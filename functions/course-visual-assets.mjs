@@ -26,7 +26,17 @@ export default async function courseVisualAssets(req) {
   const upstream = await fetch(supabaseBase() + "/storage/v1/object/" + BUCKET + "/" + path, {
     headers: { apikey: supabaseKey(), Authorization: "Bearer " + supabaseKey() }
   });
-  if (!upstream.ok) return json(upstream.status === 404 ? 404 : 502, { error: "Asset unavailable" });
+  /* Supabase Storage answers a MISSING object with 400 ("Object not found"), not 404.
+     Mapping that to 502 is what took the whole endpoint down for every uncaptured
+     course: Netlify treats a 5xx as an origin failure and serves stale-if-error, and
+     the stale body it picks is whatever this URL last cached REGARDLESS of the query -
+     so balgove (zero captures) was answered with north-shore's frames index, and the
+     Studio installed the wrong course's imagery. Missing objects are 404s; 5xx is
+     reserved for Supabase actually being down. */
+  if (!upstream.ok) {
+    const missing = upstream.status === 404 || upstream.status === 400;
+    return json(missing ? 404 : 502, { error: missing ? "Asset not found" : "Asset unavailable" });
+  }
   const contentType = upstream.headers.get("content-type") || (path.endsWith(".json") ? "application/json" : path.endsWith(".png") ? "image/png" : "image/jpeg");
   return new Response(upstream.body, {
     status: 200,

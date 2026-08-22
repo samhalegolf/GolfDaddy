@@ -556,7 +556,11 @@ function makeCloudEnv(options) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(options.index) });
       }
       if (options.index && (options.index.holes || []).some((h) => h.path === path)) {
-        return Promise.resolve({ ok: true, blob: () => Promise.resolve({ __frame: path }) });
+        return Promise.resolve({
+          ok: true,
+          headers: { get: (name) => (String(name).toLowerCase() === "content-type" ? "image/jpeg" : "") },
+          blob: () => Promise.resolve({ __frame: path })
+        });
       }
       return Promise.resolve({ ok: false, status: 404, json: () => Promise.reject(new Error("404")) });
     },
@@ -600,6 +604,51 @@ test("L · a cloud-built course acquires its bake base from the published frame"
   assert.strictEqual(healed.ok, true);
   assert.strictEqual(healed.acquired, true, "an empty probe must trigger reacquisition");
   assert.ok(env.assetStore["nc/frames/rtest1/h7.jpg"], "the pixels are back in the asset store");
+});
+
+test("L · a wrong-course index or non-image frame is refused, never installed", async () => {
+  /* The production incident: the assets endpoint 502ed for uncaptured courses, and the
+     CDN's stale-if-error served NORTH SHORE's cached index for ANY course's URL - so
+     the Studio installed north-shore imagery as balgove's bake base. Neither half of
+     that may ever be trusted again. */
+  const poisoned = makeCloudEnv({
+    index: { courseId: "north-shore", exportVersion: "rq3mud4", holes: [{ holeNumber: 7, path: "north-shore/frames/rq3mud4/h7.jpg", width: 400, height: 400 }] }
+  });
+  const lifted = liftEnsureBakeBase(poisoned);
+  const result = await lifted.gdAdminCourseVisualEnsureBakeBase("balgove", 7);
+  assert.strictEqual(result.ok, false, "an index naming a different course must be refused");
+  assert.match(result.reason, /wrong course/i);
+  assert.ok(!poisoned.stored.records.balgove, "nothing may be installed from it");
+
+  /* A frame URL answering with JSON (the stale index body) is not an image. */
+  const jsonFrame = makeCloudEnv({
+    index: { courseId: "nc", exportVersion: "r1", holes: [{ holeNumber: 7, path: "nc/frames/r1/h7.jpg" }] }
+  });
+  jsonFrame.fetch = ((real) => (url) => real(url).then((res) => {
+    const path = decodeURIComponent(String(url).split("path=")[1] || "");
+    if (path.endsWith(".jpg")) return { ok: true, headers: { get: () => "application/json" }, blob: () => Promise.resolve({}) };
+    return res;
+  }))(jsonFrame.fetch);
+  const lifted2 = liftEnsureBakeBase(jsonFrame);
+  const result2 = await lifted2.gdAdminCourseVisualEnsureBakeBase("nc", 7);
+  assert.strictEqual(result2.ok, false);
+  assert.match(result2.reason, /not an image/i);
+
+  /* A cloud-frame base already installed under another course's path is dropped and
+     reacquired, not trusted - this heals browsers poisoned during the incident. */
+  const healed = makeCloudEnv({
+    index: { courseId: "nc", exportVersion: "r2", holes: [{ holeNumber: 7, path: "nc/frames/r2/h7.jpg", width: 400, height: 400 }] }
+  });
+  healed.stored.records.nc = { courseId: "nc", holeFrameVisuals: [
+    { path: "north-shore/frames/rq3mud4/h7.jpg", holeNumber: 7, metadata: { baseSource: "cloud-frame" } }
+  ] };
+  healed.assetStore["north-shore/frames/rq3mud4/h7.jpg"] = "data:image/jpeg;base64,WRONGCOURSE";
+  const lifted3 = liftEnsureBakeBase(healed);
+  const result3 = await lifted3.gdAdminCourseVisualEnsureBakeBase("nc", 7);
+  assert.strictEqual(result3.ok, true);
+  assert.strictEqual(result3.acquired, true, "the foreign base must be replaced, not reused");
+  const base = healed.stored.records.nc.holeFrameVisuals.find((f) => f.holeNumber === 7);
+  assert.strictEqual(base.path, "nc/frames/r2/h7.jpg", "the record now points at this course's own frame");
 });
 
 test("L · the Recipe Lab captures its sample from the borrowed donor", async () => {
@@ -660,6 +709,21 @@ test("the Recipe Lab is an explicit place - one button in, one button out, draft
   const exitFn = STUDIO_SRC.slice(STUDIO_SRC.indexOf("function gdAdminCourseExitRecipeLab("), STUDIO_SRC.indexOf("function gdAdminCourseRecipeLabSetDonor("));
   assert.ok(exitFn.includes("gdAdminCourseRecipeLabStashIfDirty()"), "Exit stashes before leaving");
   assert.ok(exitFn.includes("gdAdminCourseVisualLabReturnTo"), "Exit returns to the course you came from");
+});
+
+test("the preview zoom is view-only and survives repaints", () => {
+  /* Wheel zoom + drag pan on the phone preview. It must be a CSS transform on the
+     frame host - never anything that changes which frame is displayed or how the
+     truth model identifies it. */
+  assert.ok(STUDIO_SRC.includes("function gdAdminPhoneZoomApply("), "zoom apply exists");
+  assert.ok(STUDIO_SRC.includes('document.addEventListener("wheel",gdAdminPhoneZoomWheel,{capture:true,passive:false})'),
+    "wheel must be non-passive or preventDefault is ignored");
+  const zoomRegion = STUDIO_SRC.slice(STUDIO_SRC.indexOf("const gdAdminPhoneZoom={"), STUDIO_SRC.indexOf("function gdAdminPhoneZoomDblClick("));
+  assert.ok(!zoomRegion.includes("noteDisplayedFrame") && !zoomRegion.includes("CommitBake"),
+    "zoom must not touch the truth pipeline");
+  const refresh = STUDIO_SRC.slice(STUDIO_SRC.indexOf("function gdAdminCoursePreviewRefreshFrame("), STUDIO_SRC.indexOf("function gdAdminCoursePreviewNoteDisplayedFrame("));
+  assert.ok(refresh.includes("gdAdminPhoneZoomApply()"), "a repaint must reinstate the viewing transform");
+  assert.ok(STUDIO_SRC.includes('id="gdVisualZoomChip"'), "the zoom chip with Reset exists");
 });
 
 /* --------------------------------------------------------- source contract - */

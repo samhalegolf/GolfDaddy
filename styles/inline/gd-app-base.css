@@ -506,7 +506,11 @@
     .gdAdminPhoneHud b{font-size:15px}
     .gdAdminPhoneNav{position:absolute;left:10px;right:10px;bottom:10px;display:flex;justify-content:space-between;gap:8px;z-index:2}
     .gdAdminPhoneNav button{border-radius:999px;padding:8px 11px;background:rgba(0,0,0,.62);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:10px;font-weight:950}
-    .gdAdminPhoneFrameHost{position:absolute;inset:0}
+    .gdAdminPhoneFrameHost{position:absolute;inset:0;touch-action:none}
+    /* Zoom chip: appears only while zoomed, above the HUD, small enough to ignore. */
+    .gdAdminPhoneZoomChip{position:absolute;right:10px;top:44px;z-index:3;display:flex;align-items:center;gap:7px;padding:4px 6px 4px 10px;border-radius:999px;background:rgba(0,0,0,.66);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:10px;font-weight:950}
+    .gdAdminPhoneZoomChip[hidden]{display:none}
+    .gdAdminPhoneZoomChip button{border-radius:999px;padding:3px 8px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.04em;cursor:pointer}
     /* Recipe Lab donor picker: label+select compact enough to sit inside a stage line. */
     .gdAdminRecipeLabDonorField{display:inline-flex;align-items:center;gap:6px;color:rgba(255,255,255,.62);font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}
     .gdAdminRecipeLabDonorField select{max-width:200px;padding:4px 8px;border-radius:8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);color:#fff;font-size:11px;font-weight:800}

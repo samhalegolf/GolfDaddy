@@ -1248,7 +1248,7 @@ function gdAdminCoursePreviewMarkup(selected){
      frame. RefreshFrame reads the current record, so it cannot be stale. */
   setTimeout(()=>{gdAdminCoursePreviewRefreshFrame(selected.id);},0);
   const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
-  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Build course visual re-captures the course and the server automatically applies the active recipe; Publish recipe is the advanced export-only action for the settings you have locked in here.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine" id="gdVisualFrameSourceLine">${gdAdminCoursePreviewSourceLine(selected,view,captured.length,count)}</div>${gdAdminCourseVisualStatusMarkup(selected.id,record,assetKind)}</div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div><div class="gdAdminPhoneFrameHost" id="gdVisualPhoneFrameHost" data-course-id="${gdEscapeHTML(selected.id)}" data-asset-kind="${gdEscapeHTML(assetKind)}" data-captured-count="${gdEscapeHTML(captured.length)}" data-hole-count="${gdEscapeHTML(count)}">${frame}</div><div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
+  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Build course visual re-captures the course and the server automatically applies the active recipe; Publish recipe is the advanced export-only action for the settings you have locked in here.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine" id="gdVisualFrameSourceLine">${gdAdminCoursePreviewSourceLine(selected,view,captured.length,count)}</div>${gdAdminCourseVisualStatusMarkup(selected.id,record,assetKind)}</div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div><div class="gdAdminPhoneFrameHost" id="gdVisualPhoneFrameHost" data-course-id="${gdEscapeHTML(selected.id)}" data-hole="${gdEscapeHTML(current)}" data-asset-kind="${gdEscapeHTML(assetKind)}" data-captured-count="${gdEscapeHTML(captured.length)}" data-hole-count="${gdEscapeHTML(count)}">${frame}</div><div class="gdAdminPhoneZoomChip" id="gdVisualZoomChip" hidden><b>×1.0</b><button type="button" onclick="return gdAdminPhoneZoomReset()">Reset</button></div><div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
 }
 /* Where the picture in the phone came from. Repainted with the frame itself - it used
    to be built once with the panel, so after a bake swapped the image it still said
@@ -2077,6 +2077,112 @@ function gdAdminCourseVisualSyncPreviewChrome(courseId,assetKind){
   gdAdminCourseVisualEnsureStatusTicker();
   return true;
 }
+/* View-only zoom/pan for the phone preview. Purely presentational: a CSS transform
+   on the frame host, so the truth pipeline, the bake and the displayed-frame
+   identity are untouched - zooming never changes WHAT is shown, only how closely.
+
+   Wheel (and trackpad pinch, which arrives as ctrl+wheel) zooms at the cursor, drag
+   pans once zoomed, double-click toggles 1x <-> 2.5x. State lives here rather than
+   on the DOM because repaints replace the host's children and full renders replace
+   the host itself - apply() reinstates the transform after either. Switching hole
+   or course resets to 1x: carrying a crop from one hole to another framed
+   differently reads as the wrong picture, not a kept zoom. */
+const gdAdminPhoneZoom={key:"",scale:1,x:0,y:0,dragging:false,pointerId:0,lastX:0,lastY:0};
+const GD_PHONE_ZOOM_MAX=8;
+function gdAdminPhoneZoomHost(){
+  return typeof document!=="undefined"?document.getElementById("gdVisualPhoneFrameHost"):null;
+}
+function gdAdminPhoneZoomClamp(){
+  const host=gdAdminPhoneZoomHost();
+  const screen=host&&host.parentElement;
+  if(!screen)return;
+  const rect=screen.getBoundingClientRect();
+  const z=gdAdminPhoneZoom;
+  /* The content is the screen scaled by z.scale; the translate may never pull an
+     edge inside the frame, so the picture always fills the phone. */
+  z.x=Math.min(0,Math.max(rect.width*(1-z.scale),z.x));
+  z.y=Math.min(0,Math.max(rect.height*(1-z.scale),z.y));
+}
+function gdAdminPhoneZoomApply(){
+  const host=gdAdminPhoneZoomHost();
+  if(!host)return;
+  const z=gdAdminPhoneZoom;
+  const key=String(host.getAttribute("data-course-id")||"")+":h"+String(host.getAttribute("data-hole")||"");
+  if(key!==z.key){z.key=key;z.scale=1;z.x=0;z.y=0;}
+  gdAdminPhoneZoomClamp();
+  host.style.transformOrigin="0 0";
+  host.style.transform=z.scale===1?"":`translate(${z.x}px,${z.y}px) scale(${z.scale})`;
+  host.style.cursor=z.scale>1?(z.dragging?"grabbing":"grab"):"";
+  const chip=document.getElementById("gdVisualZoomChip");
+  if(chip){
+    chip.hidden=z.scale===1;
+    const label=chip.querySelector("b");
+    if(label)label.textContent="×"+(z.scale>=10?Math.round(z.scale):z.scale.toFixed(1));
+  }
+}
+function gdAdminPhoneZoomReset(){
+  gdAdminPhoneZoom.scale=1;gdAdminPhoneZoom.x=0;gdAdminPhoneZoom.y=0;
+  gdAdminPhoneZoomApply();
+  return false;
+}
+function gdAdminPhoneZoomAt(clientX,clientY,nextScale){
+  const host=gdAdminPhoneZoomHost();
+  const screen=host&&host.parentElement;
+  if(!screen)return;
+  const rect=screen.getBoundingClientRect();
+  const z=gdAdminPhoneZoom;
+  const cx=clientX-rect.left,cy=clientY-rect.top;
+  nextScale=Math.min(GD_PHONE_ZOOM_MAX,Math.max(1,nextScale));
+  /* Keep the content point under the cursor under the cursor. */
+  z.x=cx-((cx-z.x)/z.scale)*nextScale;
+  z.y=cy-((cy-z.y)/z.scale)*nextScale;
+  z.scale=nextScale;
+  gdAdminPhoneZoomApply();
+}
+function gdAdminPhoneZoomWheel(event){
+  const target=event&&event.target;
+  if(!target||!target.closest||!target.closest(".gdAdminPhoneFrameHost"))return;
+  event.preventDefault();
+  const z=gdAdminPhoneZoom;
+  /* Pinch arrives as ctrl+wheel with fine deltas; a mouse wheel with coarse ones.
+     exp() keeps both smooth and direction-consistent. */
+  const factor=Math.exp(-(event.deltaY)*(event.ctrlKey?.01:.0022));
+  gdAdminPhoneZoomAt(event.clientX,event.clientY,z.scale*factor);
+}
+function gdAdminPhoneZoomPointerDown(event){
+  const target=event&&event.target;
+  if(!target||!target.closest||!target.closest(".gdAdminPhoneFrameHost"))return;
+  const z=gdAdminPhoneZoom;
+  if(z.scale<=1)return;
+  z.dragging=true;z.pointerId=event.pointerId;z.lastX=event.clientX;z.lastY=event.clientY;
+  const host=gdAdminPhoneZoomHost();
+  if(host&&host.setPointerCapture){try{host.setPointerCapture(event.pointerId);}catch(e){}}
+  event.preventDefault();
+  gdAdminPhoneZoomApply();
+}
+function gdAdminPhoneZoomPointerMove(event){
+  const z=gdAdminPhoneZoom;
+  if(!z.dragging||event.pointerId!==z.pointerId)return;
+  z.x+=event.clientX-z.lastX;
+  z.y+=event.clientY-z.lastY;
+  z.lastX=event.clientX;z.lastY=event.clientY;
+  event.preventDefault();
+  gdAdminPhoneZoomApply();
+}
+function gdAdminPhoneZoomPointerUp(event){
+  const z=gdAdminPhoneZoom;
+  if(!z.dragging||event.pointerId!==z.pointerId)return;
+  z.dragging=false;
+  gdAdminPhoneZoomApply();
+}
+function gdAdminPhoneZoomDblClick(event){
+  const target=event&&event.target;
+  if(!target||!target.closest||!target.closest(".gdAdminPhoneFrameHost"))return;
+  event.preventDefault();
+  const z=gdAdminPhoneZoom;
+  if(z.scale>1)return gdAdminPhoneZoomReset();
+  gdAdminPhoneZoomAt(event.clientX,event.clientY,2.5);
+}
 /* Repaints the phone image from the record, and tells the truth model what is now
    on screen. The previous image stays until this swaps it, so a bake in flight never
    blanks the phone. */
@@ -2104,6 +2210,8 @@ function gdAdminCoursePreviewRefreshFrame(courseId){
   }
   gdAdminCoursePreviewNoteDisplayedFrame(selected.id,view);
   gdAdminCourseVisualSyncPreviewChrome(selected.id,view.assetKind);
+  /* Repaints and rebuilds drop the inline transform - put the viewing state back. */
+  gdAdminPhoneZoomApply();
   return true;
 }
 /* The single gate that is allowed to turn an ingredient green. */
@@ -2213,13 +2321,6 @@ function gdAdminCourseVisualEnsureBakeBase(courseId,holeNumber){
        points at nothing) would pass a presence check and then fail the bake with
        hole-frame-missing anyway - probe the pixels, and reacquire when the probe
        comes back empty. */
-    const record=gdAdminCourseVisualRecord(courseId);
-    const existing=gdAdminCourseVisualBaseEntryFor(record,hole);
-    if(existing&&existing.dataUrl)return {ok:true};
-    if(existing&&existing.path&&typeof engine.loadCaptureImage==="function"){
-      const pixels=await Promise.resolve(engine.loadCaptureImage(existing.path)).catch(()=>null);
-      if(pixels)return {ok:true};
-    }
     /* The Recipe Lab is not a cloud course - its pixels come from the borrowed donor.
        "It can just capture something new for the sample": fetch the DONOR's published
        frame and install it on the lab record. */
@@ -2227,14 +2328,54 @@ function gdAdminCourseVisualEnsureBakeBase(courseId,holeNumber){
       ?String(gdAdminCourseRecipeLabSelected().donor?.courseId||"")
       :String(courseId);
     if(!sourceCourseId)return {ok:false,reason:"No sample course selected - borrow a hole into the lab first"};
+    const record=gdAdminCourseVisualRecord(courseId);
+    let existing=gdAdminCourseVisualBaseEntryFor(record,hole);
+    /* Heal a poisoned install. While the assets endpoint was 502ing, the CDN's
+       stale-if-error handed back another course's frames index regardless of the query,
+       and browsers that committed during that window installed ANOTHER COURSE'S imagery
+       as this course's base. A cloud-frame base whose path belongs to a different course
+       is never trusted - it is dropped and reacquired (which fails honestly if this
+       course has no captures of its own). The lab is exempt: its base legitimately
+       carries the donor's path. */
+    if(existing&&existing.metadata&&existing.metadata.baseSource==="cloud-frame"
+      &&String(courseId)!==GD_VISUAL_RECIPE_LAB_ID
+      &&existing.path&&existing.path.indexOf(sourceCourseId+"/")!==0){
+      existing=null;
+    }
+    if(existing&&existing.dataUrl)return {ok:true};
+    if(existing&&existing.path&&typeof engine.loadCaptureImage==="function"){
+      const pixels=await Promise.resolve(engine.loadCaptureImage(existing.path)).catch(()=>null);
+      if(pixels)return {ok:true};
+    }
+    const noCaptureReason=()=>{
+      /* An unlicensed region is a designed outcome, not an error - say so in its
+         own words instead of suggesting a build that cannot succeed. */
+      try{
+        const state=typeof gdAdminCourseBuildState==="function"?gdAdminCourseBuildState(sourceCourseId):null;
+        if(state&&state.state==="failed"&&gdAdminVisualUnlicensed(state.lastError)){
+          return "No licensed imagery covers this course - it plays on live map tiles, and the recipe controls need a captured course";
+        }
+      }catch(e){}
+      return "No captures published for this course - run Build course visual first";
+    };
     const indexRes=await fetch("/api/course-visual-assets?path="+encodeURIComponent(sourceCourseId+"/frames/index.json"),{headers:{Accept:"application/json"}});
-    const index=indexRes.ok?await indexRes.json().catch(()=>null):null;
+    if(!indexRes.ok)return {ok:false,reason:noCaptureReason()};
+    const index=await indexRes.json().catch(()=>null);
+    /* Never trust a body that names a different course. The CDN really did serve one
+       course's index for another's URL (stale-if-error ignores the query), and a wrong
+       index here means baking the wrong golf course. */
+    if(index&&index.courseId&&String(index.courseId)!==sourceCourseId){
+      return {ok:false,reason:"Assets service answered with the wrong course ("+String(index.courseId)+") - try again shortly"};
+    }
     const entry=index&&Array.isArray(index.holes)?index.holes.find(item=>Number(item&&item.holeNumber)===hole):null;
     if(!entry||!entry.path){
-      return {ok:false,reason:"No capture for hole "+hole+" - run Build course visual first"};
+      return {ok:false,reason:index?"No capture for hole "+hole+" - run Build course visual first":noCaptureReason()};
     }
     const frameRes=await fetch("/api/course-visual-assets?path="+encodeURIComponent(entry.path));
     if(!frameRes.ok)return {ok:false,reason:"Cloud frame download failed ("+frameRes.status+")"};
+    if(!/^image\//.test(String(frameRes.headers&&frameRes.headers.get&&frameRes.headers.get("content-type")||""))){
+      return {ok:false,reason:"Assets service returned something that is not an image - try again shortly"};
+    }
     const blob=await frameRes.blob();
     const dataUrl=await new Promise((resolve,reject)=>{
       const reader=new FileReader();
@@ -2899,6 +3040,14 @@ if(!window.__gdAdminCourseVisualControlsBound){
   document.addEventListener("pointerdown",gdAdminCourseVisualPointerEvent,true);
   document.addEventListener("pointerup",gdAdminCourseVisualPointerEvent,true);
   document.addEventListener("pointercancel",gdAdminCourseVisualPointerEvent,true);
+  /* Preview zoom. Wheel must be non-passive or preventDefault (and so pinch-zoom
+     containment) is ignored. */
+  document.addEventListener("wheel",gdAdminPhoneZoomWheel,{capture:true,passive:false});
+  document.addEventListener("pointerdown",gdAdminPhoneZoomPointerDown,true);
+  document.addEventListener("pointermove",gdAdminPhoneZoomPointerMove,true);
+  document.addEventListener("pointerup",gdAdminPhoneZoomPointerUp,true);
+  document.addEventListener("pointercancel",gdAdminPhoneZoomPointerUp,true);
+  document.addEventListener("dblclick",gdAdminPhoneZoomDblClick,true);
 }
 function gdAdminCourseVisualProductCard(product){
   const visual=product.native||(!product.suppressPublishedFallback?product.published:null)||product.base||null;
