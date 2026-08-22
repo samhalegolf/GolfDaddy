@@ -214,7 +214,7 @@
       ],
       inputs: ["Accepted course record + geometry (Course Database)", "Captured imagery"],
       outputs: ["Visual recipes", "Generated preview assets", "Cloud visual jobs"],
-      owns: ["Visual recipes", "Preview/product assembly", "Local recipe library"],
+      owns: ["Visual recipes", "Preview/product assembly", "Shared recipe library", "Which recipe is active"],
       doesNotOwn: ["Accepted geometry", "Release/publish state"],
       connections: [
         { target: "course-database", direction: "reads-from", label: "Accepted geometry" },
@@ -222,7 +222,9 @@
       ],
       keyFunctions: [
         { name: "gdAdminCourseVisualControls", purpose: "Renders the full visual-tuning control panel.", codePath: "scripts/studio/gd-admin-course-db.js" },
-        { name: "gdAdminCoursePreviewFrameFromObjects", purpose: "Computes preview frame geometry from captured objects.", codePath: "scripts/studio/gd-admin-course-db.js" }
+        { name: "gdAdminCoursePreviewFrameFromObjects", purpose: "Computes preview frame geometry from captured objects.", codePath: "scripts/studio/gd-admin-course-db.js" },
+        { name: "gdAdminCourseVisualRecipeCenterMarkup", purpose: "The active-recipe area: pick which saved recipe the pipeline applies to new courses.", codePath: "scripts/studio/gd-admin-course-db.js" },
+        { name: "gdAdminCourseVisualUpdateWithActiveRecipe", purpose: "Re-bakes one course on the server with the active recipe (explicit, so it beats the course's last published one).", codePath: "scripts/studio/gd-admin-course-db.js" }
       ],
       status: "implemented", needsVerification: false
     },

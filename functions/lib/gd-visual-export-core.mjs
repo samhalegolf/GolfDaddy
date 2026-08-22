@@ -556,15 +556,22 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, setti
     bottom: Math.max(...rects.map(r => r.pb.bottom))
   };
   const spanPx19 = Math.max((merged.right - merged.left), (merged.bottom - merged.top)) * 256 * Math.pow(2, 19);
-  const f = Math.min(1, maxDim / Math.max(1, spanPx19));
+  const f = maxDim / Math.max(1, spanPx19);
   /* captureZoom MUST be an integer. The GPS play renderer anchors the frame image to the map
      at this zoom while it projects the tee/green/ball markers independently; the locally
      captured surfaces it was built for are always whole-number zooms (z19/z20), and a
      fractional zoom (e.g. 18.58) desynchronises the image from the markers - the exact "tee is
      in the bushes" drift seen on cloud frames while local scans line up. Floor keeps the frame
-     at or under maxDim (never upscales past the source) at the cost of up to one half-step of
-     resolution; correctness over sharpness. */
-  const captureZoom = Math.max(1, Math.floor(19 + Math.log2(f)));
+     at or under maxDim at the cost of up to one half-step of resolution; correctness over
+     sharpness.
+
+     "Never upscales past the source" used to be enforced by clamping f at 1, which also made
+     z19 an unreachable ceiling and left short holes rendering at a third of the budget they
+     were allowed (see frameZoomFor). The honest bound is the sharpest capture actually in
+     hand: render at the resolution of the real pixels, never above it. Deriving it from the
+     captures rather than recomputing the planner's guess also means the two cannot drift. */
+  const shotZoom = Math.max(1, ...rects.map(r => num(r.item.entry.captureZoom, 19)));
+  const captureZoom = Math.max(1, Math.min(shotZoom, Math.floor(19 + Math.log2(f))));
   const scalePx = 256 * Math.pow(2, captureZoom);
   const originPx = { x: merged.left * scalePx, y: merged.top * scalePx };
   const W = Math.max(64, Math.round((merged.right - merged.left) * scalePx));
@@ -583,8 +590,12 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, setti
     /* No colour/tone transform here anymore - tiles composite in raw, and the WHOLE flattened
        surface gets measured and moved toward the recipe's targets in flattenWithRelief, once,
        instead of every tile getting the same blind multiplier regardless of its own exposure. */
+    /* extract chains onto the resize rather than round-tripping through a full-size raw
+       buffer: sharp applies an extract declared after a resize to the resized image, so this
+       is the same crop for one allocation instead of two. It also drops a hardcoded
+       channels:3 that would have mangled any capture arriving with an alpha channel. */
     let layer = sharp(item.buffer, { limitInputPixels: false }).resize({ width: w, height: h, fit: "fill" });
-    if (cropLeft || cropTop || visW < w || visH < h) layer = sharp(await layer.raw().toBuffer(), { raw: { width: w, height: h, channels: 3 }, limitInputPixels: false }).extract({ left: cropLeft, top: cropTop, width: visW, height: visH });
+    if (cropLeft || cropTop || visW < w || visH < h) layer = layer.extract({ left: cropLeft, top: cropTop, width: visW, height: visH });
     const buf = await layer.raw().toBuffer({ resolveWithObject: true });
     composites.push({ input: buf.data, raw: { width: buf.info.width, height: buf.info.height, channels: buf.info.channels }, left: Math.max(0, left), top: Math.max(0, top) });
   }
@@ -602,12 +613,22 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, setti
       const visW = Math.min(w - cropLeft, W - Math.max(0, left));
       const visH = Math.min(h - cropTop, H - Math.max(0, top));
       if (visW > 0 && visH > 0) {
+        /* Same chained-extract as the imagery loop above, and the layer is handed to composite
+           as raw rather than as PNG. Cropping through PNG cost a full encode AND decode of a
+           frame-sized layer, and the placement cost a second encode - three passes over the
+           biggest buffer in the function purely to move bytes between two sharp pipelines.
+           ensureAlpha stays, so the blend is byte-identical to before. */
         let terrainLayer = sharp(terrain.buffer, { limitInputPixels: false }).resize({ width: w, height: h, fit: "fill" }).ensureAlpha();
         if (cropLeft || cropTop || visW < w || visH < h) {
-          terrainLayer = sharp(await terrainLayer.png().toBuffer(), { limitInputPixels: false }).extract({ left: cropLeft, top: cropTop, width: visW, height: visH });
+          terrainLayer = terrainLayer.extract({ left: cropLeft, top: cropTop, width: visW, height: visH });
         }
+        const terrainRaw = await terrainLayer.raw().toBuffer({ resolveWithObject: true });
         const placed = await sharp({ create: { width: W, height: H, channels: 3, background: { r: 128, g: 128, b: 128 } }, limitInputPixels: false })
-          .composite([{ input: await terrainLayer.png().toBuffer(), left: Math.max(0, left), top: Math.max(0, top) }])
+          .composite([{
+            input: terrainRaw.data,
+            raw: { width: terrainRaw.info.width, height: terrainRaw.info.height, channels: terrainRaw.info.channels },
+            left: Math.max(0, left), top: Math.max(0, top)
+          }])
           .greyscale()
           .toColourspace("b-w")
           .raw().toBuffer({ resolveWithObject: true });

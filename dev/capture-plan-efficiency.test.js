@@ -107,15 +107,29 @@ let plan9;
   test("the planner's frame zoom is the export's frame zoom", () => {
     /* Ported deliberately rather than imported: if gd-visual-export-core changes its maths,
        this fails and someone has to reconcile the two on purpose. */
-    const bounds = { south: -45.05, west: 168.72, north: -45.04, east: 168.735 };
     function world(lat, lng) {
       const s = Math.sin(Math.max(-85.05112878, Math.min(85.05112878, lat)) * Math.PI / 180);
       return { x: (lng + 180) / 360, y: 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI) };
     }
-    const nw = world(bounds.north, bounds.west), se = world(bounds.south, bounds.east);
-    const span19 = Math.max(se.x - nw.x, se.y - nw.y) * 256 * Math.pow(2, 19);
-    const expected = Math.max(1, Math.floor(19 + Math.log2(Math.min(1, MAX_OUTPUT_PX / Math.max(1, span19)))));
-    assert.strictEqual(frameZoomFor(bounds, MAX_OUTPUT_PX), expected);
+    /* Mirrors renderHoleSurfaceMercator: f is NOT clamped at 1, and the ceiling is what the
+       source resolves (there, the sharpest capture actually in hand). */
+    const exportZoom = (bounds, ceiling) => {
+      const nw = world(bounds.north, bounds.west), se = world(bounds.south, bounds.east);
+      const span19 = Math.max(se.x - nw.x, se.y - nw.y) * 256 * Math.pow(2, 19);
+      return Math.max(1, Math.min(ceiling, Math.floor(19 + Math.log2(MAX_OUTPUT_PX / Math.max(1, span19)))));
+    };
+    /* A long hole, where the output budget binds and the old clamp was inert anyway. */
+    const long = { south: -45.05, west: 168.72, north: -45.04, east: 168.735 };
+    assert.strictEqual(frameZoomFor(long, MAX_OUTPUT_PX, 20), exportZoom(long, 20));
+
+    /* A par 3, which is the case the clamp used to break: it spans far less than the budget,
+       so the frame should now climb to whatever the source can resolve. */
+    const short = { south: -45.0508, west: 168.7200, north: -45.0495, east: 168.7218 };
+    assert.strictEqual(frameZoomFor(short, MAX_OUTPUT_PX, 20), exportZoom(short, 20));
+    assert.ok(frameZoomFor(short, MAX_OUTPUT_PX, 20) > 19,
+      "a short hole with budget to spare must be allowed to frame above z19");
+    /* ...but never past what the imagery actually holds. */
+    assert.strictEqual(frameZoomFor(short, MAX_OUTPUT_PX, 19), 19);
   });
 
   test("the source resolution ceiling still wins where it is lower", () => {

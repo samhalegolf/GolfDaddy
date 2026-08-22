@@ -16,7 +16,11 @@
     intro.innerHTML =
       "<p>Select a course below, then use the buttons here to open its Visual Engine tuning " +
       "(recipe controls + build/publish actions) or the lighter preview sandbox. Both render " +
-      "the same live code the legacy Admin Settings panel uses.</p>";
+      "the same live code the legacy Admin Settings panel uses.</p>" +
+      "<p>The <strong>Recipe</strong> tool in the tuning dock is where the active recipe is " +
+      "chosen. Whatever is active there is the treatment the worker applies to the next course " +
+      "through the pipeline, and <strong>Update this course</strong> re-bakes the selected " +
+      "course with it.</p>";
 
     var jumpRow = document.createElement("div");
     jumpRow.style.marginBottom = "14px";
@@ -36,6 +40,18 @@
 
     jumpRow.appendChild(jumpButton("Open Visual Engine tuning", "visuals"));
     jumpRow.appendChild(jumpButton("Open preview sandbox", "preview"));
+
+    /* The recipe area only exists inside the tuning dock, which only exists on the preview
+       screen - so this opens both in one click rather than describing where to find it. */
+    var recipeBtn = document.createElement("button");
+    recipeBtn.type = "button";
+    recipeBtn.className = "gdStudioDiagramBtn";
+    recipeBtn.textContent = "Open recipe + update";
+    recipeBtn.addEventListener("click", function () {
+      if (typeof window.gdAdminCourseDbSetTab === "function") window.gdAdminCourseDbSetTab("preview");
+      if (typeof window.gdAdminCourseVisualOpenRecipeTool === "function") window.gdAdminCourseVisualOpenRecipeTool();
+    });
+    jumpRow.appendChild(recipeBtn);
 
     var hostSlot = document.createElement("div");
 

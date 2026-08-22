@@ -364,6 +364,9 @@ export function planCourseCaptures(pkg, opts = {}) {
   }
 
   const frameZoomByHole = {};
+  /* What the imagery behind this course actually resolves. Without it a short hole would be
+     framed at a zoom the source can only upscale into. */
+  const imageryCeiling = Number(opts.source && opts.source.imagery && opts.source.imagery.maxUsefulZoom) || 19;
   holeNumbers.forEach(holeNumber => {
     const items = plan.filter(i => Number(i.holeNumber) === holeNumber && !i.terrainStageOnly);
     let bounds = null;
@@ -373,7 +376,7 @@ export function planCourseCaptures(pkg, opts = {}) {
     }
     if (!bounds) bounds = mergeBounds(items.map(i => i.bounds));
     if (!bounds) return;
-    frameZoomByHole[holeNumber] = frameZoomFor(bounds, opts.maxOutputPx);
+    frameZoomByHole[holeNumber] = frameZoomFor(bounds, opts.maxOutputPx, imageryCeiling);
   });
   plan.forEach(item => {
     const frameZoom = frameZoomByHole[item.holeNumber];
@@ -386,14 +389,26 @@ export function planCourseCaptures(pkg, opts = {}) {
 /* The zoom renderHoleSurfaceMercator will pick for these bounds. Kept in step with the export
    deliberately - if the two ever disagree, captures are either wasted or upscaled. */
 export const DEFAULT_MAX_OUTPUT_PX = 3072;
-export function frameZoomFor(bounds, maxOutputPx) {
+/* The scale factor was clamped at 1, which floored log2(f) at 0 and made z19 a hard ceiling
+   no matter how much room was left under maxOutputPx. That is why short holes look soft: a
+   150m par 3 spans ~1000px at z19, renders as a ~1000px frame, and gets stretched across the
+   whole screen, while a 500m par 5 spans ~2700px and looks sharp. Both were allowed 3072.
+
+   The clamp is gone; what binds now is the pair of ceilings that actually mean something -
+   the output budget, and what the SOURCE can resolve. Above the latter we would be rendering
+   an upscale of imagery we already have, for more bytes and no detail, so sourceCeiling is
+   passed in from the resolved imagery spec's maxUsefulZoom. It defaults to 19, which
+   reproduces the old behaviour exactly for callers that resolve no source (plan-shape
+   tests). */
+export function frameZoomFor(bounds, maxOutputPx, sourceCeiling) {
   if (!validBounds(bounds)) return 0;
   const maxDim = Math.max(256, Number(maxOutputPx) || DEFAULT_MAX_OUTPUT_PX);
   const nw = projectPoint(bounds.north, bounds.west, 19);
   const se = projectPoint(bounds.south, bounds.east, 19);
   const span19 = Math.max(Math.abs(se.x - nw.x), Math.abs(se.y - nw.y));
-  const f = Math.min(1, maxDim / Math.max(1, span19));
-  return Math.max(1, Math.floor(19 + Math.log2(f)));
+  const f = maxDim / Math.max(1, span19);
+  const ceiling = Math.max(1, Math.min(22, Math.round(Number(sourceCeiling) || 19)));
+  return Math.max(1, Math.min(ceiling, Math.floor(19 + Math.log2(f))));
 }
 
 /* ---------- spherical mercator + tile grids (replaces the Leaflet shutter) --------------- */

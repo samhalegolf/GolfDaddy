@@ -43,6 +43,45 @@ const root = path.join(__dirname, "..");
   assert.ok(studio.includes("if(!isRecipeLab){\n    gdAdminCourseVisualScheduleAutoBuild"), "recipe lab should not enter the normal automatic course build pipeline");
   assert.ok(studio.includes("gdAdminCourseDbJobsAt=Date.now();\n      gdAdminCourseDbJobsInflight=null;"), "failed mapper-status reads should cool down instead of redrawing into another request");
 
+  // --- Active-recipe area + one-button update ------------------------------------------------
+
+  assert.ok(studio.includes('{id:"recipe",icon:"📋",label:"Recipe"'), "the tuning dock should carry a dedicated Recipe tab");
+  assert.ok(studio.includes("function gdAdminCourseVisualRecipeCenterMarkup("), "the active-recipe area should be one markup function, shared by the dock and the strip");
+  assert.ok(studio.includes("function gdAdminCourseVisualActiveRecipeStrip("), "the phone should show which recipe is active while tuning");
+  assert.ok(studio.includes("gdAdminCourseVisualActiveRecipeStrip(selected.id)}${gdAdminCourseVisualStatusMarkup"), "the strip must be rendered into the phone info block");
+  assert.ok(studio.includes("gdAdminCourseVisualUpdateButton(selected&&selected.id||\"\",\"primary\")"), "the course action rail should carry the pipeline update button");
+  assert.ok(!/>Update<\/button>/.test(studio), "only one button may be called Update, and it is the pipeline one");
+
+  {
+    const fn = studio.slice(studio.indexOf("async function gdAdminCourseVisualUpdateWithActiveRecipe("));
+    const body = fn.slice(0, fn.indexOf("\nfunction gdAdminCourseVisualCourseName("));
+    assert.ok(body.length > 200 && body.length < 4000, "update function body should have been isolated");
+    // The whole point: the ACTIVE recipe is passed explicitly. An export queued with a null
+    // recipe falls back to the course's own last published recipe in the worker
+    // (latestPublishedRecipe), which is the stale treatment this button replaces.
+    assert.ok(body.includes('gdAdminCourseVisualEnqueueCloudJob(id,"export",{presetId:presetId,overrides:overrides})'),
+      "the update must hand the active recipe to the export job explicitly");
+    assert.ok(!/gdAdminCourseVisualEnqueueCloudJob\(id,"export",null\)/.test(body),
+      "the update must never queue an export with no recipe");
+    // Re-read before acting: a 20-second-stale "active" would bake the treatment somebody just replaced.
+    const reload = body.indexOf("gdAdminCourseVisualRecipeReload()");
+    const enqueue = body.indexOf("gdAdminCourseVisualEnqueueCloudJob");
+    assert.ok(reload > -1 && reload < enqueue, "the active recipe must be re-read from the server before anything is queued");
+    // No captures on the server means an export has nothing to bake from.
+    assert.ok(body.includes('state.framesReady||state.snapshotReady||state.state==="captures-ready"'),
+      "the update must check for captures before queueing an export");
+    assert.ok(body.includes('gdAdminCourseVisualEnqueueCloudJob(id,"snapshot",null)'),
+      "a course with no captures should be scanned first rather than exported into nothing");
+    assert.ok(body.includes("if(state&&state.building)"), "the update must refuse to stack on a build already in flight");
+  }
+
+  {
+    const worker = fs.readFileSync(path.join(root, "functions", "course-visual-worker-background.mjs"), "utf8");
+    const fallback = worker.slice(worker.indexOf("async function latestPublishedRecipe("));
+    assert.ok(fallback.indexOf("activeLibraryRecipe()") > -1,
+      "a course with no published recipe must fall back to the shared active recipe - that is what makes the active recipe the pipeline default for new courses");
+  }
+
   // --- Terrain preview patch regression tests ---
 
   // 1. Terrain commit must not use buildCourseVisualPreview: the early-return for terrain

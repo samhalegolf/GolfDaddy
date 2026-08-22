@@ -421,6 +421,9 @@ function gdAdminCourseDbVisualState(courseId){
   if(record.lastError||record.status==="failed")return {label:"error",tone:"bad"};
   return {label:"live map",tone:""};
 }
+/* One "Update" per course, and it means the pipeline: re-bake this course on the server with
+   the ACTIVE recipe. The old rail button of that name only rebuilt this browser's local record
+   from the course database - real, but a different job - so it says what it does now. */
 function gdAdminCourseDbActionRail(selected){
   const id=gdAdminJsArg(selected&&selected.id||"");
   const active=tab=>gdAdminCourseDatabaseTab===tab?" active":"";
@@ -430,7 +433,8 @@ function gdAdminCourseDbActionRail(selected){
     <button type="button" class="${active("scorecard")}" onclick="return gdAdminCourseDbShowScorecard(${id})">Score Card</button>
     <button type="button" class="${active("debug")}" onclick="return gdAdminCourseDbShowDebug(${id})">Debug</button>
     <button type="button" class="danger" onclick="return gdAdminCourseDbDelete(${id})">Delete</button>
-    <button type="button" class="primary" onclick="return gdAdminCourseDbUpdate(${id})">Update</button>
+    <button type="button" onclick="return gdAdminCourseDbUpdate(${id})">Rebuild local</button>
+    ${gdAdminCourseVisualUpdateButton(selected&&selected.id||"","primary")}
   </div>`;
 }
 function gdAdminCourseDbLoadVisual(courseId){
@@ -1248,7 +1252,7 @@ function gdAdminCoursePreviewMarkup(selected){
      frame. RefreshFrame reads the current record, so it cannot be stale. */
   setTimeout(()=>{gdAdminCoursePreviewRefreshFrame(selected.id);},0);
   const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
-  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Build course visual re-captures the course and the server automatically applies the active recipe; Publish recipe is the advanced export-only action for the settings you have locked in here.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine" id="gdVisualFrameSourceLine">${gdAdminCoursePreviewSourceLine(selected,view,captured.length,count)}</div>${gdAdminCourseVisualStatusMarkup(selected.id,record,assetKind)}</div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div><div class="gdAdminPhoneFrameHost" id="gdVisualPhoneFrameHost" data-course-id="${gdEscapeHTML(selected.id)}" data-hole="${gdEscapeHTML(current)}" data-asset-kind="${gdEscapeHTML(assetKind)}" data-captured-count="${gdEscapeHTML(captured.length)}" data-hole-count="${gdEscapeHTML(count)}">${frame}</div><div class="gdAdminPhoneZoomChip" id="gdVisualZoomChip" hidden><b>×1.0</b><button type="button" onclick="return gdAdminPhoneZoomReset()">Reset</button></div><div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
+  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Build course visual re-captures the course and the server automatically applies the active recipe; Publish recipe is the advanced export-only action for the settings you have locked in here.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine" id="gdVisualFrameSourceLine">${gdAdminCoursePreviewSourceLine(selected,view,captured.length,count)}</div>${gdAdminCourseVisualActiveRecipeStrip(selected.id)}${gdAdminCourseVisualStatusMarkup(selected.id,record,assetKind)}</div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div><div class="gdAdminPhoneFrameHost" id="gdVisualPhoneFrameHost" data-course-id="${gdEscapeHTML(selected.id)}" data-hole="${gdEscapeHTML(current)}" data-asset-kind="${gdEscapeHTML(assetKind)}" data-captured-count="${gdEscapeHTML(captured.length)}" data-hole-count="${gdEscapeHTML(count)}">${frame}</div><div class="gdAdminPhoneZoomChip" id="gdVisualZoomChip" hidden><b>×1.0</b><button type="button" onclick="return gdAdminPhoneZoomReset()">Reset</button></div><div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
 }
 /* Where the picture in the phone came from. Repainted with the frame itself - it used
    to be built once with the panel, so after a bake swapped the image it still said
@@ -2753,6 +2757,159 @@ async function gdAdminCourseVisualSetActiveRecipe(courseId){
   }
   return false;
 }
+/* ---- Active recipe area -------------------------------------------------------------------
+   Two questions the recipe library never answered in one place: which treatment the pipeline
+   will give the NEXT course it builds, and how to put that same treatment onto a course that
+   was baked under an older one. Both live here now - the "Recipe" tab of the tuning dock and
+   the strip above the phone are the same controls rendered twice. */
+
+/* The active recipe is what the SERVER will bake with, so anything that ACTS on it re-reads it
+   instead of trusting the 20-second panel cache. A stale "active" here would queue a course
+   with the treatment somebody has just replaced and report success. */
+async function gdAdminCourseVisualRecipeReload(){
+  gdAdminCourseVisualRecipeCache.fetchedAt=0;
+  gdAdminCourseVisualRecipeState();
+  const pending=gdAdminCourseVisualRecipeCache.loading;
+  if(pending&&typeof pending.then==="function"){try{await pending;}catch(error){}}
+  return {
+    recipes:gdAdminCourseVisualRecipeCache.recipes.slice(),
+    activeRecipe:gdAdminCourseVisualRecipeCache.activeRecipe||null,
+    lastError:gdAdminCourseVisualRecipeCache.lastError||""
+  };
+}
+function gdAdminCourseVisualRecipeRefresh(){
+  gdAdminCourseVisualRecipeReload().then(()=>gdRenderAdminCourseDatabase());
+  return false;
+}
+/* A live read, not the panel's 30-second cache: this decides between "re-bake now" and "scan
+   first", and getting it wrong queues an export with nothing to bake from. */
+async function gdAdminCourseVisualFetchBuildState(courseId){
+  const id=String(courseId||"");
+  if(!id)return null;
+  try{
+    const res=await fetch("/api/course-visual-jobs?courseId="+encodeURIComponent(id),{headers:{Accept:"application/json"},cache:"no-store"});
+    if(!res.ok)return null;
+    const state=await res.json();
+    if(state)gdAdminCourseBuildStateCache[id]={fetchedAt:Date.now(),state:state};
+    return state||null;
+  }catch(error){return null;}
+}
+const gdAdminCourseVisualUpdatePending={};
+/* THE update button. It re-bakes one course with whatever recipe is active right now - the same
+   treatment a brand-new course gets from the pipeline - and passes that recipe EXPLICITLY.
+   Explicitly matters: an export queued with no recipe falls back to the course's own last
+   published recipe (latestPublishedRecipe in course-visual-worker-background.mjs), which is
+   precisely the stale treatment this button exists to replace, so leaving it off would re-bake
+   the old look and call it done. */
+async function gdAdminCourseVisualUpdateWithActiveRecipe(courseId){
+  const id=String(courseId||"");
+  if(!id||id===GD_VISUAL_RECIPE_LAB_ID){gdAdminCourseVisualToast("Open a course to update it - the lab has no course of its own");return false;}
+  if(gdAdminCourseVisualUpdatePending[id])return false;
+  gdAdminCourseVisualUpdatePending[id]=true;
+  gdRenderAdminCourseDatabase();
+  try{
+    const active=(await gdAdminCourseVisualRecipeReload()).activeRecipe;
+    if(!active){gdAdminCourseVisualToast("No active recipe yet - set one active first");return false;}
+    const presetId=String(active.presetId||active.preset_id||"");
+    const overrides=active.courseOverrides||active.course_overrides||{};
+    const state=await gdAdminCourseVisualFetchBuildState(id);
+    if(state&&state.building){gdAdminCourseVisualToast("A build is already running for this course");return false;}
+    /* Nothing captured on the server yet, so an export would have no pixels to work on. Scan
+       first and say so plainly: the worker chains its own export off that snapshot using the
+       course's last published recipe, which is why this asks for a second Update rather than
+       claiming the active recipe has already landed. */
+    if(!state||!(state.framesReady||state.snapshotReady||state.state==="captures-ready")){
+      const queued=await gdAdminCourseVisualEnqueueCloudJob(id,"snapshot",null);
+      gdAdminCourseVisualToast(queued&&queued.job
+        ?"No captures yet - scanning first. Run Update again once the scan finishes to bake the active recipe."
+        :"Could not queue a scan for this course");
+      return false;
+    }
+    /* Keep the local record in step with what the worker is about to bake, so the studio
+       preview and the published frames are describing the same recipe. */
+    const engine=window.GDCourseVisualEngine;
+    if(engine&&typeof engine.saveCourseVisualSettings==="function"){
+      try{engine.saveCourseVisualSettings(id,overrides,{presetId:presetId});}catch(error){}
+    }
+    const data=await gdAdminCourseVisualEnqueueCloudJob(id,"export",{presetId:presetId,overrides:overrides});
+    if(!data||!data.job){gdAdminCourseVisualToast("Could not queue the update - check you are signed in as admin");return false;}
+    delete gdAdminCourseCloudFramesSuppressed[id];
+    gdAdminCourseVisualReseedControls();
+    gdAdminCourseVisualToast(data.deduped
+      ?"An update is already queued for this course"
+      :'Updating "'+gdAdminCourseVisualCourseName(id)+'" with "'+String(active.name||"active recipe")+'"');
+  }catch(error){
+    gdAdminCourseVisualToast(error&&error.message?error.message:"Course update failed to queue");
+  }finally{
+    delete gdAdminCourseVisualUpdatePending[id];
+    if(gdAdminCourseBuildStateCache[id])gdAdminCourseBuildStateCache[id].fetchedAt=0;
+    gdRenderAdminCourseDatabase();
+  }
+  return false;
+}
+function gdAdminCourseVisualCourseName(courseId){
+  const selected=gdAdminCoursePreviewSelectedFor(courseId);
+  return String(selected&&selected.name||courseId||"");
+}
+function gdAdminCourseVisualActiveRecipeLabel(active){
+  return active?`${active.name||"Recipe"} · ${active.presetId||active.preset_id||"custom"}`:"Natural fallback (none active)";
+}
+/* Disabled reason for the update button, or "" when it can run. Rendered as the button's own
+   label so the state is readable without hovering anything. */
+function gdAdminCourseVisualUpdateBlocked(courseId){
+  const id=String(courseId||"");
+  if(gdAdminCourseVisualUpdatePending[id])return "Queueing…";
+  const state=gdAdminCourseBuildState(id);
+  if(state&&state.building)return "Build in progress…";
+  return "";
+}
+function gdAdminCourseVisualUpdateButton(courseId,className){
+  const key=gdEscapeHTML(String(courseId||""));
+  const blocked=gdAdminCourseVisualUpdateBlocked(courseId);
+  return `<button type="button"${className?` class="${className}"`:""}${blocked?" disabled":""} onclick="return gdAdminCourseVisualUpdateWithActiveRecipe('${key}')">${gdEscapeHTML(blocked||"Update this course")}</button>`;
+}
+/* Compact version, pinned above the phone so the active treatment is visible while tuning
+   without opening a dock tab. */
+function gdAdminCourseVisualActiveRecipeStrip(courseId){
+  const id=String(courseId||"");
+  if(!id||id===GD_VISUAL_RECIPE_LAB_ID)return "";
+  const active=gdAdminCourseVisualRecipeState().activeRecipe;
+  return `<div class="gdAdminCourseStageLine gdAdminCourseActiveRecipeStrip">`+
+    `<span class="${active?"ready":"warn"}">Active recipe: ${gdEscapeHTML(gdAdminCourseVisualActiveRecipeLabel(active))}</span>`+
+    gdAdminCourseVisualUpdateButton(id,"")+
+    `<button type="button" class="gdAdminInlineLink" onclick="return gdAdminCourseVisualSelectTool('recipe')">Recipe library</button>`+
+  `</div>`;
+}
+/* The dock's Recipe tab: pick the active recipe out of the saved list, and update one course
+   with it. Deliberately the only place the two live together - "what the next course gets" and
+   "give this course the same" are the same decision seen from either end. */
+function gdAdminCourseVisualRecipeCenterMarkup(courseId){
+  const id=String(courseId||"");
+  const key=gdEscapeHTML(id);
+  const isLab=id===GD_VISUAL_RECIPE_LAB_ID;
+  const state=gdAdminCourseVisualRecipeState();
+  const recipes=state.recipes;
+  const active=state.activeRecipe;
+  const activeId=active?String(active.id||""):"";
+  const options=recipes.length
+    ?recipes.map(recipe=>`<option value="${gdEscapeHTML(recipe.id)}" ${activeId===String(recipe.id||"")?"selected":""}>${gdEscapeHTML(recipe.name)}${activeId===String(recipe.id||"")?" · active":""}</option>`).join("")
+    :'<option value="">No saved recipes yet</option>';
+  const updateBody=isLab
+    ?`<span class="gdAdminPhoneTiltNote">The lab borrows a sample hole and owns no course, so there is nothing here to update. Open a course to re-bake it.</span>`
+    :`<span class="gdAdminPhoneTiltNote">Re-bakes this course from its existing captures with the ACTIVE recipe and republishes its frames — how a course built under an older treatment is brought up to the current one. No re-scan, so it costs one bake.</span>`+
+     `<div class="gdAdminCourseVisualActions">${gdAdminCourseVisualUpdateButton(id,"primary")}</div>`;
+  return `<div class="gdAdminRecipeCenter">`+
+    `<div class="gdAdminCourseStageLine"><span class="${active?"ready":"warn"}">Active: ${gdEscapeHTML(gdAdminCourseVisualActiveRecipeLabel(active))}</span>${state.lastError?`<span class="warn">${gdEscapeHTML(state.lastError)}</span>`:""}<button type="button" class="gdAdminInlineLink" onclick="return gdAdminCourseVisualRecipeRefresh()">Refresh</button></div>`+
+    `<span class="gdAdminPhoneTiltNote">The active recipe is the treatment the worker applies to every new course that comes through the pipeline. Whatever is active here is what the next course gets baked with.</span>`+
+    `<label>Saved recipes<select id="gdCourseVisualRecipeSelect">${options}</select></label>`+
+    `<div class="gdAdminCourseVisualActions">`+
+      `<button type="button" class="primary"${recipes.length?"":" disabled"} onclick="return gdAdminCourseVisualSetActiveRecipe('${key}')">Set selected active</button>`+
+      `<button type="button"${recipes.length?"":" disabled"} onclick="return gdAdminCourseVisualApplyRecipe('${key}')">Load into this course</button>`+
+      `<button type="button" onclick="return gdAdminCourseVisualSaveRecipe('${key}')">Save current as recipe</button>`+
+    `</div>`+
+    `<div class="gdAdminRecipeUpdateBlock"><strong>Update workflow</strong>${updateBody}</div>`+
+  `</div>`;
+}
 /* Latest cloud job per course, throttled to one fetch per 20s (the panel re-renders often).
    Feeds the status chip on the preview so queued/running/failed publishes are visible instead
    of silently dying, and refreshes the cloud frames cache when an export completes. */
@@ -3291,6 +3448,13 @@ function gdAdminCourseVisualEffectToggled(courseId,group){
   return false;
 }
 let gdAdminCourseVisualActiveTool="turf";
+/* Open (never toggle shut) the recipe tool. The Studio page's jump button switches tabs first,
+   so the dock is freshly rendered and a toggle would be a coin flip on whether it lands open. */
+function gdAdminCourseVisualOpenRecipeTool(){
+  if(gdAdminCourseVisualActiveTool!=="recipe")gdAdminCourseVisualSelectTool("recipe");
+  else gdRenderAdminCourseDatabase();
+  return false;
+}
 function gdAdminCourseVisualSelectTool(group){
   group=String(group||"");
   gdAdminCourseVisualActiveTool=(gdAdminCourseVisualActiveTool===group)?"":group;
@@ -3350,12 +3514,6 @@ function gdAdminCourseVisualControls(record,courseId){
   const key=gdEscapeHTML(courseId||record&&record.courseId||"");
   const presetField=`<label>Preset<select id="gdCourseVisualPreset">${presets.map(p=>`<option value="${gdEscapeHTML(p&&p.id||p&&p.mode||p&&p.name||"")}" ${preset===(p&&p.id)?"selected":""}>${gdEscapeHTML(p&&p.name||p&&p.mode||p&&p.id||"Preset")}</option>`).join("")}</select></label>`;
   const presetRail=`<div class="gdAdminCourseVisualPresetRail">${presets.map(p=>{const id=p&&p.id||p&&p.mode||p&&p.name||"";return `<button type="button" data-preset-id="${gdEscapeHTML(id)}" class="${preset===id?"active":""}" onclick="return gdAdminCourseVisualPresetButtonChanged('${key}','${gdEscapeHTML(id)}')">${gdEscapeHTML(p&&p.name||p&&p.mode||id||"Preset")}</button>`;}).join("")}</div>`;
-  const recipeState=gdAdminCourseVisualRecipeState();
-  const savedRecipes=recipeState.recipes;
-  const activeRecipe=recipeState.activeRecipe;
-  const activeRecipeLabel=activeRecipe?`${activeRecipe.name||"Recipe"} · ${activeRecipe.presetId||activeRecipe.preset_id||"custom"}`:"Natural fallback";
-  const activeRecipeBlock=`<div class="gdAdminCourseStageLine"><span class="ready">Active recipe: ${gdEscapeHTML(activeRecipeLabel)}</span>${activeRecipe?`<button type="button" class="gdAdminInlineLink" onclick="return gdAdminCourseVisualApplyActiveRecipe('${key}')">Apply active here</button>`:""}</div>`;
-  const recipeField=activeRecipeBlock+`<label>Saved recipes<select id="gdCourseVisualRecipeSelect">${savedRecipes.length?savedRecipes.map(recipe=>`<option value="${gdEscapeHTML(recipe.id)}" ${activeRecipe&&String(activeRecipe.id||"")===String(recipe.id||"")?"selected":""}>${gdEscapeHTML(recipe.name)}</option>`).join(""):'<option value="">No saved recipes yet</option>'}</select></label><div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualApplyRecipe('${key}')"${savedRecipes.length?"":" disabled"}>Apply recipe</button><button type="button" onclick="return gdAdminCourseVisualSetActiveRecipe('${key}')"${savedRecipes.length?"":" disabled"}>Set selected active</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe('${key}')">Save current as recipe</button></div>`;
   /* Every slider states its current number, and sliders with a genuine no-effect
      value carry a notch on the track at that point plus a "no effect" tag in the
      readout when they sit on it - "where is zero" should never require memorising
@@ -3430,7 +3588,11 @@ function gdAdminCourseVisualControls(record,courseId){
   const mowingPanel=gdAdminCourseVisualEffectHeader("mowing","Mow lines",mowingOn)+gdAdminCourseVisualEffectBody(mowingOn,mowingField);
   const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseRemap('${key}')">Remap from OSM</button><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div>`;
   const groups=[
-    {id:"preset",icon:"🎨",label:"Preset",body:presetField+presetRail+recipeField},
+    {id:"preset",icon:"🎨",label:"Preset",body:presetField+presetRail},
+    /* The recipe area is its own tab, not a footnote under Preset: a preset is one ingredient
+       of a recipe, and which recipe is ACTIVE is a system-wide decision that has nothing to do
+       with the preset dropdown next to it. */
+    {id:"recipe",icon:"📋",label:"Recipe",body:gdAdminCourseVisualRecipeCenterMarkup(courseId||record&&record.courseId||"")},
     {id:"turf",icon:"🌱",label:"Turf & green",body:turfPanel},
     {id:"light",icon:"💡",label:"Lighting",body:lightingPanel},
     {id:"flood",icon:"🔦",label:"Floodlight",body:floodlightPanel},
@@ -3946,4 +4108,6 @@ window.gdAdminCourseDbShowDebug=gdAdminCourseDbShowDebug;
 window.gdAdminCourseLocationEdit=gdAdminCourseLocationEdit;
 window.gdAdminCourseLocationRemove=gdAdminCourseLocationRemove;
 window.gdAdminCourseDebugRefresh=gdAdminCourseDebugRefresh;
+window.gdAdminCourseVisualOpenRecipeTool=gdAdminCourseVisualOpenRecipeTool;
+window.gdAdminCourseVisualUpdateWithActiveRecipe=gdAdminCourseVisualUpdateWithActiveRecipe;
 window.gdToggleAdminCourseDbPayload=gdToggleAdminCourseDbPayload;
