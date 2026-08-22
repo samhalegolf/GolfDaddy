@@ -322,7 +322,11 @@
       // Native rows are real practice evidence; they just arrive as a table
       // rather than a photo.
       type === 'email-csv' ||
-      type === 'native-csv'
+      type === 'native-csv' ||
+      // Plotted by hand in the Manual Practice lane. Fewer measurements than a
+      // monitor row (a carry and an offline, nothing invented), but the same
+      // kind of claim about where a shot finished.
+      type === 'manual-practice'
     ) return 'practice_evidence';
     return 'raw_import';
   }
@@ -549,7 +553,10 @@
       shotId: group.shotId || createId('lm-shot'),
       sessionId: session.sessionId,
       captureId: capture.captureId,
-      source: 'launch_monitor',
+      /* Where the evidence came from, as the importer stated it. Only a source
+         that is not a launch monitor has to say so (Manual Practice does);
+         everything else keeps the historical value. */
+      source: group.source || 'launch_monitor',
       providerGuess: session.sourceIdentity && session.sourceIdentity.providerGuess || 'unknown',
       timestamp: group.timestamp || capture.timestamp || session.startedAt,
       originClubLabel: group.originClubLabel || group.candidateClub || '',
@@ -572,6 +579,15 @@
         confidence: deliveryConfidence
       },
       confidence: Math.min(metricConfidence(group, ['carryDistance', 'carry', 'Carry']), plot.confidence || 0),
+      /* Analysis lane and primary-pattern membership are promoted onto the shot
+         rather than left buried in rawGroup, so they survive anything that
+         reads shots without their group and are visible to a person reading the
+         store. Provenance is an opt-in block an importer may attach to say what
+         its evidence actually is - never a place to put a measurement. */
+      analysisLane: group.analysisLane || '',
+      sourceMethod: group.sourceMethod || '',
+      excludeFromPrimaryPattern: group.excludeFromPrimaryPattern === true,
+      provenance: group.provenance && typeof group.provenance === 'object' ? group.provenance : null,
       metrics: Array.isArray(group.metrics) ? group.metrics.slice() : [],
       rawGroup: group
     }, scope);
@@ -850,6 +866,19 @@
       groups[club].push(shot);
       return groups;
     }, {});
+  }
+
+  /* Evidence that is kept, stored, synced and plotted, but must not be allowed
+     to move the primary pattern. A Manual Practice shot the player marked
+     "disrupted" is the first case: dropping it before the boundary would throw
+     away real evidence, and letting it into the cluster would let one admitted
+     bad swing move the answer. One flag, read at every primary-pattern entry
+     point, so a source never needs its own conditional downstream. */
+  function excludedFromPrimaryPattern(shot) {
+    if (!shot) return false;
+    if (shot.excludeFromPrimaryPattern === true) return true;
+    var raw = shot.rawGroup || {};
+    return raw.excludeFromPrimaryPattern === true;
   }
 
   function isClusterHuntShot(shot) {
@@ -1157,9 +1186,10 @@
   }
 
   function analyzeResultScaledClusters(accepted, cfg) {
-    var clusterShots = (accepted || []).filter(isClusterHuntShot);
+    var primary = (accepted || []).filter(function (shot) { return !excludedFromPrimaryPattern(shot); });
+    var clusterShots = primary.filter(isClusterHuntShot);
     if (!clusterShots.length) {
-      var ovalCluster = analyzeOvalCenterCluster(accepted, cfg);
+      var ovalCluster = analyzeOvalCenterCluster(primary, cfg);
       if (ovalCluster) return ovalCluster;
     }
     var groups = groupByClub(clusterShots);
@@ -1223,6 +1253,7 @@
     var accepted = [];
     var rejected = [];
     (storeShots || []).forEach(function (shot) {
+      if (excludedFromPrimaryPattern(shot)) return;
       var reason = deliveryExclusionReason(shot, cfg);
       if (reason) rejected.push(Object.assign({ rejectReason: reason }, shot));
       else accepted.push(shot);
@@ -1379,6 +1410,7 @@
     normalizeShot: normalizeShot,
     exclusionReason: exclusionReason,
     deliveryExclusionReason: deliveryExclusionReason,
+    excludedFromPrimaryPattern: excludedFromPrimaryPattern,
     analyze: analyze,
     analyzeDisplay: analyzeDisplay,
     customGateExclusionReason: function (shot, cfg) { return customGateExclusionReason(shot, cfg || settings()); },

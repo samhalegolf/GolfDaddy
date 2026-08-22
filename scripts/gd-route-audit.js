@@ -470,15 +470,18 @@
     }),null);
   }
   function gdPracticeDisplayAnalysis(opts={}){
-    const manualApi=window.GolfDaddyManualPracticeData;
-    const manualAnalysis=safe(()=>typeof manualApi?.getDisplayAnalysis==="function"?manualApi.getDisplayAnalysis():null,null);
-    if(manualAnalysis)return manualAnalysis;
     const api=window.GolfDaddyLaunchMonitorData;
     if(typeof api?.analyzeDisplay!=="function"){
       if(!opts.quiet)gdPracticeHydrateDisplayAnalysis();
       return null;
     }
-    return safe(()=>api.analyzeDisplay(),null);
+    const analysis=safe(()=>api.analyzeDisplay(),null);
+    // Manual Practice is an INPUT ROUTE, not a second analysis: its evidence is
+    // already in the library the line above analysed. The only thing left for it
+    // to say here is the coach's trusted override, which restates the anchor
+    // without re-clustering anything.
+    if(!analysis)return analysis;
+    return safe(()=>window.GolfDaddyManualPracticeData?.applyTrustedOverride?.(analysis)||analysis,analysis);
   }
   function gdPracticeAnalysisHasRealData(analysis){
     if(Array.isArray(analysis?.acceptedShots)&&analysis.acceptedShots.length)return true;
@@ -7938,8 +7941,8 @@
 			    const evidenceList=byId("gdPracticeEvidenceList");
 			    const api=window.GolfDaddyLaunchMonitorData;
 			    const manualApi=window.GolfDaddyManualPracticeData;
-    const manualAnalysis=safe(()=>typeof manualApi?.getDisplayAnalysis==="function"?manualApi.getDisplayAnalysis():null,null);
-		    if(visualTitle)visualTitle.textContent=`${gdShotDataPlayerLabel()} - ${manualAnalysis?"Manual Practice":"Practice Data"}`;
+    const manualOverride=safe(()=>typeof manualApi?.isOverrideActive==="function"?manualApi.isOverrideActive():false,false);
+		    if(visualTitle)visualTitle.textContent=`${gdShotDataPlayerLabel()} - ${manualOverride?"Practice Data (trusted override)":"Practice Data"}`;
 		    if(result)gdRenderPracticeAutoFlow(null);
 	    gdRenderPracticeMasterTolerance();
     gdRenderPracticeAdminChrome();
@@ -7947,7 +7950,7 @@
     gdRenderNativePracticeImportLane();
     safe(()=>typeof manualApi?.renderLane==="function"&&manualApi.renderLane(byId("gdManualPracticeLane")));
     gdSyncPracticeSampleImportButton();
-	    if((!api||typeof api.analyze!=="function")&&!manualAnalysis){
+	    if(!api||typeof api.analyze!=="function"){
 	      if(visual)visual.innerHTML=gdPracticeVisualHTML(practiceSvg({acceptedShots:[],recommendation:{status:"module loading",offsetDeg:0}}),null);
 	      if(evidenceList)evidenceList.innerHTML="";
 	      gdRenderPracticeProjectionControls(null);
@@ -7976,8 +7979,10 @@
 	      const visualSource=totals.rawShots?visualAnalysis:{acceptedShots:[],recommendation:{status:"no practice data",offsetDeg:0}};
 	      visual.innerHTML=gdPracticeVisualHTML(practiceSvg(visualSource),visualSource);
 	    }
-    if(manualAnalysis&&typeof manualApi?.renderEvidenceList==="function")manualApi.renderEvidenceList(evidenceList,analysis);
-    else gdRenderPracticeEvidenceList(analysis);
+    // One evidence list. Manual observations are canonical Practice evidence now,
+    // so they list beside every other import rather than replacing the list with
+    // a Manual-Practice-only view.
+    gdRenderPracticeEvidenceList(analysis);
     gdRenderPracticeRecommendations(analysis);
 	    gdRenderPracticeMasterTolerance();
     gdRenderPracticeAdminChrome();
@@ -8352,6 +8357,11 @@
       gdPracticeDeleteImports:gdPracticeDeleteImports,
       gdPracticeClearLibraryForPlayer:gdPracticeClearLibraryForPlayer,
       gdNativePracticeFeedbackPatch:gdNativePracticeFeedbackPatch,
+      // Three modules outside this file (Manual Practice, Projected Clubs, the
+      // Shot Library sync) repaint the Practice screen through
+      // window.renderPracticeData. It was never exposed, so all three silently
+      // did nothing - the Manual Practice lane took taps and never redrew.
+      renderPracticeData:renderPracticeData,
       gdRenderNativePracticeImportLane:gdRenderNativePracticeImportLane,
       gdParseNativePracticeImport:gdParseNativePracticeImport,
       gdNativePracticePasteChanged:gdNativePracticePasteChanged,

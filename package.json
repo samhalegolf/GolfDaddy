@@ -15,7 +15,7 @@
     "test:practice-graph": "node dev/practice-graph-regression.test.js",
     "test:practice-scanner": "node dev/practice-scanner-surface.test.js",
     "test:bubble-geometry": "node dev/bubble-micro-geometry.test.js",
-    "test:manual-practice": "node dev/manual-practice-core.test.js",
+    "test:manual-practice": "node dev/manual-practice-core.test.js && node dev/manual-practice-integration.test.js",
     "test:practice-email": "node dev/practice-email-intake.test.js",
     "test:practice-email-admin": "node dev/practice-email-admin.test.js",
     "test:table-ocr": "node dev/table-ocr-boxes.test.js && node dev/table-ocr-split.test.js && node dev/table-ocr-semantics.test.js && node dev/table-ocr-words.test.js && node dev/table-ocr-strips.test.js && node dev/table-ocr-deepscan.test.js",

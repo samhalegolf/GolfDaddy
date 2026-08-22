@@ -1,3 +1,28 @@
+/* Manual Practice -> canonical Practice evidence.
+ *
+ * THE Manual Practice seam. A plotted observation is structured data already,
+ * so it does not go near the CSV parser; this file is the one place a manual
+ * observation becomes the same clubGroup shape every other practice importer
+ * hands to gd-launch-monitor-data's importCapture(). Everything after that
+ * point - gating, clustering, the recommendation, the Practice Bubble, My
+ * Bubble adoption, Bag/GPS - is the canonical pipeline's job, not this file's.
+ *
+ * What this file must NOT do (it used to do all three):
+ *   - cluster shots, score evidence or produce a recommendation. That was a
+ *     second analysis pipeline imitating the Practice contract.
+ *   - invent measurements. A plotted dot knows a carry and an offline and
+ *     nothing else. No ball speed, spin, face angle, club path or launch
+ *     direction is fabricated, so no quality gate downstream is ever fed a
+ *     number nobody observed.
+ *   - decide who a session belongs to. Ownership is the store's job
+ *     (gd-manual-practice-data.js) and it fails closed without a player.
+ *
+ * Dependency-injected rather than reaching for globals, so the whole seam runs
+ * headlessly in dev/manual-practice-core.test.js:
+ *   deps.clubBaselineM(club)                      - gdClarityClubBaselineM
+ *   deps.generatedBubbleForClub(club, carryM, 0)  - gdGeneratedShotBubbleForClub
+ *   deps.metricForKey(key, value)                 - gdLmMetricForKey
+ */
 (function (rootFactory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = rootFactory();
@@ -14,16 +39,55 @@
 })(function () {
   'use strict';
 
-  var DEFAULTS = {
-    consistencyPct: 68,
-    replicationToleranceDeg: 1.75,
-    minRepresentativeShots: 3,
-    minVerifiedClubs: 2,
-    distanceScaleWeight: 0.45,
-    referenceClub: '7i',
-    fallbackCarryM: 155,
-    fallbackWidthM: 28,
-    fallbackDepthM: 24
+  /* Bumped when the plot -> metres rule changes. It is stamped on every
+     observation's provenance so a historical manual session can always be read
+     back against the rule that produced it, instead of being silently
+     reinterpreted by whatever the current bubble-generation rules say. */
+  var CALIBRATION_VERSION = 'manual-plot-v1';
+
+  /* The inputType the Shot Library must count as practice evidence. An
+     unlisted type imports fine and then never appears on the Practice Data
+     screen, which reads to the user exactly like a failed import.
+     dev/manual-practice-core.test.js holds this file and captureDisplayLane()
+     in gd-launch-monitor-data.js to the same value. */
+  var INPUT_TYPE = 'manual-practice';
+
+  var SOURCE_MANUAL = 'manual_practice';
+  var SOURCE_OVERRIDE = 'coach_manual_override';
+
+  /* Both classifications are kept as evidence. The difference is only whether
+     the shot is allowed to move the primary pattern - carried across the
+     boundary as excludeFromPrimaryPattern, which the library honours for every
+     source, not just this one. */
+  var REPRESENTATIVE = 'representative';
+  var DISRUPTED = 'disrupted';
+
+  /* The per-club lane in the library's result-scaled cluster method (the same
+     lane the generated-demo rows use). Without it every club is pooled into one
+     oval, and the cross-club replication Manual Practice is built around could
+     never be shown. */
+  var PRIMARY_LANE = 'cluster_hunt';
+  var DISRUPTED_LANE = 'manual_disrupted';
+
+  /* Last-resort plot scale, used only when the app cannot generate a bubble for
+     the club. Same numbers the module has always used - this pass makes the
+     rule explicit and versionable, it does not retune it. */
+  var FALLBACK = {
+    carryM: 155,
+    widthRatio: 0.16,
+    depthRatio: 0.14,
+    minSpanM: 12,
+    minCarryM: 30,
+    minHalfSpanM: 4
+  };
+
+  /* Mirrors gd-launch-monitor-alias-registry.js for the only two metrics a
+     plotted dot can honestly claim. Used when no metricForKey is injected (the
+     browser injects gdLmMetricForKey). dev/manual-practice-core.test.js holds
+     these to the registry so the two cannot drift. */
+  var METRIC_FALLBACK = {
+    carry: { rawLabel: 'Carry', candidateMetric: 'carryDistance', unit: 'm', confidence: 0.72 },
+    offline: { rawLabel: 'Offline', candidateMetric: 'offline', unit: 'm', confidence: 0.7 }
   };
 
   function asNumber(value, fallback) {
@@ -45,370 +109,254 @@
     return Math.round(asNumber(value, 0) * factor) / factor;
   }
 
-  function mean(values) {
-    var clean = (values || []).filter(function (value) { return Number.isFinite(Number(value)); }).map(Number);
-    if (!clean.length) return 0;
-    return clean.reduce(function (sum, value) { return sum + value; }, 0) / clean.length;
+  function classificationOf(observation) {
+    return cleanString(observation && observation.classification, REPRESENTATIVE).toLowerCase() === DISRUPTED
+      ? DISRUPTED
+      : REPRESENTATIVE;
   }
 
-  function std(values) {
-    var clean = (values || []).filter(function (value) { return Number.isFinite(Number(value)); }).map(Number);
-    if (clean.length < 2) return 0;
-    var avg = mean(clean);
-    var variance = clean.reduce(function (sum, value) {
-      return sum + Math.pow(value - avg, 2);
-    }, 0) / clean.length;
-    return Math.sqrt(variance);
+  // === Plot calibration =====================================================
+  //
+  // The plotting surface is normalised: x and y run -1..1 with the target at
+  // the centre, top long and right right. Turning that into metres needs three
+  // numbers and a record of where they came from.
+
+  function resolveManualPracticePlotCalibration(club, deps) {
+    deps = deps || {};
+    var label = cleanString(club, '7i');
+
+    /* The bag distance, resolved by the same function every other importer
+       uses for expectedDistanceM. A rival baseline here would put manual shots
+       on a different denominator from the imported ones. */
+    var carrySource = 'club_baseline';
+    var carryM = NaN;
+    if (typeof deps.clubBaselineM === 'function') {
+      try {
+        carryM = asNumber(deps.clubBaselineM(label), NaN);
+      } catch (error) {
+        carryM = NaN;
+      }
+    }
+    if (!Number.isFinite(carryM) || carryM <= 0) {
+      carryM = FALLBACK.carryM;
+      carrySource = 'fallback_carry';
+    }
+    carryM = Math.max(FALLBACK.minCarryM, carryM);
+
+    var generated = null;
+    if (typeof deps.generatedBubbleForClub === 'function') {
+      try {
+        generated = deps.generatedBubbleForClub(label, carryM, 0) || null;
+      } catch (error) {
+        generated = null;
+      }
+    }
+    var widthM = generated ? asNumber(generated.widthM || generated.bubbleWidthM || generated.clusterWidthM, NaN) : NaN;
+    var depthM = generated ? asNumber(generated.depthM || generated.bubbleDepthM || generated.clusterDepthM, NaN) : NaN;
+    var spanSource = 'generated_bubble';
+    if (!Number.isFinite(widthM) || widthM <= 0 || !Number.isFinite(depthM) || depthM <= 0) {
+      widthM = Math.max(FALLBACK.minSpanM, carryM * FALLBACK.widthRatio);
+      depthM = Math.max(FALLBACK.minSpanM, carryM * FALLBACK.depthRatio);
+      spanSource = 'carry_ratio';
+    }
+
+    return {
+      club: label,
+      expectedCarryM: round(carryM, 1),
+      lateralHalfSpanM: round(Math.max(FALLBACK.minHalfSpanM, widthM / 2), 2),
+      depthHalfSpanM: round(Math.max(FALLBACK.minHalfSpanM, depthM / 2), 2),
+      calibrationSource: carrySource + '+' + spanSource,
+      calibrationVersion: CALIBRATION_VERSION
+    };
   }
 
-  function median(values) {
-    return percentile(values, 50);
-  }
-
-  function percentile(values, pct) {
-    var clean = (values || []).filter(function (value) { return Number.isFinite(Number(value)); }).map(Number).sort(function (a, b) { return a - b; });
-    if (!clean.length) return 0;
-    var index = clamp((Number(pct) / 100) * (clean.length - 1), 0, clean.length - 1);
-    var lower = Math.floor(index);
-    var upper = Math.ceil(index);
-    if (lower === upper) return clean[lower];
-    var t = index - lower;
-    return clean[lower] * (1 - t) + clean[upper] * t;
-  }
-
-  function groupBy(list, keyFn) {
-    var groups = {};
-    (list || []).forEach(function (item) {
-      var key = cleanString(keyFn(item), 'unknown');
-      groups[key] = groups[key] || [];
-      groups[key].push(item);
+  /* One calibration per club, resolved once per session so every observation of
+     a club is converted on exactly the same scale. */
+  function calibrationTableFor(session, deps) {
+    var table = {};
+    (session && Array.isArray(session.observations) ? session.observations : []).forEach(function (observation) {
+      var club = cleanString(observation && (observation.clubId || observation.club), '7i');
+      if (!table[club]) table[club] = resolveManualPracticePlotCalibration(club, deps);
     });
-    return groups;
+    return table;
   }
 
-  function mergeSettings(overrides) {
-    var next = {};
-    Object.keys(DEFAULTS).forEach(function (key) {
-      next[key] = DEFAULTS[key];
+  // === Observation -> canonical evidence ====================================
+
+  function buildMetric(key, value, deps) {
+    if (deps && typeof deps.metricForKey === 'function') {
+      var metric = deps.metricForKey(key, value);
+      if (metric) return metric;
+    }
+    var config = METRIC_FALLBACK[key];
+    if (!config) return null;
+    return {
+      rawLabel: config.rawLabel,
+      candidateMetric: config.candidateMetric,
+      rawValue: String(value),
+      value: Number(value),
+      unit: config.unit,
+      confidence: config.confidence
+    };
+  }
+
+  /* One plotted observation -> one Shot Library clubGroup.
+   *
+   * carry and offline are the only two measurements, and both are computed, not
+   * guessed: offline is the plotted x across the club's lateral half-span, and
+   * carry is the bag baseline plus the plotted y across the depth half-span.
+   * expectedDistanceM stays the BAG BASELINE (never the shot's own carry), so
+   * depth reads as carry-minus-bag exactly like an imported shot.
+   */
+  function manualObservationToEvidence(observation, session, calibration, deps) {
+    observation = observation || {};
+    session = session || {};
+    var club = cleanString(observation.clubId || observation.club, calibration && calibration.club || '7i');
+    var cal = calibration || resolveManualPracticePlotCalibration(club, deps);
+    var x = clamp(asNumber(observation.x, 0), -1, 1);
+    var y = clamp(asNumber(observation.y, 0), -1, 1);
+    var lateralM = round(x * cal.lateralHalfSpanM, 2);
+    var depthM = round(y * cal.depthHalfSpanM, 2);
+    var carryM = round(cal.expectedCarryM + depthM, 2);
+    var classification = classificationOf(observation);
+    var representative = classification === REPRESENTATIVE;
+    var source = cleanString(observation.source || session.source, SOURCE_MANUAL);
+    var timestamp = observation.updatedAt || observation.createdAt || session.updatedAt || session.createdAt || new Date().toISOString();
+
+    var metrics = [buildMetric('carry', carryM, deps), buildMetric('offline', lateralM, deps)].filter(Boolean);
+
+    return {
+      shotId: 'manual-' + cleanString(observation.observationId, 'observation'),
+      originClubLabel: club,
+      candidateClub: club,
+      expectedDistanceM: cal.expectedCarryM,
+      timestamp: timestamp,
+      /* Player scope rides on the group; the library's resolvePlayerScope reads
+         it off here rather than falling back to whoever is logged in. */
+      playerId: cleanString(session.playerId, ''),
+      playerName: cleanString(session.playerName, 'Player'),
+      accountId: cleanString(session.accountId, ''),
+      source: source,
+      analysisLane: representative ? PRIMARY_LANE : DISRUPTED_LANE,
+      sourceMethod: representative ? PRIMARY_LANE : DISRUPTED_LANE,
+      /* Disrupted shots are evidence and are kept, stored, synced and plotted -
+         they just must not move the primary pattern. The library honours this
+         flag for any source, so no Manual-Practice conditional is needed
+         downstream. */
+      excludeFromPrimaryPattern: !representative,
+      provenance: {
+        source: source,
+        manualPractice: true,
+        classification: classification,
+        observationId: cleanString(observation.observationId, ''),
+        sessionId: cleanString(session.sessionId, ''),
+        plot: { x: round(x, 4), y: round(y, 4) },
+        calibration: {
+          expectedCarryM: cal.expectedCarryM,
+          lateralHalfSpanM: cal.lateralHalfSpanM,
+          depthHalfSpanM: cal.depthHalfSpanM,
+          calibrationSource: cal.calibrationSource,
+          calibrationVersion: cal.calibrationVersion
+        },
+        geometryPresetId: session.geometryPresetId == null ? null : session.geometryPresetId
+      },
+      metrics: metrics
+    };
+  }
+
+  /* A finished session -> the payload importCapture() takes. Same shape the
+     CSV, photo, email and file routes produce; only the inputType and the
+     provenance differ. */
+  function manualSessionToLibraryPayload(session, options) {
+    options = options || {};
+    var deps = options.deps || options;
+    session = session || {};
+    var calibrations = calibrationTableFor(session, deps);
+    var observations = Array.isArray(session.observations) ? session.observations : [];
+    var timestamp = options.timestamp || session.completedAt || session.updatedAt || new Date().toISOString();
+    var clubGroups = observations.map(function (observation) {
+      var club = cleanString(observation && (observation.clubId || observation.club), '7i');
+      return manualObservationToEvidence(observation, session, calibrations[club], deps);
     });
-    overrides = overrides || {};
-    Object.keys(DEFAULTS).forEach(function (key) {
-      if (overrides[key] != null && overrides[key] !== '') next[key] = overrides[key];
+    return {
+      label: cleanString(options.label, 'Manual Practice session'),
+      inputType: INPUT_TYPE,
+      timestamp: timestamp,
+      startedAt: session.createdAt || timestamp,
+      sessionDate: options.sessionDate || null,
+      /* Never a launch monitor. Naming one here would attribute hand-plotted
+         dots to a device that was never in the room. */
+      sourceIdentity: {
+        providerGuess: SOURCE_MANUAL,
+        confidence: 1,
+        evidence: ['Manual Practice plot']
+      },
+      rawTextBlocks: [],
+      calibrations: calibrations,
+      clubGroups: clubGroups
+    };
+  }
+
+  // === Trusted coach override ===============================================
+  //
+  // The override is a coach restating the anchor, not a second analysis. It
+  // takes the canonical analysis and replaces the anchor and the
+  // recommendation; cluster membership, shot counts, spreads and the bubble's
+  // shape all still come from the evidence the pipeline gated and clustered.
+
+  function applyTrustedOverrideToAnalysis(analysis, override) {
+    if (!analysis || !override) return analysis;
+    var offsetDeg = asNumber(override.offsetDeg, NaN);
+    if (!Number.isFinite(offsetDeg)) return analysis;
+    var club = cleanString(override.club || override.clubId, '');
+    var method = (analysis.methods && analysis.methods.resultScaledCluster) || {};
+    var next = Object.assign({}, analysis);
+    next.methods = Object.assign({}, analysis.methods, {
+      resultScaledCluster: Object.assign({}, method, {
+        method: 'result_scaled_cluster',
+        source: SOURCE_OVERRIDE,
+        status: 'manual_override',
+        anchorDeg: round(offsetDeg, 2),
+        anchorClub: club || method.anchorClub || '',
+        showToUser: true
+      })
     });
-    next.consistencyPct = clamp(asNumber(next.consistencyPct, DEFAULTS.consistencyPct), 51, 80);
-    next.replicationToleranceDeg = Math.max(0.25, asNumber(next.replicationToleranceDeg, DEFAULTS.replicationToleranceDeg));
-    next.minRepresentativeShots = Math.max(1, Math.round(asNumber(next.minRepresentativeShots, DEFAULTS.minRepresentativeShots)));
-    next.minVerifiedClubs = Math.max(1, Math.round(asNumber(next.minVerifiedClubs, DEFAULTS.minVerifiedClubs)));
-    next.distanceScaleWeight = clamp(asNumber(next.distanceScaleWeight, DEFAULTS.distanceScaleWeight), 0, 1.5);
-    next.fallbackCarryM = Math.max(30, asNumber(next.fallbackCarryM, DEFAULTS.fallbackCarryM));
-    next.fallbackWidthM = Math.max(8, asNumber(next.fallbackWidthM, DEFAULTS.fallbackWidthM));
-    next.fallbackDepthM = Math.max(8, asNumber(next.fallbackDepthM, DEFAULTS.fallbackDepthM));
-    next.referenceClub = cleanString(next.referenceClub, DEFAULTS.referenceClub);
+    next.recommendation = {
+      status: 'manual_override',
+      offsetDeg: round(offsetDeg, 2),
+      evidence: ['result_scaled_cluster', SOURCE_OVERRIDE],
+      deltaDeg: null,
+      showToUser: true,
+      source: SOURCE_OVERRIDE
+    };
+    next.userSignals = [next.methods.resultScaledCluster, next.recommendation];
+    next.override = {
+      source: SOURCE_OVERRIDE,
+      offsetDeg: round(offsetDeg, 2),
+      club: club,
+      geometryPresetId: override.geometryPresetId == null ? null : override.geometryPresetId,
+      createdAt: override.createdAt || '',
+      createdBy: override.createdBy || ''
+    };
     return next;
   }
 
-  function defaultClubModel(club, settings) {
-    return {
-      club: cleanString(club, 'Unknown'),
-      carryM: settings.fallbackCarryM,
-      bubbleWidthM: settings.fallbackWidthM,
-      bubbleDepthM: settings.fallbackDepthM
-    };
-  }
-
-  function resolveClubModel(club, opts) {
-    var settings = opts.settings;
-    var resolver = opts.clubModelResolver;
-    var fallback = defaultClubModel(club, settings);
-    if (typeof resolver !== 'function') return fallback;
-    var model = resolver(club) || {};
-    return {
-      club: cleanString(model.club || club, fallback.club),
-      carryM: Math.max(30, asNumber(model.carryM, fallback.carryM)),
-      bubbleWidthM: Math.max(8, asNumber(model.bubbleWidthM, fallback.bubbleWidthM)),
-      bubbleDepthM: Math.max(8, asNumber(model.bubbleDepthM, fallback.bubbleDepthM))
-    };
-  }
-
-  function observationClassification(observation) {
-    return cleanString(observation && observation.classification, 'representative').toLowerCase() === 'disrupted'
-      ? 'disrupted'
-      : 'representative';
-  }
-
-  function observationTimestamp(observation, session) {
-    return observation && (observation.updatedAt || observation.createdAt) || session && (session.updatedAt || session.createdAt) || new Date().toISOString();
-  }
-
-  function normalizeObservation(observation, session, opts) {
-    var club = cleanString(observation && observation.clubId || observation && observation.club, 'Unknown');
-    var model = resolveClubModel(club, opts);
-    var normalizedX = clamp(asNumber(observation && observation.x, 0), -1, 1);
-    var normalizedY = clamp(asNumber(observation && observation.y, 0), -1, 1);
-    var lateralM = normalizedX * (model.bubbleWidthM / 2);
-    var depthM = normalizedY * (model.bubbleDepthM / 2);
-    var expectedM = model.carryM;
-    var actualDistanceM = expectedM + depthM;
-    var normalizedDeg = Math.atan2(lateralM, Math.max(expectedM, 1)) * 180 / Math.PI;
-    var classification = observationClassification(observation);
-    return {
-      shotId: cleanString(observation && observation.observationId, 'manual-observation'),
-      sessionId: cleanString(session && session.sessionId, ''),
-      playerId: cleanString(session && session.playerId, ''),
-      playerName: cleanString(session && session.playerName, 'Player'),
-      accountId: cleanString(session && session.accountId, ''),
-      club: model.club,
-      carryM: round(expectedM, 1),
-      expectedM: round(expectedM, 1),
-      actualDistanceM: round(actualDistanceM, 1),
-      depthM: round(depthM, 1),
-      lateralM: round(lateralM, 1),
-      normalizedDeg: round(normalizedDeg, 2),
-      manualPractice: true,
-      manualClassification: classification,
-      counted: classification === 'representative',
-      sourceType: 'manual_practice',
-      source: cleanString(observation && observation.source, 'manual_practice'),
-      timestamp: observationTimestamp(observation, session),
-      plot: {
-        x: round(normalizedX, 4),
-        y: round(normalizedY, 4)
-      }
-    };
-  }
-
-  function summarizeClub(club, shots, opts) {
-    var representative = (shots || []).filter(function (shot) { return shot.manualClassification === 'representative'; });
-    if (!representative.length) {
-      return {
-        club: club,
-        shots: (shots || []).length,
-        countedShots: 0,
-        consistencyPct: opts.settings.consistencyPct,
-        centerDeg: null,
-        radiusDeg: null,
-        stdDeg: null,
-        rangeDeg: null,
-        meanExpectedM: round(mean((shots || []).map(function (shot) { return shot.expectedM; })), 1),
-        evidenceScore: 0,
-        status: 'needs_more_data',
-        showToUser: false
-      };
-    }
-    var degrees = representative.map(function (shot) { return Number(shot.normalizedDeg); }).filter(Number.isFinite);
-    var center = median(degrees);
-    var distances = degrees.map(function (value) { return Math.abs(value - center); });
-    var radius = percentile(distances, opts.settings.consistencyPct);
-    var counted = representative.filter(function (shot) {
-      return Math.abs(Number(shot.normalizedDeg) - center) <= radius + 0.0001;
-    });
-    if (representative.length <= opts.settings.minRepresentativeShots && counted.length < representative.length) {
-      counted = representative.slice();
-      radius = Math.max.apply(null, distances.concat([radius]));
-    }
-    var countedDegrees = counted.map(function (shot) { return Number(shot.normalizedDeg); }).filter(Number.isFinite);
-    var spread = std(countedDegrees);
-    var range = countedDegrees.length ? Math.max.apply(null, countedDegrees) - Math.min.apply(null, countedDegrees) : 0;
-    var avgExpected = mean(counted.map(function (shot) { return Number(shot.expectedM); }));
-    var evidenceScore = counted.length * (1 + clamp(avgExpected / 240, 0, 1) * opts.settings.distanceScaleWeight);
-    var strong = counted.length >= opts.settings.minRepresentativeShots;
-    return {
-      club: club,
-      shots: (shots || []).length,
-      countedShots: counted.length,
-      consistencyPct: opts.settings.consistencyPct,
-      centerDeg: round(center, 2),
-      radiusDeg: round(radius, 2),
-      stdDeg: round(spread, 2),
-      rangeDeg: round(range, 2),
-      meanExpectedM: round(avgExpected, 1),
-      evidenceScore: round(evidenceScore, 2),
-      status: strong ? 'cluster_candidate' : 'needs_more_data',
-      showToUser: strong
-    };
-  }
-
-  function buildResultMethod(clubClusters, representativeShots, opts, source) {
-    var candidates = (clubClusters || []).filter(function (cluster) { return cluster && cluster.showToUser && Number.isFinite(Number(cluster.centerDeg)); });
-    if (!candidates.length) {
-      return {
-        method: 'result_scaled_cluster',
-        source: source || 'manual_practice',
-        status: 'needs_more_data',
-        anchorDeg: null,
-        anchorClub: null,
-        evidenceScore: 0,
-        verificationClubs: [],
-        toleranceDeg: opts.settings.replicationToleranceDeg,
-        countedShots: representativeShots.length,
-        availableShots: representativeShots.length,
-        clubClusters: clubClusters || [],
-        showToUser: false
-      };
-    }
-    var anchor = candidates.slice().sort(function (a, b) {
-      if ((b.countedShots || 0) !== (a.countedShots || 0)) return (b.countedShots || 0) - (a.countedShots || 0);
-      return (b.evidenceScore || 0) - (a.evidenceScore || 0);
-    })[0];
-    var verified = candidates.filter(function (cluster) {
-      return Math.abs(Number(cluster.centerDeg) - Number(anchor.centerDeg)) <= opts.settings.replicationToleranceDeg;
-    });
-    return {
-      method: 'result_scaled_cluster',
-      source: source || 'manual_practice',
-      status: verified.length >= opts.settings.minVerifiedClubs ? 'cross_distance_verified' : 'cluster_candidate',
-      anchorDeg: round(Number(anchor.centerDeg), 2),
-      anchorClub: anchor.club,
-      evidenceScore: round(Number(anchor.evidenceScore || 0), 2),
-      verificationClubs: verified.map(function (cluster) { return cluster.club; }),
-      toleranceDeg: opts.settings.replicationToleranceDeg,
-      countedShots: representativeShots.length,
-      availableShots: representativeShots.length,
-      clubClusters: clubClusters || [],
-      showToUser: true
-    };
-  }
-
-  function recommendationFromMethod(method, sourceLabel) {
-    var offset = Number(method && method.anchorDeg);
-    if (!(method && method.showToUser && Number.isFinite(offset))) {
-      return {
-        status: 'needs_more_data',
-        offsetDeg: null,
-        evidence: [],
-        deltaDeg: null,
-        showToUser: false,
-        source: sourceLabel
-      };
-    }
-    return {
-      status: method.status === 'cross_distance_verified' ? 'corroborated' : 'result_only',
-      offsetDeg: round(offset, 2),
-      evidence: ['result_scaled_cluster'],
-      deltaDeg: null,
-      showToUser: true,
-      source: sourceLabel
-    };
-  }
-
-  function analyzeSession(session, options) {
-    var settings = mergeSettings(options);
-    var opts = {
-      settings: settings,
-      clubModelResolver: options && options.clubModelResolver
-    };
-    session = session || {};
-    var observations = Array.isArray(session.observations) ? session.observations.slice() : [];
-    var acceptedShots = observations.map(function (observation) {
-      return normalizeObservation(observation, session, opts);
-    });
-    var grouped = groupBy(acceptedShots, function (shot) { return shot.club; });
-    var clubClusters = Object.keys(grouped).map(function (club) {
-      return summarizeClub(club, grouped[club], opts);
-    }).sort(function (a, b) {
-      if ((b.countedShots || 0) !== (a.countedShots || 0)) return (b.countedShots || 0) - (a.countedShots || 0);
-      return String(a.club || '').localeCompare(String(b.club || ''), undefined, { numeric: true });
-    });
-    var representativeShots = acceptedShots.filter(function (shot) { return shot.manualClassification === 'representative'; });
-    var resultMethod = buildResultMethod(clubClusters, representativeShots, opts, 'manual_practice');
-    return {
-      source: 'manual_practice',
-      manualPractice: true,
-      sessionId: cleanString(session.sessionId, ''),
-      generatedAt: new Date().toISOString(),
-      totals: {
-        sessions: session.sessionId ? 1 : 0,
-        captures: 1,
-        rawShots: observations.length,
-        accepted: acceptedShots.length,
-        rejected: 0,
-        representative: representativeShots.length,
-        disrupted: acceptedShots.filter(function (shot) { return shot.manualClassification === 'disrupted'; }).length
-      },
-      acceptedShots: acceptedShots,
-      rejectedShots: [],
-      clusters: clubClusters,
-      methods: {
-        resultScaledCluster: resultMethod,
-        deliveryCluster: {
-          method: 'delivery_cluster',
-          status: 'not_used',
-          anchorDeg: null,
-          anchorClub: null,
-          evidenceScore: 0,
-          acceptedShots: 0,
-          rejectedShots: 0,
-          clubClusters: [],
-          showToUser: false
-        }
-      },
-      recommendation: recommendationFromMethod(resultMethod, 'manual_practice'),
-      userSignals: resultMethod.showToUser ? [resultMethod] : [],
-      metadata: {
-        geometryPresetId: session.geometryPresetId == null ? null : session.geometryPresetId
-      }
-    };
-  }
-
-  function buildOverrideAnalysis(session, override, options) {
-    var settings = mergeSettings(options);
-    var base = analyzeSession(session, options || {});
-    override = override || {};
-    var offsetDeg = asNumber(override.offsetDeg, NaN);
-    if (!Number.isFinite(offsetDeg)) return base;
-    var club = cleanString(override.clubId || override.club || base.methods && base.methods.resultScaledCluster && base.methods.resultScaledCluster.anchorClub || settings.referenceClub, settings.referenceClub);
-    var representativeShots = base.acceptedShots.filter(function (shot) { return shot.manualClassification === 'representative'; });
-    var representativeCount = representativeShots.length;
-    var meanExpectedM = round(mean(representativeShots.filter(function (shot) { return shot.club === club; }).map(function (shot) { return shot.expectedM; })), 1) || round(mean(representativeShots.map(function (shot) { return shot.expectedM; })), 1) || settings.fallbackCarryM;
-    var radiusDeg = representativeShots.length
-      ? round(percentile(representativeShots.map(function (shot) { return Math.abs(Number(shot.normalizedDeg) - offsetDeg); }), settings.consistencyPct), 2)
-      : 0.45;
-    var method = {
-      method: 'result_scaled_cluster',
-      source: 'coach_manual_override',
-      status: 'manual_override',
-      anchorDeg: round(offsetDeg, 2),
-      anchorClub: club,
-      evidenceScore: round(Math.max(representativeCount, 1), 2),
-      verificationClubs: representativeCount ? [club] : [],
-      toleranceDeg: settings.replicationToleranceDeg,
-      countedShots: representativeCount,
-      availableShots: representativeCount,
-      clubClusters: [{
-        club: club,
-        shots: base.totals.rawShots,
-        countedShots: representativeCount,
-        consistencyPct: settings.consistencyPct,
-        centerDeg: round(offsetDeg, 2),
-        radiusDeg: Math.max(round(radiusDeg, 2), 0.25),
-        stdDeg: representativeShots.length ? round(std(representativeShots.map(function (shot) { return Number(shot.normalizedDeg); })), 2) : 0,
-        rangeDeg: representativeShots.length ? round(Math.max.apply(null, representativeShots.map(function (shot) { return Number(shot.normalizedDeg); })) - Math.min.apply(null, representativeShots.map(function (shot) { return Number(shot.normalizedDeg); })), 2) : 0,
-        meanExpectedM: meanExpectedM,
-        evidenceScore: representativeCount,
-        status: 'manual_override',
-        showToUser: true
-      }],
-      showToUser: true
-    };
-    base.source = 'coach_manual_override';
-    base.manualPractice = true;
-    base.methods.resultScaledCluster = method;
-    base.recommendation = recommendationFromMethod(method, 'coach_manual_override');
-    base.userSignals = [method];
-    base.metadata = base.metadata || {};
-    base.metadata.geometryPresetId = override.geometryPresetId == null ? null : override.geometryPresetId;
-    base.metadata.override = {
-      offsetDeg: round(offsetDeg, 2),
-      club: club
-    };
-    return base;
-  }
-
   return {
-    defaults: DEFAULTS,
-    mergeSettings: mergeSettings,
-    normalizeObservation: normalizeObservation,
-    analyzeSession: analyzeSession,
-    buildOverrideAnalysis: buildOverrideAnalysis
+    CALIBRATION_VERSION: CALIBRATION_VERSION,
+    INPUT_TYPE: INPUT_TYPE,
+    SOURCE_MANUAL: SOURCE_MANUAL,
+    SOURCE_OVERRIDE: SOURCE_OVERRIDE,
+    REPRESENTATIVE: REPRESENTATIVE,
+    DISRUPTED: DISRUPTED,
+    PRIMARY_LANE: PRIMARY_LANE,
+    DISRUPTED_LANE: DISRUPTED_LANE,
+    METRIC_FALLBACK: METRIC_FALLBACK,
+    fallbacks: FALLBACK,
+    classificationOf: classificationOf,
+    resolveManualPracticePlotCalibration: resolveManualPracticePlotCalibration,
+    calibrationTableFor: calibrationTableFor,
+    manualObservationToEvidence: manualObservationToEvidence,
+    manualSessionToLibraryPayload: manualSessionToLibraryPayload,
+    applyTrustedOverrideToAnalysis: applyTrustedOverrideToAnalysis
   };
 });
