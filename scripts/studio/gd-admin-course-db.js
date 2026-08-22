@@ -1939,6 +1939,7 @@ function gdAdminCourseVisualRestoreForm(snapshot){
     }else if(String(el.value)!==String(saved.value)){
       el.value=saved.value;
     }
+    if(el.type==="range")gdAdminCourseVisualSyncRangeReadout(el);
   });
   if(snapshot.focusId){
     const el=document.getElementById(snapshot.focusId);
@@ -2459,7 +2460,13 @@ function gdAdminCourseVisualCommitBake(courseId,spec){
              the record instead of rejecting - so a resolved promise proves nothing.
              The proof is a frame carrying this request's recipe. */
           const record=gdAdminCourseVisualRecord(courseId);
-          if(!request.holeNumber)return {ok:!(record&&record.status==="failed")};
+          if(!request.holeNumber){
+            if(record&&record.status==="failed"){
+              const why=record.lastError&&record.lastError.message||record.lastError&&record.lastError.code||"";
+              return {ok:false,error:{message:"Full-course bake failed"+(why?" - "+why:"")}};
+            }
+            return {ok:true};
+          }
           const frame=((record&&record.holeFramePreviewVisuals)||[])
             .find(item=>Number(item&&item.holeNumber)===request.holeNumber&&item.dataUrl);
           if(frame&&String(frame.overrideHash||"")===String(request.overrideHash)
@@ -2923,9 +2930,17 @@ function gdAdminCourseVisualControlCommitted(courseId,controlId){
   if(!engine||typeof engine.buildCourseVisualPreview!=="function")return false;
   const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
   const overrides=gdAdminCourseVisualOverridesFromForm(courseId);
-  /* Slider releases on the preview bake only the visible hole - a full-course bake over
-     owned-pixel frames freezes the page for minutes. Apply preset / Publish still bake all. */
-  const scopedHole=gdAdminCourseDatabaseTab==="preview"?Number(gdAdminCoursePreviewHoleByCourse[courseId])||0:0;
+  /* Slider releases bake only the visible hole - a full-course bake over owned-pixel
+     frames freezes the page for minutes (and on a cloud course fails outright, since
+     there is no local raw master). The scope comes from the PREVIEW STATE, never from
+     gdAdminCourseDatabaseTab: the Studio's Course Mapping / Course Visuals pages host
+     this same dock while setting that variable to other values, and the old tab check
+     silently downgraded every slider release there into a doomed full-course bake -
+     the "Preview failed" with no reason. If the dock is on screen, the preview markup
+     that rendered it has recorded the visible hole. Apply preset / Publish still bake
+     all through their own paths. */
+  const scopedHole=Number(gdAdminCoursePreviewHoleByCourse[courseId])
+    ||Number(document.getElementById("gdVisualPhoneFrameHost")?.getAttribute("data-hole"))||0;
   /* No bake-pending drop here. A commit that arrives while another render is in flight
      is QUEUED - latest wins, intermediates may be skipped, the newest is never lost. */
   gdAdminCourseVisualCommitBake(courseId,{
@@ -3021,6 +3036,7 @@ function gdAdminCourseVisualControlEvent(event){
     if(type==="change")gdAdminCourseVisualPresetChanged(courseId);
     return;
   }
+  if(target.type==="range")gdAdminCourseVisualSyncRangeReadout(target);
   if(GD_VISUAL_EFFECT_TOGGLE_IDS[target.id]){
     if(type==="change"){
       gdAdminCourseVisualNoteInteraction(false);
@@ -3043,6 +3059,17 @@ function gdAdminCourseVisualControlEvent(event){
   if(target.id==="gdCourseVisualTerrainStrength"&&gdAdminCourseVisualActiveTool==="terrain"){
     gdAdminCourseVisualReliefRefresh(courseId);
   }
+}
+function gdAdminCourseVisualSyncRangeReadout(el){
+  const out=document.getElementById(el.id+"Value");
+  if(!out)return;
+  const decimals=Number(el.getAttribute("data-decimals"))||0;
+  const v=Number(el.value);
+  const neutral=el.hasAttribute("data-neutral")?Number(el.getAttribute("data-neutral")):null;
+  const at=neutral!=null&&Math.abs(v-neutral)<(Number(el.step)||1)/2;
+  const text=v.toFixed(decimals)+(at?" · no effect":"");
+  if(out.textContent!==text)out.textContent=text;
+  out.classList.toggle("neutral",at);
 }
 function gdAdminCourseVisualPointerEvent(event){
   const type=String(event&&event.type||"");
@@ -3289,8 +3316,17 @@ function gdAdminCourseVisualControls(record,courseId){
   const activeRecipeLabel=activeRecipe?`${activeRecipe.name||"Recipe"} · ${activeRecipe.presetId||activeRecipe.preset_id||"custom"}`:"Natural fallback";
   const activeRecipeBlock=`<div class="gdAdminCourseStageLine"><span class="ready">Active recipe: ${gdEscapeHTML(activeRecipeLabel)}</span>${activeRecipe?`<button type="button" class="gdAdminInlineLink" onclick="return gdAdminCourseVisualApplyActiveRecipe('${key}')">Apply active here</button>`:""}</div>`;
   const recipeField=activeRecipeBlock+`<label>Saved recipes<select id="gdCourseVisualRecipeSelect">${savedRecipes.length?savedRecipes.map(recipe=>`<option value="${gdEscapeHTML(recipe.id)}" ${activeRecipe&&String(activeRecipe.id||"")===String(recipe.id||"")?"selected":""}>${gdEscapeHTML(recipe.name)}</option>`).join(""):'<option value="">No saved recipes yet</option>'}</select></label><div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualApplyRecipe('${key}')"${savedRecipes.length?"":" disabled"}>Apply recipe</button><button type="button" onclick="return gdAdminCourseVisualSetActiveRecipe('${key}')"${savedRecipes.length?"":" disabled"}>Set selected active</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe('${key}')">Save current as recipe</button></div>`;
-  function rangeField(id,label,hint,value,min,max,step){
-    return `<label>${label}${hint?` <small>${hint}</small>`:""}<input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"></label>`;
+  /* Every slider states its current number, and sliders with a genuine no-effect
+     value carry a notch on the track at that point plus a "no effect" tag in the
+     readout when they sit on it - "where is zero" should never require memorising
+     each control's magic neutral number. */
+  function rangeField(id,label,hint,value,min,max,step,neutral){
+    const hasNeutral=Number.isFinite(Number(neutral));
+    const decimals=String(step).indexOf(".")>-1?String(step).split(".")[1].length:0;
+    const atNeutral=hasNeutral&&Math.abs(Number(value)-Number(neutral))<Number(step)/2;
+    const pct=hasNeutral?((Number(neutral)-min)/Math.max(1e-6,max-min))*100:0;
+    const readout=`<output class="gdAdminRangeValue${atNeutral?" neutral":""}" id="${id}Value">${Number(value).toFixed(decimals)}${atNeutral?" · no effect":""}</output>`;
+    return `<label class="gdAdminRangeLabel"><span class="gdAdminRangeHead"><span>${label}${hint?` <small>${hint}</small>`:""}</span>${readout}</span><span class="gdAdminRangeWrap"><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}" data-decimals="${decimals}"${hasNeutral?` data-neutral="${neutral}"`:""}>${hasNeutral?`<i class="gdAdminRangeZero" style="left:${pct}%"></i>`:""}</span></label>`;
   }
   const turfOn=gdAdminCourseVisualEffectIsOn("turf",settings);
   const lightingOn=gdAdminCourseVisualEffectIsOn("lighting",settings);
@@ -3303,10 +3339,10 @@ function gdAdminCourseVisualControls(record,courseId){
     rangeField("gdCourseVisualSatMax","Saturation max","",satMax,0,100,1)+
     rangeField("gdCourseVisualLumMin","Turf brightness min","",lumMin,0,100,1)+
     rangeField("gdCourseVisualLumMax","Turf brightness max","",lumMax,0,100,1)+
-    rangeField("gdCourseVisualTargetPull","Hold to range","how firmly out-of-range turf is pulled in",targetPull,0,1,.05)+
+    rangeField("gdCourseVisualTargetPull","Hold to range","how firmly out-of-range turf is pulled in",targetPull,0,1,.05,0)+
     `<span class="gdAdminPhoneTiltNote">Turf already inside these ranges is left untouched — only out-of-range pixels are pulled in.</span>`;
   const turfPanel=gdAdminCourseVisualEffectHeader("turf","Turf correction",turfOn)+gdAdminCourseVisualEffectBody(turfOn,turfFields);
-  const terrainField=`<label>Hole terrain<input id="gdCourseVisualTerrainStrength" type="range" min="0" max="1.6" step="0.05" value="${Number.isFinite(terrain)?terrain:.9}"></label>`;
+  const terrainField=rangeField("gdCourseVisualTerrainStrength","Hole terrain","",Number.isFinite(terrain)?terrain:.9,0,1.6,.05,0);
   /* Relief is computed from elevation by /api/relief-preview, live, for one hole. The knobs
      below it are NOT saved: they exist to find the numbers, and the numbers that win get
      written into RELIEF_DEFAULTS in functions/lib/gd-relief-core.mjs and baked. Only "Hole
@@ -3339,13 +3375,13 @@ function gdAdminCourseVisualControls(record,courseId){
     `<span class="gdAdminPhoneTiltNote">Aimed down the play axis, so it works on every hole. Levels are absolute because the image is normalised first. Object mask refines the beam to mapped fairway/green geometry \u2014 off for now.</span>`;
   const floodlightPanel=gdAdminCourseVisualEffectHeader("floodlight","Floodlight",floodOn)+gdAdminCourseVisualEffectBody(floodOn,floodlightFields);
   const lightingFields=
-    rangeField("gdCourseVisualBrightness","Brightness target","image mean is driven here",brightness,0,100,1)+
-    rangeField("gdCourseVisualShadowFloor","Shadow floor","darkest point",shadowFloor,0,60,1)+
-    rangeField("gdCourseVisualHighlightCeiling","Highlight ceiling","brightest point",highlightCeiling,40,100,1)+
-    rangeField("gdCourseVisualContrast","Contrast","",contrast,.55,2.2,.01)+
-    rangeField("gdCourseVisualShadowLift","Shadow lift","how aggressively dark pixels are raised",shadowLift,0,1,.05)+
-    rangeField("gdCourseVisualShadowDark","Counts as dark","pixels below this are lifted toward it; nothing above it is touched",shadowDark,0,60,1)+
-    `<span class="gdAdminPhoneTiltNote">Exposure is normalised: whatever the capture's real range is, it's mapped between floor and ceiling and its mean driven to the target. Shadow lift then raises only the pixels darker than "counts as dark" — the rest of the image is left alone.</span>`;
+    rangeField("gdCourseVisualBrightness","Brightness target","image mean is driven here",brightness,0,100,1,52)+
+    rangeField("gdCourseVisualShadowFloor","Shadow floor","darkest point",shadowFloor,0,60,1,0)+
+    rangeField("gdCourseVisualHighlightCeiling","Highlight ceiling","brightest point",highlightCeiling,40,100,1,100)+
+    rangeField("gdCourseVisualContrast","Contrast","",contrast,.55,2.2,.01,1)+
+    rangeField("gdCourseVisualShadowLift","Shadow lift","how strongly shadows are filled with the surrounding colour",shadowLift,0,1,.05,0)+
+    rangeField("gdCourseVisualShadowDark","Counts as dark","pixels below this blend toward the ground around them; nothing above it is touched",shadowDark,0,60,1)+
+    `<span class="gdAdminPhoneTiltNote">Exposure is normalised: whatever the capture's real range is, it's mapped between floor and ceiling and its mean driven to the target. Shadow lift then fills only the pixels darker than "counts as dark" with the colour of the ground around them — brightening alone just makes bright black.</span>`;
   const lightingPanel=gdAdminCourseVisualEffectHeader("lighting","Lighting",lightingOn)+gdAdminCourseVisualEffectBody(lightingOn,lightingFields);
   /* "Unknown" is the recipe's off value; the switch owns it now, so the visible level
      choices are only the real levels. The hidden option keeps the select honest while

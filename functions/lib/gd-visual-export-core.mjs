@@ -115,14 +115,6 @@ function toneCurveLut(stats, settings) {
   const highlightCeiling = clamp(num(lighting.highlightCeiling, 92), shadowFloor + 5, 100);
   const brightnessTarget = clamp(num(lighting.brightnessTarget, 52), shadowFloor, highlightCeiling);
   const contrast = clamp(num(lighting.contrastTarget, 1.04), 0.55, 2.2);
-  /* Shadow lift - mirrors the engine's toneCurveLut exactly (see that comment): pixels
-     landing below the threshold are raised toward it, everything else untouched, and
-     strength 0 is exact identity so pre-existing recipes render unchanged. */
-  const shadowLiftStrength = clamp(num(lighting.shadowLiftStrength, 0), 0, 1);
-  const shadowLiftThreshold = clamp(num(lighting.shadowLiftThreshold, 30), 0, 60);
-  const liftShadows = (value) => (shadowLiftStrength <= 0 || value >= shadowLiftThreshold)
-    ? value
-    : shadowLiftThreshold * shadowLiftStrength + value * (1 - shadowLiftStrength);
   const black = clamp(stats.luma.p1 || 0, 0, 100);
   const white = clamp(stats.luma.p99 || 100, black + 1, 100);
   const mean = clamp(stats.luma.mean || 50, black, white);
@@ -135,16 +127,16 @@ function toneCurveLut(stats, settings) {
   /* A flat/near-flat source has no range to stretch - shift it onto the target instead. */
   if (white - black < 2) {
     const shift = brightnessTarget - mean;
-    for (let i = 0; i <= 100; i++) lut[i] = clamp(liftShadows(clamp(i + shift, 0, 100)), 0, 100);
-    return { lut, blackPoint: black, whitePoint: white, measuredMean: mean, gamma: 1, shadowFloor, highlightCeiling, brightnessTarget, contrast, shadowLiftThreshold, shadowLiftStrength };
+    for (let i = 0; i <= 100; i++) lut[i] = clamp(i + shift, 0, 100);
+    return { lut, blackPoint: black, whitePoint: white, measuredMean: mean, gamma: 1, shadowFloor, highlightCeiling, brightnessTarget, contrast };
   }
   for (let i = 0; i <= 100; i++) {
     const x = clamp((i - black) / Math.max(1e-6, white - black), 0, 1);
     let y = Math.pow(x, gamma);
     y = 0.5 + (y - 0.5) * contrast;
-    lut[i] = clamp(liftShadows(clamp(shadowFloor + clamp(y, 0, 1) * (highlightCeiling - shadowFloor), 0, 100)), 0, 100);
+    lut[i] = clamp(shadowFloor + clamp(y, 0, 1) * (highlightCeiling - shadowFloor), 0, 100);
   }
-  return { lut, blackPoint: black, whitePoint: white, measuredMean: mean, gamma, shadowFloor, highlightCeiling, brightnessTarget, contrast, shadowLiftThreshold, shadowLiftStrength };
+  return { lut, blackPoint: black, whitePoint: white, measuredMean: mean, gamma, shadowFloor, highlightCeiling, brightnessTarget, contrast };
 }
 /* Range guardrail, not a stretch - turf already inside [lo,hi] is left exactly as it is;
    pull=1 sits out-of-range values on the boundary, pull<1 keeps some of the excursion. */
@@ -157,6 +149,101 @@ function constrainToRange(value, lo, hi, pull) {
 /* Measure once, then a single pass: tone-map L, and where the pixel is turf drag H/S/L onto the
    recipe's authored targets. Mutates `buffer` in place and returns the plan for diagnostics -
    compact summary stats only, never pixel arrays. */
+/* Shadow lift, spatial - mirrors the engine's shadowSurroundFill exactly (see that
+   comment): dark pixels blend toward a coarse colour field built from the non-shadow
+   pixels around them, so a lifted shadow looks like the ground it sits in rather than
+   bright black. Strength 0 is exact identity. */
+function shadowSurroundFill(pixels, width, height, channels, settings) {
+  const lighting = settings && settings.lighting || {};
+  const strength = clamp(num(lighting.shadowLiftStrength, 0), 0, 1);
+  const threshold = clamp(num(lighting.shadowLiftThreshold, 30), 0, 60);
+  if (strength <= 0) return { applied: false, reason: "strength-zero" };
+  if (!width || !height) return { applied: false, reason: "no-dimensions" };
+  const luma = (base) => {
+    const r = pixels[base], g = pixels[base + 1], b = pixels[base + 2];
+    return (Math.max(r, g, b) + Math.min(r, g, b)) / 2 / 255 * 100;
+  };
+  const cell = Math.max(8, Math.round(Math.min(width, height) / 48));
+  const gw = Math.max(1, Math.ceil(width / cell)), gh = Math.max(1, Math.ceil(height / cell));
+  const sums = new Float64Array(gw * gh * 3), counts = new Float64Array(gw * gh);
+  const globalSum = [0, 0, 0];
+  let globalCount = 0, darkCount = 0, total = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const base = (y * width + x) * channels;
+      if (channels === 4 && pixels[base + 3] < 8) continue;
+      total++;
+      if (luma(base) < threshold) { darkCount++; continue; }
+      const gi = Math.floor(y / cell) * gw + Math.floor(x / cell);
+      sums[gi * 3] += pixels[base]; sums[gi * 3 + 1] += pixels[base + 1]; sums[gi * 3 + 2] += pixels[base + 2];
+      counts[gi]++;
+      globalSum[0] += pixels[base]; globalSum[1] += pixels[base + 1]; globalSum[2] += pixels[base + 2];
+      globalCount++;
+    }
+  }
+  if (!globalCount) return { applied: false, reason: "everything-dark" };
+  let field = new Float64Array(gw * gh * 3), filled = new Uint8Array(gw * gh);
+  for (let gi = 0; gi < gw * gh; gi++) {
+    if (counts[gi]) {
+      field[gi * 3] = sums[gi * 3] / counts[gi]; field[gi * 3 + 1] = sums[gi * 3 + 1] / counts[gi]; field[gi * 3 + 2] = sums[gi * 3 + 2] / counts[gi];
+      filled[gi] = 1;
+    }
+  }
+  let passes = gw + gh, changed = true;
+  while (changed && passes-- > 0) {
+    changed = false;
+    const nextField = Float64Array.from(field), nextFilled = Uint8Array.from(filled);
+    for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+      const gi = gy * gw + gx;
+      if (filled[gi]) continue;
+      let sr = 0, sg = 0, sb = 0, n = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = gx + dx, ny = gy + dy;
+        if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue;
+        const ni = ny * gw + nx;
+        if (!filled[ni]) continue;
+        sr += field[ni * 3]; sg += field[ni * 3 + 1]; sb += field[ni * 3 + 2]; n++;
+      }
+      if (n) { nextField[gi * 3] = sr / n; nextField[gi * 3 + 1] = sg / n; nextField[gi * 3 + 2] = sb / n; nextFilled[gi] = 1; changed = true; }
+    }
+    field = nextField; filled = nextFilled;
+  }
+  for (let gi = 0; gi < gw * gh; gi++) if (!filled[gi]) { field[gi * 3] = globalSum[0] / globalCount; field[gi * 3 + 1] = globalSum[1] / globalCount; field[gi * 3 + 2] = globalSum[2] / globalCount; }
+  const smooth = new Float64Array(gw * gh * 3);
+  for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+    let sr = 0, sg = 0, sb = 0, n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = gx + dx, ny = gy + dy;
+      if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue;
+      const ni = ny * gw + nx;
+      sr += field[ni * 3]; sg += field[ni * 3 + 1]; sb += field[ni * 3 + 2]; n++;
+    }
+    const si = gy * gw + gx;
+    smooth[si * 3] = sr / n; smooth[si * 3 + 1] = sg / n; smooth[si * 3 + 2] = sb / n;
+  }
+  const sample = (px, py, ch) => {
+    const fx = clamp(px / cell - 0.5, 0, gw - 1), fy = clamp(py / cell - 0.5, 0, gh - 1);
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const x1 = Math.min(gw - 1, x0 + 1), y1 = Math.min(gh - 1, y0 + 1);
+    const tx = fx - x0, ty = fy - y0;
+    const a = smooth[(y0 * gw + x0) * 3 + ch], b = smooth[(y0 * gw + x1) * 3 + ch];
+    const c = smooth[(y1 * gw + x0) * 3 + ch], d = smooth[(y1 * gw + x1) * 3 + ch];
+    return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+  };
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const base = (y * width + x) * channels;
+      if (channels === 4 && pixels[base + 3] < 8) continue;
+      const l = luma(base);
+      if (l >= threshold) continue;
+      const t = strength * clamp((threshold - l) / Math.max(1e-6, threshold), 0, 1);
+      pixels[base] = Math.round(pixels[base] + (sample(x, y, 0) - pixels[base]) * t);
+      pixels[base + 1] = Math.round(pixels[base + 1] + (sample(x, y, 1) - pixels[base + 1]) * t);
+      pixels[base + 2] = Math.round(pixels[base + 2] + (sample(x, y, 2) - pixels[base + 2]) * t);
+    }
+  }
+  return { applied: true, model: "surround-fill", threshold, strength: +strength.toFixed(3), cell, darkCoverage: total ? +(darkCount / total).toFixed(3) : 0 };
+}
 function normaliseSurfaceBuffer(buffer, width, height, channels, settings) {
   const band = turfBand(settings);
   const before = measureSurfaceBuffer(buffer, width, height, channels, band);
@@ -180,8 +267,10 @@ function normaliseSurfaceBuffer(buffer, width, height, channels, settings) {
     const rgb = hslToRgb(h, clamp(s, 0, 100), clamp(l, 0, 100));
     buffer[i] = rgb[0]; buffer[i + 1] = rgb[1]; buffer[i + 2] = rgb[2];
   }
+  const shadowFill = shadowSurroundFill(buffer, width, height, channels, settings);
   const after = measureSurfaceBuffer(buffer, width, height, channels, band);
   return {
+    shadowFill,
     tone: { blackPoint: +tone.blackPoint.toFixed(2), whitePoint: +tone.whitePoint.toFixed(2), measuredMean: +tone.measuredMean.toFixed(2), gamma: +tone.gamma.toFixed(3), shadowFloor: tone.shadowFloor, highlightCeiling: tone.highlightCeiling, brightnessTarget: tone.brightnessTarget, contrast: tone.contrast },
     turf: hasTurf ? { applied: true, hue: [hueMin, hueMax], saturation: [satMin, satMax], luma: [lumMin, lumMax], pull: +pull.toFixed(3), coverage: +before.turf.coverage.toFixed(3) } : { applied: false, reason: "no-turf-pixels" },
     before: { luma: before.luma, turf: { coverage: before.turf.coverage, hue: before.turf.hue, saturation: before.turf.saturation, luma: before.turf.luma } },

@@ -6,7 +6,7 @@
 
    The phone reads course visual records and caches capture pixels; it does not
    author them. Authoring - masters, previews, presets, stitching, floodlight
-   rendering, publishing, cloud sync - is 198KB of
+   rendering, publishing, cloud sync - is 202KB of
    gd-course-visual-engine.js that only the studio needs, and published frames
    are rendered server-side by the worker anyway.
 

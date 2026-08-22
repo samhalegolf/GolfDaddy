@@ -520,6 +520,14 @@
     .gdAdminEffectToggle input:checked~.gdAdminEffectState{color:#83ffb7}
     .gdAdminEffectBody{display:grid;gap:inherit}
     .gdAdminEffectBodyOff{opacity:.38;pointer-events:none;filter:saturate(.4)}
+    /* Slider zero-points: a notch on the track at the value that changes nothing, and a
+       live readout that names the number - "· no effect" when the control sits on it. */
+    .gdAdminRangeHead{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+    .gdAdminRangeValue{flex:none;color:#fff;font-size:10px;font-weight:950;letter-spacing:0;text-transform:none}
+    .gdAdminRangeValue.neutral{color:rgba(255,255,255,.42)}
+    .gdAdminRangeWrap{position:relative;display:block}
+    .gdAdminRangeWrap input{position:relative;z-index:1;background:transparent}
+    .gdAdminRangeZero{position:absolute;top:50%;left:0;width:2px;height:16px;transform:translate(-50%,-50%);border-radius:1px;background:rgba(255,255,255,.5);pointer-events:none}
     /* Zoom chip: appears only while zoomed, above the HUD, small enough to ignore. */
     .gdAdminPhoneZoomChip{position:absolute;right:10px;top:44px;z-index:3;display:flex;align-items:center;gap:7px;padding:4px 6px 4px 10px;border-radius:999px;background:rgba(0,0,0,.66);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:10px;font-weight:950}
     .gdAdminPhoneZoomChip[hidden]{display:none}

@@ -2316,19 +2316,6 @@
     var highlightCeiling=clamp(finite(lighting.highlightCeiling)==null?92:lighting.highlightCeiling,shadowFloor+5,100);
     var brightnessTarget=clamp(finite(lighting.brightnessTarget)==null?52:lighting.brightnessTarget,shadowFloor,highlightCeiling);
     var contrast=clamp(finite(lighting.contrastTarget)==null?1.04:lighting.contrastTarget,.55,2.2);
-    /* Shadow lift: pixels that would land darker than the threshold are raised toward
-       it; everything at or above the threshold is untouched. This is the thresholded
-       shadow control the floor/ceiling band cannot express - the band remaps EVERY
-       tone, and its mean-pinning gamma makes either end move the whole image. Applied
-       to the FINISHED lut value so it composes with (never fights) the band and the
-       gamma: strength 0 is exact identity, so every recipe and baked frame from before
-       this field existed renders byte-identically. */
-    var shadowLiftStrength=clamp(finite(lighting.shadowLiftStrength)==null?0:lighting.shadowLiftStrength,0,1);
-    var shadowLiftThreshold=clamp(finite(lighting.shadowLiftThreshold)==null?30:lighting.shadowLiftThreshold,0,60);
-    function liftShadows(value){
-      if(shadowLiftStrength<=0||value>=shadowLiftThreshold)return value;
-      return shadowLiftThreshold*shadowLiftStrength+value*(1-shadowLiftStrength);
-    }
     var black=clamp(stats&&stats.luma&&stats.luma.p1||0,0,100);
     var white=clamp(stats&&stats.luma&&stats.luma.p99||100,black+1,100);
     var mean=clamp(stats&&stats.luma&&stats.luma.mean||50,black,white);
@@ -2343,16 +2330,121 @@
     // onto the shadow floor. Shift it onto the target instead and leave the (absent) contrast be.
     if(white-black<2){
       var shift=brightnessTarget-mean;
-      for(i=0;i<=100;i++)lut[i]=clamp(liftShadows(clamp(i+shift,0,100)),0,100);
-      return {lut:lut,blackPoint:+black.toFixed(2),whitePoint:+white.toFixed(2),measuredMean:+mean.toFixed(2),gamma:1,degenerateRange:true,shadowFloor:shadowFloor,highlightCeiling:highlightCeiling,brightnessTarget:brightnessTarget,contrast:contrast,shadowLiftThreshold:shadowLiftThreshold,shadowLiftStrength:shadowLiftStrength};
+      for(i=0;i<=100;i++)lut[i]=clamp(i+shift,0,100);
+      return {lut:lut,blackPoint:+black.toFixed(2),whitePoint:+white.toFixed(2),measuredMean:+mean.toFixed(2),gamma:1,degenerateRange:true,shadowFloor:shadowFloor,highlightCeiling:highlightCeiling,brightnessTarget:brightnessTarget,contrast:contrast};
     }
     for(i=0;i<=100;i++){
       var x=clamp((i-black)/Math.max(1e-6,white-black),0,1);
       var y=Math.pow(x,gamma);
       y=.5+(y-.5)*contrast;
-      lut[i]=clamp(liftShadows(clamp(shadowFloor+clamp(y,0,1)*(highlightCeiling-shadowFloor),0,100)),0,100);
+      lut[i]=clamp(shadowFloor+clamp(y,0,1)*(highlightCeiling-shadowFloor),0,100);
     }
-    return {lut:lut,blackPoint:+black.toFixed(2),whitePoint:+white.toFixed(2),measuredMean:+mean.toFixed(2),gamma:+gamma.toFixed(3),shadowFloor:shadowFloor,highlightCeiling:highlightCeiling,brightnessTarget:brightnessTarget,contrast:contrast,shadowLiftThreshold:shadowLiftThreshold,shadowLiftStrength:shadowLiftStrength};
+    return {lut:lut,blackPoint:+black.toFixed(2),whitePoint:+white.toFixed(2),measuredMean:+mean.toFixed(2),gamma:+gamma.toFixed(3),shadowFloor:shadowFloor,highlightCeiling:highlightCeiling,brightnessTarget:brightnessTarget,contrast:contrast};
+  }
+  /* Shadow lift, spatial. Raising only luminance turns a deep shadow into bright black -
+     the hue and saturation are still shadow, just lit. What the operator means by
+     "lift" is that shadowed ground should look like the ground AROUND it. So: build a
+     coarse colour field from the NON-shadow pixels (per-cell averages, holes filled
+     from their neighbours, lightly smoothed), then blend each dark pixel toward the
+     field colour at its own position - hue, saturation and luminance together, deeper
+     shadows pulling harder. Strength 0 is exact identity; pixels at or above the
+     threshold are never touched; texture inside the shadow survives as the unblended
+     remainder. */
+  function shadowSurroundFill(pixels,width,height,channels,settings){
+    var lighting=settings&&settings.lighting||{};
+    var strength=clamp(finite(lighting.shadowLiftStrength)==null?0:lighting.shadowLiftStrength,0,1);
+    var threshold=clamp(finite(lighting.shadowLiftThreshold)==null?30:lighting.shadowLiftThreshold,0,60);
+    if(strength<=0)return {applied:false,reason:"strength-zero"};
+    if(!width||!height)return {applied:false,reason:"no-dimensions"};
+    var luma=function(base){
+      var r=pixels[base],g=pixels[base+1],b=pixels[base+2];
+      return (Math.max(r,g,b)+Math.min(r,g,b))/2/255*100;
+    };
+    var cell=Math.max(8,Math.round(Math.min(width,height)/48));
+    var gw=Math.max(1,Math.ceil(width/cell)),gh=Math.max(1,Math.ceil(height/cell));
+    var sums=new Float64Array(gw*gh*3),counts=new Float64Array(gw*gh);
+    var globalSum=[0,0,0],globalCount=0,darkCount=0,total=0;
+    var x,y,base,gi;
+    for(y=0;y<height;y++){
+      for(x=0;x<width;x++){
+        base=(y*width+x)*channels;
+        if(channels===4&&pixels[base+3]<8)continue;
+        total++;
+        if(luma(base)<threshold){darkCount++;continue;}
+        gi=(Math.floor(y/cell)*gw+Math.floor(x/cell));
+        sums[gi*3]+=pixels[base];sums[gi*3+1]+=pixels[base+1];sums[gi*3+2]+=pixels[base+2];
+        counts[gi]++;
+        globalSum[0]+=pixels[base];globalSum[1]+=pixels[base+1];globalSum[2]+=pixels[base+2];
+        globalCount++;
+      }
+    }
+    if(!globalCount)return {applied:false,reason:"everything-dark"};
+    var field=new Float64Array(gw*gh*3),filled=new Uint8Array(gw*gh);
+    for(gi=0;gi<gw*gh;gi++){
+      if(counts[gi]){
+        field[gi*3]=sums[gi*3]/counts[gi];field[gi*3+1]=sums[gi*3+1]/counts[gi];field[gi*3+2]=sums[gi*3+2]/counts[gi];
+        filled[gi]=1;
+      }
+    }
+    /* Cells wholly inside a shadow have no colour of their own - grow their neighbours'
+       inward so a large shadow fills from its actual rim, not from the global average. */
+    var passes=gw+gh,changed=true;
+    while(changed&&passes-->0){
+      changed=false;
+      var nextField=Float64Array.from(field),nextFilled=Uint8Array.from(filled);
+      for(var gy=0;gy<gh;gy++)for(var gx=0;gx<gw;gx++){
+        gi=gy*gw+gx;
+        if(filled[gi])continue;
+        var sr=0,sg=0,sb=0,n=0;
+        for(var dy=-1;dy<=1;dy++)for(var dx=-1;dx<=1;dx++){
+          var nx=gx+dx,ny=gy+dy;
+          if(nx<0||ny<0||nx>=gw||ny>=gh)continue;
+          var ni=ny*gw+nx;
+          if(!filled[ni])continue;
+          sr+=field[ni*3];sg+=field[ni*3+1];sb+=field[ni*3+2];n++;
+        }
+        if(n){nextField[gi*3]=sr/n;nextField[gi*3+1]=sg/n;nextField[gi*3+2]=sb/n;nextFilled[gi]=1;changed=true;}
+      }
+      field=nextField;filled=nextFilled;
+    }
+    for(gi=0;gi<gw*gh;gi++)if(!filled[gi]){field[gi*3]=globalSum[0]/globalCount;field[gi*3+1]=globalSum[1]/globalCount;field[gi*3+2]=globalSum[2]/globalCount;}
+    /* One 3x3 smooth so cell boundaries cannot print through the fill. */
+    var smooth=new Float64Array(gw*gh*3);
+    for(var gy2=0;gy2<gh;gy2++)for(var gx2=0;gx2<gw;gx2++){
+      var sr2=0,sg2=0,sb2=0,n2=0;
+      for(var dy2=-1;dy2<=1;dy2++)for(var dx2=-1;dx2<=1;dx2++){
+        var nx2=gx2+dx2,ny2=gy2+dy2;
+        if(nx2<0||ny2<0||nx2>=gw||ny2>=gh)continue;
+        var ni2=ny2*gw+nx2;
+        sr2+=field[ni2*3];sg2+=field[ni2*3+1];sb2+=field[ni2*3+2];n2++;
+      }
+      var si=gy2*gw+gx2;
+      smooth[si*3]=sr2/n2;smooth[si*3+1]=sg2/n2;smooth[si*3+2]=sb2/n2;
+    }
+    function sample(px,py,ch){
+      var fx=clamp(px/cell-.5,0,gw-1),fy=clamp(py/cell-.5,0,gh-1);
+      var x0=Math.floor(fx),y0=Math.floor(fy);
+      var x1=Math.min(gw-1,x0+1),y1=Math.min(gh-1,y0+1);
+      var tx=fx-x0,ty=fy-y0;
+      var a=smooth[(y0*gw+x0)*3+ch],b=smooth[(y0*gw+x1)*3+ch];
+      var c=smooth[(y1*gw+x0)*3+ch],d=smooth[(y1*gw+x1)*3+ch];
+      return (a*(1-tx)+b*tx)*(1-ty)+(c*(1-tx)+d*tx)*ty;
+    }
+    for(y=0;y<height;y++){
+      for(x=0;x<width;x++){
+        base=(y*width+x)*channels;
+        if(channels===4&&pixels[base+3]<8)continue;
+        var l=luma(base);
+        if(l>=threshold)continue;
+        /* Deeper shadows borrow more of the surround; a pixel just under the threshold
+           barely moves, so the fill has no visible edge. */
+        var t=strength*clamp((threshold-l)/Math.max(1e-6,threshold),0,1);
+        pixels[base]=Math.round(pixels[base]+(sample(x,y,0)-pixels[base])*t);
+        pixels[base+1]=Math.round(pixels[base+1]+(sample(x,y,1)-pixels[base+1])*t);
+        pixels[base+2]=Math.round(pixels[base+2]+(sample(x,y,2)-pixels[base+2])*t);
+      }
+    }
+    return {applied:true,model:"surround-fill",threshold:threshold,strength:+strength.toFixed(3),cell:cell,darkCoverage:total?+(darkCount/total).toFixed(3):0};
   }
   /* Measure once, then a single pass: tone-map L, and where the pixel is turf drag H/S/L onto the
      preset's authored targets. Mutates pixels in place and returns the plan for diagnostics.
@@ -2391,11 +2483,13 @@
       var rgb=hslToRgb(h,clamp(s,0,100),clamp(l,0,100));
       pixels[i]=rgb[0];pixels[i+1]=rgb[1];pixels[i+2]=rgb[2];
     }
+    var shadowFill=shadowSurroundFill(pixels,Math.max(0,Math.round(finite(opts.width)||0)),Math.max(0,Math.round(finite(opts.height)||0)),4,settings);
     var after=measureSurfacePixels(pixels,{band:band,sampleStep:sampleStep});
     return {
       band:band,
       before:before,
       after:after,
+      shadowFill:shadowFill,
       tone:{blackPoint:tone.blackPoint,whitePoint:tone.whitePoint,measuredMean:tone.measuredMean,gamma:tone.gamma,shadowFloor:tone.shadowFloor,highlightCeiling:tone.highlightCeiling,brightnessTarget:tone.brightnessTarget,contrast:tone.contrast},
       turf:hasTurf?{applied:true,hue:[hueMin,hueMax],saturation:[satMin,satMax],luma:[lumMin,lumMax],pull:+pull.toFixed(3),coverage:+m.coverage.toFixed(3)}:{applied:false,reason:"no-turf-pixels"},
       model:"measure-and-drag-to-target"
@@ -2478,7 +2572,7 @@
         result={asset:asset,applied:false,diagnostics:{applied:false,reason:"non-raster-or-undecodable-source"}};
       }else{
         try{
-          var plan=normaliseSurfacePixels(decoded.pixels,settings);
+          var plan=normaliseSurfacePixels(decoded.pixels,settings,{width:decoded.width,height:decoded.height});
           var normalisedDataUrl=encodeSurfacePixelsToDataUrl(decoded.pixels,decoded.width,decoded.height);
           result={asset:Object.assign({},asset,{dataUrl:normalisedDataUrl}),applied:true,diagnostics:plan};
         }catch(e){

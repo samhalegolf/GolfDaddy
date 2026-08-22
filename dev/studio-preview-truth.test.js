@@ -474,9 +474,9 @@ function liftFormGuards(document) {
   const end = STUDIO_SRC.indexOf("function gdAdminCoursePreviewSelectedFor(");
   assert.ok(start > -1 && end > start, "form-guard region not found in gd-admin-course-db.js");
   // eslint-disable-next-line no-new-func
-  return new Function("document", STUDIO_SRC.slice(start, end)
+  return new Function("document", "gdAdminCourseVisualSyncRangeReadout", STUDIO_SRC.slice(start, end)
     + "\nreturn {gdAdminCourseVisualFormSnapshot,gdAdminCourseVisualRestoreForm,"
-    + "gdAdminCourseVisualControlsBusy,gdAdminCourseVisualNoteInteraction,GD_VISUAL_CONTROL_IDS};")(document);
+    + "gdAdminCourseVisualControlsBusy,gdAdminCourseVisualNoteInteraction,GD_VISUAL_CONTROL_IDS};")(document, function () {});
 }
 
 test("H · a render completing does not drag a slider back to its saved value", () => {
@@ -751,6 +751,24 @@ test("the Recipe Lab's terrain preview shades the donor's hole, not 'recipe-lab'
 });
 
 /* --------------------------------------------------------- source contract - */
+test("commit scope comes from the preview state, never the shared tab variable", () => {
+  /* The Studio's Course Mapping / Course Visuals pages reparent the same panel and
+     rewrite gdAdminCourseDatabaseTab on mount (plus a 3s refresh interval). The old
+     scope check - tab==="preview" ? visible hole : 0 - silently turned every slider
+     release on those pages into a full-course bake, which on a cloud course fails
+     with no local raw master: the naked "Preview failed" status. */
+  const start = STUDIO_SRC.indexOf("function gdAdminCourseVisualControlCommitted(");
+  const end = STUDIO_SRC.indexOf("function gdAdminCourseVisualPresetChanged(", start);
+  const body = STUDIO_SRC.slice(start, end);
+  const scopeLine = body.split("\n").find((line) => line.includes("const scopedHole="));
+  assert.ok(scopeLine, "the scope derivation exists");
+  assert.ok(!scopeLine.includes("gdAdminCourseDatabaseTab"), "the tab variable must not decide the bake scope");
+  assert.ok(body.includes("gdAdminCoursePreviewHoleByCourse[courseId]"), "the visible hole decides it");
+  /* And a full-course failure must carry its reason - no more naked "Preview failed". */
+  const run = STUDIO_SRC.slice(STUDIO_SRC.indexOf("function gdAdminCourseVisualCommitBake("), STUDIO_SRC.indexOf("// While a control is still moving"));
+  assert.ok(run.includes("Full-course bake failed"), "the messageless {ok:false} branch is gone");
+});
+
 test("the dropped-adjustment guard is gone from the commit path", () => {
   const start = STUDIO_SRC.indexOf("function gdAdminCourseVisualControlCommitted(");
   const end = STUDIO_SRC.indexOf("function gdAdminCourseVisualPresetChanged(", start);
