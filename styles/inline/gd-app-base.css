@@ -507,6 +507,19 @@
     .gdAdminPhoneNav{position:absolute;left:10px;right:10px;bottom:10px;display:flex;justify-content:space-between;gap:8px;z-index:2}
     .gdAdminPhoneNav button{border-radius:999px;padding:8px 11px;background:rgba(0,0,0,.62);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:10px;font-weight:950}
     .gdAdminPhoneFrameHost{position:absolute;inset:0;touch-action:none}
+    /* Effect switches: the on/off state of a group must be readable at a glance and
+       flippable without knowing any slider's neutral value. */
+    .gdAdminEffectToggle{display:flex;align-items:center;gap:8px;margin:2px 0 8px;cursor:pointer;user-select:none}
+    .gdAdminEffectToggle input{position:absolute;opacity:0;pointer-events:none}
+    .gdAdminEffectSwitch{flex:none;width:30px;height:17px;border-radius:999px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.2);position:relative;transition:background .15s ease}
+    .gdAdminEffectSwitch:after{content:"";position:absolute;left:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#fff;opacity:.75;transition:transform .15s ease,opacity .15s ease}
+    .gdAdminEffectToggle input:checked+.gdAdminEffectSwitch{background:rgba(31,211,109,.55)}
+    .gdAdminEffectToggle input:checked+.gdAdminEffectSwitch:after{transform:translateX(13px);opacity:1}
+    .gdAdminEffectName{color:#fff;font-size:11px;font-weight:950}
+    .gdAdminEffectState{margin-left:auto;color:rgba(255,255,255,.5);font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.05em}
+    .gdAdminEffectToggle input:checked~.gdAdminEffectState{color:#83ffb7}
+    .gdAdminEffectBody{display:grid;gap:inherit}
+    .gdAdminEffectBodyOff{opacity:.38;pointer-events:none;filter:saturate(.4)}
     /* Zoom chip: appears only while zoomed, above the HUD, small enough to ignore. */
     .gdAdminPhoneZoomChip{position:absolute;right:10px;top:44px;z-index:3;display:flex;align-items:center;gap:7px;padding:4px 6px 4px 10px;border-radius:999px;background:rgba(0,0,0,.66);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:10px;font-weight:950}
     .gdAdminPhoneZoomChip[hidden]{display:none}

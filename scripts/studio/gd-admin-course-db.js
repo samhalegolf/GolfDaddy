@@ -1873,6 +1873,7 @@ const GD_VISUAL_CONTROL_IDS=[
   "gdCourseVisualFloodOn","gdCourseVisualFloodAmbient","gdCourseVisualFloodLit","gdCourseVisualFloodThrow",
   "gdCourseVisualFloodSpread","gdCourseVisualFloodGreenPool","gdCourseVisualFloodGreenRadius","gdCourseVisualFloodMask",
   "gdCourseVisualTerrainStrength","gdCourseVisualMowing",
+  "gdCourseVisualTurfOn","gdCourseVisualLightingOn","gdCourseVisualTerrainOn","gdCourseVisualMowingOn",
   "gdReliefExaggeration","gdReliefAutoAzimuth","gdReliefAzimuth","gdReliefAltitude","gdReliefAmbient","gdReliefShadeOnly"
 ];
 /* A full panel rebuild reconstructs every control from the SAVED recipe. Do that
@@ -2494,7 +2495,15 @@ function gdAdminCourseTerrainPreviewKey(courseId,holeNumber){
 }
 function gdAdminCourseVisualReliefSrc(courseId){
   const val=(id,fb)=>{const el=document.getElementById(id);const n=el?Number(el.value):NaN;return Number.isFinite(n)?n:fb;};
-  const hole=Math.max(1,Number(gdAdminCoursePreviewHoleByCourse[courseId])||1);
+  let hole=Math.max(1,Number(gdAdminCoursePreviewHoleByCourse[courseId])||1);
+  /* The lab is not a course the server knows - relief is shaded from the DONOR's
+     published geometry, at the donor's hole. */
+  if(String(courseId)===GD_VISUAL_RECIPE_LAB_ID){
+    const donor=gdAdminCourseRecipeLabSelected().donor;
+    if(!donor)return {url:"",hole:hole};
+    courseId=donor.courseId;
+    hole=Math.max(1,Number(donor.holeNumber)||hole);
+  }
   const shadeOnly=!!(document.getElementById("gdReliefShadeOnly")||{}).checked;
   const q=new URLSearchParams({
     courseId:String(courseId), hole:String(hole), size:"768",
@@ -2527,6 +2536,10 @@ function gdAdminCourseVisualReliefRefresh(courseId){
   return false;
 }
 function gdAdminCourseVisualCommitTerrain(courseId,req,img,status){
+  if(!req||!req.url){
+    if(status)status.textContent="Borrow a sample hole first - the lab has no geometry of its own";
+    return false;
+  }
   const truth=gdAdminCourseVisualTruth;
   const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
   const overrides=gdAdminCourseVisualOverridesFromForm(courseId);
@@ -2889,7 +2902,9 @@ const GD_VISUAL_CONTROL_LABELS={
   gdCourseVisualFloodLit:"Floodlight level",gdCourseVisualFloodThrow:"Floodlight falloff",
   gdCourseVisualFloodSpread:"Floodlight spread",gdCourseVisualFloodGreenPool:"Green pool",
   gdCourseVisualFloodGreenRadius:"Green pool size",gdCourseVisualFloodMask:"Object mask",
-  gdCourseVisualTerrainStrength:"Terrain",gdCourseVisualMowing:"Mow lines"
+  gdCourseVisualTerrainStrength:"Terrain",gdCourseVisualMowing:"Mow lines",
+  gdCourseVisualTurfOn:"Turf correction",gdCourseVisualLightingOn:"Lighting",
+  gdCourseVisualTerrainOn:"Terrain",gdCourseVisualMowingOn:"Mow lines"
 };
 function gdAdminCourseVisualControlLabel(controlId){
   return GD_VISUAL_CONTROL_LABELS[String(controlId||"")]||"Preview";
@@ -2988,7 +3003,9 @@ function gdAdminCourseVisualPresetButtonEvent(event){
    and this one does not stop propagation), so every release committed twice. The
    old `if(bakePending) return false` guard hid that by throwing the second one away,
    which is also how it threw away real adjustments. */
-const GD_VISUAL_RECIPE_CONTROL_IDS=["gdCourseVisualHueMin","gdCourseVisualHueMax","gdCourseVisualSatMin","gdCourseVisualSatMax","gdCourseVisualLumMin","gdCourseVisualLumMax","gdCourseVisualTargetPull","gdCourseVisualBrightness","gdCourseVisualShadowFloor","gdCourseVisualHighlightCeiling","gdCourseVisualContrast","gdCourseVisualTerrainStrength","gdCourseVisualFloodOn","gdCourseVisualFloodAmbient","gdCourseVisualFloodLit","gdCourseVisualFloodThrow","gdCourseVisualFloodSpread","gdCourseVisualFloodGreenPool","gdCourseVisualFloodGreenRadius","gdCourseVisualFloodMask","gdCourseVisualMowing"];
+const GD_VISUAL_RECIPE_CONTROL_IDS=["gdCourseVisualHueMin","gdCourseVisualHueMax","gdCourseVisualSatMin","gdCourseVisualSatMax","gdCourseVisualLumMin","gdCourseVisualLumMax","gdCourseVisualTargetPull","gdCourseVisualBrightness","gdCourseVisualShadowFloor","gdCourseVisualHighlightCeiling","gdCourseVisualContrast","gdCourseVisualTerrainStrength","gdCourseVisualFloodAmbient","gdCourseVisualFloodLit","gdCourseVisualFloodThrow","gdCourseVisualFloodSpread","gdCourseVisualFloodGreenPool","gdCourseVisualFloodGreenRadius","gdCourseVisualFloodMask","gdCourseVisualMowing"];
+/* gdCourseVisualFloodOn is deliberately NOT in this list - all five effect switches
+   route through gdAdminCourseVisualEffectToggled instead. */
 function gdAdminCourseVisualControlEvent(event){
   const target=event&&event.target;
   if(!target||!target.id)return;
@@ -2999,6 +3016,13 @@ function gdAdminCourseVisualControlEvent(event){
   if(target.id==="gdCourseVisualPreset"){
     /* A select fires input AND change for one choice - commit on change only. */
     if(type==="change")gdAdminCourseVisualPresetChanged(courseId);
+    return;
+  }
+  if(GD_VISUAL_EFFECT_TOGGLE_IDS[target.id]){
+    if(type==="change"){
+      gdAdminCourseVisualNoteInteraction(false);
+      gdAdminCourseVisualEffectToggled(courseId,GD_VISUAL_EFFECT_TOGGLE_IDS[target.id]);
+    }
     return;
   }
   if(!GD_VISUAL_RECIPE_CONTROL_IDS.includes(target.id))return;
@@ -3072,6 +3096,128 @@ function gdAdminCourseVisualPresetList(){
   }catch(e){}
   return ["Natural","Fresh","Rich","Strong"].map(mode=>engine&&typeof engine.presetForMode==="function"?engine.presetForMode(mode):{id:mode,name:mode,mode:mode});
 }
+/* Explicit on/off per effect group. "The slider happens to be at its neutral value"
+   was the only off there was, which meant on/off could not be READ from the panel and
+   could not be flipped without knowing each group's magic neutral number. Each panel
+   now carries a switch: OFF writes the group's true off-values into the recipe (the
+   same values Reset uses) and dims the sliders; ON restores what was there before the
+   switch was turned off - or the preset's values the first time. Both go through the
+   normal commit queue, so the phone and the ingredient chips answer them like any
+   other adjustment. */
+const GD_VISUAL_EFFECT_TOGGLE_IDS={
+  gdCourseVisualTurfOn:"turf",
+  gdCourseVisualLightingOn:"lighting",
+  gdCourseVisualFloodOn:"floodlight",
+  gdCourseVisualTerrainOn:"terrain",
+  gdCourseVisualMowingOn:"mowing"
+};
+const gdAdminCourseVisualEffectStash={};
+function gdAdminCourseVisualEffectIsOn(group,settings){
+  settings=settings||{};
+  const turf=settings.turf||{},lighting=settings.lighting||{},tools=settings.visualTools||{};
+  /* The same predicates the ingredient chips use - the switch and the chip must never
+     disagree about what "on" means. */
+  if(group==="turf")return gdAdminCourseVisualClampedNumber(turf.targetPull,0,1,1)>0||gdAdminCourseVisualClampedNumber(turf.greenStrength,0,1,.35)>.05;
+  if(group==="lighting")return Math.abs(gdAdminCourseVisualClampedNumber(lighting.brightnessTarget,0,100,52)-52)>2||Math.abs(gdAdminCourseVisualClampedNumber(lighting.contrastTarget,.55,2.2,1)-1)>.03;
+  if(group==="floodlight")return !!(settings.floodlight&&settings.floodlight.enabled===true);
+  if(group==="terrain")return gdAdminCourseVisualClampedNumber(tools.holeTerrainStrength,0,1.6,.9)>.02;
+  if(group==="mowing"){
+    const api=typeof window!=="undefined"?window.GDStudioPreviewTruth:null;
+    return api&&typeof api.mowingActive==="function"?api.mowingActive(settings.mowingVisibility):String(settings.mowingVisibility||"")!=="Unknown"&&!!settings.mowingVisibility;
+  }
+  return false;
+}
+function gdAdminCourseVisualEffectHeader(group,label,on){
+  const id=Object.keys(GD_VISUAL_EFFECT_TOGGLE_IDS).find(key=>GD_VISUAL_EFFECT_TOGGLE_IDS[key]===group);
+  return `<label class="gdAdminEffectToggle"><input type="checkbox" id="${id}" ${on?"checked":""}><span class="gdAdminEffectSwitch" aria-hidden="true"></span><span class="gdAdminEffectName">${gdEscapeHTML(label)}</span><b class="gdAdminEffectState">${on?"On":"Off"}</b></label>`;
+}
+function gdAdminCourseVisualEffectBody(on,fields){
+  return `<div class="gdAdminEffectBody${on?"":" gdAdminEffectBodyOff"}">${fields}</div>`;
+}
+/* Turn the group off in the FORM (so the next form read tells the truth) and return
+   any recipe fields the dock has no control for, so the caller can patch them into
+   the override object directly. */
+function gdAdminCourseVisualEffectApplyOff(group){
+  const set=(id,value)=>{const el=document.getElementById(id);if(el)el.value=String(value);};
+  if(group==="turf"){set("gdCourseVisualTargetPull",0);return {turf:{greenStrength:0,greenTone:0}};}
+  if(group==="lighting"){set("gdCourseVisualBrightness",52);set("gdCourseVisualContrast",1);return null;}
+  if(group==="floodlight"){const el=document.getElementById("gdCourseVisualFloodOn");if(el)el.checked=false;return null;}
+  if(group==="terrain"){set("gdCourseVisualTerrainStrength",0);return null;}
+  if(group==="mowing"){set("gdCourseVisualMowing","Unknown");return null;}
+  return null;
+}
+function gdAdminCourseVisualEffectApplyOn(group,stash,presetId){
+  const engine=window.GDCourseVisualEngine;
+  let preset=null;
+  try{preset=engine&&typeof engine.getPreset==="function"?engine.getPreset(presetId):null;}catch(e){preset=null;}
+  preset=preset||{};
+  const set=(id,value,fallback)=>{const el=document.getElementById(id);if(el)el.value=String(Number.isFinite(Number(value))?Number(value):fallback);};
+  if(group==="turf"){
+    const turf=stash&&stash.turf||preset.turf||{};
+    set("gdCourseVisualTargetPull",turf.targetPull,1);
+    return {turf:{
+      greenStrength:Number.isFinite(Number(turf.greenStrength))?Number(turf.greenStrength):.35,
+      greenTone:Number.isFinite(Number(turf.greenTone))?Number(turf.greenTone):0
+    }};
+  }
+  if(group==="lighting"){
+    const lighting=stash&&stash.lighting||preset.lighting||{};
+    set("gdCourseVisualBrightness",lighting.brightnessTarget,56);
+    set("gdCourseVisualContrast",lighting.contrastTarget,1.04);
+    return null;
+  }
+  if(group==="floodlight"){const el=document.getElementById("gdCourseVisualFloodOn");if(el)el.checked=true;return null;}
+  if(group==="terrain"){
+    set("gdCourseVisualTerrainStrength",stash&&Number(stash.terrain)||Number(preset.visualTools&&preset.visualTools.holeTerrainStrength)||.9,.9);
+    return null;
+  }
+  if(group==="mowing"){
+    const el=document.getElementById("gdCourseVisualMowing");
+    if(el)el.value=String(stash&&stash.mowing||preset.mowingVisibility&&preset.mowingVisibility!=="Unknown"&&preset.mowingVisibility||"Clear");
+    return null;
+  }
+  return null;
+}
+function gdAdminCourseVisualEffectToggled(courseId,group){
+  const engine=window.GDCourseVisualEngine;
+  if(!engine)return false;
+  const toggleId=Object.keys(GD_VISUAL_EFFECT_TOGGLE_IDS).find(key=>GD_VISUAL_EFFECT_TOGGLE_IDS[key]===group);
+  const box=document.getElementById(toggleId);
+  const on=!!(box&&box.checked);
+  const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
+  const stashKey=String(courseId||"");
+  const stash=gdAdminCourseVisualEffectStash[stashKey]=gdAdminCourseVisualEffectStash[stashKey]||{};
+  let patch=null;
+  if(!on){
+    /* Remember what is being switched off, so On brings these numbers back. */
+    const current=gdAdminCourseVisualMergedSettings(presetId,gdAdminCourseVisualOverridesFromForm(courseId));
+    if(group==="turf")stash.turf=Object.assign({},current.turf);
+    if(group==="lighting")stash.lighting=Object.assign({},current.lighting);
+    if(group==="terrain")stash.terrain=Number(current.visualTools&&current.visualTools.holeTerrainStrength)||.9;
+    if(group==="mowing")stash.mowing=String(current.mowingVisibility||"Clear");
+    patch=gdAdminCourseVisualEffectApplyOff(group);
+  }else{
+    patch=gdAdminCourseVisualEffectApplyOn(group,stash,presetId);
+  }
+  const overrides=gdAdminCourseVisualOverridesFromForm(courseId);
+  /* greenStrength/greenTone have no slider - carry them explicitly. */
+  if(patch&&patch.turf)overrides.turf=Object.assign({},overrides.turf,patch.turf);
+  try{engine.saveCourseVisualSettings(courseId,overrides,{presetId});}catch(e){}
+  const label=(group==="turf"?"Turf correction":group==="lighting"?"Lighting":group==="floodlight"?"Floodlight":group==="terrain"?"Terrain":"Mow lines")+(on?"":" off");
+  if(group==="terrain"&&gdAdminCourseVisualActiveTool==="terrain"){
+    gdAdminCourseVisualReliefRefresh(courseId);
+  }else{
+    gdAdminCourseVisualCommitBake(courseId,{
+      presetId:presetId,overrides:overrides,
+      holeNumber:Number(gdAdminCoursePreviewHoleByCourse[courseId])||0,
+      control:toggleId,label:label
+    });
+  }
+  /* Rebuild so the switch text and the dimmed body reflect the new state. */
+  gdAdminCourseVisualReseedControls();
+  gdRenderAdminCourseDatabase();
+  return false;
+}
 let gdAdminCourseVisualActiveTool="turf";
 function gdAdminCourseVisualSelectTool(group){
   group=String(group||"");
@@ -3139,6 +3285,10 @@ function gdAdminCourseVisualControls(record,courseId){
   function rangeField(id,label,hint,value,min,max,step){
     return `<label>${label}${hint?` <small>${hint}</small>`:""}<input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"></label>`;
   }
+  const turfOn=gdAdminCourseVisualEffectIsOn("turf",settings);
+  const lightingOn=gdAdminCourseVisualEffectIsOn("lighting",settings);
+  const terrainOn=gdAdminCourseVisualEffectIsOn("terrain",settings);
+  const mowingOn=gdAdminCourseVisualEffectIsOn("mowing",settings);
   const turfFields=
     rangeField("gdCourseVisualHueMin","Turf hue min","green band",hueMin,40,200,1)+
     rangeField("gdCourseVisualHueMax","Turf hue max","",hueMax,40,200,1)+
@@ -3148,6 +3298,7 @@ function gdAdminCourseVisualControls(record,courseId){
     rangeField("gdCourseVisualLumMax","Turf brightness max","",lumMax,0,100,1)+
     rangeField("gdCourseVisualTargetPull","Hold to range","how firmly out-of-range turf is pulled in",targetPull,0,1,.05)+
     `<span class="gdAdminPhoneTiltNote">Turf already inside these ranges is left untouched — only out-of-range pixels are pulled in.</span>`;
+  const turfPanel=gdAdminCourseVisualEffectHeader("turf","Turf correction",turfOn)+gdAdminCourseVisualEffectBody(turfOn,turfFields);
   const terrainField=`<label>Hole terrain<input id="gdCourseVisualTerrainStrength" type="range" min="0" max="1.6" step="0.05" value="${Number.isFinite(terrain)?terrain:.9}"></label>`;
   /* Relief is computed from elevation by /api/relief-preview, live, for one hole. The knobs
      below it are NOT saved: they exist to find the numbers, and the numbers that win get
@@ -3156,7 +3307,7 @@ function gdAdminCourseVisualControls(record,courseId){
   const reliefKnob=(id,label,hint,value,min,max,step)=>
     `<label>${label}<input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}" oninput="return gdAdminCourseVisualReliefRefresh('${key}')">`+
     (hint?`<small>${hint}</small>`:"")+`</label>`;
-  const terrainBody=terrainField+
+  const terrainBody=gdAdminCourseVisualEffectHeader("terrain","Terrain",terrainOn)+gdAdminCourseVisualEffectBody(terrainOn,terrainField)+
     `<div class="gdAdminReliefPanel" style="margin-top:10px">`+
       `<div style="position:relative;background:#10130f;border-radius:8px;overflow:hidden;aspect-ratio:1/1">`+
         `<img id="gdReliefPreviewImg" alt="Relief preview" style="width:100%;height:100%;object-fit:cover;display:block">`+
@@ -3171,7 +3322,6 @@ function gdAdminCourseVisualControls(record,courseId){
       `<span class="gdAdminPhoneTiltNote">Live from LINZ elevation for the hole selected in the preview \u2014 no bake needed. Only <b>Hole terrain</b> is saved with the recipe; the rest are for finding the numbers to bake in.</span>`+
     `</div>`;
   const floodlightFields=
-    `<label class="gdAdminCourseVisualCheck"><input id="gdCourseVisualFloodOn" type="checkbox" ${floodOn?"checked":""}><span>Floodlight</span></label>`+
     rangeField("gdCourseVisualFloodAmbient","Ambient level","everything off the line drops to here",floodAmbient,0,100,1)+
     rangeField("gdCourseVisualFloodLit","Lit level","the playing line is brought back to here",floodLit,0,100,1)+
     rangeField("gdCourseVisualFloodThrow","Edge falloff","how softly the light dies at the corridor edge",floodThrow,0,1,.05)+
@@ -3180,21 +3330,27 @@ function gdAdminCourseVisualControls(record,courseId){
     rangeField("gdCourseVisualFloodGreenRadius","Green pool size","",floodGreenRadius,.05,1,.01)+
     `<label class="gdAdminCourseVisualCheck"><input id="gdCourseVisualFloodMask" type="checkbox" ${floodMask?"checked":""}><span>Use object mask</span></label>`+
     `<span class="gdAdminPhoneTiltNote">Aimed down the play axis, so it works on every hole. Levels are absolute because the image is normalised first. Object mask refines the beam to mapped fairway/green geometry \u2014 off for now.</span>`;
+  const floodlightPanel=gdAdminCourseVisualEffectHeader("floodlight","Floodlight",floodOn)+gdAdminCourseVisualEffectBody(floodOn,floodlightFields);
   const lightingFields=
     rangeField("gdCourseVisualBrightness","Brightness target","image mean is driven here",brightness,0,100,1)+
     rangeField("gdCourseVisualShadowFloor","Shadow floor","darkest point",shadowFloor,0,60,1)+
     rangeField("gdCourseVisualHighlightCeiling","Highlight ceiling","brightest point",highlightCeiling,40,100,1)+
     rangeField("gdCourseVisualContrast","Contrast","",contrast,.55,2.2,.01)+
     `<span class="gdAdminPhoneTiltNote">Exposure is normalised: whatever the capture's real range is, it's mapped between floor and ceiling and its mean driven to the target.</span>`;
-  const mowingField=`<label>Mowing visibility<select id="gdCourseVisualMowing">${["Unknown","Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>`;
+  const lightingPanel=gdAdminCourseVisualEffectHeader("lighting","Lighting",lightingOn)+gdAdminCourseVisualEffectBody(lightingOn,lightingFields);
+  /* "Unknown" is the recipe's off value; the switch owns it now, so the visible level
+     choices are only the real levels. The hidden option keeps the select honest while
+     the group is off. */
+  const mowingField=`<label>Visibility level<select id="gdCourseVisualMowing"><option value="Unknown" hidden ${mowing==="Unknown"?"selected":""}>Off</option>${["Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>`;
+  const mowingPanel=gdAdminCourseVisualEffectHeader("mowing","Mow lines",mowingOn)+gdAdminCourseVisualEffectBody(mowingOn,mowingField);
   const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseRemap('${key}')">Remap from OSM</button><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div>`;
   const groups=[
     {id:"preset",icon:"🎨",label:"Preset",body:presetField+presetRail+recipeField},
-    {id:"turf",icon:"🌱",label:"Turf & green",body:turfFields},
-    {id:"light",icon:"💡",label:"Lighting",body:lightingFields},
-    {id:"flood",icon:"🔦",label:"Floodlight",body:floodlightFields},
+    {id:"turf",icon:"🌱",label:"Turf & green",body:turfPanel},
+    {id:"light",icon:"💡",label:"Lighting",body:lightingPanel},
+    {id:"flood",icon:"🔦",label:"Floodlight",body:floodlightPanel},
     {id:"terrain",icon:"⛰️",label:"Terrain",body:terrainBody},
-    {id:"lines",icon:"🌾",label:"Mow lines",body:mowingField},
+    {id:"lines",icon:"🌾",label:"Mow lines",body:mowingPanel},
     {id:"actions",icon:"⚙️",label:"Actions",body:actionsField}
   ];
   const active=gdAdminCourseVisualActiveTool;

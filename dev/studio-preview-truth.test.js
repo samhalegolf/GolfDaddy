@@ -726,6 +726,30 @@ test("the preview zoom is view-only and survives repaints", () => {
   assert.ok(STUDIO_SRC.includes('id="gdVisualZoomChip"'), "the zoom chip with Reset exists");
 });
 
+test("every effect group has an explicit on/off switch plus its adjustments", () => {
+  ["gdCourseVisualTurfOn", "gdCourseVisualLightingOn", "gdCourseVisualFloodOn", "gdCourseVisualTerrainOn", "gdCourseVisualMowingOn"].forEach((id) => {
+    assert.ok(STUDIO_SRC.includes('"' + id + '"'), id + " switch must exist");
+  });
+  assert.ok(STUDIO_SRC.includes("function gdAdminCourseVisualEffectToggled("), "switches route through one handler");
+  assert.ok(STUDIO_SRC.includes("gdAdminCourseVisualCommitBake(courseId,{")
+    && STUDIO_SRC.slice(STUDIO_SRC.indexOf("function gdAdminCourseVisualEffectToggled(")).slice(0, 3000).includes("gdAdminCourseVisualCommitBake("),
+    "a toggle is an adjustment like any other - it commits through the truth queue");
+  /* Off must be the group's REAL off-values (the ones Reset uses), not merely a dimmed panel. */
+  const offFn = STUDIO_SRC.slice(STUDIO_SRC.indexOf("function gdAdminCourseVisualEffectApplyOff("), STUDIO_SRC.indexOf("function gdAdminCourseVisualEffectApplyOn("));
+  assert.ok(offFn.includes('set("gdCourseVisualTargetPull",0)') && offFn.includes("greenStrength:0"), "turf off");
+  assert.ok(offFn.includes('set("gdCourseVisualBrightness",52)') && offFn.includes('set("gdCourseVisualContrast",1)'), "lighting off");
+  assert.ok(offFn.includes('set("gdCourseVisualTerrainStrength",0)'), "terrain off");
+  assert.ok(offFn.includes('set("gdCourseVisualMowing","Unknown")'), "mow lines off");
+  /* And the switch state is read with the SAME predicates the ingredient chips use. */
+  assert.ok(STUDIO_SRC.includes("function gdAdminCourseVisualEffectIsOn("), "switch state is derived from the recipe, not stored separately");
+});
+
+test("the Recipe Lab's terrain preview shades the donor's hole, not 'recipe-lab'", () => {
+  const src = STUDIO_SRC.slice(STUDIO_SRC.indexOf("function gdAdminCourseVisualReliefSrc("), STUDIO_SRC.indexOf("function gdAdminCourseVisualReliefRefresh("));
+  assert.ok(src.includes("GD_VISUAL_RECIPE_LAB_ID") && src.includes("donor.courseId"),
+    "the server does not know 'recipe-lab' - relief must target the donor course and hole");
+});
+
 /* --------------------------------------------------------- source contract - */
 test("the dropped-adjustment guard is gone from the commit path", () => {
   const start = STUDIO_SRC.indexOf("function gdAdminCourseVisualControlCommitted(");
