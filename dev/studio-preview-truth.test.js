@@ -514,6 +514,154 @@ test("H · a full render is deferred while a control is being worked", () => {
     "and stays busy for a short tail after release, while the commit runs");
 });
 
+/* ------------------------------------------------------------------ L ---- */
+/* Cloud-built courses. The server worker captures and composes frames entirely
+   server-side, so a browser that never scanned locally holds an EMPTY visual record -
+   and the scoped bake died with hole-frame-missing on every commit. The fix acquires
+   the hole's published cloud frame as the bake base. This lifts the acquisition
+   function and runs it against a stubbed engine + assets API. */
+function liftEnsureBakeBase(env) {
+  const start = STUDIO_SRC.indexOf("const gdAdminCourseVisualBaseEnsurePending={};");
+  const end = STUDIO_SRC.indexOf("/* Every non-terrain preview goes through here", start);
+  assert.ok(start > -1 && end > start, "base-acquisition region not found");
+  // eslint-disable-next-line no-new-func
+  return new Function("window", "fetch", "FileReader", "gdAdminCourseVisualRecord",
+    "GD_VISUAL_RECIPE_LAB_ID", "gdAdminCourseRecipeLabSelected",
+    STUDIO_SRC.slice(start, end)
+    + "\nreturn {gdAdminCourseVisualEnsureBakeBase,gdAdminCourseVisualBaseEntryFor};")(
+    env.window, env.fetch, env.FileReader, env.gdAdminCourseVisualRecord,
+    "recipe-lab", env.recipeLabSelected || (() => ({ donor: null })));
+}
+
+function makeCloudEnv(options) {
+  options = options || {};
+  const stored = { records: {} };
+  const assetStore = {};
+  const engine = {
+    saveCaptureImage: (path, dataUrl) => { assetStore[path] = dataUrl; return Promise.resolve(true); },
+    loadCaptureImage: (path) => Promise.resolve(assetStore[path] || null),
+    getRecord: (id) => JSON.parse(JSON.stringify(stored.records[id] || { courseId: id, holeFrameVisuals: [] })),
+    loadStore: () => ({ records: JSON.parse(JSON.stringify(stored.records)) }),
+    saveStore: (store) => { stored.records = store.records; return store; }
+  };
+  const fetches = [];
+  const env = {
+    stored, assetStore, fetches,
+    window: { GDCourseVisualEngine: engine },
+    gdAdminCourseVisualRecord: (id) => stored.records[id] || null,
+    fetch: (url) => {
+      fetches.push(String(url));
+      const path = decodeURIComponent(String(url).split("path=")[1] || "");
+      if (options.index && path.endsWith("/frames/index.json")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(options.index) });
+      }
+      if (options.index && (options.index.holes || []).some((h) => h.path === path)) {
+        return Promise.resolve({ ok: true, blob: () => Promise.resolve({ __frame: path }) });
+      }
+      return Promise.resolve({ ok: false, status: 404, json: () => Promise.reject(new Error("404")) });
+    },
+    FileReader: class {
+      readAsDataURL(blob) { this.result = "data:image/jpeg;base64,FRAME:" + blob.__frame; setImmediate(() => this.onload()); }
+    }
+  };
+  return env;
+}
+
+test("L · a cloud-built course acquires its bake base from the published frame", async () => {
+  const index = {
+    exportVersion: "rtest1", presetId: "p1",
+    holes: [{ holeNumber: 7, path: "nc/frames/rtest1/h7.jpg", width: 400, height: 400, bounds: { south: 1 }, playSurface: { model: "mercator-image" } }]
+  };
+  const env = makeCloudEnv({ index });
+  const lifted = liftEnsureBakeBase(env);
+
+  const result = await lifted.gdAdminCourseVisualEnsureBakeBase("nc", 7);
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.acquired, true);
+
+  const rec = env.stored.records.nc;
+  const base = rec.holeFrameVisuals.find((f) => f.holeNumber === 7);
+  assert.ok(base, "a base frame entry must be installed on the record");
+  assert.strictEqual(base.path, "nc/frames/rtest1/h7.jpg");
+  assert.strictEqual(base.dataUrl, undefined, "the record entry is path-only - pixels stay in the asset store");
+  assert.strictEqual(base.metadata.baseSource, "cloud-frame", "provenance must be recorded");
+  assert.ok(env.assetStore["nc/frames/rtest1/h7.jpg"].startsWith("data:image/jpeg"), "pixels must land in the asset store under the same path");
+
+  /* Second commit: the pixel probe finds the stored frame - no refetch. */
+  const before = env.fetches.length;
+  const again = await lifted.gdAdminCourseVisualEnsureBakeBase("nc", 7);
+  assert.strictEqual(again.ok, true);
+  assert.strictEqual(again.acquired, undefined, "already present - nothing downloaded");
+  assert.strictEqual(env.fetches.length, before, "no network traffic on the second pass");
+
+  /* A path-only entry whose PIXELS are gone is reacquired, not trusted. */
+  delete env.assetStore["nc/frames/rtest1/h7.jpg"];
+  const healed = await lifted.gdAdminCourseVisualEnsureBakeBase("nc", 7);
+  assert.strictEqual(healed.ok, true);
+  assert.strictEqual(healed.acquired, true, "an empty probe must trigger reacquisition");
+  assert.ok(env.assetStore["nc/frames/rtest1/h7.jpg"], "the pixels are back in the asset store");
+});
+
+test("L · the Recipe Lab captures its sample from the borrowed donor", async () => {
+  const index = {
+    exportVersion: "rtest1", presetId: "p1",
+    holes: [{ holeNumber: 7, path: "nc/frames/rtest1/h7.jpg", width: 400, height: 400 }]
+  };
+  const env = makeCloudEnv({ index });
+  env.recipeLabSelected = () => ({ donor: { courseId: "nc", holeNumber: 7 } });
+  const lifted = liftEnsureBakeBase(env);
+
+  const result = await lifted.gdAdminCourseVisualEnsureBakeBase("recipe-lab", 7);
+  assert.strictEqual(result.ok, true, "the lab must be able to capture something new for the sample");
+  const rec = env.stored.records["recipe-lab"];
+  const base = rec && rec.holeFrameVisuals.find((f) => f.holeNumber === 7);
+  assert.ok(base, "the sample lands on the LAB record");
+  assert.strictEqual(base.path, "nc/frames/rtest1/h7.jpg", "under the donor's own asset path - no rewrite to break hydration");
+  assert.strictEqual(base.metadata.baseSource, "cloud-frame");
+
+  /* No donor picked yet: a plain reason, not a mystery. */
+  const bare = makeCloudEnv({ index });
+  bare.recipeLabSelected = () => ({ donor: null });
+  const liftedBare = liftEnsureBakeBase(bare);
+  const refused = await liftedBare.gdAdminCourseVisualEnsureBakeBase("recipe-lab", 7);
+  assert.strictEqual(refused.ok, false);
+  assert.match(refused.reason, /borrow a hole into the lab/i);
+});
+
+test("L · a hole with no published frame fails with a reason, not a mystery", async () => {
+  const env = makeCloudEnv({ index: { exportVersion: "r1", holes: [{ holeNumber: 1, path: "nc/frames/r1/h1.jpg" }] } });
+  const lifted = liftEnsureBakeBase(env);
+  const result = await lifted.gdAdminCourseVisualEnsureBakeBase("nc", 9);
+  assert.strictEqual(result.ok, false);
+  assert.match(result.reason, /No capture for hole 9/);
+  assert.match(result.reason, /Build course visual/);
+});
+
+test("L · the failure reason reaches the status line", () => {
+  /* The commit run turns {ok:false,reason} into the request error, and statusText
+     prints it - assert the wiring exists in both files. */
+  assert.ok(STUDIO_SRC.includes('base&&base.ok===false)return {ok:false,error:{message:base.reason'),
+    "an acquisition failure must become the request's failure");
+  const truthSrc = fs.readFileSync(path.join(ROOT, "scripts", "studio", "gd-studio-preview-truth.js"), "utf8");
+  assert.ok(truthSrc.includes('" · " + why'), "the failed status line must carry the reason");
+});
+
+test("the Recipe Lab is an explicit place - one button in, one button out, drafts", () => {
+  /* Back used to land on the lab itself, making the shell's Back button read as the
+     engine's entry point; the only deliberate way in was a borrow button buried on a
+     course preview. */
+  assert.ok(STUDIO_SRC.includes("let gdAdminCourseVisualLabOpen=false"), "the lab renders only when explicitly opened");
+  assert.ok(STUDIO_SRC.includes(">Open Recipe Lab<"), "the doorway panel carries the one button in");
+  assert.ok(STUDIO_SRC.includes("gdAdminCourseExitRecipeLab"), "and there is a button out");
+  assert.ok(!STUDIO_SRC.includes("Borrow for Recipe Lab</button>"), "the borrow button moved inside the lab as the donor picker");
+  assert.ok(STUDIO_SRC.includes('id="gdRecipeLabDonorCourse"') && STUDIO_SRC.includes('id="gdRecipeLabDonorHole"'), "donor choice lives inside the lab");
+  assert.ok(STUDIO_SRC.includes("gdAdminCourseRecipeLabSaveDraft") && STUDIO_SRC.includes("gdAdminCourseRecipeLabResumeDraft") && STUDIO_SRC.includes("gdAdminCourseRecipeLabDiscardDraft"), "draft save/resume/discard exist");
+  assert.ok(STUDIO_SRC.includes("gdAdminCourseRecipeLabStashIfDirty()"), "leaving the lab stashes unsaved tweaks");
+  const exitFn = STUDIO_SRC.slice(STUDIO_SRC.indexOf("function gdAdminCourseExitRecipeLab("), STUDIO_SRC.indexOf("function gdAdminCourseRecipeLabSetDonor("));
+  assert.ok(exitFn.includes("gdAdminCourseRecipeLabStashIfDirty()"), "Exit stashes before leaving");
+  assert.ok(exitFn.includes("gdAdminCourseVisualLabReturnTo"), "Exit returns to the course you came from");
+});
+
 /* --------------------------------------------------------- source contract - */
 test("the dropped-adjustment guard is gone from the commit path", () => {
   const start = STUDIO_SRC.indexOf("function gdAdminCourseVisualControlCommitted(");

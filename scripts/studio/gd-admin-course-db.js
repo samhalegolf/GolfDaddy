@@ -310,6 +310,12 @@ function gdAdminCourseDbSummaries(){
   }).sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
 }
 function gdAdminCourseDbOpen(courseId){
+  /* Navigating to a course is leaving the lab - stash first so nothing is lost. */
+  if(gdAdminCourseVisualLabOpen){
+    gdAdminCourseRecipeLabStashIfDirty();
+    gdAdminCourseVisualLabOpen=false;
+    gdAdminCourseVisualLabReturnTo=null;
+  }
   const next=String(courseId||"");
   const nextTab=arguments.length>1?String(arguments[1]||"overview"):gdAdminCourseDatabaseTab;
   if(next&&next===gdAdminCourseDatabaseSelected&&nextTab==="overview"&&gdAdminCourseDatabaseTab==="overview"){
@@ -561,21 +567,110 @@ function gdAdminCourseRecipeLabSelected(){
     null;
   return {id:GD_VISUAL_RECIPE_LAB_ID,name:"Recipe Lab",key:"shared-active-recipe",isRecipeLab:true,donor:donor,activeRecipe:active};
 }
+/* The lab used to be whatever the detail pane fell back to when no course was
+   selected - which made the shell's Back button read as the door into the engine,
+   and "Borrow for Recipe Lab" buried on a course's preview the only deliberate way
+   in. It is now an explicit place: one button in (Open Recipe Lab, on the panel Back
+   lands on), one button out (Exit lab, which returns to the course you came from),
+   and the donor choice lives INSIDE the lab. */
+let gdAdminCourseVisualLabOpen=false;
+let gdAdminCourseVisualLabReturnTo=null;
+const GD_VISUAL_RECIPE_LAB_DRAFT_KEY="gd_course_visual_recipe_lab_draft_v1";
+function gdAdminCourseRecipeLabDraft(){
+  try{
+    const parsed=JSON.parse(localStorage.getItem(GD_VISUAL_RECIPE_LAB_DRAFT_KEY)||"null");
+    if(!parsed||typeof parsed!=="object"||!parsed.overrides)return null;
+    return parsed;
+  }catch(e){return null;}
+}
+function gdAdminCourseRecipeLabRecipeHash(presetId,overrides){
+  return String(presetId||"")+":"+gdAdminCourseVisualOverrideHash(overrides||{});
+}
+/* One draft slot. The lab reseeds from the ACTIVE recipe on every open, so tweaks
+   that were neither saved as a recipe nor drafted used to silently vanish on the
+   next visit - the draft is where they go instead. */
+function gdAdminCourseRecipeLabSaveDraft(opts){
+  opts=opts||{};
+  const record=gdAdminCourseVisualRecord(GD_VISUAL_RECIPE_LAB_ID);
+  if(!record||!record.courseOverrides)return false;
+  const donor=gdAdminCourseRecipeLabSelected().donor;
+  try{
+    localStorage.setItem(GD_VISUAL_RECIPE_LAB_DRAFT_KEY,JSON.stringify({
+      presetId:String(record.presetId||""),
+      overrides:record.courseOverrides,
+      donor:donor?{courseId:donor.courseId,holeNumber:donor.holeNumber}:null,
+      savedAt:new Date().toISOString()
+    }));
+  }catch(e){return false;}
+  if(!opts.silent)gdAdminCourseVisualToast("Lab draft saved");
+  if(!opts.skipRender)gdRenderAdminCourseDatabase();
+  return false;
+}
+/* Leaving with tweaks the active recipe does not hold stashes them automatically -
+   losing work because you pressed the wrong one of two buttons is the confusing
+   outcome, not the stash. */
+function gdAdminCourseRecipeLabStashIfDirty(){
+  const record=gdAdminCourseVisualRecord(GD_VISUAL_RECIPE_LAB_ID);
+  if(!record||!record.courseOverrides)return false;
+  const active=gdAdminCourseVisualRecipeState().activeRecipe||{presetId:"clarity-course-natural-v1",courseOverrides:{}};
+  const activeHash=gdAdminCourseRecipeLabRecipeHash(active.presetId||active.preset_id,active.courseOverrides||active.course_overrides||{});
+  const labHash=gdAdminCourseRecipeLabRecipeHash(record.presetId,record.courseOverrides);
+  if(labHash===activeHash)return false;
+  const draft=gdAdminCourseRecipeLabDraft();
+  if(draft&&gdAdminCourseRecipeLabRecipeHash(draft.presetId,draft.overrides)===labHash)return false;
+  gdAdminCourseRecipeLabSaveDraft({silent:true,skipRender:true});
+  gdAdminCourseVisualToast("Lab tweaks stashed as draft");
+  return true;
+}
+function gdAdminCourseRecipeLabResumeDraft(){
+  const draft=gdAdminCourseRecipeLabDraft();
+  const engine=window.GDCourseVisualEngine;
+  if(!draft||!engine)return false;
+  if(draft.donor&&draft.donor.courseId)gdAdminCourseRecipeLabSetDonor(draft.donor.courseId,draft.donor.holeNumber,{skipRender:true});
+  try{engine.saveCourseVisualSettings(GD_VISUAL_RECIPE_LAB_ID,draft.overrides,{presetId:String(draft.presetId||"")});}catch(e){}
+  gdAdminCourseVisualReseedControls();
+  gdRenderAdminCourseDatabase();
+  const hole=Number(draft.donor&&draft.donor.holeNumber)||Number(gdAdminCoursePreviewHoleByCourse[GD_VISUAL_RECIPE_LAB_ID])||1;
+  gdAdminCourseVisualCommitBake(GD_VISUAL_RECIPE_LAB_ID,{
+    presetId:String(draft.presetId||""),overrides:draft.overrides,holeNumber:hole,
+    control:"draft",label:"Draft"
+  });
+  return false;
+}
+function gdAdminCourseRecipeLabDiscardDraft(){
+  try{localStorage.removeItem(GD_VISUAL_RECIPE_LAB_DRAFT_KEY);}catch(e){}
+  gdAdminCourseVisualToast("Lab draft discarded");
+  gdRenderAdminCourseDatabase();
+  return false;
+}
 function gdAdminCourseOpenRecipeLab(){
   Object.keys(gdAdminCourseVisualRecipeLabAttempted).forEach(key=>delete gdAdminCourseVisualRecipeLabAttempted[key]);
+  gdAdminCourseVisualLabReturnTo=gdAdminCourseDatabaseSelected
+    ?{selected:gdAdminCourseDatabaseSelected,tab:gdAdminCourseDatabaseTab}
+    :gdAdminCourseVisualLabReturnTo;
+  gdAdminCourseVisualLabOpen=true;
   gdAdminCourseDatabaseSelected="";
   gdAdminCourseDatabaseTab="preview";
+  gdRenderAdminCourseDatabase();
+  return false;
+}
+function gdAdminCourseExitRecipeLab(){
+  gdAdminCourseRecipeLabStashIfDirty();
+  gdAdminCourseVisualLabOpen=false;
+  const back=gdAdminCourseVisualLabReturnTo;
+  gdAdminCourseVisualLabReturnTo=null;
+  if(back&&back.selected&&gdAdminCourseDbSummaries().some(item=>item.id===back.selected)){
+    gdAdminCourseDatabaseSelected=back.selected;
+    gdAdminCourseDatabaseTab=back.tab||"preview";
+  }
   gdRenderAdminCourseDatabase();
   return false;
 }
 function gdAdminCourseRecipeLabSetDonor(courseId,holeNumber,opts){
   try{localStorage.setItem(GD_VISUAL_RECIPE_LAB_DONOR_KEY,JSON.stringify({courseId:String(courseId||""),holeNumber:Math.max(1,Number(holeNumber)||1)}));}catch(e){}
   if(opts&&opts.openLab)return gdAdminCourseOpenRecipeLab();
-  gdRenderAdminCourseDatabase();
+  if(!(opts&&opts.skipRender))gdRenderAdminCourseDatabase();
   return false;
-}
-function gdAdminCourseRecipeLabUseCurrentHole(courseId,holeNumber){
-  return gdAdminCourseRecipeLabSetDonor(courseId,holeNumber,{openLab:true});
 }
 function gdAdminCourseRecipeLabEnsureSandbox(selected){
   const donor=selected&&selected.donor;
@@ -597,12 +692,24 @@ function gdAdminCourseRecipeLabEnsureSandbox(selected){
   gdAdminCourseVisualRecipeLabPending[recipeKey]=true;
   gdAdminCourseVisualRecipeLabAttempted[recipeKey]=true;
   gdAdminCoursePreviewHoleByCourse[GD_VISUAL_RECIPE_LAB_ID]=Number(donor.holeNumber)||1;
-  Promise.resolve(engine.hydrateCourseVisualAssets&&engine.hydrateCourseVisualAssets(donor.courseId))
+  /* A cloud-built donor holds no local pixels, so borrowing it used to clone an empty
+     record and the lab's bake died hole-frame-missing - which is why the lab looked
+     usable ("captured holes" counts cloud frames) and then silently wasn't. Capture
+     the sample first: the donor's published frame becomes its local base, hydration
+     attaches the pixels, and the clone then carries them under its rewritten paths.
+     The bake itself goes through the commit queue so the lab gets the same status
+     strip, timeout and confirmation treatment as every other preview. */
+  Promise.resolve(gdAdminCourseVisualEnsureBakeBase(donor.courseId,donor.holeNumber))
+    .catch(()=>null)
+    .then(()=>engine.hydrateCourseVisualAssets&&engine.hydrateCourseVisualAssets(donor.courseId))
     .catch(()=>null)
     .then(()=>engine.cloneCourseVisualSandbox(donor.courseId,GD_VISUAL_RECIPE_LAB_ID,{holeNumber:donor.holeNumber,courseName:"Recipe Lab",presetId:presetId,courseOverrides:overrides}))
     .then(()=>{
       engine.saveCourseVisualSettings(GD_VISUAL_RECIPE_LAB_ID,overrides,{presetId:presetId});
-      return engine.buildCourseVisualPreview(GD_VISUAL_RECIPE_LAB_ID,presetId,overrides,{holeNumber:donor.holeNumber});
+      return gdAdminCourseVisualCommitBake(GD_VISUAL_RECIPE_LAB_ID,{
+        presetId:presetId,overrides:overrides,holeNumber:donor.holeNumber,
+        control:"recipe-lab",label:"Recipe Lab sample"
+      });
     })
     .catch(()=>{})
     .finally(()=>{
@@ -785,7 +892,10 @@ function gdAdminCourseCloudFrames(courseId){
     .then(res=>res.ok?res.json():null)
     .then(index=>{
       gdAdminCourseCloudFramesCache[courseId]={index:index&&Array.isArray(index.holes)&&index.holes.length?index:null};
-      if(index&&gdAdminCourseDatabaseSelected===courseId&&gdAdminCourseDatabaseTab==="preview")gdRenderAdminCourseDatabase();
+      /* The lab's donor list is built from these indexes too, and in the lab nothing is
+         "selected" - re-render when it is open so a course becomes offerable the moment
+         its frames index lands. */
+      if(index&&(gdAdminCourseDatabaseSelected===courseId||gdAdminCourseVisualLabOpen)&&gdAdminCourseDatabaseTab==="preview")gdRenderAdminCourseDatabase();
     })
     .catch(()=>{});
   return null;
@@ -1055,18 +1165,45 @@ function gdAdminCoursePreviewPhoneFrameMarkup(markup,frameBox){
   ].join(";");
   return `<div class="gdAdminPhoneFrameCrop" data-frame-source="${gdEscapeHTML(frameBox.source||"gps-play-frame")}" style="${style}">${markup}</div>`;
 }
+/* Courses the lab can sample: anything with local captures or published cloud frames
+   (both bake now - cloud frames are acquired on demand). Cloud indexes load lazily, so
+   this list can grow across renders; the current donor is always resolvable. */
+function gdAdminCourseRecipeLabCandidates(){
+  return gdAdminCourseDbSummaries().map(item=>{
+    const record=gdAdminCourseVisualRecord(item.id);
+    const holes=gdAdminCoursePreviewCapturedHoles(record,item.id);
+    return holes.length?{id:item.id,name:item.name,holes:holes}:null;
+  }).filter(Boolean);
+}
+function gdAdminCourseRecipeLabDonorChanged(){
+  const course=document.getElementById("gdRecipeLabDonorCourse");
+  const hole=document.getElementById("gdRecipeLabDonorHole");
+  return gdAdminCourseRecipeLabSetDonor(course&&course.value||"",Number(hole&&hole.value)||1);
+}
 function gdAdminCoursePreviewMarkup(selected){
   if(selected&&selected.isRecipeLab){
     const donor=selected&&selected.donor;
     const active=gdAdminCourseVisualRecipeState().activeRecipe;
+    const draft=gdAdminCourseRecipeLabDraft();
+    const draftLine=draft?`<div class="gdAdminCourseStageLine"><span class="warn">Draft · saved ${gdEscapeHTML(gdCoursePlayDebugTime(draft.savedAt)||"earlier")}</span><button type="button" class="gdAdminInlineLink" onclick="return gdAdminCourseRecipeLabResumeDraft()">Resume draft</button><button type="button" class="gdAdminInlineLink" onclick="return gdAdminCourseRecipeLabDiscardDraft()">Discard</button></div>`:"";
+    const exitButton=`<button type="button" onclick="return gdAdminCourseExitRecipeLab()">Exit lab</button>`;
+    const draftButton=`<button type="button" onclick="return gdAdminCourseRecipeLabSaveDraft()">Save draft</button>`;
     if(!donor){
-      return `<div class="gdAdminPhonePreviewShell"><div class="gdAdminPhoneInfo"><strong>Recipe Lab</strong><span>No captured sample is available yet. Open any course that already has captured holes, then borrow one into the lab, or run a fresh course visual build first.</span></div></div>`;
+      return `<div class="gdAdminPhonePreviewShell"><div class="gdAdminPhoneInfo"><strong>Recipe Lab</strong><span>No sample is available yet: no course has captured holes or published cloud frames. Build a course visual first, then come back.</span><div class="gdAdminPhoneControls">${exitButton}</div></div></div>`;
     }
     gdAdminCourseRecipeLabEnsureSandbox(selected);
     gdAdminCoursePreviewHoleByCourse[GD_VISUAL_RECIPE_LAB_ID]=Number(donor.holeNumber)||1;
     const activeLabel=active?`${active.name||"Recipe"} · ${active.presetId||active.preset_id||"custom"}`:"Natural fallback";
+    const candidates=gdAdminCourseRecipeLabCandidates();
+    const donorHoles=donor.capturedHoles&&donor.capturedHoles.length?donor.capturedHoles:[donor.holeNumber];
+    const donorPicker=`<label class="gdAdminRecipeLabDonorField">Sample course<select id="gdRecipeLabDonorCourse" onchange="return gdAdminCourseRecipeLabDonorChanged()">${candidates.map(item=>`<option value="${gdEscapeHTML(item.id)}" ${item.id===donor.courseId?"selected":""}>${gdEscapeHTML(item.name)}</option>`).join("")}</select></label>`+
+      `<label class="gdAdminRecipeLabDonorField">Hole<select id="gdRecipeLabDonorHole" onchange="return gdAdminCourseRecipeLabDonorChanged()">${donorHoles.map(hole=>`<option value="${gdEscapeHTML(hole)}" ${Number(hole)===Number(donor.holeNumber)?"selected":""}>H${gdEscapeHTML(hole)}</option>`).join("")}</select></label>`;
     const shell=gdAdminCoursePreviewMarkup({id:GD_VISUAL_RECIPE_LAB_ID,name:"Recipe Lab"});
-    return `<div class="gdAdminCourseVisualNotice"><strong>Recipe Lab</strong><div class="gdAdminCourseStageLine"><span class="ready">System active recipe: ${gdEscapeHTML(activeLabel)}</span><span>Borrowed sample: ${gdEscapeHTML(donor.courseName)} · Hole ${gdEscapeHTML(donor.holeNumber)}</span><button type="button" class="gdAdminInlineLink" onclick="return gdAdminCourseDbOpen('${gdEscapeHTML(donor.courseId)}','preview')">Open donor course</button></div><div class="gdAdminCourseStageLine"><span>Changes here stay inside the lab until you save a recipe and make it active.</span></div></div>${shell}`;
+    return `<div class="gdAdminCourseVisualNotice"><strong>Recipe Lab</strong>`+
+      `<div class="gdAdminCourseStageLine"><span class="ready">System active recipe: ${gdEscapeHTML(activeLabel)}</span>${donorPicker}<button type="button" class="gdAdminInlineLink" onclick="return gdAdminCourseDbOpen('${gdEscapeHTML(donor.courseId)}','preview')">Open sample course</button></div>`+
+      draftLine+
+      `<div class="gdAdminCourseStageLine"><span>Changes stay inside the lab until you save a recipe and make it active. Exiting stashes unsaved tweaks as a draft.</span><div class="gdAdminCourseVisualActions">${draftButton}${exitButton}</div></div>`+
+      `</div>${shell}`;
   }
   const engine=window.GDCourseVisualEngine;
   const record=gdAdminCourseVisualRecord(selected.id)||engine?.getRecord?.(selected.id)||null;
@@ -1104,10 +1241,14 @@ function gdAdminCoursePreviewMarkup(selected){
   const id=gdAdminJsArg(selected.id);
   /* The frame that has just been written into the DOM is the authority on what the
      Studio may claim is applied - but only once it is actually in the document, which
-     is after this markup is inserted. */
-  setTimeout(()=>{gdAdminCoursePreviewNoteDisplayedFrame(selected.id,view);gdAdminCourseVisualSyncPreviewChrome(selected.id,view.assetKind);},0);
+     is after this markup is inserted. Recomputed at fire time, NOT the view captured
+     above: a bake is a long synchronous task, and a completion that lands inside one
+     runs its microtasks (record write, frame confirm) BEFORE this pending timeout -
+     replaying the captured view here then overwrote the fresh truth with a stale
+     frame. RefreshFrame reads the current record, so it cannot be stale. */
+  setTimeout(()=>{gdAdminCoursePreviewRefreshFrame(selected.id);},0);
   const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
-  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Build course visual re-captures the course and the server automatically applies the active recipe; Publish recipe is the advanced export-only action for the settings you have locked in here.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" onclick="return gdAdminCourseRecipeLabUseCurrentHole('${gdEscapeHTML(selected.id)}',${Number(current)||1})">Borrow for Recipe Lab</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine" id="gdVisualFrameSourceLine">${gdAdminCoursePreviewSourceLine(selected,view,captured.length,count)}</div>${gdAdminCourseVisualStatusMarkup(selected.id,record,assetKind)}</div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div><div class="gdAdminPhoneFrameHost" id="gdVisualPhoneFrameHost" data-course-id="${gdEscapeHTML(selected.id)}" data-asset-kind="${gdEscapeHTML(assetKind)}" data-captured-count="${gdEscapeHTML(captured.length)}" data-hole-count="${gdEscapeHTML(count)}">${frame}</div><div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
+  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Build course visual re-captures the course and the server automatically applies the active recipe; Publish recipe is the advanced export-only action for the settings you have locked in here.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine" id="gdVisualFrameSourceLine">${gdAdminCoursePreviewSourceLine(selected,view,captured.length,count)}</div>${gdAdminCourseVisualStatusMarkup(selected.id,record,assetKind)}</div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div><div class="gdAdminPhoneFrameHost" id="gdVisualPhoneFrameHost" data-course-id="${gdEscapeHTML(selected.id)}" data-asset-kind="${gdEscapeHTML(assetKind)}" data-captured-count="${gdEscapeHTML(captured.length)}" data-hole-count="${gdEscapeHTML(count)}">${frame}</div><div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
 }
 /* Where the picture in the phone came from. Repainted with the frame itself - it used
    to be built once with the panel, so after a bake swapped the image it still said
@@ -1115,7 +1256,8 @@ function gdAdminCoursePreviewMarkup(selected){
 function gdAdminCoursePreviewSourceLine(selected,view,capturedCount,holeCount){
   const kind=view&&view.assetKind||"";
   const tone=kind==="local-styled"||kind==="cloud-frame"||kind==="terrain-preview"?"ready":"warn";
-  const label=kind==="terrain-preview"?"terrain preview":kind==="local-styled"?"surface ready"
+  const label=kind==="terrain-preview"?"terrain preview"
+    :kind==="local-styled"?(view&&view.baseSource==="cloud-frame"?"cloud frame · re-styled":"surface ready")
     :kind==="cloud-frame"?"cloud frame":kind==="local-base"?"original capture":"hydrating";
   const path=view&&view.cloudFrame?String(view.cloudFrame.path)
     :view&&view.asset&&view.asset.path?String(view.asset.path):"";
@@ -1155,8 +1297,13 @@ function gdAdminCoursePreviewFrameState(selected,record,current){
   const imageMarkup=terrainTransient?`<img src="${gdEscapeHTML(terrainTransient.blobUrl)}" alt="Hole ${gdEscapeHTML(current)} terrain preview" loading="eager" decoding="async" style="width:100%;height:100%;object-fit:cover">`:cloudSrc?`<img src="${gdEscapeHTML(cloudSrc)}" alt="Hole ${gdEscapeHTML(current)} cloud frame" loading="eager" decoding="async" style="width:100%;height:100%;object-fit:cover">`:(inline||src?inline||`<img src="${gdEscapeHTML(src)}" alt="Hole ${gdEscapeHTML(current)} play preview" loading="lazy" decoding="async">`:"");
   const frameHtml=imageMarkup?gdAdminCoursePreviewPhoneFrameMarkup(imageMarkup,terrainTransient||cloudSrc?null:gdAdminCoursePreviewFrameBox(src)):`<div class="gdAdminPhoneEmpty">Hydrating hole capture…</div>`;
   if(terrainTransient)assetKind="terrain-preview";else if(cloudFrame)assetKind="cloud-frame";
+  /* A styled frame baked over a downloaded cloud frame is a re-style, not a bake from
+     raw capture - the source line owes the operator that distinction. */
+  const baseForHole=assetKind==="local-styled"?((Array.isArray(record&&record.holeFrameVisuals)?record.holeFrameVisuals:[])
+    .find(frame=>frame&&Math.round(Number(frame.holeNumber))===current)):null;
+  const baseSource=baseForHole&&baseForHole.metadata&&baseForHole.metadata.baseSource||"";
   return {asset:asset,assetKind:assetKind,cloudFrame:cloudFrame,terrainTransient:terrainTransient,
-    src:src,frameHtml:frameHtml,holeNumber:current,courseId:courseId};
+    src:src,frameHtml:frameHtml,holeNumber:current,courseId:courseId,baseSource:baseSource};
 }
 function gdAdminCourseDebugMarkup(selected){
   return `<div class="gdAdminCourseDebugWindow"><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Local scan, frame-cache, sync, and runtime events on this browser. This is browser state, not the database.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div><details class="gdAdminCourseSettings"><summary>Visual engine internals</summary><div class="gdAdminCourseSettingsBody">${gdAdminCourseVisualMarkup(selected)}</div></details></div>`;
@@ -2029,6 +2176,111 @@ function gdAdminCourseVisualReconcile(courseId){
   });
   return true;
 }
+/* Why the sandbox failed on every cloud-built course:
+
+   The server worker captures tiles and composes hole frames entirely server-side, so a
+   browser that never ran a local scan holds an EMPTY visual record - no rawMaster, no
+   holeFrameVisuals. The scoped bake's first move is to look up the hole's base frame,
+   and with none there every commit died with hole-frame-missing. It always had; the
+   old UI just swallowed the failure and let the ingredient list claim success.
+
+   The cloud has what we need, publicly: {courseId}/frames/index.json lists one composed
+   image per hole with width/height/bounds/playSurface. That frame becomes the bake
+   base: pixels go into the engine's asset store (saveCaptureImage), and a path-only
+   entry goes onto the persisted record, which buildCourseVisualPreview's own hydration
+   then fills - the engine is not modified.
+
+   The honesty caveat: an exported frame was already styled with the recipe that was
+   active at export. The normaliser is source-aware (it measures whatever it is given
+   and drives it to targets), so re-targeting lighting and turf on a styled frame is
+   approximately idempotent - but it is a re-style of a styled frame, not a bake from
+   raw capture, and the frame source line says so ("cloud frame · re-styled"). A local
+   Build course visual replaces this base with a real raw capture. */
+const gdAdminCourseVisualBaseEnsurePending={};
+function gdAdminCourseVisualBaseEntryFor(record,holeNumber){
+  return (record&&Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals:[])
+    .find(frame=>frame&&Math.round(Number(frame.holeNumber))===holeNumber)||null;
+}
+function gdAdminCourseVisualEnsureBakeBase(courseId,holeNumber){
+  const engine=window.GDCourseVisualEngine;
+  const hole=Math.max(0,Math.round(Number(holeNumber))||0);
+  if(!engine||!hole)return Promise.resolve({ok:true});
+  const key=String(courseId)+":h"+hole;
+  if(gdAdminCourseVisualBaseEnsurePending[key])return gdAdminCourseVisualBaseEnsurePending[key];
+  const work=(async()=>{
+    /* "An entry exists" is not "pixels exist". A path-only entry whose asset-store
+       pixels are gone (cleared IndexedDB, or a sandbox clone whose rewritten path
+       points at nothing) would pass a presence check and then fail the bake with
+       hole-frame-missing anyway - probe the pixels, and reacquire when the probe
+       comes back empty. */
+    const record=gdAdminCourseVisualRecord(courseId);
+    const existing=gdAdminCourseVisualBaseEntryFor(record,hole);
+    if(existing&&existing.dataUrl)return {ok:true};
+    if(existing&&existing.path&&typeof engine.loadCaptureImage==="function"){
+      const pixels=await Promise.resolve(engine.loadCaptureImage(existing.path)).catch(()=>null);
+      if(pixels)return {ok:true};
+    }
+    /* The Recipe Lab is not a cloud course - its pixels come from the borrowed donor.
+       "It can just capture something new for the sample": fetch the DONOR's published
+       frame and install it on the lab record. */
+    const sourceCourseId=String(courseId)===GD_VISUAL_RECIPE_LAB_ID
+      ?String(gdAdminCourseRecipeLabSelected().donor?.courseId||"")
+      :String(courseId);
+    if(!sourceCourseId)return {ok:false,reason:"No sample course selected - borrow a hole into the lab first"};
+    const indexRes=await fetch("/api/course-visual-assets?path="+encodeURIComponent(sourceCourseId+"/frames/index.json"),{headers:{Accept:"application/json"}});
+    const index=indexRes.ok?await indexRes.json().catch(()=>null):null;
+    const entry=index&&Array.isArray(index.holes)?index.holes.find(item=>Number(item&&item.holeNumber)===hole):null;
+    if(!entry||!entry.path){
+      return {ok:false,reason:"No capture for hole "+hole+" - run Build course visual first"};
+    }
+    const frameRes=await fetch("/api/course-visual-assets?path="+encodeURIComponent(entry.path));
+    if(!frameRes.ok)return {ok:false,reason:"Cloud frame download failed ("+frameRes.status+")"};
+    const blob=await frameRes.blob();
+    const dataUrl=await new Promise((resolve,reject)=>{
+      const reader=new FileReader();
+      reader.onload=()=>resolve(String(reader.result||""));
+      reader.onerror=()=>reject(new Error("Cloud frame could not be read"));
+      reader.readAsDataURL(blob);
+    });
+    if(!dataUrl)return {ok:false,reason:"Cloud frame could not be read"};
+    /* Pixels into the asset store first, entry second - hydration finds them by path. */
+    await engine.saveCaptureImage(entry.path,dataUrl);
+    const fresh=engine.getRecord(courseId);
+    fresh.holeFrameVisuals=(Array.isArray(fresh.holeFrameVisuals)?fresh.holeFrameVisuals:[])
+      .filter(frame=>Math.round(Number(frame&&frame.holeNumber))!==hole)
+      .concat([{
+        path:entry.path,
+        holeNumber:hole,
+        captureId:"cloud-frame-h"+hole,
+        width:Number(entry.width)||0,
+        height:Number(entry.height)||0,
+        bounds:entry.bounds||null,
+        metadata:{
+          stage:"capture",
+          baseSource:"cloud-frame",
+          exportVersion:String(index.exportVersion||""),
+          exportPresetId:String(index.presetId||""),
+          playSurface:entry.playSurface||{}
+        }
+      }]);
+    /* Persist path-only: the pixels live in the asset store, and a multi-MB dataUrl
+       written into localStorage is how the store write starts failing. */
+    const persistable=JSON.parse(JSON.stringify(fresh));
+    (function strip(node){
+      if(!node||typeof node!=="object")return;
+      if(Array.isArray(node)){node.forEach(strip);return;}
+      if(node.path&&node.dataUrl)delete node.dataUrl;
+      Object.keys(node).forEach(k=>strip(node[k]));
+    })(persistable);
+    const store=engine.loadStore();
+    store.records[persistable.courseId||String(courseId)]=persistable;
+    engine.saveStore(store);
+    return {ok:true,acquired:true};
+  })().catch(error=>({ok:false,reason:error&&error.message||"Cloud frame download failed"}))
+    .finally(()=>{delete gdAdminCourseVisualBaseEnsurePending[key];});
+  gdAdminCourseVisualBaseEnsurePending[key]=work;
+  return work;
+}
 /* Every non-terrain preview goes through here: slider release, preset, recipe apply,
    reset, on-demand hole bake and reconcile alike. One queue, latest-request-wins. */
 function gdAdminCourseVisualCommitBake(courseId,spec){
@@ -2052,8 +2304,14 @@ function gdAdminCourseVisualCommitBake(courseId,spec){
     kind:"bake",
     run:function(request){
       return Promise.resolve()
-        .then(()=>engine.buildCourseVisualPreview(courseId,request.presetId,request.overrides,
-          request.holeNumber?{holeNumber:request.holeNumber}:undefined))
+        /* Cloud-built courses have no local captures - acquire the hole's base first.
+           Part of the transaction on purpose: an acquisition failure is this request
+           failing, with its reason on the status line, not a silent no-op. */
+        .then(()=>request.holeNumber?gdAdminCourseVisualEnsureBakeBase(courseId,request.holeNumber):{ok:true})
+        .then(base=>{
+          if(base&&base.ok===false)return {ok:false,error:{message:base.reason||"No base capture"}};
+          return engine.buildCourseVisualPreview(courseId,request.presetId,request.overrides,
+            request.holeNumber?{holeNumber:request.holeNumber}:undefined)
         .then(()=>{
           /* buildCourseVisualPreview RESOLVES on failure - it writes the fault onto
              the record instead of rejecting - so a resolved promise proves nothing.
@@ -2066,6 +2324,7 @@ function gdAdminCourseVisualCommitBake(courseId,spec){
             &&String(frame.presetId||"")===String(request.presetId||""))return {ok:true};
           const error=record&&record.lastError||null;
           return {ok:false,error:{message:error&&error.message||"The bake produced no frame for this recipe"}};
+        });
         });
     }
   });
@@ -3227,8 +3486,15 @@ function gdRenderAdminCourseDatabaseNow(){
   }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current search.</div>');
   const selected=filtered.find(item=>item.id===gdAdminCourseDatabaseSelected);
   if(!selected){
-    const recipeLab=gdAdminCourseRecipeLabSelected();
-    gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel"><div class="gdAdminCourseActionHead"><div><h4>Recipe Lab</h4><span>Open with no course selected · shared active recipe control</span></div><div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseOpenRecipeLab()">Refresh lab</button></div></div>${gdAdminCoursePreviewMarkup(recipeLab)}</div>`);
+    /* Back (or deselecting a row) lands HERE - a doorway, not the lab itself. The lab
+       renders only after its own button is pressed, so the shell's Back button no
+       longer doubles as an accidental entry into the engine. */
+    if(gdAdminCourseVisualLabOpen){
+      const recipeLab=gdAdminCourseRecipeLabSelected();
+      gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel"><div class="gdAdminCourseActionHead"><div><h4>Recipe Lab</h4><span>Shared active recipe · tuned on a borrowed sample hole</span></div><div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseExitRecipeLab()">Exit lab</button></div></div>${gdAdminCoursePreviewMarkup(recipeLab)}</div>`);
+      return;
+    }
+    gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel"><div class="gdAdminCourseActionHead"><div><h4>Course Database</h4><span>Select a course above to inspect it, or open the Recipe Lab to tune the shared active recipe on a sample hole.</span></div><div class="gdAdminCourseVisualActions"><button type="button" class="primary" onclick="return gdAdminCourseOpenRecipeLab()">Open Recipe Lab</button></div></div></div>`);
     return;
   }
   const rows=selected.rows||[];

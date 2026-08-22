@@ -545,7 +545,12 @@
         return "✓ " + st.label + " applied to H" + (st.holeNumber || "?") + " · " + (st.durationMs / 1000).toFixed(1) + "s";
       }
       if (st.state === STATE.RENDERED) return "◦ " + st.label + " rendered — the preview is showing another frame";
-      if (st.state === STATE.FAILED) return "✕ " + st.label + " failed — previous preview retained";
+      if (st.state === STATE.FAILED) {
+        /* The reason rides on the line. "failed" alone sent the operator to the console
+           to learn something the transaction already knew. */
+        var why = String(st.error || "").slice(0, 120);
+        return "✕ " + st.label + " failed — previous preview retained" + (why ? " · " + why : "");
+      }
       if (st.state === STATE.TIMED_OUT) return "⚠ " + st.label + " timed out — previous preview retained";
       return "";
     }

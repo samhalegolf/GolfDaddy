@@ -507,6 +507,9 @@
     .gdAdminPhoneNav{position:absolute;left:10px;right:10px;bottom:10px;display:flex;justify-content:space-between;gap:8px;z-index:2}
     .gdAdminPhoneNav button{border-radius:999px;padding:8px 11px;background:rgba(0,0,0,.62);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:10px;font-weight:950}
     .gdAdminPhoneFrameHost{position:absolute;inset:0}
+    /* Recipe Lab donor picker: label+select compact enough to sit inside a stage line. */
+    .gdAdminRecipeLabDonorField{display:inline-flex;align-items:center;gap:6px;color:rgba(255,255,255,.62);font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}
+    .gdAdminRecipeLabDonorField select{max-width:200px;padding:4px 8px;border-radius:8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);color:#fff;font-size:11px;font-weight:800}
     /* Preview status strip. The operator needs one place that says whether the control
        they just released has reached the picture in front of them, and the bar is the
        proof that anything at all is happening between the two. */
