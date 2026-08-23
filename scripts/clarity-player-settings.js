@@ -101,15 +101,14 @@
   function open(opts) {
     opts = opts || {};
     var activeAccount = account();
-    /* Settings proper need an account, but the payments section must not:
-       Apple 5.1.1(v) forbids requiring registration to reach a purchase, and
-       the paywall lives in this panel. ClarityPayments.openPaywall() is the
-       caller that passes section:"payments". */
-    if (!activeAccount && opts.section !== "payments") {
-      safe(function () { if (window.gdOpenProfileV67) return window.gdOpenProfileV67(); });
-      safe(function () { return window.toast && window.toast("Sign in first"); });
-      return false;
-    }
+    /* One rule: a signed-in player gets the whole settings menu, a guest gets
+       the Access & Membership section of it.
+       Settings proper are account-based and legitimately need one. The paywall
+       is NOT - Apple 5.1.1(v) forbids requiring registration to reach a
+       purchase - and it lives inside this panel, so a guest opening settings
+       lands on it rather than being bounced to a sign-in form. That bounce was
+       the last thing standing between a guest and the purchase flow. */
+    var guestSection = !activeAccount;
 
     var route = safe(function () { return window.ClarityRouter && window.ClarityRouter.get && window.ClarityRouter.get(); }, null);
     var explicitHome = !!opts.fromHome;
@@ -138,7 +137,9 @@
       window.__gdSettingsReturnTarget = "";
     });
 
-    activeSection = activeAccount && activeAccount.requiresPasswordSetup ? "password" : "menu";
+    activeSection = guestSection ? "payments"
+      : activeAccount && activeAccount.requiresPasswordSetup ? "password"
+      : "menu";
     safe(function () {
       if (window.ClarityRouter) {
         window.ClarityRouter.navigate("playerSettings", {
@@ -284,9 +285,15 @@
     ensureButton();
     var activeAccount = account();
     var gps = document.body.classList.contains("shell-gps") || document.body.classList.contains("gdGpsActive") || document.body.classList.contains("gps-active");
+    /* Visible to everyone, not just signed-in players. For a guest this button
+       is the one visible route to the purchase flow (open() sends them to the
+       payments section), and Apple 5.1.1(v) requires that route to exist without
+       registering. Still hidden during a round, where the chrome is the map. */
     document.querySelectorAll(".gdHomePlayerSettings").forEach(function (btn) {
-      btn.classList.toggle("visible", !!activeAccount && !gps);
-      btn.title = activeAccount ? "Settings for " + (activeAccount.name || activeAccount.email || "account") : "";
+      btn.classList.toggle("visible", !gps);
+      btn.title = activeAccount
+        ? "Settings for " + (activeAccount.name || activeAccount.email || "account")
+        : "Access & Membership";
     });
   }
 

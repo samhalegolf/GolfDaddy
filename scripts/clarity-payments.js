@@ -709,7 +709,7 @@
     panel.id = "gdPlayerSettingsPaymentsSection";
     panel.hidden = true;
     panel.innerHTML = [
-      '<button class="gdPlayerSettingsSubBack" type="button" onclick="gdPlayerSettingsShowSection(&quot;menu&quot;)">‹ Settings</button>',
+      '<button class="gdPlayerSettingsSubBack" type="button" onclick="gdPlayerSettingsShowSection(&quot;menu&quot;)">' + (account() ? "‹ Settings" : "‹ Back") + '</button>',
       "<strong>Access & Membership</strong>",
       '<span id="clarityPaymentSectionLine">Month Pass and Membership access.</span>',
       '<div class="clarityPaymentSection" id="clarityPaymentSection"></div>'
@@ -732,6 +732,14 @@
   }
 
   function showSection(name) {
+    /* A guest is only ever in this panel for the paywall - the settings menu
+       behind it is account-based and would be an empty room. So "‹ Settings"
+       takes them back to the app instead of into it. */
+    if (name === "menu" && !account()) {
+      safe(function () { if (window.closePanel) window.closePanel("playerSettingsPanel"); });
+      safe(function () { if (typeof window.showShellHome === "function") window.showShellHome(); });
+      return;
+    }
     if (!originalShowSection && window.gdPlayerSettingsShowSection !== showSection) originalShowSection = window.gdPlayerSettingsShowSection;
     if (originalShowSection) originalShowSection(name);
     var panel = section();
@@ -761,6 +769,13 @@
   function render() {
     installMenuRow();
     var panel = section();
+    /* section() caches its markup, so the back label has to be re-synced here -
+       it differs for a guest and a signed-in player, and signing in mid-panel
+       must not leave "‹ Back" pointing at a menu that now exists. */
+    safe(function () {
+      var back = panel && panel.querySelector(".gdPlayerSettingsSubBack");
+      if (back) back.textContent = account() ? "‹ Settings" : "‹ Back";
+    });
     var line = document.getElementById("gdPlayerSettingsPaymentsLine");
     if (line) line.textContent = accessLabel();
     var target = document.getElementById("clarityPaymentSection");
