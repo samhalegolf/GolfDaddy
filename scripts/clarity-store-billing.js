@@ -45,6 +45,7 @@
   var busy = false;
   var prices = null;        /* productKey -> localized store price, once loaded */
   var pricesLoading = false;
+  var lastPriceDiagnostic = "";  /* why prices are missing, for diagnostics() */
   var deviceEntitlement = readEntitlementCache();
 
   function isNative() {
@@ -251,28 +252,74 @@
      reviewer reads as payment taken outside the store. Loaded once after
      configure; clarity-payments reads the cache synchronously via price(). */
   async function loadPrices() {
-    if (prices || pricesLoading || !available()) return prices;
+    if (prices || pricesLoading) return prices;
+    if (!available()) {
+      lastPriceDiagnostic = !isNative()
+        ? "not a native build"
+        : "RevenueCat plugin missing from this build";
+      return prices;
+    }
     pricesLoading = true;
     try {
       await ensureConfigured();
       var cfg = await loadConfig();
       var offerings = await plugin().getOfferings();
       var found = {};
+      var seen = [];
       Object.keys(cfg.products || {}).forEach(function (productKey) {
         var pkg = findPackage(offerings, cfg.products[productKey], productKey);
         var priceString = pkg && pkg.product && pkg.product.priceString;
         if (priceString) found[productKey] = String(priceString);
+        else seen.push(productKey + "->" + cfg.products[productKey] + (pkg ? " (package, no price)" : " (no package)"));
       });
       prices = found;
+      /* Say WHY when nothing came back. A silent empty result here has three
+         very different causes - the Paid Apps Agreement not being active, the
+         products not yet Ready to Submit, or the offering not containing them -
+         and they are indistinguishable from the UI without this. */
+      lastPriceDiagnostic = Object.keys(found).length
+        ? ""
+        : "offerings returned " + countPackages(offerings) + " package(s); " + (seen.join("; ") || "no products configured");
       /* Cards may already be rendered with the placeholder - repaint them. */
       refreshPaymentsUi();
-    } catch (_e) {
+    } catch (error) {
       /* A missing price is a display gap, not a failure - buy() resolves the
          package itself. Leave the cache null so a later render can retry. */
+      lastPriceDiagnostic = "getOfferings failed: " + (error && error.message ? error.message : String(error));
     } finally {
       pricesLoading = false;
     }
     return prices;
+  }
+
+  function countPackages(offerings) {
+    var n = 0;
+    try {
+      if (offerings && offerings.current && Array.isArray(offerings.current.availablePackages)) {
+        n += offerings.current.availablePackages.length;
+      }
+      if (offerings && offerings.all) {
+        Object.keys(offerings.all).forEach(function (name) {
+          var entry = offerings.all[name];
+          if (entry && Array.isArray(entry.availablePackages)) n += entry.availablePackages.length;
+        });
+      }
+    } catch (_e) {}
+    return n;
+  }
+
+  /* One line describing why the paywall has no prices, for the Refresh Status
+     button to surface on a device where no console is attached. */
+  function diagnostics() {
+    if (!isNative()) return "Web build - store billing is inert here.";
+    if (!plugin()) return "RevenueCat plugin not registered in this build.";
+    var parts = [
+      "configured=" + configured,
+      "prices=" + (prices ? Object.keys(prices).length : "not loaded"),
+      "user=" + (identifiedAs || "anonymous")
+    ];
+    if (lastPriceDiagnostic) parts.push(lastPriceDiagnostic);
+    return parts.join(" | ");
   }
 
   function price(productKey) {
@@ -412,6 +459,9 @@
        signed-out purchaser is a member on this device. */
     entitlementActive: entitlementActive,
     refreshEntitlement: refreshEntitlementFromStore,
+    diagnostics: diagnostics,
+    /* Force a re-fetch: clears the cache so loadPrices tries the store again. */
+    reloadPrices: function () { prices = null; lastPriceDiagnostic = ""; return loadPrices(); },
     /* Exposed for the boot smoke test and for diagnostics. */
     __state: function () {
       return { configured: configured, identifiedAs: identifiedAs, busy: busy, native: isNative() };

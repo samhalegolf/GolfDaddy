@@ -799,7 +799,7 @@
       /* Restore Purchases only exists on store builds: Apple rejects a
          subscription app without a visible restore path (3.1.1), and on the
          web there is nothing to restore - Stripe access follows the account. */
-      '<div class="clarityPaymentActions"><button class="secondary" type="button" onclick="ClarityPayments.refresh()">Refresh Status</button>'
+      '<div class="clarityPaymentActions"><button class="secondary" type="button" onclick="ClarityPayments.refreshStatusAndPrices()">Refresh Status</button>'
         + (storeBillingBlocksWebCheckout() ? '<button class="secondary" type="button" onclick="ClarityPayments.restorePurchases()">Restore Purchases</button>' : '')
         + '</div>',
       renderStoreSubscriptionTerms(),
@@ -1334,6 +1334,26 @@
     accessBadgeHTML: accessBadgeHTML,
     showSettings: openPaywall,
     openPaywall: openPaywall,
+    /* Refresh Status on a store build also re-asks the store for prices, and
+       reports what it got. There is no console on a TestFlight device, so
+       without this a paywall with no prices is a dead end to diagnose - the
+       cause could be the Paid Apps Agreement, products not yet Ready to Submit,
+       or an offering that does not contain them, and they look identical. */
+    refreshStatusAndPrices: function () {
+      refresh();
+      if (!storeBillingBlocksWebCheckout()) return false;
+      safe(function () {
+        var billing = window.ClarityStoreBilling;
+        if (!billing) return;
+        Promise.resolve(billing.reloadPrices && billing.reloadPrices()).then(function () {
+          render();
+          safe(function () {
+            if (window.toast && typeof billing.diagnostics === "function") window.toast(billing.diagnostics());
+          });
+        });
+      });
+      return false;
+    },
     /* The one membership question for every member-only action. True means
        carry on; false means the membership panel is now open and the caller
        should stop.
