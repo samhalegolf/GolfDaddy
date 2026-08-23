@@ -11,7 +11,8 @@
 [functions]
   included_files = [
     "scripts/gd-practice-parser-core.js",
-    "scripts/gd-bubble-signals-core.js"
+    "scripts/gd-bubble-signals-core.js",
+    "scripts/gd-green-contours-core.js"
   ]
 
 # Local dev with the /api/* functions actually running. `python3 -m http.server`

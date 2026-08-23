@@ -1225,6 +1225,57 @@
     }
   }
 
+  /* The green, read as contours.
+
+     Shares everything with attachMesh below - the same elevation artefact, the same green
+     polygon painter already carries - and adds nothing to the download. The difference is what
+     it does with them: the mesh spends the heights on geometry, this spends them on a surface
+     fit and draws iso-lines from it.
+
+     Only in green focus. Not a taste call: the drawing is 15cm contours with a 5cm fill, and on
+     the hole frame a green is about 77 pixels across, where none of that resolves. Focus is the
+     first moment the green is large enough on screen for the lines to carry information, so it
+     is the first moment they are worth drawing. */
+  var greenSurfacePromise = null;
+  var greenSurfaceKey = null;
+
+  function drawGreenContours(scene, proj) {
+    var canvas = el("greenContours");
+    if (!canvas || !window.GDGreenContours) return;
+    if (!scene.finish.show || !proj || !published) {
+      window.GDGreenContours.clear(canvas);
+      return;
+    }
+    var img = el("surfaceImage");
+    var meta = null;
+    try { meta = img && img.dataset.playSurface ? JSON.parse(img.dataset.playSurface) : null; } catch (e) { meta = null; }
+    var elevation = meta && meta.elevation;
+    if (!elevation || !elevation.path) { window.GDGreenContours.clear(canvas); return; }
+
+    var r = scene.hole.rec;
+    var shape = (meta.anchorPins && meta.anchorPins.greenShape) || (r && r.greenShape) || [];
+    if (shape.length < 8) { window.GDGreenContours.clear(canvas); return; }
+
+    /* One fit per hole. The promise is held rather than the surface so a repaint arriving while
+       the elevation is still decoding does not start a second decode of the same PNG. */
+    if (greenSurfaceKey !== elevation.path) {
+      greenSurfaceKey = elevation.path;
+      window.GDGreenContours.resolveUrl = function (path) { return apiUrl(surfaceLib.assetUrl(path)); };
+      greenSurfacePromise = window.GDGreenContours.surfaceFor(meta, shape);
+      greenSurfacePromise.then(function () {
+        /* The fit finished after this paint. Ask for another one rather than leaving the green
+           blank until something else happens to trigger a repaint. */
+        if (greenSurfaceKey === elevation.path && currentScene) repaint("green-contours", function () { render(currentScene); });
+      });
+      return;
+    }
+    if (!greenSurfacePromise) return;
+    greenSurfacePromise.then(function (surface) {
+      if (!surface || greenSurfaceKey !== elevation.path) { window.GDGreenContours.clear(canvas); return; }
+      window.GDGreenContours.draw(canvas, surface, proj.toScreen, {});
+    });
+  }
+
   /* Stand the surface up.
 
      Everything here is best-effort by design. The flat frame is already showing and is
@@ -1467,6 +1518,7 @@
     var proj = projector();
     drawPlayer(scene, proj);
     drawShot(scene, proj);
+    drawGreenContours(scene, proj);
     drawFinish(scene, proj);
     drawPin(scene, proj);
     drawWind(scene, proj);

@@ -3,17 +3,36 @@
      node dev/green-slope-preview/fetch-green-data.mjs     # once, to get the pixels
      node dev/green-slope-preview/render-green-slope.mjs   # writes ./out
 
-   Five variants per green, so the question "how subtle is subtle enough" can be answered by
-   looking rather than by arguing:
+   Contour lines only. The slope tint and the downhill flow lines were both tried and both cut:
+   the tint saturates to a flat wash on any green steeper than the putting bands it was anchored
+   to (Jacks Point h8 averages 5.8%, past the top of the ramp), and flow lines drawn at the same
+   weight as contours turn the pair into a mesh you have to trace with a finger to read.
 
-     1-whisper    flow lines only, barely there
-     2-subtle     flow lines + a faint slope tint          <- the proposal
-     3-contours   flow lines + 15cm contours
-     4-strong     everything turned up, to show where it stops being tasteful
-     5-naive      per-pixel slope straight off the DEM, no fit - the control
+   What is left is the oldest way of drawing ground there is, and it carries the slope on its
+   own: lines close together mean steep, far apart mean flat, and their shape is the shape of
+   the surface. Nothing needs a legend.
 
-   Variant 5 is the important one. It is what this feature looks like if the surface is not
-   fitted, and it is the reason the rest of the pipeline exists. */
+   Seven treatments at one interval, since ink and spacing are separate questions.
+
+   Dark greens ONLY - lines, fill, arrows and halos alike. Nothing light appears anywhere, so
+   the drawing reads as part of the turf rather than as ink laid over a photograph. Height is
+   carried by TONE inside that narrow dark range, never by climbing toward something brighter.
+
+   The cost is stated plainly: a dark line on dark ground has no contrast to fall back on, so
+   this palette depends on the green itself being the mid-toned part of the picture. It is the
+   right bet on mown turf and it would be the wrong one over deep shade.
+
+     a-deep          one deep green
+     b-ramp          dark green shaded BY HEIGHT
+     c-deep-supp     deep green, plus 5cm supplementary lines filling the gaps
+     d-ramp-supp     the height ramp, plus the same fill
+     e-deep-arrows   deep green + fill + short dense fall arrows
+     f-ramp-arrows   the height ramp + fill + the same arrows
+     g-ramp-one      the height ramp + fill + a single overall fall arrow
+     z-raw           off the UNFITTED DEM - the control
+
+   z-raw is the important one. It is the same elevation contoured without the surface fit, and
+   it is the artefact gd-relief-core warns about, drawn on purpose. */
 
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
@@ -22,53 +41,131 @@ import sharp from "sharp";
 import { decodeElevation } from "../../functions/lib/gd-relief-core.mjs";
 import {
   projector, metricFrame, centroid, pointInPolygon, distanceToPolygon,
-  fitSurface, slopeAt, flowLines, contours, summarise, compassName
+  fitSurface, contourPaths, slopeAt, summarise, compassName
 } from "./green-surface.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DATA = path.join(HERE, "data");
 const OUT = path.join(HERE, "out");
 const TARGET_PX = 1000;
-const COLLAR_M = 7;        // ground included in the fit beyond the green edge
+/* Ground included in the fit beyond the green edge.
+
+   This was 7m, on the reasoning that a fit needs data past its edge or the edge wanders, and
+   that the collar is where chipping happens anyway. Real greens killed it. On Jacks Point h1
+   and h6 the residual went 0.07m -> 0.31m as the collar grew 0 -> 7m, and h6's reported fall
+   went 1.7% -> 2.9%: a cubic cannot represent a putting surface AND a bunker face, so it
+   splits the difference and gets both wrong. The synthetic fixture never showed this because
+   it is smooth everywhere - the collar was free on invented ground and expensive on real ground.
+
+   Zero is safe here specifically because nothing is ever drawn outside the polygon: flowLines
+   and contours both clip to it with an inset. The edge-wander argument is about extrapolation,
+   and there is no extrapolation. Raise this only alongside a scheme that downweights the
+   collar rather than fitting it as equal evidence. */
+const COLLAR_M = 0;
 const MARGIN_M = 9;        // ground shown around the green in the picture
 
-/* Muted on purpose. A saturated ramp over an aerial photograph reads as a weather map laid on
-   a golf course; these are pulled toward the colours already in the picture so the tint looks
-   like light on the turf rather than a sticker over it.
+/* Interval is fixed per variant rather than fitted to each green's own range, and that is the
+   whole point of drawing contours at all: a green with 0.8m of relief gets five lines and one
+   with 2.9m gets nineteen, so the DENSITY carries the steepness. Normalising the count per
+   green would throw that away and make a flat green look exactly like a severe one.
 
-   CONTINUOUS, not banded. Discrete bands were the first thing tried and they are exactly the
-   silly look worth avoiding: hard colour steps across a smooth surface draw contour rings that
-   the ground does not have, and the eye reads the step edges as features. Interpolating
-   between the stops keeps the same information with nothing to catch on. */
-const STOPS = [
-  { at: 0.0, rgb: [122, 168, 158], alpha: 0.00 },
-  { at: 1.2, rgb: [122, 168, 158], alpha: 0.13 },
-  { at: 2.2, rgb: [206, 186, 126], alpha: 0.21 },
-  { at: 3.2, rgb: [193, 138, 92], alpha: 0.27 },
-  { at: 4.8, rgb: [176, 96, 72], alpha: 0.33 }
-];
-function rampFor(percent) {
-  if (percent <= STOPS[0].at) return STOPS[0];
-  const last = STOPS[STOPS.length - 1];
-  if (percent >= last.at) return last;
-  for (let i = 1; i < STOPS.length; i++) {
-    const a = STOPS[i - 1], b = STOPS[i];
-    if (percent > b.at) continue;
-    const t = (percent - a.at) / (b.at - a.at);
-    return {
-      rgb: [0, 1, 2].map(c => a.rgb[c] + (b.rgb[c] - a.rgb[c]) * t),
-      alpha: a.alpha + (b.alpha - a.alpha) * t
-    };
-  }
-  return last;
-}
+   Index every fourth line, so the heavier line is a round 40/60/100cm depending on variant and
+   the eye gets a reference without counting. */
+const INTERVAL_M = 0.15;
+const INDEX_EVERY = 4;
 
-const STYLES = {
-  "1-whisper": { tint: 0, lineAlpha: 0.50, lineWidth: 2.6, contour: false, spacing: 4.0 },
-  "2-subtle": { tint: 1.0, lineAlpha: 0.62, lineWidth: 3.0, contour: false, spacing: 3.4 },
-  "3-contours": { tint: 0.6, lineAlpha: 0.58, lineWidth: 2.8, contour: true, spacing: 3.8 },
-  "4-strong": { tint: 2.0, lineAlpha: 0.9, lineWidth: 4.0, contour: true, spacing: 2.4 }
+/* Supplementary contours - the thin neutral lines that fill the empty ground.
+
+   A fixed interval leaves a flat green nearly bare: spacing is interval/slope, so the gentler
+   the ground the wider the gaps, and the part of the green with least to say ends up with the
+   most blank space. Supplementary lines are the old survey answer to that - a finer interval
+   drawn subordinate, present only where the main lines are too far apart to describe anything.
+
+   Gated on the GAP ITSELF, not on a slope threshold. The first attempt used absolute slope and
+   drew nothing: these greens average 3.3-5.8%, so a "flat ground" cutoff picked for putting
+   surfaces in general excluded all of them. Gap width is the quantity actually being complained
+   about, it is one divide away (spacing = interval / slope), and it is scale-honest - 3m of bare
+   turf is a hole worth filling whether the green is gentle or severe.
+
+   Honesty note. At 7.5cm these lines sit INSIDE the fit's own residual, which runs 0.05-0.13m
+   on the greens measured so far. They are real iso-lines of the fitted surface and they are
+   smooth and continuous, but the ground truth does not resolve to 7.5cm and they must never be
+   drawn as though it does. Hence thin, neutral and unlabelled - texture and coverage, carrying
+   no claim the main interval is not already making. */
+const SUPP_DIVISOR = 3;          // 5cm between supplementary lines
+const SUPP_GAP_FULL_M = 2.8;     // full strength once main lines are this far apart
+const SUPP_GAP_NONE_M = 1.3;     // gone by here - the main lines already cover the ground
+const SUPP_INK = "#1b3a23";
+const SUPP_ALPHA = 0.26;
+const SUPP_WIDTH = 0.72;
+const SUPP_CHUNK = 6;            // points per constant-opacity run
+
+/* Fall arrows.
+
+   These are NOT the flow lines that were cut. That layer seeded a streamline every ~3m and made
+   length proportional to slope, so on any steep shoulder the strokes overlapped into a comb and
+   the picture turned into hair. The fix is a division of labour: the contours already say how
+   steep the ground is, in the only way that needs no legend - their spacing. So an arrow has
+   exactly one job left, which is direction, and it can therefore be CONSTANT size. Nothing about
+   an arrow varies with magnitude and nothing bunches - which is what lets them be short and
+   dense rather than long and sparse, since a short mark only has to point.
+
+   Hung off the INDEX contours rather than scattered on a lattice. A lattice position is an
+   arbitrary choice the picture cannot justify - why there and not 40cm left? - whereas a point
+   on a contour is a place the drawing already commits to. Each arrow sits ON its line and points
+   away downhill, so it reads as a property of that contour rather than as a second layer, and
+   because a contour runs perpendicular to the fall by definition, the arrow always leaves it at
+   a right angle with no extra work.
+
+   Skipped where the ground is too flat for a direction to mean anything - on a shelf at 0.4% the
+   fall bearing is real arithmetic and a lie about what a ball will do. */
+const ARROW_ALONG_M = 7.5;       // distance between arrows ALONG an index contour
+const ARROW_INSET_M = 2.0;
+const ARROW_LEN_M = 1.6;
+const ARROW_MIN_PERCENT = 1.0;
+const ARROW_INK = "#0b2013";
+const ARROW_HALO = "#050e08";
+const ARROW_ALPHA = 0.44;
+
+/* The ramp is the interesting one. A plain contour map cannot tell you which end is high - you
+   either label the lines or you count them - and on a green that is the first thing you want to
+   know. Shading each iso-line by its own level answers it at a glance: dark sits low, light sits
+   high, and the eye reads the fall direction without a legend or a single number on the page. */
+const INKS = {
+  "a-deep":        { label: "deep green", halo: "#050e08", haloAlpha: 0.26, alpha: [0.34, 0.58], colour: () => "#0d2416" },
+  "b-ramp":        { label: "dark green by height", halo: "#050e08", haloAlpha: 0.26, alpha: [0.40, 0.62], colour: t => rampGreen(t) },
+  "c-deep-supp":   { label: "deep green + fill", halo: "#050e08", haloAlpha: 0.26, alpha: [0.34, 0.58], colour: () => "#0d2416", supplementary: true },
+  "d-ramp-supp":   { label: "by height + fill", halo: "#050e08", haloAlpha: 0.26, alpha: [0.40, 0.62], colour: t => rampGreen(t), supplementary: true },
+  "e-deep-arrows": { label: "deep green + fill + arrows", halo: "#050e08", haloAlpha: 0.26, alpha: [0.34, 0.58], colour: () => "#0d2416", supplementary: true, arrows: "sparse" },
+  "f-ramp-arrows": { label: "by height + fill + arrows", halo: "#050e08", haloAlpha: 0.26, alpha: [0.40, 0.62], colour: t => rampGreen(t), supplementary: true, arrows: "sparse" },
+  "g-ramp-one":    { label: "by height + fill + one overall arrow", halo: "#050e08", haloAlpha: 0.26, alpha: [0.40, 0.62], colour: t => rampGreen(t), supplementary: true, arrows: "single" }
 };
+
+/* All one family: dark green, low to high. The range is deliberately narrow and entirely at the
+   dark end - this is variation WITHIN a shade, not a scale from dark to light. Height still
+   reads, because tone separation of even this size is plainly visible once the lines sit next to
+   each other, but no line ever gets bright enough to jump off the picture and become the subject.
+
+   Dark rather than light because the turf underneath is mid-toned: a dark line has the whole
+   bright half of the range to separate itself against, and it holds up over pale dormant grass
+   and bunker sand alike, where a light line would wash out on both. */
+const GREEN_STOPS = [
+  { at: 0.00, rgb: [7, 18, 11] },
+  { at: 0.45, rgb: [15, 34, 20] },
+  { at: 0.75, rgb: [24, 50, 29] },
+  { at: 1.00, rgb: [35, 68, 40] }
+];
+function rampGreen(t) {
+  const u = Math.max(0, Math.min(1, t));
+  let a = GREEN_STOPS[0], b = GREEN_STOPS[GREEN_STOPS.length - 1];
+  for (let i = 1; i < GREEN_STOPS.length; i++) {
+    if (u <= GREEN_STOPS[i].at) { a = GREEN_STOPS[i - 1]; b = GREEN_STOPS[i]; break; }
+  }
+  const span = (b.at - a.at) || 1;
+  const k = (u - a.at) / span;
+  const c = [0, 1, 2].map(i => Math.round(a.rgb[i] + (b.rgb[i] - a.rgb[i]) * k));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
 
 async function loadJson(file) {
   try { return JSON.parse(await readFile(path.join(DATA, file), "utf8")); }
@@ -191,80 +288,142 @@ async function renderHole(hole, capturesIndex) {
     return { x: (dx * by - dy * bx) / det, y: (ax * dy - ay * dx) / det };
   };
 
-  /* ---- tint layer: slope colour inside the green, feathered at the edge ---- */
-  function tintLayer(strength, naive) {
-    const buf = Buffer.alloc(outW * outH * 4, 0);
-    const featherM = 1.1;
-    for (let py = 0; py < outH; py++) {
-      for (let px = 0; px < outW; px++) {
-        const m = toMetric(px + 0.5, py + 0.5);
-        if (!pointInPolygon(m.x, m.y, polygon)) continue;
-        /* Feathering matters more than it sounds: a hard polygon edge makes the overlay look
-           like a decal stuck on the picture rather than a property of the ground. */
-        const edge = Math.min(1, distanceToPolygon(m.x, m.y, polygon) / featherM);
-        let percent;
-        if (naive) {
-          const ll = frame.toLatLng(m.x, m.y);
-          const p = elevProject(ll.lat, ll.lng);
-          const d = stepM;
-          const llx = frame.toLatLng(m.x + d, m.y), lly = frame.toLatLng(m.x, m.y + d);
-          const lmx = frame.toLatLng(m.x - d, m.y), lmy = frame.toLatLng(m.x, m.y - d);
-          const at = (q) => { const e = elevProject(q.lat, q.lng); return heightAtPixel(e.x, e.y); };
-          void p;
-          percent = Math.hypot((at(llx) - at(lmx)) / (2 * d), (at(lly) - at(lmy)) / (2 * d)) * 100;
-        } else {
-          percent = slopeAt(fit, m.x, m.y).percent;
-        }
-        const band = rampFor(percent);
-        const a = Math.min(1, band.alpha * strength) * edge;
-        if (a <= 0) continue;
-        const i = (py * outW + px) * 4;
-        buf[i] = band.rgb[0]; buf[i + 1] = band.rgb[1]; buf[i + 2] = band.rgb[2];
-        buf[i + 3] = Math.round(a * 255);
-      }
-    }
-    return { input: buf, raw: { width: outW, height: outH, channels: 4 } };
+  /* ---- contour overlay ----
+
+     Clipping is a feathered mask rather than a hard cut at the polygon: an iso-line that stops
+     dead on an invisible boundary reads as a sticker laid over the picture. Fading the last
+     metre lets the lines die into the surround the way a real contour map does at the edge of
+     its survey. */
+  const maskId = `green${hole}`;
+  function greenMaskDefs() {
+    const ring = polygon.map(p => { const o = toOut(p.x, p.y); return `${o.x.toFixed(1)},${o.y.toFixed(1)}`; }).join(" ");
+    const featherPx = Math.max(2, Math.abs(toOut(1.4, 0).x - toOut(0, 0).x));
+    return `<defs><filter id="${maskId}blur"><feGaussianBlur stdDeviation="${featherPx.toFixed(1)}"/></filter>`
+      + `<mask id="${maskId}"><polygon points="${ring}" fill="#fff" filter="url(#${maskId}blur)"/></mask></defs>`;
   }
 
-  /* ---- vector overlay ---- */
-  function overlaySvg(style) {
-    const parts = [];
-    if (style.contour) {
-      const segs = contours(fit, polygon, { interval: 0.15, cell: 0.4 });
-      segs.forEach(s => {
-        const a = toOut(s.a.x, s.a.y), b = toOut(s.b.x, s.b.y);
-        /* Every other line heavier, so the eye gets a 30cm reference without counting. */
-        const index = Math.abs(Math.round(s.level / 0.15)) % 2 === 0;
-        parts.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#ffffff" stroke-opacity="${index ? 0.34 : 0.17}" stroke-width="${index ? 1.5 : 1.0}"/>`);
-      });
+  /* Walk each index contour and drop an arrow every ARROW_ALONG_M of ground. Stepping by arc
+     length rather than by vertex count matters: Chaikin leaves the smoothed line densely packed
+     through curves and sparse on straights, so counting vertices would cluster every arrow into
+     the bends. */
+  function marksOnIndexLines(paths, interval, indexEvery) {
+    const marks = [];
+    for (const c of paths) {
+      if (Math.abs(Math.round(c.level / interval)) % indexEvery !== 0) continue;
+      let since = ARROW_ALONG_M * 0.5;   // half a step in, so lines do not all start with one
+      for (let i = 1; i < c.points.length; i++) {
+        const a = c.points[i - 1], b = c.points[i];
+        since += Math.hypot(b.x - a.x, b.y - a.y);
+        if (since < ARROW_ALONG_M) continue;
+        since = 0;
+        if (distanceToPolygon(b.x, b.y, polygon) < ARROW_INSET_M) continue;
+        const g = fit.gradientAt(b.x, b.y);
+        const mag = Math.hypot(g.dx, g.dy);
+        if (mag * 100 < ARROW_MIN_PERCENT) continue;
+        marks.push({ x: b.x, y: b.y, dx: -g.dx / mag, dy: -g.dy / mag, attach: true });
+      }
+    }
+    return marks;
+  }
+
+  /* The whole green in one mark, at the area-weighted mean fall. */
+  function singleFallMark() {
+    const cx = polygon.reduce((a, p) => a + p.x, 0) / polygon.length;
+    const cy = polygon.reduce((a, p) => a + p.y, 0) / polygon.length;
+    const rad = (summary.fallBearing * Math.PI) / 180;
+    return { x: cx, y: cy, dx: Math.sin(rad), dy: Math.cos(rad), lenM: 9.0, weight: 2.6 };
+  }
+
+  function contourSvg({ ink, raw = false, supplementary = false, arrows = false }) {
+    /* `contourPaths` only ever calls heightAt, so the control is the same drawing code handed a
+       surface that reads the DEM directly instead of the fit. That is the honest comparison -
+       one variable changed, nothing else. */
+    const surface = raw
+      ? { heightAt: (x, y) => { const ll = frame.toLatLng(x, y); const e = elevProject(ll.lat, ll.lng); return heightAtPixel(e.x, e.y); } }
+      : fit;
+    const paths = contourPaths(surface, polygon, { interval: INTERVAL_M, cell: 0.35 });
+
+    /* Normalised against the levels actually drawn, not against the fitted surface's full range:
+       the extremes of a cubic can sit outside the polygon entirely, and normalising to them
+       would compress every visible line into the middle of the ramp. */
+    const levels = paths.map(c => c.level);
+    const lo = Math.min(...levels), hi = Math.max(...levels);
+    const span = (hi - lo) || 1;
+
+    const parts = [greenMaskDefs(), `<g mask="url(#${maskId})" fill="none" stroke-linecap="round" stroke-linejoin="round">`];
+    /* Halo underneath every line first, then every line on top, so one contour's edge never
+       lands over its neighbour's stroke where two run close together.
+
+       The halo used to be near-white and did the real legibility work - a light edge under a
+       dark line survives any background. With the palette held to dark greens only, it can no
+       longer do that job, and what is left is a soft shadow: it still separates a line from
+       pale ground like bunker sand, and it still keeps neighbouring lines from merging, but it
+       cannot rescue a dark line sitting on dark ground. That case is now handled by staying off
+       dark ground - the mask stops at the green - rather than by contrast. */
+    for (const pass of ["halo", "ink"]) {
+      for (const c of paths) {
+        const index = Math.abs(Math.round(c.level / INTERVAL_M)) % INDEX_EVERY === 0;
+        const d = "M" + c.points.map(p => { const o = toOut(p.x, p.y); return `${o.x.toFixed(1)} ${o.y.toFixed(1)}`; }).join("L");
+        const w = index ? 2.1 : 1.1;
+        parts.push(pass === "halo"
+          ? `<path d="${d}" stroke="${ink.halo}" stroke-opacity="${ink.haloAlpha}" stroke-width="${(w + 1.8).toFixed(2)}"/>`
+          : `<path d="${d}" stroke="${ink.colour((c.level - lo) / span)}" stroke-opacity="${index ? ink.alpha[1] : ink.alpha[0]}" stroke-width="${w}"/>`);
+      }
+    }
+    /* Supplementary pass. Opacity is resolved per short run rather than per line, so one line
+       can be present across a flat shoulder and gone by the time it reaches the fall. */
+    if (supplementary && !raw) {
+      const fine = INTERVAL_M / SUPP_DIVISOR;
+      const supp = contourPaths(surface, polygon, { interval: fine, cell: 0.35, minLengthM: 2.2 });
+      for (const c of supp) {
+        /* Skip the levels that ARE main contours - drawing both puts a thin pale line exactly
+           under a heavy one, which just dirties its edge. */
+        const onMain = Math.abs(c.level / INTERVAL_M - Math.round(c.level / INTERVAL_M)) < 1e-6;
+        if (onMain) continue;
+        for (let i = 0; i < c.points.length - 1; i += SUPP_CHUNK) {
+          const run = c.points.slice(i, Math.min(c.points.length, i + SUPP_CHUNK + 1));
+          if (run.length < 2) continue;
+          const mid = run[run.length >> 1];
+          const pct = slopeAt(fit, mid.x, mid.y).percent;
+          /* Ground distance between neighbouring MAIN contours here. */
+          const gapM = INTERVAL_M / Math.max(pct / 100, 1e-4);
+          const fade = Math.max(0, Math.min(1, (gapM - SUPP_GAP_NONE_M) / (SUPP_GAP_FULL_M - SUPP_GAP_NONE_M)));
+          if (fade <= 0.02) continue;
+          const d = "M" + run.map(p => { const o = toOut(p.x, p.y); return `${o.x.toFixed(1)} ${o.y.toFixed(1)}`; }).join("L");
+          parts.push(`<path d="${d}" stroke="${SUPP_INK}" stroke-opacity="${(SUPP_ALPHA * fade).toFixed(3)}" stroke-width="${SUPP_WIDTH}"/>`);
+        }
+      }
     }
 
-    const lines = flowLines(fit, polygon, { spacing: style.spacing });
-    lines.forEach(line => {
-      const pts = line.points.map(p => toOut(p.x, p.y));
-      const K = pts.length - 1;
-      /* Fainter where the ground is nearly flat. Length already carries magnitude; carrying it
-         in opacity too is what makes the layer fade out of the way on a flat green instead of
-         covering it in evenly-confident marks. */
-      const strength = Math.min(1, 0.4 + line.slopePercent / 3.5);
-      for (let k = 0; k < K; k++) {
-        const t = k / K;
-        /* Thickest at the downhill end so the stroke reads as travelling that way. */
-        const w = style.lineWidth * (0.25 + 0.75 * t);
-        const alpha = style.lineAlpha * strength * (0.3 + 0.7 * t);
-        const a = pts[k], b = pts[k + 1];
-        const seg = `x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}"`;
-        /* Dark under-stroke: white alone disappears on pale turf and on bunker sand. */
-        parts.push(`<line ${seg} stroke="#0d1a12" stroke-opacity="${(alpha * 0.4).toFixed(3)}" stroke-width="${(w + 1.4).toFixed(2)}" stroke-linecap="round"/>`);
-        parts.push(`<line ${seg} stroke="#ffffff" stroke-opacity="${alpha.toFixed(3)}" stroke-width="${w.toFixed(2)}" stroke-linecap="round"/>`);
+    /* Arrows last, so they sit over the line work rather than under it. */
+    if (arrows) {
+      const marks = arrows === "single" ? [singleFallMark()] : marksOnIndexLines(paths, INTERVAL_M, INDEX_EVERY);
+      for (const m of marks) {
+        if (!m) continue;
+        /* An attached arrow starts AT the contour and runs downhill from it; a free one (the
+           single overall mark) straddles its point instead. */
+        const L = m.lenM || ARROW_LEN_M;
+        const back = m.attach ? 0 : L / 2;
+        const fwd = m.attach ? L : L / 2;
+        const tail = toOut(m.x - m.dx * back, m.y - m.dy * back);
+        const head = toOut(m.x + m.dx * fwd, m.y + m.dy * fwd);
+        /* Chevron built in OUTPUT space off the drawn direction, so the head stays a sane size
+           and a true right angle no matter how the metric frame lands on the pixels. */
+        const vx = head.x - tail.x, vy = head.y - tail.y;
+        const len = Math.hypot(vx, vy) || 1;
+        const ux = vx / len, uy = vy / len;
+        const wing = Math.max(3.2, len * 0.40);
+        const p1 = `${(head.x - ux * wing + -uy * wing * 0.52).toFixed(1)} ${(head.y - uy * wing + ux * wing * 0.52).toFixed(1)}`;
+        const p2 = `${(head.x - ux * wing - -uy * wing * 0.52).toFixed(1)} ${(head.y - uy * wing - ux * wing * 0.52).toFixed(1)}`;
+        const d = `M${tail.x.toFixed(1)} ${tail.y.toFixed(1)}L${head.x.toFixed(1)} ${head.y.toFixed(1)}M${p1}L${head.x.toFixed(1)} ${head.y.toFixed(1)}L${p2}`;
+        const w = m.weight || 1.25;
+        parts.push(`<path d="${d}" stroke="${ARROW_HALO}" stroke-opacity="0.26" stroke-width="${(w + 1.7).toFixed(2)}"/>`);
+        parts.push(`<path d="${d}" stroke="${ARROW_INK}" stroke-opacity="${ARROW_ALPHA}" stroke-width="${w}"/>`);
       }
-      const head = pts[pts.length - 1];
-      parts.push(`<circle cx="${head.x.toFixed(1)}" cy="${head.y.toFixed(1)}" r="${(style.lineWidth * 0.55).toFixed(2)}" fill="#ffffff" fill-opacity="${(style.lineAlpha * strength).toFixed(3)}"/>`);
-    });
+    }
 
-    return Buffer.from(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${outW}" height="${outH}" viewBox="0 0 ${outW} ${outH}">${parts.join("")}</svg>`
-    );
+    parts.push("</g>");
+    return { svg: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${outW}" height="${outH}" viewBox="0 0 ${outW} ${outH}">${parts.join("")}</svg>`), count: paths.length };
   }
 
   function captionSvg(text, sub) {
@@ -282,25 +441,23 @@ async function renderHole(hole, capturesIndex) {
   const written = [];
   const sub = `${summary.meanSlopePercent.toFixed(1)}% toward ${compassName(summary.fallBearing)} · relief ${summary.reliefM.toFixed(2)}m · ${samples.length} samples @${stepM.toFixed(2)}m · ${summary.confidence}`;
 
-  for (const [name, style] of Object.entries(STYLES)) {
-    const layers = [];
-    if (style.tint > 0) layers.push(tintLayer(style.tint, false));
-    layers.push({ input: overlaySvg(style) });
-    layers.push({ input: captionSvg(`h${hole} — ${name.slice(2)} (${geo.label})`, sub) });
+  for (const [name, ink] of Object.entries(INKS)) {
     const file = path.join(OUT, `h${hole}-${name}.png`);
-    await sharp(baseImg).composite(layers).png().toBuffer().then(b => writeFile(file, b));
+    await sharp(baseImg).composite([
+      { input: contourSvg({ ink, supplementary: !!ink.supplementary, arrows: ink.arrows || false }).svg },
+      { input: captionSvg(`h${hole} — ${ink.label}, ${(INTERVAL_M * 100).toFixed(0)}cm (${geo.label})`, sub) }
+    ]).png().toBuffer().then(b => writeFile(file, b));
     written.push(file);
   }
 
-  /* The control: no fit, just the DEM differenced pixel to pixel. */
-  const naiveFile = path.join(OUT, `h${hole}-5-naive.png`);
-  await sharp(baseImg)
-    .composite([
-      tintLayer(1.0, true),
-      { input: captionSvg(`h${hole} — naive per-pixel slope, NO surface fit`, `this is the same elevation data without the fit — noise, not slope`) }
-    ])
-    .png().toBuffer().then(b => writeFile(naiveFile, b));
-  written.push(naiveFile);
+  /* The control: the same interval contoured off the raw DEM, no fit. The staircases this draws
+     are the 0.1m terrain-RGB quantisation steps, not ground. */
+  const rawFile = path.join(OUT, `h${hole}-z-raw.png`);
+  await sharp(baseImg).composite([
+    { input: contourSvg({ ink: INKS["a-deep"], raw: true }).svg },
+    { input: captionSvg(`h${hole} — contours off the UNFITTED DEM`, `the control: same elevation, no surface fit — these steps are quantisation, not ground`) }
+  ]).png().toBuffer().then(b => writeFile(rawFile, b));
+  written.push(rawFile);
 
   return { hole, summary, samples: samples.length, stepM, written, label: geo.label };
 }

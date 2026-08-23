@@ -156,6 +156,13 @@
          way; only what fills the frame changes. Absent WebGL or elevation, it never shows and
          the img underneath is the picture. -->
     <canvas id="surfaceMesh"></canvas>
+    <!-- The green read as contour lines. Unlike #surfaceMesh this is NOT in frame space and
+         carries no transform: it spans the viewport and is drawn in viewport pixels through the
+         same projector every other overlay uses, so it re-strokes at whatever scale the player
+         is looking at instead of being magnified with the picture. That is the whole reason it
+         is drawn here rather than baked into the published frame, where a green is ~77px wide
+         and none of this line work survives. -->
+    <canvas id="greenContours"></canvas>
     <svg id="bubbleSvg" class="hiddenState"></svg>
     <!-- The club the bubble is sized from, sitting at the head of the aim line.
          DOM rather than SVG for the same reason #pinDistance is: crisper text
@@ -454,7 +461,9 @@
      placement in Preview, so a position with a source tag and a policy had
      nothing left to be. -->
 <script src="js/marshal.js"></script>
+<script src="../scripts/gd-green-contours-core.js"></script>
 <script src="js/gd-terrain-mesh.js"></script>
+<script src="js/gd-green-contours.js"></script>
 <script src="js/painter.js"></script>
 <script src="js/resume.js"></script>
 <script src="js/tool-rail.js"></script>

@@ -18,6 +18,11 @@
    The only SVGs rasterized are a few KB of gradients - no embedded images anywhere. */
 
 import sharp from "sharp";
+/* The green-reading maths is shared with the phone, so it lives in scripts/ and is pinned for
+   bundling by netlify.toml included_files - same arrangement as the bubble signals core. What
+   crosses the boundary is a display list in metres; turning that into SVG paths is this file's
+   job because the projection is. */
+import greenCore from "../../scripts/gd-green-contours-core.js";
 
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, Number(v))); }
 function num(v, fb) { const n = Number(v); return Number.isFinite(n) ? n : fb; }
@@ -382,6 +387,69 @@ function terrainParams(settings) {
   const strength = toggles.terrain ? clamp(num(tools.holeTerrainStrength, 0.9), 0, 1.6) : 0;
   return { strength, opacity: clamp(strength * 0.6, 0, 0.96) };
 }
+/* Green contours. Follows terrainParams: off in source mode, off with the terrain toggle (it is
+   the same elevation being drawn, so a user who turned terrain off does not want it back here),
+   and one number worth exposing.
+
+   arrowMinSlopePercent is THE knob. Everything else about this layer is a locked drawing
+   decision, but "how steep does ground have to be before an arrow is honest" is a judgement
+   about the course and the player, not about the rendering. */
+function greenContourParams(settings) {
+  if (isSourceModeSettings(settings)) return { enabled: false };
+  const toggles = visualEffectTogglesForSettings(settings);
+  if (!toggles.terrain) return { enabled: false };
+  const tools = settings && settings.visualTools || {};
+  if (tools.greenContours === false) return { enabled: false };
+  return {
+    enabled: true,
+    arrowMinSlopePercent: clamp(num(tools.greenContourArrowMinSlope, greenCore.CONTOUR_DEFAULTS.arrowMinSlopePercent), 0, 12),
+    opacity: clamp(num(tools.greenContourOpacity, 1), 0, 1)
+  };
+}
+
+/* Render the shared display list as SVG paths.
+   The metres->pixels step goes through the caller's projector - the SAME mercProject that
+   placed the imagery - so the lines land on the turf they were measured from rather than on a
+   second projection rule that could drift from it. */
+function greenContourSvg(surface, W, H, project, options) {
+  const drawing = greenCore.buildGreenDrawing(surface, options);
+  if (!drawing) return null;
+  const frame = surface.frame;
+  const toPx = (m) => project(frame.toLatLng(m.x, m.y));
+  const f1 = (n) => Number(n).toFixed(1);
+  const parts = [];
+
+  for (const run of drawing.runs) {
+    const px = run.points.map(toPx).filter(Boolean);
+    if (px.length < 2) continue;
+    const d = "M" + px.map(p => f1(p.x) + " " + f1(p.y)).join("L");
+    if (run.haloWidthPx > 0) {
+      parts.push('<path d="' + d + '" stroke="' + run.haloColour + '" stroke-opacity="' +
+        run.haloAlpha.toFixed(3) + '" stroke-width="' + run.haloWidthPx.toFixed(2) + '"/>');
+    }
+    parts.push('<path d="' + d + '" stroke="' + run.colour + '" stroke-opacity="' +
+      run.alpha.toFixed(3) + '" stroke-width="' + run.widthPx.toFixed(2) + '"/>');
+  }
+
+  for (const arrow of drawing.arrows) {
+    const tail = toPx(arrow.tail), head = toPx(arrow.head);
+    if (!tail || !head) continue;
+    const wings = greenCore.arrowWings(tail, head);
+    const d = "M" + f1(tail.x) + " " + f1(tail.y) + "L" + f1(head.x) + " " + f1(head.y) +
+              "M" + f1(wings[0].x) + " " + f1(wings[0].y) + "L" + f1(head.x) + " " + f1(head.y) +
+              "L" + f1(wings[1].x) + " " + f1(wings[1].y);
+    parts.push('<path d="' + d + '" stroke="' + arrow.haloColour + '" stroke-opacity="' +
+      arrow.haloAlpha.toFixed(3) + '" stroke-width="' + arrow.haloWidthPx.toFixed(2) + '"/>');
+    parts.push('<path d="' + d + '" stroke="' + arrow.colour + '" stroke-opacity="' +
+      arrow.alpha.toFixed(3) + '" stroke-width="' + arrow.widthPx.toFixed(2) + '"/>');
+  }
+
+  if (!parts.length) return null;
+  return Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H +
+    '" viewBox="0 0 ' + W + ' ' + H + '"><g fill="none" stroke-linecap="round" ' +
+    'stroke-linejoin="round">' + parts.join("") + '</g></svg>');
+}
+
 /* Lay relief onto flattened pixels with soft-light.
 
    Multiply, which this used to do, can only darken. You get the shadowed side of every roll
@@ -546,7 +614,7 @@ function unworld(x, y) {
    that grid (fractional captureZoom encodes the downscale), so the client can hand it to the
    existing renderer as a manifest with ONE tile - no new client-side projection code at all.
    Rotation-free compositing also makes it the cheapest render in the family. */
-export async function renderHoleSurfaceMercator({ pins, captures, terrain, settings, maxDim = 2048, quality = 82 }) {
+export async function renderHoleSurfaceMercator({ pins, captures, terrain, greenSurface, settings, maxDim = 2048, quality = 82 }) {
   const rects = captures.map(item => ({ item, pb: projectedBounds(item.entry.bounds) })).filter(r => r.pb);
   if (!rects.length) throw new Error("no positioned captures for mercator surface");
   const merged = {
@@ -642,6 +710,20 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, setti
   if (mow > 0) overlays.push({ input: mowSvg(W, H, mow), blend: "over" });
   const flood = floodlightSettings(settings);
   if (flood.enabled) overlays.push({ input: floodlightSvg({ width: W, height: H }, pins, flood, mercProject), blend: "over" });
+  /* Green contours, drawn through the SAME mercProject that placed the imagery, so the lines
+     land on the turf they were measured from rather than on a second projection that could
+     drift from it. Sits in `overlays` and therefore after relief and tone normalisation - the
+     drawing must not be measured as if it were aerial pixels, or the tone curve would chase
+     ink it put there itself. The confidence gate already ran in the worker; a green that failed
+     it arrives as null and nothing is drawn. */
+  const contourCfg = greenContourParams(settings);
+  if (greenSurface && contourCfg.enabled) {
+    const svg = greenContourSvg(greenSurface, W, H, mercProject, {
+      arrowMinSlopePercent: contourCfg.arrowMinSlopePercent,
+      opacity: contourCfg.opacity
+    });
+    if (svg) overlays.push({ input: svg, blend: "over" });
+  }
   /* The "void" behind any capture that doesn't reach the hole window. Same dark near-black-green
      ratio as before, now scaled off the recipe's shadow floor target instead of a blind
      brightness multiplier - unchanged at the old default (shadowFloor 14 -> scale 1). */

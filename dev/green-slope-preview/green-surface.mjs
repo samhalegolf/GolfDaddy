@@ -332,6 +332,99 @@ export function contours(fit, polygon, { interval = 0.15, cell = 0.5 } = {}) {
   return segments;
 }
 
+/* Marching squares emits each crossing as its own two-point segment, in whatever order the
+   cells happened to be walked. Drawn straight, that is a few thousand disconnected sticks: the
+   eye reads them as stipple rather than as a line, and every joint shows. Chaining walks the
+   shared endpoints back into continuous polylines, one per iso-line.
+
+   Endpoints match EXACTLY rather than approximately - two adjacent cells interpolate the
+   crossing on their shared edge from the same two corner heights, so the arithmetic is
+   identical - which is why a rounded key works and no tolerance search is needed. */
+export function chainSegments(segments, { quantum = 1e-7 } = {}) {
+  const key = p => Math.round(p.x / quantum) + "," + Math.round(p.y / quantum);
+  const byLevel = new Map();
+  for (const s of segments) {
+    if (!byLevel.has(s.level)) byLevel.set(s.level, []);
+    byLevel.get(s.level).push(s);
+  }
+
+  const chains = [];
+  for (const [level, segs] of byLevel) {
+    const ends = new Map();
+    segs.forEach((s, i) => {
+      for (const e of ["a", "b"]) {
+        const k = key(s[e]);
+        if (!ends.has(k)) ends.set(k, []);
+        ends.get(k).push({ i, e });
+      }
+    });
+
+    const used = new Array(segs.length).fill(false);
+    for (let i = 0; i < segs.length; i++) {
+      if (used[i]) continue;
+      used[i] = true;
+      const points = [segs[i].a, segs[i].b];
+      /* Grow from the tail, then from the head, so an open line is found whole no matter
+         which of its segments was picked up first. */
+      for (const fromTail of [true, false]) {
+        for (;;) {
+          const tip = fromTail ? points[points.length - 1] : points[0];
+          const next = (ends.get(key(tip)) || []).find(c => !used[c.i]);
+          if (!next) break;
+          used[next.i] = true;
+          const seg = segs[next.i];
+          const other = next.e === "a" ? seg.b : seg.a;
+          if (fromTail) points.push(other); else points.unshift(other);
+        }
+      }
+      chains.push({ level, points, closed: key(points[0]) === key(points[points.length - 1]) });
+    }
+  }
+  return chains;
+}
+
+/* Chaikin corner cutting. The chained line is still a staircase of cell-edge crossings, and a
+   green's iso-lines are smooth curves - the corners are an artefact of the sampling lattice,
+   not ground. Two passes removes them without pulling the line off the surface it came from;
+   more starts rounding off real tier noses. */
+export function smoothPolyline(points, { passes = 2, closed = false } = {}) {
+  let pts = closed && points.length > 1 ? points.slice(0, -1) : points.slice();
+  for (let p = 0; p < passes; p++) {
+    if (pts.length < 3) break;
+    const n = pts.length;
+    const next = [];
+    if (!closed) next.push(pts[0]);
+    const last = closed ? n : n - 1;
+    for (let i = 0; i < last; i++) {
+      const a = pts[i], b = pts[(i + 1) % n];
+      next.push({ x: a.x * 0.75 + b.x * 0.25, y: a.y * 0.75 + b.y * 0.25 });
+      next.push({ x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75 });
+    }
+    if (!closed) next.push(pts[n - 1]);
+    pts = next;
+  }
+  return closed && pts.length ? [...pts, pts[0]] : pts;
+}
+
+function polylineLength(points) {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += Math.hypot(points[i].x - points[i-1].x, points[i].y - points[i-1].y);
+  return total;
+}
+
+/**
+ * Iso-lines over the green as smooth, continuous polylines - the drawable form of `contours`.
+ *
+ * `minLengthM` drops the stubs left where an iso-line clips the polygon edge. They are real
+ * crossings, but a 40cm fragment of contour reads as a scratch in the turf rather than as
+ * ground, and a dozen of them around the rim make the whole overlay look like dirt on a lens.
+ */
+export function contourPaths(fit, polygon, { interval = 0.15, cell = 0.4, minLengthM = 1.6, passes = 2 } = {}) {
+  return chainSegments(contours(fit, polygon, { interval, cell }))
+    .filter(c => c.points.length >= 3 && polylineLength(c.points) >= minLengthM)
+    .map(c => ({ ...c, points: smoothPolyline(c.points, { passes, closed: c.closed }) }));
+}
+
 /* ---------- summary ------------------------------------------------------------------------ */
 
 /* The numbers a caller would publish alongside the picture, and the confidence gate.

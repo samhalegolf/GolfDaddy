@@ -31,6 +31,7 @@ import { planCourseCaptures, captureGrid, packageHoleData, courseBoundsFor } fro
 import { resolveImagerySource, unscannableReason, attributionFor } from "./lib/gd-imagery-sources.mjs";
 import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
 import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, heightsFromFloat32Tiff, terrainRgbPngFromHeights, decodeElevation } from "./lib/gd-relief-core.mjs";
+import greenCore from "../scripts/gd-green-contours-core.js";
 
 const JOBS_TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
@@ -886,6 +887,7 @@ async function runExportJob(job, deadlineAt) {
          heading and every hole has its own. */
       let terrain = null;
       let elevation = null;
+      let greenSurface = null;
       if (terrainEntry && bounds) {
         try {
           const demBuffer = await bufferFor(terrainEntry);
@@ -914,18 +916,48 @@ async function runExportJob(job, deadlineAt) {
               reliefExaggeration: shaded.exaggeration
             }
           };
+          /* The green, fitted from the SAME crop the relief was drawn from. No extra fetch, no
+             extra capture role, no second copy of the elevation - the bytes are already here and
+             the green outline is already in pins.
+
+             Deliberately gated on its own confidence rather than on the relief succeeding: relief
+             is a drawing that always looks like something, whereas this is a measurement that can
+             be wrong in ways a glance would not catch. A green that fails the gate publishes with
+             no contours and the reason in the log, exactly like a hole that ships unshaded. */
+          const greenShape = pins && pins.greenShape;
+          if (greenShape && greenShape.length >= 8) {
+            const raw = await sharp(crop.buffer, { limitInputPixels: false })
+              .raw().toBuffer({ resolveWithObject: true });
+            const decoded = decodeElevation(raw.data, raw.info.width, raw.info.height, raw.info.channels, shaded.encoding);
+            const fitted = greenCore.fitGreenSurface(decoded.heights, {
+              width: raw.info.width, height: raw.info.height,
+              bounds: crop.bounds, metresPerPixel: shaded.metresPerPixel
+            }, greenShape);
+            const sum = fitted && fitted.summary;
+            if (sum && sum.confidence !== "low") {
+              greenSurface = fitted;
+              console.log("[visual-worker] green h" + holeNumber + " " + sum.sampleCount + " samples, fall " +
+                sum.meanSlopePercent.toFixed(2) + "% " + greenCore.compassName(sum.fallBearing) + ", relief " +
+                sum.reliefM.toFixed(2) + "m, residual " + sum.residualRms.toFixed(3) + "m (" +
+                sum.residualRatio.toFixed(1) + "x q) -> " + sum.confidence);
+            } else {
+              console.log("[visual-worker] green contours skipped for h" + holeNumber + ": " +
+                (sum ? sum.reason : "surface fit did not converge"));
+            }
+          }
         } catch (error) {
           /* Relief is a finish, not the frame. A course whose elevation is missing or
              undecodable still ships its holes, unshaded, with the reason in the log. */
           console.log("[visual-worker] relief skipped for h" + holeNumber + ": " + (error && error.message || error));
           terrain = null;
           elevation = null;
+          greenSurface = null;
         }
       }
       /* North-up mercator surface: the geometry the v19 GPS pipeline consumes natively
          (originPx + captureZoom + one image). The runtime does the play-axis framing, same
          as it does for locally captured surfaces. */
-      const frame = await renderHoleSurfaceMercator({ pins, captures, terrain, settings, maxDim: EXPORT_RENDITION_PX });
+      const frame = await renderHoleSurfaceMercator({ pins, captures, terrain, greenSurface, settings, maxDim: EXPORT_RENDITION_PX });
       if (frame.diagnostics) console.log(normaliseLogLine("h" + holeNumber, frame.diagnostics));
       await storageUpload(path, frame.jpeg, "image/jpeg");
       width = frame.width; height = frame.height; bytes = frame.jpeg.length;

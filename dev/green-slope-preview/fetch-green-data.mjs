@@ -87,10 +87,21 @@ async function main() {
       if (elev) elevBytes = await save(`h${hole}.elevation.png`, elev);
     }
 
-    /* Best available base image, in descending order of sharpness. */
+    const green = captures.find(c => c.role === "green-surround" && Number(c.holeNumber) === hole);
+
+    /* Best available base image, in descending order of sharpness.
+       The green candidates are offered ONLY when the captures index carries bounds for this
+       hole. Storage outlives the index: a green-surround.jpg from an earlier export sits there
+       long after the planner stopped emitting one, and it is a picture with no known position
+       on the earth. Taking it anyway is what made h1 and h6 render the overlay over ground
+       thirty metres from the green - the renderer had nothing to place it with and quietly
+       fell back to the hole frame's bounds while holding the green's pixels. */
+    const placeable = !!(green && green.bounds);
     const candidates = [
-      { label: "green master", url: `${BASE}/${COURSE}/captures/${COURSE}/h${hole}/green-surround.jpg`, kind: "green-surround" },
-      { label: "green 3072", url: `${BASE}/${COURSE}/captures/3072/${COURSE}/h${hole}/green-surround.jpg`, kind: "green-surround" },
+      ...(placeable ? [
+        { label: "green master", url: `${BASE}/${COURSE}/captures/${COURSE}/h${hole}/green-surround.jpg`, kind: "green-surround" },
+        { label: "green 3072", url: `${BASE}/${COURSE}/captures/3072/${COURSE}/h${hole}/green-surround.jpg`, kind: "green-surround" }
+      ] : []),
       { label: "hole frame", url: `${BASE}/${COURSE}/frames/${version}/h${hole}.jpg`, kind: "frame" }
     ];
     let base = null;
@@ -100,7 +111,6 @@ async function main() {
     }
     await writeFile(path.join(OUT, `h${hole}.base.json`), JSON.stringify({ kind: base?.kind || null, label: base?.label || null }));
 
-    const green = captures.find(c => c.role === "green-surround" && Number(c.holeNumber) === hole);
     console.log(
       `h${String(hole).padEnd(3)} elevation ${elevBytes ? kb(elevBytes) : "MISSING"}` +
       `  base ${base ? base.label + " " + kb(base.bytes) : "MISSING"}` +
