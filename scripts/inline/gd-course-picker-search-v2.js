@@ -867,8 +867,13 @@
     areas.forEach(area=>{
       const row=document.createElement("div");
       row.className="course";
+      /* An area row is a QUESTION, not a course. It carries its answer here so
+         the one delegated handler in bindListeners can tell the two apart -
+         without it the row falls through to the course path, which reads the
+         .name text and tries to map a region ("Otago, New Zealand") as if it
+         were a golf course. */
+      row.__gdAreaPayload={area,fallback,run};
       row.innerHTML=`<div><div class="name">${esc(area.label)}</div><div class="meta">${esc(area.count===1?"1 result":`${area.count} results`)}</div></div><button class="play" type="button">Show</button>`;
-      row.addEventListener("click",()=>showArea(area,fallback,run));
       list.appendChild(row);
     });
     const count=byId("countLine");
@@ -1067,12 +1072,17 @@
         event.preventDefault();
         event.stopPropagation();
         if(event.stopImmediatePropagation)event.stopImmediatePropagation();
+        const area=target.__gdAreaPayload;
+        if(area)return showArea(area.area,area.fallback,area.run);
         return selectCourseForPlay(target.__gdCoursePayload||target,{source:"picker-list-click"});
       },false);
       screen.addEventListener("keydown",event=>{
         if((event.key!=="Enter"&&event.key!==" ")||!event.target?.closest?.("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course"))return;
         event.preventDefault();
-        return selectCourseForPlay(event.target.closest("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course").__gdCoursePayload,{source:"picker-list-key"});
+        const target=event.target.closest("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course");
+        const area=target.__gdAreaPayload;
+        if(area)return showArea(area.area,area.fallback,area.run);
+        return selectCourseForPlay(target.__gdCoursePayload,{source:"picker-list-key"});
       },false);
     }
     const input=byId("searchInput");

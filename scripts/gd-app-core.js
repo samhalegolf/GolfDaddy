@@ -16816,6 +16816,11 @@ function gdWireCoursePickerPlay(){
   document.addEventListener("click",function(event){
     const target=event.target&&event.target.closest&&event.target.closest("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course");
     if(!target)return;
+    /* Search can put area rows ("Otago, New Zealand") in this list - they ask
+       WHICH PLACE, and the picker expands them into the courses there. They
+       wear .course for styling only, so this capture-phase handler has to let
+       them past or it maps a region as if it were a golf course. */
+    if(target.__gdAreaPayload)return;
     event.preventDefault();
     event.stopPropagation();
     if(event.stopImmediatePropagation)event.stopImmediatePropagation();
@@ -16823,6 +16828,7 @@ function gdWireCoursePickerPlay(){
   },true);
 	  document.addEventListener("keydown",function(event){
 	    if((event.key!=="Enter"&&event.key!==" ")||!event.target?.closest?.("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course"))return;
+	    if(event.target.closest("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course").__gdAreaPayload)return;
 	    event.preventDefault();
 	    return gdOpenCoursePickerSelectionFromElement(event.target);
 	  },true);

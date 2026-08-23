@@ -257,23 +257,38 @@ async function tickEntry() {
   assert.strictEqual(saved.calls.mapping, 0, "saved playable course enters without mapping");
   assert.strictEqual(saved.calls.gps, 1, "saved playable course enters GPS Play once");
   assert.ok(/\/app\/index\.html\?/.test(saved.calls.lastGps.href), "entry names index.html - the native routers collapse an extensionless /app/ to the bundle root");
+  assert.ok(!/rangefinder=1/.test(saved.calls.lastGps.href), "a permitted player gets the full round, not the downgrade");
 
   /* The paid-access gate. gps_round_start was enforced only by the old play
      runtime, so it vanished when that was deleted; these two cases are what
-     keep it from vanishing again silently. Both fail CLOSED - the resolver is
-     the source of truth, and a check that could not complete is not evidence
-     of access. */
+     keep it from vanishing again silently.
+
+     What it gates is no longer ENTRY. A failed check used to end the journey on
+     a toast, which App Store review rejected in build 740 and which was poor
+     product besides - the rangefinder underneath needs neither an account nor a
+     payment to work. So the check downgrades instead of refusing: the player
+     gets the map and the distances, and app/js/access.js - which re-reads the
+     account itself rather than trusting this URL - withholds the scorecard, the
+     round record, resume and the bubble.
+
+     Still fails CLOSED for the PAID features. rangefinder=1 IS the closed
+     state; asserting on it is what keeps a future change from quietly handing
+     out full rounds. */
   const denied = createHarness({ permission: "denied" });
   denied.window.GDCoursePicker.selectCourse({ name: "Saved Course", courseId: "saved", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: true, databaseReady: true, savedPlayable: true });
   await tickEntry();
-  assert.strictEqual(denied.calls.gps, 0, "no paid access means no round starts");
-  assert.ok(/paid access/i.test(denied.calls.toasts.join(" ")), "a denied player is told why, not left on a dead button");
+  assert.strictEqual(denied.calls.gps, 1, "no paid access still opens the rangefinder");
+  assert.ok(/rangefinder=1/.test(denied.calls.lastGps.href), "a denied player enters in rangefinder mode, where the paid features are withheld");
 
+  /* A check that could not complete is not evidence of access, so a transient
+     failure lands in rangefinder mode too - it just says so, because the player
+     needs a different answer here than at a paywall: this one is retryable. */
   const resolverDown = createHarness({ permission: "error" });
   resolverDown.window.GDCoursePicker.selectCourse({ name: "Saved Course", courseId: "saved", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: true, databaseReady: true, savedPlayable: true });
   await tickEntry();
-  assert.strictEqual(resolverDown.calls.gps, 0, "a failed permission check fails closed");
-  assert.ok(/try again/i.test(resolverDown.calls.toasts.join(" ")), "a failed check reads as retryable, not as a paywall");
+  assert.strictEqual(resolverDown.calls.gps, 1, "a failed permission check still opens the rangefinder");
+  assert.ok(/rangefinder=1/.test(resolverDown.calls.lastGps.href), "a failed check fails closed on the paid features");
+  assert.ok(/membership/i.test(resolverDown.calls.toasts.join(" ")), "a failed check tells the player why they are short of a full round");
 
   const unmapped = createHarness();
   unmapped.window.GDCoursePicker.selectCourse({ name: "Unmapped", courseId: "unmapped", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: false });
