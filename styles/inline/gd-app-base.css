@@ -3077,6 +3077,28 @@ body.gdGpsActive #shellRouteLabel{
 #gdProfileV67 .authHelp.success{
   color:#76f2a2;
 }
+/* The way out of the sign-in panel. App Store guideline 5.1.1(v) means a player
+   who does not want an account must be able to leave this screen, and a reviewer
+   has to be able to SEE that they can - so this is a plainly worded button at
+   the top of the panel, at full touch-target height, not a subtle × in a
+   corner. */
+#gdProfileV67 .authDismiss{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  width:100%;
+  min-height:44px;
+  margin:2px 0 14px;
+  padding:0;
+  border:0;
+  background:none;
+  color:rgba(230,238,233,.82);
+  font-size:14px;
+  font-weight:800;
+  text-align:left;
+  cursor:pointer;
+}
+#gdProfileV67 .authDismiss:active{ opacity:.6; }
 #gdProfileV67 .authSwitch{
   display:flex;
   justify-content:center;

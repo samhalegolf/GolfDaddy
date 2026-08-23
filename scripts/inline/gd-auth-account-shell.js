@@ -351,6 +351,7 @@
           <div class="panelHead">
             <div><strong>Create account</strong><span>New player accounts start with their own profile.</span></div>
           </div>
+          <button class="authDismiss" type="button" onclick="gdCloseProfileV67()">‹ Continue without an account</button>
           <div class="accountGrid">
             <label class="full">Name<input id="gd67AuthName" autocomplete="name" placeholder="Your name"></label>
             <label class="full">Email<input id="gd67AuthEmail" type="email" autocomplete="email" placeholder="email@example.com"></label>
@@ -384,8 +385,9 @@
 	      return `
 	        <section class="accountPanel">
 	          <div class="panelHead">
-	            <div><strong>Login</strong></div>
+	            <div><strong>Login</strong><span>Distances and the rangefinder are free - an account saves your rounds, scores and practice data.</span></div>
 	          </div>
+	          <button class="authDismiss" type="button" onclick="gdCloseProfileV67()">‹ Continue without an account</button>
           <div class="accountGrid">
             <label class="full">Email<input id="gd67AuthEmail" type="email" autocomplete="email" placeholder="email@example.com"></label>
             <label class="full">Password<input id="gd67AuthPassword" type="password" autocomplete="current-password" placeholder="Password"></label>
@@ -1089,13 +1091,21 @@
 	    render();
 	    overlay().classList.remove('hidden');
 	    document.body.classList.add('gdProfileOpen');
-	    if (!account) forcePasswordResetSurface(false);
+	    /* Opening sign-in no longer LOCKS the app behind it.
+	       forcePasswordResetSurface() hides the entire shell and adds
+	       gdAuthLocked - correct for the password-reset route it is named after,
+	       but applied here it turned "the player tapped Profile" into a trap with
+	       no way back (5.1.1(v)). The panel is now an overlay they can close. */
 	  }
 
   function close() {
     overlay().classList.add('hidden');
-    document.body.classList.remove('gdProfileOpen');
+    /* gdAuthLocked hides the whole shell. Clearing it here means no path can
+       leave the app stranded on a blank screen behind a closed panel - closing
+       is always a way back to the app. */
+    document.body.classList.remove('gdProfileOpen', 'gdAuthLocked');
     saveSafe();
+    try { if (typeof window.showShellHome === 'function') window.showShellHome(); } catch(e) {}
   }
 
   function scrollProfileTop() {
@@ -1244,8 +1254,9 @@
 		      clearPasswordResetRoute();
 		    }
 		    render();
-		    if (authMode !== 'reset' && !currentAccount()) forcePasswordResetSurface(false);
-		    else if (authMode !== 'reset') document.body.classList.remove('gdAuthLocked');
+		    /* Switching between Login and Create account must not lock the shell
+		       either - see open(). Only the reset route locks. */
+		    if (authMode !== 'reset') document.body.classList.remove('gdAuthLocked');
 		  }
 
 		  function openPasswordResetRoute() {
@@ -1706,12 +1717,19 @@
     render();
   };
 
+	  /* The app opens to the app, for everyone.
+	     This used to force the sign-in panel open 120ms after boot for anyone
+	     without an account - the app flashed home, then locked itself behind a
+	     login form with no dismiss control. That is guideline 5.1.1(v) exactly,
+	     and it is what build 757 was rejected for a second time; the August 19
+	     work removed the equivalent gate in gd-auth-gate-v1.js but never found
+	     this one. The password-reset route still opens itself, because there the
+	     player followed a link specifically to set a password. */
 	  document.addEventListener('DOMContentLoaded', () => {
 	    setTimeout(() => {
 	      profile();
 	      if (openPasswordResetRoute()) return;
 	      render();
-	      try { if (!currentAccount()) open(); } catch(e) {}
 	    }, 120);
   });
 })();
