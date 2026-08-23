@@ -101,7 +101,11 @@
   function open(opts) {
     opts = opts || {};
     var activeAccount = account();
-    if (!activeAccount) {
+    /* Settings proper need an account, but the payments section must not:
+       Apple 5.1.1(v) forbids requiring registration to reach a purchase, and
+       the paywall lives in this panel. ClarityPayments.openPaywall() is the
+       caller that passes section:"payments". */
+    if (!activeAccount && opts.section !== "payments") {
       safe(function () { if (window.gdOpenProfileV67) return window.gdOpenProfileV67(); });
       safe(function () { return window.toast && window.toast("Sign in first"); });
       return false;
@@ -112,7 +116,9 @@
     var returnToGps = !explicitHome && (!!opts.fromGps || document.body.classList.contains("shell-gps") || document.body.classList.contains("gdGpsActive") || document.body.classList.contains("gps-active") || route && route.name === "gps");
     var profilePanel = document.getElementById("gdProfileV67");
     var explicitProfile = !!opts.fromProfile || window.__gdSettingsReturnTarget === "profile" || route && route.name === "profile";
-    var returnToProfile = explicitProfile || !!(profilePanel && !profilePanel.classList.contains("hidden") && document.body.classList.contains("gdProfileOpen"));
+    /* No account means no profile to return to, whatever panel happened to be
+       open - for a guest the profile panel is the sign-in form. */
+    var returnToProfile = !!activeAccount && (explicitProfile || !!(profilePanel && !profilePanel.classList.contains("hidden") && document.body.classList.contains("gdProfileOpen")));
     var returnProfile = returnToProfile ? profile(activeAccount) : null;
 
     safe(function () { if (window.gdCloseProfileV67) window.gdCloseProfileV67(); });
@@ -132,7 +138,7 @@
       window.__gdSettingsReturnTarget = "";
     });
 
-    activeSection = activeAccount.requiresPasswordSetup ? "password" : "menu";
+    activeSection = activeAccount && activeAccount.requiresPasswordSetup ? "password" : "menu";
     safe(function () {
       if (window.ClarityRouter) {
         window.ClarityRouter.navigate("playerSettings", {

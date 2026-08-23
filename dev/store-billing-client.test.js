@@ -62,7 +62,17 @@ function nativeStub(options) {
 
   const Purchases = {
     configure: async function (options) { window.__rc.configuredWith = options; window.__rc.calls.push("configure"); },
-    logIn: async function (options) { window.__rc.loggedInAs = options.appUserID; window.__rc.calls.push("logIn"); return { created: false }; },
+    logIn: async function (options) {
+      window.__rc.loggedInAs = options.appUserID;
+      window.__rc.calls.push("logIn");
+      /* The real SDK returns the (possibly transferred) customerInfo. */
+      return {
+        created: false,
+        customerInfo: window.__rc.purchased
+          ? { entitlements: { active: { membership: { productIdentifier: storeProductId, expirationDate: null, willRenew: true } } } }
+          : {}
+      };
+    },
     logOut: async function () { window.__rc.loggedInAs = null; window.__rc.calls.push("logOut"); return {}; },
     getOfferings: async function () {
       window.__rc.calls.push("getOfferings");
@@ -80,9 +90,20 @@ function nativeStub(options) {
     purchasePackage: async function (options) {
       window.__rc.calls.push("purchasePackage");
       window.__rc.purchased = options.aPackage;
-      return { customerInfo: {} };
+      /* A real purchase comes back with the entitlement already active on the
+         customerInfo - that is what the device entitlement cache is fed from. */
+      return {
+        customerInfo: {
+          entitlements: {
+            active: {
+              membership: { productIdentifier: storeProductId, expirationDate: null, willRenew: true }
+            }
+          }
+        }
+      };
     },
-    restorePurchases: async function () { window.__rc.calls.push("restorePurchases"); return { customerInfo: {} }; }
+    restorePurchases: async function () { window.__rc.calls.push("restorePurchases"); return { customerInfo: {} }; },
+    getCustomerInfo: async function () { window.__rc.calls.push("getCustomerInfo"); return { customerInfo: {} }; }
   };
 
   window.Capacitor = {
@@ -97,7 +118,9 @@ function nativeStub(options) {
   window.__stubAccount = { accountId: accountId, email: "native@example.com" };
   Object.defineProperty(window, "GolfDaddyAccounts", {
     configurable: true,
-    get: function () { return { current: function () { return window.__stubAccount; } }; },
+    /* An empty accountId means the signed-out pass: current() answers null,
+       exactly as the real accounts module does for a guest. */
+    get: function () { return { current: function () { return window.__stubAccount.accountId ? window.__stubAccount : null; } }; },
     set: function () { /* ignore the app's own assignment */ }
   });
 
@@ -260,6 +283,83 @@ function nativeStub(options) {
 
     await page.close();
     await context.close();
+
+    /* Signed-out pass: Apple 5.1.1(v) - build 757 was rejected because a
+       purchase could not happen without registering. A guest must be able to
+       buy, the purchase runs anonymously (no appUserID), and access is honoured
+       on this device from the store's own customerInfo. */
+    const anonApiCalls = [];
+    const anonContext = await browser.newContext();
+    const anonPage = await anonContext.newPage();
+    await anonContext.route("https://caddy.claritygolf.app/api/**", async (route) => {
+      const url = route.request().url();
+      anonApiCalls.push(url.replace("https://caddy.claritygolf.app", ""));
+      if (url.includes("/api/store-config")) {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            configured: true,
+            apiKeys: { android: "goog_test_key", ios: "appl_test_key" },
+            products: { monthly_membership: STORE_PRODUCT_ID, month_pass: "clarity_month_pass" },
+            entitlementId: "membership"
+          })
+        });
+      }
+      return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+    await anonPage.addInitScript(nativeStub, { accountId: "", storeProductId: STORE_PRODUCT_ID });
+    await anonPage.goto(`${base}/index.html`, { waitUntil: "load", timeout: 30000 });
+    await anonPage.waitForTimeout(2000);
+
+    const anonPurchase = await anonPage.evaluate(async () => {
+      const result = await window.ClarityPayments.buy("monthly_membership");
+      return {
+        result: result,
+        calls: window.__rc.calls.slice(),
+        configuredWith: window.__rc.configuredWith,
+        loggedInAs: window.__rc.loggedInAs,
+        deviceEntitled: window.ClarityStoreBilling.entitlementActive(),
+        hasAccess: window.ClarityPayments.hasActiveAccess()
+      };
+    });
+
+    check("a signed-out player can complete a purchase (5.1.1(v))", () => {
+      assert.strictEqual(anonPurchase.result, true, "buy() must not refuse a guest");
+      assert.ok(anonPurchase.calls.indexOf("purchasePackage") !== -1, "the store sheet must open for a guest");
+    });
+
+    check("the guest purchase is anonymous, never a made-up user id", () => {
+      assert.ok(!anonPurchase.configuredWith.appUserID, "configure() must pass no appUserID for a guest");
+      assert.strictEqual(anonPurchase.loggedInAs, null, "logIn() must not run without an account");
+    });
+
+    check("the store's answer grants access on this device", () => {
+      assert.strictEqual(anonPurchase.deviceEntitled, true, "entitlementActive() must reflect the purchase");
+      assert.strictEqual(anonPurchase.hasAccess, true, "hasActiveAccess() must include the device entitlement");
+    });
+
+    check("no backend entitlement poll runs without an account to ask about", () => {
+      assert.ok(
+        !anonApiCalls.some((u) => u.includes("/api/payment-entitlement")),
+        "polling the backend for a guest could only 401 - the device entitlement is the record"
+      );
+    });
+
+    /* Signing in afterwards must transfer the anonymous purchase: identify() ->
+       logIn(accountId), which is the join the webhook needs. */
+    const anonSignIn = await anonPage.evaluate(async () => {
+      window.__stubAccount = { accountId: "acct_after_purchase", email: "native@example.com" };
+      await window.ClarityStoreBilling.identify("acct_after_purchase");
+      return { loggedInAs: window.__rc.loggedInAs, calls: window.__rc.calls.slice() };
+    });
+
+    check("signing in transfers the anonymous purchase to the account", () => {
+      assert.strictEqual(anonSignIn.loggedInAs, "acct_after_purchase", "logIn must run with the real account id");
+    });
+
+    await anonPage.close();
+    await anonContext.close();
 
     /* Second pass with no Capacitor bridge at all: the website must be untouched. */
     const webContext = await browser.newContext();

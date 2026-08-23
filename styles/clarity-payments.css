@@ -66,14 +66,15 @@
   line-height: 1.35;
 }
 
+/* The billed amount. Apple 3.1.2(c) requires this to be the most clear and
+   conspicuous pricing element in the purchase flow, so it is deliberately the
+   largest text on the card - larger than the product name, with every other
+   pricing detail in subordinate small print below it. Do not shrink it. */
 .clarityPaymentPass b {
-  align-self: end;
-  color: #06110b;
-  width: fit-content;
-  border-radius: 999px;
-  padding: 7px 10px;
-  font-size: 12px;
-  background: #ff9f2f;
+  color: #ff9f2f;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.1;
 }
 
 .clarityPaymentPass em {

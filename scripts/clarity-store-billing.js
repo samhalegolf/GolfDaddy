@@ -9,10 +9,16 @@
  * Inert on web: every entry point returns early unless GDNative reports native, so
  * the website keeps using Stripe exactly as before.
  *
- * Grants are never made from here. A purchase is only ever a signal to re-ask our
- * own backend what the user is entitled to; the entitlement itself is written by
- * the RevenueCat webhook after the receipt has been validated with the store. A
- * client that could grant its own access would be trivially spoofable. */
+ * Backend grants still come only from the RevenueCat webhook after the receipt
+ * has been validated with the store. What this file additionally holds, since the
+ * August 2026 App Store rejection under 5.1.1(v), is the DEVICE entitlement: a
+ * signed-out player may buy without registering (Apple requires this - a purchase
+ * is not an account-based feature), and their access is honoured from the store's
+ * own answer, customerInfo.entitlements, cached locally. That answer comes from
+ * the store via RevenueCat, not from anything the client asserts, so it is no
+ * more spoofable than the webhook path - and when the player later signs in,
+ * logIn() transfers the anonymous purchase to their account and the webhook
+ * writes the backend entitlement as before. */
 (function () {
   "use strict";
 
@@ -26,12 +32,20 @@
   var ENTITLEMENT_POLL_ATTEMPTS = 6;
   var ENTITLEMENT_POLL_DELAY_MS = 1200;
 
+  /* Device entitlement cache. Written only from customerInfo returned by the
+     store plugin (purchase, restore, logIn, getCustomerInfo) - never from user
+     input - and persisted so a signed-out member is not locked out between
+     launches while offline. Refreshed from the store on every boot, which is
+     how expiry and refunds catch up with the cache. */
+  var ENTITLEMENT_CACHE_KEY = "clarity:store-entitlement:v1";
+
   var config = null;
   var configured = false;
   var identifiedAs = "";
   var busy = false;
   var prices = null;        /* productKey -> localized store price, once loaded */
   var pricesLoading = false;
+  var deviceEntitlement = readEntitlementCache();
 
   function isNative() {
     return !!(window.GDNative && window.GDNative.isNative);
@@ -65,6 +79,63 @@
       };
     } catch (_e) {
       return null;
+    }
+  }
+
+  function readEntitlementCache() {
+    try {
+      var raw = localStorage.getItem(ENTITLEMENT_CACHE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (_e) {
+      return null;
+    }
+  }
+
+  /* Reduce a customerInfo to the one fact the app needs: is the configured
+     entitlement active, on what product, until when. Called with every
+     customerInfo the plugin hands back, so the cache can only ever say what the
+     store last said. */
+  function saveEntitlementFromCustomerInfo(customerInfo) {
+    try {
+      var entitlementId = config && config.entitlementId || "membership";
+      var active = customerInfo && customerInfo.entitlements && customerInfo.entitlements.active || {};
+      var entry = active[entitlementId] || null;
+      deviceEntitlement = entry ? {
+        active: true,
+        productId: String(entry.productIdentifier || ""),
+        expiresAt: entry.expirationDate ? String(entry.expirationDate) : "",
+        willRenew: entry.willRenew !== false,
+        updatedAt: new Date().toISOString()
+      } : { active: false, updatedAt: new Date().toISOString() };
+      localStorage.setItem(ENTITLEMENT_CACHE_KEY, JSON.stringify(deviceEntitlement));
+    } catch (_e) {}
+    refreshPaymentsUi();
+    return deviceEntitlement;
+  }
+
+  /* True when the store last said this device holds the entitlement and it has
+     not visibly expired. A subscription's expirationDate moves forward on each
+     renewal, so a stale "expired" answer only ever under-grants until the next
+     boot refresh - it never over-grants. Non-expiring grants have no date. */
+  function entitlementActive() {
+    if (!isNative()) return false;
+    var cached = deviceEntitlement;
+    if (!cached || !cached.active) return false;
+    if (cached.expiresAt) {
+      var expires = new Date(cached.expiresAt).getTime();
+      if (Number.isFinite(expires) && expires < Date.now()) return false;
+    }
+    return true;
+  }
+
+  async function refreshEntitlementFromStore() {
+    if (!available()) return deviceEntitlement;
+    try {
+      await ensureConfigured();
+      var result = await plugin().getCustomerInfo();
+      return saveEntitlementFromCustomerInfo(result && result.customerInfo);
+    } catch (_e) {
+      return deviceEntitlement;
     }
   }
 
@@ -109,8 +180,12 @@
       await ensureConfigured();
       if (identifiedAs === clean) return true;
       var api = plugin();
-      await api.logIn({ appUserID: clean });
+      /* logIn also TRANSFERS any anonymous purchase made on this device to the
+         account, which is what turns a signed-out App Store purchase into a
+         normal webhook-backed entitlement. */
+      var result = await api.logIn({ appUserID: clean });
       identifiedAs = clean;
+      if (result && result.customerInfo) saveEntitlementFromCustomerInfo(result.customerInfo);
       return true;
     } catch (_e) {
       /* Identification failing must not block sign-in; the user simply cannot
@@ -121,9 +196,18 @@
 
   async function signOut() {
     if (!isNative() || !configured) return false;
+    /* logOut throws when the current RevenueCat user is already anonymous, and a
+       device that never signed in stays anonymous by design - its purchase must
+       survive other people's sign-in/sign-out is not a case here because
+       identify() only ever runs for the signed-in account. */
+    if (!identifiedAs) return false;
     try {
-      await plugin().logOut();
+      var result = await plugin().logOut();
       identifiedAs = "";
+      /* The new anonymous user starts without the account's entitlement, and the
+         cache must say so - otherwise a shared iPad keeps the previous owner's
+         membership after they sign out. */
+      saveEntitlementFromCustomerInfo(result && result.customerInfo);
       return true;
     } catch (_e) {
       return false;
@@ -222,17 +306,16 @@
     if (!isNative()) return false;
     if (busy) return false;
 
+    /* No sign-in wall here. Apple rejected build 757 under 5.1.1(v) because the
+       only path to a purchase ran through registration. A signed-out purchase is
+       anonymous to RevenueCat; identify() transfers it to the account whenever
+       the player does sign in. */
     var account = currentAccount();
-    if (!account || !account.accountId) {
-      toast("Sign in before buying access");
-      try { if (window.gdOpenProfileV67) window.gdOpenProfileV67(); } catch (_e) {}
-      return false;
-    }
 
     busy = true;
     try {
       await ensureConfigured();
-      await identify(account.accountId);
+      if (account && account.accountId) await identify(account.accountId);
 
       var api = plugin();
       var cfg = await loadConfig();
@@ -243,17 +326,26 @@
       var pkg = findPackage(offerings, storeProductId, productKey);
       if (!pkg) throw new Error("That option is not available right now");
 
-      await api.purchasePackage({ aPackage: pkg });
+      var result = await api.purchasePackage({ aPackage: pkg });
 
-      /* Purchased on the store. Access still comes from our backend. */
-      var entitlement = await awaitEntitlement(account);
-      refreshPaymentsUi();
-      if (entitlement) {
-        toast("Membership active");
+      /* The store has confirmed the purchase; honour it on this device now. */
+      if (result && result.customerInfo) saveEntitlementFromCustomerInfo(result.customerInfo);
+
+      if (account && account.accountId) {
+        /* Signed in: the backend entitlement comes from the webhook. */
+        var entitlement = await awaitEntitlement(account);
+        refreshPaymentsUi();
+        if (entitlement) {
+          toast("Membership active");
+        } else {
+          /* The money was taken and the webhook has not landed yet. Say so plainly
+             rather than implying the purchase failed - it did not. */
+          toast("Purchase complete. Access will appear shortly.");
+        }
       } else {
-        /* The money was taken and the webhook has not landed yet. Say so plainly
-           rather than implying the purchase failed - it did not. */
-        toast("Purchase complete. Access will appear shortly.");
+        toast(entitlementActive()
+          ? "Membership active on this device"
+          : "Purchase complete. Access will appear shortly.");
       }
       return true;
     } catch (error) {
@@ -272,19 +364,20 @@
      app whose subscription cannot be recovered on a new device. */
   async function restore() {
     if (!isNative() || busy) return false;
+    /* Restore also works signed out - the store account, not the Clarity
+       account, is what owns the purchase being recovered. */
     var account = currentAccount();
-    if (!account || !account.accountId) {
-      toast("Sign in to restore purchases");
-      return false;
-    }
     busy = true;
     try {
       await ensureConfigured();
-      await identify(account.accountId);
-      await plugin().restorePurchases();
-      var entitlement = await awaitEntitlement(account);
-      toast(entitlement ? "Purchases restored" : "No purchases found to restore");
-      return !!entitlement;
+      if (account && account.accountId) await identify(account.accountId);
+      var result = await plugin().restorePurchases();
+      saveEntitlementFromCustomerInfo(result && result.customerInfo);
+      var restored = account && account.accountId
+        ? !!(await awaitEntitlement(account))
+        : entitlementActive();
+      toast(restored ? "Purchases restored" : "No purchases found to restore");
+      return restored;
     } catch (error) {
       if (error && error.userCancelled) return false;
       toast(error && error.message ? error.message : "Could not restore purchases");
@@ -307,6 +400,11 @@
     signOut: signOut,
     price: price,
     loadPrices: loadPrices,
+    /* The device-local answer: did the store last say this device holds the
+       entitlement? clarity-payments folds this into hasActiveAccess() so a
+       signed-out purchaser is a member on this device. */
+    entitlementActive: entitlementActive,
+    refreshEntitlement: refreshEntitlementFromStore,
     /* Exposed for the boot smoke test and for diagnostics. */
     __state: function () {
       return { configured: configured, identifiedAs: identifiedAs, busy: busy, native: isNative() };
@@ -318,7 +416,23 @@
      prices. Failure is silent by design - buy() reports it in context. */
   if (isNative()) {
     document.addEventListener("DOMContentLoaded", function () {
-      ensureConfigured().then(function () { return loadPrices(); }).catch(function () {});
+      ensureConfigured()
+        .then(function () { return refreshEntitlementFromStore(); })
+        .then(function () { return loadPrices(); })
+        .catch(function () {});
+    });
+
+    /* Keep RevenueCat's user in step with the Clarity session. Signing in
+       transfers any anonymous purchase to the account (identify -> logIn);
+       signing out drops back to a fresh anonymous user so the device does not
+       keep the departed account's membership. */
+    window.addEventListener("clarity:session-changed", function () {
+      var account = currentAccount();
+      if (account && account.accountId) {
+        identify(account.accountId).catch(function () {});
+      } else if (identifiedAs) {
+        signOut().catch(function () {});
+      }
     });
   }
 })();

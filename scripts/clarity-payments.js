@@ -163,10 +163,23 @@
   function durationLabel(hours) { var value = Number(hours); if (!Number.isFinite(value) || value <= 0) return ""; if (value % 720 === 0) return (value / 720) + " month" + (value === 720 ? "" : "s"); if (value % 24 === 0) return (value / 24) + " day" + (value === 24 ? "" : "s"); return value + " hour" + (value === 1 ? "" : "s"); }
   function daysUntil(value) { var date = value ? new Date(value).getTime() : NaN; if (!Number.isFinite(date)) return null; return Math.ceil((date - Date.now()) / (24 * 60 * 60 * 1000)); }
 
+  /* The store's own answer for this device, held by clarity-store-billing. A
+     purchase made without an account (Apple 5.1.1(v) requires that path) has no
+     backend entitlement to ask about - the device entitlement IS the record
+     until the player signs in and the purchase transfers to their account. */
+  function storeEntitlementActive() {
+    return safe(function () {
+      return !!(window.ClarityStoreBilling
+        && typeof window.ClarityStoreBilling.entitlementActive === "function"
+        && window.ClarityStoreBilling.entitlementActive());
+    }, false);
+  }
+
   function hasActiveAccess() {
     var activeAccount = account();
     if (isStaff(activeAccount)) return true;
-    return !!(status && status.active);
+    if (status && status.active) return true;
+    return storeEntitlementActive();
   }
 
   function accessLabel() {
@@ -182,6 +195,7 @@
     if (status && status.paymentState === "month_pass_active" && monthPass) return "Month Pass active";
     if (status && status.paymentState === "legacy_access_active") return "Legacy paid access active";
     if (status && status.paymentState === "paid_access_expired") return "Paid access expired";
+    if (storeEntitlementActive()) return activeAccount ? "Membership active" : "Membership active on this device";
     if (hasActiveAccess()) {
       var entitlement = bestEntitlement();
       if (entitlement) return "Paid access active";
@@ -204,7 +218,8 @@
     if (status && status.paymentState === "month_pass_active" && monthPass) return "Access until " + (formatDate(monthPass.expires_at) || "the pass expiry date") + ".";
     if (status && status.paymentState === "legacy_access_active") return "A still-valid older pass is providing access.";
     if (status && status.paymentState === "paid_access_expired") return "Choose how you would like to continue.";
-    return account() ? "Choose a pass or membership to unlock full Clarity Caddy access." : "Sign in before buying access.";
+    if (!account() && storeEntitlementActive()) return "Bought on this device. Create a free account to keep score and use your membership everywhere.";
+    return account() ? "Choose a pass or membership to unlock full Clarity Caddy access." : "Choose a pass or membership. No account is needed to buy.";
   }
 
   /* Which badge artwork matches the current paid state. Month Pass has its own
@@ -213,7 +228,7 @@
      active - and staff deliberately get no badge, because the badge describes
      a pass someone holds, not a role. */
   function accessBadge() {
-    if (!(status && status.active)) return null;
+    if (!(status && status.active) && !storeEntitlementActive()) return null;
     var state = String(status.paymentState || "");
     if (state === "month_pass_active" || state === "store_month_pass_active") {
       return { src: "assets/brand/clarity-month-pass-badge.png?v=fd5af913", alt: "Month Pass" };
@@ -726,6 +741,23 @@
     if (name === "payments") { render(); refresh({ silent: true }); loadReferralDashboard({ silent: true }); loadAdminSettings(); loadIssuedPasses({ silent: true }); }
   }
 
+  /* The one way to put the paywall on screen. showSection() alone only toggles
+     sections INSIDE the settings panel; if the panel is not open - and for a
+     signed-out player it never is - it toggled hidden flags on a hidden sheet
+     and the tap looked like nothing happened. Open the panel first, and open it
+     for everyone: Apple 5.1.1(v) forbids requiring registration to reach a
+     purchase, so gdOpenPlayerSettingsPanel accepts section:"payments" without
+     an account. */
+  function openPaywall() {
+    safe(function () {
+      if (typeof window.gdOpenPlayerSettingsPanel === "function") {
+        window.gdOpenPlayerSettingsPanel({ section: "payments" });
+      }
+    });
+    showSection("payments");
+    return false;
+  }
+
   function render() {
     installMenuRow();
     var panel = section();
@@ -748,6 +780,7 @@
       '<div class="clarityPaymentActions"><button class="secondary" type="button" onclick="ClarityPayments.refresh()">Refresh Status</button>'
         + (storeBillingBlocksWebCheckout() ? '<button class="secondary" type="button" onclick="ClarityPayments.restorePurchases()">Restore Purchases</button>' : '')
         + '</div>',
+      renderStoreSubscriptionTerms(),
       renderBillingNote(),
       renderLegalLinks(),
       isAdmin(activeAccount) ? renderAdminSettings() : ""
@@ -821,12 +854,40 @@
         onclick = "ClarityPayments.manageMembership()";
         disabledReason = "";
       }
+      /* Apple 3.1.2(c): the billed amount must be the most conspicuous pricing
+         element in the purchase flow, with the billing period stated plainly.
+         The <b> price is the card's largest element (styles/clarity-payments.css)
+         and carries its own period suffix so "NZ$14.99 / month" reads as one
+         fact. Trial or intro wording, if ever added, goes in the small print
+         BELOW the billed amount, never above or bigger. */
+      var billedPeriod = isMembershipProduct ? " / month" : " one-time";
+      /* Store prices arrive as a bare localized amount ("$14.99") and need the
+         period stated beside them; web price labels are written with it. */
+      var billed = storeBillingBlocksWebCheckout() && storePrice(key)
+        ? storePrice(key) + billedPeriod
+        : price;
       var lines = isMembershipProduct
-        ? ["Full access", "Renews monthly", "Cancel anytime"]
-        : ["One payment", "30 days full access", "No automatic renewal"];
-      return '<button class="clarityPaymentPass" type="button" ' + (disabledReason ? 'disabled title="' + escapeHTML(disabledReason) + '"' : 'onclick="' + onclick + '"') + '><strong>' + escapeHTML(product.name) + '</strong><span>' + lines.map(escapeHTML).join(" · ") + '</span><small>' + escapeHTML(disabledReason || product.description || durationLabel(product.duration_hours)) + '</small><b>' + escapeHTML(price) + '</b><em>' + escapeHTML(disabledReason || action) + '</em></button>';
+        ? ["Full access", "1-month subscription, renews automatically until cancelled"]
+        : ["Full access", "One payment for 30 days, does not renew"];
+      return '<button class="clarityPaymentPass" type="button" ' + (disabledReason ? 'disabled title="' + escapeHTML(disabledReason) + '"' : 'onclick="' + onclick + '"') + '><strong>' + escapeHTML(product.name) + '</strong><b>' + escapeHTML(billed) + '</b><span>' + lines.map(escapeHTML).join(" · ") + '</span><small>' + escapeHTML(disabledReason || product.description || durationLabel(product.duration_hours)) + '</small><em>' + escapeHTML(disabledReason || action) + '</em></button>';
     }).join("");
     return '<div class="clarityPaymentPassGrid">' + cards + '</div>';
+  }
+
+  /* The written subscription terms Apple 3.1.2 requires inside the purchase
+     flow: title, length, billed price, renewal behaviour, and how to cancel.
+     Store builds only - the web flow states its terms on the Stripe page. */
+  function renderStoreSubscriptionTerms() {
+    if (!storeBillingBlocksWebCheckout()) return "";
+    var store = window.GDNative && window.GDNative.platform === "android" ? "Google Play" : "App Store";
+    var monthly = storePrice("monthly_membership");
+    var pass = storePrice("month_pass");
+    return '<div class="clarityPaymentNote">Monthly Membership is a 1-month auto-renewing subscription'
+      + (monthly ? ", billed at " + escapeHTML(monthly) + " per month" : "")
+      + ". It renews automatically unless cancelled in your " + store
+      + " account settings at least 24 hours before the current month ends. One Month Pass is a single payment"
+      + (pass ? " of " + escapeHTML(pass) : "")
+      + " for 30 days of access and never renews.</div>";
   }
 
   function renderReferralSection() {
@@ -1219,7 +1280,7 @@
        something a membership covers. Without this the "Membership" button would
        drop them on the home screen to go and find it themselves. */
     var membership = params.get("membership") === "1";
-    if (membership) safe(function () { return showSection("payments"); });
+    if (membership) safe(function () { return openPaywall(); });
     if (payment || membership || handledReferral) safe(function () { var clean = window.location.pathname + window.location.hash; window.history.replaceState({}, document.title, clean || "/"); });
   }
 
@@ -1234,7 +1295,8 @@
     hasActiveAccess: hasActiveAccess,
     accessLabel: accessLabel,
     accessBadgeHTML: accessBadgeHTML,
-    showSettings: function () { return showSection("payments"); },
+    showSettings: openPaywall,
+    openPaywall: openPaywall,
     /* The one membership question for every member-only action. True means
        carry on; false means the membership panel is now open and the caller
        should stop.
@@ -1245,7 +1307,7 @@
     requireAccess: function (what) {
       if (hasActiveAccess()) return true;
       safe(function () { return window.toast && window.toast("A Clarity membership is needed to " + what + "."); });
-      showSection("payments");
+      openPaywall();
       return false;
     },
     reloadAdminSettings: loadAdminSettings,
