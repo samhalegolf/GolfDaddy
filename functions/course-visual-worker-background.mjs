@@ -777,6 +777,21 @@ async function heartbeatJob(job, progress) {
    pure bitmap ops, no engine, no nested base64 SVGs, no librsvg megaparse. Seconds per hole,
    ~50MB peak. The version directory is a deterministic hash of (recipe, snapshot) and
    already-uploaded frames are skipped, so an interrupted run resumes where it stopped. */
+/* One line for both the hole frames and the overview. The tone block only carries black/white
+   points and a gamma when the lighting pass actually ran - with lighting toggled off the
+   normaliser reports {applied:false, measuredMean} and nothing else, so the numbers are read
+   through `applied` rather than assumed to be there. */
+function normaliseLogLine(label, diagnostics) {
+  const t = diagnostics.tone || {}, tf = diagnostics.turf || {};
+  const tone = t.applied
+    ? "mean " + t.measuredMean.toFixed(1) + "->target " + t.brightnessTarget +
+      " black/white " + t.blackPoint.toFixed(1) + ".." + t.whitePoint.toFixed(1) + " gamma " + t.gamma
+    : "mean " + (Number.isFinite(t.measuredMean) ? t.measuredMean.toFixed(1) : "?") +
+      " lighting not applied (" + (t.reason || "unknown") + ")";
+  const turf = tf.applied ? "pull " + tf.pull + " coverage " + tf.coverage : "not applied (" + tf.reason + ")";
+  return "[visual-worker] normalise " + label + " " + tone + " turf " + turf;
+}
+
 async function runExportJob(job, deadlineAt) {
   const pkg = await loadCoursePackage(job.course_id);
   if (!pkg) throw new Error("course " + job.course_id + " not found in " + MAPS_TABLE);
@@ -911,12 +926,7 @@ async function runExportJob(job, deadlineAt) {
          (originPx + captureZoom + one image). The runtime does the play-axis framing, same
          as it does for locally captured surfaces. */
       const frame = await renderHoleSurfaceMercator({ pins, captures, terrain, settings, maxDim: EXPORT_RENDITION_PX });
-      if (frame.diagnostics) {
-        const t = frame.diagnostics.tone, tf = frame.diagnostics.turf;
-        console.log("[visual-worker] normalise h" + holeNumber + " mean " + t.measuredMean.toFixed(1) + "->target " + t.brightnessTarget +
-          " black/white " + t.blackPoint.toFixed(1) + ".." + t.whitePoint.toFixed(1) + " gamma " + t.gamma +
-          " turf " + (tf.applied ? "pull " + tf.pull + " coverage " + tf.coverage : "not applied (" + tf.reason + ")"));
-      }
+      if (frame.diagnostics) console.log(normaliseLogLine("h" + holeNumber, frame.diagnostics));
       await storageUpload(path, frame.jpeg, "image/jpeg");
       width = frame.width; height = frame.height; bytes = frame.jpeg.length;
       playSurface = {
@@ -959,12 +969,7 @@ async function runExportJob(job, deadlineAt) {
         terrain: terrainEntry ? { entry: terrainEntry, buffer: await bufferFor(terrainEntry) } : null,
         settings
       });
-      if (overview.diagnostics) {
-        const t = overview.diagnostics.tone, tf = overview.diagnostics.turf;
-        console.log("[visual-worker] normalise overview mean " + t.measuredMean.toFixed(1) + "->target " + t.brightnessTarget +
-          " black/white " + t.blackPoint.toFixed(1) + ".." + t.whitePoint.toFixed(1) + " gamma " + t.gamma +
-          " turf " + (tf.applied ? "pull " + tf.pull + " coverage " + tf.coverage : "not applied (" + tf.reason + ")"));
-      }
+      if (overview.diagnostics) console.log(normaliseLogLine("overview", overview.diagnostics));
       await storageUpload(overviewPath, overview.jpeg, "image/jpeg");
       framesIndex.overview = { path: overviewPath, width: overview.width, height: overview.height, bytes: overview.jpeg.length, bounds: backdropEntry.bounds };
     } else {
@@ -1076,5 +1081,6 @@ export const __test = {
   builtInPresetSettings,
   normalizeRecipe,
   recipeFromPublishedRow,
-  recipeFromLibraryRow
+  recipeFromLibraryRow,
+  normaliseLogLine
 };

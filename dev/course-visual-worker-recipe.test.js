@@ -88,6 +88,25 @@ async function loadTests() {
   assert.strictEqual(framesReady.framesReady, true);
   assert.strictEqual(framesReady.exportReady, true);
 
+  /* A recipe with lighting toggled off makes the normaliser report the tone pass as
+     {applied:false, measuredMean} - no blackPoint, whitePoint or gamma. The progress log used
+     to read those unconditionally and killed the whole export with "Cannot read properties of
+     undefined (reading 'toFixed')" the first time a terrain-only recipe went live. */
+  const litLine = worker.normaliseLogLine("h4", {
+    tone: { applied: true, measuredMean: 41.234, brightnessTarget: 52, blackPoint: 8.11, whitePoint: 93.77, gamma: 1.2 },
+    turf: { applied: true, pull: 1, coverage: 0.42 }
+  });
+  assert.ok(/mean 41\.2->target 52/.test(litLine) && /black\/white 8\.1\.\.93\.8/.test(litLine), "a lit frame still logs its measured numbers");
+
+  const unlitLine = worker.normaliseLogLine("h4", {
+    tone: { applied: false, reason: "lighting-disabled", measuredMean: 41.234 },
+    turf: { applied: false, reason: "turf-disabled" }
+  });
+  assert.ok(/lighting not applied \(lighting-disabled\)/.test(unlitLine), "lighting off logs the reason instead of missing numbers");
+  assert.ok(/turf not applied \(turf-disabled\)/.test(unlitLine), "and says the same about turf");
+
+  assert.doesNotThrow(() => worker.normaliseLogLine("overview", {}), "an empty diagnostics block never takes the export down");
+
   console.log("course-visual-worker-recipe passed");
 })().catch((error) => {
   console.error("course-visual-worker-recipe failed");
