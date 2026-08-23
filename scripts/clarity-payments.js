@@ -132,11 +132,18 @@
     render(); return referralState;
   }
 
+  /* These defaults are what a SIGNED-OUT player sees: refresh() needs a token,
+     so a guest never loads the server's product rows and renders from here.
+     monthly_membership used to default to active:false, which showed the
+     subscription card greyed out and unbuyable as "Not active yet" - to a guest,
+     and therefore to an App Store reviewer, who cannot sign in. The row in
+     payment_products has been active:true throughout; the default was simply
+     stale. Keep these in step with that table. */
   function products() {
     var rows = Array.isArray(settings && settings.products) ? settings.products : [];
     var defaults = {
       month_pass: { product_key: "month_pass", product_kind: "month_pass", name: "One Month Pass", description: "One payment for 30 days full access. No automatic renewal.", price_label: "One month", duration_hours: 720, billing_schedule: "one_time", active: true },
-      monthly_membership: { product_key: "monthly_membership", product_kind: "membership", name: "Monthly Membership", description: "Full access with monthly renewal. Cancel anytime.", price_label: "Monthly", duration_hours: 720, billing_schedule: "monthly", active: false }
+      monthly_membership: { product_key: "monthly_membership", product_kind: "membership", name: "Monthly Membership", description: "Full access with monthly renewal. Cancel anytime.", price_label: "Monthly", duration_hours: 720, billing_schedule: "monthly", active: true }
     };
     rows.forEach(function (product) {
       var key = String(product && product.product_key || "");
@@ -858,6 +865,12 @@
            web-only concern: the store path never touches a Price ID, so they
            must not disable a store card either. */
         price = storePrice(key) || "Price shown at purchase";
+        /* On a store build the store is the authority on what can be sold: if
+           RevenueCat returns a package, it is buyable, and buy() fails loudly if
+           it is not. A stale local "active" flag must not be able to grey out a
+           purchase the store would complete - that is a rejection, not a
+           safeguard. */
+        disabledReason = "";
       } else {
         if (rowPriceMalformed) disabledReason = "Invalid Price ID";
         if (!priceConfigured && !product.stripe_price_id) disabledReason = "Not linked yet";
