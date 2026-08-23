@@ -144,13 +144,14 @@
     /* Three flows, not two.
 
        Logging sits outside both of the others on purpose. It used to be Preview
-       wearing a finish mode, and that is what let general preview state into the
-       system: a tap near a green in Preview put you in green focus, so the mode
-       you were in depended on where your finger landed rather than on anything
-       you asked for. Preview now has exactly two modes and no way into a third.
+       wearing a finish mode, which is what let a tap decide whether the round
+       CHANGED: land near a green and the same Shot End button that was a look a
+       second ago wrote to the card.
 
-       Logging is entered ONLY from the picker's outstanding badge, does exactly
-       one thing, and puts you back where you were (§4.3). */
+       Preview still reaches green focus — that is a picture, and the picture is
+       right — but it can never write from there. Logging is entered ONLY from
+       the picker's outstanding badge, does exactly one thing, and puts you back
+       where you were (§4.3). One entrance to a write. */
     function flow() {
       if (S.logging) return "logging";
       return (S.live.hole !== null && S.viewHole === S.live.hole) ? "live" : "preview";
@@ -188,7 +189,10 @@
       if (flow() === "live") {
         return S.fix.point ? { lat: S.fix.point.lat, lng: S.fix.point.lng, stale: !S.fix.fresh } : null;
       }
-      var placed = S.preview.placement;
+      /* Green focus reached by tapping the green is still a placement — the ball
+         IS where you said you are — so the tools (pin distance, wind) have a
+         point to work from rather than a mode with nobody in it. */
+      var placed = S.preview.placement || (S.finish ? S.finish.ball : null);
       return placed ? { lat: placed.lat, lng: placed.lng, stale: false } : null;
     }
 
@@ -470,16 +474,29 @@
         if (flow() !== "preview" || S.preview.mode !== "setup") return false;
         var point = pt(p && p.point);
         if (!point) return false;
-        S.preview.placement = point;
-        /* Placing yourself always means the shot view, wherever you place it.
+        var r = rec();
 
-           It used to mean green focus when the tap landed within 40m of the
-           green, which read as a convenience and behaved as a trapdoor: the mode
-           you ended up in depended on where your finger went rather than on
-           anything you chose, and it dragged S.finish into Preview with it.
-           Logging an outcome now has one entrance — the picker's outstanding
-           badge — and Preview has nothing to do with it. */
-        S.preview.target = pt(defaultTarget(point, rec()));
+        /* Placing yourself ON the green means green focus, the same as walking
+           onto it with a fix does — same 40m, same picture, same draggable ball
+           and Shot End. Anything else would be a shot view whose start and
+           target are the same point: a bubble aiming at itself.
+
+           View only. Preview opens no shots, so Shot End here writes nothing
+           unless the hole already has an origin waiting for an outcome, which
+           FINISH_LOGGED decides on its own terms. The placement is deliberately
+           NOT set — leaving Preview with nothing placed means Back returns you
+           to the resting state with the pill up (§5). */
+        var toGreen = r && r.green ? metres(point, r.green) : null;
+        if (toGreen !== null && toGreen <= GREEN_FOCUS_M) {
+          S.finish = { hole: S.viewHole, ball: point, placed: true };
+          S.preview.target = null;
+          S.preview.mode = "finish";
+          syncEngine();
+          return true;
+        }
+
+        S.preview.placement = point;
+        S.preview.target = pt(defaultTarget(point, r));
         S.preview.mode = "aim";
         syncEngine();
         return true;
@@ -619,11 +636,12 @@
         var hole = S.finish.hole;
         var open = openShot(hole);
         var ball = S.finish.ball || S.fix.point;
-        /* Something outstanding: this is the real log, and it lands on the
-           Logged screen. Note the guard is "is there an open shot", not "which
-           flow" — catching up on an old hole happens FROM Preview (§4.3) and
-           must still record. */
-        if (open && ball) {
+        /* Live only, and only with something outstanding: this is the real log,
+           and it lands on the Logged screen. Catching up on a hole you are not
+           standing on is S.logging's job (§4.3), handled above — so Preview
+           reaching green focus is always a look, never a write, however it got
+           there. */
+        if (open && ball && flow() === "live") {
           completeShot(hole, open, ball, S.finish.placed ? "ball-placed" : "ball-tracked");
           S.finish = null;
           setMode("logged");
@@ -780,18 +798,20 @@
            the Tee was a one-way door: placed, bubble up, no pill, no way to
            change your mind short of leaving the hole.
 
-           Lock is Live-only (Preview has no shots to open) and so is Shot End
-           (Preview records nothing). Unlock is the one control both share. */
+           Lock is Live-only — Preview has no shots to open. The Shot End FACE
+           appears in Preview's green focus, because that is the way out of it,
+           but `canShotEnd` (the separate mid-aim button) stays Live-only: the
+           face closes a green, the button closes a shot. */
         dock: {
           show: m === "aim" || m === "finish" || (live && m === "track" && !!S.fix.point),
           face: m === "finish" ? "shotEnd" : (m === "aim" ? "unlock" : "lock"),
           canShotEnd: live && m === "aim" && !!S.fix.point
         },
 
-        /* Green focus for the hole you are ON, offered while there is something
-           outstanding on it. Live and resting only: while Aiming, Shot End is
-           already the thing to press, and Preview has no business here at all
-           now that catching up goes through the picker. */
+        /* The button that OPENS green focus for the hole you are on, offered
+           while there is something outstanding on it. Live and resting only:
+           while Aiming, Shot End is already the thing to press, and Preview
+           needs no button — tapping the green is how you get there. */
         finishControl: { show: live && m === "track" && !!openShot(S.viewHole) },
 
         finish: focus,

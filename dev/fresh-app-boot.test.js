@@ -1112,16 +1112,16 @@ async function bootCheck() {
       shotDist: Number(document.getElementById("shotDist").textContent),
       bubbleShown: gd.shown("aimBubble")
     };
-    /* And the green is not a trapdoor: Preview has SETUP and AIM and nothing
-       else, so standing yourself on the green is still the shot view. Green
-       focus belongs to Live arrival and to the picker's catch-up, both of
-       which need an open shot — and Preview can never open one. */
+    /* Placing yourself ON the green is green focus, the same picture a fix
+       arriving there gives you: ball, Shot End, green camera. It is a LOOK,
+       though - Preview can never open a shot, so there is nothing for Shot End
+       to close and nothing gets recorded. */
     await gd.send("UNLOCK");
     await gd.until(() => gd.scene().mode === "setup", "Preview to rest at SETUP");
     await gd.place({ lat: green.lat - 0.0002, lng: green.lng });
-    await gd.until(() => gd.scene().mode === "aim", "the green placement to be an ordinary AIM");
+    await gd.until(() => gd.scene().mode === "finish", "the green placement to open green focus");
     const onGreen = read();
-    const greenIsNotATrapdoor = {
+    const greenTapFocus = {
       offGreen: Math.round(gd.scene().hole.rec
         ? window.ClarityApp.distance.haversineMeters(gd.player(), gd.scene().hole.rec.green) : -1),
       ballVisible: gd.shown("greenFocusBall"),
@@ -1131,7 +1131,10 @@ async function bootCheck() {
       dockFace: document.getElementById("shotActionBtn").dataset.action,
       shotsRecorded: gd.shots(1).length
     };
-    return { atTee, lock, gpsHold, aimed, onGreen, greenIsNotATrapdoor };
+    /* Shot End here writes nothing and hands Preview back its resting state. */
+    await gd.send("FINISH_LOGGED", null, 150);
+    const afterGreenLook = { mode: gd.scene().mode, shotsRecorded: gd.shots(1).length };
+    return { atTee, lock, gpsHold, aimed, onGreen, greenTapFocus, afterGreenLook };
   }, AKARANA_H1);
 
   /* The dock's three faces, in Live, where all three exist. Track offers Lock;
@@ -1536,19 +1539,23 @@ async function bootCheck() {
   assert.ok(stages.aimed.shotRowShown, "aiming off the green shows the shot row");
   assert.ok(stages.aimed.shotDist > 80 && stages.aimed.shotDist < 140,
     "shot distance must be the start→target number, got " + stages.aimed.shotDist);
-  assert.ok(stages.greenIsNotATrapdoor.offGreen >= 0 && stages.greenIsNotATrapdoor.offGreen < 40,
+  assert.ok(stages.greenTapFocus.offGreen >= 0 && stages.greenTapFocus.offGreen < 40,
     "test setup: the placement must be inside the green-focus radius, got "
-    + stages.greenIsNotATrapdoor.offGreen + "m");
-  assert.strictEqual(stages.onGreen.mode, "aim",
-    "and it is still AIM - the mode must depend on what you asked for, not on where your finger landed");
-  assert.strictEqual(stages.onGreen.stage, "lock", "so the camera is still the shot view");
-  assert.ok(!stages.greenIsNotATrapdoor.ballVisible, "no ball: Preview has nothing to log");
-  assert.strictEqual(stages.greenIsNotATrapdoor.dockFace, "unlock",
-    "and the dock still offers Unlock, not a Shot End for a shot that does not exist");
-  assert.ok(stages.greenIsNotATrapdoor.holeOutGone,
+    + stages.greenTapFocus.offGreen + "m");
+  assert.strictEqual(stages.onGreen.mode, "finish",
+    "tapping the green opens green focus, the same as walking onto it with a fix");
+  assert.strictEqual(stages.onGreen.stage, "zoom", "so the camera frames the green");
+  assert.ok(stages.greenTapFocus.ballVisible, "there is a ball to drag");
+  assert.strictEqual(stages.greenTapFocus.dockFace, "shotEnd",
+    "and the dock offers Shot End, the same button GPS arrival gives you");
+  assert.ok(stages.greenTapFocus.holeOutGone,
     "Hole Out is collapsed into Shot End - there must be no second confirm button");
-  assert.strictEqual(stages.greenIsNotATrapdoor.shotsRecorded, 0,
+  assert.strictEqual(stages.greenTapFocus.shotsRecorded, 0,
     "Preview cannot open a shot - previewing hole 5 must never invent a shot on hole 5");
+  assert.strictEqual(stages.afterGreenLook.shotsRecorded, 0,
+    "and Shot End in Preview writes nothing - the green was a look");
+  assert.strictEqual(stages.afterGreenLook.mode, "setup",
+    "it hands Preview back its resting state, with the pill up");
   assert.strictEqual(shotEndWiring.tracking.face, "lock", "in Track the dock offers Lock");
   assert.strictEqual(shotEndWiring.tracking.stage, "hole", "Track is the pre-frame hole view");
   assert.strictEqual(shotEndWiring.lockStage, "lock", "Lock raises the locked shot view");

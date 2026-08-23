@@ -153,12 +153,15 @@ one glance: `FLOW live→preview ← VIEW_HOLE_CHANGED`.
 
 The purpose is to look at a hole and see what a shot from a spot looks like.
 
-It has two modes and you cycle between them:
+Three modes, and where you place yourself picks which:
 
 ```
-( SETUP ) ──── place yourself ────► ( AIM )
-     ▲                                 │
-     └────────── Unlock ───────────────┘
+                    place off the green
+( SETUP ) ─────────────────────────────────────► ( AIM )
+     ▲  │                                           │
+     │  └── place on the green ──► ( GREEN FOCUS )  │
+     │                                   │          │
+     └──────── Shot End / Back ──────────┴── Unlock ┘
 ```
 
 **SETUP** — the pill is up: *Head To the Tee* / *Tap where you're standing*.
@@ -172,25 +175,29 @@ of being here, so there is nothing to press. Drag to aim.
 with the pill up, so you can change your mind about the tee or tap somewhere
 else. That is its whole job in this flow.
 
-**Preview cannot open a shot.** There is no Lock here, and nothing you do
-creates a record — no Course Data, no pin, no scorecard. That is load-bearing,
-not a simplification: previewing hole 5 must never be able to invent a shot on
-hole 5, and you should be able to hand someone the phone to look at a hole
-without touching the round.
+**GREEN FOCUS** — placing yourself within 40m of the green gives you the green,
+not a shot view: the camera frames the putting surface, the ball is draggable,
+and the dock says Shot End. The same picture arriving there with a fix gives
+you, for the same reason — the alternative is a bubble whose start and target
+are the same point, aiming at itself.
 
-**Preview cannot log anything either.** It has exactly two modes and no way into
-a third.
+**But Preview still logs nothing.** Green focus reached by a tap is a LOOK.
+Preview opens no shots, so there is nothing for Shot End to close: it closes the
+green and hands Preview back its resting state, with the pill up and nothing
+written. It cannot reach across and close a shot on some other hole either —
+that is the picker's badge, §4.3, and it is the only entrance to a write.
 
-This is a correction. Preview used to grow a finish mode when a placement landed
-within 40m of a green — you tapped near the putting surface and got the ball and
-the Shot End button. It read as a convenience and behaved as a trapdoor: the
-mode you ended up in depended on where your finger went rather than on anything
-you chose, and it pulled `finish` state into a flow that is supposed to be inert.
-That is what "some general preview state leaking into the system" meant.
+So the rule the trapdoor broke still holds, stated properly. The old fault was
+never that a tap on the green opened green focus; it was that green focus in
+Preview could *record*, which made the mode your finger landed in decide whether
+the round changed. What you tap decides what you SEE. Only Live and the picker's
+badge decide what gets WRITTEN.
 
-Placing yourself now always means the shot view, wherever you place it. Closing
-a shot Live opened is a real and necessary thing to be able to do, but it is its
-own flow with its own entrance — §4.3.
+**Preview cannot open a shot.** There is no Lock here, and nothing you do in any
+of the three modes creates a record — no Course Data, no pin, no scorecard. That
+is load-bearing, not a simplification: previewing hole 5 must never be able to
+invent a shot on hole 5, and you should be able to hand someone the phone to
+look at a hole without touching the round.
 
 ---
 

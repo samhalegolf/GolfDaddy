@@ -20,6 +20,7 @@ function offsetM(base, northM, eastM) {
 const GREEN = offsetM(TEE, -300, 0);
 const H2_TEE = offsetM(TEE, -340, 60);
 const H2_GREEN = offsetM(TEE, -640, 60);
+const GREEN_3 = offsetM(TEE, -900, 0);
 
 const PKG = {
   status: "lite-geo-ready",
@@ -311,17 +312,49 @@ check("Unlock is how you change your mind about where you are playing from", () 
   assert.strictEqual(m.scene().bubble.start.lat.toFixed(5), moved.lat.toFixed(5));
 });
 
-/* Preview has exactly two modes. It used to grow a third when a tap landed
-   near a green, which meant the mode you were in depended on where your finger
-   went rather than on anything you chose — and it dragged the finish state into
-   a flow that records nothing. */
-check("standing on the green in Preview is still just Preview", () => {
+/* Placing yourself on the green means green focus, the same picture a fix
+   arriving there gives you: a draggable ball and Shot End. Anything else would
+   be a shot view whose start and target are the same point. */
+check("placing yourself on the green gives green focus", () => {
   const { m } = newRound();
-  m.signal("PLACED", { point: offsetM(GREEN, 8, 4) });
+  const onGreen = offsetM(GREEN, 8, 4);
+  m.signal("PLACED", { point: onGreen });
   const s = m.scene();
-  assert.strictEqual(s.mode, "aim", "placing yourself always means the shot view");
-  assert.strictEqual(s.finish.show, false, "no ball, no Shot End, nothing to log");
-  assert.strictEqual(s.dock.face, "unlock");
+  assert.strictEqual(s.mode, "finish");
+  assert.strictEqual(s.finish.show, true, "there is a ball to drag");
+  assert.strictEqual(s.finish.ball.lat.toFixed(5), onGreen.lat.toFixed(5));
+  assert.strictEqual(s.dock.face, "shotEnd");
+  assert.strictEqual(s.camera.stage, "green");
+  assert.strictEqual(s.bubble.show, false, "no bubble aiming at itself");
+});
+
+/* Green focus in Preview is a LOOK. Preview opens no shots, so there is never
+   anything for Shot End to close — and it must not reach across and close a
+   shot on a hole you are not standing on either. That is the picker's badge. */
+check("green focus in Preview writes nothing", () => {
+  const { m, effects } = playing();
+  m.signal("LOCK");                        // hole 1 has an open shot
+  m.signal("VIEW_HOLE_CHANGED", { hole: 1 });
+  assert.strictEqual(m.scene().flow, "live", "still standing on hole 1");
+  m.signal("VIEW_HOLE_CHANGED", { hole: 3 });
+  m.signal("PLACED", { point: offsetM(GREEN_3, 6, 0) });
+  assert.strictEqual(m.scene().mode, "finish");
+  m.signal("BALL_MOVED", { point: offsetM(GREEN_3, 2, 2) });
+  m.signal("FINISH_LOGGED");
+  assert.deepStrictEqual(m.shots(3), [], "nothing recorded on the hole you looked at");
+  assert.strictEqual(m.openShot(1) !== null, true, "and nothing closed on the hole you left");
+  assert.strictEqual(effects.completed.length, 0);
+  assert.strictEqual(m.scene().mode, "setup", "back to the resting state");
+});
+
+check("Back leaves Preview green focus with the pill up", () => {
+  const { m } = newRound();
+  m.signal("PLACED", { point: offsetM(GREEN, 5, 5) });
+  assert.strictEqual(m.signal("BACK"), true);
+  const s = m.scene();
+  assert.strictEqual(s.mode, "setup");
+  assert.strictEqual(s.finish.show, false);
+  assert.strictEqual(s.startPill.show, true, "nothing placed, so the pill is back");
 });
 
 check("Preview has no way into green focus at all", () => {
