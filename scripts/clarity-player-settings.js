@@ -151,6 +151,17 @@
     });
     safe(function () { if (window.openPanel) window.openPanel("playerSettingsPanel"); });
     render();
+    /* render() above only hides the sections IT owns. The payments section is
+       built and revealed by clarity-payments, whose showSection is installed
+       over window.gdPlayerSettingsShowSection - so a guest needs that call, or
+       the sheet opens with the menu hidden and nothing shown in its place. */
+    if (guestSection || opts.section === "payments") {
+      safe(function () {
+        if (typeof window.gdPlayerSettingsShowSection === "function") {
+          window.gdPlayerSettingsShowSection("payments");
+        }
+      });
+    }
     refreshButton();
     return false;
   }
