@@ -1,0 +1,4 @@
+/* Downloaded course imagery and rendered previews - regenerate with the two scripts here,
+   never commit. */
+data/
+out/

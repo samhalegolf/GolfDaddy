@@ -17,6 +17,11 @@ node_modules/
 __MACOSX/
 Thumbs.db
 
+# Per-machine Claude Code settings (tool permissions, local overrides). Only the
+# .local variant - .claude/settings.json is shared project config and SHOULD be
+# committed if this project ever adds one.
+.claude/settings.local.json
+
 # Local env
 .env
 .env.*
