@@ -76,6 +76,21 @@ behaviour, and how to cancel. Terms/Privacy links were already present
 Web cards keep their Stripe price labels untouched — the "/ month" suffix is
 only added to bare store prices.
 
+### One trap found while wiring RevenueCat
+
+`/api/store-config` reports `entitlementId: "membership"`, but the entitlement in
+the RevenueCat dashboard is identified as "Clarity Golf Member". A device
+entitlement lookup keyed on an exact match would therefore have found nothing,
+and a paid purchase would have granted no access on a signed-out device -
+silently, since the store call itself succeeds.
+
+`saveEntitlementFromCustomerInfo()` now prefers the configured id and falls back
+to ANY active entitlement. Clarity has one access tier, so "an entitlement is
+active" and "has full access" are the same statement. If a second tier is ever
+introduced this has to become an exact check again, and the comment there says
+so. Setting `REVENUECAT_ENTITLEMENT_ID` in Netlify to the real identifier is
+still worth doing for precision, but is no longer load-bearing.
+
 ## Tests
 
 - `dev/store-billing-client.test.js` gained a signed-out pass: a guest purchase

@@ -91,15 +91,22 @@
     }
   }
 
-  /* Reduce a customerInfo to the one fact the app needs: is the configured
-     entitlement active, on what product, until when. Called with every
-     customerInfo the plugin hands back, so the cache can only ever say what the
-     store last said. */
+  /* Reduce a customerInfo to the one fact the app needs: is this device
+     entitled, on what product, until when. Called with every customerInfo the
+     plugin hands back, so the cache can only ever say what the store last said.
+
+     The configured id is preferred, but ANY active entitlement counts. Clarity
+     has exactly one access tier - an entitlement being active means "has full
+     access", whatever it is called - and the id in RevenueCat is a display-level
+     name that has already drifted from the configured one once. Requiring an
+     exact match would mean a real, paid-for purchase silently granting nothing,
+     which is the worst failure this file can have. If a second tier is ever
+     added, this must become an explicit check again. */
   function saveEntitlementFromCustomerInfo(customerInfo) {
     try {
       var entitlementId = config && config.entitlementId || "membership";
       var active = customerInfo && customerInfo.entitlements && customerInfo.entitlements.active || {};
-      var entry = active[entitlementId] || null;
+      var entry = active[entitlementId] || active[Object.keys(active)[0]] || null;
       deviceEntitlement = entry ? {
         active: true,
         productId: String(entry.productIdentifier || ""),
