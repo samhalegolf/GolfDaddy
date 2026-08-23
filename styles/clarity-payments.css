@@ -77,6 +77,15 @@
   line-height: 1.1;
 }
 
+/* Stand-in shown only while the store has not returned a price. Deliberately
+   small and quiet - it is not a price, and must never be mistaken for the
+   billed amount (Apple 3.1.2(c)). */
+.clarityPaymentPass .clarityPaymentPricePending {
+  color: rgba(255, 255, 255, .52);
+  font-size: 12px;
+  font-style: normal;
+}
+
 .clarityPaymentPass em {
   color: rgba(255, 255, 255, .82);
   font-size: 12px;

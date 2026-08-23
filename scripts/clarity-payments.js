@@ -891,13 +891,22 @@
       var billedPeriod = isMembershipProduct ? " / month" : " one-time";
       /* Store prices arrive as a bare localized amount ("$14.99") and need the
          period stated beside them; web price labels are written with it. */
-      var billed = storeBillingBlocksWebCheckout() && storePrice(key)
-        ? storePrice(key) + billedPeriod
-        : price;
+      var onStore = storeBillingBlocksWebCheckout();
+      var billed = onStore && storePrice(key) ? storePrice(key) + billedPeriod : (onStore ? "" : price);
+      /* No price yet - the store has not answered, or the product is not live in
+         App Store Connect. Say so in SMALL print and leave the billed-amount
+         slot empty rather than filling it with a placeholder: Apple 3.1.2(c)
+         asks for the billed amount to be the clearest element on the card, and
+         a stand-in phrase set in the price's size and colour reads as a price
+         that is not one. An empty slot is honest; a fake one is a rejection. */
+      var billedNote = onStore && !storePrice(key) ? "Price shown at purchase" : "";
       var lines = isMembershipProduct
         ? ["Full access", "1-month subscription, renews automatically until cancelled"]
         : ["Full access", "One payment for 30 days, does not renew"];
-      return '<button class="clarityPaymentPass" type="button" ' + (disabledReason ? 'disabled title="' + escapeHTML(disabledReason) + '"' : 'onclick="' + onclick + '"') + '><strong>' + escapeHTML(product.name) + '</strong><b>' + escapeHTML(billed) + '</b><span>' + lines.map(escapeHTML).join(" · ") + '</span><small>' + escapeHTML(disabledReason || product.description || durationLabel(product.duration_hours)) + '</small><em>' + escapeHTML(disabledReason || action) + '</em></button>';
+      return '<button class="clarityPaymentPass" type="button" ' + (disabledReason ? 'disabled title="' + escapeHTML(disabledReason) + '"' : 'onclick="' + onclick + '"') + '><strong>' + escapeHTML(product.name) + '</strong>'
+        + (billed ? '<b>' + escapeHTML(billed) + '</b>' : '')
+        + (billedNote ? '<i class="clarityPaymentPricePending">' + escapeHTML(billedNote) + '</i>' : '')
+        + '<span>' + lines.map(escapeHTML).join(" · ") + '</span><small>' + escapeHTML(disabledReason || product.description || durationLabel(product.duration_hours)) + '</small><em>' + escapeHTML(disabledReason || action) + '</em></button>';
     }).join("");
     return '<div class="clarityPaymentPassGrid">' + cards + '</div>';
   }
