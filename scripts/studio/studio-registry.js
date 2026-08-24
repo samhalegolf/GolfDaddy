@@ -526,7 +526,7 @@
       function: "scripts/clarity-store.js is a generic local key/value wrapper (unconfirmed full scope). The real admin surface for storage is the Data Safety card (#clarityBackupCard, scripts/clarity-backup.js) — export/import this browser's local backup (profiles, coach/player links, course mapping, shot data, practice data, settings), reparented here from #developerPanel. No permission gate beyond reaching #developerPanel.",
       owner: "scripts/clarity-backup.js (Data Safety card) + scripts/clarity-store.js (unconfirmed full scope)",
       runtime: { app: true, studio: true, server: false },
-      code: [
+      code: [{ role: "Orphaned course data", path: "scripts/studio/system/storage/orphaned-course-data.js" }, 
         { role: "Data Safety export/import card (unmoved, reparented)", path: "scripts/clarity-backup.js" },
         { role: "Studio page (reparent host)", path: "scripts/studio/system/storage/storage-page.js" },
         { role: "Storage wrapper (unconfirmed full scope)", path: "scripts/clarity-store.js" }
