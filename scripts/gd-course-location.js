@@ -43,11 +43,29 @@
     const profile=safe(()=>typeof activePlayerProfile==="function"?activePlayerProfile():null,null);
     return account?.accountId||profile?.accountId||"";
   }
+  /* Null and "" are rejected BEFORE Number() sees them, because Number(null) is 0
+     and Number.isFinite(0) is true - so a record with no coordinates resolved to
+     {lat:0,lng:0} and every guard downstream accepted it, 0 being a perfectly
+     finite number. That is what sent the Te Arai map to Null Island: setView(0,0)
+     asked ArcGIS for World_Imagery tiles 131070-131073 at zoom 18, the middle of
+     the Gulf of Guinea, and every one of them 404'd. One /api/course-package call
+     went out with courseLat=0&courseLng=0 for the same reason.
+
+     The server already fixed this exact bug in selectNearestLoop; this copy never
+     got the same treatment, and guideCoursePoint asks GDCourseLocation FIRST, so
+     the hardened finiteCoordinatePair in gd-course-library-pin-lock.js never got
+     a turn. 0,0 is rejected outright as well - it is in the ocean, no golf course
+     is there, and it is the signature of exactly this class of mistake. */
   function finitePoint(point){
     if(!point)return null;
-    const lat=Number(point.lat??point.latitude);
-    const lng=Number(point.lng??point.lon??point.longitude);
-    return Number.isFinite(lat)&&Number.isFinite(lng)?{lat,lng}:null;
+    const rawLat=point.lat??point.latitude;
+    const rawLng=point.lng??point.lon??point.longitude;
+    if(rawLat==null||rawLat===""||rawLng==null||rawLng==="")return null;
+    const lat=Number(rawLat);
+    const lng=Number(rawLng);
+    if(!Number.isFinite(lat)||!Number.isFinite(lng))return null;
+    if(lat===0&&lng===0)return null;
+    return {lat,lng};
   }
   function pointFrom(input){
     if(!input||typeof input!=="object")return null;

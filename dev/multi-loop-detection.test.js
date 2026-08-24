@@ -120,27 +120,28 @@ test("the separation threshold sits between a green's span and a loop's gap", as
     "must be inside the query radius to be reachable at all");
 });
 
-test("the worker refuses to publish rather than saving a short course", () => {
+test("the worker separates a multi-course site before it considers refusing", () => {
   const fs = require("fs");
   const src = fs.readFileSync(path.join(ROOT, "functions", "course-mapper-worker-background.mjs"), "utf8");
   const idx = src.indexOf("let collision = detectHoleNumberCollision(payload);");
   assert.notStrictEqual(idx, -1, "the worker must run the detector");
-  /* The refusal used to be immediate. It is now the LAST resort: a 1400m sweep
-     at St Andrews returns six courses and refusing outright was the Balgove
-     failure, so the worker first tries keeping only the loop nearest the course
-     centre (selectNearestLoop) and refuses only if that cannot separate them.
-     `collision` is reassigned after tightening, hence `let`. */
+  /* The detector is no longer an error detector. A second course on the site is a
+     course to publish, not ambiguity to resolve, so the worker separates the loops
+     and publishes every one of them. The refusal survives only for the case that is
+     still genuinely unresolvable: separation could not tell the courses apart, and
+     the geometry resolver could not either. */
   const after = src.slice(idx);
-  const tightenAt = after.indexOf("selectNearestLoop(payload, course.center)");
+  const separateAt = after.indexOf("separateLoops(payload, course.center)");
   const refuseAt = after.indexOf("throw fail(");
-  assert.notStrictEqual(tightenAt, -1, "the worker must try to separate the loops before giving up");
-  assert.notStrictEqual(refuseAt, -1, "the refusal must survive for the cases tightening cannot fix");
-  assert.ok(tightenAt < refuseAt, "refusing before trying to separate is the bug this replaced");
+  assert.notStrictEqual(separateAt, -1, "the worker must try to separate the loops before giving up");
+  assert.notStrictEqual(refuseAt, -1, "the refusal must survive for the cases separation cannot fix");
+  assert.ok(separateAt < refuseAt, "refusing before trying to separate is the bug this replaced");
+  assert.notStrictEqual(after.indexOf("publishSeparatedLoops("), -1, "and every separated course must be published, not only the pinned one");
   /* Execution order, not file order: saveResolvedGeometry is DEFINED earlier in
      the file than runMapperJob, so comparing against its definition would pass
      for the wrong reason. What matters is that inside runMapperJob the check
      comes before the call that writes. */
-  const body = src.slice(src.indexOf("async function runMapperJob(job) {"));
+  const body = src.slice(src.indexOf("async function runMapperJob(job, origin) {"));
   const checkAt = body.indexOf("let collision = detectHoleNumberCollision(payload);");
   const writeAt = body.indexOf("await saveResolvedGeometry(");
   assert.notStrictEqual(writeAt, -1, "runMapperJob must still write geometry somewhere");

@@ -68,8 +68,13 @@ export function validHoleNumber(value) {
   return Number.isFinite(h) && h >= 1 && h <= 36 ? Math.round(h) : null;
 }
 
+/* NFD-normalised before the character filter, because [^a-z0-9] does not eat a
+   macron - it eats the letter WITH the macron and the space beside it. "Te Arai
+   Links" (with the macron on the A) slugged to "te-rai", a course id that is not
+   the course's name and reads as a typo, and every accented club in the world
+   had the same problem waiting. */
 export function slug(s) {
-  return String(s || "item").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "item";
+  return String(s || "item").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "item";
 }
 
 /* ---------- course identity / duplicate matching (gd-course-library-pin-lock.js:763-1073) - */
@@ -367,7 +372,7 @@ export function detectHoleNumberCollision(payload) {
   /* The clusters ARE the neighbouring courses. This used to compute them, take a
      count off them and drop them on the floor, which meant the one piece of
      evidence that could separate a 27-hole site from its neighbour never left
-     the function - see selectNearestLoop below, which is the whole reason to
+     the function - see separateLoops below, which is the whole reason to
      keep them. */
   const clusters = [];
   byNumber.forEach((centres, number) => {
@@ -403,77 +408,236 @@ export function detectHoleNumberCollision(payload) {
   };
 }
 
-/* Tighten onto the one course the player asked for.
+/* Separate a multi-course site into its courses - all of them.
  *
- * A 1400m sweep at St Andrews Links returns SIX courses, every one of them with
- * holes numbered 1-18, and the mapper's only answer was to refuse - which is
- * what the Balgove run did. But the payload already contains everything needed
- * to tell them apart: detectHoleNumberCollision clusters each hole number by
- * location, and those clusters are the six courses.
+ * This replaces selectNearestLoop, which kept one course and discarded the rest.
+ * That was the wrong shape twice over.
  *
- * So instead of refetching at a smaller radius - another call on a shared,
- * goodwill-funded API, with a radius nobody can pick correctly in advance -
- * keep the payload and drop the loops that are not ours. For each hole number,
- * ours is the cluster nearest the course centre. Same effect as tightening,
- * deterministic, and free.
+ * It was wrong in method: it clustered EACH HOLE NUMBER independently and kept,
+ * per number, whichever cluster sat nearest the pin. Nothing constrained the
+ * kept numbers to come from the same course. At St Andrews, where the six
+ * courses are far apart, per-number-nearest happens to agree every time and it
+ * looked like loop selection. At Te Arai Links, whose two 18s run alongside each
+ * other through the same dunes, "nearest" flipped between courses hole by hole
+ * and produced a set belonging to neither: holes 9, 10, 12, 13, 16, 17.
  *
- * The pin is the whole discriminator, which is the honest limitation: a pin in
- * the wrong place picks the wrong cluster for every hole and produces a course
- * assembled from six. The caller must check the result is spatially coherent
- * before publishing it - see courseFitVerdict's holes-scattered rule - and ask
- * the player to place a pin when it is not. */
-export function selectNearestLoop(payload, centre) {
-  const elements = (payload && payload.elements) || [];
-  /* Both coordinates, and null/"" rejected before Number() sees them: Number(null)
-     is 0 and Number.isFinite(0) is true, so a centre-less course would have
-     clustered against Null Island and kept whichever loop happened to be nearest
-     the Gulf of Guinea. */
-  const at = centre ? [centre.lat, centre.lng] : [];
-  if (at.length !== 2 || at.some(v => v === null || v === undefined || v === "" || !Number.isFinite(Number(v)))) return null;
+ * It was wrong in intent: a second course on the site is not ambiguity to be
+ * resolved, it is a course to be published. The player picks which one they are
+ * playing from the course list, the same way they pick between two clubs, and
+ * /api/courses-near already lists them that way. The pin screen stays for what
+ * it is for - the mapped location being wrong.
+ *
+ * Two ways to separate, in order of preference:
+ *
+ *   containment  The payload already carries the site's golf=course /
+ *                leisure=golf_course polygons with full geometry and names,
+ *                requested by osmGuideQuery and until now reduced to a bounding
+ *                box. Assigning each hole to the polygon that contains it is
+ *                exact, deterministic, and free - and the polygon's name tag is
+ *                the course's real name rather than one we invented.
+ *
+ *   routing      When the site maps one polygon over both courses. Proximity
+ *                clustering is NOT the fallback: single-link chaining merges two
+ *                interleaved courses the moment any hole of one sits within
+ *                LOOP_SEPARATION_M of any hole of the other, which at a links
+ *                site is immediate - that is the failure being replaced, not a
+ *                fix for it. Instead this uses the property that makes a loop a
+ *                loop: hole N ends where hole N+1 begins. Walking 1..18 and
+ *                keeping each chain on its own nearest continuation separates
+ *                courses that are physically interleaved, because adjacency
+ *                along the routing is what distinguishes them, not adjacency in
+ *                space.
+ *
+ * Every hole-scoped feature is partitioned, not just the numbered hole ways.
+ * selectNearestLoop filtered golf=hole and passed everything else through
+ * untouched, so its "tightened" Te Arai payload held 16 mixed guides competing
+ * against all 32 greens from BOTH courses - twice the candidates each guide
+ * should have seen, half of them on the wrong course. That is why 16 guides
+ * resolved to 6 holes. Fix the clustering but keep the passthrough and the same
+ * failure returns wearing better code. */
 
-  const byNumber = new Map();
-  const passthrough = [];
-  elements.forEach(element => {
+function pointInRing(point, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const yi = ring[i].lat, xi = ring[i].lng, yj = ring[j].lat, xj = ring[j].lng;
+    if ((yi > point.lat) !== (yj > point.lat)
+      && point.lng < ((xj - xi) * (point.lat - yi)) / ((yj - yi) || Number.EPSILON) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/* The site's course polygons, each with the name that should become the course's
+   own. Rings under 4 points are tagging noise and cannot contain anything. */
+export function coursePolygonsFrom(payload) {
+  return ((payload && payload.elements) || [])
+    .filter(element => {
+      const t = (element && element.tags) || {};
+      return String(t.golf || "").toLowerCase() === "course" || String(t.leisure || "").toLowerCase() === "golf_course";
+    })
+    .map(element => ({
+      ref: String(element.type || "way") + "/" + String(element.id || ""),
+      name: String((element.tags && element.tags.name) || "").trim(),
+      holesTag: Number(element.tags && element.tags.holes) || null,
+      ring: osmGuidePointsFromElement(element)
+    }))
+    .filter(polygon => polygon.ring.length >= 4);
+}
+
+function holeFeatures(payload) {
+  const list = [];
+  ((payload && payload.elements) || []).forEach(element => {
     const tags = (element && element.tags) || {};
-    const number = String(tags.golf || "").toLowerCase() === "hole" ? osmGuideHoleRef(tags.ref || tags.name) : null;
-    const point = number ? centroidOfPoints(osmGuidePointsFromElement(element)) : null;
-    if (!number || !point) { passthrough.push(element); return; }
-    if (!byNumber.has(number)) byNumber.set(number, []);
-    byNumber.get(number).push({ element, point });
+    if (String(tags.golf || "").toLowerCase() !== "hole") return;
+    const number = osmGuideHoleRef(tags.ref || tags.name);
+    const centre = centroidOfPoints(osmGuidePointsFromElement(element));
+    if (!number || !centre) return;
+    const points = osmGuidePointsFromElement(element);
+    list.push({ element, number, centre, start: points[0] || centre, end: points[points.length - 1] || centre });
   });
+  return list;
+}
 
-  const kept = [];
-  const siblingCentres = [];
-  let dropped = 0;
-  byNumber.forEach(entries => {
-    const clusters = [];
-    entries.forEach(entry => {
-      const near = clusters.find(cluster => cluster.some(member => distance(member.point, entry.point) <= LOOP_SEPARATION_M));
-      if (near) near.push(entry); else clusters.push([entry]);
+function assignByContainment(features, polygons) {
+  /* Smallest containing polygon wins: a site often maps one facility outline
+     over two course outlines, and the course is the tighter of the two. */
+  const areaRank = polygons.map(polygon => ({
+    polygon,
+    span: spanOfRing(polygon.ring)
+  })).sort((a, b) => a.span - b.span);
+  const buckets = new Map();
+  let placed = 0;
+  features.forEach(feature => {
+    const hit = areaRank.find(entry => pointInRing(feature.centre, entry.polygon.ring));
+    if (!hit) return;
+    if (!buckets.has(hit.polygon.ref)) buckets.set(hit.polygon.ref, { polygon: hit.polygon, features: [] });
+    buckets.get(hit.polygon.ref).features.push(feature);
+    placed += 1;
+  });
+  if (buckets.size < 2 || placed < features.length * 0.6) return null;
+  return [...buckets.values()].map(bucket => ({
+    name: bucket.polygon.name,
+    osmRef: bucket.polygon.ref,
+    holesTag: bucket.polygon.holesTag,
+    features: bucket.features,
+    method: "containment"
+  }));
+}
+
+function spanOfRing(ring) {
+  let south = Infinity, west = Infinity, north = -Infinity, east = -Infinity;
+  ring.forEach(p => {
+    south = Math.min(south, p.lat); north = Math.max(north, p.lat);
+    west = Math.min(west, p.lng); east = Math.max(east, p.lng);
+  });
+  return distance({ lat: south, lng: west }, { lat: north, lng: east });
+}
+
+function assignByRouting(features, loopCount) {
+  if (loopCount < 2) return null;
+  const byNumber = new Map();
+  features.forEach(feature => {
+    if (!byNumber.has(feature.number)) byNumber.set(feature.number, []);
+    byNumber.get(feature.number).push(feature);
+  });
+  const numbers = [...byNumber.keys()].sort((a, b) => a - b);
+  const seedNumber = numbers.find(number => byNumber.get(number).length >= loopCount);
+  if (!seedNumber) return null;
+
+  const chains = byNumber.get(seedNumber).slice(0, loopCount).map(feature => ({ features: [feature], tip: feature.end }));
+  numbers.forEach(number => {
+    if (number === seedNumber) return;
+    const candidates = byNumber.get(number).slice();
+    /* Best pair first, so a hole that is unambiguous for one chain is not stolen
+       by another chain that merely reached it earlier in the loop. */
+    const pairs = [];
+    chains.forEach((chain, ci) => candidates.forEach((candidate, qi) => {
+      pairs.push({ ci, qi, away: distance(chain.tip, candidate.start) });
+    }));
+    pairs.sort((a, b) => a.away - b.away);
+    const usedChain = new Set(), usedCandidate = new Set();
+    pairs.forEach(pair => {
+      if (usedChain.has(pair.ci) || usedCandidate.has(pair.qi)) return;
+      usedChain.add(pair.ci); usedCandidate.add(pair.qi);
+      chains[pair.ci].features.push(candidates[pair.qi]);
+      chains[pair.ci].tip = candidates[pair.qi].end;
     });
-    if (clusters.length < 2) { clusters.forEach(cluster => cluster.forEach(e => kept.push(e.element))); return; }
-    const scored = clusters.map(cluster => ({ cluster, centre: centroidOfPoints(cluster.map(e => e.point)) }));
+  });
+  return chains.map(chain => ({ name: "", osmRef: "", holesTag: null, features: chain.features, method: "routing" }));
+}
+
+/* Non-hole features - greens, tees, fairways, bunkers, water - go to the loop
+   whose holes they actually sit among. Anything that belongs to no loop in
+   particular (the clubhouse pond, a practice green) is copied to every loop:
+   resolveCourseGeometry already discards greens it cannot pair, and withholding
+   a green from the loop that needed it is the more expensive mistake. */
+function partitionSupportingElements(payload, loops) {
+  const holeElements = new Set();
+  loops.forEach(loop => loop.features.forEach(feature => holeElements.add(feature.element)));
+  const shared = [];
+  const buckets = loops.map(() => []);
+  ((payload && payload.elements) || []).forEach(element => {
+    if (holeElements.has(element)) return;
+    const tags = (element && element.tags) || {};
+    const golf = String(tags.golf || "").toLowerCase();
+    const isCourseOutline = golf === "course" || String(tags.leisure || "").toLowerCase() === "golf_course";
+    const centre = centroidOfPoints(osmGuidePointsFromElement(element));
+    if (isCourseOutline || !centre) { shared.push(element); return; }
     let best = null;
-    scored.forEach(entry => {
-      const away = entry.centre ? distance(centre, entry.centre) : Infinity;
-      if (!best || away < best.away) best = { away, entry };
+    loops.forEach((loop, index) => {
+      loop.features.forEach(feature => {
+        const away = distance(centre, feature.centre);
+        if (!best || away < best.away) best = { away, index };
+      });
     });
-    scored.forEach(entry => {
-      if (entry === best.entry) entry.cluster.forEach(e => kept.push(e.element));
-      else { dropped += entry.cluster.length; if (entry.centre) siblingCentres.push(entry.centre); }
-    });
+    if (!best) { shared.push(element); return; }
+    buckets[best.index].push(element);
+  });
+  return { buckets, shared };
+}
+
+/* Hole numbers running 1..n with nothing missing. A loop that fails this was not
+   separated correctly, and publishing it is how Te Arai shipped six holes as a
+   finished course. Checked here rather than at the caller so no path can skip it. */
+export function loopIsContiguous(numbers) {
+  const unique = [...new Set(numbers)].sort((a, b) => a - b);
+  if (!unique.length) return false;
+  return unique[0] === 1 && unique[unique.length - 1] === unique.length;
+}
+
+export function separateLoops(payload, centre) {
+  const features = holeFeatures(payload);
+  if (!features.length) return null;
+
+  const collision = detectHoleNumberCollision(payload);
+  const polygons = coursePolygonsFrom(payload);
+  const groups = assignByContainment(features, polygons) || assignByRouting(features, collision.loops);
+  if (!groups || groups.length < 2) return null;
+
+  const { buckets, shared } = partitionSupportingElements(payload, groups);
+
+  const loops = groups.map((group, index) => {
+    const numbers = group.features.map(feature => feature.number);
+    const loopCentre = centroidOfPoints(group.features.map(feature => feature.centre));
+    return {
+      name: group.name,
+      osmRef: group.osmRef,
+      holesTag: group.holesTag,
+      method: group.method,
+      centre: loopCentre,
+      holeNumbers: [...new Set(numbers)].sort((a, b) => a - b),
+      contiguous: loopIsContiguous(numbers),
+      awayFromPinM: loopCentre && centre ? Math.round(distance(centre, loopCentre)) : null,
+      payload: Object.assign({}, payload, {
+        elements: group.features.map(feature => feature.element).concat(buckets[index], shared)
+      })
+    };
   });
 
-  if (!dropped) return null;
-  return {
-    payload: Object.assign({}, payload, { elements: passthrough.concat(kept) }),
-    keptHoleFeatures: kept.length,
-    droppedHoleFeatures: dropped,
-    /* Deduped loosely - many hole numbers contribute a centre for the same
-       neighbouring course, and chooseAutoMapGuides only needs somewhere to
-       measure towards. */
-    siblingCentres
-  };
+  /* Nearest first, so a caller that has to pick one - the row the job was
+     enqueued against - picks the one the player pinned. */
+  loops.sort((a, b) => (a.awayFromPinM ?? Infinity) - (b.awayFromPinM ?? Infinity));
+  loops.forEach((loop, index) => { loop.index = index; });
+  return loops;
 }
 
 export function osmGuidePointsFromElement(element) {

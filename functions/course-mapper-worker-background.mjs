@@ -26,7 +26,7 @@
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { courseFitVerdict, courseFitMessage } from "./lib/gd-course-fit-core.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, selectNearestLoop, scopeContainsFrame, osmScopeFrame, expandOsmFrame, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, separateLoops, loopIsContiguous, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
@@ -263,7 +263,113 @@ function golfFeatureCounts(payload) {
    shapes but no hole numbers at all. */
 const WIDER_RETRY_PAD_M = 700;
 
-async function runMapperJob(job) {
+/* Publish every course a separated site produced.
+ *
+ * The mapper has never created a course_maps row - saveResolvedGeometry PATCHes an
+ * existing one and throws when there is none, because rows are created by the picker
+ * when a player selects a course. A site with two courses only ever had one row, so
+ * publishing both means inserting the siblings here.
+ *
+ * The pinned loop keeps the row this job was enqueued against, so the player who
+ * started the scan gets geometry in the course they actually selected rather than a
+ * course that appeared beside it. Its name is corrected to the loop's own OSM name
+ * when there is one; its course_id is left alone, because ids are referenced by
+ * visuals, shot events and captured surfaces and renaming one orphans all three.
+ *
+ * osm_course_ref is the stable identity across rescans. Names get edited in OSM and
+ * slugs move with them; element ids do not. Matched before the slug for that reason. */
+async function findExistingLoopRow(loop, courseId) {
+  if (loop.osmRef) {
+    const byRef = await supabaseFetch(MAPS_TABLE + "?select=course_id&osm_course_ref=eq." + encodeURIComponent(loop.osmRef) + "&limit=1").catch(() => null);
+    if (Array.isArray(byRef) && byRef.length) return byRef[0].course_id;
+  }
+  const bySlug = await supabaseFetch(MAPS_TABLE + "?select=course_id&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => null);
+  return Array.isArray(bySlug) && bySlug.length ? bySlug[0].course_id : null;
+}
+
+function loopCourseId(loop, course, index) {
+  if (loop.name) {
+    const fromName = slug(loop.name);
+    /* A polygon named for the whole site tells the courses apart no better than a
+       number does, so fall through rather than minting two identical ids. */
+    if (fromName && fromName !== slug(course.courseName || "") && fromName !== course.courseId) return fromName;
+  }
+  return slug(course.courseId + "-course-" + (index + 1));
+}
+
+async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecardEvidence, origin) {
+  const published = [];
+  const otherCentres = loops.map(loop => loop.centre).filter(Boolean);
+  for (let index = 0; index < loops.length; index++) {
+    const loop = loops[index];
+    await heartbeatJob(job, { stage: "publishing-course-" + (index + 1) + "-of-" + loops.length });
+    /* index 0 is the pinned loop - separateLoops sorts by distance from the pin. */
+    const isPinned = index === 0;
+    const derivedId = loopCourseId(loop, course, index);
+    const courseId = isPinned ? course.courseId : (await findExistingLoopRow(loop, derivedId)) || derivedId;
+    const siblings = otherCentres.filter(centre => centre !== loop.centre);
+    const geometry = resolveCourseGeometry(loop.payload, courseId, loop.centre || course.center, [], siblings);
+
+    const row = {
+      course_id: courseId,
+      course_name: loop.name || course.courseName || courseId,
+      course_lat: loop.centre ? loop.centre.lat : course.center.lat,
+      course_lng: loop.centre ? loop.centre.lng : course.center.lng,
+      osm_course_ref: loop.osmRef || null,
+      objects_json: geometry.objects,
+      holes_json: geometry.holes,
+      geometry_version: MAPPER_VERSION,
+      hole_count: Object.keys(geometry.holes || {}).length || null,
+      published: true,
+      updated_at: new Date().toISOString()
+    };
+    /* The pinned row exists by definition and must not have its name replaced by a
+       blank one when the polygon carried no name. */
+    if (isPinned && !loop.name) delete row.course_name;
+
+    if (isPinned) {
+      await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
+        method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(row)
+      });
+    } else {
+      /* on_conflict + merge-duplicates so a rescan updates the sibling it created last
+         time instead of failing on its primary key. */
+      await supabaseFetch(MAPS_TABLE + "?on_conflict=course_id", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+        body: JSON.stringify([Object.assign({ id: "published::" + courseId, published_at: new Date().toISOString() }, row)])
+      });
+    }
+
+    const courseBounds = courseBoundsFor({ courseId, objects: geometry.objects, holes: geometry.holes });
+    const holeNumbers = Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite);
+    const visualChain = await chainVisualSnapshot(courseId, courseBounds, origin)
+      .catch(error => ({ chained: false, reason: String(error && error.message || error).slice(0, 300) }));
+
+    published.push({
+      courseId,
+      courseName: row.course_name || course.courseName || courseId,
+      osmRef: loop.osmRef || null,
+      pinned: isPinned,
+      method: loop.method,
+      holesResolved: geometry.holesResolved,
+      guidesFound: geometry.guidesFound,
+      greensFound: geometry.greensFound,
+      saved: geometry.saved,
+      /* Contiguity is judged on what SURVIVED resolution, not on what separation
+         handed over - the Te Arai run had 16 guides and six holes, and only the
+         second number was ever the truth about the course. */
+      contiguous: loopIsContiguous(holeNumbers),
+      holeNumbers: holeNumbers.sort((a, b) => a - b),
+      awayFromPinM: loop.awayFromPinM,
+      courseBounds,
+      visualChain
+    });
+  }
+  return published;
+}
+
+async function runMapperJob(job, origin) {
   const course = await loadCourseCenter(job.course_id);
   if (!course) throw new Error("course " + job.course_id + " has no known location in " + MAPS_TABLE + " - cannot query Overpass");
   /* Everything learned along the way, attached to any throw via fail() so the default
@@ -302,25 +408,28 @@ async function runMapperJob(job) {
   diagnostics.expectedHoles = expectedHoles;
   const warnings = [];
 
-  /* Hole numbers repeating at separated locations - the multi-nine case.
+  /* Hole numbers repeating at separated locations - a site with more than one course.
    *
-   * This was the one failure that was worse than failing: Royal Auckland's
-   * three loops are each numbered 1-9 in OSM, they collapsed into nine holes
-   * because everything keys by hole number, and with no scorecard and no OSM
-   * holes=N tag there was no expectedHoles to notice the shortfall. The job
-   * said done and a 27-hole course published as 9.
+   * This used to be treated as ambiguity: keep one loop, discard the rest, and refuse
+   * outright when that could not be done safely. Both halves were wrong. A second course
+   * on the site is not a problem to resolve, it is a course to publish - the player picks
+   * which one they are playing from the course list, exactly as they pick between two
+   * clubs, and /api/courses-near already lists nearby courses that way. The pin screen
+   * stays for the case it exists for: the mapped location being wrong.
    *
-   * OSM numbering is unusable here by definition, so this now hands off to the
-   * Native Geometry Resolver, which ignores OSM refs and derives physical
-   * numbering from scorecard distances - exactly the evidence a multi-nine
-   * site needs, and the handoff this refusal's own message always asked for
-   * ("physical numbering needs a scorecard"). Refusing remains the honest
-   * answer when that path cannot work: no shared scorecard, or a resolver
-   * answer that cannot beat the collapsed count - a partial course presented
-   * as a whole one is still worse than no course. */
+   * So the collision detector stops being an error detector and becomes a router:
+   *
+   *   numbers unique across the site   one course, however many holes. North Shore is 27
+   *                                    holes numbered 1-27; one row plus a start hole.
+   *   numbers repeat, far apart        N courses. Te Arai Links is two 18s each numbered
+   *                                    1-18; Royal Auckland is three loops. N rows.
+   *
+   * Same function, same output, no longer a failure. */
   let collision = detectHoleNumberCollision(payload);
   let resolverStatus = null;
+  let loops = null;
   if (collision.multiLoop) {
+    loops = separateLoops(payload, course.center);
     diagnostics.collision = {
       loops: collision.loops,
       collidedHoles: collision.collidedHoles,
@@ -328,38 +437,46 @@ async function runMapperJob(job) {
       distinctNumbers: collision.distinctNumbers,
       holeFeatures: collision.holeFeatures
     };
-    /* Before refusing, try keeping only the loop nearest the course centre.
-       A 1400m sweep at St Andrews returns six courses all numbered 1-18 and the
-       Balgove run died on exactly that - but the payload in hand already
-       separates them, so this costs no second Overpass call. The pin is the
-       discriminator; if it is wrong the result will not be spatially coherent
-       and courseFitVerdict below refuses it and asks the player to place one. */
-    const tightened = selectNearestLoop(payload, course.center);
-    if (tightened) {
-      const afterTightening = detectHoleNumberCollision(tightened.payload);
-      const tightGeometry = afterTightening.multiLoop ? null : resolveCourseGeometry(
-        tightened.payload, course.courseId, course.center, existingObjects,
-        siblingCentres.concat(tightened.siblingCentres)
-      );
-      /* Adopted whenever it resolved anything, NOT when it beat the untightened
-         count. The untightened run can happily report 18 holes assembled from
-         six different courses - one guide per number, each picked from whichever
-         loop happened to win - and that number is meaningless. One unambiguous
-         loop beats a confident average of six. */
-      if (tightGeometry && tightGeometry.holesResolved > 0) {
-        geometry = tightGeometry;
-        payload = tightened.payload;
-        collision = afterTightening;
-        queryStages.push("tightened-to-nearest-loop");
-        diagnostics.tightened = {
-          keptHoleFeatures: tightened.keptHoleFeatures,
-          droppedHoleFeatures: tightened.droppedHoleFeatures,
-          holesResolved: tightGeometry.holesResolved
-        };
-        diagnostics.osmFeatures = golfFeatureCounts(payload);
-      }
+    if (loops) {
+      diagnostics.separated = loops.map(loop => ({
+        name: loop.name || null,
+        osmRef: loop.osmRef || null,
+        method: loop.method,
+        holes: loop.holeNumbers.length,
+        contiguous: loop.contiguous,
+        awayFromPinM: loop.awayFromPinM
+      }));
     }
   }
+
+  /* Every separated course published, the pinned one into the row this job was enqueued
+     against so the player's own selection resolves immediately, the rest into rows of
+     their own. Returns early: the single-course path below has nothing left to do. */
+  if (loops && loops.length > 1) {
+    const published = await publishSeparatedLoops(job, course, loops, expectedHoles, scorecardEvidence, origin);
+    diagnostics.published = published.map(entry => ({ courseId: entry.courseId, holes: entry.holesResolved, contiguous: entry.contiguous }));
+    const short = published.filter(entry => !entry.contiguous);
+    if (short.length) {
+      warnings.push(short.length + " of " + published.length + " separated courses did not resolve a contiguous 1..n hole set"
+        + " (" + short.map(entry => entry.courseId + ": " + entry.holesResolved).join(", ") + ") - separation is not trustworthy here");
+    }
+    return {
+      courseId: course.courseId,
+      mapperVersion: MAPPER_VERSION,
+      multiCourse: true,
+      coursesPublished: published,
+      queryStages,
+      expectedHoles,
+      warnings: warnings.length ? warnings : undefined,
+      diagnostics
+    };
+  }
+
+  /* One loop and still colliding means separation could not tell the courses apart -
+     interleaved beyond what routing continuity can follow, or one course mapped twice.
+     The Native Geometry Resolver is the remaining option: it ignores OSM refs entirely
+     and derives numbering from scorecard distances, which is the evidence this case
+     needs. Refusing stays the honest answer when that cannot work. */
   if (collision.multiLoop) {
     await heartbeatJob(job, { stage: "geometry-resolver" });
     const result = await resolveCourseGeometryForAutoMapper({
@@ -374,33 +491,26 @@ async function runMapperJob(job) {
     resolverStatus = { status: result.status, confidence: result.confidence, warnings: result.warnings, hadScorecard: !!scorecardEvidence, trigger: "multi-loop" };
     diagnostics.resolverStatus = resolverStatus;
     const guides = (result.holes || []).map(hole => guideFromResolvedHole(hole, result)).filter(Boolean);
-    /* Publishable only when the resolver genuinely separated the loops - more holes than the
-       collapsed count the collision measured. Anything less keeps the refusal. */
     if (guides.length > collision.distinctNumbers) {
       const resolverGreens = (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon }));
       const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, existingObjects);
       geometry = Object.assign({}, geometry, merged, { holesResolved: guides.length });
     } else {
-      /* The verdict rides on the failure too. Without it the picker sees only
-         status:"failed" and a sentence, never learns the coordinate was the
-         problem, and never offers the one thing that would fix it. This IS the
-         case the pin exists for. */
       diagnostics.fit = Object.assign(
         courseFitVerdict({ collision, expectedHoles, holesResolved: 0, courseBounds: null }),
         { message: courseFitMessage({ trusted: false, reason: "multiple-courses", detail: { loops: collision.loops } }) }
       );
       throw fail(
-        "multi-loop course: hole number" + (collision.collidedHoles.length === 1 ? " " : "s ")
+        "multi-course site: hole number" + (collision.collidedHoles.length === 1 ? " " : "s ")
         + collision.collidedHoles.join(", ")
         + " appear in " + collision.loops + " separate locations up to "
         + collision.widestSeparationM + "m apart"
         + " - " + collision.holeFeatures + " hole features resolve to only "
         + collision.distinctNumbers + " distinct numbers."
+        + " Loop separation could not tell the courses apart"
         + (scorecardEvidence
-          ? " Geometry resolver ran on scorecard evidence but resolved only " + guides.length + " holes (status: " + result.status + ") - not enough to separate the loops."
-          : " No shared scorecard to derive physical numbering from - share one for this course and remap.")
-        + " (A neighbouring course inside the query radius looks the same and is"
-        + " also not safe to publish.)"
+          ? ", and the geometry resolver returned only " + guides.length + " holes (status: " + result.status + ")."
+          : ", and there is no shared scorecard to derive physical numbering from - share one for this course and remap.")
       );
     }
   }
@@ -469,6 +579,9 @@ async function runMapperJob(job) {
     collision,
     expectedHoles,
     holesResolved: geometry.holesResolved,
+    /* The hole numbers themselves, so the verdict can notice a set that does not
+       run 1..n without needing a scorecard to compare against. */
+    holeNumbers: Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite),
     courseBounds
   });
   /* Carried rather than rebuilt client-side: the player is being asked to do
@@ -493,7 +606,12 @@ async function runMapperJob(job) {
     /* Carried on the result so chainVisualSnapshot below can run the licensing check without
        re-reading the row it just wrote, and so a job's record shows what ground the mapper
        actually covered. */
-    courseBounds
+    courseBounds,
+    /* On success too, not only on failure. Diagnostics used to ride on error.diagnostics
+       alone, so the run that most needed explaining recorded the least: Te Arai published
+       six holes of a 36-hole site with status "done" and kept no record of what separation
+       dropped. A job that succeeded and was wrong is exactly the case this exists for. */
+    diagnostics
   };
 }
 
@@ -545,13 +663,18 @@ export default async function courseMapperWorker(req) {
   let job = await claimJob(payload && payload.jobId || null);
   while (job) {
     try {
-      const result = await runMapperJob(job);
+      const result = await runMapperJob(job, origin);
       /* Chained BEFORE finishJob so the outcome rides on the job's own result row - a course
          whose frames never appeared should say why in the same place everything else about
          the run is recorded. The catch keeps the contract above: geometry saved means the
          job is "done", whatever the visual queue thought of it. */
-      result.visualChain = await chainVisualSnapshot(job.course_id, result.courseBounds, origin)
-        .catch(error => ({ chained: false, reason: String(error && error.message || error).slice(0, 300) }));
+      /* A multi-course run chained a snapshot per published course inside
+         publishSeparatedLoops, where the per-course bounds live; chaining the parent
+         again here would queue a job for a course_id that now holds only one of them. */
+      if (!result.multiCourse) {
+        result.visualChain = await chainVisualSnapshot(job.course_id, result.courseBounds, origin)
+          .catch(error => ({ chained: false, reason: String(error && error.message || error).slice(0, 300) }));
+      }
       await finishJob(job.id, { status: "done", result, error: null });
     } catch (error) {
       console.error("course-mapper-worker job failed", job.id, error);

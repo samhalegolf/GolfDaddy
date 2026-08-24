@@ -11,12 +11,16 @@
  * deliberately answers with one boolean plus a reason rather than a set of
  * flags for the client to weigh - the caller has one decision to make.
  *
- * Three ways a pin proves itself wrong, all from facts the mapper already
+ * Four ways a pin proves itself wrong, all from facts the mapper already
  * computes:
  *
  *   multiple-courses    the same hole number turned up in two places far apart,
  *                       so the sweep covered more than one course and we cannot
  *                       tell which one was meant
+ *   holes-not-contiguous  the holes do not run 1..n - we have a fragment of a
+ *                       course rather than a course. Needs no outside evidence
+ *                       at all, which is why it catches what the other three
+ *                       miss; see the rule itself for the Te Arai case
  *   scorecard-mismatch  the club's own scorecard says 18 and we resolved 11
  *   holes-scattered     the holes span more ground than a golf course occupies,
  *                       so some of them belong to a neighbour
@@ -66,6 +70,32 @@ export function courseFitVerdict(facts) {
       widestSeparationM: Number(collision.widestSeparationM) || null
     });
   }
+  /* Holes that do not run 1..n.
+   *
+   * The cheapest check available and the only one here that needs no outside
+   * evidence at all - not a scorecard, not an OSM holes tag, just the numbers
+   * already in hand. Te Arai Links published holes 9, 10, 12, 13, 16, 17 as a
+   * finished course: six holes, highest number 17, no hole 1, gaps at 11, 14 and
+   * 15. Every other rule below missed it. scorecard-mismatch needed an
+   * expectedHoles that was null because the course has no shared card and no
+   * holes tag, and holes-scattered measures span, which a FRAGMENT never trips -
+   * those six holes covered 982m against a 6000m ceiling. A max-span test can
+   * only ever catch collecting too much; this is the one that catches collecting
+   * too little.
+   *
+   * Coverage rather than ground: the holes we did find are real and in the right
+   * place, there are just not enough of them, so a playable partial map must stay
+   * playable - same reasoning as scorecard-mismatch. */
+  const numbers = Array.isArray(f.holeNumbers)
+    ? [...new Set(f.holeNumbers.map(Number).filter(Number.isFinite))].sort((a, b) => a - b)
+    : null;
+  if (numbers && numbers.length && (numbers[0] !== 1 || numbers[numbers.length - 1] !== numbers.length)) {
+    return untrusted("holes-not-contiguous", "coverage", {
+      holesResolved: numbers.length,
+      highestHole: numbers[numbers.length - 1],
+      missing: Array.from({ length: numbers[numbers.length - 1] }, (_, i) => i + 1).filter(n => !numbers.includes(n))
+    });
+  }
   if (expected > 0 && resolved > 0 && resolved < expected) {
     return untrusted("scorecard-mismatch", "coverage", { expectedHoles: expected, holesResolved: resolved });
   }
@@ -102,6 +132,10 @@ export function courseFitMessage(verdict) {
   if (verdict.reason === "scorecard-mismatch") {
     return "Found " + d.holesResolved + " holes but the scorecard says " + d.expectedHoles
       + ". Pin the course so we map the right ground.";
+  }
+  if (verdict.reason === "holes-not-contiguous") {
+    return "Found " + d.holesResolved + " holes numbered up to " + d.highestHole
+      + " - this course is not complete. Pin the one you are playing.";
   }
   if (verdict.reason === "holes-scattered") {
     return "The holes found are too spread out to be one course. Pin the one you are playing.";
