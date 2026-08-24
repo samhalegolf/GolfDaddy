@@ -107,6 +107,29 @@ export function siblingCourseLinks(html, pageUrl, courseName) {
   return [...out.keys()].slice(0, 4);
 }
 
+/* Is this card actually for the course we asked about?
+ *
+ * A Brave search for "Te Arai Links" returned bluegolf.com's scorecard for AYREN
+ * Links Golf Club - a different club on another continent - and it parsed cleanly,
+ * scored well, and went into the pool the loop matcher chooses from. A wrong card
+ * that parses is more dangerous than a page that fails, because everything
+ * downstream treats it as evidence.
+ *
+ * Checked on the club words the page itself claims, not on the URL: an aggregator
+ * path is often a slug of the right club while the page is about another. */
+export function cardNameMatchesCourse(cardName, courseName) {
+  const stop = /^(golf|club|course|the|and|at|links|country|resort|of|scorecard|detailed|database|north|south|east|west|old|new)$/i;
+  const words = text => String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && !stop.test(w));
+  const wanted = words(courseName);
+  if (!wanted.length) return true;
+  const got = new Set(words(cardName));
+  const hits = wanted.filter(word => got.has(word)).length;
+  /* Every distinctive word, so "Te Arai" clears and "Ayren" does not. One-word
+     club names still work because the bar is the whole set, however small. */
+  return hits === wanted.length;
+}
+
 /* course_scorecards.course_key is the DISPLAY NAME lowercased and whitespace-
    collapsed, NOT the dash-slug every other table uses. Must stay byte-identical to
    scorecardCourseKey() in course-mapper-worker-background.mjs or a card written
@@ -175,6 +198,10 @@ export async function resolveScorecard(course, deps) {
        "18 hole, par 72" is the field three of the mapper's guards depend on. */
     if (card && card.statedHoleCount && !out.statedHoleCount) out.statedHoleCount = card.statedHoleCount;
     if (!quality.usable) continue;
+    if (!cardNameMatchesCourse(card.name, name)) {
+      out.attempts[out.attempts.length - 1].rejected = "name-mismatch:" + (card.name || "").slice(0, 60);
+      continue;
+    }
     parsed.push(Object.assign({}, card, { sourceUrl: candidate.url, source: source.id, quality: quality.score }));
   }
 

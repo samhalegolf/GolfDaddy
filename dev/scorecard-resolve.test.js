@@ -20,7 +20,10 @@ const SOUTH_ROWS = [
 function scorecardHtml(rows) {
   const header = ["Hole", 1, 2, 3, 4, 5, 6, 7, 8, 9, "Out", 10, 11, 12, 13, 14, 15, 16, 17, 18];
   const tr = cells => "<tr>" + cells.map(c => "<td>" + c + "</td>").join("") + "</tr>";
-  return "<html><body><h1>South Course Scorecard</h1><table>"
+  /* Real aggregator pages always name the club - the resolver now checks that the
+     card is for the course it asked about, after a Brave search for "Te Arai Links"
+     returned a cleanly-parsing scorecard for AYREN Links Golf Club. */
+  return "<html><body><h1>Te Arai Links Golf Club - South Course Scorecard</h1><table>"
     + tr(header) + rows.map(tr).join("")
     + "</table><p>The 18 hole, par 72 golf course.</p></body></html>";
 }
@@ -89,6 +92,19 @@ function scorecardHtml(rows) {
   assert.strictEqual(
     r.courseNameFromHtml("<h1>Te Arai Links Golf Club - South Course in Tomarata, Auckland | GolfPass</h1>"),
     "Te Arai Links Golf Club - South Course", "the location and site suffix are trimmed");
+
+  /* ---------- a card for a DIFFERENT club is rejected ----------------- */
+  assert.strictEqual(r.cardNameMatchesCourse("Te Arai Links Golf Club - North Course", "Te Ārai Links"), true,
+    "macron in the query, none on the page - still the same club");
+  assert.strictEqual(r.cardNameMatchesCourse("Ayren Links Golf Club - Detailed Scorecard", "Te Arai Links"), false,
+    "the real false positive: a cleanly-parsing card for another club entirely");
+  assert.strictEqual(r.cardNameMatchesCourse("Tara Iti Golf Club", "Te Arai Links"), false, "the neighbour is not the course");
+  const wrongClub = await r.resolveScorecard({ courseName: "Te Arai Links" }, {
+    search: async () => [{ url: "https://course.bluegolf.com/x/ayrenlinksgc/detailedscorecard.htm" }],
+    fetchHtml: async () => scorecardHtml(SOUTH_ROWS).replace("Te Arai Links Golf Club - South Course", "Ayren Links Golf Club")
+  });
+  assert.strictEqual(wrongClub.cards.length, 0, "a wrong-club card must never reach the pool the matcher chooses from");
+  assert(String(wrongClub.attempts[0].rejected || "").startsWith("name-mismatch"), "and the job row must say why");
 
   /* ---------- the cache short-circuits everything ---------------------- */
   let fetched = false;

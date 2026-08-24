@@ -110,6 +110,20 @@ const BIRDIES_NORTH_BACK = [
     [north, south]
   );
   assert.strictEqual(result.resolved, true, "the assignment is confident: " + JSON.stringify(result.score));
+  /* The same two loops against a pool that also holds two irrelevant cards. This
+     used to fail: permuting ALL the cards made the runner-up the SAME mapping with
+     the spare cards shuffled behind it, so the margin was exactly 0 and every
+     multi-card site was refused as "cards-too-alike". */
+  const filler = n => ({ name: n, holes: Array.from({ length: 18 }, (_, i) => ({ hole: i + 1, par: 4, distanceM: 320 })) });
+  const withSpares = match.matchLoopsToCards(
+    [asLoop(south, "loop-a", 1.06), asLoop(north, "loop-b", 1.06)],
+    [north, south, filler("Somewhere Else GC"), filler("Another Club")]
+  );
+  assert.strictEqual(withSpares.resolved, true, "spare cards in the pool must not tie the match: " + withSpares.reason);
+  assert(withSpares.margin > 0, "the runner-up must be a DIFFERENT assignment, not the same one reshuffled");
+  const spareByLoop = Object.fromEntries(withSpares.assignment.map(p => [p.loopId, p.cardName]));
+  assert.strictEqual(spareByLoop["loop-a"], "South Course");
+  assert.strictEqual(spareByLoop["loop-b"], "North Course");
   const byLoop = Object.fromEntries(result.assignment.map(p => [p.loopId, p.cardName]));
   assert.strictEqual(byLoop["loop-a"], "South Course", "the loop measured off the South card matches the South");
   assert.strictEqual(byLoop["loop-b"], "North Course", "and the North to the North");

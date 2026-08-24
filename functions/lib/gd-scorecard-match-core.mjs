@@ -256,11 +256,22 @@ export function scorePairing(loop, card, shares) {
   };
 }
 
-function permutations(list) {
-  if (list.length <= 1) return [list];
+/* Every way to give each loop its own distinct card - ordered selections of size
+   `take` from `list`, not full permutations of everything.
+ *
+ * Permuting all the cards was wrong whenever there were more cards than loops, and
+ * that is the normal case: the resolver keeps up to four. With two loops and four
+ * cards, 24 permutations collapse to 12 distinct loop->card mappings, so the top
+ * two "rival" assignments were routinely the SAME mapping with the unused cards
+ * shuffled behind it. Their scores were therefore identical, the margin came out at
+ * exactly 0, and matchLoopsToCards refused every multi-card site with
+ * "cards-too-alike" - including Te Arai, where the South and North cards are par 72
+ * and par 71 and could hardly be more distinguishable. */
+export function injections(list, take) {
+  if (take <= 0) return [[]];
   const out = [];
   list.forEach((item, index) => {
-    permutations(list.slice(0, index).concat(list.slice(index + 1)))
+    injections(list.slice(0, index).concat(list.slice(index + 1)), take - 1)
       .forEach(rest => out.push([item].concat(rest)));
   });
   return out;
@@ -299,11 +310,12 @@ export function matchLoopsToCards(loops, cards) {
   })));
 
   const cardIndexes = cardList.map((_, index) => index);
-  const scored = permutations(cardIndexes)
+  /* Shorter side governs: three loops and two cards leaves one loop unnamed rather
+     than forcing a card onto it. */
+  const take = Math.min(loopList.length, cardList.length);
+  const scored = injections(cardIndexes, take)
     .map(order => {
-      /* Shorter side governs: three loops and two cards leaves one loop unnamed
-         rather than forcing a card onto it. */
-      const pairs = loopList.map((loop, li) => (li < order.length ? grid[li][order[li]] : null)).filter(Boolean);
+      const pairs = order.map((cardIndex, li) => grid[li][cardIndex]);
       if (!pairs.length) return null;
       return { pairs, score: pairs.reduce((sum, pair) => sum + pair.score, 0) / pairs.length };
     })
@@ -328,4 +340,4 @@ export function matchLoopsToCards(loops, cards) {
   };
 }
 
-export const __scorecardMatchCoreTest = { permutations, sharedHoles, total };
+export const __scorecardMatchCoreTest = { injections, sharedHoles, total };
