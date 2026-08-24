@@ -802,6 +802,11 @@
       '<div class="clarityPaymentActions"><button class="secondary" type="button" onclick="ClarityPayments.refreshStatusAndPrices()">Refresh Status</button>'
         + (storeBillingBlocksWebCheckout() ? '<button class="secondary" type="button" onclick="ClarityPayments.restorePurchases()">Restore Purchases</button>' : '')
         + '</div>',
+      /* Store-build diagnostic, written into the page rather than a toast: a
+         TestFlight device has no console, and the one time this matters is
+         exactly when something is silently wrong. Shows only while prices are
+         missing. */
+      renderStoreDiagnostics(),
       renderStoreSubscriptionTerms(),
       renderBillingNote(),
       renderLegalLinks(),
@@ -823,6 +828,20 @@
         + '. Access unlocks once the purchase is confirmed.</div>';
     }
     return '<div class="clarityPaymentNote">Card details are handled by Stripe Checkout. Clarity unlocks access only after the Stripe webhook creates a Supabase entitlement.</div>';
+  }
+
+  function renderStoreDiagnostics() {
+    if (!storeBillingBlocksWebCheckout()) return "";
+    var billing = window.ClarityStoreBilling;
+    if (!billing || typeof billing.diagnostics !== "function") return "";
+    /* Only when something is wrong - a paywall with prices needs no caption. */
+    var anyPrice = safe(function () {
+      return !!(billing.price("monthly_membership") || billing.price("month_pass"));
+    }, false);
+    if (anyPrice) return "";
+    var text = safe(function () { return String(billing.diagnostics() || ""); }, "");
+    if (!text) return "";
+    return '<div class="clarityPaymentNote" style="opacity:.75">Store: ' + escapeHTML(text) + '</div>';
   }
 
   /* Apple 3.1.2 wants both documents reachable from the purchase flow itself. */
