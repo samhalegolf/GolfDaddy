@@ -23,15 +23,23 @@
     return node;
   }
 
+  /* The same token the admin Course Database uses. gd-admin-course-db.js is loaded
+     unwrapped (Studio-only, no IIFE), so its helper is already global - calling it
+     keeps one definition of "how Studio authenticates" rather than a second guess
+     at where the session lives. The inline fallback is the same two steps, for the
+     case where this panel is loaded without that file. */
   async function accessToken() {
     try {
-      if (window.GDSupabaseAuth && typeof window.GDSupabaseAuth.getAccessToken === "function") {
-        return await window.GDSupabaseAuth.getAccessToken();
-      }
+      if (typeof gdAdminCourseDbAccessToken === "function") return await gdAdminCourseDbAccessToken();
     } catch (e) {}
     try {
-      var raw = localStorage.getItem("gd_supabase_session");
-      return raw ? (JSON.parse(raw) || {}).access_token || "" : "";
+      var auth = window.ClaritySupabaseAuth;
+      if (auth && typeof auth.freshAccessToken === "function") {
+        var fresh = await auth.freshAccessToken();
+        if (fresh) return String(fresh);
+      }
+      var session = auth && typeof auth.session === "function" ? auth.session() : null;
+      return String((session && (session.access_token || session.accessToken)) || "");
     } catch (e) { return ""; }
   }
 
@@ -137,7 +145,9 @@
         status.textContent = orphans.length + " orphaned course(s), " + payload.totalBytesLabel + " of files.";
         orphans.forEach(function (orphan) { list.appendChild(row(orphan)); });
       }).catch(function (error) {
-        status.textContent = "Could not load: " + error.message;
+        status.textContent = /admin sign-in/i.test(error.message || "")
+          ? "Admin sign-in required — this panel reads the Clarity Supabase session, not the Studio ADMIN badge."
+          : "Could not load: " + error.message;
       });
     }
 
