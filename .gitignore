@@ -48,3 +48,4 @@ deno.lock
 # only, never meant to be committed. 18 stray .git/index.lock-style files
 # ended up tracked from here in the past; this stops that happening again.
 _to_delete/
+iap-review-screenshot-2048x2732.png

@@ -60,8 +60,11 @@
   font-size: 17px;
 }
 
+/* The pass cards render on the app's gold module-button gradient
+   (.moduleCard button in gd-app-base.css), so every colour here is dark-on-gold.
+   Light text on that background is what made the prices near-invisible. */
 .clarityPaymentPass span {
-  color: rgba(255, 255, 255, .66);
+  color: rgba(6, 16, 11, .78);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -71,9 +74,9 @@
    largest text on the card - larger than the product name, with every other
    pricing detail in subordinate small print below it. Do not shrink it. */
 .clarityPaymentPass b {
-  color: #ff9f2f;
+  color: #06110b;
   font-size: 24px;
-  font-weight: 800;
+  font-weight: 900;
   line-height: 1.1;
 }
 
@@ -81,16 +84,18 @@
    small and quiet - it is not a price, and must never be mistaken for the
    billed amount (Apple 3.1.2(c)). */
 .clarityPaymentPass .clarityPaymentPricePending {
-  color: rgba(255, 255, 255, .52);
+  color: rgba(6, 16, 11, .58);
   font-size: 12px;
   font-style: normal;
 }
 
 .clarityPaymentPass em {
-  color: rgba(255, 255, 255, .82);
-  font-size: 12px;
+  color: #06110b;
+  font-size: 13px;
   font-style: normal;
-  font-weight: 800;
+  font-weight: 900;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .clarityPaymentActions {
@@ -140,7 +145,7 @@
 }
 
 .clarityPaymentPass small {
-  color: rgba(255, 255, 255, .52);
+  color: rgba(6, 16, 11, .62);
   font-size: 11px;
 }
 
