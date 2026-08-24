@@ -42,6 +42,53 @@ export const COURSE_FIT_MAX_SPAN_M = 6000;
    features with one hole number are OSM tagging the same hole twice. */
 export const COURSE_FIT_LOOP_SEPARATION_M = 250;
 
+/* Standard complete hole counts. A course is 9, 18, 27 or 36 holes; nothing else
+   is a finished round of golf. Real short courses exist - Balgove is 9, Boulcott's
+   Summerset Six is 6 - but they are complete AT their own count, which is what a
+   scorecard is for. Absent a card, a non-standard count is a scan that stopped
+   early far more often than it is a genuinely odd course. */
+export const STANDARD_HOLE_COUNTS = [9, 18, 27, 36];
+
+/* Is this course complete enough to present as a finished map?
+ *
+ * Two ways to be complete, in order of authority:
+ *
+ *   the card    The club says 18 and we resolved 18. That is the answer, and it is
+ *               the only one that can vouch for a course whose real count is odd -
+ *               a 6-hole course with a 6-hole card is complete.
+ *   the shape   No card, but the holes run 1..n and n is a standard count. Good
+ *               enough: 18 contiguous holes is a golf course whatever the internet
+ *               failed to tell us about it.
+ *
+ * Six holes with no card is neither, and that is the case this exists to refuse -
+ * Te Arai Links published holes 9, 10, 12, 13, 16, 17 of a 36-hole site as a
+ * finished course because nothing asked either question. */
+export function courseCoverageComplete(facts) {
+  const f = facts || {};
+  const numbers = [...new Set((f.holeNumbers || []).map(Number).filter(Number.isFinite))].sort((a, b) => a - b);
+  const expected = Number(f.expectedHoles) || 0;
+  if (!numbers.length) return { complete: false, reason: "no-holes", holes: 0 };
+
+  const contiguous = numbers[0] === 1 && numbers[numbers.length - 1] === numbers.length;
+  if (!contiguous) {
+    return {
+      complete: false,
+      reason: "holes-not-contiguous",
+      holes: numbers.length,
+      highestHole: numbers[numbers.length - 1],
+      missing: Array.from({ length: numbers[numbers.length - 1] }, (_, i) => i + 1).filter(n => !numbers.includes(n))
+    };
+  }
+  if (expected > 0) {
+    return numbers.length >= expected
+      ? { complete: true, reason: null, holes: numbers.length, matchedCard: true }
+      : { complete: false, reason: "short-of-card", holes: numbers.length, expectedHoles: expected };
+  }
+  return STANDARD_HOLE_COUNTS.includes(numbers.length)
+    ? { complete: true, reason: null, holes: numbers.length, matchedCard: false }
+    : { complete: false, reason: "non-standard-hole-count", holes: numbers.length };
+}
+
 export function boundsSpanM(bounds) {
   if (!bounds) return null;
   const north = Number(bounds.north), south = Number(bounds.south);
@@ -70,31 +117,18 @@ export function courseFitVerdict(facts) {
       widestSeparationM: Number(collision.widestSeparationM) || null
     });
   }
-  /* Holes that do not run 1..n.
-   *
-   * The cheapest check available and the only one here that needs no outside
-   * evidence at all - not a scorecard, not an OSM holes tag, just the numbers
-   * already in hand. Te Arai Links published holes 9, 10, 12, 13, 16, 17 as a
-   * finished course: six holes, highest number 17, no hole 1, gaps at 11, 14 and
-   * 15. Every other rule below missed it. scorecard-mismatch needed an
-   * expectedHoles that was null because the course has no shared card and no
-   * holes tag, and holes-scattered measures span, which a FRAGMENT never trips -
-   * those six holes covered 982m against a 6000m ceiling. A max-span test can
-   * only ever catch collecting too much; this is the one that catches collecting
-   * too little.
-   *
-   * Coverage rather than ground: the holes we did find are real and in the right
-   * place, there are just not enough of them, so a playable partial map must stay
-   * playable - same reasoning as scorecard-mismatch. */
-  const numbers = Array.isArray(f.holeNumbers)
-    ? [...new Set(f.holeNumbers.map(Number).filter(Number.isFinite))].sort((a, b) => a - b)
-    : null;
-  if (numbers && numbers.length && (numbers[0] !== 1 || numbers[numbers.length - 1] !== numbers.length)) {
-    return untrusted("holes-not-contiguous", "coverage", {
-      holesResolved: numbers.length,
-      highestHole: numbers[numbers.length - 1],
-      missing: Array.from({ length: numbers[numbers.length - 1] }, (_, i) => i + 1).filter(n => !numbers.includes(n))
-    });
+  /* Coverage, judged by the card when there is one and by the shape when there is
+     not - see courseCoverageComplete. The cheapest check in this file and the only
+     one needing no outside evidence at all, which is why it catches what the rules
+     below miss: Te Arai had no scorecard, no OSM holes tag, and a 982m span against
+     a 6000m ceiling, so every other rule passed six holes of a 36-hole site. */
+  if (Array.isArray(f.holeNumbers) && f.holeNumbers.length) {
+    const coverage = courseCoverageComplete({ holeNumbers: f.holeNumbers, expectedHoles: expected });
+    if (!coverage.complete) {
+      return untrusted(coverage.reason === "short-of-card" ? "scorecard-mismatch" : coverage.reason, "coverage",
+        Object.assign({ holesResolved: coverage.holes }, coverage.missing ? { missing: coverage.missing, highestHole: coverage.highestHole } : {},
+          coverage.expectedHoles ? { expectedHoles: coverage.expectedHoles } : {}));
+    }
   }
   if (expected > 0 && resolved > 0 && resolved < expected) {
     return untrusted("scorecard-mismatch", "coverage", { expectedHoles: expected, holesResolved: resolved });
@@ -136,6 +170,9 @@ export function courseFitMessage(verdict) {
   if (verdict.reason === "holes-not-contiguous") {
     return "Found " + d.holesResolved + " holes numbered up to " + d.highestHole
       + " - this course is not complete. Pin the one you are playing.";
+  }
+  if (verdict.reason === "non-standard-hole-count") {
+    return "Found " + d.holesResolved + " holes, which is not a full course. Pin the one you are playing.";
   }
   if (verdict.reason === "holes-scattered") {
     return "The holes found are too spread out to be one course. Pin the one you are playing.";

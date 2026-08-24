@@ -383,7 +383,97 @@ async function deleteSupabaseCourse(courseId) {
     headers: { Prefer: "return=representation" }
   });
   await deleteMapperJobs(courseId);
+  const visualRows = await deleteVisualRows(courseId);
+  const files = await deleteVisualFiles(courseId);
+  console.log("course-maps: deleted", courseId,
+    "- visuals:", visualRows.visuals, "visual jobs:", visualRows.visualJobs, "files:", files);
   return (Array.isArray(byCourseId) ? byCourseId.length : 0) + (Array.isArray(byId) ? byId.length : 0);
+}
+
+/* Everything a course owns, not just its row.
+ *
+ * "Delete the course" used to remove course_maps and the mapper jobs, and leave
+ * course_visuals, its job history and every rendered frame in the storage bucket
+ * behind. That is not a tidiness problem, it breaks the app: a published visual
+ * whose map row is gone made /api/course-package answer full-map-ready for a
+ * course with no geometry, hand a null map to shapeFullPackage, and 502 on every
+ * request for that course id. Four courses in the database are in that state
+ * right now (omaha-beach, saint-andrews, royal-auckland, north-shore).
+ *
+ * Storage objects are keyed "<courseId>/..." so one prefix covers a course's
+ * whole render history - frames, overviews, every version.
+ *
+ * Best effort, same reasoning as deleteMapperJobs: a course that is gone must not
+ * come back because one of its leftovers refused to delete. Each step is counted
+ * and logged so a partial cleanup is visible rather than silent. */
+async function deleteVisualRows(courseId) {
+  const counts = { visuals: 0, visualJobs: 0 };
+  try {
+    const visuals = await supabaseFetch(
+      "course_visuals?course_id=eq." + encodeURIComponent(courseId),
+      { method: "DELETE", headers: { Prefer: "return=representation" } }
+    );
+    counts.visuals = Array.isArray(visuals) ? visuals.length : 0;
+  } catch (error) {
+    console.warn("course-maps: could not clear course_visuals for", courseId, error && error.message || error);
+  }
+  try {
+    const jobs = await supabaseFetch(
+      "course_visual_jobs?course_id=eq." + encodeURIComponent(courseId),
+      { method: "DELETE", headers: { Prefer: "return=representation" } }
+    );
+    counts.visualJobs = Array.isArray(jobs) ? jobs.length : 0;
+  } catch (error) {
+    console.warn("course-maps: could not clear course_visual_jobs for", courseId, error && error.message || error);
+  }
+  return counts;
+}
+
+const VISUAL_BUCKET = "course-visuals";
+
+/* Storage has no "delete by prefix", so list then delete. Listed in pages because
+   a course with a long render history can hold hundreds of frames. */
+async function deleteVisualFiles(courseId) {
+  const prefix = String(courseId || "").replace(/^\/+|\/+$/g, "");
+  if (!prefix) return 0;
+  const base = supabaseBase();
+  const key = supabaseKey();
+  if (!base || !key) return 0;
+  const headers = { apikey: key, Authorization: "Bearer " + key, "Content-Type": "application/json" };
+  let removed = 0;
+  try {
+    /* Recursive by hand: the list endpoint returns one directory level, and frames
+       live under <courseId>/frames/<version>/. */
+    const walk = async folder => {
+      const response = await fetch(base + "/storage/v1/object/list/" + VISUAL_BUCKET, {
+        method: "POST", headers,
+        body: JSON.stringify({ prefix: folder, limit: 1000, offset: 0 })
+      });
+      if (!response.ok) return [];
+      const entries = await response.json().catch(() => []);
+      const files = [];
+      for (const entry of Array.isArray(entries) ? entries : []) {
+        const name = entry && entry.name;
+        if (!name) continue;
+        const path = folder ? folder + "/" + name : name;
+        /* A row with an id is an object; without one it is a folder. */
+        if (entry.id) files.push(path);
+        else files.push(...await walk(path));
+      }
+      return files;
+    };
+    const paths = await walk(prefix);
+    for (let i = 0; i < paths.length; i += 100) {
+      const batch = paths.slice(i, i + 100);
+      const response = await fetch(base + "/storage/v1/object/" + VISUAL_BUCKET, {
+        method: "DELETE", headers, body: JSON.stringify({ prefixes: batch })
+      });
+      if (response.ok) removed += batch.length;
+    }
+  } catch (error) {
+    console.warn("course-maps: could not clear visual files for", courseId, error && error.message || error);
+  }
+  return removed;
 }
 
 /* Deleting a course has to delete its mapping history too, or "delete" does not

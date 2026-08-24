@@ -768,8 +768,9 @@ async function runMapperJob(job, origin) {
     collision,
     expectedHoles,
     holesResolved: geometry.holesResolved,
-    /* The hole numbers themselves, so the verdict can notice a set that does not
-       run 1..n without needing a scorecard to compare against. */
+    /* The hole numbers themselves, so the verdict can judge coverage against the
+       card when there is one and against the standard 9/18/27/36 shape when there
+       is not - see courseCoverageComplete. */
     holeNumbers: Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite),
     courseBounds
   });

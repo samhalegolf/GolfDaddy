@@ -21,6 +21,8 @@
    (the mapper algorithm version, "v1" or null). A client comparing one against
    the other was comparing two unrelated things, so every course with a null
    geometry_version read as permanently "Update available". */
+import { courseCoverageComplete } from "./gd-course-fit-core.mjs";
+
 export function objectsVersion(map) {
   const published = map && map.published_at ? String(map.published_at) : "";
   const updated = map && map.updated_at ? String(map.updated_at) : "";
@@ -131,6 +133,10 @@ export function shapeFullPackage(map, visual) {
     const objects = byHole.get(holeNumber) || [];
     const green = objects.find(o => o.type === "green");
     const tee = objects.find(o => o.type === "tee");
+    /* A frame with no green behind it is a picture of a hole, not a playable one -
+       every distance it could offer would be null. Dropped rather than shipped, so
+       the package contains only holes that can actually be played. */
+    if (!green) return null;
     const metadata = frame.metadata || {};
     const playSurface = metadata.playSurface || null;
     const checksum = hashText(frame.path + "|" + (metadata.width || "") + "|" + (metadata.height || "") + "|" + JSON.stringify(metadata.bounds || {}));
@@ -151,7 +157,11 @@ export function shapeFullPackage(map, visual) {
         checksum
       }
     };
-  }).sort((a, b) => a.holeNumber - b.holeNumber);
+  }).filter(Boolean).sort((a, b) => a.holeNumber - b.holeNumber);
+  /* Nothing playable came back. Returning an empty full-map-ready package would
+     tell the app a course is built and then give it no holes to play, which is the
+     shape of failure this whole guard exists to stop. */
+  if (!holes.length) return null;
   return {
     courseId: map.course_id,
     status: "full-map-ready",
@@ -170,6 +180,19 @@ export function hasGeometryPayload(map) {
   return Object.keys(objects).length > 0 || Object.keys(holes).length > 0;
 }
 
+/* How complete this course's geometry is, judged the way courseCoverageComplete
+   judges it: against the club's own card when a run found one, and against the
+   standard 9/18/27/36 shape when it did not.
+ *
+ * expectedHoles is read off the last mapper job because course_maps has no column
+ * for it - the mapper computes it per run from the shared scorecard or the OSM
+ * holes tag, and the job result is where that lands. */
+function mapCoverage(map, mapperJobs) {
+  const holeNumbers = Object.keys((map && map.holes_json) || {}).map(Number).filter(Number.isFinite);
+  const lastResult = ((mapperJobs || []).find(job => job && job.result && job.result.expectedHoles) || {}).result;
+  return courseCoverageComplete({ holeNumbers, expectedHoles: lastResult ? lastResult.expectedHoles : null });
+}
+
 function liveJob(jobs) {
   return (jobs || []).find(j => j.status === "running") || (jobs || []).find(j => j.status === "queued") || null;
 }
@@ -183,13 +206,25 @@ function liveJob(jobs) {
    course-mapper-jobs.mjs's mapperBuildState - this is the same rule one level up, composing
    both of their derived states rather than re-deriving from raw job rows. */
 export function deriveCoursePackageState({ map, visual, visualJobs, mapperJobs }) {
-  /* A published visual is only a Full Map Package if the geometry it was rendered
-     against still exists. Deleting a course_maps row without its course_visuals row
-     leaves a published visual pointing at nothing, and this used to answer
-     "full-map-ready" for it - after which shapeFullPackage dereferenced a null map
-     and the whole endpoint 502'd for that course. Orphaned state must degrade, never
-     crash: with no map row the honest answer is that the course is not built. */
-  const fullReady = !!(map && visual && Number(visual.published_version) > 0);
+  /* A Full Map Package needs GEOMETRY, not just frames.
+   *
+   * Frames are pictures. What makes a course playable is the tee and green behind
+   * each one - distances, the green shape, the route. A published visual over a map
+   * row with no usable geometry ships a course that renders beautifully and cannot
+   * answer "how far to the green", which is the only question it exists to answer.
+   *
+   * This was reachable two ways. Deleting a course_maps row without its
+   * course_visuals row left a published visual pointing at nothing, and the state
+   * came back "full-map-ready" for a null map - shapeFullPackage then dereferenced
+   * it and the endpoint 502'd for that course id. And a map row whose geometry was
+   * cleared or never resolved did the same thing more quietly: frames served, every
+   * hole's tee and green null.
+   *
+   * hasGeometryPayload is the floor. Whether the geometry actually covers the holes
+   * the frames claim is judged per hole in shapeFullPackage, which drops the ones it
+   * cannot back. */
+  const fullReady = !!(map && visual && Number(visual.published_version) > 0
+    && hasGeometryPayload(map) && mapCoverage(map, mapperJobs).complete);
   const hasGeometry = hasGeometryPayload(map);
   const liveMapperJob = liveJob(mapperJobs);
   const liveVisualJob = liveJob(visualJobs);

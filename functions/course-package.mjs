@@ -141,8 +141,15 @@ export async function buildCoursePackage(courseId) {
      `fit:{trusted:true}` and one carrying no fit at all mean the same thing, and
      the client reads both as "do not ask". */
   const withFit = (pkg) => (fit && fit.trusted === false ? Object.assign({}, pkg, { fit }) : pkg);
-  if (state === "full-map-ready") return withFit(shapeFullPackage(rows.map, rows.visual));
-  if (state === "lite-geo-ready") {
+  if (state === "full-map-ready") {
+    const full = shapeFullPackage(rows.map, rows.visual);
+    /* shapeFullPackage returns null when the published frames have no geometry
+       behind them - pictures of holes that cannot answer a distance. Falling back
+       to lite is the honest answer: the course has geometry worth playing, it just
+       has no usable frames, which is exactly what lite-geo-ready describes. */
+    if (full) return withFit(full);
+  }
+  if (state === "full-map-ready" || state === "lite-geo-ready") {
     const liveVisualJob = rows.visualJobs.find(j => j.status === "running" || j.status === "queued");
     return withFit(shapeLitePackage(rows.map, liveVisualJob ? liveVisualJob.status : "none"));
   }
