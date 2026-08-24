@@ -8,6 +8,8 @@
     "serve": "python3 -m http.server 5173",
     "build:netlify": "node scripts/clarity-deploy-build.js",
     "test:payments": "node dev/payment-rollout-tests.js",
+    "test:scorecard-resolve": "node dev/scorecard-resolve.test.js",
+    "test:scorecard-parse": "node dev/scorecard-parse-core.test.js",
     "test:multi-course": "node dev/multi-course-separation.test.js",
     "test:boot": "node dev/boot-smoke.test.js",
     "test:practice-parser": "node dev/practice-parser-parity.test.js",

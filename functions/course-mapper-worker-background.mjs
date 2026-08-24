@@ -30,6 +30,10 @@ import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoO
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
+import { resolveScorecard, toStorePayload } from "./lib/gd-scorecard-resolve.mjs";
+import { loopLengthsFromOsm, matchLoopsToCards } from "./lib/gd-scorecard-match-core.mjs";
+import pkg from "./lib/safe-remote-url.js";
+const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
 
 const JOBS_TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
@@ -263,6 +267,81 @@ function golfFeatureCounts(payload) {
    shapes but no hole numbers at all. */
 const WIDER_RETRY_PAD_M = 700;
 
+/* Resolve a card when the shared store has none.
+ *
+ * fetchScorecardEvidence above is a pure cache read, and the cache has never had a
+ * row in it: the parser that filled it was deleted with the old GPS play runtime
+ * on 2026-08-02 and nothing replaced it, so every mapper run since has computed
+ * expectedHoles = null. This closes that loop.
+ *
+ * Warn-only and time-boxed. The mapper's job is geometry; a slow or unreachable
+ * scorecard site must cost this run its expectedHoles, never its result. Every
+ * outcome lands on diagnostics.scorecardResolve so a course that keeps failing to
+ * find a card says so in the job row rather than looking like a course that has
+ * none. */
+const SCORECARD_RESOLVE_BUDGET_MS = 12000;
+
+async function fetchPageHtml(url, signal) {
+  const target = safeRemoteUrl(url);
+  if (!target) throw new Error("unsafe or unsupported url");
+  if (!(await resolvesToPublicAddress(target))) throw new Error("url does not resolve to a public address");
+  const response = await fetch(target.href, {
+    signal,
+    redirect: "follow",
+    headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "ClarityCaddie/1.0 (+https://caddy.claritygolf.app)" }
+  });
+  if (!response.ok) throw new Error("HTTP " + response.status);
+  const text = await response.text();
+  /* Same cap scorecard-fetch uses - a scorecard table is never megabytes, and an
+     unbounded read is how one bad URL becomes a function timeout. */
+  return text.slice(0, 650000);
+}
+
+async function searchScorecardPages(name, region, origin, signal) {
+  if (!origin) return [];
+  const response = await fetch(origin + "/.netlify/functions/scorecard-search", {
+    method: "POST", signal,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, region })
+  });
+  if (!response.ok) return [];
+  const payload = await response.json().catch(() => null);
+  return ((payload && payload.results) || []).map(result => ({ url: result.url, name: result.title || "" }));
+}
+
+async function resolveScorecardForCourse(course, origin) {
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), SCORECARD_RESOLVE_BUDGET_MS) : null;
+  const signal = controller ? controller.signal : undefined;
+  try {
+    return await resolveScorecard({ courseName: course.courseName, region: course.region, country: course.country }, {
+      fetchHtml: url => fetchPageHtml(url, signal),
+      search: (name, region) => searchScorecardPages(name, region, origin, signal),
+      /* Reads go through fetchScorecardEvidence already; passing readStore here
+         would just repeat the query the caller has done. */
+      writeStore: async (key, name, cards) => {
+        const payload = toStorePayload(cards[0], name);
+        if (!payload) return;
+        await supabaseFetch(SCORECARDS_TABLE + "?on_conflict=course_key", {
+          method: "POST",
+          headers: { Prefer: "resolution=merge-duplicates" },
+          body: JSON.stringify([{
+            course_key: key,
+            course_name: name,
+            source: payload.source,
+            source_url: payload.sourceUrl,
+            holes_json: payload.holes,
+            sources_json: cards.slice(0, 4).map(card => ({ source: card.source, sourceUrl: card.sourceUrl, holes: card.holes.length })),
+            updated_at: new Date().toISOString()
+          }])
+        });
+      }
+    });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /* Publish every course a separated site produced.
  *
  * The mapper has never created a course_maps row - saveResolvedGeometry PATCHes an
@@ -297,8 +376,41 @@ function loopCourseId(loop, course, index) {
   return slug(course.courseId + "-course-" + (index + 1));
 }
 
+/* Which separated loop is which named course.
+ *
+ * Only runs when OSM did not name the polygons - a name tag is exact and free and
+ * beats any inference. When it does run it matches on RELATIVE structure: rank
+ * order of hole lengths, and where the short holes fall. Absolute distance cannot
+ * be the signal, because a card is measured from one tee set of several, OSM's
+ * playing line and a card's yardage disagree on every dogleg, and GolfPass's own
+ * per-hole row for Te Arai South sums to 6778 against its own stated 6843.
+ *
+ * Naming only. A weak or tied answer costs the courses their names, never their
+ * geometry - they publish with provisional ids either way. */
+function nameLoopsFromCards(loops, cards) {
+  if (!Array.isArray(cards) || cards.length < 2) return null;
+  if (loops.every(loop => loop.name)) return null;
+  const measured = loops
+    .map((loop, index) => ({ index, id: "loop-" + index, lengths: loopLengthsFromOsm(loop.payload.elements) }))
+    .filter(entry => Object.keys(entry.lengths).length >= 6);
+  if (measured.length < 2) return null;
+  const result = matchLoopsToCards(measured, cards);
+  if (!result.resolved) return { resolved: false, reason: result.reason, score: result.score, margin: result.margin };
+  const byId = new Map(result.assignment.map(pair => [pair.loopId, pair.cardName]));
+  measured.forEach(entry => {
+    const name = byId.get(entry.id);
+    if (name && !loops[entry.index].name) {
+      loops[entry.index].name = name;
+      loops[entry.index].nameSource = "scorecard-match";
+    }
+  });
+  return { resolved: true, score: result.score, margin: result.margin, assignment: result.assignment.map(p => ({ loopId: p.loopId, cardName: p.cardName, signals: p.signals })) };
+}
+
 async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecardEvidence, origin) {
   const published = [];
+  /* Mutates loops[].name in place, so this must run before ids are derived. */
+  const naming = nameLoopsFromCards(loops, course.scorecardCards);
   const otherCentres = loops.map(loop => loop.centre).filter(Boolean);
   for (let index = 0; index < loops.length; index++) {
     const loop = loops[index];
@@ -352,6 +464,7 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
       osmRef: loop.osmRef || null,
       pinned: isPinned,
       method: loop.method,
+      nameSource: loop.nameSource || (loop.name ? "osm-polygon" : "derived"),
       holesResolved: geometry.holesResolved,
       guidesFound: geometry.guidesFound,
       greensFound: geometry.greensFound,
@@ -366,6 +479,7 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
       visualChain
     });
   }
+  if (naming) published.naming = naming;
   return published;
 }
 
@@ -402,8 +516,37 @@ async function runMapperJob(job, origin) {
   const siblingCentres = await loadSiblingCentres(course).catch(() => []);
   let geometry = resolveCourseGeometry(payload, course.courseId, course.center, existingObjects, siblingCentres);
 
-  const scorecardEvidence = await fetchScorecardEvidence(course.courseName);
-  const expectedHoles = scorecardHoleCount(scorecardEvidence) || osmCourseHoleCountTag(payload) || null;
+  let scorecardEvidence = await fetchScorecardEvidence(course.courseName);
+  /* Nothing in the shared store: go and find one. Warn-only - see
+     resolveScorecardForCourse. A course whose card cannot be found still maps, it
+     just maps without the three guards expectedHoles switches on. */
+  if (!scorecardEvidence) {
+    await heartbeatJob(job, { stage: "resolving-scorecard" });
+    const resolved = await resolveScorecardForCourse(course, origin)
+      .catch(error => ({ cards: [], reason: String(error && error.message || error).slice(0, 200) }));
+    diagnostics.scorecardResolve = {
+      cards: (resolved.cards || []).length,
+      statedHoleCount: resolved.statedHoleCount || null,
+      stored: !!resolved.stored,
+      reason: resolved.reason || null,
+      attempts: (resolved.attempts || []).slice(0, 6)
+    };
+    if (resolved.cards && resolved.cards.length) {
+      const best = resolved.cards[0];
+      scorecardEvidence = { holes: best.holes.map(hole => ({ holeNumber: hole.hole, par: hole.par, distanceM: hole.distanceM })), source: best.source || "scorecard-engine", sourceUrl: best.sourceUrl || "", sources: [] };
+    }
+    /* A page that says "18 hole, par 72" but whose table would not parse still
+       answers the only question expectedHoles asks. */
+    if (!scorecardEvidence && resolved.statedHoleCount) diagnostics.statedHoleCount = resolved.statedHoleCount;
+    /* Every card found, kept for the loop matcher - a two-course site yields two,
+       and telling North from South needs both. */
+    if (resolved.cards && resolved.cards.length > 1) diagnostics.scorecardCards = resolved.cards.map(card => ({ name: card.name, source: card.source, par: card.par, holes: card.holes.length }));
+    course.scorecardCards = resolved.cards || [];
+  }
+  const expectedHoles = scorecardHoleCount(scorecardEvidence)
+    || osmCourseHoleCountTag(payload)
+    || (diagnostics.scorecardResolve && diagnostics.scorecardResolve.statedHoleCount)
+    || null;
   diagnostics.scorecardFound = !!scorecardEvidence;
   diagnostics.expectedHoles = expectedHoles;
   const warnings = [];
@@ -454,7 +597,8 @@ async function runMapperJob(job, origin) {
      their own. Returns early: the single-course path below has nothing left to do. */
   if (loops && loops.length > 1) {
     const published = await publishSeparatedLoops(job, course, loops, expectedHoles, scorecardEvidence, origin);
-    diagnostics.published = published.map(entry => ({ courseId: entry.courseId, holes: entry.holesResolved, contiguous: entry.contiguous }));
+    diagnostics.published = published.map(entry => ({ courseId: entry.courseId, holes: entry.holesResolved, contiguous: entry.contiguous, nameSource: entry.nameSource }));
+    if (published.naming) diagnostics.loopNaming = published.naming;
     const short = published.filter(entry => !entry.contiguous);
     if (short.length) {
       warnings.push(short.length + " of " + published.length + " separated courses did not resolve a contiguous 1..n hole set"
