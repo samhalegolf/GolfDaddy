@@ -120,6 +120,21 @@ test("the separation threshold sits between a green's span and a loop's gap", as
     "must be inside the query radius to be reachable at all");
 });
 
+test("a site wider than its own sweep is re-queried before separation", () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(path.join(ROOT, "functions", "course-mapper-worker-background.mjs"), "utf8");
+  /* Te Arai Links: hole numbers 2533m apart against a 1400m radius, so seven of its
+     36 hole ways were outside the query and both separated courses published short.
+     courseFootprintFrame could not help (no golf=course polygon in OSM) and the
+     wider-retry excluded multi-loop sites - the very sites most likely to outgrow a
+     fixed radius. */
+  const widenAt = src.indexOf("collision.widestSeparationM > scope.radiusM");
+  assert.notStrictEqual(widenAt, -1, "a site wider than the sweep must trigger a wider query");
+  const separateAt = src.indexOf("separateLoops(payload, course.center)");
+  assert.notStrictEqual(separateAt, -1);
+  assert.ok(widenAt < separateAt, "and it must widen BEFORE separating, or the loops are built from a clipped payload");
+});
+
 test("the worker separates a multi-course site before it considers refusing", () => {
   const fs = require("fs");
   const src = fs.readFileSync(path.join(ROOT, "functions", "course-mapper-worker-background.mjs"), "utf8");

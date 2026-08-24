@@ -571,6 +571,51 @@ async function runMapperJob(job, origin) {
   let collision = detectHoleNumberCollision(payload);
   let resolverStatus = null;
   let loops = null;
+
+  /* A site wider than the sweep that found it.
+   *
+   * The collision measures how far apart the same hole number turned up -
+   * 2533m at Te Arai Links against a 1400m radius. That is not ambiguity, it is
+   * arithmetic: holes beyond the radius were never fetched, so the courses cannot
+   * possibly come back whole. Te Arai returned 29 numbered hole ways for a 36-hole
+   * site and both separated courses published short.
+   *
+   * Neither existing widen-er could fire. courseFootprintFrame needs a
+   * golf=course / leisure=golf_course polygon and Te Arai has none in OSM (which is
+   * also why its courses have no names to inherit), and the wider-retry below is
+   * gated on !collision.multiLoop - multi-course sites, the ones most likely to
+   * outgrow a radius, were the ones excluded from growing it.
+   *
+   * Re-queried from the separation itself rather than by a fixed pad: the widest
+   * gap between two instances of one hole number is a floor on the site's real
+   * extent, so ask for that plus the usual margin. One extra Overpass call, only
+   * for a site that has already proven it needs one. */
+  if (collision.multiLoop && collision.widestSeparationM > scope.radiusM) {
+    await heartbeatJob(job, { stage: "widening-for-multi-course-site" });
+    const needM = collision.widestSeparationM + WIDER_RETRY_PAD_M;
+    const widerFrame = expandOsmFrame(osmScopeFrame(scope, course.center), needM - scope.radiusM);
+    if (widerFrame) {
+      const widerPayload = await fetchOverpass(osmGuideQuery(osmQueryScope({ osmFrame: widerFrame }, course.center)));
+      const widerCollision = detectHoleNumberCollision(widerPayload);
+      /* Adopted only if it actually found more hole features - a wider frame that
+         returns the same thing means the site really is that size, and keeping the
+         tighter payload avoids dragging a neighbouring club in for nothing. */
+      if (widerCollision.holeFeatures > collision.holeFeatures) {
+        payload = widerPayload;
+        collision = widerCollision;
+        queryStages.push("widened-to-site-extent");
+        diagnostics.widened = {
+          fromRadiusM: scope.radiusM,
+          toSpanM: needM,
+          holeFeaturesBefore: diagnostics.osmFeatures ? diagnostics.osmFeatures.holes : null,
+          holeFeaturesAfter: widerCollision.holeFeatures
+        };
+        diagnostics.osmFeatures = golfFeatureCounts(payload);
+        geometry = resolveCourseGeometry(payload, course.courseId, course.center, existingObjects, siblingCentres);
+      }
+    }
+  }
+
   if (collision.multiLoop) {
     loops = separateLoops(payload, course.center);
     diagnostics.collision = {
