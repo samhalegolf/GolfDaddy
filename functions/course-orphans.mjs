@@ -83,7 +83,7 @@ export default async function courseOrphans(request) {
     const orphans = await findOrphans(base, key).catch(() => null);
     if (!orphans) return json(502, { error: "Could not read current state" });
     if (!orphans.some(o => o.courseId === courseId)) {
-      return json(409, { error: "Not an orphan - " + courseId + " either still has a course_maps row or has nothing left behind", courseId });
+      return json(409, { error: "Not an orphan - " + courseId + " either still has a course_maps row, or has no rows and no files left behind", courseId });
     }
     const result = await purgeCourseData(base, key, courseId);
     console.log("course-orphans: purged", courseId, "by", actor, JSON.stringify(result));

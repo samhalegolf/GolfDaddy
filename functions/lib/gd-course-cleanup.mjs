@@ -36,38 +36,66 @@ async function rest(base, key, path, options = {}) {
   return body;
 }
 
+/* Top-level folders in the visuals bucket. One per course id that has ever had a
+   frame rendered, whether or not anything in the database still refers to it. */
+export async function listBucketFolders(base, key) {
+  const response = await fetch(base.replace(/\/+$/, "") + "/storage/v1/object/list/" + VISUAL_BUCKET, {
+    method: "POST",
+    headers: { apikey: key, Authorization: "Bearer " + key, "Content-Type": "application/json" },
+    body: JSON.stringify({ prefix: "", limit: 1000, offset: 0 })
+  });
+  if (!response.ok) return [];
+  const entries = await response.json().catch(() => []);
+  /* A row without an id is a folder; with one it is a stray object at the root. */
+  return (Array.isArray(entries) ? entries : []).filter(e => e && e.name && !e.id).map(e => e.name);
+}
+
 /* Every course id that owns rows or files but has no course_maps row.
  *
- * Storage is included because a course can be fully absent from every table and
- * still hold a folder of frames - which is exactly the state a SQL-only cleanup
- * leaves behind, and the state that costs money silently. */
+ * STARTS FROM THE BUCKET as well as the tables, and that ordering matters. An
+ * earlier version enumerated orphans from table rows only and counted files
+ * afterwards - so a course whose rows had already been cleared but whose frames
+ * were still in the bucket was invisible to the very tool built to find it. That
+ * is not hypothetical: clearing four orphaned course_visuals rows by hand left
+ * 474 files and 233MB that this function could no longer see, and "cromwell" had
+ * been sitting in that state all along with no row in any table.
+ *
+ * Files are the thing that costs money and the thing nothing else in the app can
+ * show, so they are the primary source of truth here, not an afterthought. */
 export async function findOrphans(base, key) {
   const known = new Set(((await rest(base, key, "course_maps?select=course_id")) || [])
     .map(row => row && row.course_id).filter(Boolean));
 
   const byCourse = new Map();
-  const note = (courseId, patch) => {
-    if (!courseId || known.has(courseId)) return;
-    const entry = byCourse.get(courseId) || { courseId, visuals: 0, visualJobs: 0, mapperJobs: 0, files: 0, bytes: 0, published: false };
-    byCourse.set(courseId, Object.assign(entry, patch(entry)));
+  const entryFor = courseId => {
+    if (!byCourse.has(courseId)) {
+      byCourse.set(courseId, { courseId, visuals: 0, visualJobs: 0, mapperJobs: 0, files: 0, bytes: 0, published: false });
+    }
+    return byCourse.get(courseId);
   };
 
+  (await listBucketFolders(base, key)).forEach(folder => { if (!known.has(folder)) entryFor(folder); });
+
   const visuals = await rest(base, key, "course_visuals?select=course_id,status,published_version") || [];
-  visuals.forEach(row => note(row.course_id, entry => ({
-    visuals: entry.visuals + 1,
+  visuals.forEach(row => {
+    if (!row.course_id || known.has(row.course_id)) return;
+    const entry = entryFor(row.course_id);
+    entry.visuals += 1;
     /* Worth surfacing on its own: a PUBLISHED orphan is the one that breaks
        /api/course-package, as opposed to a stale queued job that merely lingers. */
-    published: entry.published || Number(row.published_version) > 0
-  })));
+    if (Number(row.published_version) > 0) entry.published = true;
+  });
   for (const table of ["course_visual_jobs", "course_mapper_jobs"]) {
     const rows = await rest(base, key, table + "?select=course_id") || [];
     const field = table === "course_visual_jobs" ? "visualJobs" : "mapperJobs";
-    rows.forEach(row => note(row.course_id, entry => ({ [field]: entry[field] + 1 })));
+    rows.forEach(row => {
+      if (!row.course_id || known.has(row.course_id)) return;
+      entryFor(row.course_id)[field] += 1;
+    });
   }
 
-  for (const courseId of [...byCourse.keys()]) {
-    const listed = await listCourseFiles(base, key, courseId).catch(() => []);
-    const entry = byCourse.get(courseId);
+  for (const entry of byCourse.values()) {
+    const listed = await listCourseFiles(base, key, entry.courseId).catch(() => []);
     entry.files = listed.length;
     entry.bytes = listed.reduce((sum, file) => sum + (file.size || 0), 0);
   }

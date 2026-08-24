@@ -55,7 +55,8 @@
     var head = el("div");
     head.appendChild(el("h3", null, "Orphaned course data"));
     head.appendChild(el("p", "gdStudioMuted",
-      "Courses with no course_maps row that still own visual rows, job history or rendered frames. "
+      "Courses with no course_maps row that still own rendered frames, visual rows or job history. "
+      + "Scanned from the storage bucket as well as the tables, so a course whose rows are already gone is still found. "
       + "A published visual with no map makes /api/course-package fail for that course."));
     card.appendChild(head);
 
@@ -82,6 +83,16 @@
         title.appendChild(flag);
       }
       left.appendChild(title);
+      var rows = orphan.visuals + orphan.visualJobs + orphan.mapperJobs;
+      if (!rows && orphan.files) {
+        /* The invisible case: no row in any table, just a folder of frames. Nothing
+           else in the app can show this - not the course database, not course
+           visuals - because every one of those screens reads course_maps. */
+        var only = el("span", null, "files only — no rows anywhere");
+        only.style.cssText = "color:#ffd08a;font-weight:400;font-size:12px";
+        title.appendChild(document.createTextNode(" "));
+        title.appendChild(only);
+      }
       left.appendChild(el("div", "gdStudioMuted",
         [orphan.visuals + " visual row(s)", orphan.visualJobs + " visual job(s)",
          orphan.mapperJobs + " mapper job(s)", orphan.files + " file(s)", orphan.bytesLabel].join(" · ")));
