@@ -120,6 +120,10 @@ function assetUrl(path) {
    sourceBounds, captureZoom, originPx) rather than inventing fields with no data behind
    them. */
 export function shapeFullPackage(map, visual) {
+  /* Belt as well as braces: deriveCoursePackageState above will no longer route an
+     orphaned visual here, but this is a public export and a null map must not be a
+     crash in any caller. */
+  if (!map || !visual) return null;
   const byHole = objectsByHole(map.objects_json);
   const frames = (visual.uploaded_assets || []).filter(a => a && a.role === "hole-frame-published" && Number.isFinite(Number(a.holeNumber)));
   const holes = frames.map(frame => {
@@ -179,7 +183,13 @@ function liveJob(jobs) {
    course-mapper-jobs.mjs's mapperBuildState - this is the same rule one level up, composing
    both of their derived states rather than re-deriving from raw job rows. */
 export function deriveCoursePackageState({ map, visual, visualJobs, mapperJobs }) {
-  const fullReady = !!(visual && Number(visual.published_version) > 0);
+  /* A published visual is only a Full Map Package if the geometry it was rendered
+     against still exists. Deleting a course_maps row without its course_visuals row
+     leaves a published visual pointing at nothing, and this used to answer
+     "full-map-ready" for it - after which shapeFullPackage dereferenced a null map
+     and the whole endpoint 502'd for that course. Orphaned state must degrade, never
+     crash: with no map row the honest answer is that the course is not built. */
+  const fullReady = !!(map && visual && Number(visual.published_version) > 0);
   const hasGeometry = hasGeometryPayload(map);
   const liveMapperJob = liveJob(mapperJobs);
   const liveVisualJob = liveJob(visualJobs);

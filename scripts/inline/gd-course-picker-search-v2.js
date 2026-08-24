@@ -41,9 +41,14 @@
   function safe(fn,fallback){try{return fn()}catch(e){return fallback}}
   function bridge(){return window.GDCoursePickerCoreBridge||{}}
   function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
-  function slug(s){return String(s||"course").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"course"}
+  /* NFD-normalised first: [^a-z0-9] does not eat a macron, it eats the letter
+     carrying it AND the space beside it, so "Te Arai Links" (macron on the A)
+     slugged to "te-rai" - a course id that is not the course name. The server
+     copy in gd-automapper-core.mjs was fixed with it; this is the one that mints
+     the id in the first place. */
+  function slug(s){return String(s||"course").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"course"}
   function cleanName(s){
-    return String(s||"").toLowerCase()
+    return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase()
       .replace(/\b(golf club|golf course|country club|links|club|course|gc|cub)\b/g," ")
       .replace(/[^a-z0-9]+/g," ")
       .replace(/\s+/g," ")
