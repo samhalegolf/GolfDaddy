@@ -368,6 +368,10 @@
 
     busy = true;
     try {
+      /* Immediate feedback: the store sheet can take a few seconds to present,
+         and a tap that visibly does nothing gets tapped again - which the busy
+         guard then swallows, which reads as "the app did not respond". */
+      toast("Contacting the App Store…");
       await ensureConfigured();
       if (account && account.accountId) await identify(account.accountId);
 
@@ -407,6 +411,9 @@
          about. RevenueCat flags exactly that case on the error object. */
       if (error && error.userCancelled) return false;
       toast(error && error.message ? error.message : "Could not complete purchase");
+      /* Keep the last failure visible to the paywall's diagnostic line - a
+         sheet that never presents otherwise leaves no trace on a device. */
+      lastPriceDiagnostic = "purchase failed: " + (error && error.message ? error.message : String(error));
       return false;
     } finally {
       busy = false;

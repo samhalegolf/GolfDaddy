@@ -27,10 +27,14 @@
   }
 
   /* Markup for the payments screen. Kept inline-small so it reads as fine print
-     under the purchase buttons rather than competing with them. */
+     under the purchase buttons rather than competing with them.
+     ?from=membership makes the legal pages' back link return to the paywall
+     (index.html?membership=1) instead of home - the pages are separate
+     documents, so going "back" reboots the shell, and without the param the
+     reader was dumped on the home screen with the paywall gone. */
   function markup() {
     var anchors = LINKS.map(function (link) {
-      return '<a href="' + link.href + '">' + link.label + '</a>';
+      return '<a href="' + link.href + '?from=membership">' + link.label + '</a>';
     }).join(" · ");
     return '<div class="clarityPaymentLegal">' + anchors + '</div>';
   }
