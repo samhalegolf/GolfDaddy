@@ -94,37 +94,66 @@ export async function findOrphans(base, key) {
     });
   }
 
-  for (const entry of byCourse.values()) {
-    const listed = await listCourseFiles(base, key, entry.courseId).catch(() => []);
-    entry.files = listed.length;
-    entry.bytes = listed.reduce((sum, file) => sum + (file.size || 0), 0);
-  }
+  /* All courses at once, against one shared deadline. Netlify gives a synchronous
+     function 10s; 7s leaves room for the table reads above and the response. */
+  const deadline = Date.now() + 7000;
+  await Promise.all([...byCourse.values()].map(async entry => {
+    const listed = await listCourseFiles(base, key, entry.courseId, deadline).catch(() => ({ files: [], partial: true }));
+    entry.files = listed.files.length;
+    entry.bytes = listed.files.reduce((sum, file) => sum + (file.size || 0), 0);
+    /* Says so rather than under-reporting silently: a partial count must not read
+       as "this course only has three files". */
+    if (listed.partial) entry.filesPartial = true;
+  }));
+
   return [...byCourse.values()].sort((a, b) => b.bytes - a.bytes || a.courseId.localeCompare(b.courseId));
 }
 
-/* Objects under "<courseId>/", walked by hand: the list endpoint returns one
-   directory level and frames live under <courseId>/frames/<version>/. */
-export async function listCourseFiles(base, key, courseId) {
+/* Objects under "<courseId>/".
+ *
+ * The list endpoint returns one directory level, so this recurses - but it does so
+ * BREADTH-FIRST AND IN PARALLEL, which is not a micro-optimisation. Walking depth
+ * first and awaiting each call in turn meant one course with 188 frames spread over
+ * a dozen frames/<version>/ folders cost a dozen serial round trips, and five such
+ * courses blew straight past Netlify's 10s synchronous limit - the report timed out
+ * and answered 502, which is the same symptom it was built to explain.
+ *
+ * deadline is a timestamp, not a duration: the caller is budgeting one HTTP request
+ * across several courses, so each walk has to respect the time already spent. */
+export async function listCourseFiles(base, key, courseId, deadline) {
   const prefix = String(courseId || "").replace(/^\/+|\/+$/g, "");
-  if (!prefix) return [];
+  if (!prefix) return { files: [], partial: false };
   const headers = { apikey: key, Authorization: "Bearer " + key, "Content-Type": "application/json" };
-  const walk = async folder => {
+  const listOne = async folder => {
     const response = await fetch(base.replace(/\/+$/, "") + "/storage/v1/object/list/" + VISUAL_BUCKET, {
       method: "POST", headers, body: JSON.stringify({ prefix: folder, limit: 1000, offset: 0 })
     });
     if (!response.ok) return [];
     const entries = await response.json().catch(() => []);
-    const out = [];
-    for (const entry of Array.isArray(entries) ? entries : []) {
-      if (!entry || !entry.name) continue;
-      const path = folder ? folder + "/" + entry.name : entry.name;
-      /* A row with an id is an object; without one it is a folder. */
-      if (entry.id) out.push({ path, size: Number(entry.metadata && entry.metadata.size) || 0 });
-      else out.push(...await walk(path));
-    }
-    return out;
+    return Array.isArray(entries) ? entries : [];
   };
-  return walk(prefix);
+
+  const files = [];
+  let frontier = [prefix];
+  let partial = false;
+  /* Bounded as well as budgeted: a pathological prefix cannot spin forever. */
+  for (let depth = 0; depth < 6 && frontier.length; depth++) {
+    if (deadline && Date.now() > deadline) { partial = true; break; }
+    const levels = await Promise.all(frontier.map(async folder => {
+      const entries = await listOne(folder).catch(() => []);
+      const next = [];
+      entries.forEach(entry => {
+        if (!entry || !entry.name) return;
+        const path = folder ? folder + "/" + entry.name : entry.name;
+        /* A row with an id is an object; without one it is a folder. */
+        if (entry.id) files.push({ path, size: Number(entry.metadata && entry.metadata.size) || 0 });
+        else next.push(path);
+      });
+      return next;
+    }));
+    frontier = levels.flat();
+  }
+  return { files, partial: partial || frontier.length > 0 };
 }
 
 /* Everything one course owns, removed. Best effort per step and counted, so a
@@ -151,7 +180,7 @@ export async function purgeCourseData(base, key, courseId, options = {}) {
   }
 
   try {
-    const files = await listCourseFiles(base, key, id);
+    const files = (await listCourseFiles(base, key, id)).files;
     const headers = { apikey: key, Authorization: "Bearer " + key, "Content-Type": "application/json" };
     for (let i = 0; i < files.length; i += 100) {
       const batch = files.slice(i, i + 100);

@@ -54,7 +54,14 @@
       body: body ? JSON.stringify(body) : undefined
     });
     var payload = await response.json().catch(function () { return null; });
-    if (!response.ok) throw new Error((payload && payload.error) || ("HTTP " + response.status));
+    if (!response.ok) {
+      /* A 502 with no JSON body is the platform, not the handler - the function
+         crashed or ran out of time before it could answer. Worth saying, because
+         "HTTP 502" alone sent us looking in the wrong place once already. */
+      var detail = (payload && payload.error)
+        || (response.status === 502 ? "the function crashed or timed out before responding" : "HTTP " + response.status);
+      throw new Error(detail);
+    }
     return payload;
   }
 
@@ -103,7 +110,9 @@
       }
       left.appendChild(el("div", "gdStudioMuted",
         [orphan.visuals + " visual row(s)", orphan.visualJobs + " visual job(s)",
-         orphan.mapperJobs + " mapper job(s)", orphan.files + " file(s)", orphan.bytesLabel].join(" · ")));
+         orphan.mapperJobs + " mapper job(s)",
+         orphan.files + (orphan.filesPartial ? "+ file(s) (count incomplete)" : " file(s)"),
+         orphan.bytesLabel].join(" · ")));
 
       var button = el("button", "gdStudioBtn", "Delete");
       button.onclick = function () {
