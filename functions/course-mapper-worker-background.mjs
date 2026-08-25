@@ -25,12 +25,12 @@
    counter, which made "wrong centre coordinates" indistinguishable from "course not in OSM". */
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
-import { courseFitVerdict, courseFitMessage } from "./lib/gd-course-fit-core.mjs";
+import { courseFitVerdict, courseFitMessage, courseCoverageComplete } from "./lib/gd-course-fit-core.mjs";
 import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, separateLoops, loopIsContiguous, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
-import { resolveScorecard, toStorePayload } from "./lib/gd-scorecard-resolve.mjs";
+import { resolveScorecard, toStorePayload, distinctCardCount, distinctCards } from "./lib/gd-scorecard-resolve.mjs";
 import { loopLengthsFromOsm, matchLoopsToCards } from "./lib/gd-scorecard-match-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
@@ -309,7 +309,7 @@ async function searchScorecardPages(name, region, origin, signal) {
   return ((payload && payload.results) || []).map(result => ({ url: result.url, name: result.title || "" }));
 }
 
-async function resolveScorecardForCourse(course, origin) {
+async function resolveScorecardForCourse(course, origin, want) {
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), SCORECARD_RESOLVE_BUDGET_MS) : null;
   const signal = controller ? controller.signal : undefined;
@@ -336,7 +336,7 @@ async function resolveScorecardForCourse(course, origin) {
           }])
         });
       }
-    });
+    }, { want });
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -373,6 +373,9 @@ function loopCourseId(loop, course, index) {
        number does, so fall through rather than minting two identical ids. */
     if (fromName && fromName !== slug(course.courseName || "") && fromName !== course.courseId) return fromName;
   }
+  /* course-1 as well as course-2: leaving the first loop on the bare facility id
+     made one row "te-rai" and the other "te-rai-course-2", which reads as a course
+     and an afterthought rather than as two courses. */
   return slug(course.courseId + "-course-" + (index + 1));
 }
 
@@ -388,23 +391,51 @@ function loopCourseId(loop, course, index) {
  * Naming only. A weak or tied answer costs the courses their names, never their
  * geometry - they publish with provisional ids either way. */
 function nameLoopsFromCards(loops, cards) {
-  if (!Array.isArray(cards) || cards.length < 2) return null;
-  if (loops.every(loop => loop.name)) return null;
+  /* Provisional names first, so two courses are never both called the facility.
+   *
+   * "Te Arai Links" twice in the picker is unusable - the player cannot tell which
+   * is which, and it was the visible symptom of naming failing. "Course 1" and
+   * "Course 2" are honest: they say the site has two courses and that we do not yet
+   * know their names, which is exactly true. A real label replaces them the moment
+   * one is found, and never blocks the map in the meantime. */
+  loops.forEach((loop, index) => {
+    if (!loop.name) {
+      loop.name = "Course " + (index + 1);
+      loop.nameSource = "provisional";
+    }
+  });
+
+  const usable = distinctCards(cards || []).filter(card => card && card.name);
+  if (usable.length < 2) return { resolved: false, reason: "fewer-than-two-cards", cards: usable.length };
+
   const measured = loops
     .map((loop, index) => ({ index, id: "loop-" + index, lengths: loopLengthsFromOsm(loop.payload.elements) }))
     .filter(entry => Object.keys(entry.lengths).length >= 6);
-  if (measured.length < 2) return null;
-  const result = matchLoopsToCards(measured, cards);
-  if (!result.resolved) return { resolved: false, reason: result.reason, score: result.score, margin: result.margin };
+  if (measured.length < 2) return { resolved: false, reason: "loops-not-measurable", measured: measured.length };
+
+  const result = matchLoopsToCards(measured, usable);
+  /* The assignment is recorded either way. Matching a loop to a card is what makes
+     the GEOMETRY right - hole numbering, expected count - and that is worth keeping
+     even when the cards carry no name good enough to publish. */
   const byId = new Map(result.assignment.map(pair => [pair.loopId, pair.cardName]));
   measured.forEach(entry => {
-    const name = byId.get(entry.id);
-    if (name && !loops[entry.index].name) {
-      loops[entry.index].name = name;
+    const cardName = byId.get(entry.id);
+    if (!cardName) return;
+    loops[entry.index].matchedCard = cardName;
+    /* Only a card whose name actually identifies a course replaces the provisional
+       one - "Scorecard" is not a course name. */
+    if (result.resolved && cardName && !/^course \d+$/i.test(cardName)) {
+      loops[entry.index].name = cardName;
       loops[entry.index].nameSource = "scorecard-match";
     }
   });
-  return { resolved: true, score: result.score, margin: result.margin, assignment: result.assignment.map(p => ({ loopId: p.loopId, cardName: p.cardName, signals: p.signals })) };
+  return {
+    resolved: result.resolved,
+    reason: result.reason,
+    score: result.score,
+    margin: result.margin,
+    assignment: result.assignment.map(p => ({ loopId: p.loopId, cardName: p.cardName, signals: p.signals }))
+  };
 }
 
 async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecardEvidence, origin) {
@@ -424,7 +455,11 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
 
     const row = {
       course_id: courseId,
-      course_name: loop.name || course.courseName || courseId,
+      /* "Te Arai Links - Course 1" rather than a bare "Course 1": the facility is
+         what the player searched for, the suffix is what tells the two apart. */
+      course_name: loop.name && /^course \d+$/i.test(loop.name)
+        ? (course.courseName ? course.courseName + " - " + loop.name : loop.name)
+        : (loop.name || course.courseName || courseId),
       course_lat: loop.centre ? loop.centre.lat : course.center.lat,
       course_lng: loop.centre ? loop.centre.lng : course.center.lng,
       osm_course_ref: loop.osmRef || null,
@@ -435,6 +470,13 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
       published: true,
       updated_at: new Date().toISOString()
     };
+    /* Every name this course is known by at publish time - the facility it was
+       searched as, the provisional label, and the card it matched. A course named
+       "Course 1" today can become "South Course" tomorrow without losing the name
+       anything already referred to it by. Built after the row so it can exclude
+       whichever of them became the display name. */
+    row.course_aliases = [...new Set([course.courseName, loop.matchedCard, loop.name].filter(Boolean))]
+      .filter(alias => alias !== row.course_name);
     /* The pinned row exists by definition and must not have its name replaced by a
        blank one when the polygon carried no name. */
     if (isPinned && !loop.name) delete row.course_name;
@@ -455,7 +497,9 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
 
     const courseBounds = courseBoundsFor({ courseId, objects: geometry.objects, holes: geometry.holes });
     const holeNumbers = Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite);
-    const visualChain = await chainVisualSnapshot(courseId, courseBounds, origin)
+
+    const coverage = courseCoverageComplete({ holeNumbers, expectedHoles });
+    const visualChain = await chainVisualSnapshot(courseId, courseBounds, origin, coverage)
       .catch(error => ({ chained: false, reason: String(error && error.message || error).slice(0, 300) }));
 
     published.push({
@@ -465,6 +509,7 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
       pinned: isPinned,
       method: loop.method,
       nameSource: loop.nameSource || (loop.name ? "osm-polygon" : "derived"),
+      matchedCard: loop.matchedCard || null,
       holesResolved: geometry.holesResolved,
       guidesFound: geometry.guidesFound,
       greensFound: geometry.greensFound,
@@ -571,6 +616,28 @@ async function runMapperJob(job, origin) {
   let collision = detectHoleNumberCollision(payload);
   let resolverStatus = null;
   let loops = null;
+
+  /* The shared store holds ONE card per course; naming a multi-course site needs
+     one per course on it. fetchScorecardEvidence above is a cache read, and a hit
+     skipped the resolver entirely - so course.scorecardCards was populated only on
+     a course's very FIRST scan, and every rescan afterwards had nothing for the
+     loop matcher to work with. Te Arai's second scan reported cards:0 and
+     loopNaming:null for exactly this reason, having stored a card on its first.
+     Gathered again here, only when the site actually has loops to tell apart. */
+  const wantCards = collision.multiLoop ? Math.max(2, Number(collision.loops) || 2) : 1;
+  if (collision.multiLoop && distinctCardCount(course.scorecardCards) < wantCards) {
+    await heartbeatJob(job, { stage: "gathering-cards-for-naming" });
+    const forNaming = await resolveScorecardForCourse(course, origin, wantCards)
+      .catch(error => ({ cards: [], reason: String(error && error.message || error).slice(0, 200) }));
+    course.scorecardCards = forNaming.cards || [];
+    diagnostics.namingCards = {
+      want: wantCards,
+      distinct: distinctCardCount(course.scorecardCards),
+      cards: course.scorecardCards.length,
+      reason: forNaming.reason || null,
+      fromCachedEvidence: !!scorecardEvidence
+    };
+  }
 
   /* A site wider than the sweep that found it.
    *
@@ -774,6 +841,7 @@ async function runMapperJob(job, origin) {
     holeNumbers: Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite),
     courseBounds
   });
+  const resolvedHoleNumbers = Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite);
   /* Carried rather than rebuilt client-side: the player is being asked to do
      work, so the sentence explaining why lives next to the rule that decided
      it. */
@@ -797,6 +865,8 @@ async function runMapperJob(job, origin) {
        re-reading the row it just wrote, and so a job's record shows what ground the mapper
        actually covered. */
     courseBounds,
+    /* Carried so chainVisualSnapshot can judge coverage without re-deriving it. */
+    holeNumbers: resolvedHoleNumbers,
     /* On success too, not only on failure. Diagnostics used to ride on error.diagnostics
        alone, so the run that most needed explaining recorded the least: Te Arai published
        six holes of a 36-hole site with status "done" and kept no record of what separation
@@ -821,7 +891,20 @@ async function runMapperJob(job, origin) {
    course keeps its geometry and plays live tiles, exactly as before. No confidence gate
    beyond the ones that already exist: the mapper fails outright without numbered holes, and
    the visual planner only shoots play-ready holes and refuses an empty plan. */
-async function chainVisualSnapshot(courseId, courseBounds, origin) {
+async function chainVisualSnapshot(courseId, courseBounds, origin, coverage) {
+  /* Frames are only worth rendering for a course that is actually finished.
+   *
+   * The chain used to fire on any saved geometry, so a scan that resolved 11 of 18
+   * holes still got a full frame set rendered and written to the bucket - a few
+   * hundred files and tens of MB per bad scan, for a course that courseFitVerdict
+   * will not serve as a full map anyway. That is the same storage the orphan
+   * cleanup exists to reclaim, being fed from the front.
+   *
+   * Geometry still saves and the course still plays on a live map; only the render
+   * waits until the coverage is real. */
+  if (coverage && !coverage.complete) {
+    return { chained: false, reason: "coverage-incomplete: " + coverage.reason + " (" + coverage.holes + " holes)" };
+  }
   const source = resolveImagerySource(courseBounds);
   if (!source) return { chained: false, reason: "imagery-source-unavailable: " + unscannableReason(courseBounds) };
   const existing = await supabaseFetch(VISUAL_JOBS_TABLE + "?select=id&course_id=eq." + encodeURIComponent(courseId) + "&kind=eq.snapshot&status=in.(queued,running)&limit=1");
@@ -862,7 +945,11 @@ export default async function courseMapperWorker(req) {
          publishSeparatedLoops, where the per-course bounds live; chaining the parent
          again here would queue a job for a course_id that now holds only one of them. */
       if (!result.multiCourse) {
-        result.visualChain = await chainVisualSnapshot(job.course_id, result.courseBounds, origin)
+        result.visualChain = await chainVisualSnapshot(job.course_id, result.courseBounds, origin,
+          courseCoverageComplete({
+            holeNumbers: (result.fit && result.fit.detail && result.fit.detail.holeNumbers) || result.holeNumbers || [],
+            expectedHoles: result.expectedHoles
+          }))
           .catch(error => ({ chained: false, reason: String(error && error.message || error).slice(0, 300) }));
       }
       await finishJob(job.id, { status: "done", result, error: null });

@@ -120,6 +120,49 @@ test("the separation threshold sits between a green's span and a loop's gap", as
     "must be inside the query radius to be reachable at all");
 });
 
+test("frames are only rendered for a course that is actually complete", () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(path.join(ROOT, "functions", "course-mapper-worker-background.mjs"), "utf8");
+  /* The chain used to fire on any saved geometry, so an 11-of-18 scan still had a
+     full frame set rendered into the bucket - the same storage the orphan cleanup
+     reclaims, fed from the front. */
+  assert.notStrictEqual(src.indexOf("coverage-incomplete"), -1,
+    "chainVisualSnapshot must refuse a course whose coverage is incomplete");
+  const gateAt = src.indexOf("coverage && !coverage.complete");
+  const sourceAt = src.indexOf("const source = resolveImagerySource(courseBounds)");
+  assert.notStrictEqual(gateAt, -1, "the gate must exist");
+  assert.ok(gateAt < sourceAt, "and must run before any imagery work is queued");
+});
+
+test("a rescan still gathers the cards a multi-course site needs to name itself", () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(path.join(ROOT, "functions", "course-mapper-worker-background.mjs"), "utf8");
+  /* The shared store holds ONE card; naming N courses needs N. A cache hit skipped
+     the resolver entirely, so Te Arai's second scan reported cards:0 and could not
+     name either loop despite having stored a card on its first. */
+  assert.notStrictEqual(src.indexOf("distinctCardCount(course.scorecardCards) < wantCards"), -1,
+    "a multi-loop site must gather cards even when the store already has one");
+  /* And the target is the loop count the scan actually found, counted over DISTINCT
+     courses - an aggregator serves the same course on two pages, so four cards can
+     be two courses and stopping at "four" leaves a site half-named. */
+  assert.notStrictEqual(src.indexOf("Math.max(2, Number(collision.loops)"), -1,
+    "the number of cards wanted comes from the number of loops separated");
+});
+
+test("two courses are never both called the facility", () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(path.join(ROOT, "functions", "course-mapper-worker-background.mjs"), "utf8");
+  /* "Te Arai Links" twice in the picker is unusable - the player cannot tell which
+     is which. Course 1 / Course 2 is honest, and the geometry is matched to a card
+     regardless of whether a publishable label was found. */
+  assert.notStrictEqual(src.indexOf('"Course " + (index + 1)'), -1,
+    "an unnamed loop takes a provisional name that distinguishes it");
+  assert.notStrictEqual(src.indexOf("loops[entry.index].matchedCard = cardName"), -1,
+    "the loop-to-card match is recorded even when the card cannot supply a name");
+  assert.notStrictEqual(src.indexOf('nameSource = "provisional"'), -1,
+    "and the row says the name is provisional");
+});
+
 test("a site wider than its own sweep is re-queried before separation", () => {
   const fs = require("fs");
   const src = fs.readFileSync(path.join(ROOT, "functions", "course-mapper-worker-background.mjs"), "utf8");

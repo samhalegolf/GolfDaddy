@@ -35,7 +35,7 @@
  * hole count, par, the course's real name - are exactly the ones the mapper needs
  * most and the cheapest to extract. */
 
-import { parseScorecardHtml } from "./gd-scorecard-parse-core.mjs";
+import { parseScorecardCardsHtml, courseFactsFromText, pageText } from "./gd-scorecard-parse-core.mjs";
 
 export const SCORECARD_SOURCE_PRIORITY = ["golfpass", "18birdies", "golfshot", "swingu", "club-site", "search"];
 
@@ -157,7 +157,67 @@ export function cardQuality(card) {
 
 /* deps: { fetchHtml, search, readStore, writeStore, log } - all injected so this
    module stays testable without a network, in keeping with every other core here. */
-export async function resolveScorecard(course, deps) {
+/* Are these two cards the same course?
+ *
+ * Names are the first answer and the weakest one. An aggregator serves the same
+ * course on its overview page and its scorecard page, sometimes titled differently;
+ * a club that lists both its courses under one generic "Scorecard" heading gives two
+ * different courses the same name. Counting by name alone is wrong in both
+ * directions - it splits one course in two, and merges two courses into one.
+ *
+ * So the layout decides. Two 18-hole cards for the SAME course have the same par on
+ * every hole; two different courses on one site do not - Te Arai's South is par 72
+ * with its short holes at 5, 8, 12, 17, and its North is par 71 with them at 2, 7,
+ * 12, 15, 17. That is the same relative-structure argument the loop matcher runs on,
+ * applied one level earlier: what makes a course identifiable also makes it
+ * distinguishable.
+ *
+ * Distances break the tie when par is identical, which happens on sibling courses
+ * built to the same par - compared as RANK ORDER, so tee sets and units cannot make
+ * one course look like two. */
+export function sameCourseCard(a, b) {
+  const parOf = card => (card && card.holes || []).filter(h => Number.isFinite(h.par));
+  const parA = parOf(a), parB = parOf(b);
+  const shared = parA.filter(h => parB.some(x => x.hole === h.hole));
+  if (shared.length < 6) {
+    /* Too little overlap to judge by layout - fall back to the names, which is all
+       that is left. */
+    return scorecardCourseKey(a && a.name) === scorecardCourseKey(b && b.name);
+  }
+  const parMatches = shared.every(h => h.par === parB.find(x => x.hole === h.hole).par);
+  if (!parMatches) return false;
+
+  const ranks = card => {
+    const withDistance = (card.holes || []).filter(h => Number.isFinite(h.distanceM));
+    const order = withDistance.slice().sort((x, y) => y.distanceM - x.distanceM).map(h => h.hole);
+    return new Map(order.map((hole, index) => [hole, index]));
+  };
+  const ra = ranks(a), rb = ranks(b);
+  const common = [...ra.keys()].filter(hole => rb.has(hole));
+  /* Same par everywhere and no distances to separate them: the same course. */
+  if (common.length < 6) return true;
+  const disagreements = common.filter(hole => Math.abs(ra.get(hole) - rb.get(hole)) > 2).length;
+  return disagreements <= Math.max(1, Math.round(common.length * 0.15));
+}
+
+/* Distinct courses in a pool, by layout rather than by title. */
+export function distinctCards(cards) {
+  const distinct = [];
+  (cards || []).forEach(card => {
+    if (!distinct.some(kept => sameCourseCard(kept, card))) distinct.push(card);
+  });
+  return distinct;
+}
+
+export function distinctCardCount(cards) {
+  return distinctCards(cards).length;
+}
+
+/* course: { courseName, region, country }
+   options.want: how many DISTINCT courses this site is known to have. The scan has
+   already separated the loops by the time this runs, so the target is a fact, not a
+   guess - keep reading candidates until that many distinct cards are in hand. */
+export async function resolveScorecard(course, deps, options) {
   const name = String((course && (course.courseName || course.name)) || "").trim();
   const key = scorecardCourseKey(name);
   const out = { courseKey: key, courseName: name, cards: [], stored: false, statedHoleCount: null, attempts: [] };
@@ -170,12 +230,18 @@ export async function resolveScorecard(course, deps) {
     }
   }
 
+  /* The number of courses the scan actually separated, when the caller knows it.
+     Without it, 2 is the floor that still lets a plain single course stop early. */
+  const want = Math.max(1, Number(options && options.want) || 1);
   const candidates = await gatherCandidates(course, name, deps);
   const queued = new Set(candidates.map(candidate => candidate.url));
   const parsed = [];
   for (let i = 0; i < candidates.length; i++) {
     const candidate = candidates[i];
-    if (parsed.length >= 4) break;
+    /* Stop on DISTINCT courses found, not pages read. A site with two courses keeps
+       reading - including the sibling links a page hands us - until it has two, and
+       an extra copy of a course already held does not count towards the target. */
+    if (distinctCardCount(parsed) >= want) break;
     const html = await deps.fetchHtml(candidate.url).catch(error => {
       out.attempts.push({ url: candidate.url, ok: false, reason: String(error && error.message || error).slice(0, 200) });
       return null;
@@ -191,24 +257,55 @@ export async function resolveScorecard(course, deps) {
         candidates.push({ url, name: "", why: "sibling-course", sibling: true });
       });
     }
-    const card = parseScorecardHtml(html, { name: courseNameFromHtml(html, candidate.name || name), unit: source.unit });
-    const quality = cardQuality(card);
-    out.attempts.push({ url: candidate.url, ok: !!card, source: source.id, holes: card ? card.holes.length : 0, usable: quality.usable, reason: quality.reason });
+    /* Every card the page holds, not one. A club that puts both its courses on one
+       page hands over both here, each named by the heading above its own table -
+       which is the cheapest possible route to "one card per course". */
+    const pageName = courseNameFromHtml(html, candidate.name || name);
+    const cards = parseScorecardCardsHtml(html, { name: pageName, unit: source.unit });
+    out.attempts.push({
+      url: candidate.url, ok: !!cards.length, source: source.id,
+      cards: cards.length, holes: cards[0] ? cards[0].holes.length : 0
+    });
+    const attempt = out.attempts[out.attempts.length - 1];
     /* Prose facts are worth keeping even from a page whose table was unreadable -
        "18 hole, par 72" is the field three of the mapper's guards depend on. */
-    if (card && card.statedHoleCount && !out.statedHoleCount) out.statedHoleCount = card.statedHoleCount;
-    if (!quality.usable) continue;
-    if (!cardNameMatchesCourse(card.name, name)) {
-      out.attempts[out.attempts.length - 1].rejected = "name-mismatch:" + (card.name || "").slice(0, 60);
-      continue;
+    cards.forEach(card => { if (card.statedHoleCount && !out.statedHoleCount) out.statedHoleCount = card.statedHoleCount; });
+    /* A page with no readable table at all still answers the one question three of
+       the mapper's guards depend on. Te Arai's own site is exactly this: no card
+       anywhere, but "The 18 hole, par 72 golf course" in plain English. */
+    if (!cards.length && !out.statedHoleCount) {
+      const facts = courseFactsFromText(pageText(html));
+      if (facts.holeCount) { out.statedHoleCount = facts.holeCount; attempt.statedHoleCount = facts.holeCount; }
     }
-    parsed.push(Object.assign({}, card, { sourceUrl: candidate.url, source: source.id, quality: quality.score }));
+    cards.forEach(card => {
+      const quality = cardQuality(card);
+      if (!quality.usable) { attempt.reason = quality.reason; return; }
+      /* A card's own heading can be just "Scorecard", so it is checked against the
+         page's name too before being called a different club's card. */
+      if (!cardNameMatchesCourse(card.name, name) && !cardNameMatchesCourse(pageName, name)) {
+        attempt.rejected = "name-mismatch:" + (card.name || "").slice(0, 60);
+        return;
+      }
+      attempt.usable = true;
+      parsed.push(Object.assign({}, card, {
+        /* Falls back to the page's name when the table heading is generic, so two
+           cards from one page stay distinguishable but a lone card is still named. */
+        name: cardNameMatchesCourse(card.name, name) ? card.name : pageName,
+        sourceUrl: candidate.url, source: source.id, quality: quality.score
+      }));
+    });
   }
 
   /* Best first, and every card kept rather than only the winner: a site with two
      courses yields two cards, and the loop matcher needs both to tell them apart. */
   parsed.sort((a, b) => b.quality - a.quality);
   out.cards = parsed;
+  out.want = want;
+  out.distinct = distinctCardCount(parsed);
+  /* Says so when it came up short rather than letting the caller assume the pool is
+     complete - a two-course site with one card cannot name anything, and the job row
+     should show that as a shortfall, not a silence. */
+  if (out.distinct < want) out.reason = parsed.length ? "found-" + out.distinct + "-of-" + want + "-courses" : "no-readable-card";
   if (!parsed.length) return Object.assign(out, { reason: "no-readable-card" });
 
   if (deps.writeStore) {

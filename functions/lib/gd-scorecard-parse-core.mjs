@@ -226,10 +226,48 @@ export function toEngineCard(parsed, name) {
 
 /* Whole page: every table on it, stacked blocks merged, one card out.
    grids is [[row, row, ...], ...] - one grid per <table>. */
+/* Every card on a page, not just one.
+ *
+ * Tables are grouped by their heading before merging, so a stacked front/back nine
+ * under one heading becomes one card while two courses under two headings stay two.
+ * Unlabelled tables join the group before them - that is the 18Birdies shape, where
+ * the second nine's table sits under the same heading as the first. */
+/* A heading is a title, not a name: "South Course Scorecard", "North Course - Score
+   Card", "Hole by hole". The trailing noun is what the page calls the TABLE, and
+   carrying it into a course name puts "Scorecard" on a course_maps row. */
+export function cleanCardLabel(label) {
+  const text = cleanCell(label)
+    .replace(/\s*[-\u2013\u2014:]?\s*(hole[\s-]?by[\s-]?hole|score\s?card|scorecard|yardages?|tees?\s*&?\s*yardages?)\s*$/i, "")
+    .replace(/\s*[-\u2013\u2014:]\s*$/, "")
+    .trim();
+  /* A heading that was ONLY the noun leaves nothing, and an empty name is better
+     than "Scorecard" - the caller falls back to the page title. */
+  return /^(scorecard|score card|hole by hole)$/i.test(cleanCell(label)) ? "" : text;
+}
+
+export function parseScorecardCards(grids, options = {}) {
+  const groups = [];
+  (grids || []).forEach(grid => {
+    const parsed = parseScorecardGrid(grid, options);
+    if (!parsed) return;
+    const label = cleanCardLabel(grid && grid.label);
+    const last = groups[groups.length - 1];
+    if (last && (!label || label === last.label)) last.parts.push(parsed);
+    else groups.push({ label, parts: [parsed] });
+  });
+  return groups
+    .map(group => toEngineCard(mergeScorecardParts(group.parts), group.label || options.name))
+    .filter(Boolean);
+}
+
+/* One card, for callers that know the page holds a single course. */
 export function parseScorecardPage(grids, options = {}) {
-  const parts = (grids || []).map(grid => parseScorecardGrid(grid, options)).filter(Boolean);
-  if (!parts.length) return null;
-  return toEngineCard(mergeScorecardParts(parts), options.name);
+  const cards = parseScorecardCards(grids, options);
+  if (!cards.length) return null;
+  /* Merged rather than "first" when a page is genuinely one course split over
+     several unlabelled tables - mergeScorecardParts already handles that above, so
+     more than one card here means the page really did hold more than one course. */
+  return cards[0];
 }
 
 /* ---------- HTML -> grids ------------------------------------------------
@@ -275,6 +313,21 @@ function cellText(html) {
  * colspan is honoured because header rows use it for grouping; rowspan is not,
  * because no scorecard needs it and guessing wrong there silently shifts a whole
  * row of distances by one hole. */
+/* The heading a table sits under.
+ *
+ * A card is labelled by the page, not just by the page's title: an aggregator that
+ * carries BOTH of a club's courses puts "South Course Scorecard" above one table and
+ * "North Course Scorecard" above the next. Without this every table on the page
+ * merged into one card and a two-course page became a single 36-hole nonsense.
+ *
+ * Nearest preceding heading, since that is what a reader would use. */
+function headingBefore(source, index) {
+  const before = source.slice(Math.max(0, index - 4000), index);
+  const headings = before.match(/<h[1-6]\b[^>]*>[\s\S]{1,200}?<\/h[1-6]>/gi);
+  if (!headings || !headings.length) return "";
+  return cellText(headings[headings.length - 1].replace(/<\/?h[1-6][^>]*>/gi, ""));
+}
+
 export function extractTableGrids(html) {
   const source = String(html || "");
   const grids = [];
@@ -295,7 +348,11 @@ export function extractTableGrids(html) {
       }
       if (cells.length) rows.push(cells);
     }
-    if (rows.length >= 2) grids.push(rows);
+    if (rows.length >= 2) {
+      /* The label rides on the array so callers that only want rows are unaffected. */
+      rows.label = headingBefore(source, table.index);
+      grids.push(rows);
+    }
   }
   return grids;
 }
@@ -309,6 +366,15 @@ export function pageText(html) {
 
 /* The whole job for one fetched page: tables out, card back, prose as fallback
    for the count and par when the page carries no card at all. */
+export function parseScorecardCardsHtml(html, options = {}) {
+  const cards = parseScorecardCards(extractTableGrids(html), options);
+  const facts = courseFactsFromText(pageText(html));
+  return cards.map(card => Object.assign(card, {
+    statedHoleCount: facts.holeCount,
+    par: card.par || facts.par
+  }));
+}
+
 export function parseScorecardHtml(html, options = {}) {
   const card = parseScorecardPage(extractTableGrids(html), options);
   const facts = courseFactsFromText(pageText(html));
