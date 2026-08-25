@@ -3729,80 +3729,227 @@ body.gdGpsActive #shellRouteLabel{
   border-color:transparent;
   color:#07100b;
 }
-#gdProfileV67 .coachPlayer{
-  display:grid;
-  grid-template-columns:1fr auto;
-  gap:10px;
+/* ---- Coach viewing a player ---------------------------------------------
+   Deliberately unlike the own-profile surface above. That screen is green and
+   orange and full of edit affordances; this one is blue-tinted, banner-first,
+   and reads as a record you are inspecting. The difference IS the feature -
+   a coach mistaking a player's data for their own is what this replaced. */
+#gdProfileV67 .coachViewBanner{
+  display:flex;
   align-items:center;
-  width:100%;
-  min-width:0;
-  padding:10px;
-  border-radius:14px;
-  background:rgba(255,255,255,.045);
-  border:1px solid rgba(255,255,255,.08);
+  gap:9px;
+  margin:2px 0 12px;
+  padding:10px 12px;
+  border-radius:13px;
+  border:1px solid rgba(96,165,250,.34);
+  background:linear-gradient(180deg,rgba(30,58,95,.55),rgba(12,24,42,.62));
+  color:rgba(226,238,255,.92);
+  font-size:12px;
+  font-weight:850;
+  line-height:1.35;
 }
-#gdProfileV67 .coachPlayerSelect{
-  width:100%;
-  appearance:none;
-  text-align:left;
-  color:inherit;
-  font:inherit;
-  cursor:pointer;
+#gdProfileV67 .coachViewBanner i{
+  flex:0 0 auto;
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:#60a5fa;
+  box-shadow:0 0 12px rgba(96,165,250,.7);
 }
-#gdProfileV67 .coachPlayerSelect > button:first-child{
+#gdProfileV67 .coachViewBanner b{
+  color:#fff;
+  font-weight:950;
+}
+#gdProfileV67 .coachPlayerHero{
   display:grid;
-  grid-template-columns:1fr auto;
-  gap:10px;
+  grid-template-columns:64px 1fr;
+  gap:12px;
   align-items:center;
-  text-align:left;
+  padding:13px;
+  border-radius:18px;
+  border:1px solid rgba(96,165,250,.20);
+  background:
+    radial-gradient(circle at 88% 18%,rgba(96,165,250,.14),transparent 42%),
+    linear-gradient(180deg,rgba(12,22,32,.94),rgba(5,9,13,.96));
+  box-shadow:0 12px 30px rgba(0,0,0,.28);
 }
-#gdProfileV67 .coachPlayerSelect.adminManage{
-  grid-template-columns:1fr auto;
+#gdProfileV67 .coachPlayerAvatar{
+  width:64px;
+  height:64px;
+  border-radius:20px;
+  display:grid;
+  place-items:center;
+  overflow:hidden;
+  font-size:22px;
+  font-weight:950;
+  letter-spacing:-.03em;
+  color:#dbeafe;
+  border:1px solid rgba(96,165,250,.30);
+  background:linear-gradient(180deg,rgba(37,74,122,.55),rgba(12,24,42,.75));
 }
-#gdProfileV67 .coachPlayerSelect > .secondaryBtn{
-  white-space:nowrap;
+#gdProfileV67 .coachPlayerAvatar.hasPhoto{
+  border-color:rgba(255,255,255,.18);
 }
-#gdProfileV67 .coachRemoveProfile{
-  width:auto;
-  min-width:112px;
-  margin:0;
-  border-color:rgba(239,68,68,.35);
-  background:rgba(127,29,29,.18);
-  color:rgba(255,225,225,.92);
+#gdProfileV67 .coachPlayerAvatar img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
 }
-#gdProfileV67 .coachRemoveProfile:hover,
-#gdProfileV67 .coachRemoveProfile:focus-visible{
-  border-color:rgba(248,113,113,.55);
-  background:rgba(127,29,29,.28);
+#gdProfileV67 .coachPlayerName{
+  font-size:24px;
+  line-height:.98;
+  font-weight:950;
+  letter-spacing:-.045em;
+  overflow-wrap:anywhere;
 }
-#gdProfileV67 .coachPlayerSelect:hover,
-#gdProfileV67 .coachPlayerSelect:focus-visible{
-  border-color:rgba(255,159,47,.32);
-  background:rgba(255,159,47,.06);
+#gdProfileV67 .coachPlayerEmail{
+  margin-top:5px;
+  color:rgba(226,238,255,.62);
+  font-size:12px;
+  font-weight:800;
+  overflow-wrap:anywhere;
 }
-#gdProfileV67 .coachPlayer strong{
+#gdProfileV67 .coachPlayerTags{
+  margin-top:9px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+#gdProfileV67 .coachPlayerTags span{
+  border-radius:999px;
+  padding:4px 9px;
+  font-size:10px;
+  font-weight:950;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:rgba(226,238,255,.80);
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.05);
+}
+#gdProfileV67 .coachPlayerTags span.warn{
+  color:#ffd7a8;
+  border-color:rgba(255,159,47,.42);
+  background:rgba(255,159,47,.12);
+}
+#gdProfileV67 .coachPlayerMetaRow{
+  margin-top:10px;
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:8px;
+}
+#gdProfileV67 .coachPlayerMetaRow > div{
+  padding:10px 8px;
+  border-radius:13px;
+  text-align:center;
+  border:1px solid rgba(255,255,255,.09);
+  background:rgba(255,255,255,.035);
+}
+#gdProfileV67 .coachPlayerMetaRow b{
   display:block;
   font-size:14px;
+  font-weight:950;
+  letter-spacing:-.02em;
 }
-#gdProfileV67 .coachPlayer span{
+#gdProfileV67 .coachPlayerMetaRow span{
   display:block;
   margin-top:3px;
-  color:rgba(230,238,233,.62);
-  font-size:11px;
-  font-weight:760;
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  color:rgba(226,238,255,.55);
 }
-#gdProfileV67 .coachPlayer.active{
-  border-color:rgba(255,159,47,.34);
-  background:rgba(255,159,47,.075);
+#gdProfileV67 .coachPlayerCards{
+  margin-top:12px;
+  display:grid;
+  gap:10px;
 }
-#gdProfileV67 .coachStatus{
-  justify-self:end;
+#gdProfileV67 .coachPlayerCard{
+  padding:12px;
+  border-radius:15px;
   border:1px solid rgba(255,255,255,.10);
-  background:rgba(255,255,255,.035);
-  color:rgba(255,255,255,.74);
-  border-radius:14px;
-  padding:11px 10px;
+  background:linear-gradient(180deg,rgba(9,16,22,.90),rgba(4,7,10,.94));
+  box-shadow:0 8px 18px rgba(0,0,0,.20);
+}
+#gdProfileV67 .coachPlayerCard.ready{
+  border-color:rgba(34,197,94,.24);
+}
+#gdProfileV67 .coachPlayerCard.empty{
+  border-color:rgba(255,159,47,.26);
+}
+#gdProfileV67 .coachPlayerCard.booking{
+  border-color:rgba(96,165,250,.30);
+}
+#gdProfileV67 .coachPlayerCardHead{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:10px;
+}
+#gdProfileV67 .coachPlayerCardHead strong{
   font-size:12px;
+  font-weight:950;
+  letter-spacing:.10em;
+  text-transform:uppercase;
+  color:rgba(230,238,233,.74);
+}
+#gdProfileV67 .coachPlayerCardState{
+  font-size:10px;
+  font-weight:950;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  color:rgba(230,238,233,.52);
+}
+#gdProfileV67 .coachPlayerCard.ready .coachPlayerCardState{color:#5ee08a}
+#gdProfileV67 .coachPlayerCard.empty .coachPlayerCardState{color:#ffb457}
+#gdProfileV67 .coachPlayerCardBody{
+  margin-top:8px;
+}
+#gdProfileV67 .coachPlayerCardBody b{
+  display:block;
+  font-size:19px;
+  font-weight:950;
+  letter-spacing:-.03em;
+}
+#gdProfileV67 .coachPlayerCardBody span{
+  display:block;
+  margin-top:3px;
+  font-size:12px;
+  font-weight:800;
+  color:rgba(230,238,233,.60);
+}
+#gdProfileV67 .coachPlayerCardAction{
+  margin-top:11px;
+  width:100%;
+  min-height:40px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.13);
+  background:rgba(255,255,255,.055);
+  color:#fff;
+  font-size:13px;
+  font-weight:950;
+}
+#gdProfileV67 .coachPlayerCardAction:hover,
+#gdProfileV67 .coachPlayerCardAction:focus-visible{
+  border-color:rgba(96,165,250,.45);
+  background:rgba(96,165,250,.12);
+}
+#gdProfileV67 .coachPlayerNote{
+  margin:12px 0 0;
+  color:rgba(226,238,255,.52);
+  font-size:11px;
+  font-weight:800;
+  line-height:1.4;
+}
+#gdProfileV67 .coachPlayerExit{
+  margin-top:10px;
+  width:100%;
+  min-height:46px;
+  border-radius:999px;
+  border:1px solid rgba(96,165,250,.34);
+  background:rgba(96,165,250,.12);
+  color:#dbeafe;
+  font-size:14px;
   font-weight:950;
 }
 #gdProfileV67 .coachUpdatesPanel .panelHead{

@@ -28,10 +28,10 @@
     "test:green-contours": "node dev/green-contours-wiring.test.js",
     "test:shadow-lift": "node dev/shadow-lift.test.js",
     "test:courses-near": "node dev/courses-near.test.js",
-  "test:course-pin-trust": "node dev/course-pin-trust.test.js",
-  "test:nearest-loop": "node dev/nearest-loop-tightening.test.js",
-  "test:unlicensed-region": "node dev/unlicensed-region-live-map.test.js",
-  "build:app": "node scripts/clarity-deploy-build.js --app-only",
+    "test:course-pin-trust": "node dev/course-pin-trust.test.js",
+    "test:nearest-loop": "node dev/nearest-loop-tightening.test.js",
+    "test:unlicensed-region": "node dev/unlicensed-region-live-map.test.js",
+    "build:app": "node scripts/clarity-deploy-build.js --app-only",
     "demo:list": "node demo/run-demo.mjs --list",
     "demo:capture": "node demo/run-demo.mjs",
     "demo:capture:local": "DEMO_BASE_URL=http://127.0.0.1:5173 node demo/run-demo.mjs",
@@ -41,7 +41,8 @@
     "native:android": "npm run native:sync && npx cap open android",
     "native:ios": "npm run native:sync && npx cap open ios",
     "native:release:aab": "npm run build:app && npx cap sync android && cd android && ./gradlew bundleRelease",
-    "native:release:apk": "npm run build:app && npx cap sync android && cd android && ./gradlew assembleRelease"
+    "native:release:apk": "npm run build:app && npx cap sync android && cd android && ./gradlew assembleRelease",
+    "test:coach-player": "node dev/coach-player-link.test.js"
   },
   "codex": {
     "entry": "index.html",

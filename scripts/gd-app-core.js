@@ -23869,17 +23869,92 @@ function gdSaveProfilePhotoDataUrl(dataUrl,account=gdCurrentAccount()){
   try{if(window.ClaritySession)window.ClaritySession.sync("profile-photo-save");}catch(e){}
   return profile;
 }
+/* A coach and a player are linked when EITHER side says so.
+
+   The two sides drift. coach.linkedPlayerIds is written by the invite flow and
+   by Booking; player.linkedCoachIds is written by the invite-code flow and by
+   the server. Reading only the coach side meant players who joined by code
+   never appeared in the roster at all, and a stale self-reference in
+   linkedPlayerIds (the coach's own account id, which account-sync happily
+   persisted) put the coach in their own player list - tapping that row opened
+   the coach's own profile, which is what this whole area was reported for.
+
+   So: union both directions, drop the coach, drop ids with no account. */
+function gdAccountPlayerLinkIds(account){
+  if(!account)return [];
+  const ids=new Set();
+  (Array.isArray(account.linkedPlayerIds)?account.linkedPlayerIds:[]).forEach(id=>{if(id)ids.add(id)});
+  GD_ACCOUNT_STATE.accounts.forEach(other=>{
+    if(!other||other.accountId===account.accountId)return;
+    const coaches=Array.isArray(other.linkedCoachIds)?other.linkedCoachIds:[];
+    if(coaches.includes(account.accountId))ids.add(other.accountId);
+  });
+  ids.delete(account.accountId);
+  return [...ids];
+}
 function gdAccountLinkedPlayers(account=gdCurrentAccount()){
   if(!account||!gdAccountIsStaff(account))return [];
-  const ids=Array.isArray(account.linkedPlayerIds)?account.linkedPlayerIds:[];
-  return ids.map(id=>gdAccountById(id)).filter(Boolean);
+  return gdAccountPlayerLinkIds(account)
+    .map(id=>gdAccountById(id))
+    .filter(other=>!!other&&other.accountId!==account.accountId&&!gdAccountIsStaff(other));
+}
+/* Extra profiles sitting on the coach's OWN account.
+
+   One account can carry several profile rows. They arrive from test runs and
+   from the storage-wipe loop that clarity-profile-hydrate exists to stop - the
+   app minted a replacement profile with a fresh id and the old row stayed
+   behind. They were invisible: the roster is built from ACCOUNTS, and all of
+   these share one. Invisible also meant undeletable, so they only ever
+   accumulated (four on the live admin account).
+
+   They are real profiles with real bags, so they belong in the coach's roster
+   as players they manage - just players with no separate login. */
+function gdAccountManagedProfiles(account=gdCurrentAccount()){
+  if(!account)return [];
+  return GD_PROFILE_STATE.profiles.filter(profile=>
+    profile&&profile.id&&profile.accountId===account.accountId&&profile.id!==account.profileId);
+}
+function gdAccountOwnsProfile(account,profileId){
+  if(!account||!profileId)return false;
+  if(account.profileId===profileId)return true;
+  const profile=gdProfileById(profileId);
+  return !!(profile&&profile.accountId===account.accountId);
 }
 function gdAccountCanAccessProfile(account,profileId){
   if(!account||!profileId)return false;
-  if(account.profileId===profileId)return true;
+  if(gdAccountOwnsProfile(account,profileId))return true;
   if(!gdAccountIsStaff(account))return false;
   const target=gdAccountForProfile(profileId);
-  return !!(target&&Array.isArray(account.linkedPlayerIds)&&account.linkedPlayerIds.includes(target.accountId));
+  if(!target)return false;
+  if(gdAdminCanManageAllUsers(account))return true;
+  return gdAccountPlayerLinkIds(account).includes(target.accountId);
+}
+/* Delete one of those extra profiles. Never the account's own live profile -
+   that is what account-delete is for, and removing it here would leave the
+   account pointing at nothing. */
+function gdAccountDeleteManagedProfile(profileId){
+  gdAccountsLoad();
+  const account=gdCurrentAccount();
+  if(!account)throw new Error('Sign in first');
+  const profile=gdProfileById(profileId);
+  if(!profile)throw new Error('Profile not found');
+  if(profile.accountId!==account.accountId)throw new Error('That profile belongs to another account');
+  if(profile.id===account.profileId)throw new Error('This is your own profile — use Settings to delete the account');
+  GD_PROFILE_STATE.profiles=GD_PROFILE_STATE.profiles.filter(row=>row&&row.id!==profileId);
+  if(GD_ACCOUNT_STATE.viewingProfileId===profileId)GD_ACCOUNT_STATE.viewingProfileId=account.profileId;
+  if(GD_PROFILE_STATE.activeId===profileId)GD_PROFILE_STATE.activeId=account.profileId;
+  gdAccountsSave();
+  savePlayerProfiles();
+  gdAccountApplySession({silent:true});
+  /* Local delete alone would leave the server row, and account-profiles would
+     hand it back the next time this device lost its storage. Fire and forget:
+     the local delete has already happened and must not depend on the network. */
+  try{
+    if(window.ClarityProfileDelete&&typeof window.ClarityProfileDelete.remove==='function'){
+      window.ClarityProfileDelete.remove(profileId).catch(()=>{});
+    }
+  }catch(e){}
+  return profile;
 }
 function gdAdminCanManageAllUsers(account=gdCurrentAccount()){
   return !!(account&&gdAccountRole(account.role)==='admin');
@@ -24330,6 +24405,13 @@ function gdAccountViewProfile(profileId){
   gdAccountsLoad();
   const account=gdCurrentAccount();
   if(!gdAccountCanAccessProfile(account,profileId))throw new Error('Profile is not linked to this account');
+  /* The profile ROW has to exist locally, not just the link. It often did not:
+     linked_player_ids arrives from the server on login but nothing ever fetched
+     the players' profiles, so on any device that did not create the player
+     gdProfileById() returned null and gdAccountApplySession quietly substituted
+     the coach's own profile - while still toasting "Player profile loaded".
+     Failing loudly here is the whole point; the caller shows the message. */
+  if(!gdProfileById(profileId))throw new Error("That player's data has not reached this device yet. Pull to refresh the player list and try again.");
   GD_ACCOUNT_STATE.viewingProfileId=profileId;
   gdAccountsSave();
   gdAccountApplySession({silent:true});
@@ -24371,6 +24453,16 @@ function gdAccountApplySession(opts={}){
   gdAccountEnsureProfile(account);
   let profileId=GD_ACCOUNT_STATE.viewingProfileId||account.profileId;
   if(!gdAccountCanAccessProfile(account,profileId))profileId=account.profileId;
+  /* Falling back to the coach's own profile is a real failure, not a default.
+     It stays (the app must not boot with no active profile) but it is now
+     reported instead of silent - a silent swap here is indistinguishable from
+     "the app opened the wrong person" and that is exactly how it was reported. */
+  if(profileId!==account.profileId&&!gdProfileById(profileId)){
+    const missingId=profileId;
+    profileId=account.profileId;
+    console.warn('[GolfDaddy] viewed profile is missing locally, falling back to own profile',missingId);
+    try{window.ClarityErrorReporter&&window.ClarityErrorReporter.report&&window.ClarityErrorReporter.report('Viewed profile missing locally','profileId='+missingId+' accountId='+account.accountId);}catch(e){}
+  }
   GD_ACCOUNT_STATE.viewingProfileId=profileId;
   const profile=gdProfileById(profileId)||gdAccountEnsureProfile(account);
   GD_PROFILE_STATE.activeId=profile.id;
@@ -24472,7 +24564,7 @@ function gdOpenGpsSettingsRouteActive(){
 }
 function bootProfileShell(){loadPlayerProfiles();gdInstallPlaceholderProfile();ensureProfile();gdAccountsBootstrap();savePlayerProfiles();syncCoreProfileFromActive();if(!gdAuthRouteBootActive()){showShellHome();if(gdOpenGpsSettingsRouteActive())openSettings({fromGps:true});}}
 window.GolfDaddyProfiles={load:loadPlayerProfiles,save:savePlayerProfiles,active:activePlayerProfile,open:openProfilePanel,onboarding:openOnboarding,generateQuickBag:gdGenerateQuickBag,installPlaceholder:gdInstallPlaceholderProfile};
-window.GolfDaddyAccounts={load:gdAccountsLoad,save:gdAccountsSave,state:()=>GD_ACCOUNT_STATE,current:gdCurrentAccount,accountForProfile:gdAccountForProfile,linkedPlayers:gdAccountLinkedPlayers,allAccounts:gdAdminAllAccounts,coachAccounts:gdAccountCoachAccounts,coachInviteFor:gdCoachInviteFor,generateCoachInvite:gdCoachGenerateInvite,connectCoachByCode:gdAccountConnectCoachByCode,linkExistingPlayerByEmail:gdAccountLinkExistingPlayerByEmail,signup:(data)=>gdAccountCreate(data,{activate:true}),login:gdAccountLogin,logout:gdAccountLogout,update:gdAccountUpdate,addPlayer:gdCoachAddPlayerAccount,addCoach:gdCoachAddCoachAccount,removeAccount:gdAdminRemoveAccount,viewProfile:gdAccountViewProfile,adminViewProfile:gdAdminViewProfile,viewOwnProfile:gdAccountViewOwnProfile,returnToOwnProfile:gdAccountReturnToOwnProfile,apply:gdAccountApplySession,roleLabel:gdAccountPublicRole};
+window.GolfDaddyAccounts={load:gdAccountsLoad,save:gdAccountsSave,state:()=>GD_ACCOUNT_STATE,current:gdCurrentAccount,accountForProfile:gdAccountForProfile,linkedPlayers:gdAccountLinkedPlayers,allAccounts:gdAdminAllAccounts,coachAccounts:gdAccountCoachAccounts,coachInviteFor:gdCoachInviteFor,generateCoachInvite:gdCoachGenerateInvite,connectCoachByCode:gdAccountConnectCoachByCode,linkExistingPlayerByEmail:gdAccountLinkExistingPlayerByEmail,signup:(data)=>gdAccountCreate(data,{activate:true}),login:gdAccountLogin,logout:gdAccountLogout,update:gdAccountUpdate,addPlayer:gdCoachAddPlayerAccount,addCoach:gdCoachAddCoachAccount,removeAccount:gdAdminRemoveAccount,managedProfiles:gdAccountManagedProfiles,deleteManagedProfile:gdAccountDeleteManagedProfile,viewProfile:gdAccountViewProfile,adminViewProfile:gdAdminViewProfile,viewOwnProfile:gdAccountViewOwnProfile,returnToOwnProfile:gdAccountReturnToOwnProfile,apply:gdAccountApplySession,roleLabel:gdAccountPublicRole};
 window.ClarityCaddieProfiles=window.GolfDaddyProfiles;
 window.ClarityCaddieAccounts=window.GolfDaddyAccounts;
 try{window.ClaritySession&&window.ClaritySession.sync("account-api-ready");}catch(e){}

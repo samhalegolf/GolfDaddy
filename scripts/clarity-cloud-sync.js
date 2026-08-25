@@ -57,13 +57,34 @@
     }, null);
   }
 
+  /* The profile that BELONGS to this account - never whatever happens to be on
+     screen.
+
+     This used to return GolfDaddyProfiles.active(), and account-sync writes the
+     payload's profile into app_profiles under the ACCOUNT's profile_id. So
+     while a coach had a player open - which is exactly when a sync fires, since
+     accountAction calls syncNow straight after switching - the coach's own
+     server profile was overwritten with the player's name, handicap and bag.
+     The coach's own data, replaced by someone else's, silently.
+
+     Falling back to active() is still allowed, but only when the active profile
+     really does belong to this account. If neither can be resolved the caller
+     skips the push rather than sending {} - account-sync writes bag_json: []
+     for a missing profile, which would wipe the bag it was meant to back up. */
   function profileFor(account) {
     return safe(function () {
+      var wanted = account && account.profileId;
       var api = profileApi();
-      if (api && typeof api.active === "function") return api.active();
+      var active = api && typeof api.active === "function" ? api.active() : null;
+      if (active && wanted && active.id === wanted) return active;
+
       var raw = JSON.parse(localStorage.getItem(PROFILE_KEY) || "{}");
       var rows = Array.isArray(raw.profiles) ? raw.profiles : [];
-      return rows.find(function (profile) { return profile && profile.id === (account && account.profileId); }) || null;
+      var own = rows.find(function (profile) { return profile && wanted && profile.id === wanted; });
+      if (own) return own;
+
+      if (active && account && active.accountId === account.accountId) return active;
+      return null;
     }, null);
   }
 
@@ -217,6 +238,18 @@
   async function requireAccountSynced(account, reason) {
     var payload = payloadFor(account, reason || "required");
     if (!payload.account || !payload.account.accountId) throw new Error("No local account to sync");
+    /* No resolvable profile for this account means we would push {} and
+       account-sync would write bag_json: [] over a real bag. Skipping is the
+       safe answer; it is reported so it cannot rot unnoticed. */
+    if (!payload.profile) {
+      console.warn("[Clarity] skipping sync: no local profile for account", payload.account.accountId);
+      safe(function () {
+        if (window.ClarityErrorReporter && typeof window.ClarityErrorReporter.report === "function") {
+          window.ClarityErrorReporter.report("Sync skipped: account has no local profile", "accountId=" + payload.account.accountId + " reason=" + (reason || ""));
+        }
+      });
+      return status;
+    }
     saveStatus({ state: "checking", label: "Confirming your account…", error: "" });
     try {
       var result = await post(payload);

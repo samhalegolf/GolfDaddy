@@ -211,6 +211,21 @@
   to = "/.netlify/functions/account-profiles"
   status = 200
 
+# A coach's players and their profiles. account-profiles covers your OWN
+# profiles; this is the coach-facing half, without which the roster only ever
+# knew the players created on that one device.
+[[redirects]]
+  from = "/api/coach-roster"
+  to = "/.netlify/functions/coach-roster"
+  status = 200
+
+# Removing one spare profile from your own account. Without it a deletion only
+# holds until account-profiles restores the row on the next device wipe.
+[[redirects]]
+  from = "/api/account-profile-delete"
+  to = "/.netlify/functions/account-profile-delete"
+  status = 200
+
 [[redirects]]
   from = "/api/shot-library-sync"
   to = "/.netlify/functions/shot-library-sync"

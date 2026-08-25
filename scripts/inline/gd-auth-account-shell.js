@@ -85,10 +85,6 @@
     const name = String((p && p.name) || 'Player').trim();
     return (name.split(/\s+/)[0] || 'Player').replace(/[^\w'-]/g,'') || 'Player';
   }
-  function playerCardPrefix(p) {
-    return '';
-  }
-
   function bubbleSource(p) {
     try {
       if (p && p.bubbleProfiles && Object.keys(p.bubbleProfiles).length) return Object.values(p.bubbleProfiles)[0];
@@ -655,6 +651,56 @@
     });
   }
 
+  /* Profiles that share the coach's own account - no separate login, but real
+     bags and shot data. They had no row anywhere, which also made them
+     impossible to delete, so they only ever piled up.
+
+     They all carry the same account name, so the name alone cannot tell them
+     apart. The profile id and what the profile actually holds do the work. */
+  function managedProfileRosterItems(account, activeProfile) {
+    const api = accountsApi();
+    let profiles = [];
+    try { profiles = api && typeof api.managedProfiles === 'function' ? api.managedProfiles(account) : []; }
+    catch(e) { profiles = []; }
+    return profiles.map(profile => {
+      const active = !!(activeProfile && activeProfile.id === profile.id);
+      const updatedAt = profile.updatedAt || '';
+      const createdAt = profile.createdAt || updatedAt;
+      const clubs = usableBagRows(profile).length;
+      const patterns = usableBubbleSources(profile).length;
+      const holds = [
+        clubs ? `${clubs} club${clubs === 1 ? '' : 's'}` : '',
+        patterns ? `${patterns} shot pattern${patterns === 1 ? '' : 's'}` : '',
+        profile.handicap ? `handicap ${profile.handicap}` : ''
+      ].filter(Boolean).join(' · ');
+      const item = {
+        account,
+        profile,
+        managed: true,
+        accountId: account.accountId || '',
+        profileId: profile.id,
+        name: profile.name || account.name || 'Player',
+        email: profile.id,
+        role: 'player',
+        roleLabel: 'Managed',
+        active,
+        status: active ? 'Selected' : 'Managed',
+        createdAt,
+        updatedAt,
+        addedLabel: shortDate(createdAt),
+        updatedLabel: shortDate(updatedAt),
+        activity: { kind:'managed', time:updatedAt, title:'Profile on your account', detail: holds || 'No bag or shot data yet' }
+      };
+      item.activityTime = updatedAt || createdAt || '';
+      /* Always listed. These are the rows the coach came to find and delete, so
+         hiding them behind the recent-activity filter would put them straight
+         back out of reach. */
+      item.hasRecentActivity = true;
+      item.searchText = rosterSearchText(item);
+      return item;
+    });
+  }
+
   function sortRosterItems(items, sortKey) {
     const list = [...items];
     const byName = (a,b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity:'base' });
@@ -702,8 +748,19 @@
     return `<div class="gdProfileRosterEmpty">${esc(message)}</div>`;
   }
 
-  function playerRosterRow(item, isAdmin) {
+  function playerRosterRow(item, canRemoveAccounts) {
     const activity = item.activity || { kind:'none', title:'No recent activity', detail:'Search or filter to open profile' };
+    /* A profile on your own account is always yours to delete. Deleting another
+       PERSON'S account stays admin-only, because that is what removeAccount
+       enforces - offering the button to a plain coach would just throw.
+
+       The Players list previously passed isAdmin:false unconditionally, so no
+       row in it could ever be removed. That is how a pile of dead profiles
+       became permanent. */
+    const removable = item.managed || canRemoveAccounts;
+    const removeArg = item.managed
+      ? `gd67RemoveManagedProfile('${esc(item.profileId)}')`
+      : `gd67RemoveProfile('${esc(item.accountId)}')`;
     return `<div class="gdProfileRosterRow ${item.active ? 'active' : ''}" data-roster-key="players" data-search="${esc(item.searchText)}" data-has-activity="${item.hasRecentActivity ? '1' : '0'}" data-activity-kind="${esc(activity.kind || 'none')}">
       <button class="gdProfileRosterMain" type="button" aria-pressed="${item.active ? 'true' : 'false'}" onclick="gd67ViewProfile('${esc(item.profileId)}')">
         <span class="gdProfileRosterName">${esc(item.name)}</span>
@@ -712,7 +769,7 @@
         <span class="gdProfileRosterMeta">Updated ${esc(item.updatedLabel)}</span>
         <span class="gdProfileRosterStatus">${esc(item.status)}</span>
       </button>
-      ${isAdmin ? `<button class="gdProfileRosterRemove" type="button" onclick="event.stopPropagation();gd67RemoveProfile('${esc(item.accountId)}')">Remove</button>` : ''}
+      ${removable ? `<button class="gdProfileRosterRemove" type="button" onclick="event.stopPropagation();${removeArg}">${item.managed ? 'Delete' : 'Remove'}</button>` : ''}
     </div>`;
   }
 
@@ -748,9 +805,7 @@
     const items = sortRosterItems(rawItems, state.sort);
     const rows = items.map(item => key === 'coaches'
       ? coachRosterRow(item, options.currentAccountId || '')
-      : (key === 'allUsers' ? adminUserRosterRow(item, options.currentAccountId || '')
-      : playerRosterRow(item, !!options.isAdmin)
-      )
+      : (key === 'allUsers' ? adminUserRosterRow(item, options.currentAccountId || '') : playerRosterRow(item, !!options.canRemoveAccounts))
     ).join('');
     const prompt = key === 'players'
       ? `<div class="gdProfileRosterPrompt">Recent player activity appears here. Use search or filter for the full player list.</div>`
@@ -856,10 +911,10 @@
     let players = [];
     try { players = api && typeof api.linkedPlayers === 'function' ? api.linkedPlayers(account) : []; }
     catch(e) { players = []; }
-    const isAdmin = String(account.role || 'player') === 'admin';
-    const playerRows = renderRosterList('players', rosterItems(players, activeProfile), {
+    const items = rosterItems(players, activeProfile).concat(managedProfileRosterItems(account, activeProfile));
+    const playerRows = renderRosterList('players', items, {
       label: 'players',
-      isAdmin: false,
+      canRemoveAccounts: String(account.role || 'player') === 'admin',
       empty: 'No linked players yet.'
     });
     return `
@@ -972,26 +1027,157 @@
           </div>`;
   }
 
+  /* ---- Coach viewing a player -------------------------------------------
+     This used to be the coach's own profile screen with the name swapped and
+     two cards hidden, which read as "I am looking at myself" - the exact
+     confusion this area was reported for. It is now its own surface: the
+     player's identity, their data summarised for review, and edit actions that
+     are explicit rather than the default gesture. */
+
+  function playerInitials(name) {
+    const parts = String(name || 'Player').trim().split(/\s+/).filter(Boolean);
+    const letters = (parts[0] || 'P').charAt(0) + (parts.length > 1 ? parts[parts.length - 1].charAt(0) : '');
+    return letters.toUpperCase();
+  }
+
+  function bagSummary(p) {
+    const rows = usableBagRows(p);
+    if (!rows.length) return { ready:false, headline:'No bag yet', detail:'This player has not set carry distances.' };
+    const carries = rows.map(row => Number(row.baseCarry ?? row.carry ?? row.carryM ?? row.totalM ?? row.distance ?? row.meters)).filter(Number.isFinite);
+    const longest = carries.length ? Math.round(Math.max(...carries)) : 0;
+    return {
+      ready:true,
+      headline:`${rows.length} club${rows.length === 1 ? '' : 's'}`,
+      detail: longest ? `Longest carry ${longest}m` : 'Carry distances set'
+    };
+  }
+
+  function shotSummary(p) {
+    const sources = usableBubbleSources(p);
+    if (!sources.length) return { ready:false, headline:'No shot data', detail:'No practice or course pattern recorded.' };
+    const clubs = new Set(sources.map(src => String(src.club || '').trim()).filter(Boolean));
+    return {
+      ready:true,
+      headline:`${sources.length} pattern${sources.length === 1 ? '' : 's'}`,
+      detail: clubs.size ? `${clubs.size} club${clubs.size === 1 ? '' : 's'} covered` : 'Pattern data ready'
+    };
+  }
+
+  function playerDataCard(key, title, summary, actionLabel, tool) {
+    return `
+        <div class="coachPlayerCard ${summary.ready ? 'ready' : 'empty'}" data-card="${esc(key)}">
+          <div class="coachPlayerCardHead">
+            <strong>${esc(title)}</strong>
+            <span class="coachPlayerCardState">${summary.ready ? 'Ready' : 'Not set'}</span>
+          </div>
+          <div class="coachPlayerCardBody">
+            <b>${esc(summary.headline)}</b>
+            <span>${esc(summary.detail)}</span>
+          </div>
+          <button class="coachPlayerCardAction" type="button" onclick="gd67OpenProfileTool('${esc(tool)}')">${esc(actionLabel)}</button>
+        </div>`;
+  }
+
+  function playerBookingCard(owner, p) {
+    const booking = upcomingBookingForPlayer(owner, p);
+    if (!booking) return '';
+    return `
+        <div class="coachPlayerCard booking">
+          <div class="coachPlayerCardHead">
+            <strong>Next booking</strong>
+            <span class="coachPlayerCardState">${esc(shortDate(booking.time))}</span>
+          </div>
+          <div class="coachPlayerCardBody">
+            <b>${esc(booking.title || 'Booked session')}</b>
+            <span>${esc(booking.detail || '')}</span>
+          </div>
+        </div>`;
+  }
+
+  function renderCoachPlayerView(account, owner, p) {
+    const photo = p.profilePhotoDataUrl || p.photoDataUrl || '';
+    const canShow = feature => typeof gdCoachCanSeeProfileFeature !== 'function' || gdCoachCanSeeProfileFeature(feature);
+    const hcp = p.handicap || '—';
+    const hand = (p.handedness || 'right').replace(/^./, c => c.toUpperCase());
+    const bag = bagSummary(p);
+    const shot = shotSummary(p);
+    /* A managed profile has no account of its own, so there is no email, no
+       sign-in state and no separate owner to name. Say so rather than showing
+       the coach's own details next to somebody else's bag. */
+    const managed = !owner;
+    const status = managed ? 'No login' : (owner.requiresPasswordSetup ? 'Setup needed' : 'Active');
+    const subtitle = managed ? `Profile on your account · ${p.id}` : (owner.email || p.email || 'No email on file');
+    const bannerText = managed
+      ? `You are viewing a profile on your own account. Signed in as <b>${esc(account.name || 'Coach')}</b>.`
+      : `You are viewing a player. Signed in as <b>${esc(account.name || 'Coach')}</b>.`;
+    const lastSeen = shortDate(managed ? (p.updatedAt || '') : rosterUpdatedAt(owner, p));
+    return `
+      <div class="wrap coachPlayerWrap">
+        <div class="topbar">
+          <div class="nav">
+            <button class="pillBtn" type="button" onclick="gd67ChangePlayer()">Players</button>
+            <button class="pillBtn" type="button" onclick="try{if(window.gdCanonicalShellHome)return window.gdCanonicalShellHome();showShellHome();}catch(e){}; window.gdCloseProfileV67()">Home</button>
+          </div>
+        </div>
+
+        <div class="coachViewBanner" role="status">
+          <i aria-hidden="true"></i>
+          <span>${bannerText}</span>
+        </div>
+
+        <section class="coachPlayerHero">
+          <div class="coachPlayerAvatar ${photo ? 'hasPhoto' : ''}" aria-hidden="true">${photo ? `<img src="${esc(photo)}" alt="">` : esc(playerInitials(p.name))}</div>
+          <div class="coachPlayerIdentity">
+            <div class="coachPlayerName">${esc(p.name)}</div>
+            <div class="coachPlayerEmail">${esc(subtitle)}</div>
+            <div class="coachPlayerTags">
+              <span>Handicap ${esc(hcp)}</span>
+              <span>${esc(hand)} handed</span>
+              <span class="${!managed && owner.requiresPasswordSetup ? 'warn' : ''}">${esc(status)}</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="coachPlayerMetaRow">
+          <div><b>${esc(lastSeen)}</b><span>Last activity</span></div>
+          <div><b>${esc(bag.ready ? bag.headline : '—')}</b><span>Bag</span></div>
+          <div><b>${esc(shot.ready ? shot.headline : '—')}</b><span>Shot data</span></div>
+        </div>
+
+        <section class="coachPlayerCards">
+          ${managed ? '' : playerBookingCard(owner, p)}
+          ${canShow('bag') ? playerDataCard('bag', 'Bag', bag, `Open ${firstName(p)}'s bag`, 'bag') : ''}
+          ${canShow('shot') ? playerDataCard('shot', 'Shot Data', shot, `Open ${firstName(p)}'s shot data`, 'shot') : ''}
+        </section>
+
+        <p class="coachPlayerNote">${managed
+          ? 'This profile has no login of its own. Changes are saved to it, not to your own golf.'
+          : "Changes you make here are saved to this player's account, not yours."}</p>
+        <button class="coachPlayerExit" type="button" onclick="gd67ChangePlayer()">Back to players</button>
+      </div>`;
+  }
+
   function render() {
     const p = profile();
     const readyBag = bagReady(p);
     const b = bubbleVars(p);
     const hasBubble = playerBubbleReady(p);
-    let playerPrefix = playerCardPrefix(p);
     const el = overlay();
     const hcp = p.handicap || '—';
     const hand = (p.handedness || 'right').replace(/^./, c => c.toUpperCase());
 	    const account = authMode === 'reset' ? null : currentAccount();
     const owner = accountForProfile(p);
     const isCoach = isCoachAccount(account);
-    const coachViewingPlayer = !!(isCoach && owner && owner.accountId !== account.accountId);
-    if (isCoach && !coachViewingPlayer) playerPrefix = 'My';
+    /* "Somebody else" is anything that is not the coach's own profile row -
+       another person's account, or a spare profile sitting on the coach's own
+       account. Keying this off `owner` alone missed the second case, because a
+       managed profile has no account pointing at it, so it fell through to the
+       own-profile screen: exactly the wrong-person bug, by another route. */
+    const coachViewingPlayer = !!(isCoach && account && p.id && p.id !== account.profileId);
+    const playerPrefix = isCoach ? 'My' : '';
     const mode = owner ? roleLabel(owner.role) : (typeof gdPermissionPublicLabel === 'function' ? gdPermissionPublicLabel(p.permission || p.accountPermission || p.mode) : (p.mode || 'player').replace(/^./, c => c.toUpperCase()));
-    const signedInLine = account
-      ? (coachViewingPlayer ? `Signed in as ${account.name}. Editing ${owner.name}.` : `Signed in as ${account.name}.`)
-      : 'Create or log into a local account.';
-    const profileKicker = isCoach ? (coachViewingPlayer ? 'Coach Editing · Player Profile' : 'Coach Portal · My Golf') : 'Player Profile';
-    const canShowProfileCard = feature => !coachViewingPlayer || (typeof gdCoachCanSeeProfileFeature === 'function' && gdCoachCanSeeProfileFeature(feature));
+    const signedInLine = account ? `Signed in as ${account.name}.` : 'Create or log into a local account.';
+    const profileKicker = isCoach ? 'Coach Portal · My Golf' : 'Player Profile';
 
     if (!account) {
       el.innerHTML = `
@@ -1037,6 +1223,13 @@
       return;
     }
 
+    /* A coach looking at somebody else gets the player surface, not their own
+       profile with the name changed. */
+    if (coachViewingPlayer) {
+      el.innerHTML = renderCoachPlayerView(account, owner, p);
+      return;
+    }
+
     el.innerHTML = `
       <div class="wrap">
         ${profileTopbar()}
@@ -1059,24 +1252,24 @@
           ${setupStatusStrip(readyBag, hasBubble)}
         </section>
         <section class="cards">
-          ${canShowProfileCard('bag') ? `<button class="card ${readyBag ? 'good' : 'warn'}" onclick="gd67OpenProfileTool('bag')">
+          <button class="card ${readyBag ? 'good' : 'warn'}" onclick="gd67OpenProfileTool('bag')">
             ${icon('bag')}
             <div><strong>${esc(playerPrefix ? `${playerPrefix} Bag` : 'Bag')}</strong><span>${readyBag ? 'Carry distances are set.' : 'Set carry distances before play.'}</span></div>
-          </button>` : ''}
-          ${canShowProfileCard('shot') ? `<button class="card" onclick="gd67OpenProfileTool('shot')">
+          </button>
+          <button class="card" onclick="gd67OpenProfileTool('shot')">
             ${icon('scorecard')}
             <div><strong>${esc(playerPrefix ? `${playerPrefix} Shot Data` : 'Shot Data')}</strong><span>Compare course and practice patterns.</span></div>
-          </button>` : ''}
-          ${canShowProfileCard('courses') ? `<button class="card" id="gdProfileCoursesCard" type="button" onclick="try{openCourseLibraryPanel()}catch(e){}">
+          </button>
+          <button class="card" id="gdProfileCoursesCard" type="button" onclick="try{openCourseLibraryPanel()}catch(e){}">
             <img class="gdCourseLibraryCardIcon" src="assets/home/clarity-caddy-course-library-icon.png?v=defd0c72" alt="">
             <div><strong>Courses</strong><span>Recent courses.</span></div>
-          </button>` : ''}
-          ${!coachViewingPlayer ? `<button class="card" onclick="gd67OpenMembershipSettings()">
+          </button>
+          <button class="card" onclick="gd67OpenMembershipSettings()">
             ${icon('profile') || icon('scorecard')}
             <div><strong>Membership</strong><span>Manage access, Month Pass and Membership.</span></div>
-          </button>` : ''}
+          </button>
         </section>
-        ${isCoach ? `<button class="coachChangePlayer" type="button" onclick="gd67ChangePlayer()">${coachViewingPlayer ? 'Change Player' : 'Coach Dashboard'}</button>` : ''}
+        ${isCoach ? `<button class="coachChangePlayer" type="button" onclick="gd67ChangePlayer()">Coach Dashboard</button>` : ''}
         ${!isCoach && account.requiresPasswordSetup ? accountPanel(account) : ''}
       </div>
     `;
@@ -1091,6 +1284,7 @@
 	    render();
 	    overlay().classList.remove('hidden');
 	    document.body.classList.add('gdProfileOpen');
+	    if (coachProfileView === 'directory' && isCoachAccount(account)) refreshCoachRoster('profile-open');
 	    /* Opening sign-in no longer LOCKS the app behind it.
 	       forcePasswordResetSurface() hides the entire shell and adds
 	       gdAuthLocked - correct for the password-reset route it is named after,
@@ -1139,10 +1333,19 @@
     }, 0);
   }
 
+  function refreshCoachRoster(reason) {
+    try {
+      if (window.ClarityCoachRoster && typeof window.ClarityCoachRoster.refresh === 'function') {
+        window.ClarityCoachRoster.refresh(reason, { force:true }).catch(() => {});
+      }
+    } catch(e) {}
+  }
+
   function changePlayer() {
     coachProfileView = 'directory';
     render();
     scrollProfileTop();
+    refreshCoachRoster('coach-directory');
   }
 
   function openPlayerSettings() {
@@ -1599,6 +1802,49 @@
     run();
   }
 
+  /* Removing a profile that lives on your own account. Not the same operation
+     as removing a player ACCOUNT above - there is no login, no email and no
+     other person involved, just a profile row and its data. */
+  function removeManagedProfile(profileId) {
+    const api = accountsApi();
+    let profile = null;
+    try { profile = typeof gdProfileById === 'function' ? gdProfileById(profileId) : null; }
+    catch(e) { profile = null; }
+    if (!profile) {
+      safeToast('Profile not found');
+      return;
+    }
+    const clubs = usableBagRows(profile).length;
+    const patterns = usableBubbleSources(profile).length;
+    const holds = [
+      clubs ? `${clubs} club${clubs === 1 ? '' : 's'}` : '',
+      patterns ? `${patterns} shot pattern${patterns === 1 ? '' : 's'}` : ''
+    ].filter(Boolean).join(' and ');
+    const run = () => {
+      accountAction(() => {
+        if (!api || typeof api.deleteManagedProfile !== 'function') throw new Error('Profile removal is not ready');
+        api.deleteManagedProfile(profileId);
+      }, 'Profile deleted');
+      coachProfileView = 'directory';
+      scrollProfileTop();
+    };
+    const message = `Deletes ${profile.id}${holds ? ` and its ${holds}` : ''}, here and on the server. This cannot be undone.`;
+    // window.confirm returns false instantly in the embedded webview without
+    // ever showing a dialog, so the in-app dialog is used when available. The
+    // confirm fallback is kept so a missing dialog owner can never approve a
+    // deletion by default.
+    if (typeof window.gdConfirmDialog === 'function') {
+      window.gdConfirmDialog({
+        title: `Delete ${profile.name || 'this profile'}?`,
+        message,
+        confirmLabel: 'Delete'
+      }).then(ok => { if (ok) run(); });
+      return;
+    }
+    if (!confirm(`Delete ${profile.name || 'this profile'}? ${message}`)) return;
+    run();
+  }
+
   function generateCoachInvite() {
     const api = accountsApi();
     accountAction(() => {
@@ -1690,6 +1936,7 @@
   window.gd67AddCoachPlayer = addCoachPlayer;
   window.gd67AddCoachAccount = addCoachAccount;
   window.gd67RemoveProfile = removeProfile;
+  window.gd67RemoveManagedProfile = removeManagedProfile;
   window.gd67GenerateCoachInvite = generateCoachInvite;
   window.gd67SetRosterSearch = setRosterSearch;
   window.gd67SetRosterSort = setRosterSort;
@@ -1708,6 +1955,19 @@
   window.gd67ViewOwnProfile = viewOwnProfile;
   window.gd67OpenPlayerSettings = openPlayerSettings;
   window.gd67ClosePlayerSettings = closePlayerSettings;
+
+  /* A roster that arrived after the directory painted has to show up without
+     the coach having to back out and come in again. */
+  window.addEventListener('clarity:coach-roster-refreshed', () => {
+    if (overlay().classList.contains('hidden')) return;
+    if (coachProfileView !== 'directory') return;
+    render();
+    setTimeout(() => {
+      applyRosterSearch('players');
+      applyRosterSearch('coaches');
+      applyRosterSearch('allUsers');
+    }, 0);
+  });
 
   window.openProfilePanel = function() {
     open();

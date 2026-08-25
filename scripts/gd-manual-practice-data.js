@@ -527,6 +527,22 @@
     return escapeHtml(value).replace(/"/g, '&quot;');
   }
 
+  function plotScaleMarkup(calibration) {
+    var lateralM = calibration ? Math.round(calibration.lateralHalfSpanM) : 0;
+    var depthM = calibration ? Math.round(calibration.depthHalfSpanM) : 0;
+    if (!(lateralM > 0) || !(depthM > 0)) return '';
+    return [
+      '<div class="gdManualPracticeGridline gdManualPracticeGridlineV" style="left:25%" aria-hidden="true"></div>',
+      '<div class="gdManualPracticeGridline gdManualPracticeGridlineV" style="left:75%" aria-hidden="true"></div>',
+      '<div class="gdManualPracticeGridline gdManualPracticeGridlineH" style="top:25%" aria-hidden="true"></div>',
+      '<div class="gdManualPracticeGridline gdManualPracticeGridlineH" style="top:75%" aria-hidden="true"></div>',
+      '<span class="gdManualPracticeScaleLabel gdManualPracticeScaleLabelLeft" aria-hidden="true">' + lateralM + 'm</span>',
+      '<span class="gdManualPracticeScaleLabel gdManualPracticeScaleLabelRight" aria-hidden="true">' + lateralM + 'm</span>',
+      '<span class="gdManualPracticeScaleLabel gdManualPracticeScaleLabelTop" aria-hidden="true">' + depthM + 'm long</span>',
+      '<span class="gdManualPracticeScaleLabel gdManualPracticeScaleLabelBottom" aria-hidden="true">' + depthM + 'm short</span>'
+    ].join('');
+  }
+
   function plotMarkup(session) {
     return ((session && session.observations) || []).map(function (observation) {
       var left = (Number(observation.x) + 1) * 50;
@@ -637,6 +653,7 @@
       '<div class="gdManualPracticeTarget" aria-hidden="true"></div>',
       '<div class="gdManualPracticeAxis gdManualPracticeAxisVertical" aria-hidden="true"></div>',
       '<div class="gdManualPracticeAxis gdManualPracticeAxisHorizontal" aria-hidden="true"></div>',
+      plotScaleMarkup(calibration),
       plotMarkup(session),
       '</div>',
       '</div>',
