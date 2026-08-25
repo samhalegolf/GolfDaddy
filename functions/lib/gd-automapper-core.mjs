@@ -224,9 +224,25 @@ export function osmQueryScope(opts = {}, center) {
    footprint polygon (golf=course / leisure=golf_course) is the honest query area: derive a
    padded bbox from it and requery in bbox mode when it spills outside the circle. */
 
+/* Pad FIRST, normalise second.
+ *
+ * normalizedOsmFrame rejects a zero-area box, and osmScopeFrame deliberately builds
+ * one - a point at the course centre, to be inflated by the query radius. Running
+ * the rejection before the padding meant it returned null for every around-scope,
+ * so osmScopeFrame answered null every time, so expandOsmFrame(null) answered null,
+ * and BOTH widen paths quietly did nothing: the wider-retry that has been in this
+ * file for months and the multi-course widen added today. A point plus a pad is a
+ * perfectly good box; it just is not one yet at the moment it arrives. */
 export function expandOsmFrame(frame, padM = 0) {
-  const f = normalizedOsmFrame(frame);
-  if (!f) return null;
+  if (!frame) return null;
+  const south = Number(frame.south ?? frame.minLat), west = Number(frame.west ?? frame.minLng);
+  const north = Number(frame.north ?? frame.maxLat), east = Number(frame.east ?? frame.maxLng);
+  if (![south, west, north, east].every(Number.isFinite)) return null;
+  const pad = Number(padM) || 0;
+  /* A degenerate frame with no padding stays degenerate, and that IS invalid - the
+     caller asked to expand by nothing, so there is nothing to hand back. */
+  const f = { south: Math.min(south, north), west: Math.min(west, east), north: Math.max(south, north), east: Math.max(west, east) };
+  if (pad <= 0) return normalizedOsmFrame(f);
   const centerLat = (f.south + f.north) / 2;
   const latPad = padM / 111320;
   const lngPad = padM / (111320 * Math.max(0.2, Math.cos(centerLat * Math.PI / 180)));

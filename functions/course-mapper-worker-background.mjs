@@ -661,9 +661,32 @@ async function runMapperJob(job, origin) {
     await heartbeatJob(job, { stage: "widening-for-multi-course-site" });
     const needM = collision.widestSeparationM + WIDER_RETRY_PAD_M;
     const widerFrame = expandOsmFrame(osmScopeFrame(scope, course.center), needM - scope.radiusM);
+    /* Recorded whether or not it helps.
+     *
+     * This block only wrote its diagnostics on the branch where the wider query
+     * found MORE - so a widen that ran and returned exactly the same features was
+     * indistinguishable from a widen that never ran at all, and the job row showed
+     * `widened: null` for both. That sent the last investigation looking at query
+     * bounds when the answer might be that OSM simply does not have the holes.
+     *
+     * "Tried and it changed nothing" is a finding. It says the sweep was never the
+     * constraint, which is the opposite conclusion and needs the same evidence. */
+    diagnostics.widened = {
+      attempted: true,
+      fromRadiusM: scope.radiusM,
+      toSpanM: needM,
+      widestSeparationM: collision.widestSeparationM,
+      holeFeaturesBefore: collision.holeFeatures,
+      holeFeaturesAfter: null,
+      adopted: false,
+      reason: widerFrame ? null : "could-not-build-wider-frame"
+    };
     if (widerFrame) {
       const widerPayload = await fetchOverpass(osmGuideQuery(osmQueryScope({ osmFrame: widerFrame }, course.center)));
       const widerCollision = detectHoleNumberCollision(widerPayload);
+      const widerCounts = golfFeatureCounts(widerPayload);
+      diagnostics.widened.holeFeaturesAfter = widerCollision.holeFeatures;
+      diagnostics.widened.osmFeaturesAfter = widerCounts;
       /* Adopted only if it actually found more hole features - a wider frame that
          returns the same thing means the site really is that size, and keeping the
          tighter payload avoids dragging a neighbouring club in for nothing. */
@@ -671,14 +694,13 @@ async function runMapperJob(job, origin) {
         payload = widerPayload;
         collision = widerCollision;
         queryStages.push("widened-to-site-extent");
-        diagnostics.widened = {
-          fromRadiusM: scope.radiusM,
-          toSpanM: needM,
-          holeFeaturesBefore: diagnostics.osmFeatures ? diagnostics.osmFeatures.holes : null,
-          holeFeaturesAfter: widerCollision.holeFeatures
-        };
-        diagnostics.osmFeatures = golfFeatureCounts(payload);
+        diagnostics.widened.adopted = true;
+        diagnostics.osmFeatures = widerCounts;
         geometry = resolveCourseGeometry(payload, course.courseId, course.center, existingObjects, siblingCentres);
+      } else {
+        /* The decisive line: the sweep was not the constraint. */
+        diagnostics.widened.reason = "no-additional-holes-in-wider-frame";
+        queryStages.push("widened-no-change");
       }
     }
   }

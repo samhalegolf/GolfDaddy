@@ -166,5 +166,32 @@ test("chooseAutoMapGuides picks the longer guide when two candidates for the sam
     console.error("automapper-core FAILED: " + failures + " of " + tests.length);
     process.exit(1);
   }
-  console.log("automapper-core passed: " + tests.length + " checks");
+  /* A point plus a pad is a valid box.
+ *
+ * osmScopeFrame deliberately builds a zero-area frame at the course centre for the
+ * radius to inflate. expandOsmFrame used to normalise before padding, and
+ * normalizedOsmFrame rejects zero-area boxes - so it answered null for every
+ * around-scope, and both widen paths silently did nothing: the long-standing
+ * wider-retry and the multi-course widen. Te Arai looked like a query-bounds problem
+ * for two scans because of it. */
+test("an around-scope can be expanded into a wider frame", () => {
+  const centre = { lat: -36.1866611, lng: 174.6594658 };
+  const scope = core.osmQueryScope({}, centre);
+  assert.strictEqual(scope.radiusM, 1400);
+
+  const frame = core.osmScopeFrame(scope, centre);
+  assert.ok(frame, "an around-scope must yield a frame, not null");
+
+  const wider = core.expandOsmFrame(frame, 1833);
+  assert.ok(wider, "and that frame must expand");
+  const halfHeight = Math.round((wider.north - centre.lat) * 111320);
+  assert.ok(halfHeight > 3000, "the wider frame really is wider, got " + halfHeight + "m");
+
+  /* Expanding by nothing cannot rescue a zero-area frame - there is nothing to give. */
+  assert.strictEqual(core.expandOsmFrame({ south: 1, north: 1, west: 2, east: 2 }, 0), null);
+  assert.strictEqual(core.expandOsmFrame(null, 500), null);
+  assert.strictEqual(core.expandOsmFrame({ south: "x", north: 1, west: 2, east: 3 }, 500), null);
+});
+
+console.log("automapper-core passed: " + tests.length + " checks");
 })();
