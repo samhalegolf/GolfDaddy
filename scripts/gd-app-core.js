@@ -14507,6 +14507,23 @@ function gdBuildBaseLayer(source){
   return L.tileLayer(mapSourceTileUrl(source),options);
 }
 
+/* One list, two consumers. Studio's map viewport draws the same providers a course plays
+   over, and it must not keep its own copy of them - a second list drifts the moment a bbox,
+   a key name or a zoom ceiling changes here, and the viewport would then be showing
+   something the app never shows.
+
+   Layer building goes with the list because a source is not just a URL: the bbox-endpoint
+   sources (NAIP) have no tile template at all, and a consumer that only read `tileUrl` would
+   silently mount nothing for them. Coverage and key readiness go too, so a second caller
+   asks the same questions of a source that setMapSource does. */
+window.GDMapSources={
+  list:mapSources,
+  buildLayer:gdBuildBaseLayer,
+  keyValue:mapSourceKeyValue,
+  covers:mapSourceCovers,
+  ready:mapSourceReady
+};
+
 /* ---- blank-layer demotion ----
    A bbox is a promise the service never made. National WMTS mosaics 404 outside their true
    coverage, and every regional rectangle necessarily swallows some neighbour ground - the

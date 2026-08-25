@@ -202,6 +202,39 @@
       keyFunctions: [], status: "documented-only", needsVerification: false },
 
     {
+      id: "map-viewport", label: "Map Viewport", parent: "courses",
+      function: "View-only window onto the ground the mapper works over. Establishes the first view through the real course picker (pick-only mode — no round is started, no recent course recorded), then lets you pan, zoom and switch between every live imagery provider the app plays over. \"Scanner view\" asks /api/imagery-source which source the scan registry resolves here and snaps to that source's live twin at its zoom ceiling. Writes nothing: no pin, no package, no scan, no course record.",
+      owner: "scripts/studio/courses/map-viewport/map-viewport-page.js",
+      runtime: { app: false, studio: true, server: true },
+      code: [
+        { role: "Page (owner)", path: "scripts/studio/courses/map-viewport/map-viewport-page.js" },
+        { role: "Provider list + layer building (window.GDMapSources, do not copy)", path: "scripts/gd-app-core.js" },
+        { role: "Course selection (pick-only mode, app-facing owner)", path: "scripts/inline/gd-course-picker-search-v2.js" },
+        { role: "Scan-source answer (reads the imagery registry server side)", path: "functions/imagery-source.mjs" },
+        { role: "Scan source registry (source of truth, never copied client side)", path: "functions/lib/gd-imagery-sources.mjs" }
+      ],
+      inputs: ["Course selection from the real picker", "Scan source resolved for the view's centre"],
+      outputs: ["Display only — nothing is written"],
+      owns: ["The viewport UI and its provider switcher"],
+      doesNotOwn: [
+        "The provider list itself (owned by gd-app-core.js's mapSources)",
+        "The course picker (owned by gd-course-picker-search-v2.js)",
+        "The scan registry (owned by functions/lib/gd-imagery-sources.mjs)",
+        "Course location/pin state — this page never writes one"
+      ],
+      connections: [
+        { target: "courses", direction: "child-of", label: "" },
+        { target: "course-mapping", direction: "see-also", label: "Where location actually gets written" }
+      ],
+      keyFunctions: [
+        { name: "GDCoursePicker.open({onPick})", purpose: "Pick-only mode — hands back the resolved course instead of entering the mapping/GPS pipeline.", codePath: "scripts/inline/gd-course-picker-search-v2.js" },
+        { name: "GDMapSources.buildLayer", purpose: "Turns a live map source into a Leaflet layer, including the bbox-endpoint sources that have no tile template.", codePath: "scripts/gd-app-core.js" },
+        { name: "GET /api/imagery-source", purpose: "Which scan source covers a point, its zoom ceiling and its licence. Returns no endpoints or keys.", codePath: "functions/imagery-source.mjs" }
+      ],
+      status: "implemented", needsVerification: false,
+      warnings: ["The providers shown here are LIVE display sources. Several (Esri, Queensland) are licensed for display only and must never be added to functions/lib/gd-imagery-sources.mjs — seeing a course over one of them here says nothing about whether it can be scanned."]
+    },
+    {
       id: "course-visuals", label: "Course Visuals", parent: "courses",
       function: "Converts accepted course data and imagery into Clarity course visuals: source imagery, visual recipes, preview generation, frame inspection, terrain/presentation controls, generated assets, and visual review.",
       owner: "Course Visuals Controller (scripts/studio/gd-admin-course-db.js visuals bucket + scripts/gd-course-visual-engine.js)",
@@ -571,7 +604,7 @@
 
   var NAV_TREE = [
     { id: "overview" },
-    { id: "courses", children: ["course-database", "course-mapping", "course-visuals", "publishing"] },
+    { id: "courses", children: ["course-database", "course-mapping", "map-viewport", "course-visuals", "publishing"] },
     { id: "shot-system", children: ["photo-scan", "practice-data", "practice-email", "bubble-geometry", "pattern-finder", "my-bubble", "shot-system-course-data", "conditions", "recommendations"] },
     { id: "gps-play", children: ["gps-course-selection", "gps-round-setup", "gps-hole-lifecycle", "gps-map-camera", "gps-shot-planning", "gps-shot-capture", "gps-scorecard", "gps-course-data-capture", "gps-sync-recovery", "gps-demo-mode"] },
     { id: "players-coaches" },

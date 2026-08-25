@@ -44,7 +44,7 @@ function gdAdminCourseLocationMarkup(selected,payload={}){
     gdAdminCourseDbMetric("Source",info.source),
     gdAdminCourseDbMetric("Status",info.resolved?info.confirmed:"missing"),
     gdAdminCourseDbMetric("Updated",info.updated||"")
-  ].join("")}</div><div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseLocationEdit(${id})">Edit location</button><button class="danger" type="button" onclick="return gdAdminCourseLocationRemove(${id})">Remove</button></div></div></details>`;
+  ].join("")}</div><div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseLocationEdit(${id})">Edit location</button><button type="button" onclick="return gdAdminCourseLocationViewport(${id})">Map viewport</button><button class="danger" type="button" onclick="return gdAdminCourseLocationRemove(${id})">Remove</button></div></div></details>`;
 }
 function gdAdminCourseDbBadge(label,tone=""){
   return `<span class="gdAdminCourseBadge ${gdEscapeHTML(tone)}">${gdEscapeHTML(label)}</span>`;
@@ -339,7 +339,26 @@ function gdAdminCourseLocationEdit(courseId){
   const course=gdAdminCourseLocationSelected(courseId);
   if(!course)return false;
   if(typeof window.gdShowCoursePinScreen==="function")return window.gdShowCoursePinScreen(course);
-  if(window.GDCoursePicker&&typeof window.GDCoursePicker.open==="function")return window.GDCoursePicker.open({source:"admin-course-location",returnTarget:"gps"});
+  /* The fallback used to open the course picker with returnTarget:"gps", which does not edit
+     anything - it starts a round. So a missing pin screen silently turned "edit this course's
+     location" into "play some course", from an admin panel. Gone. The honest fallback for a
+     surface that cannot edit is the surface that can look: Map Viewport, on this course. */
+  return gdAdminCourseLocationViewport(courseId);
+}
+/* Look at this course's ground without touching it. Separate button, separate promise:
+   Edit writes, this one never does. */
+function gdAdminCourseLocationViewport(courseId){
+  const course=gdAdminCourseLocationSelected(courseId);
+  if(!course)return false;
+  const owner=window.GDCourseLocation;
+  const resolved=owner&&typeof owner.resolve==="function"?owner.resolve(course,{requireConfirmed:false}):null;
+  const centre=resolved&&resolved.centre;
+  const payload=Object.assign({},course);
+  if(centre&&Number.isFinite(Number(centre.lat))&&Number.isFinite(Number(centre.lng))){
+    payload.lat=Number(centre.lat);
+    payload.lng=Number(centre.lng);
+  }
+  if(window.GDStudioMapViewport&&typeof window.GDStudioMapViewport.open==="function")return window.GDStudioMapViewport.open(payload);
   return false;
 }
 function gdAdminCourseLocationRemove(courseId){
@@ -4106,6 +4125,7 @@ window.gdAdminCourseDbOpen=gdAdminCourseDbOpen;
 window.gdAdminCourseDbShowGeometry=gdAdminCourseDbShowGeometry;
 window.gdAdminCourseDbShowDebug=gdAdminCourseDbShowDebug;
 window.gdAdminCourseLocationEdit=gdAdminCourseLocationEdit;
+window.gdAdminCourseLocationViewport=gdAdminCourseLocationViewport;
 window.gdAdminCourseLocationRemove=gdAdminCourseLocationRemove;
 window.gdAdminCourseDebugRefresh=gdAdminCourseDebugRefresh;
 window.gdAdminCourseVisualOpenRecipeTool=gdAdminCourseVisualOpenRecipeTool;

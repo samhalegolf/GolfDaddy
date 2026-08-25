@@ -209,6 +209,21 @@
     window.GDStudioRouter.reset("overview");
   }
 
+  /* Step aside, and come back.
+
+     Studio is a fixed full-screen layer at z-index 4000 over the whole app, so anything that
+     wants to hand the operator a REAL app surface - the course picker, in the map viewport's
+     case - has to get the shell out of the way rather than try to out-stack it. Hiding the
+     root is the whole of it: the app underneath is live and untouched the entire time.
+
+     Deliberately not a route change. The shell keeps its current page, so showing it again
+     lands exactly where it was rather than resetting to Overview. */
+  window.GDStudioShell = {
+    hide: function () { if (root) root.hidden = true; return !!root; },
+    show: function () { if (root) root.hidden = false; return !!root; },
+    isVisible: function () { return !!(root && !root.hidden); }
+  };
+
   if (activationTarget() === "studio") {
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", mount);

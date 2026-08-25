@@ -119,6 +119,13 @@
   to = "/.netlify/functions/relief-preview"
   status = 200
 
+# Which scan source covers a point, read straight off the imagery registry. Studio's map
+# viewport asks; nothing in the app does.
+[[redirects]]
+  from = "/api/imagery-source"
+  to = "/.netlify/functions/imagery-source"
+  status = 200
+
 [[redirects]]
   from = "/api/scorecard-fetch"
   to = "/.netlify/functions/scorecard-fetch"

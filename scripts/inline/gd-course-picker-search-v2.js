@@ -34,7 +34,13 @@
     lastResult:null,
     lastSearchQuery:"",
     lastNearby:null,
-    lastResumePanel:null
+    lastResumePanel:null,
+    /* Pick-only mode. Armed by open({onPick}) and consumed by the FIRST selection, which
+       hands the resolved course back instead of entering the mapping/GPS pipeline behind it.
+       Studio's map viewport is the only caller: it wants this picker - the real search,
+       nearby and database lists - to establish a view, not to start a round.
+       Cleared on consumption and on close, so a stale arm can never swallow a real one. */
+    pickHandler:null
   };
 
   function byId(id){return document.getElementById(id)}
@@ -709,6 +715,19 @@
     course.courseId=course.savedCourseId||course.courseId||course.canonicalKey;
     course=applyStoredPin(course);
     if(window.GDCourseLocation&&typeof window.GDCourseLocation.attachToCourse==="function")course=normalizeCourse(window.GDCourseLocation.attachToCourse(course,{requireConfirmed:false}));
+    /* Pick-only stops here, ABOVE rememberRecentCourse on purpose. The studio is served from
+       the same origin as the app, so its recents are the player's recents - a course somebody
+       glanced at in a map viewport is not a course they played. */
+    if(state.pickHandler){
+      const handler=state.pickHandler;
+      state.pickHandler=null;
+      state.open=false;
+      state.activeSelection=course;
+      if(typeof bridge().hidePin==="function")safe(()=>bridge().hidePin());
+      safe(()=>{byId("courseScreen")?.classList.add("hidden");});
+      safe(()=>handler(course));
+      return false;
+    }
     rememberRecentCourse(course);
     state.activeSelection=course;
     safe(()=>{window.__gdLiveCoursePickerSelection=course;window.__gdLiveCoursePickerSelectionAt=Date.now();});
@@ -956,6 +975,7 @@
     if(event){event.preventDefault?.();event.stopPropagation?.();event.stopImmediatePropagation?.();}
     state.open=true;
     state.source=opts.source||"change-course";
+    state.pickHandler=typeof opts.onPick==="function"?opts.onPick:null;
     window.gdCourseChangeMode=opts.mode||"change-course";
     window.__gdCoursePickerReturnTarget=opts.returnTarget||"gps";
     safe(()=>{window.__gdCoursePickerChangingAt=Date.now();window.__gdCoursePickerFirstHoleOpenToken=null;window.__gdStableMappedHoleOneLast=null;});
@@ -1061,6 +1081,7 @@
       state.activeToken=`cancelled-${Date.now()}-${Math.random()}`;
       state.activePromise=null;
     }
+    state.pickHandler=null;
     if(typeof bridge().hidePin==="function")bridge().hidePin();
     closePickerSurface(opts.reason||"course-picker-close");
     return false;
