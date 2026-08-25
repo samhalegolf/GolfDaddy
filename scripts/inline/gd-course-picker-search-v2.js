@@ -286,10 +286,12 @@
 	      region:raw?.region,
 	      country:raw?.country,
 	      countryCode:raw?.countryCode??raw?.country_code,
+	      aliases:Array.isArray(raw?.aliases)?raw.aliases:[],
 	      source:"database-course"
 	    });
 	    course.hasDatabaseMap=true;
 	    course.databaseCourseId=raw?.id||course.courseId;
+	    course.facilityKey=raw?.facilityKey||"";
 	    return course.name&&!/^manual gps$/i.test(course.name)?course:null;
 	  }
 	  /* A course_maps row is not proof of a map.
@@ -781,14 +783,11 @@
     }
     return invokeMappingOnce(course,Object.assign({},opts,{fromPinnedSeed:usePinSeed}));
   }
-  function renderCoursesOwner(courses){
-    const list=byId("courseList");
-    if(!list)return;
-    renderNearby();
-    courses=Array.isArray(courses)?courses:[];
-    if(courses.length===1&&courses[0]?.assumedCandidate)courses=[];
-    list.innerHTML="";
-    courses.forEach(raw=>{
+  /* Rows only - no grouping, no chooser. Used both for the normal list and for
+     what a facility chooser row expands to, so expanding one never regenerates
+     another chooser above the very siblings it just chose between. */
+  function renderFlatCourseRows(list,courses){
+    (Array.isArray(courses)?courses:[]).forEach(raw=>{
       const c=basePayload(raw);
       const row=document.createElement("div");
       row.className="course";
@@ -796,6 +795,77 @@
       row.innerHTML=`<div><div class="name">${esc(c.name)}</div><div class="meta">${esc(metaText(c))}</div></div><button class="play" type="button">Play</button>`;
       list.appendChild(row);
     });
+  }
+  /* Courses in this result set that share a facilityKey (Te Arai's North and
+     South both carry the pinned sibling's courseId, set server-side - see
+     functions/course-maps.mjs). Two or more sharing a key is a real facility,
+     not a coincidence: facilityKey is only ever stamped by the mapper worker
+     when it separated loops out of one scan. */
+  function facilityGroups(courses){
+    const byKey=new Map();
+    (Array.isArray(courses)?courses:[]).forEach(course=>{
+      const key=course&&course.facilityKey;
+      if(!key)return;
+      if(!byKey.has(key))byKey.set(key,[]);
+      byKey.get(key).push(course);
+    });
+    const groups=[];
+    byKey.forEach((members,key)=>{if(members.length>1)groups.push({facilityKey:key,members})});
+    return groups;
+  }
+  /* The longest run of words every member's name opens with - "Te Arai Links -
+     North Course" and "Te Arai Links - South Course" share "Te Arai Links".
+     Falls back to the first member's own name when nothing is shared, so a
+     facilityKey collision with no common wording still renders something. */
+  function facilityLabelFromNames(names){
+    const words=(names||[]).filter(Boolean).map(n=>String(n).trim().split(/\s+/));
+    if(!words.length)return "";
+    const first=words[0];
+    let common=[];
+    for(let i=0;i<first.length;i++){
+      const word=first[i];
+      if(words.every(list=>list[i]&&list[i].toLowerCase()===word.toLowerCase()))common.push(word);
+      else break;
+    }
+    const label=common.join(" ").replace(/[-–—:,]+$/,"").trim();
+    return label||String(names[0]||"").trim();
+  }
+  /* What a facility chooser row expands to when picked: just its own members,
+     rendered flat - never re-grouped, so choosing does not hand the player
+     another chooser sitting above the two rows it just expanded. */
+  function showFacilityChooser(members){
+    const list=byId("courseList");
+    if(!list)return false;
+    renderNearby();
+    list.innerHTML="";
+    renderFlatCourseRows(list,members);
+    const count=byId("countLine");
+    if(count)count.textContent=`${members.length} courses`;
+    return false;
+  }
+  function renderCoursesOwner(courses){
+    const list=byId("courseList");
+    if(!list)return;
+    renderNearby();
+    courses=Array.isArray(courses)?courses:[];
+    if(courses.length===1&&courses[0]?.assumedCandidate)courses=[];
+    list.innerHTML="";
+    /* One subtly-promoted chooser row per facility with 2+ known siblings in
+       this result set, ahead of the normal list. The siblings still render
+       below, unhidden - a player choosing between known courses at one
+       facility is a different question from "which place did you mean"
+       (clusterAreas, below), so this is additive rather than a replacement,
+       and duplication here costs nothing. No "Mapped"/"Database" exposure:
+       the chooser looks like the best suggestion, same principle metaText
+       already follows for a single database course. */
+    facilityGroups(courses).forEach(group=>{
+      const row=document.createElement("div");
+      row.className="course";
+      row.__gdFacilityPayload={members:group.members};
+      row.innerHTML=`<div><div class="name">${esc(facilityLabelFromNames(group.members.map(m=>m.name)))}</div><div class="meta">${esc(group.members.length+" courses here")}</div></div><button class="play" type="button">Choose</button>`;
+      list.appendChild(row);
+    });
+    renderFlatCourseRows(list,courses);
     const count=byId("countLine");
     if(count){
       const recentOnly=courses.length&&courses.every(course=>course&&course.source==="recent-course");
@@ -1100,6 +1170,8 @@
         if(event.stopImmediatePropagation)event.stopImmediatePropagation();
         const area=target.__gdAreaPayload;
         if(area)return showArea(area.area,area.fallback,area.run);
+        const facility=target.__gdFacilityPayload;
+        if(facility)return showFacilityChooser(facility.members);
         return selectCourseForPlay(target.__gdCoursePayload||target,{source:"picker-list-click"});
       },false);
       screen.addEventListener("keydown",event=>{
@@ -1108,6 +1180,8 @@
         const target=event.target.closest("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course");
         const area=target.__gdAreaPayload;
         if(area)return showArea(area.area,area.fallback,area.run);
+        const facility=target.__gdFacilityPayload;
+        if(facility)return showFacilityChooser(facility.members);
         return selectCourseForPlay(target.__gdCoursePayload,{source:"picker-list-key"});
       },false);
     }

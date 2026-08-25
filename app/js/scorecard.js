@@ -16,6 +16,16 @@
   var courseKey = null;
   var loadToken = 0;
 
+  /* course_scorecards.course_key is the DISPLAY NAME, lowercased and whitespace-
+     collapsed — NOT the dash-slug `courseKey` above is (that one keys the
+     localStorage score bucket and must not change format, or existing saved
+     scores go missing). Must stay byte-identical to scorecardCourseKey() in
+     functions/course-mapper-worker-background.mjs and
+     functions/lib/gd-scorecard-resolve.mjs. */
+  function scorecardCourseKey(name) {
+    return String(name || "").trim().replace(/\s+/g, " ").toLowerCase();
+  }
+
   function scores() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null") || {}; } catch (e) { return {}; }
   }
@@ -164,11 +174,11 @@
     /* Called on round open — resolves the canonical key and goes to fetch its
        cached par card; a hole change or a slow/failed fetch never blocks play,
        it only affects what the (separately opened) panel shows. */
-    setCourse: async function (key) {
+    setCourse: async function (key, name) {
       var token = ++loadToken;
       courseKey = app.courseKey(key);
       parByHole = {};
-      var found = await fetchPar(courseKey);
+      var found = await fetchPar(scorecardCourseKey(name || key));
       if (token !== loadToken) return;   // superseded: drop silently
       parByHole = found;
       render();

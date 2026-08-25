@@ -52,13 +52,13 @@
            rangefinder and run for everybody; Course Data and the scorecard are
            round history, and a rangefinder-only session never opens either -
            so nothing is left half-written when it ends. */
-        roundStarted: function (courseKey) {
+        roundStarted: function (courseKey, courseName) {
           if (app.pin) app.pin.startRound();
           if (app.gps) app.gps.start();
           if (app.wakeLock) app.wakeLock.start();
           if (!roundFeatures()) return;
           if (app.courseData) app.courseData.startRound(courseKey);
-          if (app.scorecard) app.scorecard.setCourse(courseKey);
+          if (app.scorecard) app.scorecard.setCourse(courseKey, courseName);
         },
         roundEnded: function () {
           if (app.gps) app.gps.stop();
@@ -116,6 +116,7 @@
   function startRound(course, pkg) {
     ensureMarshal().signal("ROUND_OPENED", {
       courseKey: app.courseKey(course.courseId),
+      courseName: course.courseName || "",
       pkg: pkg || null,
       centre: Number.isFinite(course.courseLat) && Number.isFinite(course.courseLng)
         ? { lat: course.courseLat, lng: course.courseLng } : null
@@ -389,8 +390,8 @@
         courseLng: course.courseLng,
         onProgress: function (info) {
           setLoading(info.waitedMs > 30000
-            ? "Still mapping - a first visit can take a couple of minutes"
-            : "Mapping this course",
+            ? "Preparing course - first-time setup can take a little longer"
+            : "Preparing course...",
             Math.min(90, 30 + 60 * (info.waitedMs / info.budgetMs)));
         }
       });

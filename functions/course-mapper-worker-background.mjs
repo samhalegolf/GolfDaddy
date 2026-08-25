@@ -31,7 +31,7 @@ import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolve
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
 import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow } from "./lib/gd-scorecard-resolve.mjs";
-import { loopLengthsFromOsm, matchLoopsToCards } from "./lib/gd-scorecard-match-core.mjs";
+import { loopLengthsFromOsm, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry } from "./lib/gd-scorecard-match-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
 
@@ -1043,6 +1043,21 @@ async function runMapperJob(job, origin) {
      the visual chain, once here to judge whether these holes can plausibly be
      one course. */
   const courseBounds = courseBoundsFor({ courseId: course.courseId, objects: geometry.objects, holes: geometry.holes });
+  /* Late trust check: does the ground we resolved actually look like the card
+     this course's own name matched to? Only fires on evidence that is a
+     genuine name-match for THIS course - a facility-fallback card (any card
+     stored for the site, used above only to fill in expectedHoles) might just
+     as well belong to a sibling, so scoring it here would manufacture false
+     wrong-neighbour alarms rather than catch real ones. Reuses the exact
+     relative-shape math course-scorecard-update.mjs uses to tell siblings
+     apart - see gd-scorecard-match-core.mjs. */
+  const identityMatchedEvidence = scorecardEvidence && !(diagnostics.scorecardResolve && diagnostics.scorecardResolve.facilityFallback);
+  const scorecardIdentity = identityMatchedEvidence
+    ? Object.assign(
+      scorePairing({ id: course.courseId, lengths: courseLengthsFromPublishedGeometry(geometry.objects) }, scorecardEvidence, null),
+      { cardName: course.courseName }
+    )
+    : null;
   /* Whether the coordinate this run was given can be trusted, decided from what
      the run actually found. The player is only asked to drag a pin when this
      says the answer is clearly wrong - see lib/gd-course-fit-core.mjs. */
@@ -1054,7 +1069,8 @@ async function runMapperJob(job, origin) {
        card when there is one and against the standard 9/18/27/36 shape when there
        is not - see courseCoverageComplete. */
     holeNumbers: Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite),
-    courseBounds
+    courseBounds,
+    scorecardIdentity
   });
   const resolvedHoleNumbers = Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite);
   /* Carried rather than rebuilt client-side: the player is being asked to do

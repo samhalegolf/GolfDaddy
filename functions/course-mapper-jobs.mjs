@@ -18,6 +18,7 @@
    The worker itself is functions/course-mapper-worker-background.mjs. */
 
 import { MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { findDuplicateCourseWithGeometry } from "./lib/gd-duplicate-course-guard.mjs";
 
 const TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
@@ -34,6 +35,7 @@ const AUTO_RATE_MAX_PER_USER = 5;
    OSM fetch, per-hole resolution and green-shape refinement, so silence this long is a dead
    invocation, not a slow one. */
 const STALL_SECONDS = 120;
+const ASSUMED_COURSE_MATCH_RADIUS_M = 4000; // same radius course-package.mjs uses
 
 function env(name) { return process.env[name] || ""; }
 function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
@@ -250,6 +252,22 @@ async function hasKnownCentre(courseId) {
    requested_by provenance are both keyed to it); callers without a verified user must not
    reach this function. */
 export async function enqueueMapperJob({ courseId, courseLat, courseLng, courseName, userId, origin }) {
+  /* Same guard course-package.mjs's buildCoursePackageWithTrigger already runs before it
+     enqueues - needed here too because this is a second, independent front door onto the
+     same job queue (POST /api/course-mapper-jobs, reachable directly, not only through
+     course-package.mjs's read path). Without it, a courseId slug that drifts between two
+     requests for the same physical course (a renamed variant, a different search result for
+     the same club) creates a second course_maps row and a second copy of the same geometry -
+     see lib/gd-duplicate-course-guard.mjs's header for the case this was written for. Only
+     checked when real coordinates are supplied, the same precondition ensureCourseCenter
+     itself requires to do anything. */
+  const lat = Number(courseLat), lng = Number(courseLng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    const duplicate = await findDuplicateCourseWithGeometry(supabaseFetch, {
+      courseId, courseName, center: { lat, lng }, radiusM: ASSUMED_COURSE_MATCH_RADIUS_M
+    }).catch(() => null);
+    if (duplicate) return { duplicate: true, courseId: duplicate.courseId };
+  }
   const located = await ensureCourseCenter(courseId, { courseLat, courseLng, courseName });
 
   const state = await mapperBuildState(courseId);
@@ -374,6 +392,7 @@ export default async function courseMapperJobs(req) {
     userId: user.id,
     origin: new URL(req.url).origin
   });
+  if (result.duplicate) return json(200, { duplicate: true, courseId: result.courseId });
   if (result.unlocatable) {
     return json(422, {
       error: "no location for " + courseId,

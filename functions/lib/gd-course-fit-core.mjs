@@ -49,6 +49,19 @@ export const COURSE_FIT_LOOP_SEPARATION_M = 250;
    early far more often than it is a genuinely odd course. */
 export const STANDARD_HOLE_COUNTS = [9, 18, 27, 36];
 
+/* Below this the pairing is a shrug, not evidence - see the header on
+   scorePairing's MIN_COMPARABLE_HOLES for why 6. A weak score from too few
+   comparable holes must never read as proof the ground is wrong. */
+export const SCORECARD_IDENTITY_MIN_HOLES = 6;
+
+/* Well under matchLoopsToCards' own MIN_MATCH_SCORE (0.55): that threshold
+   picks a WINNER among rival cards, this one is asked the opposite question -
+   "is this obviously not the right course" - on a single pairing with no
+   rival to compare against. A middling score is normal noise from tee-set
+   and unit differences; only a genuinely bad one is worth stopping a player
+   for. */
+export const SCORECARD_IDENTITY_MIN_SCORE = 0.35;
+
 /* Is this course complete enough to present as a finished map?
  *
  * Two ways to be complete, in order of authority:
@@ -136,6 +149,22 @@ export function courseFitVerdict(facts) {
   if (spanM !== null && spanM > COURSE_FIT_MAX_SPAN_M) {
     return untrusted("holes-scattered", "ground", { spanM, maxSpanM: COURSE_FIT_MAX_SPAN_M });
   }
+  /* The late trust check: geometry that is coherent and complete can still be a
+     coherent, complete NEIGHBOUR. f.scorecardIdentity only arrives when the
+     caller had a card it could confidently name to THIS course (never a
+     facility-fallback card, which might just as easily be a sibling's) - see
+     course-mapper-worker-background.mjs. Absence of a comparable card is not
+     evidence of anything and must fall through to trusted, same rule as every
+     other check in this file. */
+  const identity = f.scorecardIdentity;
+  if (identity && (identity.comparedHoles >= SCORECARD_IDENTITY_MIN_HOLES || identity.parHoles >= SCORECARD_IDENTITY_MIN_HOLES)
+    && Number(identity.score) < SCORECARD_IDENTITY_MIN_SCORE) {
+    return untrusted("scorecard-identity-mismatch", "ground", {
+      score: identity.score,
+      comparedHoles: identity.comparedHoles,
+      cardName: identity.cardName || ""
+    });
+  }
   return { trusted: true, reason: null, scope: null, detail: {}, spanM };
 }
 
@@ -176,6 +205,9 @@ export function courseFitMessage(verdict) {
   }
   if (verdict.reason === "holes-scattered") {
     return "The holes found are too spread out to be one course. Pin the one you are playing.";
+  }
+  if (verdict.reason === "scorecard-identity-mismatch") {
+    return "This doesn't look like the course you searched for. Pin the one you are playing.";
   }
   return "Pin the course you are playing.";
 }

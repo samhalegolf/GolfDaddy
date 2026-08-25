@@ -18,13 +18,14 @@
    an authenticated caller that supplies courseLat/courseLng (an anonymous or location-less
    request still gets a truthful "none" back, matching course-visual-jobs.mjs's own pattern of
    requiring a verified identity before any write). Before enqueueing, it checks for a nearby
-   already-mapped course under a different id/name (courseIdentity/nearbyKnownCourses from
-   gd-automapper-core.mjs) - the server-side duplicate-course-matching responsibility the
-   architecture doc assigns here, so two players' slightly different names/ids for the same
-   course don't each get their own mapper job and their own copy of the same geometry. */
+   already-mapped course under a different id/name (findDuplicateCourseWithGeometry from
+   lib/gd-duplicate-course-guard.mjs, shared with course-mapper-jobs.mjs's own direct enqueue
+   route) - the server-side duplicate-course-matching responsibility the architecture doc
+   assigns here, so two players' slightly different names/ids for the same course don't each
+   get their own mapper job and their own copy of the same geometry. */
 
-import { deriveCoursePackageState, shapeLitePackage, shapeFullPackage, hasGeometryPayload } from "./lib/gd-course-package-shape.mjs";
-import { nearbyKnownCourses, classifyCourseRelationship } from "./lib/gd-automapper-core.mjs";
+import { deriveCoursePackageState, shapeLitePackage, shapeFullPackage } from "./lib/gd-course-package-shape.mjs";
+import { findDuplicateCourseWithGeometry as findDuplicateCourse } from "./lib/gd-duplicate-course-guard.mjs";
 import { enqueueMapperJob } from "./course-mapper-jobs.mjs";
 
 const MAPS_TABLE = "course_maps";
@@ -71,33 +72,6 @@ async function verifiedUserId(req) {
 }
 
 function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
-
-/* A generous bounding box narrows the candidate set before the exact-distance check in
-   nearbyKnownCourses - avoids a full-table scan while staying wide enough that
-   ASSUMED_COURSE_MATCH_RADIUS_M (4000m, roughly 0.036 degrees of latitude) is never clipped. */
-async function findDuplicateCourseWithGeometry(courseId, courseName, center) {
-  const pad = 0.06;
-  const rows = await supabaseFetch(
-    MAPS_TABLE + "?select=course_id,course_name,course_lat,course_lng,objects_json,holes_json&published=eq.true" +
-    "&course_lat=gte." + (center.lat - pad) + "&course_lat=lte." + (center.lat + pad) +
-    "&course_lng=gte." + (center.lng - pad) + "&course_lng=lte." + (center.lng + pad) + "&limit=50"
-  ).catch(() => []);
-  const candidates = (Array.isArray(rows) ? rows : [])
-    .filter(row => row.course_id !== courseId && hasGeometryPayload(row))
-    .map(row => ({ courseId: row.course_id, courseName: row.course_name, courseLat: row.course_lat, courseLng: row.course_lng }));
-  const nearby = nearbyKnownCourses(center, candidates, ASSUMED_COURSE_MATCH_RADIUS_M);
-  /* Proximity alone is NOT duplication. Every course at a 36-hole facility sits within
-     ASSUMED_COURSE_MATCH_RADIUS_M of its siblings, so taking the nearest mapped course meant
-     the second course at a facility was permanently shadowed by the first: it was handed the
-     sibling's geometry and never enqueued a job of its own. Only redirect when the candidate
-     is genuinely the same course under a different id/name.
-
-     The courseId fallback matters for callers that send a location but no display name - ids
-     here are slugs of the name ("taupo-golf-club-centennial"), so un-slugging the hyphens
-     recovers enough for the facility/label split to work. */
-  const request = { courseId, courseName: courseName || String(courseId || "").replace(/-+/g, " ") };
-  return nearby.find(candidate => classifyCourseRelationship(request, candidate) === "duplicate") || null;
-}
 
 async function loadCoursePackageRows(courseId) {
   const [mapRows, visualRows, visualJobRows, mapperJobRows] = await Promise.all([
@@ -184,7 +158,7 @@ export async function buildCoursePackageWithTrigger(courseId, { center, courseNa
   const result = await buildCoursePackage(courseId);
   if (result.status !== "none") return result;
   if (center) {
-    const duplicate = await findDuplicateCourseWithGeometry(courseId, courseName, center);
+    const duplicate = await findDuplicateCourse(supabaseFetch, { courseId, courseName, center, radiusM: ASSUMED_COURSE_MATCH_RADIUS_M });
     if (duplicate) {
       const canonical = await buildCoursePackage(duplicate.courseId);
       return Object.assign({}, canonical, { redirectedFrom: courseId });

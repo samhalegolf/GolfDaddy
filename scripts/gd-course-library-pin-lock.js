@@ -4446,7 +4446,7 @@
     const mappedCourse=loadUserCourseData(userId(),courseId(course))||course;
     ingestRequestedHoleToPipeline(mappedCourse,h,reason||'course-play-resolver');
     const frameCollection=collectCoursePlayFrames(mappedCourse,reason||'course-play-resolver',{activeHole:h,warmFrames:opts.collectCoursePlayFrames!==false});
-    updateCourseLoading(`Framing Hole ${h}`,86);
+    updateCourseLoading(`Preparing Hole ${h}`,86);
     await sleep(80);
     let framed=false;
     try{framed=!!focusMappedHoleOrSavedGreen(h,{quiet:true,frame:true,promptStart:true,allowAnyStart:true,stablePreLock:true,course:mappedCourse});}catch(e){}
@@ -4616,6 +4616,10 @@
 	      if(res.status===429){toastSafe('Too many mapping runs started recently - try again in a few minutes');return null;}
 	      if(res.status===401){toastSafe('Sign in to start server mapping');return null;}
 	      if(res.status===422){toastSafe('Pin the course location first - the mapper needs coordinates');return null;}
+	      if(res.ok){
+	        const body=await res.json().catch(()=>null);
+	        if(body&&body.duplicate){toastSafe('Already mapped nearby as '+body.courseId+' - no new course created');return null;}
+	      }
 	    }catch(e){}
 	    const POLL_MS=4000;
 	    const MAX_ATTEMPTS=15; // ~60s of polling before telling the operator to check back later
@@ -4749,7 +4753,7 @@
                  whether this is the Overpass leg or the geometry resolver. After 30s the
                  copy admits this is a longer wait - honest feedback beats a stuck bar. */
               const pct=Math.min(80,45+35*((info.waitedMs||0)/(info.budgetMs||SERVER_PACKAGE_WAIT_MS)));
-              updateCourseLoading((info.waitedMs||0)>30000?'Still mapping - a first visit can take a couple of minutes':'Mapping this course',pct);
+              updateCourseLoading((info.waitedMs||0)>30000?'Preparing course - first-time setup can take a little longer':'Preparing course...',pct);
             }
           });
           autoMapResult=serverWait&&serverWait.result||null;

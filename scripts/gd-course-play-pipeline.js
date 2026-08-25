@@ -954,7 +954,7 @@
     document.body.dataset.gdCoursePlayPipelineHole=String(hole);
     document.body.dataset.gdCoursePlayPipelineReason=String(reason||"sync");
     var el=pipelineStatusElement();
-    if(el)el.textContent=preparing?"Preparing Hole "+hole+"...":unavailable?"Frame unavailable - remap this hole":"";
+    if(el)el.textContent=preparing?"Preparing Hole "+hole+"...":unavailable?"Hole unavailable - remap this hole":"";
     if(gpsActive()){
       var transitionKey=key+"|"+status+"|"+String(!!preparing)+"|"+String(!!unavailable);
       if(lastSyncStatusByKey[key]!==transitionKey){

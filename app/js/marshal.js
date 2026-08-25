@@ -328,12 +328,13 @@
         S = emptyState();
         S.round = {
           courseKey: p.courseKey || null,
+          courseName: p.courseName || "",
           pkg: p.pkg || null,
           centre: pt(p.centre) || packageCentre(p.pkg),
           open: true
         };
         enterHole(p.hole || holesInPlay()[0] || 1);
-        if (typeof fx.roundStarted === "function") { try { fx.roundStarted(S.round.courseKey); } catch (e) {} }
+        if (typeof fx.roundStarted === "function") { try { fx.roundStarted(S.round.courseKey, S.round.courseName); } catch (e) {} }
         return true;
       },
 

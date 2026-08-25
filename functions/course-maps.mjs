@@ -486,6 +486,8 @@ function courseFromSupabaseRow(row) {
     region: text(row.region ?? base.region, 120),
     country: text(row.country ?? base.country, 80),
     countryCode: text(row.country_code ?? base.countryCode, 8).toUpperCase(),
+    aliases: Array.isArray(row.course_aliases) ? row.course_aliases : (Array.isArray(base.aliases) ? base.aliases : []),
+    facilityKey: text(row.facility_key ?? base.facilityKey, 160),
     published: true,
     publishedAt: text(row.published_at || base.publishedAt, 80),
     publishedBy: jsonObject(row.published_by_json || base.publishedBy),
