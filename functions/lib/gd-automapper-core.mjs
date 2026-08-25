@@ -254,18 +254,93 @@ function isCourseFootprintElement(element) {
   return String(t.golf || "").toLowerCase() === "course" || String(t.leisure || "").toLowerCase() === "golf_course";
 }
 
+/* Bounding box of a set of points. Degenerate on its own (a single point gives a
+   zero-area box) - always hand the result to expandOsmFrame with a pad. */
+export function frameOfPoints(points) {
+  let south = Infinity, west = Infinity, north = -Infinity, east = -Infinity;
+  (points || []).map(toPlain).forEach(p => {
+    if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lng)) return;
+    south = Math.min(south, p.lat); north = Math.max(north, p.lat);
+    west = Math.min(west, p.lng); east = Math.max(east, p.lng);
+  });
+  if (!Number.isFinite(south) || !Number.isFinite(west)) return null;
+  return { south, west, north, east };
+}
+
+export function frameCentre(frame) {
+  if (!frame) return null;
+  const south = Number(frame.south), west = Number(frame.west);
+  const north = Number(frame.north), east = Number(frame.east);
+  if (![south, west, north, east].every(Number.isFinite)) return null;
+  return { lat: (south + north) / 2, lng: (west + east) / 2 };
+}
+
+export function unionOsmFrames(...frames) {
+  const list = frames.filter(Boolean);
+  if (!list.length) return null;
+  const corners = [];
+  list.forEach(frame => {
+    const south = Number(frame.south), west = Number(frame.west);
+    const north = Number(frame.north), east = Number(frame.east);
+    if (![south, west, north, east].every(Number.isFinite)) return;
+    corners.push({ lat: south, lng: west }, { lat: north, lng: east });
+  });
+  return frameOfPoints(corners);
+}
+
 export function courseFootprintFrame(payload, padM = 160) {
   const pts = [];
   ((payload && payload.elements) || []).filter(isCourseFootprintElement).forEach(element => {
     osmGuidePointsFromElement(element).forEach(p => pts.push(p));
   });
   if (!pts.length) return null;
-  let south = Infinity, west = Infinity, north = -Infinity, east = -Infinity;
-  pts.forEach(p => {
-    south = Math.min(south, p.lat); north = Math.max(north, p.lat);
-    west = Math.min(west, p.lng); east = Math.max(east, p.lng);
+  return expandOsmFrame(frameOfPoints(pts), padM);
+}
+
+/* Where the holes ACTUALLY are, as a frame.
+ *
+ * The widen frame used to be a square centred on the stored course pin, which is
+ * the clubhouse, not the middle of the site. At Te Arai Links the pin sits at the
+ * North course in the north-west corner, so a 2198m half-extent box put its south
+ * edge at lat -36.20010 - and Course 2's bottom holes sit BELOW that: hole 2's
+ * green 33m past it, hole 3's tee 50m, hole 4's green 54m, hole 6's tee 82m. Those
+ * came back at all only because Overpass returns a whole way when any one of its
+ * nodes is inside the box. Hole 5 lives entirely in that strip (hole 4's green and
+ * hole 6's tee are 95m apart, so 5 is tucked in the corner between them), had no
+ * node inside, and was never fetched. The box was mis-centred by ~910m against a
+ * shortfall of 82m.
+ *
+ * Centring on the hole features instead costs nothing and is usually SMALLER than
+ * the pin-centred box, because it stops spending half its area on the ocean and
+ * farmland the pin happens to sit beside. */
+export function holeFeatureFrame(payload, padM = 0) {
+  const pts = [];
+  ((payload && payload.elements) || []).forEach(element => {
+    const tags = (element && element.tags) || {};
+    if (String(tags.golf || "").toLowerCase() !== "hole") return;
+    if (!osmGuideHoleRef(tags.ref || tags.name)) return;
+    osmGuidePointsFromElement(element).forEach(p => pts.push(p));
   });
-  return expandOsmFrame({ south, west, north, east }, padM);
+  if (!pts.length) return null;
+  const frame = frameOfPoints(pts);
+  return padM > 0 ? expandOsmFrame(frame, padM) : normalizedOsmFrame(frame);
+}
+
+/* Two Overpass payloads into one, deduped on type/id so a targeted follow-up query
+   can be folded into the main sweep without double-counting the overlap. */
+export function mergeOsmPayloads(base, extra) {
+  const osmElementKey = element => (element && element.id != null)
+    ? String(element.type || "way") + "/" + element.id
+    : null;
+  const elements = ((base && base.elements) || []).slice();
+  const seen = new Set(elements.map(osmElementKey).filter(Boolean));
+  ((extra && extra.elements) || []).forEach(element => {
+    const key = osmElementKey(element);
+    if (key && seen.has(key)) return;
+    if (key) seen.add(key);
+    elements.push(element);
+  });
+  return Object.assign({}, base || {}, { elements });
 }
 
 /* The course polygon's holes=N tag is the only hole-count evidence available without a shared
@@ -618,6 +693,65 @@ export function loopIsContiguous(numbers) {
   const unique = [...new Set(numbers)].sort((a, b) => a - b);
   if (!unique.length) return false;
   return unique[0] === 1 && unique[unique.length - 1] === unique.length;
+}
+
+/* A golf routing is continuous: hole N ends where hole N+1 begins. So a course that
+ * resolved 1,2,3,4,_,6..18 tells you exactly where the missing hole is - between
+ * hole 4's green and hole 6's tee - without knowing anything else about the site.
+ *
+ * That is the cheap answer to a clipped scan. Rather than growing the whole site
+ * frame and re-fetching thousands of elements on the chance of catching one hole,
+ * ask a small box around the two anchors either side of the gap. At Te Arai those
+ * anchors are 95m apart, so a 500m pad is a ~1.1km box in one corner of the site -
+ * and hole 5 cannot be anywhere else, because it has to start near one anchor and
+ * finish near the other.
+ *
+ * Only small gaps. A course missing five holes in a row was not clipped, it was
+ * separated wrongly, and a small box will not fix that - widening the search there
+ * would just hide a separation bug behind more data. */
+export const HOLE_GAP_PAD_M = 500;
+
+export function holeGapFrames(payload, opts = {}) {
+  const padM = Number(opts.padM) || HOLE_GAP_PAD_M;
+  const maxGapHoles = Number(opts.maxGapHoles) || 2;
+  const maxFrames = Number(opts.maxFrames) || 3;
+
+  const byNumber = new Map();
+  holeFeatures(payload).forEach(feature => {
+    if (!byNumber.has(feature.number)) byNumber.set(feature.number, feature);
+  });
+  const numbers = [...byNumber.keys()].sort((a, b) => a - b);
+  if (!numbers.length) return [];
+  const highest = numbers[numbers.length - 1];
+
+  /* Runs of consecutive missing numbers below the highest one seen. A trailing
+     shortfall (1..17 of an 18) is invisible here by design - nothing in the
+     geometry says a hole 18 should exist, that is expectedHoles' job. */
+  const gaps = [];
+  let run = null;
+  for (let number = 1; number <= highest; number += 1) {
+    if (byNumber.has(number)) { if (run) { gaps.push(run); run = null; } continue; }
+    if (!run) run = [];
+    run.push(number);
+  }
+  if (run) gaps.push(run);
+
+  return gaps
+    .filter(gap => gap.length <= maxGapHoles)
+    .map(gap => {
+      /* Hole ways are drawn tee -> green, which assignByRouting already relies on:
+         the hole before the gap ends at its green, the hole after starts at its tee. */
+      const before = byNumber.get(gap[0] - 1);
+      const after = byNumber.get(gap[gap.length - 1] + 1);
+      const anchors = [];
+      if (before && before.end) anchors.push(before.end);
+      if (after && after.start) anchors.push(after.start);
+      if (!anchors.length) return null;
+      const frame = expandOsmFrame(frameOfPoints(anchors), padM);
+      return frame ? { missing: gap.slice(), anchors: anchors.map(toPlain), frame } : null;
+    })
+    .filter(Boolean)
+    .slice(0, maxFrames);
 }
 
 export function separateLoops(payload, centre) {

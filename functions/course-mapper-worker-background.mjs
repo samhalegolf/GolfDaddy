@@ -26,7 +26,7 @@
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete } from "./lib/gd-course-fit-core.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, separateLoops, loopIsContiguous, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, separateLoops, loopIsContiguous, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
@@ -266,6 +266,84 @@ function golfFeatureCounts(payload) {
    publishing a partial course. The resolver also still runs in its original case: OSM has
    shapes but no hole numbers at all. */
 const WIDER_RETRY_PAD_M = 700;
+
+/* The margin a widened frame keeps around the holes it already has. Te Arai's clip
+   was 82m, so anything in the hundreds clears this class of failure; 400m also
+   covers the hole that was cut off completely rather than merely clipped. */
+const WIDEN_DATA_PAD_M = 400;
+
+/* Fill a hole-sized hole.
+ *
+ * Te Arai Links Course 2 separated cleanly and came out 1,2,3,4,_,6..18 - every
+ * hole but the 5th, whose geometry fell just outside the query box. Widening the
+ * whole site frame to catch it is the expensive answer and the one that risks
+ * dragging a neighbouring club in; the cheap answer is that a golf routing is
+ * continuous, so the missing hole HAS to lie between hole 4's green and hole 6's
+ * tee. holeGapFrames turns that into a small box, and this asks Overpass for it.
+ *
+ * Bounded three ways: only gaps of 1-2 holes (a five-hole gap is a separation bug,
+ * not a clip), at most HOLE_GAP_MAX_QUERIES boxes per scan, and the merged result
+ * is adopted only if separation genuinely improves. That last one matters - the
+ * original 6-hole publish got through on an adoption rule of "holesResolved > 0",
+ * which is not a floor at all. */
+const HOLE_GAP_MAX_QUERIES = 3;
+
+function separationScore(loops) {
+  return {
+    courses: loops.length,
+    contiguous: loops.filter(loop => loop.contiguous).length,
+    holes: loops.reduce((sum, loop) => sum + loop.holeNumbers.length, 0)
+  };
+}
+
+async function requeryHoleGaps(job, course, payload, loops) {
+  const gaps = [];
+  loops.forEach(loop => {
+    if (loop.contiguous) return;
+    holeGapFrames(loop.payload).forEach(gap => gaps.push(Object.assign({ courseIndex: loop.index }, gap)));
+  });
+  const record = {
+    gaps: gaps.map(gap => ({ courseIndex: gap.courseIndex, missing: gap.missing, frame: gap.frame })),
+    queries: 0,
+    elementsAdded: 0,
+    adopted: false,
+    reason: null
+  };
+  /* Non-contiguous with no small gap to aim at means the shortfall is not a clip.
+     Say so - "looked and there was nothing to ask for" is a different finding from
+     "never looked", and the last investigation lost two hours to exactly that
+     ambiguity in diagnostics.widened. */
+  if (!gaps.length) { record.reason = "no-small-gaps"; return { record, next: null }; }
+
+  await heartbeatJob(job, { stage: "requerying-hole-gaps" });
+  let merged = payload;
+  for (const gap of gaps.slice(0, HOLE_GAP_MAX_QUERIES)) {
+    const gapPayload = await fetchOverpass(osmGuideQuery(osmQueryScope({ osmFrame: gap.frame }, course.center)))
+      .catch(() => null);
+    record.queries += 1;
+    if (!gapPayload) continue;
+    const before = (merged.elements || []).length;
+    merged = mergeOsmPayloads(merged, gapPayload);
+    record.elementsAdded += ((merged.elements || []).length - before);
+  }
+  if (!record.elementsAdded) { record.reason = "no-new-elements"; return { record, next: null }; }
+
+  const nextCollision = detectHoleNumberCollision(merged);
+  const nextLoops = separateLoops(merged, course.center);
+  if (!nextLoops || nextLoops.length < loops.length) { record.reason = "separation-regressed"; return { record, next: null }; }
+
+  record.before = separationScore(loops);
+  record.after = separationScore(nextLoops);
+  /* More complete courses, or the same number of complete courses covering more
+     holes. Anything else and the extra elements were noise: keep the tighter
+     payload rather than publish a differently-wrong answer. */
+  const better = record.after.contiguous > record.before.contiguous
+    || (record.after.contiguous === record.before.contiguous && record.after.holes > record.before.holes);
+  if (!better) { record.reason = "no-improvement"; return { record, next: null }; }
+
+  record.adopted = true;
+  return { record, next: { payload: merged, collision: nextCollision, loops: nextLoops } };
+}
 
 /* Resolve a card when the shared store has none.
  *
@@ -672,11 +750,33 @@ async function runMapperJob(job, origin) {
    * Re-queried from the separation itself rather than by a fixed pad: the widest
    * gap between two instances of one hole number is a floor on the site's real
    * extent, so ask for that plus the usual margin. One extra Overpass call, only
-   * for a site that has already proven it needs one. */
+   * for a site that has already proven it needs one.
+   *
+   * Sized right, centred wrong. The box was built around the stored course PIN,
+   * which is the clubhouse - at Te Arai Links that is the North course, in the
+   * north-west corner of a facility that runs south-east. The 2198m box was
+   * mis-centred by ~910m, so it spent half its area on ocean and came up 82m short
+   * over Course 2's bottom holes; hole 5 sits entirely in that strip and was never
+   * fetched. See holeFeatureFrame for the full arithmetic.
+   *
+   * Centre it on the holes already found instead, and union with what the first
+   * sweep already covered so widening can never LOSE ground. Usually a smaller box
+   * than the pin-centred one, and it is aimed by evidence rather than by a guess
+   * about which corner of the site the clubhouse sits in. */
   if (collision.multiLoop && collision.widestSeparationM > scope.radiusM) {
     await heartbeatJob(job, { stage: "widening-for-multi-course-site" });
     const needM = collision.widestSeparationM + WIDER_RETRY_PAD_M;
-    const widerFrame = expandOsmFrame(osmScopeFrame(scope, course.center), needM - scope.radiusM);
+    const scopeFrame = osmScopeFrame(scope, course.center);
+    const dataFrame = holeFeatureFrame(payload);
+    const anchor = frameCentre(dataFrame) || course.center;
+    const widerFrame = unionOsmFrames(
+      /* never lose first-pass coverage */
+      scopeFrame,
+      /* the site is at least needM across, centred on where its holes actually are */
+      expandOsmFrame({ south: anchor.lat, west: anchor.lng, north: anchor.lat, east: anchor.lng }, needM),
+      /* and never sit tighter than a clear margin around the holes already in hand */
+      holeFeatureFrame(payload, WIDEN_DATA_PAD_M)
+    );
     /* Recorded whether or not it helps.
      *
      * This block only wrote its diagnostics on the branch where the wider query
@@ -694,6 +794,11 @@ async function runMapperJob(job, origin) {
       widestSeparationM: collision.widestSeparationM,
       holeFeaturesBefore: collision.holeFeatures,
       holeFeaturesAfter: null,
+      /* The number that explains a clipped scan at a glance: how far the pin sat
+         from the middle of the holes. Te Arai's was ~910m against an 82m shortfall. */
+      centredOn: dataFrame ? "hole-features" : "pin",
+      pinOffsetM: dataFrame ? Math.round(distance(course.center, anchor)) : 0,
+      frame: widerFrame,
       adopted: false,
       reason: widerFrame ? null : "could-not-build-wider-frame"
     };
@@ -730,6 +835,29 @@ async function runMapperJob(job, origin) {
       distinctNumbers: collision.distinctNumbers,
       holeFeatures: collision.holeFeatures
     };
+    /* A separated course with a hole missing out of the middle: ask a small box
+       around the gap before accepting the shortfall. Runs after separation because
+       the gap is only visible per course - the site as a whole has every number. */
+    if (loops && loops.some(loop => !loop.contiguous)) {
+      const filled = await requeryHoleGaps(job, course, payload, loops)
+        .catch(error => ({ record: { adopted: false, reason: String((error && error.message) || error).slice(0, 200) }, next: null }));
+      diagnostics.gapFill = filled.record;
+      if (filled.next) {
+        payload = filled.next.payload;
+        collision = filled.next.collision;
+        loops = filled.next.loops;
+        queryStages.push("gap-requery");
+        diagnostics.osmFeatures = golfFeatureCounts(payload);
+        diagnostics.collision = {
+          loops: collision.loops,
+          collidedHoles: collision.collidedHoles,
+          widestSeparationM: collision.widestSeparationM,
+          distinctNumbers: collision.distinctNumbers,
+          holeFeatures: collision.holeFeatures
+        };
+      }
+    }
+
     if (loops) {
       diagnostics.separated = loops.map(loop => ({
         name: loop.name || null,
@@ -811,7 +939,16 @@ async function runMapperJob(job, origin) {
 
   if (!collision.multiLoop && expectedHoles && geometry.holesResolved < expectedHoles) {
     await heartbeatJob(job, { stage: "retry-wider-frame" });
-    const widerFrame = expandOsmFrame(osmScopeFrame(scope, course.center), WIDER_RETRY_PAD_M);
+    /* Same mis-centring as the multi-course widen above, same fix: grow around the
+       holes, not around the clubhouse. This is the Omaha Beach path - a long thin
+       course with its pin at one end is exactly the shape a pin-centred box handles
+       worst, so it had the bug more sharply than the case it was written for. */
+    const retryAnchor = frameCentre(holeFeatureFrame(payload)) || course.center;
+    const widerFrame = unionOsmFrames(
+      osmScopeFrame(scope, course.center),
+      expandOsmFrame({ south: retryAnchor.lat, west: retryAnchor.lng, north: retryAnchor.lat, east: retryAnchor.lng }, scope.radiusM + WIDER_RETRY_PAD_M),
+      holeFeatureFrame(payload, WIDEN_DATA_PAD_M)
+    );
     if (widerFrame) {
       const widerPayload = await fetchOverpass(osmGuideQuery(osmQueryScope({ osmFrame: widerFrame }, course.center)));
       const widerGeometry = resolveCourseGeometry(widerPayload, course.courseId, course.center, existingObjects, siblingCentres);
