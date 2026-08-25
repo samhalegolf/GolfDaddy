@@ -3605,7 +3605,7 @@ function gdAdminCourseVisualControls(record,courseId){
      the group is off. */
   const mowingField=`<label>Visibility level<select id="gdCourseVisualMowing"><option value="Unknown" hidden ${mowing==="Unknown"?"selected":""}>Off</option>${["Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>`;
   const mowingPanel=gdAdminCourseVisualEffectHeader("mowing","Mow lines",mowingOn)+gdAdminCourseVisualEffectBody(mowingOn,mowingField);
-  const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseRemap('${key}')">Remap from OSM</button><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div>`;
+  const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseRemap('${key}')">Remap from OSM</button><button type="button" onclick="return gdAdminCourseUpdateScorecards('${key}')">Update Scorecards</button><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div>`;
   const groups=[
     {id:"preset",icon:"🎨",label:"Preset",body:presetField+presetRail},
     /* The recipe area is its own tab, not a footnote under Preset: a preset is one ingredient
@@ -3772,6 +3772,38 @@ async function gdAdminCourseRemap(courseId){
     return true;
   }catch(error){
     gdAdminCourseVisualToast("Remap failed to send");
+    return false;
+  }
+}
+
+/* Post-scan relabelling only - never touches geometry, never queues a
+   course_mapper_jobs row. Triggering it from either sibling of a multi-course
+   facility works the same way: the server resolves the facility from this
+   course's own facility_key and updates every sibling's evidence together. */
+async function gdAdminCourseUpdateScorecards(courseId){
+  courseId=String(courseId||"");
+  if(!courseId)return false;
+  try{
+    const token=await gdAdminCourseDbAccessToken();
+    if(!token){gdAdminCourseVisualToast("Sign in again to update scorecards");return false;}
+    gdAdminCourseVisualToast("Looking for course cards…");
+    const res=await fetch("/api/course-scorecard-update",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+      body:JSON.stringify({courseId:courseId})
+    });
+    const data=await res.json().catch(()=>null);
+    if(res.status===403){gdAdminCourseVisualToast("Admin only");return false;}
+    if(res.status===404){gdAdminCourseVisualToast((data&&data.error)||"No published course found");return false;}
+    if(!res.ok){gdAdminCourseVisualToast("Update Scorecards failed ("+res.status+")");return false;}
+    gdAdminCourseVisualToast((data&&data.message)||"Update Scorecards finished");
+    if(data&&Array.isArray(data.renamed)&&data.renamed.length){
+      await gdLoadAdminCourseDbCloud({force:true});
+      gdRenderAdminCourseDatabase();
+    }
+    return true;
+  }catch(error){
+    gdAdminCourseVisualToast("Update Scorecards failed to send");
     return false;
   }
 }

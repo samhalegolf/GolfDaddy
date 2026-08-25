@@ -30,7 +30,7 @@ import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoO
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
-import { resolveScorecard, toStorePayload, distinctCardCount, distinctCards } from "./lib/gd-scorecard-resolve.mjs";
+import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow } from "./lib/gd-scorecard-resolve.mjs";
 import { loopLengthsFromOsm, matchLoopsToCards } from "./lib/gd-scorecard-match-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
@@ -222,6 +222,20 @@ async function fetchScorecardEvidence(courseName) {
   }
 }
 
+/* Every distinct card stored for a facility - the broader read fetchScorecardEvidence
+   above cannot do, since it looks up exactly one course_key. Used both to let a
+   rescan skip re-fetching cards a prior Update Scorecards run already found, and
+   as the Native Geometry Resolver's fallback when its own targeted lookup misses. */
+async function fetchFacilityScorecardEvidence(facilityKey) {
+  if (!facilityKey) return [];
+  try {
+    const rows = await supabaseFetch(SCORECARDS_TABLE + "?select=course_key,course_name,holes_json,source,source_url,sources_json&facility_key=eq." + encodeURIComponent(facilityKey));
+    return (Array.isArray(rows) ? rows : []).filter(row => Array.isArray(row.holes_json) && row.holes_json.length);
+  } catch (e) {
+    return [];
+  }
+}
+
 /* How many holes the shared scorecard actually lists - distinct valid hole numbers, since a
    card row per tee-set would otherwise double-count. */
 function scorecardHoleCount(evidence) {
@@ -391,6 +405,10 @@ async function resolveScorecardForCourse(course, origin, want) {
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), SCORECARD_RESOLVE_BUDGET_MS) : null;
   const signal = controller ? controller.signal : undefined;
+  /* The pinned course's own id, same value publishSeparatedLoops stamps as every
+     sibling's facility_key - so cards found here are findable by facility later,
+     including from Update Scorecards without re-fetching. */
+  const facilityKey = course.courseId || null;
   try {
     return await resolveScorecard({ courseName: course.courseName, region: course.region, country: course.country }, {
       fetchHtml: url => fetchPageHtml(url, signal),
@@ -398,20 +416,18 @@ async function resolveScorecardForCourse(course, origin, want) {
       /* Reads go through fetchScorecardEvidence already; passing readStore here
          would just repeat the query the caller has done. */
       writeStore: async (key, name, cards) => {
-        const payload = toStorePayload(cards[0], name);
-        if (!payload) return;
+        /* Every distinct card, not just the best one - a two-course facility's
+           second card used to be found and then thrown away here. Each keyed via
+           resolveFacilityCardKey (inside facilityScorecardRow) against whatever
+           is already stored for this facility, so a card re-resolved under a
+           different title updates its existing row instead of duplicating it. */
+        const existing = await fetchFacilityScorecardEvidence(facilityKey);
+        const rows = distinctCards(cards).map(card => facilityScorecardRow(card, name, facilityKey, existing)).filter(Boolean);
+        if (!rows.length) return;
         await supabaseFetch(SCORECARDS_TABLE + "?on_conflict=course_key", {
           method: "POST",
           headers: { Prefer: "resolution=merge-duplicates" },
-          body: JSON.stringify([{
-            course_key: key,
-            course_name: name,
-            source: payload.source,
-            source_url: payload.sourceUrl,
-            holes_json: payload.holes,
-            sources_json: cards.slice(0, 4).map(card => ({ source: card.source, sourceUrl: card.sourceUrl, holes: card.holes.length })),
-            updated_at: new Date().toISOString()
-          }])
+          body: JSON.stringify(rows)
         });
       }
     }, { want });
@@ -687,6 +703,20 @@ async function runMapperJob(job, origin) {
     if (resolved.cards && resolved.cards.length > 1) diagnostics.scorecardCards = resolved.cards.map(card => ({ name: card.name, source: card.source, par: card.par, holes: card.holes.length }));
     course.scorecardCards = resolved.cards || [];
   }
+  /* Third and last resort: this course's own name-keyed lookup and its own
+     network search both came up empty, but a sibling's search - or an earlier
+     Update Scorecards run - may already have stored a card for this facility
+     under a different key. Cheap (one store read, no network) and exactly the
+     "broader facility fetcher" evidence order the scorecard engine is meant to
+     offer every consumer, this worker included. */
+  if (!scorecardEvidence) {
+    const facilityCards = await fetchFacilityScorecardEvidence(course.courseId);
+    const usable = facilityCards.find(row => Array.isArray(row.holes_json) && row.holes_json.length);
+    if (usable) {
+      scorecardEvidence = { holes: usable.holes_json, source: usable.source || "", sourceUrl: usable.source_url || "", sources: Array.isArray(usable.sources_json) ? usable.sources_json : [] };
+      diagnostics.scorecardResolve = Object.assign({}, diagnostics.scorecardResolve, { facilityFallback: true });
+    }
+  }
   const expectedHoles = scorecardHoleCount(scorecardEvidence)
     || osmCourseHoleCountTag(payload)
     || (diagnostics.scorecardResolve && diagnostics.scorecardResolve.statedHoleCount)
@@ -716,25 +746,30 @@ async function runMapperJob(job, origin) {
   let resolverStatus = null;
   let loops = null;
 
-  /* The shared store holds ONE card per course; naming a multi-course site needs
-     one per course on it. fetchScorecardEvidence above is a cache read, and a hit
-     skipped the resolver entirely - so course.scorecardCards was populated only on
-     a course's very FIRST scan, and every rescan afterwards had nothing for the
-     loop matcher to work with. Te Arai's second scan reported cards:0 and
-     loopNaming:null for exactly this reason, having stored a card on its first.
-     Gathered again here, only when the site actually has loops to tell apart. */
+  /* Naming a multi-course site needs one card per course on it. course.scorecardCards
+     is only populated when the fetches above actually ran the resolver (a hit on the
+     single-key cache skips it) - so a rescan of an already-mapped facility used to
+     have nothing for the loop matcher, having stored a card on its first scan and
+     never gathered the rest. writeStore now keeps every distinct card, tagged with
+     this facility, so the cheap first move is reading what is already there before
+     spending a network round trip re-finding it. */
   const wantCards = collision.multiLoop ? Math.max(2, Number(collision.loops) || 2) : 1;
   if (collision.multiLoop && distinctCardCount(course.scorecardCards) < wantCards) {
     await heartbeatJob(job, { stage: "gathering-cards-for-naming" });
-    const forNaming = await resolveScorecardForCourse(course, origin, wantCards)
-      .catch(error => ({ cards: [], reason: String(error && error.message || error).slice(0, 200) }));
+    const stored = await fetchFacilityScorecardEvidence(course.courseId);
+    const storedCards = stored.map(row => ({ name: row.course_name, holes: row.holes_json, source: row.source, sourceUrl: row.source_url }));
+    const forNaming = distinctCardCount(storedCards) >= wantCards
+      ? { cards: storedCards, reason: null }
+      : await resolveScorecardForCourse(course, origin, wantCards)
+        .catch(error => ({ cards: [], reason: String(error && error.message || error).slice(0, 200) }));
     course.scorecardCards = forNaming.cards || [];
     diagnostics.namingCards = {
       want: wantCards,
       distinct: distinctCardCount(course.scorecardCards),
       cards: course.scorecardCards.length,
       reason: forNaming.reason || null,
-      fromCachedEvidence: !!scorecardEvidence
+      fromCachedEvidence: !!scorecardEvidence,
+      fromFacilityStore: distinctCardCount(storedCards) >= wantCards
     };
   }
 

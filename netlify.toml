@@ -137,6 +137,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/course-scorecard-update"
+  to = "/.netlify/functions/course-scorecard-update"
+  status = 200
+
+[[redirects]]
   from = "/api/create-checkout-session"
   to = "/.netlify/functions/create-checkout-session"
   status = 200

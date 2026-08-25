@@ -113,6 +113,38 @@ export function loopLengthsFromOsm(elements) {
   return lengths;
 }
 
+/* {holeNumber -> metres} from a course's already-PUBLISHED objects_json, for
+   relabelling a course that is not being rescanned - loopLengthsFromOsm above
+   needs raw Overpass elements from an in-progress scan, which a stored
+   course_maps row does not have.
+ *
+ * Straight tee-to-green, not the dogleg-following line loopLengthsFromOsm sums.
+ * Cheaper than reconstructing fairway point order from a stored object map, and
+ * good enough: every signal here is relative (rank order, share of total), never
+ * absolute, so a dogleg being foreshortened moves every hole's number by roughly
+ * the same fraction rather than reordering them. */
+export function courseLengthsFromPublishedGeometry(objects) {
+  const byHole = {};
+  Object.values(objects || {}).forEach(object => {
+    const hole = validHoleNumber(object && object.holeNumber);
+    if (!hole || !object || !object.position) return;
+    if (!byHole[hole]) byHole[hole] = {};
+    if (object.type === "tee") byHole[hole].tee = object.position;
+    else if (object.type === "green") byHole[hole].green = object.position;
+  });
+  const lengths = {};
+  Object.keys(byHole).forEach(hole => {
+    const pair = byHole[hole];
+    if (!pair.tee || !pair.green) return;
+    const length = finiteLength(distance(
+      { lat: Number(pair.tee.lat), lng: Number(pair.tee.lng ?? pair.tee.lon) },
+      { lat: Number(pair.green.lat), lng: Number(pair.green.lng ?? pair.green.lon) }
+    ));
+    if (length) lengths[hole] = length;
+  });
+  return lengths;
+}
+
 /* A card's distances in the same {holeNumber -> metres} shape. The tee column is
    deliberately not identified - see the header. */
 export function cardLengths(card) {

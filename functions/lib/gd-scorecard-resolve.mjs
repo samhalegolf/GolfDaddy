@@ -349,6 +349,24 @@ async function gatherCandidates(course, name, deps) {
   return list.sort((a, b) => rank(a.url) - rank(b.url)).slice(0, 8);
 }
 
+/* Which course_key a distinct card should be written under, when the facility
+   already has rows in the shared store.
+ *
+ * writeStore used to persist only the best card (cards[0]), so a multi-course
+ * facility's second/third card never reached course_scorecards. Now that every
+ * distinct card is written, the same card can be re-resolved under a slightly
+ * different title next time - "Te Arai Links" one run, "Te Arai Links Golf Club
+ * - North Course" the next - and without this check that mints a second row for
+ * the same North card instead of updating the first. Structural sameness
+ * (sameCourseCard), not the title, decides whether it is the same row. */
+export function resolveFacilityCardKey(existingRows, card, facilityKey) {
+  const match = (existingRows || []).find(row => sameCourseCard(
+    { name: row.course_name, holes: Array.isArray(row.holes_json) ? row.holes_json : [] },
+    card
+  ));
+  return match ? match.course_key : scorecardCourseKey(card.name || "");
+}
+
 /* Engine card -> the shape scorecard-store's quality gate accepts: holes numbered
    1..n with no gaps, par required on every one. A card with gaps is still useful
    to the matcher in memory but cannot be shared, because the store's contract is
@@ -370,5 +388,27 @@ export function toStorePayload(card, courseName) {
       tees: {},
       sourceUrl: card.sourceUrl || ""
     }))
+  };
+}
+
+/* One distinct card -> a course_scorecards upsert row, tagged with the facility
+   it was resolved for and keyed by resolveFacilityCardKey (an existing row's
+   key when this is structurally the same card, else the card's own name).
+   Returns null on a gappy card - same completeness contract as toStorePayload,
+   since this is the row callers pass straight to the upsert. */
+export function facilityScorecardRow(card, courseName, facilityKey, existingRows) {
+  const payload = toStorePayload(card, card.name || courseName);
+  if (!payload) return null;
+  return {
+    course_key: resolveFacilityCardKey(existingRows, card, facilityKey),
+    course_name: payload.courseName,
+    facility_key: facilityKey || null,
+    source: payload.source,
+    source_url: payload.sourceUrl,
+    hole_count: payload.holes.length,
+    distance_count: payload.holes.filter(hole => Number.isFinite(hole.metres)).length,
+    holes_json: payload.holes,
+    sources_json: [{ source: card.source || "", sourceUrl: card.sourceUrl || "", holes: (card.holes || []).length }],
+    updated_at: new Date().toISOString()
   };
 }

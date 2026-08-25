@@ -254,5 +254,44 @@ function scorecardHtml(rows) {
   assert.strictEqual(dead.attempts[0].ok, false);
   assert(dead.attempts[0].reason.includes("404"), "the job row can say why, not just that it failed");
 
+  /* ---------- facility-keyed storage: same card, no duplicate row ------ */
+  const southCard = {
+    name: "Te Arai Links Golf Club - South Course", source: "golfpass", sourceUrl: "https://example.com/south",
+    holes: [5, 4, 4, 4, 3, 4, 5, 3, 4, 4, 4, 3, 5, 4, 4, 4, 3, 5].map((par, i) => ({ hole: i + 1, par, distanceM: 300 + i * 5 }))
+  };
+  const northCard = {
+    name: "Te Arai Links Golf Club - North Course", source: "golfpass", sourceUrl: "https://example.com/north",
+    holes: [4, 3, 4, 4, 4, 4, 3, 4, 5, 4, 5, 3, 4, 5, 3, 4, 3, 5].map((par, i) => ({ hole: i + 1, par, distanceM: 280 + i * 4 }))
+  };
+  const existingRows = [{ course_key: "te arai links", course_name: "Te Arai Links", holes_json: southCard.holes }];
+
+  assert.strictEqual(
+    r.resolveFacilityCardKey(existingRows, { name: "Te Arai Links Golf Club - South Course", holes: southCard.holes }, "te-rai"),
+    "te arai links",
+    "a structurally identical card resolved under a new title updates the existing row instead of duplicating it"
+  );
+  assert.strictEqual(
+    r.resolveFacilityCardKey(existingRows, northCard, "te-rai"),
+    r.scorecardCourseKey(northCard.name),
+    "a genuinely distinct card (different par sequence) gets its own key"
+  );
+
+  const northRow = r.facilityScorecardRow(northCard, "Te Arai Links", "te-rai", existingRows);
+  assert.strictEqual(northRow.facility_key, "te-rai");
+  assert.strictEqual(northRow.course_key, r.scorecardCourseKey(northCard.name));
+  assert.strictEqual(northRow.course_name, northCard.name, "named for the card, not the facility search string");
+  assert.strictEqual(northRow.holes_json.length, 18);
+
+  const reReadSouth = r.facilityScorecardRow(
+    { name: "Te Arai Links Golf Club - South Course (reviews)", holes: southCard.holes }, "Te Arai Links", "te-rai", existingRows
+  );
+  assert.strictEqual(reReadSouth.course_key, "te arai links",
+    "the same course read under a different title still updates the one South row - three URLs for one card must never become two rows");
+
+  assert.strictEqual(
+    r.facilityScorecardRow({ name: "x", holes: [{ hole: 1, par: 4 }, { hole: 3, par: 4 }] }, "x", "fk", []), null,
+    "a gappy card is not shareable, same contract as toStorePayload"
+  );
+
   console.log("scorecard resolve tests passed");
 })().catch(error => { console.error(error); process.exit(1); });
