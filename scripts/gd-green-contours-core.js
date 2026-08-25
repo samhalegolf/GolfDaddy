@@ -659,7 +659,7 @@
       var c = paths[p];
       var index = Math.abs(Math.round(c.level / cfg.intervalM)) % cfg.indexEvery === 0;
       pushRuns(c.points, levelColour((c.level - lo) / span),
-        index ? 2.1 : 1.1, index ? 0.62 : 0.40, index ? 3.9 : 2.9, null);
+        index ? 1.1 : 0.7, index ? 0.62 : 0.40, index ? 2.1 : 1.5, null);
     }
 
     /* Walk each index contour and drop an arrow every arrowAlongM of GROUND. Stepping by arc
