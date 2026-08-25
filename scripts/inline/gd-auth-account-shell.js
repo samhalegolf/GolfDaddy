@@ -1309,9 +1309,11 @@
   }
 
   function openProfileTool(tool) {
+    let targetProfileId = '';
     try {
       const p = profile();
       if (p && p.id) {
+        targetProfileId = p.id;
         window.__gdBackTarget = 'profile';
         window.__gdProfileReturnProfileId = p.id;
         window.__gdProfileReturnName = p.name || 'Profile';
@@ -1319,6 +1321,20 @@
     } catch(e) {}
     close();
     setTimeout(() => {
+      try {
+        /* close() tears down the overlay by routing through the shell's home
+           transition, and GDShell.showHome() resets the viewed profile back
+           to the coach's own account as part of that (correct for the actual
+           Home button - wrong here, where "home" is just how this panel
+           closes on the way to a different tool). Put the player back before
+           opening anything, or a coach opening a player's tool lands on
+           their own data instead. */
+        const api = accountsApi();
+        const state = api && typeof api.state === 'function' ? api.state() : null;
+        if (targetProfileId && state && state.viewingProfileId !== targetProfileId && typeof api.viewProfile === 'function') {
+          api.viewProfile(targetProfileId);
+        }
+      } catch(e) {}
       try {
         if (tool === 'bag' && typeof openBag === 'function') return openBag({fromProfile:true});
         if (tool === 'bubble' && typeof gdOpenDataHub === 'function') return gdOpenDataHub({fromProfile:true});
