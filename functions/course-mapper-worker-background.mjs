@@ -463,6 +463,10 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
       course_lat: loop.centre ? loop.centre.lat : course.center.lat,
       course_lng: loop.centre ? loop.centre.lng : course.center.lng,
       osm_course_ref: loop.osmRef || null,
+      /* Every course out of this separation shares one token, so a search result can
+         offer the choice without re-deriving the link from proximity. The pinned
+         course's id: unique, stable, and readable. */
+      facility_key: course.courseId,
       objects_json: geometry.objects,
       holes_json: geometry.holes,
       geometry_version: MAPPER_VERSION,

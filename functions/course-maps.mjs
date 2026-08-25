@@ -361,7 +361,7 @@ async function writeBlobMaps(maps) {
 
 async function readSupabaseMaps() {
   const rows = await supabaseFetch(
-    TABLE + "?select=id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng,region,country,country_code,published,published_at,published_by_json,objects_json,holes_json,assets_json,course_json,created_at,updated_at&published=eq.true&order=updated_at.desc&limit=500",
+    TABLE + "?select=id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng,region,country,country_code,facility_key,course_aliases,published,published_at,published_by_json,objects_json,holes_json,assets_json,course_json,created_at,updated_at&published=eq.true&order=updated_at.desc&limit=500",
     { method: "GET" }
   );
   return mapsFromSupabaseRows(rows);
