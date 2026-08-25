@@ -442,7 +442,6 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
   const published = [];
   /* Mutates loops[].name in place, so this must run before ids are derived. */
   const naming = nameLoopsFromCards(loops, course.scorecardCards);
-  const otherCentres = loops.map(loop => loop.centre).filter(Boolean);
   for (let index = 0; index < loops.length; index++) {
     const loop = loops[index];
     await heartbeatJob(job, { stage: "publishing-course-" + (index + 1) + "-of-" + loops.length });
@@ -450,8 +449,21 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
     const isPinned = index === 0;
     const derivedId = loopCourseId(loop, course, index);
     const courseId = isPinned ? course.courseId : (await findExistingLoopRow(loop, derivedId)) || derivedId;
-    const siblings = otherCentres.filter(centre => centre !== loop.centre);
-    const geometry = resolveCourseGeometry(loop.payload, courseId, loop.centre || course.center, [], siblings);
+    /* NO sibling centres, deliberately.
+     *
+     * guideBelongsToCourse drops any guide that sits closer to a sibling's centre
+     * than to this course's - per-hole nearest-centre assignment, which is exactly
+     * the rule separateLoops replaced. Handing it the other loop's centroid made it
+     * re-partition holes that separation had already assigned by routing continuity,
+     * and on interleaved courses it threw away holes that genuinely belong here:
+     * Te Arai's loop 0 came out of separation contiguous 1-18 and lost holes 9 and 10
+     * to this filter, publishing 16.
+     *
+     * It is not needed either way. This payload was built by separateLoops and
+     * contains only this loop's hole features, so there is nothing to partition. The
+     * filter still earns its place on the unseparated path, where a single-course
+     * sweep really can catch a neighbouring club. */
+    const geometry = resolveCourseGeometry(loop.payload, courseId, loop.centre || course.center, [], []);
 
     const row = {
       course_id: courseId,

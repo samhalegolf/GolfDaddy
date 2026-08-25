@@ -149,6 +149,22 @@ test("a rescan still gathers the cards a multi-course site needs to name itself"
     "the number of cards wanted comes from the number of loops separated");
 });
 
+test("a separated loop is not re-partitioned by distance to its sibling", () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(path.join(ROOT, "functions", "course-mapper-worker-background.mjs"), "utf8");
+  /* guideBelongsToCourse assigns per hole by nearest centre - the very rule
+     separateLoops replaced. Passing sibling centres after separation made it undo
+     the routing-continuity assignment: Te Arai's loop 0 came out contiguous 1-18 and
+     published 16, having lost holes 9 and 10 to the sibling's centroid. The loop's
+     payload already contains only its own holes, so there is nothing to partition. */
+  const publishAt = src.indexOf("async function publishSeparatedLoops(");
+  assert.notStrictEqual(publishAt, -1);
+  const body = src.slice(publishAt, src.indexOf("\n}", publishAt));
+  assert.notStrictEqual(body.indexOf("resolveCourseGeometry(loop.payload, courseId, loop.centre || course.center, [], [])"), -1,
+    "a separated loop must be resolved with NO sibling centres");
+  assert.strictEqual(body.indexOf("otherCentres"), -1, "and the sibling list must be gone, not just unused");
+});
+
 test("two courses are never both called the facility", () => {
   const fs = require("fs");
   const src = fs.readFileSync(path.join(ROOT, "functions", "course-mapper-worker-background.mjs"), "utf8");
