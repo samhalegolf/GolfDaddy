@@ -26,7 +26,7 @@
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete } from "./lib/gd-course-fit-core.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, separateLoops, loopIsContiguous, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, separateLoops, loopIsContiguous, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
@@ -545,10 +545,15 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
 
     const row = {
       course_id: courseId,
-      /* "Te Arai Links - Course 1" rather than a bare "Course 1": the facility is
-         what the player searched for, the suffix is what tells the two apart. */
+      /* "Te Arai Links Golf Club - Course 1" rather than a bare "Course 1": the
+         facility is what the player searched for, the suffix is what tells the
+         two apart. Stripped down to the FACILITY half of the searched name via
+         splitCourseName, not the raw string - "Te Arai Links Golf Club - North
+         Course" pinned on the search result must not become the base name for
+         BOTH siblings, or the second course reads as another North Course
+         before anything has actually identified it. */
       course_name: loop.name && /^course \d+$/i.test(loop.name)
-        ? (course.courseName ? course.courseName + " - " + loop.name : loop.name)
+        ? (course.courseName ? splitCourseName(course.courseName).facility + " - " + loop.name : loop.name)
         : (loop.name || course.courseName || courseId),
       course_lat: loop.centre ? loop.centre.lat : course.center.lat,
       course_lng: loop.centre ? loop.centre.lng : course.center.lng,
@@ -1151,4 +1156,4 @@ export default async function courseMapperWorker(req) {
   return new Response("ok", { status: 200 });
 }
 
-export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, runMapperJob, chainVisualSnapshot, transientMapperFailure, golfFeatureCounts, MAX_TRANSIENT_ATTEMPTS };
+export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, runMapperJob, chainVisualSnapshot, transientMapperFailure, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, MAX_TRANSIENT_ATTEMPTS };
