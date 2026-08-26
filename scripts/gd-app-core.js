@@ -22515,6 +22515,25 @@ function gdShotBubbleOverlayBubblePath(bubble,plot,xForDistance,yForLateral){
   }
   return points.length?`M ${points.join(" L ")} Z`:"";
 }
+// The ONE place a bubble's display role (colour/label) gets decided, so
+// every renderer - Comparison, Practice chart, the hub widget's text, the
+// hub's own preview SVG - reads the same answer instead of each carrying its
+// own copy of "is this a coach-set bubble" logic. A coach-set bubble is
+// functionally My Bubble (it's what previewBubbleSet/bubbleProfiles holds,
+// what recommendations use) - only its PRESENTATION borrows the Practice
+// Bubble role's wiring, recoloured, because a starter estimate reads more
+// like "an engine's candidate" than "the confirmed active pattern".
+function gdBubbleRoleStyle(bubble,role){
+  if(bubble?.shapeSource==="coach-set"){
+    return{colour:"#c58bf2",label:"Starter Bubble",graphLabel:"START",source:"starter-bubble"};
+  }
+  const roles={
+    playing:{colour:"#f4f8f3",label:"My Bubble",graphLabel:"MY",source:"my-bubble"},
+    course:{colour:"#37f28d",label:"Course Bubble",graphLabel:"COURSE",source:"course"},
+    practice:{colour:"#62d2ff",label:"Practice Bubble",graphLabel:"PRACTICE",source:"practice-bubble-projection"}
+  };
+  return roles[role]||roles.playing;
+}
 function gdShotBubbleOverlayTypeStyle(source,view){
   const key=String(source||"").toLowerCase();
   if(key==="starter-bubble")return{colour:"#c58bf2",fillOpacity:".09",strokeOpacity:".78",strokeWidth:"1.55"};

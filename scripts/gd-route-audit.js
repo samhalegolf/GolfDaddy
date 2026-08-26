@@ -3763,21 +3763,22 @@
   }
   function gdPracticeMyBubbleState(profile,analysis){
     const p=profile||safe(()=>ensureProfile(),null)||{};
-    // A coach-set bubble is a rough starting estimate the coach dragged into
-    // place, not measured shot data - callers need to know that to label it
-    // "Starter Bubble" instead of "My Bubble" wherever this state is shown.
-    const isStarter=p?.previewBubbleSet?.shapeSource==="coach-set";
+    // gdBubbleRoleStyle is the single tap-in point for "does this present as
+    // My Bubble or Starter Bubble" - label text here is just that role's
+    // label plugged into the same phrasing every state already used.
+    const style=gdBubbleRoleStyle(p?.previewBubbleSet,"playing");
+    const isStarter=style.source==="starter-bubble";
     const pendingSource=gdPracticePendingBubbleSource(p);
     const pendingOffset=Number(pendingSource.offsetDeg);
     if(pendingSource.active&&Number.isFinite(pendingOffset)){
-      const pendingIsStarter=pendingSource.bubble?.shapeSource==="coach-set";
-      return{offset:pendingOffset,kind:"pending",label:pendingIsStarter?"Save Starter Bubble":"Save My Bubble",graphLabel:pendingIsStarter?"START":"MY",isStarter:pendingIsStarter};
+      const pendingStyle=gdBubbleRoleStyle(pendingSource.bubble,"playing");
+      return{offset:pendingOffset,kind:"pending",label:`Save ${pendingStyle.label}`,graphLabel:pendingStyle.graphLabel,isStarter:pendingStyle.source==="starter-bubble"};
     }
     const adoptedSource=p.practiceBubbleSource||{};
     const adoptedOffset=Number(adoptedSource.offsetDeg);
     const currentAdopted=gdPracticeCurrentBubbleWasAdopted(p,analysis);
     if(adoptedSource.active&&Number.isFinite(adoptedOffset)){
-      return{offset:adoptedOffset,kind:currentAdopted?"adopted-current":"saved",label:isStarter?(currentAdopted?"Starter Bubble active":"Starter Bubble saved"):(currentAdopted?"My Bubble active":"My Bubble saved"),graphLabel:isStarter?"START":"MY",isStarter};
+      return{offset:adoptedOffset,kind:currentAdopted?"adopted-current":"saved",label:currentAdopted?`${style.label} active`:`${style.label} saved`,graphLabel:style.graphLabel,isStarter};
     }
     const defaultState={offset:0,kind:"default",label:"Default My Bubble",graphLabel:"DEFAULT"};
     if(!p||p.placeholderProfile)return defaultState;
@@ -3788,7 +3789,7 @@
     }
     if(!sources.some(gdPracticeBubbleSourceLooksReal))return defaultState;
     const offset=Number(p.faceOffsetDeg??p.centralFaceOffsetDeg??p.previewBubbleSet?.faceOffsetDeg??p.previewBubbleSet?.faceAlignmentOffsetDeg??p.previewBubbleSet?.offsetDeg);
-    return Number.isFinite(offset)?{offset,kind:"saved",label:isStarter?"Starter Bubble saved":"My Bubble saved",graphLabel:isStarter?"START":"MY",isStarter}:defaultState;
+    return Number.isFinite(offset)?{offset,kind:"saved",label:`${style.label} saved`,graphLabel:style.graphLabel,isStarter}:defaultState;
   }
   function gdPracticeMyBubbleOffsetDeg(profile){
     const state=gdPracticeMyBubbleState(profile,gdPracticeProjectionReadyAnalysis());
@@ -3804,12 +3805,10 @@
   }
   function gdMyBubbleDisplayLabel(state,editing=false){
     if(editing)return"Manual centre";
-    const kind=String(state?.kind||"");
-    const isStarter=!!state?.isStarter;
-    if(kind==="default")return"Default";
-    if(kind==="pending")return isStarter?"Save Starter Bubble":"Save My Bubble";
-    if(kind==="adopted-current")return isStarter?"Starter Bubble active":"My Bubble active";
-    if(kind==="saved")return isStarter?"Starter Bubble saved":"My Bubble saved";
+    // gdPracticeMyBubbleState already resolved the correct label (via
+    // gdBubbleRoleStyle) for every kind, coach-set included - no need to
+    // re-decide My-Bubble-vs-Starter-Bubble here too.
+    if(String(state?.kind||"")==="default")return"Default";
     return state?.label||"My Bubble";
   }
   function gdPracticeProjectionSelectedClubNames(analysis,dataRows){
@@ -4454,7 +4453,7 @@
 	    const source=gdGpsReadyMyBubbleSource(sizeOpts,{offsetDeg:offset,club:sizeOpts?.club});
 	    if(!source)return "";
 	    const club=source.club||"7i";
-	    const isStarterSource=source.shapeSource==="coach-set";
+	    const isStarterSource=gdBubbleRoleStyle(source,"playing").source==="starter-bubble";
 	    const laneM=gdMyBubbleLaneMaxDistance();
 	    const requestedOffset=Number(offset);
 	    const liveOffset=Number.isFinite(requestedOffset)?requestedOffset:Number(source.offsetDeg);
@@ -5063,12 +5062,13 @@
 	    const currentSource=gdCompareProfileBubbleSource(ctx,club);
 	    const courseSource=ctx.courseBubble||null;
 	    const practiceSource=ctx.practiceBubble||null;
-	    // A coach-set bubble is a rough starting estimate, not measured data -
-	    // labelling and colouring it the same as a real adopted My Bubble would
-	    // make it look like more than it is, so it gets its own callout.
-	    const isStarterBubble=currentSource?.shapeSource==="coach-set";
+	    // gdBubbleRoleStyle is the one shared tap-in point for "does this bubble
+	    // present as My Bubble, or as a Starter Bubble" - everything downstream
+	    // of it (Practice chart, hub widget, hub preview SVG) reads the same
+	    // answer, so this is the only place Comparison needs to ask.
+	    const currentStyle=gdBubbleRoleStyle(currentSource,"playing");
 	    const items=[
-	      {kind:"playing",label:isStarterBubble?"Starter Bubble":"My Bubble",offset:Number(ctx.current),source:currentSource,stroke:isStarterBubble?"#c58bf2":"#f4f8f3",fillOpacity:".10",strokeOpacity:".78"},
+	      {kind:"playing",label:currentStyle.label,offset:Number(ctx.current),source:currentSource,stroke:currentStyle.colour,fillOpacity:".10",strokeOpacity:".78"},
 	      {kind:"course",label:"Course Bubble",offset:Number(ctx.course),source:courseSource,stroke:"#37f28d",fillOpacity:".13",strokeOpacity:".84"},
 	      {kind:"practice",label:"Practice Bubble",offset:Number(ctx.practice),source:practiceSource,stroke:"#62d2ff",fillOpacity:".13",strokeOpacity:".84"}
 	    ];
