@@ -221,6 +221,11 @@
     safe(function(){window.gdApplyGpsMapVisibilityOwner?.("shell-enter-gps");});
     safe(function(){if(typeof map!=="undefined"&&map&&map.invalidateSize)setTimeout(function(){map.invalidateSize();},80);});
     safe(function(){window.gdHydrateGpsBadge?.(true);});
+    // This is the shell's OWN enter-GPS path (window.enterGpsModule gets
+    // overwritten to delegate here, so gd-app-core.js's enterGpsModule body
+    // never actually runs for a normal GPS entry) - the "playing as" badge
+    // sync has to live here too, or it silently never fires.
+    safe(function(){window.gdSyncGpsPlayerBadge?.();});
     return false;
   }
   function leaveGps(opts){

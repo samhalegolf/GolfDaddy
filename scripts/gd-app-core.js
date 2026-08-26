@@ -22517,6 +22517,7 @@ function gdShotBubbleOverlayBubblePath(bubble,plot,xForDistance,yForLateral){
 }
 function gdShotBubbleOverlayTypeStyle(source,view){
   const key=String(source||"").toLowerCase();
+  if(key==="starter-bubble")return{colour:"#c58bf2",fillOpacity:".09",strokeOpacity:".78",strokeWidth:"1.55"};
   if(key==="practice-bubble-projection")return{colour:"#37f28d",fillOpacity:".085",strokeOpacity:".76",strokeWidth:"1.55"};
   if(key==="offset-hub-underlay")return{colour:"#d7b06b",fillOpacity:".075",strokeOpacity:".62",strokeWidth:"1.35"};
   if(key==="gps-bubble"||view==="compare")return{colour:"#d7b06b",fillOpacity:".075",strokeOpacity:".62",strokeWidth:"1.35"};
@@ -23376,6 +23377,38 @@ function setShellMode(mode){
   toast(`Mode: ${modeTitle(mode)}`);
   showShellHome();
 }
+// Whether the signed-in account is a coach/admin currently viewing a
+// DIFFERENT profile - i.e. using someone else's bag/bubble data right now,
+// on-course or off. Shared by the GPS play badge and anything else that
+// needs to know "is this actually the coach's own round".
+function gdIsCoachPlayingAsPlayer(){
+  try{
+    const account=window.GolfDaddyAccounts?.current?.();
+    if(!account)return false;
+    const role=String(account.role||'player').toLowerCase();
+    if(role!=='coach'&&role!=='admin')return false;
+    const viewingId=GD_ACCOUNT_STATE?.viewingProfileId;
+    return !!(viewingId&&viewingId!==account.profileId);
+  }catch(e){return false;}
+}
+// The .badgeName slot in the GPS HUD exists in the markup but nothing ever
+// wrote to it - it's the natural place to make it unmistakable a coach is
+// using a player's data on-course, not their own, so a demo round can't be
+// silently misread as the coach's own game.
+function gdSyncGpsPlayerBadge(){
+  try{
+    const el=document.getElementById('gdGpsPlayerBadgeName');
+    if(!el)return;
+    if(gdIsCoachPlayingAsPlayer()){
+      const p=activePlayerProfile();
+      el.textContent=`Playing as ${p?.name||'Player'}`;
+      el.hidden=false;
+    }else{
+      el.textContent='';
+      el.hidden=true;
+    }
+  }catch(e){}
+}
 function enterGpsModule(opts={}){
   closeAllPanels();
   closeModulePanels();
@@ -23390,7 +23423,8 @@ function enterGpsModule(opts={}){
     setTimeout(()=>map&&map.invalidateSize&&map.invalidateSize(),80);
     setTimeout(()=>map&&map.invalidateSize&&map.invalidateSize(),260);
   }catch(e){}
-  setTimeout(()=>{try{if(typeof gdV62Refresh==='function')gdV62Refresh();if(typeof gdHydrateGpsBadge==='function')gdHydrateGpsBadge(true);}catch(e){}},40);
+  gdSyncGpsPlayerBadge();
+  setTimeout(()=>{try{if(typeof gdV62Refresh==='function')gdV62Refresh();if(typeof gdHydrateGpsBadge==='function')gdHydrateGpsBadge(true);gdSyncGpsPlayerBadge();}catch(e){}},40);
 }
 function openShellModule(id,opts={}){
   if(id==='modeDashboardPanel')return showShellHome();

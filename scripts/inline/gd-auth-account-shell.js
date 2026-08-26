@@ -1148,6 +1148,7 @@
           ${managed ? '' : playerBookingCard(owner, p)}
           ${canShow('bag') ? playerDataCard('bag', 'Bag', bag, `Open ${firstName(p)}'s bag`, 'bag') : ''}
           ${canShow('shot') ? playerDataCard('shot', 'Shot Data', shot, `Open ${firstName(p)}'s shot data`, 'shot') : ''}
+          ${canShow('play') ? playerDataCard('play', 'Play / GPS', {ready:true, headline:'Enter GPS', detail:`On-course recommendations use ${firstName(p)}'s bag and bubble.`}, `Play as ${firstName(p)}`, 'play') : ''}
         </section>
 
         <p class="coachPlayerNote">${managed

@@ -30,7 +30,7 @@
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
 <script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260712a"></script>
 <script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260712a"></script>
-<link rel="stylesheet" href="styles/inline/gd-app-base.css?v=20260721c">
+<link rel="stylesheet" href="styles/inline/gd-app-base.css?v=coach-set-bubble-20260826a">
 
 <link rel="stylesheet" id="gdHomeButtonsHandoffCssV1" href="styles/inline/gd-home-buttons-handoff-css-v1.css?v=split04">
 </head>
@@ -219,7 +219,7 @@
 <div class="gpsModeSwitch" id="gpsModeSwitch"><button class="live" id="gpsLiveModeBtn" onclick="setGpsPlayMode(\'live\')">Live</button><button class="twoTap active" id="gpsTwoTapBtn" onclick="setGpsPlayMode(\'twoTap\')">Manual</button></div>
 <div class="playerBadge">
 <div class="badgeMain">
-<div><div class="badgeName"></div><button class="badgeCourse" id="courseLine" type="button" onclick="gdOpenChangeCourse(event)"></button></div>
+<div><div class="badgeName" id="gdGpsPlayerBadgeName" hidden></div><button class="badgeCourse" id="courseLine" type="button" onclick="gdOpenChangeCourse(event)"></button></div>
 <div class="scoreBlock"><button class="scoreBtn" type="button" aria-label="Decrease score" onclick="event.stopPropagation();return adjustScore(-1)">-</button><div class="scoreValue" id="scoreValue">E</div><button class="scoreBtn" type="button" aria-label="Increase score" onclick="event.stopPropagation();return adjustScore(1)">+</button></div>
 </div>
 <div class="badgeMeta"><span id="stateLine">GPS not started</span><span class="gpsLive" id="gpsLive"><i></i>GPS</span><span class="holeMeta" id="holeLine" style="display:none">Hole 1 · Par 4</span></div>
@@ -293,11 +293,11 @@
 </div></div>
 </div>
 <script src="scripts/gd-app-permissions.js?v=permissions-carve-20260719"></script>
-<script src="scripts/gd-app-core.js?v=20260726b-containment"></script>
+<script src="scripts/gd-app-core.js?v=coach-set-bubble-20260826a"></script>
 <script data-gd-surface="studio" src="scripts/studio/gd-studio-preview-truth.js?v=preview-truth-001"></script>
 <script data-gd-surface="studio" src="scripts/studio/gd-admin-course-db.js?v=split-phase2"></script>
 <script data-gd-surface="studio" src="scripts/studio/gd-course-play-debug.js?v=split-phase4"></script>
-<script src="scripts/gd-shell.js?v=shell-owner-20260719"></script>
+<script src="scripts/gd-shell.js?v=coach-set-bubble-20260826a"></script>
 <script src="scripts/gd-course-location.js?v=course-location-owner-20260719"></script>
 <script src="scripts/gd-flag-pin.js?v=flag-pin-carve-20260719"></script>
 <script src="scripts/gd-icon-assets.js?v=icon-assets-001"></script>
@@ -308,7 +308,7 @@
 <!-- Removed superseded cleanup layer from original script index 5. -->
 
 <script src="scripts/inline/gd-brand-icon-render.js?v=boot-crash-fix-20260719"></script>
-<script src="scripts/inline/gd-auth-account-shell.js?v=coach-set-bubble-20260826a"></script>
+<script src="scripts/inline/gd-auth-account-shell.js?v=coach-set-bubble-20260826b"></script>
 
 
 
@@ -401,7 +401,7 @@
      point into, not a Studio-only tool. -->
 <script src="scripts/gd-practice-projected-clubs.js?v=practice-projected-clubs-001"></script>
 <script data-gd-surface="studio" src="scripts/gd-bubble-signal-test-data.js?v=bubble-signal-test-data-001"></script>
-<script id="gdCanonicalRouteAuditV1" src="scripts/gd-route-audit.js?v=coach-set-bubble-20260826g"></script>
+<script id="gdCanonicalRouteAuditV1" src="scripts/gd-route-audit.js?v=coach-set-bubble-20260826i"></script>
 <script src="scripts/inline/gd-native-back-button.js?v=20260721a"></script>
 <script src="scripts/inline/gd-native-deep-links.js?v=deeplinks-20260720"></script>
 <!-- Removed gdProfileRouteStabilizerV2: profile fallback rendering masked real route failures. -->
