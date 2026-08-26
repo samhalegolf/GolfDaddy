@@ -1428,10 +1428,27 @@
     gdPracticeEmailLaneOpen=false;
     gdPracticePlotOpen=false;
     try{localStorage.removeItem(GD_PRACTICE_IMPORT_OPEN_KEY);}catch(e){}
+    if(gdCoachSetBubbleOpen){
+      gdCoachSetLiveOffsetDeg=0;
+      gdCoachSetLiveDistanceM=null;
+      gdCoachSetPreviewOn=false;
+      gdCoachSetDragState=null;
+      const select=document.getElementById("gdCoachSetClub");
+      if(select)delete select.dataset.gdPopulated;
+      const previewBtn=document.getElementById("gdCoachSetPreviewBtn");
+      if(previewBtn)previewBtn.classList.remove("active");
+    }
     gdRenderPracticeImportPanel();
     if(gdCoachSetBubbleOpen)gdRenderCoachSetBubblePanel();
     return false;
   }
+  const GD_COACH_SET_REFERENCE_CLUBS=["PW","7i","4i","Driver"];
+  const GD_COACH_SET_DEFAULT_CLUB="7i";
+  const GD_COACH_SET_NO_BAG_DEFAULT_M=120;
+  let gdCoachSetPreviewOn=false;
+  let gdCoachSetLiveOffsetDeg=0;
+  let gdCoachSetLiveDistanceM=null;
+  let gdCoachSetDragState=null;
   function gdCoachSetClubList(p){
     const bagClubs=(Array.isArray(p?.bag)?p.bag:[]).map(row=>String(row?.club||row?.name||"").trim()).filter(Boolean);
     const defaults=Object.keys(typeof GD_DEFAULT_CLUB_CARRY_M==="object"?GD_DEFAULT_CLUB_CARRY_M:{});
@@ -1443,11 +1460,229 @@
       return true;
     });
   }
+  // Reference/ghost bubbles (the Preview clubs) are just a visual guide, so
+  // an auto-seeded stock bag is a perfectly fine estimate for where to draw
+  // them - real bag entry wins if present, otherwise the stock bag, otherwise
+  // the club's standard carry.
   function gdCoachSetDistanceForClub(p,club){
-    const bagRow=(Array.isArray(p?.bag)?p.bag:[]).find(row=>String(row?.club||row?.name||"").trim().toLowerCase()===String(club||"").trim().toLowerCase());
-    const bagCarry=Number(bagRow?.baseCarry??bagRow?.carry??bagRow?.totalM);
-    if(Number.isFinite(bagCarry)&&bagCarry>0)return Math.round(bagCarry);
+    const hasBag=Array.isArray(p?.bag)&&p.bag.length>0;
+    if(hasBag){
+      const bagRow=p.bag.find(row=>String(row?.club||row?.name||"").trim().toLowerCase()===String(club||"").trim().toLowerCase());
+      const bagCarry=Number(bagRow?.baseCarry??bagRow?.carry??bagRow?.totalM);
+      if(Number.isFinite(bagCarry)&&bagCarry>0)return Math.round(bagCarry);
+    }
     return Math.round(safe(()=>gdDefaultCarryForClub(club),155)||155);
+  }
+  // The LIVE/draggable bubble is different: a fresh player has no REAL bag
+  // yet (completeProfileForHome auto-seeds a stock one the moment any code
+  // touches the profile, flagged bagSeededDefault=true), so there is nothing
+  // real to anchor the drag to - 120m is just a neutral place to start
+  // dragging FROM, not a claim about the player. Once the coach has actually
+  // set a club through here (or the bag was genuinely edited elsewhere),
+  // that real distance is the honest starting point.
+  function gdCoachSetLiveDefaultDistance(p,club){
+    const hasRealBag=Array.isArray(p?.bag)&&p.bag.length>0&&!p.bagSeededDefault;
+    if(!hasRealBag)return GD_COACH_SET_NO_BAG_DEFAULT_M;
+    return gdCoachSetDistanceForClub(p,club);
+  }
+  function gdCoachSetResolvedTemplateClub(){
+    const select=document.getElementById("gdCoachSetClub");
+    return String(select?.value||GD_COACH_SET_DEFAULT_CLUB).trim()||GD_COACH_SET_DEFAULT_CLUB;
+  }
+  function gdCoachSetBuildBubble(p,club,baseCarry,offsetDeg){
+    const storageClub=gdMyBubbleStorageClub(club);
+    return calculateCleanBubbleProfile({
+      club:storageClub,
+      baseCarry,
+      handedness:p?.handedness||"right",
+      skillLevel:p?.skillLevel||p?.consistency||"mid",
+      faceOffsetDeg:offsetDeg
+    });
+  }
+  // Chart is plotted in real units on both axes (lateral metres for aim,
+  // distance metres for carry) rather than raw degrees - that is what lets
+  // reference bubbles from different clubs sit on one shared, honest chart.
+  function gdCoachSetChartLayout(distances){
+    const W=480,H=320,padX=54,padTop=26,padBottom=40;
+    const plotLeft=padX,plotRight=W-padX,plotTop=padTop,plotBottom=H-padBottom;
+    const valid=(distances||[]).filter(d=>Number.isFinite(d)&&d>0);
+    let minD=valid.length?Math.min(...valid):60;
+    let maxD=valid.length?Math.max(...valid):200;
+    if(maxD-minD<40){const mid=(maxD+minD)/2;minD=mid-40;maxD=mid+40;}
+    minD=Math.max(15,minD-25);
+    maxD=maxD+25;
+    const lateralRangeM=24;
+    const xScale=(plotRight-plotLeft)/(lateralRangeM*2);
+    const yScale=(plotBottom-plotTop)/(maxD-minD);
+    const cx=(plotLeft+plotRight)/2;
+    return{
+      W,H,plotLeft,plotRight,plotTop,plotBottom,minD,maxD,xScale,yScale,cx,
+      mapX:lateralM=>cx+lateralM*xScale,
+      mapY:distanceM=>plotBottom-(distanceM-minD)*yScale,
+      invX:px=>(px-cx)/xScale,
+      invY:py=>minD+(plotBottom-py)/yScale
+    };
+  }
+  function gdCoachSetBubbleEllipseAttrs(bubble,layout){
+    const lateralM=Number(bubble?.aimOffsetM)||0;
+    const cx=layout.mapX(lateralM);
+    const cy=layout.mapY(Number(bubble?.baseCarry)||layout.minD);
+    const rx=Math.max(4,(Number(bubble?.clusterWidthM)||10)/2*layout.xScale);
+    const ry=Math.max(4,(Number(bubble?.clusterDepthM)||14)/2*layout.yScale);
+    const tilt=Number(bubble?.clusterTiltDeg)||0;
+    return{cx,cy,rx,ry,tilt};
+  }
+  function gdCoachSetCurrentChartDistances(p){
+    const templateClub=gdCoachSetResolvedTemplateClub();
+    const distances=[Number.isFinite(gdCoachSetLiveDistanceM)?gdCoachSetLiveDistanceM:gdCoachSetLiveDefaultDistance(p,templateClub)];
+    if(gdCoachSetPreviewOn){
+      GD_COACH_SET_REFERENCE_CLUBS.forEach(club=>{
+        const storageClub=gdMyBubbleStorageClub(club);
+        const existing=p?.bubbleProfiles?.[storageClub];
+        distances.push(Number(existing?.baseCarry)||gdCoachSetDistanceForClub(p,club));
+      });
+    }
+    return distances;
+  }
+  function gdCoachSetRenderReadout(offsetDeg,distanceM){
+    const el=document.getElementById("gdCoachSetReadout");
+    if(!el)return;
+    el.textContent=`${gdOffsetLabel(offsetDeg)} · ${Math.round(distanceM)}m`;
+  }
+  function gdCoachSetRenderChart(){
+    const host=document.getElementById("gdCoachSetChart");
+    if(!host)return;
+    const {p}=gdBubbleDataContext();
+    const templateClub=gdCoachSetResolvedTemplateClub();
+    const liveDistance=Number.isFinite(gdCoachSetLiveDistanceM)?gdCoachSetLiveDistanceM:gdCoachSetLiveDefaultDistance(p,templateClub);
+    const liveOffset=Number.isFinite(gdCoachSetLiveOffsetDeg)?gdCoachSetLiveOffsetDeg:0;
+    const liveBuilt=gdCoachSetBuildBubble(p,templateClub,liveDistance,liveOffset);
+    const referenceBubbles=gdCoachSetPreviewOn?GD_COACH_SET_REFERENCE_CLUBS.map(club=>{
+      const storageClub=gdMyBubbleStorageClub(club);
+      const existing=p?.bubbleProfiles?.[storageClub];
+      const bubble=existing||gdCoachSetBuildBubble(p,club,gdCoachSetDistanceForClub(p,club),0);
+      return{club,storageClub,bubble};
+    }):[];
+    const layout=gdCoachSetChartLayout(gdCoachSetCurrentChartDistances(p));
+    const refMarkup=referenceBubbles.map(r=>{
+      const a=gdCoachSetBubbleEllipseAttrs(r.bubble,layout);
+      return `<g class="gdCoachSetRefBubble" data-club="${gdEscapeHTML(r.storageClub)}"><ellipse cx="${a.cx.toFixed(1)}" cy="${a.cy.toFixed(1)}" rx="${a.rx.toFixed(1)}" ry="${a.ry.toFixed(1)}" transform="rotate(${a.tilt.toFixed(1)} ${a.cx.toFixed(1)} ${a.cy.toFixed(1)})"/><text class="gdCoachSetRefLabel" x="${a.cx.toFixed(1)}" y="${(a.cy-a.ry-6).toFixed(1)}" text-anchor="middle">${gdEscapeHTML(r.club)}</text></g>`;
+    }).join("");
+    const liveAttrs=gdCoachSetBubbleEllipseAttrs(liveBuilt,layout);
+    const liveMarkup=`<g class="gdCoachSetLiveBubble" data-gd-coach-set-live="1"><ellipse cx="${liveAttrs.cx.toFixed(1)}" cy="${liveAttrs.cy.toFixed(1)}" rx="${liveAttrs.rx.toFixed(1)}" ry="${liveAttrs.ry.toFixed(1)}" transform="rotate(${liveAttrs.tilt.toFixed(1)} ${liveAttrs.cx.toFixed(1)} ${liveAttrs.cy.toFixed(1)})"/><circle class="gdCoachSetLiveHandleHit" cx="${liveAttrs.cx.toFixed(1)}" cy="${liveAttrs.cy.toFixed(1)}" r="26"/><circle class="gdCoachSetLiveHandleDot" cx="${liveAttrs.cx.toFixed(1)}" cy="${liveAttrs.cy.toFixed(1)}" r="5"/></g>`;
+    const zeroX=layout.mapX(0);
+    const targetLine=`<line class="gdCoachSetTargetLine" x1="${zeroX.toFixed(1)}" y1="${layout.plotTop}" x2="${zeroX.toFixed(1)}" y2="${layout.plotBottom}"/>`;
+    host.innerHTML=`<svg viewBox="0 0 ${layout.W} ${layout.H}" data-gd-coach-set-chart="1" touch-action="none">${targetLine}${refMarkup}${liveMarkup}</svg>`;
+    gdCoachSetWireChartDrag();
+    gdCoachSetRenderReadout(liveOffset,liveDistance);
+  }
+  function gdCoachSetUpdateLiveBubbleDom(layout,liveBuilt,offsetDeg,distanceM){
+    const svg=document.querySelector('svg[data-gd-coach-set-chart="1"]');
+    if(!svg)return;
+    const a=gdCoachSetBubbleEllipseAttrs(liveBuilt,layout);
+    const g=svg.querySelector('[data-gd-coach-set-live="1"]');
+    if(!g)return;
+    const ellipse=g.querySelector("ellipse");
+    const hit=g.querySelector(".gdCoachSetLiveHandleHit");
+    const dot=g.querySelector(".gdCoachSetLiveHandleDot");
+    if(ellipse){
+      ellipse.setAttribute("cx",a.cx.toFixed(1));
+      ellipse.setAttribute("cy",a.cy.toFixed(1));
+      ellipse.setAttribute("rx",a.rx.toFixed(1));
+      ellipse.setAttribute("ry",a.ry.toFixed(1));
+      ellipse.setAttribute("transform",`rotate(${a.tilt.toFixed(1)} ${a.cx.toFixed(1)} ${a.cy.toFixed(1)})`);
+    }
+    if(hit){hit.setAttribute("cx",a.cx.toFixed(1));hit.setAttribute("cy",a.cy.toFixed(1));}
+    if(dot){dot.setAttribute("cx",a.cx.toFixed(1));dot.setAttribute("cy",a.cy.toFixed(1));}
+    gdCoachSetRenderReadout(offsetDeg,distanceM);
+  }
+  function gdCoachSetWireChartDrag(){
+    const svg=document.querySelector('svg[data-gd-coach-set-chart="1"]');
+    if(!svg)return;
+    const hit=svg.querySelector(".gdCoachSetLiveHandleHit");
+    if(!hit)return;
+    hit.onpointerdown=function(event){
+      event.preventDefault();
+      const {p}=gdBubbleDataContext();
+      const templateClub=gdCoachSetResolvedTemplateClub();
+      const layout=gdCoachSetChartLayout(gdCoachSetCurrentChartDistances(p));
+      gdCoachSetDragState={pointerId:event.pointerId,layout,templateClub};
+      try{svg.setPointerCapture(event.pointerId);}catch(e){}
+      svg.classList.add("dragging");
+    };
+    svg.onpointermove=function(event){
+      const drag=gdCoachSetDragState;
+      if(!drag||drag.pointerId!==event.pointerId)return;
+      const rect=svg.getBoundingClientRect();
+      if(!rect.width||!rect.height)return;
+      const vb=drag.layout;
+      const px=((event.clientX-rect.left)/rect.width)*vb.W;
+      const py=((event.clientY-rect.top)/rect.height)*vb.H;
+      const lateralM=gdShotBubbleOverlayClamp(vb.invX(px),-40,40);
+      const distanceM=gdShotBubbleOverlayClamp(vb.invY(py),15,320);
+      const offsetDeg=gdRound(Math.atan2(lateralM,Math.max(distanceM,1))*180/Math.PI,2);
+      gdCoachSetLiveOffsetDeg=offsetDeg;
+      gdCoachSetLiveDistanceM=Math.round(distanceM*10)/10;
+      const {p}=gdBubbleDataContext();
+      const liveBuilt=gdCoachSetBuildBubble(p,drag.templateClub,gdCoachSetLiveDistanceM,offsetDeg);
+      gdCoachSetUpdateLiveBubbleDom(vb,liveBuilt,offsetDeg,gdCoachSetLiveDistanceM);
+    };
+    const finish=function(event){
+      const drag=gdCoachSetDragState;
+      if(!drag||drag.pointerId!==event.pointerId)return;
+      svg.classList.remove("dragging");
+      try{svg.releasePointerCapture(event.pointerId);}catch(e){}
+      gdCoachSetDragState=null;
+      gdCoachSetCommitLiveBubble();
+    };
+    svg.onpointerup=finish;
+    svg.onpointercancel=finish;
+  }
+  // The whole point of this route is to skip the practice-adopt pipeline's
+  // pending -> review -> save staging (gdPracticeApplyDistanceLearning etc):
+  // letting go of the bubble IS the confirmation, so both the bubble and the
+  // bag distance for this club are written immediately, not staged.
+  function gdCoachSetCommitLiveBubble(){
+    if(!gdCoachSetIsCoachViewingPlayer())return;
+    const {p}=gdBubbleDataContext();
+    if(!p)return;
+    const club=gdCoachSetResolvedTemplateClub();
+    const storageClub=gdMyBubbleStorageClub(club);
+    const distance=Number.isFinite(gdCoachSetLiveDistanceM)?gdCoachSetLiveDistanceM:gdCoachSetLiveDefaultDistance(p,club);
+    const offset=Number.isFinite(gdCoachSetLiveOffsetDeg)?gdCoachSetLiveOffsetDeg:0;
+    const built=gdCoachSetBuildBubble(p,club,distance,offset);
+    const bubble=Object.assign({},built,{club:storageClub,displayClub:club,shapeSource:"coach-set"});
+    p.faceOffsetDeg=offset;
+    p.centralFaceOffsetDeg=offset;
+    p.placeholderProfile=false;
+    p.previewBubbleSet=bubble;
+    p.bubbleProfiles=Object.assign({},p.bubbleProfiles||{});
+    p.bubbleProfiles[storageClub]=bubble;
+    p.bag=Array.isArray(p.bag)?p.bag.slice():[];
+    const bagIndex=p.bag.findIndex(row=>String(row?.club||row?.name||"").trim().toLowerCase()===storageClub.toLowerCase());
+    const roundedDistance=Math.round(distance);
+    const bagRow={club:storageClub,baseCarry:roundedDistance,totalM:safe(()=>gdBagTotalForCarry(storageClub,roundedDistance),roundedDistance)};
+    if(bagIndex>=0)p.bag[bagIndex]=Object.assign({},p.bag[bagIndex],bagRow);
+    else p.bag.push(bagRow);
+    p.bagSlotsTouched=true;
+    p.bagSeededDefault=false;
+    p.updatedAt=new Date().toISOString();
+    savePlayerProfiles();
+    syncCoreProfileFromActive();
+    gdRenderBubbleOffsetHub();
+    renderPracticeData(true);
+    renderDataHubStatus();
+    if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
+    safe(()=>typeof renderCompareData==="function"&&renderCompareData());
+    gdLmToast(`${club} set for ${p.name||"player"}: ${roundedDistance}m, ${gdOffsetLabel(offset)}`);
+    gdCoachSetRenderChart();
+  }
+  function gdCoachSetTogglePreview(){
+    gdCoachSetPreviewOn=!gdCoachSetPreviewOn;
+    const btn=document.getElementById("gdCoachSetPreviewBtn");
+    if(btn)btn.classList.toggle("active",gdCoachSetPreviewOn);
+    gdCoachSetRenderChart();
+    return false;
   }
   function gdRenderCoachSetBubblePanel(){
     const panel=document.getElementById("gdCoachSetBubblePanel");
@@ -1457,66 +1692,39 @@
     if(select&&!select.dataset.gdPopulated){
       const clubs=gdCoachSetClubList(p);
       select.innerHTML=clubs.map(club=>`<option value="${gdEscapeHTML(club)}">${gdEscapeHTML(club)}</option>`).join("");
+      select.value=GD_COACH_SET_DEFAULT_CLUB;
+      if(!select.value&&select.options.length)select.value=select.options[0].value;
       select.dataset.gdPopulated="1";
     }
     const who=document.getElementById("gdCoachSetBubbleWho");
     if(who)who.textContent=p?.name?`Set ${p.name}'s bubble directly - skips photo, email and plotting.`:"Set this player's bubble directly.";
-    const distanceInput=document.getElementById("gdCoachSetDistance");
-    if(distanceInput&&!distanceInput.value&&select?.value)distanceInput.value=gdCoachSetDistanceForClub(p,select.value);
-    const feedback=document.getElementById("gdCoachSetBubbleFeedback");
-    if(feedback){feedback.textContent="";feedback.classList.remove("error");}
+    if(gdCoachSetLiveDistanceM==null){
+      const club=gdCoachSetResolvedTemplateClub();
+      const storageClub=gdMyBubbleStorageClub(club);
+      const existing=p?.bubbleProfiles?.[storageClub];
+      if(existing&&Number.isFinite(Number(existing.faceOffsetDeg))&&Number.isFinite(Number(existing.baseCarry))){
+        gdCoachSetLiveOffsetDeg=Number(existing.faceOffsetDeg);
+        gdCoachSetLiveDistanceM=Number(existing.baseCarry);
+      }else{
+        gdCoachSetLiveOffsetDeg=0;
+        gdCoachSetLiveDistanceM=gdCoachSetLiveDefaultDistance(p,club);
+      }
+    }
+    gdCoachSetRenderChart();
   }
   function gdCoachSetClubChanged(){
     const {p}=gdBubbleDataContext();
-    const select=document.getElementById("gdCoachSetClub");
-    const distanceInput=document.getElementById("gdCoachSetDistance");
-    if(select&&distanceInput)distanceInput.value=gdCoachSetDistanceForClub(p,select.value);
-    return false;
-  }
-  function gdCoachSetSaveBubble(){
-    const feedback=document.getElementById("gdCoachSetBubbleFeedback");
-    const setFeedback=(message,isError)=>{
-      if(!feedback)return;
-      feedback.textContent=message||"";
-      feedback.classList.toggle("error",!!isError);
-    };
-    if(!gdCoachSetIsCoachViewingPlayer()){
-      setFeedback("Coach set is only available while viewing a player.",true);
-      return false;
-    }
-    const {p}=gdBubbleDataContext();
-    if(!p){setFeedback("No player selected.",true);return false;}
-    const club=String(document.getElementById("gdCoachSetClub")?.value||"").trim()||"7i";
-    const baseCarry=Number(document.getElementById("gdCoachSetDistance")?.value);
-    if(!Number.isFinite(baseCarry)||baseCarry<=0){setFeedback("Enter a distance in metres.",true);return false;}
-    const offsetRaw=document.getElementById("gdCoachSetOffset")?.value;
-    const offset=gdParseOffsetValue(offsetRaw,0);
-    if(!Number.isFinite(offset)){setFeedback("Enter an offset, e.g. L1.5 or R2.",true);return false;}
+    const club=gdCoachSetResolvedTemplateClub();
     const storageClub=gdMyBubbleStorageClub(club);
-    const built=calculateCleanBubbleProfile({
-      club:storageClub,
-      baseCarry,
-      handedness:p.handedness||"right",
-      skillLevel:p.skillLevel||p.consistency||"mid",
-      faceOffsetDeg:offset
-    });
-    const bubble=Object.assign({},built,{club:storageClub,displayClub:club,shapeSource:"coach-set"});
-    p.faceOffsetDeg=offset;
-    p.centralFaceOffsetDeg=offset;
-    p.placeholderProfile=false;
-    p.previewBubbleSet=bubble;
-    p.bubbleProfiles=Object.assign({},p.bubbleProfiles||{});
-    p.bubbleProfiles[storageClub]=bubble;
-    p.updatedAt=new Date().toISOString();
-    savePlayerProfiles();
-    syncCoreProfileFromActive();
-    gdRenderBubbleOffsetHub();
-    renderPracticeData(true);
-    renderDataHubStatus();
-    if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
-    safe(()=>typeof renderCompareData==="function"&&renderCompareData());
-    setFeedback(`Bubble set for ${p.name||"player"}.`,false);
-    gdLmToast(`Bubble set for ${p.name||"player"}`);
+    const existing=p?.bubbleProfiles?.[storageClub];
+    if(existing&&Number.isFinite(Number(existing.faceOffsetDeg))&&Number.isFinite(Number(existing.baseCarry))){
+      gdCoachSetLiveOffsetDeg=Number(existing.faceOffsetDeg);
+      gdCoachSetLiveDistanceM=Number(existing.baseCarry);
+    }else{
+      gdCoachSetLiveOffsetDeg=0;
+      gdCoachSetLiveDistanceM=gdCoachSetLiveDefaultDistance(p,club);
+    }
+    gdCoachSetRenderChart();
     return false;
   }
   let gdPracticePhotoDebugRun=null;
@@ -8476,7 +8684,7 @@
       gdTogglePracticePlot:gdTogglePracticePlot,
       gdToggleCoachSetBubble:gdToggleCoachSetBubble,
       gdCoachSetClubChanged:gdCoachSetClubChanged,
-      gdCoachSetSaveBubble:gdCoachSetSaveBubble,
+      gdCoachSetTogglePreview:gdCoachSetTogglePreview,
       gdPracticeCopyEmailAddress:gdPracticeCopyEmailAddress,
       gdPracticeRefreshEmailLane:gdPracticeRefreshEmailLane,
       gdPracticeLoadEmailPhotoBatch:gdPracticeLoadEmailPhotoBatch,

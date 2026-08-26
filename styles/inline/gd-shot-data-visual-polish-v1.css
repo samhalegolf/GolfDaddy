@@ -3134,18 +3134,106 @@
 	  padding:0 12px!important;
 	  font-size:14px!important;
 	}
-	#practiceDataPanel.open .gdCoachSetBubbleFeedback{
-	  min-height:1px!important;
-	  color:rgba(244,247,245,.62)!important;
-	  font-size:11px!important;
+	#practiceDataPanel.open .gdCoachSetToolbar{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) auto!important;
+	  gap:8px!important;
+	  align-items:end!important;
 	}
-	#practiceDataPanel.open .gdCoachSetBubbleFeedback.error{
-	  color:#f2a3a3!important;
+	#practiceDataPanel.open .gdCoachSetClubField{
+	  margin:0!important;
 	}
-	#practiceDataPanel.open .gdCoachSetBubbleButtons button{
-	  min-height:44px!important;
+	#practiceDataPanel.open .gdCoachSetPreviewBtn{
+	  min-height:42px!important;
 	  border-radius:12px!important;
+	  padding:0 14px!important;
+	  border:1px solid rgba(255,255,255,.12)!important;
+	  background:rgba(255,255,255,.05)!important;
+	  color:rgba(244,247,245,.82)!important;
+	  font-size:12px!important;
+	  font-weight:800!important;
+	  white-space:nowrap!important;
+	}
+	#practiceDataPanel.open .gdCoachSetPreviewBtn.active{
+	  border-color:rgba(215,176,107,.54)!important;
+	  background:linear-gradient(180deg,#d7b06b,#b88d42)!important;
+	  color:#06100b!important;
+	}
+	#practiceDataPanel.open .gdCoachSetChartWrap{
+	  position:relative!important;
+	  border-radius:16px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  background:rgba(255,255,255,.03)!important;
+	  overflow:hidden!important;
+	}
+	#practiceDataPanel.open .gdCoachSetChart{
 	  width:100%!important;
+	  aspect-ratio:480/320!important;
+	}
+	#practiceDataPanel.open .gdCoachSetChart svg{
+	  display:block!important;
+	  width:100%!important;
+	  height:100%!important;
+	}
+	#practiceDataPanel.open .gdCoachSetChart svg[data-gd-coach-set-chart="1"]{
+	  touch-action:none!important;
+	  user-select:none!important;
+	}
+	#practiceDataPanel.open .gdCoachSetTargetLine{
+	  stroke:rgba(255,255,255,.28)!important;
+	  stroke-width:1.5!important;
+	  stroke-dasharray:4 6!important;
+	}
+	#practiceDataPanel.open .gdCoachSetRefBubble ellipse{
+	  fill:rgba(98,210,255,.16)!important;
+	  stroke:#62d2ff!important;
+	  stroke-width:1.4!important;
+	}
+	#practiceDataPanel.open .gdCoachSetRefBubble[data-club="Driver"] ellipse{stroke:#f2c94c!important;fill:rgba(242,201,76,.14)!important;}
+	#practiceDataPanel.open .gdCoachSetRefBubble[data-club="4i"] ellipse{stroke:#9b8cff!important;fill:rgba(155,140,255,.14)!important;}
+	#practiceDataPanel.open .gdCoachSetRefBubble[data-club="7i"] ellipse{stroke:#62d2ff!important;fill:rgba(98,210,255,.14)!important;}
+	#practiceDataPanel.open .gdCoachSetRefBubble[data-club="PW"] ellipse{stroke:#37f28d!important;fill:rgba(55,242,141,.14)!important;}
+	#practiceDataPanel.open .gdCoachSetRefLabel{
+	  fill:rgba(244,247,245,.62)!important;
+	  font-size:10px!important;
+	  font-weight:800!important;
+	}
+	#practiceDataPanel.open .gdCoachSetLiveBubble ellipse{
+	  fill:rgba(244,247,245,.22)!important;
+	  stroke:#f4f7f5!important;
+	  stroke-width:2!important;
+	  filter:drop-shadow(0 0 6px rgba(244,247,245,.35))!important;
+	}
+	#practiceDataPanel.open .gdCoachSetLiveHandleHit{
+	  fill:transparent!important;
+	  cursor:grab!important;
+	}
+	#practiceDataPanel.open svg[data-gd-coach-set-chart="1"].dragging .gdCoachSetLiveHandleHit{
+	  cursor:grabbing!important;
+	}
+	#practiceDataPanel.open .gdCoachSetLiveHandleDot{
+	  fill:#f4f7f5!important;
+	  pointer-events:none!important;
+	}
+	#practiceDataPanel.open .gdCoachSetReadout{
+	  position:absolute!important;
+	  top:8px!important;
+	  right:10px!important;
+	  padding:4px 9px!important;
+	  border-radius:999px!important;
+	  background:rgba(0,0,0,.5)!important;
+	  border:1px solid rgba(255,255,255,.14)!important;
+	  color:#f4f7f5!important;
+	  font-size:12px!important;
+	  font-weight:900!important;
+	  letter-spacing:.02em!important;
+	  pointer-events:none!important;
+	}
+	#practiceDataPanel.open .gdCoachSetHint{
+	  margin:0!important;
+	  color:rgba(244,247,245,.5)!important;
+	  font-size:11px!important;
+	  line-height:1.35!important;
 	}
 	#practiceDataPanel.open .gdPracticeImportIconButton.coachSet[hidden]{
 	  display:none!important;

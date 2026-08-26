@@ -152,11 +152,15 @@
 <div id="gdManualPracticeLane"></div>
 <div class="gdCoachSetBubblePanel" id="gdCoachSetBubblePanel" hidden>
 <div class="gdCoachSetBubbleHead"><strong>Coach set</strong><span id="gdCoachSetBubbleWho">Set this player's bubble directly.</span></div>
-<label class="gdCoachSetField">Club<select id="gdCoachSetClub" onchange="gdCoachSetClubChanged()"></select></label>
-<label class="gdCoachSetField">Distance (m)<input id="gdCoachSetDistance" type="number" inputmode="decimal" placeholder="155"></label>
-<label class="gdCoachSetField">Offset<input id="gdCoachSetOffset" type="text" inputmode="decimal" placeholder="e.g. L 1.5 or R 2"></label>
-<div id="gdCoachSetBubbleFeedback" class="gdCoachSetBubbleFeedback"></div>
-<div class="gdCoachSetBubbleButtons"><button class="primary" type="button" onclick="return gdCoachSetSaveBubble()">Set bubble</button></div>
+<div class="gdCoachSetToolbar">
+<label class="gdCoachSetField gdCoachSetClubField">Club<select id="gdCoachSetClub" onchange="gdCoachSetClubChanged()"></select></label>
+<button class="gdCoachSetPreviewBtn" id="gdCoachSetPreviewBtn" type="button" onclick="return gdCoachSetTogglePreview()">Preview PW/7i/4i/Driver</button>
+</div>
+<div class="gdCoachSetChartWrap">
+<div class="gdCoachSetChart" id="gdCoachSetChart"></div>
+<div class="gdCoachSetReadout" id="gdCoachSetReadout"></div>
+</div>
+<p class="gdCoachSetHint">Drag the white bubble left/right to aim, up/down to set distance. Letting go saves it straight away - no extra confirm step.</p>
 </div>
 </div>
 </div>
