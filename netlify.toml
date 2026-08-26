@@ -219,6 +219,14 @@
   to = "/.netlify/functions/coach-roster"
   status = 200
 
+# Taking a player off a coach's roster. An unlink, not a delete - and it has to
+# be a server call because the reverse half of the link lives on the PLAYER's
+# account row, which account-sync will never write.
+[[redirects]]
+  from = "/api/coach-unlink-player"
+  to = "/.netlify/functions/coach-unlink-player"
+  status = 200
+
 # Removing one spare profile from your own account. Without it a deletion only
 # holds until account-profiles restores the row on the next device wipe.
 [[redirects]]

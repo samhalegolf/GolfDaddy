@@ -748,19 +748,24 @@
     return `<div class="gdProfileRosterEmpty">${esc(message)}</div>`;
   }
 
-  function playerRosterRow(item, canRemoveAccounts) {
+  function playerRosterRow(item) {
     const activity = item.activity || { kind:'none', title:'No recent activity', detail:'Search or filter to open profile' };
-    /* A profile on your own account is always yours to delete. Deleting another
-       PERSON'S account stays admin-only, because that is what removeAccount
-       enforces - offering the button to a plain coach would just throw.
+    /* Two different verbs wear the same button here, and conflating them is
+       what this list was reported for.
 
-       The Players list previously passed isAdmin:false unconditionally, so no
-       row in it could ever be removed. That is how a pile of dead profiles
-       became permanent. */
-    const removable = item.managed || canRemoveAccounts;
+       A managed profile is a profile row on the coach's OWN account - no login,
+       no other person - so Delete really does delete it.
+
+       A linked player is somebody else's account. Removing them means ending
+       the coaching link and nothing more: they keep their account, their bag
+       and their rounds. This row used to call removeProfile, which is the ADMIN
+       ACCOUNT DELETE - it threw 'Admin account required' for every ordinary
+       coach, so the button did nothing, and for an admin it destroyed a real
+       person's account. Unlink is the operation the list actually wants, and it
+       needs no admin rights, so every row here gets the button. */
     const removeArg = item.managed
       ? `gd67RemoveManagedProfile('${esc(item.profileId)}')`
-      : `gd67RemoveProfile('${esc(item.accountId)}')`;
+      : `gd67UnlinkPlayer('${esc(item.accountId)}')`;
     return `<div class="gdProfileRosterRow ${item.active ? 'active' : ''}" data-roster-key="players" data-search="${esc(item.searchText)}" data-has-activity="${item.hasRecentActivity ? '1' : '0'}" data-activity-kind="${esc(activity.kind || 'none')}">
       <button class="gdProfileRosterMain" type="button" aria-pressed="${item.active ? 'true' : 'false'}" onclick="gd67ViewProfile('${esc(item.profileId)}')">
         <span class="gdProfileRosterName">${esc(item.name)}</span>
@@ -769,7 +774,7 @@
         <span class="gdProfileRosterMeta">Updated ${esc(item.updatedLabel)}</span>
         <span class="gdProfileRosterStatus">${esc(item.status)}</span>
       </button>
-      ${removable ? `<button class="gdProfileRosterRemove" type="button" onclick="event.stopPropagation();${removeArg}">${item.managed ? 'Delete' : 'Remove'}</button>` : ''}
+      <button class="gdProfileRosterRemove" type="button" onclick="event.stopPropagation();${removeArg}">${item.managed ? 'Delete' : 'Remove'}</button>
     </div>`;
   }
 
@@ -805,7 +810,7 @@
     const items = sortRosterItems(rawItems, state.sort);
     const rows = items.map(item => key === 'coaches'
       ? coachRosterRow(item, options.currentAccountId || '')
-      : (key === 'allUsers' ? adminUserRosterRow(item, options.currentAccountId || '') : playerRosterRow(item, !!options.canRemoveAccounts))
+      : (key === 'allUsers' ? adminUserRosterRow(item, options.currentAccountId || '') : playerRosterRow(item))
     ).join('');
     const prompt = key === 'players'
       ? `<div class="gdProfileRosterPrompt">Recent player activity appears here. Use search or filter for the full player list.</div>`
@@ -914,7 +919,6 @@
     const items = rosterItems(players, activeProfile).concat(managedProfileRosterItems(account, activeProfile));
     const playerRows = renderRosterList('players', items, {
       label: 'players',
-      canRemoveAccounts: String(account.role || 'player') === 'admin',
       empty: 'No linked players yet.'
     });
     return `
@@ -1822,6 +1826,47 @@
     run();
   }
 
+  /* Ending a coaching link. The player keeps everything.
+
+     This is what the Players list means by Remove, and it is a different verb
+     from removeProfile above: no account is deleted, no profile is deleted, no
+     bag or shot data is touched. The confirm copy says so, because the old copy
+     ('Deletes the account, profile, bag and shot data') described an operation
+     the coach was never asking for. */
+  function unlinkPlayer(accountId) {
+    const api = accountsApi();
+    const state = api && typeof api.state === 'function' ? api.state() : {};
+    const target = (state.accounts || []).find(item => item && item.accountId === accountId);
+    if (!target) {
+      safeToast('Player not found');
+      return;
+    }
+    const label = target.name || target.email || 'this player';
+    const run = () => {
+      accountAction(() => {
+        if (!api || typeof api.unlinkPlayer !== 'function') throw new Error('Player removal is not ready');
+        api.unlinkPlayer(accountId);
+      }, `${label} removed from your players`);
+      coachProfileView = 'directory';
+      scrollProfileTop();
+    };
+    const message = `Ends the coaching link. ${label} keeps their account, profile, bag and rounds — you just stop seeing them here. They can link again with your coach code.`;
+    // window.confirm returns false instantly in the embedded webview without ever
+    // showing a dialog, so this removal silently did nothing there. The in-app
+    // dialog is used when available; the confirm fallback is kept so that a
+    // missing dialog owner can never approve the removal by default.
+    if (typeof window.gdConfirmDialog === 'function') {
+      window.gdConfirmDialog({
+        title: `Remove ${label} from your players?`,
+        message,
+        confirmLabel: 'Remove'
+      }).then(ok => { if (ok) run(); });
+      return;
+    }
+    if (!confirm(`Remove ${label} from your players? ${message}`)) return;
+    run();
+  }
+
   /* Removing a profile that lives on your own account. Not the same operation
      as removing a player ACCOUNT above - there is no login, no email and no
      other person involved, just a profile row and its data. */
@@ -1956,6 +2001,7 @@
   window.gd67AddCoachPlayer = addCoachPlayer;
   window.gd67AddCoachAccount = addCoachAccount;
   window.gd67RemoveProfile = removeProfile;
+  window.gd67UnlinkPlayer = unlinkPlayer;
   window.gd67RemoveManagedProfile = removeManagedProfile;
   window.gd67GenerateCoachInvite = generateCoachInvite;
   window.gd67SetRosterSearch = setRosterSearch;

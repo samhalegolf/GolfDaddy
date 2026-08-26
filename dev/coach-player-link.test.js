@@ -431,6 +431,215 @@ test("the merge keeps the coach out of their own linkedPlayerIds", () => {
   assert.deepStrictEqual(list(coach.linkedPlayerIds), [], "the coach is still their own player");
 });
 
+/* ---------- removing a player is an UNLINK, not a delete ----------
+   The Players list wired its Remove button to gdAdminRemoveAccount, which
+   deletes the account, the profile, the bag and the shot data. That is the
+   wrong verb twice: it throws 'Admin account required' for an ordinary coach,
+   so the button did nothing at all, and for an admin it destroyed a real
+   person's account when the coach only wanted to stop coaching them. */
+
+function unlinkSandbox(accounts, profiles) {
+  const rows = profiles || accounts.map((a) => ({ id: a.profileId, accountId: a.accountId, name: a.name }));
+  const saved = { accounts: 0, profiles: 0, applied: 0 };
+  const sandbox = {
+    console,
+    window: {},
+    GD_ACCOUNT_STATE: { accounts: accounts, activeId: accounts[0] && accounts[0].accountId || null, viewingProfileId: null },
+    GD_PROFILE_STATE: { profiles: rows, activeId: null },
+    gdAccountsLoad: () => sandbox.GD_ACCOUNT_STATE,
+    gdAccountById: (id) => accounts.find((a) => a.accountId === id) || null,
+    gdProfileById: (pid) => rows.find((p) => p && p.id === pid) || null,
+    gdAccountsSave: () => { saved.accounts += 1; },
+    savePlayerProfiles: () => { saved.profiles += 1; },
+    gdAccountApplySession: () => { saved.applied += 1; },
+    gdAccountRole: (value) => {
+      const raw = String(value || "player").toLowerCase();
+      return raw === "admin" ? "admin" : raw === "coach" ? "coach" : "player";
+    }
+  };
+  sandbox.gdCurrentAccount = () => sandbox.gdAccountById(sandbox.GD_ACCOUNT_STATE.activeId);
+  sandbox.gdAccountIsStaff = (account) => {
+    const role = sandbox.gdAccountRole(account && account.role);
+    return role === "admin" || role === "coach";
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(extractFunction(core, "gdCoachUnlinkPlayer"), sandbox);
+  vm.runInContext(extractFunction(core, "gdAccountPlayerLinkIds"), sandbox);
+  vm.runInContext(extractFunction(core, "gdAccountLinkedPlayers"), sandbox);
+  sandbox.saved = saved;
+  return sandbox;
+}
+
+test("removing a player cuts both link directions, so the roster actually loses them", () => {
+  const coach = { accountId: "acct_coach", profileId: "profile_coach", role: "coach", linkedPlayerIds: ["acct_p1", "acct_p2"], linkedCoachIds: [] };
+  /* p1 is claimed by BOTH sides, which is the normal live shape. Clearing only
+     the coach's list leaves gdAccountPlayerLinkIds re-deriving the player from
+     linkedCoachIds, and the row never leaves the screen. */
+  const p1 = { accountId: "acct_p1", profileId: "profile_p1", role: "player", linkedCoachIds: ["acct_coach", "acct_other"] };
+  const p2 = { accountId: "acct_p2", profileId: "profile_p2", role: "player", linkedCoachIds: ["acct_coach"] };
+  const box = unlinkSandbox([coach, p1, p2]);
+  box.gdCoachUnlinkPlayer("acct_p1", coach);
+  assert.deepStrictEqual(list(coach.linkedPlayerIds), ["acct_p2"], "the coach still claims the player");
+  assert.deepStrictEqual(list(p1.linkedCoachIds), ["acct_other"], "the player still claims the coach, or another coach's link was collateral");
+  assert.deepStrictEqual(
+    list(box.gdAccountLinkedPlayers(coach)).map((a) => a.accountId), ["acct_p2"],
+    "the removed player is still in the roster"
+  );
+});
+
+test("removing a player deletes nothing", () => {
+  const coach = { accountId: "acct_coach", profileId: "profile_coach", role: "coach", linkedPlayerIds: ["acct_p1"], linkedCoachIds: [] };
+  const p1 = { accountId: "acct_p1", profileId: "profile_p1", role: "player", linkedCoachIds: ["acct_coach"], createdByCoachId: "acct_coach" };
+  const box = unlinkSandbox([coach, p1]);
+  box.gdCoachUnlinkPlayer("acct_p1", coach);
+  assert.ok(
+    box.GD_ACCOUNT_STATE.accounts.some((a) => a.accountId === "acct_p1"),
+    "the player's ACCOUNT was removed — unlinking must not delete the person"
+  );
+  assert.ok(
+    box.GD_PROFILE_STATE.profiles.some((p) => p.id === "profile_p1"),
+    "the player's profile was removed — their bag and rounds live on it"
+  );
+  assert.strictEqual(p1.createdByCoachId, null, "createdByCoachId still names a coach this player is no longer linked to");
+});
+
+test("an ordinary coach can remove a player, and cannot remove themselves", () => {
+  const coach = { accountId: "acct_coach", profileId: "profile_coach", role: "coach", linkedPlayerIds: ["acct_p1"], linkedCoachIds: [] };
+  const p1 = { accountId: "acct_p1", profileId: "profile_p1", role: "player", linkedCoachIds: ["acct_coach"] };
+  const box = unlinkSandbox([coach, p1]);
+  /* No admin check anywhere in here: requiring admin is exactly what made the
+     button a no-op for every real coach. */
+  assert.doesNotThrow(() => box.gdCoachUnlinkPlayer("acct_p1", coach));
+  assert.throws(() => box.gdCoachUnlinkPlayer("acct_coach", coach), /own account/);
+  assert.throws(() => box.gdCoachUnlinkPlayer("acct_nobody", coach), /not found/);
+});
+
+test("a coach standing inside the player they removed is moved back to their own profile", () => {
+  const coach = { accountId: "acct_coach", profileId: "profile_coach", role: "coach", linkedPlayerIds: ["acct_p1"], linkedCoachIds: [] };
+  const p1 = { accountId: "acct_p1", profileId: "profile_p1", role: "player", linkedCoachIds: ["acct_coach"] };
+  const box = unlinkSandbox([coach, p1]);
+  box.GD_ACCOUNT_STATE.viewingProfileId = "profile_p1";
+  box.GD_PROFILE_STATE.activeId = "profile_p1";
+  box.gdCoachUnlinkPlayer("acct_p1", coach);
+  assert.strictEqual(box.GD_ACCOUNT_STATE.viewingProfileId, "profile_coach", "the coach is still viewing a profile they can no longer access");
+  assert.strictEqual(box.GD_PROFILE_STATE.activeId, "profile_coach");
+});
+
+test("the unlink reaches the server, or the player is back within thirty seconds", () => {
+  const body = stripComments(extractFunction(core, "gdCoachUnlinkPlayer"));
+  assert.ok(
+    /ClarityCoachUnlink/.test(body),
+    "the unlink is local-only — coach-roster reads both link directions off the server and hands the player straight back"
+  );
+  const client = stripComments(fs.readFileSync(path.join(ROOT, "scripts", "clarity-coach-unlink.js"), "utf8"));
+  assert.ok(/\/api\/coach-unlink-player/.test(client), "the client does not call the unlink endpoint");
+  assert.ok(
+    /ClarityErrorReporter/.test(client),
+    "a failed server unlink is swallowed — the local link is already cut, so the coach sees nothing until the player reappears"
+  );
+  assert.ok(
+    /<script src="scripts\/clarity-coach-unlink\.js/.test(indexHtml),
+    "clarity-coach-unlink.js is not loaded"
+  );
+  assert.ok(
+    /\/api\/coach-unlink-player/.test(netlify) && /functions\/coach-unlink-player/.test(netlify),
+    "the unlink endpoint is not routed"
+  );
+});
+
+test("the unlink endpoint takes identity from the token and deletes nothing", () => {
+  const server = stripComments(fs.readFileSync(path.join(ROOT, "functions", "coach-unlink-player.js"), "utf8"));
+  assert.ok(/supabaseAuth\("user"/.test(server), "the coach is not resolved from the access token");
+  assert.ok(
+    !/body\.coachAccountId/.test(server) && !/body\.accountId/.test(server),
+    "a coach id from the body would let anyone rearrange anyone else's roster"
+  );
+  assert.ok(/not_a_coach/.test(server), "a player account can rewrite links through this endpoint");
+  assert.ok(/self_unlink/.test(server), "the coach can unlink themselves");
+  assert.ok(!/method:\s*"DELETE"/.test(server), "the unlink endpoint deletes rows");
+  assert.ok(
+    /linked_coach_ids/.test(server) && /linked_player_ids/.test(server),
+    "only one link direction is written — coach-roster counts a link claimed by either side"
+  );
+  assert.ok(
+    /without\(playerRow\.linked_coach_ids, coachId\)/.test(server),
+    "the player's coach list is overwritten rather than filtered — their other coaches would be dropped"
+  );
+});
+
+test("the removed player's next startup cannot push the coach link back", () => {
+  /* This is the failure that made the first version of the fix look like it
+     worked: only the server rows changed, the player's phone still held the
+     coach in its own linkedCoachIds, and account-sync writes that array up on
+     every launch. The coach removed a player and watched them reappear. */
+  const unlink = stripComments(fs.readFileSync(path.join(ROOT, "functions", "coach-unlink-player.js"), "utf8"));
+  assert.ok(
+    /severedCoachIds/.test(unlink),
+    "the unlink leaves no tombstone — the player's device writes the link straight back on its next startup"
+  );
+  assert.ok(
+    /Object\.assign\(\{\}, metadata,/.test(unlink),
+    "the player's metadata is replaced rather than extended, so whatever else the row was carrying is lost"
+  );
+
+  const sync = stripComments(fs.readFileSync(path.join(ROOT, "functions", "account-sync.js"), "utf8"));
+  assert.ok(
+    /severedCoachIds\(accountId\)/.test(sync),
+    "account-sync never reads the tombstone, so it happily writes the severed link back"
+  );
+  assert.ok(
+    !/linked_coach_ids:\s*Array\.isArray\(account\.linkedCoachIds\)/.test(sync),
+    "account-sync still writes the client's coach list unfiltered"
+  );
+  assert.ok(
+    /severedCoachIds:\s*stillSevered/.test(sync),
+    "the tombstone is not carried forward — this write replaces metadata wholesale, so it would be dropped on the first sync after a removal"
+  );
+});
+
+test("a player entering the coach code again lifts the tombstone", () => {
+  const connect = stripComments(extractFunction(core, "gdAccountConnectCoachByCode"));
+  assert.ok(
+    /restoreCoachIds/.test(connect),
+    "re-linking by code sends nothing to distinguish it from the stale array, so a removed player could never rejoin that coach"
+  );
+  const sync = stripComments(fs.readFileSync(path.join(ROOT, "functions", "account-sync.js"), "utf8"));
+  assert.ok(
+    /restoreCoachIds/.test(sync) && /restore\.includes\(id\)/.test(sync),
+    "account-sync ignores the deliberate re-link signal"
+  );
+  assert.ok(
+    /\.filter\(id => severed\.includes\(id\)\)/.test(sync),
+    "restoreCoachIds is honoured for ids that were never severed — the client could use it to grant itself links"
+  );
+});
+
+test("the Players list offers Remove to every coach, and never wires it to the account delete", () => {
+  const code = stripComments(shell);
+  assert.ok(
+    /gd67UnlinkPlayer/.test(code) && /window\.gd67UnlinkPlayer\s*=/.test(code),
+    "the unlink handler is not wired to the row"
+  );
+  assert.ok(
+    !/playerRosterRow\(item, !!options\.canRemoveAccounts\)/.test(code) && !/canRemoveAccounts:/.test(code),
+    "the Players list still gates Remove on admin, so an ordinary coach's button does nothing"
+  );
+  const row = code.slice(code.indexOf("function playerRosterRow"), code.indexOf("function adminUserRosterRow"));
+  assert.ok(
+    !/gd67RemoveProfile/.test(row),
+    "a Players row still calls the ADMIN ACCOUNT DELETE — it throws for a coach and destroys the account for an admin"
+  );
+  const handler = code.slice(code.indexOf("function unlinkPlayer"), code.indexOf("function removeManagedProfile"));
+  assert.ok(
+    !/Deletes the account/.test(handler),
+    "the confirm still tells the coach their player's account, bag and shot data are being deleted"
+  );
+  assert.ok(
+    /gdConfirmDialog/.test(handler),
+    "window.confirm alone returns false instantly in the embedded webview, so the removal would silently do nothing in the app"
+  );
+});
+
 (async () => {
   let failed = 0;
   for (const entry of tests) {

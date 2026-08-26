@@ -24392,6 +24392,12 @@ function gdAccountConnectCoachByCode(rawCode){
   if(!coach.linkedPlayerIds.includes(player.accountId))coach.linkedPlayerIds.push(player.accountId);
   player.linkedCoachIds=Array.isArray(player.linkedCoachIds)?player.linkedCoachIds:[];
   if(!player.linkedCoachIds.includes(coach.accountId))player.linkedCoachIds.push(coach.accountId);
+  /* If this coach removed the player before, the server is holding a tombstone
+     that strips the coach back out of every linkedCoachIds this device pushes -
+     otherwise the player's stale local array would undo the removal on its next
+     startup. Entering the code is the deliberate act that lifts it, and it has
+     to be said out loud: the array alone looks exactly like the stale one. */
+  player.restoreCoachIds=[...new Set([...(Array.isArray(player.restoreCoachIds)?player.restoreCoachIds:[]),coach.accountId])];
   const now=new Date().toISOString();
   coach.updatedAt=now;
   player.updatedAt=now;
@@ -24405,6 +24411,61 @@ function gdAccountConnectCoachByCode(rawCode){
   savePlayerProfiles();
   gdAccountApplySession({silent:true});
   return coach;
+}
+/* Remove a player from a coach's roster. NOT a deletion.
+
+   The Players list only ever offered gdAdminRemoveAccount, which deletes the
+   account, the profile, the bag and the shot data. That is the wrong verb for
+   this list twice over: it throws for a plain coach ('Admin account required'),
+   so the button did nothing at all, and for an admin it destroyed a real
+   person's account when all the coach wanted was to stop coaching them.
+
+   Unlinking has to cut BOTH directions. gdAccountPlayerLinkIds unions
+   coach.linkedPlayerIds with every account whose linkedCoachIds names the
+   coach, so clearing one side leaves the player sitting in the roster exactly
+   as before. The player's profile carries the same claim in two more fields.
+
+   The server half is clarity-coach-unlink.js: coach-roster.js reads both
+   directions out of app_accounts, so a link cut only on this device comes
+   straight back on the next roster refresh. */
+function gdCoachUnlinkPlayer(accountId,coach=gdCurrentAccount()){
+  gdAccountsLoad();
+  coach=coach&&gdAccountById(coach.accountId)||gdCurrentAccount();
+  if(!coach||!gdAccountIsStaff(coach))throw new Error('Coach or admin account required');
+  const player=gdAccountById(accountId);
+  if(!player)throw new Error('Player not found');
+  if(player.accountId===coach.accountId)throw new Error('That is your own account');
+  const now=new Date().toISOString();
+  coach.linkedPlayerIds=(Array.isArray(coach.linkedPlayerIds)?coach.linkedPlayerIds:[]).filter(id=>id!==player.accountId);
+  player.linkedCoachIds=(Array.isArray(player.linkedCoachIds)?player.linkedCoachIds:[]).filter(id=>id!==coach.accountId);
+  /* createdByCoachId is history, not a link - coach-roster.js never reads it -
+     but leaving this coach's id on a player they no longer coach would let any
+     future flow that trusts it re-create the pairing. */
+  if(player.createdByCoachId===coach.accountId)player.createdByCoachId=null;
+  coach.updatedAt=now;
+  player.updatedAt=now;
+  const profile=gdProfileById(player.profileId);
+  if(profile){
+    if(Array.isArray(profile.coachAccountIds))profile.coachAccountIds=profile.coachAccountIds.filter(id=>id!==coach.accountId);
+    if(Array.isArray(profile.linkedCoachIds))profile.linkedCoachIds=profile.linkedCoachIds.filter(id=>id!==coach.accountId);
+    profile.updatedAt=now;
+  }
+  /* The coach may be standing inside the profile they just unlinked. Nothing
+     else moves them out, and gdAccountCanAccessProfile would then refuse the
+     view they are already looking at. */
+  if(GD_ACCOUNT_STATE.viewingProfileId===player.profileId)GD_ACCOUNT_STATE.viewingProfileId=coach.profileId;
+  if(GD_PROFILE_STATE.activeId===player.profileId)GD_PROFILE_STATE.activeId=coach.profileId;
+  gdAccountsSave();
+  savePlayerProfiles();
+  gdAccountApplySession({silent:true});
+  /* Fire and forget, same contract as gdAccountDeleteManagedProfile: the local
+     unlink has already happened and must not depend on the network. */
+  try{
+    if(window.ClarityCoachUnlink&&typeof window.ClarityCoachUnlink.unlink==='function'){
+      window.ClarityCoachUnlink.unlink(player.accountId).catch(()=>{});
+    }
+  }catch(e){}
+  return player;
 }
 function gdAccountLinkExistingPlayerByEmail(email,coach=gdCurrentAccount()){
   gdAccountsLoad();
@@ -24617,7 +24678,7 @@ function gdOpenGpsSettingsRouteActive(){
 }
 function bootProfileShell(){loadPlayerProfiles();gdInstallPlaceholderProfile();ensureProfile();gdAccountsBootstrap();savePlayerProfiles();syncCoreProfileFromActive();if(!gdAuthRouteBootActive()){showShellHome();if(gdOpenGpsSettingsRouteActive())openSettings({fromGps:true});}}
 window.GolfDaddyProfiles={load:loadPlayerProfiles,save:savePlayerProfiles,active:activePlayerProfile,open:openProfilePanel,onboarding:openOnboarding,generateQuickBag:gdGenerateQuickBag,installPlaceholder:gdInstallPlaceholderProfile};
-window.GolfDaddyAccounts={load:gdAccountsLoad,save:gdAccountsSave,state:()=>GD_ACCOUNT_STATE,current:gdCurrentAccount,accountForProfile:gdAccountForProfile,linkedPlayers:gdAccountLinkedPlayers,allAccounts:gdAdminAllAccounts,coachAccounts:gdAccountCoachAccounts,coachInviteFor:gdCoachInviteFor,generateCoachInvite:gdCoachGenerateInvite,connectCoachByCode:gdAccountConnectCoachByCode,linkExistingPlayerByEmail:gdAccountLinkExistingPlayerByEmail,signup:(data)=>gdAccountCreate(data,{activate:true}),login:gdAccountLogin,logout:gdAccountLogout,update:gdAccountUpdate,addPlayer:gdCoachAddPlayerAccount,addCoach:gdCoachAddCoachAccount,removeAccount:gdAdminRemoveAccount,managedProfiles:gdAccountManagedProfiles,deleteManagedProfile:gdAccountDeleteManagedProfile,viewProfile:gdAccountViewProfile,adminViewProfile:gdAdminViewProfile,viewOwnProfile:gdAccountViewOwnProfile,returnToOwnProfile:gdAccountReturnToOwnProfile,apply:gdAccountApplySession,roleLabel:gdAccountPublicRole};
+window.GolfDaddyAccounts={load:gdAccountsLoad,save:gdAccountsSave,state:()=>GD_ACCOUNT_STATE,current:gdCurrentAccount,accountForProfile:gdAccountForProfile,linkedPlayers:gdAccountLinkedPlayers,allAccounts:gdAdminAllAccounts,coachAccounts:gdAccountCoachAccounts,coachInviteFor:gdCoachInviteFor,generateCoachInvite:gdCoachGenerateInvite,connectCoachByCode:gdAccountConnectCoachByCode,linkExistingPlayerByEmail:gdAccountLinkExistingPlayerByEmail,signup:(data)=>gdAccountCreate(data,{activate:true}),login:gdAccountLogin,logout:gdAccountLogout,update:gdAccountUpdate,addPlayer:gdCoachAddPlayerAccount,addCoach:gdCoachAddCoachAccount,removeAccount:gdAdminRemoveAccount,unlinkPlayer:gdCoachUnlinkPlayer,managedProfiles:gdAccountManagedProfiles,deleteManagedProfile:gdAccountDeleteManagedProfile,viewProfile:gdAccountViewProfile,adminViewProfile:gdAdminViewProfile,viewOwnProfile:gdAccountViewOwnProfile,returnToOwnProfile:gdAccountReturnToOwnProfile,apply:gdAccountApplySession,roleLabel:gdAccountPublicRole};
 window.ClarityCaddieProfiles=window.GolfDaddyProfiles;
 window.ClarityCaddieAccounts=window.GolfDaddyAccounts;
 try{window.ClaritySession&&window.ClaritySession.sync("account-api-ready");}catch(e){}

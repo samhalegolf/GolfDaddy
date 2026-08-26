@@ -89,6 +89,26 @@ async function upsertAccount(payload, action) {
     merged = true;
   }
 
+  /* COACH LINKS THE COACH ALREADY CUT MUST NOT COME BACK UP THIS PIPE.
+   *
+   * linked_coach_ids is pushed from whatever the device holds, and this runs on
+   * every startup. When a coach removes a player (coach-unlink-player.js), only
+   * the server rows change - the player's phone still has the coach in its
+   * local list, and its next launch wrote the link straight back. The coach
+   * watched the player they removed reappear in the roster the following day,
+   * which reads as "the remove button is broken" all over again.
+   *
+   * So the unlink leaves a tombstone on the player's row and this filters
+   * against it. A deliberate re-link is the one thing that lifts it: the player
+   * entering the coach's code stamps restoreCoachIds, which is an explicit act
+   * on this device rather than the same stale array arriving again.
+   */
+  const severed = await severedCoachIds(accountId);
+  const restore = idList(account.restoreCoachIds || account.restore_coach_ids).filter(id => severed.includes(id));
+  const stillSevered = severed.filter(id => !restore.includes(id));
+  const linkedCoachIds = idList(account.linkedCoachIds || account.linked_coach_ids)
+    .filter(id => !stillSevered.includes(id));
+
   await supabaseFetch("app_accounts?on_conflict=account_id", {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
@@ -99,7 +119,7 @@ async function upsertAccount(payload, action) {
       name,
       role,
       created_by_coach_id: text(account.createdByCoachId || account.created_by_coach_id, 120) || null,
-      linked_coach_ids: Array.isArray(account.linkedCoachIds) ? account.linkedCoachIds : (Array.isArray(account.linked_coach_ids) ? account.linked_coach_ids : []),
+      linked_coach_ids: linkedCoachIds,
       linked_player_ids: Array.isArray(account.linkedPlayerIds) ? account.linkedPlayerIds : (Array.isArray(account.linked_player_ids) ? account.linked_player_ids : []),
       requires_password_setup: !!(account.requiresPasswordSetup || account.requires_password_setup),
       auth_user_id: uuidOrNull(account.supabaseUserId || account.authUserId || account.auth_user_id),
@@ -107,6 +127,9 @@ async function upsertAccount(payload, action) {
       password_hash: null,
       last_login_at: dateOrNull(account.lastLoginAt || account.last_login_at),
       metadata: stripUnsafe({
+        /* Carried forward, never rebuilt from the client: this whole row is an
+           upsert, so a key that is not written here is a key that is gone. */
+        severedCoachIds: stillSevered,
         source: "clarity-caddie-web",
         action,
         syncedFromBrowserAt: now,
@@ -234,6 +257,30 @@ function uuidOrNull(value) {
 function dateOrNull(value) {
   const raw = text(value, 80);
   return raw && !Number.isNaN(Date.parse(raw)) ? new Date(raw).toISOString() : null;
+}
+
+function idList(value) {
+  return Array.isArray(value) ? value.map(item => text(item, 120)).filter(Boolean) : [];
+}
+
+/* The coach links this account's own row says were cut. Read straight before
+   every account write, because the write replaces the row's metadata wholesale
+   and the client has no idea the tombstone exists. */
+async function severedCoachIds(accountId) {
+  if (!accountId) return [];
+  let rows = [];
+  try {
+    rows = await supabaseFetch(
+      "app_accounts?select=metadata&account_id=eq." + encodeFilter(accountId) + "&limit=1",
+      { method: "GET" }
+    );
+  } catch (_error) {
+    /* A lookup failure must not cost the caller their sync. The cost of
+       guessing wrong here is one resurrected coach link, not a lost account. */
+    return [];
+  }
+  const metadata = Array.isArray(rows) && rows[0] && rows[0].metadata || null;
+  return metadata && typeof metadata === "object" ? idList(metadata.severedCoachIds) : [];
 }
 
 function stripUnsafe(value) {
