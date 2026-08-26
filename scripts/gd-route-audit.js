@@ -1422,29 +1422,134 @@
     event?.preventDefault?.();
     event?.stopPropagation?.();
     event?.stopImmediatePropagation?.();
-    if(!gdCoachSetIsCoachViewingPlayer())return false;
-    gdCoachSetBubbleOpen=!gdCoachSetBubbleOpen;
-    gdPracticeImportOpen=false;
-    gdPracticeEmailLaneOpen=false;
-    gdPracticePlotOpen=false;
-    try{localStorage.removeItem(GD_PRACTICE_IMPORT_OPEN_KEY);}catch(e){}
-    if(gdCoachSetBubbleOpen){
-      gdCoachSetLiveOffsetDeg=0;
-      gdCoachSetLiveDistanceM=null;
-      gdCoachSetPreviewOn=false;
-      gdCoachSetDragState=null;
-      const select=document.getElementById("gdCoachSetClub");
-      if(select)delete select.dataset.gdPopulated;
-      const previewBtn=document.getElementById("gdCoachSetPreviewBtn");
-      if(previewBtn)previewBtn.classList.remove("active");
+    if(!gdCoachSetIsCoachViewingPlayer()){
+      // This gate is re-checked here, not just at render time when the
+      // button was made visible - if the two disagree (viewingProfileId
+      // reset back to the coach's own profile in between), the button used
+      // to sit there looking clickable and do nothing. Surface that instead
+      // of failing silently.
+      gdLmToast("Coach Set needs you to be viewing a player, not your own profile");
+      return false;
     }
-    gdRenderPracticeImportPanel();
-    if(gdCoachSetBubbleOpen)gdRenderCoachSetBubblePanel();
+    try{
+      gdCoachSetBubbleOpen=!gdCoachSetBubbleOpen;
+      gdPracticeImportOpen=false;
+      gdPracticeEmailLaneOpen=false;
+      gdPracticePlotOpen=false;
+      try{localStorage.removeItem(GD_PRACTICE_IMPORT_OPEN_KEY);}catch(e){}
+      if(gdCoachSetBubbleOpen){
+        gdCoachSetLiveOffsetDeg=0;
+        gdCoachSetLiveDistanceM=null;
+        gdCoachSetPreviewOn=false;
+        gdCoachSetDragState=null;
+        const select=document.getElementById("gdCoachSetClub");
+        if(select)delete select.dataset.gdPopulated;
+        const previewBtn=document.getElementById("gdCoachSetPreviewBtn");
+        if(previewBtn)previewBtn.classList.remove("active");
+        safe(()=>{
+          const {p}=gdBubbleDataContext();
+          gdCoachSetDiscardStalePending(p);
+          gdCoachSetRevertLiveBag(p);
+        });
+      }
+      gdRenderPracticeImportPanel();
+      if(gdCoachSetBubbleOpen)gdRenderCoachSetBubblePanel();
+    }catch(e){
+      console.error("[GolfDaddy] Coach Set failed to open",e);
+      gdLmToast("Coach Set could not open - see console");
+    }
     return false;
   }
   const GD_COACH_SET_REFERENCE_CLUBS=["PW","7i","4i","Driver"];
   const GD_COACH_SET_DEFAULT_CLUB="7i";
   const GD_COACH_SET_NO_BAG_DEFAULT_M=120;
+  // Reasonable amateur-to-strong-player carry windows per club - dragging the
+  // live bubble can't leave this band, however far the pointer travels, so a
+  // slip of the thumb can't park a 7i at driver distance. 7i is pinned to the
+  // range this was specified against (80-170m around the 120m no-bag start);
+  // the rest step down/up from it in the same proportion.
+  const GD_COACH_SET_CLUB_RANGE_M={
+    Driver:{min:150,max:280},
+    "3W":{min:140,max:250},
+    "4H":{min:130,max:230},
+    "4i":{min:120,max:210},
+    "5i":{min:110,max:195},
+    "6i":{min:100,max:185},
+    "7i":{min:80,max:170},
+    "8i":{min:75,max:160},
+    "9i":{min:65,max:145},
+    PW:{min:55,max:130},
+    GW:{min:45,max:115},
+    SW:{min:35,max:100},
+    LW:{min:25,max:85}
+  };
+  function gdCoachSetClubDistanceRange(club){
+    const storageClub=gdMyBubbleStorageClub(club);
+    const range=GD_COACH_SET_CLUB_RANGE_M[storageClub];
+    if(range)return range;
+    const typical=Math.round(safe(()=>gdDefaultCarryForClub(storageClub),155)||155);
+    return{min:Math.round(typical*.6),max:Math.round(typical*1.35)};
+  }
+  function gdCoachSetClampDistanceForClub(distanceM,club){
+    const range=gdCoachSetClubDistanceRange(club);
+    return gdShotBubbleOverlayClamp(distanceM,range.min,range.max);
+  }
+  // A dragged-but-never-adopted bubble left in p.practiceBubblePendingSource
+  // would otherwise leak into whatever the real Practice tab does with that
+  // field next. Only ever clears OUR OWN staged entry (distanceMode
+  // "coach-set") - a genuine in-progress Practice Bubble adoption is left
+  // alone.
+  function gdCoachSetDiscardStalePending(p){
+    if(p?.practiceBubblePendingSource?.distanceMode==="coach-set"){
+      delete p.practiceBubblePendingSource;
+      delete p.practiceBubblePendingAt;
+      savePlayerProfiles();
+    }
+  }
+  // Every club's offset from 7i, read off the same "typical carry" table the
+  // bag's own Quick Set generator (gdGenerateQuickBag) is built from - that
+  // generator is hardcoded to anchor on a 7i distance, so this is how any
+  // OTHER dragged club's distance gets converted back into an equivalent 7i
+  // anchor before the rest of the bag is regenerated from it.
+  function gdCoachSetClubOffsetFromSeven(club){
+    const storageClub=gdMyBubbleStorageClub(club);
+    const table=typeof GD_DEFAULT_CLUB_CARRY_M==="object"?GD_DEFAULT_CLUB_CARRY_M:{};
+    const base=Number(table[storageClub]);
+    const seven=Number(table["7i"])||155;
+    return Number.isFinite(base)?base-seven:0;
+  }
+  // Dragging live-mutates the WHOLE p.bag (in memory, not persisted) - not
+  // just the dragged club's row - so every other live-preview surface, this
+  // chart's other reference bubbles included, tracks the drag the same way
+  // moving the 7-iron in the real bag generator bumps every other club. The
+  // pre-drag bag is snapshotted once per editing session so an abandoned
+  // drag (club switched, panel closed) can be reverted without touching
+  // Adopt's actual persisted write.
+  let gdCoachSetBagSnapshot=null;
+  function gdCoachSetSnapshotWholeBag(p){
+    if(gdCoachSetBagSnapshot)return;
+    gdCoachSetBagSnapshot={rows:(Array.isArray(p?.bag)?p.bag:[]).map(r=>Object.assign({},r))};
+  }
+  function gdCoachSetLiveMutateBag(p,storageClub,distanceM){
+    if(!p)return;
+    gdCoachSetSnapshotWholeBag(p);
+    if(!Array.isArray(p.bag))p.bag=[];
+    const sevenAnchor=distanceM-gdCoachSetClubOffsetFromSeven(storageClub);
+    const table=typeof GD_DEFAULT_CLUB_CARRY_M==="object"?GD_DEFAULT_CLUB_CARRY_M:{};
+    Object.keys(table).forEach(club=>{
+      const rounded=Math.max(20,Math.round(sevenAnchor+gdCoachSetClubOffsetFromSeven(club)));
+      const idx=p.bag.findIndex(r=>gdMyBubbleStorageClub(r?.club||r?.name||"")===club);
+      const row={club,baseCarry:rounded,totalM:safe(()=>gdBagTotalForCarry(club,rounded),rounded)};
+      if(idx>=0)p.bag[idx]=Object.assign({},p.bag[idx],row);
+      else p.bag.push(row);
+    });
+  }
+  function gdCoachSetRevertLiveBag(p){
+    if(!gdCoachSetBagSnapshot)return;
+    const{rows}=gdCoachSetBagSnapshot;
+    gdCoachSetBagSnapshot=null;
+    if(p)p.bag=rows;
+  }
   let gdCoachSetPreviewOn=false;
   let gdCoachSetLiveOffsetDeg=0;
   let gdCoachSetLiveDistanceM=null;
@@ -1482,8 +1587,8 @@
   // that real distance is the honest starting point.
   function gdCoachSetLiveDefaultDistance(p,club){
     const hasRealBag=Array.isArray(p?.bag)&&p.bag.length>0&&!p.bagSeededDefault;
-    if(!hasRealBag)return GD_COACH_SET_NO_BAG_DEFAULT_M;
-    return gdCoachSetDistanceForClub(p,club);
+    const distance=hasRealBag?gdCoachSetDistanceForClub(p,club):GD_COACH_SET_NO_BAG_DEFAULT_M;
+    return gdCoachSetClampDistanceForClub(distance,club);
   }
   function gdCoachSetResolvedTemplateClub(){
     const select=document.getElementById("gdCoachSetClub");
@@ -1502,15 +1607,18 @@
   // Chart is plotted in real units on both axes (lateral metres for aim,
   // distance metres for carry) rather than raw degrees - that is what lets
   // reference bubbles from different clubs sit on one shared, honest chart.
-  function gdCoachSetChartLayout(distances){
-    const W=480,H=320,padX=54,padTop=26,padBottom=40;
+  // The chart's vertical axis IS the club's gate: bottom of the plot is the
+  // club's minimum reasonable carry, top is its maximum - not an auto-fit
+  // range - so the whole drag surface reads as "this is the realistic window
+  // for this club" rather than a wider chart with an invisible clamp inside
+  // it. A reference bubble from Preview that falls outside this club's own
+  // window (e.g. Driver's real distance while editing 7i) simply draws above
+  // or below the visible plot and is clipped by the chart's overflow:hidden.
+  function gdCoachSetChartLayout(range,opts={}){
+    const W=480,H=opts.tall?600:320,padX=58,padTop=26,padBottom=40;
     const plotLeft=padX,plotRight=W-padX,plotTop=padTop,plotBottom=H-padBottom;
-    const valid=(distances||[]).filter(d=>Number.isFinite(d)&&d>0);
-    let minD=valid.length?Math.min(...valid):60;
-    let maxD=valid.length?Math.max(...valid):200;
-    if(maxD-minD<40){const mid=(maxD+minD)/2;minD=mid-40;maxD=mid+40;}
-    minD=Math.max(15,minD-25);
-    maxD=maxD+25;
+    const minD=Number(range?.min);
+    const maxD=Number(range?.max);
     const lateralRangeM=24;
     const xScale=(plotRight-plotLeft)/(lateralRangeM*2);
     const yScale=(plotBottom-plotTop)/(maxD-minD);
@@ -1523,26 +1631,69 @@
       invY:py=>minD+(plotBottom-py)/yScale
     };
   }
+  // The union of the Preview clubs' own gated ranges, padded well past the
+  // widest bubble any of them can draw at that range's edge - the bubble
+  // ELLIPSE, not just its centre point, has to fit inside the plot with room
+  // to spare, or the widest club (Driver) clips against the top/bottom.
+  function gdCoachSetPreviewRange(){
+    let min=Infinity,max=-Infinity,maxHalfDepth=0;
+    GD_COACH_SET_REFERENCE_CLUBS.forEach(club=>{
+      const r=gdCoachSetClubDistanceRange(club);
+      min=Math.min(min,r.min);
+      max=Math.max(max,r.max);
+      const storageClub=gdMyBubbleStorageClub(club);
+      [r.min,r.max].forEach(distance=>{
+        const depth=Number(safe(()=>calculateCleanBubbleProfile({club:storageClub,baseCarry:distance,handedness:"right",skillLevel:"mid",faceOffsetDeg:0}).clusterDepthM,20))||20;
+        maxHalfDepth=Math.max(maxHalfDepth,depth/2);
+      });
+    });
+    const margin=maxHalfDepth+30;
+    return{min:Math.max(10,min-margin),max:max+margin};
+  }
+  function gdCoachSetNiceGridStep(span){
+    const steps=[10,20,25,50,100];
+    for(const step of steps){if(span/step<=8)return step;}
+    return 100;
+  }
+  function gdCoachSetGridMarkup(layout){
+    const step=gdCoachSetNiceGridStep(layout.maxD-layout.minD);
+    const start=Math.ceil(layout.minD/step)*step;
+    const parts=[];
+    for(let d=start;d<=layout.maxD;d+=step){
+      const y=layout.mapY(d);
+      parts.push(`<line class="gdCoachSetGridLine" x1="${layout.plotLeft}" y1="${y.toFixed(1)}" x2="${layout.plotRight}" y2="${y.toFixed(1)}"/>`);
+      parts.push(`<text class="gdCoachSetGridLabel" x="${(layout.plotLeft-8).toFixed(1)}" y="${(y+3).toFixed(1)}" text-anchor="end">${d}m</text>`);
+    }
+    return parts.join("");
+  }
   function gdCoachSetBubbleEllipseAttrs(bubble,layout){
     const lateralM=Number(bubble?.aimOffsetM)||0;
     const cx=layout.mapX(lateralM);
     const cy=layout.mapY(Number(bubble?.baseCarry)||layout.minD);
-    const rx=Math.max(4,(Number(bubble?.clusterWidthM)||10)/2*layout.xScale);
-    const ry=Math.max(4,(Number(bubble?.clusterDepthM)||14)/2*layout.yScale);
+    // Position uses the two axes' own (deliberately different) scales - the
+    // lateral axis is a tight fixed range, the distance axis spans a club's
+    // whole gate. But the ELLIPSE ITSELF has to be drawn at one consistent
+    // metres-to-pixels scale on both dimensions, or a real widthM:depthM
+    // ratio comes out visibly stretched sideways (xScale is a few times
+    // larger than yScale here). Use whichever axis scale is smaller so the
+    // shape stays true without overflowing either axis.
+    const sizeScale=Math.min(layout.xScale,layout.yScale);
+    // The app's own "My Bubble" chart (gdPracticeNormalisedPlotLayout etc)
+    // also plots on a vertical target line - distance away from the player
+    // running up the screen, lateral spread running side to side - same as
+    // this chart. Its bubble still renders WIDE, because depth is the
+    // horizontal radius there and width is the vertical one, not the literal
+    // clusterWidthM->horizontal reading this had. Matching that convention
+    // is what "orientation 90 off" was describing.
+    const rx=Math.max(4,(Number(bubble?.clusterDepthM)||14)/2*sizeScale);
+    const ry=Math.max(4,(Number(bubble?.clusterWidthM)||10)/2*sizeScale);
+    // clusterTiltDeg is computed for the app's own bubble frame. Swapping
+    // which physical measurement is the horizontal vs vertical radius is a
+    // second axis transpose stacked on top of the lateral/distance one this
+    // chart already made for positioning - two transposes cancel out, so the
+    // tilt angle is used as-is here (unnegated).
     const tilt=Number(bubble?.clusterTiltDeg)||0;
     return{cx,cy,rx,ry,tilt};
-  }
-  function gdCoachSetCurrentChartDistances(p){
-    const templateClub=gdCoachSetResolvedTemplateClub();
-    const distances=[Number.isFinite(gdCoachSetLiveDistanceM)?gdCoachSetLiveDistanceM:gdCoachSetLiveDefaultDistance(p,templateClub)];
-    if(gdCoachSetPreviewOn){
-      GD_COACH_SET_REFERENCE_CLUBS.forEach(club=>{
-        const storageClub=gdMyBubbleStorageClub(club);
-        const existing=p?.bubbleProfiles?.[storageClub];
-        distances.push(Number(existing?.baseCarry)||gdCoachSetDistanceForClub(p,club));
-      });
-    }
-    return distances;
   }
   function gdCoachSetRenderReadout(offsetDeg,distanceM){
     const el=document.getElementById("gdCoachSetReadout");
@@ -1557,13 +1708,31 @@
     const liveDistance=Number.isFinite(gdCoachSetLiveDistanceM)?gdCoachSetLiveDistanceM:gdCoachSetLiveDefaultDistance(p,templateClub);
     const liveOffset=Number.isFinite(gdCoachSetLiveOffsetDeg)?gdCoachSetLiveOffsetDeg:0;
     const liveBuilt=gdCoachSetBuildBubble(p,templateClub,liveDistance,liveOffset);
+    // Every reference bubble is rebuilt fresh through the same engine as the
+    // live one, never read off a frozen bubbleProfiles snapshot - distance
+    // always comes from the CURRENT bag (or the in-progress drag, for
+    // whichever club that is), so a bag edit or an active drag is reflected
+    // immediately instead of only after Adopt writes it back. Nothing here
+    // is persisted; it is exactly the "preview, not locked in" read Adopt
+    // Bubble later makes real.
+    const templateStorageClub=gdMyBubbleStorageClub(templateClub);
+    // Aim direction cascades across every club the same way distance does -
+    // a player who pushes their 7i right is pushing everything right, it's
+    // a swing tendency, not a per-club fact. This matches how the rest of
+    // the app already treats it: p.faceOffsetDeg/centralFaceOffsetDeg are
+    // profile-level (not per-club) fields, and gdBubbleCentralOffset() reads
+    // them as the general default for any club with no bubble of its own.
     const referenceBubbles=gdCoachSetPreviewOn?GD_COACH_SET_REFERENCE_CLUBS.map(club=>{
       const storageClub=gdMyBubbleStorageClub(club);
-      const existing=p?.bubbleProfiles?.[storageClub];
-      const bubble=existing||gdCoachSetBuildBubble(p,club,gdCoachSetDistanceForClub(p,club),0);
+      const isLiveClub=storageClub===templateStorageClub;
+      const distance=isLiveClub?liveDistance:gdCoachSetDistanceForClub(p,club);
+      const bubble=gdCoachSetBuildBubble(p,club,distance,liveOffset);
       return{club,storageClub,bubble};
     }):[];
-    const layout=gdCoachSetChartLayout(gdCoachSetCurrentChartDistances(p));
+    const layout=gdCoachSetPreviewOn
+      ?gdCoachSetChartLayout(gdCoachSetPreviewRange(),{tall:true})
+      :gdCoachSetChartLayout(gdCoachSetClubDistanceRange(templateClub));
+    const gridMarkup=gdCoachSetPreviewOn?gdCoachSetGridMarkup(layout):"";
     const refMarkup=referenceBubbles.map(r=>{
       const a=gdCoachSetBubbleEllipseAttrs(r.bubble,layout);
       return `<g class="gdCoachSetRefBubble" data-club="${gdEscapeHTML(r.storageClub)}"><ellipse cx="${a.cx.toFixed(1)}" cy="${a.cy.toFixed(1)}" rx="${a.rx.toFixed(1)}" ry="${a.ry.toFixed(1)}" transform="rotate(${a.tilt.toFixed(1)} ${a.cx.toFixed(1)} ${a.cy.toFixed(1)})"/><text class="gdCoachSetRefLabel" x="${a.cx.toFixed(1)}" y="${(a.cy-a.ry-6).toFixed(1)}" text-anchor="middle">${gdEscapeHTML(r.club)}</text></g>`;
@@ -1572,11 +1741,13 @@
     const liveMarkup=`<g class="gdCoachSetLiveBubble" data-gd-coach-set-live="1"><ellipse cx="${liveAttrs.cx.toFixed(1)}" cy="${liveAttrs.cy.toFixed(1)}" rx="${liveAttrs.rx.toFixed(1)}" ry="${liveAttrs.ry.toFixed(1)}" transform="rotate(${liveAttrs.tilt.toFixed(1)} ${liveAttrs.cx.toFixed(1)} ${liveAttrs.cy.toFixed(1)})"/><circle class="gdCoachSetLiveHandleHit" cx="${liveAttrs.cx.toFixed(1)}" cy="${liveAttrs.cy.toFixed(1)}" r="26"/><circle class="gdCoachSetLiveHandleDot" cx="${liveAttrs.cx.toFixed(1)}" cy="${liveAttrs.cy.toFixed(1)}" r="5"/></g>`;
     const zeroX=layout.mapX(0);
     const targetLine=`<line class="gdCoachSetTargetLine" x1="${zeroX.toFixed(1)}" y1="${layout.plotTop}" x2="${zeroX.toFixed(1)}" y2="${layout.plotBottom}"/>`;
-    host.innerHTML=`<svg viewBox="0 0 ${layout.W} ${layout.H}" data-gd-coach-set-chart="1" touch-action="none">${targetLine}${refMarkup}${liveMarkup}</svg>`;
+    host.innerHTML=`<svg viewBox="0 0 ${layout.W} ${layout.H}" data-gd-coach-set-chart="1" touch-action="none">${gridMarkup}${targetLine}${refMarkup}${liveMarkup}</svg>`;
+    const wrap=host.closest(".gdCoachSetChartWrap");
+    if(wrap)wrap.classList.toggle("large",!!gdCoachSetPreviewOn);
     gdCoachSetWireChartDrag();
     gdCoachSetRenderReadout(liveOffset,liveDistance);
   }
-  function gdCoachSetUpdateLiveBubbleDom(layout,liveBuilt,offsetDeg,distanceM){
+  function gdCoachSetUpdateLiveBubbleDom(layout,liveBuilt,offsetDeg,distanceM,storageClub){
     const svg=document.querySelector('svg[data-gd-coach-set-chart="1"]');
     if(!svg)return;
     const a=gdCoachSetBubbleEllipseAttrs(liveBuilt,layout);
@@ -1594,6 +1765,27 @@
     }
     if(hit){hit.setAttribute("cx",a.cx.toFixed(1));hit.setAttribute("cy",a.cy.toFixed(1));}
     if(dot){dot.setAttribute("cx",a.cx.toFixed(1));dot.setAttribute("cy",a.cy.toFixed(1));}
+    // If the club being dragged is also one of the Preview ghost bubbles,
+    // that ghost is now stale (it's showing where the club WAS) - drag it
+    // along with the live bubble so Preview reads as live, not frozen.
+    if(storageClub){
+      const ref=svg.querySelector(`.gdCoachSetRefBubble[data-club="${CSS.escape(storageClub)}"]`);
+      if(ref){
+        const refEllipse=ref.querySelector("ellipse");
+        const refLabel=ref.querySelector(".gdCoachSetRefLabel");
+        if(refEllipse){
+          refEllipse.setAttribute("cx",a.cx.toFixed(1));
+          refEllipse.setAttribute("cy",a.cy.toFixed(1));
+          refEllipse.setAttribute("rx",a.rx.toFixed(1));
+          refEllipse.setAttribute("ry",a.ry.toFixed(1));
+          refEllipse.setAttribute("transform",`rotate(${a.tilt.toFixed(1)} ${a.cx.toFixed(1)} ${a.cy.toFixed(1)})`);
+        }
+        if(refLabel){
+          refLabel.setAttribute("x",a.cx.toFixed(1));
+          refLabel.setAttribute("y",(a.cy-a.ry-6).toFixed(1));
+        }
+      }
+    }
     gdCoachSetRenderReadout(offsetDeg,distanceM);
   }
   function gdCoachSetWireChartDrag(){
@@ -1603,9 +1795,14 @@
     if(!hit)return;
     hit.onpointerdown=function(event){
       event.preventDefault();
-      const {p}=gdBubbleDataContext();
       const templateClub=gdCoachSetResolvedTemplateClub();
-      const layout=gdCoachSetChartLayout(gdCoachSetCurrentChartDistances(p));
+      // Must match whatever layout gdCoachSetRenderChart() actually drew
+      // (the wide Preview range, or the tight per-club one) so pointer
+      // position tracks the rendered bubble - the drag is still clamped to
+      // the club's own reasonable range regardless of which layout is shown.
+      const layout=gdCoachSetPreviewOn
+        ?gdCoachSetChartLayout(gdCoachSetPreviewRange(),{tall:true})
+        :gdCoachSetChartLayout(gdCoachSetClubDistanceRange(templateClub));
       gdCoachSetDragState={pointerId:event.pointerId,layout,templateClub};
       try{svg.setPointerCapture(event.pointerId);}catch(e){}
       svg.classList.add("dragging");
@@ -1619,13 +1816,22 @@
       const px=((event.clientX-rect.left)/rect.width)*vb.W;
       const py=((event.clientY-rect.top)/rect.height)*vb.H;
       const lateralM=gdShotBubbleOverlayClamp(vb.invX(px),-40,40);
-      const distanceM=gdShotBubbleOverlayClamp(vb.invY(py),15,320);
+      // Gated per club - however far the pointer travels, the drag can't
+      // park a club at an unrealistic distance for it (e.g. a 7i at driver
+      // range).
+      const distanceM=gdCoachSetClampDistanceForClub(vb.invY(py),drag.templateClub);
       const offsetDeg=gdRound(Math.atan2(lateralM,Math.max(distanceM,1))*180/Math.PI,2);
       gdCoachSetLiveOffsetDeg=offsetDeg;
       gdCoachSetLiveDistanceM=Math.round(distanceM*10)/10;
       const {p}=gdBubbleDataContext();
+      const storageClub=gdMyBubbleStorageClub(drag.templateClub);
       const liveBuilt=gdCoachSetBuildBubble(p,drag.templateClub,gdCoachSetLiveDistanceM,offsetDeg);
-      gdCoachSetUpdateLiveBubbleDom(vb,liveBuilt,offsetDeg,gdCoachSetLiveDistanceM);
+      gdCoachSetUpdateLiveBubbleDom(vb,liveBuilt,offsetDeg,gdCoachSetLiveDistanceM,storageClub);
+      // Live-wire the bag too, so the GPS Ready My Bubble hub (and anything
+      // else reading the bag right now) previews the drag, not just this
+      // chart - still just an in-memory mutation, not a persisted save.
+      gdCoachSetLiveMutateBag(p,storageClub,gdCoachSetLiveDistanceM);
+      safe(()=>gdRenderBubbleOffsetHub());
     };
     const finish=function(event){
       const drag=gdCoachSetDragState;
@@ -1633,16 +1839,18 @@
       svg.classList.remove("dragging");
       try{svg.releasePointerCapture(event.pointerId);}catch(e){}
       gdCoachSetDragState=null;
-      gdCoachSetCommitLiveBubble();
+      gdCoachSetStagePendingBubble();
     };
     svg.onpointerup=finish;
     svg.onpointercancel=finish;
   }
-  // The whole point of this route is to skip the practice-adopt pipeline's
-  // pending -> review -> save staging (gdPracticeApplyDistanceLearning etc):
-  // letting go of the bubble IS the confirmation, so both the bubble and the
-  // bag distance for this club are written immediately, not staged.
-  function gdCoachSetCommitLiveBubble(){
+  // Letting go of the bubble only STAGES it - into the exact same
+  // p.practiceBubblePendingSource field the real Practice Bubble adopt flow
+  // (gdPracticeAdoptBubbleAsPlayingBubble) writes, so the drag result reads
+  // to the rest of the app as if it were an adopted Practice Bubble. Nothing
+  // is written to previewBubbleSet/bubbleProfiles/the bag until the coach
+  // presses Adopt Bubble, which reuses that same save wiring.
+  function gdCoachSetStagePendingBubble(){
     if(!gdCoachSetIsCoachViewingPlayer())return;
     const {p}=gdBubbleDataContext();
     if(!p)return;
@@ -1651,31 +1859,99 @@
     const distance=Number.isFinite(gdCoachSetLiveDistanceM)?gdCoachSetLiveDistanceM:gdCoachSetLiveDefaultDistance(p,club);
     const offset=Number.isFinite(gdCoachSetLiveOffsetDeg)?gdCoachSetLiveOffsetDeg:0;
     const built=gdCoachSetBuildBubble(p,club,distance,offset);
-    const bubble=Object.assign({},built,{club:storageClub,displayClub:club,shapeSource:"coach-set"});
-    p.faceOffsetDeg=offset;
-    p.centralFaceOffsetDeg=offset;
-    p.placeholderProfile=false;
-    p.previewBubbleSet=bubble;
-    p.bubbleProfiles=Object.assign({},p.bubbleProfiles||{});
-    p.bubbleProfiles[storageClub]=bubble;
-    p.bag=Array.isArray(p.bag)?p.bag.slice():[];
-    const bagIndex=p.bag.findIndex(row=>String(row?.club||row?.name||"").trim().toLowerCase()===storageClub.toLowerCase());
-    const roundedDistance=Math.round(distance);
-    const bagRow={club:storageClub,baseCarry:roundedDistance,totalM:safe(()=>gdBagTotalForCarry(storageClub,roundedDistance),roundedDistance)};
-    if(bagIndex>=0)p.bag[bagIndex]=Object.assign({},p.bag[bagIndex],bagRow);
-    else p.bag.push(bagRow);
-    p.bagSlotsTouched=true;
-    p.bagSeededDefault=false;
+    const bubble=Object.assign({},built,{
+      club:storageClub,
+      displayClub:club,
+      baseCarry:distance,
+      baseDistanceM:distance,
+      faceOffsetDeg:offset,
+      faceAlignmentOffsetDeg:offset,
+      offsetDeg:offset,
+      handedness:p.handedness||"right",
+      shapeSource:"coach-set"
+    });
+    // distanceMode deliberately isn't "committed"/"review" - those two values
+    // are gdBubbleOffsetSave()'s hook into gdPracticeApplyDistanceLearning,
+    // which rescales the WHOLE bag from real practice-shot analysis. That has
+    // nothing to do with a distance the coach just dragged to, so this tag
+    // skips that branch entirely; gdCoachSetAdoptBubble() writes the bag row
+    // itself, via the same gdBagPersistRows() every other bag edit goes
+    // through.
+    p.practiceBubblePendingSource={
+      active:true,
+      offsetDeg:Number(offset.toFixed(2)),
+      status:"coach-set",
+      club,
+      shots:0,
+      fingerprint:"coach-set-"+Date.now().toString(36),
+      distanceMode:"coach-set",
+      practiceDistanceM:null,
+      importBatchIds:[],
+      bubble
+    };
+    p.practiceBubblePendingAt=new Date().toISOString();
     p.updatedAt=new Date().toISOString();
     savePlayerProfiles();
     syncCoreProfileFromActive();
-    gdRenderBubbleOffsetHub();
-    renderPracticeData(true);
-    renderDataHubStatus();
-    if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
-    safe(()=>typeof renderCompareData==="function"&&renderCompareData());
-    gdLmToast(`${club} set for ${p.name||"player"}: ${roundedDistance}m, ${gdOffsetLabel(offset)}`);
+    const adoptBtn=document.getElementById("gdCoachSetAdoptBtn");
+    if(adoptBtn)adoptBtn.disabled=false;
+    const status=document.getElementById("gdCoachSetAdoptStatus");
+    if(status)status.textContent=`Ready to adopt: ${club} ${Math.round(distance)}m, ${gdOffsetLabel(offset)}`;
+    // Every pointermove already patches the live bubble (and its own ghost)
+    // directly for smooth dragging, but the OTHER Preview ghosts only get
+    // rebuilt on a full render - cheap enough to just do once here, the
+    // moment the bubble is actually placed, instead of waiting for the coach
+    // to notice and toggle Preview off/on to force it.
     gdCoachSetRenderChart();
+  }
+  function gdCoachSetAdoptBubble(){
+    if(!gdCoachSetIsCoachViewingPlayer())return false;
+    const {p}=gdBubbleDataContext();
+    const pending=p?.practiceBubblePendingSource;
+    if(!pending||!pending.active||pending.distanceMode!=="coach-set"){
+      gdLmToast("Drag the bubble into place first");
+      return false;
+    }
+    const club=pending.club||gdCoachSetResolvedTemplateClub();
+    const storageClub=gdMyBubbleStorageClub(club);
+    const distance=Number(pending.bubble?.baseDistanceM||pending.bubble?.baseCarry)||gdCoachSetLiveDefaultDistance(p,club);
+    const offset=Number(pending.offsetDeg)||0;
+    // Same "Save" wiring the Practice tab's Save button calls - it reads this
+    // exact pending source, writes previewBubbleSet/bubbleProfiles, and clears
+    // the staging fields.
+    gdPracticeSaveBubbleFromAction();
+    const roundedDistance=Math.round(distance);
+    // p.bag was already rescaled whole, live, during the drag - this call is
+    // just the final, idempotent pass in case Adopt fires without a prior
+    // move (e.g. re-adopting an already-staged value).
+    gdCoachSetLiveMutateBag(p,storageClub,distance);
+    const wholeBag=Array.isArray(p.bag)?p.bag.slice():[];
+    // The bag's own canonical write path - same function every other bag
+    // edit in the app goes through, which is what actually "kicks in" here.
+    if(typeof gdBagPersistRows==="function")gdBagPersistRows(wholeBag,{silent:true,render:false});
+    else safe(()=>{
+      const fresh=ensureProfile();
+      fresh.bag=wholeBag;
+      fresh.bagSlotsTouched=true;
+      fresh.bagSeededDefault=false;
+      savePlayerProfiles();
+      syncCoreProfileFromActive();
+    });
+    // The bag is now genuinely persisted at these values - the pre-drag
+    // snapshot no longer applies, or a later discard would wrongly revert a
+    // real, adopted save.
+    gdCoachSetBagSnapshot=null;
+    const adoptBtn=document.getElementById("gdCoachSetAdoptBtn");
+    if(adoptBtn)adoptBtn.disabled=true;
+    const status=document.getElementById("gdCoachSetAdoptStatus");
+    if(status)status.textContent="Drag the bubble, then adopt.";
+    gdLmToast(`${club} adopted for ${p.name||"player"}: ${roundedDistance}m, ${gdOffsetLabel(offset)}`);
+    gdCoachSetRenderChart();
+    return false;
+  }
+  function gdCoachSetOpenBag(){
+    if(typeof openBag==="function")openBag({fromProfile:true});
+    return false;
   }
   function gdCoachSetTogglePreview(){
     gdCoachSetPreviewOn=!gdCoachSetPreviewOn;
@@ -1698,13 +1974,20 @@
     }
     const who=document.getElementById("gdCoachSetBubbleWho");
     if(who)who.textContent=p?.name?`Set ${p.name}'s bubble directly - skips photo, email and plotting.`:"Set this player's bubble directly.";
+    const pendingIsOurs=p?.practiceBubblePendingSource?.active&&p.practiceBubblePendingSource.distanceMode==="coach-set";
+    const adoptBtn=document.getElementById("gdCoachSetAdoptBtn");
+    if(adoptBtn)adoptBtn.disabled=!pendingIsOurs;
+    const status=document.getElementById("gdCoachSetAdoptStatus");
+    if(status)status.textContent=pendingIsOurs
+      ?`Ready to adopt: ${p.practiceBubblePendingSource.club} ${Math.round(Number(p.practiceBubblePendingSource.bubble?.baseDistanceM)||0)}m, ${gdOffsetLabel(Number(p.practiceBubblePendingSource.offsetDeg)||0)}`
+      :"Drag the bubble, then adopt.";
     if(gdCoachSetLiveDistanceM==null){
       const club=gdCoachSetResolvedTemplateClub();
       const storageClub=gdMyBubbleStorageClub(club);
       const existing=p?.bubbleProfiles?.[storageClub];
       if(existing&&Number.isFinite(Number(existing.faceOffsetDeg))&&Number.isFinite(Number(existing.baseCarry))){
         gdCoachSetLiveOffsetDeg=Number(existing.faceOffsetDeg);
-        gdCoachSetLiveDistanceM=Number(existing.baseCarry);
+        gdCoachSetLiveDistanceM=gdCoachSetClampDistanceForClub(Number(existing.baseCarry),club);
       }else{
         gdCoachSetLiveOffsetDeg=0;
         gdCoachSetLiveDistanceM=gdCoachSetLiveDefaultDistance(p,club);
@@ -1714,12 +1997,19 @@
   }
   function gdCoachSetClubChanged(){
     const {p}=gdBubbleDataContext();
+    gdCoachSetDiscardStalePending(p);
+    gdCoachSetRevertLiveBag(p);
+    safe(()=>gdRenderBubbleOffsetHub());
+    const adoptBtn=document.getElementById("gdCoachSetAdoptBtn");
+    if(adoptBtn)adoptBtn.disabled=true;
+    const status=document.getElementById("gdCoachSetAdoptStatus");
+    if(status)status.textContent="Drag the bubble, then adopt.";
     const club=gdCoachSetResolvedTemplateClub();
     const storageClub=gdMyBubbleStorageClub(club);
     const existing=p?.bubbleProfiles?.[storageClub];
     if(existing&&Number.isFinite(Number(existing.faceOffsetDeg))&&Number.isFinite(Number(existing.baseCarry))){
       gdCoachSetLiveOffsetDeg=Number(existing.faceOffsetDeg);
-      gdCoachSetLiveDistanceM=Number(existing.baseCarry);
+      gdCoachSetLiveDistanceM=gdCoachSetClampDistanceForClub(Number(existing.baseCarry),club);
     }else{
       gdCoachSetLiveOffsetDeg=0;
       gdCoachSetLiveDistanceM=gdCoachSetLiveDefaultDistance(p,club);
@@ -8685,6 +8975,8 @@
       gdToggleCoachSetBubble:gdToggleCoachSetBubble,
       gdCoachSetClubChanged:gdCoachSetClubChanged,
       gdCoachSetTogglePreview:gdCoachSetTogglePreview,
+      gdCoachSetAdoptBubble:gdCoachSetAdoptBubble,
+      gdCoachSetOpenBag:gdCoachSetOpenBag,
       gdPracticeCopyEmailAddress:gdPracticeCopyEmailAddress,
       gdPracticeRefreshEmailLane:gdPracticeRefreshEmailLane,
       gdPracticeLoadEmailPhotoBatch:gdPracticeLoadEmailPhotoBatch,

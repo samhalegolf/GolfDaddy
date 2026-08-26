@@ -3136,12 +3136,53 @@
 	}
 	#practiceDataPanel.open .gdCoachSetToolbar{
 	  display:grid!important;
-	  grid-template-columns:minmax(0,1fr) auto!important;
+	  grid-template-columns:minmax(0,1fr) auto auto!important;
 	  gap:8px!important;
 	  align-items:end!important;
 	}
 	#practiceDataPanel.open .gdCoachSetClubField{
 	  margin:0!important;
+	}
+	#practiceDataPanel.open .gdCoachSetBagBtn{
+	  min-height:42px!important;
+	  min-width:42px!important;
+	  border-radius:12px!important;
+	  padding:0!important;
+	  display:grid!important;
+	  place-items:center!important;
+	  border:1px solid rgba(255,255,255,.12)!important;
+	  background:rgba(255,255,255,.05)!important;
+	  color:rgba(244,247,245,.82)!important;
+	}
+	#practiceDataPanel.open .gdCoachSetBagIcon svg{
+	  width:20px!important;
+	  height:20px!important;
+	  fill:none!important;
+	  stroke:currentColor!important;
+	  stroke-width:1.8!important;
+	  stroke-linecap:round!important;
+	  stroke-linejoin:round!important;
+	}
+	#practiceDataPanel.open .gdCoachSetAdoptRow{
+	  display:flex!important;
+	  align-items:center!important;
+	  justify-content:space-between!important;
+	  gap:10px!important;
+	}
+	#practiceDataPanel.open .gdCoachSetAdoptStatus{
+	  color:rgba(244,247,245,.6)!important;
+	  font-size:11px!important;
+	  line-height:1.3!important;
+	}
+	#practiceDataPanel.open .gdCoachSetAdoptBtn{
+	  min-height:44px!important;
+	  border-radius:12px!important;
+	  padding:0 18px!important;
+	  white-space:nowrap!important;
+	}
+	#practiceDataPanel.open .gdCoachSetAdoptBtn:disabled{
+	  opacity:.45!important;
+	  cursor:default!important;
 	}
 	#practiceDataPanel.open .gdCoachSetPreviewBtn{
 	  min-height:42px!important;
@@ -3169,6 +3210,19 @@
 	#practiceDataPanel.open .gdCoachSetChart{
 	  width:100%!important;
 	  aspect-ratio:480/320!important;
+	  transition:aspect-ratio .18s ease!important;
+	}
+	#practiceDataPanel.open .gdCoachSetChartWrap.large .gdCoachSetChart{
+	  aspect-ratio:480/600!important;
+	}
+	#practiceDataPanel.open .gdCoachSetGridLine{
+	  stroke:rgba(255,255,255,.10)!important;
+	  stroke-width:1!important;
+	}
+	#practiceDataPanel.open .gdCoachSetGridLabel{
+	  fill:rgba(244,247,245,.4)!important;
+	  font-size:9px!important;
+	  font-weight:700!important;
 	}
 	#practiceDataPanel.open .gdCoachSetChart svg{
 	  display:block!important;
