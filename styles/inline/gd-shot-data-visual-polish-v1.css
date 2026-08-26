@@ -423,6 +423,36 @@
   stroke-dasharray:5 4!important;
   filter:drop-shadow(0 0 14px rgba(55,242,141,.32))!important;
 }
+/* A coach-set (Starter) bubble reuses the exact same My Bubble layer/classes
+   above, so it inherits their gold/green rules unless something more
+   specific overrides it - the ellipse itself carries data-source="starter-
+   bubble" (from gdBubbleRoleStyle via practiceSvg), which is that override. */
+#gdPracticeDataVisual .gdPracticeMyBubbleLayer .gdOffsetHubBubble[data-source="starter-bubble"]{
+  fill:#c58bf2!important;
+  fill-opacity:.16!important;
+  stroke:#c58bf2!important;
+  stroke-opacity:.78!important;
+  stroke-width:1.55!important;
+  filter:drop-shadow(0 0 12px rgba(197,139,242,.20))!important;
+}
+#gdPracticeDataVisual .gdPracticeMyBubbleLayer-adopted-current .gdOffsetHubBubble[data-source="starter-bubble"],
+#gdPracticeDataVisual .gdPracticeMyBubbleAdopting .gdOffsetHubBubble[data-source="starter-bubble"]{
+  fill:#c58bf2!important;
+  fill-opacity:.86!important;
+  stroke:#c58bf2!important;
+  stroke-opacity:1!important;
+  stroke-width:2.35!important;
+  filter:drop-shadow(0 0 20px rgba(197,139,242,.42))!important;
+}
+#gdPracticeDataVisual .gdPracticeMyBubbleLayer-pending .gdOffsetHubBubble[data-source="starter-bubble"]{
+  fill:#c58bf2!important;
+  fill-opacity:.14!important;
+  stroke:#c58bf2!important;
+  stroke-opacity:1!important;
+  stroke-width:2.1!important;
+  stroke-dasharray:5 4!important;
+  filter:drop-shadow(0 0 14px rgba(197,139,242,.32))!important;
+}
 #gdPracticeDataVisual .gdPracticeBubbleProjectionLayer .gdOffsetHubBubble{
   fill:#62d2ff!important;
   fill-opacity:.13!important;
@@ -571,6 +601,14 @@
   stroke-width:0!important;
   stroke-opacity:0!important;
   filter:drop-shadow(0 0 14px rgba(244,248,243,.24))!important;
+}
+#gdHubCompareDataVisual .gdCompareBubbleLayer-playing .gdOffsetHubBubble[data-source="starter-bubble"]{
+  fill:#c58bf2!important;
+  fill-opacity:.26!important;
+  stroke:#c58bf2!important;
+  stroke-width:0!important;
+  stroke-opacity:0!important;
+  filter:drop-shadow(0 0 14px rgba(197,139,242,.24))!important;
 }
 #gdHubCompareDataVisual .gdCompareBubbleLayer-course .gdOffsetHubBubble{
   fill:#37f28d!important;

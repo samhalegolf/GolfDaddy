@@ -4453,7 +4453,6 @@
 	    const source=gdGpsReadyMyBubbleSource(sizeOpts,{offsetDeg:offset,club:sizeOpts?.club});
 	    if(!source)return "";
 	    const club=source.club||"7i";
-	    const isStarterSource=gdBubbleRoleStyle(source,"playing").source==="starter-bubble";
 	    const laneM=gdMyBubbleLaneMaxDistance();
 	    const requestedOffset=Number(offset);
 	    const liveOffset=Number.isFinite(requestedOffset)?requestedOffset:Number(source.offsetDeg);
@@ -4498,7 +4497,7 @@
 	      modelWidth:width,
 	      modelHeight:height,
 	      lineMode:"straight",
-	      stroke:isStarterSource?"rgba(197,139,242,.62)":"rgba(215,176,107,.62)",
+	      stroke:"rgba(215,176,107,.62)",
 	      fill:`url(#gdMyBubbleLaneFill${idSuffix})`,
 	      opacity:.96,
 	      className:"gdMyBubbleGpsAssetLayer"
@@ -4518,7 +4517,7 @@
 	          <stop offset="1" stop-color="#87928e"/>
 	        </radialGradient>
 	        <radialGradient id="gdMyBubbleLaneFill${idSuffix}" cx="42%" cy="32%" r="78%">
-	          ${isStarterSource?'<stop offset="0" stop-color="#f0dcff" stop-opacity=".30"/><stop offset=".56" stop-color="#c58bf2" stop-opacity=".18"/>':'<stop offset="0" stop-color="#fff1be" stop-opacity=".30"/><stop offset=".56" stop-color="#d7b06b" stop-opacity=".18"/>'}
+	          <stop offset="0" stop-color="#fff1be" stop-opacity=".30"/><stop offset=".56" stop-color="#d7b06b" stop-opacity=".18"/>
 	          <stop offset="1" stop-color="#62d2ff" stop-opacity=".10"/>
 	        </radialGradient>
 	      </defs>
@@ -5044,7 +5043,7 @@
 	    const layer=parts.length?gdPracticeNormalisedBubbleLayerMarkup(parts,plot,{
 	      offsetDeg:Number(item.offset)||0,
 	      groupClass:`gdShotBubbleOverlayLayer gdCompareBubbleLayer gdCompareBubbleLayer-${item.kind}`,
-	      source:item.kind==="playing"?"my-bubble":item.kind,
+	      source:item.kind==="playing"?(item.styleSource||"my-bubble"):item.kind,
 	      colour:item.stroke,
 	      fillOpacity:item.fillOpacity||".12",
 	      strokeOpacity:item.strokeOpacity||".82",
@@ -5068,7 +5067,7 @@
 	    // answer, so this is the only place Comparison needs to ask.
 	    const currentStyle=gdBubbleRoleStyle(currentSource,"playing");
 	    const items=[
-	      {kind:"playing",label:currentStyle.label,offset:Number(ctx.current),source:currentSource,stroke:currentStyle.colour,fillOpacity:".10",strokeOpacity:".78"},
+	      {kind:"playing",label:currentStyle.label,offset:Number(ctx.current),source:currentSource,styleSource:currentStyle.source,stroke:currentStyle.colour,fillOpacity:".10",strokeOpacity:".78"},
 	      {kind:"course",label:"Course Bubble",offset:Number(ctx.course),source:courseSource,stroke:"#37f28d",fillOpacity:".13",strokeOpacity:".84"},
 	      {kind:"practice",label:"Practice Bubble",offset:Number(ctx.practice),source:practiceSource,stroke:"#62d2ff",fillOpacity:".13",strokeOpacity:".84"}
 	    ];
@@ -7034,11 +7033,41 @@
 	      return `<ellipse class="gdOffsetHubBubble${opts.ellipseClass?` ${gdStatsSvgText(opts.ellipseClass)}`:""}" data-club="${gdStatsSvgText(part.club)}" data-source="${gdStatsSvgText(opts.source||"")}" data-offset-deg="${Number(part.angleDeg).toFixed(2)}" data-base-distance-m="${Number(part.baseDistanceM).toFixed(1)}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}"${part.tiltDeg?` transform="rotate(${Number(part.tiltDeg).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)})"`:""} fill="${colour}" fill-opacity="${fillOpacity}" stroke="${colour}" stroke-width="${strokeWidth}" stroke-opacity="${strokeOpacity}"${dashAttr}/>${label}`;
 	    }).join("")}</g>`;
 	  }
+	  // A coach-set (Starter) bubble has no real shots behind it by design, so
+	  // the normal "no shots -> just the empty backdrop" bail-out below used to
+	  // mean it never hydrated onto this chart at all. This still bails out of
+	  // the whole shot-analysis pipeline (nothing to cluster-hunt without shots)
+	  // but draws the single adopted bubble on top of the empty backdrop first,
+	  // exactly like it would sit alongside real shot dots once there are some.
+	  function gdPracticeMyBubbleOnlyLayerMarkup(){
+	    const p=safe(()=>ensureProfile(),null);
+	    const bubble=p?.previewBubbleSet;
+	    if(!bubble)return "";
+	    const myBubbleState=gdPracticeMyBubbleState(p,null);
+	    const offsetDeg=Number(myBubbleState?.offset);
+	    if(myBubbleState?.kind==="default"||!Number.isFinite(offsetDeg))return "";
+	    const carry=Number(bubble.baseDistanceM||bubble.baseCarry||bubble.expectedDistanceM);
+	    if(!Number.isFinite(carry)||carry<=0)return "";
+	    const club=bubble.club||"7i";
+	    const row={club,actualDistanceM:carry,handedness:bubble.handedness||p?.handedness||"right"};
+	    const parts=gdBubbleRelativeParts([row],offsetDeg,carry);
+	    if(!parts.length)return "";
+	    const style=gdBubbleRoleStyle(bubble,"playing");
+	    const plot=gdPracticeNormalisedPlotLayout();
+	    return gdPracticeNormalisedBubbleLayerMarkup(parts,plot,{
+	      offsetDeg,
+	      groupClass:`gdShotBubbleOverlayLayer gdPracticeMyBubbleLayer gdPracticeMyBubbleLayer-${myBubbleState.kind} gdShotBubbleOverlayLens`,
+	      source:style.source,
+	      colour:style.colour,
+	      labelText:style.label
+	    });
+	  }
 	  function practiceSvg(analysis){
 	    const shots=gdPracticePlotShots(analysis||{});
 		    if(!shots.length){
 		      const emptyPlot=gdPracticeNormalisedPlotLayout();
-		      return `<svg class="gdPracticeGraphSvg" viewBox="${gdPracticeNormalisedViewBox(emptyPlot)}" role="img" aria-label="Practice Data relative plot"><g class="gdPracticeGraphCanvas">${gdPracticeNormalisedBackdropSvg(emptyPlot,"",{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}</g></svg>${gdShotBubbleOverlayButton("practice")}`;
+		      const myBubbleOnlyLayer=safe(()=>gdPracticeMyBubbleOnlyLayerMarkup(),"")||"";
+		      return `<svg class="gdPracticeGraphSvg" viewBox="${gdPracticeNormalisedViewBox(emptyPlot)}" role="img" aria-label="Practice Data relative plot"><g class="gdPracticeGraphCanvas">${gdPracticeNormalisedBackdropSvg(emptyPlot,"",{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}${myBubbleOnlyLayer}</g></svg>${gdShotBubbleOverlayButton("practice")}`;
 	    }
     const plotAll=gdPracticePlotAllRowsForTest();
     const cfg=safe(()=>window.GolfDaddyLaunchMonitorData?.settings?.(),{})||{};

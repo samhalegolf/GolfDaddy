@@ -1096,6 +1096,9 @@
 
   function renderCoachPlayerView(account, owner, p) {
     const photo = p.profilePhotoDataUrl || p.photoDataUrl || '';
+    /* Bag, Shot Data and Course Mapping are admin-gated. Play / GPS is not -
+       opening GPS as the player you are looking at is a plain coach action, so
+       the card is rendered unconditionally below rather than through canShow. */
     const canShow = feature => typeof gdCoachCanSeeProfileFeature !== 'function' || gdCoachCanSeeProfileFeature(feature);
     const hcp = p.handicap || '—';
     const hand = (p.handedness || 'right').replace(/^./, c => c.toUpperCase());
@@ -1148,7 +1151,7 @@
           ${managed ? '' : playerBookingCard(owner, p)}
           ${canShow('bag') ? playerDataCard('bag', 'Bag', bag, `Open ${firstName(p)}'s bag`, 'bag') : ''}
           ${canShow('shot') ? playerDataCard('shot', 'Shot Data', shot, `Open ${firstName(p)}'s shot data`, 'shot') : ''}
-          ${canShow('play') ? playerDataCard('play', 'Play / GPS', {ready:true, headline:'Enter GPS', detail:`On-course recommendations use ${firstName(p)}'s bag and bubble.`}, `Play as ${firstName(p)}`, 'play') : ''}
+          ${playerDataCard('play', 'Play / GPS', {ready:true, headline:'Enter GPS', detail:`On-course recommendations use ${firstName(p)}'s bag and bubble.`}, `Play as ${firstName(p)}`, 'play')}
         </section>
 
         <p class="coachPlayerNote">${managed

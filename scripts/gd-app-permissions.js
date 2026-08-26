@@ -7,13 +7,16 @@ const GD_PERMISSIONS={
   player:{label:'Player',publicLabel:'Player',desc:'Core GPS, bag, profile and Shot Data.'},
   subscribedPlayer:{label:'Subscribed Player',publicLabel:'Subscribed Player',desc:'Player flow plus subscribed features and saved data.'}
 };
+/* Play / GPS used to sit in this list, defaulted off, so opening GPS as the
+   player you are looking at needed an admin to unlock it first. That is a
+   standard coach capability, not an admin one - it is now always available to
+   a coach viewing a player and is deliberately absent from this list. */
 const GD_COACH_PROFILE_VISIBILITY_FIELDS=[
   {key:'bag',label:'Bag',desc:'Club list and carry distances.'},
   {key:'shot',label:'Shot Data',desc:'Course and shot pattern data.'},
-  {key:'courses',label:'Course Mapping',desc:'Saved mapped courses, greens, tees, bunkers and fairways.'},
-  {key:'play',label:'Play / GPS',desc:'Open GPS as that player.'}
+  {key:'courses',label:'Course Mapping',desc:'Saved mapped courses, greens, tees, bunkers and fairways.'}
 ];
-const GD_COACH_PROFILE_VISIBILITY_DEFAULTS={bag:true,shot:true,courses:false,play:false};
+const GD_COACH_PROFILE_VISIBILITY_DEFAULTS={bag:true,shot:true,courses:false};
 function gdNormalizePermission(v){
   const raw=String(v||'player').trim();
   const key=raw.toLowerCase().replace(/[\s_-]+/g,'');
@@ -33,6 +36,11 @@ function gdGetCoachProfileVisibility(){
   return {...GD_COACH_PROFILE_VISIBILITY_DEFAULTS,...saved};
 }
 function gdCoachCanSeeProfileFeature(key){
+  /* Anything not on GD_COACH_PROFILE_VISIBILITY_FIELDS is not admin-gated and
+     answers yes, so a stale gd_coach_profile_visibility_v1 in localStorage
+     carrying an old play:false cannot keep hiding a card that is no longer
+     a toggle. */
+  if(!GD_COACH_PROFILE_VISIBILITY_FIELDS.some(item=>item.key===key))return true;
   return !!gdGetCoachProfileVisibility()[key];
 }
 function gdSetCoachProfileVisibility(key,value){
