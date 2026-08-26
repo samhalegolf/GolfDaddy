@@ -576,6 +576,8 @@
 	  let gdPracticeProjectionUserTouched=false;
 	  let gdPracticeImportOpen=false;
 	  let gdPracticeEmailLaneOpen=false;
+	  let gdPracticePlotOpen=false;
+	  let gdCoachSetBubbleOpen=false;
   let gdPracticeBubbleAdoptionMotion=null;
   let gdPracticeBagSuggestionOpen=false;
   let gdPracticeBagAdaptOpen=false;
@@ -1019,8 +1021,17 @@
     }
     panel.classList.toggle("open",!!gdPracticeImportOpen);
     panel.classList.toggle("email-open",!!gdPracticeEmailLaneOpen);
+    panel.classList.toggle("plot-open",!!gdPracticePlotOpen);
+    panel.classList.toggle("coachSet-open",!!gdCoachSetBubbleOpen);
     const button=panel.querySelector(".gdPracticeImportToggle");
     if(button)button.setAttribute("aria-expanded",gdPracticeImportOpen?"true":"false");
+    const coachSetVisible=gdCoachSetIsCoachViewingPlayer();
+    const coachSetBtn=panel.querySelector(".gdCoachSetIconButton");
+    if(coachSetBtn)coachSetBtn.hidden=!coachSetVisible;
+    if(!coachSetVisible&&gdCoachSetBubbleOpen){gdCoachSetBubbleOpen=false;panel.classList.remove("coachSet-open");}
+    const coachSetPanel=document.getElementById("gdCoachSetBubblePanel");
+    if(coachSetPanel)coachSetPanel.hidden=!gdCoachSetBubbleOpen;
+    if(gdCoachSetBubbleOpen)gdRenderCoachSetBubblePanel();
     gdRenderPracticeEmailLane();
   }
   function gdPracticeQuietPostImportSurface(){
@@ -1383,6 +1394,129 @@
     });
     gdPracticeRefreshEmailLane();
     gdLmToast("Practice email receiver ready");
+    return false;
+  }
+  function gdTogglePracticePlot(event){
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    event?.stopImmediatePropagation?.();
+    gdPracticePlotOpen=!gdPracticePlotOpen;
+    gdPracticeImportOpen=false;
+    gdPracticeEmailLaneOpen=false;
+    gdCoachSetBubbleOpen=false;
+    try{localStorage.removeItem(GD_PRACTICE_IMPORT_OPEN_KEY);}catch(e){}
+    gdRenderPracticeImportPanel();
+    return false;
+  }
+  function gdCoachSetIsCoachViewingPlayer(){
+    return safe(()=>{
+      const account=window.GolfDaddyAccounts?.current?.();
+      if(!account)return false;
+      const role=String(account.role||"player").toLowerCase();
+      if(role!=="coach"&&role!=="admin")return false;
+      const viewingId=window.GD_ACCOUNT_STATE?.viewingProfileId;
+      return !!(viewingId&&viewingId!==account.profileId);
+    },false);
+  }
+  function gdToggleCoachSetBubble(event){
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    event?.stopImmediatePropagation?.();
+    if(!gdCoachSetIsCoachViewingPlayer())return false;
+    gdCoachSetBubbleOpen=!gdCoachSetBubbleOpen;
+    gdPracticeImportOpen=false;
+    gdPracticeEmailLaneOpen=false;
+    gdPracticePlotOpen=false;
+    try{localStorage.removeItem(GD_PRACTICE_IMPORT_OPEN_KEY);}catch(e){}
+    gdRenderPracticeImportPanel();
+    if(gdCoachSetBubbleOpen)gdRenderCoachSetBubblePanel();
+    return false;
+  }
+  function gdCoachSetClubList(p){
+    const bagClubs=(Array.isArray(p?.bag)?p.bag:[]).map(row=>String(row?.club||row?.name||"").trim()).filter(Boolean);
+    const defaults=Object.keys(typeof GD_DEFAULT_CLUB_CARRY_M==="object"?GD_DEFAULT_CLUB_CARRY_M:{});
+    const seen=new Set();
+    return [...bagClubs,...defaults].filter(club=>{
+      const key=club.toLowerCase();
+      if(seen.has(key))return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  function gdCoachSetDistanceForClub(p,club){
+    const bagRow=(Array.isArray(p?.bag)?p.bag:[]).find(row=>String(row?.club||row?.name||"").trim().toLowerCase()===String(club||"").trim().toLowerCase());
+    const bagCarry=Number(bagRow?.baseCarry??bagRow?.carry??bagRow?.totalM);
+    if(Number.isFinite(bagCarry)&&bagCarry>0)return Math.round(bagCarry);
+    return Math.round(safe(()=>gdDefaultCarryForClub(club),155)||155);
+  }
+  function gdRenderCoachSetBubblePanel(){
+    const panel=document.getElementById("gdCoachSetBubblePanel");
+    if(!panel)return;
+    const {p}=gdBubbleDataContext();
+    const select=document.getElementById("gdCoachSetClub");
+    if(select&&!select.dataset.gdPopulated){
+      const clubs=gdCoachSetClubList(p);
+      select.innerHTML=clubs.map(club=>`<option value="${gdEscapeHTML(club)}">${gdEscapeHTML(club)}</option>`).join("");
+      select.dataset.gdPopulated="1";
+    }
+    const who=document.getElementById("gdCoachSetBubbleWho");
+    if(who)who.textContent=p?.name?`Set ${p.name}'s bubble directly - skips photo, email and plotting.`:"Set this player's bubble directly.";
+    const distanceInput=document.getElementById("gdCoachSetDistance");
+    if(distanceInput&&!distanceInput.value&&select?.value)distanceInput.value=gdCoachSetDistanceForClub(p,select.value);
+    const feedback=document.getElementById("gdCoachSetBubbleFeedback");
+    if(feedback){feedback.textContent="";feedback.classList.remove("error");}
+  }
+  function gdCoachSetClubChanged(){
+    const {p}=gdBubbleDataContext();
+    const select=document.getElementById("gdCoachSetClub");
+    const distanceInput=document.getElementById("gdCoachSetDistance");
+    if(select&&distanceInput)distanceInput.value=gdCoachSetDistanceForClub(p,select.value);
+    return false;
+  }
+  function gdCoachSetSaveBubble(){
+    const feedback=document.getElementById("gdCoachSetBubbleFeedback");
+    const setFeedback=(message,isError)=>{
+      if(!feedback)return;
+      feedback.textContent=message||"";
+      feedback.classList.toggle("error",!!isError);
+    };
+    if(!gdCoachSetIsCoachViewingPlayer()){
+      setFeedback("Coach set is only available while viewing a player.",true);
+      return false;
+    }
+    const {p}=gdBubbleDataContext();
+    if(!p){setFeedback("No player selected.",true);return false;}
+    const club=String(document.getElementById("gdCoachSetClub")?.value||"").trim()||"7i";
+    const baseCarry=Number(document.getElementById("gdCoachSetDistance")?.value);
+    if(!Number.isFinite(baseCarry)||baseCarry<=0){setFeedback("Enter a distance in metres.",true);return false;}
+    const offsetRaw=document.getElementById("gdCoachSetOffset")?.value;
+    const offset=gdParseOffsetValue(offsetRaw,0);
+    if(!Number.isFinite(offset)){setFeedback("Enter an offset, e.g. L1.5 or R2.",true);return false;}
+    const storageClub=gdMyBubbleStorageClub(club);
+    const built=calculateCleanBubbleProfile({
+      club:storageClub,
+      baseCarry,
+      handedness:p.handedness||"right",
+      skillLevel:p.skillLevel||p.consistency||"mid",
+      faceOffsetDeg:offset
+    });
+    const bubble=Object.assign({},built,{club:storageClub,displayClub:club,shapeSource:"coach-set"});
+    p.faceOffsetDeg=offset;
+    p.centralFaceOffsetDeg=offset;
+    p.placeholderProfile=false;
+    p.previewBubbleSet=bubble;
+    p.bubbleProfiles=Object.assign({},p.bubbleProfiles||{});
+    p.bubbleProfiles[storageClub]=bubble;
+    p.updatedAt=new Date().toISOString();
+    savePlayerProfiles();
+    syncCoreProfileFromActive();
+    gdRenderBubbleOffsetHub();
+    renderPracticeData(true);
+    renderDataHubStatus();
+    if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
+    safe(()=>typeof renderCompareData==="function"&&renderCompareData());
+    setFeedback(`Bubble set for ${p.name||"player"}.`,false);
+    gdLmToast(`Bubble set for ${p.name||"player"}`);
     return false;
   }
   let gdPracticePhotoDebugRun=null;
@@ -8339,6 +8473,10 @@
       gdToggleCourseImport:gdToggleCourseImport,
       gdTogglePracticeImport:gdTogglePracticeImport,
       gdPracticeEmailImportPending:gdPracticeEmailImportPending,
+      gdTogglePracticePlot:gdTogglePracticePlot,
+      gdToggleCoachSetBubble:gdToggleCoachSetBubble,
+      gdCoachSetClubChanged:gdCoachSetClubChanged,
+      gdCoachSetSaveBubble:gdCoachSetSaveBubble,
       gdPracticeCopyEmailAddress:gdPracticeCopyEmailAddress,
       gdPracticeRefreshEmailLane:gdPracticeRefreshEmailLane,
       gdPracticeLoadEmailPhotoBatch:gdPracticeLoadEmailPhotoBatch,
