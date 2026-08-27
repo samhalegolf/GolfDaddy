@@ -233,8 +233,8 @@
     if(!row) return 0;
     return num(row.totalM ?? row.total ?? row.totalMeters ?? row.totalMetres ?? row.totalDistance ?? row.totalDistanceM ?? row.baseTotal);
   }
-  function totalFor(club, carry){
-    return safe(function(){ return Math.max(carry, Math.round(win.gdBagTotalForCarry(club, carry) || carry)); }, Math.max(carry, Math.round(carry * 1.08)));
+  function totalFor(club, carry, preset){
+    return safe(function(){ return Math.max(carry, Math.round(win.gdBagTotalForCarry(club, carry, preset) || carry)); }, Math.max(carry, Math.round(carry * 1.08)));
   }
   function normalise(row, forcedClub){
     if(!row || row.ghost) return null;
@@ -326,18 +326,6 @@
       });
     })();
   }
-  function readBagPanelSafe(){
-    var rows = [];
-    document.querySelectorAll('#gdBagEditor [id^="gdBagClub_"]').forEach(function(el){
-      var i = el.id.split('_')[1];
-      rows.push(normalise({
-        club: el.value,
-        baseCarry: document.getElementById('gdBagCarry_' + i)?.value,
-        totalM: document.getElementById('gdBagTotal_' + i)?.value
-      }));
-    });
-    return rows.filter(Boolean);
-  }
   function persistRows(rows, opts){
     opts = opts || {};
     var p = profile();
@@ -358,35 +346,293 @@
     if(!opts.silent) toast('Bag saved');
     return clean;
   }
-  function totalLabel(){ return safe(function(){ return win.gdBagTotalLabel(); }, 'Total'); }
+
+  /* ---- one line per club (Claude Design "Golf bag UI simplification", turn 1b) ----
+     The sheet used to be twelve four-field forms. It is now a two-column list of
+     read-only 46px lines; tapping a line spans it full width and opens the carry
+     stepper in place, so nothing is a live input until you ask for it. */
+  var ROLL_LABEL = { soft:'Soft', medium:'Normal', hard:'Firm' };
+  var ART_ASPECT = { driver:'710 / 302', wood:'681 / 208', hybrid:'666 / 146', blade:'674 / 222' };
+  var ui = { editing:null, rollOpen:false, genOpen:false, genEntering:false, genLeaving:false, setupCarry:0, busy:false };
+  var timers = [];
+
+  function el(id){ return document.getElementById(id); }
+  function clearTimers(){ timers.forEach(clearTimeout); timers = []; }
+  function at(ms, fn){ timers.push(setTimeout(fn, ms)); }
+  function reducedMotion(){ return safe(function(){ return win.matchMedia('(prefers-reduced-motion: reduce)').matches; }, false); }
+  function firmnessKey(){ return safe(function(){ return GD_BAG_FIRMNESS_KEY; }, 'gd_bag_total_firmness_v1'); }
+  function rollPreset(){ return safe(function(){ return win.gdBagFirmness(); }, 'medium'); }
+  function art(club){
+    if(/driver/i.test(club)) return 'driver';
+    if(/\d\s*w|wood/i.test(club)) return 'wood';
+    if(/\d\s*h|hybrid|rescue/i.test(club)) return 'hybrid';
+    return 'blade';
+  }
+
+  /* The rendered rows are the panel's source of truth, the way the old inputs
+     were - gd-app-core still calls readBagPanel() from several places. */
+  function readBagPanelSafe(){
+    var rows = [];
+    document.querySelectorAll('#gdBagEditor .gdBagRow').forEach(function(node){
+      var row = normalise({ club: node.dataset.club, baseCarry: node.dataset.carry, totalM: node.dataset.total });
+      if(row) rows.push(row);
+    });
+    return rows;
+  }
+  function rowAt(index){ return readBagPanelSafe()[index] || null; }
+
+  function editHTML(index, carry, total){
+    return '<div class="gdBagRowEdit">'
+      + '<div class="gdBagRowStep">'
+      + '<button type="button" aria-label="Less carry" onclick="gdBagRowCarryStep(' + index + ',-1)">&minus;</button>'
+      + '<label><span>Carry</span><input inputmode="numeric" aria-label="Carry metres" value="' + carry + '" onchange="gdBagRowCarrySet(' + index + ',this.value)"></label>'
+      + '<button type="button" aria-label="More carry" onclick="gdBagRowCarryStep(' + index + ',1)">+</button>'
+      + '</div>'
+      + '<div class="gdBagRowFoot">'
+      + '<span class="gdBagRowNote">Runs on to ' + total + ' m</span>'
+      + '<div class="gdBagRowActions">'
+      + '<button class="gdBagRowRemove" type="button" onclick="gdBagDeleteClub(' + index + ')">Remove</button>'
+      + '<button class="gdBagRowDone" type="button" onclick="gdBagToggleRowEdit(' + index + ')">Done</button>'
+      + '</div></div></div>';
+  }
+  function rowHTML(row, index){
+    var kind = art(row.club);
+    var carry = Math.round(Number(row.baseCarry) || 0);
+    var total = Math.max(carry, Math.round(Number(row.totalM) || 0));
+    var editing = ui.editing === row.club;
+    return '<div class="gdBagRow' + (editing ? ' editing' : '') + '" id="gdBagRow_' + index + '"'
+      + ' data-club="' + esc(row.club) + '" data-carry="' + carry + '" data-total="' + total + '">'
+      + '<div class="gdBagRowArt" aria-hidden="true"><i style="aspect-ratio:' + ART_ASPECT[kind] + ';background-image:url(assets/clubs/' + kind + '-h.png)"></i></div>'
+      + '<div class="gdBagRowMain" role="button" tabindex="0" aria-expanded="' + (editing ? 'true' : 'false') + '"'
+      + ' onclick="gdBagToggleRowEdit(' + index + ')" onkeydown="gdBagRowKey(event,' + index + ')">'
+      + '<span class="gdBagRowClub">' + esc(row.club === 'Driver' ? 'DR' : row.club) + '</span>'
+      + '<span class="gdBagRowTotal">' + total + '</span>'
+      + '<span class="gdBagRowCarry">' + carry + '</span>'
+      + '</div>'
+      + (editing ? editHTML(index, carry, total) : '')
+      + '</div>';
+  }
+
   function renderBagPanelHotfix(){
     var p = clearUntouchedDefaultBag(profile());
     var bag = collectRows(p);
     if(bag.length && p){ p.bag = bag; p.bagSeededDefault = false; }
-    var box = document.getElementById('gdBagEditor');
-    var sub = document.getElementById('gdBagPanelSub');
-    var title = document.getElementById('gdBagStatusTitle');
-    var text = document.getElementById('gdBagStatusText');
-    var quick = document.getElementById('gdBagQuick7i');
-    var label = totalLabel();
-    safe(function(){ if(typeof win.gdBagSyncFirmnessButtons === 'function') win.gdBagSyncFirmnessButtons(); }, null);
-    if(quick) quick.value = (bag.find(function(c){ return c.club === '7i'; }) || {}).baseCarry || '';
-    if(sub) sub.textContent = '';
-    if(title) title.textContent = bag.length ? (bag.length + ' bag cells') : 'Build your bag';
-    if(text) text.textContent = bag.length ? (label + ' generated.') : 'Ghost bag is only a guide. Generate 12 clubs or add a club to build your real bag.';
-    if(box){
-      box.innerHTML = bag.length ? bag.map(function(c,i){
-        return '<div class="gdBagEditRow" id="gdBagRow_'+i+'"><label class="gdBagField gdBagClubField"><span>Club</span><input id="gdBagClub_'+i+'" aria-label="Club name" value="'+esc(c.club)+'" readonly oninput="gdBagRefreshQuickTab()"></label><label class="gdBagField"><span>Carry</span><input id="gdBagCarry_'+i+'" aria-label="Carry metres" inputmode="numeric" type="number" min="1" step="1" value="'+(Number(c.baseCarry)||0)+'" readonly oninput="gdBagRefreshQuickTab()"></label><label class="gdBagField"><span>'+esc(label)+'</span><input id="gdBagTotal_'+i+'" aria-label="'+esc(label)+' metres" inputmode="numeric" type="number" min="1" step="1" value="'+(Number(c.totalM)||Number(c.baseCarry)||0)+'" readonly oninput="gdBagRefreshQuickTab()"></label><div class="gdBagRowActions"><button class="gdBagRowEdit" id="gdBagEdit_'+i+'" type="button" aria-label="Edit club" onclick="gdBagToggleRowEdit('+i+')">Edit</button><button class="gdBagRowDelete" id="gdBagDelete_'+i+'" type="button" aria-label="Delete club" onclick="gdBagDeleteClub('+i+')">×</button></div></div>';
-      }).join('') : '<div class="lockNotice">Ghost bag active for visuals only. Generate 12 clubs or add your first club.</div>';
+    var hasBag = bag.length > 0;
+
+    /* Track the open row by club name, not index: every write re-sorts the bag
+       by total, so indexes move underneath us. */
+    if(ui.editing && !bag.some(function(c){ return c.club === ui.editing; })) ui.editing = null;
+    if(!ui.setupCarry){
+      var seven = (bag.find(function(c){ return c.club === '7i'; }) || {}).baseCarry;
+      ui.setupCarry = Math.max(60, Math.min(220, Math.round(num(seven) || 155)));
     }
-    showQuickGenerator();
+
+    /* Mid-flight the generator and the club list are both on the stage: the
+       clubs fly into the bag while the panel unfolds over the top of them. */
+    var genVisible = !ui.genLeaving && (ui.genOpen || ui.genEntering || !hasBag);
+    var listRows = hasBag && !ui.genOpen;
+    var listChrome = listRows && !ui.genEntering;
+
+    var sub = el('gdBagPanelSub');
+    if(sub) sub.textContent = hasBag ? (bag.length + ' clubs · metres') : 'No clubs yet';
+    var setup = el('gdBagSetupCarry');
+    if(setup) setup.textContent = String(ui.setupCarry);
+
+    var stage = el('gdBagStage');
+    if(stage) stage.classList.toggle('hasBag', hasBag);
+    var gen = el('gdBagGenPanel');
+    if(gen) gen.classList.toggle('folded', !genVisible);
+    var head = el('gdBagListHead');
+    if(head) head.hidden = !listChrome;
+    var add = el('gdBagAddTab');
+    if(add) add.hidden = !listChrome;
+    var chip = el('gdBagGenChip');
+    if(chip){ chip.hidden = !hasBag; chip.classList.toggle('active', ui.genOpen || ui.genEntering); }
+
+    var preset = rollPreset();
+    var chipRoll = el('gdBagRollChip');
+    if(chipRoll) chipRoll.textContent = 'Roll · ' + (ROLL_LABEL[preset] || 'Normal');
+    var rollPanel = el('gdBagRollPanel');
+    if(rollPanel) rollPanel.hidden = !ui.rollOpen;
+    document.querySelectorAll('[data-gd-bag-firmness]').forEach(function(btn){
+      btn.classList.toggle('active', btn.dataset.gdBagFirmness === preset);
+    });
+
+    var box = el('gdBagEditor');
+    if(box) box.innerHTML = listRows ? bag.map(rowHTML).join('') : '';
   }
-  function showQuickGenerator(){
-    var wrap = document.getElementById('gdBagQuickWrap');
-    var tab = document.getElementById('gdBagQuickTab');
-    if(wrap) wrap.hidden = false;
-    if(tab && !tab.hasAttribute('aria-expanded')) tab.setAttribute('aria-expanded', 'false');
+
+  /* ---- build / unbuild choreography ---- */
+  function flyClubs(dir){
+    if(reducedMotion()) return;
+    var box = el('gdBagEditor');
+    var artBox = document.querySelector('#bagPanel .gdBagArt');
+    if(!box || !artBox) return;
+    var nodes = Array.prototype.slice.call(box.querySelectorAll('.gdBagRow'));
+    if(!nodes.length) return;
+    var a = artBox.getBoundingClientRect();
+    if(!a.width) return;
+    /* Aim at the mouth of the bag, not the middle of the artwork - the same
+       point the 390px prototype hand-tuned its offsets against. */
+    var tx = a.left + a.width * 0.80;
+    var ty = a.top + a.height * 0.82;
+    var lines = Math.ceil(nodes.length / 2);
+    nodes.forEach(function(node, i){
+      var col = i % 2, line = Math.floor(i / 2);
+      var r = node.getBoundingClientRect();
+      var step = dir === 'in'
+        ? ((col === 1 ? 0 : lines) + (lines - 1 - line)) * 0.085
+        : ((col === 0 ? 0 : lines) + line) * 0.13;
+      node.style.setProperty('--dx', Math.round(tx - (r.left + r.width / 2)) + 'px');
+      node.style.setProperty('--dy', Math.round(ty - (r.top + r.height / 2)) + 'px');
+      node.style.setProperty('--rot', ((col === 0 ? 74 : 68) + (line % 2 ? 8 : -6)) + 'deg');
+      node.style.animation = dir === 'in'
+        ? 'gbIn .38s cubic-bezier(.36,.05,.5,1) ' + step.toFixed(3) + 's both'
+        : 'gbOut .5s cubic-bezier(.38,0,.55,.98) ' + step.toFixed(3) + 's both';
+    });
   }
+  function holdClubsInBag(){
+    document.querySelectorAll('#gdBagEditor .gdBagRow').forEach(function(node){
+      node.style.animation = 'gbIn .01s linear both';
+    });
+  }
+  function clearClubAnim(){
+    document.querySelectorAll('#gdBagEditor .gdBagRow').forEach(function(node){
+      node.style.animation = '';
+      node.style.removeProperty('--dx');
+      node.style.removeProperty('--dy');
+      node.style.removeProperty('--rot');
+    });
+  }
+  function pulseBag(){
+    var artBox = document.querySelector('#bagPanel .gdBagArt');
+    if(!artBox || reducedMotion()) return;
+    artBox.classList.remove('pulsing');
+    void artBox.offsetWidth;
+    artBox.classList.add('pulsing');
+    /* Plain setTimeout, not at(): starting the next build must not strand the
+       class by clearing the timer that takes it off again. */
+    setTimeout(function(){ artBox.classList.remove('pulsing'); }, 900);
+  }
+  function popChip(){
+    var chip = el('gdBagGenChip');
+    if(!chip || reducedMotion()) return;
+    chip.classList.remove('gdBagChipPop');
+    void chip.offsetWidth;
+    chip.classList.add('gdBagChipPop');
+    setTimeout(function(){ chip.classList.remove('gdBagChipPop'); }, 560);
+  }
+  function resetUi(){
+    clearTimers();
+    ui.editing = null; ui.rollOpen = false;
+    ui.genOpen = false; ui.genEntering = false; ui.genLeaving = false;
+    ui.setupCarry = 0; ui.busy = false;
+  }
+
+  win.gdBagSetupStep = function(delta){
+    ui.setupCarry = Math.max(60, Math.min(220, (ui.setupCarry || 155) + num(delta)));
+    var out = el('gdBagSetupCarry');
+    if(out) out.textContent = String(ui.setupCarry);
+  };
+  win.gdBagBuild = function(){
+    if(ui.busy) return;
+    ui.busy = true;
+    clearTimers();
+    var built = quickBag(ui.setupCarry);
+    ui.editing = null; ui.rollOpen = false;
+    ui.genLeaving = true; ui.genEntering = false;
+    renderBagPanelHotfix();
+    at(400, function(){
+      ui.genLeaving = false; ui.genOpen = false;
+      persistRows(built, { silent:true });
+      flyClubs('out');
+      pulseBag();
+      popChip();
+      toast('Bag built');
+    });
+    at(2600, function(){ ui.busy = false; clearClubAnim(); });
+  };
+  win.gdBagToggleGenerator = function(){
+    if(ui.busy) return;
+    if(ui.genOpen || ui.genEntering){ resetUi(); renderBagPanelHotfix(); return; }
+    ui.busy = true;
+    clearTimers();
+    ui.editing = null; ui.rollOpen = false;
+    ui.genEntering = true; ui.genLeaving = false;
+    var seven = (collectRows(profile()).find(function(c){ return c.club === '7i'; }) || {}).baseCarry;
+    if(num(seven)) ui.setupCarry = Math.max(60, Math.min(220, Math.round(num(seven))));
+    renderBagPanelHotfix();
+    flyClubs('in');
+    at(1360, function(){ holdClubsInBag(); pulseBag(); });
+    at(2000, function(){
+      ui.genOpen = true; ui.genEntering = false; ui.busy = false;
+      renderBagPanelHotfix();
+    });
+  };
+
+  /* ---- row editing ---- */
+  win.gdBagToggleRowEdit = function(index){
+    var row = rowAt(index);
+    if(!row) return;
+    ui.editing = ui.editing === row.club ? null : row.club;
+    renderBagPanelHotfix();
+  };
+  win.gdBagRowKey = function(event, index){
+    if(!event || (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar')) return;
+    event.preventDefault();
+    win.gdBagToggleRowEdit(index);
+  };
+  function setRowCarry(index, value){
+    var rows = readBagPanelSafe();
+    var row = rows[index];
+    if(!row) return;
+    var carry = Math.max(20, Math.min(400, Math.round(num(value) || row.baseCarry)));
+    ui.editing = row.club;
+    persistRows(rows.map(function(r, i){
+      return i === index ? { club: r.club, baseCarry: carry, totalM: totalFor(r.club, carry) } : r;
+    }), { silent:true });
+  }
+  win.gdBagRowCarryStep = function(index, delta){
+    var row = rowAt(index);
+    if(row) setRowCarry(index, row.baseCarry + num(delta));
+  };
+  win.gdBagRowCarrySet = function(index, value){ setRowCarry(index, value); };
+  win.gdBagDeleteClub = function(index){
+    var rows = readBagPanelSafe();
+    var removed = rows[index];
+    if(!removed) return;
+    ui.editing = null;
+    persistRows(rows.filter(function(r, i){ return i !== index; }), { silent:true });
+    toast(removed.club + ' removed');
+  };
+  win.gdBagAddSlot = function(){
+    var rows = readBagPanelSafe();
+    var used = new Set(rows.map(function(r){ return r.club.toLowerCase(); }));
+    var seven = (rows.find(function(r){ return r.club === '7i'; }) || {}).baseCarry || ui.setupCarry || 155;
+    var next = quickBag(seven).find(function(r){ return !used.has(r.club.toLowerCase()); })
+      || { club: 'Club ' + (rows.length + 1), baseCarry: 100, totalM: totalFor('Club', 100) };
+    ui.editing = next.club;
+    persistRows(rows.concat([next]), { silent:true });
+    toast(next.club + ' added');
+  };
+
+  /* ---- roll-out (the old soft / medium / hard "firmness") ---- */
+  win.gdBagToggleRoll = function(){
+    ui.rollOpen = !ui.rollOpen;
+    renderBagPanelHotfix();
+  };
+  win.gdBagSetFirmness = function(mode){
+    var preset = ROLL_LABEL[mode] ? mode : 'medium';
+    safe(function(){ localStorage.setItem(firmnessKey(), preset); }, null);
+    var rows = readBagPanelSafe();
+    if(!rows.length) rows = currentRows();
+    if(rows.length){
+      persistRows(rows.map(function(r){
+        return { club: r.club, baseCarry: r.baseCarry, totalM: totalFor(r.club, r.baseCarry, preset) };
+      }), { silent:true });
+    } else renderBagPanelHotfix();
+    toast('Roll set to ' + ROLL_LABEL[preset].toLowerCase());
+  };
 
   win.gdNormaliseBagRow = normalise;
   win.gdBagSortRows = sortRows;
@@ -406,44 +652,21 @@
   win.gdBagSourceRows = function(){ return win.gdEnsureDefaultBagCells(profile()); };
   win.readBagPanel = readBagPanelSafe;
   win.gdBagPersistRows = persistRows;
-  win.gdBagRefreshQuickTab = showQuickGenerator;
   win.renderBagPanel = renderBagPanelHotfix;
-  win.gdBagToggleQuick = function(){
-    var panel = document.getElementById('gdBagQuickPanel');
-    var tab = document.getElementById('gdBagQuickTab');
-    if(!panel) return;
-    panel.hidden = !panel.hidden;
-    if(tab) tab.setAttribute('aria-expanded', String(!panel.hidden));
-  };
-  win.gdBagGenerateQuick = function(){
-    var raw = document.getElementById('gdBagQuick7i')?.value;
-    var quick = num(raw) || 145;
-    persistRows(quickBag(quick), { silent:true });
-    toast('Quick bag generated');
-  };
-  win.gdBagTryAddClub = function(){
-    var clubEl = document.getElementById('gdBagAddClub');
-    var carryEl = document.getElementById('gdBagAddCarry');
-    var club = String(clubEl?.value || '').trim();
-    var carry = Math.round(num(carryEl?.value));
-    if(!club || carry <= 0){ toast('Enter club and carry'); return; }
-    var rows = readBagPanelSafe().filter(function(row){ return row.club.toLowerCase() !== club.toLowerCase(); });
-    persistRows(rows.concat([{ club: club, baseCarry: carry, totalM: totalFor(club, carry) }]), { silent:true });
-    if(clubEl) clubEl.value = '';
-    if(carryEl) carryEl.value = '';
-    toast('Club added');
-  };
-  win.gdBagAddSlot = function(){
-    var rows = readBagPanelSafe();
-    var used = new Set(rows.map(function(row){ return row.club.toLowerCase(); }));
-    var defaults = quickBag(rows.find(function(r){ return r.club === '7i'; })?.baseCarry || 145);
-    var next = defaults.find(function(row){ return !used.has(row.club.toLowerCase()); }) || { club: 'Club ' + (rows.length + 1), baseCarry: 100, totalM: totalFor('Club', 100) };
-    persistRows(rows.concat([next]), { silent:true });
-    setTimeout(function(){ safe(function(){ if(typeof win.gdBagToggleRowEdit === 'function') win.gdBagToggleRowEdit(readBagPanelSafe().findIndex(function(row){ return row.club === next.club; })); }, null); }, 40);
-    toast('Cell added');
+  /* The quick-set tab and the club/carry add form are gone from the sheet.
+     Keep the old entry points harmless for anything still holding a reference. */
+  win.gdBagRefreshQuickTab = function(){};
+  win.gdBagToggleQuick = function(){};
+  win.gdBagGenerateQuick = function(){ win.gdBagToggleGenerator(); };
+  win.gdBagTryAddClub = function(){ win.gdBagAddSlot(); };
+
+  var coreOpenBag = win.openBag;
+  win.openBag = function(){
+    resetUi();
+    if(typeof coreOpenBag === 'function') return coreOpenBag.apply(this, arguments);
+    safe(function(){ win.openPanel('bagPanel'); }, null);
+    renderBagPanelHotfix();
   };
 
-  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showQuickGenerator);
-  else showQuickGenerator();
-  win.ClarityBagHotfix = { version: 'bag-hotfix-20260610-restore-editor', rows: currentRows };
+  win.ClarityBagHotfix = { version: 'bag-sheet-20260827-one-line-per-club', rows: currentRows };
 })();
