@@ -507,6 +507,11 @@ body.ball-dragging #surfaceStage { transition: none !important; }
 .bagRow input[type="number"] { width: 64px; }
 .bagRow .bagRowTotal { flex: 1; text-align: right; font-size: 12px; opacity: .65; }
 .bagRow .bagRowRemove { border: 0; background: none; color: #ff9a9a; font-size: 18px; line-height: 1; padding: 4px 6px; }
+/* One metre a tap. Sized to the 44px touch target rather than to the glyph —
+   these are the fine control, and a fine control you keep missing is not one. */
+.bagRow .bagRowNudge { flex: 0 0 auto; min-width: 36px; min-height: 36px; border: 1px solid rgba(255, 255, 255, .18); border-radius: 8px; background: rgba(255, 255, 255, .08); color: #f2f7f2; font-size: 17px; line-height: 1; padding: 0; }
+.bagRow .bagRowNudge:active { background: rgba(255, 255, 255, .2); }
+.bagHandRow { margin-bottom: 4px; }
 .bagAddRow, .bagQuickRow { display: flex; gap: 8px; }
 .bagAddRow input, .bagQuickRow input, .bagRow input { padding: 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .18); background: #07100b; color: #f2f7f2; font-size: 14px; min-width: 0; }
 .bagAddRow button, .bagQuickRow button { border: 0; border-radius: 8px; padding: 10px 14px; background: rgba(255, 255, 255, .14); color: #f2f7f2; font-size: 14px; white-space: nowrap; }

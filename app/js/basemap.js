@@ -174,22 +174,36 @@
     return L.tileLayer(String(source.tileUrl).replace("{linzKey}", linzKey || "").replace("{esriKey}", esriKey || ""), options);
   }
 
+  function prefetch() {
+    if (linzKey || pending || typeof fetch !== "function") return pending;
+    pending = fetch("/api/auth-public-config", { headers: { Accept: "application/json" } })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(configure, function () {});
+    return pending;
+  }
+
   app.basemap = {
     configure: configure,
-    prefetch: function () {
-      if (linzKey || pending || typeof fetch !== "function") return pending;
-      pending = fetch("/api/auth-public-config", { headers: { Accept: "application/json" } })
-        .then(function (res) { return res.ok ? res.json() : null; })
-        .then(configure, function () {});
-      return pending;
-    },
-    /* Settles when the LINZ key fetch is done, one way or the other. The key
-       decides whether New Zealand gets aerial imagery or the drawn OSM map, and
-       it arrives over the network — so the first map is built before the answer
-       exists and picks OSM. Callers use this to re-pick once, which is why
-       hole 1 no longer opens on OSM and then swaps to satellite. */
+    prefetch: prefetch,
+    /* Settles when the imagery-key fetch is done, one way or the other. The
+       keys decide whether a course gets aerial imagery or the drawn OSM map,
+       and they arrive over the network — so the first map is built before the
+       answer exists and picks OSM. Callers use this to re-pick once.
+     *
+     * STARTS the fetch rather than only waiting on one already in flight.
+     * It used to return a bare resolved promise when nothing had been kicked
+     * off yet, and boot called prefetch() AFTER openPlay - so a course already
+     * in the library rendered synchronously, asked "are the keys ready?",
+     * was told "yes" by a promise that had never fetched anything, spent its
+     * one re-pick on a still-keyless answer, and stayed on the street map. The
+     * keys then landed with nothing left to trigger a swap, so the aerial map
+     * only appeared at the NEXT render - which is Shot Lock. Nothing in Shot
+     * Lock was ever choosing the basemap; it was just the next thing to paint.
+     *
+     * Making this self-starting means the answer is honest whatever order the
+     * callers run in, which is the property the bug turned on. */
     ready: function () {
-      return pending || Promise.resolve();
+      return prefetch() || Promise.resolve();
     },
     /* Blank-layer demotion, the live equivalent of the scan's all-or-nothing
        coverage refusal. The painter calls this after mounting baseFor's layer;

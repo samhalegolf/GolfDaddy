@@ -26,12 +26,13 @@
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete } from "./lib/gd-course-fit-core.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, separateLoops, loopIsContiguous, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
 import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow } from "./lib/gd-scorecard-resolve.mjs";
-import { loopLengthsFromOsm, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry } from "./lib/gd-scorecard-match-core.mjs";
+import { reconcileFacilityClaims } from "./lib/gd-facility-loops-core.mjs";
+import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry } from "./lib/gd-scorecard-match-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
 
@@ -484,6 +485,33 @@ function loopCourseId(loop, course, index) {
  *
  * Naming only. A weak or tied answer costs the courses their names, never their
  * geometry - they publish with provisional ids either way. */
+/* Mean of a set of points, ignoring any that are missing. The facility's middle,
+   which is what the compass points are measured from - a loop is "South" of its
+   own site, not of anywhere else. */
+function centroidOf(points) {
+  const list = (points || []).filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (!list.length) return null;
+  return {
+    lat: list.reduce((sum, p) => sum + p.lat, 0) / list.length,
+    lng: list.reduce((sum, p) => sum + p.lng, 0) / list.length
+  };
+}
+
+/* How long this loop plays, in metres.
+ *
+ * Measured geometry, not a card: the label has to describe the ground that was
+ * actually published, and on the unnumbered path there may be no card for this
+ * nine at all - which is exactly when the label matters most. Prefers the
+ * resolver guides when the loop carries them (no OSM hole ways to measure),
+ * and falls back to the OSM hole lengths the card matcher already sums. */
+function loopTotalM(loop) {
+  if (loop && Array.isArray(loop.guides) && loop.guides.length) {
+    return loop.guides.reduce((sum, guide) => sum + (lineLengthM(guide && guide.points) || 0), 0);
+  }
+  const lengths = loopLengthsFromOsm((loop && loop.payload && loop.payload.elements) || []);
+  return Object.values(lengths).reduce((sum, value) => sum + (Number(value) || 0), 0);
+}
+
 function nameLoopsFromCards(loops, cards) {
   /* Provisional names first, so two courses are never both called the facility.
    *
@@ -492,9 +520,16 @@ function nameLoopsFromCards(loops, cards) {
    * "Course 2" are honest: they say the site has two courses and that we do not yet
    * know their names, which is exactly true. A real label replaces them the moment
    * one is found, and never blocks the map in the meantime. */
+  /* Carrying the two facts that make a placeholder usable: how long the loop
+     plays, and where on the property it sits. "Course 2 - 3547m South" is
+     something a player at the clubhouse can act on - see provisionalLoopName. */
+  const facilityCentre = centroidOf(loops.map(loop => loop.centre));
   loops.forEach((loop, index) => {
     if (!loop.name) {
-      loop.name = "Course " + (index + 1);
+      loop.name = provisionalLoopName(index, {
+        totalM: loopTotalM(loop),
+        compass: compassPointFrom(facilityCentre, loop.centre)
+      });
       loop.nameSource = "provisional";
     }
   });
@@ -557,7 +592,23 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
      * contains only this loop's hole features, so there is nothing to partition. The
      * filter still earns its place on the unseparated path, where a single-course
      * sweep really can catch a neighbouring club. */
-    const geometry = resolveCourseGeometry(loop.payload, courseId, loop.centre || course.center, [], []);
+    /* A loop separated WITHOUT OSM hole numbers arrives carrying resolver
+       GUIDES rather than a payload - the Native Resolver derived its numbering
+       from the loop's own card, which is the only thing that could have, and
+       re-running resolveCourseGeometry over the payload would find no numbered
+       holes and publish an empty course.
+     *
+     * Resolved here rather than by the caller, because resolveGuidesIntoObjects
+     * stamps every object with the courseId it is given and only THIS function
+     * knows which id the row ends up under - loopCourseId can rename a loop off
+     * its card, and findExistingLoopRow can hand back an id from a previous
+     * scan. Resolving early stamped a guess. */
+    const geometry = loop.guides
+      ? Object.assign(
+        resolveGuidesIntoObjects(loop.guides, courseId, loop.resolverGreens || [], isPinned ? (loop.existingObjects || []) : []),
+        { guidesFound: loop.guides.length, greensFound: (loop.resolverGreens || []).length, holesResolved: loop.guides.length }
+      )
+      : resolveCourseGeometry(loop.payload, courseId, loop.centre || course.center, [], []);
 
     const row = {
       course_id: courseId,
@@ -568,7 +619,7 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
          Course" pinned on the search result must not become the base name for
          BOTH siblings, or the second course reads as another North Course
          before anything has actually identified it. */
-      course_name: loop.name && /^course \d+$/i.test(loop.name)
+      course_name: loop.name && /^course \d+\b/i.test(loop.name)
         ? (course.courseName ? splitCourseName(course.courseName).facility + " - " + loop.name : loop.name)
         : (loop.name || course.courseName || courseId),
       course_lat: loop.centre ? loop.centre.lat : course.center.lat,
@@ -613,7 +664,10 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
     const courseBounds = courseBoundsFor({ courseId, objects: geometry.objects, holes: geometry.holes });
     const holeNumbers = Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite);
 
-    const coverage = courseCoverageComplete({ holeNumbers, expectedHoles });
+    /* A loop separated by its own card knows its own length, and the facility's
+       expectedHoles is the wrong number for it: an 18 and a nine sharing a site
+       would judge the nine against 18 and call a complete course short. */
+    const coverage = courseCoverageComplete({ holeNumbers, expectedHoles: loop.expectedHoles || expectedHoles });
     const visualChain = await chainVisualSnapshot(courseId, courseBounds, origin, coverage)
       .catch(error => ({ chained: false, reason: String(error && error.message || error).slice(0, 300) }));
 
@@ -641,6 +695,223 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
   }
   if (naming) published.naming = naming;
   return published;
+}
+
+/* How long a facility run may take, and how many passes it may make.
+ *
+ * Both, because either alone can hang. Rounds end a facility whose other cards
+ * simply are not published anywhere - each pass finds nothing new and the loop
+ * closes itself. The clock ends one whose sources are slow enough to outlast
+ * any round count. These runs are deliberately longer than a normal scan: a
+ * three-nine facility genuinely needs several fetches and several matching
+ * passes, and it is a background job, so the cost is patience rather than a
+ * player waiting. */
+export const FACILITY_RESOLVE_BUDGET_MS = 240000;
+export const FACILITY_MAX_ROUNDS = 4;
+/* Below this a card cannot identify anything - same floor the scorecard
+   matcher uses, and for the same reason. */
+const MIN_CARD_HOLES = 6;
+
+/* Separate an unnumbered multi-loop facility by its SCORECARDS.
+ *
+ * The numbered path separates ground first and finds cards afterwards, because
+ * OSM's hole numbers do the separating for free. Here there are no numbers, one
+ * course polygon over the whole site, and three nines running through each
+ * other - so there is nothing to cluster on. Proximity is not the answer either:
+ * single-link chaining merges interleaved loops the moment any hole of one sits
+ * near any hole of the other, which is exactly the failure separateLoops was
+ * written to replace.
+ *
+ * So the cards do the separating. Each card is a set of relative hole lengths
+ * and par positions, which is the same evidence the loop matcher already trusts
+ * to tell a North from a South; run the Native Resolver once per card over the
+ * shared payload and each card claims the ground that actually fits it.
+ *
+ * It runs in ROUNDS rather than one pass, because a facility is rarely resolved
+ * in a single fetch and each answer makes the next one easier. A round matches
+ * every card known so far, reconciles what they claimed (see
+ * gd-facility-loops-core.mjs - the nine is the atom, and 18-hole cards that
+ * share ground are play orders rather than courses), and asks whether any
+ * ground is still unspoken for. If it is, there is another course out there:
+ * fetch further and go again, this time with the identified ground taken off
+ * the table so a card that lost a tie gets a clean second look. It stops when
+ * the facility is accounted for, when a round turns up no new cards, or on the
+ * budget - whichever comes first.
+ *
+ * Returns { published, record }. published is null when this could not be
+ * finished, and the caller then publishes ONE course, untrusted and warned,
+ * rather than either refusing outright or lying about what it found. */
+async function publishUnnumberedFacility(context) {
+  const { job, course, payload, origin, facility, expectedHoles, existingObjects } = context;
+  const want = facility.loops;
+  const record = { want, cards: 0, loops: 0, composite: false, rounds: [], reason: null };
+
+  const deadline = Date.now() + FACILITY_RESOLVE_BUDGET_MS;
+  let cards = [];
+  let reconciled = null;
+  let target = want;
+
+  for (let round = 0; round < FACILITY_MAX_ROUNDS; round += 1) {
+    /* Two stops, because either alone can hang. Rounds end a facility whose
+       cards simply do not exist on the internet; the clock ends one whose
+       sources are slow enough to outlast anything. */
+    if (Date.now() > deadline) { record.reason = "budget-exhausted"; break; }
+
+    await heartbeatJob(job, { stage: "gathering-cards-for-facility-" + (round + 1) });
+    const before = cards.length;
+    cards = await gatherFacilityCards(course, origin, target, cards, record);
+    if (!cards.length) { record.reason = record.reason || "no-readable-card"; break; }
+    /* A round that found nothing new will resolve to exactly what the last one
+       did. Only the FIRST round is allowed to proceed without new cards, since
+       it has none to be new. */
+    if (round > 0 && cards.length === before) { record.reason = "no-new-cards"; break; }
+
+    await heartbeatJob(job, { stage: "resolving-facility-loops-" + (round + 1) });
+    /* Round one matches every card over the WHOLE site with nothing held back.
+     *
+     * That is deliberate and it is the only way compositing is visible: three
+     * 18-hole cards over three nines are recognised by wanting the same ground
+     * as each other, and ground taken away before they ask cannot be seen to
+     * be shared. Exclusion comes in from round two, and only once the site has
+     * shown it is NOT composite - which is where "it gets easier after one is
+     * identified" actually pays: a card that lost a tie gets a second look at
+     * a field the winner has already been taken out of. */
+    const excludeIds = (reconciled && !reconciled.composite)
+      ? reconciled.loops.flatMap(loop => (loop.holes || []).map(hole => hole.candidateId)).filter(Boolean)
+      : [];
+    const claims = [];
+    for (const card of cards) {
+      if (Date.now() > deadline) break;
+      const holes = (card.holes || []).map(hole => ({ holeNumber: hole.hole, par: hole.par, distanceM: hole.distanceM }));
+      if (holes.length < MIN_CARD_HOLES) continue;
+      const result = await resolveCourseGeometryForAutoMapper({
+        osmPayload: payload,
+        courseId: course.courseId,
+        course: { courseId: course.courseId, courseName: card.name || course.courseName, courseCentre: course.center },
+        courseCentre: course.center,
+        expectedHoleCount: holes.length,
+        excludeCandidateIds: excludeIds,
+        scorecardHoles: holes,
+        scorecardEvidence: { holes }
+      });
+      const guides = (result.holes || []).map(hole => guideFromResolvedHole(hole, result)).filter(Boolean);
+      /* A card has to reach its own full length to be describing a course here.
+         A partial match is a card for somewhere else, or ground this run has
+         not fetched - either way it is not a course to publish. */
+      if (guides.length < holes.length) continue;
+      const byHole = new Map((result.holes || []).map(hole => [hole.holeNumber, hole]));
+      claims.push({
+        cardName: card.name || "",
+        confidence: result.confidence || 0,
+        resolverGreens: (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon })),
+        /* The guide rides along with its hole so reconciliation can slice a
+           composite card into nines and still hand back publishable geometry. */
+        holes: guides.map(guide => ({
+          holeNumber: guide.hole,
+          candidateId: String((byHole.get(guide.hole) || {}).candidate ? byHole.get(guide.hole).candidate.candidateId : guide.id),
+          guide
+        }))
+      });
+    }
+
+    reconciled = reconcileFacilityClaims(claims, { candidateCount: facility.candidateCount });
+    record.rounds.push({
+      round: round + 1, cards: cards.length, claims: claims.length,
+      loops: reconciled.claimedLoops, composite: reconciled.composite,
+      unclaimed: reconciled.unclaimedCandidates
+    });
+    if (reconciled.complete) { record.reason = null; break; }
+    /* Ground left over means at least one more course is out there. Ask for
+       what is missing plus one, because the count is an estimate and asking
+       short is the expensive direction. */
+    target = reconciled.expectedLoops + 1;
+    record.reason = reconciled.unclaimedCandidates + "-candidates-unclaimed";
+  }
+
+  record.cards = cards.length;
+  record.composite = !!(reconciled && reconciled.composite);
+  record.loops = reconciled ? reconciled.claimedLoops : 0;
+  if (!reconciled || reconciled.loops.length < 2) {
+    record.reason = record.reason || "only-" + ((reconciled && reconciled.loops.length) || 0) + "-courses-identified";
+    return { published: null, record };
+  }
+
+  const loops = reconciled.loops.map((loop, index) => {
+    /* Renumbered by reconciliation when the loop was sliced out of a composite
+       card, so the guide has to be restamped to agree - White's ninth hole is
+       its hole 9, not the card's hole 18. */
+    const guides = (loop.holes || [])
+      .map(hole => hole.guide && Object.assign({}, hole.guide, { hole: hole.holeNumber }))
+      .filter(Boolean);
+    const holeNumbers = guides.map(guide => guide.hole).sort((a, b) => a - b);
+    return {
+      index,
+      name: loop.cardName || "",
+      nameSource: loop.cardName ? "scorecard-resolved" : "provisional",
+      matchedCard: loop.cardName || null,
+      osmRef: "",
+      method: reconciled.composite ? "play-order-slice" : "scorecard-claim",
+      /* This loop's OWN length, not the facility's. */
+      expectedHoles: guides.length,
+      centre: centreOfGuides(guides) || course.center,
+      holeNumbers,
+      contiguous: loopIsContiguous(holeNumbers),
+      awayFromPinM: null,
+      /* No OSM element belongs to this loop by any tag, so there is no payload
+         to hand over - the guides ARE the separation. publishSeparatedLoops
+         resolves them once it knows the id the row lands under. */
+      payload: { elements: [] },
+      guides,
+      resolverGreens: loop.resolverGreens || [],
+      /* Only the pinned loop inherits what was already saved against this
+         course id; a sibling published into a new row starts clean. */
+      existingObjects: index === 0 ? existingObjects : []
+    };
+  });
+
+  /* The nines are the whole answer. The club's own 18-hole combinations are
+     deliberately NOT recorded: three siblings sharing a facility_key is
+     everything the round-start prompt needs, and the player picks whichever two
+     they are playing today, in whichever order - see gd-facility-loops-core.mjs. */
+  const published = await publishSeparatedLoops(job, course, loops, expectedHoles, null, origin);
+  return { published, record };
+}
+
+/* Every distinct card known for this facility, cheapest source first.
+ *
+ * The shared store is free and may already hold what a sibling's scan or an
+ * Update Scorecards run found. Only when it comes up short is the network
+ * asked, and it is asked for a TARGET rather than a fixed number, so a second
+ * round genuinely digs further instead of repeating the first. */
+async function gatherFacilityCards(course, origin, target, held, record) {
+  const stored = await fetchFacilityScorecardEvidence(course.courseId).catch(() => []);
+  const storedCards = stored
+    .filter(row => Array.isArray(row.holes_json) && row.holes_json.length)
+    .map(row => ({
+      name: row.course_name,
+      holes: row.holes_json.map(hole => ({ hole: hole.hole, par: hole.par, distanceM: hole.metres ?? hole.distanceM ?? null })),
+      source: row.source, sourceUrl: row.source_url
+    }));
+  let cards = distinctCards(held.concat(storedCards));
+  if (cards.length >= target) return cards;
+  const found = await resolveScorecardForCourse(course, origin, target)
+    .catch(error => ({ cards: [], reason: String(error && error.message || error).slice(0, 200) }));
+  if (found.reason) record.reason = found.reason;
+  return distinctCards(cards.concat(found.cards || []));
+}
+
+
+/* Mean of the guide centre-lines - the only centre available to a loop that owns
+   no OSM elements of its own, and the number that becomes the published row's
+   course_lat/course_lng. */
+function centreOfGuides(guides) {
+  const points = (guides || []).flatMap(guide => guide && guide.points || [])
+    .filter(point => point && Number.isFinite(point.lat) && Number.isFinite(point.lng));
+  if (!points.length) return null;
+  return {
+    lat: points.reduce((sum, p) => sum + p.lat, 0) / points.length,
+    lng: points.reduce((sum, p) => sum + p.lng, 0) / points.length
+  };
 }
 
 async function runMapperJob(job, origin) {
@@ -745,31 +1016,42 @@ async function runMapperJob(job, origin) {
   let collision = detectHoleNumberCollision(payload);
   let resolverStatus = null;
   let loops = null;
+  /* Set only when the ground proved bigger than the card AND the other cards
+     could not be found - the one case where a course publishes knowing it is a
+     fragment of a facility. Fed to courseFitVerdict so the run cannot report
+     itself trusted. */
+  let facilityUnresolved = null;
 
-  /* Naming a multi-course site needs one card per course on it. course.scorecardCards
-     is only populated when the fetches above actually ran the resolver (a hit on the
-     single-key cache skips it) - so a rescan of an already-mapped facility used to
-     have nothing for the loop matcher, having stored a card on its first scan and
-     never gathered the rest. writeStore now keeps every distinct card, tagged with
-     this facility, so the cheap first move is reading what is already there before
-     spending a network round trip re-finding it. */
+  /* Names are labels, not identity - so when OSM has already numbered the holes,
+     geometry does not wait on them.
+   *
+   * This used to spend a network round trip here hunting one card per course
+   * before publishing anything, and that ordering was backwards. OSM's hole
+   * numbers have ALREADY separated the courses; the cards were only ever going
+   * to decide whether a row reads "North Course" or "Course 1". Blocking three
+   * correct maps behind an aggregator lookup that may take seconds and may
+   * return nothing put the cheap, certain half of the job behind the expensive,
+   * uncertain half.
+   *
+   * So: publish the geometry with provisional names, and label afterwards. The
+   * cards already in the shared store are free and still get used - a rescan of
+   * a facility whose siblings were named last time names them again with no
+   * network at all. What is gone is the FETCH. course-scorecard-update.mjs is
+   * the other half and does it properly: broader search, geometry-safe, and
+   * runnable any time without re-scanning. */
   const wantCards = collision.multiLoop ? Math.max(2, Number(collision.loops) || 2) : 1;
   if (collision.multiLoop && distinctCardCount(course.scorecardCards) < wantCards) {
-    await heartbeatJob(job, { stage: "gathering-cards-for-naming" });
-    const stored = await fetchFacilityScorecardEvidence(course.courseId);
+    const stored = await fetchFacilityScorecardEvidence(course.courseId).catch(() => []);
     const storedCards = stored.map(row => ({ name: row.course_name, holes: row.holes_json, source: row.source, sourceUrl: row.source_url }));
-    const forNaming = distinctCardCount(storedCards) >= wantCards
-      ? { cards: storedCards, reason: null }
-      : await resolveScorecardForCourse(course, origin, wantCards)
-        .catch(error => ({ cards: [], reason: String(error && error.message || error).slice(0, 200) }));
-    course.scorecardCards = forNaming.cards || [];
+    if (distinctCardCount(storedCards) > distinctCardCount(course.scorecardCards)) course.scorecardCards = storedCards;
     diagnostics.namingCards = {
       want: wantCards,
       distinct: distinctCardCount(course.scorecardCards),
-      cards: course.scorecardCards.length,
-      reason: forNaming.reason || null,
-      fromCachedEvidence: !!scorecardEvidence,
-      fromFacilityStore: distinctCardCount(storedCards) >= wantCards
+      cards: (course.scorecardCards || []).length,
+      /* Said plainly on the row, because "Course 1" with no explanation reads
+         like a failure rather than a job half done on purpose. */
+      labelledLater: distinctCardCount(course.scorecardCards) < wantCards,
+      source: "facility-store-only"
     };
   }
 
@@ -922,11 +1204,21 @@ async function runMapperJob(job, origin) {
       warnings.push(short.length + " of " + published.length + " separated courses did not resolve a contiguous 1..n hole set"
         + " (" + short.map(entry => entry.courseId + ": " + entry.holesResolved).join(", ") + ") - separation is not trustworthy here");
     }
+    /* Geometry is done and correct; the labels are the half still outstanding.
+       Said on the row rather than left to be inferred from a "Course 2", so
+       Studio can offer Update Scorecards against exactly the facilities that
+       need it instead of re-scanning to find out. */
+    const unlabelled = published.filter(entry => entry.nameSource === "provisional");
+    if (unlabelled.length) {
+      warnings.push(unlabelled.length + " of " + published.length + " courses published with provisional names"
+        + " - run Update Scorecards to label them (geometry is complete and will not be re-scanned)");
+    }
     return {
       courseId: course.courseId,
       mapperVersion: MAPPER_VERSION,
       multiCourse: true,
       coursesPublished: published,
+      needsLabelling: unlabelled.length > 0,
       queryStages,
       expectedHoles,
       warnings: warnings.length ? warnings : undefined,
@@ -1016,6 +1308,62 @@ async function runMapperJob(job, origin) {
     });
     resolverStatus = { status: result.status, confidence: result.confidence, warnings: result.warnings, hadScorecard: !!scorecardEvidence, trigger: numberingIssue ? "no-osm-numbering" : "short-of-expected" };
     diagnostics.resolverStatus = resolverStatus;
+
+    /* A scorecard describes a COURSE. The ground is the facility.
+     *
+     * Everything above this point has taken expectedHoles - which on this path
+     * came from a scorecard - as the size of the site. At Howeston that made one
+     * 9-hole GolfPass card speak for 27 fairways, and the resolver dutifully
+     * matched nine of them and called the job done. So before the resolver's
+     * answer is adopted, ask whether the card was ever describing the whole
+     * place. See detectUnnumberedMultiLoop. */
+    const facility = detectUnnumberedMultiLoop({
+      candidateCount: (result.debugEvidence && result.debugEvidence.totalHoleCandidates) || 0,
+      cardHoles: expectedHoles
+    });
+    diagnostics.unnumberedFacility = facility;
+    if (facility.multiLoop) {
+      const separated = await publishUnnumberedFacility({
+        job, course, payload, origin, facility, expectedHoles, existingObjects, resolverStatus
+      });
+      diagnostics.unnumberedSeparation = separated.record;
+      if (separated.published) {
+        diagnostics.published = separated.published.map(entry => ({ courseId: entry.courseId, holes: entry.holesResolved, contiguous: entry.contiguous, nameSource: entry.nameSource }));
+        /* Nines sliced out of a composite card are unnamed by construction -
+           "Red + White" names neither of them - so this path expects to leave
+           labelling to Update Scorecards rather than treating it as a shortfall. */
+        const unlabelled = separated.published.filter(entry => entry.nameSource === "provisional");
+        if (unlabelled.length) {
+          warnings.push(unlabelled.length + " of " + separated.published.length + " courses published with provisional names"
+            + (separated.record.composite ? " (sliced from combined play-order cards, which name no single nine)" : "")
+            + " - run Update Scorecards to label them (geometry is complete and will not be re-scanned)");
+        }
+        return {
+          courseId: course.courseId,
+          mapperVersion: MAPPER_VERSION,
+          multiCourse: true,
+          coursesPublished: separated.published,
+          needsLabelling: unlabelled.length > 0,
+          queryStages,
+          expectedHoles,
+          warnings: warnings.length ? warnings : undefined,
+          diagnostics
+        };
+      }
+      /* Not enough cards to tell the loops apart. The single course still
+         publishes - a playable nine beats nothing, and the ground it sits on is
+         real - but it publishes as what it is: one course out of a facility we
+         could not finish separating. courseFitVerdict is told not to trust the
+         run, so the Studio and the player both see an unfinished answer rather
+         than the confident "done" this used to report. */
+      facilityUnresolved = facility;
+      warnings.push(
+        "facility geometry holds about " + facility.candidateCount + " holes but only a "
+        + facility.cardHoles + "-hole scorecard was found (" + facility.loops + " loops suspected)"
+        + " - " + separated.record.reason + "; published one course of a multi-loop facility"
+      );
+    }
+
     const guides = (result.holes || []).map(hole => guideFromResolvedHole(hole, result)).filter(Boolean);
     /* The resolver's numbering (scorecard-derived, OSM refs ignored) only replaces the
        OSM-numbered answer when it genuinely covers MORE holes - a lower-coverage resolver run
@@ -1070,7 +1418,8 @@ async function runMapperJob(job, origin) {
        is not - see courseCoverageComplete. */
     holeNumbers: Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite),
     courseBounds,
-    scorecardIdentity
+    scorecardIdentity,
+    facilityUnresolved
   });
   const resolvedHoleNumbers = Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite);
   /* Carried rather than rebuilt client-side: the player is being asked to do

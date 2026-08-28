@@ -79,8 +79,13 @@
       var rel = (Math.PI * 2 * i) / count;
       var rf = radiusFactor(rel, payload);
       if (geometry && api) rf *= api.microGeometryFactor(geometry, rel, exaggerate);
-      var x = Math.cos(rel) * depth * rf;
-      var y = Math.sin(rel) * lateral * rf;
+      /* Same orientation as GPS Play's buildBubbleShape, and for the same
+         reason: the ACROSS axis lies square to the shot, not down it. Both were
+         changed together - a Studio preview that disagreed with the map would
+         be worse than either being wrong on its own. See
+         scripts/gd-bubble-frame-core.js. */
+      var x = Math.cos(rel) * lateral * rf;
+      var y = Math.sin(rel) * depth * rf;
       points.push({
         x: x * Math.cos(tilt) - y * Math.sin(tilt),
         y: x * Math.sin(tilt) + y * Math.cos(tilt)

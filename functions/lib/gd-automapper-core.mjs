@@ -499,6 +499,105 @@ export function detectHoleNumberCollision(payload) {
   };
 }
 
+/* Telling one unnamed nine from another.
+ *
+ * "Course 1" and "Course 2" are honest - they say the site has more than one
+ * course and that we do not know their names - but they are useless to a player
+ * standing at the clubhouse deciding which one to open. Nothing about the label
+ * connects to anything they can see.
+ *
+ * Two facts we already hold do connect. HOW LONG it plays, which the player
+ * recognises from the card in their pocket, and WHERE ON THE PROPERTY it sits,
+ * which they can see. "Course 2 - 3547m South" is a label somebody can act on;
+ * "Course 2" is a placeholder they have to guess at.
+ *
+ * Both are free. The lengths are already summed to match cards to loops, and
+ * the centres already exist because separation computed them.
+ *
+ * Replaced the moment a real name is found - see nameLoopsFromCards. This is
+ * what an unnamed course is called in the meantime, not a naming scheme. */
+export const COMPASS_POINTS = ["North", "North-East", "East", "South-East", "South", "South-West", "West", "North-West"];
+
+/* Which way `to` lies from `from`, as one of eight compass points. Eight rather
+   than four: a three-nine site puts its loops closer together than 90 degrees
+   apart, and "South-East" separates two of them where "South" would not. */
+export function compassPointFrom(from, to) {
+  const a = toPlain(from), b = toPlain(to);
+  if (!a || !b || !Number.isFinite(a.lat) || !Number.isFinite(b.lat)) return "";
+  const dLat = b.lat - a.lat;
+  const dLng = (b.lng - a.lng) * Math.cos((a.lat * Math.PI) / 180);
+  if (!dLat && !dLng) return "";
+  const deg = (Math.atan2(dLng, dLat) * 180) / Math.PI;
+  return COMPASS_POINTS[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+}
+
+/* "3547m South", "3547m", "South", or "" - whatever is actually known.
+ *
+ * Never invents the half it does not have. A loop with no measurable holes and
+ * no separable position gets a bare "Course 2", which is worse than a full
+ * label but better than a confident wrong one. */
+export function loopDescriptor(facts) {
+  const totalM = Math.round(Number(facts && facts.totalM) || 0);
+  const compass = String((facts && facts.compass) || "");
+  return [totalM > 0 ? totalM + "m" : "", compass].filter(Boolean).join(" ");
+}
+
+/* The provisional name for a loop nothing has named yet. */
+export function provisionalLoopName(index, facts) {
+  const descriptor = loopDescriptor(facts);
+  return "Course " + (Number(index) + 1) + (descriptor ? " - " + descriptor : "");
+}
+
+/* More ground than the scorecard describes.
+ *
+ * detectHoleNumberCollision only sees a multi-course site when OSM NUMBERS the
+ * holes - the whole signal is one number turning up twice. A site OSM has not
+ * numbered at all is invisible to it, and that is precisely the site the Native
+ * Resolver exists for, so the two never met.
+ *
+ * Howeston is three nines. OSM gave it 27 tees, 27 fairways, 30 greens and zero
+ * numbered holes, so the collision detector said "one course" and the resolver
+ * was handed a 9-hole GolfPass card as expectedHoles. It matched nine of the
+ * twenty-seven candidates, reported status "resolved" at 0.87 confidence, and
+ * published a third of the facility as a finished 9-hole course with
+ * fit.trusted true. The one thing that knew something was wrong was a warning
+ * nobody was reading: "map geometry scale differs from scorecard by -36%".
+ *
+ * The missing rule is small and general: A SCORECARD DESCRIBES A COURSE, NOT A
+ * FACILITY. Finding one 9-hole card is not evidence that the site has nine
+ * holes - only that one of its courses does. When the ground carries
+ * substantially more hole candidates than the card accounts for, the card is
+ * the incomplete half of the comparison, and the site is a multi-loop facility
+ * that has to go through the multi-course machinery rather than round it.
+ *
+ * Two gates, because either alone misfires. A RATIO, so a 9-hole card against
+ * 27 candidates reads as three loops while an 18 against 20 (a couple of
+ * practice greens caught in the sweep) does not. And an ABSOLUTE floor of
+ * roughly another nine, because ratios are unstable on small numbers - 6
+ * candidates against a 4-hole read is 1.5x and means nothing. */
+export const MULTI_LOOP_GEOMETRY_RATIO = 1.5;
+export const MULTI_LOOP_MIN_EXTRA_HOLES = 7;
+
+export function detectUnnumberedMultiLoop(input) {
+  const candidateCount = Math.max(0, Number(input && input.candidateCount) || 0);
+  const cardHoles = Math.max(0, Number(input && input.cardHoles) || 0);
+  const base = { multiLoop: false, loops: 1, candidateCount, cardHoles, ratio: null };
+  /* No card means no comparison to make. That is not "one course" - it is a
+     question this rule cannot answer, and saying so keeps it out of the way of
+     the paths that can. */
+  if (!cardHoles) return Object.assign(base, { reason: "no-card-hole-count" });
+  if (!candidateCount) return Object.assign(base, { reason: "no-hole-candidates" });
+  const ratio = candidateCount / cardHoles;
+  if (ratio < MULTI_LOOP_GEOMETRY_RATIO || candidateCount - cardHoles < MULTI_LOOP_MIN_EXTRA_HOLES) {
+    return Object.assign(base, { ratio, reason: "geometry-matches-card" });
+  }
+  /* Rounded, not floored: 27 candidates against a 9-hole card is three loops,
+     and 27 against an 18 is two (an 18 and a nine) rather than one-and-a-half.
+     This is how many CARDS to go looking for, so an over-count costs a wasted
+     fetch and an under-count costs a whole course. */
+  return { multiLoop: true, loops: Math.max(2, Math.round(ratio)), candidateCount, cardHoles, ratio, reason: null };
+}
+
 /* Separate a multi-course site into its courses - all of them.
  *
  * This replaces selectNearestLoop, which kept one course and discarded the rest.

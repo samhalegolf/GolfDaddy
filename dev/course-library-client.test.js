@@ -16,7 +16,10 @@ const path = require("path");
 const ROOT = path.join(__dirname, "..");
 const PIN_LOCK = path.join(ROOT, "scripts", "gd-course-library-pin-lock.js");
 const src = fs.readFileSync(PIN_LOCK, "utf8");
-const SERVER = path.join(ROOT, "functions", "course-library.mjs");
+/* objectsVersion() moved out of course-library.mjs into the package shape module
+   when the package endpoint started needing the same value; this test kept
+   reading the old file and failed on a helper that had simply relocated. */
+const SERVER = path.join(ROOT, "functions", "lib", "gd-course-package-shape.mjs");
 const serverSrc = fs.readFileSync(SERVER, "utf8");
 
 const tests = [];
@@ -90,7 +93,7 @@ test("local version uses the newest of publishedAt and updatedAt", () => {
 test("client and server compute the version the same way", () => {
   /* If these diverge, every course looks permanently stale and the cache is
      worse than useless - it would re-download on every entry. */
-  assert.ok(/function objectsVersion\(row\)/.test(serverSrc), "server helper must exist");
+  assert.ok(/function objectsVersion\(map\)/.test(serverSrc), "server helper must exist");
   assert.ok(/published > updated \? published : updated/.test(serverSrc), "server takes the newer of the two");
   assert.ok(/published>updated\?published:updated/.test(src), "client must take the newer of the two as well");
 });

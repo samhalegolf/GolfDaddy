@@ -91,6 +91,50 @@
     return !app.access || app.access.roundFeatures();
   }
 
+  /* Handedness, from the same profile the bag comes from.
+   *
+   * It is a PLAYER value, not a round preference, which is why it lives here
+   * beside the clubs and not in GPS Settings: both answer "who is swinging",
+   * and both have to be the same answer in both shells. The old shell has had
+   * a handedness select for a long time (#profileHandInput); /app/ could read
+   * the result but never set it, so a left-hander playing only on the phone
+   * got a right-hander's bubble with no way to say otherwise.
+   *
+   * Right unless the profile explicitly says left - the same rule
+   * my-bubble.js, gdHandednessSign and every other reader uses. Anything that
+   * is not the exact string "left" is right-handed, so a missing or malformed
+   * value lands on the default rather than producing a third behaviour. */
+  function handedness() {
+    var p = activeProfile();
+    return p && p.handedness === "left" ? "left" : "right";
+  }
+
+  /* Refuses without a profile rather than inventing one, exactly as save()
+     does - see the note there. */
+  function setHandedness(value) {
+    if (!canEdit()) return refuse();
+    var raw = store();
+    var p = activeProfile(raw);
+    if (!p) return false;
+    p.handedness = value === "left" ? "left" : "right";
+    p.updatedAt = new Date().toISOString();
+    var ok = safe(function () { localStorage.setItem(PROFILE_KEY, JSON.stringify(raw)); return true; }, false);
+    /* Every bubble on the surface re-derives from this immediately. Without the
+       refresh the change would not show until the next profile read, which is
+       whenever the app next happened to wake - and a setting that appears to do
+       nothing gets pressed again. */
+    if (ok && app.myBubble && app.myBubble.refresh) app.myBubble.refresh();
+    return ok;
+  }
+
+  function renderHandedness() {
+    var button = document.getElementById("bagHandToggle");
+    if (!button) return;
+    var left = handedness() === "left";
+    button.textContent = left ? "Left handed" : "Right handed";
+    button.setAttribute("aria-pressed", left ? "true" : "false");
+  }
+
   function firmness() {
     var stored = safe(function () { return localStorage.getItem(FIRMNESS_KEY); }, null);
     return stored === "soft" || stored === "hard" ? stored : "medium";
@@ -152,6 +196,30 @@
       carryInput.value = String(row.baseCarry);
       carryInput.setAttribute("aria-label", "Carry metres");
 
+      /* One metre a tap, in both directions.
+       *
+       * step="1" only governs the platform's own spinner, and on a phone there
+       * isn't one - the number field opens a keyboard, so nudging a club by a
+       * metre meant selecting the value and retyping it. These are the actual
+       * fine control, and they are the reason the field can be trusted to move
+       * in ones: nothing about them is left to the platform. */
+      var nudge = function (delta) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "bagRowNudge";
+        button.textContent = delta < 0 ? "−" : "+";
+        button.setAttribute("aria-label", (delta < 0 ? "Decrease " : "Increase ") + row.club + " by one metre");
+        button.addEventListener("click", function () {
+          if (!editable) return refuse();
+          var next = Math.round(Number(carryInput.value)) + delta;
+          if (!(next > 0)) return;
+          carryInput.value = String(next);
+          clubs[i].baseCarry = next;
+          sync();
+        });
+        return button;
+      };
+
       if (!editable) {
         /* readOnly rather than disabled: a disabled input cannot be tapped, and
            the tap is how the player finds out why it will not change. */
@@ -172,7 +240,12 @@
       }
 
       el.appendChild(clubInput);
+      /* Only on a real bag. The ghost rows are the shipped defaults being shown
+         because there is nothing else to show - nudging one would write a bag
+         the player never set. */
+      if (editable && !showingGhost) el.appendChild(nudge(-1));
       el.appendChild(carryInput);
+      if (editable && !showingGhost) el.appendChild(nudge(1));
 
       if (editable && !showingGhost) {
         var remove = document.createElement("button");
@@ -191,6 +264,7 @@
       list.appendChild(el);
     });
 
+    renderHandedness();
     var preset = firmness();
     document.querySelectorAll("#bagFirmness [data-firmness]").forEach(function (btn) {
       btn.setAttribute("aria-pressed", btn.dataset.firmness === preset ? "true" : "false");
@@ -245,7 +319,12 @@
       var panel = document.getElementById("bagPanel");
       if (panel) panel.classList.add("hiddenState");
     },
-    rows: function () { return clubs.slice(); }
+    rows: function () { return clubs.slice(); },
+    /* Exposed so anything asking "which way does this player swing" has one
+       place to ask, rather than each caller re-reading the profile store and
+       re-deriving the left/right rule. */
+    handedness: handedness,
+    setHandedness: setHandedness
   };
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -254,13 +333,42 @@
     var close = document.getElementById("bagClose");
     if (close) close.addEventListener("click", function () { app.bag.close(); });
 
+    /* Name first, then distance.
+     *
+     * The carry field and Add button stay out of the way until the club has a
+     * name, so adding a club is one question at a time rather than two blanks
+     * side by side. Naming it also moves the cursor to the distance, which is
+     * the only thing left to answer. */
+    var addClubInput = document.getElementById("bagAddClub");
+    var addCarryInput = document.getElementById("bagAddCarry");
     var addBtn = document.getElementById("bagAddBtn");
+
+    function showAddStepTwo(named) {
+      if (addCarryInput) addCarryInput.classList.toggle("hiddenState", !named);
+      if (addBtn) addBtn.classList.toggle("hiddenState", !named);
+    }
+
+    if (addClubInput) {
+      /* input, not change: the second step should appear as the player types,
+         not when they happen to leave the field. */
+      addClubInput.addEventListener("input", function () {
+        showAddStepTwo(!!addClubInput.value.trim());
+      });
+      addClubInput.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" || !addClubInput.value.trim()) return;
+        event.preventDefault();
+        showAddStepTwo(true);
+        if (addCarryInput) addCarryInput.focus();
+      });
+    }
+
     if (addBtn) addBtn.addEventListener("click", function () {
-      var clubInput = document.getElementById("bagAddClub");
-      var carryInput = document.getElementById("bagAddCarry");
-      if (addClub(clubInput.value, carryInput.value)) {
-        clubInput.value = "";
-        carryInput.value = "";
+      if (addClub(addClubInput.value, addCarryInput.value)) {
+        addClubInput.value = "";
+        addCarryInput.value = "";
+        /* Back to step one, ready for the next club. */
+        showAddStepTwo(false);
+        addClubInput.focus();
       }
     });
 
@@ -272,6 +380,11 @@
 
     document.querySelectorAll("#bagFirmness [data-firmness]").forEach(function (btn) {
       btn.addEventListener("click", function () { setFirmness(btn.dataset.firmness); });
+    });
+
+    var handToggle = document.getElementById("bagHandToggle");
+    if (handToggle) handToggle.addEventListener("click", function () {
+      if (setHandedness(handedness() === "left" ? "right" : "left")) renderHandedness();
     });
 
     render();

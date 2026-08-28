@@ -217,7 +217,7 @@ function getGDBForClub(club,d){
   const radius=Math.max(dev("shotEngine.minimumBubbleRadiusM"),lateralRadius,depthRadius);
   return{...profile,totalM:gdRound(totalM,1),rolloutM:gdRound(rolloutM,1),visual,radius:gdRound(radius,1),lateralRadiusM:gdRound(lateralRadius,1),depthRadiusM:gdRound(depthRadius,1),source:profile.source||"account-profile",playerId:profile.playerId||"",accountId:profile.accountId||"",ghostBag:!!profile.ghostBag,engineAvailable:true}
 }
-function calculateVisualBubbleRender(profile,options={}){const handedness=options.handedness||"right", hand=gdHandednessSign(handedness), offsetNorm=gdClamp((hand*profile.faceAlignmentOffsetDeg)/6,-1,1), windowNorm=gdClamp((profile.faceWindowDeg||.7)/1.5,0,1), carryNorm=gdClamp((profile.carryWindowPct||4.2)/8,0,1);return{visualWidthM:gdRound(profile.clusterWidthM*(1+windowNorm*.1+Math.abs(offsetNorm)*.06),1),visualDepthM:gdRound(profile.clusterDepthM*(1+carryNorm*.08+windowNorm*.06),1),visualTiltDeg:gdRound(profile.clusterTiltDeg+offsetNorm*1.5+windowNorm*1.2,2),visualSkewDeg:gdRound(offsetNorm*5,2),visualYBias:gdRound(Math.max(0,offsetNorm)*.04-Math.max(0,-offsetNorm)*.03,3)}}
+function calculateVisualBubbleRender(profile,options={}){const handedness=options.handedness||"right", hand=gdHandednessSign(handedness), offsetNorm=gdClamp((hand*profile.faceAlignmentOffsetDeg)/6,-1,1), windowNorm=gdClamp((profile.faceWindowDeg||.7)/1.5,0,1), carryNorm=gdClamp((profile.carryWindowPct||4.2)/8,0,1);return{visualWidthM:gdRound(profile.clusterWidthM*(1+windowNorm*.1+Math.abs(offsetNorm)*.06),1),visualDepthM:gdRound(profile.clusterDepthM*(1+carryNorm*.08+windowNorm*.06),1),visualTiltDeg:gdRound(profile.clusterTiltDeg+offsetNorm*1.5+hand*windowNorm*1.2,2),visualSkewDeg:gdRound(offsetNorm*5,2),visualYBias:gdRound(offsetNorm*.035,3)}}
 function gdNormalizeGpsBubblePayload(raw,distance=155){
   const fallback=gdFallbackGpsBubblePayload(distance);
   if(!raw||typeof raw!=="object")return fallback;
@@ -543,7 +543,23 @@ function buildBubbleShape(center, payloadInput, scale=1){
        distance tendency it owns, and mixing a second effect into the same
        clamp would let one silently eat the other. */
     const rf=bubbleRadiusFactor(rel,payload)*gdMicroGeometryRadiusFactor(rel);
-    pts.push({x:Math.cos(rel)*axes.depth*rf,y:Math.sin(rel)*axes.lateral*rf});
+    /* ORIENTATION: the ACROSS axis is the one that lies square to the shot.
+     *
+     * This used to read `x:...axes.depth, y:...axes.lateral`, which laid the
+     * object's longer axis straight DOWN the target line - a quarter turn from
+     * where it belongs, and the 90 degrees GPS Play was visibly out by. The
+     * object itself was never wrong: the same width/depth pair drew correctly
+     * in the graphs, which lay it down the other way round. Only this
+     * assignment was.
+     *
+     * Nothing about SIZE changes here. axes.lateral and axes.depth arrive
+     * already scaled and capped by GPS Play's own logic, which stays untouched;
+     * all that changes is which of the two goes on which axis of the frame.
+     *
+     * rel keeps its meaning - rel=0 is still Long, rel=pi/2 still Right - so
+     * the region model and the tilt still measure from where they always did.
+     * See scripts/gd-bubble-frame-core.js for the shared definition. */
+    pts.push({x:Math.cos(rel)*axes.lateral*rf,y:Math.sin(rel)*axes.depth*rf});
   }
   return gdSmoothBubbleLocalRing(pts,2).map(point=>gdBubbleLocalToLatLng(center,payload,point.x,point.y));
 }

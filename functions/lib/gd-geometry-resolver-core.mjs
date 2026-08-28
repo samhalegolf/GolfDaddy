@@ -826,7 +826,7 @@ function sourceLoadFailureResult(input, courseId, resolverRunId, error, elements
   const result = {
     courseId, resolverRunId, status: "source-load-failed", sourceLoadError: error, holes: [], unresolvedCandidates: [], unresolvedScorecardHoles: scorecard || [],
     analysisBoundary: boundary || [], confidence: 0, overallConfidence: 0, warnings: [error.message], resolverVersion: RESOLVER_VERSION, resolvedAt: nowIso(), source: SOURCE,
-    debugEvidence: { resolverRunId, analysisBoundary: boundary || [], osmFeatureCount: Array.isArray(elements) ? elements.length : 0, fairwayCount: (elements || []).filter(e => golfTag(e) === "fairway").length, expectedHoleCount: expectedHoleCount(input, scorecard || []), greenCandidates: [], rejectedGreenCandidates: [], holeCandidates: [], scorecardHoles: scorecard || [], assignmentContext: {}, assignmentScore: 0, assignmentAlternatives: [], sourceLoadError: error }
+    debugEvidence: { resolverRunId, analysisBoundary: boundary || [], osmFeatureCount: Array.isArray(elements) ? elements.length : 0, fairwayCount: (elements || []).filter(e => golfTag(e) === "fairway").length, expectedHoleCount: expectedHoleCount(input, scorecard || []), greenCandidates: [], rejectedGreenCandidates: [], holeCandidates: [], totalHoleCandidates: 0, scorecardHoles: scorecard || [], assignmentContext: {}, assignmentScore: 0, assignmentAlternatives: [], sourceLoadError: error }
   };
   result.feedback = failedSourceFeedback(error, elements, scorecard || []);
   return result;
@@ -878,7 +878,16 @@ export async function resolveCourseGeometryForAutoMapper(input) {
   const acquisitionError = sourceEvidenceError(input, elements, analysisBoundary);
   if (acquisitionError) return sourceLoadFailureResult(input, courseId, resolverRunId, acquisitionError, elements, analysisBoundary, scorecard);
   const greenResult = detectGreenCandidates(elements, analysisBoundary);
-  const candidates = detectHoleGeometryCandidates(elements, greenResult.accepted, analysisBoundary);
+  const allCandidates = detectHoleGeometryCandidates(elements, greenResult.accepted, analysisBoundary);
+  /* Ground another course has already claimed.
+   *
+   * A multi-loop facility with no OSM numbering is resolved one CARD at a time
+   * over one shared payload - see the unnumbered multi-loop path in
+   * course-mapper-worker-background.mjs. Without this the second card is free to
+   * match the same nine holes the first one took, because nothing in the
+   * matching says a piece of ground can only belong to one course. */
+  const excluded = new Set((input.excludeCandidateIds || []).map(String));
+  const candidates = excluded.size ? allCandidates.filter(c => !excluded.has(String(c.candidateId))) : allCandidates;
   const expected = expectedHoleCount(input, scorecard);
   const requiredDistanceCount = scorecard.length ? Math.max(1, Math.min(expected || scorecard.length || 18, scorecard.length, 18)) : Math.max(1, Math.min(expected || 18, 18));
   const distanceEvidenceCount = scorecardDistanceCount(scorecard);
@@ -910,6 +919,10 @@ export async function resolveCourseGeometryForAutoMapper(input) {
     debugEvidence: {
       resolverRunId, analysisBoundary, osmFeatureCount: elements.length, fairwayCount: elements.filter(e => golfTag(e) === "fairway").length,
       expectedHoleCount: expected, greenCandidates: greenResult.accepted, rejectedGreenCandidates: greenResult.rejected, holeCandidates: candidates,
+      /* Every candidate the ground offered, before another course's claim was
+         taken out. holeCandidates is what THIS run could choose from; this is
+         how big the site is, which is the number the multi-loop check reads. */
+      totalHoleCandidates: allCandidates.length,
       scorecardHoles: scorecard, scorecardEvidence: match.scorecardEvidence, scorecardSources, scorecardDistanceCount: distanceEvidenceCount,
       assignmentContext: match.context || {}, assignmentScore: match.score || 0, assignmentAlternatives: match.alternatives || []
     }

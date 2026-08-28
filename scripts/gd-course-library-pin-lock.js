@@ -5932,7 +5932,38 @@
     updateAvailable:function(){
       return !!(lastCourseLibraryFreshness.checked&&(lastCourseLibraryFreshness.stale.length||lastCourseLibraryFreshness.missing.length));
     },
-    refresh:function(opts){return syncPublishedCourseMaps(Object.assign({quiet:true},opts||{}));}
+    refresh:function(opts){return syncPublishedCourseMaps(Object.assign({quiet:true},opts||{}));},
+    /* The nines that share a facility with this course, or null for an ordinary
+       course - which is the common answer and is not a failure.
+     *
+     * Lives here because this file already owns the manifest and its fetch;
+     * asking the picker to re-derive "which courses are siblings" from a second
+     * source is how two answers to one question get started. Reuses the loaded
+     * manifest when the library panel has already populated it, and otherwise
+     * pays for one sub-kilobyte fetch - the same endpoint, cached after. */
+    facilityFor:async function(courseId){
+      const key=slug(courseId||"");
+      if(!key)return null;
+      if(!courseLibraryManifestById){
+        const manifest=await fetchCourseLibraryManifest();
+        if(!manifest||!Array.isArray(manifest.courses))return null;
+        const byId={};
+        manifest.courses.forEach(row=>{if(row&&row.course_id)byId[slug(row.course_id)]=row;});
+        courseLibraryManifestById=byId;
+      }
+      const rows=Object.keys(courseLibraryManifestById).map(id=>courseLibraryManifestById[id]);
+      const mine=courseLibraryManifestById[key];
+      const facilityKey=mine&&mine.facility_key;
+      if(!facilityKey)return null;
+      /* Nines only. A facility whose siblings are an 18 and a par-3 nine is a
+         chooser, not a play order - the player picks one course and plays it. */
+      const nines=rows.filter(row=>row&&row.facility_key===facilityKey&&Number(row.hole_count)===9)
+        .map(row=>({courseId:slug(row.course_id),courseName:String(row.course_name||row.course_id),
+          lat:Number(row.course_lat),lng:Number(row.course_lng)}))
+        .filter(n=>Number.isFinite(n.lat)&&Number.isFinite(n.lng))
+        .sort((a,b)=>a.courseName.localeCompare(b.courseName));
+      return nines.length>=2?{facilityKey,nines}:null;
+    }
   };
   window.__gdHoleFrameVisualZoomHotfixV1=true;
 

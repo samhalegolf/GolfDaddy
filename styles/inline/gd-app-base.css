@@ -4179,6 +4179,12 @@ body.gd-green-zoom-active .rightRail .gdGreenZoomBtn{background:linear-gradient(
 .gdCoursePinCrosshair:before,.gdCoursePinCrosshair:after{content:"";position:absolute;background:#1fd36d;border-radius:99px}
 .gdCoursePinCrosshair:before{left:50%;top:-12px;bottom:-12px;width:2px;transform:translateX(-50%)}
 .gdCoursePinCrosshair:after{left:-12px;right:-12px;top:50%;height:2px;transform:translateY(-50%)}
+/* The tappable nine. Sized to a comfortable touch target rather than to the
+   numeral, and pointer-events on because the overlay above it is not - a pin
+   the player cannot hit is the whole screen failing. Picked pins carry their
+   tap order so "which is my front nine" is answered by looking at it. */
+.gdPlayOrderPin{pointer-events:auto;display:flex;align-items:center;justify-content:center;border-radius:999px;border:2px solid #1fd36d;background:rgba(3,9,6,.72);color:#fff;font-weight:700;font-size:15px;box-shadow:0 0 0 4px rgba(31,211,109,.18),0 10px 24px rgba(0,0,0,.44);cursor:pointer}
+.gdPlayOrderPin.picked{background:#1fd36d;color:#04150c;box-shadow:0 0 0 6px rgba(31,211,109,.3),0 12px 28px rgba(0,0,0,.5)}
 .gdCoursePinPanel{width:min(350px,calc(100vw - 32px));padding:14px;border-radius:22px;background:rgba(5,9,7,.9);border:1px solid rgba(255,255,255,.14);box-shadow:0 24px 70px rgba(0,0,0,.52);backdrop-filter:blur(18px);pointer-events:auto;color:#fff}
 .gdCoursePinKicker{color:#a8ff53;font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.14em}
 .gdCoursePinTitle{margin-top:5px;font-size:22px;font-weight:950;line-height:1;letter-spacing:-.02em}

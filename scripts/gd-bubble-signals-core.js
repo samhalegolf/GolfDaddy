@@ -34,9 +34,14 @@
  * REGION ORIENTATION - must match the engine's ring
  *
  * buildBubbleShape() in gd-app-core.js walks rel = 0..2pi building
- * { x: cos(rel)*depth, y: sin(rel)*lateral }, and localPointToLatLng() turns
+ * { x: cos(rel)*lateral, y: sin(rel)*depth }, and localPointToLatLng() turns
  * that into a bearing of shotBearing + atan2(y, x). So x is ALONG the shot
  * (long) and y is to its RIGHT. Therefore:
+ *
+ * (The radii on those axes were swapped in 2026-08 - the ACROSS axis lies
+ * square to the shot, which is the orientation the graphs always used and the
+ * 90 degrees GPS Play was out by. rel is unaffected: rel=0 is still Long, so
+ * every region below still means what it says. See gd-bubble-frame-core.js.)
  *
  *     rel = 0      -> Long
  *     rel = pi/2   -> Right

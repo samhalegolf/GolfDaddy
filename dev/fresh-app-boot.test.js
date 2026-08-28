@@ -1422,9 +1422,10 @@ async function bootCheck() {
     packageFetches += 1;
     const url = new URL(route.request().url());
     const courseId = url.searchParams.get("courseId");
-    const body = packageStatus === "full-map-ready"
+    const body = /^full-map-ready/.test(packageStatus)
       ? {
-          courseId, status: "full-map-ready", packageVersion: 7, geometryVersion: "2026-08-01T00:00:00Z",
+          courseId, status: "full-map-ready", packageVersion: packageStatus === "full-map-ready-v9" ? 9 : 7,
+          geometryVersion: "2026-08-01T00:00:00Z",
           holes: [{ holeNumber: 1, geometry: { tee: AKARANA_H1.tee, green: AKARANA_H1.green, greenShape: [], route: [] }, visual: null }]
         }
       : {
@@ -1452,20 +1453,34 @@ async function bootCheck() {
   }));
   const fetchesAfterSecondVisit = packageFetches;
 
-  /* Now simulate the published map appearing mid-round: the next hole
-     change's background check should find it and prompt, not auto-switch. */
+  /* Now simulate the published map appearing mid-round. A round on a lite-geo
+     package is drawing the LIVE map for every hole, so the captured map is
+     strictly less work for the phone and is taken without asking - the one
+     auto-adopt in the app. It is a swap, not a restart: the hole and the
+     shots survive it. */
   packageStatus = "full-map-ready";
   await storePage.evaluate(() => document.getElementById("nextHole").click());
   await storePage.waitForTimeout(400);
-  const midRoundPrompt = await storePage.evaluate(() => ({
+  const midRoundAdopt = await storePage.evaluate(() => ({
     barShown: !document.getElementById("mapUpdateBar").classList.contains("hiddenState"),
-    stillObjectMapSaved: window.ClarityApp.courseStore.load("store-test-course").mapType
+    savedMapType: window.ClarityApp.courseStore.load("store-test-course").mapType,
+    stillInRound: window.ClarityApp.marshal.round().courseKey
+  }));
+
+  /* Already on the captured map: a NEWER version of it is a prompt, because
+     swapping ground under a player mid-hole is a change they may decline. */
+  packageStatus = "full-map-ready-v9";
+  await storePage.evaluate(() => document.getElementById("nextHole").click());
+  await storePage.waitForTimeout(400);
+  const newerVersionPrompt = await storePage.evaluate(() => ({
+    barShown: !document.getElementById("mapUpdateBar").classList.contains("hiddenState"),
+    stillOldVersionSaved: window.ClarityApp.courseStore.load("store-test-course").mapVersion
   }));
   await storePage.evaluate(() => document.getElementById("mapUpdateDownload").click());
   await storePage.waitForTimeout(200);
   const afterDownload = await storePage.evaluate(() => ({
     barHidden: document.getElementById("mapUpdateBar").classList.contains("hiddenState"),
-    savedMapType: window.ClarityApp.courseStore.load("store-test-course").mapType
+    savedMapVersion: window.ClarityApp.courseStore.load("store-test-course").mapVersion
   }));
   await storePage.close();
 
@@ -1638,10 +1653,16 @@ async function bootCheck() {
   assert.strictEqual(secondVisit.courseKey, "store-test-course", "a second hand-off to the same course still starts play");
   assert.strictEqual(secondVisit.hole, 1, "a second hand-off to the same course opens on hole 1 from the saved copy");
   assert.strictEqual(fetchesAfterSecondVisit, fetchesAfterFirstVisit, "a second hand-off to an already-downloaded course must not re-fetch the package");
-  assert.ok(midRoundPrompt.barShown, "a published map appearing mid-round must prompt, not auto-switch");
-  assert.strictEqual(midRoundPrompt.stillObjectMapSaved, "object", "the saved copy must not change until the prompt is accepted");
+  assert.strictEqual(midRoundAdopt.savedMapType, "published",
+    "a captured map arriving on a round that is streaming the live one is taken without asking - it is strictly less work for the phone");
+  assert.ok(!midRoundAdopt.barShown, "the auto-adopt must not also prompt");
+  assert.strictEqual(midRoundAdopt.stillInRound, "store-test-course",
+    "PACKAGE_UPDATED is a swap, not a restart - the round survives it");
+  assert.ok(newerVersionPrompt.barShown,
+    "a NEWER version of a map the player is already on must ask before swapping ground mid-hole");
+  assert.strictEqual(newerVersionPrompt.stillOldVersionSaved, 7, "the saved copy must not change until the prompt is accepted");
   assert.ok(afterDownload.barHidden, "accepting the prompt closes the update bar");
-  assert.strictEqual(afterDownload.savedMapType, "published", "accepting the prompt saves the published map as the new downloaded copy");
+  assert.strictEqual(afterDownload.savedMapVersion, 9, "accepting the prompt saves the newer map as the downloaded copy");
   assert.ok(play.mapDisplayed, "rule 2: #map must be visible by default on the play route");
   assert.strictEqual(play.hole, 1, "play must start on hole 1");
   assert.strictEqual(play.courseKey, "akarana-golf-club");

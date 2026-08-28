@@ -16076,6 +16076,188 @@ function gdEnsureCoursePinScreen(){
   (document.getElementById("courseScreen")||document.body).appendChild(panel);
   return panel;
 }
+/* "Pick your play order" - which two nines at a 27-hole facility.
+ *
+ * A 27-hole club publishes as three nine-hole courses sharing a facility_key,
+ * and the player plays two of them on the day. Which two, and in what order, is
+ * their choice: clubs rotate their pairings, so a stored "Red + White" would be
+ * a worse answer than asking.
+ *
+ * NOT A RELATIVE OF THE COURSE PIN SCREEN, despite sitting next to it and
+ * wearing its panel classes. The two fire at opposite ends of a course's life
+ * and must not inherit each other's behaviour:
+ *
+ *   course pin    a PRE-REQUISITE to the autoscanner. The course is unmapped,
+ *                 or was mapped from a coordinate the mapper decided it could
+ *                 not trust, and the player is being asked to place the ground
+ *                 so a scan can run. It is a repair, and it blocks scanning.
+ *   play order    the course is already scanned, already published, already
+ *                 three separate maps. Nothing is being fixed and nothing is
+ *                 waiting on the answer - the player is choosing between
+ *                 finished courses.
+ *
+ * So this borrows the panel styling and nothing else. No crosshair, no map
+ * dragging, no zoom floor, no pin-mode body classes, and it is nowhere near the
+ * needsCoursePin branch.
+ *
+ * Framing rule, in full: zoom out until every pin is visible. A nine the player
+ * cannot see is a nine they cannot tap.
+ *
+ * Live map, deliberately. Published imagery is licensed per region and plenty
+ * of courses have none - Howeston, the course that prompted this, has no
+ * course_visuals row at all - but the geo pins exist for every published
+ * course, so this works everywhere and picks up aerial imagery for free
+ * wherever it happens to be licensed. */
+const GD_PLAY_ORDER_KEY="gd_play_order_v1";
+let gdPlayOrderState=null;
+
+/* The sibling lookup lives in gd-course-library-pin-lock.js, which owns the
+   course manifest. Absent (load order, or a build without it) means "no
+   facility", which opens the course normally - never a blocked round. */
+function safeGdPlayOrderFacility(payload){
+  try{
+    const lib=window.GDCourseLibrary;
+    if(!lib||typeof lib.facilityFor!=="function")return null;
+    return lib.facilityFor(payload&&(payload.courseId||payload.canonicalKey));
+  }catch(e){return null}
+}
+
+function gdEnsurePlayOrderScreen(){
+  let panel=document.getElementById("gdPlayOrderScreen");
+  if(panel)return panel;
+  panel=document.createElement("div");
+  panel.id="gdPlayOrderScreen";
+  /* gdCoursePinScreen's own class, not a copy of its CSS - one stylesheet rule
+     for both, so they cannot drift apart visually. */
+  panel.className="gdCoursePinScreen hidden";
+  panel.innerHTML='<div class="gdCoursePinPanel" role="dialog" aria-live="polite" aria-labelledby="gdPlayOrderTitle">'
+    +'<div class="gdCoursePinKicker" id="gdPlayOrderKicker">27 holes here</div>'
+    +'<div class="gdCoursePinTitle" id="gdPlayOrderTitle">Pick your play order</div>'
+    +'<div class="gdCoursePinText" id="gdPlayOrderText">Tap the nine you start on, then the one you finish on.</div>'
+    +'<div class="gdCoursePinActions">'
+    +'<button type="button" class="gdCoursePinSecondary" onclick="gdResetPlayOrder(event)">Start again</button>'
+    +'<button type="button" class="gdCoursePinPrimary" onclick="gdConfirmPlayOrder(event)">Play these 18</button>'
+    +'</div></div>';
+  (document.getElementById("courseScreen")||document.body).appendChild(panel);
+  return panel;
+}
+
+/* What they picked last time here. Offered as a starting point rather than
+   applied silently - most players do play the same pairing most weeks, but
+   "most" is not "always" and the tap is cheap. */
+function gdRememberedPlayOrder(facilityKey){
+  try{
+    const all=JSON.parse(localStorage.getItem(GD_PLAY_ORDER_KEY)||"{}")||{};
+    const saved=all[facilityKey];
+    return Array.isArray(saved)&&saved.length===2?saved:[];
+  }catch(e){return []}
+}
+function gdStorePlayOrder(facilityKey,courseIds){
+  try{
+    const all=JSON.parse(localStorage.getItem(GD_PLAY_ORDER_KEY)||"{}")||{};
+    all[facilityKey]=courseIds;
+    localStorage.setItem(GD_PLAY_ORDER_KEY,JSON.stringify(all));
+  }catch(e){}
+}
+
+/* The marker IS the button - there is no separate list to keep in step with the
+   map. Numbered by tap order, so "which is my front nine" is answered by
+   looking at it. */
+function gdPlayOrderPinIcon(order){
+  return L.divIcon({
+    className:"gdPlayOrderPin"+(order>0?" picked":""),
+    html:'<span>'+(order>0?order:"")+'</span>',
+    iconSize:[36,36],iconAnchor:[18,18]
+  });
+}
+
+function gdRenderPlayOrder(){
+  const state=gdPlayOrderState;
+  if(!state)return;
+  state.markers.forEach(entry=>{
+    entry.marker.setIcon(gdPlayOrderPinIcon(state.picks.indexOf(entry.courseId)+1));
+  });
+  const text=document.getElementById("gdPlayOrderText");
+  if(text){
+    const named=state.picks.map(id=>(state.nines.filter(n=>n.courseId===id)[0]||{}).courseName).filter(Boolean);
+    text.textContent=state.picks.length===0?"Tap the nine you start on, then the one you finish on."
+      :state.picks.length===1?"Now tap the nine you finish on."
+      :named.join(" then ")+". That's your 18.";
+  }
+  const primary=document.querySelector("#gdPlayOrderScreen .gdCoursePinPrimary");
+  if(primary)primary.disabled=state.picks.length!==2;
+}
+
+function gdTogglePlayOrderNine(courseId){
+  const state=gdPlayOrderState;
+  if(!state)return;
+  const at=state.picks.indexOf(courseId);
+  /* Tapping a chosen nine takes it back off, so a mis-tap costs one tap rather
+     than a trip through Start again. */
+  if(at>=0)state.picks.splice(at,1);
+  else if(state.picks.length<2)state.picks.push(courseId);
+  gdRenderPlayOrder();
+}
+
+window.gdResetPlayOrder=function(event){
+  try{event&&event.preventDefault();}catch(e){}
+  if(gdPlayOrderState)gdPlayOrderState.picks=[];
+  gdRenderPlayOrder();
+  return false;
+};
+
+window.gdConfirmPlayOrder=function(event){
+  try{event&&event.preventDefault();}catch(e){}
+  const state=gdPlayOrderState;
+  if(!state||state.picks.length!==2)return false;
+  gdStorePlayOrder(state.facilityKey,state.picks.slice());
+  const front=state.nines.filter(n=>n.courseId===state.picks[0])[0];
+  gdHidePlayOrderScreen();
+  /* Opens the FRONT nine as an ordinary course. Everything downstream keeps
+     treating it as the nine-hole course it is - nothing here renumbers anything
+     or stitches two courses together, which is a change to the round model and
+     is deliberately out of scope. The back nine is remembered against the
+     facility, ready for whatever consumes it. */
+  if(front)gdOpenCoursePickerLegacyCourse(Object.assign({},state.payload,{
+    courseId:front.courseId,name:front.courseName,
+    lat:front.lat,lng:front.lng,
+    gdPlayOrder:state.picks.slice(),gdPlayOrderChecked:true
+  }));
+  return false;
+};
+
+function gdHidePlayOrderScreen(){
+  try{document.getElementById("gdPlayOrderScreen")?.classList.add("hidden");}catch(e){}
+  try{(gdPlayOrderState?.markers||[]).forEach(entry=>entry.marker.remove());}catch(e){}
+  gdPlayOrderState=null;
+}
+
+function gdShowPlayOrderScreen(payload,facility){
+  const panel=gdEnsurePlayOrderScreen();
+  gdPlayOrderState={
+    facilityKey:facility.facilityKey,nines:facility.nines,payload,markers:[],
+    picks:gdRememberedPlayOrder(facility.facilityKey)
+      .filter(id=>facility.nines.some(n=>n.courseId===id))
+  };
+  const kicker=document.getElementById("gdPlayOrderKicker");
+  if(kicker)kicker.textContent=(facility.nines.length*9)+" holes here";
+  try{
+    facility.nines.forEach(nine=>{
+      const marker=L.marker([nine.lat,nine.lng],{icon:gdPlayOrderPinIcon(0),title:nine.courseName})
+        .addTo(map).on("click",()=>gdTogglePlayOrderNine(nine.courseId));
+      gdPlayOrderState.markers.push({courseId:nine.courseId,marker});
+    });
+    /* Zoom out until every pin is on screen. That is the whole framing rule -
+       a nine the player cannot see is a nine they cannot tap. No zoom floor and
+       no fixed centre: the facility decides how far out this goes, and a tight
+       three-nine site and a sprawling one both end up showing all three. */
+    map.fitBounds(facility.nines.map(n=>[n.lat,n.lng]),{padding:[56,56]});
+  }catch(e){}
+  panel.classList.remove("hidden");
+  gdRenderPlayOrder();
+  return false;
+}
+
 function gdCenterCoursePinMap(payload){
   const point=gdCoursePickerFinitePoint(payload)||gdCoursePickerMapCenterPoint()||gdCoursePickerDefaultPoint();
   if(!point)return false;
@@ -16767,6 +16949,23 @@ function gdOpenCoursePickerLegacyCourse(course){
   const usePinSeed=!payload.gdDatabaseMapAvailable&&gdCoursePickerUsesPinSeed(payload);
   if(gdCoursePickerNeedsCoursePin(payload))return gdShowCoursePinScreen(payload);
   if(gdCoursePayloadIsManual(payload))return window.GDCoursePickerCoreBridge.openManualCourse(payload);
+  /* A published 27-hole facility asks which two nines before opening one.
+   *
+   * Deliberately BELOW the pin branch and gated on a published map existing:
+   * the pin screen is a pre-requisite to scanning, this only ever applies to
+   * courses that finished scanning long ago. gdPlayOrderChecked is set on the
+   * payload the confirm hands back, so choosing a nine opens it rather than
+   * asking again. */
+  if(payload?.gdDatabaseMapAvailable===true&&!payload.gdPlayOrderChecked){
+    const facility=safeGdPlayOrderFacility(payload);
+    if(facility&&facility.then){
+      facility.then(found=>{
+        if(found)gdShowPlayOrderScreen(payload,found);
+        else gdOpenCoursePickerLegacyCourse(Object.assign({},payload,{gdPlayOrderChecked:true}));
+      }).catch(()=>gdOpenCoursePickerLegacyCourse(Object.assign({},payload,{gdPlayOrderChecked:true})));
+      return false;
+    }
+  }
   gdHideCoursePinScreen();
   gdResetCoursePickerPresentationReadiness(payload,{forceScanner:usePinSeed});
   try{selectedHole=1;currentPlayingHole=1;}catch(e){}
@@ -18161,7 +18360,23 @@ function gdDeriveDistanceTendency({faceDeltaFromPatternDeg=0,handedness="right",
 function gdDerivePatternWindow({club="7i",faceWindowDeg,carryWindowPct}){const defaults=gdGetClubPatternDefaults(club);return{faceWindowDeg:gdRound(Number(faceWindowDeg??defaults.faceWindowDeg),2),carryWindowPct:gdRound(Number(carryWindowPct??defaults.carryWindowPct),2)}}
 function gdDeriveClusterTilt({faceAlignmentOffsetDeg=0,faceWindowDeg=.7,carryWindowPct=4.2,handedness="right",club="7i"}){const hand=gdHandednessSign(handedness), defaults=gdGetClubPatternDefaults(club), geo=gdBubbleGeometryTuning(), offsetInfluence=Math.abs(Number(faceAlignmentOffsetDeg)||0)*.12, windowInfluence=Math.abs(Number(faceWindowDeg)||0)*.9, carryInfluence=Math.abs(Number(carryWindowPct)||0)*.08;return gdRound(gdClamp(hand*(defaults.tiltBaseDeg+offsetInfluence+windowInfluence+carryInfluence)*geo.tiltScale,-geo.tiltMaxDeg,geo.tiltMaxDeg),2)}
 function calculateBubbleProfile(input={}){const club=input.club||"7i", baseCarry=Number(input.baseCarry??gdDefaultCarryForClub(club)), handedness=input.handedness||"right", faceAlignmentOffsetDeg=gdResolveFaceAlignmentOffsetDeg(input), dispersionMultiplier=Number(input.dispersionMultiplier??1), window=gdDerivePatternWindow({club,faceWindowDeg:input.faceWindowDeg,carryWindowPct:input.carryWindowPct}), size=gdDeriveBasePatternSize({club,baseCarry,dispersionMultiplier}), aim=gdDeriveAimOffset({faceAlignmentOffsetDeg,baseCarry}), distanceTendencyPct=gdDeriveDistanceTendency({faceDeltaFromPatternDeg:window.faceWindowDeg,handedness,club}), clusterTiltDeg=gdDeriveClusterTilt({faceAlignmentOffsetDeg,faceWindowDeg:window.faceWindowDeg,carryWindowPct:window.carryWindowPct,handedness,club});return{club,baseCarry:gdRound(baseCarry,1),totalM:Number.isFinite(Number(input.totalM))?gdRound(Number(input.totalM),1):null,faceAlignmentOffsetDeg:gdRound(faceAlignmentOffsetDeg,2),faceOffsetDeg:gdRound(faceAlignmentOffsetDeg,2),aimOffsetDeg:aim.aimOffsetDeg,aimOffsetM:aim.aimOffsetM,clusterWidthM:size.clusterWidthM,clusterDepthM:size.clusterDepthM,clusterTiltDeg,faceWindowDeg:window.faceWindowDeg,faceToPathToleranceDeg:gdRound(Number(input.faceToPathToleranceDeg??window.faceWindowDeg),2),carryWindowPct:window.carryWindowPct,distanceTendencyPct,dispersionMultiplier:size.dispersionMultiplier,gdbTrust:gdRound(Number(input.gdbTrust??1),2),faceToPathDeg:Number.isFinite(Number(input.faceToPathDeg))?gdRound(Number(input.faceToPathDeg),2):null,derivedAoADeg:Number.isFinite(Number(input.derivedAoADeg))?gdRound(Number(input.derivedAoADeg),2):null,impactStatus:"Baseline",shapeSource:"engine-derived",modelNote:"Offset places the shot data. Club/carry sizes it. Accepted delivery window shapes the tilt/depth realism."}}
-function calculateVisualBubbleRender(profile,options={}){const handedness=options.handedness||"right", hand=gdHandednessSign(handedness), offsetNorm=gdClamp((hand*profile.faceAlignmentOffsetDeg)/6,-1,1), windowNorm=gdClamp((profile.faceWindowDeg||.7)/1.5,0,1), carryNorm=gdClamp((profile.carryWindowPct||4.2)/8,0,1);return{visualWidthM:gdRound(profile.clusterWidthM*(1+windowNorm*.1+Math.abs(offsetNorm)*.06),1),visualDepthM:gdRound(profile.clusterDepthM*(1+carryNorm*.08+windowNorm*.06),1),visualTiltDeg:gdRound(profile.clusterTiltDeg+offsetNorm*1.5+windowNorm*1.2,2),visualSkewDeg:gdRound(offsetNorm*5,2),visualYBias:gdRound(Math.max(0,offsetNorm)*.04-Math.max(0,-offsetNorm)*.03,3)}}
+/* HANDEDNESS IS THE ONLY THING THAT MAKES A BUBBLE ASYMMETRIC.
+ *
+ * visualTiltDeg used to read `clusterTiltDeg + offsetNorm*1.5 + windowNorm*1.2`.
+ * The first two mirror with the player's hand; windowNorm does not - it is
+ * faceWindowDeg/1.5, an unsigned MAGNITUDE - so that last term added the same
+ * +0.56 degrees to both hands. A right-hander's bubble came out tilted 1.12
+ * degrees further from square than a left-hander's, on every club, and since
+ * gdBubbleLocalToLatLng prefers visualTiltDeg over clusterTiltDeg it was the
+ * asymmetry that actually reached the screen.
+ *
+ * Signed with hand, so the face window widens the lean AWAY from square for
+ * whichever way the player swings instead of always clockwise. Same for
+ * visualYBias, which leaned 0.04 one way against 0.03 the other.
+ *
+ * The rule this file now keeps: any term added to a signed quantity must
+ * itself be signed, or it is a left/right difference nobody asked for. */
+function calculateVisualBubbleRender(profile,options={}){const handedness=options.handedness||"right", hand=gdHandednessSign(handedness), offsetNorm=gdClamp((hand*profile.faceAlignmentOffsetDeg)/6,-1,1), windowNorm=gdClamp((profile.faceWindowDeg||.7)/1.5,0,1), carryNorm=gdClamp((profile.carryWindowPct||4.2)/8,0,1);return{visualWidthM:gdRound(profile.clusterWidthM*(1+windowNorm*.1+Math.abs(offsetNorm)*.06),1),visualDepthM:gdRound(profile.clusterDepthM*(1+carryNorm*.08+windowNorm*.06),1),visualTiltDeg:gdRound(profile.clusterTiltDeg+offsetNorm*1.5+hand*windowNorm*1.2,2),visualSkewDeg:gdRound(offsetNorm*5,2),visualYBias:gdRound(offsetNorm*.035,3)}}
 function gdNearestStandInClub(distance){return gdResolveShotBagClub(gdGhostShotBagRows(),"Bag",distance)||{club:"7i",baseCarry:155,totalM:gdBagTotalForCarry("7i",155)}}
 function gdProfileCentralOffset(p,fallback=1.4){const n=Number(p?.faceOffsetDeg??p?.centralFaceOffsetDeg??fallback);return Number.isFinite(n)?n:fallback}
 function gdProfileInputForClub(club,distance){
@@ -18561,7 +18776,23 @@ function buildBubbleShape(center, payloadInput, scale=1){
        distance tendency it owns, and mixing a second effect into the same
        clamp would let one silently eat the other. */
     const rf=bubbleRadiusFactor(rel,payload)*gdMicroGeometryRadiusFactor(rel);
-    pts.push({x:Math.cos(rel)*axes.depth*rf,y:Math.sin(rel)*axes.lateral*rf});
+    /* ORIENTATION: the ACROSS axis is the one that lies square to the shot.
+     *
+     * This used to read `x:...axes.depth, y:...axes.lateral`, which laid the
+     * object's longer axis straight DOWN the target line - a quarter turn from
+     * where it belongs, and the 90 degrees GPS Play was visibly out by. The
+     * object itself was never wrong: the same width/depth pair drew correctly
+     * in the graphs, which lay it down the other way round. Only this
+     * assignment was.
+     *
+     * Nothing about SIZE changes here. axes.lateral and axes.depth arrive
+     * already scaled and capped by GPS Play's own logic, which stays untouched;
+     * all that changes is which of the two goes on which axis of the frame.
+     *
+     * rel keeps its meaning - rel=0 is still Long, rel=pi/2 still Right - so
+     * the region model and the tilt still measure from where they always did.
+     * See scripts/gd-bubble-frame-core.js for the shared definition. */
+    pts.push({x:Math.cos(rel)*axes.lateral*rf,y:Math.sin(rel)*axes.depth*rf});
   }
   return gdSmoothBubbleLocalRing(pts,2).map(point=>gdBubbleLocalToLatLng(center,payload,point.x,point.y));
 }

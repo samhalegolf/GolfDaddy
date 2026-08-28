@@ -130,6 +130,20 @@ export function courseFitVerdict(facts) {
       widestSeparationM: Number(collision.widestSeparationM) || null
     });
   }
+  /* The same verdict reached without OSM hole numbers: the ground holds far more
+     holes than the card that named it, and the scan could not find the other
+     cards to separate them. detectHoleNumberCollision cannot see this - it reads
+     repeated hole NUMBERS, and a site OSM never numbered has none - so Howeston
+     published nine holes of a 27-hole facility as trusted and complete. Same
+     conclusion, same message to the player: there is more than one course here. */
+  const facility = f.facilityUnresolved;
+  if (facility && facility.multiLoop) {
+    return untrusted("multiple-courses", "ground", {
+      loops: Number(facility.loops) || null,
+      holeCandidates: Number(facility.candidateCount) || null,
+      cardHoles: Number(facility.cardHoles) || null
+    });
+  }
   /* Coverage, judged by the card when there is one and by the shape when there is
      not - see courseCoverageComplete. The cheapest check in this file and the only
      one needing no outside evidence at all, which is why it catches what the rules

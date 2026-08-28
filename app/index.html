@@ -306,12 +306,25 @@
       <button id="bagClose" type="button" class="sheetClose">Done</button>
     </div>
     <div class="sheetBody">
+      <!-- Handedness sits with the bag because both are "about you" rather than
+           "about this round" - and it is a player-profile value, written to the
+           same shared profile store the clubs are, so the two shells cannot
+           disagree about which way round you swing. -->
+      <div class="setRow bagHandRow">
+        <div><strong>Handedness</strong><span>Which way your bubble leans.</span></div>
+        <button id="bagHandToggle" type="button" class="toggle">Right handed</button>
+      </div>
       <div id="bagNotice" class="bagNotice hiddenState"></div>
       <div id="bagList" class="bagList"></div>
+      <!-- Name first, then the distance. A club is a thing before it is a
+           number: asked the other way round the player is typing a carry with
+           nothing to attach it to, and "Carry m" sitting next to an empty
+           "Club" reads as two equal blanks rather than a first step. The carry
+           field and Add button appear once the club has a name. -->
       <div class="bagAddRow">
-        <input id="bagAddClub" type="text" placeholder="Club" aria-label="New club name">
-        <input id="bagAddCarry" type="number" inputmode="numeric" min="1" step="1" placeholder="Carry m" aria-label="New club carry metres">
-        <button id="bagAddBtn" type="button">Add</button>
+        <input id="bagAddClub" type="text" placeholder="New club name" aria-label="New club name">
+        <input id="bagAddCarry" class="hiddenState" type="number" inputmode="numeric" min="1" step="1" placeholder="Carry m" aria-label="New club carry metres">
+        <button id="bagAddBtn" class="hiddenState" type="button">Add</button>
       </div>
       <div class="bagQuickRow">
         <input id="bagQuick7i" type="number" inputmode="numeric" min="1" step="1" placeholder="7i carry">

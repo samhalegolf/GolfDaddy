@@ -310,13 +310,23 @@
     });
   }
 
-  /* If the course started on the object map (or nothing at all), check once
-     per hole change whether a published map has since appeared - a real
-     answer, not guessed at, since the same /api/course-package fetch used
-     everywhere else already reports it. Fire-and-forget: this runs after a
-     hole change already resolved, never blocks navigation. */
+  /* Once per hole change, ask whether the SERVER's copy is newer than the one
+     on this device. Fire-and-forget: this runs after a hole change already
+     resolved, never blocks navigation.
+
+     It used to ask a different question - "is the server's map a different
+     TYPE than the one I'm playing?" - and that question is not the same thing
+     as an update. A course sitting on the object map was offered a swap the
+     moment any published map existed, however old, and a course already on a
+     published map was skipped entirely, so a genuinely republished map never
+     reached the player at all. Presence of a map on the server is not news;
+     the scan finishing is not news. Only a higher version is news.
+
+     One rule, app.courseVersions.isStale, shared with the Course Library
+     badge - see app/js/course-versions.js. Nothing saved locally is NOT an
+     update, it's a first download, and that path belongs to openPlay. */
   async function checkForMapUpdate() {
-    if (activeMapType === "published" || mapUpdateDismissed || !activeCourse) return;
+    if (!activeCourse) return;
     var course = activeCourse;
     var token = ++updateCheckToken;
     var pkg = await app.fetchCoursePackage({
@@ -325,7 +335,49 @@
     });
     if (token !== updateCheckToken || activeCourse !== course) return;   // superseded: left/changed course
     var mapType = mapTypeOf(pkg);
-    if (mapType && mapType !== activeMapType) showMapUpdateBar(course, pkg, mapType);
+    if (!mapType) return;                                                // nothing publishable on the server
+    /* The captured map has landed on a round that is streaming the live one.
+     *
+     * Taken without asking, and it is the only case that is. Anything short of
+     * a published map - a lite-geo package, or no package at all - means the
+     * surface under the player is live tiles, fetched and drawn for every hole
+     * for the whole round. A published capture is the same course as a
+     * declared surface: less network, less battery, and it renders without the
+     * basemap at all. Prompting to make the round cheaper is a question with
+     * one sensible answer, so this stops asking it.
+     *
+     * Every other move stays a prompt. A player already on a published map is
+     * being offered a NEWER one, and swapping the ground under them mid-hole
+     * is a change they should get to decline. */
+    if (mapType === "published" && activeMapType !== "published") {
+      adoptMapUpdate(course, pkg, mapType);
+      return;
+    }
+    /* The dismissal belongs to the prompt, not to the check - it was a "no" to
+       being asked, and the auto-adopt above never asked. */
+    if (mapUpdateDismissed) return;
+    var local = app.courseStore.load(course.courseId);
+    /* Playing on the live map with nothing saved: the first map to appear is
+       genuinely new to this device, whatever its version. */
+    if (!local) { showMapUpdateBar(course, pkg, mapType); return; }
+    if (!app.courseVersions.isStale(local, {
+      objectsVersion: pkg.objectsVersion || null,
+      mapVersion: pkg.packageVersion || null
+    })) return;
+    showMapUpdateBar(course, pkg, mapType);
+  }
+
+  /* Save it, adopt it, and hand it to the Marshal.
+   *
+   * PACKAGE_UPDATED is a swap, not a restart: shots already recorded stay, the
+   * live hole stays, the mode stays, and only the geometry underneath changes
+   * (see marshal.js). That is what makes taking a map mid-round safe enough to
+   * do without asking. */
+  function adoptMapUpdate(course, pkg, mapType) {
+    saveCourseToLibrary(course, pkg);
+    activeMapType = mapType;
+    app.marshal.signal("PACKAGE_UPDATED", { pkg: pkg });
+    document.getElementById("mapUpdateBar").classList.add("hiddenState");
   }
 
   /* A prompt, not an auto-switch - the auto-download bias only applies to a
@@ -333,15 +385,16 @@
      no prompt at all); one that arrives mid-round asks first, since the
      player is already using the map they have. */
   function showMapUpdateBar(course, pkg, mapType) {
+    /* "Available" is the right word only when the device has nothing. With a
+       copy already saved this bar is offering a NEWER one, and saying
+       "available" there is the same overclaim checkForMapUpdate just stopped
+       making. */
     document.getElementById("mapUpdateLabel").textContent =
-      mapType === "published" ? "Published map available" : "Course map available";
-    var bar = document.getElementById("mapUpdateBar");
-    bar.classList.remove("hiddenState");
+      app.courseStore.load(course.courseId) ? "Updated map available"
+        : mapType === "published" ? "Published map available" : "Course map available";
+    document.getElementById("mapUpdateBar").classList.remove("hiddenState");
     document.getElementById("mapUpdateDownload").onclick = function () {
-      saveCourseToLibrary(course, pkg);
-      activeMapType = mapType;
-      app.marshal.signal("PACKAGE_UPDATED", { pkg: pkg });
-      bar.classList.add("hiddenState");
+      adoptMapUpdate(course, pkg, mapType);
     };
   }
 
@@ -405,6 +458,11 @@
   }
 
   document.addEventListener("DOMContentLoaded", function () {
+    /* FIRST, before any route opens. A hand-off to a course already in the
+       library starts the round synchronously, and the map it builds on the way
+       past can only pick aerial imagery if the keys are already on their way.
+       This used to sit at the bottom of this handler, after openPlay. */
+    app.basemap.prefetch();
     document.getElementById("accountAction").addEventListener("click", function () {
       if (app.account.signedIn()) { app.account.signOut(); renderAccountState(); }
       else show("signin");
@@ -438,7 +496,6 @@
     });
     app.courseDataFeedInstalled = !!(app.courseData && app.courseData.submit);
     app.showRoute = show;   // access.js offers sign-in without leaving the page
-    app.basemap.prefetch();   // so base-layer choice is synchronous by map time
     app.nativeBackInstalled = installNativeBack();
     app.booted = true;   // boot-test canary: the last line of the load order ran
   });
