@@ -24,6 +24,7 @@
 <link href="styles/clarity-backup.css" rel="stylesheet"/>
 <link href="styles/clarity-payments.css?v=payments-admin-slim-20260717" rel="stylesheet"/>
 <link href="styles/gd-manual-practice.css?v=manual-practice-001" rel="stylesheet"/>
+<link href="styles/gd-demo-mode.css?v=demo-mode-001" rel="stylesheet"/>
 <script src="assets/vendor/leaflet/leaflet.js"></script>
 <script src="scripts/inline/gd-leaflet-alias.js?v=split03"></script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
@@ -114,8 +115,19 @@
 </div>
 </div>
 </details>
+<!-- Outside [data-gd-offset-hub]: that whole details block is display:none
+     when this panel is reparented into the Data Hub accordion
+     (.gdHubEmbedded [data-gd-offset-hub], styles/inline/gd-app-base.css) -
+     the shared hub card at the top of the Hub takes over then. Play has to
+     stay visible in both the embedded and standalone rendering, so it lives
+     here instead. -->
+<div class="gdPracticeTopRail gdDemoCalloutAnchor">
+<button type="button" class="gdPracticePlayBtn" id="gdPracticePlayBtn" onclick="return window.GDCoursePicker&amp;&amp;typeof window.GDCoursePicker.open==='function'?window.GDCoursePicker.open({source:'practice-play',returnTarget:'gps'}):false">Play</button>
+<div class="gdDemoCallout" id="gdPracticePlayCallout" role="status" hidden>Press me</div>
+</div>
 <div class="gdPracticeVisualStack">
 <h2 class="gdPracticeVisualTitle" id="gdPracticeVisualTitle">Player - Practice Data</h2>
+<div class="gdDemoBadge" id="gdPracticeDemoBadge" hidden>DEMO DATA</div>
 <div class="gdPracticeVisual" id="gdPracticeDataVisual"></div>
 </div>
 <div class="gdPracticeProjectionControls" id="gdPracticeProjectionControls"></div>
@@ -127,6 +139,15 @@
 <button class="gdPracticeImportIconButton email" type="button" aria-label="Email import" title="Email import" onclick="return gdPracticeEmailImportPending(event)"><span class="gdPracticeImportIconGlyph" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 6.5h16a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 16V8A1.5 1.5 0 0 1 4 6.5Z"/><path d="m4 8 8 5.5L20 8"/></svg></span></button>
 <button class="gdPracticeImportIconButton plot" type="button" aria-label="Plot shots" title="Plot shots" onclick="return gdTogglePracticePlot(event)"><span class="gdPracticeImportIconGlyph" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="6" cy="17" r="1.6"/><circle cx="12" cy="9.5" r="1.6"/><circle cx="18" cy="13.5" r="1.6"/><path d="M4 20.5h16" stroke-linecap="round"/></svg></span></button>
 <button class="gdPracticeImportIconButton coachSet gdCoachSetIconButton" type="button" hidden aria-label="Coach set" title="Coach set" onclick="return gdToggleCoachSetBubble(event)"><span class="gdPracticeImportIconGlyph" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M12 3.5c-3.6 0-6.2 2.3-6.2 5.7 0 2.1 1 3.5 2.2 4.6.7.6 1 1 1 1.9v1.3h6v-1.3c0-.9.3-1.3 1-1.9 1.2-1.1 2.2-2.5 2.2-4.6 0-3.4-2.6-5.7-6.2-5.7Z"/><path d="M9.5 20h5M10 21.6h4" stroke-linecap="round"/></svg></span></button>
+<button class="gdPracticeImportIconButton demo" type="button" id="gdPracticeTryDemoBtn" aria-label="Try Demo" title="Try Demo" onclick="return window.GDDemoSession&amp;&amp;window.GDDemoSession.openEntry(event)"><span class="gdPracticeImportIconGlyph" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M12 3.5 4 7.5v9l8 4 8-4v-9L12 3.5Z"/><path d="M12 12v9M4 7.5 12 12l8-4.5"/></svg></span></button>
+<button class="gdPracticeImportIconButton demo" type="button" id="gdPracticeExitDemoBtn" hidden aria-label="Exit Demo" title="Exit Demo" onclick="return window.GDDemoSession&amp;&amp;window.GDDemoSession.exit(event)"><span class="gdPracticeImportIconGlyph" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M6 6l12 12M18 6 6 18" stroke-linecap="round"/></svg></span></button>
+</div>
+</div>
+<div class="gdDemoEntryForm" id="gdDemoEntryForm" hidden>
+<label>7-iron carry (m)<input type="number" inputmode="decimal" id="gdDemoCarryInput" min="1" step="1" placeholder="e.g. 150"></label>
+<div class="gdDemoEntryButtons">
+<button type="button" onclick="return window.GDDemoSession&amp;&amp;window.GDDemoSession.startFromEntry(event)">Start Demo</button>
+<button type="button" onclick="return window.GDDemoSession&amp;&amp;window.GDDemoSession.cancelEntry(event)">Cancel</button>
 </div>
 </div>
 <div class="gdPracticeImportBody" id="gdPracticeImportBody">
@@ -389,6 +410,12 @@
 <script src="scripts/gd-manual-practice-core.js?v=manual-practice-core-002"></script>
 <script src="scripts/gd-manual-practice-data.js?v=manual-practice-data-002"></script>
 <script src="scripts/gd-practice-library-adapter.js?v=native-library-adapter-001"></script>
+<!-- Demo Mode: fake evidence through the real Practice/Bubble/Course Data
+     pipelines. Loads after the launch-monitor and shot-cluster engines it
+     calls into, before gd-route-audit.js's render functions that check
+     window.GDDemoSession. -->
+<script src="scripts/gd-demo-session.js?v=demo-mode-001"></script>
+<script src="scripts/gd-demo-course-data-provider.js?v=demo-mode-001"></script>
 <!-- Bubble Micro-Geometry. The Signal engine is the same file functions/bubble-model.js
      requires server-side, and it is pure - no platform APIs - so it loads anywhere.
      It must come before gd-bubble-model-client.js, which reads its version gate and

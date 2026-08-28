@@ -147,8 +147,35 @@
       if (app.wakeLock) app.wakeLock.stop();
       activeCourse = null;
       activeMapType = null;
+      stopDemoCourseDataTimer();
     }
     if (route === "home") renderAccountState();
+  }
+
+  /* Demo Mode only: ~20s after GPS Play genuinely becomes interactive, offer
+     a "See Course Data" CTA. Gated on DemoSession.active && .adopted so a
+     real round never sees this. Cleared above whenever show() routes away
+     from "play" (screen exit, course change teardown, sign-in, etc.) - the
+     one place that already tears down every other play-only resource. */
+  var demoCourseDataTimer = null;
+  var DEMO_COURSE_DATA_DELAY_MS = 20000;
+  function startDemoCourseDataTimerIfNeeded() {
+    if (demoCourseDataTimer) return;
+    var demo = window.GDDemoSession;
+    if (!demo || !demo.active || !demo.adopted) return;
+    demo.markGpsEntered();
+    demoCourseDataTimer = setTimeout(function () {
+      demoCourseDataTimer = null;
+      var cta = document.getElementById("gdDemoCourseDataCta");
+      if (cta) cta.hidden = false;
+    }, DEMO_COURSE_DATA_DELAY_MS);
+  }
+  function stopDemoCourseDataTimer() {
+    if (demoCourseDataTimer) { clearTimeout(demoCourseDataTimer); demoCourseDataTimer = null; }
+  }
+  function seeDemoCourseData() {
+    if (window.GDDemoSession) window.GDDemoSession.setCourseDataActive(true);
+    window.location.href = "/?openDemoCourseData=1";
   }
 
   /* Visible from first paint (see index.html) so it covers both the "which
@@ -427,6 +454,7 @@
       startRound(course, pkg);
       goResumeHole(resumeHole);
       hideLoadingScreen();
+      startDemoCourseDataTimerIfNeeded();
     } else {
       /* awaitCoursePackage, not fetchCoursePackage: for a course the server
          is still mapping ("processing"), this holds the player behind the
@@ -453,6 +481,7 @@
       startRound(course, pkg);
       goResumeHole(resumeHole);
       hideLoadingScreen();
+      startDemoCourseDataTimerIfNeeded();
       saveCourseToLibrary(course, pkg);
     }
   }
@@ -482,6 +511,10 @@
       mapUpdateDismissed = true;
       document.getElementById("mapUpdateBar").classList.add("hiddenState");
     });
+    var demoCourseDataCta = document.getElementById("gdDemoCourseDataCta");
+    if (demoCourseDataCta) demoCourseDataCta.addEventListener("click", seeDemoCourseData);
+    var demoBadge = document.getElementById("gdGpsDemoBadge");
+    if (demoBadge && window.GDDemoSession && window.GDDemoSession.active) demoBadge.hidden = false;
     var handoffCourseId = new URLSearchParams(window.location.search).get("courseId");
     if (handoffCourseId) {
       openPlay(courseFromUrl(handoffCourseId),

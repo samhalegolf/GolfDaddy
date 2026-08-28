@@ -20866,6 +20866,9 @@ function gdStatsGuidanceLabel(guidance, deltaPct){
   return "Collecting";
 }
 function gdCurrentStatsAnalysis(){
+  if(window.GDDemoSession&&window.GDDemoSession.active&&window.GDDemoSession.courseDataActive&&window.GDDemoCourseDataProvider){
+    return window.GDDemoCourseDataProvider.analysis(window.GDDemoSession,{consistencyPct:gdStatsConsistencyPct});
+  }
   return window.GolfDaddyShotClusterAnalysis&&window.GolfDaddyShotClusterAnalysis.analyzeCurrent&&window.GolfDaddyShotClusterAnalysis.analyzeCurrent({consistencyPct:gdStatsConsistencyPct});
 }
 function gdCourseDataLandingCounts(analysis, filteredRecords){
@@ -24907,7 +24910,16 @@ function gdAuthRouteBootActive(){return gdPasswordResetRouteActive()||document.d
 function gdOpenGpsSettingsRouteActive(){
   try{return new URLSearchParams(location.search||'').has('openGpsSettings');}catch(e){return false}
 }
-function bootProfileShell(){loadPlayerProfiles();gdInstallPlaceholderProfile();ensureProfile();gdAccountsBootstrap();savePlayerProfiles();syncCoreProfileFromActive();if(!gdAuthRouteBootActive()){showShellHome();if(gdOpenGpsSettingsRouteActive())openSettings({fromGps:true});}}
+/* Same cross-document hand-off as gdOpenGpsSettingsRouteActive above: the GPS
+   Play "See Course Data" CTA lives in /app/, a separate document, so it can't
+   call gdOpenCourseData() directly - it navigates here with this param
+   instead. DemoSession.courseDataActive (sessionStorage, set before that
+   navigation) is what actually gates the demo data - this param only routes
+   to the right screen. */
+function gdOpenDemoCourseDataRouteActive(){
+  try{return new URLSearchParams(location.search||'').has('openDemoCourseData');}catch(e){return false}
+}
+function bootProfileShell(){loadPlayerProfiles();gdInstallPlaceholderProfile();ensureProfile();gdAccountsBootstrap();savePlayerProfiles();syncCoreProfileFromActive();if(!gdAuthRouteBootActive()){showShellHome();if(gdOpenGpsSettingsRouteActive())openSettings({fromGps:true});if(gdOpenDemoCourseDataRouteActive()&&typeof window.gdOpenCourseData==="function")setTimeout(()=>window.gdOpenCourseData({demo:true}),0);}}
 window.GolfDaddyProfiles={load:loadPlayerProfiles,save:savePlayerProfiles,active:activePlayerProfile,open:openProfilePanel,onboarding:openOnboarding,generateQuickBag:gdGenerateQuickBag,installPlaceholder:gdInstallPlaceholderProfile};
 window.GolfDaddyAccounts={load:gdAccountsLoad,save:gdAccountsSave,state:()=>GD_ACCOUNT_STATE,current:gdCurrentAccount,accountForProfile:gdAccountForProfile,linkedPlayers:gdAccountLinkedPlayers,allAccounts:gdAdminAllAccounts,coachAccounts:gdAccountCoachAccounts,coachInviteFor:gdCoachInviteFor,generateCoachInvite:gdCoachGenerateInvite,connectCoachByCode:gdAccountConnectCoachByCode,linkExistingPlayerByEmail:gdAccountLinkExistingPlayerByEmail,signup:(data)=>gdAccountCreate(data,{activate:true}),login:gdAccountLogin,logout:gdAccountLogout,update:gdAccountUpdate,addPlayer:gdCoachAddPlayerAccount,addCoach:gdCoachAddCoachAccount,removeAccount:gdAdminRemoveAccount,unlinkPlayer:gdCoachUnlinkPlayer,managedProfiles:gdAccountManagedProfiles,deleteManagedProfile:gdAccountDeleteManagedProfile,viewProfile:gdAccountViewProfile,adminViewProfile:gdAdminViewProfile,viewOwnProfile:gdAccountViewOwnProfile,returnToOwnProfile:gdAccountReturnToOwnProfile,apply:gdAccountApplySession,roleLabel:gdAccountPublicRole};
 window.ClarityCaddieProfiles=window.GolfDaddyProfiles;

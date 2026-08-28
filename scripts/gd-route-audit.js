@@ -470,6 +470,7 @@
     }),null);
   }
   function gdPracticeDisplayAnalysis(opts={}){
+    if(window.GDDemoSession&&window.GDDemoSession.active)return window.GDDemoSession.practiceAnalysis;
     const api=window.GolfDaddyLaunchMonitorData;
     if(typeof api?.analyzeDisplay!=="function"){
       if(!opts.quiet)gdPracticeHydrateDisplayAnalysis();
@@ -3289,6 +3290,10 @@
   // has something fixed to sit on.
   let gdPracticeAutoBagInFlight=false;
   function gdPracticeAutoBagFromData(analysis){
+    // Demo Mode's synthetic analysis must never seed a real bag onto the real
+    // profile - a new player with no bag yet trying the demo would otherwise
+    // get a demo-derived bag silently written to their real profile.
+    if(window.GDDemoSession&&window.GDDemoSession.active)return false;
     // gdBagPersistRows re-enters through gdPracticeSyncBubbleSourcesToBag; without
     // this the first render would recurse.
     if(gdPracticeAutoBagInFlight)return false;
@@ -3379,13 +3384,16 @@
   function gdPracticeProjectionControlsHTML(analysis){
     const ctx=gdPracticeProjectionContext(analysis);
     const p=safe(()=>ensureProfile(),null);
+    const demoActive=!!(window.GDDemoSession&&window.GDDemoSession.active);
     // "Adopted" must mean THIS bubble, not "a bubble was adopted once".
     // gdPracticePlayingBubbleIsAdopted only checks that a source is active and its
     // offset matches the profile - it knows nothing about the live analysis, so
     // once anything had been saved the dock locked to Adopted/Saved forever, even
     // after new shots produced a completely different practice bubble. The
     // fingerprint-aware check is the one that answers the real question.
-    const adopted=gdPracticeCurrentBubbleWasAdopted(p,analysis);
+    // Demo Mode never touches the real profile, so "adopted" has to come from
+    // DemoSession's own flag instead of asking the (untouched) real profile.
+    const adopted=demoActive?!!window.GDDemoSession.adopted:gdPracticeCurrentBubbleWasAdopted(p,analysis);
     // A bubble is saved, but it is NOT the one on screen - so adopting is available
     // again and will replace it.
     const hasStaleSaved=!adopted&&gdPracticePlayingBubbleIsAdopted(p);
@@ -3407,7 +3415,12 @@
     const adoptDisabled=pendingActive?"":(ctx.canProject&&!adopted?"":"disabled");
 	    const tone=generated?"generated":ctx.canProject?"ready":"waiting";
 	    const adoptLabel=pendingActive?"Undo":adopted?"Adopted":"Adopt";
-	    const adoptAction=pendingActive?"gdPracticeUnadoptBubbleFromAction()":"gdPracticeAdoptBubbleFromAction()";
+	    // Demo Mode stages+saves in one press (there's no separate Save step in
+	    // the demo story), so it dispatches to DemoSession.adopt() instead of the
+	    // real Adopt/Unadopt handlers - those still write onto the real profile
+	    // and must never fire while Demo Mode is active.
+	    const adoptAction=demoActive?"GDDemoSession.adopt()":(pendingActive?"gdPracticeUnadoptBubbleFromAction()":"gdPracticeAdoptBubbleFromAction()");
+	    const demoPulse=demoActive&&!adopted&&ctx.canProject;
 	    // The state line is the "locked in" feedback: it has to be unambiguous that
 	    // Undo has stopped being an option once Save has been pressed.
 	    const adoptStatus=pendingActive
@@ -3419,7 +3432,7 @@
 	          :"";
 	    const bagSuggestion=gdPracticeBagSuggestionHTML(analysis);
 	    const bagNotice=gdPracticeBagSuggestionNoticeHTML(analysis);
-	    return `<div class="gdPracticeActionDock ${tone} ${bagSuggestion?"hasBagSuggestion":""} ${gdPracticeBagSuggestionOpen?"bagOpen":""}"><div class="gdPracticePrimaryActions"><button type="button" class="gdPracticeBubbleAction save ${pendingActive?"ready":""} ${savedLocked?"locked":""}" ${saveDisabled} onclick="return gdPracticeSaveBubbleFromAction()">${gdEscapeHTML(saveLabel)}</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""} ${pendingActive?"pending":""}" aria-pressed="${adopted||pendingActive?"true":"false"}" ${adoptDisabled} onclick="return ${adoptAction}">${gdEscapeHTML(adoptLabel)}</button></div>${adoptStatus}${bagSuggestion?`<div class="gdPracticeBagSuggestionSlot">${bagSuggestion}</div>`:""}</div>${gdPracticeSandboxControlsHTML("compact")}${bagNotice}`;
+	    return `<div class="gdPracticeActionDock ${tone} ${bagSuggestion?"hasBagSuggestion":""} ${gdPracticeBagSuggestionOpen?"bagOpen":""}"><div class="gdPracticePrimaryActions gdDemoCalloutAnchor">${demoPulse?`<div class="gdDemoCallout" role="status">Press me</div>`:""}<button type="button" class="gdPracticeBubbleAction save ${pendingActive?"ready":""} ${savedLocked?"locked":""}" ${saveDisabled} onclick="return gdPracticeSaveBubbleFromAction()">${gdEscapeHTML(saveLabel)}</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""} ${pendingActive?"pending":""} ${demoPulse?"gdDemoPulse":""}" aria-pressed="${adopted||pendingActive?"true":"false"}" ${adoptDisabled} onclick="return ${adoptAction}">${gdEscapeHTML(adoptLabel)}</button></div>${adoptStatus}${bagSuggestion?`<div class="gdPracticeBagSuggestionSlot">${bagSuggestion}</div>`:""}</div>${gdPracticeSandboxControlsHTML("compact")}${bagNotice}`;
 	  }
 	  function gdRenderPracticeProjectionControls(analysis){
 	    const root=byId("gdPracticeProjectionControls");

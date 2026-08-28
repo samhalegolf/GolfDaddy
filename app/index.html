@@ -32,6 +32,7 @@
 <script src="../scripts/clarity-error-reporter.js"></script>
 <link rel="stylesheet" href="../assets/vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="../styles/gd-demo-mode.css">
 </head>
 <body>
 
@@ -50,6 +51,10 @@
     <div class="loadingTrack"><i id="loadingBar"></i></div>
   </div>
 </div>
+<!-- Demo Mode only: shown/hidden by boot.js and demo-session.js, never for a
+     real round. -->
+<div id="gdGpsDemoBadge" hidden>DEMO</div>
+<button type="button" id="gdDemoCourseDataCta" hidden>See Course Data</button>
 
 <!-- Entered exclusively via ?courseId=... from the course picker on the main
      site - there is no picker or Play tile here any more. This screen only
@@ -437,6 +442,11 @@
      copy. Pure file, no platform APIs, shared verbatim with the server. -->
 <script src="../scripts/gd-bubble-signals-core.js"></script>
 <script src="js/bubble-engine.js"></script>
+<!-- Demo Mode companion: reads the sessionStorage state the main site wrote
+     before the Play -> Course Picker -> GPS Play navigation. Must load
+     before my-bubble.js, which checks window.GDDemoSession on its first
+     (synchronous, load-time) apply(). -->
+<script src="js/demo-session.js"></script>
 <script src="js/my-bubble.js"></script>
 <!-- Cache-first: hydrates the last good model synchronously, refreshes in the
      background. Must load after bubble-engine.js (it needs setMicroGeometry)

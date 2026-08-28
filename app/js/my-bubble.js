@@ -53,11 +53,25 @@
     return { offsetDeg: deg, handedness: handednessOf(p) };
   }
 
+  /* Demo Mode: a transient adopted bubble takes over this seam while active,
+     without touching the real profile this file otherwise reads. See
+     scripts/gd-demo-session.js and app/js/demo-session.js - both write the
+     same sessionStorage key, since Play -> Course Picker -> GPS Play is a
+     real document navigation with no in-JS handoff. */
+  function demoSession() {
+    return window.GDDemoSession && window.GDDemoSession.active ? window.GDDemoSession : null;
+  }
+
   function apply() {
     if (!window.GDBubbleEngine || !window.GDBubbleEngine.setBubble) return;
-    var bubble = saved() || { offsetDeg: 0, handedness: handednessOf(activeProfile()) };
+    var demo = demoSession();
+    var bubble = (demo && demo.adopted && demo.adoptedBubble) ? demo.adoptedBubble
+      : (saved() || { offsetDeg: 0, handedness: handednessOf(activeProfile()) });
     var key = bubble.offsetDeg + "|" + bubble.handedness;
     window.GDBubbleEngine.setBubble(bubble);
+    if (demo && demo.demoBag && demo.demoBag.length && window.GDBubbleEngine.setBag) {
+      window.GDBubbleEngine.setBag(demo.demoBag);
+    }
     if (key === applied) return;
     applied = key;
     listeners.forEach(function (fn) { try { fn(bubble); } catch (e) {} });
