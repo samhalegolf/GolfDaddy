@@ -31,7 +31,8 @@ import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolve
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
 import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow } from "./lib/gd-scorecard-resolve.mjs";
-import { reconcileFacilityClaims } from "./lib/gd-facility-loops-core.mjs";
+import { reconcileFacilityClaims, atomicLoopCount, HOLES_PER_LOOP } from "./lib/gd-facility-loops-core.mjs";
+import { assessFacilityStructure, isIndependentClaim, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
 import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry } from "./lib/gd-scorecard-match-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
@@ -712,11 +713,11 @@ export const FACILITY_MAX_ROUNDS = 4;
    matcher uses, and for the same reason. */
 const MIN_CARD_HOLES = 6;
 
-/* Separate an unnumbered multi-loop facility by its SCORECARDS.
+/* RESOLVE A FACILITY: map what can be trusted, keep it, shrink what is left.
  *
  * The numbered path separates ground first and finds cards afterwards, because
  * OSM's hole numbers do the separating for free. Here there are no numbers, one
- * course polygon over the whole site, and three nines running through each
+ * course polygon over the whole site, and several loops running through each
  * other - so there is nothing to cluster on. Proximity is not the answer either:
  * single-link chaining merges interleaved loops the moment any hole of one sits
  * near any hole of the other, which is exactly the failure separateLoops was
@@ -727,29 +728,102 @@ const MIN_CARD_HOLES = 6;
  * to tell a North from a South; run the Native Resolver once per card over the
  * shared payload and each card claims the ground that actually fits it.
  *
- * It runs in ROUNDS rather than one pass, because a facility is rarely resolved
- * in a single fetch and each answer makes the next one easier. A round matches
- * every card known so far, reconciles what they claimed (see
- * gd-facility-loops-core.mjs - the nine is the atom, and 18-hole cards that
- * share ground are play orders rather than courses), and asks whether any
- * ground is still unspoken for. If it is, there is another course out there:
- * fetch further and go again, this time with the identified ground taken off
- * the table so a card that lost a tie gets a clean second look. It stops when
- * the facility is accounted for, when a round turns up no new cards, or on the
- * budget - whichever comes first.
+ * THREE THINGS THIS OWES THE CALLER, IN ORDER
+ *
+ *   1  Keep what is already trustworthy. A claim handed in by AutoMapper or by
+ *      the resolver run that got us here is evidence, not something to redo. It
+ *      is seeded straight into the accepted set.
+ *   2  Say what the facility IS before deciding how to read its cards. Structure
+ *      comes from gd-facility-structure-core.mjs, off the ground the claims sit
+ *      on, and once it is confidently known it holds for the rest of the run.
+ *   3  Make the remaining problem smaller with every accepted claim. Ground that
+ *      an INDEPENDENT claim owns comes off the table immediately - within the
+ *      round, not after it - so the next card is matched against a smaller,
+ *      cleaner field. Composite claims never take ground off the table; see
+ *      isIndependentClaim for why that distinction is load-bearing.
+ *
+ * WHY ROUND ONE IS OPEN
+ *
+ * The first pass matches every card over the WHOLE site with nothing held back,
+ * because compositing is only visible in what overlaps what: three 18-hole cards
+ * over three nines are recognised by wanting the same ground as each other, and
+ * ground removed before they ask cannot be seen to be shared. Structure is
+ * assessed from that open pass, and exclusion begins the moment it is known.
+ *
+ * WHAT WENT WRONG AT HOWESTON, AND WHERE IT IS FIXED
+ *
+ * Three nines. A named 9-hole card for each of two of them, plus a generic
+ * 18-hole aggregator card. In the open pass the 18 claimed the ground of two
+ * real loops; reconciliation read the named nine inside it as a duplicate and
+ * dropped it; two loops came back with eight candidates spare, which was under
+ * the noise floor, and the run stopped and published a course that does not
+ * exist. Every one of those is a decision made with no idea what the facility
+ * was. Now: the nine inside the eighteen with a nine of ground still beyond it
+ * IS the evidence of a multi-nine site, the eighteen is read as the two loops it
+ * describes rather than as a course, the named nine names one of them, and
+ * completion asks whether the expected loops were resolved rather than only
+ * whether the leftovers are quiet.
+ *
+ * It runs in ROUNDS because a facility is rarely resolved in a single fetch and
+ * each answer makes the next one easier. It stops when the facility is accounted
+ * for, when a round turns up no new evidence, or on the budget.
  *
  * Returns { published, record }. published is null when this could not be
  * finished, and the caller then publishes ONE course, untrusted and warned,
  * rather than either refusing outright or lying about what it found. */
 async function publishUnnumberedFacility(context) {
-  const { job, course, payload, origin, facility, expectedHoles, existingObjects } = context;
-  const want = facility.loops;
-  const record = { want, cards: 0, loops: 0, composite: false, rounds: [], reason: null };
+  const { job, course, payload, origin, facility, expectedHoles, existingObjects, seedClaim } = context;
+
+  /* The state that used to be implicit, spread across four locals and a record.
+     Written down because every rule above reads or moves one of these fields,
+     and a run that goes wrong is diagnosed by reading them in order. */
+  const resolution = {
+    structure: FACILITY_STRUCTURE.UNKNOWN,
+    structureConfident: false,
+    mappingMethods: [],
+    candidateCount: facility.candidateCount,
+    expectedLoops: atomicLoopCount(facility.candidateCount),
+    /* Ground already spoken for by an independent claim. Handed to the resolver
+       as excludeCandidateIds so the remaining problem is genuinely smaller. */
+    excludedIds: [],
+    /* Whether the cards have shown themselves to be play orders. Nothing may be
+       excluded while this is true - see claimFacilityGround. */
+    composite: false,
+    rounds: []
+  };
+
+  const record = {
+    want: facility.loops,
+    candidateCount: facility.candidateCount,
+    expectedLoops: resolution.expectedLoops,
+    structure: resolution.structure,
+    structureReason: null,
+    structureEvidence: [],
+    mappingMethod: null,
+    seeded: false,
+    cards: 0, loops: 0, composite: false,
+    rounds: [], completionReason: null, reason: null
+  };
+
+  /* A claim already in hand, from the AutoMapper or resolver run that decided
+     this was a facility at all. Seeding it costs nothing and means a nine that
+     was confidently identified cannot be lost to a later round matching that
+     card differently over a field that has changed underneath it. */
+  const seeded = [];
+  if (seedClaim && (seedClaim.holes || []).length >= MIN_CARD_HOLES) {
+    seeded.push(seedClaim);
+    resolution.mappingMethods.push(seedClaim.method || MAPPING_METHOD.NATIVE_RESOLVER);
+    record.seeded = true;
+  }
 
   const deadline = Date.now() + FACILITY_RESOLVE_BUDGET_MS;
   let cards = [];
   let reconciled = null;
-  let target = want;
+  /* How many distinct cards to go looking for. Driven by GROUND, not by how
+     many card rows happen to exist: Howeston had three rows for three loops and
+     one of them was an aggregator describing two of the others, so counting
+     rows said "enough evidence" over a facility a third unexplained. */
+  let target = Math.max(2, resolution.expectedLoops);
 
   for (let round = 0; round < FACILITY_MAX_ROUNDS; round += 1) {
     /* Two stops, because either alone can hang. Rounds end a facility whose
@@ -759,78 +833,74 @@ async function publishUnnumberedFacility(context) {
 
     await heartbeatJob(job, { stage: "gathering-cards-for-facility-" + (round + 1) });
     const before = cards.length;
-    cards = await gatherFacilityCards(course, origin, target, cards, record);
-    if (!cards.length) { record.reason = record.reason || "no-readable-card"; break; }
-    /* A round that found nothing new will resolve to exactly what the last one
-       did. Only the FIRST round is allowed to proceed without new cards, since
-       it has none to be new. */
+    /* From round two the store has already been read and every card in it
+       already matched, so a repeat of the same pool cannot say anything new -
+       go to the network whatever the count says. */
+    cards = await gatherFacilityCards(course, origin, target, cards, record, { force: round > 0 });
+    if (!cards.length && !seeded.length) { record.reason = record.reason || "no-readable-card"; break; }
     if (round > 0 && cards.length === before) { record.reason = "no-new-cards"; break; }
 
     await heartbeatJob(job, { stage: "resolving-facility-loops-" + (round + 1) });
-    /* Round one matches every card over the WHOLE site with nothing held back.
-     *
-     * That is deliberate and it is the only way compositing is visible: three
-     * 18-hole cards over three nines are recognised by wanting the same ground
-     * as each other, and ground taken away before they ask cannot be seen to
-     * be shared. Exclusion comes in from round two, and only once the site has
-     * shown it is NOT composite - which is where "it gets easier after one is
-     * identified" actually pays: a card that lost a tie gets a second look at
-     * a field the winner has already been taken out of. */
-    const excludeIds = (reconciled && !reconciled.composite)
-      ? reconciled.loops.flatMap(loop => (loop.holes || []).map(hole => hole.candidateId)).filter(Boolean)
-      : [];
-    const claims = [];
-    for (const card of cards) {
-      if (Date.now() > deadline) break;
-      const holes = (card.holes || []).map(hole => ({ holeNumber: hole.hole, par: hole.par, distanceM: hole.distanceM }));
-      if (holes.length < MIN_CARD_HOLES) continue;
-      const result = await resolveCourseGeometryForAutoMapper({
-        osmPayload: payload,
-        courseId: course.courseId,
-        course: { courseId: course.courseId, courseName: card.name || course.courseName, courseCentre: course.center },
-        courseCentre: course.center,
-        expectedHoleCount: holes.length,
-        excludeCandidateIds: excludeIds,
-        scorecardHoles: holes,
-        scorecardEvidence: { holes }
-      });
-      const guides = (result.holes || []).map(hole => guideFromResolvedHole(hole, result)).filter(Boolean);
-      /* A card has to reach its own full length to be describing a course here.
-         A partial match is a card for somewhere else, or ground this run has
-         not fetched - either way it is not a course to publish. */
-      if (guides.length < holes.length) continue;
-      const byHole = new Map((result.holes || []).map(hole => [hole.holeNumber, hole]));
-      claims.push({
-        cardName: card.name || "",
-        confidence: result.confidence || 0,
-        resolverGreens: (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon })),
-        /* The guide rides along with its hole so reconciliation can slice a
-           composite card into nines and still hand back publishable geometry. */
-        holes: guides.map(guide => ({
-          holeNumber: guide.hole,
-          candidateId: String((byHole.get(guide.hole) || {}).candidate ? byHole.get(guide.hole).candidate.candidateId : guide.id),
-          guide
-        }))
-      });
-    }
-
-    reconciled = reconcileFacilityClaims(claims, { candidateCount: facility.candidateCount });
-    record.rounds.push({
-      round: round + 1, cards: cards.length, claims: claims.length,
-      loops: reconciled.claimedLoops, composite: reconciled.composite,
-      unclaimed: reconciled.unclaimedCandidates
+    const pass = await claimFacilityGround({
+      cards, course, payload, deadline, resolution, seeded
     });
-    if (reconciled.complete) { record.reason = null; break; }
-    /* Ground left over means at least one more course is out there. Ask for
-       what is missing plus one, because the count is an estimate and asking
-       short is the expensive direction. */
-    target = reconciled.expectedLoops + 1;
-    record.reason = reconciled.unclaimedCandidates + "-candidates-unclaimed";
+
+    /* What the ground says the site is, from the claims as they now stand.
+       Sticky once confident - a generic 18-hole card arriving in round three
+       does not get to redefine a facility that has already shown itself to be
+       nines. */
+    const assessed = assessFacilityStructure({
+      candidateCount: resolution.candidateCount,
+      claims: pass.claims,
+      prior: resolution.structureConfident ? { structure: resolution.structure, confident: true } : null
+    });
+    resolution.structure = assessed.structure;
+    resolution.structureConfident = assessed.confident;
+    record.structure = assessed.structure;
+    record.structureReason = assessed.reason;
+    record.structureEvidence = assessed.evidence;
+
+    reconciled = reconcileFacilityClaims(pass.claims, {
+      candidateCount: resolution.candidateCount,
+      structure: assessed.confident ? assessed.structure : null
+    });
+
+    /* What comes off the table, and how much evidence the next round should go
+       looking for. Both live in planNextRound so the policy can be read - and
+       tested - in one place instead of inferred from two lines in a loop. */
+    const plan = planNextRound(reconciled, { target });
+    resolution.excludedIds = plan.excludeCandidateIds;
+    resolution.composite = reconciled.composite;
+
+    record.rounds.push({
+      round: round + 1,
+      cards: cards.length,
+      claims: pass.claims.length,
+      /* Capped, like every other diagnostic list on this row - a facility with
+         a dozen wrong cards should not turn the job row into a card dump. */
+      rejected: pass.rejected.slice(0, 6),
+      excludedBefore: pass.excludedAtStart,
+      excludedWithinRound: pass.excludedWithinRound,
+      structure: assessed.structure,
+      structureConfident: assessed.confident,
+      structureReason: assessed.reason,
+      loops: reconciled.claimedLoops,
+      composite: reconciled.composite,
+      claimed: reconciled.claimedCandidateIds.length,
+      unclaimed: reconciled.unclaimedCandidates,
+      completionReason: reconciled.completionReason
+    });
+
+    record.completionReason = reconciled.completionReason;
+    if (plan.done) { record.reason = null; break; }
+    target = plan.target;
+    record.reason = plan.reason;
   }
 
   record.cards = cards.length;
   record.composite = !!(reconciled && reconciled.composite);
   record.loops = reconciled ? reconciled.claimedLoops : 0;
+  record.mappingMethod = summariseMappingMethod(resolution.mappingMethods);
   if (!reconciled || reconciled.loops.length < 2) {
     record.reason = record.reason || "only-" + ((reconciled && reconciled.loops.length) || 0) + "-courses-identified";
     return { published: null, record };
@@ -870,11 +940,118 @@ async function publishUnnumberedFacility(context) {
   });
 
   /* The nines are the whole answer. The club's own 18-hole combinations are
-     deliberately NOT recorded: three siblings sharing a facility_key is
-     everything the round-start prompt needs, and the player picks whichever two
-     they are playing today, in whichever order - see gd-facility-loops-core.mjs. */
+     deliberately NOT recorded: siblings sharing a facility_key is everything the
+     round-start prompt needs, and the player picks whichever two they are
+     playing today, in whichever order - see gd-facility-loops-core.mjs. */
   const published = await publishSeparatedLoops(job, course, loops, expectedHoles, null, origin);
+  /* Geometry is finished. What the loops are to EACH OTHER is a separate
+     question with a separate owner - see organiseFacility, which is not allowed
+     to be consulted while claims are still being matched. */
+  record.organisation = organiseFacility(loops, {
+    structure: resolution.structure,
+    mappingMethod: record.mappingMethod
+  });
   return { published, record };
+}
+
+/* One matching pass: every card over the ground still unspoken for.
+ *
+ * The strongest evidence goes first and takes its ground with it. At a facility
+ * already known to be built from nines, a named 9-hole card is stronger evidence
+ * for a physical loop than a generic 18 that may be describing two of them, so
+ * the nines lead; everywhere else the cards keep the order the scorecard engine
+ * ranked them in, which is by source quality.
+ *
+ * The timing is the point. Exclusion used to wait for a whole round's claims to
+ * be reconciled, which gave an aggregator card a free run at the entire field
+ * alongside the real cards for the loops inside it. Here a claim that is
+ * INDEPENDENT - owning ground no other claim in this pass partially shares -
+ * takes that ground off the table for every card still to be matched in the same
+ * pass. Composite claims never do; a play-order facility depends on its cards
+ * reaching for the same nine. */
+async function claimFacilityGround(input) {
+  const { cards, course, payload, deadline, resolution, seeded } = input;
+  const multiNine = resolution.structureConfident && resolution.structure === FACILITY_STRUCTURE.MULTI_NINE;
+  const ordered = cards.slice().sort((a, b) => {
+    if (!multiNine) return 0;
+    const nine = card => ((card.holes || []).length === HOLES_PER_LOOP ? 0 : 1);
+    return (nine(a) - nine(b)) || ((b.name ? 1 : 0) - (a.name ? 1 : 0));
+  });
+
+  const excludedAtStart = resolution.excludedIds.slice();
+  const excluded = new Set(excludedAtStart);
+  /* The seed rides along as a claim from the first pass onwards, so a loop that
+     was already identified cannot be lost to a later round matching its card
+     differently over a field that has changed underneath it. Its GROUND is not
+     excluded here: it arrives in resolution.excludedIds once a round has
+     reconciled, which is the first moment the site has said whether excluding
+     anything is safe. */
+  const claims = seeded.slice();
+  const rejected = [];
+  let excludedWithinRound = 0;
+
+  for (const card of ordered) {
+    if (Date.now() > deadline) break;
+    const holes = (card.holes || []).map(hole => ({ holeNumber: hole.hole, par: hole.par, distanceM: hole.distanceM }));
+    if (holes.length < MIN_CARD_HOLES) { rejected.push({ card: card.name || "", reason: "card-too-short" }); continue; }
+    /* Already claimed by the seed, matched under its own name. Re-running it
+       would only produce a duplicate of ground we already hold. */
+    if (claims.some(claim => claim.cardName && card.name && claim.cardName === card.name)) continue;
+    const result = await resolveCourseGeometryForAutoMapper({
+      osmPayload: payload,
+      courseId: course.courseId,
+      course: { courseId: course.courseId, courseName: card.name || course.courseName, courseCentre: course.center },
+      courseCentre: course.center,
+      expectedHoleCount: holes.length,
+      excludeCandidateIds: [...excluded],
+      scorecardHoles: holes,
+      scorecardEvidence: { holes }
+    });
+    const guides = (result.holes || []).map(hole => guideFromResolvedHole(hole, result)).filter(Boolean);
+    /* A card has to reach its own full length to be describing a course here.
+       A partial match is a card for somewhere else, or ground this run has not
+       fetched - either way it is not a course to publish. */
+    if (guides.length < holes.length) {
+      rejected.push({ card: card.name || "", reason: "matched-" + guides.length + "-of-" + holes.length });
+      continue;
+    }
+    const byHole = new Map((result.holes || []).map(hole => [hole.holeNumber, hole]));
+    const claim = {
+      cardName: card.name || "",
+      confidence: result.confidence || 0,
+      method: MAPPING_METHOD.NATIVE_RESOLVER,
+      resolverGreens: (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon })),
+      /* The guide rides along with its hole so reconciliation can slice a
+         composite card into nines and still hand back publishable geometry. */
+      holes: guides.map(guide => ({
+        holeNumber: guide.hole,
+        candidateId: String((byHole.get(guide.hole) || {}).candidate ? byHole.get(guide.hole).candidate.candidateId : guide.id),
+        guide
+      }))
+    };
+    claims.push(claim);
+    if (!resolution.mappingMethods.includes(MAPPING_METHOD.NATIVE_RESOLVER)) resolution.mappingMethods.push(MAPPING_METHOD.NATIVE_RESOLVER);
+
+    /* Take this ground off the table for the rest of the pass.
+     *
+     * THIS IS THE TIMING FIX. Exclusion used to wait for the whole round to be
+     * reconciled, which gave a generic aggregator card a free run at the entire
+     * field alongside the real cards for the loops inside it - and at Howeston
+     * that is exactly what it did.
+     *
+     * Three things have to be true first. The site must have SAID what it is,
+     * because round one has to stay open or compositing cannot be seen at all.
+     * It must not be a composite facility, where every card legitimately reaches
+     * for a nine another one already has. And this particular claim must own its
+     * ground outright - a claim that partially shares with another is half of a
+     * play order and removing it strands the other half. */
+    if (!resolution.structureConfident) continue;
+    if (resolution.composite) continue;
+    if (!isIndependentClaim(claim, claims)) continue;
+    claim.holes.forEach(hole => { if (!excluded.has(hole.candidateId)) { excluded.add(hole.candidateId); excludedWithinRound += 1; } });
+  }
+
+  return { claims, rejected, excludedAtStart: excludedAtStart.length, excludedWithinRound };
 }
 
 /* Every distinct card known for this facility, cheapest source first.
@@ -882,8 +1059,16 @@ async function publishUnnumberedFacility(context) {
  * The shared store is free and may already hold what a sibling's scan or an
  * Update Scorecards run found. Only when it comes up short is the network
  * asked, and it is asked for a TARGET rather than a fixed number, so a second
- * round genuinely digs further instead of repeating the first. */
-async function gatherFacilityCards(course, origin, target, held, record) {
+ * round genuinely digs further instead of repeating the first.
+ *
+ * `force` is the second round onwards, and it exists because a card COUNT is not
+ * evidence about ground. Three rows for a three-loop site looks like enough
+ * until one of them turns out to be an aggregator describing two of the others,
+ * at which point the site is a third unexplained and the store has nothing left
+ * to say. When the caller knows ground is still unaccounted for, the network
+ * gets asked whatever the count says. */
+async function gatherFacilityCards(course, origin, target, held, record, opts) {
+  const force = !!(opts && opts.force);
   const stored = await fetchFacilityScorecardEvidence(course.courseId).catch(() => []);
   const storedCards = stored
     .filter(row => Array.isArray(row.holes_json) && row.holes_json.length)
@@ -893,7 +1078,7 @@ async function gatherFacilityCards(course, origin, target, held, record) {
       source: row.source, sourceUrl: row.source_url
     }));
   let cards = distinctCards(held.concat(storedCards));
-  if (cards.length >= target) return cards;
+  if (cards.length >= target && !force) return cards;
   const found = await resolveScorecardForCourse(course, origin, target)
     .catch(error => ({ cards: [], reason: String(error && error.message || error).slice(0, 200) }));
   if (found.reason) record.reason = found.reason;
@@ -964,7 +1149,11 @@ async function runMapperJob(job, origin) {
     };
     if (resolved.cards && resolved.cards.length) {
       const best = resolved.cards[0];
-      scorecardEvidence = { holes: best.holes.map(hole => ({ holeNumber: hole.hole, par: hole.par, distanceM: hole.distanceM })), source: best.source || "scorecard-engine", sourceUrl: best.sourceUrl || "", sources: [] };
+      /* The card's own name rides along. It is what a loop resolved from this
+         evidence gets published as when the facility turns out to be bigger
+         than the card - without it a correctly identified nine publishes as
+         "Course 1" while its name sits unused two lines above. */
+      scorecardEvidence = { holes: best.holes.map(hole => ({ holeNumber: hole.hole, par: hole.par, distanceM: hole.distanceM })), cardName: best.name || "", source: best.source || "scorecard-engine", sourceUrl: best.sourceUrl || "", sources: [] };
     }
     /* A page that says "18 hole, par 72" but whose table would not parse still
        answers the only question expectedHoles asks. */
@@ -1196,7 +1385,27 @@ async function runMapperJob(job, origin) {
      against so the player's own selection resolves immediately, the rest into rows of
      their own. Returns early: the single-course path below has nothing left to do. */
   if (loops && loops.length > 1) {
+    /* CLEANLY MAPPED, AND THAT IS THE END OF IT.
+     *
+     * The numbering already separated these courses. Nothing below is asked to
+     * re-derive them, and the Native Resolver is not invoked just because the
+     * site turned out to hold nines - a 27-hole facility whose three loops OSM
+     * numbered correctly is a finished job, not a harder one. What the loops are
+     * to each other is a separate question, answered once here from the shapes
+     * the separation produced. */
+    const structure = assessFacilityStructure({
+      candidateCount: loops.reduce((sum, loop) => sum + loop.holeNumbers.length, 0),
+      osmNineLoops: loops.filter(loop => loop.holeNumbers.length === HOLES_PER_LOOP).length,
+      /* Separated loops own disjoint ground by construction, so the candidate
+         ids only have to be unique per loop - the position in the list is
+         enough, and it does not depend on separateLoops carrying an index. */
+      claims: loops.map((loop, index) => ({
+        cardName: loop.name || "",
+        holes: loop.holeNumbers.map(number => ({ holeNumber: number, candidateId: index + ":" + number }))
+      }))
+    });
     const published = await publishSeparatedLoops(job, course, loops, expectedHoles, scorecardEvidence, origin);
+    diagnostics.facilityStructure = structure;
     diagnostics.published = published.map(entry => ({ courseId: entry.courseId, holes: entry.holesResolved, contiguous: entry.contiguous, nameSource: entry.nameSource }));
     if (published.naming) diagnostics.loopNaming = published.naming;
     const short = published.filter(entry => !entry.contiguous);
@@ -1218,6 +1427,12 @@ async function runMapperJob(job, origin) {
       mapperVersion: MAPPER_VERSION,
       multiCourse: true,
       coursesPublished: published,
+      facilityStructure: structure.structure,
+      facilityOrganisation: organiseFacility(loops, {
+        structure: structure.structure,
+        mappingMethod: MAPPING_METHOD.OSM_NUMBERED
+      }),
+      mappingMethod: MAPPING_METHOD.OSM_NUMBERED,
       needsLabelling: unlabelled.length > 0,
       queryStages,
       expectedHoles,
@@ -1323,8 +1538,29 @@ async function runMapperJob(job, origin) {
     });
     diagnostics.unnumberedFacility = facility;
     if (facility.multiLoop) {
+      /* The nine this run has ALREADY identified, handed forward rather than
+         resolved again from scratch.
+       *
+         The resolver above matched a full card over this ground and reported a
+         confidence for it; that is an accepted claim, not work to redo. Seeding
+         it is what makes the facility a smaller problem than the site - the
+         partial-success case where AutoMapper or the resolver gets one loop
+         right and only the remainder needs harder work. */
+      const seedGuides = (result.holes || []).map(hole => guideFromResolvedHole(hole, result)).filter(Boolean);
+      const seedByHole = new Map((result.holes || []).map(hole => [hole.holeNumber, hole]));
+      const seedClaim = (expectedHoles && seedGuides.length >= expectedHoles) ? {
+        cardName: (scorecardEvidence && scorecardEvidence.cardName) || "",
+        confidence: result.confidence || 0,
+        method: MAPPING_METHOD.NATIVE_RESOLVER,
+        resolverGreens: (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon })),
+        holes: seedGuides.map(guide => ({
+          holeNumber: guide.hole,
+          candidateId: String((seedByHole.get(guide.hole) || {}).candidate ? seedByHole.get(guide.hole).candidate.candidateId : guide.id),
+          guide
+        }))
+      } : null;
       const separated = await publishUnnumberedFacility({
-        job, course, payload, origin, facility, expectedHoles, existingObjects, resolverStatus
+        job, course, payload, origin, facility, expectedHoles, existingObjects, resolverStatus, seedClaim
       });
       diagnostics.unnumberedSeparation = separated.record;
       if (separated.published) {
@@ -1343,6 +1579,12 @@ async function runMapperJob(job, origin) {
           mapperVersion: MAPPER_VERSION,
           multiCourse: true,
           coursesPublished: separated.published,
+          /* What the site IS, on the row rather than inferred from a row count.
+             Downstream decides grouping and round-start pairing from this; it
+             does not get to reach back and change how the ground was matched. */
+          facilityStructure: separated.record.structure,
+          facilityOrganisation: separated.record.organisation || null,
+          mappingMethod: separated.record.mappingMethod || null,
           needsLabelling: unlabelled.length > 0,
           queryStages,
           expectedHoles,

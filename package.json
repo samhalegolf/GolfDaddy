@@ -14,6 +14,7 @@
     "test:multi-course": "node dev/multi-course-separation.test.js",
     "test:unnumbered-facility": "node dev/unnumbered-multi-loop.test.js",
     "test:facility-loops": "node dev/facility-loops.test.js",
+    "test:facility-structure": "node dev/facility-structure.test.js",
     "test:loop-labels": "node dev/loop-labels.test.js",
     "test:bubble-handedness": "node dev/bubble-handedness.test.js",
     "test:bubble-frame": "node dev/bubble-frame-core.test.js",

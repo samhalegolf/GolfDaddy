@@ -151,6 +151,10 @@ export function claimsOverlap(claims) {
 export function sliceClaimIntoLoops(claim) {
   const holes = ((claim && claim.holes) || []).slice().sort((a, b) => a.holeNumber - b.holeNumber);
   if (!holes.length || holes.length % HOLES_PER_LOOP !== 0) return [claim];
+  /* A nine cut into nines is the same nine with its name thrown away. The
+     slicer blanks cardName because a combined card cannot name the loops it is
+     made of - true of "Red + White", nonsense for a card that already IS Red. */
+  if (holes.length === HOLES_PER_LOOP) return [claim];
   const segments = [];
   for (let start = 0; start < holes.length; start += HOLES_PER_LOOP) {
     const slice = holes.slice(start, start + HOLES_PER_LOOP);
@@ -209,24 +213,51 @@ export function dedupeLoops(segments) {
  * 18-hole card into the two nines it was printed from - because that is how the
  * three nines get identified in the first place. That stays. */
 
+/* The structure verdict this file changes behaviour for. Compared as a plain
+   string so gd-facility-structure-core.mjs can own the vocabulary without this
+   file importing it - the dependency runs the other way. */
+const MULTI_NINE = "multi-nine";
+
 /* claims: [{ cardName, holes: [{holeNumber, candidateId}], confidence, guides }]
- * opts:   { candidateCount }
+ * opts:   { candidateCount, structure }
  *
- * Returns { loops, composite, expectedLoops, claimedLoops,
- * unclaimedCandidates, complete }. `complete` is the signal the worker's retry
- * loop reads: false means there is ground nobody has claimed and another card
- * is worth fetching. */
+ * `structure` is the facility verdict from gd-facility-structure-core.mjs, and
+ * it changes two things and nothing else:
+ *
+ *   containment   With no structure, a nine inside an eighteen is one course
+ *                 described twice and the nine is dropped. At a facility ALREADY
+ *                 known to be built from nines that same nine is the NAME of
+ *                 half the eighteen, and dropping it is how Howeston published a
+ *                 generic 18-hole aggregator card over two real loops while the
+ *                 named nine that could have identified one of them was
+ *                 discarded as a duplicate.
+ *   completion    Leftover ground is not the only way to be unfinished. Three
+ *                 nines of ground with two loops resolved leaves eight
+ *                 candidates spare - under the noise floor, and it read as done.
+ *
+ * Passing no structure leaves every existing path exactly as it was.
+ *
+ * Returns { loops, composite, structure, expectedLoops, claimedLoops,
+ * claimedCandidateIds, unclaimedCandidates, complete, completionReason }.
+ * `complete` is the signal the worker's resolution loop reads: false means the
+ * facility is not accounted for and there is more to do. */
 export function reconcileFacilityClaims(claims, opts) {
   const sized = (claims || []).filter(claim => ((claim.holes || []).length) >= MIN_SHARED_CANDIDATES);
   const candidateCount = Math.max(0, Number(opts && opts.candidateCount) || 0);
+  const structure = (opts && opts.structure) || null;
+  const multiNine = structure === MULTI_NINE;
   const expectedLoops = atomicLoopCount(candidateCount);
 
   /* Duplicates out FIRST, before anything looks at overlap.
    *
    * A card wholly inside another is one course described twice, and leaving it
    * in makes an ordinary 18 that also turned up a front-nine card look like a
-   * facility whose cards share ground - which got it sliced into two nines. */
-  const list = dropContainedClaims(sized);
+   * facility whose cards share ground - which got it sliced into two nines.
+   *
+   * Not at a multi-nine facility, where containment means the opposite. Both
+   * claims are kept, both are sliced, and dedupeLoops merges them over the same
+   * ground into one loop carrying the smaller card's name. */
+  const list = multiNine ? sized : dropContainedClaims(sized);
 
   /* Best evidence first, so the strongest card gets its ground and a weaker
      rival is the one recorded as a duplicate. Longer claims lead: an 18 that
@@ -235,27 +266,52 @@ export function reconcileFacilityClaims(claims, opts) {
     ((b.holes || []).length - (a.holes || []).length) || ((b.confidence || 0) - (a.confidence || 0)));
 
   const composite = claimsOverlap(ordered);
-  /* Slice only when the facility has shown itself to be composite. An 18 with
-     nothing overlapping it is a whole course and must publish as one. */
-  const segments = composite ? ordered.flatMap(sliceClaimIntoLoops) : ordered.map(claim =>
+  /* Slice when the cards have shown themselves to be play orders, or when the
+     facility is already known to be built from nines - at which point an
+     18-hole card is two of them however little it overlaps anything else.
+     Otherwise an 18 with nothing overlapping it is a whole course and must
+     publish as one. */
+  const segments = (composite || multiNine) ? ordered.flatMap(sliceClaimIntoLoops) : ordered.map(claim =>
     Object.assign({}, claim, { fromCard: claim.cardName || "" }));
-  const loops = dedupeLoops(segments);
+  /* Named segments lead into deduplication, so a loop with a card of its own is
+     kept under that name rather than as the anonymous half of a combined card
+     that happened to reach the same ground first. Stable, so everything else
+     holds the strength order above. */
+  const forDedupe = multiNine
+    ? segments.slice().sort((a, b) => (b.cardName ? 1 : 0) - (a.cardName ? 1 : 0))
+    : segments;
+  const loops = dedupeLoops(forDedupe);
 
   const claimedIds = new Set();
   loops.forEach(loop => candidateIds(loop).forEach(id => claimedIds.add(id)));
   const unclaimedCandidates = Math.max(0, candidateCount - claimedIds.size);
 
+  /* Done when there is not another loop's worth of ground left unspoken for.
+     Judged on GROUND, not on loop count: a facility whose cards were all found
+     still has a few candidates left over (a practice hole, a green the resolver
+     rejected), and chasing those forever is what the hard stop in the worker
+     exists to prevent.
+     At a multi-nine facility that tolerance is not enough on its own - the
+     expected loops have to have actually been resolved. */
+  const groundQuiet = unclaimedCandidates < HOLES_PER_LOOP;
+  const loopsFound = !multiNine || loops.length >= expectedLoops;
+  const complete = groundQuiet && loopsFound;
+
   return {
     loops,
     composite,
+    structure,
     expectedLoops,
     claimedLoops: loops.length,
+    /* The ground already spoken for, so the caller can take it off the table
+       before asking the resolver anything else - see the worker's rounds. */
+    claimedCandidateIds: [...claimedIds],
     unclaimedCandidates,
-    /* Done when there is not another loop's worth of ground left unspoken for.
-       Judged on GROUND, not on loop count: a facility whose cards were all
-       found still has a few candidates left over (a practice hole, a green the
-       resolver rejected), and chasing those forever is what the hard stop in
-       the worker exists to prevent. */
-    complete: unclaimedCandidates < HOLES_PER_LOOP
+    complete,
+    completionReason: complete
+      ? (multiNine ? "resolved-" + loops.length + "-of-" + expectedLoops + "-loops" : "ground-accounted-for")
+      : (!groundQuiet
+        ? unclaimedCandidates + "-candidates-unclaimed"
+        : "resolved-" + loops.length + "-of-" + expectedLoops + "-expected-loops")
   };
 }
