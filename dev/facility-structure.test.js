@@ -37,7 +37,7 @@ const noise = count => Array.from({ length: count }, (_, i) => "noise" + i);
 (async () => {
   const structure = await import("file://" + path.join(ROOT, "functions", "lib", "gd-facility-structure-core.mjs"));
   const loops = await import("file://" + path.join(ROOT, "functions", "lib", "gd-facility-loops-core.mjs"));
-  const { assessFacilityStructure, organiseFacility, isIndependentClaim, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } = structure;
+  const { assessFacilityStructure, describeClaimGround, organiseFacility, isIndependentClaim, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } = structure;
   const { reconcileFacilityClaims } = loops;
 
   /* ---- 1. clean standalone 18 ------------------------------------------- */
@@ -323,6 +323,50 @@ const noise = count => Array.from({ length: count }, (_, i) => "noise" + i);
     const plan = planNextRound(reconciled, { target: 3 });
     assert.strictEqual(plan.done, true);
     assert.strictEqual(plan.reason, "resolved-3-of-3-loops");
+  });
+
+  /* ---- the diagnostics that have to answer "which two collapsed?" -------- */
+
+  test("the round record says which claim was absorbed into which loop", () => {
+    /* The question the first rescan could not answer. Three claims, two loops -
+       and counts alone cannot say whether the missing nine was swallowed by the
+       aggregator's claim or never matched its own ground. */
+    const claims = [
+      claim("All Square Golf", A.concat(B)),
+      claim("Westward", A),
+      claim("Howard", C)
+    ];
+    const reconciled = reconcileFacilityClaims(claims, { candidateCount: 30, structure: null });
+    const ground = describeClaimGround(claims, reconciled);
+    const westward = ground.claims.find(entry => entry.card === "Westward");
+    assert.strictEqual(westward.fate, "absorbed", "Westward did not publish as its own loop");
+    assert.strictEqual(westward.into, "All Square Golf", "and this is what took its ground");
+    assert.strictEqual(westward.sharedWithHost, 9);
+  });
+
+  test("the overlap matrix carries the two numbers every structure verdict turns on", () => {
+    const claims = [claim("All Square Golf", A.concat(B)), claim("Westward", A)];
+    const ground = describeClaimGround(claims, reconcileFacilityClaims(claims, { candidateCount: 30 }));
+    const pair = ground.overlaps[0];
+    assert.strictEqual(pair.shared, 9);
+    assert.strictEqual(pair.aKeeps, 9, "the 18 keeps a nine of its own");
+    assert.strictEqual(pair.bKeeps, 0, "the nine keeps nothing - that is containment, not a play order");
+  });
+
+  test("a claim that published as itself says so, and carries its ground", () => {
+    const claims = [claim("Westward", A), claim("Howard", B)];
+    const ground = describeClaimGround(claims, reconcileFacilityClaims(claims, { candidateCount: 27 }));
+    assert.ok(ground.claims.every(entry => entry.fate === "published-as-own-loop"));
+    assert.deepStrictEqual(ground.claims[0].candidateIds, A);
+    assert.deepStrictEqual(ground.overlaps, [], "disjoint nines share nothing, and that is recorded as nothing");
+  });
+
+  test("a claim that reached no published ground is not silently missing", () => {
+    const claims = [claim("Westward", A), claim("Howard", B)];
+    const reconciled = reconcileFacilityClaims([claim("Westward", A)], { candidateCount: 27 });
+    const ground = describeClaimGround(claims, reconciled);
+    const howard = ground.claims.find(entry => entry.card === "Howard");
+    assert.strictEqual(howard.fate, "no-ground-published");
   });
 
   let failed = 0;

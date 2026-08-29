@@ -322,3 +322,82 @@ export function planNextRound(reconciled, opts) {
     reason: reconciled.completionReason || "incomplete"
   };
 }
+
+/* WHAT EACH CARD ACTUALLY TOOK, AND WHAT BECAME OF IT.
+ *
+ * The first Howeston rescan under the new architecture recorded three claims,
+ * nothing rejected, and two published loops - and that was not enough to say
+ * what went wrong. "Three claims became two loops" does not tell you WHICH two
+ * collapsed, or whether the nine that vanished was swallowed by an aggregator's
+ * claim or never matched its own ground in the first place. Those two have
+ * opposite fixes, so counts alone send the next change out on a guess.
+ *
+ * So this records the GROUND: the candidate ids each claim took, how much every
+ * pair of claims shares, and what reconciliation then did with each one. It is
+ * the difference between reading a job row and re-deriving the algorithm from
+ * its output.
+ *
+ * Pure, and read-only over the claims - it decides nothing. */
+export function describeClaimGround(claims, reconciled) {
+  const list = (claims || []);
+  const loops = ((reconciled && reconciled.loops) || []);
+
+  const idsOf = claim => claimIds(claim);
+  const overlapOf = (a, b) => claimOverlap(a, b);
+
+  /* Which loop, if any, this claim's ground ended up inside. A claim that is
+     not the loop's own card but shares its ground was merged during
+     deduplication - or dropped as contained before that, which looks the same
+     from here and is separated by the overlap figures below. */
+  const fateOf = claim => {
+    const own = loops.find(loop => loop.cardName && loop.cardName === claim.cardName
+      && overlapOf(loop, claim) >= MIN_SHARED_CANDIDATES);
+    if (own) return { fate: "published-as-own-loop", into: own.cardName || null };
+    const host = loops.find(loop => overlapOf(loop, claim) >= MIN_SHARED_CANDIDATES);
+    if (host) {
+      return {
+        fate: "absorbed",
+        into: host.cardName || host.fromCard || "(unnamed loop)",
+        sharedWithHost: overlapOf(host, claim)
+      };
+    }
+    return { fate: "no-ground-published", into: null };
+  };
+
+  const overlaps = [];
+  for (let i = 0; i < list.length; i += 1) {
+    for (let j = i + 1; j < list.length; j += 1) {
+      const shared = overlapOf(list[i], list[j]);
+      if (!shared) continue;
+      overlaps.push({
+        a: list[i].cardName || "(unnamed)",
+        b: list[j].cardName || "(unnamed)",
+        shared,
+        /* The two numbers that decide every structure verdict: what each side
+           keeps that the other has never heard of. Contained is uniqueB 0;
+           a play order is both sides >= MIN_SHARED_CANDIDATES. */
+        aKeeps: holeCount(list[i]) - shared,
+        bKeeps: holeCount(list[j]) - shared
+      });
+    }
+  }
+
+  return {
+    claims: list.map(claim => Object.assign({
+      card: claim.cardName || "(unnamed)",
+      holes: holeCount(claim),
+      confidence: Number((claim.confidence || 0).toFixed(3)),
+      /* Capped: enough to see which ground was taken and to line two claims up
+         against each other, without turning a job row into a candidate dump. */
+      candidateIds: idsOf(claim).slice(0, 24)
+    }, fateOf(claim))),
+    overlaps,
+    loops: loops.map(loop => ({
+      name: loop.cardName || "(provisional)",
+      holes: holeCount(loop),
+      fromCard: loop.fromCard || null,
+      alsoFromCards: loop.alsoFromCards || [],
+      candidateIds: idsOf(loop).slice(0, 24)
+    }))
+  };
+}

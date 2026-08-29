@@ -32,7 +32,7 @@ import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
 import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow } from "./lib/gd-scorecard-resolve.mjs";
 import { reconcileFacilityClaims, atomicLoopCount, HOLES_PER_LOOP } from "./lib/gd-facility-loops-core.mjs";
-import { assessFacilityStructure, isIndependentClaim, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
+import { assessFacilityStructure, describeClaimGround, isIndependentClaim, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
 import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry } from "./lib/gd-scorecard-match-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
@@ -888,7 +888,11 @@ async function publishUnnumberedFacility(context) {
       composite: reconciled.composite,
       claimed: reconciled.claimedCandidateIds.length,
       unclaimed: reconciled.unclaimedCandidates,
-      completionReason: reconciled.completionReason
+      completionReason: reconciled.completionReason,
+      /* The ground itself, not a count of it. Which candidates each card took,
+         how much every pair shares, and what reconciliation did with each -
+         see describeClaimGround for why counts alone were not enough. */
+      ground: describeClaimGround(pass.claims, reconciled)
     });
 
     record.completionReason = reconciled.completionReason;
@@ -939,18 +943,44 @@ async function publishUnnumberedFacility(context) {
     };
   });
 
-  /* The nines are the whole answer. The club's own 18-hole combinations are
-     deliberately NOT recorded: siblings sharing a facility_key is everything the
-     round-start prompt needs, and the player picks whichever two they are
-     playing today, in whichever order - see gd-facility-loops-core.mjs. */
+  /* GROUND WITH NO CARD IS STILL GROUND, AND IT IS SAID OUT LOUD.
+   *
+   * A facility does not always publish whole. Howeston has three nines and two
+   * cards; the third loop is real, it is under the sweep, and nothing that
+   * exists can number it - the Native Resolver derives hole order from a
+   * scorecard's distances, so no card means no numbering, and inventing one
+   * would be exactly the guessed geometry this pipeline refuses to publish.
+   *
+   * The answer is not to hold back the two loops that ARE resolved. Two
+   * playable nines beat nothing, and they are correct. So they publish, and the
+   * remainder is recorded as what it is: a loop's worth of ground this run
+   * could not explain, with the reason it could not. That is the difference
+   * between a facility that is finished and one that is waiting for a card. */
+  const outstandingLoops = Math.max(0, resolution.expectedLoops - reconciled.claimedLoops);
+  record.unresolvedGround = outstandingLoops > 0 || reconciled.unclaimedCandidates >= HOLES_PER_LOOP
+    ? {
+      loops: outstandingLoops,
+      candidates: reconciled.unclaimedCandidates,
+      /* Why it stopped, in the loop's own words - "no-new-cards" and
+         "budget-exhausted" want opposite responses next time. */
+      reason: record.reason || record.completionReason || null
+    }
+    : null;
+
   const published = await publishSeparatedLoops(job, course, loops, expectedHoles, null, origin);
   /* Geometry is finished. What the loops are to EACH OTHER is a separate
      question with a separate owner - see organiseFacility, which is not allowed
      to be consulted while claims are still being matched. */
-  record.organisation = organiseFacility(loops, {
-    structure: resolution.structure,
-    mappingMethod: record.mappingMethod
-  });
+  record.organisation = Object.assign(
+    organiseFacility(loops, {
+      structure: resolution.structure,
+      mappingMethod: record.mappingMethod
+    }),
+    /* Carried on the organisation rather than left in a reason string, so the
+       Studio can offer "find the missing card" against exactly the facilities
+       that have ground waiting rather than re-scanning to find out. */
+    { unresolved: record.unresolvedGround }
+  );
   return { published, record };
 }
 
@@ -1078,11 +1108,44 @@ async function gatherFacilityCards(course, origin, target, held, record, opts) {
       source: row.source, sourceUrl: row.source_url
     }));
   let cards = distinctCards(held.concat(storedCards));
-  if (cards.length >= target && !force) return cards;
+  const describe = list => list.map(card => ({
+    name: card.name || "(unnamed)",
+    holes: (card.holes || []).length,
+    source: card.source || null
+  }));
+  if (cards.length >= target && !force) {
+    record.cardsSeen = describe(cards);
+    record.cardFetch = { target, force, wentToNetwork: false, fromStore: storedCards.length };
+    return cards;
+  }
   const found = await resolveScorecardForCourse(course, origin, target)
     .catch(error => ({ cards: [], reason: String(error && error.message || error).slice(0, 200) }));
   if (found.reason) record.reason = found.reason;
-  return distinctCards(cards.concat(found.cards || []));
+  const all = distinctCards(cards.concat(found.cards || []));
+  /* What the fetch was asked for and what it came back with, so a facility that
+     stays unexplained can be told apart from one whose evidence simply is not
+     published anywhere - the difference between "search harder" and "there is
+     no card for that nine". */
+  record.cardsSeen = describe(all);
+  record.cardFetch = {
+    target, force, wentToNetwork: true,
+    fromStore: storedCards.length,
+    fromNetwork: (found.cards || []).length,
+    distinctAfter: all.length,
+    reason: found.reason || null,
+    /* Every page the engine opened and what it made of it. This is the raw
+       material for the follow-up hunt: a sibling course page that was found and
+       REJECTED names a loop we know exists and could not read, which is a far
+       better search term than the facility's own name. */
+    attempts: (found.attempts || []).slice(0, 8).map(attempt => ({
+      url: String(attempt.url || "").slice(0, 120),
+      source: attempt.source || null,
+      cards: attempt.cards || 0,
+      usable: !!attempt.usable,
+      rejected: attempt.rejected || attempt.reason || null
+    }))
+  };
+  return all;
 }
 
 
@@ -1573,6 +1636,18 @@ async function runMapperJob(job, origin) {
           warnings.push(unlabelled.length + " of " + separated.published.length + " courses published with provisional names"
             + (separated.record.composite ? " (sliced from combined play-order cards, which name no single nine)" : "")
             + " - run Update Scorecards to label them (geometry is complete and will not be re-scanned)");
+        }
+        /* Said on the row, because a facility that published two of its three
+           nines looks identical to a finished two-nine facility from the outside
+           - and the difference is a whole course the player cannot reach. */
+        const outstanding = separated.record.unresolvedGround;
+        if (outstanding) {
+          warnings.push("published " + separated.published.length + " of about "
+            + separated.record.expectedLoops + " loops; " + outstanding.candidates
+            + " hole candidates remain unexplained"
+            + (outstanding.reason ? " (" + outstanding.reason + ")" : "")
+            + " - no scorecard was found for the remaining ground, so it cannot be numbered."
+            + " Geometry for what published is complete and will not be re-scanned.");
         }
         return {
           courseId: course.courseId,
