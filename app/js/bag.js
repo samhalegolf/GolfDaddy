@@ -17,6 +17,15 @@
  * The ghost bag is free. Replacing it with your own clubs is the membership.
  * A player without one sees the ghost distances that are driving their bubble,
  * read-only, which is the thing they would be buying control of.
+ *
+ * ONE LIST, TOO. The clubs were already shared; the way they were shown was
+ * not. This surface drew its own column of rows in its own order while the
+ * shell's Bag panel drew a two-column, longest-first grid, so the same bag
+ * looked like two different bags depending on which door the player came
+ * through. Both now render through GDBagCore (scripts/gd-bag-core.js), which
+ * owns the order, the markup and the edit semantics; this file keeps only the
+ * things that are genuinely local - the profile store, membership, handedness
+ * and firmness.
  */
 (function () {
   "use strict";
@@ -39,12 +48,17 @@
     return profiles.filter(function (p) { return p && p.id === raw.activeId; })[0] || profiles[0];
   }
 
+  function core() { return window.GDBagCore; }
+
+  /* Longest club first, always - the shell's panel reads this same stored bag
+     back and must not have to re-order it. GDBagCore owns the rule. */
   function normalise(rows) {
-    return (Array.isArray(rows) ? rows : []).map(function (c) {
+    var list = (Array.isArray(rows) ? rows : []).map(function (c) {
       var club = String(c && (c.club || c.name) || "").trim();
       var carry = Math.round(Number(c && (c.baseCarry != null ? c.baseCarry : c.carry)) || 0);
       return club && carry > 0 ? { club: club, baseCarry: carry } : null;
     }).filter(Boolean);
+    return safe(function () { return core().sortRows(list); }, list);
   }
 
   /* A REAL bag, or nothing. A seeded default set answers "nothing" on purpose,
@@ -74,12 +88,21 @@
     return safe(function () { localStorage.setItem(PROFILE_KEY, JSON.stringify(raw)); return true; }, false);
   }
 
+  /* Roll-out, from the same calculator the shell uses. It used to be derived
+     here from the ghost bag's own carry:total ratio, which is close but not the
+     same number - so a club edited on the course and the identical club edited
+     in the shell stored different totals for the same carry. The ghost ratio
+     stays as the fallback for a page where the core has not loaded. */
   function totalFor(row) {
+    var club = row && row.club;
+    var carry = Math.round(Number(row && row.baseCarry) || 0);
+    var fromCore = safe(function () { return Math.round(core().totalForCarry(club, carry, firmness())) || 0; }, 0);
+    if (fromCore >= carry && fromCore > 0) return fromCore;
     var engine = window.GDBubbleEngine;
     var defaults = engine && engine.defaultBagRows ? engine.defaultBagRows() : [];
-    var match = defaults.filter(function (r) { return r.club === row.club; })[0];
+    var match = defaults.filter(function (r) { return r.club === club; })[0];
     var ratio = match && match.baseCarry > 0 ? match.totalM / match.baseCarry : 1;
-    return Math.max(row.baseCarry, Math.round(row.baseCarry * ratio));
+    return Math.max(carry, Math.round(carry * ratio));
   }
 
   function ghostRows() {
@@ -143,6 +166,10 @@
   function setFirmness(preset) {
     if (!canEdit()) return refuse();
     safe(function () { localStorage.setItem(FIRMNESS_KEY, preset); });
+    /* Re-persist, don't just redraw: the totals are stored alongside the
+       carries, and the shell reads those stored numbers. Redrawing alone left
+       this surface showing one total and the shell showing the old one. */
+    if (clubs.length) sync();
     render();
   }
 
@@ -152,10 +179,33 @@
   }
 
   var clubs = load();
+  /* Which club's editor is open, tracked by NAME: every write re-sorts the bag
+     by distance, so a position in the list does not survive an edit. */
+  var editing = null;
 
   function sync() {
     save(clubs);
     if (window.GDBubbleEngine) window.GDBubbleEngine.setBag(clubs);
+  }
+
+  /* One write path for the in-place edits, so a refusal from the core (an empty
+     name, a duplicate club) says why instead of silently doing nothing. */
+  function apply(result) {
+    if (!result) return;
+    if (result.error) { render(); note(result.error); return; }
+    editing = result.club || editing;
+    clubs = result.rows;
+    sync();
+    render();
+  }
+
+  /* No toast on this surface - the notice line above the list is where the bag
+     panel already explains itself. */
+  function note(message) {
+    var el = document.getElementById("bagNotice");
+    if (!el) return;
+    el.classList.remove("hiddenState");
+    el.textContent = message;
   }
 
   /* What the list shows is not always what the engine is using: with no real
@@ -178,91 +228,35 @@
           : "";
     }
 
-    list.textContent = "";
-    rows.forEach(function (row, i) {
-      var el = document.createElement("div");
-      el.className = "bagRow";
-
-      var clubInput = document.createElement("input");
-      clubInput.type = "text";
-      clubInput.value = row.club;
-      clubInput.setAttribute("aria-label", "Club name");
-
-      var carryInput = document.createElement("input");
-      carryInput.type = "number";
-      carryInput.inputMode = "numeric";
-      carryInput.min = "1";
-      carryInput.step = "1";
-      carryInput.value = String(row.baseCarry);
-      carryInput.setAttribute("aria-label", "Carry metres");
-
-      /* One metre a tap, in both directions.
-       *
-       * step="1" only governs the platform's own spinner, and on a phone there
-       * isn't one - the number field opens a keyboard, so nudging a club by a
-       * metre meant selecting the value and retyping it. These are the actual
-       * fine control, and they are the reason the field can be trusted to move
-       * in ones: nothing about them is left to the platform. */
-      var nudge = function (delta) {
-        var button = document.createElement("button");
-        button.type = "button";
-        button.className = "bagRowNudge";
-        button.textContent = delta < 0 ? "−" : "+";
-        button.setAttribute("aria-label", (delta < 0 ? "Decrease " : "Increase ") + row.club + " by one metre");
-        button.addEventListener("click", function () {
+    /* One renderer, shared with the shell's Bag panel: two columns filled left
+       column first, longest club top-left, shortest at the end of the right
+       column, and a tap opens that club's name and carry in place. */
+    safe(function () {
+      core().renderList(list, {
+        rows: rows,
+        editing: editing,
+        artBase: "../",
+        onEdit: function (club) {
           if (!editable) return refuse();
-          var next = Math.round(Number(carryInput.value)) + delta;
-          if (!(next > 0)) return;
-          carryInput.value = String(next);
-          clubs[i].baseCarry = next;
-          sync();
-        });
-        return button;
-      };
-
-      if (!editable) {
-        /* readOnly rather than disabled: a disabled input cannot be tapped, and
-           the tap is how the player finds out why it will not change. */
-        [clubInput, carryInput].forEach(function (input) {
-          input.readOnly = true;
-          input.addEventListener("focus", function () { input.blur(); refuse(); });
-          input.addEventListener("click", refuse);
-        });
-      } else {
-        clubInput.addEventListener("change", function () {
-          var v = clubInput.value.trim();
-          if (v) { clubs[i].club = v; sync(); } else { clubInput.value = clubs[i].club; }
-        });
-        carryInput.addEventListener("change", function () {
-          var v = Math.round(Number(carryInput.value));
-          if (v > 0) { clubs[i].baseCarry = v; sync(); } else { carryInput.value = String(clubs[i].baseCarry); }
-        });
-      }
-
-      el.appendChild(clubInput);
-      /* Only on a real bag. The ghost rows are the shipped defaults being shown
-         because there is nothing else to show - nudging one would write a bag
-         the player never set. */
-      if (editable && !showingGhost) el.appendChild(nudge(-1));
-      el.appendChild(carryInput);
-      if (editable && !showingGhost) el.appendChild(nudge(1));
-
-      if (editable && !showingGhost) {
-        var remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "bagRowRemove";
-        remove.setAttribute("aria-label", "Remove " + row.club);
-        remove.textContent = "×";
-        remove.addEventListener("click", function () {
-          clubs.splice(i, 1);
+          /* The ghost rows are the shipped defaults shown because there is
+             nothing else to show; opening one would edit a bag the player
+             never set. The notice above the list says so, and Add a club is
+             the way out of it. */
+          if (showingGhost) return;
+          editing = club || null;
+          render();
+        },
+        onRename: function (club, label) { apply(core().renameRow(clubs, club, label)); },
+        onCarry: function (club, metres) { apply(core().setCarry(clubs, club, metres)); },
+        onRemove: function (club) {
+          var result = core().removeRow(clubs, club);
+          editing = null;
+          clubs = result.rows;
           sync();
           render();
-        });
-        el.appendChild(remove);
-      }
-
-      list.appendChild(el);
-    });
+        }
+      });
+    }, null);
 
     renderHandedness();
     var preset = firmness();
@@ -276,12 +270,15 @@
     });
   }
 
+  /* Name first, then distance - and through the core's add, so a blank name or
+     a club already in the bag is refused the same way it is in the shell. */
   function addClub(club, carry) {
     if (!canEdit()) return refuse();
-    var name = String(club || "").trim();
-    var m = Math.round(Number(carry));
-    if (!name || !(m > 0)) return false;
-    clubs.push({ club: name, baseCarry: m });
+    var result = safe(function () { return core().addRow(clubs, club, carry); }, null);
+    if (!result) return false;
+    if (result.error) { render(); note(result.error); return false; }
+    clubs = result.rows;
+    editing = result.club;
     sync();
     render();
     return true;
@@ -298,9 +295,10 @@
     var ref = defaults.filter(function (r) { return r.club === "7i"; })[0];
     if (!(base > 0) || !defaults.length || !ref || !(ref.baseCarry > 0)) return;
     var scale = base / ref.baseCarry;
-    clubs = defaults.map(function (row) {
+    clubs = normalise(defaults.map(function (row) {
       return { club: row.club, baseCarry: Math.round(row.baseCarry * scale) };
-    });
+    }));
+    editing = null;
     sync();
     render();
   }

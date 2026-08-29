@@ -214,10 +214,6 @@
 (function(){
   var win = window;
   function safe(fn, fallback){ try { return fn(); } catch(e) { return fallback; } }
-  function esc(value){
-    try { return typeof win.gdEscapeHTML === "function" ? win.gdEscapeHTML(value) : String(value == null ? "" : value); }
-    catch(e){ return String(value == null ? "" : value); }
-  }
   function toast(message){ safe(function(){ if(typeof win.toast === "function") win.toast(message); else console.log(message); }, null); }
   function num(value){ var n = Number(value); return Number.isFinite(n) ? n : 0; }
   function clubName(row){
@@ -233,8 +229,11 @@
     if(!row) return 0;
     return num(row.totalM ?? row.total ?? row.totalMeters ?? row.totalMetres ?? row.totalDistance ?? row.totalDistanceM ?? row.baseTotal);
   }
+  /* GDBagCore is the one roll-out calculator both shells use; it defers to the
+     legacy shell's developer-tuned gdBagTotalForCarry when that is loaded. */
   function totalFor(club, carry, preset){
-    return safe(function(){ return Math.max(carry, Math.round(win.gdBagTotalForCarry(club, carry, preset) || carry)); }, Math.max(carry, Math.round(carry * 1.08)));
+    return safe(function(){ return Math.max(carry, Math.round(win.GDBagCore.totalForCarry(club, carry, preset) || carry)); },
+      safe(function(){ return Math.max(carry, Math.round(win.gdBagTotalForCarry(club, carry, preset) || carry)); }, Math.max(carry, Math.round(carry * 1.08))));
   }
   function normalise(row, forcedClub){
     if(!row || row.ghost) return null;
@@ -313,9 +312,14 @@
   function maxBagDistance(rows){
     return Math.max(0, ...(Array.isArray(rows) ? rows : []).map(function(row){ return Number(row.totalM || row.baseCarry || row.carry || row.distance || 0); }).filter(function(n){ return Number.isFinite(n) && n > 0; }));
   }
+  /* Longest club first - GDBagCore owns the rule, because the play surface
+     sorts the same rows and the two used to disagree. normalise() here first:
+     it understands more legacy row shapes than the core does, and a row it
+     cannot read is one the core would drop. */
   function sortRows(rows){
     var clean = (Array.isArray(rows) ? rows : []).map(function(row){ return normalise(row); }).filter(Boolean);
-    return clean.sort(function(a,b){ return (b.totalM || b.baseCarry) - (a.totalM || a.baseCarry); });
+    return safe(function(){ return win.GDBagCore.sortRows(clean); },
+      clean.sort(function(a,b){ return (b.totalM || b.baseCarry) - (a.totalM || a.baseCarry); }));
   }
   function quickBag(seven){
     return safe(function(){ return win.gdGenerateQuickBag(seven); }, null) || (function(){
@@ -349,11 +353,18 @@
 
   /* ---- one line per club (Claude Design "Golf bag UI simplification", turn 1b) ----
      The sheet used to be twelve four-field forms. It is now a two-column list of
-     read-only 46px lines; tapping a line spans it full width and opens the carry
-     stepper in place, so nothing is a live input until you ask for it. */
+     read-only 46px lines; tapping a line spans it full width and opens the club
+     name and carry stepper in place, so nothing is a live input until you ask
+     for it.
+
+     The rows themselves are GDBagCore's (scripts/gd-bag-core.js) - the play
+     surface at /app/ renders the same bag through the same list, in the same
+     longest-first, left-column-first order. What stays here is this sheet's own
+     chrome: the generator, the roll-out chip, the fly-into-the-bag animation
+     and the panel's state. */
   var ROLL_LABEL = { soft:'Soft', medium:'Normal', hard:'Firm' };
-  var ART_ASPECT = { driver:'710 / 302', wood:'681 / 208', hybrid:'666 / 146', blade:'674 / 222' };
-  var ui = { editing:null, rollOpen:false, genOpen:false, genEntering:false, genLeaving:false, setupCarry:0, busy:false };
+  var ui = { editing:null, rollOpen:false, genOpen:false, genEntering:false, genLeaving:false, setupCarry:0, busy:false,
+             addOpen:false, addClub:"", addCarry:0, addStep:1 };
   var timers = [];
 
   function el(id){ return document.getElementById(id); }
@@ -362,56 +373,16 @@
   function reducedMotion(){ return safe(function(){ return win.matchMedia('(prefers-reduced-motion: reduce)').matches; }, false); }
   function firmnessKey(){ return safe(function(){ return GD_BAG_FIRMNESS_KEY; }, 'gd_bag_total_firmness_v1'); }
   function rollPreset(){ return safe(function(){ return win.gdBagFirmness(); }, 'medium'); }
-  function art(club){
-    if(/driver/i.test(club)) return 'driver';
-    if(/\d\s*w|wood/i.test(club)) return 'wood';
-    if(/\d\s*h|hybrid|rescue/i.test(club)) return 'hybrid';
-    return 'blade';
-  }
-
   /* The rendered rows are the panel's source of truth, the way the old inputs
      were - gd-app-core still calls readBagPanel() from several places. */
   function readBagPanelSafe(){
-    var rows = [];
-    document.querySelectorAll('#gdBagEditor .gdBagRow').forEach(function(node){
-      var row = normalise({ club: node.dataset.club, baseCarry: node.dataset.carry, totalM: node.dataset.total });
-      if(row) rows.push(row);
-    });
-    return rows;
+    return safe(function(){ return win.GDBagCore.readList(el('gdBagEditor')); }, []);
   }
   function rowAt(index){ return readBagPanelSafe()[index] || null; }
-
-  function editHTML(index, carry, total){
-    return '<div class="gdBagRowEdit">'
-      + '<div class="gdBagRowStep">'
-      + '<button type="button" aria-label="Less carry" onclick="gdBagRowCarryStep(' + index + ',-1)">&minus;</button>'
-      + '<label><span>Carry</span><input inputmode="numeric" aria-label="Carry metres" value="' + carry + '" onchange="gdBagRowCarrySet(' + index + ',this.value)"></label>'
-      + '<button type="button" aria-label="More carry" onclick="gdBagRowCarryStep(' + index + ',1)">+</button>'
-      + '</div>'
-      + '<div class="gdBagRowFoot">'
-      + '<span class="gdBagRowNote">Runs on to ' + total + ' m</span>'
-      + '<div class="gdBagRowActions">'
-      + '<button class="gdBagRowRemove" type="button" onclick="gdBagDeleteClub(' + index + ')">Remove</button>'
-      + '<button class="gdBagRowDone" type="button" onclick="gdBagToggleRowEdit(' + index + ')">Done</button>'
-      + '</div></div></div>';
-  }
-  function rowHTML(row, index){
-    var kind = art(row.club);
-    var carry = Math.round(Number(row.baseCarry) || 0);
-    var total = Math.max(carry, Math.round(Number(row.totalM) || 0));
-    var editing = ui.editing === row.club;
-    return '<div class="gdBagRow' + (editing ? ' editing' : '') + '" id="gdBagRow_' + index + '"'
-      + ' data-club="' + esc(row.club) + '" data-carry="' + carry + '" data-total="' + total + '">'
-      + '<div class="gdBagRowArt" aria-hidden="true"><i style="aspect-ratio:' + ART_ASPECT[kind] + ';background-image:url(assets/clubs/' + kind + '-h.png)"></i></div>'
-      + '<div class="gdBagRowMain" role="button" tabindex="0" aria-expanded="' + (editing ? 'true' : 'false') + '"'
-      + ' onclick="gdBagToggleRowEdit(' + index + ')" onkeydown="gdBagRowKey(event,' + index + ')">'
-      + '<span class="gdBagRowClub">' + esc(row.club === 'Driver' ? 'DR' : row.club) + '</span>'
-      + '<span class="gdBagRowTotal">' + total + '</span>'
-      + '<span class="gdBagRowCarry">' + carry + '</span>'
-      + '</div>'
-      + (editing ? editHTML(index, carry, total) : '')
-      + '</div>';
-  }
+  /* The list is drawn column-first, so a DOM position is no longer the club's
+     place in the bag. Everything that edits a club addresses it by name; the
+     index-taking entry points below survive only for old callers. */
+  function clubAt(index){ return (rowAt(index) || {}).club || ''; }
 
   function renderBagPanelHotfix(){
     var p = clearUntouchedDefaultBag(profile());
@@ -432,6 +403,7 @@
     var genVisible = !ui.genLeaving && (ui.genOpen || ui.genEntering || !hasBag);
     var listRows = hasBag && !ui.genOpen;
     var listChrome = listRows && !ui.genEntering;
+    if(!listChrome) ui.addOpen = false;
 
     var sub = el('gdBagPanelSub');
     if(sub) sub.textContent = hasBag ? (bag.length + ' clubs · metres') : 'No clubs yet';
@@ -445,7 +417,12 @@
     var head = el('gdBagListHead');
     if(head) head.hidden = !listChrome;
     var add = el('gdBagAddTab');
-    if(add) add.hidden = !listChrome;
+    if(add){
+      add.hidden = !listChrome;
+      add.setAttribute('aria-expanded', ui.addOpen ? 'true' : 'false');
+      add.textContent = ui.addOpen ? 'Cancel' : 'Add a club';
+    }
+    renderAddPanel();
     var chip = el('gdBagGenChip');
     if(chip){ chip.hidden = !hasBag; chip.classList.toggle('active', ui.genOpen || ui.genEntering); }
 
@@ -459,7 +436,165 @@
     });
 
     var box = el('gdBagEditor');
-    if(box) box.innerHTML = listRows ? bag.map(rowHTML).join('') : '';
+    if(!box) return;
+    if(!listRows){ box.textContent = ''; return; }
+    /* GDBagCore draws the rows - same markup, same column-first order and same
+       editors as the play surface, which is the whole point of it existing. */
+    safe(function(){
+      win.GDBagCore.renderList(box, {
+        rows: bag,
+        editing: ui.editing,
+        artBase: '',
+        onEdit: function(club){ ui.editing = club || null; renderBagPanelHotfix(); },
+        onRename: function(club, label){ applyEdit(win.GDBagCore.renameRow(readBagPanelSafe(), club, label)); },
+        onCarry: function(club, metres){ applyEdit(win.GDBagCore.setCarry(readBagPanelSafe(), club, metres)); },
+        onRemove: function(club){
+          var result = win.GDBagCore.removeRow(readBagPanelSafe(), club);
+          ui.editing = null;
+          persistRows(result.rows, { silent:true });
+          if(result.club) toast(result.club + ' removed');
+        }
+      });
+    }, null);
+  }
+
+  /* One write path for every in-place edit: keep the row open under its new
+     name, persist, and say why nothing happened when the core refused. */
+  function applyEdit(result){
+    if(!result) return;
+    if(result.error){ toast(result.error); renderBagPanelHotfix(); return; }
+    ui.editing = result.club || ui.editing;
+    persistRows(result.rows, { silent:true });
+  }
+
+  /* ---- adding a club: the name, then the distance ----
+     It used to guess both - "Add a club" dropped the next unused club from the
+     generated set straight into the bag at its stock distance, and the row it
+     opened could only edit the number. So the first thing the player was asked
+     for was a distance for a club they had not chosen. Now the panel asks what
+     the club is called first, and only then how far it goes. */
+  function renderAddPanel(){
+    var panel = el('gdBagAddPanel');
+    if(!panel) return;
+    panel.hidden = !ui.addOpen;
+    if(!ui.addOpen){ panel.textContent = ''; return; }
+
+    panel.textContent = '';
+    var question = document.createElement('div');
+    question.className = 'gdBagGenQuestion';
+    panel.appendChild(question);
+
+    if(ui.addStep === 1){
+      question.textContent = 'What is the club called?';
+      var field = document.createElement('label');
+      field.className = 'gdBagAddField';
+      var caption = document.createElement('span');
+      caption.textContent = 'Club';
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.autocomplete = 'off';
+      input.placeholder = 'e.g. 5W';
+      input.value = ui.addClub;
+      input.setAttribute('aria-label', 'New club name');
+      var next = document.createElement('button');
+      next.className = 'gdBagBuild';
+      next.type = 'button';
+      next.textContent = 'Next';
+      next.disabled = !ui.addClub.trim();
+      /* Typed, not committed: the button has to unlock as the name appears, so
+         'input' rather than 'change'. */
+      input.addEventListener('input', function(){
+        ui.addClub = input.value;
+        next.disabled = !input.value.trim();
+      });
+      input.addEventListener('keydown', function(event){
+        if(event.key !== 'Enter' || !input.value.trim()) return;
+        event.preventDefault();
+        ui.addClub = input.value;
+        goToCarryStep();
+      });
+      next.addEventListener('click', goToCarryStep);
+      field.appendChild(caption);
+      field.appendChild(input);
+      panel.appendChild(field);
+      panel.appendChild(next);
+      /* Only steal focus once the panel opens, never on the re-render a
+         keystroke causes - that would put the caret back to the start. */
+      if(document.activeElement !== input) at(0, function(){ input.focus(); });
+      return;
+    }
+
+    question.textContent = 'How far does ' + ui.addClub.trim() + ' carry?';
+    var stepper = document.createElement('div');
+    stepper.className = 'gdBagGenStepper';
+    var less = document.createElement('button');
+    less.type = 'button';
+    less.setAttribute('aria-label', 'Less');
+    less.textContent = '−';
+    var value = document.createElement('div');
+    value.className = 'gdBagGenValue';
+    var carryInput = document.createElement('input');
+    carryInput.inputMode = 'numeric';
+    carryInput.value = String(ui.addCarry);
+    carryInput.setAttribute('aria-label', 'Carry metres');
+    var unit = document.createElement('small');
+    unit.textContent = 'metres';
+    var more = document.createElement('button');
+    more.type = 'button';
+    more.setAttribute('aria-label', 'More');
+    more.textContent = '+';
+    function setCarryValue(next){
+      ui.addCarry = Math.max(20, Math.min(400, Math.round(num(next) || ui.addCarry)));
+      carryInput.value = String(ui.addCarry);
+    }
+    less.addEventListener('click', function(){ setCarryValue(ui.addCarry - 5); });
+    more.addEventListener('click', function(){ setCarryValue(ui.addCarry + 5); });
+    carryInput.addEventListener('change', function(){ setCarryValue(carryInput.value); });
+    value.appendChild(carryInput);
+    value.appendChild(unit);
+    stepper.appendChild(less);
+    stepper.appendChild(value);
+    stepper.appendChild(more);
+    panel.appendChild(stepper);
+
+    var confirm = document.createElement('button');
+    confirm.className = 'gdBagBuild';
+    confirm.type = 'button';
+    confirm.textContent = 'Add ' + ui.addClub.trim();
+    confirm.addEventListener('click', function(){ setCarryValue(carryInput.value); commitAdd(); });
+    panel.appendChild(confirm);
+
+    var back = document.createElement('button');
+    back.className = 'gdBagAddBack';
+    back.type = 'button';
+    back.textContent = 'Back';
+    back.addEventListener('click', function(){ ui.addStep = 1; renderBagPanelHotfix(); });
+    panel.appendChild(back);
+  }
+
+  function goToCarryStep(){
+    if(!ui.addClub.trim()) return;
+    if(!ui.addCarry){
+      /* Start from the middle of the bag rather than zero: the stepper is the
+         fine adjustment, not the way to enter three digits. */
+      var rows = readBagPanelSafe();
+      var mid = rows.length ? rows[Math.floor(rows.length / 2)].baseCarry : (ui.setupCarry || 155);
+      ui.addCarry = Math.max(20, Math.min(400, Math.round(num(mid) || 155)));
+    }
+    ui.addStep = 2;
+    renderBagPanelHotfix();
+  }
+
+  function commitAdd(){
+    var result = win.GDBagCore.addRow(readBagPanelSafe(), ui.addClub, ui.addCarry);
+    if(result.error){ toast(result.error); return; }
+    ui.addOpen = false;
+    ui.addStep = 1;
+    ui.addClub = '';
+    ui.addCarry = 0;
+    ui.editing = result.club;
+    persistRows(result.rows, { silent:true });
+    toast(result.club + ' added');
   }
 
   /* ---- build / unbuild choreography ---- */
@@ -527,6 +662,7 @@
     ui.editing = null; ui.rollOpen = false;
     ui.genOpen = false; ui.genEntering = false; ui.genLeaving = false;
     ui.setupCarry = 0; ui.busy = false;
+    ui.addOpen = false; ui.addStep = 1; ui.addClub = ''; ui.addCarry = 0;
   }
 
   win.gdBagSetupStep = function(delta){
@@ -570,11 +706,13 @@
     });
   };
 
-  /* ---- row editing ---- */
+  /* ---- row editing ----
+     The list wires its own handlers now; these stay because gd-app-core and
+     anything else still holding the old names call them by index. */
   win.gdBagToggleRowEdit = function(index){
-    var row = rowAt(index);
-    if(!row) return;
-    ui.editing = ui.editing === row.club ? null : row.club;
+    var club = clubAt(index);
+    if(!club) return;
+    ui.editing = ui.editing === club ? null : club;
     renderBagPanelHotfix();
   };
   win.gdBagRowKey = function(event, index){
@@ -582,38 +720,41 @@
     event.preventDefault();
     win.gdBagToggleRowEdit(index);
   };
-  function setRowCarry(index, value){
-    var rows = readBagPanelSafe();
-    var row = rows[index];
-    if(!row) return;
-    var carry = Math.max(20, Math.min(400, Math.round(num(value) || row.baseCarry)));
-    ui.editing = row.club;
-    persistRows(rows.map(function(r, i){
-      return i === index ? { club: r.club, baseCarry: carry, totalM: totalFor(r.club, carry) } : r;
-    }), { silent:true });
-  }
   win.gdBagRowCarryStep = function(index, delta){
     var row = rowAt(index);
-    if(row) setRowCarry(index, row.baseCarry + num(delta));
+    if(row) applyEdit(win.GDBagCore.setCarry(readBagPanelSafe(), row.club, row.baseCarry + num(delta)));
   };
-  win.gdBagRowCarrySet = function(index, value){ setRowCarry(index, value); };
+  win.gdBagRowCarrySet = function(index, value){
+    var club = clubAt(index);
+    if(club) applyEdit(win.GDBagCore.setCarry(readBagPanelSafe(), club, value));
+  };
+  win.gdBagRowClubSet = function(index, value){
+    var club = clubAt(index);
+    if(club) applyEdit(win.GDBagCore.renameRow(readBagPanelSafe(), club, value));
+  };
   win.gdBagDeleteClub = function(index){
-    var rows = readBagPanelSafe();
-    var removed = rows[index];
-    if(!removed) return;
+    var club = clubAt(index);
+    if(!club) return;
+    var result = win.GDBagCore.removeRow(readBagPanelSafe(), club);
     ui.editing = null;
-    persistRows(rows.filter(function(r, i){ return i !== index; }), { silent:true });
-    toast(removed.club + ' removed');
+    persistRows(result.rows, { silent:true });
+    toast(club + ' removed');
   };
+  /* Opens the two-step add card. It used to add a guessed club outright. */
   win.gdBagAddSlot = function(){
-    var rows = readBagPanelSafe();
-    var used = new Set(rows.map(function(r){ return r.club.toLowerCase(); }));
-    var seven = (rows.find(function(r){ return r.club === '7i'; }) || {}).baseCarry || ui.setupCarry || 155;
-    var next = quickBag(seven).find(function(r){ return !used.has(r.club.toLowerCase()); })
-      || { club: 'Club ' + (rows.length + 1), baseCarry: 100, totalM: totalFor('Club', 100) };
-    ui.editing = next.club;
-    persistRows(rows.concat([next]), { silent:true });
-    toast(next.club + ' added');
+    if(ui.busy) return;
+    ui.addOpen = !ui.addOpen;
+    ui.addStep = 1;
+    ui.addCarry = 0;
+    if(ui.addOpen) ui.editing = null;
+    renderBagPanelHotfix();
+  };
+  win.gdBagCancelAdd = function(){
+    ui.addOpen = false;
+    ui.addStep = 1;
+    ui.addClub = '';
+    ui.addCarry = 0;
+    renderBagPanelHotfix();
   };
 
   /* ---- roll-out (the old soft / medium / hard "firmness") ---- */
