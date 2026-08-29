@@ -32,7 +32,7 @@ import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
 import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow, stitchedCardVerdict } from "./lib/gd-scorecard-resolve.mjs";
 import { reconcileFacilityClaims, atomicLoopCount, HOLES_PER_LOOP } from "./lib/gd-facility-loops-core.mjs";
-import { assessFacilityStructure, contestedClaims, describeClaimGround, isIndependentClaim, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
+import { assessFacilityStructure, contestedClaims, describeClaimGround, isIndependentClaim, mappingMethodFor, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
 import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry } from "./lib/gd-scorecard-match-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
@@ -1337,6 +1337,22 @@ async function runMapperJob(job, origin) {
      fragment of a facility. Fed to courseFitVerdict so the run cannot report
      itself trusted. */
   let facilityUnresolved = null;
+  /* WHICH NUMBERING REACHED THE PUBLISHED GEOMETRY.
+   *
+   * The single-course path used to report no mapping method at all - which
+   * meant the commonest facility of all, a standalone 18 or 9, published with
+   * the structure question answered and the method question simply missing.
+   * Only the facility paths carried one, so "how were these holes identified"
+   * was answerable exactly where the geometry was hardest and unanswerable
+   * everywhere else.
+   *
+   * Counted rather than flagged, because a resolver run that replaced SOME of
+   * the OSM numbering is genuinely mixed and a boolean cannot say so. Both
+   * counts are taken at the moment of adoption - before the resolver's guides
+   * overwrite geometry.holesResolved, which is what made this uncountable
+   * after the fact. */
+  let osmNumberedHoles = 0;
+  let resolverNumberedHoles = 0;
 
   /* Names are labels, not identity - so when OSM has already numbered the holes,
      geometry does not wait on them.
@@ -1531,6 +1547,16 @@ async function runMapperJob(job, origin) {
         holes: loop.holeNumbers.map(number => ({ holeNumber: number, candidateId: index + ":" + number }))
       }))
     });
+    /* Numbering came from OSM either way; what differs is whether OSM's own
+       course polygons sorted the holes onto their loops, or whether nothing
+       said which loop was which and the AutoMapper had to chain hole geometry
+       into loops itself. The second is the broken-numbering case, and calling
+       it "osm-numbered" hid exactly the facilities whose separation is worth
+       re-checking - see mappingMethodFor. */
+    const osmMappingMethod = summariseMappingMethod(loops.map(loop => mappingMethodFor({
+      osmNumberedHoles: loop.holeNumbers.length,
+      separatedByGeometry: loop.method === "routing"
+    })));
     const published = await publishSeparatedLoops(job, course, loops, expectedHoles, scorecardEvidence, origin);
     diagnostics.facilityStructure = structure;
     diagnostics.published = published.map(entry => ({ courseId: entry.courseId, holes: entry.holesResolved, contiguous: entry.contiguous, nameSource: entry.nameSource }));
@@ -1557,9 +1583,9 @@ async function runMapperJob(job, origin) {
       facilityStructure: structure.structure,
       facilityOrganisation: organiseFacility(loops, {
         structure: structure.structure,
-        mappingMethod: MAPPING_METHOD.OSM_NUMBERED
+        mappingMethod: osmMappingMethod
       }),
-      mappingMethod: MAPPING_METHOD.OSM_NUMBERED,
+      mappingMethod: osmMappingMethod,
       needsLabelling: unlabelled.length > 0,
       queryStages,
       expectedHoles,
@@ -1590,6 +1616,11 @@ async function runMapperJob(job, origin) {
     if (guides.length > collision.distinctNumbers) {
       const resolverGreens = (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon }));
       const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, existingObjects);
+      /* The resolver is answering here because loop separation could not tell
+         the courses apart, so its numbering stands alone - the colliding OSM
+         numbers it replaced identified nothing. */
+      osmNumberedHoles = 0;
+      resolverNumberedHoles = guides.length;
       geometry = Object.assign({}, geometry, merged, { holesResolved: guides.length });
     } else {
       diagnostics.fit = Object.assign(
@@ -1754,6 +1785,13 @@ async function runMapperJob(job, origin) {
       const resolverGreens = (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon }));
       const base = numberingIssue ? Object.values(geometry.objects) : existingObjects;
       const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, base);
+      /* numberingIssue means OSM had shapes and no numbers at all, so every
+         published number is the resolver's. The short-of-expected case is the
+         genuinely mixed one: OSM numbered part of the course and the resolver
+         filled in the rest, and reporting either method alone would overstate
+         the evidence behind half the holes. */
+      osmNumberedHoles = numberingIssue ? 0 : geometry.holesResolved;
+      resolverNumberedHoles = guides.length;
       geometry = Object.assign({}, geometry, merged, { holesResolved: guides.length });
     }
   }
@@ -1803,6 +1841,47 @@ async function runMapperJob(job, origin) {
     facilityUnresolved
   });
   const resolvedHoleNumbers = Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite);
+
+  /* THE ORDINARY COURSE ANSWERS THE SAME THREE QUESTIONS AS THE HARD ONES.
+   *
+   * Structure, method and organisation were built for the facilities that
+   * needed untangling, and only those facilities reported them. So a standalone
+   * 18 - the commonest shape there is - published with none of the three, and
+   * anything downstream reading facilityStructure had to treat "absent" as
+   * "probably one course", which is an inference about the site made from a
+   * missing field. Now it is stated.
+   *
+   * Deliberately run through the SAME assessor, not short-circuited to
+   * single-course on the grounds that one row published. That matters in the
+   * one case where it could lie: when the ground proved bigger than the card
+   * and the other cards could not be found, this course IS a fragment of a
+   * facility, and asking the assessor over the facility's full candidate count
+   * returns unknown - one claim with a loop or more standing outside it - which
+   * is the truth. Claiming single-course there would tell downstream the site
+   * was finished. */
+  if (!osmNumberedHoles && !resolverNumberedHoles) osmNumberedHoles = geometry.holesResolved;
+  const singleMappingMethod = mappingMethodFor({
+    osmNumberedHoles,
+    resolverHoles: resolverNumberedHoles
+  });
+  const singleStructure = assessFacilityStructure({
+    candidateCount: facilityUnresolved ? facilityUnresolved.candidateCount : resolvedHoleNumbers.length,
+    claims: resolvedHoleNumbers.length
+      ? [{
+        cardName: (scorecardEvidence && scorecardEvidence.cardName) || course.courseName || "",
+        /* Hole numbers are unique within a course, so they identify the ground
+           here without the candidate ids the facility paths carry. */
+        holes: resolvedHoleNumbers.map(number => ({ holeNumber: number, candidateId: "hole:" + number }))
+      }]
+      : []
+  });
+  diagnostics.facilityStructure = singleStructure;
+  diagnostics.mappingMethod = {
+    method: singleMappingMethod,
+    osmNumberedHoles,
+    resolverHoles: resolverNumberedHoles
+  };
+
   /* Carried rather than rebuilt client-side: the player is being asked to do
      work, so the sentence explaining why lives next to the rule that decided
      it. */
@@ -1822,6 +1901,17 @@ async function runMapperJob(job, origin) {
     expectedHoles,
     warnings: warnings.length ? warnings : undefined,
     resolverStatus,
+    /* The same three answers the facility paths give, on the ordinary course
+       too, so nothing downstream has to read an absent field as a verdict. */
+    facilityStructure: singleStructure.structure,
+    mappingMethod: singleMappingMethod,
+    facilityOrganisation: organiseFacility(
+      /* nameSource left to the organiser to derive: a course row that somehow
+         reached here unnamed should report as needing labelling, not assert a
+         name it does not have. */
+      [{ name: course.courseName || "", holes: resolvedHoleNumbers }],
+      { structure: singleStructure.structure, mappingMethod: singleMappingMethod }
+    ),
     /* Carried on the result so chainVisualSnapshot below can run the licensing check without
        re-reading the row it just wrote, and so a job's record shows what ground the mapper
        actually covered. */

@@ -37,7 +37,7 @@ const noise = count => Array.from({ length: count }, (_, i) => "noise" + i);
 (async () => {
   const structure = await import("file://" + path.join(ROOT, "functions", "lib", "gd-facility-structure-core.mjs"));
   const loops = await import("file://" + path.join(ROOT, "functions", "lib", "gd-facility-loops-core.mjs"));
-  const { assessFacilityStructure, contestedClaims, describeClaimGround, organiseFacility, isIndependentClaim, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } = structure;
+  const { assessFacilityStructure, contestedClaims, describeClaimGround, mappingMethodFor, organiseFacility, isIndependentClaim, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } = structure;
   const { reconcileFacilityClaims } = loops;
 
   /* ---- 1. clean standalone 18 ------------------------------------------- */
@@ -264,6 +264,82 @@ const noise = count => Array.from({ length: count }, (_, i) => "noise" + i);
     assert.strictEqual(summariseMappingMethod([MAPPING_METHOD.AUTOMAPPER, MAPPING_METHOD.NATIVE_RESOLVER]), MAPPING_METHOD.MIXED);
     assert.strictEqual(summariseMappingMethod([]), null,
       "a facility with no accepted claims has no mapping method, not a default one");
+  });
+
+  /* The four methods answer "how were these holes identified", and each has to
+     be reachable from real evidence - AUTOMAPPER was declared and then never
+     returned by anything, so a facility the AutoMapper chained into loops
+     itself reported the same method as one OSM had tagged cleanly. */
+
+  test("clean OSM numbering is osm-numbered", () => {
+    assert.strictEqual(mappingMethodFor({ osmNumberedHoles: 18 }), MAPPING_METHOD.OSM_NUMBERED);
+  });
+
+  test("loops the AutoMapper had to chain itself are automapper, not osm-numbered", () => {
+    assert.strictEqual(
+      mappingMethodFor({ osmNumberedHoles: 9, separatedByGeometry: true }),
+      MAPPING_METHOD.AUTOMAPPER,
+      "OSM numbered the holes but nothing said which loop each belonged to - that is the broken-numbering case and it must be visible");
+  });
+
+  test("numbering derived from a scorecard is native-resolver", () => {
+    assert.strictEqual(mappingMethodFor({ resolverHoles: 18 }), MAPPING_METHOD.NATIVE_RESOLVER);
+  });
+
+  test("a course numbered partly by OSM and partly by the resolver is mixed", () => {
+    assert.strictEqual(
+      mappingMethodFor({ osmNumberedHoles: 12, resolverHoles: 18 }), MAPPING_METHOD.MIXED,
+      "reporting either method alone would overstate the evidence behind half the holes");
+  });
+
+  test("nothing identified means no method, not a default one", () => {
+    assert.strictEqual(mappingMethodFor({}), null);
+    assert.strictEqual(mappingMethodFor(null), null);
+  });
+
+  test("a wider query frame is not a mapping method", () => {
+    assert.strictEqual(
+      mappingMethodFor({ osmNumberedHoles: 18, widened: true }), MAPPING_METHOD.OSM_NUMBERED,
+      "widening changes which features were fetched, not how they were identified");
+  });
+
+  /* ---- the ordinary course answers the same questions as the hard ones ----- */
+
+  test("a standalone 18 reports single-course, confidently", () => {
+    const holes = FRONT.concat(BACK);
+    const verdict = assessFacilityStructure({
+      candidateCount: holes.length,
+      claims: [claim("Championship", holes)]
+    });
+    assert.strictEqual(verdict.structure, FACILITY_STRUCTURE.SINGLE);
+    assert.strictEqual(verdict.confident, true,
+      "the commonest facility of all must not report 'unknown' - downstream would read that as a site still being untangled");
+  });
+
+  test("a standalone 9 reports single-course too", () => {
+    const verdict = assessFacilityStructure({ candidateCount: A.length, claims: [claim("The Nine", A)] });
+    assert.strictEqual(verdict.structure, FACILITY_STRUCTURE.SINGLE);
+    assert.strictEqual(verdict.confident, true);
+  });
+
+  test("one course published out of a facility that could not be separated is NOT single-course", () => {
+    /* The published nine is real, but the site holds three of them and the
+       other cards were never found. Asking over the FACILITY's ground rather
+       than the published course's is what keeps this honest: claiming
+       single-course here would tell downstream the site was finished. */
+    const verdict = assessFacilityStructure({ candidateCount: 27, claims: [claim("Westward", A)] });
+    assert.strictEqual(verdict.structure, FACILITY_STRUCTURE.UNKNOWN);
+    assert.strictEqual(verdict.confident, false);
+  });
+
+  test("a single course organises as one course, never as a selectable nine", () => {
+    const organised = organiseFacility([{ name: "Championship", holes: FRONT.concat(BACK) }],
+      { structure: FACILITY_STRUCTURE.SINGLE, mappingMethod: MAPPING_METHOD.OSM_NUMBERED });
+    assert.strictEqual(organised.siblings, 1);
+    assert.strictEqual(organised.courses[0].role, "course");
+    assert.strictEqual(organised.courses[0].holes, 18);
+    assert.strictEqual(organised.mappingMethod, MAPPING_METHOD.OSM_NUMBERED);
+    assert.strictEqual(organised.needsLabelling, false);
   });
 
   test("a multi-nine facility publishes selectable nines; anything else publishes courses", () => {

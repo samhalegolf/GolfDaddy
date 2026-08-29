@@ -251,6 +251,41 @@ export function summariseMappingMethod(methods) {
   return distinct.length === 1 ? distinct[0] : MAPPING_METHOD.MIXED;
 }
 
+/* HOW WERE THESE HOLES ACTUALLY IDENTIFIED?
+ *
+ * A separate question from what the site IS, and it has to stay separate: a
+ * cleanly-numbered 27 and a 27 the resolver had to derive from scorecard
+ * distances are the SAME structure reached two different ways, and a facility
+ * that reports only its structure cannot tell an operator which of its courses
+ * are resting on evidence worth re-checking.
+ *
+ * The four answers, and what earns each:
+ *
+ *   osm-numbered     Every published hole took its number from OSM's own
+ *                    ref/name tags, and nothing else had to be worked out.
+ *   automapper       The numbers came from OSM, but the tags alone did not put
+ *                    the holes on the right course - the AutoMapper had to chain
+ *                    hole geometry into loops itself, because the site had no
+ *                    separate course polygons to sort them by. Broken or
+ *                    duplicated numbering lands here.
+ *   native-resolver  Numbering derived from a scorecard's distances, OSM refs
+ *                    ignored entirely.
+ *   mixed            More than one of the above reached the published geometry.
+ *
+ * Note what does NOT make it `automapper`: widening the query frame. A wider
+ * sweep changes which features were fetched, not how they were identified, and
+ * counting it would make almost every large site report the same method.
+ *
+ * Returns null rather than guessing when nothing was identified at all. */
+export function mappingMethodFor(evidence) {
+  const osmHoles = Math.max(0, Number(evidence && evidence.osmNumberedHoles) || 0);
+  const resolverHoles = Math.max(0, Number(evidence && evidence.resolverHoles) || 0);
+  if (!osmHoles && !resolverHoles) return null;
+  if (osmHoles && resolverHoles) return MAPPING_METHOD.MIXED;
+  if (resolverHoles) return MAPPING_METHOD.NATIVE_RESOLVER;
+  return (evidence && evidence.separatedByGeometry) ? MAPPING_METHOD.AUTOMAPPER : MAPPING_METHOD.OSM_NUMBERED;
+}
+
 /* THE FACILITY ORGANISER
  *
  * Everything above solves geometry. This does not: it takes loops that are
