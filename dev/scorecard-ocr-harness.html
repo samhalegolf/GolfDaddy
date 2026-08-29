@@ -1,0 +1,165 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Clarity Scorecard OCR — dev harness</title>
+<style>
+  body { font: 13px/1.45 ui-monospace, Menlo, monospace; margin: 16px; background:#0f1512; color:#e7efe9; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  .muted { color:#8ba; }
+  button { font: inherit; padding:7px 12px; border-radius:9px; border:1px solid #2c4; background:#173; color:#eafff2; cursor:pointer; }
+  button:disabled { opacity:.4; cursor:default; }
+  .row { display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap; margin:10px 0; }
+  canvas { max-width:100%; border:1px solid #244; border-radius:8px; background:#050806; display:block; }
+  #status { margin:8px 0; min-height:18px; }
+  table { border-collapse:collapse; margin-top:10px; font-size:12px; }
+  th, td { border:1px solid #244; padding:3px 7px; text-align:right; }
+  th { color:#9cf; text-align:left; }
+  td.label { text-align:left; color:#bfe; }
+  pre { background:#0a0f0c; border:1px solid #244; border-radius:8px; padding:10px; overflow:auto; }
+  .kind { display:inline-block; min-width:78px; }
+  .holes { color:#37f28d; } .par { color:#9cf; } .index { color:#c9a; } .distance { color:#fd8; } .none { color:#867; }
+</style>
+
+<h1>Clarity Scorecard OCR — dev harness</h1>
+<div class="muted">
+  Load a photo of a scorecard and press Scan. There is <b>no corner-stretch step</b> — that is the
+  point of this reader. It runs on the image as given, makes its strips, works out which one holds
+  the hole numbers, and hands a grid to the same <code>gd-scorecard-parse-core</code> the club-website
+  path uses. If it cannot read the card it says which stage stopped it instead of asking you to drag
+  anything.
+</div>
+
+<div class="row">
+  <input type="file" id="file" accept="image/*">
+  <button id="scan" disabled>Scan</button>
+</div>
+<div id="status" class="muted">Waiting for an image…</div>
+
+<div class="row">
+  <div><div class="muted">Source + detected strips and columns</div><canvas id="view"></canvas></div>
+</div>
+<div id="stages"></div>
+<div id="result"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="../scripts/clarity-scorecard-ocr.js"></script>
+<script src="../scripts/clarity-scorecard-ocr-pixels.js"></script>
+<script src="../scripts/clarity-scorecard-scan.js"></script>
+<script type="module">
+import { parseScorecardCards } from "../functions/lib/gd-scorecard-parse-core.mjs";
+
+const PIX = window.ClarityScorecardOcrPixels;
+const { scanScorecard } = window.ClarityScorecardScan;
+const $ = id => document.getElementById(id);
+const status = m => { $("status").textContent = m; };
+let image = null, worker = null;
+
+$("file").onchange = event => {
+  const file = event.target.files[0];
+  if (!file) return;
+  const img = new Image();
+  img.onload = () => {
+    // Downscale very large photos: the per-box crops are what carry the detail,
+    // and a 4000px source only makes the component pass slow.
+    const scale = Math.min(1, 2400 / img.width);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    canvas.getContext("2d", { willReadFrequently: true }).drawImage(img, 0, 0, canvas.width, canvas.height);
+    image = canvas.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height);
+    draw(null);
+    $("scan").disabled = false;
+    status(`Loaded ${canvas.width}x${canvas.height}. Press Scan.`);
+  };
+  img.src = URL.createObjectURL(file);
+};
+
+async function recognizer() {
+  if (!worker) {
+    status("Starting Tesseract…");
+    worker = await Tesseract.createWorker("eng");
+  }
+  return async (source, opts) => {
+    const parameters = { tessedit_pageseg_mode: opts.psm || "7" };
+    if (opts.whitelist) parameters.tessedit_char_whitelist = opts.whitelist;
+    await worker.setParameters(parameters);
+    const result = await worker.recognize(source);
+    return String(result?.data?.text || "").trim();
+  };
+}
+
+$("scan").onclick = async () => {
+  $("scan").disabled = true;
+  $("stages").innerHTML = "";
+  $("result").innerHTML = "";
+  try {
+    const recognize = await recognizer();
+    const stages = [];
+    const result = await scanScorecard(image, {
+      recognize,
+      onStage(name, info) {
+        if (name === "read") { status(`Reading boxes ${info.done}/${info.total}`); return; }
+        stages.push(`${name}: ${JSON.stringify(info)}`);
+        status(`${name}…`);
+        $("stages").innerHTML = "<pre>" + stages.join("\n") + "</pre>";
+      }
+    });
+    draw(result);
+    if (!result.ok) {
+      status(`Stopped at "${result.stage}".`);
+      $("result").innerHTML = `<pre>${escapeHtml(result.error)}\n\n${escapeHtml(JSON.stringify(result.detail, null, 2) || "")}</pre>`;
+      return;
+    }
+    const cards = parseScorecardCards(result.grids, { unit: result.unit });
+    status(`Read ${cards.length} card${cards.length === 1 ? "" : "s"}.`);
+    $("result").innerHTML = renderStrips(result) + cards.map(renderCard).join("");
+  } catch (error) {
+    status("Failed: " + error.message);
+    console.error(error);
+  } finally {
+    $("scan").disabled = false;
+  }
+};
+
+function draw(result) {
+  const canvas = $("view");
+  const scale = Math.min(1, 1000 / image.width);
+  canvas.width = Math.round(image.width * scale);
+  canvas.height = Math.round(image.height * scale);
+  const ctx = canvas.getContext("2d");
+  ctx.putImageData(image, 0, 0);
+  ctx.drawImage(canvas, 0, 0, image.width, image.height, 0, 0, canvas.width, canvas.height);
+  if (!result) return;
+  ctx.lineWidth = 1;
+  (result.columns || []).forEach(column => {
+    ctx.strokeStyle = "rgba(255,220,120,.75)";
+    ctx.strokeRect(column.left * scale, 0, (column.right - column.left) * scale, canvas.height);
+  });
+  (result.strips || []).forEach(strip => {
+    ctx.strokeStyle = { holes: "#37f28d", par: "#9cf", index: "#c9a", distance: "#fd8" }[strip.kind] || "rgba(140,160,150,.5)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, strip.top * scale, canvas.width - 2, (strip.bottom - strip.top) * scale);
+  });
+}
+
+function renderStrips(result) {
+  const rows = result.strips.map(strip =>
+    `<tr><td class="label"><span class="kind ${strip.kind || "none"}">${strip.kind || "—"}</span></td>` +
+    `<td class="label">${escapeHtml(strip.label || "")}</td>` +
+    `<td>${strip.values.length}</td>` +
+    `<td class="label">${escapeHtml(strip.values.slice(0, 22).map(v => v.n).join(" "))}</td>` +
+    `<td class="label">${escapeHtml(strip.reason)}</td></tr>`).join("");
+  return `<h1>Strips</h1><table><tr><th>kind</th><th>label read</th><th>n</th><th>values</th><th>why</th></tr>${rows}</table>`;
+}
+
+function renderCard(card) {
+  const rows = card.holes.map(hole =>
+    `<tr><td>${hole.hole}</td><td>${hole.par ?? ""}</td><td>${hole.distanceM ?? ""}</td><td>${hole.strokeIndex ?? ""}</td></tr>`).join("");
+  return `<h1>${escapeHtml(card.name || "(unnamed card)")} — ${card.holeCount} holes, par ${card.par ?? "?"}, tee ${escapeHtml(card.teeName || "?")}</h1>` +
+    `<div class="muted">tees read: ${escapeHtml(card.teeOptions.join(", "))}</div>` +
+    `<table><tr><th>hole</th><th>par</th><th>distance (m)</th><th>index</th></tr>${rows}</table>`;
+}
+
+function escapeHtml(text) {
+  return String(text == null ? "" : text).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+</script>
