@@ -30,9 +30,9 @@ import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoO
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
-import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow } from "./lib/gd-scorecard-resolve.mjs";
+import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow, stitchedCardVerdict } from "./lib/gd-scorecard-resolve.mjs";
 import { reconcileFacilityClaims, atomicLoopCount, HOLES_PER_LOOP } from "./lib/gd-facility-loops-core.mjs";
-import { assessFacilityStructure, describeClaimGround, isIndependentClaim, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
+import { assessFacilityStructure, contestedClaims, describeClaimGround, isIndependentClaim, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
 import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry } from "./lib/gd-scorecard-match-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
@@ -840,10 +840,40 @@ async function publishUnnumberedFacility(context) {
     if (!cards.length && !seeded.length) { record.reason = record.reason || "no-readable-card"; break; }
     if (round > 0 && cards.length === before) { record.reason = "no-new-cards"; break; }
 
-    await heartbeatJob(job, { stage: "resolving-facility-loops-" + (round + 1) });
-    const pass = await claimFacilityGround({
-      cards, course, payload, deadline, resolution, seeded
+    /* An aggregator's scrape that lost the boundaries between the club's nines
+       is not a course, and matching it produces an eighteen nobody has played
+       over ground belonging to two real loops. Dropped before it can claim
+       anything - see stitchedCardVerdict, which is careful to keep GENUINE
+       combined cards, because those are how composite facilities are found. */
+    const stitched = [];
+    const usableCards = cards.filter(card => {
+      const verdict = stitchedCardVerdict(card, cards);
+      if (!verdict.stitched) return true;
+      stitched.push({ card: card.name || "(unnamed)", holes: (card.holes || []).length, reason: verdict.reason, runs: verdict.runs });
+      return false;
     });
+    record.stitchedCards = stitched;
+
+    await heartbeatJob(job, { stage: "resolving-facility-loops-" + (round + 1) });
+    let pass = await claimFacilityGround({
+      cards: usableCards, course, payload, deadline, resolution, seeded
+    });
+
+    /* Two cards that matched the same ground mean the open pass could not
+       separate them, not that the site has two loops there. Run it again with
+       the strongest claim's ground taken away, so the loser has to find its own
+       - the progressive reduction this whole path exists for, brought forward to
+       the round that actually needs it. */
+    const contested = contestedClaims(pass.claims);
+    if (contested.length) {
+      record.contested = contested;
+      await heartbeatJob(job, { stage: "separating-contested-loops-" + (round + 1) });
+      pass = await claimFacilityGround({
+        cards: usableCards, course, payload, deadline, resolution, seeded,
+        sequential: true, priorClaims: pass.claims
+      });
+      record.contestedAfter = contestedClaims(pass.claims);
+    }
 
     /* What the ground says the site is, from the claims as they now stand.
        Sticky once confident - a generic 18-hole card arriving in round three
@@ -907,6 +937,25 @@ async function publishUnnumberedFacility(context) {
   record.mappingMethod = summariseMappingMethod(resolution.mappingMethods);
   if (!reconciled || reconciled.loops.length < 2) {
     record.reason = record.reason || "only-" + ((reconciled && reconciled.loops.length) || 0) + "-courses-identified";
+    return { published: null, record };
+  }
+
+  /* A SPLIT NEEDS A REASON, NOT JUST A REMAINDER.
+   *
+   * Structure "unknown" means the evidence could not explain the ground - and
+   * splitting a facility on evidence that explains nothing is how Howeston
+   * published a stitched aggregator card as a whole eighteen. It got there
+   * through the back door: with no structure the reconciler falls back to the
+   * plain "under a loop's worth left over" rule, eight candidates were spare,
+   * and that read as finished.
+   *
+   * Publishing one course, untrusted and warned, is the honest answer here. The
+   * caller already has that path - it is what a facility with no readable cards
+   * takes - and the ground that IS well mapped still publishes, which at
+   * Howeston was a correct nine. */
+  if (resolution.structure === FACILITY_STRUCTURE.UNKNOWN || !resolution.structureConfident) {
+    record.reason = "structure-unresolved: " + (record.structureReason || "unknown")
+      + " - refusing to split " + reconciled.claimedLoops + " loops on evidence that does not explain the ground";
     return { published: null, record };
   }
 
@@ -1000,9 +1049,14 @@ async function publishUnnumberedFacility(context) {
  * pass. Composite claims never do; a play-order facility depends on its cards
  * reaching for the same nine. */
 async function claimFacilityGround(input) {
-  const { cards, course, payload, deadline, resolution, seeded } = input;
+  const { cards, course, payload, deadline, resolution, seeded, sequential, priorClaims } = input;
   const multiNine = resolution.structureConfident && resolution.structure === FACILITY_STRUCTURE.MULTI_NINE;
+  /* In sequential mode the order decides who gets their ground first, so it has
+     to be strength order - and the only honest measure of strength is what the
+     open pass actually scored each card, not a guess from its hole count. */
+  const scored = new Map((priorClaims || []).map(claim => [claim.cardName || "", claim.confidence || 0]));
   const ordered = cards.slice().sort((a, b) => {
+    if (sequential) return (scored.get(b.name || "") || 0) - (scored.get(a.name || "") || 0);
     if (!multiNine) return 0;
     const nine = card => ((card.holes || []).length === HOLES_PER_LOOP ? 0 : 1);
     return (nine(a) - nine(b)) || ((b.name ? 1 : 0) - (a.name ? 1 : 0));
@@ -1017,6 +1071,14 @@ async function claimFacilityGround(input) {
      reconciled, which is the first moment the site has said whether excluding
      anything is safe. */
   const claims = seeded.slice();
+  /* Sequential mode exists because cards were landing on each other's ground, so
+     the seed's ground goes off the table immediately too - it is the one claim
+     this run already trusts, and leaving it free is leaving the contest open. */
+  if (sequential) {
+    seeded.forEach(claim => (claim.holes || []).forEach(hole => {
+      if (hole.candidateId != null) excluded.add(String(hole.candidateId));
+    }));
+  }
   const rejected = [];
   let excludedWithinRound = 0;
 
@@ -1075,8 +1137,10 @@ async function claimFacilityGround(input) {
      * for a nine another one already has. And this particular claim must own its
      * ground outright - a claim that partially shares with another is half of a
      * play order and removing it strands the other half. */
-    if (!resolution.structureConfident) continue;
-    if (resolution.composite) continue;
+    if (!sequential) {
+      if (!resolution.structureConfident) continue;
+      if (resolution.composite) continue;
+    }
     if (!isIndependentClaim(claim, claims)) continue;
     claim.holes.forEach(hole => { if (!excluded.has(hole.candidateId)) { excluded.add(hole.candidateId); excludedWithinRound += 1; } });
   }

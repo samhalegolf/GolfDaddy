@@ -200,6 +200,108 @@ export function sameCourseCard(a, b) {
   return disagreements <= Math.max(1, Math.round(common.length * 0.15));
 }
 
+/* IS THIS CARD STITCHED TOGETHER OUT OF THE OTHERS?
+ *
+ * Howeston's aggregator page publishes an "18-hole" card for a 27-hole club, and
+ * it is not a course. Its holes are spliced out of the club's real nines and put
+ * back in the wrong order:
+ *
+ *   All Square 1-4   317,104,250,308   Howard 1-4, exactly
+ *   All Square 5-6   345,125           WESTWARD 2-3, exactly
+ *   All Square 8-9   295,290           Howard 8-9, exactly
+ *
+ * Accepting that as a course claim is how a facility publishes an eighteen that
+ * nobody has ever played, over ground belonging to two real loops.
+ *
+ * THE TEST IS ORDER, NOT ORIGIN
+ *
+ * "Its holes come from the sibling cards" is NOT evidence of fabrication - it is
+ * the definition of a legitimate combined card. A real "Red + White" card IS
+ * Red's nine followed by White's nine, and rejecting cards for that would throw
+ * away exactly the composite evidence gd-facility-loops-core.mjs is built to
+ * slice.
+ *
+ * What separates them is whether the sibling survives as a CONTIGUOUS RUN in the
+ * card's own hole order. Red + White carries Red 1-9 at holes 1-9, unbroken and
+ * in sequence. Howeston's card carries four of Howard, then two of Westward,
+ * then two more of Howard - the same distances, shuffled. A club prints its
+ * nines end to end; an aggregator's bad scrape interleaves them.
+ *
+ * Returns { stitched, runs, drawnFrom, longestRun }. `stitched` is true only
+ * when the card is substantially made of sibling holes AND no sibling survives
+ * as a run long enough to be a nine. */
+export const STITCH_TOLERANCE_M = 3;
+const STITCH_MIN_RUN = 8;
+
+function distancesOf(card) {
+  return ((card && card.holes) || [])
+    .slice()
+    .sort((a, b) => (a.hole || 0) - (b.hole || 0))
+    .map(hole => (Number.isFinite(hole.distanceM) ? hole.distanceM : null));
+}
+
+/* The longest stretch of `card` that follows `sibling` hole for hole, in order.
+   Distances are compared with a small tolerance because two sources round and
+   re-measure the same hole differently. */
+function longestOrderedRun(cardDistances, siblingDistances) {
+  let best = 0;
+  for (let start = 0; start < cardDistances.length; start += 1) {
+    for (let offset = 0; offset < siblingDistances.length; offset += 1) {
+      let run = 0;
+      while (start + run < cardDistances.length && offset + run < siblingDistances.length) {
+        const a = cardDistances[start + run];
+        const b = siblingDistances[offset + run];
+        if (a == null || b == null || Math.abs(a - b) > STITCH_TOLERANCE_M) break;
+        run += 1;
+      }
+      if (run > best) best = run;
+    }
+  }
+  return best;
+}
+
+export function stitchedCardVerdict(card, siblings) {
+  const mine = distancesOf(card);
+  /* Only cards SHORTER than this one can have been stitched into it. Without
+     that direction the test is symmetric and accuses the victim: Howeston's real
+     Howard nine came back "stitched" because the aggregator's fake eighteen had
+     borrowed from it. A nine is never assembled out of an eighteen. */
+  const others = (siblings || []).filter(other => other && other !== card
+    && ((other.holes || []).length) < ((card.holes || []).length));
+  const usable = mine.filter(value => value != null).length;
+  if (usable < 9 || !others.length) return { stitched: false, reason: "not-enough-to-judge", runs: [], drawnFrom: 0, longestRun: 0 };
+
+  const runs = others.map(other => ({
+    name: (other && other.name) || "(unnamed)",
+    run: longestOrderedRun(mine, distancesOf(other))
+  }));
+  const longestRun = runs.reduce((max, entry) => Math.max(max, entry.run), 0);
+
+  /* How much of this card any sibling can account for at all, in any order. A
+     multiset count, so a distance repeated twice needs two sources. */
+  const pool = [];
+  others.forEach(other => distancesOf(other).forEach(value => { if (value != null) pool.push(value); }));
+  let drawnFrom = 0;
+  mine.forEach(value => {
+    if (value == null) return;
+    const index = pool.findIndex(candidate => Math.abs(candidate - value) <= STITCH_TOLERANCE_M);
+    if (index >= 0) { pool.splice(index, 1); drawnFrom += 1; }
+  });
+
+  /* Substantially built from the siblings, yet not carrying any of them whole
+     and in order. That is a scrape that lost the boundaries between the club's
+     nines, not a card for a course somebody plays. */
+  const mostlyBorrowed = drawnFrom >= Math.ceil(usable * 0.5);
+  const stitched = mostlyBorrowed && longestRun < STITCH_MIN_RUN;
+  return {
+    stitched,
+    reason: stitched
+      ? "borrows-" + drawnFrom + "-of-" + usable + "-holes-longest-ordered-run-" + longestRun
+      : (mostlyBorrowed ? "composite-run-" + longestRun : "own-holes"),
+    runs, drawnFrom, longestRun
+  };
+}
+
 /* Distinct courses in a pool, by layout rather than by title. */
 export function distinctCards(cards) {
   const distinct = [];

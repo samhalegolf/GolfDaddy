@@ -401,3 +401,51 @@ export function describeClaimGround(claims, reconciled) {
     }))
   };
 }
+
+/* TWO CARDS FIGHTING OVER ONE NINE.
+ *
+ * Howeston's Howard and Westward cards both matched the SAME nine fairways -
+ * seven of nine candidates identical, the hole order scrambled between them
+ * (Westward's 1 was Howard's 9), at confidences of 0.867 and 0.868. Two cards
+ * that describe different loops cannot both be right about the same ground, and
+ * a tie that close is the resolver saying it cannot tell them apart rather than
+ * that it found two answers.
+ *
+ * This is a THIRD relationship, and until it was named the reconciler had to
+ * force it into one of the two it knew:
+ *
+ *   play order   shared >= 6, and EACH keeps >= 6 of its own    -> slice into nines
+ *   duplicate    one wholly inside the other                    -> drop the smaller
+ *   contested    shared >= 6, and NEITHER keeps 6 of its own    -> the match failed
+ *
+ * Reconciling contested claims as if both were valid is what published a nine
+ * twice and left a third of the facility unclaimed. The answer is not to pick a
+ * winner on a 0.001 confidence margin - it is to stop matching them over the
+ * same open field. Let the stronger one take its ground, remove it, and make the
+ * other find its own; if it cannot, it was never a separate loop. */
+export function contestedClaims(claims) {
+  const list = (claims || []);
+  const pairs = [];
+  for (let i = 0; i < list.length; i += 1) {
+    for (let j = i + 1; j < list.length; j += 1) {
+      const shared = claimOverlap(list[i], list[j]);
+      if (shared < MIN_SHARED_CANDIDATES) continue;
+      const aKeeps = holeCount(list[i]) - shared;
+      const bKeeps = holeCount(list[j]) - shared;
+      /* Both sides failing to keep a loop's worth of their own ground. A play
+         order keeps a nine on each side; a duplicate keeps nothing on one side
+         and everything on the other, and is handled as containment. */
+      if (aKeeps >= MIN_SHARED_CANDIDATES || bKeeps >= MIN_SHARED_CANDIDATES) continue;
+      if (isContainedIn(list[i], list[j]) || isContainedIn(list[j], list[i])) continue;
+      pairs.push({
+        a: list[i].cardName || "(unnamed)",
+        b: list[j].cardName || "(unnamed)",
+        shared, aKeeps, bKeeps,
+        /* How little separates them. A margin this small is the resolver
+           reporting a coin toss, and it is worth having on the row. */
+        confidenceMargin: Number(Math.abs((list[i].confidence || 0) - (list[j].confidence || 0)).toFixed(4))
+      });
+    }
+  }
+  return pairs;
+}

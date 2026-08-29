@@ -37,7 +37,7 @@ const noise = count => Array.from({ length: count }, (_, i) => "noise" + i);
 (async () => {
   const structure = await import("file://" + path.join(ROOT, "functions", "lib", "gd-facility-structure-core.mjs"));
   const loops = await import("file://" + path.join(ROOT, "functions", "lib", "gd-facility-loops-core.mjs"));
-  const { assessFacilityStructure, describeClaimGround, organiseFacility, isIndependentClaim, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } = structure;
+  const { assessFacilityStructure, contestedClaims, describeClaimGround, organiseFacility, isIndependentClaim, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } = structure;
   const { reconcileFacilityClaims } = loops;
 
   /* ---- 1. clean standalone 18 ------------------------------------------- */
@@ -367,6 +367,37 @@ const noise = count => Array.from({ length: count }, (_, i) => "noise" + i);
     const ground = describeClaimGround(claims, reconciled);
     const howard = ground.claims.find(entry => entry.card === "Howard");
     assert.strictEqual(howard.fate, "no-ground-published");
+  });
+
+  /* ---- contested ground: two cards fighting over one nine ---------------- */
+
+  test("Howeston: two nine-hole cards on the same ground is contested, not two loops", () => {
+    /* The real numbers off the rescan. Westward and Howard shared seven of nine
+       candidates with the hole order scrambled between them, at confidences
+       0.867 and 0.868 - a coin toss the reconciler was treating as two answers. */
+    const shared = ["s1","s2","s3","s4","s5","s6","s7"];
+    const westward = claim("Westward", shared.concat(["w8","w9"]), 0.867);
+    const howard = claim("Howard", shared.concat(["h8","h9"]), 0.868);
+    const pairs = contestedClaims([westward, howard]);
+    assert.strictEqual(pairs.length, 1);
+    assert.strictEqual(pairs[0].shared, 7);
+    assert.strictEqual(pairs[0].aKeeps, 2);
+    assert.strictEqual(pairs[0].bKeeps, 2);
+    assert.ok(pairs[0].confidenceMargin < 0.01, "the resolver could not tell them apart");
+  });
+
+  test("a play order is NOT contested - both sides keep a nine of their own", () => {
+    const pairs = contestedClaims([claim("Red + White", A.concat(B)), claim("White + Blue", B.concat(C))]);
+    assert.deepStrictEqual(pairs, [], "sharing a nine while keeping a nine is a composite, not a failed match");
+  });
+
+  test("a contained duplicate is NOT contested - containment has its own handling", () => {
+    const pairs = contestedClaims([claim("Championship", FRONT.concat(BACK)), claim("Front Nine", FRONT)]);
+    assert.deepStrictEqual(pairs, []);
+  });
+
+  test("disjoint nines are not contested", () => {
+    assert.deepStrictEqual(contestedClaims([claim("Westward", A), claim("Howard", B)]), []);
   });
 
   let failed = 0;
