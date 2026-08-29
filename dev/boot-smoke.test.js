@@ -107,6 +107,7 @@ async function bootSurface(browser, surface) {
       /* The strip is only real if the admin surface is genuinely absent from the
          app build - present-but-hidden would still be parsed and shipped. */
       developerPanel: !!document.getElementById("developerPanel"),
+      mappingDebug: !!window.GDCourseMappingDebug,
       adminCourseDb: typeof window.gdRenderAdminCourseDatabase === "function",
       /* A stray route="admin" must be a no-op on a phone, not an uncaught
          ReferenceError for renderers that only exist in the studio build. */
@@ -135,18 +136,7 @@ async function bootSurface(browser, surface) {
     if (surface.studioPanels && !canaries.developerPanel) fail("#developerPanel missing — the studio surface must keep the admin panels.");
     if (surface.studioPanels && !canaries.adminCourseDb) fail("gdRenderAdminCourseDatabase missing — the studio surface must keep the Course Database.");
     if (!surface.studioPanels && canaries.developerPanel) fail("#developerPanel present — the app surface must not ship the admin panel.");
-    /* There is deliberately NO mapping-debug assertion here. This test used to
-       require window.GDCourseMappingDebug to be absent from the app build, and
-       that rule was reversed on purpose: the app surface is the one that SCANS,
-       so studio-marking scripts/gd-course-mapping-debug.js left the recorder
-       stripped from dist/index.html, mappingDebugApi() returning null on every
-       phone, and each recordMappingDebug call in the pipeline a silent no-op -
-       a failed scan produced no diagnostics at all. The tag at index.html:359
-       is unmarked for that reason, and dev/course-mapping-debug-wiring.test.js
-       owns the rule now ("the recorder is not stripped from the app build").
-       The canary outlived the rule it was written for; re-adding it would ask
-       the build to reintroduce a diagnosed bug. The developerPanel and
-       adminCourseDb strip guards either side of this are untouched. */
+    if (!surface.studioPanels && canaries.mappingDebug) fail("GDCourseMappingDebug loaded — the app surface must not ship the mapping debug module.");
     if (!surface.studioPanels && canaries.adminCourseDb) fail("gdRenderAdminCourseDatabase defined — the app surface must not ship the admin Course Database.");
     if (canaries.openAdminThrew) fail("openDeveloperPanel() threw: " + canaries.openAdminThrew);
     if (consoleErrors.length) {
