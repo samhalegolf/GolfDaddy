@@ -83,6 +83,7 @@ jobs:
           node dev/course-publish-merge.test.js
           node dev/shell-owner.test.js
           node dev/shell-behavior.test.js
+          node dev/bag-central-system.test.js
           node dev/course-location-owner.test.js
           node dev/course-location-behavior.test.js
           node dev/course-picker-location.test.js
