@@ -114,3 +114,9 @@ jobs:
       # thing the CSV pipeline cannot afford.
       - name: Practice data suites
         run: npm run test:practice
+
+      # Scorecard image reader. Added with the suites rather than after them, for
+      # the reason the practice block above spells out: a suite nothing runs is a
+      # suite that stops being true.
+      - name: Scorecard OCR suites
+        run: npm run test:scorecard-ocr
