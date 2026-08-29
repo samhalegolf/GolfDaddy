@@ -52,7 +52,12 @@ async function launchBrowser(playwright) {
   try {
     const page = await (await browser.newContext()).newPage();
     page.on("pageerror", (err) => pageErrors.push(String(err && err.stack || err)));
-    await page.goto(`http://127.0.0.1:${server.address().port}/index.html`, { waitUntil: "load", timeout: 30000 });
+    /* ?login=1 declines the web landing redirect. scripts/inline/gd-landing-redirect-v1.js
+       runs at the top of index.html and replaces it with welcome.html for a SIGNED-OUT
+       visitor, decided synchronously from localStorage - and a fresh browser profile is
+       always signed out, so without this the page under test is the landing page, not the
+       app. ?login=1 is the redirect's own documented escape hatch (one of its SKIP_PARAMS). */
+    await page.goto(`http://127.0.0.1:${server.address().port}/index.html?login=1`, { waitUntil: "load", timeout: 30000 });
     await page.waitForTimeout(1500);
     assert.deepStrictEqual(pageErrors, [], "permissions carve must not introduce page errors");
 

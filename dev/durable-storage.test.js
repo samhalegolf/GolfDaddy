@@ -86,7 +86,12 @@ function nativeStub(seeded) {
     await context.route("**/api/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
     const page = await context.newPage();
     await page.addInitScript(nativeStub, {});
-    await page.goto(`${base}/index.html`, { waitUntil: "load", timeout: 30000 });
+    /* ?login=1 declines the web landing redirect. scripts/inline/gd-landing-redirect-v1.js
+       runs at the top of index.html and replaces it with welcome.html for a SIGNED-OUT
+       visitor, decided synchronously from localStorage - and a fresh browser profile is
+       always signed out, so without this the page under test is the landing page, not the
+       app. ?login=1 is the redirect's own documented escape hatch (one of its SKIP_PARAMS). */
+    await page.goto(`${base}/index.html?login=1`, { waitUntil: "load", timeout: 30000 });
     await page.waitForTimeout(1500);
 
     const mirrored = await page.evaluate(async () => {
@@ -190,7 +195,7 @@ function nativeStub(seeded) {
       "durable:clarity:supabase-auth-session:v1": "recovered-session",
       "durable:gd_player_profiles_v27": '{"profiles":[{"id":"player47"}]}'
     });
-    await evicted.goto(`${base}/index.html`, { waitUntil: "load", timeout: 30000 });
+    await evicted.goto(`${base}/index.html?login=1`, { waitUntil: "load", timeout: 30000 });
     await evicted.waitForTimeout(2500);
 
     const recovered = await evicted.evaluate(() => ({
@@ -223,7 +228,7 @@ function nativeStub(seeded) {
     const web = await webCtx.newPage();
     const webErrors = [];
     web.on("pageerror", (e) => webErrors.push(String(e)));
-    await web.goto(`${base}/index.html`, { waitUntil: "load", timeout: 30000 });
+    await web.goto(`${base}/index.html?login=1`, { waitUntil: "load", timeout: 30000 });
     await web.waitForTimeout(1500);
 
     const webState = await web.evaluate(() => {
