@@ -96,6 +96,7 @@ jobs:
           node dev/conditions-engine-ownership.test.js
           node dev/conditions-engine-behavior.test.js
           node dev/course-mapping-controller.test.js
+          node dev/course-mapping-debug-wiring.test.js
           node dev/course-visual-engine.test.js
           node dev/course-mapper-jobs.test.js
           node dev/course-mapper-worker.test.js

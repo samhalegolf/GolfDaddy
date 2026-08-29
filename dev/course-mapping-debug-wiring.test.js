@@ -1,17 +1,26 @@
 /* The mapping debug trail actually reaching the debugger.
  *
- * The bug this guards: a failed scan produced no debug feedback at all. Not a
- * missing event here or there - nothing, ever, on the surface that scans.
- * gd-course-mapping-debug.js was marked data-gd-surface="studio", the app build
- * strips studio-marked elements, so on a phone window.GDCourseMappingDebug was
- * undefined, mappingDebugApi() returned null, and every recordMappingDebug call
- * in the pipeline was a silent no-op. The recorder and the thing it records sat
- * on opposite sides of the build.
+ * SURFACE: the recorder is STUDIO-ONLY, by decision. gd-course-mapping-debug.js
+ * is marked data-gd-surface="studio" and the app build strips it, so on the app
+ * and native surfaces window.GDCourseMappingDebug is undefined,
+ * mappingDebugApi() returns null, and every recordMappingDebug call in the
+ * pipeline is a silent no-op. That is a real cost and it is accepted knowingly:
+ * a failed scan on a phone leaves no debug trail, and diagnosing one means
+ * reproducing it in the studio. It is the deliberate price of keeping a debug
+ * module out of the production APK/IPA, which dev/surface-split.test.js
+ * enforces at two points (the app build, and the --app-only native prune).
  *
- * Four smaller faults sat underneath it, each of which would still have made a
- * failed scan hard to read after the script tag was fixed. All five are locked
- * down here because every one of them is the kind of thing a later tidy-up
- * would quietly undo. */
+ * This file used to assert the opposite - it was written when the recorder
+ * shipped to the app - so if you are here because the app has no scan
+ * diagnostics: that is the design, not a regression. Reversing it again means
+ * changing surface-split.test.js and boot-smoke.test.js with it; those three
+ * are the ones that disagreed with each other for weeks.
+ *
+ * Everything below the first test is about the RECORDER'S OWN correctness -
+ * sources, phases, run ids, how failures and silent exits are reported - and
+ * holds whichever surface it ships to. Those faults each made a failed scan
+ * hard to read, and are locked down here because every one of them is the kind
+ * of thing a later tidy-up would quietly undo. */
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
@@ -31,17 +40,17 @@ const pipelineSrc = fs.readFileSync(PIPELINE, "utf8");
 const tests = [];
 function test(name, fn) { tests.push({ name: name, fn: fn }); }
 
-test("the recorder is not stripped from the app build", () => {
-  /* THE bug. The app surface is where scanning happens; if the recorder is
-     studio-marked it is deleted from dist/index.html and there is no trail to
-     read anywhere. */
+test("the recorder is studio-marked, so the app build strips it", () => {
+  /* The studio still has to LOAD the recorder - an unmarked-to-deleted slip
+     would take the trail away from the studio too, and then it exists nowhere.
+     The marking is what keeps it off the app and out of the native bundle. */
   const tag = indexSrc
     .split("\n")
     .find(function (line) { return line.includes("gd-course-mapping-debug.js"); });
   assert.ok(tag, "index.html must still load the mapping debug recorder");
   assert.ok(
-    !/data-gd-surface\s*=\s*"studio"/.test(tag),
-    "the recorder must NOT be studio-marked - that is what silenced every failed scan"
+    /data-gd-surface\s*=\s*"studio"/.test(tag),
+    "the recorder must stay studio-marked - unmarked it ships inside the APK/IPA"
   );
 });
 

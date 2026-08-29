@@ -12,6 +12,12 @@
    3. gdBubbleRenderCenter clamped the aim to 0.78 x the bubble's lateral
       radius, silently truncating any offset past roughly 4 deg.
 
+   And the one that survived that fix: the aim was measured at the resolved bag
+   row's CARRY rather than at the shot, so the gap between the aim line and the
+   bubble stepped with the bag and stopped growing entirely past the longest
+   club - 3 deg drew the same metres at 260m, 300m and 350m. It is measured at
+   the shot now (gdGpsAimOffsetM), and the payload quotes what it draws.
+
    Runs headless: no browser, no network. */
 const assert = require("assert");
 const fs = require("fs");
@@ -68,7 +74,7 @@ assert.strictEqual(r.api.current(), null, "a null offset must not become a saved
 
 eq(runMyBubble({}).last, { offsetDeg: 0, handedness: "right" }, "an empty store is safe");
 
-/* ---------- 2. the aim moves the GPS bubble, unclamped ---------- */
+/* ---------- 2. the aim moves the GPS bubble, measured at the shot ---------- */
 const distanceLib = require(path.join(ROOT, "app/js/distance.js"));
 const engineBox = {
   console,
@@ -83,25 +89,63 @@ vm.runInContext(read("app/js/bubble-engine.js"), engineBox, { filename: "bubble-
 const engine = engineBox.window.GDBubbleEngine;
 
 const tee = { lat: -36.9138, lng: 174.7411 };
-const tgt = { lat: -36.9165, lng: 174.7411 };   // due south, so the player's right is west
-engine.setBag([{ club: "7i", baseCarry: 155, totalM: 165 }]);
-engine.setHoleContext({ hole: 1, tee, green: tgt, route: [tee, tgt] });
+const M_PER_DEG_LAT = 111320;
+/* Due south, so the player's right is west. */
+const southOf = (metres) => ({ lat: tee.lat - metres / M_PER_DEG_LAT, lng: tee.lng });
 
-function aimMetres(bubble) {
+/* One club, and a short one: the bag must not be what sizes the aim. */
+engine.setBag([{ club: "7i", baseCarry: 155, totalM: 165 }]);
+
+function aim(bubble, shotM) {
+  const tgt = southOf(shotM);
+  engine.setHoleContext({ hole: 1, tee, green: tgt, route: [tee, tgt] });
   engine.setBubble(bubble);
   engine.setShot(tee, tgt);
-  const centre = engine.renderModel().center;
-  const east = (centre.lng - tgt.lng) * 111320 * Math.cos(tee.lat * Math.PI / 180);
-  return -east;   // west is the player's right on a southward shot
+  const model = engine.renderModel();
+  const east = (model.center.lng - tgt.lng) * M_PER_DEG_LAT * Math.cos(tee.lat * Math.PI / 180);
+  return {
+    drawnM: -east,                       // west is the player's right on a southward shot
+    shotM: model.distanceM,              // the engine's own haversine, not the flat one above
+    quotedM: model.payload.aimOffsetM,
+    carryM: model.payload.baseCarry
+  };
 }
+const idealM = (deg, shotM) => Math.tan((deg * Math.PI) / 180) * shotM;
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) < tol, msg + " (got " + a.toFixed(2) + ", wanted " + b.toFixed(2) + ")");
 
-near(aimMetres({ offsetDeg: 0 }), 0, .2, "0.0 aims at the target");
-near(aimMetres({ offsetDeg: 2 }), Math.tan(2 * Math.PI / 180) * 155, .3, "2R aims tan(2)x155 right");
-near(aimMetres({ offsetDeg: -2 }), -Math.tan(2 * Math.PI / 180) * 155, .3, "2L mirrors it");
+let a = aim({ offsetDeg: 0 }, 155);
+near(a.drawnM, 0, .2, "0.0 aims at the target");
+
+a = aim({ offsetDeg: 2 }, 155);
+near(a.drawnM, idealM(2, a.shotM), .3, "2R aims tan(2) x the shot right");
+
+a = aim({ offsetDeg: -2 }, 155);
+near(a.drawnM, -idealM(2, a.shotM), .3, "2L mirrors it");
+
 /* The clamp that used to bite: 0.78 x lateralRadius was about 9m here. */
-near(aimMetres({ offsetDeg: 6 }), Math.tan(6 * Math.PI / 180) * 155, .5, "6R is not truncated by the bubble's own size");
-near(aimMetres(null), Math.tan(1.4 * Math.PI / 180) * 155, .3, "clearing the bubble falls back to the engine placeholder");
+a = aim({ offsetDeg: 6 }, 155);
+near(a.drawnM, idealM(6, a.shotM), .5, "6R is not truncated by the bubble's own size");
+
+/* The clamp that replaced it: the bag. Every shot below resolves to the same
+   and only 155m club, so a carry-based aim drew the same metres at all four. */
+[90, 155, 210, 300].forEach((shot) => {
+  const r = aim({ offsetDeg: 3 }, shot);
+  near(r.drawnM, idealM(3, r.shotM), .35,
+    shot + "m: 3R is measured at the shot, not at the " + r.carryM + "m carry");
+  near(r.quotedM, r.drawnM, .35, shot + "m: the payload quotes the offset it draws");
+});
+const near120 = aim({ offsetDeg: 3 }, 120), far300 = aim({ offsetDeg: 3 }, 300);
+assert.ok(far300.drawnM > near120.drawnM * 2,
+  "the same setting keeps growing past the longest club (120m drew " + near120.drawnM.toFixed(2)
+  + "m, 300m drew " + far300.drawnM.toFixed(2) + "m)");
+
+/* The one bound left is geometric sanity: a quarter of the shot, 14.04 deg. */
+const wild = aim({ offsetDeg: 30 }, 155);
+near(wild.drawnM, wild.shotM * .25, .3, "30R is held at a quarter of the shot");
+near(wild.quotedM, wild.drawnM, .3, "and the payload quotes that, not the unbounded tangent");
+
+a = aim(null, 155);
+near(a.drawnM, idealM(1.4, a.shotM), .3, "clearing the bubble falls back to the engine placeholder");
 
 /* ---------- 3. the landscape sign law ---------- */
 const core = read("scripts/gd-app-core.js");
@@ -143,5 +187,5 @@ assert.ok(chart.gdShotBubbleModelEndpoint(3, frame).y > frame.yModel, "My Bubble
 assert.ok(chart.gdShotBubbleModelEndpoint(-3, frame).y < frame.yModel, "My Bubble lane: a LEFT offset draws above it");
 assert.strictEqual(chart.gdShotBubbleModelEndpoint(0, frame).y, frame.yModel, "0.0 sits on the line");
 
-console.log("my-bubble aim passed: saved aim reaches GPS, unclamped to 6 deg, landscape labels agree with the data ("
-  + labels.length + " gridlines)");
+console.log("my-bubble aim passed: saved aim reaches GPS, measured at the shot rather than the bag carry, "
+  + "bounded only at 14 deg, landscape labels agree with the data (" + labels.length + " gridlines)");

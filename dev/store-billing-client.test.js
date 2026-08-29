@@ -181,7 +181,12 @@ function nativeStub(options) {
     });
 
     await page.addInitScript(nativeStub, { accountId: ACCOUNT_ID, storeProductId: STORE_PRODUCT_ID });
-    await page.goto(`${base}/index.html`, { waitUntil: "load", timeout: 30000 });
+    /* ?login=1 declines the web landing redirect. scripts/inline/gd-landing-redirect-v1.js
+       runs at the top of index.html and replaces it with welcome.html for a SIGNED-OUT
+       visitor, decided synchronously from localStorage - and a fresh browser profile is
+       always signed out, so without this the page under test is the landing page, not the
+       app. ?login=1 is the redirect's own documented escape hatch (one of its SKIP_PARAMS). */
+    await page.goto(`${base}/index.html?login=1`, { waitUntil: "load", timeout: 30000 });
     await page.waitForTimeout(2000);
 
     const boot = await page.evaluate(() => ({
@@ -309,7 +314,7 @@ function nativeStub(options) {
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
     await anonPage.addInitScript(nativeStub, { accountId: "", storeProductId: STORE_PRODUCT_ID });
-    await anonPage.goto(`${base}/index.html`, { waitUntil: "load", timeout: 30000 });
+    await anonPage.goto(`${base}/index.html?login=1`, { waitUntil: "load", timeout: 30000 });
     await anonPage.waitForTimeout(2000);
 
     const anonPurchase = await anonPage.evaluate(async () => {
@@ -366,7 +371,7 @@ function nativeStub(options) {
     const webPage = await webContext.newPage();
     const webErrors = [];
     webPage.on("pageerror", (err) => webErrors.push(String(err && err.stack || err)));
-    await webPage.goto(`${base}/index.html`, { waitUntil: "load", timeout: 30000 });
+    await webPage.goto(`${base}/index.html?login=1`, { waitUntil: "load", timeout: 30000 });
     await webPage.waitForTimeout(1500);
 
     const web = await webPage.evaluate(() => ({

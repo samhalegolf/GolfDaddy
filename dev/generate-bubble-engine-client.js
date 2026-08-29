@@ -73,7 +73,8 @@ const CORE_FUNCS = [
   "bubbleRadiusFactor", "bubbleTextureFactor", "gdBubbleShotBearing",
   "gdBubbleRoofMaxDistanceM", "gdBubbleForwardDistanceFromStart",
   "gdBubbleDepthForRoof", "gdClampBubbleCenterToBagRoof", "gdShotDisplayTarget",
-  "gdBubbleRenderCenter", "gdBubbleAxes", "gdBubbleLocalToLatLng",
+  "gdGpsAimDistanceM", "gdGpsAimOffsetM", "gdBubbleRenderCenter",
+  "gdBubbleAxes", "gdBubbleLocalToLatLng",
   "gdSmoothBubbleLocalRing", "buildBubbleShape", "localPointToLatLng"
 ];
 

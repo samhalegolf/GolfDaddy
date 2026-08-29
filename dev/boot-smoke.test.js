@@ -33,10 +33,23 @@ const SETTLE_MS = 5000; // covers delayed installs (setTimeout 300/1200 patterns
    stripped element that some kept code dereferences without a guard would only
    ever crash the app build, which is the one that ships to phones. The source
    tree boots too, because that is what `npm start` serves while developing. */
+/* ?login=1 is not decoration: it is how this test declines the web landing
+   redirect. scripts/inline/gd-landing-redirect-v1.js runs at the top of
+   index.html and sends a SIGNED-OUT visitor to welcome.html, deciding
+   synchronously from localStorage. Every run here drives a fresh browser
+   profile with empty storage, so the test is always signed out and always
+   landed on welcome.html - where none of the canaries below exist, because
+   gd-app-core.js is not on that page at all. The four "did not run to
+   completion" failures that produced said nothing about the redirect, which is
+   why they read as a boot crash for weeks.
+
+   ?login=1 is the redirect's own documented escape hatch ("an explicit
+   ?login=1 from the landing itself", one of its SKIP_PARAMS), so opting out
+   here needs no production change and no stubbed storage. */
 const SURFACES = [
-  { name: "source", root: ROOT, page: "/index.html", studioPanels: true },
-  { name: "app (dist)", root: DIST, page: "/index.html", studioPanels: false },
-  { name: "studio (dist)", root: DIST, page: "/studio/index.html", studioPanels: true }
+  { name: "source", root: ROOT, page: "/index.html?login=1", studioPanels: true },
+  { name: "app (dist)", root: DIST, page: "/index.html?login=1", studioPanels: false },
+  { name: "studio (dist)", root: DIST, page: "/studio/index.html?login=1", studioPanels: true }
 ];
 
 const MIME = {
@@ -106,6 +119,14 @@ async function bootSurface(browser, surface) {
 
     let failed = false;
     const fail = (message) => { failed = true; console.error(`FAIL [${surface.name}]: ${message}`); };
+    /* Checked FIRST and reported in its own words: every canary below is absent
+       from welcome.html too, so a redirect that slips past ?login=1 would
+       otherwise be indistinguishable from gd-app-core.js crashing on boot. */
+    const landedOn = new URL(page.url()).pathname;
+    const wanted = surface.page.split("?")[0];
+    if (landedOn !== wanted) {
+      fail(`redirected to ${landedOn} - never reached ${wanted}, so nothing below is about the app's boot.`);
+    }
     if (pageErrors.length) {
       fail(`${pageErrors.length} uncaught exception(s) during boot:`);
       pageErrors.forEach((e, i) => console.error(`  [${i + 1}] ${e.split("\n").slice(0, 3).join("\n      ")}`));

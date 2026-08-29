@@ -359,7 +359,12 @@ function gdGpsBubbleDisplayPayload(payload,distance=155,center=null){
     }
   }catch(e){}
   scale=gdClamp(scale,.42,1.08);
-  return Math.abs(scale-1)<.015?p:gdScaleGpsBubblePayloadForDisplay(p,scale);
+  /* The aim offset rides the shot, not the display scale: the tile readout and
+     the drag hit area must quote the same metres gdBubbleRenderCenter actually
+     draws the bubble off the aim line. */
+  const aimOffsetM=gdGpsAimOffsetM(p);
+  const display=Math.abs(scale-1)<.015?p:gdScaleGpsBubblePayloadForDisplay(p,scale);
+  return Object.is(aimOffsetM,display.aimOffsetM)?display:{...display,aimOffsetM};
 }
 function gdBubblePayloadForRender(input){
   if(input&&typeof input==="object"&&Number.isFinite(Number(input.radius)))return input;
@@ -475,20 +480,57 @@ function gdShotDisplayTarget(){
   if(gdHasWindVector()&&gdWindLandingTarget)return gdWindLandingTarget;
   return target;
 }
+function gdGpsAimDistanceM(){
+  /* The AIM distance: start to the target the player is aiming at, never the
+     wind-blown landing. My Bubble is a face-alignment angle, so the metres it
+     is worth are measured to the point being aimed at. */
+  if(!start||!target||!map)return null;
+  try{
+    const d=map.distance(start,target);
+    return Number.isFinite(d)&&d>0?d:null;
+  }catch(e){return null}
+}
+function gdGpsAimOffsetM(payloadInput,distance=null){
+  /* tan(My Bubble degrees) x the shot distance. The payload's own aimOffsetM
+     is tan(deg) x the resolved bag row's CARRY, which is what the studio and
+     the charts want (they draw the bubble at its own base distance) but not
+     what GPS Play needs: on the course the bubble sits at the target, so a
+     carry-based offset drew the aim short by the ratio carry/distance and
+     stepped with whichever club the distance happened to resolve to - 3 deg
+     drew the same 12.05m at 260m, 300m and 350m, because nothing in the bag
+     is longer than the driver. Falls back to the payload value when there is
+     no shot to measure. */
+  const payload=gdBubblePayloadForRender(payloadInput);
+  const deg=gdFiniteNumber(payload.aimOffsetDeg,null);
+  const requested=gdFiniteNumber(distance,null);
+  const d=requested>0?requested:gdGpsAimDistanceM();
+  if(deg===null||!(d>0))return gdRound(gdFiniteNumber(payload.aimOffsetM,0),2);
+  /* Geometric sanity only, and the single place it is decided: a quarter of
+     the shot is 14.04 deg, far outside any aim a player can set. It lives here
+     rather than at the render seam so the metres quoted to the tile and the
+     drag hit area are the metres the bubble is drawn at. */
+  const limit=Math.max(2,d*.25);
+  return gdRound(gdClamp(Math.tan((deg*Math.PI)/180)*d,-limit,limit),2);
+}
 function gdBubbleRenderCenter(payloadInput){
   const renderTarget=gdShotDisplayTarget();
   if(!renderTarget)return null;
   const payload=gdBubblePayloadForRender(payloadInput);
   const shotBrg=gdBubbleShotBearing();
-  // The aim is a REAL offset (tan(deg) x carry). It is NOT a function of how big
-  // the bubble happens to be. Clamping it to 0.78 x lateralRadius truncated any
-  // offset past roughly 4 deg: the stated degrees kept climbing while the drawn
-  // bubble stopped moving, which is worse than no clamp at all. The bound left
-  // here is geometric sanity only - a quarter of the carry is about 14 deg, far
-  // outside any aim a player can set.
-  const aimBase=Math.max(1,gdFiniteNumber(payload.baseCarry,gdFiniteNumber(payload.radius,1)*10));
+  // The aim is a REAL offset (tan(deg) x the shot). It is NOT a function of how
+  // big the bubble happens to be. Clamping it to 0.78 x lateralRadius truncated
+  // any offset past roughly 4 deg: the stated degrees kept climbing while the
+  // drawn bubble stopped moving, which is worse than no clamp at all. Measuring
+  // it at the CARRY did the same thing more quietly - the gap between the aim
+  // line and the bubble stepped with the bag and stopped dead past the longest
+  // club, on exactly the long shots where it is widest. gdGpsAimOffsetM measures
+  // it at the shot and owns the one sanity bound left; the clamp below only
+  // still guards the carry-based value that helper falls back to when there is
+  // no shot distance to measure.
+  const aimDistance=gdGpsAimDistanceM();
+  const aimBase=Math.max(1,gdFiniteNumber(aimDistance,gdFiniteNumber(payload.baseCarry,gdFiniteNumber(payload.radius,1)*10)));
   const sideLimit=Math.max(2,aimBase*.25);
-  const sideOffset=gdClamp(gdFiniteNumber(payload.aimOffsetM,0),-sideLimit,sideLimit);
+  const sideOffset=gdClamp(gdGpsAimOffsetM(payload,aimDistance),-sideLimit,sideLimit);
   const forwardBias=gdClamp(gdFiniteNumber(payload.visual&&payload.visual.visualYBias,0),-.18,.18)*Math.max(1,gdFiniteNumber(payload.depthRadiusM,payload.radius));
   const rawCenter=projectOffset(renderTarget,shotBrg,forwardBias,sideOffset);
   return rawCenter;

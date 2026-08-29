@@ -55,7 +55,12 @@ async function launchBrowser(playwright) {
     const page = await browser.newPage();
     page.on("pageerror", (err) => pageErrors.push(String(err && err.message ? err.message : err)));
 
-    await page.goto(`http://127.0.0.1:${server.address().port}/index.html`, { waitUntil: "domcontentloaded" });
+    /* ?login=1 declines the web landing redirect. scripts/inline/gd-landing-redirect-v1.js
+       runs at the top of index.html and replaces it with welcome.html for a SIGNED-OUT
+       visitor, decided synchronously from localStorage - and a fresh browser profile is
+       always signed out, so without this the page under test is the landing page, not the
+       app. ?login=1 is the redirect's own documented escape hatch (one of its SKIP_PARAMS). */
+    await page.goto(`http://127.0.0.1:${server.address().port}/index.html?login=1`, { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => !!window.GolfDaddyCourseDataIntake, null, { timeout: 15000 });
 
     const registered = await page.evaluate(() => ({
