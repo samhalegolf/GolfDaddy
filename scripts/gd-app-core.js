@@ -24503,7 +24503,7 @@ function gdAccountLogin(email,password,opts={}){
   const loginEmail=gdAccountLoginEmail(email);
   let account=gdAccountByEmail(loginEmail);
   if(!account&&!GD_ACCOUNT_STATE.accounts.length){
-    gdAccountsBootstrap();
+    gdAccountsBootstrap({seedAdmin:true});
     gdAccountsLoad();
     account=gdAccountByEmail(loginEmail);
   }
@@ -24784,7 +24784,7 @@ function gdEnsureKnownLocalLogin(email){
   const key=gdAccountLoginEmail(email);
   let admin=gdCanonicalizeAdminAccount();
   if(key===GD_ADMIN_EMAIL&&!admin){
-    gdAccountsBootstrap();
+    gdAccountsBootstrap({seedAdmin:true});
     gdAccountsLoad();
     admin=gdCanonicalizeAdminAccount();
   }
@@ -24875,7 +24875,19 @@ function gdAccountApplySession(opts={}){
   if(!opts.silent)try{toast(`Signed in as ${account.name}`)}catch(e){}
   return account;
 }
-function gdAccountsBootstrap(){
+/* opts.seedAdmin - create the owner's local admin login when the store is
+   EMPTY. Off by default, and deliberately: this used to seed on every fresh
+   boot, and the seed does not just add an account - it takes the visitor's
+   active profile (gdProfileForNewAccount) and stamps the owner's name, email
+   and admin permission onto it. So a player who had never signed in was
+   carrying "Sam Hale" as their identity, which is what GDPlayContext.identity()
+   answers and therefore what the GPS play badge showed them.
+
+   Nothing is lost by waiting: both login paths (gdAccountLogin and
+   gdEnsureKnownLocalLogin) ask for the seed explicitly the moment the owner
+   actually signs in, so the local admin account still appears on a fresh
+   device exactly when it is needed - and only for the person signing in. */
+function gdAccountsBootstrap(opts={}){
   gdAccountsLoad();
   const removedExamples=gdCleanLegacyExampleAccounts();
   if(removedExamples){
@@ -24916,6 +24928,9 @@ function gdAccountsBootstrap(){
     gdAccountApplySession({silent:true});
     return gdCurrentAccount();
   }
+  /* An empty store is the normal state for someone who has not signed in, not
+     a gap to fill with the owner's identity. */
+  if(!opts.seedAdmin)return null;
   const profile=gdProfileForNewAccount();
   const role='admin';
   const accountId=gdNewId('acct');

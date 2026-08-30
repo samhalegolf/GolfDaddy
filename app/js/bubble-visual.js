@@ -73,6 +73,16 @@
 
   var CHIP_GAP_PX = 34;        // chip height + breathing room, past the target
   var AIM_CLEAR_PX = 26;       // how far the aim line runs past the chip
+  /* How far the carry line may be walked FORWARD onto the cluster's leading
+     edge when it lands just behind it. The bubble is centred on the expected
+     FINISH, so the carry point sits one roll-length back; for a driver that
+     roll is about the same as the cluster's half-depth, which puts carry
+     within a metre or two of the leading edge and can drop it just outside.
+     Without this the annotation blinks out on exactly the club whose carry
+     and finish differ most — and it did: 230m carry against a ring starting
+     at 231m. Bounded, so a carry that really is short of the shape still
+     draws nothing. */
+  var CARRY_SNAP_PX = 12;
 
   /* opts:
        project(latlng) → {left, top} | null      the painter's projector
@@ -112,10 +122,17 @@
         var dx = targetPx.left - startPx.left, dy = targetPx.top - startPx.top;
         var len = Math.hypot(dx, dy) || 1;
         var px = -dy / len, py = dx / len;
+        var ux = dx / len, uy = dy / len;
         var far = 400;
-        var seg = clipToPolygon(
-          { left: carryPt.left - px * far, top: carryPt.top - py * far },
-          { left: carryPt.left + px * far, top: carryPt.top + py * far }, ring);
+        /* Step 0 is the true carry point, so a carry comfortably inside the
+           shape clips exactly where it always did and nothing moves. */
+        var seg = null;
+        for (var snap = 0; snap <= CARRY_SNAP_PX && !seg; snap += 2) {
+          var at = { left: carryPt.left + ux * snap, top: carryPt.top + uy * snap };
+          seg = clipToPolygon(
+            { left: at.left - px * far, top: at.top - py * far },
+            { left: at.left + px * far, top: at.top + py * far }, ring);
+        }
         if (seg) {
           var ang = toDeg(Math.atan2(seg[1].top - seg[0].top, seg[1].left - seg[0].left));
           var lx = (seg[1].left - 6).toFixed(1), ly = (seg[1].top + 10).toFixed(1);
