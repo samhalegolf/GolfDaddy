@@ -646,7 +646,12 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
    the surface and not a full-width strip: inset + 71px puts it under the nav
    row with the state pill's overhang clear of it. #playScreen is fixed
    inset:0, so absolute here is viewport coordinates. */
-#playerBadge { position: absolute; z-index: 35; top: calc(env(safe-area-inset-top, 0px) + 71px); left: 14px;
+/* z-index sits with the rest of the play chrome (distance bar 600, start pill
+   640), NOT at the 35 the old identity banner used. #surfaceStage is z-index
+   500 and opaque once a surface is published, so anything below it is painted
+   behind the hole image — the badge was drawn correctly and simply covered on
+   every published hole. */
+#playerBadge { position: absolute; z-index: 600; top: calc(env(safe-area-inset-top, 0px) + 71px); left: 14px;
   display: flex; align-items: stretch; max-width: calc(100vw - 28px);
   border-radius: 10px; background: rgba(3, 12, 7, .8); border: 1px solid rgba(255, 255, 255, .07);
   box-shadow: 0 8px 20px rgba(0, 0, 0, .35);

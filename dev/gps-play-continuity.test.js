@@ -115,12 +115,31 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
      print, so this asks exactly what those checks used to ask. */
   const badge = () => look(() => document.getElementById("playerBadgeState").textContent
     + "/" + document.getElementById("playerBadgeNumber").textContent);
+  /* Reading the badge's text says nothing about whether anyone can SEE it, and
+     that gap shipped: the badge carried the old identity banner's z-index of
+     35, while #surfaceStage — its sibling in #playScreen — is 500 and opaque
+     once a surface is published. Every check above passed on a badge painted
+     behind the hole image. Same parent, so comparing z-index is the whole
+     answer; a null means they stopped being siblings and the comparison no
+     longer means what it says here. */
+  const overSurface = (id) => page.evaluate((x) => {
+    const node = document.getElementById(x), stage = document.getElementById("surfaceStage");
+    if (!node || !stage || node.parentElement !== stage.parentElement) return null;
+    const z = (el) => Number(getComputedStyle(el).zIndex);
+    const box = node.getBoundingClientRect();
+    return { over: z(node) > z(stage), drawn: box.width > 0 && box.height > 0, z: z(node), stage: z(stage) };
+  }, id);
 
   console.log("\n— opening in Preview —");
 
   let s = await scene();
   check("a round opens in Preview", s.flow === "preview" && s.mode === "setup", `${s.flow}/${s.mode}`);
   check("the badge says so", (await badge()) === "PREVIEW/1");
+  const stack = await overSurface("playerBadge");
+  check("and it is actually on screen, over the surface rather than under it",
+    !!stack && stack.over && stack.drawn,
+    stack ? `badge z=${stack.z}, surfaceStage z=${stack.stage}, drawn=${stack.drawn}`
+          : "badge and surfaceStage are no longer siblings — this check is void");
   check("the start pill is up and there is no bubble",
     (await visible("startPill")) && !(await visible("aimBubble")));
 
