@@ -1,6 +1,6 @@
 {
   "name": "clarity-caddie-core",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Clarity Caddy app baseline with locked Green Wand green-centred tile crop.",
   "scripts": {
