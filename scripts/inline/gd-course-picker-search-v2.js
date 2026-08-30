@@ -554,11 +554,37 @@
   }
   function setMappingStatus(result){
     try{
-      document.body.dataset.gdCourseAutoMapStatus=result&&result.stale?"stale":result&&(result.playable||result.fallback)?"done":"empty";
+      /* "waiting" is its own answer and must not read as "empty". The server is still building
+         this course; the play surface is holding a loading screen and will open the round by
+         itself when the package lands, so nothing here should look like a finished attempt
+         that produced nothing. */
+      const waiting=!!(result&&result.waiting);
+      document.body.dataset.gdCourseAutoMapStatus=result&&result.stale?"stale":waiting?"waiting":result&&(result.playable||result.fallback)?"done":"empty";
       document.body.dataset.gdCourseAutoMappedHoles=String(result?.holes||result?.persisted?.holes||0);
       document.body.dataset.gdCourseAutoMapSaved=String(result?.saved||result?.persisted?.saved||0);
-      document.body.dataset.gdCourseNeedsPin=result&&result.fallback?"active":result&&result.playable?"no":"pending";
+      document.body.dataset.gdCourseNeedsPin=result&&result.fallback?"active":result&&result.playable?"no":waiting?"waiting":"pending";
     }catch(e){}
+  }
+  /* A course that opened is a course whose location was right, so nothing about a previous
+     failed attempt may survive into the next one. Without this the fit flags stay on the live
+     selection and the pin decision stays on the body, and the next entry can read a verdict
+     that a successful map has already overruled. */
+  function clearStalePinState(course){
+    safe(()=>{
+      delete document.body.dataset.gdCoursePinDecision;
+      delete document.body.dataset.gdCourseNeedsPinCourse;
+    });
+    safe(()=>{window.__gdPendingCoursePinPayload=null;});
+    safe(()=>{
+      const live=window.__gdLiveCoursePickerSelection;
+      if(live&&typeof live==="object"){delete live.gdCourseFitTrusted;delete live.gdCourseFitReason;delete live.gdCourseFitMessage;}
+    });
+    if(course&&typeof course==="object"){delete course.gdCourseFitTrusted;delete course.gdCourseFitReason;delete course.gdCourseFitMessage;}
+    if(state.activeSelection&&typeof state.activeSelection==="object"){
+      delete state.activeSelection.gdCourseFitTrusted;
+      delete state.activeSelection.gdCourseFitReason;
+      delete state.activeSelection.gdCourseFitMessage;
+    }
   }
   function closePickerSurface(reason){
     if(window.GDShell&&typeof window.GDShell.closeCoursePicker==="function"){
@@ -689,8 +715,14 @@
            scorecard claims, which is as often a bad scrape as a bad pin - so a
            map that plays is allowed to play, or one wrong scorecard would lock a
            course out of the app for good. */
+        if(result&&result.playable)clearStalePinState(course);
         const fit=result&&result.fit;
-        if(fit&&fit.trusted===false&&(fit.scope==="ground"||!(result&&result.playable))){
+        /* A run that is still going has no verdict to give, so it can never reach here: the
+           mapper has not said the ground was wrong, it has not finished looking. Every other
+           way a run can end short - a timeout, a dropped request, a 5xx, a course the server
+           declined to start - carries no fit either, which is what keeps the pin screen tied
+           to the one thing it repairs. */
+        if(!(result&&result.waiting)&&fit&&fit.trusted===false&&(fit.scope==="ground"||!(result&&result.playable))){
           const showPin=bridge().showPin;
           if(typeof showPin==="function"){
             return showPin(Object.assign({},course,{

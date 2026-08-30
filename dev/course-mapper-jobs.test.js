@@ -4,11 +4,13 @@
  * dev/course-visual-auto-build.test.js's stub-fetch harness.
  *
  * Load-bearing assertions:
- *   - an anonymous caller reaches no database write at all
+ *   - a caller with NO identity at all - no session, no guest id - reaches no database write
+ *   - a signed-out caller WITH a guest installation id may start a normal automap
  *   - a course that already has geometry at the current mapper version is not remapped
  *   - a build already in flight is not duplicated
- *   - the per-user rate limit holds
- *   - "nudge" is admin-only, "automap" is open to any signed-in player
+ *   - the per-actor rate limit holds, tighter for guests than for signed-in players
+ *   - a live job wins over the rate limit, so polling and re-picking cost no quota
+ *   - "nudge" and "remap" stay admin-only; a guest is never an operator
  *
  * Supabase is stubbed at the fetch layer, so the suite is hermetic. */
 
@@ -22,6 +24,8 @@ const realEnv = Object.assign({}, process.env);
 const BASE = "https://stub.supabase.co";
 const PLAYER = { id: "user-player-1", email: "player@example.com" };
 const ADMIN = { id: "user-admin-1", email: "samhalegolf@gmail.com" };
+/* A minted installation id, in the shape scripts/gd-guest-identity.js produces. */
+const GUEST = "9f7381c2e4a60b5d1c8e4f0a2b6d7e31";
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
@@ -107,12 +111,72 @@ function unmappedCourse(overrides = {}) {
 
 const jobInserts = (calls) => calls.inserts.filter(insert => insert.table === "course_mapper_jobs");
 
-test("an anonymous automap request is refused before it touches the database", async () => {
+test("an automap request with no identity at all is refused before it touches the database", async () => {
   const calls = stubFetch(unmappedCourse());
   const result = await call(post({ courseId: "pupuke", kind: "automap" }, null));
   assert.strictEqual(result.status, 401);
-  assert.deepStrictEqual(calls.inserts, [], "no write may happen for an unauthenticated caller");
-  assert.deepStrictEqual(calls.reads, [], "and no read either - identity is checked first");
+  assert.deepStrictEqual(calls.inserts, [], "no write may happen for a caller with no actor");
+  assert.deepStrictEqual(calls.reads, [], "and no read either - the actor is resolved first");
+});
+
+test("a malformed guest id is no identity at all", async () => {
+  const calls = stubFetch(unmappedCourse());
+  const result = await call(post({ courseId: "pupuke", kind: "automap", guestId: "abc" }, null));
+  assert.strictEqual(result.status, 401, "too short to be a minted install id");
+  assert.deepStrictEqual(calls.inserts, []);
+});
+
+/* The first run of this app. No account exists yet, and requiring one before a course could be
+   prepared meant that run always ended in the player tapping greens by hand. */
+test("a signed-out player with a guest installation id starts a mapping run", async () => {
+  const calls = stubFetch(unmappedCourse());
+  const result = await call(post({ courseId: "pupuke", kind: "automap", courseLat: -36.78, courseLng: 174.76, guestId: GUEST }, null));
+  assert.strictEqual(result.status, 202);
+  assert.strictEqual(result.body.state, "queued");
+  const row = jobInserts(calls)[0].rows[0];
+  assert.strictEqual(row.kind, "automap");
+  assert.strictEqual(row.requested_by, "guest:" + GUEST, "provenance says which install asked, and that it was not an account");
+  assert.strictEqual(calls.workerPings, 1);
+});
+
+test("a verified session always wins over a guest id sent alongside it", async () => {
+  const calls = stubFetch(unmappedCourse());
+  const result = await call(post({ courseId: "pupuke", kind: "automap", courseLat: -36.78, courseLng: 174.76, guestId: GUEST }, "player-token"));
+  assert.strictEqual(result.status, 202);
+  assert.strictEqual(jobInserts(calls)[0].rows[0].requested_by, "user:" + PLAYER.id,
+    "a signed-in player must not be able to spend the anonymous budget instead of their own");
+});
+
+test("a guest is never an operator", async () => {
+  const nudged = await call(post({ courseId: "pupuke", kind: "nudge", guestId: GUEST }, null));
+  assert.strictEqual(nudged.status, 403, "requeueing a stalled run is an admin action");
+  const remapped = await call(post({ courseId: "pupuke", kind: "remap", guestId: GUEST }, null));
+  assert.strictEqual(remapped.status, 403, "so is throwing away a course's geometry");
+});
+
+test("guests hit a tighter new-scan limit than signed-in players", async () => {
+  const { AUTO_RATE_MAX_PER_GUEST, AUTO_RATE_MAX_PER_USER } = (await import(path.join(root, "functions", "course-mapper-jobs.mjs"))).__courseMapperJobsTest;
+  assert.ok(AUTO_RATE_MAX_PER_GUEST < AUTO_RATE_MAX_PER_USER, "an anonymous budget that matched a signed-in one would not be a budget");
+  const recent = Array.from({ length: AUTO_RATE_MAX_PER_GUEST }, (_, i) => ({ id: "g" + i }));
+  const calls = stubFetch(unmappedCourse({ userJobs: recent }));
+  const result = await call(post({ courseId: "pupuke", kind: "automap", courseLat: -36.78, courseLng: 174.76, guestId: GUEST }, null));
+  assert.strictEqual(result.status, 429);
+  assert.deepStrictEqual(jobInserts(calls), [], "no new scan is started once the budget is spent");
+});
+
+/* The rule the whole limit rests on: only STARTING a scan costs anything. A player who
+   re-picks a course that is already being mapped, or whose app is polling one, must be handed
+   the run that exists rather than told to slow down about it. */
+test("a live job is reused even by an actor who has spent their budget", async () => {
+  const { AUTO_RATE_MAX_PER_GUEST } = (await import(path.join(root, "functions", "course-mapper-jobs.mjs"))).__courseMapperJobsTest;
+  const calls = stubFetch(unmappedCourse({
+    userJobs: Array.from({ length: AUTO_RATE_MAX_PER_GUEST + 2 }, (_, i) => ({ id: "g" + i })),
+    jobs: [{ id: "job-live", kind: "automap", status: "running", updated_at: new Date().toISOString() }]
+  }));
+  const result = await call(post({ courseId: "pupuke", kind: "automap", courseLat: -36.78, courseLng: 174.76, guestId: GUEST }, null));
+  assert.strictEqual(result.status, 200);
+  assert.strictEqual(result.body.deduped, true, "the run already in flight is the answer, not a rate-limit refusal");
+  assert.deepStrictEqual(jobInserts(calls), []);
 });
 
 test("a signed-in player starts a mapping run on an unmapped course", async () => {
@@ -129,7 +193,7 @@ test("a signed-in player starts a mapping run on an unmapped course", async () =
   const row = inserted[0].rows[0];
   assert.strictEqual(row.kind, "automap");
   assert.strictEqual(row.course_id, "pupuke");
-  assert.strictEqual(row.requested_by, "auto:" + PLAYER.id);
+  assert.strictEqual(row.requested_by, "user:" + PLAYER.id);
   assert.ok(row.mapper_version, "mapper_version travels with the job so it can be compared later");
   assert.strictEqual(calls.workerPings, 1, "the worker is woken rather than left to the sweeper");
 });
@@ -150,8 +214,11 @@ test("an admin may nudge a stalled run", async () => {
 });
 
 test("a course whose geometry is already current is not remapped", async () => {
-  const { MAPPER_VERSION } = require(path.join(root, "functions", "course-mapper-jobs.mjs")).__courseMapperJobsTest || {};
-  const calls = stubFetch(unmappedCourse({ maps: [{ course_id: "pupuke", published: true, geometry_version: "v1", objects_json: { a: {} }, holes_json: {} }] }));
+  /* Read from the module rather than hard-coded: a pinned "v1" silently stopped matching when
+     the mapper version moved on, and the assertion below started passing for the wrong reason
+     - the request was being refused for having no location, not deduped for being current. */
+  const { MAPPER_VERSION } = (await import(path.join(root, "functions", "course-mapper-jobs.mjs"))).__courseMapperJobsTest;
+  const calls = stubFetch(unmappedCourse({ maps: [{ course_id: "pupuke", published: true, geometry_version: MAPPER_VERSION, objects_json: { a: {} }, holes_json: {} }] }));
   const result = await call(post({ courseId: "pupuke", kind: "automap" }, "player-token"));
   assert.strictEqual(result.status, 200);
   assert.strictEqual(result.body.state, "geometry-ready");

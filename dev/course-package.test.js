@@ -33,6 +33,75 @@ function stubFetch(world) {
 
 let buildCoursePackage = null;
 
+/* ---- the pin lifecycle ----
+ *
+ * `fit` is the mapper's verdict on the coordinate it was handed, and it is the ONLY thing that
+ * puts the pin screen in front of a player (see dev/course-pin-trust.test.js). These four
+ * cases are the repeating pin prompt: a course that had one bad run, was pinned, mapped
+ * successfully, and then asked for a pin again on every single open - because a dead verdict
+ * from the first run outlived every run after it and rode out on a ready package. */
+
+const GROUND_REFUSAL = { trusted: false, scope: "ground", reason: "multiple-courses", message: "There look to be several courses here." };
+
+test("a refusal is reported, so the one case the pin exists for can still reach the player", async () => {
+  stubFetch({ mapperJobs: [{ id: "j1", kind: "automap", status: "failed", error: "could not tell which course this is", result: { fit: GROUND_REFUSAL } }] });
+  const result = await buildCoursePackage("balgove");
+  assert.strictEqual(result.status, "failed");
+  assert.strictEqual(result.fit.scope, "ground", "without this the pin is unreachable in the only situation it repairs");
+});
+
+test("a refusal saved by the worker's catch handler is found too", async () => {
+  stubFetch({ mapperJobs: [{ id: "j1", kind: "automap", status: "failed", error: "refused", result: { diagnostics: { fit: GROUND_REFUSAL } } }] });
+  assert.strictEqual((await buildCoursePackage("balgove")).fit.reason, "multiple-courses");
+});
+
+test("a course that HAS a map never carries a verdict, whatever its job history says", async () => {
+  /* The bug, exactly. Run 1 refused. The player pinned the course and run 2 mapped it. The
+     package is lite-geo-ready - there is geometry, there is somewhere to play - and it used to
+     come back carrying run 1's refusal anyway, which the picker reads as "the ground was
+     wrong" and answers with the pin screen. Every open. Forever. */
+  stubFetch({
+    maps: [{ course_id: "southport", published: true, geometry_version: "v1", objects_json: {
+      "green-1": { type: "green", holeNumber: 1, position: { lat: 53.64, lng: -3.02 } },
+      "tee-1": { type: "tee", holeNumber: 1, position: { lat: 53.641, lng: -3.021 } }
+    }, holes_json: {} }],
+    mapperJobs: [
+      { id: "j2", kind: "automap", status: "succeeded", result: { holes: 18 } },
+      { id: "j1", kind: "automap", status: "failed", error: "could not tell which course this is", result: { fit: GROUND_REFUSAL } }
+    ]
+  });
+  const result = await buildCoursePackage("southport");
+  assert.strictEqual(result.status, "lite-geo-ready");
+  assert.strictEqual(result.fit, undefined, "published geometry is a better answer about the ground than any old verdict");
+});
+
+test("the newest settled run speaks for the course, not the oldest one that had an opinion", async () => {
+  /* Even with nothing published yet: a later run that reached a verdict has already answered
+     the question the earlier one asked. Scanning the window for anything carrying a fit meant
+     the earliest refusal won permanently. */
+  stubFetch({
+    mapperJobs: [
+      { id: "j2", kind: "automap", status: "failed", error: "no OSM hole geometry within range", result: { fit: { trusted: true } } },
+      { id: "j1", kind: "automap", status: "failed", error: "refused", result: { fit: GROUND_REFUSAL } }
+    ]
+  });
+  const result = await buildCoursePackage("southport");
+  assert.strictEqual(result.status, "failed");
+  assert.strictEqual(result.fit, undefined, "the latest run trusted the coordinate - a thin map is not a reason to ask for a pin");
+});
+
+test("a run still in flight has no verdict, and an older one may not stand in for it", async () => {
+  stubFetch({
+    mapperJobs: [
+      { id: "j2", kind: "automap", status: "running" },
+      { id: "j1", kind: "automap", status: "failed", error: "refused", result: { fit: GROUND_REFUSAL } }
+    ]
+  });
+  const result = await buildCoursePackage("southport");
+  assert.strictEqual(result.status, "processing", "a live job is the state, and processing never carries a fit");
+  assert.strictEqual(result.fit, undefined);
+});
+
 test("a fresh, never-touched course reports none", async () => {
   stubFetch({});
   const result = await buildCoursePackage("brand-new-course");

@@ -14,9 +14,12 @@
  * tell those apart: a seeded default set is NOT a real bag, and passing it as
  * one would quietly retire the ghost.
  *
- * The ghost bag is free. Replacing it with your own clubs is the membership.
- * A player without one sees the ghost distances that are driving their bubble,
- * read-only, which is the thing they would be buying control of.
+ * THE WHOLE BAG IS FREE, ghost and real alike (decided 30 Aug 2026). Setting
+ * your own club distances used to be the membership; it is not any more, and
+ * canEdit() below now asks only whether there is a profile to write into. A
+ * player with no bag still sees the ghost distances driving their bubble,
+ * because "these are the numbers behind your bubble" is the honest answer to
+ * an empty list - not because the real ones are behind a till.
  *
  * ONE LIST, TOO. The clubs were already shared; the way they were shown was
  * not. This surface drew its own column of rows in its own order while the
@@ -24,8 +27,8 @@
  * looked like two different bags depending on which door the player came
  * through. Both now render through GDBagCore (scripts/gd-bag-core.js), which
  * owns the order, the markup and the edit semantics; this file keeps only the
- * things that are genuinely local - the profile store, membership, handedness
- * and firmness.
+ * things that are genuinely local - the profile store, handedness and
+ * firmness.
  */
 (function () {
   "use strict";
@@ -110,8 +113,22 @@
     return normalise(engine && engine.defaultBagRows ? engine.defaultBagRows() : []);
   }
 
+  /* THE BAG IS FREE (decided 30 Aug 2026).
+   *
+   * This used to ask app.access whether the session had round features, which
+   * meant a signed-out or rangefinder-only player could see the ghost
+   * distances driving their bubble but not replace them. The shell's own bag
+   * sheet had stopped asking anything at all, so the same bag was editable
+   * through one door and read-only through another. Neither is the rule now:
+   * club distances are the player's own numbers and cost nothing.
+   *
+   * What is left is not an entitlement but a place to put the answer. save()
+   * and setHandedness() write into the active player profile and refuse rather
+   * than inventing one, so "is there a profile" is the only question worth
+   * asking before offering an edit - otherwise the edit is accepted and
+   * silently dropped, which is worse than saying no. */
   function canEdit() {
-    return !app.access || app.access.roundFeatures();
+    return !!activeProfile();
   }
 
   /* Handedness, from the same profile the bag comes from.
@@ -173,8 +190,12 @@
     render();
   }
 
+  /* The notice line above the list, not the access bar: there is nothing to
+     buy any more, and nothing to sign in FOR except somewhere to keep the
+     clubs. Saying that plainly beats sending the player to a membership page
+     that would not change the answer. */
   function refuse() {
-    if (app.access && app.access.prompt) app.access.prompt("set your own club distances");
+    note("Sign in to keep your own club distances. The ones shown are the standard set.");
     return false;
   }
 
@@ -223,7 +244,7 @@
     if (notice) {
       notice.classList.toggle("hiddenState", editable && !showingGhost);
       notice.textContent = !editable
-        ? "These are the standard distances driving your bubble. A Clarity membership lets you set your own."
+        ? "These are the standard distances driving your bubble. Sign in to set your own."
         : showingGhost
           ? "Standard distances, until you set your own."
           : "";
@@ -268,11 +289,16 @@
     document.querySelectorAll("#bagFirmness [data-firmness]").forEach(function (btn) {
       btn.setAttribute("aria-pressed", btn.dataset.firmness === preset ? "true" : "false");
     });
-    ["bagAddRow", "bagQuickRow"].forEach(function (cls) {
-      document.querySelectorAll("." + cls).forEach(function (el) {
-        el.classList.toggle("hiddenState", !editable);
-      });
+    document.querySelectorAll(".bagEditAction").forEach(function (el) {
+      el.classList.toggle("hiddenState", !editable);
     });
+    /* The generator's tab says which of its two jobs it is about to do, the
+       same way the shell's build button does: a bag with clubs in it is never
+       offered a "Generate bag" that would replace them. */
+    var genTab = document.getElementById("bagGenTab");
+    if (genTab) genTab.textContent = clubs.length ? "Generate rest" : "Generate bag";
+    var genBtn = document.getElementById("bagQuickBtn");
+    if (genBtn) genBtn.textContent = clubs.length ? "Generate rest" : "Generate bag";
   }
 
   /* Name first, then distance - and through the core's add, so a blank name or
@@ -292,31 +318,90 @@
   /* The full club set scaled off one 7-iron carry — same ratios as the legacy
      quick-set generator (gdBagGenerateQuick), sourced from the engine's own
      shipped ghost-bag defaults (GDBubbleEngine.defaultBagRows, which wraps
-     the verbatim GD_DEFAULT_CLUB_CARRY_M) rather than a hand-copied table. */
+     the verbatim GD_DEFAULT_CLUB_CARRY_M) rather than a hand-copied table.
+     Only reachable on an EMPTY bag - see generate(). */
   function generateQuickSet(sevenIronCarry) {
-    if (!canEdit()) return refuse();
     var base = Number(sevenIronCarry);
     var generated = safe(function () { return window.GDBagGenerator.generate(base); }, null);
-    if (!(base > 0) || !generated || !generated.length) return;
+    if (!(base > 0) || !generated || !generated.length) { note("Enter your 7-iron carry first"); return false; }
     clubs = normalise(generated);
     editing = null;
     editingAnchorRows = null;
     sync();
     render();
+    return true;
   }
 
-  function generateRest() {
-    if (!canEdit()) return refuse();
-    var input = document.getElementById("bagQuick7i");
-    var result = safe(function () { return window.GDBagGenerator.generateRest(clubs, input && input.value); }, null);
-    if (!result || result.error) { note((result && result.error) || "Enter your 7-iron carry first"); return; }
+  function generateRest(sevenIronCarry) {
+    var result = safe(function () { return window.GDBagGenerator.generateRest(clubs, sevenIronCarry); }, null);
+    if (!result || result.error) { note((result && result.error) || "Enter your 7-iron carry first"); return false; }
     var message = "Generate the rest of your bag?\n\nWe'll use your 7-iron carry to estimate " + result.added + " missing club" + (result.added === 1 ? "" : "s") + ". Your " + result.retained + " existing club" + (result.retained === 1 ? " stays" : "s stay") + " unchanged. You can edit every distance afterwards.";
-    if (!window.confirm(message)) return;
+    if (!window.confirm(message)) return false;
     clubs = normalise(result.rows);
     editing = null;
     editingAnchorRows = null;
     sync();
     render();
+    return true;
+  }
+
+  /* One generator, one button, and which of the two it runs is decided by the
+     bag rather than by which of two buttons was nearer the thumb.
+     
+     There used to be a "Generate bag" here beside "Generate rest", and it
+     replaced every club with a generated one the moment it was pressed - no
+     confirmation, nothing to undo. The shell has never had that door: with
+     clubs in the bag its build button IS "Generate rest", and it asks first.
+     This now says the same thing. */
+  function generate(sevenIronCarry) {
+    if (!canEdit()) return refuse();
+    return clubs.length ? generateRest(sevenIronCarry) : generateQuickSet(sevenIronCarry);
+  }
+
+  /* ---- the two overlay cards ----
+     Only one is ever up, and every way out of them means the same thing: the
+     scrim, Cancel, Escape and opening the other one. */
+  function overlayEls() {
+    return {
+      scrim: document.getElementById("bagOverlayScrim"),
+      add: document.getElementById("bagAddPanel"),
+      quick: document.getElementById("bagQuickPanel")
+    };
+  }
+
+  function closeOverlays() {
+    var els = overlayEls();
+    [els.scrim, els.add, els.quick].forEach(function (el) {
+      if (el) el.classList.add("hiddenState");
+    });
+    var club = document.getElementById("bagAddClub");
+    var carry = document.getElementById("bagAddCarry");
+    var addBtn = document.getElementById("bagAddBtn");
+    if (club) club.value = "";
+    if (carry) { carry.value = ""; carry.classList.add("hiddenState"); }
+    if (addBtn) addBtn.classList.add("hiddenState");
+  }
+
+  function openOverlay(which) {
+    if (!canEdit()) return refuse();
+    closeOverlays();
+    var els = overlayEls();
+    var card = which === "quick" ? els.quick : els.add;
+    if (!card) return false;
+    if (els.scrim) els.scrim.classList.remove("hiddenState");
+    card.classList.remove("hiddenState");
+    /* The 7-iron carry starts from what the bag already says it is, so the
+       generator opens on an answer rather than an empty box. */
+    if (which === "quick") {
+      var input = document.getElementById("bagQuick7i");
+      var seven = clubs.filter(function (c) { return c.club === "7i"; })[0];
+      if (input && !input.value) input.value = seven ? seven.baseCarry : "";
+      if (input) input.focus();
+    } else {
+      var name = document.getElementById("bagAddClub");
+      if (name) name.focus();
+    }
+    return true;
   }
 
   app.bag = {
@@ -325,11 +410,13 @@
          a stale copy here is how the two bags used to disagree. */
       clubs = load();
       if (window.GDBubbleEngine) window.GDBubbleEngine.setBag(clubs);
+      closeOverlays();
       var panel = document.getElementById("bagPanel");
       if (panel) panel.classList.remove("hiddenState");
       render();
     },
     close: function () {
+      closeOverlays();
       var panel = document.getElementById("bagPanel");
       if (panel) panel.classList.add("hiddenState");
     },
@@ -377,22 +464,36 @@
     }
 
     if (addBtn) addBtn.addEventListener("click", function () {
-      if (addClub(addClubInput.value, addCarryInput.value)) {
-        addClubInput.value = "";
-        addCarryInput.value = "";
-        /* Back to step one, ready for the next club. */
-        showAddStepTwo(false);
-        addClubInput.focus();
-      }
+      if (addClub(addClubInput.value, addCarryInput.value)) closeOverlays();
     });
+
+    /* The tabs open the cards; the cards do the work. */
+    var addTab = document.getElementById("bagAddTab");
+    if (addTab) addTab.addEventListener("click", function () { openOverlay("add"); });
+    var genTab = document.getElementById("bagGenTab");
+    if (genTab) genTab.addEventListener("click", function () { openOverlay("quick"); });
 
     var quickBtn = document.getElementById("bagQuickBtn");
     if (quickBtn) quickBtn.addEventListener("click", function () {
       var input = document.getElementById("bagQuick7i");
-      generateQuickSet(input.value);
+      if (generate(input && input.value)) closeOverlays();
     });
-    var restBtn = document.getElementById("bagRestBtn");
-    if (restBtn) restBtn.addEventListener("click", generateRest);
+
+    var scrim = document.getElementById("bagOverlayScrim");
+    if (scrim) scrim.addEventListener("click", closeOverlays);
+    ["bagAddCancel", "bagQuickCancel"].forEach(function (id) {
+      var btn = document.getElementById(id);
+      if (btn) btn.addEventListener("click", closeOverlays);
+    });
+    /* Escape closes the card, not the sheet behind it - the same rule the
+       shell's bag sheet follows. */
+    document.addEventListener("keydown", function (event) {
+      if (event.key !== "Escape") return;
+      var els = overlayEls();
+      if (!els.scrim || els.scrim.classList.contains("hiddenState")) return;
+      event.stopPropagation();
+      closeOverlays();
+    }, true);
 
     document.querySelectorAll("#bagFirmness [data-firmness]").forEach(function (btn) {
       btn.addEventListener("click", function () { setFirmness(btn.dataset.firmness); });

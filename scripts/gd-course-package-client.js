@@ -56,16 +56,27 @@
       params += "&courseLat=" + encodeURIComponent(lat) + "&courseLng=" + encodeURIComponent(lng);
     }
     if (opts.courseName) params += "&courseName=" + encodeURIComponent(String(opts.courseName).slice(0, 200));
+    /* Sent on every request, signed in or not. The server prefers a verified session over
+       this whenever a bearer token is present, so a signed-in player's runs are never charged
+       to a guest budget - but without it a signed-OUT player's course is never enqueued at
+       all, which is the state that made "search a course, press Play, tap a green by hand"
+       the normal first run of this app. */
+    var guestId = safe(function () {
+      var identity = window.GDGuestIdentity;
+      return identity && typeof identity.getOrCreateGuestId === "function" ? identity.getOrCreateGuestId() : "";
+    }, "") || "";
+    if (guestId) params += "&guestId=" + encodeURIComponent(guestId);
     var controller = null;
     try { if (typeof AbortController !== "undefined") controller = new AbortController(); } catch (e) {}
     var timer = controller ? setTimeout(function () { controller.abort(); }, opts.timeoutMs || DEFAULT_TIMEOUT_MS) : null;
     var headers = { Accept: "application/json" };
     var token = await accessToken();
     if (token) headers.Authorization = "Bearer " + token;
-    /* Worth its own outcome: the server answers 200 {status:"none"} for a signed-out caller
-       rather than 401, so without this an expired session is indistinguishable from an
-       unmapped course - which is exactly how a course can look "never mapped" forever. */
-    else note("no-token");
+    /* Still worth recording, but no longer a fault: a signed-out caller now maps under its
+       guest id. Kept so an expired session stays visible in the outcome channel, and so a
+       signed-out request with NO guest id either - the one case where nothing will be
+       enqueued - is distinguishable from an unmapped course. */
+    else note(guestId ? "guest-actor" : "no-actor");
     try {
       var response = await fetch(ENDPOINT + "?" + params, { headers: headers, signal: controller ? controller.signal : undefined });
       if (timer) clearTimeout(timer);
@@ -80,7 +91,7 @@
       /* A 200 is not the same as an answer. status:"none" with no token in play means the
          server declined to enqueue, which is the case worth being loud about. */
       var state = body && body.status ? String(body.status) : "none";
-      note(state === "none" && !token ? "none-signed-out" : state,
+      note(state === "none" && !token && !guestId ? "none-no-actor" : state,
         body && body.triggerError ? String(body.triggerError) : "");
       return body;
     } catch (e) {

@@ -7,10 +7,11 @@
  * reads an account or an entitlement. Build 740 was rejected because the auth
  * gate locked them anyway.
  *
- * The bubble is free too (decided 19 Aug), driven by the engine's ghost bag.
- * That is the shop window: a player with no membership sees their dispersion
- * working, and pays to replace the ghost bag with their own club distances.
- * So app/js/bag.js asks this module before it lets anything be edited.
+ * The bubble is free too (decided 19 Aug), driven by the engine's ghost bag -
+ * and so is the bag itself (decided 30 Aug). Setting your own club distances
+ * was the one thing this module gated that a player could see working for
+ * free; it is not gated any longer, and app/js/bag.js no longer asks. Its
+ * canEdit() asks only whether there is a profile to write the clubs into.
  *
  * What DOES belong to an account is everything that writes something the
  * player comes back to: the scorecard, the round record in Course Data, and

@@ -271,13 +271,18 @@ function loadController(options = {}) {
      real shape of a first visit: the server answers "processing" (the mapper job was enqueued
      as a side effect of that very request) before it answers with geometry. The last entry
      repeats once the queue drains, so a scenario can end on a state that never resolves. */
+  /* setServerPackage lets a scenario change the server's answer PART WAY THROUGH, which is
+     the only way to model the case this file now exists to protect: the client stops waiting,
+     and the job finishes afterwards. */
+  let serverPackageQueue = null;
   if (options.serverCoursePackage) {
-    const queue = Array.isArray(options.serverCoursePackage) ? options.serverCoursePackage.slice() : null;
+    const responder = typeof options.serverCoursePackage === "function" ? options.serverCoursePackage : null;
+    serverPackageQueue = responder ? null : (Array.isArray(options.serverCoursePackage) ? options.serverCoursePackage.slice() : [options.serverCoursePackage]);
     win.GDCoursePackageClient = {
       fetchPackage: async () => {
         calls.packageFetches++;
-        if (!queue) return options.serverCoursePackage;
-        return queue.length > 1 ? queue.shift() : queue[0];
+        if (responder) return responder(calls.packageFetches);
+        return serverPackageQueue.length > 1 ? serverPackageQueue.shift() : serverPackageQueue[0];
       }
     };
   }
@@ -508,13 +513,65 @@ async function main() {
   assert.strictEqual(env.calls.packageFetches, 3, "the wait polls rather than giving up on the first processing answer");
   assert(env.events.some((event) => event.event === "server-course-package-hit" && event.summary === "Server finished mapping while play waited"), "waiting for the server job is distinguishable from an already-mapped hit");
 
-  /* The wait is bounded. A job that never finishes must still hand the player something. */
-  env = await runScenario({ serverCoursePackage: [{ status: "processing", stage: "automap" }], serverWaitBudgetMs: 40, serverWaitPollMs: 10 });
-  assert.strictEqual(env.result.playable, false, "a server job that never finishes is not playable");
-  assert.strictEqual(env.result.fallback, "interactive-green", "an exhausted wait still opens the manual fallback");
-  assert(env.calls.packageFetches > 1, "the wait actually polled before giving up");
+  /* The Southport case, and the reason this whole waiting/fallback split exists.
+   *
+   * The player selects a course nobody has mapped. The job is enqueued as a side effect of
+   * the first package request and runs for longer than the client's wait budget - ordinary
+   * when the worker kick was swallowed and the job is sitting for the 3-minute sweeper. The
+   * client stops waiting. The job then finishes, successfully, and the geometry lands in
+   * Supabase.
+   *
+   * What used to happen: the exhausted wait armed the manual green-tap fallback, which is
+   * TERMINAL - the re-entry guard in runCourseMappingAttempt then refused every later attempt
+   * on that course. The map existed and the app would not open it, no matter how many times
+   * the player backed out and pressed Play. Some of those courses also carried an old mapper
+   * verdict, and asked for a pin on top of it, over and over.
+   *
+   * What must happen: a wait that runs out while the server is STILL PROCESSING keeps
+   * waiting. Nothing terminal is armed, no verdict is invented, and when the package lands
+   * the round opens without the player pressing anything. */
+  /* budgetMs 0 makes the client's wait exhaust after exactly one poll, so the handover from
+     "play is waiting" to "the background watch is waiting" is deterministic rather than a race
+     against a real clock. Poll 1 answers processing (the job was enqueued as a side effect of
+     that very request); poll 2 - the watch's first - is the finished map. */
+  let southportPolls = 0;
+  env = await runScenario({
+    /* A full 18 on the far side, because the background watch resumes through the same
+       whole-course entry a player would: a partial map is not something to open a round on. */
+    serverCoursePackage: () => { southportPolls += 1; return southportPolls > 1 ? serverPackage(18) : { status: "processing", stage: "automap" }; },
+    serverWaitBudgetMs: 0
+  });
+  assert.strictEqual(env.result.playable, false, "a job still running is not yet playable");
+  assert.strictEqual(env.result.waiting, true, "an exhausted wait on a LIVE job keeps waiting instead of ending the journey");
+  assert.strictEqual(env.result.fallback, undefined, "a still-running job must not arm the terminal manual fallback");
+  assert.ok(!env.result.fit, "a wait is not a mapper verdict, so nothing here can reach the pin screen");
   assert(env.events.some((event) => event.event === "server-course-package-wait-timed-out"), "a timed-out wait is logged distinctly from a course the server never started");
-  assert(env.events.some((event) => event.event === "manual-fallback-opened" && event.details && event.details.reason === "server-map-timed-out"), "the fallback records that the wait ran out, not that the server had nothing");
+  assert(env.events.some((event) => event.event === "server-map-wait-extended"), "the extended wait is recorded, not silent");
+
+  /* The job finishes while the player is still on the waiting screen. */
+  for (let i = 0; i < 400; i += 1) await Promise.resolve();
+  assert.strictEqual(env.calls.manual, 0, "a course that finished mapping never opens the manual fallback");
+  const waitedStore = JSON.parse(env.localStorage.data.gd_user_course_library_v1);
+  const waitedCourse = waitedStore.courses["user-local-player::controller-test"];
+  assert.ok(waitedCourse && Object.values(waitedCourse.objects || {}).some((object) => Number(object.holeNumber) === 1 && object.type === "green"),
+    "the arriving package is persisted by the background watch - the player does not press Play again");
+
+  /* And the guard that made the old behaviour permanent is gone: a course whose map is now
+     available is let back in rather than turned away by a decision made minutes ago. */
+  const afterWait = await env.win.runCourseMappingAttempt({
+    course: env.course, hole: 1, wholeCourse: false, showLoading: false,
+    selectedAt: "2026-08-30T00:00:00.000Z", attemptToken: "attempt-after-wait",
+    debugRunId: "debug-run-after-wait", reason: "reopen-after-wait"
+  });
+  assert.strictEqual(afterWait.playable, true, "reopening a course that finished mapping opens it, terminal-guard or not");
+  assert.ok(!afterWait.fit, "and asks for nothing - there is a map, so there is no pin to place");
+
+  /* The other exhaustion, which is NOT the same event: the wait ran out on misses, so nothing
+     is known to be running. That still hands the player the green-tap, because waiting on a
+     job nobody can confirm exists is just a stuck screen. */
+  env = await runScenario({ serverCoursePackage: [null], serverWaitBudgetMs: 400, serverWaitPollMs: 10 });
+  assert.strictEqual(env.result.fallback, "interactive-green", "an unreachable server still opens the manual fallback");
+  assert.strictEqual(env.result.waiting, undefined, "a wait is only extended for a job the server confirms is running");
 
   /* "none" means the server did NOT enqueue anything - anonymous caller, no location, or the
      per-user rate limit tripped. There is no job to wait on, so waiting would only stall the

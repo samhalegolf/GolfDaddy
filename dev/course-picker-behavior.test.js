@@ -121,7 +121,7 @@ function makeDocument() {
 
 function createHarness(options = {}) {
   const document = makeDocument();
-  const calls = { mapping: 0, gps: 0, resume: 0, panels: 0, geolocation: 0, toasts: [] };
+  const calls = { mapping: 0, gps: 0, resume: 0, panels: 0, geolocation: 0, toasts: [], pins: [] };
   const storage = new Map();
   const pendingGeo = [];
   const mappingDeferred = [];
@@ -181,7 +181,8 @@ function createHarness(options = {}) {
       hasPoint(course) { return Number.isFinite(Number(course && course.lat)) && Number.isFinite(Number(course && course.lng)); },
       payloadFromSelectionElement(element) { return element && element.__gdCoursePayload || null; },
       databaseMapAvailable(course) { return Promise.resolve({ available: !!course.databaseReady, source: "published-course-map" }); },
-      needsCoursePin() { return false; },
+      needsCoursePin(course) { return course && course.gdCourseFitTrusted === false && !course.__bypassPin; },
+      showPin(course) { calls.pins.push(course); return false; },
       hidePin() {},
       hasMappedPlayData(course) { return !!course.savedPlayable; },
       prepareMappingSurface() {},
@@ -320,6 +321,45 @@ async function tickEntry() {
   stale.mappingDeferred[0]({ playable: true, course: { name: "Old", courseId: "old" } });
   await tick();
   assert.strictEqual(stale.calls.gps, 0, "stale playable result is ignored");
+
+  /* ---- when the pin screen is allowed to appear, and when it is not ----
+   *
+   * The pin is a repair for one thing: the mapper came back and said the coordinate it was
+   * given was the wrong ground. It is not the app's answer to a slow server, a dropped
+   * request, or a course nobody has mapped yet. */
+
+  const groundRefusal = { trusted: false, scope: "ground", reason: "multiple-courses", message: "There look to be several courses here." };
+
+  const badGround = createHarness({ immediateMappingResult: { playable: false, fallback: "interactive-green", fit: groundRefusal } });
+  badGround.window.GDCoursePicker.selectCourse({ name: "Overlapping", courseId: "overlapping", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: false });
+  await tick();
+  assert.strictEqual(badGround.calls.pins.length, 1, "a ground refusal is exactly what the pin exists to repair");
+  assert.strictEqual(badGround.calls.pins[0].gdCourseFitTrusted, false, "and it is told why it is asking");
+  assert.strictEqual(badGround.calls.gps, 0, "a course on the wrong ground does not open a round");
+
+  /* The Southport shape from the picker's side: the server is still building. There is no
+     verdict, so there is nothing to repair, so there is no pin - and no round yet either. */
+  const stillBuilding = createHarness({ immediateMappingResult: { playable: false, waiting: true, armed: true } });
+  stillBuilding.window.GDCoursePicker.selectCourse({ name: "Preparing", courseId: "preparing", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: false });
+  await tick();
+  assert.deepStrictEqual(stillBuilding.calls.pins, [], "a course still being prepared is never asked to be pinned");
+  assert.strictEqual(stillBuilding.calls.gps, 0, "and is not sent into a round it has no map for");
+  assert.strictEqual(stillBuilding.document.body.dataset.gdCourseAutoMapStatus, "waiting", "waiting must not read as an attempt that produced nothing");
+  assert.strictEqual(stillBuilding.document.body.dataset.gdCourseNeedsPin, "waiting");
+
+  /* A verdict that arrives WITH a map is not a reason to stop the round - and, crucially, the
+     successful run wipes the flags a failed one left on the selection, so re-entering the
+     course cannot re-ask. This is the client half of the repeating pin prompt. */
+  const repaired = createHarness({ immediateMappingResult: { playable: true, holes: 18 } });
+  const repairedCourse = { name: "Southport", courseId: "southport", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: false, gdCourseFitTrusted: false, gdCourseFitReason: "multiple-courses", __bypassPin: true };
+  repaired.window.GDCoursePicker.selectCourse(repairedCourse);
+  await tickEntry();
+  assert.strictEqual(repaired.calls.gps, 1, "a course that mapped successfully opens");
+  assert.deepStrictEqual(repaired.calls.pins, [], "and asks for nothing on the way in");
+  /* The live selection is what gdConfirmCoursePin and the next selectCourse both read, so it
+     is where a dead verdict would survive to ask again. */
+  assert.strictEqual(repaired.window.__gdLiveCoursePickerSelection.gdCourseFitTrusted, undefined, "the dead verdict is cleared, so the next entry cannot inherit it");
+  assert.strictEqual(repaired.window.GDCoursePicker.getState().activeSelection.gdCourseFitTrusted, undefined, "and it is gone from the picker's own record of what was picked");
 
   const resume = createHarness();
   resume.window.GDCoursePicker.resumeRound({ event: { type: "click" } });

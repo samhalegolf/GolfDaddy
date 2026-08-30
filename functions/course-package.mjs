@@ -14,10 +14,13 @@
    over HTTP instead.
 
    On a "none" state this endpoint DOES trigger AutoMapper (stage 5 of the migration plan) -
-   the doc's "if geometry missing, server runs AutoMapper and saves geometry" - but only for
-   an authenticated caller that supplies courseLat/courseLng (an anonymous or location-less
-   request still gets a truthful "none" back, matching course-visual-jobs.mjs's own pattern of
-   requiring a verified identity before any write). Before enqueueing, it checks for a nearby
+   the doc's "if geometry missing, server runs AutoMapper and saves geometry" - for any caller
+   that supplies courseLat/courseLng AND an actor to charge the run to: a verified Supabase
+   session, or a guest installation id (see mapperActorKey in course-mapper-jobs.mjs). Signing
+   in is NOT a precondition for having a course prepared - a signed-out golfer opening an
+   unmapped course is the ordinary first run of this app, and gating the trigger on an account
+   meant that run could only ever end in manual green-tapping. A request with no location, or
+   with no actor at all, still gets a truthful "none" back. Before enqueueing, it checks for a nearby
    already-mapped course under a different id/name (findDuplicateCourseWithGeometry from
    lib/gd-duplicate-course-guard.mjs, shared with course-mapper-jobs.mjs's own direct enqueue
    route) - the server-side duplicate-course-matching responsibility the architecture doc
@@ -26,7 +29,7 @@
 
 import { deriveCoursePackageState, shapeLitePackage, shapeFullPackage } from "./lib/gd-course-package-shape.mjs";
 import { findDuplicateCourseWithGeometry as findDuplicateCourse } from "./lib/gd-duplicate-course-guard.mjs";
-import { enqueueMapperJob } from "./course-mapper-jobs.mjs";
+import { enqueueMapperJob, mapperActorKey } from "./course-mapper-jobs.mjs";
 
 const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
@@ -100,20 +103,40 @@ function fitFromMapperJobs(mapperJobs) {
      had learned under result.diagnostics. The refusal is the case that matters
      most - "there are six courses here" is precisely when a player should be
      asked to point at one - so missing it would leave the pin unreachable in the
-     only situation it exists for. */
+     only situation it exists for.
+
+     The LATEST settled run, and only that one. This used to scan the whole
+     five-job window for anything carrying a fit, which meant a single old
+     refusal outlived every later run: the player pinned the course, the remap
+     succeeded, and the next open still found that dead verdict and asked for a
+     pin again - the repeating pin prompt on a course that was by then mapped
+     and sitting in Supabase. A newer run that reached a verdict has already
+     answered the question the older one asked, and a run still queued or
+     running has not answered it yet, so neither may speak for the course. */
   const jobs = Array.isArray(mapperJobs) ? mapperJobs : [];
-  const job = jobs.find(j => j && j.result && (j.result.fit || (j.result.diagnostics && j.result.diagnostics.fit)));
-  if (!job) return null;
-  return job.result.fit || job.result.diagnostics.fit;
+  const settled = jobs.find(j => j && j.status !== "queued" && j.status !== "running");
+  const result = settled && settled.result;
+  if (!result) return null;
+  return result.fit || (result.diagnostics && result.diagnostics.fit) || null;
 }
 
 export async function buildCoursePackage(courseId) {
   const rows = await loadCoursePackageRows(courseId);
   const state = deriveCoursePackageState(rows);
   const fit = fitFromMapperJobs(rows.mapperJobs);
-  /* Only attached when it has something to say. A package carrying
-     `fit:{trusted:true}` and one carrying no fit at all mean the same thing, and
-     the client reads both as "do not ask". */
+  /* Only attached when it has something to say, and only to a package that has
+     nothing to play. A package carrying `fit:{trusted:true}` and one carrying no
+     fit at all mean the same thing, and the client reads both as "do not ask".
+
+     A READY package never carries one, whatever the job history says. `fit` is
+     the mapper's answer to "was the coordinate we were handed the right ground",
+     and published geometry IS a better answer to that than any verdict - the
+     course was mapped, so there is somewhere to play. Attaching it here was the
+     other half of the repeating pin: the picker's repair branch fires on
+     `fit.trusted === false` with scope "ground" REGARDLESS of whether the run
+     was playable, so a ready lite package carrying an old refusal sent a player
+     with a working map straight back to the pin screen, every single time they
+     opened the course. */
   const withFit = (pkg) => (fit && fit.trusted === false ? Object.assign({}, pkg, { fit }) : pkg);
   if (state === "full-map-ready") {
     const full = shapeFullPackage(rows.map, rows.visual);
@@ -121,11 +144,11 @@ export async function buildCoursePackage(courseId) {
        behind them - pictures of holes that cannot answer a distance. Falling back
        to lite is the honest answer: the course has geometry worth playing, it just
        has no usable frames, which is exactly what lite-geo-ready describes. */
-    if (full) return withFit(full);
+    if (full) return full;
   }
   if (state === "full-map-ready" || state === "lite-geo-ready") {
     const liveVisualJob = rows.visualJobs.find(j => j.status === "running" || j.status === "queued");
-    return withFit(shapeLitePackage(rows.map, liveVisualJob ? liveVisualJob.status : "none"));
+    return shapeLitePackage(rows.map, liveVisualJob ? liveVisualJob.status : "none");
   }
   if (state === "manual-required") {
     const lastMapperJob = rows.mapperJobs[0] || null;
@@ -154,7 +177,7 @@ export async function buildCoursePackage(courseId) {
    than blocking this request on it (same fire-and-poll shape as course-visual-jobs.mjs's auto
    path). Left as a separate function from buildCoursePackage so tests can exercise the pure
    read path without needing to stub identity/enqueue plumbing. */
-export async function buildCoursePackageWithTrigger(courseId, { center, courseName, userId, origin } = {}) {
+export async function buildCoursePackageWithTrigger(courseId, { center, courseName, userId, guestId, origin } = {}) {
   const result = await buildCoursePackage(courseId);
   if (result.status !== "none") return result;
   if (center) {
@@ -164,9 +187,18 @@ export async function buildCoursePackageWithTrigger(courseId, { center, courseNa
       return Object.assign({}, canonical, { redirectedFrom: courseId });
     }
   }
-  if (!userId || !center) return result;
-  const enqueued = await enqueueMapperJob({ courseId, courseLat: center.lat, courseLng: center.lng, courseName, userId, origin });
+  const actorKey = mapperActorKey({ userId, guestId });
+  if (!actorKey || !center) return result;
+  const enqueued = await enqueueMapperJob({ courseId, courseLat: center.lat, courseLng: center.lng, courseName, actorKey, origin });
+  /* Both of these keep "none". It is the honest answer and, just as importantly, the one the
+     client treats as terminal: no job was started, so there is nothing to wait for and
+     holding the player on a loading screen would be a lie. The reason rides alongside so the
+     app can say which it was instead of showing the same silence for both. */
   if (enqueued.rateLimited) return Object.assign({}, result, { triggerError: "rate-limited" });
+  if (enqueued.unauthorized) return Object.assign({}, result, { triggerError: "no-actor" });
+  /* A deduped enqueue means a run for this course is already in flight - reuse it and report
+     it as what it is. Answering "none" here would have told the client to stop waiting for a
+     job that was about to finish. */
   return { courseId, status: "processing", stage: "automap" };
 }
 
@@ -182,7 +214,11 @@ export default async function coursePackage(req) {
   const center = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
   const courseName = url.searchParams.get("courseName") || "";
   const userId = await verifiedUserId(req);
-  const result = await buildCoursePackageWithTrigger(courseId, { center, courseName, userId, origin: url.origin });
+  /* Read straight off the query string, unverified by design: this is not a claim about WHO
+     someone is, it is a stable string an installation uses to be counted against its own
+     mapping budget. Forging one buys nothing an attacker could not get by clearing storage. */
+  const guestId = url.searchParams.get("guestId") || url.searchParams.get("guest_id") || "";
+  const result = await buildCoursePackageWithTrigger(courseId, { center, courseName, userId, guestId, origin: url.origin });
   return json(200, result);
 }
 

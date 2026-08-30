@@ -32,7 +32,7 @@
      resolves natively only because the bootstrap above ran first. -->
 <script src="../scripts/clarity-error-reporter.js"></script>
 <link rel="stylesheet" href="../assets/vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=bag-free-20260830">
 <link rel="stylesheet" href="../styles/inline/gd-editable-bag-panel-v1.css">
 <link rel="stylesheet" href="../styles/gd-demo-mode.css">
 </head>
@@ -332,26 +332,41 @@
       </div>
       <div id="bagNotice" class="bagNotice hiddenState"></div>
       <div id="bagList" class="bagList"></div>
-      <!-- Name first, then the distance. A club is a thing before it is a
-           number: asked the other way round the player is typing a carry with
-           nothing to attach it to, and "Carry m" sitting next to an empty
-           "Club" reads as two equal blanks rather than a first step. The carry
-           field and Add button appear once the club has a name. -->
-      <div class="bagAddRow">
-        <input id="bagAddClub" type="text" placeholder="New club name" aria-label="New club name">
-        <input id="bagAddCarry" class="hiddenState" type="number" inputmode="numeric" min="1" step="1" placeholder="Carry m" aria-label="New club carry metres">
-        <button id="bagAddBtn" class="hiddenState" type="button">Add</button>
-      </div>
-      <div class="bagQuickRow">
-        <input id="bagQuick7i" type="number" inputmode="numeric" min="1" step="1" placeholder="7-iron carry (m)" aria-label="7-iron carry metres">
-        <button id="bagQuickBtn" type="button">Generate bag</button>
-        <button id="bagRestBtn" type="button">Generate rest</button>
+      <!-- The two questions the bag can ask - what is this club called, and
+           how far do you carry your 7-iron - live in cards that appear over
+           the list while they are being answered (see #bagAddPanel and
+           #bagQuickPanel below). They used to be permanent rows under the
+           clubs, which meant a full bag had to be scrolled past to reach them
+           and the fields sat there taking a third of the sheet the whole time
+           nobody was answering. Same shape as the shell's bag sheet, which is
+           the point: this is the same bag through a different door. -->
+      <div class="bagFooter">
+        <button id="bagAddTab" class="bagEditAction bagFootBtn" type="button">Add a club</button>
+        <button id="bagGenTab" class="bagEditAction bagFootBtn" type="button">Generate bag</button>
       </div>
       <div class="bagFirmnessRow" id="bagFirmness" aria-label="Total distance setting">
         <button type="button" data-firmness="soft">Soft</button>
-        <button type="button" data-firmness="medium">Medium</button>
-        <button type="button" data-firmness="hard">Hard</button>
+        <button type="button" data-firmness="medium">Normal</button>
+        <button type="button" data-firmness="hard">Firm</button>
       </div>
+    </div>
+    <!-- Temporary overlays, dismissed by the scrim, Cancel or Escape. Name
+         first, then the distance. A club is a thing before it is a number:
+         asked the other way round the player is typing a carry with nothing to
+         attach it to. The carry field and Add appear once the club has a name. -->
+    <div id="bagOverlayScrim" class="bagScrim hiddenState"></div>
+    <div id="bagAddPanel" class="bagCard hiddenState">
+      <div class="bagCardTitle">What is the club called?</div>
+      <input id="bagAddClub" type="text" autocomplete="off" placeholder="e.g. 5W" aria-label="New club name">
+      <input id="bagAddCarry" class="hiddenState" type="number" inputmode="numeric" min="1" step="1" placeholder="Carry m" aria-label="New club carry metres">
+      <button id="bagAddBtn" class="hiddenState" type="button">Add</button>
+      <button id="bagAddCancel" class="bagCardCancel" type="button">Cancel</button>
+    </div>
+    <div id="bagQuickPanel" class="bagCard hiddenState">
+      <div class="bagCardTitle">How far do you carry your 7&#8209;iron?</div>
+      <input id="bagQuick7i" type="number" inputmode="numeric" min="1" step="1" placeholder="7-iron carry (m)" aria-label="7-iron carry metres">
+      <button id="bagQuickBtn" type="button">Generate bag</button>
+      <button id="bagQuickCancel" class="bagCardCancel" type="button">Cancel</button>
     </div>
   </div>
 
@@ -498,7 +513,7 @@
 <script src="js/bubble-visual.js"></script>
 <script src="../scripts/gd-bag-core.js"></script>
 <script src="../scripts/gd-bag-generator-core.js"></script>
-<script src="js/bag.js"></script>
+<script src="js/bag.js?v=bag-free-20260830"></script>
 <script src="js/wind.js"></script>
 <script src="js/pin.js"></script>
 <script src="js/gps.js"></script>

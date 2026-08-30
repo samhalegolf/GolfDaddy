@@ -368,7 +368,7 @@
      chrome: the generator, the roll-out chip, the fly-into-the-bag animation
      and the panel's state. */
   var ROLL_LABEL = { soft:'Soft', medium:'Normal', hard:'Firm' };
-  var ui = { editing:null, editingAnchorRows:null, rollOpen:false, genOpen:false, genEntering:false, genLeaving:false, setupCarry:0, busy:false,
+  var ui = { editing:null, editingAnchorRows:null, rollOpen:false, genOpen:false, genLeaving:false, setupCarry:0, busy:false,
              addOpen:false, addClub:"", addCarry:0, addStep:1 };
   var timers = [];
 
@@ -403,12 +403,20 @@
       ui.setupCarry = Math.max(60, Math.min(220, Math.round(num(seven) || 155)));
     }
 
-    /* Mid-flight the generator and the club list are both on the stage: the
-       clubs fly into the bag while the panel unfolds over the top of them. */
-    var genVisible = !ui.genLeaving && (ui.genOpen || ui.genEntering || !hasBag);
-    var listRows = hasBag && !ui.genOpen;
-    var listChrome = listRows && !ui.genEntering;
-    if(!listChrome) ui.addOpen = false;
+    /* With clubs in the bag the generator is an overlay card (see the CSS
+       block of the same name): it floats over the list rather than taking its
+       place, so the bag you are about to change stays on screen behind it.
+       Empty, it IS the sheet's content and stays in the flow. */
+    var genOverlay = hasBag;
+    /* An empty bag is offered the generator whether it asked or not - it is
+       the only thing the sheet can usefully show. Deleting the last club
+       therefore also closes the add card, which would otherwise be left
+       floating over a generator that has just taken the screen. */
+    if(!hasBag) ui.addOpen = false;
+    var genVisible = !ui.genLeaving && (ui.genOpen || !hasBag);
+    var listRows = hasBag;
+    var listChrome = listRows;
+    var overlayOpen = (genOverlay && genVisible) || ui.addOpen;
 
     var sub = el('gdBagPanelSub');
     if(sub) sub.textContent = hasBag ? (bag.length + ' clubs · metres') : 'No clubs yet';
@@ -418,7 +426,12 @@
     var stage = el('gdBagStage');
     if(stage) stage.classList.toggle('hasBag', hasBag);
     var gen = el('gdBagGenPanel');
-    if(gen) gen.classList.toggle('folded', !genVisible);
+    if(gen){
+      gen.classList.toggle('gdBagOverlayCard', genOverlay);
+      gen.classList.toggle('folded', !genVisible);
+    }
+    var scrim = el('gdBagScrim');
+    if(scrim) scrim.hidden = !overlayOpen;
     var genQuestion = el('gdBagGenQuestion');
     if(genQuestion) genQuestion.textContent = hasBag ? 'How far do you carry your 7-iron?' : 'How far do you carry your 7-iron?';
     var genBuild = el('gdBagBuildButton');
@@ -433,7 +446,7 @@
     }
     renderAddPanel();
     var chip = el('gdBagGenChip');
-    if(chip){ chip.hidden = !hasBag; chip.classList.toggle('active', ui.genOpen || ui.genEntering); }
+    if(chip){ chip.hidden = !hasBag; chip.classList.toggle('active', ui.genOpen); }
 
     var preset = rollPreset();
     var chipRoll = el('gdBagRollChip');
@@ -487,6 +500,9 @@
   function renderAddPanel(){
     var panel = el('gdBagAddPanel');
     if(!panel) return;
+    /* Always an overlay: it only ever appears over a bag that already has
+       clubs in it, and appending it under them was the whole problem. */
+    panel.classList.add('gdBagOverlayCard');
     panel.hidden = !ui.addOpen;
     if(!ui.addOpen){ panel.textContent = ''; return; }
 
@@ -638,11 +654,6 @@
         : 'gbOut .5s cubic-bezier(.38,0,.55,.98) ' + step.toFixed(3) + 's both';
     });
   }
-  function holdClubsInBag(){
-    document.querySelectorAll('#gdBagEditor .gdBagRow').forEach(function(node){
-      node.style.animation = 'gbIn .01s linear both';
-    });
-  }
   function clearClubAnim(){
     document.querySelectorAll('#gdBagEditor .gdBagRow').forEach(function(node){
       node.style.animation = '';
@@ -672,9 +683,18 @@
   function resetUi(){
     clearTimers();
     ui.editing = null; ui.editingAnchorRows = null; ui.rollOpen = false;
-    ui.genOpen = false; ui.genEntering = false; ui.genLeaving = false;
+    ui.genOpen = false; ui.genLeaving = false;
     ui.setupCarry = 0; ui.busy = false;
     ui.addOpen = false; ui.addStep = 1; ui.addClub = ''; ui.addCarry = 0;
+  }
+  /* One way out of both cards - the scrim, Escape, the chip and the Cancel
+     tab all mean the same thing, and a card left open behind a closed one is
+     how you end up with two questions on screen at once. */
+  function closeOverlays(){
+    clearTimers();
+    ui.genOpen = false; ui.genLeaving = false; ui.busy = false;
+    ui.addOpen = false; ui.addStep = 1; ui.addClub = ''; ui.addCarry = 0;
+    renderBagPanelHotfix();
   }
 
   win.gdBagSetupStep = function(delta){
@@ -690,7 +710,7 @@
       if(!rest || rest.error){ toast((rest && rest.error) || 'Enter your 7-iron carry first'); return; }
       var message = 'Generate the rest of your bag?\n\nWe\'ll use your 7-iron carry to estimate ' + rest.added + ' missing club' + (rest.added === 1 ? '' : 's') + '. Your ' + rest.retained + ' existing club' + (rest.retained === 1 ? ' stays' : 's stay') + ' unchanged. You can edit every distance afterwards.';
       if(!win.confirm(message)) return;
-      ui.genOpen = false; ui.genEntering = false; ui.editing = null; ui.editingAnchorRows = null;
+      ui.genOpen = false; ui.editing = null; ui.editingAnchorRows = null;
       persistRows(rest.rows, { silent:true });
       toast(rest.added ? 'Rest of bag generated' : 'Your bag already has every standard club');
       return;
@@ -699,7 +719,7 @@
     clearTimers();
     var built = quickBag(ui.setupCarry);
     ui.editing = null; ui.editingAnchorRows = null; ui.rollOpen = false;
-    ui.genLeaving = true; ui.genEntering = false;
+    ui.genLeaving = true;
     renderBagPanelHotfix();
     at(400, function(){
       ui.genLeaving = false; ui.genOpen = false;
@@ -711,22 +731,22 @@
     });
     at(2600, function(){ ui.busy = false; clearClubAnim(); });
   };
+  /* Opens as an overlay card over the clubs, immediately.
+     It used to fly every club into the bag first and unfold the panel two
+     seconds later, which made sense while the generator REPLACED the list -
+     the clubs had to get out of the way. Floating over them, they no longer
+     do, and two seconds is a long time to hold a question. The clubs still
+     fly, in the other direction, when a bag is actually built. */
   win.gdBagToggleGenerator = function(){
     if(ui.busy) return;
-    if(ui.genOpen || ui.genEntering){ resetUi(); renderBagPanelHotfix(); return; }
-    ui.busy = true;
+    if(ui.genOpen){ closeOverlays(); return; }
     clearTimers();
     ui.editing = null; ui.editingAnchorRows = null; ui.rollOpen = false;
-    ui.genEntering = true; ui.genLeaving = false;
+    ui.addOpen = false; ui.addStep = 1; ui.addClub = ''; ui.addCarry = 0;
     var seven = (collectRows(profile()).find(function(c){ return c.club === '7i'; }) || {}).baseCarry;
     if(num(seven)) ui.setupCarry = Math.max(60, Math.min(220, Math.round(num(seven))));
+    ui.genOpen = true; ui.genLeaving = false;
     renderBagPanelHotfix();
-    flyClubs('in');
-    at(1360, function(){ holdClubsInBag(); pulseBag(); });
-    at(2000, function(){
-      ui.genOpen = true; ui.genEntering = false; ui.busy = false;
-      renderBagPanelHotfix();
-    });
   };
 
   /* ---- row editing ----
@@ -769,9 +789,10 @@
     ui.addOpen = !ui.addOpen;
     ui.addStep = 1;
     ui.addCarry = 0;
-    if(ui.addOpen) ui.editing = null;
+    if(ui.addOpen){ ui.editing = null; ui.genOpen = false; }
     renderBagPanelHotfix();
   };
+  win.gdBagCloseOverlays = closeOverlays;
   win.gdBagCancelAdd = function(){
     ui.addOpen = false;
     ui.addStep = 1;
@@ -832,5 +853,17 @@
     renderBagPanelHotfix();
   };
 
-  win.ClarityBagHotfix = { version: 'bag-sheet-20260827-one-line-per-club', rows: currentRows };
+  /* Escape closes the card, not the sheet behind it. Bound once, and it only
+     answers while a card is actually up, so the bag panel's own back button
+     keeps Escape for itself the rest of the time. */
+  document.addEventListener('keydown', function(event){
+    if(event.key !== 'Escape') return;
+    if(!ui.addOpen && !ui.genOpen) return;
+    var panel = el('bagPanel');
+    if(!panel || !panel.classList.contains('open')) return;
+    event.stopPropagation();
+    closeOverlays();
+  }, true);
+
+  win.ClarityBagHotfix = { version: 'bag-sheet-20260830-overlay-cards', rows: currentRows };
 })();

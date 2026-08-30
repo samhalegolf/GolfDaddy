@@ -4,10 +4,12 @@
    responsibilities with different failure modes, and folding them together would couple two
    pipelines' status/dedupe/rate-limit rules for no benefit.
 
-   POST {courseId, kind:"automap"} (ANY signed-in player) -> enqueues a mapping run and pings
-   the background worker. This is the app's only way to start a mapping run - there is no
+   POST {courseId, kind:"automap"} (ANY player, signed in or not) -> enqueues a mapping run and
+   pings the background worker. This is the app's only way to start a mapping run - there is no
    admin-authored recipe path here the way there is for visual jobs, because AutoMapper takes
-   no authoring input.
+   no authoring input. A signed-out caller identifies itself with {guestId}, a persistent
+   per-installation string (scripts/gd-guest-identity.js); see mapperActorKey below for what
+   that is and is not.
    POST {courseId, kind:"nudge"} (admin only) -> requeues a stalled run.
    GET ?courseId=... -> recent jobs plus a derived mapping state for that course, readable by
    players so the app can poll cheaply while it plays over live tiles + a Lite Geometry Pack.
@@ -30,6 +32,35 @@ const ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
    dedupe. */
 const AUTO_RATE_WINDOW_MS = 30 * 60 * 1000;
 const AUTO_RATE_MAX_PER_USER = 5;
+/* Anonymous installs get a tighter budget than signed-in players for the same window. A guest
+   id is a string this device minted for itself, so it costs nothing to discard and mint
+   another - the limit is a speed bump against a loop, not an identity check. The expensive
+   thing it protects is the Overpass query behind each NEW map; reading an existing map,
+   polling a running job and re-picking the same course all dedupe above this and spend
+   nothing. */
+const AUTO_RATE_MAX_PER_GUEST = 3;
+
+/* Who asked for this mapping run, as the one string that goes in requested_by and that the
+   rate limit is keyed to:
+
+     user:<supabase-user-id>   a verified session
+     guest:<installation-id>   an anonymous install (scripts/gd-guest-identity.js)
+
+   A guest id is NOT an account: nothing is created for it, it carries no personal data, and
+   it never unlocks the operator actions below. It exists so a signed-out golfer can have a
+   course prepared for them - which is the normal first run of this app - while still being
+   countable. A verified user always wins over a supplied guest id, so a signed-in player
+   cannot spend a guest budget by also sending one. */
+const GUEST_ID_RE = /^[a-z0-9][a-z0-9-]{7,63}$/;
+export function mapperActorKey({ userId, guestId } = {}) {
+  const uid = String(userId || "").trim();
+  if (uid) return "user:" + uid;
+  const gid = String(guestId || "").trim().toLowerCase();
+  return GUEST_ID_RE.test(gid) ? "guest:" + gid : "";
+}
+function actorRateLimit(actorKey) {
+  return String(actorKey || "").startsWith("guest:") ? AUTO_RATE_MAX_PER_GUEST : AUTO_RATE_MAX_PER_USER;
+}
 
 /* Same reasoning as course-visual-jobs.mjs's STALL_SECONDS: the worker heartbeats between
    OSM fetch, per-hole resolution and green-shape refinement, so silence this long is a dead
@@ -248,10 +279,17 @@ async function hasKnownCentre(courseId) {
    functions/course-package.mjs can trigger it directly on a cache miss (stage 5 of the
    migration plan) without an internal HTTP round-trip - same reasoning as
    course-visual-worker-background.mjs writing straight to its jobs table instead of calling
-   its own sibling endpoint over HTTP. userId is required (the rate limit and
-   requested_by provenance are both keyed to it); callers without a verified user must not
-   reach this function. */
-export async function enqueueMapperJob({ courseId, courseLat, courseLng, courseName, userId, origin }) {
+   its own sibling endpoint over HTTP.
+
+   An actor is required - `user:<id>` or `guest:<install-id>`, see mapperActorKey - because the
+   rate limit and the requested_by provenance are both keyed to it. Callers may pass an
+   already-built actorKey, or userId/guestId to have one built here; a caller with neither gets
+   {unauthorized:true} and nothing is written. What is NOT required any more is a Supabase
+   account: a signed-out golfer opening an unmapped course is the ordinary first run of this
+   app, and refusing to map for them meant that run always ended in manual green-tapping. */
+export async function enqueueMapperJob({ courseId, courseLat, courseLng, courseName, userId, guestId, actorKey, origin }) {
+  const actor = String(actorKey || "").trim() || mapperActorKey({ userId, guestId });
+  if (!actor) return { unauthorized: true };
   /* Same guard course-package.mjs's buildCoursePackageWithTrigger already runs before it
      enqueues - needed here too because this is a second, independent front door onto the
      same job queue (POST /api/course-mapper-jobs, reachable directly, not only through
@@ -276,13 +314,21 @@ export async function enqueueMapperJob({ courseId, courseLat, courseLng, courseN
   }
   if (state.building) return { deduped: true, state: state.state };
 
-  const since = new Date(Date.now() - AUTO_RATE_WINDOW_MS).toISOString();
-  const recent = await supabaseFetch(TABLE + "?select=id&requested_by=eq." + encodeURIComponent("auto:" + userId) + "&created_at=gt." + encodeURIComponent(since) + "&limit=" + (AUTO_RATE_MAX_PER_USER + 1));
-  if (Array.isArray(recent) && recent.length >= AUTO_RATE_MAX_PER_USER) return { rateLimited: true, state: state.state };
-
+  /* Dedupe BEFORE the rate limit, not after. Both answers can be true at once - a guest at
+     their limit re-opening a course that is already being mapped - and only one of them is
+     useful: there is nothing to start, so there is nothing to refuse. Answered the other way
+     round, a player who had spent their budget would be told "slow down" about a job that was
+     already running for them, and the client would stop waiting for it. Reusing a live job
+     costs no quota, which is the rule the whole limit depends on: picking the same course
+     again, or polling one that is mid-build, must never count as a new scan. */
   const freshCutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
   const existing = await supabaseFetch(TABLE + "?select=id,status&course_id=eq." + encodeURIComponent(courseId) + "&kind=eq.automap&status=in.(queued,running)&updated_at=gt." + encodeURIComponent(freshCutoff) + "&limit=1");
   if (Array.isArray(existing) && existing.length) return { deduped: true, job: existing[0], state: "queued" };
+
+  const rateMax = actorRateLimit(actor);
+  const since = new Date(Date.now() - AUTO_RATE_WINDOW_MS).toISOString();
+  const recent = await supabaseFetch(TABLE + "?select=id&requested_by=eq." + encodeURIComponent(actor) + "&created_at=gt." + encodeURIComponent(since) + "&limit=" + (rateMax + 1));
+  if (Array.isArray(recent) && recent.length >= rateMax) return { rateLimited: true, state: state.state, actorKey: actor, limit: rateMax };
 
   /* Last gate, deliberately after the dedupe and rate-limit answers rather than before them.
 
@@ -298,11 +344,11 @@ export async function enqueueMapperJob({ courseId, courseLat, courseLng, courseN
   const inserted = await supabaseFetch(TABLE, {
     method: "POST",
     headers: { Prefer: "return=representation" },
-    body: JSON.stringify([{ course_id: courseId, kind: "automap", status: "queued", mapper_version: MAPPER_VERSION, requested_by: "auto:" + userId }])
+    body: JSON.stringify([{ course_id: courseId, kind: "automap", status: "queued", mapper_version: MAPPER_VERSION, requested_by: actor }])
   });
   const job = Array.isArray(inserted) ? inserted[0] : inserted;
   await pingWorkerAt(origin, job && job.id || null);
-  return { queued: true, job, state: "queued" };
+  return { queued: true, job, state: "queued", actorKey: actor };
 }
 
 export default async function courseMapperJobs(req) {
@@ -327,11 +373,16 @@ export default async function courseMapperJobs(req) {
   const nudge = requestedKind === "nudge";
   const remap = requestedKind === "remap";
   const user = await verifiedUser(req, payload);
-  if (!user) return json(401, { error: "Sign in required" });
+  /* An anonymous caller may map, but only as itself: a guest install id is accepted here and
+     nowhere else. Without a verified user AND without a usable guest id there is no actor to
+     charge the run to, so nothing is read or written. */
+  const actorKey = user ? mapperActorKey({ userId: user.id }) : mapperActorKey({ guestId: payload && (payload.guestId || payload.guest_id) });
+  if (!actorKey) return json(401, { error: "A signed-in session or a guest installation id is required" });
   /* Only "automap" may be enqueued by an ordinary player. "nudge" and "remap" are operator
      actions - one on a stuck run, one on a bad map - same split as course-visual-jobs.mjs's
-     export/nudge paths. */
-  if ((nudge || remap) && !user.isAdmin) return json(403, { error: "Admin verification failed" });
+     export/nudge paths. A guest is never an operator: these ask for user.isAdmin, so an
+     anonymous caller falls through to the same 403 a signed-in non-admin gets. */
+  if ((nudge || remap) && !(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
   const kind = "automap";
 
   const courseId = slug(payload && (payload.courseId || payload.course_id));
@@ -389,7 +440,7 @@ export default async function courseMapperJobs(req) {
     courseLat: payload && payload.courseLat,
     courseLng: payload && payload.courseLng,
     courseName: payload && payload.courseName,
-    userId: user.id,
+    actorKey,
     origin: new URL(req.url).origin
   });
   if (result.duplicate) return json(200, { duplicate: true, courseId: result.courseId });
@@ -399,7 +450,7 @@ export default async function courseMapperJobs(req) {
       detail: "Mapping needs the course's coordinates. Send courseLat and courseLng, or pin the course first."
     });
   }
-  if (result.rateLimited) return json(429, { error: "too many course mapping runs started recently", state: result.state });
+  if (result.rateLimited) return json(429, { error: "too many course mapping runs started recently", state: result.state, limit: result.limit || null });
   if (result.deduped) return json(200, Object.assign({ deduped: true, remapped: remap }, result));
   return json(202, { job: result.job, state: "queued", remapped: remap });
 }
@@ -433,4 +484,4 @@ function json(status, body) {
   });
 }
 
-export const __courseMapperJobsTest = { mapperBuildState, hasGeometryPayload, MAPPER_VERSION };
+export const __courseMapperJobsTest = { mapperBuildState, hasGeometryPayload, mapperActorKey, MAPPER_VERSION, AUTO_RATE_MAX_PER_USER, AUTO_RATE_MAX_PER_GUEST };

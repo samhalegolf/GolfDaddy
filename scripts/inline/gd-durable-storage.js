@@ -52,7 +52,12 @@
        it (gd_conditions_analyses_v1) are deliberately NOT mirrored - they are
        recomputable from these by reprocessShot, so mirroring them would spend
        quota on data that is already safe. */
-    "gd_shot_snapshots_v1"
+    "gd_shot_snapshots_v1",
+    /* The anonymous installation id (scripts/gd-guest-identity.js). Small, and the one thing
+       here that is irreplaceable in a way nothing else notices: losing it does not break
+       anything visibly, it just hands the installation a fresh server-side mapping budget on
+       every eviction, which is the budget existing to be finite. */
+    "clarity:guest-install-id:v1"
   ];
 
   /* Restoring these is not enough on its own: app scripts read them

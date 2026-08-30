@@ -43,6 +43,8 @@
     "test:shadow-lift": "node dev/shadow-lift.test.js",
     "test:courses-near": "node dev/courses-near.test.js",
     "test:course-pin-trust": "node dev/course-pin-trust.test.js",
+    "test:guest-identity": "node dev/course-guest-identity.test.js",
+    "test:course-scan-lifecycle": "node dev/course-guest-identity.test.js && node dev/course-package-trigger.test.js && node dev/course-mapper-jobs.test.js && node dev/course-mapping-controller.test.js && node dev/course-picker-behavior.test.js && node dev/course-pin-trust.test.js",
     "test:nearest-loop": "node dev/nearest-loop-tightening.test.js",
     "test:unlicensed-region": "node dev/unlicensed-region-live-map.test.js",
     "build:app": "node scripts/clarity-deploy-build.js --app-only",

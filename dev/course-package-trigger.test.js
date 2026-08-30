@@ -9,6 +9,8 @@ const root = path.join(__dirname, "..");
 const realFetch = global.fetch;
 const realEnv = Object.assign({}, process.env);
 
+const GUEST = "9f7381c2e4a60b5d1c8e4f0a2b6d7e31";
+
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
 
@@ -37,7 +39,15 @@ function stubFetch(world) {
     if (table === "course_visuals") return jsonResponse(200, world.visuals || []);
     if (table === "course_visual_jobs") return jsonResponse(200, world.visualJobs || []);
     if (table === "course_mapper_jobs") {
-      if (method === "POST") { const rows = JSON.parse(options.body || "[]"); calls.mapperJobInserts.push(rows[0]); return jsonResponse(201, rows.map(r => Object.assign({ id: "job-new" }, r))); }
+      if (method === "POST") {
+        const rows = JSON.parse(options.body || "[]");
+        calls.mapperJobInserts.push(rows[0]);
+        /* Inserted rows come back on the next read, so a scenario can ask the same question
+           twice and get the same answer a real queue would give. Without this every poll of a
+           course looks like the first one. */
+        world.mapperJobs = [Object.assign({ id: "job-new" }, rows[0])].concat(world.mapperJobs || []);
+        return jsonResponse(201, rows.map(r => Object.assign({ id: "job-new" }, r)));
+      }
       if (rest.includes("requested_by=eq.")) return jsonResponse(200, world.userJobs || []);
       return jsonResponse(200, world.mapperJobs || []);
     }
@@ -77,11 +87,42 @@ test("no location means no trigger attempt at all - a plain 'none' comes back", 
   assert.deepStrictEqual(calls.mapperJobInserts, []);
 });
 
-test("a located but unauthenticated caller does not trigger a job", async () => {
+test("a located caller with no actor at all does not trigger a job", async () => {
   const calls = stubFetch({ nearbyMaps: [] });
   const result = await buildCoursePackageWithTrigger("brand-new-course", { center: { lat: -36.8, lng: 174.7 } });
   assert.strictEqual(result.status, "none");
-  assert.deepStrictEqual(calls.mapperJobInserts, [], "identity must be verified before this read endpoint may cause a write");
+  assert.deepStrictEqual(calls.mapperJobInserts, [], "a run has to be attributable to somebody before this read endpoint may cause a write");
+});
+
+/* The signed-out first run. Not signing in is the normal state of a new install, and while
+   this branch required an account the very first course a player ever opened could not be
+   prepared - the package came back "none", the client read that as terminal, and the round
+   opened in manual green-tapping. */
+test("a signed-out caller with a guest installation id triggers a mapper job and gets processing back", async () => {
+  const calls = stubFetch({ nearbyMaps: [] });
+  const result = await buildCoursePackageWithTrigger("brand-new-course", { center: { lat: -36.8, lng: 174.7 }, courseName: "Brand New Course", guestId: GUEST, origin: "https://clarity.example" });
+  assert.strictEqual(result.status, "processing");
+  assert.strictEqual(result.stage, "automap");
+  assert.strictEqual(calls.mapperJobInserts.length, 1);
+  assert.strictEqual(calls.mapperJobInserts[0].requested_by, "guest:" + GUEST);
+  assert.strictEqual(calls.workerPings, 1);
+});
+
+test("a guest id that is not a minted install id triggers nothing", async () => {
+  const calls = stubFetch({ nearbyMaps: [] });
+  const result = await buildCoursePackageWithTrigger("brand-new-course", { center: { lat: -36.8, lng: 174.7 }, guestId: "guest", origin: "https://clarity.example" });
+  assert.strictEqual(result.status, "none");
+  assert.deepStrictEqual(calls.mapperJobInserts, []);
+});
+
+/* Only the first pick of an unmapped course starts anything. Every later poll of the same
+   course - which is how the client waits - must find the run that exists. */
+test("a second request for a course already being mapped reuses the run instead of starting another", async () => {
+  const calls = stubFetch({ nearbyMaps: [], mapperJobs: [] });
+  await buildCoursePackageWithTrigger("brand-new-course", { center: { lat: -36.8, lng: 174.7 }, guestId: GUEST, origin: "https://clarity.example" });
+  const again = await buildCoursePackageWithTrigger("brand-new-course", { center: { lat: -36.8, lng: 174.7 }, guestId: GUEST, origin: "https://clarity.example" });
+  assert.strictEqual(again.status, "processing", "the live run is still the answer");
+  assert.strictEqual(calls.mapperJobInserts.length, 1, "one course being mapped means one job, however many times it is asked for");
 });
 
 test("a course whose last run failed is NOT re-enqueued by a poll - failed comes back, no insert", async () => {

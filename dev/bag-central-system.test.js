@@ -211,7 +211,9 @@ test("both shells load the bag core before the code that uses it", () => {
   assert.ok(shellCore < shellUser, "and load it before clarity-support.js");
 
   const playCore = play.indexOf("../scripts/gd-bag-core.js");
-  const playUser = play.indexOf('src="js/bag.js"');
+  /* The path only - the deploy build stamps a content hash onto every /app/
+     asset, and the source carries its own ?v= cache key. */
+  const playUser = play.indexOf('src="js/bag.js');
   assert.ok(playCore > -1, "/app/index.html must load the same core");
   assert.ok(playCore < playUser, "and load it before js/bag.js");
 });
@@ -257,6 +259,77 @@ test("adding a club asks for the label first", () => {
   assert.ok(clubField > -1 && clubField < carryField, "the play surface asks for the name first too");
   assert.ok(/id="bagAddCarry"[^>]*class="hiddenState"/.test(play),
     "and keeps the distance out of the way until there is a name");
+});
+
+test("both sheets ask their questions in an overlay, not in the flow", () => {
+  /* The generator and the add-a-club card used to sit in the sheet: on the
+     shell the generator took the club list's place, and the add card was
+     appended under it; on the play surface both were permanent rows below the
+     bag. Either way, answering a two-field question meant scrolling past a
+     full bag, and the fields took that room the whole time nobody was using
+     them. Both are now cards floated over the list, with a scrim and one way
+     out. */
+  const css = read("styles/inline/gd-editable-bag-panel-v1.css");
+  assert.ok(css.includes(".gdBagOverlayCard"), "the shell's cards have an overlay class");
+  assert.ok(/\.gdBagOverlayCard\{[^}]*position:fixed/.test(css), "and it takes them out of the flow");
+  assert.ok(css.includes(".gdBagScrim"), "with a scrim behind them");
+  assert.ok(!/\.gdBagStage\.hasBag \.gdBagGenPanel\{position:absolute/.test(css),
+    "and the generator no longer stands in the list's own box");
+
+  const support = read("scripts/clarity-support.js");
+  assert.ok(support.includes("gdBagCloseOverlays"), "one dismiss for the scrim, Escape and the chip");
+  assert.ok(!support.includes("holdClubsInBag"),
+    "the fly-the-clubs-away choreography goes with the panel that displaced them");
+
+  const appCss = read("app/styles.css");
+  assert.ok(/\.bagCard\s*\{[^}]*position:\s*absolute/.test(appCss), "the play surface's cards float too");
+  assert.ok(appCss.includes(".bagScrim"), "and have their own scrim");
+  const play = read("app/index.html");
+  assert.ok(play.includes('id="bagAddPanel"') && play.includes('id="bagQuickPanel"'),
+    "the play surface's two questions are cards, not rows");
+  assert.ok(play.includes('id="bagAddTab"') && play.includes('id="bagGenTab"'),
+    "opened from footer tabs the way the shell opens its own");
+});
+
+test("no door offers a bag rebuild that discards the clubs already in it", () => {
+  /* The play surface used to carry BOTH "Generate bag" and "Generate rest".
+     The first replaced every club with a generated one the moment it was
+     pressed - no confirmation, nothing to undo - which is a door the shell has
+     never had: with clubs in the bag its build button IS "Generate rest", and
+     it asks first. One generator now, and the bag decides which job it does. */
+  const bag = read("app/js/bag.js");
+  assert.ok(/function generate\(/.test(bag), "one entry point decides between the two");
+  assert.ok(/clubs\.length \? generateRest\(.*\) : generateQuickSet\(/.test(bag),
+    "a bag with clubs in it can only ever generate the REST");
+  assert.ok(bag.includes("window.confirm"), "and generating the rest still asks");
+  assert.ok(!read("app/index.html").includes('id="bagRestBtn"'),
+    "the second, unconfirmed generate button is gone from the play surface");
+});
+
+test("the bag is free, and every door agrees it is", () => {
+  /* Decided 30 Aug 2026. Setting your own club distances used to be the
+     membership. The shell had already stopped asking - scripts/clarity-support
+     overrode gdBagPersistRows with a copy that had no check - while the play
+     surface still refused a signed-out or rangefinder-only player, so the same
+     bag was editable through one door and read-only through another. Neither
+     asks now.
+
+     What the play surface DOES still check is that there is a profile to write
+     into: save() refuses rather than inventing one, so an edit offered without
+     somewhere to put it would be accepted and silently dropped. */
+  const shell = read("scripts/gd-app-core.js");
+  assert.ok(!shell.includes('requireAccess("set your own club distances")'),
+    "gd-app-core must not gate a bag write on an entitlement");
+  assert.ok(!read("scripts/clarity-support.js").includes("requireAccess"),
+    "and neither must the sheet that actually does the writing");
+
+  const bag = read("app/js/bag.js");
+  assert.ok(!bag.includes("roundFeatures"),
+    "the play surface must not gate club edits on round features");
+  assert.ok(/function canEdit\(\)\s*\{\s*return !!activeProfile\(\);/.test(bag),
+    "it asks only whether there is a profile to save the clubs into");
+  assert.ok(!/membership lets you set your own/.test(bag),
+    "and the notice above the list no longer sells the bag");
 });
 
 test("the row editor can rename the club it has open", () => {

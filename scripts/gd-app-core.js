@@ -24013,13 +24013,16 @@ function gdBagToggleQuick(){const panel=document.getElementById('gdBagQuickPanel
 function gdBagSortRows(rows){return (Array.isArray(rows)?rows:[]).map(gdNormaliseBagRow).filter(Boolean).sort((a,b)=>gdTotalM(b)-gdTotalM(a))}
 function gdBagPersistRows(rows,{silent=false,render=true}={}){
   const p=gdShotActiveProfile()||ensureProfile();
-  /* Every write to the player's own club distances funnels through here, which
-     makes it the one place the bag has to ask. Seeding is exempt on purpose:
-     gdEnsureDefaultBagCells writes the stand-in set with bagSeededDefault=true
-     and never comes through this function, so a free player keeps the ghost bag
-     driving their bubble. */
-  if(window.ClarityPayments&&typeof window.ClarityPayments.requireAccess==="function"
-     &&!window.ClarityPayments.requireAccess("set your own club distances"))return Array.isArray(p.bag)?p.bag:[];
+  /* THE BAG IS FREE (decided 30 Aug 2026). This used to ask ClarityPayments
+     whether the player had bought the right to set their own club distances,
+     and refused the write when they had not. It no longer asks - anyone can
+     replace the ghost bag with their own numbers.
+
+     The ghost bag stays a separate thing, and bagSeededDefault is still what
+     tells them apart: gdEnsureDefaultBagCells writes the stand-in set with
+     that flag and never comes through here, so a player who has typed nothing
+     still gets the engine's ghost distances rather than stand-ins mistaken for
+     their own. That distinction is about honesty, not entitlement. */
   GD_PROFILE_STATE.activeId=p.id;
   p.placeholderProfile=false;
   p.bag=gdBagSortRows(rows);

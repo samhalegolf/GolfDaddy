@@ -4314,8 +4314,119 @@
     fallbackPackageWatch=null;
     try{document.getElementById('gdServerMapReadyPrompt')?.classList.add('hidden');}catch(e){}
   }
+  /* Waiting is a state, not a failure.
+   *
+   * A first-time scan is enqueued as a side effect of the very first package request, so a
+   * course nobody has opened answers "processing" and keeps answering it until the worker
+   * lands. awaitServerCoursePackage waits ~4 minutes for that, and when its budget ran out it
+   * used to hand the player to the manual green-tap fallback - which is TERMINAL: the
+   * re-entry guard in runCourseMappingAttempt then blocked every later attempt on that course,
+   * so a job that finished thirty seconds later could never be picked up by pressing Play
+   * again. That is the Southport case: the scan completed, the geometry was in Supabase, and
+   * the app kept insisting the course could not be mapped.
+   *
+   * So a wait that runs out while the server is STILL PROCESSING no longer ends anything. The
+   * player is told the truth - this is taking longer than usual - the package keeps being
+   * polled, and when it lands the round opens by itself. Manual GPS stays available, but as
+   * something the player chooses, not somewhere they are put.
+   */
+  let serverMapWaitState=null;
+  /* Set to the resolution key the player pressed "Use basic GPS for now" on. Read by the poll
+     loop rather than acted on directly, because the wait owns the attempt: tearing down the
+     loading screen from a click handler while awaitServerCoursePackage was still polling meant
+     the wait's own exhausted-branch could arrive afterwards and overwrite the choice. */
+  let serverWaitOptOut='';
+  /* Offered well before the wait's own budget runs out. Four minutes of a moving bar with no
+     way out is not "waiting", it is being stuck - and the player who knows the course and just
+     wants distances should not have to sit through a scan to get them. */
+  const SERVER_WAIT_OFFER_MS=45000;
+  function ensureServerMapWaitPrompt(){
+    let el=document.getElementById('gdServerMapWaitPrompt');
+    if(el)return el;
+    el=document.createElement('div');
+    el.id='gdServerMapWaitPrompt';
+    el.className='gdServerMapWaitPrompt hidden';
+    el.innerHTML='<strong data-gd-wait-title>Still preparing this course...</strong><span>First-time setup can take a little longer.</span><div class="gdServerMapWaitActions"><button type="button" data-gd-wait-keep>Keep waiting</button><button type="button" data-gd-wait-basic>Use basic GPS for now</button></div>';
+    document.body.appendChild(el);
+    if(!document.getElementById('gdServerMapWaitPromptStyle')){
+      const style=document.createElement('style');
+      style.id='gdServerMapWaitPromptStyle';
+      style.textContent='.gdServerMapWaitPrompt{position:fixed;left:50%;bottom:calc(max(12px,env(safe-area-inset-bottom)) + 148px);transform:translateX(-50%);z-index:1900;display:flex;flex-direction:column;gap:6px;align-items:center;max-width:min(92vw,360px);border:1px solid rgba(156,255,54,.28);border-radius:18px;background:rgba(3,18,9,.9);color:#f6fff7;padding:13px 16px;text-align:center;box-shadow:0 12px 28px rgba(0,0,0,.34);backdrop-filter:blur(14px)}.gdServerMapWaitPrompt strong{font-size:14px;font-weight:950}.gdServerMapWaitPrompt span{font-size:12px;opacity:.76}.gdServerMapWaitActions{display:flex;gap:8px;margin-top:4px}.gdServerMapWaitActions button{border:1px solid rgba(246,255,247,.22);border-radius:999px;background:rgba(246,255,247,.08);color:#f6fff7;padding:7px 13px;font-size:12px;font-weight:900}.gdServerMapWaitActions button[data-gd-wait-keep]{border-color:rgba(156,255,54,.42);background:rgba(31,211,109,.18)}.gdServerMapWaitPrompt.hidden{display:none!important}';
+      document.head.appendChild(style);
+    }
+    return el;
+  }
+  /* Renders the panel and wires its two buttons. Split out from beginServerMapWait because it
+     is shown at two different moments for two different reasons - once mid-wait, over a
+     loading screen that is still polling, and once after the wait hands over to the background
+     watch - and only the second of those owns any state. */
+  function showServerMapWaitPrompt(course,hole,key,opts={}){
+    const prompt=ensureServerMapWaitPrompt();
+    try{
+      const title=prompt.querySelector('[data-gd-wait-title]');
+      if(title)title.textContent='Still preparing '+(courseName(course)||'this course')+'...';
+      const keep=prompt.querySelector('[data-gd-wait-keep]');
+      const basic=prompt.querySelector('[data-gd-wait-basic]');
+      /* "Keep waiting" only dismisses the panel - nothing here was ever conditional on it. The
+         player is agreeing to what is already happening. */
+      if(keep)keep.onclick=()=>{try{prompt.classList.add('hidden');}catch(e){}};
+      if(basic)basic.onclick=()=>{
+        try{prompt.classList.add('hidden');}catch(e){}
+        if(typeof opts.onBasicGps==='function')opts.onBasicGps();
+      };
+      prompt.classList.remove('hidden');
+    }catch(e){}
+    return prompt;
+  }
+  function stopServerMapWait(reason){
+    const state=serverMapWaitState;
+    serverMapWaitState=null;
+    if(state&&state.debugRunId&&reason&&reason!=='server-map-ready'){
+      recordMappingDebug(state.debugRunId,{source:'automapper',phase:'cancelled',event:'server-map-wait-ended',summary:'Extended server map wait ended',details:{reason:String(reason),hole:state.hole,resolutionKey:state.resolutionKey,attemptToken:state.attemptToken}});
+    }
+    try{document.getElementById('gdServerMapWaitPrompt')?.classList.add('hidden');}catch(e){}
+    try{document.body.classList.remove('gdServerMapWaitActive');}catch(e){}
+    try{delete window.__gdCoursePlayServerMapWaitActive;}catch(e){}
+    try{if(fallbackPackageWatch&&fallbackPackageWatch.mode==='waiting')stopFallbackPackageWatch();}catch(e){}
+    return state;
+  }
+  window.gdStopServerMapWait=stopServerMapWait;
+  /* Non-terminal by construction, and that is the whole point of it existing separately from
+     beginInteractiveGreenFallback: nothing here writes __gdCoursePlayInteractiveFallbackActive
+     or interactiveGreenFallbackState, so the re-entry guard stays open and pressing Play again
+     re-checks the server instead of being turned away. */
+  function beginServerMapWait(course,hole,opts={}){
+    const h=validHoleNumber(hole)||1;
+    const c=sessionCourse(course||courseObj());
+    const key=opts.resolutionKey||coursePlayResolverKey(c,h);
+    if(serverMapWaitState&&String(serverMapWaitState.resolutionKey||'')===String(key))return {playable:false,waiting:true,reused:true,debugRunId:serverMapWaitState.debugRunId};
+    if(serverMapWaitState)stopServerMapWait('superseded');
+    serverMapWaitState={course:c,hole:h,resolutionKey:key,attemptToken:opts.attemptToken||'',debugRunId:opts.debugRunId||'',courseId:courseId(c),courseName:courseName(c),at:Date.now()};
+    recordMappingDebug(opts.debugRunId||'',{source:'automapper',phase:'progress',event:'server-map-wait-extended',summary:'Server still mapping - play kept waiting instead of falling back',details:{hole:h,resolutionKey:key,attemptToken:opts.attemptToken||'',serverPackageStatus:opts.serverPackageStatus||'processing',polls:opts.polls||0}});
+    recordCoursePlayDebug('course-mapping-wait-extended',c,h,{resolutionKey:key,attemptToken:opts.attemptToken||'',serverPackageStatus:opts.serverPackageStatus||'processing'});
+    /* The loading screen stays up and keeps saying something true. The prompt sits over it
+       with the escape hatch, so "I am stuck" and "I want to play now" have different answers. */
+    try{updateCourseLoading('Still preparing '+(courseName(c)||'this course'),82);}catch(e){}
+    try{window.__gdCoursePlayServerMapWaitActive={courseId:courseId(c),courseName:courseName(c),hole:h,resolutionKey:key,at:Date.now()};}catch(e){}
+    try{document.body.classList.add('gdServerMapWaitActive');}catch(e){}
+    showServerMapWaitPrompt(c,h,key,{onBasicGps:()=>{
+      const state=stopServerMapWait('player-chose-basic-gps');
+      const waited=state||{course:c,hole:h,resolutionKey:key};
+      beginInteractiveGreenFallback(waited.course||c,waited.hole||h,'player-chose-basic-gps',{resolutionKey:key,activeResolutionKey:key,attemptToken:opts.attemptToken,debugRunId:opts.debugRunId,source:'server-map-wait',callerFunction:'beginServerMapWait',serverPackageStatus:'processing'});
+    }});
+    startServerPackageWatch(c,h,key,'waiting');
+    return {playable:false,waiting:true,armed:true,debugRunId:opts.debugRunId||''};
+  }
   function startFallbackPackageWatch(course,hole,resolutionKey){
-    const token={startedAt:Date.now()};
+    return startServerPackageWatch(course,hole,resolutionKey,'fallback');
+  }
+  /* One poll loop, two homes. In 'fallback' mode the player is already tapping a green, so an
+     arriving map PROMPTS rather than takes over. In 'waiting' mode there is nothing to
+     interrupt - the player is looking at a loading screen precisely because they are waiting
+     for this - so it continues into the round on its own, which is the "you should not have to
+     press Play again" half of the fix. */
+  function startServerPackageWatch(course,hole,resolutionKey,mode){
+    const token={startedAt:Date.now(),mode:mode||'fallback'};
     fallbackPackageWatch=token;
     (async()=>{
       /* Counted in polls, not wall-clock: FALLBACK_WATCH_BUDGET_MS/FALLBACK_WATCH_POLL_MS
@@ -4327,23 +4438,54 @@
       for(;;){
         await sleep(FALLBACK_WATCH_POLL_MS);
         if(fallbackPackageWatch!==token)return;
-        const state=interactiveGreenFallbackState;
+        const waiting=token.mode==='waiting';
+        const state=waiting?serverMapWaitState:interactiveGreenFallbackState;
         if(!state||String(state.resolutionKey||'')!==String(resolutionKey))return stopFallbackPackageWatch();
-        if(++watchPolls>maxPolls)return stopFallbackPackageWatch();
+        if(++watchPolls>maxPolls){
+          /* The watch, not the course, is what ran out. In waiting mode the player is still
+             looking at a loading screen, so ending silently would strand them - offer the
+             green-tap they were spared earlier, now as the only thing left. */
+          if(waiting){
+            stopServerMapWait('watch-budget-exhausted');
+            beginInteractiveGreenFallback(course,hole,'server-map-timed-out',{resolutionKey,activeResolutionKey:resolutionKey,source:'server-map-wait',callerFunction:'startServerPackageWatch',serverPackageStatus:'processing'});
+            return;
+          }
+          return stopFallbackPackageWatch();
+        }
         let pkg=null;
         try{pkg=await fetchServerCoursePackage(course);}catch(e){pkg=null;}
         if(fallbackPackageWatch!==token)return;
+        /* A terminal answer during an extended wait ends the wait honestly rather than
+           polling out the clock: the server has said it stopped and why. */
+        if(waiting&&pkg&&(pkg.status==='failed'||pkg.status==='manual-required')){
+          stopServerMapWait('server-'+pkg.status);
+          beginInteractiveGreenFallback(course,hole,pkg.status==='failed'?'server-map-failed':'server-map-not-ready',{resolutionKey,activeResolutionKey:resolutionKey,source:'server-map-wait',callerFunction:'startServerPackageWatch',serverPackageStatus:pkg.status});
+          return;
+        }
         if(!serverPackageIsReady(pkg))continue;
         const persisted=persistServerCoursePackage(course,pkg);
-        if(!(persisted&&persisted.holes))return stopFallbackPackageWatch();   // ready but empty: nothing will improve by waiting
+        if(!(persisted&&persisted.holes)){
+          if(waiting)stopServerMapWait('ready-but-empty');
+          return stopFallbackPackageWatch();   // ready but empty: nothing will improve by waiting
+        }
+        const resume=()=>{
+          const picker=window.GDCoursePicker;
+          if(picker&&typeof picker.selectCourse==='function')picker.selectCourse(course,{source:'server-map-ready'});
+          else runCourseMappingAttempt({course,hole,showLoading:true,wholeCourse:true,reason:'server-map-ready'});
+        };
+        if(waiting){
+          recordCoursePlayDebug('server-map-arrived-during-extended-wait',course,hole,{resolutionKey,holes:persisted.holes,saved:persisted.saved,serverPackageStatus:pkg.status});
+          stopFallbackPackageWatch();
+          stopServerMapWait('server-map-ready');
+          resume();
+          return;
+        }
         recordCoursePlayDebug('server-map-arrived-during-manual-fallback',course,hole,{resolutionKey,holes:persisted.holes,saved:persisted.saved,serverPackageStatus:pkg.status});
         const prompt=ensureServerMapReadyPrompt();
         prompt.onclick=()=>{
           stopFallbackPackageWatch();
           clearInteractiveGreenFallback('server-map-ready');
-          const picker=window.GDCoursePicker;
-          if(picker&&typeof picker.selectCourse==='function')picker.selectCourse(course,{source:'server-map-ready'});
-          else runCourseMappingAttempt({course,hole,showLoading:true,wholeCourse:true,reason:'server-map-ready'});
+          resume();
         };
         prompt.classList.remove('hidden');
         return;   // polling done - the prompt holds the result; the fallback clearing hides it
@@ -4443,6 +4585,9 @@
   }
   async function showResolvedCoursePlayHole(course,hole,reason,opts={}){
     const h=rememberRequestedPlayHole(hole||1);
+    /* A course that is opening is a course that is no longer waiting. Left standing, the
+       "still preparing" panel would sit over a round that is already running. */
+    try{if(serverMapWaitState)stopServerMapWait('map-resolved');}catch(e){}
     const mappedCourse=loadUserCourseData(userId(),courseId(course))||course;
     ingestRequestedHoleToPipeline(mappedCourse,h,reason||'course-play-resolver');
     const frameCollection=collectCoursePlayFrames(mappedCourse,reason||'course-play-resolver',{activeHole:h,warmFrames:opts.collectCoursePlayFrames!==false});
@@ -4458,6 +4603,13 @@
     hideCourseLoading(220);
     setTimeout(()=>checkClosestMappedHolePrompt(loadUserCourseData()),900);
     return {playable:true,framed,course:mappedCourse,hole:h,framesCollected:frameCollection};
+  }
+  /* "Is there a playable map for this course RIGHT NOW", asked from a guard that must not
+     throw. savedMapCanSatisfyRequest reads the local store and can raise on a corrupt or
+     unreadable one; a failure to answer is not a yes, but it must not take the caller with
+     it either. */
+  function safeSavedMapReady(course,hole,wholeCourse){
+    try{return !!(savedMapCanSatisfyRequest(course,hole,wholeCourse!==false)||{}).ready;}catch(e){return false;}
   }
   function mappingAttemptStillCurrent(request,attempt,stage){
     if(resolverAttemptCurrent(request.attemptToken,attempt))return true;
@@ -4586,8 +4738,17 @@
 	        if(consecutiveMisses>=SERVER_PACKAGE_MAX_CONSECUTIVE_MISSES)return {result:null,status,polls,timedOut:false,unreachable:true};
 	      }
 	      if(stillCurrent&&!stillCurrent())return {result:null,status,polls,timedOut:false,superseded:true};
+	      /* Checked here, in the loop, so the player's choice ends the wait cleanly instead of
+	         racing it. Deliberately after the ready check above: a package that landed on this
+	         very poll is better than what they asked for. */
+	      if(typeof opts.optedOut==='function'&&opts.optedOut())return {result:null,status,polls,timedOut:false,optedOut:true};
 	      const remaining=deadline-Date.now();
-	      if(remaining<=0)return {result:null,status,polls,timedOut:true};
+	      /* stillProcessing separates the two ways this wait can run out, which are not the same
+	         event at all. "The budget expired while the server was still answering processing"
+	         means the job is alive and this client simply stopped watching it; "the budget
+	         expired on misses" means we do not know. Only the first may keep a player waiting,
+	         and neither is a mapper verdict - so neither may ever reach the pin screen. */
+	      if(remaining<=0)return {result:null,status,polls,timedOut:true,stillProcessing:status==='processing'};
 	      const waitedMs=budgetMs-remaining;
 	      if(onProgress)onProgress({polls,remainingMs:remaining,waitedMs,budgetMs,status});
 	      await sleep(Math.min(waitedMs>30000?pollMs*2:pollMs,remaining));
@@ -4612,9 +4773,12 @@
 	      const centre=guideCoursePoint(course);
 	      const auth=window.ClaritySupabaseAuth;
 	      const token=auth&&typeof auth.freshAccessToken==='function'?await auth.freshAccessToken():'';
-	      const res=await fetch('/api/course-mapper-jobs',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},token?{Authorization:'Bearer '+token}:{}),body:JSON.stringify({courseId:courseId(course),courseName:courseName(course),courseLat:centre&&centre.lat,courseLng:centre&&centre.lng})});
+	      const guestId=(()=>{try{const id=window.GDGuestIdentity;return id&&typeof id.getOrCreateGuestId==='function'?id.getOrCreateGuestId():'';}catch(e){return '';}})();
+	      const res=await fetch('/api/course-mapper-jobs',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},token?{Authorization:'Bearer '+token}:{}),body:JSON.stringify({courseId:courseId(course),courseName:courseName(course),courseLat:centre&&centre.lat,courseLng:centre&&centre.lng,guestId})});
 	      if(res.status===429){toastSafe('Too many mapping runs started recently - try again in a few minutes');return null;}
-	      if(res.status===401){toastSafe('Sign in to start server mapping');return null;}
+	      /* Reachable now only when there is neither a session NOR a usable guest id - which
+	         means storage is unavailable, not that the player is signed out. */
+	      if(res.status===401){toastSafe("Couldn't identify this device to start mapping");return null;}
 	      if(res.status===422){toastSafe('Pin the course location first - the mapper needs coordinates');return null;}
 	      if(res.ok){
 	        const body=await res.json().catch(()=>null);
@@ -4664,10 +4828,31 @@
 	    if(opts.acceptPartialGeneratedMap)clearInteractiveGreenFallback('generated-scan-started',{courseId:courseId(c),courseName:courseName(c)});
     const h=validHoleNumber(opts.hole)||1;
     const key=opts.resolutionKey||coursePlayResolverKey(c,h);
+    /* A wait for a DIFFERENT course is over the moment this one starts. Left running it would
+       keep polling and could yank a player out of the round they just opened. */
+    if(serverMapWaitState&&String(serverMapWaitState.resolutionKey||'')!==String(key))stopServerMapWait('new-mapping-attempt');
+    /* A choice made about a previous attempt is not a choice about this one - left standing it
+       would abort a fresh scan the moment it started. */
+    if(serverWaitOptOut&&String(serverWaitOptOut)!==String(key))serverWaitOptOut='';
     const activeFallback=window.__gdCoursePlayInteractiveFallbackActive||interactiveGreenFallbackState;
     if(activeFallback&&String(activeFallback.resolutionKey||activeFallback.key||'')===String(key)){
-      recordMappingDebug(activeFallback.debugRunId||opts.debugRunId||'',{source:'manual-fallback',phase:'skipped',event:'manual-fallback-terminal-reentry-blocked',summary:'Manual fallback blocked automatic re-entry',details:{hole:h,resolutionKey:key,attemptToken:activeFallback.attemptToken||opts.attemptToken||'',requestedReason:opts.reason||'course-selected'}});
-      return {playable:false,fallback:'interactive-green',armed:true,terminal:true,debugRunId:activeFallback.debugRunId||opts.debugRunId||'',reason:'manual-fallback-active'};
+      /* The terminal guard is right about what it was built for - a player mid-green-tap must
+         not have the screen restarted under them - and wrong the moment the reason it opened
+         has gone away. A fallback armed because the server had nothing outlives the server
+         finally producing something, and then blocks every attempt to use it: the course maps,
+         the geometry lands, and the app still refuses to open it because of a decision it made
+         minutes earlier. So the guard now asks whether that is still true. A map the picker's
+         database check just found, or one already sitting in local storage, is proof it is
+         not, and the stale fallback is cleared instead of honoured. */
+      const databaseMapNowAvailable=opts.allowLocalSavedMap===true||c.gdDatabaseMapAvailable===true||!!(opts.course&&opts.course.gdDatabaseMapAvailable===true);
+      const savedNow=safeSavedMapReady(c,h,opts.wholeCourse!==false);
+      if(databaseMapNowAvailable||savedNow){
+        recordMappingDebug(activeFallback.debugRunId||opts.debugRunId||'',{source:'manual-fallback',phase:'superseded',event:'manual-fallback-cleared-by-available-map',summary:'Stale manual fallback cleared - a course map is available now',details:{hole:h,resolutionKey:key,databaseMapAvailable:databaseMapNowAvailable,savedMapReady:savedNow,requestedReason:opts.reason||'course-selected'}});
+        clearInteractiveGreenFallback('database-map-available',{courseId:courseId(c),courseName:courseName(c)});
+      }else{
+        recordMappingDebug(activeFallback.debugRunId||opts.debugRunId||'',{source:'manual-fallback',phase:'skipped',event:'manual-fallback-terminal-reentry-blocked',summary:'Manual fallback blocked automatic re-entry',details:{hole:h,resolutionKey:key,attemptToken:activeFallback.attemptToken||opts.attemptToken||'',requestedReason:opts.reason||'course-selected'}});
+        return {playable:false,fallback:'interactive-green',armed:true,terminal:true,debugRunId:activeFallback.debugRunId||opts.debugRunId||'',reason:'manual-fallback-active'};
+      }
     }
     if(coursePlayResolverInFlight[key]){
       /* The other answer to "nothing scanned": a scan for this exact course
@@ -4747,6 +4932,7 @@
             budgetMs:opts.serverWaitBudgetMs,
             pollMs:opts.serverWaitPollMs,
             stillCurrent:()=>resolverAttemptCurrent(request.attemptToken,attempt),
+            optedOut:()=>String(serverWaitOptOut||'')===String(key),
             onProgress:info=>{
               /* Ramps 45 -> 80 across the wait so the loading screen keeps moving while the
                  server job runs. Deliberately vague copy: the player does not need to know
@@ -4754,6 +4940,9 @@
                  copy admits this is a longer wait - honest feedback beats a stuck bar. */
               const pct=Math.min(80,45+35*((info.waitedMs||0)/(info.budgetMs||SERVER_PACKAGE_WAIT_MS)));
               updateCourseLoading((info.waitedMs||0)>30000?'Preparing course - first-time setup can take a little longer':'Preparing course...',pct);
+              /* Once the wait is clearly a long one, say so and offer the way out. The wait
+                 itself carries on regardless - this adds a choice, it does not take one. */
+              if((info.waitedMs||0)>SERVER_WAIT_OFFER_MS)showServerMapWaitPrompt(c,h,key,{onBasicGps:()=>{serverWaitOptOut=key;}});
             }
           });
           autoMapResult=serverWait&&serverWait.result||null;
@@ -4768,6 +4957,15 @@
         }
         if(autoMapResult)recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'server-course-package-hit',summary:serverWait&&serverWait.polls>1?'Server finished mapping while play waited':'Server already had this course mapped',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:autoMapResult.serverPackageStatus,holes:autoMapResult.holes,saved:autoMapResult.saved,polls:serverWait&&serverWait.polls||1}});
         if(!mappingAttemptStillCurrent(request,attempt,'server-course-package'))return {playable:false,stale:true,reason:'superseded-after-server-course-package'};
+        /* The player asked for the rangefinder rather than the scan. Honoured before anything
+           below can reinterpret it: this is the ONE route into manual green-tapping that is a
+           choice rather than a verdict, and it must not be reported as a mapping failure. */
+        if(serverWait&&serverWait.optedOut){
+          serverWaitOptOut='';
+          try{document.getElementById('gdServerMapWaitPrompt')?.classList.add('hidden');}catch(e){}
+          recordMappingDebug(debugRunId,{source:'automapper',phase:'skipped',event:'server-map-wait-opted-out',summary:'Player chose basic GPS while the server was still mapping',details:{hole:h,resolutionKey:key,attemptToken,polls:serverWait.polls||0}});
+          return beginInteractiveGreenFallback(c,h,'player-chose-basic-gps',{resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',source:'mapping-controller',serverPackageStatus:'processing'});
+        }
         if(!autoMapResult){
           const waitStatus=serverWait&&serverWait.status||'unreachable';
           const waitTimedOut=!!(serverWait&&serverWait.timedOut);
@@ -4810,6 +5008,15 @@
            whole wait budget - so this is no longer "the job had not started yet", it is
            "the server has nothing playable and is not about to produce any". */
         const unresolvedReason=autoMapResult&&autoMapResult.automapperStatus==='server-timed-out'?'server-map-timed-out':'server-map-not-ready';
+        /* The one branch that must NOT end in the terminal fallback. The wait ran out while the
+           server was still answering "processing" - the job is alive, it is just slower than
+           the budget, which is ordinary for a first-time scan whose worker kick was swallowed
+           and which is waiting on the 3-minute sweeper. Falling back here is what made a course
+           that mapped successfully a minute later permanently unopenable. */
+        if(serverWait&&serverWait.timedOut&&serverWait.stillProcessing){
+          recordCoursePlayDebug('course-mapping-still-processing',c,h,{reason:'server-still-processing',resolutionKey:key,attemptToken,polls:serverWait.polls||0});
+          return beginServerMapWait(c,h,{resolutionKey:key,attemptToken,debugRunId,serverPackageStatus:autoMapResult&&autoMapResult.serverPackageStatus||'processing',polls:serverWait.polls||0});
+        }
         recordMappingDebug(debugRunId,{source:'automapper',phase:'failed',event:'automapper-failed',summary:'Server has no playable map for this course yet',details:{hole:h,resolutionKey:key,attemptToken,saved:autoMapResult&&autoMapResult.saved||0,serverPackageStatus:autoMapResult&&autoMapResult.serverPackageStatus||'',reason:unresolvedReason}});
         recordCoursePlayDebug('course-mapping-automatic-unresolved',c,h,{reason:unresolvedReason,resolutionKey:key,attemptToken});
         /* The green-tap fallback is what a player gets when mapping could not
