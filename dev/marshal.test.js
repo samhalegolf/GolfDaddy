@@ -8,6 +8,7 @@
 const assert = require("assert");
 const path = require("path");
 const createMarshal = require(path.join(__dirname, "..", "app", "js", "marshal.js"));
+const distanceLib = require(path.join(__dirname, "..", "app", "js", "distance.js"));
 
 /* Akarana-ish. Hole 1 runs 300m north→south; hole 2 sits beyond it. */
 const TEE = { lat: -36.9174, lng: 174.7400 };
@@ -45,6 +46,7 @@ function newRound(opts = {}) {
       scoreSet: (hole, strokes) => effects.scores.push({ hole, strokes }),
       shotChanged: (start, target) => effects.shotChanges.push({ start, target })
     },
+    maxAimM: opts.maxAimM,
     now: () => 1000
   });
   m.signal("ROUND_OPENED", {
@@ -393,6 +395,44 @@ check("previewing a hole records nothing on it", () => {
   m.signal("UNLOCK");
   assert.deepStrictEqual(m.shots(3), []);
   assert.strictEqual(effects.completed.length, 0);
+});
+
+console.log("\n— the bag's roof on a dragged aim —");
+
+check("a live drag past the bag's reach stops at the roof, on the drag line", () => {
+  const { m } = playing({ maxAimM: () => 250 });
+  m.signal("LOCK");
+  const start = offsetM(TEE, -5, 0);            // the fix playing() locked from
+  m.signal("AIM_DRAGGED", { point: offsetM(start, -400, 0) });
+  const target = m.openShot(1).target;
+  assert.ok(Math.abs(distanceLib.haversineMeters(start, target) - 250) < 0.5,
+    "the target sits at the roof, not where the finger went");
+  assert.ok(Math.abs(target.lng - start.lng) < 1e-9, "and stays on the drag bearing");
+});
+
+check("a drag within the bag's reach is untouched", () => {
+  const { m } = playing({ maxAimM: () => 250 });
+  m.signal("LOCK");
+  const asked = offsetM(offsetM(TEE, -5, 0), -180, 20);
+  m.signal("AIM_DRAGGED", { point: asked });
+  assert.deepStrictEqual(m.openShot(1).target, asked);
+});
+
+check("a Preview drag clamps from the placement, not the tee", () => {
+  const { m, effects } = newRound({ maxAimM: () => 250 });
+  const placement = offsetM(TEE, -100, 0);
+  m.signal("PLACED", { point: placement });
+  m.signal("AIM_DRAGGED", { point: offsetM(placement, -600, 0) });
+  const target = effects.shotChanges[effects.shotChanges.length - 1].target;
+  assert.ok(Math.abs(distanceLib.haversineMeters(placement, target) - 250) < 0.5);
+});
+
+check("no roof rule (no engine) leaves the drag free", () => {
+  const { m } = playing();
+  m.signal("LOCK");
+  const asked = offsetM(offsetM(TEE, -5, 0), -400, 0);
+  m.signal("AIM_DRAGGED", { point: asked });
+  assert.deepStrictEqual(m.openShot(1).target, asked);
 });
 
 console.log("\n— shots, open shots and Finish —");

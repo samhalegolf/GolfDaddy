@@ -1266,8 +1266,13 @@ async function bootCheck() {
     hit.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 9, clientX: cx, clientY: cy, bubbles: true }));
     let midDragFrameHeld = null, tiltHeldMidDrag = null;
     const vp = document.getElementById("surfaceViewport");
+    /* Dragged back toward the player, not out: the default aim for a green
+       past the bag already sits AT the bag's roof, and the Marshal now clamps
+       a dragged aim to that same roof — an outward drag from here is pinned
+       on purpose. Pulling back is the direction the roof never touches, so it
+       still proves the drag mechanism moves the aim. */
     for (let i = 1; i <= 4; i++) {
-      hit.dispatchEvent(new PointerEvent("pointermove", { pointerId: 9, clientX: cx, clientY: cy - i * 12, bubbles: true }));
+      hit.dispatchEvent(new PointerEvent("pointermove", { pointerId: 9, clientX: cx, clientY: cy + i * 12, bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 25));
       if (i === 2) {
         midDragFrameHeld = img.style.transform === frameBefore;
@@ -1276,7 +1281,7 @@ async function bootCheck() {
         tiltHeldMidDrag = getComputedStyle(vp).transform.startsWith("matrix3d");
       }
     }
-    hit.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9, clientX: cx, clientY: cy - 48, bubbles: true }));
+    hit.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9, clientX: cx, clientY: cy + 48, bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 100));
     const after = gd.scene().bubble.target;
     const reframedAfter = img.style.transform !== frameBefore;

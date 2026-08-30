@@ -111,6 +111,28 @@
       return (rec && rec.green) || null;
     };
 
+    /* How far an aim may be dragged, in metres — the bag's longest total
+       distance, injected the same way as defaultTarget. defaultTarget already
+       bag-limits the target it PROPOSES; without this rule the drag that
+       follows had no limit at all, so the auto target respected the bag and
+       the moment you touched it, it didn't. Null means no rule (no engine),
+       and the drag stays free rather than guessing at a roof. */
+    var maxAimM = options.maxAimM || function () { return null; };
+
+    /* The dragged point, pulled back onto the roof along its own bearing when
+       it lands beyond it. The clamp lives on the TARGET, not the rendered
+       bubble centre — clamping the render is the old bag-roof bug that shifted
+       and deformed completed bubbles (dev/fresh-app-boot.test.js pins it out). */
+    function clampAim(start, point) {
+      var roof = Number(maxAimM());
+      if (!start || !point || !Number.isFinite(roof) || roof <= 0) return point;
+      var d = metres(start, point);
+      if (d === null || d <= roof) return point;
+      var brg = distance.bearingRad(start, point);
+      if (brg === null) return point;
+      return distance.project(start, brg, roof) || point;
+    }
+
     function emptyState() {
       return {
         round: { courseKey: null, courseName: "", pkg: null, centre: null, open: false },
@@ -539,9 +561,9 @@
         if (flow() === "live") {
           var open = openShot(S.live.hole);
           if (!open) return false;
-          open.target = point;
+          open.target = clampAim(pt(open.start), point);
         } else {
-          S.preview.target = point;
+          S.preview.target = clampAim(S.preview.placement, point);
         }
         syncEngine();
         return true;

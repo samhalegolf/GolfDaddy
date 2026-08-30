@@ -47,6 +47,15 @@
           return window.GDBubbleEngine.targetForGreenCentre(green, { hole: rec.holeNumber }) || green;
         } catch (e) { return green; }
       },
+      /* The bag's roof on a DRAGGED aim — despite the name, maxPlayableCarryM
+         is the longest club's total distance, rollout included. Same rule that
+         already limits defaultTarget's layup, handed to the Marshal so the
+         drag cannot go where the auto target refuses to. Null (no engine) is
+         "no rule", and the Marshal leaves the drag free. */
+      maxAimM: function () {
+        if (!window.GDBubbleEngine) return null;
+        try { return window.GDBubbleEngine.maxPlayableCarryM(); } catch (e) { return null; }
+      },
       effects: {
         /* Split by who owns it. The pin, the fix and the wake lock are the
            rangefinder and run for everybody; Course Data and the scorecard are
