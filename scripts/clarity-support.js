@@ -322,7 +322,12 @@
       clean.sort(function(a,b){ return (b.totalM || b.baseCarry) - (a.totalM || a.baseCarry); }));
   }
   function quickBag(seven){
-    return safe(function(){ return win.gdGenerateQuickBag(seven); }, null) || (function(){
+    return safe(function(){
+      var generated = win.GDBagGenerator && win.GDBagGenerator.generate(seven);
+      return generated && generated.length ? generated.map(function(row){
+        return { club:row.club, baseCarry:row.baseCarry, totalM:totalFor(row.club, row.baseCarry) };
+      }) : null;
+    }, null) || safe(function(){ return win.gdGenerateQuickBag(seven); }, null) || (function(){
       var a = num(seven) || 145;
       return [["Driver",a+75],["3W",a+50],["4H",a+30],["5i",a+18],["6i",a+9],["7i",a],["8i",a-10],["9i",a-22],["PW",a-38],["GW",a-52],["SW",a-68],["LW",a-82]].map(function(pair){
         var carry = Math.max(35, Math.round(pair[1]));
@@ -363,7 +368,7 @@
      chrome: the generator, the roll-out chip, the fly-into-the-bag animation
      and the panel's state. */
   var ROLL_LABEL = { soft:'Soft', medium:'Normal', hard:'Firm' };
-  var ui = { editing:null, rollOpen:false, genOpen:false, genEntering:false, genLeaving:false, setupCarry:0, busy:false,
+  var ui = { editing:null, editingAnchorRows:null, rollOpen:false, genOpen:false, genEntering:false, genLeaving:false, setupCarry:0, busy:false,
              addOpen:false, addClub:"", addCarry:0, addStep:1 };
   var timers = [];
 
@@ -414,6 +419,10 @@
     if(stage) stage.classList.toggle('hasBag', hasBag);
     var gen = el('gdBagGenPanel');
     if(gen) gen.classList.toggle('folded', !genVisible);
+    var genQuestion = el('gdBagGenQuestion');
+    if(genQuestion) genQuestion.textContent = hasBag ? 'How far do you carry your 7-iron?' : 'How far do you carry your 7-iron?';
+    var genBuild = el('gdBagBuildButton');
+    if(genBuild) genBuild.textContent = hasBag ? 'Generate rest' : 'Generate bag';
     var head = el('gdBagListHead');
     if(head) head.hidden = !listChrome;
     var add = el('gdBagAddTab');
@@ -444,8 +453,10 @@
       win.GDBagCore.renderList(box, {
         rows: bag,
         editing: ui.editing,
+        anchorEditing: !!ui.editingAnchorRows,
+        anchorRows: ui.editingAnchorRows,
         artBase: '',
-        onEdit: function(club){ ui.editing = club || null; renderBagPanelHotfix(); },
+        onEdit: function(club){ ui.editing = club || null; ui.editingAnchorRows = ui.editing ? bag.slice() : null; renderBagPanelHotfix(); },
         onRename: function(club, label){ applyEdit(win.GDBagCore.renameRow(readBagPanelSafe(), club, label)); },
         onCarry: function(club, metres){ applyEdit(win.GDBagCore.setCarry(readBagPanelSafe(), club, metres)); },
         onRemove: function(club){
@@ -593,6 +604,7 @@
     ui.addClub = '';
     ui.addCarry = 0;
     ui.editing = result.club;
+    ui.editingAnchorRows = null;
     persistRows(result.rows, { silent:true });
     toast(result.club + ' added');
   }
@@ -659,7 +671,7 @@
   }
   function resetUi(){
     clearTimers();
-    ui.editing = null; ui.rollOpen = false;
+    ui.editing = null; ui.editingAnchorRows = null; ui.rollOpen = false;
     ui.genOpen = false; ui.genEntering = false; ui.genLeaving = false;
     ui.setupCarry = 0; ui.busy = false;
     ui.addOpen = false; ui.addStep = 1; ui.addClub = ''; ui.addCarry = 0;
@@ -672,10 +684,21 @@
   };
   win.gdBagBuild = function(){
     if(ui.busy) return;
+    var existing = collectRows(profile());
+    if(existing.length){
+      var rest = safe(function(){ return win.GDBagGenerator.generateRest(existing, ui.setupCarry); }, null);
+      if(!rest || rest.error){ toast((rest && rest.error) || 'Enter your 7-iron carry first'); return; }
+      var message = 'Generate the rest of your bag?\n\nWe\'ll use your 7-iron carry to estimate ' + rest.added + ' missing club' + (rest.added === 1 ? '' : 's') + '. Your ' + rest.retained + ' existing club' + (rest.retained === 1 ? ' stays' : 's stay') + ' unchanged. You can edit every distance afterwards.';
+      if(!win.confirm(message)) return;
+      ui.genOpen = false; ui.genEntering = false; ui.editing = null; ui.editingAnchorRows = null;
+      persistRows(rest.rows, { silent:true });
+      toast(rest.added ? 'Rest of bag generated' : 'Your bag already has every standard club');
+      return;
+    }
     ui.busy = true;
     clearTimers();
     var built = quickBag(ui.setupCarry);
-    ui.editing = null; ui.rollOpen = false;
+    ui.editing = null; ui.editingAnchorRows = null; ui.rollOpen = false;
     ui.genLeaving = true; ui.genEntering = false;
     renderBagPanelHotfix();
     at(400, function(){
@@ -693,7 +716,7 @@
     if(ui.genOpen || ui.genEntering){ resetUi(); renderBagPanelHotfix(); return; }
     ui.busy = true;
     clearTimers();
-    ui.editing = null; ui.rollOpen = false;
+    ui.editing = null; ui.editingAnchorRows = null; ui.rollOpen = false;
     ui.genEntering = true; ui.genLeaving = false;
     var seven = (collectRows(profile()).find(function(c){ return c.club === '7i'; }) || {}).baseCarry;
     if(num(seven)) ui.setupCarry = Math.max(60, Math.min(220, Math.round(num(seven))));

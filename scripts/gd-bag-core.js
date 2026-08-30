@@ -293,9 +293,24 @@
     };
     var base = opts.artBase == null ? "" : String(opts.artBase);
 
+    /* A carry step persists immediately so every other surface sees the new
+       value, but its editor must not move under the player's finger.  Keep the
+       open club at the slot it occupied when editing began; the next render
+       after Done uses the normal sorted order again. */
+    var displayRows = rows;
+    if (opts.anchorEditing && opts.editing && Array.isArray(opts.anchorRows)) {
+      var anchor = sortRows(opts.anchorRows);
+      var oldIndex = anchor.findIndex(function (row) { return sameLabel(row.club, opts.editing); });
+      var currentIndex = rows.findIndex(function (row) { return sameLabel(row.club, opts.editing); });
+      if (oldIndex >= 0 && currentIndex >= 0) {
+        displayRows = rows.slice();
+        var moving = displayRows.splice(currentIndex, 1)[0];
+        displayRows.splice(Math.min(oldIndex, displayRows.length), 0, moving);
+      }
+    }
     container.textContent = "";
     container.classList.add("gdBagEditor");
-    columnOrder(rows, opts.columns).forEach(function (cell) {
+    columnOrder(displayRows, opts.columns).forEach(function (cell) {
       var row = cell.row;
       var editing = editable && opts.editing && sameLabel(opts.editing, row.club);
       var node = elem("div", "gdBagRow" + (editing ? " editing" : ""));

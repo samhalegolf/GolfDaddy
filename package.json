@@ -18,6 +18,7 @@
     "test:stitched-cards": "node dev/scorecard-stitched-cards.test.js",
     "test:loop-labels": "node dev/loop-labels.test.js",
     "test:bag": "node dev/bag-central-system.test.js",
+    "test:bag-generator": "node dev/bag-generator-model.test.js",
     "test:bubble-handedness": "node dev/bubble-handedness.test.js",
     "test:bubble-frame": "node dev/bubble-frame-core.test.js",
     "test:boot": "node dev/boot-smoke.test.js",

@@ -23871,8 +23871,18 @@ function gdConsistencyLabel(v){return({elite:'Very consistent',good:'Pretty cons
 	const GD_DEFAULT_BAG_CELL_COUNT=12;
 	const GD_DEFAULT_BAG_7I_CARRY=155;
 	function gdDefaultBagRows(){return gdGenerateQuickBag(GD_DEFAULT_BAG_7I_CARRY).slice(0,GD_DEFAULT_BAG_CELL_COUNT)}
-	function gdGenerateQuickBag(seven=155){
+function gdGenerateQuickBag(seven=155){
   const a=Number(seven)||155;
+  /* Kept as the compatibility entry point for older callers.  Once the pure
+     generator module is loaded, every explicit quick generation uses its
+     speed/loft ladder rather than proportional Ghost Bag scaling. */
+  if(window.GDBagGenerator&&typeof window.GDBagGenerator.generate==='function'){
+    const generated=window.GDBagGenerator.generate(a);
+    if(Array.isArray(generated)&&generated.length)return generated.map(({club,baseCarry})=>{
+      const carry=Math.max(20,Math.round(Number(baseCarry)||0));
+      return{club,baseCarry:carry,totalM:gdBagTotalForCarry(club,carry)};
+    });
+  }
   const rows=[['Driver',a+90],['3W',a+55],['4H',a+35],['5i',a+20],['6i',a+10],['7i',a],['8i',a-10],['9i',a-22],['PW',a-40],['GW',a-55],['SW',a-72],['LW',a-88]];
   return rows.map(([club,baseCarry])=>{const carry=Math.max(35,Math.round(baseCarry));return{club,baseCarry:carry,totalM:gdBagTotalForCarry(club,carry)}});
 }

@@ -335,8 +335,9 @@
         <button id="bagAddBtn" class="hiddenState" type="button">Add</button>
       </div>
       <div class="bagQuickRow">
-        <input id="bagQuick7i" type="number" inputmode="numeric" min="1" step="1" placeholder="7i carry">
-        <button id="bagQuickBtn" type="button">Generate set</button>
+        <input id="bagQuick7i" type="number" inputmode="numeric" min="1" step="1" placeholder="7-iron carry (m)" aria-label="7-iron carry metres">
+        <button id="bagQuickBtn" type="button">Generate bag</button>
+        <button id="bagRestBtn" type="button">Generate rest</button>
       </div>
       <div class="bagFirmnessRow" id="bagFirmness" aria-label="Total distance setting">
         <button type="button" data-firmness="soft">Soft</button>
@@ -457,6 +458,7 @@
 <script src="../scripts/gd-bubble-model-client.js"></script>
 <script src="js/bubble-visual.js"></script>
 <script src="../scripts/gd-bag-core.js"></script>
+<script src="../scripts/gd-bag-generator-core.js"></script>
 <script src="js/bag.js"></script>
 <script src="js/wind.js"></script>
 <script src="js/pin.js"></script>

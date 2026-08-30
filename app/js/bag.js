@@ -182,6 +182,7 @@
   /* Which club's editor is open, tracked by NAME: every write re-sorts the bag
      by distance, so a position in the list does not survive an edit. */
   var editing = null;
+  var editingAnchorRows = null;
 
   function sync() {
     save(clubs);
@@ -235,6 +236,8 @@
       core().renderList(list, {
         rows: rows,
         editing: editing,
+        anchorEditing: !!editingAnchorRows,
+        anchorRows: editingAnchorRows,
         artBase: "../",
         onEdit: function (club) {
           if (!editable) return refuse();
@@ -244,6 +247,7 @@
              the way out of it. */
           if (showingGhost) return;
           editing = club || null;
+          editingAnchorRows = editing ? clubs.slice() : null;
           render();
         },
         onRename: function (club, label) { apply(core().renameRow(clubs, club, label)); },
@@ -251,6 +255,7 @@
         onRemove: function (club) {
           var result = core().removeRow(clubs, club);
           editing = null;
+          editingAnchorRows = null;
           clubs = result.rows;
           sync();
           render();
@@ -291,14 +296,25 @@
   function generateQuickSet(sevenIronCarry) {
     if (!canEdit()) return refuse();
     var base = Number(sevenIronCarry);
-    var defaults = window.GDBubbleEngine ? window.GDBubbleEngine.defaultBagRows() : [];
-    var ref = defaults.filter(function (r) { return r.club === "7i"; })[0];
-    if (!(base > 0) || !defaults.length || !ref || !(ref.baseCarry > 0)) return;
-    var scale = base / ref.baseCarry;
-    clubs = normalise(defaults.map(function (row) {
-      return { club: row.club, baseCarry: Math.round(row.baseCarry * scale) };
-    }));
+    var generated = safe(function () { return window.GDBagGenerator.generate(base); }, null);
+    if (!(base > 0) || !generated || !generated.length) return;
+    clubs = normalise(generated);
     editing = null;
+    editingAnchorRows = null;
+    sync();
+    render();
+  }
+
+  function generateRest() {
+    if (!canEdit()) return refuse();
+    var input = document.getElementById("bagQuick7i");
+    var result = safe(function () { return window.GDBagGenerator.generateRest(clubs, input && input.value); }, null);
+    if (!result || result.error) { note((result && result.error) || "Enter your 7-iron carry first"); return; }
+    var message = "Generate the rest of your bag?\n\nWe'll use your 7-iron carry to estimate " + result.added + " missing club" + (result.added === 1 ? "" : "s") + ". Your " + result.retained + " existing club" + (result.retained === 1 ? " stays" : "s stay") + " unchanged. You can edit every distance afterwards.";
+    if (!window.confirm(message)) return;
+    clubs = normalise(result.rows);
+    editing = null;
+    editingAnchorRows = null;
     sync();
     render();
   }
@@ -375,6 +391,8 @@
       var input = document.getElementById("bagQuick7i");
       generateQuickSet(input.value);
     });
+    var restBtn = document.getElementById("bagRestBtn");
+    if (restBtn) restBtn.addEventListener("click", generateRest);
 
     document.querySelectorAll("#bagFirmness [data-firmness]").forEach(function (btn) {
       btn.addEventListener("click", function () { setFirmness(btn.dataset.firmness); });

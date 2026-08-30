@@ -127,6 +127,21 @@ test("a carry edit re-sorts the bag", () => {
   assert.strictEqual(result.club, "4H", "the caller needs the name back to keep the row open");
 });
 
+test("a carry step is exactly one metre", () => {
+  const rows = core.sortRows(bag([["7i", 155]]));
+  assert.strictEqual(core.setCarry(rows, "7i", 156).rows[0].baseCarry, 156);
+  assert.strictEqual(core.setCarry(rows, "7i", 154).rows[0].baseCarry, 154);
+});
+
+test("both surfaces keep an open editor anchored until Done", () => {
+  const coreSource = read("scripts/gd-bag-core.js");
+  assert.ok(coreSource.includes("anchorEditing") && coreSource.includes("anchorRows"),
+    "the shared renderer supports a fixed visual edit slot");
+  ["app/js/bag.js", "scripts/clarity-support.js"].forEach((file) => {
+    assert.ok(read(file).includes("editingAnchorRows"), file + " keeps the editor slot across carry steps");
+  });
+});
+
 test("removing addresses the club by name, not by where it sat", () => {
   const rows = core.sortRows(bag([["Driver", 230], ["3W", 205], ["4H", 180]]));
   const result = core.removeRow(rows, "3W");
