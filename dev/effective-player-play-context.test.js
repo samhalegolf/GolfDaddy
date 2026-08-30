@@ -21,4 +21,14 @@ window.GDPlayContext.begin({source:"practice-play",returnTarget:"practice"});
 assert.strictEqual(JSON.parse(sessionStorage.getItem("clarity:play-context:v1")).returnContext.surface,"practice");
 window.GDPlayContext.begin({source:"home-play",returnTarget:"home"});
 assert.strictEqual(JSON.parse(sessionStorage.getItem("clarity:play-context:v1")).returnContext.surface,"coach-player");
+/* Signed out, but a profile is still stored locally (logout leaves the profile
+   store behind and active() falls back to profiles[0]). That residual profile
+   must not name a guest round. */
+sessionStorage.removeItem("clarity:play-context:v1");
+window.session={viewedProfileId:"",ownProfileId:"",accountName:""};
+window.profile={id:"player-a",name:"Alex"};
+assert.strictEqual(window.GDPlayContext.identity().name,"Guest","signed-out identity must not leak the residual profile name");
+const handoff=window.GDPlayContext.begin({source:"home-play"});
+assert.strictEqual(handoff.playerId,"guest","signed-out handoff must be the guest player");
+assert.strictEqual(handoff.playerName,"Guest","signed-out handoff must not carry the residual profile name");
 console.log("effective player Play context tests passed");

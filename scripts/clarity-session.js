@@ -52,6 +52,10 @@
     var account = legacyAccount();
     var state = legacyState() || {};
     var profile = legacyProfile();
+    /* Signed out, the profile store still holds the previous owner's profiles
+       (logout leaves them behind, and active() falls back to the first one).
+       None of that may name, identify, or set the role of a guest session. */
+    if (!account) profile = null;
     var role = normalizeRole(account && (account.role || account.permission) || profile && (profile.permission || profile.accountPermission || profile.mode));
     var paidAccess = safe(function () {
       return !!(window.ClarityPayments && typeof window.ClarityPayments.hasActiveAccess === "function" && window.ClarityPayments.hasActiveAccess());

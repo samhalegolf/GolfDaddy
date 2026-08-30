@@ -11,9 +11,14 @@
   function rootIdentity() {
     var session = safe(function () { return window.ClaritySession && window.ClaritySession.get(); }, null) || {};
     var id = clean(session.viewedProfileId || session.ownProfileId);
-    var profile = safe(function () { return window.gdProfileById && id ? window.gdProfileById(id) : null; }, null)
+    /* No profile id means nobody is signed in and nobody is being viewed.
+       GolfDaddyProfiles.active() still answers here (it falls back to the first
+       stored profile, which logout deliberately leaves behind), so asking it
+       would stamp a signed-out round with the previous owner's name. */
+    if (!id) return { id: "guest", name: "Guest", ownId: "" };
+    var profile = safe(function () { return window.gdProfileById ? window.gdProfileById(id) : null; }, null)
       || safe(function () { return window.GolfDaddyProfiles && window.GolfDaddyProfiles.active(); }, null) || null;
-    return { id: id || "guest", name: clean(profile && profile.name) || clean(session.accountName) || "Guest", ownId: clean(session.ownProfileId) };
+    return { id: id, name: clean(profile && profile.name) || clean(session.accountName) || "Guest", ownId: clean(session.ownProfileId) };
   }
   function identity() {
     var handoff = readHandoff();
