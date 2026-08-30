@@ -368,6 +368,11 @@
     __owner: "GDBagCore",
     version: "bag-core-20260829",
     COLUMNS: COLUMNS,
+    /* Which silhouette a club gets, and its aspect ratio. Exported because the
+       GPS shot card draws the same artwork in its club band and must classify
+       a club the same way the bag sheet does — one rule, not two copies. */
+    clubArt: art,
+    ART_ASPECT: ART_ASPECT,
     FIRMNESS: FIRMNESS,
     FIRMNESS_KEY: FIRMNESS_KEY,
     normalise: normalise,

@@ -870,26 +870,7 @@
   // ---------------------------------------------------------------- chrome
 
   function drawChrome(scene) {
-    var banner = el("playBanner");
-    if (banner) {
-      /* Three flows, three banners. Logging says so out loud because it is the
-         one state you can be in for a hole you are not standing on, and reading
-         "PREVIEW" there would be a lie about what the Shot End button is about
-         to do. */
-      var f = scene.banner.flow;
-      banner.classList.toggle("livePlay", f === "live");
-      banner.classList.toggle("previewPlay", f === "preview");
-      banner.classList.toggle("loggingPlay", f === "logging");
-      var text = el("playBannerLabel");
-      var word = f === "live" ? "LIVE · Hole " : f === "logging" ? "LOGGING · Hole " : "PREVIEW · Hole ";
-      if (text) text.textContent = word + scene.banner.hole;
-      var back = el("playBannerReturn");
-      show(back, scene.banner.returnTo !== null);
-      if (back && scene.banner.returnTo !== null) {
-        back.textContent = f === "logging" ? "Cancel" : "Return to " + scene.banner.returnTo;
-      }
-      show(banner, true);
-    }
+    drawBadge(scene);
 
     var play = el("playButton");
     show(play, scene.playButton.show);
@@ -902,22 +883,28 @@
     if (scene.distances.show) {
       el("distFront").textContent = units(scene.distances.front);
       el("distBack").textContent = units(scene.distances.back);
-      var shotRow = el("shotRow");
+      var unit = el("cardUnit");
+      if (unit) unit.textContent = settings() ? settings().unitLabel() : "m";
       var model = scene.bubble.show && window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
       var payload = model && model.payload;
-      show(shotRow, !!payload);
+      /* No shot locked: the face still has a number to be — the green's
+         CENTRE — and the club band has nothing to say, so it empties to its
+         lip. The card keeps its height either way, which is what lets the hole
+         stepper sit on top of it at a fixed offset. */
+      bar.classList.toggle("noShot", !payload);
       if (payload) {
         var landing = model.center || scene.bubble.target;
         var toTarget = app.distance.haversineMeters(scene.bubble.start, landing);
-        el("shotClub").textContent = compactClub(payload.club);
+        el("shotClub").textContent = clubName(payload.club);
         el("shotDist").textContent = units(toTarget);
         el("shotCarry").textContent = Number.isFinite(Number(payload.baseCarry)) ? units(Number(payload.baseCarry)) : "–";
+        setClubArt(payload.club);
         drawPlaysLike(scene.bubble.start, landing, toTarget);
       } else {
+        el("shotDist").textContent = units(scene.distances.centre);
         drawPlaysLike(null, null, null);
       }
     } else {
-      show(el("shotRow"), false);
       drawPlaysLike(null, null, null);
     }
 
@@ -936,6 +923,59 @@
 
     var holeEl = el("holeNumber");
     if (holeEl) holeEl.textContent = String(scene.hole.number);
+  }
+
+  /* The badge. Four states, and Demo Mode wins over the derived flow: nothing
+     in a demo round is a real shot, so saying LIVE there would be the same lie
+     that reading "PREVIEW" over a catch-up would be. Logging keeps its own
+     state for exactly that reason — it is the one flow you can be in for a
+     hole you are not standing on, and the Shot End button in it writes to the
+     card. */
+  var BADGE_STATES = ["live", "preview", "logging", "demo"];
+  var BADGE_WORDS = { live: "LIVE", preview: "PREVIEW", logging: "LOGGING", demo: "DEMO" };
+
+  function drawBadge(scene) {
+    var badge = el("playerBadge");
+    if (!badge) return;
+    var demo = !!(window.GDDemoSession && window.GDDemoSession.active);
+    var state = demo ? "demo" : scene.banner.flow;
+    if (BADGE_STATES.indexOf(state) < 0) state = "live";
+    BADGE_STATES.forEach(function (name) {
+      badge.classList.toggle(name + "Play", name === state);
+    });
+
+    var word = el("playerBadgeState");
+    if (word) word.textContent = BADGE_WORDS[state];
+    var number = el("playerBadgeNumber");
+    if (number) number.textContent = String(scene.banner.hole);
+    /* Par comes off the same card the scorecard scores against, so the badge
+       cannot disagree with what a birdie is. Unknown par shows nothing rather
+       than a bare "PAR" — an unmapped hole is a real answer. */
+    var par = el("playerBadgePar");
+    if (par) {
+      var value = app.scorecard && app.scorecard.parFor ? app.scorecard.parFor(scene.banner.hole) : null;
+      par.textContent = value ? "PAR " + value : "";
+    }
+
+    var name = el("playerBadgeName");
+    if (name) name.textContent = playerName();
+    var course = el("playerBadgeCourse");
+    if (course) course.textContent = scene.banner.course || "";
+
+    var back = el("playerBadgeReturn");
+    show(back, scene.banner.returnTo !== null);
+    if (back && scene.banner.returnTo !== null) {
+      back.textContent = scene.banner.flow === "logging" ? "Cancel" : "Hole " + scene.banner.returnTo;
+    }
+    show(badge, true);
+  }
+
+  /* Who this round is being played as — the coach Play-as-Player invariant the
+     identity banner used to carry on its own. */
+  function playerName() {
+    var context = window.GDPlayContext;
+    var who = context && typeof context.identity === "function" ? context.identity() : null;
+    return (who && who.name) || "Guest";
   }
 
   var DOCK = {
@@ -969,18 +1009,58 @@
     return raw.length <= 3 ? raw.toUpperCase() : raw.slice(0, 3).toUpperCase();
   }
 
+  /* The card's club band has room to say the club out loud, so it does: the
+     bag stores the terse form a list needs ("7i", "PW") and this is the spoken
+     one ("7 IRON", "PITCHING WEDGE"). A club the player named themselves comes
+     through as they typed it — the shorthand table is not a whitelist, and the
+     band ellipsises whatever will not fit. */
+  var SPOKEN_CLUB = {
+    PW: "Pitching Wedge", GW: "Gap Wedge", SW: "Sand Wedge", LW: "Lob Wedge"
+  };
+
+  function clubName(label) {
+    var raw = String(label || "").trim();
+    if (!raw) return "–";
+    var spoken = SPOKEN_CLUB[raw.toUpperCase()];
+    if (spoken) return spoken.toUpperCase();
+    var numbered = /^(\d{1,2})\s*(i|w|h)$/i.exec(raw);
+    if (numbered) {
+      var kind = { i: " IRON", w: " WOOD", h: " HYBRID" }[numbered[2].toLowerCase()];
+      return numbered[1] + kind;
+    }
+    return raw.toUpperCase();
+  }
+
+  /* Plays-like, on the card's face beside the number it adjusts rather than in
+     a pop-out beside the card. Present only when the elevation lookup has an
+     answer worth showing — a level shot says nothing new. */
   function drawPlaysLike(fix, landing, flatM) {
-    var pop = el("playsPop");
-    if (!pop) return;
+    var row = el("playsRow");
+    if (!row) return;
     var data = (fix && landing && app.playsLike) ? app.playsLike.forShot(fix, landing, flatM) : null;
     var on = !!data && data.plays !== "level";
-    show(pop, on);
+    show(row, on);
     if (!on) return;
-    var value = el("playsValue"), delta = el("playsDelta");
+    var value = el("playsValue");
     if (value) value.textContent = units(data.adjustedM);
-    if (delta) delta.textContent = data.label;
-    pop.classList.toggle("playsOver", data.plays === "uphill");
-    pop.classList.toggle("playsUnder", data.plays === "downhill");
+    row.classList.toggle("playsOver", data.plays === "uphill");
+    row.classList.toggle("playsUnder", data.plays === "downhill");
+  }
+
+  /* The club band's silhouette. gd-bag-core.js owns which artwork a club gets
+     and at what aspect ratio, because the bag sheet draws the same four marks
+     — the card borrows the rule rather than keeping a second copy of it. The
+     dataset check is the same idiom as setDockFace: not reading play state off
+     the DOM, just not re-decoding a PNG that is already up. */
+  function setClubArt(club) {
+    var glyph = el("cardClubArtGlyph");
+    var core = window.GDBagCore;
+    if (!glyph || !core || typeof core.clubArt !== "function") return;
+    var kind = core.clubArt(club);
+    if (glyph.dataset.artKind === kind) return;
+    glyph.dataset.artKind = kind;
+    glyph.style.aspectRatio = (core.ART_ASPECT || {})[kind] || "674 / 222";
+    glyph.style.backgroundImage = "url(../assets/clubs/" + kind + "-h.png)";
   }
 
   function drawLogged(scene) {
@@ -1653,7 +1733,7 @@
       if (r && r.tee) send("PLACED", { point: r.tee });
     });
 
-    var back = el("playBannerReturn");
+    var back = el("playerBadgeReturn");
     if (back) back.addEventListener("click", function () {
       if (!currentScene || currentScene.banner.returnTo === null) return;
       /* Abandoning a catch-up is BACK, not a hole change: the Marshal has to
@@ -1809,6 +1889,15 @@
     cameraSolves: function () { return cameraSolves; },
     /* null, or {reason, url} when a declared surface did not arrive. */
     surfaceFailure: function () { return surfaceFailed; },
+    /* WHICH presentation is up, and on the live map which basemap is drawing
+       it. This used to be on screen as the #surfaceSource chip, which was a
+       debug readout and was retired with it; the state itself is load-bearing
+       — "published, and no OSM was ever created underneath" is the whole
+       surface-first claim — so it stays readable here rather than only being
+       inferable from a body class. */
+    presentation: function () {
+      return { kind: presentation, basemap: published ? null : baseKind };
+    },
     /* Exposed so the native-origin rewrite can be tested without a phone. */
     apiUrl: apiUrl,
     /* Which surfaces have been asked for. "the course warms nearest-hole-first,

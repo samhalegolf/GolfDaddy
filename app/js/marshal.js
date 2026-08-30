@@ -113,7 +113,7 @@
 
     function emptyState() {
       return {
-        round: { courseKey: null, pkg: null, centre: null, open: false },
+        round: { courseKey: null, courseName: "", pkg: null, centre: null, open: false },
         atCourse: false,
         viewHole: 0,
         /* liveHole is set by Play and cleared by End Round. NOTHING ELSE
@@ -743,9 +743,14 @@
         mode: m,
         hole: { number: S.viewHole, rec: r },
 
+        /* What the player badge reads off. `course` is round state and so
+           belongs here; who the player is, and whether this is Demo Mode, are
+           not — the Painter takes those from GDPlayContext and GDDemoSession
+           the same way it takes the bubble from GDBubbleEngine. */
         banner: {
           flow: f,
           hole: S.viewHole,
+          course: S.round.courseName || "",
           returnTo: f !== "live" && S.live.hole !== null ? S.live.hole : null
         },
 

@@ -110,13 +110,17 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   };
   const visible = (id) => page.evaluate(
     (x) => { const e = document.getElementById(x); return !!e && !e.classList.contains("hiddenState"); }, id);
+  /* The player badge as one string: the state its pill reads and the hole its
+     block shows. Both come off the same derived flow the banner strip used to
+     print, so this asks exactly what those checks used to ask. */
+  const badge = () => look(() => document.getElementById("playerBadgeState").textContent
+    + "/" + document.getElementById("playerBadgeNumber").textContent);
 
   console.log("\n— opening in Preview —");
 
   let s = await scene();
   check("a round opens in Preview", s.flow === "preview" && s.mode === "setup", `${s.flow}/${s.mode}`);
-  check("the banner says so", (await look(() => document.getElementById("playBannerLabel").textContent))
-    === "PREVIEW · Hole 1");
+  check("the badge says so", (await badge()) === "PREVIEW/1");
   check("the start pill is up and there is no bubble",
     (await visible("startPill")) && !(await visible("aimBubble")));
 
@@ -155,8 +159,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   await wait(400);
   s = await scene();
   check("Play starts the hole you are standing on", s.flow === "live" && s.hole.number === 1);
-  check("the banner switches to LIVE",
-    (await look(() => document.getElementById("playBannerLabel").textContent)) === "LIVE · Hole 1");
+  check("the badge switches to LIVE",
+    (await badge()) === "LIVE/1");
   check("Play is gone once the round is up", !(await visible("playButton")));
   check("Track shows the distances and no bubble",
     (await visible("distanceBar")) && !(await visible("aimBubble")));
@@ -292,8 +296,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   s = await scene();
   check("the outstanding badge opens Logging on that hole",
     s.flow === "logging" && s.hole.number === 2, `${s.flow}/${s.hole.number}`);
-  check("the banner says LOGGING, not PREVIEW",
-    (await look(() => document.getElementById("playBannerLabel").textContent)) === "LOGGING · Hole 2");
+  check("the badge says LOGGING, not PREVIEW",
+    (await badge()) === "LOGGING/2");
   check("there is a ball, the shot's origin, and a Shot End to confirm with",
     (await visible("greenFocusBall")) && (await visible("finishOrigin"))
       && (await look(() => document.getElementById("shotActionBtn").dataset.action)) === "shotEnd");
@@ -317,7 +321,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   s = await scene();
   check("looking at an old hole is plain Preview",
     s.flow === "preview" && s.mode === "setup"
-      && (await look(() => document.getElementById("playBannerLabel").textContent)) === "PREVIEW · Hole 1");
+      && (await badge()) === "PREVIEW/1");
   check("with no Log shot control — that lives on the picker now",
     !(await visible("finishControl")));
 
@@ -345,9 +349,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   console.log("\n— losing GPS —");
 
-  await page.click("#playBannerReturn");     // the banner's way back
+  await page.click("#playerBadgeReturn");    // the badge's way back
   await wait(300);
-  check("the banner's Return button goes back to the live hole",
+  check("the badge's Return button goes back to the live hole",
     (await scene()).flow === "live");
   await page.evaluate(() => ClarityApp.marshal.signal("FIX_LOST"));
   await wait(300);

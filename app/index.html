@@ -53,10 +53,6 @@
     <div class="loadingTrack"><i id="loadingBar"></i></div>
   </div>
 </div>
-<!-- Demo Mode only: shown/hidden by boot.js and demo-session.js, never for a
-     real round. -->
-<div id="gdGpsDemoBadge" hidden>DEMO</div>
-<div id="gdGpsIdentityBanner" aria-live="polite"><strong id="gdGpsIdentityPlayer"></strong><span id="gdGpsIdentityCourse"></span></div>
 <button type="button" id="gdDemoCourseDataCta" hidden>See Course Data</button>
 
 <!-- Entered exclusively via ?courseId=... from the course picker on the main
@@ -91,19 +87,6 @@
     <div id="globalNav">
       <button id="globalBackBtn" type="button" aria-label="Back">Back</button>
       <button id="globalHomeBtn" type="button" class="homeTextBtn" aria-label="Home">Home</button>
-    </div>
-    <!-- Which flow you are in, as a readout rather than a decoration: it
-         renders from the same derived `flow` as everything else (marshal.js),
-         so it cannot say LIVE while the app behaves as PREVIEW. Preview's
-         version carries the way back, so a look ahead is never somewhere you
-         get stuck.
-
-         Inside the top bar's column on purpose: as a sibling of #map it was
-         painted underneath the fixed nav row, and Return could not be tapped. -->
-    <div id="playBanner" class="hiddenState">
-      <span id="playBannerDot" aria-hidden="true"></span>
-      <span id="playBannerLabel"></span>
-      <button id="playBannerReturn" type="button" class="hiddenState"></button>
     </div>
     <!-- The wind tell. Wind is easy to leave on and invisible when the bubble
          is down, so while wind is set this says so out loud: the level, LIVE
@@ -140,6 +123,31 @@
       <span id="accessNoticeLabel"></span>
       <button id="accessNoticeAction" type="button">Sign in</button>
       <button id="accessNoticeDismiss" type="button" aria-label="Dismiss">&times;</button>
+    </div>
+  </div>
+  <!-- Player badge. One plate answers the three questions the top of the
+       screen used to need two strips for: which flow you are in, which hole
+       you are on, and who/where this round is. The state pill straddles the
+       hole block's top edge, so LIVE / PREVIEW / LOGGING / DEMO reads at a
+       glance without a banner's worth of width - and the colour runs through
+       the whole block (fill, divider, numeral, PAR) rather than sitting in a
+       dot. Preview and Logging carry the way back, so a look ahead or a
+       catch-up is never somewhere you get stuck. -->
+  <!-- Deliberately NOT a live region: the Painter rewrites this on every
+       signal, so aria-live would announce the whole plate on every GPS tick.
+       The flow banner it replaced was not one either. -->
+  <div id="playerBadge" class="hiddenState">
+    <div id="playerBadgeHole">
+      <span id="playerBadgeState">LIVE</span>
+      <span id="playerBadgeNumber">1</span>
+      <span id="playerBadgePar">PAR</span>
+    </div>
+    <div id="playerBadgeWho">
+      <span id="playerBadgeName"></span>
+      <div class="playerBadgeSub">
+        <span id="playerBadgeCourse"></span>
+        <button id="playerBadgeReturn" type="button" class="hiddenState"></button>
+      </div>
     </div>
   </div>
   <div id="map"></div>
@@ -402,22 +410,53 @@
       <div id="holePickerGrid" class="holePickerGrid"></div>
     </div>
   </div>
-  <div id="distanceBar" class="hiddenState">
-    <div id="shotRow" class="hiddenState">
-      <div class="shotLine"><span id="clubLabel" class="distLabel">CLUB</span><span id="shotClub">–</span></div>
-      <!-- The plays-like value pops out beside the main distance whenever the
-           elevation lookup has an answer worth showing. -->
-      <div class="dist distMain shotMain"><span id="shotDist">–</span></div>
-      <div id="playsPop" class="hiddenState">
-        <span class="playsLabel">PLAYS</span>
-        <span id="playsValue">–</span>
-        <span id="playsDelta"></span>
+  <!-- The shot card, as the hole in section. Four bands: BACK and FRONT are
+       sunk into wells, and the raised face between them domes UP into the back
+       well and DOWN into the front one, so the two curved edges the fill is
+       bounded by are the front and back of the green rather than straight
+       rules. Plays-like lives on the face now, beside the number it adjusts,
+       which is what retired the slide-out #playsPop.
+
+       Everything inside is a [data-move] box (box-layout.js): the bands say
+       where each one starts, the gear still lets it be dragged from there. -->
+  <div id="distanceBar" class="shotCard hiddenState">
+    <!-- The layout editor's way in (box-layout.js): tap toggles the handles,
+         double-tap resets every box. Overhangs the card's corner, which is why
+         #distanceBar stays overflow:visible and the rounding lives on
+         .cardInner instead. -->
+    <button id="cardEditToggle" type="button" aria-label="Edit card layout">&#9881;</button>
+    <div class="cardInner">
+      <div class="cardWell cardBack">
+        <span id="backLabel" class="cardWellLabel" data-move>BACK</span>
+        <span id="distBack" class="cardWellValue" data-move>–</span>
       </div>
-      <div class="shotCarryLine"><span id="carryLabel" class="distLabel">CARRY</span><span id="shotCarry">–</span></div>
-    </div>
-    <div class="fcbRow">
-      <div class="dist"><span id="frontLabel" class="distLabel">F</span><span id="distFront">–</span></div>
-      <div class="dist"><span id="backLabel" class="distLabel">B</span><span id="distBack">–</span></div>
+      <!-- The hero number: the shot's distance once one is locked, the green's
+           centre until then. The card is a fixed height and this band is the
+           one that flexes, so losing the club band never moves the card or the
+           hole stepper sitting on top of it. -->
+      <div class="cardFace">
+        <div class="cardFaceMain">
+          <span id="shotDist" class="cardDist" data-move>–</span>
+          <span id="cardUnit" class="cardUnit">m</span>
+        </div>
+        <div id="playsRow" class="cardPlays hiddenState" data-move>
+          <span class="cardPlaysLabel">PLAYS</span>
+          <span id="playsValue" class="cardPlaysValue">–</span>
+        </div>
+      </div>
+      <div class="cardSeam"></div>
+      <!-- The club band borrows .gdBagRowArt's silhouette and outline filter
+           from the bag sheet (gd-bag-core.js owns which artwork a club gets),
+           sized so the head clears the name and the shaft runs under it. -->
+      <div class="cardClub">
+        <span class="cardClubArt" aria-hidden="true"><i id="cardClubArtGlyph"></i></span>
+        <span id="shotClub" class="cardClubName" data-move>–</span>
+        <span id="shotCarry" class="cardClubCarry" data-move>–</span>
+      </div>
+      <div class="cardWell cardFront">
+        <span id="frontLabel" class="cardWellLabel" data-move>FRONT</span>
+        <span id="distFront" class="cardWellValue" data-move>–</span>
+      </div>
     </div>
   </div>
 </section>

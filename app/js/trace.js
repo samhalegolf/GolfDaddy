@@ -36,8 +36,8 @@
      constant churn is not noise in the log. */
   var WATCH = [
     "gpsDot", "aimBubble", "bubbleSvg", "greenRing", "pinMarker", "pinDistance",
-    "greenFocusBall", "greenFocusHint", "distanceBar", "shotRow", "shotActionBtn",
-    "startPill", "map", "surfaceImage", "playBanner", "playButton", "loggedScreen",
+    "greenFocusBall", "greenFocusHint", "distanceBar", "shotActionBtn",
+    "startPill", "map", "surfaceImage", "playerBadge", "playButton", "loggedScreen",
     "finishControl"
   ];
 

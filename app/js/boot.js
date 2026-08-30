@@ -199,12 +199,6 @@
     if (title && text) title.textContent = text;
   }
 
-  function renderIdentity(course) {
-    var player = window.GDPlayContext && window.GDPlayContext.identity ? window.GDPlayContext.identity() : { name: "Guest" };
-    var name = document.getElementById("gdGpsIdentityPlayer"), courseEl = document.getElementById("gdGpsIdentityCourse");
-    if (name) name.textContent = player.name || "Guest";
-    if (courseEl) courseEl.textContent = course && (course.courseName || course.name) || "Course";
-  }
   /* Back is semantic navigation. The handoff context, not browser history,
      owns the actual shell destination. */
   function exitToMainSite() {
@@ -215,6 +209,12 @@
        it answers false when there was nothing to close, so Back falls through
        to its next meaning rather than this file guessing at the play state. */
     if (app.marshal && app.marshal.signal("BACK")) return;
+    /* Then the player's own last change — a wind level, a dropped pin. Same
+       shape as the Marshal above: undo.pop() answers false when the stack is
+       empty and Back falls through. Without this the stack that wind.js and
+       pin.js push onto was never read by anything, so the very first Back
+       during play left GPS play outright and took the change with it. */
+    if (app.undo && app.undo.pop()) return;
     if (window.GDPlayContext && window.GDPlayContext.returnToOrigin) window.GDPlayContext.returnToOrigin();
     else exitToMainSite();
   }
@@ -433,7 +433,6 @@
   async function openPlay(course, resumeHole) {
     show("play");
     activeCourse = course;
-    renderIdentity(course);
     mapUpdateDismissed = false;
     gpsNoticeDismissed = false;
     /* Record the round the moment it is genuinely up, so a phone that dies on
@@ -508,8 +507,6 @@
     });
     var demoCourseDataCta = document.getElementById("gdDemoCourseDataCta");
     if (demoCourseDataCta) demoCourseDataCta.addEventListener("click", seeDemoCourseData);
-    var demoBadge = document.getElementById("gdGpsDemoBadge");
-    if (demoBadge && window.GDDemoSession && window.GDDemoSession.active) demoBadge.hidden = false;
     var handoffCourseId = new URLSearchParams(window.location.search).get("courseId");
     if (handoffCourseId) {
       openPlay(courseFromUrl(handoffCourseId),

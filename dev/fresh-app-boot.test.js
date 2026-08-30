@@ -580,7 +580,23 @@ async function bootCheck() {
       courseKey: () => app.marshal.round().courseKey,
       shots: (h) => app.marshal.shots(h),
       openShot: (h) => app.marshal.openShot(h),
-      shown: (id) => { const e = document.getElementById(id); return !!e && !e.classList.contains("hiddenState"); }
+      shown: (id) => { const e = document.getElementById(id); return !!e && !e.classList.contains("hiddenState"); },
+      /* Round features on. Writing round history is gated on being signed in
+         (access.js: a signed-out session is rangefinder-only), and the dock's
+         own handler goes through the Painter's gated send() rather than
+         straight at the Marshal the way gd.send() does — so a scenario that
+         LOGS by tapping the dock has to hold a session or the tap is correctly
+         refused and nothing lands. Returns whether it took. */
+      signIn() {
+        localStorage.setItem("clarity:supabase-auth-session:v1",
+          JSON.stringify({ access_token: "test-token", refresh_token: "test-refresh" }));
+        return app.access.roundFeatures();
+      },
+      /* The shot card's club/carry band and its shot distance. There is no
+         #shotRow wrapper any more - the card is four bands and marks itself
+         .noShot when there is no locked shot to name a club for. */
+      shotBands: () => { const e = document.getElementById("distanceBar");
+        return !!e && !e.classList.contains("hiddenState") && !e.classList.contains("noShot"); }
     };
   });
 
@@ -593,8 +609,10 @@ async function bootCheck() {
       hole: gd.hole(),
       presented: document.body.classList.contains("surface-published"),
       mapStillEmpty: document.getElementById("map").childElementCount === 0,
-      chip: document.getElementById("surfaceSource").textContent,
-      chipKind: document.getElementById("surfaceSource").dataset.source
+      /* The #surfaceSource chip that used to carry this was a debug readout
+         and was retired from the screen; the painter still tracks which
+         presentation is up, so read it there. */
+      presentation: window.ClarityApp.painter.presentation().kind
     };
     await gd.goHole(2, 600);
     const h2State = {
@@ -644,8 +662,8 @@ async function bootCheck() {
       frameStage: document.body.dataset.frameStage,
       attribution: document.getElementById("mapAttribution").textContent,
       distanceBarShown: gd.shown("distanceBar"),
-      sourceChipKind: document.getElementById("surfaceSource").dataset.source,
-      sourceChipText: document.getElementById("surfaceSource").textContent,
+      presentation: app.painter.presentation().kind,
+      basemapKind: app.painter.presentation().basemap,
       distFront: Number(document.getElementById("distFront").textContent),
       /* Centre no longer renders on the card (front/back cover it) — the
          underlying math still runs, so check it straight from the module. */
@@ -848,6 +866,10 @@ async function bootCheck() {
     const app = window.ClarityApp, gd = window.__gd;
     const ball = document.getElementById("greenFocusBall");
     const near = (m) => ({ lat: h1.green.lat + m / 111320, lng: h1.green.lng });
+    /* This scenario closes the shot by TAPPING the dock, so it needs a session
+       — see gd.signIn(). Everything up to the first round ran signed out, and
+       those assertions are already captured. */
+    const roundFeatures = gd.signIn();
     await gd.open("green-focus-course", { holes: [{ holeNumber: 1,
       tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }] },
       { lat: -36.918, lng: 174.735 });
@@ -878,7 +900,7 @@ async function bootCheck() {
          green itself. */
       aimPaths: document.getElementById("bubbleSvg").children.length,
       bubble: gd.shown("aimBubble"),
-      shotRow: gd.shown("shotRow"),
+      shotRow: gd.shotBands(),
       distBarPaused: !gd.shown("distanceBar")
     });
 
@@ -916,6 +938,7 @@ async function bootCheck() {
     const shots = gd.shots(1);
     const last = shots[shots.length - 1];
     return {
+      roundFeatures,
       openedShot, beforeArrival, onGreen, atNextTee, afterDrop,
       greenHeld: greenAtArrival && greenStillFramed
         && greenAtArrival[0] === greenStillFramed[0] && greenAtArrival[1] === greenStillFramed[1],
@@ -949,7 +972,7 @@ async function bootCheck() {
     const model = window.GDBubbleEngine.renderModel();
     const landing = (model && model.center) || gd.scene().bubble.target;
     return {
-      rowShown: gd.shown("shotRow"),
+      rowShown: gd.shotBands(),
       club: document.getElementById("shotClub").textContent,
       dist: Number(document.getElementById("shotDist").textContent),
       /* Proof the aim really is on the green - otherwise this asserts nothing. */
@@ -1035,7 +1058,7 @@ async function bootCheck() {
       targetFromTee: shot.target ? app.distance.haversineMeters(tee, shot.target) : null,
       targetToGreen: shot.target ? app.distance.haversineMeters(shot.target, green) : null,
       maxCarry: window.GDBubbleEngine.maxPlayableCarryM(),
-      shotRowShown: gd.shown("shotRow"),
+      shotRowShown: gd.shotBands(),
       bubbleShapes: document.querySelectorAll("#bubbleSvg .bubbleFill, #bubbleSvg .bubbleEdge").length,
       legacyRings: document.querySelectorAll("#bubbleSvg .ringOuter, #bubbleSvg .ringMain, #bubbleSvg .ringInner").length,
       carryKnockout: !!document.querySelector("#bubbleSvg mask[id$='-carry']"),
@@ -1108,7 +1131,7 @@ async function bootCheck() {
     /* Dragging the aim keeps the shot row live and never re-frames. */
     await gd.send("AIM_DRAGGED", { point: { lat: tee.lat - 0.0025, lng: tee.lng } }, 120);
     const aimed = {
-      shotRowShown: gd.shown("shotRow"),
+      shotRowShown: gd.shotBands(),
       shotDist: Number(document.getElementById("shotDist").textContent),
       bubbleShown: gd.shown("aimBubble")
     };
@@ -1160,6 +1183,8 @@ async function bootCheck() {
       { holeNumber: 2, geometry: { tee, green, greenShape: [], route: [] } }
     ] };
     const face = () => document.getElementById("shotActionBtn").dataset.action;
+    /* Shot End here really does log, and it logs by tapping the dock. */
+    const roundFeatures = gd.signIn();
     await gd.open("shot-end-wiring-course", pkg, null);
     await gd.until(() => document.body.classList.contains("surface-published"), "the surface to present");
     await gd.live({ lat: tee.lat - 0.0015, lng: tee.lng });
@@ -1195,6 +1220,7 @@ async function bootCheck() {
     await gd.until(() => gd.scene().mode === "logged", "the shot to land on Logged");
     const logged = gd.shots(1);
     return {
+      roundFeatures,
       tracking, lockStage, lockedFace, afterUnlock, zoomStage, greenFace,
       shotsBeforeGreenFocusClick,
       lockStartOffTee: openedShot
@@ -1345,12 +1371,19 @@ async function bootCheck() {
       anyLeft: app.undo.any()
     };
 
-    window.__historyBackCalled = false;
-    const origBack = window.history.back;
-    window.history.back = function () { window.__historyBackCalled = true; };
+    /* The way OUT of GPS play is GDPlayContext.returnToOrigin(), which does a
+       real window.location assignment — left unstubbed it navigates away and
+       destroys this page mid-scenario. Stub the exit itself rather than
+       history.back(): boot.js's exitBack() has not gone through history since
+       the play-context hand-off landed, so stubbing history.back watched a
+       door nobody uses and let the real navigation through. */
+    window.__leftPlay = false;
+    const ctx = window.GDPlayContext;
+    const origReturn = ctx.returnToOrigin;
+    ctx.returnToOrigin = function () { window.__leftPlay = true; return false; };
     document.getElementById("globalBackBtn").click();
-    const fallthrough = { historyBackCalled: window.__historyBackCalled };
-    window.history.back = origBack;
+    const fallthrough = { leftPlay: window.__leftPlay };
+    ctx.returnToOrigin = origReturn;
 
     return { beforeWindPress, afterPress, anyAfterPress, beforePin, afterPinSet, afterFirstBack, afterSecondBack, fallthrough };
   });
@@ -1504,8 +1537,8 @@ async function bootCheck() {
   assert.strictEqual(surfaceFirst.h1State.hole, 1, "the hand-off opens on hole 1");
   assert.ok(surfaceFirst.h1State.presented, "a declared package visual must present");
   assert.ok(surfaceFirst.h1State.mapStillEmpty, "no OSM is created under a declared surface");
-  assert.strictEqual(surfaceFirst.h1State.chipKind, "published",
-    "the chip must say the surface is the published one, got: " + surfaceFirst.h1State.chip);
+  assert.strictEqual(surfaceFirst.h1State.presentation, "published",
+    "the presentation up must be the published surface, got: " + surfaceFirst.h1State.presentation);
   assert.strictEqual(surfaceFirst.h2State.presented, false, "no visual on hole 2 → back on the live map");
   assert.ok(surfaceFirst.h2State.mapCreated, "the map is created the moment absence is the answer");
   assert.ok(!framed.scrollJumped, "clicking the pill must not scroll-jump the play screen");
@@ -1571,6 +1604,8 @@ async function bootCheck() {
     "and Shot End in Preview writes nothing - the green was a look");
   assert.strictEqual(stages.afterGreenLook.mode, "setup",
     "it hands Preview back its resting state, with the pill up");
+  assert.ok(shotEndWiring.roundFeatures,
+    "the dock-faces scenario logs a shot too, so it also needs round features on");
   assert.strictEqual(shotEndWiring.tracking.face, "lock", "in Track the dock offers Lock");
   assert.strictEqual(shotEndWiring.tracking.stage, "hole", "Track is the pre-frame hole view");
   assert.strictEqual(shotEndWiring.lockStage, "lock", "Lock raises the locked shot view");
@@ -1626,7 +1661,7 @@ async function bootCheck() {
   assert.deepStrictEqual(backUndo.afterSecondBack.wind, backUndo.beforeWindPress, "a second Back undoes the wind change underneath it");
   assert.ok(backUndo.afterSecondBack.stillOnPlay, "undoing a wind change must not leave the play screen");
   assert.ok(!backUndo.afterSecondBack.anyLeft, "both actions undone → nothing left on the stack");
-  assert.ok(backUndo.fallthrough.historyBackCalled, "with nothing left to undo, Back falls through to leaving GPS play");
+  assert.ok(backUndo.fallthrough.leftPlay, "with nothing left to undo, Back falls through to leaving GPS play");
   assert.strictEqual(basemap.keylessNz, "osm", "no LINZ key → OSM even in NZ");
   assert.strictEqual(basemap.nz, "linz", "keyed NZ centre → LINZ aerial");
   assert.strictEqual(basemap.pebbleBeach, "naip", "US centre → NAIP aerial");
@@ -1667,8 +1702,10 @@ async function bootCheck() {
   assert.strictEqual(play.hole, 1, "play must start on hole 1");
   assert.strictEqual(play.courseKey, "akarana-golf-club");
   assert.strictEqual(play.surfacePresented, false, "no surface offline → live map, no overlay");
-  assert.strictEqual(play.sourceChipKind, "live",
-    "no surface → the chip says which live basemap is up rather than going quiet, got: " + play.sourceChipText);
+  assert.strictEqual(play.presentation, "live",
+    "no surface → the live map is the presentation, got: " + play.presentation);
+  assert.ok(play.basemapKind, "a live presentation must name the basemap actually drawing it, got: "
+    + JSON.stringify(play.basemapKind));
   assert.ok(play.gpsFix, "the granted geolocation fix must reach the watcher");
   assert.ok(play.gpsDotShown, "the projected dot must render on the live map");
   assert.ok(Number.isFinite(play.gpsDotAt.left) && Number.isFinite(play.gpsDotAt.top)
@@ -1774,6 +1811,14 @@ async function bootCheck() {
   assert.ok(greenFocus.beforeArrival.aimPaths === 0, "no aim overlays in Track - the shot view is earned by a Lock");
   assert.strictEqual(greenFocus.onGreen.aimPaths, 0,
     "green focus must clear the aim overlays - a bubble anchored on the green is a shot nobody is playing");
+  /* Both scenarios below close a shot by TAPPING the dock, which goes through
+     the Painter's access-gated send(). If the session ever stops taking, the
+     taps get refused and every log assertion under them fails for a reason
+     that has nothing to do with what they are testing — so check the
+     precondition itself first. */
+  assert.ok(greenFocus.roundFeatures,
+    "the green-focus scenario logs a shot, so it has to run with round features on — "
+    + "a signed-out session is rangefinder-only and the dock's Shot End is refused");
   assert.ok(!greenFocus.onGreen.bubble, "no aim bubble in green focus");
   assert.ok(!greenFocus.onGreen.shotRow, "no club/carry row in green focus - there is no shot to play");
   assert.ok(greenFocus.onGreen.distBarPaused,

@@ -279,50 +279,101 @@ body.ball-dragging #surfaceStage { transition: none !important; }
 #shotActionBtn.noIcon { background: linear-gradient(180deg, #f4f7f2, #c9d3c6); border: 2px solid rgba(255, 255, 255, .9); }
 #shotActionBtn.noIcon #shotActionLabel { display: grid; place-items: center; width: 100%; height: 100%; padding: 0 6px; border-radius: 50%; color: #18240f; font-size: 12px; font-weight: 900; line-height: 1.1; text-align: center; text-transform: uppercase; }
 
-#shotRow.hiddenState { display: none; }
-#shotRow .shotLine { font-size: 13px; font-weight: 700; opacity: .85; }
-#shotRow .shotLine .distLabel { font-size: 9px; }
-#shotRow .shotCarryLine { font-size: 9px; font-weight: 700; opacity: .78; }
-#shotRow .shotCarryLine .distLabel { font-size: 8px; }
+/* ── The shot card, as the hole in section ────────────────────────────────
+   Four bands in a fixed 112x157 box. BACK and FRONT are sunk into WELLS —
+   near-black, lit from the inside edge — and the raised face between them
+   domes UP into the back well and DOWN into the front one. That is the whole
+   idea: the fill is bounded by the green's two edges rather than by straight
+   rules, so the card reads as a section through the hole.
 
-/* Hand-placed layout: every label/value below was dragged into position with
-   the box-layout.js editor and baked in here as its permanent spot, replacing
-   the flex flow that used to arrange them. #distanceBar carries an explicit
-   size because every real child is now position:absolute (out of flow) —
-   without it the card would collapse to nothing. */
-#distanceBar { width: 120px; height: 142px; padding: 0; }
-#distanceBar #clubLabel { position: absolute; left: 8px; top: 41px; }
-#distanceBar #shotClub { position: absolute; left: 11px; top: 63px; }
-#distanceBar #shotDist { position: absolute; left: 69px; top: 58px; }
-#distanceBar #carryLabel { position: absolute; left: 50px; top: 89px; }
-#distanceBar #shotCarry { position: absolute; left: 86px; top: 89px; }
+   The height is deliberate rather than emergent: .playChrome sits on top of
+   this card at a fixed offset, and a band appearing or going would otherwise
+   move the hole stepper under the player's thumb. .cardFace carries the slack
+   (flex: 1), so the card is 157px in every state. 155px of bands + the 1px
+   border top and bottom. */
+/* The card's own box, as a class rather than on #distanceBar, so card-preview.html
+   can stand two of them side by side without duplicating an id. */
+.shotCard { width: 112px; height: 157px; padding: 0; display: block;
+  border: 1px solid rgba(255, 255, 255, .06); background: rgba(13, 27, 18, .88);
+  box-shadow: 0 12px 26px rgba(0, 0, 0, .4); overflow: visible; }
+/* The rounding lives here rather than on #distanceBar so the gear can still
+   overhang the corner without being clipped. */
+.cardInner { display: flex; flex-direction: column; height: 100%; border-radius: 13px; overflow: hidden; }
+
+/* The two wells. Sunk, not raised: the inset shadow runs from the card's own
+   outer edge inward, which is what reads as depth below the face. */
+.cardWell { display: flex; justify-content: space-between; }
+.cardWellLabel { font-size: 9px; font-weight: 800; letter-spacing: .1em; color: #ff9d6b; }
+.cardWellValue { font-size: 15px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: #fff; }
 /* Back on top, front on the bottom — the card mirrors the hole on screen,
-   where the green is up and so the back of it is the further number. The
-   label slots stay exactly where they were hand-placed; it was the two
-   VALUES that sat in each other's rows, so the card read its labels
-   backwards. */
-#distanceBar #backLabel { position: absolute; left: 25px; top: 8px; }
-#distanceBar #distBack { position: absolute; left: 38px; top: 8px; }
-#distanceBar #frontLabel { position: absolute; left: 27px; top: 118px; }
-#distanceBar #distFront { position: absolute; left: 41px; top: 116px; }
+   where the green is up and so the back of it is the further number. */
+.cardBack { align-items: flex-start; padding: 6px 8px 10px; background: linear-gradient(180deg, #020604, #081409);
+  box-shadow: inset 0 6px 12px rgba(0, 0, 0, .9), inset 0 1px 2px rgba(0, 0, 0, .85); }
+.cardFront { align-items: flex-end; padding: 10px 8px 6px; background: linear-gradient(0deg, #020604, #081409);
+  box-shadow: inset 0 -6px 12px rgba(0, 0, 0, .9), inset 0 -1px 2px rgba(0, 0, 0, .85); }
 
-/* Plays-like: pops out to the RIGHT of the card, clear of the hand-placed
-   grid inside it, so it never fights the numbers it annotates. Slides out
-   from behind the distance readout when a value arrives. */
-#playsPop { position: absolute; left: 100%; top: 44px; margin-left: 8px; z-index: 601; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 10px; border-radius: 10px; background: rgba(13, 27, 18, .92); box-shadow: 0 8px 18px rgba(0, 0, 0, .32); white-space: nowrap; animation: playsPopIn .18s ease-out; }
-#playsPop.hiddenState { display: none; }
-#playsPop .playsLabel { font-size: 8px; font-weight: 800; letter-spacing: .1em; opacity: .6; }
-#playsPop #playsValue { font-size: 21px; font-weight: 900; line-height: 1; }
-#playsPop #playsDelta { font-size: 9px; font-weight: 700; opacity: .72; }
-#playsPop.playsOver #playsValue { color: #ff9d6b; }
-#playsPop.playsUnder #playsValue { color: #7fd8ff; }
-@keyframes playsPopIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
-@media (prefers-reduced-motion: reduce) { #playsPop { animation: none; } }
+/* The raised face. The negative top margin is what sinks it INTO the back
+   well; the elliptical radius is the green's far edge. */
+.cardFace { position: relative; z-index: 1; flex: 1 1 auto;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  margin-top: -11px; padding: 17px 10px 5px;
+  border-radius: 50% 50% 0 0 / 13px 13px 0 0;
+  background: linear-gradient(180deg, #26402f, #1c3023);
+  box-shadow: inset 0 1.5px 0 rgba(186, 255, 214, .26), 0 -3px 10px rgba(0, 0, 0, .55); }
+.cardFaceMain { display: flex; align-items: baseline; gap: 3px; }
+.cardDist { font-size: 40px; font-weight: 900; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.cardUnit { font-size: 10px; font-weight: 800; line-height: 1; color: rgba(255, 255, 255, .5); }
+/* Plays-like, on the face beside the number it adjusts rather than in a
+   slide-out pop beside the card. Present only when the elevation lookup has
+   an answer worth showing, exactly as the pop-out was. */
+.cardPlays { display: flex; align-items: center; gap: 5px; }
+.cardPlays.hiddenState { display: none; }
+.cardPlaysLabel { font-size: 7.5px; font-weight: 800; line-height: 1; letter-spacing: .1em; color: rgba(255, 255, 255, .42); }
+.cardPlaysValue { font-size: 12px; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+.cardPlays.playsOver .cardPlaysValue { color: #ff9d6b; }
+.cardPlays.playsUnder .cardPlaysValue { color: #7fd8ff; }
+.cardSeam { flex: 0 0 auto; height: 1px; background: rgba(255, 255, 255, .16); }
+
+/* The club band, and the green's near edge. min-height is 38 rather than the
+   27 it draws as: box-sizing is border-box here, so it has to carry the 11px
+   of padding the negative margin then sinks into the front well. */
+.cardClub { position: relative; z-index: 2; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: space-between;
+  min-height: 38px; margin-bottom: -11px; padding: 0 10px 11px;
+  border-radius: 0 0 50% 50% / 0 0 13px 13px; background: #1c3023;
+  box-shadow: inset 0 -1.5px 0 rgba(186, 255, 214, .26), 0 3px 10px rgba(0, 0, 0, .55); }
+/* Borrowed from .gdBagRowArt on the bag sheet: same silhouette, same one-pixel
+   outline filter, sized so the head clears the club name and the shaft runs
+   under it. The painter sets which artwork and its aspect ratio. */
+.cardClubArt { position: absolute; z-index: 0; left: 8px; right: -1px; bottom: 7px; pointer-events: none; }
+.cardClubArt i { display: block; width: 56%; background-size: 100% 100%; background-repeat: no-repeat; opacity: .55;
+  filter: brightness(.07) drop-shadow(.4px 0 0 #fff) drop-shadow(-.4px 0 0 #fff) drop-shadow(0 .4px 0 #fff) drop-shadow(0 -.4px 0 #fff); }
+/* The name takes what the carry number leaves and ellipsises the rest, so a
+   club the player named themselves cannot push the distance off the card. */
+.cardClubName { position: relative; z-index: 1; flex: 0 1 auto; min-width: 0; margin-left: 10px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10px; font-weight: 900; line-height: 1; letter-spacing: .03em; }
+.cardClubCarry { position: relative; z-index: 1; flex: 0 0 auto; padding-left: 4px;
+  font-size: 10px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, .62); }
+/* No shot locked: the face shows the green's CENTRE and the club band has
+   nothing to say, so it empties out and keeps only its lip — the near edge of
+   the green. The card does not change height; .cardFace takes the slack. */
+.shotCard.noShot .cardClubArt,
+.shotCard.noShot .cardClubName,
+.shotCard.noShot .cardClubCarry { display: none; }
+.shotCard.noShot .cardClub { min-height: 26px; }
 
 /* Free-position layout (box-layout.js): every label/value is its own box —
-   the hand-placed rules above set WHERE it starts, this is what lets it still
-   be dragged/resized further from there without reflowing its neighbours. */
-#distanceBar [data-move] { position: relative; display: inline-block; }
+   the bands above set WHERE it starts, this is what lets it still be
+   dragged/resized further from there without reflowing its neighbours.
+
+   Only the SPANS are blockified: an inline box ignores a transform, so a bare
+   <span> has to become one to be draggable at all. A movable box that is
+   already laying out its own children (the PLAYS row) must keep the display
+   its band gave it — forcing inline-block on that one collapsed its flex row
+   into a single line box and pushed the FRONT well out through the card. */
+#distanceBar [data-move] { position: relative; }
+#distanceBar span[data-move] { display: inline-block; }
 #distanceBar.layout-editing [data-move] { outline: 1px dashed rgba(255, 255, 255, .45); border-radius: 3px; cursor: grab; touch-action: none; }
 #distanceBar.layout-editing [data-move]:active { cursor: grabbing; }
 .boxHandle { display: none; position: absolute; right: -8px; bottom: -8px; width: 8px; height: 8px; border-radius: 50%; background: transparent; border: 1.5px solid rgba(255, 255, 255, .55); touch-action: none; }
@@ -370,11 +421,8 @@ body.ball-dragging #surfaceStage { transition: none !important; }
    Bottom-LEFT like the old app's #gdV62Distance — centre-bottom sits exactly
    on the tee guide box, and a bar there hides the player's dot at the tee
    (which read as "Head To the Tee did nothing"). */
-#distanceBar { position: absolute; left: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 120px); display: flex; flex-direction: column; gap: 6px; align-items: stretch; padding: 9px 12px; border-radius: 14px; background: rgba(13, 27, 18, .85); z-index: 600; }
+#distanceBar { position: absolute; left: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 120px); border-radius: 14px; z-index: 600; }
 #distanceBar.hiddenState { display: none; }
-.dist { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 15px; font-weight: 600; }
-.distMain { font-size: 22px; font-weight: 800; }
-.distLabel { font-size: 10px; font-weight: 600; opacity: .65; letter-spacing: .08em; }
 
 /* The way in and out of GPS play - always on top (z-index above everything
    else in the play screen), never hidden by a route change within this
@@ -411,9 +459,10 @@ body.ball-dragging #surfaceStage { transition: none !important; }
 #mapUpdateDismiss { background: rgba(255, 255, 255, .12); color: #f2f7f2; padding: 6px 10px; }
 
 /* Bottom-left, directly above the shot card (#distanceBar: left 12px,
-   bottom safe-area+120px, 142px tall) - same left edge, stacked just above
-   its top edge. */
-.playChrome { position: absolute; left: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 120px + 142px + 10px); display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px; border-radius: 14px; background: rgba(13, 27, 18, .85); z-index: 600; }
+   bottom safe-area+120px, 157px tall) - same left edge, stacked just above
+   its top edge. The card is a fixed height in every state precisely so this
+   never moves under the player's thumb. */
+.playChrome { position: absolute; left: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 120px + 157px + 10px); display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px; border-radius: 14px; background: rgba(13, 27, 18, .85); z-index: 600; }
 .playChrome button { border: 0; border-radius: 10px; padding: 8px 12px; background: rgba(255, 255, 255, .12); color: #f2f7f2; font-size: 16px; }
 #holeNumber { font-size: 18px; font-weight: 700; min-width: 34px; }
 
@@ -587,25 +636,82 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
 .trace-inert { opacity: .62; }
 .trace-inert .traceIcon { color: #8fa89a; }
 
-/* ── Flow banner ──────────────────────────────────────────────────────────
+/* ── Player badge ─────────────────────────────────────────────────────────
    A readout of the derived flow (marshal.js), not a decoration — if it says
-   PREVIEW the app IS in Preview. Sits under the nav row in the same fixed
-   column, so it never has to be guessed into place at a pixel offset. */
-#playBanner { display: flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: 11px; font-weight: 800; letter-spacing: .06em; }
-#playBanner.hiddenState { display: none; }
-#playBannerDot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
-#playBanner.livePlay { background: rgba(31, 211, 109, .14); color: #8ef0b6; }
-#playBanner.livePlay #playBannerDot { background: #1fd36d; box-shadow: 0 0 0 3px rgba(31, 211, 109, .22); }
-#playBanner.previewPlay { background: rgba(255, 255, 255, .07); color: rgba(255, 255, 255, .66); }
-#playBanner.previewPlay #playBannerDot { background: transparent; border: 1px solid rgba(255, 255, 255, .45); }
-/* Logging is neither of the other two and must not be mistaken for Preview —
-   the Shot End button in this state writes to the card. */
-#playBanner.loggingPlay { background: rgba(255, 182, 77, .16); color: #ffcf8f; }
-#playBanner.loggingPlay #playBannerDot { background: #ffb64d; box-shadow: 0 0 0 3px rgba(255, 182, 77, .22); }
-#playBannerReturn { margin-left: auto; border: 0; background: rgba(255, 255, 255, .13); color: #eafff1; border-radius: 999px; padding: 3px 10px; font: inherit; }
-#playBannerReturn.hiddenState { display: none; }
+   PREVIEW the app IS in Preview. It replaced two separate strips: the flow
+   banner in the top bar's column and the identity plate below it, which
+   landed on the same band at a 47px inset.
 
-/* The wind tell — same strip idiom as #playBanner, in the drift line's cyan
+   Positioned rather than in the top bar's flow, because it is a plate over
+   the surface and not a full-width strip: inset + 71px puts it under the nav
+   row with the state pill's overhang clear of it. #playScreen is fixed
+   inset:0, so absolute here is viewport coordinates. */
+#playerBadge { position: absolute; z-index: 35; top: calc(env(safe-area-inset-top, 0px) + 71px); left: 14px;
+  display: flex; align-items: stretch; max-width: calc(100vw - 28px);
+  border-radius: 10px; background: rgba(3, 12, 7, .8); border: 1px solid rgba(255, 255, 255, .07);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .35);
+  /* A plate, not a control — the only thing in it you can press opts back in
+     below, so the rest never eats a tap meant for the surface. */
+  pointer-events: none; }
+#playerBadge.hiddenState { display: none; }
+
+/* The hole block. Colour runs through the whole of it — fill, divider,
+   numeral and PAR all take the state — rather than sitting in a dot. */
+#playerBadgeHole { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 11px 10px 4px; border-radius: 9px 0 0 9px; }
+#playerBadgeNumber { font-size: 17px; font-weight: 950; line-height: 1; font-variant-numeric: tabular-nums; }
+/* "PAR 4" sets the block's width and must stay on one line — wrapped, it made
+   the block narrower than the pill it is meant to be measured against. */
+#playerBadgePar { font-size: 7px; font-weight: 950; line-height: 1; letter-spacing: .1em; white-space: nowrap; }
+/* The pill straddles the block's top edge and centres on it, so PREVIEW — the
+   longest label — overhangs evenly on both sides instead of pushing left. */
+#playerBadgeState { position: absolute; z-index: 2; top: 0; left: 50%; transform: translate(-50%, -50%);
+  padding: 2px 7px; border-radius: 999px; font-size: 8px; font-weight: 950; line-height: 1.4; letter-spacing: .07em;
+  white-space: nowrap; box-shadow: 0 2px 6px rgba(0, 0, 0, .5); }
+
+#playerBadge.livePlay #playerBadgeHole { background: rgba(31, 211, 109, .16); border-right: 1px solid rgba(31, 211, 109, .28); }
+#playerBadge.livePlay #playerBadgeState { background: #07170e; border: 1px solid rgba(31, 211, 109, .6); color: #8ef0b6; }
+#playerBadge.livePlay #playerBadgeNumber { color: #8ef0b6; }
+#playerBadge.livePlay #playerBadgePar { color: rgba(142, 240, 182, .7); }
+
+#playerBadge.previewPlay #playerBadgeHole { background: rgba(255, 255, 255, .07); border-right: 1px solid rgba(255, 255, 255, .14); }
+#playerBadge.previewPlay #playerBadgeState { padding: 2px 6px; font-size: 6.5px; letter-spacing: .06em;
+  background: #0d1410; border: 1px solid rgba(255, 255, 255, .28); color: rgba(255, 255, 255, .7); }
+#playerBadge.previewPlay #playerBadgeNumber { color: #f2f7f2; }
+#playerBadge.previewPlay #playerBadgePar { color: rgba(255, 255, 255, .48); }
+
+/* Demo Mode is a fourth state, not a flavour of Live: it wins over the flow
+   because nothing in a demo round is a real shot. */
+#playerBadge.demoPlay #playerBadgeHole { background: rgba(255, 176, 32, .16); border-right: 1px solid rgba(255, 176, 32, .32); }
+#playerBadge.demoPlay #playerBadgeState { background: #1a1206; border: 1px solid rgba(255, 176, 32, .6); color: #ffb020; }
+#playerBadge.demoPlay #playerBadgeNumber { color: #ffb020; }
+#playerBadge.demoPlay #playerBadgePar { color: rgba(255, 176, 32, .68); }
+
+/* Logging is neither Live nor Preview and must not be mistaken for either —
+   the Shot End button in this state writes to the card. Its own amber, the
+   one the flow banner used, so it stays distinct from Demo's. */
+#playerBadge.loggingPlay #playerBadgeHole { background: rgba(255, 182, 77, .16); border-right: 1px solid rgba(255, 182, 77, .32); }
+#playerBadge.loggingPlay #playerBadgeState { padding: 2px 6px; font-size: 6.5px; letter-spacing: .06em;
+  background: #1a1206; border: 1px solid rgba(255, 182, 77, .6); color: #ffcf8f; }
+#playerBadge.loggingPlay #playerBadgeNumber { color: #ffcf8f; }
+#playerBadge.loggingPlay #playerBadgePar { color: rgba(255, 207, 143, .7); }
+
+#playerBadgeWho { display: flex; flex-direction: column; justify-content: center; gap: 3px; min-width: 0; padding: 4px 11px 4px 10px; }
+#playerBadgeName { font-size: 11px; font-weight: 950; line-height: 1; letter-spacing: .05em; text-transform: uppercase;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#playerBadgeName:empty { display: none; }
+.playerBadgeSub { display: flex; align-items: center; gap: 6px; min-width: 0; }
+#playerBadgeCourse { max-width: 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 9px; font-weight: 850; line-height: 1.2; letter-spacing: .07em; text-transform: uppercase; color: rgba(255, 255, 255, .55); }
+#playerBadgeCourse:empty { display: none; }
+/* Preview's and Logging's way back, so a look ahead or a catch-up is never
+   somewhere you get stuck. The one thing in the plate that takes a tap. */
+#playerBadgeReturn { flex: 0 0 auto; pointer-events: auto; border: 0; border-radius: 999px; padding: 3px 8px;
+  background: rgba(255, 255, 255, .13); color: #eafff1;
+  font: inherit; font-size: 8.5px; font-weight: 900; line-height: 1.2; letter-spacing: .06em; white-space: nowrap; }
+#playerBadgeReturn.hiddenState { display: none; }
+
+/* The wind tell — a strip in the top bar's column, in the drift line's cyan
    so banner, rail dot and on-map drift read as one system. The arrow is
    rotated by the painter to the on-screen blow direction. */
 #windBanner { display: flex; align-items: center; gap: 7px; padding: 4px 12px; font-size: 11px; font-weight: 800; letter-spacing: .06em; background: rgba(102, 220, 255, .13); color: #9fe6ff; }
@@ -700,6 +806,3 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
    sheets opt back in below, because they genuinely scroll. */
 #map, #surfaceViewport, #playTopBar, .shotDock, .playChrome { touch-action: none; }
 .sheet, .sheetBody, #scoreList, #bagList, #traceList { touch-action: pan-y; }
-/* The GPS top rail remains its owner; this is only a low-profile identity
-   invariant for coach Play-as-Player and ordinary rounds. */
-#gdGpsIdentityBanner{position:fixed;z-index:35;top:calc(env(safe-area-inset-top) + 58px);left:14px;pointer-events:none;display:flex;flex-direction:column;gap:1px;max-width:calc(100vw - 28px);padding:5px 8px;border-radius:8px;background:rgba(3,12,7,.72);color:#fff;font-size:10px;letter-spacing:.06em;text-transform:uppercase}#gdGpsIdentityBanner strong{font-size:11px}#gdGpsIdentityBanner span{color:rgba(255,255,255,.68);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

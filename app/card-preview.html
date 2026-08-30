@@ -5,22 +5,79 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Shot card preview</title>
 <link rel="stylesheet" href="styles.css">
+<style>
+  /* The card positions itself against the play screen; here there is no play
+     screen, so it is parked in the middle of the page instead. Everything
+     inside it - the bands, the wells, the domes - is the shipped CSS. */
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #16281c; background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, .03) 0 7px, transparent 7px 14px);
+    color: #f2f7f2; font-family: -apple-system, system-ui, sans-serif; }
+  .previewRow { display: flex; align-items: flex-start; gap: 44px; }
+  .shotCard { position: relative; left: auto; bottom: auto; }
+</style>
 </head>
 <body>
 
 <!-- Dev-only: the shot card on its own, pre-filled with sample numbers, no
-     course/GPS/backend required. Not linked from index.html. -->
-<div id="distanceBar">
-  <div id="shotRow">
-    <div class="shotLine"><span id="clubLabel" class="distLabel" data-move>CLUB</span><span id="shotClub" data-move>DR</span></div>
-    <div class="dist distMain shotMain"><span id="shotDist" data-move>224</span></div>
-    <div class="shotCarryLine"><span id="carryLabel" class="distLabel" data-move>CARRY</span><span id="shotCarry" data-move>230</span></div>
+     course/GPS/backend required. Two copies so the shot state and the resting
+     state can be compared side by side - they must be the same height, which
+     is the whole reason .cardFace flexes. Not linked from index.html. -->
+<div class="previewRow">
+  <div id="distanceBar" class="shotCard">
+    <button id="cardEditToggle" type="button" aria-label="Edit card layout">&#9881;</button>
+    <div class="cardInner">
+      <div class="cardWell cardBack">
+        <span id="backLabel" class="cardWellLabel" data-move>BACK</span>
+        <span id="distBack" class="cardWellValue" data-move>186</span>
+      </div>
+      <div class="cardFace">
+        <div class="cardFaceMain">
+          <span id="shotDist" class="cardDist" data-move>152</span>
+          <span id="cardUnit" class="cardUnit">m</span>
+        </div>
+        <div id="playsRow" class="cardPlays playsOver" data-move>
+          <span class="cardPlaysLabel">PLAYS</span>
+          <span id="playsValue" class="cardPlaysValue">158</span>
+        </div>
+      </div>
+      <div class="cardSeam"></div>
+      <div class="cardClub">
+        <span class="cardClubArt" aria-hidden="true"><i style="aspect-ratio: 674 / 222; background-image: url(../assets/clubs/blade-h.png)"></i></span>
+        <span id="shotClub" class="cardClubName" data-move>7 IRON</span>
+        <span id="shotCarry" class="cardClubCarry" data-move>148</span>
+      </div>
+      <div class="cardWell cardFront">
+        <span id="frontLabel" class="cardWellLabel" data-move>FRONT</span>
+        <span id="distFront" class="cardWellValue" data-move>141</span>
+      </div>
+    </div>
   </div>
-  <div class="fcbRow">
-    <div class="dist"><span id="frontLabel" class="distLabel" data-move>F</span><span id="distFront" data-move>381</span></div>
-    <div class="dist"><span id="backLabel" class="distLabel" data-move>B</span><span id="distBack" data-move>410</span></div>
+
+  <div class="shotCard noShot">
+    <div class="cardInner">
+      <div class="cardWell cardBack">
+        <span class="cardWellLabel">BACK</span>
+        <span class="cardWellValue">186</span>
+      </div>
+      <div class="cardFace">
+        <div class="cardFaceMain">
+          <span class="cardDist">164</span>
+          <span class="cardUnit">m</span>
+        </div>
+        <div class="cardPlays hiddenState"></div>
+      </div>
+      <div class="cardSeam"></div>
+      <div class="cardClub">
+        <span class="cardClubArt" aria-hidden="true"><i></i></span>
+        <span class="cardClubName">–</span>
+        <span class="cardClubCarry">–</span>
+      </div>
+      <div class="cardWell cardFront">
+        <span class="cardWellLabel">FRONT</span>
+        <span class="cardWellValue">141</span>
+      </div>
+    </div>
   </div>
-  <button id="cardEditToggle" type="button" aria-label="Edit shot card layout">&#9881;</button>
 </div>
 
 <script src="js/box-layout.js"></script>
