@@ -51,7 +51,8 @@
     "native:ios": "npm run native:sync && npx cap open ios",
     "native:release:aab": "npm run build:app && npx cap sync android && cd android && ./gradlew bundleRelease",
     "native:release:apk": "npm run build:app && npx cap sync android && cd android && ./gradlew assembleRelease",
-    "test:coach-player": "node dev/coach-player-link.test.js"
+    "test:coach-player": "node dev/coach-player-link.test.js",
+    "test:effective-player-play": "node dev/effective-player-play-context.test.js"
   },
   "codex": {
     "entry": "index.html",

@@ -221,7 +221,7 @@
     });
   }
   function readRecentCourses(){
-    const rows=safe(()=>JSON.parse(localStorage.getItem(RECENTS_KEY)||"[]"),[])||[];
+    const rows=safe(()=>window.GDPlayContext?window.GDPlayContext.readJson("recent-courses",RECENTS_KEY):JSON.parse(localStorage.getItem(RECENTS_KEY)||"[]"),[])||[];
     return (Array.isArray(rows)?rows:[]).map(item=>{
       const raw=item&&typeof item==="object"?item:{};
       const course=basePayload({
@@ -266,7 +266,7 @@
     };
     const key=String(row.canonicalKey||keyForName(row.name)).toLowerCase();
     const next=[row].concat(readRecentCourses().filter(item=>String(item.canonicalKey||keyForName(item.name)).toLowerCase()!==key)).slice(0,8);
-    safe(()=>localStorage.setItem(RECENTS_KEY,JSON.stringify(next)));
+    safe(()=>window.GDPlayContext?.writeJson?.("recent-courses",next)||localStorage.setItem(RECENTS_KEY,JSON.stringify(next)));
   }
 	  function savedCourses(){
 	    return readRecentCourses();
@@ -641,6 +641,7 @@
      re-entered the old shell on a phone while working perfectly in every
      browser and in CI, which is why nothing caught it. */
   function navigateToAppPlay(course,opts){
+    safe(()=>window.GDPlayContext?.begin?.({source:state.source,returnTarget:window.__gdCoursePickerReturnTarget}));
     const parts=[];
     if(opts&&opts.rangefinder)parts.push("rangefinder=1");
     if(course.courseId)parts.push("courseId="+encodeURIComponent(course.courseId));
@@ -1047,7 +1048,8 @@
     state.source=opts.source||"change-course";
     state.pickHandler=typeof opts.onPick==="function"?opts.onPick:null;
     window.gdCourseChangeMode=opts.mode||"change-course";
-    window.__gdCoursePickerReturnTarget=opts.returnTarget||"gps";
+    window.__gdCoursePickerReturnTarget=opts.returnTarget||"home";
+    safe(()=>{const context=window.GDPlayContext?.returnContext?.({source:state.source,returnTarget:window.__gdCoursePickerReturnTarget});if(context?.surface==="coach-player")window.__gdCoursePickerReturnTarget="coach-player";});
     safe(()=>{window.__gdCoursePickerChangingAt=Date.now();window.__gdCoursePickerFirstHoleOpenToken=null;window.__gdStableMappedHoleOneLast=null;});
     safe(()=>{if(window.__gdPreLockHoleFrameTimer)clearTimeout(window.__gdPreLockHoleFrameTimer);});
     safe(()=>{if(typeof gdClearMappedStartPromptChrome==="function")gdClearMappedStartPromptChrome();});
@@ -1153,7 +1155,8 @@
     }
     state.pickHandler=null;
     if(typeof bridge().hidePin==="function")bridge().hidePin();
-    closePickerSurface(opts.reason||"course-picker-close");
+    if(window.GDShell&&typeof window.GDShell.closeCoursePicker==="function")window.GDShell.closeCoursePicker({to:"origin",source:opts.reason||"course-picker-close"});
+    else closePickerSurface(opts.reason||"course-picker-close");
     return false;
   }
   function bindListeners(){
@@ -1244,7 +1247,7 @@
     if(event){event.preventDefault?.();event.stopPropagation?.();event.stopImmediatePropagation?.();}
     return api.selectFromElement(event?.target,{source:"assumed-course"});
   };
-  window.gdOpenChangeCourse=function(event){return api.open({event,source:"change-course",returnTarget:"gps"});};
+  window.gdOpenChangeCourse=function(event){return api.open({event,source:"change-course",returnTarget:"home"});};
   window.gdOpenCoursePickerCourse=function(course){return api.selectCourse(course,{source:"legacy-global"});};
   window.gdOpenCoursePickerSelectionFromElement=function(element){return api.selectFromElement(element);};
   window.gdCoursePickerRequestGps=function(){return api.requestLocation();};

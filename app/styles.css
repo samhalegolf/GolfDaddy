@@ -700,4 +700,6 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
    sheets opt back in below, because they genuinely scroll. */
 #map, #surfaceViewport, #playTopBar, .shotDock, .playChrome { touch-action: none; }
 .sheet, .sheetBody, #scoreList, #bagList, #traceList { touch-action: pan-y; }
-
+/* The GPS top rail remains its owner; this is only a low-profile identity
+   invariant for coach Play-as-Player and ordinary rounds. */
+#gdGpsIdentityBanner{position:fixed;z-index:35;top:calc(env(safe-area-inset-top) + 58px);left:14px;pointer-events:none;display:flex;flex-direction:column;gap:1px;max-width:calc(100vw - 28px);padding:5px 8px;border-radius:8px;background:rgba(3,12,7,.72);color:#fff;font-size:10px;letter-spacing:.06em;text-transform:uppercase}#gdGpsIdentityBanner strong{font-size:11px}#gdGpsIdentityBanner span{color:rgba(255,255,255,.68);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

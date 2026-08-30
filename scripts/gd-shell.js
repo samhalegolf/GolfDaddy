@@ -210,6 +210,11 @@
   function closeCoursePicker(opts){
     opts=opts||{};
     clearPickerDatasets();
+    if(opts.to==="origin"){
+      var target=window.__gdCoursePickerReturnTarget||"home";
+      if(target==="practice")return openModule("practiceData",{module:"practiceData",moduleId:"practiceDataPanel",source:"course-picker-back"});
+      if(target==="coach-player")return openModule("profile",{module:"profile",source:"course-picker-back"});
+    }
     if(opts.to==="gps")return enterGps(Object.assign({replace:true,fromCoursePicker:true},opts));
     if(opts.to==="previous"&&state.previousRoute&&state.previousRoute!=="course-picker")return back(opts);
     return showHome(Object.assign({source:"course-picker-close"},opts));
@@ -293,7 +298,7 @@
   function back(opts){
     opts=opts||{};
     if(state.route==="module")return closeModule(opts);
-    if(state.route==="course-picker")return showHome({source:"course-picker-back"});
+    if(state.route==="course-picker")return closeCoursePicker({to:"origin",source:"course-picker-back"});
     if(state.route==="gps"){
       safe(function(){window.GDGpsPlayRuntime?.back?.({source:"shell-back"});});
       if(window.GDGpsPlayRuntime&&typeof window.GDGpsPlayRuntime.back==="function")return false;
@@ -320,6 +325,9 @@
     if(state.initialized)return false;
     state.initialized=true;
     applyRouteDom({replace:true});
+    /* A GPS exit reloads the root shell. Restore only a validated semantic
+       surface, never a stale browser-history GPS route. */
+    setTimeout(function(){safe(function(){window.GDPlayContext?.restore?.();});},0);
     var homeBtn=byId("shellHomeBtn");
     if(homeBtn&&!homeBtn.__gdShellOwnerBound){
       homeBtn.__gdShellOwnerBound=true;

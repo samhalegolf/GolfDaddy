@@ -28,7 +28,7 @@
   function safe(fn, fallback) { try { return fn(); } catch (e) { return fallback; } }
 
   function read() {
-    var saved = safe(function () { return JSON.parse(localStorage.getItem(KEY) || "null"); }, null);
+    var saved = safe(function () { return window.GDPlayContext ? window.GDPlayContext.readJson("resume-round", KEY) : JSON.parse(localStorage.getItem(KEY) || "null"); }, null);
     if (!saved || !saved.courseId) return null;
     var expires = Number(saved.expiresAt);
     if (Number.isFinite(expires) && Date.now() > expires) return null;
@@ -36,7 +36,7 @@
   }
 
   function clear() {
-    safe(function () { localStorage.removeItem(KEY); });
+    safe(function () { if (window.GDPlayContext) window.GDPlayContext.remove("resume-round"); else localStorage.removeItem(KEY); });
     safe(function () { localStorage.removeItem(LEGACY_KEY); });
   }
 

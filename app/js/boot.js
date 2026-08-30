@@ -199,29 +199,23 @@
     if (title && text) title.textContent = text;
   }
 
-  /* Exits GPS play back to the main site - the picker there is the only
-     other entry point into this page, so there's nothing of this page's own
-     to navigate back to. Home lands on the site root; Back prefers actual
-     browser history so it returns to the picker they came from. GPS
-     Settings deep-links into the old shell's GPS settings panel, which
-     checks for this param on boot the same way it already does for the
-     password-reset route. */
+  function renderIdentity(course) {
+    var player = window.GDPlayContext && window.GDPlayContext.identity ? window.GDPlayContext.identity() : { name: "Guest" };
+    var name = document.getElementById("gdGpsIdentityPlayer"), courseEl = document.getElementById("gdGpsIdentityCourse");
+    if (name) name.textContent = player.name || "Guest";
+    if (courseEl) courseEl.textContent = course && (course.courseName || course.name) || "Course";
+  }
+  /* Back is semantic navigation. The handoff context, not browser history,
+     owns the actual shell destination. */
   function exitToMainSite() {
     window.location.href = "/";
   }
-  /* During play, Back peels one layer at a time. Green focus goes first: it is
-     a layer over the hole rather than a place, so closing it returns to the
-     same hole overview with the shot, standing location, club, bubble and pin
-     all intact. Then the most recent wind/pin change is undone - only once
-     there is nothing left to close or undo does Back fall through to leaving
-     GPS play the way it always has. */
   function exitBack() {
     /* Back peels one layer at a time, and the Marshal owns what a layer is:
        it answers false when there was nothing to close, so Back falls through
        to its next meaning rather than this file guessing at the play state. */
     if (app.marshal && app.marshal.signal("BACK")) return;
-    if (app.undo && app.undo.pop()) return;
-    if (window.history.length > 1) window.history.back();
+    if (window.GDPlayContext && window.GDPlayContext.returnToOrigin) window.GDPlayContext.returnToOrigin();
     else exitToMainSite();
   }
 
@@ -439,6 +433,7 @@
   async function openPlay(course, resumeHole) {
     show("play");
     activeCourse = course;
+    renderIdentity(course);
     mapUpdateDismissed = false;
     gpsNoticeDismissed = false;
     /* Record the round the moment it is genuinely up, so a phone that dies on

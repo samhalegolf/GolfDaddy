@@ -18,6 +18,7 @@
      design, so the whole thing degraded silently into "objects on an OSM map"
      rather than erroring. Inert on web: isNative false, fetch untouched. -->
 <script src="../scripts/inline/gd-native-bootstrap.js"></script>
+<script src="../scripts/gd-play-context.js?v=effective-player-001"></script>
 <!-- Mirrors the keys that cannot be re-fetched into @capacitor/preferences,
      because a WebView evicts web storage under pressure and localStorage is
      where the in-progress round lives. Second, because it patches
@@ -55,6 +56,7 @@
 <!-- Demo Mode only: shown/hidden by boot.js and demo-session.js, never for a
      real round. -->
 <div id="gdGpsDemoBadge" hidden>DEMO</div>
+<div id="gdGpsIdentityBanner" aria-live="polite"><strong id="gdGpsIdentityPlayer"></strong><span id="gdGpsIdentityCourse"></span></div>
 <button type="button" id="gdDemoCourseDataCta" hidden>See Course Data</button>
 
 <!-- Entered exclusively via ?courseId=... from the course picker on the main

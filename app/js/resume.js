@@ -52,13 +52,13 @@
       updatedAt: now,
       expiresAt: now + TTL_MS
     };
-    try { localStorage.setItem(KEY, JSON.stringify(payload)); } catch (e) {}
+    try { if (window.GDPlayContext) window.GDPlayContext.writeJson("resume-round", payload); else localStorage.setItem(KEY, JSON.stringify(payload)); } catch (e) {}
     return payload;
   }
 
   function read() {
     var saved = null;
-    try { saved = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (e) { return null; }
+    try { saved = window.GDPlayContext ? window.GDPlayContext.readJson("resume-round", KEY) : JSON.parse(localStorage.getItem(KEY) || "null"); } catch (e) { return null; }
     if (!saved || !saved.courseId) return null;
     var expires = Number(saved.expiresAt);
     if (Number.isFinite(expires) && Date.now() > expires) return null;
@@ -84,7 +84,7 @@
     clear: function () {
       course = null;
       hole = 0;
-      try { localStorage.removeItem(KEY); } catch (e) {}
+      try { if (window.GDPlayContext) window.GDPlayContext.remove("resume-round"); else localStorage.removeItem(KEY); } catch (e) {}
       try { localStorage.removeItem(LEGACY_KEY); } catch (e) {}
       return true;
     }
