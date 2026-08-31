@@ -61,6 +61,47 @@ test("detect() diagnostics report the requested crop dimensions", async () => {
   assert.strictEqual(result.diagnostics.height, 180);
 });
 
+/* The bug this guards: the sharp port's grayscale() collapsed the filtered image to ONE band,
+   while every consumer indexes it through samplePixel's (y*width+x)*4. Past the first quarter
+   of the buffer that read off the end and came back undefined, so findTonalEdgeCandidates
+   found no edges and buildHealthyBubble fell back to its base bubble. detect() then returned a
+   ~19px disc centred on the seed - the SAME disc for a green, a bunker, bare fairway and open
+   water - and reported confidence up to 1.00 for it. Nothing failed; the output just stopped
+   depending on the picture. */
+test("the filtered buffer is RGBA, not a collapsed grayscale band", async () => {
+  const core = await import(path.join(root, "functions", "lib", "gd-green-shape-core.mjs"));
+  const T = core.__greenShapeCoreTest;
+  const W = 64, H = 64;
+  const raw = await sharp({ create: { width: W, height: H, channels: 4, background: { r: 40, g: 90, b: 50, alpha: 255 } } })
+    .ensureAlpha().raw().toBuffer();
+  const filtered = await T.renderFilteredBuffer(raw, W, H, T.GREEN_WAND_MODE_PRESETS.robustTonal.filters);
+  assert.strictEqual(filtered.data.length, W * H * 4,
+    "every consumer indexes this as RGBA, so it has to BE RGBA");
+});
+
+/* The symptom, asserted directly: two visibly different images must not produce the same
+   polygon. This is what "uncalibrated" was hiding. */
+test("the polygon depends on the image", async () => {
+  const W = 200, H = 200;
+  const disc = await sharp({ create: { width: W, height: H, channels: 3, background: { r: 30, g: 80, b: 40 } } })
+    .composite([{ input: Buffer.from(`<svg width="${W}" height="${H}"><circle cx="100" cy="100" r="55" fill="#d8cfa8"/></svg>`), top: 0, left: 0 }])
+    .png().toBuffer();
+  const flat = await sharp({ create: { width: W, height: H, channels: 3, background: { r: 30, g: 80, b: 40 } } }).png().toBuffer();
+  const seed = { x: 100, y: 100 };
+  const a = await detect({ image: disc, imageWidth: W, imageHeight: H, candidateCentrePx: seed });
+  const b = await detect({ image: flat, imageWidth: W, imageHeight: H, candidateCentrePx: seed });
+  const radius = r => {
+    const p = r.polygonPixels || [];
+    if (p.length < 3) return 0;
+    const cx = p.reduce((s, q) => s + q.x, 0) / p.length, cy = p.reduce((s, q) => s + q.y, 0) / p.length;
+    return p.reduce((s, q) => s + Math.hypot(q.x - cx, q.y - cy), 0) / p.length;
+  };
+  const ra = radius(a), rb = radius(b);
+  assert.ok(ra > 0 && rb > 0, "both runs produced a polygon");
+  assert.ok(Math.abs(ra - rb) > 1.5,
+    "a disc and a flat field must not yield the same shape (got " + ra.toFixed(2) + "px vs " + rb.toFixed(2) + "px)");
+});
+
 (async function run() {
   const mod = await import(path.join(root, "functions", "lib", "gd-green-shape-core.mjs"));
   detect = mod.detect;

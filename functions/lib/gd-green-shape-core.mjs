@@ -488,8 +488,36 @@ async function renderFilteredBuffer(sourceBuffer, width, height, filters) {
   /* Partial invert (0 < invert < 100) has no direct sharp op; every current preset uses
      invert:0, so only the boundary case is implemented. */
   if (invertPct >= 50) pipeline = pipeline.negate({ alpha: false });
-  const { data } = await pipeline.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  return { data, width, height };
+  /* Back to sRGB BEFORE ensureAlpha. grayscale() collapses the image to ONE band, and
+     ensureAlpha on a 1-band image yields two - so this returned a width*height*1 buffer that
+     every consumer then indexed as RGBA via samplePixel's (y*width+x)*4. Past the first
+     quarter of the image that reads off the end of the buffer and comes back undefined, so
+     findTonalEdgeCandidates found no edges at all and buildHealthyBubble fell back to its base
+     bubble: a ~19px disc centred on the seed, returned with confidence up to 1.00 on bare
+     fairway and open water. The module header called the port "uncalibrated"; it was not
+     calibrated because it was never actually reading the image. */
+  const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
+  /* Normalised to RGBA here rather than with ensureAlpha/toColourspace, because grayscale()
+     leaves libvips interpreting the image as one b-w band and neither op reliably expands it
+     back. Every consumer indexes this through samplePixel's (y*width+x)*4, so anything other
+     than 4 channels reads off the end of the buffer and comes back undefined - which is
+     exactly what happened: findTonalEdgeCandidates found no edges at all, buildHealthyBubble
+     fell back to its base bubble, and detect() returned a ~19px disc centred on the seed with
+     confidence up to 1.00 on bare fairway and open water. The header called this port
+     "uncalibrated"; it was not calibrated because it was never reading the image. */
+  return { data: toRgba(data, info.channels, width, height), width, height };
+}
+
+function toRgba(data, channels, width, height) {
+  if (channels === 4) return data;
+  const out = Buffer.alloc(width * height * 4);
+  for (let i = 0, n = width * height; i < n; i++) {
+    const s = i * channels, d = i * 4;
+    const r = data[s], g = channels >= 3 ? data[s + 1] : r, b = channels >= 3 ? data[s + 2] : r;
+    out[d] = r; out[d + 1] = g; out[d + 2] = b;
+    out[d + 3] = channels === 2 ? data[s + 1] : channels === 4 ? data[s + 3] : 255;
+  }
+  return out;
 }
 
 /* image: a Buffer (already-decoded pixels are NOT required - any format sharp can read).
