@@ -58,11 +58,12 @@ app, Live Activity, Lock Screen actions, native location and reconciliation.
 `npm run native:sync` re-registers this app-owned Capacitor bridge after sync;
 Capacitor otherwise regenerates its plugin list from npm packages only.
 
-The first Apple Watch UI target is intentionally not added in this foundation:
-the bridge is production-shaped but no untested Watch target is claimed. That
-target should render Standard first, then Bubble/Green Focus, and use the same
-touch interactions for Lock and tap-to-aim. It must maintain an outbox for
-durable Watch commands, retry after reachability changes, and rely on command-ID
+`ios/App/ClarityCaddyWatch` is the first read-only companion target. It decodes
+only schema v1 and displays no-round, Standard, and Bubble states. It rejects
+unsupported schema versions, retains the latest valid context while stale, and
+will not replace a scene with an older revision for the same round. It contains
+no controls, GPS, course download, or Watch-owned golf data. A later interactive
+target must add a durable command outbox/retry path and rely on command-ID
 deduplication after reconnection.
 
 Future Wear OS and Garmin adapters consume the same scene/command/location

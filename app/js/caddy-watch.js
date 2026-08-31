@@ -173,8 +173,11 @@
         if (!observation) return { accepted: false, reason: "invalid-location" };
         signal = type;
       } else return { accepted: false, reason: "unknown-command" };
-      seenCommands[id] = true;
       var changed = marshal.signal(signal, observation ? { observation: observation } : payload);
+      /* A rejected command was never applied. Keeping its ID unclaimed lets a
+         caller retry after the authoritative state changes; only a genuine
+         Marshal transition earns idempotency protection. */
+      if (changed) seenCommands[id] = true;
       return { accepted: changed, revision: latest.revision };
     }
     marshal.onScene(function (scene) { publish(scene); });

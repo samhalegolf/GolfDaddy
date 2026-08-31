@@ -32,6 +32,20 @@ check("duplicate command IDs apply only once", () => {
   const c = { commandId: "lock-1", roundId: "round-1", baseRevision: w.scene().revision, type: "LOCK", payload: {} };
   assert.equal(w.receiveCommand(c).accepted, true); assert.equal(w.receiveCommand(c).duplicate, true); assert.equal(m.shots(1).length, 1);
 });
+check("a rejected command ID stays retryable until Marshal accepts it", () => {
+  const { m, w } = ready();
+  const unlock = { commandId: "retry-unlock", roundId: "round-1", type: "UNLOCK", payload: {} };
+  assert.equal(w.receiveCommand(unlock).accepted, false, "Unlock is rejected before a shot is locked");
+  w.receiveCommand({ commandId: "lock-before-retry", roundId: "round-1", type: "LOCK", payload: {} });
+  assert.equal(w.receiveCommand(unlock).accepted, true, "the same ID can perform the later accepted Unlock");
+});
+check("unknown and invalid-location commands are not marked processed", () => {
+  const { w } = ready();
+  const unknown = { commandId: "unknown", roundId: "round-1", type: "NOPE", payload: {} };
+  assert.equal(w.receiveCommand(unknown).accepted, false); assert.equal(w.receiveCommand(unknown).duplicate, undefined);
+  const invalid = { commandId: "bad-location", roundId: "round-1", type: "LOCK_AT", payload: { location: {} } };
+  assert.equal(w.receiveCommand(invalid).accepted, false); assert.equal(w.receiveCommand(invalid).duplicate, undefined);
+});
 check("tap-to-aim maps a Watch command to the authoritative target", () => {
   const { m, w } = ready(); w.receiveCommand({ commandId: "lock-1", roundId: "round-1", type: "LOCK", payload: {} });
   const target = { lat: -36.9200, lng: 174.7401 };
