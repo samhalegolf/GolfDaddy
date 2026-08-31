@@ -13,7 +13,8 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
     public let identifier = "NativeRoundBridge"
     public let jsName = "NativeRoundBridge"
     public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "publishScene", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "publishScene", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "acknowledgeCommand", returnType: CAPPluginReturnPromise)
     ]
 
     private let queue = DispatchQueue(label: "com.claritygolf.caddy.native-round-bridge")
@@ -51,6 +52,29 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
         // CaddyWatchBridge. Durable Watch command outbox/retry is the next
         // adapter milestone, not silently simulated here.
         notifyListeners("watchCommand", data: ["command": command], retainUntilConsumed: true)
+    }
+
+    /* This is the only authoritative acknowledgement path. Native transport
+       does not infer success: JavaScript returns the result after Marshal has
+       accepted or rejected the command. */
+    @objc public func acknowledgeCommand(_ call: CAPPluginCall) {
+        guard let acknowledgement = call.getObject("acknowledgement"),
+              acknowledgement["commandId"] as? String != nil else {
+            call.reject("A command acknowledgement is required")
+            return
+        }
+        queue.async { [weak self] in
+            guard let self else { return }
+            let message: [String: Any] = ["acknowledgement": acknowledgement]
+            if let session = self.session, session.isReachable {
+                session.sendMessage(message, replyHandler: nil) { _ in
+                    session.transferUserInfo(message)
+                }
+            } else {
+                self.session?.transferUserInfo(message)
+            }
+            call.resolve()
+        }
     }
 
     public func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {

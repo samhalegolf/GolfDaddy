@@ -178,7 +178,7 @@
          caller retry after the authoritative state changes; only a genuine
          Marshal transition earns idempotency protection. */
       if (changed) seenCommands[id] = true;
-      return { accepted: changed, revision: latest.revision };
+      return { accepted: changed, reason: changed ? null : "marshal-rejected", revision: latest.revision };
     }
     marshal.onScene(function (scene) { publish(scene); });
     publish(marshal.scene());

@@ -47,10 +47,27 @@ export const SURFACE_SOURCE = "osm_auto_surface";
    course whose hole geometry did not change. */
 export const SURFACE_MAPPER_VERSION = "s1";
 
-/* Stored polygons are simplified to this many points. A surface is cloned once per hole whose
-   corridor it falls in, so an un-simplified OSM lake ring is multiplied by every hole it
-   touches. Matches the client's cap (gd-course-library-pin-lock.js:1364). */
-export const SURFACE_SHAPE_MAX_POINTS = 64;
+/* Stored polygons are simplified to this many points. Lower than the client's 64-point cap for
+   greens (gd-course-library-pin-lock.js:1364) because surfaces are not greens: a surface is
+   cloned once per hole whose corridor it falls in, so every point is paid for several times
+   over, and the course package ships these to every player on the course.
+
+   Measured on Millbrook rather than guessed: at 64 points its 115 OSM features became 278
+   stored surfaces carrying 7,117 points and a 322KB package, against 5KB before enrichment.
+   At 16 the same course lands at ~160KB. A bunker or water outline is still smooth at play
+   zoom by then - the detail this gives up is on very large lake rings, which are drawn at a
+   scale where it does not read. */
+export const SURFACE_SHAPE_MAX_POINTS = 16;
+
+/* Greens get a cap too, but a far higher one, and for the opposite reason to surfaces. Nothing
+   bounded them server-side at all before this - cleanOsmShape returns whatever OSM drew, and
+   only the CLIENT ever decimated (gd-course-library-pin-lock.js:1364, at 64). So a densely
+   traced green went into course_maps at full resolution and shipped that way.
+   64 rather than the surfaces' 16 because a green's outline is load-bearing geometry: front
+   and back yardages, pin distances and the green-focus render all read it. This is a ceiling
+   on the pathological case, not a decimation of the normal one - Millbrook's greens are 14-25
+   points and are not touched by it. */
+export const GREEN_SHAPE_MAX_POINTS = 64;
 
 /* Gross-mismatch rejection only (the plan's "do not over-clean good OSM geometry"): a 400m
    "bunker" and a 15m "fairway" are tagging errors, anything in between is trusted as-is. */
@@ -1211,12 +1228,24 @@ function upsertResolvedObject(objects, input) {
   const position = toPlain(input.position);
   if (!Number.isFinite(position && position.lat) || !Number.isFinite(position && position.lng)) return null;
   const radius = input.maxDedupeDistanceM || objectDedupeRadius(input.type);
+  const surface = SURFACE_TYPES.has(input.type);
   /* Manual override wins (surfaces only - tee/green keep merging as they always have, which is
      what lets a rescan refine a hand-placed tee rather than duplicate it). */
-  if (SURFACE_TYPES.has(input.type) && isOsmAutoSource(input.source) && manualObjectNear(objects, input.type, position, radius)) return null;
-  const existing = nearestMatchingObject(objects, input.type, position, radius, SURFACE_TYPES.has(input.type) ? input.holeNumber : undefined);
-  const id = (existing && existing.id) || nextObjectId(input.type);
+  if (surface && isOsmAutoSource(input.source) && manualObjectNear(objects, input.type, position, radius)) return null;
   const hole = validHoleNumber(input.holeNumber);
+  /* A surface carrying an OSM id is matched on THAT id, not on proximity.
+     Proximity is wrong here and measurably so: on a real course, clustered bunkering puts
+     genuinely separate bunkers well inside the 14m dedupe radius, and a position match silently
+     folded distinct features into one another - a first run over Millbrook lost 4 of 119 that
+     way. The id is exact, it is what makes a re-run idempotent rather than merely
+     approximately idempotent, and it is the "stable source identity" the maintenance-modes
+     plan asks collection to reconcile on. No position fallback when an id is present: falling
+     back would reinstate exactly the collapse this avoids. */
+  const osmId = input.extra && input.extra.osmId;
+  const existing = surface && osmId
+    ? (objects.find(o => o && o.type === input.type && o.osmId === osmId && validHoleNumber(o.holeNumber) === hole) || null)
+    : nearestMatchingObject(objects, input.type, position, radius, surface ? input.holeNumber : undefined);
+  const id = (existing && existing.id) || nextObjectId(input.type);
   const record = Object.assign({}, existing || {}, {
     id,
     courseId: input.courseId,
@@ -1257,7 +1286,8 @@ function resolveGuideObjects(objects, courseId, guide, match) {
   const tee = ordered[0];
   const greenEnd = ordered[ordered.length - 1];
   const greenCenter = (match && match.green && match.green.center) || greenEnd;
-  const greenShape = (match && match.green && match.green.shape) || fallbackGreenShape(greenCenter, 16, 40);
+  const greenShape = simplifyShape((match && match.green && match.green.shape) || fallbackGreenShape(greenCenter, 16, 40), GREEN_SHAPE_MAX_POINTS)
+    || fallbackGreenShape(greenCenter, 16, 40);
   let saved = 0;
   if (greenCenter && greenShape.length >= 3) {
     if (upsertResolvedObject(objects, { courseId, type: "green", position: greenCenter, shape: greenShape, source: match && match.green ? "osm_auto_green_polygon" : "osm_auto_green_estimate", holeNumber: h, confirmed: true, maxDedupeDistanceM: 4 })) saved++;
@@ -1384,6 +1414,33 @@ export function boundsIntersect(a, b) {
   if (!validBounds(a) || !validBounds(b)) return false;
   return Number(a.south) <= Number(b.north) && Number(a.north) >= Number(b.south)
     && Number(a.west) <= Number(b.east) && Number(a.east) >= Number(b.west);
+}
+
+/* The Overpass area for an enrichment run: the union of the holes this course ALREADY has,
+   padded. Deliberately not courseFootprintFrame's golf=course polygon, which is what the
+   mapping path requeries on.
+
+   That polygon is not this course. At Millbrook - a multi-course facility - it covers the
+   eastern loop only, with a west edge at lng 168.8170 while the saved course runs out to
+   168.8062. Requerying on it returned a payload with nothing near holes 10, 11 and 15-18, and
+   six of eighteen holes came back with no surfaces at all - not because OSM lacks them, but
+   because the second query had stopped asking about that ground.
+
+   The saved holes cannot be wrong about where this course is, which is the whole premise of
+   the job. Anything outside their corridors can never be written to a hole anyway, so this is
+   also the smallest area worth asking for. */
+export const SURFACE_QUERY_PAD_M = 150;
+
+export function savedCourseQueryFrame(objects, holes) {
+  const objectsMap = {};
+  (objects || []).forEach(object => { if (object && object.id) objectsMap[object.id] = object; });
+  const holeData = packageHoleData({ objects: objectsMap, holes: holes || {} });
+  const boxes = Object.keys(holeData).map(hole => holeCaptureBounds(holeData[hole])).filter(validBounds);
+  if (!boxes.length) return null;
+  return expandOsmFrame({
+    south: Math.min(...boxes.map(b => Number(b.south))), north: Math.max(...boxes.map(b => Number(b.north))),
+    west: Math.min(...boxes.map(b => Number(b.west))), east: Math.max(...boxes.map(b => Number(b.east)))
+  }, SURFACE_QUERY_PAD_M);
 }
 
 /* Every surface inside a hole's capture extent is written onto that hole. There is no

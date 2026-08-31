@@ -48,3 +48,32 @@ struct WatchScene: Codable, Equatable {
     var hasRound: Bool { roundId?.isEmpty == false }
     var isBubble: Bool { mode == "bubble" && bubble != nil }
 }
+
+/* The Watch sends only this existing, platform-neutral command vocabulary.
+ There are deliberately no Swift golf-state transitions behind these values. */
+struct CaddyWatchCommand: Codable, Equatable {
+    enum Kind: String, Codable, CaseIterable { case lock = "LOCK", unlock = "UNLOCK", previousHole = "VIEW_PREVIOUS_HOLE", nextHole = "VIEW_NEXT_HOLE" }
+    let commandId: String
+    let roundId: String
+    let baseRevision: Int
+    let createdAt: Double
+    let device: String
+    let type: Kind
+    let payload: [String: String]
+}
+
+struct WatchCommandAcknowledgement: Codable, Equatable {
+    let commandId: String
+    let accepted: Bool
+    let reason: String?
+    let revision: Int?
+}
+
+struct PendingWatchCommand: Codable, Equatable, Identifiable {
+    enum Status: String, Codable { case pending }
+    let command: CaddyWatchCommand
+    var status: Status
+    var attemptCount: Int
+    var lastAttemptAt: Double?
+    var id: String { command.commandId }
+}

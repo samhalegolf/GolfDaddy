@@ -26,7 +26,7 @@
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete } from "./lib/gd-course-fit-core.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
@@ -1281,18 +1281,17 @@ async function runObjectCollectionJob(job) {
   if (!holeNumbers.length) throw new Error("course " + job.course_id + " has no saved holes to enrich - map it first");
 
   await heartbeatJob(job, { stage: "querying-overpass" });
-  let scope = osmQueryScope({}, course.center);
-  let payload = await fetchOverpass(osmGuideQuery(scope));
-  const queryStages = ["around:" + scope.radiusM];
-  const footprint = courseFootprintFrame(payload);
-  if (footprint && !scopeContainsFrame(scope, footprint)) {
-    scope = osmQueryScope({ osmFrame: footprint }, course.center);
-    payload = await fetchOverpass(osmGuideQuery(scope));
-    queryStages.push("footprint-bbox");
-  }
+  const objects = Object.values(course.objects || {}).filter(Boolean).map(object => Object.assign({}, object));
+  /* The saved holes define the query area - NOT courseFootprintFrame, which the mapping path
+     above requeries on. See savedCourseQueryFrame: at a multi-course facility that polygon can
+     cover a different loop than this course, and requerying on it returns a payload with
+     nothing near half the holes. */
+  const frame = savedCourseQueryFrame(objects, course.holes);
+  const scope = frame ? osmQueryScope({ osmFrame: frame }, course.center) : osmQueryScope({}, course.center);
+  const queryStages = [frame ? "saved-holes-bbox" : "around:" + scope.radiusM];
+  const payload = await fetchOverpass(osmGuideQuery(scope));
 
   await heartbeatJob(job, { stage: "collecting-objects" });
-  const objects = Object.values(course.objects || {}).filter(Boolean).map(object => Object.assign({}, object));
   const before = surfaceCounts(objects);
   const enrichment = enrichSurfaceObjects(objects, course.courseId, payload, course.holes);
   const after = surfaceCounts(objects);

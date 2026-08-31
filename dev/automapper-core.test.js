@@ -151,6 +151,29 @@ test("chooseAutoMapGuides picks the longer guide when two candidates for the sam
   assert.strictEqual(core.guideLength(chosen[0].points) > 0, true);
 });
 
+/* Nothing bounded a green's stored outline server-side before - only the client decimated,
+   so a densely traced green went into course_maps at whatever resolution OSM drew it. */
+test("a densely traced green is capped without disturbing an ordinary one", () => {
+  const centre = { lat: -36.8, lng: 174.7 };
+  const dense = Array.from({ length: 300 }, (_, i) => {
+    const a = (i / 300) * Math.PI * 2;
+    return { lat: centre.lat + Math.cos(a) * 0.0002, lng: centre.lng + Math.sin(a) * 0.0002 };
+  });
+  const guide = { hole: 1, points: [{ lat: -36.803, lng: 174.7 }, centre] };
+  const green = { id: "g", center: centre, shape: dense, span: 44 };
+  const resolved = core.resolveGuidesIntoObjects([guide], "dense", [green]);
+  const stored = Object.values(resolved.objects).find(o => o.type === "green");
+  assert.ok(stored.shape.length <= core.GREEN_SHAPE_MAX_POINTS,
+    "capped at " + core.GREEN_SHAPE_MAX_POINTS + ", got " + stored.shape.length);
+  /* Surfaces are capped far harder, because each one is cloned per corridor and greens are
+     load-bearing geometry that yardages read. */
+  assert.ok(core.SURFACE_SHAPE_MAX_POINTS < core.GREEN_SHAPE_MAX_POINTS);
+  /* An ordinary green (Millbrook's run 14-25 points) passes through untouched. */
+  const plain = dense.filter((_, i) => i % 15 === 0);
+  const ok = core.resolveGuidesIntoObjects([guide], "plain", [{ id: "g2", center: centre, shape: plain, span: 44 }]);
+  assert.strictEqual(Object.values(ok.objects).find(o => o.type === "green").shape.length, plain.length);
+});
+
 /* ---------- OSM course surfaces --------------------------------------------------------- */
 
 /* A synthetic course rather than the saved fixture: these tests are about which hole a surface

@@ -20,7 +20,21 @@
     var cap = window.Capacitor;
     var plugin = cap && cap.Plugins && cap.Plugins.NativeRoundBridge;
     if (plugin && typeof plugin.addListener === "function") {
-      try { plugin.addListener("watchCommand", function (event) { watch.receiveCommand(event && event.command); }); } catch (e) {}
+      try {
+        plugin.addListener("watchCommand", function (event) {
+          var command = event && event.command;
+          var result = watch.receiveCommand(command);
+          if (!command || !command.commandId || typeof plugin.acknowledgeCommand !== "function") return;
+          try {
+            plugin.acknowledgeCommand({ acknowledgement: {
+              commandId: command.commandId,
+              accepted: result.accepted === true,
+              reason: result.reason || null,
+              revision: result.revision == null ? null : result.revision
+            } });
+          } catch (e) {}
+        });
+      } catch (e) {}
     }
     bridge.receiveCommand = function (command) { return watch.receiveCommand(command); };
     return true;

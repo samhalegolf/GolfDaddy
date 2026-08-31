@@ -6,7 +6,7 @@ struct ContentView: View {
     var body: some View {
         Group {
             if let scene = session.scene {
-                ShotView(scene: scene, stale: session.state == .stale)
+                ShotView(scene: scene, stale: session.state == .stale, pending: session.pendingCommands, send: session.send)
             } else {
                 VStack(spacing: 7) {
                     Text("CLARITY CADDY").font(.caption2.weight(.semibold)).foregroundStyle(.mint)
