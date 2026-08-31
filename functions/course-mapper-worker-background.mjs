@@ -34,6 +34,8 @@ import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRo
 import { reconcileFacilityClaims, atomicLoopCount, HOLES_PER_LOOP } from "./lib/gd-facility-loops-core.mjs";
 import { assessFacilityStructure, contestedClaims, describeClaimGround, isIndependentClaim, mappingMethodFor, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
 import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry } from "./lib/gd-scorecard-match-core.mjs";
+import { planListingResolution, RESOLUTION_MODE } from "./lib/gd-course-listing-core.mjs";
+import { eliminateInferredCourses } from "./lib/gd-inferred-course-claims-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
 
@@ -570,6 +572,15 @@ function nameLoopsFromCards(loops, cards) {
 
 async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecardEvidence, origin) {
   const published = [];
+  /* A child that cannot be published must not take its siblings down with it.
+   *
+   * One row per course, one set of writes each, and they are independent - so a
+   * conflict or a bad write on the third course is no reason to lose the two
+   * that worked. They are already in the database by then; failing the whole run
+   * would only mean nobody is told which ones landed. The exception is the
+   * PINNED course: that is the row the player selected and the run exists to
+   * fill, and reporting success without it would be a lie. */
+  const failures = [];
   /* Mutates loops[].name in place, so this must run before ids are derived. */
   const naming = nameLoopsFromCards(loops, course.scorecardCards);
   for (let index = 0; index < loops.length; index++) {
@@ -578,123 +589,136 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
     /* index 0 is the pinned loop - separateLoops sorts by distance from the pin. */
     const isPinned = index === 0;
     const derivedId = loopCourseId(loop, course, index);
-    const courseId = isPinned ? course.courseId : (await findExistingLoopRow(loop, derivedId)) || derivedId;
-    /* NO sibling centres, deliberately.
-     *
-     * guideBelongsToCourse drops any guide that sits closer to a sibling's centre
-     * than to this course's - per-hole nearest-centre assignment, which is exactly
-     * the rule separateLoops replaced. Handing it the other loop's centroid made it
-     * re-partition holes that separation had already assigned by routing continuity,
-     * and on interleaved courses it threw away holes that genuinely belong here:
-     * Te Arai's loop 0 came out of separation contiguous 1-18 and lost holes 9 and 10
-     * to this filter, publishing 16.
-     *
-     * It is not needed either way. This payload was built by separateLoops and
-     * contains only this loop's hole features, so there is nothing to partition. The
-     * filter still earns its place on the unseparated path, where a single-course
-     * sweep really can catch a neighbouring club. */
-    /* A loop separated WITHOUT OSM hole numbers arrives carrying resolver
-       GUIDES rather than a payload - the Native Resolver derived its numbering
-       from the loop's own card, which is the only thing that could have, and
-       re-running resolveCourseGeometry over the payload would find no numbered
-       holes and publish an empty course.
-     *
-     * Resolved here rather than by the caller, because resolveGuidesIntoObjects
-     * stamps every object with the courseId it is given and only THIS function
-     * knows which id the row ends up under - loopCourseId can rename a loop off
-     * its card, and findExistingLoopRow can hand back an id from a previous
-     * scan. Resolving early stamped a guess. */
-    const geometry = loop.guides
-      ? Object.assign(
-        resolveGuidesIntoObjects(loop.guides, courseId, loop.resolverGreens || [], isPinned ? (loop.existingObjects || []) : []),
-        { guidesFound: loop.guides.length, greensFound: (loop.resolverGreens || []).length, holesResolved: loop.guides.length }
-      )
-      : resolveCourseGeometry(loop.payload, courseId, loop.centre || course.center, [], []);
+    try {
+      const courseId = isPinned ? course.courseId : (await findExistingLoopRow(loop, derivedId)) || derivedId;
+      /* NO sibling centres, deliberately.
+       *
+       * guideBelongsToCourse drops any guide that sits closer to a sibling's centre
+       * than to this course's - per-hole nearest-centre assignment, which is exactly
+       * the rule separateLoops replaced. Handing it the other loop's centroid made it
+       * re-partition holes that separation had already assigned by routing continuity,
+       * and on interleaved courses it threw away holes that genuinely belong here:
+       * Te Arai's loop 0 came out of separation contiguous 1-18 and lost holes 9 and 10
+       * to this filter, publishing 16.
+       *
+       * It is not needed either way. This payload was built by separateLoops and
+       * contains only this loop's hole features, so there is nothing to partition. The
+       * filter still earns its place on the unseparated path, where a single-course
+       * sweep really can catch a neighbouring club. */
+      /* A loop separated WITHOUT OSM hole numbers arrives carrying resolver
+         GUIDES rather than a payload - the Native Resolver derived its numbering
+         from the loop's own card, which is the only thing that could have, and
+         re-running resolveCourseGeometry over the payload would find no numbered
+         holes and publish an empty course.
+       *
+       * Resolved here rather than by the caller, because resolveGuidesIntoObjects
+       * stamps every object with the courseId it is given and only THIS function
+       * knows which id the row ends up under - loopCourseId can rename a loop off
+       * its card, and findExistingLoopRow can hand back an id from a previous
+       * scan. Resolving early stamped a guess. */
+      const geometry = loop.guides
+        ? Object.assign(
+          resolveGuidesIntoObjects(loop.guides, courseId, loop.resolverGreens || [], isPinned ? (loop.existingObjects || []) : []),
+          { guidesFound: loop.guides.length, greensFound: (loop.resolverGreens || []).length, holesResolved: loop.guides.length }
+        )
+        : resolveCourseGeometry(loop.payload, courseId, loop.centre || course.center, [], []);
 
-    const row = {
-      course_id: courseId,
-      /* "Te Arai Links Golf Club - Course 1" rather than a bare "Course 1": the
-         facility is what the player searched for, the suffix is what tells the
-         two apart. Stripped down to the FACILITY half of the searched name via
-         splitCourseName, not the raw string - "Te Arai Links Golf Club - North
-         Course" pinned on the search result must not become the base name for
-         BOTH siblings, or the second course reads as another North Course
-         before anything has actually identified it. */
-      course_name: loop.name && /^course \d+\b/i.test(loop.name)
-        ? (course.courseName ? splitCourseName(course.courseName).facility + " - " + loop.name : loop.name)
-        : (loop.name || course.courseName || courseId),
-      course_lat: loop.centre ? loop.centre.lat : course.center.lat,
-      course_lng: loop.centre ? loop.centre.lng : course.center.lng,
-      osm_course_ref: loop.osmRef || null,
-      /* Every course out of this separation shares one token, so a search result can
-         offer the choice without re-deriving the link from proximity. The pinned
-         course's id: unique, stable, and readable. */
-      facility_key: course.courseId,
-      objects_json: geometry.objects,
-      holes_json: geometry.holes,
-      geometry_version: MAPPER_VERSION,
-      hole_count: Object.keys(geometry.holes || {}).length || null,
-      published: true,
-      updated_at: new Date().toISOString()
-    };
-    /* Every name this course is known by at publish time - the facility it was
-       searched as, the provisional label, and the card it matched. A course named
-       "Course 1" today can become "South Course" tomorrow without losing the name
-       anything already referred to it by. Built after the row so it can exclude
-       whichever of them became the display name. */
-    row.course_aliases = [...new Set([course.courseName, loop.matchedCard, loop.name].filter(Boolean))]
-      .filter(alias => alias !== row.course_name);
-    /* The pinned row exists by definition and must not have its name replaced by a
-       blank one when the polygon carried no name. */
-    if (isPinned && !loop.name) delete row.course_name;
+      const row = {
+        course_id: courseId,
+        /* "Te Arai Links Golf Club - Course 1" rather than a bare "Course 1": the
+           facility is what the player searched for, the suffix is what tells the
+           two apart. Stripped down to the FACILITY half of the searched name via
+           splitCourseName, not the raw string - "Te Arai Links Golf Club - North
+           Course" pinned on the search result must not become the base name for
+           BOTH siblings, or the second course reads as another North Course
+           before anything has actually identified it. */
+        course_name: loop.name && /^course \d+\b/i.test(loop.name)
+          ? (course.courseName ? splitCourseName(course.courseName).facility + " - " + loop.name : loop.name)
+          : (loop.name || course.courseName || courseId),
+        course_lat: loop.centre ? loop.centre.lat : course.center.lat,
+        course_lng: loop.centre ? loop.centre.lng : course.center.lng,
+        osm_course_ref: loop.osmRef || null,
+        /* Every course out of this separation shares one token, so a search result can
+           offer the choice without re-deriving the link from proximity. The pinned
+           course's id: unique, stable, and readable. */
+        facility_key: course.courseId,
+        objects_json: geometry.objects,
+        holes_json: geometry.holes,
+        geometry_version: MAPPER_VERSION,
+        hole_count: Object.keys(geometry.holes || {}).length || null,
+        published: true,
+        updated_at: new Date().toISOString()
+      };
+      /* Every name this course is known by at publish time - the facility it was
+         searched as, the provisional label, and the card it matched. A course named
+         "Course 1" today can become "South Course" tomorrow without losing the name
+         anything already referred to it by. Built after the row so it can exclude
+         whichever of them became the display name. */
+      row.course_aliases = [...new Set([course.courseName, loop.matchedCard, loop.name].filter(Boolean))]
+        .filter(alias => alias !== row.course_name);
+      /* The pinned row exists by definition and must not have its name replaced by a
+         blank one when the polygon carried no name. */
+      if (isPinned && !loop.name) delete row.course_name;
 
-    if (isPinned) {
-      await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
-        method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(row)
+      if (isPinned) {
+        await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
+          method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(row)
+        });
+      } else {
+        /* on_conflict + merge-duplicates so a rescan updates the sibling it created last
+           time instead of failing on its primary key. */
+        await supabaseFetch(MAPS_TABLE + "?on_conflict=course_id", {
+          method: "POST",
+          headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+          body: JSON.stringify([Object.assign({ id: "published::" + courseId, published_at: new Date().toISOString() }, row)])
+        });
+      }
+
+      const courseBounds = courseBoundsFor({ courseId, objects: geometry.objects, holes: geometry.holes });
+      const holeNumbers = Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite);
+
+      /* A loop separated by its own card knows its own length, and the facility's
+         expectedHoles is the wrong number for it: an 18 and a nine sharing a site
+         would judge the nine against 18 and call a complete course short. */
+      const coverage = courseCoverageComplete({ holeNumbers, expectedHoles: loop.expectedHoles || expectedHoles });
+      const visualChain = await chainVisualSnapshot(courseId, courseBounds, origin, coverage)
+        .catch(error => ({ chained: false, reason: String(error && error.message || error).slice(0, 300) }));
+
+      published.push({
+        courseId,
+        courseName: row.course_name || course.courseName || courseId,
+        osmRef: loop.osmRef || null,
+        pinned: isPinned,
+        method: loop.method,
+        nameSource: loop.nameSource || (loop.name ? "osm-polygon" : "derived"),
+        matchedCard: loop.matchedCard || null,
+        holesResolved: geometry.holesResolved,
+        guidesFound: geometry.guidesFound,
+        greensFound: geometry.greensFound,
+        saved: geometry.saved,
+        /* Contiguity is judged on what SURVIVED resolution, not on what separation
+           handed over - the Te Arai run had 16 guides and six holes, and only the
+           second number was ever the truth about the course. */
+        contiguous: loopIsContiguous(holeNumbers),
+        holeNumbers: holeNumbers.sort((a, b) => a - b),
+        awayFromPinM: loop.awayFromPinM,
+        courseBounds,
+        visualChain
       });
-    } else {
-      /* on_conflict + merge-duplicates so a rescan updates the sibling it created last
-         time instead of failing on its primary key. */
-      await supabaseFetch(MAPS_TABLE + "?on_conflict=course_id", {
-        method: "POST",
-        headers: { Prefer: "resolution=merge-duplicates,return=representation" },
-        body: JSON.stringify([Object.assign({ id: "published::" + courseId, published_at: new Date().toISOString() }, row)])
+    } catch (error) {
+      if (isPinned) throw error;
+      failures.push({
+        courseId: derivedId,
+        name: loop.name || null,
+        holes: (loop.holeNumbers || []).length,
+        reason: String((error && error.message) || error).slice(0, 200)
       });
     }
-
-    const courseBounds = courseBoundsFor({ courseId, objects: geometry.objects, holes: geometry.holes });
-    const holeNumbers = Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite);
-
-    /* A loop separated by its own card knows its own length, and the facility's
-       expectedHoles is the wrong number for it: an 18 and a nine sharing a site
-       would judge the nine against 18 and call a complete course short. */
-    const coverage = courseCoverageComplete({ holeNumbers, expectedHoles: loop.expectedHoles || expectedHoles });
-    const visualChain = await chainVisualSnapshot(courseId, courseBounds, origin, coverage)
-      .catch(error => ({ chained: false, reason: String(error && error.message || error).slice(0, 300) }));
-
-    published.push({
-      courseId,
-      courseName: row.course_name || course.courseName || courseId,
-      osmRef: loop.osmRef || null,
-      pinned: isPinned,
-      method: loop.method,
-      nameSource: loop.nameSource || (loop.name ? "osm-polygon" : "derived"),
-      matchedCard: loop.matchedCard || null,
-      holesResolved: geometry.holesResolved,
-      guidesFound: geometry.guidesFound,
-      greensFound: geometry.greensFound,
-      saved: geometry.saved,
-      /* Contiguity is judged on what SURVIVED resolution, not on what separation
-         handed over - the Te Arai run had 16 guides and six holes, and only the
-         second number was ever the truth about the course. */
-      contiguous: loopIsContiguous(holeNumbers),
-      holeNumbers: holeNumbers.sort((a, b) => a - b),
-      awayFromPinM: loop.awayFromPinM,
-      courseBounds,
-      visualChain
-    });
   }
   if (naming) published.naming = naming;
+  /* Retryable, not lost: the ground is still there and the next scan of this
+     facility will offer this course again. */
+  if (failures.length) published.failures = failures;
   return published;
 }
 
@@ -1017,6 +1041,7 @@ async function publishUnnumberedFacility(context) {
     : null;
 
   const published = await publishSeparatedLoops(job, course, loops, expectedHoles, null, origin);
+  if (published.failures) record.failedChildren = published.failures;
   /* Geometry is finished. What the loops are to EACH OTHER is a separate
      question with a separate owner - see organiseFacility, which is not allowed
      to be consulted while claims are still being matched. */
@@ -1524,6 +1549,116 @@ async function runMapperJob(job, origin) {
     }
   }
 
+  /* WHO SAID THIS SITE HOLDS SEVERAL COURSES - the search, or us?
+   *
+   * The transition that used to happen here without being named: "hole numbers
+   * repeat" became "publish several separated courses", in one step, whatever
+   * the player had actually selected. That is the step Millbrook went wrong on.
+   * A scan started from the individual listing "Millbrook - Remarkables 18"
+   * caught the rest of the resort's golf geometry, the collision fired, and the
+   * mapper set about interpreting the ground into courses of its own invention -
+   * when the answer had been handed to it in the search result.
+   *
+   * So the transition is now a router with three named outcomes, and the whole
+   * point of naming them is that two of them treat duplicated ground in
+   * OPPOSITE ways:
+   *
+   *   single-listing            the selection names one course. Map that course.
+   *                             The rest of the site belongs to other listings,
+   *                             and duplicating their ground later is fine.
+   *   listing-led-multi-course  the selection names the place, and credible
+   *                             individual course listings sit on it. They are
+   *                             the children, they carry their own identity, and
+   *                             nothing below second-guesses their ground.
+   *   geometry-led-multi-course nothing named the courses, so the mapper is
+   *                             inferring them - and only here does unique
+   *                             physical-hole allocation become evidence.
+   *
+   * See lib/gd-course-listing-core.mjs for the rules and why the order runs this
+   * way round. */
+  let resolution = { mode: RESOLUTION_MODE.SINGLE_LISTING, reason: "no-multi-course-signal-on-this-ground" };
+  /* Written now rather than at each return, so a job row that failed halfway
+     still says which of the three problems the run thought it was solving. */
+  diagnostics.resolution = Object.assign({}, resolution);
+  /* Everything a single-listing verdict does: throw the site's other courses
+     away and carry on as the ordinary one-course run below, over the ground the
+     selected listing actually owns. Nothing downstream needs to know it
+     happened - the collision is recomputed from the scoped payload, so it is
+     simply no longer a multi-course site as far as this run is concerned. */
+  const scopeRunToLoop = (loop, why) => {
+    payload = loop.payload;
+    collision = detectHoleNumberCollision(payload);
+    geometry = resolveCourseGeometry(payload, course.courseId, loop.centre || course.center, existingObjects, []);
+    queryStages.push("scoped-to-one-course");
+    diagnostics.scopedToOneCourse = {
+      reason: why,
+      name: loop.name || course.courseName || null,
+      osmRef: loop.osmRef || null,
+      method: loop.method,
+      holes: loop.holeNumbers.length,
+      contiguous: loop.contiguous,
+      otherCoursesOnSite: null
+    };
+    loops = null;
+  };
+
+  if (loops && loops.length > 1) {
+    const plan = planListingResolution({ courseName: course.courseName, loops });
+    resolution = { mode: plan.mode, reason: plan.reason };
+    diagnostics.resolution = {
+      mode: plan.mode,
+      reason: plan.reason,
+      listingKind: plan.listingKind,
+      parentListing: plan.parentListing,
+      childListings: plan.childListings.map(listing => listing.name),
+      selectedListing: plan.selectedListing ? plan.selectedListing.name : null,
+      courseCandidates: loops.length
+    };
+
+    if (plan.mode === RESOLUTION_MODE.SINGLE_LISTING) {
+      const chosen = loops[plan.scopedLoopIndex] || loops[0];
+      const others = loops.length - 1;
+      scopeRunToLoop(chosen, plan.reason);
+      diagnostics.scopedToOneCourse.otherCoursesOnSite = others;
+      /* Deliberately NOT a warning. The other courses here are not a shortfall
+         of this run - they are other listings, and a player who wants one
+         searches for it and gets a scan of its own. Duplicated geometry between
+         two listing-backed records is acceptable by design; see the listing
+         core's header. */
+    } else if (plan.mode === RESOLUTION_MODE.GEOMETRY_LED) {
+      /* ELIMINATION, and only here.
+       *
+       * The mapper is inferring these courses, so a candidate assembled from
+       * ground a stronger candidate already claimed is not a second course, and
+       * a handful of scattered holes is not a course at all - Millbrook
+       * produced a "1, 2, 18". Listing-backed children never reach this line. */
+      const inferred = eliminateInferredCourses(loops.map((loop, index) => ({
+        index,
+        name: loop.name || null,
+        contiguous: loop.contiguous,
+        holes: loop.holeFeatures || []
+      })));
+      diagnostics.inferredCourses = inferred.ledger;
+      if (inferred.withheld.length) {
+        const survivors = inferred.courses.map(entry => loops[entry.index]);
+        warnings.push(
+          inferred.withheld.length + " separated candidate" + (inferred.withheld.length === 1 ? "" : "s")
+          + " withheld as unresolved facility ground rather than published as courses ("
+          + inferred.ledger.withheldCourses.map(entry => (entry.name || "candidate") + ": " + entry.ownHoles + " holes, " + entry.reason).join("; ")
+          + ")"
+        );
+        loops = survivors;
+      }
+      /* One course left standing is not a facility. Publishing it through the
+         separated path would give it a "- Course 1" suffix and a facility_key
+         for siblings that do not exist, so it takes the ordinary single-course
+         route instead. Nothing left standing falls through to the resolver
+         below, which is the honest answer: separation produced no course. */
+      if (loops.length === 1) scopeRunToLoop(loops[0], "only-one-inferred-course-survived-elimination");
+      else if (!loops.length) loops = null;
+    }
+  }
+
   /* Every separated course published, the pinned one into the row this job was enqueued
      against so the player's own selection resolves immediately, the rest into rows of
      their own. Returns early: the single-course path below has nothing left to do. */
@@ -1558,6 +1693,16 @@ async function runMapperJob(job, origin) {
       separatedByGeometry: loop.method === "routing"
     })));
     const published = await publishSeparatedLoops(job, course, loops, expectedHoles, scorecardEvidence, origin);
+    /* A child that could not be written is outstanding, not fatal - the ones
+       that did publish are correct and playable, and saying which failed is
+       what makes the next run a retry rather than a rediscovery. */
+    if (published.failures) {
+      diagnostics.failedChildren = published.failures;
+      warnings.push(published.failures.length + " of " + (published.length + published.failures.length)
+        + " courses at this facility could not be written ("
+        + published.failures.map(entry => entry.courseId + ": " + entry.reason).join("; ")
+        + ") - the rest published and are unaffected");
+    }
     diagnostics.facilityStructure = structure;
     diagnostics.published = published.map(entry => ({ courseId: entry.courseId, holes: entry.holesResolved, contiguous: entry.contiguous, nameSource: entry.nameSource }));
     if (published.naming) diagnostics.loopNaming = published.naming;
@@ -1579,6 +1724,14 @@ async function runMapperJob(job, origin) {
       courseId: course.courseId,
       mapperVersion: MAPPER_VERSION,
       multiCourse: true,
+      /* WHY several courses are being published, not just THAT they are.
+         `multiCourse: true` covered a listing-led split and a geometry-led one
+         with the same flag, so nothing downstream - and nobody reading a job
+         row - could tell a facility whose courses the search had already named
+         from one the mapper partitioned itself. Those two have different
+         trustworthiness and opposite rules about duplicated ground. */
+      resolutionMode: resolution.mode,
+      resolutionReason: resolution.reason,
       coursesPublished: published,
       facilityStructure: structure.structure,
       facilityOrganisation: organiseFacility(loops, {
@@ -1748,6 +1901,15 @@ async function runMapperJob(job, origin) {
           courseId: course.courseId,
           mapperVersion: MAPPER_VERSION,
           multiCourse: true,
+          /* Always geometry-led: nothing on this ground carried a hole number,
+             let alone a course listing, so every one of these courses was
+             inferred - from the cards, over ground the mapper allocated. The
+             elimination that keeps that honest is the card reconciler's own
+             (contestedClaims, dropContainedClaims, dedupeLoops in
+             lib/gd-facility-loops-core.mjs), which is why the numbered path's
+             claim ledger is not run a second time over it. */
+          resolutionMode: RESOLUTION_MODE.GEOMETRY_LED,
+          resolutionReason: "no-osm-hole-numbering-courses-derived-from-cards",
           coursesPublished: separated.published,
           /* What the site IS, on the row rather than inferred from a row count.
              Downstream decides grouping and round-start pairing from this; it
@@ -1891,6 +2053,13 @@ async function runMapperJob(job, origin) {
     courseId: course.courseId,
     fit,
     mapperVersion: MAPPER_VERSION,
+    /* Stated on the ordinary course too. "single-listing" here is not a
+       fallback for "no facility fields" - it is the answer: one listing was
+       selected and one course was mapped. When the router scoped a multi-course
+       site down to the listing the player picked, this is the same value for the
+       same reason, and diagnostics.scopedToOneCourse says which ground it kept. */
+    resolutionMode: resolution.mode,
+    resolutionReason: resolution.reason,
     guidesFound: geometry.guidesFound,
     greensFound: geometry.greensFound,
     holesResolved: geometry.holesResolved,

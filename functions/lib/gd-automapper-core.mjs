@@ -874,6 +874,15 @@ export function separateLoops(payload, centre) {
       method: group.method,
       centre: loopCentre,
       holeNumbers: [...new Set(numbers)].sort((a, b) => a - b),
+      /* The PHYSICAL holes, number and OSM element together. holeNumbers cannot
+         answer "did two of these courses claim the same ground" - both courses
+         on a 36-hole site are numbered 1..18 - so the element ref travels with
+         the number for anything that has to allocate ground rather than count
+         it. See gd-inferred-course-claims-core.mjs. */
+      holeFeatures: group.features.map(feature => ({
+        number: feature.number,
+        id: String(feature.element && feature.element.type || "way") + "/" + String(feature.element && feature.element.id)
+      })),
       contiguous: loopIsContiguous(numbers),
       awayFromPinM: loopCentre && centre ? Math.round(distance(centre, loopCentre)) : null,
       payload: Object.assign({}, payload, {
