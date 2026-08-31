@@ -3605,7 +3605,7 @@ function gdAdminCourseVisualControls(record,courseId){
      the group is off. */
   const mowingField=`<label>Visibility level<select id="gdCourseVisualMowing"><option value="Unknown" hidden ${mowing==="Unknown"?"selected":""}>Off</option>${["Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>`;
   const mowingPanel=gdAdminCourseVisualEffectHeader("mowing","Mow lines",mowingOn)+gdAdminCourseVisualEffectBody(mowingOn,mowingField);
-  const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseRemap('${key}')">Remap from OSM</button><button type="button" onclick="return gdAdminCourseUpdateScorecards('${key}')">Update Scorecards</button><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div>`;
+  const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseRemap('${key}')">Full Remap</button><button type="button" onclick="return gdAdminCourseCollectExtraObjects('${key}')">Collect Extra Objects</button><button type="button" onclick="return gdAdminCourseUpdateScorecards('${key}')">Update Scorecards</button><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-Capture Visuals</button><button type="button" onclick="return gdAdminCourseVisualUpdateWithActiveRecipe('${key}')">Re-Bake Visuals</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div>`;
   const groups=[
     {id:"preset",icon:"🎨",label:"Preset",body:presetField+presetRail},
     /* The recipe area is its own tab, not a footnote under Preset: a preset is one ingredient
@@ -3751,6 +3751,43 @@ function gdAdminCourseVisualEnsurePipelineCourse(courseId){
    that both the pin gate and the Overpass query read. Delete it and the course disappears
    from the picker, the pin dialog fires instead of a package request, and nothing is ever
    enqueued. This clears the geometry and leaves the identity and the location alone. */
+/* Collect Extra Objects - the safe retro-fit next to Full Remap above.
+
+   Deliberately worded to say what it will NOT do, because that is the whole reason it exists
+   as a separate button: a course a golfer is already playing gets bunkers, fairways and
+   hazards added underneath it without its holes, greens or published frames being rebuilt.
+   The guarantee is structural rather than a promise made here - the worker's collection path
+   writes objects_json alone and the visual chain is unreachable from it (see
+   functions/course-mapper-worker-background.mjs:runObjectCollectionJob).
+
+   No destructive confirmation, unlike Remap: there is nothing to lose. The toast still names
+   the scope so it is never mistaken for the button above it. */
+async function gdAdminCourseCollectExtraObjects(courseId){
+  courseId=String(courseId||"");
+  if(!courseId)return false;
+  try{
+    const token=await gdAdminCourseDbAccessToken();
+    if(!token){gdAdminCourseVisualToast("Sign in again to collect objects");return false;}
+    const res=await fetch("/api/course-mapper-jobs",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+      body:JSON.stringify({courseId:courseId,kind:"collect_extra_objects"})
+    });
+    let data=null;
+    try{data=await res.json();}catch(e){}
+    if(res.status===409){gdAdminCourseVisualToast("No saved holes yet - map the course first");return false;}
+    if(res.status===404){gdAdminCourseVisualToast("No saved map for "+courseId+" - map it first");return false;}
+    if(res.status===403){gdAdminCourseVisualToast("Admin only");return false;}
+    if(!res.ok){gdAdminCourseVisualToast("Collect objects failed ("+res.status+")");return false;}
+    gdAdminCourseVisualToast(data&&data.deduped
+      ?"A collection run is already in progress"
+      :"Collecting extra objects for "+courseId+" - holes, greens and visuals are left as they are");
+    return false;
+  }catch(error){
+    gdAdminCourseVisualToast("Collect objects failed to send");
+    return false;
+  }
+}
 async function gdAdminCourseRemap(courseId){
   courseId=String(courseId||"");
   if(!courseId)return false;

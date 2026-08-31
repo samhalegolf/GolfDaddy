@@ -17,6 +17,12 @@
    Line references below point at the client functions this was ported from, so the two can
    be compared directly when the client algorithm changes. */
 
+/* The capture corridor is imported rather than re-derived: surfaces are selected by the exact
+   box a hole is photographed at, so a second copy of that arithmetic here could drift and start
+   putting hazards on holes they are not visible on. One-way - gd-visual-plan-core.mjs imports
+   only gd-imagery-sources.mjs, so there is no cycle. */
+import { packageHoleData, boundsFromPoints, padBounds, boundsSpanM, validBounds, capturePolicy } from "./gd-visual-plan-core.mjs";
+
 /* Bumped whenever this module's resolution algorithm changes in a way that should make an
    already-mapped course eligible to be remapped. Compared against course_maps.geometry_version
    by functions/course-mapper-jobs.mjs and written by functions/course-mapper-worker-background.mjs -
@@ -28,7 +34,31 @@ export const MAPPER_VERSION = "v2";
 export const OSM_AUTOMAPPER_RADIUS_M = 1400; // gd-course-library-pin-lock.js:2109
 export const OSM_AUTO_GREEN_MATCH_RADIUS_M = 95; // gd-course-library-pin-lock.js:40
 export const OSM_AUTO_GREEN_MAX_SPAN_M = 145; // gd-course-library-pin-lock.js:41
-export const OBJECT_DEDUPE_RADIUS_M = { green: 26, bunker: 14, tee: 9, fairway: 12, default: 10 }; // :39
+export const OBJECT_DEDUPE_RADIUS_M = { green: 26, bunker: 14, tee: 9, fairway: 12, water: 30, fairway_area: 40, default: 10 }; // :39
+
+/* OSM-derived course surfaces. Deliberately NOT "fairway": that type is already taken by the
+   1-2 centreline sample points fairwaySamplesForGuide writes, which packageHoleData reads into
+   a hole's route and planCourseCaptures turns into corridorBounds. Reusing the name would push
+   every fairway polygon's centroid into the route and shift every hole's capture frame. */
+export const SURFACE_TYPES = new Set(["fairway_area", "bunker", "water"]);
+export const SURFACE_SOURCE = "osm_auto_surface";
+
+/* Bumped independently of MAPPER_VERSION so an improved surface pass can be re-run over a
+   course whose hole geometry did not change. */
+export const SURFACE_MAPPER_VERSION = "s1";
+
+/* Stored polygons are simplified to this many points. A surface is cloned once per hole whose
+   corridor it falls in, so an un-simplified OSM lake ring is multiplied by every hole it
+   touches. Matches the client's cap (gd-course-library-pin-lock.js:1364). */
+export const SURFACE_SHAPE_MAX_POINTS = 64;
+
+/* Gross-mismatch rejection only (the plan's "do not over-clean good OSM geometry"): a 400m
+   "bunker" and a 15m "fairway" are tagging errors, anything in between is trusted as-is. */
+export const SURFACE_SPAN_LIMITS_M = {
+  bunker: { min: 2, max: 140 },
+  fairway_area: { min: 25, max: 900 },
+  water: { min: 3, max: 1200 }
+};
 
 /* ---------- plain geometry (no Leaflet) --------------------------------------------------- */
 
@@ -1103,14 +1133,48 @@ export function asGreenRecord(object) {
   };
 }
 
-export function nearestMatchingObject(objects, type, center, maxDistance = objectDedupeRadius(type)) {
+/* holeNumber scopes the match to objects already on that hole, and is required for surfaces.
+   A bunker between two holes is stored once PER hole (play is one hole at a time, so a shared
+   feature is cloned rather than assigned), and those clones sit at identical coordinates.
+   Without the scope the second clone matches the first and upsertResolvedObject rewrites its
+   holeNumber instead of inserting - the same flip that cost Omaha Beach hole 5 its green (see
+   assignGreensToGuides). Left undefined for tee/green/fairway, which keep the original
+   position-only behaviour. */
+export function nearestMatchingObject(objects, type, center, maxDistance = objectDedupeRadius(type), holeNumber) {
   if (!center) return null;
+  const scoped = holeNumber === undefined ? undefined : validHoleNumber(holeNumber);
   let best = null;
   objects.filter(o => o && o.type === type).forEach(object => {
+    if (scoped !== undefined && validHoleNumber(object.holeNumber) !== scoped) return;
     const d = distance(objectCenter(object), center);
     if (d <= maxDistance && (!best || d < best.distance)) best = { object, distance: d };
   });
   return best ? best.object : null;
+}
+
+export function isOsmAutoSource(source) {
+  return /^osm_auto/.test(String(source || ""));
+}
+
+/* A hand-placed object of the same type near this position, IGNORING hole number - manual
+   bunkers are stored with holeNumber null (gd-course-library-pin-lock.js:1368), so the
+   hole-scoped dedupe above will never see one. Without this an OSM bunker would be written
+   on top of the pin an admin placed for it rather than suppressed by it. */
+export function manualObjectNear(objects, type, center, maxDistance = objectDedupeRadius(type)) {
+  if (!center) return null;
+  return objects.filter(o => o && o.type === type && !isOsmAutoSource(o.source))
+    .find(object => distance(objectCenter(object), center) <= maxDistance) || null;
+}
+
+/* Client simplifyShape (gd-course-library-pin-lock.js:1193), ported unchanged so a shape
+   written by the server and one written by Studio decimate identically. */
+export function simplifyShape(points, max = SURFACE_SHAPE_MAX_POINTS) {
+  if (!Array.isArray(points) || !points.length) return null;
+  const clean = points.map(toPlain).filter(p => Number.isFinite(p && p.lat) && Number.isFinite(p && p.lng));
+  if (clean.length < 3) return null;
+  const step = Math.max(1, Math.ceil(clean.length / max));
+  const out = clean.filter((_, i) => i % step === 0);
+  return out.length >= 3 ? out : clean.slice(0, Math.min(clean.length, max));
 }
 
 export function mergeObjectRecord(target, source) {
@@ -1146,7 +1210,11 @@ function nextObjectId(type) {
 function upsertResolvedObject(objects, input) {
   const position = toPlain(input.position);
   if (!Number.isFinite(position && position.lat) || !Number.isFinite(position && position.lng)) return null;
-  const existing = nearestMatchingObject(objects, input.type, position, input.maxDedupeDistanceM || objectDedupeRadius(input.type));
+  const radius = input.maxDedupeDistanceM || objectDedupeRadius(input.type);
+  /* Manual override wins (surfaces only - tee/green keep merging as they always have, which is
+     what lets a rescan refine a hand-placed tee rather than duplicate it). */
+  if (SURFACE_TYPES.has(input.type) && isOsmAutoSource(input.source) && manualObjectNear(objects, input.type, position, radius)) return null;
+  const existing = nearestMatchingObject(objects, input.type, position, radius, SURFACE_TYPES.has(input.type) ? input.holeNumber : undefined);
   const id = (existing && existing.id) || nextObjectId(input.type);
   const hole = validHoleNumber(input.holeNumber);
   const record = Object.assign({}, existing || {}, {
@@ -1163,7 +1231,7 @@ function upsertResolvedObject(objects, input) {
     greenSource: input.type === "green" ? (input.source || (existing && existing.source) || "unknown") : undefined,
     createdAt: (existing && existing.createdAt) || new Date().toISOString(),
     updatedAt: new Date().toISOString()
-  });
+  }, input.extra || {});
   record.lifecycle = objectLifecycle(record);
   record.targetEligible = record.type === "green" && record.confirmed;
   if (existing) {
@@ -1232,7 +1300,130 @@ export function assignGreensToGuides(guides, greens) {
   });
 }
 
-export function resolveGuidesIntoObjects(guides, courseId, greens, existingObjects = []) {
+/* ---------- OSM course surfaces (fairway / bunker / water) -------------------------------- */
+
+/* One OSM element -> the surface rings it contributes. A relation carries its rings as members
+   and osmGuidePointsFromElement flattens all of them into a single point list, which is fine
+   for a centroid but produces a nonsense polygon - so members are split back out here and each
+   outer ring becomes its own surface. Inner rings (a mapped island inside a lake) are dropped
+   in V1: the ring itself is not drawn, so the worst case is a pond rendered without its island. */
+function surfaceRingsFromElement(element) {
+  const members = (element && element.members) || [];
+  const rings = members
+    .filter(member => member && Array.isArray(member.geometry) && String(member.role || "") !== "inner")
+    .map(member => cleanOsmShape(member.geometry.map(p => ({ lat: Number(p.lat), lng: Number(p.lng ?? p.lon) }))))
+    .filter(Boolean);
+  if (rings.length) return rings;
+  const single = cleanOsmShape(osmGuidePointsFromElement(element));
+  return single ? [single] : [];
+}
+
+/* golf=* is authoritative about what a thing IS. natural=water is not - a lake beside a course
+   is still a lake, and calling every one of them a penalty area would have Caddy asserting a
+   Rules-of-Golf status OSM never claimed. Both are drawn; only the tagged ones are penalty
+   areas. */
+function surfaceKindForElement(element) {
+  const tags = (element && element.tags) || {};
+  const golf = String(tags.golf || "").toLowerCase();
+  if (golf === "fairway") return { type: "fairway_area", hazardClass: null };
+  if (golf === "bunker") return { type: "bunker", hazardClass: null };
+  if (golf === "water_hazard" || golf === "lateral_water_hazard") return { type: "water", hazardClass: "penalty_area" };
+  if (golf) return null; /* green / tee / hole / course / rough - not a V1 surface */
+  if (String(tags.natural || "").toLowerCase() === "water" || tags.water) return { type: "water", hazardClass: "water" };
+  return null;
+}
+
+export function parseOsmSurfaces(payload) {
+  const out = [];
+  ((payload && payload.elements) || []).forEach(element => {
+    const kind = surfaceKindForElement(element);
+    if (!kind) return;
+    surfaceRingsFromElement(element).forEach((ring, index) => {
+      const centre = shapeCentroid(ring);
+      if (!centre) return;
+      const span = greenShapeSpan(ring, centre);
+      const limits = SURFACE_SPAN_LIMITS_M[kind.type];
+      if (limits && (!Number.isFinite(span) || span < limits.min || span > limits.max)) return;
+      const shape = simplifyShape(ring);
+      if (!shape) return;
+      out.push({
+        type: kind.type,
+        hazardClass: kind.hazardClass,
+        centre,
+        shape,
+        span,
+        bounds: boundsFromPoints(ring),
+        osmId: (element.type || "osm") + "/" + (element.id != null ? element.id : "x") + (index ? "#" + index : "")
+      });
+    });
+  });
+  return out;
+}
+
+/* The extent a hole is actually CAPTURED at, rebuilt from the same inputs and with the same
+   arithmetic as planCourseCaptures (gd-visual-plan-core.mjs:297 and the padBounds(bleedMeters)
+   in item()). Deliberately not an approximation of it: surfaces selected by a box that differed
+   from the frame's box would put a bunker on a hole it is not visible on, or omit one the
+   player can plainly see. packageHoleData is reused rather than re-deriving the route, so the
+   two cannot drift. */
+export function holeCaptureBounds(holeData) {
+  if (!holeData) return null;
+  const route = Array.isArray(holeData.route) ? holeData.route : [];
+  const greenShape = Array.isArray(holeData.greenShape) ? holeData.greenShape : [];
+  let bounds = boundsFromPoints([
+    holeData.tee && holeData.tee.position,
+    holeData.green && holeData.green.position,
+    ...route, ...greenShape
+  ].filter(Boolean));
+  if (!validBounds(bounds)) return null;
+  if (boundsSpanM(bounds).diag < 35) bounds = padBounds(bounds, 32);
+  return padBounds(bounds, capturePolicy("play-corridor").bleedMeters);
+}
+
+export function boundsIntersect(a, b) {
+  if (!validBounds(a) || !validBounds(b)) return false;
+  return Number(a.south) <= Number(b.north) && Number(a.north) >= Number(b.south)
+    && Number(a.west) <= Number(b.east) && Number(a.east) >= Number(b.west);
+}
+
+/* Every surface inside a hole's capture extent is written onto that hole. There is no
+   assignment step and nothing owns anything: GPS Play is one hole at a time with no free
+   panning, so a bunker that falls in three corridors is simply stored three times, and the
+   question "which hole does this bunker belong to" never has to be answered. An axis-aligned
+   box is over-inclusive on a diagonal hole - see the note at gd-visual-plan-core.mjs:344 - but
+   under cloning that is the correct behaviour rather than a defect: anything inside the box is
+   inside the frame the player is looking at, so drawing it beats hiding it.
+
+   Absence is not failure. A course with no fairway polygons in OSM enriches nothing and stays
+   exactly as playable as it was. */
+export function enrichSurfaceObjects(objects, courseId, payload, holes) {
+  const surfaces = parseOsmSurfaces(payload);
+  if (!surfaces.length) return { surfaces: 0, cloned: 0 };
+  const objectsMap = {};
+  objects.forEach(object => { if (object && object.id) objectsMap[object.id] = object; });
+  const holeData = packageHoleData({ objects: objectsMap, holes: holes || {} });
+  let cloned = 0;
+  Object.keys(holeData).map(Number).sort((a, b) => a - b).forEach(holeNumber => {
+    const bounds = holeCaptureBounds(holeData[holeNumber]);
+    if (!bounds) return;
+    surfaces.forEach(surface => {
+      if (!boundsIntersect(surface.bounds, bounds)) return;
+      const saved = upsertResolvedObject(objects, {
+        courseId, type: surface.type, position: surface.centre, shape: surface.shape,
+        source: SURFACE_SOURCE, holeNumber, confirmed: true,
+        extra: {
+          hazardClass: surface.hazardClass || undefined,
+          osmId: surface.osmId,
+          surfaceMapperVersion: SURFACE_MAPPER_VERSION
+        }
+      });
+      if (saved) cloned++;
+    });
+  });
+  return { surfaces: surfaces.length, cloned };
+}
+
+export function resolveGuidesIntoObjects(guides, courseId, greens, existingObjects = [], payload = null) {
   const objects = (existingObjects || []).map(o => Object.assign({}, o));
   let saved = 0, polygons = 0, fallbacks = 0;
   assignGreensToGuides(guides, greens).forEach(({ guide, match }) => {
@@ -1241,13 +1432,17 @@ export function resolveGuidesIntoObjects(guides, courseId, greens, existingObjec
     if (result.greenPolygon) polygons++;
     if (result.fallback) fallbacks++;
   });
-  const objectsMap = {};
-  objects.forEach(object => { objectsMap[object.id] = object; });
   const holes = {};
   objects.filter(o => o.type === "green" && o.confirmed && validHoleNumber(o.holeNumber)).forEach(green => {
     holes[green.holeNumber] = asGreenRecord(green);
   });
-  return { objects: objectsMap, holes, saved, polygons, fallbacks };
+  /* After hole resolution, never before it: surfaces are enrichment and must not be able to
+     create, move or renumber a hole. No payload (a caller that only has guides) simply skips
+     it. Runs on `objects` so the clones land in the same map everything else is written to. */
+  const surfaces = payload ? enrichSurfaceObjects(objects, courseId, payload, holes) : { surfaces: 0, cloned: 0 };
+  const objectsMap = {};
+  objects.forEach(object => { objectsMap[object.id] = object; });
+  return { objects: objectsMap, holes, saved, polygons, fallbacks, surfaces };
 }
 
 /* Top-level entry: OSM Overpass payload -> a plain {objects, holes} pair shaped like
@@ -1260,6 +1455,6 @@ export function resolveGuidesIntoObjects(guides, courseId, greens, existingObjec
 export function resolveCourseGeometry(payload, courseId, coursePoint, existingObjects = [], siblingPoints = []) {
   const bundle = parseOsmGuideBundle(payload);
   const guides = chooseAutoMapGuides(bundle.guides, coursePoint, siblingPoints);
-  const result = resolveGuidesIntoObjects(guides, courseId, bundle.greens, existingObjects);
+  const result = resolveGuidesIntoObjects(guides, courseId, bundle.greens, existingObjects, payload);
   return Object.assign(result, { guidesFound: bundle.guides.length, greensFound: bundle.greens.length, holesResolved: guides.length });
 }

@@ -705,6 +705,71 @@ check("a scene is published only when something actually changed", () => {
   assert.strictEqual(scenes, 1, "an inert signal repaints nothing");
 });
 
+console.log("\n— OSM surfaces —");
+
+/* A ring around a point, big enough to survive the >= 3 point rule. */
+function ringAt(base, r) {
+  return [offsetM(base, r, -r), offsetM(base, r, r), offsetM(base, -r, r), offsetM(base, -r, -r)];
+}
+const SURFACES = {
+  fairways: [{ shape: ringAt(offsetM(TEE, -150, 0), 30), centre: offsetM(TEE, -150, 0) }],
+  bunkers: [{ shape: ringAt(offsetM(TEE, -280, 15), 7), centre: offsetM(TEE, -280, 15) }],
+  water: [
+    { shape: ringAt(offsetM(TEE, -200, 40), 25), centre: offsetM(TEE, -200, 40), hazardClass: "penalty_area" },
+    { shape: ringAt(offsetM(TEE, -120, 55), 20), centre: offsetM(TEE, -120, 55), hazardClass: "water" }
+  ]
+};
+
+function withSurfaces(pkg) {
+  return Object.assign({}, pkg, { holes: pkg.holes.map(h =>
+    Number(h.holeNumber) === 1 ? Object.assign({}, h, { surfaces: SURFACES }) : h) });
+}
+
+check("a lite package's surfaces reach the hole record the Painter draws from", () => {
+  const m = createMarshal({});
+  m.signal("ROUND_OPENED", { courseKey: "surf", pkg: withSurfaces(PKG), hole: 1 });
+  const s = m.scene().hole.rec.surfaces;
+  assert.strictEqual(s.bunkers.length, 1);
+  assert.strictEqual(s.fairways.length, 1);
+  assert.strictEqual(s.water.length, 2);
+  /* The distinction the mapper preserved has to survive to the thing that draws
+     it, or the dashed "water, not asserted as a penalty area" edge is unreachable. */
+  assert.deepStrictEqual(s.water.map(w => w.hazardClass).sort(), ["penalty_area", "water"]);
+});
+
+check("a full package carries surfaces under geometry, and reaches the same place", () => {
+  const full = { status: "full-map-ready", holes: [{
+    holeNumber: 1,
+    geometry: { tee: TEE, green: GREEN, greenShape: [], route: [], surfaces: SURFACES },
+    visual: null
+  }] };
+  const m = createMarshal({});
+  m.signal("ROUND_OPENED", { courseKey: "surf", pkg: full, hole: 1 });
+  assert.strictEqual(m.scene().hole.rec.surfaces.bunkers.length, 1);
+});
+
+check("a course OSM had no surfaces for reports null, not empty scaffolding", () => {
+  const m = createMarshal({});
+  m.signal("ROUND_OPENED", { courseKey: "bare", pkg: PKG, hole: 1 });
+  assert.strictEqual(m.scene().hole.rec.surfaces, null);
+  /* And the hole is otherwise completely normal - enrichment is enrichment. */
+  assert.ok(m.scene().hole.rec.green && m.scene().hole.rec.tee);
+});
+
+check("a malformed ring off the wire is dropped rather than reaching the Painter", () => {
+  const broken = withSurfaces(PKG);
+  broken.holes[0].surfaces = {
+    fairways: [],
+    bunkers: [{ shape: [TEE, GREEN] }, { shape: ringAt(offsetM(TEE, -280, 15), 7) }],
+    water: [{ shape: "not an array" }]
+  };
+  const m = createMarshal({});
+  m.signal("ROUND_OPENED", { courseKey: "surf", pkg: broken, hole: 1 });
+  const s = m.scene().hole.rec.surfaces;
+  assert.strictEqual(s.bunkers.length, 1, "the two-point bunker is not a polygon");
+  assert.strictEqual(s.water.length, 0);
+});
+
 check("a crash in the Painter is reported, not swallowed", () => {
   const errors = [];
   const m = createMarshal({ trace: { signal: () => {}, error: (n, e) => errors.push(n) } });

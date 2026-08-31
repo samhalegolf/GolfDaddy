@@ -60,6 +60,15 @@ body.green-focus #map .holeGreen,
 body.green-focus #map .holeRoute,
 body.green-focus #map .holeTee { display: none; }
 
+/* Hazards and fairway edges deliberately SURVIVE shot-active, unlike the route
+   line above. The route hides because the aim line covers the same ground; a
+   bunker does not - knowing what the Bubble is sitting over is the whole reason
+   to look at the hole while aiming. They go with everything else in green
+   focus, which is a clean picture of the green and the pin. */
+body.green-focus #map .holeFairway,
+body.green-focus #map .holeWater,
+body.green-focus #map .holeBunker { display: none; }
+
 /* Basemap credit. Lives outside #map so the frame rotation cannot carry it
    off-screen; hidden only when a published surface has replaced the imagery
    it credits. */

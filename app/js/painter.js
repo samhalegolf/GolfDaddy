@@ -549,12 +549,76 @@
 
   // ------------------------------------------------------------ hole layers
 
+  /* OSM surfaces, styled against what the basemap is already showing.
+
+     On orthophotography the sand and the water are in the picture: an outline
+     says "Caddy knows this is here, and here is exactly where its edge is"
+     without painting over the imagery you are reading the hole from. On the OSM
+     fallback there is no aerial at all - the hole is a blank street map - and
+     these fills become the only thing describing it. Same reasoning the green
+     outline's own zoom gate is built on (app/styles.css): spend the fill where
+     it is needed, withhold it where it would be clutter. */
+  function surfaceStyle(kind, hazardClass, imagery) {
+    var base = { interactive: false, lineJoin: "round" };
+    if (kind === "fairway") {
+      /* The fallback basemap is pale green everywhere, so a green FILL says
+         nothing there - the edge is what carries the shape. Verified against the
+         live OSM fallback, where the fill alone was invisible. */
+      return Object.assign(base, {
+        className: "holeFairway", color: "#1fd36d", weight: imagery ? 1 : 1.5, opacity: imagery ? 0.30 : 0.55,
+        fill: !imagery, fillColor: "#1fd36d", fillOpacity: imagery ? 0 : 0.10
+      });
+    }
+    if (kind === "bunker") {
+      /* Cream over aerial, where it sits on dark ground and reads on its own;
+         ochre over the fallback, where cream-on-pale-green washes out entirely.
+         Not the #ffb64d amber - that token means "attention" elsewhere in the
+         app (trace leak, finish control) and a bunker is not a warning. */
+      return Object.assign(base, {
+        className: "holeBunker", color: imagery ? "#f4dfba" : "#d6a54a", weight: 1.5,
+        opacity: imagery ? 0.78 : 0.95, fillColor: "#f4dfba", fillOpacity: imagery ? 0.08 : 0.55
+      });
+    }
+    /* A dashed edge is not decoration: OSM tagged this one only as water, so
+       Caddy draws it and stops short of asserting a Rules-of-Golf penalty area
+       it was never told about. A solid edge means golf=*water_hazard did say so. */
+    var penalty = hazardClass === "penalty_area";
+    return Object.assign(base, {
+      className: penalty ? "holeWater holeWaterPenalty" : "holeWater",
+      color: "#79c7ff", weight: penalty ? 2 : 1.5, opacity: penalty ? 0.85 : 0.6,
+      dashArray: penalty ? null : "4 6",
+      fillColor: "#79c7ff", fillOpacity: imagery ? (penalty ? 0.10 : 0.06) : (penalty ? 0.4 : 0.28)
+    });
+  }
+
+  /* Pushed before the green, the route and the tee so they sit UNDER all three:
+     the green is the target and the route is the plan, and neither should ever
+     be crossed by a hazard outline. Order within the group is the plan's display
+     priority - fairway, then water, then bunkers. */
+  function pushSurfaceLayers(layers, r, imagery) {
+    var s = r.surfaces;
+    if (!s) return;
+    var ring = function (item) { return item.shape.map(function (p) { return [p.lat, p.lng]; }); };
+    (s.fairways || []).forEach(function (item) {
+      layers.push(L.polygon(ring(item), surfaceStyle("fairway", null, imagery)));
+    });
+    (s.water || []).forEach(function (item) {
+      layers.push(L.polygon(ring(item), surfaceStyle("water", item.hazardClass, imagery)));
+    });
+    (s.bunkers || []).forEach(function (item) {
+      layers.push(L.polygon(ring(item), surfaceStyle("bunker", null, imagery)));
+    });
+  }
+
   function drawHoleLayers(scene) {
     if (!map) return;
     if (objectLayer) { objectLayer.remove(); objectLayer = null; }
     var r = scene.hole.rec;
     if (!r) return;
     var layers = [];
+    /* "osm" is the street-map fallback basemap.baseFor() drops to when no licensed
+       orthophotography covers the course - the one case with no aerial underneath. */
+    pushSurfaceLayers(layers, r, baseKind !== "osm");
     var shape = (r.greenShape || []).map(function (p) { return [p.lat, p.lng]; });
     if (shape.length >= 3) {
       layers.push(L.polygon(shape, { color: "#ffffff", weight: 2, fillColor: "#2f8f4e", fillOpacity: 0.25, className: "holeGreen" }));

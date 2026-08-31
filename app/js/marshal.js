@@ -63,6 +63,30 @@
     return Number.isFinite(d) ? d : null;
   }
 
+  /* One surface group -> drawable rings. Anything that cannot make a polygon is
+     dropped here rather than in the painter, so the render path never has to
+     defend against a two-point "shape" off the wire. */
+  function surfaceList(list) {
+    return (Array.isArray(list) ? list : []).map(function (item) {
+      var shape = (Array.isArray(item && item.shape) ? item.shape : []).map(pt).filter(Boolean);
+      if (shape.length < 3) return null;
+      return { shape: shape, centre: pt(item && item.centre) || pt(item && item.center), hazardClass: (item && item.hazardClass) || null };
+    }).filter(Boolean);
+  }
+
+  /* OSM-derived surfaces for this hole, or null. Null is the ordinary answer for
+     a thinly tagged course and must stay distinguishable from "empty groups" —
+     the painter draws nothing either way, but a course that HAS surfaces and a
+     course that never had any are different facts. */
+  function holeSurfaces(geometry) {
+    if (!geometry || !geometry.surfaces) return null;
+    var fairways = surfaceList(geometry.surfaces.fairways);
+    var bunkers = surfaceList(geometry.surfaces.bunkers);
+    var water = surfaceList(geometry.surfaces.water);
+    if (!fairways.length && !bunkers.length && !water.length) return null;
+    return { fairways: fairways, bunkers: bunkers, water: water };
+  }
+
   /* Normalise the package's two hole shapes (lite = flat, full = {geometry,
      visual}) into one record. Null when the hole has no geometry — a normal
      outcome, not an error. */
@@ -77,6 +101,7 @@
       green: pt(geometry.green),
       greenShape: (Array.isArray(geometry.greenShape) ? geometry.greenShape : []).map(pt).filter(Boolean),
       route: (Array.isArray(geometry.route) ? geometry.route : []).map(pt).filter(Boolean),
+      surfaces: holeSurfaces(geometry),
       visual: found.visual && found.visual.playSurface ? found.visual : null
     };
   }

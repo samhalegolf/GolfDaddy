@@ -188,6 +188,68 @@ test("repeated requests for the same course are stable and side-effect-free (rea
   assert.deepStrictEqual(first, second);
 });
 
+/* ---------- OSM course surfaces in the package ------------------------------------------- */
+
+const surfaceObjects = () => ({
+  "tee-1": { id: "tee-1", type: "tee", holeNumber: 1, position: { lat: 36.0, lng: 174.0 } },
+  "green-1": { id: "green-1", type: "green", holeNumber: 1, position: { lat: 36.0, lng: 174.003 },
+    shape: [{ lat: 36.0, lng: 174.003 }, { lat: 36.0001, lng: 174.003 }, { lat: 36.0001, lng: 174.0031 }] },
+  "bunker-1": { id: "bunker-1", type: "bunker", holeNumber: 1, osmId: "way/30", source: "osm_auto_surface",
+    position: { lat: 36.0, lng: 174.0028 },
+    shape: [{ lat: 36.0, lng: 174.0028 }, { lat: 36.0001, lng: 174.0028 }, { lat: 36.0001, lng: 174.0029 }] },
+  "water-1": { id: "water-1", type: "water", holeNumber: 1, hazardClass: "penalty_area", osmId: "way/31",
+    position: { lat: 36.0, lng: 174.0015 },
+    shape: [{ lat: 36.0, lng: 174.0015 }, { lat: 36.0002, lng: 174.0015 }, { lat: 36.0002, lng: 174.0017 }] },
+  /* Far off the playable geometry - the boundary pond that must not frame the course. */
+  "water-far": { id: "water-far", type: "water", holeNumber: 1, hazardClass: "water",
+    position: { lat: 36.02, lng: 174.05 },
+    shape: [{ lat: 36.02, lng: 174.05 }, { lat: 36.021, lng: 174.05 }, { lat: 36.021, lng: 174.051 }] }
+});
+
+test("the package's surface type list matches the mapper's", async () => {
+  const shape = await import(path.join(root, "functions", "lib", "gd-course-package-shape.mjs"));
+  const core = await import(path.join(root, "functions", "lib", "gd-automapper-core.mjs"));
+  /* Held as two constants so the per-request read endpoint does not import the mapper. This is
+     the assertion that keeps them from drifting apart. */
+  assert.deepStrictEqual(
+    [...shape.__coursePackageShapeTest.SURFACE_TYPES].sort(),
+    [...core.SURFACE_TYPES].sort()
+  );
+});
+
+test("a lite package carries each hole's surfaces alongside its geometry", async () => {
+  const shape = await import(path.join(root, "functions", "lib", "gd-course-package-shape.mjs"));
+  const pkg = shape.shapeLitePackage({ course_id: "surf", objects_json: surfaceObjects(), updated_at: "2026-09-01T00:00:00Z" }, "none");
+  const hole = pkg.holes.find(h => h.holeNumber === 1);
+  assert.strictEqual(hole.surfaces.bunkers.length, 1);
+  assert.strictEqual(hole.surfaces.bunkers[0].osmId, "way/30");
+  assert.strictEqual(hole.surfaces.water.length, 2);
+  /* The hazard distinction OSM actually made survives to the client. */
+  assert.deepStrictEqual(hole.surfaces.water.map(w => w.hazardClass).sort(), ["penalty_area", "water"]);
+  /* Surfaces are additive: the geometry the client already relied on is unchanged. */
+  assert.ok(hole.green && hole.tee && hole.route.length >= 2);
+});
+
+test("a hole with no surfaces reports null rather than empty scaffolding", async () => {
+  const shape = await import(path.join(root, "functions", "lib", "gd-course-package-shape.mjs"));
+  const objects = surfaceObjects();
+  delete objects["bunker-1"]; delete objects["water-1"]; delete objects["water-far"];
+  const pkg = shape.shapeLitePackage({ course_id: "surf", objects_json: objects, updated_at: "2026-09-01T00:00:00Z" }, "none");
+  assert.strictEqual(pkg.holes.find(h => h.holeNumber === 1).surfaces, null);
+});
+
+/* courseBounds drives the client's map framing. A lake tagged on the course edge, or one
+   cloned onto three holes, would otherwise drag the course's bounds out to the water. */
+test("courseBounds is framed by playable geometry, not by hazards", async () => {
+  const shape = await import(path.join(root, "functions", "lib", "gd-course-package-shape.mjs"));
+  const objects = surfaceObjects();
+  const withSurfaces = shape.courseBoundsFromObjects(objects);
+  const playableOnly = shape.courseBoundsFromObjects(
+    Object.fromEntries(Object.entries(objects).filter(([, o]) => ["tee", "green", "fairway"].includes(o.type))));
+  assert.deepStrictEqual(withSurfaces, playableOnly);
+  assert.ok(withSurfaces.north < 36.01, "the boundary pond did not stretch the course north");
+});
+
 (async function run() {
   process.env.SUPABASE_URL = "https://stub.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-stub";

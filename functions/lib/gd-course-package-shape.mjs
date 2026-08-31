@@ -36,6 +36,27 @@ function finitePoint(value) {
   return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
 }
 
+/* Mirrors SURFACE_TYPES in gd-automapper-core.mjs. Held locally rather than imported so this
+   module - loaded by the per-request /api/course-package reader - does not drag the mapper and
+   its imagery registry (~2800 lines) into a cold start for three strings. Kept honest by a
+   parity assertion in dev/course-package.test.js, the same "two implementations, tested for
+   agreement" convention gd-automapper-core.mjs's own header describes. */
+const SURFACE_TYPES = ["fairway_area", "bunker", "water"];
+
+/* A surface is stored once per hole whose capture corridor it falls in, so the same physical
+   bunker can appear several times. Grouped by osmId only for the caller's benefit; nothing
+   downstream needs to know two clones share an origin. */
+function surfacesFor(objects) {
+  const pick = type => objects.filter(o => o.type === type && Array.isArray(o.shape) && o.shape.length >= 3)
+    .map(o => ({ shape: o.shape, center: finitePoint(o.position), osmId: o.osmId || null }));
+  const fairways = pick("fairway_area");
+  const water = objects.filter(o => o.type === "water" && Array.isArray(o.shape) && o.shape.length >= 3)
+    .map(o => ({ shape: o.shape, center: finitePoint(o.position), osmId: o.osmId || null, hazardClass: o.hazardClass || "water" }));
+  const bunkers = pick("bunker");
+  if (!fairways.length && !water.length && !bunkers.length) return null;
+  return { fairway: fairways[0] || null, fairways, bunkers, water };
+}
+
 function objectsByHole(objectsJson) {
   const byHole = new Map();
   Object.values(objectsJson || {}).forEach(object => {
@@ -59,8 +80,13 @@ function approximateRoute(objects) {
   return [tee, ...fairway, green].filter(Boolean).map(o => finitePoint(o.position)).filter(Boolean);
 }
 
+/* Surfaces are excluded deliberately. This drives the client's map framing, and a boundary
+   pond or a lake shared across three holes would drag the course's bounds out to wherever the
+   water ends. The playable geometry is what frames a course. */
 export function courseBoundsFromObjects(objectsJson) {
-  const points = Object.values(objectsJson || {}).map(o => finitePoint(o && o.position)).filter(Boolean);
+  const points = Object.values(objectsJson || {})
+    .filter(o => o && !SURFACE_TYPES.includes(o.type))
+    .map(o => finitePoint(o && o.position)).filter(Boolean);
   if (!points.length) return null;
   return {
     south: Math.min(...points.map(p => p.lat)), north: Math.max(...points.map(p => p.lat)),
@@ -81,6 +107,7 @@ export function shapeLitePackage(map, visualJobStatus) {
       green: green ? finitePoint(green.position) : null,
       greenShape: (green && Array.isArray(green.greenShape) ? green.greenShape : green && green.shape) || null,
       route: approximateRoute(objects),
+      surfaces: surfacesFor(objects),
       confidence: green && Number.isFinite(Number(green.resolverConfidence)) ? Number(green.resolverConfidence) : null
     };
   }).sort((a, b) => a.holeNumber - b.holeNumber);
@@ -146,7 +173,8 @@ export function shapeFullPackage(map, visual) {
         tee: tee ? finitePoint(tee.position) : null,
         green: green ? finitePoint(green.position) : null,
         greenShape: (green && (green.greenShape || green.shape)) || null,
-        route: approximateRoute(objects)
+        route: approximateRoute(objects),
+        surfaces: surfacesFor(objects)
       },
       visual: {
         url: assetUrl(frame.path),
@@ -247,4 +275,4 @@ export function deriveCoursePackageState({ map, visual, visualJobs, mapperJobs }
   return "none";
 }
 
-export const __coursePackageShapeTest = { objectsByHole, approximateRoute, hasGeometryPayload, liveJob };
+export const __coursePackageShapeTest = { objectsByHole, approximateRoute, hasGeometryPayload, liveJob, surfacesFor, SURFACE_TYPES };

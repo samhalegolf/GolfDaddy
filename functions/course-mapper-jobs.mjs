@@ -144,6 +144,17 @@ function hasGeometryPayload(map) {
  * number of courses. */
 const BULK_JOB_SCAN_LIMIT = 2000;
 
+/* The enrichment kind. A separate row kind rather than a flag on an automap job, so a
+   collection run can never be claimed by the mapping path, can never be deduped against a
+   mapping job, and shows up in logs and job history as the different operation it is.
+
+   It is excluded from the build state below on purpose. That state is what the PLAYER-facing
+   package flow branches on: counting an admin enrichment sweep as "this course is building"
+   would put every course on every phone into Processing while nothing about its map was
+   changing. */
+export const OBJECT_COLLECTION_KIND = "collect_extra_objects";
+const isMappingJob = job => String(job && job.kind || "automap") !== OBJECT_COLLECTION_KIND;
+
 async function mapperBuildStateAll() {
   const [jobRows, mapRows] = await Promise.all([
     supabaseFetch(TABLE + "?select=course_id,kind,status,error,mapper_version,created_at,updated_at&order=created_at.desc&limit=" + BULK_JOB_SCAN_LIMIT).catch(() => []),
@@ -154,7 +165,7 @@ async function mapperBuildStateAll() {
 
   const latestByCourse = new Map();
   const liveByCourse = new Map();
-  jobs.forEach((job) => {
+  jobs.filter(isMappingJob).forEach((job) => {
     const id = String(job && job.course_id || "");
     if (!id) return;
     if (!latestByCourse.has(id)) latestByCourse.set(id, job);
@@ -206,12 +217,15 @@ async function mapperBuildState(courseId) {
   ]);
   const jobs = Array.isArray(jobRows) ? jobRows : [];
   const map = Array.isArray(mapRows) ? mapRows[0] : null;
-  const live = jobs.find(job => job.status === "running") || jobs.find(job => job.status === "queued");
+  /* Mapping jobs only - see OBJECT_COLLECTION_KIND. `jobs` still carries every kind for the
+     admin history, which is the one place the enrichment runs SHOULD be visible. */
+  const mapping = jobs.filter(isMappingJob);
+  const live = mapping.find(job => job.status === "running") || mapping.find(job => job.status === "queued");
   const hasGeometry = hasGeometryPayload(map);
   let state;
   if (hasGeometry) state = "geometry-ready";
   else if (live) state = live.status === "running" ? "running" : "queued";
-  else if (jobs.length && jobs[0].status === "failed") state = "failed";
+  else if (mapping.length && mapping[0].status === "failed") state = "failed";
   else state = "none";
   const stalledSeconds = live && live.updated_at
     ? Math.max(0, Math.round((Date.now() - new Date(live.updated_at).getTime()) / 1000))
@@ -225,7 +239,7 @@ async function mapperBuildState(courseId) {
     stalledSeconds,
     stalled: live && live.status === "running" && stalledSeconds != null && stalledSeconds > STALL_SECONDS,
     progress: live && live.result && live.result.progress || null,
-    lastError: !live && jobs.length && jobs[0].status === "failed" ? String(jobs[0].error || "").slice(0, 300) : null,
+    lastError: !live && mapping.length && mapping[0].status === "failed" ? String(mapping[0].error || "").slice(0, 300) : null,
     jobs
   };
 }
@@ -351,6 +365,36 @@ export async function enqueueMapperJob({ courseId, courseLat, courseLng, courseN
   return { queued: true, job, state: "queued", actorKey: actor };
 }
 
+/* Enrichment has its own enqueue rather than reusing enqueueMapperJob, because every gate in
+   that one is wrong here. It refuses a course that already has geometry at the current mapper
+   version - which is exactly the course this action targets. It rate-limits against a player
+   budget - this is an admin action. And it dedupes on kind=automap - a mapping run in flight
+   must not swallow a collection request, or the enrichment silently never happens.
+
+   The one precondition it does add: saved holes must already exist. Collection uses the saved
+   map as its spatial framework and resolves nothing itself, so on a course with no holes it
+   would query Overpass and correctly find nowhere to put anything. */
+async function enqueueObjectCollectionJob({ courseId, actor, origin }) {
+  const rows = await supabaseFetch(MAPS_TABLE + "?select=course_id,holes_json,objects_json&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []);
+  const map = Array.isArray(rows) ? rows[0] : null;
+  if (!map) return { missing: true };
+  if (!Object.keys(map.holes_json || {}).length) return { noHoles: true };
+
+  const freshCutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+  const existing = await supabaseFetch(TABLE + "?select=id,status&course_id=eq." + encodeURIComponent(courseId)
+    + "&kind=eq." + OBJECT_COLLECTION_KIND + "&status=in.(queued,running)&updated_at=gt." + encodeURIComponent(freshCutoff) + "&limit=1");
+  if (Array.isArray(existing) && existing.length) return { deduped: true, job: existing[0] };
+
+  const inserted = await supabaseFetch(TABLE, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify([{ course_id: courseId, kind: OBJECT_COLLECTION_KIND, status: "queued", mapper_version: MAPPER_VERSION, requested_by: actor }])
+  });
+  const job = Array.isArray(inserted) ? inserted[0] : inserted;
+  await pingWorkerAt(origin, job && job.id || null);
+  return { queued: true, job };
+}
+
 export default async function courseMapperJobs(req) {
   if (req.method === "OPTIONS") return json(200, { ok: true });
   if (!hasSupabase()) return json(503, { error: "Supabase is not configured" });
@@ -372,6 +416,7 @@ export default async function courseMapperJobs(req) {
   const requestedKind = String(payload && payload.kind || "automap");
   const nudge = requestedKind === "nudge";
   const remap = requestedKind === "remap";
+  const collect = requestedKind === OBJECT_COLLECTION_KIND;
   const user = await verifiedUser(req, payload);
   /* An anonymous caller may map, but only as itself: a guest install id is accepted here and
      nowhere else. Without a verified user AND without a usable guest id there is no actor to
@@ -382,8 +427,7 @@ export default async function courseMapperJobs(req) {
      actions - one on a stuck run, one on a bad map - same split as course-visual-jobs.mjs's
      export/nudge paths. A guest is never an operator: these ask for user.isAdmin, so an
      anonymous caller falls through to the same 403 a signed-in non-admin gets. */
-  if ((nudge || remap) && !(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
-  const kind = "automap";
+  if ((nudge || remap || collect) && !(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
 
   const courseId = slug(payload && (payload.courseId || payload.course_id));
   if (!courseId) return json(400, { error: "courseId required" });
@@ -402,6 +446,26 @@ export default async function courseMapperJobs(req) {
     }
     await pingWorkerAt(new URL(req.url).origin);
     return json(200, Object.assign({ nudged: true, requeued }, await mapperBuildState(courseId)));
+  }
+
+  /* Enrichment, handled before the remap/automap path below and returning from here, so there
+     is no route by which asking for extra objects can fall through into clearing geometry. */
+  if (collect) {
+    const result = await enqueueObjectCollectionJob({ courseId, actor: actorKey, origin: new URL(req.url).origin });
+    if (result.missing) {
+      return json(404, {
+        error: "no course_maps row for " + courseId,
+        detail: "Collecting extra objects enriches an existing map. This course has none yet - map it first."
+      });
+    }
+    if (result.noHoles) {
+      return json(409, {
+        error: "no saved holes for " + courseId,
+        detail: "Collecting extra objects uses the saved holes as its spatial framework and resolves none of its own. Map the course first."
+      });
+    }
+    if (result.deduped) return json(200, { deduped: true, kind: OBJECT_COLLECTION_KIND, job: result.job });
+    return json(202, { job: result.job, kind: OBJECT_COLLECTION_KIND, state: "queued" });
   }
 
   /* Remap: forget the geometry, keep the course.

@@ -14,6 +14,7 @@ const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
 
 let core = null;
+let plan = null;
 
 test("osmQueryScope builds an around-radius selector when no bbox is given", () => {
   const scope = core.osmQueryScope({}, { lat: -36.8, lng: 174.7 });
@@ -150,8 +151,152 @@ test("chooseAutoMapGuides picks the longer guide when two candidates for the sam
   assert.strictEqual(core.guideLength(chosen[0].points) > 0, true);
 });
 
+/* ---------- OSM course surfaces --------------------------------------------------------- */
+
+/* A synthetic course rather than the saved fixture: these tests are about which hole a surface
+   lands on, and that needs holes at known distances from a bunker placed at a known point. */
+const SLAT = 36.0, SLNG = 174.0;
+const sPoint = (east, north) => ({
+  lat: SLAT + north / 111320,
+  lng: SLNG + east / (111320 * Math.cos(SLAT * Math.PI / 180))
+});
+const sRing = (east, north, r) => [sPoint(east - r, north - r), sPoint(east + r, north - r), sPoint(east + r, north + r), sPoint(east - r, north + r)];
+/* Two parallel holes, 80m apart, playing in opposite directions - the layout the plan warned
+   nearest-hole assignment gets wrong. */
+function surfaceFixture(extra = []) {
+  return { elements: [
+    { type: "way", id: 1, tags: { golf: "hole", ref: "1" }, geometry: [sPoint(0, 0), sPoint(270, 0)] },
+    { type: "way", id: 2, tags: { golf: "green" }, geometry: sRing(270, 0, 12) },
+    { type: "way", id: 11, tags: { golf: "hole", ref: "2" }, geometry: [sPoint(270, 80), sPoint(0, 80)] },
+    { type: "way", id: 12, tags: { golf: "green" }, geometry: sRing(0, 80, 12) },
+    ...extra
+  ] };
+}
+const resolveFixture = (extra = [], existing = []) =>
+  core.resolveCourseGeometry(surfaceFixture(extra), "surf", { lat: SLAT, lng: SLNG }, existing, []);
+
+test("parseOsmSurfaces normalises the V1 tags and keeps penalty areas apart from plain water", () => {
+  const surfaces = core.parseOsmSurfaces(surfaceFixture([
+    { type: "way", id: 20, tags: { golf: "fairway" }, geometry: sRing(140, 0, 40) },
+    { type: "way", id: 21, tags: { golf: "bunker" }, geometry: sRing(250, 20, 7) },
+    { type: "way", id: 22, tags: { golf: "lateral_water_hazard" }, geometry: sRing(150, 40, 25) },
+    { type: "way", id: 23, tags: { natural: "water" }, geometry: sRing(120, 55, 22) }
+  ]));
+  const byType = t => surfaces.filter(s => s.type === t);
+  assert.strictEqual(byType("fairway_area").length, 1);
+  assert.strictEqual(byType("bunker").length, 1);
+  assert.strictEqual(byType("water").length, 2);
+  /* OSM said "hazard" for one and only "water" for the other. Caddy draws both and asserts a
+     Rules-of-Golf status for neither beyond what the tagging actually claims. */
+  assert.deepStrictEqual(byType("water").map(s => s.hazardClass).sort(), ["penalty_area", "water"]);
+  /* greens, tees, hole lines and the course outline are not surfaces. */
+  assert.strictEqual(surfaces.some(s => s.osmId === "way/2"), false);
+});
+
+test("a surface between two holes is cloned onto both rather than assigned to one", () => {
+  const result = resolveFixture([{ type: "way", id: 30, tags: { golf: "bunker" }, geometry: sRing(140, 40, 8) }]);
+  const bunkers = Object.values(result.objects).filter(o => o.type === "bunker");
+  assert.deepStrictEqual(bunkers.map(b => b.holeNumber).sort(), [1, 2]);
+  /* Two records, one physical bunker - traceable through the shared OSM id. */
+  assert.deepStrictEqual([...new Set(bunkers.map(b => b.osmId))], ["way/30"]);
+  assert.deepStrictEqual([...new Set(bunkers.map(b => b.source))], ["osm_auto_surface"]);
+});
+
+/* The dedupe that makes cloning possible. Both clones sit at identical coordinates, so a
+   position-only match would find the first and rewrite its holeNumber - leaving one record on
+   hole 2 and nothing on hole 1. */
+test("clones at identical coordinates do not overwrite each other", () => {
+  const objects = [];
+  const near = { lat: SLAT, lng: SLNG };
+  assert.ok(core.nearestMatchingObject([{ type: "bunker", position: near, holeNumber: 1 }], "bunker", near, 14, 1));
+  assert.strictEqual(core.nearestMatchingObject([{ type: "bunker", position: near, holeNumber: 1 }], "bunker", near, 14, 2), null);
+  /* Unscoped (tee/green) behaviour is untouched. */
+  assert.ok(core.nearestMatchingObject([{ type: "tee", position: near, holeNumber: 1 }], "tee", near, 9));
+  assert.strictEqual(objects.length, 0);
+});
+
+test("a hand-placed bunker suppresses the OSM one rather than being overwritten by it", () => {
+  const manual = [{
+    id: "bunker-manual-1", courseId: "surf", type: "bunker", position: sPoint(140, 40),
+    shape: sRing(140, 40, 8), holeNumber: null, confirmed: true, source: "gps_tools_drawer"
+  }];
+  const result = resolveFixture([{ type: "way", id: 30, tags: { golf: "bunker" }, geometry: sRing(140, 40, 8) }], manual);
+  const bunkers = Object.values(result.objects).filter(o => o.type === "bunker");
+  assert.strictEqual(bunkers.length, 1, "the OSM clones are suppressed, not merged on top of the pin");
+  assert.strictEqual(bunkers[0].source, "gps_tools_drawer");
+  assert.strictEqual(bunkers[0].holeNumber, null, "and the pin keeps its own hole association");
+});
+
+test("a course with no surface tags in OSM still resolves every hole", () => {
+  const bare = resolveFixture();
+  assert.strictEqual(bare.holesResolved, 2);
+  assert.deepStrictEqual(Object.keys(bare.holes).sort(), ["1", "2"]);
+  assert.deepStrictEqual(bare.surfaces, { surfaces: 0, cloned: 0 });
+  /* Enrichment is enrichment: absence must never make a valid course unusable. */
+  assert.strictEqual(Object.values(bare.objects).some(o => core.SURFACE_TYPES.has(o.type)), false);
+});
+
+test("surfaces outside a hole's capture corridor are not written onto it", () => {
+  const result = resolveFixture([{ type: "way", id: 31, tags: { golf: "bunker" }, geometry: sRing(250, 900, 7) }]);
+  assert.strictEqual(Object.values(result.objects).some(o => o.type === "bunker"), false);
+});
+
+test("a multipolygon relation contributes one surface per outer ring, not one flattened blob", () => {
+  const surfaces = core.parseOsmSurfaces({ elements: [{
+    type: "relation", id: 40, tags: { golf: "fairway" },
+    members: [
+      { type: "way", role: "outer", geometry: sRing(100, 0, 30) },
+      { type: "way", role: "outer", geometry: sRing(200, 0, 30) },
+      { type: "way", role: "inner", geometry: sRing(100, 0, 5) }
+    ]
+  }] });
+  assert.strictEqual(surfaces.length, 2, "two outer rings, and the inner ring is not a surface");
+  assert.deepStrictEqual(surfaces.map(s => s.osmId), ["relation/40", "relation/40#1"]);
+  /* Flattening both rings into one point list would have put the centroid between them. */
+  surfaces.forEach(s => assert.ok(s.span < 120, "each ring keeps its own extent, got " + Math.round(s.span)));
+});
+
+test("grossly mis-tagged geometry is rejected without over-cleaning good geometry", () => {
+  const surfaces = core.parseOsmSurfaces({ elements: [
+    { type: "way", id: 50, tags: { golf: "bunker" }, geometry: sRing(0, 0, 300) },   // a 600m "bunker"
+    { type: "way", id: 51, tags: { golf: "fairway" }, geometry: sRing(0, 0, 5) },    // a 10m "fairway"
+    { type: "way", id: 52, tags: { golf: "bunker" }, geometry: sRing(0, 0, 9) }      // an ordinary bunker
+  ] });
+  assert.deepStrictEqual(surfaces.map(s => s.osmId), ["way/52"]);
+});
+
+test("stored surface polygons are simplified so cloning cannot multiply an OSM lake ring", () => {
+  const dense = Array.from({ length: 400 }, (_, i) => {
+    const a = (i / 400) * Math.PI * 2;
+    return sPoint(140 + Math.cos(a) * 30, 40 + Math.sin(a) * 30);
+  });
+  const result = resolveFixture([{ type: "way", id: 60, tags: { golf: "water_hazard" }, geometry: dense }]);
+  const water = Object.values(result.objects).filter(o => o.type === "water");
+  assert.ok(water.length >= 1);
+  water.forEach(w => assert.ok(w.shape.length <= core.SURFACE_SHAPE_MAX_POINTS,
+    "stored ring capped at " + core.SURFACE_SHAPE_MAX_POINTS + ", got " + w.shape.length));
+});
+
+/* The reason surfaces are typed fairway_area/bunker/water rather than reusing "fairway".
+   packageHoleData matches on tee/green/fairway; a polygon stored as "fairway" would push its
+   centroid into the hole's route, into corridorBounds, and shift every capture frame. */
+test("surface enrichment does not move a single capture frame", () => {
+  const withSurfaces = resolveFixture([
+    { type: "way", id: 70, tags: { golf: "fairway" }, geometry: sRing(140, 0, 40) },
+    { type: "way", id: 71, tags: { golf: "bunker" }, geometry: sRing(250, 20, 7) },
+    { type: "way", id: 72, tags: { golf: "water_hazard" }, geometry: sRing(150, 40, 25) }
+  ]);
+  assert.ok(withSurfaces.surfaces.cloned > 0, "the fixture really did enrich something");
+  const bare = Object.fromEntries(Object.entries(withSurfaces.objects).filter(([, o]) => !core.SURFACE_TYPES.has(o.type)));
+  const framesFor = objects => JSON.stringify(
+    plan.planCourseCaptures({ courseId: "surf", objects, holes: withSurfaces.holes }, { terrainSource: null })
+      .map(item => [item.role, item.holeNumber, item.bounds]));
+  assert.strictEqual(framesFor(withSurfaces.objects), framesFor(bare));
+});
+
 (async function run() {
   core = await import(path.join(root, "functions", "lib", "gd-automapper-core.mjs"));
+  plan = await import(path.join(root, "functions", "lib", "gd-visual-plan-core.mjs"));
   let failures = 0;
   for (const item of tests) {
     try {

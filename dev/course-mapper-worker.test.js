@@ -141,6 +141,144 @@ function jsonResponse(status, body) {
   };
 }
 
+/* ---------- collect_extra_objects -------------------------------------------------------- */
+
+/* A saved, already-playable course: one hole with a tee, a green and a route point, exactly
+   the shape runObjectCollectionJob treats as authoritative and refuses to re-resolve. */
+const CLAT = 36.0, CLNG = 174.0;
+const cPoint = (east, north) => ({
+  lat: CLAT + north / 111320,
+  lng: CLNG + east / (111320 * Math.cos(CLAT * Math.PI / 180))
+});
+const cRing = (east, north, r) => [cPoint(east - r, north - r), cPoint(east + r, north - r), cPoint(east + r, north + r), cPoint(east - r, north + r)];
+
+function savedCourseRow(extraObjects = {}) {
+  return {
+    course_id: "saved", course_name: "Saved", course_lat: CLAT, course_lng: CLNG,
+    objects_json: Object.assign({
+      "tee-1": { id: "tee-1", type: "tee", holeNumber: 1, position: cPoint(0, 0), source: "osm_auto_tee", confirmed: true },
+      "green-1": { id: "green-1", type: "green", holeNumber: 1, position: cPoint(270, 0), shape: cRing(270, 0, 12), source: "osm_auto_green_polygon", confirmed: true },
+      "fairway-1": { id: "fairway-1", type: "fairway", holeNumber: 1, position: cPoint(135, 0), source: "osm_auto_fairway", confirmed: true }
+    }, extraObjects),
+    holes_json: { 1: { holeNumber: 1, greenCenter: cPoint(270, 0), confirmed: true } },
+    object_collection: null
+  };
+}
+
+const OVERPASS_SURFACES = { elements: [
+  { type: "way", id: 90, tags: { golf: "fairway" }, geometry: cRing(140, 0, 40) },
+  { type: "way", id: 91, tags: { golf: "bunker" }, geometry: cRing(250, 22, 7) },
+  { type: "way", id: 92, tags: { golf: "lateral_water_hazard" }, geometry: cRing(150, 42, 25) }
+] };
+
+/* Returns {patches, run} - every PATCH body the job sent, in order. */
+function stubCollectionWorld(row) {
+  const patches = [];
+  global.fetch = async (url, options = {}) => {
+    url = String(url);
+    const method = String(options.method || "GET").toUpperCase();
+    if (!url.includes("stub.supabase.co")) return jsonResponse(200, OVERPASS_SURFACES);
+    const rest = url.split("/rest/v1/")[1] || "";
+    if (method === "PATCH") {
+      const body = JSON.parse(options.body || "{}");
+      patches.push({ rest, body });
+      return jsonResponse(200, [row]);
+    }
+    if (rest.startsWith("course_maps")) return jsonResponse(200, [row]);
+    return jsonResponse(200, []);
+  };
+  return patches;
+}
+
+test("collect_extra_objects writes objects_json and nothing else", async () => {
+  const row = savedCourseRow();
+  const patches = stubCollectionWorld(row);
+  const result = await worker.runObjectCollectionJob({ id: "job-c", course_id: "saved", kind: "collect_extra_objects" });
+
+  assert.deepStrictEqual(result.added, { fairways: 1, bunkers: 1, water: 1 });
+  assert.strictEqual(result.holeGeometryTouched, false);
+  assert.strictEqual(result.visualsTouched, false);
+
+  const geometryPatch = patches.find(p => p.body.objects_json);
+  assert.ok(geometryPatch, "the collected objects were saved");
+  /* The three columns that would make this behave like a remap. Their absence is the contract. */
+  ["holes_json", "geometry_version", "hole_count"].forEach(column => {
+    assert.ok(!(column in geometryPatch.body), column + " must not be written by an enrichment run");
+  });
+  /* And the saved hole geometry came through untouched rather than re-resolved. */
+  const saved = geometryPatch.body.objects_json;
+  assert.strictEqual(saved["tee-1"].source, "osm_auto_tee");
+  assert.deepStrictEqual(saved["green-1"].position, cPoint(270, 0));
+});
+
+test("collect_extra_objects refuses a course with no saved holes rather than resolving some", async () => {
+  const row = savedCourseRow();
+  row.holes_json = {};
+  stubCollectionWorld(row);
+  await assert.rejects(
+    () => worker.runObjectCollectionJob({ id: "job-c", course_id: "saved", kind: "collect_extra_objects" }),
+    /no saved holes to enrich/
+  );
+});
+
+/* Pressing the button twice must not double every bunker on the course. */
+test("collect_extra_objects is idempotent", async () => {
+  const row = savedCourseRow();
+  const patches = stubCollectionWorld(row);
+  await worker.runObjectCollectionJob({ id: "job-c", course_id: "saved", kind: "collect_extra_objects" });
+  const first = patches.find(p => p.body.objects_json).body.objects_json;
+
+  /* Feed the first run's output back in as the saved state, exactly as a second press would. */
+  row.objects_json = first;
+  const secondPatches = stubCollectionWorld(row);
+  const second = await worker.runObjectCollectionJob({ id: "job-c2", course_id: "saved", kind: "collect_extra_objects" });
+  assert.deepStrictEqual(second.added, { fairways: 0, bunkers: 0, water: 0 });
+  const saved = secondPatches.find(p => p.body.objects_json).body.objects_json;
+  assert.strictEqual(Object.keys(saved).length, Object.keys(first).length, "no duplicate surfaces on a second run");
+});
+
+/* The claim the whole job type exists to make. Not "the chain was skipped" - the chain is
+   not reachable from this path, so there is no flag that could be set wrong. */
+test("collect_extra_objects never chains a visual job", async () => {
+  const row = savedCourseRow();
+  const requests = [];
+  global.fetch = async (url, options = {}) => {
+    url = String(url);
+    requests.push(url);
+    const method = String(options.method || "GET").toUpperCase();
+    if (!url.includes("stub.supabase.co")) return jsonResponse(200, OVERPASS_SURFACES);
+    const rest = url.split("/rest/v1/")[1] || "";
+    if (method === "PATCH") return jsonResponse(200, [row]);
+    if (rest.startsWith("course_maps")) return jsonResponse(200, [row]);
+    return jsonResponse(200, []);
+  };
+  await worker.runObjectCollectionJob({ id: "job-c", course_id: "saved", kind: "collect_extra_objects" });
+  assert.strictEqual(requests.some(u => u.includes("course_visual_jobs")), false, "no visual job row was written");
+  assert.strictEqual(requests.some(u => u.includes("course-visual-worker")), false, "the visual worker was never pinged");
+});
+
+/* An unapplied migration must not turn a successful enrichment into a failed job. */
+test("collect_extra_objects still succeeds when the object_collection column is missing", async () => {
+  const row = savedCourseRow();
+  global.fetch = async (url, options = {}) => {
+    url = String(url);
+    const method = String(options.method || "GET").toUpperCase();
+    if (!url.includes("stub.supabase.co")) return jsonResponse(200, OVERPASS_SURFACES);
+    const rest = url.split("/rest/v1/")[1] || "";
+    if (method === "PATCH") {
+      const body = JSON.parse(options.body || "{}");
+      if (body.object_collection) return jsonResponse(400, { message: "column \"object_collection\" does not exist" });
+      return jsonResponse(200, [row]);
+    }
+    if (rest.startsWith("course_maps")) return jsonResponse(200, [row]);
+    return jsonResponse(200, []);
+  };
+  const result = await worker.runObjectCollectionJob({ id: "job-c", course_id: "saved", kind: "collect_extra_objects" });
+  assert.strictEqual(result.metadataSaved, false);
+  assert.strictEqual(result.objectCollection, null);
+  assert.deepStrictEqual(result.added, { fairways: 1, bunkers: 1, water: 1 }, "the objects still landed");
+});
+
 (async function run() {
   process.env.SUPABASE_URL = "https://stub.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-stub";

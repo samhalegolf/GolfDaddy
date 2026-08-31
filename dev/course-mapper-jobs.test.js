@@ -61,6 +61,10 @@ function stubFetch(world) {
     if (table === "course_maps") return jsonResponse(200, world.maps || []);
     if (table === "course_mapper_jobs") {
       if (rest.includes("requested_by=eq.")) return jsonResponse(200, world.userJobs || []);
+      /* The collection kind dedupes against its OWN live rows, so the harness has to be able
+         to answer that query separately from the mapping one - otherwise every world with any
+         job in it would look like a collection already in flight. */
+      if (rest.includes("kind=eq.collect_extra_objects")) return jsonResponse(200, world.collectJobs || []);
       return jsonResponse(200, world.jobs || []);
     }
     return jsonResponse(200, []);
@@ -295,6 +299,77 @@ test("the status read is public and derives the mapping state", async () => {
   const failed = await call(get("pupuke"));
   assert.strictEqual(failed.body.state, "failed");
   assert.ok(String(failed.body.lastError).includes("no OSM data"));
+});
+
+const mappedCourse = (overrides = {}) => unmappedCourse(Object.assign({
+  maps: [{ course_id: "pupuke", published: true, course_lat: -36.78, course_lng: 174.76,
+    geometry_version: "v2", objects_json: { "green-1": {} }, holes_json: { 1: {}, 2: {} } }]
+}, overrides));
+
+test("collecting extra objects queues its own job kind and clears no geometry", async () => {
+  const calls = stubFetch(mappedCourse());
+  const result = await call(post({ courseId: "pupuke", kind: "collect_extra_objects" }, "admin-token"));
+  assert.strictEqual(result.status, 202);
+  const inserted = jobInserts(calls);
+  assert.strictEqual(inserted.length, 1);
+  assert.strictEqual(inserted[0].rows[0].kind, "collect_extra_objects");
+  /* Remap PATCHes course_maps to empty objects_json/holes_json/geometry_version before
+     enqueuing. Enrichment must reach the queue without that ever happening. */
+  assert.deepStrictEqual(calls.patches.filter(patch => patch.table === "course_maps"), []);
+  assert.strictEqual(calls.workerPings, 1);
+});
+
+/* enqueueMapperJob refuses a course already at the current mapper version. Enrichment targets
+   exactly those courses, so it must not inherit that gate. */
+test("a fully mapped course at the current mapper version can still be enriched", async () => {
+  const calls = stubFetch(mappedCourse());
+  const remapless = await call(post({ courseId: "pupuke", kind: "automap" }, "player-token"));
+  assert.strictEqual(remapless.body.deduped, true, "the mapping path considers this course done");
+  const collect = await call(post({ courseId: "pupuke", kind: "collect_extra_objects" }, "admin-token"));
+  assert.strictEqual(collect.status, 202, "the enrichment path does not");
+  assert.strictEqual(jobInserts(calls).length, 1);
+});
+
+test("collecting extra objects is an operator action, not a player one", async () => {
+  const calls = stubFetch(mappedCourse());
+  const result = await call(post({ courseId: "pupuke", kind: "collect_extra_objects" }, "player-token"));
+  assert.strictEqual(result.status, 403);
+  assert.strictEqual(jobInserts(calls).length, 0);
+});
+
+test("a course with no saved holes is refused rather than queued to find nowhere to put anything", async () => {
+  const calls = stubFetch(mappedCourse({
+    maps: [{ course_id: "pupuke", published: true, course_lat: -36.78, course_lng: 174.76, objects_json: {}, holes_json: {} }]
+  }));
+  const result = await call(post({ courseId: "pupuke", kind: "collect_extra_objects" }, "admin-token"));
+  assert.strictEqual(result.status, 409);
+  assert.strictEqual(jobInserts(calls).length, 0);
+});
+
+test("a live collection run dedupes instead of stacking a second one", async () => {
+  const calls = stubFetch(mappedCourse({ collectJobs: [{ id: "collect-live", status: "running" }] }));
+  const result = await call(post({ courseId: "pupuke", kind: "collect_extra_objects" }, "admin-token"));
+  assert.strictEqual(result.status, 200);
+  assert.strictEqual(result.body.deduped, true);
+  assert.strictEqual(jobInserts(calls).length, 0);
+});
+
+/* The state a PLAYER's package flow branches on. An admin sweep enriching the whole library
+   must not put every course on every phone into Processing while its map is not changing. */
+test("an enrichment run in flight does not make a course read as building", async () => {
+  stubFetch(unmappedCourse({ jobs: [{ id: "c1", kind: "collect_extra_objects", status: "running" }] }));
+  const during = await call(get("pupuke"));
+  assert.strictEqual(during.body.state, "none", "not 'running' - nothing about the map is being built");
+  assert.strictEqual(during.body.building, false);
+  /* But it stays visible in the admin job history, which is the one place it should show. */
+  assert.strictEqual(during.body.jobs.length, 1);
+});
+
+test("a failed enrichment run does not make a course read as a failed map", async () => {
+  stubFetch(unmappedCourse({ jobs: [{ id: "c1", kind: "collect_extra_objects", status: "failed", error: "overpass timeout" }] }));
+  const after = await call(get("pupuke"));
+  assert.strictEqual(after.body.state, "none");
+  assert.strictEqual(after.body.lastError, null);
 });
 
 (async function run() {

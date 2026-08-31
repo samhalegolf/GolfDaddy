@@ -743,6 +743,12 @@ function sanitizeObject(raw, courseId) {
     greenCenter: type === "green" ? position : undefined,
     greenShape: type === "green" ? shape : undefined,
     greenSource: type === "green" ? text(raw.greenSource || raw.source, 120) : undefined,
+    /* OSM surface provenance. This function rebuilds a fixed field set and drops everything
+       else, so without these three a Studio publish would silently strip a bunker's hazard
+       class and its OSM id on the way back through. */
+    hazardClass: raw.hazardClass ? text(raw.hazardClass, 40) : undefined,
+    osmId: raw.osmId ? text(raw.osmId, 80) : undefined,
+    surfaceMapperVersion: raw.surfaceMapperVersion ? text(raw.surfaceMapperVersion, 20) : undefined,
     createdAt: text(raw.createdAt, 80),
     updatedAt: text(raw.updatedAt, 80),
     published: true,

@@ -26,7 +26,7 @@
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete } from "./lib/gd-course-fit-core.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
@@ -36,6 +36,7 @@ import { assessFacilityStructure, contestedClaims, describeClaimGround, isIndepe
 import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry } from "./lib/gd-scorecard-match-core.mjs";
 import { planListingResolution, RESOLUTION_MODE } from "./lib/gd-course-listing-core.mjs";
 import { eliminateInferredCourses } from "./lib/gd-inferred-course-claims-core.mjs";
+import { OBJECT_COLLECTION_KIND } from "./course-mapper-jobs.mjs";
 import pkg from "./lib/safe-remote-url.js";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
 
@@ -257,7 +258,7 @@ function scorecardHoleCount(evidence) {
    fixes, and neither is readable from the error sentence alone. */
 function golfFeatureCounts(payload) {
   const elements = (payload && payload.elements) || [];
-  const counts = { elements: elements.length, holes: 0, numberedHoles: 0, greens: 0, fairways: 0, tees: 0 };
+  const counts = { elements: elements.length, holes: 0, numberedHoles: 0, greens: 0, fairways: 0, tees: 0, bunkers: 0, water: 0 };
   elements.forEach(element => {
     const tags = (element && element.tags) || {};
     const golf = String(tags.golf || "").toLowerCase();
@@ -266,6 +267,8 @@ function golfFeatureCounts(payload) {
       if (String(tags.ref || tags.name || "").trim()) counts.numberedHoles += 1;
     } else if (golf === "green") counts.greens += 1;
     else if (golf === "fairway") counts.fairways += 1;
+    else if (golf === "bunker") counts.bunkers += 1;
+    else if (golf === "water_hazard" || golf === "lateral_water_hazard") counts.water += 1;
     else if (golf === "tee") counts.tees += 1;
   });
   return counts;
@@ -618,7 +621,7 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
        * scan. Resolving early stamped a guess. */
       const geometry = loop.guides
         ? Object.assign(
-          resolveGuidesIntoObjects(loop.guides, courseId, loop.resolverGreens || [], isPinned ? (loop.existingObjects || []) : []),
+          resolveGuidesIntoObjects(loop.guides, courseId, loop.resolverGreens || [], isPinned ? (loop.existingObjects || []) : [], loop.payload || null),
           { guidesFound: loop.guides.length, greensFound: (loop.resolverGreens || []).length, holesResolved: loop.guides.length }
         )
         : resolveCourseGeometry(loop.payload, courseId, loop.centre || course.center, [], []);
@@ -1251,6 +1254,103 @@ function centreOfGuides(guides) {
   };
 }
 
+/* ---------- collect_extra_objects ---------------------------------------------------------
+
+   Enrichment, and ONLY enrichment. It shares the Overpass sweep with runMapperJob and nothing
+   else: no guides are parsed, no holes are resolved, no green is matched, nothing is written to
+   holes_json or geometry_version, and the caller never chains a visual job off it.
+
+   That is the whole point. Adding bunkers to a course that a golfer is already playing must not
+   be able to move a green, renumber a hole or invalidate a published frame - so the code path
+   that could do those things is not on this one. enrichSurfaceObjects can only ever write the
+   three surface types; it has no route to a tee, a green or a route point. */
+function surfaceCounts(objects) {
+  const counts = { fairway_area: 0, bunker: 0, water: 0 };
+  objects.forEach(object => {
+    if (object && SURFACE_TYPES.has(object.type)) counts[object.type] += 1;
+  });
+  return counts;
+}
+
+async function runObjectCollectionJob(job) {
+  const course = await loadCourseCenter(job.course_id);
+  if (!course) throw new Error("course " + job.course_id + " has no known location in " + MAPS_TABLE + " - cannot query Overpass");
+  const holeNumbers = Object.keys(course.holes || {}).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+  /* The saved map IS the spatial framework. With no holes there is nowhere to put anything,
+     and resolving some here is exactly what this job exists not to do. */
+  if (!holeNumbers.length) throw new Error("course " + job.course_id + " has no saved holes to enrich - map it first");
+
+  await heartbeatJob(job, { stage: "querying-overpass" });
+  let scope = osmQueryScope({}, course.center);
+  let payload = await fetchOverpass(osmGuideQuery(scope));
+  const queryStages = ["around:" + scope.radiusM];
+  const footprint = courseFootprintFrame(payload);
+  if (footprint && !scopeContainsFrame(scope, footprint)) {
+    scope = osmQueryScope({ osmFrame: footprint }, course.center);
+    payload = await fetchOverpass(osmGuideQuery(scope));
+    queryStages.push("footprint-bbox");
+  }
+
+  await heartbeatJob(job, { stage: "collecting-objects" });
+  const objects = Object.values(course.objects || {}).filter(Boolean).map(object => Object.assign({}, object));
+  const before = surfaceCounts(objects);
+  const enrichment = enrichSurfaceObjects(objects, course.courseId, payload, course.holes);
+  const after = surfaceCounts(objects);
+  const added = {
+    fairways: after.fairway_area - before.fairway_area,
+    bunkers: after.bunker - before.bunker,
+    water: after.water - before.water
+  };
+
+  const objectsMap = {};
+  objects.forEach(object => { objectsMap[object.id] = object; });
+  /* objects_json and nothing else. Not holes_json, not geometry_version, not hole_count - the
+     three columns that would make this behave like a remap. */
+  const written = await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(job.course_id), {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ objects_json: objectsMap, updated_at: new Date().toISOString() })
+  });
+  if (!Array.isArray(written) || !written.length) {
+    throw new Error("course " + job.course_id + " has no course_maps row to save collected objects into");
+  }
+
+  /* Best-effort and deliberately AFTER the objects are safely written: this column arrives with
+     supabase/migrations/20260901_add_course_map_object_collection.sql, and an unapplied
+     migration must not turn a successful enrichment into a failed job. The counts are on the
+     job result either way; this column is what lets a library-wide sweep ask "which courses
+     have never had this run". */
+  const collection = {
+    revision: Number((written[0] && written[0].object_collection && written[0].object_collection.revision) || 0) + 1,
+    status: "complete",
+    collectorVersion: SURFACE_MAPPER_VERSION,
+    collectedAt: new Date().toISOString(),
+    counts: after
+  };
+  const metadataSaved = await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(job.course_id), {
+    method: "PATCH",
+    body: JSON.stringify({ object_collection: collection })
+  }).then(() => true).catch(() => false);
+
+  return {
+    kind: OBJECT_COLLECTION_KIND,
+    courseId: job.course_id,
+    holes: holeNumbers.length,
+    queryStages,
+    osmFeatures: golfFeatureCounts(payload),
+    surfacesFound: enrichment.surfaces,
+    surfacesWritten: enrichment.cloned,
+    added,
+    totals: after,
+    objectCollection: metadataSaved ? collection : null,
+    metadataSaved,
+    /* Said explicitly on the row rather than left to be inferred from what is absent, because
+       "the visuals were not touched" is the claim this whole job type exists to make. */
+    visualsTouched: false,
+    holeGeometryTouched: false
+  };
+}
+
 async function runMapperJob(job, origin) {
   const course = await loadCourseCenter(job.course_id);
   if (!course) throw new Error("course " + job.course_id + " has no known location in " + MAPS_TABLE + " - cannot query Overpass");
@@ -1768,7 +1868,7 @@ async function runMapperJob(job, origin) {
     const guides = (result.holes || []).map(hole => guideFromResolvedHole(hole, result)).filter(Boolean);
     if (guides.length > collision.distinctNumbers) {
       const resolverGreens = (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon }));
-      const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, existingObjects);
+      const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, existingObjects, payload);
       /* The resolver is answering here because loop separation could not tell
          the courses apart, so its numbering stands alone - the colliding OSM
          numbers it replaced identified nothing. */
@@ -1946,7 +2046,7 @@ async function runMapperJob(job, origin) {
     if (guides.length > geometry.holesResolved) {
       const resolverGreens = (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon }));
       const base = numberingIssue ? Object.values(geometry.objects) : existingObjects;
-      const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, base);
+      const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, base, payload);
       /* numberingIssue means OSM had shapes and no numbers at all, so every
          published number is the resolver's. The short-of-expected case is the
          genuinely mixed one: OSM numbered part of the course and the resolver
@@ -2066,6 +2166,10 @@ async function runMapperJob(job, origin) {
     saved: geometry.saved,
     polygons: geometry.polygons,
     fallbacks: geometry.fallbacks,
+    /* Enrichment, reported separately from the hole counts above so a run that mapped every
+       hole and found no fairway polygons reads as what it is - a good scan of a thinly tagged
+       course - rather than as a partial one. */
+    surfaces: geometry.surfaces,
     queryStages,
     expectedHoles,
     warnings: warnings.length ? warnings : undefined,
@@ -2156,7 +2260,8 @@ export default async function courseMapperWorker(req) {
   let job = await claimJob(payload && payload.jobId || null);
   while (job) {
     try {
-      const result = await runMapperJob(job, origin);
+      const collecting = String(job.kind || "") === OBJECT_COLLECTION_KIND;
+      const result = collecting ? await runObjectCollectionJob(job) : await runMapperJob(job, origin);
       /* Chained BEFORE finishJob so the outcome rides on the job's own result row - a course
          whose frames never appeared should say why in the same place everything else about
          the run is recorded. The catch keeps the contract above: geometry saved means the
@@ -2164,7 +2269,10 @@ export default async function courseMapperWorker(req) {
       /* A multi-course run chained a snapshot per published course inside
          publishSeparatedLoops, where the per-course bounds live; chaining the parent
          again here would queue a job for a course_id that now holds only one of them. */
-      if (!result.multiCourse) {
+      /* The structural guarantee behind "Collect Extra Objects must not change existing
+         visuals": the chain is not skipped by a flag the collection path sets, it is
+         unreachable from that path at all. */
+      if (!collecting && !result.multiCourse) {
         result.visualChain = await chainVisualSnapshot(job.course_id, result.courseBounds, origin,
           courseCoverageComplete({
             holeNumbers: (result.fit && result.fit.detail && result.fit.detail.holeNumbers) || result.holeNumbers || [],
@@ -2196,4 +2304,4 @@ export default async function courseMapperWorker(req) {
   return new Response("ok", { status: 200 });
 }
 
-export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, runMapperJob, chainVisualSnapshot, transientMapperFailure, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, MAX_TRANSIENT_ATTEMPTS };
+export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, runMapperJob, runObjectCollectionJob, surfaceCounts, chainVisualSnapshot, transientMapperFailure, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, MAX_TRANSIENT_ATTEMPTS };
