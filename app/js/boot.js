@@ -109,6 +109,21 @@
       }
     });
     if (app.painter) app.painter.attach(app.marshal);
+    /* A native surface is another subscriber to Marshal, never another round
+       owner. The iOS NativeRoundBridge can register after boot; web remains
+       inert when no native adapter is present. */
+    if (app.createCaddyWatchBridge) {
+      app.caddyWatch = app.createCaddyWatchBridge({
+        marshal: app.marshal,
+        bubbleModel: function () {
+          return window.GDBubbleEngine && window.GDBubbleEngine.renderModel
+            ? window.GDBubbleEngine.renderModel() : null;
+        }
+      });
+      if (window.GDNativeRoundBridge && window.GDNativeRoundBridge.attach) {
+        window.GDNativeRoundBridge.attach(app.caddyWatch);
+      }
+    }
     /* The only two things that turn the outside world into Signals. A fix that
        is not trusted is refused inside the Marshal, not here — this file does
        not get to decide what counts. */

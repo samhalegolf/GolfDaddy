@@ -97,6 +97,7 @@
     var geometry = found.geometry || found;
     return {
       holeNumber: Number(hole),
+      par: Number.isFinite(Number(found.par != null ? found.par : geometry.par)) ? Number(found.par != null ? found.par : geometry.par) : null,
       tee: pt(geometry.tee),
       green: pt(geometry.green),
       greenShape: (Array.isArray(geometry.greenShape) ? geometry.greenShape : []).map(pt).filter(Boolean),
@@ -160,7 +161,7 @@
 
     function emptyState() {
       return {
-        round: { courseKey: null, courseName: "", pkg: null, centre: null, open: false },
+        round: { id: null, courseKey: null, courseName: "", pkg: null, centre: null, open: false },
         atCourse: false,
         viewHole: 0,
         /* liveHole is set by Play and cleared by End Round. NOTHING ELSE
@@ -338,14 +339,45 @@
       else S.preview.mode = next;
     }
 
-    function completeShot(hole, shot, endPoint, method) {
+    function completeShot(hole, shot, endPoint, method, observation) {
       shot.end = pt(endPoint);
       shot.method = method;
+      if (observation) shot.endLocation = observation;
       if (typeof fx.shotCompleted === "function") {
-        try { fx.shotCompleted({ start: shot.start, target: shot.target, end: shot.end }, { hole: hole, captureMethod: method }); }
+        try { fx.shotCompleted({ start: shot.start, target: shot.target, end: shot.end }, { hole: hole, captureMethod: method, location: observation || null }); }
         catch (e) {}
       }
       S.logged = { hole: hole, record: { start: shot.start, target: shot.target, end: shot.end, method: method } };
+    }
+
+    /* A wearable location is an observation for this one action, never a
+       replacement for the phone's trusted fix. This preserves the existing GPS
+       ownership while letting NativeRoundBridge make provenance explicit. */
+    function observationPoint(observation) {
+      observation = observation || {};
+      var source = String(observation.source || "");
+      var accuracy = Number(observation.horizontalAccuracy);
+      var timestamp = Number(observation.timestamp);
+      var allowed = ["phone-web", "phone-native", "apple-watch", "wear-os", "garmin"];
+      if (allowed.indexOf(source) === -1 || !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100 || !Number.isFinite(timestamp)) return null;
+      /* Do not accept a delayed wearable coordinate as a present shot boundary.
+         `now` is injected, so this remains deterministic in Marshal tests. */
+      if (Math.abs(now() - timestamp) > 5 * 60 * 1000) return null;
+      var where = pt(observation.coordinate || observation.point);
+      return where ? { point: where, observation: { source: source, horizontalAccuracy: accuracy, timestamp: timestamp } } : null;
+    }
+
+    function lockAt(here, observation) {
+      if (flow() !== "live" || S.live.mode !== "track" || !here) return false;
+      var hole = S.live.hole;
+      var open = openShot(hole);
+      if (open) completeShot(hole, open, here, "lock", observation);
+      else S.logged = null;
+      shotsFor(hole).push({ start: here, target: pt(defaultTarget(here, rec())), end: null, method: null, location: observation || null });
+      S.live.mode = "aim";
+      S.live.awayFixes = 0;
+      syncEngine();
+      return true;
     }
 
     function syncEngine() {
@@ -374,6 +406,7 @@
       ROUND_OPENED: function (p) {
         S = emptyState();
         S.round = {
+          id: p.roundId || (String(p.courseKey || "round") + ":" + String(now())),
           courseKey: p.courseKey || null,
           courseName: p.courseName || "",
           pkg: p.pkg || null,
@@ -554,18 +587,15 @@
          which is why mid-hole boundaries need no separate action and why Shot
          End is only ever the hole's last shot (§4.0). */
       LOCK: function () {
-        if (flow() !== "live" || S.live.mode !== "track") return false;
-        var here = S.fix.point;
-        if (!here) return false;
-        var hole = S.live.hole;
-        var open = openShot(hole);
-        if (open) completeShot(hole, open, here, "lock");
-        else S.logged = null;
-        shotsFor(hole).push({ start: here, target: pt(defaultTarget(here, rec())), end: null, method: null });
-        S.live.mode = "aim";
-        S.live.awayFixes = 0;
-        syncEngine();
-        return true;
+        return lockAt(S.fix.point, null);
+      },
+
+      /* Same shot transition as LOCK, with a one-action external observation.
+         It deliberately leaves S.fix intact: an Apple Watch fix must not
+         silently become the phone's global location. */
+      LOCK_AT: function (p) {
+        var observed = observationPoint(p && p.observation);
+        return observed ? lockAt(observed.point, observed.observation) : false;
       },
 
       /* Returns you to the resting state of the flow you are in (§5). In Live
@@ -602,6 +632,16 @@
         completeShot(S.live.hole, open, here, "shot-end");
         S.live.mode = "logged";
         syncEngine();
+        return true;
+      },
+
+      SHOT_END_AT: function (p) {
+        if (flow() !== "live" || S.live.mode !== "aim") return false;
+        var observed = observationPoint(p && p.observation);
+        var open = openShot(S.live.hole);
+        if (!observed || !open) return false;
+        completeShot(S.live.hole, open, observed.point, "shot-end", observed.observation);
+        S.live.mode = "logged";
         return true;
       },
 
@@ -962,6 +1002,7 @@
          a new caller has to say what it wants rather than helping itself. */
       round: function () {
         return {
+          roundId: S.round.id,
           courseKey: S.round.courseKey,
           hole: S.viewHole,
           liveHole: S.live.hole,

@@ -452,9 +452,56 @@ function gdAdminCourseDbActionRail(selected){
     <button type="button" class="${active("scorecard")}" onclick="return gdAdminCourseDbShowScorecard(${id})">Score Card</button>
     <button type="button" class="${active("debug")}" onclick="return gdAdminCourseDbShowDebug(${id})">Debug</button>
     <button type="button" class="danger" onclick="return gdAdminCourseDbDelete(${id})">Delete</button>
-    <button type="button" onclick="return gdAdminCourseDbUpdate(${id})">Rebuild local</button>
+    ${gdAdminCourseMaintenanceMenu(selected)}
     ${gdAdminCourseVisualUpdateButton(selected&&selected.id||"","primary")}
   </div>`;
+}
+/* The four maintenance modes, as variants of the old "Rebuild local" button rather than four
+   more equal pills on the rail. They are NOT aliases for one pipeline - each is a deliberate
+   entry point into a different stage - and the menu is what makes that readable:
+
+     IDENTITY -> HOLE GEOMETRY -> EXTRA OBJECTS -> VISUAL CAPTURE -> VISUAL BAKE
+
+   Full Remap starts at the top. Collect Extra Objects touches the objects layer alone. The two
+   visual modes start at capture and at bake. Each line says what it leaves alone, because that
+   is the thing an operator needs to know before pressing it. "Rebuild local" stays as the last
+   entry: it is a real action (rebuild THIS BROWSER's record from the course database) and a
+   different job from all four, which is exactly why it should not be the unlabelled default. */
+function gdAdminCourseMaintenanceMenu(selected){
+  const id=gdAdminJsArg(selected&&selected.id||"");
+  const item=(mode,label,note,cls)=>`<button type="button"${cls?` class="${cls}"`:""} onclick="return gdAdminCourseMaintenance('${mode}',${id})">${gdEscapeHTML(label)}<small>${gdEscapeHTML(note)}</small></button>`;
+  return `<details class="gdAdminRebuildMenu"><summary>Rebuild</summary><div class="gdAdminRebuildMenuList">
+    ${item("full_remap","Full Remap","Geometry, objects and visuals, from source","danger")}
+    ${item("collect_extra_objects","Collect Extra Objects","Adds bunkers, fairways and hazards. Holes, greens and visuals unchanged")}
+    ${item("recapture_visuals","Re-Capture Visuals","Fresh source imagery for the existing map, then a bake")}
+    ${item("rebake_visuals","Re-Bake Visuals","Existing captures, current recipe. No re-scan")}
+    ${item("rebuild_local","Rebuild local","This browser's copy only. Nothing on the server changes")}
+  </div></details>`;
+}
+
+/* One dispatcher so the menu markup carries no behaviour and every mode closes the menu the
+   same way. Confirmation is per the scope each one actually has: Full Remap can replace
+   geometry AND visuals, Re-Capture replaces captures, and the other three take nothing away. */
+function gdAdminCourseMaintenance(mode,courseId){
+  document.querySelectorAll(".gdAdminRebuildMenu[open]").forEach(node=>{node.open=false;});
+  const id=String(courseId||"");
+  if(!id)return false;
+  if(mode==="full_remap")return gdAdminCourseRemap(id);
+  if(mode==="collect_extra_objects")return gdAdminCourseCollectExtraObjects(id);
+  if(mode==="rebuild_local")return gdAdminCourseDbUpdate(id);
+  if(mode==="rebake_visuals")return gdAdminCourseVisualUpdateWithActiveRecipe(id);
+  if(mode==="recapture_visuals"){
+    if(!window.confirm("Re-capture visuals for "+id+"?\n\nFetches fresh source imagery for the existing course map and re-bakes from it. The mapped holes, greens and collected objects are kept; the current captures are replaced."))return false;
+    /* The SERVER capture path, deliberately not gdAdminCourseVisualRecapture: that one reads
+       the tuning panel's inputs, and from this rail the panel is closed, so every field falls
+       back to a hardcoded default which it then SAVES over the course's own recipe. Enqueuing
+       the snapshot directly has no form dependency at all. */
+    return gdAdminCourseVisualEnqueueCloudSnapshot(id).then(data=>{
+      if(!data||!data.job)gdAdminCourseVisualToast("Could not queue the capture - sign in again?");
+      return false;
+    });
+  }
+  return false;
 }
 function gdAdminCourseDbLoadVisual(courseId){
   return gdAdminCourseDbOpen(courseId,"visuals");
@@ -3605,7 +3652,7 @@ function gdAdminCourseVisualControls(record,courseId){
      the group is off. */
   const mowingField=`<label>Visibility level<select id="gdCourseVisualMowing"><option value="Unknown" hidden ${mowing==="Unknown"?"selected":""}>Off</option>${["Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>`;
   const mowingPanel=gdAdminCourseVisualEffectHeader("mowing","Mow lines",mowingOn)+gdAdminCourseVisualEffectBody(mowingOn,mowingField);
-  const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseRemap('${key}')">Full Remap</button><button type="button" onclick="return gdAdminCourseCollectExtraObjects('${key}')">Collect Extra Objects</button><button type="button" onclick="return gdAdminCourseUpdateScorecards('${key}')">Update Scorecards</button><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-Capture Visuals</button><button type="button" onclick="return gdAdminCourseVisualUpdateWithActiveRecipe('${key}')">Re-Bake Visuals</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div>`;
+  const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseRemap('${key}')">Remap from OSM</button><button type="button" onclick="return gdAdminCourseUpdateScorecards('${key}')">Update Scorecards</button><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div>`;
   const groups=[
     {id:"preset",icon:"🎨",label:"Preset",body:presetField+presetRail},
     /* The recipe area is its own tab, not a footnote under Preset: a preset is one ingredient

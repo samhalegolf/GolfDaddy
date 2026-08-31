@@ -453,6 +453,22 @@
     .gdAdminCourseActionRail button.active{background:rgba(31,211,109,.18);color:#83ffb7}
     .gdAdminCourseActionRail button.danger{background:rgba(255,103,103,.11);color:#ffb0b0}
     .gdAdminCourseActionRail button.primary{background:#1fd36d;color:#06110b}
+    /* Rebuild is a menu, not a button: the four maintenance modes are different entry points
+       into the course pipeline and putting them on the rail as equal pills is what would make
+       them read as aliases for one another. <details> rather than a scripted popover so the
+       toggle, the keyboard behaviour and the close-on-second-click are the browser's. */
+    .gdAdminRebuildMenu{position:relative}
+    .gdAdminRebuildMenu>summary{list-style:none;cursor:pointer;border-radius:999px;padding:8px 10px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.74);font-size:10px;font-weight:950}
+    .gdAdminRebuildMenu>summary::-webkit-details-marker{display:none}
+    .gdAdminRebuildMenu>summary::after{content:" \25BE";opacity:.6}
+    .gdAdminRebuildMenu[open]>summary{background:rgba(31,211,109,.18);color:#83ffb7}
+    .gdAdminRebuildMenuList{position:absolute;z-index:40;top:calc(100% + 6px);left:0;min-width:246px;display:flex;flex-direction:column;gap:3px;padding:6px;border-radius:12px;background:#0d1712;border:1px solid rgba(255,255,255,.12);box-shadow:0 14px 30px rgba(0,0,0,.55)}
+    .gdAdminCourseActionRail .gdAdminRebuildMenuList button{display:block;width:100%;text-align:left;border-radius:8px;padding:8px 10px;background:transparent;color:rgba(255,255,255,.86)}
+    .gdAdminCourseActionRail .gdAdminRebuildMenuList button:hover{background:rgba(255,255,255,.08)}
+    .gdAdminCourseActionRail .gdAdminRebuildMenuList button.danger{color:#ffb0b0}
+    .gdAdminCourseActionRail .gdAdminRebuildMenuList button.danger:hover{background:rgba(255,103,103,.13)}
+    /* The scope line under each mode - what it leaves alone is the thing worth reading. */
+    .gdAdminRebuildMenuList button small{display:block;margin-top:3px;font-size:9px;font-weight:700;line-height:1.35;color:rgba(255,255,255,.48);letter-spacing:0;text-transform:none;white-space:normal}
     .gdAdminCourseWorkspace{display:grid;gap:10px}
     .gdAdminCourseDebugWindow{display:grid;gap:10px}
     .gdAdminCourseDebugWindow .gdCoursePlayDebug{display:block;margin:0}
