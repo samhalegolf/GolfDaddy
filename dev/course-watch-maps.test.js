@@ -99,6 +99,35 @@ const root = path.join(__dirname, "..");
   const migration = fs.readFileSync(path.join(root, "supabase", "migrations", "20260902_fix_course_watch_map_version_bigint.sql"), "utf8");
   assert.ok(migration.includes("bigint"), "existing installations must upgrade Watch Map package versions to bigint");
 
+
+  // --- pruning superseded packages: the live one must never be selectable ----
+
+  const { supersededPaths } = helpers;
+  const LIVE = 1788285633006;
+  const listing = [
+    { folder: "v1788278329227", assets: ["h1.webp", "h2.webp"] },
+    { folder: "v1788278423353", assets: ["h1.webp"] },
+    { folder: "v" + LIVE, assets: ["h1.webp", "h2.webp"] }
+  ];
+  const doomed = supersededPaths("millbrook-remarkables-18", LIVE, listing);
+  assert.deepStrictEqual(doomed, [
+    "millbrook-remarkables-18/v1788278329227/h1.webp",
+    "millbrook-remarkables-18/v1788278329227/h2.webp",
+    "millbrook-remarkables-18/v1788278423353/h1.webp"
+  ], "every superseded asset, and only those");
+  assert.ok(!doomed.some(p => p.includes(String(LIVE))), "the live package can never appear in the delete list");
+
+  assert.deepStrictEqual(supersededPaths("c", LIVE, [{ folder: "v" + LIVE, assets: ["h1.webp"] }]), [],
+    "a course with only the live package prunes nothing");
+  assert.deepStrictEqual(supersededPaths("c", LIVE, []), [], "an empty bucket prunes nothing");
+
+  /* A non-version folder, or a file that is not a baked hole, is not this
+     function's to delete - it did not put it there. */
+  assert.deepStrictEqual(supersededPaths("c", LIVE, [
+    { folder: "backup", assets: ["h1.webp"] },
+    { folder: "v1", assets: ["notes.txt", "h1.webp", "../../escape.webp"] }
+  ]), ["c/v1/h1.webp"], "only vN folders and only baked hole assets are pruned");
+
   console.log("course-watch-maps passed");
 })().catch((error) => {
   console.error("course-watch-maps failed");

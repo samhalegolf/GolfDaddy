@@ -73,6 +73,56 @@ async function storageList(prefix) {
   return Array.isArray(body) ? body : [];
 }
 
+/* Exact object paths for every superseded package of this course.
+
+   Pure, and separated from the fetching so the one thing that must never be
+   wrong - that the live package is not in the delete list - is testable without
+   a network or a bucket. The keep-version is excluded twice: once by folder
+   name, and once again on the assembled path. */
+function supersededPaths(courseId, keepVersion, listing) {
+  const keep = "v" + keepVersion;
+  const paths = [];
+  (listing || []).forEach(entry => {
+    const folder = String(entry && entry.folder || "");
+    if (!/^v\d+$/.test(folder) || folder === keep) return;
+    (entry.assets || []).forEach(name => {
+      if (!/^h\d{1,2}\.(png|webp)$/.test(String(name))) return;
+      paths.push(courseId + "/" + folder + "/" + name);
+    });
+  });
+  return paths.filter(path => path.startsWith(courseId + "/v") && !path.includes("/" + keep + "/"));
+}
+
+async function storageRemove(paths) {
+  if (!paths.length) return 0;
+  const response = await fetch(supabaseBase() + "/storage/v1/object/" + BUCKET, {
+    method: "DELETE",
+    headers: { apikey: supabaseKey(), Authorization: "Bearer " + supabaseKey(), "Content-Type": "application/json" },
+    body: JSON.stringify({ prefixes: paths })
+  });
+  if (!response.ok) throw new Error("Storage delete " + response.status + ": " + (await response.text()).slice(0, 300));
+  return paths.length;
+}
+
+/* A regenerate uploads a new vN folder and, before this, left every previous one
+   in the bucket for good - Millbrook accumulated five dead packages (~455KB)
+   across one afternoon of retries.
+
+   Deliberately runs only AFTER the row is persisted. Pruning first, or pruning
+   on a failed save, is how a course ends up with no usable package at all: the
+   old assets would be gone and the new ones unreferenced. */
+async function pruneSupersededPackages(courseId, keepVersion) {
+  const folders = (await storageList(courseId))
+    .map(item => String(item && item.name || ""))
+    .filter(name => /^v\d+$/.test(name) && name !== "v" + keepVersion);
+  const listing = [];
+  for (const folder of folders) {
+    const assets = await storageList(courseId + "/" + folder);
+    listing.push({ folder, assets: assets.map(asset => String(asset && asset.name || "")) });
+  }
+  return storageRemove(supersededPaths(courseId, keepVersion, listing));
+}
+
 async function findStoredPackage(courseId) {
   const versions = (await storageList(courseId)).map(item => String(item && item.name || ""))
     .filter(name => /^v\d+$/.test(name)).sort((a, b) => Number(b.slice(1)) - Number(a.slice(1)));
@@ -205,6 +255,15 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
     throw error;
   }
 
+  /* Best-effort: the package is already live and correct at this point, so a
+     bucket that refuses a delete leaves litter, never a broken course. */
+  try {
+    row.prunedAssets = await pruneSupersededPackages(courseId, version);
+  } catch (error) {
+    row.prunedAssets = 0;
+    row.pruneError = String(error && error.message || error);
+  }
+
   return row;
 }
 
@@ -289,7 +348,12 @@ export default async function courseWatchMaps(req) {
 
   try {
     const row = await generateWatchPackage({ courseId, map, actorEmail: user.email });
-    return json(200, Object.assign({ courseId }, reportShape(row)));
+    /* Not part of reportShape: pruning is an outcome of THIS run, not a
+       property of the stored package, and the GET path must never claim it. */
+    return json(200, Object.assign({ courseId }, reportShape(row), {
+      prunedAssets: row.prunedAssets || 0,
+      pruneError: row.pruneError || null
+    }));
   } catch (error) {
     if (error.watchMapReport) return json(502, Object.assign({ courseId }, error.watchMapReport, {
       status: "failed",
@@ -304,7 +368,7 @@ export const config = {
   path: "/api/course-watch-maps",
 };
 
-export const __test = { holeNumbersFromObjects, reportShape, recoveryReport };
+export const __test = { holeNumbersFromObjects, reportShape, recoveryReport, supersededPaths };
 
 function json(status, body) {
   return new Response(body == null ? "" : JSON.stringify(body), {
