@@ -59,7 +59,12 @@
       var data = await res.json().catch(function () { return null; });
       if (res.status === 403) { toast("Admin only"); return false; }
       if (res.status === 404) { toast((data && data.error) || "Course has no geometry to generate from"); return false; }
-      if (!res.ok) { toast("Generate Watch Maps failed (" + res.status + ")"); return false; }
+      if (!res.ok) {
+        if (data && data.holes) reports[courseId] = data;
+        var stage = data && data.failure && data.failure.stage;
+        toast((data && data.error) || (stage ? "Watch Maps failed during " + stage : "Generate Watch Maps failed (" + res.status + ")"));
+        return false;
+      }
       reports[courseId] = data;
       holeByCourse[courseId] = data.holes && data.holes[0] ? data.holes[0].holeNumber : null;
       var word = data.status === "ready" ? "ready" : data.status === "partial" ? "partial (" + data.readyHoleCount + "/" + data.holeCount + " holes)" : "failed";
@@ -69,6 +74,9 @@
     } finally {
       if (typeof gdAdminCourseDbShowWatchMaps === "function") gdAdminCourseDbShowWatchMaps(courseId);
       else rerender();
+      /* The POST result is rendered immediately, then re-read from the normal source of truth
+         so the gallery never waits for a reload and subsequent visits see the saved package. */
+      fetchReport(courseId, { force: true });
     }
     return false;
   }
@@ -170,7 +178,9 @@
   function statusLabel(report) {
     if (!report || report.status === "none") return { label: "Not generated", tone: "" };
     if (report.status === "ready") return { label: "Ready · " + report.readyHoleCount + "/" + report.holeCount + " holes · " + Math.round(report.totalBytes / 1024) + " KB · Recipe v" + report.recipeVersion, tone: "ok" };
+    if (report.status === "recovery") return { label: "Recovery needed · " + report.readyHoleCount + " generated assets found · Package metadata missing", tone: "warn" };
     if (report.status === "partial") return { label: "Partial · " + report.readyHoleCount + "/" + report.holeCount + " holes · " + Math.round(report.totalBytes / 1024) + " KB", tone: "warn" };
+    if (report.status === "failed" && report.failure) return { label: "Generation failed · " + (report.failure.stage || "unknown stage"), tone: "bad" };
     return { label: "Failed", tone: "bad" };
   }
 
@@ -186,9 +196,12 @@
   }
 
   function errorsMarkup(report) {
-    if (!report || !Array.isArray(report.errors) || !report.errors.length) return "";
-    var items = report.errors.map(function (e) { return "<li>Hole " + esc(e.holeNumber) + ": " + esc(e.reason) + "</li>"; }).join("");
-    return '<details class="gdAdminCourseSettings"><summary>' + report.errors.length + ' issue(s)</summary><ul class="gdAdminWatchMapErrorList">' + items + '</ul></details>';
+    if (!report) return "";
+    var errors = Array.isArray(report.errors) ? report.errors : [];
+    if (!errors.length && !report.failure) return "";
+    var items = errors.map(function (e) { return "<li>" + (e.holeNumber ? "Hole " + esc(e.holeNumber) + ": " : "") + esc(e.reason) + "</li>"; }).join("");
+    if (report.failure) items += "<li><b>Stage:</b> " + esc(report.failure.stage || "unknown") + " · " + esc(report.failure.generatedHoleCount || 0) + " images generated · " + esc(report.failure.uploadedHoleCount || 0) + " uploaded" + (report.failure.reason ? "<br>" + esc(report.failure.reason) : "") + "</li>";
+    return '<details class="gdAdminCourseSettings" open><summary>' + (errors.length + (report.failure ? 1 : 0)) + ' issue(s)</summary><ul class="gdAdminWatchMapErrorList">' + items + '</ul></details>';
   }
 
   function holeSelector(courseId, report, current) {
@@ -217,10 +230,22 @@
       ["origin", (Number(sr.originLat || 0)).toFixed(6) + ", " + (Number(sr.originLon || 0)).toFixed(6)],
       ["recipe", (sr.recipeId || "") + " v" + sr.recipeVersion],
       ["course/hole", courseId + " / h" + holeRecord.holeNumber],
-      ["layers", "fairways " + holeRecord.layers.fairways + "/" + holeRecord.layers.fairwaysMapped + " · bunkers " + holeRecord.layers.bunkers + "/" + holeRecord.layers.bunkersMapped + " · water " + holeRecord.layers.water + "/" + holeRecord.layers.waterMapped],
+      ["layers", holeRecord.layers ? "fairways " + holeRecord.layers.fairways + "/" + holeRecord.layers.fairwaysMapped + " · bunkers " + holeRecord.layers.bunkers + "/" + holeRecord.layers.bunkersMapped + " · water " + holeRecord.layers.water + "/" + holeRecord.layers.waterMapped : "not available without package metadata"],
       ["validation", holeRecord.validation && holeRecord.validation.ok ? "ok" : "ISSUES: " + ((holeRecord.validation && holeRecord.validation.issues) || []).join("; ")]
     ];
     return '<div class="gdAdminWatchMapDebugPanel">' + rows.map(function (r) { return '<div><b>' + esc(r[0]) + '</b><span>' + esc(r[1]) + '</span></div>'; }).join("") + '</div>';
+  }
+
+  function galleryMarkup(courseId, report, current) {
+    return '<div class="gdAdminWatchMapGallery" aria-label="Generated Watch Map gallery">' + report.holes.map(function (hole) {
+      var src = "/api/course-watch-map-assets?path=" + encodeURIComponent(hole.path);
+      var selected = hole.holeNumber === current;
+      return '<article class="gdAdminWatchMapCard ' + (selected ? "selected" : "") + '">' +
+        '<button type="button" onclick="return gdAdminCourseWatchMapsSelectHole(\'' + esc(courseId) + '\',' + hole.holeNumber + ')" aria-label="Inspect Hole ' + hole.holeNumber + '">' +
+        '<img src="' + esc(src) + '" alt="Watch map thumbnail, hole ' + hole.holeNumber + '" loading="lazy"></button>' +
+        '<div><b>Hole ' + hole.holeNumber + '</b><a href="' + esc(src) + '" target="_blank" rel="noopener">Open full size</a></div>' +
+        '</article>';
+    }).join("") + '</div>';
   }
 
   function viewerMarkup(courseId, report, current) {
@@ -233,7 +258,7 @@
     var src = "/api/course-watch-map-assets?path=" + encodeURIComponent(holeRecord.path);
     var debugOn = !!debugByCourse[courseId];
     var checkpoints = holeRecord.checkpoints || {};
-    var dots = debugOn ? ["tee", "green", "greenFront", "greenBack"].map(function (k) {
+    var dots = debugOn && holeRecord.spatialReference ? ["tee", "green", "greenFront", "greenBack"].map(function (k) {
       return debugPointMarkup(k, checkpoints[k], holeRecord, view);
     }).join("") : "";
     return '<div class="gdAdminWatchMapViewer">' +
@@ -246,7 +271,7 @@
       '<button type="button" onclick="return gdAdminCourseWatchMapsZoom(\'' + esc(courseId) + '\',' + current + ',1.25)">Zoom +</button>' +
       '<button type="button" onclick="return gdAdminCourseWatchMapsZoom(\'' + esc(courseId) + '\',' + current + ',0.8)">Zoom −</button>' +
       '<button type="button" onclick="return gdAdminCourseWatchMapsResetView(\'' + esc(courseId) + '\',' + current + ')">Reset</button>' +
-      '<button type="button" class="' + (debugOn ? "active" : "") + '" onclick="return gdAdminCourseWatchMapsToggleDebug(\'' + esc(courseId) + '\')">Spatial debug</button>' +
+      (holeRecord.spatialReference ? '<button type="button" class="' + (debugOn ? "active" : "") + '" onclick="return gdAdminCourseWatchMapsToggleDebug(\'' + esc(courseId) + '\')">Spatial debug</button>' : '') +
       '</div>' +
       '<div class="gdAdminWatchMapStage" id="gdWatchMapStage" style="width:' + viewportW + 'px;height:' + viewportH + 'px">' +
       '<img id="gdWatchMapImg" src="' + esc(src) + '" alt="Watch map, hole ' + current + '" draggable="false" style="transform:translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.scale + ')">' +
@@ -266,7 +291,7 @@
     if (report === "error") return '<div class="gdAdminCourseWorkspace">' + head + '<div class="gdCoursePlayDebugEmpty">Could not load Watch Map status.</div></div>';
     if (!report.holes || !report.holes.length) return '<div class="gdAdminCourseWorkspace">' + head + errorsMarkup(report) + '<div class="gdCoursePlayDebugEmpty">No Watch maps generated yet for this course.</div></div>';
     var current = holeByCourse[courseId] || report.holes[0].holeNumber;
-    return '<div class="gdAdminCourseWorkspace">' + head + errorsMarkup(report) + viewerMarkup(courseId, report, current) + '</div>';
+    return '<div class="gdAdminCourseWorkspace">' + head + errorsMarkup(report) + galleryMarkup(courseId, report, current) + viewerMarkup(courseId, report, current) + '</div>';
   }
 
   function afterRender(selected) {

@@ -57,6 +57,38 @@ async function storageUpload(path, buffer, contentType) {
   return path;
 }
 
+/* Storage is normally only a delivery layer: course_watch_maps is the canonical package
+   record.  A historical integer overflow meant a fully-uploaded package could be left
+   without that record, though.  This read-only inspection path makes that visible instead
+   of incorrectly reporting "not generated".  It deliberately reconstructs only facts the
+   object names/metadata prove; spatial references remain unavailable until regeneration. */
+async function storageList(prefix) {
+  const response = await fetch(supabaseBase() + "/storage/v1/object/list/" + BUCKET, {
+    method: "POST",
+    headers: { apikey: supabaseKey(), Authorization: "Bearer " + supabaseKey(), "Content-Type": "application/json" },
+    body: JSON.stringify({ prefix, limit: 1000, offset: 0, sortBy: { column: "name", order: "desc" } })
+  });
+  const body = await response.json().catch(() => []);
+  if (!response.ok) throw new Error("Storage list " + response.status + ": " + JSON.stringify(body).slice(0, 300));
+  return Array.isArray(body) ? body : [];
+}
+
+async function findStoredPackage(courseId) {
+  const versions = (await storageList(courseId)).map(item => String(item && item.name || ""))
+    .filter(name => /^v\d+$/.test(name)).sort((a, b) => Number(b.slice(1)) - Number(a.slice(1)));
+  for (const folder of versions) {
+    const assets = await storageList(courseId + "/" + folder);
+    const holes = assets.map(asset => {
+      const match = /^h(\d{1,2})\.(png|webp)$/.exec(String(asset && asset.name || ""));
+      if (!match) return null;
+      const bytes = Number(asset.metadata && asset.metadata.size || asset.size || 0);
+      return { holeNumber: Number(match[1]), path: courseId + "/" + folder + "/" + match[0], format: match[2], bytes };
+    }).filter(Boolean).sort((a, b) => a.holeNumber - b.holeNumber);
+    if (holes.length) return { watchPackageVersion: Number(folder.slice(1)), holes };
+  }
+  return null;
+}
+
 async function verifiedUser(req) {
   const header = String((req && req.headers && typeof req.headers.get === "function" && req.headers.get("authorization")) || "");
   const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
@@ -155,11 +187,23 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
     updated_at: new Date().toISOString()
   };
 
-  await supabaseFetch(WATCH_TABLE, {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
-    body: JSON.stringify([row])
-  });
+  try {
+    await supabaseFetch(WATCH_TABLE, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify([row])
+    });
+  } catch (error) {
+    error.watchMapReport = reportShape(row);
+    error.watchMapFailure = {
+      stage: "package metadata persistence",
+      generatedHoleCount: holes.length,
+      uploadedHoleCount: holes.length,
+      packageMetadataSaved: false,
+      reason: String(error && error.message || error)
+    };
+    throw error;
+  }
 
   return row;
 }
@@ -183,6 +227,23 @@ function reportShape(row) {
   };
 }
 
+function recoveryReport(courseId, stored) {
+  const holes = stored.holes;
+  return {
+    courseId,
+    status: "recovery",
+    recovery: true,
+    watchPackageVersion: stored.watchPackageVersion,
+    recipeId: null,
+    recipeVersion: null,
+    holeCount: holes.length,
+    readyHoleCount: holes.length,
+    totalBytes: holes.reduce((total, hole) => total + (hole.bytes || 0), 0),
+    holes,
+    errors: [{ reason: "Package metadata missing. These uploaded assets can be inspected, but regeneration is required to restore the canonical spatial-reference package." }]
+  };
+}
+
 async function loadWatchRow(courseId) {
   const rows = await supabaseFetch(WATCH_TABLE + "?select=*&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []);
   return Array.isArray(rows) ? rows[0] || null : null;
@@ -197,7 +258,16 @@ export default async function courseWatchMaps(req) {
     const courseId = slug(url.searchParams.get("courseId") || url.searchParams.get("course_id"));
     if (!courseId) return json(400, { error: "courseId required" });
     const row = await loadWatchRow(courseId);
-    return json(200, Object.assign({ courseId }, reportShape(row)));
+    const report = reportShape(row);
+    if (row && Array.isArray(report.holes) && report.holes.length) return json(200, Object.assign({ courseId }, report));
+    try {
+      const stored = await findStoredPackage(courseId);
+      if (stored) return json(200, recoveryReport(courseId, stored));
+    } catch (error) {
+      /* A storage-list outage must not hide a valid canonical row.  With no row, retain the
+         normal empty state rather than claiming recovery from an unverified listing. */
+    }
+    return json(200, Object.assign({ courseId }, report));
   }
 
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
@@ -221,7 +291,12 @@ export default async function courseWatchMaps(req) {
     const row = await generateWatchPackage({ courseId, map, actorEmail: user.email });
     return json(200, Object.assign({ courseId }, reportShape(row)));
   } catch (error) {
-    return json(502, { error: String(error && error.message || error) });
+    if (error.watchMapReport) return json(502, Object.assign({ courseId }, error.watchMapReport, {
+      status: "failed",
+      error: "Watch Map generation failed during " + error.watchMapFailure.stage,
+      failure: error.watchMapFailure
+    }));
+    return json(502, { courseId, status: "failed", error: String(error && error.message || error), failure: { stage: "generation", reason: String(error && error.message || error) } });
   }
 }
 
@@ -229,7 +304,7 @@ export const config = {
   path: "/api/course-watch-maps",
 };
 
-export const __test = { holeNumbersFromObjects, reportShape };
+export const __test = { holeNumbersFromObjects, reportShape, recoveryReport };
 
 function json(status, body) {
   return new Response(body == null ? "" : JSON.stringify(body), {

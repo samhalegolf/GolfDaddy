@@ -475,6 +475,13 @@
        image's own aspect ratio, because every hole bakes a different shape; the image is panned
        and scaled inside it with a CSS transform rather than resized. */
     .gdAdminWatchMapViewer{display:grid;gap:8px}
+    .gdAdminWatchMapGallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px}
+    .gdAdminWatchMapCard{overflow:hidden;border:1px solid rgba(255,255,255,.10);border-radius:12px;background:rgba(0,0,0,.16)}
+    .gdAdminWatchMapCard.selected{border-color:rgba(131,255,183,.72);box-shadow:0 0 0 1px rgba(131,255,183,.2)}
+    .gdAdminWatchMapCard button{display:block;width:100%;padding:0;background:#0a120c;cursor:pointer}
+    .gdAdminWatchMapCard img{display:block;width:100%;aspect-ratio:4/5;object-fit:contain}
+    .gdAdminWatchMapCard div{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:7px 8px;font:850 10px/1.2 Inter,system-ui,sans-serif;color:#fff}
+    .gdAdminWatchMapCard a{color:#83ffb7;font-size:9px;text-decoration:none}
     .gdAdminWatchMapToolbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font:800 10px/1.4 Inter,system-ui,sans-serif;color:rgba(255,255,255,.62)}
     .gdAdminWatchMapToolbar button{border-radius:999px;padding:6px 10px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.74);font-size:10px;font-weight:950}
     .gdAdminWatchMapToolbar button.active{background:rgba(31,211,109,.18);color:#83ffb7}

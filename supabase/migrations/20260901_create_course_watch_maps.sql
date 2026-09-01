@@ -7,7 +7,7 @@ create table if not exists public.course_watch_maps (
   id text primary key,
   course_id text not null,
   status text not null default 'none',              -- none | partial | ready | failed
-  watch_package_version integer not null default 0,
+  watch_package_version bigint not null default 0,
   recipe_id text,
   recipe_version integer,
   source_objects_version text,                       -- objectsVersion() at generation time, for staleness checks

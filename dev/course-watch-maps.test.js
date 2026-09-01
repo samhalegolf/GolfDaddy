@@ -52,6 +52,15 @@ const root = path.join(__dirname, "..");
   assert.strictEqual(shaped.totalBytes, 862000);
   assert.strictEqual(shaped.holes.length, 1);
 
+  // --- storage-only packages remain inspectable, but are explicitly recovery state --------
+  const recovered = helpers.recoveryReport("millbrook-remarkables-18", {
+    watchPackageVersion: 1788278423353,
+    holes: [{ holeNumber: 1, path: "millbrook-remarkables-18/v1788278423353/h1.webp", format: "webp", bytes: 4700 }]
+  });
+  assert.strictEqual(recovered.status, "recovery");
+  assert.strictEqual(recovered.watchPackageVersion, 1788278423353);
+  assert.strictEqual(recovered.holes.length, 1);
+
   // --- this pipeline must never touch the native visual/geometry tables --------------------
   const source = fs.readFileSync(path.join(root, "functions", "course-watch-maps.mjs"), "utf8");
   ["course_visuals", "course_visual_jobs", "course_mapper_jobs"].forEach(table => {
@@ -78,12 +87,17 @@ const root = path.join(__dirname, "..");
 
   const viewer = fs.readFileSync(path.join(root, "scripts", "studio", "gd-admin-watch-map-viewer.js"), "utf8");
   assert.ok(viewer.includes("/api/course-watch-maps"), "the viewer must call the Watch Map API");
+  assert.ok(viewer.includes("gdAdminWatchMapGallery"), "the viewer must render each generated Watch Map in a gallery");
+  assert.ok(viewer.includes("Open full size"), "each Watch Map must have a complete-asset inspection link");
   assert.ok(viewer.includes("window.GDWatchMapCore"), "the debug overlay must reuse the shared geo<->pixel transform, not a second implementation");
   assert.ok(!/gdAdminWatchMapStage[\s\S]{0,400}(bezel|complication|LockShot|Bubble)/i.test(viewer), "the viewer must not draw a fake Watch bezel or Bubble/Lock-Shot UI - it inspects the baked asset only");
 
   // --- netlify.toml must pin the shared core so functions/ can import it -------------------
   const toml = fs.readFileSync(path.join(root, "netlify.toml"), "utf8");
   assert.ok(toml.includes("scripts/gd-watch-map-core.js"), "netlify.toml must pin scripts/gd-watch-map-core.js as an included_files entry");
+
+  const migration = fs.readFileSync(path.join(root, "supabase", "migrations", "20260902_fix_course_watch_map_version_bigint.sql"), "utf8");
+  assert.ok(migration.includes("bigint"), "existing installations must upgrade Watch Map package versions to bigint");
 
   console.log("course-watch-maps passed");
 })().catch((error) => {
