@@ -36,18 +36,41 @@
 
   var WATCH_MAP_RECIPE_V1 = {
     id: "watch-map-v1",
-    version: 1,
+    /* v2 added the play corridor. v1 framed on the union of every mapped object,
+       which on this codebase's cloning model means every surface inside the
+       hole's axis-aligned capture box - 19.3ha for a 507m diagonal par 5. The
+       result was a canvas framed on the neighbourhood: Millbrook's 1st drew six
+       fairway corridors, five of them 104-233m off the play line, and spent
+       under 9% of its width on the hole being played. */
+    version: 2,
     canvas: {
       /* Ceiling, not a fixed size - see computeCanvasFit. Most holes land under both ceilings;
          a long narrow par 5 is height-limited, a short wide-corridor hole is width-limited. */
       targetWidthPx: 448,
       maxHeightPx: 1536,
       minSpanPx: 96,
-      /* Padding around the union of every mapped object, as a fraction of that union's own
-         span. teeMarginFraction is extra padding added only below the tee, so a future Watch
+      /* Padding around the framed corridor, as a fraction of its own span.
+         teeMarginFraction is extra padding added only below the tee, so the Watch
          viewport has room to show the player standing behind their ball. */
       marginFraction: 0.14,
       teeMarginFraction: 0.16
+    },
+    /* The play corridor: how far either side of the hole's own route this map is
+       about. It decides FRAMING ONLY - which ground the canvas is fitted to -
+       and never which objects are drawn. A surface outside it is still rendered
+       and simply falls off the edge of the viewBox, exactly as ground outside
+       an aerial capture's frame does. That split is deliberate: filtering whole
+       polygons instead was tried and does not work, because 15 of Millbrook's
+       24 OSM fairway ways are multi-hole ribbons (median bounding diagonal
+       193m, largest 403m across seven holes) - keeping one because a single
+       vertex is near the route drags 300m of a neighbouring hole back into the
+       frame, and dropping it deletes the near part the player can actually see.
+
+       55m is measured, not guessed: a mapped fairway sits within ~25m of the
+       route, and greenside bunkers within ~40m, so this keeps a hole's own
+       surrounds while excluding the next fairway over. */
+    corridor: {
+      halfWidthM: 55
     },
     simplify: {
       /* Vertex decimation distance and minimum kept-polygon area, both in OUTPUT pixels (i.e.
@@ -163,10 +186,17 @@
   function objectsForHole(objectsJson, holeNumber) {
     var hole = Number(holeNumber);
     var tee = null, green = null, greenShape = null;
-    var fairways = [], bunkers = [], water = [];
+    var fairways = [], bunkers = [], water = [], route = [];
     Object.keys(objectsJson || {}).forEach(function (key) {
       var object = objectsJson[key];
       if (!object || Number(object.holeNumber) !== hole) return;
+      /* Type "fairway" is a route BEND POINT, not a surface - the guide points a
+         hole is drawn through. Type "fairway_area" below is the polygon. */
+      if (object.type === "fairway") {
+        var bend = finitePoint(object.position);
+        if (bend) route.push(bend);
+        return;
+      }
       if (object.type === "tee" && !tee) tee = finitePoint(object.position);
       else if (object.type === "green") {
         if (!green) green = finitePoint(object.position);
@@ -180,7 +210,51 @@
         }
       }
     });
-    return { tee: tee, green: green, greenShape: greenShape, fairways: fairways, bunkers: bunkers, water: water };
+    return { tee: tee, green: green, greenShape: greenShape, route: route, fairways: fairways, bunkers: bunkers, water: water };
+  }
+
+  /* tee -> bends -> green, with the bends ordered by how far down the hole they
+     sit rather than by their key order in objects_json.
+
+     packageHoleData (gd-visual-plan-core.mjs) takes them in object-key order,
+     which happens to be chronological for courses whose ids embed a creation
+     timestamp. That is fine there, because a capture frame only needs the
+     bounding box of the route and a shuffled route has the same box. Here the
+     order is load-bearing - a corridor measured along a zig-zagged route is not
+     the corridor of the hole - so it is derived from the geometry instead of
+     inherited from a key order nothing guarantees. */
+  function orderedRoute(tee, bends, green) {
+    var start = worldPx(tee.lat, tee.lng, REF_ZOOM);
+    var end = worldPx(green.lat, green.lng, REF_ZOOM);
+    var ax = end.x - start.x, ay = end.y - start.y;
+    var len2 = ax * ax + ay * ay;
+    var ordered = (bends || []).map(function (bend) {
+      var px = worldPx(bend.lat, bend.lng, REF_ZOOM);
+      var along = len2 > 0 ? ((px.x - start.x) * ax + (px.y - start.y) * ay) / len2 : 0;
+      return { point: bend, along: along };
+    }).sort(function (a, b) { return a.along - b.along; });
+    return [tee].concat(ordered.map(function (entry) { return entry.point; })).concat([green]);
+  }
+
+  function pointToSegmentDistance(p, a, b) {
+    var vx = b.x - a.x, vy = b.y - a.y;
+    var wx = p.x - a.x, wy = p.y - a.y;
+    var len2 = vx * vx + vy * vy;
+    var t = len2 > 0 ? Math.max(0, Math.min(1, (wx * vx + wy * vy) / len2)) : 0;
+    return Math.hypot(wx - vx * t, wy - vy * t);
+  }
+
+  /* Web Mercator is conformal, so at one hole's scale a circle of N metres is a
+     circle of N/groundResolution pixels - which is what lets the corridor test
+     run in world pixels rather than converting every vertex to metres. */
+  function distanceToPolyline(p, polyline) {
+    if (polyline.length === 1) return Math.hypot(p.x - polyline[0].x, p.y - polyline[0].y);
+    var best = Infinity;
+    for (var i = 0; i < polyline.length - 1; i++) {
+      var d = pointToSegmentDistance(p, polyline[i], polyline[i + 1]);
+      if (d < best) best = d;
+    }
+    return best;
   }
 
   // ---------------------------------------------------------------- framing
@@ -217,9 +291,27 @@
     (polygons || []).forEach(function (shape) {
       var projected = shape.map(function (p) { return projectLatLngToImage(spatialRef, p.lat, p.lng); });
       var simplified = simplifyPoints(projected, recipe.simplify.minVertexSpacingPx);
-      if (simplified.length >= 3 && polygonAreaPx2(simplified) >= recipe.simplify.minPolygonAreaPx2) out.push(simplified);
+      if (simplified.length < 3 || polygonAreaPx2(simplified) < recipe.simplify.minPolygonAreaPx2) return;
+      if (!touchesCanvas(simplified, spatialRef)) return;
+      out.push(simplified);
     });
     return out;
+  }
+
+  /* Anything wholly outside the canvas is bytes nobody can see, so it is dropped
+     here. A polygon that only PARTLY overlaps is kept whole and cropped by the
+     SVG viewBox - not clipped to the canvas rectangle. Clipping would draw this
+     recipe's outline stroke along the cut, putting a dark line down the edge of
+     the image wherever a fairway ran off it; letting the viewport crop leaves
+     the same clean edge an aerial capture has. */
+  function touchesCanvas(points, spatialRef) {
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (var i = 0; i < points.length; i++) {
+      var p = points[i];
+      if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+    }
+    return maxX >= 0 && minX <= spatialRef.imageWidth && maxY >= 0 && minY <= spatialRef.imageHeight;
   }
 
   /* Fits the union of every mapped point into a canvas no wider than canvas.targetWidthPx and
@@ -332,11 +424,22 @@
     var greenWorld = worldPx(green.lat, green.lng, refZoom);
     var bearing = teeWorld.x === greenWorld.x && teeWorld.y === greenWorld.y ? 0 : holeBearingRadians(teeWorld, greenWorld);
 
-    var allLatLng = [tee, green].concat(geometry.greenShape || []);
+    /* What the canvas is fitted to: the hole itself, plus only those surface
+       vertices that fall inside the play corridor. Taking corridor VERTICES
+       rather than whole polygons is the point - a 403m ribbon that clips the
+       corridor contributes the few metres of itself that are actually beside
+       this hole, and the frame no longer stretches to contain the rest of it.
+       Every polygon is still drawn; see projectAndSimplifyPolygons. */
+    var routeLatLng = orderedRoute(tee, geometry.route, green);
+    var routeWorld = routeLatLng.map(function (p) { return worldPx(p.lat, p.lng, refZoom); });
+    var corridorPx = recipe.corridor.halfWidthM / groundResolutionMPerPx(tee.lat, refZoom);
+    var framePoints = [tee, green].concat(geometry.greenShape || []).concat(routeLatLng);
     (geometry.fairways || []).concat(geometry.bunkers || []).concat(geometry.water || []).forEach(function (polygon) {
-      allLatLng = allLatLng.concat(polygon);
+      polygon.forEach(function (p) {
+        if (distanceToPolyline(worldPx(p.lat, p.lng, refZoom), routeWorld) <= corridorPx) framePoints.push(p);
+      });
     });
-    var rotated = allLatLng.map(function (p) {
+    var rotated = framePoints.map(function (p) {
       var world = worldPx(p.lat, p.lng, refZoom);
       return rotate({ x: world.x - teeWorld.x, y: world.y - teeWorld.y }, bearing);
     });
@@ -397,7 +500,12 @@
         bunkers: projected.bunkers.length,
         bunkersMapped: (geometry.bunkers || []).length,
         water: projected.water.length,
-        waterMapped: (geometry.water || []).length
+        waterMapped: (geometry.water || []).length,
+        /* `*Mapped` is what the mapper cloned onto this hole; the plain counts
+           are what survived simplification and the off-canvas cull. A large gap
+           is normal and expected under cloning, not a fault to chase. */
+        routePoints: routeLatLng.length,
+        corridorHalfWidthM: recipe.corridor.halfWidthM
       }
     };
   }

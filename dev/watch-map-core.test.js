@@ -170,4 +170,93 @@ function longHole() {
   assert.strictEqual(frame.layers.bunkersMapped, 1, "but it must still be counted as mapped-but-omitted, for the generation report");
 })();
 
+
+// --- the play corridor: framing follows the hole, drawing does not -------------------------
+
+/* A neighbouring hole's fairway, 150m off the play line, is exactly the case that
+   made Millbrook's 1st unreadable: six corridors framed together at 1.45 m/px. */
+function neighbouringRibbon() {
+  return [
+    { lat: -45.0100, lng: 169.1025 }, { lat: -45.0135, lng: 169.1060 },
+    { lat: -45.0137, lng: 169.1064 }, { lat: -45.0102, lng: 169.1029 }
+  ];
+}
+
+(function testCorridorFramesOnTheHoleNotTheNeighbourhood() {
+  const own = longHole();
+  const withNeighbour = Object.assign({}, own, { fairways: own.fairways.concat([neighbouringRibbon()]) });
+  const alone = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, own);
+  const crowded = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, withNeighbour);
+  assert.strictEqual(alone.ok, true);
+  assert.strictEqual(crowded.ok, true);
+  assert.strictEqual(
+    crowded.spatialReference.metresPerPixel.toFixed(6),
+    alone.spatialReference.metresPerPixel.toFixed(6),
+    "a fairway outside the corridor must not change the frame's ground resolution"
+  );
+  assert.strictEqual(crowded.width, alone.width, "nor the canvas width");
+  assert.strictEqual(crowded.height, alone.height, "nor the canvas height");
+})();
+
+(function testOutOfCorridorGeometryIsStillDrawnWhenItReachesTheCanvas() {
+  const own = longHole();
+  /* Runs the length of the hole a short way off the line: outside nothing, and
+     plainly visible to the player, so it must be drawn. */
+  const adjacent = [
+    { lat: -45.0102, lng: 169.1006 }, { lat: -45.0126, lng: 169.1031 },
+    { lat: -45.0127, lng: 169.1029 }, { lat: -45.0103, lng: 169.1004 }
+  ];
+  const frame = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1,
+    Object.assign({}, own, { fairways: own.fairways.concat([adjacent]) }));
+  assert.strictEqual(frame.layers.fairwaysMapped, 2, "both fairways are mapped onto the hole");
+  assert.strictEqual(frame.layers.fairways, 2, "and both are drawn - the corridor frames, it does not filter");
+})();
+
+(function testFullyOffCanvasGeometryIsCulled() {
+  const own = longHole();
+  const frame = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1,
+    Object.assign({}, own, { fairways: own.fairways.concat([neighbouringRibbon()]) }));
+  assert.strictEqual(frame.layers.fairwaysMapped, 2);
+  assert.strictEqual(frame.layers.fairways, 1, "a ribbon entirely off the canvas is bytes nobody can see");
+  assert.ok(frame.svg.indexOf("#6fbf5e") > 0, "the hole's own fairway is still drawn");
+})();
+
+(function testRouteBendsOrderTheCorridorByGeometryNotKeyOrder() {
+  /* The same three bends in two different key orders must give one identical
+     bake - the corridor is measured along the hole, not along insertion order. */
+  const base = {
+    "green-x": { type: "green", holeNumber: 4, position: { lat: -45.013, lng: 169.104 },
+      greenShape: [{ lat: -45.0129, lng: 169.1039 }, { lat: -45.0131, lng: 169.1041 }, { lat: -45.0130, lng: 169.1042 }] },
+    "tee-x": { type: "tee", holeNumber: 4, position: { lat: -45.010, lng: 169.100 } }
+  };
+  const bends = {
+    a: { type: "fairway", holeNumber: 4, position: { lat: -45.0110, lng: 169.1013 } },
+    b: { type: "fairway", holeNumber: 4, position: { lat: -45.0119, lng: 169.1025 } },
+    c: { type: "fairway", holeNumber: 4, position: { lat: -45.0126, lng: 169.1034 } }
+  };
+  const forwards = Object.assign({}, base, { "f-1": bends.a, "f-2": bends.b, "f-3": bends.c });
+  const shuffled = Object.assign({}, base, { "f-1": bends.c, "f-2": bends.a, "f-3": bends.b });
+  const a = core.objectsForHole(forwards, 4);
+  const b = core.objectsForHole(shuffled, 4);
+  assert.strictEqual(a.route.length, 3, "route bend points come off type \"fairway\", not \"fairway_area\"");
+  const frameA = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, a);
+  const frameB = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, b);
+  assert.strictEqual(frameA.svg, frameB.svg, "key order must not change the bake");
+  assert.strictEqual(frameA.layers.routePoints, 5, "tee + three bends + green");
+})();
+
+(function testFairwayAreaIsNotMistakenForARouteBend() {
+  const objects = {
+    "green-y": { type: "green", holeNumber: 7, position: { lat: -45.013, lng: 169.104 } },
+    "tee-y": { type: "tee", holeNumber: 7, position: { lat: -45.010, lng: 169.100 } },
+    "fw-y": { type: "fairway_area", holeNumber: 7, shape: [
+      { lat: -45.0105, lng: 169.1005 }, { lat: -45.0125, lng: 169.1030 }, { lat: -45.0120, lng: 169.1035 }] }
+  };
+  const geometry = core.objectsForHole(objects, 7);
+  assert.strictEqual(geometry.route.length, 0, "a fairway_area polygon is a surface, never a route point");
+  assert.strictEqual(geometry.fairways.length, 1);
+  assert.strictEqual(core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, geometry).layers.routePoints, 2,
+    "with no bends the route is simply tee -> green");
+})();
+
 console.log("watch-map-core passed");

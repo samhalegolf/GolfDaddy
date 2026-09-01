@@ -67,6 +67,24 @@ WatchMap.swift                 projection + viewport maths
 HoleMapView.swift              the drawn page
 ```
 
+Recipe v2 frames each bake on a **play corridor** — 55m either side of the
+hole's own route — rather than on the union of every mapped object. Under this
+codebase's surface-cloning model a hole owns every surface inside its
+axis-aligned capture box, which for a 507m diagonal par 5 is 19.3ha, so v1
+framed on the neighbourhood: Millbrook's 1st drew six fairway corridors, five of
+them 104–233m off the play line, and spent under 9% of its width on the hole
+being played.
+
+The corridor decides framing only. Every polygon is still drawn and simply falls
+off the edge of the viewBox, because filtering whole polygons does not work here
+— most OSM fairway ways are multi-hole ribbons, so keeping one drags a
+neighbouring hole back into the frame and dropping it deletes the near part the
+player can see. Only geometry entirely off-canvas is culled, and nothing is
+clipped to the canvas rectangle: that would draw the outline stroke along the
+cut. Route bend points (`type: "fairway"`, not `fairway_area`) are ordered by
+distance along the hole rather than by key order, because a corridor measured
+along a zig-zagged route is not the hole's corridor.
+
 A manifest hole is `{holeNumber, asset, width, height, spatialReference}`. The
 spatial reference is the generator's own `{refZoom, transform{a,b,tx,ty},
 imageWidth, imageHeight}`; the Watch re-implements `worldPx` and the similarity
