@@ -15,8 +15,20 @@
       if (!plugin || typeof plugin.publishScene !== "function") return false;
       try { plugin.publishScene({ scene: scene }); return true; } catch (e) { return false; }
     }
-    watch.onScene(publish);
+    /* A round tells us which course is in play; that is the cue to get its
+       baked Watch maps onto the wrist. Driven off the Scene stream rather than
+       round start so it also covers a resumed round and a late-registering
+       native plugin. The delivery module is idempotent per course, so calling
+       it on every Scene costs one object lookup. */
+    function deliverMaps(scene) {
+      var key = scene && scene.course && scene.course.key;
+      if (!key || !window.GDWatchMapDelivery) return;
+      try { window.GDWatchMapDelivery.deliver(key); } catch (e) {}
+    }
+
+    watch.onScene(function (scene) { publish(scene); deliverMaps(scene); });
     publish(watch.scene());
+    deliverMaps(watch.scene());
     var cap = window.Capacitor;
     var plugin = cap && cap.Plugins && cap.Plugins.NativeRoundBridge;
     if (plugin && typeof plugin.addListener === "function") {

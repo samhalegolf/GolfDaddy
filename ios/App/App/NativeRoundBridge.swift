@@ -14,12 +14,19 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
     public let jsName = "NativeRoundBridge"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "publishScene", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "acknowledgeCommand", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "acknowledgeCommand", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "publishWatchMap", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "publishWatchMapAsset", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "watchMapInventory", returnType: CAPPluginReturnPromise)
     ]
 
     private let queue = DispatchQueue(label: "com.claritygolf.caddy.native-round-bridge")
     private var session: WCSession?
     private var latestScene: [String: Any]?
+    /* The last inventory the Watch reported. Only a hint: JavaScript uses it to
+       skip re-sending a package the wrist already has, and sending everything
+       again is always a correct fallback. */
+    private var watchMapInventoryReport: [String: Any]?
 
     /* Capacitor bridges JavaScript null as NSNull, which WatchConnectivity
        refuses (WCErrorCodePayloadUnsupportedTypes). The wearable decoder treats
@@ -89,6 +96,89 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
         }
     }
 
+    // MARK: - Watch lite maps
+
+    /* Course imagery is deliberately NOT part of the Scene. A Scene is small,
+       arrives many times a minute, and rides the application context; a Watch
+       map package is ~100KB of image that changes only when a course is
+       regenerated. So the manifest goes over transferUserInfo and each hole
+       image over transferFile — both durable queues that survive a closed Watch
+       app, a locked phone, and a walk out of Bluetooth range.
+
+       This bridge does not fetch, decode or validate a package: JavaScript owns
+       the API call, and the Watch validates what it stores. Native is transport. */
+    @objc public func publishWatchMap(_ call: CAPPluginCall) {
+        guard let manifest = call.getObject("manifest") else {
+            call.reject("A Watch map manifest is required")
+            return
+        }
+        queue.async { [weak self] in
+            guard let self, let session = self.session else { call.resolve(["published": false]); return }
+            let payload = (Self.withoutNulls(manifest) as? [String: Any]) ?? [:]
+            /* Mirrored live and queued durably, exactly as publishScene does and
+               for the same reason: the queued stores do not reach the Watch app
+               reliably, and the Watch's adoption of a manifest is idempotent. */
+            if session.isReachable {
+                session.sendMessage(["watchMapManifest": payload], replyHandler: nil, errorHandler: nil)
+            }
+            session.transferUserInfo(["watchMapManifest": payload])
+            call.resolve(["published": true])
+        }
+    }
+
+    @objc public func publishWatchMapAsset(_ call: CAPPluginCall) {
+        guard let courseKey = call.getString("courseKey"), !courseKey.isEmpty,
+              let asset = call.getString("asset"), !asset.isEmpty,
+              let base64 = call.getString("base64"),
+              let bytes = Data(base64Encoded: base64), !bytes.isEmpty else {
+            call.reject("A Watch map asset requires courseKey, asset and base64 bytes")
+            return
+        }
+        /* The package version is a millisecond timestamp. It crosses the
+           Capacitor bridge as a string so it cannot be rounded on the way, and
+           stays a string in the transfer metadata, which only carries
+           property-list types. */
+        let version = call.getString("version") ?? call.getInt("version").map(String.init) ?? ""
+        guard !version.isEmpty else {
+            call.reject("A Watch map asset requires a package version")
+            return
+        }
+        queue.async { [weak self] in
+            guard let self, let session = self.session else { call.resolve(["sent": false]); return }
+            let descriptor: [String: Any] = ["courseKey": courseKey, "version": version, "asset": asset]
+            do {
+                /* A hole bakes to a few kilobytes, comfortably inside the
+                   sendMessage payload limit, so a reachable Watch gets it
+                   immediately and the queued file transfer is the fallback for
+                   everything else. Writing the same bytes twice is a no-op on
+                   the Watch's side. */
+                if session.isReachable {
+                    var live = descriptor
+                    live["bytes"] = bytes
+                    session.sendMessage(["watchMapAsset": live], replyHandler: nil, errorHandler: nil)
+                }
+                let outbox = Self.watchMapOutbox()
+                try FileManager.default.createDirectory(at: outbox, withIntermediateDirectories: true)
+                let url = outbox.appendingPathComponent("\(courseKey)__v\(version)__\(asset)")
+                try bytes.write(to: url, options: .atomic)
+                session.transferFile(url, metadata: descriptor)
+                call.resolve(["sent": true])
+            } catch {
+                call.reject("Watch map asset could not be queued: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    @objc public func watchMapInventory(_ call: CAPPluginCall) {
+        queue.async { [weak self] in
+            call.resolve(["inventory": self?.watchMapInventoryReport as Any])
+        }
+    }
+
+    private static func watchMapOutbox() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("CaddyWatchMapOutbox", isDirectory: true)
+    }
+
     private func receive(_ command: [String: Any]) {
         // JavaScript applies the generic command through its deduplicating
         // CaddyWatchBridge. Durable Watch command outbox/retry is the next
@@ -125,6 +215,17 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
 
     public func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
         if let command = userInfo["command"] as? [String: Any] { receive(command) }
+        if let inventory = userInfo["watchMapHave"] as? [String: Any] {
+            queue.async { [weak self] in self?.watchMapInventoryReport = inventory }
+        }
+    }
+
+    /* The queued copy exists only to hand WatchConnectivity a stable file. Once
+       the transfer is done — or has definitively failed — it is dead weight in
+       the temporary directory. */
+    public func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
+        if let error { NSLog("[CaddyWatch] map asset transfer failed: %@", String(describing: error)) }
+        try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
     }
 
     public func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {}

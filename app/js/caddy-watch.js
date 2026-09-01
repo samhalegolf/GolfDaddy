@@ -122,6 +122,10 @@
         revision: revision,
         flow: flow,
         mode: watchMode,
+        /* Which course is in play. An adapter needs it to pick the right
+           pre-delivered hole imagery; it is an identifier, never geometry, and
+           nothing on the far side may treat it as permission to load a course. */
+        course: { key: round.courseKey || null },
         hole: { number: scene && scene.hole && scene.hole.number || null, par: r && finite(r.par) && Number(r.par) > 0 ? Number(r.par) : null, live: round.liveHole === (scene && scene.hole && scene.hole.number) },
         distance: { target: scene && scene.distances && scene.distances.centre, front: scene && scene.distances && scene.distances.front, centre: scene && scene.distances && scene.distances.centre, back: scene && scene.distances && scene.distances.back },
         suggestion: b ? { club: b.club, carryM: b.carryM, totalM: b.totalM } : null,

@@ -18,6 +18,9 @@
 		CA77D9000000000000000013 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000023 /* ContentView.swift */; };
 		CA77D9000000000000000014 /* ShotView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000024 /* ShotView.swift */; };
 		CA77D9000000000000000015 /* GreenBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000025 /* GreenBubbleView.swift */; };
+		CA77D9000000000000000016 /* WatchMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000028 /* WatchMap.swift */; };
+		CA77D9000000000000000017 /* WatchMapStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000029 /* WatchMapStore.swift */; };
+		CA77D9000000000000000018 /* HoleMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D900000000000000002a /* HoleMapView.swift */; };
 		CA77D9000000000000000090 /* Clarity Caddy Watch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000030 /* Clarity Caddy Watch.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		CA77D9000000000000000092 /* Clarity Caddy Watch Extension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000031 /* Clarity Caddy Watch Extension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		504EC30D1FED79650016851F /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30B1FED79650016851F /* Main.storyboard */; };
@@ -39,6 +42,9 @@
 		CA77D9000000000000000023 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000024 /* ShotView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShotView.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000025 /* GreenBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GreenBubbleView.swift; sourceTree = "<group>"; };
+		CA77D9000000000000000028 /* WatchMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMap.swift; sourceTree = "<group>"; };
+		CA77D9000000000000000029 /* WatchMapStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMapStore.swift; sourceTree = "<group>"; };
+		CA77D900000000000000002a /* HoleMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoleMapView.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000026 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		CA77D9000000000000000027 /* WatchExtension-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "WatchExtension-Info.plist"; sourceTree = "<group>"; };
 		CA77D9000000000000000030 /* Clarity Caddy Watch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Clarity Caddy Watch.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -111,6 +117,9 @@
 				CA77D9000000000000000023 /* ContentView.swift */,
 				CA77D9000000000000000024 /* ShotView.swift */,
 				CA77D9000000000000000025 /* GreenBubbleView.swift */,
+				CA77D9000000000000000028 /* WatchMap.swift */,
+				CA77D9000000000000000029 /* WatchMapStore.swift */,
+				CA77D900000000000000002a /* HoleMapView.swift */,
 				CA77D9000000000000000026 /* Info.plist */,
 				CA77D9000000000000000027 /* WatchExtension-Info.plist */,
 			);
@@ -253,7 +262,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		CA77D9000000000000000060 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (CA77D9000000000000000010 /* ClarityCaddyWatchApp.swift in Sources */, CA77D9000000000000000011 /* WatchSessionManager.swift in Sources */, CA77D9000000000000000012 /* WatchScene.swift in Sources */, CA77D9000000000000000013 /* ContentView.swift in Sources */, CA77D9000000000000000014 /* ShotView.swift in Sources */, CA77D9000000000000000015 /* GreenBubbleView.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
+		CA77D9000000000000000060 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (CA77D9000000000000000010 /* ClarityCaddyWatchApp.swift in Sources */, CA77D9000000000000000011 /* WatchSessionManager.swift in Sources */, CA77D9000000000000000012 /* WatchScene.swift in Sources */, CA77D9000000000000000013 /* ContentView.swift in Sources */, CA77D9000000000000000014 /* ShotView.swift in Sources */, CA77D9000000000000000015 /* GreenBubbleView.swift in Sources */, CA77D9000000000000000016 /* WatchMap.swift in Sources */, CA77D9000000000000000017 /* WatchMapStore.swift in Sources */, CA77D9000000000000000018 /* HoleMapView.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
 		CA77D9000000000000000063 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		CA77D9000000000000000064 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		CA77D9000000000000000065 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };

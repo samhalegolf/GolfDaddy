@@ -9,17 +9,23 @@ struct WatchScene: Codable, Equatable {
     let revision: Int
     let flow: String?
     let mode: String?
+    let course: Course?
     let hole: Hole?
     let distance: Distance?
     let suggestion: Suggestion?
     let shot: Shot?
     let target: GeoPoint?
+    let location: Location?
     let bubble: Bubble?
     let geometry: Geometry?
     let score: Score?
     let controls: Controls?
     let connection: Connection?
 
+    /* Which course is in play, so a delivered lite-map package is only ever
+       drawn for the course it was baked from. Optional because an older phone
+       build, or a round with no course key, must still produce a usable scene. */
+    struct Course: Codable, Equatable { let key: String? }
     struct Hole: Codable, Equatable { let number: Int?; let par: Int?; let live: Bool? }
     struct Distance: Codable, Equatable { let target: Double?; let front: Double?; let centre: Double?; let back: Double? }
     struct Suggestion: Codable, Equatable { let club: String?; let carryM: Double?; let totalM: Double? }
@@ -38,6 +44,10 @@ struct WatchScene: Codable, Equatable {
             y = try? values.decode(Double.self, forKey: .y)
         }
     }
+    /* The phone's own fix, used to place the player on a lite map when the
+       wrist has none. `fresh` is the phone's staleness verdict, not a second
+       opinion formed here. */
+    struct Location: Codable, Equatable { let coordinate: GeoPoint?; let source: String?; let fresh: Bool? }
     struct Bubble: Codable, Equatable { let widthM: Double?; let depthM: Double?; let tiltDeg: Double?; let club: String?; let carryM: Double?; let totalM: Double?; let centre: GeoPoint? }
     struct Geometry: Codable, Equatable { let origin: GeoPoint?; let approachBearingDeg: Double?; let greenPolygon: [LocalPoint]?; let target: LocalPoint?; let player: LocalPoint?; let route: [LocalPoint]? }
     struct Score: Codable, Equatable { let strokes: Int? }

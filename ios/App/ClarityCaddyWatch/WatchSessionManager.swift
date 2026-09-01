@@ -12,13 +12,30 @@ final class WatchSessionManager: NSObject, ObservableObject {
     @Published private(set) var pendingCommands: [PendingWatchCommand] = []
     @Published private(set) var lastRejection: WatchCommandAcknowledgement?
 
+    /* Lite maps live in their own durable store rather than in the Scene: they
+       are large, they change only when a course is regenerated, and a Scene
+       arrives many times a minute. */
+    nonisolated let maps = WatchMapStore()
+
+    /* The point a lite map draws the player at: the wrist's own fix while it has
+       a trustworthy one, the phone's otherwise. Published separately from
+       `scene` because a fix changes on its own schedule, several times between
+       Scene revisions. */
+    @Published private(set) var wristFix: WatchScene.GeoPoint?
+
     private let outboxKey = "CaddyWatchPendingCommandsV1"
     private var session: WCSession?
     private let locationManager = WatchLocationManager()
 
+    var playerPoint: WatchScene.GeoPoint? { wristFix ?? scene?.location?.coordinate }
+
     override init() {
         super.init()
         restoreOutbox()
+        locationManager.onFix = { [weak self] fix in
+            guard let self else { return }
+            self.wristFix = fix.map { WatchScene.GeoPoint(lat: $0.coordinate.latitude, lng: $0.coordinate.longitude) }
+        }
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         session.delegate = self
@@ -112,6 +129,16 @@ final class WatchSessionManager: NSObject, ObservableObject {
 
     private func retryPending() { pendingCommands.forEach { attempt(commandId: $0.command.commandId) } }
 
+    /* Tells the phone exactly which course/version/holes are already on the
+       wrist so it re-sends only what is missing. A whole 18-hole package is
+       under 100KB, but re-pushing it on every launch would still burn radio
+       time during a round for no new information. Best-effort by design: if
+       this never arrives the phone simply sends everything again. */
+    private func reportMapInventory() {
+        guard let session, session.activationState == .activated else { return }
+        session.transferUserInfo(["watchMapHave": maps.inventory()])
+    }
+
     private func commandMessage(_ command: CaddyWatchCommand) -> [String: Any]? {
         guard let data = try? JSONEncoder().encode(command),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
@@ -135,7 +162,10 @@ extension WatchSessionManager: WCSessionDelegate {
         let context = session.receivedApplicationContext
         Task { @MainActor [weak self] in
             self?.receive(context: context)
-            if activationState == .activated { self?.retryPending() }
+            if activationState == .activated {
+                self?.retryPending()
+                self?.reportMapInventory()
+            }
             else if self?.scene != nil { self?.state = .stale }
         }
     }
@@ -152,13 +182,41 @@ extension WatchSessionManager: WCSessionDelegate {
             Task { @MainActor [weak self] in self?.receive(context: message) }
             return
         }
+        /* Lite maps are mirrored live for the same reason the Scene is: the
+           queued stores do not reach the Watch app reliably, and a duplicate
+           write of identical bytes is harmless. */
+        if let manifest = message["watchMapManifest"] {
+            Task { @MainActor [weak self] in
+                self?.maps.receive(manifest: manifest)
+                self?.reportMapInventory()
+            }
+            return
+        }
+        if let asset = message["watchMapAsset"] as? [String: Any], let bytes = asset["bytes"] as? Data {
+            maps.accept(bytes: bytes, metadata: asset)
+            return
+        }
         guard let acknowledgement = message["acknowledgement"] as? [String: Any] else { return }
         Task { @MainActor [weak self] in self?.receive(acknowledgement: acknowledgement) }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        if let manifest = userInfo["watchMapManifest"] {
+            Task { @MainActor [weak self] in
+                self?.maps.receive(manifest: manifest)
+                self?.reportMapInventory()
+            }
+            return
+        }
         guard let acknowledgement = userInfo["acknowledgement"] as? [String: Any] else { return }
         Task { @MainActor [weak self] in self?.receive(acknowledgement: acknowledgement) }
+    }
+
+    /* WatchConnectivity deletes the handed-over file as soon as this returns,
+       so the store copies it out synchronously here rather than hopping to the
+       main actor first. */
+    nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
+        maps.acceptTransferredFile(at: file.fileURL, metadata: file.metadata)
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
@@ -191,6 +249,11 @@ extension WatchLocationObservation {
 final class WatchLocationManager: NSObject, ObservableObject {
     @Published private(set) var lastFix: CLLocation?
 
+    /* Only accurate-enough fixes reach map drawing, on the same 100m bound
+       LOCK_AT already trusts — a 500m fix would put the player in a neighbouring
+       fairway, which reads as a broken map rather than a coarse one. */
+    var onFix: ((CLLocation?) -> Void)?
+
     private let manager = CLLocationManager()
 
     override init() {
@@ -208,7 +271,11 @@ final class WatchLocationManager: NSObject, ObservableObject {
         }
     }
 
-    func stop() { manager.stopUpdatingLocation() }
+    func stop() {
+        manager.stopUpdatingLocation()
+        lastFix = nil
+        onFix?(nil)
+    }
 }
 
 extension WatchLocationManager: CLLocationManagerDelegate {
@@ -221,6 +288,11 @@ extension WatchLocationManager: CLLocationManagerDelegate {
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let latest = locations.last else { return }
-        Task { @MainActor [weak self] in self?.lastFix = latest }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.lastFix = latest
+            let usable = latest.horizontalAccuracy >= 0 && latest.horizontalAccuracy <= 100
+            self.onFix?(usable ? latest : nil)
+        }
     }
 }
