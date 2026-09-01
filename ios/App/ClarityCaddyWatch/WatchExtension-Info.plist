@@ -11,7 +11,12 @@
   <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
   <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
   <key>NSExtension</key>
-  <dict><key>NSExtensionPointIdentifier</key><string>com.apple.watchkit</string></dict>
-  <key>WKAppBundleIdentifier</key><string>com.claritygolf.caddy.watchkitapp</string>
+  <dict>
+    <key>NSExtensionPointIdentifier</key><string>com.apple.watchkit</string>
+    <key>NSExtensionAttributes</key>
+    <dict>
+      <key>WKAppBundleIdentifier</key><string>com.claritygolf.caddy.watchkitapp</string>
+    </dict>
+  </dict>
 </dict>
 </plist>
