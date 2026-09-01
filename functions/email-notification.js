@@ -1,4 +1,5 @@
 const { email: authEmail, supabaseAuth, supabaseRest, upsertAccount } = require("./auth-utils");
+const { appStoreUrl } = require("../clarity-caddy-app-store.js");
 
 exports.handler = async function(event){
   if(event.httpMethod !== "POST")return json(405, {error: "Method not allowed"});
@@ -20,11 +21,13 @@ exports.handler = async function(event){
     ctaLabel: text(payload.ctaLabel, 80) || "Open Clarity",
     ctaUrl: safeUrl(payload.ctaUrl, siteUrl),
     eventType: text(payload.eventType, 80) || "account_activity",
+    appStoreUrl: "",
     logoUrl: safeUrl(payload.logoUrl, siteUrl) || new URL("/assets/brand/cg-logo-white-g.png?v=1e5a26e2", siteUrl).toString()
   };
 
   try{
     if(message.eventType === "account_created"){
+      message.appStoreUrl = appStoreUrl();
       var invite = await createSetupLinkForAccount(message.to, message.recipientName, message.actorName, siteUrl);
       if(invite && invite.link){
         message.ctaLabel = "Set up your password";
@@ -113,8 +116,9 @@ function isServiceEmail(message){ return ["account_created", "password_recovery"
 function renderEmail(message){
   var recipientName = firstName(message.recipientName);
   var footer = isServiceEmail(message) ? "You are receiving this because it relates to your Clarity account access." : "You can change email notifications in Settings &gt; Notifications.";
-  var html = ["<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>","<body style=\"margin:0;background:#07100b;color:#f7faf7;font-family:Arial,Helvetica,sans-serif\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#07100b;padding:28px 14px\"><tr><td align=\"center\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:560px;background:#101b15;border:1px solid #24342c;border-radius:20px;overflow:hidden\"><tr><td style=\"padding:24px 24px 16px;background:#07100b\"><img src=\"" + escapeHTML(message.logoUrl) + "\" width=\"44\" height=\"44\" alt=\"Clarity Golf\" style=\"vertical-align:middle;margin-right:12px\"><span style=\"font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:#b9c4bd;font-weight:700\">Clarity Golf Systems</span></td></tr><tr><td style=\"padding:24px\"><p style=\"margin:0 0 10px;color:#42b66a;font-weight:700\">Hi " + escapeHTML(recipientName) + ",</p><h1 style=\"margin:0 0 12px;color:#fff;font-size:28px;line-height:1.05\">" + escapeHTML(message.title) + "</h1><p style=\"margin:0 0 18px;color:#c8d1cc;font-size:16px;line-height:1.45\">" + escapeHTML(message.detail) + "</p><p style=\"margin:0 0 22px;color:#8fa199;font-size:13px;line-height:1.4\">Update from " + escapeHTML(message.actorName) + ".</p><a href=\"" + escapeHTML(message.ctaUrl) + "\" style=\"display:inline-block;background:#ff9f2f;color:#06110b;text-decoration:none;font-weight:800;border-radius:999px;padding:12px 18px\">" + escapeHTML(message.ctaLabel) + "</a></td></tr><tr><td style=\"padding:16px 24px 24px;color:#708178;font-size:12px;line-height:1.45\">" + footer + "</td></tr></table></td></tr></table></body></html>"].join("");
-  var body = ["Hi " + recipientName, "", message.title, "", message.detail, "", "Update from " + message.actorName + ".", "", message.ctaUrl].join("\n");
+  var storeCta = message.appStoreUrl ? "<p style=\"margin:14px 0 0\"><a href=\"" + escapeHTML(message.appStoreUrl) + "\" style=\"display:inline-flex;align-items:center;min-height:44px\" aria-label=\"Download Clarity Caddy on the App Store\"><img src=\"" + escapeHTML(new URL("/download-on-the-app-store-apple-logo.svg", message.logoUrl).toString()) + "\" alt=\"Download Clarity Caddy on the App Store\" width=\"160\" height=\"48\" style=\"display:block;width:160px;height:auto;border:0\"></a></p><p style=\"margin:8px 0 0;color:#b9c4bd;font-size:13px;line-height:1.4\">Download Clarity Caddy, then sign in with this email address.</p>" : "";
+  var html = ["<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>","<body style=\"margin:0;background:#07100b;color:#f7faf7;font-family:Arial,Helvetica,sans-serif\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#07100b;padding:28px 14px\"><tr><td align=\"center\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:560px;background:#101b15;border:1px solid #24342c;border-radius:20px;overflow:hidden\"><tr><td style=\"padding:24px 24px 16px;background:#07100b\"><img src=\"" + escapeHTML(message.logoUrl) + "\" width=\"44\" height=\"44\" alt=\"Clarity Golf\" style=\"vertical-align:middle;margin-right:12px\"><span style=\"font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:#b9c4bd;font-weight:700\">Clarity Golf Systems</span></td></tr><tr><td style=\"padding:24px\"><p style=\"margin:0 0 10px;color:#42b66a;font-weight:700\">Hi " + escapeHTML(recipientName) + ",</p><h1 style=\"margin:0 0 12px;color:#fff;font-size:28px;line-height:1.05\">" + escapeHTML(message.title) + "</h1><p style=\"margin:0 0 18px;color:#c8d1cc;font-size:16px;line-height:1.45\">" + escapeHTML(message.detail) + "</p><p style=\"margin:0 0 22px;color:#8fa199;font-size:13px;line-height:1.4\">Update from " + escapeHTML(message.actorName) + ".</p><a href=\"" + escapeHTML(message.ctaUrl) + "\" style=\"display:inline-block;background:#ff9f2f;color:#06110b;text-decoration:none;font-weight:800;border-radius:999px;padding:12px 18px\">" + escapeHTML(message.ctaLabel) + "</a>" + storeCta + "</td></tr><tr><td style=\"padding:16px 24px 24px;color:#708178;font-size:12px;line-height:1.45\">" + footer + "</td></tr></table></td></tr></table></body></html>"].join("");
+  var body = ["Hi " + recipientName, "", message.title, "", message.detail, "", "Update from " + message.actorName + ".", "", message.ctaUrl].concat(message.appStoreUrl ? ["", "Download Clarity Caddy and sign in with this email address:", message.appStoreUrl] : []).join("\n");
   return {html: html, text: body};
 }
 
@@ -153,6 +157,7 @@ async function sendCompedAccessEmail(options){
     logoUrl: new URL("/assets/brand/cg-logo-white-g.png?v=1e5a26e2", siteUrl).toString(),
     ctaLabel: "Open Clarity",
     ctaUrl: siteUrl,
+    appStoreUrl: appStoreUrl(),
     title: "You've been given " + periodLabel + " of " + giftLabel
   };
 

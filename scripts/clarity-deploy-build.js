@@ -37,6 +37,10 @@ const VOID_TAGS = { link: 1, meta: 1, img: 1, input: 1, br: 1, hr: 1, source: 1 
 
 const publicPaths = [
   "index.html",
+  // Browser counterpart to the server-side email config. The public landing
+  // page loads it directly, so keep it at the deploy root with the other
+  // entry-point assets.
+  "clarity-caddy-app-store.js",
   "assets",
   "scripts",
   "styles",

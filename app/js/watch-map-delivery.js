@@ -48,6 +48,52 @@
     return Number(t.a) * Number(t.a) + Number(t.b) * Number(t.b) > 0;
   }
 
+  function referencePoint(p) {
+    return p && finite(p.lat) && finite(p.lng) ? { lat: Number(p.lat), lng: Number(p.lng) } : null;
+  }
+
+  function referencePath(points, minimum) {
+    if (!Array.isArray(points)) return null;
+    var out = [];
+    for (var i = 0; i < points.length; i++) {
+      var p = referencePoint(points[i]);
+      if (!p) return null;   // a partial play line is worse than none
+      out.push(p);
+    }
+    return out.length >= minimum ? out : null;
+  }
+
+  /* The hole's golf geometry, copied field by field like the spatial reference
+     above and for the same reason - only what the wrist is meant to have.
+
+     Optional throughout, at two levels. A package baked before the generator
+     emitted a reference simply has none, and must still deliver: it is a
+     perfectly good picture of a hole. And within one reference, a hole with no
+     mapped tee has no play line, so tee/route/bearingDeg/lengthM are absent
+     while the green and its shape are not. The wrist's rule for a missing
+     input is to defer to the phone, so an absent field costs it the local
+     calculation and nothing else - whereas a half-copied route would have it
+     confidently aim down a line that stops early. */
+  function manifestReference(reference) {
+    if (!reference || Number(reference.version) !== 1) return null;
+    var green = referencePoint(reference.green);
+    if (!green) return null;
+    var out = { version: 1, green: green };
+    var tee = referencePoint(reference.tee);
+    var route = referencePath(reference.route, 2);
+    var greenShape = referencePath(reference.greenShape, 3);
+    if (greenShape) out.greenShape = greenShape;
+    /* tee, route, bearing and length are one fact - the hole's play line -
+       and travel together or not at all. */
+    if (tee && route && finite(reference.bearingDeg) && finite(reference.lengthM)) {
+      out.tee = tee;
+      out.route = route;
+      out.bearingDeg = Number(reference.bearingDeg);
+      out.lengthM = Number(reference.lengthM);
+    }
+    return out;
+  }
+
   /* A package path is "<courseKey>/v<version>/h<n>.webp". Only the file name
      crosses to the Watch; the course key and version travel as their own
      fields, so a mismatched path cannot quietly file a hole under the wrong
@@ -63,14 +109,15 @@
     var name = assetName(hole && hole.path);
     var reference = hole && hole.spatialReference;
     if (!Number.isInteger(number) || number <= 0 || !name || !usableSpatialReference(reference)) return null;
-    return {
+    var out = {
       holeNumber: number,
       asset: name,
       width: Number(reference.imageWidth),
       height: Number(reference.imageHeight),
       path: String(hole.path),
       /* Copied field by field rather than passed through: whatever else the
-         report grows, only the projection basis reaches the wrist. */
+         report grows, only the projection basis and the hole reference reach
+         the wrist. */
       spatialReference: {
         version: Number(reference.version),
         refZoom: Number(reference.refZoom),
@@ -84,6 +131,13 @@
         metresPerPixel: finite(reference.metresPerPixel) ? Number(reference.metresPerPixel) : null
       }
     };
+    /* Assigned only when there is one, never set to null: a null anywhere in a
+       WatchConnectivity payload arrives as NSNull and makes the whole send
+       throw WCErrorCodePayloadUnsupportedTypes. The Watch reads a missing key
+       as nil, so omitting it is lossless. */
+    var golf = manifestReference(hole && hole.reference);
+    if (golf) out.reference = golf;
+    return out;
   }
 
   function base64FromBytes(bytes) {
@@ -203,7 +257,12 @@
           courseKey: courseKey,
           version: Number(version),
           holes: holes.map(function (hole) {
-            return { holeNumber: hole.holeNumber, asset: hole.asset, width: hole.width, height: hole.height, spatialReference: hole.spatialReference };
+            var out = { holeNumber: hole.holeNumber, asset: hole.asset, width: hole.width, height: hole.height, spatialReference: hole.spatialReference };
+            /* `path` stays behind - it is how THIS surface fetches the image
+               and means nothing on the wrist. `reference` is omitted rather
+               than nulled for the NSNull reason in manifestHole. */
+            if (hole.reference) out.reference = hole.reference;
+            return out;
           })
         }
       });

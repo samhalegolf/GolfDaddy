@@ -85,13 +85,41 @@ cut. Route bend points (`type: "fairway"`, not `fairway_area`) are ordered by
 distance along the hole rather than by key order, because a corridor measured
 along a zig-zagged route is not the hole's corridor.
 
-A manifest hole is `{holeNumber, asset, width, height, spatialReference}`. The
-spatial reference is the generator's own `{refZoom, transform{a,b,tx,ty},
-imageWidth, imageHeight}`; the Watch re-implements `worldPx` and the similarity
-transform to match it exactly, in `Double` throughout — a z20 world pixel is
-~2.7e8, so single precision would lose metres inside a 448px image. A package
-whose reference version is not 1, or whose transform is degenerate, is refused
-rather than drawn against.
+A manifest hole is `{holeNumber, asset, width, height, spatialReference,
+reference?}`. The spatial reference is the generator's own `{refZoom,
+transform{a,b,tx,ty}, imageWidth, imageHeight}`; the Watch re-implements
+`worldPx` and the similarity transform to match it exactly, in `Double`
+throughout — a z20 world pixel is ~2.7e8, so single precision would lose metres
+inside a 448px image. A package whose reference version is not 1, or whose
+transform is degenerate, is refused rather than drawn against.
+
+`reference` is the hole's golf geometry — `{green, greenShape?, tee?, route?,
+bearingDeg?, lengthM?}` — travelling with the image that was drawn from it. All
+of it was already computed to draw the hole and used to be discarded, so the
+wrist received a picture it could not measure anything against and every Bubble
+had to be computed on the phone and sent over. `tee`, `route`, `bearingDeg` and
+`lengthM` are one fact, the hole's play line, and travel together or not at all:
+a hole with no mapped tee has none of them rather than a route measured from the
+green standing in for the tee. `bearingDeg` is derived from the transform —
+`(360 - rotationDegrees) % 360` — rather than measured a second time, so it
+cannot drift from the picture. `greenFront`/`greenBack` deliberately stay behind
+as spatial-reference validation: they are ranked from the tee in raw degree
+space, and the wrist already answers front/centre/back properly from the polygon
+against its own fix.
+
+The reference is optional at every level and never costs a package. One baked
+before the generator emitted it is still a perfectly good picture of a hole; a
+malformed one is decoded away rather than thrown on (which would reject the
+whole manifest and leave the wrist with no map at all); and a missing field
+costs the wrist a local calculation, which falls back to the Scene, and nothing
+else. Because it derives from `course_maps.objects_json` and never from the
+image, `POST /api/course-watch-maps {courseId, action:"backfill-reference"}`
+writes it into an already-baked package without re-baking imagery or bumping
+`watch_package_version` — but only for holes whose recomputed spatial reference
+still matches the stored one, since a reference describing today's green under
+an image drawn from last week's would put the wrist somewhere the picture
+disagrees with, silently, both halves being individually valid. A hole that
+fails that test is left alone and named in the report; its fix is a regenerate.
 
 Both transports are durable queues, and neither ordering is guaranteed: an image
 is filed from its own transfer metadata and reconciled with the manifest

@@ -128,6 +128,83 @@ const root = path.join(__dirname, "..");
     { folder: "v1", assets: ["notes.txt", "h1.webp", "../../escape.webp"] }
   ]), ["c/v1/h1.webp"], "only vN folders and only baked hole assets are pruned");
 
+  // --- backfillHoleReferences ---------------------------------------------------------------
+
+  /* `reference` is derived from course_maps.objects_json alone, never from the
+     image, so it can be written into an already-baked package without a
+     re-bake and without bumping the version. The safety property is that the
+     geometry has not moved since: a reference describing today's green under
+     an image drawn from last week's would put the Bubble somewhere the picture
+     disagrees with, silently, because both halves are individually valid. */
+
+  const watchMapCore = require(path.join(root, "scripts", "gd-watch-map-core.js"));
+
+  const BACKFILL_OBJECTS = {
+    "tee-1": { type: "tee", holeNumber: 1, position: { lat: -45.010, lng: 169.100 } },
+    "green-1": { type: "green", holeNumber: 1, position: { lat: -45.013, lng: 169.104 } }
+  };
+  function bakedHole(objects, holeNumber) {
+    const frame = watchMapCore.buildWatchHoleFrame(
+      watchMapCore.WATCH_MAP_RECIPE_V1, watchMapCore.objectsForHole(objects, holeNumber));
+    return {
+      holeNumber,
+      path: "c/v1/h" + holeNumber + ".webp",
+      width: frame.width,
+      height: frame.height,
+      format: "webp",
+      bytes: 4200,
+      spatialReference: frame.spatialReference
+    };
+  }
+
+  const baked = bakedHole(BACKFILL_OBJECTS, 1);
+  const unchanged = helpers.backfillHoleReferences({ objects_json: BACKFILL_OBJECTS }, { holes: [baked] });
+  assert.strictEqual(unchanged.updated, 1, "an unedited package must accept its reference");
+  assert.strictEqual(unchanged.skipped.length, 0);
+  assert.strictEqual(unchanged.holes[0].reference.version, 1);
+  assert.deepStrictEqual(unchanged.holes[0].spatialReference, baked.spatialReference,
+    "a backfill writes the reference and touches nothing else");
+  assert.strictEqual(unchanged.holes[0].path, baked.path);
+
+  /* The green has been dragged 30m since the bake. The stored image still
+     shows the old one, so this hole must be refused and named. */
+  const moved = JSON.parse(JSON.stringify(BACKFILL_OBJECTS));
+  moved["green-1"].position.lat -= 0.00027;
+  const edited = helpers.backfillHoleReferences({ objects_json: moved }, { holes: [baked] });
+  assert.strictEqual(edited.updated, 0, "a package whose geometry has moved must not be described with the new geometry");
+  assert.strictEqual(edited.skipped.length, 1);
+  assert.match(edited.skipped[0].reason, /regenerate/, "the caller must be told the fix is a regenerate, not a retry");
+  assert.strictEqual(edited.holes[0].reference, undefined, "a refused hole is left exactly as it was");
+
+  /* Idempotent: running it twice is not an error and is not a second write. */
+  const again = helpers.backfillHoleReferences({ objects_json: BACKFILL_OBJECTS }, { holes: unchanged.holes });
+  assert.strictEqual(again.updated, 0);
+  assert.strictEqual(again.alreadyPresent, 1);
+
+  /* A hole deleted from the map since the bake still has an image in the
+     bucket. It cannot be described, and that is not a failure of the others. */
+  const orphan = helpers.backfillHoleReferences(
+    { objects_json: BACKFILL_OBJECTS }, { holes: [baked, Object.assign({}, baked, { holeNumber: 7 })] });
+  assert.strictEqual(orphan.updated, 1, "one bad hole must not cost the good ones their reference");
+  assert.strictEqual(orphan.skipped.length, 1);
+  assert.strictEqual(orphan.skipped[0].holeNumber, 7);
+  assert.match(orphan.skipped[0].reason, /no green geometry/);
+
+  // --- sameProjectionBasis --------------------------------------------------------------------
+  const basis = baked.spatialReference;
+  assert.strictEqual(helpers.sameProjectionBasis(basis, basis), true);
+  assert.strictEqual(helpers.sameProjectionBasis(basis, null), false);
+  /* A last-bit difference is the same computation; a metre is not. */
+  const nudged = JSON.parse(JSON.stringify(basis));
+  nudged.transform.tx += Math.abs(basis.transform.tx) * 1e-12;
+  assert.strictEqual(helpers.sameProjectionBasis(basis, nudged), true, "floating-point noise is not a moved green");
+  const shifted = JSON.parse(JSON.stringify(basis));
+  shifted.transform.tx += 1;
+  assert.strictEqual(helpers.sameProjectionBasis(basis, shifted), false);
+  const resized = JSON.parse(JSON.stringify(basis));
+  resized.imageWidth += 1;
+  assert.strictEqual(helpers.sameProjectionBasis(basis, resized), false, "a differently sized canvas is a different bake");
+
   console.log("course-watch-maps passed");
 })().catch((error) => {
   console.error("course-watch-maps failed");

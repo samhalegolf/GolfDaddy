@@ -259,4 +259,86 @@ function neighbouringRibbon() {
     "with no bends the route is simply tee -> green");
 })();
 
+// --- hole reference ---------------------------------------------------------------------------
+
+/* The reference is the golf geometry that travels with the picture. Everything
+   below was already computed to draw the hole and used to be discarded, so
+   these checks are as much about "it is still the SAME geometry the image was
+   drawn from" as about the numbers themselves. */
+
+(function testReferenceCarriesThePlayLine() {
+  const frame = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, longHole());
+  const reference = frame.reference;
+  assert.strictEqual(reference.version, 1);
+  assert.deepStrictEqual(reference.green, { lat: -45.013, lng: 169.104 });
+  assert.deepStrictEqual(reference.tee, { lat: -45.01, lng: 169.1 });
+  assert.strictEqual(reference.route.length, 2, "no bends mapped: the play line is tee -> green");
+  assert.deepStrictEqual(reference.route[0], reference.tee);
+  assert.deepStrictEqual(reference.route[reference.route.length - 1], reference.green);
+  assert.ok(reference.greenShape && reference.greenShape.length >= 3, "a mapped green shape must reach the wrist");
+  assert.ok(reference.lengthM > 0);
+})();
+
+(function testReferenceBearingIsTheHolesCompassBearing() {
+  /* Due north, then due east, at a latitude where a degree of longitude is
+     visibly shorter than a degree of latitude - so a bearing derived without
+     the cosine correction would show up here. */
+  const lat = -45, lng = 168.65;
+  const north = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1,
+    { tee: { lat: lat, lng: lng }, green: { lat: lat + 0.002695, lng: lng }, greenShape: null, fairways: [], bunkers: [], water: [] });
+  const east = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1,
+    { tee: { lat: lat, lng: lng }, green: { lat: lat, lng: lng + 0.003811 }, greenShape: null, fairways: [], bunkers: [], water: [] });
+  assert.ok(Math.abs(north.reference.bearingDeg - 0) < 0.05, "a hole playing due north bears 0, got " + north.reference.bearingDeg);
+  assert.ok(Math.abs(east.reference.bearingDeg - 90) < 0.05, "a hole playing due east bears 90, got " + east.reference.bearingDeg);
+  /* Both are ~300m of ground; a bearing right but a length wrong by cos(lat)
+     would mean the length was measured in raw degrees. */
+  assert.ok(Math.abs(north.reference.lengthM - 300) <= 2, "north length " + north.reference.lengthM);
+  assert.ok(Math.abs(east.reference.lengthM - 300) <= 2, "east length " + east.reference.lengthM);
+  /* The bearing is taken from the transform, so it can never disagree with the
+     image it is delivered beside. */
+  assert.ok(Math.abs(((360 - north.spatialReference.rotationDegrees) % 360) - north.reference.bearingDeg) < 0.01);
+})();
+
+(function testReferenceRouteFollowsTheHoleNotTheKeyOrder() {
+  const objects = {
+    "green-d": { type: "green", holeNumber: 4, position: { lat: -45.013, lng: 169.104 } },
+    "tee-d": { type: "tee", holeNumber: 4, position: { lat: -45.010, lng: 169.100 } },
+    "f-far": { type: "fairway", holeNumber: 4, position: { lat: -45.0125, lng: 169.1032 } },
+    "f-near": { type: "fairway", holeNumber: 4, position: { lat: -45.0112, lng: 169.1012 } }
+  };
+  const frame = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, core.objectsForHole(objects, 4));
+  const route = frame.reference.route;
+  assert.strictEqual(route.length, 4, "tee + two bends + green");
+  assert.ok(route[1].lat > route[2].lat, "bends must be ordered down the hole, not by object key");
+  /* A dogleg is longer than the straight line it cuts. */
+  const straight = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1,
+    { tee: { lat: -45.010, lng: 169.100 }, green: { lat: -45.013, lng: 169.104 }, greenShape: null, fairways: [], bunkers: [], water: [] });
+  assert.ok(frame.reference.lengthM >= straight.reference.lengthM, "a routed hole is never shorter than its straight line");
+})();
+
+(function testReferenceHasNoPlayLineWithoutAMappedTee() {
+  const geometry = core.objectsForHole({
+    "green-z": { type: "green", holeNumber: 9, position: { lat: -45.013, lng: 169.104 } }
+  }, 9);
+  const reference = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, geometry).reference;
+  assert.deepStrictEqual(reference.green, { lat: -45.013, lng: 169.104 }, "the green still travels");
+  assert.strictEqual(reference.tee, null);
+  assert.strictEqual(reference.route, null, "no tee means no play line, never one measured from the green");
+  assert.strictEqual(reference.bearingDeg, null);
+  assert.strictEqual(reference.lengthM, null);
+})();
+
+(function testReferenceGreenShapeKeepsSourceCoordinates() {
+  const hole = longHole();
+  const reference = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, hole).reference;
+  /* Decimation may drop vertices; the ones it keeps must be the mapped
+     coordinates rounded, never a coordinate round-tripped back out through the
+     transform - the wrist measures distances against these. */
+  reference.greenShape.forEach(point => {
+    assert.ok(hole.greenShape.some(source =>
+      Math.abs(source.lat - point.lat) < 1e-6 && Math.abs(source.lng - point.lng) < 1e-6),
+      "every emitted green vertex must be a mapped one: " + JSON.stringify(point));
+  });
+})();
+
 console.log("watch-map-core passed");

@@ -257,6 +257,95 @@
     return best;
   }
 
+  // ---------------------------------------------------------------- hole reference
+
+  /* Metres between two coordinates at hole scale.
+
+     Equirectangular against the SAME 111320 m/degree the rest of the Watch
+     pipeline uses - app/js/caddy-watch.js's localPoint and the wrist's own
+     WristDistances in ShotView.swift. It is 2*pi*EARTH_RADIUS_M/360 rounded,
+     so it is not a different earth; but writing the unrounded constant here
+     would make the bake and the wrist disagree about a hole's length by a
+     metre or two for no reason anybody could later explain. */
+  function metresBetween(a, b) {
+    var north = (b.lat - a.lat) * 111320;
+    var east = (b.lng - a.lng) * 111320 * Math.cos((((a.lat + b.lat) / 2) * Math.PI) / 180);
+    return Math.hypot(north, east);
+  }
+
+  function polylineLengthM(points) {
+    var total = 0;
+    for (var i = 1; i < points.length; i++) total += metresBetween(points[i - 1], points[i]);
+    return total;
+  }
+
+  /* Decimates a lat/lng ring to the coarseness the DRAWN outline already has,
+     by converting the recipe's output-pixel spacing back into metres through
+     this hole's own metresPerPixel. Same policy as simplifyPoints (plain
+     distance decimation, last point always kept), and the emitted coordinates
+     are the source ones - never a coordinate round-tripped out through the
+     transform, which would bake the projection's rounding into the geometry
+     the wrist measures distances against. */
+  function decimateLatLng(points, minSpacingM) {
+    if (points.length <= 4 || !(minSpacingM > 0)) return points.slice();
+    var out = [points[0]];
+    for (var i = 1; i < points.length; i++) {
+      if (metresBetween(points[i], out[out.length - 1]) >= minSpacingM || i === points.length - 1) out.push(points[i]);
+    }
+    return out;
+  }
+
+  /* ~0.11m of latitude. Finer than any distance the Watch displays, and it
+     keeps a route plus a green ring under a few hundred bytes. */
+  function referencePoint(p) {
+    return { lat: Math.round(p.lat * 1e6) / 1e6, lng: Math.round(p.lng * 1e6) / 1e6 };
+  }
+
+  /* The hole's golf geometry, travelling with the image that was drawn from it.
+
+     WHY IT IS HERE. Everything below was already computed to draw the hole and
+     was then discarded: objectsForHole reads the tee, green, green shape and
+     bend points; buildWatchHoleFrame orders them into the play line. Only
+     `layers` - a set of COUNTS - used to survive, so the wrist received a
+     picture of a hole it could not measure anything against, and every Bubble
+     it drew had to be computed on the phone and sent over.
+
+     WHAT IS NOT HERE. `checkpoints.greenFront/greenBack` stay behind as
+     spatial-reference validation only. They are the nearest and farthest green
+     vertex FROM THE TEE, ranked in raw degree space, so they are neither the
+     player's front and back once they have left the tee nor a true metric
+     ranking. The wrist already answers that question properly from the polygon
+     against its own fix (WristDistances), so shipping a fixed pair beside the
+     shape it is derived from would only invite something to use the wrong one.
+
+     A hole with no mapped tee has no play line: `tee`, `route`, `bearingDeg`
+     and `lengthM` are all null rather than measured from the green standing in
+     for the tee. Per objectsForHole's contract every layer but the green is
+     optional, and the wrist's rule for a missing input is to defer to the
+     phone, never to approximate. */
+  function buildHoleReference(recipe, spatialRef, geometry, routeLatLng) {
+    var hasTee = !!geometry.tee;
+    var spacingM = Number(spatialRef.metresPerPixel) * recipe.simplify.minVertexSpacingPx;
+    return {
+      version: 1,
+      tee: hasTee ? referencePoint(geometry.tee) : null,
+      green: referencePoint(geometry.green),
+      greenShape: geometry.greenShape ? decimateLatLng(geometry.greenShape, spacingM).map(referencePoint) : null,
+      route: hasTee ? routeLatLng.map(referencePoint) : null,
+      /* The hole's compass bearing, tee to green, derived from the transform
+         rather than measured a second time. rotationDegrees is the rotation
+         applied to stand the hole up on the canvas, which is the NEGATIVE of
+         the bearing it was standing at: holeBearingRadians is
+         `atan2(-1,0) - atan2(dy,dx)` in world pixels, and the compass bearing
+         of the same vector is `atan2(dx,-dy)`, which works out to exactly its
+         negation. Mercator is conformal, so that angle is the map's and the
+         ground's alike at one hole's scale. Taking it from the transform means
+         it cannot drift from the picture: any framing change moves both. */
+      bearingDeg: hasTee ? Math.round(((360 - Number(spatialRef.rotationDegrees)) % 360) * 100) / 100 : null,
+      lengthM: hasTee ? Math.round(polylineLengthM(routeLatLng)) : null
+    };
+  }
+
   // ---------------------------------------------------------------- framing
 
   function polygonAreaPx2(points) {
@@ -411,7 +500,8 @@
      {ok:false, reason} when there is no green to build against - a hole with no green cannot
      answer any distance, the same floor functions/lib/gd-course-package-shape.mjs applies to
      the native package. Otherwise returns {ok:true, svg, width, height, spatialReference,
-     validation, layers} where `layers` records what was actually drawn, for the generation
+     reference, validation, layers} where `reference` is the hole's golf geometry for the wrist
+     (see buildHoleReference) and `layers` records what was actually drawn, for the generation
      report (omitted/simplified geometry). */
   function buildWatchHoleFrame(recipe, geometry, opts) {
     recipe = recipe || WATCH_MAP_RECIPE_V1;
@@ -489,6 +579,7 @@
       width: fit.imageWidth,
       height: fit.imageHeight,
       spatialReference: spatialRef,
+      reference: buildHoleReference(recipe, spatialRef, geometry, routeLatLng),
       checkpoints: checkpoints,
       validation: validation,
       layers: {

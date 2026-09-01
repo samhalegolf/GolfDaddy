@@ -47,7 +47,8 @@ function reportFor(frame, holeNumbers) {
       height: frame.height,
       format: "webp",
       bytes: 4700,
-      spatialReference: frame.spatialReference
+      spatialReference: frame.spatialReference,
+      reference: frame.reference
     }))
   };
 }
@@ -222,6 +223,69 @@ function fakeEnvironment(report, options) {
     assert.deepStrictEqual(delivery.__test.alreadyDelivered({ courseKey: "a", version: "2", holes: [4] }, "a", "2"), { 4: true });
     assert.deepStrictEqual(delivery.__test.alreadyDelivered({ courseKey: "a", version: "2", holes: [4] }, "a", "3"), {});
   });
+
+  await (async () => {
+    const { instance, calls } = fakeEnvironment(reportFor(frame, [1, 2]));
+    await instance.deliver("millbrook-remarkables-18");
+    check("the hole reference travels with the manifest, field by field", () => {
+      const hole = calls.manifests[0].manifest.holes[0];
+      assert.ok(hole.reference, "a baked reference must reach the wrist");
+      assert.strictEqual(hole.reference.version, 1);
+      /* Rounded to 6dp on the way out - ~0.11m of latitude, finer than any
+         distance the Watch shows, and it keeps a route plus a green ring to a
+         few hundred bytes. */
+      assert.deepStrictEqual(hole.reference.tee, { lat: -44.949275, lng: 168.814238 });
+      assert.deepStrictEqual(hole.reference.green, { lat: -44.946232, lng: 168.819022 });
+      assert.strictEqual(hole.reference.route.length, 2);
+      assert.ok(hole.reference.lengthM > 400 && hole.reference.lengthM < 700, "Millbrook's 1st is a par 5: " + hole.reference.lengthM);
+      assert.ok(Number.isFinite(hole.reference.bearingDeg));
+      assert.strictEqual(hole.path, undefined, "the storage path is this surface's business, not the wrist's");
+    });
+  })();
+
+  await (async () => {
+    /* A package baked before the generator emitted a reference. It is still a
+       perfectly good picture of a hole and must deliver unchanged. */
+    const report = reportFor(frame, [1]);
+    delete report.holes[0].reference;
+    const { instance, calls } = fakeEnvironment(report);
+    const result = await instance.deliver("millbrook-remarkables-18");
+    check("a package with no reference still delivers", () => {
+      assert.strictEqual(result.delivered, true);
+      const hole = calls.manifests[0].manifest.holes[0];
+      assert.ok(hole.spatialReference, "the projection is what makes a hole drawable");
+      assert.ok(!("reference" in hole), "absent, never null - a null is NSNull on the far side of the bridge");
+    });
+  })();
+
+  await (async () => {
+    const partial = reportFor(frame, [1]);
+    partial.holes[0].reference = Object.assign({}, frame.reference, { route: [{ lat: -44.9, lng: 168.8 }, { lat: NaN, lng: 168.8 }] });
+    const { instance, calls } = fakeEnvironment(partial);
+    await instance.deliver("millbrook-remarkables-18");
+    check("a broken play line is dropped whole, and never half-copied", () => {
+      const reference = calls.manifests[0].manifest.holes[0].reference;
+      assert.ok(reference, "the green survives a bad route");
+      assert.deepStrictEqual(reference.green, { lat: -44.946232, lng: 168.819022 });
+      assert.strictEqual(reference.route, undefined, "half a route would aim down a line that stops early");
+      assert.strictEqual(reference.tee, undefined, "tee, route, bearing and length are one fact");
+      assert.strictEqual(reference.bearingDeg, undefined);
+      assert.strictEqual(reference.lengthM, undefined);
+    });
+  })();
+
+  await (async () => {
+    const wrongVersion = reportFor(frame, [1]);
+    wrongVersion.holes[0].reference = Object.assign({}, frame.reference, { version: 2 });
+    const { instance, calls } = fakeEnvironment(wrongVersion);
+    const result = await instance.deliver("millbrook-remarkables-18");
+    check("a reference from a newer recipe is refused, and costs the hole nothing else", () => {
+      assert.strictEqual(result.delivered, true);
+      const hole = calls.manifests[0].manifest.holes[0];
+      assert.strictEqual(hole.reference, undefined);
+      assert.ok(hole.spatialReference, "the image still draws");
+    });
+  })();
 
   report();
 })();

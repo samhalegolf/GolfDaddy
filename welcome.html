@@ -6,6 +6,7 @@
 <title>Clarity Caddy — golf GPS and coaching support</title>
 <meta name="description" content="Clarity Caddy is a golf GPS and coaching-support app that helps players make clearer on-course decisions.">
 <link rel="icon" href="assets/clarity-app-icon.png">
+<script src="clarity-caddy-app-store.js?v=20260902a"></script>
 <style>
   html { background: #000; }
   body { margin: 0; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
@@ -38,6 +39,7 @@
       <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:40px;align-items:center">
         <a href="/?login=1" style="min-height:58px;display:inline-flex;align-items:center;justify-content:center;gap:10px;border-radius:999px;padding:0 26px;text-decoration:none;font-size:17px;font-weight:900;letter-spacing:-.01em;white-space:nowrap;color:#150800;background:linear-gradient(180deg,#ffae24 0%,#ff9700 100%);border:1px solid rgba(255,165,0,.95);box-shadow:0 18px 48px rgba(255,151,0,.16), 0 18px 46px rgba(0,0,0,.36)" style-hover="transform:translateY(-1px)">Open Clarity Caddy <span aria-hidden="true">→</span></a>
         <a href="/?login=1" style="min-height:58px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:0 26px;text-decoration:none;font-size:17px;font-weight:900;letter-spacing:-.01em;white-space:nowrap;color:#fff;background:rgba(255,255,255,.035);border:1px solid rgba(32,217,107,.70);box-shadow:0 18px 46px rgba(0,0,0,.32)" style-hover="transform:translateY(-1px)">Create account</a>
+        <a data-caddy-app-store-link href="#" style="min-height:58px;display:inline-flex;align-items:center;justify-content:center;gap:10px;border-radius:999px;padding:0 18px;text-decoration:none;font-size:15px;font-weight:800;white-space:nowrap;color:#fff;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.26)" aria-label="Download Clarity Caddy on the App Store"><img src="download-on-the-app-store-apple-logo.svg" alt="" width="142" height="42" style="width:142px;height:auto;display:block"></a>
       </div>
     </div>
   </section>
@@ -195,6 +197,14 @@
     <p style="margin:22px 0 0;color:rgba(255,255,255,.72);font-size:clamp(18px,1.6vw,22px);line-height:1.55;max-width:820px">For support, contact Sam Hale Golf at <a href="mailto:samhalegolf@gmail.com">samhalegolf@gmail.com</a>.</p>
   </section>
 
+  <section style="width:min(1180px,calc(100% - 44px));margin:0 auto;padding:0 0 clamp(48px,7vw,90px)">
+    <div style="padding:clamp(28px,4vw,46px);border:1px solid rgba(32,217,107,.28);border-radius:34px;background:radial-gradient(circle at 12% 15%, rgba(32,217,107,.16), transparent 30%),linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.025))">
+      <h2 style="margin:0 0 12px;font-size:clamp(28px,3vw,42px);line-height:1.08">Ready to take Clarity Caddy to the course?</h2>
+      <p style="margin:0 0 22px;color:rgba(255,255,255,.72);font-size:17px;line-height:1.55">Download the iPhone app, then sign in with your Clarity account.</p>
+      <a data-caddy-app-store-link href="#" style="display:inline-flex;min-height:48px;align-items:center" aria-label="Download Clarity Caddy on the App Store"><img src="download-on-the-app-store-apple-logo.svg" alt="Download Clarity Caddy on the App Store" width="160" height="48" style="width:160px;height:auto;display:block"></a>
+    </div>
+  </section>
+
   <footer style="width:min(1180px,calc(100% - 44px));margin:0 auto;padding:42px 0 56px;border-top:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.48);display:flex;gap:24px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap">
     <div>
       <strong style="display:block;color:#fff;font-size:18px;margin-bottom:7px">Clarity Caddy</strong>
@@ -232,6 +242,9 @@
   </div>
 
 <script>
+  document.querySelectorAll('[data-caddy-app-store-link]').forEach(function (link) {
+    link.href = window.CLARITY_CADDY_APP_STORE_URL || link.href;
+  });
   var STEPS = [{"tag":"Data intake","title":"Practice Shot Data","img":"assets/shot-practice-data.png","detail":"Clarity works off real numbers. Pull them in from any launch monitor — most players just snap a photo of the results screen and Clarity reads the table automatically.","points":[["📷","Photo of the results screen","Snap the Toptracer, Trackman or GCQuad output table — Clarity reads the rows."],["↓","Import a session export","Drop in a CSV / session file straight from the monitor software."],["✎","Type it in","Enter carry, dispersion and club by hand when you're away from a monitor."]]},{"tag":"Analyze","title":"Practice Bubble","img":"assets/shot-comparison.png","detail":"Right inside the shot data screen, Clarity shows the new Practice Bubble side by side with the Bubble you currently trust — then ‘Adopt Bubble’ is the one tap that makes it your model going forward.","points":[["◎","Predictive, not descriptive","The Bubble models where shots should finish, not just where they did."],["⇄","Compared with My Bubble","See the new Bubble against the one you currently trust, in the same screen."],["✓","Adopt Bubble — the way forward","One tap promotes it to the model you'll play with."]]},{"tag":"In play","title":"GPS Play","img":"assets/shot-gps-play.png","detail":"Out on the course, My Bubble is projected into the GPS play view — the Bubble sits on your target so you can aim and commit to the exact outcome zone you adopted.","points":[["🌐","GPS play view","The Bubble lands on your target line for the shot in front of you."],["🎯","Aim with confidence","Commit to the outcome zone you chose to trust."]]},{"tag":"Compare","title":"Course Data","img":"assets/shot-course-data.png","detail":"Your on-course results build a Course Bubble, normalized across club, wind, slope and distance. The comparison screen shows all three Bubbles — Practice, My Bubble and Course — laid over each other so you can read them at a glance.","points":[["◎","Three Bubbles overlaid","Practice Bubble, My Bubble and Course Bubble compared in one view."],["⚖","Normalized","Adjusted for wind, slope and distance so it's apples-to-apples."]]}];
   var modalEl = document.getElementById('stepModal');
   function openStep(i) {

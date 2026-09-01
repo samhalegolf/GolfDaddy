@@ -4,6 +4,11 @@
    POST {courseId}               -> admin-only. Bakes a fresh Watch package for every hole this
                                      course has geometry for, from course_maps.objects_json, and
                                      replaces the course's course_watch_maps row.
+   POST {courseId, action:       -> admin-only, metadata only. Writes the hole reference into an
+         "backfill-reference"}      already-baked package without re-baking imagery or bumping
+                                     its version, and only for holes whose stored spatial
+                                     reference still matches a fresh bake. See
+                                     backfillHoleReferences.
 
    Deliberately synchronous, not a job queue like course-visual-jobs.mjs/course-mapper-jobs.mjs:
    those exist because their work fetches tens of thousands of external map tiles. This pipeline
@@ -207,6 +212,7 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
         format: encoded.format,
         bytes: encoded.bytes.length,
         spatialReference: frame.spatialReference,
+        reference: frame.reference,
         checkpoints: frame.checkpoints,
         validation: frame.validation,
         layers: frame.layers
@@ -265,6 +271,72 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
   }
 
   return row;
+}
+
+/* Are these two spatial references the same projection basis?
+
+   Used to prove a stored package was baked from the geometry we are about to
+   describe it with. The transform's translation terms run to ~1e8 world pixels
+   and one metre of movement anywhere in the hole moves them by orders of
+   magnitude more than this, so a tight RELATIVE tolerance separates "the same
+   deterministic computation" from "the geometry has been edited" with an
+   enormous margin either side. Exact equality would be true in practice and
+   would also make a harmless last-bit difference look like a moved green. */
+function sameProjectionBasis(a, b) {
+  if (!a || !b) return false;
+  if (Number(a.refZoom) !== Number(b.refZoom)) return false;
+  if (Number(a.imageWidth) !== Number(b.imageWidth) || Number(a.imageHeight) !== Number(b.imageHeight)) return false;
+  return ["a", "b", "tx", "ty"].every(key => {
+    const x = Number(a.transform && a.transform[key]), y = Number(b.transform && b.transform[key]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    return Math.abs(x - y) <= 1e-9 * Math.max(1, Math.abs(x), Math.abs(y));
+  });
+}
+
+/* Gives an already-baked package the hole reference it was generated without.
+
+   `reference` is derived entirely from course_maps.objects_json - never from
+   the image - so it can be written into an existing row WITHOUT re-baking any
+   imagery and WITHOUT bumping watch_package_version. That matters: bumping the
+   version would re-push ~100KB per course over WatchConnectivity to every
+   wrist that already holds the package, for a few hundred bytes of geometry.
+   Same manoeuvre as the millbrook-remarkables-18 metadata restore.
+
+   The safety property is the whole point. objects_json may have been edited
+   since the bake, and a reference describing today's green sitting under an
+   image drawn from last week's would put the wrist's Bubble in a place the
+   picture disagrees with - silently, because both halves are individually
+   valid. So every hole is re-run through the real generator and its recomputed
+   spatial reference must match the stored one before its reference is
+   accepted. A hole that fails that test is left exactly as it was and named in
+   the report; the fix for it is a regenerate, not a backfill. */
+function backfillHoleReferences(map, row) {
+  const stored = Array.isArray(row && row.holes) ? row.holes : [];
+  const skipped = [];
+  let updated = 0, alreadyPresent = 0;
+
+  const holes = stored.map(hole => {
+    const holeNumber = Number(hole && hole.holeNumber);
+    if (hole && hole.reference) { alreadyPresent += 1; return hole; }
+    if (!Number.isFinite(holeNumber) || holeNumber <= 0) {
+      skipped.push({ holeNumber: hole && hole.holeNumber, reason: "hole has no usable number" });
+      return hole;
+    }
+    const geometry = watchMapCore.objectsForHole(map.objects_json, holeNumber);
+    const frame = watchMapCore.buildWatchHoleFrame(watchMapCore.WATCH_MAP_RECIPE_V1, geometry);
+    if (!frame.ok) {
+      skipped.push({ holeNumber, reason: frame.reason });
+      return hole;
+    }
+    if (!sameProjectionBasis(frame.spatialReference, hole.spatialReference)) {
+      skipped.push({ holeNumber, reason: "geometry has changed since this package was baked - regenerate instead" });
+      return hole;
+    }
+    updated += 1;
+    return Object.assign({}, hole, { reference: frame.reference });
+  });
+
+  return { holes, updated, alreadyPresent, skipped };
 }
 
 function reportShape(row) {
@@ -346,6 +418,38 @@ export default async function courseWatchMaps(req) {
     return json(404, { error: "course has no published geometry to generate Watch maps from" });
   }
 
+  /* Metadata-only: writes the hole reference into an existing package without
+     touching its imagery or its version. Deliberately a separate action rather
+     than something a plain POST does on the way past - a regenerate replaces a
+     package, and this must be usable precisely when you do NOT want that. */
+  if (String(payload && payload.action || "") === "backfill-reference") {
+    const row = await loadWatchRow(courseId);
+    if (!row || !Array.isArray(row.holes) || !row.holes.length) {
+      return json(404, { courseId, error: "no stored Watch package to backfill" });
+    }
+    const result = backfillHoleReferences(map, row);
+    if (result.updated > 0) {
+      try {
+        await supabaseFetch(WATCH_TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ holes: result.holes, updated_at: new Date().toISOString() })
+        });
+      } catch (error) {
+        return json(502, { courseId, error: "backfill could not be persisted: " + String(error && error.message || error) });
+      }
+    }
+    return json(200, {
+      courseId,
+      action: "backfill-reference",
+      watchPackageVersion: row.watch_package_version,
+      holeCount: result.holes.length,
+      updated: result.updated,
+      alreadyPresent: result.alreadyPresent,
+      skipped: result.skipped
+    });
+  }
+
   try {
     const row = await generateWatchPackage({ courseId, map, actorEmail: user.email });
     /* Not part of reportShape: pruning is an outcome of THIS run, not a
@@ -368,7 +472,7 @@ export const config = {
   path: "/api/course-watch-maps",
 };
 
-export const __test = { holeNumbersFromObjects, reportShape, recoveryReport, supersededPaths };
+export const __test = { holeNumbersFromObjects, reportShape, recoveryReport, supersededPaths, sameProjectionBasis, backfillHoleReferences };
 
 function json(status, body) {
   return new Response(body == null ? "" : JSON.stringify(body), {

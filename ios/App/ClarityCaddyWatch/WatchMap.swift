@@ -86,6 +86,76 @@ struct WatchMapSpatialReference: Codable, Equatable {
     }
 }
 
+/* One hole's golf geometry, baked from the same course objects the image was
+ drawn from and travelling with it.
+
+ This is what lets the wrist answer a golf question locally instead of asking
+ the phone: where the green is and what shape it is, and — when the hole has a
+ mapped tee — the play line down it. `spatialReference` already turns any of
+ these coordinates into a pixel on the delivered image.
+
+ The play line is one fact and arrives whole or not at all: a hole with no
+ mapped tee has `tee`, `route`, `bearingDeg` and `lengthM` all nil rather than a
+ route measured from the green standing in for the tee. `greenShape` may be nil
+ independently, because a green can be mapped as a centre with no outline.
+
+ Nothing here is invented on this side. A hole that lacks what a calculation
+ needs defers to the Scene's value; it never approximates one. */
+struct WatchHoleReference: Codable, Equatable {
+    static let supportedVersion = 1
+
+    let version: Int
+    let green: Coordinate
+    let greenShape: [Coordinate]?
+    let tee: Coordinate?
+    let route: [Coordinate]?
+    let bearingDeg: Double?
+    let lengthM: Double?
+
+    struct Coordinate: Codable, Equatable {
+        let lat: Double
+        let lng: Double
+    }
+
+    /* A reference from a newer recipe is refused rather than half-read, the
+       same rule `WatchMapSpatialReference.isUsable` applies to the projection.
+       Refusing costs the local calculation and nothing else — the hole still
+       draws, and the Scene still carries the phone's answer. */
+    var isUsable: Bool {
+        version == Self.supportedVersion && green.isFinite
+    }
+
+    /* The green outline, only when it is one. A green mapped as a centre with
+       no shape is normal and is not a fault. */
+    var usableGreenShape: [Coordinate]? {
+        guard let greenShape, greenShape.count >= 3, greenShape.allSatisfy({ $0.isFinite }) else { return nil }
+        return greenShape
+    }
+
+    /* The hole's play line, present only when every part of it is. Callers ask
+       for this rather than reading `route` and `tee` separately, so there is
+       one place — not one per caller — that decides whether the wrist may
+       reason down the hole. A missing play line never invalidates the green:
+       the two answer different questions and only one of them needs a tee. */
+    var playLine: PlayLine? {
+        guard let tee, let route, let bearingDeg, let lengthM else { return nil }
+        guard route.count >= 2, tee.isFinite, route.allSatisfy({ $0.isFinite }) else { return nil }
+        guard bearingDeg.isFinite, lengthM.isFinite, lengthM > 0 else { return nil }
+        return PlayLine(tee: tee, route: route, bearingDeg: bearingDeg, lengthM: lengthM)
+    }
+
+    struct PlayLine: Equatable {
+        let tee: Coordinate
+        let route: [Coordinate]
+        let bearingDeg: Double
+        let lengthM: Double
+    }
+}
+
+extension WatchHoleReference.Coordinate {
+    var isFinite: Bool { lat.isFinite && lng.isFinite }
+}
+
 /* One course's package as the phone describes it. `version` is the generator's
    millisecond package version; it is the whole cache key, because a regenerated
    package lands under a new version folder and never overwrites the old one. */
@@ -100,6 +170,48 @@ struct WatchMapManifest: Codable, Equatable {
         let width: Double
         let height: Double
         let spatialReference: WatchMapSpatialReference
+        /* The hole's golf geometry. Optional at the hole, because a package
+           baked before the generator emitted one is still a perfectly good
+           picture of a hole and must keep delivering. */
+        let reference: WatchHoleReference?
+
+        /* What callers should read: a reference that arrived from a newer
+           recipe, or malformed, is nothing rather than something to guess
+           from. It never costs the hole its image — only the local
+           calculation, which falls back to the Scene. */
+        var golfReference: WatchHoleReference? {
+            guard let reference, reference.isUsable else { return nil }
+            return reference
+        }
+
+        enum CodingKeys: String, CodingKey { case holeNumber, asset, width, height, spatialReference, reference }
+
+        init(holeNumber: Int, asset: String, width: Double, height: Double, spatialReference: WatchMapSpatialReference, reference: WatchHoleReference?) {
+            self.holeNumber = holeNumber
+            self.asset = asset
+            self.width = width
+            self.height = height
+            self.spatialReference = spatialReference
+            self.reference = reference
+        }
+
+        /* Written out only because of the last line. The synthesized decoder
+           would use decodeIfPresent for the optional reference, which THROWS on
+           a present-but-malformed one — and a throw here fails the whole
+           manifest, so one bad coordinate in one hole's reference would reject
+           an otherwise perfect 18-hole package and leave the wrist with no map
+           at all. The projection is required and still is; the reference is a
+           bonus and degrades to nothing. Same policy as WatchScene.LocalPoint
+           and this file's tolerant `version` decode. */
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            holeNumber = try values.decode(Int.self, forKey: .holeNumber)
+            asset = try values.decode(String.self, forKey: .asset)
+            width = try values.decode(Double.self, forKey: .width)
+            height = try values.decode(Double.self, forKey: .height)
+            spatialReference = try values.decode(WatchMapSpatialReference.self, forKey: .spatialReference)
+            reference = try? values.decode(WatchHoleReference.self, forKey: .reference)
+        }
     }
 
     /* The package version is a millisecond timestamp that has crossed a
