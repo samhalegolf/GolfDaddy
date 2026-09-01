@@ -12,6 +12,14 @@ final class WatchSessionManager: NSObject, ObservableObject {
     @Published private(set) var pendingCommands: [PendingWatchCommand] = []
     @Published private(set) var lastRejection: WatchCommandAcknowledgement?
 
+    /* One line about a handover that just happened, shown briefly where the
+       status strip sits. Set only on a real change of driver, so a Scene that
+       merely repeats "the Watch is driving" many times a minute stays silent. */
+    @Published private(set) var handoverNotice: String?
+    private var answeredHandovers = Set<String>()
+
+    var isDriving: Bool { scene?.isDriving == true }
+
     /* Lite maps live in their own durable store rather than in the Scene: they
        are large, they change only when a course is regenerated, and a Scene
        arrives many times a minute. */
@@ -79,10 +87,62 @@ final class WatchSessionManager: NSObject, ObservableObject {
         guard incoming.isSupported else { NSLog("[CCWatch] unsupported schemaVersion %d", incoming.schemaVersion); return }
         guard incoming.hasRound else { scene = nil; state = .noRound; locationManager.stop(); return }
         if let current = scene, current.roundId == incoming.roundId, incoming.revision < current.revision { return }
+        let previous = scene
         scene = incoming
         state = .live
         locationManager.start()
+        reconcileOutbox(with: incoming)
+        noteSurface(previous: previous, incoming: incoming)
     }
+
+    /* A Scene arriving is proof the phone is listening, which the durable
+       outbox otherwise only learns from a reachability flip. Commands for a
+       round that is no longer the one on the phone can never be accepted
+       (the command gate checks the round ID first), so they are dropped
+       rather than retried forever; the rest are re-sent if they have been
+       waiting a while. The phone dedupes by command ID, so a repeat is safe. */
+    private func reconcileOutbox(with incoming: WatchScene) {
+        let before = pendingCommands.count
+        pendingCommands.removeAll { $0.command.roundId != incoming.roundId }
+        if pendingCommands.count != before { persistOutbox() }
+        let now = Date().timeIntervalSince1970 * 1000
+        for pending in pendingCommands where now - (pending.lastAttemptAt ?? 0) > 10_000 {
+            attempt(commandId: pending.command.commandId)
+        }
+    }
+
+    /* The wrist's side of a handover. A phone-initiated one arrives `offered`:
+       answering TAKE_OVER is how the phone learns the round actually reached a
+       wrist rather than a drawer, and it is answered once per handover ID so a
+       repeated Scene does not become a repeated command. The notice and haptic
+       fire only when the driver actually changed. */
+    private func noteSurface(previous: WatchScene?, incoming: WatchScene) {
+        let handover = incoming.surface?.handover
+        if incoming.isDriving, handover?.state == "offered", let id = handover?.id, !answeredHandovers.contains(id) {
+            answeredHandovers.insert(id)
+            send(.takeOver)
+        }
+        /* For a surface command the Scene IS the outcome: once the phone says
+           the wrist is driving, an outstanding TAKE_OVER has plainly landed
+           (and likewise HAND_BACK), acknowledgement or not. Clearing it here
+           keeps the strip from reading "Switching…" past the switch. */
+        let settled: CaddyWatchCommand.Kind = incoming.isDriving ? .takeOver : .handBack
+        if pendingCommands.contains(where: { $0.command.type == settled }) {
+            pendingCommands.removeAll { $0.command.type == settled }
+            persistOutbox()
+        }
+        let wasDriving = previous?.isDriving == true
+        guard wasDriving != incoming.isDriving else { return }
+        if incoming.isDriving {
+            handoverNotice = handover?.from == "phone" ? "iPhone handed over" : "You're driving"
+            if previous != nil { WKInterfaceDevice.current().play(.success) }
+        } else if previous != nil {
+            handoverNotice = "Back on iPhone"
+            WKInterfaceDevice.current().play(.click)
+        }
+    }
+
+    func dismissHandoverNotice() { handoverNotice = nil }
 
     private func receive(acknowledgement raw: [String: Any]) {
         guard JSONSerialization.isValidJSONObject(raw),

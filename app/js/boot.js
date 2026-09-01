@@ -123,6 +123,11 @@
       if (window.GDNativeRoundBridge && window.GDNativeRoundBridge.attach) {
         window.GDNativeRoundBridge.attach(app.caddyWatch);
       }
+      /* The phone's handover controls draw off the same wearable scene, so
+         "who is driving" has one source whichever end changed it. */
+      if (window.GDWatchHandover && window.GDWatchHandover.attach) {
+        window.GDWatchHandover.attach(app.caddyWatch);
+      }
     }
     /* The only two things that turn the outside world into Signals. A fix that
        is not trusted is refused inside the Marshal, not here — this file does

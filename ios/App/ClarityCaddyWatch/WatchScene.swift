@@ -20,7 +20,17 @@ struct WatchScene: Codable, Equatable {
     let geometry: Geometry?
     let score: Score?
     let controls: Controls?
+    let surface: Surface?
     let connection: Connection?
+
+    /* Which surface is driving the round. The phone owns the answer and both
+       ends may ask to change it (TAKE_OVER / HAND_BACK); this is presentation
+       state, never permission - LOCK works from the wrist either way. A
+       handover from the phone is `offered` until this app answers, so a phone
+       can tell a Watch that has the round from one that is still in a drawer. */
+    struct Surface: Codable, Equatable { let active: String?; let handover: Handover?; let watch: Presence? }
+    struct Handover: Codable, Equatable { let id: String?; let state: String?; let from: String? }
+    struct Presence: Codable, Equatable { let paired: Bool?; let appInstalled: Bool?; let reachable: Bool? }
 
     /* Which course is in play, so a delivered lite-map package is only ever
        drawn for the course it was baked from. Optional because an older phone
@@ -57,12 +67,13 @@ struct WatchScene: Codable, Equatable {
     var isSupported: Bool { schemaVersion == Self.supportedSchemaVersion }
     var hasRound: Bool { roundId?.isEmpty == false }
     var isBubble: Bool { mode == "bubble" && bubble != nil }
+    var isDriving: Bool { surface?.active == "watch" }
 }
 
 /* The Watch sends only this existing, platform-neutral command vocabulary.
  There are deliberately no Swift golf-state transitions behind these values. */
 struct CaddyWatchCommand: Codable, Equatable {
-    enum Kind: String, Codable, CaseIterable { case lock = "LOCK", unlock = "UNLOCK", previousHole = "VIEW_PREVIOUS_HOLE", nextHole = "VIEW_NEXT_HOLE", lockAt = "LOCK_AT" }
+    enum Kind: String, Codable, CaseIterable { case lock = "LOCK", unlock = "UNLOCK", previousHole = "VIEW_PREVIOUS_HOLE", nextHole = "VIEW_NEXT_HOLE", lockAt = "LOCK_AT", takeOver = "TAKE_OVER", handBack = "HAND_BACK" }
     let commandId: String
     let roundId: String
     let baseRevision: Int

@@ -20,7 +20,8 @@ struct ContentView: View {
                    or a background: it is a picture of a hole, and it earns the
                    whole screen when it is the thing being looked at. */
                 TabView {
-                    ShotView(scene: scene, stale: session.state == .stale, pending: session.pendingCommands, rejection: session.lastRejection, send: session.send, dismissRejection: session.dismissRejection)
+                    ShotView(scene: scene, stale: session.state == .stale, pending: session.pendingCommands, rejection: session.lastRejection, send: session.send, dismissRejection: session.dismissRejection,
+                             driving: scene.isDriving, handoverNotice: session.handoverNotice, dismissHandoverNotice: session.dismissHandoverNotice)
                     if let holeNumber = scene.hole?.number {
                         HoleMapPage(
                             scene: scene,

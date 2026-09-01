@@ -837,3 +837,38 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
    sheets opt back in below, because they genuinely scroll. */
 #map, #surfaceViewport, #playTopBar, .shotDock, .playChrome { touch-action: none; }
 .sheet, .sheetBody, #scoreList, #bagList, #traceList { touch-action: pan-y; }
+
+/* ---- Phone <-> Watch handover (watch-handover.js) ------------------------ */
+/* Top-right, under the tool-rail tab so the two never overlap; mirrored from
+   the player badge's height on the left so the top row reads as one line. */
+#watchHandoverBtn { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 71px); right: 64px; z-index: 600;
+  display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 12px 0 9px; border: 1px solid rgba(31, 211, 109, .45);
+  border-radius: 999px; background: rgba(3, 12, 7, .82); color: #8ef0b6; font-size: 12px; font-weight: 800; letter-spacing: .02em;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .35); }
+#watchHandoverBtn.hiddenState { display: none; }
+#watchHandoverBtn svg { width: 18px; height: 18px; }
+#watchHandoverBtn.unreachable { color: rgba(234, 255, 241, .55); border-color: rgba(255, 255, 255, .14); }
+#watchHandoverBtn:active { transform: scale(.98); }
+
+/* Below the top bar (700) so Back/Home still work, above everything on the
+   surface (dock 630, Play 660) so the phone cannot be driven by accident
+   from a pocket. */
+#watchHandoverScreen { position: absolute; inset: 0; z-index: 690; display: flex; align-items: center; justify-content: center;
+  padding: 20px; background: rgba(3, 7, 5, .9); backdrop-filter: blur(10px); }
+#watchHandoverScreen.hiddenState { display: none; }
+.watchHandoverCard { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(340px, 100%);
+  padding: 28px 22px 22px; border-radius: 22px; background: rgba(10, 18, 13, .96); border: 1px solid rgba(31, 211, 109, .22);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .5); text-align: center; }
+.watchHandoverEyebrow { font-size: 11px; font-weight: 900; letter-spacing: .14em; color: #8ef0b6; }
+.watchHandoverGlyph { width: 64px; height: 64px; color: #8ef0b6; opacity: .55; }
+#watchHandoverScreen.confirmed .watchHandoverGlyph { opacity: 1; }
+#watchHandoverScreen:not(.confirmed) .watchHandoverGlyph { animation: watchHandoverPulse 1.6s ease-in-out infinite; }
+@keyframes watchHandoverPulse { 0%, 100% { opacity: .35; } 50% { opacity: .9; } }
+.watchHandoverHole { font-size: 13px; font-weight: 800; color: rgba(234, 255, 241, .72); letter-spacing: .04em; }
+.watchHandoverDistance { display: flex; align-items: baseline; gap: 4px; font-variant-numeric: tabular-nums; }
+.watchHandoverDistance > span:first-child { font-size: 56px; font-weight: 950; line-height: 1; color: #eafff1; }
+.watchHandoverUnitLabel { font-size: 18px; font-weight: 800; color: rgba(234, 255, 241, .6); }
+.watchHandoverStatus { min-height: 2.6em; font-size: 14px; line-height: 1.35; color: rgba(234, 255, 241, .82); }
+.watchHandoverBack { width: 100%; min-height: 50px; margin-top: 6px; border: 1px solid rgba(255, 255, 255, .16); border-radius: 14px;
+  background: rgba(255, 255, 255, .06); color: #eafff1; font-size: 15px; font-weight: 900; }
+.watchHandoverBack:active { transform: scale(.99); }

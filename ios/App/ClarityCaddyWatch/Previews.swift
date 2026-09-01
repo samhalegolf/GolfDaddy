@@ -37,7 +37,7 @@ enum WatchPreviewFixtures {
     static let player = WatchScene.GeoPoint(lat: -44.9476015985, lng: 168.81686964675)
     static let target = WatchScene.GeoPoint(lat: -44.946658352200004, lng: 168.81835271310004)
 
-    static func scene(mode: String = "standard", canLock: Bool = true) -> WatchScene {
+    static func scene(mode: String = "standard", canLock: Bool = true, driving: Bool = false) -> WatchScene {
         WatchScene(
             schemaVersion: 1,
             roundId: "preview-round",
@@ -56,6 +56,9 @@ enum WatchPreviewFixtures {
             score: .init(strokes: nil),
             controls: .init(canLock: canLock, canUnlock: !canLock, canAim: false, canShotEnd: false,
                             canPreviousHole: false, canNextHole: true),
+            surface: .init(active: driving ? "watch" : "phone",
+                           handover: driving ? .init(id: "preview-handover", state: "confirmed", from: "phone") : nil,
+                           watch: .init(paired: true, appInstalled: true, reachable: true)),
             connection: .init(status: "live")
         )
     }
@@ -130,6 +133,33 @@ enum WatchPreviewFixtures {
         rejection: nil,
         send: { _ in },
         dismissRejection: {}
+    )
+    .containerBackground(.black, for: .navigation)
+}
+
+#Preview("Numbers face — Watch driving") {
+    ShotView(
+        scene: WatchPreviewFixtures.scene(driving: true),
+        stale: false,
+        pending: [],
+        rejection: nil,
+        send: { _ in },
+        dismissRejection: {},
+        driving: true
+    )
+    .containerBackground(.black, for: .navigation)
+}
+
+#Preview("Numbers face — just handed over") {
+    ShotView(
+        scene: WatchPreviewFixtures.scene(driving: true),
+        stale: false,
+        pending: [],
+        rejection: nil,
+        send: { _ in },
+        dismissRejection: {},
+        driving: true,
+        handoverNotice: "iPhone handed over"
     )
     .containerBackground(.black, for: .navigation)
 }

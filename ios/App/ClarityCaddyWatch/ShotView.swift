@@ -7,6 +7,9 @@ struct ShotView: View {
     let rejection: WatchCommandAcknowledgement?
     let send: (CaddyWatchCommand.Kind) -> Void
     let dismissRejection: () -> Void
+    var driving: Bool = false
+    var handoverNotice: String? = nil
+    var dismissHandoverNotice: () -> Void = {}
 
     private var holeText: String {
         let number = scene.hole?.number.map { "HOLE \($0)" } ?? "HOLE"
@@ -37,6 +40,21 @@ struct ShotView: View {
                         try? await Task.sleep(nanoseconds: 3_000_000_000)
                         dismissRejection()
                     }
+            } else if let handoverNotice {
+                /* The moment of handover, said out loud, then the strip below
+                   takes over as the standing answer. */
+                Label(handoverNotice, systemImage: "checkmark.circle.fill")
+                    .font(.caption2.weight(.bold)).foregroundStyle(.mint)
+                    .task(id: handoverNotice) {
+                        try? await Task.sleep(nanoseconds: 2_500_000_000)
+                        dismissHandoverNotice()
+                    }
+            } else if !scene.isBubble {
+                /* The Bubble page is already the full height of a 42mm face;
+                   a standing strip there pushes UNLOCK off the bottom. The
+                   driver is one Unlock away on the numbers face, and a
+                   change of driver still announces itself above. */
+                surfaceStrip
             }
             if scene.isBubble {
                 GreenBubbleView(scene: scene)
@@ -55,6 +73,30 @@ struct ShotView: View {
     }
 
     private var distanceText: String { scene.distance?.target.map { "\(Int($0.rounded())) m" } ?? "—" }
+
+    /* Who is driving, as a standing line rather than a glyph you have to know
+       about: "iPhone driving · take over" while the phone has it, "Watch
+       driving" once this wrist does. Tapping it is the wrist-initiated
+       handover in either direction; the phone answers through the Scene, so
+       the line only changes when the phone agrees it has. */
+    @ViewBuilder
+    private var surfaceStrip: some View {
+        let waiting = pending.contains { $0.command.type == .takeOver || $0.command.type == .handBack }
+        Button {
+            send(driving ? .handBack : .takeOver)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: driving ? "applewatch" : "iphone")
+                Text(waiting ? "Switching…" : (driving ? "Watch driving" : "iPhone driving · take over"))
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(driving ? Color.mint : Color.secondary)
+            .lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .buttonStyle(.plain)
+        .disabled(waiting)
+        .accessibilityLabel(driving ? "Watch is driving. Hand back to iPhone" : "iPhone is driving. Take over on Watch")
+    }
 
     @ViewBuilder
     private func control(_ kind: CaddyWatchCommand.Kind, title: String, enabled: Bool, primary: Bool = false) -> some View {

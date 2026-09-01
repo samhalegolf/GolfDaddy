@@ -109,6 +109,69 @@
     var revision = 0;
     var latest = null;
 
+    /* Which surface is DRIVING the round: the phone in the hand, or the Watch
+       on the wrist with the phone in the bag. Marshal still owns the round on
+       either answer; this is presentation state, kept here because both ends
+       read it off the same Scene and both ends may change it. A handover is
+       for one round only, so it carries the round it was made for and lapses
+       with it. */
+    var surface = { active: "phone", roundId: null, handover: null };
+    var watchState = { paired: false, appInstalled: false, reachable: false };
+    var handoverSeq = 0;
+
+    /* Only LIVE play can be driven from the wrist: the Watch has no Play
+       button and nothing to preview from a couch. So a handover needs a live
+       hole, and lapses when the round changes or live play ends (END_ROUND
+       keeps the round record for its card; it is the live hole that goes). */
+    function liveRoundId(round) {
+      return round.roundId && round.liveHole !== null && round.liveHole !== undefined ? round.roundId : null;
+    }
+    function surfaceFor(round) {
+      if (surface.active === "watch" && surface.roundId !== liveRoundId(round)) surface = { active: "phone", roundId: null, handover: null };
+      return {
+        active: surface.active,
+        handover: surface.handover ? { id: surface.handover.id, state: surface.handover.state, from: surface.handover.from } : null,
+        watch: { paired: !!watchState.paired, appInstalled: !!watchState.appInstalled, reachable: !!watchState.reachable }
+      };
+    }
+
+    /* `from` is who asked. A phone-initiated handover is only OFFERED until the
+       wrist answers with TAKE_OVER; a wrist-initiated one is confirmed by the
+       asking. Both directions converge on the same confirmed state, so the
+       phone's "is the Watch actually driving?" has one honest answer. */
+    function setActive(active, from) {
+      var round = marshal.round ? marshal.round() : {};
+      if (active !== "watch" && active !== "phone") return false;
+      if (active === "watch") {
+        var roundId = liveRoundId(round);
+        if (!roundId) return false;
+        var current = surface.active === "watch" && surface.roundId === roundId ? surface.handover : null;
+        if (from === "watch") {
+          if (current && current.state === "confirmed") return true;
+          handoverSeq += 1;
+          surface = { active: "watch", roundId: roundId, handover: { id: current ? current.id : String(now()) + "-" + handoverSeq, state: "confirmed", from: current ? current.from : "watch" } };
+        } else {
+          if (current) return true;
+          handoverSeq += 1;
+          surface = { active: "watch", roundId: roundId, handover: { id: String(now()) + "-" + handoverSeq, state: "offered", from: "phone" } };
+        }
+      } else {
+        if (surface.active === "phone") return true;
+        surface = { active: "phone", roundId: null, handover: null };
+      }
+      publish();
+      return true;
+    }
+
+    function setWatchState(state) {
+      state = state || {};
+      var next = { paired: !!state.paired, appInstalled: !!state.appInstalled, reachable: !!state.reachable };
+      if (next.paired === watchState.paired && next.appInstalled === watchState.appInstalled && next.reachable === watchState.reachable) return false;
+      watchState = next;
+      publish();
+      return true;
+    }
+
     function project(scene) {
       var b = bubbleFor(scene, bubbleModel);
       var r = scene && scene.hole && scene.hole.rec || null;
@@ -143,6 +206,7 @@
           canPreviousHole: !!(scene && scene.picker && scene.picker.current > 1),
           canNextHole: !!(scene && scene.picker && scene.picker.holes && scene.picker.current < scene.picker.holes.length)
         },
+        surface: surfaceFor(round),
         connection: { status: "live" }
       };
     }
@@ -172,6 +236,14 @@
       else if (type === "VIEW_HOLE") signal = "VIEW_HOLE_CHANGED";
       else if (type === "SET_SCORE") signal = "SCORE_SET";
       else if (type === "REQUEST_LATEST_SCENE") return { accepted: true, scene: latest };
+      else if (type === "TAKE_OVER" || type === "HAND_BACK") {
+        /* Surface commands move no golf state, so they never reach Marshal
+           and cannot be "marshal-rejected"; the round-ID check above is what
+           stops a wrist claiming a round it is not looking at. */
+        setActive(type === "TAKE_OVER" ? "watch" : "phone", "watch");
+        seenCommands[id] = true;
+        return { accepted: true, reason: null, revision: latest.revision };
+      }
       else if (type === "LOCK_AT" || type === "SHOT_END_AT") {
         observation = locationObservation(payload.location, now);
         if (!observation) return { accepted: false, reason: "invalid-location" };
@@ -186,7 +258,17 @@
     }
     marshal.onScene(function (scene) { publish(scene); });
     publish(marshal.scene());
-    return { scene: function () { return latest; }, onScene: onScene, receiveCommand: receiveCommand, publish: publish, localPoint: localPoint, validateLocationObservation: function (v) { return locationObservation(v, now); } };
+    return {
+      scene: function () { return latest; }, onScene: onScene, receiveCommand: receiveCommand, publish: publish, localPoint: localPoint,
+      validateLocationObservation: function (v) { return locationObservation(v, now); },
+      /* The phone's side of a handover. The wrist's side arrives as TAKE_OVER /
+         HAND_BACK commands through receiveCommand, so both go through the
+         same setActive and the Scene is the only place the answer lives. */
+      handToWatch: function () { return setActive("watch", "phone"); },
+      takeBack: function () { return setActive("phone", "phone"); },
+      setWatchState: setWatchState,
+      surface: function () { return latest ? latest.surface : null; }
+    };
   }
 
   createCaddyWatchBridge.SCHEMA_VERSION = SCHEMA_VERSION;

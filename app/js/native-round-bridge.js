@@ -31,6 +31,19 @@
     deliverMaps(watch.scene());
     var cap = window.Capacitor;
     var plugin = cap && cap.Plugins && cap.Plugins.NativeRoundBridge;
+    /* Whether there is a Watch to hand over to at all. Native reports it on
+       activation and on every reachability/pairing change; the answer rides
+       the Scene so the phone's Send to Watch and the wrist's status strip read
+       the same fact. Absent on web, so the handover UI simply never appears. */
+    if (plugin && typeof watch.setWatchState === "function") {
+      var applyWatchState = function (state) { try { watch.setWatchState(state || {}); } catch (e) {} };
+      if (typeof plugin.addListener === "function") {
+        try { plugin.addListener("watchState", applyWatchState); } catch (e) {}
+      }
+      if (typeof plugin.watchState === "function") {
+        try { plugin.watchState().then(applyWatchState, function () {}); } catch (e) {}
+      }
+    }
     if (plugin && typeof plugin.addListener === "function") {
       try {
         plugin.addListener("watchCommand", function (event) {

@@ -142,3 +142,41 @@ next one. `SHOT_END` closes only the final open shot. Bubble is a presentation o
 the locked/aiming shot—there is no extra Watch Lock or generic per-shot Log
 button. Green Focus and outstanding-shot completion continue to use Marshal's
 existing deferred logging model.
+
+## Handover: who is driving
+
+Marshal owns the round on the phone whichever surface the player is looking at.
+What changes at a handover is presentation: which surface is **driving**, and
+therefore what each screen should say. That answer lives on the Scene as
+`surface`, so both ends read one fact and either end may change it:
+
+```text
+surface.active    "phone" | "watch"
+surface.handover  null | { id, state: "offered" | "confirmed", from: "phone" | "watch" }
+surface.watch     { paired, appInstalled, reachable }   -- native's report of the wrist
+```
+
+A phone-initiated handover (`caddyWatch.handToWatch()`, the Send to Watch
+button) is only **offered** until the Watch answers with a `TAKE_OVER` command
+for that handover ID. That answer is what separates a Watch that has the round
+from one still in a drawer: the phone's handover screen says "Sending…" or
+"Open Clarity Caddy on your Watch" until it arrives, and "Your Watch is driving"
+after. A wrist-initiated takeover is confirmed by the asking. `HAND_BACK` from
+the wrist and `takeBack()` on the phone return the phone to driving. Surface
+commands go through the same command gate as everything else (round ID,
+command-ID idempotency) but never reach Marshal, so they cannot be
+"marshal-rejected" and LOCK works from the wrist whichever surface is driving.
+
+A handover belongs to one round: it lapses when the round ends and a new round
+starts with the phone driving. The Watch answers each offered handover once
+(by ID), so a repeated Scene does not become a repeated command.
+
+On the phone `app/js/watch-handover.js` draws the Send to Watch control (only
+while the phone is driving and `surface.watch.appInstalled`) and the full-screen
+"On Apple Watch" state, which sits above the dock and Play so a phone in a
+pocket cannot be driven by accident, and below the top bar so Back/Home still
+work. On the wrist the numbers face carries a standing strip - "iPhone driving ·
+take over" or "Watch driving" - that is also the wrist's handover control, and a
+brief notice plus haptic marks the moment the driver actually changes.
+`NativeRoundBridge.watchState` / the `watchState` event supply `surface.watch`;
+on web nothing reports a Watch, so none of this UI appears.

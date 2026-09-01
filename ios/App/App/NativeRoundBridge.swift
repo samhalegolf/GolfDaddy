@@ -17,7 +17,8 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
         CAPPluginMethod(name: "acknowledgeCommand", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "publishWatchMap", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "publishWatchMapAsset", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "watchMapInventory", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "watchMapInventory", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "watchState", returnType: CAPPluginReturnPromise)
     ]
 
     private let queue = DispatchQueue(label: "com.claritygolf.caddy.native-round-bridge")
@@ -175,6 +176,33 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
         }
     }
 
+    // MARK: - Watch presence
+
+    /* Whether there is a wrist to hand the round to. JavaScript puts the answer
+       on the Scene so the phone's Send to Watch and the Watch's own status strip
+       read one fact. Pushed on activation and on every pairing/reachability
+       change, and answerable on demand for a bridge that attaches late. */
+    private func watchStateData() -> [String: Any] {
+        guard let session else {
+            return ["supported": false, "activated": false, "paired": false, "appInstalled": false, "reachable": false]
+        }
+        return [
+            "supported": true,
+            "activated": session.activationState == .activated,
+            "paired": session.isPaired,
+            "appInstalled": session.isWatchAppInstalled,
+            "reachable": session.isReachable
+        ]
+    }
+
+    @objc public func watchState(_ call: CAPPluginCall) {
+        call.resolve(watchStateData())
+    }
+
+    private func publishWatchState() {
+        notifyListeners("watchState", data: watchStateData())
+    }
+
     private static func watchMapOutbox() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("CaddyWatchMapOutbox", isDirectory: true)
     }
@@ -197,7 +225,14 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
         }
         queue.async { [weak self] in
             guard let self else { return }
-            let message: [String: Any] = ["acknowledgement": acknowledgement]
+            /* An accepted command acknowledges with `reason: null`, which
+               Capacitor bridges as NSNull and WatchConnectivity refuses outright
+               (WCErrorCodePayloadUnsupportedTypes) - on BOTH the live and the
+               queued path, so the Watch never heard that its LOCK or hole change
+               went through and kept the button reading busy. Same fix as
+               publishScene: the Watch decoder treats an absent key as nil. */
+            let payload = (Self.withoutNulls(acknowledgement) as? [String: Any]) ?? [:]
+            let message: [String: Any] = ["acknowledgement": payload]
             if let session = self.session, session.isReachable {
                 session.sendMessage(message, replyHandler: nil) { _ in
                     session.transferUserInfo(message)
@@ -233,8 +268,13 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
     public func sessionDidDeactivate(_ session: WCSession) { session.activate() }
     public func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
         if activationState == .activated { republishLatestScene() }
+        publishWatchState()
     }
     public func sessionReachabilityDidChange(_ session: WCSession) {
         if session.isReachable { republishLatestScene() }
+        publishWatchState()
+    }
+    public func sessionWatchStateDidChange(_ session: WCSession) {
+        publishWatchState()
     }
 }
