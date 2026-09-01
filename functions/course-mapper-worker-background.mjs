@@ -36,7 +36,8 @@ import { assessFacilityStructure, contestedClaims, describeClaimGround, isIndepe
 import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry } from "./lib/gd-scorecard-match-core.mjs";
 import { planListingResolution, RESOLUTION_MODE } from "./lib/gd-course-listing-core.mjs";
 import { eliminateInferredCourses } from "./lib/gd-inferred-course-claims-core.mjs";
-import { OBJECT_COLLECTION_KIND } from "./course-mapper-jobs.mjs";
+import { OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND } from "./course-mapper-jobs.mjs";
+import { refineSurfaceShape, applyRefinedShape, REFINED_SHAPE_SOURCE } from "./lib/gd-surface-refine-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
 
@@ -1254,6 +1255,122 @@ function centreOfGuides(guides) {
   };
 }
 
+/* ---------- refine_surface_shapes ---------------------------------------------------------
+
+   Re-traces surfaces we already have against the course's own published frames, replacing an
+   OSM ring with a lighter one of our own (see gd-surface-refine-core.mjs for what that does and
+   does not prove). Adds nothing, finds nothing, and - like collection - writes objects_json
+   alone and chains no visual work: the frames are READ here, never rebuilt.
+
+   Refinement is one-way per surface. A refined shape has no guide left to re-trace from, so a
+   second run skips it rather than refining its own output and letting the geometry drift. To
+   redo one, Collect Extra Objects would have to put the OSM ring back first - which it will not
+   do while shapeSource says the shape is ours (see upsertResolvedObject). */
+const VISUALS_TABLE = "course_visuals";
+const VISUALS_BUCKET = "course-visuals";
+
+async function downloadFrame(path) {
+  const response = await fetch(supabaseBase() + "/storage/v1/object/" + VISUALS_BUCKET + "/" + path, {
+    headers: { apikey: supabaseKey(), Authorization: "Bearer " + supabaseKey() }
+  });
+  if (!response.ok) throw new Error("frame " + path + " came back " + response.status);
+  return Buffer.from(await response.arrayBuffer());
+}
+
+/* hole number -> {path, playSurface} for every hole this course has actually published. */
+async function publishedFramesByHole(courseId) {
+  const rows = await supabaseFetch(VISUALS_TABLE + "?select=course_id,uploaded_assets&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []);
+  const assets = ((Array.isArray(rows) ? rows[0] : null) || {}).uploaded_assets || [];
+  const byHole = new Map();
+  assets.forEach(asset => {
+    if (!asset || asset.role !== "hole-frame-published") return;
+    const hole = Number(asset.holeNumber);
+    const playSurface = asset.metadata && asset.metadata.playSurface;
+    if (!Number.isFinite(hole) || !playSurface || !asset.path) return;
+    if (!byHole.has(hole)) byHole.set(hole, { path: asset.path, playSurface });
+  });
+  return byHole;
+}
+
+async function runShapeRefineJob(job) {
+  const course = await loadCourseCenter(job.course_id);
+  if (!course) throw new Error("course " + job.course_id + " has no known location in " + MAPS_TABLE);
+  const objects = Object.values(course.objects || {}).filter(Boolean).map(o => Object.assign({}, o));
+  const candidates = objects.filter(o => SURFACE_TYPES.has(o.type) && Array.isArray(o.shape) && o.shape.length >= 3
+    && o.shapeSource !== REFINED_SHAPE_SOURCE);
+  if (!candidates.length) throw new Error("course " + job.course_id + " has no unrefined surfaces - run Collect Extra Objects first");
+
+  await heartbeatJob(job, { stage: "reading-published-frames" });
+  const frames = await publishedFramesByHole(job.course_id);
+  if (!frames.size) throw new Error("course " + job.course_id + " has no published frames to trace against");
+
+  const counts = { refined: 0, skipped: 0, noFrame: 0 };
+  const reasons = {};
+  const byHole = new Map();
+  candidates.forEach(o => {
+    const hole = Number(o.holeNumber);
+    if (!frames.has(hole)) { counts.noFrame += 1; return; }
+    if (!byHole.has(hole)) byHole.set(hole, []);
+    byHole.get(hole).push(o);
+  });
+
+  /* One download per HOLE, not per surface: a busy hole carries 30-odd surfaces and they all
+     trace against the same picture. */
+  const holes = [...byHole.keys()].sort((a, b) => a - b);
+  for (let i = 0; i < holes.length; i++) {
+    const hole = holes[i];
+    await heartbeatJob(job, { stage: "refining-hole-" + hole + "-of-" + holes.length });
+    const frame = frames.get(hole);
+    let image;
+    try { image = await downloadFrame(frame.path); }
+    catch (error) { counts.noFrame += byHole.get(hole).length; reasons["frame-unreadable"] = (reasons["frame-unreadable"] || 0) + 1; continue; }
+    for (const object of byHole.get(hole)) {
+      const result = await refineSurfaceShape({ image, playSurface: frame.playSurface, guideShape: object.shape })
+        .catch(error => ({ ok: false, reason: "refine-threw:" + String(error && error.message || error).slice(0, 60) }));
+      if (!result.ok) {
+        counts.skipped += 1;
+        reasons[result.reason] = (reasons[result.reason] || 0) + 1;
+        continue;
+      }
+      const index = objects.findIndex(o => o.id === object.id);
+      if (index >= 0) { objects[index] = applyRefinedShape(objects[index], result); counts.refined += 1; }
+    }
+  }
+
+  if (!counts.refined) {
+    return { kind: SHAPE_REFINE_KIND, courseId: job.course_id, counts, reasons,
+      holes: holes.length, written: false, visualsTouched: false, holeGeometryTouched: false };
+  }
+
+  const objectsMap = {};
+  objects.forEach(o => { objectsMap[o.id] = o; });
+  const written = await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(job.course_id), {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ objects_json: objectsMap, updated_at: new Date().toISOString() })
+  });
+  if (!Array.isArray(written) || !written.length) {
+    throw new Error("course " + job.course_id + " has no course_maps row to save refined shapes into");
+  }
+
+  const pointsBefore = candidates.reduce((n, o) => n + o.shape.length, 0);
+  const pointsAfter = objects.filter(o => o.shapeSource === REFINED_SHAPE_SOURCE).reduce((n, o) => n + o.shape.length, 0);
+  const refinement = {
+    revision: Number((written[0] && written[0].shape_refinement && written[0].shape_refinement.revision) || 0) + 1,
+    status: "complete", refinerVersion: SURFACE_MAPPER_VERSION, refinedAt: new Date().toISOString(), counts
+  };
+  const metadataSaved = await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(job.course_id), {
+    method: "PATCH", body: JSON.stringify({ shape_refinement: refinement })
+  }).then(() => true).catch(() => false);
+
+  return {
+    kind: SHAPE_REFINE_KIND, courseId: job.course_id, counts, reasons,
+    holes: holes.length, written: true, pointsBefore, pointsAfter,
+    shapeRefinement: metadataSaved ? refinement : null, metadataSaved,
+    visualsTouched: false, holeGeometryTouched: false
+  };
+}
+
 /* ---------- collect_extra_objects ---------------------------------------------------------
 
    Enrichment, and ONLY enrichment. It shares the Overpass sweep with runMapperJob and nothing
@@ -2259,8 +2376,11 @@ export default async function courseMapperWorker(req) {
   let job = await claimJob(payload && payload.jobId || null);
   while (job) {
     try {
-      const collecting = String(job.kind || "") === OBJECT_COLLECTION_KIND;
-      const result = collecting ? await runObjectCollectionJob(job) : await runMapperJob(job, origin);
+      const kind = String(job.kind || "");
+      const maintenance = kind === OBJECT_COLLECTION_KIND || kind === SHAPE_REFINE_KIND;
+      const result = kind === OBJECT_COLLECTION_KIND ? await runObjectCollectionJob(job)
+        : kind === SHAPE_REFINE_KIND ? await runShapeRefineJob(job)
+        : await runMapperJob(job, origin);
       /* Chained BEFORE finishJob so the outcome rides on the job's own result row - a course
          whose frames never appeared should say why in the same place everything else about
          the run is recorded. The catch keeps the contract above: geometry saved means the
@@ -2271,7 +2391,7 @@ export default async function courseMapperWorker(req) {
       /* The structural guarantee behind "Collect Extra Objects must not change existing
          visuals": the chain is not skipped by a flag the collection path sets, it is
          unreachable from that path at all. */
-      if (!collecting && !result.multiCourse) {
+      if (!maintenance && !result.multiCourse) {
         result.visualChain = await chainVisualSnapshot(job.course_id, result.courseBounds, origin,
           courseCoverageComplete({
             holeNumbers: (result.fit && result.fit.detail && result.fit.detail.holeNumbers) || result.holeNumbers || [],
@@ -2303,4 +2423,4 @@ export default async function courseMapperWorker(req) {
   return new Response("ok", { status: 200 });
 }
 
-export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, runMapperJob, runObjectCollectionJob, surfaceCounts, chainVisualSnapshot, transientMapperFailure, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, MAX_TRANSIENT_ATTEMPTS };
+export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, MAX_TRANSIENT_ATTEMPTS };

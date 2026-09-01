@@ -19,11 +19,12 @@
 
    The worker itself is functions/course-mapper-worker-background.mjs. */
 
-import { MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { MAPPER_VERSION, SURFACE_TYPES } from "./lib/gd-automapper-core.mjs";
 import { findDuplicateCourseWithGeometry } from "./lib/gd-duplicate-course-guard.mjs";
 
 const TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
+const VISUALS_TABLE = "course_visuals";
 const ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
 
 /* Mirrors course-visual-jobs.mjs's AUTO_RATE_* - a player tap is cheap for them, and an
@@ -148,12 +149,21 @@ const BULK_JOB_SCAN_LIMIT = 2000;
    collection run can never be claimed by the mapping path, can never be deduped against a
    mapping job, and shows up in logs and job history as the different operation it is.
 
-   It is excluded from the build state below on purpose. That state is what the PLAYER-facing
-   package flow branches on: counting an admin enrichment sweep as "this course is building"
-   would put every course on every phone into Processing while nothing about its map was
-   changing. */
+   It and the refine kind below are excluded from the build state on purpose. That state is
+   what the PLAYER-facing package flow branches on: counting an admin maintenance sweep as
+   "this course is building" would put every course on every phone into Processing while
+   nothing about its map was changing. */
 export const OBJECT_COLLECTION_KIND = "collect_extra_objects";
-const isMappingJob = job => String(job && job.kind || "automap") !== OBJECT_COLLECTION_KIND;
+
+/* Re-traces surfaces that already exist, against the course's own published frames
+   (gd-surface-refine-core.mjs). Like collection it touches the objects layer alone; unlike
+   collection it adds nothing, it only replaces geometry we already had with a lighter ring we
+   own. Its own kind for the same reasons - separate dedupe, separate history, and no chance of
+   a mapping run claiming it. */
+export const SHAPE_REFINE_KIND = "refine_surface_shapes";
+
+const MAINTENANCE_KINDS = new Set([OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND]);
+const isMappingJob = job => !MAINTENANCE_KINDS.has(String(job && job.kind || "automap"));
 
 async function mapperBuildStateAll() {
   const [jobRows, mapRows] = await Promise.all([
@@ -395,6 +405,39 @@ async function enqueueObjectCollectionJob({ courseId, actor, origin }) {
   return { queued: true, job };
 }
 
+/* Refinement needs two things collection does not: surfaces to re-trace, and published frames
+   to trace them against. Both are checked here rather than in the worker so an operator gets
+   "this course has no frames yet" immediately instead of a failed job row minutes later. */
+async function enqueueShapeRefineJob({ courseId, actor, origin }) {
+  const [mapRows, visualRows] = await Promise.all([
+    supabaseFetch(MAPS_TABLE + "?select=course_id,objects_json&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []),
+    supabaseFetch(VISUALS_TABLE + "?select=course_id,uploaded_assets&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => [])
+  ]);
+  const map = Array.isArray(mapRows) ? mapRows[0] : null;
+  if (!map) return { missing: true };
+  const surfaces = Object.values(map.objects_json || {})
+    .filter(o => o && SURFACE_TYPES.has(o.type) && Array.isArray(o.shape) && o.shape.length >= 3);
+  if (!surfaces.length) return { noSurfaces: true };
+  const assets = (Array.isArray(visualRows) ? visualRows[0] : null);
+  const frames = ((assets && assets.uploaded_assets) || [])
+    .filter(a => a && a.role === "hole-frame-published" && a.metadata && a.metadata.playSurface);
+  if (!frames.length) return { noFrames: true };
+
+  const freshCutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+  const existing = await supabaseFetch(TABLE + "?select=id,status&course_id=eq." + encodeURIComponent(courseId)
+    + "&kind=eq." + SHAPE_REFINE_KIND + "&status=in.(queued,running)&updated_at=gt." + encodeURIComponent(freshCutoff) + "&limit=1");
+  if (Array.isArray(existing) && existing.length) return { deduped: true, job: existing[0] };
+
+  const inserted = await supabaseFetch(TABLE, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify([{ course_id: courseId, kind: SHAPE_REFINE_KIND, status: "queued", mapper_version: MAPPER_VERSION, requested_by: actor }])
+  });
+  const job = Array.isArray(inserted) ? inserted[0] : inserted;
+  await pingWorkerAt(origin, job && job.id || null);
+  return { queued: true, job, surfaces: surfaces.length, frames: frames.length };
+}
+
 export default async function courseMapperJobs(req) {
   if (req.method === "OPTIONS") return json(200, { ok: true });
   if (!hasSupabase()) return json(503, { error: "Supabase is not configured" });
@@ -417,6 +460,7 @@ export default async function courseMapperJobs(req) {
   const nudge = requestedKind === "nudge";
   const remap = requestedKind === "remap";
   const collect = requestedKind === OBJECT_COLLECTION_KIND;
+  const refine = requestedKind === SHAPE_REFINE_KIND;
   const user = await verifiedUser(req, payload);
   /* An anonymous caller may map, but only as itself: a guest install id is accepted here and
      nowhere else. Without a verified user AND without a usable guest id there is no actor to
@@ -427,7 +471,7 @@ export default async function courseMapperJobs(req) {
      actions - one on a stuck run, one on a bad map - same split as course-visual-jobs.mjs's
      export/nudge paths. A guest is never an operator: these ask for user.isAdmin, so an
      anonymous caller falls through to the same 403 a signed-in non-admin gets. */
-  if ((nudge || remap || collect) && !(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
+  if ((nudge || remap || collect || refine) && !(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
 
   const courseId = slug(payload && (payload.courseId || payload.course_id));
   if (!courseId) return json(400, { error: "courseId required" });
@@ -466,6 +510,23 @@ export default async function courseMapperJobs(req) {
     }
     if (result.deduped) return json(200, { deduped: true, kind: OBJECT_COLLECTION_KIND, job: result.job });
     return json(202, { job: result.job, kind: OBJECT_COLLECTION_KIND, state: "queued" });
+  }
+
+  /* Refinement, returning from here for the same reason collection does: no route from asking
+     for better shapes into clearing geometry. */
+  if (refine) {
+    const result = await enqueueShapeRefineJob({ courseId, actor: actorKey, origin: new URL(req.url).origin });
+    if (result.missing) {
+      return json(404, { error: "no course_maps row for " + courseId, detail: "Refining re-traces surfaces an existing map already has. Map the course first." });
+    }
+    if (result.noSurfaces) {
+      return json(409, { error: "no surfaces to refine on " + courseId, detail: "Run Collect Extra Objects first - refinement re-traces the shapes that pass finds, it does not find its own." });
+    }
+    if (result.noFrames) {
+      return json(409, { error: "no published frames for " + courseId, detail: "Refining traces against this course's own captures. Build its visuals first." });
+    }
+    if (result.deduped) return json(200, { deduped: true, kind: SHAPE_REFINE_KIND, job: result.job });
+    return json(202, { job: result.job, kind: SHAPE_REFINE_KIND, state: "queued", surfaces: result.surfaces, frames: result.frames });
   }
 
   /* Remap: forget the geometry, keep the course.

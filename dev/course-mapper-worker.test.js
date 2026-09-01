@@ -279,6 +279,144 @@ test("collect_extra_objects still succeeds when the object_collection column is 
   assert.deepStrictEqual(result.added, { fairways: 1, bunkers: 1, water: 1 }, "the objects still landed");
 });
 
+/* ---------- refine_surface_shapes -------------------------------------------------------- */
+
+/* A frame whose top-left pixel is a known lat/lng, plus a pale blob at its centre for the wand
+   to find - the smallest thing that makes a real refinement happen rather than a stubbed one. */
+async function syntheticHole(centre, size = 512) {
+  const plan = await import(path.join(root, "functions", "lib", "gd-visual-plan-core.mjs"));
+  const sharp = (await import("sharp")).default;
+  const centrePx = plan.projectPoint(centre.lat, centre.lng, 18);
+  const originPx = { x: centrePx.x - size / 2, y: centrePx.y - size / 2 };
+  const image = await sharp({ create: { width: size, height: size, channels: 3, background: { r: 38, g: 86, b: 46 } } })
+    .composite([{ input: Buffer.from(`<svg width="${size}" height="${size}"><ellipse cx="${size/2}" cy="${size/2}" rx="60" ry="46" fill="#d8cfa8"/></svg>`), top: 0, left: 0 }])
+    .jpeg().toBuffer();
+  return { image, playSurface: { originPx, captureZoom: 18, outputDimensions: { width: size, height: size } } };
+}
+
+const RCENTRE = { lat: -44.9463, lng: 168.8190 };
+function squareAround(centre, metres) {
+  const dLat = metres / 111320, dLng = metres / (111320 * Math.cos(centre.lat * Math.PI / 180));
+  return [{ lat: centre.lat - dLat, lng: centre.lng - dLng }, { lat: centre.lat - dLat, lng: centre.lng + dLng },
+          { lat: centre.lat + dLat, lng: centre.lng + dLng }, { lat: centre.lat + dLat, lng: centre.lng - dLng }];
+}
+
+function refineRow(extraObjects = {}) {
+  return {
+    course_id: "refine", course_name: "Refine", course_lat: RCENTRE.lat, course_lng: RCENTRE.lng,
+    objects_json: Object.assign({
+      "green-1": { id: "green-1", type: "green", holeNumber: 1, position: RCENTRE, source: "osm_auto_green_polygon", confirmed: true },
+      "bunker-1": { id: "bunker-1", type: "bunker", holeNumber: 1, osmId: "way/1", source: "osm_auto_surface",
+        position: RCENTRE, shape: squareAround(RCENTRE, 22), confirmed: true }
+    }, extraObjects),
+    holes_json: { 1: { holeNumber: 1, greenCenter: RCENTRE, confirmed: true } },
+    shape_refinement: null
+  };
+}
+
+/* Returns {patches, gets} - every PATCH body and every URL the run touched. */
+function stubRefineWorld(row, frame, { frames = true } = {}) {
+  const patches = [], gets = [];
+  global.fetch = async (url, options = {}) => {
+    url = String(url);
+    const method = String(options.method || "GET").toUpperCase();
+    if (url.includes("/storage/v1/object/")) { gets.push(url); return { ok: true, status: 200, arrayBuffer: async () => frame.image }; }
+    if (!url.includes("stub.supabase.co")) return jsonResponse(200, {});
+    const rest = url.split("/rest/v1/")[1] || "";
+    gets.push(url);
+    if (method === "PATCH") { patches.push({ rest, body: JSON.parse(options.body || "{}") }); return jsonResponse(200, [row]); }
+    if (rest.startsWith("course_visuals")) {
+      return jsonResponse(200, frames ? [{ course_id: "refine", uploaded_assets: [
+        { role: "hole-frame-published", holeNumber: 1, path: "refine/frames/x/h1.jpg", metadata: { playSurface: frame.playSurface } }
+      ] }] : [{ course_id: "refine", uploaded_assets: [] }]);
+    }
+    if (rest.startsWith("course_maps")) return jsonResponse(200, [row]);
+    return jsonResponse(200, []);
+  };
+  return { patches, gets };
+}
+
+test("refine_surface_shapes replaces geometry and writes objects_json only", async () => {
+  const frame = await syntheticHole(RCENTRE);
+  const row = refineRow();
+  const { patches } = stubRefineWorld(row, frame);
+  const result = await worker.runShapeRefineJob({ id: "job-r", course_id: "refine", kind: "refine_surface_shapes" });
+
+  assert.strictEqual(result.counts.refined, 1, JSON.stringify(result.reasons));
+  assert.strictEqual(result.visualsTouched, false);
+  assert.strictEqual(result.holeGeometryTouched, false);
+  const geometryPatch = patches.find(p => p.body.objects_json);
+  assert.ok(geometryPatch, "the refined shape was saved");
+  ["holes_json", "geometry_version", "hole_count"].forEach(column => {
+    assert.ok(!(column in geometryPatch.body), column + " must not be written by a refinement run");
+  });
+  const saved = geometryPatch.body.objects_json;
+  assert.strictEqual(saved["bunker-1"].shapeSource, "wand_refined");
+  assert.strictEqual(saved["bunker-1"].osmId, "way/1", "still traceable to the guide");
+  assert.ok(saved["bunker-1"].shape.length <= 10, "refined to a lighter ring");
+  /* The tee/green geometry is not a surface and is not touched. */
+  assert.strictEqual(saved["green-1"].source, "osm_auto_green_polygon");
+  assert.ok(!saved["green-1"].shapeSource);
+});
+
+/* The claim the job type exists to make, asserted the same way collection's is. */
+test("refine_surface_shapes reads frames and never rebuilds them", async () => {
+  const frame = await syntheticHole(RCENTRE);
+  const { gets } = stubRefineWorld(refineRow(), frame);
+  await worker.runShapeRefineJob({ id: "job-r", course_id: "refine", kind: "refine_surface_shapes" });
+  assert.strictEqual(gets.some(u => u.includes("course_visual_jobs")), false, "no visual job row was written");
+  assert.strictEqual(gets.some(u => u.includes("course-visual-worker")), false, "the visual worker was never pinged");
+  const storagePosts = gets.filter(u => u.includes("/storage/v1/object/"));
+  assert.ok(storagePosts.length >= 1, "the frame was downloaded");
+});
+
+/* One download per hole, however many surfaces sit on it. */
+test("refine_surface_shapes downloads each hole's frame once", async () => {
+  const frame = await syntheticHole(RCENTRE);
+  const extra = {};
+  for (let i = 2; i <= 6; i++) {
+    extra["bunker-" + i] = { id: "bunker-" + i, type: "bunker", holeNumber: 1, osmId: "way/" + i,
+      source: "osm_auto_surface", position: RCENTRE, shape: squareAround(RCENTRE, 20 + i), confirmed: true };
+  }
+  const { gets } = stubRefineWorld(refineRow(extra), frame);
+  await worker.runShapeRefineJob({ id: "job-r", course_id: "refine", kind: "refine_surface_shapes" });
+  assert.strictEqual(gets.filter(u => u.includes("/storage/v1/object/")).length, 1,
+    "six surfaces on one hole, one frame download");
+});
+
+/* Refinement is one-way: a refined shape has no guide left, so re-running must skip it rather
+   than re-trace its own output and let the geometry drift. */
+test("an already-refined surface is skipped, not refined again", async () => {
+  const frame = await syntheticHole(RCENTRE);
+  const row = refineRow({
+    "bunker-done": { id: "bunker-done", type: "bunker", holeNumber: 1, osmId: "way/9", source: "osm_auto_surface",
+      shapeSource: "wand_refined", position: RCENTRE, shape: squareAround(RCENTRE, 18), confirmed: true }
+  });
+  const { patches } = stubRefineWorld(row, frame);
+  const result = await worker.runShapeRefineJob({ id: "job-r", course_id: "refine", kind: "refine_surface_shapes" });
+  assert.strictEqual(result.counts.refined, 1, "only the unrefined one was touched");
+  const saved = patches.find(p => p.body.objects_json).body.objects_json;
+  assert.deepStrictEqual(saved["bunker-done"].shape, squareAround(RCENTRE, 18), "left exactly as it was");
+});
+
+test("refine_surface_shapes refuses a course with no published frames", async () => {
+  const frame = await syntheticHole(RCENTRE);
+  stubRefineWorld(refineRow(), frame, { frames: false });
+  await assert.rejects(
+    () => worker.runShapeRefineJob({ id: "job-r", course_id: "refine", kind: "refine_surface_shapes" }),
+    /no published frames/);
+});
+
+test("refine_surface_shapes refuses a course with nothing left to refine", async () => {
+  const frame = await syntheticHole(RCENTRE);
+  const row = refineRow();
+  delete row.objects_json["bunker-1"];
+  stubRefineWorld(row, frame);
+  await assert.rejects(
+    () => worker.runShapeRefineJob({ id: "job-r", course_id: "refine", kind: "refine_surface_shapes" }),
+    /no unrefined surfaces/);
+});
+
 (async function run() {
   process.env.SUPABASE_URL = "https://stub.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-stub";

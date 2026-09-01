@@ -43,6 +43,12 @@ export const OBJECT_DEDUPE_RADIUS_M = { green: 26, bunker: 14, tee: 9, fairway: 
 export const SURFACE_TYPES = new Set(["fairway_area", "bunker", "water"]);
 export const SURFACE_SOURCE = "osm_auto_surface";
 
+/* A surface whose geometry has been re-traced from our own published frame
+   (gd-surface-refine-core.mjs). Declared HERE rather than there because upsertResolvedObject
+   below has to recognise it, and the refine core imports this module - the dependency only
+   runs one way. */
+export const REFINED_SHAPE_SOURCE = "wand_refined";
+
 /* Bumped independently of MAPPER_VERSION so an improved surface pass can be re-run over a
    course whose hole geometry did not change. */
 export const SURFACE_MAPPER_VERSION = "s1";
@@ -1250,8 +1256,13 @@ function upsertResolvedObject(objects, input) {
     id,
     courseId: input.courseId,
     type: input.type,
-    position,
-    shape: input.shape || (existing && existing.shape) || null,
+    /* A refined surface keeps the geometry it was refined to. Without this, the next Collect
+       Extra Objects run matches it on osmId+hole and writes the OSM ring straight back over the
+       traced one - silently undoing every refinement on the course. Same principle as the
+       manual-override guard above: what we derived beats what OSM drew. */
+    position: existing && existing.shapeSource === REFINED_SHAPE_SOURCE ? existing.position : position,
+    shape: (existing && existing.shapeSource === REFINED_SHAPE_SOURCE ? existing.shape : null)
+      || input.shape || (existing && existing.shape) || null,
     holeNumber: hole,
     confirmed: !!(input.confirmed || (existing && existing.confirmed)),
     source: input.source || (existing && existing.source) || "unknown",

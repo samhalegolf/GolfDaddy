@@ -59,12 +59,14 @@ function stubFetch(world) {
     }
     calls.reads.push(rest);
     if (table === "course_maps") return jsonResponse(200, world.maps || []);
+    if (table === "course_visuals") return jsonResponse(200, world.visuals || []);
     if (table === "course_mapper_jobs") {
       if (rest.includes("requested_by=eq.")) return jsonResponse(200, world.userJobs || []);
       /* The collection kind dedupes against its OWN live rows, so the harness has to be able
          to answer that query separately from the mapping one - otherwise every world with any
          job in it would look like a collection already in flight. */
       if (rest.includes("kind=eq.collect_extra_objects")) return jsonResponse(200, world.collectJobs || []);
+      if (rest.includes("kind=eq.refine_surface_shapes")) return jsonResponse(200, world.refineJobs || []);
       return jsonResponse(200, world.jobs || []);
     }
     return jsonResponse(200, []);
@@ -370,6 +372,70 @@ test("a failed enrichment run does not make a course read as a failed map", asyn
   const after = await call(get("pupuke"));
   assert.strictEqual(after.body.state, "none");
   assert.strictEqual(after.body.lastError, null);
+});
+
+const SURF = { lat: -44.9463, lng: 168.819 };
+const ring = [{ lat: -44.9464, lng: 168.8189 }, { lat: -44.9464, lng: 168.8191 }, { lat: -44.9462, lng: 168.8191 }];
+const enrichedCourse = (overrides = {}) => unmappedCourse(Object.assign({
+  maps: [{ course_id: "pupuke", published: true, course_lat: SURF.lat, course_lng: SURF.lng,
+    geometry_version: "v2", holes_json: { 1: {} },
+    objects_json: { "b1": { id: "b1", type: "bunker", holeNumber: 1, shape: ring, source: "osm_auto_surface" } } }],
+  visuals: [{ course_id: "pupuke", uploaded_assets: [
+    { role: "hole-frame-published", holeNumber: 1, path: "pupuke/frames/x/h1.jpg", metadata: { playSurface: { captureZoom: 18 } } }
+  ] }]
+}, overrides));
+
+test("refining queues its own job kind and clears no geometry", async () => {
+  const calls = stubFetch(enrichedCourse());
+  const result = await call(post({ courseId: "pupuke", kind: "refine_surface_shapes" }, "admin-token"));
+  assert.strictEqual(result.status, 202);
+  const inserted = jobInserts(calls);
+  assert.strictEqual(inserted.length, 1);
+  assert.strictEqual(inserted[0].rows[0].kind, "refine_surface_shapes");
+  assert.deepStrictEqual(calls.patches.filter(p => p.table === "course_maps"), []);
+  assert.strictEqual(calls.workerPings, 1);
+});
+
+/* The two things that have to exist first, each with its own answer rather than a generic 400. */
+test("refining tells you which precondition is missing", async () => {
+  const noSurfaces = enrichedCourse();
+  noSurfaces.maps[0].objects_json = { "t1": { id: "t1", type: "tee", holeNumber: 1 } };
+  const a = await call(post({ courseId: "pupuke", kind: "refine_surface_shapes" }, "admin-token"));
+  stubFetch(noSurfaces);
+  const surfaces = await call(post({ courseId: "pupuke", kind: "refine_surface_shapes" }, "admin-token"));
+  assert.strictEqual(surfaces.status, 409);
+  assert.match(String(surfaces.body.detail || ""), /Collect Extra Objects first/);
+
+  stubFetch(enrichedCourse({ visuals: [{ course_id: "pupuke", uploaded_assets: [] }] }));
+  const frames = await call(post({ courseId: "pupuke", kind: "refine_surface_shapes" }, "admin-token"));
+  assert.strictEqual(frames.status, 409);
+  assert.match(String(frames.body.detail || ""), /Build its visuals first/);
+  assert.ok(a);
+});
+
+test("refining is an operator action, not a player one", async () => {
+  const calls = stubFetch(enrichedCourse());
+  const result = await call(post({ courseId: "pupuke", kind: "refine_surface_shapes" }, "player-token"));
+  assert.strictEqual(result.status, 403);
+  assert.strictEqual(jobInserts(calls).length, 0);
+});
+
+test("a live refine run dedupes instead of stacking a second one", async () => {
+  const calls = stubFetch(enrichedCourse({ refineJobs: [{ id: "refine-live", status: "running" }] }));
+  const result = await call(post({ courseId: "pupuke", kind: "refine_surface_shapes" }, "admin-token"));
+  assert.strictEqual(result.status, 200);
+  assert.strictEqual(result.body.deduped, true);
+  assert.strictEqual(jobInserts(calls).length, 0);
+});
+
+/* Same reasoning as the collection kind: a maintenance sweep must not read as "this course is
+   building" to a player waiting on a package. */
+test("a refine run in flight does not make a course read as building", async () => {
+  stubFetch(unmappedCourse({ jobs: [{ id: "r1", kind: "refine_surface_shapes", status: "running" }] }));
+  const during = await call(get("pupuke"));
+  assert.strictEqual(during.body.state, "none");
+  assert.strictEqual(during.body.building, false);
+  assert.strictEqual(during.body.jobs.length, 1, "but still visible in the admin history");
 });
 
 (async function run() {

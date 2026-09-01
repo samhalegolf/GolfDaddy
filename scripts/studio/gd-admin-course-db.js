@@ -473,6 +473,7 @@ function gdAdminCourseMaintenanceMenu(selected){
   return `<details class="gdAdminRebuildMenu"><summary>Rebuild</summary><div class="gdAdminRebuildMenuList">
     ${item("full_remap","Full Remap","Geometry, objects and visuals, from source","danger")}
     ${item("collect_extra_objects","Collect Extra Objects","Adds bunkers, fairways and hazards. Holes, greens and visuals unchanged")}
+    ${item("refine_surface_shapes","Refine Shapes","Re-traces those shapes from this course's own frames. Lighter, and ours")}
     ${item("recapture_visuals","Re-Capture Visuals","Fresh source imagery for the existing map, then a bake")}
     ${item("rebake_visuals","Re-Bake Visuals","Existing captures, current recipe. No re-scan")}
     ${item("rebuild_local","Rebuild local","This browser's copy only. Nothing on the server changes")}
@@ -488,6 +489,7 @@ function gdAdminCourseMaintenance(mode,courseId){
   if(!id)return false;
   if(mode==="full_remap")return gdAdminCourseRemap(id);
   if(mode==="collect_extra_objects")return gdAdminCourseCollectExtraObjects(id);
+  if(mode==="refine_surface_shapes")return gdAdminCourseRefineShapes(id);
   if(mode==="rebuild_local")return gdAdminCourseDbUpdate(id);
   if(mode==="rebake_visuals")return gdAdminCourseVisualUpdateWithActiveRecipe(id);
   if(mode==="recapture_visuals"){
@@ -3809,6 +3811,41 @@ function gdAdminCourseVisualEnsurePipelineCourse(courseId){
 
    No destructive confirmation, unlike Remap: there is nothing to lose. The toast still names
    the scope so it is never mistaken for the button above it. */
+/* Refine Shapes - the pass after Collect Extra Objects.
+
+   Takes the OSM rings that pass wrote and re-traces each one against this course's OWN
+   published frame, keeping a lighter polygon we own. It reads the frames and never rebuilds
+   them, so the visuals a golfer already has stay exactly as they are.
+
+   Both preconditions get their own message: refinement needs surfaces to re-trace (409 from
+   the API when Collect Extra Objects has not run) and frames to trace against (409 when the
+   course has no published visuals). Neither is an error worth a stack trace - they are just
+   the two things that have to happen first. */
+async function gdAdminCourseRefineShapes(courseId){
+  courseId=String(courseId||"");
+  if(!courseId)return false;
+  try{
+    const token=await gdAdminCourseDbAccessToken();
+    if(!token){gdAdminCourseVisualToast("Sign in again to refine shapes");return false;}
+    const res=await fetch("/api/course-mapper-jobs",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+      body:JSON.stringify({courseId:courseId,kind:"refine_surface_shapes"})
+    });
+    const data=await res.json().catch(()=>null);
+    if(res.status===403){gdAdminCourseVisualToast("Admin only");return false;}
+    if(res.status===409){gdAdminCourseVisualToast((data&&data.detail)||"Nothing to refine yet");return false;}
+    if(res.status===404){gdAdminCourseVisualToast("No saved map for "+courseId);return false;}
+    if(!res.ok){gdAdminCourseVisualToast("Refine failed ("+res.status+")");return false;}
+    gdAdminCourseVisualToast(data&&data.deduped
+      ?"A refine run is already in progress"
+      :"Refining "+(data&&data.surfaces?data.surfaces+" shapes":"shapes")+" against this course's own frames - visuals unchanged");
+    return false;
+  }catch(error){
+    gdAdminCourseVisualToast("Refine failed to send");
+    return false;
+  }
+}
 async function gdAdminCourseCollectExtraObjects(courseId){
   courseId=String(courseId||"");
   if(!courseId)return false;
