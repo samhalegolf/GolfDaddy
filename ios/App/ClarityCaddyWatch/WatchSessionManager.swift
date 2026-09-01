@@ -36,10 +36,13 @@ final class WatchSessionManager: NSObject, ObservableObject {
     }
 
     private func receive(context: [String: Any]) {
-        guard let raw = context["scene"], JSONSerialization.isValidJSONObject(raw),
-              let data = try? JSONSerialization.data(withJSONObject: raw),
-              let incoming = try? JSONDecoder().decode(WatchScene.self, from: data),
-              incoming.isSupported else { return }
+        guard let raw = context["scene"] else { NSLog("[CCWatch] scene key missing in context: %@", context.keys.joined(separator: ",")); return }
+        guard JSONSerialization.isValidJSONObject(raw) else { NSLog("[CCWatch] scene is not a valid JSON object"); return }
+        guard let data = try? JSONSerialization.data(withJSONObject: raw) else { NSLog("[CCWatch] scene serialization failed"); return }
+        let incoming: WatchScene
+        do { incoming = try JSONDecoder().decode(WatchScene.self, from: data) }
+        catch { NSLog("[CCWatch] scene decode failed: %@ payload: %@", String(describing: error), String(data: data, encoding: .utf8) ?? "?"); return }
+        guard incoming.isSupported else { NSLog("[CCWatch] unsupported schemaVersion %d", incoming.schemaVersion); return }
         guard incoming.hasRound else { scene = nil; state = .noRound; return }
         if let current = scene, current.roundId == incoming.roundId, incoming.revision < current.revision { return }
         scene = incoming
@@ -113,6 +116,13 @@ extension WatchSessionManager: WCSessionDelegate {
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        /* The phone mirrors every scene as a live message because the
+           application-context store can lag behind a reconnect. Same payload
+           shape, same authoritative receive path. */
+        if message["scene"] != nil {
+            Task { @MainActor [weak self] in self?.receive(context: message) }
+            return
+        }
         guard let acknowledgement = message["acknowledgement"] as? [String: Any] else { return }
         Task { @MainActor [weak self] in self?.receive(acknowledgement: acknowledgement) }
     }
