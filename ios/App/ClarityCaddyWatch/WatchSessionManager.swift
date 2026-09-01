@@ -90,8 +90,16 @@ final class WatchSessionManager: NSObject, ObservableObject {
         persistOutbox()
         if session.isReachable {
             session.sendMessage(message, replyHandler: nil) { [weak self] _ in
-                // A transport error is deliberately not an acknowledgement. The
-                // durable command remains available for a later retry.
+                // A transport error is deliberately not an acknowledgement, but it
+                // must not strand the command either: transferUserInfo is durable
+                // and delivers once the phone can process it, the same fallback
+                // NativeRoundBridge.acknowledgeCommand already uses for the
+                // phone -> watch direction. Without this, a single transient
+                // sendMessage failure left the command - and isPending's block on
+                // retapping the same button - stuck until reachability happened
+                // to change again, which is what made Next/Previous/Lock feel
+                // unreliable rather than merely slow.
+                session.transferUserInfo(message)
                 Task { @MainActor in
                     guard let self else { return }
                     self.state = self.scene == nil ? .noRound : .stale

@@ -164,11 +164,17 @@
     /* Lets CSS soften anything that is only meaningful with a round behind it,
        without any module having to ask twice. */
     document.body.classList.toggle("rangefinderOnly", !roundFeatures());
+    /* Which screen is on top of the round, not whether the round exists. A
+       live round is a Marshal fact ended only through its own signal (the
+       Logged screen's "End round", wired in painter.js) - never as a side
+       effect of the phone showing a different screen on top of it. This used
+       to fire END_ROUND/gps.stop() here too, so access.js's forced sign-in
+       interruption (a live round hitting a gated, unauthenticated action)
+       silently killed the round just to show a sign-in form - and an Apple
+       Watch driving the same round has even less reason to care which screen
+       the phone happens to have on top. */
     if (route !== "play") {
-      if (app.marshal) app.marshal.signal("END_ROUND");
       if (app.painter && app.painter.detach) app.painter.detach();
-      if (app.gps) app.gps.stop();
-      if (app.wakeLock) app.wakeLock.stop();
       activeCourse = null;
       activeMapType = null;
       stopDemoCourseDataTimer();
