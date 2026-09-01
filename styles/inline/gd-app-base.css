@@ -470,6 +470,27 @@
     /* The scope line under each mode - what it leaves alone is the thing worth reading. */
     .gdAdminRebuildMenuList button small{display:block;margin-top:3px;font-size:9px;font-weight:700;line-height:1.35;color:rgba(255,255,255,.48);letter-spacing:0;text-transform:none;white-space:normal}
     .gdAdminCourseWorkspace{display:grid;gap:10px}
+    /* Watch Map viewer - a plain inspection window, deliberately NOT a fake Apple Watch bezel
+       (see the task's own instruction against drawing one). Fixed pixel box regardless of the
+       image's own aspect ratio, because every hole bakes a different shape; the image is panned
+       and scaled inside it with a CSS transform rather than resized. */
+    .gdAdminWatchMapViewer{display:grid;gap:8px}
+    .gdAdminWatchMapToolbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font:800 10px/1.4 Inter,system-ui,sans-serif;color:rgba(255,255,255,.62)}
+    .gdAdminWatchMapToolbar button{border-radius:999px;padding:6px 10px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.74);font-size:10px;font-weight:950}
+    .gdAdminWatchMapToolbar button.active{background:rgba(31,211,109,.18);color:#83ffb7}
+    .gdAdminWatchMapToolbar select{border-radius:8px;padding:5px 8px;background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.12);font-size:10px;font-weight:800}
+    .gdAdminWatchMapStage{position:relative;overflow:hidden;border-radius:14px;background:#0a120c;border:1px solid rgba(255,255,255,.10);cursor:grab;touch-action:none;max-width:100%}
+    .gdAdminWatchMapStage:active{cursor:grabbing}
+    .gdAdminWatchMapStage img{position:absolute;left:0;top:0;transform-origin:0 0;image-rendering:pixelated;user-select:none;-webkit-user-drag:none}
+    .gdAdminWatchMapDot{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;pointer-events:none}
+    .gdAdminWatchMapDot i{width:9px;height:9px;border-radius:999px;background:#ff5d8f;border:2px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.4)}
+    .gdAdminWatchMapDot span{font:900 9px/1 Inter,system-ui,sans-serif;color:#fff;background:rgba(0,0,0,.6);border-radius:4px;padding:2px 4px;white-space:nowrap}
+    .gdAdminWatchMapDebugPanel{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:4px 14px;padding:9px 11px;border-radius:10px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.07)}
+    .gdAdminWatchMapDebugPanel div{display:flex;justify-content:space-between;gap:8px;padding:2px 0;font:700 10px/1.4 Inter,system-ui,sans-serif;color:rgba(255,255,255,.5)}
+    .gdAdminWatchMapDebugPanel div b{color:rgba(255,255,255,.8);font-weight:850;text-transform:uppercase;letter-spacing:.03em;font-size:9px}
+    .gdAdminWatchMapDebugPanel div span{color:#fff;text-align:right;word-break:break-word}
+    .gdAdminWatchMapErrorList{margin:6px 0 0;padding-left:16px;font:700 10px/1.5 Inter,system-ui,sans-serif;color:#ffd287}
+    .gdAdminWatchMapStatusLine{margin-bottom:2px}
     .gdAdminCourseDebugWindow{display:grid;gap:10px}
     .gdAdminCourseDebugWindow .gdCoursePlayDebug{display:block;margin:0}
     .gdAdminCourseStageLine{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
