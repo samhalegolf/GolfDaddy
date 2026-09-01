@@ -1,5 +1,6 @@
 import Foundation
 import WatchConnectivity
+import WatchKit
 
 @MainActor
 final class WatchSessionManager: NSObject, ObservableObject {
@@ -25,11 +26,14 @@ final class WatchSessionManager: NSObject, ObservableObject {
 
     func send(_ type: CaddyWatchCommand.Kind) {
         guard let scene, let roundId = scene.roundId, !roundId.isEmpty, !isPending(type) else { return }
+        lastRejection = nil
         let command = CaddyWatchCommand(commandId: UUID().uuidString, roundId: roundId, baseRevision: scene.revision, createdAt: Date().timeIntervalSince1970 * 1000, device: "apple-watch", type: type, payload: [:])
         pendingCommands.append(PendingWatchCommand(command: command, status: .pending, attemptCount: 0, lastAttemptAt: nil))
         persistOutbox()
         attempt(commandId: command.commandId)
     }
+
+    func dismissRejection() { lastRejection = nil }
 
     func isPending(_ type: CaddyWatchCommand.Kind) -> Bool {
         pendingCommands.contains { $0.command.type == type }
@@ -58,7 +62,10 @@ final class WatchSessionManager: NSObject, ObservableObject {
            loop forever, but their command ID remains retryable on the phone. */
         pendingCommands.removeAll { $0.command.commandId == acknowledgement.commandId }
         persistOutbox()
-        if !acknowledgement.accepted { lastRejection = acknowledgement }
+        if !acknowledgement.accepted {
+            lastRejection = acknowledgement
+            WKInterfaceDevice.current().play(.failure)
+        }
     }
 
     private func attempt(commandId: String) {

@@ -4,11 +4,23 @@ struct ShotView: View {
     let scene: WatchScene
     let stale: Bool
     let pending: [PendingWatchCommand]
+    let rejection: WatchCommandAcknowledgement?
     let send: (CaddyWatchCommand.Kind) -> Void
+    let dismissRejection: () -> Void
 
     private var holeText: String {
         let number = scene.hole?.number.map { "HOLE \($0)" } ?? "HOLE"
         return scene.hole?.par.map { "\(number) · PAR \($0)" } ?? number
+    }
+
+    private var rejectionText: String? {
+        guard let rejection else { return nil }
+        switch rejection.reason {
+        case "marshal-rejected": return "Not yet — start your round first"
+        case "future-revision": return "Out of sync — try again"
+        case "invalid-location": return "No GPS fix"
+        default: return "Couldn't do that"
+        }
     }
 
     var body: some View {
@@ -18,6 +30,13 @@ struct ShotView: View {
                 Text(holeText).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                 if scene.controls?.canNextHole == true { control(.nextHole, title: "›", enabled: true) }
                 if stale { Image(systemName: "antenna.radiowaves.left.and.right.slash").font(.caption2).foregroundStyle(.secondary) }
+            }
+            if let rejectionText {
+                Text(rejectionText).font(.caption2.weight(.semibold)).foregroundStyle(.red)
+                    .task(id: rejection?.commandId) {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        dismissRejection()
+                    }
             }
             if scene.isBubble {
                 GreenBubbleView(scene: scene)

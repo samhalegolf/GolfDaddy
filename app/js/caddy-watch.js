@@ -122,7 +122,7 @@
         revision: revision,
         flow: flow,
         mode: watchMode,
-        hole: { number: scene && scene.hole && scene.hole.number || null, par: r && finite(r.par) ? Number(r.par) : null, live: round.liveHole === (scene && scene.hole && scene.hole.number) },
+        hole: { number: scene && scene.hole && scene.hole.number || null, par: r && finite(r.par) && Number(r.par) > 0 ? Number(r.par) : null, live: round.liveHole === (scene && scene.hole && scene.hole.number) },
         distance: { target: scene && scene.distances && scene.distances.centre, front: scene && scene.distances && scene.distances.front, centre: scene && scene.distances && scene.distances.centre, back: scene && scene.distances && scene.distances.back },
         suggestion: b ? { club: b.club, carryM: b.carryM, totalM: b.totalM } : null,
         shot: { locked: mode === "aim", open: !!(scene && scene.finishControl && scene.finishControl.show) || mode === "aim" },
