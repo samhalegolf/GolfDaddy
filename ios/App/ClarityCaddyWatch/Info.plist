@@ -20,5 +20,7 @@
   <string>$(CURRENT_PROJECT_VERSION)</string>
   <key>WKCompanionAppBundleIdentifier</key>
   <string>com.claritygolf.caddy</string>
+  <key>WKWatchKitApp</key>
+  <true/>
 </dict>
 </plist>
