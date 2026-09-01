@@ -243,24 +243,43 @@
        offer. It names the hole it will start, because it starts the hole you
        are STANDING on rather than the one on screen. -->
   <button id="playButton" type="button" class="hiddenState">Play</button>
-  <!-- Phone <-> Watch handover. The button is offered only while the phone is
-       driving and a Watch with the app is paired; the screen replaces the map
-       once the Watch is driving, so the phone can go in the bag without the
-       round looking abandoned on it. Both read the Scene's `surface`
-       (watch-handover.js); nothing here decides who is driving. -->
-  <button id="watchHandoverBtn" type="button" class="hiddenState" aria-label="Send this round to Apple Watch">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="5" width="10" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9.5 5V2.5h5V5M9.5 19v2.5h5V19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 9v3.2l2 1.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-    <span>Send to Watch</span>
+  <!-- Phone <-> Watch handover (watch-handover.js). One card in the top-right
+       slot with three lives: it reports the lite-map package going across, it
+       proves readiness by drawing the hole with "Play on Watch", and once the
+       Watch is driving it becomes a small phone offering "Play on phone" while
+       the mask below dims the map. It draws the Scene's `surface` and the
+       delivery module's count; nothing here decides who is driving. -->
+  <button id="watchHandoverCard" type="button" class="hiddenState" data-phase="uploading" aria-label="Apple Watch">
+    <span class="whCrown" aria-hidden="true"></span><span class="whCrown whCrown2" aria-hidden="true"></span>
+    <span class="whSide whSideR" aria-hidden="true"></span><span class="whSide whSideL1" aria-hidden="true"></span><span class="whSide whSideL2" aria-hidden="true"></span>
+    <span class="whScreen">
+      <span class="whFace whUploading">
+        <span class="whEyebrow">Loading course</span>
+        <span class="whBar"><span id="watchHandoverBar" class="whBarFill"></span></span>
+        <span id="watchHandoverPct" class="whPct">0%</span>
+        <span id="watchHandoverHoles" class="whHoles">0 of 18 holes</span>
+      </span>
+      <span class="whFace whReady">
+        <span class="whHead"><span id="watchHandoverHole">Hole 1</span><span id="watchHandoverPar"></span></span>
+        <span class="whThumb"><img id="watchHandoverThumb" alt="" hidden><span class="whThumbNum"><span id="watchHandoverThumbDist">–</span><span class="whUnit watchHandoverUnit">m</span></span></span>
+        <span class="whAction">Play on Watch</span>
+      </span>
+      <span class="whFace whHanding">
+        <span class="whSweep" aria-hidden="true"></span>
+        <span class="whSpin" aria-hidden="true"></span>
+        <span class="whEyebrow">Handing over</span>
+      </span>
+      <span class="whFace whPlaying">
+        <span class="whGrip" aria-hidden="true"></span>
+        <span class="whThumb"><img id="watchHandoverThumb2" alt="" hidden><span class="whThumbNum"><span id="watchHandoverDist2">–</span><span class="whUnit watchHandoverUnit">m</span></span></span>
+        <span class="whAction">Play on phone</span>
+      </span>
+    </span>
   </button>
   <div id="watchHandoverScreen" class="hiddenState" role="status">
-    <div class="watchHandoverCard">
-      <span class="watchHandoverEyebrow">ON APPLE WATCH</span>
-      <svg class="watchHandoverGlyph" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="5" width="10" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.5 5V2.5h5V5M9.5 19v2.5h5V19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12 9v3.2l2 1.3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-      <span id="watchHandoverHole" class="watchHandoverHole"></span>
-      <div class="watchHandoverDistance"><span id="watchHandoverDistance">–</span><span id="watchHandoverUnit" class="watchHandoverUnitLabel">m</span></div>
-      <span id="watchHandoverStatus" class="watchHandoverStatus"></span>
-      <button id="watchHandoverBack" type="button" class="watchHandoverBack">Back to iPhone</button>
-    </div>
+    <div class="whMaskWatch" aria-hidden="true"><span class="whMaskCrown"></span><span class="whMaskCrown whMaskCrown2"></span><span class="whMaskWatchScreen"></span></div>
+    <div class="whMaskTitle">Playing on Watch</div>
+    <div class="whMaskCopy">Phone can sleep. It keeps the round and every shot rule; the Watch draws it.</div>
   </div>
   <!-- Preview's way of answering "where am I playing from". Tapping works
        without arming anything — placing yourself IS the plan here, so there is

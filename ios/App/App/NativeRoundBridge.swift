@@ -1,5 +1,6 @@
 import Capacitor
 import Foundation
+import UIKit
 import WatchConnectivity
 
 /*
@@ -146,6 +147,7 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
         }
         queue.async { [weak self] in
             guard let self, let session = self.session else { call.resolve(["sent": false]); return }
+            let bytes = Self.watchDecodableBytes(bytes)
             let descriptor: [String: Any] = ["courseKey": courseKey, "version": version, "asset": asset]
             do {
                 /* A hole bakes to a few kilobytes, comfortably inside the
@@ -203,6 +205,23 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
         notifyListeners("watchState", data: watchStateData())
     }
 
+    /* The bake is WebP, and watchOS ImageIO has no WebP decoder: the wrist
+       logged "createImageAtIndex: could not find plugin for image source
+       ... 'RIFF'" on every hole and drew "This hole has no map" over a
+       complete package. iOS decodes it fine, so the phone re-encodes each
+       hole on the way past. The asset keeps its manifest name - the Watch
+       files by name and UIImage sniffs content, not extensions.
+
+       JPEG, not PNG: a 448x1536 hole came out at 50-68KB as PNG, over the
+       sendMessage payload limit (WCErrorCodePayloadTooLarge on 14 of 18
+       holes), and the queued file path is not something this Watch app can
+       lean on. At quality 0.8 the same holes are 15-20KB, and the bake has no
+       alpha to lose. */
+    private static func watchDecodableBytes(_ bytes: Data) -> Data {
+        guard let image = UIImage(data: bytes), let jpeg = image.jpegData(compressionQuality: 0.8) else { return bytes }
+        return jpeg
+    }
+
     private static func watchMapOutbox() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("CaddyWatchMapOutbox", isDirectory: true)
     }
@@ -244,15 +263,23 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
         }
     }
 
+    /* The Watch's count of the holes it holds. Kept for the delivery module's
+       next errand and pushed to JavaScript now, so the phone's handover card
+       counts the same holes the wrist does. Arrives as a live message when the
+       Watch is reachable and as queued user info otherwise. */
+    private func receive(inventory: [String: Any]) {
+        queue.async { [weak self] in self?.watchMapInventoryReport = inventory }
+        notifyListeners("watchMapInventory", data: ["inventory": inventory])
+    }
+
     public func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
         if let command = message["command"] as? [String: Any] { receive(command) }
+        if let inventory = message["watchMapHave"] as? [String: Any] { receive(inventory: inventory) }
     }
 
     public func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
         if let command = userInfo["command"] as? [String: Any] { receive(command) }
-        if let inventory = userInfo["watchMapHave"] as? [String: Any] {
-            queue.async { [weak self] in self?.watchMapInventoryReport = inventory }
-        }
+        if let inventory = userInfo["watchMapHave"] as? [String: Any] { receive(inventory: inventory) }
     }
 
     /* The queued copy exists only to hand WatchConnectivity a stable file. Once

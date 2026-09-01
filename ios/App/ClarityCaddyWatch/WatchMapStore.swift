@@ -113,13 +113,27 @@ final class WatchMapStore: ObservableObject {
             return
         }
         let present = Set((try? FileManager.default.contentsOfDirectory(atPath: package.path)) ?? [])
-        let ready = Set(manifest.holes.filter { present.contains($0.asset) }.map(\.holeNumber))
+        /* A file that is here but undecodable must not count as delivered, or
+           the phone is told "have" and never re-sends. The one such case is a
+           raw WebP bake (RIFF container) from before the phone learned to
+           transcode: watchOS ImageIO has no WebP decoder. Four bytes settle
+           it without decoding anything. */
+        let ready = Set(manifest.holes.filter { hole in
+            present.contains(hole.asset) && !Self.isWebP(package.appendingPathComponent(hole.asset))
+        }.map(\.holeNumber))
         let next = Installed(manifest: manifest, readyHoles: ready)
         if installed != next {
             installed = next
             imageCache.removeAll()
             cachedPackage = nil
         }
+    }
+
+    nonisolated private static func isWebP(_ url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        let head = (try? handle.read(upToCount: 4)) ?? Data()
+        return head == Data("RIFF".utf8)
     }
 
     // ------------------------------------------- nonisolated transfer landing

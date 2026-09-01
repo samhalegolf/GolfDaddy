@@ -10,6 +10,25 @@ struct ShotView: View {
     var driving: Bool = false
     var handoverNotice: String? = nil
     var dismissHandoverNotice: () -> Void = {}
+    /* The wrist's own fix, when it has a trustworthy one. */
+    var wristFix: WatchScene.GeoPoint? = nil
+
+    /* Which numbers to show. The Watch is its own rangefinder once it is
+       driving: front/centre/back come from ITS fix against the green geometry
+       the Scene already carries, so a phone in the bag showing Preview (or
+       nothing) does not blank the wrist. While the phone drives, its numbers
+       lead - they may be a deliberate "if I stood here" placement - and the
+       wrist's own fix only fills the gap when the phone offers none. */
+    private var effectiveDistance: WatchScene.Distance? {
+        let wrist = WristDistances.compute(fix: wristFix, geometry: scene.geometry)
+        let phone = scene.distance?.target == nil ? nil : scene.distance
+        return driving ? (wrist ?? phone) : (phone ?? wrist)
+    }
+    private var distanceFromWrist: Bool {
+        let wrist = WristDistances.compute(fix: wristFix, geometry: scene.geometry)
+        let phoneHas = scene.distance?.target != nil
+        return wrist != nil && (driving || !phoneHas)
+    }
 
     private var holeText: String {
         let number = scene.hole?.number.map { "HOLE \($0)" } ?? "HOLE"
@@ -22,6 +41,7 @@ struct ShotView: View {
         case "marshal-rejected": return "Not yet — start your round first"
         case "future-revision": return "Out of sync — try again"
         case "invalid-location": return "No GPS fix"
+        case "no-live-round": return "Play on iPhone first"
         default: return "Couldn't do that"
         }
     }
@@ -33,6 +53,13 @@ struct ShotView: View {
                 Text(holeText).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                 if scene.controls?.canNextHole == true { control(.nextHole, title: "›", enabled: true) }
                 if stale { Image(systemName: "antenna.radiowaves.left.and.right.slash").font(.caption2).foregroundStyle(.secondary) }
+                /* The wrist is driving: a live dot, not a sentence. Taking the
+                   round back is done from the phone's card. */
+                if driving {
+                    Circle().fill(Color.mint).frame(width: 6, height: 6)
+                        .shadow(color: .mint.opacity(0.8), radius: 4)
+                        .accessibilityLabel("Watch is driving")
+                }
             }
             if let rejectionText {
                 Text(rejectionText).font(.caption2.weight(.semibold)).foregroundStyle(.red)
@@ -49,19 +76,17 @@ struct ShotView: View {
                         try? await Task.sleep(nanoseconds: 2_500_000_000)
                         dismissHandoverNotice()
                     }
-            } else if !scene.isBubble {
-                /* The Bubble page is already the full height of a 42mm face;
-                   a standing strip there pushes UNLOCK off the bottom. The
-                   driver is one Unlock away on the numbers face, and a
-                   change of driver still announces itself above. */
-                surfaceStrip
             }
             if scene.isBubble {
                 GreenBubbleView(scene: scene)
             } else {
-                Text(distanceText).font(.system(size: 39, weight: .bold, design: .rounded)).monospacedDigit().minimumScaleFactor(0.7)
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text(distanceText).font(.system(size: 39, weight: .bold, design: .rounded)).monospacedDigit().minimumScaleFactor(0.7)
+                    /* Says, quietly, that this number is the wrist's own. */
+                    if distanceFromWrist { Image(systemName: "location.fill").font(.caption2).foregroundStyle(.mint) }
+                }
                 if let club = scene.suggestion?.club, !club.isEmpty { Text(club).font(.title3.weight(.semibold)).foregroundStyle(.mint) }
-                DistanceDetail(distance: scene.distance)
+                DistanceDetail(distance: effectiveDistance)
             }
             if scene.controls?.canLock == true {
                 control(.lock, title: "LOCK", enabled: true, primary: true)
@@ -72,31 +97,7 @@ struct ShotView: View {
         .padding(.horizontal, 5)
     }
 
-    private var distanceText: String { scene.distance?.target.map { "\(Int($0.rounded())) m" } ?? "—" }
-
-    /* Who is driving, as a standing line rather than a glyph you have to know
-       about: "iPhone driving · take over" while the phone has it, "Watch
-       driving" once this wrist does. Tapping it is the wrist-initiated
-       handover in either direction; the phone answers through the Scene, so
-       the line only changes when the phone agrees it has. */
-    @ViewBuilder
-    private var surfaceStrip: some View {
-        let waiting = pending.contains { $0.command.type == .takeOver || $0.command.type == .handBack }
-        Button {
-            send(driving ? .handBack : .takeOver)
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: driving ? "applewatch" : "iphone")
-                Text(waiting ? "Switching…" : (driving ? "Watch driving" : "iPhone driving · take over"))
-            }
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(driving ? Color.mint : Color.secondary)
-            .lineLimit(1).minimumScaleFactor(0.8)
-        }
-        .buttonStyle(.plain)
-        .disabled(waiting)
-        .accessibilityLabel(driving ? "Watch is driving. Hand back to iPhone" : "iPhone is driving. Take over on Watch")
-    }
+    private var distanceText: String { effectiveDistance?.target.map { "\(Int($0.rounded())) m" } ?? "—" }
 
     @ViewBuilder
     private func control(_ kind: CaddyWatchCommand.Kind, title: String, enabled: Bool, primary: Bool = false) -> some View {
@@ -122,5 +123,40 @@ private struct DistanceDetail: View {
             if let back = distance?.back { Text("B \(Int(back.rounded()))") }
         }
         .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+    }
+}
+
+/* Front / centre / back from the wrist's own fix.
+
+   The Scene's geometry is the green polygon in local metres around the green
+   centre, rotated so the phone's approach bearing points up (caddy-watch.js
+   localPoint). The wrist fix is put into that SAME frame with the same
+   equirectangular projection and rotation, so nothing here disagrees with the
+   phone by a rotation. Front and back are the polygon's nearest and farthest
+   extent along the line from the player to the centre - the same question
+   the phone's greenDistances answers - and centre is the straight distance.
+   No polygon means no front/back, never an invented one. */
+enum WristDistances {
+    static func compute(fix: WatchScene.GeoPoint?, geometry: WatchScene.Geometry?) -> WatchScene.Distance? {
+        guard let fix, let lat = fix.lat, let lng = fix.lng,
+              let origin = geometry?.origin, let olat = origin.lat, let olng = origin.lng else { return nil }
+        let bearing = (geometry?.approachBearingDeg ?? 0) * .pi / 180
+        let north = (lat - olat) * 111320
+        let east = (lng - olng) * 111320 * cos(olat * .pi / 180)
+        let px = east * cos(bearing) - north * sin(bearing)
+        let py = north * cos(bearing) + east * sin(bearing)
+        let centre = (px * px + py * py).squareRoot()
+        guard centre.isFinite, centre > 0.5 else { return WatchScene.Distance(target: 0, front: nil, centre: 0, back: nil) }
+        /* Unit vector from the player towards the green centre (the origin). */
+        let dx = -px / centre, dy = -py / centre
+        var front: Double? = nil, back: Double? = nil
+        for vertex in geometry?.greenPolygon ?? [] {
+            guard let vx = vertex.x, let vy = vertex.y else { continue }
+            let along = (vx - px) * dx + (vy - py) * dy
+            front = min(front ?? along, along)
+            back = max(back ?? along, along)
+        }
+        if let f = front, f < 0 { front = 0 }
+        return WatchScene.Distance(target: centre, front: front, centre: centre, back: back)
     }
 }

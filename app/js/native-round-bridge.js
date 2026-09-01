@@ -44,6 +44,19 @@
         try { plugin.watchState().then(applyWatchState, function () {}); } catch (e) {}
       }
     }
+    /* How much of the course is on the wrist rides the Scene too, so the
+       phone's handover card and the Watch's Receiving face count the same
+       holes. The delivery module counts what it sends; the Watch's own
+       inventory report, relayed by native, overrides that count. */
+    var delivery = window.GDWatchMapDelivery;
+    if (delivery && typeof delivery.onProgress === "function" && typeof watch.setWatchMaps === "function") {
+      delivery.onProgress(function (progress) { try { watch.setWatchMaps(progress); } catch (e) {} });
+    }
+    if (plugin && delivery && typeof delivery.noteInventory === "function" && typeof plugin.addListener === "function") {
+      try {
+        plugin.addListener("watchMapInventory", function (event) { delivery.noteInventory(event && event.inventory); });
+      } catch (e) {}
+    }
     if (plugin && typeof plugin.addListener === "function") {
       try {
         plugin.addListener("watchCommand", function (event) {

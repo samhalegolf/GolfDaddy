@@ -100,6 +100,15 @@ exactly the holes it has. The Watch reports its inventory back as `watchMapHave`
 so the phone re-sends only what is missing; losing that report costs a re-send,
 never correctness.
 
+The bake is WebP and **watchOS has no WebP decoder** (ImageIO: "could not find
+plugin for image source ... 'RIFF'"), so `NativeRoundBridge.publishWatchMapAsset`
+re-encodes each hole as JPEG (quality 0.8) before it leaves the phone. PNG was
+tried first and came out at 50-68KB per hole, over the `sendMessage` payload
+limit. The asset keeps its manifest name; the Watch files by name and decodes by
+content. A raw WebP file left on the wrist by an older phone build is not
+counted as delivered (`WatchMapStore` checks the RIFF magic), so the phone is
+asked for it again rather than told "have".
+
 A reachable Watch also receives the manifest and each image as live
 `sendMessage` payloads, the same mirror `publishScene` uses and for the same
 reason — the queued stores do not reach this two-target Watch app reliably, and
@@ -171,12 +180,36 @@ A handover belongs to one round: it lapses when the round ends and a new round
 starts with the phone driving. The Watch answers each offered handover once
 (by ID), so a repeated Scene does not become a repeated command.
 
-On the phone `app/js/watch-handover.js` draws the Send to Watch control (only
-while the phone is driving and `surface.watch.appInstalled`) and the full-screen
-"On Apple Watch" state, which sits above the dock and Play so a phone in a
+On the phone `app/js/watch-handover.js` draws one card in the top-right slot of
+the play screen (the corner the GPS/demo badges use), with three lives read off
+`surface` and the lite-map errand's count (`surface.watch.maps`): **Loading
+course · 7 of 18 holes** while the package goes across, **Play on Watch** with a
+thumbnail of the hole once it is there (or when there is no package to wait
+for), a short **Handing over** spinner while the offer is out, and then, as a
+small phone, **Play on phone** while the wrist drives - behind a "Playing on
+Watch" mask that dims the map, sits above the dock and Play so a phone in a
 pocket cannot be driven by accident, and below the top bar so Back/Home still
-work. On the wrist the numbers face carries a standing strip - "iPhone driving ·
-take over" or "Watch driving" - that is also the wrist's handover control, and a
-brief notice plus haptic marks the moment the driver actually changes.
-`NativeRoundBridge.watchState` / the `watchState` event supply `surface.watch`;
-on web nothing reports a Watch, so none of this UI appears.
+work.
+
+The Watch has the same four faces off the same state (`WatchSessionManager.face`):
+**Receiving course** with the store's own hole count, **Ready** - the hole drawn
+from the delivered map with the wrist's own distance to the green (or the hole's
+length before there is a fix) and a **Play here** button, **Taking the round**,
+and **Playing** - the numbers face with LOCK and a live dot in the header. Either
+end can finish the handover: tap the card, or press Play here. Taking the round
+back is done from the phone's card. While the wrist drives, the numbers face
+uses the wrist's own fix for front/centre/back against the Scene's green
+geometry (`WristDistances`), so a phone in the bag showing Preview does not
+blank the wrist; the wrist's fix also fills in whenever the phone offers no
+distance.
+
+`NativeRoundBridge.watchState` / the `watchState` event supply the rest of
+`surface.watch`; `watch-map-delivery.js` reports the count and keeps the fetched
+images as thumbnails; the Watch reports `watchMapHave` (live-mirrored, debounced
+as holes land) and native relays it as a `watchMapInventory` event so both ends
+count the same holes. On web nothing reports a Watch, so none of this UI appears.
+
+Open questions carried from the design: whether the card should offer handover
+at the live hole while the rest of the package keeps filling (today it waits for
+the whole package), and whether the parked phone-shaped card should retire into
+the settings row later in the round (today it stays).

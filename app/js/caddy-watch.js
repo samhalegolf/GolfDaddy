@@ -117,6 +117,10 @@
        with it. */
     var surface = { active: "phone", roundId: null, handover: null };
     var watchState = { paired: false, appInstalled: false, reachable: false };
+    /* How much of the course's lite-map package the wrist has. Reported by
+       watch-map-delivery.js from what it sent and what the Watch says it
+       holds; the phone's card and the Watch's Receiving face both read it. */
+    var watchMaps = { total: 0, have: 0 };
     var handoverSeq = 0;
 
     /* Only LIVE play can be driven from the wrist: the Watch has no Play
@@ -131,8 +135,21 @@
       return {
         active: surface.active,
         handover: surface.handover ? { id: surface.handover.id, state: surface.handover.state, from: surface.handover.from } : null,
-        watch: { paired: !!watchState.paired, appInstalled: !!watchState.appInstalled, reachable: !!watchState.reachable }
+        watch: {
+          paired: !!watchState.paired, appInstalled: !!watchState.appInstalled, reachable: !!watchState.reachable,
+          maps: { total: watchMaps.total, have: watchMaps.have }
+        }
       };
+    }
+
+    function setWatchMaps(progress) {
+      progress = progress || {};
+      var total = Number.isInteger(Number(progress.total)) && Number(progress.total) > 0 ? Number(progress.total) : 0;
+      var have = Number.isInteger(Number(progress.have)) ? Math.max(0, Math.min(total, Number(progress.have))) : 0;
+      if (total === watchMaps.total && have === watchMaps.have) return false;
+      watchMaps = { total: total, have: have };
+      publish();
+      return true;
     }
 
     /* `from` is who asked. A phone-initiated handover is only OFFERED until the
@@ -188,8 +205,16 @@
         /* Which course is in play. An adapter needs it to pick the right
            pre-delivered hole imagery; it is an identifier, never geometry, and
            nothing on the far side may treat it as permission to load a course. */
-        course: { key: round.courseKey || null },
-        hole: { number: scene && scene.hole && scene.hole.number || null, par: r && finite(r.par) && Number(r.par) > 0 ? Number(r.par) : null, live: round.liveHole === (scene && scene.hole && scene.hole.number) },
+        course: { key: round.courseKey || null, name: scene && scene.banner && scene.banner.course || null },
+        hole: {
+          number: scene && scene.hole && scene.hole.number || null,
+          par: r && finite(r.par) && Number(r.par) > 0 ? Number(r.par) : null,
+          live: round.liveHole === (scene && scene.hole && scene.hole.number),
+          /* The hole's own length, for a face that has no player yet: the
+             Watch's Ready face and the phone's card both show tee-to-green
+             before anyone is standing anywhere. */
+          teeToGreenM: r && point(r.tee) && point(r.green) ? rounded(distance.haversineMeters(point(r.tee), point(r.green)), 0) : null
+        },
         distance: { target: scene && scene.distances && scene.distances.centre, front: scene && scene.distances && scene.distances.front, centre: scene && scene.distances && scene.distances.centre, back: scene && scene.distances && scene.distances.back },
         suggestion: b ? { club: b.club, carryM: b.carryM, totalM: b.totalM } : null,
         shot: { locked: mode === "aim", open: !!(scene && scene.finishControl && scene.finishControl.show) || mode === "aim" },
@@ -240,7 +265,10 @@
         /* Surface commands move no golf state, so they never reach Marshal
            and cannot be "marshal-rejected"; the round-ID check above is what
            stops a wrist claiming a round it is not looking at. */
-        setActive(type === "TAKE_OVER" ? "watch" : "phone", "watch");
+        var applied = setActive(type === "TAKE_OVER" ? "watch" : "phone", "watch");
+        /* "Play here" before Play was pressed on the phone: there is no live
+           hole to drive yet, and the wrist is told so rather than left waiting. */
+        if (!applied) return { accepted: false, reason: "no-live-round", revision: latest.revision };
         seenCommands[id] = true;
         return { accepted: true, reason: null, revision: latest.revision };
       }
@@ -267,6 +295,7 @@
       handToWatch: function () { return setActive("watch", "phone"); },
       takeBack: function () { return setActive("phone", "phone"); },
       setWatchState: setWatchState,
+      setWatchMaps: setWatchMaps,
       surface: function () { return latest ? latest.surface : null; }
     };
   }

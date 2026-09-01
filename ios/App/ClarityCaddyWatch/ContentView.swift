@@ -14,30 +14,51 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if let scene = session.scene {
-                /* The numbers face stays page one and keeps LOCK a single tap
-                   away. The lite map is a second page rather than a replacement
-                   or a background: it is a picture of a hole, and it earns the
-                   whole screen when it is the thing being looked at. */
-                TabView {
-                    ShotView(scene: scene, stale: session.state == .stale, pending: session.pendingCommands, rejection: session.lastRejection, send: session.send, dismissRejection: session.dismissRejection,
-                             driving: scene.isDriving, handoverNotice: session.handoverNotice, dismissHandoverNotice: session.dismissHandoverNotice)
-                    if let holeNumber = scene.hole?.number {
-                        HoleMapPage(
-                            scene: scene,
-                            map: maps.hole(holeNumber, courseKey: scene.course?.key),
-                            player: session.playerPoint,
-                            deliveryHint: deliveryHint(for: scene)
-                        )
+            switch session.face {
+            case .noRound:
+                NoRoundFace()
+            case .receiving:
+                ReceivingFace(courseName: session.scene?.course?.name, held: session.mapsHeld, expected: session.mapsExpected)
+            case .ready:
+                if let scene = session.scene {
+                    ReadyFace(
+                        scene: scene,
+                        map: scene.hole?.number.flatMap { maps.hole($0, courseKey: scene.course?.key) },
+                        player: session.playerPoint,
+                        wristDistance: WristDistances.compute(fix: session.wristFix, geometry: scene.geometry)?.centre,
+                        play: { session.send(.takeOver) },
+                        notice: session.lastRejection.map { $0.reason == "no-live-round" ? "Play on iPhone first" : "Couldn't do that" }
+                    )
+                    .task(id: session.lastRejection?.commandId) {
+                        guard session.lastRejection != nil else { return }
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        session.dismissRejection()
                     }
                 }
-                .tabViewStyle(.page)
-            } else {
-                VStack(spacing: 7) {
-                    Text("CLARITY CADDY").font(.caption2.weight(.semibold)).foregroundStyle(.mint)
-                    Text("Start a round\non iPhone").font(.headline).multilineTextAlignment(.center)
+            case .taking:
+                TakingFace()
+            case .playing:
+                if let scene = session.scene {
+                    /* The numbers face stays page one and keeps LOCK a single
+                       tap away. The lite map is a second page rather than a
+                       replacement or a background: it is a picture of a hole,
+                       and it earns the whole screen when it is the thing being
+                       looked at. */
+                    TabView {
+                        ShotView(scene: scene, stale: session.state == .stale, pending: session.pendingCommands, rejection: session.lastRejection, send: session.send, dismissRejection: session.dismissRejection,
+                                 driving: true, handoverNotice: session.handoverNotice, dismissHandoverNotice: session.dismissHandoverNotice,
+                                 wristFix: session.wristFix)
+                        if let holeNumber = scene.hole?.number {
+                            HoleMapPage(
+                                scene: scene,
+                                map: maps.hole(holeNumber, courseKey: scene.course?.key),
+                                player: session.playerPoint,
+                                deliveryHint: deliveryHint(for: scene)
+                            )
+                        }
+                    }
+                    .tabViewStyle(.page)
                 }
-                .padding()
             }
         }
         .containerBackground(.black, for: .navigation)
@@ -52,5 +73,115 @@ struct ContentView: View {
         guard installed.manifest.courseKey == courseKey else { return "Hole maps are for\nanother course" }
         if !installed.isComplete { return "Hole maps arriving…\n\(installed.readyHoles.count) of \(installed.manifest.holes.count)" }
         return "This hole has no map"
+    }
+}
+
+struct NoRoundFace: View {
+    var body: some View {
+        VStack(spacing: 7) {
+            Text("CLARITY CADDY").font(.caption2.weight(.semibold)).foregroundStyle(.mint)
+            Text("Start a round\non iPhone").font(.headline).multilineTextAlignment(.center)
+        }
+        .padding()
+    }
+}
+
+/* The course is on its way over from the phone. Counts the holes as they
+   land, off the store's own inventory, so the number is what the wrist can
+   actually draw and not what the phone believes it sent. */
+struct ReceivingFace: View {
+    let courseName: String?
+    let held: Int
+    let expected: Int
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("RECEIVING\nCOURSE")
+                .font(.caption2.weight(.heavy)).foregroundStyle(.mint)
+                .multilineTextAlignment(.center).kerning(0.8)
+            ProgressView(value: Double(held), total: Double(max(expected, 1)))
+                .tint(.mint)
+            Text("\(held) of \(expected) holes")
+                .font(.caption.monospacedDigit().weight(.bold)).foregroundStyle(.secondary)
+            if let courseName, !courseName.isEmpty {
+                Text(courseName).font(.caption2).foregroundStyle(.tertiary).lineLimit(2).multilineTextAlignment(.center)
+            }
+        }
+        .padding(.horizontal, 14)
+    }
+}
+
+/* The course is here and the phone is driving. This face proves readiness by
+   drawing the hole, and offers the one thing the wrist can do about it. */
+struct ReadyFace: View {
+    let scene: WatchScene
+    let map: WatchMapStore.LoadedHoleMap?
+    let player: WatchScene.GeoPoint?
+    let wristDistance: Double?
+    let play: () -> Void
+    /* Why the last Play here did not take - "Play on iPhone first" - shown
+       in place of the PAR until it is dismissed. */
+    var notice: String? = nil
+
+    private var distanceLabel: (caption: String, metres: Double)? {
+        if let wristDistance { return ("YOU → GREEN", wristDistance) }
+        if let length = scene.hole?.teeToGreenM { return ("TEE → GREEN", length) }
+        return nil
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(scene.hole?.number.map { "Hole \($0)" } ?? "Hole").font(.headline)
+                Spacer()
+                if let notice {
+                    Text(notice).font(.caption2.weight(.semibold)).foregroundStyle(.red).lineLimit(1).minimumScaleFactor(0.7)
+                } else if let par = scene.hole?.par {
+                    Text("PAR \(par)").font(.caption2.weight(.heavy)).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 4)
+            ZStack(alignment: .bottomTrailing) {
+                if let map {
+                    HoleMapView(map: map, player: player, green: scene.geometry?.origin, target: nil)
+                } else {
+                    VStack(spacing: 4) {
+                        Image(systemName: "map").font(.title3).foregroundStyle(.secondary)
+                        Text("No hole map").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(white: 0.09))
+                }
+                if let distanceLabel {
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text("\(Int(distanceLabel.metres.rounded()))").font(.system(size: 17, weight: .black, design: .rounded)).monospacedDigit()
+                        Text("m").font(.caption2.weight(.heavy)).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .padding(5)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .frame(maxHeight: .infinity)
+            Button("Play here", action: play)
+                .buttonStyle(.borderedProminent).tint(.mint)
+                .font(.callout.weight(.heavy))
+                .accessibilityHint("Take the round onto this Watch")
+        }
+        .padding(.horizontal, 3)
+    }
+}
+
+/* The moment between asking and having. Short, and deliberately not a state
+   that can be acted on. */
+struct TakingFace: View {
+    var body: some View {
+        VStack(spacing: 14) {
+            ProgressView().tint(.mint).controlSize(.large)
+            Text("TAKING\nTHE ROUND")
+                .font(.caption2.weight(.heavy)).foregroundStyle(.mint)
+                .multilineTextAlignment(.center).kerning(0.8)
+        }
     }
 }

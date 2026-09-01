@@ -1,3 +1,4 @@
+import Combine
 import CoreLocation
 import Foundation
 import WatchConnectivity
@@ -6,6 +7,16 @@ import WatchKit
 @MainActor
 final class WatchSessionManager: NSObject, ObservableObject {
     enum State { case noRound, live, stale }
+
+    /* The four faces of a round on the wrist, in the order they happen.
+       Receiving: the phone is still pushing the course across. Ready: the
+       course is here (or there is none to wait for) and the phone is driving;
+       the face offers Play here. Taking: this wrist has asked for the round, or
+       the phone has offered it, and the answer is in flight. Playing: the
+       wrist is driving - the numbers face with LOCK. */
+    enum Face { case noRound, receiving, ready, taking, playing }
+
+    private var storeWatch: AnyCancellable?
 
     @Published private(set) var scene: WatchScene?
     @Published private(set) var state: State = .noRound
@@ -19,6 +30,23 @@ final class WatchSessionManager: NSObject, ObservableObject {
     private var answeredHandovers = Set<String>()
 
     var isDriving: Bool { scene?.isDriving == true }
+
+    /* What the phone says the package holds, and what this wrist can prove it
+       holds. The phone's count decides whether there is anything to wait for;
+       the local store decides whether the Ready face has a picture to show. */
+    var mapsExpected: Int { scene?.surface?.watch?.maps?.total ?? 0 }
+    var mapsHeld: Int {
+        guard let installed = maps.installed, installed.manifest.courseKey == scene?.course?.key else { return 0 }
+        return installed.readyHoles.count
+    }
+
+    var face: Face {
+        guard let scene, scene.hasRound else { return .noRound }
+        if scene.isDriving { return .playing }
+        if scene.surface?.handover?.state == "offered" || pendingCommands.contains(where: { $0.command.type == .takeOver }) { return .taking }
+        if mapsExpected > 0 && mapsHeld < mapsExpected { return .receiving }
+        return .ready
+    }
 
     /* Lite maps live in their own durable store rather than in the Scene: they
        are large, they change only when a course is regenerated, and a Scene
@@ -49,6 +77,12 @@ final class WatchSessionManager: NSObject, ObservableObject {
         session.delegate = self
         session.activate()
         self.session = session
+        /* Each hole that lands changes the store; a short debounce turns a
+           burst of eighteen into one or two reports rather than eighteen. */
+        storeWatch = maps.$installed
+            .dropFirst()
+            .debounce(for: .milliseconds(400), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reportMapInventory() }
     }
 
     /* LOCK always resolves against the wrist's own GPS when a recent, accurate
@@ -66,6 +100,7 @@ final class WatchSessionManager: NSObject, ObservableObject {
         let command = CaddyWatchCommand(commandId: UUID().uuidString, roundId: roundId, baseRevision: scene.revision, createdAt: Date().timeIntervalSince1970 * 1000, device: "apple-watch", type: wireType, payload: payload)
         pendingCommands.append(PendingWatchCommand(command: command, status: .pending, attemptCount: 0, lastAttemptAt: nil))
         persistOutbox()
+        NSLog("[CCWatch] send %@ pending=%d face=%@", wireType.rawValue, pendingCommands.count, String(describing: face))
         attempt(commandId: command.commandId)
     }
 
@@ -153,6 +188,7 @@ final class WatchSessionManager: NSObject, ObservableObject {
            loop forever, but their command ID remains retryable on the phone. */
         pendingCommands.removeAll { $0.command.commandId == acknowledgement.commandId }
         persistOutbox()
+        NSLog("[CCWatch] ack %@ accepted=%d reason=%@ pending=%d face=%@", acknowledgement.commandId, acknowledgement.accepted ? 1 : 0, acknowledgement.reason ?? "-", pendingCommands.count, String(describing: face))
         if !acknowledgement.accepted {
             lastRejection = acknowledgement
             WKInterfaceDevice.current().play(.failure)
@@ -196,7 +232,11 @@ final class WatchSessionManager: NSObject, ObservableObject {
        this never arrives the phone simply sends everything again. */
     private func reportMapInventory() {
         guard let session, session.activationState == .activated else { return }
-        session.transferUserInfo(["watchMapHave": maps.inventory()])
+        let payload: [String: Any] = ["watchMapHave": maps.inventory()]
+        /* Mirrored live when reachable, like everything else that crosses this
+           link: the phone's card counts holes off this report as they land. */
+        if session.isReachable { session.sendMessage(payload, replyHandler: nil, errorHandler: nil) }
+        session.transferUserInfo(payload)
     }
 
     private func commandMessage(_ command: CaddyWatchCommand) -> [String: Any]? {

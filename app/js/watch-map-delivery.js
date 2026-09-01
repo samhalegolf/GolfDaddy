@@ -12,6 +12,11 @@
    that changes only when a course is regenerated. Putting the second on the
    first's transport would make every distance update drag a course behind it.
 
+   It does keep score, though: how many holes the package has and how many the
+   wrist holds is what the phone's handover card and the Watch's Receiving face
+   both count down, so the errand reports its progress (`onProgress`) and keeps
+   the images it fetched around as thumbnails (`holeImage`).
+
    Pure and inert off-native: with no NativeRoundBridge plugin present (any
    browser, including the Studio surfaces) `deliver` resolves with a reason and
    makes no network call at all. */
@@ -90,6 +95,8 @@
     return btoa(parts.join(""));
   }
 
+  function mimeFor(name) { return /\.png$/i.test(String(name || "")) ? "image/png" : "image/webp"; }
+
   /* Holes the Watch says it already has, but only when it is talking about this
      exact course and package version. Anything else is treated as "has
      nothing", because re-sending under 100KB is always cheaper than reasoning
@@ -122,6 +129,44 @@
     var completed = Object.create(null);
     var retryAfter = Object.create(null);
 
+    /* Per course: how many holes the package has, how many the wrist holds,
+       which ones, and where each image lives (for a late thumbnail fetch). */
+    var progress = Object.create(null);
+    var images = Object.create(null);
+    var paths = Object.create(null);
+    var thumbFetches = Object.create(null);
+    var listeners = [];
+
+    function progressFor(courseKey) {
+      var p = progress[courseKey];
+      if (!p) return { courseKey: courseKey, known: false, none: false, total: 0, have: 0, complete: false };
+      return { courseKey: courseKey, known: true, none: p.none, total: p.total, have: p.have, complete: p.total > 0 && p.have >= p.total };
+    }
+    function emit(courseKey) {
+      var snapshot = progressFor(courseKey);
+      listeners.forEach(function (fn) { try { fn(snapshot); } catch (e) {} });
+    }
+    function setHave(courseKey, holes) {
+      var p = progress[courseKey];
+      if (!p) return;
+      var seen = Object.create(null);
+      holes.forEach(function (n) { seen[Number(n)] = true; });
+      p.holes = seen;
+      p.have = Object.keys(seen).length;
+      emit(courseKey);
+    }
+    function markHave(courseKey, holeNumber) {
+      var p = progress[courseKey];
+      if (!p || p.holes[holeNumber]) return;
+      p.holes[holeNumber] = true;
+      p.have = Object.keys(p.holes).length;
+      emit(courseKey);
+    }
+    function rememberImage(courseKey, holeNumber, name, bytes) {
+      images[courseKey] = images[courseKey] || Object.create(null);
+      images[courseKey][holeNumber] = "data:" + mimeFor(name) + ";base64," + toBase64(bytes);
+    }
+
     async function run(courseKey) {
       if (!plugin || typeof plugin.publishWatchMap !== "function" || typeof plugin.publishWatchMapAsset !== "function") {
         return { delivered: false, reason: "no-native-bridge" };
@@ -131,12 +176,22 @@
       var report = await response.json();
       var version = String((report && report.watchPackageVersion) || "");
       var holes = (report && Array.isArray(report.holes) ? report.holes : []).map(manifestHole).filter(Boolean);
-      if (!version || version === "0" || !holes.length) return { delivered: false, reason: "no-package" };
+      if (!version || version === "0" || !holes.length) {
+        /* Known to have nothing is its own answer: the handover need not wait
+           for maps that will never come. */
+        progress[courseKey] = { none: true, total: 0, have: 0, holes: Object.create(null), version: version };
+        emit(courseKey);
+        return { delivered: false, reason: "no-package" };
+      }
+      paths[courseKey] = Object.create(null);
+      holes.forEach(function (hole) { paths[courseKey][hole.holeNumber] = hole.path; });
 
       var have = {};
       if (typeof plugin.watchMapInventory === "function") {
         try { have = alreadyDelivered(await plugin.watchMapInventory(), courseKey, version); } catch (e) { have = {}; }
       }
+      progress[courseKey] = { none: false, total: holes.length, have: 0, holes: Object.create(null), version: version };
+      setHave(courseKey, Object.keys(have));
       var missing = holes.filter(function (hole) { return !have[hole.holeNumber]; });
       if (!missing.length) return { delivered: true, sent: 0, skipped: holes.length, version: version };
 
@@ -162,14 +217,19 @@
           if (!asset || !asset.ok) { failed += 1; continue; }
           var bytes = new Uint8Array(await asset.arrayBuffer());
           if (!bytes.length) { failed += 1; continue; }
+          var base64 = toBase64(bytes);
+          rememberImage(courseKey, hole.holeNumber, hole.asset, bytes);
           await plugin.publishWatchMapAsset({
             courseKey: courseKey,
             version: version,
             holeNumber: hole.holeNumber,
             asset: hole.asset,
-            base64: toBase64(bytes)
+            base64: base64
           });
           sent += 1;
+          /* Counted as it leaves. The wrist's own inventory report, when it
+             comes, is the truth and overwrites this. */
+          markHave(courseKey, hole.holeNumber);
         } catch (error) {
           /* One unreachable hole is not a failed round. The Watch shows the
              holes it does have and the next delivery attempt fills the gap. */
@@ -203,7 +263,43 @@
       return promise;
     }
 
-    return { deliver: deliver };
+    /* The Watch's own count of what it holds, relayed by the native bridge.
+       Authoritative over anything counted here on the way out. */
+    function noteInventory(inventory) {
+      var have = inventory && inventory.inventory ? inventory.inventory : inventory;
+      var courseKey = have && String(have.courseKey || "");
+      var p = courseKey && progress[courseKey];
+      if (!p || p.none) return false;
+      if (String(have.version || "") !== String(p.version)) return false;
+      setHave(courseKey, Array.isArray(have.holes) ? have.holes : []);
+      return true;
+    }
+
+    /* A thumbnail for the phone's card. Whatever was fetched on the way to the
+       wrist is already here; a hole that was skipped (the wrist had it) is
+       fetched once in the background and announced through onProgress so the
+       card redraws. */
+    function holeImage(courseKey, holeNumber) {
+      var cached = images[courseKey] && images[courseKey][holeNumber];
+      if (cached) return cached;
+      var path = paths[courseKey] && paths[courseKey][holeNumber];
+      var key = courseKey + "#" + holeNumber;
+      if (!path || thumbFetches[key] || !fetchImpl) return null;
+      thumbFetches[key] = true;
+      Promise.resolve().then(function () { return fetchImpl(apiUrl(ASSET_ENDPOINT + "?path=" + encodeURIComponent(path))); })
+        .then(function (asset) { return asset && asset.ok ? asset.arrayBuffer() : null; })
+        .then(function (buffer) {
+          if (!buffer) return;
+          rememberImage(courseKey, holeNumber, assetName(path), new Uint8Array(buffer));
+          emit(courseKey);
+        })
+        .catch(function () { delete thumbFetches[key]; });
+      return null;
+    }
+
+    function onProgress(fn) { if (typeof fn === "function") listeners.push(fn); }
+
+    return { deliver: deliver, progress: progressFor, onProgress: onProgress, noteInventory: noteInventory, holeImage: holeImage };
   }
 
   var shared = null;
@@ -211,24 +307,49 @@
     var capacitor = typeof window !== "undefined" ? window.Capacitor : null;
     return (capacitor && capacitor.Plugins && capacitor.Plugins.NativeRoundBridge) || null;
   }
+  /* The app-wide instance, bound late so it picks up the Capacitor plugin
+     whenever it registers rather than only if it is ready at load. */
+  function ensureShared() {
+    if (shared) return shared;
+    var plugin = nativePlugin();
+    if (!plugin) return null;
+    shared = createDelivery({
+      plugin: plugin,
+      apiUrl: function (url) {
+        var origin = (typeof window !== "undefined" && window.GDNative && window.GDNative.apiOrigin) || "";
+        return origin && !/^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? origin + url : url;
+      }
+    });
+    pendingListeners.forEach(function (fn) { shared.onProgress(fn); });
+    pendingListeners = [];
+    return shared;
+  }
+  var pendingListeners = [];
 
   return {
     createDelivery: createDelivery,
-    /* The app-wide instance, bound late so it picks up the Capacitor plugin
-       whenever it registers rather than only if it is ready at load. */
     deliver: function (courseKey) {
-      var plugin = nativePlugin();
-      if (!plugin) return Promise.resolve({ delivered: false, reason: "no-native-bridge" });
-      if (!shared) {
-        shared = createDelivery({
-          plugin: plugin,
-          apiUrl: function (url) {
-            var origin = (typeof window !== "undefined" && window.GDNative && window.GDNative.apiOrigin) || "";
-            return origin && !/^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? origin + url : url;
-          }
-        });
-      }
-      return shared.deliver(courseKey);
+      var instance = ensureShared();
+      if (!instance) return Promise.resolve({ delivered: false, reason: "no-native-bridge" });
+      return instance.deliver(courseKey);
+    },
+    progress: function (courseKey) {
+      var instance = ensureShared();
+      return instance ? instance.progress(courseKey) : { courseKey: courseKey, known: false, none: false, total: 0, have: 0, complete: false };
+    },
+    /* Listeners may register before the native plugin exists; they are
+       attached the moment the shared errand is created. */
+    onProgress: function (fn) {
+      var instance = ensureShared();
+      if (instance) instance.onProgress(fn); else if (typeof fn === "function") pendingListeners.push(fn);
+    },
+    noteInventory: function (inventory) {
+      var instance = ensureShared();
+      return instance ? instance.noteInventory(inventory) : false;
+    },
+    holeImage: function (courseKey, holeNumber) {
+      var instance = ensureShared();
+      return instance ? instance.holeImage(courseKey, holeNumber) : null;
     },
     __test: { manifestHole: manifestHole, assetName: assetName, alreadyDelivered: alreadyDelivered, usableSpatialReference: usableSpatialReference }
   };

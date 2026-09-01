@@ -30,13 +30,19 @@ struct WatchScene: Codable, Equatable {
        can tell a Watch that has the round from one that is still in a drawer. */
     struct Surface: Codable, Equatable { let active: String?; let handover: Handover?; let watch: Presence? }
     struct Handover: Codable, Equatable { let id: String?; let state: String?; let from: String? }
-    struct Presence: Codable, Equatable { let paired: Bool?; let appInstalled: Bool?; let reachable: Bool? }
+    struct Presence: Codable, Equatable { let paired: Bool?; let appInstalled: Bool?; let reachable: Bool?; let maps: Maps? }
+    /* The phone's count of the lite-map package: how many holes it has and
+       how many this wrist holds. Zero total means the phone knows of no
+       package (or does not know yet), and the Ready face need not wait. */
+    struct Maps: Codable, Equatable { let total: Int?; let have: Int? }
 
     /* Which course is in play, so a delivered lite-map package is only ever
        drawn for the course it was baked from. Optional because an older phone
        build, or a round with no course key, must still produce a usable scene. */
-    struct Course: Codable, Equatable { let key: String? }
-    struct Hole: Codable, Equatable { let number: Int?; let par: Int?; let live: Bool? }
+    struct Course: Codable, Equatable { let key: String?; let name: String? }
+    /* `teeToGreenM` is the hole's own length, for the Ready face before anyone
+       is standing anywhere. */
+    struct Hole: Codable, Equatable { let number: Int?; let par: Int?; let live: Bool?; let teeToGreenM: Double? }
     struct Distance: Codable, Equatable { let target: Double?; let front: Double?; let centre: Double?; let back: Double? }
     struct Suggestion: Codable, Equatable { let club: String?; let carryM: Double?; let totalM: Double? }
     struct Shot: Codable, Equatable { let locked: Bool?; let open: Bool? }

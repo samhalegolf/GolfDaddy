@@ -72,9 +72,9 @@ console.log("\n— Phone <-> Watch handover —");
 check("the phone drives by default and the Watch's presence rides the scene", () => {
   const { w } = ready(), s = w.scene();
   assert.equal(s.surface.active, "phone"); assert.equal(s.surface.handover, null);
-  assert.deepEqual(s.surface.watch, { paired: false, appInstalled: false, reachable: false });
+  assert.deepEqual(s.surface.watch, { paired: false, appInstalled: false, reachable: false, maps: { total: 0, have: 0 } });
   assert.equal(w.setWatchState({ paired: true, appInstalled: true, reachable: true }), true);
-  assert.deepEqual(w.scene().surface.watch, { paired: true, appInstalled: true, reachable: true });
+  assert.deepEqual(w.scene().surface.watch, { paired: true, appInstalled: true, reachable: true, maps: { total: 0, have: 0 } });
   assert.equal(w.setWatchState({ paired: true, appInstalled: true, reachable: true }), false, "an unchanged report does not republish");
 });
 check("a phone-initiated handover is only OFFERED until the wrist answers TAKE_OVER", () => {
@@ -120,6 +120,22 @@ check("a handover belongs to one live round and lapses with it", () => {
   m.signal("ROUND_OPENED", { courseKey: "watch-test", roundId: "round-2", pkg: PKG, hole: 1 });
   assert.equal(w.scene().surface.active, "phone");
   assert.equal(w.handToWatch(), false, "preview at a new course still has no live hole to drive");
+  const early = w.receiveCommand({ commandId: "early", roundId: "round-2", type: "TAKE_OVER", payload: {} });
+  assert.equal(early.accepted, false); assert.equal(early.reason, "no-live-round", "Play here before Play on the phone is told why");
+  assert.equal(w.scene().surface.active, "phone");
+});
+check("the scene carries what the Ready faces need: course name, hole length, map count", () => {
+  const { w } = ready(), s = w.scene();
+  assert.equal(s.course.key, "watch-test");
+  assert.ok(s.hole.teeToGreenM > 290 && s.hole.teeToGreenM < 310, "tee to green is the hole's own length: " + s.hole.teeToGreenM);
+  assert.deepEqual(s.surface.watch.maps, { total: 0, have: 0 });
+  assert.equal(w.setWatchMaps({ total: 18, have: 7 }), true);
+  assert.deepEqual(w.scene().surface.watch.maps, { total: 18, have: 7 });
+  assert.equal(w.setWatchMaps({ total: 18, have: 7 }), false, "unchanged count does not republish");
+  assert.equal(w.setWatchMaps({ total: 18, have: 40 }), true);
+  assert.equal(w.scene().surface.watch.maps.have, 18, "cannot hold more than the package has");
+  assert.equal(w.setWatchMaps({ known: false }), true);
+  assert.deepEqual(w.scene().surface.watch.maps, { total: 0, have: 0 });
 });
 check("Lock still works from the wrist whichever surface is driving", () => {
   const { m, w } = ready();

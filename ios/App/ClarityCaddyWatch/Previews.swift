@@ -44,8 +44,8 @@ enum WatchPreviewFixtures {
             revision: 42,
             flow: "live",
             mode: mode,
-            course: .init(key: courseKey),
-            hole: .init(number: 1, par: 5, live: true),
+            course: .init(key: courseKey, name: "Millbrook · Remarkables"),
+            hole: .init(number: 1, par: 5, live: true, teeToGreenM: 507),
             distance: .init(target: 213, front: 205, centre: 213, back: 224),
             suggestion: .init(club: "5 IRON", carryM: 178, totalM: 186),
             shot: .init(locked: false, open: false),
@@ -58,7 +58,7 @@ enum WatchPreviewFixtures {
                             canPreviousHole: false, canNextHole: true),
             surface: .init(active: driving ? "watch" : "phone",
                            handover: driving ? .init(id: "preview-handover", state: "confirmed", from: "phone") : nil,
-                           watch: .init(paired: true, appInstalled: true, reachable: true)),
+                           watch: .init(paired: true, appInstalled: true, reachable: true, maps: .init(total: 18, have: 18))),
             connection: .init(status: "live")
         )
     }
@@ -137,20 +137,32 @@ enum WatchPreviewFixtures {
     .containerBackground(.black, for: .navigation)
 }
 
-#Preview("Numbers face — Watch driving") {
-    ShotView(
-        scene: WatchPreviewFixtures.scene(driving: true),
-        stale: false,
-        pending: [],
-        rejection: nil,
-        send: { _ in },
-        dismissRejection: {},
-        driving: true
+#Preview("Receiving course") {
+    ReceivingFace(courseName: "Millbrook · Remarkables", held: 7, expected: 18)
+        .containerBackground(.black, for: .navigation)
+}
+
+#Preview("Ready — Play here") {
+    ReadyFace(
+        scene: WatchPreviewFixtures.scene(),
+        map: WatchPreviewFixtures.standInMap(),
+        player: WatchPreviewFixtures.player,
+        wristDistance: 213,
+        play: {}
     )
     .containerBackground(.black, for: .navigation)
 }
 
-#Preview("Numbers face — just handed over") {
+#Preview("Ready — no map") {
+    ReadyFace(scene: WatchPreviewFixtures.scene(), map: nil, player: nil, wristDistance: nil, play: {})
+        .containerBackground(.black, for: .navigation)
+}
+
+#Preview("Taking the round") {
+    TakingFace().containerBackground(.black, for: .navigation)
+}
+
+#Preview("Playing — just handed over") {
     ShotView(
         scene: WatchPreviewFixtures.scene(driving: true),
         stale: false,
