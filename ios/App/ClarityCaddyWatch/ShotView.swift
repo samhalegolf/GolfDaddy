@@ -58,7 +58,7 @@ struct ShotView: View {
 
     @ViewBuilder
     private func control(_ kind: CaddyWatchCommand.Kind, title: String, enabled: Bool, primary: Bool = false) -> some View {
-        let waiting = pending.contains { $0.command.type == kind }
+        let waiting = pending.contains { $0.command.type == kind || (kind == .lock && $0.command.type == .lockAt) }
         if primary {
             Button(waiting ? "\(title)…" : title) { send(kind) }
                 .buttonStyle(.borderedProminent).tint(.mint)

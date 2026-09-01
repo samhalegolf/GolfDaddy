@@ -10,6 +10,8 @@
   <key>CFBundlePackageType</key><string>XPC!</string>
   <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
   <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>Clarity Caddy uses your wrist's location to mark your ball position when you press LOCK.</string>
   <key>NSExtension</key>
   <dict>
     <key>NSExtensionPointIdentifier</key><string>com.apple.watchkit</string>

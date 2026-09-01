@@ -52,14 +52,32 @@ struct WatchScene: Codable, Equatable {
 /* The Watch sends only this existing, platform-neutral command vocabulary.
  There are deliberately no Swift golf-state transitions behind these values. */
 struct CaddyWatchCommand: Codable, Equatable {
-    enum Kind: String, Codable, CaseIterable { case lock = "LOCK", unlock = "UNLOCK", previousHole = "VIEW_PREVIOUS_HOLE", nextHole = "VIEW_NEXT_HOLE" }
+    enum Kind: String, Codable, CaseIterable { case lock = "LOCK", unlock = "UNLOCK", previousHole = "VIEW_PREVIOUS_HOLE", nextHole = "VIEW_NEXT_HOLE", lockAt = "LOCK_AT" }
     let commandId: String
     let roundId: String
     let baseRevision: Int
     let createdAt: Double
     let device: String
     let type: Kind
-    let payload: [String: String]
+    let payload: CommandPayload
+}
+
+/* Mirrors the payload shapes CaddyWatchBridge.receiveCommand reads out of
+ command.payload — only `location` exists today, for LOCK_AT. */
+struct CommandPayload: Codable, Equatable {
+    var location: WatchLocationObservation?
+    init(location: WatchLocationObservation? = nil) { self.location = location }
+}
+
+struct WatchCoordinate: Codable, Equatable { let lat: Double; let lng: Double }
+
+/* Mirrors the shape locationObservation() in caddy-watch.js validates:
+ coordinate, source, horizontalAccuracy (<=100m), timestamp (<=5min old). */
+struct WatchLocationObservation: Codable, Equatable {
+    let coordinate: WatchCoordinate
+    let source: String
+    let horizontalAccuracy: Double
+    let timestamp: Double
 }
 
 struct WatchCommandAcknowledgement: Codable, Equatable {

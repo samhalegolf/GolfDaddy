@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import WatchConnectivity
 import WatchKit
@@ -13,6 +14,7 @@ final class WatchSessionManager: NSObject, ObservableObject {
 
     private let outboxKey = "CaddyWatchPendingCommandsV1"
     private var session: WCSession?
+    private let locationManager = WatchLocationManager()
 
     override init() {
         super.init()
@@ -24,10 +26,19 @@ final class WatchSessionManager: NSObject, ObservableObject {
         self.session = session
     }
 
+    /* LOCK always resolves against the wrist's own GPS when a recent, accurate
+       fix exists — the phone can then stay in the bag. It only falls back to
+       the phone-authoritative LOCK when the watch has no trustworthy fix. */
     func send(_ type: CaddyWatchCommand.Kind) {
         guard let scene, let roundId = scene.roundId, !roundId.isEmpty, !isPending(type) else { return }
         lastRejection = nil
-        let command = CaddyWatchCommand(commandId: UUID().uuidString, roundId: roundId, baseRevision: scene.revision, createdAt: Date().timeIntervalSince1970 * 1000, device: "apple-watch", type: type, payload: [:])
+        var wireType = type
+        var payload = CommandPayload()
+        if type == .lock, let fix = locationManager.lastFix, let observation = WatchLocationObservation(fix) {
+            wireType = .lockAt
+            payload = CommandPayload(location: observation)
+        }
+        let command = CaddyWatchCommand(commandId: UUID().uuidString, roundId: roundId, baseRevision: scene.revision, createdAt: Date().timeIntervalSince1970 * 1000, device: "apple-watch", type: wireType, payload: payload)
         pendingCommands.append(PendingWatchCommand(command: command, status: .pending, attemptCount: 0, lastAttemptAt: nil))
         persistOutbox()
         attempt(commandId: command.commandId)
@@ -35,8 +46,10 @@ final class WatchSessionManager: NSObject, ObservableObject {
 
     func dismissRejection() { lastRejection = nil }
 
+    /* A wire command's true type may be LOCK_AT rather than LOCK once wrist GPS
+       is available; the LOCK button still needs to read "busy" either way. */
     func isPending(_ type: CaddyWatchCommand.Kind) -> Bool {
-        pendingCommands.contains { $0.command.type == type }
+        pendingCommands.contains { $0.command.type == type || (type == .lock && $0.command.type == .lockAt) }
     }
 
     private func receive(context: [String: Any]) {
@@ -47,10 +60,11 @@ final class WatchSessionManager: NSObject, ObservableObject {
         do { incoming = try JSONDecoder().decode(WatchScene.self, from: data) }
         catch { NSLog("[CCWatch] scene decode failed: %@ payload: %@", String(describing: error), String(data: data, encoding: .utf8) ?? "?"); return }
         guard incoming.isSupported else { NSLog("[CCWatch] unsupported schemaVersion %d", incoming.schemaVersion); return }
-        guard incoming.hasRound else { scene = nil; state = .noRound; return }
+        guard incoming.hasRound else { scene = nil; state = .noRound; locationManager.stop(); return }
         if let current = scene, current.roundId == incoming.roundId, incoming.revision < current.revision { return }
         scene = incoming
         state = .live
+        locationManager.start()
     }
 
     private func receive(acknowledgement raw: [String: Any]) {
@@ -145,5 +159,60 @@ extension WatchSessionManager: WCSessionDelegate {
             self.state = session.isReachable ? .live : .stale
             if session.isReachable { self.retryPending() }
         }
+    }
+}
+
+extension WatchLocationObservation {
+    /* Mirrors locationObservation()'s own acceptance bound in caddy-watch.js so
+       a stale or coarse wrist fix falls back to phone-authoritative LOCK
+       instead of round-tripping a command Marshal will just reject. */
+    init?(_ location: CLLocation, maxAgeSeconds: TimeInterval = 30) {
+        guard location.horizontalAccuracy >= 0, location.horizontalAccuracy <= 100 else { return nil }
+        guard Date().timeIntervalSince(location.timestamp) <= maxAgeSeconds else { return nil }
+        coordinate = WatchCoordinate(lat: location.coordinate.latitude, lng: location.coordinate.longitude)
+        source = "apple-watch"
+        horizontalAccuracy = location.horizontalAccuracy
+        timestamp = location.timestamp.timeIntervalSince1970 * 1000
+    }
+}
+
+/* Keeps one fresh, best-effort GPS fix while a round is live so LOCK can mark
+   the ball from the wrist. Foreground-only: there is deliberately no
+   background location mode here (§ no golf-state transitions belong here). */
+@MainActor
+final class WatchLocationManager: NSObject, ObservableObject {
+    @Published private(set) var lastFix: CLLocation?
+
+    private let manager = CLLocationManager()
+
+    override init() {
+        super.init()
+        manager.desiredAccuracy = kCLLocationAccuracyBest
+        manager.distanceFilter = 5
+        manager.delegate = self
+    }
+
+    func start() {
+        switch manager.authorizationStatus {
+        case .notDetermined: manager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse, .authorizedAlways: manager.startUpdatingLocation()
+        default: break
+        }
+    }
+
+    func stop() { manager.stopUpdatingLocation() }
+}
+
+extension WatchLocationManager: CLLocationManagerDelegate {
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let status = manager.authorizationStatus
+        Task { @MainActor in
+            if status == .authorizedWhenInUse || status == .authorizedAlways { manager.startUpdatingLocation() }
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let latest = locations.last else { return }
+        Task { @MainActor [weak self] in self?.lastFix = latest }
     }
 }

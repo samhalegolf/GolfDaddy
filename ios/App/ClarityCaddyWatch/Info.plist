@@ -18,6 +18,8 @@
   <string>$(MARKETING_VERSION)</string>
   <key>CFBundleVersion</key>
   <string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>Clarity Caddy uses your wrist's location to mark your ball position when you press LOCK.</string>
   <key>WKCompanionAppBundleIdentifier</key>
   <string>com.claritygolf.caddy</string>
   <key>WKWatchKitApp</key>
