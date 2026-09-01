@@ -451,6 +451,7 @@ function gdAdminCourseDbActionRail(selected){
     <button type="button" class="${active("preview")}" onclick="return gdAdminCourseDbShowPreview(${id})">Visual Engine</button>
     <button type="button" class="${active("scorecard")}" onclick="return gdAdminCourseDbShowScorecard(${id})">Score Card</button>
     <button type="button" class="${active("debug")}" onclick="return gdAdminCourseDbShowDebug(${id})">Debug</button>
+    <button type="button" class="${active("watchmaps")}" onclick="return gdAdminCourseDbShowWatchMaps(${id})">Watch Maps</button>
     <button type="button" class="danger" onclick="return gdAdminCourseDbDelete(${id})">Delete</button>
     ${gdAdminCourseMaintenanceMenu(selected)}
     ${gdAdminCourseVisualUpdateButton(selected&&selected.id||"","primary")}
@@ -476,6 +477,7 @@ function gdAdminCourseMaintenanceMenu(selected){
     ${item("refine_surface_shapes","Refine Shapes","Re-traces those shapes from this course's own frames. Lighter, and ours")}
     ${item("recapture_visuals","Re-Capture Visuals","Fresh source imagery for the existing map, then a bake")}
     ${item("rebake_visuals","Re-Bake Visuals","Existing captures, current recipe. No re-scan")}
+    ${item("generate_watch_maps","Generate Watch Maps","Bakes lightweight spatially-referenced hole maps for Apple Watch from the existing geometry. Does not remap, recollect objects, or touch native visuals, tees/greens, or GPS Play imagery")}
     ${item("rebuild_local","Rebuild local","This browser's copy only. Nothing on the server changes")}
   </div></details>`;
 }
@@ -492,6 +494,10 @@ function gdAdminCourseMaintenance(mode,courseId){
   if(mode==="refine_surface_shapes")return gdAdminCourseRefineShapes(id);
   if(mode==="rebuild_local")return gdAdminCourseDbUpdate(id);
   if(mode==="rebake_visuals")return gdAdminCourseVisualUpdateWithActiveRecipe(id);
+  if(mode==="generate_watch_maps"){
+    if(typeof window.gdAdminCourseWatchMapsGenerate!=="function"){gdAdminCourseVisualToast("Watch Map generator not loaded");return false;}
+    return window.gdAdminCourseWatchMapsGenerate(id);
+  }
   if(mode==="recapture_visuals"){
     if(!window.confirm("Re-capture visuals for "+id+"?\n\nFetches fresh source imagery for the existing course map and re-bakes from it. The mapped holes, greens and collected objects are kept; the current captures are replaced."))return false;
     /* The SERVER capture path, deliberately not gdAdminCourseVisualRecapture: that one reads
@@ -519,6 +525,9 @@ function gdAdminCourseDbShowPreview(courseId){
 }
 function gdAdminCourseDbShowDebug(courseId){
   return gdAdminCourseDbOpen(courseId,"debug");
+}
+function gdAdminCourseDbShowWatchMaps(courseId){
+  return gdAdminCourseDbOpen(courseId,"watchmaps");
 }
 /* Mirrors ADMIN_EMAILS in functions/course-maps.mjs - the server is the real
    gate (it 403s a non-admin actor); this only decides whether we bother asking. */
@@ -4251,6 +4260,12 @@ function gdRenderAdminCourseDatabaseNow(){
     gdAdminCourseDebugRefresh();
     return;
   }
+  if(gdAdminCourseDatabaseTab==="watchmaps"){
+    const markup=typeof window.gdAdminCourseWatchMapsMarkup==="function"?window.gdAdminCourseWatchMapsMarkup(selected):'<div class="gdCoursePlayDebugEmpty">Watch Map viewer not loaded.</div>';
+    gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}${markup}</div>`);
+    if(typeof window.gdAdminCourseWatchMapsAfterRender==="function")window.gdAdminCourseWatchMapsAfterRender(selected);
+    return;
+  }
   const visual=gdAdminCourseDbVisualState(selected.id);
   const stageLine=`<div class="gdAdminCourseStageLine">${[
     `<span class="${selected.geometryReadyCount===selected.holeCount&&selected.holeCount?"ready":"warn"}">${gdEscapeHTML(selected.geometryReadyCount)}/${gdEscapeHTML(selected.holeCount)} geometry</span>`,
@@ -4277,6 +4292,7 @@ window.gdAdminCourseDbToggleRow=gdAdminCourseDbToggleRow;
 window.gdAdminCourseDbOpen=gdAdminCourseDbOpen;
 window.gdAdminCourseDbShowGeometry=gdAdminCourseDbShowGeometry;
 window.gdAdminCourseDbShowDebug=gdAdminCourseDbShowDebug;
+window.gdAdminCourseDbShowWatchMaps=gdAdminCourseDbShowWatchMaps;
 window.gdAdminCourseLocationEdit=gdAdminCourseLocationEdit;
 window.gdAdminCourseLocationViewport=gdAdminCourseLocationViewport;
 window.gdAdminCourseLocationRemove=gdAdminCourseLocationRemove;
