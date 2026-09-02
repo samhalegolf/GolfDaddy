@@ -46,6 +46,7 @@
     "test:course-pin-trust": "node dev/course-pin-trust.test.js",
     "test:guest-identity": "node dev/course-guest-identity.test.js",
     "test:course-scan-lifecycle": "node dev/course-guest-identity.test.js && node dev/course-package-trigger.test.js && node dev/course-mapper-jobs.test.js && node dev/course-mapping-controller.test.js && node dev/course-picker-behavior.test.js && node dev/course-pin-trust.test.js",
+    "test:progress": "node dev/progress-core.test.js",
     "test:watch-maps": "node dev/watch-map-core.test.js && node dev/course-watch-maps.test.js && node dev/watch-map-delivery.test.js",
     "test:watch-player": "node dev/watch-player-delivery.test.js",
     "test:bubble-parity": "node dev/bubble-engine-parity.test.js",

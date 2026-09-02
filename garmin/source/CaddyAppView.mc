@@ -33,8 +33,14 @@ class CaddyAppView extends WatchUi.View {
         } else {
             // Leaving the playing face resets the Numbers<->Map choice, so
             // a new round or a hand-back always opens on Numbers rather
-            // than resuming wherever the player last left the map.
+            // than resuming wherever the player last left the map. Also
+            // drops any in-progress aim/drag — GarminSessionManager has
+            // already reset session.playState itself (receiveScene's
+            // !hasRound branch), so this is cosmetic (the "AIMING" chrome
+            // and bigger drag dot) rather than a second source of truth.
             showingMap = false;
+            mapView.aiming = false;
+            mapView.dragActive = false;
             statusView.onUpdate(dc);
         }
     }

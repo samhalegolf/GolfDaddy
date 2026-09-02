@@ -167,7 +167,7 @@ const isMappingJob = job => !MAINTENANCE_KINDS.has(String(job && job.kind || "au
 
 async function mapperBuildStateAll() {
   const [jobRows, mapRows] = await Promise.all([
-    supabaseFetch(TABLE + "?select=course_id,kind,status,error,mapper_version,created_at,updated_at&order=created_at.desc&limit=" + BULK_JOB_SCAN_LIMIT).catch(() => []),
+    supabaseFetch(TABLE + "?select=course_id,kind,status,error,result,mapper_version,created_at,updated_at&order=created_at.desc&limit=" + BULK_JOB_SCAN_LIMIT).catch(() => []),
     supabaseFetch(MAPS_TABLE + "?select=course_id,published,geometry_version,objects_json,holes_json&limit=2000").catch(() => [])
   ]);
   const jobs = Array.isArray(jobRows) ? jobRows : [];
@@ -181,15 +181,25 @@ async function mapperBuildStateAll() {
     if (!latestByCourse.has(id)) latestByCourse.set(id, job);
     if ((job.status === "running" || job.status === "queued") && !liveByCourse.has(id)) liveByCourse.set(id, job);
   });
+  /* Live maintenance runs, kept in their own map for the same reason mapperBuildState keeps
+     them in their own field: they feed the row's progress bar and never its state. */
+  const maintenanceByCourse = new Map();
+  jobs.filter(job => !isMappingJob(job)).forEach((job) => {
+    const id = String(job && job.course_id || "");
+    if (!id) return;
+    if ((job.status === "running" || job.status === "queued") && !maintenanceByCourse.has(id)) maintenanceByCourse.set(id, job);
+  });
 
   const courses = {};
   const ids = new Set([...latestByCourse.keys()]);
   maps.forEach((row) => { if (row && row.course_id) ids.add(String(row.course_id)); });
   const mapById = new Map(maps.map((row) => [String(row && row.course_id || ""), row]));
 
+  maintenanceByCourse.forEach((job, id) => ids.add(id));
   ids.forEach((id) => {
     const latest = latestByCourse.get(id) || null;
     const live = liveByCourse.get(id) || null;
+    const maintenanceJob = maintenanceByCourse.get(id) || null;
     const hasGeometry = hasGeometryPayload(mapById.get(id) || null);
     let state;
     if (hasGeometry) state = "geometry-ready";
@@ -206,7 +216,19 @@ async function mapperBuildStateAll() {
       lastJobKind: latest ? String(latest.kind || "") : null,
       lastJobAt: latest ? (latest.updated_at || latest.created_at || null) : null,
       mapperVersion: latest ? (latest.mapper_version || null) : null,
-      building: !!live
+      building: !!live,
+      progress: (live && live.result && live.result.progress) || null,
+      activeKind: live ? String(live.kind || "automap") : null,
+      stalled: !!(live && live.status === "running" && live.updated_at
+        && (Date.now() - new Date(live.updated_at).getTime()) / 1000 > STALL_SECONDS),
+      maintenance: maintenanceJob ? {
+        kind: String(maintenanceJob.kind || ""),
+        state: maintenanceJob.status === "running" ? "running" : "queued",
+        progress: (maintenanceJob.result && maintenanceJob.result.progress) || null,
+        stalled: maintenanceJob.status === "running" && maintenanceJob.updated_at
+          ? (Date.now() - new Date(maintenanceJob.updated_at).getTime()) / 1000 > STALL_SECONDS
+          : false
+      } : null
     };
   });
 
@@ -231,6 +253,13 @@ async function mapperBuildState(courseId) {
      admin history, which is the one place the enrichment runs SHOULD be visible. */
   const mapping = jobs.filter(isMappingJob);
   const live = mapping.find(job => job.status === "running") || mapping.find(job => job.status === "queued");
+  /* Collect Extra Objects and Refine Shapes, which isMappingJob deliberately excludes from
+     `state` - a maintenance run must never make a fully mapped course read as "Processing".
+     They are still WORK, though, and the Course Database now draws a progress bar for every
+     long action on the screen, so they are reported here as their own field. Nothing below
+     reads this into `state`; it feeds the bar and nothing else. */
+  const maintenanceJob = jobs.filter(job => !isMappingJob(job))
+    .find(job => job.status === "running" || job.status === "queued") || null;
   const hasGeometry = hasGeometryPayload(map);
   let state;
   if (hasGeometry) state = "geometry-ready";
@@ -249,6 +278,19 @@ async function mapperBuildState(courseId) {
     stalledSeconds,
     stalled: live && live.status === "running" && stalledSeconds != null && stalledSeconds > STALL_SECONDS,
     progress: live && live.result && live.result.progress || null,
+    /* Which of the three job kinds is running. The stage names overlap between them
+       ("querying-overpass" is emitted by both automap and Collect Extra Objects) and mean a
+       different fraction of a different job, so the bar cannot place a stage without it -
+       see the per-kind phase tables in scripts/gd-progress-core.js. */
+    activeKind: live ? String(live.kind || "automap") : null,
+    maintenance: maintenanceJob ? {
+      kind: String(maintenanceJob.kind || ""),
+      state: maintenanceJob.status === "running" ? "running" : "queued",
+      progress: (maintenanceJob.result && maintenanceJob.result.progress) || null,
+      stalled: maintenanceJob.status === "running" && maintenanceJob.updated_at
+        ? (Date.now() - new Date(maintenanceJob.updated_at).getTime()) / 1000 > STALL_SECONDS
+        : false
+    } : null,
     lastError: !live && mapping.length && mapping[0].status === "failed" ? String(mapping[0].error || "").slice(0, 300) : null,
     jobs
   };

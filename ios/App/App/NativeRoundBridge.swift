@@ -60,9 +60,22 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WearableCoord
         return value
     }
 
+    // Must always equal garmin/manifest.xml's <iq:application id="...">
+    // once that placeholder is replaced — see GarminTransport.swift.
+    private static let garminConnectIQAppId = "GARMIN-APP-ID-PLACEHOLDER"
+
     public override func load() {
         coordinator.delegate = self
         coordinator.register(AppleWatchTransport())
+        // GarminTransport is a safe, inert stub today (garmin/README.md):
+        // every Connect IQ SDK call inside it is commented out, so
+        // registering it here changes nothing observable until the SDK is
+        // actually linked — activate()/publish*() all resolve honestly as
+        // "not sent" rather than pretending to reach a device. Registering
+        // it now, rather than waiting for the SDK, is what makes
+        // WearableCoordinator's fan-out (see its own header comment) a real
+        // two-transport path instead of untested code.
+        coordinator.register(GarminTransport(connectIQAppId: Self.garminConnectIQAppId))
         coordinator.activateAll()
     }
 

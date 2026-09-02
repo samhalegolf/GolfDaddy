@@ -21,9 +21,12 @@
   var viewByKey = {};    // "<courseId>:<hole>" -> {scale, tx, ty}
   var debugByCourse = {};// courseId -> boolean
   var generatingByCourse = {}; // courseId -> true while a generate() POST is in flight
+  var progressByCourse = {};   // courseId -> the bake's own {stage,...} block, while it runs
+  var progressTimer = null;
   var dragState = null;
 
   function core() { return window.GDWatchMapCore || null; }
+  function progressCore() { return window.GDProgressCore || null; }
   function esc(v) { return typeof gdEscapeHTML === "function" ? gdEscapeHTML(v) : String(v == null ? "" : v); }
   function toast(text) { if (typeof gdAdminCourseVisualToast === "function") gdAdminCourseVisualToast(text); }
   function rerender() { if (typeof gdRenderAdminCourseDatabase === "function") gdRenderAdminCourseDatabase(); }
@@ -43,6 +46,31 @@
       .catch(function () { reports[courseId] = "error"; rerender(); });
   }
 
+  /* The bake is one blocking POST, so the browser that started it cannot learn anything from
+     its own request until it returns. It CAN ask the server, though: the generator writes its
+     stage into course_watch_maps.progress as it goes (see writeProgress in
+     functions/course-watch-maps.mjs), and that is a normal row any GET can read. So the
+     percentage here is the real one - the hole the server is actually on - not an estimate
+     made from elapsed time.
+
+     Deliberately a separate, lighter request than fetchReport: that one replaces the whole
+     report and would swap the viewer's image out from under a pan/zoom mid-bake. This reads
+     the same endpoint and keeps only the progress block. */
+  function pollProgress(courseId) {
+    if (progressTimer) { clearTimeout(progressTimer); progressTimer = null; }
+    if (!generatingByCourse[courseId]) { delete progressByCourse[courseId]; return; }
+    fetch("/api/course-watch-maps?courseId=" + encodeURIComponent(courseId), { headers: { Accept: "application/json" }, cache: "no-store" })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!generatingByCourse[courseId]) return;
+        if (data && data.progress) { progressByCourse[courseId] = data.progress; rerender(); }
+      })
+      .catch(function () { /* A missed poll is a stale bar for two seconds, not an error. */ })
+      .then(function () {
+        if (generatingByCourse[courseId]) progressTimer = setTimeout(function () { pollProgress(courseId); }, 2000);
+      });
+  }
+
   async function generate(courseId) {
     courseId = String(courseId || "");
     if (!courseId) return false;
@@ -55,7 +83,11 @@
        why this is synchronous, not a job queue), so the bar is deliberately indeterminate -
        it says "working", not a percentage this code has no way to know. */
     generatingByCourse[courseId] = true;
+    delete progressByCourse[courseId];
+    var pcore = progressCore();
+    if (pcore) pcore.clearFloor(courseId + ":watch");
     rerender();
+    pollProgress(courseId);
     try {
       var token = await accessToken();
       if (!token) { toast("Sign in again to generate Watch maps"); return false; }
@@ -81,6 +113,9 @@
       toast("Generate Watch Maps failed to send");
     } finally {
       generatingByCourse[courseId] = false;
+      delete progressByCourse[courseId];
+      if (progressTimer) { clearTimeout(progressTimer); progressTimer = null; }
+      if (pcore) pcore.clearFloor(courseId + ":watch");
       if (typeof gdAdminCourseDbShowWatchMaps === "function") gdAdminCourseDbShowWatchMaps(courseId);
       else rerender();
       /* The POST result is rendered immediately, then re-read from the normal source of truth
@@ -198,15 +233,21 @@
     var generating = !!generatingByCourse[courseId];
     var busy = report === "loading" || generating;
     var buttonLabel = generating ? "Baking…" : (report && report.status === "ready" ? "Regenerate Watch Maps" : "Generate Watch Maps");
-    /* Indeterminate, deliberately - see generate()'s own comment on why there is no percentage
-       to show. A sliding highlight says "this is running", which is the entire ask: feedback
-       that the click did something, visible before the request has had time to answer. */
-    var bar = generating
-      ? '<div class="gdAdminWatchMapBar" role="progressbar" aria-label="Baking Watch map images">' +
-        '<span class="gdAdminWatchMapBarFill"></span>' +
-        '<span class="gdAdminWatchMapBarText">Baking hole images…</span>' +
-        '</div>'
-      : "";
+    /* The same bar, from the same module, that the Course Database draws for every mapping and
+       building run - see scripts/gd-progress-core.js. Real percentages: the generator reports
+       the hole it is on and pollProgress reads it back.
+
+       Indeterminate only for the gap before the first stage lands (and on an older deployment
+       where the progress column is not there yet), which is what an indeterminate bar is
+       actually for - "running, cannot say how far" - rather than the whole bake. */
+    var pcore = progressCore();
+    var bar = "";
+    if (generating) {
+      var model = pcore && progressByCourse[courseId]
+        ? pcore.watchProgress({ progress: progressByCourse[courseId] }, { key: courseId + ":watch" })
+        : { live: true, pct: null, label: "Baking hole images", detail: "", stalled: false, stage: "" };
+      bar = pcore ? pcore.barMarkup(model) : "";
+    }
     return '<div class="gdAdminCourseStageLine gdAdminWatchMapStatusLine">' +
       '<span class="gdAdminCourseStatusDot ' + status.tone + '">Watch Maps: ' + esc(status.label) + '</span>' +
       '</div>' +

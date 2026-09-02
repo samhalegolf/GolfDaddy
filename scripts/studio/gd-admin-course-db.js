@@ -3086,6 +3086,87 @@ function gdAdminCourseBuildCheckpointLines(state){
             : "Checkpoint 2 - Apply visual treatment: waiting for capture";
   return [captureLine,exportLine];
 }
+/* The one progress bar, for every long action on this screen.
+
+   Six things on the Course Database take long enough to need one - automap, Collect Extra
+   Objects, Refine Shapes, the visual scan, the frame bake and the Watch map bake - and they
+   used to be reported three different ways: a percentage bar for the visual build, the bare
+   word "mapping" for the three mapper jobs, and an indeterminate sweep for the Watch bake. The
+   arithmetic that makes them comparable lives in scripts/gd-progress-core.js; this is just the
+   wiring that finds whichever one is running for a course.
+
+   Degrades rather than throws if the core has not loaded: no bar is a worse screen, a broken
+   render is a broken screen. */
+function gdProgressCore(){return typeof window!=="undefined"&&window.GDProgressCore||null;}
+
+/* Whichever action is actually in flight for this course, as one model.
+
+   Order matters when two overlap: a mapper job is reported ahead of a visual build because it
+   is the one the visual build is waiting on - publishing geometry chains a snapshot, so during
+   that overlap the mapping run is the honest answer to "what is happening". */
+function gdAdminCourseLiveProgress(courseId){
+  const core=gdProgressCore();
+  if(!core)return null;
+  courseId=String(courseId||"");
+  if(!courseId)return null;
+  const job=gdAdminCourseDbJobState(courseId);
+  if(job){
+    const mapping=core.mapperProgress(job,{key:courseId+":mapper"});
+    if(mapping.live)return mapping;
+    if(job.maintenance){
+      const maintenance=core.mapperProgress(
+        Object.assign({},job.maintenance,{activeKind:job.maintenance.kind}),
+        {key:courseId+":"+job.maintenance.kind}
+      );
+      if(maintenance.live)return maintenance;
+    }
+  }
+  const visual=core.visualProgress(gdAdminCourseBuildState(courseId),{key:courseId+":visual"});
+  if(visual.live)return visual;
+  return null;
+}
+
+/* Markup for the course's live action, or "" when nothing is running. Safe to concatenate
+   unconditionally, which is what lets the row and the detail header share one call. */
+function gdAdminCourseProgressBar(courseId){
+  const core=gdProgressCore();
+  const model=gdAdminCourseLiveProgress(courseId);
+  if(!core||!model){
+    /* Nothing running: stop the poll and drop the high-water marks, so the next run on this
+       course starts from zero instead of opening at the last one's ceiling. */
+    gdAdminCourseProgressWatch(courseId,false);
+    gdAdminCourseProgressSettle(courseId);
+    return "";
+  }
+  gdAdminCourseProgressWatch(courseId,true);
+  return core.barMarkup(model);
+}
+
+/* Keeps a live bar moving. Re-rendering is what re-reads the state, so without a tick the bar
+   only advances when the admin happens to click something - and the mapper list's own 20-second
+   cache is far too slow to watch a job by. Forces the job list to refetch while something is
+   running, and stops entirely when nothing is. */
+let gdAdminCourseProgressTimer=null;
+function gdAdminCourseProgressWatch(courseId,live){
+  if(gdAdminCourseProgressTimer){clearTimeout(gdAdminCourseProgressTimer);gdAdminCourseProgressTimer=null;}
+  if(!live)return;
+  gdAdminCourseProgressTimer=setTimeout(()=>{
+    gdAdminCourseProgressTimer=null;
+    Promise.resolve(gdLoadAdminCourseDbJobs({force:true})).catch(()=>null).then(()=>{
+      if(typeof gdRenderAdminCourseDatabase==="function")gdRenderAdminCourseDatabase();
+    });
+  },5000);
+}
+
+/* A finished run must not leave its high-water mark behind, or the next run on the same course
+   opens at the last one's ceiling. Called when a course stops reporting a live action. */
+function gdAdminCourseProgressSettle(courseId){
+  const core=gdProgressCore();
+  if(!core)return;
+  courseId=String(courseId||"");
+  ["mapper","visual","collect_extra_objects","refine_surface_shapes"].forEach(suffix=>core.clearFloor(courseId+":"+suffix));
+}
+
 /* The build bar. One line that answers: is this course built, is it building, how far, and has
    it stopped moving. Rendered wherever the published/live area is shown. */
 function gdAdminCourseCloudJobChip(courseId){
@@ -3093,22 +3174,19 @@ function gdAdminCourseCloudJobChip(courseId){
   if(!state)return "";
   const live=!!state.building||state.state==="queued";
   gdAdminCourseBuildWatch(courseId,live);
-  const progress=gdAdminCourseBuildProgress(state);
-  const kind=state.activeKind==="export"?"baking frames":state.activeKind==="snapshot"?"scanning":"";
   const stalled=!!state.stalled;
   const nudge=`<button type="button" class="gdAdminBuildNudge" onclick="return gdAdminCourseBuildNudge('${gdEscapeHTML(courseId)}')" title="Hand a dead job back to the queue and wake a worker">Nudge</button>`;
 
   if(live){
-    /* An explicit percentage as well as the bar: "47%" is checkable against the last time you
-       looked, which is the whole point of putting this on screen. */
-    const pct=progress?progress.pct:0;
-    const detail=progress?`${progress.done}/${progress.total}`:"starting";
-    const stall=stalled?` · <span class="warn">stalled ${Math.round((state.stalledSeconds||0)/60)}m</span>`:"";
-    const checkpoints=gdAdminCourseBuildCheckpointLines(state).map(line=>`<span style="display:block">${gdEscapeHTML(line)}</span>`).join("");
-    return `<span class="gdAdminBuildBar${stalled?" gdAdminBuildBarStalled":""}" title="${gdEscapeHTML(progress&&progress.stage||"")}">`
-      +`<span class="gdAdminBuildBarFill" style="width:${pct}%"></span>`
-      +`<span class="gdAdminBuildBarText">${gdEscapeHTML(kind||"building")} ${gdEscapeHTML(detail)} · ${pct}%${stall}</span>`
-      +`</span><span style="display:block;margin-top:4px">${checkpoints}</span>${stalled?nudge:""}`;
+    const checkpoints=gdAdminCourseBuildCheckpointLines(state).map(line=>`<span>${gdEscapeHTML(line)}</span>`).join("");
+    /* The SAME bar the mapper jobs and the Watch bake draw - see gdAdminCourseProgressBar.
+       The checkpoint captions stay, because the two-stage story ("capture complete, treatment
+       queued") is something one percentage genuinely cannot tell. */
+    const core=gdProgressCore();
+    const bar=core
+      ? core.barMarkup(core.visualProgress(state,{key:courseId+":visual"}))
+      : "";
+    return bar+`<div class="gdAdminProgressCheckpoints">${checkpoints}</div>${stalled?nudge:""}`;
   }
   if(state.state==="frames-ready")return `<span class="ready">cloud frames v${gdEscapeHTML(state.framesVersion||1)}</span>`;
   if(state.state==="captures-ready")return `<span class="warn" title="Capture completed. Visual treatment is queued or waiting to be retried.">capture complete - waiting for visual treatment</span>${nudge}`;
@@ -4152,6 +4230,10 @@ function gdAdminCourseDbExpandedRow(item){
   /* A failure gets the reason first and in full. Everything else is the same
      block so a working course and a broken one are read the same way. */
   const banner=why?`<div class="gdAdminCourseDiagWhy ${status==="failed"?"bad":"warn"}">${gdEscapeHTML(why)}</div>`:"";
+  /* Whatever this course has in flight - a mapping run, an enrichment pass, a visual build -
+     drawn as the one bar. Empty string when nothing is running, so the row is unchanged for a
+     settled course. */
+  const progressBar=gdAdminCourseProgressBar(item.id);
   const diag=[
     gdAdminCourseDbDiagRow("Status",status),
     gdAdminCourseDbDiagRow("Course key",item.key),
@@ -4164,7 +4246,7 @@ function gdAdminCourseDbExpandedRow(item){
     gdAdminCourseDbDiagRow("Mapper version",job&&job.mapperVersion),
     gdAdminCourseDbDiagRow("Updated",gdCoursePlayDebugTime(item.updatedAt)||"unknown")
   ].join("");
-  return `<tr class="gdAdminCourseDiagRowHost"><td colspan="7"><div class="gdAdminCourseDiag">${banner}<div class="gdAdminCourseDiagGrid">${diag}</div>${gdAdminCourseDbActionRail(item)}</div></td></tr>`;
+  return `<tr class="gdAdminCourseDiagRowHost"><td colspan="7"><div class="gdAdminCourseDiag">${banner}${progressBar}<div class="gdAdminCourseDiagGrid">${diag}</div>${gdAdminCourseDbActionRail(item)}</div></td></tr>`;
 }
 
 /* A full panel rebuild reconstructs the whole detail pane, tuning dock included,
@@ -4242,7 +4324,9 @@ function gdRenderAdminCourseDatabaseNow(){
   }
   const rows=selected.rows||[];
   const payload=gdAdminCourseDbPayload(selected.id);
-  const header=`<div class="gdAdminCourseActionHead"><div><h4>${gdEscapeHTML(selected.name)}</h4><span>${gdEscapeHTML(selected.key)} · ${gdEscapeHTML(gdAdminCourseDbStatusFor(selected))} · ${gdEscapeHTML(selected.syncStatus)} · ${gdEscapeHTML(selected.source)}</span></div>${gdAdminCourseDbActionRail(selected)}</div>`;
+  /* The same bar as the row above it, so switching between the list and the detail pane does
+     not change how a running job is reported. */
+  const header=`<div class="gdAdminCourseActionHead"><div><h4>${gdEscapeHTML(selected.name)}</h4><span>${gdEscapeHTML(selected.key)} · ${gdEscapeHTML(gdAdminCourseDbStatusFor(selected))} · ${gdEscapeHTML(selected.syncStatus)} · ${gdEscapeHTML(selected.source)}</span></div>${gdAdminCourseDbActionRail(selected)}</div>${gdAdminCourseProgressBar(selected.id)}`;
   if(gdAdminCourseDatabaseTab==="visuals"){
     gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}${gdAdminCourseVisualMarkup(selected)}</div>`);
     return;

@@ -16,6 +16,8 @@
 		CA77D9000000000000000C11 /* WearableTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000C10 /* WearableTransport.swift */; };
 		CA77D9000000000000000C13 /* WearableCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000C12 /* WearableCoordinator.swift */; };
 		CA77D9000000000000000C15 /* AppleWatchTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000C14 /* AppleWatchTransport.swift */; };
+		CA77D9000000000000000C21 /* GarminTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000C20 /* GarminTransport.swift */; };
+		CA77D9000000000000000C23 /* GarminDeviceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000C22 /* GarminDeviceStore.swift */; };
 		CA77D9000000000000000010 /* ClarityCaddyWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000020 /* ClarityCaddyWatchApp.swift */; };
 		CA77D9000000000000000011 /* WatchSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000021 /* WatchSessionManager.swift */; };
 		CA77D9000000000000000012 /* WatchScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000022 /* WatchScene.swift */; };
@@ -45,6 +47,8 @@
 		CA77D9000000000000000C10 /* WearableTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WearableTransport.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000C12 /* WearableCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WearableCoordinator.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000C14 /* AppleWatchTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleWatchTransport.swift; sourceTree = "<group>"; };
+		CA77D9000000000000000C20 /* GarminTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminTransport.swift; sourceTree = "<group>"; };
+		CA77D9000000000000000C22 /* GarminDeviceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminDeviceStore.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000020 /* ClarityCaddyWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClarityCaddyWatchApp.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000021 /* WatchSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSessionManager.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000022 /* WatchScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchScene.swift; sourceTree = "<group>"; };
@@ -144,6 +148,7 @@
 				CA77D9000000000000000C10 /* WearableTransport.swift */,
 				CA77D9000000000000000C12 /* WearableCoordinator.swift */,
 				CA77D9000000000000000C01 /* Apple */,
+				CA77D9000000000000000C02 /* Garmin */,
 			);
 			path = Wearables;
 			sourceTree = "<group>";
@@ -154,6 +159,15 @@
 				CA77D9000000000000000C14 /* AppleWatchTransport.swift */,
 			);
 			path = Apple;
+			sourceTree = "<group>";
+		};
+		CA77D9000000000000000C02 /* Garmin */ = {
+			isa = PBXGroup;
+			children = (
+				CA77D9000000000000000C20 /* GarminTransport.swift */,
+				CA77D9000000000000000C22 /* GarminDeviceStore.swift */,
+			);
+			path = Garmin;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -296,6 +310,8 @@
 				CA77D9000000000000000C11 /* WearableTransport.swift in Sources */,
 				CA77D9000000000000000C13 /* WearableCoordinator.swift in Sources */,
 				CA77D9000000000000000C15 /* AppleWatchTransport.swift in Sources */,
+				CA77D9000000000000000C21 /* GarminTransport.swift in Sources */,
+				CA77D9000000000000000C23 /* GarminDeviceStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

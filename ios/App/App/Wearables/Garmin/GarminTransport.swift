@@ -2,13 +2,22 @@ import Foundation
 // import ConnectIQ  // Garmin Connect IQ Mobile SDK for iOS — not vendored in
                       // this repo yet. Add the .xcframework from Garmin's
                       // developer portal (developer.garmin.com/connect-iq),
-                      // then uncomment this import and add this file to
-                      // App.xcodeproj's Sources build phase. Until then this
-                      // file does not compile and is deliberately excluded
-                      // from the target — see garmin/README.md.
+                      // then uncomment this import and the commented
+                      // conformances/calls below. This file IS in
+                      // App.xcodeproj's Sources build phase and IS
+                      // registered with WearableCoordinator
+                      // (NativeRoundBridge.load()) — it compiles and runs
+                      // today as a safe stub that never claims to reach a
+                      // device (see `state()`/`send()` below), not because
+                      // it's excluded from the build.
 
 /*
- UNVERIFIED / NOT WIRED INTO THE BUILD. Garmin Phase 1 plan step 4.
+ UNVERIFIED Connect IQ Mobile SDK calls — see below. WIRED INTO THE BUILD
+ (Garmin Phase 1 plan step 4): registered alongside AppleWatchTransport in
+ NativeRoundBridge.load(), and WearableCoordinator now fans out to both
+ rather than only the first-registered transport — see
+ WearableCoordinator.swift's header comment for why that had to change here
+ rather than staying "deliberately left undefined."
 
  Everything that calls into `ConnectIQ`/`IQDevice`/`IQApp` below is written
  against this session's best understanding of the Connect IQ Mobile SDK for

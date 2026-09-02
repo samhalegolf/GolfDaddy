@@ -1,9 +1,9 @@
 import Foundation
 
 /*
- UNVERIFIED / NOT WIRED INTO THE BUILD. This file is not in project.pbxproj's
- Sources build phase — see garmin/README.md and the Garmin Phase 1 plan
- step 5. Add it once the Garmin Connect IQ Mobile SDK for iOS is linked.
+ Wired into the build (App.xcodeproj's Sources build phase) and used by
+ GarminTransport.swift, which currently constructs one with its default
+ UserDefaults-backed init — see the Garmin Phase 1 plan step 5.
 
  Persists which Garmin device Caddy should treat as the wearable target.
  Unlike Apple Watch — where WCSession always addresses "the paired Watch,"

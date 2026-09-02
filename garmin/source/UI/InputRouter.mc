@@ -4,9 +4,19 @@ using Toybox.WatchUi;
 // Semantic Garmin actions (Garmin Phase 1 plan step 12/27). The round engine
 // never learns whether an action came from a drag or a button — physical
 // input is translated to one of these constants here, once, and every view
-// consumes only the semantic form. Phase 1 wires NEXT/PREVIOUS/SELECT/BACK/
-// LOCK/UNLOCK/NEXT_HOLE/PREVIOUS_HOLE; the AIM_* and MAP/NUMBERS actions are
-// declared now so Phase 2/3 extends this module instead of redesigning it.
+// consumes only the semantic form. Phase 1 wired NEXT/PREVIOUS/SELECT/BACK/
+// LOCK/UNLOCK/NEXT_HOLE/PREVIOUS_HOLE. Phase 3 wires AIM_UP/DOWN/LEFT/RIGHT
+// (CaddyInputDelegate.onAction, nudging GarminMapView's target) and
+// OPEN_MAP/OPEN_NUMBERS (CaddyAppView).
+//
+// AIM_MODE/CONFIRM_AIM/CANCEL_AIM are declared but NOT dispatched through
+// onAction in this pass: entering/confirming/cancelling an aim needs the
+// current face and Numbers-vs-Map state that only
+// CaddyInputDelegate.handleSelect()/onAction(BACK) already have in scope,
+// so those call GarminMapView.enterAimMode()/confirmAim()/cancelAim()
+// directly rather than round-tripping through a same-named action. The
+// constants stay part of the semantic vocabulary for a future caller that
+// doesn't have that context to hand — e.g. an on-screen touch button.
 module InputAction {
     var NEXT = "NEXT";
     var PREVIOUS = "PREVIOUS";
@@ -46,20 +56,14 @@ class InputRouter {
         if (onAction != null) { onAction.invoke(action); }
     }
 
-    // WatchUi.InputDelegate.onKey's key event -> semantic action. Mirrors
-    // the Garmin Phase 1 plan step 25's suggested button pattern for the
-    // numbers face: UP/DOWN move between hole/adjacent info (Phase 1 does
-    // not yet have a scrollable numbers face, so these are reserved),
-    // SELECT is context-sensitive (LOCK on the playing face), BACK backs out
-    // of nothing yet in Phase 1 (no aim mode to cancel).
-    function onKey(keyEvent) {
-        var key = keyEvent.getKey();
-        if (key == WatchUi.KEY_ENTER) { dispatch(InputAction.SELECT); return true; }
-        if (key == WatchUi.KEY_ESC) { dispatch(InputAction.BACK); return true; }
-        if (key == WatchUi.KEY_UP) { dispatch(InputAction.PREVIOUS_HOLE); return true; }
-        if (key == WatchUi.KEY_DOWN) { dispatch(InputAction.NEXT_HOLE); return true; }
-        return false;
-    }
+    // NOTE: there is deliberately no generic onKey() here. WatchUi.
+    // BehaviorDelegate already turns KEY_ENTER/KEY_ESC/KEY_UP/KEY_DOWN into
+    // its own semantic onSelect/onBack/onNextPage/onPreviousPage callbacks
+    // before a raw key would ever reach an onKey handler, so a second
+    // translation of the same four keys here would be unreachable in
+    // practice. CaddyInputDelegate overrides onKey() directly, but only for
+    // WatchUi.KEY_LAP (Phase 3's "LOCK from the map" input) — the one key
+    // BehaviorDelegate has no semantic method for.
 
     // Touch tap on a named on-screen hit target (e.g. "lock", "nextHole",
     // "previousHole") — NumbersView owns the hit-testing and calls this with

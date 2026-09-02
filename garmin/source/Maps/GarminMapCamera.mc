@@ -131,4 +131,18 @@ class GarminMapCamera {
         var lower = a < b ? a : b;
         return lower < c ? lower : c;
     }
+
+    // The inverse of place() — Phase 3's whole interaction path starts here:
+    // finger/nudge -> view point -> IMAGE point (this) -> lat/lng
+    // (GarminMapSpatialReference.coordinate) -> GarminPlayState.moveTarget.
+    // Mirrors WatchMapCamera.swift's imagePoint(fromView:imageSize:viewSize:),
+    // which itself was written as "the half that proves the transform
+    // round-trips" before Apple's own aiming existed — this is that same
+    // day for Garmin.
+    function imagePointFromView(viewX, viewY, imageWidth, imageHeight, viewWidth, viewHeight) {
+        if (scale <= 0) { return null; }
+        var oX = originX(imageWidth, viewWidth);
+        var oY = originY(imageHeight, viewHeight);
+        return { "x" => (viewX - oX) / scale, "y" => (viewY - oY) / scale };
+    }
 }

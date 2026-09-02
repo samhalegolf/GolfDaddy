@@ -107,12 +107,25 @@ class GarminSessionManager {
     // complete, non-error answer with four honest causes: version
     // disagreement, no bag, no target, or no trustworthy fix — see
     // WatchSessionManager.localBubble's identical reasoning.
+    //
+    // Phase 3 note: Apple's own architecture keeps two separate local-Bubble
+    // paths — WatchSessionManager.localBubble (Scene-target-based, for the
+    // read-only faces) and AimableHoleMap's own private WatchPlayState
+    // (locally-aimed-target-based, owned entirely by the map view). Garmin
+    // shares one GarminPlayState instance instead of instantiating a second
+    // engine, so this method reproduces the same OUTCOME by preferring
+    // playState's own target/bubble once GarminMapView has actually moved
+    // one (drag, nudge, or the seed move `enterAimMode()` makes) — see
+    // GarminMapView.mc's header comment for how playState gets driven.
     function localBubble() {
         var agreement = engineAgreement();
         if (!agreement["mayComputeLocally"]) { return null; }
         if (playerStore.snapshot == null) { return null; }
         var fix = locationManager.lastFix;
         if (fix == null) { return null; }
+        if (playState.target != null && playState.bubble != null) {
+            return playState.bubble;
+        }
         var aim = (scene != null) ? scene.aimTarget() : null;
         if (aim == null) { return null; }
         return GarminBubbleEngine.calculate({
@@ -234,6 +247,10 @@ class GarminSessionManager {
             scene = null;
             state = "noRound";
             lockedShot = null;
+            // A new hole is a new shot, and no round at all is the same
+            // rule at a larger scale: everything about the old target/held
+            // club/Bubble goes (GarminPlayState.enter's own reasoning).
+            playState = new GarminPlayState();
             locationManager.stop();
             return;
         }
@@ -243,9 +260,20 @@ class GarminSessionManager {
                 && scene.roundId().equals(incoming.roundId()) && incoming.revision() < scene.revision()) {
             return;
         }
+        var previousHole = (scene != null) ? scene.holeNumber() : null;
         var previous = scene;
         scene = incoming;
         state = "live";
+        // A new hole discards the old one's local target/held club/Bubble —
+        // GarminPlayState.enter() (Garmin Phase 2+3 plan step 30): "load new
+        // map, reset local target state, adopt new authoritative Scene
+        // target, recompute local Bubble, reframe camera." The map/camera
+        // half of that is GarminMapView's own framedHoleNumber check
+        // (Phase 2); this is the target/Bubble half.
+        var incomingHole = incoming.holeNumber();
+        if (incomingHole != null && (previousHole == null || previousHole != incomingHole)) {
+            playState.enter(incomingHole);
+        }
         locationManager.start();
         reconcileOutbox(incoming);
         noteSurface(previous, incoming);
@@ -312,11 +340,18 @@ class GarminSessionManager {
         }
     }
 
+    // A fresh fix moves the player and re-sizes the Bubble for the new
+    // distance (plan step 31). It never moves the target: walking towards a
+    // target already placed is the point. Mirrors
+    // AimableHoleMap.swift's .onChange(of: player) exactly — update the
+    // player, then re-run moveTarget against whatever target is already
+    // held, if any, so the ring on screen tracks the walk.
     function onLocationFix(coordinate, accuracy, epochMillis) {
-        // Location updates recompute distance/local Bubble on the fly; the
-        // target itself never moves because of a GPS update (Phase 3
-        // aiming's rule, honoured here from day one).
-        if (scene != null) { playState.update(coordinate); }
+        if (scene == null) { return; }
+        playState.update(coordinate);
+        if (playState.target != null && playerStore.snapshot != null) {
+            playState.moveTarget(playState.target, playerStore.snapshot.bag, playerStore.snapshot.bubble);
+        }
     }
 
     // ----------------------------------------------------------- report

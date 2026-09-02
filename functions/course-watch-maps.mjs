@@ -357,15 +357,64 @@ async function encodeSmallest(image) {
     : { format: "png", contentType: "image/png", bytes: png };
 }
 
+/* Live progress for the one action on this screen that has no job row to read.
+   
+   Written to course_watch_maps.progress and nothing else - never status, never holes, never
+   watch_package_version. That separation is the safety property: a REGENERATE leaves the
+   existing package fully intact and deliverable to the wrist for its whole duration, so a bake
+   that fails halfway costs the course nothing. Studio polls the normal report endpoint and
+   draws the same bar every other long action uses (scripts/gd-progress-core.js).
+
+   Best-effort by construction, exactly like runObjectCollectionJob's object_collection write:
+   this column arrives with supabase/migrations/20260903_add_course_watch_map_progress.sql, and
+   an unapplied migration must degrade the bar to indeterminate rather than fail the bake. Every
+   call is caught and dropped; nothing downstream reads what it wrote. */
+async function writeProgress(courseId, stage, holeCount, startedAt) {
+  try {
+    await supabaseFetch(WATCH_TABLE, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify([{
+        id: courseId,
+        course_id: courseId,
+        progress: { stage, holeCount, startedAt, updatedAt: new Date().toISOString() }
+      }])
+    });
+  } catch (error) {
+    /* Deliberately silent. A bar is not worth a failed bake. */
+  }
+}
+
+/* Clears the bar. Called on EVERY exit path including failure - a crashed bake that left its
+   progress behind would show Studio a bar that never moves and never ends. */
+async function clearProgress(courseId) {
+  try {
+    await supabaseFetch(WATCH_TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
+      method: "PATCH",
+      body: JSON.stringify({ progress: null })
+    });
+  } catch (error) { /* see writeProgress */ }
+}
+
 async function generateWatchPackage({ courseId, map, actorEmail }) {
   const holeNumbers = holeNumbersFromObjects(map.objects_json);
   const version = Date.now();
   const holes = [];
   const errors = [];
   let totalBytes = 0;
+  const startedAt = new Date().toISOString();
+  const holeTotal = holeNumbers.length;
+  await writeProgress(courseId, "reading-course", holeTotal, startedAt);
+  await writeProgress(courseId, "reading-terrain", holeTotal, startedAt);
   const terrainIndex = await loadTerrainIndex(courseId);
 
+  let holeIndex = 0;
   for (const holeNumber of holeNumbers) {
+    holeIndex += 1;
+    /* Reported BEFORE the hole is baked, so the bar names the hole being worked on rather than
+       the last one finished - the difference matters on the long holes, which are exactly the
+       ones an admin is watching to see whether anything is still moving. */
+    await writeProgress(courseId, "baking-hole-" + holeIndex + "-of-" + holeTotal, holeTotal, startedAt);
     const geometry = watchMapCore.objectsForHole(map.objects_json, holeNumber);
     const frame = watchMapCore.buildWatchHoleFrame(watchMapCore.WATCH_MAP_RECIPE_V1, geometry);
     if (!frame.ok) { errors.push({ holeNumber, reason: frame.reason }); continue; }
@@ -414,6 +463,12 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
     updated_at: new Date().toISOString()
   };
 
+  await writeProgress(courseId, "saving-package", holeTotal, startedAt);
+  /* The finished row carries progress: null in the same write that publishes it, so the bar
+     disappears at exactly the moment the package becomes current - never a frame of "100%"
+     sitting over an already-finished package. */
+  row.progress = null;
+
   try {
     await supabaseFetch(WATCH_TABLE, {
       method: "POST",
@@ -421,6 +476,7 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
       body: JSON.stringify([row])
     });
   } catch (error) {
+    await clearProgress(courseId);
     error.watchMapReport = reportShape(row);
     error.watchMapFailure = {
       stage: "package metadata persistence",
@@ -554,7 +610,10 @@ function reportShape(row) {
     generatedAt: row.generated_at,
     generatedBy: row.generated_by,
     holes: row.holes || [],
-    errors: row.errors || []
+    errors: row.errors || [],
+    /* Present only while a bake is running - the generator nulls it on the write that
+       publishes the finished package. See writeProgress. */
+    progress: row.progress || null
   };
 }
 
@@ -659,6 +718,11 @@ export default async function courseWatchMaps(req) {
       pruneError: row.pruneError || null
     }));
   } catch (error) {
+    /* The last word on the bar. generateWatchPackage clears its own progress on the paths it
+       knows about, but anything that escapes it - an Overpass-sized surprise, a bucket outage
+       mid-loop - would otherwise leave a bar on screen that never moves and never ends, which
+       is the exact failure this whole feature exists to make visible. */
+    await clearProgress(courseId);
     if (error.watchMapReport) return json(502, Object.assign({ courseId }, error.watchMapReport, {
       status: "failed",
       error: "Watch Map generation failed during " + error.watchMapFailure.stage,

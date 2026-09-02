@@ -175,12 +175,75 @@ view falls back to a plain target dot + club label, exactly matching
   `GarminMapProjection.mc`'s `fromDict`/persisted round-trip — it was
   omitted from the Phase 1 port since Phase 1 never needed it.
 
+## Phase 3: interactive aiming
+
+`GarminMapView` now drives `GarminSessionManager.playState` directly:
+touch drag and button nudge both move `playState.target` locally (recomputing
+the Bubble on every frame via `GarminPlayState.moveTarget`, including club
+hysteresis and the bag-roof clamp — the same engine call Phase 1/2 already
+had, just now driven by the player instead of only by the Scene), and
+`AIM_AT` is sent exactly once, on release/confirm — never per frame.
+
+- **Local vs. authoritative target**: `GarminSessionManager.localBubble()`
+  (used by both `NumbersView` and `GarminMapView`, Phase 1/2's code, unchanged
+  in shape) now prefers `playState.bubble` once a local target has been
+  placed, falling back to the Scene's target otherwise. Apple's own
+  architecture keeps two separate engine instances for this (`WatchSessionManager
+  .localBubble` vs. `AimableHoleMap`'s private `WatchPlayState`); Garmin
+  shares one `GarminPlayState` instance and gets the same outcome — see
+  `GarminSessionManager.localBubble()`'s header comment.
+- **GPS during an aim**: `onLocationFix` now re-runs `moveTarget` against
+  whatever target is already held (if any) on every fix, so distance and the
+  ring track the walk — the target itself never moves from a GPS update
+  (plan step 31), only from a drag/nudge/AIM_AT correction.
+- **Hole change**: `receiveScene` now calls `playState.enter(holeNumber)` on
+  a detected hole-number change (and resets `playState` entirely when the
+  round ends) — everything about the old target/held-club/Bubble goes,
+  matching plan step 30.
+- **Image-bounds clamp** (`GarminMapView.applyImagePoint`): drag/nudge
+  results are clamped to `[0, imageWidth] x [0, imageHeight]` before being
+  turned back into a coordinate — a LOCAL UX constraint only, so the target
+  stays drawable. This is NOT the Caddy aim-roof/bag-clamp authority (plan
+  step 19's explicit distinction) — that clamp is
+  `GarminPlayState.clampedToBag`, already inside `moveTarget` since Phase 1,
+  ported from `WatchPlayState.swift` exactly (Apple's own wrist applies the
+  same local bag-roof clamp — it is not a Marshal-only rule).
+- **Command ordering** (plan step 22, "`AIM_AT` then `LOCK_AT` must not lock
+  the old target"): no extra guard code was added. `GarminOutbox` sends
+  commands in the order they were enqueued over one reliable
+  `Communications.transmit` channel, and each command carries its own
+  `baseRevision`; trusting that FIFO ordering rather than inventing a
+  "block LOCK while an AIM_AT is in flight" state is the literal instruction
+  in the plan ("use the existing command revision/order system rather than
+  inventing special Garmin lock state").
+- **Button layout decision**: SELECT enters/confirms Aim Mode (plan step 25);
+  BACK cancels an in-progress aim or backs out to Numbers; UP/DOWN nudge
+  vertically while aiming, navigate holes otherwise; `WatchUi.KEY_LAP` is
+  LOCK-from-the-map (plan step 22) since SELECT was already needed for aim
+  entry/confirm. **No lateral (LEFT/RIGHT) nudge is wired for button
+  devices** — none of the Phase 1 device matrix (Approach S62/S70, Fenix 6,
+  Forerunner 55) has a physical left/right control, and inventing an
+  unproven axis-toggle UX without real hardware to validate it against would
+  be a guess, not a decision. Touch devices get full 2D freedom via drag.
+  Revisit once real devices are in hand.
+- **NEW unverified items** (in addition to Phase 1/2's list):
+  - Whether `WatchUi.KEY_LAP` reaches `onKey()` on a `BehaviorDelegate`
+    subclass at all, and whether that constant name is current.
+  - The touch-event API shape (`CaddyInputDelegate.onTouch`) — constant
+    names for start/move/end and the coordinate-accessor shape are this
+    session's best guess, wired defensively with `has :symbol` checks so an
+    unrecognised SDK shape degrades to a no-op (or, for a bare unrecognised
+    touch report, a tap-and-send fallback) rather than crashing. This is the
+    single least-certain piece of the whole Garmin build — confirm early
+    against the real SDK before relying on continuous drag.
+
 ## What's deliberately NOT done yet
 
-- No interactive aiming UI (drag/button nudge) — Phase 3. `sendAim()` and the
-  full `AIM_AT` plumbing exist in `GarminSessionManager`/`GarminPlayState`
-  now so Phase 3 does not need to touch this layer, but nothing calls them
-  yet.
+- Real device/simulator testing of any of the above — none of it has run.
+- No touch-drag polish (edge panning while dragging near the screen bounds,
+  live pinch/crown zoom) — `WatchMapCamera.swift`'s `panned()`/`zoomed()`
+  were deliberately not ported; add them here if real-device testing shows
+  the fixed resting-camera framing is too tight to aim comfortably within.
 - No Scene schema v2 (`surface.active.platform`/`deviceId` — original plan
   step 6). Not required for Phase 1: `surface.active == "watch"` already
   covers "a wrist is driving," Apple or Garmin alike, and the `device` field

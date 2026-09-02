@@ -4,13 +4,11 @@ import android.content.Context;
 import java.util.Map;
 
 /**
- * UNVERIFIED / NOT YET CALLED FROM ANY CAPACITOR PLUGIN.
- *
- * Android has no NativeRoundBridge Capacitor plugin at all yet (unlike iOS,
- * where this session refactored an existing one) — see the Garmin-on-Android
- * scope note this session produced earlier. This class exists on its own so
- * the transport shape is ready once that plugin is built; nothing registers
- * or calls it today.
+ * UNVERIFIED Connect IQ Mobile SDK calls — see below. NOW CALLED from
+ * {@link com.claritygolf.caddy.NativeRoundBridge}, Android's Capacitor
+ * plugin (built after this class, in a later session — see the
+ * Garmin-on-Android scope note this repo's memory records for why Android
+ * has no WearableCoordinator-style indirection above this transport).
  *
  * Everything referencing the Connect IQ Mobile SDK for Android below
  * ({@code com.garmin.android.connectiq.ConnectIQ}/{@code IQDevice}/
