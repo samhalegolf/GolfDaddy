@@ -69,6 +69,70 @@ public struct WatchMapCamera: Equatable {
         return WatchMapCamera(focus: CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2), scale: chosen)
     }
 
+    /* PLAY framing: the shot, filling the screen.
+     *
+     * `resting` above fits the whole span with padding, and that is right for a
+     * hole nobody is standing on. It is wrong for playing one, because of an
+     * aspect ratio nothing can argue with: a par 5 bakes to roughly 1:7.7 and a
+     * 42mm watch is 1:1.2. Containing the image makes Millbrook's 1st 28pt wide
+     * with 84% of the screen as black bars — technically the whole hole, and
+     * useless.
+     *
+     * So this fills the width and shows the part being played, oriented the way
+     * the bake already is: tee at the bottom, green at the top, player low on
+     * the screen with the ground ahead above them. That is how every golf GPS
+     * presents a long hole, and it is what the player is actually looking for.
+     *
+     * When the shot IS short enough for both ends to fit — an approach, a chip —
+     * the span wins and both dots are on screen. The choice is made by the
+     * geometry, not by a mode the player has to think about. */
+    public static func play(player: CGPoint?, target: CGPoint?,
+                            imageSize: CGSize, viewSize: CGSize) -> WatchMapCamera {
+        guard imageSize.width > 0, imageSize.height > 0, viewSize.width > 0, viewSize.height > 0 else {
+            return WatchMapCamera(focus: CGPoint(x: imageSize.width / 2, y: imageSize.height / 2), scale: 1)
+        }
+        /* The floor: never narrower than the view. Black bars down both sides
+           are the thing being fixed, so they are not an option at any zoom. */
+        let fillWidth = viewSize.width / imageSize.width
+        let centre = CGPoint(x: imageSize.width / 2, y: imageSize.height / 2)
+
+        guard let player else {
+            let focus = target ?? centre
+            return WatchMapCamera(focus: CGPoint(x: centre.x, y: focus.y),
+                                  scale: min(fillWidth, maximumScale))
+        }
+        guard let target else {
+            return low(player: player, centreX: centre.x, scale: min(fillWidth, maximumScale), viewSize: viewSize)
+        }
+
+        /* Would both ends fit, with margin, at a scale that still fills the
+           width? `spanFraction` leaves room top and bottom so the dots are not
+           against the bezel. */
+        let spanFraction: CGFloat = 0.72
+        let span = abs(target.y - player.y)
+        let spanScale = span > 0 ? (viewSize.height * spanFraction) / span : maximumScale
+        let scale = min(max(spanScale, fillWidth), maximumScale)
+
+        if span * scale <= viewSize.height * spanFraction {
+            /* Both fit: centre on the shot. */
+            return WatchMapCamera(focus: CGPoint(x: centre.x, y: (player.y + target.y) / 2), scale: scale)
+        }
+        return low(player: player, centreX: centre.x, scale: scale, viewSize: viewSize)
+    }
+
+    /* The player sitting low, with the hole running up the screen.
+     *
+     * `playerHeightFraction` is how far down the view the player sits: 0.78
+     * gives roughly three quarters of the screen to the ground ahead, which is
+     * the direction being played, and still leaves the player clear of the
+     * bottom bezel and of the button that sits over it. */
+    private static func low(player: CGPoint, centreX: CGFloat, scale: CGFloat, viewSize: CGSize) -> WatchMapCamera {
+        let playerHeightFraction: CGFloat = 0.78
+        let visibleImageHeight = viewSize.height / scale
+        let focusY = player.y - (playerHeightFraction - 0.5) * visibleImageHeight
+        return WatchMapCamera(focus: CGPoint(x: centreX, y: focusY), scale: scale)
+    }
+
     // MARK: - Following a drag
 
     /* Pans — and ONLY pans — to keep a region inside the comfort rect.

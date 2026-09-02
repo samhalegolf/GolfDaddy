@@ -270,61 +270,15 @@ struct WatchMapManifest: Codable, Equatable {
     }
 }
 
-/* Where the scaled image sits inside the view, and how to put an image pixel on
-   screen. It lives beside the projection rather than inside the view because it
-   is the other half of "is this marker in the right place": the transform says
-   which pixel, this says where that pixel is on a 176pt-wide screen. Pure
-   CoreGraphics, so it can be exercised without a running Watch. */
-struct WatchMapFrame {
-    /// Never magnify a 448px-wide bake past this, or the flat vector edges turn
-    /// to mush and the map reads as broken rather than close-up.
-    private static let maximumScale: CGFloat = 3
+/* Framing lives in WatchMapCamera (ios/WatchBubbleEngine), not here.
 
-    let scale: CGFloat
-    let origin: CGPoint
+ There was a `WatchMapFrame` in this file that fitted the whole baked image into
+ the view. It was right for a hole nobody is standing on and wrong for playing
+ one: a par 5 bakes to about 1:7.7 and a 42mm watch is 1:1.2, so containing the
+ image drew Millbrook's 1st 28pt wide with 84% of the screen as black bars.
 
-    init(imageSize: CGSize, viewSize: CGSize, interest: [CGPoint]) {
-        guard imageSize.width > 0, imageSize.height > 0, viewSize.width > 0, viewSize.height > 0 else {
-            scale = 1
-            origin = .zero
-            return
-        }
-        let fitScale = min(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
-        var chosen = fitScale
-        var focus = CGPoint(x: imageSize.width / 2, y: imageSize.height / 2)
-
-        if interest.count >= 2 {
-            let xs = interest.map(\.x), ys = interest.map(\.y)
-            let minX = xs.min()!, maxX = xs.max()!, minY = ys.min()!, maxY = ys.max()!
-            /* Padding is proportional so a 20m chip and a 500m par 5 both get
-               breathing room, with a floor so the markers never touch the bezel. */
-            let padding = max(24, 0.22 * max(maxX - minX, maxY - minY))
-            let boxWidth = (maxX - minX) + padding * 2
-            let boxHeight = (maxY - minY) + padding * 2
-            chosen = min(viewSize.width / boxWidth, viewSize.height / boxHeight)
-            chosen = min(max(chosen, fitScale), Self.maximumScale)
-            focus = CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2)
-        } else if let only = interest.first {
-            chosen = min(max(fitScale, 1.4), Self.maximumScale)
-            focus = only
-        }
-
-        scale = chosen
-        let scaled = CGSize(width: imageSize.width * chosen, height: imageSize.height * chosen)
-        origin = CGPoint(
-            x: Self.axisOrigin(scaledLength: scaled.width, viewLength: viewSize.width, focus: focus.x * chosen),
-            y: Self.axisOrigin(scaledLength: scaled.height, viewLength: viewSize.height, focus: focus.y * chosen)
-        )
-    }
-
-    func place(_ imagePoint: CGPoint) -> CGPoint {
-        CGPoint(x: origin.x + imagePoint.x * scale, y: origin.y + imagePoint.y * scale)
-    }
-
-    /* Centre on the focus, then refuse to show background past an edge — an
-       off-centre hole is better than a map that appears to float. */
-    private static func axisOrigin(scaledLength: CGFloat, viewLength: CGFloat, focus: CGFloat) -> CGFloat {
-        guard scaledLength > viewLength else { return (viewLength - scaledLength) / 2 }
-        return min(0, max(viewLength - scaledLength, viewLength / 2 - focus))
-    }
-}
+ WatchMapCamera.play fills the screen and shows the part being played, and it is
+ in the package because it is pure — image pixels in, image pixels out, no view
+ and no gesture — so it can be tested without a wrist. Deleted rather than left
+ unused: an unreferenced framing helper beside a live one is exactly how the
+ wrong one gets picked up again. */

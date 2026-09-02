@@ -182,16 +182,17 @@ struct AimableHoleMap: View {
 
     // MARK: - Framing
 
+    /* PLAY framing, the same as the read-only map page uses.
+       `WatchMapCamera.resting` fits a whole span with padding and is right for a
+       hole nobody is standing on; on a par 5 it draws the map 28pt wide with
+       black bars down 84% of the screen, because the bake is 1:7.7 and this
+       screen is 1:1.2. `play` fills the screen and shows the part being played,
+       and still fits both ends when the shot is short enough. */
     private func restingCamera(viewSize: CGSize) -> WatchMapCamera {
-        var interest: [CGPoint] = []
-        if let p = imagePoint(player) { interest.append(p) }
-        if let t = imagePoint(currentTarget) { interest.append(t) }
-        /* The Bubble's own extent, so a wide pattern is not cropped by a frame
-           fitted to its centre alone. */
-        (state.bubble?.ring ?? []).forEach { point in
-            if let p = imagePoint(lat: point.lat, lng: point.lng) { interest.append(p) }
-        }
-        return WatchMapCamera.resting(interest: interest, imageSize: imageSize, viewSize: viewSize)
+        WatchMapCamera.play(
+            player: imagePoint(player),
+            target: imagePoint(currentTarget) ?? imagePoint(green),
+            imageSize: imageSize, viewSize: viewSize)
     }
 
     // MARK: - Coordinates

@@ -26,21 +26,28 @@ struct HoleMapView: View {
             let playerPoint = imagePoint(player, reference)
             let greenPoint = imagePoint(green, reference)
             let targetPoint = imagePoint(target, reference)
-            let frame = WatchMapFrame(
-                imageSize: CGSize(width: reference.imageWidth, height: reference.imageHeight),
-                viewSize: proxy.size,
-                interest: [playerPoint, greenPoint, targetPoint].compactMap { $0 }
-            )
+            let imageSize = CGSize(width: reference.imageWidth, height: reference.imageHeight)
+            /* PLAY framing, not a contain-fit. A par 5 bakes to about 1:7.7 and
+               this screen is 1:1.2, so containing the whole image drew the hole
+               28pt wide with 84% of the width as black bars. WatchMapCamera.play
+               fills the screen and shows the part being played — and still fits
+               both ends when the shot is short enough for that to mean
+               something. */
+            let camera = WatchMapCamera.play(
+                player: playerPoint, target: targetPoint ?? greenPoint,
+                imageSize: imageSize, viewSize: proxy.size)
+            let origin = camera.origin(imageSize: imageSize, viewSize: proxy.size)
             ZStack(alignment: .topLeading) {
                 Image(uiImage: map.image)
                     .resizable()
                     .interpolation(.medium)
-                    .frame(width: reference.imageWidth * frame.scale, height: reference.imageHeight * frame.scale)
-                    .offset(x: frame.origin.x, y: frame.origin.y)
+                    .frame(width: reference.imageWidth * camera.scale, height: reference.imageHeight * camera.scale)
+                    .offset(x: origin.x, y: origin.y)
                 Canvas { context, _ in
-                    let playerAt = playerPoint.map(frame.place)
-                    let greenAt = greenPoint.map(frame.place)
-                    let targetAt = targetPoint.map(frame.place)
+                    let place = { (p: CGPoint) in camera.place(p, imageSize: imageSize, viewSize: proxy.size) }
+                    let playerAt = playerPoint.map(place)
+                    let greenAt = greenPoint.map(place)
+                    let targetAt = targetPoint.map(place)
                     if let playerAt, let aim = targetAt ?? greenAt {
                         var line = Path()
                         line.move(to: playerAt)

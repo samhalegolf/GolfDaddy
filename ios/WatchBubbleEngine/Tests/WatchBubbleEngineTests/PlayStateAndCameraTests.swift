@@ -215,6 +215,72 @@ final class PlayStateAndCameraTests: XCTestCase {
         }
     }
 
+    // MARK: - Play framing
+
+    /* Millbrook's 1st as actually baked: 200x1536, which is 1:7.7 against a
+       1:1.2 screen. Containing it drew the hole 28pt wide with 84% of the view
+       as black bars — the thing this framing exists to stop. */
+    private let holeImage = CGSize(width: 200, height: 1536)
+
+    func testALongHoleFillsTheWidthInsteadOfLeavingBlackBars() {
+        let player = CGPoint(x: 100, y: 1450)
+        let target = CGPoint(x: 100, y: 50)
+        let camera = WatchMapCamera.play(player: player, target: target,
+                                         imageSize: holeImage, viewSize: viewSize)
+        let drawnWidth = holeImage.width * camera.scale
+        XCTAssertGreaterThanOrEqual(drawnWidth, viewSize.width - 0.001,
+                                    "the map must be at least as wide as the screen — no side bars")
+        let contain = min(viewSize.width / holeImage.width, viewSize.height / holeImage.height)
+        XCTAssertGreaterThan(camera.scale, contain * 5, "and far bigger than a contain-fit")
+    }
+
+    /* The player sits low with the hole running up, because that is the
+       direction being played. */
+    func testThePlayerSitsLowWithTheHoleAhead() {
+        let player = CGPoint(x: 100, y: 1450)
+        let camera = WatchMapCamera.play(player: player, target: CGPoint(x: 100, y: 50),
+                                         imageSize: holeImage, viewSize: viewSize)
+        let at = camera.place(player, imageSize: holeImage, viewSize: viewSize)
+        XCTAssertGreaterThan(at.y, viewSize.height * 0.6, "the player belongs low on the screen")
+        XCTAssertLessThan(at.y, viewSize.height, "but on it, not under the bezel")
+    }
+
+    /* A short shot is a different question, and the geometry decides — not a
+       mode the player has to pick. Both ends on screen when both ends fit. */
+    func testAShortShotShowsBothEnds() {
+        let player = CGPoint(x: 100, y: 140)
+        let target = CGPoint(x: 100, y: 50)
+        let camera = WatchMapCamera.play(player: player, target: target,
+                                         imageSize: holeImage, viewSize: viewSize)
+        for point in [player, target] {
+            let at = camera.place(point, imageSize: holeImage, viewSize: viewSize)
+            XCTAssertTrue((0...viewSize.height).contains(at.y), "\(point) landed off screen at \(at)")
+        }
+        XCTAssertGreaterThan(camera.scale, viewSize.width / holeImage.width,
+                             "a short shot zooms in past the width fill")
+    }
+
+    func testPlayFramingSurvivesMissingPoints() {
+        let noTarget = WatchMapCamera.play(player: CGPoint(x: 100, y: 1450), target: nil,
+                                           imageSize: holeImage, viewSize: viewSize)
+        XCTAssertGreaterThanOrEqual(holeImage.width * noTarget.scale, viewSize.width - 0.001)
+        let noPlayer = WatchMapCamera.play(player: nil, target: CGPoint(x: 100, y: 50),
+                                           imageSize: holeImage, viewSize: viewSize)
+        XCTAssertGreaterThanOrEqual(holeImage.width * noPlayer.scale, viewSize.width - 0.001)
+        let nothing = WatchMapCamera.play(player: nil, target: nil,
+                                          imageSize: .zero, viewSize: viewSize)
+        XCTAssertEqual(nothing.scale, 1, "a degenerate image must not divide by zero")
+    }
+
+    /* The magnification ceiling still holds — a 448px bake blown up past 3x
+       turns the flat vector edges to mush. */
+    func testPlayFramingRespectsTheMagnificationCeiling() {
+        let tiny = CGSize(width: 20, height: 40)
+        let camera = WatchMapCamera.play(player: CGPoint(x: 10, y: 30), target: CGPoint(x: 10, y: 28),
+                                         imageSize: tiny, viewSize: viewSize)
+        XCTAssertLessThanOrEqual(camera.scale, WatchMapCamera.maximumScale)
+    }
+
     func testDegenerateSizesDoNotCrashOrProduceNonsense() {
         let camera = WatchMapCamera.resting(interest: [], imageSize: .zero, viewSize: viewSize)
         XCTAssertEqual(camera.scale, 1)
