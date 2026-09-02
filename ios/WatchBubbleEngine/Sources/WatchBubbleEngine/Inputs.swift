@@ -50,14 +50,33 @@ public struct WatchClub: Codable, Equatable, Sendable {
  own. Dropping the flag on the way over would make a guess indistinguishable
  from the player's measured bag. */
 public struct WatchBagSnapshot: Codable, Equatable, Sendable {
+    /* The SCHEMA version is the envelope's (WatchPlayerSnapshot.version). This
+       one is a convenience for callers that build a bag directly, and it is
+       DECODED WITH A DEFAULT because the wire does not carry it — the phone
+       sends `{isGhost, clubs}` and nothing else.
+
+       It was non-optional once, for exactly as long as it took to ship: the
+       Watch rejected every snapshot the phone sent, the phone re-sent forever,
+       and both sides' tests passed because the Swift one hand-wrote its JSON to
+       match these structs. dev/fixtures' `playerWire` now holds the real bytes
+       so that cannot recur. */
     public let version: Int
     public let clubs: [WatchClub]
     public let isGhost: Bool
 
-    public init(version: Int, clubs: [WatchClub], isGhost: Bool) {
+    public init(version: Int = 1, clubs: [WatchClub], isGhost: Bool) {
         self.version = version
         self.clubs = clubs
         self.isGhost = isGhost
+    }
+
+    enum CodingKeys: String, CodingKey { case version, clubs, isGhost }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = (try? values.decode(Int.self, forKey: .version)) ?? 1
+        clubs = try values.decode([WatchClub].self, forKey: .clubs)
+        isGhost = (try? values.decode(Bool.self, forKey: .isGhost)) ?? false
     }
 
     /// Longest total first, matching `gdNormaliseShotBagRows`. The wrist sorts
@@ -99,14 +118,27 @@ public struct WatchBubbleProfile: Codable, Equatable, Sendable {
         }
     }
 
+    /// See the note on WatchBagSnapshot.version — the envelope owns the schema
+    /// version and the wire does not carry this one.
     public let version: Int
     public let offsetDeg: Double?
     public let handedness: Handedness
 
-    public init(version: Int, offsetDeg: Double?, handedness: Handedness) {
+    public init(version: Int = 1, offsetDeg: Double?, handedness: Handedness) {
         self.version = version
         self.offsetDeg = offsetDeg
         self.handedness = handedness
+    }
+
+    enum CodingKeys: String, CodingKey { case version, offsetDeg, handedness }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = (try? values.decode(Int.self, forKey: .version)) ?? 1
+        /* decodeIfPresent, deliberately: an ABSENT offset is "no My Bubble" and
+           must stay nil rather than becoming a fabricated 0.0 degrees. */
+        offsetDeg = try values.decodeIfPresent(Double.self, forKey: .offsetDeg)
+        handedness = Handedness(lenient: try values.decodeIfPresent(String.self, forKey: .handedness))
     }
 
     /// The aim to actually use: 0.0° when no My Bubble is set, explicitly, and

@@ -82,8 +82,13 @@
     if (plugin && typeof plugin.addListener === "function" && window.GDWatchPlayerDelivery) {
       try {
         plugin.addListener("watchPlayerInventory", function (event) {
+          /* Record what the wrist holds; do NOT publish from here. Publishing
+             in response to a report closes a loop - the wrist reports, the
+             phone sends, the wrist reports again - which ran at hundreds of
+             messages a second the first time a snapshot was being rejected.
+             The Scene stream already calls deliverPlayer() often enough, and
+             deliver() is a fingerprint compare when nothing has changed. */
           window.GDWatchPlayerDelivery.noteInventory(event && event.inventory);
-          deliverPlayer();
         });
       } catch (e) {}
     }

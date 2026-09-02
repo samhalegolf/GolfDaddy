@@ -42,15 +42,16 @@ final class WatchPlayerStore: ObservableObject {
 
        Adoption is idempotent, so the live mirror and the durable queue
        delivering the same snapshot twice is a no-op rather than a conflict. */
-    func receive(player raw: Any) {
+    @discardableResult
+    func receive(player raw: Any) -> Bool {
         guard JSONSerialization.isValidJSONObject(raw),
               let data = try? JSONSerialization.data(withJSONObject: raw),
               let incoming = try? JSONDecoder().decode(WatchPlayerSnapshot.self, from: data),
               incoming.isUsable else {
             NSLog("[CCWatch] watch player snapshot rejected")
-            return
+            return false
         }
-        guard incoming.fingerprint != snapshot?.fingerprint else { return }
+        guard incoming.fingerprint != snapshot?.fingerprint else { return false }
         do {
             try FileManager.default.createDirectory(at: Self.directory(), withIntermediateDirectories: true)
             try JSONEncoder().encode(incoming).write(to: Self.fileURL(), options: .atomic)
@@ -60,6 +61,7 @@ final class WatchPlayerStore: ObservableObject {
             NSLog("[CCWatch] watch player write failed: %@", String(describing: error))
         }
         DispatchQueue.main.async { self.snapshot = incoming }
+        return true
     }
 
     /// Re-reads the cache from disk. A stored snapshot that no longer validates

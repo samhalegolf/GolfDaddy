@@ -1975,5 +1975,68 @@
         }
       }
     ]
+  },
+  "playerWire": {
+    "accountBag": {
+      "version": 1,
+      "fingerprint": "v1|g0|Driver:205:228|7i:138:148|b:3.20:right|e:bubble-engine-v1",
+      "bag": {
+        "isGhost": false,
+        "clubs": [
+          {
+            "club": "Driver",
+            "carryM": 205,
+            "totalM": 228
+          },
+          {
+            "club": "7i",
+            "carryM": 138,
+            "totalM": 148
+          }
+        ]
+      },
+      "bubble": {
+        "handedness": "right",
+        "offsetDeg": 3.2
+      },
+      "engineVersion": "bubble-engine-v1"
+    },
+    "noMyBubble": {
+      "version": 1,
+      "fingerprint": "v1|g0|Driver:205:228|b:-:left|e:bubble-engine-v1",
+      "bag": {
+        "isGhost": false,
+        "clubs": [
+          {
+            "club": "Driver",
+            "carryM": 205,
+            "totalM": 228
+          }
+        ]
+      },
+      "bubble": {
+        "handedness": "left"
+      },
+      "engineVersion": "bubble-engine-v1"
+    },
+    "ghostBag": {
+      "version": 1,
+      "fingerprint": "v1|g1|Driver:230:255|b:0.00:right|e:bubble-engine-v1",
+      "bag": {
+        "isGhost": true,
+        "clubs": [
+          {
+            "club": "Driver",
+            "carryM": 230,
+            "totalM": 255
+          }
+        ]
+      },
+      "bubble": {
+        "handedness": "right",
+        "offsetDeg": 0
+      },
+      "engineVersion": "bubble-engine-v1"
+    }
   }
 }

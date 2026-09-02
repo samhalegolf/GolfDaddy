@@ -235,6 +235,32 @@ function compare(actual, expected, tolerances, name, failures) {
   });
 }
 
+/* ---------------------------------------------------------------- the wire payload
+
+   The EXACT bytes app/js/watch-player-delivery.js puts on the radio, recorded
+   so the Swift side decodes what the phone actually sends rather than what its
+   own types happen to describe.
+
+   This exists because that gap shipped. The Swift snapshot types carried a
+   `version` on the nested bag and bubble; the JavaScript never sent one; the
+   Watch rejected every snapshot with "watch player snapshot rejected" and the
+   phone re-sent forever. Both sides had passing tests — because the Swift test
+   built its JSON by hand, to match its own structs. A hand-written payload
+   tests the reader against the reader. */
+function wirePayload() {
+  const delivery = require(path.join(ROOT, "app", "js", "watch-player-delivery.js"));
+  const engineVersion = require(path.join(ROOT, "app", "js", "caddy-watch.js")).BUBBLE_ENGINE_VERSION;
+  return {
+    accountBag: delivery.__test.snapshotFrom(
+      [{ club: "Driver", baseCarry: 205, totalM: 228 }, { club: "7i", baseCarry: 138, totalM: 148 }],
+      { offsetDeg: 3.2 }, "right", engineVersion),
+    noMyBubble: delivery.__test.snapshotFrom(
+      [{ club: "Driver", baseCarry: 205, totalM: 228 }], null, "left", engineVersion),
+    ghostBag: delivery.__test.snapshotFrom(
+      [{ club: "Driver", baseCarry: 230, totalM: 255, ghostBag: true }], { offsetDeg: 0 }, "right", engineVersion)
+  };
+}
+
 /* ---------------------------------------------------------------- go */
 
 const fixture = JSON.parse(fs.readFileSync(FIXTURE, "utf8"));
@@ -248,6 +274,7 @@ fixture.cases.forEach(entry => {
 });
 
 if (UPDATE) {
+  fixture.playerWire = wirePayload();
   fs.writeFileSync(FIXTURE, JSON.stringify(fixture, null, 2) + "\n");
   console.log("bubble-engine parity: recorded " + fixture.cases.length + " cases from the current engine");
   console.log("  Review the diff. This is the file the Swift engine is held to.");
@@ -257,6 +284,11 @@ if (UPDATE) {
 /* Guards on the fixture itself. A parity file that stops covering the corners,
    or quietly loses its version, protects nothing while still passing. */
 assert.ok(fixture.bubbleEngineVersion, "the fixture must name the engine version it describes");
+/* The recorded wire payload must still be what the module produces. If this
+   fails the shape on the radio has changed and the Swift decoder needs to
+   change with it — which is the whole point of recording it. */
+assert.deepStrictEqual(fixture.playerWire, wirePayload(),
+  "the recorded wire payload no longer matches what watch-player-delivery.js sends");
 assert.ok(fixture.cases.length >= 8, "expected at least 8 parity cases, found " + fixture.cases.length);
 ["ghost-bag", "no-my-bubble", "left-handed", "beyond-bag-reach"].forEach(required => {
   assert.ok(fixture.cases.some(entry => entry.name === required),

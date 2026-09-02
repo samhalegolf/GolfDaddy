@@ -132,19 +132,57 @@ final class PlayerSnapshotParityTests: XCTestCase {
         XCTAssertTrue(zero.contains("b:0.00:right"), zero)
     }
 
-    /* A snapshot round-trips through the wire encoding the phone actually
-       uses — an omitted offset must decode as nil rather than defaulting to
-       zero, which is how a fabricated aim would get back in on this side. */
-    func testWireDecodeKeepsAnOmittedAimAbsent() throws {
-        let json = """
-        {"version":1,"fingerprint":"x","engineVersion":"bubble-engine-v1",
-         "bag":{"version":1,"isGhost":false,"clubs":[{"club":"Driver","carryM":205,"totalM":228}]},
-         "bubble":{"version":1,"handedness":"right"}}
-        """
-        let snapshot = try JSONDecoder().decode(WatchPlayerSnapshot.self, from: Data(json.utf8))
-        XCTAssertNil(snapshot.bubble.offsetDeg, "an omitted aim must stay absent through the wire")
-        XCTAssertEqual(snapshot.bubble.effectiveOffsetDeg, 0, "and still play as 0.0 degrees")
-        XCTAssertFalse(snapshot.isUsable, "the placeholder fingerprint must not verify")
+    /* THE PAYLOAD THE PHONE ACTUALLY SENDS.
+     *
+     * Decoded from dev/fixtures/bubble-engine-parity.json's `playerWire`, which
+     * the JavaScript runner records straight out of watch-player-delivery.js —
+     * not hand-written here.
+     *
+     * This test exists because its absence shipped a bug. The Swift snapshot
+     * types carried a `version` on the nested bag and bubble; the JavaScript
+     * never sent one; the Watch rejected every snapshot and the phone re-sent
+     * forever. Both sides had green tests, because the Swift one built its JSON
+     * by hand to match its own structs — testing the reader against the reader.
+     *
+     * A payload that decodes AND self-verifies is the only evidence that the
+     * two ends actually agree. */
+    func testTheRealWirePayloadDecodesAndVerifies() throws {
+        struct Wire: Decodable {
+            let playerWire: [String: WatchPlayerSnapshot]
+        }
+        let url = try BubbleEngineParityTests.fixtureURL()
+        let wire = try JSONDecoder().decode(Wire.self, from: try Data(contentsOf: url))
+        XCTAssertGreaterThanOrEqual(wire.playerWire.count, 3)
+
+        for (name, snapshot) in wire.playerWire {
+            XCTAssertTrue(snapshot.isUsable,
+                          "\(name): the phone's own payload must verify against this side's fingerprint")
+            XCTAssertFalse(snapshot.bag.byLengthDescending.isEmpty, "\(name)")
+            XCTAssertEqual(snapshot.engineVersion, BubbleEngineVersion.current, "\(name)")
+        }
+
+        /* And the distinctions the payload exists to carry survive the wire. */
+        let noBubble = try XCTUnwrap(wire.playerWire["noMyBubble"])
+        XCTAssertNil(noBubble.bubble.offsetDeg, "an omitted aim must stay absent through the wire")
+        XCTAssertEqual(noBubble.bubble.effectiveOffsetDeg, 0, "and still play as 0.0 degrees")
+        XCTAssertEqual(noBubble.bubble.handedness, .left)
+
+        let ghost = try XCTUnwrap(wire.playerWire["ghostBag"])
+        XCTAssertTrue(ghost.bag.isGhost, "the ghost flag must survive - it is what stops a stand-in reading as real")
+        XCTAssertEqual(ghost.bubble.offsetDeg, 0, "a saved zero aim is a real value, distinct from an absent one")
+    }
+
+    /* A tampered fingerprint must still be refused — the integrity check is the
+       reason the decode is worth having at all. */
+    func testARealPayloadWithAWrongFingerprintIsRefused() throws {
+        struct Wire: Decodable { let playerWire: [String: WatchPlayerSnapshot] }
+        let url = try BubbleEngineParityTests.fixtureURL()
+        let wire = try JSONDecoder().decode(Wire.self, from: try Data(contentsOf: url))
+        let good = try XCTUnwrap(wire.playerWire["accountBag"])
+        let tampered = WatchPlayerSnapshot(
+            version: good.version, fingerprint: good.fingerprint + "x",
+            bag: good.bag, bubble: good.bubble, engineVersion: good.engineVersion)
+        XCTAssertFalse(tampered.isUsable)
     }
 
     func testInventoryReportsWhatIsHeld() {

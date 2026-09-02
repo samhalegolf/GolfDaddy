@@ -438,8 +438,13 @@ extension WatchSessionManager: WCSessionDelegate {
         }
         if let snapshot = message["watchPlayer"] {
             Task { @MainActor [weak self] in
-                self?.player.receive(player: snapshot)
-                self?.reportPlayerInventory()
+                /* Report ONLY when something actually changed.
+                   Reporting unconditionally made a hot loop: a rejected
+                   snapshot still triggered a report, the phone answered a
+                   report with another publish, and the two spun at hundreds of
+                   messages a second. A report is news, and a rejection is not
+                   news - the phone already knows what it sent. */
+                if self?.player.receive(player: snapshot) == true { self?.reportPlayerInventory() }
             }
             return
         }
@@ -457,8 +462,7 @@ extension WatchSessionManager: WCSessionDelegate {
         }
         if let snapshot = userInfo["watchPlayer"] {
             Task { @MainActor [weak self] in
-                self?.player.receive(player: snapshot)
-                self?.reportPlayerInventory()
+                if self?.player.receive(player: snapshot) == true { self?.reportPlayerInventory() }
             }
             return
         }
