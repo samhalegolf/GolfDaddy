@@ -19,6 +19,9 @@ struct HoleMapView: View {
     let player: WatchScene.GeoPoint?
     let green: WatchScene.GeoPoint?
     let target: WatchScene.GeoPoint?
+    /// The phone's Bubble size in metres, when the Scene carries one. This
+    /// page draws the PHONE's shot, so its extent comes off the Scene.
+    var bubbleExtentM: CGSize? = nil
 
     var body: some View {
         GeometryReader { proxy in
@@ -27,15 +30,14 @@ struct HoleMapView: View {
             let greenPoint = imagePoint(green, reference)
             let targetPoint = imagePoint(target, reference)
             let imageSize = CGSize(width: reference.imageWidth, height: reference.imageHeight)
-            /* PLAY framing, not a contain-fit. A par 5 bakes to about 1:7.7 and
-               this screen is 1:1.2, so containing the whole image drew the hole
-               28pt wide with 84% of the width as black bars. WatchMapCamera.play
-               fills the screen and shows the part being played — and still fits
-               both ends when the shot is short enough for that to mean
-               something. */
-            let camera = WatchMapCamera.play(
-                player: playerPoint, target: targetPoint ?? greenPoint,
-                imageSize: imageSize, viewSize: proxy.size)
+            /* The Bubble framed with its surroundings when there is a target,
+               the player-low play framing when there is not (the Ready face,
+               a hole nobody has locked). Neither is a contain-fit: a par 5
+               bakes to about 1:7.7 and this screen is 1:1.2, so containing the
+               whole image drew the hole 28pt wide with 84% as black bars. */
+            let camera = Self.camera(player: playerPoint, target: targetPoint, green: greenPoint,
+                                     bubbleExtentM: bubbleExtentM, reference: reference,
+                                     imageSize: imageSize, viewSize: proxy.size)
             let origin = camera.origin(imageSize: imageSize, viewSize: proxy.size)
             ZStack(alignment: .topLeading) {
                 Image(uiImage: map.image)
@@ -68,6 +70,22 @@ struct HoleMapView: View {
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
             .clipped()
         }
+    }
+
+    private static func camera(player: CGPoint?, target: CGPoint?, green: CGPoint?,
+                               bubbleExtentM: CGSize?, reference: WatchMapSpatialReference,
+                               imageSize: CGSize, viewSize: CGSize) -> WatchMapCamera {
+        guard let target else {
+            return WatchMapCamera.play(player: player, target: green, imageSize: imageSize, viewSize: viewSize)
+        }
+        let metresPerPixel = reference.metresPerPixel ?? 0.5
+        /* A Driver's cluster when the Scene has no size — the phone always
+           sends one with a target, so this is a stand-in, not a guess at play. */
+        let extentM = bubbleExtentM ?? CGSize(width: 45, height: 55)
+        return WatchMapCamera.bubble(
+            centre: target,
+            extent: CGSize(width: extentM.width / metresPerPixel, height: extentM.height / metresPerPixel),
+            imageSize: imageSize, viewSize: viewSize)
     }
 
     private func imagePoint(_ point: WatchScene.GeoPoint?, _ reference: WatchMapSpatialReference) -> CGPoint? {
@@ -136,7 +154,8 @@ struct HoleMapPage: View {
                         map: map,
                         player: player,
                         green: scene.geometry?.origin,
-                        target: scene.target ?? scene.bubble?.centre
+                        target: scene.target ?? scene.bubble?.centre,
+                        bubbleExtentM: scene.bubble.map { CGSize(width: $0.widthM ?? 45, height: $0.depthM ?? 55) }
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }

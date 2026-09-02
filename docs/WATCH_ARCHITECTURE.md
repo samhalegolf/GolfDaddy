@@ -270,9 +270,27 @@ drag feel immediate; the phone does not need the intermediate frames, and a
 Scene republished per frame would swamp the link for numbers nobody reads. It is
 sent **raw**: the aim roof lives in Marshal (`clampAim` with `maxAimM` injected),
 and a second clamp on the wrist is how two ends start disagreeing about where
-the target is. The wrist sends where the finger went and takes the phone's
-correction on the next Scene — except while a finger is still down, where the
-player's own drag wins.
+the target is. The wrist sends where the finger went.
+
+**The Scene's target is adopted only while the wrist has none of its own.**
+Once the wrist has placed a target — by its default rule or by a drag — a Scene
+revision neither moves it nor re-frames the map. The wrist is driving; a picture
+that re-fits itself around the phone on every revision is the phone driving by
+proxy, and it read on the wrist as the origin wandering. The wrist's target is
+cleared on a new hole (`WatchPlayState.enter`) and placed afresh: from the Scene
+if the phone has one (after LOCK, its own default layup), otherwise by the
+wrist's default rule off the green and route the manifest carries for the hole
+(`LoadedHoleMap.reference` → `WatchPlayState.reset`). A long hole therefore
+opens on a Driver Bubble on the fairway line before anyone has locked.
+
+**The camera frames the Bubble, not the player** (`WatchMapCamera.bubble`): the
+ring — or a 45x55m nominal extent around a bare target — at 42% of the view,
+floored at the width fill so there are no side bars. The player is allowed off
+the bottom; the aim line still reaches the edge and pivots as the target moves,
+which is the cue that the origin is a fixed point. `play` (player low, hole
+ahead) remains for a hole with no target at all. The camera is set on appear, a
+new hole, the first fix and the first Scene target — and by the crown and a
+drag's `following` pan — never on a Scene revision and never on drag end.
 
 Aiming needs three things at once: the phone says the shot can be aimed
 (`controls.canAim`), the wrist runs the same engine (the version handshake), and

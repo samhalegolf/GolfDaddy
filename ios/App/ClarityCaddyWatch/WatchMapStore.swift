@@ -30,6 +30,19 @@ final class WatchMapStore: ObservableObject {
         let holeNumber: Int
         let image: UIImage
         let spatialReference: WatchMapSpatialReference
+        /* The hole's golf geometry (green, and the play line when mapped), so
+           the wrist can place its own default Bubble on a hole the phone has
+           not locked yet. Nil for a package baked before the generator emitted
+           one; the map still draws and the Scene still carries the phone's
+           target. */
+        let reference: WatchHoleReference?
+
+        init(holeNumber: Int, image: UIImage, spatialReference: WatchMapSpatialReference, reference: WatchHoleReference? = nil) {
+            self.holeNumber = holeNumber
+            self.image = image
+            self.spatialReference = spatialReference
+            self.reference = reference
+        }
         static func == (lhs: LoadedHoleMap, rhs: LoadedHoleMap) -> Bool {
             lhs.holeNumber == rhs.holeNumber && lhs.image === rhs.image && lhs.spatialReference == rhs.spatialReference
         }
@@ -58,7 +71,7 @@ final class WatchMapStore: ObservableObject {
         let packageKey = installed.manifest.courseKey + "/v\(installed.manifest.version)"
         if cachedPackage != packageKey { imageCache.removeAll(); cachedPackage = packageKey }
         if let cached = imageCache[number] {
-            return LoadedHoleMap(holeNumber: number, image: cached, spatialReference: hole.spatialReference)
+            return LoadedHoleMap(holeNumber: number, image: cached, spatialReference: hole.spatialReference, reference: hole.golfReference)
         }
         let url = Self.packageDirectory(courseKey: installed.manifest.courseKey, version: installed.manifest.version).appendingPathComponent(hole.asset)
         guard let image = UIImage(contentsOfFile: url.path) else { return nil }
@@ -67,7 +80,7 @@ final class WatchMapStore: ObservableObject {
            holes actually looked at this round stay resident. */
         if imageCache.count >= 4 { imageCache.removeAll() }
         imageCache[number] = image
-        return LoadedHoleMap(holeNumber: number, image: image, spatialReference: hole.spatialReference)
+        return LoadedHoleMap(holeNumber: number, image: image, spatialReference: hole.spatialReference, reference: hole.golfReference)
     }
 
     /// What the phone needs in order to skip re-sending what is already here.

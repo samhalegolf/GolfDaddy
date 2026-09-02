@@ -120,6 +120,41 @@ public struct WatchMapCamera: Equatable {
         return low(player: player, centreX: centre.x, scale: scale, viewSize: viewSize)
     }
 
+    /* BUBBLE framing: the shot being shaped, with its surroundings.
+     *
+     * `play` anchors the player low and lets the target run off the top. That
+     * is right for a picture nobody can touch and wrong the moment the wrist
+     * is aiming: the thing being moved is off screen, and every re-fit around
+     * the player slides the map under the dot the player is not looking at —
+     * which reads as the origin wandering. So this frames the Bubble itself
+     * (its computed ring, or a nominal extent around a target with no ring yet)
+     * at a fixed share of the view and lets the PLAYER fall off the bottom.
+     * The aim line still reaches the edge and pivots as the target moves,
+     * which is exactly the cue that the origin is a fixed point in the world.
+     *
+     * `bubbleFraction` is how much of the view's shorter side the Bubble's
+     * longer side takes. 0.42 leaves better than a Bubble's width of ground
+     * on every side — the bunker short of it, the rough wide of it — which is
+     * the "surroundings". Floored at the width fill (no black bars, the same
+     * rule as `play`) and capped at the mush ceiling; `origin` then refuses to
+     * show background past an edge, so a Bubble near the top of the bake sits
+     * off-centre rather than floating. */
+    public static let bubbleFraction: CGFloat = 0.42
+
+    public static func bubble(centre: CGPoint, extent: CGSize,
+                              imageSize: CGSize, viewSize: CGSize) -> WatchMapCamera {
+        guard imageSize.width > 0, imageSize.height > 0, viewSize.width > 0, viewSize.height > 0 else {
+            return WatchMapCamera(focus: CGPoint(x: imageSize.width / 2, y: imageSize.height / 2), scale: 1)
+        }
+        let fillWidth = viewSize.width / imageSize.width
+        let longest = max(extent.width, extent.height)
+        let wanted = longest > 0 && longest.isFinite
+            ? (min(viewSize.width, viewSize.height) * bubbleFraction) / longest
+            : maximumScale
+        let scale = min(max(wanted, fillWidth), maximumScale)
+        return WatchMapCamera(focus: centre, scale: scale)
+    }
+
     /* The player sitting low, with the hole running up the screen.
      *
      * `playerHeightFraction` is how far down the view the player sits: 0.78

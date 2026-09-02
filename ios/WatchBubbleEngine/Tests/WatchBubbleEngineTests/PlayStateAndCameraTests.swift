@@ -287,4 +287,35 @@ final class PlayStateAndCameraTests: XCTestCase {
         XCTAssertNil(WatchMapCamera(focus: .zero, scale: 0)
             .imagePoint(fromView: .zero, imageSize: imageSize, viewSize: viewSize))
     }
+
+    // MARK: - Bubble framing
+
+    /* The aimable page frames the BUBBLE, not the player. A Driver's cluster
+       (about 83x101px on Millbrook's bake) sits centred, and the player 440px
+       behind it is allowed off the bottom: the aim line pivots from a fixed
+       origin instead of the map sliding under it on every re-fit. */
+    func testBubbleFramingCentresTheBubbleAndLetsThePlayerGo() {
+        let centre = CGPoint(x: 100, y: 700)
+        let camera = WatchMapCamera.bubble(centre: centre, extent: CGSize(width: 40, height: 50),
+                                           imageSize: holeImage, viewSize: viewSize)
+        let at = camera.place(centre, imageSize: holeImage, viewSize: viewSize)
+        XCTAssertEqual(at.x, viewSize.width / 2, accuracy: 0.5)
+        XCTAssertEqual(at.y, viewSize.height / 2, accuracy: 0.5)
+        XCTAssertEqual(50 * camera.scale, min(viewSize.width, viewSize.height) * WatchMapCamera.bubbleFraction,
+                       accuracy: 0.5, "the Bubble's longer side takes its fixed share of the view")
+        let player = camera.place(CGPoint(x: 100, y: 1140), imageSize: holeImage, viewSize: viewSize)
+        XCTAssertGreaterThan(player.y, viewSize.height, "a Driver's length behind the Bubble is off the bottom")
+    }
+
+    /* A big Bubble cannot zoom out past the width fill: side bars are still
+       not an option, and the ceiling still holds for a tiny one. */
+    func testBubbleFramingKeepsTheNoBarsFloorAndTheMushCeiling() {
+        let wide = WatchMapCamera.bubble(centre: CGPoint(x: 100, y: 700), extent: CGSize(width: 180, height: 220),
+                                         imageSize: holeImage, viewSize: viewSize)
+        XCTAssertEqual(wide.scale, viewSize.width / holeImage.width, accuracy: 1e-9)
+        XCTAssertGreaterThanOrEqual(holeImage.width * wide.scale, viewSize.width - 0.001)
+        let tiny = WatchMapCamera.bubble(centre: CGPoint(x: 100, y: 700), extent: CGSize(width: 4, height: 5),
+                                         imageSize: holeImage, viewSize: viewSize)
+        XCTAssertEqual(tiny.scale, WatchMapCamera.maximumScale)
+    }
 }
