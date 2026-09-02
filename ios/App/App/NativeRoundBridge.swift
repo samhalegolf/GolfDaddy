@@ -19,6 +19,8 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
         CAPPluginMethod(name: "publishWatchMap", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "publishWatchMapAsset", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "watchMapInventory", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "publishWatchPlayer", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "watchPlayerInventory", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "watchState", returnType: CAPPluginReturnPromise)
     ]
 
@@ -29,6 +31,7 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
        skip re-sending a package the wrist already has, and sending everything
        again is always a correct fallback. */
     private var watchMapInventoryReport: [String: Any]?
+    private var watchPlayerInventoryReport: [String: Any]?
 
     /* Capacitor bridges JavaScript null as NSNull, which WatchConnectivity
        refuses (WCErrorCodePayloadUnsupportedTypes). The wearable decoder treats
@@ -178,6 +181,56 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
         }
     }
 
+    // MARK: - Watch player snapshot
+
+    /* The player's bag and saved My Bubble. A third payload, because it fits
+       neither of the other two: the Scene is small and arrives many times a
+       minute, so equipment riding it would trail every distance update; the
+       lite-map package is ~100KB per COURSE, while a bag belongs to the PLAYER
+       and changes when they edit it.
+
+       Mirrored live and queued durably, exactly as publishScene and
+       publishWatchMap are and for the same reason - the queued stores do not
+       reach this two-target Watch app reliably, and the Watch's adoption of a
+       snapshot is idempotent, so the mirror and the queue cannot disagree.
+
+       Native is transport. It does not read a bag, validate one, or decide when
+       one has changed: JavaScript builds the snapshot and the Watch verifies it
+       against its own fingerprint before storing it. */
+    @objc public func publishWatchPlayer(_ call: CAPPluginCall) {
+        guard let player = call.getObject("player") else {
+            call.reject("A Watch player snapshot is required")
+            return
+        }
+        queue.async { [weak self] in
+            guard let self, let session = self.session else { call.resolve(["published": false]); return }
+            /* An omitted My Bubble offset is the whole point of the field (see
+               Bubble Bible s8) and Capacitor bridges a JS null as NSNull, which
+               makes the entire send throw WCErrorCodePayloadUnsupportedTypes.
+               Stripping is lossless: the Watch reads a missing key as nil. */
+            let payload = (Self.withoutNulls(player) as? [String: Any]) ?? [:]
+            if session.isReachable {
+                session.sendMessage(["watchPlayer": payload], replyHandler: nil, errorHandler: nil)
+            }
+            session.transferUserInfo(["watchPlayer": payload])
+            call.resolve(["published": true])
+        }
+    }
+
+    @objc public func watchPlayerInventory(_ call: CAPPluginCall) {
+        queue.async { [weak self] in
+            call.resolve(["inventory": self?.watchPlayerInventoryReport as Any])
+        }
+    }
+
+    /* The wrist's own answer to "which bag do you already hold". Kept for a
+       delivery module that attaches late and pushed to JavaScript now, so an
+       unchanged bag is never re-sent. */
+    private func receive(playerInventory: [String: Any]) {
+        queue.async { [weak self] in self?.watchPlayerInventoryReport = playerInventory }
+        notifyListeners("watchPlayerInventory", data: ["inventory": playerInventory])
+    }
+
     // MARK: - Watch presence
 
     /* Whether there is a wrist to hand the round to. JavaScript puts the answer
@@ -275,11 +328,13 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
     public func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
         if let command = message["command"] as? [String: Any] { receive(command) }
         if let inventory = message["watchMapHave"] as? [String: Any] { receive(inventory: inventory) }
+        if let held = message["watchPlayerHave"] as? [String: Any] { receive(playerInventory: held) }
     }
 
     public func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
         if let command = userInfo["command"] as? [String: Any] { receive(command) }
         if let inventory = userInfo["watchMapHave"] as? [String: Any] { receive(inventory: inventory) }
+        if let held = userInfo["watchPlayerHave"] as? [String: Any] { receive(playerInventory: held) }
     }
 
     /* The queued copy exists only to hand WatchConnectivity a stable file. Once

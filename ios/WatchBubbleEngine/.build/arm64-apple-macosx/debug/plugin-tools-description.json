@@ -1,0 +1,640 @@
+{
+  "builtTestProducts" : [
+    {
+      "binaryPath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.xctest/Contents/MacOS/WatchBubbleEnginePackageTests",
+      "packagePath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine",
+      "productName" : "WatchBubbleEnginePackageTests"
+    }
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.WatchBubbleEngine-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/sources",
+      "importPath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Sources/WatchBubbleEngine/Inputs.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Sources/WatchBubbleEngine/PlayerSnapshot.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "WatchBubbleEngine",
+      "moduleOutputPath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/Modules/WatchBubbleEngine.swiftmodule",
+      "objects" : [
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/Inputs.swift.o",
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/PlayerSnapshot.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx13.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/include/WatchBubbleEngine-Swift.h",
+        "-swift-version",
+        "5",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "watchbubbleengine"
+      ],
+      "outputFileMapPath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/Inputs.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/PlayerSnapshot.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/Modules/WatchBubbleEngine.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Sources/WatchBubbleEngine/Inputs.swift",
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Sources/WatchBubbleEngine/PlayerSnapshot.swift"
+      ],
+      "tempsPath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.WatchBubbleEnginePackageTests-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.build/sources",
+      "importPath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.derived/runner.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/Modules/WatchBubbleEngineTests.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "WatchBubbleEnginePackageTests",
+      "moduleOutputPath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/Modules/WatchBubbleEnginePackageTests.swiftmodule",
+      "objects" : [
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.build/runner.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx13.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-Xfrontend",
+        "-enable-cross-import-overlays",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.build/include/WatchBubbleEnginePackageTests-Swift.h",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "watchbubbleengine"
+      ],
+      "outputFileMapPath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.build/runner.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/Modules/WatchBubbleEnginePackageTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.derived/runner.swift"
+      ],
+      "tempsPath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.WatchBubbleEngineTests-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/sources",
+      "importPath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Tests/WatchBubbleEngineTests/BubbleEngineParityTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Tests/WatchBubbleEngineTests/PlayerSnapshotParityTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/Modules/WatchBubbleEngine.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "WatchBubbleEngineTests",
+      "moduleOutputPath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/Modules/WatchBubbleEngineTests.swiftmodule",
+      "objects" : [
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/BubbleEngineParityTests.swift.o",
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/PlayerSnapshotParityTests.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-Xfrontend",
+        "-enable-cross-import-overlays",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-swift-version",
+        "5",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "watchbubbleengine"
+      ],
+      "outputFileMapPath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/BubbleEngineParityTests.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/PlayerSnapshotParityTests.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/Modules/WatchBubbleEngineTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Tests/WatchBubbleEngineTests/BubbleEngineParityTests.swift",
+        "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Tests/WatchBubbleEngineTests/PlayerSnapshotParityTests.swift"
+      ],
+      "tempsPath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build",
+      "wholeModuleOptimization" : false
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "WatchBubbleEngine" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "WatchBubbleEngine",
+      "-package-name",
+      "watchbubbleengine",
+      "-c",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Sources/WatchBubbleEngine/Inputs.swift",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Sources/WatchBubbleEngine/PlayerSnapshot.swift",
+      "-I",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx13.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/include/WatchBubbleEngine-Swift.h",
+      "-swift-version",
+      "5",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "watchbubbleengine",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "WatchBubbleEnginePackageTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "WatchBubbleEnginePackageTests",
+      "-package-name",
+      "watchbubbleengine",
+      "-c",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.derived/runner.swift",
+      "-I",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx13.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-Xfrontend",
+      "-enable-cross-import-overlays",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.build/include/WatchBubbleEnginePackageTests-Swift.h",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "watchbubbleengine",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "WatchBubbleEngineTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "WatchBubbleEngineTests",
+      "-package-name",
+      "watchbubbleengine",
+      "-c",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Tests/WatchBubbleEngineTests/BubbleEngineParityTests.swift",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Tests/WatchBubbleEngineTests/PlayerSnapshotParityTests.swift",
+      "-I",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-Xfrontend",
+      "-enable-cross-import-overlays",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-swift-version",
+      "5",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "watchbubbleengine",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "WatchBubbleEngine" : [
+
+    ],
+    "WatchBubbleEnginePackageTests" : [
+      "WatchBubbleEngineTests",
+      "WatchBubbleEngine"
+    ],
+    "WatchBubbleEngineTests" : [
+      "WatchBubbleEngine"
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+    "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.derived/runner.swift" : {
+      "inputs" : [
+
+      ],
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.derived/runner.swift"
+        }
+      ]
+    }
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Sources/WatchBubbleEngine/Inputs.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Sources/WatchBubbleEngine/PlayerSnapshot.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/sources"
+    },
+    "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.derived/runner.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.build/sources"
+    },
+    "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/Inputs.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/PlayerSnapshot.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.build/runner.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/BubbleEngineParityTests.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/PlayerSnapshotParityTests.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEnginePackageTests.product/Objects.LinkFileList"
+    },
+    "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Tests/WatchBubbleEngineTests/BubbleEngineParityTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Tests/WatchBubbleEngineTests/PlayerSnapshotParityTests.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/sources"
+    },
+    "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+    }
+  }
+}

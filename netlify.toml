@@ -228,6 +228,15 @@
   to = "/.netlify/functions/coach-unlink-player"
   status = 200
 
+# Changing the email a player signs in with, on behalf of a coach or an admin.
+# It has to be a server call three times over: the row belongs to somebody else,
+# Supabase Auth is the only store that can accept or refuse the new address, and
+# the account holder has to be told at both addresses.
+[[redirects]]
+  from = "/api/account-change-email"
+  to = "/.netlify/functions/account-change-email"
+  status = 200
+
 # Removing one spare profile from your own account. Without it a deletion only
 # holds until account-profiles restores the row on the next device wipe.
 [[redirects]]

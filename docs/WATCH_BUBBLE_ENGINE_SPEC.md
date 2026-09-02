@@ -341,10 +341,19 @@ render     calculateVisualBubbleRender, getGDBForClub, gdBubbleShotBearing,
            gdGpsAimDistanceM, gdGpsAimOffsetM, gdBubbleRenderCenter,
            gdBubbleAxes, gdBubbleLocalToLatLng, localPointToLatLng,
            buildBubbleShape, gdSmoothBubbleLocalRing
-roof       gdBubbleRoofMaxDistanceM, gdBubbleForwardDistanceFromStart,
-           gdBubbleDepthForRoof, gdClampBubbleCenterToBagRoof
 geo        bearing, project, projectOffset, normAng, haversine
 ```
+
+**Not the bag roof.** `gdClampBubbleCenterToBagRoof`,
+`gdBubbleRoofMaxDistanceM`, `gdBubbleForwardDistanceFromStart` and
+`gdBubbleDepthForRoof` are defined in `gd-app-core.js`, copied into the client
+by the generator, and **called by nothing**. The clamp was taken out of the
+render path deliberately and `dev/fresh-app-boot.test.js` pins its absence from
+the other direction ("bag reach must not shift the completed Driver bubble
+centre"). Porting it would give the wrist behaviour the phone does not have, on
+every out-of-range aim. The `beyond-bag-reach` parity case records what the
+engine really does instead, so a Watch engine that helpfully ported the dead
+clamp fails the harness rather than quietly disagreeing.
 
 Orientation follows `scripts/gd-bubble-frame-core.js` and nothing else: 0° down
 the origin→target line, 90° square right, clockwise positive, `acrossM` on
@@ -397,10 +406,15 @@ Do not repeat that with a second, much larger engine.
    `app/js/bubble-engine.js` and asserts the expectations. This makes the
    fixture file authoritative on the JavaScript side, so it cannot silently
    describe an engine that no longer exists.
-3. An `xcodeproj` **test target** for the Watch, and
-   `BubbleEngineParityTests.swift` reading the *same* file — added to the target
-   as a resource, never re-typed into Swift literals. A copied fixture is a
-   second source of truth and defeats the point.
+3. A **SwiftPM package**, `ios/WatchBubbleEngine`, rather than a target inside
+   `App.xcodeproj`. It gets a test target (the xcodeproj has none, for anything),
+   `swift test` runs it on the Mac without a watchOS simulator, and it is the
+   shape the engine should be anyway — no UI, no WatchConnectivity, no round
+   state, so a Garmin or Wear adapter can reuse it later. Nothing in it may
+   import SwiftUI, WatchKit or WatchConnectivity; if it needs one of those it is
+   not the engine. `BubbleEngineParityTests.swift` resolves the fixture by
+   walking up from `#filePath` to the repo root — **not** a bundle resource
+   copy, because a copy is a second source of truth and defeats the point.
 4. Tolerances stated per field in the fixture, not global: metres to 0.1,
    degrees to 0.01, distances to 0.5.
 5. Coverage that includes the corners, not just the happy path — ghost bag,
@@ -636,17 +650,31 @@ inside a 448px image — and the same applies to any geometry that meets it.
 
 ## 15. Build order
 
-1. **Parity harness** — fixture file, `dev/` runner, Watch test target. Nothing
-   else is safe to build first (§6).
+1. ~~**Parity harness**~~ — **done.** `dev/fixtures/bubble-engine-parity.json`
+   (11 cases), `dev/bubble-engine-parity.test.js` running them through
+   `app/js/bubble-engine.js` with a deliberate `--update` to re-record, and
+   `ios/WatchBubbleEngine` — a SwiftPM package with a real test target reading
+   the same file by path. `npm run test:bubble-parity` and
+   `npm run test:bubble-parity:swift` (§6).
 2. ~~**Hole reference**~~ — **done.** `buildWatchHoleFrame` emits `reference`;
    `course-watch-maps.mjs` stores it and offers a
    `POST {courseId, action: "backfill-reference"}` that writes it into existing
    packages without re-baking or bumping the version, refusing any hole whose
-   recomputed spatial reference no longer matches the stored one;
+   *own geometry* has moved (`sameReferenceGeometry` — deliberately not the
+   projection basis, since surfaces are capture-time input and a hole reframes
+   harmlessly once they are no longer listed); all 18 Millbrook holes
+   backfilled 2026-09-02 against package `1788285633006`, images untouched;
    `manifestHole` forwards it field by field, omitted rather than nulled;
    `WatchMapManifest.Hole` decodes it tolerantly as optional (§2).
-3. **Bag + profile transport** — third payload, null-stripped, mirrored,
-   version-reported (§3.3).
+3. ~~**Bag + profile transport**~~ — **done.**
+   `app/js/watch-player-delivery.js` builds the snapshot and decides whether to
+   send it; `NativeRoundBridge.publishWatchPlayer` mirrors it live and queues it
+   durably, null-stripped; `WatchPlayerStore.swift` caches it and reports
+   `watchPlayerHave` back. Change detection is a content fingerprint rather than
+   a counter, shared with the Swift side and pinned in the parity fixture, and
+   the wrist recomputes it to refuse a truncated payload (§3.3).
+   `ios/WatchBubbleEngine` is now a real dependency of the Watch Extension
+   target, so the wire types are defined once.
 4. **Engine version handshake** — before the engine ships, so a mismatched pair
    is detectable on day one (§7).
 5. **The engine** — ported subset, stateless, fixtures green (§5).

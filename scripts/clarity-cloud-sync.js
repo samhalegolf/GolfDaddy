@@ -217,6 +217,43 @@
     });
   }
 
+  /* THE SERVER'S EMAIL WINS, AND THIS IS HOW THE DEVICE FINDS OUT.
+     A coach or an admin can change the login email of an account they manage
+     (functions/account-change-email.js). Nothing pushes that down to the
+     account holder's own device: the access token keeps working, the refresh
+     never re-reads the address, and the restore path only runs off a recovery
+     link. So the phone kept showing - and offering to sign in with - an address
+     that no longer exists, and the holder had only the confirmation email to go
+     on. account-sync echoes the stored address on every sync; adopting it here
+     is the propagation. */
+  function adoptServerEmail(result) {
+    var serverEmail = String((result && result.accountEmail) || "").trim().toLowerCase();
+    var accountId = result && result.accountId;
+    if (!serverEmail || !accountId) return;
+    safe(function () {
+      var raw = JSON.parse(localStorage.getItem(ACCOUNT_KEY) || "{}");
+      var accounts = Array.isArray(raw.accounts) ? raw.accounts : [];
+      var changed = false;
+      accounts.forEach(function (account) {
+        if (!account || account.accountId !== accountId) return;
+        if (String(account.email || "").trim().toLowerCase() === serverEmail) return;
+        account.email = serverEmail;
+        account.updatedAt = new Date().toISOString();
+        changed = true;
+      });
+      if (!changed) return;
+      gdSafeLocalSet(ACCOUNT_KEY, JSON.stringify(raw));
+      var profileRaw = JSON.parse(localStorage.getItem(PROFILE_KEY) || "{}");
+      var profiles = Array.isArray(profileRaw.profiles) ? profileRaw.profiles : [];
+      profiles.forEach(function (profile) {
+        if (profile && profile.accountId === accountId) profile.email = serverEmail;
+      });
+      gdSafeLocalSet(PROFILE_KEY, JSON.stringify(profileRaw));
+      if (window.GolfDaddyAccounts && typeof window.GolfDaddyAccounts.load === "function") window.GolfDaddyAccounts.load();
+      if (window.GolfDaddyAccounts && typeof window.GolfDaddyAccounts.apply === "function") window.GolfDaddyAccounts.apply({ silent: true });
+    });
+  }
+
   function enqueue(payload, error) {
     var status = error && error.status;
     if (status >= 400 && status < 500) return; // client errors won't succeed on retry
@@ -254,6 +291,7 @@
     try {
       var result = await post(payload);
       adoptCanonicalIds(result);
+      adoptServerEmail(result);
       saveStatus({ state: "synced", label: "Synced", lastSyncedAt: result.checkedAt || new Date().toISOString(), error: "" });
       return result;
     } catch (error) {

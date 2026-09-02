@@ -141,7 +141,18 @@ const root = path.join(__dirname, "..");
 
   const BACKFILL_OBJECTS = {
     "tee-1": { type: "tee", holeNumber: 1, position: { lat: -45.010, lng: 169.100 } },
-    "green-1": { type: "green", holeNumber: 1, position: { lat: -45.013, lng: 169.104 } }
+    "green-1": { type: "green", holeNumber: 1, position: { lat: -45.013, lng: 169.104 },
+      greenShape: [
+        { lat: -45.0129, lng: 169.1039 }, { lat: -45.0131, lng: 169.1041 },
+        { lat: -45.0130, lng: 169.1042 }, { lat: -45.0128, lng: 169.1040 }
+      ] },
+    "bunker-1": { type: "bunker", holeNumber: 1, shape: [
+      { lat: -45.0122, lng: 169.1032 }, { lat: -45.0123, lng: 169.1033 }, { lat: -45.0121, lng: 169.1034 }
+    ] },
+    "fw-1": { type: "fairway_area", holeNumber: 1, shape: [
+      { lat: -45.0105, lng: 169.1005 }, { lat: -45.0125, lng: 169.1030 },
+      { lat: -45.0120, lng: 169.1035 }, { lat: -45.0100, lng: 169.1010 }
+    ] }
   };
   function bakedHole(objects, holeNumber) {
     const frame = watchMapCore.buildWatchHoleFrame(
@@ -153,9 +164,12 @@ const root = path.join(__dirname, "..");
       height: frame.height,
       format: "webp",
       bytes: 4200,
-      spatialReference: frame.spatialReference
+      spatialReference: frame.spatialReference,
+      checkpoints: frame.checkpoints,
+      layers: frame.layers
     };
   }
+  const withoutSurfaces = { "tee-1": BACKFILL_OBJECTS["tee-1"], "green-1": BACKFILL_OBJECTS["green-1"] };
 
   const baked = bakedHole(BACKFILL_OBJECTS, 1);
   const unchanged = helpers.backfillHoleReferences({ objects_json: BACKFILL_OBJECTS }, { holes: [baked] });
@@ -166,15 +180,45 @@ const root = path.join(__dirname, "..");
     "a backfill writes the reference and touches nothing else");
   assert.strictEqual(unchanged.holes[0].path, baked.path);
 
+  /* THE CASE THAT MATTERS. The surfaces are gone from objects_json - they are
+     capture-time input, collected to be drawn, and the lean tee/green/route set
+     is all GPS Play needs. The canvas therefore reframes, because it is fitted
+     to the corridor plus whichever surface vertices fall inside it. None of
+     that is in the reference: the tee, green, green outline and play line are
+     untouched, and the reference is delivered beside the STORED spatial
+     reference, which still projects it onto the stored image exactly as before.
+     A guard that compared projection bases would refuse this, and refusing it
+     is refusing every honest backfill - all 18 Millbrook holes reframed this
+     way while their geometry stayed byte-identical. */
+  const reframed = helpers.backfillHoleReferences({ objects_json: withoutSurfaces }, { holes: [baked] });
+  assert.notStrictEqual(
+    watchMapCore.buildWatchHoleFrame(watchMapCore.WATCH_MAP_RECIPE_V1, watchMapCore.objectsForHole(withoutSurfaces, 1)).spatialReference.imageWidth,
+    baked.spatialReference.imageWidth,
+    "the fixture must actually reframe, or this case is not testing anything");
+  assert.strictEqual(reframed.updated, 1, "dropped surfaces reframe the canvas and must NOT block the backfill");
+  assert.strictEqual(reframed.skipped.length, 0);
+  assert.deepStrictEqual(reframed.holes[0].reference, unchanged.holes[0].reference,
+    "and the reference written is identical either way - surfaces are not in it");
+
   /* The green has been dragged 30m since the bake. The stored image still
      shows the old one, so this hole must be refused and named. */
   const moved = JSON.parse(JSON.stringify(BACKFILL_OBJECTS));
   moved["green-1"].position.lat -= 0.00027;
+  moved["green-1"].greenShape.forEach(p => { p.lat -= 0.00027; });
   const edited = helpers.backfillHoleReferences({ objects_json: moved }, { holes: [baked] });
-  assert.strictEqual(edited.updated, 0, "a package whose geometry has moved must not be described with the new geometry");
+  assert.strictEqual(edited.updated, 0, "a package whose hole has moved must not be described with the new geometry");
   assert.strictEqual(edited.skipped.length, 1);
   assert.match(edited.skipped[0].reason, /regenerate/, "the caller must be told the fix is a regenerate, not a retry");
   assert.strictEqual(edited.holes[0].reference, undefined, "a refused hole is left exactly as it was");
+
+  /* A re-routed hole: same tee, same green, an extra bend. The play line the
+     reference publishes would no longer be the one the image was drawn through. */
+  const rerouted = Object.assign({}, BACKFILL_OBJECTS, {
+    "bend-1": { type: "fairway", holeNumber: 1, position: { lat: -45.0118, lng: 169.1022 } }
+  });
+  const reroutedResult = helpers.backfillHoleReferences({ objects_json: rerouted }, { holes: [baked] });
+  assert.strictEqual(reroutedResult.updated, 0, "an added route bend changes the play line and must be refused");
+  assert.strictEqual(reroutedResult.skipped.length, 1);
 
   /* Idempotent: running it twice is not an error and is not a second write. */
   const again = helpers.backfillHoleReferences({ objects_json: BACKFILL_OBJECTS }, { holes: unchanged.holes });
@@ -190,20 +234,20 @@ const root = path.join(__dirname, "..");
   assert.strictEqual(orphan.skipped[0].holeNumber, 7);
   assert.match(orphan.skipped[0].reason, /no green geometry/);
 
-  // --- sameProjectionBasis --------------------------------------------------------------------
-  const basis = baked.spatialReference;
-  assert.strictEqual(helpers.sameProjectionBasis(basis, basis), true);
-  assert.strictEqual(helpers.sameProjectionBasis(basis, null), false);
-  /* A last-bit difference is the same computation; a metre is not. */
-  const nudged = JSON.parse(JSON.stringify(basis));
-  nudged.transform.tx += Math.abs(basis.transform.tx) * 1e-12;
-  assert.strictEqual(helpers.sameProjectionBasis(basis, nudged), true, "floating-point noise is not a moved green");
-  const shifted = JSON.parse(JSON.stringify(basis));
-  shifted.transform.tx += 1;
-  assert.strictEqual(helpers.sameProjectionBasis(basis, shifted), false);
-  const resized = JSON.parse(JSON.stringify(basis));
-  resized.imageWidth += 1;
-  assert.strictEqual(helpers.sameProjectionBasis(basis, resized), false, "a differently sized canvas is a different bake");
+  // --- sameReferenceGeometry ------------------------------------------------------------------
+  const freshSame = watchMapCore.buildWatchHoleFrame(
+    watchMapCore.WATCH_MAP_RECIPE_V1, watchMapCore.objectsForHole(BACKFILL_OBJECTS, 1));
+  assert.strictEqual(helpers.sameReferenceGeometry(baked, freshSame), true);
+  assert.strictEqual(helpers.sameReferenceGeometry(baked, null), false);
+  assert.strictEqual(helpers.sameReferenceGeometry({}, freshSame), false, "a row with no checkpoints cannot be verified");
+
+  /* An outline that has appeared or vanished since the bake is a change, even
+     though the green centre has not moved. */
+  const noShape = { "tee-1": BACKFILL_OBJECTS["tee-1"], "green-1": { type: "green", holeNumber: 1, position: BACKFILL_OBJECTS["green-1"].position } };
+  const freshNoShape = watchMapCore.buildWatchHoleFrame(
+    watchMapCore.WATCH_MAP_RECIPE_V1, watchMapCore.objectsForHole(noShape, 1));
+  assert.strictEqual(helpers.sameReferenceGeometry(baked, freshNoShape), false,
+    "losing the green outline is a change the reference would publish");
 
   console.log("course-watch-maps passed");
 })().catch((error) => {

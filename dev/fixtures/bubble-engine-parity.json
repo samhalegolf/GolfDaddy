@@ -1,0 +1,1702 @@
+{
+  "$comment": [
+    "Cross-platform Bubble parity fixtures. ONE file, read by two engines:",
+    "  dev/bubble-engine-parity.test.js                    runs these through app/js/bubble-engine.js",
+    "  ios/WatchBubbleEngine/Tests/.../BubbleEngineParityTests.swift   reads THIS path, never a copy",
+    "A copied fixture is a second source of truth and defeats the point.",
+    "",
+    "Expectations are recorded from the JavaScript engine, which is authoritative:",
+    "  node dev/bubble-engine-parity.test.js --update",
+    "That is a deliberate act, like re-running the client generator. Review the diff,",
+    "and bump bubbleEngineVersion when the answers change on purpose.",
+    "",
+    "Every case names why it exists. The corners are the point — a fixture set that",
+    "only covers a mid-iron from the middle of the fairway would pass on an engine",
+    "that had lost handedness, lost the ghost bag, or fabricated an aim offset."
+  ],
+  "bubbleEngineVersion": "bubble-engine-v1",
+  "tolerances": {
+    "$comment": "Per-field, because 0.1 means different things to a metre, a degree and a latitude. 1e-7 degrees is ~11mm.",
+    "metres": 0.1,
+    "degrees": 0.01,
+    "distanceM": 0.5,
+    "coordinate": 1e-7
+  },
+  "bags": {
+    "$comment": "A real account bag, longest first the way gdNormaliseShotBagRows sorts it. totalM omitted so the roll-out preset derives it — the wrist receives finished numbers, but the fixture pins the derivation too.",
+    "account": [
+      {
+        "club": "Driver",
+        "baseCarry": 205
+      },
+      {
+        "club": "3W",
+        "baseCarry": 190
+      },
+      {
+        "club": "5i",
+        "baseCarry": 155
+      },
+      {
+        "club": "7i",
+        "baseCarry": 138
+      },
+      {
+        "club": "9i",
+        "baseCarry": 118
+      },
+      {
+        "club": "PW",
+        "baseCarry": 103
+      }
+    ]
+  },
+  "holes": {
+    "$comment": "Akarana's 1st — the same hole dev/fresh-app-boot.test.js exercises the engine on, so a disagreement between the two files is about the engine and not about the ground.",
+    "akaranaFirst": {
+      "number": 1,
+      "tee": {
+        "lat": -36.9134,
+        "lng": 174.7411
+      },
+      "green": {
+        "lat": -36.9169,
+        "lng": 174.7393
+      },
+      "route": [
+        {
+          "lat": -36.9134,
+          "lng": 174.7411
+        },
+        {
+          "lat": -36.9145,
+          "lng": 174.7403
+        },
+        {
+          "lat": -36.9157,
+          "lng": 174.7398
+        },
+        {
+          "lat": -36.9169,
+          "lng": 174.7393
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "name": "mid-iron approach",
+      "why": "The ordinary case, and the baseline every other case is read against: a real account bag, a saved My Bubble, a target inside comfortable range.",
+      "input": {
+        "bag": [
+          {
+            "club": "Driver",
+            "baseCarry": 205
+          },
+          {
+            "club": "3W",
+            "baseCarry": 190
+          },
+          {
+            "club": "5i",
+            "baseCarry": 155
+          },
+          {
+            "club": "7i",
+            "baseCarry": 138
+          },
+          {
+            "club": "9i",
+            "baseCarry": 118
+          },
+          {
+            "club": "PW",
+            "baseCarry": 103
+          }
+        ],
+        "bubble": {
+          "offsetDeg": 3.2,
+          "handedness": "right"
+        },
+        "hole": {
+          "number": 1,
+          "tee": {
+            "lat": -36.9134,
+            "lng": 174.7411
+          },
+          "green": {
+            "lat": -36.9169,
+            "lng": 174.7393
+          },
+          "route": [
+            {
+              "lat": -36.9134,
+              "lng": 174.7411
+            },
+            {
+              "lat": -36.9145,
+              "lng": 174.7403
+            },
+            {
+              "lat": -36.9157,
+              "lng": 174.7398
+            },
+            {
+              "lat": -36.9169,
+              "lng": 174.7393
+            }
+          ]
+        },
+        "player": {
+          "lat": -36.9157,
+          "lng": 174.7398
+        },
+        "target": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        }
+      },
+      "expect": {
+        "defaultTarget": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        },
+        "targetDistanceM": 140.643,
+        "shotBearingDeg": 198.42,
+        "club": "7i",
+        "carryM": 138,
+        "totalM": 148,
+        "aimOffsetDeg": 3.2,
+        "aimOffsetM": 7.86,
+        "clusterWidthM": 20.4,
+        "clusterDepthM": 26.9,
+        "clusterTiltDeg": 5.35,
+        "visualWidthM": 22,
+        "visualDepthM": 28.8,
+        "visualTiltDeg": 6.71,
+        "ghostBag": false,
+        "bubbleCentre": {
+          "lat": -36.9168751,
+          "lng": 174.7392173
+        },
+        "ringSampleCount": 8,
+        "ringResolution": 168,
+        "ringSample": [
+          {
+            "lat": -36.9169619,
+            "lng": 174.7391535
+          },
+          {
+            "lat": -36.9168908,
+            "lng": 174.7390705
+          },
+          {
+            "lat": -36.9168105,
+            "lng": 174.7390735
+          },
+          {
+            "lat": -36.9167679,
+            "lng": 174.7391607
+          },
+          {
+            "lat": -36.9167882,
+            "lng": 174.7392812
+          },
+          {
+            "lat": -36.9168594,
+            "lng": 174.7393642
+          },
+          {
+            "lat": -36.9169397,
+            "lng": 174.7393611
+          },
+          {
+            "lat": -36.9169821,
+            "lng": 174.7392738
+          }
+        ]
+      }
+    },
+    {
+      "name": "ghost-bag",
+      "why": "With no account bag the engine falls back to its own stand-in carries and tags the answer ghostBag. That tag has to cross: a Bubble built on a ghost bag is a stand-in, and the wrist must be able to say so rather than presenting invented distances as the player's own.",
+      "input": {
+        "bag": [],
+        "bubble": {
+          "offsetDeg": 3.2,
+          "handedness": "right"
+        },
+        "hole": {
+          "number": 1,
+          "tee": {
+            "lat": -36.9134,
+            "lng": 174.7411
+          },
+          "green": {
+            "lat": -36.9169,
+            "lng": 174.7393
+          },
+          "route": [
+            {
+              "lat": -36.9134,
+              "lng": 174.7411
+            },
+            {
+              "lat": -36.9145,
+              "lng": 174.7403
+            },
+            {
+              "lat": -36.9157,
+              "lng": 174.7398
+            },
+            {
+              "lat": -36.9169,
+              "lng": 174.7393
+            }
+          ]
+        },
+        "player": {
+          "lat": -36.9157,
+          "lng": 174.7398
+        },
+        "target": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        }
+      },
+      "expect": {
+        "defaultTarget": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        },
+        "targetDistanceM": 140.643,
+        "shotBearingDeg": 198.42,
+        "club": "9i",
+        "carryM": 130,
+        "totalM": 140,
+        "aimOffsetDeg": 3.2,
+        "aimOffsetM": 7.86,
+        "clusterWidthM": 19.2,
+        "clusterDepthM": 25.4,
+        "clusterTiltDeg": 5.35,
+        "visualWidthM": 20.7,
+        "visualDepthM": 27.2,
+        "visualTiltDeg": 6.71,
+        "ghostBag": true,
+        "bubbleCentre": {
+          "lat": -36.916875,
+          "lng": 174.7392174
+        },
+        "ringSampleCount": 8,
+        "ringResolution": 168,
+        "ringSample": [
+          {
+            "lat": -36.916957,
+            "lng": 174.739157
+          },
+          {
+            "lat": -36.9168899,
+            "lng": 174.7390787
+          },
+          {
+            "lat": -36.916814,
+            "lng": 174.7390815
+          },
+          {
+            "lat": -36.9167737,
+            "lng": 174.739164
+          },
+          {
+            "lat": -36.9167928,
+            "lng": 174.7392778
+          },
+          {
+            "lat": -36.91686,
+            "lng": 174.7393562
+          },
+          {
+            "lat": -36.916936,
+            "lng": 174.7393532
+          },
+          {
+            "lat": -36.9169761,
+            "lng": 174.7392707
+          }
+        ]
+      }
+    },
+    {
+      "name": "no-my-bubble",
+      "why": "Bubble Bible s8. With no active saved bubble the aim is 0.0 deg EXPLICITLY, not the engine's placeholder 1.4 deg right — which used to be applied to everyone, left-handers included. Number(null) is 0 and passes a bare finite check, so this is the case that catches a fabricated aim reappearing.",
+      "input": {
+        "bag": [
+          {
+            "club": "Driver",
+            "baseCarry": 205
+          },
+          {
+            "club": "5i",
+            "baseCarry": 155
+          },
+          {
+            "club": "7i",
+            "baseCarry": 138
+          },
+          {
+            "club": "PW",
+            "baseCarry": 103
+          }
+        ],
+        "bubble": {
+          "offsetDeg": 0,
+          "handedness": "right"
+        },
+        "hole": {
+          "number": 1,
+          "tee": {
+            "lat": -36.9134,
+            "lng": 174.7411
+          },
+          "green": {
+            "lat": -36.9169,
+            "lng": 174.7393
+          },
+          "route": [
+            {
+              "lat": -36.9134,
+              "lng": 174.7411
+            },
+            {
+              "lat": -36.9157,
+              "lng": 174.7398
+            },
+            {
+              "lat": -36.9169,
+              "lng": 174.7393
+            }
+          ]
+        },
+        "player": {
+          "lat": -36.9157,
+          "lng": 174.7398
+        },
+        "target": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        }
+      },
+      "expect": {
+        "defaultTarget": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        },
+        "targetDistanceM": 140.643,
+        "shotBearingDeg": 198.42,
+        "club": "7i",
+        "carryM": 138,
+        "totalM": 148,
+        "aimOffsetDeg": 0,
+        "aimOffsetM": 0,
+        "clusterWidthM": 20.4,
+        "clusterDepthM": 26.9,
+        "clusterTiltDeg": 4.97,
+        "visualWidthM": 21.4,
+        "visualDepthM": 28.8,
+        "visualTiltDeg": 5.53,
+        "ghostBag": false,
+        "bubbleCentre": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        },
+        "ringSampleCount": 8,
+        "ringResolution": 168,
+        "ringSample": [
+          {
+            "lat": -36.9169863,
+            "lng": 174.7392422
+          },
+          {
+            "lat": -36.9169171,
+            "lng": 174.7391564
+          },
+          {
+            "lat": -36.9168378,
+            "lng": 174.7391545
+          },
+          {
+            "lat": -36.9167948,
+            "lng": 174.739238
+          },
+          {
+            "lat": -36.9168135,
+            "lng": 174.7393579
+          },
+          {
+            "lat": -36.9168829,
+            "lng": 174.7394438
+          },
+          {
+            "lat": -36.9169622,
+            "lng": 174.7394455
+          },
+          {
+            "lat": -36.917005,
+            "lng": 174.7393619
+          }
+        ]
+      }
+    },
+    {
+      "name": "left-handed",
+      "why": "The tilt mirrors with handedness — right is positive, left is the equal negative. A left-handed bubble legitimately looks like a right-handed one reflected, which is also exactly what an accidental mirror in a render chain looks like, so the sign is pinned here rather than judged by eye. Same inputs as 'mid-iron approach' but for the handedness.",
+      "input": {
+        "bag": [
+          {
+            "club": "Driver",
+            "baseCarry": 205
+          },
+          {
+            "club": "3W",
+            "baseCarry": 190
+          },
+          {
+            "club": "5i",
+            "baseCarry": 155
+          },
+          {
+            "club": "7i",
+            "baseCarry": 138
+          },
+          {
+            "club": "9i",
+            "baseCarry": 118
+          },
+          {
+            "club": "PW",
+            "baseCarry": 103
+          }
+        ],
+        "bubble": {
+          "offsetDeg": 3.2,
+          "handedness": "left"
+        },
+        "hole": {
+          "number": 1,
+          "tee": {
+            "lat": -36.9134,
+            "lng": 174.7411
+          },
+          "green": {
+            "lat": -36.9169,
+            "lng": 174.7393
+          },
+          "route": [
+            {
+              "lat": -36.9134,
+              "lng": 174.7411
+            },
+            {
+              "lat": -36.9145,
+              "lng": 174.7403
+            },
+            {
+              "lat": -36.9157,
+              "lng": 174.7398
+            },
+            {
+              "lat": -36.9169,
+              "lng": 174.7393
+            }
+          ]
+        },
+        "player": {
+          "lat": -36.9157,
+          "lng": 174.7398
+        },
+        "target": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        }
+      },
+      "expect": {
+        "defaultTarget": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        },
+        "targetDistanceM": 140.643,
+        "shotBearingDeg": 198.42,
+        "club": "7i",
+        "carryM": 138,
+        "totalM": 148,
+        "aimOffsetDeg": 3.2,
+        "aimOffsetM": 7.86,
+        "clusterWidthM": 20.4,
+        "clusterDepthM": 26.9,
+        "clusterTiltDeg": -5.35,
+        "visualWidthM": 22,
+        "visualDepthM": 28.8,
+        "visualTiltDeg": -3.99,
+        "ghostBag": false,
+        "bubbleCentre": {
+          "lat": -36.9168751,
+          "lng": 174.7392173
+        },
+        "ringSampleCount": 8,
+        "ringResolution": 168,
+        "ringSample": [
+          {
+            "lat": -36.9169701,
+            "lng": 174.7391747
+          },
+          {
+            "lat": -36.9169124,
+            "lng": 174.7390765
+          },
+          {
+            "lat": -36.916833,
+            "lng": 174.739061
+          },
+          {
+            "lat": -36.9167783,
+            "lng": 174.7391369
+          },
+          {
+            "lat": -36.9167803,
+            "lng": 174.7392599
+          },
+          {
+            "lat": -36.9168379,
+            "lng": 174.7393579
+          },
+          {
+            "lat": -36.9169172,
+            "lng": 174.7393736
+          },
+          {
+            "lat": -36.916972,
+            "lng": 174.7392978
+          }
+        ]
+      }
+    },
+    {
+      "name": "beyond-bag-reach",
+      "why": "A target far beyond anything in the bag. Pins what the engine ACTUALLY does: it selects the longest club and leaves the bubble on the target. It does NOT pull the centre back to the edge of the bag - gdClampBubbleCenterToBagRoof is defined in gd-app-core.js, copied into the client by the generator, and called by nothing. dev/fresh-app-boot.test.js pins its absence from the other direction (\"bag reach must not shift the completed Driver bubble centre\"). The Watch engine must not port it: a wrist that clamped here would disagree with the phone on every out-of-range aim.",
+      "input": {
+        "bag": [
+          {
+            "club": "9i",
+            "baseCarry": 118
+          },
+          {
+            "club": "PW",
+            "baseCarry": 103
+          }
+        ],
+        "bubble": {
+          "offsetDeg": 3.2,
+          "handedness": "right"
+        },
+        "hole": {
+          "number": 1,
+          "tee": {
+            "lat": -36.9134,
+            "lng": 174.7411
+          },
+          "green": {
+            "lat": -36.9169,
+            "lng": 174.7393
+          },
+          "route": [
+            {
+              "lat": -36.9134,
+              "lng": 174.7411
+            },
+            {
+              "lat": -36.9157,
+              "lng": 174.7398
+            },
+            {
+              "lat": -36.9169,
+              "lng": 174.7393
+            }
+          ]
+        },
+        "player": {
+          "lat": -36.9134,
+          "lng": 174.7411
+        },
+        "target": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        }
+      },
+      "expect": {
+        "defaultTarget": {
+          "lat": -36.9144171,
+          "lng": 174.740381
+        },
+        "targetDistanceM": 420.799,
+        "shotBearingDeg": 202.35,
+        "club": "9i",
+        "carryM": 118,
+        "totalM": 127,
+        "aimOffsetDeg": 3.2,
+        "aimOffsetM": 23.53,
+        "clusterWidthM": 17.5,
+        "clusterDepthM": 23,
+        "clusterTiltDeg": 5.35,
+        "visualWidthM": 18.9,
+        "visualDepthM": 24.6,
+        "visualTiltDeg": 6.71,
+        "ghostBag": false,
+        "bubbleCentre": {
+          "lat": -36.9168052,
+          "lng": 174.7390637
+        },
+        "ringSampleCount": 8,
+        "ringResolution": 168,
+        "ringSample": [
+          {
+            "lat": -36.9168764,
+            "lng": 174.7390012
+          },
+          {
+            "lat": -36.9168111,
+            "lng": 174.7389369
+          },
+          {
+            "lat": -36.9167423,
+            "lng": 174.7389468
+          },
+          {
+            "lat": -36.9167103,
+            "lng": 174.7390252
+          },
+          {
+            "lat": -36.9167339,
+            "lng": 174.7391262
+          },
+          {
+            "lat": -36.9167993,
+            "lng": 174.7391906
+          },
+          {
+            "lat": -36.9168681,
+            "lng": 174.7391806
+          },
+          {
+            "lat": -36.9169,
+            "lng": 174.7391021
+          }
+        ]
+      }
+    },
+    {
+      "name": "driver-off-the-tee",
+      "why": "The longest club and the widest pattern ratios. The target sits at 228m — the Driver TOTAL, not its 205m carry — because club selection ranks on total. A selector that ranked on carry would pick the 3W here and pass every shorter case.",
+      "input": {
+        "bag": [
+          {
+            "club": "Driver",
+            "baseCarry": 205
+          },
+          {
+            "club": "3W",
+            "baseCarry": 190
+          },
+          {
+            "club": "5i",
+            "baseCarry": 155
+          },
+          {
+            "club": "7i",
+            "baseCarry": 138
+          },
+          {
+            "club": "PW",
+            "baseCarry": 103
+          }
+        ],
+        "bubble": {
+          "offsetDeg": 2.1,
+          "handedness": "right"
+        },
+        "hole": {
+          "number": 1,
+          "tee": {
+            "lat": -36.9134,
+            "lng": 174.7411
+          },
+          "green": {
+            "lat": -36.9169,
+            "lng": 174.7393
+          },
+          "route": [
+            {
+              "lat": -36.9134,
+              "lng": 174.7411
+            },
+            {
+              "lat": -36.9145,
+              "lng": 174.7403
+            },
+            {
+              "lat": -36.9157,
+              "lng": 174.7398
+            },
+            {
+              "lat": -36.9169,
+              "lng": 174.7393
+            }
+          ]
+        },
+        "player": {
+          "lat": -36.9134,
+          "lng": 174.7411
+        },
+        "target": {
+          "lat": -36.915296,
+          "lng": 174.740125
+        }
+      },
+      "expect": {
+        "defaultTarget": {
+          "lat": -36.915222,
+          "lng": 174.7399238
+        },
+        "targetDistanceM": 227.95,
+        "shotBearingDeg": 202.35,
+        "club": "Driver",
+        "carryM": 205,
+        "totalM": 228,
+        "aimOffsetDeg": 2.1,
+        "aimOffsetM": 8.36,
+        "clusterWidthM": 39,
+        "clusterDepthM": 47.2,
+        "clusterTiltDeg": 6.22,
+        "visualWidthM": 41.6,
+        "visualDepthM": 56.4,
+        "visualTiltDeg": 7.31,
+        "ghostBag": false,
+        "bubbleCentre": {
+          "lat": -36.9152644,
+          "lng": 174.7400397
+        },
+        "ringSampleCount": 8,
+        "ringResolution": 168,
+        "ringSample": [
+          {
+            "lat": -36.9154197,
+            "lng": 174.7399024
+          },
+          {
+            "lat": -36.9152708,
+            "lng": 174.7397546
+          },
+          {
+            "lat": -36.915118,
+            "lng": 174.7397736
+          },
+          {
+            "lat": -36.9150507,
+            "lng": 174.7399487
+          },
+          {
+            "lat": -36.9151086,
+            "lng": 174.7401774
+          },
+          {
+            "lat": -36.9152579,
+            "lng": 174.7403254
+          },
+          {
+            "lat": -36.9154107,
+            "lng": 174.7403059
+          },
+          {
+            "lat": -36.9154777,
+            "lng": 174.7401306
+          }
+        ]
+      }
+    },
+    {
+      "name": "wedge-short-shot",
+      "why": "The other end of the bag. Wedges have their own pattern ratios and the smallest tilt influence, so a group lookup that quietly fell through to the iron defaults would pass every longer case and fail here.",
+      "input": {
+        "bag": [
+          {
+            "club": "Driver",
+            "baseCarry": 205
+          },
+          {
+            "club": "7i",
+            "baseCarry": 138
+          },
+          {
+            "club": "PW",
+            "baseCarry": 103
+          },
+          {
+            "club": "SW",
+            "baseCarry": 78
+          }
+        ],
+        "bubble": {
+          "offsetDeg": 1.6,
+          "handedness": "right"
+        },
+        "hole": {
+          "number": 1,
+          "tee": {
+            "lat": -36.9134,
+            "lng": 174.7411
+          },
+          "green": {
+            "lat": -36.9169,
+            "lng": 174.7393
+          },
+          "route": [
+            {
+              "lat": -36.9134,
+              "lng": 174.7411
+            },
+            {
+              "lat": -36.9169,
+              "lng": 174.7393
+            }
+          ]
+        },
+        "player": {
+          "lat": -36.9162,
+          "lng": 174.7396
+        },
+        "target": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        }
+      },
+      "expect": {
+        "defaultTarget": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        },
+        "targetDistanceM": 82.279,
+        "shotBearingDeg": 198.91,
+        "club": "SW",
+        "carryM": 78,
+        "totalM": 82,
+        "aimOffsetDeg": 1.6,
+        "aimOffsetM": 2.3,
+        "clusterWidthM": 9.4,
+        "clusterDepthM": 12.5,
+        "clusterTiltDeg": 3.66,
+        "visualWidthM": 10,
+        "visualDepthM": 13.4,
+        "visualTiltDeg": 4.62,
+        "ghostBag": false,
+        "bubbleCentre": {
+          "lat": -36.9168924,
+          "lng": 174.739276
+        },
+        "ringSampleCount": 8,
+        "ringResolution": 168,
+        "ringSample": [
+          {
+            "lat": -36.9169326,
+            "lng": 174.7392488
+          },
+          {
+            "lat": -36.9169006,
+            "lng": 174.7392088
+          },
+          {
+            "lat": -36.9168637,
+            "lng": 174.7392081
+          },
+          {
+            "lat": -36.9168436,
+            "lng": 174.7392472
+          },
+          {
+            "lat": -36.916852,
+            "lng": 174.7393032
+          },
+          {
+            "lat": -36.9168841,
+            "lng": 174.7393433
+          },
+          {
+            "lat": -36.916921,
+            "lng": 174.7393439
+          },
+          {
+            "lat": -36.9169411,
+            "lng": 174.7393047
+          }
+        ]
+      }
+    },
+    {
+      "name": "green-reachable-default-target",
+      "why": "The default-target rule with the green inside the bag: the target IS the green, not a lay-up short of it. Spec section 8 — the wrist recomputes this on hole change and on Reset.",
+      "input": {
+        "bag": [
+          {
+            "club": "Driver",
+            "baseCarry": 205
+          },
+          {
+            "club": "5i",
+            "baseCarry": 155
+          },
+          {
+            "club": "7i",
+            "baseCarry": 138
+          }
+        ],
+        "bubble": {
+          "offsetDeg": 3.2,
+          "handedness": "right"
+        },
+        "hole": {
+          "number": 1,
+          "tee": {
+            "lat": -36.9134,
+            "lng": 174.7411
+          },
+          "green": {
+            "lat": -36.9169,
+            "lng": 174.7393
+          },
+          "route": [
+            {
+              "lat": -36.9134,
+              "lng": 174.7411
+            },
+            {
+              "lat": -36.9157,
+              "lng": 174.7398
+            },
+            {
+              "lat": -36.9169,
+              "lng": 174.7393
+            }
+          ]
+        },
+        "player": {
+          "lat": -36.9157,
+          "lng": 174.7398
+        },
+        "target": null
+      },
+      "expect": {
+        "defaultTarget": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        },
+        "targetDistanceM": 140.643,
+        "shotBearingDeg": 198.42,
+        "club": "7i",
+        "carryM": 138,
+        "totalM": 148,
+        "aimOffsetDeg": 3.2,
+        "aimOffsetM": 7.86,
+        "clusterWidthM": 20.4,
+        "clusterDepthM": 26.9,
+        "clusterTiltDeg": 5.35,
+        "visualWidthM": 22,
+        "visualDepthM": 28.8,
+        "visualTiltDeg": 6.71,
+        "ghostBag": false,
+        "bubbleCentre": {
+          "lat": -36.9168751,
+          "lng": 174.7392173
+        },
+        "ringSampleCount": 8,
+        "ringResolution": 168,
+        "ringSample": [
+          {
+            "lat": -36.9169619,
+            "lng": 174.7391535
+          },
+          {
+            "lat": -36.9168908,
+            "lng": 174.7390705
+          },
+          {
+            "lat": -36.9168105,
+            "lng": 174.7390735
+          },
+          {
+            "lat": -36.9167679,
+            "lng": 174.7391607
+          },
+          {
+            "lat": -36.9167882,
+            "lng": 174.7392812
+          },
+          {
+            "lat": -36.9168594,
+            "lng": 174.7393642
+          },
+          {
+            "lat": -36.9169397,
+            "lng": 174.7393611
+          },
+          {
+            "lat": -36.9169821,
+            "lng": 174.7392738
+          }
+        ]
+      }
+    },
+    {
+      "name": "green-out-of-reach-lays-up",
+      "why": "The same rule with the green out of range: the default target walks down the hole's own route to the edge of the bag rather than cutting the straight line to the green. Pinned because the fairway-line gate has been supplied under the wrong name once already, and when it silently never opened every out-of-reach hole laid up across the dogleg.",
+      "input": {
+        "bag": [
+          {
+            "club": "9i",
+            "baseCarry": 118
+          },
+          {
+            "club": "PW",
+            "baseCarry": 103
+          }
+        ],
+        "bubble": {
+          "offsetDeg": 3.2,
+          "handedness": "right"
+        },
+        "hole": {
+          "number": 1,
+          "tee": {
+            "lat": -36.9134,
+            "lng": 174.7411
+          },
+          "green": {
+            "lat": -36.9169,
+            "lng": 174.7393
+          },
+          "route": [
+            {
+              "lat": -36.9134,
+              "lng": 174.7411
+            },
+            {
+              "lat": -36.9145,
+              "lng": 174.7403
+            },
+            {
+              "lat": -36.9157,
+              "lng": 174.7398
+            },
+            {
+              "lat": -36.9169,
+              "lng": 174.7393
+            }
+          ]
+        },
+        "player": {
+          "lat": -36.9134,
+          "lng": 174.7411
+        },
+        "target": null
+      },
+      "expect": {
+        "defaultTarget": {
+          "lat": -36.91433,
+          "lng": 174.740254
+        },
+        "targetDistanceM": 127.871,
+        "shotBearingDeg": 216.03,
+        "club": "9i",
+        "carryM": 118,
+        "totalM": 127,
+        "aimOffsetDeg": 3.2,
+        "aimOffsetM": 7.15,
+        "clusterWidthM": 17.5,
+        "clusterDepthM": 23,
+        "clusterTiltDeg": 5.35,
+        "visualWidthM": 18.9,
+        "visualDepthM": 24.6,
+        "visualTiltDeg": 6.71,
+        "ghostBag": false,
+        "bubbleCentre": {
+          "lat": -36.9142884,
+          "lng": 174.7401928
+        },
+        "ringSampleCount": 8,
+        "ringResolution": 168,
+        "ringSample": [
+          {
+            "lat": -36.9143441,
+            "lng": 174.7401094
+          },
+          {
+            "lat": -36.9142677,
+            "lng": 174.7400685
+          },
+          {
+            "lat": -36.9142033,
+            "lng": 174.7401004
+          },
+          {
+            "lat": -36.9141887,
+            "lng": 174.7401865
+          },
+          {
+            "lat": -36.9142325,
+            "lng": 174.7402764
+          },
+          {
+            "lat": -36.914309,
+            "lng": 174.7403173
+          },
+          {
+            "lat": -36.9143734,
+            "lng": 174.7402853
+          },
+          {
+            "lat": -36.9143879,
+            "lng": 174.7401991
+          }
+        ]
+      }
+    },
+    {
+      "name": "club-boundary-just-long",
+      "why": "A target just past the midpoint of two adjacent clubs (5i total 167m, 6i total 157m). Together with its neighbour this pins the exact boundary AND proves the engine has no hysteresis: it is a pure function of its inputs and answers whichever club is nearest. The transition band is a Watch INTERACTION concern and lives in WatchPlayState - if it ever leaks into the engine, this pair stops being reproducible and that is the signal.",
+      "input": {
+        "bag": [
+          {
+            "club": "5i",
+            "baseCarry": 155
+          },
+          {
+            "club": "6i",
+            "baseCarry": 146
+          },
+          {
+            "club": "7i",
+            "baseCarry": 138
+          }
+        ],
+        "bubble": {
+          "offsetDeg": 3.2,
+          "handedness": "right"
+        },
+        "hole": {
+          "number": 1,
+          "tee": {
+            "lat": -36.9134,
+            "lng": 174.7411
+          },
+          "green": {
+            "lat": -36.9169,
+            "lng": 174.7393
+          },
+          "route": [
+            {
+              "lat": -36.9134,
+              "lng": 174.7411
+            },
+            {
+              "lat": -36.9169,
+              "lng": 174.7393
+            }
+          ]
+        },
+        "player": {
+          "lat": -36.915544,
+          "lng": 174.739997
+        },
+        "target": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        }
+      },
+      "expect": {
+        "defaultTarget": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        },
+        "targetDistanceM": 163.017,
+        "shotBearingDeg": 202.34,
+        "club": "5i",
+        "carryM": 155,
+        "totalM": 167,
+        "aimOffsetDeg": 3.2,
+        "aimOffsetM": 9.11,
+        "clusterWidthM": 22.9,
+        "clusterDepthM": 30.2,
+        "clusterTiltDeg": 5.35,
+        "visualWidthM": 24.7,
+        "visualDepthM": 32.3,
+        "visualTiltDeg": 6.71,
+        "ghostBag": false,
+        "bubbleCentre": {
+          "lat": -36.916865,
+          "lng": 174.7392074
+        },
+        "ringSampleCount": 8,
+        "ringResolution": 168,
+        "ringSample": [
+          {
+            "lat": -36.916958,
+            "lng": 174.7391259
+          },
+          {
+            "lat": -36.9168723,
+            "lng": 174.7390409
+          },
+          {
+            "lat": -36.9167823,
+            "lng": 174.7390534
+          },
+          {
+            "lat": -36.9167407,
+            "lng": 174.7391561
+          },
+          {
+            "lat": -36.916772,
+            "lng": 174.739289
+          },
+          {
+            "lat": -36.9168578,
+            "lng": 174.7393741
+          },
+          {
+            "lat": -36.9169478,
+            "lng": 174.7393614
+          },
+          {
+            "lat": -36.9169893,
+            "lng": 174.7392586
+          }
+        ]
+      }
+    },
+    {
+      "name": "club-boundary-just-short",
+      "why": "The other side of the same boundary, four metres away, and it must answer the next club down. One case cannot tell a working selector from one stuck on the longest club in the bag.",
+      "input": {
+        "bag": [
+          {
+            "club": "5i",
+            "baseCarry": 155
+          },
+          {
+            "club": "6i",
+            "baseCarry": 146
+          },
+          {
+            "club": "7i",
+            "baseCarry": 138
+          }
+        ],
+        "bubble": {
+          "offsetDeg": 3.2,
+          "handedness": "right"
+        },
+        "hole": {
+          "number": 1,
+          "tee": {
+            "lat": -36.9134,
+            "lng": 174.7411
+          },
+          "green": {
+            "lat": -36.9169,
+            "lng": 174.7393
+          },
+          "route": [
+            {
+              "lat": -36.9134,
+              "lng": 174.7411
+            },
+            {
+              "lat": -36.9169,
+              "lng": 174.7393
+            }
+          ]
+        },
+        "player": {
+          "lat": -36.915578,
+          "lng": 174.73998
+        },
+        "target": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        }
+      },
+      "expect": {
+        "defaultTarget": {
+          "lat": -36.9169,
+          "lng": 174.7393
+        },
+        "targetDistanceM": 158.945,
+        "shotBearingDeg": 202.35,
+        "club": "6i",
+        "carryM": 146,
+        "totalM": 157,
+        "aimOffsetDeg": 3.2,
+        "aimOffsetM": 8.89,
+        "clusterWidthM": 21.6,
+        "clusterDepthM": 28.5,
+        "clusterTiltDeg": 5.35,
+        "visualWidthM": 23.3,
+        "visualDepthM": 30.5,
+        "visualTiltDeg": 6.71,
+        "ghostBag": false,
+        "bubbleCentre": {
+          "lat": -36.9168658,
+          "lng": 174.7392097
+        },
+        "ringSampleCount": 8,
+        "ringResolution": 168,
+        "ringSample": [
+          {
+            "lat": -36.9169534,
+            "lng": 174.7391328
+          },
+          {
+            "lat": -36.9168725,
+            "lng": 174.7390525
+          },
+          {
+            "lat": -36.9167876,
+            "lng": 174.7390643
+          },
+          {
+            "lat": -36.9167484,
+            "lng": 174.7391613
+          },
+          {
+            "lat": -36.916778,
+            "lng": 174.7392867
+          },
+          {
+            "lat": -36.9168591,
+            "lng": 174.739367
+          },
+          {
+            "lat": -36.916944,
+            "lng": 174.7393551
+          },
+          {
+            "lat": -36.9169831,
+            "lng": 174.739258
+          }
+        ]
+      }
+    }
+  ],
+  "playerFingerprints": {
+    "$comment": [
+      "The bag/profile snapshot fingerprint, pinned across both engines.",
+      "Built by watchPlayerFingerprint in app/js/watch-player-delivery.js and recomputed by",
+      "WatchPlayerSnapshot.fingerprint in ios/WatchBubbleEngine. The wrist VERIFIES an arriving",
+      "snapshot against its own recomputation, so a disagreement here is not cosmetic: it would",
+      "make the wrist reject every bag the phone sends."
+    ],
+    "engineVersion": "bubble-engine-v1",
+    "cases": [
+      {
+        "name": "account bag with a saved aim",
+        "why": "The ordinary case. Clubs are emitted longest-total-first, which is the bag order, and the aim is a real saved value.",
+        "input": {
+          "bag": [
+            {
+              "club": "Driver",
+              "baseCarry": 205,
+              "totalM": 228
+            },
+            {
+              "club": "5i",
+              "baseCarry": 155,
+              "totalM": 167
+            },
+            {
+              "club": "PW",
+              "baseCarry": 103,
+              "totalM": 108
+            }
+          ],
+          "bubble": {
+            "offsetDeg": 3.2
+          },
+          "handedness": "right"
+        },
+        "expect": {
+          "fingerprint": "v1|g0|Driver:205:228|5i:155:167|PW:103:108|b:3.20:right|e:bubble-engine-v1",
+          "clubs": [
+            {
+              "club": "Driver",
+              "carryM": 205,
+              "totalM": 228
+            },
+            {
+              "club": "5i",
+              "carryM": 155,
+              "totalM": 167
+            },
+            {
+              "club": "PW",
+              "carryM": 103,
+              "totalM": 108
+            }
+          ],
+          "isGhost": false,
+          "bubble": {
+            "handedness": "right",
+            "offsetDeg": 3.2
+          }
+        }
+      },
+      {
+        "name": "shuffled bag is the same bag",
+        "why": "Arrival order must not change the fingerprint, or a re-render that reorders rows would re-send the whole bag.",
+        "input": {
+          "bag": [
+            {
+              "club": "PW",
+              "baseCarry": 103,
+              "totalM": 108
+            },
+            {
+              "club": "Driver",
+              "baseCarry": 205,
+              "totalM": 228
+            },
+            {
+              "club": "5i",
+              "baseCarry": 155,
+              "totalM": 167
+            }
+          ],
+          "bubble": {
+            "offsetDeg": 3.2
+          },
+          "handedness": "right"
+        },
+        "expect": {
+          "fingerprint": "v1|g0|Driver:205:228|5i:155:167|PW:103:108|b:3.20:right|e:bubble-engine-v1",
+          "clubs": [
+            {
+              "club": "Driver",
+              "carryM": 205,
+              "totalM": 228
+            },
+            {
+              "club": "5i",
+              "carryM": 155,
+              "totalM": 167
+            },
+            {
+              "club": "PW",
+              "carryM": 103,
+              "totalM": 108
+            }
+          ],
+          "isGhost": false,
+          "bubble": {
+            "handedness": "right",
+            "offsetDeg": 3.2
+          }
+        }
+      },
+      {
+        "name": "no my bubble",
+        "why": "An absent aim is `-`, NOT `0`. A saved zero-degree aim is a real and different thing (Bubble Bible s8) and the two must not share a fingerprint.",
+        "input": {
+          "bag": [
+            {
+              "club": "Driver",
+              "baseCarry": 205,
+              "totalM": 228
+            }
+          ],
+          "bubble": null,
+          "handedness": "right"
+        },
+        "expect": {
+          "fingerprint": "v1|g0|Driver:205:228|b:-:right|e:bubble-engine-v1",
+          "clubs": [
+            {
+              "club": "Driver",
+              "carryM": 205,
+              "totalM": 228
+            }
+          ],
+          "isGhost": false,
+          "bubble": {
+            "handedness": "right"
+          }
+        }
+      },
+      {
+        "name": "saved zero aim",
+        "why": "The other side of that pair. Same bag, same handedness, and it must NOT collide with the absent-aim case above.",
+        "input": {
+          "bag": [
+            {
+              "club": "Driver",
+              "baseCarry": 205,
+              "totalM": 228
+            }
+          ],
+          "bubble": {
+            "offsetDeg": 0
+          },
+          "handedness": "right"
+        },
+        "expect": {
+          "fingerprint": "v1|g0|Driver:205:228|b:0.00:right|e:bubble-engine-v1",
+          "clubs": [
+            {
+              "club": "Driver",
+              "carryM": 205,
+              "totalM": 228
+            }
+          ],
+          "isGhost": false,
+          "bubble": {
+            "handedness": "right",
+            "offsetDeg": 0
+          }
+        }
+      },
+      {
+        "name": "left handed",
+        "why": "Handedness is in the fingerprint because it mirrors the Bubble; the same bag played left-handed is a different snapshot.",
+        "input": {
+          "bag": [
+            {
+              "club": "Driver",
+              "baseCarry": 205,
+              "totalM": 228
+            }
+          ],
+          "bubble": {
+            "offsetDeg": 3.2
+          },
+          "handedness": "left"
+        },
+        "expect": {
+          "fingerprint": "v1|g0|Driver:205:228|b:3.20:left|e:bubble-engine-v1",
+          "clubs": [
+            {
+              "club": "Driver",
+              "carryM": 205,
+              "totalM": 228
+            }
+          ],
+          "isGhost": false,
+          "bubble": {
+            "handedness": "left",
+            "offsetDeg": 3.2
+          }
+        }
+      },
+      {
+        "name": "ghost bag",
+        "why": "The ghost flag is in the fingerprint, so adopting a real bag with identical numbers still re-sends - the wrist must stop calling it a stand-in.",
+        "input": {
+          "bag": [
+            {
+              "club": "Driver",
+              "baseCarry": 205,
+              "totalM": 228,
+              "ghostBag": true
+            }
+          ],
+          "bubble": {
+            "offsetDeg": 3.2
+          },
+          "handedness": "right"
+        },
+        "expect": {
+          "fingerprint": "v1|g1|Driver:205:228|b:3.20:right|e:bubble-engine-v1",
+          "clubs": [
+            {
+              "club": "Driver",
+              "carryM": 205,
+              "totalM": 228
+            }
+          ],
+          "isGhost": true,
+          "bubble": {
+            "handedness": "right",
+            "offsetDeg": 3.2
+          }
+        }
+      },
+      {
+        "name": "fractional distances round to whole metres",
+        "why": "A bag is edited and displayed in whole metres. A float artefact must not read as an equipment change and re-send the bag every Scene.",
+        "input": {
+          "bag": [
+            {
+              "club": "7i",
+              "baseCarry": 138.4,
+              "totalM": 148.49
+            }
+          ],
+          "bubble": {
+            "offsetDeg": 1.6667
+          },
+          "handedness": "right"
+        },
+        "expect": {
+          "fingerprint": "v1|g0|7i:138:148|b:1.67:right|e:bubble-engine-v1",
+          "clubs": [
+            {
+              "club": "7i",
+              "carryM": 138,
+              "totalM": 148
+            }
+          ],
+          "isGhost": false,
+          "bubble": {
+            "handedness": "right",
+            "offsetDeg": 1.6667
+          }
+        }
+      },
+      {
+        "name": "total below carry falls back to carry",
+        "why": "A row whose stored total is under its carry is not a broken row - it simply has no total, and the carry stands in.",
+        "input": {
+          "bag": [
+            {
+              "club": "7i",
+              "baseCarry": 138,
+              "totalM": 100
+            }
+          ],
+          "bubble": {
+            "offsetDeg": 1.6
+          },
+          "handedness": "right"
+        },
+        "expect": {
+          "fingerprint": "v1|g0|7i:138:138|b:1.60:right|e:bubble-engine-v1",
+          "clubs": [
+            {
+              "club": "7i",
+              "carryM": 138,
+              "totalM": 138
+            }
+          ],
+          "isGhost": false,
+          "bubble": {
+            "handedness": "right",
+            "offsetDeg": 1.6
+          }
+        }
+      }
+    ]
+  }
+}

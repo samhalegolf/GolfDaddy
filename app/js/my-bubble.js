@@ -79,6 +79,12 @@
 
   app.myBubble = {
     current: saved,
+    /* Handedness is NOT part of "is there a My Bubble". A player is
+       left- or right-handed whether or not they have adopted one, and the
+       Watch needs the answer either way to lay a Bubble down. current()
+       returning null must not be read as "right-handed" by a caller that
+       only has current() to ask. */
+    handedness: function () { return handednessOf(activeProfile()); },
     refresh: apply,
     onChange: function (fn) { listeners.push(fn); }
   };

@@ -26,9 +26,29 @@
       try { window.GDWatchMapDelivery.deliver(key); } catch (e) {}
     }
 
-    watch.onScene(function (scene) { publish(scene); deliverMaps(scene); });
+    /* The bag and the saved My Bubble, so the wrist can size a Bubble without
+       asking. Driven off the Scene stream for the same reasons the maps are -
+       it covers a resumed round and a late-registering plugin - and the module
+       is a fingerprint compare when nothing has changed, which is most Scenes. */
+    function deliverPlayer() {
+      if (!window.GDWatchPlayerDelivery) return;
+      try { window.GDWatchPlayerDelivery.deliver(); } catch (e) {}
+    }
+
+    watch.onScene(function (scene) { publish(scene); deliverMaps(scene); deliverPlayer(); });
     publish(watch.scene());
     deliverMaps(watch.scene());
+    deliverPlayer();
+
+    /* A bag edit or a My Bubble save mid-round must not wait for the player to
+       change something else. my-bubble.js already broadcasts an adopted aim;
+       clearing the delivery's note makes the next Scene re-publish. */
+    if (window.ClarityApp && window.ClarityApp.myBubble && typeof window.ClarityApp.myBubble.onChange === "function") {
+      window.ClarityApp.myBubble.onChange(function () {
+        if (window.GDWatchPlayerDelivery) { try { window.GDWatchPlayerDelivery.invalidate(); } catch (e) {} }
+        deliverPlayer();
+      });
+    }
     var cap = window.Capacitor;
     var plugin = cap && cap.Plugins && cap.Plugins.NativeRoundBridge;
     /* Whether there is a Watch to hand over to at all. Native reports it on
@@ -55,6 +75,16 @@
     if (plugin && delivery && typeof delivery.noteInventory === "function" && typeof plugin.addListener === "function") {
       try {
         plugin.addListener("watchMapInventory", function (event) { delivery.noteInventory(event && event.inventory); });
+      } catch (e) {}
+    }
+    /* What the wrist says it already holds, so an unchanged bag is never
+       re-sent. Losing this report costs one re-send, never correctness. */
+    if (plugin && typeof plugin.addListener === "function" && window.GDWatchPlayerDelivery) {
+      try {
+        plugin.addListener("watchPlayerInventory", function (event) {
+          window.GDWatchPlayerDelivery.noteInventory(event && event.inventory);
+          deliverPlayer();
+        });
       } catch (e) {}
     }
     if (plugin && typeof plugin.addListener === "function") {

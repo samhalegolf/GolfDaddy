@@ -1,0 +1,19 @@
+{
+  "": {
+    "swift-dependencies": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/primary.swiftdeps"
+  },
+  "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Tests/WatchBubbleEngineTests/BubbleEngineParityTests.swift": {
+    "dependencies": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/BubbleEngineParityTests.d",
+    "object": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/BubbleEngineParityTests.swift.o",
+    "swiftmodule": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/BubbleEngineParityTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/BubbleEngineParityTests.swiftdeps",
+    "diagnostics": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/BubbleEngineParityTests.dia"
+  },
+  "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Tests/WatchBubbleEngineTests/PlayerSnapshotParityTests.swift": {
+    "dependencies": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/PlayerSnapshotParityTests.d",
+    "object": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/PlayerSnapshotParityTests.swift.o",
+    "swiftmodule": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/PlayerSnapshotParityTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/PlayerSnapshotParityTests.swiftdeps",
+    "diagnostics": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngineTests.build/PlayerSnapshotParityTests.dia"
+  }
+}

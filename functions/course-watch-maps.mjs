@@ -6,9 +6,8 @@
                                      replaces the course's course_watch_maps row.
    POST {courseId, action:       -> admin-only, metadata only. Writes the hole reference into an
          "backfill-reference"}      already-baked package without re-baking imagery or bumping
-                                     its version, and only for holes whose stored spatial
-                                     reference still matches a fresh bake. See
-                                     backfillHoleReferences.
+                                     its version, and only for holes whose own geometry has
+                                     not moved since. See backfillHoleReferences.
 
    Deliberately synchronous, not a job queue like course-visual-jobs.mjs/course-mapper-jobs.mjs:
    those exist because their work fetches tens of thousands of external map tiles. This pipeline
@@ -273,24 +272,52 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
   return row;
 }
 
-/* Are these two spatial references the same projection basis?
-
-   Used to prove a stored package was baked from the geometry we are about to
-   describe it with. The transform's translation terms run to ~1e8 world pixels
-   and one metre of movement anywhere in the hole moves them by orders of
-   magnitude more than this, so a tight RELATIVE tolerance separates "the same
-   deterministic computation" from "the geometry has been edited" with an
-   enormous margin either side. Exact equality would be true in practice and
-   would also make a harmless last-bit difference look like a moved green. */
-function sameProjectionBasis(a, b) {
+function sameCoordinate(a, b) {
   if (!a || !b) return false;
-  if (Number(a.refZoom) !== Number(b.refZoom)) return false;
-  if (Number(a.imageWidth) !== Number(b.imageWidth) || Number(a.imageHeight) !== Number(b.imageHeight)) return false;
-  return ["a", "b", "tx", "ty"].every(key => {
-    const x = Number(a.transform && a.transform[key]), y = Number(b.transform && b.transform[key]);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-    return Math.abs(x - y) <= 1e-9 * Math.max(1, Math.abs(x), Math.abs(y));
-  });
+  return Math.abs(Number(a.lat) - Number(b.lat)) < 1e-9 && Math.abs(Number(a.lng) - Number(b.lng)) < 1e-9;
+}
+
+/* Does the stored package still describe the same hole the reference is about
+   to claim it does?
+
+   THE THING THIS MUST NOT COMPARE is the projection basis. The obvious guard —
+   re-bake the hole and require an identical spatial reference — is wrong here,
+   and wrong in a way that refuses every honest backfill.
+
+   The canvas is framed on the hole's play corridor PLUS whichever mapped
+   surface vertices fall inside it, so the image's width depends on the
+   fairways, bunkers and water that were in objects_json at bake time. Those are
+   capture-time input: they are collected to be drawn, they become part of the
+   image, and the lean tee/green/route set that objects_json settles back to is
+   all GPS Play needs. Millbrook proves the point — all 18 holes have identical
+   tees, greens, green extents, route point counts and hole bearings, and all 18
+   canvases changed width, purely because the surfaces are no longer listed.
+
+   None of that is in the reference. The reference is lat/lng, and it is
+   delivered beside the STORED spatial reference, which still projects it onto
+   the stored image exactly as it always did. So the honest question is only
+   whether the geometry the reference itself carries has moved, and that is what
+   is compared here: the tee, the green, the green outline's near and far
+   extents, the number of points in the play line, and the hole's bearing.
+
+   Known gap, stated rather than papered over: a green outline that changed
+   shape while keeping the same nearest and farthest points from the tee would
+   pass. checkpoints is all the stored row keeps of the outline, so that is the
+   floor available without re-reading the image. A moved green, a moved tee, a
+   re-routed hole or a re-shaped green that moves either extent are all caught. */
+function sameReferenceGeometry(stored, fresh) {
+  const a = stored && stored.checkpoints, b = fresh && fresh.checkpoints;
+  if (!a || !b) return false;
+  if (!sameCoordinate(a.tee, b.tee) || !sameCoordinate(a.green, b.green)) return false;
+  /* An outline that has appeared or vanished since the bake is a change. */
+  if (!!a.greenFront !== !!b.greenFront || !!a.greenBack !== !!b.greenBack) return false;
+  if (a.greenFront && (!sameCoordinate(a.greenFront, b.greenFront) || !sameCoordinate(a.greenBack, b.greenBack))) return false;
+  if (Number(stored.layers && stored.layers.routePoints) !== Number(fresh.layers && fresh.layers.routePoints)) return false;
+  /* The bearing the reference publishes is derived from this rotation, so it is
+     compared directly rather than trusted to follow from the tee and green. */
+  const rotation = Math.abs(Number(stored.spatialReference && stored.spatialReference.rotationDegrees)
+    - Number(fresh.spatialReference && fresh.spatialReference.rotationDegrees));
+  return Number.isFinite(rotation) && rotation < 1e-9;
 }
 
 /* Gives an already-baked package the hole reference it was generated without.
@@ -306,10 +333,11 @@ function sameProjectionBasis(a, b) {
    since the bake, and a reference describing today's green sitting under an
    image drawn from last week's would put the wrist's Bubble in a place the
    picture disagrees with - silently, because both halves are individually
-   valid. So every hole is re-run through the real generator and its recomputed
-   spatial reference must match the stored one before its reference is
-   accepted. A hole that fails that test is left exactly as it was and named in
-   the report; the fix for it is a regenerate, not a backfill. */
+   valid. So every hole is re-run through the real generator and the geometry
+   the REFERENCE itself carries must be unchanged before it is accepted; see
+   sameReferenceGeometry, which deliberately does not care that the canvas has
+   been reframed. A hole that fails is left exactly as it was and named in the
+   report; the fix for it is a regenerate, not a backfill. */
 function backfillHoleReferences(map, row) {
   const stored = Array.isArray(row && row.holes) ? row.holes : [];
   const skipped = [];
@@ -328,8 +356,8 @@ function backfillHoleReferences(map, row) {
       skipped.push({ holeNumber, reason: frame.reason });
       return hole;
     }
-    if (!sameProjectionBasis(frame.spatialReference, hole.spatialReference)) {
-      skipped.push({ holeNumber, reason: "geometry has changed since this package was baked - regenerate instead" });
+    if (!sameReferenceGeometry(hole, frame)) {
+      skipped.push({ holeNumber, reason: "the hole's own geometry has moved since this package was baked - regenerate instead" });
       return hole;
     }
     updated += 1;
@@ -472,7 +500,7 @@ export const config = {
   path: "/api/course-watch-maps",
 };
 
-export const __test = { holeNumbersFromObjects, reportShape, recoveryReport, supersededPaths, sameProjectionBasis, backfillHoleReferences };
+export const __test = { holeNumbersFromObjects, reportShape, recoveryReport, supersededPaths, sameReferenceGeometry, backfillHoleReferences };
 
 function json(status, body) {
   return new Response(body == null ? "" : JSON.stringify(body), {

@@ -52,6 +52,10 @@ final class WatchSessionManager: NSObject, ObservableObject {
        are large, they change only when a course is regenerated, and a Scene
        arrives many times a minute. */
     nonisolated let maps = WatchMapStore()
+    /* The bag and saved My Bubble. Its own store because it is its own
+       transport: a snapshot belongs to the PLAYER and changes when they edit
+       their bag, while a map package belongs to the course. */
+    nonisolated let player = WatchPlayerStore()
 
     /* The point a lite map draws the player at: the wrist's own fix while it has
        a trustworthy one, the phone's otherwise. Published separately from
@@ -83,6 +87,10 @@ final class WatchSessionManager: NSObject, ObservableObject {
             .dropFirst()
             .debounce(for: .milliseconds(400), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in self?.reportMapInventory() }
+        /* Told once on activation, so a phone that has been sending into the
+           void since a reinstall learns immediately that this wrist holds
+           nothing. */
+        reportPlayerInventory()
     }
 
     /* LOCK always resolves against the wrist's own GPS when a recent, accurate
@@ -239,6 +247,16 @@ final class WatchSessionManager: NSObject, ObservableObject {
         session.transferUserInfo(payload)
     }
 
+    /* Which bag this wrist holds, so the phone re-sends only when it differs.
+       An empty fingerprint means "none", which is what makes a phone send one.
+       Losing this report costs one re-send, never correctness. */
+    private func reportPlayerInventory() {
+        guard let session, session.activationState == .activated else { return }
+        let payload: [String: Any] = ["watchPlayerHave": player.inventory]
+        if session.isReachable { session.sendMessage(payload, replyHandler: nil, errorHandler: nil) }
+        session.transferUserInfo(payload)
+    }
+
     private func commandMessage(_ command: CaddyWatchCommand) -> [String: Any]? {
         guard let data = try? JSONEncoder().encode(command),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
@@ -296,6 +314,13 @@ extension WatchSessionManager: WCSessionDelegate {
             maps.accept(bytes: bytes, metadata: asset)
             return
         }
+        if let snapshot = message["watchPlayer"] {
+            Task { @MainActor [weak self] in
+                self?.player.receive(player: snapshot)
+                self?.reportPlayerInventory()
+            }
+            return
+        }
         guard let acknowledgement = message["acknowledgement"] as? [String: Any] else { return }
         Task { @MainActor [weak self] in self?.receive(acknowledgement: acknowledgement) }
     }
@@ -305,6 +330,13 @@ extension WatchSessionManager: WCSessionDelegate {
             Task { @MainActor [weak self] in
                 self?.maps.receive(manifest: manifest)
                 self?.reportMapInventory()
+            }
+            return
+        }
+        if let snapshot = userInfo["watchPlayer"] {
+            Task { @MainActor [weak self] in
+                self?.player.receive(player: snapshot)
+                self?.reportPlayerInventory()
             }
             return
         }
@@ -321,7 +353,13 @@ extension WatchSessionManager: WCSessionDelegate {
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         Task { @MainActor [weak self] in
-            guard let self, self.scene != nil else { return }
+            guard let self else { return }
+            /* Coming back into range is the moment to say what this wrist
+               holds - a bag edited while the phone was away has been waiting on
+               exactly this. Deliberately outside the round guard below: it is
+               true whether or not a round is in progress. */
+            if session.isReachable { self.reportPlayerInventory() }
+            guard self.scene != nil else { return }
             self.state = session.isReachable ? .live : .stale
             if session.isReachable { self.retryPending() }
         }

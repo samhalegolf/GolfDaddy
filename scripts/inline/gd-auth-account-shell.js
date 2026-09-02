@@ -8,6 +8,11 @@
 	  let authFeedbackKind = 'info';
   let coachProfileView = 'directory';
   let playerSettingsOpen = false;
+  /* Sticky across renders: the email panel is a <details>, and render() rebuilds
+     the whole surface from a template string, so anything the user opened by
+     hand closes again on the next paint. It is also how the admin roster's
+     Email button lands on a player with the panel already open. */
+  let emailPanelAccountId = '';
   let profileVisualCache = { key:'', html:'' };
   const rosterControls = {
     players: { search:'', sort:'updated_desc' },
@@ -780,7 +785,7 @@
 
   function adminUserRosterRow(item, currentAccountId) {
     const current = item.accountId === currentAccountId;
-    return `<div class="gdProfileRosterRow ${current ? 'active' : ''}" data-roster-key="allUsers" data-search="${esc(item.searchText)}">
+    return `<div class="gdProfileRosterRow ${current ? 'active' : ''} ${current ? '' : 'hasEmailAction'}" data-roster-key="allUsers" data-search="${esc(item.searchText)}">
       <button class="gdProfileRosterMain" type="button" aria-pressed="${item.active ? 'true' : 'false'}" onclick="gd67AdminViewProfile('${esc(item.profileId)}')">
         <span class="gdProfileRosterName">${esc(item.name)}</span>
         <span class="gdProfileRosterEmail">${esc(item.email || 'No email')}</span>
@@ -788,6 +793,7 @@
         <span class="gdProfileRosterMeta">Updated ${esc(item.updatedLabel)}</span>
         <span class="gdProfileRosterStatus">${current ? 'You' : esc(item.roleLabel)}</span>
       </button>
+      ${current ? '' : `<button class="gdProfileRosterRemove gdProfileRosterEmailAction" type="button" onclick="event.stopPropagation();gd67OpenEmailPanel('${esc(item.profileId)}','${esc(item.accountId)}')">Email</button>`}
       ${current ? '' : `<button class="gdProfileRosterRemove" type="button" onclick="event.stopPropagation();gd67RemoveProfile('${esc(item.accountId)}')">Remove</button>`}
     </div>`;
   }
@@ -1098,6 +1104,38 @@
         </div>`;
   }
 
+  /* Changing the login email of the account you are looking at.
+
+     One control, two surfaces: a coach reaches it through Players, an admin
+     through All Users, and both land on renderCoachPlayerView - so this is
+     written once and rendered wherever that view is. It is deliberately not on
+     the roster row itself: the row is a list of names, and an input that
+     rewrites somebody's login does not belong in a list.
+
+     Not shown for a managed profile. Those have no account, no login and no
+     email to change - see the `managed` branch in renderCoachPlayerView. */
+  function playerEmailPanel(account, owner) {
+    if (!owner) return '';
+    const isStaffTarget = isCoachAccount(owner);
+    /* Only an admin may move a coach or admin address. Whoever holds the
+       address holds the password-reset link, so this is a staff-privilege
+       handover, not an edit. The server refuses it too. */
+    if (isStaffTarget && String(account.role || 'player') !== 'admin') return '';
+    if (owner.accountId === account.accountId) return '';
+    const open = emailPanelAccountId === owner.accountId;
+    const who = roleLabel(account.role);
+    return `
+        <details class="coachAddPlayer coachPlayerEmailPanel"${open ? ' open' : ''} data-email-panel="${esc(owner.accountId)}">
+          <summary>Change login email</summary>
+          <div class="accountGrid">
+            <label class="full">New email<input id="gd67PlayerEmailInput" type="email" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="${esc(owner.email || 'player@example.com')}" value=""></label>
+          </div>
+          ${authFeedbackMarkup('gd67PlayerEmailFeedback')}
+          <p class="coachPlayerNote">This is the address ${esc(firstName(owner))} signs in with. The password does not change. Clarity emails the new address and the old one to say ${esc(who)} ${esc(account.name || '')} made the change.</p>
+          <button class="saveBtn" type="button" onclick="gd67ChangePlayerEmail('${esc(owner.accountId)}')">Save new login email</button>
+        </details>`;
+  }
+
   function renderCoachPlayerView(account, owner, p) {
     const photo = p.profilePhotoDataUrl || p.photoDataUrl || '';
     /* Bag, Shot Data and Course Mapping are admin-gated. Play / GPS is not -
@@ -1157,6 +1195,8 @@
           ${canShow('shot') ? playerDataCard('shot', 'Shot Data', shot, `Open ${firstName(p)}'s shot data`, 'shot') : ''}
           ${playerDataCard('play', 'Play / GPS', {ready:true, headline:'Enter GPS', detail:`On-course recommendations use ${firstName(p)}'s bag and bubble.`}, `Play as ${firstName(p)}`, 'play')}
         </section>
+
+        ${managed ? '' : playerEmailPanel(account, owner)}
 
         <p class="coachPlayerNote">${managed
           ? 'This profile has no login of its own. Changes are saved to it, not to your own golf.'
@@ -1367,6 +1407,7 @@
 
   function changePlayer() {
     coachProfileView = 'directory';
+    emailPanelAccountId = '';
     render();
     scrollProfileTop();
     refreshCoachRoster('coach-directory');
@@ -1867,6 +1908,98 @@
     run();
   }
 
+  /* Changing what an account signs in with. Server-first, and confirmed.
+
+     Confirmed because it is not an edit to a display field: the old address
+     stops working the moment this lands, and if it is wrong the holder cannot
+     receive the reset link that would fix it. gdConfirmDialog is used rather
+     than window.confirm for the reason spelled out on removeProfile - confirm
+     returns false instantly in the embedded webview, which would silently turn
+     this button into a no-op.
+
+     Server-first because gdStaffChangeAccountEmail does not touch local state
+     until the endpoint has accepted. Everything this shows the coach afterwards
+     therefore describes something that actually happened. */
+  async function changePlayerEmail(accountId) {
+    const api = accountsApi();
+    const input = document.getElementById('gd67PlayerEmailInput');
+    const nextEmail = String(input?.value || '').trim().toLowerCase();
+    setFieldFeedback('gd67PlayerEmailFeedback','','info');
+    emailPanelAccountId = accountId;
+
+    const state = api && typeof api.state === 'function' ? api.state() : {};
+    const target = (state.accounts || []).find(item => item && item.accountId === accountId);
+    if (!target) {
+      setFieldFeedback('gd67PlayerEmailFeedback','Account not found','error');
+      safeToast('Account not found');
+      return;
+    }
+    if (!nextEmail) {
+      setFieldFeedback('gd67PlayerEmailFeedback','Enter the new email','error');
+      focusField('gd67PlayerEmailInput');
+      return;
+    }
+    /* The local duplicate check is a fast fail with a message worth reading.
+       The one that decides is the server's, which sees every account and not
+       just the ones that reached this device. */
+    if (blockDuplicateEmail('gd67PlayerEmailInput','gd67PlayerEmailFeedback',accountId)) return;
+
+    const label = target.name || target.email || 'this player';
+    const previous = target.email || 'their current address';
+    const ok = typeof window.gdConfirmDialog === 'function'
+      ? await window.gdConfirmDialog({
+          title: `Change ${label}'s login email?`,
+          message: `They will sign in with ${nextEmail} instead of ${previous}. Their password, bag and rounds are untouched. Clarity emails both addresses to say you made the change.`,
+          confirmLabel: 'Change email'
+        })
+      : false;
+    if (!ok) return;
+
+    setFieldFeedback('gd67PlayerEmailFeedback','Changing login email...','info');
+    try {
+      if (!api || typeof api.changeAccountEmail !== 'function') throw new Error('Email changes are not ready');
+      const result = await api.changeAccountEmail(accountId, nextEmail);
+      saveSafe();
+      /* Left open deliberately. render() rebuilds the panel with the new
+         address as the placeholder and an empty field; closing it would hide
+         the one line that says whether the account holder was actually told. */
+      emailPanelAccountId = accountId;
+      render();
+      /* Named rather than generic: "Saved" would not tell the coach whether the
+         player has any way of learning about this. */
+      const notified = result && result.notified;
+      const mailed = !!(notified && notified.next && notified.next.sent);
+      /* An account with no Supabase Auth user behind it - one created on a
+         device and never synced - has its record moved but not its sign-in,
+         because there is no sign-in to move. Saying so beats letting a coach
+         believe a login changed that never existed. */
+      const loginMoved = !result || result.loginUpdated !== false;
+      const headline = loginMoved
+        ? `${label} now signs in with ${nextEmail}.`
+        : `${label}'s account is now recorded under ${nextEmail}. This account has no Clarity sign-in yet, so nothing to sign in with has changed.`;
+      const message = mailed
+        ? `${headline} Both addresses have been emailed.`
+        : `${headline} The confirmation email could not be sent - tell them directly.`;
+      setFieldFeedback('gd67PlayerEmailFeedback',message,(mailed && loginMoved) ? 'success' : 'error');
+      safeToast(message);
+    } catch(e) {
+      const message = e && e.message ? e.message : 'Could not change the login email';
+      setFieldFeedback('gd67PlayerEmailFeedback',message,'error');
+      focusField('gd67PlayerEmailInput');
+      safeToast(message);
+    }
+  }
+
+  /* The admin All Users route into the same control. The roster row opens the
+     user and asks for the panel; the panel itself only ever lives on the user
+     view, so there is one implementation of the change and one place it can be
+     made from. */
+  function openEmailPanelFor(profileId, accountId) {
+    emailPanelAccountId = String(accountId || '');
+    adminViewProfile(profileId);
+    setTimeout(() => focusField('gd67PlayerEmailInput'), 0);
+  }
+
   /* Removing a profile that lives on your own account. Not the same operation
      as removing a player ACCOUNT above - there is no login, no email and no
      other person involved, just a profile row and its data. */
@@ -2002,6 +2135,8 @@
   window.gd67AddCoachAccount = addCoachAccount;
   window.gd67RemoveProfile = removeProfile;
   window.gd67UnlinkPlayer = unlinkPlayer;
+  window.gd67ChangePlayerEmail = changePlayerEmail;
+  window.gd67OpenEmailPanel = openEmailPanelFor;
   window.gd67RemoveManagedProfile = removeManagedProfile;
   window.gd67GenerateCoachInvite = generateCoachInvite;
   window.gd67SetRosterSearch = setRosterSearch;

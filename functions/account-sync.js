@@ -103,6 +103,24 @@ async function upsertAccount(payload, action) {
    * entering the coach's code stamps restoreCoachIds, which is an explicit act
    * on this device rather than the same stale array arriving again.
    */
+  /* THE DEVICE DOES NOT OWN THE EMAIL ONCE THE SERVER HAS ONE.
+   *
+   * This runs on every startup and pushes whatever the phone holds. When a
+   * coach or an admin changes a player's login (account-change-email.js), only
+   * the server rows move - the player's phone still has the old address, and
+   * its next launch wrote that straight back over the new one. Supabase Auth
+   * keeps the new address either way, so the account ends up signing in with
+   * one address while every roster and every findAccountByEmail() lookup reads
+   * the other: the split that endpoint takes such care to avoid, re-created
+   * here a launch later.
+   *
+   * So a stored email wins. Every route that legitimately sets one - login,
+   * signup, restore, Settings, the staff change - is server-side and writes the
+   * row itself; this pipe has never been the place an address changes. The
+   * device learns the new one from the accountEmail echoed back below. */
+  const storedEmail = await storedAccountEmail(accountId);
+  const effectiveEmail = storedEmail || accountEmail;
+
   const severed = await severedCoachIds(accountId);
   const restore = idList(account.restoreCoachIds || account.restore_coach_ids).filter(id => severed.includes(id));
   const stillSevered = severed.filter(id => !restore.includes(id));
@@ -115,7 +133,7 @@ async function upsertAccount(payload, action) {
     body: JSON.stringify({
       account_id: accountId,
       profile_id: profileId,
-      email: accountEmail,
+      email: effectiveEmail,
       name,
       role,
       created_by_coach_id: text(account.createdByCoachId || account.created_by_coach_id, 120) || null,
@@ -149,7 +167,7 @@ async function upsertAccount(payload, action) {
       profile_id: profileId,
       account_id: accountId,
       auth_user_id: uuidOrNull(account.supabaseUserId || account.authUserId || account.auth_user_id || profile.supabaseUserId || profile.authUserId || profile.auth_user_id),
-      email: accountEmail,
+      email: effectiveEmail,
       name,
       permission: normalPermission(profile.accountPermission || profile.permission || role),
       handedness: text(profile.handedness, 40) || "right",
@@ -169,7 +187,7 @@ async function upsertAccount(payload, action) {
       event_type: action,
       status: "synced",
       payload_json: {
-        accountEmail,
+        accountEmail: effectiveEmail,
         role,
         reason: text(payload.reason, 120),
         clientTime: payload.clientTime || null,
@@ -193,7 +211,11 @@ async function upsertAccount(payload, action) {
     synced: true,
     accountId,
     profileId,
-    accountEmail,
+    /* The server's address, not the pushed one. clarity-cloud-sync adopts it,
+       which is how a device whose login was changed for it finds out. */
+    accountEmail: effectiveEmail,
+    emailChanged: effectiveEmail !== accountEmail,
+    pushedEmail: effectiveEmail !== accountEmail ? accountEmail : undefined,
     merged,
     localAccountId: merged ? localAccountId : undefined,
     localProfileId: merged ? localProfileId : undefined,
@@ -261,6 +283,28 @@ function dateOrNull(value) {
 
 function idList(value) {
   return Array.isArray(value) ? value.map(item => text(item, 120)).filter(Boolean) : [];
+}
+
+/* The address the server already holds for this account, or "" when there is no
+   row yet. Read before every account write for the same reason severedCoachIds
+   is: this is an upsert of client-held state, and the client cannot know that
+   somebody changed the account out from under it. */
+async function storedAccountEmail(accountId) {
+  if (!accountId) return "";
+  let rows = [];
+  try {
+    rows = await supabaseFetch(
+      "app_accounts?select=email&account_id=eq." + encodeFilter(accountId) + "&limit=1",
+      { method: "GET" }
+    );
+  } catch (_error) {
+    /* A lookup failure must not cost the caller their sync. Falling through to
+       the pushed address is what this did for its whole life before the staff
+       email change existed, so the failure mode is the old behaviour, not a
+       lost account. */
+    return "";
+  }
+  return Array.isArray(rows) && rows[0] ? email(rows[0].email) : "";
 }
 
 /* The coach links this account's own row says were cut. Read straight before

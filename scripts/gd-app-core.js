@@ -24756,6 +24756,54 @@ function gdCoachUnlinkPlayer(accountId,coach=gdCurrentAccount()){
   }catch(e){}
   return player;
 }
+/* Change the email an account SIGNS IN with, as a coach or an admin.
+
+   Not gdAccountUpdate. That one edits the account you are signed in as, takes
+   the user id from your own token on the server, and is reached from Settings.
+   This edits somebody else's, and the only correct order for it is server
+   first: the address is the login, so only Supabase Auth can accept or refuse
+   it, only the server can move all three stores together, and only the server
+   can tell the account holder at both addresses that it happened. A local write
+   first would show a change that may never have landed.
+
+   The local checks below are a courtesy - they fail fast on the obvious cases
+   without a round trip, and their messages are what the coach reads. The checks
+   that COUNT are account-change-email.js's, because a crafted request never
+   goes near these. */
+async function gdStaffChangeAccountEmail(accountId,nextEmail,actor=gdCurrentAccount()){
+  gdAccountsLoad();
+  actor=actor&&gdAccountById(actor.accountId)||gdCurrentAccount();
+  if(!actor||!gdAccountIsStaff(actor))throw new Error('Coach or admin account required');
+  const target=gdAccountById(accountId);
+  if(!target)throw new Error('Account not found');
+  if(target.accountId===actor.accountId)throw new Error('Change your own email in Settings, so you can sign in again straight away.');
+  if(gdAccountIsStaff(target)&&gdAccountRole(actor.role)!=='admin')throw new Error('Only an admin can change a coach or admin login email');
+  const email=gdAccountEmail(nextEmail);
+  if(!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new Error('Enter a valid email');
+  if(email===gdAccountEmail(target.email))throw new Error('That is already the login email for this account.');
+  const duplicate=gdAccountEmailInUse(email,target.accountId);
+  if(duplicate)throw new Error(gdAccountDuplicateEmailMessage(email,duplicate));
+  if(!window.ClarityAccountEmail||typeof window.ClarityAccountEmail.change!=='function')throw new Error('Email changes are not available on this build');
+
+  const result=await window.ClarityAccountEmail.change(target.accountId,email);
+
+  /* Only now. Everything above this line could still have been refused. */
+  const previousEmail=target.email||'';
+  const now=new Date().toISOString();
+  target.email=email;
+  target.updatedAt=now;
+  GD_PROFILE_STATE.profiles.forEach(profile=>{
+    if(!profile)return;
+    if(profile.accountId===target.accountId||profile.id===target.profileId){
+      profile.email=email;
+      profile.updatedAt=now;
+    }
+  });
+  gdAccountsSave();
+  savePlayerProfiles();
+  gdAccountApplySession({silent:true});
+  return{...target,previousEmail,changed:result&&result.changed!==false,notified:result&&result.notified||null};
+}
 function gdAccountLinkExistingPlayerByEmail(email,coach=gdCurrentAccount()){
   gdAccountsLoad();
   coach=coach&&gdAccountById(coach.accountId)||gdCurrentAccount();
@@ -24991,7 +25039,7 @@ function gdOpenDemoCourseDataRouteActive(){
 }
 function bootProfileShell(){loadPlayerProfiles();gdInstallPlaceholderProfile();ensureProfile();gdAccountsBootstrap();savePlayerProfiles();syncCoreProfileFromActive();if(!gdAuthRouteBootActive()){showShellHome();if(gdOpenGpsSettingsRouteActive())openSettings({fromGps:true});if(gdOpenDemoCourseDataRouteActive()&&typeof window.gdOpenCourseData==="function")setTimeout(()=>window.gdOpenCourseData({demo:true}),0);}}
 window.GolfDaddyProfiles={load:loadPlayerProfiles,save:savePlayerProfiles,active:activePlayerProfile,open:openProfilePanel,onboarding:openOnboarding,generateQuickBag:gdGenerateQuickBag,installPlaceholder:gdInstallPlaceholderProfile};
-window.GolfDaddyAccounts={load:gdAccountsLoad,save:gdAccountsSave,state:()=>GD_ACCOUNT_STATE,current:gdCurrentAccount,accountForProfile:gdAccountForProfile,linkedPlayers:gdAccountLinkedPlayers,allAccounts:gdAdminAllAccounts,coachAccounts:gdAccountCoachAccounts,coachInviteFor:gdCoachInviteFor,generateCoachInvite:gdCoachGenerateInvite,connectCoachByCode:gdAccountConnectCoachByCode,linkExistingPlayerByEmail:gdAccountLinkExistingPlayerByEmail,signup:(data)=>gdAccountCreate(data,{activate:true}),login:gdAccountLogin,logout:gdAccountLogout,update:gdAccountUpdate,addPlayer:gdCoachAddPlayerAccount,addCoach:gdCoachAddCoachAccount,removeAccount:gdAdminRemoveAccount,unlinkPlayer:gdCoachUnlinkPlayer,managedProfiles:gdAccountManagedProfiles,deleteManagedProfile:gdAccountDeleteManagedProfile,viewProfile:gdAccountViewProfile,adminViewProfile:gdAdminViewProfile,viewOwnProfile:gdAccountViewOwnProfile,returnToOwnProfile:gdAccountReturnToOwnProfile,apply:gdAccountApplySession,roleLabel:gdAccountPublicRole};
+window.GolfDaddyAccounts={load:gdAccountsLoad,save:gdAccountsSave,state:()=>GD_ACCOUNT_STATE,current:gdCurrentAccount,accountForProfile:gdAccountForProfile,linkedPlayers:gdAccountLinkedPlayers,allAccounts:gdAdminAllAccounts,coachAccounts:gdAccountCoachAccounts,coachInviteFor:gdCoachInviteFor,generateCoachInvite:gdCoachGenerateInvite,connectCoachByCode:gdAccountConnectCoachByCode,linkExistingPlayerByEmail:gdAccountLinkExistingPlayerByEmail,signup:(data)=>gdAccountCreate(data,{activate:true}),login:gdAccountLogin,logout:gdAccountLogout,update:gdAccountUpdate,addPlayer:gdCoachAddPlayerAccount,addCoach:gdCoachAddCoachAccount,removeAccount:gdAdminRemoveAccount,unlinkPlayer:gdCoachUnlinkPlayer,changeAccountEmail:gdStaffChangeAccountEmail,managedProfiles:gdAccountManagedProfiles,deleteManagedProfile:gdAccountDeleteManagedProfile,viewProfile:gdAccountViewProfile,adminViewProfile:gdAdminViewProfile,viewOwnProfile:gdAccountViewOwnProfile,returnToOwnProfile:gdAccountReturnToOwnProfile,apply:gdAccountApplySession,roleLabel:gdAccountPublicRole};
 window.ClarityCaddieProfiles=window.GolfDaddyProfiles;
 window.ClarityCaddieAccounts=window.GolfDaddyAccounts;
 try{window.ClaritySession&&window.ClaritySession.sync("account-api-ready");}catch(e){}

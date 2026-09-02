@@ -65,9 +65,29 @@ async function findAccountByEmail(accountEmail) {
   const rows = await supabaseRest("app_accounts?select=*&email=eq." + encodeFilter(accountEmail) + "&limit=1", { method: "GET" });
   return Array.isArray(rows) && rows[0] || null;
 }
+async function findAccountByAuthUserId(authUserId) {
+  if (!authUserId) return null;
+  const rows = await supabaseRest("app_accounts?select=*&auth_user_id=eq." + encodeFilter(authUserId) + "&limit=1", { method: "GET" })
+    .catch(function () { return []; });
+  return Array.isArray(rows) && rows[0] || null;
+}
+/* THE ACCOUNT IS THE AUTH USER, NOT THE ADDRESS ON IT.
+ *
+ * This used to find the existing row by email alone. That is fine right up
+ * until an email changes: /auth/v1/user then reports the NEW address, no row
+ * matches it, accountPayload mints a fresh account_id and profile_id, and the
+ * upsert writes a SECOND row - leaving the account forked in two, the original
+ * still sitting on the old address with the bag, the links and the history on
+ * it. auth-update-account.js did exactly that every time someone changed their
+ * own email in Settings.
+ *
+ * auth_user_id is the identity that survives an address change, so it is asked
+ * first. Email stays as the fallback for rows written before that column was
+ * populated, which is the only case where it is still the best key available. */
 async function upsertAccount(authUser, input) {
   const accountEmail = email(authUser && authUser.email || input && input.email);
-  const existing = accountEmail ? await findAccountByEmail(accountEmail) : null;
+  const existing = (await findAccountByAuthUserId(authUser && authUser.id))
+    || (accountEmail ? await findAccountByEmail(accountEmail) : null);
   const pack = accountPayload(existing, authUser, input || {});
   const now = new Date().toISOString();
   await supabaseRest("app_accounts?on_conflict=account_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({
@@ -89,5 +109,5 @@ async function upsertAccount(authUser, input) {
   return pack;
 }
 module.exports = {
-  anonKey, email, hasAuth, hasAuthWithServiceKey, json, role, supabaseAuth, supabaseRest, text, findAccountByEmail, upsertAccount
+  anonKey, email, hasAuth, hasAuthWithServiceKey, json, role, supabaseAuth, supabaseRest, text, findAccountByAuthUserId, findAccountByEmail, upsertAccount
 };

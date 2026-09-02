@@ -47,6 +47,10 @@
     "test:guest-identity": "node dev/course-guest-identity.test.js",
     "test:course-scan-lifecycle": "node dev/course-guest-identity.test.js && node dev/course-package-trigger.test.js && node dev/course-mapper-jobs.test.js && node dev/course-mapping-controller.test.js && node dev/course-picker-behavior.test.js && node dev/course-pin-trust.test.js",
     "test:watch-maps": "node dev/watch-map-core.test.js && node dev/course-watch-maps.test.js && node dev/watch-map-delivery.test.js",
+    "test:watch-player": "node dev/watch-player-delivery.test.js",
+    "test:bubble-parity": "node dev/bubble-engine-parity.test.js",
+    "test:bubble-parity:swift": "swift test --package-path ios/WatchBubbleEngine",
+    "test:bubble-parity:update": "node dev/bubble-engine-parity.test.js --update",
   "test:nearest-loop": "node dev/nearest-loop-tightening.test.js",
     "test:unlicensed-region": "node dev/unlicensed-region-live-map.test.js",
     "build:app": "node scripts/clarity-deploy-build.js --app-only",
@@ -61,6 +65,7 @@
     "native:release:aab": "npm run build:app && npx cap sync android && cd android && ./gradlew bundleRelease",
     "native:release:apk": "npm run build:app && npx cap sync android && cd android && ./gradlew assembleRelease",
     "test:coach-player": "node dev/coach-player-link.test.js",
+    "test:account-email": "node dev/account-email-change.test.js",
     "test:effective-player-play": "node dev/effective-player-play-context.test.js"
   },
   "codex": {

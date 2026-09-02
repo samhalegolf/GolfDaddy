@@ -3734,6 +3734,23 @@ body.gdGpsActive #shellRouteLabel{
   background:rgba(127,29,29,.28);
   outline:none;
 }
+/* An admin row carries two actions - Email and Remove - and the base row is a
+   two-column grid, so a third child would auto-place onto a second row under
+   the name. Widened here rather than in the base rule so every other roster
+   (players, coaches) keeps the layout it already has. */
+#gdProfileV67 .gdProfileRosterRow.hasEmailAction{
+  grid-template-columns:minmax(0,1fr) auto auto;
+}
+/* Changing an email is not a destructive act, so it does not wear the
+   destructive colour. It shares the button geometry and nothing else. */
+#gdProfileV67 .gdProfileRosterEmailAction{
+  background:rgba(255,255,255,.05);
+  color:rgba(230,238,233,.88);
+}
+#gdProfileV67 .gdProfileRosterEmailAction:hover,
+#gdProfileV67 .gdProfileRosterEmailAction:focus-visible{
+  background:rgba(255,255,255,.12);
+}
 #gdProfileV67 .gdProfileRosterEmpty{
   display:block;
   padding:12px;
@@ -4158,6 +4175,9 @@ body.gdGpsActive #shellRouteLabel{
   #gdProfileV67 .accountGrid{grid-template-columns:1fr}
   #gdProfileV67 .coachPlayer{grid-template-columns:1fr}
   #gdProfileV67 .gdProfileRosterRow{grid-template-columns:1fr}
+  /* Beats the widened admin rule above on specificity only if it repeats the
+     class, so it does. Stacked actions are correct at this width. */
+  #gdProfileV67 .gdProfileRosterRow.hasEmailAction{grid-template-columns:1fr}
   #gdProfileV67 .gdProfileRosterMain{
     grid-template-columns:minmax(0,1fr) auto;
     gap:5px 8px;

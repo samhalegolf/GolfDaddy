@@ -1,0 +1,19 @@
+{
+  "": {
+    "swift-dependencies": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/primary.swiftdeps"
+  },
+  "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Sources/WatchBubbleEngine/Inputs.swift": {
+    "dependencies": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/Inputs.d",
+    "object": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/Inputs.swift.o",
+    "swiftmodule": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/Inputs~partial.swiftmodule",
+    "swift-dependencies": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/Inputs.swiftdeps",
+    "diagnostics": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/Inputs.dia"
+  },
+  "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/Sources/WatchBubbleEngine/PlayerSnapshot.swift": {
+    "dependencies": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/PlayerSnapshot.d",
+    "object": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/PlayerSnapshot.swift.o",
+    "swiftmodule": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/PlayerSnapshot~partial.swiftmodule",
+    "swift-dependencies": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/PlayerSnapshot.swiftdeps",
+    "diagnostics": "/Users/samhalegolf/GitHub/GolfDaddy/ios/WatchBubbleEngine/.build/arm64-apple-macosx/debug/WatchBubbleEngine.build/PlayerSnapshot.dia"
+  }
+}

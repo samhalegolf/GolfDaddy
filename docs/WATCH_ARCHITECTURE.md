@@ -115,11 +115,23 @@ costs the wrist a local calculation, which falls back to the Scene, and nothing
 else. Because it derives from `course_maps.objects_json` and never from the
 image, `POST /api/course-watch-maps {courseId, action:"backfill-reference"}`
 writes it into an already-baked package without re-baking imagery or bumping
-`watch_package_version` — but only for holes whose recomputed spatial reference
-still matches the stored one, since a reference describing today's green under
-an image drawn from last week's would put the wrist somewhere the picture
-disagrees with, silently, both halves being individually valid. A hole that
-fails that test is left alone and named in the report; its fix is a regenerate.
+`watch_package_version` — but only for holes whose own geometry has not moved
+since, because a reference describing today's green under an image drawn from
+last week's would put the wrist somewhere the picture disagrees with, silently,
+both halves being individually valid. A hole that fails is left alone and named
+in the report; its fix is a regenerate.
+
+What that guard must **not** compare is the projection basis. The canvas is
+framed on the play corridor plus whichever mapped surface vertices fall inside
+it, and surfaces are capture-time input: they are collected to be drawn, they
+become part of the image, and `objects_json` settles back to the lean
+tee/green/route set that GPS Play actually needs. So a hole reframes whenever
+the surfaces are no longer listed — all 18 Millbrook holes did, from 179–448px
+wide down to 96–251px — while its tee, green, green extents, route and bearing
+stayed byte-identical. None of that is in the reference, which is lat/lng and
+travels beside the *stored* spatial reference that still projects it onto the
+*stored* image exactly as before. `sameReferenceGeometry` therefore compares the
+hole itself, not the canvas.
 
 Both transports are durable queues, and neither ordering is guaranteed: an image
 is filed from its own transfer metadata and reconciled with the manifest
@@ -148,6 +160,62 @@ with LOCK one tap away. Nothing on the Watch decides anything about the round �
 the green comes from the Scene, the aim point comes from the Scene, and the
 player is the wrist's own fix (or the phone's when the wrist has none). A hole
 with no delivered image shows why, not a blank.
+
+## The player snapshot: bag and My Bubble
+
+A third payload, alongside the Scene and the lite-map package, because it fits
+neither. A Scene is a few hundred bytes republished many times a minute, so
+equipment riding it would trail every distance update; a map package is ~100KB
+per COURSE, while a bag belongs to the PLAYER and changes when they edit it.
+
+```text
+app/js/watch-player-delivery.js   builds the snapshot, decides whether to send
+NativeRoundBridge.publishWatchPlayer   sendMessage mirror + transferUserInfo
+WatchPlayerStore.swift            durable cache, one snapshot at a time
+WatchBubbleEngine (SwiftPM)       the wire types, shared with the engine
+```
+
+The snapshot is `{version, fingerprint, bag{isGhost, clubs[]}, bubble{handedness,
+offsetDeg?}, engineVersion}`. The bag is the engine's own playable bag — the
+account bag, or the ghost stand-in when there is none — already normalised,
+sorted longest-total-first and with the roll-out preset applied, so the wrist
+consumes finished numbers and has no opinion about how they were produced.
+`isGhost` travels because a Bubble built on a stand-in bag is a stand-in and the
+wrist must be able to say so. The bubble is a degree value and a handedness and
+nothing else (Bubble Bible s2); `offsetDeg` is **omitted** when no My Bubble is
+set rather than sent as zero, because a saved 0.0° aim is a real and different
+thing and a fabricated one was once applied to every player, left-handers
+included, as a right-hand miss.
+
+Change detection is a **fingerprint, not a counter**. A counter has to be stored
+on both ends and kept in step, and the moment they disagree a stale bag looks
+current. The fingerprint is derived from the content —
+`v1|g0|Driver:205:228|…|b:3.20:right|e:bubble-engine-v1` — so either end can
+answer "has this changed" with no memory of what went before. It is a readable
+string rather than a hash on purpose: no collisions to reason about, and a
+misbehaving delivery says in the log exactly what the wrist holds.
+
+The wrist reports its fingerprint back as `watchPlayerHave` on activation, on
+adoption, and whenever the phone comes back into range. An **empty** fingerprint
+is a real answer — a fresh install or a cleared cache — and is deliberately
+distinct from never having reported: collapsing the two leaves a wrist that has
+lost its bag un-resupplied because the phone still believes it sent one. An
+answer from the wrist settles the question outright; the phone's own note of
+what it last sent only stands in while the first report is still in flight.
+
+The wrist **recomputes** the fingerprint from the contents it receives and
+refuses a snapshot that does not match. WatchConnectivity payloads cross a
+Capacitor bridge, a plist encoding and a radio, and a snapshot that lost half its
+clubs on the way would otherwise be cached and played on — a silently short bag
+picks the wrong club for every shot. That check is also why the two
+implementations are pinned against shared cases in
+`dev/fixtures/bubble-engine-parity.json`: a quiet disagreement here would make
+the wrist reject every bag the phone ever sends, and nothing would say why.
+
+`engineVersion` rides along so the wrist can tell whether it implements the same
+Bubble maths the phone's numbers came from. Nothing on the wrist computes a
+Bubble locally yet; when it does, a mismatch means render the phone's answer
+rather than a second opinion.
 
 ## Native Round Bridge and adapters
 
