@@ -100,12 +100,15 @@ communications/**image request** APIs."
 
 ## Known unverified items (verify against the installed Connect IQ SDK)
 
-1. **`manifest.xml`'s app id** is a placeholder. Register the app at
-   apps.garmin.com (Connect IQ Developer Portal) and replace
-   `GARMIN-APP-ID-PLACEHOLDER`.
-2. **Product ids** (`approachs62`, `fenix6`, `fr55`, `approachs70`) — cross-check
-   against the Connect IQ SDK Manager's current device list; Garmin revises
-   these strings between SDK releases.
+1. ~~**`manifest.xml`'s app id** is a placeholder.~~ **Done.** A real UUID
+   (`fac5991c…`) is now in `manifest.xml`. Note the earlier claim here was
+   wrong: the app UUID is *developer*-generated, not minted by the portal —
+   the portal issues a separate *Store* UUID at publish time. Never
+   regenerate the app UUID once published; it would orphan the listing.
+2. **Product ids** — `approachs70` was not a valid id (the S70 has a separate
+   id per case size) and has been replaced with `approachs7042mm` +
+   `approachs7047mm`. Still cross-check the whole list against the SDK
+   Manager's device list; `./build.sh check` does this for you.
 3. **`minSdkVersion="3.2.0"`** — plan step 29 prefers a 3.0 baseline;
    `registerForPhoneAppMessages`/`makeImageRequestWithDictionary` are most
    reliably documented from 3.2 onward. Relax if the actual devices in the

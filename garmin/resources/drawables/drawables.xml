@@ -1,7 +1,7 @@
 <drawables>
-    <!-- launcher_icon.png does not exist yet in this tree — add a real
-         Connect IQ launcher icon (typically 40x40 PNG for most watch
-         products; check the SDK's per-product icon size table) before the
-         first build. See garmin/README.md. -->
+    <!-- launcher_icon.png is a 40x40 solid-colour PLACEHOLDER, not artwork.
+         Replace it with the real Clarity Caddy mark before publishing.
+         40x40 covers every device in the current product list; check the
+         SDK's per-product icon size table if you add wider devices. -->
     <bitmap id="LauncherIcon" filename="launcher_icon.png"/>
 </drawables>

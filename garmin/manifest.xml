@@ -2,21 +2,24 @@
 <!--
   Clarity Caddy — Garmin Connect IQ app manifest.
 
-  UNVERIFIED / NEEDS SDK: the <iq:application> id below is a PLACEHOLDER.
-  Every Connect IQ app needs a real UUID minted by the Connect IQ Developer
-  Portal (apps.garmin.com) when the app is first registered there — replace
-  GARMIN-APP-ID-PLACEHOLDER before this will build. See garmin/README.md.
+  APP UUID: developer-generated, NOT issued by the Connect IQ portal. Garmin
+  issues a separate *Store* UUID when the app is first published; that one
+  lives in the portal, not here. This id must stay STABLE across every future
+  version — changing it makes the store treat the upload as a brand new app
+  and orphans existing installs and reviews.
+  (VS Code equivalent: "Monkey C: Regenerate UUID" — do not run it on this
+  project once published.)
 
-  Product IDs (the <iq:products> list) are Garmin's official Connect IQ
-  device identifiers, matched against the Phase 1 device matrix (plan step
-  28): Approach S62, Fenix 6, Forerunner 55, Approach S70. Cross-check the
-  exact <iq:product id="..."/> strings against the Connect IQ SDK Manager's
-  device list before building — Garmin occasionally revises these ids
-  between SDK releases.
+  Product ids are cross-checked against Garmin's Compatible Devices list.
+  Approach S70 ships in two sizes and has a separate id per size.
+  Before building, confirm each id is present in your installed SDK's device
+  list (`~/Library/Application Support/Garmin/ConnectIQ/Devices/`) and that
+  you have downloaded that device in the SDK Manager — the compiler fails on
+  a product id it has no device definition for.
 -->
 <iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="3">
     <iq:application
-        id="GARMIN-APP-ID-PLACEHOLDER"
+        id="fac5991c01f348ddb7577553071ddd0f"
         type="watch-app"
         name="@Strings.AppName"
         entry="ClarityCaddyApp"
@@ -30,9 +33,10 @@
              earlier minSdkVersion proves sufficient. -->
         <iq:products>
             <iq:product id="approachs62"/>
+            <iq:product id="approachs7042mm"/>
+            <iq:product id="approachs7047mm"/>
             <iq:product id="fenix6"/>
             <iq:product id="fr55"/>
-            <iq:product id="approachs70"/>
         </iq:products>
         <iq:permissions>
             <iq:uses-permission id="Positioning"/>

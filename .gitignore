@@ -49,3 +49,9 @@ deno.lock
 # ended up tracked from here in the past; this stops that happening again.
 _to_delete/
 iap-review-screenshot-2048x2732.png
+
+# Garmin Connect IQ build output (never commit the signed package or keys)
+garmin/build/
+*.iq
+*.prg
+*developer_key*
