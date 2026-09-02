@@ -90,12 +90,29 @@ async function upsertAccount(authUser, input) {
     || (accountEmail ? await findAccountByEmail(accountEmail) : null);
   const pack = accountPayload(existing, authUser, input || {});
   const now = new Date().toISOString();
+  /* METADATA IS MERGED, NEVER REPLACED.
+   *
+   * This is a whole-row upsert, so a metadata key that is not written here is a
+   * key that is gone - and this runs on every login, signup and restore. Writing
+   * the two source keys flat wiped severedCoachIds, the tombstone
+   * coach-unlink-player.js leaves on a removed player's row: the player's next
+   * sign-in cleared it, the startup after that pushed the phone's stale
+   * linked_coach_ids through account-sync, and with no tombstone left to filter
+   * against the removed player walked back into the coach's roster. It also
+   * dropped emailChanges (account-change-email.js) and the stripe_customer_id
+   * fallback payment-utils.js writes here when the column write fails.
+   *
+   * The row is already in hand, so this costs no extra query. Same shape as
+   * coach-unlink-player.js and account-change-email.js. */
+  const existingMetadata = existing && existing.metadata && typeof existing.metadata === "object" && !Array.isArray(existing.metadata)
+    ? existing.metadata
+    : {};
   await supabaseRest("app_accounts?on_conflict=account_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({
     account_id: pack.account.accountId, profile_id: pack.account.profileId, auth_user_id: authUser.id,
     email: pack.account.email, name: pack.account.name, role: pack.account.role,
     created_by_coach_id: pack.account.createdByCoachId || null, linked_coach_ids: pack.account.linkedCoachIds, linked_player_ids: pack.account.linkedPlayerIds,
     requires_password_setup: false, password_salt: null, password_hash: null,
-    last_login_at: now, metadata: { source: "supabase-auth", authProvider: "supabase" }, updated_at: now
+    last_login_at: now, metadata: Object.assign({}, existingMetadata, { source: "supabase-auth", authProvider: "supabase" }), updated_at: now
   }) });
   await supabaseRest("app_profiles?on_conflict=profile_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({
     profile_id: pack.profile.id, account_id: pack.account.accountId, auth_user_id: authUser.id,
