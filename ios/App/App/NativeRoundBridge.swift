@@ -1,16 +1,26 @@
 import Capacitor
 import Foundation
-import UIKit
-import WatchConnectivity
 
 /*
  NativeRoundBridge is the single native boundary for active-round consumers.
  It does not interpret golf rules: JavaScript Marshal validates every command
  and publishes the portable CaddyWatchScene. A future Live Activity/Lock Screen
  surface shares this bridge rather than reconstructing round state.
+
+ It also does not own any wearable transport itself. It:
+   - receives a Capacitor call
+   - validates required top-level input
+   - forwards the sanitised payload to WearableCoordinator
+   - resolves the Capacitor call
+   - publishes incoming wearable events to JavaScript
+
+ Apple Watch's WatchConnectivity behaviour lives in
+ Wearables/Apple/AppleWatchTransport.swift; a Garmin transport is a sibling
+ registered with the same coordinator. JavaScript does not need to learn
+ which platform it is talking to for ordinary Scene publication.
 */
 @objc(NativeRoundBridge)
-public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDelegate {
+public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WearableCoordinatorDelegate {
     public let identifier = "NativeRoundBridge"
     public let jsName = "NativeRoundBridge"
     public let pluginMethods: [CAPPluginMethod] = [
@@ -24,12 +34,11 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
         CAPPluginMethod(name: "watchState", returnType: CAPPluginReturnPromise)
     ]
 
+    private let coordinator = WearableCoordinator()
     private let queue = DispatchQueue(label: "com.claritygolf.caddy.native-round-bridge")
-    private var session: WCSession?
-    private var latestScene: [String: Any]?
-    /* The last inventory the Watch reported. Only a hint: JavaScript uses it to
-       skip re-sending a package the wrist already has, and sending everything
-       again is always a correct fallback. */
+    /* The last inventory each side reported. Only a hint: JavaScript uses it
+       to skip re-sending a package the wrist already has, and sending
+       everything again is always a correct fallback. */
     private var watchMapInventoryReport: [String: Any]?
     private var watchPlayerInventoryReport: [String: Any]?
 
@@ -52,11 +61,9 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
     }
 
     public override func load() {
-        guard WCSession.isSupported() else { return }
-        let session = WCSession.default
-        session.delegate = self
-        session.activate()
-        self.session = session
+        coordinator.delegate = self
+        coordinator.register(AppleWatchTransport())
+        coordinator.activateAll()
     }
 
     @objc public func publishScene(_ call: CAPPluginCall) {
@@ -64,70 +71,26 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
             call.reject("A CaddyWatchScene is required")
             return
         }
-        queue.async { [weak self] in
-            guard let self else { return }
-            let payload = (Self.withoutNulls(scene) as? [String: Any]) ?? [:]
-            self.latestScene = payload
-            /* A reachable Watch also gets the scene as a live message: the
-               application-context store can lag (or, on the simulator, fail to
-               hand its data to the client), and the newest scene always wins. */
-            if let session = self.session, session.isReachable {
-                session.sendMessage(["scene": payload], replyHandler: nil, errorHandler: nil)
-            }
-            do {
-                // Application context deliberately carries only the newest scene.
-                try self.session?.updateApplicationContext(["scene": payload])
+        let payload = (Self.withoutNulls(scene) as? [String: Any]) ?? [:]
+        coordinator.publishScene(payload) { published in
+            if published {
                 call.resolve(["published": true])
-            } catch {
-                // A later activation/reconnect repeats the latest scene; this is
-                // presentation data, so it never needs a command-style outbox.
+            } else {
                 call.resolve(["published": false, "queuedForReconciliation": true])
             }
         }
     }
 
-    private func republishLatestScene() {
-        queue.async { [weak self] in
-            guard let self, let scene = self.latestScene else { return }
-            /* updateApplicationContext silently skips a dictionary identical to
-               the last one, but a Watch app (re)launch can drop the context that
-               arrived before its session activated. The nonce defeats that
-               dedupe so a reconnect always re-delivers the latest scene. */
-            let payload: [String: Any] = ["scene": scene, "sentAt": Date().timeIntervalSince1970]
-            if let session = self.session, session.isReachable {
-                session.sendMessage(["scene": scene], replyHandler: nil, errorHandler: nil)
-            }
-            try? self.session?.updateApplicationContext(payload)
-        }
-    }
-
     // MARK: - Watch lite maps
 
-    /* Course imagery is deliberately NOT part of the Scene. A Scene is small,
-       arrives many times a minute, and rides the application context; a Watch
-       map package is ~100KB of image that changes only when a course is
-       regenerated. So the manifest goes over transferUserInfo and each hole
-       image over transferFile — both durable queues that survive a closed Watch
-       app, a locked phone, and a walk out of Bluetooth range.
-
-       This bridge does not fetch, decode or validate a package: JavaScript owns
-       the API call, and the Watch validates what it stores. Native is transport. */
     @objc public func publishWatchMap(_ call: CAPPluginCall) {
         guard let manifest = call.getObject("manifest") else {
             call.reject("A Watch map manifest is required")
             return
         }
-        queue.async { [weak self] in
-            guard let self, let session = self.session else { call.resolve(["published": false]); return }
-            let payload = (Self.withoutNulls(manifest) as? [String: Any]) ?? [:]
-            /* Mirrored live and queued durably, exactly as publishScene does and
-               for the same reason: the queued stores do not reach the Watch app
-               reliably, and the Watch's adoption of a manifest is idempotent. */
-            if session.isReachable {
-                session.sendMessage(["watchMapManifest": payload], replyHandler: nil, errorHandler: nil)
-            }
-            session.transferUserInfo(["watchMapManifest": payload])
-            call.resolve(["published": true])
+        let payload = (Self.withoutNulls(manifest) as? [String: Any]) ?? [:]
+        coordinator.publishMapManifest(payload) { published in
+            call.resolve(["published": published])
         }
     }
 
@@ -148,28 +111,11 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
             call.reject("A Watch map asset requires a package version")
             return
         }
-        queue.async { [weak self] in
-            guard let self, let session = self.session else { call.resolve(["sent": false]); return }
-            let bytes = Self.watchDecodableBytes(bytes)
-            let descriptor: [String: Any] = ["courseKey": courseKey, "version": version, "asset": asset]
-            do {
-                /* A hole bakes to a few kilobytes, comfortably inside the
-                   sendMessage payload limit, so a reachable Watch gets it
-                   immediately and the queued file transfer is the fallback for
-                   everything else. Writing the same bytes twice is a no-op on
-                   the Watch's side. */
-                if session.isReachable {
-                    var live = descriptor
-                    live["bytes"] = bytes
-                    session.sendMessage(["watchMapAsset": live], replyHandler: nil, errorHandler: nil)
-                }
-                let outbox = Self.watchMapOutbox()
-                try FileManager.default.createDirectory(at: outbox, withIntermediateDirectories: true)
-                let url = outbox.appendingPathComponent("\(courseKey)__v\(version)__\(asset)")
-                try bytes.write(to: url, options: .atomic)
-                session.transferFile(url, metadata: descriptor)
-                call.resolve(["sent": true])
-            } catch {
+        coordinator.publishMapAsset(courseKey: courseKey, version: version, asset: asset, bytes: bytes) { result in
+            switch result {
+            case .success(let sent):
+                call.resolve(["sent": sent])
+            case .failure(let error):
                 call.reject("Watch map asset could not be queued: \(error.localizedDescription)")
             }
         }
@@ -183,37 +129,18 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
 
     // MARK: - Watch player snapshot
 
-    /* The player's bag and saved My Bubble. A third payload, because it fits
-       neither of the other two: the Scene is small and arrives many times a
-       minute, so equipment riding it would trail every distance update; the
-       lite-map package is ~100KB per COURSE, while a bag belongs to the PLAYER
-       and changes when they edit it.
-
-       Mirrored live and queued durably, exactly as publishScene and
-       publishWatchMap are and for the same reason - the queued stores do not
-       reach this two-target Watch app reliably, and the Watch's adoption of a
-       snapshot is idempotent, so the mirror and the queue cannot disagree.
-
-       Native is transport. It does not read a bag, validate one, or decide when
-       one has changed: JavaScript builds the snapshot and the Watch verifies it
-       against its own fingerprint before storing it. */
     @objc public func publishWatchPlayer(_ call: CAPPluginCall) {
         guard let player = call.getObject("player") else {
             call.reject("A Watch player snapshot is required")
             return
         }
-        queue.async { [weak self] in
-            guard let self, let session = self.session else { call.resolve(["published": false]); return }
-            /* An omitted My Bubble offset is the whole point of the field (see
-               Bubble Bible s8) and Capacitor bridges a JS null as NSNull, which
-               makes the entire send throw WCErrorCodePayloadUnsupportedTypes.
-               Stripping is lossless: the Watch reads a missing key as nil. */
-            let payload = (Self.withoutNulls(player) as? [String: Any]) ?? [:]
-            if session.isReachable {
-                session.sendMessage(["watchPlayer": payload], replyHandler: nil, errorHandler: nil)
-            }
-            session.transferUserInfo(["watchPlayer": payload])
-            call.resolve(["published": true])
+        /* An omitted My Bubble offset is the whole point of the field (see
+           Bubble Bible s8) and Capacitor bridges a JS null as NSNull, which
+           makes the entire send throw WCErrorCodePayloadUnsupportedTypes.
+           Stripping is lossless: the Watch reads a missing key as nil. */
+        let payload = (Self.withoutNulls(player) as? [String: Any]) ?? [:]
+        coordinator.publishPlayer(payload) { published in
+            call.resolve(["published": published])
         }
     }
 
@@ -223,67 +150,10 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
         }
     }
 
-    /* The wrist's own answer to "which bag do you already hold". Kept for a
-       delivery module that attaches late and pushed to JavaScript now, so an
-       unchanged bag is never re-sent. */
-    private func receive(playerInventory: [String: Any]) {
-        queue.async { [weak self] in self?.watchPlayerInventoryReport = playerInventory }
-        notifyListeners("watchPlayerInventory", data: ["inventory": playerInventory])
-    }
-
     // MARK: - Watch presence
 
-    /* Whether there is a wrist to hand the round to. JavaScript puts the answer
-       on the Scene so the phone's Send to Watch and the Watch's own status strip
-       read one fact. Pushed on activation and on every pairing/reachability
-       change, and answerable on demand for a bridge that attaches late. */
-    private func watchStateData() -> [String: Any] {
-        guard let session else {
-            return ["supported": false, "activated": false, "paired": false, "appInstalled": false, "reachable": false]
-        }
-        return [
-            "supported": true,
-            "activated": session.activationState == .activated,
-            "paired": session.isPaired,
-            "appInstalled": session.isWatchAppInstalled,
-            "reachable": session.isReachable
-        ]
-    }
-
     @objc public func watchState(_ call: CAPPluginCall) {
-        call.resolve(watchStateData())
-    }
-
-    private func publishWatchState() {
-        notifyListeners("watchState", data: watchStateData())
-    }
-
-    /* The bake is WebP, and watchOS ImageIO has no WebP decoder: the wrist
-       logged "createImageAtIndex: could not find plugin for image source
-       ... 'RIFF'" on every hole and drew "This hole has no map" over a
-       complete package. iOS decodes it fine, so the phone re-encodes each
-       hole on the way past. The asset keeps its manifest name - the Watch
-       files by name and UIImage sniffs content, not extensions.
-
-       JPEG, not PNG: a 448x1536 hole came out at 50-68KB as PNG, over the
-       sendMessage payload limit (WCErrorCodePayloadTooLarge on 14 of 18
-       holes), and the queued file path is not something this Watch app can
-       lean on. At quality 0.8 the same holes are 15-20KB, and the bake has no
-       alpha to lose. */
-    private static func watchDecodableBytes(_ bytes: Data) -> Data {
-        guard let image = UIImage(data: bytes), let jpeg = image.jpegData(compressionQuality: 0.8) else { return bytes }
-        return jpeg
-    }
-
-    private static func watchMapOutbox() -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("CaddyWatchMapOutbox", isDirectory: true)
-    }
-
-    private func receive(_ command: [String: Any]) {
-        // JavaScript applies the generic command through its deduplicating
-        // CaddyWatchBridge. Durable Watch command outbox/retry is the next
-        // adapter milestone, not silently simulated here.
-        notifyListeners("watchCommand", data: ["command": command], retainUntilConsumed: true)
+        call.resolve(coordinator.state())
     }
 
     /* This is the only authoritative acknowledgement path. Native transport
@@ -295,68 +165,49 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WCSessionDele
             call.reject("A command acknowledgement is required")
             return
         }
-        queue.async { [weak self] in
-            guard let self else { return }
-            /* An accepted command acknowledges with `reason: null`, which
-               Capacitor bridges as NSNull and WatchConnectivity refuses outright
-               (WCErrorCodePayloadUnsupportedTypes) - on BOTH the live and the
-               queued path, so the Watch never heard that its LOCK or hole change
-               went through and kept the button reading busy. Same fix as
-               publishScene: the Watch decoder treats an absent key as nil. */
-            let payload = (Self.withoutNulls(acknowledgement) as? [String: Any]) ?? [:]
-            let message: [String: Any] = ["acknowledgement": payload]
-            if let session = self.session, session.isReachable {
-                session.sendMessage(message, replyHandler: nil) { _ in
-                    session.transferUserInfo(message)
-                }
-            } else {
-                self.session?.transferUserInfo(message)
-            }
+        /* An accepted command acknowledges with `reason: null`, which
+           Capacitor bridges as NSNull and WatchConnectivity refuses outright
+           (WCErrorCodePayloadUnsupportedTypes) - on BOTH the live and the
+           queued path, so the Watch never heard that its LOCK or hole change
+           went through and kept the button reading busy. Same fix as
+           publishScene: the Watch decoder treats an absent key as nil. */
+        let payload = (Self.withoutNulls(acknowledgement) as? [String: Any]) ?? [:]
+        coordinator.acknowledge(payload) {
             call.resolve()
         }
     }
 
+    // MARK: - WearableCoordinatorDelegate
+
+    func wearableCoordinator(_ coordinator: WearableCoordinator, didReceiveCommand command: [String: Any]) {
+        // JavaScript applies the generic command through its deduplicating
+        // CaddyWatchBridge. Durable Watch command outbox/retry is the next
+        // adapter milestone, not silently simulated here.
+        notifyListeners("watchCommand", data: ["command": command], retainUntilConsumed: true)
+    }
+
     /* The Watch's count of the holes it holds. Kept for the delivery module's
        next errand and pushed to JavaScript now, so the phone's handover card
-       counts the same holes the wrist does. Arrives as a live message when the
-       Watch is reachable and as queued user info otherwise. */
-    private func receive(inventory: [String: Any]) {
+       counts the same holes the wrist does. */
+    func wearableCoordinator(_ coordinator: WearableCoordinator, didReceiveMapInventory inventory: [String: Any]) {
         queue.async { [weak self] in self?.watchMapInventoryReport = inventory }
         notifyListeners("watchMapInventory", data: ["inventory": inventory])
     }
 
-    public func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-        if let command = message["command"] as? [String: Any] { receive(command) }
-        if let inventory = message["watchMapHave"] as? [String: Any] { receive(inventory: inventory) }
-        if let held = message["watchPlayerHave"] as? [String: Any] { receive(playerInventory: held) }
+    /* The wrist's own answer to "which bag do you already hold". Kept for a
+       delivery module that attaches late and pushed to JavaScript now, so an
+       unchanged bag is never re-sent. */
+    func wearableCoordinator(_ coordinator: WearableCoordinator, didReceivePlayerInventory inventory: [String: Any]) {
+        queue.async { [weak self] in self?.watchPlayerInventoryReport = inventory }
+        notifyListeners("watchPlayerInventory", data: ["inventory": inventory])
     }
 
-    public func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
-        if let command = userInfo["command"] as? [String: Any] { receive(command) }
-        if let inventory = userInfo["watchMapHave"] as? [String: Any] { receive(inventory: inventory) }
-        if let held = userInfo["watchPlayerHave"] as? [String: Any] { receive(playerInventory: held) }
-    }
-
-    /* The queued copy exists only to hand WatchConnectivity a stable file. Once
-       the transfer is done — or has definitively failed — it is dead weight in
-       the temporary directory. */
-    public func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
-        if let error { NSLog("[CaddyWatch] map asset transfer failed: %@", String(describing: error)) }
-        try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
-    }
-
-    public func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {}
-    public func sessionDidBecomeInactive(_ session: WCSession) {}
-    public func sessionDidDeactivate(_ session: WCSession) { session.activate() }
-    public func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
-        if activationState == .activated { republishLatestScene() }
-        publishWatchState()
-    }
-    public func sessionReachabilityDidChange(_ session: WCSession) {
-        if session.isReachable { republishLatestScene() }
-        publishWatchState()
-    }
-    public func sessionWatchStateDidChange(_ session: WCSession) {
-        publishWatchState()
+    /* Whether there is a wrist to hand the round to. JavaScript puts the answer
+       on the Scene so the phone's Send to Watch and the Watch's own status strip
+       read one fact. Pushed on activation and on every pairing/reachability
+       change, and answerable on demand via watchState for a bridge that
+       attaches late. */
+    func wearableCoordinatorStateDidChange(_ coordinator: WearableCoordinator) {
+        notifyListeners("watchState", data: coordinator.state())
     }
 }

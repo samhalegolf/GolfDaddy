@@ -13,6 +13,9 @@
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
 		504EC3081FED79650016851F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 504EC3071FED79650016851F /* AppDelegate.swift */; };
 		CA77D9000000000000000001 /* NativeRoundBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000002 /* NativeRoundBridge.swift */; };
+		CA77D9000000000000000C11 /* WearableTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000C10 /* WearableTransport.swift */; };
+		CA77D9000000000000000C13 /* WearableCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000C12 /* WearableCoordinator.swift */; };
+		CA77D9000000000000000C15 /* AppleWatchTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000C14 /* AppleWatchTransport.swift */; };
 		CA77D9000000000000000010 /* ClarityCaddyWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000020 /* ClarityCaddyWatchApp.swift */; };
 		CA77D9000000000000000011 /* WatchSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000021 /* WatchSessionManager.swift */; };
 		CA77D9000000000000000012 /* WatchScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000022 /* WatchScene.swift */; };
@@ -39,6 +42,9 @@
 		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		504EC3071FED79650016851F /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000002 /* NativeRoundBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRoundBridge.swift; sourceTree = "<group>"; };
+		CA77D9000000000000000C10 /* WearableTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WearableTransport.swift; sourceTree = "<group>"; };
+		CA77D9000000000000000C12 /* WearableCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WearableCoordinator.swift; sourceTree = "<group>"; };
+		CA77D9000000000000000C14 /* AppleWatchTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleWatchTransport.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000020 /* ClarityCaddyWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClarityCaddyWatchApp.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000021 /* WatchSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSessionManager.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000022 /* WatchScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchScene.swift; sourceTree = "<group>"; };
@@ -102,6 +108,7 @@
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				CA77D9000000000000000002 /* NativeRoundBridge.swift */,
+				CA77D9000000000000000C00 /* Wearables */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
@@ -129,6 +136,24 @@
 				CA77D9000000000000000027 /* WatchExtension-Info.plist */,
 			);
 			path = ClarityCaddyWatch;
+			sourceTree = "<group>";
+		};
+		CA77D9000000000000000C00 /* Wearables */ = {
+			isa = PBXGroup;
+			children = (
+				CA77D9000000000000000C10 /* WearableTransport.swift */,
+				CA77D9000000000000000C12 /* WearableCoordinator.swift */,
+				CA77D9000000000000000C01 /* Apple */,
+			);
+			path = Wearables;
+			sourceTree = "<group>";
+		};
+		CA77D9000000000000000C01 /* Apple */ = {
+			isa = PBXGroup;
+			children = (
+				CA77D9000000000000000C14 /* AppleWatchTransport.swift */,
+			);
+			path = Apple;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -268,6 +293,9 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				CA77D9000000000000000001 /* NativeRoundBridge.swift in Sources */,
+				CA77D9000000000000000C11 /* WearableTransport.swift in Sources */,
+				CA77D9000000000000000C13 /* WearableCoordinator.swift in Sources */,
+				CA77D9000000000000000C15 /* AppleWatchTransport.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
