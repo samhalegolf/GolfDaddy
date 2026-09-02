@@ -133,6 +133,7 @@ struct HoleMapPage: View {
     var profile: WatchBubbleProfile? = nil
     var canAim: Bool = false
     var onAim: (Coordinate) -> Void = { _ in }
+    var onSwipeBack: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 2) {
@@ -157,7 +158,8 @@ struct HoleMapPage: View {
                         bag: bag,
                         profile: profile,
                         canAim: true,
-                        onAim: onAim
+                        onAim: onAim,
+                        onSwipeBack: onSwipeBack
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 } else {

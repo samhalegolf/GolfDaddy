@@ -13,11 +13,11 @@ struct ShotView: View {
     var dismissHandoverNotice: () -> Void = {}
     /* The wrist's own fix, when it has a trustworthy one. */
     var wristFix: WatchScene.GeoPoint? = nil
-    /* A lock this wrist has made but nothing has confirmed yet. Presented as
-       locked, because that is what the player just did — with the club and
-       distance the wrist computed, not the phone's, since the phone has not
-       answered. Cleared by rejection, by the Scene catching up, or by expiry;
-       see WatchLockedShot. */
+    /* A lock this wrist has made but nothing has confirmed yet. The map page
+       is where a locked shot is looked at; here it only decides which club to
+       name and that no second LOCK is offered while the first is in flight.
+       Cleared by rejection, by the Scene catching up, or by expiry; see
+       WatchLockedShot. */
     var lockedShot: WatchLockedShot? = nil
 
     /* Which numbers to show. The Watch is its own rangefinder once it is
@@ -91,19 +91,19 @@ struct ShotView: View {
                         dismissHandoverNotice()
                     }
             }
-            if let lockedShot {
-                LockedShotFace(shot: lockedShot)
-            } else if scene.isBubble {
-                GreenBubbleView(scene: scene)
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(distanceText).font(.system(size: 39, weight: .bold, design: .rounded)).monospacedDigit().minimumScaleFactor(0.7)
-                    /* Says, quietly, that this number is the wrist's own. */
-                    if distanceFromWrist { Image(systemName: "location.fill").font(.caption2).foregroundStyle(.mint) }
-                }
-                if let club = scene.suggestion?.club, !club.isEmpty { Text(club).font(.title3.weight(.semibold)).foregroundStyle(.mint) }
-                DistanceDetail(distance: effectiveDistance)
+            /* Always the numbers. This page is the rangefinder; the shot, locked
+               or being shaped, is the map page's — LOCK takes the player there
+               and swiping back here is the unlock. There is deliberately no
+               second rendering of the Bubble on a black background. */
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(distanceText).font(.system(size: 39, weight: .bold, design: .rounded)).monospacedDigit().minimumScaleFactor(0.7)
+                /* Says, quietly, that this number is the wrist's own. */
+                if distanceFromWrist { Image(systemName: "location.fill").font(.caption2).foregroundStyle(.mint) }
             }
+            if let club = lockedShot?.club ?? scene.bubble?.club ?? scene.suggestion?.club, !club.isEmpty {
+                Text(club).font(.title3.weight(.semibold)).foregroundStyle(.mint)
+            }
+            DistanceDetail(distance: effectiveDistance)
             if lockedShot != nil {
                 /* No control while the lock is unconfirmed. UNLOCK would be a
                    command against a shot the phone may not have accepted, and
@@ -133,25 +133,6 @@ struct ShotView: View {
             Button(waiting ? "\(title)…" : title) { send(kind) }
                 .buttonStyle(.bordered).tint(.gray)
                 .font(.caption2.weight(.bold)).disabled(!enabled || waiting)
-        }
-    }
-}
-
-/* The shot as the wrist locked it: the club it chose and the distance it
-   measured, from its own engine. Deliberately not the Scene's numbers — the
-   Scene has not caught up yet, and showing its stale values under a "locked"
-   heading would be the one genuinely misleading thing this face could do. */
-private struct LockedShotFace: View {
-    let shot: WatchLockedShot
-
-    var body: some View {
-        VStack(spacing: 2) {
-            Label("LOCKED", systemImage: "checkmark.circle.fill")
-                .font(.caption2.weight(.heavy)).foregroundStyle(.mint).kerning(0.6)
-            Text("\(Int(shot.targetDistanceM.rounded())) m")
-                .font(.system(size: 34, weight: .bold, design: .rounded)).monospacedDigit()
-                .minimumScaleFactor(0.7)
-            Text(shot.club).font(.title3.weight(.semibold)).foregroundStyle(.mint)
         }
     }
 }

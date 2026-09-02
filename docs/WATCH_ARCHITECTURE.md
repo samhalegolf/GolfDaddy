@@ -156,10 +156,14 @@ a hole bakes small enough to fit a message. Writing identical bytes to the same
 versioned path twice is a no-op, so the mirror and the queue cannot disagree.
 
 The map is a second page, not a replacement: page one stays the numbers face
-with LOCK one tap away. Nothing on the Watch decides anything about the round —
-the green comes from the Scene, the aim point comes from the Scene, and the
-player is the wrist's own fix (or the phone's when the wrist has none). A hole
-with no delivered image shows why, not a blank.
+with LOCK one tap away. **LOCK flips to the map by itself** — the shot has just
+become a thing to look at — and **swiping back to the numbers is the unlock**:
+the map is only ever entered programmatically, so a page change to the numbers
+while the shot is locked can only be the player's swipe, and it sends `UNLOCK`.
+There is no separate locked face and no rendering of the Bubble on a black
+background; the numbers page is always the rangefinder. The green comes from
+the Scene, the player is the wrist's own fix (or the phone's when the wrist has
+none). A hole with no delivered image shows why, not a blank.
 
 ## The player snapshot: bag and My Bubble
 
@@ -231,8 +235,8 @@ wrist's own fix, the same way `WristDistances` already answers front/centre/back
 — the wrist is its own rangefinder, and now its own Bubble too. It is gated on
 the version handshake and returns nothing when the versions disagree, no bag has
 arrived, no target is in play, or there is no trustworthy fix. None of those is
-an error, and none shows the player anything: the numbers face draws the Scene's
-Bubble exactly as it did before.
+an error, and none shows the player anything: the map page draws the Scene's
+target as a picture, exactly as it did before.
 
 The port is deliberately narrow. Wind, micro-geometry (built but shipping off),
 tournament mode and the display **pixel** clamp do not cross — the last because
@@ -297,9 +301,12 @@ ahead) remains for a hole with no target at all. The camera is set on appear, a
 new hole, the first fix and the first Scene target — and by the crown and the
 edge pan — never on a Scene revision and never on drag end.
 
-**A tap places the target and moves nothing else.** A drag keeps the target
-under the finger and the map under both stays put: what is being placed stays
-where it is being placed. The map moves only when the finger reaches the very
+**A tap places the target and moves nothing else.** A drag — press, hold 0.2s
+(a click says the target is picked up), then move — keeps the target under the
+finger and the map under both stays put: what is being placed stays where it is
+being placed. The hold is what lets the page be swiped away: a drag that began
+on touch-down took every horizontal swipe, and swiping back to the numbers is
+the UNLOCK. The map moves only when the finger reaches the very
 edge of the view (`WatchMapCamera.edgeInset`, 16pt) and holds there for
 `edgeDwell` (0.4s) — so a sweep to the far side does not set it moving on the
 way past — and then it creeps at `edgePanSpeed` (45pt/s) in the edge's
@@ -367,11 +374,11 @@ It stores the Bubble's **shape**, not its 168 ring points — the ring is derive
 and storing derived geometry beside the inputs that produce it is how the two
 drift apart.
 
-The locked face shows the wrist's own club and distance, deliberately not the
-Scene's: the Scene has not caught up, and its stale numbers under a "locked"
-heading would be the one genuinely misleading thing this could show. No LOCK or
-UNLOCK control is offered while it is unconfirmed — UNLOCK would act against a
-shot the phone may not have accepted, and LOCK would invite a second one.
+While it is unconfirmed the numbers page names the wrist's own club, not the
+Scene's (the Scene has not caught up), and offers no LOCK or UNLOCK control —
+UNLOCK would act against a shot the phone may not have accepted, and LOCK would
+invite a second one. The player is on the map page by then anyway: LOCK took
+them there.
 
 A wrist that computed nothing of its own records nothing and waits exactly as it
 did before, so this never invents a shot it cannot describe.
@@ -501,7 +508,8 @@ The Watch has the same four faces off the same state (`WatchSessionManager.face`
 **Receiving course** with the store's own hole count, **Ready** - the hole drawn
 from the delivered map with the wrist's own distance to the green (or the hole's
 length before there is a fix) and a **Play here** button, **Taking the round**,
-and **Playing** - the numbers face with LOCK and a live dot in the header. Either
+and **Playing** - the numbers face with LOCK and a live dot in the header, with
+the map as page two (LOCK flips to it; swiping back unlocks). Either
 end can finish the handover: tap the card, or press Play here. Taking the round
 back is done from the phone's card. While the wrist drives, the numbers face
 uses the wrist's own fix for front/centre/back against the Scene's green

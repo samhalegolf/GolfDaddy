@@ -1,5 +1,6 @@
 import SwiftUI
 import WatchBubbleEngine
+import WatchKit
 
 /* The map you can aim on.
  *
@@ -33,6 +34,10 @@ struct AimableHoleMap: View {
     /// the map is a picture: no drag, no local Bubble, the phone's numbers.
     let canAim: Bool
     let onAim: (Coordinate) -> Void
+    /// A quick swipe towards the numbers page. The TabView cannot see a swipe
+    /// through this view's own gestures, so the map reports it and the page
+    /// state does the rest — which, while the shot is locked, is the UNLOCK.
+    var onSwipeBack: () -> Void = {}
 
     @State private var state = WatchPlayState()
     @State private var camera: WatchMapCamera?
@@ -41,6 +46,10 @@ struct AimableHoleMap: View {
     /// pan so a map creeping under a held finger keeps the target under it.
     @State private var fingerAt: CGPoint?
     @State private var edgePan: Task<Void, Never>?
+    /// True from the first movement of a touch until a press-and-hold claims
+    /// it. A touch that ends still a candidate, having travelled sideways, was
+    /// a swipe.
+    @State private var swipeCandidate = false
     /// Zoom, driven by the Digital Crown. Held separately from the camera so a
     /// resting re-fit does not fight a zoom the player just chose.
     @State private var crownZoom: Double = 1
@@ -126,7 +135,9 @@ struct AimableHoleMap: View {
             .frame(width: viewSize.width, height: viewSize.height, alignment: .topLeading)
             .clipped()
             .contentShape(Rectangle())
+            .gesture(tapGesture(viewSize: viewSize), including: canAim ? .all : .subviews)
             .gesture(aimGesture(viewSize: viewSize), including: canAim ? .all : .subviews)
+            .simultaneousGesture(swipeGesture, including: canAim ? .all : .subviews)
             .focusable(canAim)
             .focused($crownFocused)
             .digitalCrownRotation($crownZoom, from: 0.5, through: 3.0, by: 0.05,
@@ -179,22 +190,72 @@ struct AimableHoleMap: View {
 
     // MARK: - Interaction
 
-    /* A tap puts the target under the finger. A drag keeps it under the
-       finger. Neither moves the map: what is being placed stays where it is
-       being placed. The map moves only when the finger reaches the very edge
-       and holds there — see `edgePan`. */
+    /* A tap puts the target under the finger, and sends it. Nothing moves but
+       the target: what is being placed stays where it is being placed. */
+    private func tapGesture(viewSize: CGSize) -> some Gesture {
+        SpatialTapGesture()
+            .onEnded { value in
+                guard canAim, let bag, let profile,
+                      let coordinate = coordinate(fromView: value.location, viewSize: viewSize) else { return }
+                state.moveTarget(to: coordinate, bag: bag, profile: profile)
+                if let target = state.target { onAim(target) }
+            }
+    }
+
+    /* The page swipe, recognised here because nothing above this view can see
+       it once the aim gestures are attached. Only a touch that was never
+       picked up by the press-and-hold counts, and only a decisive sideways
+       one: a rightward travel of 50pt that outruns its vertical drift. */
+    private var swipeGesture: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onChanged { _ in
+                if dragging { swipeCandidate = false } else if !swipeCandidate { swipeCandidate = true }
+            }
+            .onEnded { value in
+                defer { swipeCandidate = false }
+                guard swipeCandidate, !dragging else { return }
+                let travel = value.translation
+                guard travel.width > 50, abs(travel.width) > abs(travel.height) * 1.5 else { return }
+                onSwipeBack()
+            }
+    }
+
+    /* Press, hold a beat, then drag: the target follows the finger.
+     *
+     * The hold is what lets this page be swiped away. A drag gesture that
+     * started on touch-down took every horizontal swipe for itself, so the
+     * page could never be swiped back to the numbers — and swiping back is
+     * the UNLOCK. A quick swipe fails the press (it travels too far, too
+     * soon) and falls through to the TabView; a finger that stays put for
+     * 0.2s has picked the target up, and a click says so.
+     *
+     * The map itself never moves under the finger except at the very edge —
+     * see `edgePan`. */
     private func aimGesture(viewSize: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 0)
+        LongPressGesture(minimumDuration: 0.2, maximumDistance: 12)
+            .sequenced(before: DragGesture(minimumDistance: 0))
             .onChanged { value in
                 guard canAim, let bag, let profile else { return }
-                dragging = true
-                fingerAt = value.location
-                if let coordinate = coordinate(fromView: value.location, viewSize: viewSize) {
-                    state.moveTarget(to: coordinate, bag: bag, profile: profile)
+                switch value {
+                case .first:
+                    return
+                case .second(true, nil):
+                    if !dragging { WKInterfaceDevice.current().play(.click) }
+                    dragging = true
+                    swipeCandidate = false
+                case .second(true, let drag?):
+                    dragging = true
+                    fingerAt = drag.location
+                    if let coordinate = coordinate(fromView: drag.location, viewSize: viewSize) {
+                        state.moveTarget(to: coordinate, bag: bag, profile: profile)
+                    }
+                    updateEdgePan(viewSize: viewSize)
+                default:
+                    return
                 }
-                updateEdgePan(viewSize: viewSize)
             }
             .onEnded { _ in
+                guard dragging else { return }
                 dragging = false
                 fingerAt = nil
                 stopEdgePan()
@@ -262,7 +323,11 @@ struct AimableHoleMap: View {
         guard canAim, let bag, let profile,
               let fix = player, let lat = fix.lat, let lng = fix.lng else { return }
         state.update(player: Coordinate(lat: lat, lng: lng))
-        if let target = sceneTarget, let tLat = target.lat, let tLng = target.lng {
+        if let own = state.target {
+            /* Re-appearing (the app came back from the background) with a
+               target of its own: keep it, refresh the ring for the fix. */
+            state.moveTarget(to: own, bag: bag, profile: profile)
+        } else if let target = sceneTarget, let tLat = target.lat, let tLng = target.lng {
             state.moveTarget(to: Coordinate(lat: tLat, lng: tLng), bag: bag, profile: profile)
         } else if let reference = map.reference {
             state.reset(

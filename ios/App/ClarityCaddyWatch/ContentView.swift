@@ -5,6 +5,14 @@ struct ContentView: View {
     @ObservedObject var session: WatchSessionManager
     @ObservedObject private var maps: WatchMapStore
 
+    /* The two pages of the driving face. LOCK flips to the map by itself —
+       the shot has just become a thing to look at — and swiping back to the
+       numbers IS the unlock. The map is never entered by a swipe the code
+       cares about and never left by anything but the player, so a change to
+       `.numbers` while the shot is locked can only be that swipe. */
+    private enum Page: Hashable { case numbers, map }
+    @State private var page: Page = .numbers
+
     /* The store publishes on its own schedule (a file lands, a manifest is
        adopted), so the view observes it alongside the session rather than
        waiting for the next Scene revision to notice. */
@@ -45,10 +53,17 @@ struct ContentView: View {
                        replacement or a background: it is a picture of a hole,
                        and it earns the whole screen when it is the thing being
                        looked at. */
-                    TabView {
-                        ShotView(scene: scene, stale: session.state == .stale, pending: session.pendingCommands, rejection: session.lastRejection, send: session.send, dismissRejection: session.dismissRejection,
+                    let locked = scene.shot?.locked == true || session.lockedShot != nil
+                    TabView(selection: $page) {
+                        ShotView(scene: scene, stale: session.state == .stale, pending: session.pendingCommands, rejection: session.lastRejection,
+                                 send: { kind in
+                                     session.send(kind)
+                                     if kind == .lock { page = .map }
+                                 },
+                                 dismissRejection: session.dismissRejection,
                                  driving: true, handoverNotice: session.handoverNotice, dismissHandoverNotice: session.dismissHandoverNotice,
                                  wristFix: session.wristFix, lockedShot: session.lockedShot)
+                            .tag(Page.numbers)
                         if let holeNumber = scene.hole?.number {
                             HoleMapPage(
                                 scene: scene,
@@ -65,11 +80,28 @@ struct ContentView: View {
                                 canAim: scene.controls?.canAim == true
                                     && session.engineAgreement.mayComputeLocally
                                     && session.player.snapshot != nil,
-                                onAim: { session.sendAim(to: $0) }
+                                onAim: { session.sendAim(to: $0) },
+                                /* The aimable map swallows the page swipe, so
+                                   it reports one; landing on the numbers is
+                                   what sends UNLOCK below. */
+                                onSwipeBack: { page = .numbers }
                             )
+                            .tag(Page.map)
                         }
                     }
                     .tabViewStyle(.page)
+                    /* The phone locked (or the wrist's LOCK was confirmed):
+                       the map is where a locked shot lives. */
+                    .onChange(of: scene.shot?.locked) { _, isLocked in
+                        if isLocked == true { page = .map }
+                    }
+                    /* Opened mid-shot — the app relaunched, or the round came
+                       back — the locked shot is still on the map. */
+                    .onAppear { if locked { page = .map } }
+                    .onChange(of: page) { _, now in
+                        guard now == .numbers, locked else { return }
+                        session.send(.unlock)
+                    }
                 }
             }
         }
