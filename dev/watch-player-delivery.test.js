@@ -18,6 +18,15 @@ const fs = require("fs");
 const delivery = require(path.join(__dirname, "..", "app", "js", "watch-player-delivery.js"));
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "bubble-engine-parity.json"), "utf8"));
 
+/* The engine version comes from caddy-watch.js, which owns it - the same place
+   the delivery module reads it from in the browser. Taking it from there rather
+   than writing the string here is the point: a second literal is the drift the
+   handshake exists to catch, and a test that carried its own copy would be the
+   first place it appeared. */
+const ENGINE_VERSION = require(path.join(__dirname, "..", "app", "js", "caddy-watch.js")).BUBBLE_ENGINE_VERSION;
+const snapshotFrom = (bag, bubble, handedness) =>
+  delivery.__test.snapshotFrom(bag, bubble, handedness, ENGINE_VERSION);
+
 const results = [];
 function check(name, fn) {
   try { fn(); results.push({ name, ok: true }); }
@@ -47,7 +56,8 @@ function environment(options) {
   const instance = delivery.createDelivery({
     plugin: () => (options.noPlugin ? null : plugin),
     bag: () => state.bag,
-    bubble: () => ({ saved: state.saved, handedness: state.handedness })
+    bubble: () => ({ saved: state.saved, handedness: state.handedness }),
+    engineVersion: () => (options.engineVersion === undefined ? ENGINE_VERSION : options.engineVersion)
   });
   return { instance, calls, state };
 }
@@ -56,7 +66,7 @@ function environment(options) {
 
 fixture.playerFingerprints.cases.forEach(entry => {
   check("fingerprint · " + entry.name, () => {
-    const snapshot = delivery.__test.snapshotFrom(entry.input.bag, entry.input.bubble, entry.input.handedness);
+    const snapshot = snapshotFrom(entry.input.bag, entry.input.bubble, entry.input.handedness);
     assert.ok(snapshot, "the case must produce a snapshot");
     assert.strictEqual(snapshot.fingerprint, entry.expect.fingerprint, entry.why);
     assert.deepStrictEqual(snapshot.bag.clubs, entry.expect.clubs);
@@ -69,8 +79,8 @@ check("an absent aim and a saved zero are different snapshots", () => {
   /* The single most important distinction in this payload. Number(null) is 0
      and passes a bare finite check, which is exactly how a fabricated 0.0 deg
      aim got applied to everyone once before. */
-  const absent = delivery.__test.snapshotFrom([{ club: "Driver", baseCarry: 205 }], null, "right");
-  const zero = delivery.__test.snapshotFrom([{ club: "Driver", baseCarry: 205 }], { offsetDeg: 0 }, "right");
+  const absent = snapshotFrom([{ club: "Driver", baseCarry: 205 }], null, "right");
+  const zero = snapshotFrom([{ club: "Driver", baseCarry: 205 }], { offsetDeg: 0 }, "right");
   assert.notStrictEqual(absent.fingerprint, zero.fingerprint);
   assert.ok(!("offsetDeg" in absent.bubble), "no My Bubble must OMIT the offset, never send zero");
   assert.strictEqual(zero.bubble.offsetDeg, 0, "a saved zero-degree aim is a real value and must survive");
@@ -78,7 +88,7 @@ check("an absent aim and a saved zero are different snapshots", () => {
 
 check("an empty-string or null offset is an absent aim, not a zero", () => {
   ["", null, undefined, NaN].forEach(value => {
-    const snapshot = delivery.__test.snapshotFrom([{ club: "Driver", baseCarry: 205 }], { offsetDeg: value }, "right");
+    const snapshot = snapshotFrom([{ club: "Driver", baseCarry: 205 }], { offsetDeg: value }, "right");
     assert.ok(!("offsetDeg" in snapshot.bubble), "offsetDeg " + JSON.stringify(value) + " must be treated as absent");
   });
 });
@@ -86,31 +96,74 @@ check("an empty-string or null offset is an absent aim, not a zero", () => {
 // --- building a snapshot ----------------------------------------------------------------------
 
 check("clubs are emitted longest-total-first whatever order they arrive in", () => {
-  const forwards = delivery.__test.snapshotFrom(ACCOUNT_BAG, { offsetDeg: 3.2 }, "right");
-  const shuffled = delivery.__test.snapshotFrom(ACCOUNT_BAG.slice().reverse(), { offsetDeg: 3.2 }, "right");
+  const forwards = snapshotFrom(ACCOUNT_BAG, { offsetDeg: 3.2 }, "right");
+  const shuffled = snapshotFrom(ACCOUNT_BAG.slice().reverse(), { offsetDeg: 3.2 }, "right");
   assert.deepStrictEqual(forwards.bag.clubs.map(c => c.club), ["Driver", "5i", "PW"]);
   assert.strictEqual(forwards.fingerprint, shuffled.fingerprint,
     "a shuffled bag is the same bag - otherwise a re-render re-sends it");
 });
 
 check("an unnamed or zero-carry row is dropped, not sent as a club", () => {
-  const snapshot = delivery.__test.snapshotFrom(
+  const snapshot = snapshotFrom(
     [{ club: "Driver", baseCarry: 205 }, { club: "", baseCarry: 150 }, { club: "Ghost", baseCarry: 0 }],
     { offsetDeg: 1 }, "right");
   assert.deepStrictEqual(snapshot.bag.clubs.map(c => c.club), ["Driver"]);
 });
 
 check("a bag with nothing playable produces no snapshot at all", () => {
-  assert.strictEqual(delivery.__test.snapshotFrom([], { offsetDeg: 1 }, "right"), null);
-  assert.strictEqual(delivery.__test.snapshotFrom(null, null, "right"), null);
+  assert.strictEqual(snapshotFrom([], { offsetDeg: 1 }, "right"), null);
+  assert.strictEqual(snapshotFrom(null, null, "right"), null);
 });
 
 check("the engine version travels with the bag", () => {
-  const snapshot = delivery.__test.snapshotFrom(ACCOUNT_BAG, { offsetDeg: 3.2 }, "right");
-  assert.strictEqual(snapshot.engineVersion, delivery.ENGINE_VERSION);
+  const snapshot = snapshotFrom(ACCOUNT_BAG, { offsetDeg: 3.2 }, "right");
+  assert.strictEqual(snapshot.engineVersion, ENGINE_VERSION);
   assert.strictEqual(snapshot.version, delivery.SCHEMA_VERSION);
-  assert.ok(snapshot.fingerprint.endsWith("|e:" + delivery.ENGINE_VERSION),
+  assert.ok(snapshot.fingerprint.endsWith("|e:" + ENGINE_VERSION),
     "the engine version is IN the fingerprint, so upgrading the engine re-sends the bag");
+});
+
+check("the version comes from caddy-watch.js and is not a second literal here", () => {
+  /* Both halves of the handshake must read the SAME constant. If this file
+     ever grows its own copy, the Scene and the bag start declaring different
+     engines and the wrist quietly stops computing with nothing to say why. */
+  assert.strictEqual(typeof ENGINE_VERSION, "string");
+  assert.ok(ENGINE_VERSION.length > 0);
+  const source = fs.readFileSync(path.join(__dirname, "..", "app", "js", "watch-player-delivery.js"), "utf8");
+  assert.ok(!source.includes('"' + ENGINE_VERSION + '"'),
+    "watch-player-delivery.js must READ the engine version, never declare one");
+});
+
+check("no engine version means no snapshot and nothing sent", () => {
+  /* A bag delivered without an engine version would leave the wrist unable to
+     decide whether it may compute against it at all, which is worse than not
+     having the bag. */
+  const { instance, calls } = environment({ engineVersion: null });
+  const result = instance.deliver();
+  assert.strictEqual(result.delivered, false);
+  assert.strictEqual(result.reason, "no-engine-version");
+  assert.strictEqual(calls.length, 0);
+  assert.strictEqual(snapshotFrom(ACCOUNT_BAG, { offsetDeg: 1 }, "right", null) === null, false);
+  assert.strictEqual(delivery.__test.snapshotFrom(ACCOUNT_BAG, { offsetDeg: 1 }, "right", null), null);
+});
+
+check("a phone upgrading its engine re-sends the bag", () => {
+  /* The engine version is in the fingerprint precisely so that this happens:
+     the numbers have not changed but which engine normalised them has, and the
+     wrist has to be told before it trusts them. */
+  const { instance, calls, state } = environment();
+  instance.deliver();
+  state.engine = "bubble-engine-v2";
+  const upgraded = delivery.createDelivery({
+    plugin: () => ({ publishWatchPlayer: snapshot => calls.push(snapshot.player) }),
+    bag: () => state.bag,
+    bubble: () => ({ saved: state.saved, handedness: state.handedness }),
+    engineVersion: () => "bubble-engine-v2"
+  });
+  upgraded.noteInventory({ fingerprint: calls[0].fingerprint });
+  assert.strictEqual(upgraded.deliver().delivered, true,
+    "the same bag under a new engine is a new snapshot");
+  assert.notStrictEqual(calls[1].fingerprint, calls[0].fingerprint);
 });
 
 // --- when it sends ------------------------------------------------------------------------------
@@ -129,7 +182,7 @@ check("a fresh wrist gets the snapshot once, not on every Scene", () => {
 
 check("a bag the wrist already reports holding is never sent", () => {
   const { instance, calls } = environment();
-  const snapshot = delivery.__test.snapshotFrom(ACCOUNT_BAG, { offsetDeg: 3.2 }, "right");
+  const snapshot = snapshotFrom(ACCOUNT_BAG, { offsetDeg: 3.2 }, "right");
   instance.noteInventory({ fingerprint: snapshot.fingerprint });
   const result = instance.deliver();
   assert.strictEqual(result.delivered, false);
@@ -216,7 +269,8 @@ check("a publish that throws is retried on the next Scene", () => {
   const failing = delivery.createDelivery({
     plugin: () => ({ publishWatchPlayer: () => { throw new Error("no session"); } }),
     bag: () => ACCOUNT_BAG,
-    bubble: () => ({ saved: { offsetDeg: 3.2 }, handedness: "right" })
+    bubble: () => ({ saved: { offsetDeg: 3.2 }, handedness: "right" }),
+    engineVersion: () => ENGINE_VERSION
   });
   const result = failing.deliver();
   assert.strictEqual(result.delivered, false);
@@ -236,6 +290,35 @@ check("a malformed inventory report clears the record rather than being trusted"
      which is a real answer and a different one from having not answered. */
   instance.noteInventory({ fingerprint: "" });
   assert.strictEqual(instance.state().wristHas, "", "an empty fingerprint is an answer, not a missing report");
+});
+
+check("the wrist's engine version is recorded and compared", () => {
+  const { instance } = environment();
+  assert.deepStrictEqual(instance.engineAgreement(), { agreed: null, phone: ENGINE_VERSION, watch: null },
+    "before the wrist reports, there is nothing to compare");
+  instance.noteInventory({ fingerprint: "", engineVersion: ENGINE_VERSION });
+  assert.strictEqual(instance.engineAgreement().agreed, true);
+  instance.noteInventory({ fingerprint: "", engineVersion: "bubble-engine-v9" });
+  assert.deepStrictEqual(instance.engineAgreement(), { agreed: false, phone: ENGINE_VERSION, watch: "bubble-engine-v9" });
+  /* A report with no engine version is an older Watch build. Unknown, not
+     disagreeing - and the WRIST is the end that defers either way. */
+  instance.noteInventory({ fingerprint: "" });
+  assert.strictEqual(instance.engineAgreement().agreed, null);
+});
+
+check("the phone, the fixture and the Watch name the same engine", () => {
+  /* Closes the triangle. The Swift side asserts its own constant against the
+     fixture (EngineVersionTests.testCurrentVersionMatchesTheParityFixture);
+     this asserts the phone's against the same fixture, and against the literal
+     the Swift source declares. Bumping one alone fails here. */
+  assert.strictEqual(ENGINE_VERSION, fixture.bubbleEngineVersion,
+    "caddy-watch.js and dev/fixtures/bubble-engine-parity.json must name the same engine");
+  assert.strictEqual(ENGINE_VERSION, fixture.playerFingerprints.engineVersion,
+    "the recorded fingerprints must be for this engine");
+  const swiftSource = fs.readFileSync(
+    path.join(__dirname, "..", "ios", "WatchBubbleEngine", "Sources", "WatchBubbleEngine", "EngineVersion.swift"), "utf8");
+  assert.ok(swiftSource.includes('public static let current = "' + ENGINE_VERSION + '"'),
+    "BubbleEngineVersion.current must name the same engine as caddy-watch.js");
 });
 
 report();

@@ -29,11 +29,24 @@
   "use strict";
 
   var SCHEMA_VERSION = 1;
+
   /* Which Bubble engine the numbers on this phone come from. The wrist refuses
      to compute locally against an engine it does not implement and renders the
      phone's Bubble instead, so this travelling with the bag is what makes that
-     check possible at all. */
-  var ENGINE_VERSION = "bubble-engine-v1";
+     check possible at all.
+
+     READ from caddy-watch.js rather than declared here. That module owns the
+     wearable contract and puts the same value on the Scene; a second literal
+     in this file is exactly the drift the handshake exists to catch, and it
+     would be invisible - the two would simply stop agreeing and the wrist
+     would quietly stop computing. There is deliberately NO fallback string: a
+     snapshot with no engine version cannot take part in the handshake, so not
+     being able to read it is a reason to send nothing. */
+  function engineVersion() {
+    var factory = (typeof window !== "undefined") && window.ClarityApp && window.ClarityApp.createCaddyWatchBridge;
+    var value = factory && factory.BUBBLE_ENGINE_VERSION;
+    return typeof value === "string" && value ? value : null;
+  }
 
   function finite(n) { return Number.isFinite(Number(n)); }
   function whole(n) { return Math.round(Number(n) || 0); }
@@ -94,16 +107,18 @@
     return parts.join("|");
   }
 
-  function snapshotFrom(rows, saved, handedness) {
+  function snapshotFrom(rows, saved, handedness, engine) {
+    var version = engine || engineVersion();
+    if (!version) return null;
     var bag = bagFrom(rows);
     if (!bag.clubs.length) return null;
     var bubble = bubbleFrom(saved, handedness);
     return {
       version: SCHEMA_VERSION,
-      fingerprint: fingerprint(bag, bubble, ENGINE_VERSION),
+      fingerprint: fingerprint(bag, bubble, version),
       bag: bag,
       bubble: bubble,
-      engineVersion: ENGINE_VERSION
+      engineVersion: version
     };
   }
 
@@ -125,6 +140,7 @@
         handedness: typeof my.handedness === "function" ? my.handedness() : "right"
       };
     };
+    var readEngineVersion = options.engineVersion || engineVersion;
     var nativePlugin = options.plugin || function () {
       var cap = (typeof window !== "undefined") && window.Capacitor;
       return cap && cap.Plugins && cap.Plugins.NativeRoundBridge;
@@ -135,6 +151,7 @@
        never, on a wrist that has not reported yet), and without the local note
        every Scene would re-publish the same snapshot until it did. */
     var wristHas = null;
+    var wristEngine = null;
     var sent = null;
 
     function pluginOrNull() {
@@ -150,7 +167,12 @@
         var plugin = pluginOrNull();
         if (!plugin) return { delivered: false, reason: "no-native-bridge" };
         var bubble = readBubble() || {};
-        var snapshot = snapshotFrom(readBag(), bubble.saved, bubble.handedness);
+        var engine = typeof readEngineVersion === "function" ? readEngineVersion() : readEngineVersion;
+        /* No engine version, no snapshot. The wrist decides whether it may
+           compute locally by comparing versions, and a bag delivered without
+           one would leave it unable to answer that at all. */
+        if (!engine) return { delivered: false, reason: "no-engine-version" };
+        var snapshot = snapshotFrom(readBag(), bubble.saved, bubble.handedness, engine);
         /* No playable bag at all is not a failure to report to the wrist - it
            is a player who has not set one up, and the engine's ghost bag covers
            the phone. Sending an empty bag would let the wrist compute against
@@ -196,7 +218,22 @@
            has not told us", which must not. A malformed report is the latter -
            losing a report costs one re-send, never correctness. */
         wristHas = report && typeof report.fingerprint === "string" ? report.fingerprint : null;
+        /* The engine the wrist implements, reported alongside. Nothing on the
+           phone changes behaviour on it - the WRIST is the end that decides
+           whether it may compute, and it defers on its own. This is here so a
+           mismatch is visible from the phone's side too, rather than only
+           inferable from a Watch that mysteriously never computes. */
+        var engine = report && typeof report.engineVersion === "string" ? report.engineVersion : null;
+        wristEngine = engine || null;
         return wristHas;
+      },
+
+      /* Whether the wrist runs the same Bubble engine this phone does. null
+         while the wrist has not reported one. */
+      engineAgreement: function () {
+        var mine = typeof readEngineVersion === "function" ? readEngineVersion() : readEngineVersion;
+        if (!mine || !wristEngine) return { agreed: null, phone: mine || null, watch: wristEngine };
+        return { agreed: mine === wristEngine, phone: mine, watch: wristEngine };
       },
 
       /* A bag edit or a My Bubble save mid-round must reach the wrist without
@@ -204,7 +241,7 @@
          the next Scene re-publishes. */
       invalidate: function () { sent = null; },
 
-      state: function () { return { sent: sent, wristHas: wristHas }; }
+      state: function () { return { sent: sent, wristHas: wristHas, wristEngine: wristEngine }; }
     };
   }
 
@@ -223,7 +260,7 @@
   return {
     createDelivery: createDelivery,
     SCHEMA_VERSION: SCHEMA_VERSION,
-    ENGINE_VERSION: ENGINE_VERSION,
+    engineVersion: engineVersion,
     deliver: function () {
       var instance = ensureShared();
       return instance ? instance.deliver() : { delivered: false, reason: "no-native-bridge" };

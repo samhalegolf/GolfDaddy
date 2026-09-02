@@ -15,6 +15,21 @@
   "use strict";
 
   var SCHEMA_VERSION = 1;
+  /* Which Bubble engine produced the numbers on this Scene.
+
+     Declared HERE, once, because it is a fact about the wearable contract and
+     two surfaces have to agree on it: the Scene carries it so the wrist knows
+     which engine drew the Bubble it is being shown, and the player snapshot
+     (app/js/watch-player-delivery.js) carries it so the wrist knows which
+     engine the bag it is holding was normalised for. A second literal
+     somewhere else is the whole failure this value exists to prevent.
+
+     Bump it whenever any ported Bubble function changes behaviour. The parity
+     fixtures in dev/fixtures/bubble-engine-parity.json are versioned with it,
+     and a wrist that implements a different version stops computing locally
+     and renders the phone's Bubble instead - which is a slightly staler
+     answer, and far better than two engines silently disagreeing. */
+  var BUBBLE_ENGINE_VERSION = "bubble-engine-v1";
   var LOCATION_SOURCES = ["phone-web", "phone-native", "apple-watch", "wear-os", "garmin"];
 
   function finite(n) { return Number.isFinite(Number(n)); }
@@ -81,7 +96,11 @@
       club: payload.club || null,
       carryM: rounded(payload.baseCarry),
       totalM: rounded(payload.totalM),
-      centre: model && model.center ? copyPoint(model.center) : copyPoint(scene.bubble.target)
+      centre: model && model.center ? copyPoint(model.center) : copyPoint(scene.bubble.target),
+      /* Which engine drew this. The wrist compares it with the engine it
+         implements before it computes anything of its own; a difference means
+         render these numbers rather than form a second opinion. */
+      engineVersion: BUBBLE_ENGINE_VERSION
     };
   }
 
@@ -301,6 +320,7 @@
   }
 
   createCaddyWatchBridge.SCHEMA_VERSION = SCHEMA_VERSION;
+  createCaddyWatchBridge.BUBBLE_ENGINE_VERSION = BUBBLE_ENGINE_VERSION;
   createCaddyWatchBridge.localPoint = localPoint;
   return createCaddyWatchBridge;
 });

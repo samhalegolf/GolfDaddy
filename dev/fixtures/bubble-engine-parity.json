@@ -157,6 +157,38 @@
         }
       },
       "expect": {
+        "bagSent": [
+          {
+            "club": "Driver",
+            "carryM": 205,
+            "totalM": 228
+          },
+          {
+            "club": "3W",
+            "carryM": 190,
+            "totalM": 209
+          },
+          {
+            "club": "5i",
+            "carryM": 155,
+            "totalM": 167
+          },
+          {
+            "club": "7i",
+            "carryM": 138,
+            "totalM": 148
+          },
+          {
+            "club": "9i",
+            "carryM": 118,
+            "totalM": 127
+          },
+          {
+            "club": "PW",
+            "carryM": 103,
+            "totalM": 108
+          }
+        ],
         "defaultTarget": {
           "lat": -36.9169,
           "lng": 174.7393
@@ -265,6 +297,73 @@
         }
       },
       "expect": {
+        "bagSent": [
+          {
+            "club": "Driver",
+            "carryM": 230,
+            "totalM": 255
+          },
+          {
+            "club": "3W",
+            "carryM": 205,
+            "totalM": 226
+          },
+          {
+            "club": "4H",
+            "carryM": 180,
+            "totalM": 198
+          },
+          {
+            "club": "4i",
+            "carryM": 178,
+            "totalM": 191
+          },
+          {
+            "club": "5i",
+            "carryM": 170,
+            "totalM": 183
+          },
+          {
+            "club": "6i",
+            "carryM": 160,
+            "totalM": 172
+          },
+          {
+            "club": "7i",
+            "carryM": 155,
+            "totalM": 167
+          },
+          {
+            "club": "8i",
+            "carryM": 142,
+            "totalM": 153
+          },
+          {
+            "club": "9i",
+            "carryM": 130,
+            "totalM": 140
+          },
+          {
+            "club": "PW",
+            "carryM": 115,
+            "totalM": 120
+          },
+          {
+            "club": "GW",
+            "carryM": 98,
+            "totalM": 103
+          },
+          {
+            "club": "SW",
+            "carryM": 82,
+            "totalM": 86
+          },
+          {
+            "club": "LW",
+            "carryM": 66,
+            "totalM": 69
+          }
+        ],
         "defaultTarget": {
           "lat": -36.9169,
           "lng": 174.7393
@@ -386,6 +485,28 @@
         }
       },
       "expect": {
+        "bagSent": [
+          {
+            "club": "Driver",
+            "carryM": 205,
+            "totalM": 228
+          },
+          {
+            "club": "5i",
+            "carryM": 155,
+            "totalM": 167
+          },
+          {
+            "club": "7i",
+            "carryM": 138,
+            "totalM": 148
+          },
+          {
+            "club": "PW",
+            "carryM": 103,
+            "totalM": 108
+          }
+        ],
         "defaultTarget": {
           "lat": -36.9169,
           "lng": 174.7393
@@ -519,6 +640,38 @@
         }
       },
       "expect": {
+        "bagSent": [
+          {
+            "club": "Driver",
+            "carryM": 205,
+            "totalM": 228
+          },
+          {
+            "club": "3W",
+            "carryM": 190,
+            "totalM": 209
+          },
+          {
+            "club": "5i",
+            "carryM": 155,
+            "totalM": 167
+          },
+          {
+            "club": "7i",
+            "carryM": 138,
+            "totalM": 148
+          },
+          {
+            "club": "9i",
+            "carryM": 118,
+            "totalM": 127
+          },
+          {
+            "club": "PW",
+            "carryM": 103,
+            "totalM": 108
+          }
+        ],
         "defaultTarget": {
           "lat": -36.9169,
           "lng": 174.7393
@@ -632,6 +785,18 @@
         }
       },
       "expect": {
+        "bagSent": [
+          {
+            "club": "9i",
+            "carryM": 118,
+            "totalM": 127
+          },
+          {
+            "club": "PW",
+            "carryM": 103,
+            "totalM": 108
+          }
+        ],
         "defaultTarget": {
           "lat": -36.9144171,
           "lng": 174.740381
@@ -761,6 +926,33 @@
         }
       },
       "expect": {
+        "bagSent": [
+          {
+            "club": "Driver",
+            "carryM": 205,
+            "totalM": 228
+          },
+          {
+            "club": "3W",
+            "carryM": 190,
+            "totalM": 209
+          },
+          {
+            "club": "5i",
+            "carryM": 155,
+            "totalM": 167
+          },
+          {
+            "club": "7i",
+            "carryM": 138,
+            "totalM": 148
+          },
+          {
+            "club": "PW",
+            "carryM": 103,
+            "totalM": 108
+          }
+        ],
         "defaultTarget": {
           "lat": -36.915222,
           "lng": 174.7399238
@@ -878,6 +1070,28 @@
         }
       },
       "expect": {
+        "bagSent": [
+          {
+            "club": "Driver",
+            "carryM": 205,
+            "totalM": 228
+          },
+          {
+            "club": "7i",
+            "carryM": 138,
+            "totalM": 148
+          },
+          {
+            "club": "PW",
+            "carryM": 103,
+            "totalM": 108
+          },
+          {
+            "club": "SW",
+            "carryM": 78,
+            "totalM": 82
+          }
+        ],
         "defaultTarget": {
           "lat": -36.9169,
           "lng": 174.7393
@@ -992,6 +1206,23 @@
         "target": null
       },
       "expect": {
+        "bagSent": [
+          {
+            "club": "Driver",
+            "carryM": 205,
+            "totalM": 228
+          },
+          {
+            "club": "5i",
+            "carryM": 155,
+            "totalM": 167
+          },
+          {
+            "club": "7i",
+            "carryM": 138,
+            "totalM": 148
+          }
+        ],
         "defaultTarget": {
           "lat": -36.9169,
           "lng": 174.7393
@@ -1106,6 +1337,18 @@
         "target": null
       },
       "expect": {
+        "bagSent": [
+          {
+            "club": "9i",
+            "carryM": 118,
+            "totalM": 127
+          },
+          {
+            "club": "PW",
+            "carryM": 103,
+            "totalM": 108
+          }
+        ],
         "defaultTarget": {
           "lat": -36.91433,
           "lng": 174.740254
@@ -1219,6 +1462,23 @@
         }
       },
       "expect": {
+        "bagSent": [
+          {
+            "club": "5i",
+            "carryM": 155,
+            "totalM": 167
+          },
+          {
+            "club": "6i",
+            "carryM": 146,
+            "totalM": 157
+          },
+          {
+            "club": "7i",
+            "carryM": 138,
+            "totalM": 148
+          }
+        ],
         "defaultTarget": {
           "lat": -36.9169,
           "lng": 174.7393
@@ -1332,6 +1592,23 @@
         }
       },
       "expect": {
+        "bagSent": [
+          {
+            "club": "5i",
+            "carryM": 155,
+            "totalM": 167
+          },
+          {
+            "club": "6i",
+            "carryM": 146,
+            "totalM": 157
+          },
+          {
+            "club": "7i",
+            "carryM": 138,
+            "totalM": 148
+          }
+        ],
         "defaultTarget": {
           "lat": -36.9169,
           "lng": 174.7393

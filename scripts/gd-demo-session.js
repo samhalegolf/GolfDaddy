@@ -169,10 +169,21 @@
     window.ensureProfile = function () { return demoProfile; };
     window.savePlayerProfiles = function () {};
     window.syncCoreProfileFromActive = function () {};
+    /* Set for exactly as long as the clone is in place, and read by the three
+       entitlement checks in gd-route-audit.js (adopt, save, bubble-centre save).
+       Those checks exist to stop a non-member writing a bubble they have not
+       paid for; here there is no write to stop, because ensureProfile is the
+       clone above and savePlayerProfiles is a no-op. Without the flag the demo
+       dead-ends at the paywall for every non-member, which is everyone the demo
+       is for. It is scoped to this call rather than to "a demo is running", so a
+       demo session cannot be used to get a free real save through the My Bubble
+       hub while it happens to be active. */
+    window.__gdDemoAdoptInFlight = true;
     try {
       window.gdPracticeAdoptBubbleFromAction();
       window.gdPracticeSaveBubbleFromAction();
     } finally {
+      window.__gdDemoAdoptInFlight = false;
       window.ensureProfile = realEnsureProfile;
       window.savePlayerProfiles = realSave;
       window.syncCoreProfileFromActive = realSync;

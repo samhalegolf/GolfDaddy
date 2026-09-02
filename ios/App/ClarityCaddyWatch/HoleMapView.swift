@@ -1,4 +1,5 @@
 import SwiftUI
+import WatchBubbleEngine
 
 /* Draws one delivered lite map and puts the three points that matter on it:
  where the player is, where the green is, and where the shot is aimed.
@@ -83,6 +84,13 @@ struct HoleMapPage: View {
        question and not one a view should be answering. */
     let player: WatchScene.GeoPoint?
     let deliveryHint: String?
+    /* The bag and aim, when the wrist holds them AND runs the same engine the
+       phone does. Absent means the map is a picture: it still draws the hole,
+       the player and the phone's target, and simply cannot be aimed on. */
+    var bag: WatchBagSnapshot? = nil
+    var profile: WatchBubbleProfile? = nil
+    var canAim: Bool = false
+    var onAim: (Coordinate) -> Void = { _ in }
 
     var body: some View {
         VStack(spacing: 2) {
@@ -94,13 +102,31 @@ struct HoleMapPage: View {
                 }
             }
             if let map {
-                HoleMapView(
-                    map: map,
-                    player: player,
-                    green: scene.geometry?.origin,
-                    target: scene.target ?? scene.bubble?.centre
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                /* Aimable when the wrist has everything it needs to answer for
+                   itself, a plain picture otherwise. Two views rather than one
+                   with a disabled mode: an aimable map owns play state and a
+                   camera, and a hole nobody can touch should carry neither. */
+                if canAim, let bag, let profile {
+                    AimableHoleMap(
+                        map: map,
+                        player: player,
+                        green: scene.geometry?.origin,
+                        sceneTarget: scene.target ?? scene.bubble?.centre,
+                        bag: bag,
+                        profile: profile,
+                        canAim: true,
+                        onAim: onAim
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                } else {
+                    HoleMapView(
+                        map: map,
+                        player: player,
+                        green: scene.geometry?.origin,
+                        target: scene.target ?? scene.bubble?.centre
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
             } else {
                 VStack(spacing: 6) {
                     Image(systemName: "map").font(.title3).foregroundStyle(.secondary)

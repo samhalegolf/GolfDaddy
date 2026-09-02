@@ -150,6 +150,15 @@ function run(input) {
 
   const payload = model.payload;
   return {
+    /* The bag the phone would actually put on the wire — the engine's own
+       playable bag, which for a player with no account bag is the 13-club
+       ghost stand-in rather than the empty list the input shows. Recorded
+       because the WRIST never derives a ghost bag: it is sent one, and the
+       Swift side must start from the same clubs or it is testing a different
+       question. */
+    bagSent: engine.playableBag().map(function (row) {
+      return { club: row.club, carryM: row.baseCarry, totalM: row.totalM };
+    }),
     defaultTarget: coordinate(defaultTarget),
     targetDistanceM: round(model.distanceM, 3),
     shotBearingDeg: bearingDeg(player, target),
@@ -189,6 +198,19 @@ function compare(actual, expected, tolerances, name, failures) {
   Object.keys(expected).forEach(key => {
     const want = expected[key], got = actual[key];
     const tolerance = toleranceFor(key, tolerances);
+    if (key === "bagSent") {
+      const got = actual[key] || [];
+      if (got.length !== want.length) {
+        failures.push(`${name}: ${key} expected ${want.length} clubs, got ${got.length}`);
+        return;
+      }
+      want.forEach((club, i) => {
+        if (got[i].club !== club.club || got[i].carryM !== club.carryM || got[i].totalM !== club.totalM) {
+          failures.push(`${name}: ${key}[${i}] expected ${JSON.stringify(club)}, got ${JSON.stringify(got[i])}`);
+        }
+      });
+      return;
+    }
     if (typeof want === "number") {
       if (!(Math.abs(got - want) <= tolerance)) {
         failures.push(`${name}: ${key} expected ${want} ± ${tolerance}, got ${got}`);

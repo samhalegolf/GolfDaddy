@@ -271,10 +271,12 @@
       setDock("");
       setRouteLabel("Profile");
       document.body.classList.add("gdAuthLocked","gdProfileOpen");
-      const profile=byId("gdProfileV67");
-      if(window.gdOpenProfileV67&&(!profile||profile.classList.contains("hidden")||!/Sign in|Create account|Set password/i.test(profile.textContent||""))){
-        safe(()=>window.gdOpenProfileV67({authGate:true}));
-      }
+      /* Asks for the sign-in FORM outright. The text match this replaced also
+         matched the guest PROFILE screen, whose account call to action says
+         "Sign In" and "Create Account" - so restoring a recorded auth route for
+         a guest left the guest profile on screen under gdAuthLocked, which is
+         the shell hidden behind a screen that is not the one that hid it. */
+      safe(()=>window.gdOpenProfileV67&&window.gdOpenProfileV67({authGate:true}));
       byId("gdProfileV67")?.classList.remove("hidden");
     }finally{
       setTimeout(()=>{gdBrowserRouteRestoring=false;},0);
@@ -2854,8 +2856,21 @@
   // return in the flow - after it, Undo is gone and the only way back is adopting
   // something else - so it refuses politely rather than silently doing nothing
   // when there is nothing staged.
+  /* True only while GDDemoSession.adopt() is running, and it is that call which
+     sets the flag. Inside it, ensureProfile returns a THROWAWAY clone and
+     savePlayerProfiles is a no-op (dev/demo-session-adopt-isolation.test.js
+     proves the real profile is never fetched or saved), so the three entitlement
+     checks below are guarding a write that cannot happen - while dead-ending the
+     demo for every non-member, which is everyone the demo is for.
+
+     Deliberately NOT "a demo session is active": that would leave the paywall
+     open on the My Bubble hub's own Apply button for as long as a demo was
+     running, which is a real save to a real profile. */
+  function gdPracticeDemoAdoptActive(){
+    return safe(()=>!!window.__gdDemoAdoptInFlight,false);
+  }
   function gdPracticeSaveBubbleFromAction(){
-    if(window.ClarityPayments?.requireAccess&&!window.ClarityPayments.requireAccess("save your own bubble"))return false;
+    if(!gdPracticeDemoAdoptActive()&&window.ClarityPayments?.requireAccess&&!window.ClarityPayments.requireAccess("save your own bubble"))return false;
     const p=safe(()=>ensureProfile(),null);
     const pending=p?.practiceBubblePendingSource;
     if(!pending||!pending.active||!Number.isFinite(Number(pending.offsetDeg))){
@@ -2888,7 +2903,7 @@
     return gdPracticeRefreshProjectionSurfaces();
   }
   function gdPracticeAdoptBubbleFromAction(){
-    if(window.ClarityPayments?.requireAccess&&!window.ClarityPayments.requireAccess("adopt a bubble from your own data"))return false;
+    if(!gdPracticeDemoAdoptActive()&&window.ClarityPayments?.requireAccess&&!window.ClarityPayments.requireAccess("adopt a bubble from your own data"))return false;
     const analysis=gdPracticeProjectionReadyAnalysis();
     const ctx=gdPracticeProjectionContext(analysis);
     if(!ctx.canProject){
@@ -5797,7 +5812,11 @@
     });
   }
   function gdBubbleOffsetSave(){
-    if(window.ClarityPayments?.requireAccess&&!window.ClarityPayments.requireAccess("set your own bubble centre"))return false;
+    /* gdPracticeSaveBubbleFromAction ends here, so the demo exemption has to be
+       honoured at this level too or the staged bubble is never committed and
+       GDDemoSession.adopt() silently reports failure. See
+       gdPracticeDemoAdoptActive. */
+    if(!gdPracticeDemoAdoptActive()&&window.ClarityPayments?.requireAccess&&!window.ClarityPayments.requireAccess("set your own bubble centre"))return false;
     const {p}=gdBubbleDataContext();
     const previewPending=gdMyBubbleLanePreviewPendingSource();
     const pending=previewPending||p.practiceBubblePendingSource||{};
@@ -6816,10 +6835,34 @@
 	      visual.innerHTML=gdCourseDataSurfaceSvg(surfaceCounts,analysis);
 	    }
 	  }
+  /* A guest reaches the shot system, but only the synthetic pipeline is allowed
+     to fill it (gd-guest-access.js owns that rule). With no evidence and no way
+     to add any, every section would open empty and read as broken - so for a
+     guest the shot system OPENS ON its own starting move: the Practice section
+     with the 7-iron carry form up, which is the single input GDDemoSession needs
+     to generate a pattern, adopt a bubble and hand over to Play.
+     Once a demo session exists this stands aside; the guest is then looking at
+     real output from the real engines and should be left alone in it. */
+  function gdGuestDemoEntry(){
+    if(!safe(()=>!!(window.GDGuestAccess&&window.GDGuestAccess.demoOnly()),false))return false;
+    if(safe(()=>!!(window.GDDemoSession&&window.GDDemoSession.active),false))return false;
+    safe(()=>gdHubSetSection("practice",{force:true}));
+    setTimeout(()=>safe(()=>{
+      /* Re-asserted inside the timeout on purpose: openCompareData and the hub's
+         own section buttons switch sections AFTER calling through here, so
+         setting it once up front would leave the entry form revealed underneath
+         a section the guest is not looking at. */
+      gdHubSetSection("practice",{force:true});
+      if(window.GDDemoSession&&typeof window.GDDemoSession.openEntry==="function")window.GDDemoSession.openEntry();
+    }),140);
+    return true;
+  }
   function openDataHub(opts){
-    /* Account-based route: this is the player's own data, one of the few things
-       that legitimately needs a sign-in. gd-auth-gate-v1.js owns the decision
-       and opens the sign-in screen itself when the answer is no. */
+    /* Open to everyone. This used to ask gdAuthGateAllows("shotData") and send a
+       signed-out player to a login form; the surface is now guest-reachable and
+       the restriction moved to the evidence - see gdGuestDemoEntry below and
+       gd-guest-access.js. The call is kept because "admin" still answers no and
+       a future gated hub section would ask through the same door. */
     if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("shotData"))return false;
     rememberProfileReturn(opts);
     openModulePanel("dataHubPanel","Data","",opts);
@@ -6828,6 +6871,7 @@
     renderDataHubStatus();
     gdSyncDataHubCompare();
     gdRenderDataHubCards();
+    gdGuestDemoEntry();
     return false;
   }
 	  function openCourseData(opts){
@@ -6839,6 +6883,10 @@
 	    gdRenderBubbleOffsetHub();
 	    setTimeout(gdRenderCourseDataSurfaceFallback,60);
 	    remember("courseData",!!(opts&&opts.replace));
+	    /* Deliberately after the course section is set: a guest with no demo yet is
+	       redirected to Practice, because Course Data has nothing to show until the
+	       demo has been through Play. A guest mid-demo keeps the course section. */
+	    gdGuestDemoEntry();
 	    return false;
 	  }
 	  // The practice dots plot in a normalised frame (x: depth vs expected carry,
@@ -8682,6 +8730,7 @@
     gdHubSetSection("practice",{force:true});
     gdSetPracticeDataTab(opts&&opts.adminTab?"admin":"data");
     gdRenderBubbleOffsetHub();
+    gdGuestDemoEntry();
     return false;
   }
 	  function openCompareData(opts){
@@ -8812,8 +8861,8 @@
     return false;
   }
   function openBubbleStable(opts){
-    /* openDataHub carries the gate; stop here too rather than re-labelling the
-       shell for a panel that never opened. */
+    /* openDataHub carries the gate and the guest demo entry; stop here too
+       rather than re-labelling the shell for a panel that never opened. */
     if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("shotData"))return false;
     openDataHub(opts);
     setDock("bubble");
@@ -9302,9 +9351,12 @@
 	        return openGpsStable({replace:false,fromHome:homeContext});
 	      }
       if(target.id==="dockBubble"||target.classList.contains("gdBubbleTile")){event.preventDefault();event.stopImmediatePropagation();openBubbleStable();return;}
-      if(target.id==="gdCourseDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("courseData"))return;gdHubSetSection("course");return;}
-      if(target.id==="gdPracticeDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("practiceData"))return;gdHubSetSection("practice");return;}
-      if(target.id==="gdCompareDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("shotData"))return;gdHubSetSection("compare");return;}
+      /* gdGuestDemoEntry() after the section switch, not instead of it: a guest
+         who has already started a demo gets the section they asked for, and one
+         who has not is put back on the only section with something in it. */
+      if(target.id==="gdCourseDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("courseData"))return;gdHubSetSection("course");gdGuestDemoEntry();return;}
+      if(target.id==="gdPracticeDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("practiceData"))return;gdHubSetSection("practice");gdGuestDemoEntry();return;}
+      if(target.id==="gdCompareDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("shotData"))return;gdHubSetSection("compare");gdGuestDemoEntry();return;}
       if(on.includes("gdBubbleOffsetEdit")){event.preventDefault();event.stopImmediatePropagation();gdBubbleOffsetEdit();return;}
       if(on.includes("gdBubbleOffsetSave")){event.preventDefault();event.stopImmediatePropagation();gdBubbleOffsetSave();return;}
       if(target.classList.contains("gdProfileTile")){

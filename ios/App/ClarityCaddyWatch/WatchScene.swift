@@ -64,7 +64,13 @@ struct WatchScene: Codable, Equatable {
        wrist has none. `fresh` is the phone's staleness verdict, not a second
        opinion formed here. */
     struct Location: Codable, Equatable { let coordinate: GeoPoint?; let source: String?; let fresh: Bool? }
-    struct Bubble: Codable, Equatable { let widthM: Double?; let depthM: Double?; let tiltDeg: Double?; let club: String?; let carryM: Double?; let totalM: Double?; let centre: GeoPoint? }
+    /* `engineVersion` says which Bubble engine drew these numbers. The wrist
+       compares it with the engine it implements before computing anything of
+       its own (BubbleEngineVersion.agreement); a difference means render these
+       values rather than form a second opinion. Optional because an older phone
+       build does not declare one, which is not an error - it simply means the
+       wrist does not compute. */
+    struct Bubble: Codable, Equatable { let widthM: Double?; let depthM: Double?; let tiltDeg: Double?; let club: String?; let carryM: Double?; let totalM: Double?; let centre: GeoPoint?; let engineVersion: String? }
     struct Geometry: Codable, Equatable { let origin: GeoPoint?; let approachBearingDeg: Double?; let greenPolygon: [LocalPoint]?; let target: LocalPoint?; let player: LocalPoint?; let route: [LocalPoint]? }
     struct Score: Codable, Equatable { let strokes: Int? }
     struct Controls: Codable, Equatable { let canLock: Bool?; let canUnlock: Bool?; let canAim: Bool?; let canShotEnd: Bool?; let canPreviousHole: Bool?; let canNextHole: Bool? }
@@ -79,7 +85,7 @@ struct WatchScene: Codable, Equatable {
 /* The Watch sends only this existing, platform-neutral command vocabulary.
  There are deliberately no Swift golf-state transitions behind these values. */
 struct CaddyWatchCommand: Codable, Equatable {
-    enum Kind: String, Codable, CaseIterable { case lock = "LOCK", unlock = "UNLOCK", previousHole = "VIEW_PREVIOUS_HOLE", nextHole = "VIEW_NEXT_HOLE", lockAt = "LOCK_AT", takeOver = "TAKE_OVER", handBack = "HAND_BACK" }
+    enum Kind: String, Codable, CaseIterable { case lock = "LOCK", unlock = "UNLOCK", previousHole = "VIEW_PREVIOUS_HOLE", nextHole = "VIEW_NEXT_HOLE", lockAt = "LOCK_AT", aimAt = "AIM_AT", takeOver = "TAKE_OVER", handBack = "HAND_BACK" }
     let commandId: String
     let roundId: String
     let baseRevision: Int
@@ -90,10 +96,21 @@ struct CaddyWatchCommand: Codable, Equatable {
 }
 
 /* Mirrors the payload shapes CaddyWatchBridge.receiveCommand reads out of
- command.payload — only `location` exists today, for LOCK_AT. */
+ command.payload: `location` for LOCK_AT, and `point` for AIM_AT — which
+ Marshal's AIM_DRAGGED reads as `p.point`.
+
+ NOTE the aim is sent RAW. The roof that stops a target being dragged past the
+ bag lives in Marshal (clampAim, with maxAimM injected), and a second clamp on
+ the wrist is precisely how two ends start disagreeing about where the target
+ is. The wrist sends where the finger went and accepts the phone's correction
+ on the next Scene. */
 struct CommandPayload: Codable, Equatable {
     var location: WatchLocationObservation?
-    init(location: WatchLocationObservation? = nil) { self.location = location }
+    var point: WatchCoordinate?
+    init(location: WatchLocationObservation? = nil, point: WatchCoordinate? = nil) {
+        self.location = location
+        self.point = point
+    }
 }
 
 struct WatchCoordinate: Codable, Equatable { let lat: Double; let lng: Double }

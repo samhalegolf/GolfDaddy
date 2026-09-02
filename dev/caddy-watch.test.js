@@ -26,6 +26,12 @@ check("Lock maps to Marshal and projects Bubble geometry without a second engine
   const { m, w } = ready();
   const result = w.receiveCommand({ commandId: "lock-1", roundId: "round-1", baseRevision: w.scene().revision, type: "LOCK", payload: {} });
   assert.equal(result.accepted, true); assert.equal(m.scene().mode, "aim"); assert.equal(w.scene().mode, "bubble"); assert.equal(w.scene().bubble.club, "8i");
+  /* Which engine drew this Bubble travels with it, so the wrist can decide
+     whether it may compute one of its own. It is the module's own constant -
+     the same one the bag snapshot carries - not a second literal. */
+  assert.equal(w.scene().bubble.engineVersion, createWatchBridge.BUBBLE_ENGINE_VERSION,
+    "the Scene's Bubble must declare the engine that produced it");
+  assert.ok(createWatchBridge.BUBBLE_ENGINE_VERSION, "the contract module owns the engine version");
 });
 check("duplicate command IDs apply only once", () => {
   const { m, w } = ready();

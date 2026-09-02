@@ -374,9 +374,33 @@ convention.
 | `gdGpsBubbleDisplayPayload` pixel clamp | That is framing, not geometry | Framing Engine |
 
 **The fallback rule.** When the wrist meets a case it has not ported, it uses
-the Scene's value and reports `confidence: .deferredToPhone`. It never
-approximates. A wrist that quietly substitutes its own answer for one it was not
-built to give is worse than a wrist that says "the phone has this one".
+the Scene's value. It never approximates. A wrist that quietly substitutes its
+own answer for one it was not built to give is worse than a wrist that says
+"the phone has this one". In the built engine this is `nil` from
+`calculate`/`defaultTarget` and `nil` from `localBubble` — four honest causes
+(versions disagree, no bag, no target, no fix), none of them an error and none
+of them shown to the player.
+
+**Three things the port found that the plan had not.** Each was invisible until
+the fixtures ran, and each is now pinned:
+
+- `bubbleVisuals.mainScale` is **1.02**, not 1. The phone draws three
+  concentric rings and the fixtures record the middle one. Two percent is 0.2m
+  on a 10m radius — twenty times the parity tolerance, and the whole of the
+  first ring mismatch.
+- `calculateVisualBubbleRender` is **always called with handedness "right"**,
+  because `calculateBubbleProfile` returns no `handedness` key and the caller's
+  `|| "right"` fallback always wins. A left-hander's -5.35° cluster is drawn at
+  -3.99°, pulled toward zero rather than mirrored to -6.71°. That is arguably a
+  latent bug in the phone engine; it is deliberately reproduced rather than
+  fixed, because a wrist that "corrected" it would draw a visibly different
+  Bubble for every left-handed player. Fix it in `gd-app-core.js` if it should
+  be fixed, and both surfaces move together.
+- `Math.round` is **not** Swift's `.rounded()`: JavaScript rounds halves toward
+  +∞, Swift away from zero, so they disagree on every negative half — and
+  negative halves are exactly where left-handed cluster tilts live. A mutation
+  check proved no fixture value happens to land on one, so `JS.round` is pinned
+  by direct unit test instead.
 
 ---
 
@@ -571,12 +595,27 @@ left side, the right side, a hazard carry, a lay-up, an aggressive line and a
 conservative one. Bubble geometry is not fairway clipping. How far the target can
 travel before the map starts scrolling is the Framing Engine's question.
 
-Framing is a real gap: `WatchMapFrame` is a static viewport chooser (fit the
-span of interest, cap magnification at 3×, refuse to show background past an
-edge), not a camera model. And `WatchMapSpatialReference.coordinate(atImageX:y:)`
-is currently marked "only used for diagnostics today" — it becomes the
-load-bearing screen→geo path the moment a finger moves a target. It is already
-proven as the inverse that round-trips; it just gets promoted.
+Framing is now `WatchMapCamera`, in the package beside the engine because it is
+pure: image pixels in, image pixels out, no view and no gesture. `WatchMapFrame`
+stays for the Ready face, which draws a hole nobody is touching — it is a
+viewport chooser with no memory, and memory is what "should the map move"
+needs.
+
+Two rules earn their place:
+
+- **A drag pans and never zooms.** Scaling the world under a moving finger makes
+  the target stop tracking the touch, and the player ends up fighting the map
+  instead of aiming. The resting fit is applied when the finger lifts, where a
+  scale change is something they watch rather than something that happens to
+  them.
+- **Minimal movement, not re-centring.** The camera moves by exactly enough to
+  bring the Bubble back inside the comfort inset. A camera that re-centres every
+  frame drags the whole hole past the player for a one-pixel adjustment.
+
+`WatchMapSpatialReference.coordinate(atImageX:y:)` was marked "only used for
+diagnostics today". It is now the load-bearing screen→geo path:
+finger → view point → image pixel (`WatchMapCamera.imagePoint`) → coordinate →
+Bubble Engine.
 
 ---
 
@@ -675,13 +714,33 @@ inside a 448px image — and the same applies to any geometry that meets it.
    the wrist recomputes it to refuse a truncated payload (§3.3).
    `ios/WatchBubbleEngine` is now a real dependency of the Watch Extension
    target, so the wire types are defined once.
-4. **Engine version handshake** — before the engine ships, so a mismatched pair
-   is detectable on day one (§7).
-5. **The engine** — ported subset, stateless, fixtures green (§5).
-6. **`AIM_AT`** — Swift enum, drag-end send, no local clamp (§9).
-7. **Interaction + framing** — drag, crown, hysteresis, smoothing, reset,
-   camera (§10, §11).
-8. **Local locked shot** (§12).
+4. ~~**Engine version handshake**~~ — **done.** `BUBBLE_ENGINE_VERSION` is
+   declared once in `app/js/caddy-watch.js` and rides both the Scene's Bubble
+   block and the player snapshot; `BubbleEngineVersion.agreement(scene:snapshot:)`
+   in `ios/WatchBubbleEngine` resolves it, and only an exact match permits local
+   computation. The wrist reports its engine in `watchPlayerHave`. Tests pin the
+   JS constant, the Swift constant and the fixture to one another, so bumping
+   one alone fails (§7).
+5. ~~**The engine**~~ — **done.** `ios/WatchBubbleEngine` computes the Bubble
+   locally: bag selection, profile derivation, visual render, the display caps
+   and floors, the 168-point ring, and the route-following default target. All
+   11 parity cases pass at the recorded tolerances, and
+   `WatchSessionManager.localBubble` runs it for the Scene's target off the
+   wrist's own fix, gated on the version handshake (§5).
+6. ~~**`AIM_AT`**~~ — **done.** On `CaddyWatchCommand.Kind`, payload
+   `{point:{lat,lng}}` matching Marshal's `AIM_DRAGGED`, sent once on drag end,
+   raw with no local clamp. Gated on the Scene's `canAim`, and deliberately not
+   gated on `isPending` — a second drag must send the newer target, not be
+   dropped as a duplicate (§9).
+7. ~~**Interaction + framing**~~ — **done.** `WatchPlayState` holds the target,
+   the held club and the transition band; `WatchMapCamera` is the Framing
+   Engine (resting fit, pan-only follow, crown zoom, and the view→image inverse
+   that makes a drag possible); `AimableHoleMap` is the SwiftUI glue. The
+   engine gained a `heldClub` input so the band can live outside it (§10, §11).
+8. ~~**Local locked shot**~~ — **done.** `WatchLockedShot` records the shot the
+   wrist computed, keyed by the LOCK command's own id, and the numbers face
+   reads locked immediately. Three explicit endings — rejected, the Scene moved
+   past it, or expired — each mutation-checked (§12).
 
 Steps 1, 3 and 4 are phone-side or test-side, and step 2 is delivery-side —
 none of them changes what the Watch draws. That is deliberate: the wrist keeps rendering the phone's Bubble,

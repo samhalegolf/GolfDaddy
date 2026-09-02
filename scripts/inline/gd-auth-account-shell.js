@@ -3,6 +3,12 @@
   const ICONS = window.GDIconAssets.gd66Icons;
 	  let editing = false;
 	  let authMode = 'login';
+	  /* Signed out, this panel has TWO surfaces: the guest profile and the sign-in
+	     form. Which one renders is a routing decision, not something to infer from
+	     what is on screen - a guest who taps Sign in is in the same account state
+	     as one who tapped Profile. authIntent is that decision, set by whoever
+	     opened the panel and cleared when the guest backs out of the form. */
+	  let authIntent = false;
 	  let resetEmail = '';
 	  let authFeedback = '';
 	  let authFeedbackKind = 'info';
@@ -352,7 +358,7 @@
           <div class="panelHead">
             <div><strong>Create account</strong><span>New player accounts start with their own profile.</span></div>
           </div>
-          <button class="authDismiss" type="button" onclick="gdCloseProfileV67()">‹ Continue without an account</button>
+          <button class="authDismiss" type="button" onclick="gd67ExitAuth()">‹ Continue without an account</button>
           <div class="accountGrid">
             <label class="full">Name<input id="gd67AuthName" autocomplete="name" placeholder="Your name"></label>
             <label class="full">Email<input id="gd67AuthEmail" type="email" autocomplete="email" placeholder="email@example.com"></label>
@@ -388,7 +394,7 @@
 	          <div class="panelHead">
 	            <div><strong>Login</strong><span>Distances and the rangefinder are free - an account saves your rounds, scores and practice data.</span></div>
 	          </div>
-	          <button class="authDismiss" type="button" onclick="gdCloseProfileV67()">‹ Continue without an account</button>
+	          <button class="authDismiss" type="button" onclick="gd67ExitAuth()">‹ Continue without an account</button>
           <div class="accountGrid">
             <label class="full">Email<input id="gd67AuthEmail" type="email" autocomplete="email" placeholder="email@example.com"></label>
             <label class="full">Password<input id="gd67AuthPassword" type="password" autocomplete="current-password" placeholder="Password"></label>
@@ -1037,6 +1043,71 @@
           </div>`;
   }
 
+  /* ---- Guest profile ------------------------------------------------------
+     Signed out and not here to sign in. Same shape as the player's own screen,
+     because it IS the same screen one identity short: the only differences are
+     the identity line, the demo-mode note on Shot Data, and the account call to
+     action that stands where a signed-in player's coach controls would.
+
+     Its own function rather than a branch inside render(), so it sits beside
+     renderCoachPlayerView as a peer surface. That also keeps it out of the span
+     dev/coach-player-link.test.js reads between renderCoachPlayerView's
+     definition and its call site - the Membership card here is the guest's own,
+     not one offered to a coach looking at somebody else. */
+  function renderGuestProfile(view) {
+    const p = view.p;
+    return `
+      <div class="wrap">
+        ${profileTopbar()}
+
+        <div class="heading">
+          <div class="kicker">Guest Profile</div>
+          <h1>${esc(p.name)}</h1>
+          <p>Playing as a guest on this device. Distances, your bag and the course library are yours to use now; an account saves them.</p>
+        </div>
+
+        <section class="hero">
+          <div class="heroMain">
+            <div>
+              <div class="name">${esc(p.name)}</div>
+              <div class="meta">Handicap ${esc(view.hcp)} · ${esc(view.hand)} handed · Guest</div>
+              ${window.ClarityPayments && typeof window.ClarityPayments.accessBadgeHTML === 'function' ? window.ClarityPayments.accessBadgeHTML('profile') : ''}
+            </div>
+            ${profileVisual(p, view.b, view.hasBubble)}
+          </div>
+          ${setupStatusStrip(view.readyBag, view.hasBubble)}
+        </section>
+        <section class="cards">
+          <button class="card ${view.readyBag ? 'good' : 'warn'}" onclick="gd67OpenProfileTool('bag')">
+            ${icon('bag')}
+            <div><strong>Bag</strong><span>${view.readyBag ? 'Carry distances are set.' : 'Set carry distances before play.'}</span></div>
+          </button>
+          <button class="card" onclick="gd67OpenProfileTool('shot')">
+            ${icon('scorecard')}
+            <div><strong>Shot Data</strong><span>Demo mode - try the pattern engine on sample shots.</span></div>
+          </button>
+          <button class="card" id="gdProfileCoursesCard" type="button" onclick="try{openCourseLibraryPanel()}catch(e){}">
+            <img class="gdCourseLibraryCardIcon" src="assets/home/clarity-caddy-course-library-icon.png?v=defd0c72" alt="">
+            <div><strong>Courses</strong><span>Recent courses.</span></div>
+          </button>
+          <button class="card" onclick="gd67OpenMembershipSettings()">
+            ${icon('profile') || icon('scorecard')}
+            <div><strong>Membership</strong><span>Manage access, Month Pass and Membership.</span></div>
+          </button>
+        </section>
+        <section class="accountPanel gdGuestAccountCta">
+          <div class="panelHead">
+            <div><strong>Save this to an account</strong><span>Scores, rounds and your own practice data need somewhere to live. Guest work stays on this device.</span></div>
+          </div>
+          <div class="accountActions">
+            <button class="saveBtn" type="button" onclick="gd67OpenAuth('signup')">Create Account</button>
+            <button class="secondaryBtn" type="button" onclick="gd67OpenAuth('login')">Sign In</button>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
   /* ---- Coach viewing a player -------------------------------------------
      This used to be the coach's own profile screen with the name swapped and
      two cards hidden, which read as "I am looking at myself" - the exact
@@ -1206,6 +1277,10 @@
   }
 
   function render() {
+    /* The guest profile is minted by its owner, not here - this only makes sure
+       it exists before the surface that shows it is built. Signed in, it is a
+       no-op. */
+    try { if (!currentAccount() && window.GDGuestAccess) window.GDGuestAccess.ensureGuestProfile(); } catch(e) {}
     const p = profile();
     const readyBag = bagReady(p);
     const b = bubbleVars(p);
@@ -1228,6 +1303,12 @@
     const profileKicker = isCoach ? 'Coach Portal · My Golf' : 'Player Profile';
 
     if (!account) {
+      /* Signed out and not here to sign in: the guest profile, not the login
+         form. See renderGuestProfile. */
+      if (!authIntent && authMode !== 'reset') {
+        el.innerHTML = renderGuestProfile({ p: p, b: b, hasBubble: hasBubble, readyBag: readyBag, hcp: hcp, hand: hand });
+        return;
+      }
       el.innerHTML = `
       <div class="wrap">
         <div class="heading authHeading">
@@ -1323,8 +1404,13 @@
     `;
   }
 
-	  function open() {
+	  function open(opts) {
 	    editing = false;
+	    /* gd-auth-gate-v1.js passes {authGate:true} when a route sent the player
+	       here to sign in. Everything else - the Profile tile, the dock, a coach
+	       returning from a player - is a request for the profile screen, which
+	       for a guest is now a real screen rather than a login wall. */
+	    authIntent = !!(opts && (opts.authGate || opts.signIn));
 	    const account = currentAccount();
 	    const state = accountsApi()?.state?.() || {};
 	    const viewingOwn = !account || !state.viewingProfileId || state.viewingProfileId === account.profileId;
@@ -1513,8 +1599,38 @@
 	    }
 	  }
 
+		  /* A guest asking for the form, and a guest backing out of it. Two functions
+		     rather than one toggle, because the two directions are reached from
+		     different places: the profile screen's call to action goes in, the
+		     form's dismiss control comes back out. Coming out lands on the guest
+		     profile rather than closing the panel - closing was the old behaviour,
+		     and for a guest it meant "Continue without an account" threw away the
+		     screen they had just come from. */
+		  function openAuth(mode) {
+		    authIntent = true;
+		    setAuthMode(mode === 'signup' ? 'signup' : 'login');
+		    overlay().classList.remove('hidden');
+		    document.body.classList.add('gdProfileOpen');
+		    scrollProfileTop();
+		    return false;
+		  }
+
+		  function exitAuth() {
+		    if (currentAccount()) return close();
+		    authIntent = false;
+		    authMode = 'login';
+		    authFeedback = '';
+		    document.body.classList.remove('gdAuthLocked');
+		    render();
+		    scrollProfileTop();
+		    return false;
+		  }
+
 		  function setAuthMode(mode) {
 		    authMode = mode === 'signup' ? 'signup' : (mode === 'reset' ? 'reset' : 'login');
+		    /* Choosing a mode IS asking for the form, so the guest profile must not
+		       paint over it on the render below. */
+		    authIntent = true;
 		    authFeedback = '';
 		    authFeedbackKind = 'info';
 		    if (authMode !== 'reset') {
@@ -2120,6 +2236,19 @@
   window.gdSaveProfileV67 = save;
   window.gdResetDemoProfileV67 = resetDemo;
 	  window.gd67SetAuthMode = setAuthMode;
+	  window.gd67OpenAuth = openAuth;
+	  window.gd67ExitAuth = exitAuth;
+	  /* "Is the panel currently showing the sign-in FORM?" - the authoritative
+	     answer, published because two other files used to work it out by matching
+	     /Sign in|Create account/ against the panel's rendered text. That heuristic
+	     was right while the only signed-out surface WAS the form; the guest profile
+	     screen carries the same words on its account call to action, so it was
+	     misread as the form and the shell was locked behind it
+	     (gd-inline-profile-route-hardening-v1.js). Ask this instead. */
+	  window.gd67AuthFormOpen = function () {
+	    if (currentAccount()) return false;
+	    return authIntent || authMode === 'reset';
+	  };
 	  window.gd67OpenPasswordResetRoute = openPasswordResetRoute;
 	  window.gd67ResetPasswordFromLink = resetPasswordFromLink;
 	  window.gd67Signup = signup;

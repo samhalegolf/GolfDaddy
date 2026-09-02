@@ -3,6 +3,7 @@ import CoreLocation
 import Foundation
 import WatchConnectivity
 import WatchKit
+import WatchBubbleEngine
 
 @MainActor
 final class WatchSessionManager: NSObject, ObservableObject {
@@ -22,6 +23,9 @@ final class WatchSessionManager: NSObject, ObservableObject {
     @Published private(set) var state: State = .noRound
     @Published private(set) var pendingCommands: [PendingWatchCommand] = []
     @Published private(set) var lastRejection: WatchCommandAcknowledgement?
+    /* The shot this wrist believes it just locked, shown while nothing has
+       confirmed it yet. Intent, never truth — see WatchLockedShot. */
+    @Published private(set) var lockedShot: WatchLockedShot?
 
     /* One line about a handover that just happened, shown briefly where the
        status strip sits. Set only on a real change of driver, so a Scene that
@@ -56,6 +60,50 @@ final class WatchSessionManager: NSObject, ObservableObject {
        transport: a snapshot belongs to the PLAYER and changes when they edit
        their bag, while a map package belongs to the course. */
     nonisolated let player = WatchPlayerStore()
+
+    /* Whether this wrist may run its own Bubble engine, or must render the
+       phone's. Derived rather than stored: it is a pure function of what the
+       phone has declared on the latest Scene and on the bag currently held, so
+       there is no third copy to fall out of step with either.
+
+       Nothing consumes it yet - the Swift engine is the next step - but the
+       gate lands with the versions it reads, so the engine is written against
+       a decision that already exists rather than one bolted on afterwards. */
+    var engineAgreement: BubbleEngineVersion.Agreement {
+        BubbleEngineVersion.agreement(
+            scene: scene?.bubble?.engineVersion,
+            snapshot: player.snapshot?.engineVersion
+        )
+    }
+
+    /* The wrist's own Bubble for the target currently in play.
+
+       This is the engine actually running. It computes from the WRIST's fix
+       against the Scene's target, which is the same thing WristDistances
+       already does for front/centre/back - the wrist is its own rangefinder,
+       and now its own Bubble too.
+
+       nil is a complete answer and it has four honest causes: the versions do
+       not agree (the phone's Bubble is rendered instead), no bag has arrived,
+       no target is in play, or there is no trustworthy wrist fix. None of them
+       is an error and none of them shows the player anything: the numbers face
+       keeps drawing the Scene's Bubble exactly as it did before this existed.
+
+       Moving the target is not here. That is the Interaction Engine's, and
+       until it exists the wrist computes for the target the phone placed. */
+    var localBubble: BubbleEngine.Result? {
+        guard engineAgreement.mayComputeLocally else { return nil }
+        guard let snapshot = player.snapshot else { return nil }
+        guard let fix = wristFix, let lat = fix.lat, let lng = fix.lng else { return nil }
+        guard let aim = scene?.target ?? scene?.bubble?.centre,
+              let aimLat = aim.lat, let aimLng = aim.lng else { return nil }
+        return BubbleEngine.calculate(.init(
+            player: Coordinate(lat: lat, lng: lng),
+            target: Coordinate(lat: aimLat, lng: aimLng),
+            bag: snapshot.bag,
+            bubble: snapshot.bubble
+        ))
+    }
 
     /* The point a lite map draws the player at: the wrist's own fix while it has
        a trustworthy one, the phone's otherwise. Published separately from
@@ -106,9 +154,50 @@ final class WatchSessionManager: NSObject, ObservableObject {
             payload = CommandPayload(location: observation)
         }
         let command = CaddyWatchCommand(commandId: UUID().uuidString, roundId: roundId, baseRevision: scene.revision, createdAt: Date().timeIntervalSince1970 * 1000, device: "apple-watch", type: wireType, payload: payload)
+        /* A LOCK the wrist computed for itself can be shown as locked at once,
+           rather than after a round trip. It is recorded against THIS command's
+           id, so the acknowledgement that comes back names exactly the record
+           it settles. If the wrist has no Bubble of its own — no bag, versions
+           disagreed, no fix — nothing is recorded and the button waits, which
+           is what it did before this existed. */
+        if type == .lock, let bubble = localBubble, let fix = wristFix,
+           let lat = fix.lat, let lng = fix.lng {
+            lockedShot = WatchLockedShot(
+                commandId: command.commandId, roundId: roundId, baseRevision: scene.revision,
+                holeNumber: scene.hole?.number, bubble: bubble,
+                player: Coordinate(lat: lat, lng: lng))
+        }
         pendingCommands.append(PendingWatchCommand(command: command, status: .pending, attemptCount: 0, lastAttemptAt: nil))
         persistOutbox()
         NSLog("[CCWatch] send %@ pending=%d face=%@", wireType.rawValue, pendingCommands.count, String(describing: face))
+        attempt(commandId: command.commandId)
+    }
+
+    /* The aim, sent once the finger lifts.
+     *
+     * NOT on every frame of the drag. Local recalculation is what makes the
+     * drag feel immediate; the phone does not need the intermediate frames, and
+     * a Scene republished per frame would swamp the link for numbers nobody
+     * reads. One command, at the end, carrying where the target actually
+     * landed.
+     *
+     * Raw, with no clamp of its own — see CommandPayload. Marshal owns the aim
+     * roof and the wrist accepts its correction on the next Scene.
+     *
+     * `isPending` is deliberately NOT consulted: a second drag while the first
+     * command is still queued must send the newer target, not be dropped as a
+     * duplicate. Each carries its own command ID, and Marshal applies them in
+     * order; the last one wins, which is the one the player is looking at. */
+    func sendAim(to point: Coordinate) {
+        guard let scene, let roundId = scene.roundId, !roundId.isEmpty else { return }
+        guard scene.controls?.canAim == true else { return }
+        lastRejection = nil
+        let command = CaddyWatchCommand(
+            commandId: UUID().uuidString, roundId: roundId, baseRevision: scene.revision,
+            createdAt: Date().timeIntervalSince1970 * 1000, device: "apple-watch",
+            type: .aimAt, payload: CommandPayload(point: WatchCoordinate(lat: point.lat, lng: point.lng)))
+        pendingCommands.append(PendingWatchCommand(command: command, status: .pending, attemptCount: 0, lastAttemptAt: nil))
+        persistOutbox()
         attempt(commandId: command.commandId)
     }
 
@@ -128,7 +217,10 @@ final class WatchSessionManager: NSObject, ObservableObject {
         do { incoming = try JSONDecoder().decode(WatchScene.self, from: data) }
         catch { NSLog("[CCWatch] scene decode failed: %@ payload: %@", String(describing: error), String(data: data, encoding: .utf8) ?? "?"); return }
         guard incoming.isSupported else { NSLog("[CCWatch] unsupported schemaVersion %d", incoming.schemaVersion); return }
-        guard incoming.hasRound else { scene = nil; state = .noRound; locationManager.stop(); return }
+        /* The round is over. A lock belongs to the round it was made in, so it
+           goes with it — otherwise the wrist would carry a shot from a finished
+           round into the next screen the player looks at. */
+        guard incoming.hasRound else { scene = nil; state = .noRound; lockedShot = nil; locationManager.stop(); return }
         if let current = scene, current.roundId == incoming.roundId, incoming.revision < current.revision { return }
         let previous = scene
         scene = incoming
@@ -145,6 +237,11 @@ final class WatchSessionManager: NSObject, ObservableObject {
        rather than retried forever; the rest are re-sent if they have been
        waiting a while. The phone dedupes by command ID, so a repeat is safe. */
     private func reconcileOutbox(with incoming: WatchScene) {
+        /* AFTER the outbox filter below, deliberately: whether the lock's own
+           command is still pending is one of the three inputs to the decision,
+           and dropping stale commands is what settles it. `scene` is already
+           the incoming one by the time this runs. */
+        defer { refreshLockedShot() }
         let before = pendingCommands.count
         pendingCommands.removeAll { $0.command.roundId != incoming.roundId }
         if pendingCommands.count != before { persistOutbox() }
@@ -200,6 +297,23 @@ final class WatchSessionManager: NSObject, ObservableObject {
         if !acknowledgement.accepted {
             lastRejection = acknowledgement
             WKInterfaceDevice.current().play(.failure)
+            /* The lock did not happen. Discard at once rather than waiting for
+               the expiry — a player who has just been told "no" must not still
+               be looking at a locked shot. */
+            if lockedShot?.commandId == acknowledgement.commandId { lockedShot = nil }
+        }
+        refreshLockedShot()
+    }
+
+    /* Ends 2 and 3: the Scene has caught up, the round changed, or nothing came
+       back at all. The rule itself is in WatchLockedShot so it can be tested
+       without any of this; here it is only applied, at the three moments the
+       inputs to it change. */
+    private func refreshLockedShot() {
+        guard let shot = lockedShot else { return }
+        let pending = pendingCommands.contains { $0.command.commandId == shot.commandId }
+        if !shot.isStillShowing(roundId: scene?.roundId, sceneRevision: scene?.revision, commandStillPending: pending) {
+            lockedShot = nil
         }
     }
 
@@ -252,7 +366,15 @@ final class WatchSessionManager: NSObject, ObservableObject {
        Losing this report costs one re-send, never correctness. */
     private func reportPlayerInventory() {
         guard let session, session.activationState == .activated else { return }
-        let payload: [String: Any] = ["watchPlayerHave": player.inventory]
+        /* The bag this wrist holds AND the engine it implements, in one
+           report. They travel together because they are answered at the same
+           moments - activation, adoption, coming back into range - and because
+           a phone that can see the wrist's engine version can spot a mismatch
+           from its own side instead of only inferring one from a Watch that
+           never computes. */
+        var held = player.inventory
+        held.merge(BubbleEngineVersion.report) { current, _ in current }
+        let payload: [String: Any] = ["watchPlayerHave": held]
         if session.isReachable { session.sendMessage(payload, replyHandler: nil, errorHandler: nil) }
         session.transferUserInfo(payload)
     }

@@ -4,8 +4,17 @@
 	(function(){
 	  'use strict';
 	  function safe(fn){try{return fn()}catch(e){console.warn('[GD profile route]',e);}}
+	  /* Signed out no longer means "the sign-in form is up": gd-auth-account-shell.js
+	     also renders a guest PROFILE, whose account call to action says "Sign In"
+	     and "Create Account". The text match below therefore classified the guest
+	     profile as the auth surface and locked the shell behind it - Home, the
+	     dock and every module panel hidden, and the profile's own topbar with it.
+	     gd67AuthFormOpen() is that shell's own answer; the text match is kept only
+	     as a fallback for the window before it is defined. */
 	  function authSurfaceOpen(){
 	    if(document.body.classList.contains('gdAuthLocked'))return true;
+	    const owner=safe(()=>typeof window.gd67AuthFormOpen==='function'?window.gd67AuthFormOpen():null);
+	    if(typeof owner==='boolean')return owner;
 	    const profile=document.getElementById('gdProfileV67');
 	    const account=safe(()=>window.GolfDaddyAccounts&&window.GolfDaddyAccounts.current&&window.GolfDaddyAccounts.current(),null);
 	    return !!(profile&&!profile.classList.contains('hidden')&&!account&&/Sign in|Set password|Create account/i.test(profile.textContent||''));

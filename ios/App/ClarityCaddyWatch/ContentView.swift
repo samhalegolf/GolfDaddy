@@ -1,4 +1,5 @@
 import SwiftUI
+import WatchBubbleEngine
 
 struct ContentView: View {
     @ObservedObject var session: WatchSessionManager
@@ -47,13 +48,24 @@ struct ContentView: View {
                     TabView {
                         ShotView(scene: scene, stale: session.state == .stale, pending: session.pendingCommands, rejection: session.lastRejection, send: session.send, dismissRejection: session.dismissRejection,
                                  driving: true, handoverNotice: session.handoverNotice, dismissHandoverNotice: session.dismissHandoverNotice,
-                                 wristFix: session.wristFix)
+                                 wristFix: session.wristFix, lockedShot: session.lockedShot)
                         if let holeNumber = scene.hole?.number {
                             HoleMapPage(
                                 scene: scene,
                                 map: maps.hole(holeNumber, courseKey: scene.course?.key),
                                 player: session.playerPoint,
-                                deliveryHint: deliveryHint(for: scene)
+                                deliveryHint: deliveryHint(for: scene),
+                                bag: session.player.snapshot?.bag,
+                                profile: session.player.snapshot?.bubble,
+                                /* Aiming needs three things at once: the phone
+                                   says the shot can be aimed, the wrist runs
+                                   the same engine, and it has a bag to run it
+                                   with. Any of them missing and the map is a
+                                   picture — which is what it was yesterday. */
+                                canAim: scene.controls?.canAim == true
+                                    && session.engineAgreement.mayComputeLocally
+                                    && session.player.snapshot != nil,
+                                onAim: { session.sendAim(to: $0) }
                             )
                         }
                     }

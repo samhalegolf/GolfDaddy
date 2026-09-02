@@ -217,6 +217,181 @@ Bubble maths the phone's numbers came from. Nothing on the wrist computes a
 Bubble locally yet; when it does, a mismatch means render the phone's answer
 rather than a second opinion.
 
+## The Watch Bubble Engine
+
+`ios/WatchBubbleEngine` computes the Bubble on the wrist: which club a distance
+resolves to, the pattern that club derives, the caps and floors that size it,
+and the 168-point ring that draws it. It is stateless —
+`BubbleEngine.calculate(input)` — and everything mutable belongs to the play
+state. It answers where the Bubble is and what shape it is, and says nothing
+about the screen: no panning, no zoom, no camera.
+
+`WatchSessionManager.localBubble` runs it for the Scene's target against the
+wrist's own fix, the same way `WristDistances` already answers front/centre/back
+— the wrist is its own rangefinder, and now its own Bubble too. It is gated on
+the version handshake and returns nothing when the versions disagree, no bag has
+arrived, no target is in play, or there is no trustworthy fix. None of those is
+an error, and none shows the player anything: the numbers face draws the Scene's
+Bubble exactly as it did before.
+
+The port is deliberately narrow. Wind, micro-geometry (built but shipping off),
+tournament mode and the display **pixel** clamp do not cross — the last because
+it measures the Bubble against a map viewport, which is framing. Neither does
+the bag-roof clamp, which is defined in `gd-app-core.js`, copied into the client
+by the generator, and called by nothing.
+
+Three quirks of the phone engine are reproduced rather than corrected, because a
+wrist that "improved" on any of them would disagree with the phone with nothing
+to say why: the main ring is drawn at 1.02 scale; the visual tilt adjustment
+never mirrors for left-handers (`calculateBubbleProfile` returns no handedness,
+so the caller's "right" fallback always wins); and JavaScript's `Math.round`
+rounds negative halves the opposite way from Swift's. All three are pinned —
+the first two by parity cases, the third by direct unit test after a mutation
+check showed no fixture value reaches a half.
+
+## Aiming on the wrist
+
+The target is the control point: a drag moves the TARGET, never the player. The
+player comes from GPS and only from GPS — tap-to-place is not part of geo-mapped
+play, and a drag that could relocate the golfer would be exactly that.
+
+```text
+finger  ->  view point
+        ->  image pixel        WatchMapCamera.imagePoint
+        ->  coordinate         WatchMapSpatialReference.coordinate
+        ->  Bubble             WatchPlayState.moveTarget -> BubbleEngine
+        ->  drawn immediately
+lift    ->  AIM_AT, once
+```
+
+`AIM_AT` carries `{point:{lat,lng}}` — the shape Marshal's `AIM_DRAGGED` reads —
+and is sent on drag END, not per frame. Local recomputation is what makes the
+drag feel immediate; the phone does not need the intermediate frames, and a
+Scene republished per frame would swamp the link for numbers nobody reads. It is
+sent **raw**: the aim roof lives in Marshal (`clampAim` with `maxAimM` injected),
+and a second clamp on the wrist is how two ends start disagreeing about where
+the target is. The wrist sends where the finger went and takes the phone's
+correction on the next Scene — except while a finger is still down, where the
+player's own drag wins.
+
+Aiming needs three things at once: the phone says the shot can be aimed
+(`controls.canAim`), the wrist runs the same engine (the version handshake), and
+it holds a bag. Any missing and the map is the picture it was before — the hole,
+the player, the phone's target, no drag.
+
+**The club transition band lives in `WatchPlayState`, not the engine.** A finger
+crossing the boundary between two clubs crosses it many times a second, and
+without a band the answer flickers 6i, 5i, 6i, 5i with the Bubble jumping after
+it. But a band is memory — the answer depends on which club was showing a moment
+ago — and memory in the engine would end its being a pure function of its
+inputs, which is the property the parity fixtures rest on. So the state holds the
+club, the engine is TOLD which club to use (`heldClub`), and the fixtures keep
+working. The band is 3m past the midpoint of the two clubs' totals, applied on
+the side the target is moving toward; that asymmetry is the hysteresis, and it
+means 164m is a 6-iron if you were on a 6-iron and a 5-iron if you were on a 5.
+
+Reset rebuilds a shot rather than restoring a camera: current fix, current hole,
+the default target down the route, engine, frame. A reset that put the player
+back where the map happened to be looking would return them to a view they had
+already decided was wrong. It clears the held club too — the band smooths a drag,
+and carrying it through a reset would let a club they have left behind survive
+the thing meant to start over.
+
+## The locked shot, before the phone answers
+
+Pressing LOCK sends a command and then waits — for the radio, for Marshal, and
+for the next Scene to say the shot is closed. On a good link that is fast enough
+not to notice; in a bag at the far end of a fairway it is not, and the player has
+already walked off. `WatchLockedShot` lets the wrist read locked at once, from
+the club and distance its own engine produced.
+
+It is **intent, not truth**. Marshal owns the round and can refuse — no live
+round, a stale revision, a location it will not accept — and a record that
+outlives its own uncertainty is not a nicety, it is a shot the player believes
+is logged and is not. So there are exactly three ways out, all explicit:
+
+```text
+rejected     the lock did not happen        discard at once
+confirmed    the Scene moved past it        the Scene is truth now
+expired      nothing came back in 20s       stop claiming, whatever the reason
+```
+
+The expiry matters most because it is the only one that survives a case nobody
+thought of: any bug in the other two costs twenty seconds of a wrong screen
+rather than a whole round of one. The decision is one pure function on the
+record — round, Scene revision, whether the command is still queued, and the
+clock — so it is tested without a radio, a Scene or a wrist, and all three
+endings are mutation-checked.
+
+The record is keyed by the LOCK command's own id, so an acknowledgement names
+exactly the record it settles; it carries the engine version that produced it;
+and it survives a relaunch, because the outbox does and a lock that vanished
+while its command did not would leave the wrist waiting with no explanation.
+
+It stores the Bubble's **shape**, not its 168 ring points — the ring is derived,
+and storing derived geometry beside the inputs that produce it is how the two
+drift apart.
+
+The locked face shows the wrist's own club and distance, deliberately not the
+Scene's: the Scene has not caught up, and its stale numbers under a "locked"
+heading would be the one genuinely misleading thing this could show. No LOCK or
+UNLOCK control is offered while it is unconfirmed — UNLOCK would act against a
+shot the phone may not have accepted, and LOCK would invite a second one.
+
+A wrist that computed nothing of its own records nothing and waits exactly as it
+did before, so this never invents a shot it cannot describe.
+
+## Engine version handshake
+
+Two engines, one written in JavaScript and generated from `gd-app-core.js`, one
+written in Swift and generated by nobody. The parity fixtures catch a
+disagreement at the moment they run; they cannot catch a phone that has since
+shipped a new engine to a wrist that has not been updated. Only a version
+exchanged at runtime can, and the failure it prevents is the silent one — two
+engines each answering confidently and differently, a Watch showing a 6-iron
+where the phone shows a 5, no error anywhere, and no way for the player to know
+which to believe.
+
+`BUBBLE_ENGINE_VERSION` is declared **once**, in `app/js/caddy-watch.js`
+alongside `SCHEMA_VERSION`, because it is a fact about the wearable contract and
+two payloads have to agree on it: the Scene's `bubble.engineVersion` says which
+engine drew the Bubble on screen, and the player snapshot's `engineVersion` says
+which engine the bag on the wrist was normalised for.
+`app/js/watch-player-delivery.js` reads it rather than declaring one, with no
+fallback string — a snapshot that cannot state its engine cannot take part in
+the handshake, so it is not sent at all. `BubbleEngineVersion.current` in
+`ios/WatchBubbleEngine` is the Swift half, and tests on both sides pin all three
+against the fixture so bumping one alone fails the build.
+
+`BubbleEngineVersion.agreement(scene:snapshot:)` resolves it on the wrist:
+
+```text
+agreed              versions match           -> the wrist may compute
+mismatch            phone runs another       -> render the phone's Bubble
+phoneInconsistent   scene and bag disagree   -> a phone mid-upgrade; defer
+undeclared          nothing said yet         -> defer
+```
+
+Exact match only. A compatibility range would be a claim about which changes
+were behavioural, and every change to this engine is behavioural — it exists to
+produce numbers. One declaration is enough to decide, because a phone only ever
+sends one value and a Scene and a bag legitimately arrive in either order;
+requiring both would leave the wrist deferring through the gap for nothing. An
+empty string is silence rather than a differing version, because null-stripping
+on the way over can legitimately turn an absent field into one. Only `agreed` is
+permissive, asserted as such over every state so that adding one later cannot
+quietly default to allowing local computation.
+
+Deferring costs a slightly staler Bubble — the phone's, off the Scene, which is
+exactly what the wrist rendered before it had an engine at all. That is a good
+trade and it is taken automatically, with nothing shown to the player: this is
+not their problem to solve.
+
+The wrist reports the engine it implements in `watchPlayerHave`, beside the bag
+fingerprint, so a mismatch is visible from the phone's side too rather than only
+inferable from a Watch that mysteriously never computes. Nothing on the phone
+changes behaviour on it — the wrist is the end that defers.
+
 ## Native Round Bridge and adapters
 
 `app/js/native-round-bridge.js` is inert on web. On native iOS it hands the

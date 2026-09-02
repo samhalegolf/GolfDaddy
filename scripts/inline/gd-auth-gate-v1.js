@@ -9,14 +9,23 @@
  * dismissed, and re-asserted all of that from a capture-phase listener on every
  * click anywhere in the app.
  *
- * It is now a gate on four routes. The test for what belongs here: does the
- * route read or write something that belongs to a person? Stats, practice data,
- * player settings and the admin panel do. Home, the course library, the bag and
- * the GPS surface do not - none of them read GolfDaddyAccounts, and nothing
- * under app/ references ClarityPermissions at all, so a signed-out player gets
- * the rangefinder, which is what Apple asked for. Whether that player may also
- * keep score is a separate question answered by clarity-permissions.js and
- * app/js/access.js; a paywall is not a login wall.
+ * It is now a gate on ONE route: admin.
+ *
+ * Rewritten again September 2026, when the guest experience was widened. The
+ * old test was "does the route read or write something that belongs to a
+ * person?", and the shot system answered yes - so stats, course data and
+ * practice data all asked for a login. That answer conflated the SURFACE with
+ * the EVIDENCE. A guest can be shown the shot system without being allowed to
+ * put their own evidence into it, which is what gd-guest-access.js's demo mode
+ * now does: the surfaces open, GDDemoSession's synthetic pipeline is the only
+ * thing allowed to feed them, and importCapture refuses real imports. Home, the
+ * course library, the bag and the GPS surface were already open.
+ *
+ * Admin is the one thing left. It is not a data screen a guest could be shown a
+ * demo of - it is the operator console, and it stays account-based.
+ *
+ * Whether a signed-in player may keep score is a separate question answered by
+ * clarity-permissions.js and app/js/access.js; a paywall is not a login wall.
  *
  * The default is deliberately "open": a route that does not call
  * gdAuthGateAllows() is reachable. A new screen has to opt IN to needing an
@@ -47,25 +56,33 @@
   }
 
   /* The account-based routes, and what to say when one is reached without an
-     account. Everything else is open. */
+     account. Everything else is open.
+
+     shotData / courseData / practiceData used to be in here. They are not any
+     more: gd-guest-access.js opens them to a guest in demo mode. Keys that are
+     no longer gated are deliberately absent rather than mapped to an empty
+     string, because gdAuthGateAllows() answers "allowed" for anything it does
+     not recognise - a route only stays shut while it is named here. */
   var REASONS={
-    shotData:'Your shot data is saved to your account.',
-    courseData:'Your course data is saved to your account.',
-    practiceData:'Your practice data is saved to your account.',
     admin:'Admin tools need an account.'
   };
 
   let demoPracticeRetriesScheduled=false;
   let demoPracticeOffsetApplied=false;
 
+  /* Always asks the profile shell for the sign-in FORM, never just un-hides the
+     panel. It used to sniff the panel's text for "Sign in" and skip re-opening
+     when it matched - which now matches the guest PROFILE screen too, since
+     that carries a Sign in button. Sniffing rendered text for routing state was
+     the bug; asking the owner is the fix. */
   function openAuth(message){
     safe(()=>window.GDShell?.showAuth?.({source:'auth-gate'}));
     document.body.classList.add('gdProfileOpen');
-    const profile=document.getElementById('gdProfileV67');
-    if(window.gdOpenProfileV67&&(!profile||profile.classList.contains('hidden')||!/Sign in/i.test(profile.textContent||''))){
+    if(window.gdOpenProfileV67){
       safe(()=>window.gdOpenProfileV67({authGate:true}));
-    }else if(profile){
-      profile.classList.remove('hidden');
+    }else{
+      const profile=document.getElementById('gdProfileV67');
+      if(profile)profile.classList.remove('hidden');
     }
     if(message)safe(()=>{if(typeof window.toast==='function')window.toast(message+' Sign in to open it.')});
     return false;
@@ -95,7 +112,8 @@
      owner calls this instead, at the top of the routes that need an account. */
   window.gdAuthGateAllows=function(reasonKey){
     if(signedIn())return true;
-    openAuth(REASONS[reasonKey]||null);
+    if(!REASONS[reasonKey])return true;
+    openAuth(REASONS[reasonKey]);
     return false;
   };
 

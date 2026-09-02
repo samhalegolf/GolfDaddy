@@ -111,6 +111,12 @@ final class BubbleEngineParityTests: XCTestCase {
             let bubbleCentre: Coordinate
             let ringResolution: Int
             let ringSample: [Coordinate]
+            /* The bag the PHONE would actually put on the wire for this case —
+               the engine's own playable bag, which for the ghost case is the
+               13-club stand-in rather than the empty account bag the input
+               shows. The wrist never derives a ghost bag; it is sent one. */
+            let bagSent: [SentClub]
+            struct SentClub: Decodable { let club: String; let carryM: Double; let totalM: Double }
         }
     }
 
@@ -219,23 +225,93 @@ final class BubbleEngineParityTests: XCTestCase {
 
     // MARK: - Waiting on the engine
 
-    /* Step 5 of docs/WATCH_BUBBLE_ENGINE_SPEC.md. Skipped rather than absent so
-       that the work it is waiting for is visible in the test output instead of
-       being something a reader has to know to look for.
+    /* The engine, held to the JavaScript's answers.
 
-       When the engine lands, this becomes: build a WatchBubbleInput from
-       entry.input, call BubbleEngine.calculate, and compare every field of
-       entry.expect at the fixture's own per-field tolerances — metres to 0.1,
+       Every field at the fixture's own per-field tolerance — metres to 0.1,
        degrees to 0.01, distance to 0.5, coordinates to 1e-7 (~11mm). Do not
-       loosen a tolerance to make a case pass. A disagreement here is the two
-       engines diverging, which is the single failure this whole harness exists
-       to catch. */
+       loosen one to make a case pass. A disagreement here is the two engines
+       diverging, which is the single failure this whole harness exists to
+       catch, and the fix is in the Swift or in gd-app-core.js, never in the
+       tolerance. */
     func testEveryCaseMatchesTheJavaScriptEngine() throws {
         let fixture = try loadFixture()
-        throw XCTSkip("""
-            Swift Bubble engine not implemented yet (spec step 5). \
-            \(fixture.cases.count) cases are recorded and waiting at \
-            \(fixture.bubbleEngineVersion).
-            """)
+        let t = fixture.tolerances
+        var failures: [String] = []
+
+        for entry in fixture.cases {
+            let bag = WatchBagSnapshot(
+                version: 1,
+                clubs: entry.expect.bagSent.map { WatchClub(club: $0.club, carryM: $0.carryM, totalM: $0.totalM) },
+                isGhost: entry.expect.ghostBag
+            )
+            let profile = WatchBubbleProfile(
+                version: 1,
+                offsetDeg: entry.input.bubble?.offsetDeg,
+                handedness: .init(lenient: entry.input.bubble?.handedness)
+            )
+
+            /* The default target first — it is what a null `target` in the
+               fixture means, and it is the same call the wrist makes on hole
+               change and on Reset. */
+            let defaulted = BubbleEngine.defaultTarget(
+                player: entry.input.player, green: entry.input.hole.green,
+                route: entry.input.hole.route, bag: bag)
+            if let defaulted {
+                near(defaulted, entry.expect.defaultTarget, t.coordinate, entry.name, "defaultTarget", &failures)
+            } else if entry.input.target == nil {
+                failures.append("\(entry.name): no default target produced, but the case has none of its own")
+            }
+
+            let target = entry.input.target ?? defaulted ?? entry.expect.defaultTarget
+            guard let result = BubbleEngine.calculate(
+                .init(player: entry.input.player, target: target, bag: bag, bubble: profile)) else {
+                failures.append("\(entry.name): the engine produced no result")
+                continue
+            }
+
+            eq(result.targetDistanceM, entry.expect.targetDistanceM, t.distanceM, entry.name, "targetDistanceM", &failures)
+            eq(result.shotBearingDeg, entry.expect.shotBearingDeg, t.degrees, entry.name, "shotBearingDeg", &failures)
+            if result.club.club != entry.expect.club {
+                failures.append("\(entry.name): club expected \(entry.expect.club), got \(result.club.club)")
+            }
+            eq(result.club.carryM, entry.expect.carryM, t.metres, entry.name, "carryM", &failures)
+            eq(result.club.totalM, entry.expect.totalM, t.metres, entry.name, "totalM", &failures)
+            if result.club.isGhost != entry.expect.ghostBag {
+                failures.append("\(entry.name): ghostBag expected \(entry.expect.ghostBag), got \(result.club.isGhost)")
+            }
+            eq(result.aimOffsetDeg, entry.expect.aimOffsetDeg, t.degrees, entry.name, "aimOffsetDeg", &failures)
+            eq(result.widthM, entry.expect.visualWidthM, t.metres, entry.name, "visualWidthM", &failures)
+            eq(result.depthM, entry.expect.visualDepthM, t.metres, entry.name, "visualDepthM", &failures)
+            eq(result.tiltDeg, entry.expect.visualTiltDeg, t.degrees, entry.name, "visualTiltDeg", &failures)
+            near(result.centre, entry.expect.bubbleCentre, t.coordinate, entry.name, "bubbleCentre", &failures)
+
+            if result.ring.count != entry.expect.ringResolution {
+                failures.append("\(entry.name): ring resolution expected \(entry.expect.ringResolution), got \(result.ring.count)")
+            } else {
+                let step = Double(result.ring.count) / Double(entry.expect.ringSample.count)
+                for (i, want) in entry.expect.ringSample.enumerated() {
+                    let index = Int((Double(i) * step).rounded()) % result.ring.count
+                    near(result.ring[index], want, t.coordinate, entry.name, "ringSample[\(i)]", &failures)
+                }
+            }
+        }
+
+        if !failures.isEmpty {
+            XCTFail("\(failures.count) parity mismatch(es):\n" + failures.prefix(24).joined(separator: "\n"))
+        }
+    }
+
+    private func eq(_ actual: Double, _ expected: Double, _ tolerance: Double,
+                    _ name: String, _ field: String, _ failures: inout [String]) {
+        if !(abs(actual - expected) <= tolerance) {
+            failures.append("\(name): \(field) expected \(expected) ± \(tolerance), got \(actual)")
+        }
+    }
+
+    private func near(_ actual: Coordinate, _ expected: Coordinate, _ tolerance: Double,
+                      _ name: String, _ field: String, _ failures: inout [String]) {
+        if abs(actual.lat - expected.lat) > tolerance || abs(actual.lng - expected.lng) > tolerance {
+            failures.append("\(name): \(field) expected (\(expected.lat), \(expected.lng)), got (\(actual.lat), \(actual.lng))")
+        }
     }
 }

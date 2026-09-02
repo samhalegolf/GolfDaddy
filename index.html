@@ -335,7 +335,7 @@
 <!-- Removed superseded cleanup layer from original script index 5. -->
 
 <script src="scripts/inline/gd-brand-icon-render.js?v=boot-crash-fix-20260719"></script>
-<script src="scripts/inline/gd-auth-account-shell.js?v=coach-unlink-20260827a"></script>
+<script src="scripts/inline/gd-auth-account-shell.js?v=guest-access-005"></script>
 
 
 
@@ -368,8 +368,8 @@
 <script src="scripts/gd-course-play-pipeline.js?v=course-play-pipeline-001"></script>
 <link rel="stylesheet" id="gdGpsViewportLockCssV1" href="styles/inline/gd-gps-viewport-lock-css-v1.css?v=split04">
 <link rel="stylesheet" id="gdProfileRouteHardeningCssV1" href="styles/inline/gd-profile-route-hardening-css-v1.css?v=split04">
-<script src="scripts/inline/gd-inline-profile-route-hardening-v1.js?v=split03"></script>
-<script id="gdAuthGateV1" src="scripts/inline/gd-auth-gate-v1.js?v=20260721a"></script>
+<script src="scripts/inline/gd-inline-profile-route-hardening-v1.js?v=guest-access-004"></script>
+<script id="gdAuthGateV1" src="scripts/inline/gd-auth-gate-v1.js?v=guest-access-001"></script>
 <link rel="stylesheet" href="styles/gd-gps-badge.css">
 <link rel="stylesheet" href="styles/gd-shell.css?v=real-shell-controls-20260716">
 <script src="scripts/gd-namespace.js"></script>
@@ -423,8 +423,15 @@
      pipelines. Loads after the launch-monitor and shot-cluster engines it
      calls into, before gd-route-audit.js's render functions that check
      window.GDDemoSession. -->
-<script src="scripts/gd-demo-session.js?v=demo-mode-001"></script>
+<script src="scripts/gd-demo-session.js?v=guest-access-003"></script>
 <script src="scripts/gd-demo-course-data-provider.js?v=demo-mode-001"></script>
+<!-- What a signed-out session is: a guest identity, a guest profile, and the
+     shot system in demo mode. Loads after gd-app-core.js (the profile store it
+     writes the guest profile into), after gd-launch-monitor-data.js (whose
+     importCapture it wraps), and before gd-route-audit.js, which asks it
+     whether opening the shot system should start the guided demo. -->
+<script src="scripts/gd-guest-access.js?v=guest-access-001"></script>
+<link rel="stylesheet" href="styles/gd-guest-mode.css?v=guest-access-001">
 <!-- Bubble Micro-Geometry. The Signal engine is the same file functions/bubble-model.js
      requires server-side, and it is pure - no platform APIs - so it loads anywhere.
      It must come before gd-bubble-model-client.js, which reads its version gate and
@@ -438,7 +445,7 @@
      point into, not a Studio-only tool. -->
 <script src="scripts/gd-practice-projected-clubs.js?v=practice-projected-clubs-001"></script>
 <script data-gd-surface="studio" src="scripts/gd-bubble-signal-test-data.js?v=bubble-signal-test-data-001"></script>
-<script id="gdCanonicalRouteAuditV1" src="scripts/gd-route-audit.js?v=coach-set-bubble-20260827c"></script>
+<script id="gdCanonicalRouteAuditV1" src="scripts/gd-route-audit.js?v=guest-access-004"></script>
 <script src="scripts/inline/gd-native-back-button.js?v=20260721a"></script>
 <script src="scripts/inline/gd-native-deep-links.js?v=deeplinks-20260720"></script>
 <!-- Removed gdProfileRouteStabilizerV2: profile fallback rendering masked real route failures. -->
