@@ -498,6 +498,13 @@
     .gdAdminWatchMapDebugPanel div span{color:#fff;text-align:right;word-break:break-word}
     .gdAdminWatchMapErrorList{margin:6px 0 0;padding-left:16px;font:700 10px/1.5 Inter,system-ui,sans-serif;color:#ffd287}
     .gdAdminWatchMapStatusLine{margin-bottom:2px}
+    /* Indeterminate - the bake is one blocking request with no midpoint to report (see
+       gd-admin-watch-map-viewer.js's generate()), so this shows a sliding highlight rather than
+       a fake percentage. The point is only to be visible the instant the button is clicked. */
+    .gdAdminWatchMapBar{position:relative;overflow:hidden;margin-top:6px;height:22px;border-radius:999px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1)}
+    .gdAdminWatchMapBarFill{position:absolute;top:0;bottom:0;left:-40%;width:40%;background:linear-gradient(90deg,rgba(31,211,109,0),rgba(31,211,109,.55),rgba(31,211,109,0));animation:gdAdminWatchMapBarSlide 1.1s ease-in-out infinite}
+    .gdAdminWatchMapBarText{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;height:100%;font:850 10px/1 Inter,system-ui,sans-serif;color:#d8ffe8}
+    @keyframes gdAdminWatchMapBarSlide{0%{left:-40%}100%{left:100%}}
     .gdAdminCourseDebugWindow{display:grid;gap:10px}
     .gdAdminCourseDebugWindow .gdCoursePlayDebug{display:block;margin:0}
     .gdAdminCourseStageLine{display:flex;gap:6px;flex-wrap:wrap;align-items:center}

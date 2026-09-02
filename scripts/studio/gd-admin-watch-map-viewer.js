@@ -20,6 +20,7 @@
   var holeByCourse = {}; // courseId -> selected hole number
   var viewByKey = {};    // "<courseId>:<hole>" -> {scale, tx, ty}
   var debugByCourse = {};// courseId -> boolean
+  var generatingByCourse = {}; // courseId -> true while a generate() POST is in flight
   var dragState = null;
 
   function core() { return window.GDWatchMapCore || null; }
@@ -47,10 +48,17 @@
     if (!courseId) return false;
     var existing = reports[courseId];
     if (existing && existing.status === "ready" && !window.confirm("Regenerate Watch maps for " + courseId + "?\n\nBakes fresh hole images from the course's current geometry with the Watch Map recipe and replaces the existing Watch package. Native visuals, geometry and GPS Play imagery are not touched.")) return false;
+    /* Set BEFORE the first await, so the button disables and the progress bar appears the
+       instant the click handler runs - not after accessToken()'s own round trip, which was the
+       gap that made a click look like nothing happened. The bake itself is one blocking POST
+       with no incremental status to poll (see functions/course-watch-maps.mjs's own header on
+       why this is synchronous, not a job queue), so the bar is deliberately indeterminate -
+       it says "working", not a percentage this code has no way to know. */
+    generatingByCourse[courseId] = true;
+    rerender();
     try {
       var token = await accessToken();
       if (!token) { toast("Sign in again to generate Watch maps"); return false; }
-      toast("Generating Watch maps…");
       var res = await fetch("/api/course-watch-maps", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + token },
@@ -72,6 +80,7 @@
     } catch (error) {
       toast("Generate Watch Maps failed to send");
     } finally {
+      generatingByCourse[courseId] = false;
       if (typeof gdAdminCourseDbShowWatchMaps === "function") gdAdminCourseDbShowWatchMaps(courseId);
       else rerender();
       /* The POST result is rendered immediately, then re-read from the normal source of truth
@@ -186,13 +195,25 @@
 
   function statusHead(courseId, report) {
     var status = statusLabel(report);
-    var busy = report === "loading";
+    var generating = !!generatingByCourse[courseId];
+    var busy = report === "loading" || generating;
+    var buttonLabel = generating ? "Baking…" : (report && report.status === "ready" ? "Regenerate Watch Maps" : "Generate Watch Maps");
+    /* Indeterminate, deliberately - see generate()'s own comment on why there is no percentage
+       to show. A sliding highlight says "this is running", which is the entire ask: feedback
+       that the click did something, visible before the request has had time to answer. */
+    var bar = generating
+      ? '<div class="gdAdminWatchMapBar" role="progressbar" aria-label="Baking Watch map images">' +
+        '<span class="gdAdminWatchMapBarFill"></span>' +
+        '<span class="gdAdminWatchMapBarText">Baking hole images…</span>' +
+        '</div>'
+      : "";
     return '<div class="gdAdminCourseStageLine gdAdminWatchMapStatusLine">' +
       '<span class="gdAdminCourseStatusDot ' + status.tone + '">Watch Maps: ' + esc(status.label) + '</span>' +
       '</div>' +
       '<div class="gdAdminCourseVisualActions">' +
-      '<button type="button" class="primary" ' + (busy ? "disabled" : "") + ' onclick="return gdAdminCourseWatchMapsGenerate(\'' + esc(courseId) + '\')">' + (report && report.status === "ready" ? "Regenerate Watch Maps" : "Generate Watch Maps") + '</button>' +
-      '</div>';
+      '<button type="button" class="primary" ' + (busy ? "disabled" : "") + ' onclick="return gdAdminCourseWatchMapsGenerate(\'' + esc(courseId) + '\')">' + buttonLabel + '</button>' +
+      '</div>' +
+      bar;
   }
 
   function errorsMarkup(report) {
