@@ -1,0 +1,8 @@
+project.manifest = manifest.xml
+
+# Standard single-barrel layout: every .mc file under source/ compiles into
+# one program and shares a global namespace (no per-file imports needed
+# beyond `using Toybox.X` for SDK modules) — see garmin/README.md for the
+# directory map.
+base.sourcePath = source
+base.resourcePath = resources

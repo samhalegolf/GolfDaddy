@@ -1,0 +1,7 @@
+<drawables>
+    <!-- launcher_icon.png does not exist yet in this tree — add a real
+         Connect IQ launcher icon (typically 40x40 PNG for most watch
+         products; check the SDK's per-product icon size table) before the
+         first build. See garmin/README.md. -->
+    <bitmap id="LauncherIcon" filename="launcher_icon.png"/>
+</drawables>

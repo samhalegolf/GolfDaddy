@@ -19,9 +19,11 @@ const SRC = fs.readFileSync(path.join(ROOT, "functions", "course-maps.mjs"), "ut
 
 /* Evaluate the whole module body (top level is only const + function decls; the
    dynamic import lives inside store() and never runs here) with the ESM export
-   keywords stripped, then pull mergeGeneratedCourse and every helper it needs. */
+   keywords stripped (and the ESM imports dropped - nothing the merge calls lives
+   behind one), then pull mergeGeneratedCourse and every helper it needs. */
 function loadMerge() {
   const body = SRC
+    .replace(/^import[\s\S]*?from\s+["'][^"']+["'];\s*$/gm, "")
     .replace(/export default /g, "")
     .replace(/^export /gm, "");
   // eslint-disable-next-line no-new-func
@@ -67,6 +69,19 @@ test("the endpoint uses ONE merge for all actors, not an admin branch", () => {
   assert.ok(
     /const merge = mergeGeneratedCourse\(existingCourse, course\);/.test(SRC),
     "the merge must not branch on adminActor - play/scan/publish are the same for everyone"
+  );
+  /* The merge is only a merge if it is what gets WRITTEN. Supabase is the authoritative store
+     and its upsert replaces objects_json wholesale, so writing the raw incoming payload here
+     silently discards everything the client did not send - which is every server-collected
+     fairway/bunker/water surface, since no client ever holds those. Millbrook lost 278 of them
+     to one phone scan on 2026-09-02 and its Watch maps baked with no hazards. */
+  assert.ok(
+    /await writeSupabaseCourse\(merge\.course\);/.test(SRC),
+    "publish must write the MERGED course to Supabase, never the raw incoming payload"
+  );
+  assert.ok(
+    !/await writeSupabaseCourse\(course\);/.test(SRC),
+    "the raw incoming course must never reach Supabase - it wipes server-collected surfaces"
   );
   assert.ok(!/mergeAdminPublish/.test(SRC), "the destructive admin-only merge must be gone entirely");
   assert.ok(

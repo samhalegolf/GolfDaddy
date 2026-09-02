@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Clarity Caddy — Garmin Connect IQ app manifest.
+
+  UNVERIFIED / NEEDS SDK: the <iq:application> id below is a PLACEHOLDER.
+  Every Connect IQ app needs a real UUID minted by the Connect IQ Developer
+  Portal (apps.garmin.com) when the app is first registered there — replace
+  GARMIN-APP-ID-PLACEHOLDER before this will build. See garmin/README.md.
+
+  Product IDs (the <iq:products> list) are Garmin's official Connect IQ
+  device identifiers, matched against the Phase 1 device matrix (plan step
+  28): Approach S62, Fenix 6, Forerunner 55, Approach S70. Cross-check the
+  exact <iq:product id="..."/> strings against the Connect IQ SDK Manager's
+  device list before building — Garmin occasionally revises these ids
+  between SDK releases.
+-->
+<iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="3">
+    <iq:application
+        id="GARMIN-APP-ID-PLACEHOLDER"
+        type="watch-app"
+        name="@Strings.AppName"
+        entry="ClarityCaddyApp"
+        launcherIcon="@Drawables.LauncherIcon"
+        minSdkVersion="3.2.0">
+        <!-- Connect IQ 3.0 baseline preferred per plan step 29, but the
+             companion-app messaging APIs this project depends on
+             (registerForPhoneAppMessages / makeImageRequestWithDictionary)
+             are most reliably documented from 3.2 onward — verify against
+             the actual devices in the Phase 1 matrix and relax if an
+             earlier minSdkVersion proves sufficient. -->
+        <iq:products>
+            <iq:product id="approachs62"/>
+            <iq:product id="fenix6"/>
+            <iq:product id="fr55"/>
+            <iq:product id="approachs70"/>
+        </iq:products>
+        <iq:permissions>
+            <iq:uses-permission id="Positioning"/>
+            <iq:uses-permission id="Communications"/>
+        </iq:permissions>
+        <iq:languages>
+            <iq:language>eng</iq:language>
+        </iq:languages>
+    </iq:application>
+</iq:manifest>

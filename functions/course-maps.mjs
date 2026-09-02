@@ -141,7 +141,14 @@ export default async function courseMaps(req) {
   let storage = "netlify-blobs";
   if (hasSupabase()) {
     try {
-      await writeSupabaseCourse(course);
+      /* merge.course, NEVER the raw incoming `course`. Supabase is the authoritative store and
+         this upsert replaces objects_json wholesale, so writing the payload the client sent
+         made the merge above apply to the blob mirror only: a phone's Community scan of
+         Millbrook (tee/green/route, 65 objects) republished over the 278 fairway/bunker/water
+         surfaces collect_extra_objects had written server-side, and the next Watch bake shipped
+         every hole with no hazards. The client never holds those surfaces - they exist only in
+         objects_json - so the merged course is the only thing that can be written back. */
+      await writeSupabaseCourse(merge.course);
       storage = "supabase";
     } catch (error) {
       warnings.push({ storage: "supabase", message: storageMessage(error) });
@@ -591,7 +598,9 @@ function mergeGeneratedCourse(existing, incoming) {
     accepted.holes += 1;
   });
 
-  ["courseLat", "courseLng", "finderLat", "finderLng", "courseFinderLat", "courseFinderLng"].forEach((key) => {
+  /* Place fields ride along too: ensureCoursePlace geocodes the INCOMING course, and a row
+     published before the region columns existed has nothing to fall back on. */
+  ["courseLat", "courseLng", "finderLat", "finderLng", "courseFinderLat", "courseFinderLng", "region", "country", "countryCode"].forEach((key) => {
     if ((course[key] === null || course[key] === undefined || course[key] === "") && incoming[key] !== null && incoming[key] !== undefined && incoming[key] !== "") course[key] = incoming[key];
   });
   if (accepted.objects || accepted.holes) course.updatedAt = now;
