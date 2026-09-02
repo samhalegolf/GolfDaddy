@@ -584,7 +584,7 @@ test("the removed player's next startup cannot push the coach link back", () => 
 
   const sync = stripComments(fs.readFileSync(path.join(ROOT, "functions", "account-sync.js"), "utf8"));
   assert.ok(
-    /severedCoachIds\(accountId\)/.test(sync),
+    /idList\(stored\.metadata\.severedCoachIds\)/.test(sync),
     "account-sync never reads the tombstone, so it happily writes the severed link back"
   );
   assert.ok(
@@ -637,6 +637,289 @@ test("the Players list offers Remove to every coach, and never wires it to the a
   assert.ok(
     /gdConfirmDialog/.test(handler),
     "window.confirm alone returns false instantly in the embedded webview, so the removal would silently do nothing in the app"
+  );
+});
+
+/* ---------- the tombstone has to SURVIVE, not just get written ----------
+
+   Everything above proves the tombstone is written and that account-sync reads
+   it. Neither says anything about what happens in between: app_accounts.metadata
+   is a whole-column write on every path that touches it, so any writer that
+   composes a fresh object erases the tombstone and the resurrection is back by a
+   slightly longer route.
+
+   These run the real handlers against an in-memory app_accounts, because the
+   bug lives in the ORDER of three writes rather than in any one of them. */
+
+const FN = (name) => path.join(ROOT, "functions", name);
+const COACH_UUID = "11111111-1111-4111-8111-111111111111";
+const PLAYER_UUID = "22222222-2222-4222-8222-222222222222";
+
+function qs(query) {
+  const out = [];
+  String(query || "").split("&").filter(Boolean).forEach((pair) => {
+    const at = pair.indexOf("=");
+    out.push([decodeURIComponent(pair.slice(0, at)), decodeURIComponent(pair.slice(at + 1))]);
+  });
+  return out;
+}
+
+function matches(row, filters) {
+  return filters.every(([key, value]) => {
+    if (key === "select" || key === "limit" || key === "order" || key === "on_conflict") return true;
+    const dot = value.indexOf(".");
+    const op = value.slice(0, dot);
+    const want = value.slice(dot + 1);
+    const have = row[key] === null || row[key] === undefined ? "" : String(row[key]);
+    if (op === "eq") return have === want;
+    if (op === "neq") return have !== want;
+    return true;
+  });
+}
+
+/* A Supabase stand-in that actually STORES what is written, so a second handler
+   reads what the first one left. A recorder alone would miss this bug entirely:
+   every individual write is well-formed; it is the row afterwards that is wrong. */
+function supabaseSandbox(accounts) {
+  const state = {
+    accounts: accounts.map((row) => Object.assign({}, row)),
+    writes: [],
+    authUser: null,
+    row: (accountId) => state.accounts.find((a) => a.account_id === accountId) || null
+  };
+  const realFetch = global.fetch;
+  const realEnv = {
+    SUPABASE_URL: process.env.SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY
+  };
+  process.env.SUPABASE_URL = "https://sandbox.supabase.test";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key";
+  process.env.SUPABASE_ANON_KEY = "anon-key";
+
+  const reply = (body, status) => ({
+    ok: !status || status < 400,
+    status: status || 200,
+    text: async () => (body === null || body === undefined ? "" : JSON.stringify(body))
+  });
+
+  global.fetch = async function (url, options) {
+    const method = (options && options.method) || "GET";
+    const body = options && options.body ? JSON.parse(options.body) : null;
+    const target = String(url);
+
+    if (target.includes("/auth/v1/user")) {
+      return state.authUser ? reply(state.authUser) : reply({ msg: "invalid token" }, 401);
+    }
+
+    const query = target.split("/rest/v1/")[1] || "";
+    const table = query.split("?")[0];
+    const filters = qs(query.split("?")[1] || "");
+
+    if (table !== "app_accounts") {
+      state.writes.push({ table, method, body });
+      return reply(method === "GET" ? [] : null);
+    }
+    if (method === "GET") return reply(state.accounts.filter((row) => matches(row, filters)));
+
+    state.writes.push({ table, method, body });
+    if (method === "POST") {
+      /* on_conflict=account_id,resolution=merge-duplicates: the columns in the
+         payload are written, the ones left out keep whatever they held. */
+      const found = state.row(body.account_id);
+      if (found) Object.assign(found, body);
+      else state.accounts.push(Object.assign({}, body));
+    }
+    if (method === "PATCH") {
+      state.accounts.filter((row) => matches(row, filters)).forEach((row) => Object.assign(row, body));
+    }
+    return reply(null);
+  };
+
+  state.restore = () => {
+    global.fetch = realFetch;
+    Object.keys(realEnv).forEach((key) => {
+      if (realEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = realEnv[key];
+    });
+    delete require.cache[FN("auth-utils.js")];
+    delete require.cache[FN("account-sync.js")];
+    delete require.cache[FN("coach-unlink-player.js")];
+    delete require.cache[FN("payment-utils.js")];
+  };
+  return state;
+}
+
+function coachRow(extra) {
+  return Object.assign({
+    account_id: "acct_coach", profile_id: "profile_coach", auth_user_id: COACH_UUID,
+    email: "coach@example.com", name: "Coach", role: "coach",
+    linked_player_ids: ["acct_p1"], linked_coach_ids: [], metadata: {}
+  }, extra || {});
+}
+
+function playerRow(extra) {
+  return Object.assign({
+    account_id: "acct_p1", profile_id: "profile_p1", auth_user_id: PLAYER_UUID,
+    email: "player@example.com", name: "Player", role: "player",
+    linked_player_ids: [], linked_coach_ids: ["acct_coach"], created_by_coach_id: "acct_coach",
+    metadata: {}
+  }, extra || {});
+}
+
+async function unlink(box) {
+  box.authUser = { id: COACH_UUID, email: "coach@example.com" };
+  const handler = require(FN("coach-unlink-player.js")).handler;
+  const response = await handler({ httpMethod: "POST", body: JSON.stringify({ accessToken: "token", playerAccountId: "acct_p1" }) });
+  assert.strictEqual(response.statusCode, 200, "the unlink itself failed: " + response.body);
+  return response;
+}
+
+/* The player's device pushing what it still holds, which is the coach it was
+   just cut from. This is what runs on every startup. */
+async function playerSync(box) {
+  const handler = require(FN("account-sync.js")).handler;
+  const response = await handler({ httpMethod: "POST", body: JSON.stringify({
+    action: "upsert_account",
+    account: {
+      accountId: "acct_p1", profileId: "profile_p1", email: "player@example.com", name: "Player",
+      role: "player", supabaseUserId: PLAYER_UUID, linkedCoachIds: ["acct_coach"], linkedPlayerIds: []
+    },
+    profile: { id: "profile_p1", name: "Player", email: "player@example.com", permission: "player", bag: [] }
+  }) });
+  assert.strictEqual(response.statusCode, 200, "the sync itself failed: " + response.body);
+  return response;
+}
+
+test("a removed player's sign-in does not lift the tombstone", async () => {
+  /* THE BUG. upsertAccount ran on every login, signup and restore and wrote
+     metadata as a flat literal, so the sign-in after a removal wiped
+     severedCoachIds. The next startup then pushed the phone's stale
+     linked_coach_ids through account-sync, which found no tombstone to filter
+     against, and the removed player was back in the roster. */
+  const box = supabaseSandbox([coachRow(), playerRow()]);
+  try {
+    await unlink(box);
+    assert.deepStrictEqual(
+      list(box.row("acct_p1").metadata.severedCoachIds), ["acct_coach"],
+      "the unlink left no tombstone"
+    );
+
+    const { upsertAccount } = require(FN("auth-utils.js"));
+    await upsertAccount({ id: PLAYER_UUID, email: "player@example.com" }, { eventType: "supabase_login" });
+
+    assert.deepStrictEqual(
+      list(box.row("acct_p1").metadata.severedCoachIds), ["acct_coach"],
+      "signing in wiped the tombstone — the player's next startup will write the coach link straight back"
+    );
+
+    await playerSync(box);
+    assert.deepStrictEqual(
+      list(box.row("acct_p1").linked_coach_ids), [],
+      "the removed player pushed the cut coach link back up and is in the roster again"
+    );
+    assert.deepStrictEqual(
+      list(box.row("acct_coach").linked_player_ids), [],
+      "the coach's own row re-acquired the player"
+    );
+  } finally { box.restore(); }
+});
+
+test("signing in preserves every metadata key the server owns", async () => {
+  /* severedCoachIds is the one that resurrects a removed player, but it is not
+     the only server-written key on this column: emailChanges is the audit
+     account-change-email.js keeps, and stripe_customer_id is the fallback
+     payment-utils.js writes when the column write fails — losing that one mints
+     a second Stripe customer for the same person. */
+  const box = supabaseSandbox([playerRow({
+    metadata: {
+      severedCoachIds: ["acct_coach"],
+      emailChanges: [{ at: "2026-08-01T00:00:00.000Z", from: "old@example.com", to: "player@example.com" }],
+      stripe_customer_id: "cus_123"
+    }
+  })]);
+  try {
+    const { upsertAccount } = require(FN("auth-utils.js"));
+    await upsertAccount({ id: PLAYER_UUID, email: "player@example.com" }, { eventType: "supabase_signup" });
+    const metadata = box.row("acct_p1").metadata;
+    assert.deepStrictEqual(list(metadata.severedCoachIds), ["acct_coach"]);
+    assert.strictEqual(metadata.stripe_customer_id, "cus_123", "the Stripe customer fallback was dropped");
+    assert.strictEqual(list(metadata.emailChanges).length, 1, "the email-change audit was dropped");
+    /* Still stamped, or the merge has quietly stopped writing anything. */
+    assert.strictEqual(metadata.source, "supabase-auth");
+    assert.strictEqual(metadata.authProvider, "supabase");
+  } finally { box.restore(); }
+});
+
+test("a first sign-in with no row yet still writes the source keys", async () => {
+  const box = supabaseSandbox([]);
+  try {
+    const { upsertAccount } = require(FN("auth-utils.js"));
+    const pack = await upsertAccount({ id: PLAYER_UUID, email: "new@example.com" }, {});
+    const metadata = box.row(pack.account.accountId).metadata;
+    assert.deepStrictEqual(metadata, { source: "supabase-auth", authProvider: "supabase" });
+  } finally { box.restore(); }
+});
+
+test("account-sync carries the whole metadata column forward, not just the tombstone", async () => {
+  /* This write is an upsert too, and it used to compose metadata from scratch —
+     correct for severedCoachIds, which it deliberately carried, and silently
+     lossy for everything else the server had put there. */
+  const box = supabaseSandbox([playerRow({
+    linked_coach_ids: [],
+    metadata: {
+      severedCoachIds: ["acct_coach"],
+      emailChanges: [{ at: "2026-08-01T00:00:00.000Z", to: "player@example.com" }],
+      stripe_customer_id: "cus_123"
+    }
+  })]);
+  try {
+    await playerSync(box);
+    const metadata = box.row("acct_p1").metadata;
+    assert.deepStrictEqual(list(metadata.severedCoachIds), ["acct_coach"], "the tombstone did not survive the sync");
+    assert.strictEqual(metadata.stripe_customer_id, "cus_123", "the Stripe customer fallback was dropped");
+    assert.strictEqual(list(metadata.emailChanges).length, 1, "the email-change audit was dropped");
+    assert.strictEqual(metadata.source, "clarity-caddie-web", "the sync's own keys must still win");
+    assert.deepStrictEqual(list(box.row("acct_p1").linked_coach_ids), [], "the cut link came back up the pipe");
+  } finally { box.restore(); }
+});
+
+test("a re-link by code still clears the tombstone after a sign-in", async () => {
+  /* The merge must not turn the tombstone into something permanent: entering
+     the coach's code is the deliberate act that lifts it, and it has to keep
+     working across the sign-in that now preserves the metadata. */
+  const box = supabaseSandbox([coachRow({ linked_player_ids: [] }), playerRow({ linked_coach_ids: [], metadata: { severedCoachIds: ["acct_coach"] } })]);
+  try {
+    const { upsertAccount } = require(FN("auth-utils.js"));
+    await upsertAccount({ id: PLAYER_UUID, email: "player@example.com" }, {});
+    const handler = require(FN("account-sync.js")).handler;
+    const response = await handler({ httpMethod: "POST", body: JSON.stringify({
+      action: "upsert_account",
+      account: {
+        accountId: "acct_p1", profileId: "profile_p1", email: "player@example.com", name: "Player",
+        role: "player", supabaseUserId: PLAYER_UUID,
+        linkedCoachIds: ["acct_coach"], restoreCoachIds: ["acct_coach"], linkedPlayerIds: []
+      },
+      profile: { id: "profile_p1", name: "Player", email: "player@example.com", permission: "player", bag: [] }
+    }) });
+    assert.strictEqual(response.statusCode, 200, response.body);
+    assert.deepStrictEqual(list(box.row("acct_p1").linked_coach_ids), ["acct_coach"], "the player could not rejoin the coach by code");
+    assert.deepStrictEqual(list(box.row("acct_p1").metadata.severedCoachIds), [], "the tombstone outlived the deliberate re-link");
+  } finally { box.restore(); }
+});
+
+test("neither whole-row account write composes metadata from a literal", () => {
+  /* The regression is one keystroke away in both files: a fresh object literal
+     on this column is a wholesale erase, because both writes are upserts. */
+  const auth = stripComments(fs.readFileSync(path.join(ROOT, "functions", "auth-utils.js"), "utf8"));
+  assert.ok(
+    /metadata: Object\.assign\(\{\}, existingMetadata,/.test(auth),
+    "upsertAccount replaces the metadata column, wiping the tombstone on every login"
+  );
+  const sync = stripComments(fs.readFileSync(path.join(ROOT, "functions", "account-sync.js"), "utf8"));
+  assert.ok(
+    /metadata: stripUnsafe\(Object\.assign\(\{\}, stored\.metadata,/.test(sync),
+    "account-sync rebuilds the metadata column from scratch"
   );
 });
 
