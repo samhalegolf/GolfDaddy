@@ -165,6 +165,33 @@ public struct WatchMapCamera: Equatable {
         return WatchMapCamera(focus: centre, scale: scale)
     }
 
+    /* How much of the screen the green-focus band is given. The band is where
+     * the ball may be placed, so the whole of it has to be reachable by a
+     * finger: framing tighter than this puts part of it off the bezel, and
+     * the ball is the one thing on that face you have to be able to touch. */
+    public static let greenFraction: CGFloat = 0.92
+
+    /* Green focus: the band the ball may be placed in, filling the screen.
+     *
+     * `radiusPx` is Marshal's GREEN_FOCUS_M expressed in this bake's pixels —
+     * measured rather than converted, exactly as the phone does it, because
+     * the projection is the only thing that knows the scale.
+     *
+     * It frames the BAND and not the green, which is the same correction the
+     * phone's zoom stage got: a green polygon is 15m across and the band is
+     * 80m, so framing the polygon left a ball 30m short of the green sitting
+     * off the edge of a screen you were being asked to drag it on. */
+    public static func green(centre: CGPoint, radiusPx: CGFloat,
+                             imageSize: CGSize, viewSize: CGSize) -> WatchMapCamera {
+        guard imageSize.width > 0, imageSize.height > 0, viewSize.width > 0, viewSize.height > 0,
+              radiusPx > 0, radiusPx.isFinite else {
+            return WatchMapCamera(focus: centre, scale: 1)
+        }
+        let wanted = (min(viewSize.width, viewSize.height) * greenFraction) / (radiusPx * 2)
+        let fillWidth = viewSize.width / imageSize.width
+        return WatchMapCamera(focus: centre, scale: min(max(wanted, fillWidth), maximumScale))
+    }
+
     /* The player sitting low, with the hole running up the screen.
      *
      * `playerHeightFraction` is how far down the view the player sits: 0.78

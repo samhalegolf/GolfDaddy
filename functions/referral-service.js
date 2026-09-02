@@ -33,7 +33,11 @@ function config() {
     enabled: env("CLARITY_REFERRALS_ENABLED") !== "0",
     freeAccessDays: intEnv("CLARITY_REFERRAL_FREE_ACCESS_DAYS", 30, 1, 730),
     inviteExpiryDays: intEnv("CLARITY_REFERRAL_INVITE_EXPIRY_DAYS", 30, 1, 365),
-    maxOutstandingInvites: intEnv("CLARITY_REFERRAL_MAX_OUTSTANDING_INVITES", 10, 1, 100),
+    /* Five, not ten: enough that a normal golfer never feels constrained, low
+       enough that nobody sprays free months. Still a CONCURRENT limit - an
+       accepted, expired or revoked invitation releases its slot - so it is not
+       a lifetime cap. */
+    maxOutstandingInvites: intEnv("CLARITY_REFERRAL_MAX_OUTSTANDING_INVITES", 5, 1, 100),
     maxStackedRewards: intEnv("CLARITY_REFERRAL_MAX_UNAPPLIED_REWARDS", intEnv("CLARITY_REFERRAL_MAX_STACKED_REWARDS", 12, 1, 24), 1, 24),
     refundReviewDays: intEnv("CLARITY_REFERRAL_REFUND_REVIEW_DAYS", 14, 0, 365)
   };

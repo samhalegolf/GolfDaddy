@@ -38,7 +38,7 @@
     "gpsDot", "aimBubble", "bubbleSvg", "greenRing", "pinMarker", "pinDistance",
     "greenFocusBall", "greenFocusHint", "distanceBar", "shotActionBtn",
     "startPill", "map", "surfaceImage", "playerBadge", "playButton", "loggedScreen",
-    "finishControl"
+    "finishControl", "holeCompleteControl", "holeCompleteScreen", "queuedCard"
   ];
 
   var rows = [];       // newest first

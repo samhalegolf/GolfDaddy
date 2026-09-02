@@ -44,7 +44,11 @@
     FINISH_OPENED: "log where your shots finish",
     FINISH_LOGGED: "log where your shots finish",
     LOG_OPENED: "log where your shots finish",
-    SCORE_SET: "keep score"
+    SCORE_SET: "keep score",
+    /* The holding screen writes par the moment it opens, so reaching it is
+       keeping score whether or not the stepper is ever touched. */
+    HOLE_COMPLETED: "keep score",
+    SCORE_STEP: "keep score"
   };
 
   function rangefinderParam() {

@@ -213,7 +213,10 @@
       var r = scene && scene.hole && scene.hole.rec || null;
       var flow = scene && scene.flow || "preview";
       var mode = scene && scene.mode || "setup";
-      var watchMode = mode === "finish" ? "green-focus" : (mode === "aim" ? "bubble" : "standard");
+      var watchMode = mode === "finish" ? "green-focus"
+        : mode === "complete" ? "hole-complete"
+        : mode === "queued" ? "queued"
+        : (mode === "aim" ? "bubble" : "standard");
       var round = marshal.round ? marshal.round() : {};
       return {
         schemaVersion: SCHEMA_VERSION,
@@ -224,7 +227,13 @@
         /* Which course is in play. An adapter needs it to pick the right
            pre-delivered hole imagery; it is an identifier, never geometry, and
            nothing on the far side may treat it as permission to load a course. */
-        course: { key: round.courseKey || null, name: scene && scene.banner && scene.banner.course || null },
+        /* `pars` is the whole of what a wrist needs to run the between-holes
+           screens without asking: it already holds tee and green for every
+           hole in its lite-map package, and this is the one fact that lives on
+           the card instead of in the geometry. Holes with no par are absent,
+           never null — a null crossing WatchConnectivity throws the send. */
+        course: { key: round.courseKey || null, name: scene && scene.banner && scene.banner.course || null,
+          pars: (scene && scene.picker && scene.picker.pars) || {} },
         hole: {
           number: scene && scene.hole && scene.hole.number || null,
           par: r && finite(r.par) && Number(r.par) > 0 ? Number(r.par) : null,
@@ -240,7 +249,28 @@
         target: scene && scene.bubble && scene.bubble.show ? copyPoint(scene.bubble.target) : null,
         bubble: b,
         geometry: geometryFor(scene),
-        score: { strokes: scene && scene.logged && scene.logged.score || null },
+        score: { strokes: (scene && scene.logged && scene.logged.score)
+          || (scene && scene.holeComplete && scene.holeComplete.score) || null },
+
+        /* The holding screen and the queued hole, projected so a wrist that is
+           NOT driving still shows what the phone is showing. A wrist that IS
+           driving runs both screens off its own state and its own fix (see
+           WatchHoleFlow) and only sends the result over — which is the whole
+           point of the between-holes screens: they ask nothing of GPS, so
+           there is nothing for the two surfaces to disagree about. */
+        holeComplete: (scene && scene.holeComplete && scene.holeComplete.show) ? {
+          hole: scene.holeComplete.hole,
+          par: scene.holeComplete.par,
+          score: scene.holeComplete.score,
+          nextHole: scene.holeComplete.next && scene.holeComplete.next.hole != null ? scene.holeComplete.next.hole : null
+        } : null,
+        queued: (scene && scene.queued && scene.queued.show) ? {
+          hole: scene.queued.hole,
+          par: scene.queued.par,
+          lengthM: scene.queued.lengthM,
+          arrivalM: scene.queued.arrivalM,
+          atTee: !!scene.queued.atTee
+        } : null,
         location: scene && scene.locator ? { coordinate: copyPoint(scene.locator), source: "phone-web", horizontalAccuracy: null, timestamp: null, fresh: !scene.locator.stale } : null,
         controls: {
           canLock: !!(scene && scene.dock && scene.dock.face === "lock"),
@@ -248,7 +278,15 @@
           canAim: !!(scene && scene.bubble && scene.bubble.show),
           canShotEnd: !!(scene && scene.dock && scene.dock.canShotEnd),
           canPreviousHole: !!(scene && scene.picker && scene.picker.current > 1),
-          canNextHole: !!(scene && scene.picker && scene.picker.holes && scene.picker.current < scene.picker.holes.length)
+          canNextHole: !!(scene && scene.picker && scene.picker.holes && scene.picker.current < scene.picker.holes.length),
+          /* The wrist's own way through a hole: close the green, call the hole
+             done, keep the score, queue the next one, start it. */
+          canBallMove: !!(scene && scene.finish && scene.finish.show),
+          canLogFinish: !!(scene && scene.finish && scene.finish.show && scene.finish.canLog),
+          canComplete: !!(scene && scene.holeCompleteControl && scene.holeCompleteControl.show),
+          canScore: !!(scene && scene.holeComplete && scene.holeComplete.show),
+          canPlay: !!(scene && scene.playButton && scene.playButton.show),
+          playHole: (scene && scene.playButton && scene.playButton.show) ? scene.playButton.hole : null
         },
         surface: surfaceFor(round),
         connection: { status: "live" }
@@ -279,6 +317,15 @@
       else if (type === "VIEW_PREVIOUS_HOLE") signal = "PREV_HOLE";
       else if (type === "VIEW_HOLE") signal = "VIEW_HOLE_CHANGED";
       else if (type === "SET_SCORE") signal = "SCORE_SET";
+      /* The between-holes vocabulary. Every one of them is something the wrist
+         can already decide by itself while driving; sending it is how the
+         phone's record catches up, not how the wrist gets permission. */
+      else if (type === "BALL_MOVED") signal = "BALL_MOVED";
+      else if (type === "LOG_FINISH") signal = "FINISH_LOGGED";
+      else if (type === "HOLE_COMPLETE") signal = "HOLE_COMPLETED";
+      else if (type === "STEP_SCORE") signal = "SCORE_STEP";
+      else if (type === "ADVANCE_TO_HOLE") signal = "ADVANCE_TO_HOLE";
+      else if (type === "PLAY_HOLE") signal = "PLAY_PRESSED";
       else if (type === "REQUEST_LATEST_SCENE") return { accepted: true, scene: latest };
       else if (type === "TAKE_OVER" || type === "HAND_BACK") {
         /* Surface commands move no golf state, so they never reach Marshal

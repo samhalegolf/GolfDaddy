@@ -167,6 +167,10 @@
   }
   function membership() { return status && status.membership || null; }
   function formatDate(value) { if (!value) return ""; var date = new Date(value); if (Number.isNaN(date.getTime())) return ""; return date.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); }
+  /* Day only. formatDate carries the time because a Month Pass expires at an
+     hour that matters to the person holding it; an invite's dates are things
+     like "shared 1 Sept", where a timestamp is just noise in a list. */
+  function formatDay(value) { if (!value) return ""; var date = new Date(value); if (Number.isNaN(date.getTime())) return ""; return date.toLocaleDateString([], { day: "numeric", month: "short" }); }
   function durationLabel(hours) { var value = Number(hours); if (!Number.isFinite(value) || value <= 0) return ""; if (value % 720 === 0) return (value / 720) + " month" + (value === 720 ? "" : "s"); if (value % 24 === 0) return (value / 24) + " day" + (value === 24 ? "" : "s"); return value + " hour" + (value === 1 ? "" : "s"); }
   function daysUntil(value) { var date = value ? new Date(value).getTime() : NaN; if (!Number.isFinite(date)) return null; return Math.ceil((date - Date.now()) / (24 * 60 * 60 * 1000)); }
 
@@ -522,10 +526,13 @@
   async function shareText(value) {
     var textValue = String(value || "").trim();
     if (!textValue) return false;
+    /* navigator.share is absent on desktop browsers and has been unreliable in
+       WKWebView, so copying is the fallback rather than an error. */
     if (navigator.share) {
+      var sender = accountPayload().name;
       await navigator.share({
-        title: "A private Clarity invitation",
-        text: "You have been privately invited to try a full month of Clarity Membership.",
+        title: "A month of Clarity Caddy",
+        text: (sender ? sender + " has given you" : "You have been given") + " a free month of Clarity Caddy. No card, no automatic renewal.",
         url: textValue
       });
       return true;
@@ -725,17 +732,73 @@
     return panel;
   }
 
+  function referralPage() {
+    var existing = document.getElementById("gdPlayerSettingsReferralSection");
+    if (existing) return existing;
+    var sheet = document.querySelector("#playerSettingsPanel .gdPlayerSettingsSheet");
+    if (!sheet) return null;
+    var panel = document.createElement("div");
+    panel.className = "moduleCard gdPlayerSettingsSubPage";
+    panel.id = "gdPlayerSettingsReferralSection";
+    panel.hidden = true;
+    panel.innerHTML = [
+      '<button class="gdPlayerSettingsSubBack" type="button" onclick="gdPlayerSettingsShowSection(&quot;menu&quot;)">‹ Settings</button>',
+      "<strong>Invite a Golfer</strong>",
+      '<span>Give a friend a month of Clarity Caddy.</span>',
+      '<div class="clarityPaymentSection" id="clarityReferralSection"></div>'
+    ].join("");
+    sheet.appendChild(panel);
+    return panel;
+  }
+
   function installMenuRow() {
     var list = document.querySelector("#gdPlayerSettingsMenu .gdPlayerSettingsList");
-    if (!list || document.getElementById("gdPlayerSettingsPaymentsRow")) return;
-    var accountRow = Array.prototype.find.call(list.children, function (node) { return String(node && node.getAttribute && node.getAttribute("onclick") || "").indexOf("account") !== -1; });
-    var row = document.createElement("button");
-    row.className = "gdPlayerSettingsRow";
-    row.id = "gdPlayerSettingsPaymentsRow";
-    row.type = "button";
-    row.onclick = function () { showSection("payments"); };
-    row.innerHTML = '<div><strong>Access & Membership</strong><span id="gdPlayerSettingsPaymentsLine">Free access</span></div>';
-    if (accountRow) list.insertBefore(row, accountRow); else list.appendChild(row);
+    if (!list) return;
+    if (!document.getElementById("gdPlayerSettingsPaymentsRow")) {
+      var accountRow = Array.prototype.find.call(list.children, function (node) { return String(node && node.getAttribute && node.getAttribute("onclick") || "").indexOf("account") !== -1; });
+      var row = document.createElement("button");
+      row.className = "gdPlayerSettingsRow";
+      row.id = "gdPlayerSettingsPaymentsRow";
+      row.type = "button";
+      row.onclick = function () { showSection("payments"); };
+      row.innerHTML = '<div><strong>Access & Membership</strong><span id="gdPlayerSettingsPaymentsLine">Free access</span></div>';
+      if (accountRow) list.insertBefore(row, accountRow); else list.appendChild(row);
+    }
+    syncReferralMenuRow(list);
+  }
+
+  /* Referrals are a private member benefit, so the row exists only while the
+     server says this member may invite - it is not a greyed-out teaser for
+     everyone else, and it disappears again if Membership lapses. Eligibility is
+     the server's answer (dashboard.eligibility), never a local guess. */
+  function syncReferralMenuRow(list) {
+    list = list || document.querySelector("#gdPlayerSettingsMenu .gdPlayerSettingsList");
+    if (!list) return;
+    var existing = document.getElementById("gdPlayerSettingsReferralRow");
+    if (!referralEligible()) {
+      if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+      return;
+    }
+    var row = existing;
+    if (!row) {
+      row = document.createElement("button");
+      row.className = "gdPlayerSettingsRow";
+      row.id = "gdPlayerSettingsReferralRow";
+      row.type = "button";
+      row.onclick = function () { showSection("referrals"); };
+      row.innerHTML = '<div><strong>Invite a Golfer</strong><span id="gdPlayerSettingsReferralLine">Give a friend a month free.</span></div>';
+      var paymentsRow = document.getElementById("gdPlayerSettingsPaymentsRow");
+      if (paymentsRow && paymentsRow.nextSibling) list.insertBefore(row, paymentsRow.nextSibling);
+      else if (paymentsRow) list.appendChild(row);
+      else list.appendChild(row);
+    }
+    var line = document.getElementById("gdPlayerSettingsReferralLine");
+    if (line) {
+      var openInvites = number(referralSummary().openInvitations);
+      line.textContent = openInvites
+        ? openInvites + " of " + referralInviteCap() + " open invites"
+        : "Give a friend a month free.";
+    }
   }
 
   function showSection(name) {
@@ -748,12 +811,30 @@
       return;
     }
     if (!originalShowSection && window.gdPlayerSettingsShowSection !== showSection) originalShowSection = window.gdPlayerSettingsShowSection;
+    /* The base switcher only knows its own six sections; an unknown name hides
+       the menu and every page it owns, which is exactly the blank canvas both
+       of ours need. */
     if (originalShowSection) originalShowSection(name);
     var panel = section();
+    var invitePanel = referralPage();
     var menu = document.getElementById("gdPlayerSettingsMenu");
     if (panel) panel.hidden = name !== "payments";
-    if (menu && name === "payments") menu.hidden = true;
+    if (invitePanel) invitePanel.hidden = name !== "referrals";
+    if (menu && (name === "payments" || name === "referrals")) menu.hidden = true;
     if (name === "payments") { render(); refresh({ silent: true }); loadReferralDashboard({ silent: true }); loadAdminSettings(); loadIssuedPasses({ silent: true }); }
+    if (name === "referrals") { render(); loadReferralDashboard({ silent: true }); }
+  }
+
+  /* The one way in for everything that is not the settings menu: the Membership
+     card, and later the contextual "enjoying Caddy?" card. Opens the panel
+     first - showSection alone only toggles pages inside a sheet that may not be
+     on screen. */
+  function openReferrals() {
+    safe(function () {
+      if (typeof window.gdOpenPlayerSettingsPanel === "function") window.gdOpenPlayerSettingsPanel({});
+    });
+    showSection("referrals");
+    return false;
   }
 
   /* The one way to put the paywall on screen. showSection() alone only toggles
@@ -775,6 +856,7 @@
 
   function render() {
     installMenuRow();
+    renderReferralPage();
     var panel = section();
     /* section() caches its markup, so the back label has to be re-synced here -
        it differs for a guest and a signed-in player, and signing in mid-panel
@@ -946,18 +1028,85 @@
       + " for 30 days of access and never renews.</div>";
   }
 
+  /* Membership shows referrals as STATUS, not as their home.
+   *
+   * This used to render the whole referral dashboard - five metrics, the create
+   * form and the full invite list - inside Access & Membership, which made
+   * inviting a friend a sub-feature of billing and buried it behind a screen
+   * members only open when something is wrong with their payment. The invite
+   * flow now lives in its own settings page (renderReferralHome); what stays
+   * here is the part that genuinely belongs to billing: the invitee's own free
+   * month, and why an inviter's access dates may have moved. */
   function renderReferralSection() {
-    var dashboard = referralState && referralState.dashboard;
-    var eligible = dashboard && dashboard.eligibility && dashboard.eligibility.eligible;
-    var invitee = dashboard && dashboard.invitee;
-    var activeAccount = account();
-    if (!activeAccount) return "";
-    if (!eligible && !invitee) return "";
+    var invitee = referralDashboard() && referralDashboard().invitee;
+    if (!account()) return "";
+    if (!referralEligible() && !invitee) return "";
     return [
       invitee ? renderInviteeReferral(invitee) : "",
-      eligible ? renderMemberReferrals(dashboard) : "",
+      referralEligible() ? renderReferralStatusBlock() : "",
       referralState.error ? '<div class="clarityPaymentStatus warning"><strong>Referral update failed</strong><span>' + escapeHTML(referralState.error) + '</span></div>' : ""
     ].join("");
+  }
+
+  function renderReferralStatusBlock() {
+    return [
+      '<div class="clarityReferralPanel">',
+      '<div class="clarityReferralHead"><strong>Invite a Golfer</strong><span>Give a friend a month free. If they become a member, you get a month too.</span></div>',
+      renderReferralRewardLine(),
+      '<div class="clarityPaymentActions"><button type="button" onclick="ClarityPayments.openReferrals()">Invite a Golfer</button></div>',
+      '</div>'
+    ].join("");
+  }
+
+  /* The honest version of "you get a month too".
+   *
+   * An earned reward is 30 days written to user_entitlements, stacked on the END
+   * of existing access - it is not a discount on the next bill, and for a member
+   * whose subscription is still renewing it sits behind those renewals. Say
+   * "added to the end of your access", never "your next month is free". */
+  function renderReferralRewardLine() {
+    var summary = referralSummary();
+    var earned = number(summary.freeMonthsAvailable) + number(summary.freeMonthsScheduled) + number(summary.freeMonthsApplied);
+    var waiting = number(summary.pendingRewards);
+    if (!earned && !waiting) return "";
+    var parts = [];
+    if (earned) parts.push(monthCount(earned) + " earned, added to the end of your Caddy Access");
+    if (waiting) parts.push(monthCount(waiting) + " waiting to be added");
+    return '<div class="clarityPaymentNote">Referral rewards: ' + escapeHTML(parts.join(". ")) + '.</div>';
+  }
+
+  function monthCount(value) {
+    return value === 1 ? "1 free month" : value + " free months";
+  }
+
+  function number(value) {
+    var parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function referralDashboard() {
+    return referralState && referralState.dashboard || null;
+  }
+
+  function referralEligible() {
+    var dashboard = referralDashboard();
+    return !!(account() && dashboard && dashboard.eligibility && dashboard.eligibility.eligible);
+  }
+
+  function referralSummary() {
+    var dashboard = referralDashboard();
+    return dashboard && dashboard.summary || {};
+  }
+
+  /* The cap is the server's to state - it is enforced in referral-service.js and
+     configurable per environment - so read it back rather than printing a
+     literal. The UI said "10" in three places while the server allowed a
+     different number. */
+  function referralInviteCap() {
+    var dashboard = referralDashboard();
+    var summary = referralSummary();
+    var max = number(summary.maxOpenInvitations) || number(dashboard && dashboard.config && dashboard.config.maxOutstandingInvites);
+    return max || 5;
   }
 
   function renderInviteeReferral(invitee) {
@@ -972,49 +1121,64 @@
     ].join("");
   }
 
-  function renderMemberReferrals(dashboard) {
-    var summary = dashboard.summary || {};
-    var max = Number(summary.maxOpenInvitations || dashboard.config && dashboard.config.maxOutstandingInvites || 10);
-    var available = Number(summary.freeMonthsAvailableToGive);
-    if (!Number.isFinite(available)) available = max;
-    var source = dashboard.eligibility && dashboard.eligibility.eligibilitySource;
-    var intro = source === "admin_comped_membership"
-      ? "Your Membership includes private invitations. You can give up to 10 golfers a free month of Clarity while your comped Membership is active."
-      : "Invite someone privately. They receive one full month with no card and no automatic renewal. If they later complete their first paid Membership month, you receive a free month too.";
-    var limitReached = available <= 0;
+  function renderReferralPage() {
+    /* Built lazily and only for a member who has one: an ineligible player
+       never gets the page, and referralPage() is not created until then. */
+    if (!referralEligible() && !document.getElementById("gdPlayerSettingsReferralSection")) return;
+    var page = referralPage();
+    var target = document.getElementById("clarityReferralSection");
+    if (!page || !target) return;
+    target.innerHTML = renderReferralHome();
+  }
+
+  /* Invite a Golfer: the single source of truth for a member's referrals.
+     Reached from its own Settings row and from the Membership card, never
+     rendered inside the billing screen itself. */
+  function renderReferralHome() {
+    if (!account()) return '<div class="gdShotAdminEmpty">Sign in to invite a golfer.</div>';
+    if (!referralEligible()) {
+      var eligibility = referralDashboard() && referralDashboard().eligibility;
+      return '<div class="clarityPaymentStatus"><strong>Invites come with Membership</strong><span>'
+        + escapeHTML(eligibility && eligibility.reason || "Monthly Membership is required to invite a golfer.")
+        + '</span></div>';
+    }
+    var cap = referralInviteCap();
+    var openInvites = number(referralSummary().openInvitations);
+    var full = openInvites >= cap;
     return [
       '<div class="clarityReferralPanel">',
-      '<div class="clarityReferralHead"><strong>Your private Member Referrals</strong><span>You have up to 10 free Membership months to give away at one time.</span></div>',
-      '<div class="clarityPaymentNote">' + escapeHTML(intro) + '</div>',
-      '<div class="clarityReferralSummary">',
-      referralMetric("Free months available to give", available + " of " + max),
-      referralMetric("Friends using a free month", summary.friendsUsingFreeMonth || 0),
-      referralMetric("Rewards waiting for conversion", summary.pendingRewards || 0),
-      referralMetric("Free months earned", (summary.freeMonthsAvailable || 0) + (summary.freeMonthsScheduled || 0)),
-      referralMetric("Free months already applied", summary.freeMonthsApplied || 0),
+      '<div class="clarityReferralHead"><strong>Give a friend 1 month of Clarity Caddy</strong><span>They get a full month with no card and no automatic renewal. If they become a member, you get a month too.</span></div>',
+      renderReferralRewardLine(),
+      full
+        ? '<div class="clarityPaymentStatus warning"><strong>All ' + cap + ' invites are out</strong><span>You can send another when one is accepted, expires, or you close an unused link.</span></div>'
+        : renderReferralCreateForm(),
       '</div>',
-      limitReached ? '<div class="clarityPaymentStatus warning"><strong>All 10 free months are currently allocated</strong><span>You can create another invitation when someone accepts, an invitation expires or you revoke an unused link.</span></div>' : renderReferralCreateForm(),
-      renderReferralInviteList(dashboard.invites || []),
-      '</div>'
+      '<div class="clarityReferralPanel">',
+      '<div class="clarityReferralHead"><strong>Your invites</strong><span>' + escapeHTML(openInvites + " of " + cap + " open invites") + '</span></div>',
+      renderReferralInviteList(referralDashboard() && referralDashboard().invites || []),
+      '</div>',
+      referralState.error ? '<div class="clarityPaymentStatus warning"><strong>Referral update failed</strong><span>' + escapeHTML(referralState.error) + '</span></div>' : ""
     ].join("");
   }
 
-  function referralMetric(label, value) {
-    return '<div><span>' + escapeHTML(label) + '</span><strong>' + escapeHTML(value) + '</strong></div>';
-  }
-
+  /* Share first. The invite is a link the member sends through whatever they
+     already use - Messages, WhatsApp, email - not a form where they type a
+     friend's address into our app. Email stays behind a disclosure for whoever
+     wants it. The name is optional and purely a label: it names the row in this
+     member's own invite list and is never shown to the friend. */
   function renderReferralCreateForm() {
     return [
-      '<form class="clarityReferralForm" onsubmit="return ClarityPayments.createReferralFromForm(this, &quot;copy&quot;)">',
-      '<strong>Give a free month</strong>',
-      '<span>Create a private invitation for someone you know.</span>',
-      '<input name="friendName" placeholder="Friend name (optional)">',
-      '<input name="friendEmail" type="email" placeholder="Friend email (optional)">',
+      '<form class="clarityReferralForm" onsubmit="return ClarityPayments.createReferralFromForm(this, &quot;share&quot;)">',
+      '<input name="friendName" placeholder="Their name (optional)">',
       '<div class="clarityPaymentActions">',
-      '<button type="submit">' + (referralPending ? "Creating..." : "Copy private link") + '</button>',
-      '<button class="secondary" type="button" onclick="ClarityPayments.createReferralFromForm(this.form, &quot;share&quot;)">Share</button>',
-      '<button class="secondary" type="button" onclick="ClarityPayments.createReferralFromForm(this.form, &quot;email&quot;)">Send invitation email</button>',
+      '<button type="submit">' + (referralPending ? "Creating..." : "Share Invite") + '</button>',
+      '<button class="secondary" type="button" onclick="ClarityPayments.createReferralFromForm(this.form, &quot;copy&quot;)">Copy link</button>',
       '</div>',
+      '<details class="clarityReferralEmail">',
+      '<summary>Send it by email instead</summary>',
+      '<input name="friendEmail" type="email" placeholder="Their email">',
+      '<div class="clarityPaymentActions"><button class="secondary" type="button" onclick="ClarityPayments.createReferralFromForm(this.form, &quot;email&quot;)">Open email draft</button></div>',
+      '</details>',
       '</form>'
     ].join("");
   }
@@ -1022,23 +1186,28 @@
   function renderReferralInviteList(invites) {
     var rows = (Array.isArray(invites) ? invites : []).slice(0, 12).map(function (invite) {
       var open = invite.status === "open" || invite.status === "opened";
-      var title = invite.friendName || invite.inviteeEmail || "Private invitation";
+      var title = invite.friendName || invite.inviteeEmail || "Invite";
       var status = referralStatusText(invite);
-      return '<div class="clarityReferralRow"><div><strong>' + escapeHTML(title) + '</strong><span>' + escapeHTML(status.primary) + '</span><em>' + escapeHTML(status.detail) + '</em></div>' + (open ? '<button class="secondary" type="button" onclick="ClarityPayments.revokeReferralInvite(&quot;' + escapeHTML(invite.id) + '&quot;)">Revoke</button>' : '') + '</div>';
+      return '<div class="clarityReferralRow"><div><strong>' + escapeHTML(title) + '</strong><span>' + escapeHTML(status.primary) + '</span><em>' + escapeHTML(status.detail) + '</em></div>' + (open ? '<button class="secondary" type="button" onclick="ClarityPayments.revokeReferralInvite(&quot;' + escapeHTML(invite.id) + '&quot;)">Close</button>' : '') + '</div>';
     }).join("");
-    if (!rows) rows = '<div class="gdShotAdminEmpty">Give your first free month.</div>';
+    if (!rows) rows = '<div class="gdShotAdminEmpty">No invites yet. Share your first one above.</div>';
     return '<div class="clarityReferralList">' + rows + '</div>';
   }
 
+  /* Nine server lifecycle states, told as the four things a member actually
+     wants to know: did it go, did they join, did they stay, did I get my month.
+     "Reward will apply to your next eligible bill" was also simply untrue - the
+     reward is entitlement days on the end of their access, not a bill discount. */
   function referralStatusText(invite) {
-    var created = formatDate(invite.createdAt) || "recently";
-    if (invite.status === "open" || invite.status === "opened") return { primary: "Waiting for signup", detail: "Created " + created };
-    if (invite.status === "accepted" || invite.status === "free_month_active") return { primary: "Free month active", detail: "Ends " + (formatDate(invite.freeAccessEndsAt) || "after 30 days") };
-    if (invite.status === "free_month_ended") return { primary: "Waiting for first paid month", detail: "Free access completed" };
-    if (invite.status === "converted") return { primary: "First paid month completed", detail: "Reward is being prepared" };
-    if (invite.status === "reward_earned") return { primary: "You earned a free month", detail: "Reward will apply to your next eligible bill" };
-    if (invite.status === "revoked" || invite.status === "invalid") return { primary: "Invite expired or invalid", detail: invite.revokedReason || invite.invalidReason || "No action needed" };
-    return { primary: String(invite.status || "Referral"), detail: "Created " + created };
+    var created = formatDay(invite.createdAt) || "recently";
+    if (invite.status === "open") return { primary: "Invite sent", detail: "Shared " + created };
+    if (invite.status === "opened") return { primary: "Invite opened", detail: "Not claimed yet" };
+    if (invite.status === "accepted" || invite.status === "free_month_active") return { primary: "Joined", detail: "Free month active until " + (formatDay(invite.freeAccessEndsAt) || "the end of their 30 days") };
+    if (invite.status === "free_month_ended") return { primary: "Free month finished", detail: "Not a member yet" };
+    if (invite.status === "converted") return { primary: "Became a member", detail: "Your free month is being added" };
+    if (invite.status === "reward_earned") return { primary: "Became a member", detail: "✓ Your free month added" };
+    if (invite.status === "revoked" || invite.status === "invalid") return { primary: "Invite closed", detail: invite.revokedReason || invite.invalidReason || "No action needed" };
+    return { primary: String(invite.status || "Invite"), detail: "Shared " + created };
   }
 
   function renderAdminSettings() {
@@ -1353,6 +1522,7 @@
     accessBadgeHTML: accessBadgeHTML,
     showSettings: openPaywall,
     openPaywall: openPaywall,
+    openReferrals: openReferrals,
     /* Refresh Status on a store build also re-asks the store for prices, and
        reports what it got. There is no console on a TestFlight device, so
        without this a paywall with no prices is a dead end to diagnose - the

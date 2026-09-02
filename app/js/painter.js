@@ -74,6 +74,14 @@
     return settings() ? settings().toDisplay(m) : Math.round(Number(m));
   }
 
+  /* The same number with its unit attached, for the places that read as a
+     sentence rather than as a card well — "92m to the tee" needs the m and the
+     card's FRONT/BACK wells, which sit under a shared unit, do not. */
+  function unitsWithLabel(m) {
+    if (m === null || !Number.isFinite(Number(m))) return "–";
+    return settings() ? settings().format(m) : Math.round(Number(m)) + "m";
+  }
+
   // ---------------------------------------------------------------- the map
 
   function ensureMap(centre) {
@@ -422,7 +430,10 @@
       green: (pins && pins.green) || r.green || null,
       greenShape: (pins && Array.isArray(pins.greenShape) && pins.greenShape.length ? pins.greenShape : r.greenShape) || [],
       position: shot ? shot.start : (r.tee || null),
-      target: shot ? shot.target : null
+      target: shot ? shot.target : null,
+      /* The green-focus radius, as a point. Only the zoom stage reads it, and
+         only green focus supplies one. */
+      focus: scene.camera.focus || null
     };
   }
 
@@ -944,7 +955,23 @@
 
     var bar = el("distanceBar");
     show(bar, scene.distances.show);
-    if (scene.distances.show) {
+    /* Green focus: one number, and the pin beats the middle when there is one.
+       The pin distance is measured from the same anchor the Marshal measured
+       the middle from — the ball once it has been moved, the player until then
+       — so the two numbers can never be answering from different places. */
+    var focusCard = scene.distances.show && scene.distances.single;
+    if (bar) bar.classList.toggle("toGreen", !!focusCard);
+    show(el("cardFocusLabel"), !!focusCard);
+    if (focusCard) {
+      var pin = app.pin && app.pin.current ? app.pin.current() : null;
+      var anchor = scene.distances.from || scene.finish.ball || scene.player;
+      var toPin = pin && anchor ? app.distance.haversineMeters(anchor, pin) : null;
+      el("cardFocusLabel").textContent = Number.isFinite(toPin) ? "TO PIN" : "TO MIDDLE";
+      el("shotDist").textContent = units(Number.isFinite(toPin) ? toPin : scene.distances.centre);
+      var focusUnit = el("cardUnit");
+      if (focusUnit) focusUnit.textContent = settings() ? settings().unitLabel() : "m";
+      drawPlaysLike(null, null, null);
+    } else if (scene.distances.show) {
       el("distFront").textContent = units(scene.distances.front);
       el("distBack").textContent = units(scene.distances.back);
       var unit = el("cardUnit");
@@ -982,8 +1009,11 @@
     show(el("shotEndBtn"), scene.dock.canShotEnd);
 
     show(el("finishControl"), scene.finishControl.show);
+    show(el("holeCompleteControl"), scene.holeCompleteControl.show);
 
     drawLogged(scene);
+    drawHoleComplete(scene);
+    drawQueued(scene);
 
     var holeEl = el("holeNumber");
     if (holeEl) holeEl.textContent = String(scene.hole.number);
@@ -1151,6 +1181,78 @@
       next.textContent = scene.logged.next.label;
       next.dataset.signal = scene.logged.next.signal;
       next.dataset.payload = JSON.stringify(scene.logged.next.payload || null);
+    }
+  }
+
+  /* The holding screen. The score is already on the card by the time this
+     draws — the Marshal wrote par when the screen opened — so the stepper
+     shows a value that is already true rather than a suggestion waiting to be
+     confirmed. That is the whole difference between this and a prompt. */
+  function drawHoleComplete(scene) {
+    var screen = el("holeCompleteScreen");
+    if (!screen) return;
+    show(screen, scene.holeComplete.show);
+    if (!scene.holeComplete.show) return;
+    var state = scene.holeComplete;
+    var title = el("completeTitle");
+    if (title) title.textContent = "Hole " + state.hole;
+    var detail = el("completeDetail");
+    if (detail) {
+      var par = state.par != null ? state.par : parFor(state.hole);
+      detail.textContent = [
+        par ? "Par " + par : null,
+        state.shots ? state.shots + (state.shots === 1 ? " shot logged" : " shots logged") : null
+      ].filter(Boolean).join(" · ");
+    }
+    var score = el("completeScore");
+    if (score) score.textContent = state.score != null ? String(state.score) : "–";
+    var note = el("completeScoreNote");
+    if (note) {
+      var par2 = state.par != null ? state.par : parFor(state.hole);
+      note.textContent = (par2 && state.score === par2) ? "Par unless you say otherwise"
+        : par2 ? scoreWord(state.score, par2) : "Tap + to record a score";
+    }
+    var next = el("completeNext");
+    if (next && state.next) {
+      next.textContent = state.next.hole ? state.next.label + " · " + state.next.hole : state.next.label;
+      next.dataset.signal = state.next.signal;
+      next.dataset.payload = JSON.stringify(state.next.payload || null);
+    }
+  }
+
+  /* Golf's own words for a number against par. Worth having because "4" over
+     a par 3 and "4" over a par 5 are not the same afternoon. */
+  function scoreWord(score, par) {
+    if (!Number.isFinite(score) || !Number.isFinite(par)) return "";
+    var d = score - par;
+    if (score === 1) return "Hole in one";
+    if (d <= -3) return "Albatross";
+    if (d === -2) return "Eagle";
+    if (d === -1) return "Birdie";
+    if (d === 0) return "Par";
+    if (d === 1) return "Bogey";
+    return d + " over";
+  }
+
+  /* The queued hole's card. It says how far the walk to the tee is precisely
+     because Play has not pressed itself yet — an unexplained wait is the thing
+     that makes a player press a button they did not need to. */
+  function drawQueued(scene) {
+    var card = el("queuedCard");
+    if (!card) return;
+    show(card, scene.queued.show);
+    if (!scene.queued.show) return;
+    var title = el("queuedTitle");
+    if (title) title.textContent = "Hole " + scene.queued.hole;
+    var detail = el("queuedDetail");
+    if (detail) {
+      var par = scene.queued.par != null ? scene.queued.par : parFor(scene.queued.hole);
+      detail.textContent = [
+        par ? "Par " + par : null,
+        Number.isFinite(scene.queued.lengthM) ? unitsWithLabel(scene.queued.lengthM) : null,
+        scene.queued.atTee ? "at the tee"
+          : Number.isFinite(scene.queued.arrivalM) ? unitsWithLabel(scene.queued.arrivalM) + " to the tee" : null
+      ].filter(Boolean).join(" · ");
     }
   }
 
@@ -1823,6 +1925,32 @@
     });
     var loggedBack = el("loggedBack");
     if (loggedBack) loggedBack.addEventListener("click", function () { send("BACK"); });
+
+    var complete = el("holeCompleteControl");
+    if (complete) complete.addEventListener("click", function () {
+      send("HOLE_COMPLETED", { hole: currentScene ? currentScene.hole.number : null });
+    });
+
+    var completeNext = el("completeNext");
+    if (completeNext) completeNext.addEventListener("click", function () {
+      var payload = null;
+      try { payload = JSON.parse(completeNext.dataset.payload || "null"); } catch (e) {}
+      send(completeNext.dataset.signal || "NEXT_HOLE", payload);
+    });
+    var completeBack = el("completeBack");
+    if (completeBack) completeBack.addEventListener("click", function () { send("BACK"); });
+
+    /* A step, not a value: the floor (a hole takes at least one shot) and the
+       par it counts from both live in the Marshal, so the Watch's + and this
+       one are the same + . */
+    ["completeScoreDown", "completeScoreUp"].forEach(function (id, index) {
+      var btn = el(id);
+      if (!btn) return;
+      btn.addEventListener("click", function () {
+        if (!currentScene || !currentScene.holeComplete.show) return;
+        send("SCORE_STEP", { hole: currentScene.holeComplete.hole, delta: index ? 1 : -1 });
+      });
+    });
 
     ["loggedScoreDown", "loggedScoreUp"].forEach(function (id, index) {
       var btn = el(id);

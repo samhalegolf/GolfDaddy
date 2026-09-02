@@ -48,64 +48,119 @@ struct ContentView: View {
                 TakingFace()
             case .playing:
                 if let scene = session.scene {
-                    /* The numbers face stays page one and keeps LOCK a single
-                       tap away. The lite map is a second page rather than a
-                       replacement or a background: it is a picture of a hole,
-                       and it earns the whole screen when it is the thing being
-                       looked at. */
-                    let locked = scene.shot?.locked == true || session.lockedShot != nil
-                    TabView(selection: $page) {
-                        ShotView(scene: scene, stale: session.state == .stale, pending: session.pendingCommands, rejection: session.lastRejection,
-                                 send: { kind in
-                                     session.send(kind)
-                                     if kind == .lock { page = .map }
-                                 },
-                                 dismissRejection: session.dismissRejection,
-                                 driving: true, handoverNotice: session.handoverNotice, dismissHandoverNotice: session.dismissHandoverNotice,
-                                 wristFix: session.wristFix, lockedShot: session.lockedShot)
-                            .tag(Page.numbers)
-                        if let holeNumber = scene.hole?.number {
-                            HoleMapPage(
-                                scene: scene,
-                                map: maps.hole(holeNumber, courseKey: scene.course?.key),
-                                player: session.playerPoint,
-                                deliveryHint: deliveryHint(for: scene),
-                                bag: session.player.snapshot?.bag,
-                                profile: session.player.snapshot?.bubble,
-                                /* Aiming needs three things at once: the phone
-                                   says the shot can be aimed, the wrist runs
-                                   the same engine, and it has a bag to run it
-                                   with. Any of them missing and the map is a
-                                   picture — which is what it was yesterday. */
-                                canAim: scene.controls?.canAim == true
-                                    && session.engineAgreement.mayComputeLocally
-                                    && session.player.snapshot != nil,
-                                onAim: { session.sendAim(to: $0) },
-                                /* The aimable map swallows the page swipe, so
-                                   it reports one; landing on the numbers is
-                                   what sends UNLOCK below. */
-                                onSwipeBack: { page = .numbers }
-                            )
-                            .tag(Page.map)
-                        }
-                    }
-                    .tabViewStyle(.page)
-                    /* The phone locked (or the wrist's LOCK was confirmed):
-                       the map is where a locked shot lives. */
-                    .onChange(of: scene.shot?.locked) { _, isLocked in
-                        if isLocked == true { page = .map }
-                    }
-                    /* Opened mid-shot — the app relaunched, or the round came
-                       back — the locked shot is still on the map. */
-                    .onAppear { if locked { page = .map } }
-                    .onChange(of: page) { _, now in
-                        guard now == .numbers, locked else { return }
-                        session.send(.unlock)
+                    /* Three of the wrist's own screens sit IN FRONT of the
+                       driving pages, because each is the whole answer while it
+                       is up: on the green there is no club to choose, on the
+                       holding screen there is no hole to look at, and on the
+                       queued hole there is nothing to measure from. They are
+                       decided locally (WatchHoleFlow) so they keep working with
+                       the phone asleep in a bag. */
+                    switch session.holeFlow.face {
+                    case .greenFocus:
+                        GreenFocusView(
+                            holeNumber: session.holeFlow.hole ?? scene.hole?.number,
+                            par: (session.holeFlow.hole ?? scene.hole?.number).flatMap { session.scene?.course?.par($0) } ?? scene.hole?.par,
+                            map: (session.holeFlow.hole ?? scene.hole?.number).flatMap { maps.hole($0, courseKey: scene.course?.key) },
+                            green: session.flowHole(session.holeFlow.hole ?? scene.hole?.number)?.green,
+                            greenShape: session.flowGreenShape(session.holeFlow.hole ?? scene.hole?.number),
+                            ball: session.holeFlow.ball,
+                            ballPlaced: session.holeFlow.ballPlaced,
+                            player: session.playerPoint.flatMap { p in
+                                guard let lat = p.lat, let lng = p.lng else { return nil }
+                                return Coordinate(lat: lat, lng: lng)
+                            },
+                            onBallMoved: { session.flowMoveBall(to: $0) },
+                            onHoleDone: session.flowHoleDone,
+                            onBack: session.flowBack)
+                    case .holeComplete:
+                        HoleCompleteView(
+                            holeNumber: session.holeFlow.hole,
+                            par: session.holeFlow.hole.flatMap { session.scene?.course?.par($0) },
+                            score: session.holeFlow.score,
+                            nextHole: session.flowNextHole,
+                            onStep: { session.flowStepScore($0) },
+                            onNext: session.flowNext,
+                            onBack: session.flowBack)
+                    case .queued:
+                        QueuedHoleView(
+                            holeNumber: session.holeFlow.hole,
+                            par: session.holeFlow.hole.flatMap { session.scene?.course?.par($0) },
+                            lengthM: session.queuedLengthM,
+                            toTeeM: session.queuedToTeeM,
+                            atTee: session.queuedAtTee,
+                            map: session.holeFlow.hole.flatMap { maps.hole($0, courseKey: scene.course?.key) },
+                            green: session.flowHole(session.holeFlow.hole).flatMap { hole in
+                                hole.green.map { WatchScene.GeoPoint(lat: $0.lat, lng: $0.lng) }
+                            },
+                            onPlay: session.flowPlay)
+                    case .playing:
+                        drivingPages(scene: scene)
                     }
                 }
             }
         }
         .containerBackground(.black, for: .navigation)
+    }
+
+    /* The driving face proper: the numbers, and the lite map beside them. */
+    @ViewBuilder
+    private func drivingPages(scene: WatchScene) -> some View {
+        Group {
+            /* The numbers face stays page one and keeps LOCK a single
+               tap away. The lite map is a second page rather than a
+               replacement or a background: it is a picture of a hole,
+               and it earns the whole screen when it is the thing being
+               looked at. */
+            let locked = scene.shot?.locked == true || session.lockedShot != nil
+            TabView(selection: $page) {
+                ShotView(scene: scene, stale: session.state == .stale, pending: session.pendingCommands, rejection: session.lastRejection,
+                         send: { kind in
+                             session.send(kind)
+                             if kind == .lock { page = .map }
+                         },
+                         dismissRejection: session.dismissRejection,
+                         driving: true, handoverNotice: session.handoverNotice, dismissHandoverNotice: session.dismissHandoverNotice,
+                         wristFix: session.wristFix, lockedShot: session.lockedShot)
+                    .tag(Page.numbers)
+                if let holeNumber = scene.hole?.number {
+                    HoleMapPage(
+                        scene: scene,
+                        map: maps.hole(holeNumber, courseKey: scene.course?.key),
+                        player: session.playerPoint,
+                        deliveryHint: deliveryHint(for: scene),
+                        bag: session.player.snapshot?.bag,
+                        profile: session.player.snapshot?.bubble,
+                        /* Aiming needs three things at once: the phone
+                           says the shot can be aimed, the wrist runs
+                           the same engine, and it has a bag to run it
+                           with. Any of them missing and the map is a
+                           picture — which is what it was yesterday. */
+                        canAim: scene.controls?.canAim == true
+                            && session.engineAgreement.mayComputeLocally
+                            && session.player.snapshot != nil,
+                        onAim: { session.sendAim(to: $0) },
+                        /* The aimable map swallows the page swipe, so
+                           it reports one; landing on the numbers is
+                           what sends UNLOCK below. */
+                        onSwipeBack: { page = .numbers }
+                    )
+                    .tag(Page.map)
+                }
+            }
+            .tabViewStyle(.page)
+            /* The phone locked (or the wrist's LOCK was confirmed):
+               the map is where a locked shot lives. */
+            .onChange(of: scene.shot?.locked) { _, isLocked in
+                if isLocked == true { page = .map }
+            }
+            /* Opened mid-shot — the app relaunched, or the round came
+               back — the locked shot is still on the map. */
+            .onAppear { if locked { page = .map } }
+            .onChange(of: page) { _, now in
+                guard now == .numbers, locked else { return }
+                session.send(.unlock)
+            }
+        }
     }
 
     /* Says which of the three honest reasons applies instead of one blank

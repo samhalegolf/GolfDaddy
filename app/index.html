@@ -217,6 +217,11 @@
          arms it and nothing expires it — it is a view of the record, so it is
          right retroactively and is how you catch up on a hole later. -->
     <button id="finishControl" type="button" class="hiddenState dockSide" aria-label="Log where the shot finished">Log shot</button>
+    <!-- The hole is done. Offered on the green and on the Logged screen that
+         follows closing a shot there, because those are the two places where
+         "done" is an honest thing to say. It goes to the holding screen; it
+         does not move the round on by itself. -->
+    <button id="holeCompleteControl" type="button" class="hiddenState dockSide" aria-label="Hole complete">Hole done</button>
   </div>
 
   <!-- Where Shot End and Finish both land. It reports the shot, takes the
@@ -236,6 +241,41 @@
       <button id="loggedNext" type="button" class="loggedNext"></button>
       <button id="loggedBack" type="button" class="linkButton">Back to this hole</button>
     </div>
+  </div>
+
+  <!-- The holding screen: the one screen in the app that is not about a
+       position. The hole behind you is finished and the hole in front of you
+       has not been reached, so there is nowhere honest to point a map — which
+       is exactly why this exists rather than the round stepping straight from
+       one green to the next tee.
+
+       The score is already par. Touching it is optional and that is the whole
+       design: walking off a green having made par should cost nothing. -->
+  <div id="holeCompleteScreen" class="hiddenState">
+    <div class="loggedCard">
+      <span class="completeEyebrow">HOLE COMPLETE</span>
+      <strong id="completeTitle" class="loggedTitle">Hole 1</strong>
+      <span id="completeDetail" class="loggedDetail"></span>
+      <div class="loggedScoreRow">
+        <button id="completeScoreDown" type="button" aria-label="One less">&minus;</button>
+        <span id="completeScore">4</span>
+        <button id="completeScoreUp" type="button" aria-label="One more">+</button>
+      </div>
+      <span id="completeScoreNote" class="completeNote">Par unless you say otherwise</span>
+      <button id="completeNext" type="button" class="loggedNext"></button>
+      <button id="completeBack" type="button" class="linkButton">Back to the green</button>
+    </div>
+  </div>
+
+  <!-- The next hole, previewed. Deliberately NOT framed on where you are
+       standing: you are still on the last green, and a hole drawn around that
+       position reads as a tee shot from the wrong place. So this is the hole
+       as the hole, with its own numbers, and Play waits for the tee — or for
+       you to say we are wrong about the tee. -->
+  <div id="queuedCard" class="hiddenState">
+    <span class="queuedEyebrow">NEXT UP</span>
+    <strong id="queuedTitle">Hole 2</strong>
+    <span id="queuedDetail"></span>
   </div>
 
   <!-- Live starts one way. Gated on a trusted fix saying you are at the course,
@@ -488,6 +528,11 @@
            one that flexes, so losing the club band never moves the card or the
            hole stepper sitting on top of it. -->
       <div class="cardFace">
+        <!-- Green focus turns the card into one number: how far the middle
+             is, or the pin when one is set. You are still playing — the chip
+             and the putt both want it — and the front/back wells and the club
+             band have nothing to say from four metres away. -->
+        <span id="cardFocusLabel" class="cardFocusLabel hiddenState">TO MIDDLE</span>
         <div class="cardFaceMain">
           <span id="shotDist" class="cardDist" data-move>–</span>
           <span id="cardUnit" class="cardUnit">m</span>

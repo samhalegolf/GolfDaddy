@@ -19,6 +19,8 @@ struct WatchScene: Codable, Equatable {
     let bubble: Bubble?
     let geometry: Geometry?
     let score: Score?
+    let holeComplete: HoleComplete?
+    let queued: Queued?
     let controls: Controls?
     let surface: Surface?
     let connection: Connection?
@@ -39,7 +41,18 @@ struct WatchScene: Codable, Equatable {
     /* Which course is in play, so a delivered lite-map package is only ever
        drawn for the course it was baked from. Optional because an older phone
        build, or a round with no course key, must still produce a usable scene. */
-    struct Course: Codable, Equatable { let key: String?; let name: String? }
+    /* `pars` is par for every hole in the round, keyed by hole number as a
+       string (it crosses as a JSON object). It is the one fact the wrist needs
+       in order to run the between-holes screens by itself — tee and green for
+       every hole it already holds, in its lite-map package — so it rides on
+       every Scene rather than being asked for. Holes with no par are absent,
+       never null. */
+    struct Course: Codable, Equatable {
+        let key: String?
+        let name: String?
+        let pars: [String: Int]?
+        func par(_ hole: Int) -> Int? { pars?[String(hole)] }
+    }
     /* `teeToGreenM` is the hole's own length, for the Ready face before anyone
        is standing anywhere. */
     struct Hole: Codable, Equatable { let number: Int?; let par: Int?; let live: Bool?; let teeToGreenM: Double? }
@@ -73,7 +86,22 @@ struct WatchScene: Codable, Equatable {
     struct Bubble: Codable, Equatable { let widthM: Double?; let depthM: Double?; let tiltDeg: Double?; let club: String?; let carryM: Double?; let totalM: Double?; let centre: GeoPoint?; let engineVersion: String? }
     struct Geometry: Codable, Equatable { let origin: GeoPoint?; let approachBearingDeg: Double?; let greenPolygon: [LocalPoint]?; let target: LocalPoint?; let player: LocalPoint?; let route: [LocalPoint]? }
     struct Score: Codable, Equatable { let strokes: Int? }
-    struct Controls: Codable, Equatable { let canLock: Bool?; let canUnlock: Bool?; let canAim: Bool?; let canShotEnd: Bool?; let canPreviousHole: Bool?; let canNextHole: Bool? }
+    /* The phone's own between-holes state, so a wrist that is NOT driving
+       shows what the phone is showing. A wrist that IS driving runs both
+       screens off WatchHoleFlow and ignores these — which costs nothing,
+       because neither screen depends on a position for either surface. */
+    struct HoleComplete: Codable, Equatable { let hole: Int?; let par: Int?; let score: Int?; let nextHole: Int? }
+    struct Queued: Codable, Equatable { let hole: Int?; let par: Int?; let lengthM: Double?; let arrivalM: Double?; let atTee: Bool? }
+    struct Controls: Codable, Equatable {
+        let canLock: Bool?; let canUnlock: Bool?; let canAim: Bool?; let canShotEnd: Bool?
+        let canPreviousHole: Bool?; let canNextHole: Bool?
+        /* The wrist's own way through a hole. Each is something the wrist can
+           already decide for itself while driving; these say whether the PHONE
+           would accept being told about it, which is what stops a command
+           being queued that can only ever be rejected. */
+        let canBallMove: Bool?; let canLogFinish: Bool?; let canComplete: Bool?
+        let canScore: Bool?; let canPlay: Bool?; let playHole: Int?
+    }
     struct Connection: Codable, Equatable { let status: String? }
 
     var isSupported: Bool { schemaVersion == Self.supportedSchemaVersion }
@@ -85,7 +113,15 @@ struct WatchScene: Codable, Equatable {
 /* The Watch sends only this existing, platform-neutral command vocabulary.
  There are deliberately no Swift golf-state transitions behind these values. */
 struct CaddyWatchCommand: Codable, Equatable {
-    enum Kind: String, Codable, CaseIterable { case lock = "LOCK", unlock = "UNLOCK", previousHole = "VIEW_PREVIOUS_HOLE", nextHole = "VIEW_NEXT_HOLE", lockAt = "LOCK_AT", aimAt = "AIM_AT", takeOver = "TAKE_OVER", handBack = "HAND_BACK" }
+    enum Kind: String, Codable, CaseIterable {
+        case lock = "LOCK", unlock = "UNLOCK", previousHole = "VIEW_PREVIOUS_HOLE", nextHole = "VIEW_NEXT_HOLE"
+        case lockAt = "LOCK_AT", aimAt = "AIM_AT", takeOver = "TAKE_OVER", handBack = "HAND_BACK"
+        /* The between-holes vocabulary. Sending one is how the phone's record
+           catches up with a decision the wrist has already made and drawn; it
+           is never how the wrist gets permission to draw it. */
+        case ballMoved = "BALL_MOVED", logFinish = "LOG_FINISH", holeComplete = "HOLE_COMPLETE"
+        case stepScore = "STEP_SCORE", advance = "ADVANCE_TO_HOLE", playHole = "PLAY_HOLE"
+    }
     let commandId: String
     let roundId: String
     let baseRevision: Int
@@ -107,9 +143,18 @@ struct CaddyWatchCommand: Codable, Equatable {
 struct CommandPayload: Codable, Equatable {
     var location: WatchLocationObservation?
     var point: WatchCoordinate?
-    init(location: WatchLocationObservation? = nil, point: WatchCoordinate? = nil) {
+    /* `hole` and `delta` are read straight off the payload by Marshal's
+       ADVANCE_TO_HOLE, HOLE_COMPLETED and SCORE_STEP (p.hole, p.delta). Both
+       are omitted when absent rather than encoded as null — a null crossing
+       WatchConnectivity arrives as NSNull and throws the whole send. */
+    var hole: Int?
+    var delta: Int?
+    init(location: WatchLocationObservation? = nil, point: WatchCoordinate? = nil,
+         hole: Int? = nil, delta: Int? = nil) {
         self.location = location
         self.point = point
+        self.hole = hole
+        self.delta = delta
     }
 }
 

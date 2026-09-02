@@ -372,6 +372,20 @@ body.ball-dragging #surfaceStage { transition: none !important; }
 .shotCard.noShot .cardClubCarry { display: none; }
 .shotCard.noShot .cardClub { min-height: 26px; }
 
+/* ── Green focus: one number ──────────────────────────────────────────────
+   Inside 40m the card stops being a shot card. Front and back of a green you
+   are standing on are noise, and the club band has nothing to name, so both
+   go and the hero number carries a label saying what it is measuring to —
+   the middle, or the pin when one has been set. */
+.shotCard.toGreen .cardWell,
+.shotCard.toGreen .cardSeam,
+.shotCard.toGreen .cardClub,
+.shotCard.toGreen .cardPlays { display: none; }
+.shotCard.toGreen .cardFace { justify-content: center; }
+.cardFocusLabel { display: block; font-size: 10px; font-weight: 900; letter-spacing: .14em;
+  color: rgba(255, 255, 255, .55); text-align: center; }
+.cardFocusLabel.hiddenState { display: none; }
+
 /* Free-position layout (box-layout.js): every label/value is its own box —
    the bands above set WHERE it starts, this is what lets it still be
    dragged/resized further from there without reflowing its neighbours.
@@ -771,6 +785,13 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
   background: rgba(5, 9, 7, .74); color: #eafff1; font-size: 12px; font-weight: 800; backdrop-filter: blur(10px); }
 .dockSide.hiddenState { display: none; }
 #finishControl { border-color: rgba(255, 182, 77, .5); color: #ffd9a0; }
+/* The way off the green, and the only primary action in the dock — so it is
+   the one that gets a filled pill. `.shotDock button` (a class AND an element)
+   outranks `.dockSide`, which is why every other dock side button renders as
+   bare text on the map; this selector matches its specificity deliberately
+   rather than relying on a bare id. */
+.shotDock button#holeCompleteControl { background: #1fd36d; color: #06110b; border-radius: 999px;
+  padding: 10px 16px; font-size: 13px; font-weight: 950; box-shadow: 0 10px 22px rgba(0, 0, 0, .4); }
 
 /* ── The edge-clamped dot ─────────────────────────────────────────────────
    The camera frames the hole and never widens to fit a player who is not on
@@ -807,6 +828,33 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
 .loggedNext { width: 100%; min-height: 50px; border: 0; border-radius: 14px; background: #1fd36d; color: #06110b;
   font-size: 15px; font-weight: 950; }
 .loggedNext:active { transform: scale(.99); }
+
+/* ── The holding screen ───────────────────────────────────────────────────
+   Same card as Logged, deliberately: it is the same moment of the round seen
+   one step later, and a second visual language for it would only make the
+   pair look like two different apps. What is different is the eyebrow and the
+   note under the stepper, which together say the one thing this screen is
+   for — nothing is being asked of you. */
+#holeCompleteScreen { position: absolute; inset: 0; z-index: 800; display: flex; align-items: center; justify-content: center;
+  padding: 20px; background: rgba(3, 7, 5, .82); backdrop-filter: blur(8px); }
+#holeCompleteScreen.hiddenState { display: none; }
+.completeEyebrow { font-size: 10px; font-weight: 950; letter-spacing: .16em; color: #7fc99a; }
+#completeScore { min-width: 34px; font-size: 34px; font-weight: 950; color: #eafff1; }
+.completeNote { font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, .45); margin-top: -6px; }
+
+/* ── The queued hole ──────────────────────────────────────────────────────
+   Sits above the Play button on the next-hole preview. It names the hole and
+   how far the walk to its tee is, so a Play button that has not pressed
+   itself yet is explained rather than mysterious. */
+#queuedCard { position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: calc(214px + env(safe-area-inset-bottom)); z-index: 640;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 10px 18px; border-radius: 16px; background: rgba(5, 9, 7, .72);
+  border: 1px solid rgba(255, 255, 255, .14); backdrop-filter: blur(10px); text-align: center; }
+#queuedCard.hiddenState { display: none; }
+.queuedEyebrow { font-size: 9px; font-weight: 950; letter-spacing: .16em; color: #7fc99a; }
+#queuedTitle { font-size: 17px; font-weight: 950; color: #eafff1; }
+#queuedDetail { font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, .55); letter-spacing: .04em; }
 
 /* ── The picker's shot marks ──────────────────────────────────────────────
    What the card says about each hole:

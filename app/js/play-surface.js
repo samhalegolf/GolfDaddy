@@ -195,8 +195,13 @@
               locked shot view is start→target; the target defaults to the
               green until the bubble moves it). Tilt is CSS on the viewport,
               not part of this matrix.
-       zoom — the green filling the zoom box, approach direction up, flat
-     pts: {tee, green, position, target, greenShape} in lat/lng.
+       zoom — the GREEN-FOCUS BAND filling the zoom box, approach direction
+              up, flat. Sized on pts.focus (a point on the band's radius) and
+              never smaller than the green itself, because the band is where
+              the ball may be placed and a ball outside the frame cannot be
+              dragged at all. Falls back to the green outline when no focus
+              point is given.
+     pts: {tee, green, position, target, greenShape, focus} in lat/lng.
      Null → caller's own fallback.
 
      px is the presentation's projector: lat/lng → a planar pixel space, any
@@ -244,6 +249,13 @@
       });
       /* ~15m at the observed z18 when a green has no shape. */
       if (!(radius > 0)) radius = Number(opts && opts.defaultGreenRadiusPx) || 25;
+      /* The focus band, measured in whatever px space this presentation uses
+         rather than converted from metres — the projector is the only thing
+         here that knows the scale, and asking it to place one point on the
+         radius is how the caller says "this far" without either end having to
+         talk about metres. */
+      var focusPx = at(pts.focus);
+      if (focusPx) radius = Math.max(radius, Math.hypot(focusPx.x - greenPx.x, focusPx.y - greenPx.y));
       var box = FRAME_GUIDE.zoom;
       var boxMin = Math.min(Number(viewDims.width) * box.w, Number(viewDims.height) * box.h);
       return anchoredTransform(greenPx, frameAnchor("zoom", viewDims), angle, (0.55 * boxMin) / (2 * radius));

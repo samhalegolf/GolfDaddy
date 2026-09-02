@@ -111,6 +111,143 @@ final class WatchSessionManager: NSObject, ObservableObject {
        Scene revisions. */
     @Published private(set) var wristFix: WatchScene.GeoPoint?
 
+    /* The wrist's own way through a hole — green focus, the holding screen and
+       the queued next hole. See WatchHoleFlow for why these three, and only
+       these three, are decided here rather than asked for.
+     *
+     * It runs only while this wrist is DRIVING. A wrist the phone is driving
+     * shows what the phone shows, because two surfaces deciding independently
+     * which hole you are on is exactly the disagreement the whole play-owner
+     * design exists to prevent. Driving means there is only one decider and it
+     * happens to be this one. */
+    @Published private(set) var holeFlow = WatchHoleFlow()
+
+    /* Everything the flow needs to know about a hole, assembled from what this
+       wrist already holds: green and tee out of the delivered lite-map
+       package, par off the Scene. Nil when there is no package for this hole,
+       which is the honest answer — without a green there is no green focus and
+       without a tee there is no tee zone, and the wrist simply keeps showing
+       the numbers face. */
+    func flowHole(_ number: Int?) -> WatchHoleFlow.Hole? {
+        guard let number else { return nil }
+        let reference = maps.hole(number, courseKey: scene?.course?.key)?.reference
+        let par = scene?.course?.par(number) ?? (scene?.hole?.number == number ? scene?.hole?.par : nil)
+        guard let reference, reference.isUsable else {
+            return par == nil ? nil : WatchHoleFlow.Hole(number: number, par: par)
+        }
+        return WatchHoleFlow.Hole(
+            number: number,
+            par: par,
+            tee: reference.playLine.map { Coordinate(lat: $0.tee.lat, lng: $0.tee.lng) },
+            green: Coordinate(lat: reference.green.lat, lng: reference.green.lng))
+    }
+
+    /// The green outline for the hole being shown, for the green face to draw.
+    func flowGreenShape(_ number: Int?) -> [Coordinate] {
+        guard let number, let shape = maps.hole(number, courseKey: scene?.course?.key)?.reference?.usableGreenShape else { return [] }
+        return shape.map { Coordinate(lat: $0.lat, lng: $0.lng) }
+    }
+
+    /// The hole after the one just finished. The wrist steps by one; anything
+    /// cleverer is the phone's card and the picker's business.
+    var flowNextHole: Int? {
+        guard let current = holeFlow.hole ?? scene?.hole?.number else { return nil }
+        return current + 1
+    }
+
+    /* A fix, or a Scene, or both — everything that could change what the flow
+       should be showing goes through here. Effects leave as commands; nothing
+       waits for one to be acknowledged, which is what lets the next hole start
+       with the phone asleep in a bag. */
+    private func advanceFlow() {
+        guard scene?.isDriving == true else { return }
+        let current = flowHole(scene?.hole?.number)
+        let next = holeFlow.face == .queued ? flowHole(holeFlow.hole) : flowHole(flowNextHole)
+        let fix = wristFix.flatMap { fix -> Coordinate? in
+            guard let lat = fix.lat, let lng = fix.lng else { return nil }
+            return Coordinate(lat: lat, lng: lng)
+        }
+        let effect = holeFlow.update(fix: fix, hole: current, next: next,
+                                     locked: scene?.shot?.locked == true || lockedShot != nil)
+        if let effect { dispatch(effect) }
+    }
+
+    // ------------------------------------------------- the wrist's own actions
+
+    func flowMoveBall(to point: Coordinate) {
+        if let effect = holeFlow.moveBall(to: point) { dispatch(effect) }
+    }
+
+    /* "That's me." Closes the shot the phone has open when there is one, and
+       moves to the holding screen. Whether there is a shot to close is the
+       PHONE's answer (controls.canLogFinish): the wrist decides screens, not
+       what is in the record. */
+    func flowHoleDone() {
+        let effects = holeFlow.complete(hole: flowHole(scene?.hole?.number),
+                                        logShot: scene?.controls?.canLogFinish == true)
+        effects.forEach(dispatch)
+        WKInterfaceDevice.current().play(.success)
+    }
+
+    func flowStepScore(_ delta: Int) {
+        if let effect = holeFlow.stepScore(delta) { dispatch(effect) }
+    }
+
+    func flowNext() {
+        guard let next = flowNextHole, let hole = flowHole(next) ?? WatchHoleFlow.Hole(number: next) as WatchHoleFlow.Hole? else { return }
+        dispatch(holeFlow.queue(hole))
+    }
+
+    func flowPlay() {
+        guard let number = holeFlow.hole, let hole = flowHole(number) ?? WatchHoleFlow.Hole(number: number) as WatchHoleFlow.Hole? else { return }
+        dispatch(holeFlow.play(hole: hole))
+        WKInterfaceDevice.current().play(.start)
+    }
+
+    func flowBack() { _ = holeFlow.back() }
+
+    /* What the queued screen reads. Its own length is a fact about the hole and
+       always available; the walk to the tee needs both a mapped tee and a fix,
+       and is simply absent otherwise — an absent number is better than a
+       confident one measured from nothing. */
+    var queuedLengthM: Double? {
+        guard let hole = flowHole(holeFlow.hole), let tee = hole.tee, let green = hole.green else { return nil }
+        return WatchHoleFlow.metres(tee, green)
+    }
+    var queuedToTeeM: Double? {
+        guard let hole = flowHole(holeFlow.hole), let tee = hole.tee,
+              let fix = wristFix, let lat = fix.lat, let lng = fix.lng else { return nil }
+        return WatchHoleFlow.metres(Coordinate(lat: lat, lng: lng), tee)
+    }
+    var queuedAtTee: Bool {
+        guard let d = queuedToTeeM else { return false }
+        return d <= WatchHoleFlow.teeZoneM
+    }
+
+    /* One effect, one command. Nothing here waits for an answer: the wrist has
+       already drawn the consequence, and the phone catching up late is the
+       normal case rather than a failure. */
+    private func dispatch(_ effect: WatchHoleFlow.Effect) {
+        switch effect {
+        case .ballMoved(let point):
+            send(.ballMoved, payload: CommandPayload(point: WatchCoordinate(lat: point.lat, lng: point.lng)), allowDuplicate: true)
+        case .logFinish:
+            send(.logFinish, payload: CommandPayload())
+        case .holeComplete(let hole):
+            send(.holeComplete, payload: CommandPayload(hole: hole))
+        case .stepScore(let hole, let delta):
+            send(.stepScore, payload: CommandPayload(hole: hole, delta: delta), allowDuplicate: true)
+        case .advance(let hole):
+            /* Advance and Play are a pair and must arrive in this order: Play
+               starts the hole the phone is LOOKING at, which Advance is what
+               put there. The outbox preserves order. */
+            send(.advance, payload: CommandPayload(hole: hole))
+        case .play(let hole):
+            send(.advance, payload: CommandPayload(hole: hole))
+            send(.playHole, payload: CommandPayload(hole: hole))
+        }
+    }
+
     private let outboxKey = "CaddyWatchPendingCommandsV1"
     private var session: WCSession?
     private let locationManager = WatchLocationManager()
@@ -123,6 +260,10 @@ final class WatchSessionManager: NSObject, ObservableObject {
         locationManager.onFix = { [weak self] fix in
             guard let self else { return }
             self.wristFix = fix.map { WatchScene.GeoPoint(lat: $0.coordinate.latitude, lng: $0.coordinate.longitude) }
+            /* Every fix, not every Scene. The whole reason the between-holes
+               screens live here is that they must keep working while the phone
+               is asleep, and a phone asleep sends no Scenes. */
+            self.advanceFlow()
         }
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
@@ -144,11 +285,19 @@ final class WatchSessionManager: NSObject, ObservableObject {
     /* LOCK always resolves against the wrist's own GPS when a recent, accurate
        fix exists — the phone can then stay in the bag. It only falls back to
        the phone-authoritative LOCK when the watch has no trustworthy fix. */
-    func send(_ type: CaddyWatchCommand.Kind) {
-        guard let scene, let roundId = scene.roundId, !roundId.isEmpty, !isPending(type) else { return }
+    func send(_ type: CaddyWatchCommand.Kind) { send(type, payload: CommandPayload()) }
+
+    /* `allowDuplicate` exists for the two commands that carry a VALUE rather
+       than an intent: a ball dragged twice and a score stepped twice are two
+       different things to say, and dropping the second as a duplicate would
+       lose the one the player is looking at. Everything else stays deduped,
+       because a second LOCK while the first is in flight is a mistake. */
+    func send(_ type: CaddyWatchCommand.Kind, payload initialPayload: CommandPayload, allowDuplicate: Bool = false) {
+        guard let scene, let roundId = scene.roundId, !roundId.isEmpty else { return }
+        guard allowDuplicate || !isPending(type) else { return }
         lastRejection = nil
         var wireType = type
-        var payload = CommandPayload()
+        var payload = initialPayload
         if type == .lock, let fix = locationManager.lastFix, let observation = WatchLocationObservation(fix) {
             wireType = .lockAt
             payload = CommandPayload(location: observation)
@@ -228,6 +377,15 @@ final class WatchSessionManager: NSObject, ObservableObject {
         locationManager.start()
         reconcileOutbox(with: incoming)
         noteSurface(previous: previous, incoming: incoming)
+        /* The round moved: the phone started a different hole, or somebody used
+           the picker. The wrist owns its screens and never which hole is being
+           played, so it follows without argument — unless it is itself between
+           holes, where the hole on screen is deliberately not the phone's and
+           following would undo the queue it just made. */
+        if holeFlow.face == .playing || holeFlow.face == .greenFocus {
+            holeFlow.follow(hole: incoming.hole?.number)
+        }
+        advanceFlow()
     }
 
     /* A Scene arriving is proof the phone is listening, which the durable
