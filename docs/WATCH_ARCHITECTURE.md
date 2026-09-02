@@ -267,10 +267,15 @@ lift    ->  AIM_AT, once
 `AIM_AT` carries `{point:{lat,lng}}` — the shape Marshal's `AIM_DRAGGED` reads —
 and is sent on drag END, not per frame. Local recomputation is what makes the
 drag feel immediate; the phone does not need the intermediate frames, and a
-Scene republished per frame would swamp the link for numbers nobody reads. It is
-sent **raw**: the aim roof lives in Marshal (`clampAim` with `maxAimM` injected),
-and a second clamp on the wrist is how two ends start disagreeing about where
-the target is. The wrist sends where the finger went.
+Scene republished per frame would swamp the link for numbers nobody reads.
+
+**The bag's roof is applied on the wrist** (`WatchPlayState.clampedToBag`): a
+target dragged past the longest total in the bag is pulled back to it along its
+own bearing — Marshal's `clampAim` rule, on the wrist's own target, never on the
+drawn ring. It used to be sent raw and the wrist took the phone's correction on
+the next Scene; now that the wrist keeps its own target while driving, the roof
+has to be on both ends or they disagree about where the aim is. The point sent
+is already inside the bag, so Marshal's clamp is a no-op on it.
 
 **The Scene's target is adopted only while the wrist has none of its own.**
 Once the wrist has placed a target — by its default rule or by a drag — a Scene
@@ -289,8 +294,20 @@ floored at the width fill so there are no side bars. The player is allowed off
 the bottom; the aim line still reaches the edge and pivots as the target moves,
 which is the cue that the origin is a fixed point. `play` (player low, hole
 ahead) remains for a hole with no target at all. The camera is set on appear, a
-new hole, the first fix and the first Scene target — and by the crown and a
-drag's `following` pan — never on a Scene revision and never on drag end.
+new hole, the first fix and the first Scene target — and by the crown and the
+edge pan — never on a Scene revision and never on drag end.
+
+**A tap places the target and moves nothing else.** A drag keeps the target
+under the finger and the map under both stays put: what is being placed stays
+where it is being placed. The map moves only when the finger reaches the very
+edge of the view (`WatchMapCamera.edgeInset`, 16pt) and holds there for
+`edgeDwell` (0.4s) — so a sweep to the far side does not set it moving on the
+way past — and then it creeps at `edgePanSpeed` (45pt/s) in the edge's
+direction, putting the target back under the finger on every step. The old
+comfort-rect follow, which panned the moment the Bubble's ring reached 22% of
+the view, is gone: it moved the map on a plain tap and read as far too
+sensitive. The club and the distance to the target are drawn inside the Bubble,
+live, off the wrist's own engine result.
 
 Aiming needs three things at once: the phone says the shot can be aimed
 (`controls.canAim`), the wrist runs the same engine (the version handshake), and

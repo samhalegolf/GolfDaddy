@@ -37,6 +37,10 @@ struct AimableHoleMap: View {
     @State private var state = WatchPlayState()
     @State private var camera: WatchMapCamera?
     @State private var dragging = false
+    /// Where the finger is, in view points, while it is down. Read by the edge
+    /// pan so a map creeping under a held finger keeps the target under it.
+    @State private var fingerAt: CGPoint?
+    @State private var edgePan: Task<Void, Never>?
     /// Zoom, driven by the Digital Crown. Held separately from the camera so a
     /// resting re-fit does not fight a zoom the player just chose.
     @State private var crownZoom: Double = 1
@@ -86,6 +90,15 @@ struct AimableHoleMap: View {
                             context.fill(path, with: .color(.mint.opacity(0.22)))
                             context.stroke(path, with: .color(.mint), lineWidth: 1.5)
                         }
+                    }
+
+                    /* The club, live, inside the Bubble it was chosen for —
+                       so the answer is read where the eye already is, not
+                       off a strip somewhere else. Name and the distance to
+                       the target, over a dark ghost so it reads on any
+                       ground. */
+                    if let bubble = state.bubble, let at = imagePoint(lat: bubble.centre.lat, lng: bubble.centre.lng).map(place) {
+                        drawLabel(context, club: bubble.club.club, metres: bubble.targetDistanceM, at: at)
                     }
 
                     if let greenAt = imagePoint(green).map(place) {
@@ -166,31 +179,70 @@ struct AimableHoleMap: View {
 
     // MARK: - Interaction
 
+    /* A tap puts the target under the finger. A drag keeps it under the
+       finger. Neither moves the map: what is being placed stays where it is
+       being placed. The map moves only when the finger reaches the very edge
+       and holds there — see `edgePan`. */
     private func aimGesture(viewSize: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 guard canAim, let bag, let profile else { return }
                 dragging = true
-                guard let coordinate = coordinate(fromView: value.location, viewSize: viewSize) else { return }
-                state.moveTarget(to: coordinate, bag: bag, profile: profile)
-                follow(viewSize: viewSize)
+                fingerAt = value.location
+                if let coordinate = coordinate(fromView: value.location, viewSize: viewSize) {
+                    state.moveTarget(to: coordinate, bag: bag, profile: profile)
+                }
+                updateEdgePan(viewSize: viewSize)
             }
             .onEnded { _ in
                 dragging = false
+                fingerAt = nil
+                stopEdgePan()
                 /* One command, now, with where the target actually landed. */
                 if let target = state.target { onAim(target) }
-                /* The framing STAYS. `follow` kept the Bubble inside the
-                   comfort rect through the drag; a re-fit here slid the map
-                   under a player who had just put the target where they
-                   wanted it, and that slide read as the origin wandering. */
+                /* The framing STAYS. A re-fit here slid the map under a
+                   player who had just put the target where they wanted it,
+                   and that slide read as the origin wandering. */
             }
     }
 
-    /* Pans to keep the Bubble in the comfort rect while the finger moves — pan
-       only, never zoom. See WatchMapCamera.following. */
-    private func follow(viewSize: CGSize) {
-        guard let ring = state.bubble?.ring, let box = imageBox(of: ring) else { return }
-        camera = (camera ?? restingCamera(viewSize: viewSize)).following(region: box, viewSize: viewSize)
+    /* The edge pan: dwell, then creep.
+     *
+     * Starts a pan the moment the finger enters the edge inset and stops it
+     * the moment the finger leaves — but the pan itself does nothing for
+     * `edgeDwell` first, so a finger sweeping across to the far side does not
+     * set the map moving on its way past. After the dwell the map creeps at
+     * `edgePanSpeed` in the edge's direction, and on every step the target is
+     * put back under the finger, because the world under a held finger has
+     * moved and the target must go with it. */
+    private func updateEdgePan(viewSize: CGSize) {
+        guard let fingerAt else { stopEdgePan(); return }
+        let direction = WatchMapCamera.edgeDirection(of: fingerAt, viewSize: viewSize)
+        guard direction != .zero else { stopEdgePan(); return }
+        guard edgePan == nil else { return }
+        edgePan = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(WatchMapCamera.edgeDwell * 1_000_000_000))
+            let tick: TimeInterval = 1.0 / 30
+            while !Task.isCancelled {
+                guard let finger = self.fingerAt, self.dragging else { return }
+                let direction = WatchMapCamera.edgeDirection(of: finger, viewSize: viewSize)
+                guard direction != .zero else { return }
+                let step = WatchMapCamera.edgePanSpeed * tick
+                let current = self.camera ?? self.restingCamera(viewSize: viewSize)
+                self.camera = current.panned(byScreen: CGVector(dx: direction.dx * step, dy: direction.dy * step),
+                                             imageSize: self.imageSize)
+                if let bag = self.bag, let profile = self.profile,
+                   let coordinate = self.coordinate(fromView: finger, viewSize: viewSize) {
+                    self.state.moveTarget(to: coordinate, bag: bag, profile: profile)
+                }
+                try? await Task.sleep(nanoseconds: UInt64(tick * 1_000_000_000))
+            }
+        }
+    }
+
+    private func stopEdgePan() {
+        edgePan?.cancel()
+        edgePan = nil
     }
 
     /* Places the wrist's shot for this hole, and frames it.
@@ -246,6 +298,19 @@ struct AimableHoleMap: View {
     private var nominalBubbleExtent: CGSize {
         let metresPerPixel = map.spatialReference.metresPerPixel ?? 0.5
         return CGSize(width: 45 / metresPerPixel, height: 55 / metresPerPixel)
+    }
+
+    private func drawLabel(_ context: GraphicsContext, club: String, metres: Double, at point: CGPoint) {
+        let name = Text(club).font(.system(size: 12, weight: .heavy, design: .rounded))
+        let distance = Text("\(Int(metres.rounded())) m").font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
+        let nameAt = CGPoint(x: point.x, y: point.y - 12)
+        let distanceAt = CGPoint(x: point.x, y: point.y + 11)
+        for offset in [CGPoint(x: 0.8, y: 0.8), CGPoint(x: -0.8, y: 0.8), CGPoint(x: 0.8, y: -0.8), CGPoint(x: -0.8, y: -0.8)] {
+            context.draw(name.foregroundStyle(.black.opacity(0.85)), at: CGPoint(x: nameAt.x + offset.x, y: nameAt.y + offset.y))
+            context.draw(distance.foregroundStyle(.black.opacity(0.85)), at: CGPoint(x: distanceAt.x + offset.x, y: distanceAt.y + offset.y))
+        }
+        context.draw(name.foregroundStyle(.white), at: nameAt)
+        context.draw(distance.foregroundStyle(.white.opacity(0.92)), at: distanceAt)
     }
 
     private func imageBox(of ring: [Coordinate]) -> CGRect? {

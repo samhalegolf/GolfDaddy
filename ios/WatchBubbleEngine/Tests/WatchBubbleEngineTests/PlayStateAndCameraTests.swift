@@ -83,6 +83,26 @@ final class PlayStateAndCameraTests: XCTestCase {
     /* The engine underneath stays pure. Same inputs, same answer, regardless of
        what any play state was holding — this is the property the parity
        fixtures depend on. */
+    /* The bag's roof: a target dragged past the longest club lands at the far
+       edge of the bag, on the same bearing, not somewhere no club goes. This
+       bag's longest total is 167m. */
+    func testATargetPastTheBagIsPulledBackToItsRoof() throws {
+        var state = WatchPlayState(player: player(metresFromGreen: 300))
+        let result = try XCTUnwrap(state.moveTarget(to: green, bag: bag, profile: profile))
+        let target = try XCTUnwrap(state.target)
+        XCTAssertEqual(Geo.distance(state.player!, target), 167, accuracy: 0.5)
+        XCTAssertEqual(result.targetDistanceM, 167, accuracy: 0.5)
+        XCTAssertEqual(Geo.bearing(state.player!, target), Geo.bearing(state.player!, green), accuracy: 1e-6,
+                       "pulled straight back along its own line")
+        XCTAssertEqual(result.club.club, "5i")
+    }
+
+    func testATargetInsideTheBagIsLeftAlone() throws {
+        var state = WatchPlayState(player: player(metresFromGreen: 150))
+        _ = state.moveTarget(to: green, bag: bag, profile: profile)
+        XCTAssertEqual(state.target, green)
+    }
+
     func testTheEngineItselfStillHasNoMemory() throws {
         let input = BubbleEngine.Input(player: player(metresFromGreen: 163), target: green, bag: bag, bubble: profile)
         let a = try XCTUnwrap(BubbleEngine.calculate(input))
@@ -165,30 +185,35 @@ final class PlayStateAndCameraTests: XCTestCase {
 
     /* THE rule of the drag: following pans and never zooms. Scaling the world
        under a moving finger makes the target stop tracking the touch. */
-    func testFollowingNeverChangesTheScale() {
+    /* A finger anywhere inside the edge inset asks for no movement at all: a
+       tap places the target and the map under it stays put. Only the very edge
+       asks, and it asks for the edge's direction. */
+    func testOnlyTheVeryEdgeAsksTheMapToMove() {
+        let middle = CGPoint(x: viewSize.width / 2, y: viewSize.height / 2)
+        XCTAssertEqual(WatchMapCamera.edgeDirection(of: middle, viewSize: viewSize), .zero)
+        let nearButNotAt = CGPoint(x: viewSize.width - WatchMapCamera.edgeInset - 1, y: viewSize.height / 2)
+        XCTAssertEqual(WatchMapCamera.edgeDirection(of: nearButNotAt, viewSize: viewSize), .zero)
+        XCTAssertEqual(WatchMapCamera.edgeDirection(of: CGPoint(x: viewSize.width - 2, y: viewSize.height / 2), viewSize: viewSize),
+                       CGVector(dx: 1, dy: 0))
+        XCTAssertEqual(WatchMapCamera.edgeDirection(of: CGPoint(x: 3, y: 4), viewSize: viewSize),
+                       CGVector(dx: -1, dy: -1))
+    }
+
+    func testPanningMovesTheFocusAndNeverTheScale() {
         let camera = WatchMapCamera(focus: CGPoint(x: 224, y: 768), scale: 2)
-        let farOff = CGRect(x: 900, y: 1400, width: 40, height: 40)
-        let followed = camera.following(region: farOff, viewSize: viewSize)
-        XCTAssertEqual(followed.scale, camera.scale, "a drag pans; it does not breathe")
-        XCTAssertNotEqual(followed.focus, camera.focus, "and it did need to move")
+        let moved = camera.panned(byScreen: CGVector(dx: 30, dy: -10), imageSize: imageSize)
+        XCTAssertEqual(moved.scale, 2)
+        XCTAssertEqual(moved.focus.x, 224 + 15, accuracy: 1e-9, "screen points become image pixels at the scale")
+        XCTAssertEqual(moved.focus.y, 768 - 5, accuracy: 1e-9)
     }
 
-    /* Minimal movement: a region already comfortably inside the view must not
-       provoke a pan at all. A camera that re-centres on every frame drags the
-       whole hole past the player for a one-pixel adjustment. */
-    func testAComfortableRegionDoesNotMoveTheMap() {
+    /* A long hold at an edge parks at the end of the bake rather than
+       drifting into nothing. */
+    func testPanningParksAtTheEdgeOfTheImage() {
         let camera = WatchMapCamera(focus: CGPoint(x: 224, y: 768), scale: 1)
-        let centred = CGRect(x: 214, y: 758, width: 20, height: 20)
-        XCTAssertEqual(camera.following(region: centred, viewSize: viewSize), camera)
-    }
-
-    func testFollowingBringsAnEscapingRegionBackInside() {
-        let camera = WatchMapCamera(focus: CGPoint(x: 224, y: 768), scale: 1)
-        let escaping = CGRect(x: 300, y: 768, width: 20, height: 20)
-        let followed = camera.following(region: escaping, viewSize: viewSize)
-        let maxX = followed.place(CGPoint(x: escaping.maxX, y: escaping.midY), imageSize: imageSize, viewSize: viewSize).x
-        XCTAssertLessThanOrEqual(maxX, viewSize.width * (1 - WatchMapCamera.comfortInset) + 0.001,
-                                 "the region must end up inside the comfort rect")
+        let far = camera.panned(byScreen: CGVector(dx: 100_000, dy: -100_000), imageSize: imageSize)
+        XCTAssertEqual(far.focus.x, imageSize.width)
+        XCTAssertEqual(far.focus.y, 0)
     }
 
     func testTheCrownCannotZoomIntoMushOrIntoNothing() {

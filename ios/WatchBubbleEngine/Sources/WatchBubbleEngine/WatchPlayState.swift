@@ -56,6 +56,7 @@ public struct WatchPlayState: Equatable {
                                     bag: WatchBagSnapshot,
                                     profile: WatchBubbleProfile) -> BubbleEngine.Result? {
         guard let player else { return nil }
+        let newTarget = Self.clampedToBag(newTarget, from: player, bag: bag)
         target = newTarget
 
         /* Ask twice: once with no hold, to learn what the distance alone would
@@ -83,6 +84,33 @@ public struct WatchPlayState: Equatable {
         heldClub = result?.club.club ?? free.club.club
         bubble = result ?? free
         return bubble
+    }
+
+    /* The bag's roof on an aim, on the wrist.
+     *
+     * Marshal's `clampAim` with `maxAimM` injected — the longest TOTAL in the
+     * bag — applied here to the wrist's own target, along its own bearing, so
+     * a finger dragged past the bag lands at the far edge of the bag instead of
+     * somewhere no club goes. The same rule `defaultTarget` already respects
+     * when it proposes a target, and the same rule the phone applies to the
+     * copy it keeps; putting it on the TARGET (never the drawn ring) is what
+     * keeps the two ends agreeing about where the aim actually is, now that the
+     * wrist no longer adopts the phone's correction while it is driving.
+     *
+     * No roof when the bag has no finite total — the drag stays free rather
+     * than guessing at one. */
+    public static func clampedToBag(_ target: Coordinate, from player: Coordinate, bag: WatchBagSnapshot) -> Coordinate {
+        guard let roof = Bag.maxPlayableM(in: bag), roof > 0 else { return target }
+        let metres = Geo.distance(player, target)
+        guard metres.isFinite, metres > roof else { return target }
+        /* Scaled back along the player->target vector itself rather than
+           re-projected from a bearing: `Geo.bearing` is the phone's
+           degree-space convention (kept faithful for Bubble rotation), not a
+           geodesic, so projecting along it would step off the line the finger
+           drew. A scaled vector cannot. */
+        let fraction = roof / metres
+        return Coordinate(lat: player.lat + (target.lat - player.lat) * fraction,
+                          lng: player.lng + (target.lng - player.lng) * fraction)
     }
 
     /* Has the target moved far enough past the midpoint of the two clubs to

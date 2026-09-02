@@ -22,6 +22,9 @@ struct HoleMapView: View {
     /// The phone's Bubble size in metres, when the Scene carries one. This
     /// page draws the PHONE's shot, so its extent comes off the Scene.
     var bubbleExtentM: CGSize? = nil
+    /// The phone's club for this target, drawn at the target so the read-only
+    /// page reads the same way the aimable one does.
+    var club: String? = nil
 
     var body: some View {
         GeometryReader { proxy in
@@ -58,6 +61,14 @@ struct HoleMapView: View {
                     }
                     if let greenAt { ring(context, at: greenAt, radius: 6, colour: .mint.opacity(0.9)) }
                     if let targetAt { dot(context, at: targetAt, radius: 4, fill: .mint, edge: .black.opacity(0.7)) }
+                    if let targetAt, let club, !club.isEmpty {
+                        let text = Text(club).font(.system(size: 12, weight: .heavy, design: .rounded))
+                        let at = CGPoint(x: targetAt.x, y: targetAt.y - 12)
+                        for offset in [CGPoint(x: 0.8, y: 0.8), CGPoint(x: -0.8, y: 0.8), CGPoint(x: 0.8, y: -0.8), CGPoint(x: -0.8, y: -0.8)] {
+                            context.draw(text.foregroundStyle(.black.opacity(0.85)), at: CGPoint(x: at.x + offset.x, y: at.y + offset.y))
+                        }
+                        context.draw(text.foregroundStyle(.white), at: at)
+                    }
                     if let playerAt { dot(context, at: playerAt, radius: 4.5, fill: .white, edge: .black.opacity(0.8)) }
                 }
             }
@@ -155,7 +166,8 @@ struct HoleMapPage: View {
                         player: player,
                         green: scene.geometry?.origin,
                         target: scene.target ?? scene.bubble?.centre,
-                        bubbleExtentM: scene.bubble.map { CGSize(width: $0.widthM ?? 45, height: $0.depthM ?? 55) }
+                        bubbleExtentM: scene.bubble.map { CGSize(width: $0.widthM ?? 45, height: $0.depthM ?? 55) },
+                        club: scene.bubble?.club ?? scene.suggestion?.club
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }

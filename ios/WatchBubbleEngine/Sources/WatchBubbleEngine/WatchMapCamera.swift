@@ -25,10 +25,20 @@ public struct WatchMapCamera: Equatable {
     /// WatchMapFrame uses, for the same reason.
     public static let maximumScale: CGFloat = 3
 
-    /// The fraction of the view kept clear at each edge. A target inside this
-    /// inset does not move the map; one that reaches it pushes the map along.
-    /// 0.22 leaves a little over half the view as free travel.
-    public static let comfortInset: CGFloat = 0.22
+    /* Edge panning. A tap or a drag moves the TARGET and nothing else — the
+       map under it stays put, so what the finger is placing stays where the
+       finger is. The map moves only when the finger reaches the very edge of
+       the view and holds there for a beat, and then it creeps.
+
+       `edgeInset` is how close to the edge counts, in points. `edgeDwell` is
+       the beat: long enough that a finger sweeping across to the far side does
+       not start the map moving on its way past, short enough that a finger
+       parked on the edge is not left wondering. `edgePanSpeed` is deliberately
+       slow — the finger is still holding a target, and a map racing under it
+       moves that target faster than anyone can aim. */
+    public static let edgeInset: CGFloat = 16
+    public static let edgeDwell: TimeInterval = 0.4
+    public static let edgePanSpeed: CGFloat = 45
 
     /// Where the camera is looking, in image pixels.
     public var focus: CGPoint
@@ -168,40 +178,29 @@ public struct WatchMapCamera: Equatable {
         return WatchMapCamera(focus: CGPoint(x: centreX, y: focusY), scale: scale)
     }
 
-    // MARK: - Following a drag
+    // MARK: - Edge panning
 
-    /* Pans — and ONLY pans — to keep a region inside the comfort rect.
+    /// Which way the map should travel for a finger at `point`: each component
+    /// is -1, 0 or 1, and both are 0 anywhere inside the edge inset.
+    public static func edgeDirection(of point: CGPoint, viewSize: CGSize) -> CGVector {
+        guard viewSize.width > 0, viewSize.height > 0 else { return .zero }
+        let dx: CGFloat = point.x <= edgeInset ? -1 : (point.x >= viewSize.width - edgeInset ? 1 : 0)
+        let dy: CGFloat = point.y <= edgeInset ? -1 : (point.y >= viewSize.height - edgeInset ? 1 : 0)
+        return CGVector(dx: dx, dy: dy)
+    }
+
+    /* Moves the focus by a screen-point delta — and ONLY the focus.
      *
-     * The scale is deliberately untouched. Zooming while a finger is moving the
-     * target scales the world under that finger: the target stops tracking the
-     * touch, and the player is fighting the map instead of aiming. So during a
-     * drag the map slides and never breathes; the resting fit is applied when
-     * the finger lifts, where a scale change is something the player watches
-     * rather than something that happens to them.
-     *
-     * Minimal movement, too: the camera moves by exactly as much as it takes to
-     * bring the region back inside, and not to re-centre. A camera that
-     * re-centres on every frame drags the whole hole past the player for a
-     * one-pixel adjustment. */
-    public func following(region: CGRect, viewSize: CGSize) -> WatchMapCamera {
-        guard viewSize.width > 0, viewSize.height > 0, scale > 0 else { return self }
-        let insetX = viewSize.width * Self.comfortInset
-        let insetY = viewSize.height * Self.comfortInset
-
-        /* The region in screen points, relative to the current focus. */
-        let half = CGPoint(x: viewSize.width / 2, y: viewSize.height / 2)
-        let minPoint = CGPoint(x: half.x + (region.minX - focus.x) * scale, y: half.y + (region.minY - focus.y) * scale)
-        let maxPoint = CGPoint(x: half.x + (region.maxX - focus.x) * scale, y: half.y + (region.maxY - focus.y) * scale)
-
-        var moved = focus
-        /* A region wider than the comfort rect cannot be satisfied on both
-           sides. Prefer the leading edge — the one the target is pushing
-           against — rather than oscillating between the two. */
-        if maxPoint.x > viewSize.width - insetX { moved.x += (maxPoint.x - (viewSize.width - insetX)) / scale }
-        else if minPoint.x < insetX { moved.x -= (insetX - minPoint.x) / scale }
-        if maxPoint.y > viewSize.height - insetY { moved.y += (maxPoint.y - (viewSize.height - insetY)) / scale }
-        else if minPoint.y < insetY { moved.y -= (insetY - minPoint.y) / scale }
-
+     * The scale is untouched for the same reason it always was: zooming while
+     * a finger is moving the target scales the world under that finger. The
+     * focus is kept inside the image, so a long hold at an edge parks at the
+     * end of the bake instead of drifting off into nothing and needing to be
+     * dragged all the way back. */
+    public func panned(byScreen delta: CGVector, imageSize: CGSize) -> WatchMapCamera {
+        guard scale > 0, delta.dx.isFinite, delta.dy.isFinite else { return self }
+        let moved = CGPoint(
+            x: min(max(focus.x + delta.dx / scale, 0), max(imageSize.width, 0)),
+            y: min(max(focus.y + delta.dy / scale, 0), max(imageSize.height, 0)))
         return WatchMapCamera(focus: moved, scale: scale)
     }
 
