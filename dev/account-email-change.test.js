@@ -157,8 +157,8 @@ test("upsertAccount finds the account by auth_user_id first, so an email change 
 
 test("account-sync writes the stored email, not the pushed one", () => {
   const code = stripComments(sync);
-  assert.ok(/storedAccountEmail/.test(code), "the server's address has to be read before the write");
-  assert.ok(/const effectiveEmail = storedEmail \|\| accountEmail/.test(code),
+  assert.ok(/storedAccount\(accountId\)/.test(code), "the server's address has to be read before the write");
+  assert.ok(/const effectiveEmail = stored\.email \|\| accountEmail/.test(code),
     "a stored address wins; the pushed one is only used when there is no row yet");
   assert.ok(!/\n      email: accountEmail,/.test(code),
     "no write may still use the pushed address");
@@ -167,11 +167,16 @@ test("account-sync writes the stored email, not the pushed one", () => {
 });
 
 test("a lookup failure falls back to the old behaviour rather than losing the sync", () => {
-  const start = sync.indexOf("async function storedAccountEmail");
+  const start = sync.indexOf("async function storedAccount");
   assert.ok(start !== -1);
-  const body = sync.slice(start, start + 900);
-  assert.ok(/catch \(_error\) \{[\s\S]*?return "";/.test(body),
-    "a failed read must return \"\" so the caller still syncs");
+  const body = sync.slice(start, start + 1200);
+  /* The empty read stands in for BOTH halves of the row now: no stored address,
+     so the pushed one is used, and no stored metadata, so the tombstone is not
+     applied. Neither costs the caller their sync. */
+  assert.ok(/catch \(_error\) \{[\s\S]*?return empty;/.test(body),
+    "a failed read must return the empty row so the caller still syncs");
+  assert.ok(/const empty = \{ email: "", metadata: \{\} \};/.test(body),
+    "the empty read has to carry both halves");
 });
 
 test("account-sync echoes the stored address and the client adopts it", () => {

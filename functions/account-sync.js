@@ -118,10 +118,10 @@ async function upsertAccount(payload, action) {
    * signup, restore, Settings, the staff change - is server-side and writes the
    * row itself; this pipe has never been the place an address changes. The
    * device learns the new one from the accountEmail echoed back below. */
-  const storedEmail = await storedAccountEmail(accountId);
-  const effectiveEmail = storedEmail || accountEmail;
+  const stored = await storedAccount(accountId);
+  const effectiveEmail = stored.email || accountEmail;
 
-  const severed = await severedCoachIds(accountId);
+  const severed = idList(stored.metadata.severedCoachIds);
   const restore = idList(account.restoreCoachIds || account.restore_coach_ids).filter(id => severed.includes(id));
   const stillSevered = severed.filter(id => !restore.includes(id));
   const linkedCoachIds = idList(account.linkedCoachIds || account.linked_coach_ids)
@@ -144,9 +144,13 @@ async function upsertAccount(payload, action) {
       password_salt: null,
       password_hash: null,
       last_login_at: dateOrNull(account.lastLoginAt || account.last_login_at),
-      metadata: stripUnsafe({
-        /* Carried forward, never rebuilt from the client: this whole row is an
-           upsert, so a key that is not written here is a key that is gone. */
+      /* Merged onto what the row already holds, never rebuilt from the client:
+         this whole row is an upsert, so a key that is not written here is a key
+         that is gone. severedCoachIds is recomputed above; everything else the
+         server wrote is carried through untouched - emailChanges
+         (account-change-email.js) and the stripe_customer_id fallback
+         payment-utils.js writes here when the column write fails. */
+      metadata: stripUnsafe(Object.assign({}, stored.metadata, {
         severedCoachIds: stillSevered,
         source: "clarity-caddie-web",
         action,
@@ -155,7 +159,7 @@ async function upsertAccount(payload, action) {
         updatedAt: account.updatedAt || account.updated_at || null,
         profileWasDerived: !(account.profileId || account.profile_id || profile.id || profile.profileId || profile.profile_id || payload.profileId),
         mergedFromLocalAccountId: merged ? localAccountId : null
-      }),
+      })),
       updated_at: now
     })
   });
@@ -285,46 +289,39 @@ function idList(value) {
   return Array.isArray(value) ? value.map(item => text(item, 120)).filter(Boolean) : [];
 }
 
-/* The address the server already holds for this account, or "" when there is no
-   row yet. Read before every account write for the same reason severedCoachIds
-   is: this is an upsert of client-held state, and the client cannot know that
-   somebody changed the account out from under it. */
-async function storedAccountEmail(accountId) {
-  if (!accountId) return "";
+/* The server-owned half of this account: the address it already holds, and the
+   metadata it is already carrying. Read straight before every account write,
+   because that write is an upsert of client-held state - the client cannot know
+   that somebody changed the account out from under it, and it has never seen
+   the metadata at all.
+
+   The email is why a staff-side change of a player's login is not undone by
+   that player's next launch; the metadata is why the unlink tombstone
+   (severedCoachIds), the emailChanges audit and the stripe_customer_id fallback
+   survive a sync instead of being replaced by whatever this endpoint composes.
+
+   One read, not two: both were the same row. */
+async function storedAccount(accountId) {
+  const empty = { email: "", metadata: {} };
+  if (!accountId) return empty;
   let rows = [];
   try {
     rows = await supabaseFetch(
-      "app_accounts?select=email&account_id=eq." + encodeFilter(accountId) + "&limit=1",
+      "app_accounts?select=email,metadata&account_id=eq." + encodeFilter(accountId) + "&limit=1",
       { method: "GET" }
     );
   } catch (_error) {
     /* A lookup failure must not cost the caller their sync. Falling through to
        the pushed address is what this did for its whole life before the staff
-       email change existed, so the failure mode is the old behaviour, not a
-       lost account. */
-    return "";
+       email change existed, and the cost of guessing wrong on the metadata is
+       one resurrected coach link - neither is a lost account. */
+    return empty;
   }
-  return Array.isArray(rows) && rows[0] ? email(rows[0].email) : "";
-}
-
-/* The coach links this account's own row says were cut. Read straight before
-   every account write, because the write replaces the row's metadata wholesale
-   and the client has no idea the tombstone exists. */
-async function severedCoachIds(accountId) {
-  if (!accountId) return [];
-  let rows = [];
-  try {
-    rows = await supabaseFetch(
-      "app_accounts?select=metadata&account_id=eq." + encodeFilter(accountId) + "&limit=1",
-      { method: "GET" }
-    );
-  } catch (_error) {
-    /* A lookup failure must not cost the caller their sync. The cost of
-       guessing wrong here is one resurrected coach link, not a lost account. */
-    return [];
-  }
-  const metadata = Array.isArray(rows) && rows[0] && rows[0].metadata || null;
-  return metadata && typeof metadata === "object" ? idList(metadata.severedCoachIds) : [];
+  const row = Array.isArray(rows) && rows[0] || null;
+  const metadata = row && row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+    ? row.metadata
+    : {};
+  return { email: row ? email(row.email) : "", metadata };
 }
 
 function stripUnsafe(value) {
