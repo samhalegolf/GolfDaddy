@@ -41,8 +41,16 @@
        hole's axis-aligned capture box - 19.3ha for a 507m diagonal par 5. The
        result was a canvas framed on the neighbourhood: Millbrook's 1st drew six
        fairway corridors, five of them 104-233m off the play line, and spent
-       under 9% of its width on the hole being played. */
-    version: 2,
+       under 9% of its width on the hole being played.
+
+       v3 added corner-smoothing on every decimated polygon (simplify.smoothPasses)
+       and, when a satellite bake's per-hole elevation crop is available, terrain
+       shading + thin green slope contours baked into the shipped image itself -
+       see buildGroundSvg/buildMarkersSvg and functions/course-watch-maps.mjs's
+       terrain step. Both are purely cosmetic: they change no framing, no
+       projection, and nothing buildHoleReference measures, so a v2 package still
+       reads correctly and only needs a re-bake to pick up the new look. */
+    version: 3,
     canvas: {
       /* Ceiling, not a fixed size - see computeCanvasFit. Most holes land under both ceilings;
          a long narrow par 5 is height-limited, a short wide-corridor hole is width-limited. */
@@ -77,7 +85,13 @@
          applied after the fit scale, so the thresholds mean the same thing on every hole
          regardless of how much ground one pixel covers). */
       minVertexSpacingPx: 2.5,
-      minPolygonAreaPx2: 24
+      minPolygonAreaPx2: 24,
+      /* Corner-rounding passes run on every decimated ring (see smoothClosedPolygon), so the
+         jagged, hand-drawn/OSM-derived turns left by simplifyPoints don't bake straight into a
+         watch-scale image. Same technique functions/lib/gd-green-shape-core.mjs's smoothPoints
+         uses for detected green outlines; 2 passes is enough to round a saw-tooth corner without
+         eating a real point (a fairway dogleg, a bunker's own shape). */
+      smoothPasses: 2
     },
     colors: {
       background: "#3c6b45",
@@ -372,17 +386,43 @@
     return out;
   }
 
-  /* Projects every polygon through the transform, decimates points, and drops any polygon that
-     ends up smaller than the recipe's noise floor - "insignificant isolated objects" in the
-     task's words. Returns image-pixel point lists only; nothing here needs lat/lng again. */
+  /* Rounds off jagged corners left by decimation - the raw shapes are hand-drawn or cloned from
+     OSM ways and often carry sharp saw-tooth turns that read as noise at Watch scale, where a
+     handful of pixels is the whole width of a bunker. Weighted-neighbour blending against each
+     point's own ring neighbours, the same technique functions/lib/gd-green-shape-core.mjs's
+     smoothPoints uses for detected green outlines - closed here (wraps around, since every
+     polygon this recipe draws is a closed ring) rather than that module's open contour case.
+
+     Runs AFTER simplifyPoints, deliberately: smoothing hundreds of near-duplicate points would
+     spend its passes averaging noise instead of rounding real corners, and decimation's own job
+     is to remove exactly those points first. Left alone below 5 points - a triangle or the
+     recipe's own minimum has no "corner" to round, only a shape smoothing would collapse. */
+  function smoothClosedPolygon(points, passes) {
+    if (points.length < 5 || !(passes > 0)) return points;
+    var out = points.map(function (p) { return { x: p.x, y: p.y }; });
+    for (var pass = 0; pass < passes; pass++) {
+      out = out.map(function (p, i) {
+        var prev = out[(i - 1 + out.length) % out.length];
+        var next = out[(i + 1) % out.length];
+        return { x: p.x * 0.5 + prev.x * 0.25 + next.x * 0.25, y: p.y * 0.5 + prev.y * 0.25 + next.y * 0.25 };
+      });
+    }
+    return out;
+  }
+
+  /* Projects every polygon through the transform, decimates points, smooths the surviving
+     corners, and drops any polygon that ends up smaller than the recipe's noise floor -
+     "insignificant isolated objects" in the task's words. Returns image-pixel point lists only;
+     nothing here needs lat/lng again. */
   function projectAndSimplifyPolygons(polygons, spatialRef, recipe) {
     var out = [];
     (polygons || []).forEach(function (shape) {
       var projected = shape.map(function (p) { return projectLatLngToImage(spatialRef, p.lat, p.lng); });
       var simplified = simplifyPoints(projected, recipe.simplify.minVertexSpacingPx);
-      if (simplified.length < 3 || polygonAreaPx2(simplified) < recipe.simplify.minPolygonAreaPx2) return;
-      if (!touchesCanvas(simplified, spatialRef)) return;
-      out.push(simplified);
+      var smoothed = smoothClosedPolygon(simplified, recipe.simplify.smoothPasses);
+      if (smoothed.length < 3 || polygonAreaPx2(smoothed) < recipe.simplify.minPolygonAreaPx2) return;
+      if (!touchesCanvas(smoothed, spatialRef)) return;
+      out.push(smoothed);
     });
     return out;
   }
@@ -469,11 +509,11 @@
     return points.map(function (p) { return (Math.round(p.x * 10) / 10) + "," + (Math.round(p.y * 10) / 10); }).join(" ");
   }
 
-  function buildHoleSvg(recipe, spatialRef, projected) {
-    var w = spatialRef.imageWidth, h = spatialRef.imageHeight;
-    var parts = [];
-    parts.push('<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">');
-    parts.push('<rect x="0" y="0" width="' + w + '" height="' + h + '" fill="' + recipe.colors.background + '"/>');
+  function svgOpen(w, h) {
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">';
+  }
+
+  function drawGroundLayers(parts, recipe, projected) {
     function layer(polys, fill) {
       polys.forEach(function (points) {
         parts.push('<polygon points="' + polygonPointsAttr(points) + '" fill="' + fill + '" stroke="' + recipe.colors.outline + '" stroke-width="' + recipe.strokeWidthPx + '"/>');
@@ -486,9 +526,46 @@
     else if (projected.greenPx) {
       parts.push('<circle cx="' + projected.greenPx.x + '" cy="' + projected.greenPx.y + '" r="' + recipe.fallbackGreenRadiusPx + '" fill="' + recipe.colors.green + '" stroke="' + recipe.colors.outline + '" stroke-width="' + recipe.strokeWidthPx + '"/>');
     }
+  }
+
+  function drawMarkerLayers(parts, recipe, projected) {
     if (projected.teePx) {
       parts.push('<circle cx="' + projected.teePx.x + '" cy="' + projected.teePx.y + '" r="' + recipe.teeMarkerRadiusPx + '" fill="' + recipe.colors.tee + '" stroke="' + recipe.colors.outline + '" stroke-width="' + recipe.strokeWidthPx + '"/>');
     }
+  }
+
+  /* The ground alone: background fill plus every mapped surface. Rendered and rasterized on its
+     own by the caller when a terrain shading pass is available, so relief can be laid over real
+     ground pixels and BEFORE the crisp un-shaded markers go on top - shading a tee marker would
+     be shading a piece of UI, not ground. Opaque (carries its own background rect), unlike
+     buildMarkersSvg. */
+  function buildGroundSvg(recipe, spatialRef, projected) {
+    var w = spatialRef.imageWidth, h = spatialRef.imageHeight;
+    var parts = [svgOpen(w, h)];
+    parts.push('<rect x="0" y="0" width="' + w + '" height="' + h + '" fill="' + recipe.colors.background + '"/>');
+    drawGroundLayers(parts, recipe, projected);
+    parts.push("</svg>");
+    return parts.join("");
+  }
+
+  /* Just the tee marker, over a transparent background - a compositing layer meant to sit above
+     ground + relief + green contours, never rendered standalone. */
+  function buildMarkersSvg(recipe, spatialRef, projected) {
+    var w = spatialRef.imageWidth, h = spatialRef.imageHeight;
+    var parts = [svgOpen(w, h)];
+    drawMarkerLayers(parts, recipe, projected);
+    parts.push("</svg>");
+    return parts.join("");
+  }
+
+  /* Ground + markers in one document - the whole picture with no terrain pass, and the fast
+     path every existing caller/test still gets by reading frame.svg. */
+  function buildHoleSvg(recipe, spatialRef, projected) {
+    var w = spatialRef.imageWidth, h = spatialRef.imageHeight;
+    var parts = [svgOpen(w, h)];
+    parts.push('<rect x="0" y="0" width="' + w + '" height="' + h + '" fill="' + recipe.colors.background + '"/>');
+    drawGroundLayers(parts, recipe, projected);
+    drawMarkerLayers(parts, recipe, projected);
     parts.push("</svg>");
     return parts.join("");
   }
@@ -566,6 +643,8 @@
     }
 
     var svg = buildHoleSvg(recipe, spatialRef, projected);
+    var groundSvg = buildGroundSvg(recipe, spatialRef, projected);
+    var markersSvg = buildMarkersSvg(recipe, spatialRef, projected);
     var checkpoints = { tee: tee, green: green };
     if (geometry.greenShape && geometry.greenShape.length) {
       checkpoints.greenFront = nearestShapePoint(geometry.greenShape, tee);
@@ -576,6 +655,8 @@
     return {
       ok: true,
       svg: svg,
+      groundSvg: groundSvg,
+      markersSvg: markersSvg,
       width: fit.imageWidth,
       height: fit.imageHeight,
       spatialReference: spatialRef,

@@ -17,18 +17,50 @@
    that, this is the seam to convert to the same queue+worker shape, not a reason to build one
    pre-emptively now.
 
-   Never touches course_maps, course_visuals, course_visual_jobs, or course_mapper_jobs - the
-   task this generates from is READ, everything it writes lands only in course_watch_maps and
-   the course-watch-maps Storage bucket. */
+   Never touches course_maps, course_visuals, course_visual_jobs, or course_mapper_jobs (the
+   DATABASE TABLES) - the task this generates from is READ, everything it writes lands only in
+   course_watch_maps and the course-watch-maps Storage bucket.
+
+   The one read this pipeline adds beyond that: TERRAIN_BUCKET below is the "course-visuals"
+   Storage BUCKET (hyphen), a different resource from the course_visuals DATABASE TABLE
+   (underscore) the paragraph above forbids. It is read best-effort, for one file per course -
+   the stable frames/index.json the satellite-bake worker already overwrites on every successful
+   run - to find each hole's already-cropped elevation image and shade a Watch-scale relief from
+   it. No row is read, no job state is consulted, and a course that has never run a satellite
+   bake (or a hole whose relief there failed) simply ships its Watch map flat, exactly as every
+   hole did before this existed. See generateWatchPackage's terrain step. */
 
 import sharp from "sharp";
 import watchMapCore from "../scripts/gd-watch-map-core.js";
 import { objectsVersion } from "./lib/gd-course-package-shape.mjs";
+import { decodeElevation, hillshade, ambientOcclusion, RELIEF_DEFAULTS } from "./lib/gd-relief-core.mjs";
+import { applyRelief, greenContourSvg } from "./lib/gd-visual-export-core.mjs";
+import greenCore from "../scripts/gd-green-contours-core.js";
 
 const MAPS_TABLE = "course_maps";
 const WATCH_TABLE = "course_watch_maps";
 const BUCKET = "course-watch-maps";
+const TERRAIN_BUCKET = "course-visuals";
 const ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
+
+/* Soft-light strength for the terrain relief laid under the ground fills. Lower than the
+   satellite bake's own default: that recipe shades a photograph, where relief has real texture
+   to compete with; this recipe shades three or four flat fill colours, where the same strength
+   reads as heavier because there is nothing else in the picture to share it with. A drawing
+   decision, tunable in place - see gd-relief-core.mjs's header on why relief is drawn, not
+   measured. */
+const TERRAIN_RELIEF_OPACITY = 0.55;
+
+/* Roughly half the satellite bake's own contour weights (scripts/gd-green-contours-core.js's
+   CONTOUR_DEFAULTS) - "thinner" was asked for explicitly, and a 448px-wide canvas earns it
+   anyway: the satellite bake draws at up to 2048px, so its line weights already read heavier
+   per unit of green here than there before any deliberate thinning at all. */
+const WATCH_GREEN_CONTOUR_OPTIONS = {
+  indexWidthPx: 0.55, nonIndexWidthPx: 0.35,
+  indexHaloWidthPx: 1.0, nonIndexHaloWidthPx: 0.7,
+  suppWidthPx: 0.36,
+  arrowWidthPx: 0.6, arrowHaloWidthPx: 1.4
+};
 
 function env(name) { return process.env[name] || ""; }
 function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
@@ -59,6 +91,143 @@ async function storageUpload(path, buffer, contentType) {
   });
   if (!response.ok) throw new Error("Storage upload " + response.status + " for " + path + ": " + (await response.text()).slice(0, 300));
   return path;
+}
+
+async function bucketDownload(bucket, path) {
+  const response = await fetch(supabaseBase() + "/storage/v1/object/" + bucket + "/" + path, {
+    headers: { apikey: supabaseKey(), Authorization: "Bearer " + supabaseKey() }
+  });
+  if (!response.ok) throw new Error("Storage download " + response.status + " for " + bucket + "/" + path);
+  return Buffer.from(await response.arrayBuffer());
+}
+
+/* Best-effort, whole-course, called once per generation rather than once per hole: every
+   hole's already-cropped elevation asset is listed in this one stable file, so finding it never
+   costs more than the one read. Returns null on anything from "no satellite bake has ever run"
+   to a malformed index - the caller's job is to ship the Watch map either way. */
+async function loadTerrainIndex(courseId) {
+  try {
+    const buffer = await bucketDownload(TERRAIN_BUCKET, courseId + "/frames/index.json");
+    const index = JSON.parse(buffer.toString("utf8"));
+    return index && Array.isArray(index.holes) ? index : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+/* The satellite-bake worker only ever records `playSurface.elevation` when its own relief
+   succeeded for that hole (functions/course-visual-worker-background.mjs's own "relief is a
+   finish, not the frame" gate) - so its mere presence here already means a decodable crop with
+   real bounds exists. Still checked defensively: this file reads someone else's asset, not one
+   it wrote itself. */
+function elevationMetaForHole(terrainIndex, holeNumber) {
+  if (!terrainIndex) return null;
+  const hole = terrainIndex.holes.find(h => h.holeNumber === holeNumber);
+  const elevation = hole && hole.playSurface && hole.playSurface.elevation;
+  if (!elevation || !elevation.path || !elevation.bounds || !(elevation.metresPerPixel > 0)) return null;
+  return elevation;
+}
+
+async function loadElevationCrop(elevationMeta) {
+  const buffer = await bucketDownload(TERRAIN_BUCKET, elevationMeta.path);
+  const { data, info } = await sharp(buffer, { limitInputPixels: false }).raw().toBuffer({ resolveWithObject: true });
+  const decoded = decodeElevation(data, info.width, info.height, info.channels, elevationMeta.encoding);
+  return { heights: decoded.heights, width: info.width, height: info.height, bounds: elevationMeta.bounds, metresPerPixel: elevationMeta.metresPerPixel };
+}
+
+/* Same mercator-y convention functions/lib/gd-relief-core.mjs's cropByBounds cuts the crop
+   with (linear in longitude, log-scale in latitude) - matching it here is what makes a lat/lng
+   land on the row/column that crop was actually cut from, not a nearby one. */
+function mercY(lat) {
+  const s = Math.sin(Math.max(-85.05112878, Math.min(85.05112878, lat)) * Math.PI / 180);
+  return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI);
+}
+
+function heightSampler(crop) {
+  const { heights, width, height, bounds } = crop;
+  const dx = (bounds.east - bounds.west) || 1e-12;
+  const dy = (mercY(bounds.south) - mercY(bounds.north)) || 1e-12;
+  const y0 = mercY(bounds.north);
+  return function sample(lat, lng) {
+    const fx = Math.max(0, Math.min(width - 1, ((lng - bounds.west) / dx) * (width - 1)));
+    const fy = Math.max(0, Math.min(height - 1, ((mercY(lat) - y0) / dy) * (height - 1)));
+    const x0 = Math.floor(fx), y0i = Math.floor(fy);
+    const x1 = Math.min(width - 1, x0 + 1), y1 = Math.min(height - 1, y0i + 1);
+    const tx = fx - x0, ty = fy - y0i;
+    const h = (x, y) => heights[y * width + x];
+    return h(x0, y0i) * (1 - tx) * (1 - ty) + h(x1, y0i) * tx * (1 - ty)
+         + h(x0, y1) * (1 - tx) * ty + h(x1, y1) * tx * ty;
+  };
+}
+
+/* Shaded fresh in the Watch canvas's own tee-up orientation, rather than shading the DEM crop
+   north-up (as the satellite bake does) and warping the finished picture to match afterwards -
+   a gradient taken on a rotated raster is a gradient of the ROTATION's own resampling, and
+   rotating an already-lit hillshade blurs it and points the light the wrong way. Sampling each
+   output pixel's real height and lighting THAT grid keeps both the gradient and the light
+   direction honest in the exact frame that ships - no second raster ever exists to warp. */
+function reliefMaskForFrame(spatialRef, sample) {
+  const w = spatialRef.imageWidth, h = spatialRef.imageHeight;
+  const heightsOut = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const latLng = watchMapCore.projectImageToLatLng(spatialRef, { x: x + 0.5, y: y + 0.5 });
+      heightsOut[y * w + x] = latLng ? sample(latLng.lat, latLng.lng) : 0;
+    }
+  }
+  const shade = hillshade(heightsOut, w, h, spatialRef.metresPerPixel, {
+    exaggeration: RELIEF_DEFAULTS.exaggeration,
+    azimuth: RELIEF_DEFAULTS.azimuth,
+    altitude: RELIEF_DEFAULTS.altitude,
+    smoothPx: 1
+  });
+  if (RELIEF_DEFAULTS.ambient > 0) {
+    const ao = ambientOcclusion(heightsOut, w, h, RELIEF_DEFAULTS.exaggeration);
+    for (let i = 0; i < shade.length; i++) shade[i] = shade[i] * (1 - RELIEF_DEFAULTS.ambient) + ao[i] * RELIEF_DEFAULTS.ambient;
+  }
+  const mask = new Uint8Array(w * h);
+  for (let i = 0; i < shade.length; i++) mask[i] = Math.round(shade[i] * 255);
+  return mask;
+}
+
+/* Ground -> terrain relief -> thin green slope contours -> markers, composited in that order so
+   relief lands on real ground pixels and never on the crisp UI markers drawn last. Ships the
+   RESULT as a raster - the composited picture - never the elevation crop or the fitted surface
+   themselves; those never leave this function. Falls back to the plain flat ground+markers SVG,
+   unchanged from before this existed, whenever a hole has no elevation crop or anything about
+   using one goes wrong - a Watch map must never fail to bake because its finish did. */
+async function rasterizeFrame(frame, geometry, terrainIndex, holeNumber) {
+  const elevationMeta = elevationMetaForHole(terrainIndex, holeNumber);
+  if (!elevationMeta) return frame.svg;
+  try {
+    const crop = await loadElevationCrop(elevationMeta);
+    const sample = heightSampler(crop);
+    const mask = reliefMaskForFrame(frame.spatialReference, sample);
+
+    const ground = await sharp(Buffer.from(frame.groundSvg, "utf8")).raw().toBuffer({ resolveWithObject: true });
+    applyRelief(ground.data, mask, TERRAIN_RELIEF_OPACITY, ground.info.channels);
+    const composited = sharp(ground.data, {
+      raw: { width: ground.info.width, height: ground.info.height, channels: ground.info.channels },
+      limitInputPixels: false
+    });
+
+    const overlays = [];
+    if (geometry.greenShape && geometry.greenShape.length >= 8) {
+      const surface = greenCore.fitGreenSurface(crop.heights,
+        { width: crop.width, height: crop.height, bounds: crop.bounds, metresPerPixel: crop.metresPerPixel },
+        geometry.greenShape);
+      if (surface && surface.summary && surface.summary.confidence !== "low") {
+        const project = (latLng) => watchMapCore.projectLatLngToImage(frame.spatialReference, latLng.lat, latLng.lng);
+        const contourSvg = greenContourSvg(surface, frame.width, frame.height, project, WATCH_GREEN_CONTOUR_OPTIONS);
+        if (contourSvg) overlays.push({ input: contourSvg, blend: "over" });
+      }
+    }
+    overlays.push({ input: Buffer.from(frame.markersSvg, "utf8"), blend: "over" });
+    return await composited.composite(overlays).png().toBuffer();
+  } catch (error) {
+    console.log("[watch-maps] terrain skipped for h" + holeNumber + ": " + String(error && error.message || error));
+    return frame.svg;
+  }
 }
 
 /* Storage is normally only a delivery layer: course_watch_maps is the canonical package
@@ -173,11 +342,12 @@ function holeNumbersFromObjects(objectsJson) {
   return Array.from(numbers).sort((a, b) => a - b);
 }
 
-/* Renders one hole's baked SVG to both PNG and WebP and keeps whichever is smaller - the task
-   asks us to compare, not to assume. WebP wins on essentially every flat-vector hole (measured:
-   ~4-6x smaller than PNG for this recipe's flat fills), but the comparison is real, not assumed. */
-async function encodeSmallest(svg) {
-  const buffer = Buffer.from(svg, "utf8");
+/* Renders one hole's baked image (flat SVG, or the terrain-composited raster from
+   rasterizeFrame) to both PNG and WebP and keeps whichever is smaller - the task asks us to
+   compare, not to assume. WebP wins on essentially every flat-vector hole (measured: ~4-6x
+   smaller than PNG for this recipe's flat fills), but the comparison is real, not assumed. */
+async function encodeSmallest(image) {
+  const buffer = Buffer.isBuffer(image) ? image : Buffer.from(image, "utf8");
   const [png, webp] = await Promise.all([
     sharp(buffer).png({ compressionLevel: 9, palette: true }).toBuffer(),
     sharp(buffer).webp({ quality: 82 }).toBuffer()
@@ -193,13 +363,15 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
   const holes = [];
   const errors = [];
   let totalBytes = 0;
+  const terrainIndex = await loadTerrainIndex(courseId);
 
   for (const holeNumber of holeNumbers) {
     const geometry = watchMapCore.objectsForHole(map.objects_json, holeNumber);
     const frame = watchMapCore.buildWatchHoleFrame(watchMapCore.WATCH_MAP_RECIPE_V1, geometry);
     if (!frame.ok) { errors.push({ holeNumber, reason: frame.reason }); continue; }
     try {
-      const encoded = await encodeSmallest(frame.svg);
+      const rasterized = await rasterizeFrame(frame, geometry, terrainIndex, holeNumber);
+      const encoded = await encodeSmallest(rasterized);
       const path = courseId + "/v" + version + "/h" + holeNumber + "." + encoded.format;
       await storageUpload(path, encoded.bytes, encoded.contentType);
       totalBytes += encoded.bytes.length;
@@ -500,7 +672,10 @@ export const config = {
   path: "/api/course-watch-maps",
 };
 
-export const __test = { holeNumbersFromObjects, reportShape, recoveryReport, supersededPaths, sameReferenceGeometry, backfillHoleReferences };
+export const __test = {
+  holeNumbersFromObjects, reportShape, recoveryReport, supersededPaths, sameReferenceGeometry, backfillHoleReferences,
+  mercY, heightSampler, elevationMetaForHole
+};
 
 function json(status, body) {
   return new Response(body == null ? "" : JSON.stringify(body), {

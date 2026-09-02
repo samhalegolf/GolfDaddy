@@ -411,7 +411,7 @@ function greenContourParams(settings) {
    The metres->pixels step goes through the caller's projector - the SAME mercProject that
    placed the imagery - so the lines land on the turf they were measured from rather than on a
    second projection rule that could drift from it. */
-function greenContourSvg(surface, W, H, project, options) {
+export function greenContourSvg(surface, W, H, project, options) {
   const drawing = greenCore.buildGreenDrawing(surface, options);
   if (!drawing) return null;
   const frame = surface.frame;
@@ -464,7 +464,7 @@ function greenContourSvg(surface, W, H, project, options) {
 
    Call this AFTER the imagery is flattened and BEFORE mow lines and floodlight go on. Those
    are drawn marks, not ground - shading them would be shading the annotation. */
-function softLightTable(opacity) {
+export function softLightTable(opacity) {
   const table = new Uint8Array(256 * 256);
   for (let s = 0; s < 256; s++) {
     /* Fold opacity into the shade rather than cross-fading the result: pulling the mask
@@ -482,7 +482,7 @@ function softLightTable(opacity) {
   return table;
 }
 
-function applyRelief(rgb, mask, opacity, channels) {
+export function applyRelief(rgb, mask, opacity, channels) {
   if (!mask || !(opacity > 0)) return rgb;
   const table = softLightTable(opacity);
   const pixels = Math.min(mask.length, Math.floor(rgb.length / channels));

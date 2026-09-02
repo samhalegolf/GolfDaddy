@@ -341,4 +341,70 @@ function neighbouringRibbon() {
   });
 })();
 
+// --- polygon smoothing: jagged decimated corners get rounded, not the shape lost ------------
+
+/* A sawtooth ring: a square with every edge midpoint kicked hard outward, alternating in and
+   out. simplifyPoints keeps all of it (spacing is generous relative to the kick), so this
+   isolates smoothClosedPolygon's own effect. */
+function sawtoothSquare() {
+  /* Centred on longHole()'s own bunker location (known to survive framing/corridor/canvas), so
+     this isolates smoothClosedPolygon's effect rather than accidentally testing corridor
+     placement again. */
+  const base = 169.1032, lat = -45.0122;
+  const kickDeg = 0.00003;
+  return [
+    { lat: lat - 0.0002, lng: base - 0.0002 },
+    { lat: lat - 0.0002 - kickDeg, lng: base },
+    { lat: lat - 0.0002, lng: base + 0.0002 },
+    { lat: lat, lng: base + 0.0002 + kickDeg },
+    { lat: lat + 0.0002, lng: base + 0.0002 },
+    { lat: lat + 0.0002 + kickDeg, lng: base },
+    { lat: lat + 0.0002, lng: base - 0.0002 },
+    { lat: lat, lng: base - 0.0002 - kickDeg }
+  ];
+}
+
+(function testSmoothingRoundsJaggedCornersWithoutLosingTheShape() {
+  const geometry = Object.assign({}, longHole(), { bunkers: [sawtoothSquare()] });
+  const smoothRecipe = core.WATCH_MAP_RECIPE_V1;
+  const noSmoothRecipe = JSON.parse(JSON.stringify(core.WATCH_MAP_RECIPE_V1));
+  noSmoothRecipe.simplify.smoothPasses = 0;
+
+  const smoothed = core.buildWatchHoleFrame(smoothRecipe, geometry);
+  const flat = core.buildWatchHoleFrame(noSmoothRecipe, geometry);
+  assert.strictEqual(smoothed.ok, true);
+  assert.strictEqual(flat.ok, true);
+  assert.strictEqual(smoothed.layers.bunkers, 1, "the sawtooth bunker must still survive as one polygon");
+
+  function bunkerPoints(svg) {
+    const match = svg.match(/<polygon points="([^"]+)" fill="#e9d9a8"/);
+    assert.ok(match, "bunker polygon must be present in the SVG");
+    return match[1].split(" ").map(pair => { const [x, y] = pair.split(",").map(Number); return { x, y }; });
+  }
+  const smoothPts = bunkerPoints(smoothed.svg);
+  const flatPts = bunkerPoints(flat.svg);
+  assert.strictEqual(smoothPts.length, flatPts.length, "smoothing must move points, not add or remove them");
+
+  function perimeter(points) {
+    let sum = 0;
+    for (let i = 0; i < points.length; i++) {
+      const a = points[i], b = points[(i + 1) % points.length];
+      sum += Math.hypot(a.x - b.x, a.y - b.y);
+    }
+    return sum;
+  }
+  assert.ok(perimeter(smoothPts) < perimeter(flatPts),
+    "rounding a sawtooth must shorten its perimeter - the whole point of cutting the corners");
+  assert.notDeepStrictEqual(smoothPts, flatPts, "smoothPasses:0 must actually disable smoothing, for this to be a real comparison");
+})();
+
+(function testSmoothingLeavesTinyShapesAlone() {
+  /* A 4-point shape sits at the recipe's own "nothing to round" floor - smoothing it would only
+     ever distort a shape with no spare vertex to spend on rounding. */
+  const geometry = longHole(); // its own fairway and bunker are both <= 4 points
+  const frame = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, geometry);
+  assert.strictEqual(frame.layers.fairways, 1);
+  assert.strictEqual(frame.layers.bunkersMapped, 1);
+})();
+
 console.log("watch-map-core passed");

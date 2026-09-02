@@ -241,6 +241,37 @@ const root = path.join(__dirname, "..");
   assert.strictEqual(helpers.sameReferenceGeometry(baked, null), false);
   assert.strictEqual(helpers.sameReferenceGeometry({}, freshSame), false, "a row with no checkpoints cannot be verified");
 
+  // --- terrain: elevationMetaForHole is a strict, defensive gate ---------------------------
+
+  assert.strictEqual(helpers.elevationMetaForHole(null, 1), null, "no index at all - no satellite bake has ever run");
+  assert.strictEqual(helpers.elevationMetaForHole({ holes: [] }, 1), null, "no hole entry for this number");
+  assert.strictEqual(helpers.elevationMetaForHole({ holes: [{ holeNumber: 1 }] }, 1), null, "hole present but relief never succeeded there");
+  assert.strictEqual(
+    helpers.elevationMetaForHole({ holes: [{ holeNumber: 1, playSurface: { elevation: { path: "c/frames/v1/h1.elevation.png" } } } ] }, 1),
+    null, "an elevation entry missing bounds/metresPerPixel must not be trusted");
+  const goodElevation = { path: "c/frames/v1/h1.elevation.png", bounds: { west: 169, south: -45, east: 169.01, north: -44.99 }, metresPerPixel: 0.6, encoding: "terrain-rgb" };
+  assert.deepStrictEqual(
+    helpers.elevationMetaForHole({ holes: [{ holeNumber: 1, playSurface: { elevation: goodElevation } }, { holeNumber: 2 }] }, 1),
+    goodElevation, "a complete elevation entry is returned as-is, for the hole asked for");
+  assert.strictEqual(helpers.elevationMetaForHole({ holes: [{ holeNumber: 1, playSurface: { elevation: goodElevation } }] }, 2),
+    null, "must not return another hole's elevation");
+
+  // --- terrain: heightSampler bilinear-samples the crop in the crop's OWN mercator frame ---
+
+  /* A flat 2x2 crop with a single known slope: north-west corner low, everywhere else high.
+     bounds cover exactly 1 degree of latitude and longitude so the maths is easy to check by
+     hand - this is the same mercY convention gd-relief-core.mjs's cropByBounds cuts with. */
+  const flatCrop = {
+    heights: new Float32Array([10, 20, 20, 20]), // row-major: NW, NE, SW, SE
+    width: 2, height: 2,
+    bounds: { west: 0, east: 1, north: 1, south: 0 }
+  };
+  const sampleFlat = helpers.heightSampler(flatCrop);
+  assert.ok(Math.abs(sampleFlat(1, 0) - 10) < 1e-6, "the crop's own NW corner must read back its own height");
+  assert.ok(Math.abs(sampleFlat(0, 1) - 20) < 1e-6, "the crop's own SE corner must read back its own height");
+  assert.ok(sampleFlat(0.5, 0.5) > 10 && sampleFlat(0.5, 0.5) < 20, "the centre must interpolate between the corners, not pick one");
+  assert.strictEqual(sampleFlat(5, 5), sampleFlat(1, 1), "a lat/lng outside the crop must clamp to the nearest edge, not extrapolate or throw");
+
   /* An outline that has appeared or vanished since the bake is a change, even
      though the green centre has not moved. */
   const noShape = { "tee-1": BACKFILL_OBJECTS["tee-1"], "green-1": { type: "green", holeNumber: 1, position: BACKFILL_OBJECTS["green-1"].position } };

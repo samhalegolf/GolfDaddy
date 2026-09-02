@@ -527,7 +527,6 @@
   var HALO_ALPHA = 0.26;
   var SUPP_INK = "#1b3a23";
   var SUPP_ALPHA = 0.26;
-  var SUPP_WIDTH = 0.72;
   var ARROW_INK = "#0b2013";
   var ARROW_ALPHA = 0.44;
   var RUN_POINTS = 6;
@@ -567,7 +566,17 @@
     /* How far inside the polygon the drawing fades to nothing. This is what keeps the green
        OUTLINE from ever appearing: no line reaches the boundary, so there is no edge to see. */
     edgeFadeM: 2.6,
-    opacity: 1
+    opacity: 1,
+    /* Stroke widths, in output pixels. Callers rendering at a much smaller canvas (the Watch
+       map, 448px wide vs. up to 2048px for the satellite bake) override these to keep the same
+       proportion of ink to ground rather than drawing satellite-scale lines onto a wrist. */
+    indexWidthPx: 1.1,
+    nonIndexWidthPx: 0.7,
+    indexHaloWidthPx: 2.1,
+    nonIndexHaloWidthPx: 1.5,
+    suppWidthPx: 0.72,
+    arrowWidthPx: 1.25,
+    arrowHaloWidthPx: 2.95
   };
 
   /**
@@ -646,7 +655,7 @@
         /* Skip levels that ARE main contours - a thin pale line exactly under a heavy one just
            dirties its edge. */
         if (Math.abs(sc.level / cfg.intervalM - Math.round(sc.level / cfg.intervalM)) < 1e-6) continue;
-        pushRuns(sc.points, SUPP_INK, SUPP_WIDTH, SUPP_ALPHA, 0, function (mid) {
+        pushRuns(sc.points, SUPP_INK, cfg.suppWidthPx, SUPP_ALPHA, 0, function (mid) {
           var pct = slopeAt(fit, mid.x, mid.y).percent;
           var gapM = cfg.intervalM / Math.max(pct / 100, 1e-4);
           return Math.max(0, Math.min(1,
@@ -659,7 +668,8 @@
       var c = paths[p];
       var index = Math.abs(Math.round(c.level / cfg.intervalM)) % cfg.indexEvery === 0;
       pushRuns(c.points, levelColour((c.level - lo) / span),
-        index ? 1.1 : 0.7, index ? 0.62 : 0.40, index ? 2.1 : 1.5, null);
+        index ? cfg.indexWidthPx : cfg.nonIndexWidthPx, index ? 0.62 : 0.40,
+        index ? cfg.indexHaloWidthPx : cfg.nonIndexHaloWidthPx, null);
     }
 
     /* Walk each index contour and drop an arrow every arrowAlongM of GROUND. Stepping by arc
@@ -687,7 +697,7 @@
           colour: ARROW_INK, haloColour: HALO,
           alpha: ARROW_ALPHA * f2 * cfg.opacity,
           haloAlpha: HALO_ALPHA * f2 * cfg.opacity,
-          widthPx: 1.25, haloWidthPx: 2.95
+          widthPx: cfg.arrowWidthPx, haloWidthPx: cfg.arrowHaloWidthPx
         });
       }
     }
