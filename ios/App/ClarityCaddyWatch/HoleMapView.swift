@@ -59,7 +59,13 @@ struct HoleMapView: View {
                     if let playerAt { dot(context, at: playerAt, radius: 4.5, fill: .white, edge: .black.opacity(0.8)) }
                 }
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
+            /* topLeading, and it is load-bearing. The Image is now far TALLER
+               than the view (a hole is 1352pt at play scale in a ~190pt space),
+               so the ZStack sizes to it — and `.frame` centres oversized content
+               by default, which shifted the picture ~580pt and drew the empty
+               space past the end of the image. The offset above is computed from
+               the top-left, so the frame has to anchor there too. */
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
             .clipped()
         }
     }

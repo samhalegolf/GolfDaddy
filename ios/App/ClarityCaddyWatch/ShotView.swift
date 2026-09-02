@@ -45,7 +45,14 @@ struct ShotView: View {
     private var rejectionText: String? {
         guard let rejection else { return nil }
         switch rejection.reason {
-        case "marshal-rejected": return "Not yet — start your round first"
+        /* `marshal-rejected` is a catch-all: Marshal declined and did not say
+           why. The old wording guessed — "start your round first" — and guessed
+           wrong the moment the round WAS running, which is most of the time a
+           player sees this: the usual cause is pressing LOCK while looking at a
+           hole they are not playing. So say what the wrist actually knows
+           (hole.live tells it), and otherwise decline to invent a reason. */
+        case "marshal-rejected":
+            return scene.hole?.live == false ? "Not on this hole" : "Can't do that yet"
         case "future-revision": return "Out of sync — try again"
         case "invalid-location": return "No GPS fix"
         case "no-live-round": return "Play on iPhone first"

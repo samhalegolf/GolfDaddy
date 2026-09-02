@@ -107,7 +107,10 @@ struct AimableHoleMap: View {
                     }
                 }
             }
-            .frame(width: viewSize.width, height: viewSize.height)
+            /* topLeading for the same reason as HoleMapView: the image is
+               taller than the view at play scale, and a centring frame would
+               slide it off the drawn content. */
+            .frame(width: viewSize.width, height: viewSize.height, alignment: .topLeading)
             .clipped()
             .contentShape(Rectangle())
             .gesture(aimGesture(viewSize: viewSize), including: canAim ? .all : .subviews)
