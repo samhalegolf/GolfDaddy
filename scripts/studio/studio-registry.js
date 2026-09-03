@@ -77,11 +77,41 @@
     },
     {
       id: "communications", label: "Communications", parent: null,
-      function: "Not yet moved into Studio. Notification preferences/events were located by filename but not read in depth this branch.",
-      owner: "Needs verification", runtime: { app: true, studio: false, server: false },
-      code: [{ role: "Email/notification events (unconfirmed scope)", path: "scripts/clarity-email.js" }],
-      inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [], keyFunctions: [],
-      status: "placeholder", needsVerification: true
+      function: "Every outbound email Clarity sends: what fires it, who receives it, what suppresses it, and a live preview of the real template. Read-only — sending and copy edits live elsewhere.",
+      owner: "Studio Communications page + the shared template core",
+      runtime: { app: true, studio: true, server: true },
+      code: [
+        { role: "Studio page", path: "scripts/studio/communications/communications-page.js" },
+        { role: "Templates, copy and the catalogue (shared browser/server)", path: "scripts/gd-email-templates-core.js" },
+        { role: "Delivery + service senders", path: "functions/email-notification.js" },
+        { role: "Account setup / invite send", path: "functions/admin-user-invite.js" },
+        { role: "Password reset send", path: "functions/auth-reset-password.js" },
+        { role: "Opt-in activity events and per-account preferences", path: "scripts/clarity-email.js" }
+      ],
+      inputs: [
+        "RESEND_API_KEY, CLARITY_EMAIL_FROM, CLARITY_SITE_URL, EMAIL_NOTIFICATIONS_ENABLED (reported as booleans by payment-admin's settings action)",
+        "Per-account notification preferences, stored on the account row by clarity-email.js"
+      ],
+      outputs: ["Outbound email via Resend"],
+      owns: [
+        "The one email layout and every subject/title/detail string",
+        "The catalogue of what is sent and why"
+      ],
+      doesNotOwn: [
+        "Delivery credentials (Netlify env only)",
+        "Whether an entitlement or account exists — the email only describes what another system already wrote"
+      ],
+      connections: [
+        { target: "commerce", direction: "used-by", label: "comped access email; the comped-month tick shares its entitlement writer" },
+        { target: "players-coaches", direction: "used-by", label: "creating an account sends the setup email" }
+      ],
+      keyFunctions: [
+        { name: "catalogue", purpose: "Every email, its trigger and what suppresses it.", codePath: "scripts/gd-email-templates-core.js" },
+        { name: "build", purpose: "Subject + HTML + plain text for one event type.", codePath: "scripts/gd-email-templates-core.js" },
+        { name: "sendAccountSetupEmail", purpose: "Account setup, with the comped variant folded in.", codePath: "functions/email-notification.js" },
+        { name: "sendCompedAccessEmail", purpose: "Comped access issued on its own from Commerce.", codePath: "functions/email-notification.js" }
+      ],
+      status: "implemented", needsVerification: false
     },
     {
       id: "system", label: "System", parent: null,

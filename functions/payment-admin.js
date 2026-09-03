@@ -14,7 +14,8 @@ const {
   normaliseProductKey,
   productPriceId,
   supabaseFetch,
-  text
+  text,
+  writeCompedEntitlement
 } = require("./payment-utils");
 const { sendSystemAlert } = require("./alert-utils");
 const { sendCompedAccessEmail } = require("./email-notification");
@@ -118,6 +119,15 @@ async function readSettings(auth) {
     stripeConnected: !!env("STRIPE_SECRET_KEY"),
     webhookConfigured: !!env("STRIPE_WEBHOOK_SECRET"),
     alertEmailConfigured: !!env("CLARITY_ALERT_EMAIL"),
+    /* Outbound-email delivery, reported as booleans only - never the values. Studio's
+       Communications page shows these next to the catalogue, because "which emails does
+       Clarity send" is only half an answer without "and can it send anything at all". */
+    emailDelivery: {
+      providerConfigured: !!env("RESEND_API_KEY"),
+      fromAddress: env("CLARITY_EMAIL_FROM") || "",
+      siteUrl: env("CLARITY_SITE_URL") || "",
+      activityEmailsEnabled: env("EMAIL_NOTIFICATIONS_ENABLED") === "1"
+    },
     monthPassPriceConfigured: diagnostics.monthPassPriceConfigured,
     monthlyMembershipPriceConfigured: diagnostics.monthlyMembershipPriceConfigured,
     subscriptionWebhookEventsConfigured: diagnostics.subscriptionWebhookEventsConfigured,
@@ -414,43 +424,28 @@ async function manualRevokePermission(payload, auth) {
 async function issueFreePass(payload, auth) {
   const accountEmail = email(payload.accountEmail || payload.email);
   const accountId = text(payload.accountId || payload.userId, 120);
-  const productKey = text(payload.productKey || "free_pass", 80).toLowerCase().replace(/[^a-z0-9_]+/g, "_");
-  const hours = Number(payload.durationHours || payload.duration_hours || 24);
-  const cleanHours = Number.isFinite(hours) && hours > 0 ? hours : 24;
-  const isCompedMembership = productKey === ADMIN_COMPED_MEMBERSHIP_KEY;
-  const allowMemberReferrals = isCompedMembership && boolFlag(payload.allowMemberReferrals, true);
   if (!accountEmail && !accountId) return json(400, { error: "Account email or account id is required" });
 
-  const starts = payload.startsAt ? new Date(payload.startsAt) : new Date();
-  const expires = payload.expiresAt ? new Date(payload.expiresAt) : new Date(starts.getTime() + cleanHours * 60 * 60 * 1000);
-  if (Number.isNaN(starts.getTime()) || Number.isNaN(expires.getTime())) return json(400, { error: "Invalid pass dates" });
+  let pass;
+  try {
+    /* Same writer as the "Include a comped month" tick on Create Player Account, so the two
+       routes cannot drift into issuing two different shapes of comp. */
+    pass = await writeCompedEntitlement({
+      accountEmail,
+      accountId,
+      productKey: payload.productKey || "free_pass",
+      durationHours: payload.durationHours || payload.duration_hours || 24,
+      allowMemberReferrals: boolFlag(payload.allowMemberReferrals, true),
+      startsAt: payload.startsAt,
+      expiresAt: payload.expiresAt,
+      note: payload.note,
+      issuedBy: auth.account && auth.account.email || "admin",
+      issuedVia: "commerce_admin"
+    });
+  } catch (error) {
+    return json(400, { error: error.message || "Could not issue the pass" });
+  }
 
-  await supabaseFetch("user_entitlements", {
-    method: "POST",
-    headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({
-      user_id: accountId || null,
-      account_email: accountEmail || null,
-      entitlement_type: productKey,
-      product_key: productKey,
-      status: "active",
-      starts_at: starts.toISOString(),
-      expires_at: expires.toISOString(),
-      source_type: isCompedMembership ? ADMIN_COMPED_MEMBERSHIP_KEY : "admin_free_pass",
-      entitlement_reason: isCompedMembership ? ADMIN_COMPED_MEMBERSHIP_KEY : productKey,
-      referral_eligible: allowMemberReferrals,
-      non_renewing: true,
-      metadata: {
-        source: isCompedMembership ? ADMIN_COMPED_MEMBERSHIP_KEY : "admin_free_pass",
-        entitlement_reason: isCompedMembership ? ADMIN_COMPED_MEMBERSHIP_KEY : productKey,
-        note: text(payload.note, 500),
-        issued_by: auth.account && auth.account.email || "admin",
-        duration_hours: cleanHours,
-        membership_level: isCompedMembership,
-        allow_member_referrals: allowMemberReferrals
-      }
-    })
-  });
   /* Notify the recipient, after the entitlement is safely written. A failed
      email is reported in emailStatus but never fails the request - the pass
      exists either way, and claiming otherwise is how this screen used to lie.
@@ -463,14 +458,13 @@ async function issueFreePass(payload, auth) {
     try {
       const accountRows = await supabaseFetch("app_accounts?select=account_id,name&email=eq." + encodeFilter(accountEmail) + "&limit=1", { method: "GET" });
       const existingAccount = Array.isArray(accountRows) ? accountRows[0] : null;
-      const days = Math.round(cleanHours / 24);
       const result = await sendCompedAccessEmail({
         to: accountEmail,
         recipientName: existingAccount && existingAccount.name || "",
         hasAccount: !!existingAccount,
-        membership: isCompedMembership,
-        periodLabel: days >= 28 && days <= 31 ? "a month" : days + " days",
-        expiresLabel: expires.toLocaleDateString("en-NZ", { day: "numeric", month: "long", year: "numeric" }),
+        membership: pass.membership,
+        periodLabel: pass.periodLabel,
+        expiresLabel: pass.expiresLabel,
         issuedByName: "Clarity Golf"
       });
       emailStatus = result && result.sent ? "sent" : "skipped";
@@ -479,7 +473,7 @@ async function issueFreePass(payload, auth) {
     }
   }
 
-  await logAdmin(auth, "issue_free_pass", { accountEmail, accountId, productKey, hours: cleanHours, emailStatus });
+  await logAdmin(auth, "issue_free_pass", { accountEmail, accountId, productKey: pass.productKey, hours: pass.durationHours, emailStatus });
   return json(200, { ok: true, message: "Free pass issued", emailStatus });
 }
 

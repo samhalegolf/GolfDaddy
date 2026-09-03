@@ -17,6 +17,10 @@
      from "the same shot's aim is being dragged" (leave wind alone). */
   var lastShotStartKey = null;
 
+  /* Wired once, on the first Marshal. The listener outlives any single round
+     and asks the Marshal fresh each time, so there is nothing to tear down. */
+  var wiredSleepUnlock = false;
+
   /* Build the Marshal and hand it the effects it is allowed to cause. It is
      pure by construction — no globals, no DOM — so everything with a side
      effect arrives here, which is also why the whole transition table can be
@@ -129,7 +133,7 @@
         window.GDWatchHandover.attach(app.caddyWatch);
       }
     }
-    /* The only two things that turn the outside world into Signals. A fix that
+    /* The three things that turn the outside world into Signals. A fix that
        is not trusted is refused inside the Marshal, not here — this file does
        not get to decide what counts. */
     if (app.gps) {
@@ -139,7 +143,48 @@
         if (status === "denied" || status === "unsupported") app.marshal.signal("FIX_LOST");
       });
     }
+    wireSleepUnlock();
     return app.marshal;
+  }
+
+  /* Putting the phone away lets the shot go.
+
+     WHAT THIS ACTUALLY LISTENS TO. iOS gives an app no way to hear the side
+     button. What it gives is "you are no longer on screen", and inside a
+     WKWebView that arrives as visibilitychange -> hidden — fired by the side
+     button, by swiping home, and by switching apps, and NOT by pulling down
+     Control Centre or a notification, which leave the page visible. So the
+     rule is honestly "the phone stopped showing the round", and pressing the
+     side button is the case it was asked for.
+
+     WHY THAT IS THE RIGHT RULE ANYWAY. A locked shot is a picture of an aim
+     being taken. Nobody takes an aim with the phone in a pocket; the next
+     thing that happens is the walk to the ball. Marshal's own thirty-metre
+     release (AIM_RELEASE_M) is the backstop for a phone that never came out
+     again — this is the same intention, said a few minutes earlier and with
+     no GPS needed to say it.
+
+     WHY MARSHAL IS ASKED RATHER THAN TOLD. UNLOCK refuses itself unless a shot
+     is actually locked, so there is no "is there anything to unlock" test
+     here; deciding that outside the Marshal is exactly the second opinion this
+     file exists not to have. It costs the picture and never the record.
+
+     THE ONE GATE. Not while the WATCH is driving. A phone in a pocket during a
+     wrist-driven round is the normal state of that round, and a shot locked on
+     the wrist must not be let go because the phone's screen went dark in a
+     bag. The wrist has its own rule for walking off a shot
+     (WatchAimRelease, five metres) and it is the surface actually looking at
+     the shot. */
+  function wireSleepUnlock() {
+    if (wiredSleepUnlock) return;
+    wiredSleepUnlock = true;
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState !== "hidden") return;
+      if (!app.marshal) return;
+      var surface = app.caddyWatch && app.caddyWatch.surface();
+      if (surface && surface.active === "watch") return;
+      app.marshal.signal("UNLOCK");
+    });
   }
 
   function startRound(course, pkg) {

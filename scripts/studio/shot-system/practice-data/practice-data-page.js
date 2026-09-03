@@ -33,7 +33,14 @@
       "</div>";
 
     var btn = containerEl.querySelector("#gdStudioOpenPracticeAdmin");
-    if (btn && canOpen) btn.addEventListener("click", function () { window.gdOpenPracticeAdminTab(); });
+    /* Same hand-off as every other Studio jump - see gd-studio-handoff.js. */
+    var handoff = null;
+    if (btn && canOpen) btn.addEventListener("click", function () {
+      if (handoff) handoff();
+      handoff = window.GDStudioHandoff.to({ open: function () { window.gdOpenPracticeAdminTab(); } });
+    });
+
+    return function () { if (handoff) handoff(); };
   }
 
   window.GDStudioPages = window.GDStudioPages || {};

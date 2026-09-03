@@ -8,12 +8,22 @@
  * this page opens the real screen the same way the app's own "Open Membership" button does,
  * rather than duplicating ~1200 lines of billing UI.
  *
- * #playerSettingsPanel uses the bare `.panel` class (z-index 3900, styles/inline/gd-app-
- * base.css:149) with no higher override — unlike the other Studio jump targets (#dataHubPanel's
- * .gdShotDataPanel.open hits 100200, #gdProfileV67 is 7600), it would render BELOW the Studio
- * shell (#gdStudioShellRoot, z-index 4000) and be invisible. Confirmed by testing, not assumed.
- * Fixed here with a scoped inline z-index bump on the one element, rather than touching the
- * shared production CSS rule that every `.panel`-classed screen in the app depends on. */
+ * ---- why this steps aside instead of out-stacking the panel ----
+ *
+ * This page used to raise #playerSettingsPanel above the Studio shell with an inline
+ * z-index, which is what it was reported for. That style is permanent for the session, so
+ * from then on EVERY later open of the app's ORDINARY Settings - its own Settings button,
+ * gdPanelBack returning to it, the payments card's own "‹ Settings" back link - painted the
+ * general settings menu on top of Studio with Studio's nav sealed underneath and unclickable.
+ * And because gd67OpenMembershipSettings() opens the panel on the MENU first and only jumps to
+ * Access & Membership on a setTimeout(…, 0), "general app settings, nothing responds" is also
+ * what a raised panel looks like for any tick that jump has not landed. Meanwhile a panel
+ * opened by any route that did NOT run the bump sat at 3900, below the shell: open, invisible,
+ * with every click going to Studio.
+ *
+ * The shell now outranks the app outright, and the jump goes through GDStudioHandoff: Studio
+ * steps aside, the real screen owns the whole viewport at its own natural z-index, and Studio
+ * comes back when it closes. One outcome instead of three. */
 (function () {
   "use strict";
 
@@ -28,14 +38,24 @@
       '<p><button type="button" class="gdStudioDiagramBtn" id="gdStudioOpenCommerceAdmin"' +
       (canOpen ? "" : " disabled") + ">Open Commerce Admin (Payments)</button></p>" +
       (canOpen ? "" : '<p class="gdStudioNeedsVerification">gd67OpenMembershipSettings() was not found on this build.</p>') +
+      '<p class="gdStudioMuted" id="gdStudioCommerceHandoffNote" hidden>Studio is out of the way while the ' +
+      "Payments screen is open. Close that screen and Studio comes back here.</p>" +
       "</div>";
+
+    var handoff = null;
 
     var btn = containerEl.querySelector("#gdStudioOpenCommerceAdmin");
     if (btn && canOpen) btn.addEventListener("click", function () {
-      window.gd67OpenMembershipSettings();
-      var panel = document.getElementById("playerSettingsPanel");
-      if (panel) panel.style.zIndex = "4500";
+      var note = containerEl.querySelector("#gdStudioCommerceHandoffNote");
+      if (note) note.hidden = false;
+      if (handoff) handoff();
+      handoff = window.GDStudioHandoff.to({
+        open: function () { window.gd67OpenMembershipSettings(); },
+        onReturn: function () { if (note) note.hidden = true; }
+      });
     });
+
+    return function () { if (handoff) handoff(); };
   }
 
   window.GDStudioPages = window.GDStudioPages || {};

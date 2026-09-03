@@ -10,11 +10,6 @@
   function safe(fn, fallback){
     try{return fn();}catch(e){return fallback;}
   }
-  function escapeHTML(value){
-    return String(value == null ? "" : value).replace(/[&<>"']/g,function(ch){
-      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch];
-    });
-  }
   function nowISO(){return new Date().toISOString();}
   function role(account){return String(account && account.role || "player").toLowerCase();}
   function isStaff(account){var r=role(account);return r==="coach"||r==="admin";}
@@ -182,33 +177,6 @@
     url.searchParams.set("email", String(emailValue || "").trim());
     return url.toString();
   }
-  function template(payload){
-    var recipientName = firstName(payload.recipientName);
-    var actorName = payload.actorName || "Clarity";
-    var title = payload.title || "Your Clarity account was updated";
-    var detail = payload.detail || "";
-    var ctaUrl = payload.ctaUrl || appUrl();
-    var ctaLabel = payload.ctaLabel || "Open Clarity";
-    var footer = isServiceEmail(payload)
-      ? "You are receiving this because it relates to your Clarity account access."
-      : "You can change email notifications in Settings &gt; Notifications.";
-    var html = [
-      "<!doctype html><html><body style=\"margin:0;background:#07100b;color:#f7faf7;font-family:Arial,sans-serif\">",
-      "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#07100b;padding:28px 14px\"><tr><td align=\"center\">",
-      "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:560px;background:#101b15;border:1px solid rgba(255,255,255,.12);border-radius:20px;overflow:hidden\">",
-      "<tr><td style=\"padding:24px 24px 16px;background:#07100b\"><img src=\""+escapeHTML(payload.logoUrl || logoUrl())+"\" width=\"44\" height=\"44\" alt=\"Clarity Golf\" style=\"vertical-align:middle;margin-right:12px\"><span style=\"font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:#b9c4bd;font-weight:700\">Clarity Golf Systems</span></td></tr>",
-      "<tr><td style=\"padding:24px\"><p style=\"margin:0 0 10px;color:#42b66a;font-weight:700\">Hi "+escapeHTML(recipientName)+",</p>",
-      "<h1 style=\"margin:0 0 12px;color:#fff;font-size:28px;line-height:1.05\">"+escapeHTML(title)+"</h1>",
-      "<p style=\"margin:0 0 18px;color:#c8d1cc;font-size:16px;line-height:1.45\">"+escapeHTML(detail)+"</p>",
-      "<p style=\"margin:0 0 22px;color:#8fa199;font-size:13px;line-height:1.4\">Update from "+escapeHTML(actorName)+".</p>",
-      "<a href=\""+escapeHTML(ctaUrl)+"\" style=\"display:inline-block;background:#ff9f2f;color:#06110b;text-decoration:none;font-weight:800;border-radius:999px;padding:12px 18px\">"+escapeHTML(ctaLabel)+"</a>",
-      "</td></tr>",
-      "<tr><td style=\"padding:16px 24px 24px;color:#708178;font-size:12px;line-height:1.45\">"+footer+"</td></tr>",
-      "</table></td></tr></table></body></html>"
-    ].join("");
-    var text = "Hi " + recipientName + ",\\n\\n" + title + "\\n\\n" + detail + "\\n\\nUpdate from " + actorName + ".\\n\\n" + ctaUrl;
-    return {html:html,text:text};
-  }
   function eventTitle(kind, actor, target){
     var actorName = actor && actor.name || "A connected account";
     var targetName = target && target.name || "your account";
@@ -243,12 +211,15 @@
     var prefs = getPreferences(recipient);
     var allowed = force || prefsAllow(recipient, event);
     var recipientEmail = prefs.email || recipient.email || "";
+    /* The body is NOT built here. /api/email-notification renders every message from
+       scripts/gd-email-templates-core.js and has always ignored an html/text pair sent up with
+       the payload - so building one client-side was a fourth copy of the brand that nobody
+       ever received, quietly drifting from the three that did. Send the facts; the server owns
+       the words. */
     var payload = Object.assign({}, event, {
       to:recipientEmail,
       recipientName:recipient.name || recipient.email || "there",
-      logoUrl:logoUrl(),
-      html:template(Object.assign({}, event, {recipientName:recipient.name || recipient.email || "there"})).html,
-      text:template(Object.assign({}, event, {recipientName:recipient.name || recipient.email || "there"})).text
+      logoUrl:logoUrl()
     });
     var queued = Object.assign({}, event, {
       recipientAccountId:recipient.accountId,
@@ -287,9 +258,11 @@
       createdAt:nowISO()
     };
   }
-  function isServiceEmail(event){
-    return ["account_created","password_recovery"].indexOf(event && event.eventType) !== -1;
-  }
+  /* Which event types are service (always-send) mail is the SERVER's answer - see
+     SERVICE_EVENT_TYPES in scripts/gd-email-templates-core.js, which is what the endpoint
+     actually applies. There used to be a second, shorter list here that only fed the footer of
+     the client-side layout nobody received; it had already drifted. Nothing on this side needs
+     the answer, so it no longer keeps one. */
   function sendServiceEmail(recipient, options){
     if(!recipient)return Promise.resolve({queued:false});
     return sendToRecipient(serviceEvent(recipient, options), recipient, true);
@@ -487,7 +460,6 @@
     renderSettings:renderSettings,
     recordActivity:recordActivity,
     readEvents:readEvents,
-    template:template,
     sendTest:sendTest
   };
   window.gdToggleEmailNotifications = toggleEmailNotifications;

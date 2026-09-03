@@ -24,7 +24,17 @@
       "</div>";
 
     var btn = containerEl.querySelector("#gdStudioOpenCourseDataAdmin");
-    if (btn && canOpen) btn.addEventListener("click", function () { window.gdOpenCourseData({ adminTab: true }); });
+    /* Same hand-off as every other Studio jump: the shell steps aside so the real screen owns
+       the viewport, and comes back when it closes. Before the shell outranked the app this
+       opened a `.panel` at 3900 UNDER the shell - open, invisible, and eating nothing because
+       every click landed on Studio. */
+    var handoff = null;
+    if (btn && canOpen) btn.addEventListener("click", function () {
+      if (handoff) handoff();
+      handoff = window.GDStudioHandoff.to({ open: function () { window.gdOpenCourseData({ adminTab: true }); } });
+    });
+
+    return function () { if (handoff) handoff(); };
   }
 
   window.GDStudioPages = window.GDStudioPages || {};

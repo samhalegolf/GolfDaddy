@@ -4163,6 +4163,48 @@ body.gdGpsActive #shellRouteLabel{
 #gdProfileV67 .coachAdminTab .accountGrid{
   margin-top:10px;
 }
+/* "Include a comped month" on Create Player Account. A real tick target, not a bare
+   checkbox: the whole row is the <label>, so the copy explaining what the comp IS is also
+   what you tap. Admin-only - the markup is not emitted for a coach. */
+#gdProfileV67 .coachCompRow{
+  /* The surrounding .accountGrid uppercases its <label>s, which is right for one-word field
+     captions and wrong for a sentence. Reset it here rather than at the grid, so nothing else
+     in that form changes. */
+  text-transform:none;
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  margin-top:10px;
+  padding:11px 12px;
+  border:1px solid rgba(255,159,47,.28);
+  border-radius:14px;
+  background:rgba(255,159,47,.07);
+  cursor:pointer;
+}
+#gdProfileV67 .coachCompRow input[type="checkbox"]{
+  width:18px;
+  height:18px;
+  margin:1px 0 0;
+  flex:0 0 auto;
+  accent-color:#ff9f2f;
+}
+#gdProfileV67 .coachCompRow span{
+  display:block;
+  min-width:0;
+}
+#gdProfileV67 .coachCompRow strong{
+  display:block;
+  font-size:13.5px;
+  color:#fff;
+}
+#gdProfileV67 .coachCompRow em{
+  display:block;
+  margin-top:2px;
+  font-style:normal;
+  font-size:11.5px;
+  line-height:1.35;
+  color:rgba(255,255,255,.62);
+}
 #gdProfileV67 .coachAddPlayer:not([open]) > :not(summary),
 #gdProfileV67 .coachInvite:not([open]) > :not(summary),
 #gdProfileV67 .coachAdminTab:not([open]) > :not(summary){

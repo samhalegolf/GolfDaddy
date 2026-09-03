@@ -10,7 +10,18 @@
   --gdStudioWarn: #ffb54c;
   position: fixed;
   inset: 0;
-  z-index: 4000;
+  /* Above every app layer this shell floats over, not between them.
+     4000 used to sit BELOW #shellHome (7300) and #gdProfileV67 (7600) and ABOVE the bare
+     `.panel` class (3900), so which surface you were actually looking at on /studio depended
+     on what the live app underneath happened to be showing — Studio when it sat on a module,
+     the app's home screen the moment it went home, and an app panel opened while Studio was up
+     was open-but-invisible with every click landing on Studio. Studio is a full-screen takeover
+     of the app, so it outranks the app outright; a page that needs to hand a real app screen to
+     the operator calls GDStudioShell.hide() and comes back afterwards (see
+     map-viewport-page.js's picker hand-off, commerce-page.js's payments hand-off).
+     Deliberately below the gps-active chrome overrides (2147483001), which only apply mid-round
+     and never on this surface. */
+  z-index: 9000;
   overflow: hidden;
   background: var(--gdStudioBg);
   color: var(--gdStudioText);
@@ -199,4 +210,73 @@
   #gdStudioShellRoot .gdStudioShell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   #gdStudioShellRoot .gdStudioNavRail { border-right: none; border-bottom: 1px solid var(--gdStudioBorder); max-height: 40vh; }
   #gdStudioShellRoot .gdStudioViewportMap { height: 380px; }
+}
+
+/* ---- Communications page ----
+   The email catalogue and its previews. A preview is the real template HTML rendered in a
+   sandboxed iframe rather than inline: email HTML is a whole document with its own body
+   background and font stack, so dropped into the page it would both escape this layout and
+   restyle everything around it. */
+#gdStudioShellRoot .gdStudioEmailPage section { margin-bottom: 26px; }
+#gdStudioShellRoot .gdStudioEmailStatus { border: 1px solid var(--gdStudioBorder); border-radius: 10px; overflow: hidden; }
+#gdStudioShellRoot .gdStudioEmailStatusRow {
+  display: grid;
+  grid-template-columns: 14px 190px 1fr;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--gdStudioBorder);
+}
+#gdStudioShellRoot .gdStudioEmailStatusRow:last-child { border-bottom: none; }
+#gdStudioShellRoot .gdStudioEmailStatusRow span:last-child { color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdStudioEmailDot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--gdStudioWarn);
+  align-self: center;
+}
+#gdStudioShellRoot .gdStudioEmailDot.isOn { background: var(--gdStudioAccent); }
+
+#gdStudioShellRoot .gdStudioEmailCard {
+  background: var(--gdStudioPanel);
+  border: 1px solid var(--gdStudioBorder);
+  border-radius: 10px;
+  padding: 16px;
+  margin-top: 12px;
+}
+#gdStudioShellRoot .gdStudioEmailHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+#gdStudioShellRoot .gdStudioEmailHead h3 { margin: 0; font-size: 15px; color: var(--gdStudioText); text-transform: none; letter-spacing: 0; }
+#gdStudioShellRoot .gdStudioEmailHead code { font-size: 11.5px; color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdStudioEmailBadge {
+  flex: 0 0 auto;
+  border: 1px solid var(--gdStudioBorder);
+  color: var(--gdStudioMuted);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+#gdStudioShellRoot .gdStudioEmailBadge.isService { color: var(--gdStudioAccent); border-color: var(--gdStudioAccentDim); }
+#gdStudioShellRoot .gdStudioEmailFacts {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 6px 14px;
+  margin: 14px 0 0;
+  font-size: 12.5px;
+}
+#gdStudioShellRoot .gdStudioEmailFacts dt { color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdStudioEmailFacts dd { margin: 0; color: var(--gdStudioText); }
+#gdStudioShellRoot .gdStudioEmailFacts code { background: var(--gdStudioPanelAlt); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+#gdStudioShellRoot .gdStudioEmailActions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+#gdStudioShellRoot .gdStudioEmailPreview { margin-top: 14px; }
+#gdStudioShellRoot .gdStudioEmailFrame { width: 100%; border: 1px solid var(--gdStudioBorder); border-radius: 10px; background: #07100b; }
+#gdStudioShellRoot .gdStudioEmailSource pre {
+  background: var(--gdStudioPanelAlt);
+  border: 1px solid var(--gdStudioBorder);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 6px 0 0;
 }

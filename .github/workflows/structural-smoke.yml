@@ -54,6 +54,7 @@ jobs:
           node dev/course-identity-resolution.test.js
           node dev/auth-route-boot-release.test.js
           node dev/password-reset-surface.test.js
+          node dev/email-templates.test.js
           node dev/course-hole-count.test.js
           node dev/placeholder-profile-identity.test.js
           node dev/course-library-manifest.test.js

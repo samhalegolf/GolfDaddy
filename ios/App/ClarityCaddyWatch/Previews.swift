@@ -119,6 +119,19 @@ enum WatchPreviewFixtures {
     .containerBackground(.black, for: .navigation)
 }
 
+/* The page a locked shot lands you on, with the way out of it visible. On a
+   Series 9 or later this button is also what Double Tap presses. */
+#Preview("Hole map — locked") {
+    HoleMapPage(
+        scene: WatchPreviewFixtures.scene(canLock: false, driving: true),
+        map: WatchPreviewFixtures.standInMap(),
+        player: WatchPreviewFixtures.player,
+        deliveryHint: nil,
+        locked: true
+    )
+    .containerBackground(.black, for: .navigation)
+}
+
 #Preview("Hole map — still arriving") {
     HoleMapPage(
         scene: WatchPreviewFixtures.scene(),

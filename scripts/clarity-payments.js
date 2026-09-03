@@ -1517,6 +1517,17 @@
     render: render,
     status: function () { return status; },
     settings: function () { return settings; },
+    /* A fresh admin read, for callers outside this panel. Studio's Communications page uses it
+       for the delivery-config booleans (payment-admin's `emailDelivery` block); it is the same
+       admin-gated GET this panel already makes, so it adds no new surface. Resolves to the
+       settings object either way - loadAdminSettings folds a failure into settingsError rather
+       than rejecting, and callers must read that rather than assume success. */
+    adminSettings: function () {
+      return Promise.resolve(loadAdminSettings()).then(function (body) {
+        if (body && body.settingsError) throw new Error(body.settingsError);
+        return body;
+      });
+    },
     hasActiveAccess: hasActiveAccess,
     accessLabel: accessLabel,
     accessBadgeHTML: accessBadgeHTML,

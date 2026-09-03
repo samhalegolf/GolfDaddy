@@ -111,6 +111,16 @@ final class WatchSessionManager: NSObject, ObservableObject {
        Scene revisions. */
     @Published private(set) var wristFix: WatchScene.GeoPoint?
 
+    /* Whether there is a locked shot on this wrist at all — the phone's answer,
+       or this wrist's own lock while nothing has confirmed it yet. One place,
+       because the map page, the unlock control, the hole flow and the release
+       rule were each forming the same opinion separately. */
+    var shotIsLocked: Bool { scene?.shot?.locked == true || lockedShot != nil }
+
+    /* Walking off the shot. Not published: it decides one thing, at the moment
+       a fix lands, and what the player sees is the UNLOCK that follows. */
+    private var aimRelease = WatchAimRelease()
+
     /* The wrist's own way through a hole — green focus, the holding screen and
        the queued next hole. See WatchHoleFlow for why these three, and only
        these three, are decided here rather than asked for.
@@ -176,12 +186,52 @@ final class WatchSessionManager: NSObject, ObservableObject {
            whose tee the package has in the wrong place. Nil until a bag has
            arrived, which simply leaves the strict tee zone in charge. */
         let effect = holeFlow.update(fix: fix, hole: current, next: next,
-                                     locked: scene?.shot?.locked == true || lockedShot != nil,
+                                     locked: shotIsLocked,
                                      reachM: player.snapshot?.bag.maxTotalM)
         if let effect { dispatch(effect) }
     }
 
+    /* Walking off the shot, checked on every fix and every Scene.
+     *
+     * Driving only, for the same reason WatchHoleFlow is: a wrist the phone is
+     * driving shows what the phone decided, and Marshal's own thirty-metre rule
+     * is the phone's to apply. While the wrist drives it is the surface with
+     * the locked Bubble on its face, so it is the surface that gets to say the
+     * player has left. */
+    private func advanceAimRelease() {
+        guard scene?.isDriving == true else { aimRelease.reset(); return }
+        let fix = locationManager.lastFix
+        let released = aimRelease.update(
+            locked: shotIsLocked,
+            /* The phone has confirmed it, and this wrist's own LOCK is no
+               longer in flight. Both, because either alone is a command sent
+               against a shot the other end may not have. */
+            settled: scene?.shot?.locked == true && lockedShot == nil,
+            at: lockedShot?.player,
+            fix: fix.map { Coordinate(lat: $0.coordinate.latitude, lng: $0.coordinate.longitude) },
+            accuracyM: fix?.horizontalAccuracy)
+        if released { unlock(announce: true) }
+    }
+
     // ------------------------------------------------- the wrist's own actions
+
+    /* Let the shot go. The one place UNLOCK is sent from, whether it came from
+       the button, from Double Tap, or from the player walking off it — so the
+       release rule cannot be left armed by one path and disarmed by another.
+     *
+     * `announce` is the walk-away's. Nobody pressed anything, so the wrist
+       taps to say the shot has been let go; a button press already has the
+       system's own feedback, and a second tap for it reads as a fault. */
+    func unlock(announce: Bool = false) {
+        guard shotIsLocked else { return }
+        aimRelease.markReleased()
+        /* This wrist's own unconfirmed lock goes with it. It is intent, and the
+           intent has just been withdrawn — leaving it would keep the numbers
+           face saying SENDING for a shot nobody is holding any more. */
+        lockedShot = nil
+        send(.unlock)
+        if announce { WKInterfaceDevice.current().play(.click) }
+    }
 
     func flowMoveBall(to point: Coordinate) {
         if let effect = holeFlow.moveBall(to: point) { dispatch(effect) }
@@ -273,6 +323,10 @@ final class WatchSessionManager: NSObject, ObservableObject {
                screens live here is that they must keep working while the phone
                is asleep, and a phone asleep sends no Scenes. */
             self.advanceFlow()
+            /* And the same reason again: walking off a locked shot is a thing
+               the wrist notices in its own GPS, not something the phone tells
+               it about. */
+            self.advanceAimRelease()
         }
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
@@ -378,7 +432,7 @@ final class WatchSessionManager: NSObject, ObservableObject {
         /* The round is over. A lock belongs to the round it was made in, so it
            goes with it — otherwise the wrist would carry a shot from a finished
            round into the next screen the player looks at. */
-        guard incoming.hasRound else { scene = nil; state = .noRound; lockedShot = nil; locationManager.stop(); return }
+        guard incoming.hasRound else { scene = nil; state = .noRound; lockedShot = nil; aimRelease.reset(); locationManager.stop(); return }
         if let current = scene, current.roundId == incoming.roundId, incoming.revision < current.revision { return }
         let previous = scene
         scene = incoming
@@ -395,6 +449,7 @@ final class WatchSessionManager: NSObject, ObservableObject {
             holeFlow.follow(hole: incoming.hole?.number)
         }
         advanceFlow()
+        advanceAimRelease()
     }
 
     /* A Scene arriving is proof the phone is listening, which the durable

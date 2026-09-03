@@ -229,4 +229,24 @@ check("Lock still works from the wrist whichever surface is driving", () => {
   assert.equal(w.receiveCommand({ commandId: "lock-driving", roundId: "round-1", type: "LOCK", payload: {} }).accepted, true);
   assert.equal(m.scene().mode, "aim"); assert.equal(w.scene().surface.active, "watch", "a round transition does not reset the driver");
 });
+/* The two facts boot.js's sleep-unlock stands on. It listens for the phone
+   leaving the screen (visibilitychange -> hidden, which is what the side button
+   produces inside the WebView) and then signals UNLOCK — with no test of its
+   own for whether there is anything to unlock, and one gate on who is driving.
+   Both of those are contracts owned here, so both are pinned here. */
+check("UNLOCK is a safe no-op when there is no shot locked, so the sleep rule needs no second opinion", () => {
+  const { m } = ready();
+  assert.equal(m.signal("UNLOCK"), false, "nothing locked: refused, not thrown");
+  assert.equal(m.signal("LOCK"), true);
+  assert.equal(m.signal("UNLOCK"), true);
+  assert.equal(m.shots(1).length, 1, "and the shot the lock opened survives the unlock");
+});
+check("the driver is readable off surface(), which is the sleep rule's one gate", () => {
+  const { w } = ready();
+  assert.equal(w.surface().active, "phone", "a phone-driven round: sleeping the phone may let the shot go");
+  w.receiveCommand({ commandId: "take-sleep", roundId: "round-1", type: "TAKE_OVER", payload: {} });
+  assert.equal(w.surface().active, "watch",
+    "a wrist-driven round: a phone dark in a bag is normal and must not unlock the wrist's shot");
+});
+
 console.log("\n" + passed + " Caddy Watch compatibility checks passed.");

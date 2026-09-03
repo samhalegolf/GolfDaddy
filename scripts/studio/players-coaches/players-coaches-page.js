@@ -24,8 +24,19 @@
       (canOpen ? "" : '<p class="gdStudioNeedsVerification">gdOpenProfileV67() was not found on this build.</p>') +
       "</div>";
 
+    /* The Profile screen used to out-stack the Studio shell by accident (#gdProfileV67 is 7600,
+       the old shell was 4000), so this jump appeared to work while the identical jump on the
+       Commerce page did not. It goes through the same hand-off as every other one now: Studio
+       steps aside and comes back when the profile closes, rather than depending on which of two
+       overlays happens to have the larger number. */
+    var handoff = null;
     var btn = containerEl.querySelector("#gdStudioOpenPlayersCoaches");
-    if (btn && canOpen) btn.addEventListener("click", function () { window.gdOpenProfileV67(); });
+    if (btn && canOpen) btn.addEventListener("click", function () {
+      if (handoff) handoff();
+      handoff = window.GDStudioHandoff.to({ open: function () { window.gdOpenProfileV67(); } });
+    });
+
+    return function () { if (handoff) handoff(); };
   }
 
   window.GDStudioPages = window.GDStudioPages || {};

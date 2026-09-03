@@ -134,6 +134,12 @@ struct HoleMapPage: View {
     var canAim: Bool = false
     var onAim: (Coordinate) -> Void = { _ in }
     var onSwipeBack: () -> Void = {}
+    /* A shot is locked, so this page is showing a shot rather than a hole —
+       and the way out of it is an UNLOCK the player can actually see. Swiping
+       back still does it, but a swipe is a thing you have to be told about,
+       and this page is the one a locked shot lands you on. */
+    var locked: Bool = false
+    var onUnlock: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 2) {
@@ -183,5 +189,46 @@ struct HoleMapPage: View {
             }
         }
         .padding(.horizontal, 3)
+        /* Over the map rather than beside it: the map wants every pixel it can
+           have, and a row that only exists while a shot is locked would push
+           the picture around each time one was. Bottom centre is where the
+           thumb already is on a wrist. */
+        .overlay(alignment: .bottom) {
+            if locked { UnlockControl(action: onUnlock).padding(.bottom, 4) }
+        }
+    }
+}
+
+/* UNLOCK, and the Double Tap that stands in for it.
+ *
+ * Double Tap is claimed HERE and nowhere else, deliberately. It is a single
+ * primary action for the whole screen, and a locked shot puts this page in
+ * front — so while a shot is locked, pinching twice is the unlock, and while
+ * one is not, the gesture stays with LOCK on the numbers face where the system
+ * already finds it.
+ *
+ * The shortcut is watchOS 11's; on 10 the system picks a primary action by
+ * prominence on its own, and a `.borderedProminent` button that is the only
+ * control on the page is what it picks. So both ages of watchOS land on the
+ * same button — one because it was told, one because there is nothing else. */
+private struct UnlockControl: View {
+    let action: () -> Void
+
+    var body: some View {
+        let button = Button(action: action) {
+            Label("UNLOCK", systemImage: "lock.open.fill")
+                .font(.caption2.weight(.heavy))
+                .padding(.horizontal, 2)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.mint)
+        .controlSize(.mini)
+        .accessibilityHint("Let the locked shot go")
+
+        if #available(watchOS 11.0, *) {
+            button.handGestureShortcut(.primaryAction)
+        } else {
+            button
+        }
     }
 }

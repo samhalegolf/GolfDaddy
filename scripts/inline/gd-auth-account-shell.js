@@ -950,11 +950,26 @@
             <label>Email<input id="gd67CoachPlayerEmail" type="email" placeholder="player@example.com"></label>
 	            <label class="full">Temporary Password<input id="gd67CoachPlayerPassword" type="text" placeholder="At least 4 characters"></label>
           </div>
+          ${compedMonthRow(account)}
 	          ${authFeedbackMarkup('gd67CoachPlayerFeedback')}
 	          <button class="saveBtn" type="button" onclick="gd67AddCoachPlayer()">Create Player Account</button>
         </details>
         ${coachInvitePanel(account)}
       </section>`;
+  }
+
+  /* "Include a comped month" on account creation.
+     Admin-only, because it hands out access that would otherwise be paid for - the same gate
+     Studio → Commerce applies, and the server refuses it for a coach regardless of what the
+     form sends. Ticking it does NOT queue a second email: the invite endpoint writes the
+     entitlement before it sends, and the setup email becomes the variant that covers both. */
+  function compedMonthRow(account) {
+    if (String((account && account.role) || 'player') !== 'admin') return '';
+    return `
+          <label class="coachCompRow" for="gd67CoachPlayerComp">
+            <input id="gd67CoachPlayerComp" type="checkbox">
+            <span><strong>Include a comped month</strong><em>Full membership for 30 days, no card, does not renew. Covered in the same welcome email.</em></span>
+          </label>`;
   }
 
   function coachInvitePanel(account) {
@@ -1916,6 +1931,7 @@
 	  async function addCoachPlayer() {
 	    const api = accountsApi();
 	    setFieldFeedback('gd67CoachPlayerFeedback','','info');
+	    const compedMonth = !!document.getElementById('gd67CoachPlayerComp')?.checked;
 	    await accountActionAsync(async () => {
 	      if (!api || typeof api.addPlayer !== 'function') throw new Error('Account system not ready');
 	      if (window.ClarityCloudSync && typeof window.ClarityCloudSync.restoreAccounts === 'function') {
@@ -1925,15 +1941,28 @@
 		      const player = await api.addPlayer({
 		        name: document.getElementById('gd67CoachPlayerName')?.value,
 		        email: document.getElementById('gd67CoachPlayerEmail')?.value,
-		        password: document.getElementById('gd67CoachPlayerPassword')?.value
+		        password: document.getElementById('gd67CoachPlayerPassword')?.value,
+		        compedMonth
       });
 	      if (player && String(player.email || '').trim().toLowerCase() === String(document.getElementById('gd67CoachPlayerEmail')?.value || '').trim().toLowerCase()) {
 	        document.getElementById('gd67CoachPlayerName').value = '';
 	        document.getElementById('gd67CoachPlayerEmail').value = '';
 	        document.getElementById('gd67CoachPlayerPassword').value = '';
+	        const compBox = document.getElementById('gd67CoachPlayerComp');
+	        if (compBox) compBox.checked = false;
 	      }
 	      return player;
-	    }, result => result && result.mergedExisting ? 'Existing player merged into your list' : 'Player account added', 'gd67CoachPlayerFeedback');
+	      /* The comp is reported separately from the account. It is written server-side after
+	         the account exists, so "account added" and "month included" are two different
+	         truths - and an admin who ticked the box has to be told when only the first one
+	         happened, rather than reading a success message that covers it up. */
+	    }, result => {
+	      const base = result && result.mergedExisting ? 'Existing player merged into your list' : 'Player account added';
+	      if (!compedMonth) return base;
+	      if (result && result.comped) return base + ' with a comped month - one welcome email covers both';
+	      const why = result && result.compError ? ': ' + result.compError : '';
+	      return base + ', but the comped month was NOT issued' + why + '. Issue it from Studio > Commerce.';
+	    }, 'gd67CoachPlayerFeedback');
 	  }
 
 	  function addCoachAccount() {

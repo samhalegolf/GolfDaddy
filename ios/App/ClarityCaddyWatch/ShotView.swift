@@ -126,13 +126,29 @@ struct ShotView: View {
     private func control(_ kind: CaddyWatchCommand.Kind, title: String, enabled: Bool, primary: Bool = false) -> some View {
         let waiting = pending.contains { $0.command.type == kind || (kind == .lock && $0.command.type == .lockAt) }
         if primary {
-            Button(waiting ? "\(title)…" : title) { send(kind) }
-                .buttonStyle(.borderedProminent).tint(.mint)
-                .font(.caption.weight(.bold)).disabled(!enabled || waiting)
+            /* LOCK claims Double Tap while there is nothing locked; the map
+               page's UNLOCK claims it once there is. The two can never be on
+               screen together — the dock has one face at a time — so this is
+               one gesture with one meaning at any moment: do the thing to the
+               shot. Declared rather than left to the system's prominence
+               heuristic so both halves of the pair are decided in the code. */
+            primaryButton(title: waiting ? "\(title)…" : title, enabled: enabled && !waiting) { send(kind) }
         } else {
             Button(waiting ? "\(title)…" : title) { send(kind) }
                 .buttonStyle(.bordered).tint(.gray)
                 .font(.caption2.weight(.bold)).disabled(!enabled || waiting)
+        }
+    }
+
+    @ViewBuilder
+    private func primaryButton(title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        let button = Button(title, action: action)
+            .buttonStyle(.borderedProminent).tint(.mint)
+            .font(.caption.weight(.bold)).disabled(!enabled)
+        if #available(watchOS 11.0, *) {
+            button.handGestureShortcut(.primaryAction)
+        } else {
+            button
         }
     }
 }

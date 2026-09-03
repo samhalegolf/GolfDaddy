@@ -573,8 +573,79 @@ async function readPaidAccess(identity) {
   };
 }
 
+/* Writing a comped entitlement, in one place.
+ *
+ * Two screens issue one: Studio → Commerce → "Issue comped access", and the "Include a comped
+ * month" tick on Create Player Account. They must produce the SAME row - source_type,
+ * entitlement_reason, non_renewing and referral_eligible are all read back by
+ * membershipAccessState and by the referral rules, and a comp that differs from the other
+ * comp by one column is a support ticket nobody can reproduce.
+ *
+ * Returns the window it wrote, because the caller has to describe it to the recipient. */
+async function writeCompedEntitlement(options) {
+  options = options || {};
+  const accountEmail = email(options.accountEmail);
+  const accountId = text(options.accountId, 120);
+  if (!accountEmail && !accountId) throw new Error("Account email or account id is required");
+
+  const productKey = normaliseProductKey(options.productKey || ADMIN_COMPED_MEMBERSHIP_KEY) || ADMIN_COMPED_MEMBERSHIP_KEY;
+  const isCompedMembership = productKey === ADMIN_COMPED_MEMBERSHIP_KEY;
+  const rawHours = Number(options.durationHours);
+  const durationHours = Number.isFinite(rawHours) && rawHours > 0 ? rawHours : MONTH_PASS_HOURS;
+  const allowMemberReferrals = isCompedMembership && options.allowMemberReferrals !== false;
+
+  const starts = options.startsAt ? new Date(options.startsAt) : new Date();
+  const expires = options.expiresAt ? new Date(options.expiresAt) : new Date(starts.getTime() + durationHours * 60 * 60 * 1000);
+  if (Number.isNaN(starts.getTime()) || Number.isNaN(expires.getTime())) throw new Error("Invalid pass dates");
+
+  const sourceType = isCompedMembership ? ADMIN_COMPED_MEMBERSHIP_KEY : "admin_free_pass";
+  await supabaseFetch("user_entitlements", {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      user_id: accountId || null,
+      account_email: accountEmail || null,
+      entitlement_type: productKey,
+      product_key: productKey,
+      status: "active",
+      starts_at: starts.toISOString(),
+      expires_at: expires.toISOString(),
+      source_type: sourceType,
+      entitlement_reason: isCompedMembership ? ADMIN_COMPED_MEMBERSHIP_KEY : productKey,
+      referral_eligible: allowMemberReferrals,
+      non_renewing: true,
+      metadata: {
+        source: sourceType,
+        entitlement_reason: isCompedMembership ? ADMIN_COMPED_MEMBERSHIP_KEY : productKey,
+        note: text(options.note, 500),
+        issued_by: text(options.issuedBy, 240) || "admin",
+        issued_via: text(options.issuedVia, 80) || "commerce_admin",
+        duration_hours: durationHours,
+        membership_level: isCompedMembership,
+        allow_member_referrals: allowMemberReferrals
+      }
+    })
+  });
+
+  const days = Math.round(durationHours / 24);
+  return {
+    productKey,
+    membership: isCompedMembership,
+    durationHours,
+    allowMemberReferrals,
+    startsAt: starts,
+    expiresAt: expires,
+    days,
+    /* "a month" reads better than "30 days" and is what the copy expects for a month pass;
+       anything else is described honestly in days. */
+    periodLabel: days >= 28 && days <= 31 ? "a month" : days + " days",
+    expiresLabel: expires.toLocaleDateString("en-NZ", { day: "numeric", month: "long", year: "numeric" })
+  };
+}
+
 module.exports = {
   MEMBERSHIP_BLOCKING_STATUSES,
+  writeCompedEntitlement,
   MONTHLY_MEMBERSHIP_KEY,
   MONTH_PASS_HOURS,
   MONTH_PASS_KEY,

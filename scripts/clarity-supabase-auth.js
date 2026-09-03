@@ -215,10 +215,21 @@
       actorName: coach.name || coach.email || "your coach",
       // Sent for continuity, but the server takes the actor from the token.
       actorAccountId: coach.accountId || "",
-      targetAccountId: data && data.accountId || ""
+      targetAccountId: data && data.accountId || "",
+      // Admin-only, re-checked server-side; the endpoint writes the entitlement and folds it
+      // into the one setup email rather than sending a second one.
+      compedMonth: !!(data && data.compedMonth)
     }, true);
     var player = commit(body, { activate: false });
-    return linkLocalCoachPlayer(coach.accountId, player);
+    var linked = linkLocalCoachPlayer(coach.accountId, player);
+    /* Reported back on a COPY, not on the stored account row: the comp outcome describes this
+       one call, not the player, and writing it onto the persisted account would leave a stale
+       "comped: true" on the row forever. The form needs it separately from the account because
+       the two can succeed independently - the account is written before the entitlement is. */
+    return Object.assign({}, linked, {
+      comped: !!(body && body.comped),
+      compError: body && body.compError || ""
+    });
   }
 
   function parseRecoveryParams() {

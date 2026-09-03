@@ -111,10 +111,15 @@ struct ContentView: View {
                replacement or a background: it is a picture of a hole,
                and it earns the whole screen when it is the thing being
                looked at. */
-            let locked = scene.shot?.locked == true || session.lockedShot != nil
+            let locked = session.shotIsLocked
             TabView(selection: $page) {
                 ShotView(scene: scene, stale: session.state == .stale, pending: session.pendingCommands, rejection: session.lastRejection,
                          send: { kind in
+                             /* UNLOCK has one door — session.unlock() — because
+                                letting the shot go also clears this wrist's own
+                                unconfirmed lock and re-arms the walk-away rule,
+                                and a second sender would do neither. */
+                             if kind == .unlock { session.unlock(); return }
                              session.send(kind)
                              if kind == .lock { page = .map }
                          },
@@ -142,7 +147,13 @@ struct ContentView: View {
                         /* The aimable map swallows the page swipe, so
                            it reports one; landing on the numbers is
                            what sends UNLOCK below. */
-                        onSwipeBack: { page = .numbers }
+                        onSwipeBack: { page = .numbers },
+                        /* The same unlock, said out loud. A swipe is the
+                           gesture somebody has to be shown once; this is
+                           the control a player finds by looking, and it
+                           is also what Double Tap presses. */
+                        locked: locked,
+                        onUnlock: { page = .numbers }
                     )
                     .tag(Page.map)
                 }
@@ -158,7 +169,7 @@ struct ContentView: View {
             .onAppear { if locked { page = .map } }
             .onChange(of: page) { _, now in
                 guard now == .numbers, locked else { return }
-                session.send(.unlock)
+                session.unlock()
             }
         }
     }

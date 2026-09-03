@@ -3,12 +3,12 @@
 const { email, hasAuth, json, role, supabaseAuth, supabaseRest, text, upsertAccount } = require("./auth-utils");
 const { sendSystemAlert } = require("./alert-utils");
 const { isStaffRole, resolveCaller } = require("./clarity-caller");
+const { sendAccountSetupEmail } = require("./email-notification");
+const { hasSupabase, writeCompedEntitlement } = require("./payment-utils");
 
 function env(name) { return process.env[name] || ""; }
 function siteUrl() { return (env("CLARITY_SITE_URL") || env("APP_URL") || "https://caddy.claritygolf.app").replace(/\/+$/, ""); }
 function tempPassword() { return "Clarity-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10) + "!"; }
-function escapeHTML(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, function(ch) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]; }); }
-function firstName(value) { return (String(value || "there").trim().split(/\s+/)[0] || "there").replace(/[^\w'-]/g, "") || "there"; }
 function cleanId(value) { return text(value, 120).replace(/[^a-zA-Z0-9_:-]/g, ""); }
 function unique(list) {
   const out = [];
@@ -19,31 +19,13 @@ function unique(list) {
   return out;
 }
 
-async function sendEmail(to, name, actorName, setupLink) {
-  const resendKey = env("RESEND_API_KEY");
-  if (!resendKey) return { sent: false, provider: "not_configured" };
-  const from = env("CLARITY_EMAIL_FROM") || "Clarity Golf Systems <notifications@claritygolf.app>";
-  const app = siteUrl();
-  const logoUrl = app + "/assets/brand/cg-logo-white-g.png?v=1e5a26e2";
-  const detail = "Your Clarity Caddy account has been created by " + (actorName || "your coach") + ". Use the secure button below to set your password. This link is unique to your account.";
-  const html = [
-    "<!doctype html><html><body style=\"margin:0;background:#07100b;color:#f7faf7;font-family:Arial,Helvetica,sans-serif\">",
-    "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#07100b;padding:28px 14px\"><tr><td align=\"center\">",
-    "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:560px;background:#101b15;border:1px solid #24342c;border-radius:20px;overflow:hidden\">",
-    "<tr><td style=\"padding:24px 24px 16px;background:#07100b\"><img src=\"" + escapeHTML(logoUrl) + "\" width=\"44\" height=\"44\" alt=\"Clarity Golf\" style=\"vertical-align:middle;margin-right:12px\"><span style=\"font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:#b9c4bd;font-weight:700\">Clarity Golf Systems</span></td></tr>",
-    "<tr><td style=\"padding:24px\"><p style=\"margin:0 0 10px;color:#42b66a;font-weight:700\">Hi " + escapeHTML(firstName(name)) + ",</p>",
-    "<h1 style=\"margin:0 0 12px;color:#fff;font-size:28px;line-height:1.05\">Set up your Clarity account</h1>",
-    "<p style=\"margin:0 0 18px;color:#c8d1cc;font-size:16px;line-height:1.45\">" + escapeHTML(detail) + "</p>",
-    "<a href=\"" + escapeHTML(setupLink) + "\" style=\"display:inline-block;background:#ff9f2f;color:#06110b;text-decoration:none;font-weight:800;border-radius:999px;padding:12px 18px\">Set up your password</a>",
-    "<p style=\"margin:18px 0 0;color:#8fa199;font-size:13px;line-height:1.4\">If the button does not work, copy the secure link from this button into your browser.</p>",
-    "</td></tr><tr><td style=\"padding:16px 24px 24px;color:#708178;font-size:12px;line-height:1.45\">You are receiving this because it relates to your Clarity account access.</td></tr>",
-    "</table></td></tr></table></body></html>"
-  ].join("");
-  const plain = "Hi " + firstName(name) + ",\n\nSet up your Clarity account\n\n" + detail + "\n\n" + setupLink;
-  const response = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: "Bearer " + resendKey, "Content-Type": "application/json" }, body: JSON.stringify({ from, to: [to], subject: "Set up your Clarity account", html, text: plain }) });
-  const body = await response.json().catch(function() { return null; });
-  if (!response.ok) { const error = new Error("Email provider rejected the invite email"); error.status = response.status; error.body = body; throw error; }
-  return { sent: true, provider: "resend", id: body && body.id || null };
+/* The setup email itself lives in functions/email-notification.js, rendering from
+   scripts/gd-email-templates-core.js. This file used to carry its own hand-copied <table>
+   layout - a third copy of the same brand, which is how a logo or footer change lands in two
+   emails out of three. `comped` picks the variant that says "account ready AND here's your
+   month" in ONE message rather than firing a second email a second later. */
+async function sendEmail(to, name, actorName, setupLink, comped) {
+  return sendAccountSetupEmail({ to, recipientName: name, actorName, setupLink, comped });
 }
 
 async function createOrFindUser(accountEmail, name, accountRole) {
@@ -108,6 +90,10 @@ exports.handler = async function(event) {
   const accountRole = role(body.role);
   const actorName = text(body.actorName, 120) || "your coach";
   const targetAccountId = cleanId(body.targetAccountId || body.accountId || "");
+  /* An unticked checkbox is simply absent from the request, so anything that is not an
+     affirmative value means "no comp" - never a default-on. */
+  const compRequested = body.compedMonth === true || body.compedMonth === "true" || body.compedMonth === "on" || body.compedMonth === 1 || body.compedMonth === "1";
+  const compHours = Number(body.compedHours);
   if (!accountEmail) return json(400, { error: "Enter a valid email" });
 
   /* This endpoint creates Supabase Auth users, sends account-setup emails from
@@ -131,6 +117,15 @@ exports.handler = async function(event) {
   if (isStaffRole(accountRole) && !caller.isAdmin) {
     return json(403, { error: "Only an admin can invite a coach or admin account" });
   }
+  /* Comping is an admin power, the same as Studio → Commerce. A coach may create a player;
+     only an admin may hand out access that would otherwise be paid for. Refused loudly rather
+     than dropped silently, so nobody believes they gave someone a month they did not. */
+  if (compRequested && !caller.isAdmin) {
+    return json(403, { error: "Only an admin can include comped access with a new account", code: "comp_admin_only" });
+  }
+  if (compRequested && !hasSupabase()) {
+    return json(503, { error: "Entitlements are not configured, so comped access cannot be included", code: "entitlements_not_configured" });
+  }
   const actorAccountId = cleanId(caller.actorAccountId || "");
 
   try {
@@ -143,8 +138,33 @@ exports.handler = async function(event) {
       pack.account.createdByCoachId = pack.account.createdByCoachId || actorAccountId;
     }
     const link = await setupLink(accountEmail);
-    const emailResult = await sendEmail(accountEmail, name, actorName, link);
-    return json(200, { ok: true, invited: true, linked: linkResult.linked, email: accountEmail, emailResult, account: pack.account, profile: pack.profile });
+
+    /* Order matters: the entitlement is written BEFORE the email goes out, so the message can
+       state the real expiry date and the access is already live when they follow the link.
+       A comp that fails to write downgrades the email to the plain setup version rather than
+       promising a month that does not exist - and says so in the response, because the admin
+       who ticked the box is the one who has to know. */
+    let comped = null;
+    let compError = "";
+    if (compRequested) {
+      try {
+        const pass = await writeCompedEntitlement({
+          accountEmail,
+          accountId: playerId || "",
+          durationHours: Number.isFinite(compHours) && compHours > 0 ? compHours : undefined,
+          note: text(body.compedNote, 500) || "Included with account creation",
+          issuedBy: (caller.account && caller.account.email) || actorName,
+          issuedVia: "create_player_account"
+        });
+        comped = { periodLabel: pass.periodLabel, expiresLabel: pass.expiresLabel, membership: pass.membership };
+      } catch (error) {
+        compError = error && error.message ? error.message : "Comped access could not be issued";
+        await sendSystemAlert({ eventType: "admin_user_invite_comp_failed", title: "Comped access failed on account creation", detail: "The account was created but the comped entitlement was not written.", accountEmail, context: { details: compError } });
+      }
+    }
+
+    const emailResult = await sendEmail(accountEmail, name, actorName, link, comped);
+    return json(200, { ok: true, invited: true, linked: linkResult.linked, email: accountEmail, emailResult, comped: !!comped, compError, account: pack.account, profile: pack.profile });
   } catch (error) {
     await sendSystemAlert({ eventType: "admin_user_invite_failed", title: "Clarity account invite failed", detail: "A user invite could not create a setup-password link.", accountEmail, context: { status: error.status || null, details: error.body || error.message } });
     return json(error.status || 502, { error: error.message || "Could not invite user", details: error.body || null });

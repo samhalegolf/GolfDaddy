@@ -30,38 +30,29 @@ function ensureDeliveryConfigured() {
   if (!from) return null;
   return { resendKey, from: from };
 }
-function escapeHtml(value) {
-  return String(value == null ? "" : value).replace(/[&<>"']/g, function (char) {
-    return { "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[char] || char;
-  });
-}
+/* The layout and the wording come from scripts/gd-email-templates-core.js, like every other
+   Clarity email. This used to carry its own <table> - a second brand to keep in step, and one
+   the Studio Communications preview could only approximate. `requestedAt` is appended to the
+   body rather than templated separately: it is the one fact this send has that the shared copy
+   does not. */
+const templates = require("../scripts/gd-email-templates-core.js");
 
 async function sendRecoveryEmail(delivery, emailAddress, link, requestedAt) {
+  const built = templates.build("password_recovery", {
+    to: emailAddress,
+    siteUrl: env("CLARITY_SITE_URL") || templates.DEFAULT_SITE,
+    actorName: "Clarity Golf Systems",
+    ctaUrl: link
+  });
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "Authorization": "Bearer " + delivery.resendKey, "Content-Type": "application/json" },
     body: JSON.stringify({
       from: delivery.from,
       to: [emailAddress],
-      subject: "Reset your Clarity password",
-      html: [
-        "<!doctype html><html><body style=\"margin:0;background:#07100b;color:#f7faf7;font-family:Arial,Helvetica,sans-serif\">",
-        "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"padding:28px 14px;background:#07100b\">",
-        "<tr><td align=\"center\">",
-        "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:560px;background:#101b15;border:1px solid #24342c;border-radius:20px;overflow:hidden\">",
-        "<tr><td style=\"padding:24px 24px 16px;background:#07100b\"><p style=\"margin:0 0 12px;color:#b9c4bd;font-size:13px;letter-spacing:.14em;text-transform:uppercase;\">Clarity Golf</p>",
-        "<h1 style=\"margin:0 0 12px;color:#fff;font-size:28px;line-height:1.05\">Reset your password</h1>",
-        "<p style=\"margin:0 0 18px;color:#c8d1cc;font-size:16px;line-height:1.45\">Use the button below to set a new password. This link expires soon.</p>",
-        "<p><a href=\"" + escapeHtml(link) + "\" style=\"display:inline-block;background:#ff9f2f;color:#06110b;text-decoration:none;font-weight:800;border-radius:999px;padding:12px 18px\">Set new password</a></p>",
-        "<p style=\"margin-top:16px;color:#8fa199;font-size:12px;line-height:1.45\">Requested on " + requestedAt + ".</p>",
-        "</td></tr></table></td></tr></table></body></html>"
-      ].join(""),
-      text: [
-        "Reset your Clarity password",
-        "",
-        "Use the button below to set a new password. This link expires soon.",
-        link
-      ].join("\\n")
+      subject: built.subject,
+      html: built.html,
+      text: built.text + "\n\nRequested on " + requestedAt + "."
     })
   });
   const body = await response.json().catch(function () { return null; });
