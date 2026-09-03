@@ -407,4 +407,36 @@ function sawtoothSquare() {
   assert.strictEqual(frame.layers.bunkersMapped, 1);
 })();
 
+(function testWearableDeliveryVerdict() {
+  /* Millbrook's real numbers, measured against the baked v1788373891710 assets:
+     h1 fits as baked, h3 was the worst hole in the package at 88KB and needs
+     one step down, and the eight like it are exactly what went missing when the
+     phone had no ladder at all. */
+  const budget = core.WEARABLE_DELIVERY.assetBudgetBytes;
+  assert.ok(budget < core.WEARABLE_DELIVERY.liveMessageCapBytes,
+    "the budget must leave headroom under the hard payload cap for the descriptor and framing");
+
+  const asBaked = core.wearableDeliveryVerdict({ 0.8: 42561 });
+  assert.strictEqual(asBaked.ok, true);
+  assert.strictEqual(asBaked.quality, 0.8);
+  assert.strictEqual(asBaked.squeezed, false, "a hole that fits as baked is not squeezed");
+
+  const squeezed = core.wearableDeliveryVerdict({ 0.8: 88111, 0.6: 58930 });
+  assert.strictEqual(squeezed.ok, true);
+  assert.strictEqual(squeezed.quality, 0.6);
+  assert.strictEqual(squeezed.bytes, 58930);
+  assert.strictEqual(squeezed.squeezed, true, "fitting only below the baked quality is the fact worth reporting");
+
+  const refused = core.wearableDeliveryVerdict({ 0.8: 400000, 0.6: 300000, 0.45: 200000, 0.3: 150000, 0.2: 120000 });
+  assert.strictEqual(refused.ok, false, "a hole no rung of the ladder can carry is not deliverable");
+  assert.strictEqual(refused.bytes, 120000);
+
+  /* The generator stops encoding at the first rung that fits, so the sizes it
+     hands over are sparse by design and a gap must not read as a fit. */
+  const sparse = core.wearableDeliveryVerdict({ 0.8: 70000, 0.45: 40000 });
+  assert.strictEqual(sparse.quality, 0.45);
+  assert.strictEqual(core.wearableDeliveryVerdict({}).ok, false, "no measurement at all is not a pass");
+  assert.strictEqual(core.wearableDeliveryVerdict(null).ok, false);
+})();
+
 console.log("watch-map-core passed");

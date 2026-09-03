@@ -219,9 +219,27 @@
 
   // ---------------------------------------------------------------- markup
 
+  /* The bytes in the bucket are WebP; the wrist is sent JPEG, and it is the
+     JPEG that has to clear WatchConnectivity's 65,536-byte payload cap. The
+     bake measures both (see functions/course-watch-maps.mjs's measureDelivery),
+     so an admin can see a recipe outgrowing the radio here rather than from a
+     package that stops halfway across. */
+  function squeezedNote(report) {
+    var delivery = report && report.delivery;
+    if (!delivery || !delivery.squeezedHoles) return "";
+    return " · " + delivery.squeezedHoles + " hole" + (delivery.squeezedHoles === 1 ? "" : "s") + " squeezed for the watch";
+  }
+
+  function deliveryLabel(delivery) {
+    if (!delivery) return "not measured (baked before the generator recorded this)";
+    var size = (delivery.bytes || 0) + " B at quality " + delivery.quality;
+    if (!delivery.ok) return "OVER BUDGET — " + size + ", above " + delivery.budgetBytes + " B";
+    return (delivery.squeezed ? "squeezed to fit — " : "fits as baked — ") + size;
+  }
+
   function statusLabel(report) {
     if (!report || report.status === "none") return { label: "Not generated", tone: "" };
-    if (report.status === "ready") return { label: "Ready · " + report.readyHoleCount + "/" + report.holeCount + " holes · " + Math.round(report.totalBytes / 1024) + " KB · Recipe v" + report.recipeVersion, tone: "ok" };
+    if (report.status === "ready") return { label: "Ready · " + report.readyHoleCount + "/" + report.holeCount + " holes · " + Math.round(report.totalBytes / 1024) + " KB · Recipe v" + report.recipeVersion + squeezedNote(report), tone: "ok" };
     if (report.status === "recovery") return { label: "Recovery needed · " + report.readyHoleCount + " generated assets found · Package metadata missing", tone: "warn" };
     if (report.status === "partial") return { label: "Partial · " + report.readyHoleCount + "/" + report.holeCount + " holes · " + Math.round(report.totalBytes / 1024) + " KB", tone: "warn" };
     if (report.status === "failed" && report.failure) return { label: "Generation failed · " + (report.failure.stage || "unknown stage"), tone: "bad" };
@@ -287,6 +305,7 @@
     var rows = [
       ["image", holeRecord.width + "×" + holeRecord.height + " " + holeRecord.format],
       ["bytes", holeRecord.bytes + " B"],
+      ["to watch", deliveryLabel(holeRecord.delivery)],
       ["metres/px", Number(sr.metresPerPixel || 0).toFixed(3)],
       ["rotation", Number(sr.rotationDegrees || 0).toFixed(1) + "°"],
       ["origin", (Number(sr.originLat || 0)).toFixed(6) + ", " + (Number(sr.originLon || 0)).toFixed(6)],

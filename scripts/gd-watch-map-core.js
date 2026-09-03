@@ -503,6 +503,88 @@
     return { ok: issues.length === 0, issues: issues };
   }
 
+  // ---------------------------------------------------------------- wearable delivery
+
+  /* What the wrist's radio will actually accept, which is not the same question
+     as what this pipeline can draw.
+
+     The bake ships WebP; the phone re-encodes every hole to JPEG on the way to
+     the watch, because watchOS ImageIO has no WebP decoder. That re-encode is
+     where a package meets a limit nothing else here can see. WCSession's
+     sendMessage refuses a payload over 65,536 bytes outright, and on this
+     two-target Watch app the queued transferFile fallback is not dependable, so
+     a refused hole is simply a hole the player never gets.
+
+     It has already happened once. Recipe v3 draws far more than the recipe the
+     phone's fixed quality 0.8 was measured against, and it pushed 8 of
+     Millbrook's 18 holes to 66-88KB - every one refused, in silence, leaving
+     the wrist at 10 of 18. The phone now steps quality down per hole to fit
+     (AppleWatchTransport.watchDecodableBytes), so this ladder is a copy of a
+     decision made in Swift. It is copied here rather than left there because
+     the GENERATOR is the only thing that can notice the trend early: it can
+     measure what it just baked and say, in the package report, which holes only
+     arrive squeezed and which would not arrive at all.
+
+     A BUDGET, not the cap: the descriptor (course key, package version, asset
+     name) and WatchConnectivity's own framing ride in the same payload. */
+  var WEARABLE_DELIVERY = {
+    liveMessageCapBytes: 65536,
+    assetBudgetBytes: 60000,
+    /* 0.8 is the hole as baked. Below it the wrist is looking at a softer
+       picture than the one on file - which on a map drawn about 190pt wide
+       costs nothing anybody can see, where being refused costs the hole. */
+    transcodeQuality: [0.8, 0.6, 0.45, 0.3, 0.2]
+  };
+
+  /* The verdict for one hole, given what it weighs as JPEG at each quality in
+     `transcodeQuality`. The sizes are measured by whoever can actually encode -
+     the generator has sharp, and this file deliberately has neither sharp nor a
+     canvas - so this is only the rule, applied to their numbers.
+
+     Those numbers must be in the PHONE's bytes, not the measurer's. The two are
+     not the same: sharp writes 1.75-1.84x smaller than iOS's ImageIO at the
+     same quality (measured across all 18 Millbrook holes), so a caller handing
+     over its own raw byte counts would have this call an 88KB hole a
+     comfortable fit. Converting is the caller's job because only the caller
+     knows which encoder it used - see measureDelivery.
+
+     `squeezed` is the interesting one: the hole fits, but only because the
+     phone dropped it below the baked quality. One squeezed hole is a hole; a
+     package full of them is a recipe drawing more than the wrist can carry, and
+     the report is where that should become visible. */
+  function wearableDeliveryVerdict(sizesByQuality) {
+    var ladder = WEARABLE_DELIVERY.transcodeQuality;
+    var sizes = sizesByQuality || {};
+    for (var i = 0; i < ladder.length; i++) {
+      var quality = ladder[i];
+      var bytes = Number(sizes[quality]);
+      if (!Number.isFinite(bytes) || bytes <= 0) continue;
+      if (bytes <= WEARABLE_DELIVERY.assetBudgetBytes) {
+        return {
+          ok: true,
+          quality: quality,
+          bytes: bytes,
+          squeezed: i > 0,
+          budgetBytes: WEARABLE_DELIVERY.assetBudgetBytes,
+          capBytes: WEARABLE_DELIVERY.liveMessageCapBytes
+        };
+      }
+    }
+    /* Nothing on the ladder fits. The phone has a halved-pixel fallback below
+       this, so the hole is not necessarily lost - but a hole that has to be
+       thrown away at half resolution to travel is a bake this pipeline should
+       be reporting, not quietly relying on the phone to rescue. */
+    var floor = ladder[ladder.length - 1];
+    return {
+      ok: false,
+      quality: floor,
+      bytes: Number(sizes[floor]) || null,
+      squeezed: true,
+      budgetBytes: WEARABLE_DELIVERY.assetBudgetBytes,
+      capBytes: WEARABLE_DELIVERY.liveMessageCapBytes
+    };
+  }
+
   // ---------------------------------------------------------------- SVG rendering
 
   function polygonPointsAttr(points) {
@@ -701,6 +783,8 @@
 
   return {
     WATCH_MAP_RECIPE_V1: WATCH_MAP_RECIPE_V1,
+    WEARABLE_DELIVERY: WEARABLE_DELIVERY,
+    wearableDeliveryVerdict: wearableDeliveryVerdict,
     worldPx: worldPx,
     latLngFromWorldPx: latLngFromWorldPx,
     applyTransform: applyTransform,

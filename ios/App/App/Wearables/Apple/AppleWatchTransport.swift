@@ -225,7 +225,12 @@ final class AppleWatchTransport: NSObject, WearableTransport, WCSessionDelegate 
        65-80KB, past the cap, and were refused - while the ten quiet ones
        came in at 35-64KB and landed. A hole is a picture the wrist draws
        about 190pt wide, so stepping quality down until it fits costs the
-       player nothing visible; being refused costs them the whole hole. */
+       player nothing visible; being refused costs them the whole hole.
+
+       This budget and this ladder are mirrored in scripts/gd-watch-map-core.js
+       as WEARABLE_DELIVERY, where the generator uses them to measure a package
+       it has just baked and report which holes only travel squeezed. This side
+       is the one that actually runs; if either moves, move both. */
     private static let liveAssetByteBudget = 60_000
 
     private static func watchDecodableBytes(_ bytes: Data) -> Data {

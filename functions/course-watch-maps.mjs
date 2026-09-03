@@ -357,6 +357,55 @@ async function encodeSmallest(image) {
     : { format: "png", contentType: "image/png", bytes: png };
 }
 
+/* sharp's JPEG encoder is not the phone's, and the gap is large and one-sided.
+   Encoding all 18 of Millbrook's baked holes both ways at matching quality,
+   iOS's ImageIO writes 1.746-1.835x what sharp does - remarkably tight across
+   holes, but nowhere near 1. Reading a raw sharp byte count against the
+   wearable budget would therefore have called the 88KB hole that never reached
+   the wrist a comfortable 50KB fit: exactly the false comfort this measurement
+   exists to remove.
+
+   Deliberately just above the top of the observed range rather than the mean.
+   Over-calling a hole squeezed costs one pessimistic line in a report;
+   under-calling it costs the player the hole. Re-measure this if the recipe's
+   drawing changes character or iOS changes its encoder - measureDelivery keeps
+   sharp's own count alongside the projection so the comparison can be redone
+   from a package that already exists. */
+const IOS_JPEG_FACTOR = 1.85;
+
+/* What this hole will weigh on the way to the wrist, which is a different
+   number from what it weighs in storage.
+
+   The stored asset is WebP and the watch cannot decode WebP, so the phone
+   re-encodes every hole to JPEG before sending it - and JPEG of a detailed
+   flat-vector hole runs 2-3x the WebP. That multiple is exactly what went
+   unnoticed: recipe v3 shipped a package whose eight busiest holes could not
+   cross the radio at all, and nothing in the bake, the report or the Studio
+   viewer said so. Measuring it here, with the same ladder the phone uses,
+   is what makes the next such recipe change visible on the bake rather than on
+   somebody's wrist.
+
+   Stops at the first quality that fits, so the common hole costs one extra
+   encode. */
+async function measureDelivery(image) {
+  const buffer = Buffer.isBuffer(image) ? image : Buffer.from(image, "utf8");
+  const sizes = {};
+  const measured = {};
+  for (const quality of watchMapCore.WEARABLE_DELIVERY.transcodeQuality) {
+    try {
+      const jpeg = await sharp(buffer).jpeg({ quality: Math.round(quality * 100) }).toBuffer();
+      measured[quality] = jpeg.length;
+      sizes[quality] = Math.round(jpeg.length * IOS_JPEG_FACTOR);
+      if (sizes[quality] <= watchMapCore.WEARABLE_DELIVERY.assetBudgetBytes) break;
+    } catch (error) { break; }
+  }
+  const verdict = watchMapCore.wearableDeliveryVerdict(sizes);
+  /* Both numbers are kept: the projection is what the budget is judged on, and
+     the encoder's own count is what makes the projection auditable if the
+     factor ever needs re-measuring against a new iOS or a new recipe. */
+  return Object.assign(verdict, { measuredBytes: measured[verdict.quality] || null, projectionFactor: IOS_JPEG_FACTOR });
+}
+
 /* Live progress for the one action on this screen that has no job row to read.
    
    Written to course_watch_maps.progress and nothing else - never status, never holes, never
@@ -421,6 +470,7 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
     try {
       const rasterized = await rasterizeFrame(frame, geometry, terrainIndex, holeNumber);
       const encoded = await encodeSmallest(rasterized);
+      const delivery = await measureDelivery(rasterized);
       const path = courseId + "/v" + version + "/h" + holeNumber + "." + encoded.format;
       await storageUpload(path, encoded.bytes, encoded.contentType);
       totalBytes += encoded.bytes.length;
@@ -431,6 +481,7 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
         height: frame.height,
         format: encoded.format,
         bytes: encoded.bytes.length,
+        delivery,
         spatialReference: frame.spatialReference,
         reference: frame.reference,
         checkpoints: frame.checkpoints,
@@ -438,6 +489,18 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
         layers: frame.layers
       });
       if (!frame.validation.ok) errors.push({ holeNumber, reason: "spatial reference validation failed: " + frame.validation.issues.join("; ") });
+      /* A squeezed hole is not an error - the phone drops a step and the hole
+         arrives - so it rides the report and nothing more. A hole the whole
+         ladder cannot fit IS one: it can only travel by being thrown away at
+         half resolution, and a package should say that out loud rather than
+         lean on the phone's last-resort fallback. */
+      if (!delivery.ok) {
+        errors.push({
+          holeNumber,
+          reason: "too large for wearable delivery: " + (delivery.bytes || "?") + " bytes at quality " +
+            delivery.quality + ", over the " + delivery.budgetBytes + "-byte budget"
+        });
+      }
     } catch (error) {
       errors.push({ holeNumber, reason: String(error && error.message || error) });
     }
@@ -595,6 +658,25 @@ function backfillHoleReferences(map, row) {
   return { holes, updated, alreadyPresent, skipped };
 }
 
+/* How this package travels, in one line, so nobody has to read eighteen holes
+   to notice a recipe that has outgrown the radio. Null for a package baked
+   before the bake measured it - "not measured" and "measured, all fine" are
+   different answers and the report should not blur them. */
+function deliverySummary(holes) {
+  const measured = (Array.isArray(holes) ? holes : []).filter(hole => hole && hole.delivery);
+  if (!measured.length) return null;
+  const heaviest = measured.reduce((worst, hole) =>
+    (hole.delivery.bytes || 0) > (worst.delivery.bytes || 0) ? hole : worst, measured[0]);
+  return {
+    measuredHoles: measured.length,
+    squeezedHoles: measured.filter(hole => hole.delivery.squeezed).length,
+    overBudgetHoles: measured.filter(hole => !hole.delivery.ok).length,
+    heaviestHole: heaviest.holeNumber,
+    heaviestBytes: heaviest.delivery.bytes || null,
+    budgetBytes: watchMapCore.WEARABLE_DELIVERY.assetBudgetBytes
+  };
+}
+
 function reportShape(row) {
   if (!row) return { status: "none", holeCount: 0, readyHoleCount: 0, totalBytes: 0, holes: [], errors: [] };
   return {
@@ -610,6 +692,7 @@ function reportShape(row) {
     generatedAt: row.generated_at,
     generatedBy: row.generated_by,
     holes: row.holes || [],
+    delivery: deliverySummary(row.holes),
     errors: row.errors || [],
     /* Present only while a bake is running - the generator nulls it on the write that
        publishes the finished package. See writeProgress. */
@@ -738,7 +821,7 @@ export const config = {
 
 export const __test = {
   holeNumbersFromObjects, reportShape, recoveryReport, supersededPaths, sameReferenceGeometry, backfillHoleReferences,
-  mercY, heightSampler, elevationMetaForHole
+  mercY, heightSampler, elevationMetaForHole, measureDelivery, deliverySummary
 };
 
 function json(status, body) {

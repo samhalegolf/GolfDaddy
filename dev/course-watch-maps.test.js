@@ -280,6 +280,40 @@ const root = path.join(__dirname, "..");
   assert.strictEqual(helpers.sameReferenceGeometry(baked, freshNoShape), false,
     "losing the green outline is a change the reference would publish");
 
+  // --- delivery measurement: what a hole weighs on the way to the wrist ------------------
+  /* The point of measuring at bake time is that the stored WebP does not answer
+     the question - the phone re-encodes to JPEG, and it is the JPEG that has to
+     cross the radio. This runs the real ladder through sharp. */
+  const flatHole = '<svg xmlns="http://www.w3.org/2000/svg" width="448" height="1536">' +
+    '<rect width="448" height="1536" fill="#3c6b45"/><rect x="120" y="200" width="200" height="1100" fill="#6fbf5e"/></svg>';
+  const measured = await helpers.measureDelivery(flatHole);
+  assert.strictEqual(measured.ok, true, "a flat hole must be deliverable");
+  assert.strictEqual(measured.quality, 0.8, "a hole that fits as baked is never stepped down");
+  assert.strictEqual(measured.squeezed, false);
+  assert.ok(measured.bytes > 0 && measured.bytes <= measured.budgetBytes);
+  assert.strictEqual(measured.budgetBytes, watchMapCore.WEARABLE_DELIVERY.assetBudgetBytes);
+  /* The budget is in the PHONE's bytes, so what sharp weighed must be projected
+     up, never used raw - the whole point of the factor. Both are kept so the
+     factor can be re-measured later against a package that already exists. */
+  assert.ok(measured.measuredBytes > 0 && measured.measuredBytes < measured.bytes,
+    "the projection must sit above sharp's own count, or it is not projecting");
+  assert.strictEqual(measured.bytes, Math.round(measured.measuredBytes * measured.projectionFactor));
+
+  // --- deliverySummary: one line per package, and no false reassurance --------------------
+  assert.strictEqual(helpers.deliverySummary([{ holeNumber: 1 }]), null,
+    "a package baked before this was measured must read as unmeasured, not as clean");
+  assert.strictEqual(helpers.deliverySummary(null), null);
+  const summary = helpers.deliverySummary([
+    { holeNumber: 1, delivery: { ok: true, quality: 0.8, bytes: 42561, squeezed: false } },
+    { holeNumber: 3, delivery: { ok: true, quality: 0.6, bytes: 58930, squeezed: true } },
+    { holeNumber: 7, delivery: { ok: false, quality: 0.2, bytes: 120000, squeezed: true } }
+  ]);
+  assert.strictEqual(summary.measuredHoles, 3);
+  assert.strictEqual(summary.squeezedHoles, 2);
+  assert.strictEqual(summary.overBudgetHoles, 1);
+  assert.strictEqual(summary.heaviestHole, 7, "the heaviest hole is the one worth naming");
+  assert.strictEqual(summary.heaviestBytes, 120000);
+
   console.log("course-watch-maps passed");
 })().catch((error) => {
   console.error("course-watch-maps failed");
