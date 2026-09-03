@@ -105,6 +105,11 @@ public struct WatchHoleFlow: Equatable {
     /// How far from the green the fix was when the current shot was locked.
     /// The only thing that distinguishes "still deciding" from "played it".
     public private(set) var lockedAtGreenM: Double?
+    /// The green of the hole just finished, kept only so the reach fallback
+    /// below can tell "walked to the next tee" from "still standing on the
+    /// last one". Nil until a hole is completed, which is deliberate: without
+    /// it the fallback does not apply at all.
+    public private(set) var lastGreen: Coordinate?
     private var wasLocked = false
 
     public init() {}
@@ -128,7 +133,8 @@ public struct WatchHoleFlow: Equatable {
      *
      * Everything else it decides here is a screen, and screens are not events. */
     @discardableResult
-    public mutating func update(fix: Coordinate?, hole current: Hole?, next: Hole?, locked: Bool) -> Effect? {
+    public mutating func update(fix: Coordinate?, hole current: Hole?, next: Hole?, locked: Bool,
+                                reachM: Double? = nil) -> Effect? {
         /* A lock records where it was made FROM, in green-distance, because
            that is what greenApproachM is measured against. It is captured on
            the transition rather than read every time, so a shot locked before
@@ -157,8 +163,11 @@ public struct WatchHoleFlow: Equatable {
         case .queued:
             /* The tee zone IS the Play button. It can only ever start the hole
                already on screen, which a deliberate press put there. */
-            guard let next, let tee = next.tee, let d = distance(from: fix, to: tee), d <= Self.teeZoneM else { return nil }
-            return play(hole: next)
+            guard let next else { return nil }
+            if let tee = next.tee, let d = distance(from: fix, to: tee), d <= Self.teeZoneM {
+                return play(hole: next)
+            }
+            return arrivedByReach(fix: fix, next: next, reachM: reachM) ? play(hole: next) : nil
 
         case .holeComplete:
             /* Nothing about a position matters on the holding screen. That is
@@ -172,10 +181,54 @@ public struct WatchHoleFlow: Equatable {
             return nil
 
         case .playing:
+            /* Only the hole this wrist is actually showing may take the screen.
+             *
+             * Moving on is behind a deliberate button - "That's me", Next hole,
+             * Play - and once that has been pressed, position is not entitled
+             * to argue with it. Without this guard it did: the player putts
+             * out, presses through to the next hole, and is still standing on
+             * the green they just finished while the phone's Scene has not
+             * caught up (its ADVANCE and PLAY are in flight, or were rejected).
+             * `current` is then the OLD hole, its green is five metres away,
+             * and the wrist is dragged straight back to it - again on the next
+             * fix, and the next, so the next hole can never be reached.
+             *
+             * The positional rule is not being weakened. It is being asked
+             * about the right hole. */
+            guard hole == nil || current?.number == hole else { return nil }
             guard shouldFocusGreen(fix: fix, hole: current, locked: locked) else { return nil }
             openGreen(on: current, ball: fix)
             return nil
         }
+    }
+
+    /* The looser way onto the queued hole.
+     *
+     * Thirty metres to the mapped tee is the right test when the map is right.
+     * When it is not - a tee box nobody mapped, a package a little out of
+     * place, a hole played from a different set of markers - it never arrives,
+     * and the queued screen becomes a dead end you can only leave by pressing
+     * Play by hand.
+     *
+     * So: can this bag reach anything on that hole from where the player is
+     * standing? If the longest club cannot get to its tee or its green then
+     * they are not on it, whatever the map thinks. If it can, they are
+     * plausibly on it and the map or the tee is what is wrong.
+     *
+     * Reach alone is NOT enough, which is why the green behind matters. From
+     * the green you have just putted out on, the next tee is usually well
+     * inside a driver - so reach on its own would start the next hole while
+     * you were still picking your ball out of the cup, and the walk to the tee
+     * is exactly what this screen is for. Both conditions, or neither. */
+    func arrivedByReach(fix: Coordinate, next: Hole, reachM: Double?) -> Bool {
+        guard let reachM, reachM > 0 else { return false }
+        /* No green behind means no hole was completed, so there is no walk to
+           have finished - a hole queued from mid-round keeps the strict tee
+           zone and nothing else. */
+        guard let last = lastGreen, let back = distance(from: fix, to: last), back > Self.greenReleaseM else { return false }
+        let reaches = [next.tee, next.green].compactMap { $0 }.compactMap { distance(from: fix, to: $0) }
+        guard let nearest = reaches.min() else { return false }
+        return nearest <= reachM
     }
 
     /* Green focus, decided. Position and nothing else, with one exception: a
@@ -231,6 +284,7 @@ public struct WatchHoleFlow: Equatable {
         ball = nil
         ballPlaced = false
         greenClosed = nil
+        lastGreen = current?.green ?? lastGreen
         score = current?.par
         if let number { effects.append(.holeComplete(hole: number)) }
         return effects
@@ -274,6 +328,7 @@ public struct WatchHoleFlow: Equatable {
         ballPlaced = false
         greenClosed = nil
         lockedAtGreenM = nil
+        lastGreen = nil
         wasLocked = false
         return .play(hole: next.number)
     }
@@ -303,6 +358,7 @@ public struct WatchHoleFlow: Equatable {
         score = nil
         greenClosed = nil
         lockedAtGreenM = nil
+        lastGreen = nil
         wasLocked = false
     }
 

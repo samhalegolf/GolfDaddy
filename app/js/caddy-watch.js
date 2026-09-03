@@ -373,6 +373,26 @@
         if (!observation) return { accepted: false, reason: "invalid-location" };
         signal = type;
       } else return { accepted: false, reason: "unknown-command" };
+      /* Bring the phone's eyes home before a driving wrist's command lands.
+
+         Every play gate in Marshal asks flow() === "live", and flow is a VIEW
+         fact - "is the phone looking at the hole being played". So ANY browse
+         silently disarmed the driver: two taps of the wrist's own hole arrows,
+         or (now the mask lets the hole rail through) a page on the phone, and
+         the wrist's next LOCK came back marshal-rejected, its ball drags came
+         back twenty rejections deep, and every button stayed lit throughout.
+
+         Looking around must cost the player nothing. The moment the driver
+         acts, the round is what the phone shows again - which is also the
+         honest thing for the phone to be showing. The view commands themselves
+         are exempt, or browsing could never leave the live hole at all. */
+      var isBrowse = type === "VIEW_NEXT_HOLE" || type === "VIEW_PREVIOUS_HOLE" || type === "VIEW_HOLE";
+      if (!isBrowse && surface.active === "watch") {
+        var seen = marshal.round ? marshal.round() : {};
+        if (seen.liveHole !== null && seen.liveHole !== undefined && seen.hole !== seen.liveHole) {
+          marshal.signal("VIEW_LIVE_HOLE");
+        }
+      }
       var changed = marshal.signal(signal, observation ? { observation: observation } : payload);
       /* A rejected command was never applied. Keeping its ID unclaimed lets a
          caller retry after the authoritative state changes; only a genuine

@@ -171,6 +171,45 @@ check("the driver survives the phone looking at another hole", () => {
   assert.equal(w.takeBack(), true, "and Play on phone is the one way back");
   assert.equal(w.scene().surface.active, "phone");
 });
+/* From the log of a real round: two taps of the wrist's own hole arrows, then
+   every LOCK and twenty consecutive ball drags came back marshal-rejected with
+   the wrist's buttons still lit. Marshal's play gates ask flow() === "live",
+   and flow means "the phone is looking at the hole being played" - so browsing
+   disarmed the driver. Needs a course with somewhere to browse TO. */
+const PKG2 = { holes: [PKG.holes[0], { holeNumber: 2, par: 4, tee: TEE, green: GREEN }] };
+function twoHoles() {
+  const m = createMarshal({ now: () => 1000 });
+  m.signal("ROUND_OPENED", { courseKey: "watch-test", roundId: "round-1", pkg: PKG2, hole: 1 });
+  m.signal("FIX_RECEIVED", { point: TEE });
+  m.signal("PLAY_PRESSED");
+  return { m, w: createWatchBridge({ marshal: m, now: () => 1000 }) };
+}
+check("browsing a hole does not disarm the wrist that is driving", () => {
+  const { m, w } = twoHoles();
+  w.receiveCommand({ commandId: "take-arm", roundId: "round-1", type: "TAKE_OVER", payload: {} });
+  assert.equal(w.receiveCommand({ commandId: "arrow", roundId: "round-1", type: "VIEW_NEXT_HOLE", payload: {} }).accepted, true);
+  assert.equal(m.round().hole, 2, "the arrow still looks where it is told");
+  assert.equal(w.scene().flow, "preview");
+  const lock = w.receiveCommand({ commandId: "lock-after-browse", roundId: "round-1", type: "LOCK", payload: {} });
+  assert.equal(lock.accepted, true, "the wrist can still play the hole it is playing");
+  assert.equal(m.round().hole, 1, "and the phone is showing that hole again by the time it lands");
+});
+check("the phone's own hole rail cannot disarm the wrist either", () => {
+  const { m, w } = twoHoles();
+  w.receiveCommand({ commandId: "take-rail", roundId: "round-1", type: "TAKE_OVER", payload: {} });
+  assert.equal(m.signal("NEXT_HOLE"), true, "the rail comes through the mask - browsable, not playable");
+  assert.equal(m.round().hole, 2);
+  const ball = w.receiveCommand({ commandId: "ball-after-rail", roundId: "round-1", type: "BALL_MOVED", payload: { point: GREEN } });
+  assert.equal(ball.accepted, true, "placing the ball opens green focus on the LIVE hole, not the browsed one");
+  assert.equal(m.round().hole, 1);
+});
+check("none of that changes what the arrows mean when the phone is driving", () => {
+  const { m, w } = twoHoles();
+  assert.equal(m.signal("NEXT_HOLE"), true);
+  assert.equal(w.receiveCommand({ commandId: "lock-phone-browse", roundId: "round-1", type: "LOCK", payload: {} }).accepted, false,
+    "stepping off the live hole is still Preview, and Preview still has no shot to lock");
+  assert.equal(m.round().hole, 2, "and nothing drags the view back behind the player's own arrow");
+});
 check("the scene carries what the Ready faces need: course name, hole length, map count", () => {
   const { w } = ready(), s = w.scene();
   assert.equal(s.course.key, "watch-test");

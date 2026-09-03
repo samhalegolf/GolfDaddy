@@ -161,14 +161,23 @@ final class WatchSessionManager: NSObject, ObservableObject {
        with the phone asleep in a bag. */
     private func advanceFlow() {
         guard scene?.isDriving == true else { return }
-        let current = flowHole(scene?.hole?.number)
+        /* The wrist's OWN hole first, the phone's only as the opening answer.
+           While the wrist is driving it is the one that decided which hole is
+           on screen, and it decides a beat before the phone hears about it -
+           so reading the hole off the Scene meant every fix in that gap was
+           measured against the hole just left. See WatchHoleFlow.update. */
+        let current = flowHole(holeFlow.hole ?? scene?.hole?.number)
         let next = holeFlow.face == .queued ? flowHole(holeFlow.hole) : flowHole(flowNextHole)
         let fix = wristFix.flatMap { fix -> Coordinate? in
             guard let lat = fix.lat, let lng = fix.lng else { return nil }
             return Coordinate(lat: lat, lng: lng)
         }
+        /* The bag's longest club, for the reach fallback onto a queued hole
+           whose tee the package has in the wrong place. Nil until a bag has
+           arrived, which simply leaves the strict tee zone in charge. */
         let effect = holeFlow.update(fix: fix, hole: current, next: next,
-                                     locked: scene?.shot?.locked == true || lockedShot != nil)
+                                     locked: scene?.shot?.locked == true || lockedShot != nil,
+                                     reachM: player.snapshot?.bag.maxTotalM)
         if let effect { dispatch(effect) }
     }
 
@@ -183,7 +192,7 @@ final class WatchSessionManager: NSObject, ObservableObject {
        PHONE's answer (controls.canLogFinish): the wrist decides screens, not
        what is in the record. */
     func flowHoleDone() {
-        let effects = holeFlow.complete(hole: flowHole(scene?.hole?.number),
+        let effects = holeFlow.complete(hole: flowHole(holeFlow.hole ?? scene?.hole?.number),
                                         logShot: scene?.controls?.canLogFinish == true)
         effects.forEach(dispatch)
         WKInterfaceDevice.current().play(.success)

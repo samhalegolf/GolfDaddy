@@ -678,6 +678,26 @@
         return true;
       },
 
+      /* Back to the hole being played, without disturbing it.
+
+         Deliberately NOT VIEW_HOLE_CHANGED: that is the picker, and it drops
+         the open finish and any logging on its way past - which is exactly the
+         state whoever is calling this is about to use. This only moves the
+         eyes back.
+
+         It exists because every play gate here asks flow() === "live", and
+         flow is a VIEW fact: "is the phone looking at the hole being played".
+         That is fine while the phone IS the player, and wrong the moment
+         something else is driving - browsing a hole then disarms the driver,
+         and its LOCK and its ball placements come back rejected with nothing
+         on screen to say why. See caddy-watch.js's receiveCommand. */
+      VIEW_LIVE_HOLE: function () {
+        if (S.live.hole === null || S.viewHole === S.live.hole) return false;
+        enterHole(S.live.hole);
+        syncEngine();
+        return true;
+      },
+
       /* The arrows LOOK, they do not move you on.
 
          They used to walk the round while Live, so the hole you were "playing"
