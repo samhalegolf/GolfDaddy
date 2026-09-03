@@ -26,9 +26,19 @@
   }
   function unitLabel() { var s = settings(); return s && s.unitLabel ? s.unitLabel() : "m"; }
 
+  /* Deliberately NOT gated on scene.flow.
+
+     It was, and `flow` is a view fact, not a round fact: marshal calls it
+     "live" only while you are LOOKING at the hole you are playing. So the card
+     was absent for the whole of preview - the window where the course should
+     be crossing to the wrist and where the player decides which surface to
+     play on - and, far worse, it vanished mid-round the moment you paged to
+     another hole, taking the "Playing on Watch" mask with it while the wrist
+     went on driving. A round on screen and a Watch to put it on is the whole
+     condition. */
   function phaseFor(scene) {
     var surface = scene && scene.surface;
-    if (!scene || !scene.roundId || scene.flow !== "live") return null;
+    if (!scene || !scene.roundId) return null;
     if (!surface || !surface.watch || !surface.watch.appInstalled) return null;
     if (surface.active === "watch") return "playing";
     if (surface.handover && surface.handover.state === "offered") return "handing";

@@ -116,18 +116,59 @@ check("surface commands still need the right round and are idempotent by ID", ()
   assert.equal(w.receiveCommand(take).accepted, true);
   assert.equal(w.receiveCommand(take).duplicate, true);
 });
-check("a handover belongs to one live round and lapses with it", () => {
+check("a handover belongs to one ROUND and lapses with it", () => {
   const { m, w } = ready();
   assert.equal(w.handToWatch(), true);
-  m.signal("END_ROUND");
-  assert.equal(w.scene().flow, "preview");
-  assert.equal(w.scene().surface.active, "phone", "live play over, nothing left on the Watch");
-  assert.equal(w.handToWatch(), false, "nothing to hand over without a live hole");
   m.signal("ROUND_OPENED", { courseKey: "watch-test", roundId: "round-2", pkg: PKG, hole: 1 });
+  assert.equal(w.scene().surface.active, "phone", "a new round is nobody's until it is handed over again");
+  assert.equal(w.scene().surface.handover, null);
+});
+/* The wrist's Play and the phone's card are one control with two faces. A
+   round that has been started but not yet played is exactly where a player
+   reaches for the wrist, and it used to be the one place neither face worked. */
+check("Play on the wrist starts the hole it hands over", () => {
+  const m = createMarshal({ now: () => 1000 });
+  m.signal("ROUND_OPENED", { courseKey: "watch-test", roundId: "round-1", pkg: PKG, hole: 1 });
+  m.signal("FIX_RECEIVED", { point: TEE });
+  const w = createWatchBridge({ marshal: m, now: () => 1000 });
+  assert.equal(m.round().liveHole, null, "the round is started but no hole is live");
+  const take = w.receiveCommand({ commandId: "take-preview", roundId: "round-1", type: "TAKE_OVER", payload: {} });
+  assert.equal(take.accepted, true, "the wrist no longer has to ask the phone to go first");
+  assert.equal(m.round().liveHole, 1, "taking over started the hole");
+  assert.equal(w.scene().surface.active, "watch");
+  assert.equal(w.scene().surface.handover.from, "watch");
+});
+check("the same is true of the phone's own card", () => {
+  const m = createMarshal({ now: () => 1000 });
+  m.signal("ROUND_OPENED", { courseKey: "watch-test", roundId: "round-1", pkg: PKG, hole: 1 });
+  m.signal("FIX_RECEIVED", { point: TEE });
+  const w = createWatchBridge({ marshal: m, now: () => 1000 });
+  assert.equal(w.handToWatch(), true);
+  assert.equal(m.round().liveHole, 1, "Play on Watch is still Play");
+  assert.equal(w.scene().surface.active, "watch");
+});
+check("a Play the ground will not allow is refused, and says so honestly", () => {
+  const m = createMarshal({ now: () => 1000 });
+  m.signal("ROUND_OPENED", { courseKey: "watch-test", roundId: "round-1", pkg: PKG, hole: 1 });
+  const w = createWatchBridge({ marshal: m, now: () => 1000 });
+  const take = w.receiveCommand({ commandId: "take-nofix", roundId: "round-1", type: "TAKE_OVER", payload: {} });
+  assert.equal(take.accepted, false, "no fix, so Marshal will not start a hole and neither does the handover");
+  assert.equal(take.reason, "play-unavailable", "the wrist is told about the ground, not told to use its phone");
+  assert.equal(m.round().liveHole, null);
   assert.equal(w.scene().surface.active, "phone");
-  assert.equal(w.handToWatch(), false, "preview at a new course still has no live hole to drive");
-  const early = w.receiveCommand({ commandId: "early", roundId: "round-2", type: "TAKE_OVER", payload: {} });
-  assert.equal(early.accepted, false); assert.equal(early.reason, "no-live-round", "Play here before Play on the phone is told why");
+});
+/* The black hole: `flow` goes to "preview" whenever the phone LOOKS at another
+   hole, and the driver used to lapse with it - phone and wrist both apparently
+   in play, neither saying which owned the round. Only Play on phone takes it
+   back. */
+check("the driver survives the phone looking at another hole", () => {
+  const { m, w } = ready();
+  w.receiveCommand({ commandId: "take-look", roundId: "round-1", type: "TAKE_OVER", payload: {} });
+  assert.equal(w.scene().surface.active, "watch");
+  m.signal("VIEW_HOLE_CHANGED", { hole: 2 });
+  assert.equal(w.scene().flow, "preview", "the phone is looking away from the live hole");
+  assert.equal(w.scene().surface.active, "watch", "which changes nothing about who is driving");
+  assert.equal(w.takeBack(), true, "and Play on phone is the one way back");
   assert.equal(w.scene().surface.active, "phone");
 });
 check("the scene carries what the Ready faces need: course name, hole length, map count", () => {

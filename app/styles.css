@@ -957,8 +957,15 @@ body.watchCardTall #toolRailTab { top: calc(env(safe-area-inset-top, 0px) + 64px
 body.watchCardTall #toolRail { top: calc(env(safe-area-inset-top, 0px) + 64px + 168px + 8px + 48px); }
 /* Playing on Watch: the map dims and a mask says why. Below the top bar so
    Back/Home still work, above the dock and Play so a phone in a pocket cannot
-   be driven by accident. */
+   be driven by accident.
+
+   Browsable, not playable: the hole rail is lifted ABOVE the mask so the phone
+   can still be paged around to look at other holes while the wrist plays. Only
+   the arrows and the picker come through - they change what is drawn and
+   nothing else (see marshal.js: "the arrows LOOK, they do not move you on") -
+   so the round can only come back to the phone through Play on phone. */
 body.watchDriving #surfaceStage, body.watchDriving #map { opacity: .32; filter: saturate(.6); transition: opacity .5s ease, filter .5s ease; }
+body.watchDriving .playChrome { z-index: 700; }
 #watchHandoverScreen { position: absolute; inset: 0; z-index: 690; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
   padding: 40px; box-sizing: border-box; text-align: center; background: rgba(4, 9, 6, .72); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); animation: whMaskIn .55s ease both; }
 #watchHandoverScreen.hiddenState { display: none; }

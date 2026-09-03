@@ -36,7 +36,7 @@ struct ContentView: View {
                         player: session.playerPoint,
                         wristDistance: WristDistances.compute(fix: session.wristFix, geometry: scene.geometry)?.centre,
                         play: { session.send(.takeOver) },
-                        notice: session.lastRejection.map { $0.reason == "no-live-round" ? "Play on iPhone first" : "Couldn't do that" }
+                        notice: session.lastRejection.map { $0.reason == "play-unavailable" ? "Can't start here yet" : "Couldn't do that" }
                     )
                     .task(id: session.lastRejection?.commandId) {
                         guard session.lastRejection != nil else { return }
@@ -218,8 +218,11 @@ struct ReadyFace: View {
     let player: WatchScene.GeoPoint?
     let wristDistance: Double?
     let play: () -> Void
-    /* Why the last Play here did not take - "Play on iPhone first" - shown
-       in place of the PAR until it is dismissed. */
+    /* Why the last Play here did not take, shown in place of the PAR until it
+       is dismissed. It no longer says "Play on iPhone first": the wrist's Play
+       now starts the hole itself (caddy-watch.js setActive), so the only
+       refusal left is Marshal declining to start play from where the player is
+       standing - which is about the ground, not about which device to use. */
     var notice: String? = nil
 
     private var distanceLabel: (caption: String, metres: Double)? {

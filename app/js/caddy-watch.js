@@ -142,15 +142,27 @@
     var watchMaps = { total: 0, have: 0 };
     var handoverSeq = 0;
 
-    /* Only LIVE play can be driven from the wrist: the Watch has no Play
-       button and nothing to preview from a couch. So a handover needs a live
-       hole, and lapses when the round changes or live play ends (END_ROUND
-       keeps the round record for its card; it is the live hole that goes). */
-    function liveRoundId(round) {
-      return round.roundId && round.liveHole !== null && round.liveHole !== undefined ? round.roundId : null;
+    /* A handover belongs to a ROUND, not to a live hole.
+
+       It used to belong to the live hole, and that one choice broke the flow
+       in three places at once. A round that had been started but not yet
+       played could not be handed over at all, so "Play here" on the wrist
+       answered "Play on iPhone first" to a player who had plainly already
+       started. The phone's card is gated on the same fact, so it never
+       appeared during preview - exactly the window where the course should be
+       crossing to the wrist. And worst, `flow` is a VIEW fact (see marshal.js:
+       "live" means you are LOOKING at the hole you are playing), so paging to
+       another hole mid-round hid the card AND its mask while the wrist kept
+       driving: two surfaces apparently in play, with nothing on either saying
+       which one owned the round.
+
+       The round is the right scope. It lapses when the round changes or ends,
+       and the only other way back to the phone is Play on phone. */
+    function handoverRoundId(round) {
+      return round && round.roundId ? round.roundId : null;
     }
     function surfaceFor(round) {
-      if (surface.active === "watch" && surface.roundId !== liveRoundId(round)) surface = { active: "phone", roundId: null, handover: null };
+      if (surface.active === "watch" && surface.roundId !== handoverRoundId(round)) surface = { active: "phone", roundId: null, handover: null };
       return {
         active: surface.active,
         handover: surface.handover ? { id: surface.handover.id, state: surface.handover.state, from: surface.handover.from } : null,
@@ -179,8 +191,24 @@
       var round = marshal.round ? marshal.round() : {};
       if (active !== "watch" && active !== "phone") return false;
       if (active === "watch") {
-        var roundId = liveRoundId(round);
+        var roundId = handoverRoundId(round);
         if (!roundId) return false;
+        /* Handing over from preview starts the hole on the way past. The two
+           Play controls are one control with two faces - the card on the phone
+           and the button on the wrist - so pressing either must do what
+           pressing the other would, and neither is allowed to be the one that
+           has to go first.
+
+           Marshal still owns the gate. If it will not start a hole from here
+           (no fix, not at the course, not yet arrived) then the handover does
+           not happen either and the caller is told why - rather than the wrist
+           being sent to a round nobody is playing. */
+        if (round.liveHole === null || round.liveHole === undefined) {
+          if (!marshal.signal("PLAY_PRESSED")) return false;
+          round = marshal.round ? marshal.round() : round;
+          roundId = handoverRoundId(round);
+          if (!roundId) return false;
+        }
         var current = surface.active === "watch" && surface.roundId === roundId ? surface.handover : null;
         if (from === "watch") {
           if (current && current.state === "confirmed") return true;
@@ -332,9 +360,11 @@
            and cannot be "marshal-rejected"; the round-ID check above is what
            stops a wrist claiming a round it is not looking at. */
         var applied = setActive(type === "TAKE_OVER" ? "watch" : "phone", "watch");
-        /* "Play here" before Play was pressed on the phone: there is no live
-           hole to drive yet, and the wrist is told so rather than left waiting. */
-        if (!applied) return { accepted: false, reason: "no-live-round", revision: latest.revision };
+        /* The handover itself never fails for want of a live hole any more -
+           setActive starts one. What it can still fail for is Marshal refusing
+           to start play AT ALL from where the player is standing, which is a
+           true thing to say and a different thing from "use your phone". */
+        if (!applied) return { accepted: false, reason: "play-unavailable", revision: latest.revision };
         seenCommands[id] = true;
         return { accepted: true, reason: null, revision: latest.revision };
       }
