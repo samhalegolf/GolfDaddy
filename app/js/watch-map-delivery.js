@@ -179,9 +179,19 @@
        turn one flaky asset into a request every few seconds for the whole
        round. So a failed attempt waits out a cooldown first. */
     var RETRY_COOLDOWN_MS = 60 * 1000;
+    /* Doubling, to a quarter of an hour. A gap the wrist cannot close - a
+       course whose package is genuinely unreachable - must not become a
+       fetch a minute for the rest of the round. */
+    var RETRY_COOLDOWN_MAX_MS = 15 * 60 * 1000;
     var inFlight = Object.create(null);
     var completed = Object.create(null);
     var retryAfter = Object.create(null);
+    var attempts = Object.create(null);
+
+    function cooldownFor(courseKey) {
+      var n = attempts[courseKey] = (attempts[courseKey] || 0) + 1;
+      return Math.min(RETRY_COOLDOWN_MS * Math.pow(2, n - 1), RETRY_COOLDOWN_MAX_MS);
+    }
 
     /* Per course: how many holes the package has, how many the wrist holds,
        which ones, and where each image lives (for a late thumbnail fetch). */
@@ -200,6 +210,12 @@
       var snapshot = progressFor(courseKey);
       listeners.forEach(function (fn) { try { fn(snapshot); } catch (e) {} });
     }
+    /* Both counters write the same tally, and only one of them is evidence.
+       `setHave` relays what the WRIST says it holds; `markHave` is the phone
+       noting a hole as it leaves. The card is happy to show either - an
+       optimistic count that the wrist corrects a moment later is the point of
+       `onProgress` - but `confirmed` is what decides whether this errand is
+       over, so a hole nobody has ever confirmed can never end it. */
     function setHave(courseKey, holes) {
       var p = progress[courseKey];
       if (!p) return;
@@ -207,6 +223,7 @@
       holes.forEach(function (n) { seen[Number(n)] = true; });
       p.holes = seen;
       p.have = Object.keys(seen).length;
+      p.confirmed = true;
       emit(courseKey);
     }
     function markHave(courseKey, holeNumber) {
@@ -214,7 +231,19 @@
       if (!p || p.holes[holeNumber]) return;
       p.holes[holeNumber] = true;
       p.have = Object.keys(p.holes).length;
+      p.confirmed = false;
       emit(courseKey);
+    }
+
+    /* The one place that decides a course is done with. It reads the wrist's
+       own count, never the phone's: see the note in deliver(). */
+    function settle(courseKey, result) {
+      var p = progress[courseKey];
+      if (!p || !p.confirmed || !(p.total > 0) || p.have < p.total) return false;
+      completed[courseKey] = result || completed[courseKey] || { delivered: true, sent: 0, version: p.version };
+      delete attempts[courseKey];
+      delete retryAfter[courseKey];
+      return true;
     }
     function rememberImage(courseKey, holeNumber, name, bytes) {
       images[courseKey] = images[courseKey] || Object.create(null);
@@ -307,14 +336,21 @@
       if (retryAfter[courseKey] > now()) return Promise.resolve({ delivered: false, reason: "cooling-down" });
       var promise = run(courseKey).then(function (result) {
         delete inFlight[courseKey];
-        /* Only a settled, complete delivery is remembered for good. Anything
-           else is retried, but not before the cooldown. */
-        if (result.delivered && !result.failed) completed[courseKey] = result;
-        else retryAfter[courseKey] = now() + RETRY_COOLDOWN_MS;
+        /* Only a package the WRIST says it holds is remembered for good.
+           Deliberately not `result.delivered && !result.failed`: that counted
+           holes as they left the phone, and a hole handed to the radio is not
+           a hole on the wrist. A live message the counterpart refuses (an
+           image over the sendMessage byte cap) and a queued transfer that
+           never lands both look like success from here, so latching on them
+           is what left Millbrook stuck at 10 of 18 with no path back - the
+           errand was finished for good and the eight gaps could never be
+           filled. Anything short is retried, but not before the cooldown. */
+        if (settle(courseKey, result)) return result;
+        retryAfter[courseKey] = now() + cooldownFor(courseKey);
         return result;
       }, function (error) {
         delete inFlight[courseKey];
-        retryAfter[courseKey] = now() + RETRY_COOLDOWN_MS;
+        retryAfter[courseKey] = now() + cooldownFor(courseKey);
         log("watch map delivery failed", courseKey, error);
         return { delivered: false, reason: "error" };
       });
@@ -331,6 +367,15 @@
       if (!p || p.none) return false;
       if (String(have.version || "") !== String(p.version)) return false;
       setHave(courseKey, Array.isArray(have.holes) ? have.holes : []);
+      /* A report that comes back SHORT is the repair signal. The phone had
+         nothing else to learn this from - it had already watched every hole
+         leave - so without this a wrist that quietly lost eight of them stayed
+         short for the whole round. Re-opening the errand is enough; the next
+         Scene runs it once the cooldown is out, and it re-sends only the gaps. */
+      if (!settle(courseKey, null) && completed[courseKey]) {
+        delete completed[courseKey];
+        retryAfter[courseKey] = now() + cooldownFor(courseKey);
+      }
       return true;
     }
 

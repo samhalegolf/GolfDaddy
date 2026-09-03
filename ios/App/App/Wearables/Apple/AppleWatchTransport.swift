@@ -99,15 +99,26 @@ final class AppleWatchTransport: NSObject, WearableTransport, WCSessionDelegate 
             let bytes = Self.watchDecodableBytes(bytes)
             let descriptor: [String: Any] = ["courseKey": courseKey, "version": version, "asset": asset]
             do {
-                /* A hole bakes to a few kilobytes, comfortably inside the
-                   sendMessage payload limit, so a reachable Watch gets it
-                   immediately and the queued file transfer is the fallback
+                /* A hole is encoded to fit inside the sendMessage payload
+                   limit (see watchDecodableBytes), so a reachable Watch gets
+                   it immediately and the queued file transfer is the fallback
                    for everything else. Writing the same bytes twice is a
-                   no-op on the Watch's side. */
+                   no-op on the Watch's side.
+
+                   The errorHandler is not optional here. It was nil, and a
+                   refused message is the ONLY signal that a hole did not
+                   land: eight of Millbrook's eighteen holes encoded past the
+                   65,536-byte cap, every one of them was refused in silence,
+                   and with the queued transfer unreliable on the simulator
+                   the package simply stopped at 10 of 18 with nothing in any
+                   log to say why. */
                 if session.isReachable {
                     var live = descriptor
                     live["bytes"] = bytes
-                    session.sendMessage(["watchMapAsset": live], replyHandler: nil, errorHandler: nil)
+                    session.sendMessage(["watchMapAsset": live], replyHandler: nil) { error in
+                        NSLog("[CaddyWatch] map asset %@ (%d bytes) refused live: %@",
+                              asset, bytes.count, String(describing: error))
+                    }
                 }
                 let outbox = Self.watchMapOutbox()
                 try FileManager.default.createDirectory(at: outbox, withIntermediateDirectories: true)
@@ -206,11 +217,44 @@ final class AppleWatchTransport: NSObject, WearableTransport, WCSessionDelegate 
        JPEG, not PNG: a 448x1536 hole came out at 50-68KB as PNG, over the
        sendMessage payload limit (WCErrorCodePayloadTooLarge on 14 of 18
        holes), and the queued file path is not something this Watch app can
-       lean on. At quality 0.8 the same holes are 15-20KB, and the bake has
-       no alpha to lose. */
+       lean on. The bake has no alpha to lose.
+
+       The QUALITY is chosen per hole rather than fixed, because a fixed 0.8
+       is what broke recipe v3. Those bakes carry far more detail than the
+       ones 0.8 was measured on: Millbrook's eight busiest holes encoded to
+       65-80KB, past the cap, and were refused - while the ten quiet ones
+       came in at 35-64KB and landed. A hole is a picture the wrist draws
+       about 190pt wide, so stepping quality down until it fits costs the
+       player nothing visible; being refused costs them the whole hole. */
+    private static let liveAssetByteBudget = 60_000
+
     private static func watchDecodableBytes(_ bytes: Data) -> Data {
-        guard let image = UIImage(data: bytes), let jpeg = image.jpegData(compressionQuality: 0.8) else { return bytes }
-        return jpeg
+        guard let image = UIImage(data: bytes) else { return bytes }
+        var smallest: Data?
+        for quality in [0.8, 0.6, 0.45, 0.3, 0.2] as [CGFloat] {
+            guard let jpeg = image.jpegData(compressionQuality: quality) else { continue }
+            smallest = jpeg
+            if jpeg.count <= liveAssetByteBudget { return jpeg }
+        }
+        /* Nothing this tall has ever needed it, but a hole that will not fit
+           on quality alone is halved in pixels rather than dropped. The map
+           view sizes the image from the manifest's own imageWidth/Height and
+           resizes into it, so fewer pixels is a softer hole and never a
+           misplaced one. */
+        guard let downscaled = halved(image), let jpeg = downscaled.jpegData(compressionQuality: 0.5) else {
+            return smallest ?? bytes
+        }
+        return jpeg.count < (smallest?.count ?? Int.max) ? jpeg : (smallest ?? bytes)
+    }
+
+    private static func halved(_ image: UIImage) -> UIImage? {
+        let size = CGSize(width: image.size.width / 2, height: image.size.height / 2)
+        guard size.width >= 1, size.height >= 1 else { return nil }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
     }
 
     private static func watchMapOutbox() -> URL {

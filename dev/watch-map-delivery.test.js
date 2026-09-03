@@ -57,10 +57,14 @@ function fakeEnvironment(report, options) {
   options = options || {};
   const calls = { manifests: [], assets: [], fetched: [] };
   const clock = { at: 1_000_000 };
+  /* Native caches the wrist's last inventory report and answers
+     watchMapInventory from it, so a test that reports one must move this
+     too - otherwise a retry re-sends holes the wrist has already confirmed. */
+  const wrist = { report: options.inventory || null };
   const plugin = {
     publishWatchMap: async manifest => { calls.manifests.push(manifest); },
     publishWatchMapAsset: async asset => { calls.assets.push(asset); },
-    watchMapInventory: async () => options.inventory || null
+    watchMapInventory: async () => wrist.report
   };
   const fetchImpl = async url => {
     calls.fetched.push(url);
@@ -76,7 +80,7 @@ function fakeEnvironment(report, options) {
     now: () => clock.at,
     toBase64: bytes => "b64:" + bytes.length
   });
-  return { instance, calls, clock };
+  return { instance, calls, clock, wrist };
 }
 
 (async function run() {
@@ -159,6 +163,43 @@ function fakeEnvironment(report, options) {
     await instance.deliver("millbrook-remarkables-18");
     check("a settled delivery is not repeated on every Scene", () => {
       assert.strictEqual(calls.assets.length, first, "the second call must not re-send anything");
+      assert.strictEqual(calls.fetched.filter(u => u.indexOf("/api/course-watch-maps") === 0).length, 1);
+    });
+  })();
+
+  /* The 10-of-18 failure, in miniature. Every hole left the phone and the
+     module counted them all, but the wrist only ever wrote two of them - the
+     third was refused by the radio for being over the payload cap. The wrist's
+     own report is the only place that fact exists. */
+  await (async () => {
+    const { instance, calls, clock, wrist } = fakeEnvironment(reportFor(frame, [1, 2, 3]));
+    await instance.deliver("millbrook-remarkables-18");
+    const sentFirstPass = calls.assets.length;
+    wrist.report = { courseKey: "millbrook-remarkables-18", version: "1788278423353", holes: [1, 2] };
+    instance.noteInventory(wrist.report);
+    const afterReport = instance.progress("millbrook-remarkables-18");
+    clock.at += 61_000;
+    await instance.deliver("millbrook-remarkables-18");
+    check("a wrist that reports back short re-opens a delivery the phone thought was done", () => {
+      assert.strictEqual(sentFirstPass, 3, "the first pass hands every hole to the radio");
+      assert.strictEqual(afterReport.have, 2, "the wrist's count replaces the phone's");
+      assert.strictEqual(afterReport.complete, false);
+      assert.deepStrictEqual(calls.assets.slice(sentFirstPass).map(a => a.holeNumber), [3],
+        "only the hole the wrist is missing is sent again");
+    });
+  })();
+
+  await (async () => {
+    const { instance, calls, clock, wrist } = fakeEnvironment(reportFor(frame, [1, 2]));
+    await instance.deliver("millbrook-remarkables-18");
+    wrist.report = { courseKey: "millbrook-remarkables-18", version: "1788278423353", holes: [1, 2] };
+    instance.noteInventory(wrist.report);
+    const settled = calls.assets.length;
+    clock.at += 61_000;
+    await instance.deliver("millbrook-remarkables-18");
+    check("a wrist that confirms the whole package ends the errand for good", () => {
+      assert.strictEqual(instance.progress("millbrook-remarkables-18").complete, true);
+      assert.strictEqual(calls.assets.length, settled, "nothing is re-sent once the wrist has confirmed");
       assert.strictEqual(calls.fetched.filter(u => u.indexOf("/api/course-watch-maps") === 0).length, 1);
     });
   })();
