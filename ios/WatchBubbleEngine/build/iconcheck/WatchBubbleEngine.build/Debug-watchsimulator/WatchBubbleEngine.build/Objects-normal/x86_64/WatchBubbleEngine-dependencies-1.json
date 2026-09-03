@@ -1,0 +1,274 @@
+[
+  {
+    "isFramework" : true,
+    "moduleName" : "Combine",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/Combine.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "CoreFoundation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/CoreFoundation.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "CoreGraphics",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/CoreGraphics.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Darwin",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/Darwin.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Dispatch",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/Dispatch.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "Foundation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/Foundation.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "ObjectiveC",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/ObjectiveC.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Observation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/Observation.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Swift",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/Swift.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "SwiftOnoneSupport",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/SwiftOnoneSupport.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "System",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/System.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "XPC",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/XPC.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_Builtin_float",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/_Builtin_float.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_Concurrency",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/_Concurrency.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation1",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/_DarwinFoundation1.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation2",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/_DarwinFoundation2.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation3",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/_DarwinFoundation3.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_StringProcessing",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/watchsimulator\/prebuilt-modules\/26.5\/_StringProcessing.swiftmodule\/x86_64-apple-watchos-simulator.swiftmodule"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/System\/Library\/Frameworks\/CoreFoundation.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/CoreFoundation-E8CTKZTE35AUD5NRBFN5F32B7.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreFoundation"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/System\/Library\/Frameworks\/CoreGraphics.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/CoreGraphics-9THYXYI64U030ROLO1EYBITWB.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreGraphics"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/usr\/include\/Darwin.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/Darwin-73T6FLTWYVN8I77K73M3IQW8S.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Darwin"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/usr\/include\/dispatch.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/Dispatch-4OBG56UNYJB3VFPIE5TNPVW83.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Dispatch"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/System\/Library\/Frameworks\/Foundation.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/Foundation-5UTCTA2XNO6Y8K8YHKB4674Z9.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Foundation"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/usr\/include\/ObjectiveC.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/ObjectiveC-E4URMS3G1Q5DEB8PRPKM2E62S.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ObjectiveC"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/System\/Library\/Frameworks\/Security.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/Security-7EO3J513FYI02AMPXRHQV5E95.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Security"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/usr\/lib\/swift\/shims\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/SwiftShims-4TMD6FQ64055DKW89N1S76ETK.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "SwiftShims"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/usr\/include\/xpc.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/XPC-D3PCLIZKM0QA7V6QT4J5PZ8UX.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "XPC"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/usr\/include\/DarwinFoundation1.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/_AvailabilityInternal-5KLL4G6QG4UFS1ZVNDMXJSZ1X.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_AvailabilityInternal"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/_Builtin_float-4ZBPT80OINRM8V973NQ9AJCKT.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_float"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/_Builtin_inttypes-BE32LGPL8HBXKFBDVFUF06C75.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_inttypes"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/_Builtin_limits-6WUE9YCYDPZUZUXIHJ93GVVOM.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_limits"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/_Builtin_stdarg-5U9J2S01OWSRUIUWJVKFKY8ML.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stdarg"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/_Builtin_stdbool-DI4JJBGO4QOMW8HICRK9HH2ZM.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stdbool"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/_Builtin_stddef-4YDVNTFZJPDADAUNWUYHM2GEF.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stddef"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/_Builtin_stdint-1T8DLQQWT90WEA86L4Q994J2O.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stdint"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/usr\/include\/DarwinFoundation1.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/_DarwinFoundation1-4ZAKGCDT46XB5616PPXXJHHTO.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation1"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/usr\/include\/DarwinFoundation2.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/_DarwinFoundation2-299EZZASJ58DAMRIISC7PV55L.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation2"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/usr\/include\/DarwinFoundation3.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/_DarwinFoundation3-BROXSIPLSW28J22DT1FCIV89I.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation3"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/usr\/lib\/swift\/shims\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/_SwiftConcurrencyShims-7MMCAEGTTELOIYYWZ94DBPB8B.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_SwiftConcurrencyShims"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/usr\/include\/os.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/os_object-F2GUP72J33QDT1JZ9OGWZI3WZ.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "os_object"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/usr\/include\/os.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/os_workgroup-95R6W4IBJAPMMLYFDYQL779M4.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "os_workgroup"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/ptrauth-3TBN76RNYI00V3B51FCYQDSKK.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ptrauth"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/ptrcheck-4203NS22OAAQIIV6TJDW7GN7P.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ptrcheck"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/WatchSimulator.platform\/Developer\/SDKs\/WatchSimulator.sdk\/usr\/include\/DarwinFoundation2.modulemap",
+    "clangModulePath" : "\/Users\/samhalegolf\/GitHub\/GolfDaddy\/ios\/WatchBubbleEngine\/build\/iconcheck\/SwiftExplicitPrecompiledModules\/sys_types-BOWUH9KH8GCUW0830D1GW7RA0.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "sys_types"
+  }
+]

@@ -38,6 +38,7 @@
 		CA77D9000000000000000C23 /* GarminDeviceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000C22 /* GarminDeviceStore.swift */; };
 		CA77D9000000000000000D01 /* GreenFocusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000D11 /* GreenFocusView.swift */; };
 		CA77D9000000000000000D02 /* BetweenHolesViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000D12 /* BetweenHolesViews.swift */; };
+		CA77D9000000000000000E01 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000E02 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -117,6 +118,7 @@
 		CA77D9000000000000000C22 /* GarminDeviceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminDeviceStore.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000D11 /* GreenFocusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GreenFocusView.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000D12 /* BetweenHolesViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BetweenHolesViews.swift; sourceTree = "<group>"; };
+		CA77D9000000000000000E02 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -200,6 +202,7 @@
 				CA77D900000000000000002b /* Previews.swift */,
 				CA77D9000000000000000D11 /* GreenFocusView.swift */,
 				CA77D9000000000000000D12 /* BetweenHolesViews.swift */,
+				CA77D9000000000000000E02 /* Assets.xcassets */,
 				CA77D9000000000000000026 /* Info.plist */,
 				CA77D9000000000000000027 /* WatchExtension-Info.plist */,
 			);
@@ -365,6 +368,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CA77D9000000000000000E01 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -570,7 +574,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 864;
 				DEVELOPMENT_TEAM = 9JL7847XQL;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
@@ -578,7 +582,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.2;
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
 				PRODUCT_BUNDLE_IDENTIFIER = com.claritygolf.caddy;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -594,7 +598,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 864;
 				DEVELOPMENT_TEAM = 9JL7847XQL;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
@@ -602,7 +606,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.claritygolf.caddy;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
@@ -614,11 +618,12 @@
 		CA77D9000000000000000071 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 864;
 				DEVELOPMENT_TEAM = 9JL7847XQL;
 				INFOPLIST_FILE = ClarityCaddyWatch/Info.plist;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.claritygolf.caddy.watchkitapp;
 				PRODUCT_NAME = "Clarity Caddy Watch";
 				SDKROOT = watchos;
@@ -632,11 +637,12 @@
 		CA77D9000000000000000072 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 864;
 				DEVELOPMENT_TEAM = 9JL7847XQL;
 				INFOPLIST_FILE = ClarityCaddyWatch/Info.plist;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.claritygolf.caddy.watchkitapp;
 				PRODUCT_NAME = "Clarity Caddy Watch";
 				SDKROOT = watchos;
@@ -652,7 +658,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 864;
 				DEVELOPMENT_TEAM = 9JL7847XQL;
 				INFOPLIST_FILE = "ClarityCaddyWatch/WatchExtension-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -660,7 +666,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.claritygolf.caddy.watchkitapp.watchkitextension;
 				PRODUCT_NAME = "Clarity Caddy Watch Extension";
 				SDKROOT = watchos;
@@ -677,7 +683,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 864;
 				DEVELOPMENT_TEAM = 9JL7847XQL;
 				INFOPLIST_FILE = "ClarityCaddyWatch/WatchExtension-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -685,7 +691,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.claritygolf.caddy.watchkitapp.watchkitextension;
 				PRODUCT_NAME = "Clarity Caddy Watch Extension";
 				SDKROOT = watchos;

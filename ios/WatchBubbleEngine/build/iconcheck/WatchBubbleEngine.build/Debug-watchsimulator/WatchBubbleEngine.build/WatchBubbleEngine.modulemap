@@ -1,0 +1,4 @@
+module WatchBubbleEngine {
+header "WatchBubbleEngine-Swift.h"
+export *
+}
