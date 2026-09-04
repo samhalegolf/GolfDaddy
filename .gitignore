@@ -7,6 +7,11 @@ node_modules/
 # Demo capture output
 /demo-output/
 
+# Marketing snapshot output, and the runner's saved browser session. The session file holds a
+# live Supabase login for whoever ran `npm run marketing:login` — it must never be committed.
+/marketing-output/
+/marketing/.auth.json
+
 # Archives / large binaries (keep source, not zipped bundles)
 *.zip
 

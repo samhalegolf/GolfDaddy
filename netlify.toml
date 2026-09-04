@@ -138,6 +138,13 @@
   to = "/.netlify/functions/scorecard-search"
   status = 200
 
+# Studio-only, admin-gated signature-hole lookup for the Marketing Snapshot Machine.
+# Shares ./lib/gd-web-search.js with scorecard-search above.
+[[redirects]]
+  from = "/api/marketing-hole-intel"
+  to = "/.netlify/functions/marketing-hole-intel"
+  status = 200
+
 [[redirects]]
   from = "/api/course-scorecard-update"
   to = "/.netlify/functions/course-scorecard-update"

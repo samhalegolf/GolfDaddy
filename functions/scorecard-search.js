@@ -12,14 +12,14 @@
    /api/scorecard-fetch and the existing parsers, so there is one fetch path and one
    set of parsers rather than two.
 
-   Configure one of:
-     BRAVE_SEARCH_API_KEY
-     GOOGLE_CSE_KEY + GOOGLE_CSE_ID */
+   Provider selection and the Brave/Google-CSE calls live in ./lib/gd-web-search.js, shared
+   with functions/marketing-hole-intel.mjs. Configure one of BRAVE_SEARCH_API_KEY, or
+   GOOGLE_CSE_KEY + GOOGLE_CSE_ID. */
 
 const { safeRemoteUrl } = require("./lib/safe-remote-url");
+const { pickProvider } = require("./lib/gd-web-search");
 
 const MAX_RESULTS = 8;
-const PROVIDER_FETCH_COUNT = 15;
 
 /* Pages that tend to carry a full hole-by-hole table. */
 const SCORECARD_HINTS = [
@@ -81,49 +81,6 @@ exports.handler = async function scorecardSearch(event) {
   return json(200, { query, provider: provider.name, results });
 };
 
-function pickProvider() {
-  if (env("BRAVE_SEARCH_API_KEY")) return { name: "brave", search: searchBrave };
-  if (env("GOOGLE_CSE_KEY") && env("GOOGLE_CSE_ID")) return { name: "google-cse", search: searchGoogleCse };
-  return null;
-}
-
-async function searchBrave(query) {
-  const url = new URL("https://api.search.brave.com/res/v1/web/search");
-  url.searchParams.set("q", query);
-  url.searchParams.set("count", String(PROVIDER_FETCH_COUNT));
-  const res = await fetch(url.href, {
-    headers: {
-      "Accept": "application/json",
-      "X-Subscription-Token": env("BRAVE_SEARCH_API_KEY")
-    }
-  });
-  if (!res.ok) throw new Error("Brave search returned " + res.status);
-  const body = await res.json();
-  const items = (body && body.web && body.web.results) || [];
-  return items.map(item => ({
-    url: item && item.url,
-    title: stripTags(item && item.title),
-    snippet: stripTags(item && item.description)
-  }));
-}
-
-async function searchGoogleCse(query) {
-  const url = new URL("https://www.googleapis.com/customsearch/v1");
-  url.searchParams.set("key", env("GOOGLE_CSE_KEY"));
-  url.searchParams.set("cx", env("GOOGLE_CSE_ID"));
-  url.searchParams.set("q", query);
-  url.searchParams.set("num", "10"); // CSE hard-caps at 10 per request
-  const res = await fetch(url.href, { headers: { "Accept": "application/json" } });
-  if (!res.ok) throw new Error("Google CSE returned " + res.status);
-  const body = await res.json();
-  const items = (body && body.items) || [];
-  return items.map(item => ({
-    url: item && item.link,
-    title: stripTags(item && item.title),
-    snippet: stripTags(item && item.snippet)
-  }));
-}
-
 /* Reorders provider results so the pages most likely to hold a hole-by-hole table
    come first, and drops anything the fetcher would refuse anyway - no point
    handing back a URL that /api/scorecard-fetch will reject. */
@@ -175,10 +132,6 @@ function tokenize(value) {
 
 function cleanName(value) {
   return String(value == null ? "" : value).replace(/\s+/g, " ").trim().slice(0, 120);
-}
-
-function stripTags(value) {
-  return String(value == null ? "" : value).replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
 }
 
 function clamp(value, min, max) {

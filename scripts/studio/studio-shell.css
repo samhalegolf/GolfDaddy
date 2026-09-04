@@ -280,3 +280,51 @@
   word-break: break-word;
   margin: 6px 0 0;
 }
+
+/* ---- Marketing › Snapshot Machine (scripts/studio/marketing/snapshot-machine-page.js) ---- */
+#gdStudioShellRoot .gdMktWarn {
+  background: rgba(255, 181, 76, 0.08);
+  border: 1px solid rgba(255, 181, 76, 0.3);
+  color: var(--gdStudioWarn);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  margin: 0 0 18px;
+}
+#gdStudioShellRoot .gdMktSectionHead {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 26px 0 8px; padding-top: 14px; border-top: 1px solid var(--gdStudioBorder);
+}
+#gdStudioShellRoot .gdMktSectionHead h3 {
+  margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--gdStudioAccent); flex: 1 1 auto;
+}
+#gdStudioShellRoot .gdMktToggle { font-size: 12px; color: var(--gdStudioMuted); display: inline-flex; align-items: center; gap: 6px; }
+#gdStudioShellRoot .gdMktRow {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--gdStudioPanel); border: 1px solid var(--gdStudioBorder);
+  border-radius: 8px; padding: 9px 12px; margin-bottom: 6px;
+}
+#gdStudioShellRoot .gdMktRowBody { flex: 1 1 auto; min-width: 0; font-size: 13px; }
+#gdStudioShellRoot .gdMktRowBody code { font-size: 11.5px; }
+#gdStudioShellRoot .gdMktCard {
+  background: var(--gdStudioPanel); border: 1px solid var(--gdStudioBorder);
+  border-radius: 10px; padding: 12px 14px; margin-bottom: 10px;
+}
+#gdStudioShellRoot .gdMktCardHead { font-size: 13.5px; margin-bottom: 6px; }
+#gdStudioShellRoot .gdMktStepLine { font-size: 12.5px; margin-bottom: 8px; }
+#gdStudioShellRoot .gdMktLog { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdMktErr { color: var(--gdStudioWarn); font-size: 12.5px; margin: 0; }
+#gdStudioShellRoot .gdMktFields { display: flex; flex-wrap: wrap; gap: 14px; margin: 6px 0 4px; }
+#gdStudioShellRoot .gdMktFields input, #gdStudioShellRoot .gdMktFields select {
+  background: var(--gdStudioPanelAlt); border: 1px solid var(--gdStudioBorder);
+  color: var(--gdStudioText); border-radius: 6px; padding: 3px 6px; font-size: 12px; width: 5.5em;
+}
+#gdStudioShellRoot .gdMktFields select { width: auto; }
+#gdStudioShellRoot .gdMktScores { margin-top: 10px; font-size: 12px; }
+#gdStudioShellRoot .gdMktScores summary { cursor: pointer; color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdMktJson, #gdStudioShellRoot .gdMktCmd {
+  background: var(--gdStudioPanelAlt); border: 1px solid var(--gdStudioBorder);
+  border-radius: 8px; padding: 10px 12px; font-size: 11.5px; overflow: auto; max-height: 320px;
+}
+#gdStudioShellRoot .gdMktCmd { max-height: none; color: var(--gdStudioAccent); }

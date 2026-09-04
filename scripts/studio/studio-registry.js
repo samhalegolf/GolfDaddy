@@ -583,6 +583,52 @@
       code: [], inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "gps-play", direction: "child-of", label: "" }],
       keyFunctions: [], status: "placeholder", needsVerification: true },
 
+    {
+      id: "marketing", label: "Marketing", parent: null,
+      function: "Marketing assets built from the real app rather than mocked up. Today that is one workspace: the Snapshot Machine.",
+      owner: "n/a (nav grouping only)", runtime: { app: false, studio: true, server: false },
+      code: [], inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [], keyFunctions: [],
+      status: "group", needsVerification: false
+    },
+    {
+      id: "marketing-snapshots", label: "Snapshot Machine", parent: "marketing",
+      function: "Turns a basket of courses into a marketing screenshot plan: pick courses with the real course search, run the six-step full map build, then choose two holes per course and the units to display. It does NOT take the screenshots \u2014 a browser page cannot capture itself at phone resolution, so marketing/run-snapshots.mjs (Playwright, headless Chromium, the real app/index.html) reads the emitted snapshot-plan.json and shoots three frames per course: the pre-lock frame, Head To the Tee on a par 4/5, and a 130m approach with the bubble nudged up and left.",
+      owner: "scripts/studio/marketing/snapshot-machine-page.js",
+      runtime: { app: false, studio: true, server: true },
+      code: [
+        { role: "Studio page (basket, build chain, plan emit)", path: "scripts/studio/marketing/snapshot-machine-page.js" },
+        { role: "Hole choosing + units, pure and shared with the runner", path: "scripts/gd-marketing-snapshot-core.js" },
+        { role: "Signature-hole lookup (admin-gated)", path: "functions/marketing-hole-intel.js" },
+        { role: "Shared Brave/Google-CSE client", path: "functions/lib/gd-web-search.js" },
+        { role: "The camera (Playwright runner)", path: "marketing/run-snapshots.mjs" }
+      ],
+      inputs: [
+        "Courses chosen through window.GDCoursePicker (pick-only mode)",
+        "GET /api/course-package \u2014 the built geometry the holes are scored from",
+        "GET /api/marketing-hole-intel \u2014 optional signature-hole evidence"
+      ],
+      outputs: ["marketing/snapshot-plan.json", "marketing-output/<run>/ PNGs + contact sheet (written by the runner, not this page)"],
+      owns: ["The order of the six build steps", "Which two holes a course is shot on", "Which unit each course's screenshots display"],
+      doesNotOwn: [
+        "The six build actions themselves \u2014 identical jobs to the Course Database buttons (gd-admin-course-db.js)",
+        "The progress bar model (scripts/gd-progress-core.js)",
+        "The course search (scripts/inline/gd-course-picker-search-v2.js)",
+        "The play screen the runner drives (app/js/painter.js + app/js/marshal.js)"
+      ],
+      connections: [
+        { target: "course-database", direction: "uses", label: "same mapper/visual job endpoints, chained" },
+        { target: "gps-play", direction: "uses", label: "the runner drives the real play screen" },
+        { target: "gps-demo-mode", direction: "see-also", label: "demo/run-demo.mjs \u2014 the video harness this borrows its shape from" }
+      ],
+      keyFunctions: [
+        { name: "pickHoles", purpose: "Two holes per course: signature-hole evidence first, terrain variance otherwise.", codePath: "scripts/gd-marketing-snapshot-core.js" },
+        { name: "standingPoint", purpose: "Where to stand for the approach frame \u2014 130m back from the green along the line the hole plays.", codePath: "scripts/gd-marketing-snapshot-core.js" },
+        { name: "unitsForPoint", purpose: "Yards or metres, from where the course is.", codePath: "scripts/gd-marketing-snapshot-core.js" }
+      ],
+      status: "implemented", needsVerification: false,
+      warnings: ["Every build step writes to the live Supabase project \u2014 the same jobs the Course Database buttons queue."]
+    },
+
     // ---- System ----
     { id: "system-integrations", label: "Integrations", parent: "system", function: "Not yet documented — placeholder nav entry.", owner: "Needs verification", runtime: { app: true, studio: false, server: false }, code: [], inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "system", direction: "child-of", label: "" }], keyFunctions: [], status: "placeholder", needsVerification: true },
     { id: "system-storage", label: "Storage", parent: "system",
@@ -640,6 +686,7 @@
     { id: "players-coaches" },
     { id: "commerce" },
     { id: "communications" },
+    { id: "marketing", children: ["marketing-snapshots"] },
     { id: "system", children: ["system-integrations", "system-storage", "system-diagnostics", "system-feature-controls"] }
   ];
 

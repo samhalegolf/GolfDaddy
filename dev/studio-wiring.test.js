@@ -52,7 +52,12 @@ const STUDIO_SCRIPTS = [
   "scripts/studio/system/storage/storage-page.js",
   "scripts/studio/system/feature-controls/feature-controls-page.js",
   "scripts/studio/system/diagnostics/launch-monitor-diagnostics-page.js",
-  "scripts/studio/gps-play/shot-planning/shot-planning-page.js"
+  "scripts/studio/gps-play/shot-planning/shot-planning-page.js",
+  "scripts/studio/marketing/snapshot-machine-page.js",
+  /* Outside scripts/studio/ because marketing/run-snapshots.mjs require()s it from node too —
+     the Studio page and the Playwright runner have to choose the same holes. It is still
+     studio-only on the web surface, so it belongs under the same split contract. */
+  "scripts/gd-marketing-snapshot-core.js"
 ];
 const STUDIO_CSS = "scripts/studio/studio-shell.css";
 

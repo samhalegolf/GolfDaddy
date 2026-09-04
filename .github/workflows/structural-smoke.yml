@@ -38,6 +38,8 @@ jobs:
         run: |
           node dev/surface-split.test.js
           node dev/studio-wiring.test.js
+          node dev/marketing-snapshot-core.test.js
+          node dev/marketing-hole-intel.test.js
           node dev/icon-assets.test.js
           node dev/image-assets.test.js
           node dev/visual-engine-client.test.js
