@@ -562,7 +562,13 @@ async function main() {
      A session still changes ONE visible thing: the player badge reads GUEST rather than a name.
      Sign in with --login if that badge matters for the shot. */
   const storageState = await authIfPresent();
-  if (!storageState) console.log('Signed out - the player badge will read GUEST. `--login` changes that.\n');
+  /* Says whose browser this is about. The earlier wording ("Signed out - ...") read as an
+     instruction to go and sign out, when it is describing the RUNNER's own throwaway browser
+     and has nothing to do with the session in anybody's Chrome. */
+  if (!storageState) {
+    console.log('This run\'s browser has no saved session, so the player badge in the shots will');
+    console.log('read GUEST. That is the only difference. `npm run marketing:login` changes it.\n');
+  }
 
   const runDir = path.join(OUTPUT_ROOT, stamp());
   await fs.mkdir(runDir, { recursive: true });

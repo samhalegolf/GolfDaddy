@@ -1,64 +1,24 @@
 {
   "version": 1,
-  "createdAt": "2026-09-04T05:49:51.854Z",
+  "createdAt": "2026-09-04T21:55:55.393Z",
   "courses": [
     {
-      "courseId": "akarana-golf-course",
-      "name": "akarana-golf-course",
-      "lat": -36.91845902782651,
-      "lng": 174.73998646001667,
+      "courseId": "waihi",
+      "name": "waihi",
+      "lat": -37.44780894832657,
+      "lng": 175.86371449096467,
       "units": "m",
-      "teeHole": 4,
-      "approachHole": 8,
+      "teeHole": 11,
+      "approachHole": 18,
       "approachFromM": 130,
       "standingPoint": {
-        "lat": -36.91618933485349,
-        "lng": 174.74078844705878
+        "lat": -37.443205309912294,
+        "lng": 175.86537067199993
       },
       "notes": [
-        "Tee shot on 4 - most varied corridor terrain.",
+        "Tee shot on 11 - most varied corridor terrain.",
         "4 hole(s) cannot be played from 130m back - excluded.",
-        "Approach on 8 - most varied green surrounds.",
-        "Outside the yard-playing regions - metres."
-      ]
-    },
-    {
-      "courseId": "maungakiekie-golf-club",
-      "name": "maungakiekie-golf-club",
-      "lat": -36.922883481213255,
-      "lng": 174.7265484427076,
-      "units": "m",
-      "teeHole": 12,
-      "approachHole": 9,
-      "approachFromM": 130,
-      "standingPoint": {
-        "lat": -36.919657481912296,
-        "lng": 174.73029405526313
-      },
-      "notes": [
-        "Tee shot on 12 - most varied corridor terrain.",
-        "4 hole(s) cannot be played from 130m back - excluded.",
-        "Approach on 9 - most varied green surrounds.",
-        "Outside the yard-playing regions - metres."
-      ]
-    },
-    {
-      "courseId": "millbrook-remarkables-18",
-      "name": "millbrook-remarkables-18",
-      "lat": -44.94805181799321,
-      "lng": 168.81489053153743,
-      "units": "m",
-      "teeHole": 5,
-      "approachHole": 8,
-      "approachFromM": 130,
-      "standingPoint": {
-        "lat": -44.94708171048372,
-        "lng": 168.8194172071428
-      },
-      "notes": [
-        "Tee shot on 5 - most varied corridor terrain.",
-        "2 hole(s) cannot be played from 130m back - excluded.",
-        "Approach on 8 - most varied green surrounds.",
+        "Approach on 18 - most varied green surrounds.",
         "Outside the yard-playing regions - metres."
       ]
     }
