@@ -44,8 +44,17 @@
      run earlier it 409s with "no frames to trace against", which is a precondition, not a
      failure (see gdAdminCourseRefineShapes). */
   var CHAIN = [
-    { id: "remap", label: "Map from OpenStreetMap", api: "mapper", kind: "remap",
-      why: "Tees, greens and hole routes. Everything below depends on this." },
+    /* Mapping goes through the SAME call the course picker makes when a player selects a course:
+       ask for the course package. GET /api/course-package is what triggers the server-side
+       AutoMapper (buildCoursePackageWithTrigger) - and it is the only path that also runs the
+       duplicate-course guard, creates the course_maps row from the picker's coordinates,
+       applies the rate limit and charges the run to a real actor. Posting to
+       /api/course-mapper-jobs from here skipped all of it: "remap" 404s on a course with no row
+       (the first real run died exactly there), and even "automap" would have bypassed the
+       duplicate guard that stops a second map being built for a course already in the database
+       under another id. Studio must not own a second way to map a course. */
+    { id: "map", label: "Map from OpenStreetMap", api: "package", kind: null,
+      why: "Tees, greens and hole routes, through the same request the picker makes." },
     { id: "scorecard", label: "Update scorecards", api: "scorecard", kind: null,
       why: "Par per hole — the tee-shot frame has to land on a par 4 or 5." },
     { id: "collect_extra_objects", label: "Collect extra objects", api: "mapper", kind: "collect_extra_objects",
@@ -318,13 +327,63 @@
 
     // ------------------------------------------------------------ build chain
 
-    async function queueMapper(courseId, kind) {
+    /* Step 1. scripts/gd-course-package-client.js is the app's own client for this - the same
+       one the picker's mapping controller reaches for - so the guest id, the outcome channel
+       and the exact parameter shape are not re-implemented here. The coordinates matter: the
+       server only enqueues when it has a centre to map around, and a course the database has
+       never seen has none of its own until this call creates it. */
+    async function requestPackage(course) {
+      var client = window.GDCoursePackageClient;
+      if (!client || typeof client.fetchPackage !== "function") {
+        return { ok: false, detail: "Course package client not loaded on this surface." };
+      }
+      var body = await client.fetchPackage({
+        courseId: course.courseId,
+        courseLat: course.lat,
+        courseLng: course.lng,
+        courseName: course.name
+      });
+      if (!body) {
+        var why = typeof client.lastOutcome === "function" ? client.lastOutcome() : null;
+        return { ok: false, detail: "Could not reach the course package" + (why && why.status ? " (" + why.status + ")" : "") + "." };
+      }
+      var status = String(body.status || "none");
+      /* The server answered with a DIFFERENT course's package: this course already exists in
+         the database under another id, and mapping it again would create a second copy. That is
+         the duplicate guard doing its job, and it is a stop, not a failure. */
+      if (body.redirectedFrom) {
+        return { ok: false, duplicate: true,
+          detail: "Already in the database as \"" + body.courseId + "\" — snapshot that one instead." };
+      }
+      if (status === "full" || status === "lite") return { ok: true, ready: true };
+      /* "processing" covers both "this call started a run" and "a run was already in flight" -
+         the server answers the same either way (buildCoursePackageWithTrigger returns processing
+         for a fresh enqueue AND a deduped one), so the label must not claim to know which. */
+      if (status === "processing") return { ok: true, inProgress: true };
+      if (status === "manual-required" || status === "failed") {
+        return { ok: false, detail: "Mapping " + status + ": " + (body.reason || "no reason given") + "." };
+      }
+      /* "none" with a triggerError is terminal - nothing was queued, so nothing is coming. */
+      if (body.triggerError) {
+        return { ok: false, detail: body.triggerError === "rate-limited"
+          ? "Too many mapping runs started recently - try again shortly."
+          : "Nothing was queued (" + body.triggerError + ")." };
+      }
+      if (status === "none") {
+        return { ok: false, detail: course.lat == null || course.lng == null
+          ? "This course has no coordinates - re-add it through the picker."
+          : "The server declined to start a mapping run." };
+      }
+      return { ok: true };
+    }
+
+    async function queueMapper(course, kind) {
       var token = await accessToken();
       if (!token) return { ok: false, detail: "Sign in again — no access token." };
       var res = await fetch("/api/course-mapper-jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + token },
-        body: JSON.stringify({ courseId: courseId, kind: kind })
+        body: JSON.stringify({ courseId: course.courseId, kind: kind })
       });
       var data = await res.json().catch(function () { return null; });
       if (res.ok) return { ok: true, deduped: !!(data && data.deduped) };
@@ -392,15 +451,19 @@
      * actually lives. */
     async function stepState(step, courseId) {
       if (step.api === "scorecard") return { phase: "unknown" };   // no queue row; fire and move on
-      if (step.api === "mapper") {
+      /* The package step is triggered through the course-package client, but its PROGRESS is
+         read from the mapper queue - that is where the run it started actually lives, and it is
+         the same state the Course Database draws its bar from. */
+      if (step.api === "mapper" || step.api === "package") {
         var m = await mapperState(courseId);
         if (!m) return { phase: "unknown" };
 
-        if (step.kind === "remap") {
+        if (step.api === "package") {
           /* Geometry already on the course IS the finished state of this step, and it is what
              lets an already-mapped course skip straight to the enrichment steps. It also means
-             this chain never re-runs a destructive remap on a course that has geometry — that
-             stays a deliberate, separately-confirmed action on the Course Database page. */
+             this chain never re-maps a course that already has geometry — replacing a good map
+             is a destructive, separately-confirmed action (Remap) on the Course Database page,
+             not something a screenshot run should do on its way past. */
           if (m.hasGeometry) return { phase: "done", raw: m };
           if (m.state === "running" || m.state === "queued") return { phase: "running", raw: m };
           if (m.state === "failed") return { phase: "failed", detail: m.lastError || "", raw: m };
@@ -475,9 +538,10 @@
       }
 
       run.status = "running";
-      var result = step.api === "scorecard" ? await queueScorecard(course.courseId)
-        : step.api === "mapper" ? await queueMapper(course.courseId, step.kind)
-          : await queueVisual(course.courseId, step.kind);
+      var result = step.api === "package" ? await requestPackage(course)
+        : step.api === "scorecard" ? await queueScorecard(course.courseId)
+          : step.api === "mapper" ? await queueMapper(course, step.kind)
+            : await queueVisual(course.courseId, step.kind);
       if (!result.ok) {
         /* A 409 here means an earlier step did not produce what this one needs. Say so and
            stop this course — carrying on would queue work with nothing to work on. */
@@ -486,7 +550,9 @@
         return;
       }
       run.started = true;
-      run.log.push(step.label + (result.deduped ? " — already in progress" : " — queued"));
+      run.log.push(step.label + (result.ready ? " — already mapped"
+        : result.inProgress ? " — mapping run in progress"
+          : result.deduped ? " — already in progress" : " — queued"));
     }
 
     function anyRunLive() {

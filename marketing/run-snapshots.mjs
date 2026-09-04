@@ -76,11 +76,13 @@ function stamp() {
 
 /* ------------------------------------------------------------------ sign-in, once */
 
-/* The play screen reads /api/course-package with a bearer token, so a signed-out run shoots a
-   bare OSM map. Rather than handling a password here, this opens a real browser at the real
-   site and waits for a human to sign in, then saves the browser storage Playwright will replay
-   on every later run. The saved file holds a live session - it is gitignored, and deleting it
-   is how you sign the runner out. */
+/* OPTIONAL. A signed-out run shoots perfectly good frames - /api/course-package serves a
+   published course to anyone, and the play screen's shot view is free - but the player badge
+   reads GUEST. Signing in replaces it with the account name.
+
+   Rather than handling a password here, this opens a real browser at the real site and waits
+   for a human to sign in, then saves the browser storage Playwright replays on later runs. The
+   saved file holds a live session - it is gitignored, and deleting it signs the runner out. */
 /* Long, and overridable, because the person signing in may not be sitting at the terminal that
    started this - the window can open behind whatever else is on screen. MARKETING_LOGIN_MINUTES
    raises it further. */
@@ -444,29 +446,59 @@ async function planCourses(courseIds) {
   /* The package call needs the bearer token that clarity-supabase-auth.js holds, so the fetch is
      made FROM the site's own origin with the restored session rather than reimplementing token
      refresh out here. */
-  await page.goto(`${BASE_URL}/?login=1`, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => !!window.ClaritySupabaseAuth, null, { timeout: 30_000 });
+  /* /app/ rather than the site root, because this needs ClarityApp.playSurface - the app's own
+     projectToSurface - to answer whether a standing point is inside a hole's published raster.
+     That is the difference between "long enough, probably" and knowing. */
+  await page.goto(`${BASE_URL}/app/index.html?login=1`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => !!(window.ClarityApp && window.ClarityApp.playSurface), null, { timeout: 30_000 });
 
   const courses = [];
   for (const courseId of courseIds) {
     const got = await page.evaluate(async (id) => {
       let token = '';
-      try { token = (await window.ClaritySupabaseAuth.freshAccessToken()) || ''; } catch (e) {}
+      try { token = window.ClaritySupabaseAuth ? (await window.ClaritySupabaseAuth.freshAccessToken()) || '' : ''; } catch (e) {}
       const headers = { Accept: 'application/json' };
       if (token) headers.Authorization = 'Bearer ' + token;
       const res = await fetch('/api/course-package?courseId=' + encodeURIComponent(id), { headers, cache: 'no-store' });
-      if (!res.ok) return { error: 'course-package returned ' + res.status, signedIn: !!token };
-      return { pkg: await res.json(), signedIn: !!token };
+      if (!res.ok) return { error: 'course-package returned ' + res.status };
+      const pkg = await res.json();
+      /* The published-surface metadata per hole, so the caller can ask whether a point is
+         inside the raster the app will actually draw. Absent is normal - a course with no
+         published visuals plays on the live map, where nothing is clipped. */
+      const meta = {};
+      (pkg.holes || []).forEach((h) => {
+        const ps = h && h.visual && h.visual.playSurface;
+        if (ps) meta[h.holeNumber] = ps;
+      });
+      return { pkg, meta };
     }, courseId);
 
     if (got.error) { console.error(`  ${courseId}: ${got.error}`); continue; }
-    if (!got.signedIn) console.warn(`  ${courseId}: no token - run --login first`);
 
     const pkg = got.pkg;
     const recs = core.holeRecords(pkg);
     if (!recs.length) { console.error(`  ${courseId}: package has no hole with a green`); continue; }
 
-    const picked = core.pickHoles(pkg);
+    /* Exact rather than heuristic: ask the app's own projectToSurface whether the standing point
+       lands inside that hole's raster. Outside it, projectToSurface answers null, the bubble
+       visual cannot be built and the app draws no bubble at all - which is the entire subject of
+       the approach frame. A hole with no published surface is fine: the live map has no edges. */
+    const usable = async (holeNumber, stand) => page.evaluate(([m, s]) => {
+      if (!m) return true;
+      try { return !!window.ClarityApp.playSurface.projectToSurface(m, s.lat, s.lng); }
+      catch (e) { return true; }
+    }, [got.meta[holeNumber] || null, stand]);
+
+    /* pickHoles' predicate is synchronous, so resolve every candidate up front. */
+    const usableByHole = {};
+    for (const rec of recs) {
+      const stand = core.standingPoint(rec, core.constants.APPROACH_M);
+      usableByHole[rec.holeNumber] = stand ? await usable(rec.holeNumber, stand) : true;
+    }
+
+    const picked = core.pickHoles(pkg, {
+      approachUsable: (holeNumber) => usableByHole[holeNumber] !== false
+    });
     const centre = core.packageCentre(pkg);
     const units = core.unitsForPoint(centre);
     const approachRec = recs.find((r) => r.holeNumber === picked.approachHole) || null;
@@ -521,12 +553,16 @@ async function main() {
     return;
   }
 
-  let storageState;
-  try { await fs.access(AUTH_FILE); storageState = AUTH_FILE; }
-  catch (e) {
-    console.warn('No saved session (marketing/.auth.json). Run with --login first, or the run will');
-    console.warn('shoot an unmapped live map - /api/course-package needs a bearer token.\n');
-  }
+  /* Signed in is OPTIONAL, contrary to what this used to warn. /api/course-package answers a
+     published course for a signed-out visitor - geometry, surfaces and the published play
+     surface all come back - and the play screen itself runs the whole shot view as a guest
+     (the bubble and the rangefinder are free; only writing a round is gated). Verified against
+     production: all three frames render identically signed out.
+
+     A session still changes ONE visible thing: the player badge reads GUEST rather than a name.
+     Sign in with --login if that badge matters for the shot. */
+  const storageState = await authIfPresent();
+  if (!storageState) console.log('Signed out - the player badge will read GUEST. `--login` changes that.\n');
 
   const runDir = path.join(OUTPUT_ROOT, stamp());
   await fs.mkdir(runDir, { recursive: true });

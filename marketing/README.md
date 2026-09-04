@@ -20,29 +20,53 @@ DPR 3 — so the camera has to be Playwright driving headless Chromium.
 npm run demo:install
 ```
 
+Signing in is **optional**:
+
 ```bash
 npm run marketing:login
 ```
 
-`marketing:login` opens a real browser, walks itself to the sign-in form
-(Player Profile → the account panel; the home screen has no visible way in and
-`?login=1` only stops the landing page eating the visit), and watches for you to
-sign in — there is nothing to press, it notices the session appear and saves
-`marketing/.auth.json` itself. `MARKETING_LOGIN_MINUTES` extends the 20-minute
-window. The play screen reads `/api/course-package`
-with a bearer token, so a signed-out run would shoot a bare OSM map. That file
-holds a live session — it is gitignored, and deleting it signs the runner out.
+A signed-out run shoots perfectly good frames — `/api/course-package` serves a
+published course to anyone, and the play screen's whole shot view is free. The
+only difference is the player badge, which reads GUEST instead of your name.
+
+`marketing:login` opens a real browser, walks itself to the sign-in form (Player
+Profile → Sign In; the home screen has no visible way in, and `?login=1` only
+stops the landing page eating the visit), and watches for you to sign in — there
+is nothing to press. `MARKETING_LOGIN_MINUTES` extends the 20-minute window. The
+saved `marketing/.auth.json` holds a live session — it is gitignored, and
+deleting it signs the runner out.
 
 ## Every run
+
+Either plan in the Studio (which shows the terrain scores and lets you override
+every choice), or plan headlessly:
+
+```bash
+node marketing/run-snapshots.mjs --plan akarana-golf-course,tara-iti
+```
+
+The headless planner makes the same decision with the same core, skipping only
+the signature-hole search (admin-gated, spends a shared search key). It also
+checks each candidate approach hole against the app's own `projectToSurface`,
+which the Studio cannot — see *Why the approach hole matters* below.
 
 1. Open the Studio at `/studio/`, go to **Marketing › Snapshot Machine**.
 2. **Add a course** — this opens the real course search. Pick one, repeat for
    as many as you want. The basket persists across reloads.
 3. **Build selected courses** if they are not already mapped. Six steps per
-   course, in dependency order, all of them the same production jobs the Course
-   Database buttons queue: map from OSM → scorecards → collect extra objects →
-   capture imagery → apply visual treatment → refine shapes. Steps already
-   satisfied are skipped, so a fully built course walks straight through.
+   course, in dependency order: map from OSM → scorecards → collect extra
+   objects → capture imagery → apply visual treatment → refine shapes. Steps
+   already satisfied are skipped, so a fully built course walks straight
+   through.
+
+   Mapping goes through **the same request the course picker makes** — a GET of
+   `/api/course-package` with the course's coordinates, which is what triggers
+   the server-side AutoMapper. That is the only path that also runs the
+   duplicate-course guard, creates the `course_maps` row from those
+   coordinates, applies the rate limit and charges the run to a real actor, so
+   the Studio never owns a second way to map a course. The remaining five steps
+   are the same jobs the Course Database buttons queue.
 4. **Plan selected courses.** The machine reads the built package back and
    chooses two holes. Override anything you disagree with.
 5. **Download snapshot-plan.json** into this folder.
@@ -92,6 +116,23 @@ Studio open. `node dev/marketing-snapshot-core.test.js` pins the rules.
 **Units** come from where the course is: yards in the US, Canada, the UK and
 Japan; metres everywhere else. Genuinely mixed regions default to metres and
 show the choice in the Studio so you can flip it.
+
+## Why the approach hole matters
+
+The approach frame stands 130m back from the green, and that point has to be
+**inside the hole's published raster**. `app/js/play-surface.js`
+`projectToSurface` answers null for anything outside it; the painter then cannot
+build the bubble visual and draws **no bubble at all** — the one thing that
+frame exists to show. It is a clean boundary: on Akarana hole 5 (151m, a par 3)
+the bubble renders at 50/70/90m and vanishes at 110/130/150m, exactly tracking
+whether the standing point is inside the image.
+
+So the planner excludes holes that cannot be played from the approach distance —
+by raster where it can check (the headless `--plan`), by length otherwise (the
+Studio: at least `distance + 40m` of hole). And the runner checks the frame
+itself before shooting, warning loudly rather than shipping a bubble-less
+screenshot. The first real run did exactly that on all three courses and
+reported "3 frames" for each, which is why the check exists.
 
 ## What the runner actually does
 

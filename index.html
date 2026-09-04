@@ -413,7 +413,11 @@
 <script data-gd-surface="studio" src="scripts/course-data/gd-conditions-debug.js?v=conditions-engine-v1"></script>
 <script src="scripts/gd-launch-monitor-data.js?v=manual-practice-evidence-20260822a"></script>
 <script src="scripts/gd-shot-library-sync.js?v=shot-library-supabase-001"></script>
-<script data-gd-surface="app" src="scripts/gd-course-package-client.js?v=course-package-client-001"></script>
+<!-- Unmarked (both surfaces): the Studio's Marketing > Snapshot Machine maps a course the
+     same way the picker does - by asking for its package, which is what triggers the
+     server-side AutoMapper. Studio-only code must not re-implement that call, so the one
+     client is shared rather than copied. It has no app-state coupling; it is a fetch. -->
+<script src="scripts/gd-course-package-client.js?v=course-package-client-001"></script>
 <script src="scripts/inline/gd-course-package-boundary-gate-v1.js?v=boundary-gate-001"></script>
 <script data-gd-surface="app" src="scripts/gd-course-visual-client.js?v=shadowfill-001"></script>
 <script data-gd-surface="studio" src="scripts/gd-course-visual-engine.js?v=shadowfill-001"></script>

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "createdAt": "2026-09-04T05:42:55.234Z",
+  "createdAt": "2026-09-04T05:49:51.854Z",
   "courses": [
     {
       "courseId": "akarana-golf-course",
@@ -17,7 +17,7 @@
       },
       "notes": [
         "Tee shot on 4 - most varied corridor terrain.",
-        "4 hole(s) too short to play a 130m approach on - excluded.",
+        "4 hole(s) cannot be played from 130m back - excluded.",
         "Approach on 8 - most varied green surrounds.",
         "Outside the yard-playing regions - metres."
       ]
@@ -37,7 +37,7 @@
       },
       "notes": [
         "Tee shot on 12 - most varied corridor terrain.",
-        "4 hole(s) too short to play a 130m approach on - excluded.",
+        "4 hole(s) cannot be played from 130m back - excluded.",
         "Approach on 9 - most varied green surrounds.",
         "Outside the yard-playing regions - metres."
       ]
@@ -49,16 +49,16 @@
       "lng": 168.81489053153743,
       "units": "m",
       "teeHole": 5,
-      "approachHole": 6,
+      "approachHole": 8,
       "approachFromM": 130,
       "standingPoint": {
-        "lat": -44.95086950857897,
-        "lng": 168.81730461333336
+        "lat": -44.94708171048372,
+        "lng": 168.8194172071428
       },
       "notes": [
         "Tee shot on 5 - most varied corridor terrain.",
-        "1 hole(s) too short to play a 130m approach on - excluded.",
-        "Approach on 6 - most varied green surrounds.",
+        "2 hole(s) cannot be played from 130m back - excluded.",
+        "Approach on 8 - most varied green surrounds.",
         "Outside the yard-playing regions - metres."
       ]
     }
