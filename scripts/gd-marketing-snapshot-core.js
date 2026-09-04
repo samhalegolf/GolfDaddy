@@ -270,6 +270,27 @@
     return score.lengthM > 200;
   }
 
+  /* The approach frame stands APPROACH_M back from the green, so the hole has to be longer than
+     that by enough to still be on it. Learned the hard way on Akarana: hole 5 won the approach
+     score, and it is 151m tee to green - standing 130m out put the player behind the tee, off
+     the end of the hole's published raster, and projectToSurface answers null outside that
+     raster. The app then draws NO BUBBLE AT ALL (app/js/painter.js drawShot -> buildBubbleParts),
+     which is the one thing this frame exists to show. Verified as a clean boundary: on that hole
+     the bubble renders at 50/70/90m and vanishes at 110/130/150m, exactly tracking whether the
+     start point is inside the image.
+
+     TEE_ROOM_M is how much hole must remain behind the player. 40m keeps the standing point off
+     the tee box and comfortably inside a raster that was framed around the hole. */
+  var TEE_ROOM_M = 40;
+
+  function eligibleForApproach(score, approachM) {
+    var d = Number.isFinite(approachM) ? approachM : APPROACH_M;
+    /* No length at all (a green with no tee) cannot be judged; let it through rather than
+       silently emptying the candidate pool - the runner checks the frame itself. */
+    if (!score.lengthM) return true;
+    return score.lengthM >= d + TEE_ROOM_M;
+  }
+
   function best(list, key) {
     var top = null;
     list.forEach(function (item) {
@@ -288,6 +309,8 @@
     var notes = [];
 
     if (!scores.length) return { teeHole: null, approachHole: null, scores: [], notes: ["No hole in this package has a green - nothing to frame."] };
+
+    var recs = holeRecords(pkg);
 
     var ranked = scores.map(function (s) {
       var hit = intelBoost(intel, s.holeNumber);
@@ -317,9 +340,31 @@
 
     /* A different hole for the approach where there is one. Two frames of the same hole is a
        worse marketing set than a slightly duller second hole, so difference wins over score. */
-    var approachPool = ranked.filter(function (r) { return !teePick || r.holeNumber !== teePick.holeNumber; });
+    var approachM = Number.isFinite(opts.approachM) ? opts.approachM : APPROACH_M;
+    /* Length is a proxy for "is the standing point still on the hole". A caller that can answer
+       the real question - is that point inside this hole's PUBLISHED RASTER, which is what
+       app/js/play-surface.js projectToSurface will accept - passes approachUsable and gets the
+       exact answer instead. The runner does (it plans inside the app page, where
+       ClarityApp.playSurface is loaded); the Studio page has no play-surface code on its
+       surface and falls back to length alone. */
+    var usable = typeof opts.approachUsable === "function" ? opts.approachUsable : null;
+    var longEnough = ranked.filter(function (r) {
+      var score = scores.find(function (s) { return s.holeNumber === r.holeNumber; });
+      if (!eligibleForApproach(score, approachM)) return false;
+      if (!usable) return true;
+      var rec = recs.find(function (x) { return x.holeNumber === r.holeNumber; });
+      var stand = rec ? standingPoint(rec, approachM) : null;
+      return !stand || usable(r.holeNumber, stand) !== false;
+    });
+    if (!longEnough.length) {
+      notes.push("No hole is long enough to stand " + approachM + "m back from the green - the approach frame will be short of the hole.");
+      longEnough = ranked;
+    } else if (longEnough.length < ranked.length) {
+      notes.push((ranked.length - longEnough.length) + " hole(s) cannot be played from " + approachM + "m back - excluded.");
+    }
+    var approachPool = longEnough.filter(function (r) { return !teePick || r.holeNumber !== teePick.holeNumber; });
     if (!approachPool.length) {
-      approachPool = ranked;
+      approachPool = longEnough;
       notes.push("Only one hole available - both frames come from it.");
     }
     var approachPick = best(approachPool, "approachRank");

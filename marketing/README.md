@@ -24,8 +24,12 @@ npm run demo:install
 npm run marketing:login
 ```
 
-`marketing:login` opens a real browser at the site, waits for you to sign in,
-and saves `marketing/.auth.json`. The play screen reads `/api/course-package`
+`marketing:login` opens a real browser, walks itself to the sign-in form
+(Player Profile → the account panel; the home screen has no visible way in and
+`?login=1` only stops the landing page eating the visit), and watches for you to
+sign in — there is nothing to press, it notices the session appear and saves
+`marketing/.auth.json` itself. `MARKETING_LOGIN_MINUTES` extends the 20-minute
+window. The play screen reads `/api/course-package`
 with a bearer token, so a signed-out run would shoot a bare OSM map. That file
 holds a live session — it is gitignored, and deleting it signs the runner out.
 

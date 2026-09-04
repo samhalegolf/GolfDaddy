@@ -21,10 +21,12 @@
  *
  * Usage:
  *   node marketing/run-snapshots.mjs --login          # once: sign in, saves marketing/.auth.json
+ *   node marketing/run-snapshots.mjs --plan a,b,c     # plan without Studio (terrain only)
  *   npm run marketing:snapshots                       # shoot the plan
  *   npm run marketing:snapshots -- --course te-arai   # just one course from the plan
  *
- * MARKETING_BASE_URL overrides the target (default https://claritycaddy.com).
+ * MARKETING_BASE_URL overrides the target (default https://caddy.claritygolf.app — the same
+ * default the functions use for CLARITY_SITE_URL).
  */
 
 import fs from 'node:fs/promises';
@@ -45,7 +47,7 @@ const PLAN_FILE = path.join(root, 'marketing', 'snapshot-plan.json');
 const AUTH_FILE = path.join(root, 'marketing', '.auth.json');
 const OUTPUT_ROOT = path.join(root, 'marketing-output');
 
-const BASE_URL = process.env.MARKETING_BASE_URL || 'https://claritycaddy.com';
+const BASE_URL = process.env.MARKETING_BASE_URL || 'https://caddy.claritygolf.app';
 
 /* 390x844 at deviceScaleFactor 3 = 1170x2532. Sam's chosen output size: web and social, and it
    downsizes cleanly. Changing the scale factor changes nothing else - the layout is the phone
@@ -79,17 +81,72 @@ function stamp() {
    site and waits for a human to sign in, then saves the browser storage Playwright will replay
    on every later run. The saved file holds a live session - it is gitignored, and deleting it
    is how you sign the runner out. */
+/* Long, and overridable, because the person signing in may not be sitting at the terminal that
+   started this - the window can open behind whatever else is on screen. MARKETING_LOGIN_MINUTES
+   raises it further. */
+const LOGIN_TIMEOUT_MS = (Number(process.env.MARKETING_LOGIN_MINUTES) || 20) * 60 * 1000;
+
 async function login() {
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext();
   const page = await context.newPage();
-  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
-  console.log('\nSign in in the browser window that just opened.');
-  console.log('When you are signed in and on the home screen, come back here and press Enter.\n');
-  await new Promise((resolve) => process.stdin.once('data', resolve));
+  /* ?login=1 so the landing page does not eat the visit - gd-landing-redirect-v1.js sends a
+     signed-out visitor to welcome.html, which has no sign-in form of its own. */
+  await page.goto(`${BASE_URL}/?login=1`, { waitUntil: 'domcontentloaded' });
+
+  /* ?login=1 only stops gd-landing-redirect-v1.js eating the visit - it does NOT open a sign-in
+     form, and the home screen has no visible way in at all. The route is Player Profile tile ->
+     the guest panel's "Sign In" -> the login form (#gd67AuthEmail / #gd67AuthPassword). Walked
+     here so the window opens ON the form; leaving somebody to find it themselves is how the
+     first two attempts at this timed out having shown nothing but the home screen.
+
+     Note the login form's fields are gd67Auth*, NOT the gdPlayerSettings* pair that also exists
+     in the DOM - those belong to the profile editor and are never visible on this route. */
+  let onForm = false;
+  try {
+    await page.locator('button.gdProfileTile').first().click({ timeout: 20_000 });
+    await page.getByRole('button', { name: /^sign in$/i }).first().click({ timeout: 20_000 });
+    await page.waitForSelector('#gd67AuthEmail', { state: 'visible', timeout: 20_000 });
+    onForm = true;
+  } catch (e) { onForm = false; }
+
+  console.log(`\nA browser window has opened at ${BASE_URL} - it may be BEHIND your other windows.`);
+  console.log(onForm
+    ? 'It is sitting on the sign-in form. Enter your email and password there.'
+    : 'Go to Player Profile, then Sign In, and enter your email and password there.');
+  console.log('This notices by itself when you are signed in; nothing to press here.');
+  console.log(`Waiting up to ${Math.round(LOGIN_TIMEOUT_MS / 60000)} minutes.\n`);
+
+  /* Watched rather than waited on with a keypress. A prompt on stdin means this can only ever
+     be run from a terminal somebody is sitting at, and the thing being waited for is a fact
+     the page already holds: clarity-supabase-auth.js writes its session to localStorage the
+     moment a login succeeds. Polling the page for it works the same way whoever - or whatever -
+     started the process. */
+  const started = Date.now();
+  let signedIn = false;
+  while (Date.now() - started < LOGIN_TIMEOUT_MS) {
+    signedIn = await page.evaluate(() => {
+      try {
+        const raw = localStorage.getItem('clarity:supabase-auth-session:v1');
+        if (!raw) return false;
+        const session = JSON.parse(raw);
+        return !!(session && (session.access_token || session.accessToken));
+      } catch (e) { return false; }
+    }).catch(() => false);
+    if (signedIn) break;
+    await page.waitForTimeout(2000);
+  }
+
+  if (!signedIn) {
+    await browser.close();
+    console.error(`No sign-in seen within ${Math.round(LOGIN_TIMEOUT_MS / 60000)} minutes. Nothing was saved.`);
+    process.exitCode = 1;
+    return;
+  }
+
   await context.storageState({ path: AUTH_FILE });
   await browser.close();
-  console.log(`Saved ${path.relative(root, AUTH_FILE)}. It holds a live session - keep it out of git.`);
+  console.log(`Signed in. Saved ${path.relative(root, AUTH_FILE)} - it holds a live session, keep it out of git.`);
 }
 
 /* ------------------------------------------------------------------ page helpers */
@@ -136,6 +193,29 @@ async function clearChrome(page) {
     const button = page.locator(`#${id}`);
     if (await button.isVisible().catch(() => false)) await button.click().catch(() => {});
   }
+}
+
+/* Did the bubble actually PAINT? #aimBubble is only the transparent drag handle - the rings,
+   aim ray and club chip are SVG in #bubbleSvg - so waiting for #aimBubble to be visible proves
+   nothing about the picture. The whole first run shipped three approach frames with no bubble in
+   them and reported "3 frames" for each, because that is what it was checking.
+ *
+ * The app hides #bubbleSvg whenever the shot cannot be drawn on the current presentation. The
+ * case that bit us: on a published surface, play-surface.js projectToSurface answers null for
+ * anything outside the hole's own raster, so a start point off the end of a short hole takes the
+ * bubble with it. The plan avoids that now; this checks it rather than trusting it. */
+async function bubblePainted(page) {
+  return page.evaluate(() => {
+    const svg = document.getElementById('bubbleSvg');
+    if (!svg) return { painted: false, why: 'no #bubbleSvg' };
+    if (svg.classList.contains('hiddenState')) return { painted: false, why: 'bubble layer hidden' };
+    if (!svg.innerHTML.length) return { painted: false, why: 'bubble layer empty' };
+    /* The club chip only shows when the full bubble visual built, so it separates "the layer has
+       a guide line in it" from "the bubble itself is there". */
+    const chip = document.getElementById('bubbleClub');
+    const hasChip = !!(chip && !chip.classList.contains('hiddenState'));
+    return { painted: true, withBubbleVisual: hasChip, bytes: svg.innerHTML.length };
+  });
 }
 
 async function signal(page, name, payload) {
@@ -228,6 +308,9 @@ async function shootCourse(context, course, outDir, report) {
     /* The bubble is the whole subject of this frame; without it there is nothing to show. */
     await page.waitForSelector('#aimBubble', { state: 'visible', timeout: 15_000 });
     await settle(page, 1600);
+    const teeBubble = await bubblePainted(page);
+    if (!teeBubble.painted) errors.push(`Tee-shot bubble did not render (${teeBubble.why}).`);
+    else if (!teeBubble.withBubbleVisual) errors.push('Tee-shot bubble layer drew guides but no bubble.');
     await shoot('02-head-to-tee');
 
     // ---- frame 3: the approach hole, from 130m
@@ -247,9 +330,19 @@ async function shootCourse(context, course, outDir, report) {
     await page.waitForSelector('#aimBubble', { state: 'visible', timeout: 15_000 });
     await settle(page, 1600);
 
+    const placedBubble = await bubblePainted(page);
+    if (!placedBubble.painted) {
+      /* Loud, because a frame with no bubble is not a usable marketing frame - it is the one
+         thing this shot exists to show. The commonest cause is an approach hole too short for
+         the distance, which the planner now excludes. */
+      errors.push(`Approach bubble did not render (${placedBubble.why}) - hole ${course.approachHole} may be too short to stand ${course.approachFromM || 130}m back on.`);
+    }
+
     const moved = await nudgeBubble(page, NUDGE);
     if (!moved) errors.push('The bubble could not be nudged - shooting it on the green instead.');
     await settle(page, 1200);
+    const finalBubble = await bubblePainted(page);
+    if (!finalBubble.painted) errors.push(`Approach bubble gone after the nudge (${finalBubble.why}).`);
     await shoot('03-approach');
 
     const distance = rec ? Math.round(core.metresBetween(stand, rec.green)) : null;
@@ -262,6 +355,7 @@ async function shootCourse(context, course, outDir, report) {
       approachHole: course.approachHole,
       approachM: distance,
       bubbleNudged: !!moved,
+      bubblePainted: finalBubble.painted,
       shots,
       warnings: errors,
       pageErrors: consoleErrors
@@ -329,8 +423,85 @@ function escapeHtml(value) {
 
 /* ------------------------------------------------------------------ main */
 
+/* ------------------------------------------------------------------ planning, headless */
+
+/* `--plan te-arai-links,tara-iti` writes marketing/snapshot-plan.json without opening Studio.
+ *
+ * The Studio page is the place a human plans a shoot - it shows the terrain scores, the reason
+ * each hole won, and lets you override before committing. This is the same decision made without
+ * the room: it calls the same /api/course-package the Studio calls, hands the result to the same
+ * scripts/gd-marketing-snapshot-core.js, and writes the same file. It exists so a re-plan (a
+ * course was rebuilt, a hole changed) does not require a browser, and so this whole pipeline can
+ * be run start to finish from a terminal.
+ *
+ * Signature-hole intel is deliberately NOT fetched here. It is admin-gated and spends a shared
+ * search key, and a headless re-plan is exactly the case where nobody is watching what it costs;
+ * the Studio asks for it because a person is there to see the answer. Terrain decides here. */
+async function planCourses(courseIds) {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ storageState: await authIfPresent() });
+  const page = await context.newPage();
+  /* The package call needs the bearer token that clarity-supabase-auth.js holds, so the fetch is
+     made FROM the site's own origin with the restored session rather than reimplementing token
+     refresh out here. */
+  await page.goto(`${BASE_URL}/?login=1`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => !!window.ClaritySupabaseAuth, null, { timeout: 30_000 });
+
+  const courses = [];
+  for (const courseId of courseIds) {
+    const got = await page.evaluate(async (id) => {
+      let token = '';
+      try { token = (await window.ClaritySupabaseAuth.freshAccessToken()) || ''; } catch (e) {}
+      const headers = { Accept: 'application/json' };
+      if (token) headers.Authorization = 'Bearer ' + token;
+      const res = await fetch('/api/course-package?courseId=' + encodeURIComponent(id), { headers, cache: 'no-store' });
+      if (!res.ok) return { error: 'course-package returned ' + res.status, signedIn: !!token };
+      return { pkg: await res.json(), signedIn: !!token };
+    }, courseId);
+
+    if (got.error) { console.error(`  ${courseId}: ${got.error}`); continue; }
+    if (!got.signedIn) console.warn(`  ${courseId}: no token - run --login first`);
+
+    const pkg = got.pkg;
+    const recs = core.holeRecords(pkg);
+    if (!recs.length) { console.error(`  ${courseId}: package has no hole with a green`); continue; }
+
+    const picked = core.pickHoles(pkg);
+    const centre = core.packageCentre(pkg);
+    const units = core.unitsForPoint(centre);
+    const approachRec = recs.find((r) => r.holeNumber === picked.approachHole) || null;
+
+    courses.push({
+      courseId,
+      name: (pkg && (pkg.courseName || pkg.name)) || courseId,
+      lat: centre ? centre.lat : null,
+      lng: centre ? centre.lng : null,
+      units: units.units,
+      teeHole: picked.teeHole,
+      approachHole: picked.approachHole,
+      approachFromM: core.constants.APPROACH_M,
+      standingPoint: approachRec ? core.standingPoint(approachRec, core.constants.APPROACH_M) : null,
+      notes: picked.notes.concat([units.reason])
+    });
+    console.log(`  ${courseId}: ${recs.length} holes · tee ${picked.teeHole} · approach ${picked.approachHole} · ${units.units}`);
+    picked.notes.forEach((n) => console.log(`      ${n}`));
+  }
+
+  await browser.close();
+  if (!courses.length) { console.error('Nothing could be planned.'); process.exitCode = 1; return; }
+  await fs.writeFile(PLAN_FILE, JSON.stringify({ version: 1, createdAt: new Date().toISOString(), courses }, null, 2));
+  console.log(`\nWrote ${path.relative(root, PLAN_FILE)} (${courses.length} course(s)).`);
+}
+
+async function authIfPresent() {
+  try { await fs.access(AUTH_FILE); return AUTH_FILE; } catch (e) { return undefined; }
+}
+
 async function main() {
   if (hasFlag('--login')) return login();
+
+  const planFor = argValue('--plan');
+  if (planFor) return planCourses(planFor.split(',').map((s) => s.trim()).filter(Boolean));
 
   let plan;
   try {

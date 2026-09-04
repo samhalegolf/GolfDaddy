@@ -61,7 +61,7 @@
     "demo:capture": "node demo/run-demo.mjs",
     "demo:capture:local": "DEMO_BASE_URL=http://127.0.0.1:5173 node demo/run-demo.mjs",
     "demo:capture:bubble-merge": "DEMO_BASE_URL=http://127.0.0.1:5173 node demo/run-demo.mjs --scenario practice-vs-my-bubble-merge",
-    "demo:install": "npx playwright-core install chromium",
+    "demo:install": "npx playwright-core install chromium chromium-headless-shell",
     "marketing:login": "node marketing/run-snapshots.mjs --login",
     "marketing:snapshots": "node marketing/run-snapshots.mjs",
     "test:marketing": "node dev/marketing-snapshot-core.test.js && node dev/marketing-hole-intel.test.js",

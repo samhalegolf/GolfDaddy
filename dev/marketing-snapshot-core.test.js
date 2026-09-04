@@ -159,6 +159,47 @@ test("a package with no greens picks nothing and says why", () => {
   assert.ok(picked.notes.length);
 });
 
+test("the approach hole must be long enough to stand the approach distance back on", () => {
+  /* The Akarana regression, in miniature. Hole 5 there is 151m tee to green and won the approach
+     score outright; standing 130m back put the player behind the tee and off the end of the
+     hole's published raster, and the app drew no bubble at all. */
+  const pkg = {
+    holes: [
+      hole({ holeNumber: 4, par: 4, lengthM: 400, surfaces: surfaces({ fairways: [at(0, 200)] }) }),
+      hole({
+        holeNumber: 5, par: 3, lengthM: 151,
+        surfaces: surfaces({ bunkers: [at(18, 130), at(-18, 140), at(15, 120)], water: [at(-25, 110)] })
+      })
+    ]
+  };
+  const picked = core.pickHoles(pkg, { approachM: 130 });
+  assert.notStrictEqual(picked.approachHole, 5, "a 151m hole was chosen for a 130m approach");
+  assert.strictEqual(picked.approachHole, 4);
+  assert.ok(picked.notes.some((n) => /cannot be played from/i.test(n)), "nothing explained the exclusion");
+});
+
+test("a shorter approach distance re-opens shorter holes", () => {
+  const pkg = {
+    holes: [
+      hole({ holeNumber: 4, par: 4, lengthM: 400 }),
+      hole({
+        holeNumber: 5, par: 3, lengthM: 151,
+        surfaces: surfaces({ bunkers: [at(18, 130), at(-18, 140)], water: [at(-25, 110)] })
+      })
+    ]
+  };
+  assert.strictEqual(core.pickHoles(pkg, { approachM: 130 }).approachHole, 4);
+  assert.strictEqual(core.pickHoles(pkg, { approachM: 90 }).approachHole, 5,
+    "a 151m hole is fine for a 90m approach and should win on terrain");
+});
+
+test("when no hole is long enough it says so rather than silently picking one", () => {
+  const pkg = { holes: [hole({ holeNumber: 1, par: 3, lengthM: 140 }), hole({ holeNumber: 2, par: 3, lengthM: 150 })] };
+  const picked = core.pickHoles(pkg, { approachM: 130 });
+  assert.ok(picked.approachHole, "gave up entirely instead of falling back");
+  assert.ok(picked.notes.some((n) => /no hole is long enough/i.test(n)), "no warning note");
+});
+
 /* ---- signature-hole evidence outranks terrain ------------------------------ */
 
 test("a confidently named signature hole beats the busiest hole on the course", () => {
