@@ -63,8 +63,9 @@
 .gdBagStage:not(.hasBag){min-height:352px}
 
 .gdBagGenPanel{display:grid;gap:16px;padding:18px 16px 20px;margin:2px 0 16px;border-radius:22px;background:#0d1410;border:1px solid rgba(255,255,255,.09);box-shadow:0 18px 40px rgba(0,0,0,.6);z-index:2;transform-origin:88% -30%;transition:transform .85s cubic-bezier(.2,.8,.3,1),opacity .55s ease-out}
-/* Once there is a bag the generator is an overlay card - see the overlay
-   block below. Empty, it is the sheet's whole content and stays in the flow. */
+/* The generator card belongs to the EMPTY bag only - it is the sheet's whole
+   content and stays in the flow. A bag with clubs in it has generate mode
+   instead (see the generate-mode block), where the list itself is the input. */
 .gdBagGenPanel.folded{transform:translate(88px,-118px) scale(.28);opacity:0;pointer-events:none;transition:transform .4s cubic-bezier(.4,0,.7,.6),opacity .3s ease-in}
 .gdBagGenQuestion{font-size:19px;font-weight:900;letter-spacing:-.03em;line-height:1.25;text-wrap:pretty}
 .gdBagGenStepper{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:9px;align-items:center}
@@ -126,14 +127,13 @@
 .gdBagAddPanel .gdBagGenValue input{width:100%;border:0;background:none;color:#fff;text-align:center;font-size:34px;font-weight:950;letter-spacing:-.05em;line-height:1;font-variant-numeric:tabular-nums;padding:0}
 .gdBagAddBack{justify-self:center;border:0;background:none;color:rgba(238,245,242,.6);font-size:12px;font-weight:900;padding:2px 8px}
 
-/* ---- temporary overlays: the generator and the add-a-club card ----
-   Both used to be part of the sheet's flow. The generator took the list's
-   place, and the add card was appended after it - so with a full bag the
-   answer to "what is the club called?" was a scroll below thirteen rows, and
-   the sheet grew by the card's whole height to hold a two-field question.
-   They are the same cards, floated over the sheet while the question is being
-   answered: the clubs stay where they were, and dismissing the card leaves
-   nothing behind.
+/* ---- the add-a-club card ----
+   It used to be part of the sheet's flow, appended after the list - so with a
+   full bag the answer to "what is the club called?" was a scroll below
+   thirteen rows, and the sheet grew by the card's whole height to hold a
+   two-field question. It is the same card, floated over the sheet while the
+   question is being answered: the clubs stay where they were, and dismissing
+   the card leaves nothing behind.
 
    Anchored to the bottom because that is where the thumb is, and because the
    header - which says which bag this is, and carries the generator's own chip
@@ -155,12 +155,60 @@
 .gdBagArt.pulsing img{animation:gbPulse .8s ease-out}
 .gdBagArt.pulsing .gdBagGlow{animation:gbGlow .8s ease-out}
 
+/* ---- generate mode ----
+   The sheet takes the fill of the button that used to be the only way to
+   generate anything, so the mode is unmistakable without a banner explaining
+   it: green means every number you set rewrites the rest of the bag.
+
+   Everything on the sheet flips to dark-on-green EXCEPT the input fields,
+   which stay dark-filled with white text. That is the point of the whole
+   treatment - the only things that still look like the normal sheet are the
+   places you can type, so the eye lands on them. */
+.gdBagSheet{transition:background .26s ease,border-color .26s ease,color .26s ease}
+.gdBagSheet.gdBagGenMode{background:linear-gradient(180deg,#23dd75,#14a953);border-color:rgba(255,255,255,.42);color:#071008}
+
+.gdBagGenMode .sheetTitle{color:#071008}
+.gdBagGenMode .sheetSub{color:rgba(7,16,8,.66)}
+.gdBagGenMode .backBtn{background:rgba(7,16,8,.14);color:#071008}
+.gdBagGenMode .gdBagGenChip,
+.gdBagGenMode .gdBagGenChip.active{background:#071008;border-color:rgba(7,16,8,.6);color:#a8ffcd}
+
+.gdBagGenMode .gdBagListHead{color:rgba(7,16,8,.52)}
+.gdBagGenMode .gdBagRow{background:rgba(7,16,8,.10);border-color:rgba(7,16,8,.16)}
+.gdBagGenMode .gdBagRow.editing{background:rgba(7,16,8,.17)}
+/* The club silhouettes are drawn dark with a white outline to lift them off
+   the near-black sheet. On green the outline is the thing that reads wrong,
+   so it comes off rather than the artwork. */
+.gdBagGenMode .gdBagRowArt i{filter:brightness(.07) opacity(.5)}
+.gdBagGenMode .gdBagRowCarry{color:rgba(7,16,8,.5)}
+
+.gdBagGenMode .gdBagRowEdit{background:rgba(7,16,8,.12);border-top-color:rgba(7,16,8,.22)}
+.gdBagGenMode .gdBagRowName span,
+.gdBagGenMode .gdBagRowStep label span{color:rgba(7,16,8,.6)}
+.gdBagGenMode .gdBagRowNote{color:rgba(7,16,8,.66)}
+.gdBagGenMode .gdBagRowStep>button{background:rgba(7,16,8,.14);border-color:rgba(7,16,8,.2);color:#071008}
+.gdBagGenMode .gdBagRowDone{background:#071008;color:#a8ffcd}
+.gdBagGenMode .gdBagRowRemove{background:rgba(120,10,20,.16);border-color:rgba(90,8,16,.3);color:#3d0710}
+
+.gdBagGenMode .gdBagAddTab{background:rgba(7,16,8,.08);border-color:rgba(7,16,8,.3);color:#071008}
+.gdBagGenMode .gdBagRollChip{background:rgba(7,16,8,.12);border-color:rgba(7,16,8,.18);color:#071008}
+.gdBagGenMode .gdBagRollPanel{background:rgba(7,16,8,.10);border-color:rgba(7,16,8,.16)}
+.gdBagGenMode .gdBagRollNote{color:rgba(7,16,8,.66)}
+.gdBagGenMode .gdBagFirmness button{background:rgba(7,16,8,.12);border-color:rgba(7,16,8,.18);color:#071008}
+.gdBagGenMode .gdBagFirmness button.active{background:#071008;border-color:rgba(7,16,8,.6);color:#a8ffcd}
+
+/* The exception, stated once: anything you can type into keeps its own dark
+   fill in both modes. */
+.gdBagGenMode .gdBagRowName input,
+.gdBagGenMode .gdBagRowStep input{background:rgba(3,7,5,.86);border-color:rgba(7,16,8,.4);color:#fff}
+
 @media(max-width:380px){
   .gdBagEditor,.gdBagListHead{column-gap:12px;padding-left:4px}
   .gdBagListHead>div,.gdBagRowMain{padding-left:22px}
   .gdBagHeadText{padding-right:104px}
 }
 @media(prefers-reduced-motion:reduce){
+  .gdBagSheet{transition:none}
   .gdBagRow,.gdBagArt img,.gdBagGlow,.gdBagGenChip.gdBagChipPop{animation:none!important}
   .gdBagGenPanel{transition:opacity .18s ease}
   .gdBagGenPanel.folded,.gdBagOverlayCard.folded{transform:none;transition:opacity .18s ease}

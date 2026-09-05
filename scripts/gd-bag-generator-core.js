@@ -72,31 +72,103 @@
     }[headType] || [0.78, 1.11];
     return x < 0 ? 1 + x * (1 - ends[0]) : 1 + x * (ends[1] - 1);
   }
-  function carryFor(desc, sevenCarry) {
+  function carryFor(desc, sevenCarry, unguarded) {
     var reference = referenceCarry(desc);
     var gap = reference - 155;
     var estimate = sevenCarry + gap * gapFactor(desc.headType, sevenCarry);
     /* Short-game loft does not vanish just because the long-game speed is low.
        This low-speed guard is deliberately limited below 130 m, so it cannot
-       disturb ordinary bags. */
-    if (desc.headType === "wedge" && sevenCarry < 130) estimate = Math.max(estimate, sevenCarry - 55);
+       disturb ordinary bags.
+
+       `unguarded` turns it off for sevenIronForCarry, and only for that: the
+       guard is a floor, so it flattens and slightly dips the wedge curve
+       below 130 m, and a flat curve has no single inverse. The ladder the
+       player actually gets is always the guarded one. */
+    if (!unguarded && desc.headType === "wedge" && sevenCarry < 130) estimate = Math.max(estimate, sevenCarry - 55);
     return estimate;
   }
   function defaultLabels() { return STANDARD.map(function (entry) { return entry[0]; }); }
-  function generate(sevenIronCarry, labels) {
-    var seven = Math.round(clamp(number(sevenIronCarry, 155), 90, 185));
+
+  /* The ladder itself, with ONE club held exactly.
+   *
+   * The measured club is the only number the player gave us, so nothing may
+   * move it - not the sort, and not the crossover guard. The guard therefore
+   * walks outwards from the locked row (down the shorter clubs, then up the
+   * longer ones) instead of always from the top of the list. With the seven
+   * iron locked, which is every bag built before generate-from existed, that
+   * is the same walk it always did. */
+  function ladder(seven, labels, lockLabel, lockCarry) {
     var list = Array.isArray(labels) && labels.length ? labels : defaultLabels();
     var rows = list.map(function (label) {
       var desc = descriptor(label);
-      return { club: desc.club, baseCarry: Math.max(20, Math.round(carryFor(desc, seven))), _desc: desc };
+      return { club: desc.club, baseCarry: Math.max(20, Math.round(carryFor(desc, seven))) };
     });
-    var sevenRow = rows.filter(function (row) { return /^7\s*i(?:ron)?$/i.test(row.club); })[0];
-    if (sevenRow) sevenRow.baseCarry = seven; // player measurement always wins exactly
-    /* Standard bags are emitted longest to shortest.  Guard the shape against
-       rounding crossovers without changing the measured seven iron. */
+    var locked = lockLabel ? rows.filter(function (row) { return key(row.club) === key(lockLabel); })[0] : null;
+    if (locked) locked.baseCarry = Math.round(lockCarry); // player measurement always wins exactly
     rows.sort(function (a, b) { return b.baseCarry - a.baseCarry; });
-    for (var i = 1; i < rows.length; i++) rows[i].baseCarry = Math.min(rows[i].baseCarry, rows[i - 1].baseCarry - 1);
+    var at = locked ? rows.indexOf(locked) : 0;
+    for (var i = at + 1; i < rows.length; i++) rows[i].baseCarry = Math.min(rows[i].baseCarry, rows[i - 1].baseCarry - 1);
+    for (var j = at - 1; j >= 0; j--) rows[j].baseCarry = Math.max(rows[j].baseCarry, rows[j + 1].baseCarry + 1);
     return rows.map(function (row) { return { club: row.club, baseCarry: Math.max(20, row.baseCarry) }; });
+  }
+
+  function generate(sevenIronCarry, labels) {
+    var seven = Math.round(clamp(number(sevenIronCarry, 155), 90, 185));
+    var list = Array.isArray(labels) && labels.length ? labels : defaultLabels();
+    var sevenLabel = list.filter(function (label) { return /^7\s*i(?:ron)?$/i.test(String(label || "").trim()); })[0];
+    return ladder(seven, list, sevenLabel, seven);
+  }
+
+  /* The model backwards: which seven-iron carry would produce THIS carry from
+     THIS club.
+
+     A search over the forward model, deliberately, rather than a second
+     formula - an inverse written by hand is one more thing that can disagree
+     with the ladder it is supposed to invert.
+
+     It searches the UNGUARDED curve (see carryFor): the low-speed wedge guard
+     is a floor, so with it the wedge curve flattens below 130 m and a lob
+     wedge carry that a normal bag produces is also produced by a much slower
+     one - the search would have to choose between them, and choosing wrong
+     collapses the whole bag. Without the floor every club rises strictly with
+     the seven iron, so the answer is single and stable under a one-metre
+     nudge. Out of range answers clamp rather than fail: a 300 m driver is
+     simply the fastest bag the model knows. */
+  function sevenIronForCarry(club, carry) {
+    var desc = descriptor(club);
+    var target = number(carry, NaN);
+    if (!(target > 0)) return null;
+    var lo = 90, hi = 185;
+    if (carryFor(desc, lo, true) >= target) return lo;
+    if (carryFor(desc, hi, true) <= target) return hi;
+    for (var i = 0; i < 32; i++) {
+      var mid = (lo + hi) / 2;
+      if (carryFor(desc, mid, true) < target) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
+  }
+
+  /* Generate mode's single entry point: one club's carry, and the rest of the
+     bag follows from it. The club that was typed is held exactly; every other
+     label in `labels` is re-estimated and OVERWRITTEN. The label set is the
+     caller's - the shell passes the bag the player actually carries, so this
+     never silently adds or drops a club. */
+  function generateFrom(club, carry, labels) {
+    var label = String(club || "").trim();
+    /* Check the number BEFORE clamping it: an empty or nonsense box has to be
+       refused, and clamping first turns it into a legitimate 20 m club and
+       rebuilds the whole bag around it. */
+    var typed = number(carry, NaN);
+    if (!label) return { error: "Give the club a name first", rows: [] };
+    if (!(typed > 0)) return { error: "Give the club a distance", rows: [] };
+    var metres = Math.round(clamp(typed, 20, 400));
+    var seven = sevenIronForCarry(label, metres);
+    if (seven == null) return { error: "Give the club a distance", rows: [] };
+    var list = (Array.isArray(labels) && labels.length ? labels.slice() : defaultLabels())
+      .map(function (item) { return String(item && item.club != null ? item.club : item || "").trim(); })
+      .filter(Boolean);
+    if (!list.some(function (item) { return key(item) === key(label); })) list.push(label);
+    return { rows: ladder(Math.round(seven), list, label, metres), club: label, sevenIronCarry: Math.round(seven) };
   }
   function generateRest(existingRows, sevenIronCarry) {
     var existing = Array.isArray(existingRows) ? existingRows : [];
@@ -112,6 +184,7 @@
     return { rows: existing.concat(additions), added: additions.length, retained: existing.length, sevenIronCarry: Math.round(seven) };
   }
 
-  win.GDBagGenerator = { __owner: "GDBagGenerator", version: "20260830", descriptor: descriptor,
-    inferSevenIronSpeed: inferredSevenIronSpeed, generate: generate, generateRest: generateRest, defaultLabels: defaultLabels };
+  win.GDBagGenerator = { __owner: "GDBagGenerator", version: "20260906", descriptor: descriptor,
+    inferSevenIronSpeed: inferredSevenIronSpeed, sevenIronForCarry: sevenIronForCarry,
+    generate: generate, generateFrom: generateFrom, generateRest: generateRest, defaultLabels: defaultLabels };
 })();

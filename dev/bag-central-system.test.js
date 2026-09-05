@@ -341,6 +341,40 @@ test("the row editor can rename the club it has open", () => {
     "and it is styled in the shared stylesheet both shells load");
 });
 
+test("the shell bag has two modes, and only one of them rewrites the bag", () => {
+  /* Normal mode edits the club you opened. Generate mode makes that club the
+     measurement and re-derives every other club from it. The mode is a mode,
+     not a card: the clubs stay on screen and stay editable, and the sheet
+     takes the generate button's own fill so there is no mistaking which of
+     the two is live. */
+  const support = read("scripts/clarity-support.js");
+  assert.ok(support.includes("ui.genMode"), "the sheet carries a generate MODE");
+  assert.ok(!support.includes("genOpen"), "and no longer an is-the-generator-card-open flag");
+  assert.ok(/onCarry: function\(club, metres\)\{[\s\S]{0,200}genMode \? regenerateFrom\(club, metres\) : win\.GDBagCore\.setCarry/.test(support),
+    "a carry edit means one thing in each mode, decided in one place");
+  assert.ok(support.includes("gdBagGenMode"), "the sheet is marked while the mode is live");
+
+  const css = read("styles/inline/gd-editable-bag-panel-v1.css");
+  assert.ok(/\.gdBagSheet\.gdBagGenMode\{[^}]*background:linear-gradient\(180deg,#23dd75,#14a953\)/.test(css),
+    "generate mode fills the sheet with the generate button's own green");
+  assert.ok(/\.gdBagGenMode \.gdBagRowName input,\s*\.gdBagGenMode \.gdBagRowStep input\{[^}]*background:rgba\(3,7,5,\.86\)/.test(css),
+    "and everything BUT the input fields takes it - the boxes you type in stay dark");
+
+  /* One generator, one door. The card that asked for a seven-iron carry over
+     a bag that already had clubs in it is gone: every club is already a place
+     to put that number. The empty bag keeps it, because it has no cells. */
+  assert.ok(!/gen\.classList\.toggle\('gdBagOverlayCard'/.test(support),
+    "the generator no longer floats a second question over a full bag");
+  assert.ok(/var genVisible = !ui\.genLeaving && !hasBag/.test(support),
+    "the seven-iron card belongs to the empty bag alone");
+
+  const generator = read("scripts/gd-bag-generator-core.js");
+  assert.ok(generator.includes("function generateFrom("), "the model can be anchored on any club");
+  assert.ok(generator.includes("function sevenIronForCarry("), "by inverting its own forward ladder");
+  assert.ok(/carryFor\(desc, mid, true\)/.test(generator),
+    "and the inverse searches the unguarded curve, which is the monotonic one");
+});
+
 (async () => {
   let failed = 0;
   for (const t of tests) {

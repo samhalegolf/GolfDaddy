@@ -368,7 +368,8 @@
      chrome: the generator, the roll-out chip, the fly-into-the-bag animation
      and the panel's state. */
   var ROLL_LABEL = { soft:'Soft', medium:'Normal', hard:'Firm' };
-  var ui = { editing:null, editingAnchorRows:null, rollOpen:false, genOpen:false, genLeaving:false, setupCarry:0, busy:false,
+  /* genMode is a MODE, not a card. See gdBagToggleGenerator. */
+  var ui = { editing:null, editingAnchorRows:null, rollOpen:false, genMode:false, genLeaving:false, setupCarry:0, busy:false,
              addOpen:false, addClub:"", addCarry:0, addStep:1 };
   var timers = [];
 
@@ -403,50 +404,52 @@
       ui.setupCarry = Math.max(60, Math.min(220, Math.round(num(seven) || 155)));
     }
 
-    /* With clubs in the bag the generator is an overlay card (see the CSS
-       block of the same name): it floats over the list rather than taking its
-       place, so the bag you are about to change stays on screen behind it.
-       Empty, it IS the sheet's content and stays in the flow. */
-    var genOverlay = hasBag;
-    /* An empty bag is offered the generator whether it asked or not - it is
-       the only thing the sheet can usefully show. Deleting the last club
-       therefore also closes the add card, which would otherwise be left
-       floating over a generator that has just taken the screen. */
-    if(!hasBag) ui.addOpen = false;
-    var genVisible = !ui.genLeaving && (ui.genOpen || !hasBag);
+    /* TWO MODES, and only one of them is a card.
+     *
+     * An EMPTY bag has nothing to type into, so the seven-iron question is the
+     * sheet's whole content, in the flow, exactly as it was. Once there are
+     * clubs the question is redundant: every club is already a place to put a
+     * number, and generate mode makes each of them the anchor the rest of the
+     * bag is derived from. The overlay card that used to ask for a seven iron
+     * over a full bag is gone with it - one generator, one door. */
+    if(!hasBag){ ui.addOpen = false; ui.genMode = false; }
+    var genVisible = !ui.genLeaving && !hasBag;
     var listRows = hasBag;
-    var listChrome = listRows;
-    var overlayOpen = (genOverlay && genVisible) || ui.addOpen;
+    var genMode = hasBag && ui.genMode;
+    var overlayOpen = ui.addOpen;
+
+    var sheet = document.querySelector('#bagPanel .gdBagSheet');
+    if(sheet) sheet.classList.toggle('gdBagGenMode', genMode);
 
     var sub = el('gdBagPanelSub');
-    if(sub) sub.textContent = hasBag ? (bag.length + ' clubs · metres') : 'No clubs yet';
+    if(sub) sub.textContent = genMode ? 'Set one club · the rest follow'
+      : hasBag ? (bag.length + ' clubs · metres') : 'No clubs yet';
     var setup = el('gdBagSetupCarry');
     if(setup) setup.textContent = String(ui.setupCarry);
 
     var stage = el('gdBagStage');
     if(stage) stage.classList.toggle('hasBag', hasBag);
     var gen = el('gdBagGenPanel');
-    if(gen){
-      gen.classList.toggle('gdBagOverlayCard', genOverlay);
-      gen.classList.toggle('folded', !genVisible);
-    }
+    if(gen) gen.classList.toggle('folded', !genVisible);
     var scrim = el('gdBagScrim');
     if(scrim) scrim.hidden = !overlayOpen;
-    var genQuestion = el('gdBagGenQuestion');
-    if(genQuestion) genQuestion.textContent = hasBag ? 'How far do you carry your 7-iron?' : 'How far do you carry your 7-iron?';
-    var genBuild = el('gdBagBuildButton');
-    if(genBuild) genBuild.textContent = hasBag ? 'Generate rest' : 'Generate bag';
     var head = el('gdBagListHead');
-    if(head) head.hidden = !listChrome;
+    if(head) head.hidden = !listRows;
     var add = el('gdBagAddTab');
     if(add){
-      add.hidden = !listChrome;
+      add.hidden = !listRows;
       add.setAttribute('aria-expanded', ui.addOpen ? 'true' : 'false');
       add.textContent = ui.addOpen ? 'Cancel' : 'Add a club';
     }
     renderAddPanel();
     var chip = el('gdBagGenChip');
-    if(chip){ chip.hidden = !hasBag; chip.classList.toggle('active', ui.genOpen); }
+    if(chip){
+      chip.hidden = !hasBag;
+      chip.classList.toggle('active', genMode);
+      chip.setAttribute('aria-pressed', genMode ? 'true' : 'false');
+      var chipLabel = el('gdBagGenChipLabel');
+      if(chipLabel) chipLabel.textContent = genMode ? 'Generating' : 'Generate';
+    }
 
     var preset = rollPreset();
     var chipRoll = el('gdBagRollChip');
@@ -471,7 +474,12 @@
         artBase: '',
         onEdit: function(club){ ui.editing = club || null; ui.editingAnchorRows = ui.editing ? bag.slice() : null; renderBagPanelHotfix(); },
         onRename: function(club, label){ applyEdit(win.GDBagCore.renameRow(readBagPanelSafe(), club, label)); },
-        onCarry: function(club, metres){ applyEdit(win.GDBagCore.setCarry(readBagPanelSafe(), club, metres)); },
+        /* The only difference between the two modes. Normal: this club's carry
+           and nothing else. Generate: this club is the measurement, and every
+           other club in the bag is re-derived from it. */
+        onCarry: function(club, metres){
+          applyEdit(genMode ? regenerateFrom(club, metres) : win.GDBagCore.setCarry(readBagPanelSafe(), club, metres));
+        },
         onRemove: function(club){
           var result = win.GDBagCore.removeRow(readBagPanelSafe(), club);
           ui.editing = null;
@@ -480,6 +488,24 @@
         }
       });
     }, null);
+  }
+
+  /* Generate mode's write: the typed club is held exactly and the rest of the
+     bag is rebuilt around it, keeping the club SET the player carries - the
+     labels go in, the same labels come back with new numbers. Shaped like a
+     GDBagCore edit result so applyEdit cannot tell the two modes apart. */
+  function regenerateFrom(club, metres){
+    var rows = readBagPanelSafe();
+    var result = safe(function(){
+      return win.GDBagGenerator.generateFrom(club, metres, rows.map(function(r){ return r.club; }));
+    }, null);
+    if(!result || result.error || !result.rows || !result.rows.length){
+      return { rows: rows, error: (result && result.error) || 'Could not generate from that number' };
+    }
+    return {
+      rows: result.rows.map(function(r){ return { club:r.club, baseCarry:r.baseCarry, totalM: totalFor(r.club, r.baseCarry) }; }),
+      club: result.club
+    };
   }
 
   /* One write path for every in-place edit: keep the row open under its new
@@ -683,16 +709,16 @@
   function resetUi(){
     clearTimers();
     ui.editing = null; ui.editingAnchorRows = null; ui.rollOpen = false;
-    ui.genOpen = false; ui.genLeaving = false;
+    ui.genMode = false; ui.genLeaving = false;
     ui.setupCarry = 0; ui.busy = false;
     ui.addOpen = false; ui.addStep = 1; ui.addClub = ''; ui.addCarry = 0;
   }
-  /* One way out of both cards - the scrim, Escape, the chip and the Cancel
-     tab all mean the same thing, and a card left open behind a closed one is
-     how you end up with two questions on screen at once. */
+  /* One way out of the add card - the scrim, Escape and the Cancel tab all
+     mean the same thing. Generate mode is NOT a card and is not closed here:
+     it is a mode, and only its own chip turns it off. */
   function closeOverlays(){
     clearTimers();
-    ui.genOpen = false; ui.genLeaving = false; ui.busy = false;
+    ui.genLeaving = false; ui.busy = false;
     ui.addOpen = false; ui.addStep = 1; ui.addClub = ''; ui.addCarry = 0;
     renderBagPanelHotfix();
   }
@@ -702,19 +728,11 @@
     var out = el('gdBagSetupCarry');
     if(out) out.textContent = String(ui.setupCarry);
   };
+  /* Only ever reached from an EMPTY bag now - the seven-iron card is the empty
+     bag's own content, and a bag with clubs in it uses generate mode instead. */
   win.gdBagBuild = function(){
     if(ui.busy) return;
-    var existing = collectRows(profile());
-    if(existing.length){
-      var rest = safe(function(){ return win.GDBagGenerator.generateRest(existing, ui.setupCarry); }, null);
-      if(!rest || rest.error){ toast((rest && rest.error) || 'Enter your 7-iron carry first'); return; }
-      var message = 'Generate the rest of your bag?\n\nWe\'ll use your 7-iron carry to estimate ' + rest.added + ' missing club' + (rest.added === 1 ? '' : 's') + '. Your ' + rest.retained + ' existing club' + (rest.retained === 1 ? ' stays' : 's stay') + ' unchanged. You can edit every distance afterwards.';
-      if(!win.confirm(message)) return;
-      ui.genOpen = false; ui.editing = null; ui.editingAnchorRows = null;
-      persistRows(rest.rows, { silent:true });
-      toast(rest.added ? 'Rest of bag generated' : 'Your bag already has every standard club');
-      return;
-    }
+    if(collectRows(profile()).length) return;
     ui.busy = true;
     clearTimers();
     var built = quickBag(ui.setupCarry);
@@ -722,7 +740,7 @@
     ui.genLeaving = true;
     renderBagPanelHotfix();
     at(400, function(){
-      ui.genLeaving = false; ui.genOpen = false;
+      ui.genLeaving = false;
       persistRows(built, { silent:true });
       flyClubs('out');
       pulseBag();
@@ -731,22 +749,28 @@
     });
     at(2600, function(){ ui.busy = false; clearClubAnim(); });
   };
-  /* Opens as an overlay card over the clubs, immediately.
-     It used to fly every club into the bag first and unfold the panel two
-     seconds later, which made sense while the generator REPLACED the list -
-     the clubs had to get out of the way. Floating over them, they no longer
-     do, and two seconds is a long time to hold a question. The clubs still
-     fly, in the other direction, when a bag is actually built. */
+  /* The chip is a MODE switch, not a card opener.
+   *
+   * It used to float a card over the bag asking for a seven-iron carry, which
+   * was a second place to type a distance into a sheet already full of them -
+   * and it could only ever ask about one club. In generate mode the list
+   * itself is the question: set ANY club and the rest of the bag is derived
+   * from it. The sheet takes the generate button's own green so there is no
+   * mistaking which mode is live, and the clubs stay put, editable, with the
+   * previous numbers visible right up until the moment they are replaced.
+   *
+   * An empty bag has no cells to type into, so it keeps the seven-iron card
+   * and this does nothing. */
   win.gdBagToggleGenerator = function(){
     if(ui.busy) return;
-    if(ui.genOpen){ closeOverlays(); return; }
+    if(!collectRows(profile()).length) return;
     clearTimers();
-    ui.editing = null; ui.editingAnchorRows = null; ui.rollOpen = false;
+    ui.rollOpen = false;
     ui.addOpen = false; ui.addStep = 1; ui.addClub = ''; ui.addCarry = 0;
-    var seven = (collectRows(profile()).find(function(c){ return c.club === '7i'; }) || {}).baseCarry;
-    if(num(seven)) ui.setupCarry = Math.max(60, Math.min(220, Math.round(num(seven))));
-    ui.genOpen = true; ui.genLeaving = false;
+    ui.genMode = !ui.genMode;
+    ui.genLeaving = false;
     renderBagPanelHotfix();
+    if(ui.genMode) popChip();
   };
 
   /* ---- row editing ----
@@ -789,7 +813,7 @@
     ui.addOpen = !ui.addOpen;
     ui.addStep = 1;
     ui.addCarry = 0;
-    if(ui.addOpen){ ui.editing = null; ui.genOpen = false; }
+    if(ui.addOpen) ui.editing = null;
     renderBagPanelHotfix();
   };
   win.gdBagCloseOverlays = closeOverlays;
@@ -858,12 +882,13 @@
      keeps Escape for itself the rest of the time. */
   document.addEventListener('keydown', function(event){
     if(event.key !== 'Escape') return;
-    if(!ui.addOpen && !ui.genOpen) return;
+    if(!ui.addOpen) return;
     var panel = el('bagPanel');
     if(!panel || !panel.classList.contains('open')) return;
     event.stopPropagation();
     closeOverlays();
   }, true);
 
-  win.ClarityBagHotfix = { version: 'bag-sheet-20260830-overlay-cards', rows: currentRows };
+  win.ClarityBagHotfix = { version: 'bag-sheet-20260906-generate-mode', rows: currentRows,
+    generateMode: function(){ return !!ui.genMode; } };
 })();
