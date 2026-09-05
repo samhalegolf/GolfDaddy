@@ -247,18 +247,49 @@ test("the standing point is the asked-for distance from the green", () => {
   assert.ok(Math.abs(d - 130) < 1, `stood ${d.toFixed(1)}m from the green`);
 });
 
-test("on a dogleg it comes back along the line the hole plays, not the tee-green line", () => {
-  /* The tee sits due west of the green, so the straight tee-green line is the north=0 axis and
-     "did the dogleg matter" is just "how far north did the standing point land". */
+test("on a dogleg the standing point stays ON the hole's line, not off the end of it", () => {
+  /* A hard dogleg: the turn is 120m north of the tee-green axis, 240m out on a 480m hole. The
+     old rule took a straight bearing from the green through the turn and stepped 130m down it,
+     which sails past the turn into whatever is beyond. */
   const rec = core.holeRecords({ holes: [hole({
     holeNumber: 1, par: 5, lengthM: 480, route: [at(120, 240)]
   })] })[0];
   const stand = core.standingPoint(rec, 130);
-  const straight = core.standingPoint(
-    core.holeRecords({ holes: [hole({ holeNumber: 1, par: 5, lengthM: 480 })] })[0], 130);
-  const offset = core.metresBetween(stand, straight);
-  assert.ok(offset > 40, `the dogleg moved the standing point only ${offset.toFixed(1)}m off the straight line`);
-  assert.ok(Math.abs(core.metresBetween(stand, rec.green) - 130) < 1, "the dogleg version is no longer 130m out");
+  const offset = core.offsetFromHoleLine(rec, stand);
+  assert.ok(offset < 0.5, `standing point sat ${offset.toFixed(1)}m off the hole's line`);
+  assert.ok(offset <= core.constants.FAIRWAY_OFFSET_M);
+});
+
+test("the shot still READS the approach distance — straight-line to the green", () => {
+  /* Both things at once: on the line, and 130m by the measurement the card actually shows. */
+  [
+    hole({ holeNumber: 1, par: 5, lengthM: 480, route: [at(120, 240)] }),
+    hole({ holeNumber: 2, par: 4, lengthM: 400, route: [at(-60, 180), at(-30, 300)] }),
+    hole({ holeNumber: 3, par: 4, lengthM: 380 })
+  ].forEach((h) => {
+    const rec = core.holeRecords({ holes: [h] })[0];
+    const stand = core.standingPoint(rec, 130);
+    const straight = core.metresBetween(stand, rec.green);
+    assert.ok(Math.abs(straight - 130) < 1,
+      `hole ${rec.holeNumber}: card would read ${straight.toFixed(1)}m, not 130m`);
+    assert.ok(core.offsetFromHoleLine(rec, stand) < 0.5,
+      `hole ${rec.holeNumber}: standing point left the hole's line`);
+  });
+});
+
+test("on a straight hole it lands where the old straight-bearing rule did", () => {
+  const rec = core.holeRecords({ holes: [hole({ holeNumber: 1, par: 4, lengthM: 380 })] })[0];
+  const stand = core.standingPoint(rec, 130);
+  const straightBearing = core.destination(rec.green, core.bearing(rec.green, rec.tee), 130);
+  assert.ok(core.metresBetween(stand, straightBearing) < 1, "straight holes changed behaviour");
+});
+
+test("the standing point never sits beyond the tee", () => {
+  const rec = core.holeRecords({ holes: [hole({ holeNumber: 1, par: 4, lengthM: 400, route: [at(40, 200)] })] })[0];
+  const stand = core.standingPoint(rec, 130);
+  const teeToGreen = core.metresBetween(rec.tee, rec.green);
+  const standToGreen = core.metresBetween(stand, rec.green);
+  assert.ok(standToGreen <= teeToGreen, "stood further from the green than the tee is");
 });
 
 test("a hole with neither route nor tee has no standing point rather than an invented one", () => {

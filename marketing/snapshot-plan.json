@@ -1,25 +1,24 @@
 {
   "version": 1,
-  "createdAt": "2026-09-04T21:55:55.393Z",
+  "createdAt": "2026-09-05T04:39:59.192Z",
   "courses": [
     {
       "courseId": "waihi",
-      "name": "waihi",
-      "lat": -37.44780894832657,
-      "lng": 175.86371449096467,
+      "name": "Waihi Golf Club",
+      "lat": -37.4478892,
+      "lng": 175.8635446,
       "units": "m",
-      "teeHole": 11,
-      "approachHole": 18,
+      "teeHole": 14,
+      "approachHole": 4,
       "approachFromM": 130,
       "standingPoint": {
-        "lat": -37.443205309912294,
-        "lng": 175.86537067199993
+        "lat": -37.45000027715039,
+        "lng": 175.86107568571435
       },
       "notes": [
         "Tee shot on 11 - most varied corridor terrain.",
         "4 hole(s) cannot be played from 130m back - excluded.",
-        "Approach on 18 - most varied green surrounds.",
-        "Outside the yard-playing regions - metres."
+        "Approach on 18 - most varied green surrounds."
       ]
     }
   ]

@@ -381,23 +381,93 @@
     };
   }
 
-  /* Where to stand for the approach frame: APPROACH_M back from the green, along the line the
-     hole actually plays rather than the straight tee-green line. On a dogleg the last route
-     point is the one a second shot is played from, so that is the bearing used; a hole with no
-     route falls back to the tee. Returns null when neither exists - the runner then skips the
-     approach frame for that hole rather than standing somewhere invented.
+  /* Where to stand for the approach frame.
+   *
+   * TWO things have to be true at once, and the old version only managed one. The shot must
+   * READ 130m — that is the number on the card, and the app measures it straight-line to the
+   * green — and the player must be ON THE FAIRWAY. The old version took a straight bearing from
+   * the green towards the last route point and stepped 130m down it, which on a dogleg sails
+   * straight past that point and lands in whatever is beyond: rough, trees, a car park.
+   *
+   * So: walk the hole's own line (tee → route → green) back from the green and find the point
+   * on it whose STRAIGHT-LINE distance to the green is the approach distance. On the line by
+   * construction, and 130m by measurement. On a straight hole the two definitions coincide and
+   * this returns exactly what the old one did.
+   *
+   * 130m is Sam's number and is deliberately NOT clamped to the bag: the frame is meant to show
+   * the bubble sitting on the green, which is what a 130m shot does for every bag. */
 
-     130m is Sam's number and is deliberately NOT clamped to the bag: the frame is meant to
-     show the bubble sitting on the green, which is what a 130m shot does for every bag. */
+  /* How far off the hole's line the standing point is allowed to be. Zero by construction here;
+     the constant exists so callers can VERIFY rather than trust, and so a future placement rule
+     has one number to honour. */
+  var FAIRWAY_OFFSET_M = 30;
+
+  /* The line the hole plays along, green LAST. Null when there is nothing to walk. */
+  function holeLine(rec) {
+    if (!rec || !rec.green) return null;
+    var route = Array.isArray(rec.route) ? rec.route.filter(Boolean) : [];
+    var line = [];
+    if (rec.tee) line.push(rec.tee);
+    route.forEach(function (p) { line.push(p); });
+    line.push(rec.green);
+    return line.length >= 2 ? line : null;
+  }
+
+  /* Interpolate a fraction along a segment, in local metres so it is a straight line on the
+     ground rather than in degrees. */
+  function alongSegment(a, b, t) {
+    return { lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t };
+  }
+
   function standingPoint(rec, distanceM) {
     if (!rec || !rec.green) return null;
     var d = Number.isFinite(distanceM) ? distanceM : APPROACH_M;
-    var route = Array.isArray(rec.route) ? rec.route.filter(Boolean) : [];
-    var from = route.length ? route[route.length - 1] : rec.tee;
-    if (!from) return null;
-    var back = bearing(rec.green, from);
+    var line = holeLine(rec);
+    if (!line) return null;
+    var green = rec.green;
+
+    /* Walk segments from the green backwards. The first segment whose far end is at least `d`
+       from the green contains the answer; bisect inside it. Bisection rather than trigonometry
+       because the target is "straight-line distance to the green", which is not linear along a
+       segment that is not pointing at the green. 40 halvings is sub-millimetre. */
+    for (var i = line.length - 2; i >= 0; i -= 1) {
+      var near = line[i + 1], far = line[i];
+      var farD = metresBetween(far, green);
+      if (farD === null) continue;
+      if (farD < d) continue;                       /* whole segment is inside d - keep walking back */
+      var lo = 0, hi = 1;                            /* lo = near end, hi = far end */
+      for (var step = 0; step < 40; step += 1) {
+        var mid = (lo + hi) / 2;
+        var at = alongSegment(near, far, mid);
+        if (metresBetween(at, green) < d) lo = mid; else hi = mid;
+      }
+      return alongSegment(near, far, (lo + hi) / 2);
+    }
+
+    /* The whole hole is shorter than the approach distance. Rather than inventing a point off
+       the end of it, extend the FIRST segment's bearing - the tee-ward direction - which is at
+       least the direction the hole plays. eligibleForApproach normally keeps such a hole out of
+       the running entirely; this only runs when a caller overrode that. */
+    var back = bearing(green, line[0]);
     if (!Number.isFinite(back)) return null;
-    return destination(rec.green, back, d);
+    return destination(green, back, d);
+  }
+
+  /* How far a point sits off the hole's line, in metres. Null when the hole has no line.
+     Exported so the Studio, the runner and the tests can all check the same thing rather than
+     each deciding what "on the fairway" means. */
+  function offsetFromHoleLine(rec, point) {
+    var line = holeLine(rec);
+    if (!line || !point) return null;
+    var toPlane = localPlane(line[0]);
+    var p = toPlane(point);
+    var flat = line.map(toPlane);
+    var best = Infinity;
+    for (var i = 0; i < flat.length - 1; i += 1) {
+      var dist = distanceToSegment(p, flat[i], flat[i + 1]);
+      if (dist < best) best = dist;
+    }
+    return best === Infinity ? null : best;
   }
 
   /* ------------------------------------------------------------------ units by region */
@@ -448,11 +518,14 @@
     scoreCourse: scoreCourse,
     pickHoles: pickHoles,
     standingPoint: standingPoint,
+    holeLine: holeLine,
+    offsetFromHoleLine: offsetFromHoleLine,
     unitsForPoint: unitsForPoint,
     packageCentre: packageCentre,
     metresBetween: metresBetween,
     bearing: bearing,
     destination: destination,
-    constants: { CORRIDOR_M: CORRIDOR_M, GREEN_AREA_M: GREEN_AREA_M, APPROACH_M: APPROACH_M, INTEL_WEIGHT: INTEL_WEIGHT }
+    constants: { CORRIDOR_M: CORRIDOR_M, GREEN_AREA_M: GREEN_AREA_M, APPROACH_M: APPROACH_M,
+      INTEL_WEIGHT: INTEL_WEIGHT, TEE_ROOM_M: TEE_ROOM_M, FAIRWAY_OFFSET_M: FAIRWAY_OFFSET_M }
   };
 });

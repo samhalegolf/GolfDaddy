@@ -22,6 +22,8 @@
  * Usage:
  *   node marketing/run-snapshots.mjs --login          # once: sign in, saves marketing/.auth.json
  *   node marketing/run-snapshots.mjs --plan a,b,c     # plan without Studio (terrain only)
+ *   node marketing/run-snapshots.mjs --show           # what is currently planned
+ *   node marketing/run-snapshots.mjs --set waihi tee=7 approach=12   # edit the plan in place
  *   npm run marketing:snapshots                       # shoot the plan
  *   npm run marketing:snapshots -- --course te-arai   # just one course from the plan
  *
@@ -529,11 +531,151 @@ async function authIfPresent() {
   try { await fs.access(AUTH_FILE); return AUTH_FILE; } catch (e) { return undefined; }
 }
 
+
+/* ------------------------------------------------------------------ read + edit the plan */
+
+async function readPlan() {
+  try { return JSON.parse(await fs.readFile(PLAN_FILE, 'utf8')); }
+  catch (e) { return null; }
+}
+
+async function writePlan(plan) {
+  plan.updatedAt = new Date().toISOString();
+  await fs.writeFile(PLAN_FILE, JSON.stringify(plan, null, 2));
+}
+
+function describeCourse(c) {
+  const bits = [
+    `tee ${c.teeHole}`,
+    `approach ${c.approachHole} at ${c.approachFromM || APPROACH_DEFAULT}m`,
+    c.units === 'yd' ? 'yards' : 'metres'
+  ];
+  return `  ${c.courseId.padEnd(28)} ${bits.join(' · ')}`;
+}
+
+const APPROACH_DEFAULT = 130;
+
+/* `--show` — what is currently queued to shoot, without opening anything. */
+async function showPlan() {
+  const plan = await readPlan();
+  if (!plan || !Array.isArray(plan.courses) || !plan.courses.length) {
+    console.log(`No plan at ${path.relative(root, PLAN_FILE)}.`);
+    return;
+  }
+  console.log(`${path.relative(root, PLAN_FILE)} — planned ${plan.createdAt}${plan.updatedAt ? `, edited ${plan.updatedAt}` : ''}\n`);
+  plan.courses.forEach((c) => console.log(describeCourse(c)));
+  console.log(`\n${plan.courses.length} course(s) → ${plan.courses.length * 3} screenshots.`);
+}
+
+/* `--set <courseId> tee=7 approach=12 from=110 units=yd`
+ *
+ * Edits the plan IN PLACE and saves it. This exists because overriding a hole had no honest
+ * path before: the Studio's number inputs only changed the JSON shown on screen, which then had
+ * to be downloaded and moved into place by hand, and `--plan` re-decides everything and throws
+ * the override away. A plan is a file; this edits the file.
+ *
+ * The standing point is RE-DERIVED, never carried over — it is a function of the approach hole
+ * and the distance, so an edited hole with yesterday's standing point would place the player on
+ * a different hole entirely. That needs the course's geometry, so this opens the app the same
+ * way planning does. */
+async function setPlanValues(courseId, assignments) {
+  const plan = await readPlan();
+  if (!plan) { console.error(`No plan at ${path.relative(root, PLAN_FILE)} — run --plan first.`); process.exitCode = 1; return; }
+  const course = (plan.courses || []).find((c) => c.courseId === courseId);
+  if (!course) {
+    console.error(`"${courseId}" is not in the plan. It has: ${(plan.courses || []).map((c) => c.courseId).join(', ') || '(nothing)'}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const before = describeCourse(course);
+  const unknown = [];
+  for (const [key, raw] of assignments) {
+    const n = Number(raw);
+    if (key === 'tee') course.teeHole = n;
+    else if (key === 'approach') course.approachHole = n;
+    else if (key === 'from') course.approachFromM = n;
+    else if (key === 'units') course.units = String(raw) === 'yd' ? 'yd' : 'm';
+    else unknown.push(key);
+  }
+  if (unknown.length) {
+    console.error(`Unknown setting(s): ${unknown.join(', ')}. Use tee=, approach=, from=, units=.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  /* Re-derive the standing point from the course's real geometry, and check the result against
+     the two rules the planner enforces: on the hole's line, and inside the published raster. */
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ storageState: await authIfPresent() });
+  const page = await context.newPage();
+  await page.goto(`${BASE_URL}/app/index.html?login=1`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => !!(window.ClarityApp && window.ClarityApp.playSurface), null, { timeout: 30_000 });
+  const got = await page.evaluate(async (id) => {
+    const res = await fetch('/api/course-package?courseId=' + encodeURIComponent(id), { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    if (!res.ok) return { error: 'course-package returned ' + res.status };
+    const pkg = await res.json();
+    const meta = {};
+    (pkg.holes || []).forEach((h) => { const ps = h && h.visual && h.visual.playSurface; if (ps) meta[h.holeNumber] = ps; });
+    return { pkg, meta };
+  }, courseId);
+
+  if (got.error) { await browser.close(); console.error(`  ${courseId}: ${got.error}`); process.exitCode = 1; return; }
+
+  const recs = core.holeRecords(got.pkg);
+  const rec = recs.find((r) => r.holeNumber === Number(course.approachHole));
+  const warnings = [];
+  if (!rec) {
+    warnings.push(`hole ${course.approachHole} has no green in the package — the approach frame will fail`);
+    course.standingPoint = null;
+  } else {
+    const distance = Number(course.approachFromM) || APPROACH_DEFAULT;
+    course.standingPoint = core.standingPoint(rec, distance);
+    const offset = core.offsetFromHoleLine(rec, course.standingPoint);
+    if (offset !== null && offset > core.constants.FAIRWAY_OFFSET_M) {
+      warnings.push(`standing point is ${Math.round(offset)}m off the hole's line (limit ${core.constants.FAIRWAY_OFFSET_M}m)`);
+    }
+    const inside = await page.evaluate(([m, pt]) => {
+      if (!m) return true;
+      try { return !!window.ClarityApp.playSurface.projectToSurface(m, pt.lat, pt.lng); } catch (e) { return true; }
+    }, [got.meta[course.approachHole] || null, course.standingPoint]);
+    if (!inside) warnings.push(`standing point falls outside hole ${course.approachHole}'s published image — the bubble will not render`);
+  }
+  if (!recs.find((r) => r.holeNumber === Number(course.teeHole))) {
+    warnings.push(`hole ${course.teeHole} has no green in the package — the tee frames will fail`);
+  }
+  await browser.close();
+
+  await writePlan(plan);
+  console.log(`${path.relative(root, PLAN_FILE)} updated.\n`);
+  console.log(`  was ${before.trim()}`);
+  console.log(`  now ${describeCourse(course).trim()}`);
+  warnings.forEach((w) => console.warn(`\n  ! ${w}`));
+  if (!warnings.length) console.log('\nChecked: on the hole\'s line, and inside the published image.');
+}
+
 async function main() {
   if (hasFlag('--login')) return login();
 
+  if (hasFlag('--show')) return showPlan();
+
   const planFor = argValue('--plan');
   if (planFor) return planCourses(planFor.split(',').map((s) => s.trim()).filter(Boolean));
+
+  const setFor = argValue('--set');
+  if (setFor) {
+    /* Everything after the course id that looks like key=value. */
+    const assignments = process.argv
+      .slice(process.argv.indexOf('--set') + 2)
+      .filter((a) => /^[a-z]+=/.test(a))
+      .map((a) => { const i = a.indexOf('='); return [a.slice(0, i), a.slice(i + 1)]; });
+    if (!assignments.length) {
+      console.error('Nothing to set. Example: --set waihi tee=7 approach=12 from=110');
+      process.exitCode = 1;
+      return;
+    }
+    return setPlanValues(setFor, assignments);
+  }
 
   let plan;
   try {

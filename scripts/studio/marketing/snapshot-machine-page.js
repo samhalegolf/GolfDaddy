@@ -72,9 +72,10 @@
   function readStore() {
     try {
       var raw = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
-      if (!raw || !Array.isArray(raw.courses)) return { courses: [], intel: true, baseUrl: "" };
-      return { courses: raw.courses, intel: raw.intel !== false, baseUrl: String(raw.baseUrl || "") };
-    } catch (e) { return { courses: [], intel: true, baseUrl: "" }; }
+      if (!raw || !Array.isArray(raw.courses)) return { courses: [], intel: true, baseUrl: "", overrides: {} };
+      return { courses: raw.courses, intel: raw.intel !== false, baseUrl: String(raw.baseUrl || ""),
+        overrides: raw.overrides && typeof raw.overrides === "object" ? raw.overrides : {} };
+    } catch (e) { return { courses: [], intel: true, baseUrl: "", overrides: {} }; }
   }
 
   function writeStore(state) {
@@ -100,6 +101,8 @@
     var n = Number(value);
     return Number.isFinite(n) ? n : null;
   }
+
+  function core() { return window.GDMarketingSnapshotCore; }
 
   async function accessToken() {
     /* The Course Database's own resolver, already loaded on this surface. Duplicating it here
@@ -714,7 +717,9 @@
         /* Kept so an override can re-derive the standing point without another network call.
            Double-underscored and never copied into planFile() — it is working state, not part
            of the contract with the runner. */
-        __recs: recs
+        __recs: recs,
+        __pickedTee: picked.teeHole,
+        __pickedApproach: picked.approachHole
       };
     }
 
@@ -730,7 +735,7 @@
       for (var i = 0; i < list.length; i += 1) {
         /* Serial on purpose: each course can fire a web search, and the search key is shared
            with the scorecard resolver. Six parallel lookups is how a quota gets spent. */
-        plans.push(await planCourse(list[i]));
+        plans.push(applyOverride(await planCourse(list[i])));
         if (destroyed) return;
       }
       planBtn.disabled = false;
@@ -771,6 +776,10 @@
             /* The standing point is derived from BOTH the approach hole and the distance, so
                it has to be re-derived here rather than left at whatever the picker computed. */
             recomputeStanding(plans[index]);
+            /* Overrides are the operator disagreeing with the machine — losing them to a
+               re-render or a reload is losing the only part of this a human authored. */
+            persistOverrides();
+            renderPlan();
             renderOut();
           });
           wrap.appendChild(input);
@@ -788,15 +797,38 @@
         unitSel.addEventListener("change", function () {
           plans[index].units = unitSel.value;
           plans[index].unitsReason = "Set by hand in Studio.";
+          persistOverrides();
           renderOut();
         });
         unitWrap.appendChild(unitSel);
         fields.appendChild(unitWrap);
         card.appendChild(fields);
 
+        if (plan.offLine) {
+          card.appendChild(el("p", "gdMktErr", plan.lineOffsetM == null
+            ? "Hole " + esc(plan.approachHole) + " has no green in this package — the approach frame will fail."
+            : "The " + esc(plan.approachFromM) + "m standing point is " + Math.round(plan.lineOffsetM) +
+              "m off the hole's line (limit " + core().constants.FAIRWAY_OFFSET_M + "m) — it would be shot from the rough."));
+        }
         card.appendChild(el("ul", "gdMktLog", plan.notes.map(function (n) {
           return "<li>" + esc(n) + "</li>";
         }).concat(['<li class="gdStudioMuted">' + esc(plan.unitsReason) + "</li>"]).join("")));
+
+        if (state.overrides && state.overrides[plan.courseId]) {
+          var reset = el("button", "gdStudioCopyPath", "Reset to the machine's choice");
+          reset.type = "button";
+          reset.addEventListener("click", function () {
+            delete state.overrides[plan.courseId];
+            persist();
+            plans[index].teeHole = plan.__pickedTee;
+            plans[index].approachHole = plan.__pickedApproach;
+            plans[index].approachFromM = core().constants.APPROACH_M;
+            recomputeStanding(plans[index]);
+            renderPlan();
+            renderOut();
+          });
+          card.appendChild(reset);
+        }
 
         var details = el("details", "gdMktScores");
         details.appendChild(el("summary", null, "Terrain scores for all " + plan.holeCount + " holes"));
@@ -825,6 +857,39 @@
       if (!core || !plan || !plan.__recs) return;
       var rec = plan.__recs.find(function (r) { return r.holeNumber === plan.approachHole; });
       plan.standingPoint = rec ? core.standingPoint(rec, plan.approachFromM) : null;
+      /* The one rule an override can break that the machine's own pick never does: the standing
+         point has to sit on the hole's line, not in the rough beside it. Says so on the card
+         rather than waiting for the run to produce a frame from the wrong place. */
+      plan.lineOffsetM = rec && plan.standingPoint
+        ? core.offsetFromHoleLine(rec, plan.standingPoint) : null;
+      plan.offLine = plan.lineOffsetM != null && plan.lineOffsetM > core.constants.FAIRWAY_OFFSET_M;
+      if (!rec) plan.offLine = true;
+    }
+
+    /* Overrides live beside the basket so a reload does not silently undo them. Keyed by course
+       id and applied on the next plan; the machine's own choice is what a course with no entry
+       here gets. */
+    function persistOverrides() {
+      var out = {};
+      plans.forEach(function (p) {
+        if (p.error) return;
+        out[p.courseId] = { teeHole: p.teeHole, approachHole: p.approachHole,
+          approachFromM: p.approachFromM, units: p.units };
+      });
+      state.overrides = out;
+      persist();
+    }
+
+    function applyOverride(plan) {
+      var saved = state.overrides && state.overrides[plan.courseId];
+      if (!saved || plan.error) return plan;
+      ["teeHole", "approachHole", "approachFromM", "units"].forEach(function (key) {
+        if (saved[key] != null) plan[key] = saved[key];
+      });
+      plan.notes = plan.notes.concat(["Overridden by hand — the machine chose tee " +
+        plan.__pickedTee + ", approach " + plan.__pickedApproach + "."]);
+      recomputeStanding(plan);
+      return plan;
     }
 
     // ------------------------------------------------------------ plan file

@@ -85,6 +85,29 @@ npm run marketing:snapshots -- --course te-arai-links
 `--headed` watches it happen. `MARKETING_BASE_URL` points it somewhere other
 than production.
 
+## Changing what gets shot
+
+The plan is a file, and these edit it in place — no downloading and moving.
+
+```bash
+node marketing/run-snapshots.mjs --show
+```
+
+```bash
+node marketing/run-snapshots.mjs --set waihi tee=7 approach=12 from=110
+```
+
+`tee=`, `approach=`, `from=` (metres) and `units=` (`m`/`yd`). The standing
+point is always **re-derived**, never carried over — it is a function of the
+approach hole and the distance, so an edited hole keeping yesterday's standing
+point would put the player on a different hole. The edit is then checked
+against the same two rules the planner enforces (on the hole's line, inside the
+published image) and warns if either fails.
+
+In the Studio, overriding a number now saves straight to the basket and
+survives a reload, the card says what the machine had chosen, and **Reset to
+the machine's choice** puts it back.
+
 ## How the holes get chosen
 
 Signature-hole evidence first, terrain second.
@@ -116,6 +139,22 @@ Studio open. `node dev/marketing-snapshot-core.test.js` pins the rules.
 **Units** come from where the course is: yards in the US, Canada, the UK and
 Japan; metres everywhere else. Genuinely mixed regions default to metres and
 show the choice in the Studio so you can flip it.
+
+## Where the approach shot is played from
+
+Two things have to be true at once: the shot must **read** the approach distance
+— that is the number on the card, measured straight-line to the green — and the
+player must be **on the fairway**, within 30m of the hole's line.
+
+So `standingPoint` walks the hole's own line (tee → route → green) back from the
+green and finds the point on it whose straight-line distance to the green is the
+approach distance. On the line by construction, and 130m by measurement. It used
+to take a straight bearing from the green through the last route point and step
+130m down it, which on a dogleg sails past the turn into rough, trees, or a car
+park. On a straight hole the two agree exactly.
+
+`offsetFromHoleLine()` is the shared check, and `FAIRWAY_OFFSET_M` (30m) the
+shared limit — the Studio, `--set` and the tests all ask the same question.
 
 ## Why the approach hole matters
 
