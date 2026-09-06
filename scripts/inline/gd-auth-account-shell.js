@@ -906,6 +906,7 @@
           <div class="panelHead">
             <div><strong>All Users</strong><span>System-wide user route. Your Players list stays limited to linked clients.</span></div>
           </div>
+          <button class="saveBtn" type="button" onclick="window.ClarityAdminUsers&&window.ClarityAdminUsers.open()">Open canonical Users</button>
           ${allUserRows}
           <div class="panelHead gdProfileAdminSubHead">
             <div><strong>Coach Accounts</strong><span>Add independent coach profiles for other staff.</span></div>

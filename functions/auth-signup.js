@@ -1,5 +1,5 @@
 "use strict";
-const { email, hasAuth, json, role, supabaseAuth, text, upsertAccount } = require("./auth-utils");
+const { email, hasAuth, json, role, supabaseAuth, text, upsertAccount, claimCanonicalPlayer } = require("./auth-utils");
 const { sendSystemAlert } = require("./alert-utils");
 exports.handler = async function(event) {
   if (event.httpMethod === "OPTIONS") return json(204, {});
@@ -19,8 +19,19 @@ exports.handler = async function(event) {
       throw error;
     }
     const authUser = created && (created.user || created);
-    const pack = await upsertAccount(authUser, { email: accountEmail, name, role: accountRole, eventType: "supabase_auth_signup" });
-    return json(200, { ok: true, source: "supabase_auth", account: pack.account, profile: pack.profile });
+    /* Claim is exact-email only and runs before legacy app profile creation.
+       An existing unclaimed player retains its stable player/profile identity,
+       bag and coach assignment; multiple candidates are rejected by the DB's
+       partial unique index rather than guessed in this handler. */
+    const claimed = await claimCanonicalPlayer(authUser, { email: accountEmail, name });
+    const pack = await upsertAccount(authUser, {
+      accountId: claimed.accountId,
+      profileId: claimed.profileId,
+      bag: claimed.player && claimed.player.bag_json,
+      profileJson: claimed.player && claimed.player.profile_json,
+      email: accountEmail, name, role: accountRole, eventType: "supabase_auth_signup"
+    });
+    return json(200, { ok: true, source: "supabase_auth", claimedPlayerId: claimed.player && claimed.player.id || null, account: pack.account, profile: pack.profile });
   } catch (error) {
     await sendSystemAlert({ eventType: "supabase_auth_signup_failed", title: "Supabase Auth signup failed", detail: "A signup was blocked because Supabase Auth did not confirm it.", accountEmail, context: { status: error.status || null, details: error.body || error.message } });
     return json(error.status || 502, { error: error.message || "Could not create Supabase Auth user", details: error.body || null });

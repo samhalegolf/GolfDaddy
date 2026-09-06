@@ -52,13 +52,13 @@ function accountPayload(row, authUser, input) {
       requiresPasswordSetup: !!(row && row.requires_password_setup),
       authProvider: "supabase", createdAt: row && row.created_at || now, updatedAt: now, lastLoginAt: now
     },
-    profile: {
+    profile: Object.assign({}, input && input.profileJson && typeof input.profileJson === "object" ? input.profileJson : {}, {
       id: profileId, accountId, supabaseUserId: authUser && authUser.id || row && row.auth_user_id || "",
       name, email: accountEmail, permission: permission(accountRole), accountPermission: permission(accountRole),
       mode: accountRole === "coach" || accountRole === "admin" ? "coach" : "player",
       handedness: row && row.handedness || "right", handicap: row && row.handicap || "", hcp: row && row.handicap || "",
-      bag: row && row.bag_json || [], onboardingComplete: true, createdAt: row && row.created_at || now, updatedAt: now
-    }
+      bag: input && Array.isArray(input.bag) ? input.bag : (row && row.bag_json || []), onboardingComplete: true, createdAt: row && row.created_at || now, updatedAt: now
+    })
   };
 }
 async function findAccountByEmail(accountEmail) {
@@ -125,6 +125,21 @@ async function upsertAccount(authUser, input) {
   }) });
   return pack;
 }
+async function claimCanonicalPlayer(authUser, input) {
+  const accountId = text(input && input.accountId, 120) || newId("acct");
+  const profileId = text(input && input.profileId, 120) || newId("profile");
+  const row = await supabaseRest("rpc/caddy_claim_or_create_player", {
+    method: "POST",
+    body: JSON.stringify({
+      p_auth_user_id: authUser && authUser.id,
+      p_email: email(authUser && authUser.email || input && input.email),
+      p_name: text(input && input.name || "Player", 160),
+      p_account_id: accountId,
+      p_profile_id: profileId
+    })
+  });
+  return { player: row, accountId: row && row.account_id || accountId, profileId: row && row.profile_id || profileId };
+}
 module.exports = {
-  anonKey, email, hasAuth, hasAuthWithServiceKey, json, role, supabaseAuth, supabaseRest, text, findAccountByAuthUserId, findAccountByEmail, upsertAccount
+  anonKey, email, hasAuth, hasAuthWithServiceKey, json, role, supabaseAuth, supabaseRest, text, findAccountByAuthUserId, findAccountByEmail, upsertAccount, claimCanonicalPlayer
 };
