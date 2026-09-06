@@ -759,6 +759,100 @@
     return `<div class="gdProfileRosterEmpty">${esc(message)}</div>`;
   }
 
+  /* Every roster row opens into this. It exists because the ids a merge needs
+     were not shown anywhere: the canonical Player ID lives on the server, and
+     the local profile / account ids never had a home in the list. Opening the
+     profile moved to its own button here, so a tap on the row itself can expand
+     instead of navigating away. */
+  function rosterDetailRow(label, value) {
+    return `<div><dt>${esc(label)}</dt><dd>${esc(value || '—')}</dd></div>`;
+  }
+
+  function rosterDetailId(label, value) {
+    if (!value) return '';
+    return `<div><dt>${esc(label)}</dt><dd><code>${esc(value)}</code><button type="button" class="gdRosterDetailCopy" onclick="gd67CopyRosterId('${esc(value)}',this)">Copy</button></dd></div>`;
+  }
+
+  function rosterDetail(item, options={}) {
+    const admin = String((currentAccount() || {}).role || 'player') === 'admin';
+    const openArg = options.adminRoute
+      ? `gd67AdminViewProfile('${esc(item.profileId)}')`
+      : `gd67ViewProfile('${esc(item.profileId)}')`;
+    /* A managed profile shares the coach's account id, so that id must not be
+       used as a canonical-player fallback - it would resolve to the coach. */
+    return `<div class="gdProfileRosterDetail" hidden data-profile-id="${esc(item.profileId)}" data-account-id="${esc(item.managed ? '' : item.accountId)}">
+      <dl class="gdRosterDetailGrid">
+        ${admin ? `<div><dt>Player ID</dt><dd><span data-canonical-slot>Expand to look up</span></dd></div>` : ''}
+        ${rosterDetailId('Profile ID', item.profileId)}
+        ${rosterDetailId(item.managed ? 'Owner account ID' : 'Account ID', item.accountId)}
+        ${rosterDetailRow('Email', item.email)}
+        ${rosterDetailRow('Account type', item.roleLabel)}
+        ${rosterDetailRow('Added', item.addedLabel)}
+        ${rosterDetailRow('Updated', item.updatedLabel)}
+        ${rosterDetailRow('Status', item.status)}
+      </dl>
+      <div class="gdRosterDetailActions">
+        <button type="button" class="gdRosterDetailAction" onclick="${openArg}">Open profile</button>
+        ${admin && item.profileId ? `<button type="button" class="gdRosterDetailAction" onclick="gd67MergeIntoPlayer(this)">Merge a duplicate into this player</button>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function toggleRosterDetail(button) {
+    const row = button && button.closest('.gdProfileRosterRow');
+    const detail = row && row.querySelector('.gdProfileRosterDetail');
+    if (!detail) return;
+    const opening = detail.hidden;
+    detail.hidden = !opening;
+    row.classList.toggle('isExpanded', opening);
+    button.setAttribute('aria-expanded', opening ? 'true' : 'false');
+    if (opening) fillCanonicalPlayerId(detail);
+  }
+
+  function adminUsersApi() {
+    const api = window.ClarityAdminUsers;
+    return api && typeof api.canonicalIdFor === 'function' ? api : null;
+  }
+
+  /* The canonical id is only reachable through the admin endpoint, so this is
+     async and admin-only. One lookup per row; the endpoint caches the list. */
+  function fillCanonicalPlayerId(detail) {
+    const slot = detail.querySelector('[data-canonical-slot]');
+    const api = adminUsersApi();
+    if (!slot || !api || slot.dataset.filled === '1') return Promise.resolve(detail.dataset.playerId || '');
+    slot.dataset.filled = '1';
+    slot.textContent = 'Looking up…';
+    return api.canonicalIdFor(detail.dataset.profileId || '', detail.dataset.accountId || '').then(id => {
+      if (!id) { slot.textContent = 'No canonical player yet'; return ''; }
+      detail.dataset.playerId = id;
+      slot.innerHTML = `<code>${esc(id)}</code><button type="button" class="gdRosterDetailCopy" onclick="gd67CopyRosterId('${esc(id)}',this)">Copy</button>`;
+      return id;
+    }).catch(err => {
+      slot.dataset.filled = '';
+      slot.textContent = (err && err.message) || 'Lookup failed';
+      return '';
+    });
+  }
+
+  function copyRosterId(value, button) {
+    try { navigator.clipboard.writeText(value); } catch(e) {}
+    if (!button) return;
+    const label = button.textContent;
+    button.textContent = 'Copied';
+    setTimeout(() => { button.textContent = label; }, 1200);
+  }
+
+  function mergeIntoPlayer(button) {
+    const detail = button && button.closest('.gdProfileRosterDetail');
+    const api = adminUsersApi();
+    if (!detail || !api) return;
+    Promise.resolve(detail.dataset.playerId || fillCanonicalPlayerId(detail)).then(id => {
+      if (!id) throw new Error('No canonical Player ID for this row yet');
+      return api.mergeInto(id);
+    }).then(merged => { if (merged) render(); })
+      .catch(err => { alert((err && err.message) || 'Merge failed'); });
+  }
+
   function playerRosterRow(item) {
     const activity = item.activity || { kind:'none', title:'No recent activity', detail:'Search or filter to open profile' };
     /* Two different verbs wear the same button here, and conflating them is
@@ -778,7 +872,7 @@
       ? `gd67RemoveManagedProfile('${esc(item.profileId)}')`
       : `gd67UnlinkPlayer('${esc(item.accountId)}')`;
     return `<div class="gdProfileRosterRow ${item.active ? 'active' : ''}" data-roster-key="players" data-search="${esc(item.searchText)}" data-has-activity="${item.hasRecentActivity ? '1' : '0'}" data-activity-kind="${esc(activity.kind || 'none')}">
-      <button class="gdProfileRosterMain" type="button" aria-pressed="${item.active ? 'true' : 'false'}" onclick="gd67ViewProfile('${esc(item.profileId)}')">
+      <button class="gdProfileRosterMain" type="button" aria-expanded="false" onclick="gd67ToggleRosterDetail(this)">
         <span class="gdProfileRosterName">${esc(item.name)}</span>
         <span class="gdProfileRosterEmail">${esc(item.email || 'No email')}</span>
         <span class="gdProfileRosterActivity"><b>${esc(activity.title)}</b><small>${esc(activity.detail)}</small></span>
@@ -786,13 +880,14 @@
         <span class="gdProfileRosterStatus">${esc(item.status)}</span>
       </button>
       <button class="gdProfileRosterRemove" type="button" onclick="event.stopPropagation();${removeArg}">${item.managed ? 'Delete' : 'Remove'}</button>
+      ${rosterDetail(item)}
     </div>`;
   }
 
   function adminUserRosterRow(item, currentAccountId) {
     const current = item.accountId === currentAccountId;
     return `<div class="gdProfileRosterRow ${current ? 'active' : ''} ${current ? '' : 'hasEmailAction'}" data-roster-key="allUsers" data-search="${esc(item.searchText)}">
-      <button class="gdProfileRosterMain" type="button" aria-pressed="${item.active ? 'true' : 'false'}" onclick="gd67AdminViewProfile('${esc(item.profileId)}')">
+      <button class="gdProfileRosterMain" type="button" aria-expanded="false" onclick="gd67ToggleRosterDetail(this)">
         <span class="gdProfileRosterName">${esc(item.name)}</span>
         <span class="gdProfileRosterEmail">${esc(item.email || 'No email')}</span>
         <span class="gdProfileRosterMeta">Added ${esc(item.addedLabel)}</span>
@@ -801,6 +896,7 @@
       </button>
       ${current ? '' : `<button class="gdProfileRosterRemove gdProfileRosterEmailAction" type="button" onclick="event.stopPropagation();gd67OpenEmailPanel('${esc(item.profileId)}','${esc(item.accountId)}')">Email</button>`}
       ${current ? '' : `<button class="gdProfileRosterRemove" type="button" onclick="event.stopPropagation();gd67RemoveProfile('${esc(item.accountId)}')">Remove</button>`}
+      ${rosterDetail(item, { adminRoute:true })}
     </div>`;
   }
 
@@ -2300,6 +2396,9 @@
   window.gd67GenerateCoachInvite = generateCoachInvite;
   window.gd67SetRosterSearch = setRosterSearch;
   window.gd67SetRosterSort = setRosterSort;
+  window.gd67ToggleRosterDetail = toggleRosterDetail;
+  window.gd67CopyRosterId = copyRosterId;
+  window.gd67MergeIntoPlayer = mergeIntoPlayer;
   window.ClarityCaddieBookingPort = {
     registerUpcomingProvider: registerBookingProvider,
     clearUpcomingProvider: () => registerBookingProvider(null),

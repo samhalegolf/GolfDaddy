@@ -3767,6 +3767,80 @@ body.gdGpsActive #shellRouteLabel{
 #gdProfileV67 .gdProfileRosterEmailAction:focus-visible{
   background:rgba(255,255,255,.12);
 }
+/* Expanded row detail. Spans the whole row whether it has one action button or
+   two, so it sits under the name rather than beside it. */
+#gdProfileV67 .gdProfileRosterDetail{
+  grid-column:1/-1;
+  display:grid;
+  gap:10px;
+  padding:10px 11px 12px;
+  border-top:1px solid rgba(255,255,255,.075);
+  background:rgba(0,0,0,.22);
+}
+#gdProfileV67 .gdProfileRosterRow.isExpanded{
+  background:rgba(255,255,255,.03);
+}
+#gdProfileV67 .gdRosterDetailGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:8px 14px;
+  margin:0;
+}
+#gdProfileV67 .gdRosterDetailGrid dt{
+  color:rgba(230,238,233,.52);
+  font-size:10px;
+  font-weight:950;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+}
+#gdProfileV67 .gdRosterDetailGrid dd{
+  display:flex;
+  gap:6px;
+  align-items:center;
+  min-width:0;
+  margin:2px 0 0;
+  color:rgba(240,247,243,.9);
+  font-size:11px;
+  font-weight:780;
+}
+#gdProfileV67 .gdRosterDetailGrid code{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:11px;
+  user-select:all;
+}
+#gdProfileV67 .gdRosterDetailCopy{
+  flex:0 0 auto;
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:6px;
+  padding:2px 7px;
+  background:rgba(255,255,255,.05);
+  color:rgba(230,238,233,.88);
+  font-size:10px;
+  font-weight:950;
+  cursor:pointer;
+}
+#gdProfileV67 .gdRosterDetailActions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+#gdProfileV67 .gdRosterDetailAction{
+  border:1px solid rgba(255,159,47,.34);
+  border-radius:8px;
+  padding:7px 11px;
+  background:rgba(255,159,47,.12);
+  color:#ffe9cd;
+  font-size:11px;
+  font-weight:950;
+  cursor:pointer;
+}
+#gdProfileV67 .gdRosterDetailCopy:hover,
+#gdProfileV67 .gdRosterDetailAction:hover{
+  background:rgba(255,159,47,.22);
+}
 #gdProfileV67 .gdProfileRosterEmpty{
   display:block;
   padding:12px;
