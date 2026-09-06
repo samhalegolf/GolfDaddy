@@ -3777,6 +3777,11 @@ body.gdGpsActive #shellRouteLabel{
   border-top:1px solid rgba(255,255,255,.075);
   background:rgba(0,0,0,.22);
 }
+/* display:grid above outranks the browser's own [hidden] rule, which is what
+   left every row expanded on load. */
+#gdProfileV67 .gdProfileRosterDetail[hidden]{
+  display:none;
+}
 #gdProfileV67 .gdProfileRosterRow.isExpanded{
   background:rgba(255,255,255,.03);
 }
