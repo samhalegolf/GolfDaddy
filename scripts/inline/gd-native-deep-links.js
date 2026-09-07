@@ -33,6 +33,10 @@
     "resetPassword",
     "clarityAccountSetup",
     "accountSetup",
+    /* The one-time password token, on links that point at our own domain so the app gets the
+       tap at all. Without these two the app opens and drops the very thing it was opened for. */
+    "token_hash",
+    "type",
     "referral",
     "referralToken"
   ];

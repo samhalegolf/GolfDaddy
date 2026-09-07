@@ -282,7 +282,7 @@
 	      const params = new URLSearchParams(location.search || '');
 	      /* claritySetPassword is the parameter the recovery emails send; omitting it
 	         meant resetParams() returned null on a genuine reset link. */
-	      return (params.has('claritySetPassword') || params.has('setPassword') || params.has('clarityResetPassword') || params.has('resetPassword') || params.has('clarityAccountSetup') || params.has('accountSetup')) ? params : null;
+	      return (params.has('claritySetPassword') || params.has('setPassword') || params.has('clarityResetPassword') || params.has('resetPassword') || params.has('clarityAccountSetup') || params.has('accountSetup') || params.has('token_hash')) ? params : null;
 	    } catch(e) { return null; }
 	  }
 
@@ -315,6 +315,10 @@
 	      url.searchParams.delete('accountSetup');
 	      url.searchParams.delete('email');
 	      url.searchParams.delete('account');
+	      /* A one-time token that has been spent. Leaving it in the URL means a refresh
+	         replays it and shows "link expired" to someone who just succeeded. */
+	      url.searchParams.delete('token_hash');
+	      url.searchParams.delete('type');
 		      history.replaceState({}, document.title, url.pathname + (url.search || '') + (url.hash || ''));
 		    } catch(e) {}
 		    document.documentElement.classList.remove('gdResetRouteBoot');
@@ -1830,6 +1834,15 @@
 	      close();
 	      try { if (typeof showShellHome === 'function') showShellHome(); } catch(e) {}
 	      safeToast(setupRoute ? 'Account set up' : 'Password updated');
+	      /* Only for a first-time setup. A password RESET is someone who already knows what
+	         Clarity is - offering them the app here would be a nag, not a next step. */
+	      if (setupRoute) {
+	        try {
+	          if (window.GDAppDownloadPrompt && typeof window.GDAppDownloadPrompt.show === 'function') {
+	            window.GDAppDownloadPrompt.show({ reason: 'account_setup' });
+	          }
+	        } catch(e) {}
+	      }
 	    } catch(e) {
 	      setAuthFeedback(e && e.message ? e.message : 'Could not update password.', 'error');
 	    }

@@ -12,6 +12,7 @@ const { hasAuthWithServiceKey, json, supabaseAuth, supabaseRest, text, upsertAcc
 const { resolveCaller } = require("./clarity-caller");
 const templates = require("../scripts/gd-email-templates-core.js");
 const signupTemplates = require("./lib/gd-signup-templates.js");
+const { buildSetupLink } = require("./lib/gd-setup-link.js");
 const { ADMIN_COMPED_MEMBERSHIP_KEY } = require("./payment-utils");
 const { appStoreUrl, playStoreUrl } = require("../clarity-caddy-app-store.js");
 
@@ -105,7 +106,9 @@ async function secureSetup(resolved) {
   await upsertAccount(authUser, { accountId, profileId, email: resolved.recipientEmail, name: resolved.player.display_name, role: "player", eventType: "player_welcome_setup" });
   await claimCanonicalPlayer(authUser, { accountId, profileId, email: resolved.recipientEmail, name: resolved.player.display_name });
   const generated = await supabaseAuth("admin/generate_link", { method: "POST", body: JSON.stringify({ type: "recovery", email: resolved.recipientEmail, options: { redirect_to: siteUrl() + "/?claritySetPassword=1&clarityAccountSetup=1" } }) }, true);
-  const link = generated && (generated.action_link || generated.actionLink || generated.properties && generated.properties.action_link);
+  /* On our own domain when Supabase gives us the hashed token, so the tap opens the app for a
+     player who already has it installed - see functions/lib/gd-setup-link.js. */
+  const link = buildSetupLink(generated, siteUrl(), { claritySetPassword: 1, clarityAccountSetup: 1 }).link;
   if (!link || !/^https:\/\//.test(String(link))) throw new Error("Supabase did not return a secure setup link");
   resolved.accountState = "needs_setup";
   return { link: String(link), rollback: async function () {

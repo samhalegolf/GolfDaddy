@@ -7,7 +7,10 @@
        reset link did not set the pre-paint route classes and the UI did not
        believe it was on a reset route even while the Supabase layer was
        processing the recovery token. */
-    var resetRoute=params.has("claritySetPassword")||params.has("setPassword")||params.has("clarityResetPassword")||params.has("resetPassword")||params.has("clarityAccountSetup")||params.has("accountSetup");
+    /* token_hash is the first-party setup link (functions/lib/gd-setup-link.js). It always
+       arrives with claritySetPassword, but it is listed in its own right so a link that ever
+       loses the flag still paints as a reset route rather than flashing the signed-out shell. */
+    var resetRoute=params.has("claritySetPassword")||params.has("setPassword")||params.has("clarityResetPassword")||params.has("resetPassword")||params.has("clarityAccountSetup")||params.has("accountSetup")||params.has("token_hash");
     /* gdAuthRouteBoot hides the entire shell pre-paint (gd-app-base.css). It
        used to be set for any signed-out visitor, which made "signed out" mean
        "blank app" before a single line of app code had run - the pre-paint half

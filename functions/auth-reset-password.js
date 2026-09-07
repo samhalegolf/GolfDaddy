@@ -2,6 +2,7 @@
 
 const { email, hasAuthWithServiceKey, findAccountByEmail, json, supabaseAuth } = require("./auth-utils");
 const { sendSystemAlert } = require("./alert-utils");
+const { buildSetupLink } = require("./lib/gd-setup-link.js");
 
 function env(name) { return process.env[name] || ""; }
 function toHeader(headers = {}, keys = []) {
@@ -84,7 +85,10 @@ exports.handler = async function(event) {
     const origin = safeOrigin(event) || "https://caddy.claritygolf.app";
     const redirectTo = origin + "/?claritySetPassword=1";
     const reset = await supabaseAuth("admin/generate_link", { method: "POST", body: JSON.stringify({ type: "recovery", email: accountEmail, options: { redirect_to: redirectTo } }) }, true);
-    const resetUrl = reset && (reset.action_link || (reset.properties && reset.properties.action_link) || "");
+    /* A reset, not a first-time setup, so no clarityAccountSetup flag - the shell must say
+       "Set new password" rather than "Set up account". Otherwise identical: on our own domain
+       so an installed app takes the tap. */
+    const resetUrl = buildSetupLink(reset, origin, { claritySetPassword: 1 }).link;
     if (!resetUrl) return json(502, { error: "Could not generate a password reset link.", code: "reset_link_failed" });
     await sendRecoveryEmail(delivery, accountEmail, resetUrl, new Date().toISOString());
     return json(200, { ok: true, code: "password_reset_sent", sent: true });

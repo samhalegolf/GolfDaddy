@@ -5,6 +5,7 @@ const { sendSystemAlert } = require("./alert-utils");
 const { isStaffRole, resolveCaller } = require("./clarity-caller");
 const { sendAccountSetupEmail } = require("./email-notification");
 const { hasSupabase, writeCompedEntitlement } = require("./payment-utils");
+const { buildSetupLink } = require("./lib/gd-setup-link.js");
 
 function env(name) { return process.env[name] || ""; }
 function siteUrl() { return (env("CLARITY_SITE_URL") || env("APP_URL") || "https://caddy.claritygolf.app").replace(/\/+$/, ""); }
@@ -54,10 +55,14 @@ async function setupLink(accountEmail) {
   // clarityAccountSetup marks this as a NEW-account setup so the UI shows setup
   // wording ("Set up account") and telemetry uses the account-setup reason,
   // instead of the generic reset wording an invited user was getting.
+  //
+  // redirect_to is still sent, because it is what Supabase uses if we fall back to its
+  // action_link. buildSetupLink prefers a link on our OWN domain so the tap opens the app
+  // instead of a browser - see functions/lib/gd-setup-link.js.
   const generated = await supabaseAuth("admin/generate_link", { method: "POST", body: JSON.stringify({ type: "recovery", email: accountEmail, options: { redirect_to: siteUrl() + "/?claritySetPassword=1&clarityAccountSetup=1" } }) }, true);
-  const link = generated && (generated.action_link || generated.actionLink || generated.properties && generated.properties.action_link);
-  if (!link || !/^https?:\/\//.test(String(link))) throw new Error("Supabase did not return a setup link");
-  return String(link);
+  const built = buildSetupLink(generated, siteUrl(), { claritySetPassword: 1, clarityAccountSetup: 1 });
+  if (!built.link || !/^https?:\/\//.test(String(built.link))) throw new Error("Supabase did not return a setup link");
+  return String(built.link);
 }
 
 async function linkAccounts(coachId, playerId) {

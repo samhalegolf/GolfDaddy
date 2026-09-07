@@ -6,6 +6,7 @@ const { appStoreUrl, playStoreUrl } = require("../clarity-caddy-app-store.js");
 const templates = require("../scripts/gd-email-templates-core.js");
 /* Reading and writing the two Studio-managed welcome templates lives in one place. */
 const signupTemplates = require("./lib/gd-signup-templates.js");
+const { buildSetupLink } = require("./lib/gd-setup-link.js");
 
 exports.handler = async function(event){
   if(event.httpMethod !== "POST")return json(405, {error: "Method not allowed"});
@@ -132,8 +133,10 @@ async function createSetupLinkForAccount(accountEmail, name, actorName, siteUrl)
   }catch(error){
     if(error.status !== 400 && error.status !== 422)throw error;
   }
-  var generated = await supabaseAuth("admin/generate_link", {method: "POST", body: JSON.stringify({type: "recovery", email: accountEmail, options: {redirect_to: String(siteUrl || "https://caddy.claritygolf.app").replace(/\/+$/, "") + "/?claritySetPassword=1"}})}, true);
-  return {link: generated && (generated.action_link || generated.actionLink || generated.properties && generated.properties.action_link) || "", user: user};
+  var site = String(siteUrl || "https://caddy.claritygolf.app").replace(/\/+$/, "");
+  var generated = await supabaseAuth("admin/generate_link", {method: "POST", body: JSON.stringify({type: "recovery", email: accountEmail, options: {redirect_to: site + "/?claritySetPassword=1"}})}, true);
+  /* Our own domain when we can, so the tap opens the app rather than a browser. */
+  return {link: buildSetupLink(generated, site, {claritySetPassword: 1, clarityAccountSetup: 1}).link || "", user: user};
 }
 
 async function syncInvitedAccount(authUser, payload, message){

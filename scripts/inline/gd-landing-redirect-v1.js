@@ -34,7 +34,7 @@
     var hash = String(window.location.hash || "");
     var SKIP_PARAMS = [
       "login", "claritySetPassword", "clarityResetPassword",
-      "clarityAccountSetup", "access_token", "type", "payment",
+      "clarityAccountSetup", "access_token", "token_hash", "type", "payment",
       "session_id", "ref", "referral", "demo", "membership"
     ];
     for (var i = 0; i < SKIP_PARAMS.length; i++) {

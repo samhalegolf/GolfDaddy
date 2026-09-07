@@ -36,6 +36,7 @@
     "test:bubble-geometry": "node dev/bubble-micro-geometry.test.js",
     "test:manual-practice": "node dev/manual-practice-core.test.js && node dev/manual-practice-integration.test.js",
     "test:email-templates": "node dev/email-templates.test.js",
+    "test:setup-link": "node dev/setup-link-app-handoff.test.js",
     "test:practice-email": "node dev/practice-email-intake.test.js",
     "test:practice-email-admin": "node dev/practice-email-admin.test.js",
     "test:scorecard-ocr": "node dev/scorecard-ocr-strips.test.js && node dev/scorecard-ocr-split.test.js && node dev/scorecard-ocr-image.test.js",

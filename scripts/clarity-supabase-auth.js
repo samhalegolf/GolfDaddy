@@ -238,8 +238,37 @@
     var accessToken = hash.get("access_token") || params.get("access_token") || "";
     var refreshToken = hash.get("refresh_token") || params.get("refresh_token") || "";
     var type = hash.get("type") || params.get("type") || "";
-    var requested = params.get("claritySetPassword") === "1" || params.get("clarityResetPassword") === "1" || params.get("clarityAccountSetup") === "1" || type === "recovery" || !!accessToken;
-    return requested ? { accessToken: accessToken, refreshToken: refreshToken, type: type, raw: hash.get("error") || params.get("error") || "" } : null;
+    /* Two shapes arrive here now.
+       - access_token in the fragment: Supabase redirected the browser to us, the old path.
+       - token_hash in the query: the email linked straight at OUR domain, so the tap could
+         open the app. Nothing is verified yet - exchangeTokenHash below turns it into a
+         session, and until it does there is no access token to act on. */
+    var tokenHash = params.get("token_hash") || "";
+    var requested = params.get("claritySetPassword") === "1" || params.get("clarityResetPassword") === "1" || params.get("clarityAccountSetup") === "1" || type === "recovery" || !!accessToken || !!tokenHash;
+    return requested ? { accessToken: accessToken, refreshToken: refreshToken, tokenHash: tokenHash, type: type, raw: hash.get("error") || params.get("error") || "" } : null;
+  }
+
+  /* Exchange a one-time token_hash for a session - the REST equivalent of supabase-js
+     verifyOtp({token_hash, type}). This is what lets the setup link live on caddy.claritygolf.app
+     instead of <project>.supabase.co, which is the whole reason an installed app now gets the
+     tap: Universal Links and App Links only fire for the URL tapped, never for a redirect. */
+  async function exchangeTokenHash(config, tokenHash, type) {
+    var response = await fetch(config.supabaseUrl.replace(/\/+$/, "") + "/auth/v1/verify", {
+      method: "POST",
+      headers: { apikey: config.supabaseAnonKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ type: type || "recovery", token_hash: tokenHash })
+    });
+    var body = await response.json().catch(function () { return {}; });
+    if (!response.ok || !body.access_token) {
+      /* Supabase answers "Email link is invalid or has expired", which is accurate and
+         useless - it leaves someone holding a dead link with nowhere to go. Say what to do
+         instead; the raw reason stays on the error for diagnosis. */
+      var failure = new Error("That link has expired or has already been used. Ask your coach to resend the welcome email, or use Forgot password on the sign-in screen.");
+      failure.detail = body.message || body.error_description || body.msg || body.error || ("HTTP " + response.status);
+      failure.code = body.error_code || "";
+      throw failure;
+    }
+    return body;
   }
 
   /* This config is public, per-deploy and effectively static - a Supabase URL, an
@@ -458,7 +487,7 @@
 
   function showPasswordSetup() {
     var token = parseRecoveryParams();
-    if (!token || !token.accessToken) return false;
+    if (!token || (!token.accessToken && !token.tokenHash)) return false;
     if (document.getElementById("clarityPasswordSetupOverlay")) return true;
     var overlay = document.createElement("div");
     overlay.id = "clarityPasswordSetupOverlay";
@@ -477,6 +506,34 @@
     document.body.appendChild(overlay);
     var status = document.getElementById("claritySetupPasswordStatus");
     var button = document.getElementById("claritySetupPasswordSave");
+
+    /* A first-party link carries only a one-time token_hash - nothing is verified until it is
+       exchanged for a session. Do that before the form is usable, so a dead or already-used
+       link says so up front rather than after someone has typed a password twice. */
+    var ready = token.accessToken
+      ? Promise.resolve(token.accessToken)
+      : (function () {
+          button.disabled = true;
+          status.textContent = "Checking your link...";
+          return publicAuthConfig()
+            .then(function (config) { return exchangeTokenHash(config, token.tokenHash, token.type); })
+            .then(function (session) {
+              token.accessToken = session.access_token;
+              token.refreshToken = session.refresh_token || "";
+              button.disabled = false;
+              status.textContent = "";
+              /* Consumed. Strip it now so a refresh cannot replay a spent token and land
+                 the player on an "expired link" screen they cannot explain. */
+              clearRecoveryUrl();
+              return token.accessToken;
+            });
+        })();
+    ready.catch(function (error) {
+      button.disabled = true;
+      status.textContent = (error && error.message) || "That setup link has expired or has already been used.";
+      clearRecoveryUrl();
+    });
+
     button.onclick = async function () {
     var p1 = document.getElementById("claritySetupPassword1").value || "";
     var p2 = document.getElementById("claritySetupPassword2").value || "";
@@ -485,14 +542,24 @@
       button.disabled = true;
       status.textContent = "Saving password...";
       try {
+        var accessToken = await ready;
         var config = await publicAuthConfig();
-        var user = await supabaseUser(config, token.accessToken);
+        var user = await supabaseUser(config, accessToken);
         var accountEmail = normalizeEmail(user && user.email || "");
-        await setSupabasePassword(config, token.accessToken, p1);
+        await setSupabasePassword(config, accessToken, p1);
         if (!accountEmail) throw new Error("Could not read account email from setup link");
         await login(accountEmail, p1, { keepLoggedIn: true });
         clearRecoveryUrl();
         status.textContent = "Password saved. Opening Clarity...";
+        /* The moment they are activated is the moment the app is worth offering - see
+           scripts/gd-app-download-prompt.js. It resolves immediately on native, or when the
+           player dismisses it, so this never blocks the reload. */
+        try {
+          if (window.GDAppDownloadPrompt && typeof window.GDAppDownloadPrompt.show === "function") {
+            overlay.remove();
+            await window.GDAppDownloadPrompt.show({ reason: "account_setup" });
+          }
+        } catch (_e) {}
         setTimeout(function () { overlay.remove(); location.reload(); }, 600);
       } catch (error) {
         button.disabled = false;
@@ -505,6 +572,7 @@
     };
     return true;
   }
+
 
   function wrap() {
     var api = window.GolfDaddyAccounts || window.ClarityCaddieAccounts;
