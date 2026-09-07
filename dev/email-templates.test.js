@@ -8,10 +8,17 @@
  *    renders from scripts/gd-email-templates-core.js, and this test fails if a function grows
  *    its own <table> layout again.
  *
- * 2. ONE email when an account is created WITH a comped month. The whole point of the tick on
- *    Create Player Account is that the player is not sent a setup email and a gift email a
- *    second apart, describing one event. account_created_comped must therefore mention both
- *    the password step and the comp, and the invite endpoint must send exactly one message.
+ * 2. ONE email when an account is created WITH a comped month, and it is the COMPED one. The
+ *    whole point of the tick on Create Player Account is that the player is not sent a setup
+ *    email and a gift email a second apart, describing one event. The comped welcome template
+ *    must therefore mention both the password step and the comp, the invite endpoint must send
+ *    exactly one message, and it must only send the comped template once the entitlement has
+ *    actually been written - an email promising access to someone who holds none is the worst
+ *    failure available here.
+ *
+ * 2b. TWO independent templates, edited in Studio, with code-level defaults underneath. A
+ *    Studio row that was never written, or cannot be read, must still produce the email that
+ *    was going out before any of this existed - never a blank message to a customer.
  *
  * 3. Comping is admin-only and cannot silently fail. A coach may create a player; only an
  *    admin may hand out paid-for access, and if the entitlement write fails the account must
@@ -41,7 +48,7 @@ test("every catalogue entry is complete enough to audit", () => {
     assert.ok(!seen.has(entry.id), "duplicate catalogue id: " + entry.id);
     seen.add(entry.id);
     /* The page names the owning file; a stale pointer is worse than none. */
-    entry.sender.split("→").forEach((chunk) => {
+    entry.sender.split(/[→,]/).forEach((chunk) => {
       const file = chunk.trim();
       if (!/^(functions|scripts)\//.test(file)) return;
       assert.ok(fs.existsSync(path.join(ROOT, file)), entry.id + " points at a missing file: " + file);
@@ -89,27 +96,88 @@ test("welcome endpoint stays server-owned and does not accept a recipient from t
   assert.ok(/requireAdmin/.test(src), "welcome endpoint lacks an admin gate");
   assert.ok(/playerById\(body\.playerId\)/.test(src), "welcome endpoint does not resolve a canonical player server-side");
   assert.ok(!/body\.email/.test(src), "welcome endpoint trusts a browser-supplied email address");
-  assert.ok(/templates\.build\("player_welcome"/.test(src), "welcome endpoint bypasses the central renderer");
+  assert.ok(/templates\.build\(resolved\.templateKey/.test(src), "welcome endpoint bypasses the central renderer");
+  /* Which template a player gets is an entitlement question, never a request field. */
+  assert.ok(/resolvePlayer\(await playerById\(body\.playerId\)\)/.test(src), "the player send does not resolve the player server-side");
+  assert.ok(!/templateKey: text\(body\.templateKey/.test(src), "a player send takes its template from the browser");
+  assert.ok(/signupTemplates\.keyForComped\(comped\)/.test(src), "the player send does not pick its template from the entitlement");
   assert.ok(/admin\/generate_link/.test(src), "welcome endpoint does not reuse the secure setup mechanism");
 });
 
-test("the comped setup email covers BOTH the password step and the comp", () => {
-  const built = core.build("account_created_comped", {
+function compedBuild(overrides) {
+  return core.build("player_signup_comped", Object.assign({
     to: "player@example.com",
     recipientName: "Alex Fenwick",
     actorName: "Sam Hale",
-    periodLabel: "a month",
-    expiresLabel: "3 October 2026",
-    membership: true,
+    welcomeTemplate: core.defaultSignupTemplate("player_signup_comped"),
+    variables: Object.assign(
+      { firstName: "Alex", fullName: "Alex Fenwick", email: "player@example.com", coachName: "Sam Hale", appUrl: "https://example.test" },
+      core.accessVariables({ periodLabel: "a month", expiresLabel: "3 October 2026", membership: true })
+    ),
+    accountState: "needs_setup",
     ctaUrl: "https://example.test/set-password"
-  });
+  }, overrides || {}));
+}
+
+test("the comped welcome email covers BOTH the password step and the comp", () => {
+  const built = compedBuild();
   assert.ok(/a month/.test(built.subject), "the subject does not mention the comp");
-  assert.ok(/password/i.test(built.message.detail), "the body never tells them to set a password");
-  assert.ok(/a month/.test(built.message.detail), "the body never mentions the comped period");
+  assert.ok(/password/i.test(built.html), "the message never tells them to set a password");
+  assert.ok(/a month of Clarity Membership/.test(built.message.detail), "the body never mentions the comped period");
   assert.ok(/3 October 2026/.test(built.message.detail), "the body never states when the access ends");
-  assert.ok(/no card|won't auto-renew|does not renew/i.test(built.message.detail),
+  assert.ok(/no card|won't auto-renew|does not renew|does not auto-renew/i.test(built.message.detail),
     "the body must say it does not renew - a comp that reads like a subscription generates support");
   assert.ok(built.html.includes("https://example.test/set-password"), "the CTA is not the set-password link");
+});
+
+test("Basic and Comped Sign Up are two independent templates, not one plus a paragraph", () => {
+  const basic = core.defaultSignupTemplate("player_signup_basic");
+  const comped = core.defaultSignupTemplate("player_signup_comped");
+  assert.notStrictEqual(basic.subject, comped.subject, "both welcome templates share a subject");
+  assert.notStrictEqual(basic.body, comped.body, "both welcome templates share a body");
+  assert.ok(!comped.body.includes(basic.body), "Comped Sign Up is Basic Sign Up with something appended");
+  assert.deepStrictEqual(core.SIGNUP_TEMPLATE_KEYS, ["player_signup_basic", "player_signup_comped"]);
+  assert.strictEqual(core.signupTemplateKey(true), "player_signup_comped");
+  assert.strictEqual(core.signupTemplateKey(false), "player_signup_basic");
+  /* Both must be service emails or a welcome could be suppressed by a preference. */
+  core.SIGNUP_TEMPLATE_KEYS.forEach((key) => assert.strictEqual(core.isServiceEventType(key), true, key + " is not a service email"));
+});
+
+test("an unwritten, unreadable or half-empty template still sends a real email", () => {
+  /* Field by field, not template by template: one cleared box must not take the rest of the
+     message with it. */
+  const built = core.build("player_signup_basic", {
+    to: "player@example.com",
+    welcomeTemplate: { subject: "", headline: "", body: "", ctaLabel: "", ctaUrl: "" },
+    variables: { firstName: "Alex" }
+  });
+  const fallback = core.defaultSignupTemplate("player_signup_basic");
+  assert.strictEqual(built.subject, fallback.subject, "an empty subject did not fall back");
+  assert.ok(built.message.detail.trim().length > 40, "an empty body produced a near-blank customer email");
+  assert.ok(built.message.ctaLabel.trim(), "an empty button label produced a blank button");
+  assert.ok(/^https?:\/\//.test(built.message.ctaUrl), "an empty destination produced a dead button");
+});
+
+test("a template destination is validated, and a secure setup link always beats it", () => {
+  assert.strictEqual(core.safeCtaUrl("javascript:alert(1)"), "", "a javascript: destination survived");
+  assert.strictEqual(core.safeCtaUrl("data:text/html,x"), "", "a data: destination survived");
+  assert.strictEqual(core.safeCtaUrl("https://example.test/go"), "https://example.test/go");
+  const template = Object.assign(core.defaultSignupTemplate("player_signup_basic"), { ctaUrl: "https://example.test/go" });
+  const existing = core.build("player_signup_basic", { to: "a@b.com", welcomeTemplate: template, accountState: "existing" });
+  assert.strictEqual(existing.message.ctaUrl, "https://example.test/go", "the template destination was ignored");
+  const setup = core.build("player_signup_basic", { to: "a@b.com", welcomeTemplate: template, accountState: "needs_setup", ctaUrl: "https://example.test/one-use" });
+  assert.strictEqual(setup.message.ctaUrl, "https://example.test/one-use", "a one-use setup link lost to a typed destination");
+});
+
+test("a line whose only facts are missing is dropped, not printed half-empty", () => {
+  const template = Object.assign(core.defaultSignupTemplate("player_signup_comped"), {
+    body: "Hi {{firstName}},\n\nYou have access.\n\nYour access runs until {{accessUntil}}.\n\nClarity Golf"
+  });
+  const withDate = core.build("player_signup_comped", { to: "a@b.com", welcomeTemplate: template, variables: { firstName: "Alex", accessType: "a month", accessUntil: "3 October 2026" } });
+  const without = core.build("player_signup_comped", { to: "a@b.com", welcomeTemplate: template, variables: { firstName: "Alex", accessType: "a month" } });
+  assert.ok(/runs until 3 October 2026/.test(withDate.message.detail), "the expiry line vanished when the date was known");
+  assert.ok(!/runs until/.test(without.message.detail), "an unknown expiry printed as a dangling sentence");
+  assert.ok(/Clarity Golf/.test(without.message.detail), "dropping a line took the rest of the message with it");
 });
 
 test("no sender carries its own copy of the email layout", () => {
@@ -138,6 +206,64 @@ test("the invite endpoint sends exactly one email, comped or not", () => {
     "the single send does not carry the comp, so a comped account would get the plain setup email");
   assert.ok(src.indexOf("writeCompedEntitlement") < src.indexOf("await sendEmail("),
     "the entitlement must be written BEFORE the email, or the email cannot state a real expiry");
+  /* `comped` is only ever assigned from the pass writeCompedEntitlement returned, and is left
+     null on failure - which is what stops a Comped Sign Up email describing access nobody
+     holds. If this stops being the shape, the send-safety rule has gone with it. */
+  assert.ok(/let comped = null;/.test(src), "the comp result is no longer null until it succeeds");
+  assert.ok(/comped = \{ periodLabel: pass\.periodLabel/.test(src), "the comp result no longer comes from the written pass");
+  assert.ok(/compError = error/.test(src), "a failed comp no longer leaves comped null");
+
+  /* And the signup flow must not carry a second copy of the wording. */
+  assert.ok(!/Welcome to Clarity/.test(src) && !/ctaLabel/.test(src) && !/subject:/.test(src),
+    "the invite endpoint has grown its own email copy again");
+});
+
+test("the signup flow names an event, and the server picks the template from it", () => {
+  const notify = read("functions", "email-notification.js");
+  assert.ok(/signupTemplates\.keyForComped\(comped\)/.test(notify),
+    "the welcome send no longer picks its template from whether a comp was issued");
+  assert.ok(/welcomeTemplate: loaded\.template/.test(notify), "the welcome send no longer renders the stored template");
+  assert.ok(/signupKey/.test(notify), "the generic notification endpoint no longer routes account_created to a Studio template");
+
+  /* The browser used to post a fourth hand-written version of the welcome email. */
+  const client = read("scripts", "clarity-email.js");
+  assert.ok(/eventType:"account_created"/.test(client), "the client no longer reports the signup event at all");
+  assert.ok(!/Your Clarity account is ready/.test(client),
+    "the signup client is writing welcome-email copy again");
+});
+
+test("Welcome Emails are edited in Studio, and only in Studio", () => {
+  const users = read("scripts", "clarity-admin-users.js");
+  assert.ok(/Send Welcome/.test(users), "Admin -> Users lost its send action");
+  assert.ok(!/editWelcomeTemplate/.test(users), "the template editor is back in Admin -> Users");
+  assert.ok(!/data-field="body"/.test(users), "Admin -> Users still has editable email copy in it");
+  assert.ok(/Communications/.test(users), "Admin -> Users does not say where the wording lives");
+
+  const page = read("scripts", "studio", "communications", "communications-page.js");
+  assert.ok(/Welcome Emails/.test(page), "Studio has no Welcome Emails section");
+  assert.ok(/list_templates/.test(page), "the page does not read the stored templates");
+  assert.ok(/action: "save_template"/.test(page), "the page cannot save a template");
+  assert.ok(/action: "send_test"/.test(page), "the page has no Send Test");
+  /* Preview must come from the server's renderer, not from a second one built in the page. */
+  assert.ok(/action: "preview"/.test(page), "the page does not preview through the production renderer");
+  assert.ok(!/<!doctype html>/i.test(page), "the Studio page is building email HTML");
+  assert.ok(!/<table/i.test(page), "the Studio page has grown an email layout");
+});
+
+test("the two welcome templates share the existing storage and fall back in code", () => {
+  const lib = read("functions", "lib", "gd-signup-templates.js");
+  assert.ok(/caddy_email_templates/.test(lib), "the templates are no longer stored in the existing table");
+  assert.ok(/player_welcome/.test(lib), "the key the first version shipped under is no longer honoured");
+  assert.ok(/catch \(err\)/.test(lib), "a failed template read is no longer survivable");
+
+  const migrations = fs.readdirSync(path.join(ROOT, "supabase", "migrations"))
+    .filter((f) => /welcome|signup/i.test(f))
+    .map((f) => read("supabase", "migrations", f))
+    .join("\n");
+  assert.ok(/player_signup_basic/.test(migrations) && /player_signup_comped/.test(migrations),
+    "no migration allows the two welcome template keys");
+  assert.ok(!/create table if not exists public\.caddy_signup/.test(migrations),
+    "a second template table was created instead of reusing the existing one");
 });
 
 test("comping on account creation is admin-only and reported honestly", () => {

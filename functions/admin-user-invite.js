@@ -19,11 +19,18 @@ function unique(list) {
   return out;
 }
 
-/* The setup email itself lives in functions/email-notification.js, rendering from
-   scripts/gd-email-templates-core.js. This file used to carry its own hand-copied <table>
-   layout - a third copy of the same brand, which is how a logo or footer change lands in two
-   emails out of three. `comped` picks the variant that says "account ready AND here's your
-   month" in ONE message rather than firing a second email a second later. */
+/* This file decides WHICH welcome email is sent; it never decides what it says.
+ *
+ * `comped` is the whole decision: passed, the player gets the Comped Sign Up template, and it
+ * is only ever passed once writeCompedEntitlement has actually returned a pass. Passed as
+ * null - including when the comp was requested but failed - they get Basic Sign Up. That is
+ * the only way the message can be trusted: an email that says access was included, sent to
+ * someone who holds none, is worse than no email at all.
+ *
+ * Still ONE message either way. The copy comes from the Studio-managed template, resolved in
+ * functions/email-notification.js and rendered by scripts/gd-email-templates-core.js. This
+ * file used to carry its own hand-copied <table> layout - a third copy of the same brand,
+ * which is how a logo or footer change lands in two emails out of three. */
 async function sendEmail(to, name, actorName, setupLink, comped) {
   return sendAccountSetupEmail({ to, recipientName: name, actorName, setupLink, comped });
 }

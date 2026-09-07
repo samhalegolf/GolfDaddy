@@ -4,6 +4,8 @@ const { appStoreUrl } = require("../clarity-caddy-app-store.js");
    of scripts/gd-email-templates-core.js. This file owns delivery and the Supabase side of an
    invite; it no longer owns a second copy of the layout. */
 const templates = require("../scripts/gd-email-templates-core.js");
+/* Reading and writing the two Studio-managed welcome templates lives in one place. */
+const signupTemplates = require("./lib/gd-signup-templates.js");
 
 exports.handler = async function(event){
   if(event.httpMethod !== "POST")return json(405, {error: "Method not allowed"});
@@ -29,26 +31,50 @@ exports.handler = async function(event){
     logoUrl: safeUrl(payload.logoUrl, siteUrl) || new URL("/assets/brand/cg-logo-white-g.png?v=1e5a26e2", siteUrl).toString()
   };
 
+  /* A signup event carries facts, not copy. The browser used to post its own title, detail and
+     button label for account_created - a fourth hand-written version of the welcome email,
+     living in the signup UI where no admin could see or change it. The event now selects a
+     Studio-managed template and everything the customer reads comes from there; whatever copy
+     the client sent is ignored rather than merged, because a half-overridden email is the one
+     failure nobody can reproduce. */
+  var signupKey = message.eventType === "account_created" ? "player_signup_basic"
+    : templates.isSignupTemplateKey(message.eventType) ? message.eventType : "";
+  var subjectFromTemplate = "";
   try{
-    if(message.eventType === "account_created"){
+    if(signupKey){
+      message.eventType = signupKey;
       message.appStoreUrl = appStoreUrl();
       var invite = await createSetupLinkForAccount(message.to, message.recipientName, message.actorName, siteUrl);
-      if(invite && invite.link){
-        message.ctaLabel = "Set up your password";
-        message.ctaUrl = invite.link;
-        message.title = "Set up your Clarity account";
-        message.detail = "Your Clarity Caddy account has been created by " + (message.actorName || "your coach") + ". Use the secure button below to set your password. This link is unique to your account.";
-      }
       if(invite && invite.user && invite.user.id){
         await syncInvitedAccount(invite.user, payload, message);
       }
+      var loaded = await signupTemplates.loadTemplate(signupKey);
+      var copy = templates.compose(signupKey, {
+        siteUrl: siteUrl,
+        welcomeTemplate: loaded.template,
+        variables: signupTemplates.variablesFor({
+          recipientName: message.recipientName,
+          email: message.to,
+          actorName: message.actorName,
+          siteUrl: siteUrl,
+          appStoreUrl: message.appStoreUrl
+        }),
+        accountState: invite && invite.link ? "needs_setup" : "existing",
+        /* Only a link this server minted may become the button. */
+        ctaUrl: (invite && invite.link) || ""
+      });
+      message.title = copy.title;
+      message.detail = copy.detail;
+      message.ctaLabel = copy.ctaLabel;
+      message.ctaUrl = copy.ctaUrl;
+      subjectFromTemplate = copy.subject;
     }
   }catch(error){
     return json(error.status || 502, {error: "Could not prepare account email", details: error.body || error.message});
   }
 
   var rendered = renderEmail(message);
-  var subject = text(payload.subject, 140) || subjectFor(message);
+  var subject = subjectFromTemplate || text(payload.subject, 140) || subjectFor(message);
   var serviceEmail = isServiceEmail(message);
 
   if(!serviceEmail && env("EMAIL_NOTIFICATIONS_ENABLED") !== "1"){
@@ -177,28 +203,59 @@ async function sendCompedAccessEmail(options){
   return deliver("comped_access_granted", input, "Email provider rejected the comped-access message");
 }
 
-/* The account-setup email, sent by admin-user-invite when a coach or admin creates someone's
- * account. `comped` upgrades it in place rather than adding a second message: when an account
- * is created WITH a comped month, the player gets one email that sets their password and tells
- * them what they have, instead of two emails a second apart describing one event. */
-async function sendAccountSetupEmail(options){
+/* The signup welcome email, sent by admin-user-invite when a coach or admin creates someone's
+ * account, and by the self-signup path below.
+ *
+ * `comped` does two jobs and only one of them is wording. It picks WHICH of the two
+ * Studio-managed templates is sent - and the caller only passes it once the entitlement has
+ * actually been written, so a player is never told they were given access they do not hold.
+ * It is still ONE message either way: an account-ready email and a gift email a second apart
+ * describing one event read as a mistake, and the second - the one carrying the thing of
+ * value - is the one that gets ignored.
+ *
+ * Every word comes from the stored template, never from this file and never from the browser.
+ * A row that has never been edited falls back to the code defaults in the template core. */
+async function sendSignupWelcomeEmail(options){
   options = options || {};
   var to = email(options.to);
   if(!to)return {sent: false, reason: "invalid_email"};
-  if(!options.setupLink)return {sent: false, reason: "missing_setup_link"};
   var comped = options.comped || null;
-  return deliver(comped ? "account_created_comped" : "account_created", {
+  var siteUrl = env("CLARITY_SITE_URL") || templates.DEFAULT_SITE;
+  var key = signupTemplates.keyForComped(comped);
+  var loaded = await signupTemplates.loadTemplate(key);
+  var store = appStoreUrl();
+  return deliver(key, {
     to: to,
-    siteUrl: env("CLARITY_SITE_URL") || templates.DEFAULT_SITE,
+    siteUrl: siteUrl,
     recipientName: options.recipientName,
     actorName: options.actorName || "your coach",
-    ctaUrl: options.setupLink,
-    appStoreUrl: appStoreUrl(),
-    periodLabel: comped && comped.periodLabel,
-    expiresLabel: comped && comped.expiresLabel,
-    membership: comped ? comped.membership !== false : undefined
-  }, "Email provider rejected the account setup message");
+    welcomeTemplate: loaded.template,
+    variables: signupTemplates.variablesFor({
+      recipientName: options.recipientName,
+      email: to,
+      actorName: options.actorName || "your coach",
+      siteUrl: siteUrl,
+      appStoreUrl: store,
+      comped: comped
+    }),
+    /* A one-use set-password link, when there is one, always wins over the destination on the
+       template - it cannot be typed into a settings box, and it is the whole point of the
+       email for a player with no login yet. */
+    accountState: options.setupLink ? "needs_setup" : "existing",
+    ctaUrl: options.setupLink || "",
+    appStoreUrl: store
+  }, "Email provider rejected the welcome message");
+}
+
+/* The name the invite endpoint has always called. Kept so a setup link stays required on that
+   route: admin-user-invite mints one before it sends, and a missing link there means the
+   account creation did not finish. */
+async function sendAccountSetupEmail(options){
+  options = options || {};
+  if(!options.setupLink)return {sent: false, reason: "missing_setup_link"};
+  return sendSignupWelcomeEmail(options);
 }
 
 exports.sendCompedAccessEmail = sendCompedAccessEmail;
 exports.sendAccountSetupEmail = sendAccountSetupEmail;
+exports.sendSignupWelcomeEmail = sendSignupWelcomeEmail;

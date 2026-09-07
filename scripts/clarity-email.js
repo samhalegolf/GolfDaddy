@@ -251,7 +251,11 @@
       targetAccountId:recipient && recipient.accountId || "",
       targetName:recipient && recipient.name || "",
       direction:"service",
-      title:options && options.title || "Your Clarity account is ready",
+      /* Neutral placeholders, not welcome-email copy. Every service event this function can
+         currently raise is a signup, and the server renders those from the Studio template and
+         discards whatever title/detail arrive - so anything written here would be a version of
+         the welcome email that nobody can see, edit, or tell apart from the real one. */
+      title:options && options.title || "Your Clarity account was updated",
       detail:options && options.detail || "Your account has been updated in Clarity Caddy.",
       ctaLabel:options && options.ctaLabel || "Open Clarity",
       ctaUrl:options && options.ctaUrl || appUrl(),
@@ -366,12 +370,9 @@
 	        setTimeout(function(){
 	          Promise.resolve(result).then(function(resolved){
 	            if(name === "signup"){
-	              sendServiceEmail(resolved, {
-	                eventType:"account_created",
-	                title:"Your Clarity account is ready",
-	                detail:"Your player account has been created. You can now add your bag, enter shot data, and connect to a coach from Settings.",
-	                ctaLabel:"Open Clarity"
-	              }).catch(function(){});
+	              /* Facts only. The wording of the welcome email is a Studio template now, and a
+	                 second copy of it here is a version of the email nobody can see or edit. */
+	              sendServiceEmail(resolved, { eventType:"account_created" }).catch(function(){});
 	              return;
 	            }
 	            if(name === "addPlayer" || name === "addCoach"){
@@ -387,9 +388,7 @@
 	              }
 	              sendServiceEmail(resolved, {
 	                eventType:"account_created",
-	                title:"Your Clarity account is ready",
-	                detail:"Your account has been created by " + ((actor && actor.name) || "your coach") + ". Sign in with the temporary password, then open Settings to set your own password.",
-	                ctaLabel:"Open Settings"
+	                actorName:(actor && actor.name) || "your coach"
 	              }).catch(function(){});
 	              recordActivity({
 	                kind:"profile",

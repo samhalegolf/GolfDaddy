@@ -40,8 +40,28 @@
     "account_created_comped",
     "password_recovery",
     "player_welcome",
+    "player_signup_basic",
+    "player_signup_comped",
     "comped_access_granted",
     "sign_in_email_changed"
+  ];
+
+  /* The two Studio-managed welcome emails. One signup event picks exactly one of these, by the
+     only thing that can honestly answer the question: whether comped access was actually
+     issued. They are two independent templates rather than "basic plus a paragraph" - the
+     comped one is a different message with a different promise, and they are expected to
+     diverge. Studio edits the CONTENT below; the shell, the escaping and the final HTML stay
+     here. */
+  var SIGNUP_TEMPLATE_KEYS = ["player_signup_basic", "player_signup_comped"];
+  var TEMPLATE_VARIABLES = [
+    { key: "firstName", note: "Alex" },
+    { key: "fullName", note: "Alex Fenwick" },
+    { key: "email", note: "the address the email went to" },
+    { key: "coachName", note: "whoever created the account" },
+    { key: "appUrl", note: "caddy.claritygolf.app" },
+    { key: "appStoreUrl", note: "the App Store listing" },
+    { key: "accessType", note: "comped only - \"a month of Clarity Membership\"" },
+    { key: "accessUntil", note: "comped only - the date the access ends" }
   ];
 
   /* ---------------------------------------------------------------------------
@@ -51,51 +71,34 @@
      --------------------------------------------------------------------------- */
   var CATALOGUE = [
     {
-      id: "player_welcome",
-      eventType: "player_welcome",
-      label: "Player welcome",
+      id: "player_signup_basic",
+      eventType: "player_signup_basic",
+      templateKey: "player_signup_basic",
+      group: "Welcome Emails",
+      label: "Basic Sign Up",
+      editable: true,
       category: "service",
-      recipient: "A canonical Caddy player, sent deliberately by an admin from Admin → Users.",
-      trigger: "Admin → Users → Send Welcome, after the personalised preview is confirmed.",
-      gating: "Always sends when explicitly confirmed by an admin. Delivery is recorded against the canonical player after Resend accepts it.",
-      sender: "functions/caddy-admin-welcome-email.js",
-      cta: "Open Clarity for an existing account, or a one-use Supabase password-setup link for a player without a login.",
-      sample: { recipientName: "Alex Fenwick", actorName: "Clarity Golf", ctaUrl: DEFAULT_SITE, welcomeTemplate: defaultWelcomeTemplate() }
+      recipient: "A Caddy player whose account was created WITHOUT comped access.",
+      trigger: "Player created and comped access = No. Also the template Admin → Users → Send/Resend Welcome uses for a player with no comped entitlement.",
+      gating: "Always sends once the account creation step has succeeded. Service email: not subject to EMAIL_NOTIFICATIONS_ENABLED or the recipient's notification preference.",
+      sender: "functions/admin-user-invite.js → functions/email-notification.js, functions/caddy-admin-welcome-email.js",
+      cta: "A one-use Supabase set-password link when the player has no login yet; otherwise the destination set on the template, falling back to Clarity.",
+      sample: { recipientName: "Alex Fenwick", actorName: "Sam Hale", accountState: "existing", variables: sampleVariables(false) }
     },
     {
-      id: "account_created",
-      eventType: "account_created",
-      label: "Set up your Clarity account",
+      id: "player_signup_comped",
+      eventType: "player_signup_comped",
+      templateKey: "player_signup_comped",
+      group: "Welcome Emails",
+      label: "Comped Sign Up",
+      editable: true,
       category: "service",
-      recipient: "The new player or coach whose account was just created",
-      trigger: "A coach or admin creates an account from Profile → Players → Create Player Account, or Booking invites a user.",
-      gating: "Always sends. Service email: not subject to EMAIL_NOTIFICATIONS_ENABLED or the recipient's notification preference.",
-      sender: "functions/admin-user-invite.js",
-      cta: "A single-use Supabase recovery link that sets their password and signs them in.",
-      sample: {
-        recipientName: "Alex Fenwick",
-        actorName: "Sam Hale",
-        ctaUrl: DEFAULT_SITE + "/?claritySetPassword=1"
-      }
-    },
-    {
-      id: "account_created_comped",
-      eventType: "account_created_comped",
-      label: "Set up your account + comped access (one email)",
-      category: "service",
-      recipient: "The new player, when the account was created with comped access ticked",
-      trigger: 'Create Player Account with "Include a comped month" ticked. Replaces the plain setup email — the comp is described in the same message, so the player gets one email, not two.',
-      gating: "Always sends. Service email. Skipped only if the account creation itself failed.",
-      sender: "functions/admin-user-invite.js",
-      cta: "The same set-password link. Their access is already live when they arrive.",
-      sample: {
-        recipientName: "Alex Fenwick",
-        actorName: "Sam Hale",
-        periodLabel: "a month",
-        expiresLabel: "3 October 2026",
-        membership: true,
-        ctaUrl: DEFAULT_SITE + "/?claritySetPassword=1"
-      }
+      recipient: "A Caddy player whose account was created WITH comped Caddy access.",
+      trigger: 'Player created and comped access = Yes ("Include a comped month" on Create Player Account), and only after the entitlement was actually written. Also the template Admin → Users → Resend Welcome uses for a player holding comped access.',
+      gating: "Always sends, but only once comped access has been issued successfully. If the entitlement write fails the player gets the Basic Sign Up email instead and the admin is told the comp did not happen — nobody is emailed access they do not have.",
+      sender: "functions/admin-user-invite.js → functions/email-notification.js, functions/caddy-admin-welcome-email.js",
+      cta: "The same set-password link for a new login; otherwise the destination set on the template. Their access is already live when they arrive.",
+      sample: { recipientName: "Alex Fenwick", actorName: "Sam Hale", accountState: "needs_setup", ctaUrl: DEFAULT_SITE + "/?claritySetPassword=1", variables: sampleVariables(true) }
     },
     {
       id: "comped_access_granted",
@@ -209,44 +212,149 @@
     return input ? input[0].toUpperCase() + input.slice(1) : input;
   }
 
-  function defaultWelcomeTemplate() {
+  /* ---- the two Studio-managed welcome templates ----
+
+     Code-level defaults, deliberately. A Studio row that has never been written, a settings
+     read that fails, or a field an admin cleared must all still produce the email that was
+     going out before any of this existed - never a blank message to a customer. Every getter
+     below falls back field by field, not template by template, so one emptied box cannot
+     take the rest of the message with it. */
+
+  /* No greeting line in either default body: render() already prints "Hi <first name>," above
+     the headline, and the first version of this template repeated it. {{firstName}} is still
+     available to an admin who wants it somewhere else. */
+  function defaultSignupTemplate(key) {
+    if (String(key) === "player_signup_comped") {
+      /* Descended from the account_created_comped copy: one message that covers BOTH the
+         password step and the comp, because two emails a second apart describing one event
+         read as a mistake - and the second one, the one carrying the thing of value, is the
+         one that gets ignored. */
+      return {
+        subject: "Your Clarity account is ready — with {{accessType}} on us",
+        headline: "Your Clarity account is ready",
+        body: "Welcome to Clarity Caddy.\n\n{{coachName}} has set up your account and included {{accessType}} — no card, and it does not auto-renew.\n\nYour access runs until {{accessUntil}}.\n\nClarity Caddy is a golf GPS built around the way you actually play. Use the button below to get started — your access is live the moment you sign in.\n\nClarity Golf",
+        ctaLabel: "Get started",
+        ctaUrl: ""
+      };
+    }
     return {
       subject: "Welcome to Clarity Caddy",
       headline: "Welcome to Clarity Caddy",
-      body: "Hi {{firstName}},\n\nWelcome to Clarity Caddy.\n\nClarity Caddy is a golf GPS built around the way you actually play.\n\nYour account gives you a place to build your bag, bring your practice data into your game, and use Clarity on the course.\n\nUse the button below to get started.\n\nClarity Golf",
+      body: "Clarity Caddy is a golf GPS built around the way you actually play.\n\nYour account gives you a place to build your bag, bring your practice data into your game, and use Clarity on the course.\n\nUse the button below to get started.\n\nClarity Golf",
       ctaLabel: "Open Clarity",
-      ctaType: "automatic"
+      ctaUrl: ""
     };
   }
-  function welcomeTemplate(input) {
+
+  /* A template destination is a plain link an admin typed, so it is held to the same rule as
+     any other untrusted URL: absolute http(s) or nothing. A javascript: or data: destination
+     in a branded email from our own domain is the one thing this editor must not be able to
+     produce. Empty is fine and means "use the automatic destination". */
+  function safeCtaUrl(value) {
+    var input = text(value, 900);
+    if (!input) return "";
+    return /^https?:\/\/[^\s]+$/i.test(input) ? input : "";
+  }
+
+  function signupTemplateKey(comped) {
+    return comped ? "player_signup_comped" : "player_signup_basic";
+  }
+  function isSignupTemplateKey(key) {
+    return SIGNUP_TEMPLATE_KEYS.indexOf(String(key || "")) !== -1;
+  }
+
+  function signupTemplate(key, input) {
     input = input || {};
-    var fallback = defaultWelcomeTemplate();
+    var fallback = defaultSignupTemplate(key);
     return {
+      templateKey: isSignupTemplateKey(key) ? String(key) : "player_signup_basic",
       subject: text(input.subject, 140) || fallback.subject,
       headline: text(input.headline, 180) || fallback.headline,
       body: text(input.body, 4000) || fallback.body,
       ctaLabel: text(input.ctaLabel, 80) || fallback.ctaLabel,
-      ctaType: "automatic"
+      ctaUrl: safeCtaUrl(input.ctaUrl)
     };
   }
+
+  /* Kept because the first welcome template shipped under this name and the stored row, the
+     endpoint and the tests all still reach for it. Basic Sign Up is what it always was. */
+  function defaultWelcomeTemplate() { return defaultSignupTemplate("player_signup_basic"); }
+  function welcomeTemplate(input) { return signupTemplate("player_signup_basic", input); }
+
   function substituteVariables(value, variables) {
     return String(value == null ? "" : value).replace(/{{\s*([a-zA-Z][a-zA-Z0-9]*)\s*}}/g, function (_all, key) {
       return Object.prototype.hasOwnProperty.call(variables || {}, key) ? String(variables[key] == null ? "" : variables[key]) : "";
     });
   }
-  function welcomeCopy(input) {
+
+  /* Body substitution has one extra rule the single-line fields do not need: a line that
+     exists ONLY to state a fact we do not have is dropped rather than printed half-empty.
+     "Your access runs until {{accessUntil}}." with no date is a bug the customer reads, and
+     the alternative - forbidding the variable in the default copy - loses the expiry line the
+     comped email has always carried. A line survives unless it contained at least one
+     variable and every one of them resolved to an empty string. */
+  function substituteBody(value, variables) {
+    var lines = String(value == null ? "" : value).split(/\r?\n/);
+    var kept = lines.filter(function (line) {
+      var tokens = line.match(/{{\s*[a-zA-Z][a-zA-Z0-9]*\s*}}/g);
+      if (!tokens) return true;
+      for (var i = 0; i < tokens.length; i++) if (substituteVariables(tokens[i], variables) !== "") return true;
+      return false;
+    }).map(function (line) { return substituteVariables(line, variables); });
+    /* Dropping a line leaves the blank line that separated it, so close the gap - otherwise
+       a missing expiry shows up as a hole in the paragraph spacing. And never let the drop
+       rule empty the whole message. */
+    var out = kept.join("\n").replace(/\n{3,}/g, "\n\n");
+    return out.trim() ? out : substituteVariables(value, variables);
+  }
+
+  function sampleVariables(comped) {
+    var base = {
+      firstName: "Alex", fullName: "Alex Fenwick", email: "player@example.com",
+      coachName: "Sam Hale", appUrl: DEFAULT_SITE, appStoreUrl: ""
+    };
+    if (comped) { base.accessType = "a month of Clarity Membership"; base.accessUntil = "3 October 2026"; }
+    return base;
+  }
+
+  /* What a comp actually is, in the words the email uses. Built from the entitlement that was
+     written - periodLabel and expiresLabel come back from writeCompedEntitlement - so the
+     message can only describe access that exists. */
+  function accessVariables(comped) {
+    if (!comped) return { accessType: "", accessUntil: "" };
+    var giftLabel = comped.membership === false ? "full Clarity access" : "Clarity Membership";
+    var periodLabel = text(comped.periodLabel, 40);
+    return {
+      accessType: periodLabel ? periodLabel + " of " + giftLabel : giftLabel,
+      accessUntil: text(comped.expiresLabel, 60)
+    };
+  }
+
+  function signupCopy(eventType, input) {
     input = input || {};
-    var template = welcomeTemplate(input.welcomeTemplate);
+    var key = eventType === "player_signup_comped" ? "player_signup_comped" : "player_signup_basic";
+    var template = signupTemplate(key, input.welcomeTemplate);
     var variables = input.variables || {};
+    /* The comped template is only ever selected once access has actually been issued, so
+       accessType is known. Floor it anyway: a message that says "included  \u2014 no card" is a
+       worse failure than one that is slightly vague about which comp it was. */
+    if (key === "player_signup_comped" && !text(variables.accessType)) {
+      variables = Object.assign({}, variables, { accessType: "full Clarity access" });
+    }
+    /* A one-use set-password link cannot be typed into a settings box, so when the send has
+       one it beats the template destination, and the button says what the link actually
+       does. Everywhere else the admin's destination is honoured. */
     var needsSetup = input.accountState === "needs_setup";
     return {
       subject: substituteVariables(template.subject, variables),
       title: substituteVariables(template.headline, variables),
-      detail: substituteVariables(template.body, variables),
+      detail: substituteBody(template.body, variables),
       ctaLabel: needsSetup ? "Set up your password & get started" : substituteVariables(template.ctaLabel, variables),
-      ctaUrl: text(input.ctaUrl, 900) || trimSite(input.siteUrl)
+      ctaUrl: needsSetup ? text(input.ctaUrl, 900) || trimSite(input.siteUrl)
+        : safeCtaUrl(substituteVariables(template.ctaUrl, variables)) || text(input.ctaUrl, 900) || trimSite(input.siteUrl)
     };
   }
+  function welcomeCopy(input) { return signupCopy("player_signup_basic", input); }
 
   /* ---------------------------------------------------------------------------
      Copy. Every subject/title/detail in the product is written here, so the
@@ -261,7 +369,12 @@
     var expiresLabel = text(input.expiresLabel, 60);
     var expirySentence = expiresLabel ? " Your access runs until " + expiresLabel + " and won't auto-renew or ask for a card." : "";
 
-    if (eventType === "player_welcome") return welcomeCopy(input);
+    /* The three Studio-managed welcome event types all render from a stored template.
+       player_welcome is the key the first version shipped under and still resolves to
+       Basic Sign Up, so an old caller cannot fall through to un-editable copy. */
+    if (eventType === "player_welcome" || eventType === "player_signup_basic" || eventType === "player_signup_comped") {
+      return signupCopy(eventType, input);
+    }
 
     if (eventType === "account_created") {
       return {
@@ -346,7 +459,10 @@
       title: text(input.title, 180) || copy.title,
       detail: text(input.detail, 1200) || copy.detail,
       ctaLabel: text(input.ctaLabel, 80) || copy.ctaLabel,
-      ctaUrl: text(input.ctaUrl, 900) || site,
+      /* A signup template can carry its own destination, so the composed ctaUrl is
+         preferred over the caller's raw one - signupCopy has already decided between
+         a secure link, the template destination and the site. */
+      ctaUrl: text(copy.ctaUrl, 900) || text(input.ctaUrl, 900) || site,
       appStoreUrl: text(input.appStoreUrl, 900),
       logoUrl: text(input.logoUrl, 900) || site + LOGO_PATH,
       siteUrl: site
@@ -416,12 +532,21 @@
     DEFAULT_SITE: DEFAULT_SITE,
     DEFAULT_FROM: DEFAULT_FROM,
     SERVICE_EVENT_TYPES: SERVICE_EVENT_TYPES.slice(),
+    SIGNUP_TEMPLATE_KEYS: SIGNUP_TEMPLATE_KEYS.slice(),
+    TEMPLATE_VARIABLES: TEMPLATE_VARIABLES.map(function (v) { return { key: v.key, note: v.note }; }),
     catalogue: catalogue,
     catalogueEntry: catalogueEntry,
     isServiceEventType: isServiceEventType,
     compose: compose,
     defaultWelcomeTemplate: defaultWelcomeTemplate,
     welcomeTemplate: welcomeTemplate,
+    defaultSignupTemplate: defaultSignupTemplate,
+    signupTemplate: signupTemplate,
+    signupTemplateKey: signupTemplateKey,
+    isSignupTemplateKey: isSignupTemplateKey,
+    accessVariables: accessVariables,
+    sampleVariables: sampleVariables,
+    safeCtaUrl: safeCtaUrl,
     substituteVariables: substituteVariables,
     welcomeCopy: welcomeCopy,
     buildMessage: buildMessage,

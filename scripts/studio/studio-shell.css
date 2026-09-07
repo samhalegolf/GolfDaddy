@@ -281,6 +281,37 @@
   margin: 6px 0 0;
 }
 
+/* ---- Communications › Welcome Emails editor ---- */
+#gdStudioShellRoot .gdStudioEmailCard.isEditable { border-color: var(--gdStudioAccentDim); }
+#gdStudioShellRoot .gdStudioEmailEditor { margin-top: 14px; display: grid; gap: 10px; }
+#gdStudioShellRoot .gdStudioEmailEditor label { display: block; font-size: 12px; color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdStudioEmailEditor input,
+#gdStudioShellRoot .gdStudioEmailEditor textarea {
+  width: 100%;
+  margin-top: 4px;
+  box-sizing: border-box;
+  background: var(--gdStudioPanelAlt);
+  border: 1px solid var(--gdStudioBorder);
+  border-radius: 8px;
+  padding: 9px 10px;
+  color: var(--gdStudioText);
+  font-family: inherit;
+  font-size: 13px;
+}
+#gdStudioShellRoot .gdStudioEmailEditor textarea { min-height: 190px; resize: vertical; line-height: 1.5; }
+#gdStudioShellRoot .gdStudioEmailEditor input:focus,
+#gdStudioShellRoot .gdStudioEmailEditor textarea:focus { outline: 1px solid var(--gdStudioAccentDim); }
+#gdStudioShellRoot .gdStudioEmailVars { font-size: 11.5px; color: var(--gdStudioMuted); margin: 0; line-height: 1.7; }
+#gdStudioShellRoot .gdStudioEmailVars code {
+  background: var(--gdStudioPanelAlt);
+  padding: 1px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioEmailStatusLine { font-size: 12px; margin: 0; min-height: 16px; }
+#gdStudioShellRoot .gdStudioEmailStatusLine.isError { color: var(--gdStudioWarn); }
+#gdStudioShellRoot .gdStudioEmailStatusLine.isOk { color: var(--gdStudioAccent); }
+
 /* ---- Marketing › Snapshot Machine (scripts/studio/marketing/snapshot-machine-page.js) ---- */
 #gdStudioShellRoot .gdMktWarn {
   background: rgba(255, 181, 76, 0.08);

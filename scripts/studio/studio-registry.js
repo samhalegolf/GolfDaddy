@@ -77,12 +77,14 @@
     },
     {
       id: "communications", label: "Communications", parent: null,
-      function: "Every outbound email Clarity sends: what fires it, who receives it, what suppresses it, and a live preview of the real template. Read-only — sending and copy edits live elsewhere.",
+      function: "Every outbound email Clarity sends: what fires it, who receives it, what suppresses it, and a live preview of the real template. The two Welcome Emails — Basic Sign Up and Comped Sign Up — are edited here; every other email is written in code.",
       owner: "Studio Communications page + the shared template core",
       runtime: { app: true, studio: true, server: true },
       code: [
         { role: "Studio page", path: "scripts/studio/communications/communications-page.js" },
         { role: "Templates, copy and the catalogue (shared browser/server)", path: "scripts/gd-email-templates-core.js" },
+        { role: "Welcome template read/write and safe variables (server)", path: "functions/lib/gd-signup-templates.js" },
+        { role: "Welcome template editing, preview, test send and player send", path: "functions/caddy-admin-welcome-email.js" },
         { role: "Delivery + service senders", path: "functions/email-notification.js" },
         { role: "Account setup / invite send", path: "functions/admin-user-invite.js" },
         { role: "Password reset send", path: "functions/auth-reset-password.js" },
@@ -90,16 +92,20 @@
       ],
       inputs: [
         "RESEND_API_KEY, CLARITY_EMAIL_FROM, CLARITY_SITE_URL, EMAIL_NOTIFICATIONS_ENABLED (reported as booleans by payment-admin's settings action)",
-        "Per-account notification preferences, stored on the account row by clarity-email.js"
+        "Per-account notification preferences, stored on the account row by clarity-email.js",
+        "public.caddy_email_templates — one row per Welcome Email (player_signup_basic, player_signup_comped). A missing row falls back to the code default rather than sending a blank email.",
+        "The player's live entitlement, which is what picks Basic vs Comped — never a second setting"
       ],
       outputs: ["Outbound email via Resend"],
       owns: [
         "The one email layout and every subject/title/detail string",
-        "The catalogue of what is sent and why"
+        "The catalogue of what is sent and why",
+        "The content of the two Welcome Emails, and which of them a signup sends"
       ],
       doesNotOwn: [
         "Delivery credentials (Netlify env only)",
-        "Whether an entitlement or account exists — the email only describes what another system already wrote"
+        "Whether an entitlement or account exists — the email only describes what another system already wrote",
+        "Any email HTML built in the browser. Studio edits content; the shell, the escaping and the markup are the template core's, server-side"
       ],
       connections: [
         { target: "commerce", direction: "used-by", label: "comped access email; the comped-month tick shares its entitlement writer" },
@@ -108,7 +114,8 @@
       keyFunctions: [
         { name: "catalogue", purpose: "Every email, its trigger and what suppresses it.", codePath: "scripts/gd-email-templates-core.js" },
         { name: "build", purpose: "Subject + HTML + plain text for one event type.", codePath: "scripts/gd-email-templates-core.js" },
-        { name: "sendAccountSetupEmail", purpose: "Account setup, with the comped variant folded in.", codePath: "functions/email-notification.js" },
+        { name: "sendSignupWelcomeEmail", purpose: "Sends the Basic or Comped welcome template, picked by whether comped access was actually issued.", codePath: "functions/email-notification.js" },
+        { name: "loadTemplate / saveTemplate", purpose: "The stored Welcome Email content, with field-by-field fallback to the code defaults.", codePath: "functions/lib/gd-signup-templates.js" },
         { name: "sendCompedAccessEmail", purpose: "Comped access issued on its own from Commerce.", codePath: "functions/email-notification.js" }
       ],
       status: "implemented", needsVerification: false
