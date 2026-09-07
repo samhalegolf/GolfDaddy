@@ -77,7 +77,7 @@
     },
     {
       id: "communications", label: "Communications", parent: null,
-      function: "Every outbound email Clarity sends: what fires it, who receives it, what suppresses it, and a live preview of the real template. The two Welcome Emails — Basic Sign Up and Comped Sign Up — are edited here; every other email is written in code.",
+      function: "Every outbound email Clarity sends: what fires it, who receives it, what suppresses it, and a live preview of the real template. Four templates are edited here — Coach Invite (standard and comped), Sign Up Welcome, and Coach Updated Your Account; every other email is written in code.",
       owner: "Studio Communications page + the shared template core",
       runtime: { app: true, studio: true, server: true },
       code: [
@@ -93,14 +93,16 @@
       inputs: [
         "RESEND_API_KEY, CLARITY_EMAIL_FROM, CLARITY_SITE_URL, EMAIL_NOTIFICATIONS_ENABLED (reported as booleans by payment-admin's settings action)",
         "Per-account notification preferences, stored on the account row by clarity-email.js",
-        "public.caddy_email_templates — one row per Welcome Email (player_signup_basic, player_signup_comped). A missing row falls back to the code default rather than sending a blank email.",
-        "The player's live entitlement, which is what picks Basic vs Comped — never a second setting"
+        "public.caddy_email_templates — one row per editable template (coach_invite_basic, coach_invite_comped, player_signup_welcome, coach_updated_account). A missing row falls back to the code default rather than sending a blank email.",
+        "The player's live entitlement, which is what picks standard vs comped Coach Invite — never a second setting",
+        "public.caddy_email_throttle, claimed atomically by claim_caddy_email_throttle() — one coach-update email per player per 30 minutes"
       ],
       outputs: ["Outbound email via Resend"],
       owns: [
         "The one email layout and every subject/title/detail string",
         "The catalogue of what is sent and why",
-        "The content of the two Welcome Emails, and which of them a signup sends"
+        "The content of the four editable templates, and which of them an event sends",
+        "The coach-update throttle: one per player per 30 minutes, dropped rather than queued"
       ],
       doesNotOwn: [
         "Delivery credentials (Netlify env only)",
@@ -115,7 +117,8 @@
         { name: "catalogue", purpose: "Every email, its trigger and what suppresses it.", codePath: "scripts/gd-email-templates-core.js" },
         { name: "build", purpose: "Subject + HTML + plain text for one event type.", codePath: "scripts/gd-email-templates-core.js" },
         { name: "sendSignupWelcomeEmail", purpose: "Sends the Basic or Comped welcome template, picked by whether comped access was actually issued.", codePath: "functions/email-notification.js" },
-        { name: "loadTemplate / saveTemplate", purpose: "The stored Welcome Email content, with field-by-field fallback to the code defaults.", codePath: "functions/lib/gd-signup-templates.js" },
+        { name: "loadTemplate / saveTemplate", purpose: "The stored template content, with field-by-field fallback to the code defaults.", codePath: "functions/lib/gd-signup-templates.js" },
+        { name: "claimCoachUpdateSlot", purpose: "Atomically claims the right to send one coach-update email; a lost claim is dropped, never queued.", codePath: "functions/lib/gd-signup-templates.js" },
         { name: "sendCompedAccessEmail", purpose: "Comped access issued on its own from Commerce.", codePath: "functions/email-notification.js" }
       ],
       status: "implemented", needsVerification: false

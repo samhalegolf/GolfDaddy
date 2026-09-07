@@ -42,7 +42,7 @@ async function listUsers() {
   const entitlements = await supabaseRest("user_entitlements?select=user_id,profile_id,status,expires_at,entitlement_reason", { method: "GET" });
   /* Welcome history is additive: until its migration is applied, Users still
      works normally and simply reports no history rather than failing the list. */
-  const welcomeHistory = await supabaseRest("caddy_email_delivery_attempts?select=player_id,recipient_email,sent_at,status,template_key&template_key=in." + encodeURIComponent("(player_signup_basic,player_signup_comped,player_welcome)") + "&order=sent_at.desc", { method: "GET" }).catch(function () { return []; });
+  const welcomeHistory = await supabaseRest("caddy_email_delivery_attempts?select=player_id,recipient_email,sent_at,status,template_key&template_key=in." + encodeURIComponent("(coach_invite_basic,coach_invite_comped,player_signup_welcome,player_signup_basic,player_signup_comped,player_welcome)") + "&order=sent_at.desc", { method: "GET" }).catch(function () { return []; });
   const known = new Set((players || []).map(p => p.auth_user_id).filter(Boolean));
   const authOnly = await supabaseAuth("admin/users?page=1&per_page=1000", { method: "GET" }, true);
   const byId = Object.create(null); (players || []).forEach(p => { byId[p.id] = p; });

@@ -98,6 +98,13 @@
   }
   function prefsAllow(recipient, event){
     var prefs = getPreferences(recipient);
+    /* "A coach updated your account" is opt-OUT, and its opt-out is the Coach updates toggle
+       right below the master switch. It deliberately does not consult emailEnabled: that
+       switch defaults to FALSE, so gating on it would mean almost nobody ever receives this,
+       and "off because nobody ever turned it on" is indistinguishable from a deliberate no.
+       The Coach updates toggle defaults to on and is a real choice, so that is the one that
+       decides. */
+    if(event && event.eventType === "coach_updated_account")return prefs.coachUpdates !== false;
     if(!prefs.emailEnabled)return false;
     if(event && event.test)return true;
     if(event && event.direction === "coach_to_player")return prefs.coachUpdates !== false;
@@ -106,7 +113,9 @@
   }
   function statusText(account){
     var prefs = getPreferences(account);
-    if(!prefs.emailEnabled)return "Off";
+    /* Coach updates are not governed by the master switch any more, so "Off" would be a lie
+       to anyone who still has them on. Report what actually sends. */
+    if(!prefs.emailEnabled)return prefs.coachUpdates ? "Coach updates only" : "Off";
     var bits = [];
     if(prefs.coachUpdates)bits.push("coach updates");
     if(prefs.playerUpdates)bits.push("player updates");
@@ -321,8 +330,13 @@
     return Promise.all(recipients.map(function(item){
       var recipient = item.account || item;
       var direction = item.direction || "";
+      /* One direction has its own Studio-managed email now. Everything else stays on the
+         generic account_activity event - collapsing them would tell a COACH that their coach
+         had updated their account, which is the direction this email cannot describe. */
+      var isCoachUpdate = direction === "coach_to_player" && !(options && options.test);
       var eventForRecipient = Object.assign({}, event, {
         direction:direction,
+        eventType:isCoachUpdate ? "coach_updated_account" : event.eventType,
         detail:options && options.detail || eventDetail(kind, direction, actor, target)
       });
       return sendToRecipient(eventForRecipient, recipient, options && options.force);
@@ -370,9 +384,10 @@
 	        setTimeout(function(){
 	          Promise.resolve(result).then(function(resolved){
 	            if(name === "signup"){
-	              /* Facts only. The wording of the welcome email is a Studio template now, and a
-	                 second copy of it here is a version of the email nobody can see or edit. */
-	              sendServiceEmail(resolved, { eventType:"account_created" }).catch(function(){});
+	              /* Facts only, and the RIGHT fact: this person signed themselves up. Nobody
+	                 invited them and they already chose a password, so the coach invite would be
+	                 describing an event that did not happen to them. */
+	              sendServiceEmail(resolved, { eventType:"player_signup_welcome" }).catch(function(){});
 	              return;
 	            }
 	            if(name === "addPlayer" || name === "addCoach"){
@@ -387,7 +402,7 @@
 	                return;
 	              }
 	              sendServiceEmail(resolved, {
-	                eventType:"account_created",
+	                eventType:"coach_invite_basic",
 	                actorName:(actor && actor.name) || "your coach"
 	              }).catch(function(){});
 	              recordActivity({

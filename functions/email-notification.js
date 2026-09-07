@@ -37,16 +37,32 @@ exports.handler = async function(event){
      Studio-managed template and everything the customer reads comes from there; whatever copy
      the client sent is ignored rather than merged, because a half-overridden email is the one
      failure nobody can reproduce. */
-  var signupKey = message.eventType === "account_created" ? "player_signup_basic"
-    : templates.isSignupTemplateKey(message.eventType) ? message.eventType : "";
+  var signupKey = templates.isEditableTemplateKey(message.eventType) || message.eventType === "account_created"
+    ? templates.resolveTemplateKey(message.eventType)
+    : "";
   var subjectFromTemplate = "";
   try{
     if(signupKey){
       message.eventType = signupKey;
       message.appStoreUrl = appStoreUrl();
-      var invite = await createSetupLinkForAccount(message.to, message.recipientName, message.actorName, siteUrl);
+      /* Only a coach INVITE mints a login. A self-signup already chose a password, and a
+         coach-update notice goes to someone who has had an account for a while - creating an
+         auth user for either would be inventing an account that already exists. */
+      var mintsLogin = signupKey === "coach_invite_basic" || signupKey === "coach_invite_comped";
+      var invite = mintsLogin
+        ? await createSetupLinkForAccount(message.to, message.recipientName, message.actorName, siteUrl)
+        : null;
       if(invite && invite.user && invite.user.id){
         await syncInvitedAccount(invite.user, payload, message);
+      }
+      /* One coach-update email per player per window, claimed before anything is rendered.
+         Losing the claim is a silent, successful no-op: the caller asked us to tell the
+         player something changed, and they have already been told. */
+      if(signupKey === signupTemplates.COACH_UPDATE_KEY){
+        var slot = await signupTemplates.claimCoachUpdateSlot(message.to);
+        if(!slot.allowed){
+          return json(200, {sent: false, throttled: slot.reason === "throttled", reason: slot.reason, windowMinutes: slot.windowMinutes || signupTemplates.THROTTLE_MINUTES});
+        }
       }
       var loaded = await signupTemplates.loadTemplate(signupKey);
       var copy = templates.compose(signupKey, {
@@ -75,7 +91,10 @@ exports.handler = async function(event){
 
   var rendered = renderEmail(message);
   var subject = subjectFromTemplate || text(payload.subject, 140) || subjectFor(message);
-  var serviceEmail = isServiceEmail(message);
+  /* bypassesActivitySwitch, not isServiceEventType: the coach-update email ships working
+     without an env var being set, but still carries the "you can turn this off in Settings"
+     footer, because the player genuinely can. */
+  var serviceEmail = templates.bypassesActivitySwitch(message.eventType);
 
   if(!serviceEmail && env("EMAIL_NOTIFICATIONS_ENABLED") !== "1"){
     return json(202, {queued: true, provider: "disabled", setup: "Set EMAIL_NOTIFICATIONS_ENABLED=1 to send optional notification emails.", preview: {subject: subject, html: rendered.html, text: rendered.text}});
@@ -139,7 +158,6 @@ async function linkAccounts(creatorId, invitedId){
 
 function safeUrl(value, fallbackOrigin){ if(!String(value || "").trim())return ""; try{ var url = new URL(String(value || ""), fallbackOrigin); return /^https?:$/.test(url.protocol) ? url.toString() : ""; }catch(error){ return ""; } }
 function subjectFor(message){ return templates.compose(message.eventType, message).subject; }
-function isServiceEmail(message){ return templates.isServiceEventType(message && message.eventType); }
 function renderEmail(message){ return templates.render(message); }
 
 function json(statusCode, body){ return {statusCode: statusCode, headers: {"Content-Type": "application/json", "Cache-Control": "no-store"}, body: JSON.stringify(body)}; }
@@ -221,7 +239,7 @@ async function sendSignupWelcomeEmail(options){
   if(!to)return {sent: false, reason: "invalid_email"};
   var comped = options.comped || null;
   var siteUrl = env("CLARITY_SITE_URL") || templates.DEFAULT_SITE;
-  var key = signupTemplates.keyForComped(comped);
+  var key = options.templateKey ? signupTemplates.normaliseKey(options.templateKey) : signupTemplates.keyForComped(comped);
   var loaded = await signupTemplates.loadTemplate(key);
   var store = appStoreUrl();
   return deliver(key, {

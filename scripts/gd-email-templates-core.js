@@ -42,27 +42,81 @@
     "player_welcome",
     "player_signup_basic",
     "player_signup_comped",
+    "coach_invite_basic",
+    "coach_invite_comped",
+    "player_signup_welcome",
     "comped_access_granted",
     "sign_in_email_changed"
   ];
 
-  /* The two Studio-managed welcome emails. One signup event picks exactly one of these, by the
-     only thing that can honestly answer the question: whether comped access was actually
-     issued. They are two independent templates rather than "basic plus a paragraph" - the
-     comped one is a different message with a different promise, and they are expected to
-     diverge. Studio edits the CONTENT below; the shell, the escaping and the final HTML stay
-     here. */
-  var SIGNUP_TEMPLATE_KEYS = ["player_signup_basic", "player_signup_comped"];
+  /* ---------------------------------------------------------------------------
+     The Studio-managed templates.
+
+     Four independent messages, not one with switches. Which one goes out is never a setting:
+     it is decided by what actually happened - who created the account, and whether comped
+     access was really issued. They are expected to diverge, so none of them is defined as
+     "another one plus a paragraph".
+
+       coach_invite_basic     a coach or admin created the account. No comped access.
+       coach_invite_comped    same, but comped access WAS successfully issued.
+       player_signup_welcome  the player signed themselves up. No coach, no setup link -
+                              they already chose their own password, so "set your password"
+                              and {{coachName}} would both be lies.
+       coach_updated_account  a coach changed something on a player's account. Throttled to
+                              one per player per 30 minutes, server-side.
+
+     Studio edits the CONTENT. The shell, the escaping and the final HTML stay here.
+     --------------------------------------------------------------------------- */
+  var TEMPLATE_GROUP_WELCOME = "Welcome Emails";
+  var TEMPLATE_GROUP_UPDATES = "Account Updates";
+  var EDITABLE_TEMPLATE_KEYS = ["coach_invite_basic", "coach_invite_comped", "player_signup_welcome", "coach_updated_account"];
+  /* The keys these shipped under before Coach Invite and Sign Up Welcome were separated.
+     An older stored row, or an older caller, still resolves rather than falling through to
+     un-editable copy. */
+  var LEGACY_TEMPLATE_KEYS = {
+    player_welcome: "coach_invite_basic",
+    player_signup_basic: "coach_invite_basic",
+    player_signup_comped: "coach_invite_comped",
+    account_created: "coach_invite_basic",
+    account_created_comped: "coach_invite_comped"
+  };
+  /* account_activity is deliberately NOT mapped here. It still carries player -> coach
+     updates and the Settings test email, and collapsing it into coach_updated_account would
+     tell a coach that their coach had updated their account. The client names
+     coach_updated_account explicitly for the one direction that means it. */
+  /* How often coach_updated_account may reach one player. Deliberately not a queue: a coach
+     saving a bag, then a profile, then some shot data is ONE thing that happened to the
+     player, and three emails describing it is how a useful notification becomes noise people
+     filter. Everything inside the window is dropped, not deferred - a delayed duplicate is
+     still a duplicate. */
+  var COACH_UPDATE_THROTTLE_MINUTES = 30;
+
   var TEMPLATE_VARIABLES = [
     { key: "firstName", note: "Alex" },
     { key: "fullName", note: "Alex Fenwick" },
     { key: "email", note: "the address the email went to" },
-    { key: "coachName", note: "whoever created the account" },
+    { key: "coachName", note: "whoever created the account or made the change" },
     { key: "appUrl", note: "caddy.claritygolf.app" },
     { key: "appStoreUrl", note: "the App Store listing" },
-    { key: "accessType", note: "comped only - \"a month of Clarity Membership\"" },
-    { key: "accessUntil", note: "comped only - the date the access ends" }
+    { key: "accessType", note: "comped invite only - \"a month of Clarity Membership\"" },
+    { key: "accessUntil", note: "comped invite only - the date the access ends" }
   ];
+
+  function isEditableTemplateKey(key) {
+    return EDITABLE_TEMPLATE_KEYS.indexOf(String(key || "")) !== -1;
+  }
+  /* One place that turns anything a caller might hold - a current key, a key from before the
+     split, a stale event type - into a key that exists. */
+  function resolveTemplateKey(key) {
+    var input = String(key || "");
+    if (isEditableTemplateKey(input)) return input;
+    return LEGACY_TEMPLATE_KEYS[input] || EDITABLE_TEMPLATE_KEYS[0];
+  }
+  /* Which welcome template a coach-created account gets. The ONLY input is whether the
+     entitlement was actually written. */
+  function coachInviteKey(comped) {
+    return comped ? "coach_invite_comped" : "coach_invite_basic";
+  }
 
   /* ---------------------------------------------------------------------------
      The catalogue: every outbound email, what fires it, and what gates it.
@@ -71,34 +125,64 @@
      --------------------------------------------------------------------------- */
   var CATALOGUE = [
     {
-      id: "player_signup_basic",
-      eventType: "player_signup_basic",
-      templateKey: "player_signup_basic",
-      group: "Welcome Emails",
-      label: "Basic Sign Up",
+      id: "coach_invite_basic",
+      eventType: "coach_invite_basic",
+      templateKey: "coach_invite_basic",
+      group: TEMPLATE_GROUP_WELCOME,
+      label: "Coach Invite — Standard",
       editable: true,
       category: "service",
-      recipient: "A Caddy player whose account was created WITHOUT comped access.",
-      trigger: "Player created and comped access = No. Also the template Admin → Users → Send/Resend Welcome uses for a player with no comped entitlement.",
+      recipient: "A player whose account was created FOR them by a coach or admin, without comped access.",
+      trigger: "Profile → Players → Create Player Account with the comp tick off. Also the template Admin → Users → Send/Resend Welcome uses for a player with no comped entitlement.",
       gating: "Always sends once the account creation step has succeeded. Service email: not subject to EMAIL_NOTIFICATIONS_ENABLED or the recipient's notification preference.",
       sender: "functions/admin-user-invite.js → functions/email-notification.js, functions/caddy-admin-welcome-email.js",
       cta: "A one-use Supabase set-password link when the player has no login yet; otherwise the destination set on the template, falling back to Clarity.",
       sample: { recipientName: "Alex Fenwick", actorName: "Sam Hale", accountState: "existing", variables: sampleVariables(false) }
     },
     {
-      id: "player_signup_comped",
-      eventType: "player_signup_comped",
-      templateKey: "player_signup_comped",
-      group: "Welcome Emails",
-      label: "Comped Sign Up",
+      id: "coach_invite_comped",
+      eventType: "coach_invite_comped",
+      templateKey: "coach_invite_comped",
+      group: TEMPLATE_GROUP_WELCOME,
+      label: "Coach Invite — Comped",
       editable: true,
       category: "service",
-      recipient: "A Caddy player whose account was created WITH comped Caddy access.",
-      trigger: 'Player created and comped access = Yes ("Include a comped month" on Create Player Account), and only after the entitlement was actually written. Also the template Admin → Users → Resend Welcome uses for a player holding comped access.',
-      gating: "Always sends, but only once comped access has been issued successfully. If the entitlement write fails the player gets the Basic Sign Up email instead and the admin is told the comp did not happen — nobody is emailed access they do not have.",
+      recipient: "A player whose account was created FOR them by a coach or admin, WITH comped Caddy access.",
+      trigger: 'Create Player Account with "Include a comped month" ticked, and only after the entitlement was actually written. Also the template Admin → Users → Resend Welcome uses for a player holding comped access.',
+      gating: "Always sends, but only once comped access has been issued successfully. If the entitlement write fails the player gets the standard Coach Invite instead and the admin is told the comp did not happen — nobody is emailed access they do not have.",
       sender: "functions/admin-user-invite.js → functions/email-notification.js, functions/caddy-admin-welcome-email.js",
       cta: "The same set-password link for a new login; otherwise the destination set on the template. Their access is already live when they arrive.",
       sample: { recipientName: "Alex Fenwick", actorName: "Sam Hale", accountState: "needs_setup", ctaUrl: DEFAULT_SITE + "/?claritySetPassword=1", variables: sampleVariables(true) }
+    },
+    {
+      id: "player_signup_welcome",
+      eventType: "player_signup_welcome",
+      templateKey: "player_signup_welcome",
+      group: TEMPLATE_GROUP_WELCOME,
+      label: "Sign Up Welcome",
+      editable: true,
+      category: "service",
+      recipient: "Someone who signed themselves up. Nobody invited them and they already chose their own password.",
+      trigger: "Self-serve sign-up on the sign-in screen (/api/auth-signup).",
+      gating: "Always sends once the account exists. Service email.",
+      sender: "scripts/clarity-email.js → functions/email-notification.js",
+      cta: "The destination set on the template, falling back to Clarity. No set-password link — they already have a password.",
+      sample: { recipientName: "Alex Fenwick", actorName: "Clarity Golf", accountState: "existing", variables: sampleVariables(false) }
+    },
+    {
+      id: "coach_updated_account",
+      eventType: "coach_updated_account",
+      templateKey: "coach_updated_account",
+      group: TEMPLATE_GROUP_UPDATES,
+      label: "Coach Updated Your Account",
+      editable: true,
+      category: "optional",
+      recipient: "A player, when a coach linked to them saves a change to their bag, shot data or profile.",
+      trigger: "The first such save. Deliberately vague about WHAT changed — one email can cover half an hour of saves, so naming a single one would be right only by luck.",
+      gating: "Throttled to one per player per " + COACH_UPDATE_THROTTLE_MINUTES + " minutes, claimed atomically server-side. Everything inside the window is DROPPED, never queued — a delayed duplicate is still a duplicate. The player can turn it off in Settings → Notifications; unlike the other activity mail it is not held back by EMAIL_NOTIFICATIONS_ENABLED, so it works without a server flag being set.",
+      sender: "scripts/clarity-email.js → functions/email-notification.js",
+      cta: "The destination set on the template, falling back to Clarity.",
+      sample: { recipientName: "Alex Fenwick", actorName: "Sam Hale", accountState: "existing", variables: sampleVariables(false) }
     },
     {
       id: "comped_access_granted",
@@ -185,6 +269,15 @@
   function isServiceEventType(eventType) {
     return SERVICE_EVENT_TYPES.indexOf(String(eventType || "")) !== -1;
   }
+  /* Two different questions that used to share one list.
+     isServiceEventType decides the FOOTER: "this relates to your account access" is only
+     honest for mail the recipient cannot switch off. bypassesActivitySwitch decides whether
+     the server-wide EMAIL_NOTIFICATIONS_ENABLED flag can suppress it.
+     coach_updated_account answers yes to the second and no to the first: it ships working
+     without an env var being set, and it still tells the reader where to turn it off. */
+  function bypassesActivitySwitch(eventType) {
+    return isServiceEventType(eventType) || String(eventType || "") === "coach_updated_account";
+  }
 
   /* ---- small pure helpers, shared by every template ---- */
 
@@ -220,11 +313,13 @@
      below falls back field by field, not template by template, so one emptied box cannot
      take the rest of the message with it. */
 
-  /* No greeting line in either default body: render() already prints "Hi <first name>," above
+  /* No greeting line in any default body: render() already prints "Hi <first name>," above
      the headline, and the first version of this template repeated it. {{firstName}} is still
      available to an admin who wants it somewhere else. */
   function defaultSignupTemplate(key) {
-    if (String(key) === "player_signup_comped") {
+    key = resolveTemplateKey(key);
+
+    if (key === "coach_invite_comped") {
       /* Descended from the account_created_comped copy: one message that covers BOTH the
          password step and the comp, because two emails a second apart describing one event
          read as a mistake - and the second one, the one carrying the thing of value, is the
@@ -232,11 +327,39 @@
       return {
         subject: "Your Clarity account is ready — with {{accessType}} on us",
         headline: "Your Clarity account is ready",
-        body: "Welcome to Clarity Caddy.\n\n{{coachName}} has set up your account and included {{accessType}} — no card, and it does not auto-renew.\n\nYour access runs until {{accessUntil}}.\n\nClarity Caddy is a golf GPS built around the way you actually play. Use the button below to get started — your access is live the moment you sign in.\n\nClarity Golf",
+        body: "{{coachName}} has set up your Clarity Caddy account and included {{accessType}} — no card, and it does not auto-renew.\n\nYour access runs until {{accessUntil}}.\n\nClarity Caddy is a golf GPS built around the way you actually play. Use the button below to get started — your access is live the moment you sign in.\n\nClarity Golf",
         ctaLabel: "Get started",
         ctaUrl: ""
       };
     }
+
+    if (key === "player_signup_welcome") {
+      /* The one template with no coach in it. This player signed themselves up, chose their
+         own password and was invited by nobody, so anything about "your coach" or "set your
+         password" would be describing an event that did not happen to them. */
+      return {
+        subject: "Welcome to Clarity Caddy",
+        headline: "Welcome to Clarity Caddy",
+        body: "Thanks for signing up.\n\nClarity Caddy is a golf GPS built around the way you actually play — start by building your bag, then let your practice data sharpen it.\n\nYour account is ready and your password is already set. Sign in on the app and everything is there.\n\nClarity Golf",
+        ctaLabel: "Open Clarity",
+        ctaUrl: ""
+      };
+    }
+
+    if (key === "coach_updated_account") {
+      /* Deliberately generic about WHAT changed. One of these covers up to 30 minutes of a
+         coach's saves, so naming a single thing - "updated your bag" - would be wrong the
+         moment they also changed something else, and right only by luck. Say that something
+         changed and send them to the place they can see it. */
+      return {
+        subject: "{{coachName}} updated your Clarity account",
+        headline: "Your coach updated your account",
+        body: "{{coachName}} has updated some information on your Clarity Caddy account.\n\nOpen the app and you will have the latest — everything syncs to your device when you sign in.\n\nClarity Golf",
+        ctaLabel: "Open Clarity",
+        ctaUrl: ""
+      };
+    }
+
     return {
       subject: "Welcome to Clarity Caddy",
       headline: "Welcome to Clarity Caddy",
@@ -256,18 +379,12 @@
     return /^https?:\/\/[^\s]+$/i.test(input) ? input : "";
   }
 
-  function signupTemplateKey(comped) {
-    return comped ? "player_signup_comped" : "player_signup_basic";
-  }
-  function isSignupTemplateKey(key) {
-    return SIGNUP_TEMPLATE_KEYS.indexOf(String(key || "")) !== -1;
-  }
-
   function signupTemplate(key, input) {
     input = input || {};
+    key = resolveTemplateKey(key);
     var fallback = defaultSignupTemplate(key);
     return {
-      templateKey: isSignupTemplateKey(key) ? String(key) : "player_signup_basic",
+      templateKey: key,
       subject: text(input.subject, 140) || fallback.subject,
       headline: text(input.headline, 180) || fallback.headline,
       body: text(input.body, 4000) || fallback.body,
@@ -332,13 +449,13 @@
 
   function signupCopy(eventType, input) {
     input = input || {};
-    var key = eventType === "player_signup_comped" ? "player_signup_comped" : "player_signup_basic";
+    var key = resolveTemplateKey(eventType);
     var template = signupTemplate(key, input.welcomeTemplate);
     var variables = input.variables || {};
     /* The comped template is only ever selected once access has actually been issued, so
        accessType is known. Floor it anyway: a message that says "included  \u2014 no card" is a
        worse failure than one that is slightly vague about which comp it was. */
-    if (key === "player_signup_comped" && !text(variables.accessType)) {
+    if (key === "coach_invite_comped" && !text(variables.accessType)) {
       variables = Object.assign({}, variables, { accessType: "full Clarity access" });
     }
     /* A one-use set-password link cannot be typed into a settings box, so when the send has
@@ -369,35 +486,16 @@
     var expiresLabel = text(input.expiresLabel, 60);
     var expirySentence = expiresLabel ? " Your access runs until " + expiresLabel + " and won't auto-renew or ask for a card." : "";
 
-    /* The three Studio-managed welcome event types all render from a stored template.
-       player_welcome is the key the first version shipped under and still resolves to
-       Basic Sign Up, so an old caller cannot fall through to un-editable copy. */
-    if (eventType === "player_welcome" || eventType === "player_signup_basic" || eventType === "player_signup_comped") {
+    /* Every Studio-managed event type renders from a stored template, including the keys
+       these shipped under before Coach Invite and Sign Up Welcome were separated - an old
+       caller must not fall through to un-editable copy. */
+    if (isEditableTemplateKey(eventType) || Object.prototype.hasOwnProperty.call(LEGACY_TEMPLATE_KEYS, eventType)) {
       return signupCopy(eventType, input);
     }
 
-    if (eventType === "account_created") {
-      return {
-        subject: "Set up your Clarity account",
-        title: "Set up your Clarity account",
-        detail: "Your Clarity Caddy account has been created by " + actorName
-          + ". Use the secure button below to set your password. This link is unique to your account.",
-        ctaLabel: "Set up your password"
-      };
-    }
-    if (eventType === "account_created_comped") {
-      /* Deliberately ONE message rather than a setup email plus a comp email a second apart.
-         Two emails describing one event read as a mistake, and the second is the one that
-         gets ignored - which is the one carrying the thing of value. */
-      return {
-        subject: "Your Clarity account is ready — with " + periodLabel + " on us",
-        title: "Your Clarity account is ready",
-        detail: actorName + " has set up your Clarity Caddy account and included " + periodLabel + " of "
-          + giftLabel + " — no card, no auto-renewal. Set your password with the button below and your "
-          + "access is live the moment you sign in." + expirySentence,
-        ctaLabel: "Set your password & get started"
-      };
-    }
+    /* account_created and account_created_comped used to have hard-coded branches here. They
+       are now the Coach Invite templates and resolve above, via LEGACY_TEMPLATE_KEYS - which
+       is what stops an old caller quietly getting copy no admin can edit. */
     if (eventType === "comped_access_granted") {
       if (input.hasAccount) {
         return {
@@ -532,18 +630,23 @@
     DEFAULT_SITE: DEFAULT_SITE,
     DEFAULT_FROM: DEFAULT_FROM,
     SERVICE_EVENT_TYPES: SERVICE_EVENT_TYPES.slice(),
-    SIGNUP_TEMPLATE_KEYS: SIGNUP_TEMPLATE_KEYS.slice(),
+    EDITABLE_TEMPLATE_KEYS: EDITABLE_TEMPLATE_KEYS.slice(),
+    TEMPLATE_GROUP_WELCOME: TEMPLATE_GROUP_WELCOME,
+    TEMPLATE_GROUP_UPDATES: TEMPLATE_GROUP_UPDATES,
+    COACH_UPDATE_THROTTLE_MINUTES: COACH_UPDATE_THROTTLE_MINUTES,
     TEMPLATE_VARIABLES: TEMPLATE_VARIABLES.map(function (v) { return { key: v.key, note: v.note }; }),
     catalogue: catalogue,
     catalogueEntry: catalogueEntry,
     isServiceEventType: isServiceEventType,
+    bypassesActivitySwitch: bypassesActivitySwitch,
     compose: compose,
     defaultWelcomeTemplate: defaultWelcomeTemplate,
     welcomeTemplate: welcomeTemplate,
     defaultSignupTemplate: defaultSignupTemplate,
     signupTemplate: signupTemplate,
-    signupTemplateKey: signupTemplateKey,
-    isSignupTemplateKey: isSignupTemplateKey,
+    resolveTemplateKey: resolveTemplateKey,
+    isEditableTemplateKey: isEditableTemplateKey,
+    coachInviteKey: coachInviteKey,
     accessVariables: accessVariables,
     sampleVariables: sampleVariables,
     safeCtaUrl: safeCtaUrl,

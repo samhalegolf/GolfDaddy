@@ -68,6 +68,9 @@ async function resolvePlayer(player) {
   if (player.account_id) { const rows = await supabaseRest("app_accounts?select=*&account_id=eq." + encodeURIComponent(player.account_id) + "&limit=1", { method: "GET" }); account = Array.isArray(rows) && rows[0]; }
   const recipientEmail = email(authUser && authUser.email) || email(account && account.email) || email(player.normalized_email);
   const comped = await compedAccess(player, account, recipientEmail);
+  /* Admin -> Users is always someone inviting a player, never a self-signup, so the resend is
+     a Coach Invite - standard or comped, decided by the entitlement rather than by the
+     request. */
   return { player, authUser, account, recipientEmail, comped, templateKey: signupTemplates.keyForComped(comped), accountState: authUser ? "existing" : "needs_setup" };
 }
 function variables(resolved, caller) {
@@ -123,7 +126,10 @@ async function secureSetup(resolved) {
 async function record(resolved, caller, status, providerId, failure) { await supabaseRest("caddy_email_delivery_attempts", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ player_id: resolved.player.id, recipient_email: resolved.recipientEmail, template_key: resolved.templateKey || KEYS[0], sent_by_auth_user_id: actorId(caller) || null, provider_message_id: providerId || null, status, failure_detail: failure ? text(failure, 1000) : null }) }); }
 /* The log spans both templates and the key the first version wrote under, so "when did this
    player last get a welcome email" keeps answering across the rename. */
-async function history() { const rows = await supabaseRest("caddy_email_delivery_attempts?select=player_id,recipient_email,sent_at,status,provider_message_id,template_key&template_key=in." + encodeURIComponent("(" + KEYS.concat([signupTemplates.LEGACY_KEY]).join(",") + ")") + "&order=sent_at.desc", { method: "GET" }); const result = {}; (rows || []).forEach(row => { if (!result[row.player_id]) result[row.player_id] = row; }); return result; }
+const WELCOME_LOG_KEYS = ["coach_invite_basic", "coach_invite_comped", "player_signup_welcome", "player_signup_basic", "player_signup_comped", "player_welcome"];
+/* The log spans both invite templates and the keys they were written under before the split,
+   so "when did this player last get a welcome email" keeps answering across the rename. */
+async function history() { const rows = await supabaseRest("caddy_email_delivery_attempts?select=player_id,recipient_email,sent_at,status,provider_message_id,template_key&template_key=in." + encodeURIComponent("(" + WELCOME_LOG_KEYS.join(",") + ")") + "&order=sent_at.desc", { method: "GET" }); const result = {}; (rows || []).forEach(row => { if (!result[row.player_id]) result[row.player_id] = row; }); return result; }
 async function send(resolved, template, caller, options) {
   options = options || {};
   if (!resolved.recipientEmail) { const e = new Error("Welcome email — no email address"); e.status = 400; throw e; }
@@ -151,7 +157,7 @@ exports.handler = async function(event) {
         player: { id: null, display_name: "Alex Fenwick" },
         recipientEmail: email(caller.account && caller.account.email),
         templateKey: key,
-        comped: key === "player_signup_comped" ? { membership: true, periodLabel: "a month", expiresLabel: new Date(Date.now() + 30 * 86400000).toLocaleDateString("en-NZ", { day: "numeric", month: "long", year: "numeric" }) } : null,
+        comped: key === "coach_invite_comped" ? { membership: true, periodLabel: "a month", expiresLabel: new Date(Date.now() + 30 * 86400000).toLocaleDateString("en-NZ", { day: "numeric", month: "long", year: "numeric" }) } : null,
         accountState: "existing"
       };
       if (!sample.recipientEmail) { const e = new Error("Your admin account has no usable email address"); e.status = 400; throw e; }

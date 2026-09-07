@@ -53,7 +53,15 @@
     return data;
   }
 
+  var GROUP_NOTES = {
+    "Welcome Emails": "Three independent templates. Which one a new account gets is never a setting — "
+      + "it is decided by what actually happened: whether a coach created the account for them, and "
+      + "whether comped access was really issued.",
+    "Account Updates": "Sent while someone is already a player, rather than when they arrive."
+  };
+
   function categoryBadge(entry) {
+    if (entry.category === "optional") return '<span class="gdStudioEmailBadge">Player can opt out</span>';
     var isService = entry.category === "service";
     return '<span class="gdStudioEmailBadge' + (isService ? " isService" : "") + '">'
       + (isService ? "Always sends" : "Opt-in") + "</span>";
@@ -175,22 +183,32 @@
     }
 
     var entries = api.catalogue();
-    var welcome = entries.filter(function (e) { return e.editable; });
+    var editable = entries.filter(function (e) { return e.editable; });
     var rest = entries.filter(function (e) { return !e.editable; });
+    /* Grouped by what fires them, in catalogue order - the order is the order they were
+       thought about, and a template that has no group would otherwise vanish from the page. */
+    var groups = [];
+    editable.forEach(function (entry) {
+      var name = entry.group || "Templates";
+      var group = null;
+      for (var i = 0; i < groups.length; i++) if (groups[i].name === name) { group = groups[i]; break; }
+      if (!group) { group = { name: name, entries: [] }; groups.push(group); }
+      group.entries.push(entry);
+    });
     var deliveryState = { loading: true, error: "", delivery: null };
     var welcomeState = { loading: true, error: "", byKey: {} };
     var destroyed = false;
 
-    function welcomeSectionHTML() {
-      if (welcomeState.loading) return '<p class="gdStudioMuted">Reading the stored templates…</p>';
-      var warning = welcomeState.error
-        ? '<p class="gdStudioNeedsVerification">Saved templates could not be read: ' + esc(welcomeState.error)
-          + " The built-in defaults are shown below — that is also what a send would use right now, so nothing is broken, "
-          + "but do not save over a template you cannot see.</p>"
-        : "";
-      return warning + welcome.map(function (entry) {
-        return editorHTML(entry, welcomeState.byKey[entry.templateKey], api);
-      }).join("");
+    function groupHTML(group) {
+      return '<section><h3 class="gdStudioJobHistoryHeading">' + esc(group.name) + "</h3>"
+        + '<p class="gdStudioMuted">' + esc(GROUP_NOTES[group.name] || "") + "</p>"
+        + '<div data-gd-group="' + esc(group.name) + '">'
+        + (welcomeState.loading
+          ? '<p class="gdStudioMuted">Reading the stored templates…</p>'
+          : group.entries.map(function (entry) {
+              return editorHTML(entry, welcomeState.byKey[entry.templateKey], api);
+            }).join(""))
+        + "</div></section>";
     }
 
     function paint() {
@@ -199,12 +217,12 @@
         + '<p class="gdStudioLede">' + esc((record && record.function) || "") + "</p>"
         + '<section><h3 class="gdStudioJobHistoryHeading">Delivery</h3>'
         + '<div id="gdStudioEmailDelivery">' + deliveryHTML(deliveryState) + "</div></section>"
-        + '<section><h3 class="gdStudioJobHistoryHeading">Welcome Emails</h3>'
-        + '<p class="gdStudioMuted">Two independent templates. One signup event sends exactly one of them, '
-        + "chosen by whether comped access was actually issued — never by a second setting. You are editing "
-        + "content only: Clarity owns the layout, the branding and the escaping, and Preview and Send Test "
-        + "both run through the production renderer.</p>"
-        + '<div id="gdStudioWelcomeEmails">' + welcomeSectionHTML() + "</div></section>"
+        + '<div id="gdStudioWelcomeEmails">'
+        + (welcomeState.error ? '<p class="gdStudioNeedsVerification">Saved templates could not be read: ' + esc(welcomeState.error)
+            + " The built-in defaults are shown below — that is also what a send would use right now, so nothing is broken, "
+            + "but do not save over a template you cannot see.</p>" : "")
+        + groups.map(groupHTML).join("")
+        + "</div>"
         + '<section><h3 class="gdStudioJobHistoryHeading">Every other email Clarity sends (' + rest.length + ")</h3>"
         + '<p class="gdStudioMuted">Read from scripts/gd-email-templates-core.js, which is also what the '
         + "Netlify functions render from — so a preview here is the real message, and a sender missing from "
@@ -219,7 +237,12 @@
     }
     function repaintWelcome() {
       var host = containerEl.querySelector("#gdStudioWelcomeEmails");
-      if (host) host.innerHTML = welcomeSectionHTML();
+      if (!host) return;
+      host.innerHTML = (welcomeState.error
+        ? '<p class="gdStudioNeedsVerification">Saved templates could not be read: ' + esc(welcomeState.error)
+          + " The built-in defaults are shown below — that is also what a send would use right now, so nothing is broken, "
+          + "but do not save over a template you cannot see.</p>"
+        : "") + groups.map(groupHTML).join("");
     }
 
     /* Delivery config comes from payment-admin's settings action, which is already the

@@ -44,7 +44,7 @@ test("every catalogue entry is complete enough to audit", () => {
     ["id", "eventType", "label", "recipient", "trigger", "gating", "sender", "cta"].forEach((field) => {
       assert.ok(entry[field] && String(entry[field]).trim(), entry.id + " is missing " + field);
     });
-    assert.ok(["service", "activity"].includes(entry.category), entry.id + " has an unknown category");
+    assert.ok(["service", "activity", "optional"].includes(entry.category), entry.id + " has an unknown category");
     assert.ok(!seen.has(entry.id), "duplicate catalogue id: " + entry.id);
     seen.add(entry.id);
     /* The page names the owning file; a stale pointer is worse than none. */
@@ -105,11 +105,11 @@ test("welcome endpoint stays server-owned and does not accept a recipient from t
 });
 
 function compedBuild(overrides) {
-  return core.build("player_signup_comped", Object.assign({
+  return core.build("coach_invite_comped", Object.assign({
     to: "player@example.com",
     recipientName: "Alex Fenwick",
     actorName: "Sam Hale",
-    welcomeTemplate: core.defaultSignupTemplate("player_signup_comped"),
+    welcomeTemplate: core.defaultSignupTemplate("coach_invite_comped"),
     variables: Object.assign(
       { firstName: "Alex", fullName: "Alex Fenwick", email: "player@example.com", coachName: "Sam Hale", appUrl: "https://example.test" },
       core.accessVariables({ periodLabel: "a month", expiresLabel: "3 October 2026", membership: true })
@@ -130,28 +130,73 @@ test("the comped welcome email covers BOTH the password step and the comp", () =
   assert.ok(built.html.includes("https://example.test/set-password"), "the CTA is not the set-password link");
 });
 
-test("Basic and Comped Sign Up are two independent templates, not one plus a paragraph", () => {
-  const basic = core.defaultSignupTemplate("player_signup_basic");
-  const comped = core.defaultSignupTemplate("player_signup_comped");
-  assert.notStrictEqual(basic.subject, comped.subject, "both welcome templates share a subject");
-  assert.notStrictEqual(basic.body, comped.body, "both welcome templates share a body");
-  assert.ok(!comped.body.includes(basic.body), "Comped Sign Up is Basic Sign Up with something appended");
-  assert.deepStrictEqual(core.SIGNUP_TEMPLATE_KEYS, ["player_signup_basic", "player_signup_comped"]);
-  assert.strictEqual(core.signupTemplateKey(true), "player_signup_comped");
-  assert.strictEqual(core.signupTemplateKey(false), "player_signup_basic");
-  /* Both must be service emails or a welcome could be suppressed by a preference. */
-  core.SIGNUP_TEMPLATE_KEYS.forEach((key) => assert.strictEqual(core.isServiceEventType(key), true, key + " is not a service email"));
+test("the four editable templates are independent, not one plus a paragraph", () => {
+  assert.deepStrictEqual(core.EDITABLE_TEMPLATE_KEYS,
+    ["coach_invite_basic", "coach_invite_comped", "player_signup_welcome", "coach_updated_account"]);
+  const bodies = core.EDITABLE_TEMPLATE_KEYS.map((k) => core.defaultSignupTemplate(k));
+  bodies.forEach((a, i) => bodies.forEach((b, j) => {
+    if (i === j) return;
+    assert.notStrictEqual(a.body, b.body, core.EDITABLE_TEMPLATE_KEYS[i] + " and " + core.EDITABLE_TEMPLATE_KEYS[j] + " share a body");
+    assert.ok(!b.body.includes(a.body), core.EDITABLE_TEMPLATE_KEYS[j] + " is " + core.EDITABLE_TEMPLATE_KEYS[i] + " with something appended");
+  }));
+
+  /* The comped invite is picked by the entitlement, and by nothing else. */
+  assert.strictEqual(core.coachInviteKey(true), "coach_invite_comped");
+  assert.strictEqual(core.coachInviteKey(false), "coach_invite_basic");
+
+  /* A self-signup has no coach and no setup link, so its copy must not claim either. */
+  const selfSignup = core.defaultSignupTemplate("player_signup_welcome");
+  assert.ok(!/coachName/.test(selfSignup.body + selfSignup.subject), "the sign-up welcome names a coach who does not exist");
+  assert.ok(!/set (up )?your password/i.test(selfSignup.body), "the sign-up welcome tells someone to set a password they already chose");
+
+  /* Every key that ever shipped must still resolve to a real template. */
+  ["player_welcome", "player_signup_basic", "player_signup_comped", "account_created", "account_created_comped", "nonsense"]
+    .forEach((legacy) => assert.ok(core.EDITABLE_TEMPLATE_KEYS.includes(core.resolveTemplateKey(legacy)), legacy + " resolves nowhere"));
+  assert.strictEqual(core.resolveTemplateKey("player_signup_comped"), "coach_invite_comped");
+  assert.strictEqual(core.resolveTemplateKey("player_welcome"), "coach_invite_basic");
+});
+
+test("the coach-update email is opt-out, not opt-in, and says so in its own footer", () => {
+  /* It must survive EMAIL_NOTIFICATIONS_ENABLED being unset - that flag is set nowhere in the
+     repo, so gating on it would ship an email that never sends. */
+  assert.strictEqual(core.bypassesActivitySwitch("coach_updated_account"), true,
+    "the coach-update email can be silenced by an unset env var");
+  /* But it is NOT a service email: the player can turn it off, so the footer must point at
+     Settings rather than claim it relates to account access. */
+  assert.strictEqual(core.isServiceEventType("coach_updated_account"), false,
+    "the coach-update email claims to be unsuppressable");
+  const built = core.build("coach_updated_account", {
+    to: "player@example.com",
+    welcomeTemplate: core.defaultSignupTemplate("coach_updated_account"),
+    variables: { firstName: "Alex", coachName: "Sam Hale" }
+  });
+  assert.ok(/Settings &gt; Notifications/.test(built.html), "the opt-out email does not say where to opt out");
+  assert.ok(!/relates to your Clarity account access/.test(built.html), "the opt-out email uses the service footer");
+  /* One email can cover half an hour of saves, so it must not name a single thing. */
+  assert.ok(!/\b(bag|shot data|profile photo)\b/i.test(built.message.detail),
+    "the coach-update email names one specific change it cannot know is the only one");
+  assert.ok(core.COACH_UPDATE_THROTTLE_MINUTES === 30, "the documented throttle window changed");
+});
+
+test("account_activity must not collapse into the coach-update template", () => {
+  /* The same client event also carries player -> coach updates and the Settings test email.
+     Mapping it would tell a coach that their coach had updated their account. */
+  assert.strictEqual(core.resolveTemplateKey("account_activity"), "coach_invite_basic",
+    "account_activity now resolves as an editable template");
+  const activity = core.build("account_activity", { to: "a@b.com", title: "Sam updated your bag" });
+  assert.strictEqual(activity.message.title, "Sam updated your bag", "account_activity lost its caller-supplied title");
+  assert.strictEqual(core.bypassesActivitySwitch("account_activity"), false, "generic activity mail stopped being opt-in");
 });
 
 test("an unwritten, unreadable or half-empty template still sends a real email", () => {
   /* Field by field, not template by template: one cleared box must not take the rest of the
      message with it. */
-  const built = core.build("player_signup_basic", {
+  const built = core.build("coach_invite_basic", {
     to: "player@example.com",
     welcomeTemplate: { subject: "", headline: "", body: "", ctaLabel: "", ctaUrl: "" },
     variables: { firstName: "Alex" }
   });
-  const fallback = core.defaultSignupTemplate("player_signup_basic");
+  const fallback = core.defaultSignupTemplate("coach_invite_basic");
   assert.strictEqual(built.subject, fallback.subject, "an empty subject did not fall back");
   assert.ok(built.message.detail.trim().length > 40, "an empty body produced a near-blank customer email");
   assert.ok(built.message.ctaLabel.trim(), "an empty button label produced a blank button");
@@ -162,19 +207,19 @@ test("a template destination is validated, and a secure setup link always beats 
   assert.strictEqual(core.safeCtaUrl("javascript:alert(1)"), "", "a javascript: destination survived");
   assert.strictEqual(core.safeCtaUrl("data:text/html,x"), "", "a data: destination survived");
   assert.strictEqual(core.safeCtaUrl("https://example.test/go"), "https://example.test/go");
-  const template = Object.assign(core.defaultSignupTemplate("player_signup_basic"), { ctaUrl: "https://example.test/go" });
-  const existing = core.build("player_signup_basic", { to: "a@b.com", welcomeTemplate: template, accountState: "existing" });
+  const template = Object.assign(core.defaultSignupTemplate("coach_invite_basic"), { ctaUrl: "https://example.test/go" });
+  const existing = core.build("coach_invite_basic", { to: "a@b.com", welcomeTemplate: template, accountState: "existing" });
   assert.strictEqual(existing.message.ctaUrl, "https://example.test/go", "the template destination was ignored");
-  const setup = core.build("player_signup_basic", { to: "a@b.com", welcomeTemplate: template, accountState: "needs_setup", ctaUrl: "https://example.test/one-use" });
+  const setup = core.build("coach_invite_basic", { to: "a@b.com", welcomeTemplate: template, accountState: "needs_setup", ctaUrl: "https://example.test/one-use" });
   assert.strictEqual(setup.message.ctaUrl, "https://example.test/one-use", "a one-use setup link lost to a typed destination");
 });
 
 test("a line whose only facts are missing is dropped, not printed half-empty", () => {
-  const template = Object.assign(core.defaultSignupTemplate("player_signup_comped"), {
+  const template = Object.assign(core.defaultSignupTemplate("coach_invite_comped"), {
     body: "Hi {{firstName}},\n\nYou have access.\n\nYour access runs until {{accessUntil}}.\n\nClarity Golf"
   });
-  const withDate = core.build("player_signup_comped", { to: "a@b.com", welcomeTemplate: template, variables: { firstName: "Alex", accessType: "a month", accessUntil: "3 October 2026" } });
-  const without = core.build("player_signup_comped", { to: "a@b.com", welcomeTemplate: template, variables: { firstName: "Alex", accessType: "a month" } });
+  const withDate = core.build("coach_invite_comped", { to: "a@b.com", welcomeTemplate: template, variables: { firstName: "Alex", accessType: "a month", accessUntil: "3 October 2026" } });
+  const without = core.build("coach_invite_comped", { to: "a@b.com", welcomeTemplate: template, variables: { firstName: "Alex", accessType: "a month" } });
   assert.ok(/runs until 3 October 2026/.test(withDate.message.detail), "the expiry line vanished when the date was known");
   assert.ok(!/runs until/.test(without.message.detail), "an unknown expiry printed as a dangling sentence");
   assert.ok(/Clarity Golf/.test(without.message.detail), "dropping a line took the rest of the message with it");
@@ -227,7 +272,15 @@ test("the signup flow names an event, and the server picks the template from it"
 
   /* The browser used to post a fourth hand-written version of the welcome email. */
   const client = read("scripts", "clarity-email.js");
-  assert.ok(/eventType:"account_created"/.test(client), "the client no longer reports the signup event at all");
+  /* Self-signup and coach-created are different events, and the client must say which. */
+  assert.ok(/eventType:"player_signup_welcome"/.test(client), "self-signup no longer reports its own event");
+  assert.ok(/eventType:"coach_invite_basic"/.test(client), "a coach creating a player no longer reports a coach invite");
+  /* Raised for exactly one direction - coach to player - and never for the test email. */
+  assert.ok(/"coach_updated_account"/.test(client), "the coach-update event is never raised");
+  assert.ok(/direction === "coach_to_player" && !\(options && options\.test\)/.test(client),
+    "the coach-update event is no longer scoped to the coach -> player direction");
+  assert.ok(/eventType === "coach_updated_account"\)return prefs\.coachUpdates !== false/.test(client),
+    "the coach-update email no longer answers to the Coach updates toggle");
   assert.ok(!/Your Clarity account is ready/.test(client),
     "the signup client is writing welcome-email copy again");
 });
@@ -248,6 +301,43 @@ test("Welcome Emails are edited in Studio, and only in Studio", () => {
   assert.ok(/action: "preview"/.test(page), "the page does not preview through the production renderer");
   assert.ok(!/<!doctype html>/i.test(page), "the Studio page is building email HTML");
   assert.ok(!/<table/i.test(page), "the Studio page has grown an email layout");
+});
+
+test("the coach-update throttle is atomic, server-side, and drops rather than queues", () => {
+  const lib = read("functions", "lib", "gd-signup-templates.js");
+  assert.ok(/claimCoachUpdateSlot/.test(lib), "the throttle claim is gone");
+  assert.ok(/rpc\/claim_caddy_email_throttle/.test(lib),
+    "the throttle is no longer claimed through the atomic function - a read-then-send races");
+  /* An unreachable throttle must fail CLOSED. Falling back to sending would turn the one
+     failure mode this feature exists to prevent into the default. */
+  assert.ok(/catch \(err\)[\s\S]{0,200}allowed: false/.test(lib),
+    "a failed throttle check no longer refuses the send");
+
+  const notify = read("functions", "email-notification.js");
+  assert.ok(/claimCoachUpdateSlot\(message\.to\)/.test(notify), "the endpoint does not claim a slot before sending");
+  assert.ok(/if\(!slot\.allowed\)/.test(notify) && /return json\(200, \{sent: false, throttled/.test(notify),
+    "a lost claim is not a silent, successful no-op");
+  /* "or que any" - nothing may be deferred for later. */
+  assert.ok(!/setTimeout|queue|retry/i.test(notify.slice(notify.indexOf("claimCoachUpdateSlot"), notify.indexOf("claimCoachUpdateSlot") + 600)),
+    "a throttled coach-update email is being queued instead of dropped");
+
+  /* The claim must be per recipient, so one player's saves cannot mute another player's. */
+  assert.ok(/p_recipient_email/.test(lib), "the throttle is not keyed on the recipient");
+
+  const migrations = fs.readdirSync(path.join(ROOT, "supabase", "migrations"))
+    .filter((f) => /coach_invite|throttle/i.test(f))
+    .map((f) => read("supabase", "migrations", f))
+    .join("\n");
+  assert.ok(/create or replace function public\.claim_caddy_email_throttle/.test(migrations),
+    "the atomic claim function is not in a migration");
+  /* The `where` on the conflict branch IS the atomicity. Without it the upsert always wins
+     and the throttle silently stops throttling. */
+  assert.ok(/on conflict[\s\S]{0,120}do update[\s\S]{0,120}where/i.test(migrations),
+    "the throttle upsert lost the window guard that makes it atomic");
+  assert.ok(/coach_invite_basic/.test(migrations) && /player_signup_welcome/.test(migrations),
+    "the migration does not allow the new template keys");
+  assert.ok(/update public\.caddy_email_templates set template_key = 'coach_invite_basic'/.test(migrations),
+    "an admin's already-saved welcome copy is dropped instead of renamed");
 });
 
 test("the two welcome templates share the existing storage and fall back in code", () => {
