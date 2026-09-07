@@ -68,6 +68,31 @@ test("a service email footers as account access, an activity email as a preferen
   assert.strictEqual(core.isServiceEventType("account_activity"), false, "activity email must stay opt-in");
 });
 
+test("player welcome uses the shared shell, resolves safe variables, and drops unknown tokens", () => {
+  const template = core.defaultWelcomeTemplate();
+  template.subject = "Welcome {{firstName}} {{unknown}}";
+  template.headline = "Hello {{fullName}}";
+  template.body = "Hi {{firstName}}, <script>alert(1)</script> {{email}}";
+  const built = core.build("player_welcome", {
+    to: "player@example.com", recipientName: "Ava <Coach>", welcomeTemplate: template,
+    variables: { firstName: "Ava", fullName: "Ava <Coach>", email: "player@example.com" }, accountState: "needs_setup",
+    ctaUrl: "https://example.test/setup"
+  });
+  assert.strictEqual(built.subject, "Welcome Ava ", "unknown variables must disappear safely");
+  assert.ok(/Set up your password &amp; get started/.test(built.html), "setup state did not override CTA safely");
+  assert.ok(/&lt;script&gt;alert\(1\)&lt;\/script&gt;/.test(built.html), "welcome content was not escaped by the shared renderer");
+  assert.ok(!built.html.includes("<script>alert"), "welcome content injected HTML");
+});
+
+test("welcome endpoint stays server-owned and does not accept a recipient from the browser", () => {
+  const src = read("functions", "caddy-admin-welcome-email.js");
+  assert.ok(/requireAdmin/.test(src), "welcome endpoint lacks an admin gate");
+  assert.ok(/playerById\(body\.playerId\)/.test(src), "welcome endpoint does not resolve a canonical player server-side");
+  assert.ok(!/body\.email/.test(src), "welcome endpoint trusts a browser-supplied email address");
+  assert.ok(/templates\.build\("player_welcome"/.test(src), "welcome endpoint bypasses the central renderer");
+  assert.ok(/admin\/generate_link/.test(src), "welcome endpoint does not reuse the secure setup mechanism");
+});
+
 test("the comped setup email covers BOTH the password step and the comp", () => {
   const built = core.build("account_created_comped", {
     to: "player@example.com",

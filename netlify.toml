@@ -47,6 +47,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/caddy-admin-welcome-email"
+  to = "/.netlify/functions/caddy-admin-welcome-email"
+  status = 200
+
+[[redirects]]
   from = "/api/store-webhook"
   to = "/.netlify/functions/store-webhook"
   status = 200

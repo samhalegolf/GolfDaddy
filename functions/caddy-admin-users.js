@@ -40,6 +40,9 @@ async function listUsers() {
   const accounts = await supabaseRest("app_accounts?select=account_id,profile_id,auth_user_id,email,name,last_login_at,linked_player_ids,linked_coach_ids", { method: "GET" });
   const profiles = await supabaseRest("app_profiles?select=profile_id,account_id,bag_json,profile_json", { method: "GET" });
   const entitlements = await supabaseRest("user_entitlements?select=user_id,profile_id,status,expires_at,entitlement_reason", { method: "GET" });
+  /* Welcome history is additive: until its migration is applied, Users still
+     works normally and simply reports no history rather than failing the list. */
+  const welcomeHistory = await supabaseRest("caddy_email_delivery_attempts?select=player_id,recipient_email,sent_at,status&template_key=eq.player_welcome&order=sent_at.desc", { method: "GET" }).catch(function () { return []; });
   const known = new Set((players || []).map(p => p.auth_user_id).filter(Boolean));
   const authOnly = await supabaseAuth("admin/users?page=1&per_page=1000", { method: "GET" }, true);
   const byId = Object.create(null); (players || []).forEach(p => { byId[p.id] = p; });
@@ -50,10 +53,13 @@ async function listUsers() {
     const coachPlayer = coach && byId[coach.coach_player_id];
     const bag = Array.isArray(player.bag_json) && player.bag_json.length ? player.bag_json : (profile.bag_json || []);
     const generated = !!((player.profile_json || profile.profile_json || {}).bagSeededDefault || (player.profile_json || profile.profile_json || {}).ghostBagOnly);
+    const account = (accounts || []).find(a => a.account_id === player.account_id) || {};
+    const playerEmail = email(player.normalized_email) || email(account.email);
     const entitlement = (entitlements || []).filter(function (e) { return e.user_id === player.account_id || e.profile_id === player.profile_id; }).sort(function(a,b){ return String(b.expires_at||"").localeCompare(String(a.expires_at||"")); })[0];
     const activeAccess = entitlement && entitlement.status === "active" && (!entitlement.expires_at || new Date(entitlement.expires_at) > new Date());
     const access = activeAccess ? (/comp|coach_issued/i.test(entitlement.entitlement_reason || "") ? "Comped" : "Active") : (entitlement ? "Expired" : "None");
-    return { playerId: player.id, profileId: player.profile_id || "", accountId: player.account_id || "", authUserId: player.auth_user_id || "", name: player.display_name, email: player.normalized_email || "", login: player.auth_user_id ? "Active" : "No Login", player: player.status === "active" ? "Active" : "Merged / Archived", coach: coachPlayer ? coachPlayer.display_name : "Unassigned", coachPlayerId: coachPlayer && coachPlayer.id || "", access: access, bagCount: bag.length || 0, bagKind: generated ? "generated" : "real", bubble: Object.keys(player.bubble_json || {}).length ? "Present" : "None", status: player.status === "active" && (!player.auth_user_id || !coach) ? "Needs Attention" : "OK", lastLoginAt: ((accounts || []).find(a => a.account_id === player.account_id) || {}).last_login_at || null, mergedIntoPlayerId: player.merged_into_player_id || null };
+    const welcome = (welcomeHistory || []).find(function (entry) { return entry.player_id === player.id; }) || null;
+    return { playerId: player.id, profileId: player.profile_id || "", accountId: player.account_id || "", authUserId: player.auth_user_id || "", name: player.display_name, email: playerEmail, login: player.auth_user_id ? "Active" : "No Login", player: player.status === "active" ? "Active" : "Merged / Archived", coach: coachPlayer ? coachPlayer.display_name : "Unassigned", coachPlayerId: coachPlayer && coachPlayer.id || "", access: access, bagCount: bag.length || 0, bagKind: generated ? "generated" : "real", bubble: Object.keys(player.bubble_json || {}).length ? "Present" : "None", status: player.status === "active" && (!player.auth_user_id || !coach) ? "Needs Attention" : "OK", lastLoginAt: account.last_login_at || null, mergedIntoPlayerId: player.merged_into_player_id || null, welcomeEmail: welcome ? { status: welcome.status, sentAt: welcome.sent_at, recipientEmail: welcome.recipient_email } : null };
   }).concat(((authOnly && authOnly.users) || []).filter(u => !known.has(u.id)).map(u => ({ playerId: "", profileId: "", accountId: "", authUserId: u.id || "", name: (u.user_metadata || {}).name || u.email || "Auth user", email: u.email || "", login: "Auth Only", player: "Missing", coach: "Unassigned", bagCount: 0, bubble: "None", status: "Needs Attention", lastLoginAt: u.last_sign_in_at || null })));
 }
 function actorAuthId(caller) { return uuid(caller && caller.account && caller.account.auth_user_id); }

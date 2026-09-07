@@ -39,6 +39,7 @@
     "account_created",
     "account_created_comped",
     "password_recovery",
+    "player_welcome",
     "comped_access_granted",
     "sign_in_email_changed"
   ];
@@ -49,6 +50,18 @@
      not listed here is a sender nobody can audit. Keep them in step.
      --------------------------------------------------------------------------- */
   var CATALOGUE = [
+    {
+      id: "player_welcome",
+      eventType: "player_welcome",
+      label: "Player welcome",
+      category: "service",
+      recipient: "A canonical Caddy player, sent deliberately by an admin from Admin → Users.",
+      trigger: "Admin → Users → Send Welcome, after the personalised preview is confirmed.",
+      gating: "Always sends when explicitly confirmed by an admin. Delivery is recorded against the canonical player after Resend accepts it.",
+      sender: "functions/caddy-admin-welcome-email.js",
+      cta: "Open Clarity for an existing account, or a one-use Supabase password-setup link for a player without a login.",
+      sample: { recipientName: "Alex Fenwick", actorName: "Clarity Golf", ctaUrl: DEFAULT_SITE, welcomeTemplate: defaultWelcomeTemplate() }
+    },
     {
       id: "account_created",
       eventType: "account_created",
@@ -196,6 +209,45 @@
     return input ? input[0].toUpperCase() + input.slice(1) : input;
   }
 
+  function defaultWelcomeTemplate() {
+    return {
+      subject: "Welcome to Clarity Caddy",
+      headline: "Welcome to Clarity Caddy",
+      body: "Hi {{firstName}},\n\nWelcome to Clarity Caddy.\n\nClarity Caddy is a golf GPS built around the way you actually play.\n\nYour account gives you a place to build your bag, bring your practice data into your game, and use Clarity on the course.\n\nUse the button below to get started.\n\nClarity Golf",
+      ctaLabel: "Open Clarity",
+      ctaType: "automatic"
+    };
+  }
+  function welcomeTemplate(input) {
+    input = input || {};
+    var fallback = defaultWelcomeTemplate();
+    return {
+      subject: text(input.subject, 140) || fallback.subject,
+      headline: text(input.headline, 180) || fallback.headline,
+      body: text(input.body, 4000) || fallback.body,
+      ctaLabel: text(input.ctaLabel, 80) || fallback.ctaLabel,
+      ctaType: "automatic"
+    };
+  }
+  function substituteVariables(value, variables) {
+    return String(value == null ? "" : value).replace(/{{\s*([a-zA-Z][a-zA-Z0-9]*)\s*}}/g, function (_all, key) {
+      return Object.prototype.hasOwnProperty.call(variables || {}, key) ? String(variables[key] == null ? "" : variables[key]) : "";
+    });
+  }
+  function welcomeCopy(input) {
+    input = input || {};
+    var template = welcomeTemplate(input.welcomeTemplate);
+    var variables = input.variables || {};
+    var needsSetup = input.accountState === "needs_setup";
+    return {
+      subject: substituteVariables(template.subject, variables),
+      title: substituteVariables(template.headline, variables),
+      detail: substituteVariables(template.body, variables),
+      ctaLabel: needsSetup ? "Set up your password & get started" : substituteVariables(template.ctaLabel, variables),
+      ctaUrl: text(input.ctaUrl, 900) || trimSite(input.siteUrl)
+    };
+  }
+
   /* ---------------------------------------------------------------------------
      Copy. Every subject/title/detail in the product is written here, so the
      Communications page and the live send are reading the same words.
@@ -208,6 +260,8 @@
     var giftLabel = input.membership === false ? "full Clarity access" : "Clarity Membership";
     var expiresLabel = text(input.expiresLabel, 60);
     var expirySentence = expiresLabel ? " Your access runs until " + expiresLabel + " and won't auto-renew or ask for a card." : "";
+
+    if (eventType === "player_welcome") return welcomeCopy(input);
 
     if (eventType === "account_created") {
       return {
@@ -305,6 +359,10 @@
     var site = trimSite(message.siteUrl);
     var logo = text(message.logoUrl) || site + LOGO_PATH;
     var recipientName = firstName(message.recipientName);
+    /* Editable welcome copy is plain text, never HTML. Preserve its intentional
+       paragraph breaks only after escaping, so an admin cannot turn a template
+       field into markup. */
+    var detailHtml = escapeHTML(message.detail).replace(/\r?\n/g, "<br>");
     var footer = isServiceEventType(message.eventType)
       ? "You are receiving this because it relates to your Clarity account access."
       : "You can change email notifications in Settings &gt; Notifications.";
@@ -321,7 +379,7 @@
       "<tr><td style=\"padding:24px\">",
       "<p style=\"margin:0 0 10px;color:#42b66a;font-weight:700\">Hi " + escapeHTML(recipientName) + ",</p>",
       "<h1 style=\"margin:0 0 12px;color:#fff;font-size:28px;line-height:1.05\">" + escapeHTML(message.title) + "</h1>",
-      "<p style=\"margin:0 0 18px;color:#c8d1cc;font-size:16px;line-height:1.45\">" + escapeHTML(message.detail) + "</p>",
+      "<p style=\"margin:0 0 18px;color:#c8d1cc;font-size:16px;line-height:1.45\">" + detailHtml + "</p>",
       "<p style=\"margin:0 0 22px;color:#8fa199;font-size:13px;line-height:1.4\">Update from " + escapeHTML(message.actorName) + ".</p>",
       "<a href=\"" + escapeHTML(message.ctaUrl) + "\" style=\"display:inline-block;background:#ff9f2f;color:#06110b;text-decoration:none;font-weight:800;border-radius:999px;padding:12px 18px\">" + escapeHTML(message.ctaLabel) + "</a>",
       storeCta,
@@ -362,6 +420,10 @@
     catalogueEntry: catalogueEntry,
     isServiceEventType: isServiceEventType,
     compose: compose,
+    defaultWelcomeTemplate: defaultWelcomeTemplate,
+    welcomeTemplate: welcomeTemplate,
+    substituteVariables: substituteVariables,
+    welcomeCopy: welcomeCopy,
     buildMessage: buildMessage,
     render: render,
     build: build
