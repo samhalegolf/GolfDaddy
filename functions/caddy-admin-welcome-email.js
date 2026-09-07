@@ -13,7 +13,7 @@ const { resolveCaller } = require("./clarity-caller");
 const templates = require("../scripts/gd-email-templates-core.js");
 const signupTemplates = require("./lib/gd-signup-templates.js");
 const { ADMIN_COMPED_MEMBERSHIP_KEY } = require("./payment-utils");
-const { appStoreUrl } = require("../clarity-caddy-app-store.js");
+const { appStoreUrl, playStoreUrl } = require("../clarity-caddy-app-store.js");
 
 const KEYS = signupTemplates.KEYS;
 function uuid(value) { const s = String(value || "").trim(); return /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(s) ? s : ""; }
@@ -80,6 +80,7 @@ function variables(resolved, caller) {
     actorName: (caller && caller.account && caller.account.name) || "Clarity Golf",
     siteUrl: siteUrl(),
     appStoreUrl: appStoreUrl() || "",
+    playStoreUrl: playStoreUrl() || "",
     comped: resolved.comped
   });
 }
@@ -87,7 +88,8 @@ function render(resolved, template, caller, ctaUrl) {
   return templates.build(resolved.templateKey || KEYS[0], {
     to: resolved.recipientEmail, siteUrl: siteUrl(), recipientName: resolved.player.display_name,
     actorName: "Clarity Golf", welcomeTemplate: template, variables: variables(resolved, caller),
-    accountState: resolved.accountState, ctaUrl: ctaUrl || "", appStoreUrl: ""
+    accountState: resolved.accountState, ctaUrl: ctaUrl || "",
+    appStoreUrl: appStoreUrl() || "", playStoreUrl: playStoreUrl() || ""
   });
 }
 async function createOrFindAuth(accountEmail, name) {

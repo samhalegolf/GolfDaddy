@@ -1,5 +1,5 @@
 const { email: authEmail, supabaseAuth, supabaseRest, upsertAccount } = require("./auth-utils");
-const { appStoreUrl } = require("../clarity-caddy-app-store.js");
+const { appStoreUrl, playStoreUrl } = require("../clarity-caddy-app-store.js");
 /* Wording, branding and the service/activity split all live in one place now - see the header
    of scripts/gd-email-templates-core.js. This file owns delivery and the Supabase side of an
    invite; it no longer owns a second copy of the layout. */
@@ -28,6 +28,7 @@ exports.handler = async function(event){
     ctaUrl: safeUrl(payload.ctaUrl, siteUrl),
     eventType: text(payload.eventType, 80) || "account_activity",
     appStoreUrl: "",
+    playStoreUrl: "",
     logoUrl: safeUrl(payload.logoUrl, siteUrl) || new URL("/assets/brand/cg-logo-white-g.png?v=1e5a26e2", siteUrl).toString()
   };
 
@@ -45,6 +46,7 @@ exports.handler = async function(event){
     if(signupKey){
       message.eventType = signupKey;
       message.appStoreUrl = appStoreUrl();
+      message.playStoreUrl = playStoreUrl();
       /* Only a coach INVITE mints a login. A self-signup already chose a password, and a
          coach-update notice goes to someone who has had an account for a while - creating an
          auth user for either would be inventing an account that already exists. */
@@ -73,7 +75,8 @@ exports.handler = async function(event){
           email: message.to,
           actorName: message.actorName,
           siteUrl: siteUrl,
-          appStoreUrl: message.appStoreUrl
+          appStoreUrl: message.appStoreUrl,
+          playStoreUrl: message.playStoreUrl
         }),
         accountState: invite && invite.link ? "needs_setup" : "existing",
         /* Only a link this server minted may become the button. */
@@ -212,7 +215,8 @@ async function sendCompedAccessEmail(options){
     membership: options.membership !== false,
     hasAccount: !!options.hasAccount,
     ctaUrl: siteUrl,
-    appStoreUrl: appStoreUrl()
+    appStoreUrl: appStoreUrl(),
+    playStoreUrl: playStoreUrl()
   };
   if(!options.hasAccount){
     var invite = await createSetupLinkForAccount(to, options.recipientName, input.actorName, siteUrl);
@@ -242,6 +246,7 @@ async function sendSignupWelcomeEmail(options){
   var key = options.templateKey ? signupTemplates.normaliseKey(options.templateKey) : signupTemplates.keyForComped(comped);
   var loaded = await signupTemplates.loadTemplate(key);
   var store = appStoreUrl();
+  var play = playStoreUrl();
   return deliver(key, {
     to: to,
     siteUrl: siteUrl,
@@ -254,6 +259,7 @@ async function sendSignupWelcomeEmail(options){
       actorName: options.actorName || "your coach",
       siteUrl: siteUrl,
       appStoreUrl: store,
+      playStoreUrl: play,
       comped: comped
     }),
     /* A one-use set-password link, when there is one, always wins over the destination on the
@@ -261,7 +267,8 @@ async function sendSignupWelcomeEmail(options){
        email for a player with no login yet. */
     accountState: options.setupLink ? "needs_setup" : "existing",
     ctaUrl: options.setupLink || "",
-    appStoreUrl: store
+    appStoreUrl: store,
+    playStoreUrl: play
   }, "Email provider rejected the welcome message");
 }
 

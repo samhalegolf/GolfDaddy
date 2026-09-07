@@ -96,7 +96,8 @@ function variablesFor(input) {
     email: text(input.email, 240),
     coachName: text(input.actorName, 120) || "Clarity Golf",
     appUrl: site,
-    appStoreUrl: text(input.appStoreUrl, 900) || ""
+    appStoreUrl: text(input.appStoreUrl, 900) || "",
+    playStoreUrl: text(input.playStoreUrl, 900) || ""
   }, templates.accessVariables(input.comped));
 }
 

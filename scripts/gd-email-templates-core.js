@@ -28,7 +28,16 @@
   var DEFAULT_SITE = "https://caddy.claritygolf.app";
   var DEFAULT_FROM = "Clarity Golf Systems <notifications@claritygolf.systems>";
   var LOGO_PATH = "/assets/brand/cg-logo-white-g.png?v=1e5a26e2";
-  var APP_STORE_BADGE = "/download-on-the-app-store-apple-logo.svg";
+  /* PNG, not the SVG the web pages use. Gmail - the client most of these land in - does not
+     render SVG in email at all, so the badge was simply missing for most recipients. These are
+     rasterised at 3x the display width so they stay sharp on a phone. */
+  /* Both rendered at the same HEIGHT with each badge's own width, because a row of badges is
+     read off its baseline - a shared width with drifting heights is what looks wrong. The
+     widths are each asset's true aspect ratio at 47px, so neither official badge is stretched.
+     Assets are rasterised at 3x that for retina. */
+  var BADGE_HEIGHT = 47;
+  var APP_STORE_BADGE = { path: "/assets/brand/app-store-badge.png", width: 159, label: "Download Clarity Caddy on the App Store" };
+  var PLAY_STORE_BADGE = { path: "/assets/brand/google-play-badge.png", width: 158, label: "Get Clarity Caddy on Google Play" };
 
   /* A "service" email describes a change to the recipient's own account access. It is sent
      regardless of the EMAIL_NOTIFICATIONS_ENABLED switch and regardless of the recipient's
@@ -98,6 +107,7 @@
     { key: "coachName", note: "whoever created the account or made the change" },
     { key: "appUrl", note: "caddy.claritygolf.app" },
     { key: "appStoreUrl", note: "the App Store listing" },
+    { key: "playStoreUrl", note: "the Google Play listing" },
     { key: "accessType", note: "comped invite only - \"a month of Clarity Membership\"" },
     { key: "accessUntil", note: "comped invite only - the date the access ends" }
   ];
@@ -562,9 +572,40 @@
          a secure link, the template destination and the site. */
       ctaUrl: text(copy.ctaUrl, 900) || text(input.ctaUrl, 900) || site,
       appStoreUrl: text(input.appStoreUrl, 900),
+      playStoreUrl: text(input.playStoreUrl, 900),
       logoUrl: text(input.logoUrl, 900) || site + LOGO_PATH,
       siteUrl: site
     };
+  }
+
+  /* The download row.
+   *
+   * A table rather than inline-block: Outlook renders the body through Word, which ignores
+   * inline-block and stacks the badges with no control over the gap. Explicit width AND
+   * height on every img, because a client that blocks images still has to lay out a box the
+   * right shape - and because the Apple asset is intrinsically SQUARE, so the old
+   * width:160px;height:auto rendered a 160x160 tile with the badge adrift in the middle of it,
+   * silently overriding the height="48" sitting right next to it.
+   *
+   * Both stores or neither is not the rule: whichever URLs the caller has are shown, so a
+   * platform that is not live yet simply does not appear. */
+  function storeBadge(url, badge, site) {
+    return '<a href="' + escapeHTML(url) + '" style="display:block;text-decoration:none" aria-label="' + escapeHTML(badge.label) + '">'
+      + '<img src="' + escapeHTML(site + badge.path) + '" alt="' + escapeHTML(badge.label) + '"'
+      + ' width="' + badge.width + '" height="' + BADGE_HEIGHT + '"'
+      + ' style="display:block;width:' + badge.width + 'px;height:' + BADGE_HEIGHT + 'px;border:0"></a>';
+  }
+  function storeBadges(message, site) {
+    var cells = [];
+    if (message.appStoreUrl) cells.push(storeBadge(message.appStoreUrl, APP_STORE_BADGE, site));
+    if (message.playStoreUrl) cells.push(storeBadge(message.playStoreUrl, PLAY_STORE_BADGE, site));
+    if (!cells.length) return "";
+    return '<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:16px 0 0"><tr>'
+      + cells.map(function (cell, index) {
+          return '<td style="padding:0 ' + (index < cells.length - 1 ? "10" : "0") + 'px 0 0">' + cell + "</td>";
+        }).join("")
+      + "</tr></table>"
+      + '<p style="margin:8px 0 0;color:#b9c4bd;font-size:13px;line-height:1.4">Download Clarity Caddy, then sign in with this email address.</p>';
   }
 
   /* ---- the one layout ---- */
@@ -580,12 +621,14 @@
     var footer = isServiceEventType(message.eventType)
       ? "You are receiving this because it relates to your Clarity account access."
       : "You can change email notifications in Settings &gt; Notifications.";
-    var storeCta = message.appStoreUrl
-      ? "<p style=\"margin:14px 0 0\"><a href=\"" + escapeHTML(message.appStoreUrl) + "\" style=\"display:inline-flex;align-items:center;min-height:44px\" aria-label=\"Download Clarity Caddy on the App Store\"><img src=\"" + escapeHTML(site + APP_STORE_BADGE) + "\" alt=\"Download Clarity Caddy on the App Store\" width=\"160\" height=\"48\" style=\"display:block;width:160px;height:auto;border:0\"></a></p><p style=\"margin:8px 0 0;color:#b9c4bd;font-size:13px;line-height:1.4\">Download Clarity Caddy, then sign in with this email address.</p>"
-      : "";
+    var storeCta = storeBadges(message, site);
 
     var html = [
-      "<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>",
+      /* charset first, and before anything else in <head>. The copy is full of em dashes and
+         curly quotes; without this a client that does not inherit the transport encoding
+         renders them as "a\u20ac\u201d" mojibake, which is exactly how the comped invite read in
+         preview. It has to be inside the first 1024 bytes to be honoured, so it leads. */
+      "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>",
       "<body style=\"margin:0;background:#07100b;color:#f7faf7;font-family:Arial,Helvetica,sans-serif\">",
       "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#07100b;padding:28px 14px\"><tr><td align=\"center\">",
       "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:560px;background:#101b15;border:1px solid #24342c;border-radius:20px;overflow:hidden\">",
@@ -612,8 +655,10 @@
       "Update from " + message.actorName + ".",
       "",
       message.ctaUrl
-    ].concat(message.appStoreUrl
-      ? ["", "Download Clarity Caddy and sign in with this email address:", message.appStoreUrl]
+    ].concat(message.appStoreUrl || message.playStoreUrl
+      ? ["", "Download Clarity Caddy and sign in with this email address:"]
+        .concat(message.appStoreUrl ? ["App Store: " + message.appStoreUrl] : [])
+        .concat(message.playStoreUrl ? ["Google Play: " + message.playStoreUrl] : [])
       : []).join("\n");
 
     return { subject: message.subject, html: html, text: body };

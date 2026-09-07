@@ -303,6 +303,61 @@ test("Welcome Emails are edited in Studio, and only in Studio", () => {
   assert.ok(!/<table/i.test(page), "the Studio page has grown an email layout");
 });
 
+test("both store badges render, undistorted, and survive an image-blocking client", () => {
+  const stores = require(path.join(ROOT, "clarity-caddy-app-store.js"));
+  assert.ok(/^https:\/\/apps\.apple\.com\//.test(stores.appStoreUrl()), "the App Store URL is gone");
+  assert.ok(/^https:\/\/play\.google\.com\//.test(stores.playStoreUrl()), "the Play Store URL is gone");
+  /* The Play listing is keyed on the same package the Android bundle ships and assetlinks.json
+     delegates to. If they drift, the badge links to someone else's app. */
+  const pkg = read("android", "app", "build.gradle").match(/applicationId "([^"]+)"/)[1];
+  assert.ok(stores.playStoreUrl().includes(pkg), "the Play URL and the Android applicationId disagree");
+  assert.ok(read(".well-known", "assetlinks.json").includes(pkg), "assetlinks.json and the Play URL disagree");
+
+  const built = core.build("coach_invite_basic", {
+    to: "a@b.com", welcomeTemplate: core.defaultSignupTemplate("coach_invite_basic"),
+    appStoreUrl: stores.appStoreUrl(), playStoreUrl: stores.playStoreUrl()
+  });
+  assert.ok(built.html.includes(stores.appStoreUrl()), "the App Store badge is not linked");
+  assert.ok(built.html.includes(stores.playStoreUrl()), "the Play Store badge is not linked");
+  assert.ok(built.text.includes(stores.playStoreUrl()), "the plain-text part offers only one store");
+
+  /* Gmail does not render SVG in email, so a badge referenced as SVG is simply absent. */
+  assert.ok(!/<img[^>]+\.svg/i.test(built.html), "an email badge is being served as SVG again");
+
+  /* Every img needs BOTH dimensions: a client with images off still lays out the box, and the
+     Apple asset used to be intrinsically square - height:auto rendered it as a 160x160 tile. */
+  (built.html.match(/<img[^>]*>/g) || []).forEach((img) => {
+    assert.ok(/width="\d+"/.test(img) && /height="\d+"/.test(img), "an email image has no intrinsic box: " + img.slice(0, 90));
+    assert.ok(/alt="[^"]+"/.test(img), "an email image has no alt text: " + img.slice(0, 90));
+    assert.ok(!/height:\s*auto/.test(img), "an email image is back on height:auto: " + img.slice(0, 90));
+  });
+
+  /* Neither official badge may be stretched - each width is its own asset's true ratio. */
+  const sharp = require(path.join(ROOT, "node_modules", "sharp"));
+  return Promise.all(["app-store-badge.png", "google-play-badge.png"].map(async (file) => {
+    const full = path.join(ROOT, "assets", "brand", file);
+    assert.ok(fs.existsSync(full), "missing badge asset: " + file);
+    const meta = await sharp(full).metadata();
+    const img = (built.html.match(new RegExp('<img[^>]+' + file.replace(".", "\\.") + '[^>]*>')) || [])[0];
+    assert.ok(img, file + " is not referenced by the email");
+    const w = Number(img.match(/width="(\d+)"/)[1]);
+    const h = Number(img.match(/height="(\d+)"/)[1]);
+    assert.ok(Math.abs((w / h) - (meta.width / meta.height)) < 0.05,
+      file + " is stretched: shown " + w + "x" + h + " but the asset is " + meta.width + "x" + meta.height);
+    assert.ok(meta.width >= w * 2, file + " is not rasterised for retina (" + meta.width + "px for a " + w + "px slot)");
+  }));
+});
+
+test("the email declares UTF-8, so an em dash is not mojibake", () => {
+  const built = core.build("coach_invite_comped", {
+    to: "a@b.com", welcomeTemplate: core.defaultSignupTemplate("coach_invite_comped"),
+    variables: { firstName: "Alex", coachName: "Sam", accessType: "a month", accessUntil: "3 October 2026" }
+  });
+  const head = built.html.slice(0, 1024);
+  assert.ok(/<meta charset="utf-8">/i.test(head), "the email HTML declares no charset in the first 1024 bytes");
+  assert.ok(/—/.test(built.message.detail), "the copy no longer exercises a non-ASCII character");
+});
+
 test("the coach-update throttle is atomic, server-side, and drops rather than queues", () => {
   const lib = read("functions", "lib", "gd-signup-templates.js");
   assert.ok(/claimCoachUpdateSlot/.test(lib), "the throttle claim is gone");
