@@ -3352,7 +3352,19 @@
     const p=safe(()=>ensureProfile(),null)||{};
     return p.bagSource==="practice-data";
   }
+  /* THE BAG STAYS OUT OF THE DEMO.
+     Demo Mode is one story - synthetic shots, find the pattern, adopt the
+     bubble, take it to the course - and the bag suggestion cuts across it with
+     a second decision about a set of clubs the player has not entered and this
+     session will never write (gdPracticeAutoBagFromData already refuses to seed
+     one while a demo is running). Suppressed at the source, so the icon, the
+     panel and the notice below all go with it rather than each call site having
+     to remember. */
+  function gdPracticeDemoSuppressesBag(){
+    return safe(()=>!!(window.GDDemoSession&&window.GDDemoSession.active),false);
+  }
   function gdPracticeBagSuggestionHTML(analysis){
+    if(gdPracticeDemoSuppressesBag())return"";
     const hasBag=gdPracticeHasUserBag();
     const estimate=gdPracticeEstimatedBagRowsFromEvidence(analysis);
     const prefillRows=gdPracticePrefillRows(analysis);
@@ -3386,6 +3398,7 @@
 	    return `<div class="gdPracticeBagSuggestionPanel ${hasBag?"hasBag":"noBag"} ${gdPracticeBagAdaptOpen?"adapt":""}"><div class="gdPracticeBagSuggestionHead"><div class="gdPracticeBagSuggestionTitle"><img src="assets/home/bag.png?v=ae58e8eb" alt=""><span>Bag</span></div><button type="button" aria-label="Close" onclick="return gdPracticeToggleBagSuggestions(false)">×</button></div>${generatedCopy}${linkCopy}${linkChoices}<div class="gdPracticeBagSuggestionGrid"><span>Club</span><span>${gdPracticeBagAdaptOpen?"Edit current":hasBag?"Current":"Bag"}</span><span>Suggested</span><span>Diff</span>${body}</div><div class="gdPracticeBagSuggestionActions">${actions}</div></div>`;
 	  }
 	  function gdPracticeBagSuggestionNoticeHTML(analysis){
+	    if(gdPracticeDemoSuppressesBag())return"";
 	    if(gdPracticeBagSuggestionOpen)return"";
 	    const hasBag=gdPracticeHasUserBag();
 	    const estimate=gdPracticeEstimatedBagRowsFromEvidence(analysis);
@@ -6396,10 +6409,24 @@
     if(admin)gdRenderCourseDataAdminPanel();
     return false;
   }
-	  function gdCourseDataSurfaceCounts(){
-	    const store=safe(()=>window.GolfDaddyShotEvents?.getScopedStore?.()||window.GolfDaddyShotEvents?.getStore?.(),{})||{};
+	  /* ONE ANALYSIS PER SCREEN. These two used to reach past
+	     gdCurrentStatsAnalysis() straight into
+	     GolfDaddyShotClusterAnalysis.analyzeCurrent(), which is the one call that
+	     does NOT know about Demo Mode - so mid-demo they filled the landing card
+	     with the real (empty) store's counts and it read "No data yet" directly
+	     above a chart holding a full round. They run AFTER renderStats and the
+	     landing write is unconditional, so whatever they answer is what the
+	     player is left looking at. */
+	  function gdCourseSurfaceAnalysis(){
+	    if(typeof gdCurrentStatsAnalysis==="function")return safe(()=>gdCurrentStatsAnalysis(),null);
 	    const pct=safe(()=>Number(localStorage.getItem("gd_stats_consistency_pct")||68)||68,68);
-	    const analysis=safe(()=>window.GolfDaddyShotClusterAnalysis?.analyzeCurrent?.({consistencyPct:pct}),null)||{};
+	    return safe(()=>window.GolfDaddyShotClusterAnalysis?.analyzeCurrent?.({consistencyPct:pct}),null);
+	  }
+	  /* Same store, same demo gate as the landing counts - gdCourseDataStore owns
+	     that rule, next to the analysis gate it mirrors. */
+	  function gdCourseDataSurfaceCounts(){
+	    const store=safe(()=>gdCourseDataStore(),{})||{};
+	    const analysis=gdCourseSurfaceAnalysis()||{};
 	    const records=Array.isArray(analysis.records)?analysis.records:[];
     const shown=records;
     const counted=shown.filter(record=>record&&record.counted).length;
@@ -6819,8 +6846,7 @@
   }
   function gdRenderCourseDataSurfaceFallback(){
     const surfaceCounts=gdCourseDataSurfaceCounts();
-    const pct=safe(()=>Number(localStorage.getItem("gd_stats_consistency_pct")||68)||68,68);
-    const analysis=safe(()=>window.GolfDaddyShotClusterAnalysis?.analyzeCurrent?.({consistencyPct:pct}),null)||{};
+    const analysis=gdCourseSurfaceAnalysis()||{};
     const filteredRecords=analysis&&typeof gdStatsFilteredRecords==="function"?gdStatsFilteredRecords(analysis):[];
     const filteredAnalysis=analysis&&typeof gdStatsAnalysisForRecords==="function"?gdStatsAnalysisForRecords(filteredRecords,analysis.settings)||analysis:analysis;
     const counts=gdCourseDataLandingCounts(analysis,filteredRecords);

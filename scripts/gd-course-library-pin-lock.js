@@ -3019,6 +3019,9 @@
   window.gdMappedHolePlayData=mappedHolePlayData;
   window.gdMappedFairwayAxisForShot=mappedFairwayAxisForShot;
   window.gdMappedFairwayLayupTarget=mappedFairwayLayupTarget;
+  /* Every object on the course in play (private + published base), for GPS Play's bubble
+     hazard reveal. Reads localStorage on every call - callers cache. */
+  window.gdMappedCourseObjects=courseObjectsForMapper;
   window.gdScheduleOsmAutoMapForPlay=scheduleOsmAutoMapForPlay;
 
 		  function ensureMapperToolsDrawer(){

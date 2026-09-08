@@ -17,14 +17,63 @@
 
   var STORAGE_KEY = 'gd_demo_session_v1';
 
+  /* WHAT "IN THE BUBBLE" MEANS HERE, IN NUMBERS.
+   *
+   * The practice bubble the chart draws is the PRESET iron shape and nothing
+   * else (gd-route-audit.js gdGraphBubbleDimensions -> gdDeriveBasePatternSize,
+   * iron ratios: width 0.148 and depth 0.195 OF THE CARRY). Both are ratios of
+   * the carry, so the bubble's half-axes are the same wherever the player sets
+   * their 7-iron: +-atan(0.074) = 4.23 degrees laterally, +-9.75% of carry in
+   * distance. Building shots in units of THOSE radii is what lets this file
+   * promise "most of these miss the bubble" and have the drawn picture agree,
+   * rather than guessing at a spread in degrees and hoping.
+   *
+   * Laterally the bubble sits wherever the cluster hunter puts it, so a lateral
+   * miss has to clear the radius PLUS however far that centre drifts off the
+   * core - hence the 1.55-radius floor on the miss shapes below. In DEPTH the
+   * bubble is pinned to the anchor distance (gdBubbleRelativeParts draws it at
+   * depth 0), so a distance miss needs no such margin.
+   */
+  var IRON_WIDTH_RATIO = 0.148;
+  var IRON_DEPTH_RATIO = 0.195;
+  var BUBBLE_ANGLE_RADIUS_DEG = Math.atan(IRON_WIDTH_RATIO / 2) * 180 / Math.PI;
+  var BUBBLE_DEPTH_RADIUS_PCT = IRON_DEPTH_RATIO / 2;
+
+  /* Where the repeatable pattern sits, and how tight it is - not how wide the
+     day was. The variety in a demo session comes from the MISSES around the
+     pattern, which is what a range session actually looks like. */
   var PATTERN_PRESETS = [
-    { id: 'modest-left', centerDeg: -3.1, spreadDeg: 2.4 },
-    { id: 'modest-right', centerDeg: 2.9, spreadDeg: 2.4 },
-    { id: 'tight-left', centerDeg: -2.0, spreadDeg: 1.3 },
-    { id: 'tight-right', centerDeg: 2.1, spreadDeg: 1.3 },
-    { id: 'near-centred', centerDeg: 0.6, spreadDeg: 1.7 },
-    { id: 'broader', centerDeg: -1.5, spreadDeg: 3.3 }
+    { id: 'modest-left', centerDeg: -3.1, coreSpreadRadii: 0.24 },
+    { id: 'modest-right', centerDeg: 2.9, coreSpreadRadii: 0.24 },
+    { id: 'tight-left', centerDeg: -2.0, coreSpreadRadii: 0.15 },
+    { id: 'tight-right', centerDeg: 2.1, coreSpreadRadii: 0.15 },
+    { id: 'near-centred', centerDeg: 0.6, coreSpreadRadii: 0.2 },
+    { id: 'broader', centerDeg: -1.5, coreSpreadRadii: 0.3 },
+    { id: 'strong-left', centerDeg: -4.4, coreSpreadRadii: 0.22 },
+    { id: 'strong-right', centerDeg: 4.2, coreSpreadRadii: 0.22 },
+    { id: 'square', centerDeg: -0.3, coreSpreadRadii: 0.26 }
   ];
+
+  /* Miss archetypes, in bubble radii. Every one clears the unit ellipse on at
+     least one axis, so a shot built from any of them is outside the drawn
+     bubble by construction rather than by luck. */
+  var MISS_SHAPES = [
+    { id: 'block-right', side: 'right', depthBias: 'flat', angle: [1.55, 2.7], depth: [-0.55, 0.55] },
+    { id: 'wipe-right', side: 'right', depthBias: 'short', angle: [2.3, 3.4], depth: [-1.15, -0.2] },
+    { id: 'heel-push', side: 'right', depthBias: 'long', angle: [1.55, 2.4], depth: [0.85, 1.5] },
+    { id: 'pull-left', side: 'left', depthBias: 'flat', angle: [-2.7, -1.55], depth: [-0.55, 0.55] },
+    { id: 'snap-left', side: 'left', depthBias: 'flat', angle: [-3.3, -2.2], depth: [-0.6, 0.6] },
+    { id: 'toe-pull', side: 'left', depthBias: 'short', angle: [-2.3, -1.55], depth: [-1.6, -0.9] },
+    { id: 'fat', side: 'centre', depthBias: 'short', angle: [-0.9, 0.9], depth: [-1.95, -1.3] },
+    { id: 'thin-flyer', side: 'centre', depthBias: 'long', angle: [-0.9, 0.9], depth: [1.25, 1.95] }
+  ];
+
+  /* Share of the session that is the repeatable pattern; the rest are misses, so
+     around two in three shots land outside the bubble. It has to stay clear of
+     the cluster hunter's own quorum - it needs ceil(shots * clusterHunterPct)
+     neighbours, 28% by default (gd-launch-monitor-data.js) - or it finds no
+     pattern, Adopt never enables and the demo dead-ends. */
+  var CORE_SHARE = 0.36;
 
   function safe(fn, fallback) {
     try { return fn(); } catch (e) { return fallback; }
@@ -43,6 +92,23 @@
     while (u === 0) u = Math.random();
     while (v === 0) v = Math.random();
     return spread * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+
+  function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
+
+  function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+
+  function between(range) { return range[0] + Math.random() * (range[1] - range[0]); }
+
+  function shuffled(list) {
+    var out = list.slice();
+    for (var i = out.length - 1; i > 0; i -= 1) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var swap = out[i];
+      out[i] = out[j];
+      out[j] = swap;
+    }
+    return out;
   }
 
   function defaultState() {
@@ -80,22 +146,76 @@
     return PATTERN_PRESETS[Math.floor(Math.random() * PATTERN_PRESETS.length)];
   }
 
+  /* THE DECK IS WHY THE HUNTER STILL FINDS THE PATTERN.
+   *
+   * One session reads as a player who blocks it right, the next as one who
+   * comes out of it - but the deck is fixed at four shapes, one per region:
+   * a right miss, a left miss, and both centre misses (fat and thin). Two
+   * constraints are doing real work there and neither is decoration.
+   *
+   * COUNT. Misses are dealt evenly across the deck, so each shape gets about
+   * (1 - CORE_SHARE)/4 of the session - comfortably under the hunter's quorum,
+   * and no pair of deck shapes sits close enough to make one between them. Let
+   * two shapes share a region and they can out-quorum the core, and the demo
+   * adopts a bubble centred on a miss.
+   *
+   * DEPTH. With no saved bag (which is every guest running this) the chart
+   * anchors its distance axis on the MEDIAN carry of these shots. fat and thin
+   * always come as a pair, and the two wings are never both short or both long,
+   * so the misses cannot drag that anchor off the pattern.
+   */
+  function missDeck() {
+    var rights = MISS_SHAPES.filter(function (shape) { return shape.side === 'right'; });
+    var lefts = MISS_SHAPES.filter(function (shape) { return shape.side === 'left'; });
+    var centres = MISS_SHAPES.filter(function (shape) { return shape.side === 'centre'; });
+    var right = pick(rights);
+    var balanced = lefts.filter(function (shape) { return shape.depthBias === 'flat' || shape.depthBias !== right.depthBias; });
+    var left = pick(balanced.length ? balanced : lefts);
+    return shuffled([right, left].concat(centres));
+  }
+
   function buildSyntheticGroups(sevenIronCarryM, preset) {
-    var count = 16 + Math.floor(Math.random() * 8);
-    var groups = [];
-    for (var i = 0; i < count; i += 1) {
-      var carry = sevenIronCarryM + jitter(sevenIronCarryM * 0.03);
-      var sideAngle = preset.centerDeg + jitter(preset.spreadDeg);
-      groups.push({
+    var total = 24 + Math.floor(Math.random() * 13);
+    var coreCount = Math.max(6, Math.ceil(total * CORE_SHARE));
+    var deck = missDeck();
+    var placed = [];
+    var i;
+    for (i = 0; i < total; i += 1) {
+      if (i < coreCount) {
+        /* Tight laterally, so the hunter's centre lands on the pattern instead
+           of being dragged around by the pattern's own spread; looser in depth,
+           because the depth axis has no such feedback and a core that is tight
+           in both reads as a printed dot rather than a golfer. */
+        placed.push({
+          angleRadii: clamp(jitter(preset.coreSpreadRadii), -0.55, 0.55),
+          depthRadii: clamp(jitter(preset.coreSpreadRadii * 1.5), -0.8, 0.8)
+        });
+      } else {
+        /* Cyclic, not random, so the deck's balance survives into the actual
+           shot list rather than only holding on average. */
+        var shape = deck[(i - coreCount) % deck.length];
+        placed.push({ angleRadii: between(shape.angle), depthRadii: between(shape.depth) });
+      }
+    }
+    /* The chart plots rows in order and the evidence list reads the same order,
+       so an unshuffled list would show every good shot first and every miss
+       last - a session no range has ever produced. */
+    return shuffled(placed).map(function (spot) {
+      var sideAngle = clamp(preset.centerDeg + spot.angleRadii * BUBBLE_ANGLE_RADIUS_DEG, -18, 18);
+      var carry = sevenIronCarryM * (1 + spot.depthRadii * BUBBLE_DEPTH_RADIUS_PCT);
+      return {
         candidateClub: '7i',
         source: 'manual',
+        /* Stated separately from the carry, so a shot that came up short reads as
+           short. Without it normalizeShot takes expected FROM carry, every shot's
+           depth is exactly 0, and the chart's distance axis carries nothing. */
+        expectedDistanceM: Math.round(sevenIronCarryM * 10) / 10,
         metrics: [
-          { candidateMetric: 'carryDistance', rawLabel: 'Carry', value: Math.max(1, Math.round(carry * 10) / 10), confidence: 0.92 },
-          { candidateMetric: 'sideAngle', rawLabel: 'Side Angle', value: Math.round(sideAngle * 100) / 100, confidence: 0.9 }
+          { candidateMetric: 'carryDistance', rawLabel: 'Carry', value: Math.max(20.5, Math.round(carry * 10) / 10), confidence: 0.88 + Math.random() * 0.08 },
+          { candidateMetric: 'sideAngle', rawLabel: 'Side Angle', value: Math.round(sideAngle * 100) / 100, confidence: 0.86 + Math.random() * 0.08 }
         ]
-      });
-    }
-    return groups;
+      };
+    });
   }
 
   function buildDemoAnalysis(sevenIronCarryM, preset) {
@@ -130,7 +250,7 @@
     state.active = true;
     state.sevenIronCarryM = carry;
     state.patternCenterDeg = preset.centerDeg;
-    state.patternSpreadDeg = preset.spreadDeg;
+    state.patternSpreadDeg = preset.coreSpreadRadii * BUBBLE_ANGLE_RADIUS_DEG;
     state.practiceAnalysis = buildDemoAnalysis(carry, preset);
     state.demoBag = computeDemoBag(carry);
     persist();
@@ -207,7 +327,7 @@
     safe(function () { typeof window.renderPracticeData === 'function' && window.renderPracticeData(true); }, null);
   }
 
-  // === Try Demo entry form (index.html #gdDemoEntryForm) ====================
+  // === "Import shots" entry form (index.html #gdDemoEntryForm) =============
 
   function openEntry(event) {
     if (event) event.preventDefault();

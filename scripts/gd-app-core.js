@@ -49,7 +49,11 @@ const DEV_DEFAULTS={
     lockedShadeOpacity:.085,
     dragShadowOpacity:.18,
     classicOutlineOpacity:.78,
-    classicFillOpacity:.065
+    classicFillOpacity:.065,
+    hazardRevealEnabled:1,
+    hazardWaterOpacity:.46,
+    hazardBunkerOpacity:.5,
+    offFairwayOpacity:.14
   },
   previewAccess:{
     freePreviewShotsPerSession:1,
@@ -211,6 +215,10 @@ const DEV_FIELDS={
   "bubbleVisuals.dragShadowOpacity":{label:"Hover shadow opacity",step:.01,min:0,max:.5,help:"Shadow while shot area is moving."},
   "bubbleVisuals.classicOutlineOpacity":{label:"Classic outline opacity",step:.01,min:0,max:1,help:"Classic fallback circle outline."},
   "bubbleVisuals.classicFillOpacity":{label:"Classic fill opacity",step:.001,min:0,max:.2,help:"Classic fallback circle fill."},
+  "bubbleVisuals.hazardRevealEnabled":{label:"Hazard reveal",step:1,min:0,max:1,help:"1 = the bubble reveals mapped water (red) and bunkers (yellow) under it, and tints light red when wholly off the fairway."},
+  "bubbleVisuals.hazardWaterOpacity":{label:"Water reveal opacity",step:.01,min:0,max:1,help:"Red fill strength for water inside the bubble."},
+  "bubbleVisuals.hazardBunkerOpacity":{label:"Bunker reveal opacity",step:.01,min:0,max:1,help:"Yellow fill strength for bunkers inside the bubble."},
+  "bubbleVisuals.offFairwayOpacity":{label:"Off-fairway tint opacity",step:.01,min:0,max:.6,help:"Light red bubble fill once no part of it is on a fairway or green."},
   "previewAccess.freePreviewShotsPerSession":{label:"Free live preview shots",step:1,min:0,max:10,help:"Reserved: live GPS preview limit."},
   "previewAccess.guidedTrialPreviewShots":{label:"Guided trial preview shots",step:1,min:0,max:30,help:"Reserved: longer manual trial preview limit."},
   "previewAccess.guidedTrialTimeoutMin":{label:"Guided trial timeout",step:1,min:1,max:90,unit:"min",help:"Reserved: how long home trial preview hangs around."},
@@ -481,6 +489,16 @@ function gdLmSetStatus(label,value,sub,status){
 function gdLmSafe(fn,fallback){
   try{return fn();}
   catch(e){console.warn("[GolfDaddy] launch monitor",e);return fallback;}
+}
+/* The bare `safe()` this file used in four places is NOT a global - it is a
+   local inside gd-route-audit.js's IIFE, so every one of those calls threw
+   ReferenceError the moment it ran. The damage was quiet rather than loud
+   because the callers catch: gdRenderStatsAnalysis swallowed the throw from
+   gdRenderCourseClubGroups and returned false, so Course Data rendered its
+   shot library as nothing at all and showed the empty-state message under a
+   full chart. Same signature, same intent, but a name that resolves here. */
+function gdSafe(fn,fallback){
+  try{return fn();}catch(e){return fallback;}
 }
 function gdEnsureLaunchMonitorAliasRegistry(){
   if(window.GolfDaddyLaunchMonitorAliasRegistry&&typeof window.GolfDaddyLaunchMonitorAliasRegistry.canonicalKey==="function"){
@@ -14648,7 +14666,7 @@ const app=document.getElementById("app");
 let mode="start", start=null, target=null, greenCentre=null, pin=null;
 let twoTapGreenClickGuardUntil=0, twoTapLastPlacement=null, gdMapPlacementPointer=null, gdMapPlacementSuppressClickUntil=0;
 let startMarker=null,targetMarker=null,greenMarker=null,pinMarker=null;
-let aimLine=null,gdAimLineRenderKey="",aimPixelGlows=[],pinLine=null,pinLabel=null,remainingGreenLine=null,remainingGreenLabel=null,middleGuideLine=null,middleGuideLabel=null,bubbleOuter=null,bubbleMain=null,bubbleCore=null,bubbleMiss=null,bubbleShadow=null,bubbleShade=null,bubbleCarryLine=null,gdFocusMasks=[],bubbleTexture=[];
+let aimLine=null,gdAimLineRenderKey="",aimPixelGlows=[],pinLine=null,pinLabel=null,remainingGreenLine=null,remainingGreenLabel=null,middleGuideLine=null,middleGuideLabel=null,bubbleOuter=null,bubbleMain=null,bubbleCore=null,bubbleMiss=null,bubbleShadow=null,bubbleShade=null,bubbleCarryLine=null,gdFocusMasks=[],bubbleTexture=[],gdBubbleRevealLayers=[];
 let gdPreLockReferenceLayers=[],gdPreLockFocusMasks=[],gdLayupReferenceLayers=[];
 let gdFocusFrameStart=null,gdFocusFrameTarget=null;
 let gdWindEffectLine=null,gdWindAimMarker=null;
@@ -20379,6 +20397,136 @@ function gdSuppressUnlockedGpsShotRender(){
 }
 window.gdSuppressUnlockedGpsShotRender=gdSuppressUnlockedGpsShotRender;
 
+/* ---------------- Bubble hazard reveal ----------------
+   The mapped fairway/bunker/water surfaces (Collect Extra Objects, see
+   functions/course-mapper-worker-background.mjs:runObjectCollectionJob) are never drawn as
+   shapes on the play map - no outlines, nothing to clutter the imagery. They sit under the
+   map, and the bubble reveals them: whatever part of a water surface lies inside the bubble
+   fills red, a bunker fills yellow. Only the interior colour shows, never the surface's
+   edge, because each fill is CLIPPED to the bubble outline rather than drawn whole.
+
+   The clip is an SVG <clipPath> living in Leaflet's own overlay <svg>. The bubble outline is
+   added as an ordinary (invisible) L.polygon and its <path> is moved into that clipPath, so
+   Leaflet keeps its `d` in step with every pan/zoom exactly as it does for the fills - same
+   renderer, same update pass, same coordinate space - and nothing has to be re-projected by
+   hand. Under a canvas renderer there is no <path> to move, and the clipped fills are simply
+   skipped (the off-fairway tint needs no clip and still draws).
+
+   Fairway is the inverse rule: nothing shows while ANY part of the bubble is on a fairway or
+   a green; once the whole bubble is off both, the bubble tints light red. Greens count as safe
+   because an approach bubble sits on the green by design. The geometry - overlap tests, which
+   surfaces qualify - is scripts/gd-bubble-hazard-core.js, tested in
+   dev/bubble-hazard-core.test.js. This block is only the Leaflet plumbing. */
+const GD_BUBBLE_REVEAL_CLIP_ID="gdBubbleRevealClip";
+const GD_BUBBLE_REVEAL_SURFACE_TTL_MS=2500;
+let gdBubbleRevealSurfaceCache={key:"",at:0,surfaces:null};
+function gdBubbleRevealCore(){
+  const core=window.GDBubbleHazardCore;
+  return core&&typeof core.bubbleSurfaceState==="function"?core:null;
+}
+function gdBubbleRevealEnabled(){
+  return Number(dev("bubbleVisuals.hazardRevealEnabled"))!==0&&!!gdBubbleRevealCore();
+}
+function gdBubbleRevealCourseKey(){
+  try{
+    const c=currentCourse||window.gdActiveCourse||null;
+    return String(c?.courseId||c?.id||c?.name||c?.courseName||"");
+  }catch(e){return "";}
+}
+/* loadUserCourseData re-parses localStorage on every call, and renderShot runs on every drag
+   frame, so the surface set is cached for a couple of seconds per course. A freshly collected
+   course is picked up at the next refresh; a course change is picked up immediately. */
+function gdBubbleRevealSurfaces(){
+  const core=gdBubbleRevealCore();
+  if(!core||typeof window.gdMappedCourseObjects!=="function")return null;
+  const key=gdBubbleRevealCourseKey();
+  const now=Date.now();
+  const cache=gdBubbleRevealSurfaceCache;
+  if(cache.surfaces&&cache.key===key&&now-cache.at<GD_BUBBLE_REVEAL_SURFACE_TTL_MS)return cache.surfaces;
+  let surfaces=null;
+  try{
+    const objects=window.gdMappedCourseObjects();
+    surfaces=core.collectSurfaces(Array.isArray(objects)?objects:[]);
+  }catch(e){surfaces=null;}
+  gdBubbleRevealSurfaceCache={key,at:now,surfaces};
+  return surfaces;
+}
+/* The ring the fills are clipped to: the main bubble outline, built the same way the visible
+   outline is so the reveal never leaks past the line the golfer sees. */
+function gdBubbleRevealRing(gdb,bubbleCenter){
+  if(bubbleRenderMode==="classic"){
+    const radius=Number(gdb&&gdb.radius);
+    if(!bubbleCenter||!(radius>0))return null;
+    const pts=[];
+    for(let i=0;i<72;i++)pts.push(project(bubbleCenter,(Math.PI*2*i)/72,radius));
+    return pts;
+  }
+  const payload=gdBubblePayloadForRender(gdb);
+  const center=gdBubbleRenderCenter(payload)||gdShotDisplayTarget()||target;
+  if(!center)return null;
+  return buildBubbleShape(center,payload,dev("bubbleVisuals.mainScale"));
+}
+function gdBubbleRevealClipRef(clipLayer){
+  try{
+    const path=clipLayer&&clipLayer._path;
+    const svg=clipLayer&&clipLayer._renderer&&clipLayer._renderer._container;
+    if(!path||!svg||!L.SVG||typeof L.SVG.create!=="function")return null;
+    let defs=svg.querySelector("defs");
+    if(!defs){defs=L.SVG.create("defs");svg.insertBefore(defs,svg.firstChild);}
+    let clip=defs.querySelector("#"+GD_BUBBLE_REVEAL_CLIP_ID);
+    if(!clip){clip=L.SVG.create("clipPath");clip.setAttribute("id",GD_BUBBLE_REVEAL_CLIP_ID);defs.appendChild(clip);}
+    while(clip.firstChild)clip.removeChild(clip.firstChild);
+    clip.appendChild(path);
+    return "url(#"+GD_BUBBLE_REVEAL_CLIP_ID+")";
+  }catch(e){return null;}
+}
+function gdClearBubbleHazardReveal(){
+  if(gdBubbleRevealLayers&&gdBubbleRevealLayers.length){
+    gdBubbleRevealLayers.forEach(l=>{try{if(l)map.removeLayer(l);}catch(e){}});
+  }
+  gdBubbleRevealLayers=[];
+}
+function gdRenderBubbleHazardReveal(gdb,bubbleCenter){
+  gdClearBubbleHazardReveal();
+  if(!gdBubbleRevealEnabled())return;
+  const core=gdBubbleRevealCore();
+  const surfaces=gdBubbleRevealSurfaces();
+  if(!core||!surfaces||!core.hasAnySurface(surfaces))return;
+  const ring=gdBubbleRevealRing(gdb,bubbleCenter);
+  if(!ring||ring.length<3)return;
+  const liveGreen=Array.isArray(greenPolygon)&&greenPolygon.length>=3?[greenPolygon]:[];
+  const state=core.bubbleSurfaceState(ring,surfaces,liveGreen);
+  const layers=[];
+  const add=(pts,fillColor,fillOpacity,className)=>{
+    const layer=L.polygon(pts,{stroke:false,fill:true,fillColor,fillOpacity,interactive:false,bubblingMouseEvents:false,className}).addTo(map);
+    layers.push(layer);
+    return layer;
+  };
+  if(state.offFairway){
+    add(ring,"#ff5a5a",gdFiniteNumber(dev("bubbleVisuals.offFairwayOpacity"),.14),"gdBubbleReveal gdBubbleOffFairway");
+  }
+  const hazards=[]
+    .concat(state.water.map(s=>({ring:s.ring,color:"#ff2f2f",opacity:gdFiniteNumber(dev("bubbleVisuals.hazardWaterOpacity"),.46),className:"gdBubbleReveal gdBubbleHazardWater"})))
+    .concat(state.bunkers.map(s=>({ring:s.ring,color:"#f7d64a",opacity:gdFiniteNumber(dev("bubbleVisuals.hazardBunkerOpacity"),.5),className:"gdBubbleReveal gdBubbleHazardBunker"})));
+  if(hazards.length){
+    /* Invisible outline whose <path> becomes the clip. Added first so it shares the renderer
+       (and therefore the <svg>) with the fills that reference it. */
+    const clipLayer=add(ring,"#000",0,"gdBubbleRevealClipShape");
+    const clipRef=gdBubbleRevealClipRef(clipLayer);
+    if(clipRef){
+      hazards.forEach(h=>{
+        const layer=add(h.ring,h.color,h.opacity,h.className);
+        try{if(layer._path)layer._path.setAttribute("clip-path",clipRef);}catch(e){}
+      });
+    }else{
+      /* No SVG path to clip with (canvas renderer): drawing the whole surface would show its
+         edge, which is exactly what this feature must not do, so draw nothing. */
+      try{map.removeLayer(clipLayer);}catch(e){}
+      layers.splice(layers.indexOf(clipLayer),1);
+    }
+  }
+  gdBubbleRevealLayers=layers;
+}
 function renderShot(){
   if(gdSuppressShotForMappedStartPrompt())return;
   if(gdSuppressUnlockedGpsShotRender())return;
@@ -20463,6 +20611,8 @@ function renderShot(){
   if(bubbleTexture&&bubbleTexture.length){bubbleTexture.forEach(l=>l&&map.removeLayer(l));bubbleTexture=[];}
   if(bubbleShadow){map.removeLayer(bubbleShadow);bubbleShadow=null;}
   if(bubbleShade){map.removeLayer(bubbleShade);bubbleShade=null;}
+  /* Before the bubble shells, so the outline and shade sit over the revealed colour. */
+  try{gdRenderBubbleHazardReveal(gdb,bubbleCenter);}catch(e){gdClearBubbleHazardReveal();}
   if(bubbleRenderMode==="classic"){
     bubbleOuter=L.circle(bubbleCenter,{radius:gdb.radius*1.28,color:"#fff",weight:1,opacity:.22,fillColor:"#fff",fillOpacity:.022,interactive:false}).addTo(map);
     bubbleMain=L.circle(bubbleCenter,{radius:gdb.radius,color:"#fff",weight:2.5,opacity:dev("bubbleVisuals.classicOutlineOpacity"),fillColor:"#fff",fillOpacity:dev("bubbleVisuals.classicFillOpacity"),interactive:false}).addTo(map);
@@ -20485,7 +20635,7 @@ function clearShot(options={}){
   const preserveAimLine=!!(options&&options.preserveAimLine);
   if(!preserveAimLine)gdClearAimLine();
   [pinLine,pinLabel,remainingGreenLine,remainingGreenLabel,middleGuideLine,middleGuideLabel,bubbleOuter,bubbleMain,bubbleCore,bubbleMiss,bubbleShadow,bubbleShade,bubbleCarryLine].forEach(l=>l&&map.removeLayer(l));
-  gdClearGpsFocusModeLayer();gdClearWindVisuals();gdClearMappedLayupReference();if(bubbleTexture&&bubbleTexture.length){bubbleTexture.forEach(l=>l&&map.removeLayer(l));}bubbleTexture=[];pinLine=pinLabel=remainingGreenLine=remainingGreenLabel=middleGuideLine=middleGuideLabel=bubbleOuter=bubbleMain=bubbleCore=bubbleMiss=bubbleShadow=bubbleShade=bubbleCarryLine=null
+  gdClearGpsFocusModeLayer();gdClearWindVisuals();gdClearMappedLayupReference();gdClearBubbleHazardReveal();if(bubbleTexture&&bubbleTexture.length){bubbleTexture.forEach(l=>l&&map.removeLayer(l));}bubbleTexture=[];pinLine=pinLabel=remainingGreenLine=remainingGreenLabel=middleGuideLine=middleGuideLabel=bubbleOuter=bubbleMain=bubbleCore=bubbleMiss=bubbleShadow=bubbleShade=bubbleCarryLine=null
   try{if(typeof window.gdClearCapturedHoleFrameShotOverlay==="function")window.gdClearCapturedHoleFrameShotOverlay();}catch(e){}
 }
 
@@ -20873,7 +21023,7 @@ function logShot(reason){if(!shotTracking||!start||!target)return;const d=map.di
 let gdStatsConsistencyPct=68;
 try{gdStatsConsistencyPct=Number(localStorage.getItem("gd_stats_consistency_pct")||68)||68}catch(e){}
 function gdStatsClusterSettings(){
-  return safe(()=>window.GolfDaddyShotClusterAnalysis?.settings?.(),null)||{
+  return gdSafe(()=>window.GolfDaddyShotClusterAnalysis?.settings?.(),null)||{
     consistencyMinPct:51,
     consistencyMaxPct:80,
     consistencyDefaultPct:68
@@ -20913,9 +21063,20 @@ function gdCurrentStatsAnalysis(){
   }
   return window.GolfDaddyShotClusterAnalysis&&window.GolfDaddyShotClusterAnalysis.analyzeCurrent&&window.GolfDaddyShotClusterAnalysis.analyzeCurrent({consistencyPct:gdStatsConsistencyPct});
 }
+/* The store behind Course Data's plan/pair/event counts, gated exactly as
+   gdCurrentStatsAnalysis above gates the analysis. Those counts read off a
+   STORE rather than the analysis, so without their own gate a demo round showed
+   "0 plans, 0 pairs" beside its own 27 shown - the durable store being empty
+   mid-demo is the isolation guarantee working, not a number to put in front of
+   the player. */
+function gdCourseDataStore(){
+  const demo=gdSafe(()=>window.GDDemoSession&&window.GDDemoSession.active&&window.GDDemoSession.courseDataActive&&window.GDDemoCourseDataProvider?.store
+    ?window.GDDemoCourseDataProvider.store(window.GDDemoSession):null,null);
+  if(demo)return demo;
+  return gdSafe(()=>window.GolfDaddyShotEvents?.getScopedStore?.()||window.GolfDaddyShotEvents?.getStore?.()||{},{})||{};
+}
 function gdCourseDataLandingCounts(analysis, filteredRecords){
-  let store={};
-  try{store=window.GolfDaddyShotEvents?.getScopedStore?.()||window.GolfDaddyShotEvents?.getStore?.()||{}}catch(e){store={}}
+  const store=gdCourseDataStore();
   const records=Array.isArray(analysis?.records)?analysis.records:[];
   const shown=Array.isArray(filteredRecords)?filteredRecords:[];
   return {
@@ -21791,7 +21952,7 @@ function gdDeleteCourseShot(shotId){
 }
 function gdDeleteCourseShotConfirmed(id){
   const api=window.GolfDaddyShotEvents;
-  const store=safe(()=>api?.getScopedStore?.()||api?.getStore?.(),null);
+  const store=gdSafe(()=>api?.getScopedStore?.()||api?.getStore?.(),null);
   if(!api||!store){toast("Course data feed unavailable");return}
   if(typeof api.deleteShot==="function")api.deleteShot(id);
   else{
@@ -23208,13 +23369,13 @@ function gdCourseLibraryToggleClub(el){
   if(club)gdCourseLibraryOpenClubs[club]=!!el.open;
 }
 function gdCourseShotDateLabel(record){
-  const t=safe(()=>typeof gdStatsShotTime==="function"?gdStatsShotTime(record):Date.parse(record?.at||record?.time||record?.timestamp||0),0)||0;
+  const t=gdSafe(()=>typeof gdStatsShotTime==="function"?gdStatsShotTime(record):Date.parse(record?.at||record?.time||record?.timestamp||0),0)||0;
   if(!t)return "";
   try{return new Date(t).toLocaleDateString(undefined,{day:"numeric",month:"short"});}catch(e){return "";}
 }
 function gdRenderCourseClubGroups(list, records, filteredAnalysis, cfg){
   const rows=records||[];
-  const bubbleValue=safe(()=>gdCourseBubbleValueLabel(filteredAnalysis,filteredAnalysis,rows),"-");
+  const bubbleValue=gdSafe(()=>gdCourseBubbleValueLabel(filteredAnalysis,filteredAnalysis,rows),"-");
   if(!rows.length){
     list.innerHTML=gdShotDataLibraryShellHTML({
       kind:"course",

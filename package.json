@@ -34,6 +34,7 @@
     "test:practice-graph": "node dev/practice-graph-regression.test.js",
     "test:practice-scanner": "node dev/practice-scanner-surface.test.js",
     "test:bubble-geometry": "node dev/bubble-micro-geometry.test.js",
+    "test:bubble-hazard": "node dev/bubble-hazard-core.test.js",
     "test:manual-practice": "node dev/manual-practice-core.test.js && node dev/manual-practice-integration.test.js",
     "test:email-templates": "node dev/email-templates.test.js",
     "test:setup-link": "node dev/setup-link-app-handoff.test.js",
@@ -74,7 +75,8 @@
     "test:coach-player": "node dev/coach-player-link.test.js",
     "test:canonical-users": "node dev/canonical-users.test.js",
     "test:account-email": "node dev/account-email-change.test.js",
-    "test:effective-player-play": "node dev/effective-player-play-context.test.js"
+    "test:effective-player-play": "node dev/effective-player-play-context.test.js",
+    "test:demo": "node dev/demo-session-practice-isolation.test.js && node dev/demo-session-gps-course-data-isolation.test.js && node dev/demo-session-flow-shape.test.js"
   },
   "codex": {
     "entry": "index.html",
