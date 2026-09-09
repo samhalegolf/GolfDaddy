@@ -3887,6 +3887,101 @@ function gdAdminCourseVisualEnsurePipelineCourse(courseId){
    that both the pin gate and the Overpass query read. Delete it and the course disappears
    from the picker, the pin dialog fires instead of a package request, and nothing is ever
    enqueued. This clears the geometry and leaves the identity and the location alone. */
+/* Loading state for the two maintenance runs (Collect Extra Objects, Refine Shapes).
+
+   Before this, pressing either button produced one toast and nothing else. The bar that
+   gdAdminCourseProgressBar draws is real, but it only appears on a RE-RENDER, and nothing
+   re-rendered after the click: the job list is cached for 20 seconds and the 5-second watch
+   only starts once a render has already seen a live job. A collection run finishes in
+   5-20 seconds (Kauri Cliffs, 2026-09-09: queued 00:45:37, done 00:45:56), so in practice the
+   bar never showed and the run looked like it had done nothing.
+
+   Two things fix that. gdAdminCourseMaintenanceStart seeds the course's job state with the
+   queued job the API just returned and re-renders at once, so the bar is on screen before the
+   worker has even been woken; the existing 5-second watch then takes over and refetches the
+   real state. gdAdminCourseMaintenanceFollow polls that one course every 3 seconds until its
+   job row reads done or failed, and says what happened - with the counts the worker wrote to
+   the job result - because a bar that quietly disappears is the same "did it work?" question
+   the bar was meant to answer. Bounded: it gives up after six minutes and says so. */
+let gdAdminCourseMaintenanceFollows={};
+function gdAdminCourseMaintenanceLabel(kind){
+  return kind==="refine_surface_shapes"?"Refine Shapes":"Collect Extra Objects";
+}
+function gdAdminCourseMaintenanceStart(courseId,kind,data){
+  courseId=String(courseId||"");
+  const job=data&&data.job||null;
+  const existing=gdAdminCourseDbJobs[courseId]||{};
+  gdAdminCourseDbJobs=Object.assign({},gdAdminCourseDbJobs,{
+    [courseId]:Object.assign({},existing,{
+      maintenance:{
+        kind:kind,
+        state:job&&job.status==="running"?"running":"queued",
+        progress:(job&&job.result&&job.result.progress)||null,
+        stalled:false
+      }
+    })
+  });
+  try{gdRenderAdminCourseDatabase();}catch(e){}
+  gdAdminCourseMaintenanceFollow(courseId,kind,job&&job.id?String(job.id):"",Date.now());
+}
+function gdAdminCourseMaintenanceFollow(courseId,kind,jobId,startedAt){
+  const key=courseId+":"+kind;
+  const previous=gdAdminCourseMaintenanceFollows[key];
+  if(previous&&previous.timer)clearTimeout(previous.timer);
+  const follow={timer:null};
+  gdAdminCourseMaintenanceFollows[key]=follow;
+  const active=()=>gdAdminCourseMaintenanceFollows[key]===follow;
+  const stop=()=>{
+    if(follow.timer)clearTimeout(follow.timer);
+    follow.timer=null;
+    if(active())delete gdAdminCourseMaintenanceFollows[key];
+  };
+  const tick=async()=>{
+    follow.timer=null;
+    if(!active())return;
+    let finished=null;
+    try{
+      const res=await fetch("/api/course-mapper-jobs?courseId="+encodeURIComponent(courseId),{headers:{Accept:"application/json"},cache:"no-store"});
+      const state=res.ok?await res.json():null;
+      const jobs=Array.isArray(state&&state.jobs)?state.jobs:[];
+      /* The job we queued by id when the API gave us one; otherwise the newest job of this
+         kind created since the click (a deduped response points at a run already in flight). */
+      finished=jobs.find(j=>j&&String(j.kind||"")===kind
+        &&(jobId?String(j.id)===jobId:Date.parse(j.created_at||0)>=startedAt-60000)
+        &&(j.status==="done"||j.status==="failed"))||null;
+    }catch(e){}
+    if(!active())return;
+    if(finished){
+      stop();
+      gdAdminCourseVisualToast(gdAdminCourseMaintenanceOutcome(courseId,kind,finished));
+      Promise.resolve(gdLoadAdminCourseDbJobs({force:true})).catch(()=>null).then(()=>{
+        try{gdRenderAdminCourseDatabase();}catch(e){}
+      });
+      return;
+    }
+    if(Date.now()-startedAt>6*60*1000){
+      stop();
+      gdAdminCourseVisualToast(gdAdminCourseMaintenanceLabel(kind)+" is still running for "+courseId+" after six minutes - the bar keeps tracking it");
+      return;
+    }
+    follow.timer=setTimeout(tick,3000);
+  };
+  follow.timer=setTimeout(tick,2500);
+}
+/* One sentence from the finished job row, in the worker's own numbers. */
+function gdAdminCourseMaintenanceOutcome(courseId,kind,job){
+  const label=gdAdminCourseMaintenanceLabel(kind);
+  if(!job||job.status==="failed")return label+" failed for "+courseId+": "+String(job&&job.error||"no reason given").slice(0,160);
+  const r=job.result||{};
+  const n=v=>Number(v)||0;
+  if(kind==="collect_extra_objects"){
+    const t=r.totals||{},a=r.added||{};
+    const added=n(a.bunkers)+n(a.fairways)+n(a.water);
+    return label+" done for "+courseId+": "+n(t.bunker)+" bunkers, "+n(t.fairway_area)+" fairways, "+n(t.water)+" water on the map ("+(added?added+" new":"nothing new found")+")";
+  }
+  const c=r.counts||{};
+  return label+" done for "+courseId+": "+n(c.refined)+" shapes re-traced"+(n(c.skipped)?", "+n(c.skipped)+" kept as they were":"")+(n(c.noFrame)?", "+n(c.noFrame)+" with no frame to trace against":"");
+}
 /* Collect Extra Objects - the safe retro-fit next to Full Remap above.
 
    Deliberately worded to say what it will NOT do, because that is the whole reason it exists
@@ -3927,6 +4022,7 @@ async function gdAdminCourseRefineShapes(courseId){
     gdAdminCourseVisualToast(data&&data.deduped
       ?"A refine run is already in progress"
       :"Refining "+(data&&data.surfaces?data.surfaces+" shapes":"shapes")+" against this course's own frames - visuals unchanged");
+    gdAdminCourseMaintenanceStart(courseId,"refine_surface_shapes",data);
     return false;
   }catch(error){
     gdAdminCourseVisualToast("Refine failed to send");
@@ -3953,6 +4049,7 @@ async function gdAdminCourseCollectExtraObjects(courseId){
     gdAdminCourseVisualToast(data&&data.deduped
       ?"A collection run is already in progress"
       :"Collecting extra objects for "+courseId+" - holes, greens and visuals are left as they are");
+    gdAdminCourseMaintenanceStart(courseId,"collect_extra_objects",data);
     return false;
   }catch(error){
     gdAdminCourseVisualToast("Collect objects failed to send");
