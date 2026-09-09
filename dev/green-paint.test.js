@@ -175,6 +175,34 @@ check("the export publishes a palette and paints no pixels itself", async () => 
   return on.greenPalette.samples + " px sampled, " + JSON.stringify(on.greenPalette).length + " bytes";
 });
 
+check("a green that is a sliver of the frame still gets a palette", async () => {
+  /* The regression this exists for. A green fills ~40% of a green frame but ~4% of a hole
+     frame. Sampling at one fixed working resolution starved the hole frame - the green came
+     out ~19px across, under the 400-sample floor - and 15 of 18 hole frames published with no
+     palette. The sampler now reads the green's own box at native resolution, so the sample
+     count follows the green rather than the frame. */
+  const surface = buildGreenSurface();
+  const buf = await turfCapture();
+  /* Same green, but framed like a whole hole: ~8x the extent, so the green is a sliver. */
+  /* Proportioned like the real thing: a 30m green in an 830m hole frame is ~3.6% of the
+     width, which at export resolution is ~110px across - plenty of pixels, just a small
+     share of the frame. That distinction is exactly what the old sampler lost. */
+  const wide = {
+    north: midLat + 0.0100, south: midLat - 0.0100,
+    west: midLng - 0.0100, east: midLng + 0.0100
+  };
+  const out = await renderHoleSurfaceMercator({
+    pins: {},
+    captures: [{ entry: { role: "course-backdrop", bounds: wide, width: D, height: D, stitchLayer: 0, captureZoom: 18 }, buffer: buf }],
+    terrain: null, greenSurface: surface, settings: { visualTools: {} }, maxDim: 2048, quality: 92
+  });
+  assert.ok(out.greenPalette, "a sliver-sized green must still be measured");
+  assert.ok(out.greenPalette.samples >= 400,
+    "needs a real sample count off a small green, got " + out.greenPalette.samples);
+  return out.greenPalette.samples + " px sampled from a green ~" +
+    (100 * (0.0008 / 0.020)).toFixed(1) + "% of the frame width";
+});
+
 check("a green with no fitted surface draws nothing and fails quietly", async () => {
   const buf = await turfCapture();
   const out = await renderHoleSurfaceMercator({

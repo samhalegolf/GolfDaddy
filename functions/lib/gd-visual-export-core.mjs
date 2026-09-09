@@ -454,30 +454,43 @@ function greenPaintParams(settings) {
 async function sampleGreenPaletteFor(composites, width, height, background, surface, project) {
   const polyPx = surface.polygon.map(m => project(surface.frame.toLatLng(m.x, m.y))).filter(Boolean);
   if (polyPx.length < 4) return null;
-  const scale = Math.min(1, 520 / Math.max(width, height));
-  const W = Math.max(8, Math.round(width * scale)), H = Math.max(8, Math.round(height * scale));
-  /* Composite at full size, THEN downscale. sharp orders resize before composite within one
-     pipeline, so chaining .resize() here shrinks the base and the full-size overlays no longer
-     fit it - "Image to composite must have same dimensions or smaller". Two steps, not one. */
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of polyPx) {
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+  }
+  const x0 = Math.max(0, Math.floor(minX)), x1 = Math.min(width - 1, Math.ceil(maxX));
+  const y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(height - 1, Math.ceil(maxY));
+  if (!(x1 > x0 && y1 > y0)) return null;
+
+  /* Composite at full size, THEN read only the green's own box.
+
+     Downscaling the whole frame first was wrong, and wrong in a way that only showed on real
+     data: a green fills about 40% of a green frame but about 4% of a hole frame, so one fixed
+     working resolution either starves the hole frame or wastes the green one. At a 520px working
+     size a hole frame's green came out ~19px across - under 300 samples, below the palette floor -
+     and 15 of 18 hole frames published with no palette at all.
+
+     Reading the box at native resolution instead makes the sample count depend on the green,
+     which is the thing being measured. The stride keeps a big box affordable; a palette is a
+     distribution, so ~120k samples is far past the point of diminishing returns.
+
+     sharp orders resize before composite within one pipeline, which is what made the first
+     version throw "Image to composite must have same dimensions or smaller" - another reason
+     the composite stands alone here. */
   const full = await sharp({ create: { width, height, channels: 3, background }, limitInputPixels: false })
     .composite(composites)
     .raw().toBuffer({ resolveWithObject: true });
-  const flat = await sharp(full.data, {
-    raw: { width: full.info.width, height: full.info.height, channels: full.info.channels },
-    limitInputPixels: false
-  }).resize(W, H).raw().toBuffer({ resolveWithObject: true });
-  const ch = flat.info.channels;
-  const poly = polyPx.map(p => ({ x: p.x * scale, y: p.y * scale }));
-  const xs = poly.map(p => p.x), ys = poly.map(p => p.y);
-  const x0 = Math.max(0, Math.floor(Math.min(...xs))), x1 = Math.min(W - 1, Math.ceil(Math.max(...xs)));
-  const y0 = Math.max(0, Math.floor(Math.min(...ys))), y1 = Math.min(H - 1, Math.ceil(Math.max(...ys)));
+  const ch = full.info.channels, rowW = full.info.width;
+  const boxW = x1 - x0 + 1, boxH = y1 - y0 + 1;
+  const stride = Math.max(1, Math.round(Math.sqrt((boxW * boxH) / 120000)));
   const rgb = [];
   let n = 0;
-  for (let y = y0; y <= y1; y++) {
-    for (let x = x0; x <= x1; x++) {
-      if (!greenCore.pointInPolygon(x + 0.5, y + 0.5, poly)) continue;
-      const o = (y * flat.info.width + x) * ch;
-      rgb.push(flat.data[o], flat.data[o + 1], flat.data[o + 2]);
+  for (let y = y0; y <= y1; y += stride) {
+    for (let x = x0; x <= x1; x += stride) {
+      if (!greenCore.pointInPolygon(x + 0.5, y + 0.5, polyPx)) continue;
+      const o = (y * rowW + x) * ch;
+      rgb.push(full.data[o], full.data[o + 1], full.data[o + 2]);
       n++;
     }
   }
