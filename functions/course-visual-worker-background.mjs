@@ -74,6 +74,10 @@ const NATURAL_PRESET_ID = "clarity-course-natural-v1";
    exaggeration or light angle makes every one of them stale, and neither the plan ids nor
    the recipe hash would notice. */
 const RELIEF_STAMP = "relief2-perhole-x" + RELIEF_DEFAULTS.exaggeration + "-az" + RELIEF_DEFAULTS.azimuth + "-al" + RELIEF_DEFAULTS.altitude;
+/* Green paint changes published pixels but NOT captures, so it stamps the export version only.
+   Putting it in the plan key the way RELIEF_STAMP has to be would throw away every stored
+   terrain capture on the course for what is a drawing change. */
+const PAINT_STAMP = "paint1-t" + greenCore.PAINT_DEFAULTS.tiers + "-s" + greenCore.PAINT_DEFAULTS.spread;
 const ENGINE_SOURCE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../scripts/gd-course-visual-engine.js");
 let presetHelpersCache = null;
 
@@ -808,7 +812,7 @@ async function runExportJob(job, deadlineAt) {
      fractional-zoom frames must NOT be resumed/reused, so the version dir has to change.
      RELIEF_STAMP rides along for the same reason - relief changes published pixels, and
      without it every already-exported frame resumes as current and nothing re-renders. */
-  const version = "r" + hashText(JSON.stringify({ presetId, settings, snapshot: capturesIndex.generatedAt, out: "mercator-" + EXPORT_RENDITION_PX + "-iz1-" + RELIEF_STAMP }));
+  const version = "r" + hashText(JSON.stringify({ presetId, settings, snapshot: capturesIndex.generatedAt, out: "mercator-" + EXPORT_RENDITION_PX + "-iz1-" + RELIEF_STAMP + "-" + PAINT_STAMP }));
   const framesDir = pkg.courseId + "/frames/" + version;
   const holeData = packageHoleData(pkg);
   const terrainEntry = entries.find(e => e.role === "terrain-reference");
@@ -973,6 +977,16 @@ async function runExportJob(job, deadlineAt) {
         originPx: frame.originPx,
         outputDimensions: { width: frame.width, height: frame.height }
       };
+      /* Baked once, carried in the index. The phone gets the same run of turf colours the export
+         painted with, without re-reading a pixel - the palette IS the shared opinion, the way the
+         contour display list is. ~700 bytes a hole. */
+      if (frame.greenPalette) {
+        playSurface.greenPalette = frame.greenPalette;
+        const gp = frame.diagnostics && frame.diagnostics.greenPaint;
+        console.log("[visual-worker] green paint h" + holeNumber + " " + frame.greenPalette.samples +
+          " px sampled, " + (gp ? gp.tiers + " tiers over " + gp.reliefM.toFixed(2) + "m, " +
+          Math.round(gp.beyondSampledRange * 100) + "% beyond sampled range" : "painted"));
+      }
       if (elevation) {
         await storageUpload(elevation.path, elevation.buffer, "image/png");
         playSurface.elevation = Object.assign({ path: elevation.path }, elevation.meta);

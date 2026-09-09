@@ -721,6 +721,166 @@
     ];
   }
 
+  /* ---------- turf palette ------------------------------------------------------------------ */
+
+  /* Green colour, taken from the green.
+
+     Sampling the putting surface gives a run of tones that already belong to this green on this
+     day - mowing bands, wear, the shade under a lip. Tiering along that run can say "this end is
+     high" in a colour the ground can actually be, instead of tinting it with a hue borrowed from
+     a cartographic ramp. Measured on Jacks Point h3: 28829 sampled pixels run rgb(102,111,94) to
+     rgb(159,154,141), and nothing outside that run is ever needed to draw five readable tiers.
+
+     What gets stored is the RUN, not a picture: the principal axis of the colour cloud, the
+     quantile breakpoints along it, and one averaged colour per bin. Baked once at export and
+     carried in the frames index, so the export and the phone tier identically without either of
+     them re-reading pixels - the same reason the contour maths lives in this file.
+
+     The axis is the first principal component rather than luminance because turf does not vary
+     along grey: it drifts warmer and lighter together, and a luminance ramp would cut across that
+     drift and pick colours the green does not have.
+
+     PALETTE_BINS is 32. The tail turns rank into colour by interpolating between bins, so the
+     bins only have to be finer than the eye can step; 32 keeps a hole to ~130 numbers in an index
+     that already carries per-hole geometry. */
+  var PALETTE_BINS = 32;
+  var PALETTE_MIN_SAMPLES = 400;
+
+  /* Clip to the 2nd/98th percentile before building the run. The tails of a green's colour cloud
+     are sprinkler heads, a ball mark, the odd bunker pixel the polygon clipped in - real colours,
+     but not turf, and letting them define the ends would spend the whole run reaching them. */
+  function sampleGreenPalette(rgb, count) {
+    if (!rgb) return null;
+    var n = count > 0 ? Math.floor(count) : Math.floor(rgb.length / 3);
+    if (!(n >= PALETTE_MIN_SAMPLES)) return null;
+
+    var i, k, mr = 0, mg = 0, mb = 0;
+    for (i = 0; i < n; i++) { mr += rgb[i * 3]; mg += rgb[i * 3 + 1]; mb += rgb[i * 3 + 2]; }
+    mr /= n; mg /= n; mb /= n;
+
+    var c = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    for (i = 0; i < n; i++) {
+      var d0 = rgb[i * 3] - mr, d1 = rgb[i * 3 + 1] - mg, d2 = rgb[i * 3 + 2] - mb;
+      c[0] += d0 * d0; c[1] += d0 * d1; c[2] += d0 * d2;
+      c[4] += d1 * d1; c[5] += d1 * d2; c[8] += d2 * d2;
+    }
+    c[3] = c[1]; c[6] = c[2]; c[7] = c[5];
+    for (i = 0; i < 9; i++) c[i] /= n;
+
+    /* Power iteration: the covariance of a turf cloud is strongly dominated by its first
+       component, so this converges long before 24 rounds and needs no eigen solver. */
+    var v = [0.5773, 0.5773, 0.5773];
+    for (k = 0; k < 24; k++) {
+      var w0 = c[0] * v[0] + c[1] * v[1] + c[2] * v[2];
+      var w1 = c[3] * v[0] + c[4] * v[1] + c[5] * v[2];
+      var w2 = c[6] * v[0] + c[7] * v[1] + c[8] * v[2];
+      var m = Math.sqrt(w0 * w0 + w1 * w1 + w2 * w2) || 1;
+      v = [w0 / m, w1 / m, w2 / m];
+    }
+    if (v[0] + v[1] + v[2] < 0) v = [-v[0], -v[1], -v[2]];   // point the run at the lighter end
+
+    var proj = new Float64Array(n);
+    for (i = 0; i < n; i++) {
+      proj[i] = (rgb[i * 3] - mr) * v[0] + (rgb[i * 3 + 1] - mg) * v[1] + (rgb[i * 3 + 2] - mb) * v[2];
+    }
+    var order = new Array(n);
+    for (i = 0; i < n; i++) order[i] = i;
+    order.sort(function (a, b) { return proj[a] - proj[b]; });
+
+    var lo = Math.floor(n * 0.02), hi = Math.floor((n - 1) * 0.98);
+    var span = hi - lo;
+    if (!(span > PALETTE_BINS)) return null;
+
+    var stops = [], lut = [];
+    for (k = 0; k <= PALETTE_BINS; k++) {
+      stops.push(Math.round(proj[order[lo + Math.round(span * k / PALETTE_BINS)]] * 100) / 100);
+    }
+    for (k = 0; k < PALETTE_BINS; k++) {
+      var a = lo + Math.round(span * k / PALETTE_BINS);
+      var b = Math.max(a + 1, lo + Math.round(span * (k + 1) / PALETTE_BINS));
+      var sr = 0, sg = 0, sb = 0, cnt = 0;
+      for (i = a; i < b; i++) { var j = order[i]; sr += rgb[j * 3]; sg += rgb[j * 3 + 1]; sb += rgb[j * 3 + 2]; cnt++; }
+      lut.push(Math.round(sr / cnt), Math.round(sg / cnt), Math.round(sb / cnt));
+    }
+    /* The rank lookup inverts these stops, so they have to be strictly increasing. A plateau in
+       the middle of the run is NORMAL - a green with a large evenly-mown area puts a lot of its
+       pixels on one colour - so nudge those apart rather than refusing the green. Only a run with
+       no spread at all (flat cloud, or a solid fill where there is no turf to read) is refused,
+       and that is a genuine "there is no palette here" rather than a numerical inconvenience. */
+    if (!(stops[stops.length - 1] > stops[0])) return null;
+    for (k = 1; k < stops.length; k++) {
+      if (!(stops[k] > stops[k - 1])) stops[k] = stops[k - 1] + 1e-4;
+    }
+
+    return {
+      version: 1,
+      bins: PALETTE_BINS,
+      samples: n,
+      mean: [Math.round(mr * 10) / 10, Math.round(mg * 10) / 10, Math.round(mb * 10) / 10],
+      axis: [Math.round(v[0] * 10000) / 10000, Math.round(v[1] * 10000) / 10000, Math.round(v[2] * 10000) / 10000],
+      stops: stops,
+      lut: lut
+    };
+  }
+
+  /* Where a colour sits along the run, 0..1. Piecewise-linear against the stored quantiles, so
+     rank is the pixel's percentile among real turf rather than a linear read of brightness. */
+  function paletteRank(pal, r, g, b) {
+    var p = (r - pal.mean[0]) * pal.axis[0] + (g - pal.mean[1]) * pal.axis[1] + (b - pal.mean[2]) * pal.axis[2];
+    var stops = pal.stops, last = stops.length - 1;
+    if (p <= stops[0]) return 0;
+    if (p >= stops[last]) return 1;
+    var lo = 0, hi = last;
+    while (hi - lo > 1) { var mid = (lo + hi) >> 1; if (p >= stops[mid]) lo = mid; else hi = mid; }
+    var t = (p - stops[lo]) / ((stops[lo + 1] - stops[lo]) || 1e-9);
+    return (lo + t) / last;
+  }
+
+  /* Colour at a rank. Past either end the run is CONTINUED along itself rather than clamped:
+     clamping pins every over-driven pixel to one colour and flattens the tier it belongs to,
+     whereas continuing keeps the steps apart in the same hue direction the turf already runs.
+     It stops being a colour the green has, which is why the caller gates how far it may go. */
+  function paletteColour(pal, t, out) {
+    out = out || [0, 0, 0];
+    var lut = pal.lut, bins = pal.bins || (lut.length / 3), lastBin = bins - 1;
+    var i, e;
+    if (t < 0 || t > 1) {
+      var d0 = lut[lastBin * 3] - lut[0], d1 = lut[lastBin * 3 + 1] - lut[1], d2 = lut[lastBin * 3 + 2] - lut[2];
+      e = t < 0 ? t : t - 1;
+      i = t < 0 ? 0 : lastBin * 3;
+      out[0] = Math.max(0, Math.min(255, lut[i] + e * d0));
+      out[1] = Math.max(0, Math.min(255, lut[i + 1] + e * d1));
+      out[2] = Math.max(0, Math.min(255, lut[i + 2] + e * d2));
+      return out;
+    }
+    var f = t * lastBin, b0 = Math.floor(f), fr = f - b0, b1 = Math.min(lastBin, b0 + 1);
+    out[0] = lut[b0 * 3] * (1 - fr) + lut[b1 * 3] * fr;
+    out[1] = lut[b0 * 3 + 1] * (1 - fr) + lut[b1 * 3 + 1] * fr;
+    out[2] = lut[b0 * 3 + 2] * (1 - fr) + lut[b1 * 3 + 2] * fr;
+    return out;
+  }
+
+  /* Tiers. tiers=5 gives ~0.56m steps on a 2.8m green - four reads as shelves, six as a map.
+     spread stretches the tier targets past the sampled ends; 0.2 measured 0% colour outside the
+     green's own gamut on real ground, because the run was cut at the 2nd/98th percentile and
+     there is real turf in the tails.
+
+     strength is how far a pixel moves toward its tier, and it is NOT 1 for a reason worth
+     stating. The palette reconstructs turf to about 1.2/255, so at strength 1 every pixel in a
+     tier lands on the tier colour and the residual that carries mowing bands and wear is gone -
+     the tier reads as a decal laid over the green rather than the green itself. Holding it at
+     0.7 keeps roughly a third of the within-tier spread, which is what makes the paint look like
+     ground. Tiers stay legible because the SEPARATION between them is set by spread, not by
+     strength. */
+  var PAINT_DEFAULTS = { tiers: 5, spread: 0.2, strength: 0.7 };
+
+  function paintTargetForHeight(zNorm, cfg) {
+    var tiers = Math.max(2, Math.round((cfg && cfg.tiers) || PAINT_DEFAULTS.tiers));
+    var spread = (cfg && cfg.spread !== undefined) ? cfg.spread : PAINT_DEFAULTS.spread;
+    var k = Math.max(0, Math.min(tiers - 1, Math.floor(zNorm * tiers)));
+    return (k / (tiers - 1) - 0.5) * (1 + 2 * spread) + 0.5;
+  }
+
   return {
     rasterProjector: rasterProjector,
     metricFrame: metricFrame,
@@ -728,6 +888,11 @@
     distanceToPolygon: distanceToPolygon,
     fitSurface: fitSurface,
     slopeAt: slopeAt,
+    sampleGreenPalette: sampleGreenPalette,
+    paletteRank: paletteRank,
+    paletteColour: paletteColour,
+    paintTargetForHeight: paintTargetForHeight,
+    PAINT_DEFAULTS: PAINT_DEFAULTS,
     contours: contours,
     chainSegments: chainSegments,
     smoothPolyline: smoothPolyline,

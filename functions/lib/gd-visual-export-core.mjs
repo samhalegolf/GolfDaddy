@@ -407,6 +407,111 @@ function greenContourParams(settings) {
   };
 }
 
+/* Green paint. Tiers the putting surface in colours taken from the putting surface.
+
+   Same gates as the contours, and for the same reason: it is the same elevation being drawn, so
+   a user who turned terrain off does not want it back as colour. It also refuses to run without
+   a fitted surface - the tiers are read off the fit, never off pixel differences, because at
+   1.7m sampling and 0.1m quantisation neighbour differencing returns the quantisation pattern.
+
+   spread is THE knob here, the way arrowMinSlopePercent is for the contours. It is how far past
+   the green's own colour range the tiers may reach for separation, and it is the one number that
+   trades honesty for legibility: at 0.2 nothing outside the real gamut appears, past roughly 0.3
+   the paint starts inventing turf this green does not have. */
+function greenPaintParams(settings) {
+  if (isSourceModeSettings(settings)) return { enabled: false };
+  const toggles = visualEffectTogglesForSettings(settings);
+  if (!toggles.terrain) return { enabled: false };
+  const tools = settings && settings.visualTools || {};
+  if (tools.greenPaint === false) return { enabled: false };
+  const d = greenCore.PAINT_DEFAULTS;
+  return {
+    enabled: true,
+    tiers: Math.round(clamp(num(tools.greenPaintTiers, d.tiers), 3, 8)),
+    spread: clamp(num(tools.greenPaintSpread, d.spread), 0, 0.6),
+    strength: clamp(num(tools.greenPaintStrength, d.strength), 0, 1)
+  };
+}
+
+/* Paints tiers onto flattened pixels and returns the palette it sampled.
+
+   Two passes over the green and nothing else: the first reads the turf to build the run, the
+   second moves each pixel along it. The move is a DIFFERENCE between two palette entries, never
+   a fill - that is what leaves mowing bands, wear and the cup surround intact underneath. A flat
+   fill would read as a decal.
+
+   Edge fade matches the contours' edgeFadeM so paint and lines arrive and leave together; a hard
+   polygon edge reads as a cutout of a different green. */
+function applyGreenPaint(data, width, height, channels, surface, project, unproject, cfg) {
+  const frame = surface.frame, fit = surface.fit;
+  const polyPx = surface.polygon.map(m => project(frame.toLatLng(m.x, m.y))).filter(Boolean);
+  if (polyPx.length < 4) return null;
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of polyPx) {
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+  }
+  const x0 = Math.max(0, Math.floor(minX)), x1 = Math.min(width - 1, Math.ceil(maxX));
+  const y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(height - 1, Math.ceil(maxY));
+  if (!(x1 > x0 && y1 > y0)) return null;
+
+  /* metres -> px, measured off the projection actually in use rather than assumed. */
+  const c = surface.polygon.reduce((a, m) => ({ x: a.x + m.x / surface.polygon.length, y: a.y + m.y / surface.polygon.length }), { x: 0, y: 0 });
+  const pc = project(frame.toLatLng(c.x, c.y)), pc1 = project(frame.toLatLng(c.x + 1, c.y));
+  const pxPerM = (pc && pc1) ? Math.hypot(pc1.x - pc.x, pc1.y - pc.y) : 0;
+  const fadePx = pxPerM > 0 ? pxPerM * greenCore.CONTOUR_DEFAULTS.edgeFadeM : 0;
+
+  /* pixel -> green-local metres, so height comes off the fit at the pixel being painted. */
+  const local = [];
+  const rgb = [];
+  let lo = Infinity, hi = -Infinity, n = 0;
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const ll = unproject(x + 0.5, y + 0.5);
+      if (!ll) continue;
+      const m = frame.toMetres(ll.lat, ll.lng);
+      if (!greenCore.pointInPolygon(m.x, m.y, surface.polygon)) continue;
+      const d = greenCore.distanceToPolygon(m.x, m.y, surface.polygon);
+      const t = fadePx > 0 ? Math.max(0, Math.min(1, d / greenCore.CONTOUR_DEFAULTS.edgeFadeM)) : 1;
+      const z = fit.heightAt(m.x, m.y);
+      if (z < lo) lo = z; if (z > hi) hi = z;
+      const o = (y * width + x) * channels;
+      local.push(o, z, t * t * (3 - 2 * t));
+      rgb.push(data[o], data[o + 1], data[o + 2]);
+      n++;
+    }
+  }
+  if (!n) return null;
+  const palette = greenCore.sampleGreenPalette(rgb, n);
+  if (!palette) return null;
+  const span = (hi - lo) || 1e-9;
+
+  const src = [0, 0, 0], dst = [0, 0, 0];
+  let outside = 0;
+  for (let i = 0; i < n; i++) {
+    const o = local[i * 3], z = local[i * 3 + 1], fade = local[i * 3 + 2];
+    const r = rgb[i * 3], g = rgb[i * 3 + 1], b = rgb[i * 3 + 2];
+    const t = greenCore.paletteRank(palette, r, g, b);
+    const target = greenCore.paintTargetForHeight((z - lo) / span, cfg);
+    greenCore.paletteColour(palette, t, src);
+    greenCore.paletteColour(palette, t + cfg.strength * fade * (target - t), dst);
+    data[o]     = Math.max(0, Math.min(255, Math.round(r + (dst[0] - src[0]))));
+    data[o + 1] = Math.max(0, Math.min(255, Math.round(g + (dst[1] - src[1]))));
+    data[o + 2] = Math.max(0, Math.min(255, Math.round(b + (dst[2] - src[2]))));
+    if (target < 0 || target > 1) outside++;
+  }
+  return {
+    palette,
+    diagnostics: {
+      painted: n,
+      reliefM: Number((hi - lo).toFixed(3)),
+      tiers: cfg.tiers, spread: cfg.spread, strength: cfg.strength,
+      beyondSampledRange: Number((outside / n).toFixed(3))
+    }
+  };
+}
+
 /* Render the shared display list as SVG paths.
    The metres->pixels step goes through the caller's projector - the SAME mercProject that
    placed the imagery - so the lines land on the turf they were measured from rather than on a
@@ -503,7 +608,7 @@ export function applyRelief(rgb, mask, opacity, channels) {
    The raw-buffer roundtrip used to be conditional on `relief` being present; now it always
    happens, because normalisation needs the real flattened pixels regardless. Relief - when
    present - runs on the SAME buffer normalisation just wrote, no extra full-res allocation. */
-async function flattenWithRelief({ width, height, background, composites, relief, settings, overlays, quality }) {
+async function flattenWithRelief({ width, height, background, composites, relief, settings, overlays, quality, greenPaint }) {
   const surface = sharp({ create: { width, height, channels: 3, background }, limitInputPixels: false })
     .composite(composites);
   const flat = await surface.raw().toBuffer({ resolveWithObject: true });
@@ -529,9 +634,19 @@ async function flattenWithRelief({ width, height, background, composites, relief
      modulate, applied after normalisation/relief so it never fights the tone curve. */
   const fRecipe = recipeFilter(settings);
   out = out.modulate({ saturation: fRecipe.saturation });
+  /* Paint the green here and nowhere else. After saturation, so the sampled palette is the turf
+     as it will actually publish; before the overlays, so the contour lines and arrows sit ON the
+     paint rather than being sampled as if they were turf. */
+  let paint = null;
+  if (greenPaint) {
+    const pm = await out.raw().toBuffer({ resolveWithObject: true });
+    paint = greenPaint(pm.data, pm.info.width, pm.info.height, pm.info.channels);
+    out = sharp(pm.data, { raw: { width: pm.info.width, height: pm.info.height, channels: pm.info.channels }, limitInputPixels: false });
+  }
   if (overlays && overlays.length) out = out.composite(overlays);
   const jpeg = await out.jpeg({ quality }).toBuffer();
-  return { jpeg, diagnostics };
+  if (paint) diagnostics.greenPaint = paint.diagnostics;
+  return { jpeg, diagnostics, greenPalette: paint && paint.palette };
 }
 
 function mowingOpacity(value) {
@@ -730,10 +845,15 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, green
   const lighting = settings && settings.lighting || {};
   const voidScale = clamp(num(lighting.shadowFloor, 14), 0, 60) / 14;
   const background = { r: Math.round(clamp(16 * voidScale, 0, 255)), g: Math.round(clamp(19 * voidScale, 0, 255)), b: Math.round(clamp(15 * voidScale, 0, 255)) };
+  const paintCfg = greenPaintParams(settings);
+  const mercUnproject = (px, py) => unworld((px + originPx.x) / scalePx, (py + originPx.y) / scalePx);
+  const greenPaint = (greenSurface && paintCfg.enabled)
+    ? (data, w2, h2, ch) => applyGreenPaint(data, w2, h2, ch, greenSurface, mercProject, mercUnproject, paintCfg)
+    : null;
   const frame = await flattenWithRelief({
     width: W, height: H,
     background,
-    composites, relief: reliefMask, settings, overlays, quality
+    composites, relief: reliefMask, settings, overlays, quality, greenPaint
   });
   const nw = unworld(merged.left, merged.top);
   const se = unworld(merged.right, merged.bottom);
@@ -744,6 +864,7 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, green
     captureZoom,
     originPx,
     bounds: { north: nw.lat, west: nw.lng, south: se.lat, east: se.lng },
+    greenPalette: frame.greenPalette || null,
     diagnostics: frame.diagnostics
   };
 }
