@@ -78,7 +78,10 @@ const RELIEF_STAMP = "relief2-perhole-x" + RELIEF_DEFAULTS.exaggeration + "-az" 
    Putting it in the plan key the way RELIEF_STAMP has to be would throw away every stored
    terrain capture on the course for what is a drawing change. */
 const GREEN_FRAME_STAMP = "greenframe1";
-const PAINT_STAMP = "paint1-t" + greenCore.PAINT_DEFAULTS.tiers + "-s" + greenCore.PAINT_DEFAULTS.spread;
+/* paint2: tiers moved out of the compositor into buildGreenDrawing's display list, and the
+   palette is now sampled off the green's own box rather than a fixed 520px downscale of the
+   whole frame. Both change published pixels, so already-exported frames must not resume. */
+const PAINT_STAMP = "paint2-t" + greenCore.PAINT_DEFAULTS.tiers + "-s" + greenCore.PAINT_DEFAULTS.spread;
 const ENGINE_SOURCE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../scripts/gd-course-visual-engine.js");
 let presetHelpersCache = null;
 
