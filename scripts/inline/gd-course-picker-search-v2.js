@@ -313,7 +313,9 @@
 	    const now=Date.now();
 	    if(!opts.force&&databaseCourseCache.length&&now-databaseCourseLoadAt<120000)return Promise.resolve(databaseCourseCache.slice());
 	    if(databaseCoursePromise)return databaseCoursePromise;
-	    databaseCoursePromise=fetch(COURSE_MAPS_API,{headers:{Accept:"application/json"},cache:"no-store"})
+	    /* scope=play: names, locations and holes are all the picker reads; the collected
+	       surfaces stay behind (see functions/course-maps.mjs stripSurfacesForPlay). */
+	    databaseCoursePromise=fetch(COURSE_MAPS_API+"?scope=play",{headers:{Accept:"application/json"},cache:"no-store"})
 	      .then(res=>res.ok?res.json():null)
 	      .then(data=>{
 	        databaseCourseCache=databaseCoursesFromMaps(data);

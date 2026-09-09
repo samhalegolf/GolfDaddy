@@ -87,7 +87,13 @@ async function supabaseFetch(path, options = {}) {
 
 export default async function courseMaps(req) {
   if (req.method === "OPTIONS") return json(200, { ok: true });
-  if (req.method === "GET") return json(200, await readMaps());
+  if (req.method === "GET") {
+    /* ?scope=play is what the phone's library sync and the course picker ask for. Every
+       other caller (Studio's Course Database, the watch bake, tests) gets the full record. */
+    const scope = new URL(req.url).searchParams.get("scope");
+    const maps = await readMaps();
+    return json(200, scope === "play" ? stripSurfacesForPlay(maps) : maps);
+  }
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
 
   let payload;
@@ -250,6 +256,48 @@ async function safeStore() {
     console.warn("course map store unavailable", error && error.message || error);
     return null;
   }
+}
+
+/* The play-scope library: every course's identity, location, holes and core objects (tee,
+   green, route bends), but NOT the collected fairway/bunker/water surfaces for a course whose
+   map is ready.
+
+   Why: the phone mirrors this whole response into one localStorage entry with a hard ~10 MB
+   cap. Core objects for the library run about 2.7 MB of text; surfaces average ~170 KB per
+   course (Millbrook: 291 surfaces, 281 KB), so collecting them for every course would put the
+   mirror at the cap and the quota eviction path would start throwing courses away. A phone
+   only ever needs the surfaces of the course it is playing, and /api/course-package already
+   carries exactly those per hole - so a ready course ships its surfaces through the package,
+   on demand, and the library stays a library.
+
+   "Ready" means the course has saved holes. A course still on its first scan keeps its full
+   record here, because until its package exists this response is the only thing the phone has
+   to play from - and in practice such a course has no surfaces yet anyway, since collection
+   needs the saved holes as its spatial framework. `surfacesOmitted` carries the counts so a
+   client can tell "stripped" from "never collected". */
+const PLAY_SURFACE_TYPES = new Set(["fairway_area", "bunker", "water"]);
+function isPlaySurface(object) {
+  return !!(object && PLAY_SURFACE_TYPES.has(String(object.type || "")) && Array.isArray(object.shape) && object.shape.length >= 3);
+}
+export function stripSurfacesForPlay(maps) {
+  const out = Object.assign({}, maps || {}, { courses: {}, scope: "play" });
+  const courses = maps && maps.courses || {};
+  Object.keys(courses).forEach((key) => {
+    const course = courses[key];
+    if (!course) return;
+    const ready = Object.keys(course.holes || {}).length > 0;
+    if (!ready) { out.courses[key] = course; return; }
+    const objects = {};
+    const counts = { fairway_area: 0, bunker: 0, water: 0 };
+    Object.keys(course.objects || {}).forEach((id) => {
+      const object = course.objects[id];
+      if (isPlaySurface(object)) { counts[object.type] += 1; return; }
+      objects[id] = object;
+    });
+    const stripped = counts.fairway_area + counts.bunker + counts.water;
+    out.courses[key] = stripped ? Object.assign({}, course, { objects, surfacesOmitted: counts }) : course;
+  });
+  return out;
 }
 
 function emptyMaps() {
@@ -870,6 +918,7 @@ export const __courseMapsTest = {
   mapsFromSupabaseRows,
   mergeMapSets,
   sanitizeCourse,
+  stripSurfacesForPlay,
   visualSnapshotCourseId,
   withMirrorSummary,
 };

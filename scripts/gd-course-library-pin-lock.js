@@ -814,11 +814,15 @@
     for(let i=0;i<objects.length;i++){
       const base=objects[i];
       if(!base||!course.objects[base.id])continue;
+      /* Surfaces are never merged by proximity. Two greenside bunkers 12 m apart are two
+         bunkers, and this radius pass (14 m for the bunker type) was quietly folding the
+         second into the first - which is one bunker the bubble could never reveal. */
+      if(isSurfaceObject(base))continue;
       const basePos=objectCenter(base);
       if(!basePos)continue;
       for(let j=i+1;j<objects.length;j++){
         const next=objects[j];
-        if(!next||!course.objects[next.id]||next.type!==base.type)continue;
+        if(!next||!course.objects[next.id]||next.type!==base.type||isSurfaceObject(next))continue;
         const nextPos=objectCenter(next);
         if(!nextPos)continue;
         if(distance(basePos,nextPos)>objectDedupeRadius(base.type))continue;
@@ -1092,9 +1096,17 @@
       published:false,
       publishedSourceId:base.id,
       hasPublishedBase:true,
-      objects:{...(base.objects||{}),...(own.objects||{})},
+      /* Once the package has written this course's surfaces into the private record, any
+         surfaces still sitting in the published mirror (a full copy cached before the sync
+         went scope=play) would draw twice over the same ground. The package copy wins. */
+      objects:{...(own.surfacesSavedAt?withoutSurfaceObjects(base.objects):(base.objects||{})),...(own.objects||{})},
       holes:{...(base.holes||{}),...(own.holes||{})}
     };
+  }
+  function withoutSurfaceObjects(objects){
+    const out={};
+    Object.keys(objects||{}).forEach(id=>{if(!isSurfaceObject(objects[id]))out[id]=objects[id];});
+    return out;
   }
   function libraryCourses(uid=userId()){
     const privateCourses=Object.values(loadStore().courses||{}).filter(c=>c.userId===uid);
@@ -4674,7 +4686,119 @@
 	    /* fit is the server's verdict on the coordinate this run was given. It rides
 	       all the way to the picker, which is the only thing that may put a pin
 	       screen in front of a player. Absent means the pin held up. */
-	    return {saved,holes:holes.length,polygons,fallbacks,automapperStatus:'success',serverPackageStatus:pkg.status,fit:pkg&&pkg.fit||null};
+	    let surfaces=null;
+	    try{surfaces=persistServerSurfaces(course,pkg);}catch(e){surfaces=null;}
+	    return {saved,holes:holes.length,polygons,fallbacks,surfaces,automapperStatus:'success',serverPackageStatus:pkg.status,fit:pkg&&pkg.fit||null};
+	  }
+	  /* ---- Surfaces from the course package ----------------------------------------------
+
+	     The collected fairway/bunker/water surfaces reach a phone HERE and only here. The
+	     library sync asks /api/course-maps for scope=play, which leaves them out for any course
+	     whose map is ready (see stripSurfacesForPlay there for the localStorage arithmetic), and
+	     both package shapes carry them per hole: lite as hole.surfaces, full as
+	     hole.geometry.surfaces. Every path that applies a package runs through
+	     persistServerCoursePackage above, so every path lands the surfaces too.
+
+	     Stored as ordinary objects on the player's private course record - type fairway_area /
+	     bunker / water with a shape - because that is what everything downstream already reads:
+	     GPS Play's bubble reveal (gdMappedCourseObjects), the mapper tools, the library. Keyed by
+	     OSM way id, so the same physical bunker the server stores once per hole it straddles is
+	     kept once. Replaced wholesale per package objectsVersion, never merged: the package is
+	     the authority for surfaces and a stale bunker must not outlive its collection.
+
+	     Kept for the last few courses played, not forever: each course is ~100-280 KB of rings in
+	     the same localStorage bucket the library lives in. */
+	  const PACKAGE_SURFACE_SOURCE='server-course-package-surface';
+	  const PACKAGE_SURFACE_BUCKETS={fairways:'fairway_area',bunkers:'bunker',water:'water'};
+	  const PACKAGE_SURFACE_COURSE_LIMIT=4;
+	  function isSurfaceObject(object){
+	    if(!object)return false;
+	    if(object.type==='fairway_area'||object.type==='water')return true;
+	    return object.type==='bunker'&&Array.isArray(object.shape)&&object.shape.length>=3;
+	  }
+	  function surfaceShapeKey(shape){
+	    const text=(Array.isArray(shape)?shape:[]).map(p=>Number(p&&p.lat).toFixed(6)+','+Number(p&&p.lng).toFixed(6)).join(';');
+	    let hash=5381;
+	    for(let i=0;i<text.length;i++)hash=((hash<<5)+hash+text.charCodeAt(i))>>>0;
+	    return hash.toString(36);
+	  }
+	  /* Pure: package -> flat list of surface object records (no user/course stamping yet). */
+	  function packageSurfaceRecords(pkg){
+	    const holes=Array.isArray(pkg&&pkg.holes)?pkg.holes:[];
+	    const out=new Map();
+	    holes.forEach(hole=>{
+	      const h=Number(hole&&hole.holeNumber);
+	      const geometry=pkg.status==='full-map-ready'?(hole&&hole.geometry):hole;
+	      const surfaces=geometry&&geometry.surfaces;
+	      if(!surfaces||typeof surfaces!=='object')return;
+	      Object.keys(PACKAGE_SURFACE_BUCKETS).forEach(bucket=>{
+	        const type=PACKAGE_SURFACE_BUCKETS[bucket];
+	        (Array.isArray(surfaces[bucket])?surfaces[bucket]:[]).forEach(surface=>{
+	          const shape=(Array.isArray(surface&&surface.shape)?surface.shape:[]).map(toPlain).filter(p=>p&&Number.isFinite(p.lat)&&Number.isFinite(p.lng));
+	          if(shape.length<3)return;
+	          const key=type+':'+(surface.osmId?String(surface.osmId):'shape-'+surfaceShapeKey(shape));
+	          if(out.has(key))return;
+	          const center=toPlain(surface.center);
+	          out.set(key,{
+	            id:'pkg-'+key.replace(/[^a-z0-9_:.-]+/gi,'-'),
+	            type,
+	            shape,
+	            position:center&&Number.isFinite(center.lat)&&Number.isFinite(center.lng)?center:shapeCentroid(shape),
+	            holeNumber:Number.isFinite(h)&&h>0?h:null,
+	            osmId:surface.osmId?String(surface.osmId):null,
+	            hazardClass:type==='water'?String(surface.hazardClass||'water'):undefined
+	          });
+	        });
+	      });
+	    });
+	    return Array.from(out.values());
+	  }
+	  function persistServerSurfaces(course,pkg){
+	    const records=packageSurfaceRecords(pkg);
+	    const version=String(pkg&&pkg.objectsVersion||'');
+	    const uid=userId();
+	    const c=sessionCourse(course||courseObj());
+	    const cid=courseId(c);
+	    if(!cid)return null;
+	    const store=loadStore();
+	    const target=ensureCourse(store,uid,cid,courseName(c),c);
+	    target.objects=target.objects||{};
+	    const haveCurrent=Object.values(target.objects).some(o=>o&&o.source===PACKAGE_SURFACE_SOURCE);
+	    if(version&&target.surfacesVersion===version&&(haveCurrent||!records.length))return {surfaces:records.length,written:0,skipped:true};
+	    Object.keys(target.objects).forEach(id=>{const o=target.objects[id];if(o&&o.source===PACKAGE_SURFACE_SOURCE)delete target.objects[id];});
+	    const now=nowIso();
+	    records.forEach(record=>{
+	      const confirmed=!!validHoleNumber(record.holeNumber);
+	      target.objects[record.id]={
+	        ...record,
+	        userId:uid,
+	        courseId:target.courseId||cid,
+	        confirmed,
+	        lifecycle:objectLifecycle({type:record.type,holeNumber:record.holeNumber,confirmed}),
+	        targetEligible:false,
+	        source:PACKAGE_SURFACE_SOURCE,
+	        createdAt:now,
+	        updatedAt:now
+	      };
+	    });
+	    target.surfacesVersion=version||null;
+	    target.surfacesSavedAt=records.length?now:null;
+	    target.updatedAt=now;
+	    evictStalePackageSurfaces(store,target.id);
+	    if(!saveStore(store))return {surfaces:records.length,written:0,persistFailed:true};
+	    return {surfaces:records.length,written:records.length};
+	  }
+	  /* Surfaces stay on the most recent PACKAGE_SURFACE_COURSE_LIMIT courses; older ones drop
+	     theirs and get them back from the package the next time they are opened. */
+	  function evictStalePackageSurfaces(store,keepKey){
+	    const carrying=Object.values(store.courses||{})
+	      .filter(c=>c&&c.id!==keepKey&&c.surfacesSavedAt)
+	      .sort((a,b)=>String(b.surfacesSavedAt).localeCompare(String(a.surfacesSavedAt)));
+	    carrying.slice(Math.max(0,PACKAGE_SURFACE_COURSE_LIMIT-1)).forEach(c=>{
+	      Object.keys(c.objects||{}).forEach(id=>{if(c.objects[id]&&c.objects[id].source===PACKAGE_SURFACE_SOURCE)delete c.objects[id];});
+	      c.surfacesSavedAt=null;
+	      c.surfacesVersion=null;
+	    });
 	  }
 	  async function resolveGeometryFromServerPackage(course){
 	    const pkg=await fetchServerCoursePackage(course);
@@ -5687,7 +5811,7 @@
           return loadPublishedStore();
         }
       }
-      const res=await fetch(PUBLISHED_COURSE_API,{headers:{Accept:'application/json'},cache:'no-store'});
+      const res=await fetch(PUBLISHED_COURSE_API+'?scope=play',{headers:{Accept:'application/json'},cache:'no-store'});
       if(!res.ok){
         const error=new Error(`Course map lookup failed (${res.status})`);
         error.status=res.status;

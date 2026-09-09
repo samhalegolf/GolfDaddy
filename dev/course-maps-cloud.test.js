@@ -17,6 +17,7 @@ const { pathToFileURL } = require("url");
     mapsFromSupabaseRows,
     mergeMapSets,
     sanitizeCourse,
+    stripSurfacesForPlay,
     visualSnapshotCourseId,
     withMirrorSummary
   } = mod.__courseMapsTest;
@@ -178,6 +179,40 @@ const { pathToFileURL } = require("url");
   assert.notEqual(visualSnapshotCourseId(course), course.id, "the store key is not a course id");
   assert.equal(visualSnapshotCourseId({ id: "published::cromwell" }), "",
     "a course carrying only a store key enqueues nothing rather than a phantom");
+
+  /* ?scope=play: a ready course loses its collected surfaces (the package carries those), a
+     course still on its first scan keeps everything, and nothing else about either changes. */
+  const ring = [{ lat: -45.03, lng: 169.2 }, { lat: -45.031, lng: 169.201 }, { lat: -45.032, lng: 169.2 }];
+  const playMaps = stripSurfacesForPlay({
+    updatedAt: "2026-09-09T00:00:00.000Z",
+    courses: {
+      "published::ready": {
+        id: "published::ready", courseId: "ready", courseName: "Ready",
+        holes: { 1: { holeNumber: 1 } },
+        objects: {
+          g1: { id: "g1", type: "green", position: { lat: -45.03, lng: 169.2 }, shape: ring, holeNumber: 1 },
+          t1: { id: "t1", type: "tee", position: { lat: -45.04, lng: 169.2 }, holeNumber: 1 },
+          pin: { id: "pin", type: "bunker", position: { lat: -45.035, lng: 169.2 }, holeNumber: 1 },
+          b1: { id: "b1", type: "bunker", position: { lat: -45.035, lng: 169.2 }, shape: ring, holeNumber: 1 },
+          f1: { id: "f1", type: "fairway_area", position: { lat: -45.035, lng: 169.2 }, shape: ring, holeNumber: 1 },
+          w1: { id: "w1", type: "water", position: { lat: -45.035, lng: 169.2 }, shape: ring, holeNumber: 1, hazardClass: "penalty_area" }
+        }
+      },
+      "published::fresh": {
+        id: "published::fresh", courseId: "fresh", courseName: "Fresh", holes: {},
+        objects: { w9: { id: "w9", type: "water", position: { lat: -45.1, lng: 169.3 }, shape: ring } }
+      }
+    }
+  });
+  assert.equal(playMaps.scope, "play");
+  assert.equal(playMaps.updatedAt, "2026-09-09T00:00:00.000Z");
+  assert.deepEqual(Object.keys(playMaps.courses["published::ready"].objects).sort(), ["g1", "pin", "t1"],
+    "a ready course keeps green, tee and the bunker PIN; the three surfaces go");
+  assert.deepEqual(playMaps.courses["published::ready"].surfacesOmitted, { fairway_area: 1, bunker: 1, water: 1 });
+  assert.deepEqual(Object.keys(playMaps.courses["published::ready"].holes), ["1"]);
+  assert.deepEqual(Object.keys(playMaps.courses["published::fresh"].objects), ["w9"],
+    "a course with no saved holes ships its full record until its map is ready");
+  assert.equal(playMaps.courses["published::fresh"].surfacesOmitted, undefined);
 
   const optionsResponse = await mod.default(new Request("https://clarity-caddie.test/api/course-maps", { method: "OPTIONS" }));
   assert.equal(optionsResponse.status, 200);
