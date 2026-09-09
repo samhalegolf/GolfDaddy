@@ -44,7 +44,7 @@ assert(routeAudit.includes('return window.GDCoursePicker.open({source:"route-aud
 const legacyDelegates = [
   "window.renderCourses=function(courses){return api.renderCourses(courses);};",
   "window.manualSearch=function(query){return api.search(query);};",
-  "window.gdOpenChangeCourse=function(event){return api.open({event,source:\"change-course\",returnTarget:\"gps\"});};",
+  "window.gdOpenChangeCourse=function(event){return api.open({event,source:\"change-course\",returnTarget:\"home\"});};",
   "window.gdOpenCoursePickerCourse=function(course){return api.selectCourse(course,{source:\"legacy-global\"});};",
   "window.gdOpenCoursePickerSelectionFromElement=function(element){return api.selectFromElement(element);};",
   "window.gdCoursePickerRequestGps=function(){return api.requestLocation();};"

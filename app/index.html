@@ -178,6 +178,11 @@
          is looking at instead of being magnified with the picture. That is the whole reason it
          is drawn here rather than baked into the published frame, where a green is ~77px wide
          and none of this line work survives. -->
+    <!-- The green tiered in its own colours. Sits UNDER #greenContours so the lines stay on
+         top, and like it carries no transform: the tiers are recomputed per screen pixel off
+         the fitted surface, so the steps between them are crisp at any zoom instead of being
+         magnified out of a ~77px frame. Only drawn when the export left the frame unpainted. -->
+    <canvas id="greenPaint"></canvas>
     <canvas id="greenContours"></canvas>
     <svg id="bubbleSvg" class="hiddenState"></svg>
     <!-- The club the bubble is sized from, sitting at the head of the aim line.

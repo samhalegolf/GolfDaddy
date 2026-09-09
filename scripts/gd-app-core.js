@@ -17048,6 +17048,11 @@ function gdWireCoursePickerPlay(){
   if(window.__gdCoursePickerPlayDelegated)return;
   window.__gdCoursePickerPlayDelegated=true;
   document.addEventListener("click",function(event){
+    /* The picker owner (gd-course-picker-search-v2.js) handles its own rows on
+       #courseScreen. This capture handler fired first and stopped propagation,
+       so the owner never saw facility "Choose" rows and mapped their label as
+       a course. It stays only for a page where the owner did not load. */
+    if(window.GDCoursePicker)return;
     const target=event.target&&event.target.closest&&event.target.closest("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course");
     if(!target)return;
     /* Search can put area rows ("Otago, New Zealand") in this list - they ask
@@ -17061,6 +17066,7 @@ function gdWireCoursePickerPlay(){
     return gdOpenCoursePickerSelectionFromElement(target);
   },true);
 	  document.addEventListener("keydown",function(event){
+	    if(window.GDCoursePicker)return;
 	    if((event.key!=="Enter"&&event.key!==" ")||!event.target?.closest?.("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course"))return;
 	    if(event.target.closest("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course").__gdAreaPayload)return;
 	    event.preventDefault();
@@ -17084,7 +17090,9 @@ function manualSearch(){
   const count=document.getElementById("countLine");
   if(count)count.textContent=q?"No course found":"Search";
 }
-document.getElementById("searchInput")?.addEventListener("keydown",e=>{if(e.key==="Enter")manualSearch();});
+/* The picker owner binds Enter itself; a second listener here ran every search
+   twice and fired two Nominatim requests in the same millisecond. */
+document.getElementById("searchInput")?.addEventListener("keydown",e=>{if(e.key==="Enter"&&!window.GDCoursePicker)manualSearch();});
 document.querySelectorAll(".panel").forEach(panel=>{
   panel.addEventListener("click",e=>{if(e.target===panel)panel.classList.remove("open")});
 });

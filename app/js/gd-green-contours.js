@@ -184,6 +184,114 @@
     return drew > 0;
   }
 
+  /* ---------- the green, painted in its own colours ---------------------------------------- */
+
+  /* Tiers at screen resolution, from the palette the export measured and published.
+
+     WHY HERE AS WELL AS IN THE BAKE. The bake paints a green about 77 pixels across; magnify
+     that at focus and the colour is fine - a tier wash is low-frequency and scales cleanly - but
+     the STEPS between tiers arrive as soft 77px stairs. Drawn here the boundaries are computed
+     per screen pixel off the analytic fit, so they are as crisp as the display.
+
+     WHY IT MUST NOT DOUBLE. The displacement is measured against the pixel already on screen, so
+     running this over a frame the bake already painted applies the tiers twice. The export
+     publishes `appliedToFrame` for exactly this reason and the caller honours it.
+
+     The projector is treated as AFFINE over the green. It is not, globally - it is mercator -
+     but across thirty metres the departure is far below a pixel, and an affine inverse is what
+     makes a per-pixel pass affordable at all. Three probes give the matrix. */
+  function paint(canvas, surface, palette, project, sampleFrameRgb, options) {
+    if (!canvas || !surface || !palette || !project || !core || !sampleFrameRgb) return false;
+    var cfg = {
+      tiers: (options && options.tiers) || palette.tiers || core.PAINT_DEFAULTS.tiers,
+      spread: (options && options.spread !== undefined) ? options.spread
+        : (palette.spread !== undefined ? palette.spread : core.PAINT_DEFAULTS.spread),
+      strength: (options && options.strength !== undefined) ? options.strength
+        : (palette.strength !== undefined ? palette.strength : core.PAINT_DEFAULTS.strength)
+    };
+    var dpr = root.devicePixelRatio || 1;
+    var cssW = canvas.clientWidth, cssH = canvas.clientHeight;
+    if (!cssW || !cssH) return false;
+    var needW = Math.max(1, Math.round(cssW * dpr)), needH = Math.max(1, Math.round(cssH * dpr));
+    if (canvas.width !== needW || canvas.height !== needH) { canvas.width = needW; canvas.height = needH; }
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return false;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, needW, needH);
+
+    var frame = surface.frame, rect = canvas.getBoundingClientRect();
+    function toDev(mx, my) {
+      var at = project(frame.toLatLng(mx, my));
+      return at ? { x: (at.left - rect.left) * dpr, y: (at.top - rect.top) * dpr } : null;
+    }
+    var o0 = toDev(0, 0), ox = toDev(1, 0), oy = toDev(0, 1);
+    if (!o0 || !ox || !oy) return false;
+    var a = ox.x - o0.x, b = oy.x - o0.x, c = ox.y - o0.y, d = oy.y - o0.y;
+    var det = a * d - b * c;
+    if (!det || !isFinite(det)) return false;
+    var ia = d / det, ib = -b / det, ic = -c / det, id = a / det;   // screen -> metres
+
+    /* Only the green's own screen box is touched. */
+    var poly = surface.polygon, minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+    for (var i = 0; i < poly.length; i++) {
+      var p = toDev(poly[i].x, poly[i].y);
+      if (!p) return false;
+      if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+    }
+    var x0 = Math.max(0, Math.floor(minX)), x1 = Math.min(needW - 1, Math.ceil(maxX));
+    var y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(needH - 1, Math.ceil(maxY));
+    if (!(x1 > x0 && y1 > y0)) return false;
+
+    /* Height range over the green, so the tiers divide what is actually there - the same
+       normalisation the export used, recomputed rather than stored because it is three lines. */
+    var lo = Infinity, hi = -Infinity, k;
+    for (k = 0; k < poly.length; k++) {
+      var z0 = surface.fit.heightAt(poly[k].x, poly[k].y);
+      if (z0 < lo) lo = z0; if (z0 > hi) hi = z0;
+    }
+    var stepM = 1.0;
+    for (var sx = -30; sx <= 30; sx += stepM) {
+      for (var sy = -30; sy <= 30; sy += stepM) {
+        if (!core.pointInPolygon(sx, sy, poly)) continue;
+        var zz = surface.fit.heightAt(sx, sy);
+        if (zz < lo) lo = zz; if (zz > hi) hi = zz;
+      }
+    }
+    var span = (hi - lo) || 1e-9;
+    var fadeM = core.CONTOUR_DEFAULTS.edgeFadeM;
+
+    var img = ctx.createImageData(x1 - x0 + 1, y1 - y0 + 1);
+    var out = img.data, w = x1 - x0 + 1;
+    var src = [0, 0, 0], dst = [0, 0, 0], rgb = [0, 0, 0];
+    var drew = 0;
+    for (var y = y0; y <= y1; y++) {
+      for (var x = x0; x <= x1; x++) {
+        var dx = x + 0.5 - o0.x, dy = y + 0.5 - o0.y;
+        var mx = ia * dx + ib * dy, my = ic * dx + id * dy;
+        if (!core.pointInPolygon(mx, my, poly)) continue;
+        if (!sampleFrameRgb(frame.toLatLng(mx, my), rgb)) continue;
+        var dist = core.distanceToPolygon(mx, my, poly);
+        var f = Math.max(0, Math.min(1, dist / fadeM));
+        f = f * f * (3 - 2 * f);
+        var zNorm = (surface.fit.heightAt(mx, my) - lo) / span;
+        var t = core.paletteRank(palette, rgb[0], rgb[1], rgb[2]);
+        var target = core.paintTargetForHeight(zNorm, cfg);
+        core.paletteColour(palette, t, src);
+        core.paletteColour(palette, t + cfg.strength * f * (target - t), dst);
+        var o = ((y - y0) * w + (x - x0)) * 4;
+        out[o]     = Math.max(0, Math.min(255, rgb[0] + (dst[0] - src[0])));
+        out[o + 1] = Math.max(0, Math.min(255, rgb[1] + (dst[1] - src[1])));
+        out[o + 2] = Math.max(0, Math.min(255, rgb[2] + (dst[2] - src[2])));
+        out[o + 3] = 255;
+        drew++;
+      }
+    }
+    if (!drew) return false;
+    ctx.putImageData(img, x0, y0);
+    return true;
+  }
+
   function clear(canvas) {
     if (!canvas) return;
     var ctx = canvas.getContext("2d");
@@ -193,6 +301,7 @@
   root.GDGreenContours = {
     surfaceFor: surfaceFor,
     draw: draw,
+    paint: paint,
     clear: clear,
     /* painter installs the asset-URL resolver it already uses for the mesh, so this file never
        learns anything about how storage paths become URLs. */

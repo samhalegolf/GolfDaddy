@@ -1484,23 +1484,69 @@
      is the first moment they are worth drawing. */
   var greenSurfacePromise = null;
   var greenSurfaceKey = null;
+  var publishedFrameUrl = null;
+
+  /* The published frame, readable. #surfaceImage is loaded without crossOrigin because nothing
+     else needs its pixels, and reading it would taint the canvas; a second fetch with
+     crossOrigin "anonymous" comes out of the HTTP cache and is what attachMesh already does for
+     its texture. Cached per frame url - one decode per hole, not per repaint. */
+  var frameSampleKey = null, frameSamplePromise = null;
+  function frameSamplerFor(url, meta) {
+    if (frameSampleKey === url && frameSamplePromise) return frameSamplePromise;
+    frameSampleKey = url;
+    frameSamplePromise = new Promise(function (resolve) {
+      var probe = new Image();
+      probe.crossOrigin = "anonymous";
+      probe.onload = function () {
+        try {
+          var c = document.createElement("canvas");
+          c.width = probe.naturalWidth; c.height = probe.naturalHeight;
+          var cx = c.getContext("2d");
+          cx.drawImage(probe, 0, 0);
+          var px = cx.getImageData(0, 0, c.width, c.height);
+          var origin = meta.originPx || {};
+          var scalePx = 256 * Math.pow(2, Number(meta.captureZoom) || 0);
+          var ox = Number(origin.x) || 0, oy = Number(origin.y) || 0;
+          var out0 = meta.outputDimensions || {};
+          var sx = c.width / (Number(out0.width) || c.width);
+          var sy = c.height / (Number(out0.height) || c.height);
+          resolve(function (ll, rgb) {
+            var sn = Math.sin(ll.lat * Math.PI / 180);
+            var wx = (ll.lng + 180) / 360;
+            var wy = 0.5 - Math.log((1 + sn) / (1 - sn)) / (4 * Math.PI);
+            var x = Math.round((wx * scalePx - ox) * sx);
+            var y = Math.round((wy * scalePx - oy) * sy);
+            if (x < 0 || y < 0 || x >= px.width || y >= px.height) return false;
+            var o = (y * px.width + x) * 4;
+            rgb[0] = px.data[o]; rgb[1] = px.data[o + 1]; rgb[2] = px.data[o + 2];
+            return true;
+          });
+        } catch (error) { resolve(null); }   // tainted or oversized: the frame is still correct
+      };
+      probe.onerror = function () { resolve(null); };
+      probe.src = url;
+    });
+    return frameSamplePromise;
+  }
 
   function drawGreenContours(scene, proj) {
     var canvas = el("greenContours");
+    var paintCanvas = el("greenPaint");
     if (!canvas || !window.GDGreenContours) return;
-    if (!scene.finish.show || !proj || !published) {
+    function clearBoth() {
       window.GDGreenContours.clear(canvas);
-      return;
+      if (paintCanvas) window.GDGreenContours.clear(paintCanvas);
     }
+    if (!scene.finish.show || !proj || !published) { clearBoth(); return; }
     var img = el("surfaceImage");
     var meta = null;
     try { meta = img && img.dataset.playSurface ? JSON.parse(img.dataset.playSurface) : null; } catch (e) { meta = null; }
     var elevation = meta && meta.elevation;
-    if (!elevation || !elevation.path) { window.GDGreenContours.clear(canvas); return; }
+    if (!elevation || !elevation.path) { clearBoth(); return; }
 
     var r = scene.hole.rec;
     var shape = (meta.anchorPins && meta.anchorPins.greenShape) || (r && r.greenShape) || [];
-    if (shape.length < 8) { window.GDGreenContours.clear(canvas); return; }
+    if (shape.length < 8) { clearBoth(); return; }
 
     /* One fit per hole. The promise is held rather than the surface so a repaint arriving while
        the elevation is still decoding does not start a second decode of the same PNG. */
@@ -1517,8 +1563,20 @@
     }
     if (!greenSurfacePromise) return;
     greenSurfacePromise.then(function (surface) {
-      if (!surface || greenSurfaceKey !== elevation.path) { window.GDGreenContours.clear(canvas); return; }
+      if (!surface || greenSurfaceKey !== elevation.path) { clearBoth(); return; }
       window.GDGreenContours.draw(canvas, surface, proj.toScreen, {});
+      /* Tiers, but only if the export left them to us. A frame the bake already painted must not
+         be painted again - the displacement is measured against what is on screen. */
+      var palette = meta.greenPalette;
+      if (!paintCanvas) return;
+      if (!palette || palette.appliedToFrame !== false || !publishedFrameUrl) {
+        window.GDGreenContours.clear(paintCanvas);
+        return;
+      }
+      frameSamplerFor(publishedFrameUrl, meta).then(function (sample) {
+        if (!sample || greenSurfaceKey !== elevation.path) { window.GDGreenContours.clear(paintCanvas); return; }
+        window.GDGreenContours.paint(paintCanvas, surface, palette, proj.toScreen, sample, {});
+      });
     });
   }
 
@@ -1648,6 +1706,7 @@
         presentation = "published";
         surfaceFailed = null;
         document.body.classList.add("surface-published");
+        publishedFrameUrl = url;
         attachMesh(asset.playSurface, url);
         lastCameraKey = null;
         /* Draw it. Without this the image appeared with no solved frame — a

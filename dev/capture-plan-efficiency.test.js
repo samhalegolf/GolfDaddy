@@ -68,8 +68,24 @@ let plan9;
       const grids = items.map(i => captureGrid(i, { source: SOURCE })).filter(Boolean);
       /* The export merges the capture image bounds - this is the same maths it uses. */
       const frameZoom = frameZoomFor(mergeBounds(grids.map(g => g.imageBounds)), MAX_OUTPUT_PX);
-      grids.forEach((g, i) => assert.ok(g.captureZoom <= frameZoom,
-        `hole ${hole} capture ${items[i].role} shot at z${g.captureZoom} for a z${frameZoom} frame`));
+      grids.forEach((g, i) => {
+        /* A green surround is framed on its own extent and published as its own frame, so the
+           hole's zoom is not the frame it lands in. Its own ceiling is checked below. */
+        if (items[i].ownFrame === "green") {
+          /* Its own frame, so the hole's zoom does not bind. The invariant is unchanged - a
+             capture may not out-shoot the frame it lands in - only the frame is different, and
+             the planner already resolved it (with the source ceiling this test's local
+             frameZoomFor call would not know about). */
+          const own = Number(items[i].frameZoom) || 0;
+          assert.ok(own > frameZoom,
+            `hole ${hole} green frame z${own} should out-resolve the hole frame z${frameZoom}`);
+          assert.ok(g.captureZoom <= own,
+            `hole ${hole} green surround shot at z${g.captureZoom} for its own z${own} frame`);
+          return;
+        }
+        assert.ok(g.captureZoom <= frameZoom,
+          `hole ${hole} capture ${items[i].role} shot at z${g.captureZoom} for a z${frameZoom} frame`);
+      });
     });
   });
 
@@ -146,20 +162,53 @@ let plan9;
     });
   });
 
-  test("a green surround inside its own corridor is not captured twice", () => {
-    /* Once every capture clamps to the frame zoom, a long hole's green surround is the same
-       ground at the same resolution as the corridor that already covers it. On the real Jacks
-       Point package this drops 18 green captures to 3. */
+  test("a green surround is kept even inside its corridor, and stays cheap", () => {
+    /* This used to assert the opposite. Once every capture clamped to the hole's frame zoom, a
+       long hole's green surround WAS the same ground at the same resolution as the corridor over
+       it, and dropping it took 18 green captures to 3.
+
+       It now feeds a green-scale frame, which the corridor cannot supply at any extent: the hole
+       frame spreads one grid over the whole hole and lands a 45m green in ~106px, four times
+       short of what the contour and tier work needs. So it is kept everywhere - and what has to
+       be defended instead is the COST that drop was protecting, which is why the megapixel
+       ceiling below is the real assertion. */
     const pkg = course(4);
     const plan = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX, terrainSource: null });
     const greens = plan.filter(i => i.role === "green-surround");
+    assert.ok(greens.length, "green surrounds must survive planning");
     greens.forEach(green => {
-      const corridors = plan.filter(i => i.role === "play-corridor" && i.holeNumber === green.holeNumber);
-      if (!corridors.length) return;
-      const covered = mergeBounds(corridors.map(i => captureGrid(i, { source: SOURCE }).imageBounds));
-      const bounds = captureGrid(green, { source: SOURCE }).imageBounds;
-      assert.ok(!mod.boundsContain(covered, bounds),
-        `hole ${green.holeNumber} kept a green surround its corridor already covers`);
+      assert.equal(green.ownFrame, "green", `hole ${green.holeNumber} green must be its own frame`);
+      const g = captureGrid(green, { source: SOURCE });
+      const mp = (g.imageWidth * g.imageHeight) / 1e6;
+      assert.ok(mp < 4, `hole ${green.holeNumber} green capture is ${mp.toFixed(1)}MP - too big to add per hole`);
+    });
+  });
+
+  test("a green capture covers the green, not the hole", () => {
+    /* The bug that made green focus soft, and made the green surround look redundant.
+
+       pixelRect unions the item's bounds with its capture anchor pins, and holeCaptureAnchorPins
+       returned null for every role but play-corridor - so a green surround inherited the HOLE's
+       pins, tee and full route included, and its "green" capture spanned the whole hole. On this
+       fixture that was 540m of ground at 6.55MP for a 96m green box. Framed on the green it is
+       ~143m at ~1.8MP, and the same 45m green lands at ~426px instead of ~106px. */
+    const pkg = course(3);
+    const plan = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX, terrainSource: null });
+    const greens = plan.filter(i => i.role === "green-surround");
+    assert.ok(greens.length, "green surrounds must survive planning");
+    greens.forEach(green => {
+      assert.ok(green.captureAnchorPins, `hole ${green.holeNumber} green must carry its own capture pins`);
+      assert.equal(green.captureAnchorPins.tee, null, "the tee must not widen a green capture");
+      assert.equal(green.captureAnchorPins.route.length, 0, "the route must not widen a green capture");
+      const g = captureGrid(green, { source: SOURCE });
+      const lat = (green.bounds.north + green.bounds.south) / 2;
+      const groundM = (g.imageBounds.east - g.imageBounds.west) * 111320 * Math.cos(lat * Math.PI / 180);
+      assert.ok(groundM < 260,
+        `hole ${green.holeNumber} green capture spans ${groundM.toFixed(0)}m - it is capturing the hole`);
+      /* The point of the whole exercise: enough pixels on a green to draw on. */
+      const pxPerGreen = 45 / (groundM / g.imageWidth);
+      assert.ok(pxPerGreen > 380,
+        `a 45m green lands at ${pxPerGreen.toFixed(0)}px - the contour design needs 400-700`);
     });
   });
 

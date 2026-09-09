@@ -77,6 +77,7 @@ const RELIEF_STAMP = "relief2-perhole-x" + RELIEF_DEFAULTS.exaggeration + "-az" 
 /* Green paint changes published pixels but NOT captures, so it stamps the export version only.
    Putting it in the plan key the way RELIEF_STAMP has to be would throw away every stored
    terrain capture on the course for what is a drawing change. */
+const GREEN_FRAME_STAMP = "greenframe1";
 const PAINT_STAMP = "paint1-t" + greenCore.PAINT_DEFAULTS.tiers + "-s" + greenCore.PAINT_DEFAULTS.spread;
 const ENGINE_SOURCE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../scripts/gd-course-visual-engine.js");
 let presetHelpersCache = null;
@@ -812,7 +813,7 @@ async function runExportJob(job, deadlineAt) {
      fractional-zoom frames must NOT be resumed/reused, so the version dir has to change.
      RELIEF_STAMP rides along for the same reason - relief changes published pixels, and
      without it every already-exported frame resumes as current and nothing re-renders. */
-  const version = "r" + hashText(JSON.stringify({ presetId, settings, snapshot: capturesIndex.generatedAt, out: "mercator-" + EXPORT_RENDITION_PX + "-iz1-" + RELIEF_STAMP + "-" + PAINT_STAMP }));
+  const version = "r" + hashText(JSON.stringify({ presetId, settings, snapshot: capturesIndex.generatedAt, out: "mercator-" + EXPORT_RENDITION_PX + "-iz1-" + RELIEF_STAMP + "-" + PAINT_STAMP + "-" + GREEN_FRAME_STAMP }));
   const framesDir = pkg.courseId + "/frames/" + version;
   const holeData = packageHoleData(pkg);
   const terrainEntry = entries.find(e => e.role === "terrain-reference");
@@ -860,7 +861,7 @@ async function runExportJob(job, deadlineAt) {
       route: data.route || [],
       greenShape: data.greenShape || []
     };
-    let width = null, height = null, playSurface = null, bytes = null;
+    let width = null, height = null, playSurface = null, bytes = null, greenFrame = null;
     /* A frame may only be SKIPPED when its metadata is recoverable. The metadata sidecar is
        written AT RENDER TIME next to each frame - recovering from the final index.json was a
        livelock: that file only exists after a COMPLETE run, so relayed runs re-rendered from
@@ -872,6 +873,7 @@ async function runExportJob(job, deadlineAt) {
     if (sidecar && sidecar.playSurface && sidecar.playSurface.originPx) {
       width = sidecar.width; height = sidecar.height; playSurface = sidecar.playSurface;
       bytes = Number(sidecar.bytes) || null;
+      greenFrame = sidecar.greenFrame || null;
       if (sidecar.bounds) bounds = sidecar.bounds;
     } else {
       /* Stage marker BEFORE the render: a silent crash (OOM, native abort) writes no error,
@@ -994,10 +996,45 @@ async function runExportJob(job, deadlineAt) {
           " " + elevation.meta.elevationRange.min.toFixed(1) + ".." + elevation.meta.elevationRange.max.toFixed(1) + "m" +
           " light az " + Math.round(elevation.meta.reliefAzimuth) + " (" + (elevation.buffer.length / 1024).toFixed(0) + "KB)");
       }
-      await storageUpload(path + ".json", Buffer.from(JSON.stringify({ width, height, bytes, bounds, playSurface })), "application/json");
+      /* The green at its own scale.
+
+         Same captures, but only the one shot FOR the green, so renderHoleSurfaceMercator frames
+         on that extent instead of the hole's and picks the zoom the ground can carry - z20 where
+         the hole frame gets z18. That is the whole fix for green focus: the hole frame has to
+         spread one 3072px grid over ~830m and lands a 45m green in about 106 pixels, which is
+         four times short of what the contour and tier work needs. Framed alone the same green is
+         ~423px. It is a small asset - the capture behind it is ~1.8MP over ~143m of ground -
+         because it covers a small piece of ground, not because anything was compromised. */
+      const greenCap = captures.find(c => c.entry && c.entry.role === "green-surround");
+      if (greenCap) {
+        try {
+          const g = await renderHoleSurfaceMercator({ pins, captures: [greenCap], terrain, greenSurface, settings, maxDim: EXPORT_RENDITION_PX });
+          const greenPath = framesDir + "/h" + holeNumber + ".green.jpg";
+          await storageUpload(greenPath, g.jpeg, "image/jpeg");
+          greenFrame = {
+            path: greenPath, width: g.width, height: g.height, bytes: g.jpeg.length, bounds: g.bounds,
+            playSurface: {
+              model: "mercator-image", projection: "mercator-image", useGpsPlayFraming: true,
+              fallbackUnderlay: "live-gps", fallbackPolicy: "live-gps-only",
+              anchorPins: pins, sourceBounds: g.bounds, captureZoom: g.captureZoom,
+              originPx: g.originPx, outputDimensions: { width: g.width, height: g.height },
+              elevation: playSurface.elevation || null,
+              greenPalette: g.greenPalette || null
+            }
+          };
+          console.log("[visual-worker] green frame h" + holeNumber + " " + g.width + "x" + g.height +
+            " z" + g.captureZoom + " (" + (g.jpeg.length / 1024).toFixed(0) + "KB)" +
+            (playSurface.captureZoom ? " vs hole z" + playSurface.captureZoom : ""));
+        } catch (error) {
+          /* A green frame is an improvement on the hole frame, never a precondition for it. */
+          console.log("[visual-worker] green frame skipped h" + holeNumber + ": " + (error && error.message || error));
+          greenFrame = null;
+        }
+      }
+      await storageUpload(path + ".json", Buffer.from(JSON.stringify({ width, height, bytes, bounds, playSurface, greenFrame })), "application/json");
       rendered += 1;
     }
-    framesIndex.holes.push({ holeNumber, path, width, height, bytes, bounds, playSurface });
+    framesIndex.holes.push({ holeNumber, path, width, height, bytes, bounds, playSurface, greenFrame });
     await heartbeatJob(job, { version, holesDone: framesIndex.holes.length, holesTotal: holeNumbers.length });
     /* Production invocations get silently killed around the 4-minute mark regardless of the
        advertised background budget. Rather than die mid-hole and wait for the reaper, hand

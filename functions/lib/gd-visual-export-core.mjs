@@ -425,8 +425,16 @@ function greenPaintParams(settings) {
   const tools = settings && settings.visualTools || {};
   if (tools.greenPaint === false) return { enabled: false };
   const d = greenCore.PAINT_DEFAULTS;
+  /* WHO paints. The frame and the phone must not both do it - the phone samples the published
+     frame to compute its displacement, so painting an already-painted frame applies the tiers
+     twice. "bake" puts them in the frame (every view gets them, at the frame's ~77px across a
+     green). "phone" leaves the frame clean and lets the focus view draw them at screen
+     resolution, where the tier edges are crisp. The palette is measured and published either
+     way, because that is what lets the phone tier without re-reading pixels. */
+  const target = String(tools.greenPaintTarget || "bake") === "phone" ? "phone" : "bake";
   return {
     enabled: true,
+    target,
     tiers: Math.round(clamp(num(tools.greenPaintTiers, d.tiers), 3, 8)),
     spread: clamp(num(tools.greenPaintSpread, d.spread), 0, 0.6),
     strength: clamp(num(tools.greenPaintStrength, d.strength), 0, 1)
@@ -488,23 +496,32 @@ function applyGreenPaint(data, width, height, channels, surface, project, unproj
   const span = (hi - lo) || 1e-9;
 
   const src = [0, 0, 0], dst = [0, 0, 0];
+  const writePixels = cfg.target !== "phone";
   let outside = 0;
   for (let i = 0; i < n; i++) {
     const o = local[i * 3], z = local[i * 3 + 1], fade = local[i * 3 + 2];
     const r = rgb[i * 3], g = rgb[i * 3 + 1], b = rgb[i * 3 + 2];
     const t = greenCore.paletteRank(palette, r, g, b);
     const target = greenCore.paintTargetForHeight((z - lo) / span, cfg);
-    greenCore.paletteColour(palette, t, src);
-    greenCore.paletteColour(palette, t + cfg.strength * fade * (target - t), dst);
-    data[o]     = Math.max(0, Math.min(255, Math.round(r + (dst[0] - src[0]))));
-    data[o + 1] = Math.max(0, Math.min(255, Math.round(g + (dst[1] - src[1]))));
-    data[o + 2] = Math.max(0, Math.min(255, Math.round(b + (dst[2] - src[2]))));
+    if (writePixels) {
+      greenCore.paletteColour(palette, t, src);
+      greenCore.paletteColour(palette, t + cfg.strength * fade * (target - t), dst);
+      data[o]     = Math.max(0, Math.min(255, Math.round(r + (dst[0] - src[0]))));
+      data[o + 1] = Math.max(0, Math.min(255, Math.round(g + (dst[1] - src[1]))));
+      data[o + 2] = Math.max(0, Math.min(255, Math.round(b + (dst[2] - src[2]))));
+    }
     if (target < 0 || target > 1) outside++;
   }
+  palette.appliedToFrame = cfg.target !== "phone";
+  palette.tiers = cfg.tiers;
+  palette.spread = cfg.spread;
+  palette.strength = cfg.strength;
   return {
     palette,
     diagnostics: {
-      painted: n,
+      painted: writePixels ? n : 0,
+      sampled: n,
+      target: cfg.target,
       reliefM: Number((hi - lo).toFixed(3)),
       tiers: cfg.tiers, spread: cfg.spread, strength: cfg.strength,
       beyondSampledRange: Number((outside / n).toFixed(3))

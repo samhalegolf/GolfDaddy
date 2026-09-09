@@ -210,6 +210,96 @@ check("spread past the sampled range is reported, not hidden", async () => {
   return "spread 0 -> " + t.beyondSampledRange + ", 0.6 -> " + w.beyondSampledRange;
 });
 
+/* ---------- the phone half ----------------------------------------------------------------
+   Same core, same formula, drawn per screen pixel instead of per frame pixel. Stubbed canvas
+   rather than a browser: what is worth testing here is the affine inverse and the displacement,
+   both of which are plain arithmetic. */
+function stubCanvas(w, h) {
+  const data = new Uint8ClampedArray(w * h * 4);
+  const ctx = {
+    setTransform() {}, clearRect() {},
+    createImageData: (cw, ch) => ({ width: cw, height: ch, data: new Uint8ClampedArray(cw * ch * 4) }),
+    putImageData(img, dx, dy) {
+      for (let y = 0; y < img.height; y++) {
+        for (let x = 0; x < img.width; x++) {
+          const src = (y * img.width + x) * 4, dst = ((y + dy) * w + (x + dx)) * 4;
+          if (dst < 0 || dst + 3 >= data.length) continue;
+          data[dst] = img.data[src]; data[dst + 1] = img.data[src + 1];
+          data[dst + 2] = img.data[src + 2]; data[dst + 3] = img.data[src + 3];
+        }
+      }
+    }
+  };
+  return {
+    width: w, height: h, clientWidth: w, clientHeight: h,
+    getContext: () => ctx, getBoundingClientRect: () => ({ left: 0, top: 0 }),
+    _data: data
+  };
+}
+function loadPhoneModule() {
+  const fs = require("node:fs");
+  const win = { devicePixelRatio: 1, GDGreenContoursCore: greenCore };
+  const src = fs.readFileSync(path.join(__dirname, "..", "app", "js", "gd-green-contours.js"), "utf8");
+  new Function("window", "document", src)(win, { createElement: () => stubCanvas(4, 4) });
+  return win.GDGreenContours;
+}
+
+check("phone paint reproduces the bake's tier direction", async () => {
+  const { surface } = buildGreenSurface();
+  const painted = await render(await turfCapture(), surface, settingsWith({ greenPaintTarget: "phone" }));
+  const pal = painted.greenPalette;
+  assert.ok(pal, "palette must still publish when the phone owns the pixels");
+  assert.equal(pal.appliedToFrame, false, "frame must be left unpainted for the phone");
+
+  const phone = loadPhoneModule();
+  assert.equal(typeof phone.paint, "function");
+
+  const S = 200;
+  const canvas = stubCanvas(S, S);
+  /* Projector: green-local metres straight onto a 200px box, 0.2m per px. */
+  const project = ll => {
+    const m = surface.frame.toMetres(ll.lat, ll.lng);
+    return { left: S / 2 + m.x * 2.5, top: S / 2 - m.y * 2.5 };
+  };
+  /* Every sampled pixel the same mid turf colour, so the ONLY thing that can vary the output
+     is the tier - which is exactly the claim. */
+  const sample = (ll, rgb) => { rgb[0] = 130; rgb[1] = 128; rgb[2] = 116; return true; };
+  const ok = phone.paint(canvas, surface, pal, project, sample, {});
+  assert.ok(ok, "paint must draw");
+
+  const at = (mx, my) => {
+    const p = project(surface.frame.toLatLng(mx, my));
+    const o = (Math.round(p.top) * S + Math.round(p.left)) * 4;
+    return [canvas._data[o], canvas._data[o + 1], canvas._data[o + 2], canvas._data[o + 3]];
+  };
+  const low = at(-20, 0), high = at(20, 0);
+  assert.ok(low[3] === 255 && high[3] === 255, "both ends must be painted");
+  const lumaOf = c => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  assert.ok(lumaOf(high) - lumaOf(low) > 3,
+    "phone tiers must separate the ends, got " + (lumaOf(high) - lumaOf(low)).toFixed(1));
+  return "separation " + (lumaOf(high) - lumaOf(low)).toFixed(1) + " luma at 0.4 m/px";
+});
+
+check("phone paint leaves everything outside the green alone", async () => {
+  const { surface } = buildGreenSurface();
+  const painted = await render(await turfCapture(), surface, settingsWith({ greenPaintTarget: "phone" }));
+  const phone = loadPhoneModule();
+  const S = 200, canvas = stubCanvas(S, S);
+  const project = ll => {
+    const m = surface.frame.toMetres(ll.lat, ll.lng);
+    return { left: S / 2 + m.x * 2.5, top: S / 2 - m.y * 2.5 };
+  };
+  phone.paint(canvas, surface, painted.greenPalette, project,
+    (ll, rgb) => { rgb[0] = 130; rgb[1] = 128; rgb[2] = 116; return true; }, {});
+  /* A corner is well outside a green that spans +-35m about the centre. */
+  const corner = (3 * S + 3) * 4;
+  assert.equal(canvas._data[corner + 3], 0, "corner must stay transparent");
+  let opaque = 0;
+  for (let i = 3; i < canvas._data.length; i += 4) if (canvas._data[i] === 255) opaque++;
+  assert.ok(opaque > 500, "the green itself must be covered, got " + opaque + " px");
+  return opaque + " px painted, corners clear";
+});
+
 (async () => {
   console.log("green paint\n");
   let failed = 0;

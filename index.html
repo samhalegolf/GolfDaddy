@@ -37,7 +37,7 @@
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
 <script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260712a"></script>
 <script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260712a"></script>
-<link rel="stylesheet" href="styles/inline/gd-app-base.css?v=roster-detail-20260906b">
+<link rel="stylesheet" href="styles/inline/gd-app-base.css?v=search-owner-20260909">
 
 <link rel="stylesheet" id="gdHomeButtonsHandoffCssV1" href="styles/inline/gd-home-buttons-handoff-css-v1.css?v=split04">
 </head>
@@ -310,7 +310,7 @@
 <div class="gdScoreHolePickerBar"><button id="gdScoreHolePickerToggle" type="button" aria-expanded="true" onclick="gdToggleScoreHolePicker(event)"><span>Pick hole</span><strong id="gdScoreHolePickerCurrent">H1</strong></button></div><div class="holeStrip" id="holeStrip"></div><div class="scoreCard"><div><div class="scoreTitle" id="scoreTitle">Hole 1</div><div class="scoreMeta" id="scoreMeta">Par 4</div></div></div>
 <div class="scoreControls"><div><label>Score</label><div class="stepper"><button onclick="adjustHoleScore(-1)">−</button><strong id="holeScore">—</strong><button onclick="adjustHoleScore(1)">+</button></div></div></div><button class="primary gdScoreSave" onclick="saveHoleScore()" style="width:100%">Save score</button>
 </div></div>
-<div class="courseScreen" id="courseScreen"><div class="courseHeader"><div class="courseNav"><button type="button" onclick="gdCoursePickerBack(event)">Back</button><button type="button" onclick="gdCoursePickerHome(event)">Home</button></div><div class="brand"><div class="logo" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=1e5a26e2" alt=""></div><div><h1>Clarity Caddy</h1><div class="subtitle">Playable decisions on the course</div></div></div></div><div class="courseAssumed" id="gdCourseAssumedOption"><div class="courseAssumedBlock" role="button" tabindex="0" onclick="gdConfirmAssumedCourse(event)"><div class="courseAssumedMain"><div class="courseAssumedLabel">Nearby course</div><div class="courseAssumedName" id="gdCourseAssumedName">Looking nearby</div></div><button type="button" id="gdCourseAssumedPlayBtn" onclick="gdConfirmAssumedCourse(event)">Play</button></div></div><div class="courseCard">
+<div class="courseScreen" id="courseScreen"><div class="courseHeader"><div class="courseNav"><button type="button" onclick="gdCoursePickerBack(event)">Back</button><button type="button" onclick="gdCoursePickerHome(event)">Home</button></div><div class="brand"><div class="logo" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=1e5a26e2" alt=""></div><div><h1>Clarity Caddy</h1><div class="subtitle">Playable decisions on the course</div></div></div></div><div class="courseAssumed" id="gdCourseAssumedOption"><div class="courseAssumedBlock" role="button" tabindex="0"><div class="courseAssumedMain"><div class="courseAssumedLabel">Nearby course</div><div class="courseAssumedName" id="gdCourseAssumedName">Looking nearby</div></div><button type="button" id="gdCourseAssumedPlayBtn">Play</button></div></div><div class="courseCard">
 <div style="display:flex;justify-content:space-between;margin-bottom:12px">
 <div><strong style="font-size:20px">Find course</strong><div class="meta">Search by course name</div></div>
 <div class="meta" id="countLine">Search</div>
@@ -321,7 +321,7 @@
 </div>
 <script src="scripts/gd-app-permissions.js?v=permissions-carve-20260719"></script>
 <script src="scripts/gd-bubble-hazard-core.js?v=hazard-reveal-001"></script>
-<script src="scripts/gd-app-core.js?v=hazard-reveal-001"></script>
+<script src="scripts/gd-app-core.js?v=search-owner-20260909"></script>
 <script data-gd-surface="studio" src="scripts/studio/gd-studio-preview-truth.js?v=preview-truth-001"></script>
 <script data-gd-surface="studio" src="scripts/gd-progress-core.js?v=progress-v1"></script>
 <!-- Hole choosing + units for the Marketing Snapshot Machine. Studio-only here; the same
@@ -370,7 +370,7 @@
      capped at 10 runs / 180 events, never uploaded. -->
 <script data-gd-surface="studio" src="scripts/gd-course-mapping-debug.js?v=course-mapping-debug-20260819"></script>
 <script src="app/js/course-versions.js?v=course-freshness-20260809"></script>
-<script src="scripts/gd-course-library-pin-lock.js?v=course-freshness-20260809"></script>
+<script src="scripts/gd-course-library-pin-lock.js?v=search-owner-20260909"></script>
 <script src="scripts/gd-course-play-pipeline.js?v=course-play-pipeline-001"></script>
 <link rel="stylesheet" id="gdGpsViewportLockCssV1" href="styles/inline/gd-gps-viewport-lock-css-v1.css?v=split04">
 <link rel="stylesheet" id="gdProfileRouteHardeningCssV1" href="styles/inline/gd-profile-route-hardening-css-v1.css?v=split04">
@@ -468,7 +468,7 @@
 
 <!-- Removed gdFinalStructureGuardCssV3: final CSS hiders masked retired-panel bleed-through. -->
 <!-- Removed gdFinalStructureGuardV3: blank-route recovery masked route ownership problems. -->
-<script id="gdCoursePickerSearchV2" src="scripts/inline/gd-course-picker-search-v2.js?v=20260721a"></script>
+<script id="gdCoursePickerSearchV2" src="scripts/inline/gd-course-picker-search-v2.js?v=search-owner-20260909"></script>
 <script id="gdResumeRoundPickerV1" src="scripts/inline/gd-resume-round-picker-v1.js?v=20260806a"></script>
 <link rel="stylesheet" id="gdGpsRequestButtonFixV1" href="styles/inline/gd-gps-request-button-fix-v1.css?v=split04">
 <link rel="stylesheet" id="gdStableGpsModeSwitchV1" href="styles/inline/gd-stable-gps-mode-switch-v1.css?v=split04">

@@ -43,6 +43,77 @@
     pickHandler:null
   };
 
+
+  /* The one owner of what the picker shows.
+
+     Every input - a search, a tap on an area or facility row, a GPS fix, the
+     course-maps load, the pin-lock candidate refresh - updates this model and
+     asks for ONE render, coalesced to the next frame. The DOM is rewritten only
+     when what it would show has changed, so a row or nearby block under the
+     player's finger is not torn down by an unrelated refresh between touchstart
+     and click. Before this, four pieces of code wrote into #courseList and
+     #gdCourseAssumedOption on their own timers; opening the picker rebuilt the
+     nearby block seven times and one search rebuilt the list six. */
+  const view={
+    phase:"idle",        /* idle | searching | results | areas | chooser */
+    query:"",
+    rows:[],             /* ranked, query-matched courses */
+    extraRows:[],        /* courses near the searched place, shown BELOW rows */
+    extraLabel:"",
+    partial:false,
+    areas:[],
+    areaFallback:[],
+    areaRun:0,
+    chooser:null,
+    countText:"Search",
+    selecting:null,      /* {key,name,at} while a tapped course is being checked or mapped */
+    renderQueued:false,
+    rowsSignature:null,
+    extrasSignature:null
+  };
+  /* A tap is acknowledged for this long. Within it a second tap on the SAME course
+     is a no-op rather than a fresh selection that cancels the first; after it the
+     guard lapses so a check that never returned cannot lock a course out. */
+  const SELECTING_GUARD_MS=20000;
+  function rowKey(course){
+    return String(course?.courseId||course?.canonicalKey||course?.name||course?.courseName||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+  }
+  function requestRender(){
+    if(view.renderQueued)return;
+    view.renderQueued=true;
+    const schedule=typeof window.requestAnimationFrame==="function"?window.requestAnimationFrame.bind(window):(fn=>setTimeout(fn,0));
+    schedule(()=>{view.renderQueued=false;render();});
+  }
+  function selectingActive(){
+    return !!(view.selecting&&Date.now()-view.selecting.at<SELECTING_GUARD_MS);
+  }
+  function setSelecting(course){
+    view.selecting={key:rowKey(course),name:String(course?.name||course?.courseName||"course"),at:Date.now()};
+    requestRender();
+  }
+  function clearSelecting(){
+    if(!view.selecting)return;
+    view.selecting=null;
+    requestRender();
+  }
+  function selectionInFlight(course){
+    return selectingActive()&&!!view.selecting.key&&view.selecting.key===rowKey(course);
+  }
+  function countFor(courses){
+    if(!courses.length)return "Search";
+    const recentOnly=courses.every(course=>course&&course.source==="recent-course");
+    return recentOnly?`${courses.length} recent`:`${courses.length} found`;
+  }
+  /* The normal shape: a ranked list and nothing else. */
+  function showRows(courses,countText){
+    courses=Array.isArray(courses)?courses:[];
+    view.phase=courses.length?"results":"idle";
+    view.rows=courses;
+    view.extraRows=[];view.extraLabel="";view.partial=false;
+    view.areas=[];view.areaFallback=[];view.chooser=null;
+    view.countText=countText==null?countFor(courses):countText;
+    requestRender();
+  }
   function byId(id){return document.getElementById(id)}
   function safe(fn,fallback){try{return fn()}catch(e){return fallback}}
   function bridge(){return window.GDCoursePickerCoreBridge||{}}
@@ -434,7 +505,10 @@
       course.__rank=score;
       return course;
     }).sort((a,b)=>{
-      if(gps&&Number.isFinite(a.distanceM)&&Number.isFinite(b.distanceM)){
+      /* Distance decides only when nothing is typed - that is the nearby list.
+         With a query, how well the name matches is the question the player
+         asked; distance still nudges the score above but no longer overrides it. */
+      if(!q&&gps&&Number.isFinite(a.distanceM)&&Number.isFinite(b.distanceM)){
         const distanceDelta=a.distanceM-b.distanceM;
         if(Math.abs(distanceDelta)>25)return distanceDelta;
       }
@@ -471,6 +545,7 @@
     }
     element.dataset.gdCourseId=course.courseId||"";
   }
+
   function renderNearby(){
     const option=byId("gdCourseAssumedOption");
     if(!option)return null;
@@ -479,7 +554,7 @@
     const courses=nearby.length?nearby:[basePayload({name:"Manual GPS",lat:center?.lat??null,lng:center?.lng??null,source:"manual-gps"})];
     const selected=courses[0];
     setPayloadOn(option,selected);
-    option.innerHTML=courses.map((course,idx)=>{
+    const html=courses.map((course,idx)=>{
       const detail=metaText(course).replace(/\s*·\s*course result$/,"").replace(/^course result$/,"");
       return `<div class="courseAssumedBlock" role="button" tabindex="0" data-course-key="${esc(course.canonicalKey||course.name)}" data-course-index="${idx}">
         <div class="courseAssumedMain">
@@ -490,10 +565,17 @@
         <button type="button"${idx===0?' id="gdCourseAssumedPlayBtn"':""}>${course.name==="Manual GPS"?"Manual":"Play"}</button>
       </div>`;
     }).join("");
+    /* Only touch the DOM when the block would look different. This is called
+       from every render, from the GPS fix, from the course-maps load and from
+       the pin-lock's after-every-click refresh; before the diff each of those
+       replaced the blocks under the player's finger. */
+    if(option.__gdNearbyHtml!==html){
+      option.innerHTML=html;
+      option.__gdNearbyHtml=html;
+    }
     option.querySelectorAll(".courseAssumedBlock").forEach(block=>{
       const idx=Number(block.dataset.courseIndex);
-      const course=courses[idx]||selected;
-      setPayloadOn(block,course);
+      setPayloadOn(block,courses[idx]||selected);
     });
     state.lastNearby=selected;
     return selected;
@@ -699,6 +781,7 @@
     prepareMappingSurface(course,opts);
     if(typeof controller!=="function"){
       try{document.body.dataset.gdCourseAutoMapStatus="controller_unavailable";document.body.dataset.gdCourseNeedsPin="pending";}catch(e){}
+      clearSelecting();
       return false;
     }
     const request=mappingRequest(course,opts);
@@ -727,6 +810,7 @@
         if(!(result&&result.waiting)&&fit&&fit.trusted===false&&(fit.scope==="ground"||!(result&&result.playable))){
           const showPin=bridge().showPin;
           if(typeof showPin==="function"){
+            clearSelecting();
             return showPin(Object.assign({},course,{
               gdCourseFitTrusted:false,
               gdCourseFitReason:fit.reason||"",
@@ -735,11 +819,16 @@
           }
         }
         if(result&&result.playable)enterGpsPlay(course,result,opts);
+        /* A run that is still going keeps the row acknowledged - the play surface
+           is holding a loading screen for it. Anything else that ended without a
+           round hands the row back so the player can try again or pick another. */
+        else if(!(result&&result.waiting))clearSelecting();
         return result;
       })
       .catch(error=>{
         if(state.activeToken===token){
           try{document.body.dataset.gdCourseAutoMapStatus="error";document.body.dataset.gdCourseNeedsPin="pending";}catch(e){}
+          clearSelecting();
         }
         throw error;
       })
@@ -765,6 +854,16 @@
       safe(()=>handler(course));
       return false;
     }
+    /* Acknowledge the tap before anything asynchronous. The database check below
+       is a network round-trip during which nothing used to change on screen, so
+       players tapped again - and the second tap's token silently discarded the
+       first tap's answer. Now the row shows "Opening", the count line says which
+       course, and a repeat tap on that course while it is in flight is a no-op.
+       opts.internal marks the picker's own re-entry once the check has answered. */
+    if(!opts.internal){
+      if(selectionInFlight(course))return false;
+      setSelecting(course);
+    }
     rememberRecentCourse(course);
     state.activeSelection=course;
     safe(()=>{window.__gdLiveCoursePickerSelection=course;window.__gdLiveCoursePickerSelectionAt=Date.now();});
@@ -782,12 +881,12 @@
           if(state.activeToken!==token)return false;
           const hasDatabaseMap=!!(result&&result.available);
           safe(()=>{document.body.dataset.gdCourseDatabaseMapAvailable=hasDatabaseMap?"yes":"no";document.body.dataset.gdCourseDatabaseMapSource=result&&result.source||result&&result.reason||"";});
-          return selectCourseForPlay(Object.assign({},course,{gdDatabaseMapChecked:true,gdDatabaseMapAvailable:hasDatabaseMap,gdDatabaseMapSource:result&&result.source||""}),Object.assign({},opts,{source:"database-map-checked"}));
+          return selectCourseForPlay(Object.assign({},course,{gdDatabaseMapChecked:true,gdDatabaseMapAvailable:hasDatabaseMap,gdDatabaseMapSource:result&&result.source||""}),Object.assign({},opts,{source:"database-map-checked",internal:true}));
         })
         .catch(error=>{
           if(state.activeToken!==token)return false;
           safe(()=>{document.body.dataset.gdCourseDatabaseMapAvailable="error";document.body.dataset.gdCourseDatabaseMapSource=error&&error.message||"database-map-check-error";});
-          return selectCourseForPlay(Object.assign({},course,{gdDatabaseMapChecked:true,gdDatabaseMapAvailable:false}),Object.assign({},opts,{source:"database-map-error"}));
+          return selectCourseForPlay(Object.assign({},course,{gdDatabaseMapChecked:true,gdDatabaseMapAvailable:false}),Object.assign({},opts,{source:"database-map-error",internal:true}));
         });
       return false;
     }
@@ -801,10 +900,12 @@
     });
     const needsPin=bridge().needsCoursePin;
     if(typeof needsPin==="function"&&needsPin(course)){
+      clearSelecting();
       const showPin=bridge().showPin;
       return typeof showPin==="function"?showPin(course):false;
     }
     if(isManualCourse(course)){
+      clearSelecting();
       if(typeof bridge().hidePin==="function")bridge().hidePin();
       closePickerSurface("manual-gps-selected");
       const manualOpen=bridge().openManualCourse;
@@ -821,12 +922,14 @@
   /* Rows only - no grouping, no chooser. Used both for the normal list and for
      what a facility chooser row expands to, so expanding one never regenerates
      another chooser above the very siblings it just chose between. */
+
   function renderFlatCourseRows(list,courses){
     (Array.isArray(courses)?courses:[]).forEach(raw=>{
       const c=basePayload(raw);
       const row=document.createElement("div");
       row.className="course";
       setPayloadOn(row,c);
+      row.dataset.gdSelectionKey=rowKey(c);
       row.innerHTML=`<div><div class="name">${esc(c.name)}</div><div class="meta">${esc(metaText(c))}</div></div><button class="play" type="button">Play</button>`;
       list.appendChild(row);
     });
@@ -868,44 +971,107 @@
   /* What a facility chooser row expands to when picked: just its own members,
      rendered flat - never re-grouped, so choosing does not hand the player
      another chooser sitting above the two rows it just expanded. */
+
   function showFacilityChooser(members){
-    const list=byId("courseList");
-    if(!list)return false;
-    renderNearby();
-    list.innerHTML="";
-    renderFlatCourseRows(list,members);
-    const count=byId("countLine");
-    if(count)count.textContent=`${members.length} courses`;
+    view.phase="chooser";
+    view.chooser=(Array.isArray(members)?members:[]).map(basePayload);
+    view.rows=[];view.extraRows=[];view.extraLabel="";view.areas=[];
+    view.countText=`${view.chooser.length} courses`;
+    requestRender();
     return false;
   }
+  /* Legacy entry (window.renderCourses). A lone assumed-candidate row was the
+     old way of saying "nothing to list"; it is still honoured as that. */
   function renderCoursesOwner(courses){
-    const list=byId("courseList");
-    if(!list)return;
-    renderNearby();
     courses=Array.isArray(courses)?courses:[];
     if(courses.length===1&&courses[0]?.assumedCandidate)courses=[];
-    list.innerHTML="";
-    /* One subtly-promoted chooser row per facility with 2+ known siblings in
-       this result set, ahead of the normal list. The siblings still render
-       below, unhidden - a player choosing between known courses at one
-       facility is a different question from "which place did you mean"
-       (clusterAreas, below), so this is additive rather than a replacement,
-       and duplication here costs nothing. No "Mapped"/"Database" exposure:
-       the chooser looks like the best suggestion, same principle metaText
-       already follows for a single database course. */
-    facilityGroups(courses).forEach(group=>{
-      const row=document.createElement("div");
-      row.className="course";
-      row.__gdFacilityPayload={members:group.members};
-      row.innerHTML=`<div><div class="name">${esc(facilityLabelFromNames(group.members.map(m=>m.name)))}</div><div class="meta">${esc(group.members.length+" courses here")}</div></div><button class="play" type="button">Choose</button>`;
-      list.appendChild(row);
+    showRows(courses.map(basePayload));
+  }
+  function rowSignature(course){
+    return `${rowKey(course)}|${metaText(course)}`;
+  }
+  function facilityRow(group){
+    const row=document.createElement("div");
+    row.className="course";
+    row.__gdFacilityPayload={members:group.members};
+    row.innerHTML=`<div><div class="name">${esc(facilityLabelFromNames(group.members.map(m=>m.name)))}</div><div class="meta">${esc(group.members.length+" courses here")}</div></div><button class="play" type="button">Choose</button>`;
+    return row;
+  }
+  function areaRow(area){
+    const row=document.createElement("div");
+    row.className="course";
+    /* An area row is a QUESTION, not a course. It carries its answer here so
+       the one delegated handler in bindListeners can tell the two apart -
+       without it the row falls through to the course path, which reads the
+       .name text and tries to map a region ("Otago, New Zealand") as if it
+       were a golf course. */
+    row.__gdAreaPayload={area,fallback:view.areaFallback,run:view.areaRun};
+    row.innerHTML=`<div><div class="name">${esc(area.label)}</div><div class="meta">${esc(area.count===1?"1 result":`${area.count} results`)}</div></div><button class="play" type="button">Show</button>`;
+    return row;
+  }
+  function removeExtraRows(list){
+    (list.__gdExtraNodes||[]).forEach(node=>{
+      if(typeof list.removeChild==="function"&&node.parentNode===list)list.removeChild(node);
+      else if(typeof node.remove==="function")node.remove();
     });
-    renderFlatCourseRows(list,courses);
-    const count=byId("countLine");
-    if(count){
-      const recentOnly=courses.length&&courses.every(course=>course&&course.source==="recent-course");
-      count.textContent=courses.length?(recentOnly?`${courses.length} recent`:`${courses.length} found`):"Search";
+    list.__gdExtraNodes=[];
+  }
+  function appendExtraRows(list){
+    list.__gdExtraNodes=[];
+    if(!view.extraRows.length)return;
+    const before=list.children?list.children.length:0;
+    const divider=document.createElement("div");
+    divider.className="courseListDivider";
+    divider.textContent=view.extraLabel?`Also near ${view.extraLabel}`:"Also nearby";
+    list.appendChild(divider);
+    renderFlatCourseRows(list,view.extraRows);
+    list.__gdExtraNodes=list.children?Array.from(list.children).slice(before):[divider];
+  }
+  /* The only writer of #courseList and #countLine. Rows are rebuilt when the
+     ranked set changes; the "also nearby" tail is rebuilt on its own when only
+     it changed, so the search results a player is already reading (and maybe
+     already touching) stay put when the neighbourhood arrives. */
+  function render(){
+    renderNearby();
+    const list=byId("courseList");
+    if(list){
+      const one=view.phase==="chooser"?(view.chooser||[]).map(rowSignature):view.phase==="areas"?view.areas.map(area=>`${area.label}|${area.count}|${view.areaRun}`):view.rows.map(rowSignature);
+      const rowsSignature=JSON.stringify([view.phase,one]);
+      const extrasSignature=JSON.stringify([view.extraLabel,view.extraRows.map(rowSignature)]);
+      if(rowsSignature!==view.rowsSignature){
+        view.rowsSignature=rowsSignature;
+        view.extrasSignature=extrasSignature;
+        list.innerHTML="";
+        list.__gdExtraNodes=[];
+        if(view.phase==="areas")view.areas.forEach(area=>list.appendChild(areaRow(area)));
+        else if(view.phase==="chooser")renderFlatCourseRows(list,view.chooser||[]);
+        else{
+          /* One subtly-promoted chooser row per facility with 2+ known siblings in
+             this result set, ahead of the normal list. The siblings still render
+             below, unhidden - a player choosing between known courses at one
+             facility is a different question from "which place did you mean"
+             (clusterAreas, below), so this is additive rather than a replacement. */
+          facilityGroups(view.rows).forEach(group=>list.appendChild(facilityRow(group)));
+          renderFlatCourseRows(list,view.rows);
+          appendExtraRows(list);
+        }
+      }else if(extrasSignature!==view.extrasSignature){
+        view.extrasSignature=extrasSignature;
+        removeExtraRows(list);
+        appendExtraRows(list);
+      }
+      const selecting=selectingActive()?view.selecting.key:"";
+      list.querySelectorAll(".course").forEach(row=>{
+        const key=row.dataset&&row.dataset.gdSelectionKey;
+        if(!key)return;
+        const on=!!selecting&&key===selecting;
+        row.classList.toggle("selecting",on);
+        const button=typeof row.querySelector==="function"?row.querySelector(".play"):null;
+        if(button)button.textContent=on?"Opening…":"Play";
+      });
     }
+    const count=byId("countLine");
+    if(count)count.textContent=selectingActive()?`Opening ${view.selecting.name}…`:view.countText;
   }
   /* Group results that sit near each other into ONE place to choose.
      Searching "st andrews" returns the Old Course, the Jubilee, the clubhouse
@@ -988,42 +1154,46 @@
       countryCode:area&&area.countryCode||""
     }));
   }
+
   function renderAreasOwner(areas,fallback,run){
-    const list=byId("courseList");
-    if(!list)return;
-    renderNearby();
-    list.innerHTML="";
-    areas.forEach(area=>{
-      const row=document.createElement("div");
-      row.className="course";
-      /* An area row is a QUESTION, not a course. It carries its answer here so
-         the one delegated handler in bindListeners can tell the two apart -
-         without it the row falls through to the course path, which reads the
-         .name text and tries to map a region ("Otago, New Zealand") as if it
-         were a golf course. */
-      row.__gdAreaPayload={area,fallback,run};
-      row.innerHTML=`<div><div class="name">${esc(area.label)}</div><div class="meta">${esc(area.count===1?"1 result":`${area.count} results`)}</div></div><button class="play" type="button">Show</button>`;
-      list.appendChild(row);
-    });
-    const count=byId("countLine");
-    if(count)count.textContent="Which one?";
+    view.phase="areas";
+    view.areas=Array.isArray(areas)?areas:[];
+    view.areaFallback=Array.isArray(fallback)?fallback:[];
+    view.areaRun=run;
+    view.rows=[];view.extraRows=[];view.extraLabel="";view.chooser=null;
+    view.countText="Which one?";
+    requestRender();
   }
-  /* Falls back to the flat ranked list whenever the nearby lookup gives nothing
-     - offline, Overpass busy, or a place with no mapped courses around it. A
-     coverage gap degrades to today's behaviour rather than an empty screen. */
+  /* The player said which place. Show the query-matched results that sit
+     there, in their ranked order, then ask what else is nearby and add that
+     BELOW them. The search results are never replaced by the neighbourhood:
+     that replacement is what made a good, ranked "3 found" turn into an
+     unranked "14 nearby" a few seconds later. */
   function showArea(area,fallback,run){
-    const count=byId("countLine");
-    if(count)count.textContent="Searching";
+    if(run!==searchRun)return false;
+    const results=Array.isArray(fallback)?fallback:[];
+    const members=results.filter(course=>finitePoint(course)&&metresBetween(course,area)<=AREA_M);
+    const shown=members.length?members:results;
+    showRows(shown,`${shown.length} found`);
+    return expandArea(area,run);
+  }
+  /* Leaves the ranked list alone whenever the nearby lookup gives nothing -
+     offline, Overpass busy, or a place with no mapped courses around it. */
+  function expandArea(area,run){
     coursesNear(area).then(result=>{
-      if(run!==searchRun)return;
-      if(!result){
-        renderCoursesOwner(fallback);
-        if(count)count.textContent=fallback.length?`${fallback.length} found`:"No course found";
-        return;
-      }
-      const payloads=nearbyPayloads(result.courses,area);
-      renderCoursesOwner(payloads);
-      if(count)count.textContent=result.partial?`${payloads.length} found · list may be short`:`${payloads.length} nearby`;
+      if(run!==searchRun||!result)return;
+      const have=new Set();
+      view.rows.forEach(course=>{have.add(rowKey(course));have.add(keyForName(course.name));});
+      const center=currentPoint();
+      const extra=nearbyPayloads(result.courses,area)
+        .filter(course=>!have.has(rowKey(course))&&!have.has(keyForName(course.name)))
+        .slice(0,8);
+      extra.forEach(course=>{const d=distance(center,course);if(Number.isFinite(d))course.distanceM=d;});
+      view.extraRows=extra;
+      view.extraLabel=area.label||"";
+      view.partial=!!result.partial;
+      if(view.partial&&view.rows.length)view.countText=`${view.rows.length} found · nearby list may be short`;
+      requestRender();
     });
     return false;
   }
@@ -1034,39 +1204,39 @@
       const input=byId("searchInput");
       if(input)input.value=requested;
     }
-    const count=byId("countLine");
-    const list=byId("courseList");
     const run=++searchRun;
-    if(list)list.innerHTML="";
-    renderNearby();
+    view.query=requested;
     state.lastSearchQuery=requested;
-	    if(!requested){
-	      renderCoursesOwner(readRecentCourses());
-	      loadDatabaseCourses().then(()=>{renderNearby();if(run===searchRun)renderCoursesOwner(readRecentCourses());});
-	      return false;
-	    }
-	    if(count)count.textContent="Searching";
-	    const immediate=rank(localMatches(requested),requested);
-	    if(immediate.length)renderCoursesOwner(immediate);
-	    Promise.all([loadDatabaseCourses(),remoteMatches(requested)]).then(([,remote])=>{
-	      if(run!==searchRun)return;
-	      const results=rank(localMatches(requested).concat(remote),requested).slice(0,12);
-	      renderCoursesOwner(results);
-	      if(count)count.textContent=results.length?`${results.length} found`:"No course found";
-	      /* One rule, no branch: a result names a PLACE, and a place expands to
-	         the courses on it. More than one place worth the name asks which
-	         first. One place goes straight there - that is not a special case,
-	         it is not asking a question with one answer. */
-	      const areas=clusterAreas(results);
-	      if(areas.length>1)renderAreasOwner(areas,results,run);
-	      else if(areas.length===1)showArea(areas[0],results,run);
-	    });
+    clearSelecting();
+    if(!requested){
+      showRows(readRecentCourses());
+      loadDatabaseCourses().then(()=>{if(run===searchRun)requestRender();});
+      return false;
+    }
+    const immediate=rank(localMatches(requested),requested);
+    showRows(immediate,"Searching");
+    view.phase="searching";
+    Promise.all([loadDatabaseCourses(),remoteMatches(requested)]).then(([,remote])=>{
+      if(run!==searchRun)return;
+      const results=rank(localMatches(requested).concat(remote),requested).slice(0,12);
+      /* One rule, no branch: a result names a PLACE, and a place expands to
+         the courses on it. More than one place worth the name asks which
+         first. One place goes straight there - and "there" means the ranked
+         results stay on top, with the neighbourhood added underneath. */
+      const areas=clusterAreas(results);
+      if(areas.length>1)return renderAreasOwner(areas,results,run);
+      showRows(results,results.length?`${results.length} found`:"No course found");
+      if(areas.length===1)expandArea(areas[0],run);
+    });
     return false;
   }
-  const oldRefreshAssumedOption=window.gdRefreshCourseAssumedOption;
-  function refreshAssumedOptionOwner(course){
-    if(course&&course.assumedCandidate&&course.name&&!/^assumed/i.test(course.name))return renderNearby();
-    if(typeof oldRefreshAssumedOption==="function")oldRefreshAssumedOption(course);
+
+  /* The pin-lock candidate refresh and the core both arrive here. The nearby
+     block is derived from the picker's own data, so all a caller can do is ask
+     for it to be re-derived; renderNearby's diff decides whether the DOM moves.
+     The old core writer used to overwrite the block's name with a "Assumed
+     course -36.92, 174.74" label for a frame before the real render put it back. */
+  function refreshAssumedOptionOwner(){
     return renderNearby();
   }
   function confirmAssumedCourseOwner(event){
@@ -1107,10 +1277,13 @@
     });
     const input=byId("searchInput");
     if(input)input.value="";
-	    centerPickerMapOnGps();
-	    requestPickerGps();
-	    renderCoursesOwner(readRecentCourses());
-	    loadDatabaseCourses().then(()=>{renderNearby();if(!(input&&input.value.trim()))renderCoursesOwner(readRecentCourses());});
+    clearSelecting();
+    centerPickerMapOnGps();
+    requestPickerGps();
+    showRows(readRecentCourses());
+    /* The course-maps load only changes the nearby block; the recents are
+       already on screen and stay put. */
+    loadDatabaseCourses().then(()=>{if(!(input&&input.value.trim()))requestRender();});
     setTimeout(()=>input?.focus(),80);
     resumeRound({renderOnly:true,source:state.source});
     return false;
@@ -1187,6 +1360,7 @@
       state.activeToken=`cancelled-${Date.now()}-${Math.random()}`;
       state.activePromise=null;
     }
+    clearSelecting();
     state.pickHandler=null;
     if(typeof bridge().hidePin==="function")bridge().hidePin();
     if(window.GDShell&&typeof window.GDShell.closeCoursePicker==="function")window.GDShell.closeCoursePicker({to:"origin",source:opts.reason||"course-picker-close"});
@@ -1199,6 +1373,10 @@
     const screen=byId("courseScreen");
     if(screen&&!screen.__gdCoursePickerOwnerBound){
       screen.__gdCoursePickerOwnerBound=true;
+      /* The one click path for rows and nearby blocks. gd-app-core.js's
+         document-capture handler (gdWireCoursePickerPlay) stands down when this
+         owner exists - it used to win by firing first, and it did not know
+         facility rows, so "Choose" mapped the facility label as a course. */
       screen.addEventListener("click",event=>{
         const target=event.target&&event.target.closest&&event.target.closest("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course");
         if(!target)return;
@@ -1209,7 +1387,7 @@
         if(area)return showArea(area.area,area.fallback,area.run);
         const facility=target.__gdFacilityPayload;
         if(facility)return showFacilityChooser(facility.members);
-        return selectCourseForPlay(target.__gdCoursePayload||target,{source:"picker-list-click"});
+        return selectCourseForPlay(selectionFromElement(target),{source:"picker-list-click"});
       },false);
       screen.addEventListener("keydown",event=>{
         if((event.key!=="Enter"&&event.key!==" ")||!event.target?.closest?.("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course"))return;
@@ -1219,7 +1397,7 @@
         if(area)return showArea(area.area,area.fallback,area.run);
         const facility=target.__gdFacilityPayload;
         if(facility)return showFacilityChooser(facility.members);
-        return selectCourseForPlay(target.__gdCoursePayload,{source:"picker-list-key"});
+        return selectCourseForPlay(selectionFromElement(target),{source:"picker-list-key"});
       },false);
     }
     const input=byId("searchInput");
@@ -1233,9 +1411,8 @@
     if(state.destroyed)return false;
     bindListeners();
     state.initialized=true;
-    renderNearby();
-    renderCoursesOwner(readRecentCourses());
-    loadDatabaseCourses().then(()=>{renderNearby();renderCoursesOwner(readRecentCourses());});
+    showRows(readRecentCourses());
+    loadDatabaseCourses().then(()=>requestRender());
     return true;
   }
   function destroy(){

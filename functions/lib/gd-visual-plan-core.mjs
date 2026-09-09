@@ -183,8 +183,18 @@ function holeAnchorPins(holeData) {
   };
 }
 function holeCaptureAnchorPins(holeData, role, extra) {
-  if (role !== "play-corridor") return null;
   const anchors = holeAnchorPins(holeData);
+  /* A green surround is framed on the GREEN.
+
+     Falling through to the hole's pins put the tee and the whole route into pixelRect's cover -
+     which unions pins as well as bounds - so the "green surround" capture spanned the entire
+     hole. Measured on the plan fixture: a 96m green box captured 540m of ground at 6.55MP. That
+     is why it always looked like the same ground as the play corridor, and why dropping it as
+     redundant cost nothing to the picture. It is the green, its shape, and nothing else. */
+  if (role === "green-surround") {
+    return { tee: null, green: anchors.green || null, route: [], greenShape: anchors.greenShape };
+  }
+  if (role !== "play-corridor") return null;
   let route = anchors.route;
   if (!route.length && anchors.tee && anchors.green) route = [anchors.tee, anchors.green];
   let segmentRoute = route;
@@ -319,7 +329,11 @@ export function planCourseCaptures(pkg, opts = {}) {
        surround is square. On Jacks Point's two shortest holes, dropping it took 47% and 30% off
        the frame - lateral ground around the green, which is exactly where a player who has
        missed is standing. So keep it only where it actually reaches past the corridor. */
-    if (corridorItems.length && boundsContain(mergeBounds(corridorItems.map(i => i.bounds)), greenItem.bounds)) return;
+    /* It used to be dropped when the corridor already covered that ground, because the only
+       thing it could add to the HOLE frame was ground. It now also feeds a green-scale frame of
+       its own, which the corridor cannot supply at any extent - so it is kept regardless. The
+       cost is one small capture per hole: a ~95m square at z20 is under a megapixel, against the
+       37MP captures that clamp was written to stop. */
     plan.push(greenItem);
   });
   /* Don't shoot sharper than the frame we render.
@@ -340,29 +354,6 @@ export function planCourseCaptures(pkg, opts = {}) {
 
      Without a source (plan-shape tests) it falls back to the metric bounds, which errs high -
      shooting one zoom sharper than needed, never softer. */
-  /* Second look at the green surrounds, now that footprints can be computed. The check above
-     compares METRIC bounds, but a corridor is captured through the axis-aligned box around a
-     rotated 9/16 lens, which covers far more ground than its metric bounds suggest - so that
-     check is conservative and keeps greens the corridor genuinely swallows. With a source in
-     hand the real footprints settle it, and a green is dropped only when the corridor's actual
-     captured rectangle already contains the green's. */
-  if (opts.source) {
-    const footprint = (i) => { const g = captureGrid(i, { source: opts.source }); return g ? g.imageBounds : null; };
-    holeNumbers.forEach(holeNumber => {
-      const items = plan.filter(i => Number(i.holeNumber) === holeNumber && !i.terrainStageOnly);
-      const greens = items.filter(i => i.role === "green-surround");
-      const corridors = items.filter(i => i.role === "play-corridor");
-      if (!greens.length || !corridors.length) return;
-      const covered = mergeBounds(corridors.map(footprint).filter(Boolean));
-      greens.forEach(green => {
-        const bounds = footprint(green);
-        if (!bounds || !boundsContain(covered, bounds)) return;
-        const at = plan.indexOf(green);
-        if (at >= 0) plan.splice(at, 1);
-      });
-    });
-  }
-
   const frameZoomByHole = {};
   /* What the imagery behind this course actually resolves. Without it a short hole would be
      framed at a zoom the source can only upscale into. */
@@ -378,7 +369,22 @@ export function planCourseCaptures(pkg, opts = {}) {
     if (!bounds) return;
     frameZoomByHole[holeNumber] = frameZoomFor(bounds, opts.maxOutputPx, imageryCeiling);
   });
+  /* A green-surround is framed on ITS OWN extent. Clamping it to the hole's frame zoom is what
+     made green focus soft: a 95m square and an 830m hole share one grid, the hole's extent wins,
+     and the green lands at ~0.42 m/px - about 106px across a 45m green, where the design needs
+     400-700. Framed alone the same maths returns z20 and the same green lands at ~423px. */
   plan.forEach(item => {
+    if (item.role === "green-surround") {
+      let gb = item.bounds;
+      if (opts.source) {
+        const g = captureGrid(item, { source: opts.source });
+        if (g && g.imageBounds) gb = g.imageBounds;
+      }
+      const z = frameZoomFor(gb, opts.maxOutputPx, imageryCeiling);
+      if (z) item.frameZoom = z;
+      item.ownFrame = "green";
+      return;
+    }
     const frameZoom = frameZoomByHole[item.holeNumber];
     if (frameZoom) item.frameZoom = frameZoom;
   });

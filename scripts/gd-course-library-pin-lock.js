@@ -2737,6 +2737,11 @@
       const input=document.getElementById('searchInput');
       if(!screen||screen.classList.contains('hidden')||!list)return;
       const candidate=assumedCourseCandidate();
+      /* The picker owns its list and nearby block. It re-derives the block from
+         its own data and only rewrites the DOM when that would look different;
+         writing rows from here rebuilt the block under the player's finger
+         130ms after every click, and blanked a search in progress. */
+      if(window.GDCoursePicker&&typeof window.GDCoursePicker.refreshAssumed==='function'){window.GDCoursePicker.refreshAssumed(candidate);return;}
       if(typeof window.gdRefreshCourseAssumedOption==='function')window.gdRefreshCourseAssumedOption(candidate);
       if(input&&!input.value.trim()&&!document.getElementById('gdCourseAssumedOption'))input.value=candidate.name;
       const hasManualOnly=/Manual GPS/i.test(list.textContent||'')&&!isUsefulCourseName(list.textContent||'');
