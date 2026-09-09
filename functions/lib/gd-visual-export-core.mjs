@@ -441,92 +441,48 @@ function greenPaintParams(settings) {
   };
 }
 
-/* Paints tiers onto flattened pixels and returns the palette it sampled.
+/* Measure the green's colour run. Nothing is painted here.
 
-   Two passes over the green and nothing else: the first reads the turf to build the run, the
-   second moves each pixel along it. The move is a DIFFERENCE between two palette entries, never
-   a fill - that is what leaves mowing bands, wear and the cup surround intact underneath. A flat
-   fill would read as a decal.
+   The tiers are drawn by buildGreenDrawing, in the same display list and the same metres as the
+   contour lines, so both the export and the phone draw them from one opinion - the whole reason
+   that file exists. What the export owes it is the PALETTE, which needs pixels, which the shared
+   core is not allowed to touch.
 
-   Edge fade matches the contours' edgeFadeM so paint and lines arrive and leave together; a hard
-   polygon edge reads as a cutout of a different green. */
-function applyGreenPaint(data, width, height, channels, surface, project, unproject, cfg) {
-  const frame = surface.frame, fit = surface.fit;
-  const polyPx = surface.polygon.map(m => project(frame.toLatLng(m.x, m.y))).filter(Boolean);
+   Sampled off a small composite of the imagery rather than the finished frame: a palette is a
+   distribution, 400px across a green is thousands of samples, and doing it here means it is ready
+   before the overlays are built rather than after they are composited. */
+async function sampleGreenPaletteFor(composites, width, height, background, surface, project) {
+  const polyPx = surface.polygon.map(m => project(surface.frame.toLatLng(m.x, m.y))).filter(Boolean);
   if (polyPx.length < 4) return null;
-
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const p of polyPx) {
-    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
-    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
-  }
-  const x0 = Math.max(0, Math.floor(minX)), x1 = Math.min(width - 1, Math.ceil(maxX));
-  const y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(height - 1, Math.ceil(maxY));
-  if (!(x1 > x0 && y1 > y0)) return null;
-
-  /* metres -> px, measured off the projection actually in use rather than assumed. */
-  const c = surface.polygon.reduce((a, m) => ({ x: a.x + m.x / surface.polygon.length, y: a.y + m.y / surface.polygon.length }), { x: 0, y: 0 });
-  const pc = project(frame.toLatLng(c.x, c.y)), pc1 = project(frame.toLatLng(c.x + 1, c.y));
-  const pxPerM = (pc && pc1) ? Math.hypot(pc1.x - pc.x, pc1.y - pc.y) : 0;
-  const fadePx = pxPerM > 0 ? pxPerM * greenCore.CONTOUR_DEFAULTS.edgeFadeM : 0;
-
-  /* pixel -> green-local metres, so height comes off the fit at the pixel being painted. */
-  const local = [];
+  const scale = Math.min(1, 520 / Math.max(width, height));
+  const W = Math.max(8, Math.round(width * scale)), H = Math.max(8, Math.round(height * scale));
+  /* Composite at full size, THEN downscale. sharp orders resize before composite within one
+     pipeline, so chaining .resize() here shrinks the base and the full-size overlays no longer
+     fit it - "Image to composite must have same dimensions or smaller". Two steps, not one. */
+  const full = await sharp({ create: { width, height, channels: 3, background }, limitInputPixels: false })
+    .composite(composites)
+    .raw().toBuffer({ resolveWithObject: true });
+  const flat = await sharp(full.data, {
+    raw: { width: full.info.width, height: full.info.height, channels: full.info.channels },
+    limitInputPixels: false
+  }).resize(W, H).raw().toBuffer({ resolveWithObject: true });
+  const ch = flat.info.channels;
+  const poly = polyPx.map(p => ({ x: p.x * scale, y: p.y * scale }));
+  const xs = poly.map(p => p.x), ys = poly.map(p => p.y);
+  const x0 = Math.max(0, Math.floor(Math.min(...xs))), x1 = Math.min(W - 1, Math.ceil(Math.max(...xs)));
+  const y0 = Math.max(0, Math.floor(Math.min(...ys))), y1 = Math.min(H - 1, Math.ceil(Math.max(...ys)));
   const rgb = [];
-  let lo = Infinity, hi = -Infinity, n = 0;
+  let n = 0;
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
-      const ll = unproject(x + 0.5, y + 0.5);
-      if (!ll) continue;
-      const m = frame.toMetres(ll.lat, ll.lng);
-      if (!greenCore.pointInPolygon(m.x, m.y, surface.polygon)) continue;
-      const d = greenCore.distanceToPolygon(m.x, m.y, surface.polygon);
-      const t = fadePx > 0 ? Math.max(0, Math.min(1, d / greenCore.CONTOUR_DEFAULTS.edgeFadeM)) : 1;
-      const z = fit.heightAt(m.x, m.y);
-      if (z < lo) lo = z; if (z > hi) hi = z;
-      const o = (y * width + x) * channels;
-      local.push(o, z, t * t * (3 - 2 * t));
-      rgb.push(data[o], data[o + 1], data[o + 2]);
+      if (!greenCore.pointInPolygon(x + 0.5, y + 0.5, poly)) continue;
+      const o = (y * flat.info.width + x) * ch;
+      rgb.push(flat.data[o], flat.data[o + 1], flat.data[o + 2]);
       n++;
     }
   }
   if (!n) return null;
-  const palette = greenCore.sampleGreenPalette(rgb, n);
-  if (!palette) return null;
-  const span = (hi - lo) || 1e-9;
-
-  const src = [0, 0, 0], dst = [0, 0, 0];
-  const writePixels = cfg.target !== "phone";
-  let outside = 0;
-  for (let i = 0; i < n; i++) {
-    const o = local[i * 3], z = local[i * 3 + 1], fade = local[i * 3 + 2];
-    const r = rgb[i * 3], g = rgb[i * 3 + 1], b = rgb[i * 3 + 2];
-    const t = greenCore.paletteRank(palette, r, g, b);
-    const target = greenCore.paintTargetForHeight((z - lo) / span, cfg);
-    if (writePixels) {
-      greenCore.paletteColour(palette, t, src);
-      greenCore.paletteColour(palette, t + cfg.strength * fade * (target - t), dst);
-      data[o]     = Math.max(0, Math.min(255, Math.round(r + (dst[0] - src[0]))));
-      data[o + 1] = Math.max(0, Math.min(255, Math.round(g + (dst[1] - src[1]))));
-      data[o + 2] = Math.max(0, Math.min(255, Math.round(b + (dst[2] - src[2]))));
-    }
-    if (target < 0 || target > 1) outside++;
-  }
-  palette.appliedToFrame = cfg.target !== "phone";
-  palette.tiers = cfg.tiers;
-  palette.spread = cfg.spread;
-  palette.strength = cfg.strength;
-  return {
-    palette,
-    diagnostics: {
-      painted: writePixels ? n : 0,
-      sampled: n,
-      target: cfg.target,
-      reliefM: Number((hi - lo).toFixed(3)),
-      tiers: cfg.tiers, spread: cfg.spread, strength: cfg.strength,
-      beyondSampledRange: Number((outside / n).toFixed(3))
-    }
-  };
+  return greenCore.sampleGreenPalette(rgb, n);
 }
 
 /* Render the shared display list as SVG paths.
@@ -540,6 +496,15 @@ export function greenContourSvg(surface, W, H, project, options) {
   const toPx = (m) => project(frame.toLatLng(m.x, m.y));
   const f1 = (n) => Number(n).toFixed(1);
   const parts = [];
+
+  /* Bands first: they are ground, the lines sit on them. Same projector, same units - the only
+     difference from a run is that four points close instead of many points stroking. */
+  for (const band of drawing.bands || []) {
+    const q = band.quad.map(toPx);
+    if (q.some(p => !p)) continue;
+    parts.push('<path d="M' + q.map(p => f1(p.x) + " " + f1(p.y)).join("L") + 'Z" fill="' +
+      band.colour + '" fill-opacity="' + band.alpha.toFixed(3) + '" stroke="none"/>');
+  }
 
   for (const run of drawing.runs) {
     const px = run.points.map(toPx).filter(Boolean);
@@ -625,7 +590,7 @@ export function applyRelief(rgb, mask, opacity, channels) {
    The raw-buffer roundtrip used to be conditional on `relief` being present; now it always
    happens, because normalisation needs the real flattened pixels regardless. Relief - when
    present - runs on the SAME buffer normalisation just wrote, no extra full-res allocation. */
-async function flattenWithRelief({ width, height, background, composites, relief, settings, overlays, quality, greenPaint }) {
+async function flattenWithRelief({ width, height, background, composites, relief, settings, overlays, quality }) {
   const surface = sharp({ create: { width, height, channels: 3, background }, limitInputPixels: false })
     .composite(composites);
   const flat = await surface.raw().toBuffer({ resolveWithObject: true });
@@ -651,19 +616,9 @@ async function flattenWithRelief({ width, height, background, composites, relief
      modulate, applied after normalisation/relief so it never fights the tone curve. */
   const fRecipe = recipeFilter(settings);
   out = out.modulate({ saturation: fRecipe.saturation });
-  /* Paint the green here and nowhere else. After saturation, so the sampled palette is the turf
-     as it will actually publish; before the overlays, so the contour lines and arrows sit ON the
-     paint rather than being sampled as if they were turf. */
-  let paint = null;
-  if (greenPaint) {
-    const pm = await out.raw().toBuffer({ resolveWithObject: true });
-    paint = greenPaint(pm.data, pm.info.width, pm.info.height, pm.info.channels);
-    out = sharp(pm.data, { raw: { width: pm.info.width, height: pm.info.height, channels: pm.info.channels }, limitInputPixels: false });
-  }
   if (overlays && overlays.length) out = out.composite(overlays);
   const jpeg = await out.jpeg({ quality }).toBuffer();
-  if (paint) diagnostics.greenPaint = paint.diagnostics;
-  return { jpeg, diagnostics, greenPalette: paint && paint.palette };
+  return { jpeg, diagnostics };
 }
 
 function mowingOpacity(value) {
@@ -849,10 +804,22 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, green
      ink it put there itself. The confidence gate already ran in the worker; a green that failed
      it arrives as null and nothing is drawn. */
   const contourCfg = greenContourParams(settings);
+  const paintCfg = greenPaintParams(settings);
+  const lighting0 = settings && settings.lighting || {};
+  const voidScale0 = clamp(num(lighting0.shadowFloor, 14), 0, 60) / 14;
+  const bg0 = { r: Math.round(clamp(16 * voidScale0, 0, 255)), g: Math.round(clamp(19 * voidScale0, 0, 255)), b: Math.round(clamp(15 * voidScale0, 0, 255)) };
+  let greenPalette = null;
+  if (greenSurface && paintCfg.enabled) {
+    greenPalette = await sampleGreenPaletteFor(composites, W, H, bg0, greenSurface, mercProject);
+  }
   if (greenSurface && contourCfg.enabled) {
     const svg = greenContourSvg(greenSurface, W, H, mercProject, {
       arrowMinSlopePercent: contourCfg.arrowMinSlopePercent,
-      opacity: contourCfg.opacity
+      opacity: contourCfg.opacity,
+      palette: greenPalette,
+      bandTiers: paintCfg.enabled ? paintCfg.tiers : 0,
+      bandSpread: paintCfg.spread,
+      bandOpacity: paintCfg.strength * 0.45
     });
     if (svg) overlays.push({ input: svg, blend: "over" });
   }
@@ -862,15 +829,10 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, green
   const lighting = settings && settings.lighting || {};
   const voidScale = clamp(num(lighting.shadowFloor, 14), 0, 60) / 14;
   const background = { r: Math.round(clamp(16 * voidScale, 0, 255)), g: Math.round(clamp(19 * voidScale, 0, 255)), b: Math.round(clamp(15 * voidScale, 0, 255)) };
-  const paintCfg = greenPaintParams(settings);
-  const mercUnproject = (px, py) => unworld((px + originPx.x) / scalePx, (py + originPx.y) / scalePx);
-  const greenPaint = (greenSurface && paintCfg.enabled)
-    ? (data, w2, h2, ch) => applyGreenPaint(data, w2, h2, ch, greenSurface, mercProject, mercUnproject, paintCfg)
-    : null;
   const frame = await flattenWithRelief({
     width: W, height: H,
     background,
-    composites, relief: reliefMask, settings, overlays, quality, greenPaint
+    composites, relief: reliefMask, settings, overlays, quality
   });
   const nw = unworld(merged.left, merged.top);
   const se = unworld(merged.right, merged.bottom);
@@ -881,7 +843,7 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, green
     captureZoom,
     originPx,
     bounds: { north: nw.lat, west: nw.lng, south: se.lat, east: se.lng },
-    greenPalette: frame.greenPalette || null,
+    greenPalette: greenPalette || null,
     diagnostics: frame.diagnostics
   };
 }

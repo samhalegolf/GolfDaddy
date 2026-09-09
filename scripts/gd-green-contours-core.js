@@ -703,7 +703,78 @@
     }
 
     if (!runs.length && !arrows.length) return null;
-    return { runs: runs, arrows: arrows };
+    /* Tier bands, in the same display list and the same units as the lines.
+
+       They are emitted as QUADS in green-local metres rather than closed band outlines, because
+       a band is {z between two levels} clipped to the green, and computing that outline needs
+       polygon boolean ops the renderers would then have to agree about. Scanning the fitted
+       surface and emitting spans needs none of that: it is the same analytic evaluation the
+       contours already do, and both renderers just fill four projected points. Under the play
+       axis rotation a metre-space rectangle is a parallelogram, which is why all four corners
+       travel rather than an origin and a size.
+
+       Colour comes from the palette the export measured off this green's own pixels, so the
+       bands are turf tones - the same reason the contour ink is. No palette, no bands: the
+       lines are the drawing, the colour is an enhancement to it. */
+    var bands = [];
+    if (cfg.palette && cfg.palette.lut && cfg.bandTiers !== 0) {
+      var N = Math.max(2, Math.round(cfg.bandTiers || PAINT_DEFAULTS.tiers));
+      var spread = cfg.bandSpread !== undefined ? cfg.bandSpread : PAINT_DEFAULTS.spread;
+      var alpha = cfg.bandOpacity !== undefined ? cfg.bandOpacity : 0.55;
+      var xsB = polygon.map(function (p) { return p.x; });
+      var ysB = polygon.map(function (p) { return p.y; });
+      var bx0 = Math.min.apply(null, xsB), bx1 = Math.max.apply(null, xsB);
+      var by0 = Math.min.apply(null, ysB), by1 = Math.max.apply(null, ysB);
+      var step = Math.max(0.25, (by1 - by0) / 90);        // ~90 scanlines across any green
+      var sub = Math.max(0.25, (bx1 - bx0) / 120);
+      /* the band range is the fit over the green, matching what the export measured */
+      var zlo = Infinity, zhi = -Infinity, sx, sy, zz;
+      for (sy = by0; sy <= by1; sy += step) {
+        for (sx = bx0; sx <= bx1; sx += sub) {
+          if (!pointInPolygon(sx, sy, polygon)) continue;
+          zz = fit.heightAt(sx, sy);
+          if (zz < zlo) zlo = zz;
+          if (zz > zhi) zhi = zz;
+        }
+      }
+      var zspan = (zhi - zlo) || 1e-9;
+      var col = [0, 0, 0];
+      for (sy = by0; sy <= by1; sy += step) {
+        var runStart = null, runTier = -1;
+        for (sx = bx0; sx <= bx1 + sub; sx += sub) {
+          var inside = pointInPolygon(sx, sy, polygon);
+          var tier = -1;
+          if (inside) {
+            var zn = (fit.heightAt(sx, sy) - zlo) / zspan;
+            tier = Math.max(0, Math.min(N - 1, Math.floor(zn * N)));
+          }
+          if (tier !== runTier) {
+            if (runStart !== null && runTier >= 0) {
+              paletteColour(cfg.palette, (runTier / (N - 1) - 0.5) * (1 + 2 * spread) + 0.5, col);
+              var f = fade((runStart + sx) / 2, sy + step / 2);
+              /* Overlap each span by a sliver. Abutting translucent quads leave a seam: both
+                 edges are antialiased, so the shared boundary composites twice on one side and
+                 not at all on the other, and the fill reads as horizontal stripes. Growing each
+                 quad past its neighbour hides the join under the neighbour's own fill. */
+              var ox = sub * 0.5, oy = step * 0.5;
+              if (f > 0.02) bands.push({
+                quad: [
+                  { x: runStart - ox, y: sy - oy }, { x: sx + ox, y: sy - oy },
+                  { x: sx + ox, y: sy + step + oy }, { x: runStart - ox, y: sy + step + oy }
+                ],
+                colour: "rgb(" + Math.round(col[0]) + "," + Math.round(col[1]) + "," + Math.round(col[2]) + ")",
+                alpha: alpha * f,
+                tier: runTier
+              });
+            }
+            runStart = tier >= 0 ? sx : null;
+            runTier = tier;
+          }
+        }
+      }
+    }
+
+    return { runs: runs, arrows: arrows, bands: bands };
   }
 
   /* Chevron wings for an arrow, in the CALLER'S pixel space. Built from the projected tail and

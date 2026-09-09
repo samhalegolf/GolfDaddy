@@ -1486,6 +1486,21 @@
   var greenSurfaceKey = null;
   var publishedFrameUrl = null;
 
+  /* The green, read as contours.
+
+     Shares everything with attachMesh below - the same elevation artefact, the same green
+     polygon painter already carries - and adds nothing to the download. The difference is what
+     it does with them: the mesh spends the heights on geometry, this spends them on a surface
+     fit and draws iso-lines from it.
+
+     Only in green focus. Not a taste call: the drawing is 15cm contours with a 5cm fill, and on
+     the hole frame a green is about 77 pixels across, where none of that resolves. Focus is the
+     first moment the green is large enough on screen for the lines to carry information, so it
+     is the first moment they are worth drawing. */
+  var greenSurfacePromise = null;
+  var greenSurfaceKey = null;
+  var publishedFrameUrl = null;
+
   /* The published frame, readable. #surfaceImage is loaded without crossOrigin because nothing
      else needs its pixels, and reading it would taint the canvas; a second fetch with
      crossOrigin "anonymous" comes out of the HTTP cache and is what attachMesh already does for
@@ -1553,53 +1568,13 @@
     return true;
   }
 
-  var frameSampleKey = null, frameSamplePromise = null;
-  function frameSamplerFor(url, meta) {
-    if (frameSampleKey === url && frameSamplePromise) return frameSamplePromise;
-    frameSampleKey = url;
-    frameSamplePromise = new Promise(function (resolve) {
-      var probe = new Image();
-      probe.crossOrigin = "anonymous";
-      probe.onload = function () {
-        try {
-          var c = document.createElement("canvas");
-          c.width = probe.naturalWidth; c.height = probe.naturalHeight;
-          var cx = c.getContext("2d");
-          cx.drawImage(probe, 0, 0);
-          var px = cx.getImageData(0, 0, c.width, c.height);
-          var origin = meta.originPx || {};
-          var scalePx = 256 * Math.pow(2, Number(meta.captureZoom) || 0);
-          var ox = Number(origin.x) || 0, oy = Number(origin.y) || 0;
-          var out0 = meta.outputDimensions || {};
-          var sx = c.width / (Number(out0.width) || c.width);
-          var sy = c.height / (Number(out0.height) || c.height);
-          resolve(function (ll, rgb) {
-            var sn = Math.sin(ll.lat * Math.PI / 180);
-            var wx = (ll.lng + 180) / 360;
-            var wy = 0.5 - Math.log((1 + sn) / (1 - sn)) / (4 * Math.PI);
-            var x = Math.round((wx * scalePx - ox) * sx);
-            var y = Math.round((wy * scalePx - oy) * sy);
-            if (x < 0 || y < 0 || x >= px.width || y >= px.height) return false;
-            var o = (y * px.width + x) * 4;
-            rgb[0] = px.data[o]; rgb[1] = px.data[o + 1]; rgb[2] = px.data[o + 2];
-            return true;
-          });
-        } catch (error) { resolve(null); }   // tainted or oversized: the frame is still correct
-      };
-      probe.onerror = function () { resolve(null); };
-      probe.src = url;
-    });
-    return frameSamplePromise;
-  }
 
   function drawGreenContours(scene, proj) {
     var canvas = el("greenContours");
-    var paintCanvas = el("greenPaint");
     var frameCanvas = el("greenFrame");
     if (!canvas || !window.GDGreenContours) return;
     function clearBoth() {
       window.GDGreenContours.clear(canvas);
-      if (paintCanvas) window.GDGreenContours.clear(paintCanvas);
       if (frameCanvas) window.GDGreenContours.clear(frameCanvas);
     }
     if (!scene.finish.show || !proj || !published) { clearBoth(); return; }
@@ -1643,21 +1618,6 @@
       window.GDGreenContours.draw(canvas, surface, proj.toScreen, {});
       /* Tiers, but only if the export left them to us. A frame the bake already painted must not
          be painted again - the displacement is measured against what is on screen. */
-      /* Paint whatever is actually ON SCREEN. With a green frame drawn over the hole frame, the
-         hole frame's pixels are no longer visible, so sampling them would compute a displacement
-         against ground nobody is looking at. Palette follows the same frame. */
-      var useGreen = !!(gf && gf.path);
-      var palette = useGreen ? gf.greenPalette : meta.greenPalette;
-      if (!paintCanvas) return;
-      var sampleUrl = useGreen ? apiUrl(surfaceLib.assetUrl(gf.path)) : publishedFrameUrl;
-      if (!palette || palette.appliedToFrame !== false || !sampleUrl) {
-        window.GDGreenContours.clear(paintCanvas);
-        return;
-      }
-      frameSamplerFor(sampleUrl, useGreen ? gf : meta).then(function (sample) {
-        if (!sample || greenSurfaceKey !== elevation.path) { window.GDGreenContours.clear(paintCanvas); return; }
-        window.GDGreenContours.paint(paintCanvas, surface, palette, proj.toScreen, sample, {});
-      });
     });
   }
 

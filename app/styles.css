@@ -166,8 +166,6 @@ body.surface-published.surface-mesh #surfaceMesh { display: block; }
    for 15cm lines to mean anything. */
 #greenFrame { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; pointer-events: none; z-index: 538; }
 body.green-focus #greenFrame { display: block; }
-#greenPaint { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; pointer-events: none; z-index: 539; }
-body.green-focus #greenPaint { display: block; }
 #greenContours { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; pointer-events: none; z-index: 540; }
 body.green-focus #greenContours { display: block; }
 body.surface-published #surfaceImage { display: block; }

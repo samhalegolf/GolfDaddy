@@ -183,11 +183,6 @@
          only the pixels get sharper. The hole frame spreads one grid over ~830m and lands a 45m
          green in ~106px; this is that green captured alone at z20, ~426px. -->
     <canvas id="greenFrame"></canvas>
-    <!-- The green tiered in its own colours. Sits UNDER #greenContours so the lines stay on
-         top, and like it carries no transform: the tiers are recomputed per screen pixel off
-         the fitted surface, so the steps between them are crisp at any zoom instead of being
-         magnified out of a ~77px frame. Only drawn when the export left the frame unpainted. -->
-    <canvas id="greenPaint"></canvas>
     <canvas id="greenContours"></canvas>
     <svg id="bubbleSvg" class="hiddenState"></svg>
     <!-- The club the bubble is sized from, sitting at the head of the aim line.
