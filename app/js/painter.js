@@ -1490,6 +1490,69 @@
      else needs its pixels, and reading it would taint the canvas; a second fetch with
      crossOrigin "anonymous" comes out of the HTTP cache and is what attachMesh already does for
      its texture. Cached per frame url - one decode per hole, not per repaint. */
+  /* The green-scale frame, if this export published one. Loaded crossOrigin for the same reason
+     the mesh texture is - the paint layer reads its pixels. */
+  var greenFrameKey = null, greenFramePromise = null;
+  function greenFrameFor(url) {
+    if (greenFrameKey === url && greenFramePromise) return greenFramePromise;
+    greenFrameKey = url;
+    greenFramePromise = new Promise(function (resolve) {
+      var im = new Image();
+      im.crossOrigin = "anonymous";
+      im.onload = function () { resolve(im); };
+      im.onerror = function () { resolve(null); };
+      im.src = url;
+    });
+    return greenFramePromise;
+  }
+
+  /* image pixel -> lat/lng for a north-up mercator frame, from its own playSurface. */
+  function framePxToLatLng(ps, x, y) {
+    var scale = 256 * Math.pow(2, Number(ps.captureZoom) || 0);
+    var origin = ps.originPx || {};
+    var wx = ((Number(origin.x) || 0) + x) / scale;
+    var wy = ((Number(origin.y) || 0) + y) / scale;
+    var n = Math.PI - 2 * Math.PI * wy;
+    return { lat: 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))), lng: wx * 360 - 180 };
+  }
+
+  /* Paint the green frame over the hole frame, through the projector the hole frame is already
+     placed with. Both are north-up mercator, so three projected corners give the exact affine -
+     including whatever rotation Play has applied for the play axis - and the sharper pixels land
+     on precisely the ground they came from. Nothing downstream knows the difference. */
+  function drawGreenFrame(canvas, gf, img, project) {
+    if (!canvas || !gf || !img || !project) return false;
+    var dpr = window.devicePixelRatio || 1;
+    var cssW = canvas.clientWidth, cssH = canvas.clientHeight;
+    if (!cssW || !cssH) return false;
+    var needW = Math.max(1, Math.round(cssW * dpr)), needH = Math.max(1, Math.round(cssH * dpr));
+    if (canvas.width !== needW || canvas.height !== needH) { canvas.width = needW; canvas.height = needH; }
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return false;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, needW, needH);
+
+    var ps = gf;
+    var out = ps.outputDimensions || {};
+    var W = Number(out.width) || img.naturalWidth, H = Number(out.height) || img.naturalHeight;
+    if (!W || !H) return false;
+    var rect = canvas.getBoundingClientRect();
+    function corner(x, y) {
+      var at = project(framePxToLatLng(ps, x, y));
+      return at ? { x: (at.left - rect.left) * dpr, y: (at.top - rect.top) * dpr } : null;
+    }
+    var p00 = corner(0, 0), p10 = corner(W, 0), p01 = corner(0, H);
+    if (!p00 || !p10 || !p01) return false;
+    var a = (p10.x - p00.x) / W, c = (p10.y - p00.y) / W;
+    var b = (p01.x - p00.x) / H, d = (p01.y - p00.y) / H;
+    if (!isFinite(a) || !isFinite(d) || (a === 0 && b === 0)) return false;
+    ctx.imageSmoothingQuality = "high";
+    ctx.setTransform(a, c, b, d, p00.x, p00.y);
+    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, 0, 0, W, H);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    return true;
+  }
+
   var frameSampleKey = null, frameSamplePromise = null;
   function frameSamplerFor(url, meta) {
     if (frameSampleKey === url && frameSamplePromise) return frameSamplePromise;
@@ -1532,10 +1595,12 @@
   function drawGreenContours(scene, proj) {
     var canvas = el("greenContours");
     var paintCanvas = el("greenPaint");
+    var frameCanvas = el("greenFrame");
     if (!canvas || !window.GDGreenContours) return;
     function clearBoth() {
       window.GDGreenContours.clear(canvas);
       if (paintCanvas) window.GDGreenContours.clear(paintCanvas);
+      if (frameCanvas) window.GDGreenContours.clear(frameCanvas);
     }
     if (!scene.finish.show || !proj || !published) { clearBoth(); return; }
     var img = el("surfaceImage");
@@ -1564,16 +1629,32 @@
     if (!greenSurfacePromise) return;
     greenSurfacePromise.then(function (surface) {
       if (!surface || greenSurfaceKey !== elevation.path) { clearBoth(); return; }
+      /* Sharper ground first. If this export published no green frame the hole frame shows
+         through exactly as before - the layer simply stays empty. */
+      var gf = meta.greenFrame;
+      if (frameCanvas && gf && gf.path) {
+        greenFrameFor(apiUrl(surfaceLib.assetUrl(gf.path))).then(function (im) {
+          if (!im || greenSurfaceKey !== elevation.path) { window.GDGreenContours.clear(frameCanvas); return; }
+          drawGreenFrame(frameCanvas, gf, im, proj.toScreen);
+        });
+      } else if (frameCanvas) {
+        window.GDGreenContours.clear(frameCanvas);
+      }
       window.GDGreenContours.draw(canvas, surface, proj.toScreen, {});
       /* Tiers, but only if the export left them to us. A frame the bake already painted must not
          be painted again - the displacement is measured against what is on screen. */
-      var palette = meta.greenPalette;
+      /* Paint whatever is actually ON SCREEN. With a green frame drawn over the hole frame, the
+         hole frame's pixels are no longer visible, so sampling them would compute a displacement
+         against ground nobody is looking at. Palette follows the same frame. */
+      var useGreen = !!(gf && gf.path);
+      var palette = useGreen ? gf.greenPalette : meta.greenPalette;
       if (!paintCanvas) return;
-      if (!palette || palette.appliedToFrame !== false || !publishedFrameUrl) {
+      var sampleUrl = useGreen ? apiUrl(surfaceLib.assetUrl(gf.path)) : publishedFrameUrl;
+      if (!palette || palette.appliedToFrame !== false || !sampleUrl) {
         window.GDGreenContours.clear(paintCanvas);
         return;
       }
-      frameSamplerFor(publishedFrameUrl, meta).then(function (sample) {
+      frameSamplerFor(sampleUrl, useGreen ? gf : meta).then(function (sample) {
         if (!sample || greenSurfaceKey !== elevation.path) { window.GDGreenContours.clear(paintCanvas); return; }
         window.GDGreenContours.paint(paintCanvas, surface, palette, proj.toScreen, sample, {});
       });

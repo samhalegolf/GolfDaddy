@@ -1011,17 +1011,17 @@ async function runExportJob(job, deadlineAt) {
           const g = await renderHoleSurfaceMercator({ pins, captures: [greenCap], terrain, greenSurface, settings, maxDim: EXPORT_RENDITION_PX });
           const greenPath = framesDir + "/h" + holeNumber + ".green.jpg";
           await storageUpload(greenPath, g.jpeg, "image/jpeg");
+          /* Flat, and carried INSIDE playSurface. The client is handed the published asset's
+             metadata.playSurface and nothing beside it, so a sibling field would never arrive -
+             and everything here is what drawing it needs: where the pixels are, and the mercator
+             geometry to put them back on the ground they came from. */
           greenFrame = {
-            path: greenPath, width: g.width, height: g.height, bytes: g.jpeg.length, bounds: g.bounds,
-            playSurface: {
-              model: "mercator-image", projection: "mercator-image", useGpsPlayFraming: true,
-              fallbackUnderlay: "live-gps", fallbackPolicy: "live-gps-only",
-              anchorPins: pins, sourceBounds: g.bounds, captureZoom: g.captureZoom,
-              originPx: g.originPx, outputDimensions: { width: g.width, height: g.height },
-              elevation: playSurface.elevation || null,
-              greenPalette: g.greenPalette || null
-            }
+            path: greenPath, width: g.width, height: g.height, bytes: g.jpeg.length,
+            bounds: g.bounds, captureZoom: g.captureZoom, originPx: g.originPx,
+            outputDimensions: { width: g.width, height: g.height },
+            greenPalette: g.greenPalette || null
           };
+          playSurface.greenFrame = greenFrame;
           console.log("[visual-worker] green frame h" + holeNumber + " " + g.width + "x" + g.height +
             " z" + g.captureZoom + " (" + (g.jpeg.length / 1024).toFixed(0) + "KB)" +
             (playSurface.captureZoom ? " vs hole z" + playSurface.captureZoom : ""));

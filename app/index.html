@@ -178,6 +178,11 @@
          is looking at instead of being magnified with the picture. That is the whole reason it
          is drawn here rather than baked into the published frame, where a green is ~77px wide
          and none of this line work survives. -->
+    <!-- The green at its own capture scale. Same ground as the frame underneath, drawn through
+         the SAME projector, so nothing about the camera, the tap maths or the overlays changes -
+         only the pixels get sharper. The hole frame spreads one grid over ~830m and lands a 45m
+         green in ~106px; this is that green captured alone at z20, ~426px. -->
+    <canvas id="greenFrame"></canvas>
     <!-- The green tiered in its own colours. Sits UNDER #greenContours so the lines stay on
          top, and like it carries no transform: the tiers are recomputed per screen pixel off
          the fitted surface, so the steps between them are crisp at any zoom instead of being
