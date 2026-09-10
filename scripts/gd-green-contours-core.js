@@ -943,7 +943,12 @@
      0.7 keeps roughly a third of the within-tier spread, which is what makes the paint look like
      ground. Tiers stay legible because the SEPARATION between them is set by spread, not by
      strength. */
-  var PAINT_DEFAULTS = { tiers: 5, spread: 0.2, strength: 0.7 };
+  /* spread 0.6, not 0.2. Measured over 17 real greens: the adjacent-tier gap is 5.97 luma at
+     0.2 and 9.38 at 0.6, and a step needs 8-10 to read as a step. 0.2 kept the guarantee that no
+     colour appears which is not already on the green; 0.6 spends it - about 80% of tier colours
+     now sit past the sampled run, continued along the same axis rather than invented from
+     nowhere, but past it all the same. That is the trade the visibility costs. */
+  var PAINT_DEFAULTS = { tiers: 5, spread: 0.6, strength: 0.7 };
 
   function paintTargetForHeight(zNorm, cfg) {
     var tiers = Math.max(2, Math.round((cfg && cfg.tiers) || PAINT_DEFAULTS.tiers));
