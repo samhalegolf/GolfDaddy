@@ -35,6 +35,13 @@ body.route-signin #signInScreen { display: flex; align-items: center; justify-co
    internal z-1000 panes stay inside it, underneath a presented surface,
    instead of painting over it. */
 #map { position: absolute; inset: 0; background: #16281c; z-index: 0; }
+/* A published picture is the whole presentation. The live map may still exist
+   underneath (an earlier hole of the same round played on it) and the tilt's
+   perspective pulls the stage's top corners in from the viewport edges - so
+   whatever the map was last showing appeared in those corners as a second,
+   unrelated aerial. visibility, not display: Leaflet keeps its size and the
+   next live hole re-frames without an invalidateSize round-trip. */
+body.surface-published #map { visibility: hidden; }
 
 /* Live-map stage framing. The map element is over-provisioned to a square of
    the viewport diagonal and placed entirely by play.js's matrix, so rotating

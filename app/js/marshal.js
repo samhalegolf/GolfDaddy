@@ -1280,6 +1280,15 @@
 
     // ------------------------------------------------------------------ api
 
+    /* Non-zero while a handler runs. The effects a handler causes (holeEntered,
+       roundStarted) reach modules that notify the Painter synchronously, and
+       the Painter answers by re-reading scene(). Handing it the last PUBLISHED
+       Scene there is handing it the round before this one - or the empty
+       pre-round Scene - with hole 0 and no package: it "loaded" a surface that
+       did not exist, fell to the live map and built it under the published
+       picture the real Scene was about to present. Mid-signal, the honest
+       answer is the state as it stands. */
+    var signalDepth = 0;
     function signal(name, payload) {
       var handler = HANDLERS[name];
       var before = { flow: flow(), mode: mode() };
@@ -1288,11 +1297,14 @@
         return false;
       }
       var changed = false;
+      signalDepth += 1;
       try { changed = !!handler(payload || {}); }
       catch (e) {
+        signalDepth -= 1;
         if (trace) trace.error(name, e);
         return false;
       }
+      signalDepth -= 1;
       var after = { flow: flow(), mode: mode() };
       if (trace) trace.signal(name, payload, { known: true, changed: changed, before: before, after: after });
       if (changed) publish(name);
@@ -1312,7 +1324,10 @@
 
     return {
       signal: signal,
-      scene: function () { return lastScene || (lastScene = scene()); },
+      scene: function () {
+        if (signalDepth > 0) return scene();
+        return lastScene || (lastScene = scene());
+      },
       onScene: function (fn) { if (typeof fn === "function") sceneListeners.push(fn); },
 
       /* The small, purposeful reads the tool modules need. Deliberately not a
@@ -1324,11 +1339,20 @@
         return {
           roundId: S.round.id,
           courseKey: S.round.courseKey,
+          /* The painter's two questions before it draws anything: is there a
+             round to draw, and where is it. state() answers both but clones
+             the whole package to do it, and the painter asks on every pass. */
+          open: !!S.round.open,
+          centre: S.round.centre ? { lat: S.round.centre.lat, lng: S.round.centre.lng } : null,
           hole: S.viewHole,
           liveHole: S.live.hole,
           holesInPlay: holesInPlay()
         };
       },
+      /* The package in play, by reference - the one read that is not a copy,
+         because the bubble hazard reveal keys a per-package cache on its
+         identity and asks on every drag frame. Read-only by contract. */
+      pkg: function () { return S.round.pkg; },
       player: player,
       lastFix: function () { return S.fix.point; },
 

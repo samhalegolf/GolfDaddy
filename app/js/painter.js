@@ -87,6 +87,18 @@
   function ensureMap(centre) {
     if (typeof L === "undefined") return map;
     if (!map) {
+      /* Built where the hole is, or not yet. This used to open every map on a
+         fixed Auckland view and rely on the camera to move it - but the camera
+         cannot solve while the map has no size (behind the loading screen),
+         and a round whose first hole is a published picture never solves a
+         live camera at all. Either way the map stayed where it was born:
+         Cornwall Park tiles under the published photo, showing through the
+         tilt's corners, and on a live hole a suburb nobody was standing in
+         until the next Signal moved it. No centre, no map: the caller has
+         nothing to frame yet and will be back with the next Scene. */
+      var at = centre || (marshal ? marshal.round().centre : null);
+      var lat = Number(at && at.lat), lng = Number(at && at.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
       /* zoomSnap:0 is load-bearing: the camera solves a continuous scale and
          hands log2 of it to setView. Snapping would put the anchors off their
          guide boxes. */
@@ -100,7 +112,7 @@
         zoomControl: false, attributionControl: false, zoomSnap: 0,
         dragging: false, touchZoom: false, doubleClickZoom: false,
         scrollWheelZoom: false, boxZoom: false, keyboard: false
-      }).setView([-36.9, 174.78], 15);
+      }).setView([lat, lng], 15);
       map.on("click", function (e) {
         var native = e && e.originalEvent;
         if (!native) return;
@@ -741,7 +753,7 @@
   var hazardSurfaceCache = { pkg: null, surfaces: null };
   function courseHazardSurfaces() {
     var core = window.GDBubbleHazardCore;
-    var pkg = marshal ? marshal.state().round.pkg : null;
+    var pkg = marshal && marshal.pkg ? marshal.pkg() : null;
     if (!core || !pkg) return null;
     if (hazardSurfaceCache.pkg !== pkg) {
       var surfaces = null;
@@ -1840,7 +1852,7 @@
   async function loadSurfaceFor(scene) {
     var hole = scene.hole.number;
     var r = scene.hole.rec;
-    var courseKey = marshal.state().round.courseKey;
+    var courseKey = marshal.round().courseKey;
     var token = ++transitionToken;
     loadedHole = hole;
     loadedVisual = (r && r.visual && (r.visual.url || r.visual.path)) || null;
@@ -1879,6 +1891,13 @@
      exception: it is expensive, so it is keyed and re-solved only when the key
      changes. */
   function render(scene) {
+    /* A Scene from before the round is open - the pin and My Bubble modules
+       notify on their own schedule and the painter re-reads the Scene each
+       time - has no package, no hole record and no centre. Presenting it
+       "loads" a surface that is not there, drops to the live map and builds
+       it with nothing to frame. Nothing about it is drawable; wait for the
+       ROUND_OPENED Scene. */
+    if (marshal && !marshal.round().open) return;
     currentScene = scene;
     var r = scene.hole.rec;
     var visualKey = (r && r.visual && (r.visual.url || r.visual.path)) || null;
