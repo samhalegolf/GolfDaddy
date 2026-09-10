@@ -29,7 +29,24 @@
        local:  a saved record {objectsVersion, mapVersion, savedAt}
        remote: the manifest row {objectsVersion, mapVersion} */
     isStale: function (local, remote) {
-      if (!local || !remote) return false;
+      return app.courseVersions.updateKind(local, remote) !== "none";
+    },
+    /* WHICH part of the downloaded copy is out of date - the answer decides
+       whether the player is asked. Same inputs as isStale.
+
+         "frame"    - the published picture moved (mapVersion). The ground under
+                      the player would change, so the app asks first.
+         "geometry" - only the objects moved (objectsVersion): greens, tees,
+                      routes, bunkers, water. Marshal swaps those under a live
+                      round without disturbing it (PACKAGE_UPDATED), so this
+                      one is safe to take unasked - and is exactly the update
+                      that used to sit behind a prompt nobody saw.
+         "none"     - up to date. */
+    updateKind: function (local, remote) {
+      if (!local || !remote) return "none";
+      var newerMap = Number.isFinite(Number(remote.mapVersion))
+        && Number(remote.mapVersion) > Number(local.mapVersion || 0);
+      if (newerMap) return "frame";
       var remoteObjects = comparableVersion(remote.objectsVersion);
       var localObjects = comparableVersion(local.objectsVersion);
       var newerObjects = false;
@@ -46,9 +63,7 @@
           newerObjects = Number.isFinite(published) && published > Number(local.savedAt);
         }
       }
-      var newerMap = Number.isFinite(Number(remote.mapVersion))
-        && Number(remote.mapVersion) > Number(local.mapVersion || 0);
-      return newerObjects || newerMap;
+      return newerObjects ? "geometry" : "none";
     }
   };
 })();

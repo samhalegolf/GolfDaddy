@@ -2111,6 +2111,17 @@
   // ------------------------------------------------------------------- api
 
   app.painter = {
+    /* A newer package was adopted mid-round (boot.js adoptMapUpdate). The
+       visual store caches "published or none" per hole for the whole session,
+       so a frame published after the round began stayed invisible until the
+       app relaunched; and render() only re-presents when the hole or the
+       package's own visual url changes, which a lite package never carries.
+       Forgetting both makes the very next Scene load the surface afresh. */
+    refreshSurface: function (courseKey) {
+      if (store && courseKey) store.forget(courseKey);
+      loadedHole = null;
+      loadedVisual = null;
+    },
     attach: function (owner) {
       marshal = owner;
       wireInput();

@@ -11,6 +11,11 @@
   var activeMapType = null;   // "object" | "published" | null (nothing usable yet)
   var mapUpdateDismissed = false;
   var updateCheckToken = 0;
+  /* The hole the last update check was scheduled for. The check rides on the
+     Marshal's holeEntered effect, which also fires when a package is swapped
+     under the SAME hole (PACKAGE_UPDATED re-enters it) - without this the
+     adoption would immediately schedule another fetch of what it just took. */
+  var lastUpdateCheckHole = null;
 
   /* The start point of the shot the engine was last handed, as a value key.
      shotChanged compares against it to tell "the shot moved on" (reset wind)
@@ -80,6 +85,18 @@
         holeEntered: function (hole, rec) {
           if (app.pin) app.pin.startHole(hole);
           if (app.undo) app.undo.clear();
+          /* Every way of changing hole lands here - the arrows, the hole
+             picker, "Play hole N", the catch-up banner, resume - so this is
+             where the freshness check belongs. It used to hang off the two
+             arrow buttons only, and a round driven from the picker or the
+             pill never asked the server once. The first hole of a round is
+             checked too, a moment after play is up, so a course opened from
+             the device's copy is not stale for eighteen holes. */
+          if (activeCourse && hole !== lastUpdateCheckHole) {
+            var firstHole = lastUpdateCheckHole === null;
+            lastUpdateCheckHole = hole;
+            scheduleMapUpdateCheck(firstHole ? 1500 : 250);
+          }
           /* The bubble is free; resume is the round record, so it is not. */
           if (window.GDBubbleEngine && rec) {
             window.GDBubbleEngine.setHoleContext({
@@ -226,6 +243,7 @@
     if (route !== "play") {
       if (app.painter && app.painter.detach) app.painter.detach();
       activeCourse = null;
+      cancelMapUpdateCheck();
       activeMapType = null;
       stopDemoCourseDataTimer();
     }
@@ -411,6 +429,22 @@
     });
   }
 
+  /* Deferred so the check never sits on the Signal path that entered the
+     hole, and cancellable so a round that ends - or a package that was just
+     downloaded in full by openPlay - does not get a pointless re-fetch. The
+     token is shared with checkForMapUpdate's own supersession guard, so
+     bumping it here also strands any check already in flight. */
+  function scheduleMapUpdateCheck(delayMs) {
+    var pending = ++updateCheckToken;
+    setTimeout(function () {
+      if (pending !== updateCheckToken) return;
+      checkForMapUpdate();
+    }, delayMs);
+  }
+  function cancelMapUpdateCheck() {
+    updateCheckToken += 1;
+  }
+
   /* Once per hole change, ask whether the SERVER's copy is newer than the one
      on this device. Fire-and-forget: this runs after a hole change already
      resolved, never blocks navigation.
@@ -423,7 +457,7 @@
      reached the player at all. Presence of a map on the server is not news;
      the scan finishing is not news. Only a higher version is news.
 
-     One rule, app.courseVersions.isStale, shared with the Course Library
+     One rule, app.courseVersions.updateKind, shared with the Course Library
      badge - see app/js/course-versions.js. Nothing saved locally is NOT an
      update, it's a first download, and that path belongs to openPlay. */
   async function checkForMapUpdate() {
@@ -454,17 +488,30 @@
       adoptMapUpdate(course, pkg, mapType);
       return;
     }
-    /* The dismissal belongs to the prompt, not to the check - it was a "no" to
-       being asked, and the auto-adopt above never asked. */
-    if (mapUpdateDismissed) return;
     var local = app.courseStore.load(course.courseId);
     /* Playing on the live map with nothing saved: the first map to appear is
        genuinely new to this device, whatever its version. */
-    if (!local) { showMapUpdateBar(course, pkg, mapType); return; }
-    if (!app.courseVersions.isStale(local, {
+    if (!local) {
+      if (!mapUpdateDismissed) showMapUpdateBar(course, pkg, mapType);
+      return;
+    }
+    var kind = app.courseVersions.updateKind(local, {
       objectsVersion: pkg.objectsVersion || null,
       mapVersion: pkg.packageVersion || null
-    })) return;
+    });
+    if (kind === "none") return;
+    /* Geometry only - greens, tees, routes, surfaces - is the second case
+       taken without asking. PACKAGE_UPDATED already keeps the hole, the mode
+       and every recorded shot, so nothing the player is looking at moves
+       except the objects that were wrong. A newer published FRAME still asks:
+       that swaps the picture under their feet. */
+    if (kind === "geometry") {
+      adoptMapUpdate(course, pkg, mapType);
+      return;
+    }
+    /* The dismissal belongs to the prompt, not to the check - it was a "no" to
+       being asked, and the auto-adopts above never asked. */
+    if (mapUpdateDismissed) return;
     showMapUpdateBar(course, pkg, mapType);
   }
 
@@ -477,6 +524,9 @@
   function adoptMapUpdate(course, pkg, mapType) {
     saveCourseToLibrary(course, pkg);
     activeMapType = mapType;
+    /* Before the signal: the Scene it emits is what re-presents the hole, and
+       the painter's per-session visual cache has to be gone by then. */
+    if (app.painter && app.painter.refreshSurface) app.painter.refreshSurface(app.courseKey(course.courseId));
     app.marshal.signal("PACKAGE_UPDATED", { pkg: pkg });
     document.getElementById("mapUpdateBar").classList.add("hiddenState");
   }
@@ -514,6 +564,7 @@
     show("play");
     activeCourse = course;
     mapUpdateDismissed = false;
+    lastUpdateCheckHole = null;
     gpsNoticeDismissed = false;
     /* Record the round the moment it is genuinely up, so a phone that dies on
        the 7th tee still has somewhere to come back to. play.js keeps the hole
@@ -557,6 +608,9 @@
       hideLoadingScreen();
       startDemoCourseDataTimerIfNeeded();
       saveCourseToLibrary(course, pkg);
+      /* The package on this branch is seconds old; the first-hole check that
+         startRound scheduled would only fetch it again. */
+      cancelMapUpdateCheck();
     }
   }
 
@@ -575,10 +629,9 @@
     document.getElementById("globalBackBtn").addEventListener("click", exitBack);
     document.getElementById("globalHomeBtn").addEventListener("click", exitToMainSite);
     document.getElementById("railGpsSettings").addEventListener("click", openGpsSettings);
-    /* The hole controls send their own Signals (painter.js). This listener is
-       only the background "has a published map appeared" check riding along. */
-    document.getElementById("prevHole").addEventListener("click", checkForMapUpdate);
-    document.getElementById("nextHole").addEventListener("click", checkForMapUpdate);
+    /* The hole controls send their own Signals (painter.js). The freshness
+       check used to ride on these two clicks; it now rides on the Marshal's
+       holeEntered effect (ensureMarshal), which every hole change reaches. */
     document.getElementById("holeNumber").addEventListener("click", openHolePicker);
     document.getElementById("holePickerClose").addEventListener("click", closeHolePicker);
     document.getElementById("mapUpdateDismiss").addEventListener("click", function () {

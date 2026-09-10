@@ -1490,6 +1490,17 @@ async function bootCheck() {
     hole: window.ClarityApp.marshal.round().hole
   }));
   const fetchesAfterSecondVisit = packageFetches;
+  /* Play started from the saved copy without waiting on the network; the
+     freshness check follows in the background once the round is up
+     (boot.js holeEntered -> scheduleMapUpdateCheck), so a course opened from
+     the device is not stale for eighteen holes. Same version here, so it
+     changes nothing and asks nothing. */
+  await storePage.waitForTimeout(1800);
+  const fetchesAfterSettle = packageFetches;
+  const settled = await storePage.evaluate(() => ({
+    barShown: !document.getElementById("mapUpdateBar").classList.contains("hiddenState"),
+    savedMapType: window.ClarityApp.courseStore.load("store-test-course").mapType
+  }));
 
   /* Now simulate the published map appearing mid-round. A round on a lite-geo
      package is drawing the LIVE map for every hole, so the captured map is
@@ -1692,7 +1703,10 @@ async function bootCheck() {
   assert.strictEqual(fetchesAfterFirstVisit, 1, "the first visit fetches the package exactly once");
   assert.strictEqual(secondVisit.courseKey, "store-test-course", "a second hand-off to the same course still starts play");
   assert.strictEqual(secondVisit.hole, 1, "a second hand-off to the same course opens on hole 1 from the saved copy");
-  assert.strictEqual(fetchesAfterSecondVisit, fetchesAfterFirstVisit, "a second hand-off to an already-downloaded course must not re-fetch the package");
+  assert.strictEqual(fetchesAfterSecondVisit, fetchesAfterFirstVisit, "a second hand-off to an already-downloaded course must start without re-fetching the package");
+  assert.strictEqual(fetchesAfterSettle, fetchesAfterFirstVisit + 1, "one background freshness check once the round is up");
+  assert.ok(!settled.barShown, "an up-to-date copy must not prompt");
+  assert.strictEqual(settled.savedMapType, "object", "an up-to-date copy is left alone");
   assert.strictEqual(midRoundAdopt.savedMapType, "published",
     "a captured map arriving on a round that is streaming the live one is taken without asking - it is strictly less work for the phone");
   assert.ok(!midRoundAdopt.barShown, "the auto-adopt must not also prompt");
