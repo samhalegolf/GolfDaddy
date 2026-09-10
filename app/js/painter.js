@@ -732,6 +732,47 @@
      The bubble itself is free (decided 19 Aug): a player with no membership sees
      it driven by the engine's ghost bag. What costs is replacing that ghost bag
      with your own clubs - see app/js/bag.js. */
+  /* ---- bubble hazard reveal ----------------------------------------------
+     The geometry - which surfaces the bubble touches, whether it is wholly off
+     the fairway - is scripts/gd-bubble-hazard-core.js, shared with the old shell
+     and tested in dev/bubble-hazard-core.test.js. The surfaces come from the
+     package the Marshal is playing (all holes), collected once per package: a
+     drag re-renders on every move, and a course has hundreds of rings. */
+  var hazardSurfaceCache = { pkg: null, surfaces: null };
+  function courseHazardSurfaces() {
+    var core = window.GDBubbleHazardCore;
+    var pkg = marshal ? marshal.state().round.pkg : null;
+    if (!core || !pkg) return null;
+    if (hazardSurfaceCache.pkg !== pkg) {
+      var surfaces = null;
+      try { surfaces = core.collectPackageSurfaces(pkg); } catch (e) { surfaces = null; }
+      hazardSurfaceCache = { pkg: pkg, surfaces: surfaces && core.hasAnySurface(surfaces) ? surfaces : null };
+    }
+    return hazardSurfaceCache.surfaces;
+  }
+  /* Lat/lng rings for the builder to project, cut down to the bubble's own box
+     first - see clipRingToBounds for why the published-photo projector needs
+     that. The live green polygon counts as safe, as it does in the old shell. */
+  function bubbleHazards(model, rec) {
+    var core = window.GDBubbleHazardCore;
+    var surfaces = courseHazardSurfaces();
+    if (!core || !surfaces || !model || !model.rings || !model.rings.main) return null;
+    var state;
+    try {
+      var safe = rec && Array.isArray(rec.greenShape) && rec.greenShape.length >= 3 ? [rec.greenShape] : [];
+      state = core.bubbleSurfaceState(model.rings.main, surfaces, safe);
+    } catch (e) { return null; }
+    var ring = core.cleanRing(model.rings.main);
+    var bounds = ring ? core.ringBounds(ring) : null;
+    var pad = bounds ? Math.max(bounds.maxLat - bounds.minLat, bounds.maxLng - bounds.minLng) * 0.25 : 0;
+    var cut = function (s) { return bounds ? core.clipRingToBounds(s.ring, bounds, pad) : s.ring; };
+    return {
+      water: state.water.map(cut).filter(Boolean),
+      bunkers: state.bunkers.map(cut).filter(Boolean),
+      offFairway: !!state.offFairway
+    };
+  }
+
   function drawShot(scene, proj) {
     var svg = el("bubbleSvg");
     var bubble = el("aimBubble");
@@ -775,6 +816,7 @@
           carryM: payload && Number(payload.baseCarry),
           corridor: settings() ? settings().corridor() : false,
           aimLine: settings() ? settings().aimLine() : true,
+          hazards: bubbleHazards(model, r),
           idPrefix: "gdb"
         }) : null;
         var greenScreen = r.green ? project(r.green) : null;

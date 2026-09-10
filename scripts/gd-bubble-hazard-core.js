@@ -15,6 +15,8 @@
    Surface records come from course_maps.objects_json as the client stores them
    (scripts/gd-course-library-pin-lock.js loadUserCourseData): type "fairway_area" /
    "bunker" / "water" with a `shape` ring, type "green" with `greenShape` (or `shape`).
+   The /app/ shell has no such record - it plays straight off the course package - so
+   collectPackageSurfaces() turns a package's per-hole surfaces into the same buckets.
    Bunker PINS (type "bunker", no shape) are not surfaces and are ignored here. Hole numbers
    are deliberately not consulted: functions/lib/gd-automapper-core.mjs dedupes a surface
    shared by two holes onto whichever hole claimed it first, so a per-hole filter would hide
@@ -136,6 +138,63 @@
     return out;
   }
 
+  /* The /app/ shell's source: GET /api/course-package, whose holes carry surfaces per
+     hole (lite: hole.surfaces, full: hole.geometry.surfaces - see
+     functions/lib/gd-course-package-shape.mjs). Whole course, not the hole in play, for
+     the reason in the header: a bunker straddling two holes is stored under both, and
+     which hole "owns" it is not the bubble's concern. Greens ride along as the safe
+     surface for the off-fairway rule. */
+  function collectPackageSurfaces(pkg) {
+    var holes = pkg && Array.isArray(pkg.holes) ? pkg.holes : [];
+    var objects = [];
+    for (var i = 0; i < holes.length; i++) {
+      var hole = holes[i];
+      var g = pkg.status === "full-map-ready" ? (hole && hole.geometry) : hole;
+      if (!g) continue;
+      var s = g.surfaces || {};
+      var h = hole && hole.holeNumber;
+      (Array.isArray(s.fairways) ? s.fairways : []).forEach(function (f) { objects.push({ type: "fairway_area", shape: f && f.shape, holeNumber: h }); });
+      (Array.isArray(s.bunkers) ? s.bunkers : []).forEach(function (b) { objects.push({ type: "bunker", shape: b && b.shape, holeNumber: h }); });
+      (Array.isArray(s.water) ? s.water : []).forEach(function (w) { objects.push({ type: "water", shape: w && w.shape, hazardClass: w && w.hazardClass, holeNumber: h }); });
+      if (Array.isArray(g.greenShape) && g.greenShape.length >= 3) objects.push({ type: "green", greenShape: g.greenShape, holeNumber: h });
+    }
+    return collectSurfaces(objects);
+  }
+
+  /* Sutherland-Hodgman against a lat/lng box. The /app/ painter projects through the
+     published photo, and that projection answers null for any point off the picture -
+     a lake whose far shore is off-frame would lose those vertices and draw a different
+     shape. Clipping the surface to the bubble's own box (plus a margin) first keeps
+     every vertex handed to the projector near the bubble, and the bubble is on the
+     picture whenever it is drawn. The visible result is identical: everything outside
+     the bubble is clipped away again on screen. */
+  function clipRingToBounds(ring, bounds, pad) {
+    var clean = cleanRing(ring);
+    if (!clean || !bounds) return null;
+    var p = Number(pad) || 0;
+    var box = { minLat: bounds.minLat - p, maxLat: bounds.maxLat + p, minLng: bounds.minLng - p, maxLng: bounds.maxLng + p };
+    var edges = [
+      function (pt) { return pt.lat >= box.minLat; }, function (pt) { return pt.lat <= box.maxLat; },
+      function (pt) { return pt.lng >= box.minLng; }, function (pt) { return pt.lng <= box.maxLng; }
+    ];
+    var axis = ["lat", "lat", "lng", "lng"], at = [box.minLat, box.maxLat, box.minLng, box.maxLng];
+    var out = clean;
+    for (var e = 0; e < 4 && out.length; e++) {
+      var input = out, inside = edges[e], key = axis[e], value = at[e];
+      out = [];
+      for (var i = 0; i < input.length; i++) {
+        var cur = input[i], prev = input[(i + input.length - 1) % input.length];
+        var curIn = inside(cur), prevIn = inside(prev);
+        if (curIn !== prevIn) {
+          var t = (value - prev[key]) / (cur[key] - prev[key]);
+          out.push({ lat: prev.lat + (cur.lat - prev.lat) * t, lng: prev.lng + (cur.lng - prev.lng) * t });
+        }
+        if (curIn) out.push(cur);
+      }
+    }
+    return out.length >= 3 ? out : null;
+  }
+
   function hasAnySurface(surfaces) {
     return !!(surfaces && ((surfaces.fairways && surfaces.fairways.length) || (surfaces.greens && surfaces.greens.length) ||
       (surfaces.bunkers && surfaces.bunkers.length) || (surfaces.water && surfaces.water.length)));
@@ -192,6 +251,8 @@
     segmentsIntersect: segmentsIntersect,
     ringsOverlap: ringsOverlap,
     collectSurfaces: collectSurfaces,
+    collectPackageSurfaces: collectPackageSurfaces,
+    clipRingToBounds: clipRingToBounds,
     hasAnySurface: hasAnySurface,
     bubbleSurfaceState: bubbleSurfaceState
   };

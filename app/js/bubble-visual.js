@@ -93,6 +93,10 @@
        aimLine                                    draw the aim ray (the player's setting)
        aimClearPx                                 override for AIM_CLEAR_PX
        idPrefix                                   unique per render pass
+     hazards      {water:[ring], bunkers:[ring], offFairway}  optional - lat/lng rings
+                  the bubble is over (scripts/gd-bubble-hazard-core.js), drawn clipped
+                  to the outline so the bubble reveals what is under it; offFairway
+                  tints the whole bubble light red.
 
      Returns { defs, parts, chip, centre } — strings plus the viewport-pixel
      point the DOM club chip is positioned at. Caller writes
@@ -160,6 +164,33 @@
       + '<stop offset="90%" stop-color="#fff" stop-opacity=".12"/>'
       + '<stop offset="100%" stop-color="#fff" stop-opacity="0"/></radialGradient>');
     var d = pathFrom(ring);
+
+    /* ---- hazard reveal: what the bubble is sitting on ------------------- */
+    /* Pushed BEFORE the fill and the edge so the outline sits over the colour,
+       the same order the old shell's gdRenderBubbleHazardReveal draws in. The
+       clip is the outline itself, so the reveal can never leak past the line
+       the golfer sees; the carry knockout applies to it like everything else. */
+    var hazards = opts.hazards;
+    if (hazards) {
+      if (hazards.offFairway) {
+        parts.push('<path class="bubbleOffFairway" d="' + d + '" fill="#ff5a5a" fill-opacity=".14"' + maskAttr + '/>');
+      }
+      var reveal = [];
+      (hazards.water || []).forEach(function (r) { reveal.push({ ring: r, cls: "bubbleHazardWater", fill: "#ff2f2f", opacity: ".46" }); });
+      (hazards.bunkers || []).forEach(function (r) { reveal.push({ ring: r, cls: "bubbleHazardBunker", fill: "#f7d64a", opacity: ".5" }); });
+      var revealParts = [];
+      reveal.forEach(function (h) {
+        var pts = (h.ring || []).map(project).filter(Boolean);
+        if (pts.length < 3) return;
+        revealParts.push('<path class="' + h.cls + '" d="' + pathFrom(pts) + '" fill="' + h.fill
+          + '" fill-opacity="' + h.opacity + '" clip-path="url(#' + id + '-reveal)"' + maskAttr + '/>');
+      });
+      if (revealParts.length) {
+        defs.push('<clipPath id="' + id + '-reveal"><path d="' + d + '"/></clipPath>');
+        revealParts.forEach(function (p) { parts.push(p); });
+      }
+    }
+
     parts.push('<path class="bubbleFill" d="' + d + '" fill="url(#' + id + '-fill)"' + maskAttr + '/>');
     parts.push('<path class="bubbleEdge" d="' + d + '" fill="none" stroke="#fff"'
       + ' stroke-opacity=".8" stroke-width="1.1"' + maskAttr + '/>');

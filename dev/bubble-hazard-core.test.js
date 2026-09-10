@@ -152,4 +152,41 @@ test("bubbleSurfaceState: garbage in, empty state out", () => {
   assert.strictEqual(core.bubbleSurfaceState(circle(0, 0, 5), null).offFairway, false);
 });
 
+test("collectPackageSurfaces: both package shapes land in the same buckets", () => {
+  const lite = { status: "lite-geo-ready", holes: [
+    { holeNumber: 1, greenShape: rect(0, 0, 10, 10), surfaces: { fairways: [{ shape: rect(20, 0, 60, 10) }], bunkers: [{ shape: rect(70, 0, 80, 10) }], water: [{ shape: rect(90, 0, 100, 10), hazardClass: "penalty_area" }] } },
+    { holeNumber: 2, surfaces: { bunkers: [{ shape: rect(70, 0, 80, 10) }, { shape: [m(0, 0), m(1, 1)] }] } }
+  ] };
+  const s = core.collectPackageSurfaces(lite);
+  assert.strictEqual(s.fairways.length, 1);
+  assert.strictEqual(s.bunkers.length, 2, "the same bunker under two holes stays twice - harmless for an overlap test; a two-point shape is dropped");
+  assert.strictEqual(s.water.length, 1);
+  assert.strictEqual(s.water[0].hazardClass, "penalty_area");
+  assert.strictEqual(s.greens.length, 1);
+  const full = { status: "full-map-ready", holes: [{ holeNumber: 1, geometry: lite.holes[0], visual: {} }] };
+  const f = core.collectPackageSurfaces(full);
+  assert.deepStrictEqual([f.fairways.length, f.bunkers.length, f.water.length, f.greens.length], [1, 1, 1, 1]);
+  assert.strictEqual(core.hasAnySurface(core.collectPackageSurfaces({ status: "full-map-ready", holes: [{ holeNumber: 1, geometry: { green: m(0, 0) } }] })), false);
+  assert.strictEqual(core.hasAnySurface(core.collectPackageSurfaces(null)), false);
+});
+
+test("clipRingToBounds: a surface bigger than the box comes back as the box's share of it", () => {
+  const big = rect(-100, -100, 100, 100);
+  const box = core.ringBounds(rect(0, 0, 10, 10));
+  const cut = core.clipRingToBounds(big, box, 0);
+  assert.ok(cut && cut.length === 4);
+  const b = core.ringBounds(cut);
+  ["minLat", "maxLat", "minLng", "maxLng"].forEach(k => assert.ok(Math.abs(b[k] - box[k]) < 1e-9, k));
+  /* Wholly inside: untouched. Wholly outside: nothing. */
+  assert.strictEqual(core.clipRingToBounds(rect(2, 2, 4, 4), box, 0).length, 4);
+  assert.strictEqual(core.clipRingToBounds(rect(50, 50, 60, 60), box, 0), null);
+  /* The padded box lets a little context past the outline for the clip-path to trim. */
+  const padded = core.clipRingToBounds(big, box, 5 / 111320);
+  const pb = core.ringBounds(padded);
+  assert.ok(pb.minLat < box.minLat && pb.maxLat > box.maxLat);
+  /* A bunker straddling one corner keeps its diagonal edge. */
+  const corner = core.clipRingToBounds([m(5, 5), m(20, 5), m(5, 20)], box, 0);
+  assert.ok(corner.length >= 3 && core.ringsOverlap(corner, rect(0, 0, 10, 10)));
+});
+
 console.log("bubble-hazard-core: " + passed + " tests passed");
