@@ -39,6 +39,7 @@
     "test:bubble-geometry": "node dev/bubble-micro-geometry.test.js",
     "test:bubble-hazard": "node dev/bubble-hazard-core.test.js",
     "test:bubble-reveal": "node dev/bubble-hazard-reveal.test.js",
+    "test:terrain-lift": "node dev/terrain-lift.test.js",
     "test:package-surfaces": "node dev/course-package-surfaces.test.js",
     "test:manual-practice": "node dev/manual-practice-core.test.js && node dev/manual-practice-integration.test.js",
     "test:email-templates": "node dev/email-templates.test.js",

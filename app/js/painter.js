@@ -181,14 +181,23 @@
       var meta;
       try { meta = JSON.parse(img.dataset.playSurface); } catch (e) { return null; }
       var frame = activeFrame;
+      /* In lock the mesh has stood the ground up: every pixel of the picture is shifted by
+         its height (gd-terrain-mesh.js). The overlays go through the same lift so the dot,
+         the pin, the bubble and the hazard fills land on the ground as drawn, not on the
+         plane it rose from - and a tap is grounded back the same way. Identity whenever
+         there is no mesh or no tilt. */
+      var relief = mesh && document.body.classList.contains("surface-mesh") ? mesh : null;
       return {
         toScreen: function (ll) {
           if (!ll) return null;
           var px = surfaceLib.projectToSurface(meta, ll.lat, ll.lng);
-          return px ? surfaceLib.transformApply(frame, px) : null;
+          if (!px) return null;
+          if (relief) px = relief.lift(px);
+          return surfaceLib.transformApply(frame, px);
         },
         toLatLng: function (screenPt) {
           var px = surfaceLib.transformInvert(frame, screenPt);
+          if (px && relief) px = relief.ground(px);
           var w = Number(meta.outputDimensions.width), h = Number(meta.outputDimensions.height);
           if (!px || !(px.x >= 0 && px.y >= 0 && px.x <= w && px.y <= h)) return null;
           return surfaceLib.latLngFromWorldPx(
@@ -1716,6 +1725,7 @@
           metres: [metresX, metresY],
           demSize: [Number(elevation.width), Number(elevation.height)],
           imagePx: [canvas.width, canvas.height],
+          framePx: [frameW, frameH],
           seaLevel: elevation.elevationRange ? Number(elevation.elevationRange.min) : 0
         });
         /* The texture is the published frame, which already carries baked relief aimed off
@@ -1726,6 +1736,9 @@
         mesh.state.exaggeration = 2.5;
         applyMeshFrame();
         document.body.classList.add("surface-mesh");
+        /* The overlays already on screen were placed on the flat frame. Now that the
+           ground has relief, place them again on it (the projector lifts from here on). */
+        if (marshal) render(marshal.scene());
       } catch (error) {
         /* Reported rather than swallowed: a driver that will not compile the shader is
            something to learn about from the field, not from a support ticket describing a

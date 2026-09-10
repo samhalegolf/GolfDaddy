@@ -160,6 +160,96 @@
     return t;
   }
 
+  /* The vertex shader's displacement, restated for the overlays.
+
+     Every pixel of the picture moves by uShear * h once the lock tilt is on, but the dot,
+     the pin, the bubble and the hazard fills are projected by the flat frame at height zero,
+     so in lock they sat on the ground plane while the ground itself had stood up. The bubble
+     ring is small and hid it; a bunker or a pond fill spans tens of metres and did not - the
+     colour sat a few metres off the sand it was meant to reveal.
+
+     Pure: no GL, no DOM. heightAt(uv) is whatever samples the DEM (create() wires a 2D-canvas
+     read of the same terrain-RGB the texture holds; a test hands in a function). Works in
+     FRAME pixels (the published outputDimensions), which is the space the projector already
+     speaks, so pxPerMetre is framePx / metres rather than the shader's canvas figure - the
+     canvas is styled to the frame's size, so the two agree on screen.
+
+     lift(px) is the shader's px + uShear * h. ground(px) is its inverse for taps: the height
+     under a screen point depends on where the tap lands on the ground, so it is solved by a
+     few fixed-point steps - the field is smooth and the offset is a few metres, so three
+     rounds are well inside a pixel. */
+  function makeDisplacer(opts) {
+    const heightAt = opts.heightAt;
+    const framePx = opts.framePx;
+    const metres = opts.metres;
+    const state = opts.state;
+    function edgeFade(u, v) {
+      const e = Math.min(u, 1 - u, v, 1 - v);
+      const t = Math.min(1, Math.max(0, e / 0.012));
+      return t * t * (3 - 2 * t);
+    }
+    function offsetAt(px) {
+      const tilt = Number(state.tiltDeg) || 0;
+      if (!(tilt > 0) || !framePx || !metres || !(metres[0] > 0)) return { x: 0, y: 0 };
+      const u = px.x / framePx[0], v = px.y / framePx[1];
+      if (!(u >= 0 && u <= 1 && v >= 0 && v <= 1)) return { x: 0, y: 0 };
+      let h = (heightAt(u, v) - (Number(state.seaLevel) || 0)) * (Number(state.exaggeration) || 0);
+      h *= edgeFade(u, v);
+      const shear = (framePx[0] / metres[0]) * Math.tan(tilt * Math.PI / 180);
+      const rot = -(Number(state.frameRotationDeg) || 0) * Math.PI / 180;
+      return { x: Math.sin(rot) * shear * h, y: -Math.cos(rot) * shear * h };
+    }
+    return {
+      offsetAt: offsetAt,
+      lift: function (px) {
+        if (!px) return px;
+        const d = offsetAt(px);
+        return { x: px.x + d.x, y: px.y + d.y };
+      },
+      ground: function (px) {
+        if (!px) return px;
+        let g = { x: px.x, y: px.y };
+        for (let i = 0; i < 8; i++) {
+          const d = offsetAt(g);
+          const next = { x: px.x - d.x, y: px.y - d.y };
+          const step = Math.hypot(next.x - g.x, next.y - g.y);
+          g = next;
+          if (step < 0.01) break;
+        }
+        return g;
+      }
+    };
+  }
+
+  /* Terrain-RGB decoded on the CPU from the same image the texture was built from, sampled
+     bilinearly the way LINEAR filtering samples it on the GPU - the decode is linear in the
+     channels, so interpolating first and decoding after gives the same height. */
+  function demSampler(image, demSize) {
+    try {
+      const w = Number(demSize[0]) || image.naturalWidth, h = Number(demSize[1]) || image.naturalHeight;
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(image, 0, 0, w, h);
+      const data = ctx.getImageData(0, 0, w, h).data;
+      function at(x, y) {
+        const i = (Math.min(h - 1, Math.max(0, y)) * w + Math.min(w - 1, Math.max(0, x))) * 4;
+        return -10000 + (data[i] * 65536 + data[i + 1] * 256 + data[i + 2]) * 0.1;
+      }
+      return function (u, v) {
+        const x = u * w - 0.5, y = v * h - 0.5;
+        const x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0;
+        const top = at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx;
+        const bottom = at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx;
+        return top * (1 - fy) + bottom * fy;
+      };
+    } catch (e) {
+      /* A tainted canvas (no CORS on the sidecar) cannot be read. The picture still stands
+         up; the overlays simply stay on the ground plane as they did before. */
+      return null;
+    }
+  }
+
   /* No camera maths here on purpose. The frame is solved by play-surface.js's stageFrame and
      written to the element as a CSS matrix, exactly as it is for the flat image; this renderer
      only fills that frame in. A projection of its own would be a second framing rule to keep
@@ -241,7 +331,13 @@
       } catch (e) { /* already gone */ }
     }
 
-    return { gl, state, render, dispose };
+    /* framePx is the published frame's outputDimensions - the projector's space. Without it
+       (or without a readable DEM) lift/ground are the identity and nothing changes. */
+    const sampler = options.framePx ? demSampler(options.elevation, state.demSize) : null;
+    const displacer = sampler ? makeDisplacer({ heightAt: sampler, framePx: options.framePx, metres: state.metres, state: state })
+      : { lift: function (px) { return px; }, ground: function (px) { return px; }, offsetAt: function () { return { x: 0, y: 0 }; } };
+
+    return { gl, state, render, dispose, lift: displacer.lift, ground: displacer.ground, offsetAt: displacer.offsetAt };
   }
 
   /* Cheap enough to call before committing to the mesh path, and the answer is the whole
@@ -253,5 +349,5 @@
     } catch (e) { return false; }
   }
 
-  root.GDTerrainMesh = { create: create, supported: supported };
+  root.GDTerrainMesh = { create: create, supported: supported, makeDisplacer: makeDisplacer };
 })(typeof window !== "undefined" ? window : this);
