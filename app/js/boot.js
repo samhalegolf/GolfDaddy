@@ -570,6 +570,10 @@
        the 7th tee still has somewhere to come back to. play.js keeps the hole
        current from here on. */
     if (app.resume && roundFeatures()) app.resume.setCourse(course);
+    /* Before the cached/uncached split: the main site's overlay already shows
+       the course name, so the title here must not flip to "Loading course" for
+       the frames between this page painting and the round starting. */
+    setLoadingTitle(course.courseName);
     var cached = app.courseStore.load(course.courseId);
     var pkg = cached && cached.pkg;
     if (pkg) {
@@ -587,7 +591,6 @@
          live-map-only round they would have to leave and re-enter to fix.
          A terminal answer or a timeout still falls through to the live map
          exactly as a plain null fetch always has. */
-      setLoadingTitle(course.courseName);
       setLoading("Downloading course map", 24);
       pkg = await app.awaitCoursePackage({
         courseId: course.courseId,

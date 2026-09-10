@@ -140,7 +140,7 @@ function fetchFor(net) {
 
 function createHarness(options = {}) {
   const document = makeDocument();
-  const net = { nominatim: 0, courseMaps: 0, coursesNear: 0, dbChecks: 0 };
+  const net = { nominatim: 0, courseMaps: 0, coursesNear: 0, dbChecks: 0, loadingShown: [], loadingHidden: 0 };
   const storage = new Map();
   const window = {};
   Object.assign(window, {
@@ -174,6 +174,7 @@ function createHarness(options = {}) {
     gdEnsureResumeRoundPicker() { return null; },
     gdClearMappedStartPromptChrome() {},
     gdOpenChangeCourse() { return false; },
+    GDCourseLoading: { show(name, sub) { net.loadingShown.push({ name, sub }); }, update() {}, hide() { net.loadingHidden++; } },
     fetch: fetchFor(net)
   });
   const context = vm.createContext(Object.assign(window, { window, globalThis: window }));
@@ -257,7 +258,9 @@ test("a tap is acknowledged at once and a repeat tap on the same course is a no-
   assert.strictEqual(click(env, row), "owner", "the owner's own listener handles the row, not the core capture");
   await settle(2);
   assert.ok(row.classList.contains("selecting"), "the row shows it was taken");
-  assert.strictEqual(row.querySelector(".play").textContent, "Opening…");
+  assert.strictEqual(row.querySelector(".play").textContent, "Play", "the button does not relabel itself - the loading screen is the acknowledgement");
+  assert.deepStrictEqual(env.net.loadingShown, [{ name: "Akarana Golf Club", sub: "Opening…" }], "the loading screen went up on the tap, before the database check answered");
+  assert.strictEqual(env.net.loadingHidden, 0, "and stays up while the check is in flight");
   assert.strictEqual(countText(env), "Opening Akarana Golf Club…");
   const token = env.window.GDCoursePicker.getState().activeToken;
   click(env, row);

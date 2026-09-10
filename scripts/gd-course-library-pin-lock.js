@@ -3624,14 +3624,25 @@
     document.body.appendChild(el);
     return el;
   }
-  function showCourseLoading(courseName){
+  /* One pending hide at a time, and a show cancels it. hideCourseLoading is
+     deliberately delayed (the bar reads "ready" for a beat before it goes), so
+     a show that lands inside that beat - the picker re-asserting the overlay
+     while it hands off to /app/ - used to be undone by the timer a moment
+     later, and the picker flashed through the gap. */
+  let courseLoadingHideTimer=null;
+  function showCourseLoading(courseName,subText,pct){
     const el=ensureCourseLoadingOverlay();
+    if(courseLoadingHideTimer){clearTimeout(courseLoadingHideTimer);courseLoadingHideTimer=null;}
+    const wasHidden=el.classList.contains('hidden');
     const title=el.querySelector('#gdCourseLoadingTitle');
     const sub=el.querySelector('#gdCourseLoadingSub');
     const bar=el.querySelector('#gdCourseLoadingBar');
     if(title)title.textContent=courseName||'Loading course';
-    if(sub)sub.textContent='Preparing Hole 1';
-    if(bar)bar.style.width='18%';
+    if(sub)sub.textContent=subText||'Preparing Hole 1';
+    /* A re-show over an overlay that is already up keeps its bar where it is;
+       only a fresh show starts the bar over. */
+    if(bar&&Number.isFinite(Number(pct)))bar.style.width=`${Math.max(8,Math.min(100,Number(pct)))}%`;
+    else if(bar&&wasHidden)bar.style.width='18%';
     el.classList.remove('hidden');
     document.body.classList.add('gdCourseOpening');
     return el;
@@ -3644,11 +3655,19 @@
     if(bar&&Number.isFinite(Number(pct)))bar.style.width=`${Math.max(8,Math.min(100,Number(pct)))}%`;
   }
   function hideCourseLoading(delay=180){
-    setTimeout(()=>{
+    if(courseLoadingHideTimer)clearTimeout(courseLoadingHideTimer);
+    courseLoadingHideTimer=setTimeout(()=>{
+      courseLoadingHideTimer=null;
       try{document.getElementById('gdCourseLoadingOverlay')?.classList.add('hidden');}catch(e){}
       try{document.body.classList.remove('gdCourseOpening');}catch(e){}
     },delay);
   }
+  /* The course picker (scripts/inline/gd-course-picker-search-v2.js) puts this
+     overlay up the moment a course is tapped and keeps it up until /app/ takes
+     over, so the tap, the mapping wait and the hand-off read as one loading
+     screen rather than a button label, a screen, a flash of picker, and a
+     second screen. */
+  window.GDCourseLoading={show:showCourseLoading,update:updateCourseLoading,hide:hideCourseLoading};
   function ensureClosestHolePrompt(){
     let el=document.getElementById('gdClosestHolePrompt');
     if(el)return el;

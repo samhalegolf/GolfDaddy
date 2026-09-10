@@ -87,13 +87,32 @@
   function selectingActive(){
     return !!(view.selecting&&Date.now()-view.selecting.at<SELECTING_GUARD_MS);
   }
+  /* The acknowledgement IS the loading screen. The tap used to relabel the row
+     "Opening…" while the database check ran and only then, on the mapping path,
+     put the loading overlay up - so the player saw a button change, then a
+     loading screen, then (see enterGpsPlay) the picker again for a frame, then
+     /app/'s own loading screen. Now the overlay goes up on the tap and stays up
+     through every hop until /app/ paints its matching one over the top. */
+  function showOpeningScreen(course,subText){
+    const name=String(course?.name||course?.courseName||"").trim()||"Loading course";
+    safe(()=>window.GDCourseLoading?.show?.(name,subText||"Opening…"));
+  }
+  function hideOpeningScreen(){
+    safe(()=>window.GDCourseLoading?.hide?.(0));
+  }
   function setSelecting(course){
     view.selecting={key:rowKey(course),name:String(course?.name||course?.courseName||"course"),at:Date.now()};
+    showOpeningScreen(course);
     requestRender();
   }
+  /* Every way a selection ends WITHOUT a round comes through here - the pin
+     screen, an error, a manual course, the picker being reopened - so this is
+     also where the overlay comes down. A selection that ends in a round never
+     clears: the navigation to /app/ replaces the page, overlay and all. */
   function clearSelecting(){
     if(!view.selecting)return;
     view.selecting=null;
+    hideOpeningScreen();
     requestRender();
   }
   function selectionInFlight(course){
@@ -714,6 +733,12 @@
   function enterGpsPlay(course,result,opts={}){
     if(!(result&&result.playable))return false;
     state.lastResult=result;
+    /* Re-asserted here, not trusted from the tap: on the mapping path the
+       resolver has just scheduled its own hide ("Hole 1 ready", then gone), and
+       the membership check below is a network round-trip. Between the two the
+       picker showed through for a moment before /app/ loaded. show() cancels
+       that pending hide; nothing after this point takes the overlay down. */
+    showOpeningScreen(course,"Starting round…");
     /* Resuming a round already in progress bypasses the gate, exactly as the old
        owner's shouldBypassGpsRoundStartPermission did - a player whose access
        lapsed mid-round is not locked out of the holes they are standing on. */
@@ -1066,8 +1091,6 @@
         if(!key)return;
         const on=!!selecting&&key===selecting;
         row.classList.toggle("selecting",on);
-        const button=typeof row.querySelector==="function"?row.querySelector(".play"):null;
-        if(button)button.textContent=on?"Opening…":"Play";
       });
     }
     const count=byId("countLine");
