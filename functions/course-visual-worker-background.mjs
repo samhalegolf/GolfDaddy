@@ -221,6 +221,43 @@ async function fetchTileUncached(url) {
   throw lastError || new Error("tile fetch failed");
 }
 
+/* Fill NaN holes from their nearest real neighbours.
+
+   A multi-source flood from every real pixel that touches a hole, so each filled pixel takes the
+   value of the nearest measured ground rather than a global average - a whole missing block
+   filled with one number would read as a plateau, and relief would draw a cliff round it.
+
+   This is a REPAIR for the drawing, not a measurement. Callers get the footprint of what was
+   filled so anything that measures (the green fit, plays-like) can refuse to read it. */
+function patchElevationGaps(heights, width, height) {
+  const total = width * height;
+  let holes = 0;
+  for (let i = 0; i < total; i++) if (!Number.isFinite(heights[i])) holes++;
+  if (!holes) return { filled: 0, remaining: 0 };
+  const queue = [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      if (!Number.isFinite(heights[i])) continue;
+      if ((x > 0 && !Number.isFinite(heights[i - 1])) ||
+          (x < width - 1 && !Number.isFinite(heights[i + 1])) ||
+          (y > 0 && !Number.isFinite(heights[i - width])) ||
+          (y < height - 1 && !Number.isFinite(heights[i + width]))) queue.push(i);
+    }
+  }
+  let head = 0, filled = 0;
+  while (head < queue.length) {
+    const i = queue[head++];
+    const v = heights[i];
+    const x = i % width, y = (i / width) | 0;
+    if (x > 0 && !Number.isFinite(heights[i - 1])) { heights[i - 1] = v; filled++; queue.push(i - 1); }
+    if (x < width - 1 && !Number.isFinite(heights[i + 1])) { heights[i + 1] = v; filled++; queue.push(i + 1); }
+    if (y > 0 && !Number.isFinite(heights[i - width])) { heights[i - width] = v; filled++; queue.push(i - width); }
+    if (y < height - 1 && !Number.isFinite(heights[i + width])) { heights[i + width] = v; filled++; queue.push(i + width); }
+  }
+  return { filled: filled / total, remaining: (holes - filled) / total };
+}
+
 /* Composite one capture: fetch its tile grid (bounded concurrency) and flatten onto a single
    canvas. Coverage is enforced like the browser flatten - a capture with missing tiles is
    refused rather than baked with holes in it. */
@@ -249,10 +286,30 @@ async function buildCapture(grid, { format }) {
      mosaic itself is already width*height*4 bytes of headroom this worker has to find. */
   if (grid.encoding === "float32") {
     const mosaic = new Float32Array(grid.imageWidth * grid.imageHeight).fill(NaN);
+    /* A block that arrives HTTP 200, the right size and with a valid TIFF header can still
+       carry a malformed internal tile - 3DEP does this intermittently over some regions, and
+       libtiff reports "Invalid tile byte count". Measured over Trump National: 13 of 16 blocks
+       decoded, at every block size tried, with the bad tile index moving between attempts.
+
+       Losing one block used to lose the whole capture, and with it the course's elevation - so
+       all 18 greens silently shipped with no contours and no tiers because of one bad response.
+       The hole is left as NaN here and patched below instead. What is NOT done is pretending the
+       patch is ground: the filled rectangles travel with the capture so the green fit can refuse
+       a green that sits on one, because a flat invented patch fits a cubic beautifully and would
+       otherwise read as a confident, wrong answer. */
+    const gaps = [];
     for (let index = 0; index < tiles.length; index++) {
-      const block = await heightsFromFloat32Tiff(buffers[index]);
-      buffers[index] = null;
       const left = tiles[index].x, top = tiles[index].y;
+      let block = null;
+      try {
+        block = await heightsFromFloat32Tiff(buffers[index]);
+      } catch (error) {
+        gaps.push({ x: left, y: top, w: tiles[index].w || 0, h: tiles[index].h || 0,
+                    reason: String(error && error.message || error).slice(0, 120) });
+        buffers[index] = null;
+        continue;
+      }
+      buffers[index] = null;
       const w = Math.min(block.width, grid.imageWidth - left);
       const h = Math.min(block.height, grid.imageHeight - top);
       for (let y = 0; y < h; y++) {
@@ -261,7 +318,16 @@ async function buildCapture(grid, { format }) {
       }
     }
     buffers.length = 0;
-    return await terrainRgbPngFromHeights(mosaic, grid.imageWidth, grid.imageHeight);
+    if (gaps.length) {
+      const patched = patchElevationGaps(mosaic, grid.imageWidth, grid.imageHeight);
+      if (patched.remaining > 0.25) {
+        throw new Error("elevation coverage too thin: " + gaps.length + "/" + tiles.length +
+          " blocks undecodable (" + Math.round(patched.remaining * 100) + "% of the mosaic)");
+      }
+      console.log("[visual-worker] elevation: patched " + gaps.length + "/" + tiles.length +
+        " undecodable block(s), " + (patched.filled * 100).toFixed(1) + "% of pixels filled");
+    }
+    return { buffer: await terrainRgbPngFromHeights(mosaic, grid.imageWidth, grid.imageHeight), gaps };
   }
   const canvas = sharp({
     create: { width: grid.imageWidth, height: grid.imageHeight, channels: 3, background: { r: 16, g: 19, b: 15 } },
@@ -287,9 +353,9 @@ async function buildCapture(grid, { format }) {
   if (format === "png" && grid.encoding && grid.encoding !== "terrain-rgb") {
     const { data, info } = await sharp(out, { limitInputPixels: false }).raw().toBuffer({ resolveWithObject: true });
     const decoded = decodeElevation(data, info.width, info.height, info.channels, grid.encoding);
-    return await terrainRgbPngFromHeights(decoded.heights, info.width, info.height);
+    return { buffer: await terrainRgbPngFromHeights(decoded.heights, info.width, info.height), gaps: [] };
   }
-  return out;
+  return { buffer: out, gaps: [] };
 }
 
 /* Snapshot is resumable the same way export is, but cheaper: every field in a capture's index
@@ -354,6 +420,10 @@ async function runSnapshotJob(job, deadlineAt) {
        drop the capture, keep the course. */
     if (!grid) { skipped += 1; continue; }
     const isTerrain = item.role === "terrain-reference";
+    /* Footprint of any elevation block that could not be decoded and had to be patched. Rides
+       with the capture so the export can refuse to MEASURE a green that sits on invented
+       ground, while still drawing relief over it. */
+    let elevationGaps = [];
     const ext = isTerrain ? "png" : "jpg";
     const fullPath = pkg.courseId + "/captures/" + item.captureKey.replace(/:/g, "/") + "." + ext;
     const renditionPath = pkg.courseId + "/captures/" + EXPORT_RENDITION_PX + "/" + item.captureKey.replace(/:/g, "/") + "." + ext;
@@ -370,7 +440,9 @@ async function runSnapshotJob(job, deadlineAt) {
         if (mastersMatchPlan && await storageExists(fullPath)) {
           buffer = await storageDownload(fullPath);
         } else {
-          buffer = await buildCapture(grid, { format: isTerrain ? "png" : "jpeg" });
+          const built = await buildCapture(grid, { format: isTerrain ? "png" : "jpeg" });
+          buffer = built.buffer;
+          elevationGaps = built.gaps || [];
           /* A terrain capture is stored as the elevation it arrived as, not as shading.
 
              It used to be shaded here, once per course, which was cheaper - but the frames
@@ -410,6 +482,7 @@ async function runSnapshotJob(job, deadlineAt) {
         shot += 1;
       }
       index.captures.push({
+        elevationGaps,
         pathExport: renditionPath,
         renditionPx: EXPORT_RENDITION_PX,
         sourceKey: grid.sourceKey || source.key,
@@ -934,7 +1007,27 @@ async function runExportJob(job, deadlineAt) {
              be wrong in ways a glance would not catch. A green that fails the gate publishes with
              no contours and the reason in the log, exactly like a hole that ships unshaded. */
           const greenShape = pins && pins.greenShape;
-          if (greenShape && greenShape.length >= 8) {
+          /* A green standing on a patched elevation block is not measurable. The patch is a
+             nearest-neighbour fill, which is smooth - and a smooth invented surface fits a cubic
+             beautifully, so the confidence gate would wave it through and publish a confident,
+             wrong read of the ground. Refuse it here instead, the same way a green that fails
+             the fit is refused: no contours, no tiers, reason in the log. */
+          const gapsHere = (terrainEntry && terrainEntry.elevationGaps) || [];
+          let onPatchedGround = false;
+          if (gapsHere.length && greenShape && greenShape.length) {
+            const tb = terrainEntry.bounds;
+            const gx = p => (p.lng - tb.west) / ((tb.east - tb.west) || 1e-12) * (terrainEntry.width || 0);
+            const gy = p => (p.lat - tb.north) / ((tb.south - tb.north) || 1e-12) * (terrainEntry.height || 0);
+            const xs = greenShape.map(gx), ys = greenShape.map(gy);
+            const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+            onPatchedGround = gapsHere.some(g =>
+              x1 >= g.x && x0 <= g.x + (g.w || 0) && y1 >= g.y && y0 <= g.y + (g.h || 0));
+            if (onPatchedGround) {
+              console.log("[visual-worker] green h" + holeNumber +
+                " skipped: sits on a patched elevation block (" + (gapsHere[0].reason || "undecodable") + ")");
+            }
+          }
+          if (!onPatchedGround && greenShape && greenShape.length >= 8) {
             const raw = await sharp(crop.buffer, { limitInputPixels: false })
               .raw().toBuffer({ resolveWithObject: true });
             const decoded = decodeElevation(raw.data, raw.info.width, raw.info.height, raw.info.channels, shaded.encoding);

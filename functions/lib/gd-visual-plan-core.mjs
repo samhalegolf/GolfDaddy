@@ -561,7 +561,9 @@ function exportBlocks(spec, rect, origin, zoom) {
       const h = Math.min(block, height - by);
       if (w <= 0 || h <= 0) continue;
       blocks.push({
-        z: zoom, x: bx, y: by,
+        /* w/h travel so a consumer can say WHICH ground a block covered - the elevation path
+           needs it to record the footprint of a block it could not decode. */
+        z: zoom, x: bx, y: by, w, h,
         url: exportImageUrl(spec, { left: origin.x + bx, top: origin.y + by, width: w, height: h }, zoom)
       });
     }

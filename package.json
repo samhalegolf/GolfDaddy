@@ -27,6 +27,7 @@
     "test:bag-generator": "node dev/bag-generator-model.test.js",
     "test:bubble-handedness": "node dev/bubble-handedness.test.js",
     "test:bubble-frame": "node dev/bubble-frame-core.test.js",
+    "test:elevation-gaps": "node dev/elevation-gaps.test.js",
     "test:green-paint": "node dev/green-paint.test.js",
     "test:boot": "node dev/boot-smoke.test.js",
     "test:practice-parser": "node dev/practice-parser-parity.test.js",
