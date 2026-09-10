@@ -79,6 +79,25 @@ function fixturePalette() {
   return pal;
 }
 
+/* Same shape, far wider run - the case that broke: at spread 0.6 a 72-luma green was pushed
+   43 luma past its own ends and went chalky at the top, near-black at the bottom. */
+function widePalette() {
+  const rgb = [];
+  let n = 0;
+  for (let i = 0; i < 4000; i++) {
+    const t = i / 3999;
+    rgb.push(40 + t * 190, 70 + t * 160, 40 + t * 170);
+    n++;
+  }
+  const pal = greenCore.sampleGreenPalette(rgb, n);
+  assert.ok(pal, "wide fixture palette must build");
+  return pal;
+}
+const lumaOfLut = (pal, i) => {
+  const o = i * 3;
+  return 0.2126 * pal.lut[o] + 0.7152 * pal.lut[o + 1] + 0.0722 * pal.lut[o + 2];
+};
+
 const results = [];
 const check = (name, fn) => results.push({ name, fn });
 
@@ -201,6 +220,36 @@ check("a green that is a sliver of the frame still gets a palette", async () => 
     "needs a real sample count off a small green, got " + out.greenPalette.samples);
   return out.greenPalette.samples + " px sampled from a green ~" +
     (100 * (0.0008 / 0.020)).toFixed(1) + "% of the frame width";
+});
+
+check("extrapolation is capped in absolute luma, not as a share of the run", async () => {
+  const surface = buildGreenSurface();
+  const narrow = fixturePalette(), wide = widePalette();
+  const runOf = p => lumaOfLut(p, (p.bins || p.lut.length / 3) - 1) - lumaOfLut(p, 0);
+  const nRun = runOf(narrow), wRun = runOf(wide);
+  assert.ok(wRun > nRun * 2.5, "fixtures must differ enough to test the cap");
+
+  const reach = pal => {
+    const d = greenCore.buildGreenDrawing(surface, { palette: pal });
+    const tiers = new Map();
+    for (const b of d.bands) if (!tiers.has(b.tier)) tiers.set(b.tier, b.colour);
+    const ls = [...tiers.keys()].sort((a, b) => a - b).map(t => {
+      const m = tiers.get(t).match(/(\d+),(\d+),(\d+)/);
+      return luma([+m[1], +m[2], +m[3]]);
+    });
+    /* how far the extreme tier colours sit outside the palette's own sampled ends */
+    const lo = lumaOfLut(pal, 0), hi = lumaOfLut(pal, (pal.bins || pal.lut.length / 3) - 1);
+    return Math.max(lo - ls[0], ls[ls.length - 1] - hi);
+  };
+  const cap = greenCore.PAINT_DEFAULTS.maxExtrapLuma;
+  const nReach = reach(narrow), wReach = reach(wide);
+  assert.ok(nReach <= cap + 1.5, "narrow green must stay within the cap, got " + nReach.toFixed(1));
+  assert.ok(wReach <= cap + 1.5, "wide green must be pulled back to the cap, got " + wReach.toFixed(1));
+  /* the whole point: without the cap the wide green would reach proportionally further */
+  assert.ok(wRun * greenCore.PAINT_DEFAULTS.spread > cap * 1.5,
+    "the wide fixture must be one the cap actually bites on");
+  return "run " + nRun.toFixed(0) + "/" + wRun.toFixed(0) + " luma -> reach " +
+    nReach.toFixed(1) + "/" + wReach.toFixed(1) + " (cap " + cap + ")";
 });
 
 check("a green with no fitted surface draws nothing and fails quietly", async () => {

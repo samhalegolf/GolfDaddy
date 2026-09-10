@@ -437,7 +437,8 @@ function greenPaintParams(settings) {
     target,
     tiers: Math.round(clamp(num(tools.greenPaintTiers, d.tiers), 3, 8)),
     spread: clamp(num(tools.greenPaintSpread, d.spread), 0, 1),
-    strength: clamp(num(tools.greenPaintStrength, d.strength), 0, 1)
+    strength: clamp(num(tools.greenPaintStrength, d.strength), 0, 1),
+    maxExtrapLuma: clamp(num(tools.greenPaintMaxExtrapLuma, d.maxExtrapLuma), 0, 60)
   };
 }
 
@@ -832,7 +833,8 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, green
       palette: greenPalette,
       bandTiers: paintCfg.enabled ? paintCfg.tiers : 0,
       bandSpread: paintCfg.spread,
-      bandOpacity: paintCfg.strength * 0.85
+      bandOpacity: paintCfg.strength * 0.85,
+      bandMaxExtrapLuma: paintCfg.maxExtrapLuma
     });
     if (svg) overlays.push({ input: svg, blend: "over" });
   }

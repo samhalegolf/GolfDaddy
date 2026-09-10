@@ -81,7 +81,7 @@ const GREEN_FRAME_STAMP = "greenframe1";
 /* paint2: tiers moved out of the compositor into buildGreenDrawing's display list, and the
    palette is now sampled off the green's own box rather than a fixed 520px downscale of the
    whole frame. Both change published pixels, so already-exported frames must not resume. */
-const PAINT_STAMP = "paint3-t" + greenCore.PAINT_DEFAULTS.tiers + "-s" + greenCore.PAINT_DEFAULTS.spread;
+const PAINT_STAMP = "paint4-t" + greenCore.PAINT_DEFAULTS.tiers + "-s" + greenCore.PAINT_DEFAULTS.spread;
 const ENGINE_SOURCE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../scripts/gd-course-visual-engine.js");
 let presetHelpersCache = null;
 

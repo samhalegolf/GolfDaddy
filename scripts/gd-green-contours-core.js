@@ -720,6 +720,15 @@
     if (cfg.palette && cfg.palette.lut && cfg.bandTiers !== 0) {
       var N = Math.max(2, Math.round(cfg.bandTiers || PAINT_DEFAULTS.tiers));
       var spread = cfg.bandSpread !== undefined ? cfg.bandSpread : PAINT_DEFAULTS.spread;
+      /* Cap in absolute luma. The extreme tiers sit at -spread and 1+spread, so their reach past
+         the sampled run is spread x the run's own luma width - which is the term that varies
+         between greens and the reason one spread setting looked gentle on some and violent on
+         others. Capping the product makes the reach comparable course-wide. */
+      var lutB = cfg.palette.lut, lastB = (cfg.palette.bins || (lutB.length / 3)) - 1;
+      var runLuma = lumaOf(lutB[lastB * 3], lutB[lastB * 3 + 1], lutB[lastB * 3 + 2]) -
+                    lumaOf(lutB[0], lutB[1], lutB[2]);
+      var capLuma = cfg.bandMaxExtrapLuma !== undefined ? cfg.bandMaxExtrapLuma : PAINT_DEFAULTS.maxExtrapLuma;
+      if (runLuma > 0.5 && capLuma > 0) spread = Math.min(spread, capLuma / runLuma);
       var alpha = cfg.bandOpacity !== undefined ? cfg.bandOpacity : 0.55;
       var xsB = polygon.map(function (p) { return p.x; });
       var ysB = polygon.map(function (p) { return p.y; });
@@ -948,7 +957,15 @@
      colour appears which is not already on the green; 0.6 spends it - about 80% of tier colours
      now sit past the sampled run, continued along the same axis rather than invented from
      nowhere, but past it all the same. That is the trade the visibility costs. */
-  var PAINT_DEFAULTS = { tiers: 5, spread: 0.6, strength: 0.7 };
+  /* spread is a multiplier on each green's OWN colour run, which is why one setting cannot suit
+     every green: at 0.6 a narrow 17-luma green is pushed 10 luma past its ends, while a 72-luma
+     green is pushed 43 and goes chalky white at the top and near-black at the bottom - colours
+     no turf has. maxExtrapLuma caps that reach in absolute terms, so the setting means the same
+     thing on every green: never more than this many luma beyond what was actually sampled.
+     12 leaves the narrow greens untouched and pulls the widest one back to a fifth of its reach. */
+  var PAINT_DEFAULTS = { tiers: 5, spread: 0.6, strength: 0.7, maxExtrapLuma: 12 };
+
+  function lumaOf(r, g, b) { return 0.2126 * r + 0.7152 * g + 0.0722 * b; }
 
   function paintTargetForHeight(zNorm, cfg) {
     var tiers = Math.max(2, Math.round((cfg && cfg.tiers) || PAINT_DEFAULTS.tiers));
