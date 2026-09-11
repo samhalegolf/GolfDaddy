@@ -4,10 +4,10 @@
 # at once - the watch app and its extension must carry the SAME build number as
 # the phone app or App Store Connect rejects the upload.
 #
-# Wired as a pre-action on the App scheme's Archive step (see
-# App.xcodeproj/xcshareddata/xcschemes/App.xcscheme), so it runs once, before
-# the archive build starts, and the number it writes is the number that ships.
-# Plain builds and runs never touch it. Run by hand from anywhere:
+# Called by stamp-build-number.sh --bump from the Watch Extension target's
+# "Stamp build number" phase, on Archive only, so it runs once per archive and
+# the number it writes is the number every bundle in that archive is stamped
+# with. Plain builds and runs never touch it. Run by hand from anywhere:
 #
 #   ios/App/bump-build-number.sh          # next number
 #   ios/App/bump-build-number.sh 900      # set an explicit number

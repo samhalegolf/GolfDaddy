@@ -248,6 +248,7 @@
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
 				CA77D9000000000000000091 /* Embed Watch Content */,
+				CA77D90000000000000000A1 /* Stamp build number */,
 			);
 			buildRules = (
 			);
@@ -270,6 +271,7 @@
 				CA77D9000000000000000061 /* Frameworks */,
 				CA77D9000000000000000062 /* Resources */,
 				CA77D9000000000000000093 /* Embed App Extensions */,
+				CA77D90000000000000000A2 /* Stamp build number */,
 			);
 			buildRules = (
 			);
@@ -288,6 +290,7 @@
 				CA77D9000000000000000060 /* Sources */,
 				CA77D9000000000000000064 /* Frameworks */,
 				CA77D9000000000000000065 /* Resources */,
+				CA77D90000000000000000A3 /* Stamp build number */,
 			);
 			buildRules = (
 			);
@@ -380,6 +383,66 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		CA77D90000000000000000A1 /* Stamp build number */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Stamp build number";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/stamp-build-number.sh\"\n";
+		};
+		CA77D90000000000000000A2 /* Stamp build number */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Stamp build number";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/stamp-build-number.sh\"\n";
+		};
+		CA77D90000000000000000A3 /* Stamp build number */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Stamp build number";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/stamp-build-number.sh\" --bump\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		504EC3001FED79650016851F /* Sources */ = {
