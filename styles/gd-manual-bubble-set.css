@@ -1,0 +1,225 @@
+/* Manual Bubble Set - the player's own Bubble placement.
+   Deliberately the ordinary player surface: the same sheet, chip and primary
+   button language My Bubble already uses. Nothing here should read as an
+   advanced or admin screen. */
+
+.gdManualBubbleSetEntry {
+  /* Sits in .gdBubbleOffsetActions beside Edit / Apply / Clear, as one more
+     ordinary way to establish a Bubble rather than a replacement for them. */
+  white-space: nowrap;
+}
+
+/* gd-shot-data-visual-polish-v1.css deliberately takes Edit / Apply / Clear off
+   the Data Hub and Shot Data surfaces - those are the tuning controls and the
+   card there is a read-only summary. Manual Set is not a tuning control: it is
+   one of the two ways a player establishes a Bubble in the first place, so it
+   stays on those surfaces while the rest of the row stays hidden. The narrow
+   re-show below keeps that design decision intact rather than reversing it. */
+#dataHubPanel .gdOffsetHubBody .gdBubbleOffsetActions,
+#statsPanel .gdOffsetHubBody .gdBubbleOffsetActions {
+  display: flex !important;
+  justify-content: flex-end;
+}
+
+#dataHubPanel .gdOffsetHubBody .gdBubbleOffsetActions > button:not(.gdManualBubbleSetEntry),
+#statsPanel .gdOffsetHubBody .gdBubbleOffsetActions > button:not(.gdManualBubbleSetEntry) {
+  display: none !important;
+}
+
+.gdManualBubbleSetOverlay {
+  display: none;
+}
+
+.gdManualBubbleSetOverlay.open {
+  display: flex;
+  position: fixed;
+  inset: 0;
+  z-index: 9600;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(3, 9, 8, .72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+body.gdManualBubbleSetOpen {
+  overflow: hidden;
+}
+
+.gdManualBubbleSetSheet {
+  width: min(560px, 100%);
+  max-height: 94vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 14px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+  border-radius: 20px 20px 0 0;
+  background: linear-gradient(180deg, #0d1614 0%, #070f0e 100%);
+  border: 1px solid rgba(238, 245, 242, .10);
+  border-bottom: 0;
+  color: #eef5f2;
+  box-shadow: 0 -18px 48px rgba(0, 0, 0, .55);
+}
+
+.gdManualBubbleSetHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.gdManualBubbleSetHead strong {
+  display: block;
+  font-size: 17px;
+  letter-spacing: .2px;
+}
+
+.gdManualBubbleSetHead span {
+  display: block;
+  font-size: 12px;
+  opacity: .66;
+}
+
+.gdManualBubbleSetBack {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 50%;
+  border: 1px solid rgba(238, 245, 242, .16);
+  background: rgba(238, 245, 242, .06);
+  color: #eef5f2;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* The explainer is three short lines and stays three short lines. */
+.gdManualBubbleSetLead {
+  margin: 14px 2px 8px;
+  font-size: 13.5px;
+  line-height: 1.4;
+  opacity: .88;
+}
+
+.gdManualBubbleSetScale {
+  opacity: .62;
+  font-size: 12.5px;
+}
+
+.gdManualBubbleSetClubs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.gdManualBubbleSetChip {
+  padding: 8px 13px;
+  border-radius: 999px;
+  border: 1px solid rgba(238, 245, 242, .14);
+  background: rgba(238, 245, 242, .05);
+  color: #eef5f2;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gdManualBubbleSetChip.active {
+  border-color: rgba(215, 176, 107, .82);
+  background: rgba(215, 176, 107, .18);
+  color: #ffe9bd;
+}
+
+.gdManualBubbleSetEmpty {
+  font-size: 12.5px;
+  opacity: .6;
+}
+
+.gdManualBubbleSetStage {
+  margin-top: 4px;
+}
+
+.gdManualBubbleSetLane {
+  display: block;
+  width: 100%;
+  height: auto;
+  touch-action: none;      /* the drag is the interaction; do not scroll the sheet */
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.gdManualBubbleSetLane:active {
+  cursor: grabbing;
+}
+
+.gdManualBubbleSetSide {
+  fill: rgba(238, 245, 242, .40);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2.4px;
+}
+
+.gdManualBubbleSetHandle circle:last-child {
+  pointer-events: none;
+}
+
+.gdManualBubbleSetReadout {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(238, 245, 242, .05);
+  border: 1px solid rgba(238, 245, 242, .09);
+}
+
+.gdManualBubbleSetReadout strong {
+  font-size: 15px;
+  color: #ffe9bd;
+}
+
+.gdManualBubbleSetReadout span {
+  font-size: 12px;
+  opacity: .6;
+}
+
+.gdManualBubbleSetUnavailable {
+  padding: 22px 14px;
+  border-radius: 14px;
+  background: rgba(238, 245, 242, .04);
+  border: 1px dashed rgba(238, 245, 242, .14);
+  font-size: 12.5px;
+  text-align: center;
+  opacity: .72;
+}
+
+.gdManualBubbleSetActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.gdManualBubbleSetActions button {
+  flex: 1;
+  padding: 13px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(238, 245, 242, .16);
+  background: rgba(238, 245, 242, .06);
+  color: #eef5f2;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gdManualBubbleSetActions .gdManualBubbleSetPrimary {
+  flex: 1.6;
+  border-color: rgba(215, 176, 107, .72);
+  background: linear-gradient(180deg, rgba(215, 176, 107, .30), rgba(215, 176, 107, .16));
+  color: #ffe9bd;
+}
+
+.gdManualBubbleSetActions button[disabled] {
+  opacity: .4;
+  cursor: default;
+}

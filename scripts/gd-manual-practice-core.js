@@ -297,6 +297,35 @@
     };
   }
 
+  // === The offset anchor ====================================================
+  //
+  // THE shared shape. A manual input - a coach restating the anchor, a player
+  // placing their own Bubble - is only ever allowed to say three things: which
+  // club it was read from, how many degrees off alignment the result sat, and
+  // who said so. Everything downstream (the recommendation, the Bubble's shape,
+  // the Bag scaling, GPS) is the canonical pipeline's job either way.
+  //
+  // It lives here, in the seam file, so the coach lane
+  // (applyTrustedOverrideToAnalysis, below) and the player lane
+  // (gd-manual-bubble-set-core.js) cannot drift into two dialects of the same
+  // three facts. `source` is what keeps them distinguishable afterwards: a
+  // player-set Bubble must never read back as coach-set, and neither may read
+  // back as evidence.
+
+  function buildOffsetAnchor(input) {
+    input = input || {};
+    var offsetDeg = asNumber(input.offsetDeg, NaN);
+    if (!Number.isFinite(offsetDeg)) return null;
+    return {
+      source: cleanString(input.source, SOURCE_OVERRIDE),
+      offsetDeg: round(offsetDeg, 2),
+      club: cleanString(input.club || input.clubId || input.referenceClub, ''),
+      geometryPresetId: input.geometryPresetId == null ? null : input.geometryPresetId,
+      createdAt: cleanString(input.createdAt, ''),
+      createdBy: cleanString(input.createdBy, '')
+    };
+  }
+
   // === Trusted coach override ===============================================
   //
   // The override is a coach restating the anchor, not a second analysis. It
@@ -306,9 +335,10 @@
 
   function applyTrustedOverrideToAnalysis(analysis, override) {
     if (!analysis || !override) return analysis;
-    var offsetDeg = asNumber(override.offsetDeg, NaN);
-    if (!Number.isFinite(offsetDeg)) return analysis;
-    var club = cleanString(override.club || override.clubId, '');
+    var anchor = buildOffsetAnchor(Object.assign({}, override, { source: SOURCE_OVERRIDE }));
+    if (!anchor) return analysis;
+    var offsetDeg = anchor.offsetDeg;
+    var club = anchor.club;
     var method = (analysis.methods && analysis.methods.resultScaledCluster) || {};
     var next = Object.assign({}, analysis);
     next.methods = Object.assign({}, analysis.methods, {
@@ -330,14 +360,7 @@
       source: SOURCE_OVERRIDE
     };
     next.userSignals = [next.methods.resultScaledCluster, next.recommendation];
-    next.override = {
-      source: SOURCE_OVERRIDE,
-      offsetDeg: round(offsetDeg, 2),
-      club: club,
-      geometryPresetId: override.geometryPresetId == null ? null : override.geometryPresetId,
-      createdAt: override.createdAt || '',
-      createdBy: override.createdBy || ''
-    };
+    next.override = anchor;
     return next;
   }
 
@@ -353,6 +376,7 @@
     METRIC_FALLBACK: METRIC_FALLBACK,
     fallbacks: FALLBACK,
     classificationOf: classificationOf,
+    buildOffsetAnchor: buildOffsetAnchor,
     resolveManualPracticePlotCalibration: resolveManualPracticePlotCalibration,
     calibrationTableFor: calibrationTableFor,
     manualObservationToEvidence: manualObservationToEvidence,

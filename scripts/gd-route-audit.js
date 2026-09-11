@@ -5809,6 +5809,9 @@
       delete p.practiceBubbleAdoptedAt;
       delete p.previewBubbleSet;
       delete p.bubbleProfiles;
+      // Clearing My Bubble clears the manual record with it. Leaving it behind
+      // would reopen Manual Set on a placement the player has just deleted.
+      delete p.manualBubbleSet;
       p.faceOffsetDeg=0;
       p.centralFaceOffsetDeg=0;
       p.updatedAt=new Date().toISOString();
@@ -5871,8 +5874,19 @@
         shots:Number(pending.shots||0),
         fingerprint:pending.fingerprint||gdPracticeBubbleFingerprint(analysis),
         distanceMode:pending.distanceMode||"review",
-        practiceDistanceM:Number(pending.practiceDistanceM)||null
+        practiceDistanceM:Number(pending.practiceDistanceM)||null,
+        // WHERE THIS BUBBLE CAME FROM, kept with the Bubble itself. Practice
+        // adoption leaves it empty (evidence is the default story); the player's
+        // own Manual Set stamps user_manual_set and the coach's override
+        // coach_manual_override. Without it a hand-placed Bubble reads back
+        // afterwards as though the pipeline had measured it.
+        source:pending.source||""
       };
+      // The manual record rides with the source and is dropped the moment
+      // anything else takes the Bubble over, so a Practice Bubble adopted on top
+      // can never leave a stale "you set this by hand at +2.3" behind it.
+      if(pending.manualSet&&typeof pending.manualSet==="object")p.manualBubbleSet=pending.manualSet;
+      else delete p.manualBubbleSet;
       p.practiceBubbleAdoptedAt=new Date().toISOString();
       delete p.practiceBubblePendingSource;
       delete p.practiceBubblePendingAt;
@@ -9192,6 +9206,16 @@
       gdBubbleOffsetEdit:gdBubbleOffsetEdit,
       gdBubbleOffsetSave:gdBubbleOffsetSave,
       gdClearMyBubble:gdClearMyBubble,
+	      // The four pieces gd-manual-bubble-set.js needs, and nothing more. The
+	      // player's Manual Set draws with the SAME frame and endpoint the hub and
+	      // GPS previews draw with, and keys its saved bubble with the SAME
+	      // normaliser, so a placement cannot be shown at one angle and stored at
+	      // another. Copies of this geometry in the new lane would be the next
+	      // thing to drift.
+	      gdShotBubbleFrame:gdShotBubbleFrame,
+	      gdShotBubbleModelEndpoint:gdShotBubbleModelEndpoint,
+	      gdCompareClubKey:gdCompareClubKey,
+	      gdMyBubbleStorageClub:gdMyBubbleStorageClub,
       gdLoadPracticeDemo:loadPracticeDemo,
       gdClearPracticeData:clearPracticeData,
 	      gdCanonicalShellBack:function(){return window.GDShell?.back?.({source:"legacy-canonical-back"});},
