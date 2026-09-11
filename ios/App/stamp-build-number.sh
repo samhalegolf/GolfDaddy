@@ -1,14 +1,14 @@
 #!/bin/sh
-# "Stamp build number" - the last build phase in the App, Clarity Caddy Watch
-# and Clarity Caddy Watch Extension targets.
+# "Stamp build number" - the last build phase in the App and Clarity Caddy
+# Watch targets.
 #
 # Two jobs:
 #   --bump  On an Archive (and only then - ACTION is "install"), add one to
 #           CURRENT_PROJECT_VERSION in project.pbxproj via bump-build-number.sh.
-#           Passed by exactly ONE target: the Watch Extension, because it is the
-#           leaf of the dependency chain (App -> Watch -> Extension) and so the
-#           first of the three to reach this phase. If the watch targets are
-#           ever removed, move the --bump to the App target's phase.
+#           Passed by exactly ONE target: Clarity Caddy Watch, because App
+#           depends on it and so it is the first of the two to reach this
+#           phase. If the watch target is ever removed, move the --bump to the
+#           App target's phase.
 #   always  Write the number that is in project.pbxproj RIGHT NOW into this
 #           target's built Info.plist. $(CURRENT_PROJECT_VERSION) cannot be
 #           used for this: Xcode resolves build settings before the build

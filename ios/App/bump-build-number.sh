@@ -1,10 +1,10 @@
 #!/bin/sh
 # Bumps CURRENT_PROJECT_VERSION (the CFBundleVersion "build number") in
 # App.xcodeproj/project.pbxproj by one, in every configuration of every target
-# at once - the watch app and its extension must carry the SAME build number as
-# the phone app or App Store Connect rejects the upload.
+# at once - the watch app must carry the SAME build number as the phone app or
+# App Store Connect rejects the upload.
 #
-# Called by stamp-build-number.sh --bump from the Watch Extension target's
+# Called by stamp-build-number.sh --bump from the Clarity Caddy Watch target's
 # "Stamp build number" phase, on Archive only, so it runs once per archive and
 # the number it writes is the number every bundle in that archive is stamped
 # with. Plain builds and runs never touch it. Run by hand from anywhere:
