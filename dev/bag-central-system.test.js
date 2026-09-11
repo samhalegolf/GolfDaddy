@@ -375,6 +375,27 @@ test("the shell bag has two modes, and only one of them rewrites the bag", () =>
     "and the inverse searches the unguarded curve, which is the monotonic one");
 });
 
+test("a guest's first bag is shown, not just saved", () => {
+  /* A guest profile is seeded as a placeholder (gd-guest-access.js) and the
+     shell's collectRows() skips a placeholder's bag on purpose - the stand-in
+     clubs are not the player's own. Every bag write is therefore also the
+     moment the profile stops being a placeholder. gd-app-core's
+     gdBagPersistRows and the play surface's save() both clear the flag; the
+     shell's persistRows in clarity-support.js overrides the former and did
+     not, so a guest pressing "Generate bag" saved thirteen clubs and kept
+     seeing "No clubs yet". */
+  const support = read("scripts/clarity-support.js");
+  const persist = support.slice(support.indexOf("function persistRows("), support.indexOf("win.gdBagPersistRows = persistRows"));
+  assert.ok(persist.includes("p.placeholderProfile = false"),
+    "the shell's persistRows must clear placeholderProfile on every bag write");
+  assert.ok(/if\(container && !container\.placeholderProfile\)/.test(support),
+    "because collectRows() still ignores a placeholder's bag");
+  assert.ok(/p\.placeholderProfile = false;/.test(read("app/js/bag.js")),
+    "and the play surface's save() does the same");
+  assert.ok(/p\.placeholderProfile=false;/.test(read("scripts/gd-app-core.js")),
+    "as does the core's own gdBagPersistRows");
+});
+
 (async () => {
   let failed = 0;
   for (const t of tests) {

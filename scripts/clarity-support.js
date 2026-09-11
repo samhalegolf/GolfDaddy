@@ -341,6 +341,13 @@
     if(!p) return [];
     var clean = sortRows(rows);
     p.bag = clean;
+    /* A guest profile is seeded as a placeholder (gd-guest-access.js) and
+       collectRows() skips placeholder bags on purpose, so without clearing the
+       flag here a guest's generated or edited bag is saved and then never
+       shown - "Generate bag" looked like it did nothing. gd-app-core's
+       gdBagPersistRows and app/js/bag.js save() already clear it; this is the
+       override that replaces the former (see the bottom of this file). */
+    p.placeholderProfile = false;
     p.bagSlotsTouched = true;
     p.bagSeededDefault = false;
     p.onboardingComplete = true;
