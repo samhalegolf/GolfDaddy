@@ -4,10 +4,10 @@
 # at once - the watch app must carry the SAME build number as the phone app or
 # App Store Connect rejects the upload.
 #
-# Called by stamp-build-number.sh --bump from the Clarity Caddy Watch target's
-# "Stamp build number" phase, on Archive only, so it runs once per archive and
-# the number it writes is the number every bundle in that archive is stamped
-# with. Plain builds and runs never touch it. Run by hand from anywhere:
+# Run this BY HAND before pressing Archive in Xcode. It used to be called by
+# the watch target's "Stamp build number" phase on Archive, but editing the
+# project file mid-build makes Xcode reload the project and cancel the build,
+# so the archive never finished. Run from anywhere:
 #
 #   ios/App/bump-build-number.sh          # next number
 #   ios/App/bump-build-number.sh 900      # set an explicit number

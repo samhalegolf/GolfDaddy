@@ -3,12 +3,14 @@
 # Watch targets.
 #
 # Two jobs:
-#   --bump  On an Archive (and only then - ACTION is "install"), add one to
-#           CURRENT_PROJECT_VERSION in project.pbxproj via bump-build-number.sh.
-#           Passed by exactly ONE target: Clarity Caddy Watch, because App
-#           depends on it and so it is the first of the two to reach this
-#           phase. If the watch target is ever removed, move the --bump to the
-#           App target's phase.
+#   --bump  Add one to CURRENT_PROJECT_VERSION in project.pbxproj via
+#           bump-build-number.sh, on an Archive only (ACTION is "install").
+#           NOT passed by any target any more: editing project.pbxproj while
+#           Xcode is building makes Xcode reload the project and cancel the
+#           build ("Build stopped, No issues"), so every GUI archive died a
+#           couple of seconds after the bump. It only ever worked under
+#           xcodebuild, which does not watch the project file. Run
+#           ios/App/bump-build-number.sh by hand BEFORE pressing Archive.
 #   always  Write the number that is in project.pbxproj RIGHT NOW into this
 #           target's built Info.plist. $(CURRENT_PROJECT_VERSION) cannot be
 #           used for this: Xcode resolves build settings before the build
