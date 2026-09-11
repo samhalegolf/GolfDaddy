@@ -27,7 +27,6 @@
 		CA77D9000000000000000018 /* HoleMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D900000000000000002a /* HoleMapView.swift */; };
 		CA77D9000000000000000019 /* Previews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D900000000000000002b /* Previews.swift */; };
 		CA77D9000000000000000090 /* Clarity Caddy Watch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000030 /* Clarity Caddy Watch.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		CA77D9000000000000000092 /* Clarity Caddy Watch Extension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000031 /* Clarity Caddy Watch Extension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		CA77D9000000000000000B03 /* WatchBubbleEngine in Frameworks */ = {isa = PBXBuildFile; productRef = CA77D9000000000000000B02 /* WatchBubbleEngine */; };
 		CA77D9000000000000000B04 /* WatchPlayerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000B05 /* WatchPlayerStore.swift */; };
 		CA77D9000000000000000B06 /* AimableHoleMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000B07 /* AimableHoleMap.swift */; };
@@ -39,6 +38,7 @@
 		CA77D9000000000000000D01 /* GreenFocusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000D11 /* GreenFocusView.swift */; };
 		CA77D9000000000000000D02 /* BetweenHolesViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000D12 /* BetweenHolesViews.swift */; };
 		CA77D9000000000000000E01 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000E02 /* Assets.xcassets */; };
+		FD521105305380D300E56735 /* WatchBubbleEngine in Frameworks */ = {isa = PBXBuildFile; productRef = FD521104305380D300E56735 /* WatchBubbleEngine */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -48,13 +48,6 @@
 			proxyType = 1;
 			remoteGlobalIDString = CA77D9000000000000000050;
 			remoteInfo = "Clarity Caddy Watch";
-		};
-		CA77D9000000000000000082 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = CA77D9000000000000000051;
-			remoteInfo = "Clarity Caddy Watch Extension";
 		};
 /* End PBXContainerItemProxy section */
 
@@ -68,17 +61,6 @@
 				CA77D9000000000000000090 /* Clarity Caddy Watch.app in Embed Watch Content */,
 			);
 			name = "Embed Watch Content";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		CA77D9000000000000000093 /* Embed App Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				CA77D9000000000000000092 /* Clarity Caddy Watch Extension.appex in Embed App Extensions */,
-			);
-			name = "Embed App Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -108,7 +90,6 @@
 		CA77D900000000000000002a /* HoleMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoleMapView.swift; sourceTree = "<group>"; };
 		CA77D900000000000000002b /* Previews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Previews.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000030 /* Clarity Caddy Watch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Clarity Caddy Watch.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		CA77D9000000000000000031 /* Clarity Caddy Watch Extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Clarity Caddy Watch Extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		CA77D9000000000000000B05 /* WatchPlayerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPlayerStore.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000B07 /* AimableHoleMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AimableHoleMap.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000C10 /* WearableTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WearableTransport.swift; sourceTree = "<group>"; };
@@ -134,14 +115,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		CA77D9000000000000000064 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
 				CA77D9000000000000000B03 /* WatchBubbleEngine in Frameworks */,
+				FD521105305380D300E56735 /* WatchBubbleEngine in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -163,7 +138,6 @@
 			children = (
 				504EC3041FED79650016851F /* App.app */,
 				CA77D9000000000000000030 /* Clarity Caddy Watch.app */,
-				CA77D9000000000000000031 /* Clarity Caddy Watch Extension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -270,39 +244,17 @@
 				CA77D9000000000000000063 /* Sources */,
 				CA77D9000000000000000061 /* Frameworks */,
 				CA77D9000000000000000062 /* Resources */,
-				CA77D9000000000000000093 /* Embed App Extensions */,
 				CA77D90000000000000000A2 /* Stamp build number */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				CA77D9000000000000000083 /* PBXTargetDependency */,
-			);
-			name = "Clarity Caddy Watch";
-			productName = "Clarity Caddy Watch";
-			productReference = CA77D9000000000000000030 /* Clarity Caddy Watch.app */;
-			productType = "com.apple.product-type.application.watchapp2";
-		};
-		CA77D9000000000000000051 /* Clarity Caddy Watch Extension */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = CA77D9000000000000000073 /* Build configuration list for PBXNativeTarget "Clarity Caddy Watch Extension" */;
-			buildPhases = (
-				CA77D9000000000000000060 /* Sources */,
-				CA77D9000000000000000064 /* Frameworks */,
-				CA77D9000000000000000065 /* Resources */,
 				CA77D90000000000000000A3 /* Stamp build number */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			name = "Clarity Caddy Watch Extension";
-			packageProductDependencies = (
-				CA77D9000000000000000B02 /* WatchBubbleEngine */,
-			);
-			productName = "Clarity Caddy Watch Extension";
-			productReference = CA77D9000000000000000031 /* Clarity Caddy Watch Extension.appex */;
-			productType = "com.apple.product-type.watchkit2-extension";
+			name = "Clarity Caddy Watch";
+			productName = "Clarity Caddy Watch";
+			productReference = CA77D9000000000000000030 /* Clarity Caddy Watch.app */;
+			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
@@ -310,8 +262,9 @@
 		504EC2FC1FED79650016851F /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
+				BuildIndependentTargetsInParallel = YES;
 				LastSwiftUpdateCheck = 0920;
-				LastUpgradeCheck = 0920;
+				LastUpgradeCheck = 2660;
 				TargetAttributes = {
 					504EC3031FED79650016851F = {
 						CreatedOnToolsVersion = 9.2;
@@ -319,10 +272,6 @@
 						ProvisioningStyle = Automatic;
 					};
 					CA77D9000000000000000050 = {
-						CreatedOnToolsVersion = 16.0;
-						ProvisioningStyle = Automatic;
-					};
-					CA77D9000000000000000051 = {
 						CreatedOnToolsVersion = 16.0;
 						ProvisioningStyle = Automatic;
 					};
@@ -347,7 +296,6 @@
 			targets = (
 				504EC3031FED79650016851F /* App */,
 				CA77D9000000000000000050 /* Clarity Caddy Watch */,
-				CA77D9000000000000000051 /* Clarity Caddy Watch Extension */,
 			);
 		};
 /* End PBXProject section */
@@ -372,13 +320,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				CA77D9000000000000000E01 /* Assets.xcassets in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		CA77D9000000000000000065 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -459,30 +400,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		CA77D9000000000000000060 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				CA77D9000000000000000010 /* ClarityCaddyWatchApp.swift in Sources */,
-				CA77D9000000000000000011 /* WatchSessionManager.swift in Sources */,
-				CA77D9000000000000000012 /* WatchScene.swift in Sources */,
-				CA77D9000000000000000013 /* ContentView.swift in Sources */,
-				CA77D9000000000000000014 /* ShotView.swift in Sources */,
-				CA77D9000000000000000016 /* WatchMap.swift in Sources */,
-				CA77D9000000000000000017 /* WatchMapStore.swift in Sources */,
-				CA77D9000000000000000B04 /* WatchPlayerStore.swift in Sources */,
-				CA77D9000000000000000B06 /* AimableHoleMap.swift in Sources */,
-				CA77D9000000000000000018 /* HoleMapView.swift in Sources */,
-				CA77D9000000000000000019 /* Previews.swift in Sources */,
-				CA77D9000000000000000D01 /* GreenFocusView.swift in Sources */,
-				CA77D9000000000000000D02 /* BetweenHolesViews.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		CA77D9000000000000000063 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CA77D9000000000000000011 /* WatchSessionManager.swift in Sources */,
+				CA77D9000000000000000014 /* ShotView.swift in Sources */,
+				CA77D9000000000000000D02 /* BetweenHolesViews.swift in Sources */,
+				CA77D9000000000000000B04 /* WatchPlayerStore.swift in Sources */,
+				CA77D9000000000000000D01 /* GreenFocusView.swift in Sources */,
+				CA77D9000000000000000019 /* Previews.swift in Sources */,
+				CA77D9000000000000000012 /* WatchScene.swift in Sources */,
+				CA77D9000000000000000017 /* WatchMapStore.swift in Sources */,
+				CA77D9000000000000000B06 /* AimableHoleMap.swift in Sources */,
+				CA77D9000000000000000013 /* ContentView.swift in Sources */,
+				CA77D9000000000000000016 /* WatchMap.swift in Sources */,
+				CA77D9000000000000000010 /* ClarityCaddyWatchApp.swift in Sources */,
+				CA77D9000000000000000018 /* HoleMapView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -493,11 +427,6 @@
 			isa = PBXTargetDependency;
 			target = CA77D9000000000000000050 /* Clarity Caddy Watch */;
 			targetProxy = CA77D9000000000000000080 /* PBXContainerItemProxy */;
-		};
-		CA77D9000000000000000083 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = CA77D9000000000000000051 /* Clarity Caddy Watch Extension */;
-			targetProxy = CA77D9000000000000000082 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -536,6 +465,7 @@
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
 				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
@@ -543,8 +473,10 @@
 				CLANG_WARN_INFINITE_RECURSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
 				CLANG_WARN_STRICT_PROTOTYPES = YES;
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
@@ -554,8 +486,10 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 9JL7847XQL;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -574,6 +508,7 @@
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -593,6 +528,7 @@
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
 				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
@@ -600,8 +536,10 @@
 				CLANG_WARN_INFINITE_RECURSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
 				CLANG_WARN_STRICT_PROTOTYPES = YES;
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
@@ -611,8 +549,10 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 9JL7847XQL;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -624,6 +564,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				VALIDATE_PRODUCT = YES;
@@ -637,8 +578,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 865;
-				DEVELOPMENT_TEAM = 9JL7847XQL;
+				CURRENT_PROJECT_VERSION = 866;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -661,8 +601,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 865;
-				DEVELOPMENT_TEAM = 9JL7847XQL;
+				CURRENT_PROJECT_VERSION = 866;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -683,9 +622,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 865;
-				DEVELOPMENT_TEAM = 9JL7847XQL;
+				CURRENT_PROJECT_VERSION = 866;
 				INFOPLIST_FILE = ClarityCaddyWatch/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
 				MARKETING_VERSION = 1.0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.claritygolf.caddy.watchkitapp;
 				PRODUCT_NAME = "Clarity Caddy Watch";
@@ -702,66 +644,18 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 865;
-				DEVELOPMENT_TEAM = 9JL7847XQL;
+				CURRENT_PROJECT_VERSION = 866;
 				INFOPLIST_FILE = ClarityCaddyWatch/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
 				MARKETING_VERSION = 1.0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.claritygolf.caddy.watchkitapp;
 				PRODUCT_NAME = "Clarity Caddy Watch";
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = "watchos watchsimulator";
-				TARGETED_DEVICE_FAMILY = 4;
-				WATCHOS_DEPLOYMENT_TARGET = 10.0;
-			};
-			name = Release;
-		};
-		CA77D9000000000000000074 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 865;
-				DEVELOPMENT_TEAM = 9JL7847XQL;
-				INFOPLIST_FILE = "ClarityCaddyWatch/WatchExtension-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0.3;
-				PRODUCT_BUNDLE_IDENTIFIER = com.claritygolf.caddy.watchkitapp.watchkitextension;
-				PRODUCT_NAME = "Clarity Caddy Watch Extension";
-				SDKROOT = watchos;
-				SKIP_INSTALL = YES;
-				SUPPORTED_PLATFORMS = "watchos watchsimulator";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
-				WATCHOS_DEPLOYMENT_TARGET = 10.0;
-			};
-			name = Debug;
-		};
-		CA77D9000000000000000075 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 865;
-				DEVELOPMENT_TEAM = 9JL7847XQL;
-				INFOPLIST_FILE = "ClarityCaddyWatch/WatchExtension-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0.3;
-				PRODUCT_BUNDLE_IDENTIFIER = com.claritygolf.caddy.watchkitapp.watchkitextension;
-				PRODUCT_NAME = "Clarity Caddy Watch Extension";
-				SDKROOT = watchos;
-				SKIP_INSTALL = YES;
-				SUPPORTED_PLATFORMS = "watchos watchsimulator";
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 4;
 				WATCHOS_DEPLOYMENT_TARGET = 10.0;
 			};
@@ -797,15 +691,6 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		CA77D9000000000000000073 /* Build configuration list for PBXNativeTarget "Clarity Caddy Watch Extension" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				CA77D9000000000000000074 /* Debug */,
-				CA77D9000000000000000075 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -826,6 +711,11 @@
 			productName = "CapApp-SPM";
 		};
 		CA77D9000000000000000B02 /* WatchBubbleEngine */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CA77D9000000000000000B01 /* XCLocalSwiftPackageReference "../WatchBubbleEngine" */;
+			productName = WatchBubbleEngine;
+		};
+		FD521104305380D300E56735 /* WatchBubbleEngine */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = CA77D9000000000000000B01 /* XCLocalSwiftPackageReference "../WatchBubbleEngine" */;
 			productName = WatchBubbleEngine;
