@@ -73,8 +73,12 @@
       'border-radius:999px;padding:4px 12px;font:inherit;font-size:12px;cursor:pointer}',
       '.gdPracticeViewSwitch button.isOn{background:rgba(60,255,141,.16);border-color:rgba(60,255,141,.5)}',
       '.gdPracticeViewSwitch .gdPracticeViewSpacer{flex:1}',
-      '.gdProjectedClubs{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;padding:2px 0 6px}',
-      '.gdProjectedClubs figure{margin:0;flex:1 1 0;min-width:104px;text-align:center}',
+      '.gdProjectedClubs{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;padding:2px 0 6px;justify-content:center}',
+      /* max-width matters as much as min-width: with flex:1 1 0 and a single
+         projected club, one card stretched to the full panel and the bubble was
+         blown up to the height of the screen. These are cards in a row, not a
+         chart, so they keep card size however many there are. */
+      '.gdProjectedClubs figure{margin:0;flex:0 1 auto;width:100%;min-width:104px;max-width:172px;text-align:center}',
       '.gdProjectedClubs svg{width:100%;height:auto;display:block}',
       '.gdProjectedNote{font-size:11.5px;opacity:.62;line-height:1.5;margin:4px 0 0}',
       /* Fully opaque. At 94% the screen underneath bled through the cards and

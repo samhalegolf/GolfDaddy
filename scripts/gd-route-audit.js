@@ -5288,12 +5288,10 @@
     const rows=Array.isArray(ctx.courseRecords)?ctx.courseRecords:[];
     const counted=rows.filter(row=>row&&row.counted!==false).length;
     const bubble=gdCourseBubbleValueLabel(ctx.courseAnalysis,ctx.courseFiltered,rows);
-    const body=`<div class="gdCompareLibraryStats"><span>${counted}/${rows.length} counted</span><span>${gdStatsConsistencyPct}% cluster setting</span></div><div class="gdCompareCourseSummary" data-gd-card-control onpointerdown="event.stopPropagation()" onclick="event.stopPropagation()">
-      <div class="gdCompareCourseConsistency" data-gd-card-control>
-        <div><span>Consistency</span><strong class="gdCompareCompactValue">${gdStatsConsistencyPct}%</strong></div>
-        <input data-gd-card-control type="range" min="51" max="80" step="1" value="${gdStatsConsistencyPct}" onpointerdown="event.stopPropagation()" onclick="event.stopPropagation()" oninput="gdCompareSetConsistency(this.value,this)" onchange="gdCompareSetConsistency(this.value,this)">
-      </div>
-    </div>`;
+    // The second copy of the consistency slider lived here. The percentile is
+    // pinned now (gd-app-core.js gdStatsConsistencyPct), so this card just says
+    // what it holds.
+    const body=`<div class="gdCompareLibraryStats"><span>${counted}/${rows.length} counted</span></div>`;
     return gdShotDataLibraryShellHTML({kind:"course",title:"Course Library",bubbleLabel:"Course Bubble",bubbleValue:bubble,count:rows.length,bodyHTML:body,compact:true,stopPropagation:true,dropdown:true,open:gdShotDataLibraryIsOpen("course")});
   }
   function gdComparePracticeAdminIsOpen(){
@@ -5463,13 +5461,6 @@
   function gdCompareCourseControl(key,value){
     gdStatsView[key]=value;
     renderCompareData();
-  }
-  function gdCompareSetConsistency(value,input){
-    gdStatsConsistencyPct=Math.max(51,Math.min(80,Math.round(Number(value)||68)));
-    try{localStorage.setItem("gd_stats_consistency_pct",String(gdStatsConsistencyPct))}catch(e){}
-    const el=gdCompareSliderValueEl(input);
-    if(el)el.textContent=`${gdStatsConsistencyPct}%`;
-    gdPaintCompareVisual();
   }
   function renderCompareData(){
     const ctx=gdComparisonContext();
@@ -6010,7 +6001,6 @@
     gdPersistAdminTuning();
     if(path.startsWith("statsCluster.")){
       gdStatsConsistencyPct=gdStatsClampConsistency(gdStatsConsistencyPct);
-      try{localStorage.setItem("gd_stats_consistency_pct",String(gdStatsConsistencyPct))}catch(e){}
       renderStats();
       if(document.getElementById("dataHubPanel")?.classList.contains("open"))renderCompareData();
     }
@@ -6433,8 +6423,9 @@
 	     player is left looking at. */
 	  function gdCourseSurfaceAnalysis(){
 	    if(typeof gdCurrentStatsAnalysis==="function")return safe(()=>gdCurrentStatsAnalysis(),null);
-	    const pct=safe(()=>Number(localStorage.getItem("gd_stats_consistency_pct")||68)||68,68);
-	    return safe(()=>window.GolfDaddyShotClusterAnalysis?.analyzeCurrent?.({consistencyPct:pct}),null);
+	    // The percentile is the engine default now - it was never a player setting
+	    // worth storing, and the slider that wrote this key is gone.
+	    return safe(()=>window.GolfDaddyShotClusterAnalysis?.analyzeCurrent?.(),null);
 	  }
 	  /* Same store, same demo gate as the landing counts - gdCourseDataStore owns
 	     that rule, next to the analysis gate it mirrors. */
@@ -6868,7 +6859,8 @@
     if(landing){
       const countedLabel=counts.shown?`${counts.counted}/${counts.shown} counted`:"0 shown";
       const body=`<div class="gdCourseDataLandingHead"><span>Stored shots</span><strong>${gdCourseDataLandingStatus(counts)}</strong></div><div class="gdCourseDataLandingStats"><b>${counts.planned} plans</b><b>${counts.paired} pairs</b><b>${countedLabel}</b></div>${gdCourseLibraryClubTabsHTML(analysis,filteredRecords)}`;
-      landing.innerHTML=gdCourseLibraryShellHTML(analysis,filteredAnalysis,filteredRecords,counts,body);
+      // Plain strip, not a second library pill - see gdRenderCourseDataLanding.
+      landing.innerHTML=body;
     }
 	    const visual=byId("gdStatsVisual");
 	    if(visual&&!visual.innerHTML.trim()){
@@ -9102,7 +9094,6 @@
 		      gdCompareSetSource:gdCompareSetSource,
 	      gdCompareSetClub:gdCompareSetClub,
 	      gdCompareCourseControl:gdCompareCourseControl,
-	      gdCompareSetConsistency:gdCompareSetConsistency,
 	      gdCompareTogglePracticeAdmin:gdCompareTogglePracticeAdmin,
 	      gdCompareSetPracticeToleranceMaster:gdCompareSetPracticeToleranceMaster,
       gdCompareSetPracticeToleranceField:gdCompareSetPracticeToleranceField,

@@ -2881,13 +2881,11 @@
 }
 #statsPanel:not(.gdCourseAdminTab) .gdShotDataAdminPanel{display:none!important}
 #statsPanel.gdCourseAdminTab .gdShotDataAdminPanel{display:block!important;grid-column:2!important}
+/* The chrome used to be stripped here because the strip carried its own
+   library-shell pill. It no longer does, so it keeps the same card treatment
+   as the legend and the filters around it. */
 #statsPanel.open .gdCourseDataLanding{
   order:1!important;
-  padding:0!important;
-  border:0!important;
-  border-radius:0!important;
-  background:transparent!important;
-  box-shadow:none!important;
 }
 #statsPanel.open .gdCourseAdminExpander{order:2!important}
 #statsPanel.open .gdShotDataAdminPanel{order:3!important}

@@ -21028,8 +21028,16 @@ function gdRefreshScoreDisplays(){
 function adjustScore(d){if(gdScorecardHasDrivenScore)gdManualScoreOverride=true;playerScore+=Number(d)||0;updateScore();return false}
 function updateScore(){gdRefreshScoreDisplays()}
 function logShot(reason){if(!shotTracking||!start||!target)return;const d=map.distance(start,target);trackedShots.push({id:++shotId,reason,distanceM:Math.round(d),start:{lat:start.lat,lng:start.lng},target:{lat:target.lat,lng:target.lng},time:new Date().toISOString()})}
+/* THE CONSISTENCY PERCENTILE IS NOT A PLAYER SETTING ANY MORE.
+   It used to be a slider on Shot Data (and a second copy on the Comparison
+   card) whose stated job - sizing the drawn course bubble - went away when
+   that bubble was pinned to its preset size (GD_COURSE_BUBBLE_SCALE in
+   gd-route-audit.js). All it still did was set the percentile that
+   analyzeBubbleFit uses for the Course Bubble PROPOSAL's width and depth,
+   which is engine tuning, not something to ask a golfer about. Pinned at the
+   engine default, so anyone who never moved the old slider sees no change.
+   Admin tuning still reaches it through gdStatsClampConsistency below. */
 let gdStatsConsistencyPct=68;
-try{gdStatsConsistencyPct=Number(localStorage.getItem("gd_stats_consistency_pct")||68)||68}catch(e){}
 function gdStatsClusterSettings(){
   return gdSafe(()=>window.GolfDaddyShotClusterAnalysis?.settings?.(),null)||{
     consistencyMinPct:51,
@@ -21043,11 +21051,6 @@ function gdStatsClampConsistency(value,cfg){
   const max=Math.round(Number(settings.consistencyMaxPct)||80);
   const fallback=Math.round(Number(settings.consistencyDefaultPct)||68);
   return Math.max(min,Math.min(max,Math.round(Number(value)||fallback)));
-}
-function gdSetStatsConsistency(value){
-  gdStatsConsistencyPct=gdStatsClampConsistency(value);
-  try{localStorage.setItem("gd_stats_consistency_pct",String(gdStatsConsistencyPct))}catch(e){}
-  renderStats();
 }
 function gdStatsInsightLabel(status){
   return ({
@@ -21891,12 +21894,13 @@ function gdCourseLibraryClubTabsHTML(analysis, filteredRecords){
   }).join("");
   return `<div class="gdCourseLibraryClubTabs">${all}${clubs}</div>`;
 }
-function gdCourseLibraryShellHTML(analysis, filteredAnalysis, filteredRecords, counts, bodyHTML){
-  const safeCounts=counts||gdCourseDataLandingCounts(analysis,filteredRecords);
-  const totalRows=Number(safeCounts.records)||Number(Array.isArray(filteredRecords)?filteredRecords.length:0)||0;
-  const bubble=gdCourseBubbleValueLabel(analysis,filteredAnalysis,filteredRecords);
-  return gdShotDataLibraryShellHTML({kind:"course",title:"Course Library",bubbleLabel:"Course Bubble",bubbleValue:bubble,count:totalRows,bodyHTML,dropdown:true,open:gdShotDataLibraryIsOpen("course")});
-}
+/* THE COURSE SCREEN HAS ONE LIBRARY PILL, AND IT IS THE SHOT LIBRARY.
+   This strip used to be a second gdShotDataLibraryShell titled "Course
+   Library", which put two near-identical dropdowns on the same screen - and
+   because both carried kind:"course", they shared one open flag and one
+   toggle selector, so tapping either opened both. The stored-shot counts and
+   the club tabs are a heading for the screen, not a library of their own, so
+   they render as a plain strip and the Shot Library keeps the pill. */
 function gdRenderCourseDataLanding(analysis, filteredRecords, filteredAnalysis){
   const root=document.getElementById("gdCourseDataLanding");
   if(!root)return;
@@ -21908,7 +21912,7 @@ function gdRenderCourseDataLanding(analysis, filteredRecords, filteredAnalysis){
     counts.rawEvents?`${counts.rawEvents} ball events`:"No data yet";
   const countedLabel=counts.shown?`${counts.counted}/${counts.shown} counted`:"0 shown";
   const body=`<div class="gdCourseDataLandingHead"><span>Stored shots</span><strong>${gdEscapeHTML(status)}</strong></div><div class="gdCourseDataLandingStats"><b>${counts.planned} plans</b><b>${counts.paired} pairs</b><b>${countedLabel}</b></div>${gdCourseLibraryClubTabsHTML(analysis,filteredRecords)}`;
-  root.innerHTML=gdCourseLibraryShellHTML(analysis,filteredAnalysis,filteredRecords,counts,body);
+  root.innerHTML=body;
 }
 function gdCourseDataCanManage(){
   let permission="player";
@@ -23132,6 +23136,11 @@ function gdApplyShotBubbleDomOverlay(view){
   visual.querySelectorAll(".gdShotBubbleDomOverlay").forEach(node=>node.remove());
   if(!gdShotBubbleOverlayEnabled(view))return;
   if(visual.querySelector("svg:not(.gdShotBubbleDomOverlay) .gdShotBubbleOverlayLayer"))return;
+  // Projected Clubs owns the practice visual when it is showing. Its bubbles are
+  // drawn in the model's own frame inside a 150x150 box; this overlay is built in
+  // the legacy absolute 480x260 chart frame, so injecting it there dropped a
+  // second, unrelated bubble at an unrelated scale on top of the projection.
+  if(visual.querySelector(".gdProjectedClubs"))return;
   const practiceAnalysis=view==="practice"?gdShotBubblePracticeAnalysis():null;
   const practiceOffset=view==="practice"&&typeof window.gdPracticeBubbleOffsetDeg==="function"?window.gdPracticeBubbleOffsetDeg(practiceAnalysis):null;
   const hasPracticeOffset=value=>typeof window.gdPracticeHasBubbleOffset==="function"?window.gdPracticeHasBubbleOffset(value):typeof value==="number"&&Number.isFinite(value);
@@ -23391,7 +23400,8 @@ function gdRenderCourseClubGroups(list, records, filteredAnalysis, cfg){
       bubbleLabel:"Course Bubble",
       bubbleValue,
       count:0,
-      bodyHTML:`<div class="gdPracticeEvidenceHead"><div><strong>Course Shot Library</strong><span>Paired GPS course shots will appear here, filed by club.</span></div></div>`,
+      // No title here: the pill directly above this body already says it.
+      bodyHTML:`<div class="gdPracticeEvidenceHead"><div><span>Paired GPS course shots will appear here, filed by club.</span></div></div>`,
       dropdown:true,
       open:gdShotDataLibraryIsOpen("course")
     });
@@ -23419,7 +23429,7 @@ function gdRenderCourseClubGroups(list, records, filteredAnalysis, cfg){
       const meta=[gdCourseShotDateLabel(record),record.holeId||record.roundId||""].filter(Boolean).join(" · ");
       return `<div class="bagRow gdClubShotRow ${record.counted?"":"filtered"}"><span>${Number(record.actualDistanceM||0).toFixed(0)}m · ${record.counted?"counted":"filtered"}${meta?` · ${gdEscapeHTML(meta)}`:""}</span><strong>${gdOffsetLabel(record.normalizedDeg||0)}</strong></div>`;
     }).join("");
-    return `<details class="gdCourseLibraryClub" data-gd-course-club="${gdEscapeHTML(club)}" ${open?"open":""} ontoggle="gdCourseLibraryToggleClub(this)"><summary class="bagRow gdClubGroupRow"><span>${gdEscapeHTML(club)} · ${counted}/${clubRows.length} counted${fit.shots?` · ${Math.round(fit.consistencyPct||gdStatsConsistencyPct)}% fit`:""}</span><strong>${gdOffsetLabel(offset||0)}</strong></summary><div class="gdCourseLibraryClubRows">${shotRows}</div></details>`;
+    return `<details class="gdCourseLibraryClub" data-gd-course-club="${gdEscapeHTML(club)}" ${open?"open":""} ontoggle="gdCourseLibraryToggleClub(this)"><summary class="bagRow gdClubGroupRow"><span>${gdEscapeHTML(club)} · ${counted}/${clubRows.length} counted</span><strong>${gdOffsetLabel(offset||0)}</strong></summary><div class="gdCourseLibraryClubRows">${shotRows}</div></details>`;
   }).join("");
   list.innerHTML=gdShotDataLibraryShellHTML({
     kind:"course",
@@ -23443,28 +23453,10 @@ function gdRenderStatsAnalysis(list){
     gdRenderCourseDataLanding(analysis,filteredRecords,filteredAnalysis);
     gdStatsVisualSummary(analysis,filteredRecords,filteredAnalysis);
     const cfg=analysis.settings;
-    const slider=document.getElementById("gdStatsConsistency");
-    const label=document.getElementById("gdStatsConsistencyLabel");
-    const hint=document.getElementById("gdStatsFitHint");
-    const clampedPct=gdStatsClampConsistency(gdStatsConsistencyPct,cfg);
-    if(clampedPct!==gdStatsConsistencyPct){
-      gdStatsConsistencyPct=clampedPct;
-      try{localStorage.setItem("gd_stats_consistency_pct",String(gdStatsConsistencyPct))}catch(e){}
-    }
-    if(slider){
-      slider.min=Math.round(cfg.consistencyMinPct);
-      slider.max=Math.round(cfg.consistencyMaxPct);
-      slider.value=String(gdStatsConsistencyPct);
-    }
-    if(label)label.textContent=`${gdStatsConsistencyPct}%`;
-    const topFit=(filteredAnalysis.bubbleFit||[]).slice().sort((a,b)=>(b.shots||0)-(a.shots||0))[0];
-    // The slider now sizes the course bubble, so the hint reports what that size
-    // actually holds. Falls back to the fit guidance when there is no containment
-    // figure (no course bubble drawn yet).
-    const containment=window.gdCourseBubbleContainment;
-    if(hint)hint.textContent=containment
-      ?`${containment.pct}% inside (${containment.inside}/${containment.total})`
-      :(topFit?`${topFit.club} ${gdStatsGuidanceLabel(topFit.fitGuidance,topFit.sizeDeltaPct)}`:"Shot Data fit");
+    // The consistency slider and its fit hint used to sit here. The percentile is
+    // pinned now (see gdStatsConsistencyPct), and the containment figure the hint
+    // showed already has a home under the course score, in What this means.
+    gdStatsConsistencyPct=gdStatsClampConsistency(gdStatsConsistencyPct,cfg);
     gdRenderCourseClubGroups(list,filteredRecords,filteredAnalysis,cfg);
     return true;
   }catch(e){
