@@ -25,7 +25,8 @@
    counter, which made "wrong centre coordinates" indistinguishable from "course not in OSM". */
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
-import { courseFitVerdict, courseFitMessage, courseCoverageComplete } from "./lib/gd-course-fit-core.mjs";
+import { courseFitVerdict, courseFitMessage, courseCoverageComplete, scorecardIdentityMismatch } from "./lib/gd-course-fit-core.mjs";
+import { reverseGeocodePlace } from "./lib/gd-course-place.mjs";
 import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
@@ -145,12 +146,49 @@ async function reapStaleJobs() {
 }
 
 async function loadCourseCenter(courseId) {
-  const rows = await supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,course_lat,course_lng,objects_json,holes_json&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
+  const rows = await supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,course_lat,course_lng,region,country,country_code,objects_json,holes_json&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return null;
   const lat = Number(row.course_lat), lng = Number(row.course_lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return { courseId: row.course_id, courseName: row.course_name, center: { lat, lng }, objects: row.objects_json || {}, holes: row.holes_json || {} };
+  const course = {
+    courseId: row.course_id, courseName: row.course_name, center: { lat, lng },
+    region: row.region || "", country: row.country || "", countryCode: row.country_code || "",
+    objects: row.objects_json || {}, holes: row.holes_json || {}
+  };
+  await ensureCoursePlace(course);
+  return course;
+}
+
+/* Where in the world this course is, filled from its coordinates when the row
+   does not say.
+ *
+ * The Studio publish path geocodes every course it saves (course-maps.mjs
+ * ensureCoursePlace); the mapper path never did. course-mapper-jobs creates the
+ * row with a name and a centre only, so every auto-mapped course reached the
+ * scorecard search with no region - and "East Golf Course" at Dorado, Puerto
+ * Rico searched the whole web for an "East Golf Course" and took East Orange
+ * Golf Course's card from New Jersey. The region is the one word that makes a
+ * generic club name findable, so it is resolved here, once, before anything
+ * that searches by name runs. Best-effort and never blocking: a geocoder
+ * failure leaves the fields empty exactly as before. Written back so the row
+ * carries its subtitle and the next run does not ask again. */
+async function ensureCoursePlace(course) {
+  if (!course || course.region || course.country || course.countryCode) return course;
+  const place = await reverseGeocodePlace(course.center.lat, course.center.lng).catch(() => null);
+  if (!place || !(place.region || place.country || place.countryCode)) return course;
+  course.region = place.region || "";
+  course.country = place.country || "";
+  course.countryCode = place.countryCode || "";
+  try {
+    await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(course.courseId), {
+      method: "PATCH",
+      body: JSON.stringify({ region: course.region || null, country: course.country || null, country_code: course.countryCode || null })
+    });
+  } catch (error) {
+    console.warn("course-mapper-worker: place write failed", course.courseId, error && error.message || error);
+  }
+  return course;
 }
 
 /* The Overpass sweep around a course centre also covers any sibling course at the same
@@ -641,6 +679,12 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
           : (loop.name || course.courseName || courseId),
         course_lat: loop.centre ? loop.centre.lat : course.center.lat,
         course_lng: loop.centre ? loop.centre.lng : course.center.lng,
+        /* Same ground, same place: a sibling published out of this separation
+           must not start life with the empty region the pinned course just had
+           filled in - see ensureCoursePlace. */
+        region: course.region || null,
+        country: course.country || null,
+        country_code: course.countryCode || null,
         osm_course_ref: loop.osmRef || null,
         /* Every course out of this separation shares one token, so a search result can
            offer the choice without re-deriving the link from proximity. The pinned
@@ -2036,7 +2080,38 @@ async function runMapperJob(job, origin) {
   }
 
   const numberingIssue = !collision.multiLoop && !geometry.holesResolved && hasNumberingIssue({ osmPayload: payload });
-  const shortOfExpected = !!(!collision.multiLoop && expectedHoles && geometry.holesResolved < expectedHoles);
+  let shortOfExpected = !!(!collision.multiLoop && expectedHoles && geometry.holesResolved < expectedHoles);
+  /* A card only gets to re-number holes it describes.
+   *
+   * On the short-of-expected path the resolver's answer REPLACES an OSM-numbered
+   * one, and it takes the card's yardages as truth. If the card is another
+   * club's - the search matched on a generic name, or a facility-fallback card
+   * belongs to the sibling - the resolver still returns "resolved" with a good
+   * confidence, because it is scoring the fit of its own assignment, not whether
+   * the card was ever about this ground. East Golf Course at Dorado had 17 of
+   * 18 holes numbered by OSM; East Orange's card turned that into 14 holes
+   * with wrong greens. So the same relative-shape check the late trust verdict
+   * runs is asked here first, over the OSM-numbered geometry: a card that
+   * clearly does not match keeps its hands off the numbering. The resolver
+   * still runs when OSM numbered nothing (numberingIssue) - there is no answer
+   * to protect and no geometry to compare against. */
+  if (shortOfExpected && scorecardEvidence && geometry.holesResolved > 0) {
+    const precheck = Object.assign(
+      scorePairing({ id: course.courseId, lengths: courseLengthsFromPublishedGeometry(geometry.objects) }, scorecardEvidence, null),
+      { cardName: (scorecardEvidence && scorecardEvidence.cardName) || "" }
+    );
+    diagnostics.scorecardIdentityPrecheck = { score: precheck.score, comparedHoles: precheck.comparedHoles, parHoles: precheck.parHoles, cardName: precheck.cardName };
+    if (scorecardIdentityMismatch(precheck)) {
+      diagnostics.scorecardIdentityPrecheck.mismatch = true;
+      shortOfExpected = false;
+      resolverStatus = { status: "skipped", trigger: "short-of-expected", hadScorecard: true, reason: "scorecard-identity-mismatch", warnings: [] };
+      diagnostics.resolverStatus = resolverStatus;
+      warnings.push("scorecard" + (precheck.cardName ? " \"" + precheck.cardName + "\"" : "")
+        + " does not match the OSM-numbered holes (identity score " + precheck.score.toFixed(2)
+        + " over " + precheck.comparedHoles + " holes) - kept OSM numbering; the card was not used to re-number this course."
+        + " Check the stored scorecard for " + course.courseId + ".");
+    }
+  }
   if (numberingIssue || shortOfExpected) {
     await heartbeatJob(job, { stage: "geometry-resolver" });
     const result = await resolveCourseGeometryForAutoMapper({
@@ -2423,4 +2498,4 @@ export default async function courseMapperWorker(req) {
   return new Response("ok", { status: 200 });
 }
 
-export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, MAX_TRANSIENT_ATTEMPTS };
+export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, loadCourseCenter, ensureCoursePlace, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, MAX_TRANSIENT_ATTEMPTS };

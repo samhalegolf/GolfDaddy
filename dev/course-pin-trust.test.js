@@ -24,6 +24,23 @@ function test(name, fn) { tests.push({ name, fn }); }
 
 /* ---- what counts as clearly wrong ---- */
 
+test("a card that clearly does not describe the ground is a mismatch, before or after the run", async () => {
+  const { scorecardIdentityMismatch } = await import(FIT);
+  /* East Golf Course at Dorado vs East Orange Golf Course's card: 17 holes
+     compared, score 0.335. The mapper must not let that card re-number holes. */
+  assert.strictEqual(scorecardIdentityMismatch({ score: 0.335, comparedHoles: 17, parHoles: 17 }), true);
+  /* The right card for the same ground scored 0.883. */
+  assert.strictEqual(scorecardIdentityMismatch({ score: 0.883, comparedHoles: 17, parHoles: 17 }), false);
+});
+
+test("thin or absent evidence is never a mismatch", async () => {
+  const { scorecardIdentityMismatch } = await import(FIT);
+  assert.strictEqual(scorecardIdentityMismatch(null), false);
+  assert.strictEqual(scorecardIdentityMismatch({ score: 0, comparedHoles: 3, parHoles: 3 }), false);
+  /* Par positions alone are enough to compare when the card has no distances. */
+  assert.strictEqual(scorecardIdentityMismatch({ score: 0.1, comparedHoles: 0, parHoles: 9 }), true);
+});
+
 test("a normal course is trusted and asks for nothing", async () => {
   const { courseFitVerdict } = await import(FIT);
   const v = courseFitVerdict({

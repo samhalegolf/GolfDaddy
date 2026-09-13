@@ -62,6 +62,23 @@ export const SCORECARD_IDENTITY_MIN_HOLES = 6;
    for. */
 export const SCORECARD_IDENTITY_MIN_SCORE = 0.35;
 
+/* Does a scorecard pairing say "this card is obviously not this ground"?
+ *
+ * One rule, asked twice. courseFitVerdict asks it AFTER the run, to stop a
+ * player on a coherent neighbour. The mapper asks it BEFORE handing a card to
+ * the geometry resolver: a card that does not describe the OSM-numbered holes
+ * cannot be allowed to re-number them. East Golf Course at Dorado searched for
+ * its card with no region, matched East Orange Golf Course in New Jersey, and
+ * the resolver rebuilt 17 good OSM holes into 14 wrong ones from that card's
+ * yardages. Absent or thin evidence is not a mismatch - same rule as every
+ * other check in this file. */
+export function scorecardIdentityMismatch(identity) {
+  if (!identity) return false;
+  const enough = Number(identity.comparedHoles) >= SCORECARD_IDENTITY_MIN_HOLES
+    || Number(identity.parHoles) >= SCORECARD_IDENTITY_MIN_HOLES;
+  return enough && Number(identity.score) < SCORECARD_IDENTITY_MIN_SCORE;
+}
+
 /* Is this course complete enough to present as a finished map?
  *
  * Two ways to be complete, in order of authority:
@@ -171,8 +188,7 @@ export function courseFitVerdict(facts) {
      evidence of anything and must fall through to trusted, same rule as every
      other check in this file. */
   const identity = f.scorecardIdentity;
-  if (identity && (identity.comparedHoles >= SCORECARD_IDENTITY_MIN_HOLES || identity.parHoles >= SCORECARD_IDENTITY_MIN_HOLES)
-    && Number(identity.score) < SCORECARD_IDENTITY_MIN_SCORE) {
+  if (scorecardIdentityMismatch(identity)) {
     return untrusted("scorecard-identity-mismatch", "ground", {
       score: identity.score,
       comparedHoles: identity.comparedHoles,

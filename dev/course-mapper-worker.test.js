@@ -84,6 +84,69 @@ test("a job stalled 8 times in a row is failed for good, not requeued forever", 
   assert.strictEqual(patches[0].status, "failed");
 });
 
+/* The mapper path never filled region/country in, so every auto-mapped course searched
+   for its scorecard by bare name: "East Golf Course" (Dorado, Puerto Rico) took East
+   Orange Golf Course's card from New Jersey. loadCourseCenter now geocodes a row that
+   has no place and writes it back, once. */
+test("a course row with no region is geocoded once and the place written back", async () => {
+  const patches = [];
+  let geocoded = 0;
+  global.fetch = async (url, options = {}) => {
+    url = String(url);
+    const method = String(options.method || "GET").toUpperCase();
+    if (url.includes("nominatim.openstreetmap.org")) {
+      geocoded++;
+      return jsonResponse(200, { address: { state: "Puerto Rico", country: "United States", country_code: "us" } });
+    }
+    if (method === "GET") {
+      return jsonResponse(200, [{ course_id: "east", course_name: "East Golf Course", course_lat: 18.4708, course_lng: -66.2934, region: null, country: null, country_code: null, objects_json: {}, holes_json: {} }]);
+    }
+    if (method === "PATCH") { patches.push({ url, body: JSON.parse(options.body || "{}") }); return jsonResponse(200, [{}]); }
+    return jsonResponse(200, []);
+  };
+  const course = await worker.loadCourseCenter("east");
+  assert.strictEqual(geocoded, 1, "one reverse-geocode call");
+  assert.strictEqual(course.region, "Puerto Rico");
+  assert.strictEqual(course.country, "United States");
+  assert.strictEqual(patches.length, 1, "the place is written back to the row");
+  assert.ok(patches[0].url.includes("course_id=eq.east"));
+  assert.deepStrictEqual(patches[0].body, { region: "Puerto Rico", country: "United States", country_code: "US" });
+});
+
+test("a course row that already has a place is not geocoded again", async () => {
+  let geocoded = 0;
+  const patches = [];
+  global.fetch = async (url, options = {}) => {
+    url = String(url);
+    const method = String(options.method || "GET").toUpperCase();
+    if (url.includes("nominatim.openstreetmap.org")) { geocoded++; return jsonResponse(200, {}); }
+    if (method === "GET") {
+      return jsonResponse(200, [{ course_id: "pupuke", course_name: "Pupuke Golf Club", course_lat: -36.78, course_lng: 174.76, region: "Auckland", country: "New Zealand", country_code: "NZ", objects_json: {}, holes_json: {} }]);
+    }
+    if (method === "PATCH") { patches.push(url); return jsonResponse(200, [{}]); }
+    return jsonResponse(200, []);
+  };
+  const course = await worker.loadCourseCenter("pupuke");
+  assert.strictEqual(geocoded, 0);
+  assert.strictEqual(patches.length, 0);
+  assert.strictEqual(course.region, "Auckland");
+});
+
+test("a geocoder failure leaves the course loadable with no place, as before", async () => {
+  global.fetch = async (url, options = {}) => {
+    url = String(url);
+    const method = String(options.method || "GET").toUpperCase();
+    if (url.includes("nominatim.openstreetmap.org")) return jsonResponse(503, {});
+    if (method === "GET") {
+      return jsonResponse(200, [{ course_id: "east", course_name: "East Golf Course", course_lat: 18.4708, course_lng: -66.2934, objects_json: {}, holes_json: {} }]);
+    }
+    return jsonResponse(200, []);
+  };
+  const course = await worker.loadCourseCenter("east");
+  assert.ok(course, "the course still loads");
+  assert.strictEqual(course.region, "");
+});
+
 /* NZ mainland bounds (LINZ-covered, key stubbed in run() below) and an Australian course
    (no licensed imagery source) - the two sides of chainVisualSnapshot's licensing guard. */
 const NZ_BOUNDS = { south: -36.79, west: 174.75, north: -36.77, east: 174.77 };
