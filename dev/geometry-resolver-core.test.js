@@ -20,6 +20,24 @@ test("hasNumberingIssue is true for shapes with no hole refs", () => {
   assert.strictEqual(resolver.hasNumberingIssue({ osmPayload: fixture }), true);
 });
 
+test("a card read back from the store, whose sources rows carry a hole COUNT, still reaches the resolver", () => {
+  /* course_scorecards.sources_json rows are provenance summaries: { source, sourceUrl,
+     holes: 18 }. Treating that count as a hole list produced no entries and, because
+     the sources array was non-empty, skipped the evidence's own hole list too - every
+     stored card re-read by the mapper became "Scorecard unavailable". Dorado Beach
+     East could not number its one un-ref'd OSM hole with an 18-hole card in hand. */
+  const t = resolver.__geometryResolverCoreTest;
+  const holes = [{ hole: 1, par: 5, metres: 527.6 }, { hole: 2, par: 3, metres: 220.4 }, { hole: 3, par: 4, metres: 358.4 }];
+  const fromStore = { holes, source: "golfpass", sourceUrl: "https://example.test/card", sources: [{ source: "golfpass", sourceUrl: "https://example.test/card", holes: 18 }] };
+  const normalized = t.normalizeScorecard({ scorecardHoles: holes, scorecardEvidence: fromStore });
+  assert.strictEqual(normalized.length, 3, "the evidence hole list is used when the sources rows yield none");
+  assert.deepStrictEqual(normalized.map(h => h.holeNumber), [1, 2, 3]);
+  assert.strictEqual(Math.round(normalized[0].distanceM), 528, "store rows spell distance as metres");
+  /* A sources row that really carries holes still wins, as it always did. */
+  const withList = { holes: holes.slice(0, 1), sources: [{ source: "golfpass", sourceUrl: "u", holes }] };
+  assert.strictEqual(t.normalizeScorecard({ scorecardEvidence: withList }).length, 3);
+});
+
 test("hasNumberingIssue is false when there is no golf geometry at all", () => {
   assert.strictEqual(resolver.hasNumberingIssue({ osmPayload: { elements: [] } }), false);
 });

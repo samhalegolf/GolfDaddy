@@ -550,13 +550,23 @@ function scorecardSourceEntries(input) {
   const entries = [];
   const evidence = input.scorecardEvidence || {};
   const evidenceSources = Array.isArray(evidence.sources) ? evidence.sources : [];
-  if (evidenceSources.length) {
-    evidenceSources.forEach(source => pushScorecardSource(entries, source.holes || source.scorecard || source, source.source || source.provider || evidence.source, source.sourceUrl || source.url));
-  } else if (Array.isArray(evidence.holes)) {
+  /* evidence.sources carries hole LISTS on the client, but a card read back from
+     course_scorecards carries sources_json, whose rows are provenance summaries -
+     { source, sourceUrl, holes: 18 } with the hole COUNT under `holes`
+     (gd-scorecard-resolve.mjs facilityScorecardRow). Treating that count as a
+     list produced no entries, and because the sources array was non-empty the
+     hole list on the evidence itself was then skipped too: every stored card
+     re-read by the mapper reached the resolver as "Scorecard unavailable".
+     Dorado Beach East had its 18-hole card in hand and still could not number
+     the one OSM hole with no ref. So a source only counts once it has actually
+     yielded holes; otherwise the evidence's own list is used as before. */
+  evidenceSources.forEach(source => pushScorecardSource(entries, source.holes || source.scorecard || source, source.source || source.provider || evidence.source, source.sourceUrl || source.url));
+  const sourcesYieldedHoles = entries.length > 0;
+  if (!sourcesYieldedHoles && Array.isArray(evidence.holes)) {
     pushScorecardSource(entries, evidence.holes, evidence.source || "scorecard-evidence", evidence.sourceUrl || "");
   }
-  if (!evidenceSources.length && Array.isArray(input.scorecardHoles)) pushScorecardSource(entries, input.scorecardHoles, "scorecard-holes", "");
-  if (!evidenceSources.length && input.scorecard) pushScorecardSource(entries, input.scorecard, input.scorecard.source || "scorecard", input.scorecard.sourceUrl || "");
+  if (!sourcesYieldedHoles && Array.isArray(input.scorecardHoles)) pushScorecardSource(entries, input.scorecardHoles, "scorecard-holes", "");
+  if (!sourcesYieldedHoles && input.scorecard) pushScorecardSource(entries, input.scorecard, input.scorecard.source || "scorecard", input.scorecard.sourceUrl || "");
   return entries;
 }
 function normalizeScorecardSources(input) {
