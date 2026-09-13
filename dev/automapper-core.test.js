@@ -317,6 +317,70 @@ test("surface enrichment does not move a single capture frame", () => {
   assert.strictEqual(framesFor(withSurfaces.objects), framesFor(bare));
 });
 
+/* ---- elimination and resolver fill (Dorado Beach East, 2026-09-14) ---- */
+function wayAt(id, ref, a, b, extra = {}) {
+  return { type: "way", id, tags: Object.assign({ golf: "hole" }, ref ? { ref: String(ref) } : {}, extra), geometry: [{ lat: a[0], lon: a[1] }, { lat: b[0], lon: b[1] }] };
+}
+/* Three short parallel holes 200m apart, west to east; the middle one has no ref. */
+const ELIM = {
+  centre: { lat: -36.8, lng: 174.7 },
+  payload: { elements: [
+    wayAt(1, 1, [-36.8, 174.700], [-36.797, 174.700]),
+    wayAt(2, null, [-36.8, 174.7022], [-36.797, 174.7022]),
+    wayAt(3, 3, [-36.8, 174.7044], [-36.797, 174.7044])
+  ] }
+};
+function elimGuides() { return core.parseOsmHoleGuides(ELIM.payload); }
+
+test("one missing number and one un-numbered way: the way takes the number", () => {
+  const fill = core.fillMissingHoleByElimination({ payload: ELIM.payload, resolvedHoleNumbers: [1, 3], numberedGuides: elimGuides(), expectedHoles: 3, coursePoint: ELIM.centre });
+  assert.ok(fill.guide, "a guide is produced");
+  assert.strictEqual(fill.guide.hole, 2);
+  assert.strictEqual(fill.record.reason, "one-missing-number-one-unnumbered-way");
+  assert.strictEqual(fill.record.unnumberedWays, 1);
+});
+
+test("elimination refuses when it is not elimination", () => {
+  /* two numbers missing */
+  let fill = core.fillMissingHoleByElimination({ payload: ELIM.payload, resolvedHoleNumbers: [1], numberedGuides: elimGuides(), expectedHoles: 3, coursePoint: ELIM.centre });
+  assert.strictEqual(fill.guide, null); assert.strictEqual(fill.record.reason, "more-than-one-missing");
+  /* nothing missing */
+  fill = core.fillMissingHoleByElimination({ payload: ELIM.payload, resolvedHoleNumbers: [1, 2, 3], numberedGuides: elimGuides(), expectedHoles: 3, coursePoint: ELIM.centre });
+  assert.strictEqual(fill.guide, null); assert.strictEqual(fill.record.reason, "nothing-missing");
+  /* two un-numbered ways */
+  const twoWays = { elements: ELIM.payload.elements.concat([wayAt(4, null, [-36.8, 174.7066], [-36.797, 174.7066])]) };
+  fill = core.fillMissingHoleByElimination({ payload: twoWays, resolvedHoleNumbers: [1, 3], numberedGuides: elimGuides(), expectedHoles: 3, coursePoint: ELIM.centre });
+  assert.strictEqual(fill.guide, null); assert.strictEqual(fill.record.reason, "more-than-one-unnumbered-way");
+  /* the un-numbered way is a duplicate trace of a numbered hole's ground */
+  const dup = { elements: [ELIM.payload.elements[0], ELIM.payload.elements[2], wayAt(5, null, [-36.8, 174.70005], [-36.797, 174.70005])] };
+  fill = core.fillMissingHoleByElimination({ payload: dup, resolvedHoleNumbers: [1, 3], numberedGuides: core.parseOsmHoleGuides(dup), expectedHoles: 3, coursePoint: ELIM.centre });
+  assert.strictEqual(fill.guide, null); assert.strictEqual(fill.record.reason, "no-unnumbered-way");
+});
+
+test("elimination checks the way's length against the card when the card has one", () => {
+  /* the way is ~333m; a card saying hole 2 is 195m is within tolerance, 100m is not */
+  let fill = core.fillMissingHoleByElimination({ payload: ELIM.payload, resolvedHoleNumbers: [1, 3], numberedGuides: elimGuides(), expectedHoles: 3, coursePoint: ELIM.centre, scorecardLengths: { 2: 300 } });
+  assert.strictEqual(fill.guide && fill.guide.hole, 2);
+  fill = core.fillMissingHoleByElimination({ payload: ELIM.payload, resolvedHoleNumbers: [1, 3], numberedGuides: elimGuides(), expectedHoles: 3, coursePoint: ELIM.centre, scorecardLengths: { 2: 100 } });
+  assert.strictEqual(fill.guide, null); assert.strictEqual(fill.record.reason, "length-disagrees-with-card");
+});
+
+test("the resolver may only fill numbers OSM lacks, on ground no numbered hole holds", () => {
+  const geometry = core.resolveCourseGeometry(ELIM.payload, "elim", ELIM.centre, [], []);
+  assert.deepStrictEqual(Object.keys(geometry.holes).map(Number).sort(), [1, 3]);
+  const guides = [
+    /* re-numbers hole 1's ground as hole 2: rejected, ground is claimed */
+    { id: "r-a", hole: 2, points: [{ lat: -36.8, lng: 174.700 }, { lat: -36.797, lng: 174.700 }] },
+    /* says hole 3 is somewhere else: rejected, 3 is already numbered */
+    { id: "r-b", hole: 3, points: [{ lat: -36.8, lng: 174.7066 }, { lat: -36.797, lng: 174.7066 }] },
+    /* hole 2 on free ground: accepted */
+    { id: "r-c", hole: 2, points: [{ lat: -36.8, lng: 174.7022 }, { lat: -36.797, lng: 174.7022 }] }
+  ];
+  const fill = core.resolverFillGuides(guides, geometry);
+  assert.deepStrictEqual(fill.accepted.map(g => g.id), ["r-c"]);
+  assert.deepStrictEqual(fill.rejected.map(r => r.reason).sort(), ["already-numbered", "ground-claimed-by-hole-1"]);
+});
+
 (async function run() {
   core = await import(path.join(root, "functions", "lib", "gd-automapper-core.mjs"));
   plan = await import(path.join(root, "functions", "lib", "gd-visual-plan-core.mjs"));

@@ -1009,6 +1009,113 @@ export function parseOsmHoleGuides(payload) {
   return rows;
 }
 
+/* The hole ways OSM drew but did not number - parseOsmHoleGuides drops these,
+   because a guide with no number has nowhere to go. Kept separately for the one
+   inference that CAN place one: elimination, below. */
+export function parseOsmUnnumberedHoleGuides(payload) {
+  const rows = [];
+  (payload && payload.elements || []).forEach(element => {
+    if (String((element.tags && element.tags.golf) || "").toLowerCase() !== "hole") return;
+    if (osmGuideHoleRef(element.tags && (element.tags.ref || element.tags.name))) return;
+    const points = osmGuidePointsFromElement(element);
+    if (points.length < 2) return;
+    rows.push({ id: (element.type || "osm") + "-" + (element.id || rows.length), hole: null, par: Number.isFinite(Number(element.tags && element.tags.par)) ? Number(element.tags.par) : null, points });
+  });
+  return rows;
+}
+
+/* Two hole features closer than this at an end share ground: a tee box or a
+   green is never 40m from itself on another hole. */
+export const HOLE_GROUND_CLAIM_RADIUS_M = 40;
+
+function guideEnds(guide) {
+  const pts = (guide && guide.points || []).filter(p => Number.isFinite(p && p.lat) && Number.isFinite(p && p.lng));
+  return pts.length ? [pts[0], pts[pts.length - 1]] : [];
+}
+
+function guideSharesGroundWith(guide, others, radiusM) {
+  const ends = guideEnds(guide);
+  return (others || []).some(other => {
+    const otherEnds = guideEnds(other);
+    return ends.some(end => otherEnds.some(point => distance(end, point) <= radiusM));
+  });
+}
+
+/* The one missing number goes to the one un-numbered way.
+ *
+ * Dorado Beach East: OSM draws 18 hole ways and numbers 17 of them; the card
+ * says 18. Every number but 5 is on the ground and exactly one way carries no
+ * ref, sitting between holes 4 and 6 and ending 3m from a mapped green. The
+ * geometry resolver was asked to fill that gap and instead re-derived the whole
+ * course from scorecard distances, moving hole 5 onto another fairway. No
+ * distance matching is needed here - it is elimination, and it is only ever
+ * done when it is elimination: one missing number, one unclaimed un-numbered
+ * way that belongs to this course, and (when the card gives a length) a way
+ * that is roughly that long. Anything less certain is left to the resolver. */
+export function fillMissingHoleByElimination({ payload, resolvedHoleNumbers, numberedGuides, expectedHoles, coursePoint, siblingPoints = [], scorecardLengths = null }) {
+  const expected = Number(expectedHoles) || 0;
+  const have = new Set((resolvedHoleNumbers || []).map(validHoleNumber).filter(Boolean));
+  const missing = [];
+  for (let hole = 1; hole <= expected; hole++) if (!have.has(hole)) missing.push(hole);
+  const record = { expectedHoles: expected, missing, unnumberedWays: 0, assigned: null, reason: null };
+  if (!expected || missing.length !== 1) {
+    record.reason = missing.length ? "more-than-one-missing" : "nothing-missing";
+    return { guide: null, record };
+  }
+  const candidates = parseOsmUnnumberedHoleGuides(payload)
+    .filter(guide => guideBelongsToCourse(guide, coursePoint, siblingPoints))
+    .filter(guide => !guideSharesGroundWith(guide, numberedGuides || [], HOLE_GROUND_CLAIM_RADIUS_M));
+  record.unnumberedWays = candidates.length;
+  if (candidates.length !== 1) {
+    record.reason = candidates.length ? "more-than-one-unnumbered-way" : "no-unnumbered-way";
+    return { guide: null, record };
+  }
+  const hole = missing[0];
+  const candidate = candidates[0];
+  const lengthM = guideLength(candidate.points);
+  const cardLengthM = scorecardLengths ? Number(scorecardLengths[hole]) : NaN;
+  record.lengthM = Math.round(lengthM);
+  if (Number.isFinite(cardLengthM) && cardLengthM > 0) {
+    record.cardLengthM = Math.round(cardLengthM);
+    const ratio = lengthM / cardLengthM;
+    if (ratio < 0.6 || ratio > 1.5) {
+      record.reason = "length-disagrees-with-card";
+      return { guide: null, record };
+    }
+  }
+  record.assigned = hole;
+  record.reason = "one-missing-number-one-unnumbered-way";
+  return { guide: Object.assign({}, candidate, { hole }), record };
+}
+
+/* Which of the geometry resolver's guides may be ADDED to an OSM-numbered course.
+ *
+ * On the short-of-expected path the resolver's answer used to replace the OSM
+ * one whenever it covered more holes. Its numbering comes from scorecard
+ * distances alone, so with 17 holes right on the ground and one missing, an
+ * 18-hole resolver answer that disagreed about three of them still won, and
+ * Dorado Beach East got a second hole 6 on the wrong fairway and duplicate
+ * greens. The resolver now fills: only numbers the course does not have, and
+ * only on ground no numbered hole already holds a tee or green. */
+export function resolverFillGuides(guides, geometry, radiusM = HOLE_GROUND_CLAIM_RADIUS_M) {
+  const holes = (geometry && geometry.holes) || {};
+  const claimed = Object.values((geometry && geometry.objects) || {})
+    .filter(o => o && (o.type === "tee" || o.type === "green") && validHoleNumber(o.holeNumber))
+    .map(o => ({ hole: validHoleNumber(o.holeNumber), point: objectCenter(o) }))
+    .filter(entry => entry.point);
+  const accepted = [], rejected = [];
+  (guides || []).forEach(guide => {
+    const hole = validHoleNumber(guide && guide.hole);
+    if (!hole) return;
+    if (holes[hole]) { rejected.push({ hole, reason: "already-numbered" }); return; }
+    const ends = guideEnds(guide);
+    const clash = claimed.find(entry => entry.hole !== hole && ends.some(end => distance(end, entry.point) <= radiusM));
+    if (clash) { rejected.push({ hole, reason: "ground-claimed-by-hole-" + clash.hole }); return; }
+    accepted.push(guide);
+  });
+  return { accepted, rejected };
+}
+
 export function parseOsmGreenShapes(payload) {
   return (payload && payload.elements || []).map(osmGreenShapeFromElement).filter(Boolean);
 }

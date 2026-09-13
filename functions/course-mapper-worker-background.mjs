@@ -27,14 +27,14 @@
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete, scorecardIdentityMismatch } from "./lib/gd-course-fit-core.mjs";
 import { reverseGeocodePlace } from "./lib/gd-course-place.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
 import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow, stitchedCardVerdict } from "./lib/gd-scorecard-resolve.mjs";
 import { reconcileFacilityClaims, atomicLoopCount, HOLES_PER_LOOP } from "./lib/gd-facility-loops-core.mjs";
 import { assessFacilityStructure, contestedClaims, describeClaimGround, isIndependentClaim, mappingMethodFor, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
-import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry } from "./lib/gd-scorecard-match-core.mjs";
+import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry, cardLengths } from "./lib/gd-scorecard-match-core.mjs";
 import { planListingResolution, RESOLUTION_MODE } from "./lib/gd-course-listing-core.mjs";
 import { eliminateInferredCourses } from "./lib/gd-inferred-course-claims-core.mjs";
 import { OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND } from "./course-mapper-jobs.mjs";
@@ -2079,6 +2079,27 @@ async function runMapperJob(job, origin) {
     }
   }
 
+  /* One number missing, one way un-numbered: that way is that hole. Asked
+     before the resolver because it is elimination, not matching, and it is the
+     answer the resolver was being asked for at Dorado Beach East (17 refs on 18
+     ways) and got wrong - see fillMissingHoleByElimination. */
+  if (!collision.multiLoop && expectedHoles && geometry.holesResolved && geometry.holesResolved < expectedHoles) {
+    const bundle = parseOsmGuideBundle(payload);
+    const fill = fillMissingHoleByElimination({
+      payload,
+      resolvedHoleNumbers: Object.keys(geometry.holes || {}).map(Number),
+      numberedGuides: bundle.guides.filter(guide => guideBelongsToCourse(guide, course.center, siblingCentres)),
+      expectedHoles,
+      coursePoint: course.center,
+      siblingPoints: siblingCentres,
+      scorecardLengths: scorecardEvidence ? cardLengths(scorecardEvidence) : null
+    });
+    diagnostics.eliminationFill = fill.record;
+    if (fill.guide) {
+      const merged = resolveGuidesIntoObjects([fill.guide], course.courseId, bundle.greens, Object.values(geometry.objects || {}), payload);
+      geometry = Object.assign({}, geometry, { objects: merged.objects, holes: merged.holes, holesResolved: Object.keys(merged.holes || {}).length });
+    }
+  }
   const numberingIssue = !collision.multiLoop && !geometry.holesResolved && hasNumberingIssue({ osmPayload: payload });
   let shortOfExpected = !!(!collision.multiLoop && expectedHoles && geometry.holesResolved < expectedHoles);
   /* A card only gets to re-number holes it describes.
@@ -2234,18 +2255,31 @@ async function runMapperJob(job, origin) {
        OSM-numbered answer when it genuinely covers MORE holes - a lower-coverage resolver run
        must not clobber good numbered geometry. In the no-numbering case anything it found is
        strictly better than the nothing OSM numbering produced. */
-    if (guides.length > geometry.holesResolved) {
-      const resolverGreens = (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon }));
-      const base = numberingIssue ? Object.values(geometry.objects) : existingObjects;
-      const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, base, payload);
-      /* numberingIssue means OSM had shapes and no numbers at all, so every
-         published number is the resolver's. The short-of-expected case is the
-         genuinely mixed one: OSM numbered part of the course and the resolver
-         filled in the rest, and reporting either method alone would overstate
-         the evidence behind half the holes. */
-      osmNumberedHoles = numberingIssue ? 0 : geometry.holesResolved;
-      resolverNumberedHoles = guides.length;
-      geometry = Object.assign({}, geometry, merged, { holesResolved: guides.length });
+    const resolverGreens = (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon }));
+    if (numberingIssue) {
+      /* OSM had shapes and no numbers at all, so every published number is the
+         resolver's - and anything it found beats the nothing OSM produced. */
+      if (guides.length > geometry.holesResolved) {
+        const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, Object.values(geometry.objects), payload);
+        osmNumberedHoles = 0;
+        resolverNumberedHoles = guides.length;
+        geometry = Object.assign({}, geometry, merged, { holesResolved: guides.length });
+      }
+    } else {
+      /* OSM numbered part of the course. The resolver FILLS the rest - only the
+         numbers OSM lacks, only on ground no numbered hole already holds - and
+         never re-numbers what the refs said. Its whole-course answer used to
+         replace the OSM one whenever it covered more holes, which at Dorado Beach
+         East moved hole 5 and 6 onto other fairways because 18 > 17 - see
+         resolverFillGuides. Reported as the genuinely mixed method it is. */
+      const fill = resolverFillGuides(guides, geometry);
+      diagnostics.resolverFill = { accepted: fill.accepted.map(guide => guide.hole), rejected: fill.rejected };
+      if (fill.accepted.length) {
+        const merged = resolveGuidesIntoObjects(fill.accepted, course.courseId, resolverGreens, Object.values(geometry.objects), payload);
+        osmNumberedHoles = geometry.holesResolved;
+        resolverNumberedHoles = fill.accepted.length;
+        geometry = Object.assign({}, geometry, { objects: merged.objects, holes: merged.holes, holesResolved: Object.keys(merged.holes || {}).length });
+      }
     }
   }
   if (!geometry.holesResolved) {
