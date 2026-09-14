@@ -162,33 +162,41 @@
   /* Patch localStorage so existing call sites keep working untouched. Wrapped so
      a failure here can never break a write - the original is always called.
 
-     Every assignment here MUST go through Object.defineProperty. localStorage is
-     a WebIDL legacy platform object with a named-property setter, so a plain
-     `storage.setItem = fn` stores an ENTRY called "setItem" holding the
-     function's source text. An earlier version of this file did exactly that,
-     and the engines disagree about what else happens: Chromium also overrides
-     the method, so the mirror worked there and the test suite stayed green,
-     while iOS WebKit did not override at all. On WebKit that left only the
-     boot-time seed() mirroring - every write during a session went unmirrored,
-     and the durable copy of the in-progress round was found sitting over two
-     hours stale on a device. Restoring that after an eviction hands the player
-     back the wrong hole.
+     The patch goes on Storage.prototype, NOT on the localStorage instance. Two
+     earlier versions of this file tried the instance and both silently failed:
 
-     Both engines wrote the three junk keys ("setItem", "removeItem",
-     "__gdDurableMirror") into the same quota this module exists to protect,
-     which cleanStrayKeys below clears. Testing for those keys is also how this
-     stays catchable in a Chromium-only harness.
+     - `storage.setItem = fn` stores an ENTRY called "setItem" holding the
+       function's source text, because localStorage is a WebIDL legacy platform
+       object with a named-property setter.
+     - `Object.defineProperty(storage, "setItem", ...)` does the same thing. The
+       WebIDL [[DefineOwnProperty]] for such an object routes any name that is
+       not already an own property through the named-property setter, and the
+       builtin methods live on the prototype, not the instance. So the define
+       "succeeds", writes a junk entry, and `storage.setItem` still resolves to
+       the builtin. Seen directly in Chromium (dev/durable-storage.test.js
+       found the junk entries and an inactive mirror); WebKit implements the
+       same spec.
 
-     The installed flag lives on the patched function rather than on storage for
-     the same reason - a flag on storage is a storage write. */
+     The result on a device was that only the boot-time seed() ever mirrored -
+     every write during a session went unmirrored, and the durable copy of the
+     in-progress round was found sitting over two hours stale. Restoring that
+     after an eviction hands the player back the wrong hole.
+
+     Prototype methods are ordinary properties, so replacing them takes in both
+     engines. The wrappers mirror only when called on localStorage itself, so
+     sessionStorage is left alone. The installed flag lives on the patched
+     function - a flag on storage would itself be a storage write - and the
+     junk entries the earlier versions left on devices are cleared below. */
   function installMirror() {
     var storage = window.localStorage;
     if (!storage) return;
+    var proto = Object.getPrototypeOf(storage);
+    if (!proto || typeof proto.setItem !== "function" || typeof proto.removeItem !== "function") return;
 
-    var originalSet = storage.setItem.bind(storage);
-    var originalRemove = storage.removeItem.bind(storage);
+    var originalSet = proto.setItem;
+    var originalRemove = proto.removeItem;
     if (storage.setItem.__gdDurableMirror) { state.active = true; return; }
-    originalSetItem = originalSet;
+    originalSetItem = originalSet.bind(storage);
     var durable = {};
     DURABLE_KEYS.forEach(function (key) { durable[key] = true; });
 
@@ -198,25 +206,25 @@
          hostile or unusual Storage implementation degrades to no mirroring
          instead of breaking every write in the app. */
       return safe(function () {
-        Object.defineProperty(storage, name, {
-          value: fn, writable: true, configurable: true, enumerable: false
+        Object.defineProperty(proto, name, {
+          value: fn, writable: true, configurable: true, enumerable: true
         });
         return storage[name] === fn;
       }, false);
     }
 
     var setOk = define("setItem", function (key, value) {
-      var result = originalSet(key, value);
-      if (durable[key]) safe(function () { mirror(key, value); });
+      var result = originalSet.call(this, key, value);
+      if (this === storage && durable[key]) safe(function () { mirror(key, value); });
       return result;
     });
     var removeOk = define("removeItem", function (key) {
-      var result = originalRemove(key);
-      if (durable[key]) safe(function () { unmirror(key); });
+      var result = originalRemove.call(this, key);
+      if (this === storage && durable[key]) safe(function () { unmirror(key); });
       return result;
     });
 
-    cleanStrayKeys(originalRemove);
+    cleanStrayKeys(originalRemove.bind(storage));
     state.active = setOk && removeOk;
   }
 

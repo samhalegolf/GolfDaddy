@@ -108,16 +108,26 @@ exports.handler = async function (event) {
     return json(200, { received: true, test: true });
   }
 
-  const claim = await claimEvent(rcEvent);
-  if (claim.duplicate) return json(200, { received: true, duplicate: true });
-
+  /* The claim is inside the try on purpose. It is the first database call, so
+     it is where a schema or connectivity problem surfaces - and an unhandled
+     throw here would crash the function without the alert below ever firing,
+     which is exactly how a missing table went unnoticed for weeks. */
+  let claimed = false;
   try {
+    const claim = await claimEvent(rcEvent);
+    if (claim.duplicate) return json(200, { received: true, duplicate: true });
+    claimed = true;
+
     const outcome = await processEvent(rcEvent);
     await settleEvent(rcEvent.id, "processed", null);
     return json(200, Object.assign({ received: true }, outcome));
   } catch (error) {
-    const message = error && (error.message || String(error));
-    await settleEvent(rcEvent.id, "failed", message);
+    const message = describeError(error);
+    /* Best effort: if the database itself is the problem, marking the row failed
+       will fail too, and that must not swallow the alert. */
+    if (claimed) {
+      try { await settleEvent(rcEvent.id, "failed", message); } catch (_settleError) {}
+    }
     await sendSystemAlert({
       eventType: "store_webhook_failed",
       title: "Store purchase could not be recorded",
@@ -129,6 +139,19 @@ exports.handler = async function (event) {
     return json(500, { error: "Could not record store purchase" });
   }
 };
+
+/* supabaseFetch throws a bare "Supabase request failed"; the status and the
+   PostgREST body are what say why (missing relation, bad column, RLS). Fold
+   them in so the alert and the event row are actually diagnosable. */
+function describeError(error) {
+  if (!error) return "Unknown error";
+  let message = error.message || String(error);
+  if (error.status) message += " (HTTP " + error.status + ")";
+  const body = error.body;
+  const detail = body && typeof body === "object" ? (body.message || body.hint || body.details) : body;
+  if (detail) message += ": " + text(detail, 300);
+  return message;
+}
 
 function safeEqual(a, b) {
   const left = Buffer.from(String(a));

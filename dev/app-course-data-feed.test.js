@@ -5,6 +5,13 @@
  * error, no toast, just fewer shots than there should be. Silence is what makes
  * it worth a test: nothing else will ever report that it stopped.
  *
+ * How a shot reaches the feed: the Marshal's completeShot() fires the
+ * shotCompleted effect with { start, target, end } and { hole, captureMethod },
+ * and boot.js wires that effect to app.courseData.submit. There is no shot
+ * module to subscribe to any more, so the wiring is asserted statically and
+ * the behaviour is exercised by calling submit with exactly the payload the
+ * Marshal sends.
+ *
  * The destination is the point. gd-shot-snapshot.js's contract is that GPS Play
  * "performs no wind correction, no slope correction, no My Bubble comparison" -
  * it records. So this asserts both halves: shots reach the Course Data intake,
@@ -55,7 +62,7 @@ assert.ok(
   "gd-conditions-debug.js is studio-only and must not ship on the play surface"
 );
 assert.ok(idx("gd-course-data-intake.js") < idx("js/course-data.js"), "the intake must load before its caller");
-assert.ok(idx("js/course-data.js") < idx("js/play.js"), "course-data.js must load before play.js starts a round");
+assert.ok(idx("js/course-data.js") < idx("js/marshal.js"), "course-data.js must load before marshal.js, which enters holes and starts the round");
 
 /* --------------------------------------------------------------------------
  * Behaviour: run the real intake and the real feed together.
@@ -97,7 +104,6 @@ function harness(options = {}) {
     "scripts/course-data/conditions-engine/gd-conditions-geometry.js",
     "scripts/course-data/conditions-engine/gd-conditions-engine.js",
     "scripts/course-data/gd-course-data-intake.js",
-    "app/js/shot.js",
     "app/js/course-data.js"
   ].forEach((rel) => vm.runInContext(read(rel), context, { filename: rel }));
 
@@ -113,7 +119,10 @@ function harness(options = {}) {
       return 2 * R * Math.asin(Math.sqrt(s));
     }
   };
-  app.play = { state: () => ({ courseKey: "akarana-golf-club", hole: 1 }) };
+  /* The feed reads the course off the Marshal's round; nothing else of the
+     Marshal is needed here because a completed shot ARRIVES as an effect call
+     (see complete below) rather than being observed. */
+  app.marshal = { round: () => ({ courseKey: "akarana-golf-club" }) };
   if (options.gps !== false) app.gps = { lastFix: () => ({ lat: 0, lng: 0, accuracy: 4.5 }) };
   if (options.wind) app.wind = options.wind;
   if (options.playsLike) app.playsLike = options.playsLike;
@@ -125,17 +134,43 @@ const START = { lat: 0, lng: 0 };
 const LANDING = { lat: 0.001, lng: 0 };      /* ~111 m north */
 const TARGET = { lat: 0.0012, lng: 0 };
 
+/* The Marshal's shotCompleted payload, verbatim (app/js/marshal.js
+   completeShot). Sending exactly this is what makes these scenarios a test of
+   the real seam rather than of a shape the feed would accept anyway. */
+function complete(h, hole, captureMethod, shot = { start: START, target: TARGET, end: LANDING }) {
+  return h.app.courseData.submit(
+    { start: shot.start, target: shot.target, end: shot.end },
+    { hole, captureMethod, location: null }
+  );
+}
+
+/* 0. The seam exists end to end: the Marshal states a completed shot with a
+      capture method, and boot.js hands it to the feed. This is the wiring
+      that went missing silently once; it is checked in source because no
+      runtime here has the Marshal. */
+{
+  const marshal = read("app/js/marshal.js");
+  const boot = read("app/js/boot.js");
+  assert.ok(
+    /fx\.shotCompleted\(\{ start: shot\.start, target: shot\.target, end: shot\.end \}, \{ hole: hole, captureMethod: method/.test(marshal),
+    "the Marshal must state a completed shot as { start, target, end } with its capture method"
+  );
+  ["\"lock\"", "\"shot-end\"", "\"ball-placed\"", "\"ball-tracked\""].forEach((method) => {
+    assert.ok(new RegExp("completeShot\\([^;]*" + method).test(marshal),
+      "the Marshal must still complete shots with capture method " + method + " - the feed records it verbatim");
+  });
+  assert.ok(
+    /shotCompleted:\s*function \(shot, meta\)[\s\S]{0,400}?app\.courseData\.submit\(shot, meta\)/.test(boot),
+    "boot.js must wire the Marshal's shotCompleted effect to app.courseData.submit"
+  );
+}
+
 /* 1. A completed shot reaches the Course Data intake as a raw snapshot. */
 {
   const h = harness();
   h.app.courseData.startRound("akarana-golf-club");
-  assert.strictEqual(h.app.courseData.install(), true, "the feed installs onto shot completion");
-
-  h.app.shot.startRound();
-  h.app.shot.startHole(1);
-  h.app.shot.place(START, TARGET);
-  /* The second placement is what completes the first shot. */
-  h.app.shot.place(LANDING, TARGET);
+  const result = complete(h, 1, "lock");
+  assert.strictEqual(result && result.accepted, true, "the intake accepted the shot");
 
   const stats = h.app.courseData.stats();
   assert.strictEqual(stats.submitted, 1, "one completed shot, one submission: " + JSON.stringify(stats));
@@ -144,13 +179,13 @@ const TARGET = { lat: 0.0012, lng: 0 };
   const stored = h.context.window.GolfDaddyCourseDataIntake.listSnapshots();
   assert.strictEqual(stored.length, 1, "the raw snapshot is persisted");
   const snap = stored[0];
-  assert.strictEqual(snap.courseId, "akarana-golf-club", "the course is recorded");
+  assert.strictEqual(snap.courseId, "akarana-golf-club", "the course is recorded, read off the Marshal's round");
   assert.strictEqual(snap.holeNumber, 1, "the hole is recorded");
   assert.strictEqual(snap.shotStartPosition.lat, START.lat, "start position is raw");
   assert.strictEqual(snap.shotLandingPosition.lat, LANDING.lat, "landing position is raw");
   assert.ok(Math.abs(snap.shotDistance - 111.19) < 1, "distance measured, got " + snap.shotDistance);
   assert.strictEqual(snap.gpsAccuracy, 4.5, "the fix accuracy is carried as evidence quality");
-  assert.strictEqual(snap.shotCaptureMethod, "placement", "how the landing point was established is recorded");
+  assert.strictEqual(snap.shotCaptureMethod, "lock", "how the landing point was established is recorded");
 }
 
 /* 2. No measurement means null, never a substituted value. This is the rule
@@ -161,11 +196,7 @@ const TARGET = { lat: 0.0012, lng: 0 };
     wind: { selection: () => ({ originAngleRad: 1.57, level: 2 }), liveReading: () => null }
   });
   h.app.courseData.startRound("akarana-golf-club");
-  h.app.courseData.install();
-  h.app.shot.startRound();
-  h.app.shot.startHole(3);
-  h.app.shot.place(START, TARGET);
-  h.app.shot.place(LANDING, TARGET);
+  complete(h, 3, "lock");
 
   const snap = h.context.window.GolfDaddyCourseDataIntake.listSnapshots()[0];
   assert.strictEqual(snap.userSelectedWind, true, "the player's wind setting is recorded as intent");
@@ -186,11 +217,7 @@ const TARGET = { lat: 0.0012, lng: 0 };
     playsLike: { forShot: () => ({ deltaM: -4.2 }) }
   });
   h.app.courseData.startRound("akarana-golf-club");
-  h.app.courseData.install();
-  h.app.shot.startRound();
-  h.app.shot.startHole(7);
-  h.app.shot.place(START, TARGET);
-  h.app.shot.place(LANDING, TARGET);
+  complete(h, 7, "lock");
 
   const snap = h.context.window.GolfDaddyCourseDataIntake.listSnapshots()[0];
   assert.strictEqual(snap.liveWindAvailable, true, "a measurement is available");
@@ -203,40 +230,33 @@ const TARGET = { lat: 0.0012, lng: 0 };
   assert.strictEqual(snap.liveSlopeDirection, "downhill", "a negative delta reads as downhill");
 }
 
-/* 4. Hole out completes the last shot, and says when the landing point was the
-      aim standing in for a fix rather than an observation. */
+/* 4. How the landing point was established travels with the shot, verbatim.
+      A ball the player placed on the green is not the same evidence as one a
+      GPS fix tracked to, and an analysis has to be able to weigh them apart. */
 {
   const h = harness();
   h.app.courseData.startRound("akarana-golf-club");
-  h.app.courseData.install();
-  h.app.shot.startRound();
-  h.app.shot.startHole(9);
-  h.app.shot.place(START, TARGET);
-  h.app.shot.holeOut(LANDING);
-  h.app.shot.startHole(10);
-  h.app.shot.place(START, TARGET);
-  h.app.shot.holeOut(null);
+  complete(h, 9, "shot-end");
+  complete(h, 9, "ball-placed");
+  complete(h, 10, "ball-tracked");
 
   const snaps = h.context.window.GolfDaddyCourseDataIntake.listSnapshots();
-  assert.strictEqual(snaps.length, 2, "both holes filed their final shot");
-  const methods = snaps.map((s) => s.shotCaptureMethod).sort();
-  assert.deepStrictEqual(methods, ["hole-out", "hole-out-assumed-target"],
-    "an assumed landing point is labelled as assumed, not passed off as observed");
+  assert.strictEqual(snaps.length, 3, "every completed shot filed");
+  assert.deepStrictEqual(snaps.map((s) => s.shotCaptureMethod).sort(), ["ball-placed", "ball-tracked", "shot-end"],
+    "the Marshal's capture method is recorded as stated, never normalised or guessed");
+  assert.deepStrictEqual([...new Set(snaps.map((s) => s.shotId))].length, 3, "each shot gets its own id");
 }
 
 /* 5. Nothing here may take a round down. A broken intake must not escape into
-      the play path that completed the shot. */
+      the Marshal effect that completed the shot. */
 {
   const h = harness();
   h.app.courseData.startRound("akarana-golf-club");
-  h.app.courseData.install();
   h.context.window.GolfDaddyCourseDataIntake.submitShotSnapshot = () => { throw new Error("SIMULATED_INTAKE_FAILURE"); };
 
-  h.app.shot.startRound();
-  h.app.shot.startHole(2);
-  h.app.shot.place(START, TARGET);
-  assert.doesNotThrow(() => h.app.shot.place(LANDING, TARGET), "a failing intake must not throw into play");
-  assert.deepStrictEqual(h.app.shot.holeShots(2).length, 1, "the shot is still recorded in the round");
+  let result;
+  assert.doesNotThrow(() => { result = complete(h, 2, "lock"); }, "a failing intake must not throw into play");
+  assert.strictEqual(result, null, "and the failure is reported as no submission, not a fake acceptance");
 }
 
 /* 6. Re-submitting the same shot is idempotent rather than duplicating - the
@@ -245,10 +265,8 @@ const TARGET = { lat: 0.0012, lng: 0 };
 {
   const h = harness();
   h.app.courseData.startRound("akarana-golf-club");
-  h.app.shot.startRound();
-  h.app.shot.startHole(4);
   const shot = { start: START, target: TARGET, end: LANDING };
-  const first = h.app.courseData.submit(shot, { hole: 4, captureMethod: "placement" });
+  const first = h.app.courseData.submit(shot, { hole: 4, captureMethod: "lock" });
   assert.strictEqual(first.accepted, true, "first submission accepted");
   assert.strictEqual(h.context.window.GolfDaddyCourseDataIntake.listSnapshots().length, 1, "one snapshot stored");
 }
@@ -266,11 +284,7 @@ const TARGET = { lat: 0.0012, lng: 0 };
   assert.strictEqual(h.context.window.GolfDaddyCourseDataComparison, undefined,
     "the comparison layer is genuinely absent from this context");
   h.app.courseData.startRound("akarana-golf-club");
-  h.app.courseData.install();
-  h.app.shot.startRound();
-  h.app.shot.startHole(5);
-  h.app.shot.place(START, TARGET);
-  h.app.shot.place(LANDING, TARGET);
+  complete(h, 5, "lock");
 
   assert.doesNotThrow(() => h.flush(), "the deferred analysis runs without the comparison layer");
   const snaps = h.context.window.GolfDaddyCourseDataIntake.listSnapshots();
@@ -285,4 +299,4 @@ assert.ok(
 );
 
 console.log("app course data feed passed: shots reach Course Data raw, intent and evidence stay separate, "
-  + "assumed landings are labelled, failures stay out of play, My Bubble comparison absent");
+  + "capture methods travel verbatim, failures stay out of play, My Bubble comparison absent");

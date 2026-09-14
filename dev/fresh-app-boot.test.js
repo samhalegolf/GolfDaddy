@@ -773,10 +773,11 @@ async function bootCheck() {
       foundGreenOnScreen: !!hit,
       placedFromNothing: !before && !!after,
       landedOnGreen: after ? Math.round(app.distance.haversineMeters(after, h1.green)) : null,
-      /* Even on the green, placing yourself is AIM. Preview has exactly two
-         modes now: a tap near a green used to drop you into green focus, which
-         made the mode depend on where your finger landed rather than on
-         anything you asked for. */
+      /* Placing yourself ON the green is green focus (finish), the same as
+         walking onto it with a fix - a look at the green, with Shot End
+         handing Preview back to SETUP. The stages scenario above pins that
+         hand-back; here the point is that the tap lands you on the green and
+         the mode follows from where you are, not from a third gesture. */
       mode: gd.scene().mode,
       flow: gd.scene().flow
     };
@@ -901,7 +902,10 @@ async function bootCheck() {
       aimPaths: document.getElementById("bubbleSvg").children.length,
       bubble: gd.shown("aimBubble"),
       shotRow: gd.shotBands(),
-      distBarPaused: !gd.shown("distanceBar")
+      /* Green focus keeps ONE number - to the middle, or to the pin when one
+         is set (marshal.js scene.distances.single, painter drawChrome) - not
+         the front/centre/back card, and not nothing. */
+      focusCard: gd.shown("distanceBar") && document.getElementById("distanceBar").classList.contains("toGreen")
     });
 
     /* Two fixes clear of the lock point release Aim back to Track (§4), which
@@ -1243,9 +1247,16 @@ async function bootCheck() {
     const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC";
     const shift = (p) => ({ lat: p.lat - 3, lng: p.lng });
     const tee = shift(h1.tee), green = shift(h1.green);
-    const origin = app.playSurface.worldPx(green.lat + 0.004, green.lng - 0.004, 18);
+    /* A generous capture. The edge-pan clamp (painter surfacePanAllowed) refuses
+       any step that pushes the viewport's corners further outside the picture,
+       and this harness runs in a 1280x720 desktop window - a phone-sized
+       portrait capture is narrower than that viewport at the lock scale, so
+       every pan is refused before the mechanism is even reached. Real captures
+       are sized for the phone; here the picture is simply made large enough
+       that the frame sits inside it, which is what the edge exception assumes. */
+    const origin = app.playSurface.worldPx(green.lat + 0.012, green.lng - 0.012, 18);
     const meta = { captureZoom: 18, originPx: { x: origin.x, y: origin.y },
-      outputDimensions: { width: 1341, height: 1889 }, anchorPins: { tee, green } };
+      outputDimensions: { width: 4500, height: 4500 }, anchorPins: { tee, green } };
     await gd.open("bubble-drag-course", { holes: [{ holeNumber: 1,
       geometry: { tee, green, greenShape: [], route: [] },
       visual: { url: PNG, playSurface: meta } }] }, null);
@@ -1265,7 +1276,10 @@ async function bootCheck() {
     const frameBefore = img.style.transform;
     hit.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 9, clientX: cx, clientY: cy, bubbles: true }));
     let midDragFrameHeld = null, tiltHeldMidDrag = null;
-    const vp = document.getElementById("surfaceViewport");
+    /* The tilt lives on the STAGE (body.tilt-lock #surfaceStage in styles.css);
+       the viewport inside it stays the flat screen rectangle the painter
+       positions into. */
+    const stage = document.getElementById("surfaceStage");
     /* Dragged back toward the player, not out: the default aim for a green
        past the bag already sits AT the bag's roof, and the Marshal now clamps
        a dragged aim to that same roof — an outward drag from here is pinned
@@ -1278,7 +1292,7 @@ async function bootCheck() {
         midDragFrameHeld = img.style.transform === frameBefore;
         /* matrix3d means the perspective tilt is still applied. It used to be
            forced to none for the duration of the drag. */
-        tiltHeldMidDrag = getComputedStyle(vp).transform.startsWith("matrix3d");
+        tiltHeldMidDrag = getComputedStyle(stage).transform.startsWith("matrix3d");
       }
     }
     hit.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9, clientX: cx, clientY: cy + 48, bubbles: true }));
@@ -1456,19 +1470,39 @@ async function bootCheck() {
   storePage.on("pageerror", (err) => storeErrors.push(err && err.message || String(err)));
   let packageFetches = 0;
   let packageStatus = "lite-geo-ready";
-  await storePage.route("**/api/course-package**", (route) => {
+  /* What the round looked like when each package request arrived. Whether a
+     hand-off started from the saved copy is a question of ORDER - was play up
+     before the network was asked - not of how many requests had happened by
+     some wall-clock moment: the first-hole freshness check is a 1.5s timer
+     that starts at hole entry, during script execution, and a slow load event
+     can land after it fires. */
+  const roundAtFetch = [];
+  await storePage.route("**/api/course-package**", async (route) => {
     packageFetches += 1;
+    let round = null;
+    try {
+      round = await storePage.evaluate(() => {
+        const r = window.ClarityApp && window.ClarityApp.marshal && window.ClarityApp.marshal.round();
+        return r ? { courseKey: r.courseKey, hole: r.hole } : null;
+      });
+    } catch (e) { round = null; }
+    roundAtFetch.push(round);
     const url = new URL(route.request().url());
     const courseId = url.searchParams.get("courseId");
+    /* Three holes, because the scenario below steps to the next hole twice
+       and the Marshal's holes-in-play come from the package (holesInPlay):
+       on a one-hole package Next is a no-op, no hole is entered, and the
+       freshness check the step is meant to trigger never runs. */
+    const holeNumbers = [1, 2, 3];
     const body = /^full-map-ready/.test(packageStatus)
       ? {
           courseId, status: "full-map-ready", packageVersion: packageStatus === "full-map-ready-v9" ? 9 : 7,
           geometryVersion: "2026-08-01T00:00:00Z",
-          holes: [{ holeNumber: 1, geometry: { tee: AKARANA_H1.tee, green: AKARANA_H1.green, greenShape: [], route: [] }, visual: null }]
+          holes: holeNumbers.map((holeNumber) => ({ holeNumber, geometry: { tee: AKARANA_H1.tee, green: AKARANA_H1.green, greenShape: [], route: [] }, visual: null }))
         }
       : {
           courseId, status: "lite-geo-ready", geometryVersion: "2026-08-01T00:00:00Z",
-          holes: [{ holeNumber: 1, tee: AKARANA_H1.tee, green: AKARANA_H1.green, greenShape: [], route: [] }]
+          holes: holeNumbers.map((holeNumber) => ({ holeNumber, tee: AKARANA_H1.tee, green: AKARANA_H1.green, greenShape: [], route: [] }))
         };
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   });
@@ -1489,7 +1523,6 @@ async function bootCheck() {
     courseKey: window.ClarityApp.marshal.round().courseKey,
     hole: window.ClarityApp.marshal.round().hole
   }));
-  const fetchesAfterSecondVisit = packageFetches;
   /* Play started from the saved copy without waiting on the network; the
      freshness check follows in the background once the round is up
      (boot.js holeEntered -> scheduleMapUpdateCheck), so a course opened from
@@ -1497,6 +1530,7 @@ async function bootCheck() {
      changes nothing and asks nothing. */
   await storePage.waitForTimeout(1800);
   const fetchesAfterSettle = packageFetches;
+  const secondVisitFetches = roundAtFetch.slice(fetchesAfterFirstVisit);
   const settled = await storePage.evaluate(() => ({
     barShown: !document.getElementById("mapUpdateBar").classList.contains("hiddenState"),
     savedMapType: window.ClarityApp.courseStore.load("store-test-course").mapType
@@ -1509,7 +1543,7 @@ async function bootCheck() {
      shots survive it. */
   packageStatus = "full-map-ready";
   await storePage.evaluate(() => document.getElementById("nextHole").click());
-  await storePage.waitForTimeout(400);
+  await storePage.waitForTimeout(800);   /* 250ms hole-step check + the fetch */
   const midRoundAdopt = await storePage.evaluate(() => ({
     barShown: !document.getElementById("mapUpdateBar").classList.contains("hiddenState"),
     savedMapType: window.ClarityApp.courseStore.load("store-test-course").mapType,
@@ -1520,7 +1554,7 @@ async function bootCheck() {
      swapping ground under a player mid-hole is a change they may decline. */
   packageStatus = "full-map-ready-v9";
   await storePage.evaluate(() => document.getElementById("nextHole").click());
-  await storePage.waitForTimeout(400);
+  await storePage.waitForTimeout(800);
   const newerVersionPrompt = await storePage.evaluate(() => ({
     barShown: !document.getElementById("mapUpdateBar").classList.contains("hiddenState"),
     stillOldVersionSaved: window.ClarityApp.courseStore.load("store-test-course").mapVersion
@@ -1701,10 +1735,13 @@ async function bootCheck() {
   assert.strictEqual(firstVisit.savedMapType, "object", "a lite-geo-ready course auto-saves to the library with no prompt");
   assert.strictEqual(firstVisit.hole, 1, "the first visit plays from the freshly-fetched package");
   assert.strictEqual(fetchesAfterFirstVisit, 1, "the first visit fetches the package exactly once");
+  assert.ok(!(roundAtFetch[0] && roundAtFetch[0].courseKey === "store-test-course"),
+    "the first visit has nothing saved, so it must fetch BEFORE it can start the round");
   assert.strictEqual(secondVisit.courseKey, "store-test-course", "a second hand-off to the same course still starts play");
   assert.strictEqual(secondVisit.hole, 1, "a second hand-off to the same course opens on hole 1 from the saved copy");
-  assert.strictEqual(fetchesAfterSecondVisit, fetchesAfterFirstVisit, "a second hand-off to an already-downloaded course must start without re-fetching the package");
-  assert.strictEqual(fetchesAfterSettle, fetchesAfterFirstVisit + 1, "one background freshness check once the round is up");
+  assert.ok(secondVisitFetches.every((r) => r && r.courseKey === "store-test-course"),
+    "a second hand-off to an already-downloaded course must start from the saved copy before any network call - got round state at fetch: " + JSON.stringify(secondVisitFetches));
+  assert.strictEqual(fetchesAfterSettle, fetchesAfterFirstVisit + 1, "exactly one background freshness check once the round is up");
   assert.ok(!settled.barShown, "an up-to-date copy must not prompt");
   assert.strictEqual(settled.savedMapType, "object", "an up-to-date copy is left alone");
   assert.strictEqual(midRoundAdopt.savedMapType, "published",
@@ -1786,9 +1823,9 @@ async function bootCheck() {
   assert.ok(greenTap.mapped.landedOnGreen !== null && greenTap.mapped.landedOnGreen < 8,
     "and it lands where you touched - tapping the green puts you on the green, got "
     + greenTap.mapped.landedOnGreen + "m off");
-  assert.strictEqual(greenTap.mapped.mode, "aim",
-    "placing yourself is AIM wherever you put it - Preview has two modes, and a tap near a green "
-    + "must not be a trapdoor into a third");
+  assert.strictEqual(greenTap.mapped.mode, "finish",
+    "placing yourself on the green opens green focus, exactly as GPS arrival does (marshal.js "
+    + "preview placement) - the earlier stages scenario pins that it is a look, not a shot");
   assert.strictEqual(greenTap.mapped.flow, "preview", "and it is still Preview, not some other flow");
   assert.ok(greenTap.unmappedPlaces,
     "a hole with no geometry at all still takes the tap - it is the only way to play one");
@@ -1840,10 +1877,10 @@ async function bootCheck() {
     + "a signed-out session is rangefinder-only and the dock's Shot End is refused");
   assert.ok(!greenFocus.onGreen.bubble, "no aim bubble in green focus");
   assert.ok(!greenFocus.onGreen.shotRow, "no club/carry row in green focus - there is no shot to play");
-  assert.ok(greenFocus.onGreen.distBarPaused,
-    "the distance readout pauses in green focus - front/back of a green you are standing on is not a number you play to");
-  assert.ok(greenFocus.atNextTee.distBarPaused,
-    "it stays paused while deferred, rather than reading a 250m approach to a hole already finished");
+  assert.ok(greenFocus.onGreen.focusCard,
+    "green focus keeps one number - to the middle or the pin - instead of the front/back card: the chip and the putt still want it");
+  assert.ok(greenFocus.atNextTee.focusCard,
+    "and it stays that one number while the finish is deferred, rather than reading a 250m approach to a hole already finished");
 
   assert.ok(approachCard.landingFromGreen !== null && approachCard.landingFromGreen <= 3,
     "test setup: the default aim must land on the green, got " + approachCard.landingFromGreen + "m off");

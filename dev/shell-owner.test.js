@@ -40,7 +40,9 @@ function exactClassWriterLines(source, className) {
   return source.split(/\n/).map((line, index) => ({ line, index: index + 1 })).filter((item) => pattern.test(item.line));
 }
 
-assertContains(html, 'scripts/gd-shell.js?v=shell-owner-20260719', "index loads the Shell owner");
+/* The cache-buster on this tag changes with every shell deploy; what matters is
+   that the owner is loaded at all. */
+assert(/scripts\/gd-shell\.js(\?[^"']*)?["']/.test(html), "index loads the Shell owner");
 assertBefore(html, "scripts/gd-app-core.js", "scripts/gd-shell.js", "Shell loads after legacy core globals exist");
 assertBefore(html, "scripts/gd-shell.js", "scripts/gd-route-audit.js", "Shell loads before route audit can expose aliases");
 

@@ -84,8 +84,11 @@ function stubSupabaseFetch(db) {
 
 /* Load the webhook with payment-utils' supabaseFetch and the alert channel
    replaced, without touching the real modules on disk. */
-function loadWebhook(db, envOverrides) {
+const alerts = [];
+
+function loadWebhook(db, envOverrides, fetchOverride) {
   [UTILS, ALERTS, WEBHOOK].forEach(function (p) { delete require.cache[p]; });
+  alerts.length = 0;
 
   const previousEnv = {};
   const envVars = Object.assign({ REVENUECAT_WEBHOOK_AUTH: AUTH, SUPABASE_URL: "https://stub.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "stub-key" }, envOverrides || {});
@@ -96,13 +99,13 @@ function loadWebhook(db, envOverrides) {
   });
 
   const utils = require(UTILS);
-  utils.supabaseFetch = stubSupabaseFetch(db);
+  utils.supabaseFetch = fetchOverride || stubSupabaseFetch(db);
 
   const originalLoad = Module._load;
   Module._load = function (request, parent, isMain) {
     if (parent && parent.filename === WEBHOOK) {
       if (request === "./payment-utils") return utils;
-      if (request === "./alert-utils") return { sendSystemAlert: async function () {} };
+      if (request === "./alert-utils") return { sendSystemAlert: async function (input) { alerts.push(input); } };
     }
     return originalLoad.apply(this, arguments);
   };
@@ -343,6 +346,33 @@ test("an unknown buyer is recorded against their email", async () => {
       row.account_email, "newgolfer@example.com",
       "entitlement must be held against the email so signup picks it up"
     );
+  } finally { restore(); }
+});
+
+/* Regression: the store_webhook_events table was missing in production for
+   weeks and every real event crashed the function before the alert path. A
+   failure in the claim step must be a clean 500 (so RevenueCat retries) AND
+   must raise the alert with a message that says what broke. */
+test("a failing claim step returns 500 and raises a diagnosable alert", async () => {
+  const db = makeDb();
+  const missingTable = async function (pathAndQuery) {
+    if (pathAndQuery.indexOf("store_webhook_events") === 0) {
+      const error = new Error("Supabase request failed");
+      error.status = 404;
+      error.body = { message: "relation \"public.store_webhook_events\" does not exist" };
+      throw error;
+    }
+    throw new Error("unexpected call: " + pathAndQuery);
+  };
+  const { webhook, restore } = loadWebhook(db, null, missingTable);
+  try {
+    const res = await call(webhook, purchaseEvent());
+    assert.strictEqual(res.statusCode, 500, "must be a handled 500, not a crash");
+    assert.strictEqual(alerts.length, 1, "the failure alert must fire");
+    assert.ok(/store_webhook_events/.test(alerts[0].context.error),
+      "alert must carry the PostgREST reason, got: " + alerts[0].context.error);
+    assert.ok(/HTTP 404/.test(alerts[0].context.error), "alert must carry the HTTP status");
+    assert.strictEqual(db.entitlements.length, 0, "nothing may be granted");
   } finally { restore(); }
 });
 
