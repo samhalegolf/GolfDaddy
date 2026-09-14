@@ -215,17 +215,23 @@ Neither platform has a version number to bump by hand.
 - **Android** — `versionCode` is the git commit count and `versionName` comes
   from `package.json` (`resolveVersionCode`/`resolveVersionName` in
   `android/app/build.gradle`). `ANDROID_VERSION_CODE` overrides for CI.
-- **iOS** — the same two values, stamped onto the **built** `Info.plist` by the
-  "Stamp version" build phase (`ios/App/stamp-version.sh`). `IOS_BUILD_NUMBER`
-  overrides for CI.
+- **iOS** — `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` live in
+  `project.pbxproj` and are the single source of truth. Bump the build number
+  by hand with `ios/App/bump-build-number.sh` **before** pressing Archive; the
+  "Stamp build number" phase (`ios/App/stamp-build-number.sh`, last phase of
+  the App and watch targets) then writes that number onto each target's
+  **built** `Info.plist`, because Xcode resolves build settings before the
+  build starts and would otherwise carry the pre-bump value. The watch app
+  must carry the same number as the phone app or App Store Connect rejects
+  the upload; the bump script edits every target at once.
 
 `CFBundleVersion` was hardcoded to `1` until 2026-07-26, which would have let
 exactly one App Store Connect upload through and had every later one rejected.
 
-The iOS values are stamped onto the build product rather than written into
-`project.pbxproj` on purpose: a commit-count build number in a tracked file
-dirties the tree on every commit, and committing that change advances the count
-again — a loop with no fixed point.
+A commit-count build number (the earlier `stamp-version.sh` design) was
+abandoned: bumping from a build phase makes Xcode reload the project mid-build
+and cancel the archive, and a commit-count in a tracked file dirties the tree
+on every commit. `dev/ios-version-stamp.test.js` pins the current wiring.
 
 One ordering detail matters and is easy to get wrong. Xcode re-runs
 `ProcessInfoPlistFile` on incremental builds and will overwrite an unordered

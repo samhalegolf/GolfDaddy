@@ -125,8 +125,12 @@ test("a course with published geometry but no visuals reports lite-geo-ready wit
 });
 
 test("a course with a published full package reports full-map-ready even while a re-export is running", async () => {
+  /* Full needs COMPLETE geometry, judged by courseCoverageComplete on holes_json:
+     a contiguous 1..n run of a standard count (or the club's card). A frame is
+     only shipped for hole 1 here, which is all the package needs to carry. */
+  const nineHoles = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [String(i + 1), {}]));
   stubFetch({
-    maps: [{ course_id: "pupuke", published: true, geometry_version: "v1", objects_json: { "green-1": { type: "green", holeNumber: 1, position: { lat: -36.8, lng: 174.7 } } }, holes_json: {} }],
+    maps: [{ course_id: "pupuke", published: true, geometry_version: "v1", objects_json: { "green-1": { type: "green", holeNumber: 1, position: { lat: -36.8, lng: 174.7 } } }, holes_json: nineHoles }],
     visuals: [{ published_version: 3, uploaded_assets: [{ path: "pupuke/frames/r1/h1.jpg", role: "hole-frame-published", holeNumber: 1, metadata: { width: 1024, height: 768, bounds: { south: -36.81 } } }], diagnostics: { generatedAt: "2026-01-01T00:00:00.000Z" } }],
     visualJobs: [{ id: "job-export-running", kind: "export", status: "running" }]
   });

@@ -22,7 +22,9 @@ function assertBefore(source, first, second, message) {
 new Function(shell);
 new Function(routeAudit);
 
-assertContains(html, 'scripts/gd-shell.js?v=shell-owner-20260719', "page loads explicit Shell owner");
+/* The cache-buster on this tag changes with every shell deploy; what matters is
+   that the owner is loaded at all. */
+assert(/scripts\/gd-shell\.js(\?[^"']*)?["']/.test(html), "page loads explicit Shell owner");
 assertBefore(html, "scripts/gd-shell.js", "scripts/gd-route-audit.js", "Shell owner loads before route audit compatibility code");
 
 assertContains(shell, "window.GDShell=api", "Shell owner exposes GDShell");
