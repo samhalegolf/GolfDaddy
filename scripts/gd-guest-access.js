@@ -25,12 +25,10 @@
  *              gdProfileForNewAccount() whether signing up should adopt this
  *              profile or mint a fresh one.
  *
- *   demo mode  A guest may OPEN the shot system but may not feed it real
- *              evidence. The synthetic pipeline (GDDemoSession ->
- *              GDDemoCourseDataProvider) is the whole experience, so the
- *              guided flow is the only flow. importCapture is the single
- *              choke point every real practice import goes through, and it is
- *              guarded here rather than at each of the six intake buttons.
+ *   demo mode  The synthetic pipeline remains the guided first-run path, but
+ *              it is no longer the only path. A guest may also use every
+ *              Practice intake. gd-launch-monitor-data.js retains only their
+ *              latest two sessions, and paid gates stop adoption/export.
  *
  * What this file does NOT do: it is not a security boundary and never decides
  * what the SERVER will accept. Clearing storage mints a new guest. Round
@@ -230,27 +228,11 @@
     });
   }
 
-  /* Every real practice import - camera scan, email intake, pasted CSV, manual
-     plot, coach set - ends at importCapture. Guarding it here is one edit
-     instead of six, and it cannot be routed around by a new intake button that
-     forgets to ask. The demo pipeline never calls it (GDDemoSession builds its
-     store in memory and hands it straight to analyze()), so the guided flow is
-     unaffected. */
+  /* Kept as the historical installation seam so older callers/tests do not
+     fail during a rolling release. Practice writes are intentionally open now;
+     storage limits live with the store that can enforce them atomically. */
   function guardPracticeWrites() {
-    var api = window.GolfDaddyLaunchMonitorData;
-    if (!api || api.__gdGuestGuard || typeof api.importCapture !== "function") return false;
-    var real = api.importCapture;
-    api.importCapture = function () {
-      if (demoOnly()) {
-        toast("Demo mode - sign in to import your own practice data");
-        /* The real return shape, emptied. Callers read .shots.length to report
-           what landed; returning null would throw on the way to the message. */
-        return { session: null, capture: null, shots: [], blocked: "guest-demo" };
-      }
-      return real.apply(this, arguments);
-    };
-    api.__gdGuestGuard = true;
-    return true;
+    return !!(window.GolfDaddyLaunchMonitorData && typeof window.GolfDaddyLaunchMonitorData.importCapture === "function");
   }
 
   /* One class, read by styles/gd-guest-mode.css to take the real-intake controls
@@ -277,6 +259,7 @@
     demoOnly: demoOnly,
     guestProfileId: guestProfileId,
     ensureGuestProfile: ensureGuestProfile,
+    practiceSessionLimit: 2,
     sync: sync,
     /* exposed for dev/guest-access.test.js */
     _uidFor: uidFor,

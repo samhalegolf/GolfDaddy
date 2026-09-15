@@ -10,8 +10,7 @@
  *     (and carrying its saved-course keys across) rather than orphaning them;
  *   - a placeholder some ACCOUNT points at is never adopted - that is another
  *     player on this device, not the guest;
- *   - the shot system opens for a guest, and importCapture is the one door
- *     that stays shut, so no intake button can route around it;
+ *   - the shot system and every Practice intake open for a guest;
  *   - admin is still account-based.
  *
  * Run: node dev/guest-access.test.js
@@ -213,28 +212,21 @@ test("ensureGuestProfile is idempotent and never runs for a signed-in account", 
   assert.strictEqual(signedIn.profileState.activeId, "player42", "a signed-in session must keep its own active profile");
 });
 
-test("importCapture is the one door: refused for a guest, open for an account", () => {
+test("importCapture stays open for both a guest and an account", () => {
   const calls = [];
-  /* Held separately: _guardPracticeWrites replaces importCapture ON the object
-     it is given, so reusing that object for the second boot would hand the
-     signed-in session the guest's wrapper. */
+  /* Held separately so both session types exercise the compatibility seam. */
   const real = (payload) => { calls.push(payload); return { session: { sessionId: "s1" }, capture: {}, shots: [1, 2] }; };
 
   const guest = boot({ launchMonitor: { importCapture: real } });
   assert.strictEqual(guest.api._guardPracticeWrites(), true);
-  const blocked = guest.window.GolfDaddyLaunchMonitorData.importCapture({ label: "real import" });
-  assert.strictEqual(calls.length, 0, "a guest import must never reach the store");
-  /* Length, not deepStrictEqual: the array is built inside the vm realm, so its
-     Array prototype is not this realm's and a deep-equal would fail on identity
-     rather than on content. */
-  assert.strictEqual(blocked.shots.length, 0, "the refusal must keep the real return shape");
-  assert.strictEqual(blocked.blocked, "guest-demo");
-  assert.ok(guest.toasts.some((t) => /demo mode/i.test(t)), "a silent refusal reads as a broken import");
+  const guestSaved = guest.window.GolfDaddyLaunchMonitorData.importCapture({ label: "real import" });
+  assert.strictEqual(calls.length, 1, "a guest import must reach the Practice store");
+  assert.strictEqual(guestSaved.shots.length, 2);
 
   const member = boot({ account: { accountId: "acc-1" }, launchMonitor: { importCapture: real } });
   member.api._guardPracticeWrites();
   const allowed = member.window.GolfDaddyLaunchMonitorData.importCapture({ label: "real import" });
-  assert.strictEqual(calls.length, 1, "a signed-in import must pass straight through");
+  assert.strictEqual(calls.length, 2, "a signed-in import must pass straight through");
   assert.strictEqual(allowed.shots.length, 2);
 });
 

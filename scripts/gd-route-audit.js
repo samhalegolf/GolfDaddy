@@ -3481,6 +3481,38 @@
 	    if(gdPracticePlayingBubbleIsAdopted(p))return "Restore My Bubble";
 	    return "Play With Practice Bubble";
 	  }
+  function gdPracticeHasPaidAccess(){
+    return safe(()=>!!window.ClarityPayments?.hasActiveAccess?.(),false);
+  }
+  function gdOpenPracticeBubblePreview(){
+    const demoActive=safe(()=>!!window.GDDemoSession?.active,false);
+    const picker=window.GDCoursePicker;
+    if(!picker||typeof picker.open!=="function"){
+      gdLmToast("Play preview is not ready");
+      return false;
+    }
+    if(demoActive||gdPracticeHasPaidAccess()){
+      safe(()=>window.GolfDaddyPracticeBubblePreview?.clear?.());
+      return picker.open({source:"practice-play",returnTarget:"practice"});
+    }
+    const preview=window.GolfDaddyPracticeBubblePreview;
+    if(!preview||typeof preview.stage!=="function"){
+      gdLmToast("Bubble Preview is not ready");
+      return false;
+    }
+    const existing=safe(()=>preview.current?.(),null);
+    if(!existing||existing.source!=="user_manual_set"){
+      const analysis=gdPracticeProjectionReadyAnalysis();
+      const source=gdPracticeBubbleSource(analysis);
+      if(!source||!Number.isFinite(Number(source.offsetDeg))){
+        gdLmToast("Add practice shots or set a Bubble manually first");
+        return false;
+      }
+      const p=safe(()=>ensureProfile(),null)||{};
+      preview.stage({offsetDeg:Number(source.offsetDeg),handedness:p.handedness||"right",source:"practice_data",club:source.club||"",guest:safe(()=>!!window.GDGuestAccess?.isGuest?.(),true)});
+    }
+    return picker.open({source:"practice-bubble-preview",returnTarget:"practice"});
+  }
 	  function gdPracticePlayingBubbleIsAdopted(profile){
 	    const p=profile||safe(()=>ensureProfile(),null)||{};
 	    const source=p.practiceBubbleSource||{};
@@ -4662,7 +4694,10 @@
 	    const courseAnalysis=safe(()=>gdCurrentStatsAnalysis?.(),null);
 	    const courseRecords=courseAnalysis?gdStatsFilteredRecords(courseAnalysis):[];
 	    const courseFiltered=courseAnalysis?gdStatsAnalysisForRecords(courseRecords,courseAnalysis.settings):null;
-	    const practiceAnalysis=gdPracticeProjectionReadyAnalysis();
+	    /* Free custom evidence belongs to Practice only. Comparison is a
+	       downstream consumer, so it receives no guest/unpaid analysis. Demo
+	       remains synthetic and paid players keep the full comparison. */
+	    const practiceAnalysis=(gdPracticeHasPaidAccess()||safe(()=>!!window.GDDemoSession?.active,false))?gdPracticeProjectionReadyAnalysis():null;
 	    const courseBubble=gdCourseBubbleSource(courseAnalysis,courseFiltered,courseRecords,p);
 	    const practiceBubble=gdPracticeBubbleSource(practiceAnalysis);
 	    const course=Number.isFinite(Number(courseBubble?.offsetDeg))?Number(courseBubble.offsetDeg):null;
@@ -6867,12 +6902,10 @@
 	      visual.innerHTML=gdCourseDataSurfaceSvg(surfaceCounts,analysis);
 	    }
 	  }
-  /* A guest reaches the shot system, but only the synthetic pipeline is allowed
-     to fill it (gd-guest-access.js owns that rule). With no evidence and no way
-     to add any, every section would open empty and read as broken - so for a
-     guest the shot system OPENS ON its own starting move: the Practice section
-     with the 7-iron carry form up, which is the single input GDDemoSession needs
-     to generate a pattern, adopt a bubble and hand over to Play.
+  /* A guest reaches the full Practice intake, while the guided demo remains the
+     suggested starting move. Open on its 7-iron carry form so first run still
+     tells a coherent story; the visible intake controls let the guest choose
+     their own data or Manual Bubble instead.
      Once a demo session exists this stands aside; the guest is then looking at
      real output from the real engines and should be left alone in it. */
   function gdGuestDemoEntry(){
@@ -9105,6 +9138,7 @@
       gdTogglePracticeImport:gdTogglePracticeImport,
       gdPracticeEmailImportPending:gdPracticeEmailImportPending,
       gdTogglePracticePlot:gdTogglePracticePlot,
+      gdOpenPracticeBubblePreview:gdOpenPracticeBubblePreview,
       gdToggleCoachSetBubble:gdToggleCoachSetBubble,
       gdCoachSetClubChanged:gdCoachSetClubChanged,
       gdCoachSetTogglePreview:gdCoachSetTogglePreview,

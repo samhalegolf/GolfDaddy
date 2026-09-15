@@ -22,6 +22,9 @@
   padding:0 0 10px!important;
 }
 #practiceDataPanel.open .gdPracticePlayBtn{
+  display:grid!important;
+  gap:2px!important;
+  text-align:left!important;
   padding:8px 22px!important;
   border-radius:999px!important;
   background:rgba(70,190,120,.16)!important;
@@ -29,6 +32,37 @@
   color:#7de3a0!important;
   font-size:13px!important;
   font-weight:900!important;
+}
+#practiceDataPanel.open .gdPracticePlayBtn strong{font-size:13px!important;line-height:1.1!important}
+#practiceDataPanel.open .gdPracticePlayBtn span{font-size:10px!important;font-weight:750!important;opacity:.72!important}
+
+.gdPracticeBubblePreviewBanner{
+  position:relative;
+  z-index:35;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin:8px 10px 0;
+  padding:10px 12px;
+  border:1px solid rgba(255,176,32,.48);
+  border-radius:12px;
+  background:rgba(21,18,8,.92);
+  color:#fff2c8;
+  box-shadow:0 8px 24px rgba(0,0,0,.28);
+}
+.gdPracticeBubblePreviewBanner div{display:grid;gap:2px;min-width:0}
+.gdPracticeBubblePreviewBanner strong{font-size:12px;font-weight:950;text-transform:uppercase;letter-spacing:.05em}
+.gdPracticeBubblePreviewBanner span{font-size:10.5px;line-height:1.3;color:rgba(255,255,255,.72)}
+.gdPracticeBubblePreviewBanner button{
+  flex:none;
+  padding:8px 10px;
+  border:1px solid rgba(255,176,32,.55);
+  border-radius:999px;
+  background:#ffb020;
+  color:#171005;
+  font-size:11px;
+  font-weight:900;
 }
 
 .gdDemoBadge,

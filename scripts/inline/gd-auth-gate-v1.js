@@ -22,7 +22,9 @@
  * course library, the bag and the GPS surface were already open.
  *
  * Admin is the one thing left. It is not a data screen a guest could be shown a
- * demo of - it is the operator console, and it stays account-based.
+ * demo of - it is the operator console, and it stays account-based. Practice
+ * intake is now open too; guest storage and downstream paid gates define the
+ * free boundary rather than refusing importCapture.
  *
  * Whether a signed-in player may keep score is a separate question answered by
  * clarity-permissions.js and app/js/access.js; a paywall is not a login wall.

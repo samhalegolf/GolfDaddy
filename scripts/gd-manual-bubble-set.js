@@ -61,6 +61,14 @@
     return window.GolfDaddyManualPracticeCore || window.ClarityCaddieManualPracticeCore || null;
   }
 
+  function previewApi() { return window.GolfDaddyPracticeBubblePreview || null; }
+  function hasPaidAccess() {
+    return safe(function () {
+      return !!(window.ClarityPayments && typeof window.ClarityPayments.hasActiveAccess === 'function' && window.ClarityPayments.hasActiveAccess());
+    }, false);
+  }
+  function isGuest() { return safe(function () { return !!window.GDGuestAccess?.isGuest?.(); }, true); }
+
   /* The three app functions this lane is allowed to read, handed to the core
      rather than reached for inside it. */
   function deps() {
@@ -308,7 +316,7 @@
       + (distanceNote ? '<span>' + distanceNote + '</span>' : '') + '</div>'
       + '<p class="gdManualBubbleSetLead gdManualBubbleSetScale">We’ll scale it across the rest of your bag.</p>'
       + '<div class="gdManualBubbleSetActions">'
-      + '<button type="button" class="gdManualBubbleSetPrimary" data-gd-manual-bubble-action="save"' + (state.club ? '' : ' disabled') + '>Use This Bubble</button>'
+      + '<button type="button" class="gdManualBubbleSetPrimary" data-gd-manual-bubble-action="save"' + (state.club ? '' : ' disabled') + '>' + (hasPaidAccess() ? 'Use This Bubble' : 'Use in Bubble Preview') + '</button>'
       + '<button type="button" data-gd-manual-bubble-action="close">Cancel</button>'
       + '</div>'
       + '</div>';
@@ -345,6 +353,7 @@
     if (!p) { toast('Sign in to set your Bubble'); return false; }
 
     var restored = api.restoreState(p, deps());
+    var preview = safe(function () { return previewApi() && previewApi().current(); }, null);
     var clubs = bagClubs();
     var club = defaultClub(clubs, restored);
     state = {
@@ -352,8 +361,8 @@
       club: club,
       /* Centred on the target line unless they already have a manual Bubble.
          0.0 is a completely valid answer and nothing here nudges them off it. */
-      offsetDeg: restored.hasManualSet ? restored.offsetDeg : 0,
-      hasManualSet: restored.hasManualSet
+      offsetDeg: preview && preview.source === 'user_manual_set' ? Number(preview.offsetDeg) : (restored.hasManualSet ? restored.offsetDeg : 0),
+      hasManualSet: !!(restored.hasManualSet || (preview && preview.source === 'user_manual_set'))
     };
 
     var node = overlay();
@@ -423,6 +432,25 @@
       })
     });
     if (!pending) { toast('That placement could not be read'); return false; }
+
+    /* Free and guest players can build and view this Bubble, but the placement
+       remains a session-only Practice preview. It never touches the profile
+       fields the GPS/Watch/cloud paths understand as My Bubble. */
+    if (!hasPaidAccess()) {
+      var preview = previewApi();
+      if (!preview || typeof preview.stage !== 'function') { toast('Bubble Preview is not ready'); return false; }
+      preview.stage({
+        offsetDeg: pending.offsetDeg,
+        handedness: p.handedness || 'right',
+        source: 'user_manual_set',
+        club: storageClub,
+        guest: isGuest()
+      });
+      close();
+      safe(function () { if (typeof window.renderPracticeData === 'function') window.renderPracticeData(true); });
+      toast('Manual Bubble ready to preview');
+      return false;
+    }
 
     p.practiceBubblePendingSource = pending;
     p.practiceBubblePendingAt = now;

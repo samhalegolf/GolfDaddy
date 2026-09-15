@@ -642,8 +642,35 @@
     store.sessions.push(session);
     store.captures.push(capture);
     shots.forEach(function (shot) { store.shots.push(shot); });
+    var prunedSessionCount = trimGuestSessions(store, scope, session.sessionId);
     saveStore(store);
-    return { session: session, capture: capture, shots: shots };
+    return { session: session, capture: capture, shots: shots, prunedSessionCount: prunedSessionCount };
+  }
+
+  /* Guest practice is useful, not disposable, but it is intentionally small.
+     Retain the two newest sessions for this guest only and remove every child
+     row with the evicted session. Account-owned data is never considered. */
+  function trimGuestSessions(store, scope, newestSessionId) {
+    var guest = !!(window.GDGuestAccess && typeof window.GDGuestAccess.isGuest === 'function' && window.GDGuestAccess.isGuest());
+    if (!guest) return 0;
+    var limit = Number(window.GDGuestAccess.practiceSessionLimit) || 2;
+    var mine = (store.sessions || []).filter(function (row) { return itemMatchesScope(row, scope) && itemIsActive(row); });
+    if (mine.length <= limit) return 0;
+    mine.sort(function (a, b) {
+      if (a.sessionId === newestSessionId) return -1;
+      if (b.sessionId === newestSessionId) return 1;
+      var aTime = Date.parse(a.importedAt || a.startedAt || '') || 0;
+      var bTime = Date.parse(b.importedAt || b.startedAt || '') || 0;
+      return bTime - aTime;
+    });
+    var remove = mine.slice(limit).reduce(function (ids, row) { ids[row.sessionId] = true; return ids; }, {});
+    var count = Object.keys(remove).length;
+    if (!count) return 0;
+    store.sessions = (store.sessions || []).filter(function (row) { return !remove[row && row.sessionId]; });
+    store.captures = (store.captures || []).filter(function (row) { return !remove[row && row.sessionId]; });
+    store.shots = (store.shots || []).filter(function (row) { return !remove[row && row.sessionId]; });
+    store.rejects = (store.rejects || []).filter(function (row) { return !remove[row && row.sessionId]; });
+    return count;
   }
 
   function idSet(values) {

@@ -21,6 +21,8 @@
   var listeners = [];
   var applied = null;
 
+  function safe(fn, fallback) { try { return fn(); } catch (e) { return fallback; } }
+
   function activeProfile() {
     try {
       var raw = JSON.parse(localStorage.getItem(PROFILE_KEY) || "null") || {};
@@ -65,8 +67,11 @@
   function apply() {
     if (!window.GDBubbleEngine || !window.GDBubbleEngine.setBubble) return;
     var demo = demoSession();
+    var practicePreview = safe(function () {
+      return window.GolfDaddyPracticeBubblePreview && window.GolfDaddyPracticeBubblePreview.current();
+    }, null);
     var bubble = (demo && demo.adopted && demo.adoptedBubble) ? demo.adoptedBubble
-      : (saved() || { offsetDeg: 0, handedness: handednessOf(activeProfile()) });
+      : (practicePreview || saved() || { offsetDeg: 0, handedness: handednessOf(activeProfile()) });
     var key = bubble.offsetDeg + "|" + bubble.handedness;
     window.GDBubbleEngine.setBubble(bubble);
     if (demo && demo.demoBag && demo.demoBag.length && window.GDBubbleEngine.setBag) {

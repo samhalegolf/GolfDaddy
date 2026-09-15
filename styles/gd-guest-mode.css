@@ -1,48 +1,7 @@
-/* Demo mode chrome for a signed-out session.
- *
- * body.gdGuestDemoMode is set by scripts/gd-guest-access.js. It means "this
- * session may look at the shot system but may not put its own evidence into
- * it", so everything here removes an INTAKE control - the ways real practice
- * shots get in. Nothing here hides output: the pattern plot, the bubble, the
- * recommendations and the comparison all render, because they are the point.
- *
- * The refusal is enforced in JS at importCapture, not by these rules. Hiding a
- * button is presentation; a hidden button that still worked would be the bug.
- * Read gd-guest-access.js before adding a rule here.
- */
-
-/* The real intake lanes: camera/photo scan, email import, manual plot, coach
-   set, pasted CSV rows, and the scanner surface they all feed. */
-body.gdGuestDemoMode #gdPracticeImportBody,
-body.gdGuestDemoMode #gdPracticeScanner,
-body.gdGuestDemoMode #gdNativePracticeImportDrawer,
-body.gdGuestDemoMode #gdManualPracticeLane,
-body.gdGuestDemoMode #gdPracticeEmailBox {
-  display: none !important;
-}
-
-/* The intake icon row. #practiceDataPanel is carried here on purpose:
-   gd-shot-data-visual-polish-v1.css sizes these buttons through
-   `#practiceDataPanel.open .gdPracticeImportIconButton{display:grid!important}`,
-   and !important on both sides is decided by specificity - an id beats any
-   number of classes, so a class-only rule here loses and the camera, email and
-   plot buttons stay on screen for a guest. */
-body.gdGuestDemoMode #practiceDataPanel .gdPracticeImportIconButton:not(.demo),
-body.gdGuestDemoMode #practiceDataPanel.open .gdPracticeImportIconButton:not(.demo) {
-  display: none !important;
-}
-
-/* The Import group's own label would otherwise sit above nothing but the two
-   demo buttons and read as a broken import panel. */
-body.gdGuestDemoMode .gdPracticeImportTitle {
-  visibility: hidden;
-}
-
-/* Says what mode this is, once, where the evidence would be. Placed on the
-   practice surface rather than as a banner so it travels with the thing it is
-   describing. */
+/* Guest Practice keeps every intake control visible. Demo is still the guided
+   first move, while local evidence is capped to the latest two sessions. */
 body.gdGuestDemoMode .gdPracticeVisualStack::before {
-  content: "Demo mode · sample shots, real engine. Sign in to use your own.";
+  content: "Try the guided demo, or add your own shots. Guest storage keeps your latest 2 sessions.";
   display: block;
   margin: 0 0 8px;
   padding: 6px 10px;
