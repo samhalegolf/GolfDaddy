@@ -642,6 +642,7 @@
       const role = String(account && account.role || 'player');
       const updatedAt = rosterUpdatedAt(account, profile);
       const createdAt = rosterCreatedAt(account, profile);
+      const profileOnly = !account.supabaseUserId && !account.email;
       const item = {
         account,
         profile,
@@ -652,7 +653,7 @@
         role,
         roleLabel: roleLabel(role),
         active,
-        status: active ? 'Selected' : (account.requiresPasswordSetup ? 'Setup needed' : 'Ready'),
+        status: active ? 'Selected' : (profileOnly ? 'Profile only' : (account.requiresPasswordSetup ? 'Setup needed' : 'Ready')),
         createdAt,
         updatedAt,
         addedLabel: shortDate(createdAt),
@@ -1044,6 +1045,15 @@
           <div><strong>Players</strong><span>Open a player profile as ${esc(roleLabel(account.role))}.</span></div>
         </div>
         ${playerRows}
+        <details class="coachAddPlayer coachShotFirstProfile">
+          <summary>Start with Shot Data</summary>
+          <p class="coachPlayerNote">Create an editable player profile now. A name and login can be added later.</p>
+          <div class="accountGrid">
+            <label class="full">Player name (optional)<input id="gd67ShotFirstName" placeholder="New Player"></label>
+          </div>
+          ${authFeedbackMarkup('gd67ShotFirstFeedback')}
+          <button class="saveBtn" type="button" onclick="gd67StartShotDataProfile()">Create Profile &amp; Enter Shot Data</button>
+        </details>
         <details class="coachAddPlayer">
           <summary>Create Player Account</summary>
           <div class="accountGrid">
@@ -1323,6 +1333,21 @@
         </details>`;
   }
 
+  function draftProfileDetailsPanel(owner, p) {
+    if (!owner || owner.supabaseUserId || owner.email) return '';
+    return `
+        <details class="coachAddPlayer coachPlayerEmailPanel">
+          <summary>Add player details &amp; login</summary>
+          <p class="coachPlayerNote">Shot data already saved on this profile will stay attached when the login is created.</p>
+          <div class="accountGrid">
+            <label>Name<input id="gd67DraftPlayerName" value="${esc(p.name === 'New Player' ? '' : p.name)}" placeholder="Player name"></label>
+            <label>Email<input id="gd67DraftPlayerEmail" type="email" autocomplete="off" placeholder="player@example.com"></label>
+          </div>
+          ${authFeedbackMarkup('gd67DraftPlayerFeedback')}
+          <button class="saveBtn" type="button" onclick="gd67CompleteShotDataProfile('${esc(owner.accountId)}','${esc(p.id)}')">Save Details &amp; Send Setup Email</button>
+        </details>`;
+  }
+
   function renderCoachPlayerView(account, owner, p) {
     const photo = p.profilePhotoDataUrl || p.photoDataUrl || '';
     /* Bag, Shot Data and Course Mapping are admin-gated. Play / GPS is not -
@@ -1383,7 +1408,7 @@
           ${playerDataCard('play', 'Play / GPS', {ready:true, headline:'Enter GPS', detail:`On-course recommendations use ${firstName(p)}'s bag and bubble.`}, `Play as ${firstName(p)}`, 'play')}
         </section>
 
-        ${managed ? '' : playerEmailPanel(account, owner)}
+        ${managed ? '' : (draftProfileDetailsPanel(owner, p) || playerEmailPanel(account, owner))}
 
         <p class="coachPlayerNote">${managed
           ? 'This profile has no login of its own. Changes are saved to it, not to your own golf.'
@@ -2042,18 +2067,29 @@
 	    const api = accountsApi();
 	    setFieldFeedback('gd67CoachPlayerFeedback','','info');
 	    const compedMonth = !!document.getElementById('gd67CoachPlayerComp')?.checked;
+	    const requestedEmail = String(document.getElementById('gd67CoachPlayerEmail')?.value || '').trim().toLowerCase();
 	    await accountActionAsync(async () => {
 	      if (!api || typeof api.addPlayer !== 'function') throw new Error('Account system not ready');
 	      if (window.ClarityCloudSync && typeof window.ClarityCloudSync.restoreAccounts === 'function') {
-	        setFieldFeedback('gd67CoachPlayerFeedback','Checking existing accounts...','info');
-	        await window.ClarityCloudSync.restoreAccounts('coach-add-player-merge');
+	        /* The server already resolves an existing account by Auth id/email. A full
+	           device restore used to sit in front of every creation and made the form
+	           wait for unrelated profiles. Refresh it in parallel instead. */
+	        window.ClarityCloudSync.restoreAccounts('coach-add-player-merge').catch(() => {});
 	      }
-		      const player = await api.addPlayer({
+	      setFieldFeedback('gd67CoachPlayerFeedback','Creating profile… You can open it as soon as it appears; the setup email may finish just after.','info');
+	      const discovery = setInterval(() => refreshCoachRoster('player-create-pending'), 900);
+	      setTimeout(() => refreshCoachRoster('player-create-started'), 350);
+	      let player;
+	      try {
+		        player = await api.addPlayer({
 		        name: document.getElementById('gd67CoachPlayerName')?.value,
-		        email: document.getElementById('gd67CoachPlayerEmail')?.value,
+		        email: requestedEmail,
 		        password: document.getElementById('gd67CoachPlayerPassword')?.value,
 		        compedMonth
-      });
+        });
+	      } finally {
+	        clearInterval(discovery);
+	      }
 	      if (player && String(player.email || '').trim().toLowerCase() === String(document.getElementById('gd67CoachPlayerEmail')?.value || '').trim().toLowerCase()) {
 	        document.getElementById('gd67CoachPlayerName').value = '';
 	        document.getElementById('gd67CoachPlayerEmail').value = '';
@@ -2068,11 +2104,63 @@
 	         happened, rather than reading a success message that covers it up. */
 	    }, result => {
 	      const base = result && result.mergedExisting ? 'Existing player merged into your list' : 'Player account added';
+	      if (result && result.emailError) return base + ', but the setup email was NOT sent: ' + result.emailError + '. The profile is ready to use now; resend the welcome email from Admin > Users.';
 	      if (!compedMonth) return base;
 	      if (result && result.comped) return base + ' with a comped month - one welcome email covers both';
 	      const why = result && result.compError ? ': ' + result.compError : '';
 	      return base + ', but the comped month was NOT issued' + why + '. Issue it from Studio > Commerce.';
 	    }, 'gd67CoachPlayerFeedback');
+	  }
+
+	  async function startShotDataProfile() {
+	    const api = accountsApi();
+	    setFieldFeedback('gd67ShotFirstFeedback','Creating profile…','info');
+	    try {
+	      if (!api || typeof api.addPlayer !== 'function') throw new Error('Account system not ready');
+	      const player = await api.addPlayer({
+	        profileOnly: true,
+	        name: document.getElementById('gd67ShotFirstName')?.value || 'New Player'
+	      });
+	      if (!player || !player.profileId) throw new Error('The new profile did not return an id');
+	      coachProfileView = 'profile';
+	      api.viewProfile(player.profileId);
+	      render();
+	      scrollProfileTop();
+	      setTimeout(() => openProfileTool('shot'), 0);
+	    } catch(e) {
+	      const message = e && e.message ? e.message : 'Could not create the profile';
+	      setFieldFeedback('gd67ShotFirstFeedback',message,'error');
+	      safeToast(message);
+	    }
+	  }
+
+	  async function completeShotDataProfile(accountId, profileId) {
+	    const api = accountsApi();
+	    const name = String(document.getElementById('gd67DraftPlayerName')?.value || '').trim();
+	    const email = String(document.getElementById('gd67DraftPlayerEmail')?.value || '').trim().toLowerCase();
+	    if (!name) { setFieldFeedback('gd67DraftPlayerFeedback','Enter the player name','error'); focusField('gd67DraftPlayerName'); return; }
+	    if (!email || !email.includes('@')) { setFieldFeedback('gd67DraftPlayerFeedback','Enter a valid email','error'); focusField('gd67DraftPlayerEmail'); return; }
+	    setFieldFeedback('gd67DraftPlayerFeedback','Adding login and sending setup email…','info');
+	    try {
+	      if (!api || typeof api.addPlayer !== 'function') throw new Error('Account system not ready');
+	      const localProfile = typeof gdProfileById === 'function' ? gdProfileById(profileId) : null;
+	      const player = await api.addPlayer({
+	        accountId, profileId, name, email,
+	        profileJson: localProfile || undefined,
+	        bag: localProfile && Array.isArray(localProfile.bag) ? localProfile.bag : undefined
+	      });
+	      if (!player || player.profileId !== profileId) throw new Error('The login was not attached to the current profile');
+	      coachProfileView = 'profile';
+	      api.viewProfile(profileId);
+	      render();
+	      safeToast(player.emailError
+	        ? 'Player details saved, but the setup email was not sent. Resend it from Admin > Users.'
+	        : 'Player details saved and setup email sent');
+	    } catch(e) {
+	      const message = e && e.message ? e.message : 'Could not add player details';
+	      setFieldFeedback('gd67DraftPlayerFeedback',message,'error');
+	      safeToast(message);
+	    }
 	  }
 
 	  function addCoachAccount() {
@@ -2400,6 +2488,8 @@
   window.gd67OpenProfileSettings = openProfileSettings;
   window.gd67OpenMembershipSettings = openMembershipSettings;
   window.gd67AddCoachPlayer = addCoachPlayer;
+  window.gd67StartShotDataProfile = startShotDataProfile;
+  window.gd67CompleteShotDataProfile = completeShotDataProfile;
   window.gd67AddCoachAccount = addCoachAccount;
   window.gd67RemoveProfile = removeProfile;
   window.gd67UnlinkPlayer = unlinkPlayer;

@@ -109,6 +109,8 @@
         existing.name = incoming.name || existing.name;
         existing.email = incoming.email || existing.email;
         existing.profileId = incoming.profileId || existing.profileId;
+        existing.supabaseUserId = incoming.supabaseUserId || existing.supabaseUserId || "";
+        existing.authProvider = existing.supabaseUserId ? "supabase" : (existing.authProvider || "profile_only");
         existing.linkedCoachIds = unique([].concat(existing.linkedCoachIds || [], incoming.linkedCoachIds || [], [coachAccountId]));
         existing.requiresPasswordSetup = !!incoming.requiresPasswordSetup;
       } else {
@@ -118,7 +120,8 @@
           name: incoming.name || "Player",
           email: incoming.email || "",
           role: "player",
-          authProvider: "supabase",
+          authProvider: incoming.supabaseUserId ? "supabase" : "profile_only",
+          supabaseUserId: incoming.supabaseUserId || "",
           passwordSalt: "",
           passwordHash: "",
           linkedCoachIds: unique([].concat(incoming.linkedCoachIds || [], [coachAccountId])),

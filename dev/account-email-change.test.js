@@ -248,7 +248,7 @@ test("the client calls the server and waits, rather than writing locally first",
 test("the coach>player view carries the control, and a managed profile does not", () => {
   const code = stripComments(shell);
   assert.ok(/function playerEmailPanel/.test(code));
-  assert.ok(/\$\{managed \? '' : playerEmailPanel\(account, owner\)\}/.test(code),
+  assert.ok(/\$\{managed \? '' : \(draftProfileDetailsPanel\(owner, p\) \|\| playerEmailPanel\(account, owner\)\)\}/.test(code),
     "a managed profile has no account and no login, so it gets no email control");
   assert.ok(/if \(!owner\) return '';/.test(code), "and the panel refuses to render without one");
 });

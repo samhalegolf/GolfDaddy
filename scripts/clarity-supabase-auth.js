@@ -211,11 +211,15 @@
     var body = await post("/api/admin-user-invite", {
       name: data && data.name,
       email: data && data.email,
+      profileOnly: !!(data && data.profileOnly),
       role: "player",
       actorName: coach.name || coach.email || "your coach",
       // Sent for continuity, but the server takes the actor from the token.
       actorAccountId: coach.accountId || "",
       targetAccountId: data && data.accountId || "",
+      targetProfileId: data && data.profileId || "",
+      profileJson: data && data.profileJson && typeof data.profileJson === "object" ? data.profileJson : undefined,
+      bag: data && Array.isArray(data.bag) ? data.bag : undefined,
       // Admin-only, re-checked server-side; the endpoint writes the entitlement and folds it
       // into the one setup email rather than sending a second one.
       compedMonth: !!(data && data.compedMonth)
@@ -227,6 +231,8 @@
        "comped: true" on the row forever. The form needs it separately from the account because
        the two can succeed independently - the account is written before the entitlement is. */
     return Object.assign({}, linked, {
+      profileOnly: !!(body && body.profileOnly),
+      emailError: body && body.emailError || "",
       comped: !!(body && body.comped),
       compError: body && body.compError || ""
     });

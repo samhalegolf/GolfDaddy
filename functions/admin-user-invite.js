@@ -1,6 +1,6 @@
 "use strict";
 
-const { email, hasAuth, json, role, supabaseAuth, supabaseRest, text, upsertAccount } = require("./auth-utils");
+const { claimCanonicalPlayer, email, findAccountByAuthUserId, findAccountById, hasAuth, json, role, supabaseAuth, supabaseRest, text, upsertAccount } = require("./auth-utils");
 const { sendSystemAlert } = require("./alert-utils");
 const { isStaffRole, resolveCaller } = require("./clarity-caller");
 const { sendAccountSetupEmail } = require("./email-notification");
@@ -11,6 +11,7 @@ function env(name) { return process.env[name] || ""; }
 function siteUrl() { return (env("CLARITY_SITE_URL") || env("APP_URL") || "https://caddy.claritygolf.app").replace(/\/+$/, ""); }
 function tempPassword() { return "Clarity-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10) + "!"; }
 function cleanId(value) { return text(value, 120).replace(/[^a-zA-Z0-9_:-]/g, ""); }
+function newId(prefix) { return prefix + "_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 9); }
 function unique(list) {
   const out = [];
   (Array.isArray(list) ? list : []).forEach(function(item) {
@@ -91,6 +92,110 @@ async function linkAccounts(coachId, playerId) {
   return { linked: !!(coach && player) };
 }
 
+async function createProfileOnly(caller, body) {
+  const coachId = cleanId(caller && caller.actorAccountId);
+  if (!coachId) { const error = new Error("Coach account is not ready"); error.status = 409; throw error; }
+  const accountId = newId("acct");
+  const profileId = newId("profile");
+  const now = new Date().toISOString();
+  const name = text(body.name, 160) || "New Player";
+  const profile = {
+    id: profileId,
+    accountId,
+    supabaseUserId: "",
+    name,
+    email: "",
+    permission: "player",
+    accountPermission: "player",
+    mode: "player",
+    handedness: "right",
+    handicap: "",
+    hcp: "",
+    bag: [],
+    onboardingComplete: false,
+    setupStage: "shot_data_first",
+    createdAt: now,
+    updatedAt: now
+  };
+  const account = {
+    accountId,
+    profileId,
+    supabaseUserId: "",
+    name,
+    email: "",
+    role: "player",
+    authProvider: "profile_only",
+    linkedCoachIds: [coachId],
+    linkedPlayerIds: [],
+    createdByCoachId: coachId,
+    requiresPasswordSetup: false,
+    createdAt: now,
+    updatedAt: now,
+    lastLoginAt: null
+  };
+  await supabaseRest("app_accounts?on_conflict=account_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      account_id: accountId, profile_id: profileId, auth_user_id: null, email: null, name, role: "player",
+      created_by_coach_id: coachId, linked_coach_ids: [coachId], linked_player_ids: [], requires_password_setup: false,
+      metadata: { source: "coach-profile-only", setupStage: "shot_data_first" }, created_at: now, updated_at: now
+    })
+  });
+  await supabaseRest("app_profiles?on_conflict=profile_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      profile_id: profileId, account_id: accountId, auth_user_id: null, email: null, name, permission: "player",
+      handedness: "right", handicap: "", bag_json: [], profile_json: profile, updated_at: now
+    })
+  });
+  await linkAccounts(coachId, accountId);
+  await claimCanonicalPlayer(null, { accountId, profileId, name, email: "" });
+  return { account, profile };
+}
+
+async function targetProfile(targetAccountId, caller) {
+  if (!targetAccountId) return null;
+  const account = await findAccountById(targetAccountId);
+  if (!account) { const error = new Error("Player profile not found"); error.status = 404; throw error; }
+  const coachId = cleanId(caller && caller.actorAccountId);
+  const linked = unique(account.linked_coach_ids).indexOf(coachId) !== -1 || unique(caller && caller.account && caller.account.linked_player_ids).indexOf(targetAccountId) !== -1;
+  if (!caller.isAdmin && !linked) { const error = new Error("That player is not linked to this coach"); error.status = 403; throw error; }
+  if (account.auth_user_id) { const error = new Error("That profile already has a login"); error.status = 409; throw error; }
+  const rows = await supabaseRest("app_profiles?select=*&profile_id=eq." + encodeURIComponent(account.profile_id) + "&limit=1", { method: "GET" });
+  return { account, profile: Array.isArray(rows) && rows[0] || null };
+}
+
+async function claimInvitedPlayer(authUser, input) {
+  let accountId = cleanId(input.accountId);
+  let profileId = cleanId(input.profileId);
+  const existingForAuth = await findAccountByAuthUserId(authUser && authUser.id);
+  if (existingForAuth && accountId && existingForAuth.account_id !== accountId) {
+    const error = new Error("That email already belongs to another Clarity account"); error.status = 409; throw error;
+  }
+  if (existingForAuth && !accountId) {
+    accountId = cleanId(existingForAuth.account_id);
+    profileId = cleanId(existingForAuth.profile_id);
+  }
+  if (accountId) {
+    const rows = await supabaseRest("caddy_players?select=id,auth_user_id&account_id=eq." + encodeURIComponent(accountId) + "&limit=1", { method: "GET" });
+    const player = Array.isArray(rows) && rows[0] || null;
+    if (player) {
+      if (player.auth_user_id && player.auth_user_id !== authUser.id) {
+        const error = new Error("That profile is already claimed by another login"); error.status = 409; throw error;
+      }
+      await supabaseRest("caddy_players?id=eq." + encodeURIComponent(player.id), {
+        method: "PATCH", headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ auth_user_id: authUser.id, normalized_email: input.email, display_name: input.name, profile_id: profileId, updated_at: new Date().toISOString() })
+      });
+      return { accountId, profileId };
+    }
+  }
+  const claimed = await claimCanonicalPlayer(authUser, input);
+  return { accountId: claimed.accountId, profileId: claimed.profileId };
+}
+
 exports.handler = async function(event) {
   if (event.httpMethod === "OPTIONS") return json(204, {});
   if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
@@ -106,7 +211,6 @@ exports.handler = async function(event) {
      affirmative value means "no comp" - never a default-on. */
   const compRequested = body.compedMonth === true || body.compedMonth === "true" || body.compedMonth === "on" || body.compedMonth === 1 || body.compedMonth === "1";
   const compHours = Number(body.compedHours);
-  if (!accountEmail) return json(400, { error: "Enter a valid email" });
 
   /* This endpoint creates Supabase Auth users, sends account-setup emails from
      the Clarity domain, and writes coach-player relationships. It used to take
@@ -141,16 +245,28 @@ exports.handler = async function(event) {
   const actorAccountId = cleanId(caller.actorAccountId || "");
 
   try {
+    if (body.profileOnly === true) {
+      const draft = await createProfileOnly(caller, body);
+      return json(200, { ok: true, profileOnly: true, account: draft.account, profile: draft.profile });
+    }
+    if (!accountEmail) return json(400, { error: "Enter a valid email" });
+    const draft = await targetProfile(targetAccountId, caller);
     const authUser = await createOrFindUser(accountEmail, name, accountRole);
-    const pack = await upsertAccount(authUser, { accountId: targetAccountId, email: accountEmail, name, role: accountRole, coachId: actorAccountId || null, eventType: "admin_user_invite" });
+    const submittedProfile = body.profileJson && typeof body.profileJson === "object" && !Array.isArray(body.profileJson) ? body.profileJson : null;
+    const preservedProfile = submittedProfile || (draft && draft.profile && draft.profile.profile_json && typeof draft.profile.profile_json === "object" ? draft.profile.profile_json : {});
+    const profileId = draft && draft.account && cleanId(draft.account.profile_id) || "";
+    const canonical = await claimInvitedPlayer(authUser, { accountId: targetAccountId, profileId, email: accountEmail, name });
+    const pack = await upsertAccount(authUser, {
+      accountId: canonical.accountId, profileId: canonical.profileId, email: accountEmail, name, role: accountRole,
+      coachId: actorAccountId || null, eventType: draft ? "coach_profile_completed" : "admin_user_invite",
+      profileJson: preservedProfile, bag: Array.isArray(body.bag) ? body.bag : (draft && draft.profile && draft.profile.bag_json)
+    });
     const playerId = pack && pack.account && pack.account.accountId || targetAccountId;
     const linkResult = accountRole === "player" ? await linkAccounts(actorAccountId, playerId) : { linked: false };
     if (linkResult.linked && pack && pack.account) {
       pack.account.linkedCoachIds = unique([].concat(pack.account.linkedCoachIds || [], [actorAccountId]));
       pack.account.createdByCoachId = pack.account.createdByCoachId || actorAccountId;
     }
-    const link = await setupLink(accountEmail);
-
     /* Order matters: the entitlement is written BEFORE the email goes out, so the message can
        state the real expiry date and the access is already live when they follow the link.
        A comp that fails to write downgrades the email to the plain setup version rather than
@@ -175,8 +291,19 @@ exports.handler = async function(event) {
       }
     }
 
-    const emailResult = await sendEmail(accountEmail, name, actorName, link, comped);
-    return json(200, { ok: true, invited: true, linked: linkResult.linked, email: accountEmail, emailResult, comped: !!comped, compError, account: pack.account, profile: pack.profile });
+    let emailResult = null;
+    let emailError = "";
+    try {
+      const link = await setupLink(accountEmail);
+      emailResult = await sendEmail(accountEmail, name, actorName, link, comped);
+    } catch (error) {
+      /* Account/profile creation is already complete. An email-provider or setup-link
+         failure must not hide that usable profile from the coach or force a refresh;
+         return the created rows and report the invitation as the separate failure it is. */
+      emailError = error && error.message ? error.message : "Setup email could not be sent";
+      await sendSystemAlert({ eventType: "admin_user_invite_email_failed", title: "Clarity profile created but setup email failed", detail: "The player profile is ready, but its setup email was not sent.", accountEmail, context: { details: error && (error.body || error.message) } });
+    }
+    return json(200, { ok: true, invited: !emailError, linked: linkResult.linked, email: accountEmail, emailResult, emailError, comped: !!comped, compError, account: pack.account, profile: pack.profile });
   } catch (error) {
     await sendSystemAlert({ eventType: "admin_user_invite_failed", title: "Clarity account invite failed", detail: "A user invite could not create a setup-password link.", accountEmail, context: { status: error.status || null, details: error.body || error.message } });
     return json(error.status || 502, { error: error.message || "Could not invite user", details: error.body || null });

@@ -135,7 +135,7 @@ exports.handler = async function (event) {
   let accountRows = [];
   try {
     accountRows = await supabaseRest(
-      "app_accounts?select=account_id,profile_id,name,email,role,requires_password_setup,linked_coach_ids,created_by_coach_id,created_at,updated_at" +
+      "app_accounts?select=account_id,profile_id,auth_user_id,name,email,role,requires_password_setup,linked_coach_ids,created_by_coach_id,created_at,updated_at" +
         "&account_id=in." + encodeURIComponent(inList(ids.slice(0, MAX_PLAYERS))),
       { method: "GET" }
     );
@@ -185,6 +185,7 @@ exports.handler = async function (event) {
       account: {
         accountId,
         profileId: cleanId(row.profile_id),
+        supabaseUserId: cleanId(row.auth_user_id),
         name: row.name || "",
         email: row.email || "",
         role: "player",

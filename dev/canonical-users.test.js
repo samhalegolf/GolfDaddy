@@ -8,6 +8,10 @@ const admin = read("functions/caddy-admin-users.js");
 const signup = read("functions/auth-signup.js");
 const auth = read("functions/auth-utils.js");
 const ui = read("scripts/clarity-admin-users.js");
+const invite = read("functions/admin-user-invite.js");
+const authClient = read("scripts/clarity-supabase-auth.js");
+const profileShell = read("scripts/inline/gd-auth-account-shell.js");
+const roster = read("functions/coach-roster.js");
 
 assert.match(sql, /create table if not exists public\.caddy_players/i);
 assert.match(sql, /auth_user_id uuid unique/i);
@@ -32,4 +36,17 @@ assert.ok(signup.indexOf("const claimed = await claimCanonicalPlayer") < signup.
 assert.match(auth, /caddy_claim_or_create_player/);
 assert.match(ui, /Create no-login player/);
 assert.match(ui, /Assign Sam Hale/);
+assert.match(invite, /body\.profileOnly === true/);
+assert.match(invite, /setupStage: "shot_data_first"/);
+assert.match(invite, /await claimCanonicalPlayer\(null, \{ accountId, profileId, name, email: "" \}\)/);
+assert.ok(invite.indexOf("const canonical = await claimInvitedPlayer") < invite.indexOf("const pack = await upsertAccount"), "an invited profile must keep its canonical ids before the compatibility rows are written");
+assert.match(invite, /profileJson: preservedProfile/);
+assert.match(invite, /profile created but setup email failed/i);
+assert.match(invite, /invited: !emailError/);
+assert.match(authClient, /profileOnly: !!\(data && data\.profileOnly\)/);
+assert.match(profileShell, /Start with Shot Data/);
+assert.match(profileShell, /Create Profile &amp; Enter Shot Data/);
+assert.match(profileShell, /Shot data already saved on this profile will stay attached/);
+assert.ok(!/await window\.ClarityCloudSync\.restoreAccounts\('coach-add-player-merge'\)/.test(profileShell), "account creation still waits for a full unrelated device restore");
+assert.match(roster, /profile_id,auth_user_id,name,email/);
 console.log("canonical users tests passed");

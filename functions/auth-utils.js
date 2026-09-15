@@ -71,6 +71,13 @@ async function findAccountByAuthUserId(authUserId) {
     .catch(function () { return []; });
   return Array.isArray(rows) && rows[0] || null;
 }
+async function findAccountById(accountId) {
+  accountId = text(accountId, 120);
+  if (!accountId) return null;
+  const rows = await supabaseRest("app_accounts?select=*&account_id=eq." + encodeFilter(accountId) + "&limit=1", { method: "GET" })
+    .catch(function () { return []; });
+  return Array.isArray(rows) && rows[0] || null;
+}
 /* THE ACCOUNT IS THE AUTH USER, NOT THE ADDRESS ON IT.
  *
  * This used to find the existing row by email alone. That is fine right up
@@ -87,6 +94,7 @@ async function findAccountByAuthUserId(authUserId) {
 async function upsertAccount(authUser, input) {
   const accountEmail = email(authUser && authUser.email || input && input.email);
   const existing = (await findAccountByAuthUserId(authUser && authUser.id))
+    || (input && input.accountId ? await findAccountById(input.accountId) : null)
     || (accountEmail ? await findAccountByEmail(accountEmail) : null);
   const pack = accountPayload(existing, authUser, input || {});
   const now = new Date().toISOString();
@@ -141,5 +149,5 @@ async function claimCanonicalPlayer(authUser, input) {
   return { player: row, accountId: row && row.account_id || accountId, profileId: row && row.profile_id || profileId };
 }
 module.exports = {
-  anonKey, email, hasAuth, hasAuthWithServiceKey, json, role, supabaseAuth, supabaseRest, text, findAccountByAuthUserId, findAccountByEmail, upsertAccount, claimCanonicalPlayer
+  anonKey, email, hasAuth, hasAuthWithServiceKey, json, role, supabaseAuth, supabaseRest, text, findAccountByAuthUserId, findAccountByEmail, findAccountById, upsertAccount, claimCanonicalPlayer
 };
