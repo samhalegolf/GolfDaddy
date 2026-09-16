@@ -554,7 +554,18 @@ body.ball-dragging #surfaceStage { transition: none !important; }
 /* The flag is a drag source, so it says so by the cursor and by never
    swallowing the gesture as a scroll. */
 .pinChoiceFlag { cursor: grab; }
-#pinChoiceDrag { touch-action: none; }
+/* Flag drag sources. touch-action must be none on the BUTTON that receives
+   pointerdown (an ancestor's value cannot restrict on its behalf): with the
+   default, WebKit hands the gesture to scrolling a few px in and fires
+   pointercancel, so the ghost flag vanished and nothing ever dropped. The
+   rail and popover get it too so a drag that starts in their padding is
+   never read as a pan. And nothing here may start a native image drag, a
+   long-press callout or a text selection — each of those cancels the
+   pointer stream in one engine or another. */
+#railPin, #pinChoiceDrag, #toolRail, #pinChoicePopover { touch-action: none; }
+#railPin, #pinChoiceDrag, #railPin img, #pinChoiceDrag img, #pinGhost img, #pinMarker img {
+  -webkit-user-drag: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+}
 
 #pinLockPanel { gap: 10px; padding: 16px 16px calc(env(safe-area-inset-bottom, 0px) + 16px); }
 #pinLockPanel h2 { font-size: 17px; margin: 0; }

@@ -34,11 +34,46 @@
     if (el) el.classList.add("hiddenState");
   }
 
+  /* The play screen is overflow:hidden, but a focused input (the Pin Lock
+     distance field, under the iOS keyboard) still gets scrolled into view,
+     and that scrolls the whole screen. Every overlay is positioned against
+     the unscrolled viewport, so from then on the flag draws — and a tap
+     lands — a scroll's width away from where the finger was. The painter
+     undoes this on hole entry; the tools that can cause it undo it on the
+     way out. */
+  function settleScreen() {
+    var screen = document.getElementById("playScreen");
+    if (!screen) return;
+    if (screen.scrollLeft) screen.scrollLeft = 0;
+    if (screen.scrollTop) screen.scrollTop = 0;
+  }
+
   function closePinLock() {
     var panel = document.getElementById("pinLockPanel");
     if (panel) panel.classList.add("hiddenState");
     var status = document.getElementById("pinLockStatus");
     if (status) status.classList.add("hiddenState");
+    var input = document.getElementById("pinLockDistance");
+    if (input && document.activeElement === input) input.blur();
+    settleScreen();
+  }
+
+  /* Opens fresh every time: last hole's quadrant and reading are the wrong
+     answer for this one, and a stale "pick the quadrant" message under a
+     new question reads as a bug. The unit follows GPS Settings. */
+  function openPinLock() {
+    var status = document.getElementById("pinLockStatus");
+    if (status) status.classList.add("hiddenState");
+    var grid = document.getElementById("pinQuadrantGrid");
+    if (grid) Array.prototype.forEach.call(grid.querySelectorAll("[data-quadrant]"), function (b) {
+      b.classList.remove("active");
+    });
+    var input = document.getElementById("pinLockDistance");
+    if (input) input.value = "";
+    var unit = document.getElementById("pinLockUnit");
+    if (unit) unit.textContent = "(" + (app.gpsSettings ? app.gpsSettings.unitLabel() : "m") + ")";
+    var panel = document.getElementById("pinLockPanel");
+    if (panel) panel.classList.remove("hiddenState");
   }
 
   app.toolRail = { toggle: toggle, close: close, openPinChoice: openPinChoice };
@@ -69,12 +104,18 @@
     function wireFlagSource(btn, onTap) {
       if (!btn || !app.pin) return;
       var down = false, dragged = false, startX = 0, startY = 0;
+      /* Belt and braces with draggable="false" on the image: a native drag
+         starting anywhere in the button ends the pointer stream with a
+         pointercancel, and the drop never happens. */
+      btn.addEventListener("dragstart", function (e) { e.preventDefault(); });
       btn.addEventListener("pointerdown", function (e) {
         down = true;
         dragged = false;
         startX = e.clientX;
         startY = e.clientY;
         try { btn.setPointerCapture(e.pointerId); } catch (err) {}
+        /* No text selection, no focus ring, no iOS callout timer. */
+        e.preventDefault();
       });
       btn.addEventListener("pointermove", function (e) {
         if (!down) return;
@@ -93,6 +134,9 @@
         if (pinGhost) pinGhost.classList.add("hiddenState");
         if (dragged) {
           app.pin.disarm();
+          /* A scrolled screen would put the drop a scroll's width from the
+             finger; settle it before asking where the finger is. */
+          settleScreen();
           var ll = app.painter && app.painter.latLngAt(e.clientX, e.clientY);
           if (ll) app.pin.set(ll);
           close();
@@ -125,11 +169,11 @@
     if (pinLockBtn) pinLockBtn.addEventListener("click", function () {
       closePinChoice();
       if (app.pin) app.pin.disarm();
-      var panel = document.getElementById("pinLockPanel");
-      if (panel) panel.classList.remove("hiddenState");
+      openPinLock();
     });
 
-    /* Quadrant is a single choice, so selecting one clears the rest. */
+    /* Quadrant is a single choice, so selecting one clears the rest — and
+       clears a "pick the quadrant" message, since that has just been done. */
     var quadrantGrid = document.getElementById("pinQuadrantGrid");
     if (quadrantGrid) quadrantGrid.addEventListener("click", function (e) {
       var btn = e.target && e.target.closest ? e.target.closest("[data-quadrant]") : null;
@@ -137,13 +181,14 @@
       Array.prototype.forEach.call(quadrantGrid.querySelectorAll("[data-quadrant]"), function (b) {
         b.classList.toggle("active", b === btn);
       });
+      var status = document.getElementById("pinLockStatus");
+      if (status) status.classList.add("hiddenState");
     });
 
     var pinLockCancel = document.getElementById("pinLockCancel");
     if (pinLockCancel) pinLockCancel.addEventListener("click", closePinLock);
 
-    var pinLockPlace = document.getElementById("pinLockPlace");
-    if (pinLockPlace) pinLockPlace.addEventListener("click", function () {
+    function placeLockedPin() {
       var status = document.getElementById("pinLockStatus");
       function fail(message) {
         if (!status) return;
@@ -153,7 +198,15 @@
       var chosen = quadrantGrid && quadrantGrid.querySelector("[data-quadrant].active");
       if (!chosen) { fail("Pick the quadrant the flag is in"); return; }
       var input = document.getElementById("pinLockDistance");
-      var distance = input ? Number(input.value) : NaN;
+      /* The reading is in the player's units; the pin maths is in metres.
+         Blank is allowed (the quadrant stands on its own); a number that is
+         not a distance is not. */
+      var typed = input ? String(input.value).trim() : "";
+      var distanceM = null;
+      if (typed) {
+        distanceM = app.gpsSettings ? app.gpsSettings.fromDisplay(typed) : Number(typed);
+        if (!Number.isFinite(distanceM) || distanceM <= 0) { fail("Enter the distance as a number"); return; }
+      }
       var hole = app.painter && app.painter.holeGeometry ? app.painter.holeGeometry() : null;
       var position = app.marshal && app.marshal.player();
       /* Named failures rather than a pin dropped somewhere plausible: without
@@ -165,11 +218,22 @@
         green: hole.green,
         greenShape: hole.greenShape,
         quadrant: chosen.dataset.quadrant,
-        distanceM: distance
+        distanceM: distanceM
       });
       if (!placed) { fail("Could not work out the pin from that"); return; }
       app.pin.set(placed);
       closePinLock();
+    }
+
+    var pinLockPlace = document.getElementById("pinLockPlace");
+    if (pinLockPlace) pinLockPlace.addEventListener("click", placeLockedPin);
+
+    /* Done on the number keyboard places the pin, the same as the button. */
+    var pinLockInput = document.getElementById("pinLockDistance");
+    if (pinLockInput) pinLockInput.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      placeLockedPin();
     });
 
     /* "Put me where I actually am" — a PREVIEW placement, since that is the

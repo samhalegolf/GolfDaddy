@@ -76,6 +76,14 @@
       return Math.round(state.units === "yd" ? v * YARDS_PER_METRE : v);
     },
     unitLabel: function () { return state.units === "yd" ? "yd" : "m"; },
+    /* The inverse: a number the player typed in their units (a rangefinder
+       reading for Pin Lock) back to the metres everything computes in.
+       Null for anything that is not a positive number. */
+    fromDisplay: function (shown) {
+      var v = Number(shown);
+      if (!Number.isFinite(v) || v <= 0) return null;
+      return state.units === "yd" ? v / YARDS_PER_METRE : v;
+    },
     /* "142m" / "155yd" — for the labels that do carry a suffix (pin distance,
        the middle guide's green readout). */
     format: function (metres) {

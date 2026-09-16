@@ -33,7 +33,7 @@
      resolves natively only because the bootstrap above ran first. -->
 <script src="../scripts/clarity-error-reporter.js"></script>
 <link rel="stylesheet" href="../assets/vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="styles.css?v=bag-free-20260830">
+<link rel="stylesheet" href="styles.css?v=pin-drag-20260916">
 <link rel="stylesheet" href="../styles/inline/gd-editable-bag-panel-v1.css">
 <link rel="stylesheet" href="../styles/gd-demo-mode.css">
 </head>
@@ -191,7 +191,7 @@
          at this size. The painter positions it from the visual builder. -->
     <div id="bubbleClub" class="hiddenState"></div>
     <div id="pinDistance" class="hiddenState"></div>
-    <div id="pinMarker" class="hiddenState"><img src="../assets/icons/flag.svg" alt=""></div>
+    <div id="pinMarker" class="hiddenState"><img src="../assets/icons/flag.svg" alt="" draggable="false"></div>
     <!-- Finish: the ball you drag to where the shot actually finished, and the
          shot's ORIGIN so you can see the shot you are reconstructing rather
          than guessing from a bare green — which is what makes logging a hole
@@ -341,7 +341,10 @@
   <div id="toolRail" class="hiddenState">
     <button id="railBag" type="button" class="railBtn" aria-label="Bag"><img src="../assets/icons/bag.png" alt=""></button>
     <button id="railWind" type="button" class="railBtn" aria-label="Wind"><span id="railWindIcon" class="railIcon"></span></button>
-    <button id="railPin" type="button" class="railBtn" aria-label="Pin" aria-pressed="false"><img src="../assets/icons/flag.svg" alt=""></button>
+    <!-- draggable="false" on the flag images: the flag is a pointer-drag
+         source, and an <img> that starts a native drag cancels the pointer
+         stream (pointercancel) before it can ever drop. -->
+    <button id="railPin" type="button" class="railBtn" aria-label="Pin" aria-pressed="false"><img src="../assets/icons/flag.svg" alt="" draggable="false"></button>
     <button id="railGpsPin" type="button" class="railBtn" aria-label="GPS locate"><img src="../assets/brand/cg-gps-pin.png?v=deb3313b" alt=""></button>
     <button id="railScorecard" type="button" class="railBtn" aria-label="Scorecard"><img src="../assets/icons/scorecard.png" alt=""></button>
     <button id="railGpsSettings" type="button" class="railBtn" aria-label="GPS Settings">
@@ -349,7 +352,7 @@
     </button>
   </div>
 
-  <div id="pinGhost" class="hiddenState"><img src="../assets/icons/flag.svg" alt=""></div>
+  <div id="pinGhost" class="hiddenState"><img src="../assets/icons/flag.svg" alt="" draggable="false"></div>
 
   <!-- The pin tool reveals its two placement methods rather than placing
        anything itself. Crosshair = calculated Pin Lock; flag = pick it up and
@@ -364,7 +367,7 @@
       <span class="pinChoiceLabel">Pin Lock</span>
     </button>
     <button id="pinChoiceDrag" type="button" class="pinChoice" aria-label="Drag and place">
-      <span class="pinChoiceIcon pinChoiceFlag" aria-hidden="true"><img src="../assets/icons/flag.svg" alt=""></span>
+      <span class="pinChoiceIcon pinChoiceFlag" aria-hidden="true"><img src="../assets/icons/flag.svg" alt="" draggable="false"></span>
       <span class="pinChoiceLabel">Drag &amp; place</span>
     </button>
   </div>
@@ -380,8 +383,10 @@
       <button type="button" data-quadrant="front-left">Front left</button>
       <button type="button" data-quadrant="front-right">Front right</button>
     </div>
-    <label class="pinLockField" for="pinLockDistance">Rangefinder distance</label>
-    <input id="pinLockDistance" type="number" inputmode="decimal" min="1" max="400" step="1" placeholder="e.g. 148">
+    <!-- Read in the player's units (GPS Settings); tool-rail.js converts to
+         metres before the pin maths, which only ever speaks metres. -->
+    <label class="pinLockField" for="pinLockDistance">Rangefinder distance <span id="pinLockUnit">(m)</span></label>
+    <input id="pinLockDistance" type="number" inputmode="decimal" min="1" max="450" step="1" placeholder="e.g. 148" enterkeyhint="done">
     <p id="pinLockStatus" class="windAutoStatus hiddenState"></p>
     <div class="windPopoverActions">
       <button id="pinLockPlace" type="button" class="linkButton">Place pin</button>

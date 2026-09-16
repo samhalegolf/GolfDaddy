@@ -1407,6 +1407,109 @@ async function bootCheck() {
     return { beforeWindPress, afterPress, anyAfterPress, beforePin, afterPinSet, afterFirstBack, afterSecondBack, fallthrough };
   });
 
+  /* The flag's two placement methods, end to end.
+
+     Drag and place: the rail flag is a pointer-drag source. Its <img> must
+     not start a native drag - that ends the pointer stream with a
+     pointercancel before anything can drop, in every engine - and the button
+     itself must carry touch-action:none, or WebKit reads the gesture as a
+     pan and cancels it a few px in. Both are readable from Chromium even
+     though only WebKit ever failed the second (audit rule 9). The drop lands
+     where the finger let go, with the flag's base on that point.
+
+     Pin Lock: the quadrant fixes the direction, the rangefinder reading fixes
+     the range - and the reading is typed in the player's units, so a yards
+     player's 150 is 137 metres, not 150. The sheet opens fresh every time. */
+  const pinTools = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp, gd = window.__gd, S = app.gpsSettings;
+    const pkg = { holes: [{ holeNumber: 1, par: 4, tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }] };
+    await gd.open("pin-tools-course", pkg, { lat: -36.918, lng: 174.735 });
+    await gd.place(h1.tee, 400);
+    app.undo.clear(); app.pin.clear();
+    const railPin = document.getElementById("railPin");
+    const statics = {
+      imgNotDraggable: railPin.querySelector("img").draggable === false,
+      railTouchAction: getComputedStyle(railPin).touchAction,
+      choiceTouchAction: getComputedStyle(document.getElementById("pinChoiceDrag")).touchAction,
+      dragStartCancelled: !railPin.dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }))
+    };
+
+    document.getElementById("toolRailTab").click();
+    await gd.wait(100);
+    const r = railPin.getBoundingClientRect();
+    const sx = r.left + r.width / 2, sy = r.top + r.height / 2;
+    const dropX = Math.round(window.innerWidth / 2), dropY = Math.round(window.innerHeight / 2 + 100);
+    const expected = app.painter.latLngAt(dropX, dropY);
+    const ev = (type, x, y) => railPin.dispatchEvent(new PointerEvent(type,
+      { bubbles: true, cancelable: true, pointerId: 7, pointerType: "touch", isPrimary: true, clientX: x, clientY: y }));
+    ev("pointerdown", sx, sy);
+    ev("pointermove", sx - 20, sy + 20);
+    const ghostShownMidDrag = gd.shown("pinGhost");
+    ev("pointermove", dropX, dropY);
+    ev("pointerup", dropX, dropY);
+    await gd.wait(120);
+    const dropped = app.pin.current();
+    const marker = document.getElementById("pinMarker").getBoundingClientRect();
+    const drag = {
+      ghostShownMidDrag,
+      ghostHiddenAfter: !gd.shown("pinGhost"),
+      railClosed: !gd.shown("toolRail"),
+      dropOnMap: !!expected,
+      landedAtFinger: !!dropped && !!expected && app.distance.haversineMeters(dropped, expected) < 0.5,
+      markerShown: gd.shown("pinMarker"),
+      /* 24px tall with its pole 6px in from the left edge (styles.css #pinMarker). */
+      markerUnderFinger: Math.abs((marker.left + 6) - dropX) < 2 && Math.abs(marker.bottom - dropY) < 2
+    };
+
+    /* A tap - no movement - reveals the two methods and places nothing. */
+    app.pin.clear();
+    document.getElementById("toolRailTab").click(); await gd.wait(60);
+    ev("pointerdown", sx, sy); ev("pointerup", sx, sy);
+    await gd.wait(60);
+    const tap = { choiceShown: gd.shown("pinChoicePopover"), noPin: app.pin.current() === null, notArmed: !app.pin.armed() };
+
+    S.set("units", "yd");
+    document.getElementById("pinChoiceLock").click(); await gd.wait(60);
+    const opened = {
+      panelShown: gd.shown("pinLockPanel"), choiceClosed: !gd.shown("pinChoicePopover"),
+      unit: document.getElementById("pinLockUnit").textContent,
+      noQuadrant: !document.querySelector("#pinQuadrantGrid .active"),
+      emptyInput: document.getElementById("pinLockDistance").value === ""
+    };
+    document.getElementById("pinLockPlace").click(); await gd.wait(30);
+    const refused = { statusShown: gd.shown("pinLockStatus"), noPin: app.pin.current() === null, panelStillOpen: gd.shown("pinLockPanel") };
+    document.querySelector('#pinQuadrantGrid [data-quadrant="back-right"]').click();
+    const statusClearedByQuadrant = !gd.shown("pinLockStatus");
+    const input = document.getElementById("pinLockDistance");
+    input.value = "150";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await gd.wait(120);
+    const locked = app.pin.current();
+    const toDeg = (rad) => (rad * 180) / Math.PI;
+    const lock = {
+      placed: !!locked,
+      panelClosed: !gd.shown("pinLockPanel"),
+      metresFromPlayer: locked ? app.distance.haversineMeters(h1.tee, locked) : null,
+      /* Degrees the pin sits clockwise of the tee-to-centre line: back-RIGHT is right of it. */
+      deltaDeg: locked
+        ? ((toDeg(app.distance.bearingRad(h1.tee, locked) - app.distance.bearingRad(h1.tee, h1.green)) + 540) % 360) - 180
+        : null
+    };
+
+    S.set("units", "m");
+    document.getElementById("toolRailTab").click(); await gd.wait(60);
+    ev("pointerdown", sx, sy); ev("pointerup", sx, sy); await gd.wait(60);
+    document.getElementById("pinChoiceLock").click(); await gd.wait(60);
+    const reopened = {
+      unit: document.getElementById("pinLockUnit").textContent,
+      noQuadrant: !document.querySelector("#pinQuadrantGrid .active"),
+      emptyInput: document.getElementById("pinLockDistance").value === ""
+    };
+    document.getElementById("pinLockCancel").click();
+    app.pin.clear();
+    return { statics, drag, tap, opened, refused, statusClearedByQuadrant, lock, reopened };
+  }, AKARANA_H1);
+
   /* Base imagery policy: aerial only inside a licensed source's coverage —
      LINZ (keyed, NZ), NAIP (US), QLD (AU) — then the keyed global Esri layer
      for everywhere no open program covers, and the honest OSM fallback when
@@ -1709,6 +1812,28 @@ async function bootCheck() {
   assert.ok(backUndo.afterFirstBack.stillOnPlay, "undoing a pin placement must not leave the play screen");
   assert.ok(backUndo.afterFirstBack.historyUnchanged, "undoing must not touch browser history");
   assert.deepStrictEqual(backUndo.afterSecondBack.wind, backUndo.beforeWindPress, "a second Back undoes the wind change underneath it");
+
+  assert.ok(pinTools.statics.imgNotDraggable, "the rail flag image must not start a native drag - it cancels the pointer stream before any drop");
+  assert.ok(pinTools.statics.dragStartCancelled, "a dragstart on the flag button is refused");
+  assert.strictEqual(pinTools.statics.railTouchAction, "none", "the rail flag button carries touch-action:none - WebKit cancels the drag as a pan otherwise");
+  assert.strictEqual(pinTools.statics.choiceTouchAction, "none", "the popover flag carries touch-action:none");
+  assert.ok(pinTools.drag.ghostShownMidDrag, "a ghost flag tracks the finger once the drag is past the tap threshold");
+  assert.ok(pinTools.drag.ghostHiddenAfter && pinTools.drag.railClosed, "the drop hides the ghost and closes the rail");
+  assert.ok(pinTools.drag.dropOnMap, "the test's drop point must be on the map");
+  assert.ok(pinTools.drag.landedAtFinger, "the drop lands at the release point");
+  assert.ok(pinTools.drag.markerShown && pinTools.drag.markerUnderFinger, "the flag draws with its base on the drop point");
+  assert.ok(pinTools.tap.choiceShown && pinTools.tap.noPin && pinTools.tap.notArmed, "a tap on the rail flag reveals the two methods and places nothing");
+  assert.ok(pinTools.opened.panelShown && pinTools.opened.choiceClosed, "Pin Lock opens from the popover and closes it");
+  assert.ok(pinTools.opened.noQuadrant && pinTools.opened.emptyInput, "Pin Lock opens with nothing chosen");
+  assert.strictEqual(pinTools.opened.unit, "(yd)", "Pin Lock reads the rangefinder in the player's units");
+  assert.ok(pinTools.refused.statusShown && pinTools.refused.noPin && pinTools.refused.panelStillOpen, "no quadrant: no pin, and the sheet says why");
+  assert.ok(pinTools.statusClearedByQuadrant, "choosing a quadrant clears the complaint about not having one");
+  assert.ok(pinTools.lock.placed && pinTools.lock.panelClosed, "Enter on the reading places the pin and closes the sheet");
+  assert.ok(Math.abs(pinTools.lock.metresFromPlayer - 150 / 1.0936133) < 0.5,
+    "a 150yd reading places the pin 137m out, not 150m (got " + pinTools.lock.metresFromPlayer + ")");
+  assert.ok(pinTools.lock.deltaDeg > 0 && pinTools.lock.deltaDeg < 45, "back-right puts the pin right of the shot line (got " + pinTools.lock.deltaDeg + "deg)");
+  assert.ok(pinTools.reopened.noQuadrant && pinTools.reopened.emptyInput && pinTools.reopened.unit === "(m)",
+    "reopening Pin Lock forgets the last answer and follows the units setting");
   assert.ok(backUndo.afterSecondBack.stillOnPlay, "undoing a wind change must not leave the play screen");
   assert.ok(!backUndo.afterSecondBack.anyLeft, "both actions undone → nothing left on the stack");
   assert.ok(backUndo.fallthrough.leftPlay, "with nothing left to undo, Back falls through to leaving GPS play");
