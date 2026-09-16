@@ -23,6 +23,7 @@
     "test:facility-structure": "node dev/facility-structure.test.js",
     "test:stitched-cards": "node dev/scorecard-stitched-cards.test.js",
     "test:loop-labels": "node dev/loop-labels.test.js",
+    "test:units": "node dev/units-setting.test.js",
     "test:bag": "node dev/bag-central-system.test.js",
     "test:bag-generator": "node dev/bag-generator-model.test.js",
     "test:bubble-handedness": "node dev/bubble-handedness.test.js",

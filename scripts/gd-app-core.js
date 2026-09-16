@@ -14675,7 +14675,19 @@ let targetDragging=false;
 let lockedFrame=false, targetWasMoved=false, undoStack=[], currentCourse=null, gdCurrentPlannedShotId=null;
 let gdSimpleGreenZoomActive=false, gdSimpleGreenZoomReturnView=null;
 let gdCurrentShotTargetMode="greenTarget", gdLastShotTargetMode="greenTarget", gdFairwayCameraNudgeState={lastAt:0};
-let units="m", showAim=true, showFilter=true, gpsWatch=null, gpsOk=false, shotTracking=false, trackedShots=[], shotId=0, currentShotLogged=false;
+/* Units is a player's setting, not a per-launch mood: metres or yards is
+   remembered on the device the same way the bag's roll-out preset is
+   (GD_BAG_FIRMNESS_KEY), so a yards player is not put back into metres every
+   time the app opens. Stored on the device rather than the profile because a
+   guest with no profile has the same right to a remembered setting, and
+   because the toggle is about how this phone reads, not who is signed in. */
+const GD_UNITS_KEY="gd_units_v1";
+function gdStoredUnits(){try{const stored=localStorage.getItem(GD_UNITS_KEY);if(stored==="m"||stored==="yd")return stored}catch(e){}return"m"}
+function gdUnitsLabel(unit){return unit==="yd"?"Yards":"Meters"}
+/* The Settings row is written in HTML as Meters; this is what makes it tell the
+   truth when the remembered setting is yards. */
+function gdSyncUnitsButtons(){const label=gdUnitsLabel(units);const btn=document.getElementById("unitsToggle");if(btn)btn.textContent=label;const sub=document.getElementById("unitsSub");if(sub)sub.textContent=label}
+let units=gdStoredUnits(), showAim=true, showFilter=true, gpsWatch=null, gpsOk=false, shotTracking=false, trackedShots=[], shotId=0, currentShotLogged=false;
 let gdLastAutoNextShotAt=0;
 let gdWindActive=false, gdWindLevel=1, gdWindOriginAngle=null, gdWindLandingTarget=null;
 /* Records whether the active wind came from live evidence or the player's own
@@ -21003,7 +21015,9 @@ function gdPanelBack(id){
   if(typeof showShellHome==="function")return showShellHome();
   return false;
 }
-function toggleUnits(){units=units==="m"?"yd":"m";document.getElementById("unitsToggle").textContent=units==="m"?"Meters":"Yards";document.getElementById("unitsSub").textContent=units==="m"?"Meters":"Yards";renderShot();if(greenPolygon)drawGreenDistances(greenPolygon);renderScorecard()}
+function toggleUnits(){units=units==="m"?"yd":"m";try{localStorage.setItem(GD_UNITS_KEY,units)}catch(e){}gdSyncUnitsButtons();renderShot();if(greenPolygon)drawGreenDistances(greenPolygon);renderScorecard()}
+if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",gdSyncUnitsButtons);
+else gdSyncUnitsButtons();
 function toggleTracking(){shotTracking=!shotTracking;const b=document.getElementById("trackToggle");b.textContent=shotTracking?"On":"Off";b.classList.toggle("active",shotTracking)}
 function toggleBubbleRenderMode(){bubbleRenderMode=bubbleRenderMode==="classic"?"custom":"classic";const b=document.getElementById("bubbleModeToggle");b.textContent=bubbleRenderMode==="classic"?"Classic":"Custom";b.classList.toggle("active",bubbleRenderMode!=="classic");renderShot()}
 function cycleBubbleBias(){const order=["neutral","right","left","long"];bubbleBiasMode=order[(order.indexOf(bubbleBiasMode)+1)%order.length];const labels={neutral:"Neutral",right:"Right",left:"Left",long:"Long"};const b=document.getElementById("bubbleBiasToggle");b.textContent=labels[bubbleBiasMode];b.classList.toggle("active",bubbleBiasMode!=="neutral");renderShot()}
