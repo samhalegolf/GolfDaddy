@@ -8,6 +8,32 @@
   function safe(fn, fallback) { try { return fn(); } catch (e) { return fallback; } }
   function clean(value) { return String(value || "").trim(); }
   function readHandoff() { return safe(function () { return JSON.parse(sessionStorage.getItem(HANDOFF_KEY) || "null"); }, null) || null; }
+  /* /app/ is a separate document. Its ordinary identity comes from the
+     sessionStorage hand-off, but iOS may rebuild a WebView after the app has
+     spent time in the background. sessionStorage is then the first thing we
+     can lose while the durable Supabase session and active account remain.
+
+     Recover only the signed-in account's OWN profile. Local profile rows are
+     deliberately not enough: logout leaves them behind, so trusting one would
+     recreate the old "previous player became the guest" leak. A current auth
+     session, an active account id and the absence of the explicit sign-out
+     marker must all agree. Coach-selected players still require the hand-off;
+     without it the safe recovery is the signed-in account, never Guest and
+     never an unrelated cached player. */
+  function durableAccountIdentity() {
+    return safe(function () {
+      if (localStorage.getItem("gd_account_signed_out_v1") === "1") return null;
+      var auth = JSON.parse(localStorage.getItem("clarity:supabase-auth-session:v1") || "null");
+      if (!auth || (!clean(auth.access_token) && !clean(auth.refresh_token))) return null;
+      var state = JSON.parse(localStorage.getItem("gd_accounts_v1") || "null") || {};
+      var accounts = Array.isArray(state.accounts) ? state.accounts : [];
+      var account = accounts.find(function (item) { return item && clean(item.accountId) === clean(state.activeId); });
+      if (!account) return null;
+      var ownId = clean(account.profileId);
+      if (!ownId) return null;
+      return { id: ownId, name: clean(account.name || account.email) || "Player", ownId: ownId };
+    }, null);
+  }
   function rootIdentity() {
     var session = safe(function () { return window.ClaritySession && window.ClaritySession.get(); }, null) || {};
     var id = clean(session.viewedProfileId || session.ownProfileId);
@@ -15,7 +41,7 @@
        GolfDaddyProfiles.active() still answers here (it falls back to the first
        stored profile, which logout deliberately leaves behind), so asking it
        would stamp a signed-out round with the previous owner's name. */
-    if (!id) return { id: "guest", name: "Guest", ownId: "" };
+    if (!id) return durableAccountIdentity() || { id: "guest", name: "Guest", ownId: "" };
     var profile = safe(function () { return window.gdProfileById ? window.gdProfileById(id) : null; }, null)
       || safe(function () { return window.GolfDaddyProfiles && window.GolfDaddyProfiles.active(); }, null) || null;
     return { id: id, name: clean(profile && profile.name) || clean(session.accountName) || "Guest", ownId: clean(session.ownProfileId) };

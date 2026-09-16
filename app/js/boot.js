@@ -9,8 +9,9 @@
      check in flight for a course just left can't land on the next one. */
   var activeCourse = null;
   var activeMapType = null;   // "object" | "published" | null (nothing usable yet)
-  var mapUpdateDismissed = false;
+  var mapUpdatePrompt = null;
   var updateCheckToken = 0;
+  var UPDATE_DISMISS_KEY = "clarity:course-update-dismissed:v1";
   /* The hole the last update check was scheduled for. The check rides on the
      Marshal's holeEntered effect, which also fires when a package is swapped
      under the SAME hole (PACKAGE_UPDATED re-enters it) - without this the
@@ -328,6 +329,24 @@
     el.classList.toggle("hiddenState", gpsNoticeDismissed || status !== "denied");
   }
 
+  /* A denied native permission cannot be prompted again. Take the player to
+     this app's settings page; web browsers have no standard settings URL, so
+     re-check there and leave the plain-language route visible. */
+  function enableLocation() {
+    gpsNoticeDismissed = false;
+    var native = window.GDNative || {};
+    try {
+      if (native.isNative && native.platform === "ios") {
+        window.location.href = "app-settings:";
+      } else if (native.isNative && native.platform === "android") {
+        window.location.href = "intent:#Intent;action=android.settings.APPLICATION_DETAILS_SETTINGS;data=package:com.claritygolf.caddy;end";
+      } else if (app.gps && app.gps.recheck) {
+        app.gps.recheck();
+      }
+    } catch (e) {}
+    setTimeout(function () { if (app.gps && app.gps.recheck) app.gps.recheck(); }, 800);
+  }
+
   /* Android's hardware Back, routed to the same handler as the on-screen one.
      Without a listener the system default pops the WebView's history or closes
      the app outright, which mid-round is the worst thing this app can do.
@@ -445,6 +464,25 @@
     updateCheckToken += 1;
   }
 
+  function updateVersion(pkg, mapType) {
+    return [mapType || "map", pkg && pkg.packageVersion || "", pkg && pkg.objectsVersion || ""].join(":");
+  }
+
+  function dismissedUpdates() {
+    try { return JSON.parse(localStorage.getItem(UPDATE_DISMISS_KEY) || "null") || {}; }
+    catch (e) { return {}; }
+  }
+
+  function updateWasDismissed(course, pkg, mapType) {
+    return dismissedUpdates()[String(course && course.courseId || "")] === updateVersion(pkg, mapType);
+  }
+
+  function dismissMapUpdate(course, pkg, mapType) {
+    var all = dismissedUpdates();
+    all[String(course.courseId)] = updateVersion(pkg, mapType);
+    try { localStorage.setItem(UPDATE_DISMISS_KEY, JSON.stringify(all)); } catch (e) {}
+  }
+
   /* Once per hole change, ask whether the SERVER's copy is newer than the one
      on this device. Fire-and-forget: this runs after a hole change already
      resolved, never blocks navigation.
@@ -492,7 +530,7 @@
     /* Playing on the live map with nothing saved: the first map to appear is
        genuinely new to this device, whatever its version. */
     if (!local) {
-      if (!mapUpdateDismissed) showMapUpdateBar(course, pkg, mapType);
+      if (!updateWasDismissed(course, pkg, mapType)) showMapUpdateBar(course, pkg, mapType);
       return;
     }
     var kind = app.courseVersions.updateKind(local, {
@@ -509,9 +547,9 @@
       adoptMapUpdate(course, pkg, mapType);
       return;
     }
-    /* The dismissal belongs to the prompt, not to the check - it was a "no" to
-       being asked, and the auto-adopts above never asked. */
-    if (mapUpdateDismissed) return;
+    /* Dismissal belongs to this exact published/object version. A later
+       version is news again; the same one stays quiet across holes/restarts. */
+    if (updateWasDismissed(course, pkg, mapType)) return;
     showMapUpdateBar(course, pkg, mapType);
   }
 
@@ -521,14 +559,40 @@
    * live hole stays, the mode stays, and only the geometry underneath changes
    * (see marshal.js). That is what makes taking a map mid-round safe enough to
    * do without asking. */
-  function adoptMapUpdate(course, pkg, mapType) {
+  function adoptMapUpdate(course, pkg, mapType, opts) {
     saveCourseToLibrary(course, pkg);
     activeMapType = mapType;
     /* Before the signal: the Scene it emits is what re-presents the hole, and
        the painter's per-session visual cache has to be gone by then. */
     if (app.painter && app.painter.refreshSurface) app.painter.refreshSurface(app.courseKey(course.courseId));
     app.marshal.signal("PACKAGE_UPDATED", { pkg: pkg });
-    document.getElementById("mapUpdateBar").classList.add("hiddenState");
+    mapUpdatePrompt = null;
+    if (!(opts && opts.keepBar)) document.getElementById("mapUpdateBar").classList.add("hiddenState");
+  }
+
+  function applyMapUpdateWithProgress(course, pkg, mapType) {
+    var bar = document.getElementById("mapUpdateBar");
+    var label = document.getElementById("mapUpdateLabel");
+    var button = document.getElementById("mapUpdateDownload");
+    if (!bar || !label || !button || button.disabled) return;
+    button.disabled = true;
+    button.textContent = "Updating…";
+    label.textContent = "Updating course map · Preparing…";
+    document.body.classList.add("map-update-in-progress");
+    requestAnimationFrame(function () {
+      label.textContent = "Updating course map · Refreshing playing surface…";
+      setTimeout(function () {
+        adoptMapUpdate(course, pkg, mapType, { keepBar: true });
+        document.body.classList.remove("map-update-in-progress");
+        label.textContent = "Map updated ✓";
+        button.textContent = "Updated";
+        setTimeout(function () {
+          bar.classList.add("hiddenState");
+          button.disabled = false;
+          button.textContent = "Update";
+        }, 900);
+      }, 120);
+    });
   }
 
   /* A prompt, not an auto-switch - the auto-download bias only applies to a
@@ -536,6 +600,7 @@
      no prompt at all); one that arrives mid-round asks first, since the
      player is already using the map they have. */
   function showMapUpdateBar(course, pkg, mapType) {
+    if (updateWasDismissed(course, pkg, mapType)) return;
     /* "Available" is the right word only when the device has nothing. With a
        copy already saved this bar is offering a NEWER one, and saying
        "available" there is the same overclaim checkForMapUpdate just stopped
@@ -544,8 +609,11 @@
       app.courseStore.load(course.courseId) ? "Updated map available"
         : mapType === "published" ? "Published map available" : "Course map available";
     document.getElementById("mapUpdateBar").classList.remove("hiddenState");
+    mapUpdatePrompt = { course: course, pkg: pkg, mapType: mapType };
+    document.getElementById("mapUpdateDownload").textContent = "Update";
+    document.getElementById("mapUpdateDownload").disabled = false;
     document.getElementById("mapUpdateDownload").onclick = function () {
-      adoptMapUpdate(course, pkg, mapType);
+      applyMapUpdateWithProgress(course, pkg, mapType);
     };
   }
 
@@ -556,16 +624,24 @@
   function goResumeHole(hole) {
     var n = Number(hole);
     if (!Number.isFinite(n) || n < 1) return;
-    if (app.marshal.round().hole === n) return;
-    app.marshal.signal("VIEW_HOLE_CHANGED", { hole: n });
+    app.marshal.signal("RESUME_HOLE", { hole: n });
   }
 
   async function openPlay(course, resumeHole) {
     show("play");
     activeCourse = course;
-    mapUpdateDismissed = false;
+    mapUpdatePrompt = null;
     lastUpdateCheckHole = null;
     gpsNoticeDismissed = false;
+    /* A WebView rebuilt after backgrounding returns directly to this course
+       URL, which carries no hole. Read the durable round BEFORE setCourse()
+       writes its initial Hole 1 record, or the reload destroys the very hole
+       it is meant to resume. The player-scoped storage key also ensures a
+       different signed-in player cannot inherit it. */
+    if ((!Number.isFinite(Number(resumeHole)) || Number(resumeHole) < 1) && app.resume && roundFeatures()) {
+      var savedRound = app.resume.read();
+      if (savedRound && String(savedRound.courseId) === String(course.courseId)) resumeHole = savedRound.hole;
+    }
     /* Record the round the moment it is genuinely up, so a phone that dies on
        the 7th tee still has somewhere to come back to. play.js keeps the hole
        current from here on. */
@@ -638,7 +714,8 @@
     document.getElementById("holeNumber").addEventListener("click", openHolePicker);
     document.getElementById("holePickerClose").addEventListener("click", closeHolePicker);
     document.getElementById("mapUpdateDismiss").addEventListener("click", function () {
-      mapUpdateDismissed = true;
+      if (mapUpdatePrompt) dismissMapUpdate(mapUpdatePrompt.course, mapUpdatePrompt.pkg, mapUpdatePrompt.mapType);
+      mapUpdatePrompt = null;
       document.getElementById("mapUpdateBar").classList.add("hiddenState");
     });
     var demoCourseDataCta = document.getElementById("gdDemoCourseDataCta");
@@ -654,6 +731,10 @@
     document.getElementById("gpsNoticeDismiss").addEventListener("click", function () {
       gpsNoticeDismissed = true;
       document.getElementById("gpsNotice").classList.add("hiddenState");
+    });
+    document.getElementById("gpsNoticeEnable").addEventListener("click", enableLocation);
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden && activeCourse && app.gps && app.gps.recheck) app.gps.recheck();
     });
     app.courseDataFeedInstalled = !!(app.courseData && app.courseData.submit);
     app.showRoute = show;   // access.js offers sign-in without leaving the page

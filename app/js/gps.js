@@ -11,6 +11,7 @@
   /* "" until the browser answers. "denied" is the only value that means the
      player has to do something; the others stay silent on purpose. */
   var status = "";
+  var permissionState = "unknown";
 
   function setStatus(next) {
     if (status === next) return;
@@ -18,9 +19,28 @@
     statusListeners.forEach(function (fn) { try { fn(status); } catch (e) {} });
   }
 
+  function checkPermission() {
+    if (!navigator.permissions || typeof navigator.permissions.query !== "function") return Promise.resolve("unknown");
+    return navigator.permissions.query({ name: "geolocation" }).then(function (result) {
+      permissionState = result.state || "unknown";
+      if (permissionState === "denied") setStatus("denied");
+      result.onchange = function () {
+        var before = permissionState;
+        permissionState = result.state || "unknown";
+        if (permissionState === "denied") setStatus("denied");
+        else if (permissionState === "granted" && before === "denied") {
+          app.gps.stop();
+          app.gps.start();
+        }
+      };
+      return permissionState;
+    }).catch(function () { return "unknown"; });
+  }
+
   app.gps = {
     start: function () {
       if (watchId !== null) return;
+      checkPermission();
       if (!navigator.geolocation || typeof navigator.geolocation.watchPosition !== "function") {
         setStatus("unsupported");
         return;
@@ -59,5 +79,19 @@
     onStatus: function (fn) { statusListeners.push(fn); },
     status: function () { return status; },
     lastFix: function () { return lastFix; }
+  };
+  app.gps.recheck = function () {
+    return checkPermission().then(function (state) {
+      /* A denied watch is not guaranteed to recover after Settings changes.
+         Recreate it when permission is now usable so resume immediately asks
+         the platform for a fresh high-accuracy fix. */
+      if (state === "granted" && status === "denied") {
+        app.gps.stop();
+        app.gps.start();
+      } else if (watchId === null && state !== "denied") {
+        app.gps.start();
+      }
+      return state;
+    });
   };
 })();

@@ -50,7 +50,7 @@ function newRound(opts = {}) {
     now: () => 1000
   });
   m.signal("ROUND_OPENED", {
-    courseKey: "verify", pkg: PKG,
+    courseKey: "verify", pkg: opts.pkg || PKG,
     centre: opts.centre === undefined ? null : opts.centre,   // null = must derive
     hole: 1
   });
@@ -127,6 +127,18 @@ check("looking at another hole is Preview; the live hole is untouched", () => {
   assert.strictEqual(m.scene().mode, "aim", "the live hole comes back exactly as it was");
 });
 
+check("resume restores the canonical live hole, not merely the viewed hole", () => {
+  const { m } = newRound();
+  m.signal("VIEW_HOLE_CHANGED", { hole: 1 });
+  assert.strictEqual(m.state().live.hole, null, "ordinary viewing remains Preview");
+  assert.strictEqual(m.signal("RESUME_HOLE", { hole: 2 }), true);
+  assert.strictEqual(m.state().live.hole, 2);
+  assert.strictEqual(m.scene().hole.number, 2);
+  assert.strictEqual(m.scene().flow, "live");
+  m.signal("FIX_RECEIVED", { point: TEE });
+  assert.strictEqual(m.state().live.hole, 2, "a later suggestion/fix cannot replace the resumed hole");
+});
+
 console.log("\n— the round moves when you say so —");
 
 /* The arrows used to walk the round while Live: skip ahead to read the next
@@ -144,14 +156,15 @@ check("the arrows never move the live hole", () => {
   assert.strictEqual(m.scene().mode, "track");
 });
 
-check("scroll ahead and Play appears only on the hole you have reached", () => {
+check("scroll ahead offers an explicit override for a selected hole within about 1km", () => {
   const { m } = playing();
   m.signal("NEXT_HOLE");
-  assert.strictEqual(m.scene().playButton.show, false, "you are still on the 1st tee");
+  assert.strictEqual(m.scene().playButton.show, true, "hole 2 is reasonably close to the course position");
+  assert.strictEqual(m.state().live.hole, 1, "the offer alone does not move the live round");
   m.signal("NEXT_HOLE");
-  assert.strictEqual(m.scene().playButton.show, false);
+  assert.strictEqual(m.scene().playButton.show, true, "hole 3 is still inside the explicit override radius");
   m.signal("FIX_RECEIVED", { point: offsetM(H2_TEE, -8, 0) });   // walk to the 2nd
-  assert.strictEqual(m.scene().playButton.show, false, "looking at 3, standing at 2");
+  assert.strictEqual(m.scene().playButton.show, true, "the selected hole remains the proposed override");
   m.signal("VIEW_HOLE_CHANGED", { hole: 2 });
   assert.strictEqual(m.scene().playButton.show, true, "there it is");
   assert.strictEqual(m.scene().playButton.hole, 2, "and it plays the hole on screen");
@@ -160,11 +173,14 @@ check("scroll ahead and Play appears only on the hole you have reached", () => {
   assert.strictEqual(m.scene().hole.number, 2);
 });
 
-check("Play is inert on a hole you are only looking at", () => {
-  const { m } = playing();
-  m.signal("VIEW_HOLE_CHANGED", { hole: 3 });
+check("Play is inert on a selected hole beyond the override radius", () => {
+  const farPkg = { status: "lite-geo-ready", holes: PKG.holes.concat([
+    { holeNumber: 9, par: 4, tee: offsetM(TEE, -1400, 0), green: offsetM(TEE, -1650, 0), greenShape: [], route: [] }
+  ]) };
+  const { m } = playing({ pkg: farPkg, centre: TEE });
+  m.signal("VIEW_HOLE_CHANGED", { hole: 9 });
   assert.strictEqual(m.signal("PLAY_PRESSED"), false);
-  assert.strictEqual(m.scene().hole.number, 3);
+  assert.strictEqual(m.scene().hole.number, 9);
   assert.strictEqual(m.scene().flow, "preview", "still just looking");
 });
 
@@ -203,6 +219,22 @@ check("only End Round clears the live hole", () => {
   m.signal("END_ROUND");
   assert.strictEqual(m.state().live.hole, null);
   assert.strictEqual(m.scene().flow, "preview");
+});
+
+check("a course package update preserves live, preview and shot state", () => {
+  const { m } = playing();
+  m.signal("LOCK");
+  m.signal("VIEW_HOLE_CHANGED", { hole: 2 });
+  const before = m.state();
+  const updated = JSON.parse(JSON.stringify(PKG));
+  updated.packageVersion = 9;
+  updated.holes[1].green = offsetM(H2_GREEN, 2, 0);
+  assert.strictEqual(m.signal("PACKAGE_UPDATED", { pkg: updated }), true);
+  const after = m.state();
+  assert.strictEqual(after.live.hole, before.live.hole, "the canonical live hole survives");
+  assert.strictEqual(after.viewHole, before.viewHole, "the previewed hole survives");
+  assert.deepStrictEqual(after.shots, before.shots, "the in-progress shot survives");
+  assert.strictEqual(m.scene().flow, "preview", "the player stays in the same play/preview mode");
 });
 
 console.log("\n— no bubble unless you asked —");
@@ -543,16 +575,16 @@ check("green focus keeps a distance to the middle", () => {
   assert.strictEqual(m.scene().distances.centre, 8);
 });
 
-/* The ball has to be reachable anywhere in the band it may be placed in, so
-   the camera is told to frame the radius rather than the green. */
-check("green focus frames the whole 40m band, not the green polygon", () => {
+/* Shot End frames the actual landing area with the green, rather than always
+   zooming back out to the full trigger band. */
+check("green focus frames the actual ball position tightly", () => {
   const { m } = playing();
-  m.signal("FIX_RECEIVED", { point: offsetM(GREEN, 38, 0) });
+  m.signal("FIX_RECEIVED", { point: offsetM(GREEN, 8, 0) });
   const cam = m.scene().camera;
   assert.strictEqual(cam.stage, "green");
-  assert.ok(cam.focus, "the camera is given a point on the radius");
+  assert.ok(cam.focus, "the camera is given the actual finish point");
   const radius = distanceLib.haversineMeters(cam.focus, GREEN);
-  assert.ok(Math.abs(radius - 40) < 0.5, `the radius is 40m, got ${radius}`);
+  assert.ok(Math.abs(radius - 8) < 0.5, `the landing-area radius is 8m, got ${radius}`);
 });
 
 console.log("\n— the picker's marks —");
@@ -861,6 +893,7 @@ check("an inert signal answers false so Trace can show it", () => {
 check("every signal the concept lists has a handler", () => {
   const { m } = playing();
   ["ROUND_OPENED", "FIX_RECEIVED", "FIX_LOST", "PLAY_PRESSED", "END_ROUND",
+    "RESUME_HOLE",
     "VIEW_HOLE_CHANGED", "PLACED", "LOCK", "UNLOCK", "AIM_DRAGGED", "SHOT_END",
     "FINISH_OPENED", "BALL_MOVED", "FINISH_LOGGED", "SCORE_SET", "SCORE_STEP", "BACK",
     "HOLE_COMPLETED", "NEXT_HOLE", "PREV_HOLE", "ADVANCE_TO_HOLE", "LOG_OPENED",

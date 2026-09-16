@@ -1009,11 +1009,14 @@
 
   function drawChrome(scene) {
     drawBadge(scene);
+    var canTrackShots = !app.access || app.access.roundFeatures();
 
     var play = el("playButton");
     show(play, scene.playButton.show);
     if (play && scene.playButton.show) {
-      play.textContent = scene.playButton.hole ? "Play hole " + scene.playButton.hole : "Play";
+      play.textContent = scene.banner.returnTo !== null
+        ? "Play This Hole · " + scene.playButton.hole
+        : (scene.playButton.hole ? "Play hole " + scene.playButton.hole : "Play");
     }
 
     var bar = el("distanceBar");
@@ -1065,13 +1068,16 @@
     show(el("startPill"), scene.startPill.show);
 
     var dock = el("shotActionBtn");
-    show(dock, scene.dock.show);
+    /* Guests keep Lock/Unlock as rangefinder controls, but never see a Shot
+       End action. In green focus the primary face itself becomes Shot End, so
+       hide that face too; Back still closes the view without writing. */
+    show(dock, scene.dock.show && (canTrackShots || scene.dock.face !== "shotEnd"));
     /* Updated even while hidden, so the button never comes back wearing the
        previous coin for the frame it takes the new PNG to decode. */
     if (dock) setDockFace(dock, scene);
-    show(el("shotEndBtn"), scene.dock.canShotEnd);
+    show(el("shotEndBtn"), canTrackShots && scene.dock.canShotEnd);
 
-    show(el("finishControl"), scene.finishControl.show);
+    show(el("finishControl"), canTrackShots && scene.finishControl.show);
     show(el("holeCompleteControl"), scene.holeCompleteControl.show);
 
     drawLogged(scene);

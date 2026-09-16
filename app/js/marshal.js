@@ -31,7 +31,7 @@
 
   /* Is this person at the golf course at all — measured from the course centre,
      not from any one hole, so walking between holes never re-litigates it. */
-  var AT_COURSE_M = 800;
+  var AT_COURSE_M = 1000;
 
   /* Inside this of the green centre the app is LOOKING AT THE GREEN. Green
      focus is a view, not a prompt: it opens on position alone, whether or not
@@ -72,12 +72,12 @@
      because arriving is a stronger claim than being offered the choice. */
   var TEE_ZONE_M = 30;
 
-  /* Close enough to a hole to be playing it. The arrows and the picker only
-     ever LOOK at holes now — the live hole moves when you say so, and this is
-     the test for whether the app is allowed to offer you that. Measured from
-     the tee, falling back to the green, because "have I arrived" is a question
-     about the tee box. */
-  var HOLE_ARRIVAL_M = 100;
+  /* Close enough to a hole to make an explicit player override credible. The
+     arrows and picker only LOOK; inside roughly a kilometre, "Play This Hole"
+     lets the player overrule a bad suggestion. Measured from the tee, falling
+     back to the green. Pressing it is authoritative; proximity never changes
+     the live hole again. */
+  var HOLE_ARRIVAL_M = 1000;
 
   /* Aim releases itself once you have plainly walked off the point you locked
      from: you locked in, you hit, you walked. Two fixes so one wild reading
@@ -570,6 +570,17 @@
         };
         enterHole(p.hole || holesInPlay()[0] || 1);
         if (typeof fx.roundStarted === "function") { try { fx.roundStarted(S.round.courseKey, S.round.courseName); } catch (e) {} }
+        return true;
+      },
+
+      /* Resume is an explicit restoration of the canonical live hole, not a
+         request to look at it. Using VIEW_HOLE_CHANGED here left live.hole
+         null, so the next fix could start whichever hole happened to be
+         nearest and make a previously previewed/viewed hole look canonical. */
+      RESUME_HOLE: function (p) {
+        var hole = Number(p && p.hole);
+        if (!S.round.open || holesInPlay().indexOf(hole) === -1) return false;
+        startHole(hole);
         return true;
       },
 
@@ -1230,15 +1241,16 @@
           stage: m === "finish" ? "green" : (aiming ? "shot" : "hole"),
           hole: r,
           shot: aimShot,
-          /* A point on the green-focus radius, so the camera can frame the
-             whole 40m band as a circle rather than framing the green polygon.
-             It is given as a POINT and not a number of metres because the
-             framing happens in the presentation's own pixel space, which knows
-             nothing about metres — it projects this and measures. Without it
-             the ball you are asked to drag starts outside the frame the moment
-             you are more than a green's width from the middle, which is most
-             of the band. */
-          focus: (m === "finish" && r && r.green) ? distance.project(r.green, 0, GREEN_FOCUS_M) : null,
+          /* A point the green-focus camera must include. It is the actual ball
+             when one exists, so the landing area gets the tightest truthful
+             frame rather than an unconditional 40m overview. */
+          /* Fit the actual finish point with the green instead of always
+             framing the full 40m trigger band. A ball on or beside the green
+             now gets the tight landing-area view; an honest fix near the edge
+             still remains in frame. With no ball, keep a compact fallback. */
+          focus: (m === "finish" && r && r.green)
+            ? ((S.finish && S.finish.ball) || (S.logging && S.logging.ball) || distance.project(r.green, 0, 22))
+            : null,
           /* The course centre, so a hole with no tee or green still has
              somewhere to point the map — and so the basemap can be chosen at
              all, which is what keeps the imagery attribution on screen. */

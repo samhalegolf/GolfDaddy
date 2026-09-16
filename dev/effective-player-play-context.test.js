@@ -31,4 +31,14 @@ assert.strictEqual(window.GDPlayContext.identity().name,"Guest","signed-out iden
 const handoff=window.GDPlayContext.begin({source:"home-play"});
 assert.strictEqual(handoff.playerId,"guest","signed-out handoff must be the guest player");
 assert.strictEqual(handoff.playerName,"Guest","signed-out handoff must not carry the residual profile name");
+/* iOS may rebuild the GPS Play document after backgrounding and lose only the
+   sessionStorage hand-off. A durable auth session plus the active account must
+   recover the signed-in player's OWN identity, never a cached profile guess. */
+localStorage.setItem("clarity:supabase-auth-session:v1",JSON.stringify({refresh_token:"refresh-1"}));
+localStorage.setItem("gd_accounts_v1",JSON.stringify({activeId:"acct-admin",accounts:[{accountId:"acct-admin",profileId:"profile-admin",name:"Sam",role:"admin"}]}));
+localStorage.removeItem("gd_account_signed_out_v1");
+sessionStorage.removeItem("clarity:play-context:v1");
+assert.deepStrictEqual(JSON.parse(JSON.stringify(window.GDPlayContext.identity())),{id:"profile-admin",name:"Sam",ownId:"profile-admin"},"a rebuilt GPS page must retain the authenticated account identity");
+localStorage.setItem("gd_account_signed_out_v1","1");
+assert.strictEqual(window.GDPlayContext.identity().name,"Guest","an explicit sign-out must defeat durable account recovery");
 console.log("effective player Play context tests passed");

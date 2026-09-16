@@ -240,7 +240,7 @@ body.ball-dragging #surfaceStage { transition: none !important; }
    than trusting the fix. Ported verbatim from the legacy green focus
    (styles/inline/gd-gps-state-stabilizer-v1.css .gdGreenFocusScreenBall) —
    dimples and shading are pure radial-gradients, no asset. */
-#greenFocusBall { position: absolute; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 999px; z-index: 558; touch-action: none; cursor: grab; pointer-events: auto;
+#greenFocusBall { position: absolute; width: clamp(20px, 5.4vw, 24px); height: clamp(20px, 5.4vw, 24px); margin: 0; transform: translate(-50%, -50%); border-radius: 999px; z-index: 558; touch-action: none; cursor: grab; pointer-events: auto;
   background:
     radial-gradient(circle at 38% 33%, rgba(255, 255, 255, .98) 0 3px, transparent 3.4px),
     radial-gradient(circle at 58% 31%, rgba(215, 226, 215, .86) 0 2.2px, transparent 2.8px),
@@ -250,23 +250,23 @@ body.ball-dragging #surfaceStage { transition: none !important; }
     radial-gradient(circle at 39% 30%, #fff 0%, #f6f8f1 35%, #dce5d7 65%, #9caf96 100%);
   border: 2px solid rgba(255, 255, 255, .96);
   box-shadow:
-    inset -7px -9px 12px rgba(63, 86, 58, .32),
-    inset 6px 6px 10px rgba(255, 255, 255, .58),
-    0 0 0 7px rgba(88, 220, 126, .22),
-    0 0 30px rgba(88, 220, 126, .88),
-    0 16px 32px rgba(0, 0, 0, .45); }
+    inset -4px -5px 7px rgba(63, 86, 58, .32),
+    inset 3px 3px 6px rgba(255, 255, 255, .58),
+    0 0 0 4px rgba(88, 220, 126, .2),
+    0 0 16px rgba(88, 220, 126, .72),
+    0 8px 16px rgba(0, 0, 0, .4); }
 #greenFocusBall.hiddenState { display: none; }
 #greenFocusBall.dragging { cursor: grabbing;
   box-shadow:
-    inset -7px -9px 12px rgba(63, 86, 58, .32),
-    inset 6px 6px 10px rgba(255, 255, 255, .58),
-    0 0 0 9px rgba(88, 220, 126, .28),
-    0 0 38px rgba(88, 220, 126, .96),
-    0 20px 38px rgba(0, 0, 0, .5); }
+    inset -4px -5px 7px rgba(63, 86, 58, .32),
+    inset 3px 3px 6px rgba(255, 255, 255, .58),
+    0 0 0 5px rgba(88, 220, 126, .26),
+    0 0 20px rgba(88, 220, 126, .88),
+    0 10px 20px rgba(0, 0, 0, .46); }
 /* Parked: walked off the green with the ball still unplaced. It sits at a
    fixed pickup point clear of the Shot End dock, waiting to be dragged onto
    the green the camera is still holding. A gentle pulse says "grab me". */
-#greenFocusBall.parked { left: auto; top: auto; right: 34px; bottom: calc(env(safe-area-inset-bottom, 0px) + 226px); margin: 0; animation: ballWaiting 1.9s ease-in-out infinite; }
+#greenFocusBall.parked { left: auto; top: auto; right: 34px; bottom: calc(env(safe-area-inset-bottom, 0px) + 226px); margin: 0; transform: none; animation: ballWaiting 1.9s ease-in-out infinite; }
 @keyframes ballWaiting { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
 @media (prefers-reduced-motion: reduce) { #greenFocusBall.parked { animation: none; } }
 
@@ -472,6 +472,8 @@ body.ball-dragging #surfaceStage { transition: none !important; }
 #mapUpdateBar span { flex: 1; font-size: 14px; }
 #mapUpdateBar button { border: 0; border-radius: 8px; padding: 6px 12px; font-size: 13px; }
 #mapUpdateDownload { background: #1fd36d; color: #06110b; font-weight: 700; }
+#mapUpdateDownload:disabled { opacity: .72; cursor: progress; }
+body.map-update-in-progress #surfaceStage { opacity: .72; transition: opacity 120ms ease; }
 /* Same bar shape as the map-update row above, in a warning amber rather than
    the brand green - this one reports something the player has to fix, not
    something they can take. Both live in #playTopBar's normal flow, so they
@@ -480,6 +482,7 @@ body.ball-dragging #surfaceStage { transition: none !important; }
 #gpsNotice.hiddenState { display: none; }
 #gpsNotice span { flex: 1; font-size: 13px; line-height: 1.35; color: #f4dfba; }
 #gpsNotice button { border: 0; border-radius: 8px; padding: 6px 12px; font-size: 13px; background: transparent; color: #f4dfba; }
+#gpsNoticeEnable { background: #f0b042 !important; color: #181106 !important; font-weight: 800; white-space: nowrap; }
 /* Rangefinder-only prompt. Brand green rather than the amber warning above:
    this is an offer, not a fault the player has to fix. */
 #accessNotice { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: rgba(31, 211, 109, .16); border-bottom: 1px solid rgba(31, 211, 109, .3); }

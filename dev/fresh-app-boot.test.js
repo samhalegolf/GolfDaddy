@@ -1599,7 +1599,7 @@ async function bootCheck() {
     const holeNumbers = [1, 2, 3];
     const body = /^full-map-ready/.test(packageStatus)
       ? {
-          courseId, status: "full-map-ready", packageVersion: packageStatus === "full-map-ready-v9" ? 9 : 7,
+          courseId, status: "full-map-ready", packageVersion: Number((/v(\d+)/.exec(packageStatus) || [])[1]) || 7,
           geometryVersion: "2026-08-01T00:00:00Z",
           holes: holeNumbers.map((holeNumber) => ({ holeNumber, geometry: { tee: AKARANA_H1.tee, green: AKARANA_H1.green, greenShape: [], route: [] }, visual: null }))
         }
@@ -1618,6 +1618,22 @@ async function bootCheck() {
     const saved = window.ClarityApp.courseStore.load("store-test-course");
     return { fetchesSoFar: undefined, savedMapType: saved && saved.mapType, hole: window.ClarityApp.marshal.round().hole };
   });
+  const guestShotControls = await storePage.evaluate(({ tee, green }) => {
+    const m = window.ClarityApp.marshal;
+    m.signal("FIX_RECEIVED", { point: tee });
+    m.signal("PLAY_PRESSED");
+    m.signal("LOCK");
+    const aiming = {
+      shotEndHidden: document.getElementById("shotEndBtn").classList.contains("hiddenState"),
+      unlockShown: !document.getElementById("shotActionBtn").classList.contains("hiddenState")
+    };
+    m.signal("FIX_RECEIVED", { point: green });
+    return {
+      aiming,
+      finishFace: document.getElementById("shotActionBtn").dataset.action,
+      finishActionHidden: document.getElementById("shotActionBtn").classList.contains("hiddenState")
+    };
+  }, { tee: AKARANA_H1.tee, green: AKARANA_H1.green });
   const fetchesAfterFirstVisit = packageFetches;
 
   await storePage.goto(storeUrl, { waitUntil: "load" });
@@ -1664,9 +1680,57 @@ async function bootCheck() {
   }));
   await storePage.evaluate(() => document.getElementById("mapUpdateDownload").click());
   await storePage.waitForTimeout(200);
+  const updateComplete = await storePage.evaluate(() => ({
+    barHidden: document.getElementById("mapUpdateBar").classList.contains("hiddenState"),
+    label: document.getElementById("mapUpdateLabel").textContent,
+    disabled: document.getElementById("mapUpdateDownload").disabled,
+    savedMapVersion: window.ClarityApp.courseStore.load("store-test-course").mapVersion
+  }));
+  await storePage.waitForTimeout(1000);
   const afterDownload = await storePage.evaluate(() => ({
     barHidden: document.getElementById("mapUpdateBar").classList.contains("hiddenState"),
     savedMapVersion: window.ClarityApp.courseStore.load("store-test-course").mapVersion
+  }));
+
+  /* Dismissal belongs to v11, survives leaving/re-entering GPS Play, and does
+     not alter the downloaded v9 copy. A future v12 would produce a different
+     key and be eligible again. */
+  packageStatus = "full-map-ready-v11";
+  await storePage.evaluate(() => document.getElementById("prevHole").click());
+  await storePage.waitForTimeout(800);
+  const dismissalPrompt = await storePage.evaluate(() => !document.getElementById("mapUpdateBar").classList.contains("hiddenState"));
+  await storePage.evaluate(() => document.getElementById("mapUpdateDismiss").click());
+  await storePage.goto(storeUrl, { waitUntil: "load" });
+  await storePage.waitForTimeout(1800);
+  const afterDismissedReload = await storePage.evaluate(() => ({
+    barShown: !document.getElementById("mapUpdateBar").classList.contains("hiddenState"),
+    savedMapVersion: window.ClarityApp.courseStore.load("store-test-course").mapVersion,
+    dismissed: JSON.parse(localStorage.getItem("clarity:course-update-dismissed:v1") || "{}")["store-test-course"]
+  }));
+
+  /* Simulate iOS rebuilding /app/ after backgrounding: the sessionStorage
+     hand-off is absent, but durable auth and the player-scoped resume record
+     remain. The page must recover both the admin identity and live hole 2. */
+  await storePage.evaluate(() => {
+    localStorage.removeItem("gd_account_signed_out_v1");
+    localStorage.setItem("clarity:supabase-auth-session:v1", JSON.stringify({ refresh_token: "refresh-admin" }));
+    localStorage.setItem("gd_accounts_v1", JSON.stringify({
+      activeId: "acct-admin",
+      accounts: [{ accountId: "acct-admin", profileId: "profile-admin", name: "Sam", role: "admin" }]
+    }));
+    localStorage.setItem("clarity:player:profile-admin:resume-round:v1", JSON.stringify({
+      version: 1, courseId: "store-test-course", courseName: "Store Test", hole: 2,
+      updatedAt: Date.now(), expiresAt: Date.now() + 3600000
+    }));
+    sessionStorage.removeItem("clarity:play-context:v1");
+  });
+  await storePage.goto(storeUrl, { waitUntil: "load" });
+  await storePage.waitForTimeout(300);
+  const rebuiltPlay = await storePage.evaluate(() => ({
+    name: document.getElementById("playerBadgeName").textContent,
+    liveHole: window.ClarityApp.marshal.round().liveHole,
+    viewHole: window.ClarityApp.marshal.round().hole,
+    flow: window.ClarityApp.marshal.scene().flow
   }));
   await storePage.close();
 
@@ -1859,6 +1923,10 @@ async function bootCheck() {
   assert.strictEqual(storeErrors.length, 0, "uncaught exceptions in the course-library flow:\n" + storeErrors.join("\n"));
   assert.strictEqual(firstVisit.savedMapType, "object", "a lite-geo-ready course auto-saves to the library with no prompt");
   assert.strictEqual(firstVisit.hole, 1, "the first visit plays from the freshly-fetched package");
+  assert.ok(guestShotControls.aiming.shotEndHidden, "Guest GPS Play never shows the Shot End side action");
+  assert.ok(guestShotControls.aiming.unlockShown, "Guest keeps the non-writing Unlock rangefinder control");
+  assert.strictEqual(guestShotControls.finishFace, "shotEnd", "the underlying green-focus state still identifies its action");
+  assert.ok(guestShotControls.finishActionHidden, "Guest green focus hides the Shot End face instead of exposing a gated write");
   assert.strictEqual(fetchesAfterFirstVisit, 1, "the first visit fetches the package exactly once");
   assert.ok(!(roundAtFetch[0] && roundAtFetch[0].courseKey === "store-test-course"),
     "the first visit has nothing saved, so it must fetch BEFORE it can start the round");
@@ -1877,8 +1945,19 @@ async function bootCheck() {
   assert.ok(newerVersionPrompt.barShown,
     "a NEWER version of a map the player is already on must ask before swapping ground mid-hole");
   assert.strictEqual(newerVersionPrompt.stillOldVersionSaved, 7, "the saved copy must not change until the prompt is accepted");
+  assert.strictEqual(updateComplete.label, "Map updated ✓", "the player sees a definite completion state before the bar closes");
+  assert.ok(updateComplete.disabled, "the update action stays disabled through completion so repeated taps cannot race");
+  assert.strictEqual(updateComplete.savedMapVersion, 9, "the completion state is only shown after the newer copy is saved");
   assert.ok(afterDownload.barHidden, "accepting the prompt closes the update bar");
   assert.strictEqual(afterDownload.savedMapVersion, 9, "accepting the prompt saves the newer map as the downloaded copy");
+  assert.ok(dismissalPrompt, "a later v11 map is eligible for its own prompt");
+  assert.ok(!afterDismissedReload.barShown, "dismissing v11 stays dismissed after GPS Play is reopened");
+  assert.strictEqual(afterDismissedReload.savedMapVersion, 9, "dismissal does not silently install the update");
+  assert.strictEqual(afterDismissedReload.dismissed, "published:11:", "dismissal is scoped to the exact course version");
+  assert.strictEqual(rebuiltPlay.name, "Sam", "a handoff-less GPS page rebuild must retain the authenticated admin identity");
+  assert.strictEqual(rebuiltPlay.liveHole, 2, "a handoff-less GPS page rebuild restores the canonical live hole");
+  assert.strictEqual(rebuiltPlay.viewHole, 2, "the rebuilt surface returns to that live hole, not Hole 1 or a preview");
+  assert.strictEqual(rebuiltPlay.flow, "live", "resume restoration re-enters Live rather than merely viewing the saved hole");
   assert.ok(play.mapDisplayed, "rule 2: #map must be visible by default on the play route");
   assert.strictEqual(play.hole, 1, "play must start on hole 1");
   assert.strictEqual(play.courseKey, "akarana-golf-club");
