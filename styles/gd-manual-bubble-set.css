@@ -140,7 +140,12 @@ body.gdManualBubbleSetOpen {
 .gdManualBubbleSetLane {
   display: block;
   width: 100%;
-  height: auto;
+  /* The lane stands upright now, so it is height that has to be held: left to
+     itself a 200x480 viewBox at full sheet width would be over a thousand
+     pixels tall and push the buttons off the screen. Capped here, the SVG
+     letterboxes itself to a centred corridor and the sheet still fits a phone
+     without scrolling mid-drag. */
+  height: min(46vh, 380px);
   touch-action: none;      /* the drag is the interaction; do not scroll the sheet */
   cursor: grab;
   user-select: none;

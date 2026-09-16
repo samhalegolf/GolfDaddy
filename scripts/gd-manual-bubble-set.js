@@ -47,6 +47,18 @@
   var LANE_BASE_PCT = 0.72;
   var LANE_Y_PCT = 0.55;
 
+  /* The lane stands up: the ball sits at the BOTTOM of the sheet, the shot runs
+     away from the player up the screen, and a left miss is left of centre.
+     The shared frame only speaks landscape - ball at the left, target at the
+     right, model +y below the alignment line meaning right - so the drawing is
+     still built in that frame and the whole group is turned a quarter turn
+     counter-clockwise. One transform, no second geometry: model (x, y) lands at
+     view (y, LANE_WIDTH - x), which puts model +x up the screen and model +y to
+     the right. Everything the core converts is untouched by it. */
+  var VIEW_WIDTH = LANE_HEIGHT;
+  var VIEW_HEIGHT = LANE_WIDTH;
+  var UPRIGHT_TRANSFORM = 'translate(0,' + LANE_WIDTH + ') rotate(-90)';
+
   var state = null;
 
   function safe(fn, fallback) {
@@ -202,9 +214,12 @@
     if (!rect || !rect.height || !rect.width) return NaN;
     /* preserveAspectRatio="xMidYMid meet": work in the same letterboxed space
        the frame does rather than assuming the SVG fills its box. */
-    var scale = Math.min(rect.width / LANE_WIDTH, rect.height / LANE_HEIGHT);
-    var offsetY = (rect.height - LANE_HEIGHT * scale) / 2;
-    var yModel = (Number(event.clientY) - rect.top - offsetY) / Math.max(0.0001, scale);
+    var scale = Math.min(rect.width / VIEW_WIDTH, rect.height / VIEW_HEIGHT);
+    var offsetX = (rect.width - VIEW_WIDTH * scale) / 2;
+    /* The lane is drawn turned a quarter turn, so the across-the-lane axis the
+       player drags along is the view's x - and it maps straight back to the
+       frame's model y, which is the only number the core wants. */
+    var yModel = (Number(event.clientX) - rect.left - offsetX) / Math.max(0.0001, scale);
     var dy = yModel - laneFrame.yModel;
     var dx = Math.max(1, laneFrame.zeroXModel - laneFrame.startXModel);
     return api.clampOffsetDeg(api.offsetDegForPlacement(dy, dx), placementRange(laneFrame));
@@ -263,14 +278,17 @@
       }));
     }, '') || '';
 
-    return '<svg class="gdManualBubbleSetLane" id="gdManualBubbleSetLane" viewBox="0 0 ' + LANE_WIDTH + ' ' + LANE_HEIGHT + '"'
+    return '<svg class="gdManualBubbleSetLane" id="gdManualBubbleSetLane" viewBox="0 0 ' + VIEW_WIDTH + ' ' + VIEW_HEIGHT + '"'
       + ' preserveAspectRatio="xMidYMid meet" role="img"'
       + ' aria-label="Bubble placed ' + escapeHtml(offsetLabel(state.offsetDeg)) + '">'
-      + '<rect x="0" y="0" width="' + LANE_WIDTH + '" height="' + LANE_HEIGHT + '" rx="18" fill="rgba(3,12,11,.42)"/>'
-      /* Top is left, bottom is right - the app's one landscape law. Saying so
-         on the surface is the whole reason the player can trust the drag. */
-      + '<text class="gdManualBubbleSetSide" x="' + LANE_WIDTH / 2 + '" y="20" text-anchor="middle">LEFT</text>'
-      + '<text class="gdManualBubbleSetSide" x="' + LANE_WIDTH / 2 + '" y="' + (LANE_HEIGHT - 10) + '" text-anchor="middle">RIGHT</text>'
+      + '<rect x="0" y="0" width="' + VIEW_WIDTH + '" height="' + VIEW_HEIGHT + '" rx="18" fill="rgba(3,12,11,.42)"/>'
+      /* Left is left and right is right, now that the player is standing at the
+         bottom of the lane looking up it. The labels sit either side of the
+         ball, where the eye starts, and are the whole reason the drag can be
+         trusted. They are drawn upright, outside the turned group. */
+      + '<text class="gdManualBubbleSetSide" x="12" y="' + (VIEW_HEIGHT - 14) + '" text-anchor="start">LEFT</text>'
+      + '<text class="gdManualBubbleSetSide" x="' + (VIEW_WIDTH - 12) + '" y="' + (VIEW_HEIGHT - 14) + '" text-anchor="end">RIGHT</text>'
+      + '<g transform="' + UPRIGHT_TRANSFORM + '">'
       + '<line x1="' + originX.toFixed(1) + '" y1="' + originY.toFixed(1) + '" x2="' + (LANE_WIDTH - 16) + '" y2="' + originY.toFixed(1) + '"'
       + ' stroke="rgba(238,245,242,.42)" stroke-width="1.4" stroke-dasharray="7 7" stroke-linecap="round"/>'
       + '<g class="gdManualBubbleSetTarget">'
@@ -282,6 +300,7 @@
       + '<g class="gdManualBubbleSetHandle" data-gd-manual-bubble-handle="1" pointer-events="all">'
       + '<circle cx="' + bubbleX.toFixed(1) + '" cy="' + bubbleY.toFixed(1) + '" r="30" fill="transparent"/>'
       + '<circle cx="' + bubbleX.toFixed(1) + '" cy="' + bubbleY.toFixed(1) + '" r="6.5" fill="rgba(255,235,170,.95)" stroke="rgba(8,12,8,.6)" stroke-width="1.2"/>'
+      + '</g>'
       + '</g>'
       + '</svg>';
   }
