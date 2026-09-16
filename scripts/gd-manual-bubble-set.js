@@ -59,6 +59,16 @@
   var VIEW_HEIGHT = LANE_WIDTH;
   var UPRIGHT_TRANSFORM = 'translate(0,' + LANE_WIDTH + ') rotate(-90)';
 
+  /* Where the lane's distance rungs stop - the same model x the guide line
+     already runs to, so the markers never label ground the lane does not draw. */
+  var LANE_TOP_X_MODEL = LANE_WIDTH - 16;
+  /* Round steps a golfer actually reads a lane in, in whichever unit is
+     showing. The smallest one that keeps the lane to about five rungs wins, so a
+     wedge is marked every 25 and a driver every 100 without either ending up as
+     a ladder - and yards, whose numbers run 9% larger, lands on the same tier as
+     metres rather than one coarser. */
+  var MARKER_STEPS = [10, 25, 50, 100, 200];
+
   var state = null;
 
   function safe(fn, fallback) {
@@ -111,6 +121,29 @@
       if (typeof window.gdLmToast === 'function') window.gdLmToast(message);
       else if (typeof window.toast === 'function') window.toast(message);
     });
+  }
+
+  /* The app's Units setting, read through the one function that owns it.
+     gd-app-core's fmt() is where every other distance in Clarity Caddy is
+     converted and labelled, so the lane asks it rather than keeping a second
+     copy of the toggle - a metres/yards answer this screen could disagree with
+     is exactly the bug being fixed. One probe gives both the unit and the
+     factor; metres is the honest fallback on a shell where fmt is not loaded. */
+  function laneUnits() {
+    return safe(function () {
+      if (typeof window.fmt !== 'function') return { unit: 'm', perMetre: 1 };
+      var probe = window.fmt(1000);
+      var perMetre = Number(probe && probe.value) / 1000;
+      if (!Number.isFinite(perMetre) || perMetre <= 0) return { unit: 'm', perMetre: 1 };
+      return { unit: String((probe && probe.unit) || 'm'), perMetre: perMetre };
+    }, { unit: 'm', perMetre: 1 });
+  }
+
+  function displayDistance(metres) {
+    var m = Number(metres);
+    if (!Number.isFinite(m)) return '';
+    var unitState = laneUnits();
+    return Math.round(m * unitState.perMetre) + unitState.unit;
   }
 
   function escapeHtml(value) {
@@ -244,6 +277,55 @@
     return api.referenceBubbleFor(state.club, state.offsetDeg, deps());
   }
 
+  /* Distance rungs up the lane.
+     The lane is honestly to scale in one direction and one only: the ball sits
+     at zero and the target cross sits at the club's own bag carry, so the run
+     between them fixes metres-per-model-unit for the whole lane and every rung
+     is read off that. (The Bubble's drawn size is deliberately exaggerated by
+     the shared generator - that is why the rungs measure the lane and never the
+     Bubble.) Drawn upright, outside the turned group, so the numbers read the
+     way the player holds the phone. */
+  function markerLayer(laneFrame, baseDistanceM) {
+    var carryM = Number(baseDistanceM);
+    if (!laneFrame || !Number.isFinite(carryM) || carryM <= 0) return '';
+    var dxModel = laneFrame.zeroXModel - laneFrame.startXModel;
+    if (!Number.isFinite(dxModel) || dxModel <= 0) return '';
+
+    var unitState = laneUnits();
+    var metresPerModel = carryM / dxModel;
+    var maxDisplay = (LANE_TOP_X_MODEL - laneFrame.startXModel) * metresPerModel * unitState.perMetre;
+    if (!(maxDisplay > 0)) return '';
+
+    var step = MARKER_STEPS.filter(function (candidate) {
+      return maxDisplay / candidate <= 5.5;
+    })[0] || MARKER_STEPS[MARKER_STEPS.length - 1];
+
+    /* A rung is a line across the corridor with its number at the left edge.
+       viewY is the turned lane's one conversion: model x runs up the screen. */
+    function rung(distanceM, label, strong) {
+      var viewY = LANE_WIDTH - laneFrame.x(laneFrame.startXModel + distanceM / metresPerModel);
+      if (!Number.isFinite(viewY) || viewY < 14 || viewY > VIEW_HEIGHT - 26) return '';
+      var stroke = strong ? 'rgba(215,176,107,.42)' : 'rgba(238,245,242,.13)';
+      return '<line x1="8" y1="' + viewY.toFixed(1) + '" x2="' + (VIEW_WIDTH - 8) + '" y2="' + viewY.toFixed(1) + '"'
+        + ' stroke="' + stroke + '" stroke-width="1"/>'
+        + '<text class="gdManualBubbleSetTick' + (strong ? ' strong' : '') + '" x="11" y="' + (viewY - 5).toFixed(1) + '">'
+        + escapeHtml(label) + '</text>';
+    }
+
+    var markup = '';
+    for (var value = step; value <= maxDisplay + 0.001; value += step) {
+      var metres = value / unitState.perMetre;
+      /* The carry gets its own rung below; a round number sitting almost on top
+         of it would just be two lines saying the same thing. */
+      if (Math.abs(metres - carryM) * unitState.perMetre < step * 0.35) continue;
+      markup += rung(metres, value + unitState.unit, false);
+    }
+    /* The club's own carry, where the target cross is. This is the rung the
+       whole screen is about, so it is drawn last and in the target's gold. */
+    markup += rung(carryM, displayDistance(carryM), true);
+    return markup;
+  }
+
   function laneSvg(reference) {
     var laneFrame = frame();
     if (!laneFrame) return '<div class="gdManualBubbleSetUnavailable">The Bubble preview is not ready on this screen.</div>';
@@ -282,6 +364,7 @@
       + ' preserveAspectRatio="xMidYMid meet" role="img"'
       + ' aria-label="Bubble placed ' + escapeHtml(offsetLabel(state.offsetDeg)) + '">'
       + '<rect x="0" y="0" width="' + VIEW_WIDTH + '" height="' + VIEW_HEIGHT + '" rx="18" fill="rgba(3,12,11,.42)"/>'
+      + markerLayer(laneFrame, reference.baseDistanceM)
       /* Left is left and right is right, now that the player is standing at the
          bottom of the lane looking up it. The labels sit either side of the
          ball, where the eye starts, and are the whole reason the drag can be
@@ -319,7 +402,7 @@
 
     var distance = Number(reference && reference.baseDistanceM);
     var distanceNote = Number.isFinite(distance) && distance > 0
-      ? escapeHtml(state.club) + ' · ' + Math.round(distance) + 'm from your Bag'
+      ? escapeHtml(state.club) + ' · ' + displayDistance(distance) + ' from your Bag'
       : '';
 
     return '<div class="gdManualBubbleSetSheet" role="dialog" aria-modal="true" aria-labelledby="gdManualBubbleSetTitle">'

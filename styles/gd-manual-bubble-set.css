@@ -163,6 +163,20 @@ body.gdManualBubbleSetOpen {
   letter-spacing: 2.4px;
 }
 
+/* The lane's distance rungs. Quiet enough to read past - they are the lane's
+   scale, not its subject - with the club's own carry lifted into the target's
+   gold so the one rung that matters is findable at a glance. */
+.gdManualBubbleSetTick {
+  fill: rgba(238, 245, 242, .38);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .2px;
+}
+
+.gdManualBubbleSetTick.strong {
+  fill: rgba(255, 233, 189, .82);
+}
+
 .gdManualBubbleSetHandle circle:last-child {
   pointer-events: none;
 }
