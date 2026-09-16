@@ -438,6 +438,21 @@ export function osmScopeFrame(scope, center) {
   return expandOsmFrame({ south: origin.lat, west: origin.lng, north: origin.lat, east: origin.lng }, r);
 }
 
+/* How far the last query reached, as the radius-equivalent the multi-course widen compares
+   against. Around mode answers with its radius. Bbox mode used to answer with nothing - the
+   scope carries no radiusM - so `widestSeparationM > scope.radiusM` was `2326 > undefined`
+   at Fancourt and the widen never ran on any site whose course polygon had already put the
+   scope into bbox mode. Half the frame's shorter side: the distance from the middle the
+   query is guaranteed to have covered in every direction. */
+export function osmScopeReachM(scope, center) {
+  if (scope && scope.mode === "around" && Number.isFinite(Number(scope.radiusM))) return Number(scope.radiusM);
+  const frame = osmScopeFrame(scope, center);
+  if (!frame) return OSM_AUTOMAPPER_RADIUS_M;
+  const width = distance({ lat: frame.south, lng: frame.west }, { lat: frame.south, lng: frame.east });
+  const height = distance({ lat: frame.south, lng: frame.west }, { lat: frame.north, lng: frame.west });
+  return Math.round(Math.min(width, height) / 2);
+}
+
 export function osmGuideQuery(scope) {
   const selector = (scope && scope.selector) || "";
   const selectors = [
@@ -740,30 +755,149 @@ function holeFeatures(payload) {
   return list;
 }
 
+/* ---------- containment (why: Fancourt, 2026-09-16) ---------------------------------------
+ *
+ * Fancourt's OSM has a facility outline ("Fancourt Golf Estate") with a course outline
+ * ("The Links at Fancourt") drawn INSIDE it, and a second 18 drawn outside both. The old
+ * rule - smallest containing polygon wins, keep going if 60% of holes landed somewhere -
+ * did three wrong things at once:
+ *
+ *   the facility outline became a "course" holding the three holes that spill past the
+ *   Links boundary, so one 18 published as a 3 and a 14;
+ *   every hole outside both polygons was dropped from every loop, silently, because
+ *   17 of 24 cleared the floor;
+ *   the dropped holes then came back as SUPPORTING elements (see
+ *   partitionSupportingElements), so a loop's payload carried another course's hole 1
+ *   and holeGapFrames anchored a gap on two holes 1.6km apart.
+ *
+ * Three rules replace it. An outline that contains another outline is the facility, not
+ * a course. A hole inside no course outline is still a hole: it joins the outline whose
+ * routing it continues (hole 18 starts where hole 17 ends), or forms a loop of its own
+ * with the other unclaimed holes. And when a facility outline exists, a course outline
+ * wholly outside it is a different club that a wide sweep dragged in - kept apart, never
+ * dropped, never published as a sibling. */
+
+/* A tee within this of the previous green is the next hole on the same course. Measured
+   across all three courses at Fancourt the longest green-to-next-tee walk is 216m and the
+   shortest cross-course one is 859m; interleaved sites are closer than that, but a hole
+   only reaches this test when it sits outside every course outline, and a site with no
+   outlines never runs it at all. */
+export const HOLE_CONTINUITY_M = 250;
+
+function polygonContainsPolygon(outer, inner) {
+  if (outer === inner) return false;
+  const centre = centroidOfPoints(inner.ring);
+  return !!centre && spanOfRing(inner.ring) < spanOfRing(outer.ring) && pointInRing(centre, outer.ring);
+}
+
+/* Does this outline hold the same hole number twice, on different ground? A course has
+   one hole 7; a site has one per course. The separation distance keeps a hole that OSM
+   happens to have drawn twice from turning its own course outline into a facility. */
+function outlineHoldsRepeatedNumbers(polygon, features) {
+  const seen = new Map();
+  return (features || []).some(feature => {
+    if (!pointInRing(feature.centre, polygon.ring)) return false;
+    const earlier = seen.get(feature.number) || [];
+    if (earlier.some(centre => distance(centre, feature.centre) > LOOP_SEPARATION_M)) return true;
+    seen.set(feature.number, earlier.concat([feature.centre]));
+    return false;
+  });
+}
+
+/* Course outlines and facility outlines, told apart by what they contain. An outline
+   with another outline inside it is the site. A LONE outline with the same hole number
+   twice inside it is also the site - one polygon drawn over every course, the Millbrook
+   and Te Arai shape. A lone outline around one course's worth of holes is that course's
+   outline whatever tag it carries; OSM draws single-course sites with leisure=golf_course
+   and no golf=course at all. The repetition test is only asked of a lone outline on
+   purpose: two course outlines on an interleaved site overlap at their edges and each
+   catches a few of the other's holes, which is not evidence that either is the site. */
+export function classifyCoursePolygons(polygons, features) {
+  const list = polygons || [];
+  const facilities = list.filter(polygon => list.some(other => polygonContainsPolygon(polygon, other))
+    || (list.length === 1 && outlineHoldsRepeatedNumbers(polygon, features)));
+  return { courses: list.filter(polygon => !facilities.includes(polygon)), facilities };
+}
+
+function polygonTouchesAnyFacility(polygon, facilities) {
+  return facilities.some(facility => polygon.ring.some(point => pointInRing(point, facility.ring)));
+}
+
+/* Does this hole continue the bucket's routing - start at the previous hole's green, or
+   finish at the next hole's tee? Hole 1 follows the highest hole the bucket holds, since
+   18's green and 1's tee share the clubhouse. */
+function continuesRouting(bucket, feature) {
+  const numbers = bucket.features.map(entry => entry.number);
+  if (numbers.includes(feature.number)) return false;
+  const prevNumber = feature.number > 1 ? feature.number - 1 : Math.max(...numbers);
+  const prev = bucket.features.find(entry => entry.number === prevNumber);
+  const next = bucket.features.find(entry => entry.number === feature.number + 1);
+  return !!((prev && distance(prev.end, feature.start) <= HOLE_CONTINUITY_M)
+    || (next && distance(feature.end, next.start) <= HOLE_CONTINUITY_M));
+}
+
+/* Holes that spill past their course outline join it by continuity. Iterates because a
+   spill of three (Fancourt's 18, 1 and 2) attaches one hole at a time: 18 off 17, then 1
+   off 18, then 2 off 1. A hole that could continue two buckets is left alone rather than
+   guessed. Returns what is still unplaced. */
+function attachSpills(buckets, unplaced) {
+  let pending = unplaced.slice();
+  let changed = true;
+  while (changed && pending.length) {
+    changed = false;
+    pending = pending.filter(feature => {
+      const homes = buckets.filter(bucket => continuesRouting(bucket, feature));
+      if (homes.length !== 1) return true;
+      homes[0].features.push(feature);
+      changed = true;
+      return false;
+    });
+  }
+  return pending;
+}
+
+/* Unclaimed holes are a course nobody drew an outline for - Fancourt's east 18 - so they
+   route among themselves. One chain per repeated number; a set with no repeats is one loop. */
+function routeUnclaimed(features) {
+  if (!features.length) return [];
+  const multiplicity = new Map();
+  features.forEach(feature => multiplicity.set(feature.number, (multiplicity.get(feature.number) || 0) + 1));
+  const loopCount = Math.max(...multiplicity.values());
+  return assignByRouting(features, loopCount)
+    || [{ name: "", osmRef: "", holesTag: null, features: features.slice(), method: "routing" }];
+}
+
 function assignByContainment(features, polygons) {
-  /* Smallest containing polygon wins: a site often maps one facility outline
-     over two course outlines, and the course is the tighter of the two. */
-  const areaRank = polygons.map(polygon => ({
-    polygon,
-    span: spanOfRing(polygon.ring)
-  })).sort((a, b) => a.span - b.span);
+  const { courses, facilities } = classifyCoursePolygons(polygons, features);
+  if (!courses.length) return null;
+  /* Smallest containing course outline wins: a par-3 loop drawn inside the main course's
+     outline is the tighter of the two. */
+  const areaRank = courses.map(polygon => ({ polygon, span: spanOfRing(polygon.ring) })).sort((a, b) => a.span - b.span);
   const buckets = new Map();
-  let placed = 0;
+  const unplaced = [];
   features.forEach(feature => {
     const hit = areaRank.find(entry => pointInRing(feature.centre, entry.polygon.ring));
-    if (!hit) return;
+    if (!hit) { unplaced.push(feature); return; }
     if (!buckets.has(hit.polygon.ref)) buckets.set(hit.polygon.ref, { polygon: hit.polygon, features: [] });
     buckets.get(hit.polygon.ref).features.push(feature);
-    placed += 1;
   });
-  if (buckets.size < 2 || placed < features.length * 0.6) return null;
-  return [...buckets.values()].map(bucket => ({
+  if (!buckets.size) return null;
+  const groups = [...buckets.values()].map(bucket => ({
     name: bucket.polygon.name,
     osmRef: bucket.polygon.ref,
     holesTag: bucket.polygon.holesTag,
     features: bucket.features,
-    method: "containment"
+    method: "containment",
+    /* Only judged when OSM has drawn the facility: with no outline to be outside of,
+       every course outline is taken to belong to the site, as before. */
+    foreign: facilities.length > 0 && !polygonTouchesAnyFacility(bucket.polygon, facilities)
   }));
+  const stillUnplaced = attachSpills(groups.filter(group => !group.foreign), unplaced);
+  const all = groups.concat(routeUnclaimed(stillUnplaced));
+  /* One course on this site's own ground is not a separation, whatever else the sweep
+     caught - the single-course path keeps its neighbour filter for that. */
+  if (all.filter(group => !group.foreign).length < 2) return null;
+  return all;
 }
 
 function spanOfRing(ring) {
@@ -822,6 +956,12 @@ function partitionSupportingElements(payload, loops) {
     if (holeElements.has(element)) return;
     const tags = (element && element.tags) || {};
     const golf = String(tags.golf || "").toLowerCase();
+    /* A numbered hole is never a supporting element. Every one of them was either placed
+       in a loop above or deliberately kept out; letting a leftover ride along as if it
+       were a bunker is how a loop's payload came to carry another course's hole 1 and
+       holeGapFrames anchored on it. Unnumbered hole ways still travel with the nearest
+       loop - they are exactly what an elimination fill needs to find. */
+    if (golf === "hole" && osmGuideHoleRef(tags.ref || tags.name)) return;
     const isCourseOutline = golf === "course" || String(tags.leisure || "").toLowerCase() === "golf_course";
     const centre = centroidOfPoints(osmGuidePointsFromElement(element));
     if (isCourseOutline || !centre) { shared.push(element); return; }
@@ -917,7 +1057,7 @@ export function separateLoops(payload, centre) {
 
   const { buckets, shared } = partitionSupportingElements(payload, groups);
 
-  const loops = groups.map((group, index) => {
+  const everyLoop = groups.map((group, index) => {
     const numbers = group.features.map(feature => feature.number);
     const loopCentre = centroidOfPoints(group.features.map(feature => feature.centre));
     return {
@@ -925,6 +1065,7 @@ export function separateLoops(payload, centre) {
       osmRef: group.osmRef,
       holesTag: group.holesTag,
       method: group.method,
+      foreign: !!group.foreign,
       centre: loopCentre,
       holeNumbers: [...new Set(numbers)].sort((a, b) => a - b),
       /* The PHYSICAL holes, number and OSM element together. holeNumbers cannot
@@ -944,6 +1085,21 @@ export function separateLoops(payload, centre) {
     };
   });
 
+  /* A neighbouring club's outline, caught by a wide sweep, is separated from the
+     site's own courses so its greens and holes cannot be paired with theirs - and then
+     kept OFF the list, because the only thing worse than dropping it silently would be
+     publishing George Golf Club as Fancourt's Course 3. Reported on the array the way
+     publishSeparatedLoops reports failures, so the job row can say what was set aside. */
+  const loops = everyLoop.filter(loop => !loop.foreign);
+  if (loops.length < 2) return null;
+  loops.excluded = everyLoop.filter(loop => loop.foreign).map(loop => ({
+    name: loop.name || null,
+    osmRef: loop.osmRef || null,
+    holes: loop.holeNumbers.length,
+    contiguous: loop.contiguous,
+    awayFromPinM: loop.awayFromPinM,
+    reason: "course-outline-outside-facility-outline"
+  }));
   /* Nearest first, so a caller that has to pick one - the row the job was
      enqueued against - picks the one the player pinned. */
   loops.sort((a, b) => (a.awayFromPinM ?? Infinity) - (b.awayFromPinM ?? Infinity));

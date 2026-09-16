@@ -27,7 +27,7 @@
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete, scorecardIdentityMismatch } from "./lib/gd-course-fit-core.mjs";
 import { reverseGeocodePlace } from "./lib/gd-course-place.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
@@ -1702,7 +1702,22 @@ async function runMapperJob(job, origin) {
    * sweep already covered so widening can never LOSE ground. Usually a smaller box
    * than the pin-centred one, and it is aimed by evidence rather than by a guess
    * about which corner of the site the clubhouse sits in. */
-  if (collision.multiLoop && collision.widestSeparationM > scope.radiusM) {
+  /* Measured against how far the query REACHED, not against `scope.radiusM`. A scope that
+   * the footprint requery has already put into bbox mode carries no radiusM, so the old
+   * test read `2326 > undefined` at Fancourt - false - and the widen was skipped on exactly
+   * the sites that have a course polygon, with nothing on the row to say it had been
+   * considered. See osmScopeReachM. */
+  const reachM = osmScopeReachM(scope, course.center);
+  if (collision.multiLoop && !(collision.widestSeparationM > reachM)) {
+    diagnostics.widened = {
+      attempted: false,
+      reason: "site-within-sweep",
+      scopeMode: scope.mode,
+      reachM,
+      widestSeparationM: collision.widestSeparationM
+    };
+  }
+  if (collision.multiLoop && collision.widestSeparationM > reachM) {
     await heartbeatJob(job, { stage: "widening-for-multi-course-site" });
     const needM = collision.widestSeparationM + WIDER_RETRY_PAD_M;
     const scopeFrame = osmScopeFrame(scope, course.center);
@@ -1728,7 +1743,8 @@ async function runMapperJob(job, origin) {
      * constraint, which is the opposite conclusion and needs the same evidence. */
     diagnostics.widened = {
       attempted: true,
-      fromRadiusM: scope.radiusM,
+      scopeMode: scope.mode,
+      fromReachM: reachM,
       toSpanM: needM,
       widestSeparationM: collision.widestSeparationM,
       holeFeaturesBefore: collision.holeFeatures,
@@ -1765,8 +1781,15 @@ async function runMapperJob(job, origin) {
     }
   }
 
+  /* What separation set aside. A course outline wholly outside the facility outline is
+     another club the widened sweep caught - George Golf Club beside Fancourt - and it is
+     neither published nor silently dropped. */
+  const noteExcludedLoops = () => {
+    if (loops && Array.isArray(loops.excluded) && loops.excluded.length) diagnostics.neighbouringClubs = loops.excluded;
+  };
   if (collision.multiLoop) {
     loops = separateLoops(payload, course.center);
+    noteExcludedLoops();
     diagnostics.collision = {
       loops: collision.loops,
       collidedHoles: collision.collidedHoles,
@@ -1785,6 +1808,7 @@ async function runMapperJob(job, origin) {
         payload = filled.next.payload;
         collision = filled.next.collision;
         loops = filled.next.loops;
+        noteExcludedLoops();
         queryStages.push("gap-requery");
         diagnostics.osmFeatures = golfFeatureCounts(payload);
         diagnostics.collision = {
