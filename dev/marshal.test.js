@@ -86,6 +86,20 @@ check("a round opens in Preview, because Play has not been pressed", () => {
   assert.strictEqual(m.scene().mode, "setup");
 });
 
+check("manual GPS supplies only the missing hole and mapped play resumes after it", () => {
+  const partial = { status: "lite-geo-ready", expectedHoleCount: 3, holes: [PKG.holes[0], PKG.holes[2]] };
+  const { m } = newRound({ pkg: partial });
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -5, 0) });
+  m.signal("VIEW_HOLE_CHANGED", { hole: 2 });
+  assert.strictEqual(m.scene().hole.rec, null);
+  assert.deepStrictEqual(m.scene().picker.holes, [1, 2, 3]);
+  assert.strictEqual(m.signal("MANUAL_HOLE_SET", { hole: 2, green: H2_GREEN }), true);
+  assert.strictEqual(m.scene().flow, "live");
+  assert.deepStrictEqual(m.scene().hole.rec.green, H2_GREEN);
+  m.signal("VIEW_HOLE_CHANGED", { hole: 3 });
+  assert.deepStrictEqual(m.scene().hole.rec.green, GREEN_3);
+});
+
 check("the course centre is derived from the package when none is handed off", () => {
   const { m } = newRound({ centre: null });
   // A fix at the course is trusted only if a centre was worked out.

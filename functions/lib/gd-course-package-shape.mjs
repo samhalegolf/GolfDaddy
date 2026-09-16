@@ -96,7 +96,7 @@ export function courseBoundsFromObjects(objectsJson) {
 
 /* Doc shape: {courseId, status:"lite-geo-ready", objectsVersion, geometryVersion, courseBounds,
    holes:[{holeNumber, tee, green, greenShape, route, confidence}], visualJob:{status}}. */
-export function shapeLitePackage(map, visualJobStatus) {
+export function shapeLitePackage(map, visualJobStatus, mapperJobs) {
   const byHole = objectsByHole(map.objects_json);
   const holes = Array.from(byHole.entries()).map(([holeNumber, objects]) => {
     const tee = objects.find(o => o.type === "tee");
@@ -111,7 +111,7 @@ export function shapeLitePackage(map, visualJobStatus) {
       confidence: green && Number.isFinite(Number(green.resolverConfidence)) ? Number(green.resolverConfidence) : null
     };
   }).sort((a, b) => a.holeNumber - b.holeNumber);
-  return {
+  return addReadinessMetadata({
     courseId: map.course_id,
     status: "lite-geo-ready",
     objectsVersion: objectsVersion(map),
@@ -119,7 +119,7 @@ export function shapeLitePackage(map, visualJobStatus) {
     courseBounds: courseBoundsFromObjects(map.objects_json),
     holes,
     visualJob: { status: visualJobStatus || "none" }
-  };
+  }, map, mapperJobs);
 }
 
 function hashText(text) {
@@ -148,7 +148,7 @@ function assetUrl(path) {
    real `playSurface` object the visual worker already writes (projection, anchorPins,
    sourceBounds, captureZoom, originPx) rather than inventing fields with no data behind
    them. */
-export function shapeFullPackage(map, visual) {
+export function shapeFullPackage(map, visual, mapperJobs) {
   /* Belt as well as braces: deriveCoursePackageState above will no longer route an
      orphaned visual here, but this is a public export and a null map must not be a
      crash in any caller. */
@@ -190,7 +190,7 @@ export function shapeFullPackage(map, visual) {
      tell the app a course is built and then give it no holes to play, which is the
      shape of failure this whole guard exists to stop. */
   if (!holes.length) return null;
-  return {
+  return addReadinessMetadata({
     courseId: map.course_id,
     status: "full-map-ready",
     packageVersion: visual.published_version || null,
@@ -198,7 +198,7 @@ export function shapeFullPackage(map, visual) {
     geometryVersion: map.geometry_version || null,
     generatedAt: (visual.diagnostics && visual.diagnostics.generatedAt) || visual.updated_at || null,
     holes
-  };
+  }, map, mapperJobs);
 }
 
 export function hasGeometryPayload(map) {
@@ -219,6 +219,31 @@ function mapCoverage(map, mapperJobs) {
   const holeNumbers = Object.keys((map && map.holes_json) || {}).map(Number).filter(Number.isFinite);
   const lastResult = ((mapperJobs || []).find(job => job && job.result && job.result.expectedHoles) || {}).result;
   return courseCoverageComplete({ holeNumbers, expectedHoles: lastResult ? lastResult.expectedHoles : null });
+}
+
+/* Publication is the viability decision. These fields describe completeness so
+   clients can present a repaired package differently, but they are not another
+   gate on whether the package may be played. `holes` is the actual playable
+   payload being returned (after shapeFullPackage has discarded picture-only
+   frames), while expectedHoles remains the server mapper's course fact. */
+function addReadinessMetadata(pkg, map, mapperJobs) {
+  const holeNumbers = (pkg.holes || []).map(h => Number(h && h.holeNumber)).filter(Number.isFinite);
+  const coverage = mapCoverage(map, mapperJobs);
+  const lastResult = ((mapperJobs || []).find(job => job && job.result && job.result.expectedHoles) || {}).result;
+  const mapperExpected = Number(lastResult && lastResult.expectedHoles) || 0;
+  const expected = mapperExpected
+    || (coverage.complete ? Number(coverage.holes) : 0)
+    || (holeNumbers.length ? Math.max(...holeNumbers) : 0);
+  const missing = expected > 0
+    ? Array.from({ length: expected }, (_, i) => i + 1).filter(n => !holeNumbers.includes(n))
+    : [];
+  const complete = expected > 0 && missing.length === 0 && (mapperExpected > 0 || coverage.complete);
+  return Object.assign(pkg, {
+    readiness: complete ? "complete" : "partial",
+    mappedHoleCount: holeNumbers.length,
+    expectedHoleCount: expected || null,
+    missingHoles: missing
+  });
 }
 
 function liveJob(jobs) {
@@ -252,7 +277,7 @@ export function deriveCoursePackageState({ map, visual, visualJobs, mapperJobs }
    * the frames claim is judged per hole in shapeFullPackage, which drops the ones it
    * cannot back. */
   const fullReady = !!(map && visual && Number(visual.published_version) > 0
-    && hasGeometryPayload(map) && mapCoverage(map, mapperJobs).complete);
+    && hasGeometryPayload(map));
   const hasGeometry = hasGeometryPayload(map);
   const liveMapperJob = liveJob(mapperJobs);
   const liveVisualJob = liveJob(visualJobs);

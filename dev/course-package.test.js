@@ -142,6 +142,26 @@ test("a course with a published full package reports full-map-ready even while a
   assert.ok(result.holes[0].visual.checksum, "a checksum travels with the descriptor so a client can detect it changed");
 });
 
+test("a published partial visual package remains full-map-ready and describes its missing holes", async () => {
+  const objects = {}, holes = {}, frames = [];
+  for (let hole = 1; hole <= 15; hole++) {
+    objects["green-" + hole] = { type: "green", holeNumber: hole, position: { lat: -36.8 - hole / 10000, lng: 174.7 } };
+    holes[String(hole)] = {};
+    frames.push({ path: "partial/h" + hole + ".jpg", role: "hole-frame-published", holeNumber: hole, metadata: {} });
+  }
+  stubFetch({
+    maps: [{ course_id: "partial", published: true, geometry_version: "v1", objects_json: objects, holes_json: holes }],
+    visuals: [{ published_version: 4, uploaded_assets: frames }],
+    mapperJobs: [{ id: "mapped", status: "succeeded", result: { expectedHoles: 18 } }]
+  });
+  const result = await buildCoursePackage("partial");
+  assert.strictEqual(result.status, "full-map-ready", "publication, not 18-hole client coverage, is authoritative");
+  assert.strictEqual(result.readiness, "partial");
+  assert.strictEqual(result.mappedHoleCount, 15);
+  assert.strictEqual(result.expectedHoleCount, 18);
+  assert.deepStrictEqual(result.missingHoles, [16, 17, 18]);
+});
+
 test("a course with a live mapper job and no geometry yet reports processing", async () => {
   stubFetch({ mapperJobs: [{ id: "job-1", kind: "automap", status: "running" }] });
   const result = await buildCoursePackage("brand-new-course");

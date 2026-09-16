@@ -157,6 +157,28 @@
        oversizes the map element, so Leaflet's own attribution control would
        ride off-screen with it. The imagery licences require it stays visible. -->
   <div id="mapAttribution" class="hiddenState"></div>
+  <!-- Deliberately above play state, not inside the Leaflet/published surface.
+       Package readiness owns this screen; GPS fixes and shot placement cannot
+       dismiss, recreate or reframe it. -->
+  <section id="mapRecoveryScreen" class="hiddenState" aria-live="polite">
+    <div class="mapRecoveryCard">
+      <span id="mapRecoveryEyebrow">COURSE MAP NOT AVAILABLE</span>
+      <h2 id="mapRecoveryTitle">This hole is not mapped yet</h2>
+      <p id="mapRecoveryCopy">You can still use GPS manually. We'll keep checking for an updated map.</p>
+      <button id="mapRecoveryManual" type="button">Use Manual GPS</button>
+      <button id="mapRecoveryBack" type="button" class="linkButton">Back to Courses</button>
+    </div>
+  </section>
+  <section id="manualGpsIntro" class="hiddenState" aria-live="polite">
+    <div class="mapRecoveryCard">
+      <span>MANUAL GPS</span>
+      <h2>Your location is already known.</h2>
+      <p>Tap the centre of the green to set your target. Distances and your Bubble will then work normally.</p>
+      <button id="manualGpsBegin" type="button">Tap Green</button>
+      <button id="manualGpsCancel" type="button" class="linkButton">Cancel</button>
+    </div>
+  </section>
+  <div id="manualTapPrompt" class="hiddenState">MANUAL GPS · Tap centre of green</div>
   <!-- The stage carries the lock-stage tilt and nothing else. It is the screen
        grown by the overscan (styles.css) purely so the tilted box still covers
        the screen once perspective has pushed its far edge toward the vanishing
@@ -586,6 +608,7 @@
 <script src="js/course-versions.js"></script>
 <script src="js/course-store.js"></script>
 <script src="js/course-package.js"></script>
+<script src="js/map-readiness.js"></script>
 <script src="js/scorecard.js"></script>
 <script src="js/basemap.js"></script>
 <script src="js/play-surface.js"></script>

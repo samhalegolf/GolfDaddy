@@ -17147,17 +17147,12 @@ function gdMappedCourseAssistActive(){
 }
 function gdMappedStartHint(){return gdMappedCourseAssistActive()?"Tap where you are standing":"Tap twice: ball then green"}
 function gdMappedStartState(){return gdMappedCourseAssistActive()?"Mapped: set position":"Manual: set start"}
-var gdMappedDropoutUiNotice={key:"",at:0};
 function gdShowMappedDropout(){
   let hole=1;
   try{hole=Number(currentPlayingHole||selectedHole||1)||1}catch(e){}
-  const msg=`Mapped data missing for H${hole}`;
-  const now=Date.now();
-  const duplicate=gdMappedDropoutUiNotice.key===msg&&now-gdMappedDropoutUiNotice.at<1800;
-  gdMappedDropoutUiNotice={key:msg,at:now};
-  try{setState("Mapped data needed")}catch(e){}
-  try{showHint(msg)}catch(e){}
-  if(!duplicate)try{toast(msg)}catch(e){}
+  /* Compatibility reporter only. Presentation belongs to the canonical
+     course/hole readiness controller; GPS placement must not invent it. */
+  try{window.dispatchEvent(new CustomEvent('gd:map-readiness',{detail:{state:'CURRENT_HOLE_MISSING',hole:hole,reason:'mapped-green-lock'}}))}catch(e){}
   return false;
 }
 function gdMappedStartHoleNumber(){

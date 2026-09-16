@@ -536,8 +536,8 @@ async function main() {
      that very request); poll 2 - the watch's first - is the finished map. */
   let southportPolls = 0;
   env = await runScenario({
-    /* A full 18 on the far side, because the background watch resumes through the same
-       whole-course entry a player would: a partial map is not something to open a round on. */
+    /* A full 18 on the far side here; partial-package acceptance has its own
+       explicit scenario below. */
     serverCoursePackage: () => { southportPolls += 1; return southportPolls > 1 ? serverPackage(18) : { status: "processing", stage: "automap" }; },
     serverWaitBudgetMs: 0
   });
@@ -610,16 +610,13 @@ async function main() {
   assert(!env.events.some((event) => String(event.event || "").startsWith("course-map-cloud")), "resume-round path has no cloud-map lifecycle noise");
   assert.strictEqual(env.result.playable, true, "resume-round skip still resolves play from the server package");
 
-  /* Unlike the old native-resolver stage - which warmed play frames for whatever holes it had
-     just persisted regardless of whether the rest of the course was mapped - the surviving
-     automapper branch only reaches showResolvedCoursePlayHole (where frame warming happens) once
-     the whole-course map is fully complete. A 3-of-18 server package is real progress but is not
-     "accepted" on its own; it falls through to the interactive fallback below like any other
-     server-map-not-ready miss, and produces no play frames at all. */
+  /* Publication is the course-level decision. A 3-of-18 package opens when the
+     requested hole exists; missing holes remain hole-level fallbacks. */
   env = await runScenario({ wholeCourse: true, serverCoursePackage: serverPackage(3) });
-  assert.strictEqual(env.result.playable, false, "an incomplete whole-course server package is not accepted on its own");
-  assert.strictEqual(env.calls.frameWarm, 0, "an incomplete whole-course server package warms no play frames");
-  assert.strictEqual(env.calls.ingestMappedCourse, 0, "an incomplete whole-course server package does not ingest into the play pipeline");
+  assert.strictEqual(env.result.playable, true, "a partial published package opens when the requested hole is mapped");
+  assert.deepStrictEqual(env.calls.frameWarmHoles, [1, 2, 3], "every available partial-package hole is warmed");
+  assert.strictEqual(env.calls.ingestMappedCourse, 1, "available partial geometry enters the play pipeline");
+  assert.strictEqual(env.calls.manual, 0, "a mapped requested hole does not fall through to manual");
 
   env = await runScenario({ wholeCourse: true, serverCoursePackage: serverPackage(18) });
   assert.strictEqual(env.result.playable, true, "resolved server-package run confirms every assigned hole");

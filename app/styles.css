@@ -31,6 +31,17 @@ body.route-signin #signInScreen { display: flex; align-items: center; justify-co
 
 .hiddenState { display: none; }
 
+#mapRecoveryScreen, #manualGpsIntro { position: absolute; inset: 0; z-index: 680; display: grid; place-items: center; padding: calc(96px + env(safe-area-inset-top, 0px)) 24px calc(32px + env(safe-area-inset-bottom, 0px)); background: #07100b; }
+#mapRecoveryScreen.hiddenState, #manualGpsIntro.hiddenState { display: none; }
+.mapRecoveryCard { width: min(420px, 100%); display: flex; flex-direction: column; align-items: stretch; gap: 14px; text-align: center; }
+.mapRecoveryCard > span { color: #7effae; font-size: 12px; font-weight: 850; letter-spacing: .13em; }
+.mapRecoveryCard h2 { margin: 0; color: #fff; font-size: clamp(25px, 7vw, 34px); line-height: 1.08; }
+.mapRecoveryCard p { margin: 0 0 8px; color: rgba(235, 246, 238, .76); font-size: 16px; line-height: 1.5; }
+.mapRecoveryCard button { min-height: 50px; border: 0; border-radius: 14px; background: #1fd36d; color: #041009; font-size: 16px; font-weight: 800; }
+.mapRecoveryCard button.linkButton { background: transparent; color: rgba(235, 246, 238, .78); }
+#manualTapPrompt { position: absolute; z-index: 670; top: calc(118px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); padding: 9px 13px; border-radius: 999px; background: rgba(4, 16, 9, .9); border: 1px solid rgba(126, 255, 174, .35); color: #eafff1; font-size: 12px; font-weight: 850; letter-spacing: .05em; white-space: nowrap; }
+#manualTapPrompt.hiddenState { display: none; }
+
 /* z-index:0 is load-bearing: it makes #map a stacking context so Leaflet's
    internal z-1000 panes stay inside it, underneath a presented surface,
    instead of painting over it. */

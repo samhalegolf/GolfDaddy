@@ -139,7 +139,7 @@ export async function buildCoursePackage(courseId) {
      opened the course. */
   const withFit = (pkg) => (fit && fit.trusted === false ? Object.assign({}, pkg, { fit }) : pkg);
   if (state === "full-map-ready") {
-    const full = shapeFullPackage(rows.map, rows.visual);
+    const full = shapeFullPackage(rows.map, rows.visual, rows.mapperJobs);
     /* shapeFullPackage returns null when the published frames have no geometry
        behind them - pictures of holes that cannot answer a distance. Falling back
        to lite is the honest answer: the course has geometry worth playing, it just
@@ -148,7 +148,7 @@ export async function buildCoursePackage(courseId) {
   }
   if (state === "full-map-ready" || state === "lite-geo-ready") {
     const liveVisualJob = rows.visualJobs.find(j => j.status === "running" || j.status === "queued");
-    return shapeLitePackage(rows.map, liveVisualJob ? liveVisualJob.status : "none");
+    return shapeLitePackage(rows.map, liveVisualJob ? liveVisualJob.status : "none", rows.mapperJobs);
   }
   if (state === "manual-required") {
     const lastMapperJob = rows.mapperJobs[0] || null;

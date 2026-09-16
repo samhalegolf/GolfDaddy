@@ -1976,6 +1976,7 @@
     var ll = proj ? proj.toLatLng({ left: at.left, top: at.top }) : null;
     if (!ll) return;
     if (app.pin && app.pin.armed()) { app.pin.set(ll); app.pin.disarm(); return; }
+    if (app.mapReadiness && app.mapReadiness.handleTap && app.mapReadiness.handleTap(ll)) return;
     /* A tap places you in Preview and nowhere else. In Live your position is
        the trusted fix, so a tap has nothing to say. */
     send("PLACED", { point: ll });

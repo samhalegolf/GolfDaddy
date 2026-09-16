@@ -427,7 +427,12 @@
        The 18 fallback covers only a round opened before any package arrived. */
     function holesInPlay() {
       var holes = (S.round.pkg && Array.isArray(S.round.pkg.holes)) ? S.round.pkg.holes : [];
-      var max = holes.reduce(function (m, h) { return Math.max(m, Number(h && h.holeNumber) || 0); }, 0);
+      var mappedMax = holes.reduce(function (m, h) { return Math.max(m, Number(h && h.holeNumber) || 0); }, 0);
+      /* The server owns the course's size. A partial 15/18 package must still
+         let the picker and Next reach holes 16-18 so the readiness controller
+         can offer their hole-level fallback instead of silently ending at 15. */
+      var expected = Number(S.round.pkg && S.round.pkg.expectedHoleCount) || 0;
+      var max = Math.max(mappedMax, expected);
       var out = [];
       for (var i = 1; i <= (max || 18); i++) out.push(i);
       return out;
@@ -785,6 +790,21 @@
         S.preview.target = pt(defaultTarget(point, r));
         S.preview.mode = "aim";
         syncEngine();
+        return true;
+      },
+
+      /* Live-GPS fallback for ONE hole. The current fix is already the player;
+         the tap supplies only the missing green. This session geometry is not
+         written to the course package store and does not change any other hole. */
+      MANUAL_HOLE_SET: function (p) {
+        var hole = Number(p && p.hole) || S.viewHole;
+        var green = pt(p && p.green);
+        if (!green || !S.fix.point || hole !== S.viewHole) return false;
+        var base = S.round.pkg && Array.isArray(S.round.pkg.holes) ? S.round.pkg.holes.slice() : [];
+        base = base.filter(function (item) { return Number(item && item.holeNumber) !== hole; });
+        base.push({ holeNumber: hole, tee: S.fix.point, green: green, greenShape: [], route: [S.fix.point, green], manual: true });
+        S.round.pkg = Object.assign({}, S.round.pkg || { status: "lite-geo-ready" }, { holes: base });
+        startHole(hole);
         return true;
       },
 

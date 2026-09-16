@@ -10,6 +10,10 @@
   var activeCourse = null;
   var activeMapType = null;   // "object" | "published" | null (nothing usable yet)
   var mapUpdatePrompt = null;
+  var pendingMapUpdate = null;
+  var readinessRetryTimer = null;
+  var manualGreenArmed = false;
+  var mapReadiness = app.createMapReadiness ? app.createMapReadiness() : null;
   var updateCheckToken = 0;
   var UPDATE_DISMISS_KEY = "clarity:course-update-dismissed:v1";
   /* The hole the last update check was scheduled for. The check rides on the
@@ -26,6 +30,68 @@
   /* Wired once, on the first Marshal. The listener outlives any single round
      and asks the Marshal fresh each time, so there is nothing to tear down. */
   var wiredSleepUnlock = false;
+
+  function stopReadinessRetry() {
+    if (readinessRetryTimer) clearTimeout(readinessRetryTimer);
+    readinessRetryTimer = null;
+  }
+
+  function scheduleReadinessRetry() {
+    if (readinessRetryTimer || !activeCourse || manualGreenArmed) return;
+    readinessRetryTimer = setTimeout(function () {
+      readinessRetryTimer = null;
+      checkForMapUpdate();
+    }, 3000);
+  }
+
+  function renderMapReadiness(value) {
+    if (!value) return;
+    var screen = document.getElementById("mapRecoveryScreen");
+    var intro = document.getElementById("manualGpsIntro");
+    var tapPrompt = document.getElementById("manualTapPrompt");
+    var title = document.getElementById("mapRecoveryTitle");
+    var copy = document.getElementById("mapRecoveryCopy");
+    var eyebrow = document.getElementById("mapRecoveryEyebrow");
+    var ready = value.state === "READY" || value.state === "PARTIAL_READY";
+    if (ready) {
+      screen.classList.add("hiddenState");
+      if (!manualGreenArmed) intro.classList.add("hiddenState");
+      stopReadinessRetry();
+      return;
+    }
+    manualGreenArmed = false;
+    tapPrompt.classList.add("hiddenState");
+    intro.classList.add("hiddenState");
+    eyebrow.textContent = value.state === "PROCESSING" ? "COURSE MAP PREPARING"
+      : value.state === "MANUAL_ACTION_REQUIRED" ? "COURSE MAP NEEDS ATTENTION"
+      : "COURSE MAP NOT AVAILABLE";
+    title.textContent = value.state === "CURRENT_HOLE_MISSING" ? "This hole is not mapped yet"
+      : value.state === "PROCESSING" ? "We're still preparing this course"
+      : value.state === "MANUAL_ACTION_REQUIRED" ? "This course map needs correction"
+      : "We couldn't load a usable map";
+    copy.textContent = value.state === "PROCESSING"
+      ? "You can wait here or use GPS manually. We'll open the mapped hole automatically if it becomes ready."
+      : "You can still use GPS manually. We'll keep checking for an updated map.";
+    screen.classList.remove("hiddenState");
+    scheduleReadinessRetry();
+  }
+
+  if (mapReadiness) {
+    mapReadiness.onChange(renderMapReadiness);
+    app.mapReadiness = {
+      controller: mapReadiness,
+      handleTap: function (point) {
+        if (!manualGreenArmed || !app.marshal) return false;
+        var hole = app.marshal.round().hole;
+        var changed = app.marshal.signal("MANUAL_HOLE_SET", { hole: hole, green: point });
+        if (!changed) return true;
+        manualGreenArmed = false;
+        document.getElementById("manualTapPrompt").classList.add("hiddenState");
+        mapReadiness.setManualHole(hole);
+        return true;
+      }
+    };
+  }
 
   /* Build the Marshal and hand it the effects it is allowed to cause. It is
      pure by construction — no globals, no DOM — so everything with a side
@@ -94,10 +160,20 @@
              checked too, a moment after play is up, so a course opened from
              the device's copy is not stale for eighteen holes. */
           if (activeCourse && hole !== lastUpdateCheckHole) {
+            /* A downloaded update becomes the playing package only at a hole
+               boundary. This is also what protects a manually targeted hole
+               from being replaced underneath its active shot. */
+            if (pendingMapUpdate && Number(pendingMapUpdate.stagedHole) !== Number(hole)) {
+              var queued = pendingMapUpdate;
+              pendingMapUpdate = null;
+              adoptMapUpdate(queued.course, queued.pkg, queued.mapType);
+              return;
+            }
             var firstHole = lastUpdateCheckHole === null;
             lastUpdateCheckHole = hole;
             scheduleMapUpdateCheck(firstHole ? 1500 : 250);
           }
+          if (mapReadiness) mapReadiness.enterHole(hole);
           /* The bubble is free; resume is the round record, so it is not. */
           if (window.GDBubbleEngine && rec) {
             window.GDBubbleEngine.setHoleContext({
@@ -206,6 +282,7 @@
   }
 
   function startRound(course, pkg) {
+    if (mapReadiness) mapReadiness.observePackage(pkg);
     ensureMarshal().signal("ROUND_OPENED", {
       courseKey: app.courseKey(course.courseId),
       courseName: course.courseName || "",
@@ -508,7 +585,21 @@
     });
     if (token !== updateCheckToken || activeCourse !== course) return;   // superseded: left/changed course
     var mapType = mapTypeOf(pkg);
-    if (!mapType) return;                                                // nothing publishable on the server
+    if (!mapType) {
+      if (mapReadiness && mapReadiness.current().state !== "READY" && mapReadiness.current().state !== "PARTIAL_READY") {
+        mapReadiness.observePackage(pkg);
+      }
+      return;                                                // nothing publishable on the server
+    }
+    var readiness = mapReadiness && mapReadiness.current();
+    var currentHole = app.marshal ? app.marshal.round().hole : 1;
+    /* A late package that fixes the blocked hole is recovery, not an update
+       prompt. Manual choice is the exception: once chosen, stage it. */
+    if (readiness && readiness.state !== "READY" && readiness.state !== "PARTIAL_READY"
+        && mapReadiness.playableHole(pkg, currentHole)) {
+      adoptMapUpdate(course, pkg, mapType);
+      return;
+    }
     /* The captured map has landed on a round that is streaming the live one.
      *
      * Taken without asking, and it is the only case that is. Anything short of
@@ -523,7 +614,7 @@
      * being offered a NEWER one, and swapping the ground under them mid-hole
      * is a change they should get to decline. */
     if (mapType === "published" && activeMapType !== "published") {
-      adoptMapUpdate(course, pkg, mapType);
+      stageOrAdoptMapUpdate(course, pkg, mapType);
       return;
     }
     var local = app.courseStore.load(course.courseId);
@@ -538,13 +629,20 @@
       mapVersion: pkg.packageVersion || null
     });
     if (kind === "none") return;
+    /* Partial -> complete is not an ordinary invisible geometry refresh. It
+       repairs holes the player may have had to play manually, so say that
+       clearly and let the existing update state machine stage the package. */
+    if (local.pkg && local.pkg.readiness === "partial" && pkg.readiness === "complete") {
+      if (!updateWasDismissed(course, pkg, mapType)) showMapUpdateBar(course, pkg, mapType);
+      return;
+    }
     /* Geometry only - greens, tees, routes, surfaces - is the second case
        taken without asking. PACKAGE_UPDATED already keeps the hole, the mode
        and every recorded shot, so nothing the player is looking at moves
        except the objects that were wrong. A newer published FRAME still asks:
        that swaps the picture under their feet. */
     if (kind === "geometry") {
-      adoptMapUpdate(course, pkg, mapType);
+      stageOrAdoptMapUpdate(course, pkg, mapType);
       return;
     }
     /* Dismissal belongs to this exact published/object version. A later
@@ -566,8 +664,17 @@
        the painter's per-session visual cache has to be gone by then. */
     if (app.painter && app.painter.refreshSurface) app.painter.refreshSurface(app.courseKey(course.courseId));
     app.marshal.signal("PACKAGE_UPDATED", { pkg: pkg });
+    if (mapReadiness) mapReadiness.observePackage(pkg);
     mapUpdatePrompt = null;
     if (!(opts && opts.keepBar)) document.getElementById("mapUpdateBar").classList.add("hiddenState");
+  }
+
+  function stageOrAdoptMapUpdate(course, pkg, mapType) {
+    var round = app.marshal && app.marshal.round();
+    if (!round || round.liveHole === null) return adoptMapUpdate(course, pkg, mapType);
+    saveCourseToLibrary(course, pkg);
+    pendingMapUpdate = { course: course, pkg: pkg, mapType: mapType, stagedHole: round.hole };
+    document.getElementById("mapUpdateLabel").textContent = "Map ready · applies next hole";
   }
 
   function applyMapUpdateWithProgress(course, pkg, mapType) {
@@ -582,10 +689,10 @@
     requestAnimationFrame(function () {
       label.textContent = "Updating course map · Refreshing playing surface…";
       setTimeout(function () {
-        adoptMapUpdate(course, pkg, mapType, { keepBar: true });
+        stageOrAdoptMapUpdate(course, pkg, mapType);
         document.body.classList.remove("map-update-in-progress");
-        label.textContent = "Map updated ✓";
-        button.textContent = "Updated";
+        label.textContent = pendingMapUpdate ? "Ready for next hole ✓" : "Map updated ✓";
+        button.textContent = "Ready";
         setTimeout(function () {
           bar.classList.add("hiddenState");
           button.disabled = false;
@@ -605,8 +712,11 @@
        copy already saved this bar is offering a NEWER one, and saying
        "available" there is the same overclaim checkForMapUpdate just stopped
        making. */
+    var local = app.courseStore.load(course.courseId);
+    var repair = !!(local && local.pkg && local.pkg.readiness === "partial" && pkg.readiness === "complete");
     document.getElementById("mapUpdateLabel").textContent =
-      app.courseStore.load(course.courseId) ? "Updated map available"
+      repair ? "COURSE MAP FIXED · Complete map ready"
+      : local ? "Updated map available"
         : mapType === "published" ? "Published map available" : "Course map available";
     document.getElementById("mapUpdateBar").classList.remove("hiddenState");
     mapUpdatePrompt = { course: course, pkg: pkg, mapType: mapType };
@@ -630,6 +740,7 @@
   async function openPlay(course, resumeHole) {
     show("play");
     activeCourse = course;
+    pendingMapUpdate = null;
     mapUpdatePrompt = null;
     lastUpdateCheckHole = null;
     gpsNoticeDismissed = false;
@@ -733,6 +844,21 @@
       document.getElementById("gpsNotice").classList.add("hiddenState");
     });
     document.getElementById("gpsNoticeEnable").addEventListener("click", enableLocation);
+    document.getElementById("mapRecoveryManual").addEventListener("click", function () {
+      stopReadinessRetry();
+      document.getElementById("mapRecoveryScreen").classList.add("hiddenState");
+      document.getElementById("manualGpsIntro").classList.remove("hiddenState");
+    });
+    document.getElementById("mapRecoveryBack").addEventListener("click", exitBack);
+    document.getElementById("manualGpsCancel").addEventListener("click", function () {
+      document.getElementById("manualGpsIntro").classList.add("hiddenState");
+      renderMapReadiness(mapReadiness && mapReadiness.current());
+    });
+    document.getElementById("manualGpsBegin").addEventListener("click", function () {
+      manualGreenArmed = true;
+      document.getElementById("manualGpsIntro").classList.add("hiddenState");
+      document.getElementById("manualTapPrompt").classList.remove("hiddenState");
+    });
     document.addEventListener("visibilitychange", function () {
       if (!document.hidden && activeCourse && app.gps && app.gps.recheck) app.gps.recheck();
     });

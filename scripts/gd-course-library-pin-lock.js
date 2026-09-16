@@ -2562,15 +2562,11 @@
     const h=validHoleNumber(hole)||activePlayingHole()||mapperHole()||holeNumber()||1;
     const key=`${mappedModeCourseIdentity()}::${h}::${reason}`;
     const now=Date.now();
-    const duplicate=mappedDropoutNotice.key===key&&now-mappedDropoutNotice.at<1800;
     mappedDropoutNotice={key,at:now};
     try{console.warn('[Clarity Caddy] mapped data dropout',{course:mappedModeCourseIdentity(),hole:h,reason});}catch(e){}
-    if(opts.quiet)return false;
-    if(!duplicate){
-      try{setState('Mapped data needed');}catch(e){}
-      hintSafe(`Mapped data missing for H${h}`);
-      toastSafe(`Mapped data missing for H${h}`);
-    }
+    /* A renderer/lock result, not a UI strategy. The course/hole readiness
+       owner decides whether this is processing, a missing hole, or failure. */
+    try{window.dispatchEvent(new CustomEvent('gd:map-readiness',{detail:{state:'CURRENT_HOLE_MISSING',course:mappedModeCourseIdentity(),hole:h,reason}}));}catch(e){}
     return false;
   }
 	  function focusMappedHoleOrSavedGreen(hole,opts={}){
@@ -3860,7 +3856,10 @@
     return {
       requestedPlayable,
       coverage,
-      ready: wholeCourse?coverage.complete:requestedPlayable
+      /* Publication/course selection decides course viability. This function
+         answers only whether the requested hole can render; partial coverage
+         is metadata, never a reason to reject every mapped hole. */
+      ready:requestedPlayable
     };
   }
   function courseDataMapReadiness(course,hole,wholeCourse){
@@ -3875,7 +3874,7 @@
     for(let n=1;n<=expected;n++)if(!holes.includes(n))missing.push(n);
     const requestedPlayable=holes.includes(h);
     const coverage={expected,holes,count:holes.length,missing,complete:holes.length>=expected&&missing.length===0};
-    return {requestedPlayable,coverage,ready:wholeCourse?coverage.complete:requestedPlayable};
+    return {requestedPlayable,coverage,ready:requestedPlayable};
   }
   function coursePlayDebugDetail(course,hole,detail={}){
     const h=validHoleNumber(hole)||1;
