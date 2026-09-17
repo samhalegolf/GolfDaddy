@@ -208,9 +208,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.click("#shotActionBtn");
   await wait(300);
   check("Lock raises the bubble", await visible("aimBubble"));
-  check("Shot End and Log shot are laid out sensibly",
-    (await visible("shotEndBtn")) && !(await visible("finishControl")),
-    "while aiming, Shot End is the action");
+  check("no side action while aiming - the next Lock closes this shot",
+    !(await visible("shotEndBtn")) && !(await visible("finishControl")));
 
   await page.click("#shotActionBtn");     // Unlock
   await wait(250);
@@ -220,8 +219,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     !(await visible("aimBubble")) && !(await visible("bubbleSvg")));
   check("the shot is still in flight for Course Data",
     await look(() => !!ClarityApp.marshal.openShot(1)));
-  check("Log shot appears now there is something outstanding and we are at rest",
-    await visible("finishControl"));
+  check("Log shot waits until you are near the green, even with a shot outstanding",
+    !(await visible("finishControl")), "170m out is not near the green");
 
   console.log("\n— Aim releases itself —");
 

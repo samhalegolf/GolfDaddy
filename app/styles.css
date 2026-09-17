@@ -972,7 +972,10 @@ body.watchDriving .playChrome { z-index: 700; }
 @keyframes logPopupIn { from { opacity: 0; transform: scale(.94) translateY(8px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .logPopupBox { animation: none; } }
 .logPopupHead { display: flex; flex-direction: column; gap: 2px; padding: 0 2px; }
+.logPopupHeadRow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .logPopupHead strong { font-size: 16px; }
+#logPopupZoom { border: 1px solid rgba(255, 255, 255, .16); border-radius: 999px; padding: 5px 10px; background: rgba(255, 255, 255, .07); color: rgba(255, 255, 255, .78); font-size: 11px; font-weight: 800; letter-spacing: .02em; }
+#logPopupZoom:active { transform: scale(.97); }
 #logPopupHint { min-height: 14px; font-size: 11.5px; font-weight: 700; line-height: 1.25; color: rgba(255, 255, 255, .62); }
 /* The snapshot. Square, 90m across (SNAP_SPAN_M in painter.js): a green is
    30-45m, so the surrounds - the bunker, the collar, the run-off - stay in

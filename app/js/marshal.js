@@ -97,6 +97,13 @@
   var MOVING_START_MPS = 0.7;
   var MOVING_STOP_MPS = 0.35;
 
+  /* How close to the green "Log shot" is offered (and the Lock coin stops
+     inviting). Wider than the 40m popup band: it is the way to reopen the
+     popup after closing it, and to log from the collar or the run-off. Away
+     from the green there is nothing to press - the next Lock closes the
+     previous shot by itself (lockAt), which is the whole mid-hole rule. */
+  var LOG_NEAR_GREEN_M = 80;
+
   function pt(value) {
     if (!value || value.lat == null || value.lng == null) return null;
     var lat = Number(value.lat), lng = Number(value.lng);
@@ -373,10 +380,10 @@
       return fromLock !== null && (fromLock - d) >= GREEN_APPROACH_M;
     }
 
-    /* Standing inside the green band, whatever is or is not open. */
-    function nearGreen(hole) {
+    /* Standing inside a band around the green, whatever is or is not open. */
+    function nearGreen(hole, radiusM) {
       var d = S.fix.point ? toGreen(S.fix.point, hole) : null;
-      return d !== null && d <= GREEN_FOCUS_M;
+      return d !== null && d <= (radiusM || GREEN_FOCUS_M);
     }
 
     /* One fix's worth of "am I moving". The platform's speed when it gave
@@ -1274,7 +1281,7 @@
           /* Resting in Track and standing still: the moment Lock is the thing
              to press, said with a small animation on the coin rather than a
              prompt. Walking, or already aiming, it is quiet. */
-          invite: live && m === "track" && !!S.fix.point && !S.motion.moving
+          invite: live && m === "track" && !!S.fix.point && !S.motion.moving && !nearGreen(S.live.hole, LOG_NEAR_GREEN_M)
         },
 
         /* Walking or not. The club recommendation hides while moving in
@@ -1291,11 +1298,12 @@
           start: (live && S.fix.point) ? { lat: S.fix.point.lat, lng: S.fix.point.lng } : null
         },
 
-        /* The button that OPENS green focus for the hole you are on, offered
-           while there is something outstanding on it. Live and resting only:
-           while Aiming, Shot End is already the thing to press, and Preview
-           needs no button — tapping the green is how you get there. */
-        finishControl: { show: live && m === "track" && !!openShot(S.viewHole) },
+        /* The button that OPENS the logging popup for the hole you are on:
+           Live, resting, something outstanding, and NEAR THE GREEN. Away
+           from it there is nothing to log by hand - the next Lock closes the
+           previous shot (lockAt) - and Preview needs no button at all; the
+           picker's Shot logging switch is the other door. */
+        finishControl: { show: live && m === "track" && !!openShot(S.viewHole) && nearGreen(S.live.hole, LOG_NEAR_GREEN_M) },
 
         /* `canLog` is the difference between the two reasons to be here: a
            shot outstanding makes Shot End a write, and nothing outstanding
@@ -1485,7 +1493,7 @@
       openShot: openShot,
       constants: { AT_COURSE_M: AT_COURSE_M, GREEN_FOCUS_M: GREEN_FOCUS_M, GREEN_RELEASE_M: GREEN_RELEASE_M, GREEN_APPROACH_M: GREEN_APPROACH_M,
         TEE_ZONE_M: TEE_ZONE_M, HOLE_ARRIVAL_M: HOLE_ARRIVAL_M, AIM_RELEASE_M: AIM_RELEASE_M, AIM_RELEASE_FIXES: AIM_RELEASE_FIXES,
-        MOVING_START_MPS: MOVING_START_MPS, MOVING_STOP_MPS: MOVING_STOP_MPS }
+        MOVING_START_MPS: MOVING_START_MPS, MOVING_STOP_MPS: MOVING_STOP_MPS, LOG_NEAR_GREEN_M: LOG_NEAR_GREEN_M }
     };
   }
 

@@ -528,19 +528,40 @@ check("Lock closes the previous shot and opens the next", () => {
   assert.ok(m.openShot(1));
 });
 
-check("Finish is offered exactly when the hole has an open shot", () => {
+check("Log shot is offered only with an open shot, at rest, near the green", () => {
   const { m } = playing();
   assert.strictEqual(m.scene().finishControl.show, false, "nothing outstanding");
   m.signal("LOCK");
   assert.strictEqual(m.scene().mode, "aim");
-  assert.strictEqual(m.scene().finishControl.show, false, "Shot End is the action while aiming");
+  assert.strictEqual(m.scene().finishControl.show, false, "not while aiming - the next Lock is the shot end");
   m.signal("UNLOCK");
-  assert.strictEqual(m.scene().finishControl.show, true, "back at rest, with a shot outstanding");
+  assert.strictEqual(m.scene().finishControl.show, false, "at rest but 335m from the green: nothing to log by hand yet");
+  m.signal("FIX_RECEIVED", { point: offsetM(GREEN, 60, 0) });
+  assert.strictEqual(m.scene().finishControl.show, true, "near the green, with a shot outstanding");
   m.signal("FINISH_OPENED", { hole: 1 });
   m.signal("BALL_MOVED", { point: GREEN });
   m.signal("FINISH_LOGGED");
   m.signal("BACK");
   assert.strictEqual(m.scene().finishControl.show, false, "logged, so nothing to offer");
+});
+
+check("the next Lock closes the previous shot - no Shot End needed mid-hole", () => {
+  const { m, effects } = playing();
+  m.signal("LOCK");
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -120, 0) });
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -150, 0) });     // aim released
+  assert.strictEqual(m.scene().mode, "track");
+  m.signal("LOCK");
+  assert.strictEqual(effects.completed.length, 1, "locking again ended the tee shot where you now stand");
+  assert.strictEqual(effects.completed[0].meta.captureMethod, "lock");
+  assert.strictEqual(m.shots(1).length, 2, "and opened the next");
+});
+
+check("the coin stops inviting near the green", () => {
+  const { m } = playing();
+  assert.strictEqual(m.scene().dock.invite, true, "still, in Track, on the fairway");
+  m.signal("FIX_RECEIVED", { point: offsetM(GREEN, 50, 0) });
+  assert.strictEqual(m.scene().dock.invite, false, "inside the log band it stays quiet");
 });
 
 /* Green focus is a VIEW and opens on position alone. It used to need an open

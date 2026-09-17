@@ -101,26 +101,31 @@
        flag in the choice popover so the gesture means the same in both. */
     var pinGhost = document.getElementById("pinGhost");
 
+    /* The TAP rides on click, the DRAG on pointer events. They used to share
+       one pointerup, with preventDefault on pointerdown and pointer capture
+       holding the stream together - and on iOS WebKit that tap never landed:
+       the button lit up, the popover never came, and the next tap on a
+       neighbouring rail button fired it instead. click is the one event both
+       engines deliver for a tap regardless of what happened to the pointer
+       stream, so the tap lives there and is suppressed only after a real
+       drag. A drag can still lose its stream (pointercancel); that is a
+       dropped pin, never a dropped tap. */
     function wireFlagSource(btn, onTap) {
       if (!btn || !app.pin) return;
       var down = false, dragged = false, startX = 0, startY = 0;
-      /* Belt and braces with draggable="false" on the image: a native drag
-         starting anywhere in the button ends the pointer stream with a
-         pointercancel, and the drop never happens. */
+      var DRAG_START_PX = 12;
       btn.addEventListener("dragstart", function (e) { e.preventDefault(); });
       btn.addEventListener("pointerdown", function (e) {
         down = true;
         dragged = false;
         startX = e.clientX;
         startY = e.clientY;
-        try { btn.setPointerCapture(e.pointerId); } catch (err) {}
-        /* No text selection, no focus ring, no iOS callout timer. */
-        e.preventDefault();
       });
       btn.addEventListener("pointermove", function (e) {
         if (!down) return;
-        if (!dragged && Math.hypot(e.clientX - startX, e.clientY - startY) > 8) {
+        if (!dragged && Math.hypot(e.clientX - startX, e.clientY - startY) > DRAG_START_PX) {
           dragged = true;
+          try { btn.setPointerCapture(e.pointerId); } catch (err) {}
           if (pinGhost) pinGhost.classList.remove("hiddenState");
         }
         if (dragged && pinGhost) {
@@ -132,23 +137,25 @@
         if (!down) return;
         down = false;
         if (pinGhost) pinGhost.classList.add("hiddenState");
-        if (dragged) {
-          app.pin.disarm();
-          /* A scrolled screen would put the drop a scroll's width from the
-             finger; settle it before asking where the finger is. */
-          settleScreen();
-          var ll = app.painter && app.painter.latLngAt(e.clientX, e.clientY);
-          if (ll) app.pin.set(ll);
-          close();
-          closePinChoice();
-          return;
-        }
-        onTap();
+        if (!dragged) return;                       // a tap: click will follow
+        app.pin.disarm();
+        /* A scrolled screen would put the drop a scroll's width from the
+           finger; settle it before asking where the finger is. */
+        settleScreen();
+        var ll = app.painter && app.painter.latLngAt(e.clientX, e.clientY);
+        if (ll) app.pin.set(ll);
+        close();
+        closePinChoice();
       });
       btn.addEventListener("pointercancel", function () {
         down = false;
         dragged = false;
         if (pinGhost) pinGhost.classList.add("hiddenState");
+      });
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        if (dragged) { dragged = false; return; }   // the drop already happened
+        onTap();
       });
     }
 
@@ -262,21 +269,27 @@
        appears when live can't answer) then cycles the level (1→2→3→off);
        a long press opens the compass for a manual direction override —
        same long-press as the legacy rail button. */
+    /* Same split as the pin: the long press is timed off pointerdown, the
+       short tap is the click, which every engine delivers. */
     var windBtn = document.getElementById("railWind");
     if (windBtn && app.wind) {
       var pressTimer = null, longPressed = false;
       windBtn.addEventListener("pointerdown", function () {
         longPressed = false;
+        clearTimeout(pressTimer);
         pressTimer = setTimeout(function () {
           longPressed = true;
           app.wind.openPicker();
         }, WIND_LONG_PRESS_MS);
       });
-      windBtn.addEventListener("pointerup", function () {
-        clearTimeout(pressTimer);
-        if (!longPressed) app.wind.press();
-      });
+      windBtn.addEventListener("pointerup", function () { clearTimeout(pressTimer); });
       windBtn.addEventListener("pointercancel", function () { clearTimeout(pressTimer); });
+      windBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        clearTimeout(pressTimer);
+        if (longPressed) { longPressed = false; return; }
+        app.wind.press();
+      });
     }
   });
 })();

@@ -992,7 +992,9 @@
      How much ground the snapshot shows, edge to edge. A green is 30-45m
      across, so this keeps the surrounds in the picture - the bunker short,
      the run-off long - without the green shrinking to a coin. */
-  var SNAP_SPAN_M = 90;
+  var SNAP_SPANS_M = [80, 120, 170];
+  var snapSpanIndex = 1;
+  function snapSpanM() { return SNAP_SPANS_M[snapSpanIndex]; }
   /* The solved snapshot. Presentation state: which picture, at what
      placement, and the two-way projection between the box and the ground. */
   var snap = null;
@@ -1000,7 +1002,7 @@
   function snapKeyFor(scene, r, size) {
     var img = el("surfaceImage");
     var pub = published && img && img.dataset.playSurface;
-    return [scene.hole.number, r.green.lat, r.green.lng, size,
+    return [scene.hole.number, r.green.lat, r.green.lng, size, snapSpanM(),
       pub ? "p:" + (publishedFrameUrl || "") : "l:" + baseKind].join("|");
   }
 
@@ -1017,7 +1019,7 @@
 
   /* A north-up mercator frame - the export's green frame when it published
      one (the green alone at z20, sharp), the hole frame otherwise - placed by
-     one translate+scale so the green centre lands mid-box at SNAP_SPAN_M
+     one translate+scale so the green centre lands mid-box at snapSpanM()
      across. The projection is the frame's own: world px at its capture zoom,
      minus its origin, through the same transform. */
   function buildImageSnap(meta, url, green, size) {
@@ -1028,7 +1030,7 @@
     var north = surfaceLib.worldPx(green.lat + 1 / 111320, green.lng, z);
     var ppm = Math.abs(north.y - gw.y);             // frame px per metre at the green
     if (!(ppm > 0)) return null;
-    var s = (size / SNAP_SPAN_M) / ppm;             // box px per frame px
+    var s = (size / snapSpanM()) / ppm;             // box px per frame px
     var tx = size / 2 - (gw.x - ox) * s, ty = size / 2 - (gw.y - oy) * s;
     var image = el("logSnapImage");
     if (!image) return null;
@@ -1051,7 +1053,7 @@
   }
 
   /* No published picture: a small live map on the same basemap the hole is
-     drawn on, every gesture off, fitted to SNAP_SPAN_M around the green. */
+     drawn on, every gesture off, fitted to snapSpanM() around the green. */
   function buildMapSnap(green, size) {
     if (typeof L === "undefined") return null;
     var node = el("logSnapMap");
@@ -1065,7 +1067,7 @@
     var base = app.basemap.baseFor(green);
     var layer = base.layer.addTo(m);
     m.invalidateSize({ animate: false });
-    var half = (SNAP_SPAN_M / 2) * Math.SQRT2;
+    var half = (snapSpanM() / 2) * Math.SQRT2;
     var sw = app.distance.project(green, Math.PI * 1.25, half);
     var ne = app.distance.project(green, Math.PI * 0.25, half);
     if (sw && ne) m.fitBounds(L.latLngBounds([[sw.lat, sw.lng], [ne.lat, ne.lng]]), { animate: false, padding: [0, 0] });
@@ -1126,6 +1128,8 @@
     var green = r && r.green;
     var title = el("logPopupTitle");
     if (title) title.textContent = "Hole " + scene.finish.hole;
+    var zoom = el("logPopupZoom");
+    if (zoom) zoom.textContent = unitsWithLabel(snapSpanM()) + " wide";
     var hint = el("logPopupHint");
     var logBtn = el("logPopupLog");
     if (logBtn) logBtn.disabled = !scene.finish.canLog;
@@ -1289,7 +1293,6 @@
       setDockFace(dock, scene);
       dock.classList.toggle("invite", !!scene.dock.invite);
     }
-    show(el("shotEndBtn"), canTrackShots && scene.dock.canShotEnd && !scene.finish.show);
 
     show(el("finishControl"), canTrackShots && scene.finishControl.show);
     show(el("holeCompleteControl"), scene.holeCompleteControl.show);
@@ -2231,6 +2234,13 @@
     });
     if (scrim) scrim.addEventListener("click", function () { send("BACK"); });
     if (logBtn) logBtn.addEventListener("click", function () { send("FINISH_LOGGED"); });
+    /* How much ground the snapshot shows: cycles the widths. Presentation
+       state, so it is a repaint of the same Scene rather than a Signal. */
+    var zoom = el("logPopupZoom");
+    if (zoom) zoom.addEventListener("click", function () {
+      snapSpanIndex = (snapSpanIndex + 1) % SNAP_SPANS_M.length;
+      if (currentScene) repaint("SNAP_ZOOM", function () { drawLogPopup(currentScene); });
+    });
   }
 
   function wireInput() {
@@ -2283,9 +2293,6 @@
     if (finish) finish.addEventListener("click", function () {
       send("FINISH_OPENED", { hole: currentScene ? currentScene.hole.number : null });
     });
-
-    var shotEnd = el("shotEndBtn");
-    if (shotEnd) shotEnd.addEventListener("click", function () { send("SHOT_END"); });
 
     var next = el("loggedNext");
     if (next) next.addEventListener("click", function () {

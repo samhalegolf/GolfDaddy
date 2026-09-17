@@ -33,7 +33,7 @@
      resolves natively only because the bootstrap above ran first. -->
 <script src="../scripts/clarity-error-reporter.js"></script>
 <link rel="stylesheet" href="../assets/vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="styles.css?v=log-popup-20260917b">
+<link rel="stylesheet" href="styles.css?v=log-popup-20260917c">
 <link rel="stylesheet" href="../styles/inline/gd-editable-bag-panel-v1.css">
 <link rel="stylesheet" href="../styles/gd-demo-mode.css">
 </head>
@@ -212,19 +212,19 @@
     <div id="aimBubble" class="hiddenState"></div>
   </div>
   </div>
-  <!-- The dock: Lock in Track, Unlock Shot while aiming. Shot End sits beside
-       it rather than being a third face, because while aiming BOTH are things
-       you might do. The label is the fallback that shows if the coin art is
-       missing, so the control still works without it. -->
+  <!-- The dock: Lock in Track, Unlock Shot while aiming. There is no Shot End
+       beside it any more: the next Lock closes the previous shot (marshal
+       lockAt), and the last shot of a hole is closed in the logging popup,
+       which Log shot opens near the green. The label is the fallback that
+       shows if the coin art is missing, so the control still works without it. -->
   <div class="shotDock">
-    <button id="shotEndBtn" type="button" class="hiddenState dockSide" aria-label="Shot End">Shot End</button>
     <button id="shotActionBtn" type="button" class="hiddenState" aria-label="Lock">
       <img id="shotActionIcon" src="" alt="">
       <span id="shotActionLabel"></span>
     </button>
-    <!-- Offered exactly when this hole has a shot with no end on it. Nothing
-         arms it and nothing expires it — it is a view of the record, so it is
-         right retroactively and is how you catch up on a hole later. -->
+    <!-- Offered when this hole has a shot with no end on it AND you are near
+         its green (marshal LOG_NEAR_GREEN_M). It opens the logging popup;
+         catching up on an earlier hole is the picker's Shot logging switch. -->
     <button id="finishControl" type="button" class="hiddenState dockSide" aria-label="Log where the shot finished">Log shot</button>
     <!-- The hole is done. Offered on the green and on the Logged screen that
          follows closing a shot there, because those are the two places where
@@ -539,7 +539,11 @@
     <div id="logPopupScrim"></div>
     <div class="logPopupBox">
       <div class="logPopupHead">
-        <strong id="logPopupTitle">Hole 1</strong>
+        <div class="logPopupHeadRow">
+          <strong id="logPopupTitle">Hole 1</strong>
+          <!-- How much ground the snapshot shows; taps cycle the widths. -->
+          <button id="logPopupZoom" type="button" aria-label="Change how much of the green surrounds is shown">120m wide</button>
+        </div>
         <span id="logPopupHint">Drag the ball to where the shot finished</span>
       </div>
       <div id="logSnap" class="logSnap">
@@ -683,7 +687,7 @@
      Marshal now derives — the player IS the trusted fix in Live and IS your
      placement in Preview, so a position with a source tag and a policy had
      nothing left to be. -->
-<script src="js/marshal.js?v=log-popup-20260917"></script>
+<script src="js/marshal.js?v=log-popup-20260917c"></script>
 <script src="js/caddy-watch.js"></script>
 <script src="js/watch-map-delivery.js"></script>
 <script src="js/watch-player-delivery.js"></script>
@@ -692,9 +696,9 @@
 <script src="../scripts/gd-green-contours-core.js"></script>
 <script src="js/gd-terrain-mesh.js"></script>
 <script src="js/gd-green-contours.js"></script>
-<script src="js/painter.js?v=log-popup-20260917"></script>
+<script src="js/painter.js?v=log-popup-20260917c"></script>
 <script src="js/resume.js"></script>
-<script src="js/tool-rail.js"></script>
+<script src="js/tool-rail.js?v=log-popup-20260917c"></script>
 <!-- Password-reset and account-setup links land on whatever page the app has
      open, including this one. The handler hands them to the root shell, which
      is the only surface that reads those parameters. Inert on web, where the

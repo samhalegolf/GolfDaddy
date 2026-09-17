@@ -1512,7 +1512,9 @@ async function bootCheck() {
     /* A tap - no movement - reveals the two methods and places nothing. */
     app.pin.clear();
     document.getElementById("toolRailTab").click(); await gd.wait(60);
-    ev("pointerdown", sx, sy); ev("pointerup", sx, sy);
+    /* A real tap ends in a click as well - the tap rides on click now, since
+       WebKit dropped the pointerup path on the phone (tool-rail.js). */
+    ev("pointerdown", sx, sy); ev("pointerup", sx, sy); railPin.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, clientX: sx, clientY: sy }));
     await gd.wait(60);
     const tap = { choiceShown: gd.shown("pinChoicePopover"), noPin: app.pin.current() === null, notArmed: !app.pin.armed() };
 
@@ -1546,7 +1548,7 @@ async function bootCheck() {
 
     S.set("units", "m");
     document.getElementById("toolRailTab").click(); await gd.wait(60);
-    ev("pointerdown", sx, sy); ev("pointerup", sx, sy); await gd.wait(60);
+    ev("pointerdown", sx, sy); ev("pointerup", sx, sy); railPin.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, clientX: sx, clientY: sy })); await gd.wait(60);
     document.getElementById("pinChoiceLock").click(); await gd.wait(60);
     const reopened = {
       unit: document.getElementById("pinLockUnit").textContent,
@@ -1672,7 +1674,9 @@ async function bootCheck() {
     m.signal("PLAY_PRESSED");
     m.signal("LOCK");
     const aiming = {
-      shotEndHidden: document.getElementById("shotEndBtn").classList.contains("hiddenState"),
+      /* The mid-aim Shot End button is gone for everyone: the next Lock
+         closes the previous shot, and the last one is logged in the popup. */
+      shotEndHidden: !document.getElementById("shotEndBtn"),
       unlockShown: !document.getElementById("shotActionBtn").classList.contains("hiddenState")
     };
     /* Two fixes on the green: the aim releases (you hit and walked), and a
