@@ -132,6 +132,11 @@
         if (!window.GDBubbleEngine) return null;
         try { return window.GDBubbleEngine.maxPlayableCarryM(); } catch (e) { return null; }
       },
+      /* Green focus — the logging popup, the ball, the picker's catch-up — is
+         a write to the round record, so a rangefinder-only session never
+         reaches it. Same rule as the effects below, asked live so a sign-in
+         mid-round takes effect at the next fix. */
+      canLogShots: roundFeatures,
       effects: {
         /* Split by who owns it. The pin, the fix and the wake lock are the
            rangefinder and run for everybody; Course Data and the scorecard are
@@ -174,13 +179,18 @@
             scheduleMapUpdateCheck(firstHole ? 1500 : 250);
           }
           if (mapReadiness) mapReadiness.enterHole(hole);
-          /* The bubble is free; resume is the round record, so it is not. */
           if (window.GDBubbleEngine && rec) {
             window.GDBubbleEngine.setHoleContext({
               hole: hole, tee: rec.tee, green: rec.green, route: rec.route
             });
           }
-          if (roundFeatures() && app.resume) app.resume.setHole(hole);
+          /* Resume is free (2026-09-17): it is a local note of which course
+             and hole you were on, written to this device and read by the
+             picker's Continue Round pill. It records no shot and no score, so
+             a rangefinder-only session gets it too — without it a guest who
+             backs out to the picker had no way back in but the nearby course
+             block, which starts them on hole 1. */
+          if (app.resume) app.resume.setHole(hole);
         },
         shotChanged: function (start, target) {
           if (window.GDBubbleEngine) window.GDBubbleEngine.setShot(start || null, target || null);
@@ -207,6 +217,36 @@
       }
     });
     if (app.painter) app.painter.attach(app.marshal);
+    /* The club the engine would recommend from a point, before anything is
+       locked. The Marshal says WHEN this is worth asking (scene.suggestion:
+       Track, standing still, a green to play to); the Painter asks here. The
+       engine is stateful, so the shot is set for the question and put back to
+       nothing after it — in Track the engine holds no shot, which is exactly
+       the state this restores. Cached on the start point, because the Painter
+       repaints on every fix and the answer only changes when you move. */
+    var suggestionCache = { key: null, value: null };
+    app.shotSuggestion = function (start, rec) {
+      var engine = window.GDBubbleEngine;
+      if (!engine || !start || !rec || !rec.green) return null;
+      var key = [Number(start.lat).toFixed(6), Number(start.lng).toFixed(6), rec.holeNumber,
+        rec.green.lat, rec.green.lng].join("|");
+      if (suggestionCache.key === key) return suggestionCache.value;
+      var value = null;
+      try {
+        engine.setShot(start, null);
+        var target = engine.targetForGreenCentre(rec.green, { hole: rec.holeNumber }) || rec.green;
+        engine.setShot(start, target);
+        var model = engine.renderModel();
+        var payload = model && model.payload;
+        if (payload && payload.club) {
+          value = { club: payload.club, carryM: Number(payload.baseCarry), distanceM: model.distanceM,
+            target: { lat: target.lat, lng: target.lng } };
+        }
+      } catch (e) { value = null; }
+      try { engine.setShot(null, null); } catch (e2) {}
+      suggestionCache = { key: key, value: value };
+      return value;
+    };
     /* A native surface is another subscriber to Marshal, never another round
        owner. The iOS NativeRoundBridge can register after boot; web remains
        inert when no native adapter is present. */
@@ -231,7 +271,7 @@
        is not trusted is refused inside the Marshal, not here — this file does
        not get to decide what counts. */
     if (app.gps) {
-      app.gps.onFix(function (fix) { app.marshal.signal("FIX_RECEIVED", { point: fix }); });
+      app.gps.onFix(function (fix) { app.marshal.signal("FIX_RECEIVED", { point: fix, speed: fix.speed }); });
       app.gps.onStatus(function (status) {
         renderGpsNotice(status);
         if (status === "denied" || status === "unsupported") app.marshal.signal("FIX_LOST");
@@ -749,14 +789,15 @@
        writes its initial Hole 1 record, or the reload destroys the very hole
        it is meant to resume. The player-scoped storage key also ensures a
        different signed-in player cannot inherit it. */
-    if ((!Number.isFinite(Number(resumeHole)) || Number(resumeHole) < 1) && app.resume && roundFeatures()) {
+    if ((!Number.isFinite(Number(resumeHole)) || Number(resumeHole) < 1) && app.resume) {
       var savedRound = app.resume.read();
       if (savedRound && String(savedRound.courseId) === String(course.courseId)) resumeHole = savedRound.hole;
     }
     /* Record the round the moment it is genuinely up, so a phone that dies on
-       the 7th tee still has somewhere to come back to. play.js keeps the hole
-       current from here on. */
-    if (app.resume && roundFeatures()) app.resume.setCourse(course);
+       the 7th tee still has somewhere to come back to. The holeEntered effect
+       keeps the hole current from here on. Not gated on an account — see the
+       note there. */
+    if (app.resume) app.resume.setCourse(course);
     /* Before the cached/uncached split: the main site's overlay already shows
        the course name, so the title here must not flip to "Loading course" for
        the frames between this page painting and the round starting. */

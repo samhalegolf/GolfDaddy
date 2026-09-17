@@ -734,21 +734,21 @@ async function bootCheck() {
      stops moving you the moment you have placed yourself.) */
   const greenTap = await page.evaluate(async (h1) => {
     const app = window.ClarityApp, gd = window.__gd;
-    const tapAtGreen = async () => {
-      /* Aim the tap at wherever the green is actually drawn on screen. Take
+    const tapAt = async (target) => {
+      /* Aim the tap at wherever the target is actually drawn on screen. Take
          the CLOSEST point rather than the first inside a tolerance - the
          metres-per-pixel varies a lot between stages, so a fixed tolerance
-         plus a fixed step can stride straight over the green. */
+         plus a fixed step can stride straight over it. */
       const proj = app.painter.latLngAt;
       let hit = null, best = Infinity;
       /* Scan the real viewport, not a hardcoded phone width - the stage
-         decides where on screen the green lands, and a fixed box can miss it
+         decides where on screen the target lands, and a fixed box can miss it
          entirely once the framing changes. */
       for (let y = 60; y < window.innerHeight - 40; y += 6) {
         for (let x = 20; x < window.innerWidth - 20; x += 6) {
           const ll = proj(x, y);
           if (!ll) continue;
-          const d = app.distance.haversineMeters(ll, h1.green);
+          const d = app.distance.haversineMeters(ll, target);
           if (d < best) { best = d; hit = [x, y]; }
         }
       }
@@ -759,25 +759,31 @@ async function bootCheck() {
       return hit;
     };
 
-    // A mapped hole, in SETUP: tapping the green puts you on the green.
+    // A mapped hole, in SETUP: tapping the fairway puts you on the fairway.
+    // 90m short of the green, on the tee-green line: outside the green band.
+    const short = app.distance.project(h1.green, app.distance.bearingRad(h1.green, h1.tee), 90);
     await gd.open("green-tap-mapped", { holes: [{ holeNumber: 1,
       tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }] },
       { lat: -36.918, lng: 174.735 }, 900);
+    /* Placing yourself ON the green is inert: nothing to aim at itself and
+       nothing to log (the stages scenario pins the Marshal's side). Here the
+       point is that the tap reaches the Marshal and changes nothing. */
+    const greenHit = await tapAt(h1.green);
+    const afterGreenTap = { placed: !!gd.player(), mode: gd.scene().mode, popup: gd.shown("logPopup") };
     const before = gd.player();
-    const hit = await tapAtGreen();
+    const hit = await tapAt(short);
     const after = gd.player();
     const mapped = {
       /* If this ever fails, mapState is the thing to look at: a Leaflet size
          of 0 means the camera was solved before the screen was measurable. */
       mapState: JSON.stringify(app.painter.mapState()),
-      foundGreenOnScreen: !!hit,
+      foundGreenOnScreen: !!greenHit,
+      greenTapInert: !!greenHit && !afterGreenTap.placed && afterGreenTap.mode === "setup" && !afterGreenTap.popup,
+      foundTargetOnScreen: !!hit,
       placedFromNothing: !before && !!after,
-      landedOnGreen: after ? Math.round(app.distance.haversineMeters(after, h1.green)) : null,
-      /* Placing yourself ON the green is green focus (finish), the same as
-         walking onto it with a fix - a look at the green, with Shot End
-         handing Preview back to SETUP. The stages scenario above pins that
-         hand-back; here the point is that the tap lands you on the green and
-         the mode follows from where you are, not from a third gesture. */
+      landedOnTarget: after ? Math.round(app.distance.haversineMeters(after, short)) : null,
+      /* Placing yourself off the green IS the plan: the lock-in is automatic
+         and the mode follows from where you are, not from a third gesture. */
       mode: gd.scene().mode,
       flow: gd.scene().flow
     };
@@ -865,41 +871,39 @@ async function bootCheck() {
      walks the real route — fix at the course, Play, Lock, then walk in. */
   const greenFocus = await page.evaluate(async (h1) => {
     const app = window.ClarityApp, gd = window.__gd;
-    const ball = document.getElementById("greenFocusBall");
     const near = (m) => ({ lat: h1.green.lat + m / 111320, lng: h1.green.lng });
-    /* This scenario closes the shot by TAPPING the dock, so it needs a session
-       — see gd.signIn(). Everything up to the first round ran signed out, and
+    /* This scenario closes the shot by TAPPING Log, so it needs a session —
+       see gd.signIn(). Everything up to the first round ran signed out, and
        those assertions are already captured. */
     const roundFeatures = gd.signIn();
     await gd.open("green-focus-course", { holes: [{ holeNumber: 1,
       tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }] },
       { lat: -36.918, lng: 174.735 });
-    await gd.live(h1.tee);
-    await gd.send("LOCK");                            // opens the shot to log
-    await gd.until(() => gd.scene().mode === "aim", "Lock to raise the shot view");
+    await gd.live(h1.tee);                            // from the tee box: Play locks the tee shot
+    await gd.until(() => gd.scene().mode === "aim", "Play from the tee to raise the shot view");
     const openedShot = !!gd.openShot(1);
-
-    /* Where the green is drawn — the ball has to be draggable onto it. */
-    const greenOnScreen = async () => {
-      app.pin.set(h1.green); await gd.wait(60);
-      const m = document.getElementById("pinMarker");
-      return m.classList.contains("hiddenState") ? null
-        : [Math.round(parseFloat(m.style.left)), Math.round(parseFloat(m.style.top))];
+    const snapKind = () => {
+      const b = document.getElementById("logSnap");
+      return b.classList.contains("image") ? "image" : b.classList.contains("map") ? "map" : null;
+    };
+    const ballPx = () => {
+      const b = document.getElementById("greenFocusBall");
+      return [Math.round(parseFloat(b.style.left)), Math.round(parseFloat(b.style.top))];
     };
     const state = () => ({
       mode: gd.scene().mode,
       stage: document.body.dataset.frameStage,
+      popup: gd.shown("logPopup"),
       ball: gd.shown("greenFocusBall"),
-      origin: gd.shown("finishOrigin"),
-      hint: gd.shown("greenFocusHint"),
+      snapKind: snapKind(),
+      greenDrawn: !!document.querySelector("#logSnapSvg .snapGreen"),
+      originLine: !!document.querySelector("#logSnapSvg .snapOriginLine"),
+      hint: (document.getElementById("logPopupHint").textContent || "").length > 0,
       dock: gd.shown("shotActionBtn"),
-      dockFace: document.getElementById("shotActionBtn").dataset.action,
+      logEnabled: !document.getElementById("logPopupLog").disabled,
       /* Aiming instruments. Standing on the green there is nothing to aim, so
-         the engine must not be asked to model a shot from there - it answers
-         with the shortest club and a bag-roof clamp that throws the cluster
-         well past the green, which showed up as a bubble anchored on the
-         green itself. */
-      aimPaths: document.getElementById("bubbleSvg").children.length,
+         the engine must not be asked to model a shot from there. */
+      aimPaths: document.querySelectorAll("#bubbleSvg .aimLine, #bubbleSvg .bubbleEdge").length,
       bubble: gd.shown("aimBubble"),
       shotRow: gd.shotBands(),
       /* Green focus keeps ONE number - to the middle, or to the pin when one
@@ -915,37 +919,41 @@ async function bootCheck() {
     await gd.until(() => gd.scene().mode === "track", "Aim to release back to Track");
     const beforeArrival = state();
     await gd.fix(near(28));
-    await gd.until(() => gd.scene().mode === "finish", "arrival to open Finish");
+    await gd.until(() => gd.scene().mode === "finish", "arrival to open the popup");
+    await gd.until(() => gd.shown("greenFocusBall"), "the ball to be drawn in the popup");
     const onGreen = state();
-    const greenAtArrival = await greenOnScreen();
+    const ballAtArrival = ballPx();
 
     /* Walk 260m past the green to the next tee without touching the ball. */
     await gd.fix(near(-260), 320);
     const atNextTee = state();
-    const greenStillFramed = await greenOnScreen();
-    app.pin.clear(); await gd.wait(60);
 
-    /* Pick the ball up and drop it on the green. */
-    const box = ball.getBoundingClientRect();
-    const grab = [Math.round(box.left + box.width / 2), Math.round(box.top + box.height / 2)];
-    const drop = greenStillFramed ? [greenStillFramed[0] - 22, greenStillFramed[1] + 34] : [180, 320];
+    /* Pick the ball up and drop it on the green - inside the popup's box. */
+    const ball = document.getElementById("greenFocusBall");
+    const box = document.getElementById("logSnap").getBoundingClientRect();
+    const grabBox = ball.getBoundingClientRect();
+    const grab = [Math.round(grabBox.left + grabBox.width / 2), Math.round(grabBox.top + grabBox.height / 2)];
+    const drop = [Math.round(box.left + box.width * 0.42), Math.round(box.top + box.height * 0.58)];
     for (const [type, xy] of [["pointerdown", grab], ["pointermove", drop], ["pointerup", drop]]) {
       ball.dispatchEvent(new PointerEvent(type, { clientX: xy[0], clientY: xy[1], bubbles: true, pointerId: 7 }));
     }
     await gd.wait();
     const afterDrop = state();
-    const droppedLL = app.painter.latLngAt(drop[0], drop[1]);
+    const ballAfterDrop = ballPx();
+    const droppedLL = gd.scene().finish.ball;
     const playerPos = gd.player();
 
-    await gd.tap("shotActionBtn");
+    await gd.tap("logPopupLog");
     await gd.until(() => gd.scene().mode === "logged", "the shot to land on Logged");
     const shots = gd.shots(1);
     const last = shots[shots.length - 1];
     return {
       roundFeatures,
       openedShot, beforeArrival, onGreen, atNextTee, afterDrop,
-      greenHeld: greenAtArrival && greenStillFramed
-        && greenAtArrival[0] === greenStillFramed[0] && greenAtArrival[1] === greenStillFramed[1],
+      ballMoved: ballAfterDrop[0] !== ballAtArrival[0] || ballAfterDrop[1] !== ballAtArrival[1],
+      ballInsideBox: ballAfterDrop[0] > 0 && ballAfterDrop[1] > 0
+        && ballAfterDrop[0] < box.width && ballAfterDrop[1] < box.height,
+      popupClosed: !gd.shown("logPopup"),
       recorded: {
         shots: shots.length,
         offBall: last && last.end && droppedLL
@@ -1145,23 +1153,23 @@ async function bootCheck() {
        to close and nothing gets recorded. */
     await gd.send("UNLOCK");
     await gd.until(() => gd.scene().mode === "setup", "Preview to rest at SETUP");
-    await gd.place({ lat: green.lat - 0.0002, lng: green.lng });
-    await gd.until(() => gd.scene().mode === "finish", "the green placement to open green focus");
+    /* Placing yourself ON the green is inert in Preview: a shot from there
+       would aim at itself, and green focus is the logging popup now, which
+       Preview has nothing to put in. Nothing opens and nothing changes. */
+    const onGreenPoint = { lat: green.lat - 0.0002, lng: green.lng };
+    await gd.place(onGreenPoint, 150);
     const onGreen = read();
-    const greenTapFocus = {
-      offGreen: Math.round(gd.scene().hole.rec
-        ? window.ClarityApp.distance.haversineMeters(gd.player(), gd.scene().hole.rec.green) : -1),
+    const greenTap = {
+      offGreen: Math.round(window.ClarityApp.distance.haversineMeters(onGreenPoint, green)),
+      popupShown: gd.shown("logPopup"),
       ballVisible: gd.shown("greenFocusBall"),
-      /* Shot End is the single confirm - Hole Out is gone, because in green
-         focus the two had become the same action on the same point. */
-      holeOutGone: !document.getElementById("holeOutBtn"),
-      dockFace: document.getElementById("shotActionBtn").dataset.action,
+      pillShown: gd.shown("startPill"),
       shotsRecorded: gd.shots(1).length
     };
-    /* Shot End here writes nothing and hands Preview back its resting state. */
+    /* And Shot End in Preview has nothing to do. */
     await gd.send("FINISH_LOGGED", null, 150);
     const afterGreenLook = { mode: gd.scene().mode, shotsRecorded: gd.shots(1).length };
-    return { atTee, lock, gpsHold, aimed, onGreen, greenTapFocus, afterGreenLook };
+    return { atTee, lock, gpsHold, aimed, onGreen, greenTap, afterGreenLook };
   }, AKARANA_H1);
 
   /* The dock's three faces, in Live, where all three exist. Track offers Lock;
@@ -1213,19 +1221,29 @@ async function bootCheck() {
       shown: gd.shown("shotActionBtn"),
       endRecorded: !!(gd.shots(1)[0] || {}).end
     };
-    /* Walk in: the arrival fix opens Finish because a shot is outstanding. */
+    /* Walk in: the arrival fix opens the logging popup because a shot is
+       outstanding. On a published hole the snapshot is the published frame. */
     await gd.fix({ lat: green.lat - 0.0002, lng: green.lng });
-    await gd.until(() => gd.scene().mode === "finish", "arrival to open Finish");
-    await gd.until(() => face() === "shotEnd", "the dock to offer Shot End");
+    await gd.until(() => gd.scene().mode === "finish", "arrival to open the popup");
+    await gd.until(() => gd.shown("logPopup"), "the popup to be drawn");
     const zoomStage = document.body.dataset.frameStage;
-    const greenFace = face();
+    const popup = {
+      shown: gd.shown("logPopup"),
+      dockShown: gd.shown("shotActionBtn"),
+      snapKind: (function () {
+        var b = document.getElementById("logSnap");
+        return b.classList.contains("image") ? "image" : b.classList.contains("map") ? "map" : null;
+      })(),
+      imageSrc: document.getElementById("logSnapImage").getAttribute("src") || "",
+      logEnabled: !document.getElementById("logPopupLog").disabled
+    };
     const shotsBeforeGreenFocusClick = gd.shots(1).length;
-    await gd.tap("shotActionBtn");                      // Shot End
+    await gd.tap("logPopupLog");                        // Log
     await gd.until(() => gd.scene().mode === "logged", "the shot to land on Logged");
     const logged = gd.shots(1);
     return {
       roundFeatures,
-      tracking, lockStage, lockedFace, afterUnlock, zoomStage, greenFace,
+      tracking, lockStage, lockedFace, afterUnlock, zoomStage, popup,
       shotsBeforeGreenFocusClick,
       lockStartOffTee: openedShot
         ? Math.round(app.distance.haversineMeters(openedShot.start, { lat: tee.lat - 0.0015, lng: tee.lng })) : null,
@@ -1349,11 +1367,41 @@ async function bootCheck() {
     };
     document.querySelectorAll("#holePickerGrid button")[2].click();
     await gd.wait(120);
-    return {
-      opened,
-      jumpedToHole: gd.hole(),
-      panelClosedAfterPick: !gd.shown("holePickerPanel")
+    const jumpedToHole = gd.hole();
+    const panelClosedAfterPick = !gd.shown("holePickerPanel");
+
+    /* Shot logging: a member switches it on, the tiles carry the record, and
+       a hole with an origin waiting on an outcome is the button into the
+       popup - which opens OVER the sheet, so closing it lands back here. */
+    gd.signIn();
+    await gd.live(h1.tee);                 // from the tee box: Play locks the tee shot
+    await gd.until(() => !!gd.openShot(gd.hole()), "Play from the tee to lock the tee shot");
+    const liveHole = gd.hole();
+    await gd.tap("holeNumber", 60);
+    const togglePresent = gd.shown("pickerLogToggle");
+    const plainTiles = Array.from(document.querySelectorAll("#holePickerGrid button")).map((b) => b.textContent);
+    await gd.tap("pickerLogToggle", 80);
+    const logTiles = Array.from(document.querySelectorAll("#holePickerGrid button"))
+      .map((b) => ({ text: b.textContent, loggable: b.classList.contains("loggable") }));
+    const other = liveHole === 1 ? 2 : 1;
+    document.querySelector("#holePickerGrid button[data-hole='" + other + "']").click();
+    await gd.wait(120);
+    const inertTap = { popup: gd.shown("logPopup"), hole: gd.hole(), panel: gd.shown("holePickerPanel") };
+    document.querySelector("#holePickerGrid button[data-hole='" + liveHole + "']").click();
+    await gd.until(() => gd.shown("logPopup"), "the popup to open from the picker");
+    const ballLL = gd.scene().finish.ball;
+    const fromPicker = {
+      flow: gd.scene().flow,
+      panelStillOpen: gd.shown("holePickerPanel"),
+      ballOnCentre: ballLL ? Math.round(window.ClarityApp.distance.haversineMeters(ballLL, h1.green)) : null
     };
+    await gd.tap("logPopupScrim", 150);
+    const dismissed = {
+      popup: gd.shown("logPopup"), panelStillOpen: gd.shown("holePickerPanel"),
+      flow: gd.scene().flow, stillOutstanding: !!gd.openShot(liveHole)
+    };
+    await gd.tap("holePickerClose", 60);
+    return { opened, jumpedToHole, panelClosedAfterPick, liveHole, togglePresent, plainTiles, logTiles, inertTap, fromPicker, dismissed };
   }, AKARANA_H1);
 
   /* Back-as-undo: during play, Back steps off the most recent wind/pin
@@ -1627,11 +1675,19 @@ async function bootCheck() {
       shotEndHidden: document.getElementById("shotEndBtn").classList.contains("hiddenState"),
       unlockShown: !document.getElementById("shotActionBtn").classList.contains("hiddenState")
     };
+    /* Two fixes on the green: the aim releases (you hit and walked), and a
+       member would now be looking at the logging popup. A guest is not -
+       there is nothing they may log, so nothing opens and Track carries on
+       with Lock offered as the rangefinder control it is. */
+    m.signal("FIX_RECEIVED", { point: green });
     m.signal("FIX_RECEIVED", { point: green });
     return {
       aiming,
+      mode: m.scene().mode,
       finishFace: document.getElementById("shotActionBtn").dataset.action,
-      finishActionHidden: document.getElementById("shotActionBtn").classList.contains("hiddenState")
+      popupHidden: document.getElementById("logPopup").classList.contains("hiddenState"),
+      dockShown: !document.getElementById("shotActionBtn").classList.contains("hiddenState"),
+      holeDoneShown: !document.getElementById("holeCompleteControl").classList.contains("hiddenState")
     };
   }, { tee: AKARANA_H1.tee, green: AKARANA_H1.green });
   const fetchesAfterFirstVisit = packageFetches;
@@ -1804,23 +1860,19 @@ async function bootCheck() {
   assert.ok(stages.aimed.shotRowShown, "aiming off the green shows the shot row");
   assert.ok(stages.aimed.shotDist > 80 && stages.aimed.shotDist < 140,
     "shot distance must be the start→target number, got " + stages.aimed.shotDist);
-  assert.ok(stages.greenTapFocus.offGreen >= 0 && stages.greenTapFocus.offGreen < 40,
-    "test setup: the placement must be inside the green-focus radius, got "
-    + stages.greenTapFocus.offGreen + "m");
-  assert.strictEqual(stages.onGreen.mode, "finish",
-    "tapping the green opens green focus, the same as walking onto it with a fix");
-  assert.strictEqual(stages.onGreen.stage, "zoom", "so the camera frames the green");
-  assert.ok(stages.greenTapFocus.ballVisible, "there is a ball to drag");
-  assert.strictEqual(stages.greenTapFocus.dockFace, "shotEnd",
-    "and the dock offers Shot End, the same button GPS arrival gives you");
-  assert.ok(stages.greenTapFocus.holeOutGone,
-    "Hole Out is collapsed into Shot End - there must be no second confirm button");
-  assert.strictEqual(stages.greenTapFocus.shotsRecorded, 0,
+  assert.ok(stages.greenTap.offGreen >= 0 && stages.greenTap.offGreen < 40,
+    "test setup: the placement must be inside the green band, got " + stages.greenTap.offGreen + "m");
+  assert.strictEqual(stages.onGreen.mode, "setup",
+    "tapping the green in Preview is inert - nothing to aim at itself, nothing to log");
+  assert.strictEqual(stages.onGreen.stage, "hole", "so the camera stays on the hole");
+  assert.ok(!stages.greenTap.popupShown && !stages.greenTap.ballVisible, "no popup and no ball for a look");
+  assert.ok(stages.greenTap.pillShown, "and the pill is still up");
+  assert.strictEqual(stages.greenTap.shotsRecorded, 0,
     "Preview cannot open a shot - previewing hole 5 must never invent a shot on hole 5");
   assert.strictEqual(stages.afterGreenLook.shotsRecorded, 0,
-    "and Shot End in Preview writes nothing - the green was a look");
+    "and Shot End in Preview writes nothing");
   assert.strictEqual(stages.afterGreenLook.mode, "setup",
-    "it hands Preview back its resting state, with the pill up");
+    "Preview stays at its resting state, with the pill up");
   assert.ok(shotEndWiring.roundFeatures,
     "the dock-faces scenario logs a shot too, so it also needs round features on");
   assert.strictEqual(shotEndWiring.tracking.face, "lock", "in Track the dock offers Lock");
@@ -1841,8 +1893,13 @@ async function bootCheck() {
     "unlocked, the dock button offers Lock again");
   assert.ok(shotEndWiring.afterUnlock.shown,
     "and it stays offered, because the next Lock is the thing to press");
-  assert.strictEqual(shotEndWiring.zoomStage, "zoom", "arriving at the green opens the green view");
-  assert.strictEqual(shotEndWiring.greenFace, "shotEnd", "and the dock turns into Shot End");
+  assert.strictEqual(shotEndWiring.zoomStage, "hole",
+    "arriving at the green leaves the camera on the hole - the popup carries the green");
+  assert.ok(shotEndWiring.popup.shown, "and the logging popup opens");
+  assert.strictEqual(shotEndWiring.popup.snapKind, "image", "on a published hole the snapshot is the published frame");
+  assert.ok(shotEndWiring.popup.imageSrc.length > 0, "with the frame loaded into it");
+  assert.ok(shotEndWiring.popup.logEnabled, "Log is live, because a shot is outstanding");
+  assert.ok(!shotEndWiring.popup.dockShown, "the dock stands down under the popup - Log is the one action");
   /* One shot, not two: the unlock in between is not a boundary. Course data
      joins the last lock-in to the next lock-in, so one lock plus the on-green
      Shot End bracket exactly one shot. */
@@ -1850,7 +1907,7 @@ async function bootCheck() {
     "one lock-in opened exactly one shot - the unlock between added none");
   assert.strictEqual(shotEndWiring.finalShots, 1, "Shot End closes that shot rather than opening another");
   assert.ok(shotEndWiring.allClosed, "and it leaves nothing in flight");
-  assert.ok(shotEndWiring.loggedShown, "Shot End in green focus lands on the Logged screen");
+  assert.ok(shotEndWiring.loggedShown, "Log in the popup lands on the Logged screen");
   assert.strictEqual(shotEndWiring.mode, "logged", "which is the mode it puts the round into");
   assert.ok(bubbleDrag.tiltHeldMidDrag,
     "the lock tilt must survive the drag - it used to flatten to birds-eye on grab and spring back on release");
@@ -1869,6 +1926,19 @@ async function bootCheck() {
   assert.strictEqual(holePicker.opened.activeButton, "1", "the current hole is marked active in the picker");
   assert.strictEqual(holePicker.jumpedToHole, 3, "picking a hole jumps straight to it");
   assert.ok(holePicker.panelClosedAfterPick, "picking a hole closes the picker");
+  assert.ok(holePicker.togglePresent, "a member sees the Shot logging switch");
+  assert.ok(holePicker.plainTiles.every((t) => /^\d+$/.test(t)), "off, the tiles are bare hole numbers");
+  assert.ok(holePicker.logTiles.some((t) => t.loggable && /0$/.test(t.text)),
+    "on, the hole with an origin waiting shows its 0 and is the button in");
+  assert.ok(!holePicker.inertTap.popup && holePicker.inertTap.hole === holePicker.liveHole && holePicker.inertTap.panel,
+    "a tile with nothing to log is inert in logging mode");
+  assert.strictEqual(holePicker.fromPicker.flow, "logging", "the tile opens the catch-up");
+  assert.ok(holePicker.fromPicker.panelStillOpen, "over the picker, which stays");
+  assert.ok(holePicker.fromPicker.ballOnCentre !== null && holePicker.fromPicker.ballOnCentre < 1,
+    "with the ball on the green's centre, got " + holePicker.fromPicker.ballOnCentre + "m off");
+  assert.ok(!holePicker.dismissed.popup && holePicker.dismissed.panelStillOpen,
+    "tapping outside the box hides it and leaves you on the picker");
+  assert.ok(holePicker.dismissed.stillOutstanding && holePicker.dismissed.flow === "live", "with nothing written");
   assert.ok(backUndo.anyAfterPress, "a wind change must leave something to undo");
   assert.strictEqual(backUndo.afterPress.level, backUndo.beforeWindPress.level + 1, "pressing wind bumps its level");
   assert.ok(backUndo.afterPinSet && backUndo.afterPinSet.lat === -36.9166, "placing a pin must be readable back");
@@ -1925,8 +1995,11 @@ async function bootCheck() {
   assert.strictEqual(firstVisit.hole, 1, "the first visit plays from the freshly-fetched package");
   assert.ok(guestShotControls.aiming.shotEndHidden, "Guest GPS Play never shows the Shot End side action");
   assert.ok(guestShotControls.aiming.unlockShown, "Guest keeps the non-writing Unlock rangefinder control");
-  assert.strictEqual(guestShotControls.finishFace, "shotEnd", "the underlying green-focus state still identifies its action");
-  assert.ok(guestShotControls.finishActionHidden, "Guest green focus hides the Shot End face instead of exposing a gated write");
+  assert.strictEqual(guestShotControls.mode, "track", "a guest walking onto the green stays in Track - the popup is a write, and there is nothing they may write");
+  assert.ok(guestShotControls.popupHidden, "Guest never sees the logging popup");
+  assert.strictEqual(guestShotControls.finishFace, "lock", "the dock keeps offering Lock, the rangefinder control");
+  assert.ok(guestShotControls.dockShown, "and it stays on screen");
+  assert.ok(guestShotControls.holeDoneShown, "Hole done is offered on position - it writes a score, and the gate says so when pressed");
   assert.strictEqual(fetchesAfterFirstVisit, 1, "the first visit fetches the package exactly once");
   assert.ok(!(roundAtFetch[0] && roundAtFetch[0].courseKey === "store-test-course"),
     "the first visit has nothing saved, so it must fetch BEFORE it can start the round");
@@ -1945,7 +2018,11 @@ async function bootCheck() {
   assert.ok(newerVersionPrompt.barShown,
     "a NEWER version of a map the player is already on must ask before swapping ground mid-hole");
   assert.strictEqual(newerVersionPrompt.stillOldVersionSaved, 7, "the saved copy must not change until the prompt is accepted");
-  assert.strictEqual(updateComplete.label, "Map updated ✓", "the player sees a definite completion state before the bar closes");
+  /* The round on storePage is LIVE by now (guestShotControls pressed Play),
+     and a newer map taken mid-hole is staged for the next hole boundary
+     rather than swapped under the active shot (boot.js stageOrAdoptMapUpdate,
+     2026-09-17) - so the definite state it reports is the staged one. */
+  assert.strictEqual(updateComplete.label, "Ready for next hole ✓", "the player sees a definite completion state before the bar closes");
   assert.ok(updateComplete.disabled, "the update action stays disabled through completion so repeated taps cannot race");
   assert.strictEqual(updateComplete.savedMapVersion, 9, "the completion state is only shown after the newer copy is saved");
   assert.ok(afterDownload.barHidden, "accepting the prompt closes the update bar");
@@ -2019,17 +2096,18 @@ async function bootCheck() {
     "leaving the hole and coming back also clears the placement");
   assert.ok(!afterLeaving.afterHoleChange.placed, "a hole you have just arrived at has nobody standing on it");
 
-  assert.ok(greenTap.mapped.foundGreenOnScreen,
-    "the green must be projectable on screen for the tap test to mean anything; map was "
+  assert.ok(greenTap.mapped.foundGreenOnScreen && greenTap.mapped.foundTargetOnScreen,
+    "the green and the fairway point must be projectable on screen for the tap test to mean anything; map was "
     + greenTap.mapped.mapState);
+  assert.ok(greenTap.mapped.greenTapInert,
+    "tapping the green in SETUP is inert - nothing to aim at itself, nothing to log");
   assert.ok(greenTap.mapped.placedFromNothing,
     "'or tap where you'd stand' is half the pill: from SETUP, a tap places you");
-  assert.ok(greenTap.mapped.landedOnGreen !== null && greenTap.mapped.landedOnGreen < 8,
-    "and it lands where you touched - tapping the green puts you on the green, got "
-    + greenTap.mapped.landedOnGreen + "m off");
-  assert.strictEqual(greenTap.mapped.mode, "finish",
-    "placing yourself on the green opens green focus, exactly as GPS arrival does (marshal.js "
-    + "preview placement) - the earlier stages scenario pins that it is a look, not a shot");
+  assert.ok(greenTap.mapped.landedOnTarget !== null && greenTap.mapped.landedOnTarget < 8,
+    "and it lands where you touched - tapping the fairway puts you on the fairway, got "
+    + greenTap.mapped.landedOnTarget + "m off");
+  assert.strictEqual(greenTap.mapped.mode, "aim",
+    "placing yourself off the green IS the lock-in (marshal.js preview placement) - the bubble is up with nothing pressed");
   assert.strictEqual(greenTap.mapped.flow, "preview", "and it is still Preview, not some other flow");
   assert.ok(greenTap.unmappedPlaces,
     "a hole with no geometry at all still takes the tap - it is the only way to play one");
@@ -2059,30 +2137,36 @@ async function bootCheck() {
     "every tool-rail icon must be 24x24 (the inline gear used to fill its button), got "
     + gpsSettings.iconSizes.join(", "));
 
-  assert.ok(greenFocus.openedShot, "test setup: Lock must open a shot from the tee");
-  assert.ok(!greenFocus.beforeArrival.ball, "no ball before green focus opens");
+  assert.ok(greenFocus.openedShot, "test setup: Play from the tee must lock the tee shot");
+  assert.ok(!greenFocus.beforeArrival.popup, "no popup before green focus opens");
   assert.strictEqual(greenFocus.beforeArrival.mode, "track",
     "two fixes clear of the lock point release Aim back to Track");
   assert.strictEqual(greenFocus.onGreen.mode, "finish",
-    "arriving at the green with a shot outstanding opens Finish by itself");
-  assert.strictEqual(greenFocus.onGreen.stage, "zoom", "inside 40m of the green opens green focus");
-  assert.ok(greenFocus.onGreen.ball, "green focus turns the position marker into the ball");
-  assert.ok(greenFocus.onGreen.origin, "and draws the shot's ORIGIN, so you can see the shot you are reconstructing");
+    "arriving at the green with a shot outstanding opens the logging popup by itself");
+  assert.strictEqual(greenFocus.onGreen.stage, "hole",
+    "the camera is left on the hole - the popup carries its own picture of the green");
+  assert.ok(greenFocus.onGreen.popup && greenFocus.onGreen.ball, "the popup is up, with a ball to drag");
+  assert.strictEqual(greenFocus.onGreen.snapKind, "map", "an unpublished hole gets a live-map snapshot");
+  assert.ok(greenFocus.onGreen.greenDrawn, "the green's outline is drawn in the snapshot");
+  assert.ok(greenFocus.onGreen.originLine,
+    "and the line back to the shot's ORIGIN, so you can see the shot you are reconstructing");
   assert.ok(greenFocus.beforeArrival.aimPaths === 0, "no aim overlays in Track - the shot view is earned by a Lock");
   assert.strictEqual(greenFocus.onGreen.aimPaths, 0,
     "green focus must clear the aim overlays - a bubble anchored on the green is a shot nobody is playing");
-  /* Both scenarios below close a shot by TAPPING the dock, which goes through
-     the Painter's access-gated send(). If the session ever stops taking, the
-     taps get refused and every log assertion under them fails for a reason
-     that has nothing to do with what they are testing — so check the
-     precondition itself first. */
+  /* Both scenarios below close a shot by TAPPING Log, which goes through the
+     Painter's access-gated send(). If the session ever stops taking, the taps
+     get refused and every log assertion under them fails for a reason that
+     has nothing to do with what they are testing — so check the precondition
+     itself first. */
   assert.ok(greenFocus.roundFeatures,
     "the green-focus scenario logs a shot, so it has to run with round features on — "
-    + "a signed-out session is rangefinder-only and the dock's Shot End is refused");
+    + "a signed-out session is rangefinder-only and Log is refused");
   assert.ok(!greenFocus.onGreen.bubble, "no aim bubble in green focus");
   assert.ok(!greenFocus.onGreen.shotRow, "no club/carry row in green focus - there is no shot to play");
   assert.ok(greenFocus.onGreen.focusCard,
     "green focus keeps one number - to the middle or the pin - instead of the front/back card: the chip and the putt still want it");
+  assert.ok(!greenFocus.onGreen.dock, "the dock stands down under the popup - Log is the one action");
+  assert.ok(greenFocus.onGreen.logEnabled, "and Log is live, because a shot is outstanding");
   assert.ok(greenFocus.atNextTee.focusCard,
     "and it stays that one number while the finish is deferred, rather than reading a 250m approach to a hole already finished");
 
@@ -2098,19 +2182,18 @@ async function bootCheck() {
     "the aim overlays stay cleared while green focus is deferred");
   assert.strictEqual(greenFocus.atNextTee.mode, "finish",
     "green focus is sticky: walking to the next tee must not close it");
-  assert.strictEqual(greenFocus.atNextTee.stage, "zoom",
-    "and the camera keeps holding the green being logged, not the hole you walked to");
+  assert.ok(greenFocus.atNextTee.popup && greenFocus.atNextTee.ball,
+    "the popup keeps holding the green being logged, wherever you walked");
   assert.ok(greenFocus.atNextTee.hint, "the unplaced ball still asks to be dragged into place");
-  assert.ok(greenFocus.atNextTee.dock, "Shot End stays available to confirm the ball");
-  assert.strictEqual(greenFocus.atNextTee.dockFace, "shotEnd", "and it is still wearing the Shot End face");
-  assert.ok(greenFocus.greenHeld,
-    "the camera must keep holding the green being logged - the ball needs it on screen");
+  assert.ok(greenFocus.ballMoved && greenFocus.ballInsideBox,
+    "dragging the ball inside the popup moves it, through the popup's own projection");
   assert.ok(!greenFocus.afterDrop.hint, "the prompt goes once the ball is placed");
-  assert.strictEqual(greenFocus.recorded.shots, 1, "Shot End records the shot");
+  assert.ok(greenFocus.popupClosed, "Log closes the popup");
+  assert.strictEqual(greenFocus.recorded.shots, 1, "Log records the shot");
   assert.strictEqual(greenFocus.recorded.method, "ball-placed",
     "and records that the end was placed by hand rather than tracked");
   assert.ok(greenFocus.recorded.offBall !== null && greenFocus.recorded.offBall < 1.5,
-    "Shot End must record where the BALL is, off by " + greenFocus.recorded.offBall + "m");
+    "Log must record where the BALL is, off by " + greenFocus.recorded.offBall + "m");
   assert.ok(greenFocus.recorded.playerFromGreen > 200,
     "test setup: the player must be far from the green when confirming, got "
     + greenFocus.recorded.playerFromGreen + "m");

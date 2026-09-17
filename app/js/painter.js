@@ -681,7 +681,7 @@
     var label = el("edgeDistance");
     var who = scene.locator;
     if (!dot) return;
-    if (!who || !proj || scene.finish.show) {
+    if (!who || !proj) {
       show(dot, false); show(label, false);
       return;
     }
@@ -875,8 +875,12 @@
        pattern #pinDistance already uses. Positioned in viewport pixels from
        the builder's own aim geometry, so it rides the shot, not the screen. */
     var clubLabel = payload ? compactClub(payload.club) : null;
-    show(chipEl, !!(vis && clubLabel));
-    if (chipEl && vis && clubLabel) {
+    /* Walking off the lock: the club was chosen for the point you locked
+       from, and you are leaving it. The chip goes; the shape stays until the
+       Marshal releases the aim. */
+    var chipOn = !!(vis && clubLabel) && !(scene.motion && scene.motion.moving);
+    show(chipEl, chipOn);
+    if (chipEl && chipOn) {
       chipEl.textContent = clubLabel;
       chipEl.style.left = vis.chip.left + "px";
       chipEl.style.top = vis.chip.top + "px";
@@ -978,31 +982,220 @@
     }
   }
 
-  /* The Finish ball and its prompt. Parked when it has no anchor worth drawing —
-     never placed and off the green, or simply not projectable — which is the
-     "pick it up and put it where the shot finished" gesture. */
-  function drawFinish(scene, proj) {
-    var ball = el("greenFocusBall"), hint = el("greenFocusHint");
-    var origin = el("finishOrigin");
-    if (!ball) return;
-    if (!scene.finish.show) {
-      show(ball, false); show(hint, false); show(origin, false);
-      ball.classList.remove("parked");
+  // ------------------------------------------------------------ the popup
+
+  /* The logging popup: a snapshot of the green and its surrounds, a ball to
+     put where the shot finished, one Log button. Three doors, one box (see
+     index.html). The Marshal owns whether it is open (scene.finish.show),
+     where the ball is and whether Log can write; this solves the picture.
+
+     How much ground the snapshot shows, edge to edge. A green is 30-45m
+     across, so this keeps the surrounds in the picture - the bunker short,
+     the run-off long - without the green shrinking to a coin. */
+  var SNAP_SPAN_M = 90;
+  /* The solved snapshot. Presentation state: which picture, at what
+     placement, and the two-way projection between the box and the ground. */
+  var snap = null;
+
+  function snapKeyFor(scene, r, size) {
+    var img = el("surfaceImage");
+    var pub = published && img && img.dataset.playSurface;
+    return [scene.hole.number, r.green.lat, r.green.lng, size,
+      pub ? "p:" + (publishedFrameUrl || "") : "l:" + baseKind].join("|");
+  }
+
+  function disposeSnap() {
+    if (snap && snap.map) { try { snap.map.remove(); } catch (e) {} }
+    snap = null;
+    var box = el("logSnap");
+    if (box) box.classList.remove("image", "map");
+    var image = el("logSnapImage");
+    if (image) { image.removeAttribute("src"); image.style.transform = ""; }
+    var svg = el("logSnapSvg");
+    if (svg) svg.innerHTML = "";
+  }
+
+  /* A north-up mercator frame - the export's green frame when it published
+     one (the green alone at z20, sharp), the hole frame otherwise - placed by
+     one translate+scale so the green centre lands mid-box at SNAP_SPAN_M
+     across. The projection is the frame's own: world px at its capture zoom,
+     minus its origin, through the same transform. */
+  function buildImageSnap(meta, url, green, size) {
+    var z = Number(meta.captureZoom);
+    if (!Number.isInteger(z) || !meta.originPx || !meta.outputDimensions || !url) return null;
+    var ox = Number(meta.originPx.x), oy = Number(meta.originPx.y);
+    var gw = surfaceLib.worldPx(green.lat, green.lng, z);
+    var north = surfaceLib.worldPx(green.lat + 1 / 111320, green.lng, z);
+    var ppm = Math.abs(north.y - gw.y);             // frame px per metre at the green
+    if (!(ppm > 0)) return null;
+    var s = (size / SNAP_SPAN_M) / ppm;             // box px per frame px
+    var tx = size / 2 - (gw.x - ox) * s, ty = size / 2 - (gw.y - oy) * s;
+    var image = el("logSnapImage");
+    if (!image) return null;
+    image.style.width = Number(meta.outputDimensions.width) + "px";
+    image.style.height = Number(meta.outputDimensions.height) + "px";
+    image.style.transform = "translate(" + tx.toFixed(2) + "px," + ty.toFixed(2) + "px) scale(" + s + ")";
+    if (image.getAttribute("src") !== url) image.src = url;
+    el("logSnap").classList.add("image");
+    return {
+      kind: "image", size: size,
+      toBox: function (ll) {
+        if (!ll) return null;
+        var w = surfaceLib.worldPx(ll.lat, ll.lng, z);
+        return { left: (w.x - ox) * s + tx, top: (w.y - oy) * s + ty };
+      },
+      fromBox: function (pt) {
+        return surfaceLib.latLngFromWorldPx({ x: (pt.left - tx) / s + ox, y: (pt.top - ty) / s + oy }, z);
+      }
+    };
+  }
+
+  /* No published picture: a small live map on the same basemap the hole is
+     drawn on, every gesture off, fitted to SNAP_SPAN_M around the green. */
+  function buildMapSnap(green, size) {
+    if (typeof L === "undefined") return null;
+    var node = el("logSnapMap");
+    if (!node) return null;
+    el("logSnap").classList.add("map");
+    var m = L.map(node, {
+      zoomControl: false, attributionControl: false, zoomSnap: 0,
+      dragging: false, touchZoom: false, doubleClickZoom: false,
+      scrollWheelZoom: false, boxZoom: false, keyboard: false, tap: false
+    });
+    var base = app.basemap.baseFor(green);
+    var layer = base.layer.addTo(m);
+    m.invalidateSize({ animate: false });
+    var half = (SNAP_SPAN_M / 2) * Math.SQRT2;
+    var sw = app.distance.project(green, Math.PI * 1.25, half);
+    var ne = app.distance.project(green, Math.PI * 0.25, half);
+    if (sw && ne) m.fitBounds(L.latLngBounds([[sw.lat, sw.lng], [ne.lat, ne.lng]]), { animate: false, padding: [0, 0] });
+    else m.setView([green.lat, green.lng], 19, { animate: false });
+    return {
+      kind: "map", size: size, map: m, layer: layer,
+      toBox: function (ll) {
+        if (!ll) return null;
+        try { var c = m.latLngToContainerPoint([ll.lat, ll.lng]); return { left: c.x, top: c.y }; }
+        catch (e) { return null; }
+      },
+      fromBox: function (pt) {
+        try { var ll = m.containerPointToLatLng([pt.left, pt.top]); return { lat: ll.lat, lng: ll.lng }; }
+        catch (e) { return null; }
+      }
+    };
+  }
+
+  /* The green's outline and the line back to where the shot came from, both
+     in the popup's own pixels. The origin line runs to the origin wherever it
+     is; the box clips it, so an approach reads as a dashed line leaving the
+     picture the way the shot came in. */
+  function drawSnapShapes(scene, r, ballAt) {
+    var svg = el("logSnapSvg");
+    if (!svg || !snap) return;
+    var size = snap.size;
+    svg.setAttribute("viewBox", "0 0 " + size + " " + size);
+    var parts = [];
+    var shape = (r.greenShape || []).map(snap.toBox).filter(Boolean);
+    if (shape.length >= 3) {
+      parts.push('<path class="snapGreen" d="M' + shape.map(function (p) {
+        return p.left.toFixed(1) + "," + p.top.toFixed(1);
+      }).join("L") + 'Z"/>');
+    } else {
+      var edge = app.distance.project(r.green, 0, 12);
+      var c = snap.toBox(r.green), e = edge ? snap.toBox(edge) : null;
+      if (c && e) parts.push('<circle class="snapGreen" cx="' + c.left.toFixed(1) + '" cy="' + c.top.toFixed(1)
+        + '" r="' + Math.abs(e.top - c.top).toFixed(1) + '"/>');
+    }
+    var origin = scene.finish.origin ? snap.toBox(scene.finish.origin) : null;
+    if (origin && ballAt) {
+      parts.push('<path class="snapOriginLine" d="M' + ballAt.left.toFixed(1) + "," + ballAt.top.toFixed(1)
+        + "L" + origin.left.toFixed(1) + "," + origin.top.toFixed(1) + '"/>');
+    }
+    svg.innerHTML = parts.join("");
+  }
+
+  function drawLogPopup(scene) {
+    var popup = el("logPopup");
+    if (!popup) return;
+    var on = !!scene.finish.show;
+    show(popup, on);
+    /* The ball carries its own hidden state as well as riding inside the
+       popup: it is a watched element (trace.js) and "is the ball up" is
+       read off it directly, so it must answer for itself. */
+    if (!on) { show(el("greenFocusBall"), false); if (snap) disposeSnap(); drawGreenContours(scene); return; }
+    var r = scene.hole.rec;
+    var green = r && r.green;
+    var title = el("logPopupTitle");
+    if (title) title.textContent = "Hole " + scene.finish.hole;
+    var hint = el("logPopupHint");
+    var logBtn = el("logPopupLog");
+    if (logBtn) logBtn.disabled = !scene.finish.canLog;
+    var box = el("logSnap");
+    var size = box ? box.clientWidth : 0;
+    var ball = el("greenFocusBall");
+    if (!green || !(size > 0)) {
+      if (hint) hint.textContent = green ? "" : "This hole has no green mapped yet";
+      show(ball, false);
       return;
     }
-    var at = scene.finish.ball && proj ? proj.toScreen(scene.finish.ball) : null;
-    var parked = !at;
+    var key = snapKeyFor(scene, r, size);
+    if (!snap || snap.key !== key) {
+      disposeSnap();
+      var img = el("surfaceImage");
+      var meta = null;
+      if (published && img && img.dataset.playSurface) {
+        try { meta = JSON.parse(img.dataset.playSurface); } catch (e) { meta = null; }
+      }
+      if (meta) {
+        var gf = meta.greenFrame;
+        snap = (gf && gf.path && gf.originPx && gf.outputDimensions)
+          ? buildImageSnap(gf, apiUrl(surfaceLib.assetUrl(gf.path)), green, size)
+          : (publishedFrameUrl ? buildImageSnap(meta, publishedFrameUrl, green, size) : null);
+      }
+      if (!snap) snap = buildMapSnap(green, size);
+      if (snap) snap.key = key;
+    }
+    if (!snap) { show(ball, false); return; }
+
+    /* The ball. Where the Marshal says it is; pinned to the nearest edge when
+       that is outside the picture (Log shot pressed from the next tee), so it
+       is always there to be picked up. */
+    var at = scene.finish.ball ? snap.toBox(scene.finish.ball) : null;
+    var edged = false;
+    if (!at) at = { left: size / 2, top: size / 2 };
+    else {
+      var m = 10;
+      var clamped = { left: Math.max(m, Math.min(size - m, at.left)), top: Math.max(m, Math.min(size - m, at.top)) };
+      edged = clamped.left !== at.left || clamped.top !== at.top;
+      at = clamped;
+    }
     show(ball, true);
-    ball.classList.toggle("parked", parked);
-    if (!parked) { ball.style.left = at.left + "px"; ball.style.top = at.top + "px"; }
-    else { ball.style.left = ""; ball.style.top = ""; }
-    show(hint, parked || !scene.finish.placed);
-    /* The shot's origin, so you can see the shot you are reconstructing rather
-       than guessing from a bare green — the whole point of being able to log a
-       hole later. */
-    var originAt = scene.finish.origin && proj ? proj.toScreen(scene.finish.origin) : null;
-    show(origin, !!originAt);
-    if (originAt && origin) { origin.style.left = originAt.left + "px"; origin.style.top = originAt.top + "px"; }
+    ball.classList.toggle("edged", edged);
+    ball.style.left = at.left + "px";
+    ball.style.top = at.top + "px";
+    if (hint) {
+      hint.textContent = !scene.finish.canLog ? "Nothing on this hole is waiting to be logged"
+        : edged ? "You are outside this view - drag the ball to where the shot finished"
+        : scene.finish.placed ? "" : "Drag the ball to where the shot finished";
+    }
+
+    var origin = el("finishOrigin");
+    var oat = scene.finish.origin ? snap.toBox(scene.finish.origin) : null;
+    var oin = !!(oat && oat.left >= 0 && oat.top >= 0 && oat.left <= size && oat.top <= size);
+    show(origin, oin);
+    if (oin && origin) { origin.style.left = oat.left + "px"; origin.style.top = oat.top + "px"; }
+
+    drawSnapShapes(scene, r, at);
+
+    var dist = el("logPopupDist");
+    if (dist) {
+      var from = scene.finish.ball;
+      var pin = app.pin && app.pin.current ? app.pin.current() : null;
+      var toPin = pin && from ? app.distance.haversineMeters(from, pin) : null;
+      var toMid = from ? app.distance.haversineMeters(from, green) : null;
+      dist.textContent = Number.isFinite(toPin) ? unitsWithLabel(toPin) + " to pin"
+        : Number.isFinite(toMid) ? unitsWithLabel(toMid) + " to middle" : "";
+    }
+    drawGreenContours(scene);
   }
 
   // ---------------------------------------------------------------- chrome
@@ -1044,11 +1237,22 @@
       if (unit) unit.textContent = settings() ? settings().unitLabel() : "m";
       var model = scene.bubble.show && window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
       var payload = model && model.payload;
-      /* No shot locked: the face still has a number to be — the green's
-         CENTRE — and the club band has nothing to say, so it empties to its
-         lip. The card keeps its height either way, which is what lets the hole
-         stepper sit on top of it at a fixed offset. */
-      bar.classList.toggle("noShot", !payload);
+      /* Walking: the club band empties (CSS), whichever club it would name.
+         The number stays - it is measured from where you are now. */
+      var moving = !!(scene.motion && scene.motion.moving);
+      bar.classList.toggle("moving", moving);
+      /* Nothing locked and standing still: the club the engine would pick
+         from here, so the recommendation is on the card before Lock is
+         pressed. boot.js answers it; the Marshal says when it is worth
+         asking (scene.suggestion). */
+      var suggested = (!payload && !moving && scene.suggestion && scene.suggestion.show && app.shotSuggestion)
+        ? app.shotSuggestion(scene.suggestion.start, scene.hole.rec) : null;
+      /* No shot and nothing to suggest: the face still has a number to be —
+         the green's CENTRE — and the club band has nothing to say, so it
+         empties to its lip. The card keeps its height either way, which is
+         what lets the hole stepper sit on top of it at a fixed offset. */
+      bar.classList.toggle("noShot", !payload && !suggested);
+      bar.classList.toggle("suggested", !payload && !!suggested);
       if (payload) {
         var landing = model.center || scene.bubble.target;
         var toTarget = app.distance.haversineMeters(scene.bubble.start, landing);
@@ -1057,11 +1261,18 @@
         el("shotCarry").textContent = Number.isFinite(Number(payload.baseCarry)) ? units(Number(payload.baseCarry)) : "–";
         setClubArt(payload.club);
         drawPlaysLike(scene.bubble.start, landing, toTarget);
+      } else if (suggested) {
+        el("shotClub").textContent = clubName(suggested.club);
+        el("shotDist").textContent = units(scene.distances.centre);
+        el("shotCarry").textContent = Number.isFinite(suggested.carryM) ? units(suggested.carryM) : "–";
+        setClubArt(suggested.club);
+        drawPlaysLike(null, null, null);
       } else {
         el("shotDist").textContent = units(scene.distances.centre);
         drawPlaysLike(null, null, null);
       }
     } else {
+      bar.classList.remove("moving", "suggested");
       drawPlaysLike(null, null, null);
     }
 
@@ -1069,13 +1280,16 @@
 
     var dock = el("shotActionBtn");
     /* Guests keep Lock/Unlock as rangefinder controls, but never see a Shot
-       End action. In green focus the primary face itself becomes Shot End, so
-       hide that face too; Back still closes the view without writing. */
-    show(dock, scene.dock.show && (canTrackShots || scene.dock.face !== "shotEnd"));
+       End action. While the logging popup is up the dock is under its scrim
+       and the popup's own Log is the action, so the dock stands down. */
+    show(dock, scene.dock.show && !scene.finish.show && (canTrackShots || scene.dock.face !== "shotEnd"));
     /* Updated even while hidden, so the button never comes back wearing the
        previous coin for the frame it takes the new PNG to decode. */
-    if (dock) setDockFace(dock, scene);
-    show(el("shotEndBtn"), canTrackShots && scene.dock.canShotEnd);
+    if (dock) {
+      setDockFace(dock, scene);
+      dock.classList.toggle("invite", !!scene.dock.invite);
+    }
+    show(el("shotEndBtn"), canTrackShots && scene.dock.canShotEnd && !scene.finish.show);
 
     show(el("finishControl"), canTrackShots && scene.finishControl.show);
     show(el("holeCompleteControl"), scene.holeCompleteControl.show);
@@ -1343,9 +1557,15 @@
     if (!mark) return "";
     var bits = [];
     if (mark.done) bits.push('<span class="holeMarkDone">0-0' + (mark.done > 1 ? " x" + mark.done : "") + "</span>");
-    if (mark.open) bits.push('<span class="holeMarkOpen" data-log="1">0</span>');
+    if (mark.open) bits.push('<span class="holeMarkOpen">0</span>');
     return bits.length ? '<span class="holeMark">' + bits.join("") + "</span>" : "";
   }
+
+  /* Presentation state: is the picker's Shot logging switch on. A fact about
+     the sheet, not the round - the Marshal's marks are the same either way;
+     this only decides whether they are drawn and what a tile does when
+     tapped. Off for a rangefinder-only session, and reset when play ends. */
+  var pickerLogMode = false;
 
   function markKey(marks) {
     return Object.keys(marks || {}).sort().map(function (h) {
@@ -1360,7 +1580,12 @@
   function drawPicker(scene) {
     var grid = el("holePickerGrid");
     if (!grid) return;
-    var key = markKey(scene.picker.marks);
+    var canTrackShots = !app.access || app.access.roundFeatures();
+    if (!canTrackShots) pickerLogMode = false;
+    var toggle = el("pickerLogToggle");
+    show(toggle, canTrackShots);
+    if (toggle) toggle.setAttribute("aria-pressed", pickerLogMode ? "true" : "false");
+    var key = markKey(scene.picker.marks) + (pickerLogMode ? "|log" : "");
     if (grid.dataset.built === "1" && grid.dataset.hole === String(scene.hole.number)
       && grid.dataset.holes === scene.picker.holes.join(",")
       && grid.dataset.marks === key) return;
@@ -1368,13 +1593,20 @@
     grid.dataset.hole = String(scene.hole.number);
     grid.dataset.holes = scene.picker.holes.join(",");
     grid.dataset.marks = key;
+    grid.classList.toggle("logMode", pickerLogMode);
+    /* Shot logging on: the marks are drawn and a tile with an origin waiting
+       on an outcome is the way into the popup; the rest step back. Off: a
+       plain hole chooser, no marks. */
     grid.innerHTML = scene.picker.holes.map(function (hole) {
       var mark = scene.picker.marks[hole];
       var classes = ["holeTile"];
       if (hole === scene.picker.current) classes.push("active");
-      if (mark && mark.open) classes.push("pending");
+      if (pickerLogMode) {
+        if (mark && mark.open) classes.push("loggable");
+        else if (mark && mark.done) classes.push("logged");
+      }
       return '<button type="button" class="' + classes.join(" ") + '" data-hole="' + hole + '">'
-        + hole + markHtml(mark) + "</button>";
+        + hole + (pickerLogMode ? markHtml(mark) : "") + "</button>";
     }).join("");
   }
 
@@ -1547,115 +1779,28 @@
      it does with them: the mesh spends the heights on geometry, this spends them on a surface
      fit and draws iso-lines from it.
 
-     Only in green focus. Not a taste call: the drawing is 15cm contours with a 5cm fill, and on
-     the hole frame a green is about 77 pixels across, where none of that resolves. Focus is the
-     first moment the green is large enough on screen for the lines to carry information, so it
-     is the first moment they are worth drawing. */
+     Only in the logging popup. Not a taste call: the drawing is 15cm contours with a 5cm fill,
+     and on the hole frame a green is about 77 pixels across, where none of that resolves. The
+     popup is the one place the green is drawn large enough for the lines to carry
+     information, so it is the one place they are drawn - through the popup's own projector. */
   var greenSurfacePromise = null;
   var greenSurfaceKey = null;
   var publishedFrameUrl = null;
 
-  /* The green, read as contours.
-
-     Shares everything with attachMesh below - the same elevation artefact, the same green
-     polygon painter already carries - and adds nothing to the download. The difference is what
-     it does with them: the mesh spends the heights on geometry, this spends them on a surface
-     fit and draws iso-lines from it.
-
-     Only in green focus. Not a taste call: the drawing is 15cm contours with a 5cm fill, and on
-     the hole frame a green is about 77 pixels across, where none of that resolves. Focus is the
-     first moment the green is large enough on screen for the lines to carry information, so it
-     is the first moment they are worth drawing. */
-  var greenSurfacePromise = null;
-  var greenSurfaceKey = null;
-  var publishedFrameUrl = null;
-
-  /* The published frame, readable. #surfaceImage is loaded without crossOrigin because nothing
-     else needs its pixels, and reading it would taint the canvas; a second fetch with
-     crossOrigin "anonymous" comes out of the HTTP cache and is what attachMesh already does for
-     its texture. Cached per frame url - one decode per hole, not per repaint. */
-  /* The green-scale frame, if this export published one. Loaded crossOrigin for the same reason
-     the mesh texture is - the paint layer reads its pixels. */
-  var greenFrameKey = null, greenFramePromise = null;
-  function greenFrameFor(url) {
-    if (greenFrameKey === url && greenFramePromise) return greenFramePromise;
-    greenFrameKey = url;
-    greenFramePromise = new Promise(function (resolve) {
-      var im = new Image();
-      im.crossOrigin = "anonymous";
-      im.onload = function () { resolve(im); };
-      im.onerror = function () { resolve(null); };
-      im.src = url;
-    });
-    return greenFramePromise;
-  }
-
-  /* image pixel -> lat/lng for a north-up mercator frame, from its own playSurface. */
-  function framePxToLatLng(ps, x, y) {
-    var scale = 256 * Math.pow(2, Number(ps.captureZoom) || 0);
-    var origin = ps.originPx || {};
-    var wx = ((Number(origin.x) || 0) + x) / scale;
-    var wy = ((Number(origin.y) || 0) + y) / scale;
-    var n = Math.PI - 2 * Math.PI * wy;
-    return { lat: 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))), lng: wx * 360 - 180 };
-  }
-
-  /* Paint the green frame over the hole frame, through the projector the hole frame is already
-     placed with. Both are north-up mercator, so three projected corners give the exact affine -
-     including whatever rotation Play has applied for the play axis - and the sharper pixels land
-     on precisely the ground they came from. Nothing downstream knows the difference. */
-  function drawGreenFrame(canvas, gf, img, project) {
-    if (!canvas || !gf || !img || !project) return false;
-    var dpr = window.devicePixelRatio || 1;
-    var cssW = canvas.clientWidth, cssH = canvas.clientHeight;
-    if (!cssW || !cssH) return false;
-    var needW = Math.max(1, Math.round(cssW * dpr)), needH = Math.max(1, Math.round(cssH * dpr));
-    if (canvas.width !== needW || canvas.height !== needH) { canvas.width = needW; canvas.height = needH; }
-    var ctx = canvas.getContext("2d");
-    if (!ctx) return false;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, needW, needH);
-
-    var ps = gf;
-    var out = ps.outputDimensions || {};
-    var W = Number(out.width) || img.naturalWidth, H = Number(out.height) || img.naturalHeight;
-    if (!W || !H) return false;
-    var rect = canvas.getBoundingClientRect();
-    function corner(x, y) {
-      var at = project(framePxToLatLng(ps, x, y));
-      return at ? { x: (at.left - rect.left) * dpr, y: (at.top - rect.top) * dpr } : null;
-    }
-    var p00 = corner(0, 0), p10 = corner(W, 0), p01 = corner(0, H);
-    if (!p00 || !p10 || !p01) return false;
-    var a = (p10.x - p00.x) / W, c = (p10.y - p00.y) / W;
-    var b = (p01.x - p00.x) / H, d = (p01.y - p00.y) / H;
-    if (!isFinite(a) || !isFinite(d) || (a === 0 && b === 0)) return false;
-    ctx.imageSmoothingQuality = "high";
-    ctx.setTransform(a, c, b, d, p00.x, p00.y);
-    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, 0, 0, W, H);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    return true;
-  }
-
-
-  function drawGreenContours(scene, proj) {
+  function drawGreenContours(scene) {
     var canvas = el("greenContours");
-    var frameCanvas = el("greenFrame");
     if (!canvas || !window.GDGreenContours) return;
-    function clearBoth() {
-      window.GDGreenContours.clear(canvas);
-      if (frameCanvas) window.GDGreenContours.clear(frameCanvas);
-    }
-    if (!scene.finish.show || !proj || !published) { clearBoth(); return; }
+    function clear() { window.GDGreenContours.clear(canvas); }
+    if (!scene.finish.show || !snap || !published) { clear(); return; }
     var img = el("surfaceImage");
     var meta = null;
     try { meta = img && img.dataset.playSurface ? JSON.parse(img.dataset.playSurface) : null; } catch (e) { meta = null; }
     var elevation = meta && meta.elevation;
-    if (!elevation || !elevation.path) { clearBoth(); return; }
+    if (!elevation || !elevation.path) { clear(); return; }
 
     var r = scene.hole.rec;
     var shape = (meta.anchorPins && meta.anchorPins.greenShape) || (r && r.greenShape) || [];
-    if (shape.length < 8) { clearBoth(); return; }
+    if (shape.length < 8) { clear(); return; }
 
     /* One fit per hole. The promise is held rather than the surface so a repaint arriving while
        the elevation is still decoding does not start a second decode of the same PNG. */
@@ -1671,22 +1816,17 @@
       return;
     }
     if (!greenSurfacePromise) return;
+    /* The contour drawer subtracts the canvas rect from what the projector answers (it was
+       written for viewport-placed overlays), so answer in viewport pixels: box px plus the
+       box's own offset. */
+    var rect = canvas.getBoundingClientRect();
+    var project = function (ll) {
+      var p = snap ? snap.toBox(ll) : null;
+      return p ? { left: p.left + rect.left, top: p.top + rect.top } : null;
+    };
     greenSurfacePromise.then(function (surface) {
-      if (!surface || greenSurfaceKey !== elevation.path) { clearBoth(); return; }
-      /* Sharper ground first. If this export published no green frame the hole frame shows
-         through exactly as before - the layer simply stays empty. */
-      var gf = meta.greenFrame;
-      if (frameCanvas && gf && gf.path) {
-        greenFrameFor(apiUrl(surfaceLib.assetUrl(gf.path))).then(function (im) {
-          if (!im || greenSurfaceKey !== elevation.path) { window.GDGreenContours.clear(frameCanvas); return; }
-          drawGreenFrame(frameCanvas, gf, im, proj.toScreen);
-        });
-      } else if (frameCanvas) {
-        window.GDGreenContours.clear(frameCanvas);
-      }
-      window.GDGreenContours.draw(canvas, surface, proj.toScreen, {});
-      /* Tiers, but only if the export left them to us. A frame the bake already painted must not
-         be painted again - the displacement is measured against what is on screen. */
+      if (!surface || greenSurfaceKey !== elevation.path || !snap || !currentScene || !currentScene.finish.show) { clear(); return; }
+      window.GDGreenContours.draw(canvas, surface, project, {});
     });
   }
 
@@ -1939,17 +2079,16 @@
     if (presentation === "loading") { drawChrome(scene); drawWind(scene, null); drawPicker(scene); return; }
     applyCamera(scene);
     if (!published) drawHoleLayers(scene);
-    document.body.classList.toggle("green-focus", scene.finish.show);
     document.body.classList.toggle("shot-active", scene.bubble.show);
     var proj = projector();
     drawPlayer(scene, proj);
     drawShot(scene, proj);
-    drawGreenContours(scene, proj);
-    drawFinish(scene, proj);
     drawPin(scene, proj);
     drawWind(scene, proj);
     drawChrome(scene);
     drawPicker(scene);
+    /* Last: the popup measures its own box, which needs the chrome laid out. */
+    drawLogPopup(scene);
   }
 
   function repaint(cause, fn) {
@@ -2040,6 +2179,60 @@
     node.addEventListener("pointercancel", end);
   }
 
+  /* The popup's gestures: drag the ball, tap the picture to put it there,
+     tap outside to close, Log to write. Box pixels through the snapshot's own
+     projector, never the stage's - the two pictures are unrelated. */
+  function wireSnapInput() {
+    var box = el("logSnap"), ball = el("greenFocusBall");
+    var scrim = el("logPopupScrim"), logBtn = el("logPopupLog");
+    if (!box || !ball) return;
+    var dragging = false, grab = { x: 0, y: 0 };
+    function boxPoint(e) {
+      var rect = box.getBoundingClientRect();
+      return { left: e.clientX - rect.left, top: e.clientY - rect.top, size: rect.width };
+    }
+    function clampTo(p) {
+      return { left: Math.max(0, Math.min(p.size, p.left)), top: Math.max(0, Math.min(p.size, p.top)) };
+    }
+    ball.addEventListener("pointerdown", function (e) {
+      if (!snap) return;
+      var p = boxPoint(e);
+      var bx = parseFloat(ball.style.left), by = parseFloat(ball.style.top);
+      grab = (Number.isFinite(bx) && Number.isFinite(by)) ? { x: bx - p.left, y: by - p.top } : { x: 0, y: 0 };
+      dragging = true;
+      try { ball.setPointerCapture(e.pointerId); } catch (err) {}
+      repaint("ball-dragging:start", function () {
+        document.body.classList.add("ball-dragging");
+        ball.classList.add("dragging");
+      });
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    ball.addEventListener("pointermove", function (e) {
+      if (!dragging || !snap) return;
+      var p = boxPoint(e);
+      var ll = snap.fromBox(clampTo({ left: p.left + grab.x, top: p.top + grab.y, size: p.size }));
+      if (ll) send("BALL_MOVED", { point: ll });
+    });
+    function end() {
+      if (!dragging) return;
+      dragging = false;
+      repaint("ball-dragging:end", function () {
+        document.body.classList.remove("ball-dragging");
+        ball.classList.remove("dragging");
+      });
+    }
+    ball.addEventListener("pointerup", end);
+    ball.addEventListener("pointercancel", end);
+    box.addEventListener("click", function (e) {
+      if (!snap || e.target === ball) return;
+      var ll = snap.fromBox(clampTo(boxPoint(e)));
+      if (ll) send("BALL_MOVED", { point: ll });
+    });
+    if (scrim) scrim.addEventListener("click", function () { send("BACK"); });
+    if (logBtn) logBtn.addEventListener("click", function () { send("FINISH_LOGGED"); });
+  }
+
   function wireInput() {
     dragHandler(el("aimBubble"), {
       busyClass: "bubble-dragging", trackPoint: true,
@@ -2052,11 +2245,7 @@
       onMove: function (ll) { if (app.pin) app.pin.set(ll); },
       onEnd: function () { if (marshal) render(marshal.scene()); }
     });
-    dragHandler(el("greenFocusBall"), {
-      busyClass: "ball-dragging", stop: true,
-      anchor: function () { return currentScene && currentScene.finish.ball; },
-      onMove: function (ll) { send("BALL_MOVED", { point: ll }); }
-    });
+    wireSnapInput();
 
     var img = el("surfaceImage");
     if (img) img.addEventListener("click", function (e) { onSurfaceTap(e.clientX, e.clientY); });
@@ -2149,13 +2338,25 @@
       var btn = e.target && e.target.closest ? e.target.closest("[data-hole]") : null;
       if (!btn) return;
       var hole = Number(btn.dataset.hole);
-      /* The 0 badge means "this hole has an origin and no outcome". Tapping it
-         goes and logs that outcome; tapping the rest of the tile just looks at
-         the hole. Same tile, two intents, and the target you hit says which. */
-      var onBadge = e.target.closest ? e.target.closest("[data-log]") : null;
-      send(onBadge ? "LOG_OPENED" : "VIEW_HOLE_CHANGED", { hole: hole });
+      /* Shot logging on: a hole with an origin and no outcome opens the popup
+         to log it, over the picker, which stays where it is - closing the
+         popup lands you back on this sheet. Read off the Scene, not the tile.
+         Anything else in this mode is inert. */
+      if (pickerLogMode) {
+        var mark = currentScene && currentScene.picker.marks[hole];
+        if (mark && mark.open) send("LOG_OPENED", { hole: hole });
+        return;
+      }
+      send("VIEW_HOLE_CHANGED", { hole: hole });
       var panel = el("holePickerPanel");
       if (panel) show(panel, false);
+    });
+    var logToggle = el("pickerLogToggle");
+    if (logToggle) logToggle.addEventListener("click", function () {
+      pickerLogMode = !pickerLogMode;
+      repaint("PICKER_LOG_MODE", function () {
+        if (currentScene) drawPicker(currentScene);
+      });
     });
 
     var prev = el("prevHole"), nextHole = el("nextHole");
@@ -2233,7 +2434,10 @@
       lastCameraKey = null;
       presentation = "live";
       currentScene = null;
+      pickerLogMode = false;
       repaint("ROUND_ENDED", function () {
+        disposeSnap();
+        show(el("logPopup"), false);
         clearSurface();
         if (objectLayer) { objectLayer.remove(); objectLayer = null; }
         if (mapSide !== null) {
@@ -2244,7 +2448,7 @@
           if (map) map.invalidateSize({ animate: false });
         }
         liveFrame = { a: 1, b: 0, tx: 0, ty: 0 };
-        document.body.classList.remove("tilt-lock", "green-focus", "shot-active");
+        document.body.classList.remove("tilt-lock", "shot-active");
         delete document.body.dataset.frameStage;
       });
       return true;

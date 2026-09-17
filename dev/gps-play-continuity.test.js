@@ -130,6 +130,17 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     return { over: z(node) > z(stage), drawn: box.width > 0 && box.height > 0, z: z(node), stage: z(stage) };
   }, id);
 
+  /* Round features on. Logging where a shot finished - Shot End, Log shot,
+     the popup on the green - is a write to the round record and gated on an
+     account (access.js; the Marshal's canLogShots). A signed-out session is
+     the rangefinder, and this walk is the whole round. */
+  await page.evaluate(() => {
+    localStorage.setItem("clarity:supabase-auth-session:v1",
+      JSON.stringify({ access_token: "test-token", refresh_token: "test-refresh" }));
+  });
+  check("the walk runs with round features on",
+    await look(() => ClarityApp.access.roundFeatures()), "signed in, no rangefinder flag");
+
   console.log("\n— opening in Preview —");
 
   let s = await scene();
@@ -173,7 +184,10 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   console.log("\n— going Live —");
 
-  await setFix(offsetM(TEE, -6, 0));
+  /* 36m short of the tee point: on the hole, outside the tee zone, so Play
+     lands in Track. Pressed FROM the tee box it locks the tee shot straight
+     away (marshal.test.js has that door); this walk wants the resting state. */
+  await setFix(offsetM(TEE, 36, 0));
   await page.click("#playButton");
   await wait(400);
   s = await scene();
@@ -228,22 +242,23 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   await wait(300);
   s = await scene();
   check("Finish opens on arrival, because there is a shot to log", s.mode === "finish");
-  check("the ball and the shot's origin are both drawn",
-    (await visible("greenFocusBall")) && (await visible("finishOrigin")));
+  check("the logging popup is up, with the ball and the line back to the shot's origin",
+    (await visible("logPopup")) && (await visible("greenFocusBall"))
+      && (await look(() => !!document.querySelector("#logSnapSvg .snapOriginLine"))));
 
-  /* Confirm by CLICKING the dock, not by firing the signal. Green focus had a
+  /* Confirm by CLICKING Log, not by firing the signal. Green focus once had a
      ball and no way to confirm it — the dock was hidden in finish mode and the
-     #finishDone button the painter listened for did not exist in the shell.
-     Driving signals in the test is exactly what hid that. */
-  check("green focus offers Shot End on the dock",
-    (await visible("shotActionBtn"))
-      && (await look(() => document.getElementById("shotActionBtn").dataset.action)) === "shotEnd");
+     button the painter listened for did not exist in the shell. Driving
+     signals in the test is exactly what hid that. */
+  check("the popup offers Log, and the dock stands down under it",
+    (await visible("logPopupLog")) && !(await visible("shotActionBtn"))
+      && (await look(() => !document.getElementById("logPopupLog").disabled)));
   await page.evaluate(() => ClarityApp.marshal.signal("BALL_MOVED", { point: { lat: -36.92, lng: 174.74 } }));
-  await page.click("#shotActionBtn");
+  await page.click("#logPopupLog");
   await wait(300);
   check("logging lands on the Logged screen", await visible("loggedScreen"));
-  check("which offers the next hole and waits",
-    (await look(() => document.getElementById("loggedNext").textContent)) === "Hole 2"
+  check("which offers to call the hole done, and waits",
+    (await look(() => document.getElementById("loggedNext").textContent)) === "Hole complete"
       && (await scene()).hole.number === 1, "you still have to putt");
 
   await page.click("#loggedScoreUp");
@@ -252,13 +267,20 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     (await look(() => ClarityApp.marshal.state().scores["1"])) > 0,
     `score=${await look(() => ClarityApp.marshal.state().scores["1"])}`);
 
-  /* The 1st green is ~77m from the 2nd tee, so the fix agrees we have arrived
-     and the button commits. Standing further off it would preview instead and
-     leave Play waiting — see the arrows below for that half. */
+  /* Hole complete is the holding screen; Next hole queues the 2nd as a
+     preview, and walking into its tee zone is what starts it. The 1st green
+     is ~77m from the 2nd tee, so nothing starts until we actually get there. */
   await page.click("#loggedNext");
-  await wait(400);
+  await wait(300);
+  check("Hole complete lands on the holding screen", await visible("holeCompleteScreen"));
+  await page.click("#completeNext");
+  await wait(300);
   s = await scene();
-  check("pressing the hole number goes live when the fix says you are there",
+  check("Next hole queues the 2nd as a preview, not live",
+    s.hole.number === 2 && s.flow === "preview" && s.mode === "queued", `${s.flow}/${s.mode}`);
+  await setFix(offsetM(TEE, -344, 60));      // the 2nd tee
+  s = await scene();
+  check("walking onto the 2nd tee starts it, in Track",
     s.hole.number === 2 && s.flow === "live" && s.mode === "track", `${s.flow}/${s.mode}`);
 
   console.log("\n— the arrows browse; they do not move the round —");
@@ -272,8 +294,12 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     s.hole.number === 3 && s.flow === "preview", `${s.hole.number}/${s.flow}`);
   check("the live hole is untouched — you are still playing 2",
     (await look(() => ClarityApp.marshal.state().live.hole)) === 2);
-  check("and Play is not offered on a hole you have not walked to",
-    !(await visible("playButton")));
+  /* Inside roughly a kilometre "Play This Hole" is offered as the override
+     for a bad suggestion (HOLE_ARRIVAL_M); pressing it is the only thing that
+     moves the round on, so an offer alone changes nothing. */
+  check("Play This Hole is offered as the override, and the live hole is still 2",
+    (await visible("playButton"))
+      && (await look(() => ClarityApp.marshal.state().live.hole)) === 2);
 
   await setFix(offsetM(TEE, -700, 4));       // walk to the 3rd tee
   check("Play appears once you arrive at the hole you are looking at",
@@ -290,51 +316,58 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   console.log("\n— catching up on a hole later —");
 
-  check("hole 1 reads as two shots with outcomes, hole 2 as one still open",
-    JSON.stringify((await scene()).picker.marks) === '{"1":{"done":2,"open":0},"2":{"done":0,"open":1}}',
+  /* Hole 3 was started from its tee box, so Play locked the tee shot: one
+     origin open there too. */
+  check("hole 1 reads as two shots with outcomes, holes 2 and 3 as one still open each",
+    JSON.stringify((await scene()).picker.marks)
+      === '{"1":{"done":2,"open":0},"2":{"done":0,"open":1},"3":{"done":0,"open":1}}',
     JSON.stringify((await scene()).picker.marks));
 
   await page.click("#holeNumber");
   await wait(200);
-  check("hole 1's tile shows 0-0 x2 and offers nothing to press",
+  check("with Shot logging off the tiles are bare hole numbers",
+    await look(() => document.querySelector('#holePickerGrid [data-hole="2"]').textContent === "2"));
+  await page.click("#pickerLogToggle");
+  await wait(200);
+  check("hole 1's tile shows 0-0 x2 and is not a button",
     await look(() => {
       const t = document.querySelector('#holePickerGrid [data-hole="1"]');
-      return !!t && /0-0 x2/.test(t.textContent) && !t.querySelector("[data-log]");
+      return !!t && /0-0 x2/.test(t.textContent) && !t.classList.contains("loggable");
     }), await look(() => document.querySelector('#holePickerGrid [data-hole="1"]').textContent));
-  check("hole 2's tile carries the outstanding 0, which is a control",
+  check("hole 2's tile carries the outstanding 0 and is the way in",
     await look(() => {
       const t = document.querySelector('#holePickerGrid [data-hole="2"]');
-      return !!t && !!t.querySelector("[data-log]");
+      return !!t && /0$/.test(t.textContent) && t.classList.contains("loggable");
     }));
 
-  /* Click the BADGE, not the tile. This is the only door into logging an
+  /* The tile, with Shot logging on. This is the only door into logging an
      outcome for a hole you are not standing on, and the whole point of moving
      it here was that green focus used to leak into general Preview. */
-  await page.click('#holePickerGrid [data-hole="2"] [data-log]');
+  await page.click('#holePickerGrid [data-hole="2"]');
   await wait(400);
   s = await scene();
-  check("the outstanding badge opens Logging on that hole",
+  check("the tile opens Logging on that hole",
     s.flow === "logging" && s.hole.number === 2, `${s.flow}/${s.hole.number}`);
   check("the badge says LOGGING, not PREVIEW",
     (await badge()) === "LOGGING/2");
-  check("there is a ball, the shot's origin, and a Shot End to confirm with",
-    (await visible("greenFocusBall")) && (await visible("finishOrigin"))
-      && (await look(() => document.getElementById("shotActionBtn").dataset.action)) === "shotEnd");
+  check("the popup is up over the picker, with the ball on the green and Log to confirm with",
+    (await visible("logPopup")) && (await visible("greenFocusBall")) && (await visible("holePickerPanel"))
+      && (await look(() => !document.getElementById("logPopupLog").disabled)));
 
   await page.evaluate(() => ClarityApp.marshal.signal("BALL_MOVED", { point: { lat: -36.9231, lng: 174.7406 } }));
-  await page.click("#shotActionBtn");
+  await page.click("#logPopupLog");
   await wait(400);
   s = await scene();
   check("confirming records the outcome",
     (await look(() => !ClarityApp.marshal.openShot(2))) && s.picker.marks["2"].open === 0);
-  check("and puts you straight back where you were, with no Logged screen",
-    s.hole.number === 3 && s.flow === "live" && !(await visible("loggedScreen")),
+  check("and puts you straight back where you were, with no Logged screen and the picker still open",
+    s.hole.number === 3 && s.flow === "live" && !(await visible("loggedScreen")) && (await visible("holePickerPanel")),
     `${s.hole.number}/${s.flow}`);
+  await page.click("#pickerLogToggle");      // off again: a plain hole chooser
+  await wait(150);
 
   console.log("\n— Preview has no way into green focus —");
 
-  await page.click("#holeNumber");
-  await wait(150);
   await page.click('#holePickerGrid [data-hole="1"]');
   await wait(350);
   s = await scene();
@@ -363,8 +396,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.evaluate(() => ClarityApp.marshal.signal("PLACED", { point: { lat: -36.9201, lng: 174.7400 } }));
   await wait(250);
   s = await scene();
-  check("and placing yourself on the green is still just the shot view",
-    s.mode === "aim" && !s.finish.show, `${s.mode}, finish=${s.finish.show}`);
+  check("and placing yourself on the green is inert - nothing to aim at itself, nothing to log",
+    s.mode === "setup" && !s.finish.show && !(await visible("logPopup")), `${s.mode}, finish=${s.finish.show}`);
 
   console.log("\n— losing GPS —");
 
@@ -392,8 +425,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
      test has to run where a shot can actually be opened. */
   const liveHole = await look(() => ClarityApp.marshal.state().live.hole);
   await setFix(offsetM(TEE, -700 + 6, 0));      // hole 3's tee
-  await page.click("#shotActionBtn");           // Lock, by the button
-  await wait(300);
+  /* Play from the tee box already locked the tee shot; only Lock if a walk
+     has since released it. */
+  if ((await scene()).mode !== "aim") { await page.click("#shotActionBtn"); await wait(300); }
   check("locked in on the live hole, ready to drag",
     (await scene()).mode === "aim" && (await visible("aimBubble")), `hole ${liveHole}`);
   const before = await look(() => ClarityApp.painter.cameraSolves());
@@ -435,15 +469,15 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
       return /user-scalable=no/.test(v) && /maximum-scale=1/.test(v);
     }));
 
-  check("the source tag says what is on screen",
-    await look(() => {
-      const chip = document.getElementById("surfaceSource");
-      return !!chip && !chip.classList.contains("hiddenState")
-        && /LIVE MAP · /.test(chip.textContent);
-    }), await look(() => document.getElementById("surfaceSource").textContent));
+  /* The #surfaceSource chip was a debug readout and was retired; the state
+     itself stays readable off the painter (presentation()). */
+  check("the painter says what is on screen",
+    await look(() => ClarityApp.painter.presentation().kind === "live"),
+    await look(() => JSON.stringify(ClarityApp.painter.presentation())));
 
   check("and it names the basemap rather than guessing",
-    await look(() => document.getElementById("surfaceSource").dataset.source) === "live");
+    await look(() => typeof ClarityApp.painter.presentation().basemap === "string"
+      && ClarityApp.painter.presentation().basemap.length > 0));
 
   console.log("\n— published imagery reaches a native build —");
 
@@ -479,9 +513,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const failure = await look(() => ClarityApp.painter.surfaceFailure());
   check("a declared surface that will not load is recorded as a failure",
     !!failure && failure.reason === "load-error", failure ? failure.reason : "none");
-  check("and the tag says so rather than reading as a normal live map",
-    (await look(() => document.getElementById("surfaceSource").dataset.source)) === "failed",
-    await look(() => document.getElementById("surfaceSource").textContent));
+  check("and the presentation reads as the live map, with the failure kept beside it",
+    await look(() => ClarityApp.painter.presentation().kind === "live" && !!ClarityApp.painter.surfaceFailure()),
+    await look(() => JSON.stringify(ClarityApp.painter.presentation())));
   check("the round keeps playing on the live map regardless",
     (await scene()).hole.number === 1 && !(await visible("loggedScreen")));
 

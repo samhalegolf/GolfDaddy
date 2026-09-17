@@ -33,7 +33,7 @@
      resolves natively only because the bootstrap above ran first. -->
 <script src="../scripts/clarity-error-reporter.js"></script>
 <link rel="stylesheet" href="../assets/vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="styles.css?v=pin-drag-20260916">
+<link rel="stylesheet" href="styles.css?v=log-popup-20260917b">
 <link rel="stylesheet" href="../styles/inline/gd-editable-bag-panel-v1.css">
 <link rel="stylesheet" href="../styles/gd-demo-mode.css">
 </head>
@@ -196,18 +196,6 @@
          way; only what fills the frame changes. Absent WebGL or elevation, it never shows and
          the img underneath is the picture. -->
     <canvas id="surfaceMesh"></canvas>
-    <!-- The green read as contour lines. Unlike #surfaceMesh this is NOT in frame space and
-         carries no transform: it spans the viewport and is drawn in viewport pixels through the
-         same projector every other overlay uses, so it re-strokes at whatever scale the player
-         is looking at instead of being magnified with the picture. That is the whole reason it
-         is drawn here rather than baked into the published frame, where a green is ~77px wide
-         and none of this line work survives. -->
-    <!-- The green at its own capture scale. Same ground as the frame underneath, drawn through
-         the SAME projector, so nothing about the camera, the tap maths or the overlays changes -
-         only the pixels get sharper. The hole frame spreads one grid over ~830m and lands a 45m
-         green in ~106px; this is that green captured alone at z20, ~426px. -->
-    <canvas id="greenFrame"></canvas>
-    <canvas id="greenContours"></canvas>
     <svg id="bubbleSvg" class="hiddenState"></svg>
     <!-- The club the bubble is sized from, sitting at the head of the aim line.
          DOM rather than SVG for the same reason #pinDistance is: crisper text
@@ -215,14 +203,6 @@
     <div id="bubbleClub" class="hiddenState"></div>
     <div id="pinDistance" class="hiddenState"></div>
     <div id="pinMarker" class="hiddenState"><img src="../assets/icons/flag.svg" alt="" draggable="false"></div>
-    <!-- Finish: the ball you drag to where the shot actually finished, and the
-         shot's ORIGIN so you can see the shot you are reconstructing rather
-         than guessing from a bare green — which is what makes logging a hole
-         from the next tee, or three holes later, possible at all. Parked at a
-         fixed pickup point when it has no anchor worth drawing. -->
-    <div id="finishOrigin" class="hiddenState" aria-hidden="true"></div>
-    <div id="greenFocusBall" class="hiddenState" role="button" aria-label="Ball position"></div>
-    <div id="greenFocusHint" class="hiddenState">Drag the ball to where the shot finished</div>
     <div id="gpsDot" class="hiddenState"></div>
     <!-- The distance shown beside an edge-clamped dot: the camera frames the
          hole and never widens to fit a player who is not on it, so a fix that
@@ -531,10 +511,49 @@
   <div id="holePickerPanel" class="sheet hiddenState">
     <div class="sheetHeader">
       <strong>Choose a hole</strong>
+      <!-- Shot logging: switched on, the grid shows what the record says
+           about each hole (0 for an origin still waiting on an outcome, 0-0
+           for a shot with both ends) and the holes with something outstanding
+           become the way into the logging popup. Switched off it is a plain
+           hole chooser. Members only; the painter hides it for a guest. -->
+      <button id="pickerLogToggle" type="button" class="pickerLogToggle hiddenState" aria-pressed="false">
+        <span class="pickerLogLabel">Shot logging</span><span class="pickerLogKnob" aria-hidden="true"></span>
+      </button>
       <button id="holePickerClose" type="button" class="sheetClose">Done</button>
     </div>
     <div class="sheetBody">
       <div id="holePickerGrid" class="holePickerGrid"></div>
+    </div>
+  </div>
+  <!-- The logging popup: where a shot finished, placed on a snapshot of the
+       green and its surrounds rather than on the whole hole. Three doors, one
+       box: it opens by itself when you walk onto the green with a shot open
+       (ball on your fix), from Log shot during a hole (ball on your fix), and
+       from a hole's tile in the picker with Shot logging on (ball on the
+       green's centre). Tapping outside it closes it and leaves you exactly
+       where you were - the picker, or the hole - with nothing written. The
+       snapshot is the green frame the export published when there is one,
+       the hole frame otherwise, and a small live map for an unpublished hole;
+       the painter draws it (drawLogPopup) and decides nothing. -->
+  <div id="logPopup" class="hiddenState" role="dialog" aria-label="Log where the shot finished">
+    <div id="logPopupScrim"></div>
+    <div class="logPopupBox">
+      <div class="logPopupHead">
+        <strong id="logPopupTitle">Hole 1</strong>
+        <span id="logPopupHint">Drag the ball to where the shot finished</span>
+      </div>
+      <div id="logSnap" class="logSnap">
+        <img id="logSnapImage" alt="" draggable="false">
+        <div id="logSnapMap"></div>
+        <canvas id="greenContours"></canvas>
+        <svg id="logSnapSvg" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+        <div id="finishOrigin" class="hiddenState" aria-hidden="true"></div>
+        <div id="greenFocusBall" role="button" aria-label="Ball position"></div>
+      </div>
+      <div class="logPopupFoot">
+        <span id="logPopupDist"></span>
+        <button id="logPopupLog" type="button">Log</button>
+      </div>
     </div>
   </div>
   <!-- The shot card, as the hole in section. Four bands: BACK and FRONT are
@@ -601,7 +620,7 @@
 <script src="js/platform.js"></script>
 <script src="../scripts/clarity-supabase-auth.js"></script>
 <script src="js/account.js"></script>
-<script src="js/access.js"></script>
+<script src="js/access.js?v=log-popup-20260917"></script>
 <script src="js/course-key.js"></script>
 <script src="js/undo.js"></script>
 <script src="js/course-library.js"></script>
@@ -637,7 +656,7 @@
 <script src="js/bag.js?v=bag-free-20260830"></script>
 <script src="js/wind.js"></script>
 <script src="js/pin.js"></script>
-<script src="js/gps.js"></script>
+<script src="js/gps.js?v=log-popup-20260917"></script>
 <script src="js/wake-lock.js"></script>
 <script src="js/gps-settings.js"></script>
 <script src="js/plays-like.js"></script>
@@ -664,7 +683,7 @@
      Marshal now derives — the player IS the trusted fix in Live and IS your
      placement in Preview, so a position with a source tag and a policy had
      nothing left to be. -->
-<script src="js/marshal.js"></script>
+<script src="js/marshal.js?v=log-popup-20260917"></script>
 <script src="js/caddy-watch.js"></script>
 <script src="js/watch-map-delivery.js"></script>
 <script src="js/watch-player-delivery.js"></script>
@@ -673,7 +692,7 @@
 <script src="../scripts/gd-green-contours-core.js"></script>
 <script src="js/gd-terrain-mesh.js"></script>
 <script src="js/gd-green-contours.js"></script>
-<script src="js/painter.js"></script>
+<script src="js/painter.js?v=log-popup-20260917"></script>
 <script src="js/resume.js"></script>
 <script src="js/tool-rail.js"></script>
 <!-- Password-reset and account-setup links land on whatever page the app has
@@ -687,6 +706,6 @@
      on the first Back press, the exact failure it was written to prevent.
      boot.js wires Android's Back to this page's own exitBack instead. -->
 <script src="../scripts/inline/gd-native-deep-links.js"></script>
-<script src="js/boot.js"></script>
+<script src="js/boot.js?v=log-popup-20260917"></script>
 </body>
 </html>

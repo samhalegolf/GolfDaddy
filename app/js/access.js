@@ -15,8 +15,12 @@
  *
  * What DOES belong to an account is everything that writes something the
  * player comes back to: the scorecard, the round record in Course Data, and
- * resume. Those stay gated, and this module is the one place that decides
- * which is which.
+ * logging where shots finish (green focus in every form - boot.js hands the
+ * Marshal this module's roundFeatures as canLogShots). Those stay gated, and
+ * this module is the one place that decides which is which. Resume is NOT
+ * one of them any more (17 Sep): it is a local note of where you were up to,
+ * read back by the picker's Continue Round pill, and a guest who backs out to
+ * the picker needs it as much as a member does.
  *
  * Two ways to land in rangefinder-only mode:
  *   - no account at all               -> always, whatever the URL says

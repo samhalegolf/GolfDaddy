@@ -74,18 +74,12 @@ body[data-frame-stage="zoom"] #map .holeGreen { display: inline; }
 /* Green focus is a clean image of the green plus the placed pin — no boundary
    outline, no centre pip, no hole corridor or tee marker carried in from the
    overview. Last rule wins over the zoom-stage reveal above. */
-body.green-focus #map .holeGreen,
-body.green-focus #map .holeRoute,
-body.green-focus #map .holeTee { display: none; }
 
 /* Hazards and fairway edges deliberately SURVIVE shot-active, unlike the route
    line above. The route hides because the aim line covers the same ground; a
    bunker does not - knowing what the Bubble is sitting over is the whole reason
    to look at the hole while aiming. They go with everything else in green
    focus, which is a clean picture of the green and the pin. */
-body.green-focus #map .holeFairway,
-body.green-focus #map .holeWater,
-body.green-focus #map .holeBunker { display: none; }
 
 /* Basemap credit. Lives outside #map so the frame rotation cannot carry it
    off-screen; hidden only when a published surface has replaced the imagery
@@ -179,13 +173,6 @@ body.surface-published.tilt-lock #surfaceStage {
    ground plane, which is the img's plane. */
 #surfaceMesh { position: absolute; top: 0; left: 0; display: none; pointer-events: none; }
 body.surface-published.surface-mesh #surfaceMesh { display: block; }
-/* Spans the viewport rather than the frame: the contours are projected per point, not
-   transformed as a bitmap. Shown only in green focus, where the green is big enough on screen
-   for 15cm lines to mean anything. */
-#greenFrame { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; pointer-events: none; z-index: 538; }
-body.green-focus #greenFrame { display: block; }
-#greenContours { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; pointer-events: none; z-index: 540; }
-body.green-focus #greenContours { display: block; }
 body.surface-published #surfaceImage { display: block; }
 
 /* The player's projected position, on whichever presentation is up.
@@ -246,43 +233,6 @@ body.ball-dragging #surfaceStage { transition: none !important; }
 
 /* Green focus: the green centre ring in the zoom stage. */
 
-/* The green-focus ball: the position dot becomes a draggable golf ball inside
-   40m of the green, so you can say where the shot actually finished rather
-   than trusting the fix. Ported verbatim from the legacy green focus
-   (styles/inline/gd-gps-state-stabilizer-v1.css .gdGreenFocusScreenBall) —
-   dimples and shading are pure radial-gradients, no asset. */
-#greenFocusBall { position: absolute; width: clamp(20px, 5.4vw, 24px); height: clamp(20px, 5.4vw, 24px); margin: 0; transform: translate(-50%, -50%); border-radius: 999px; z-index: 558; touch-action: none; cursor: grab; pointer-events: auto;
-  background:
-    radial-gradient(circle at 38% 33%, rgba(255, 255, 255, .98) 0 3px, transparent 3.4px),
-    radial-gradient(circle at 58% 31%, rgba(215, 226, 215, .86) 0 2.2px, transparent 2.8px),
-    radial-gradient(circle at 49% 49%, rgba(194, 211, 193, .7) 0 2px, transparent 2.6px),
-    radial-gradient(circle at 33% 63%, rgba(176, 195, 176, .62) 0 2px, transparent 2.6px),
-    radial-gradient(circle at 64% 66%, rgba(170, 190, 170, .56) 0 2px, transparent 2.6px),
-    radial-gradient(circle at 39% 30%, #fff 0%, #f6f8f1 35%, #dce5d7 65%, #9caf96 100%);
-  border: 2px solid rgba(255, 255, 255, .96);
-  box-shadow:
-    inset -4px -5px 7px rgba(63, 86, 58, .32),
-    inset 3px 3px 6px rgba(255, 255, 255, .58),
-    0 0 0 4px rgba(88, 220, 126, .2),
-    0 0 16px rgba(88, 220, 126, .72),
-    0 8px 16px rgba(0, 0, 0, .4); }
-#greenFocusBall.hiddenState { display: none; }
-#greenFocusBall.dragging { cursor: grabbing;
-  box-shadow:
-    inset -4px -5px 7px rgba(63, 86, 58, .32),
-    inset 3px 3px 6px rgba(255, 255, 255, .58),
-    0 0 0 5px rgba(88, 220, 126, .26),
-    0 0 20px rgba(88, 220, 126, .88),
-    0 10px 20px rgba(0, 0, 0, .46); }
-/* Parked: walked off the green with the ball still unplaced. It sits at a
-   fixed pickup point clear of the Shot End dock, waiting to be dragged onto
-   the green the camera is still holding. A gentle pulse says "grab me". */
-#greenFocusBall.parked { left: auto; top: auto; right: 34px; bottom: calc(env(safe-area-inset-bottom, 0px) + 226px); margin: 0; transform: none; animation: ballWaiting 1.9s ease-in-out infinite; }
-@keyframes ballWaiting { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
-@media (prefers-reduced-motion: reduce) { #greenFocusBall.parked { animation: none; } }
-
-#greenFocusHint { position: absolute; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 278px); z-index: 558; max-width: 58vw; text-align: right; padding: 7px 11px; border-radius: 10px; background: rgba(5, 9, 7, .78); color: #eafff1; font-size: 11px; font-weight: 700; line-height: 1.3; pointer-events: none; }
-#greenFocusHint.hiddenState { display: none; }
 
 /* Hole Out is gone: in green focus it and Shot End had become the same
    action on the same point, so Shot End is the single confirm. */
@@ -837,12 +787,6 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
   border: 1px solid rgba(255, 255, 255, .2); color: #eafff1; font-size: 10px; font-weight: 800; white-space: nowrap; pointer-events: none; }
 #edgeDistance.hiddenState { display: none; }
 
-/* The shot's origin while logging it — what makes reconstructing a hole from
-   the next tee (or three holes later) possible rather than guesswork. */
-#finishOrigin { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; z-index: 556;
-  background: rgba(255, 255, 255, .18); border: 1.5px dashed rgba(255, 255, 255, .7); pointer-events: none; }
-#finishOrigin.hiddenState { display: none; }
-
 /* ── The Logged screen ────────────────────────────────────────────────────
    Where Shot End and Finish both land. It WAITS: nothing here advances the
    round except pressing the next hole's number. */
@@ -1010,3 +954,109 @@ body.watchDriving .playChrome { z-index: 700; }
 .whMaskWatchScreen { display: block; width: 100%; height: 100%; border-radius: 28px; background: #000; }
 .whMaskTitle { font: 900 22px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: -.02em; color: #f2f7f2; animation: whRise .5s ease .2s both; }
 .whMaskCopy { max-width: 230px; font: 400 12.5px/1.55 -apple-system, system-ui, sans-serif; color: rgba(255, 255, 255, .55); animation: whRise .5s ease .28s both; }
+
+/* ── The logging popup ────────────────────────────────────────────────────
+   Where a shot finished, placed on a snapshot of the green and its
+   surrounds. It replaces the full-screen green focus: that framed the whole
+   40m band, which put the green at coin size and the ball at thumb size -
+   the two things the placement needs the other way round. The box sits over
+   whatever the hole stage was showing; the scrim closes it (BACK) and leaves
+   the picker or the hole exactly as it was. Above the sheets (700) because
+   the picker is one of its doors and stays open underneath. */
+#logPopup { position: absolute; inset: 0; z-index: 760; display: grid; place-items: center; padding: 16px; box-sizing: border-box; }
+#logPopup.hiddenState { display: none; }
+#logPopupScrim { position: absolute; inset: 0; background: rgba(3, 8, 6, .58); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+.logPopupBox { position: relative; width: min(300px, 100%); box-sizing: border-box; padding: 12px; border-radius: 18px;
+  background: rgba(6, 14, 9, .97); border: 1px solid rgba(255, 255, 255, .12); box-shadow: 0 26px 60px rgba(0, 0, 0, .6);
+  display: flex; flex-direction: column; gap: 10px; animation: logPopupIn .22s cubic-bezier(.2, .9, .3, 1.2) both; }
+@keyframes logPopupIn { from { opacity: 0; transform: scale(.94) translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .logPopupBox { animation: none; } }
+.logPopupHead { display: flex; flex-direction: column; gap: 2px; padding: 0 2px; }
+.logPopupHead strong { font-size: 16px; }
+#logPopupHint { min-height: 14px; font-size: 11.5px; font-weight: 700; line-height: 1.25; color: rgba(255, 255, 255, .62); }
+/* The snapshot. Square, 90m across (SNAP_SPAN_M in painter.js): a green is
+   30-45m, so the surrounds - the bunker, the collar, the run-off - stay in
+   the picture without the green shrinking to a coin. */
+.logSnap { position: relative; width: 100%; aspect-ratio: 1 / 1; border-radius: 12px; overflow: hidden; background: #0d1b12; touch-action: none; isolation: isolate; }
+/* Published: the green frame (z20, sharp) or the hole frame, north-up, placed
+   by a translate+scale the painter solves so the green centre lands mid-box. */
+#logSnapImage { position: absolute; left: 0; top: 0; max-width: none; transform-origin: 0 0; display: none; pointer-events: none; user-select: none; -webkit-user-drag: none; z-index: 1; }
+.logSnap.image #logSnapImage { display: block; }
+/* Unpublished: a small live map, every gesture off, framed on the green. */
+/* z-index + isolation: Leaflet's panes sit at z-index 400 inside the map,
+   and without their own stacking context they would climb over the SVG
+   outline, the contours and the ball. Contained, the map is one layer. */
+#logSnapMap { position: absolute; inset: 0; display: none; background: #0d1b12; z-index: 1; isolation: isolate; }
+.logSnap.map #logSnapMap { display: block; }
+#logSnapMap .leaflet-container { background: #0d1b12; }
+/* The green read as contours (gd-green-contours.js), drawn through the
+   popup's own projector at the popup's own scale - the one place the lines
+   are big enough to mean anything. */
+#greenContours { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
+#logSnapSvg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; overflow: visible; }
+#logSnapSvg .snapGreen { fill: rgba(47, 143, 78, .16); stroke: #fff; stroke-width: 1.4; stroke-opacity: .85; }
+#logSnapSvg .snapOriginLine { fill: none; stroke: #ffb64d; stroke-width: 1.4; stroke-dasharray: 3 5; stroke-opacity: .85; }
+/* The shot's origin, when it falls inside the picture (a chip does; an
+   approach shows as the dashed line running off the edge instead). */
+#finishOrigin { position: absolute; width: 10px; height: 10px; transform: translate(-50%, -50%); border-radius: 50%; z-index: 4;
+  background: #ffb64d; border: 2px solid rgba(255, 255, 255, .9); box-shadow: 0 0 0 3px rgba(255, 182, 77, .25); pointer-events: none; }
+#finishOrigin.hiddenState { display: none; }
+/* The ball. 15px in a 300px box is about 4.5m of green - a marker, not a
+   thumb. The ::after ring is the finger target, drawn nowhere. Dimples and
+   shading are radial gradients, no asset. */
+#greenFocusBall { position: absolute; left: 50%; top: 50%; width: 15px; height: 15px; transform: translate(-50%, -50%); border-radius: 50%; z-index: 5;
+  touch-action: none; cursor: grab; pointer-events: auto;
+  background:
+    radial-gradient(circle at 38% 33%, rgba(255, 255, 255, .98) 0 2px, transparent 2.3px),
+    radial-gradient(circle at 60% 30%, rgba(215, 226, 215, .86) 0 1.4px, transparent 1.8px),
+    radial-gradient(circle at 50% 52%, rgba(194, 211, 193, .7) 0 1.3px, transparent 1.7px),
+    radial-gradient(circle at 34% 64%, rgba(176, 195, 176, .62) 0 1.3px, transparent 1.7px),
+    radial-gradient(circle at 39% 30%, #fff 0%, #f6f8f1 35%, #dce5d7 65%, #9caf96 100%);
+  border: 1.5px solid rgba(255, 255, 255, .96);
+  box-shadow: inset -2px -3px 4px rgba(63, 86, 58, .32), inset 2px 2px 3px rgba(255, 255, 255, .58),
+    0 0 0 3px rgba(88, 220, 126, .22), 0 0 12px rgba(88, 220, 126, .7), 0 5px 10px rgba(0, 0, 0, .4); }
+#greenFocusBall::after { content: ""; position: absolute; inset: -14px; border-radius: 50%; }
+#greenFocusBall.hiddenState { display: none; }
+#greenFocusBall.dragging { cursor: grabbing; box-shadow: inset -2px -3px 4px rgba(63, 86, 58, .32), inset 2px 2px 3px rgba(255, 255, 255, .58),
+    0 0 0 4px rgba(88, 220, 126, .28), 0 0 16px rgba(88, 220, 126, .88), 0 7px 14px rgba(0, 0, 0, .46); }
+/* Pinned to the edge: the ball's real position (your fix) is outside the
+   picture, so it waits at the nearest edge to be dragged in. Amber says the
+   place it marks is not yet a place on the green. */
+#greenFocusBall.edged { box-shadow: 0 0 0 3px rgba(255, 182, 77, .55), 0 0 12px rgba(255, 182, 77, .6), 0 5px 10px rgba(0, 0, 0, .4); }
+.logPopupFoot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 2px; }
+#logPopupDist { font-size: 12px; font-weight: 800; color: rgba(255, 255, 255, .75); }
+#logPopupLog { min-height: 44px; min-width: 120px; border: 0; border-radius: 999px; padding: 0 26px; background: #1fd36d; color: #06110b;
+  font-size: 14px; font-weight: 950; letter-spacing: .03em; box-shadow: 0 10px 22px rgba(0, 0, 0, .35); }
+#logPopupLog:disabled { opacity: .35; }
+#logPopupLog:active { transform: scale(.97); }
+
+/* ── Standing still ───────────────────────────────────────────────────────
+   The dock's coin invites the lock once you have stopped walking in Track
+   (scene.dock.invite): one small bulge every few seconds, nothing while you
+   walk and nothing while you aim. It is a nudge for the flow of the round,
+   not a demand - the player may be waiting on the group ahead. */
+@keyframes dockInvite { 0%, 76%, 100% { transform: scale(1); } 83% { transform: scale(1.1); } 89% { transform: scale(.98); } 94% { transform: scale(1.03); } }
+#shotActionBtn.invite { animation: dockInvite 3.6s ease-in-out 1.4s infinite; }
+#shotActionBtn.invite:active { animation: none; }
+@media (prefers-reduced-motion: reduce) { #shotActionBtn.invite { animation: none; } }
+/* Walking: the club band empties, because the club it names was sized for
+   where you locked, and that is behind you now. The card keeps its height. */
+.shotCard.moving .cardClub { visibility: hidden; }
+/* The club recommended from where you are standing, before anything is
+   locked - quieter than a locked shot's club, since nothing is up yet. */
+.shotCard.suggested .cardClub { opacity: .82; }
+
+/* ── The picker's Shot logging switch ─────────────────────────────────── */
+.pickerLogToggle { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; margin-right: 10px; border: 0; padding: 6px 4px 6px 10px; border-radius: 999px;
+  background: rgba(255, 255, 255, .08); color: rgba(255, 255, 255, .8); font-size: 12px; font-weight: 800; }
+.pickerLogToggle.hiddenState { display: none; }
+.pickerLogKnob { position: relative; width: 34px; height: 20px; border-radius: 999px; background: rgba(255, 255, 255, .18); transition: background .15s ease; }
+.pickerLogKnob::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s ease, background .15s ease; }
+.pickerLogToggle[aria-pressed="true"] { color: #eafff1; }
+.pickerLogToggle[aria-pressed="true"] .pickerLogKnob { background: #1fd36d; }
+.pickerLogToggle[aria-pressed="true"] .pickerLogKnob::after { transform: translateX(14px); background: #06110b; }
+/* Logging on: the holes with something to log are the buttons; the rest
+   are the record, or nothing, and step back. */
+.holePickerGrid.logMode .holeTile { opacity: .38; }
+.holePickerGrid.logMode .holeTile.loggable, .holePickerGrid.logMode .holeTile.logged { opacity: 1; }
+.holePickerGrid.logMode .holeTile.loggable { box-shadow: inset 0 0 0 2px rgba(255, 182, 77, .75); }

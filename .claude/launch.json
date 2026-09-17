@@ -4,20 +4,43 @@
     {
       "name": "clarity-static",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "5173"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5173"
+      ],
       "port": 5173
     },
     {
       "name": "clarity-dist",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "5174", "-d", "dist"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5174",
+        "-d",
+        "dist"
+      ],
       "port": 5174
     },
     {
       "name": "clarity-api",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["netlify", "dev"],
+      "runtimeArgs": [
+        "netlify",
+        "dev"
+      ],
       "port": 8888
+    },
+    {
+      "name": "clarity-static-5177",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5177"
+      ],
+      "port": 5177
     }
   ]
 }

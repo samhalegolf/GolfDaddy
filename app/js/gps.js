@@ -48,10 +48,15 @@
       setStatus("pending");
       watchId = navigator.geolocation.watchPosition(
         function (position) {
+          /* speed: metres per second as the platform measured it, or null.
+             iOS reports -1 when it has no estimate; that is "unknown", not
+             "stopped", and the Marshal falls back to displacement over time. */
+          var speed = Number(position.coords.speed);
           lastFix = {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
-            accuracy: position.coords.accuracy
+            accuracy: position.coords.accuracy,
+            speed: Number.isFinite(speed) && speed >= 0 ? speed : null
           };
           setStatus("ok");
           listeners.forEach(function (fn) { try { fn(lastFix); } catch (e) {} });

@@ -57,10 +57,13 @@ function newRound(opts = {}) {
   return { m, effects };
 }
 
-/* Walk on to the course and press Play. Returns a marshal live on hole 1. */
+/* Walk on to the course and press Play. Returns a marshal live on hole 1.
+   Standing 35m short of the tee point: inside the arrival radius, outside
+   the tee zone, so Play lands in Track — the resting state most checks start
+   from. Pressing it FROM the tee zone locks the tee shot (its own checks). */
 function playing(opts = {}) {
   const r = newRound(opts);
-  r.m.signal("FIX_RECEIVED", { point: offsetM(TEE, -5, 0) });
+  r.m.signal("FIX_RECEIVED", { point: offsetM(TEE, 35, 0) });
   r.m.signal("PLAY_PRESSED");
   return r;
 }
@@ -70,7 +73,7 @@ function playing(opts = {}) {
    instead, which is the point of the change. */
 const TEES = { 1: TEE, 2: H2_TEE, 3: offsetM(TEE, -700, 0) };
 function walkTo(m, hole) {
-  m.signal("FIX_RECEIVED", { point: offsetM(TEES[hole], -4, 0) });
+  m.signal("FIX_RECEIVED", { point: offsetM(TEES[hole], 35, 0) });
   m.signal("VIEW_HOLE_CHANGED", { hole });
   assert.strictEqual(m.scene().playButton.show, true, `Play should be offered at hole ${hole}`);
   m.signal("PLAY_PRESSED");
@@ -120,13 +123,56 @@ check("Play is not offered until a trusted fix says you are at the course", () =
   assert.strictEqual(m.scene().flow, "preview");
 });
 
-check("Play starts the hole you are standing on, not the one on screen", () => {
-  const { m } = newRound();
-  m.signal("VIEW_HOLE_CHANGED", { hole: 3 });
+check("Play starts the nearest hole when no hole has been chosen", () => {
+  const { m } = newRound();                                       // opened on hole 1, not chosen
   m.signal("FIX_RECEIVED", { point: offsetM(H2_TEE, -5, 0) });   // standing on 2
+  assert.strictEqual(m.scene().playButton.hole, 2, "the button names the hole you are on");
   m.signal("PLAY_PRESSED");
   assert.strictEqual(m.scene().hole.number, 2);
   assert.strictEqual(m.scene().flow, "live");
+});
+
+/* The report: on the 1st green the nearest tee was the 9th, fine — but picking
+   hole 2 in the chooser still offered "Play hole 9". A hole the player went
+   and looked at is the hole they mean, as long as they are near it. */
+check("a hole chosen before the round wins over the nearest one", () => {
+  const { m } = newRound();
+  m.signal("FIX_RECEIVED", { point: offsetM(GREEN, 5, 0) });    // on the 1st green, by the 3rd tee... nearest is 2
+  assert.strictEqual(m.scene().playButton.hole, 2, "nearest wins until a hole is chosen");
+  m.signal("VIEW_HOLE_CHANGED", { hole: 3 });
+  assert.strictEqual(m.scene().playButton.hole, 3, "the chosen hole is offered");
+  m.signal("PLAY_PRESSED");
+  assert.strictEqual(m.scene().hole.number, 3);
+  assert.strictEqual(m.scene().flow, "live");
+});
+
+check("a chosen hole you are nowhere near falls back to the nearest", () => {
+  const far = { status: "lite-geo-ready", holes: PKG.holes.concat([
+    { holeNumber: 4, par: 4, tee: offsetM(TEE, -5000, 0), green: offsetM(TEE, -5300, 0), greenShape: [], route: [] }]) };
+  const { m } = newRound({ pkg: far, centre: TEE });
+  m.signal("FIX_RECEIVED", { point: offsetM(H2_TEE, -5, 0) });
+  m.signal("VIEW_HOLE_CHANGED", { hole: 4 });
+  assert.strictEqual(m.scene().playButton.hole, 2, "5km away is not a credible choice");
+});
+
+check("Play pressed from the tee box locks the tee shot straight away", () => {
+  const { m } = newRound();
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -5, 0) });      // on the tee
+  m.signal("PLAY_PRESSED");
+  const s = m.scene();
+  assert.strictEqual(s.flow, "live");
+  assert.strictEqual(s.mode, "aim", "locked in, nothing to press");
+  assert.strictEqual(s.bubble.show, true);
+  assert.ok(m.openShot(1), "the tee shot is open from the tee");
+});
+
+check("Play pressed from the fairway lands in Track, not locked", () => {
+  const { m } = newRound();
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -120, 0) });    // down the 1st, 120m off the tee
+  m.signal("PLAY_PRESSED");
+  assert.strictEqual(m.scene().flow, "live");
+  assert.strictEqual(m.scene().mode, "track", "no guess at where the shot is from");
+  assert.strictEqual(m.openShot(1), null);
 });
 
 check("looking at another hole is Preview; the live hole is untouched", () => {
@@ -289,12 +335,12 @@ check("Unlock keeps the shot in flight for Course Data", () => {
 
 check("Aim releases itself two fixes after you walk off the lock point", () => {
   const { m } = playing();
-  m.signal("LOCK");
-  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -20, 0) });   // 15m — still there
+  m.signal("LOCK");                                            // locked 35m short of the tee point
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, 20, 0) });    // 15m — still there
   assert.strictEqual(m.scene().mode, "aim");
-  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -60, 0) });   // away, 1 of 2
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -20, 0) });   // away, 1 of 2
   assert.strictEqual(m.scene().mode, "aim");
-  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -90, 0) });   // away, 2 of 2
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -50, 0) });   // away, 2 of 2
   assert.strictEqual(m.scene().mode, "track", "you hit and walked");
   assert.ok(m.openShot(1), "releasing the view never ends the shot");
 });
@@ -302,9 +348,9 @@ check("Aim releases itself two fixes after you walk off the lock point", () => {
 check("one wild fix does not release Aim", () => {
   const { m } = playing();
   m.signal("LOCK");
-  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -90, 0) });   // away, 1 of 2
-  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -8, 0) });    // back on the spot
-  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -90, 0) });   // away, 1 of 2 again
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -50, 0) });   // away, 1 of 2
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, 32, 0) });    // back on the spot
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -50, 0) });   // away, 1 of 2 again
   assert.strictEqual(m.scene().mode, "aim");
 });
 
@@ -363,46 +409,33 @@ check("Unlock is how you change your mind about where you are playing from", () 
 /* Placing yourself on the green means green focus, the same picture a fix
    arriving there gives you: a draggable ball and Shot End. Anything else would
    be a shot view whose start and target are the same point. */
-check("placing yourself on the green gives green focus", () => {
+/* Green focus is the logging popup now, and Preview has nothing to log — so
+   a tap on the green is inert rather than a bubble aiming at itself or a
+   popup with a dead button. */
+check("placing yourself on the green is inert in Preview", () => {
   const { m } = newRound();
-  const onGreen = offsetM(GREEN, 8, 4);
-  m.signal("PLACED", { point: onGreen });
+  assert.strictEqual(m.signal("PLACED", { point: offsetM(GREEN, 8, 4) }), false);
   const s = m.scene();
-  assert.strictEqual(s.mode, "finish");
-  assert.strictEqual(s.finish.show, true, "there is a ball to drag");
-  assert.strictEqual(s.finish.ball.lat.toFixed(5), onGreen.lat.toFixed(5));
-  assert.strictEqual(s.dock.face, "shotEnd");
-  assert.strictEqual(s.camera.stage, "green");
+  assert.strictEqual(s.mode, "setup");
+  assert.strictEqual(s.finish.show, false, "no ball, no popup");
   assert.strictEqual(s.bubble.show, false, "no bubble aiming at itself");
+  assert.strictEqual(s.startPill.show, true, "the pill is still up");
 });
 
-/* Green focus in Preview is a LOOK. Preview opens no shots, so there is never
-   anything for Shot End to close — and it must not reach across and close a
-   shot on a hole you are not standing on either. That is the picker's badge. */
-check("green focus in Preview writes nothing", () => {
+/* Preview opens no shots, so nothing it does can close one — and it must not
+   reach across and close a shot on a hole you are not standing on either.
+   That is the picker's badge. */
+check("Preview cannot log, whatever you tap", () => {
   const { m, effects } = playing();
   m.signal("LOCK");                        // hole 1 has an open shot
-  m.signal("VIEW_HOLE_CHANGED", { hole: 1 });
-  assert.strictEqual(m.scene().flow, "live", "still standing on hole 1");
   m.signal("VIEW_HOLE_CHANGED", { hole: 3 });
-  m.signal("PLACED", { point: offsetM(GREEN_3, 6, 0) });
-  assert.strictEqual(m.scene().mode, "finish");
-  m.signal("BALL_MOVED", { point: offsetM(GREEN_3, 2, 2) });
-  m.signal("FINISH_LOGGED");
+  assert.strictEqual(m.signal("PLACED", { point: offsetM(GREEN_3, 6, 0) }), false);
+  assert.strictEqual(m.signal("BALL_MOVED", { point: offsetM(GREEN_3, 2, 2) }), false);
+  assert.strictEqual(m.signal("FINISH_LOGGED"), false);
   assert.deepStrictEqual(m.shots(3), [], "nothing recorded on the hole you looked at");
   assert.strictEqual(m.openShot(1) !== null, true, "and nothing closed on the hole you left");
   assert.strictEqual(effects.completed.length, 0);
-  assert.strictEqual(m.scene().mode, "setup", "back to the resting state");
-});
-
-check("Back leaves Preview green focus with the pill up", () => {
-  const { m } = newRound();
-  m.signal("PLACED", { point: offsetM(GREEN, 5, 5) });
-  assert.strictEqual(m.signal("BACK"), true);
-  const s = m.scene();
-  assert.strictEqual(s.mode, "setup");
-  assert.strictEqual(s.finish.show, false);
-  assert.strictEqual(s.startPill.show, true, "nothing placed, so the pill is back");
+  assert.strictEqual(m.scene().mode, "setup");
 });
 
 check("Preview has no way into green focus at all", () => {
@@ -448,7 +481,7 @@ console.log("\n— the bag's roof on a dragged aim —");
 check("a live drag past the bag's reach stops at the roof, on the drag line", () => {
   const { m } = playing({ maxAimM: () => 250 });
   m.signal("LOCK");
-  const start = offsetM(TEE, -5, 0);            // the fix playing() locked from
+  const start = offsetM(TEE, 35, 0);            // the fix playing() locked from
   m.signal("AIM_DRAGGED", { point: offsetM(start, -400, 0) });
   const target = m.openShot(1).target;
   assert.ok(Math.abs(distanceLib.haversineMeters(start, target) - 250) < 0.5,
@@ -459,7 +492,7 @@ check("a live drag past the bag's reach stops at the roof, on the drag line", ()
 check("a drag within the bag's reach is untouched", () => {
   const { m } = playing({ maxAimM: () => 250 });
   m.signal("LOCK");
-  const asked = offsetM(offsetM(TEE, -5, 0), -180, 20);
+  const asked = offsetM(offsetM(TEE, 35, 0), -180, 20);
   m.signal("AIM_DRAGGED", { point: asked });
   assert.deepStrictEqual(m.openShot(1).target, asked);
 });
@@ -514,14 +547,55 @@ check("Finish is offered exactly when the hole has an open shot", () => {
    shot, so a hole played without locking anything never gave you the green at
    all — and the ball you are meant to drag was the only thing that could have
    put a score on the card. */
-check("arriving at the green opens focus with nothing outstanding at all", () => {
+/* The popup exists to place an outcome. A hole played without a lock has no
+   outcome to place, so arriving on its green stays in Track — and Hole done
+   is offered on position instead, since that is the one thing left to say. */
+check("arriving at the green with nothing outstanding stays in Track and offers Hole done", () => {
   const { m } = playing();
+  assert.strictEqual(m.scene().holeCompleteControl.show, false, "not from the tee");
   m.signal("FIX_RECEIVED", { point: offsetM(GREEN, 10, 0) });
   const s = m.scene();
-  assert.strictEqual(s.mode, "finish", "the green takes the screen");
-  assert.strictEqual(s.finish.show, true, "there is a ball to place");
-  assert.strictEqual(s.finish.canLog, false, "but nothing to write");
-  assert.strictEqual(s.camera.stage, "green");
+  assert.strictEqual(s.mode, "track", "nothing to log, so no popup");
+  assert.strictEqual(s.finish.show, false);
+  assert.strictEqual(s.holeCompleteControl.show, true, "but the hole can be called done");
+  assert.strictEqual(m.signal("HOLE_COMPLETED", { hole: 1 }), true);
+  assert.strictEqual(m.scene().mode, "complete");
+});
+
+check("arriving at the green with a shot open opens the popup with the ball where you stand", () => {
+  const { m } = playing();
+  m.signal("LOCK");
+  m.signal("FIX_RECEIVED", { point: offsetM(GREEN, 60, 0) });
+  m.signal("FIX_RECEIVED", { point: offsetM(GREEN, 50, 0) });     // aim released
+  assert.strictEqual(m.scene().mode, "track");
+  const here = offsetM(GREEN, 10, 0);
+  m.signal("FIX_RECEIVED", { point: here });
+  const s = m.scene();
+  assert.strictEqual(s.mode, "finish", "the popup opens");
+  assert.strictEqual(s.finish.canLog, true);
+  assert.strictEqual(s.finish.ball.lat.toFixed(6), here.lat.toFixed(6), "the ball starts on your fix");
+  assert.strictEqual(s.camera.stage, "hole", "the camera is left alone; the green is in the popup");
+});
+
+/* The whole of the guest rule: no account, no popup — not a popup whose one
+   button is refused. Lock and Unlock stay, because they are the rangefinder. */
+check("a rangefinder-only session never reaches green focus", () => {
+  const effects = { completed: [] };
+  const m = createMarshal({ canLogShots: () => false, now: () => 1000,
+    effects: { shotCompleted: (shot, meta) => effects.completed.push({ shot, meta }) } });
+  m.signal("ROUND_OPENED", { courseKey: "guest", pkg: PKG, centre: null, hole: 1 });
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -5, 0) });
+  m.signal("PLAY_PRESSED");
+  assert.strictEqual(m.scene().mode, "aim", "the tee shot still locks");
+  m.signal("FIX_RECEIVED", { point: offsetM(GREEN, 60, 0) });
+  m.signal("FIX_RECEIVED", { point: offsetM(GREEN, 50, 0) });
+  m.signal("FIX_RECEIVED", { point: offsetM(GREEN, 10, 0) });
+  assert.strictEqual(m.scene().mode, "track", "walking onto the green opens nothing");
+  assert.strictEqual(m.signal("FINISH_OPENED", { hole: 1 }), false, "Log shot is refused");
+  assert.strictEqual(m.signal("BALL_MOVED", { point: GREEN }), false, "a wearable ball placement opens nothing");
+  assert.strictEqual(m.signal("LOG_OPENED", { hole: 1 }), false, "and so is the picker's catch-up");
+  assert.strictEqual(m.scene().finish.show, false);
+  assert.strictEqual(effects.completed.length, 0);
 });
 
 /* The case this whole change is named after: chip on from inside the aim
@@ -563,6 +637,7 @@ check("the long approach still lands you on the green", () => {
    be remembered — and forgotten again once you have walked away. */
 check("a green focus closed by hand stays closed until you leave the green", () => {
   const { m } = playing();
+  m.signal("LOCK");                                             // something to log
   m.signal("FIX_RECEIVED", { point: offsetM(GREEN, 10, 0) });
   assert.strictEqual(m.scene().mode, "finish");
   m.signal("BACK");
@@ -578,6 +653,7 @@ check("a green focus closed by hand stays closed until you leave the green", () 
    number. The old rule blanked the card the moment focus opened. */
 check("green focus keeps a distance to the middle", () => {
   const { m } = playing();
+  m.signal("LOCK");
   m.signal("FIX_RECEIVED", { point: offsetM(GREEN, 30, 0) });
   const s = m.scene();
   assert.strictEqual(s.distances.show, true, "there is still a number to read");
@@ -591,14 +667,58 @@ check("green focus keeps a distance to the middle", () => {
 
 /* Shot End frames the actual landing area with the green, rather than always
    zooming back out to the full trigger band. */
-check("green focus frames the actual ball position tightly", () => {
+check("green focus does not move the camera", () => {
   const { m } = playing();
-  m.signal("FIX_RECEIVED", { point: offsetM(GREEN, 8, 0) });
+  m.signal("LOCK");
+  m.signal("FINISH_OPENED", { hole: 1 });
   const cam = m.scene().camera;
-  assert.strictEqual(cam.stage, "green");
-  assert.ok(cam.focus, "the camera is given the actual finish point");
-  const radius = distanceLib.haversineMeters(cam.focus, GREEN);
-  assert.ok(Math.abs(radius - 8) < 0.5, `the landing-area radius is 8m, got ${radius}`);
+  assert.strictEqual(m.scene().mode, "finish");
+  assert.strictEqual(cam.stage, "hole", "the popup carries its own picture of the green");
+});
+
+console.log("\n— moving and standing still —");
+
+check("walking hides the club; standing still invites the lock", () => {
+  const { m } = playing();
+  assert.strictEqual(m.scene().motion.moving, false, "nothing measured yet reads as still");
+  assert.strictEqual(m.scene().dock.invite, true, "Track, still, with a fix: the coin invites");
+  assert.strictEqual(m.scene().suggestion.show, true, "and a club is suggested from here");
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -10, 0), speed: 1.4 });
+  assert.strictEqual(m.scene().motion.moving, true, "a walking pace is moving");
+  assert.strictEqual(m.scene().dock.invite, false);
+  assert.strictEqual(m.scene().suggestion.show, false, "no club while walking");
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -12, 0), speed: 0.5 });
+  assert.strictEqual(m.scene().motion.moving, true, "slowing is not yet stopped (hysteresis)");
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -12, 0), speed: 0 });
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, -12, 0), speed: 0 });
+  assert.strictEqual(m.scene().motion.moving, false, "stopped");
+  assert.strictEqual(m.scene().dock.invite, true);
+});
+
+check("moving is measured from displacement when the platform reports no speed", () => {
+  let t = 1000;
+  const m = createMarshal({ now: () => t });
+  m.signal("ROUND_OPENED", { courseKey: "walk", pkg: PKG, centre: null, hole: 1 });
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, 35, 0) });
+  m.signal("PLAY_PRESSED");
+  t += 1000; m.signal("FIX_RECEIVED", { point: offsetM(TEE, 33.5, 0) });   // 1.5 m/s
+  t += 1000; m.signal("FIX_RECEIVED", { point: offsetM(TEE, 32, 0) });
+  assert.strictEqual(m.scene().motion.moving, true);
+  t += 1000; m.signal("FIX_RECEIVED", { point: offsetM(TEE, 32, 0) });     // 0 m/s
+  t += 1000; m.signal("FIX_RECEIVED", { point: offsetM(TEE, 32, 0) });
+  t += 1000; m.signal("FIX_RECEIVED", { point: offsetM(TEE, 32, 0) });
+  assert.strictEqual(m.scene().motion.moving, false);
+});
+
+check("aiming while walking keeps the shot but hides the club", () => {
+  const { m } = playing();
+  m.signal("LOCK");
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, 30, 0), speed: 1.3 });
+  const s = m.scene();
+  assert.strictEqual(s.mode, "aim", "inside the release radius the shot stays");
+  assert.strictEqual(s.bubble.show, true);
+  assert.strictEqual(s.motion.moving, true, "the Painter reads this to hide the club chip");
+  assert.strictEqual(s.dock.invite, false);
 });
 
 console.log("\n— the picker's marks —");
@@ -638,8 +758,10 @@ check("the open mark is the only way in, and it needs something to close", () =>
   assert.strictEqual(m.signal("LOG_OPENED", { hole: 1 }), true);
   assert.strictEqual(m.scene().flow, "logging", "its own flow, not Preview wearing a finish");
   assert.strictEqual(m.scene().mode, "finish");
-  assert.strictEqual(m.scene().camera.stage, "green");
+  assert.strictEqual(m.scene().camera.stage, "hole", "the popup carries the green; the camera stays");
   assert.ok(m.scene().finish.origin, "the origin is shown so you can reconstruct the shot");
+  assert.strictEqual(m.scene().finish.ball.lat.toFixed(6), GREEN.lat.toFixed(6),
+    "from the picker the ball starts on the green's centre, not on your fix");
 });
 
 check("logging records the outcome and puts you straight back", () => {
@@ -881,12 +1003,12 @@ check("the camera frames the hole, never the player", () => {
   assert.ok(!("player" in cam), "the player is not something the camera fits");
 });
 
-check("Aim frames the shot; Finish frames the green", () => {
+check("Aim frames the shot; Finish leaves the hole frame under the popup", () => {
   const { m } = playing();
   m.signal("LOCK");
   assert.strictEqual(m.scene().camera.stage, "shot");
   m.signal("FINISH_OPENED", { hole: 1 });
-  assert.strictEqual(m.scene().camera.stage, "green");
+  assert.strictEqual(m.scene().camera.stage, "hole");
 });
 
 console.log("\n— signals that do nothing say so —");

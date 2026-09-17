@@ -86,6 +86,17 @@
   var AIM_RELEASE_M = 30;
   var AIM_RELEASE_FIXES = 2;
 
+  /* Moving or standing still, read off the fixes. The dock's invitation to
+     lock and the club recommendation both key on standing still: nobody
+     chooses a club mid-stride, and a club sized for where you locked is stale
+     the moment you walk off it. Two thresholds rather than one, because one
+     flickers — a fix jittering across a single line would toggle the club
+     band on and off every second. The platform's own speed is used when it
+     reports one, displacement over time when it does not, and both are
+     smoothed so a single wild reading cannot flip the answer. */
+  var MOVING_START_MPS = 0.7;
+  var MOVING_STOP_MPS = 0.35;
+
   function pt(value) {
     if (!value || value.lat == null || value.lng == null) return null;
     var lat = Number(value.lat), lng = Number(value.lng);
@@ -179,6 +190,15 @@
        and the drag stays free rather than guessing at a roof. */
     var maxAimM = options.maxAimM || function () { return null; };
 
+    /* May this session log where shots finish? Injected, because it is an
+       account fact (access.js) and the Marshal never reads one. Everything
+       green focus does — the popup opening as you walk onto the green, the
+       ball, the catch-up from the picker — is a write to the round record, so
+       a rangefinder-only session gets none of it rather than a view whose
+       one button is refused. Default true keeps the transition table testable
+       with nothing injected. */
+    var canLogShots = typeof options.canLogShots === "function" ? options.canLogShots : function () { return true; };
+
     /* The dragged point, pulled back onto the roof along its own bearing when
        it lands beyond it. The clamp lives on the TARGET, not the rendered
        bubble centre — clamping the render is the old bag-roof bug that shifted
@@ -219,6 +239,16 @@
            not reopen while they are still standing inside the radius. Cleared
            by walking out past GREEN_RELEASE_M and by changing hole. */
         greenClosed: null,
+        /* Before the round, has the player deliberately looked at a hole (the
+           picker or the arrows)? Play then offers THAT hole when they have
+           arrived at it, rather than the nearest one — choosing hole 2 and
+           being handed "Play hole 9" is the app overruling a choice it was
+           just given. Cleared once the round is up; from then on Play always
+           means the hole on screen. */
+        viewChosen: false,
+        /* Standing still or walking, derived from the fixes (see
+           MOVING_START_MPS). Presentation reads `moving` and nothing else. */
+        motion: { speedMps: null, moving: false, lastPoint: null, lastAt: 0 },
         /* The third flow, and the ONLY way to log an outcome for a hole you are
            not standing on. Set by the picker's outstanding badge, cleared the
            moment it is logged or cancelled — it always remembers the hole to put
@@ -326,15 +356,50 @@
       if (S.live.hole === null || flow() !== "live") return false;
       if (S.live.mode === "finish" || S.live.mode === "logged" || S.live.mode === "complete") return false;
       if (S.greenClosed === S.live.hole) return false;
+      if (!canLogShots()) return false;
+      /* Green focus is the logging popup now, so it needs something to log:
+         a hole played without a lock has no outcome to place, and a popup
+         with a dead Log button is worse than none. Standing on the green with
+         nothing open leaves you in Track, where Hole done is offered on
+         position instead (holeCompleteControl). */
+      var open = openShot(S.live.hole);
+      if (!open) return false;
       var d = toGreen(point, S.live.hole);
       if (d === null || d > GREEN_FOCUS_M) return false;
       if (S.live.mode !== "aim") return true;
       /* Locked. The shot has to have been PLAYED before the green may take the
-         screen off it — see GREEN_APPROACH_M. A lock with no start is not a
-         shot to protect. */
-      var open = openShot(S.live.hole);
-      var fromLock = open ? toGreen(open.start, S.live.hole) : null;
+         screen off it — see GREEN_APPROACH_M. */
+      var fromLock = toGreen(open.start, S.live.hole);
       return fromLock !== null && (fromLock - d) >= GREEN_APPROACH_M;
+    }
+
+    /* Standing inside the green band, whatever is or is not open. */
+    function nearGreen(hole) {
+      var d = S.fix.point ? toGreen(S.fix.point, hole) : null;
+      return d !== null && d <= GREEN_FOCUS_M;
+    }
+
+    /* One fix's worth of "am I moving". The platform's speed when it gave
+       one, otherwise how far this fix is from the last over how long it
+       took; either way smoothed (half old, half new) and read through the
+       two thresholds so it cannot flicker. A fix with no usable sample
+       leaves the answer where it was. */
+    function updateMotion(point, reportedSpeed) {
+      var t = now();
+      var sample = null;
+      var speed = Number(reportedSpeed);
+      if (Number.isFinite(speed) && speed >= 0) sample = speed;
+      else if (S.motion.lastPoint && S.motion.lastAt) {
+        var dt = (t - S.motion.lastAt) / 1000;
+        var d = metres(S.motion.lastPoint, point);
+        if (dt >= 0.5 && d !== null) sample = d / dt;
+      }
+      S.motion.lastPoint = point;
+      S.motion.lastAt = t;
+      if (sample === null) return;
+      S.motion.speedMps = S.motion.speedMps === null ? sample : (S.motion.speedMps + sample) / 2;
+      if (S.motion.moving) { if (S.motion.speedMps < MOVING_STOP_MPS) S.motion.moving = false; }
+      else if (S.motion.speedMps >= MOVING_START_MPS) S.motion.moving = true;
     }
 
     /* Am I at the tee of this hole? Not "have I arrived in the area" — that is
@@ -365,7 +430,14 @@
        park. Once the round is running you are looking at a hole deliberately, so
        Play means THAT one, and it is only offered when you have arrived. */
     function playableHole() {
-      if (S.live.hole === null) return S.fix.point ? nearestHole(S.fix.point) : null;
+      if (S.live.hole === null) {
+        if (!S.fix.point) return null;
+        /* A hole the player went and looked at wins over the nearest one,
+           provided they are actually near it — the same arrival test the
+           mid-round override uses. */
+        if (S.viewChosen && atHole(S.viewHole)) return S.viewHole;
+        return nearestHole(S.fix.point);
+      }
       return S.viewHole;
     }
 
@@ -513,6 +585,7 @@
       S.finish = null;
       S.logged = null;
       S.greenClosed = null;
+      S.viewChosen = false;
       if (S.viewHole !== hole) enterHole(hole);
       syncEngine();
     }
@@ -524,10 +597,12 @@
        syncEngine() matters here: arriving on the green out of Aim has to put
        the bubble away, and the engine only learns that from this call. */
     function openFinish(hole, ball) {
+      if (!canLogShots()) return false;
       var keep = (S.finish && S.finish.hole === hole) ? S.finish.ball : null;
       S.finish = { hole: hole, ball: pt(keep) || pt(ball) || null, placed: false };
       setMode("finish");
       syncEngine();
+      return true;
     }
 
     function setScore(hole, strokes) {
@@ -600,6 +675,7 @@
           S.atCourse = true;
         }
         S.fix = { point: point, fresh: true, at: now() };
+        updateMotion(point, p && p.speed);
 
         /* Walked far enough off the green to have left it: whatever the player
            dismissed there is no longer the thing in front of them. */
@@ -665,6 +741,14 @@
         var hole = playableHole();
         if (!hole) return false;
         startHole(hole);
+        /* Pressed from the tee box, the shot is already in front of you:
+           there is nothing Lock would add except a second press, so the tee
+           shot is locked here and the bubble is up as the hole opens. Only
+           the tee zone earns this — Play pressed from the fairway (the
+           override for a tee the package has wrong, or a hole joined late)
+           lands in Track, because where you are standing is not where you
+           are about to hit from with any certainty. */
+        if (inTeeZone(hole)) lockAt(S.fix.point, null);
         return true;
       },
 
@@ -675,6 +759,7 @@
         S.finish = null;
         S.logged = null;
         S.greenClosed = null;
+        S.viewChosen = false;
         if (typeof fx.roundEnded === "function") { try { fx.roundEnded(); } catch (e) {} }
         return true;
       },
@@ -688,6 +773,7 @@
         S.logging = null;
         S.logged = null;
         S.finish = null;
+        if (S.live.hole === null) S.viewChosen = true;
         enterHole(hole);
         if (flow() === "preview") S.preview = { mode: "setup", placement: null, target: null };
         syncEngine();
@@ -767,24 +853,15 @@
         if (!point) return false;
         var r = rec();
 
-        /* Placing yourself ON the green means green focus, the same as walking
-           onto it with a fix does — same 40m, same picture, same draggable ball
-           and Shot End. Anything else would be a shot view whose start and
-           target are the same point: a bubble aiming at itself.
-
-           View only. Preview opens no shots, so Shot End here writes nothing
-           unless the hole already has an origin waiting for an outcome, which
-           FINISH_LOGGED decides on its own terms. The placement is deliberately
-           NOT set — leaving Preview with nothing placed means Back returns you
-           to the resting state with the pill up (§5). */
+        /* Placing yourself ON the green is not a shot: a bubble whose start
+           and target are the same point aims at itself, and the engine answers
+           it with the shortest club thrown past the green by the bag roof. It
+           used to open green focus as a look; green focus is the logging
+           popup now, and Preview has nothing to log (§3), so the tap is
+           simply inert here. Logging a hole you are not on is the picker's
+           badge, and only that. */
         var onGreen = r && r.green ? metres(point, r.green) : null;
-        if (onGreen !== null && onGreen <= GREEN_FOCUS_M) {
-          S.finish = { hole: S.viewHole, ball: point, placed: true };
-          S.preview.target = null;
-          S.preview.mode = "finish";
-          syncEngine();
-          return true;
-        }
+        if (onGreen !== null && onGreen <= GREEN_FOCUS_M) return false;
 
         S.preview.placement = point;
         S.preview.target = pt(defaultTarget(point, r));
@@ -882,10 +959,11 @@
         if (flow() !== "live" || hole !== S.live.hole) return false;
         if (!openShot(hole)) return false;
         /* Asking for it by hand un-dismisses it, or the button would appear to
-           do nothing on a green the player closed a moment ago. */
+           do nothing on a green the player closed a moment ago. The ball starts
+           where you are standing, which is the honest first guess for a shot
+           you have just walked up to. */
         S.greenClosed = null;
-        openFinish(hole, player());
-        return true;
+        return openFinish(hole, player());
       },
 
       /* The picker's outstanding badge: "hole 4 has an origin and no outcome —
@@ -897,18 +975,19 @@
          catching up on is the outcome of an approach you already locked, and a
          retro-add would be a second, unverifiable way for shots to exist.
 
-         The ball starts wherever there is a real answer to start it — your fix
-         if you have one, otherwise the green — so there is always something to
-         drag rather than an empty green. */
+         The ball starts on the green's centre. This route is taken from the
+         picker, for a hole you are typically nowhere near, so your fix says
+         nothing about where that shot finished — the middle of the green is
+         the one neutral place to pick it up from. */
       LOG_OPENED: function (p) {
         var hole = Number((p && p.hole) != null ? p.hole : S.viewHole);
-        if (!Number.isFinite(hole) || !openShot(hole)) return false;
+        if (!Number.isFinite(hole) || !openShot(hole) || !canLogShots()) return false;
         var r = holeRecord(S.round.pkg, hole);
         S.finish = null;
         S.logged = null;
         S.logging = {
           hole: hole,
-          ball: S.fix.point || (r && r.green) || null,
+          ball: (r && r.green) || S.fix.point || null,
           placed: false,
           from: S.viewHole
         };
@@ -926,7 +1005,7 @@
            reached the green on its own fix gets its answer accepted by a phone
            asleep in a bag with a stale one. Live only: Preview reaches green
            focus by tapping, and a tap that missed must not become a placement. */
-        if (!S.finish && flow() === "live" && S.live.hole !== null) openFinish(S.live.hole, point);
+        if (!S.finish && flow() === "live" && S.live.hole !== null && openShot(S.live.hole)) openFinish(S.live.hole, point);
         if (!S.finish) return false;
         S.finish.ball = point;
         S.finish.placed = true;
@@ -1072,6 +1151,7 @@
       S.logging = null;
       S.logged = null;
       S.finish = null;
+      if (S.live.hole === null) S.viewChosen = true;
       enterHole(next);
       if (flow() === "preview") S.preview = { mode: "setup", placement: null, target: null };
       syncEngine();
@@ -1190,7 +1270,25 @@
         dock: {
           show: m === "aim" || m === "finish" || (live && m === "track" && !!S.fix.point),
           face: m === "finish" ? "shotEnd" : (m === "aim" ? "unlock" : "lock"),
-          canShotEnd: live && m === "aim" && !!S.fix.point
+          canShotEnd: live && m === "aim" && !!S.fix.point,
+          /* Resting in Track and standing still: the moment Lock is the thing
+             to press, said with a small animation on the coin rather than a
+             prompt. Walking, or already aiming, it is quiet. */
+          invite: live && m === "track" && !!S.fix.point && !S.motion.moving
+        },
+
+        /* Walking or not. The club recommendation hides while moving in
+           either flow — a club sized for where you locked is stale the moment
+           you walk off it — and comes back with the honest one once you stop. */
+        motion: { moving: !!S.motion.moving },
+
+        /* The club for the shot in front of you, before you have locked it:
+           Track, standing still, with a green to play to. The Painter asks
+           the engine what it would recommend from here; nothing is opened,
+           nothing is recorded, and the bubble stays down until you Lock. */
+        suggestion: {
+          show: live && m === "track" && !!S.fix.point && !S.motion.moving && !!(r && r.green),
+          start: (live && S.fix.point) ? { lat: S.fix.point.lat, lng: S.fix.point.lng } : null
         },
 
         /* The button that OPENS green focus for the hole you are on, offered
@@ -1244,7 +1342,7 @@
            be called done. Not on the Logged screen: that screen has its own
            button and already offers this as its `next` — a second control
            behind a full-screen overlay is a control nobody can press. */
-        holeCompleteControl: { show: live && m === "finish" },
+        holeCompleteControl: { show: live && (m === "finish" || (m === "track" && nearGreen(S.live.hole))) },
 
         /* The card. `marks` is per hole: `done` outcomes recorded and `open`
            origins still waiting for one, so the picker can draw 0 for something
@@ -1258,19 +1356,12 @@
            fitted in — a fix that does not land on screen is edge-clamped by the
            Painter instead (§6). */
         camera: {
-          stage: m === "finish" ? "green" : (aiming ? "shot" : "hole"),
+          /* Green focus no longer takes the camera: the green is drawn inside
+             the logging popup at its own scale, over whatever the hole stage
+             was showing, so closing the popup costs no re-solve. */
+          stage: aiming ? "shot" : "hole",
           hole: r,
           shot: aimShot,
-          /* A point the green-focus camera must include. It is the actual ball
-             when one exists, so the landing area gets the tightest truthful
-             frame rather than an unconditional 40m overview. */
-          /* Fit the actual finish point with the green instead of always
-             framing the full 40m trigger band. A ball on or beside the green
-             now gets the tight landing-area view; an honest fix near the edge
-             still remains in frame. With no ball, keep a compact fallback. */
-          focus: (m === "finish" && r && r.green)
-            ? ((S.finish && S.finish.ball) || (S.logging && S.logging.ball) || distance.project(r.green, 0, 22))
-            : null,
           /* The course centre, so a hole with no tee or green still has
              somewhere to point the map — and so the basemap can be chosen at
              all, which is what keeps the imagery attribution on screen. */
@@ -1393,7 +1484,8 @@
       shots: function (hole) { return (S.shots[hole] || []).slice(); },
       openShot: openShot,
       constants: { AT_COURSE_M: AT_COURSE_M, GREEN_FOCUS_M: GREEN_FOCUS_M, GREEN_RELEASE_M: GREEN_RELEASE_M, GREEN_APPROACH_M: GREEN_APPROACH_M,
-        TEE_ZONE_M: TEE_ZONE_M, HOLE_ARRIVAL_M: HOLE_ARRIVAL_M, AIM_RELEASE_M: AIM_RELEASE_M, AIM_RELEASE_FIXES: AIM_RELEASE_FIXES }
+        TEE_ZONE_M: TEE_ZONE_M, HOLE_ARRIVAL_M: HOLE_ARRIVAL_M, AIM_RELEASE_M: AIM_RELEASE_M, AIM_RELEASE_FIXES: AIM_RELEASE_FIXES,
+        MOVING_START_MPS: MOVING_START_MPS, MOVING_STOP_MPS: MOVING_STOP_MPS }
     };
   }
 
