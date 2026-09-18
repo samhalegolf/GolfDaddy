@@ -5835,6 +5835,35 @@
      hundreds of kilobytes fetched twice for one result. The shared promise
      resolves to {store,error} so each caller still applies its own
      throwOnError rather than inheriting another caller's error handling. */
+  /* Mirrors PLAY_SUBSET_MAX in functions/course-maps.mjs. Above this the full
+     read is the cheaper request anyway. */
+  const PUBLISHED_SUBSET_SYNC_MAX=24;
+  /* The named courses in play scope, or null when the server did not answer a
+     subset - an older server answers the whole library to this URL, and that
+     must not be merged as if it were the subset, so the caller then takes the
+     full path it always took.
+
+     A request that FAILS is thrown, exactly as the full pull throws, and is
+     never followed by a second pull. Falling back to the whole library on a
+     failed subset would turn one failed request into two during an outage,
+     which is the amplification that kept the database down on 18 Sep 2026.
+     An answer that says the database was unavailable is handled the way the
+     full path handles it: nothing merges, the store stands. */
+  async function fetchPublishedCourseSubset(courseIds){
+    const res=await fetch(PUBLISHED_COURSE_API+'?scope=play&courseIds='+encodeURIComponent(courseIds.join(',')),{headers:{Accept:'application/json'},cache:'no-store'});
+    if(!res.ok){
+      const error=new Error(`Course map lookup failed (${res.status})`);
+      error.status=res.status;
+      throw error;
+    }
+    const data=await res.json();
+    if(!data||data.partial!==true||!data.courses)return null;
+    /* A subset's updatedAt is the newest of ITS rows, which may be older than
+       what the store already holds; the store's stamp must not go backwards. */
+    const held=String(loadPublishedStore().updatedAt||'');
+    if(held&&(!data.updatedAt||String(data.updatedAt)<held))data.updatedAt=held;
+    return data;
+  }
   let publishedSyncInFlight=null;
   async function syncPublishedCourseMaps(opts={}){
     if(opts.force!==true&&publishedSyncInFlight){
@@ -5872,6 +5901,23 @@
         if(freshness.checked&&!freshness.stale.length&&!freshness.missing.length){
           try{renderCourseLibraryPanel();}catch(e){}
           return loadPublishedStore();
+        }
+        /* The manifest named what changed, so ask for that and nothing else. The
+           whole library is ~12 MB of geometry; two republished courses are a few
+           hundred kilobytes. Every phone whose manifest went stale in the same
+           minute used to pull the whole library at once, and that burst is what
+           stalled the database on 18 Sep 2026. A fresh install (everything
+           missing) or a failed subset read still takes the full path below. */
+        if(freshness.checked){
+          const wanted=freshness.stale.concat(freshness.missing).filter(Boolean);
+          if(wanted.length&&wanted.length<=PUBLISHED_SUBSET_SYNC_MAX){
+            const subset=await fetchPublishedCourseSubset(wanted);
+            if(subset){
+              const merged=mergePublishedStore(subset);
+              try{renderCourseLibraryPanel();}catch(e){}
+              return merged;
+            }
+          }
         }
       }
       const res=await fetch(PUBLISHED_COURSE_API+'?scope=play',{headers:{Accept:'application/json'},cache:'no-store'});

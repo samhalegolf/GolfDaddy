@@ -58,6 +58,17 @@ function stubFetch(world) {
       return jsonResponse(200, world.patchedRows || []);
     }
     calls.reads.push(rest);
+    /* The counts view, derived from the same rows the way the database does it
+       (supabase/migrations: course_maps_list), so a world only ever describes
+       its geometry once. */
+    if (table === "course_maps_list") {
+      return jsonResponse(200, (world.maps || []).map((row) => ({
+        course_id: row.course_id,
+        published: row.published,
+        hole_count: Object.keys(row.holes_json || {}).length,
+        object_count: Object.keys(row.objects_json || {}).length
+      })));
+    }
     if (table === "course_maps") return jsonResponse(200, world.maps || []);
     if (table === "course_visuals") return jsonResponse(200, world.visuals || []);
     if (table === "course_mapper_jobs") {

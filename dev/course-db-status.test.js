@@ -126,7 +126,11 @@ test("the jobs endpoint answers for every course in one request", () => {
 
 test("the bulk and single forms use one vocabulary", () => {
   /* Two status vocabularies would let a row and its detail panel disagree. */
-  const single = jobsSrc.slice(jobsSrc.indexOf("async function mapperBuildState(courseId)"), jobsSrc.indexOf("async function mapperBuildState(courseId)") + 1400);
+  /* The whole function, not a fixed number of characters: the states sit at its
+     end, after the reads and their reasons. */
+  const singleStart = jobsSrc.indexOf("async function mapperBuildState(courseId)");
+  const singleEnd = jobsSrc.indexOf("\n}\n", singleStart) + 3;
+  const single = jobsSrc.slice(singleStart, singleEnd);
   const bulk = jobsSrc.slice(jobsSrc.indexOf("async function mapperBuildStateAll()"), jobsSrc.indexOf("async function mapperBuildState(courseId)"));
   ["geometry-ready", "running", "queued", "failed", "none"].forEach(function (state) {
     assert.ok(single.includes('"' + state + '"'), "single form lost state: " + state);

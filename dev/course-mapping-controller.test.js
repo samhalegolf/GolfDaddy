@@ -346,7 +346,11 @@ function loadController(options = {}) {
         calls.order.push("course-maps-get");
         if (options.courseMapsFails) throw Object.assign(new Error("database pull failed"), { status: 502 });
         const holes = options.courseMapsHoles === undefined ? 0 : options.courseMapsHoles;
-        return { ok: true, status: 200, json: async () => publishedCourseMap(holes) };
+        /* scope=play&courseIds=... answers the named courses and says so, the
+           way functions/course-maps.mjs does; the fixture holds one course, so
+           the subset and the whole library are the same rows. */
+        const partial = href.includes("courseIds=");
+        return { ok: true, status: 200, json: async () => Object.assign(publishedCourseMap(holes), partial ? { partial: true } : {}) };
       }
       /* The library manifest the client now checks before pulling full course
          payloads. Reports the same version the published fixture carries, so a

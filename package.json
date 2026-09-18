@@ -33,6 +33,7 @@
     "test:boot": "node dev/boot-smoke.test.js",
     "test:supabase-retry": "node dev/supabase-retry.test.js",
     "test:course-maps-scope": "node dev/course-maps-list-scope.test.js",
+    "test:course-db-load": "node dev/course-db-load.test.js",
     "test:course-versions": "node dev/course-versions.test.js",
     "test:course-version-label": "node dev/course-version-label.test.js",
     "test:course-snapshots": "node dev/course-snapshots.test.js",

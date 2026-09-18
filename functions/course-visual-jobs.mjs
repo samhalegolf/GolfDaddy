@@ -6,6 +6,9 @@
    selects a course with no frames and the build starts. No recipe may be passed on this path.
    GET ?courseId=... -> recent jobs plus a derived build state for that course, readable by
    players so the app can poll cheaply while it plays over live tiles.
+   GET with no courseId -> the same derived state for EVERY course, one row each, for the
+   Studio Course Database (courseBuildStateAll below). Same derivation as the single form so
+   a row and its detail panel cannot disagree.
    The worker itself is functions/course-visual-worker-background.mjs. */
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import courseVersionLabel from "../scripts/gd-course-version-label.js";
@@ -136,18 +139,103 @@ async function courseBuildState(courseId) {
   ]);
   const jobs = Array.isArray(jobRows) ? jobRows : [];
   const visual = Array.isArray(visualRows) ? visualRows[0] : null;
+  const map = Array.isArray(mapRows) ? mapRows[0] || null : null;
+  /* The mapper queue is consulted only on the none branch, so the common states cost nothing
+     extra per poll - see shapeBuildState for what "mapping" means. */
+  let mapping = false;
+  if (deriveCourseBuildStateFromRows({ jobs, visual }).state === "none") {
+    const mapper = await supabaseFetch(MAPPER_JOBS_TABLE + "?select=id&course_id=eq." + encodeURIComponent(courseId) + "&status=in.(queued,running)&limit=1").catch(() => []);
+    mapping = Array.isArray(mapper) && mapper.length > 0;
+  }
+  return shapeBuildState({ jobs, visual, map, mapping });
+}
+
+/* Every course's build state in three reads.
+ *
+ * The Studio Course Database draws a status chip on every row, and each chip
+ * used to ask GET ?courseId=... for itself: three Supabase reads per course,
+ * every 30 seconds per row (5 while a build was live), for 48 courses. That is
+ * the "sync" traffic that filled PostgREST's connection pool on 18 Sep 2026
+ * whenever anything slow (a 12 MB library read) was already in it - the polls
+ * queued, timed out, were retried, and the pile-up outlived the read that
+ * started it.
+ *
+ * This answers the same question for the whole table at once: one read of the
+ * visuals, one of recent jobs, one of the maps' revisions, one of the mapper
+ * queue. The per-course derivation is shared with courseBuildState, so a row
+ * and its detail panel say the same thing. The rows omit the `jobs` array the
+ * single form carries - a table does not show job history.
+ *
+ * Jobs are read newest-first under a cap, so a course whose jobs all fall
+ * outside it derives from none - "frames-ready" or "none", never a wrong
+ * error. The cap is a real limit and is reported when hit. */
+const BULK_JOB_SCAN_LIMIT = 2000;
+const JOBS_PER_COURSE = 8;
+
+async function courseBuildStateAll() {
+  const [visualRows, jobRows, mapRows, mapperRows] = await Promise.all([
+    supabaseFetch(VISUALS_TABLE + "?select=course_id,published_version,bake_number,bake_objects_revision,current_version,status,updated_at&limit=2000").catch(() => []),
+    supabaseFetch(TABLE + "?select=course_id,id,kind,status,error,result,created_at,updated_at&order=created_at.desc&limit=" + BULK_JOB_SCAN_LIMIT).catch(() => []),
+    supabaseFetch(MAPS_TABLE + "?select=course_id,objects_revision&published=eq.true&limit=2000").catch(() => []),
+    supabaseFetch(MAPPER_JOBS_TABLE + "?select=course_id&status=in.(queued,running)&limit=500").catch(() => [])
+  ]);
+  const visuals = new Map();
+  (Array.isArray(visualRows) ? visualRows : []).forEach((row) => {
+    const id = String(row && row.course_id || "");
+    if (id && !visuals.has(id)) visuals.set(id, row);
+  });
+  const jobsByCourse = new Map();
+  const jobs = Array.isArray(jobRows) ? jobRows : [];
+  jobs.forEach((job) => {
+    const id = String(job && job.course_id || "");
+    if (!id) return;
+    const list = jobsByCourse.get(id) || [];
+    if (list.length < JOBS_PER_COURSE) list.push(job);
+    jobsByCourse.set(id, list);
+  });
+  const maps = new Map();
+  (Array.isArray(mapRows) ? mapRows : []).forEach((row) => {
+    const id = String(row && row.course_id || "");
+    if (id && !maps.has(id)) maps.set(id, row);
+  });
+  const mapping = new Set();
+  (Array.isArray(mapperRows) ? mapperRows : []).forEach((row) => {
+    const id = String(row && row.course_id || "");
+    if (id) mapping.add(id);
+  });
+
+  const ids = new Set([...visuals.keys(), ...jobsByCourse.keys(), ...maps.keys()]);
+  const courses = {};
+  ids.forEach((id) => {
+    const state = shapeBuildState({
+      jobs: jobsByCourse.get(id) || [],
+      visual: visuals.get(id) || null,
+      map: maps.get(id) || null,
+      mapping: mapping.has(id)
+    });
+    delete state.jobs;
+    courses[id] = state;
+  });
+  return {
+    courses,
+    counted: ids.size,
+    truncated: jobs.length >= BULK_JOB_SCAN_LIMIT
+  };
+}
+
+/* The single-course state, from rows already in hand. courseBuildState reads
+   the rows for one course and courseBuildStateAll reads them for every course;
+   both hand them here, so there is exactly one place that turns rows into the
+   vocabulary the app and the Studio read. */
+function shapeBuildState({ jobs, visual, map, mapping }) {
   const derived = deriveCourseBuildStateFromRows({ jobs, visual });
   const live = derived.live;
   let state = derived.state;
   /* "none" while the AutoMapper is still resolving this course is unfinished truth: the
      mapper worker chains the snapshot itself when geometry lands (chainVisualSnapshot in
      course-mapper-worker-background.mjs), so a client that hears "mapping" keeps its watch
-     alive and catches the frames-ready that follows - where "none" would rightly end it.
-     Read only on the none branch, so the common states cost nothing extra per poll. */
-  if (state === "none") {
-    const mapper = await supabaseFetch(MAPPER_JOBS_TABLE + "?select=id&course_id=eq." + encodeURIComponent(courseId) + "&status=in.(queued,running)&limit=1").catch(() => []);
-    if (Array.isArray(mapper) && mapper.length) state = "mapping";
-  }
+     alive and catches the frames-ready that follows - where "none" would rightly end it. */
+  if (state === "none" && mapping) state = "mapping";
   /* A worker heartbeats after every capture and every hole, so silence is the only honest
      signal that an invocation died - status stays "running" on a process that is gone. The
      reaper needs 6 minutes to be sure; the UI wants to say "this looks stuck" well before
@@ -155,9 +243,14 @@ async function courseBuildState(courseId) {
   const stalledSeconds = live && live.updated_at
     ? Math.max(0, Math.round((Date.now() - new Date(live.updated_at).getTime()) / 1000))
     : null;
+  const version = courseVersionLabel.courseVersion({
+    bakeNumber: visual ? visual.bake_number : null,
+    objectsRevision: map ? map.objects_revision : null,
+    bakeObjectsRevision: visual ? visual.bake_objects_revision : null
+  });
   return {
     state,
-    hasGeometry: Array.isArray(mapRows) && mapRows.length > 0,
+    hasGeometry: !!map,
     /* Reported even while a rebuild runs: frames stay playable during a re-export. */
     framesReady: derived.framesReady,
     /* framesVersion is the legacy number and stays wired to published_version so nothing
@@ -165,15 +258,7 @@ async function courseBuildState(courseId) {
        1977), so the Studio shows framesVersionLabel instead. See
        supabase/migrations/20260918_add_course_visual_bake_number.sql. */
     framesVersion: visual ? Number(visual.published_version) || null : null,
-    framesVersionLabel: (() => {
-      const map = Array.isArray(mapRows) ? mapRows[0] || null : null;
-      const version = courseVersionLabel.courseVersion({
-        bakeNumber: visual ? visual.bake_number : null,
-        objectsRevision: map ? map.objects_revision : null,
-        bakeObjectsRevision: visual ? visual.bake_objects_revision : null
-      });
-      return version ? version.label : null;
-    })(),
+    framesVersionLabel: version ? version.label : null,
     building: !!live,
     activeKind: live ? live.kind : null,
     checkpoint: derived.checkpoint,
@@ -196,7 +281,7 @@ export default async function courseVisualJobs(req) {
   if (req.method === "GET") {
     const url = new URL(req.url);
     const courseId = slug(url.searchParams.get("courseId") || url.searchParams.get("course_id"));
-    if (!courseId) return json(400, { error: "courseId required" });
+    if (!courseId) return json(200, await courseBuildStateAll());
     return json(200, Object.assign({ courseId }, await courseBuildState(courseId)));
   }
 

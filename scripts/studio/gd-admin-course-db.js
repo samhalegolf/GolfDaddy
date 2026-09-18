@@ -282,7 +282,7 @@ function gdAdminCourseDbWithDetail(course){
 /* Refresh means refresh. The versions come from a different endpoint than the courses do,
    so refreshing only the course list would leave a freshly rebuilt course showing the
    version it had before the rebuild - the exact thing this button is pressed to check. */
-function gdRefreshAdminCourseDbCloud(){gdLoadAdminCourseDbCloud({force:true});gdLoadAdminCourseVersions({force:true});return false;}
+function gdRefreshAdminCourseDbCloud(){gdLoadAdminCourseDbCloud({force:true});gdLoadAdminCourseVersions({force:true});gdLoadAdminCourseBuildStates({force:true});return false;}
 function gdAdminCourseDbCloudStatusMarkup(){
   const state=gdAdminCourseDbCloudState;
   const count=gdAdminCourseDbCloud?Object.keys(gdAdminCourseDbCloud.courses||{}).length:0;
@@ -3135,37 +3135,109 @@ function gdAdminCourseCloudLatestJob(courseId){
     .catch(()=>{});
   return entry&&entry.job||null;
 }
-/* Build state for the progress bar, polled from /api/course-visual-jobs. Separate from the
+/* Build state for the progress bar, from /api/course-visual-jobs. Separate from the
    job-list cache above because it refreshes far more often while a build is live: a bar that
-   updates once every 20 seconds is a bar you cannot tell is stuck. */
+   updates once every 20 seconds is a bar you cannot tell is stuck.
+
+   Two reads, deliberately. The TABLE reads one snapshot of every course's state
+   (gdLoadAdminCourseBuildStates, GET with no courseId): one request for the whole screen,
+   every 30 seconds, 5 while anything is building. Only the SELECTED course asks for itself
+   (GET ?courseId=...), because its bar is the one being watched. Each row used to ask for
+   itself - three Supabase reads per row per poll, for every row on the screen - and that
+   per-row polling is what kept PostgREST's connection pool full on 18 Sep 2026 once one slow
+   read had started the queue: polls timed out, were asked again on the next render, and the
+   pile-up outlived the read that began it. A poll that fails now waits a full minute before
+   it is asked again, and one that is still in flight is never asked twice. */
 const gdAdminCourseBuildStateCache={};
 let gdAdminCourseBuildTimer=null;
+let gdAdminCourseBuildStates=null;          // {courseId: state} for every course, one request
+let gdAdminCourseBuildStatesAt=0;
+let gdAdminCourseBuildStatesInflight=null;
+let gdAdminCourseBuildStatesLive=false;     // any course building: poll the snapshot faster
+const GD_ADMIN_BUILD_POLL_LIVE_MS=5000;
+const GD_ADMIN_BUILD_POLL_IDLE_MS=30000;
+const GD_ADMIN_BUILD_POLL_FAILED_MS=60000;
+function gdLoadAdminCourseBuildStates(opts){
+  opts=opts||{};
+  if(typeof fetch!=="function")return Promise.resolve(null);
+  if(gdAdminCourseBuildStatesInflight&&!opts.force)return gdAdminCourseBuildStatesInflight;
+  const maxAge=gdAdminCourseBuildStatesLive?GD_ADMIN_BUILD_POLL_LIVE_MS:GD_ADMIN_BUILD_POLL_IDLE_MS;
+  if(!opts.force&&gdAdminCourseBuildStatesAt&&Date.now()-gdAdminCourseBuildStatesAt<maxAge)return Promise.resolve(gdAdminCourseBuildStates);
+  gdAdminCourseBuildStatesInflight=fetch("/api/course-visual-jobs",{headers:{Accept:"application/json"},cache:"no-store"})
+    .then(res=>res.ok?res.json():null)
+    .then(data=>{
+      if(!data||!data.courses||typeof data.courses!=="object")return gdAdminCourseBuildStates;
+      const previous=gdAdminCourseBuildStates||{};
+      gdAdminCourseBuildStates=data.courses;
+      gdAdminCourseBuildStatesLive=Object.keys(data.courses).some(id=>{
+        const state=data.courses[id];
+        return !!(state&&(state.building||state.state==="queued"));
+      });
+      /* Frames just landed - drop the frame cache so the preview shows the new bake. */
+      Object.keys(data.courses).forEach(id=>{
+        const state=data.courses[id];
+        const before=previous[id];
+        if(state&&state.framesReady&&(!before||!before.framesReady)){
+          delete gdAdminCourseCloudFramesCache[id];
+          delete gdAdminCourseCloudFramesSuppressed[id];
+        }
+      });
+      return gdAdminCourseBuildStates;
+    })
+    .catch(()=>gdAdminCourseBuildStates)
+    .finally(()=>{
+      /* A failure cools down too, or the next render would ask again at once. */
+      gdAdminCourseBuildStatesAt=Date.now();
+      gdAdminCourseBuildStatesInflight=null;
+      try{gdRenderAdminCourseDatabase();}catch(e){}
+    });
+  return gdAdminCourseBuildStatesInflight;
+}
 function gdAdminCourseBuildState(courseId){
   courseId=String(courseId||"");
   if(!courseId)return null;
-  const entry=gdAdminCourseBuildStateCache[courseId];
   const nowMs=Date.now();
+  const bulk=gdAdminCourseBuildStates&&gdAdminCourseBuildStates[courseId]||null;
+  /* A row that is not the selected course reads the table snapshot and never asks for
+     itself. Its own last answer, if it was once selected, stands in until the snapshot
+     lands. */
+  if(courseId!==gdAdminCourseDatabaseSelected){
+    gdLoadAdminCourseBuildStates();
+    if(bulk)return bulk;
+    const cached=gdAdminCourseBuildStateCache[courseId];
+    return cached&&cached.state||null;
+  }
+  const entry=gdAdminCourseBuildStateCache[courseId];
+  const known=entry&&entry.state||bulk||null;
+  if(entry&&entry.inflight)return known;
   /* Poll hard while something is moving, back off to a heartbeat when it is not - an idle
-     course database should not be talking to the server every five seconds. */
-  const live=entry&&entry.state&&(entry.state.building||entry.state.state==="queued");
-  const maxAge=live?5000:30000;
-  if(entry&&nowMs-entry.fetchedAt<maxAge)return entry.state||null;
-  gdAdminCourseBuildStateCache[courseId]={fetchedAt:nowMs,state:entry&&entry.state||null};
+     course database should not be talking to the server every five seconds - and wait a
+     full minute after a failure rather than joining a queue that is already too long. */
+  const live=known&&(known.building||known.state==="queued");
+  const maxAge=entry&&entry.failedAt?GD_ADMIN_BUILD_POLL_FAILED_MS:(live?GD_ADMIN_BUILD_POLL_LIVE_MS:GD_ADMIN_BUILD_POLL_IDLE_MS);
+  if(entry&&nowMs-entry.fetchedAt<maxAge)return known;
+  gdAdminCourseBuildStateCache[courseId]={fetchedAt:nowMs,state:entry&&entry.state||null,inflight:true};
+  const settle=state=>{
+    const slot=gdAdminCourseBuildStateCache[courseId]||{};
+    if(!state){
+      gdAdminCourseBuildStateCache[courseId]={fetchedAt:Date.now(),failedAt:Date.now(),state:slot.state||null};
+      return;
+    }
+    const previous=slot.state;
+    gdAdminCourseBuildStateCache[courseId]={fetchedAt:Date.now(),state};
+    if(gdAdminCourseBuildStates)gdAdminCourseBuildStates[courseId]=state;
+    /* Frames just landed - drop the frame cache so the preview shows the new bake. */
+    if(state.framesReady&&(!previous||!previous.framesReady)){
+      delete gdAdminCourseCloudFramesCache[courseId];
+      delete gdAdminCourseCloudFramesSuppressed[courseId];
+    }
+    if(gdAdminCourseDatabaseSelected===courseId)gdRenderAdminCourseDatabase();
+  };
   fetch("/api/course-visual-jobs?courseId="+encodeURIComponent(courseId),{headers:{Accept:"application/json"},cache:"no-store"})
     .then(res=>res.ok?res.json():null)
-    .then(state=>{
-      if(!state)return;
-      const previous=gdAdminCourseBuildStateCache[courseId]&&gdAdminCourseBuildStateCache[courseId].state;
-      gdAdminCourseBuildStateCache[courseId]={fetchedAt:Date.now(),state};
-      /* Frames just landed - drop the frame cache so the preview shows the new bake. */
-      if(state.framesReady&&(!previous||!previous.framesReady)){
-        delete gdAdminCourseCloudFramesCache[courseId];
-        delete gdAdminCourseCloudFramesSuppressed[courseId];
-      }
-      if(gdAdminCourseDatabaseSelected===courseId)gdRenderAdminCourseDatabase();
-    })
-    .catch(()=>{});
-  return entry&&entry.state||null;
+    .then(settle)
+    .catch(()=>settle(null));
+  return known;
 }
 /* Keeps the bar moving while a build runs. Re-rendering is what re-reads the state, so without
    a tick the bar only advances when the admin happens to click something. */

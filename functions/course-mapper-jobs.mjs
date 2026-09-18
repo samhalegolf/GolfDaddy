@@ -104,12 +104,40 @@ const supabaseFetch = createSupabaseFetch({
 
 function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
 
+/* Two shapes, one answer. A course_maps row carries the geometry itself; a
+   course_maps_list row carries the view's counts of it (object_count,
+   hole_count). The counts are what the state reads now - see LIST_VIEW below -
+   but a row that still arrives with the payload is judged the same way, so a
+   caller that has the geometry in hand need not fetch the counts to ask. */
 function hasGeometryPayload(map) {
   if (!map) return false;
+  const objectCount = Number(map.object_count);
+  const holeCount = Number(map.hole_count);
+  if (Number.isFinite(objectCount) || Number.isFinite(holeCount)) {
+    return (Number.isFinite(objectCount) && objectCount > 0) || (Number.isFinite(holeCount) && holeCount > 0);
+  }
   const objects = map.objects_json && typeof map.objects_json === "object" ? map.objects_json : {};
   const holes = map.holes_json && typeof map.holes_json === "object" ? map.holes_json : {};
   return Object.keys(objects).length > 0 || Object.keys(holes).length > 0;
 }
+
+/* Whether a course has geometry is answered from the counts view, never from
+   the geometry itself.
+ *
+ * mapperBuildStateAll used to read objects_json and holes_json for every
+ * published course - about 12 MB of JSON, serialised by Postgres and shipped
+ * to this function - purely to ask Object.keys(...).length > 0 per row. The
+ * Studio asks this endpoint on load and every 5 seconds while any bar is
+ * live, so during a build it was a 12 MB read every 5 seconds. Alongside the
+ * phone's library sync that was enough to fill PostgREST's connection pool;
+ * every other read (the picker's course package, the row status polls, the
+ * Studio list itself) then queued behind it until it timed out, and the
+ * Studio fell back to its local cache (18 Sep 2026, 08:13-08:27 UTC).
+ *
+ * course_maps_list computes object_count and hole_count in the database from
+ * the same two columns, so the answer is identical and the read is a few
+ * hundred bytes. */
+const LIST_VIEW = "course_maps_list";
 
 /* Derived from what EXISTS over what the job queue last said, same reasoning as
    course-visual-jobs.mjs's courseBuildState: a course with published geometry is playable
@@ -160,7 +188,7 @@ const isMappingJob = job => !MAINTENANCE_KINDS.has(String(job && job.kind || "au
 async function mapperBuildStateAll() {
   const [jobRows, mapRows] = await Promise.all([
     supabaseFetch(TABLE + "?select=course_id,kind,status,error,result,mapper_version,created_at,updated_at&order=created_at.desc&limit=" + BULK_JOB_SCAN_LIMIT).catch(() => []),
-    supabaseFetch(MAPS_TABLE + "?select=course_id,published,geometry_version,objects_json,holes_json&limit=2000").catch(() => [])
+    supabaseFetch(LIST_VIEW + "?select=course_id,published,hole_count,object_count&limit=2000").catch(() => [])
   ]);
   const jobs = Array.isArray(jobRows) ? jobRows : [];
   const maps = Array.isArray(mapRows) ? mapRows : [];
@@ -235,12 +263,20 @@ async function mapperBuildStateAll() {
 }
 
 async function mapperBuildState(courseId) {
-  const [jobRows, mapRows] = await Promise.all([
+  const [jobRows, mapRows, countRows] = await Promise.all([
     supabaseFetch(TABLE + "?select=id,kind,status,error,result,mapper_version,created_at,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&order=created_at.desc&limit=8").catch(() => []),
-    supabaseFetch(MAPS_TABLE + "?select=course_id,published,geometry_version,objects_json,holes_json&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1").catch(() => [])
+    supabaseFetch(MAPS_TABLE + "?select=course_id,published,geometry_version&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1").catch(() => []),
+    /* Counts from the view rather than the geometry from the table - see LIST_VIEW. The
+       app polls this while a course maps, and each poll was a full copy of the map. */
+    supabaseFetch(LIST_VIEW + "?select=course_id,hole_count,object_count&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1").catch(() => [])
   ]);
   const jobs = Array.isArray(jobRows) ? jobRows : [];
-  const map = Array.isArray(mapRows) ? mapRows[0] : null;
+  const mapRow = Array.isArray(mapRows) ? mapRows[0] : null;
+  const countRow = Array.isArray(countRows) ? countRows[0] : null;
+  const map = mapRow ? Object.assign({}, mapRow, {
+    hole_count: countRow ? countRow.hole_count : 0,
+    object_count: countRow ? countRow.object_count : 0
+  }) : null;
   /* Mapping jobs only - see OBJECT_COLLECTION_KIND. `jobs` still carries every kind for the
      admin history, which is the one place the enrichment runs SHOULD be visible. */
   const mapping = jobs.filter(isMappingJob);

@@ -92,8 +92,18 @@ export default async function courseMaps(req) {
     if (scope === "full") return json(200, await readMaps());
 
     /* ?scope=play is what the phone's library sync and the course picker ask
-       for - the full record minus collected surfaces for a ready course. */
-    if (scope === "play") return json(200, stripSurfacesForPlay(await readMaps()));
+       for - the full record minus collected surfaces for a ready course.
+
+       With courseIds=a,b,c it answers only those courses. The phone already
+       asks /api/course-library which of its courses are stale or missing
+       before it syncs; until now the answer to "two courses changed" was
+       still every course's geometry, 12 MB, and every phone asked for it at
+       once whenever anything was republished. */
+    if (scope === "play") {
+      const wanted = requestedCourseIds(params);
+      if (wanted.length) return json(200, stripSurfacesForPlay(await readSomeCourses(wanted)));
+      return json(200, stripSurfacesForPlay(await readMaps()));
+    }
 
     return json(200, await readList());
   }
@@ -305,6 +315,47 @@ export function stripSurfacesForPlay(maps) {
 
 function emptyMaps() {
   return { version: 1, courses: {}, updatedAt: null, storage: "empty" };
+}
+
+/* A named subset of the library, in full: the courses a phone's manifest check
+   found stale or missing. Same row shape as readMaps, so stripSurfacesForPlay
+   and the phone's merge treat the two identically; `partial` says which this
+   was, so a client never mistakes "these three" for "all of them". */
+const PLAY_SUBSET_MAX = 40;
+function requestedCourseIds(params) {
+  const raw = String(params.get("courseIds") || params.get("course_ids") || "");
+  const ids = [];
+  raw.split(",").forEach((part) => {
+    /* slug() here answers "course" for nothing, which would turn an absent
+       parameter into a one-course subset. */
+    if (!String(part || "").trim()) return;
+    const id = slug(part);
+    if (id && ids.indexOf(id) < 0) ids.push(id);
+  });
+  return ids.slice(0, PLAY_SUBSET_MAX);
+}
+
+async function readSomeCourses(courseIds) {
+  const requested = courseIds.slice();
+  if (!hasSupabase()) {
+    return Object.assign(emptyMaps(), { storage: "supabase", unavailable: true, partial: true, requested,
+      warnings: [{ storage: "supabase", message: "Supabase is not configured" }] });
+  }
+  try {
+    const list = requested.map((id) => '"' + id.replace(/"/g, "") + '"').join(",");
+    const rows = await supabaseFetch(
+      TABLE + "?select=" + FULL_COLUMNS + "&published=eq.true&course_id=in.(" + list + ")&limit=" + PLAY_SUBSET_MAX,
+      { method: "GET" }
+    );
+    const maps = mapsFromSupabaseRows(rows);
+    maps.partial = true;
+    maps.requested = requested;
+    return maps;
+  } catch (error) {
+    console.warn("course map subset read failed", error && (error.body || error.message) || error);
+    return Object.assign(emptyMaps(), { storage: "supabase", unavailable: true, partial: true, requested,
+      warnings: [{ storage: "supabase", message: storageMessage(error) }] });
+  }
 }
 
 async function readMaps() {
