@@ -147,6 +147,51 @@ test("an object-only course is v0.n, and an uncountable one is named not at all"
   });
 });
 
+test("COURSE_NAME_VERSION_TAG folds the version into the name, and is off by default", async () => {
+  const course = Object.assign({}, COURSE, { objects_revision: 5 });
+  const visuals = [{ course_id: "takapuna-golf-course", published_version: 1977, bake_number: 2, bake_objects_revision: 3, status: "published" }];
+
+  await withEnv(async () => {
+    const r = await callHandler({ course_maps: [course], course_visuals: visuals });
+    assert.strictEqual(r.body.courses[0].course_name, "Takapuna Golf Course",
+      "default: the name is the real name - it ends up in round records and scorecards");
+    assert.strictEqual(r.body.nameVersionTag, false);
+  });
+
+  /* The switch exists for one job: an already-shipped app build draws every other string
+     on its Course Library card on the device, so the name is the only channel the server
+     has to tell that build which version it is holding. */
+  process.env.COURSE_NAME_VERSION_TAG = "1";
+  try {
+    await withEnv(async () => {
+      const r = await callHandler({ course_maps: [course], course_visuals: visuals });
+      assert.strictEqual(r.body.courses[0].course_name, "Takapuna Golf Course (v2.2)");
+      assert.strictEqual(r.body.nameVersionTag, true);
+    });
+
+    /* No version to tag with - the name must stay clean rather than gain empty brackets. */
+    await withEnv(async () => {
+      const legacy = Object.assign({}, COURSE, { objects_revision: null });
+      const r = await callHandler({ course_maps: [legacy], course_visuals: [] });
+      assert.strictEqual(r.body.courses[0].course_name, "Takapuna Golf Course");
+    });
+  } finally {
+    delete process.env.COURSE_NAME_VERSION_TAG;
+  }
+
+  /* A var left at "false" or "0" while debugging must not tag anything. */
+  for (const value of ["false", "0", "", "no"]) {
+    process.env.COURSE_NAME_VERSION_TAG = value;
+    try {
+      await withEnv(async () => {
+        const r = await callHandler({ course_maps: [course], course_visuals: visuals });
+        assert.strictEqual(r.body.courses[0].course_name, "Takapuna Golf Course",
+          "COURSE_NAME_VERSION_TAG=" + JSON.stringify(value) + " must not tag");
+      });
+    } finally { delete process.env.COURSE_NAME_VERSION_TAG; }
+  }
+});
+
 test("a course with no Clarity map reports null, not an error", async () => {
   await withEnv(async () => {
     const r = await callHandler({ course_maps: [COURSE], course_visuals: [] });

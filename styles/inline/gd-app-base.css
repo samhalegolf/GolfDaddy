@@ -436,6 +436,9 @@
    as distinct from a real zero. */
 .gdAdminCourseMuted{opacity:.45;font-variant-numeric:tabular-nums;cursor:help;}
 .gdAdminCourseCaret{display:inline-block;width:9px;color:rgba(255,255,255,.4);font-size:9px}
+    /* The published version of a course map - "v2.0", "v0.1", and W-v1.0 for a Watch
+       package. Monospace and tabular so a column of them lines up digit under digit. */
+.gdAdminCourseVersion{font:11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;color:rgba(226,240,230,.82);white-space:nowrap}
     .gdAdminCourseTable tr.expanded{background:rgba(31,211,109,.075)}
     .gdAdminCourseTable tr.expanded .gdAdminCourseCaret{color:#1fd36d}
     .gdAdminCourseTable tr.gdAdminCourseDiagRowHost{cursor:default;background:rgba(0,0,0,.22)}

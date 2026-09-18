@@ -141,11 +141,12 @@ test("a course with a published full package reports full-map-ready even while a
   });
   const result = await buildCoursePackage("pupuke");
   assert.strictEqual(result.status, "full-map-ready", "a published package stays playable while a rebuild runs in the background");
-  /* bake_number, NOT published_version. published_version is 1977 in this fixture on
-     purpose - that is the shape of the real akarana row, hash digits rather than a count
-     - and a package that reported it would hand the freshness check a number that can go
-     down on the next bake. */
-  assert.strictEqual(result.packageVersion, 3);
+  /* packageVersion is FROZEN on published_version - hash digits and all - because an
+     older client saves it here and compares what it saved against /api/course-library's
+     clarity_map_version, which is the same column. Reporting bake_number here while the
+     manifest reported published_version made every already-installed client read as
+     permanently "Update available". bake_number travels as its own field instead. */
+  assert.strictEqual(result.packageVersion, 1977);
   assert.strictEqual(result.bakeNumber, 3);
   assert.strictEqual(result.objectsRevision, 6);
   /* Bake 3, made from geometry revision 4, sitting on a course now at revision 6: two

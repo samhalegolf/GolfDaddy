@@ -203,6 +203,46 @@ function gdLoadAdminCourseDbCloud(opts){
     .finally(()=>{gdAdminCourseDbCloudInflight=null;gdRenderAdminCourseDatabase();});
   return gdAdminCourseDbCloudInflight;
 }
+/* Map VERSIONS for the whole table, from /api/course-library.
+ *
+ * A separate read from /api/course-maps above because the version is assembled from two
+ * tables - course_maps.objects_revision and course_visuals.bake_number/bake_objects_revision -
+ * and /api/course-library is the endpoint that already joins them and applies the naming
+ * rule (scripts/gd-course-version-label.js). Asking it once for every course is one small
+ * request; deriving the label here would be a second implementation of the scheme, which is
+ * exactly what that shared file exists to prevent.
+ *
+ * Fails soft and silently: a table that cannot name its versions still lists its courses,
+ * and a column of "—" is the honest answer rather than a blocked render. */
+let gdAdminCourseVersions=null;
+let gdAdminCourseVersionsInflight=null;
+function gdLoadAdminCourseVersions(opts){
+  opts=opts||{};
+  if(gdAdminCourseVersionsInflight&&!opts.force)return gdAdminCourseVersionsInflight;
+  if(typeof fetch!=="function")return Promise.resolve(null);
+  gdAdminCourseVersionsInflight=fetch("/api/course-library",{headers:{Accept:"application/json"},cache:"no-store"})
+    .then(res=>{if(!res.ok)throw new Error("HTTP "+res.status);return res.json();})
+    .then(body=>{
+      const rows=(body&&Array.isArray(body.courses))?body.courses:[];
+      const byId={};
+      rows.forEach(row=>{if(row&&row.course_id)byId[String(row.course_id)]=row;});
+      gdAdminCourseVersions=byId;
+      return byId;
+    })
+    .catch(()=>null)
+    .finally(()=>{gdAdminCourseVersionsInflight=null;gdRenderAdminCourseDatabase();});
+  return gdAdminCourseVersionsInflight;
+}
+/* "v2.0" for a course row, or "" when this course has no countable version yet - a course
+   the manifest does not carry (unpublished), or one whose geometry revision predates the
+   counter. Matched on the course key as well as the id because the table's two identifiers
+   are the same string for a published course and there is no reason to depend on which. */
+function gdAdminCourseVersionLabel(item){
+  if(!gdAdminCourseVersions||!item)return "";
+  const row=gdAdminCourseVersions[String(item.key||"")]||gdAdminCourseVersions[String(item.id||"")];
+  return row&&typeof row.version_label==="string"?row.version_label:"";
+}
+
 /* Geometry for ONE course, fetched when its row is opened.
  *
  * The list response carries no objects or holes - see functions/course-maps.mjs
@@ -239,7 +279,10 @@ function gdAdminCourseDbWithDetail(course){
   const detail=gdAdminCourseDbDetail[String(course.courseId||course.id||"")];
   return detail?Object.assign({},course,detail,{courseKey:course.courseKey||course.courseId}):course;
 }
-function gdRefreshAdminCourseDbCloud(){gdLoadAdminCourseDbCloud({force:true});return false;}
+/* Refresh means refresh. The versions come from a different endpoint than the courses do,
+   so refreshing only the course list would leave a freshly rebuilt course showing the
+   version it had before the rebuild - the exact thing this button is pressed to check. */
+function gdRefreshAdminCourseDbCloud(){gdLoadAdminCourseDbCloud({force:true});gdLoadAdminCourseVersions({force:true});return false;}
 function gdAdminCourseDbCloudStatusMarkup(){
   const state=gdAdminCourseDbCloudState;
   const count=gdAdminCourseDbCloud?Object.keys(gdAdminCourseDbCloud.courses||{}).length:0;
@@ -4423,10 +4466,16 @@ function gdAdminCourseDbExpandedRow(item){
     gdAdminCourseDbDiagRow("Location",Number.isFinite(Number(lat))&&Number.isFinite(Number(lng))?Number(lat).toFixed(5)+", "+Number(lng).toFixed(5)+(place?"  ("+place+")":""):"not set"),
     gdAdminCourseDbDiagRow("Last mapping run",job?(job.lastJobStatus||job.state)+(job.lastJobKind?" ("+job.lastJobKind+")":""):"none recorded"),
     gdAdminCourseDbDiagRow("Run finished",job&&job.lastJobAt?gdCoursePlayDebugTime(job.lastJobAt):"—"),
+    /* Two different "versions" sit next to each other on purpose. Mapper version is which
+       ALGORITHM resolved the geometry; Map version is which PUBLICATION of this course you
+       are looking at. Confusing the two is how "v2" ended up meaning three things. */
     gdAdminCourseDbDiagRow("Mapper version",job&&job.mapperVersion),
+    gdAdminCourseDbDiagRow("Map version",gdAdminCourseVersionLabel(item)||"not versioned yet"),
     gdAdminCourseDbDiagRow("Updated",gdCoursePlayDebugTime(item.updatedAt)||"unknown")
   ].join("");
-  return `<tr class="gdAdminCourseDiagRowHost"><td colspan="7"><div class="gdAdminCourseDiag">${banner}${progressBar}<div class="gdAdminCourseDiagGrid">${diag}</div>${gdAdminCourseDbActionRail(item)}</div></td></tr>`;
+  /* colspan tracks the header above - 8 since the Version column joined it. A stale number
+     here silently narrows the expanded panel rather than erroring. */
+  return `<tr class="gdAdminCourseDiagRowHost"><td colspan="8"><div class="gdAdminCourseDiag">${banner}${progressBar}<div class="gdAdminCourseDiagGrid">${diag}</div>${gdAdminCourseDbActionRail(item)}</div></td></tr>`;
 }
 
 /* A full panel rebuild reconstructs the whole detail pane, tuning dock included,
@@ -4461,6 +4510,7 @@ function gdRenderAdminCourseDatabaseNow(){
   /* Cheap and cached for 20s. Without it a course with no geometry can only be
      described as "empty" - the queue is the only thing that knows it failed. */
   if(!gdAdminCourseDbJobsAt&&!gdAdminCourseDbJobsInflight)gdLoadAdminCourseDbJobs().then(()=>gdRenderAdminCourseDatabase());
+  if(!gdAdminCourseVersions&&!gdAdminCourseVersionsInflight)gdLoadAdminCourseVersions();
   gdAdminCourseDbSetHTML(summary,gdAdminCourseDbCloudStatusMarkup());
   const all=gdAdminCourseDbSummaries();
   const search=String(document.getElementById("gdAdminCourseDbSearch")?.value||"").trim().toLowerCase();
@@ -4477,16 +4527,17 @@ function gdRenderAdminCourseDatabaseNow(){
     gdAdminCourseDbSetHTML(detail,"");
     return;
   }
-  gdAdminCourseDbSetHTML(list,filtered.length?`<div class="gdAdminCourseTableWrap"><table class="gdAdminCourseTable"><thead><tr><th>Course</th><th>Status</th><th>Sync</th><th>Holes</th><th>Play</th><th>Visual Engine</th><th>Updated</th></tr></thead><tbody>${filtered.map(item=>{
+  gdAdminCourseDbSetHTML(list,filtered.length?`<div class="gdAdminCourseTableWrap"><table class="gdAdminCourseTable"><thead><tr><th>Course</th><th>Version</th><th>Status</th><th>Sync</th><th>Holes</th><th>Play</th><th>Visual Engine</th><th>Updated</th></tr></thead><tbody>${filtered.map(item=>{
     const visual=gdAdminCourseDbVisualState(item.id);
     /* The displayed status, not the stored one - see gdAdminCourseDbStatusFor. */
     const status=gdAdminCourseDbStatusFor(item);
     const statusTone=gdAdminCourseDbStatusTone(status,["published","ready","play_data_ready","mapped_geometry_ready"]);
     const syncTone=gdAdminCourseDbStatusTone(item.syncStatus,["synced","cloud","ready"]);
+    const version=gdAdminCourseVersionLabel(item);
     const active=item.id===gdAdminCourseDatabaseSelected?" active":"";
     const open=item.id===gdAdminCourseDbExpanded;
     const caret=open?"▾":"▸";
-    const row=`<tr class="${active}${open?" expanded":""}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${caret}</span> ${gdEscapeHTML(item.name)}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(status)}</span></td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${item.playReadyCount==null?"<span class=\"gdAdminCourseMuted\" title=\"Open the row to load this course's geometry\">\u2014</span>":gdEscapeHTML(item.playReadyCount)+"/"+gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
+    const row=`<tr class="${active}${open?" expanded":""}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${caret}</span> ${gdEscapeHTML(item.name)}</td><td>${version?`<span class="gdAdminCourseVersion">${gdEscapeHTML(version)}</span>`:`<span class="gdAdminCourseMuted" title="No countable version yet - this course has not been rebuilt since versions existed">\u2014</span>`}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(status)}</span></td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${item.playReadyCount==null?"<span class=\"gdAdminCourseMuted\" title=\"Open the row to load this course's geometry\">\u2014</span>":gdEscapeHTML(item.playReadyCount)+"/"+gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
     return open?row+gdAdminCourseDbExpandedRow(item):row;
   }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current search.</div>');
   const selected=filtered.find(item=>item.id===gdAdminCourseDatabaseSelected);

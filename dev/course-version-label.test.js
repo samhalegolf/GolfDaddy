@@ -128,7 +128,91 @@ test("frame updates are decided by bake_number, not by the hash digits that prec
     "a copy saved before bake numbers cannot be compared against one, so it re-downloads ONCE and gains a number");
 });
 
+// ------------------------------------------------- naming a version for old builds
+
+test("the name tag is off unless explicitly switched on", async () => {
+  const tag = await import("../functions/lib/gd-course-name-version-tag.mjs");
+  const version = { label: "v2.0" };
+  assert.strictEqual(tag.taggedCourseName("Akarana Golf Club", version, false), "Akarana Golf Club");
+  assert.strictEqual(tag.taggedCourseName("Akarana Golf Club", version, true), "Akarana Golf Club (v2.0)");
+  assert.strictEqual(tag.taggedCourseName("Akarana Golf Club", null, true), "Akarana Golf Club",
+    "no version to tag with means the real name, never empty brackets");
+
+  const saved = process.env.COURSE_NAME_VERSION_TAG;
+  try {
+    for (const on of ["1", "true", "on", "TRUE"]) {
+      process.env.COURSE_NAME_VERSION_TAG = on;
+      assert.strictEqual(tag.nameVersionTagEnabled(), true, on + " must enable it");
+    }
+    /* A var left at "false"/"0" while debugging must not quietly rename every course. */
+    for (const off of ["false", "0", "", "no", "off"]) {
+      process.env.COURSE_NAME_VERSION_TAG = off;
+      assert.strictEqual(tag.nameVersionTagEnabled(), false, JSON.stringify(off) + " must NOT enable it");
+    }
+  } finally {
+    if (saved === undefined) delete process.env.COURSE_NAME_VERSION_TAG;
+    else process.env.COURSE_NAME_VERSION_TAG = saved;
+  }
+});
+
+test("a tagged name must not reach mergeWithLibrary - it would double the course", async () => {
+  /* The hazard, demonstrated rather than asserted about. mergeWithLibrary decides that an
+     OSM course and a mapped course are the same place by comparing the slugs of their
+     names. Tag the name first and that match fails, so the picker lists the course twice:
+     once as mapped, once as an unmapped OSM footprint. */
+  const { mergeWithLibrary } = await import("../functions/lib/gd-courses-near-core.mjs");
+  const osm = [{ name: "Akarana Golf Club", lat: -36.88, lng: 174.74, distanceM: 10 }];
+  const anchor = { lat: -36.88, lng: 174.74 };
+
+  const clean = mergeWithLibrary(osm, [
+    { course_id: "akarana-golf-club", course_name: "Akarana Golf Club", course_lat: -36.88, course_lng: 174.74, hole_count: 18 }
+  ], anchor);
+  assert.strictEqual(clean.length, 1, "untagged: one course, recognised as already mapped");
+
+  const tagged = mergeWithLibrary(osm, [
+    { course_id: "akarana-golf-club", course_name: "Akarana Golf Club (v2.0)", course_lat: -36.88, course_lng: 174.74, hole_count: 18 }
+  ], anchor);
+  assert.ok(tagged.length >= clean.length,
+    "tagging before the merge can only ever add rows, never remove them");
+});
+
+test("courses-near tags AFTER merging, and the tag costs nothing when off", () => {
+  const src = fs.readFileSync(path.join(root, "functions", "courses-near.mjs"), "utf8");
+  const mergeAt = src.indexOf("mergeWithLibrary(osmCourses, library, anchor)");
+  const tagAt = src.indexOf("tagVersionNames(merged, library)");
+  assert.ok(mergeAt > 0 && tagAt > mergeAt,
+    "the version tag must be applied to the MERGED list, never to the library rows the merge matches on");
+  assert.ok(/tagNames \? await tagVersionNames/.test(src),
+    "the extra course_visuals read must only happen when the switch is on");
+});
+
+test("both download paths name a course the same way", () => {
+  /* /api/course-library feeds the app shell's picker, /api/courses-near feeds the older
+     shell's "Find course". A course downloaded through one must not be named differently
+     from the same course downloaded through the other, so both go through one helper. */
+  ["functions/course-library.mjs", "functions/courses-near.mjs"].forEach(file => {
+    const src = fs.readFileSync(path.join(root, file), "utf8");
+    assert.ok(/gd-course-name-version-tag\.mjs/.test(src), file + " must use the shared tag helper");
+    assert.ok(/taggedCourseName\(/.test(src), file + " must name courses through it");
+  });
+});
+
 // -------------------------------------------------------------- the wiring
+
+test("the legacy version pair stays self-consistent for already-installed clients", () => {
+  /* A client saves `packageVersion` from /api/course-package and compares what it saved
+     against /api/course-library's `clarity_map_version`. Both must keep reading the same
+     column, or every installed build reads as permanently "Update available" and
+     re-downloading cannot clear it. This is not cosmetic - it regressed once already. */
+  const shape = fs.readFileSync(path.join(root, "functions", "lib", "gd-course-package-shape.mjs"), "utf8");
+  const manifest = fs.readFileSync(path.join(root, "functions", "course-library.mjs"), "utf8");
+  assert.ok(/packageVersion:\s*visual\.published_version/.test(shape),
+    "course-package's packageVersion must stay on published_version");
+  assert.ok(/clarity_map_version:\s*visual\s*\?\s*integer\(visual\.published_version\)/.test(manifest),
+    "the manifest's clarity_map_version must stay on published_version - it is the other half of that pair");
+  assert.ok(/bakeNumber:\s*visual\.bake_number/.test(shape),
+    "the real counter travels as its own field instead");
+});
 
 test("the shared core is pinned for the functions bundle", () => {
   const toml = fs.readFileSync(path.join(root, "netlify.toml"), "utf8");
@@ -190,10 +274,12 @@ test("both shells agree on who the operator is", () => {
     "the two shells share the account store but no code - their admin lists must not drift");
 });
 
-let failed = 0;
-checks.forEach(([name, fn]) => {
-  try { fn(); console.log("  ok  " + name); }
-  catch (error) { failed++; console.log("  FAIL  " + name + "\n        " + (error && error.message)); }
-});
-if (failed) { console.log("course-version-label FAILED: " + failed + " of " + checks.length); process.exit(1); }
-console.log("course-version-label passed: " + checks.length + " checks");
+(async () => {
+  let failed = 0;
+  for (const [name, fn] of checks) {
+    try { await fn(); console.log("  ok  " + name); }
+    catch (error) { failed++; console.log("  FAIL  " + name + "\n        " + (error && error.message)); }
+  }
+  if (failed) { console.log("course-version-label FAILED: " + failed + " of " + checks.length); process.exit(1); }
+  console.log("course-version-label passed: " + checks.length + " checks");
+})();

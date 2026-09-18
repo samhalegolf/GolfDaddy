@@ -221,12 +221,18 @@ export function shapeFullPackage(map, visual, mapperJobs) {
   return addReadinessMetadata({
     courseId: map.course_id,
     status: "full-map-ready",
-    /* packageVersion has always been the visual's version number and stays that, but it
-       now carries bake_number - the real publish counter - instead of published_version,
-       which was the digits scraped out of a content hash and was neither monotonic nor
-       meaningful (akarana read 1977). Clients compare this against what they hold; a
-       number that could go DOWN on a re-bake is why frame updates were being missed. */
-    packageVersion: visual.bake_number || null,
+    /* packageVersion keeps carrying published_version, unchanged, and MUST.
+       It is one half of a pair: a client saves packageVersion from here and then compares
+       what it saved against /api/course-library's clarity_map_version, which is also
+       published_version. Moving this to bake_number while that stayed put broke the pair -
+       every client running the older code saved 2 and compared it against 13, so the
+       course read as "Update available" permanently and re-downloading could not clear it.
+       Installed native builds are exactly those clients, so this field is frozen.
+
+       bake_number rides alongside as its own field. Clients that know about it prefer it
+       (app/js/course-versions.js) and get a counter that actually counts; clients that do
+       not keep the self-consistent pair they were built against. */
+    packageVersion: visual.published_version || null,
     bakeNumber: visual.bake_number || null,
     objectsRevision: Number.isFinite(Number(map.objects_revision)) ? Number(map.objects_revision) : null,
     versionLabel: version ? version.label : null,

@@ -15,6 +15,9 @@
  * so the library can update one without the other and show "objects current,
  * new Clarity map available".
  *
+ * COURSE_NAME_VERSION_TAG=1 additionally folds the version into course_name - see
+ * lib/gd-course-name-version-tag.mjs for what that switch is for and why it is off.
+ *
  * Those two are the machine-readable pair the freshness check compares. Alongside
  * them the row carries the readable name of the same thing - objects_revision,
  * bake_number and version_label ("v1.4") - so a device can SHOW which version it is
@@ -26,6 +29,7 @@
 
 import { objectsVersion } from "./lib/gd-course-package-shape.mjs";
 import courseVersionLabel from "../scripts/gd-course-version-label.js";
+import { nameVersionTagEnabled, taggedCourseName } from "./lib/gd-course-name-version-tag.mjs";
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const COURSE_TABLE = "course_maps";
@@ -46,6 +50,7 @@ function supabaseKey() {
 function hasSupabase() {
   return !!(supabaseBase() && supabaseKey());
 }
+
 
 const supabaseFetch = createSupabaseFetch({
   base: supabaseBase,
@@ -127,6 +132,7 @@ export default async function courseLibrary(req) {
       }
     }
 
+    const tagNames = nameVersionTagEnabled(env);
     const manifest = courses.map((row) => {
       const id = text(row.course_id, 160);
       const visual = visualsByCourse[id] || null;
@@ -137,7 +143,10 @@ export default async function courseLibrary(req) {
       });
       return {
         course_id: id,
-        course_name: text(row.course_name, 200),
+        /* Shared with /api/courses-near, which feeds the older shell's "Find course", so
+           the same course cannot arrive under two different names depending on which
+           screen downloaded it. */
+        course_name: taggedCourseName(text(row.course_name, 200), version, tagNames),
         /* Carried to the client so a search result can group the courses that came
            out of one scan, rather than guessing the link from distance. */
         facilityKey: row.facility_key || null,
@@ -162,6 +171,9 @@ export default async function courseLibrary(req) {
 
     return json(200, {
       configured: true,
+      /* Reported so the tag is never a mystery: if course names suddenly carry versions,
+         the response says who did it and that a switch turns it off. */
+      nameVersionTag: tagNames,
       since: since || null,
       count: manifest.length,
       serverTime: new Date().toISOString(),

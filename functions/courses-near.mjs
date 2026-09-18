@@ -26,6 +26,7 @@ import {
   mergeWithLibrary,
   nearbyCoursesQuery
 } from "./lib/gd-courses-near-core.mjs";
+import { nameVersionTagEnabled, taggedCourseName, courseVersionLabel } from "./lib/gd-course-name-version-tag.mjs";
 
 const COURSE_TABLE = "course_maps";
 const MAX_RADIUS_M = 25000;
@@ -59,7 +60,7 @@ async function libraryNear(lat, lng, radiusM) {
   if (!hasSupabase()) return [];
   const box = boundingBox(lat, lng, radiusM);
   const query = COURSE_TABLE
-    + "?select=course_id,course_name,course_lat,course_lng,hole_count"
+    + "?select=course_id,course_name,course_lat,course_lng,hole_count,objects_revision"
     + "&published=eq.true"
     + "&course_lat=gte." + box.minLat + "&course_lat=lte." + box.maxLat
     + "&course_lng=gte." + box.minLng + "&course_lng=lte." + box.maxLng
@@ -74,6 +75,56 @@ async function libraryNear(lat, lng, radiusM) {
   if (!response.ok) return [];
   const body = await response.json().catch(() => null);
   return Array.isArray(body) ? body : [];
+}
+
+/* Names tagged with their version, for an installed app build that can show a version no
+   other way - see lib/gd-course-name-version-tag.mjs. Off by default and costing nothing
+   when off: the extra read below only happens once the switch is on.
+ *
+ * Applied AFTER mergeWithLibrary, never before. That merge decides whether an OSM course
+ * and a mapped course are the same place by comparing the slug of their names, so a course
+ * renamed to "Akarana Golf Club (v2.0)" would stop matching plain "Akarana Golf Club" and
+ * the picker would list the same course twice - once mapped, once not. */
+async function tagVersionNames(courses, libraryRows) {
+  const revisionById = {};
+  (Array.isArray(libraryRows) ? libraryRows : []).forEach((row) => {
+    const id = String((row && row.course_id) || "");
+    if (id) revisionById[id] = row.objects_revision;
+  });
+  const ids = Object.keys(revisionById);
+  if (!ids.length) return courses;
+
+  let visualsById = {};
+  try {
+    const query = "course_visuals?select=course_id,bake_number,bake_objects_revision"
+      + "&course_id=in.(" + ids.map((id) => '"' + id.replace(/"/g, "") + '"').join(",") + ")";
+    const response = await fetch(supabaseBase() + "/rest/v1/" + query, {
+      headers: {
+        apikey: supabaseKey(),
+        Authorization: "Bearer " + supabaseKey(),
+        "Content-Type": "application/json"
+      }
+    });
+    if (response.ok) {
+      const rows = await response.json().catch(() => null);
+      (Array.isArray(rows) ? rows : []).forEach((row) => {
+        const id = String((row && row.course_id) || "");
+        if (id) visualsById[id] = row;
+      });
+    }
+  } catch (error) { /* no versions to tag with: names stay untouched */ }
+
+  return courses.map((course) => {
+    const id = String((course && course.courseId) || "");
+    if (!id || !Object.prototype.hasOwnProperty.call(revisionById, id)) return course;
+    const visual = visualsById[id] || null;
+    const version = courseVersionLabel.courseVersion({
+      bakeNumber: visual ? visual.bake_number : null,
+      objectsRevision: revisionById[id],
+      bakeObjectsRevision: visual ? visual.bake_objects_revision : null
+    });
+    return Object.assign({}, course, { name: taggedCourseName(course.name, version, true) });
+  });
 }
 
 export default async function coursesNear(req) {
@@ -99,11 +150,15 @@ export default async function coursesNear(req) {
 
   const failed = !!(overpass && overpass.__error);
   const osmCourses = failed ? [] : coursesFromOverpass(overpass, anchor);
-  const courses = mergeWithLibrary(osmCourses, library, anchor);
+  const merged = mergeWithLibrary(osmCourses, library, anchor);
+  const tagNames = nameVersionTagEnabled(env);
+  const courses = tagNames ? await tagVersionNames(merged, library) : merged;
 
   return json(200, {
     anchor,
     radiusM,
+    /* Said out loud so a tagged name is never a mystery to whoever reads this response. */
+    nameVersionTag: tagNames,
     /* True means the list is the courses we happen to hold maps for, not
        everything that is there. The picker says so rather than presenting a
        short list as complete. */
