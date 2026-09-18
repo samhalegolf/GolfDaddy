@@ -14,9 +14,18 @@
  *   clarity_map_version  - the processed visual, from course_visuals
  * so the library can update one without the other and show "objects current,
  * new Clarity map available".
+ *
+ * Those two are the machine-readable pair the freshness check compares. Alongside
+ * them the row carries the readable name of the same thing - objects_revision,
+ * bake_number and version_label ("v1.4") - so a device can SHOW which version it is
+ * offering without re-deriving the scheme. clarity_map_version stays exactly as it
+ * was and is now the legacy field: it was never a counter (see
+ * supabase/migrations/20260918_add_course_visual_bake_number.sql), which is why
+ * bake_number exists beside it and why app/js/course-versions.js prefers it.
  */
 
 import { objectsVersion } from "./lib/gd-course-package-shape.mjs";
+import courseVersionLabel from "../scripts/gd-course-version-label.js";
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const COURSE_TABLE = "course_maps";
@@ -90,7 +99,7 @@ export default async function courseLibrary(req) {
 
   try {
     let query = COURSE_TABLE
-      + "?select=course_id,course_name,course_lat,course_lng,hole_count,facility_key,published_at,updated_at"
+      + "?select=course_id,course_name,course_lat,course_lng,hole_count,facility_key,objects_revision,published_at,updated_at"
       + "&published=eq.true&order=updated_at.desc&limit=1000";
     if (since) query += "&updated_at=gt." + encodeURIComponent(since);
 
@@ -108,7 +117,7 @@ export default async function courseLibrary(req) {
       if (ids.length) {
         const visualRows = await supabaseFetch(
           VISUAL_TABLE
-          + "?select=course_id,published_version,current_version,status,updated_at"
+          + "?select=course_id,published_version,bake_number,bake_objects_revision,current_version,status,updated_at"
           + "&course_id=in.(" + ids.join(",") + ")"
         ).catch(() => []);
         (Array.isArray(visualRows) ? visualRows : []).forEach((row) => {
@@ -121,6 +130,11 @@ export default async function courseLibrary(req) {
     const manifest = courses.map((row) => {
       const id = text(row.course_id, 160);
       const visual = visualsByCourse[id] || null;
+      const version = courseVersionLabel.courseVersion({
+        bakeNumber: visual ? visual.bake_number : null,
+        objectsRevision: row.objects_revision,
+        bakeObjectsRevision: visual ? visual.bake_objects_revision : null
+      });
       return {
         course_id: id,
         course_name: text(row.course_name, 200),
@@ -134,7 +148,15 @@ export default async function courseLibrary(req) {
         hole_count: integer(row.hole_count),
         objects_version: objectsVersion(row),
         clarity_map_version: visual ? integer(visual.published_version) : null,
-        clarity_map_status: visual ? text(visual.status, 40) || null : null
+        clarity_map_status: visual ? text(visual.status, 40) || null : null,
+        /* The readable version and the two counters behind it. bake_number is what the
+           freshness check compares (published_version never counted); version_label is
+           what a card, a badge or an update prompt prints. Null when the course has no
+           countable revision yet - the client shows no version at all rather than
+           guessing one. */
+        objects_revision: integer(row.objects_revision),
+        bake_number: visual ? integer(visual.bake_number) : null,
+        version_label: version ? version.label : null
       };
     });
 

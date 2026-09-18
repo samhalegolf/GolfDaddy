@@ -116,6 +116,37 @@ test("reports objects and Clarity map versions independently", async () => {
   });
 });
 
+test("names the version it is offering, so a client can say which one it means", async () => {
+  await withEnv(async () => {
+    const course = Object.assign({}, COURSE, { objects_revision: 5 });
+    const r = await callHandler({
+      course_maps: [course],
+      /* published_version 1977 is the real akarana value - hash digits, not a count.
+         The manifest must report bake_number beside it and label off THAT. */
+      course_visuals: [{ course_id: "takapuna-golf-course", published_version: 1977, bake_number: 2, bake_objects_revision: 3, status: "published" }]
+    });
+    const c = r.body.courses[0];
+    assert.strictEqual(c.bake_number, 2);
+    assert.strictEqual(c.objects_revision, 5);
+    assert.strictEqual(c.version_label, "v2.2", "bake 2, taken at revision 3, course now at 5");
+    assert.strictEqual(c.clarity_map_version, 1977, "the legacy field is reported unchanged");
+  });
+});
+
+test("an object-only course is v0.n, and an uncountable one is named not at all", async () => {
+  await withEnv(async () => {
+    const mapped = Object.assign({}, COURSE, { objects_revision: 4 });
+    const r = await callHandler({ course_maps: [mapped], course_visuals: [] });
+    assert.strictEqual(r.body.courses[0].version_label, "v0.4");
+    assert.strictEqual(r.body.courses[0].bake_number, null);
+
+    const legacy = Object.assign({}, COURSE, { objects_revision: null });
+    const r2 = await callHandler({ course_maps: [legacy], course_visuals: [] });
+    assert.strictEqual(r2.body.courses[0].version_label, null,
+      "no countable revision means no version shown - a badge nobody can stand behind is the bug this area exists to stop");
+  });
+});
+
 test("a course with no Clarity map reports null, not an error", async () => {
   await withEnv(async () => {
     const r = await callHandler({ course_maps: [COURSE], course_visuals: [] });

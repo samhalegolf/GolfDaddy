@@ -1746,8 +1746,45 @@
     return store;
   }
 
+  /* WHICH baked asset is on screen, for the operator only.
+   *
+   * Two rules make this trustworthy, and both matter:
+   *
+   *   1. It is read off the asset that was actually loaded - its own frozen stamp and
+   *      its own storage path - never off the course. A course sits at one version; the
+   *      picture in front of you may have been baked at an earlier one, and an overlay
+   *      derived from the course would confidently paper over exactly the mismatch this
+   *      exists to expose. So "v1.2 · h7" on a course at v1.3 is not a bug in the stamp.
+   *   2. It is drawn, not burnt in. The number rides in the asset's metadata; nothing is
+   *      composited into the JPEG, because a pixel stamp would be visible to every
+   *      player on every hole, which is the opposite of what an operator diagnostic is.
+   *
+   * Hidden the moment the surface is anything other than a published bake - on the live
+   * map there is no baked asset to name, and a stamp left behind would be describing a
+   * picture that is no longer there. */
+  function showVersionStamp(asset) {
+    var node = el("assetVersionStamp");
+    if (!node) return;
+    var admin = false;
+    try { admin = !!(app.account && app.account.isAdmin && app.account.isAdmin()); } catch (e) { admin = false; }
+    if (!admin || !asset) { hideVersionStamp(); return; }
+    var label = surfaceLib.assetVersionLabel(asset);
+    var file = surfaceLib.assetFileName(asset);
+    var text = [label, file].filter(Boolean).join(" · ");
+    if (!text) { hideVersionStamp(); return; }
+    node.textContent = text;
+    node.classList.remove("hiddenState");
+  }
+  function hideVersionStamp() {
+    var node = el("assetVersionStamp");
+    if (!node) return;
+    node.textContent = "";
+    node.classList.add("hiddenState");
+  }
+
   function clearSurface() {
     published = false;
+    hideVersionStamp();
     document.body.classList.remove("surface-published");
     var img = el("surfaceImage");
     if (img) {
@@ -1964,6 +2001,7 @@
         surfaceFailed = null;
         document.body.classList.add("surface-published");
         publishedFrameUrl = url;
+        showVersionStamp(asset);
         attachMesh(asset.playSurface, url);
         lastCameraKey = null;
         /* Draw it. Without this the image appeared with no solved frame — a

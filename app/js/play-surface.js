@@ -48,7 +48,7 @@
   }
 
   /* Pick the published asset for a hole out of a course-visual record.
-     Returns {path, playSurface} or null — null is normal, not an error. */
+     Returns {path, playSurface, version} or null — null is normal, not an error. */
   function holeSurfaceAsset(record, holeNumber) {
     if (!record || String(record.status || "") !== "published") return null;
     var assets = Array.isArray(record.uploaded_assets) ? record.uploaded_assets
@@ -58,7 +58,11 @@
       var asset = assets[i] || {};
       var meta = asset.metadata && asset.metadata.playSurface;
       if (meta && Number(asset.holeNumber) === hole && asset.path) {
-        return { path: String(asset.path), playSurface: meta };
+        /* version is the stamp frozen onto this image when it was baked. Carried with
+           the asset, never recomputed from the course: the whole value of the stamp is
+           that it still names the bake the pixels came from after the course has moved
+           on. Null for frames baked before stamping existed. */
+        return { path: String(asset.path), playSurface: meta, version: asset.metadata.version || null };
       }
     }
     return null;
@@ -322,6 +326,35 @@
     );
   }
 
+  /* The version stamped on a baked asset, read back off the asset itself. Accepts
+     either shape the painter can be handed: a package hole's `visual` (which carries the
+     stamp through from /api/course-package) or a course_visuals uploaded asset. Empty
+     string for anything baked before stamping existed - the caller renders nothing
+     rather than a placeholder, because an unlabelled asset and an asset labelled "?" say
+     different things to whoever is reading the stamp. Pure, for tests. */
+  function assetVersionLabel(asset) {
+    var stamp = asset && asset.version;
+    if (!stamp) return "";
+    if (typeof stamp === "string") return /^W?-?v\d+\.\d+$/.test(stamp) ? stamp : "";
+    return typeof stamp.label === "string" ? stamp.label : "";
+  }
+
+  /* The last two segments of the asset's storage path - "r1alw6nz/h7.jpg". That is the
+     export build hash and the hole, which together name the exact file in the bucket;
+     the leading course-id segment is the one part the reader already knows. Works off
+     `path` or off the /api/course-visual-assets URL the package ships, since the painter
+     is handed whichever of the two the hole came from. Pure, for tests. */
+  function assetFileName(asset) {
+    if (!asset) return "";
+    var raw = String(asset.path || "");
+    if (!raw) {
+      raw = String(asset.url || "").split("path=").pop();
+      try { raw = decodeURIComponent(raw); } catch (e) {}
+    }
+    if (!raw || raw.indexOf("/") === -1) return raw || "";
+    return raw.split("/").slice(-2).join("/");
+  }
+
   /* One-line provenance label for the readout chip. Pure, for tests.
      e.g. "pkg · r1alw6nz/h1.jpg · z18 · 1341×1889 · 412ms" */
   function provenanceLabel(prov) {
@@ -344,6 +377,8 @@
   return {
     worldPx: worldPx,
     provenanceLabel: provenanceLabel,
+    assetVersionLabel: assetVersionLabel,
+    assetFileName: assetFileName,
     frameAnchor: frameAnchor,
     similarityFromPairs: similarityFromPairs,
     transformApply: transformApply,

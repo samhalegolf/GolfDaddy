@@ -3259,7 +3259,7 @@ function gdAdminCourseCloudJobChip(courseId){
       : "";
     return bar+`<div class="gdAdminProgressCheckpoints">${checkpoints}</div>${stalled?nudge:""}`;
   }
-  if(state.state==="frames-ready")return `<span class="ready">cloud frames v${gdEscapeHTML(state.framesVersion||1)}</span>`;
+  if(state.state==="frames-ready")return `<span class="ready">cloud frames ${gdEscapeHTML(state.framesVersionLabel||("v"+(state.framesVersion||1)+".?"))}</span>`;
   if(state.state==="captures-ready")return `<span class="warn" title="Capture completed. Visual treatment is queued or waiting to be retried.">capture complete - waiting for visual treatment</span>${nudge}`;
   if(state.state==="failed"&&gdAdminVisualUnlicensed(state.lastError))return `<span title="${gdEscapeHTML(gdAdminVisualUnlicensedTitle(state.lastError))}">live map only</span>`;
   if(state.state==="failed"&&state.failedStage==="export")return `<span class="warn" title="${gdEscapeHTML(String(state.lastError||"").slice(0,180))}">visual treatment failed</span>${nudge}`;
@@ -4350,7 +4350,7 @@ function gdAdminCourseVisualMarkup(selected){
   const cloudFrameIndex=gdAdminCourseCloudFrames(selected.id);
   const holeFrames=(cloudState&&cloudState.framesReady&&cloudFrameIndex&&Array.isArray(cloudFrameIndex.holes)?cloudFrameIndex.holes.length:0)
     ||(record&&(Array.isArray(record.holeFramePublishedVisuals)&&record.holeFramePublishedVisuals.length?record.holeFramePublishedVisuals:record.holeFrameVisuals)||[]).length;
-  const lifecycle=`<div class="gdAdminCourseStageLine gdAdminCourseVisualLifecycle">${["geometry","scan","bake","published"].map(stage=>`<span class="${stage===lifecycleStage?"ready":""}">${gdEscapeHTML(stage)}</span>`).join("<b>→</b>")}${holeFrames?`<span class="ready">${gdEscapeHTML(holeFrames)}/${gdEscapeHTML(selected.holeCount||0)} hole frames</span>`:""}${cloudState&&cloudState.framesReady?`<span class="ready">cloud v${gdEscapeHTML(cloudState.framesVersion||1)}</span>`:""}</div>`;
+  const lifecycle=`<div class="gdAdminCourseStageLine gdAdminCourseVisualLifecycle">${["geometry","scan","bake","published"].map(stage=>`<span class="${stage===lifecycleStage?"ready":""}">${gdEscapeHTML(stage)}</span>`).join("<b>→</b>")}${holeFrames?`<span class="ready">${gdEscapeHTML(holeFrames)}/${gdEscapeHTML(selected.holeCount||0)} hole frames</span>`:""}${cloudState&&cloudState.framesReady?`<span class="ready">cloud ${gdEscapeHTML(cloudState.framesVersionLabel||("v"+(cloudState.framesVersion||1)+".?"))}</span>`:""}</div>`;
   return [
     `<div class="gdAdminCourseWorkspace">${lifecycle}<div class="gdAdminCourseStageLine">${[
       `<span class="${cloudState&&cloudState.framesReady?"ready":record&&["preview-ready","published","basic-ready"].includes(record.status)?"ready":"warn"}">${gdEscapeHTML(cloudState&&cloudState.framesReady?"published":cloudState&&cloudState.building?cloudState.state:record&&record.status||"unavailable")}</span>`,
@@ -4361,8 +4361,13 @@ function gdAdminCourseVisualMarkup(selected){
     record.lastError?`<div class="gdAdminCourseVisualNotice">${gdEscapeHTML(record.lastError.message||record.lastError.code||"Course visual pipeline needs attention.")}</div>`:"",
     `<div class="gdAdminCourseVisualNotice gdAdminCourseVisualTuningHint">These blocks are engine internals for debugging. Day-to-day work — scanning, tuning, publishing — lives on the <button type="button" class="gdAdminInlineLink" onclick="return gdAdminCoursePreviewSetHole('${gdEscapeHTML(selected.id)}',${Number(gdAdminCoursePreviewHoleByCourse[selected.id])||1})">Visual Engine</button> preview screen, the only place the visual effect variables appear.</div>`,
     `<details class="gdAdminCourseSettings"><summary>Diagnostics</summary><div class="gdAdminCourseSettingsBody"><div class="gdAdminDatabaseSummary">${[
-      gdAdminCourseDbMetric("Current version",record.currentVersion||0),
-      gdAdminCourseDbMetric("Published",record.publishedVersion||0),
+      /* These two are engine internals, not the course's version: they carry
+         course_visuals.current_version/published_version, which are hash digits rather
+         than a count. The version a human reads is the "cloud v1.4" chip on the
+         lifecycle line above, from bake_number. Labelled so the diagnostics block does
+         not read as a second, disagreeing answer to the same question. */
+      gdAdminCourseDbMetric("Engine build (legacy)",record.currentVersion||0),
+      gdAdminCourseDbMetric("Engine published (legacy)",record.publishedVersion||0),
       gdAdminCourseDbMetric("Layer model",planSummary?"live underlay + HD overlays":"live map fallback")
     ].join("")}</div><pre class="gdAdminCourseVisualDiag">${gdEscapeHTML(JSON.stringify(diagnostics,null,2))}</pre></div></details></div>`
   ].join("");

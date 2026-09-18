@@ -7,7 +7,10 @@
    objectsVersion/mapVersion are carried through (the server already
    computes them; dropping them here just meant reinventing the freshness
    check elsewhere) so app.courseStore.updateAvailable() has something to
-   compare a downloaded copy against without a second network round-trip. */
+   compare a downloaded copy against without a second network round-trip.
+   bakeNumber/objectsRevision/versionLabel ride along for the same reason: the
+   server already knows what version it is offering, and the update prompt has
+   to be able to name it ("Update Available (v1.5)"). */
 (function () {
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
@@ -29,7 +32,10 @@
             courseLng: Number(row.course_lng),
             holeCount: Number(row.hole_count) || null,
             objectsVersion: row.objects_version || null,
-            mapVersion: Number.isFinite(Number(row.clarity_map_version)) ? Number(row.clarity_map_version) : null
+            mapVersion: Number.isFinite(Number(row.clarity_map_version)) ? Number(row.clarity_map_version) : null,
+            bakeNumber: Number.isFinite(Number(row.bake_number)) ? Number(row.bake_number) : null,
+            objectsRevision: Number.isFinite(Number(row.objects_revision)) ? Number(row.objects_revision) : null,
+            versionLabel: row.version_label || null
           };
         })
         .sort(function (a, b) { return a.courseName.localeCompare(b.courseName); });

@@ -157,6 +157,12 @@
        oversizes the map element, so Leaflet's own attribution control would
        ride off-screen with it. The imagery licences require it stays visible. -->
   <div id="mapAttribution" class="hiddenState"></div>
+  <!-- Which baked asset is on screen, for the operator only (app/js/account.js
+       isAdmin). Outside #map for the same reason the credit above is: the stage camera
+       rotates and oversizes the map element, and a stamp that rode with it would spin
+       off the edge of the hole it is describing. Never shown to a player - see
+       painter.js showVersionStamp. -->
+  <div id="assetVersionStamp" class="hiddenState"></div>
   <!-- Deliberately above play state, not inside the Leaflet/published surface.
        Package readiness owns this screen; GPS fixes and shot placement cannot
        dismiss, recreate or reframe it. -->
@@ -628,6 +634,9 @@
 <script src="js/course-key.js"></script>
 <script src="js/undo.js"></script>
 <script src="js/course-library.js"></script>
+<!-- What a map version is CALLED. Shared with the server that reports it, so the update
+     bar names an offered version exactly the way /api/course-library does. -->
+<script src="../scripts/gd-course-version-label.js"></script>
 <script src="js/course-versions.js"></script>
 <script src="js/course-store.js"></script>
 <script src="js/course-package.js"></script>

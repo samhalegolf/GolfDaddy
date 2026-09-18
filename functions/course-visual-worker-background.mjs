@@ -32,6 +32,7 @@ import { resolveImagerySource, unscannableReason, attributionFor } from "./lib/g
 import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
 import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, heightsFromFloat32Tiff, terrainRgbPngFromHeights, decodeElevation } from "./lib/gd-relief-core.mjs";
 import greenCore from "../scripts/gd-green-contours-core.js";
+import courseVersionLabel from "../scripts/gd-course-version-label.js";
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const JOBS_TABLE = "course_visual_jobs";
@@ -771,7 +772,50 @@ async function reapStaleJobs() {
    payloads through a size-limited function. uploaded_assets roles drive the existing
    play_payload contract in /api/course-visuals. */
 async function writeCourseVisualRow(job, pkg, framesIndex, recipe) {
+  /* published_version, kept exactly as it always was so nothing that reads it changes
+     meaning. It is NOT a version number: these are the digits left after stripping the
+     letters out of the export content hash, which is how akarana ended up at 1977 and
+     how a re-bake could produce a SMALLER number than the one before it. The real
+     counter is bake_number, computed below. */
   const versionNumber = Math.max(1, parseInt(String(framesIndex.exportVersion || "v1").replace(/[^0-9]/g, ""), 10) || 1);
+  const buildId = String(framesIndex.exportVersion || "");
+  const encodedCourse = encodeURIComponent(pkg.courseId);
+
+  /* The publish counter, and the geometry this bake was made from.
+
+     Bumped per BUILD, not per call: exports resume and jobs retry, and running the same
+     build twice must not invent a second version of identical pixels. The stored buildId
+     (the export content hash) is what makes that decidable - same hash, same bake number.
+
+     Both reads fail soft. A version number is worth having but it is not worth failing a
+     finished bake over: a course that ends up at bake 1 with an unknown geometry revision
+     still plays, and the next successful bake corrects it. */
+  let bakeNumber = 1;
+  let bakeObjectsRevision = null;
+  try {
+    const priorRows = await supabaseFetch("course_visuals?select=bake_number,diagnostics&course_id=eq." + encodedCourse + "&limit=1");
+    const prior = Array.isArray(priorRows) ? priorRows[0] || null : null;
+    const priorBake = Number(prior && prior.bake_number) || 0;
+    const priorBuild = String((prior && prior.diagnostics && prior.diagnostics.buildId) || "");
+    bakeNumber = priorBuild && buildId && priorBuild === buildId ? Math.max(1, priorBake) : priorBake + 1;
+  } catch (error) { /* no prior row, or unreadable: this is bake 1 */ }
+  try {
+    const mapRows = await supabaseFetch(MAPS_TABLE + "?select=objects_revision&course_id=eq." + encodedCourse + "&limit=1");
+    const map = Array.isArray(mapRows) ? mapRows[0] || null : null;
+    const revision = Number(map && map.objects_revision);
+    if (Number.isFinite(revision)) bakeObjectsRevision = revision;
+  } catch (error) { /* geometry revision unknown - the label falls back to <bake>.0 */ }
+
+  /* The label this bake is published under, and the stamp frozen onto every image it
+     writes. Frozen is the point: the course will go on being edited, and an image that
+     still says v2.0 inside a course that has reached v2.3 is telling you something true
+     and useful about the picture on your screen. */
+  const bakeVersion = courseVersionLabel.courseVersion({
+    bakeNumber,
+    objectsRevision: bakeObjectsRevision,
+    bakeObjectsRevision
+  });
+  const versionStamp = courseVersionLabel.stampFor(bakeVersion, { buildId, bakedAt: framesIndex.generatedAt || null });
   const bounds = (framesIndex.holes || []).map(h => h.bounds).filter(Boolean);
   const courseBounds = bounds.length ? {
     south: Math.min(...bounds.map(b => Number(b.south))),
@@ -780,9 +824,9 @@ async function writeCourseVisualRow(job, pkg, framesIndex, recipe) {
     east: Math.max(...bounds.map(b => Number(b.east)))
   } : {};
   const uploadedAssets = [];
-  if (framesIndex.overview) uploadedAssets.push({ path: framesIndex.overview.path, role: "published", contentType: "image/jpeg", holeNumber: null, hole_number: null, metadata: { width: framesIndex.overview.width, height: framesIndex.overview.height, bounds: framesIndex.overview.bounds } });
+  if (framesIndex.overview) uploadedAssets.push({ path: framesIndex.overview.path, role: "published", contentType: "image/jpeg", holeNumber: null, hole_number: null, metadata: { width: framesIndex.overview.width, height: framesIndex.overview.height, bounds: framesIndex.overview.bounds, version: versionStamp } });
   (framesIndex.holes || []).forEach(frame => {
-    uploadedAssets.push({ path: frame.path, role: "hole-frame-published", contentType: "image/jpeg", holeNumber: frame.holeNumber, hole_number: frame.holeNumber, metadata: { width: frame.width, height: frame.height, bounds: frame.bounds, playSurface: frame.playSurface } });
+    uploadedAssets.push({ path: frame.path, role: "hole-frame-published", contentType: "image/jpeg", holeNumber: frame.holeNumber, hole_number: frame.holeNumber, metadata: { width: frame.width, height: frame.height, bounds: frame.bounds, playSurface: frame.playSurface, version: versionStamp } });
   });
   const row = {
     id: "cv-" + pkg.courseId,
@@ -799,10 +843,15 @@ async function writeCourseVisualRow(job, pkg, framesIndex, recipe) {
     course_overrides: recipe.courseOverrides || {},
     current_version: versionNumber,
     published_version: versionNumber,
+    bake_number: bakeNumber,
+    bake_objects_revision: bakeObjectsRevision,
     last_error: {},
     /* imagery/attribution ride in diagnostics because the row's shape is fixed by the existing
        play_payload contract; the client reads them to render the credit over cloud frames. */
-    diagnostics: { source: "course-visual-worker", jobId: job.id, framesIndexPath: pkg.courseId + "/frames/index.json", generatedAt: framesIndex.generatedAt, imagery: framesIndex.source || null, attribution: framesIndex.source && framesIndex.source.attribution || null },
+    /* buildId is the export content hash. It rides in diagnostics rather than a column of
+       its own because its only job is to let the NEXT run of this function tell "the same
+       build again" from "a new build" when deciding whether to bump bake_number. */
+    diagnostics: { source: "course-visual-worker", jobId: job.id, framesIndexPath: pkg.courseId + "/frames/index.json", generatedAt: framesIndex.generatedAt, buildId, versionLabel: bakeVersion ? bakeVersion.label : null, imagery: framesIndex.source || null, attribution: framesIndex.source && framesIndex.source.attribution || null },
     versions: [],
     uploaded_assets: uploadedAssets,
     updated_at: new Date().toISOString()

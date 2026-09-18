@@ -22,6 +22,20 @@
    the other was comparing two unrelated things, so every course with a null
    geometry_version read as permanently "Update available". */
 import { courseCoverageComplete } from "./gd-course-fit-core.mjs";
+import courseVersionLabel from "../../scripts/gd-course-version-label.js";
+
+/* The course's readable version - "v1.4" - built from the countable revisions rather
+   than from objectsVersion above. objectsVersion answers "is mine older than yours";
+   this answers "which one is this", and the two are not interchangeable. Null whenever
+   objects_revision is not yet countable, so a client renders no version at all instead
+   of one it cannot stand behind. */
+export function courseVersion(map, visual) {
+  return courseVersionLabel.courseVersion({
+    bakeNumber: visual ? visual.bake_number : null,
+    objectsRevision: map ? map.objects_revision : null,
+    bakeObjectsRevision: visual ? visual.bake_objects_revision : null
+  });
+}
 
 export function objectsVersion(map) {
   const published = map && map.published_at ? String(map.published_at) : "";
@@ -111,10 +125,17 @@ export function shapeLitePackage(map, visualJobStatus, mapperJobs) {
       confidence: green && Number.isFinite(Number(green.resolverConfidence)) ? Number(green.resolverConfidence) : null
     };
   }).sort((a, b) => a.holeNumber - b.holeNumber);
+  const version = courseVersion(map, null);
   return addReadinessMetadata({
     courseId: map.course_id,
     status: "lite-geo-ready",
     objectsVersion: objectsVersion(map),
+    /* No baked picture, so the major is 0 by construction: a lite pack is "v0.3", and
+       the leading zero is the thing that says out loud that this course is playing off
+       objects with no photography behind them. */
+    objectsRevision: Number.isFinite(Number(map.objects_revision)) ? Number(map.objects_revision) : null,
+    bakeNumber: 0,
+    versionLabel: version ? version.label : null,
     geometryVersion: map.geometry_version || null,
     courseBounds: courseBoundsFromObjects(map.objects_json),
     holes,
@@ -182,7 +203,13 @@ export function shapeFullPackage(map, visual, mapperJobs) {
         height: metadata.height || null,
         bounds: metadata.bounds || null,
         playSurface,
-        checksum
+        checksum,
+        /* The version stamp the bake worker froze onto THIS image, carried through
+           untouched. Never recomputed from the course: an image baked at v1.2 sitting
+           in a course now at v1.3 is exactly the case the stamp exists to make
+           visible, and recomputing it here would erase the difference. Null for frames
+           baked before stamping existed. */
+        version: metadata.version || null
       }
     };
   }).filter(Boolean).sort((a, b) => a.holeNumber - b.holeNumber);
@@ -190,10 +217,19 @@ export function shapeFullPackage(map, visual, mapperJobs) {
      tell the app a course is built and then give it no holes to play, which is the
      shape of failure this whole guard exists to stop. */
   if (!holes.length) return null;
+  const version = courseVersion(map, visual);
   return addReadinessMetadata({
     courseId: map.course_id,
     status: "full-map-ready",
-    packageVersion: visual.published_version || null,
+    /* packageVersion has always been the visual's version number and stays that, but it
+       now carries bake_number - the real publish counter - instead of published_version,
+       which was the digits scraped out of a content hash and was neither monotonic nor
+       meaningful (akarana read 1977). Clients compare this against what they hold; a
+       number that could go DOWN on a re-bake is why frame updates were being missed. */
+    packageVersion: visual.bake_number || null,
+    bakeNumber: visual.bake_number || null,
+    objectsRevision: Number.isFinite(Number(map.objects_revision)) ? Number(map.objects_revision) : null,
+    versionLabel: version ? version.label : null,
     objectsVersion: objectsVersion(map),
     geometryVersion: map.geometry_version || null,
     generatedAt: (visual.diagnostics && visual.diagnostics.generatedAt) || visual.updated_at || null,

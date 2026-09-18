@@ -239,9 +239,13 @@
 
   function statusLabel(report) {
     if (!report || report.status === "none") return { label: "Not generated", tone: "" };
-    if (report.status === "ready") return { label: "Ready · " + report.readyHoleCount + "/" + report.holeCount + " holes · " + Math.round(report.totalBytes / 1024) + " KB · Recipe v" + report.recipeVersion + squeezedNote(report), tone: "ok" };
+    /* The package's own name leads - "W-v1.0" - and the recipe follows it. They are
+       different facts: the recipe moves when the drawing rules change, the package
+       version moves when THIS course is regenerated, and reading the recipe as the
+       package's version is what made three regenerations look like one. */
+    if (report.status === "ready") return { label: "Ready · " + (report.versionLabel ? report.versionLabel + " · " : "") + report.readyHoleCount + "/" + report.holeCount + " holes · " + Math.round(report.totalBytes / 1024) + " KB · Recipe v" + report.recipeVersion + squeezedNote(report), tone: "ok" };
     if (report.status === "recovery") return { label: "Recovery needed · " + report.readyHoleCount + " generated assets found · Package metadata missing", tone: "warn" };
-    if (report.status === "partial") return { label: "Partial · " + report.readyHoleCount + "/" + report.holeCount + " holes · " + Math.round(report.totalBytes / 1024) + " KB", tone: "warn" };
+    if (report.status === "partial") return { label: "Partial · " + (report.versionLabel ? report.versionLabel + " · " : "") + report.readyHoleCount + "/" + report.holeCount + " holes · " + Math.round(report.totalBytes / 1024) + " KB", tone: "warn" };
     if (report.status === "failed" && report.failure) return { label: "Generation failed · " + (report.failure.stage || "unknown stage"), tone: "bad" };
     return { label: "Failed", tone: "bad" };
   }

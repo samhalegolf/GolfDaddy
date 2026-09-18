@@ -24,7 +24,8 @@
   }
 
   app.courseStore = {
-    /* entry: {courseId, courseName, mapType: "object"|"published", objectsVersion, mapVersion, pkg}.
+    /* entry: {courseId, courseName, mapType: "object"|"published", objectsVersion, mapVersion,
+       bakeNumber, objectsRevision, versionLabel, pkg}.
        Returns the saved record (with byte size + timestamp filled in), or
        null if localStorage rejected the write (quota, private browsing). */
     save: function (entry) {
@@ -36,6 +37,13 @@
         mapType: entry.mapType === "published" ? "published" : "object",
         objectsVersion: entry.objectsVersion || null,
         mapVersion: Number.isFinite(Number(entry.mapVersion)) ? Number(entry.mapVersion) : null,
+        /* The countable version of this exact copy. bakeNumber is what the freshness
+           check compares (mapVersion never counted - see course-versions.js); the label
+           is what the Course Library card shows, stored rather than recomputed so an
+           offline device can still name what it is holding. */
+        bakeNumber: Number.isFinite(Number(entry.bakeNumber)) ? Number(entry.bakeNumber) : null,
+        objectsRevision: Number.isFinite(Number(entry.objectsRevision)) ? Number(entry.objectsRevision) : null,
+        versionLabel: entry.versionLabel || null,
         pkg: entry.pkg || null,
         savedAt: Date.now(),
         bytes: body.length
@@ -66,7 +74,8 @@
       if (!local || !remote) return false;
       return app.courseVersions.isStale(local, {
         objectsVersion: remote.objectsVersion,
-        mapVersion: remote.mapVersion
+        mapVersion: remote.mapVersion,
+        bakeNumber: remote.bakeNumber
       });
     }
   };

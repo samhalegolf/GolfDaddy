@@ -5533,6 +5533,13 @@
            downloadedEntryHasUpdate below for why those are not the same thing. */
         objectsVersion:pkg.objectsVersion||null,
         mapVersion:Number.isFinite(Number(pkg.packageVersion))?Number(pkg.packageVersion):null,
+        /* Written in the same shape app/js/course-store.js writes, version fields
+           included - this panel is a VIEW of that store, and a record saved here without
+           a bakeNumber would read as legacy to the freshness rule and flag itself stale
+           forever. */
+        bakeNumber:Number.isFinite(Number(pkg.bakeNumber))?Number(pkg.bakeNumber):null,
+        objectsRevision:Number.isFinite(Number(pkg.objectsRevision))?Number(pkg.objectsRevision):null,
+        versionLabel:pkg.versionLabel||null,
         pkg:pkg,
         savedAt:Date.now(),
         bytes:body.length
@@ -5556,7 +5563,29 @@
        badge is the exact bug this is fixing - so say nothing. */
     const shared=window.ClarityApp&&window.ClarityApp.courseVersions;
     if(!shared||typeof shared.isStale!=='function')return false;
-    return shared.isStale(entry,{objectsVersion:remote.objects_version,mapVersion:remote.clarity_map_version});
+    return shared.isStale(entry,{objectsVersion:remote.objects_version,mapVersion:remote.clarity_map_version,bakeNumber:remote.bake_number});
+  }
+  /* The version the SERVER is offering - what an "Update Available (v1.5)" badge names.
+     Straight off the manifest row; the server owns the scheme
+     (scripts/gd-course-version-label.js) and this panel must not re-derive it. */
+  function downloadedEntryRemoteLabel(entry){
+    const remote=courseLibraryManifestById&&courseLibraryManifestById[entry.courseId];
+    return remote&&typeof remote.version_label==='string'?remote.version_label:'';
+  }
+  /* The version of the copy ON THIS DEVICE. Stored at download time rather than derived
+     now, so the panel names what is actually held even with no network - which is the
+     whole point of a downloads screen. */
+  function downloadedEntryLabel(entry){
+    return entry&&typeof entry.versionLabel==='string'?entry.versionLabel:'';
+  }
+  /* Punctuation comes from the shared core so this badge and the /app/ update bar cannot
+     say the same thing two ways. Guarded like downloadedEntryHasUpdate above it: if the
+     file did not load, the badge still appears - it just cannot name a version. */
+  function updateBadgeText(entry){
+    const label=downloadedEntryRemoteLabel(entry);
+    const shared=window.ClarityApp&&window.ClarityApp.courseVersionLabel;
+    if(!shared||typeof shared.updateAvailable!=='function')return 'Update Available';
+    return shared.updateAvailable(label);
   }
   function refreshCourseLibraryManifest(){
     fetchCourseLibraryManifest().then(manifest=>{
@@ -5665,12 +5694,21 @@
       if(!entry){renderCourseLibraryPanel();return;}
       const stale=downloadedEntryHasUpdate(entry);
       const updateAction=stale?`<button type="button" data-action="update" class="gdCourseUpdateBtn">Update map</button>`:'';
-      list.innerHTML=`<div class="gdCourseCard${entry.mapType==='published'?' published':''}"><strong>${esc(entry.courseName)}</strong><span>${esc(mapTypeLabel(entry.mapType))} · ${esc(sizeLabel(entry.bytes))}</span><div class="gdCourseActions"><button type="button" data-action="back">Back</button>${updateAction}<button class="danger" type="button" data-action="remove">Remove from device</button></div></div>`;
+      const heldLabel=downloadedEntryLabel(entry);
+      const offeredLabel=downloadedEntryRemoteLabel(entry);
+      /* Version in the subtext beside map type and size. Omitted entirely when unknown -
+         a course downloaded before versions existed shows the line it always showed
+         rather than an empty pair of brackets. */
+      const detailSub=[mapTypeLabel(entry.mapType),sizeLabel(entry.bytes)].concat(heldLabel?[heldLabel]:[]).join(' · ');
+      list.innerHTML=`<div class="gdCourseCard${entry.mapType==='published'?' published':''}"><strong>${esc(entry.courseName)}</strong><span>${esc(detailSub)}</span><div class="gdCourseActions"><button type="button" data-action="back">Back</button>${updateAction}<button class="danger" type="button" data-action="remove">Remove from device</button></div></div>`;
       const facts=[
         ['Map type',mapTypeLabel(entry.mapType)],
         ['Storage used',sizeLabel(entry.bytes)],
         ['Downloaded',entry.savedAt?dateLabel(entry.savedAt):'—'],
-        ['Status',stale?'Update available':'Up to date']
+        /* Two versions, not one: the copy you are holding, and - when they differ - the
+           one the server has. "v1.4 → v1.5" says what an update would actually do. */
+        ['Version',heldLabel?(stale&&offeredLabel&&offeredLabel!==heldLabel?heldLabel+' → '+offeredLabel:heldLabel):'—'],
+        ['Status',stale?updateBadgeText(entry):'Up to date']
       ];
       list.insertAdjacentHTML('beforeend',`<div class="gdCourseCard gdCourseStorageFacts">${facts.map(([k,v])=>`<div class="gdCourseStorageRow"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join('')}</div>`);
       list.querySelector('[data-action="back"]').onclick=()=>renderCourseLibraryPanel();
@@ -5721,9 +5759,11 @@
       const card=document.createElement('button');
       card.className='gdCourseCard'+(entry.mapType==='published'?' published':'');
       card.type='button';
-      const meta=[sizeLabel(entry.bytes),entry.savedAt?dateLabel(entry.savedAt):null].filter(Boolean).join(' · ');
+      /* The version leads the subtext: on a list of downloaded courses it is the one
+         fact that says WHICH copy this is, and size/date only say how big and how old. */
+      const meta=[downloadedEntryLabel(entry),sizeLabel(entry.bytes),entry.savedAt?dateLabel(entry.savedAt):null].filter(Boolean).join(' · ');
       const typeBadge=`<span class="${entry.mapType==='published'?'gdSavedGreenBadge':'gdCourseObjectBadge'}">${esc(mapTypeLabel(entry.mapType))}</span>`;
-      const updateBadge=stale?`<span class="gdCourseObjectBadge">Update available</span>`:'';
+      const updateBadge=stale?`<span class="gdCourseObjectBadge">${esc(updateBadgeText(entry))}</span>`:'';
       card.innerHTML=`<strong>${esc(entry.courseName)}</strong><span>${esc(meta)}${typeBadge}${updateBadge}</span>`;
       card.onclick=()=>renderCourseLibraryPanel(entry.courseId);
       list.appendChild(card);

@@ -1,4 +1,3 @@
-import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 /* Visual engine job queue API.
    POST {courseId, kind:"snapshot"|"export"} (admin only, verified against Supabase Auth like
    course-maps) -> inserts a course_visual_jobs row and pings the background worker.
@@ -8,6 +7,8 @@ import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
    GET ?courseId=... -> recent jobs plus a derived build state for that course, readable by
    players so the app can poll cheaply while it plays over live tiles.
    The worker itself is functions/course-visual-worker-background.mjs. */
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
+import courseVersionLabel from "../scripts/gd-course-version-label.js";
 
 const TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
@@ -126,12 +127,12 @@ function deriveCourseBuildStateFromRows({ jobs, visual }) {
      none            - never built; a player selecting this course may start one */
 async function courseBuildState(courseId) {
   const [visualRows, jobRows, mapRows] = await Promise.all([
-    supabaseFetch(VISUALS_TABLE + "?select=published_version,current_version,status,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []),
+    supabaseFetch(VISUALS_TABLE + "?select=published_version,bake_number,bake_objects_revision,current_version,status,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []),
     supabaseFetch(TABLE + "?select=id,kind,status,error,result,created_at,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&order=created_at.desc&limit=8").catch(() => []),
     /* The app tries several candidate keys for a course it has just selected (id, saved id,
        name, name minus "Golf Club"...). Without this it cannot tell "this key is not a course"
        from "this course has never been built", and both look like state "none". */
-    supabaseFetch(MAPS_TABLE + "?select=course_id&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1").catch(() => [])
+    supabaseFetch(MAPS_TABLE + "?select=course_id,objects_revision&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1").catch(() => [])
   ]);
   const jobs = Array.isArray(jobRows) ? jobRows : [];
   const visual = Array.isArray(visualRows) ? visualRows[0] : null;
@@ -159,7 +160,20 @@ async function courseBuildState(courseId) {
     hasGeometry: Array.isArray(mapRows) && mapRows.length > 0,
     /* Reported even while a rebuild runs: frames stay playable during a re-export. */
     framesReady: derived.framesReady,
+    /* framesVersion is the legacy number and stays wired to published_version so nothing
+       reading it changes under foot - but it was never a counter (hash digits: akarana
+       1977), so the Studio shows framesVersionLabel instead. See
+       supabase/migrations/20260918_add_course_visual_bake_number.sql. */
     framesVersion: visual ? Number(visual.published_version) || null : null,
+    framesVersionLabel: (() => {
+      const map = Array.isArray(mapRows) ? mapRows[0] || null : null;
+      const version = courseVersionLabel.courseVersion({
+        bakeNumber: visual ? visual.bake_number : null,
+        objectsRevision: map ? map.objects_revision : null,
+        bakeObjectsRevision: visual ? visual.bake_objects_revision : null
+      });
+      return version ? version.label : null;
+    })(),
     building: !!live,
     activeKind: live ? live.kind : null,
     checkpoint: derived.checkpoint,

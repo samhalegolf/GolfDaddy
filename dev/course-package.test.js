@@ -118,6 +118,11 @@ test("a course with published geometry but no visuals reports lite-geo-ready wit
   const result = await buildCoursePackage("pupuke");
   assert.strictEqual(result.status, "lite-geo-ready");
   assert.strictEqual(result.geometryVersion, "v1");
+  /* Object-only: no baked picture, so the major is 0 and the leading zero is the thing
+     that says so. This fixture carries no objects_revision at all, which is the honest
+     "we do not know" - and an unknown revision must produce no label rather than v0.0. */
+  assert.strictEqual(result.bakeNumber, 0);
+  assert.strictEqual(result.versionLabel, null);
   assert.strictEqual(result.holes.length, 1);
   assert.deepStrictEqual(result.holes[0].tee, { lat: -36.799, lng: 174.699 });
   assert.deepStrictEqual(result.holes[0].green, { lat: -36.8, lng: 174.7 });
@@ -130,16 +135,29 @@ test("a course with a published full package reports full-map-ready even while a
      only shipped for hole 1 here, which is all the package needs to carry. */
   const nineHoles = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [String(i + 1), {}]));
   stubFetch({
-    maps: [{ course_id: "pupuke", published: true, geometry_version: "v1", objects_json: { "green-1": { type: "green", holeNumber: 1, position: { lat: -36.8, lng: 174.7 } } }, holes_json: nineHoles }],
-    visuals: [{ published_version: 3, uploaded_assets: [{ path: "pupuke/frames/r1/h1.jpg", role: "hole-frame-published", holeNumber: 1, metadata: { width: 1024, height: 768, bounds: { south: -36.81 } } }], diagnostics: { generatedAt: "2026-01-01T00:00:00.000Z" } }],
+    maps: [{ course_id: "pupuke", published: true, geometry_version: "v1", objects_revision: 6, objects_json: { "green-1": { type: "green", holeNumber: 1, position: { lat: -36.8, lng: 174.7 } } }, holes_json: nineHoles }],
+    visuals: [{ published_version: 1977, bake_number: 3, bake_objects_revision: 4, uploaded_assets: [{ path: "pupuke/frames/r1/h1.jpg", role: "hole-frame-published", holeNumber: 1, metadata: { width: 1024, height: 768, bounds: { south: -36.81 }, version: { label: "v3.0", major: 3, minor: 0, buildId: "r1" } } }], diagnostics: { generatedAt: "2026-01-01T00:00:00.000Z" } }],
     visualJobs: [{ id: "job-export-running", kind: "export", status: "running" }]
   });
   const result = await buildCoursePackage("pupuke");
   assert.strictEqual(result.status, "full-map-ready", "a published package stays playable while a rebuild runs in the background");
+  /* bake_number, NOT published_version. published_version is 1977 in this fixture on
+     purpose - that is the shape of the real akarana row, hash digits rather than a count
+     - and a package that reported it would hand the freshness check a number that can go
+     down on the next bake. */
   assert.strictEqual(result.packageVersion, 3);
+  assert.strictEqual(result.bakeNumber, 3);
+  assert.strictEqual(result.objectsRevision, 6);
+  /* Bake 3, made from geometry revision 4, sitting on a course now at revision 6: two
+     geometry edits since the pictures were taken. */
+  assert.strictEqual(result.versionLabel, "v3.2");
   assert.strictEqual(result.holes.length, 1);
   assert.ok(result.holes[0].visual.url.includes("/api/course-visual-assets"));
   assert.ok(result.holes[0].visual.checksum, "a checksum travels with the descriptor so a client can detect it changed");
+  /* The IMAGE still says v3.0 - it was baked before those two edits. The course label and
+     the asset label disagreeing is the signal, not a bug: recomputing the stamp from the
+     course here would erase the only evidence that the picture is behind the geometry. */
+  assert.strictEqual(result.holes[0].visual.version.label, "v3.0");
 });
 
 test("a published partial visual package remains full-map-ready and describes its missing holes", async () => {

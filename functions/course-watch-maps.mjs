@@ -33,6 +33,7 @@
 import sharp from "sharp";
 import watchMapCore from "../scripts/gd-watch-map-core.js";
 import { objectsVersion } from "./lib/gd-course-package-shape.mjs";
+import courseVersionLabel from "../scripts/gd-course-version-label.js";
 import { decodeElevation, hillshade, ambientOcclusion, RELIEF_DEFAULTS } from "./lib/gd-relief-core.mjs";
 import { applyRelief, greenContourSvg } from "./lib/gd-visual-export-core.mjs";
 import greenCore from "../scripts/gd-green-contours-core.js";
@@ -499,14 +500,34 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
   }
 
   const status = holes.length === 0 ? "failed" : errors.length === 0 && holes.length === holeNumbers.length ? "ready" : "partial";
+
+  /* The Watch package's own publish counter, and the geometry revision it was drawn
+     from. Its own, deliberately: the Watch pipeline is separate from the native bake
+     (see this file's header), so a Watch map is named W-v1.0 and can never be read as
+     the phone's v1.0 for the same course.
+
+     recipe_version is NOT this number - it moves when the recipe changes, so three
+     regenerations on recipe v3 would all be called v3 and "which asset is this" would
+     have no answer. Counted off the stored row, failing soft: a package that generated
+     is worth keeping even if its number could not be read. */
+  let watchBuildNumber = 1;
+  try {
+    const priorRows = await supabaseFetch(WATCH_TABLE + "?select=watch_build_number&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
+    const prior = Array.isArray(priorRows) ? priorRows[0] || null : null;
+    watchBuildNumber = (Number(prior && prior.watch_build_number) || 0) + 1;
+  } catch (error) { /* no prior package, or unreadable: this is build 1 */ }
+  const sourceObjectsRevision = Number.isFinite(Number(map && map.objects_revision)) ? Number(map.objects_revision) : null;
+
   const row = {
     id: courseId,
     course_id: courseId,
     status,
     watch_package_version: version,
+    watch_build_number: watchBuildNumber,
     recipe_id: watchMapCore.WATCH_MAP_RECIPE_V1.id,
     recipe_version: watchMapCore.WATCH_MAP_RECIPE_V1.version,
     source_objects_version: objectsVersion(map),
+    source_objects_revision: sourceObjectsRevision,
     hole_count: holeNumbers.length,
     ready_hole_count: holes.length,
     total_bytes: totalBytes,
@@ -669,14 +690,35 @@ function deliverySummary(holes) {
   };
 }
 
-function reportShape(row) {
+/* The stored package's label. Drift - the minor number - is the distance between the
+   geometry revision this package was generated from and the revision the course is at
+   NOW, so a caller holding the course row passes it as currentObjectsRevision. Without
+   one the package still names itself correctly, it just reports no drift; a made-up
+   drift figure would be worse than none. */
+function watchVersionLabel(row, currentObjectsRevision) {
+  const source = row && row.source_objects_revision == null ? null : Number(row.source_objects_revision);
+  const version = courseVersionLabel.watchVersion({
+    buildNumber: row && row.watch_build_number,
+    objectsRevision: currentObjectsRevision == null ? source : currentObjectsRevision,
+    sourceObjectsRevision: source
+  });
+  return version ? version.label : null;
+}
+
+function reportShape(row, currentObjectsRevision) {
   if (!row) return { status: "none", holeCount: 0, readyHoleCount: 0, totalBytes: 0, holes: [], errors: [] };
   return {
     status: row.status,
     watchPackageVersion: row.watch_package_version,
+    /* "W-v1.0" - what this package is called. The minor is drift: it grows when the
+       course's geometry moves on without the Watch package being regenerated, which is
+       precisely when a wrist is showing something the phone no longer agrees with. */
+    versionLabel: watchVersionLabel(row, currentObjectsRevision),
+    watchBuildNumber: row.watch_build_number || null,
     recipeId: row.recipe_id,
     recipeVersion: row.recipe_version,
     sourceObjectsVersion: row.source_objects_version,
+    sourceObjectsRevision: row.source_objects_revision == null ? null : Number(row.source_objects_revision),
     holeCount: row.hole_count,
     readyHoleCount: row.ready_hole_count,
     totalBytes: row.total_bytes,
@@ -709,6 +751,15 @@ function recoveryReport(courseId, stored) {
   };
 }
 
+async function loadCourseObjectsRevision(courseId) {
+  try {
+    const rows = await supabaseFetch(MAPS_TABLE + "?select=objects_revision&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
+    const row = Array.isArray(rows) ? rows[0] || null : null;
+    const revision = Number(row && row.objects_revision);
+    return Number.isFinite(revision) ? revision : null;
+  } catch (error) { return null; }
+}
+
 async function loadWatchRow(courseId) {
   const rows = await supabaseFetch(WATCH_TABLE + "?select=*&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []);
   return Array.isArray(rows) ? rows[0] || null : null;
@@ -723,7 +774,11 @@ export default async function courseWatchMaps(req) {
     const courseId = slug(url.searchParams.get("courseId") || url.searchParams.get("course_id"));
     if (!courseId) return json(400, { error: "courseId required" });
     const row = await loadWatchRow(courseId);
-    const report = reportShape(row);
+    /* Read alongside the package so the report can say how far the course has moved since
+       the wrist copy was made - a W-v1.3 on a package generated at W-v1.0 is a Watch
+       showing geometry the phone has already left behind. Fails soft to "no drift known". */
+    const currentObjectsRevision = await loadCourseObjectsRevision(courseId);
+    const report = reportShape(row, currentObjectsRevision);
     if (row && Array.isArray(report.holes) && report.holes.length) return json(200, Object.assign({ courseId }, report));
     try {
       const stored = await findStoredPackage(courseId);
@@ -746,7 +801,7 @@ export default async function courseWatchMaps(req) {
   const courseId = slug(payload && (payload.courseId || payload.course_id));
   if (!courseId) return json(400, { error: "courseId required" });
 
-  const maps = await supabaseFetch(MAPS_TABLE + "?select=course_id,objects_json,holes_json,published_at,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1");
+  const maps = await supabaseFetch(MAPS_TABLE + "?select=course_id,objects_json,holes_json,objects_revision,published_at,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1");
   const map = Array.isArray(maps) ? maps[0] : null;
   if (!map || !map.objects_json || !Object.keys(map.objects_json).length) {
     return json(404, { error: "course has no published geometry to generate Watch maps from" });

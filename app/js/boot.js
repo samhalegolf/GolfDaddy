@@ -561,6 +561,9 @@
          as permanently "Update available". */
       objectsVersion: pkg.objectsVersion || null,
       mapVersion: pkg.packageVersion || null,
+      bakeNumber: pkg.bakeNumber == null ? null : pkg.bakeNumber,
+      objectsRevision: pkg.objectsRevision == null ? null : pkg.objectsRevision,
+      versionLabel: pkg.versionLabel || null,
       pkg: pkg
     });
   }
@@ -583,6 +586,16 @@
 
   function updateVersion(pkg, mapType) {
     return [mapType || "map", pkg && pkg.packageVersion || "", pkg && pkg.objectsVersion || ""].join(":");
+  }
+
+  /* "v1.5" for the package being offered, or "" when the server did not report one.
+     Read straight off the package rather than recomputed here - the server owns the
+     scheme (scripts/gd-course-version-label.js) and a second implementation of it in the
+     shell is how the freshness fields drifted apart the first time. The brackets come
+     from that same file's suffixed(), so every surface punctuates a version identically
+     and every surface drops it identically when there is not one. */
+  function versionLabelOf(pkg) {
+    return pkg && typeof pkg.versionLabel === "string" ? pkg.versionLabel : "";
   }
 
   function dismissedUpdates() {
@@ -666,7 +679,8 @@
     }
     var kind = app.courseVersions.updateKind(local, {
       objectsVersion: pkg.objectsVersion || null,
-      mapVersion: pkg.packageVersion || null
+      mapVersion: pkg.packageVersion || null,
+      bakeNumber: pkg.bakeNumber == null ? null : pkg.bakeNumber
     });
     if (kind === "none") return;
     /* Partial -> complete is not an ordinary invisible geometry refresh. It
@@ -748,16 +762,21 @@
      player is already using the map they have. */
   function showMapUpdateBar(course, pkg, mapType) {
     if (updateWasDismissed(course, pkg, mapType)) return;
-    /* "Available" is the right word only when the device has nothing. With a
-       copy already saved this bar is offering a NEWER one, and saying
-       "available" there is the same overclaim checkForMapUpdate just stopped
-       making. */
+    /* Three different things, three different sentences. With nothing saved this is a
+       MAP becoming available and the bar says so; with a copy already saved it is an
+       UPDATE to the copy you hold, and calling that "map available" was the same
+       overclaim checkForMapUpdate stopped making. */
     var local = app.courseStore.load(course.courseId);
     var repair = !!(local && local.pkg && local.pkg.readiness === "partial" && pkg.readiness === "complete");
-    document.getElementById("mapUpdateLabel").textContent =
+    /* The version being OFFERED, in brackets after the message - "Update Available
+       (v1.5)". Appended only when the server reported one, so a course with no countable
+       revision reads exactly as it did before rather than as "Update Available ()". */
+    var message =
       repair ? "COURSE MAP FIXED · Complete map ready"
-      : local ? "Updated map available"
+      : local ? "Update Available"
         : mapType === "published" ? "Published map available" : "Course map available";
+    document.getElementById("mapUpdateLabel").textContent =
+      app.courseVersionLabel.suffixed(message, versionLabelOf(pkg));
     document.getElementById("mapUpdateBar").classList.remove("hiddenState");
     mapUpdatePrompt = { course: course, pkg: pkg, mapType: mapType };
     document.getElementById("mapUpdateDownload").textContent = "Update";
