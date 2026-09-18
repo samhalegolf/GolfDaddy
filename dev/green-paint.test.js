@@ -336,7 +336,7 @@ check("the worker publishes the descriptor and re-bakes every course", () => {
   const fs = require("node:fs");
   const worker = fs.readFileSync(path.join(__dirname, "..", "functions", "course-visual-worker-background.mjs"), "utf8");
   assert.ok(/greenDrawing: frame\.greenDrawing \|\| null/.test(worker), "playSurface.greenDrawing must be written");
-  assert.ok(/GREEN_FRAME_STAMP = "greenframe2"/.test(worker), "the stamp must move, or resumed exports keep their burnt-in lines");
+  assert.ok(/GREEN_FRAME_STAMP = "greenframe([3-9]|[1-9][0-9])"/.test(worker), "the stamp must have moved past greenframe2, or resumed exports keep their burnt-in lines");
 });
 
 check("the recipe's green switches survive a Studio slider release", () => {

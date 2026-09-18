@@ -179,6 +179,10 @@ body.surface-published.tilt-lock #surfaceStage {
 #surfaceMesh { position: absolute; top: 0; left: 0; display: none; pointer-events: none; }
 body.surface-published.surface-mesh #surfaceMesh { display: block; }
 body.surface-published #surfaceImage { display: block; }
+/* The green frame rides the same camera as the hole frame (painter writes its matrix from the
+   solved one) and only shows in green focus, where its extra pixels are what is on screen. */
+#surfaceGreen { position: absolute; top: 0; left: 0; display: none; pointer-events: none; transform-origin: 0 0; }
+body.surface-published[data-frame-stage="zoom"] #surfaceGreen[src] { display: block; }
 
 /* The player's projected position, on whichever presentation is up.
    Positioned by play.js in viewport pixels; hidden whenever there is no fix

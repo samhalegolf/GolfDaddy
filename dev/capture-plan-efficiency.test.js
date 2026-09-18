@@ -25,8 +25,9 @@ const { pathToFileURL } = require("url");
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
 
-/* A course of straight holes on a diagonal, which is the case that hurts: the axis-aligned box
-   a rotated lens is captured through is far larger than the lens itself. */
+/* A course of straight holes on a diagonal, which is the case that used to hurt: the
+   axis-aligned box a rotated 9:16 lens was captured through was far larger than the hole. The
+   corridor is now framed on the hole itself, so a diagonal hole costs only its own box. */
 function course(holeCount = 6, lengthDeg = 0.004) {
   const objects = {};
   for (let h = 1; h <= holeCount; h++) {
@@ -50,7 +51,7 @@ const SOURCE = {
   imagery: { adapter: "xyz", urlTemplate: "https://tiles.test/{z}/{x}/{y}.webp", maxUsefulZoom: 20 },
   terrain: null
 };
-const MAX_OUTPUT_PX = 3072;
+const MAX_OUTPUT_PX = 2048;
 
 let plan9;
 
@@ -90,11 +91,14 @@ let plan9;
   });
 
   test("clamping actually bites - the fixture would otherwise overshoot", () => {
-    const pkg = course();
-    /* Same plan with no source: the planner cannot grid, falls back to metric bounds, and the
-       policy zooms stand. If this ever stops overshooting the test above proves nothing. */
-    const unclamped = planCourseCaptures(pkg, { terrainSource: null });
+    /* Long holes: ~890m on the diagonal, which cannot fit a z19 frame under the 2048 cap.
+       (The default fixture no longer overshoots at all - a tightly framed 500m hole fits z19 -
+       which is the point of tight framing, but it would make the test above vacuous.) */
+    const pkg = course(6, 0.008);
+    /* Same plan with the planner's frame zoom stripped, so the policy zooms stand. If this
+       ever stops overshooting the test above proves nothing. */
     const clamped = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX, terrainSource: null });
+    const unclamped = clamped.map(item => Object.assign({}, item, { frameZoom: 0 }));
     const tilesOf = (plan) => plan.reduce((sum, item) => {
       const g = captureGrid(item, { source: SOURCE });
       return sum + (g ? g.tiles.length : 0);
@@ -233,11 +237,19 @@ let plan9;
     });
   });
 
-  test("green surrounds may sit at z20 only when the frame can show it", () => {
-    /* The policy still asks for z20 - the clamp is what decides. A green on a tiny frame gets
-       pulled down; the policy itself is unchanged so nothing else has to move. */
-    assert.strictEqual(capturePolicy("green-surround").targetZoom, 20);
+  test("green surrounds are shot at the source's best zoom, never below z20", () => {
+    /* The policy asks for the top of the range and the source ceiling is what decides - a
+       green is the one capture whose resolution is guaranteed, so it takes whatever the imagery
+       resolves. The corridor stays z19 (best effort within the frame cap). */
+    const policy = capturePolicy("green-surround");
+    assert.ok(policy.targetZoom >= 22 && policy.minZoom === 20, "green policy reaches for the ceiling");
     assert.strictEqual(capturePolicy("play-corridor").targetZoom, 19);
+    const sharp = Object.assign({}, SOURCE, { imagery: Object.assign({}, SOURCE.imagery, { maxUsefulZoom: 21 }) });
+    const plan = planCourseCaptures(course(2), { source: sharp, maxOutputPx: MAX_OUTPUT_PX, terrainSource: null });
+    plan.filter(i => i.role === "green-surround").forEach(item => {
+      const g = captureGrid(item, { source: sharp });
+      assert.strictEqual(g.captureZoom, 21, `green shot at z${g.captureZoom} from a z21 source`);
+    });
   });
 
   let failures = 0;

@@ -27,7 +27,7 @@ sharp.cache(false);
    rather than the work - and the work is not the bottleneck here anyway; tile fetching is.
    Trading compositing throughput we are not using for headroom we keep running out of. */
 sharp.concurrency(1);
-import { planCourseCaptures, captureGrid, packageHoleData, courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
+import { planCourseCaptures, captureGrid, packageHoleData, courseBoundsFor, GREEN_FRAME_MAX_PX } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason, attributionFor } from "./lib/gd-imagery-sources.mjs";
 import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
 import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, heightsFromFloat32Tiff, terrainRgbPngFromHeights, decodeElevation } from "./lib/gd-relief-core.mjs";
@@ -48,27 +48,26 @@ const TILE_CONCURRENCY = 16;
 const TILE_TIMEOUT_MS = 15000;
 const TILE_RETRIES = 3;
 
-/* The export only ever reads the 2048 rendition, so the full-resolution master costs ~90MB per
-   course and is never read back. Deleting it is tempting but NOT free: the in-browser bake
-   works at up to 4096 (gd-course-visual-engine.js), so cloud frames are currently half the
-   linear resolution of the local preview. If that parity gap is ever closed by raising the
-   cloud output, these masters are the only way to do it without re-shooting 6.6k tiles.
-   Kept until that call is made - flipping this to false is a one-liner, un-flipping it needs a
-   fresh snapshot. */
-const KEEP_FULL_RES_MASTER = true;
+/* The export only ever reads the rendition. Captures now clamp to the zoom their frame renders
+   at, so a master is almost always the same pixels as its rendition, stored twice and never
+   read back. Off. Raising EXPORT_RENDITION_PX later means a fresh snapshot (re-shooting
+   tiles), which is the honest cost of it. */
+const KEEP_FULL_RES_MASTER = false;
 
-/* Longest edge of the export-ready rendition AND of the frames rendered from it. The two are
-   one number on purpose: the rendition exists so the export never decodes a 17MP master, so
-   shipping it smaller than the frame would just upscale mush, and shipping it larger would put
-   the decode cost straight back.
+/* Longest edge of the export-ready rendition AND of the hole frames rendered from it. The two
+   are one number on purpose: the rendition exists so the export never decodes a 17MP master,
+   so shipping it smaller than the frame would just upscale mush, and shipping it larger would
+   put the decode cost straight back.
 
-   Was 2048, which dated from the dead engine-in-Node path that OOM-killed workers - the sharp
-   compositor that replaced it was never the thing that got stuck. The masters kept by
-   KEEP_FULL_RES_MASTER are shot well above this, so raising it re-renditions from storage and
-   never re-shoots tiles. 4096 is the next stop if worker memory holds (peak scales with the
-   square of this). Changing it MUST come with a bump to the out tag in runExportJob's version
-   hash, or already-uploaded frames at the old size get resumed as if they were current. */
-const EXPORT_RENDITION_PX = 3072;
+   2048 because that is what the phone can SHOW of a hole frame: the terrain mesh renders it
+   through a canvas capped at MESH_MAX_PX = 2048 (app/js/painter.js), so pixels above that
+   are decoded, held in RAM and never reach the screen. Green detail does not come from here -
+   the green frame has its own cap (GREEN_FRAME_MAX_PX) and is overlaid at native resolution.
+   Raise this and MESH_MAX_PX together or not at all; captures clamp to the frame zoom this
+   implies, so raising it means a fresh snapshot, and it MUST come with a bump to the out tag
+   in runExportJob's version hash, or already-uploaded frames at the old size get resumed as
+   if they were current. */
+const EXPORT_RENDITION_PX = 2048;
 const NATURAL_PRESET_ID = "clarity-course-natural-v1";
 
 /* Stamps the relief lighting into cache keys. Bump it whenever the shading constants in
@@ -82,7 +81,16 @@ const RELIEF_STAMP = "relief2-perhole-x" + RELIEF_DEFAULTS.exaggeration + "-az" 
 /* greenframe2: paint and ink decoupled, and the frame publishes which of the two it carries
    (playSurface.greenDrawing). Bumped so every course re-bakes under the new rule rather than
    resuming a frame that still has the lines burnt in. */
-const GREEN_FRAME_STAMP = "greenframe2";
+/* greenframe3: the green surround left the hole frame (corridor only, tightly framed) and is
+   shot at the source's best zoom. Both change published pixels and extents. */
+const GREEN_FRAME_STAMP = "greenframe3";
+/* Plan ids hash each capture's PADDED BOUNDS, not the grid captureGrid derives from them - so
+   a change to how a capture is framed (lens, bleed, zoom policy) leaves every id, and so the
+   planKey, exactly as it was, and a re-snapshot would happily reuse stored masters shot under
+   the old geometry against the new grid's metadata. This stamps the geometry rules into the
+   planKey. Bump it whenever pixelRect / applyHoleView / applyLens / capturePolicy change what
+   a capture covers. */
+const CAPTURE_GEOMETRY_STAMP = "geom-holeview1";
 /* paint2: tiers moved out of the compositor into buildGreenDrawing's display list, and the
    palette is now sampled off the green's own box rather than a fixed 520px downscale of the
    whole frame. Both change published pixels, so already-exported frames must not resume. */
@@ -162,8 +170,7 @@ async function fetchTileOnce(url) {
 }
 
 /* Captures overlap, heavily and by design: corridor segments carry a 42m overlap, a green sits
-   inside its own corridor, and parallel holes share the axis-aligned box each rotated lens is
-   captured through. Measured on Jacks Point, 2250 tile requests covered 614 distinct tiles -
+   inside its own corridor, and parallel holes share bleed. Measured on Jacks Point, 2250 tile requests covered 614 distinct tiles -
    73% of the traffic was re-fetching bytes the run already had, one tile 18 times over.
 
    So tiles are cached for the run. Bounded, because a course is not the only thing that has to
@@ -387,7 +394,7 @@ async function runSnapshotJob(job, deadlineAt) {
      RELIEF_STAMP is in the key for the same reason. What gets stored for a terrain capture is
      shading, not elevation, so the lighting constants are baked into those bytes - change the
      exaggeration and every stored relief is stale in a way no other signal would catch. */
-  const planKey = hashText(source.key + "|" + RELIEF_STAMP + "|" + plan.map(item => item.id).join("|"));
+  const planKey = hashText(source.key + "|" + RELIEF_STAMP + "|" + CAPTURE_GEOMETRY_STAMP + "|" + plan.map(item => item.id).join("|"));
   const resumable = !!(job.result && job.result.progress && job.result.progress.planKey === planKey);
   /* Stored masters may only be reused when they were shot for THIS plan. The plan ids embed a
      hash of each capture's padded bounds, so a course whose geometry moved gets a different
@@ -497,8 +504,6 @@ async function runSnapshotJob(job, deadlineAt) {
         height: grid.imageHeight,
         bounds: grid.imageBounds,
         originPx: grid.originPx,
-        lensOrientation: grid.lensOrientation,
-        lensCornersPx: grid.lensCornersPx,
         anchorPins: item.anchorPins,
         captureAnchorPins: item.captureAnchorPins,
         terrainStageOnly: !!item.terrainStageOnly,
@@ -958,21 +963,21 @@ async function runExportJob(job, deadlineAt) {
     }
     return cachedBuffers[entry.path];
   }
-  function entryWithLensLocal(entry) {
-    return Object.assign({}, entry, {
-      lensLocalCorners: Array.isArray(entry.lensCornersPx) && entry.originPx
-        ? entry.lensCornersPx.map(p => ({ x: p.x - entry.originPx.x, y: p.y - entry.originPx.y }))
-        : []
-    });
-  }
-  const holeNumbers = [...new Set(entries.filter(e => e.holeNumber && !e.terrainStageOnly).map(e => Number(e.holeNumber)))].sort((a, b) => a - b);
+  /* A hole is its corridor. A green surround on its own (its corridor failed to shoot) is not a
+     hole frame and must not take the export down with it. */
+  const holeNumbers = [...new Set(entries.filter(e => e.holeNumber && !e.terrainStageOnly && e.role !== "green-surround").map(e => Number(e.holeNumber)))].sort((a, b) => a - b);
   /* Carried through from the captures so a frame always ships with the credit for the imagery
      it was made from - Play renders it from here, not from a client-side lookup table. */
   const framesIndex = { version: 1, courseId: pkg.courseId, exportVersion: version, presetId, generatedAt: capturesIndex.generatedAt, source: capturesIndex.source || null, overview: null, holes: [] };
   let rendered = 0;
   for (const holeNumber of holeNumbers) {
     const path = framesDir + "/h" + holeNumber + ".jpg";
-    const holeEntries = entries.filter(e => Number(e.holeNumber) === holeNumber && !e.terrainStageOnly);
+    const allHoleEntries = entries.filter(e => Number(e.holeNumber) === holeNumber && !e.terrainStageOnly);
+    /* The hole frame is the corridor only. The green surround is shot for the green frame
+       below; composited into the hole frame it added ground around the green at the hole's
+       zoom, never detail, and widened the frame to fit it. */
+    const holeEntries = allHoleEntries.filter(e => e.role !== "green-surround");
+    const greenEntry = allHoleEntries.find(e => e.role === "green-surround") || null;
     const holeBoundsList = holeEntries.map(e => e.bounds).filter(Boolean);
     let bounds = holeBoundsList.length ? { south: Math.min(...holeBoundsList.map(b => b.south)), west: Math.min(...holeBoundsList.map(b => b.west)), north: Math.max(...holeBoundsList.map(b => b.north)), east: Math.max(...holeBoundsList.map(b => b.east)) } : null;
     const data = holeData[holeNumber] || {};
@@ -1001,7 +1006,7 @@ async function runExportJob(job, deadlineAt) {
          but this leaves a corpse marker in the job row saying exactly where it died. */
       await heartbeatJob(job, { version, holesDone: framesIndex.holes.length, holesTotal: holeNumbers.length, stage: "rendering h" + holeNumber, rssMb: Math.round(process.memoryUsage().rss / 1048576) });
       const captures = [];
-      for (const entry of holeEntries) captures.push({ entry: entryWithLensLocal(entry), buffer: await bufferFor(entry) });
+      for (const entry of holeEntries) captures.push({ entry, buffer: await bufferFor(entry) });
 
       /* Elevation for THIS hole, cut from the course-wide capture, then shaded for it.
 
@@ -1140,17 +1145,16 @@ async function runExportJob(job, deadlineAt) {
       }
       /* The green at its own scale.
 
-         Same captures, but only the one shot FOR the green, so renderHoleSurfaceMercator frames
-         on that extent instead of the hole's and picks the zoom the ground can carry - z20 where
-         the hole frame gets z18. That is the whole fix for green focus: the hole frame has to
-         spread one 3072px grid over ~830m and lands a 45m green in about 106 pixels, which is
-         four times short of what the contour and tier work needs. Framed alone the same green is
-         ~423px. It is a small asset - the capture behind it is ~1.8MP over ~143m of ground -
-         because it covers a small piece of ground, not because anything was compromised. */
-      const greenCap = captures.find(c => c.entry && c.entry.role === "green-surround");
-      if (greenCap) {
+         Only the capture shot FOR the green, so renderHoleSurfaceMercator frames on that extent
+         instead of the hole's and picks the zoom the ground can carry - the source's best,
+         where the hole frame lands a zoom or two lower. The hole frame spreads one 3072px grid
+         over the whole hole and lands a 45m green in ~100-200 pixels; framed alone the same
+         green is 400px+, which is what the contour and tier work needs and what the phone
+         overlays in green focus. A small asset, because it covers a small piece of ground. */
+      if (greenEntry) {
         try {
-          const g = await renderHoleSurfaceMercator({ pins, captures: [greenCap], terrain, greenSurface, settings, maxDim: EXPORT_RENDITION_PX });
+          const greenCap = { entry: greenEntry, buffer: await bufferFor(greenEntry) };
+          const g = await renderHoleSurfaceMercator({ pins, captures: [greenCap], terrain, greenSurface, settings, maxDim: GREEN_FRAME_MAX_PX });
           const greenPath = framesDir + "/h" + holeNumber + ".green.jpg";
           await storageUpload(greenPath, g.jpeg, "image/jpeg");
           /* Flat, and carried INSIDE playSurface. The client is handed the published asset's

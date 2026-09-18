@@ -419,6 +419,7 @@
     img.style.transform = "matrix(" + activeFrame.a + "," + activeFrame.b + ","
       + (-activeFrame.b) + "," + activeFrame.a + "," + activeFrame.tx + "," + activeFrame.ty + ")";
     applyMeshFrame();
+    applyGreenFrame(meta);
     return true;
   }
 
@@ -495,6 +496,55 @@
       img.style.transform = ""; img.style.transformOrigin = "";
     }
     applyMeshFrame();
+    applyGreenFrame(meta);
+  }
+
+  /* The green frame is a second north-up mercator picture of part of the same ground, at a
+     higher zoom and its own origin. Its placement is DERIVED from the hole frame's solved
+     camera, never solved again: green px -> hole px is one scale (2^(holeZoom - greenZoom))
+     and one shift (the green origin in hole px), and the hole's matrix takes it from there.
+     So the two pictures cannot disagree about where the ground is, and every overlay keeps
+     projecting through the hole frame as before. */
+  function applyGreenFrame(meta) {
+    var green = el("surfaceGreen");
+    if (!green) return;
+    var gf = meta && meta.greenFrame;
+    if (!activeFrame || !gf || !gf.originPx || !gf.outputDimensions || !green.getAttribute("src")) {
+      /* No solved camera means the hole img is on its contain fallback; an untransformed green
+         would sit at natural size in the corner. Hidden, not merely unplaced. */
+      green.style.display = "none";
+      green.style.width = ""; green.style.height = ""; green.style.transform = "";
+      return;
+    }
+    green.style.display = "";
+    var k = Math.pow(2, Number(meta.captureZoom) - Number(gf.captureZoom));
+    var dx = Number(gf.originPx.x) * k - Number(meta.originPx.x);
+    var dy = Number(gf.originPx.y) * k - Number(meta.originPx.y);
+    var a = activeFrame.a, b = activeFrame.b;
+    green.style.width = Number(gf.outputDimensions.width) + "px";
+    green.style.height = Number(gf.outputDimensions.height) + "px";
+    green.style.transform = "matrix(" + (a * k) + "," + (b * k) + "," + (-b * k) + "," + (a * k) + ","
+      + (a * dx - b * dy + activeFrame.tx) + "," + (b * dx + a * dy + activeFrame.ty) + ")";
+  }
+
+  /* Point the green overlay at this surface's green frame, or at nothing. */
+  function setGreenFrame(meta) {
+    var green = el("surfaceGreen");
+    if (!green) return;
+    var gf = meta && meta.greenFrame;
+    var url = gf && gf.path ? apiUrl(surfaceLib.assetUrl(gf.path)) : null;
+    if (!url) {
+      green.removeAttribute("src");
+      green.style.width = ""; green.style.height = ""; green.style.transform = "";
+      return;
+    }
+    if (green.getAttribute("src") !== url) {
+      /* Drop the previous hole's pixels first: an img keeps painting its old bitmap until the
+         new one decodes, which would put the last green on this hole's frame for a beat. */
+      green.removeAttribute("src");
+      green.src = url;
+    }
+    warmed.add(url);
   }
 
   /* The live map's camera. The solved similarity is split: its SCALE becomes
@@ -1699,6 +1749,13 @@
     return apiUrl(visual.url || surfaceLib.assetUrl(visual.path));
   }
 
+  /* The hole's green frame, when the export published one. Warmed with the hole frame so
+     green focus is as instant as the hole is. */
+  function greenUrl(visual) {
+    var gf = visual && visual.playSurface && visual.playSurface.greenFrame;
+    return gf && gf.path ? apiUrl(surfaceLib.assetUrl(gf.path)) : null;
+  }
+
   /* Called once the hole you are actually looking at has settled, so the
      visible picture never queues behind the warm-up. */
   function warmCourse() {
@@ -1713,7 +1770,11 @@
     });
 
     /* A downloaded package carries its own visuals — warm straight from it. */
-    var fromPkg = holes.map(function (h) { return surfaceUrl(h && h.visual); }).filter(Boolean);
+    var fromPkg = [];
+    holes.forEach(function (h) {
+      fromPkg.push(surfaceUrl(h && h.visual), greenUrl(h && h.visual));
+    });
+    fromPkg = fromPkg.filter(Boolean);
     if (fromPkg.length) { warmPush(fromPkg); return; }
 
     /* Otherwise the course-visual record holds every hole's asset, and the store
@@ -1725,9 +1786,11 @@
       if (!n) return null;
       return ensureStore().surfaceFor(courseKey, n).catch(function () { return null; });
     })).then(function (answers) {
-      warmPush(answers.map(function (a) {
-        return a && a.state === "published" ? surfaceUrl(a.asset) : null;
-      }).filter(Boolean));
+      var urls = [];
+      answers.forEach(function (a) {
+        if (a && a.state === "published") urls.push(surfaceUrl(a.asset), greenUrl(a.asset));
+      });
+      warmPush(urls.filter(Boolean));
     }, function () {});
   }
 
@@ -1793,6 +1856,7 @@
       img.style.width = ""; img.style.height = "";
       img.style.transform = ""; img.style.transformOrigin = "";
     }
+    setGreenFrame(null);
     disposeMesh();
     activeFrame = null;
   }
@@ -2033,6 +2097,7 @@
       repaint("SURFACE_READY", function () {
         img.dataset.playSurface = JSON.stringify(asset.playSurface);
         img.src = url;
+        setGreenFrame(asset.playSurface);
         published = true;
         presentation = "published";
         surfaceFailed = null;

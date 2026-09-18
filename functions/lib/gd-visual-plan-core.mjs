@@ -15,10 +15,20 @@ import { exportImageUrl } from "./gd-imagery-sources.mjs";
    up baked into stored frames. */
 export function capturePolicy(role) {
   role = String(role || "");
-  const mobileHoleLens = { captureLens: "mobile-hole", lensShape: "mobile-hole", lensAspectRatio: 9 / 16, lensOrientation: "play-axis", lensFit: "expand-bounds" };
-  const greenSquareLens = { captureLens: "green-square", lensShape: "green-square", lensAspectRatio: 1, lensOrientation: "map-axis", lensFit: "expand-bounds" };
-  if (role === "green-surround") return Object.assign({ role, label: "Super HD green surrounds", quality: "super-hd", targetZoom: 20, minZoom: 20, maxZoom: 20, maxTiles: 220, bleedMeters: 26, bleedPx: 220, stitchLayer: 30, fixedZoom: true }, greenSquareLens);
-  if (role === "play-corridor") return Object.assign({ role, label: "HD play corridor", quality: "hd", targetZoom: 19, minZoom: 19, maxZoom: 19, maxTiles: 320, bleedMeters: 32, bleedPx: 220, stitchLayer: 20, fixedZoom: true, maxSegmentMeters: 320, segmentOverlapMeters: 42, maxSegments: 6 }, mobileHoleLens);
+  /* The green is shot at the sharpest zoom the imagery source actually resolves (captureGrid
+     clamps to the source's maxUsefulZoom), never below z20. It is the one capture whose
+     resolution is guaranteed: it frames on its own extent and renders its own frame, so no
+     hole length can pull it down. */
+  /* bleedPx is authored against targetZoom (pixelRect rescales it), so 880 at z22 is the
+     same ~23m of ground the old 220 at z20 was: green plus a margin the zoom stage can show. */
+  const greenSquareLens = { lensAspectRatio: 1 };
+  if (role === "green-surround") return Object.assign({ role, label: "Super HD green surrounds", quality: "super-hd", targetZoom: 22, minZoom: 20, maxZoom: 22, maxTiles: 220, bleedMeters: 26, bleedPx: 880, stitchLayer: 30 }, greenSquareLens);
+  /* The corridor is framed on what the phone shows of the hole (HOLE_VIEW) and nothing more.
+     It used to be expanded into a 9:16 window along the play axis PER SEGMENT and then boxed
+     north-up, and the union of those boxes plus bleeds put 2-3x the hole's ground into every
+     frame (Jacks Point h1: a 333m hole in a 697x844m picture), pushing the frame zoom down a
+     step to fit the cap. */
+  if (role === "play-corridor") return { role, label: "HD play corridor", quality: "hd", targetZoom: 19, minZoom: 19, maxZoom: 19, maxTiles: 320, bleedMeters: 32, bleedPx: 220, stitchLayer: 20, maxSegmentMeters: 320, segmentOverlapMeters: 42, maxSegments: 6 };
   if (role === "terrain-reference") return { role, label: "Terrain relief reference", quality: "terrain-map", targetZoom: 16, minZoom: 14, maxZoom: 17, maxTiles: 260, bleedMeters: 130, bleedPx: 380, stitchLayer: 5, terrainStageOnly: true };
   return { role: "course-backdrop", label: "Live map underlay", quality: "live-map-base", targetZoom: 17, minZoom: 16, maxZoom: 18, maxTiles: 260, bleedMeters: 120, bleedPx: 420, stitchLayer: 0 };
 }
@@ -318,22 +328,9 @@ export function planCourseCaptures(pkg, opts = {}) {
     if (boundsSpanM(greenBounds).diag < 8) greenBounds = padBounds(greenBounds, 16);
     const greenItem = item("green-surround", greenBounds, holeNumber, data);
     if (!greenItem) return;
-    /* The green surround used to buy detail the corridor could not: z20 against the corridor's
-       z19. Now that every capture clamps to the zoom its frame renders at, the two sit at the
-       SAME zoom - so on a long hole the green surround is the identical ground at the identical
-       resolution, composited on top of itself, costing a fetch, decode, composite, encode and
-       upload per hole for pixels already present.
-
-       It is NOT redundant everywhere, and the difference is not about detail: the corridor is a
-       9/16 window along the play axis, so a SHORT hole gets a narrow one, while the green
-       surround is square. On Jacks Point's two shortest holes, dropping it took 47% and 30% off
-       the frame - lateral ground around the green, which is exactly where a player who has
-       missed is standing. So keep it only where it actually reaches past the corridor. */
-    /* It used to be dropped when the corridor already covered that ground, because the only
-       thing it could add to the HOLE frame was ground. It now also feeds a green-scale frame of
-       its own, which the corridor cannot supply at any extent - so it is kept regardless. The
-       cost is one small capture per hole: a ~95m square at z20 is under a megapixel, against the
-       37MP captures that clamp was written to stop. */
+    /* The green surround feeds the hole's green frame (h<N>.green.jpg) and nothing else: it is
+       no longer composited into the hole frame, where at the hole's zoom it could only add
+       ground, not detail. One small capture per hole. */
     plan.push(greenItem);
   });
   /* Don't shoot sharper than the frame we render.
@@ -345,10 +342,9 @@ export function planCourseCaptures(pkg, opts = {}) {
      composited to produce ~72MP of frames, with the biggest single capture at 37.9MP,
      which is also what put the worker against its memory ceiling.
 
-     What the export merges is the capture IMAGE bounds - the lens-expanded, bleed-padded
-     rectangles - not the hole's metric bounds, and the lens expansion is large enough that
-     estimating from the metric bounds lands a whole zoom high. So when a source is available
-     this grids each capture once to find those bounds, then clamps. The second pass is stable
+     What the export merges is the capture IMAGE bounds - the bleed-padded rectangles - not
+     the hole's metric bounds, so when a source is available this grids each capture once to
+     find those bounds, then clamps. The second pass is stable
      because bleedPx is now pinned to ground distance (see pixelRect), so re-gridding at a
      lower zoom covers the same ground and cannot walk the frame zoom down again.
 
@@ -359,7 +355,8 @@ export function planCourseCaptures(pkg, opts = {}) {
      framed at a zoom the source can only upscale into. */
   const imageryCeiling = Number(opts.source && opts.source.imagery && opts.source.imagery.maxUsefulZoom) || 19;
   holeNumbers.forEach(holeNumber => {
-    const items = plan.filter(i => Number(i.holeNumber) === holeNumber && !i.terrainStageOnly);
+    /* The green surround renders its own frame, so it has no say in the hole frame's extent. */
+    const items = plan.filter(i => Number(i.holeNumber) === holeNumber && !i.terrainStageOnly && i.role !== "green-surround");
     let bounds = null;
     if (opts.source) {
       const grids = items.map(i => captureGrid(i, { source: opts.source })).filter(Boolean);
@@ -380,7 +377,7 @@ export function planCourseCaptures(pkg, opts = {}) {
         const g = captureGrid(item, { source: opts.source });
         if (g && g.imageBounds) gb = g.imageBounds;
       }
-      const z = frameZoomFor(gb, opts.maxOutputPx, imageryCeiling);
+      const z = frameZoomFor(gb, Math.max(Number(opts.maxOutputPx) || 0, GREEN_FRAME_MAX_PX), imageryCeiling);
       if (z) item.frameZoom = z;
       item.ownFrame = "green";
       return;
@@ -394,7 +391,11 @@ export function planCourseCaptures(pkg, opts = {}) {
 
 /* The zoom renderHoleSurfaceMercator will pick for these bounds. Kept in step with the export
    deliberately - if the two ever disagree, captures are either wasted or upscaled. */
-export const DEFAULT_MAX_OUTPUT_PX = 3072;
+export const DEFAULT_MAX_OUTPUT_PX = 2048;
+/* The green frame's own cap. The green is the one picture whose resolution is guaranteed, so
+   it is not held to the hole frame's budget: a green box with its margin is ~150-200m, and at
+   the sharpest sources (z21) that is over 3072px. Small in bytes either way. */
+export const GREEN_FRAME_MAX_PX = 4096;
 /* The scale factor was clamped at 1, which floored log2(f) at 0 and made z19 a hard ceiling
    no matter how much room was left under maxOutputPx. That is why short holes look soft: a
    150m par 3 spans ~1000px at z19, renders as a ~1000px frame, and gets stretched across the
@@ -436,6 +437,57 @@ export function unprojectPoint(x, y, zoom) {
   return { lat, lng };
 }
 
+/* What the phone's hole stage shows, in hole lengths (play-surface.js FRAME_GUIDE: the tee
+   sits at 0.90 of the screen height and the green at 0.28, so tee->green is 0.62 of it, and a
+   9:19.5 phone is 0.46 as wide as it is tall). Ground outside this is never on screen in the
+   hole stage, and the lock and zoom stages sit inside it. halfCross carries a margin over the
+   0.375 a 9:19.5 phone needs, for wider phones and the edge-pan reveal. */
+const HOLE_VIEW = { behindTee: 0.16, beyondGreen: 0.46, halfCross: 0.42 };
+
+/* Play-axis lens for a corridor capture. Measured from the GROUND POINTS (this segment's
+   route and, on the last segment, the green shape) along the HOLE's tee->green axis - not
+   from the north-up padded box, whose corners stick out sideways on a diagonal hole and would
+   double the width. Every segment carries the full HOLE_VIEW width; the first also reaches
+   behind the tee and the last beyond the green; bleed is added on every side. The north-up
+   box of that is what gets captured, and the union over a hole's segments is the phone's
+   viewport. */
+function applyHoleView(item, zoom, bleedPx) {
+  const hole = item.anchorPins || {};
+  const holeRoute = points(hole.route);
+  const start = holeRoute[0] || point(hole.tee);
+  const end = holeRoute[holeRoute.length - 1] || point(hole.green);
+  if (!start || !end) return null;
+  const a = projectPoint(start.lat, start.lng, zoom);
+  const b = projectPoint(end.lat, end.lng, zoom);
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (!(len > 1)) return null;
+  const ux = dx / len, uy = dy / len, px = -uy, py = ux;
+  const seg = item.captureAnchorPins || hole;
+  const ground = [seg.tee, seg.green, ...(seg.route || []), ...(seg.greenShape || [])].map(point).filter(Boolean)
+    .map(p => projectPoint(p.lat, p.lng, zoom));
+  if (!ground.length) return null;
+  const along = ground.map(c => (c.x - a.x) * ux + (c.y - a.y) * uy);
+  const cross = ground.map(c => Math.abs((c.x - a.x) * px + (c.y - a.y) * py));
+  const index = Number(item.segmentIndex) || 1, count = Number(item.segmentCount) || 1;
+  let alongMin = Math.min(...along) - bleedPx, alongMax = Math.max(...along) + bleedPx;
+  if (index <= 1) alongMin = Math.min(alongMin, -HOLE_VIEW.behindTee * len);
+  if (index >= count) alongMax = Math.max(alongMax, len * (1 + HOLE_VIEW.beyondGreen));
+  const half = Math.max(Math.max(...cross) + bleedPx, HOLE_VIEW.halfCross * len);
+  const box = [
+    { x: a.x + ux * alongMin - px * half, y: a.y + uy * alongMin - py * half },
+    { x: a.x + ux * alongMin + px * half, y: a.y + uy * alongMin + py * half },
+    { x: a.x + ux * alongMax - px * half, y: a.y + uy * alongMax - py * half },
+    { x: a.x + ux * alongMax + px * half, y: a.y + uy * alongMax + py * half }
+  ];
+  return {
+    minX: Math.floor(Math.min(...box.map(p => p.x))),
+    minY: Math.floor(Math.min(...box.map(p => p.y))),
+    maxX: Math.ceil(Math.max(...box.map(p => p.x))),
+    maxY: Math.ceil(Math.max(...box.map(p => p.y)))
+  };
+}
+
 function pixelRect(item, zoom) {
   const pins = item.captureAnchorPins || item.anchorPins || {};
   const surface = [
@@ -451,6 +503,14 @@ function pixelRect(item, zoom) {
      which widens the frame, which steps the zoom down again. */
   const refZoom = Math.max(1, Math.round(Number(item.targetZoom) || zoom));
   const bleed = Math.max(0, Math.round((Number(item.bleedPx) || 0) * Math.pow(2, zoom - refZoom)));
+  if (item.role === "play-corridor") {
+    /* The corridor's bleed is the pixel bleed plus the policy's metric bleed (which pads
+       item.bounds, a box this lens does not use) in pixels at this zoom and latitude. */
+    const lat = (Number(item.bounds.north) + Number(item.bounds.south)) / 2;
+    const metresPerPx = 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom);
+    const viewed = applyHoleView(item, zoom, bleed + (Number(item.bleedMeters) || 0) / metresPerPx);
+    if (viewed) return viewed;
+  }
   const projected = surface.map(p => projectPoint(p.lat, p.lng, zoom));
   let rect = {
     minX: Math.floor(Math.min(...projected.map(p => p.x)) - bleed),
@@ -458,56 +518,21 @@ function pixelRect(item, zoom) {
     maxX: Math.ceil(Math.max(...projected.map(p => p.x)) + bleed),
     maxY: Math.ceil(Math.max(...projected.map(p => p.y)) + bleed)
   };
-  return applyLens(rect, item, pins, zoom);
+  return applyLens(rect, item);
 }
 
-/* Play-axis lens: fit a 9/16 (or square) window along the tee->green direction, mirroring the
-   camera's applyCaptureLensRect. The captured rect is the axis-aligned cover of that window. */
-function applyLens(rect, item, pins, zoom) {
+/* Square (or fixed-aspect) lens, map-axis: grow the shorter side of the rect around its
+   centre until it reaches the policy's aspect ratio. Only the green surround carries one. */
+function applyLens(rect, item) {
   const aspect = Number(item.lensAspectRatio) || 0;
   if (!aspect) return rect;
-  const route = points(pins && pins.route);
-  const routeStart = route[0] || point(pins && pins.tee);
-  const routeEnd = route[route.length - 1] || point(pins && pins.green);
-  if (item.lensOrientation === "play-axis" && routeStart && routeEnd) {
-    const a = projectPoint(routeStart.lat, routeStart.lng, zoom);
-    const b = projectPoint(routeEnd.lat, routeEnd.lng, zoom);
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const len = Math.sqrt(dx * dx + dy * dy);
-    if (len > 1) {
-      const ux = dx / len, uy = dy / len, px = -uy, py = ux;
-      const corners = [
-        { x: rect.minX, y: rect.minY }, { x: rect.maxX, y: rect.minY },
-        { x: rect.maxX, y: rect.maxY }, { x: rect.minX, y: rect.maxY }
-      ];
-      const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      const extents = corners.map(p => ({ along: (p.x - center.x) * ux + (p.y - center.y) * uy, cross: (p.x - center.x) * px + (p.y - center.y) * py }));
-      let along = Math.max(len / 2, ...extents.map(p => Math.abs(p.along)));
-      let cross = Math.max(1, ...extents.map(p => Math.abs(p.cross)));
-      if ((cross * 2) / (along * 2) > aspect) along = cross / aspect; else cross = along * aspect;
-      const lens = [
-        { x: center.x - ux * along - px * cross, y: center.y - uy * along - py * cross },
-        { x: center.x + ux * along - px * cross, y: center.y + uy * along - py * cross },
-        { x: center.x + ux * along + px * cross, y: center.y + uy * along + py * cross },
-        { x: center.x - ux * along + px * cross, y: center.y - uy * along + py * cross }
-      ];
-      return {
-        minX: Math.floor(Math.min(...lens.map(p => p.x))),
-        minY: Math.floor(Math.min(...lens.map(p => p.y))),
-        maxX: Math.ceil(Math.max(...lens.map(p => p.x))),
-        maxY: Math.ceil(Math.max(...lens.map(p => p.y))),
-        lensCornersPx: lens.map(p => ({ x: Math.round(p.x), y: Math.round(p.y) })),
-        lensOrientation: "play-axis"
-      };
-    }
-  }
   const width = Math.max(1, rect.maxX - rect.minX), height = Math.max(1, rect.maxY - rect.minY);
   const current = width / height;
   if (Math.abs(current - aspect) < 0.01) return rect;
   const cx = (rect.minX + rect.maxX) / 2, cy = (rect.minY + rect.maxY) / 2;
   const w = current > aspect ? width : height * aspect;
   const h = current > aspect ? width / aspect : height;
-  return { minX: Math.floor(cx - w / 2), minY: Math.floor(cy - h / 2), maxX: Math.ceil(cx + w / 2), maxY: Math.ceil(cy + h / 2), lensOrientation: "map-axis" };
+  return { minX: Math.floor(cx - w / 2), minY: Math.floor(cy - h / 2), maxX: Math.ceil(cx + w / 2), maxY: Math.ceil(cy + h / 2) };
 }
 
 function tileCountFor(rect) {
@@ -578,8 +603,8 @@ export function captureGrid(item, opts = {}) {
      throwing lets the planner drop one role (relief) without failing the course. */
   if (!spec || !(spec.urlTemplate || spec.endpoint)) return null;
   /* Resolution ceiling from the source, not from the policy. NAIP is 0.6m, so asking it for
-     z19 buys nothing but upscaled mush at the same cost; and a fixedZoom policy (green
-     surrounds sit at z20) has to be allowed to come DOWN to the ceiling, hence the floor
+     z19 buys nothing but upscaled mush at the same cost; and a policy whose floor sits above
+     the ceiling (green surrounds, z20+) has to be allowed to come DOWN to it, hence the floor
      moving too. */
   /* Two ceilings, both hard: what the SOURCE actually resolves (above it we upscale mush) and
      what the FRAME renders (above it we decode pixels the compositor discards). */
@@ -610,8 +635,6 @@ export function captureGrid(item, opts = {}) {
     imageWidth: width,
     imageHeight: height,
     imageBounds: { north: nw.lat, west: nw.lng, south: se.lat, east: se.lng },
-    lensCornersPx: rect.lensCornersPx || null,
-    lensOrientation: rect.lensOrientation || item.lensOrientation || "",
     sourceKey: source.key || "",
     sourceLabel: source.label || "",
     adapter: String(spec.adapter || "xyz"),
