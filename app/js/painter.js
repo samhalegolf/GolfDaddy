@@ -1866,8 +1866,45 @@
     };
     greenSurfacePromise.then(function (surface) {
       if (!surface || greenSurfaceKey !== elevation.path || !snap || !currentScene || !currentScene.finish.show) { clear(); return; }
-      window.GDGreenContours.draw(canvas, surface, project, {});
+      var options = greenDrawingOptions(meta);
+      if (!options || !window.GDGreenContours.draw(canvas, surface, project, options)) clear();
     });
+  }
+
+  /* What the phone layer should add to a green, read off what the frame says it already has.
+
+     The frame publishes playSurface.greenDrawing: whether it baked the contour ink, whether it
+     baked the tier paint, and where the paint was aimed. This layer used to draw with {} -
+     full-opacity ink, always - which put the lines back on every green even once the bake had
+     stopped drawing them. Now:
+
+       ink on the frame   -> re-stroke it here at live scale, as before (the frame's 77px green
+                             cannot resolve 15cm lines; the popup can)
+       ink off the frame  -> draw none. The bake's decision is the decision.
+       paint aimed here   -> draw the bands from the published palette
+       paint in the frame -> draw no bands; the pixels already have them
+
+     Null means "nothing to add", and the caller clears the canvas. A frame baked before the
+     descriptor existed gets the old behaviour - it has ink burnt in, so re-stroking it is what
+     it always looked like - until its course is re-baked. */
+  function greenDrawingOptions(meta) {
+    var gd = meta && meta.greenDrawing;
+    if (!gd) return {};
+    var ink = gd.contours !== false && Number(gd.contourOpacity) > 0;
+    var paintHere = !!gd.paint && gd.target === "phone" && meta.greenPalette && meta.greenPalette.lut;
+    if (!ink && !paintHere) return null;
+    var options = {
+      opacity: ink ? Number(gd.contourOpacity) : 0,
+      bandTiers: paintHere ? Number(gd.tiers) || 0 : 0
+    };
+    if (ink && Number.isFinite(Number(gd.arrowMinSlopePercent))) options.arrowMinSlopePercent = Number(gd.arrowMinSlopePercent);
+    if (paintHere) {
+      options.palette = meta.greenPalette;
+      if (Number.isFinite(Number(gd.spread))) options.bandSpread = Number(gd.spread);
+      if (Number.isFinite(Number(gd.strength))) options.bandOpacity = Number(gd.strength) * 0.85;
+      if (Number.isFinite(Number(gd.maxExtrapLuma))) options.bandMaxExtrapLuma = Number(gd.maxExtrapLuma);
+    }
+    return options;
   }
 
   /* Stand the surface up.

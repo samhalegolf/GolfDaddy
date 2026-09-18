@@ -2089,7 +2089,7 @@ const GD_VISUAL_CONTROL_IDS=[
   "gdCourseVisualBrightness","gdCourseVisualShadowFloor","gdCourseVisualHighlightCeiling","gdCourseVisualContrast","gdCourseVisualShadowLift","gdCourseVisualShadowDark",
   "gdCourseVisualFloodOn","gdCourseVisualFloodAmbient","gdCourseVisualFloodLit","gdCourseVisualFloodThrow",
   "gdCourseVisualFloodSpread","gdCourseVisualFloodGreenPool","gdCourseVisualFloodGreenRadius","gdCourseVisualFloodMask",
-  "gdCourseVisualTerrainStrength","gdCourseVisualMowing",
+  "gdCourseVisualTerrainStrength","gdCourseVisualGreenPaint","gdCourseVisualGreenContours","gdCourseVisualMowing",
   "gdCourseVisualTurfOn","gdCourseVisualLightingOn","gdCourseVisualTerrainOn","gdCourseVisualMowingOn",
   "gdReliefExaggeration","gdReliefAutoAzimuth","gdReliefAzimuth","gdReliefAltitude","gdReliefAmbient","gdReliefShadeOnly"
 ];
@@ -3365,7 +3365,7 @@ const GD_VISUAL_CONTROL_LABELS={
   gdCourseVisualShadowLift:"Shadow lift",gdCourseVisualShadowDark:"Shadow lift",
   gdCourseVisualHueMin:"Turf hue",gdCourseVisualHueMax:"Turf hue",gdCourseVisualSatMin:"Turf saturation",
   gdCourseVisualSatMax:"Turf saturation",gdCourseVisualLumMin:"Turf brightness",gdCourseVisualLumMax:"Turf brightness",
-  gdCourseVisualTargetPull:"Turf target",gdCourseVisualFloodOn:"Floodlight",gdCourseVisualFloodAmbient:"Floodlight ambient",
+  gdCourseVisualTargetPull:"Turf target",gdCourseVisualGreenPaint:"Green paint",gdCourseVisualGreenContours:"Green contour lines",gdCourseVisualFloodOn:"Floodlight",gdCourseVisualFloodAmbient:"Floodlight ambient",
   gdCourseVisualFloodLit:"Floodlight level",gdCourseVisualFloodThrow:"Floodlight falloff",
   gdCourseVisualFloodSpread:"Floodlight spread",gdCourseVisualFloodGreenPool:"Green pool",
   gdCourseVisualFloodGreenRadius:"Green pool size",gdCourseVisualFloodMask:"Object mask",
@@ -3447,6 +3447,11 @@ function gdAdminCourseVisualPresetChanged(courseId){
     if(floodOnEl)floodOnEl.checked=floodP.enabled===true;
     const floodMaskEl=document.getElementById("gdCourseVisualFloodMask");
     if(floodMaskEl)floodMaskEl.checked=floodP.useObjectMask===true;
+    const greenToolsP=preset.visualTools||{};
+    const greenPaintEl=document.getElementById("gdCourseVisualGreenPaint");
+    if(greenPaintEl)greenPaintEl.checked=greenToolsP.greenPaint!==false;
+    const greenContoursEl=document.getElementById("gdCourseVisualGreenContours");
+    if(greenContoursEl)greenContoursEl.checked=greenToolsP.greenContours!==false;
 
     const mowing=document.getElementById("gdCourseVisualMowing");
     if(mowing)mowing.value=String(preset.mowingVisibility||"Unknown");
@@ -3817,6 +3822,14 @@ function gdAdminCourseVisualControls(record,courseId){
     `<span class="gdAdminPhoneTiltNote">Turf already inside these ranges is left untouched — only out-of-range pixels are pulled in.</span>`;
   const turfPanel=gdAdminCourseVisualEffectHeader("turf","Turf correction",turfOn)+gdAdminCourseVisualEffectBody(turfOn,turfFields);
   const terrainField=rangeField("gdCourseVisualTerrainStrength","Hole terrain","",Number.isFinite(terrain)?terrain:.9,0,1.6,.05,0);
+  /* The green's two products, switched separately. Both live under Terrain because the export
+     gates both on the terrain toggle - it is the same elevation being drawn, as tiers of colour
+     or as lines. Unset means on, matching functions/lib/gd-visual-export-core.mjs, so a recipe
+     that never mentions them reads exactly as it bakes. */
+  const greenTools=settings.visualTools||{};
+  const greenProductsField=
+    `<label class="gdAdminCourseVisualCheck"><input id="gdCourseVisualGreenPaint" type="checkbox" ${greenTools.greenPaint!==false?"checked":""}><span>Green paint (tiers)</span></label>`+
+    `<label class="gdAdminCourseVisualCheck"><input id="gdCourseVisualGreenContours" type="checkbox" ${greenTools.greenContours!==false?"checked":""}><span>Green contour lines &amp; arrows</span></label>`;
   /* Relief is computed from elevation by /api/relief-preview, live, for one hole. The knobs
      below it are NOT saved: they exist to find the numbers, and the numbers that win get
      written into RELIEF_DEFAULTS in functions/lib/gd-relief-core.mjs and baked. Only "Hole
@@ -3824,7 +3837,7 @@ function gdAdminCourseVisualControls(record,courseId){
   const reliefKnob=(id,label,hint,value,min,max,step)=>
     `<label>${label}<input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}" oninput="return gdAdminCourseVisualReliefRefresh('${key}')">`+
     (hint?`<small>${hint}</small>`:"")+`</label>`;
-  const terrainBody=gdAdminCourseVisualEffectHeader("terrain","Terrain",terrainOn)+gdAdminCourseVisualEffectBody(terrainOn,terrainField)+
+  const terrainBody=gdAdminCourseVisualEffectHeader("terrain","Terrain",terrainOn)+gdAdminCourseVisualEffectBody(terrainOn,terrainField+greenProductsField)+
     `<div class="gdAdminReliefPanel" style="margin-top:10px">`+
       `<div style="position:relative;background:#10130f;border-radius:8px;overflow:hidden;aspect-ratio:1/1">`+
         `<img id="gdReliefPreviewImg" alt="Relief preview" style="width:100%;height:100%;object-fit:cover;display:block">`+
@@ -3890,7 +3903,12 @@ function gdAdminCourseVisualControls(record,courseId){
 const GD_VISUAL_UNCONTROLLED_OVERRIDES=[
   ["turf","greenStrength"],["turf","greenTone"],
   ["readability","sharpness"],["readability","fairwaySeparation"],["readability","localContrast"],
-  ["visualTools","courseTerrainStrength"],["visualTools","fairwayAirbrush"]
+  ["visualTools","courseTerrainStrength"],["visualTools","fairwayAirbrush"],
+  /* The green's two products and where the paint is aimed. Set on the recipe row directly
+     for the paint-only look; without this line the next slider release would drop them and
+     the contour ink would quietly return on the next bake. */
+  ["visualTools","greenContours"],["visualTools","greenPaint"],["visualTools","greenPaintTarget"],
+  ["visualTools","greenContourOpacity"],["visualTools","greenContourArrowMinSlope"]
 ];
 function gdAdminCourseVisualCarryUncontrolled(overrides,courseId){
   const record=gdAdminCourseVisualRecord(courseId||gdAdminCourseDatabaseSelected||"");
@@ -3938,7 +3956,13 @@ function gdAdminCourseVisualOverridesFromForm(courseId){
       greenPoolRadius:num("gdCourseVisualFloodGreenRadius",.05,1,.22),
       useObjectMask:document.getElementById("gdCourseVisualFloodMask")?.checked===true
     },
-    visualTools:{holeTerrainStrength:num("gdCourseVisualTerrainStrength",0,1.6,.9)},
+    visualTools:{
+      holeTerrainStrength:num("gdCourseVisualTerrainStrength",0,1.6,.9),
+      /* Written explicitly either way. A missing key means "on" to the export, so an unchecked
+         box has to save `false` - leaving it out would switch the product back on. */
+      greenPaint:document.getElementById("gdCourseVisualGreenPaint")?.checked!==false,
+      greenContours:document.getElementById("gdCourseVisualGreenContours")?.checked!==false
+    },
     mowingVisibility:String(document.getElementById("gdCourseVisualMowing")?.value||"Unknown")
   };
   out.effectToggles={

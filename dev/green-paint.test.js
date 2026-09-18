@@ -263,6 +263,91 @@ check("a green with no fitted surface draws nothing and fails quietly", async ()
   return "skipped cleanly";
 });
 
+/* ---- paint without ink -------------------------------------------------------------------
+   The hole-1 look, made the rule. The two products of the fit used to be coupled three ways:
+   opacity 0 returned null before the bands were reached, the export only built the SVG when
+   contours were enabled, and the phone re-stroked the ink with {} regardless. Each of those is
+   pinned here, because each one on its own quietly puts the lines back. */
+
+check("opacity 0 with a palette yields bands and no ink at all", () => {
+  const surface = buildGreenSurface();
+  const drawing = greenCore.buildGreenDrawing(surface, { palette: fixturePalette(), opacity: 0 });
+  assert.ok(drawing, "the drawing must not be null just because the ink is off");
+  assert.equal(drawing.runs.length, 0, "no contour runs");
+  assert.equal(drawing.arrows.length, 0, "no fall arrows");
+  assert.ok(drawing.bands.length > 0, "the tier bands must still be emitted");
+  return drawing.bands.length + " bands, 0 runs, 0 arrows";
+});
+
+check("opacity 0 and no palette is honestly nothing", () => {
+  const surface = buildGreenSurface();
+  assert.equal(greenCore.buildGreenDrawing(surface, { opacity: 0 }), null);
+});
+
+check("ink on still draws ink - the decoupling did not cost the old drawing", () => {
+  const surface = buildGreenSurface();
+  const drawing = greenCore.buildGreenDrawing(surface, { palette: fixturePalette() });
+  assert.ok(drawing.runs.length > 0 && drawing.bands.length > 0, "both products when both are asked for");
+});
+
+check("the svg for a paint-only green has fills and no strokes", () => {
+  const surface = buildGreenSurface();
+  const project = ll => ({ left: 128 + (ll.lng - midLng) * 40000, top: 128 - (ll.lat - midLat) * 40000 });
+  const svg = greenContourSvg(surface, D, D, project, { palette: fixturePalette(), opacity: 0 });
+  assert.ok(svg, "svg must render with the ink off");
+  const text = svg.toString("utf8");
+  assert.ok((text.match(/fill="rgb\(/g) || []).length > 0, "bands as fills");
+  assert.equal((text.match(/stroke="[^n]/g) || []).length, 0, "no stroked paths - no lines, no halos, no arrows");
+});
+
+check("the export paints with contours switched off, and says so", async () => {
+  const surface = buildGreenSurface();
+  const buf = await turfCapture();
+  const render = settings => renderHoleSurfaceMercator({
+    pins: {}, captures: [{ entry: { role: "course-backdrop", bounds, width: D, height: D, stitchLayer: 0, captureZoom: 18 }, buffer: buf }],
+    terrain: null, greenSurface: surface, settings, maxDim: D, quality: 96
+  });
+  const out = await render({ visualTools: { greenContours: false, greenPaint: true } });
+  assert.ok(out.greenPalette, "paint must still be measured when the lines are off - this was the coupling");
+  assert.deepEqual(
+    { contours: out.greenDrawing.contours, paint: out.greenDrawing.paint, target: out.greenDrawing.target, opacity: out.greenDrawing.contourOpacity },
+    { contours: false, paint: true, target: "bake", opacity: 0 },
+    "the frame must publish what it carries so the phone can stay out of the way");
+  const both = await render({ visualTools: {} });
+  assert.equal(both.greenDrawing.contours, true, "defaults unchanged: a recipe that says nothing still gets ink");
+  const neither = await render({ visualTools: { greenContours: false, greenPaint: false } });
+  assert.equal(neither.greenPalette, null, "paint off means no palette is measured");
+  assert.equal(neither.greenDrawing.paint, false);
+});
+
+check("the phone layer draws only what the frame does not already carry", () => {
+  const fs = require("node:fs");
+  const painter = fs.readFileSync(path.join(__dirname, "..", "app", "js", "painter.js"), "utf8");
+  assert.ok(!/GDGreenContours\.draw\([^)]*,\s*\{\}\)/.test(painter),
+    "painter must not call draw(..., {}) - that is unconditional full-opacity ink on every green");
+  assert.ok(/function greenDrawingOptions\(meta\)/.test(painter), "the options come from the frame's greenDrawing");
+  const fn = painter.slice(painter.indexOf("function greenDrawingOptions"), painter.indexOf("return options;", painter.indexOf("function greenDrawingOptions")));
+  assert.ok(/if \(!gd\) return \{\};/.test(fn), "a frame with no descriptor keeps the old behaviour until it is re-baked");
+  assert.ok(/if \(!ink && !paintHere\) return null;/.test(fn), "ink off + paint in the frame -> nothing to add, canvas cleared");
+  assert.ok(/gd\.target === "phone"/.test(fn), "bands only when the paint was aimed at the phone");
+});
+
+check("the worker publishes the descriptor and re-bakes every course", () => {
+  const fs = require("node:fs");
+  const worker = fs.readFileSync(path.join(__dirname, "..", "functions", "course-visual-worker-background.mjs"), "utf8");
+  assert.ok(/greenDrawing: frame\.greenDrawing \|\| null/.test(worker), "playSurface.greenDrawing must be written");
+  assert.ok(/GREEN_FRAME_STAMP = "greenframe2"/.test(worker), "the stamp must move, or resumed exports keep their burnt-in lines");
+});
+
+check("the recipe's green switches survive a Studio slider release", () => {
+  const fs = require("node:fs");
+  const studio = fs.readFileSync(path.join(__dirname, "..", "scripts", "studio", "gd-admin-course-db.js"), "utf8");
+  const list = studio.slice(studio.indexOf("GD_VISUAL_UNCONTROLLED_OVERRIDES=["), studio.indexOf("];", studio.indexOf("GD_VISUAL_UNCONTROLLED_OVERRIDES=[")));
+  ["greenContours", "greenPaint", "greenPaintTarget"].forEach(f => {
+    assert.ok(list.includes('["visualTools","' + f + '"]'), f + " must be carried across a dock save, or the ink returns on the next bake");
+  });
+});
+
 (async () => {
   console.log("green tiers (display list)\n");
   let failed = 0;

@@ -79,7 +79,10 @@ const RELIEF_STAMP = "relief2-perhole-x" + RELIEF_DEFAULTS.exaggeration + "-az" 
 /* Green paint changes published pixels but NOT captures, so it stamps the export version only.
    Putting it in the plan key the way RELIEF_STAMP has to be would throw away every stored
    terrain capture on the course for what is a drawing change. */
-const GREEN_FRAME_STAMP = "greenframe1";
+/* greenframe2: paint and ink decoupled, and the frame publishes which of the two it carries
+   (playSurface.greenDrawing). Bumped so every course re-bakes under the new rule rather than
+   resuming a frame that still has the lines burnt in. */
+const GREEN_FRAME_STAMP = "greenframe2";
 /* paint2: tiers moved out of the compositor into buildGreenDrawing's display list, and the
    palette is now sampled off the green's own box rather than a fixed 520px downscale of the
    whole frame. Both change published pixels, so already-exported frames must not resume. */
@@ -1115,7 +1118,8 @@ async function runExportJob(job, deadlineAt) {
         sourceBounds: frame.bounds,
         captureZoom: frame.captureZoom,
         originPx: frame.originPx,
-        outputDimensions: { width: frame.width, height: frame.height }
+        outputDimensions: { width: frame.width, height: frame.height },
+        greenDrawing: frame.greenDrawing || null
       };
       /* Baked once, carried in the index. The phone gets the same run of turf colours the export
          painted with, without re-reading a pixel - the palette IS the shared opinion, the way the

@@ -605,7 +605,12 @@
     var k;
     for (k in CONTOUR_DEFAULTS) if (Object.prototype.hasOwnProperty.call(CONTOUR_DEFAULTS, k)) cfg[k] = CONTOUR_DEFAULTS[k];
     if (options) for (k in options) if (Object.prototype.hasOwnProperty.call(options, k) && options[k] !== undefined) cfg[k] = options[k];
-    if (!(cfg.opacity > 0)) return null;
+    /* Two independent products of one fit. `ink` is the contour lines, the 5cm fill and the fall
+       arrows; the tier bands below are gated on their own inputs (a palette and a tier count).
+       They used to be coupled - opacity 0 returned null before the bands were reached, and a
+       green with no contour paths returned null too - so "paint, no lines" was impossible to
+       ask for. The first course to go paint-only is the reason this line exists. */
+    var ink = cfg.opacity > 0;
 
     var fit = surface.fit, polygon = surface.polygon;
 
@@ -616,11 +621,10 @@
       return t * t * (3 - 2 * t);   // smoothstep, so the fade has no visible start
     }
 
-    var paths = contourPaths(fit, polygon, { interval: cfg.intervalM, cell: 0.35 });
-    if (!paths.length) return null;
+    var paths = ink ? contourPaths(fit, polygon, { interval: cfg.intervalM, cell: 0.35 }) : [];
 
     var levels = paths.map(function (c) { return c.level; });
-    var lo = Math.min.apply(null, levels), hi = Math.max.apply(null, levels);
+    var lo = levels.length ? Math.min.apply(null, levels) : 0, hi = levels.length ? Math.max.apply(null, levels) : 0;
     var span = (hi - lo) || 1;
 
     var runs = [], arrows = [];
@@ -647,7 +651,7 @@
 
     /* Supplementary fill first, then main lines, then arrows - so the heavier marks always sit
        over the lighter ones where they cross. */
-    if (cfg.supplementaryDivisor > 1) {
+    if (ink && cfg.supplementaryDivisor > 1) {
       var fine = cfg.intervalM / cfg.supplementaryDivisor;
       var supp = contourPaths(fit, polygon, { interval: fine, cell: 0.35, minLengthM: 2.2 });
       for (var s = 0; s < supp.length; s++) {
@@ -702,7 +706,6 @@
       }
     }
 
-    if (!runs.length && !arrows.length) return null;
     /* Tier bands, in the same display list and the same units as the lines.
 
        They are emitted as QUADS in green-local metres rather than closed band outlines, because
@@ -714,8 +717,9 @@
        travel rather than an origin and a size.
 
        Colour comes from the palette the export measured off this green's own pixels, so the
-       bands are turf tones - the same reason the contour ink is. No palette, no bands: the
-       lines are the drawing, the colour is an enhancement to it. */
+       bands are turf tones - the same reason the contour ink is. No palette, no bands. The
+       bands do not need the contour paths: they scan the fitted surface directly, which is
+       what lets a green be painted with its lines switched off. */
     var bands = [];
     if (cfg.palette && cfg.palette.lut && cfg.bandTiers !== 0) {
       var N = Math.max(2, Math.round(cfg.bandTiers || PAINT_DEFAULTS.tiers));
@@ -783,6 +787,7 @@
       }
     }
 
+    if (!runs.length && !arrows.length && !bands.length) return null;
     return { runs: runs, arrows: arrows, bands: bands };
   }
 

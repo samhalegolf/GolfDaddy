@@ -826,10 +826,14 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, green
   if (greenSurface && paintCfg.enabled) {
     greenPalette = await sampleGreenPaletteFor(composites, W, H, bg0, greenSurface, mercProject);
   }
-  if (greenSurface && contourCfg.enabled) {
+  /* One SVG carries both products, but each is switched on its own. Contours off + paint on
+     hands the drawer opacity 0 and a palette, and it emits bands and no ink - the paint-only
+     green. It used to be gated on the contour switch alone, which meant turning the lines off
+     silently took the paint with them. */
+  if (greenSurface && (contourCfg.enabled || paintCfg.enabled)) {
     const svg = greenContourSvg(greenSurface, W, H, mercProject, {
-      arrowMinSlopePercent: contourCfg.arrowMinSlopePercent,
-      opacity: contourCfg.opacity,
+      arrowMinSlopePercent: contourCfg.enabled ? contourCfg.arrowMinSlopePercent : 12,
+      opacity: contourCfg.enabled ? contourCfg.opacity : 0,
       palette: greenPalette,
       bandTiers: paintCfg.enabled ? paintCfg.tiers : 0,
       bandSpread: paintCfg.spread,
@@ -859,7 +863,26 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, green
     originPx,
     bounds: { north: nw.lat, west: nw.lng, south: se.lat, east: se.lng },
     greenPalette: greenPalette || null,
+    /* What this frame already carries on its green, so the phone can decide what NOT to draw
+       again. Published beside the palette: the phone's contour layer used to re-stroke the ink
+       unconditionally, on top of a frame that had it baked in, and with the ink switched off
+       here that layer was the only thing still drawing lines. */
+    greenDrawing: greenDrawingDescriptor(contourCfg, paintCfg),
     diagnostics: frame.diagnostics
+  };
+}
+
+export function greenDrawingDescriptor(contourCfg, paintCfg) {
+  return {
+    contours: !!(contourCfg && contourCfg.enabled),
+    contourOpacity: contourCfg && contourCfg.enabled ? contourCfg.opacity : 0,
+    arrowMinSlopePercent: contourCfg && contourCfg.enabled ? contourCfg.arrowMinSlopePercent : null,
+    paint: !!(paintCfg && paintCfg.enabled),
+    target: paintCfg && paintCfg.enabled ? paintCfg.target : null,
+    tiers: paintCfg && paintCfg.enabled ? paintCfg.tiers : 0,
+    spread: paintCfg && paintCfg.enabled ? paintCfg.spread : null,
+    strength: paintCfg && paintCfg.enabled ? paintCfg.strength : null,
+    maxExtrapLuma: paintCfg && paintCfg.enabled ? paintCfg.maxExtrapLuma : null
   };
 }
 
