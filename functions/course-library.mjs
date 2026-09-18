@@ -18,6 +18,7 @@
 
 import { objectsVersion } from "./lib/gd-course-package-shape.mjs";
 
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const COURSE_TABLE = "course_maps";
 const VISUAL_TABLE = "course_visuals";
 
@@ -37,28 +38,11 @@ function hasSupabase() {
   return !!(supabaseBase() && supabaseKey());
 }
 
-async function supabaseFetch(path) {
-  if (!hasSupabase()) throw new Error("Supabase is not configured");
-  const response = await fetch(supabaseBase() + "/rest/v1/" + path, {
-    headers: {
-      apikey: supabaseKey(),
-      Authorization: "Bearer " + supabaseKey(),
-      "Content-Type": "application/json"
-    }
-  });
-  const bodyText = await response.text();
-  let body = null;
-  if (bodyText) {
-    try { body = JSON.parse(bodyText); } catch (_error) { body = bodyText; }
-  }
-  if (!response.ok) {
-    const error = new Error("Supabase request failed");
-    error.status = response.status;
-    error.body = body;
-    throw error;
-  }
-  return body;
-}
+const supabaseFetch = createSupabaseFetch({
+  base: supabaseBase,
+  key: supabaseKey,
+  label: "course-library"
+});
 
 function json(status, body) {
   return new Response(body == null ? "" : JSON.stringify(body), {

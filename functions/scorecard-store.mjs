@@ -1,3 +1,4 @@
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 /* Shared store for scorecards resolved from club websites.
  *
  * Resolving a scorecard means fetching and parsing a club's own site through
@@ -38,28 +39,11 @@ function hasSupabase() {
   return !!(supabaseBase() && supabaseKey());
 }
 
-async function supabaseFetch(path, options = {}) {
-  if (!hasSupabase()) throw new Error("Supabase is not configured");
-  const response = await fetch(supabaseBase() + "/rest/v1/" + path, Object.assign({}, options, {
-    headers: Object.assign({
-      apikey: supabaseKey(),
-      Authorization: "Bearer " + supabaseKey(),
-      "Content-Type": "application/json"
-    }, options.headers || {})
-  }));
-  const bodyText = await response.text();
-  let body = null;
-  if (bodyText) {
-    try { body = JSON.parse(bodyText); } catch (_error) { body = bodyText; }
-  }
-  if (!response.ok) {
-    const error = new Error("Supabase request failed");
-    error.status = response.status;
-    error.body = body;
-    throw error;
-  }
-  return body;
-}
+const supabaseFetch = createSupabaseFetch({
+  base: supabaseBase,
+  key: supabaseKey,
+  label: "scorecard-store"
+});
 
 /* Identity is proven, not asserted - the caller's access token is validated
    against /auth/v1/user. Any signed-in player may contribute; the quality gate

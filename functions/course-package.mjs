@@ -31,6 +31,7 @@ import { deriveCoursePackageState, shapeLitePackage, shapeFullPackage } from "./
 import { findDuplicateCourseWithGeometry as findDuplicateCourse } from "./lib/gd-duplicate-course-guard.mjs";
 import { enqueueMapperJob, mapperActorKey } from "./course-mapper-jobs.mjs";
 
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
 const VISUAL_JOBS_TABLE = "course_visual_jobs";
@@ -43,16 +44,11 @@ function supabaseKey() { return env("SUPABASE_SERVICE_ROLE_KEY"); }
 function anonKey() { return env("SUPABASE_ANON_KEY") || env("VITE_SUPABASE_ANON_KEY") || env("SUPABASE_PUBLIC_ANON_KEY") || ""; }
 function hasSupabase() { return !!(supabaseBase() && supabaseKey()); }
 
-async function supabaseFetch(path) {
-  const response = await fetch(supabaseBase() + "/rest/v1/" + path, {
-    headers: { apikey: supabaseKey(), Authorization: "Bearer " + supabaseKey(), "Content-Type": "application/json" }
-  });
-  const textBody = await response.text();
-  let body = null;
-  try { body = textBody ? JSON.parse(textBody) : null; } catch (e) { body = textBody; }
-  if (!response.ok) throw new Error("Supabase " + response.status + ": " + (typeof body === "string" ? body : JSON.stringify(body)));
-  return body;
-}
+const supabaseFetch = createSupabaseFetch({
+  base: supabaseBase,
+  key: supabaseKey,
+  label: "course-package"
+});
 
 /* Verifies the caller's Supabase session, same pattern as course-visual-jobs.mjs and
    course-mapper-jobs.mjs - read is public, but only a real signed-in identity may trigger a

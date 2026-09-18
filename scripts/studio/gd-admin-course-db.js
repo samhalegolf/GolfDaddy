@@ -52,7 +52,11 @@ function gdAdminCourseDbBadge(label,tone=""){
 function gdAdminCourseDbFlag(value){
   return `<span class="gdCoursePlayDebugFlag ${value?'ok':'bad'}">${value?'Yes':'No'}</span>`;
 }
-/* The admin Course Database screen is a LIVE view of Supabase (/api/course-maps),
+/* The admin Course Database screen is a LIVE view of Supabase (/api/course-maps).
+   The table is a list shell: identity, status and counts, no geometry. A row's
+   objects and holes are fetched for that one course when it is opened, by
+   gdAdminCourseDbLoadCourse. Loading every course's geometry to draw the table
+   is what it used to do, and it cost ~12 MB a refresh.
    not the local Course Play Pipeline. It fetches once on first render and on
    explicit Refresh, caches the result, and only falls back to the local pipeline
    when Supabase is unreachable - and even then the status banner says so, so the
@@ -99,9 +103,23 @@ function gdLoadAdminCourseDbJobs(opts){
    only evidence a course is playable, so it is the only thing that earns
    "published". */
 function gdAdminCourseDbBaseStatus(course){
-  const holes=Object.keys(course&&course.holes||{}).length;
-  const objects=Object.keys(course&&course.objects||{}).length;
+  /* A list row carries counts and no geometry; an opened row (or the local
+     cache) carries geometry and no counts. Prefer whichever is actually
+     present - reading course.holes on a list row would count {} as zero and
+     label a fully mapped course "empty", which is the exact bug the status
+     column was added to fix. */
+  const holes=gdAdminCourseDbCount(course,"holeCount","holes");
+  const objects=gdAdminCourseDbCount(course,"objectCount","objects");
   return holes>0?"published":objects>0?"partial":"empty";
+}
+function gdAdminCourseDbCount(course,countKey,mapKey){
+  if(!course)return 0;
+  if(Number.isFinite(Number(course[countKey])))return Number(course[countKey]);
+  return Object.keys(course[mapKey]||{}).length;
+}
+/* True once a course's geometry is in hand. List rows do not carry it. */
+function gdAdminCourseDbHasGeometry(course){
+  return !!(course&&(course.objects||course.holes));
 }
 /* The status a row displays. Geometry wins; the mapper queue only gets to
    speak for a course that has none, which is exactly the case the old default
@@ -148,7 +166,10 @@ function gdMapCloudMapsToAdminStore(maps){
       status:c.status||gdAdminCourseDbBaseStatus(c),
       syncStatus:"cloud",
       source:"supabase",
-      holes:c.holes||{},
+      /* No empty-geometry default here, deliberately. The list response carries
+         counts instead of objects and holes, and defaulting them to an empty
+         object would read as "mapped, zero holes" rather than "not loaded yet" -
+         the same class of bug as the old status default just below. */
       updatedAt:c.updatedAt||c.publishedAt||store.updatedAt||""
     });
   });
@@ -181,6 +202,42 @@ function gdLoadAdminCourseDbCloud(opts){
     })
     .finally(()=>{gdAdminCourseDbCloudInflight=null;gdRenderAdminCourseDatabase();});
   return gdAdminCourseDbCloudInflight;
+}
+/* Geometry for ONE course, fetched when its row is opened.
+ *
+ * The list response carries no objects or holes - see functions/course-maps.mjs
+ * for why. Everything that needs real geometry (the per-hole table, the visual
+ * engine's pipeline hydration) asks for it here, once, and it is kept for the
+ * rest of the session. */
+const gdAdminCourseDbDetail={};
+const gdAdminCourseDbDetailInflight={};
+function gdAdminCourseDbLoadCourse(courseId,opts){
+  const id=String(courseId||"");
+  if(!id)return Promise.resolve(null);
+  opts=opts||{};
+  if(!opts.force&&gdAdminCourseDbDetail[id])return Promise.resolve(gdAdminCourseDbDetail[id]);
+  if(gdAdminCourseDbDetailInflight[id])return gdAdminCourseDbDetailInflight[id];
+  if(typeof fetch!=="function")return Promise.resolve(null);
+  gdAdminCourseDbDetailInflight[id]=fetch("/api/course-maps?courseId="+encodeURIComponent(id),{headers:{Accept:"application/json"},cache:"no-store"})
+    .then(res=>{if(!res.ok)throw new Error("HTTP "+res.status);return res.json();})
+    .then(maps=>{
+      if(!maps||maps.unavailable)return null;
+      const courses=maps.courses||{};
+      const key=Object.keys(courses)[0];
+      const course=key?courses[key]:null;
+      if(course)gdAdminCourseDbDetail[id]=course;
+      return course;
+    })
+    .catch(()=>null)
+    .finally(()=>{delete gdAdminCourseDbDetailInflight[id];gdRenderAdminCourseDatabase();});
+  return gdAdminCourseDbDetailInflight[id];
+}
+/* The course as the screen should see it: the list row, with geometry merged in
+   once it has been fetched. */
+function gdAdminCourseDbWithDetail(course){
+  if(!course)return course;
+  const detail=gdAdminCourseDbDetail[String(course.courseId||course.id||"")];
+  return detail?Object.assign({},course,detail,{courseKey:course.courseKey||course.courseId}):course;
 }
 function gdRefreshAdminCourseDbCloud(){gdLoadAdminCourseDbCloud({force:true});return false;}
 function gdAdminCourseDbCloudStatusMarkup(){
@@ -274,6 +331,14 @@ function gdAdminCourseDbSourceLabel(sources){
   return stems.filter((stem,index)=>stems.indexOf(stem)===index).join(" / ");
 }
 function gdAdminCourseDbObjectTotals(course){
+  /* A list row already has these counted server-side, by course_maps_list. */
+  if(!gdAdminCourseDbHasGeometry(course)){
+    return {
+      tees:Number(course&&course.teeCount)||0,
+      greens:Number(course&&course.greenCount)||0,
+      fairways:Number(course&&course.fairwayCount)||0
+    };
+  }
   const totals={tees:0,greens:0,fairways:0};
   Object.keys(course.objects||{}).forEach(key=>{
     const type=course.objects[key]&&course.objects[key].type;
@@ -286,12 +351,18 @@ function gdAdminCourseDbObjectTotals(course){
 function gdAdminCourseDbSummaries(){
   const store=gdAdminCourseDbStore();
   return Object.keys(store.courses||{}).map(key=>{
-    const course=store.courses[key]||{};
+    const course=gdAdminCourseDbWithDetail(store.courses[key]||{});
     course.courseId=course.courseId||key;
     course.courseKey=course.courseKey||course.courseId;
-    const rows=gdAdminCourseDbHoleRows(course);
+    /* Per-hole rows need geometry. A list row has none until it is opened, so
+       the hole breakdown and the play-ready ratio stay null rather than being
+       reported as zero - "not loaded" and "nothing there" are different
+       answers and the table must not confuse them. */
+    const loaded=gdAdminCourseDbHasGeometry(course);
+    const rows=loaded?gdAdminCourseDbHoleRows(course):[];
     return {
       course:course,
+      geometryLoaded:loaded,
       id:course.courseId,
       name:course.courseName||course.name||course.courseKey||course.courseId||"Course",
       key:course.courseKey||course.courseId||key,
@@ -301,9 +372,9 @@ function gdAdminCourseDbSummaries(){
       dataVersion:course.dataVersion||"",
       updatedAt:course.updatedAt||"",
       source:course.source||"local",
-      holeCount:rows.length,
-      geometryReadyCount:rows.filter(row=>row.hasTee&&row.hasGreen).length,
-      playReadyCount:rows.filter(row=>row.playReady).length,
+      holeCount:loaded?rows.length:(Number(course.holeCount)||0),
+      geometryReadyCount:loaded?rows.filter(row=>row.hasTee&&row.hasGreen).length:null,
+      playReadyCount:loaded?rows.filter(row=>row.playReady).length:null,
       objectTotals:gdAdminCourseDbObjectTotals(course),
       rows:rows
     };
@@ -3871,7 +3942,10 @@ function gdAdminCourseVisualEnsurePipelineCourse(courseId){
     const localHoles=localCourse&&localCourse.holes?Object.keys(localCourse.holes).length:0;
     if(localHoles>0)return false;
     const cloudCourse=summaries&&summaries.course||gdAdminCourseDbPayload(courseId);
-    if(!cloudCourse||!cloudCourse.objects)return false;
+    /* No geometry in hand means the list row has not been opened yet. Fetch it
+       and let the caller run again once it lands, rather than silently
+       hydrating the pipeline from nothing. */
+    if(!cloudCourse||!cloudCourse.objects){gdAdminCourseDbLoadCourse(courseId);return false;}
     pipeline.ingestCourseLibraryCourse(cloudCourse,{source:"admin-visual-scan"});
     return true;
   }catch(e){return false;}
@@ -4309,7 +4383,11 @@ let gdAdminCourseDbExpanded="";
 function gdAdminCourseDbToggleRow(courseId){
   const next=String(courseId||"");
   gdAdminCourseDbExpanded=gdAdminCourseDbExpanded===next?"":next;
-  if(gdAdminCourseDbExpanded)gdLoadAdminCourseDbJobs().then(()=>gdRenderAdminCourseDatabase());
+  if(gdAdminCourseDbExpanded){
+    gdLoadAdminCourseDbJobs().then(()=>gdRenderAdminCourseDatabase());
+    /* The per-hole table needs real geometry, which the list does not carry. */
+    gdAdminCourseDbLoadCourse(gdAdminCourseDbExpanded);
+  }
   gdRenderAdminCourseDatabase();
   return false;
 }
@@ -4335,7 +4413,7 @@ function gdAdminCourseDbExpandedRow(item){
     gdAdminCourseDbDiagRow("Status",status),
     gdAdminCourseDbDiagRow("Course key",item.key),
     gdAdminCourseDbDiagRow("Holes built",item.holeCount),
-    gdAdminCourseDbDiagRow("Play ready",item.playReadyCount+"/"+(item.holeCount||0)),
+    gdAdminCourseDbDiagRow("Play ready",item.playReadyCount==null?"loading geometry…":item.playReadyCount+"/"+(item.holeCount||0)),
     gdAdminCourseDbDiagRow("Geometry objects",(totals.tees||0)+" tees, "+(totals.greens||0)+" greens, "+(totals.fairways||0)+" fairways"),
     gdAdminCourseDbDiagRow("Location",Number.isFinite(Number(lat))&&Number.isFinite(Number(lng))?Number(lat).toFixed(5)+", "+Number(lng).toFixed(5)+(place?"  ("+place+")":""):"not set"),
     gdAdminCourseDbDiagRow("Last mapping run",job?(job.lastJobStatus||job.state)+(job.lastJobKind?" ("+job.lastJobKind+")":""):"none recorded"),
@@ -4403,7 +4481,7 @@ function gdRenderAdminCourseDatabaseNow(){
     const active=item.id===gdAdminCourseDatabaseSelected?" active":"";
     const open=item.id===gdAdminCourseDbExpanded;
     const caret=open?"▾":"▸";
-    const row=`<tr class="${active}${open?" expanded":""}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${caret}</span> ${gdEscapeHTML(item.name)}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(status)}</span></td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${gdEscapeHTML(item.playReadyCount)}/${gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
+    const row=`<tr class="${active}${open?" expanded":""}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${caret}</span> ${gdEscapeHTML(item.name)}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(status)}</span></td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${item.playReadyCount==null?"<span class=\"gdAdminCourseMuted\" title=\"Open the row to load this course's geometry\">\u2014</span>":gdEscapeHTML(item.playReadyCount)+"/"+gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
     return open?row+gdAdminCourseDbExpandedRow(item):row;
   }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current search.</div>');
   const selected=filtered.find(item=>item.id===gdAdminCourseDatabaseSelected);

@@ -188,30 +188,21 @@ function hasSupabaseAuth() {
   return !!(supabaseBase() && supabaseAnonKey());
 }
 
+/* CommonJS module, ESM helper - hence the memoised dynamic import. The
+   "payment storage" wording is kept because payment-admin surfaces
+   error.message straight to the operator. */
+let supabaseFetchImpl = null;
 async function supabaseFetch(path, options) {
   if (!hasSupabase()) throw new Error("Supabase payment storage is not configured");
-  const headers = Object.assign({
-    apikey: supabaseKey(),
-    Authorization: "Bearer " + supabaseKey(),
-    "Content-Type": "application/json"
-  }, options && options.headers || {});
-  const response = await fetch(supabaseBase() + "/rest/v1/" + path, Object.assign({}, options, { headers }));
-  const bodyText = await response.text();
-  let body = null;
-  if (bodyText) {
-    try {
-      body = JSON.parse(bodyText);
-    } catch (error) {
-      body = bodyText;
-    }
+  if (!supabaseFetchImpl) {
+    const { createSupabaseFetch } = await import("./lib/gd-supabase-fetch.mjs");
+    supabaseFetchImpl = createSupabaseFetch({
+      base: supabaseBase,
+      key: supabaseKey,
+      label: "payment-utils"
+    });
   }
-  if (!response.ok) {
-    const error = new Error("Supabase request failed");
-    error.status = response.status;
-    error.body = body;
-    throw error;
-  }
-  return body;
+  return supabaseFetchImpl(path, options || {});
 }
 
 function encodeFilter(value) {

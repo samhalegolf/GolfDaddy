@@ -218,6 +218,29 @@ const { pathToFileURL } = require("url");
   assert.equal(optionsResponse.status, 200);
   assert.equal(optionsResponse.headers.get("Access-Control-Allow-Methods"), "GET,POST,OPTIONS");
 
+  /* course_json is the catch-all for fields with no column of their own. It must
+     NOT carry a second copy of objects/holes/assets: that copy is what drifted out
+     of date and made every read twice the size it needed to be. */
+  const slimRow = courseToSupabaseRow(course);
+  assert.equal(slimRow.course_json.objects, undefined, "course_json must not duplicate objects");
+  assert.equal(slimRow.course_json.holes, undefined, "course_json must not duplicate holes");
+  assert.equal(slimRow.course_json.assets, undefined, "course_json must not duplicate assets");
+  assert.ok(slimRow.course_json.courseId, "course_json still carries the rest of the course");
+  assert.ok(Object.keys(slimRow.objects_json).length > 0, "objects still land in their own column");
+
+  /* A slimmed course_json must still restore to the same course. */
+  const slimRestored = courseFromSupabaseRow(slimRow);
+  assert.deepEqual(Object.keys(slimRestored.objects).sort(), Object.keys(course.objects).sort());
+  assert.deepEqual(Object.keys(slimRestored.holes).sort(), Object.keys(course.holes).sort());
+
+  /* A pre-backfill row still has the stale copy inside course_json. The columns
+     are authoritative and must win. */
+  const staleRestored = courseFromSupabaseRow(Object.assign({}, slimRow, {
+    course_json: Object.assign({}, slimRow.course_json, { objects: { ghost: { type: "tee" } }, holes: { 99: {} } })
+  }));
+  assert.equal(staleRestored.objects.ghost, undefined, "a stale course_json copy must never win over the column");
+  assert.deepEqual(Object.keys(staleRestored.holes).sort(), Object.keys(course.holes).sort());
+
   console.log("course maps cloud tests passed");
 })().catch((error) => {
   console.error(error);

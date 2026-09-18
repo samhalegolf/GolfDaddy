@@ -37,6 +37,7 @@ import { decodeElevation, hillshade, ambientOcclusion, RELIEF_DEFAULTS } from ".
 import { applyRelief, greenContourSvg } from "./lib/gd-visual-export-core.mjs";
 import greenCore from "../scripts/gd-green-contours-core.js";
 
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const MAPS_TABLE = "course_maps";
 const WATCH_TABLE = "course_watch_maps";
 const BUCKET = "course-watch-maps";
@@ -68,20 +69,11 @@ function supabaseKey() { return env("SUPABASE_SERVICE_ROLE_KEY"); }
 function anonKey() { return env("SUPABASE_ANON_KEY") || env("VITE_SUPABASE_ANON_KEY") || env("SUPABASE_PUBLIC_ANON_KEY") || ""; }
 function hasSupabase() { return !!(supabaseBase() && supabaseKey()); }
 
-async function supabaseFetch(path, options = {}) {
-  if (!hasSupabase()) throw new Error("Supabase is not configured");
-  const headers = Object.assign({
-    apikey: supabaseKey(),
-    Authorization: "Bearer " + supabaseKey(),
-    "Content-Type": "application/json"
-  }, options.headers || {});
-  const response = await fetch(supabaseBase() + "/rest/v1/" + path, Object.assign({}, options, { headers }));
-  const textBody = await response.text();
-  let body = null;
-  try { body = textBody ? JSON.parse(textBody) : null; } catch (e) { body = textBody; }
-  if (!response.ok) throw new Error("Supabase " + response.status + ": " + (typeof body === "string" ? body : JSON.stringify(body)));
-  return body;
-}
+const supabaseFetch = createSupabaseFetch({
+  base: supabaseBase,
+  key: supabaseKey,
+  label: "course-watch-maps"
+});
 
 async function storageUpload(path, buffer, contentType) {
   const response = await fetch(supabaseBase() + "/storage/v1/object/" + BUCKET + "/" + path, {

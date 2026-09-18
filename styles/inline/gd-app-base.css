@@ -432,7 +432,10 @@
     .gdAdminCourseStatusDot.ok:before{background:#1fd36d;box-shadow:0 0 0 2px rgba(31,211,109,.15)}
     .gdAdminCourseStatusDot.warn:before{background:#ffd287;box-shadow:0 0 0 2px rgba(255,210,135,.13)}
     .gdAdminCourseStatusDot.bad:before{background:#ff7d7d;box-shadow:0 0 0 2px rgba(255,125,125,.13)}
-    .gdAdminCourseCaret{display:inline-block;width:9px;color:rgba(255,255,255,.4);font-size:9px}
+    /* "Open the row to load this" - a figure the list deliberately does not carry,
+   as distinct from a real zero. */
+.gdAdminCourseMuted{opacity:.45;font-variant-numeric:tabular-nums;cursor:help;}
+.gdAdminCourseCaret{display:inline-block;width:9px;color:rgba(255,255,255,.4);font-size:9px}
     .gdAdminCourseTable tr.expanded{background:rgba(31,211,109,.075)}
     .gdAdminCourseTable tr.expanded .gdAdminCourseCaret{color:#1fd36d}
     .gdAdminCourseTable tr.gdAdminCourseDiagRowHost{cursor:default;background:rgba(0,0,0,.22)}

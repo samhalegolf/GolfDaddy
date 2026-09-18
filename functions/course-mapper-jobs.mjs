@@ -22,6 +22,7 @@
 import { MAPPER_VERSION, SURFACE_TYPES } from "./lib/gd-automapper-core.mjs";
 import { findDuplicateCourseWithGeometry } from "./lib/gd-duplicate-course-guard.mjs";
 
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
@@ -95,20 +96,11 @@ async function verifiedUser(req, payload) {
   }
 }
 
-async function supabaseFetch(path, options = {}) {
-  if (!hasSupabase()) throw new Error("Supabase is not configured");
-  const headers = Object.assign({
-    apikey: supabaseKey(),
-    Authorization: "Bearer " + supabaseKey(),
-    "Content-Type": "application/json"
-  }, options.headers || {});
-  const response = await fetch(supabaseBase() + "/rest/v1/" + path, Object.assign({}, options, { headers }));
-  const textBody = await response.text();
-  let body = null;
-  try { body = textBody ? JSON.parse(textBody) : null; } catch (e) { body = textBody; }
-  if (!response.ok) throw new Error("Supabase " + response.status + ": " + (typeof body === "string" ? body : JSON.stringify(body)));
-  return body;
-}
+const supabaseFetch = createSupabaseFetch({
+  base: supabaseBase,
+  key: supabaseKey,
+  label: "course-mapper-jobs"
+});
 
 function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
 

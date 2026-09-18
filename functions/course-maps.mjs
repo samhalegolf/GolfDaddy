@@ -6,6 +6,7 @@ const STORE_NAME = "clarity-course-maps";
 const STORE_KEY = "published-course-maps-v1";
 const TABLE = "course_maps";
 import { purgeCourseData } from "./lib/gd-course-cleanup.mjs";
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 
 const ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
 let getStoreImpl = null;
@@ -59,40 +60,42 @@ async function verifiedAdminEmail(req, payload) {
   }
 }
 
-async function supabaseFetch(path, options = {}) {
-  if (!hasSupabase()) throw new Error("Supabase is not configured");
-  const headers = Object.assign({
-    apikey: supabaseKey(),
-    Authorization: "Bearer " + supabaseKey(),
-    "Content-Type": "application/json"
-  }, options.headers || {});
-  const response = await fetch(supabaseBase() + "/rest/v1/" + path, Object.assign({}, options, { headers }));
-  const bodyText = await response.text();
-  let body = null;
-  if (bodyText) {
-    try {
-      body = JSON.parse(bodyText);
-    } catch (_error) {
-      body = bodyText;
-    }
-  }
-  if (!response.ok) {
-    const error = new Error("Supabase request failed");
-    error.status = response.status;
-    error.body = body;
-    throw error;
-  }
-  return body;
-}
+const supabaseFetch = createSupabaseFetch({
+  base: supabaseBase,
+  key: supabaseKey,
+  label: "course-maps"
+});
 
 export default async function courseMaps(req) {
   if (req.method === "OPTIONS") return json(200, { ok: true });
   if (req.method === "GET") {
-    /* ?scope=play is what the phone's library sync and the course picker ask for. Every
-       other caller (Studio's Course Database, the watch bake, tests) gets the full record. */
-    const scope = new URL(req.url).searchParams.get("scope");
-    const maps = await readMaps();
-    return json(200, scope === "play" ? stripSurfacesForPlay(maps) : maps);
+    const params = new URL(req.url).searchParams;
+    const scope = params.get("scope");
+    const courseId = text(params.get("courseId"), 160);
+
+    /* One course, in full. This is what a Studio row asks for when it is
+       opened, and it is the only way to get geometry out of here now other
+       than asking for all of it on purpose. */
+    if (courseId) return json(200, await readOneCourse(courseId));
+
+    /* Geometry is opt-in.
+     *
+     * The default used to be every published course's full record - about
+     * 12 MB, of which objects_json is 11 MB - and the Studio Course Database
+     * pulled the lot on load to draw a table of names and status badges. It
+     * sat at 2.5s average and 6.9s worst, timed out against the statement
+     * limit, and was the last thing running before the database restarted on
+     * 17 Sep. Nothing displayed the geometry; there is no payload viewer.
+     *
+     * So: no scope is now the list shell, and a caller that genuinely wants
+     * every course's geometry has to say so. */
+    if (scope === "full") return json(200, await readMaps());
+
+    /* ?scope=play is what the phone's library sync and the course picker ask
+       for - the full record minus collected surfaces for a ready course. */
+    if (scope === "play") return json(200, stripSurfacesForPlay(await readMaps()));
+
+    return json(200, await readList());
   }
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
 
@@ -414,9 +417,111 @@ async function writeBlobMaps(maps) {
   }
 }
 
+const LIST_VIEW = "course_maps_list";
+/* Identity, freshness and counts. No geometry - that is the entire point. The
+   counts come from the course_maps_list view so they are computed from the
+   geometry itself and cannot drift. */
+const LIST_COLUMNS = "id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng," +
+  "region,country,country_code,facility_key,course_aliases,published,published_at," +
+  "created_at,updated_at,hole_count,object_count,tee_count,green_count,fairway_count";
+
+function listRowToCourse(row) {
+  if (!row || typeof row !== "object") return null;
+  const course = {
+    id: text(row.id, 180),
+    userId: "published",
+    courseId: text(row.course_id, 160),
+    courseName: text(row.course_name, 200),
+    courseLat: finite(row.course_lat),
+    courseLng: finite(row.course_lng),
+    finderLat: finite(row.finder_lat),
+    finderLng: finite(row.finder_lng),
+    courseFinderLat: finite(row.finder_lat),
+    courseFinderLng: finite(row.finder_lng),
+    region: text(row.region, 120),
+    country: text(row.country, 80),
+    countryCode: text(row.country_code, 8).toUpperCase(),
+    aliases: Array.isArray(row.course_aliases) ? row.course_aliases : [],
+    facilityKey: text(row.facility_key, 160),
+    published: true,
+    publishedAt: text(row.published_at, 80),
+    createdAt: text(row.created_at, 80),
+    updatedAt: text(row.updated_at, 80),
+    /* Counts, deliberately NOT empty objects/holes. A caller that reads
+       course.objects on a list row gets undefined and fails loudly, rather
+       than reading {} and quietly reporting a mapped course as empty. */
+    holeCount: integerOrZero(row.hole_count),
+    objectCount: integerOrZero(row.object_count),
+    teeCount: integerOrZero(row.tee_count),
+    greenCount: integerOrZero(row.green_count),
+    fairwayCount: integerOrZero(row.fairway_count),
+    scope: "list"
+  };
+  return course.id && course.courseId && course.courseName ? course : null;
+}
+
+function integerOrZero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n) : 0;
+}
+
+async function readList() {
+  if (!hasSupabase()) {
+    return Object.assign(emptyMaps(), { scope: "list", storage: "supabase", unavailable: true,
+      warnings: [{ storage: "supabase", message: "Supabase is not configured" }] });
+  }
+  try {
+    const rows = await supabaseFetch(
+      LIST_VIEW + "?select=" + LIST_COLUMNS + "&published=eq.true&order=updated_at.desc&limit=500",
+      { method: "GET" }
+    );
+    const maps = emptyMaps();
+    maps.storage = "supabase";
+    maps.scope = "list";
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      const course = listRowToCourse(row);
+      if (!course) return;
+      maps.courses[course.id] = course;
+      if (row.updated_at && (!maps.updatedAt || String(row.updated_at) > String(maps.updatedAt))) {
+        maps.updatedAt = row.updated_at;
+      }
+    });
+    return maps;
+  } catch (error) {
+    console.warn("course map list read failed", error && (error.body || error.message) || error);
+    return Object.assign(emptyMaps(), { scope: "list", storage: "supabase", unavailable: true,
+      warnings: [{ storage: "supabase", message: storageMessage(error) }] });
+  }
+}
+
+/* One course with its geometry, for a Studio row that has been opened. */
+async function readOneCourse(courseId) {
+  if (!hasSupabase()) {
+    return Object.assign(emptyMaps(), { scope: "course", storage: "supabase", unavailable: true,
+      warnings: [{ storage: "supabase", message: "Supabase is not configured" }] });
+  }
+  try {
+    const rows = await supabaseFetch(
+      TABLE + "?select=" + FULL_COLUMNS + "&course_id=eq." + encodeURIComponent(courseId) + "&limit=1",
+      { method: "GET" }
+    );
+    const maps = mapsFromSupabaseRows(rows);
+    maps.scope = "course";
+    return maps;
+  } catch (error) {
+    console.warn("course map read failed", courseId, error && (error.body || error.message) || error);
+    return Object.assign(emptyMaps(), { scope: "course", storage: "supabase", unavailable: true,
+      warnings: [{ storage: "supabase", message: storageMessage(error) }] });
+  }
+}
+
+const FULL_COLUMNS = "id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng," +
+  "region,country,country_code,facility_key,course_aliases,published,published_at," +
+  "published_by_json,objects_json,holes_json,assets_json,course_json,created_at,updated_at";
+
 async function readSupabaseMaps() {
   const rows = await supabaseFetch(
-    TABLE + "?select=id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng,region,country,country_code,facility_key,course_aliases,published,published_at,published_by_json,objects_json,holes_json,assets_json,course_json,created_at,updated_at&published=eq.true&order=updated_at.desc&limit=500",
+    TABLE + "?select=" + FULL_COLUMNS + "&published=eq.true&order=updated_at.desc&limit=500",
     { method: "GET" }
   );
   return mapsFromSupabaseRows(rows);
@@ -519,7 +624,13 @@ function courseToSupabaseRow(course) {
        reading holes_json, which runs to tens of kilobytes per course. */
     hole_count: Object.keys(jsonObject(course && course.holes)).length || null,
     assets_json: jsonObject(course && course.assets),
-    course_json: jsonObject(course),
+    /* objects, holes and assets have their own columns above. course_json used
+       to carry a second copy of all three, so every read fetched both - 894 kB
+       of the table, on a table whose rows are otherwise small. The copies drifted
+       too: Tara Iti's course_json held 64 objects against the column's 723. The
+       read path has always preferred the columns, so the copy was never even the
+       one being used. course_json now carries only what has no column of its own. */
+    course_json: courseWithoutGeometry(course),
     updated_at: text(course && course.updatedAt, 80) || now
   };
 }
@@ -546,9 +657,9 @@ function courseFromSupabaseRow(row) {
     published: true,
     publishedAt: text(row.published_at || base.publishedAt, 80),
     publishedBy: jsonObject(row.published_by_json || base.publishedBy),
-    objects: jsonObject(row.objects_json || base.objects),
-    holes: jsonObject(row.holes_json || base.holes),
-    assets: jsonObject(row.assets_json || base.assets),
+    objects: jsonObject(row.objects_json),
+    holes: jsonObject(row.holes_json),
+    assets: jsonObject(row.assets_json),
     createdAt: text(row.created_at || base.createdAt, 80),
     updatedAt: text(row.updated_at || base.updatedAt, 80)
   });
@@ -868,6 +979,15 @@ function shapePoints(value) {
   return points.length >= 3 ? points : null;
 }
 
+/* Everything about a course except the three blobs that have their own columns. */
+function courseWithoutGeometry(course) {
+  const rest = Object.assign({}, jsonObject(course));
+  delete rest.objects;
+  delete rest.holes;
+  delete rest.assets;
+  return rest;
+}
+
 function jsonObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -910,6 +1030,8 @@ function distanceM(a, b) {
 
 export const __courseMapsTest = {
   courseFromSupabaseRow,
+  courseWithoutGeometry,
+  listRowToCourse,
   courseToSupabaseRow,
   deleteCourseId,
   findCourseMapKey,

@@ -23,6 +23,7 @@ import { matchLoopsToCards, courseLengthsFromPublishedGeometry } from "./lib/gd-
 import { renamePatch } from "./lib/gd-course-rename-core.mjs";
 import { splitCourseName } from "./lib/gd-automapper-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
 
 const MAPS_TABLE = "course_maps";
@@ -36,25 +37,11 @@ function supabaseKey() { return env("SUPABASE_SERVICE_ROLE_KEY"); }
 function anonKey() { return env("SUPABASE_ANON_KEY") || env("VITE_SUPABASE_ANON_KEY") || env("SUPABASE_PUBLIC_ANON_KEY") || ""; }
 function hasSupabase() { return !!(supabaseBase() && supabaseKey()); }
 
-async function supabaseFetch(path, options = {}) {
-  if (!hasSupabase()) throw new Error("Supabase is not configured");
-  const headers = Object.assign({
-    apikey: supabaseKey(),
-    Authorization: "Bearer " + supabaseKey(),
-    "Content-Type": "application/json"
-  }, options.headers || {});
-  const response = await fetch(supabaseBase() + "/rest/v1/" + path, Object.assign({}, options, { headers }));
-  const bodyText = await response.text();
-  let body = null;
-  if (bodyText) { try { body = JSON.parse(bodyText); } catch (_e) { body = bodyText; } }
-  if (!response.ok) {
-    const error = new Error("Supabase request failed");
-    error.status = response.status;
-    error.body = body;
-    throw error;
-  }
-  return body;
-}
+const supabaseFetch = createSupabaseFetch({
+  base: supabaseBase,
+  key: supabaseKey,
+  label: "course-scorecard-update"
+});
 
 /* Same proof-of-identity rule as course-maps.mjs/course-mapper-jobs.mjs: the
    caller's Supabase access token is verified against /auth/v1/user, and only the

@@ -33,6 +33,7 @@ import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-expor
 import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, heightsFromFloat32Tiff, terrainRgbPngFromHeights, decodeElevation } from "./lib/gd-relief-core.mjs";
 import greenCore from "../scripts/gd-green-contours-core.js";
 
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const JOBS_TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
 const RECIPES_TABLE = "course_visual_recipes";
@@ -89,19 +90,11 @@ function env(name) { return process.env[name] || ""; }
 function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
 function supabaseKey() { return env("SUPABASE_SERVICE_ROLE_KEY"); }
 
-async function supabaseFetch(path, options = {}) {
-  const headers = Object.assign({
-    apikey: supabaseKey(),
-    Authorization: "Bearer " + supabaseKey(),
-    "Content-Type": "application/json"
-  }, options.headers || {});
-  const response = await fetch(supabaseBase() + "/rest/v1/" + path, Object.assign({}, options, { headers }));
-  const textBody = await response.text();
-  let body = null;
-  try { body = textBody ? JSON.parse(textBody) : null; } catch (e) { body = textBody; }
-  if (!response.ok) throw new Error("Supabase " + response.status + ": " + (typeof body === "string" ? body : JSON.stringify(body)));
-  return body;
-}
+const supabaseFetch = createSupabaseFetch({
+  base: supabaseBase,
+  key: supabaseKey,
+  label: "course-visual-worker-background"
+});
 
 async function storageUpload(path, buffer, contentType) {
   const response = await fetch(supabaseBase() + "/storage/v1/object/" + BUCKET + "/" + path, {

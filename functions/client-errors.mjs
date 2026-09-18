@@ -1,3 +1,4 @@
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 /* Client error intake.
  *
  * Accepts small batches of already-deduplicated errors from the app and upserts
@@ -33,26 +34,11 @@ function hasSupabase() {
   return !!(supabaseBase() && supabaseKey());
 }
 
-async function supabaseFetch(path, options = {}) {
-  const headers = Object.assign({
-    apikey: supabaseKey(),
-    Authorization: "Bearer " + supabaseKey(),
-    "Content-Type": "application/json"
-  }, options.headers || {});
-  const response = await fetch(supabaseBase() + "/rest/v1/" + path, Object.assign({}, options, { headers }));
-  const bodyText = await response.text();
-  let body = null;
-  if (bodyText) {
-    try { body = JSON.parse(bodyText); } catch (_error) { body = bodyText; }
-  }
-  if (!response.ok) {
-    const error = new Error("Supabase request failed");
-    error.status = response.status;
-    error.body = body;
-    throw error;
-  }
-  return body;
-}
+const supabaseFetch = createSupabaseFetch({
+  base: supabaseBase,
+  key: supabaseKey,
+  label: "client-errors"
+});
 
 function json(status, body) {
   return new Response(body == null ? "" : JSON.stringify(body), {

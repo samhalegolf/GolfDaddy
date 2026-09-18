@@ -1,3 +1,4 @@
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const TABLE = "course_visuals";
 const BUCKET = "course-visuals";
 const ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
@@ -18,31 +19,11 @@ function hasSupabase() {
   return !!(supabaseBase() && supabaseKey());
 }
 
-async function supabaseFetch(path, options = {}) {
-  if (!hasSupabase()) throw new Error("Supabase is not configured");
-  const headers = Object.assign({
-    apikey: supabaseKey(),
-    Authorization: "Bearer " + supabaseKey(),
-    "Content-Type": "application/json"
-  }, options.headers || {});
-  const response = await fetch(supabaseBase() + "/rest/v1/" + path, Object.assign({}, options, { headers }));
-  const bodyText = await response.text();
-  let body = null;
-  if (bodyText) {
-    try {
-      body = JSON.parse(bodyText);
-    } catch (_error) {
-      body = bodyText;
-    }
-  }
-  if (!response.ok) {
-    const error = new Error("Supabase request failed");
-    error.status = response.status;
-    error.body = body;
-    throw error;
-  }
-  return body;
-}
+const supabaseFetch = createSupabaseFetch({
+  base: supabaseBase,
+  key: supabaseKey,
+  label: "course-visuals"
+});
 
 async function supabaseStorageFetch(path, options = {}) {
   if (!hasSupabase()) throw new Error("Supabase is not configured");

@@ -40,6 +40,7 @@ import { eliminateInferredCourses } from "./lib/gd-inferred-course-claims-core.m
 import { OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND } from "./course-mapper-jobs.mjs";
 import { refineSurfaceShape, applyRefinedShape, REFINED_SHAPE_SOURCE } from "./lib/gd-surface-refine-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
 
 const JOBS_TABLE = "course_mapper_jobs";
@@ -51,19 +52,11 @@ function env(name) { return process.env[name] || ""; }
 function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
 function supabaseKey() { return env("SUPABASE_SERVICE_ROLE_KEY"); }
 
-async function supabaseFetch(path, options = {}) {
-  const headers = Object.assign({
-    apikey: supabaseKey(),
-    Authorization: "Bearer " + supabaseKey(),
-    "Content-Type": "application/json"
-  }, options.headers || {});
-  const response = await fetch(supabaseBase() + "/rest/v1/" + path, Object.assign({}, options, { headers }));
-  const textBody = await response.text();
-  let body = null;
-  try { body = textBody ? JSON.parse(textBody) : null; } catch (e) { body = textBody; }
-  if (!response.ok) throw new Error("Supabase " + response.status + ": " + (typeof body === "string" ? body : JSON.stringify(body)));
-  return body;
-}
+const supabaseFetch = createSupabaseFetch({
+  base: supabaseBase,
+  key: supabaseKey,
+  label: "course-mapper-worker-background"
+});
 
 /* status=eq.queued in the filter makes the claim atomic - two workers racing the same row
    can't both flip it to running. Identical pattern to course-visual-worker-background.mjs's
