@@ -2,15 +2,11 @@ import { placeFromCourse, reverseGeocodePlace } from "./lib/gd-course-place.mjs"
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
 import { courseBoundsFromObjects } from "./lib/gd-course-package-shape.mjs";
 
-const STORE_NAME = "clarity-course-maps";
-const STORE_KEY = "published-course-maps-v1";
 const TABLE = "course_maps";
 import { purgeCourseData } from "./lib/gd-course-cleanup.mjs";
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 
 const ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
-let getStoreImpl = null;
-let getStoreLoadAttempted = false;
 
 function env(name) {
   return process.env[name] || "";
@@ -140,9 +136,21 @@ export default async function courseMaps(req) {
   if (!course) return json(400, { error: "Course map is required" });
   await ensureCoursePlace(course);
 
-  const current = await readMaps();
-  const existingKey = findCourseMapKey(current, course);
-  const existingCourse = existingKey ? current.courses[existingKey] : null;
+  /* The course this one already is, if any: matched by id, course id or name
+     against the identity-only list view, then read in full on its own. This
+     used to read every published course WITH its geometry (12 MB) to find the
+     one row it was about to merge into, and read it all again afterwards to
+     rewrite a Netlify Blobs mirror of the whole library. A multi-course
+     automap publishes each course separately, so one scan did that several
+     times inside a minute - alongside the phones' library syncs, that is what
+     filled PostgREST's connection pool on 17-18 Sep 2026. The mirror is gone:
+     Supabase is the one store, and a publish touches one course. */
+  let existingCourse = null;
+  try {
+    existingCourse = await readExistingCourse(course);
+  } catch (error) {
+    return json(error.status || 503, { error: storageMessage(error), storage: "supabase" });
+  }
   // Play, scan and publish behave the SAME for everyone - admin is not a
   // different code path here. Admin is only a privilege for out-of-band actions
   // (delete above), and for looking at the database afterward. The merge that
@@ -152,40 +160,31 @@ export default async function courseMaps(req) {
   const mode = "create-or-append";
   const merge = mergeGeneratedCourse(existingCourse, course);
   if (!merge.course) return json(400, { error: "No new generated objects" });
-  if (existingKey && existingKey !== merge.course.id) delete current.courses[existingKey];
-  current.courses[merge.course.id] = merge.course;
-  current.updatedAt = new Date().toISOString();
 
+  if (!hasSupabase()) return json(503, { error: "Supabase is not configured", storage: "supabase" });
   const warnings = [];
-  let storage = "netlify-blobs";
-  if (hasSupabase()) {
-    try {
-      /* merge.course, NEVER the raw incoming `course`. Supabase is the authoritative store and
-         this upsert replaces objects_json wholesale, so writing the payload the client sent
-         made the merge above apply to the blob mirror only: a phone's Community scan of
-         Millbrook (tee/green/route, 65 objects) republished over the 278 fairway/bunker/water
-         surfaces collect_extra_objects had written server-side, and the next Watch bake shipped
-         every hole with no hazards. The client never holds those surfaces - they exist only in
-         objects_json - so the merged course is the only thing that can be written back. */
-      await writeSupabaseCourse(merge.course);
-      storage = "supabase";
-    } catch (error) {
-      warnings.push({ storage: "supabase", message: storageMessage(error) });
-    }
-  } else {
-    warnings.push({ storage: "supabase", message: "Supabase is not configured" });
-  }
-
-  const mirrored = await writeBlobMaps(current);
-  if (!mirrored.ok) {
-    warnings.push({ storage: "netlify-blobs", message: mirrored.message });
-    if (storage !== "supabase") return json(503, { error: "Course map storage unavailable", warnings });
+  const storage = "supabase";
+  try {
+    /* merge.course, NEVER the raw incoming `course`. Supabase is the authoritative store and
+       this upsert replaces objects_json wholesale, so writing the payload the client sent
+       would discard what the merge above kept: a phone's Community scan of Millbrook
+       (tee/green/route, 65 objects) once republished over the 278 fairway/bunker/water
+       surfaces collect_extra_objects had written server-side, and the next Watch bake shipped
+       every hole with no hazards. The client never holds those surfaces - they exist only in
+       objects_json - so the merged course is the only thing that can be written back. */
+    await writeSupabaseCourse(merge.course);
+  } catch (error) {
+    return json(error.status || 503, {
+      error: storageMessage(error),
+      storage,
+      warnings: [{ storage, message: storageMessage(error) }]
+    });
   }
 
   /* Geometry changed -> the visual worker should re-snapshot this course. Fire-and-forget:
      publish must never fail because the visual queue hiccuped, and the jobs endpoint dedupes
      if a snapshot is already queued or running. */
-  if (storage === "supabase" && merge.accepted && (merge.accepted.objects || merge.accepted.holes)) {
+  if (merge.accepted && (merge.accepted.objects || merge.accepted.holes)) {
     try {
       /* courseId, NOT id. `course.id` is the STORE key, "published::helensville", which
          slugifies to "published-helensville" - a course that does not exist. Every publish
@@ -198,7 +197,14 @@ export default async function courseMaps(req) {
     }
   }
 
-  return json(200, Object.assign(current, { storage, warnings, mode, accepted: merge.accepted }));
+  /* The course as now published, and nothing else. Both clients merge this
+     response into their store additively (mergePublishedStore), so the rest
+     of the library never needed to ride along. */
+  const published = emptyMaps();
+  published.storage = storage;
+  published.courses[merge.course.id] = merge.course;
+  published.updatedAt = merge.course.updatedAt || new Date().toISOString();
+  return json(200, Object.assign(published, { storage, warnings, mode, accepted: merge.accepted }));
 }
 
 /* The id the visual worker looks a course up by - it reads course_maps.course_id, which is
@@ -249,27 +255,6 @@ export const config = {
   path: "/api/course-maps",
 };
 
-async function store() {
-  if (!getStoreLoadAttempted) {
-    getStoreLoadAttempted = true;
-    try {
-      const mod = await import("@netlify/blobs");
-      getStoreImpl = mod && mod.getStore;
-    } catch (error) {
-      console.warn("course map blob module unavailable", error && error.message || error);
-    }
-  }
-  return getStoreImpl ? getStoreImpl(STORE_NAME) : null;
-}
-
-async function safeStore() {
-  try {
-    return await store();
-  } catch (error) {
-    console.warn("course map store unavailable", error && error.message || error);
-    return null;
-  }
-}
 
 /* The play-scope library: every course's identity, location, holes and core objects (tee,
    green, route bends), but NOT the collected fairway/bunker/water surfaces for a course whose
@@ -359,113 +344,72 @@ async function readSomeCourses(courseIds) {
 }
 
 async function readMaps() {
-  if (!hasSupabase()) return readBlobMaps();
-  const blobMapsPromise = readBlobMaps().catch((error) => {
-    console.warn("course map mirror read failed", error && error.message || error);
-    return null;
-  });
+  if (!hasSupabase()) {
+    return Object.assign(emptyMaps(), { storage: "supabase", unavailable: true,
+      warnings: [{ storage: "supabase", message: "Supabase is not configured" }] });
+  }
   try {
-    const cloudMaps = await readSupabaseMaps();
-    const blobMaps = await blobMapsPromise;
-    return withMirrorSummary(cloudMaps, blobMaps);
+    return await readSupabaseMaps();
   } catch (error) {
     console.warn("course map supabase read failed", error && (error.body || error.message) || error);
-    const warnings = [{ storage: "supabase", message: storageMessage(error) }];
-    const blobMaps = await blobMapsPromise;
-    if (env("COURSE_MAPS_ALLOW_BLOB_FALLBACK") === "true") {
-      return Object.assign(blobMaps || emptyMaps(), {
-        storage: "netlify-blobs",
-        authoritativeStorage: "supabase",
-        warnings
-      });
-    }
     return Object.assign(emptyMaps(), {
       storage: "supabase",
       unavailable: true,
-      mirrorStorage: blobMaps ? "netlify-blobs" : null,
-      mirrorCourseCount: blobMaps ? Object.keys(blobMaps.courses || {}).length : 0,
-      warnings
+      warnings: [{ storage: "supabase", message: storageMessage(error) }]
     });
   }
+}
+
+/* The published row this course would merge into, read on its own.
+   Identity comes from the list view (id, course id, name, aliases - no
+   geometry), which is all findCourseMapKey has ever matched on; only the one
+   row that matches is then read in full. */
+async function readExistingCourse(course) {
+  if (!hasSupabase()) return null;
+  const rows = await supabaseFetch(
+    LIST_VIEW + "?select=id,course_id,course_name,course_aliases&published=eq.true&limit=1000",
+    { method: "GET" }
+  );
+  const index = emptyMaps();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const id = text(row && row.id, 180);
+    if (!id) return;
+    index.courses[id] = {
+      id,
+      courseId: text(row.course_id, 160),
+      courseName: text(row.course_name, 200),
+      aliases: Array.isArray(row.course_aliases) ? row.course_aliases : []
+    };
+  });
+  const key = findCourseMapKey(index, course);
+  if (!key) return null;
+  const full = await supabaseFetch(
+    TABLE + "?select=" + FULL_COLUMNS + "&id=eq." + encodeURIComponent(key) + "&limit=1",
+    { method: "GET" }
+  );
+  return courseFromSupabaseRow(Array.isArray(full) ? full[0] : null);
 }
 
 async function deleteCourseMap(payload) {
   const courseId = deleteCourseId(payload);
   if (!courseId) return json(400, { error: "courseId is required" });
+  if (!hasSupabase()) return json(503, { error: "Supabase is not configured", courseId, storage: "supabase" });
 
-  let current;
+  let deletedSupabase = 0;
   try {
-    current = hasSupabase() ? await readSupabaseMaps() : await readBlobMaps();
+    deletedSupabase = await deleteSupabaseCourse(courseId);
   } catch (error) {
     return json(error.status || 503, { error: storageMessage(error), courseId, storage: "supabase" });
   }
 
-  const existingKey = findCourseMapKey(current, {
-    id: "published::" + courseId,
-    courseId,
-    courseName: payload && (payload.courseName || payload.name) || payload && payload.course && (payload.course.courseName || payload.course.name)
-  });
-  let deletedMirror = 0;
-  if (existingKey) {
-    delete current.courses[existingKey];
-    current.updatedAt = new Date().toISOString();
-    deletedMirror = 1;
-  }
-
-  const warnings = [];
-  let deletedSupabase = 0;
-  let storage = "netlify-blobs";
-  if (hasSupabase()) {
-    try {
-      deletedSupabase = await deleteSupabaseCourse(courseId);
-      storage = "supabase";
-    } catch (error) {
-      return json(error.status || 503, { error: storageMessage(error), courseId, storage: "supabase" });
-    }
-  } else {
-    warnings.push({ storage: "supabase", message: "Supabase is not configured" });
-  }
-
-  const mirrored = await writeBlobMaps(current);
-  if (!mirrored.ok) {
-    warnings.push({ storage: "netlify-blobs", message: mirrored.message });
-    if (storage !== "supabase") return json(503, { error: "Course map storage unavailable", courseId, warnings });
-  }
-
-  return json(200, Object.assign(current, {
+  return json(200, Object.assign(emptyMaps(), {
+    storage: "supabase",
     ok: true,
     action: "delete",
     courseId,
-    deleted: { supabase: deletedSupabase, mirror: deletedMirror },
-    storage,
-    warnings
+    deleted: { supabase: deletedSupabase },
+    warnings: []
   }));
-}
-
-function withMirrorSummary(cloudMaps, blobMaps) {
-  const out = Object.assign(emptyMaps(), cloudMaps || {}, { storage: "supabase" });
-  out.mirrorStorage = blobMaps ? "netlify-blobs" : null;
-  out.mirrorCourseCount = blobMaps ? Object.keys(blobMaps.courses || {}).length : 0;
-  return out;
-}
-
-async function readBlobMaps() {
-  const blobStore = await safeStore();
-  if (!blobStore) return emptyMaps();
-  const saved = await blobStore.get(STORE_KEY, { type: "json" }).catch(() => null);
-  if (saved && saved.courses) return Object.assign(emptyMaps(), saved, { storage: "netlify-blobs" });
-  return emptyMaps();
-}
-
-async function writeBlobMaps(maps) {
-  const blobStore = await safeStore();
-  if (!blobStore) return { ok: false, message: "Netlify Blob store unavailable" };
-  try {
-    await blobStore.setJSON(STORE_KEY, maps);
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, message: storageMessage(error) };
-  }
 }
 
 const LIST_VIEW = "course_maps_list";
@@ -715,19 +659,6 @@ function courseFromSupabaseRow(row) {
     updatedAt: text(row.updated_at || base.updatedAt, 80)
   });
   return course.id && course.courseId && course.courseName ? course : null;
-}
-
-function mergeMapSets(...sets) {
-  const opts = sets.length && sets[sets.length - 1] && !sets[sets.length - 1].courses ? sets.pop() : {};
-  const out = emptyMaps();
-  out.storage = opts.storage || "merged";
-  sets.forEach((set) => {
-    Object.values(set && set.courses || {}).forEach((course) => {
-      if (course && course.id) out.courses[course.id] = course;
-    });
-    if (set && set.updatedAt && (!out.updatedAt || String(set.updatedAt) > String(out.updatedAt))) out.updatedAt = set.updatedAt;
-  });
-  return out;
 }
 
 /* Removed: isAdminActor() trusted actor.email/actor.role straight from the
@@ -1089,9 +1020,7 @@ export const __courseMapsTest = {
   isGeneratedCourseUpload,
   mergeGeneratedCourse,
   mapsFromSupabaseRows,
-  mergeMapSets,
   sanitizeCourse,
   stripSurfacesForPlay,
   visualSnapshotCourseId,
-  withMirrorSummary,
 };

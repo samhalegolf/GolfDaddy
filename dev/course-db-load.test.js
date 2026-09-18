@@ -12,6 +12,8 @@
         three Supabase reads per row, and asked again as soon as a poll failed.
      3. Every phone whose manifest went stale pulled the whole library through
         /api/course-maps?scope=play at once.
+     4. Every publish read the whole library twice (Supabase and a Netlify
+        Blobs mirror of it) and rewrote the 12 MB mirror, to merge one course.
 
    These checks pin down the shape of each request now. */
 
@@ -29,9 +31,10 @@ function jsonResponse(status, body) {
 }
 
 function stubTables(world, asked) {
-  global.fetch = async function (url) {
+  global.fetch = async function (url, options) {
     const target = String(url);
     asked.push(target);
+    if (target.includes("/auth/v1/user")) return jsonResponse(200, { id: "admin-1", email: "samhalegolf@gmail.com" });
     const rest = target.split("/rest/v1/")[1] || "";
     const table = rest.split("?")[0];
     if (table === "course_maps_list") {
@@ -46,12 +49,25 @@ function stubTables(world, asked) {
       })));
     }
     if (table === "course_maps") {
+      const method = (options && options.method) || "GET";
+      if (method === "POST") {
+        world.writes = world.writes || [];
+        world.writes.push(JSON.parse(options.body));
+        return jsonResponse(201, []);
+      }
+      if (method === "DELETE") {
+        world.deletes = world.deletes || [];
+        world.deletes.push(rest);
+        return jsonResponse(200, [{ id: "published::cromwell" }]);
+      }
       let rows = world.maps || [];
       const inList = /course_id=in\.\(([^)]*)\)/.exec(rest);
       if (inList) {
         const wanted = inList[1].split(",").map((s) => s.replace(/"/g, ""));
         rows = rows.filter((row) => wanted.indexOf(row.course_id) >= 0);
       }
+      const byId = /(?:^|&)id=eq\.([^&]+)/.exec(rest);
+      if (byId) rows = rows.filter((row) => row.id === decodeURIComponent(byId[1]));
       return jsonResponse(200, rows);
     }
     /* PostgREST filters; a single-course read must not see every course's rows. */
@@ -159,6 +175,48 @@ const STUB = {
   assert.ok(!whole.body.partial, "no courseIds is still the whole library");
   assert.strictEqual(Object.keys(whole.body.courses).length, 2);
   ok("scope=play without courseIds is unchanged");
+
+  // --- 4. a publish touches one course ---------------------------------------
+  const post = (fn, body, token) => fn(new Request("https://clarity.example/api/course-maps", {
+    method: "POST",
+    headers: Object.assign({ "Content-Type": "application/json" }, token ? { Authorization: "Bearer " + token } : {}),
+    body: JSON.stringify(body)
+  })).then(async (res) => ({ status: res.status, body: JSON.parse(await res.text()) }));
+
+  asked = [];
+  let world = { maps: [MAPPED, STUB] };
+  stubTables(world, asked);
+  const scan = await post(courseMaps, {
+    generated: true, mode: "generated-create-or-append",
+    course: {
+      courseId: "cromwell", courseName: "Cromwell Golf Course", courseLat: -45.038, courseLng: 169.204, countryCode: "NZ", country: "New Zealand",
+      objects: { g2: { id: "g2", type: "green", holeNumber: 2, position: { lat: -45.04, lng: 169.21 } } },
+      holes: { 2: { holeNumber: 2, greenCenter: { lat: -45.04, lng: 169.21 } } }
+    }
+  });
+  assert.strictEqual(scan.status, 200, JSON.stringify(scan.body));
+  assert.ok(!asked.some((u) => u.includes("objects_json") && !u.includes("id=eq.")), "a publish must not read the whole library: " + asked.join("\n"));
+  assert.ok(asked.some((u) => u.includes("course_maps_list") && !u.includes("object_count")), "the course is matched against the identity view");
+  assert.ok(asked.some((u) => u.includes("id=eq.published%3A%3Acromwell")), "and only the matched row is read in full");
+  assert.ok(!asked.some((u) => u.includes("blob")), "nothing is mirrored anywhere");
+  assert.strictEqual(world.writes.length, 1, "one row is written");
+  assert.strictEqual(world.writes[0].id, "published::cromwell");
+  assert.deepStrictEqual(Object.keys(world.writes[0].objects_json).sort(), ["g1", "g2", "t1"], "the write is the merge, not the incoming scan");
+  assert.deepStrictEqual(Object.keys(scan.body.courses), ["published::cromwell"], "the response carries the published course and nothing else");
+  assert.strictEqual(scan.body.accepted.holes, 1);
+  assert.strictEqual(scan.body.storage, "supabase");
+  ok("a publish matches on the identity view, reads one row, writes one row, answers one course");
+
+  asked = [];
+  world = { maps: [MAPPED, STUB] };
+  stubTables(world, asked);
+  const gone = await post(courseMaps, { action: "delete", courseId: "cromwell" }, "admin-token");
+  assert.strictEqual(gone.status, 200, JSON.stringify(gone.body));
+  assert.ok(!asked.some((u) => u.includes("objects_json")), "a delete must not read the library: " + asked.join("\n"));
+  assert.ok(world.deletes.length >= 1, "the rows are deleted");
+  assert.strictEqual(gone.body.deleted.supabase, 2);
+  assert.strictEqual(gone.body.action, "delete");
+  ok("a delete deletes, and reads nothing");
 
   // --- the two screens hold up their end ----------------------------------------
   const studio = fs.readFileSync(path.join(ROOT, "scripts", "studio", "gd-admin-course-db.js"), "utf8");

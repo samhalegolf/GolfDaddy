@@ -15,11 +15,9 @@ const { pathToFileURL } = require("url");
     isGeneratedCourseUpload,
     mergeGeneratedCourse,
     mapsFromSupabaseRows,
-    mergeMapSets,
     sanitizeCourse,
     stripSurfacesForPlay,
     visualSnapshotCourseId,
-    withMirrorSummary
   } = mod.__courseMapsTest;
 
   const actor = { name: "Sam", email: "samhalegolf@gmail.com", role: "admin", accountId: "acct-1" };
@@ -97,25 +95,8 @@ const { pathToFileURL } = require("url");
   assert.equal(Object.keys(cloudMaps.courses).length, 1);
   assert.equal(cloudMaps.updatedAt, "2026-07-15T01:00:00.000Z");
 
-  const merged = mergeMapSets(
-    { updatedAt: "2026-07-14T00:00:00.000Z", courses: { "published::cromwell": { id: "published::cromwell", courseName: "Old" } } },
-    cloudMaps,
-    { storage: "supabase" }
-  );
-  assert.equal(merged.storage, "supabase");
-  assert.equal(merged.courses["published::cromwell"].courseName, "Cromwell Golf Course");
-  assert.equal(merged.updatedAt, "2026-07-15T01:00:00.000Z");
-
-  const authoritative = withMirrorSummary(cloudMaps, {
-    updatedAt: "2026-07-16T01:00:00.000Z",
-    courses: {
-      "published::akarana-golf-club": { id: "published::akarana-golf-club", courseId: "akarana-golf-club", courseName: "Akarana Golf Club" }
-    }
-  });
-  assert.equal(authoritative.storage, "supabase");
-  assert.equal(authoritative.courses["published::akarana-golf-club"], undefined);
-  assert.equal(authoritative.courses["published::cromwell"].courseName, "Cromwell Golf Course");
-  assert.equal(authoritative.mirrorCourseCount, 1);
+  /* No mirror any more: Supabase is the one store, and a read reports it as such. */
+  assert.equal(cloudMaps.mirrorStorage, undefined);
 
   assert.equal(deleteCourseId({ id: "published::akarana-golf-club" }), "akarana-golf-club");
   assert.equal(deleteCourseId({ course: { courseName: "Akarana Golf Club" } }), "akarana-golf-club");
