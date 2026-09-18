@@ -715,7 +715,7 @@ function unworld(x, y) {
    that grid (fractional captureZoom encodes the downscale), so the client can hand it to the
    existing renderer as a manifest with ONE tile - no new client-side projection code at all.
    Rotation-free compositing also makes it the cheapest render in the family. */
-export async function renderHoleSurfaceMercator({ pins, captures, terrain, greenSurface, settings, maxDim = 2048, quality = 82 }) {
+export async function renderHoleSurfaceMercator({ pins, captures, underlay = null, terrain, greenSurface, settings, maxDim = 2048, quality = 82 }) {
   const rects = captures.map(item => ({ item, pb: projectedBounds(item.entry.bounds) })).filter(r => r.pb);
   if (!rects.length) throw new Error("no positioned captures for mercator surface");
   const merged = {
@@ -747,7 +747,13 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, green
   const H = Math.max(64, Math.round((merged.bottom - merged.top) * scalePx));
   const composites = [];
   rects.sort((a, b) => (num(a.item.entry.stitchLayer, 10) - num(b.item.entry.stitchLayer, 10)) || (num(a.item.entry.segmentIndex, 999) - num(b.item.entry.segmentIndex, 999)));
-  for (const { item, pb } of rects) {
+  /* The underlay (course backdrop) is drawn first and clipped to the frame like the relief
+     reference: it fills the corners of the north-up box that no corridor segment covers -
+     ground the hole stage never shows, but which the flattened view and Studio do - with
+     low-res imagery instead of black. It has no say in the frame's extent or zoom. */
+  const underlayPb = underlay && underlay.buffer ? projectedBounds(underlay.entry.bounds) : null;
+  const layers = underlayPb ? [{ item: underlay, pb: underlayPb }, ...rects] : rects;
+  for (const { item, pb } of layers) {
     const left = Math.round(pb.left * scalePx - originPx.x);
     const top = Math.round(pb.top * scalePx - originPx.y);
     const w = Math.max(1, Math.round((pb.right - pb.left) * scalePx));

@@ -82,8 +82,9 @@ const RELIEF_STAMP = "relief2-perhole-x" + RELIEF_DEFAULTS.exaggeration + "-az" 
    (playSurface.greenDrawing). Bumped so every course re-bakes under the new rule rather than
    resuming a frame that still has the lines burnt in. */
 /* greenframe3: the green surround left the hole frame (corridor only, tightly framed) and is
-   shot at the source's best zoom. Both change published pixels and extents. */
-const GREEN_FRAME_STAMP = "greenframe3";
+   shot at the source's best zoom. greenframe4: the course backdrop underlays the hole frame so
+   the uncovered corners of the north-up box are low-res ground, not black. */
+const GREEN_FRAME_STAMP = "greenframe4";
 /* Plan ids hash each capture's PADDED BOUNDS, not the grid captureGrid derives from them - so
    a change to how a capture is framed (lens, bleed, zoom policy) leaves every id, and so the
    planKey, exactly as it was, and a re-snapshot would happily reuse stored masters shot under
@@ -1109,7 +1110,8 @@ async function runExportJob(job, deadlineAt) {
       /* North-up mercator surface: the geometry the v19 GPS pipeline consumes natively
          (originPx + captureZoom + one image). The runtime does the play-axis framing, same
          as it does for locally captured surfaces. */
-      const frame = await renderHoleSurfaceMercator({ pins, captures, terrain, greenSurface, settings, maxDim: EXPORT_RENDITION_PX });
+      const underlay = backdropEntry ? { entry: backdropEntry, buffer: await bufferFor(backdropEntry) } : null;
+      const frame = await renderHoleSurfaceMercator({ pins, captures, underlay, terrain, greenSurface, settings, maxDim: EXPORT_RENDITION_PX });
       if (frame.diagnostics) console.log(normaliseLogLine("h" + holeNumber, frame.diagnostics));
       await storageUpload(path, frame.jpeg, "image/jpeg");
       width = frame.width; height = frame.height; bytes = frame.jpeg.length;
