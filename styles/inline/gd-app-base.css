@@ -439,6 +439,20 @@
     /* The published version of a course map - "v2.0", "v0.1", and W-v1.0 for a Watch
        package. Monospace and tabular so a column of them lines up digit under digit. */
 .gdAdminCourseVersion{font:11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;color:rgba(226,240,230,.82);white-space:nowrap}
+    /* Snapshots panel - the course's imagery, shown to be looked at. Tiles are deliberately
+       generous: the point is spotting a mis-framed hole or a blown-out capture, which a
+       postage-stamp thumbnail cannot show. */
+.gdAdminSnapKinds{display:flex;gap:6px;margin:10px 0 12px}
+.gdAdminSnapKinds button{padding:5px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:transparent;color:rgba(226,240,230,.7);font-size:12px;cursor:pointer}
+.gdAdminSnapKinds button.active{background:rgba(31,211,109,.16);border-color:rgba(31,211,109,.5);color:#bff6d5}
+.gdAdminSnapGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.gdAdminSnapTile{margin:0;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);border-radius:10px;overflow:hidden}
+.gdAdminSnapTile a{display:block;line-height:0}
+.gdAdminSnapTile img{width:100%;height:150px;object-fit:contain;background:#07110c;display:block}
+.gdAdminSnapTile figcaption{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:7px 9px;font-size:11px;color:rgba(226,240,230,.62)}
+.gdAdminSnapTile figcaption b{color:rgba(226,240,230,.9);font-weight:600}
+.gdAdminSnapTile figcaption span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.gdAdminSnapBusy{font-size:11px;color:rgba(226,240,230,.6);align-self:center;font-variant-numeric:tabular-nums}
     .gdAdminCourseTable tr.expanded{background:rgba(31,211,109,.075)}
     .gdAdminCourseTable tr.expanded .gdAdminCourseCaret{color:#1fd36d}
     .gdAdminCourseTable tr.gdAdminCourseDiagRowHost{cursor:default;background:rgba(0,0,0,.22)}

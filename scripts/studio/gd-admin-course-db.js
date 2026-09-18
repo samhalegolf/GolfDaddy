@@ -566,6 +566,7 @@ function gdAdminCourseDbActionRail(selected){
     <button type="button" class="${active("scorecard")}" onclick="return gdAdminCourseDbShowScorecard(${id})">Score Card</button>
     <button type="button" class="${active("debug")}" onclick="return gdAdminCourseDbShowDebug(${id})">Debug</button>
     <button type="button" class="${active("watchmaps")}" onclick="return gdAdminCourseDbShowWatchMaps(${id})">Watch Maps</button>
+    <button type="button" class="${active("snapshots")}" onclick="return gdAdminCourseDbShowSnapshots(${id})">Snapshots</button>
     <button type="button" class="danger" onclick="return gdAdminCourseDbDelete(${id})">Delete</button>
     ${gdAdminCourseMaintenanceMenu(selected)}
     ${gdAdminCourseVisualUpdateButton(selected&&selected.id||"","primary")}
@@ -642,6 +643,12 @@ function gdAdminCourseDbShowDebug(courseId){
 }
 function gdAdminCourseDbShowWatchMaps(courseId){
   return gdAdminCourseDbOpen(courseId,"watchmaps");
+}
+/* Look at the imagery this course actually holds - the baked hole frames, or the raw
+   captures they were composited from - and pull it out as a contact sheet or a zip.
+   Rendered by scripts/studio/gd-admin-course-snapshots.js, same delegation as Watch Maps. */
+function gdAdminCourseDbShowSnapshots(courseId){
+  return gdAdminCourseDbOpen(courseId,"snapshots");
 }
 /* Mirrors ADMIN_EMAILS in functions/course-maps.mjs - the server is the real
    gate (it 403s a non-admin actor); this only decides whether we bother asking. */
@@ -4573,6 +4580,12 @@ function gdRenderAdminCourseDatabaseNow(){
   if(gdAdminCourseDatabaseTab==="debug"){
     gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}${gdAdminCourseDebugMarkup(selected)}</div>`);
     gdAdminCourseDebugRefresh();
+    return;
+  }
+  if(gdAdminCourseDatabaseTab==="snapshots"){
+    const markup=typeof window.gdAdminCourseSnapshotsMarkup==="function"?window.gdAdminCourseSnapshotsMarkup(selected):'<div class="gdCoursePlayDebugEmpty">Snapshots viewer not loaded.</div>';
+    gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}${markup}</div>`);
+    if(typeof window.gdAdminCourseSnapshotsAfterRender==="function")window.gdAdminCourseSnapshotsAfterRender(selected);
     return;
   }
   if(gdAdminCourseDatabaseTab==="watchmaps"){

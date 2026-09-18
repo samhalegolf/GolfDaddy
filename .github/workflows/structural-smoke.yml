@@ -110,6 +110,7 @@ jobs:
           node dev/course-package.test.js
           node dev/course-package-trigger.test.js
           node dev/course-version-label.test.js
+          node dev/course-snapshots.test.js
           node dev/imagery-source-registry.test.js
           node dev/map-source-coverage.test.js
           node dev/shell-navigation-owner.test.js

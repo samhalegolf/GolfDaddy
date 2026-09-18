@@ -35,6 +35,7 @@
     "test:course-maps-scope": "node dev/course-maps-list-scope.test.js",
     "test:course-versions": "node dev/course-versions.test.js",
     "test:course-version-label": "node dev/course-version-label.test.js",
+    "test:course-snapshots": "node dev/course-snapshots.test.js",
     "test:practice-parser": "node dev/practice-parser-parity.test.js",
     "test:practice-csv": "node dev/practice-csv-regression.test.js",
     "test:practice-adapter": "node dev/practice-library-adapter.test.js",
