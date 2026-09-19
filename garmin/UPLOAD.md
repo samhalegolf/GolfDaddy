@@ -127,11 +127,26 @@ its own screen shape.
 - [x] ~~**Per-hole map URLs.**~~ Done 2026-09-19 —
       `app/js/watch-map-delivery.js` attaches an absolute `url` per hole and
       the asset endpoint is public, unsigned and immutable. See README.
-- [ ] **The Connect IQ Mobile SDK is not bundled in either phone build**, so
-      the phone cannot talk to a watch at all: no `.xcframework` on iOS, no
-      Maven coordinate on Android, and every SDK call in both
-      `GarminTransport`s is still commented out and written from inference.
-      Nothing below matters until this is done.
+- [x] ~~**The Connect IQ Mobile SDK is not bundled in either phone build.**~~
+      Done 2026-09-20. Neither is a portal download:
+
+        iOS      Swift package `garmin/connectiq-companion-app-sdk-ios`,
+                 pinned at 1.8.0 in App.xcodeproj (Garmin's own licence, not
+                 Apache — worth reading before shipping).
+        Android  Maven Central `com.garmin.connectiq:ciq-companion-app-sdk:2.4.0`.
+                 NOT the 2.2.0 that SDK's README prints; that README is stale.
+
+      Both `GarminTransport`s are now written against the real APIs, read
+      from the xcframework headers and the AAR respectively rather than from
+      documentation. **Neither has yet run against a watch.**
+
+- [ ] **Nothing has been tested against real hardware.** The two device
+      flows differ and only one can be checked without a phone in hand:
+      Android lists paired watches in-process (`getKnownDevices`), iOS hands
+      off to the Garmin Connect app and is called back on the
+      `claritycaddy-ciq` URL scheme. The hand-off in particular has several
+      silent failure modes — a missing `LSApplicationQueriesSchemes` entry,
+      a scheme that does not match Info.plist, Garmin Connect not signed in.
 
 ---
 

@@ -220,6 +220,36 @@ test("the SDK's checked exceptions are handled rather than assumed away", functi
   }
 });
 
+test("the iOS SDK is pinned in the Xcode project, with no duplicate object id", function () {
+  const pbx = fs.readFileSync(path.join(ROOT, "ios", "App", "App.xcodeproj", "project.pbxproj"), "utf8");
+  assert.ok(/connectiq-companion-app-sdk-ios/.test(pbx), "the ConnectIQ package must be referenced by the project");
+  assert.ok(/productName = ConnectIQ;/.test(pbx), "the App target must actually link the ConnectIQ product");
+  /* A duplicate object id is what makes Xcode call a project "damaged", and
+     it is invisible to plutil — the file stays a valid plist. Hand-picking an
+     id that was already taken is exactly how that happened here once. */
+  const ids = (pbx.match(/^\t\t([0-9A-F]{24}) \/\*/gm) || []).map(l => l.trim().split(" ")[0]);
+  const seen = new Set(), dupes = new Set();
+  for (const id of ids) { if (seen.has(id)) dupes.add(id); seen.add(id); }
+  assert.deepStrictEqual([...dupes], [], "duplicate object ids in project.pbxproj — Xcode will refuse to open it");
+});
+
+test("iOS declares both Info.plist entries the hand-off needs", function () {
+  const plist = fs.readFileSync(path.join(ROOT, "ios", "App", "App", "Info.plist"), "utf8");
+  assert.ok(/claritycaddy-ciq/.test(plist),
+    "CFBundleURLTypes needs our scheme, or Garmin Connect has nowhere to hand the chosen watch back to");
+  assert.ok(/gcm-ciq/.test(plist),
+    "LSApplicationQueriesSchemes needs gcm-ciq, or canOpenURL always answers false and every player is " +
+    "told Garmin Connect is missing when it is installed");
+});
+
+test("the settings page handles iOS's hand-off selection, not just Android's list", function () {
+  const src = fs.readFileSync(GARMIN_JS, "utf8");
+  assert.ok(/devices\.handoff/.test(src),
+    "iOS cannot enumerate devices in-process; it leaves for Garmin Connect, so there is never a list to draw " +
+    "and 'no watches found' would be both wrong and alarming");
+  assert.ok(/selectionStyle === "handoff"/.test(src), "the button should say it leaves the app on iOS");
+});
+
 test("the settings page tells apart 'cannot look' from 'looked and found none'", function () {
   const src = fs.readFileSync(GARMIN_JS, "utf8");
   assert.ok(/devices\.sdkLinked === false/.test(src), "the not-bundled case needs its own wording");

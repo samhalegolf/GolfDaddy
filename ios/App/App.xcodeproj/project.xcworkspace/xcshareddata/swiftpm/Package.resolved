@@ -1,5 +1,5 @@
 {
-  "originHash" : "754fadc50300abf1035171f0df1823afe33696b734ca043ec9283e589dd7f009",
+  "originHash" : "3de1a7c5573e8b55d5c64942dcba706a4b287ea55078d3e7a05da655a86f5b17",
   "pins" : [
     {
       "identity" : "capacitor-swift-pm",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "9b9fb0af76b2b653f6e9b999f658adc132b9ab4c",
         "version" : "8.4.2"
+      }
+    },
+    {
+      "identity" : "connectiq-companion-app-sdk-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/garmin/connectiq-companion-app-sdk-ios",
+      "state" : {
+        "revision" : "f0d29ff691d700a132d86205ed9bb091e336c2f7",
+        "version" : "1.8.0"
       }
     },
     {
