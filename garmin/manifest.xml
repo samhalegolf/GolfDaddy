@@ -24,13 +24,20 @@
         name="@Strings.AppName"
         entry="ClarityCaddyApp"
         launcherIcon="@Drawables.LauncherIcon"
-        minSdkVersion="3.2.0">
-        <!-- Connect IQ 3.0 baseline preferred per plan step 29, but the
-             companion-app messaging APIs this project depends on
-             (registerForPhoneAppMessages / makeImageRequestWithDictionary)
-             are most reliably documented from 3.2 onward — verify against
-             the actual devices in the Phase 1 matrix and relax if an
-             earlier minSdkVersion proves sufficient. -->
+        minSdkVersion="3.0.0">
+        <!-- Connect IQ 3.0 baseline per plan step 29. The 3.2.0 minimum this
+             carried until 2026-09-19 was a guess, and it locked out the
+             Approach S62 entirely: that device tops out at CIQ 3.0.12, so
+             the compiler refused it outright. Verified against SDK 9.2.0
+             before relaxing — the companion-app messaging APIs this project
+             depends on are both far older than 3.0:
+               Communications.registerForPhoneAppMessages  since API 1.0.0
+               Communications.makeImageRequest             since API 1.2.0
+             (the latter under its real name; makeImageRequestWithDictionary,
+             named in the original note here, does not exist in the SDK).
+             With this minimum all five products in the matrix below compile,
+             the S62 included. Raise it again only for an API that genuinely
+             needs it, and re-check the S62 when you do. -->
         <iq:products>
             <iq:product id="approachs62"/>
             <iq:product id="approachs7042mm"/>

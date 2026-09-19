@@ -107,7 +107,8 @@ class GarminMapStore {
         while (residentOrder.size() > RESIDENT_BITMAP_LIMIT) {
             var evict = residentOrder[0];
             residentOrder = residentOrder.slice(1, residentOrder.size());
-            if (!residentOrder.contains(evict)) { residentBitmaps.remove(evict); }
+            // Lang.Array has indexOf, not contains (checked against SDK 9.2.0).
+            if (residentOrder.indexOf(evict) < 0) { residentBitmaps.remove(evict); }
         }
     }
 

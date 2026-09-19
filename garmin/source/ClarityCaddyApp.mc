@@ -25,7 +25,8 @@ class ClarityCaddyApp extends Application.AppBase {
         refreshTimer.start(method(:onTick), 1000, true);
     }
 
-    function onTick() {
+    // Typed because Timer.start resolves method(:onTick) against Method() as Void.
+    function onTick() as Void {
         WatchUi.requestUpdate();
     }
 

@@ -171,6 +171,24 @@
     var apiUrl = options.apiUrl || function (url) { return url; };
     var toBase64 = options.toBase64 || base64FromBytes;
     var log = options.log || function () {};
+    /* The public, permanently-cacheable URL for one hole's raster.
+
+       ABSOLUTE ONLY, and null otherwise. A watch has no notion of this app's
+       origin, so a relative "/api/..." would be unfetchable there; on web
+       apiUrl leaves paths relative, which is exactly the case to skip. On a
+       native build GDNative.apiOrigin makes it absolute, and native is the
+       only place a Garmin exists.
+
+       Unauthenticated on purpose, and safe to be: Connect IQ's
+       makeImageRequest takes no headers, so the URL has to work without one.
+       /api/course-watch-map-assets is a read-only proxy over published
+       imagery that is public by design (see functions/course-watch-map-assets.mjs),
+       serving immutable/max-age=31536000 over a versioned vN path. Nothing is
+       signed and nothing expires. */
+    function assetUrl(path) {
+      var url = apiUrl(ASSET_ENDPOINT + "?path=" + encodeURIComponent(String(path || "")));
+      return /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : null;
+    }
     var now = options.now || function () { return Date.now(); };
     /* One in-flight errand per course, and no repeat once a course is on the
        wrist: this is called from the Scene stream, which fires constantly.
@@ -291,6 +309,22 @@
                and means nothing on the wrist. `reference` is omitted rather
                than nulled for the NSNull reason in manifestHole. */
             if (hole.reference) out.reference = hole.reference;
+            /* `url` is what makes the map work on Garmin at all. Connect IQ
+               has no public API for turning an arbitrary byte buffer into a
+               bitmap, so the watch fetches its own imagery
+               (Communications.makeImageRequest in
+               garmin/source/Maps/GarminMapDownloader.mc) instead of being
+               handed bytes. Without this field GarminMapDownloader.requestHole
+               returns early on a null url and not one hole raster ever
+               downloads - the numbers face works and the map face stays empty.
+
+               Apple Watch ignores it: watchOS has no way to fetch on its own,
+               so it keeps receiving bytes through publishWatchMapAsset. One
+               manifest is built for whichever transports are registered, so
+               the field is simply present for both. Omitted rather than
+               nulled, for the NSNull reason above. */
+            var url = assetUrl(hole.path);
+            if (url) out.url = url;
             return out;
           })
         }

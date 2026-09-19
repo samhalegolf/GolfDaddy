@@ -1,6 +1,7 @@
 using Toybox.Lang;
 using Toybox.Communications;
 using Toybox.Graphics;
+using Toybox.WatchUi;
 
 // Fetches one hole's raster and hands the decoded bitmap to GarminMapStore.
 //
@@ -8,7 +9,7 @@ using Toybox.Graphics;
 // pushes raw JPEG bytes over WatchConnectivity's transferFile/sendMessage,
 // because watchOS's WCSession has no concept of the Watch fetching a URL
 // itself. Garmin's situation is different in a way that matters: Connect
-// IQ's Communications.makeImageRequestWithDictionary(url, params, options,
+// IQ's Communications.makeImageRequest(url, params, options,
 // callback) fetches a web image AND hands back an already-decoded
 // Graphics.BitmapType — there is no public Monkey C API for decoding an
 // arbitrary JPEG/PNG byte buffer the app assembled itself from chunked
@@ -22,14 +23,21 @@ using Toybox.Graphics;
 // Phase 1 plan step 22: "Garmin then obtains each hole image using Connect
 // IQ communications/image request APIs."
 //
-// UNVERIFIED: makeImageRequestWithDictionary's exact options dictionary keys
-// (content type hints, max dimensions) and its cross-relaunch caching
-// behaviour need confirming against the installed Connect IQ SDK version —
-// see garmin/README.md. If the phone's course_watch_maps URLs are
-// short-lived signed URLs rather than stable ones, the manifest must carry
-// a URL with enough lifetime to survive between fetches, or Garmin must
-// re-request a fresh manifest before each fetch; this is an open item for
-// whoever wires the phone-side manifest generation for Garmin.
+// VERIFIED against SDK 9.2.0 (2026-09-19): the API is
+// Communications.makeImageRequest(url, parameters, options, responseCallback)
+// — there is no makeImageRequestWithDictionary, and no fifth context
+// argument. :maxWidth/:maxHeight are real options keys. Its cross-relaunch
+// caching behaviour is still unconfirmed.
+//
+// RESOLVED 2026-09-19 — the URL lifetime worry that used to sit here was
+// unfounded, and the phone now sends the URL. app/js/watch-map-delivery.js
+// attaches an absolute `url` per hole, pointing at
+// /api/course-watch-map-assets. That endpoint is a read-only proxy over
+// imagery that is public by design (functions/course-watch-map-assets.mjs
+// says so in its own header), it takes no Authorization header -- which
+// matters, because makeImageRequest cannot send one -- and it serves
+// `immutable, max-age=31536000` over a versioned vN path. Nothing is signed
+// and nothing expires, so a URL is good for as long as the package is.
 class GarminMapDownloader {
     var store;       // GarminMapStore, set by the store itself on construction
     var inFlight;     // Dictionary used as a Set of hole numbers currently fetching
@@ -49,24 +57,24 @@ class GarminMapDownloader {
             :maxHeight => hole.height.toNumber()
         };
         try {
-            Communications.makeImageRequestWithDictionary(
-                hole.url, {}, options, method(:onImageResponse), hole.holeNumber);
+            // parameters == null, not {}: these URLs may be signed, and an
+            // empty dictionary can still append a bare "?" on some versions.
+            Communications.makeImageRequest(
+                hole.url, null, options, method(:onImageResponse));
         } catch (e) {
             inFlight.remove(hole.holeNumber);
         }
     }
 
-    // Signature matches Communications' image-request callback convention:
-    // (responseCode, data). The hole number is closed over via the request
-    // context argument where the SDK supports it; where it does not, callers
-    // should track the single outstanding request themselves (Phase 1 only
-    // ever has one hole in flight at a time per GarminMapStore's own
-    // decoded-bitmap discipline, so this is not a practical ambiguity).
-    function onImageResponse(responseCode, data) {
-        // context is not threaded through on every CIQ API level's
-        // callback signature; resolve against whichever hole is currently
-        // being awaited rather than assuming an argument that may not
-        // exist on the installed SDK.
+    // Signature matches the documented image-request callback exactly:
+    // (responseCode as Number, data as BitmapResource/BitmapReference/Null).
+    // There is no context argument on this API, so the hole number cannot be
+    // threaded through the request — Phase 1 only ever has one hole in
+    // flight at a time per GarminMapStore's decoded-bitmap discipline, so
+    // resolving against the awaited hole is unambiguous in practice.
+    function onImageResponse(
+            responseCode as Lang.Number,
+            data as WatchUi.BitmapResource or Graphics.BitmapReference or Null) as Void {
         var holeNumber = currentlyAwaitedHole();
         if (holeNumber != null) { inFlight.remove(holeNumber); }
         if (responseCode == 200 && data != null && holeNumber != null) {

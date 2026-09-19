@@ -56,7 +56,8 @@ class GarminLocationManager {
         if (onFix != null) { onFix.invoke(null, null, null); }
     }
 
-    function onPositionInfo(info) {
+    // Typed: Position.enableLocationEvents wants Method(loc as Position.Info) as Void.
+    function onPositionInfo(info as Position.Info) as Void {
         if (info == null || info.position == null) { return; }
         var degrees = info.position.toDegrees(); // [lat, lng] in decimal degrees
         var coordinate = new GarminCoordinate(degrees[0], degrees[1]);

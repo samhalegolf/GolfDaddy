@@ -29,20 +29,10 @@ class GarminBubbleProfile {
     var carryWindowPct;
     var distanceTendencyPct;
 
-    function initialize(club, baseCarryM, totalM, faceAlignmentOffsetDeg, aimOffsetDeg, aimOffsetM,
-            clusterWidthM, clusterDepthM, clusterTiltDeg, faceWindowDeg, carryWindowPct, distanceTendencyPct) {
-        self.club = club;
-        self.baseCarryM = baseCarryM;
-        self.totalM = totalM;
-        self.faceAlignmentOffsetDeg = faceAlignmentOffsetDeg;
-        self.aimOffsetDeg = aimOffsetDeg;
-        self.aimOffsetM = aimOffsetM;
-        self.clusterWidthM = clusterWidthM;
-        self.clusterDepthM = clusterDepthM;
-        self.clusterTiltDeg = clusterTiltDeg;
-        self.faceWindowDeg = faceWindowDeg;
-        self.carryWindowPct = carryWindowPct;
-        self.distanceTendencyPct = distanceTendencyPct;
+    // Monkey C caps a method at 9 arguments and this record carries 12
+    // fields. Construct with `new GarminBubbleProfile()` and assign every
+    // field — derive() below is the only site.
+    function initialize() {
     }
 
     // calculateBubbleProfile, entered the way getActiveBubbleProfile enters
@@ -84,12 +74,20 @@ class GarminBubbleProfile {
 
         var totalRounded = (totalM != null) ? GarminJS.roundTo(totalM, 1) : null;
 
-        return new GarminBubbleProfile(
-            club, GarminJS.roundTo(baseCarryM, 1), totalRounded,
-            GarminJS.roundTo(faceAlignmentOffsetDeg, 2), aimOffsetDeg, aimOffsetM,
-            clusterWidthM, clusterDepthM, clusterTiltDeg,
-            faceWindowDeg, carryWindowPct, distanceTendencyPct
-        );
+        var out = new GarminBubbleProfile();
+        out.club = club;
+        out.baseCarryM = GarminJS.roundTo(baseCarryM, 1);
+        out.totalM = totalRounded;
+        out.faceAlignmentOffsetDeg = GarminJS.roundTo(faceAlignmentOffsetDeg, 2);
+        out.aimOffsetDeg = aimOffsetDeg;
+        out.aimOffsetM = aimOffsetM;
+        out.clusterWidthM = clusterWidthM;
+        out.clusterDepthM = clusterDepthM;
+        out.clusterTiltDeg = clusterTiltDeg;
+        out.faceWindowDeg = faceWindowDeg;
+        out.carryWindowPct = carryWindowPct;
+        out.distanceTendencyPct = distanceTendencyPct;
+        return out;
     }
 }
 

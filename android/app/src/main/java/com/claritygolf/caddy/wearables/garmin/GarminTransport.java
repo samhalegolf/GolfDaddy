@@ -36,8 +36,11 @@ import java.util.Map;
  * (see garmin/GarminMapDownloader.mc's header comment) rather than
  * receiving pushed bytes, so publishMapManifest is the only map-related
  * method here — PROVIDED the manifest it is given already carries a `url`
- * per hole, which is unresolved phone-side work flagged in
- * garmin/README.md, not solved by this class.
+ * per hole.
+ *
+ * <p>DONE 2026-09-19: app/js/watch-map-delivery.js now attaches an absolute
+ * {@code url} to every manifest hole, so the manifest this forwards is
+ * complete.
  */
 public final class GarminTransport {
 
@@ -70,8 +73,22 @@ public final class GarminTransport {
     private final Context context;
     private final GarminDeviceStore deviceStore;
     // The Connect IQ app identifier — must always equal garmin/manifest.xml's
-    // <iq:application id="..."> once that placeholder is replaced.
+    // <iq:application id="...">. See NativeRoundBridge.CONNECT_IQ_APP_ID for
+    // why Android holds the undashed spelling and iOS the dashed one.
     private final String connectIqAppId;
+
+    /* Garmin is a paid feature, and this is the gate that enforces it:
+       send() refuses while it is false, so a membership that lapses stops the
+       watch receiving rather than merely greying out a settings row.
+
+       Defaults to FALSE and is only raised by JavaScript
+       (NativeRoundBridge.setGarminEnabled, driven by
+       ClarityPayments.hasActiveAccess). Failing closed is deliberate: if the
+       payments module never loads we would rather one paying player reports a
+       dead Garmin than every non-paying player quietly gets the feature.
+       Volatile because setEntitled is called from the Capacitor bridge thread
+       and read on whichever thread happens to be publishing. */
+    private volatile boolean entitled = false;
 
     private Listener listener;
 
@@ -140,7 +157,73 @@ public final class GarminTransport {
         );
     }
 
+    public void setEntitled(boolean value) {
+        if (entitled == value) { return; }
+        entitled = value;
+        /* A lapse does not clear the chosen device: the pairing survives and
+           starts working again the moment access returns. Re-pairing after
+           every billing hiccup would be its own bug. */
+        if (listener != null) { listener.onStateChanged(); }
+    }
+
+    // ------------------------------------------- device selection (Settings)
+
+    /** What the Settings > Garmin Watch page lists: the devices, plus whether
+     *  the SDK is actually linked — "no devices" and "we cannot look" are
+     *  different answers and the page words them differently.
+     *
+     *  UNVERIFIED / NOT YET POSSIBLE: the real implementation is
+     *  {@code connectIQ.getKnownDevices()} (or getConnectedDevices()), which
+     *  needs the SDK this repo does not vendor. Until then this reports
+     *  honestly that it cannot look rather than returning a misleading empty
+     *  list. */
+    public Map<String, Object> availableDevices() {
+        java.util.HashMap<String, Object> out = new java.util.HashMap<>();
+        out.put("devices", new java.util.ArrayList<Map<String, Object>>());
+        out.put("sdkLinked", false);
+        out.put("reason", "The Connect IQ Mobile SDK is not bundled in this build yet.");
+        return out;
+    }
+
+    public void selectDevice(String deviceId, String deviceName, String model) {
+        deviceStore.select(deviceId, deviceName, model);
+        activate();
+        if (listener != null) { listener.onStateChanged(); }
+    }
+
+    public void clearSelectedDevice() {
+        deviceStore.clearSelection();
+        if (listener != null) { listener.onStateChanged(); }
+    }
+
+    /** The richer state the settings page needs, over and above the five
+     *  booleans {@link #state()} reports. */
+    public Map<String, Object> garminState() {
+        State current = state();
+        java.util.HashMap<String, Object> out = new java.util.HashMap<>();
+        out.put("supported", current.supported);
+        out.put("activated", current.activated);
+        out.put("paired", current.paired);
+        out.put("appInstalled", current.appInstalled);
+        out.put("reachable", current.reachable);
+        out.put("entitled", entitled);
+        out.put("sdkLinked", false);
+        out.put("connectionState", String.valueOf(deviceStore.getLastKnownConnectionState()));
+        GarminDeviceStore.SelectedDevice selected = deviceStore.getSelectedDevice();
+        if (selected != null) {
+            java.util.HashMap<String, Object> device = new java.util.HashMap<>();
+            device.put("deviceId", selected.deviceId);
+            device.put("deviceName", selected.deviceName);
+            device.put("model", selected.model);
+            out.put("selectedDevice", device);
+        }
+        return out;
+    }
+
     private void send(Map<String, Object> message, Callback<Boolean> completion) {
+        // The paid gate, enforced below the web layer: no entitlement,
+        // nothing leaves the phone.
+        if (!entitled) { completion.onResult(false); return; }
         if (deviceStore.getSelectedDevice() == null) { completion.onResult(false); return; }
         // UNVERIFIED: connectIQ.sendMessage(device, app, message, listener) —
         // the real send call. Until the SDK is linked this stub reports

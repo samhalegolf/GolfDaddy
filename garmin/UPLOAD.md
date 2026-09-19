@@ -8,10 +8,24 @@ from a clean Mac to an upload.
 
 ## 0. Reality check
 
-The Monkey C source in `garmin/source/` has **never been compiled**. Expect the
-first `./build.sh build` to produce a list of compiler errors — that is the
-normal state of a 4,150-line port written without an SDK, not a sign anything
-is wrong. Fix them, then continue. Steps 1–4 below get you to that point.
+**It compiles.** As of 2026-09-19 all five products in `manifest.xml` build
+clean and `./build.sh package` produces a signed `.iq`. The nine errors the
+first compile found are fixed (see the git history for what they were; one,
+`Math.log` missing its base, was a real Web Mercator bug rather than a
+compiler complaint).
+
+**It has never run.** Nothing has been in the simulator or on a wrist.
+Compiling is not running, and the items still listed as unverified in
+`README.md` — the touch-drag event shape, `WatchUi.KEY_LAP`,
+`Position.Info.accuracy` — are precisely the kind that compile clean and
+misbehave on a device.
+
+There is no system Java on this Mac; `monkeyc` is a Java launcher, so every
+build needs a JDK on PATH first. Android Studio's bundled one works:
+
+```bash
+export PATH="/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin:$PATH"
+```
 
 ---
 
@@ -78,10 +92,10 @@ CIQ_KEY=/path/to/existing_key ./build.sh package
 CIQ_DEVICE=fr55 ./build.sh build      # smallest screen — good stress test
 ```
 
-Work through the compiler output. The README's "Known unverified items" list
-is where the errors are most likely to cluster: the touch-event API shape in
-`CaddyInputDelegate.onTouch`, `Position.Info.accuracy`, the
-`makeImageRequestWithDictionary` callback signature, and `WatchUi.KEY_LAP`.
+This should be clean. If it is not, the README's "Known unverified items"
+list is where new errors are most likely to cluster: the touch-event API
+shape in `CaddyInputDelegate.onTouch`, `Position.Info.accuracy`, and
+`WatchUi.KEY_LAP`.
 
 Then run it in the simulator:
 
@@ -98,15 +112,26 @@ its own screen shape.
 
 ## 5. Before you package — the things that are still placeholders
 
-- [ ] **Launcher icon.** `resources/drawables/launcher_icon.png` is a 40×40
-      solid-colour placeholder. Replace it with the real Clarity Caddy mark.
+- [x] ~~**Launcher icon.**~~ Done 2026-09-19. The 105-byte solid-colour
+      placeholder is gone; the real Clarity Caddy pin now ships at each
+      device's own size out of `resources-icons/<size>/`, selected per product
+      in `monkey.jungle`. Guarded by `npm run test:garmin`.
+
+      Worth knowing if you ever redraw it: at 35×35 (Approach S62, Forerunner
+      55) the G's counter closes up and the golf ball reads as a plain dot.
+      The pin silhouette still carries it, but a hand-simplified mark for the
+      two small sizes would read better than the downscale does.
 - [ ] **Bubble Engine parity fixtures.** `dev/fixtures/bubble-engine-parity.json`
       is the project's own stated completion bar for the engine and has never
       been run against the Monkey C port. Tolerances: 0.1 m, 0.01°, 1e-7 coord.
-- [ ] **Per-hole map URLs.** The Garmin map path fetches hole rasters by URL
-      rather than receiving pushed bytes (see README). If `course_watch_maps`
-      serves short-lived signed URLs, the phone-side manifest for Garmin needs
-      URLs that outlive the fetch. This is unresolved phone-side work.
+- [x] ~~**Per-hole map URLs.**~~ Done 2026-09-19 —
+      `app/js/watch-map-delivery.js` attaches an absolute `url` per hole and
+      the asset endpoint is public, unsigned and immutable. See README.
+- [ ] **The Connect IQ Mobile SDK is not bundled in either phone build**, so
+      the phone cannot talk to a watch at all: no `.xcframework` on iOS, no
+      Maven coordinate on Android, and every SDK call in both
+      `GarminTransport`s is still commented out and written from inference.
+      Nothing below matters until this is done.
 
 ---
 

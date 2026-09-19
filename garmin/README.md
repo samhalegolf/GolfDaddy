@@ -67,17 +67,43 @@ garmin/
       DeviceCapabilities.mc           Screen shape/size/touch/memory-tier
       LayoutProfile.mc                Small layout derivations
   resources/
-    strings/strings.xml
-    drawables/drawables.xml, launcher_icon.png (105-byte placeholder — replace)
+    strings/strings.xml               Everything identical on every device
+  resources-icons/
+    35/ 40/ 60/ 70/                   One launcher icon per required size,
+                                      each with its own drawables.xml;
+                                      monkey.jungle picks per product
 ```
+
+### Why the launcher icon is four folders
+
+Connect IQ asks a different icon size per device and re-encodes whatever
+source bitmap it is given to that size at compile time. A wrong-size source
+therefore **still builds** — it is silently resampled, and the only symptom is
+a soft icon on a device nobody looked at. Worse, because the compiler
+re-encodes, the `.prg` comes out the *same length* either way (verified
+2026-09-19: fenix6 built from a 40x40 and from a 70x70 source gave two
+191,788-byte files with different hashes), so build size tells you nothing.
+
+So each size is its own folder and `base` deliberately has no icon at all: a
+product with no `resourcePath` line fails the build outright with "A bitmap
+resource matching the provided launcher icon can't be found", which is a loud
+error at the moment you add the product rather than a soft icon discovered
+later. `npm run test:garmin` checks the wiring and the sizes, reading the
+expected size from the installed SDK's own device definitions rather than a
+list anyone has to maintain.
+
+The images are the app icon (`ios/.../AppIcon-512@2x.png`) cropped square to
+the pin — the source has wide margins, and cropping lifts the mark from 62% to
+89% of the frame, which is the difference between legible and mush at 35px —
+then resized with `sips`.
 
 ## Architectural decision: Garmin pulls map images by URL, not pushed bytes
 
 `AppleWatchTransport.swift` pushes JPEG bytes over WatchConnectivity
 (`sendMessage`/`transferFile`), because watchOS's WCSession has no concept of
 the Watch fetching a URL itself. Garmin's Connect IQ SDK is different in a way
-that matters here: `Communications.makeImageRequestWithDictionary(url, ...)`
-fetches a web image and hands back an **already-decoded** bitmap — there is no
+that matters here: `Communications.makeImageRequest(url, parameters, options,
+callback)` fetches a web image and hands back an **already-decoded** bitmap — there is no
 public Monkey C API for decoding an arbitrary JPEG/PNG byte buffer the app
 assembled itself from chunked transmit messages. So:
 
@@ -87,12 +113,17 @@ assembled itself from chunked transmit messages. So:
   pointing at the same baked image `course_watch_maps` already serves.
 - `GarminMapDownloader` fetches by URL and hands the decoded bitmap to
   `GarminMapStore`.
-- **This means the phone-side manifest generation for Garmin needs to attach
-  a fetchable URL per hole.** If `course_watch_maps`'s existing URLs are
-  short-lived signed URLs, either the manifest needs a URL with a longer
-  lifetime, or Garmin needs to re-request the manifest before each fetch.
-  This is real, unresolved phone-side work — not something this device-side
-  code can settle alone.
+- **Done (2026-09-19).** `app/js/watch-map-delivery.js` attaches an absolute
+  `url` to every manifest hole, pointing at `/api/course-watch-map-assets`.
+  The lifetime worry recorded here was unfounded: that endpoint is a
+  read-only proxy over imagery that is public by design
+  (`functions/course-watch-map-assets.mjs` says so in its own header), it
+  takes no `Authorization` header — which matters, because `makeImageRequest`
+  cannot send one — and it serves `immutable, max-age=31536000` over a
+  versioned `vN` path. Nothing is signed and nothing expires, so a URL is
+  good for as long as the package is. Covered by two checks in
+  `dev/watch-map-delivery.test.js`; a relative URL (the web case, where there
+  is no origin to resolve against) is omitted rather than sent unusable.
 
 This also happens to be the literal reading of the original Garmin Phase 1
 plan's step 22 wording: "Garmin then obtains each hole image using Connect IQ
@@ -109,29 +140,40 @@ communications/**image request** APIs."
    id per case size) and has been replaced with `approachs7042mm` +
    `approachs7047mm`. Still cross-check the whole list against the SDK
    Manager's device list; `./build.sh check` does this for you.
-3. **`minSdkVersion="3.2.0"`** — plan step 29 prefers a 3.0 baseline;
-   `registerForPhoneAppMessages`/`makeImageRequestWithDictionary` are most
-   reliably documented from 3.2 onward. Relax if the actual devices in the
-   Phase 1 matrix support less.
+3. ~~**`minSdkVersion="3.2.0"`**~~ — **settled 2026-09-19: now `3.0.0`.** The
+   3.2.0 was a guess and it locked out the Approach S62 entirely (that device
+   tops out at CIQ 3.0.12, and the compiler refused it outright). Checked
+   against SDK 9.2.0 before relaxing: `registerForPhoneAppMessages` is since
+   API 1.0.0 and `makeImageRequest` since 1.2.0, both far below 3.0. All five
+   products build.
 4. **`Position.Info.accuracy`** (`GarminLocationManager.estimateAccuracyMetres`)
    — some API levels report metres directly, others only a `QUALITY_*` enum.
    The code handles both defensively but the exact field shape per device in
    the Phase 1 matrix needs confirming on real hardware/simulator.
-5. **`Communications.makeImageRequestWithDictionary`'s callback signature**
-   (`GarminMapDownloader.onImageResponse`) — whether a request context
-   argument is threaded through to the callback varies by API level; the
-   code falls back to "whichever hole is currently awaited," which is safe
-   under Phase 1's one-bitmap-resident discipline but should be tightened
-   once the real callback shape is confirmed.
+5. ~~**`Communications.makeImageRequestWithDictionary`'s callback signature**~~
+   — **settled 2026-09-19.** That method does not exist. The real API is
+   `makeImageRequest(url, parameters, options, responseCallback)`: four
+   arguments, **no request-context argument**, callback
+   `(responseCode as Number, data as BitmapResource|BitmapReference|Null)`.
+   So the hole number genuinely cannot be threaded through the request, and
+   `GarminMapDownloader.onImageResponse`'s "whichever hole is currently
+   awaited" is the answer rather than a fallback — safe under Phase 1's
+   one-bitmap-resident discipline. What remains unconfirmed is only its
+   cross-relaunch caching behaviour.
 6. **`Application.Storage` capacity** — total and per-key limits vary by
    device and were not verified against the specific devices in the Phase 1
    matrix. The manifest and ready-hole set are small; if a full 18-hole
    manifest with per-hole `spatialReference` transforms proves too large for
    a given device's storage budget, trim what gets persisted (e.g. persist
    only the current hole's entry) rather than the whole manifest.
-7. **The launcher icon** (`resources/drawables/launcher_icon.png`) is a
-   105-byte solid-colour placeholder generated by this session, not real
-   artwork. Replace it — check the SDK's per-product icon size table.
+7. ~~**The launcher icon**~~ — **settled 2026-09-19.** The placeholder is
+   gone; the real Clarity Caddy pin ships at each device's own size from
+   `resources-icons/`, wired per product in `monkey.jungle` and guarded by
+   `npm run test:garmin`. See "Why the launcher icon is four folders" above.
+   One honest caveat: at 35x35 (Approach S62, Forerunner 55) the G's counter
+   closes up and the ball reads as a dot. The pin silhouette still carries it,
+   but a hand-simplified mark for the small sizes would read better than the
+   downscale.
 8. **`WatchUi.BehaviorDelegate`'s `onNextPage`/`onPreviousPage`** are mapped to
    hole navigation (`CaddyInputDelegate.mc`) on the assumption that Connect
    IQ maps these to whatever the device's natural "next/previous" gesture or

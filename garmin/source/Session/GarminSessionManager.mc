@@ -223,7 +223,8 @@ class GarminSessionManager {
 
     // ----------------------------------------------------------- receive
 
-    function onPhoneAppMessage(msg) {
+    // Typed: registerForPhoneAppMessages wants Communications.PhoneMessageCallback.
+    function onPhoneAppMessage(msg as Communications.PhoneAppMessage) as Void {
         var data = msg.data;
         if (!(data instanceof Lang.Dictionary)) { return; }
         if (data.hasKey("scene")) { receiveScene(GarminWire.dictVal(data, "scene")); return; }
@@ -375,7 +376,7 @@ class GarminSessionManager {
 
     function transmit(dict) {
         try {
-            Communications.transmit(dict, null, method(:onTransmitComplete));
+            Communications.transmit(dict, null, new GarminTransmitListener());
         } catch (e) {
             // Best-effort: a Scene/ack/inventory report is presentation
             // data, never a command-style outbox item, so a dropped send
@@ -383,11 +384,11 @@ class GarminSessionManager {
         }
     }
 
-    function onTransmitComplete(data, transmitError) {
-        // No further action: commands rely on the phone's ACK, never on
-        // "message delivered" — see the Garmin Phase 1 plan step 8. This
-        // callback exists only because Communications.transmit requires one.
-    }
+    // Communications.transmit takes a ConnectionListener object (onComplete /
+    // onError, both no-arg) — not a Method reference. Nothing to do in either:
+    // commands rely on the phone's ACK, never on "message delivered" — see the
+    // Garmin Phase 1 plan step 8. The listener exists only because transmit
+    // requires one.
 
     // ----------------------------------------------------------- helpers
 
@@ -402,5 +403,15 @@ class GarminSessionManager {
     // roughly every few seconds at most).
     function uuid() {
         return Lang.format("garmin-$1$-$2$", [nowEpochMillis().toNumber(), Toybox.Math.rand()]);
+    }
+}
+
+class GarminTransmitListener extends Communications.ConnectionListener {
+    function initialize() {
+        ConnectionListener.initialize();
+    }
+    function onComplete() as Void {
+    }
+    function onError() as Void {
     }
 }
