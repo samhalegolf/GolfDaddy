@@ -175,6 +175,11 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+    /* Talks to Garmin wearables over the Garmin Connect Mobile app. Consumed
+       as an @aar: the artifact publishes no transitive POM dependencies worth
+       pulling, and the classifier keeps Gradle from looking for a .jar that
+       is not there. */
+    implementation "com.garmin.connectiq:ciq-companion-app-sdk:$connectIqSdkVersion@aar"
 }
 
 apply from: 'capacitor.build.gradle'

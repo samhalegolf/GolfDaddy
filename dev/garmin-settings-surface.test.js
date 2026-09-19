@@ -181,6 +181,54 @@ test("the UI asks ClarityPayments before pairing, and pairing is the thing it as
   assert.ok(/function choose\([^)]*\)[^}]*if \(!requireAccess\(\)\) return false;/s.test(src), "choose() must ask before selecting a watch");
 });
 
+/* ------------------------------------------- the Android SDK integration
+
+   Source assertions, because the SDK needs a device and Garmin Connect
+   Mobile to exercise. They pin the things that were WRONG while the calls
+   were written from inference, each of which compiles either way. */
+
+test("the Connect IQ SDK is actually a dependency, at the version Maven has", function () {
+  const gradle = fs.readFileSync(path.join(ROOT, "android", "app", "build.gradle"), "utf8");
+  const vars = fs.readFileSync(path.join(ROOT, "android", "variables.gradle"), "utf8");
+  assert.ok(
+    /com\.garmin\.connectiq:ciq-companion-app-sdk/.test(gradle),
+    "android/app/build.gradle must declare the Connect IQ Mobile SDK, or GarminTransport talks to nothing"
+  );
+  assert.ok(/connectIqSdkVersion\s*=\s*'2\.4\.0'/.test(vars),
+    "expected connectIqSdkVersion 2.4.0 — note the SDK repo's README prints a stale 2.2.0");
+});
+
+test("inbound watch messages are read as a List, not a Map", function () {
+  const java = fs.readFileSync(path.join(ROOT, "android", "app", "src", "main", "java", "com", "claritygolf",
+    "caddy", "wearables", "garmin", "GarminTransport.java"), "utf8");
+  assert.ok(
+    /onMessageReceived\([^)]*List<Object>\s+\w+/s.test(java),
+    "onMessageReceived's payload is a List<Object> in the real SDK. Treating it as a Map compiles, runs, " +
+    "and silently drops every command the watch sends — there is no error to notice."
+  );
+  assert.ok(
+    /for \(Object message : messages\)[\s\S]{0,200}?message instanceof Map/.test(java),
+    "the Map check belongs on each ELEMENT of the list, never on the list itself"
+  );
+});
+
+test("the SDK's checked exceptions are handled rather than assumed away", function () {
+  const java = fs.readFileSync(path.join(ROOT, "android", "app", "src", "main", "java", "com", "claritygolf",
+    "caddy", "wearables", "garmin", "GarminTransport.java"), "utf8");
+  for (const name of ["InvalidStateException", "ServiceUnavailableException"]) {
+    assert.ok(java.includes(name), "GarminTransport must handle " + name + " — nearly every SDK call throws it");
+  }
+});
+
+test("the settings page tells apart 'cannot look' from 'looked and found none'", function () {
+  const src = fs.readFileSync(GARMIN_JS, "utf8");
+  assert.ok(/devices\.sdkLinked === false/.test(src), "the not-bundled case needs its own wording");
+  assert.ok(/if \(devices\.reason\)/.test(src),
+    "a reason with sdkLinked true means we could not look — sending the player to re-pair a watch that was " +
+    "never the problem is the failure this branch exists to avoid");
+  assert.ok(/No Garmin watches found/.test(src), "the genuinely-empty case still needs its own wording");
+});
+
 let failed = 0;
 tests.forEach(function (t) {
   try { t.fn(); console.log("ok   " + t.name); }

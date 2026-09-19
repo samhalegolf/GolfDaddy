@@ -55,8 +55,10 @@ public class NativeRoundBridge extends Plugin implements GarminTransport.Listene
      *  holds the DASHED form of these same 128 bits, because its
      *  UUID(uuidString:) rejects the undashed one — see
      *  NativeRoundBridge.swift. Do not "fix" the two to match by spelling.)
-     *  UNVERIFIED with the rest of this file's SDK assumptions: confirm the
-     *  expected format against the real SDK before trusting it. */
+     *  VERIFIED 2026-09-20 against the 2.4.0 AAR: IQApp takes the id as a
+     *  plain String ({@code IQApp(String)}, {@code getApplicationId()}) with
+     *  no UUID parsing anywhere in the Android SDK, so the manifest's own
+     *  undashed spelling is the right one to pass here. */
     private static final String CONNECT_IQ_APP_ID = "fac5991c01f348ddb7577553071ddd0f";
 
     private GarminTransport transport;
@@ -74,6 +76,15 @@ public class NativeRoundBridge extends Plugin implements GarminTransport.Listene
         transport = new GarminTransport(getContext(), deviceStore, CONNECT_IQ_APP_ID);
         transport.setListener(this);
         transport.activate();
+    }
+
+    /* Releases the Connect IQ SDK's binding to Garmin Connect Mobile. The
+       chosen device is kept in GarminDeviceStore, so this costs a re-bind on
+       next launch, never a re-pair. */
+    @Override
+    protected void handleOnDestroy() {
+        if (transport != null) { transport.deactivate(); }
+        super.handleOnDestroy();
     }
 
     @PluginMethod
