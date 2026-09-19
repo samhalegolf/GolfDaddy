@@ -27,11 +27,17 @@ using Toybox.WatchUi;
 // Communications.makeImageRequest(url, parameters, options, responseCallback)
 // — there is no makeImageRequestWithDictionary, and no fifth context
 // argument. :maxWidth/:maxHeight are real options keys. Its cross-relaunch
-// caching behaviour is still unconfirmed. If the phone's course_watch_maps URLs are
-// short-lived signed URLs rather than stable ones, the manifest must carry
-// a URL with enough lifetime to survive between fetches, or Garmin must
-// re-request a fresh manifest before each fetch; this is an open item for
-// whoever wires the phone-side manifest generation for Garmin.
+// caching behaviour is still unconfirmed.
+//
+// RESOLVED 2026-09-19 — the URL lifetime worry that used to sit here was
+// unfounded, and the phone now sends the URL. app/js/watch-map-delivery.js
+// attaches an absolute `url` per hole, pointing at
+// /api/course-watch-map-assets. That endpoint is a read-only proxy over
+// imagery that is public by design (functions/course-watch-map-assets.mjs
+// says so in its own header), it takes no Authorization header -- which
+// matters, because makeImageRequest cannot send one -- and it serves
+// `immutable, max-age=31536000` over a versioned vN path. Nothing is signed
+// and nothing expires, so a URL is good for as long as the package is.
 class GarminMapDownloader {
     var store;       // GarminMapStore, set by the store itself on construction
     var inFlight;     // Dictionary used as a Set of hole numbers currently fetching

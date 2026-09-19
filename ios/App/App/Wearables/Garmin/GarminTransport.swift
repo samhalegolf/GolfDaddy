@@ -43,12 +43,12 @@ import Foundation
  pulls map imagery by URL (see garmin/GarminMapDownloader.mc's header
  comment for why), so there is no bytes-over-the-wire asset path to
  implement on the phone side — publishMapManifest is enough, PROVIDED the
- manifest handed to this transport already carries a `url` per hole. That is
- not yet true of the manifest NativeRoundBridge.publishWatchMap forwards
- today (it is built once, generically, for whichever transports are
- registered) — wiring a Garmin-specific URL into that manifest is unresolved
- phone-side work, flagged here and in garmin/README.md, not silently assumed
- solved.
+ manifest handed to this transport already carries a `url` per hole.
+
+ DONE 2026-09-19: app/js/watch-map-delivery.js now attaches an absolute `url`
+ to every manifest hole, so the manifest this forwards is complete. Apple
+ Watch ignores the field and keeps taking bytes, which is why one generic
+ manifest still serves both transports.
 */
 final class GarminTransport: NSObject, WearableTransport {
     let platform: WearablePlatform = .garmin

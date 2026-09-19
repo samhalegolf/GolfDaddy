@@ -76,8 +76,8 @@ garmin/
 `AppleWatchTransport.swift` pushes JPEG bytes over WatchConnectivity
 (`sendMessage`/`transferFile`), because watchOS's WCSession has no concept of
 the Watch fetching a URL itself. Garmin's Connect IQ SDK is different in a way
-that matters here: `Communications.makeImageRequestWithDictionary(url, ...)`
-fetches a web image and hands back an **already-decoded** bitmap — there is no
+that matters here: `Communications.makeImageRequest(url, parameters, options,
+callback)` fetches a web image and hands back an **already-decoded** bitmap — there is no
 public Monkey C API for decoding an arbitrary JPEG/PNG byte buffer the app
 assembled itself from chunked transmit messages. So:
 
@@ -87,12 +87,17 @@ assembled itself from chunked transmit messages. So:
   pointing at the same baked image `course_watch_maps` already serves.
 - `GarminMapDownloader` fetches by URL and hands the decoded bitmap to
   `GarminMapStore`.
-- **This means the phone-side manifest generation for Garmin needs to attach
-  a fetchable URL per hole.** If `course_watch_maps`'s existing URLs are
-  short-lived signed URLs, either the manifest needs a URL with a longer
-  lifetime, or Garmin needs to re-request the manifest before each fetch.
-  This is real, unresolved phone-side work — not something this device-side
-  code can settle alone.
+- **Done (2026-09-19).** `app/js/watch-map-delivery.js` attaches an absolute
+  `url` to every manifest hole, pointing at `/api/course-watch-map-assets`.
+  The lifetime worry recorded here was unfounded: that endpoint is a
+  read-only proxy over imagery that is public by design
+  (`functions/course-watch-map-assets.mjs` says so in its own header), it
+  takes no `Authorization` header — which matters, because `makeImageRequest`
+  cannot send one — and it serves `immutable, max-age=31536000` over a
+  versioned `vN` path. Nothing is signed and nothing expires, so a URL is
+  good for as long as the package is. Covered by two checks in
+  `dev/watch-map-delivery.test.js`; a relative URL (the web case, where there
+  is no origin to resolve against) is omitted rather than sent unusable.
 
 This also happens to be the literal reading of the original Garmin Phase 1
 plan's step 22 wording: "Garmin then obtains each hole image using Connect IQ
@@ -109,20 +114,26 @@ communications/**image request** APIs."
    id per case size) and has been replaced with `approachs7042mm` +
    `approachs7047mm`. Still cross-check the whole list against the SDK
    Manager's device list; `./build.sh check` does this for you.
-3. **`minSdkVersion="3.2.0"`** — plan step 29 prefers a 3.0 baseline;
-   `registerForPhoneAppMessages`/`makeImageRequestWithDictionary` are most
-   reliably documented from 3.2 onward. Relax if the actual devices in the
-   Phase 1 matrix support less.
+3. ~~**`minSdkVersion="3.2.0"`**~~ — **settled 2026-09-19: now `3.0.0`.** The
+   3.2.0 was a guess and it locked out the Approach S62 entirely (that device
+   tops out at CIQ 3.0.12, and the compiler refused it outright). Checked
+   against SDK 9.2.0 before relaxing: `registerForPhoneAppMessages` is since
+   API 1.0.0 and `makeImageRequest` since 1.2.0, both far below 3.0. All five
+   products build.
 4. **`Position.Info.accuracy`** (`GarminLocationManager.estimateAccuracyMetres`)
    — some API levels report metres directly, others only a `QUALITY_*` enum.
    The code handles both defensively but the exact field shape per device in
    the Phase 1 matrix needs confirming on real hardware/simulator.
-5. **`Communications.makeImageRequestWithDictionary`'s callback signature**
-   (`GarminMapDownloader.onImageResponse`) — whether a request context
-   argument is threaded through to the callback varies by API level; the
-   code falls back to "whichever hole is currently awaited," which is safe
-   under Phase 1's one-bitmap-resident discipline but should be tightened
-   once the real callback shape is confirmed.
+5. ~~**`Communications.makeImageRequestWithDictionary`'s callback signature**~~
+   — **settled 2026-09-19.** That method does not exist. The real API is
+   `makeImageRequest(url, parameters, options, responseCallback)`: four
+   arguments, **no request-context argument**, callback
+   `(responseCode as Number, data as BitmapResource|BitmapReference|Null)`.
+   So the hole number genuinely cannot be threaded through the request, and
+   `GarminMapDownloader.onImageResponse`'s "whichever hole is currently
+   awaited" is the answer rather than a fallback — safe under Phase 1's
+   one-bitmap-resident discipline. What remains unconfirmed is only its
+   cross-relaunch caching behaviour.
 6. **`Application.Storage` capacity** — total and per-key limits vary by
    device and were not verified against the specific devices in the Phase 1
    matrix. The manifest and ready-hole set are small; if a full 18-hole

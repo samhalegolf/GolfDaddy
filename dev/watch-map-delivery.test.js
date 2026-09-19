@@ -68,7 +68,9 @@ function fakeEnvironment(report, options) {
   };
   const fetchImpl = async url => {
     calls.fetched.push(url);
-    if (url.indexOf("/api/course-watch-maps") === 0) {
+    /* Matched anywhere, not at position 0: with an origin set (the native
+       case) these arrive absolute. */
+    if (url.indexOf("/api/course-watch-maps?") !== -1) {
       return { ok: true, json: async () => report };
     }
     if (options.assetStatus === "fail") return { ok: false };
@@ -78,7 +80,12 @@ function fakeEnvironment(report, options) {
     plugin,
     fetch: fetchImpl,
     now: () => clock.at,
-    toBase64: bytes => "b64:" + bytes.length
+    toBase64: bytes => "b64:" + bytes.length,
+    /* Native resolves relative /api paths against GDNative.apiOrigin; web
+       leaves them alone. Tests that care pass `origin` to pick the case. */
+    apiUrl: options.origin
+      ? (url => (/^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : options.origin + url))
+      : undefined
   });
   return { instance, calls, clock, wrist };
 }
@@ -325,6 +332,37 @@ function fakeEnvironment(report, options) {
       const hole = calls.manifests[0].manifest.holes[0];
       assert.strictEqual(hole.reference, undefined);
       assert.ok(hole.spatialReference, "the image still draws");
+    });
+  })();
+
+  /* Garmin fetches its own hole imagery — Connect IQ cannot decode an
+     arbitrary byte buffer into a bitmap — so the manifest has to carry a URL
+     the watch can actually GET. Without it GarminMapDownloader.requestHole
+     returns early on a null url and no hole raster ever downloads: the numbers
+     face works and the map face stays permanently empty, with nothing in any
+     log to say why. Apple Watch ignores the field and keeps taking bytes. */
+  await (async () => {
+    const { instance, calls } = fakeEnvironment(reportFor(frame, [1, 2]), { origin: "https://caddy.claritygolf.app" });
+    await instance.deliver("millbrook-remarkables-18");
+    check("each manifest hole carries an absolute, fetchable image URL for Garmin", () => {
+      const holes = calls.manifests[0].manifest.holes;
+      assert.strictEqual(
+        holes[0].url,
+        "https://caddy.claritygolf.app/api/course-watch-map-assets?path=" +
+          encodeURIComponent("millbrook-remarkables-18/v1788278423353/h1.webp"),
+        "the URL must be the public asset proxy, absolute and with the path encoded"
+      );
+      assert.ok(holes.every(h => /^https:\/\//.test(h.url)), "every hole needs one, not just the first");
+      assert.ok(!("path" in holes[0]), "the raw storage path still must not cross to the wrist");
+    });
+  })();
+
+  await (async () => {
+    const { instance, calls } = fakeEnvironment(reportFor(frame, [1]));
+    await instance.deliver("millbrook-remarkables-18");
+    check("a relative URL is omitted rather than sent as an unusable one", () => {
+      const hole = calls.manifests[0].manifest.holes[0];
+      assert.ok(!("url" in hole), "on web there is no origin to resolve against, and a watch cannot use a relative path");
     });
   })();
 

@@ -36,8 +36,11 @@ import java.util.Map;
  * (see garmin/GarminMapDownloader.mc's header comment) rather than
  * receiving pushed bytes, so publishMapManifest is the only map-related
  * method here — PROVIDED the manifest it is given already carries a `url`
- * per hole, which is unresolved phone-side work flagged in
- * garmin/README.md, not solved by this class.
+ * per hole.
+ *
+ * <p>DONE 2026-09-19: app/js/watch-map-delivery.js now attaches an absolute
+ * {@code url} to every manifest hole, so the manifest this forwards is
+ * complete.
  */
 public final class GarminTransport {
 
