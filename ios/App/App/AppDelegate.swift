@@ -36,6 +36,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
         // Called when the app was launched with a url. Feel free to add additional processing here,
         // but if you want the App API to support tracking app url opens, make sure to keep this call
+
+        // Garmin Connect hands the chosen watch back on our own URL scheme
+        // (see GarminTransport). Broadcast rather than call: AppDelegate has
+        // no handle on the plugin's transport and should not grow one, and a
+        // URL arriving before the plugin loads is then simply unobserved.
+        NotificationCenter.default.post(
+            name: GarminTransport.openURLNotification, object: nil, userInfo: ["url": url]
+        )
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
     }
 

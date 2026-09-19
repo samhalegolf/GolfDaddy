@@ -201,9 +201,14 @@
       '<div class="clarityReferralHead"><strong>' + escapeHTML(device.deviceName || "Garmin watch") + "</strong>",
       "<span>" + (reachable ? "Connected." : "Saved, but not currently connected.") + "</span></div>",
       device.model ? "<p>" + escapeHTML(device.model) + "</p>" : "",
-      /* Said plainly rather than left for the player to discover by the map
-         staying blank. Both are real, current limitations. */
-      "<p>Install Clarity Caddy on the watch from the Connect IQ store, then start a round on your phone.</p>",
+      /* appInstalled is a real answer from the SDK now, not a proxy for "the
+         device is connected", so this only appears when the watch genuinely
+         has no Clarity Caddy on it — the one case where telling someone to
+         install it is useful rather than noise. It stays silent while we
+         cannot tell (watch out of range), rather than nagging. */
+      (state && state.reachable && state.appInstalled === false)
+        ? "<p><strong>Clarity Caddy is not installed on this watch.</strong> Install it from the Connect IQ store, then start a round on your phone.</p>"
+        : "<p>Start a round on your phone and it appears on your wrist.</p>",
       '<div class="clarityPaymentActions">',
       '<button type="button" onclick="ClarityGarmin.disconnect()">Disconnect</button>',
       "</div>"
@@ -212,13 +217,33 @@
 
   function deviceListHTML() {
     if (!devices) return "";
+    /* Three different answers, worded as three different things, because a
+       player can act on two of them and not the third:
+         sdkLinked false  -> this build cannot talk to Garmin at all
+         a reason         -> we tried and could not look (Garmin Connect not
+                             ready, service unreachable)
+         empty list       -> we looked and there is nothing paired
+       Collapsing the middle one into "none found" sends people to re-pair a
+       watch that was never the problem. */
     if (devices.sdkLinked === false) {
       return [
         "<p><strong>Not available in this build.</strong></p>",
         "<p>" + escapeHTML(devices.reason || "Garmin support is not bundled in this build yet.") + "</p>"
       ].join("");
     }
+    /* iOS cannot list paired watches in-process — there is no equivalent of
+       Android's getKnownDevices(). Choosing one means leaving for the Garmin
+       Connect app and being handed back through a URL scheme, so there is
+       never a list to draw here: the phone has already switched away by the
+       time this renders, and the answer arrives as a state change. Saying
+       "no watches found" in that moment would be both wrong and alarming. */
+    if (devices.handoff) {
+      return "<p>" + escapeHTML(devices.reason || "Choose your watch in the Garmin Connect app.") + "</p>";
+    }
     var list = (devices.devices || []);
+    if (devices.reason) {
+      return "<p>" + escapeHTML(devices.reason) + "</p>";
+    }
     if (!list.length) {
       return "<p>No Garmin watches found. Open the Garmin Connect app, make sure your watch is paired there, then try again.</p>";
     }
@@ -226,10 +251,20 @@
       var id = escapeHTML(device.deviceId);
       var name = escapeHTML(device.deviceName || "Garmin watch");
       var model = escapeHTML(device.model || "");
+      /* A watch that is paired but out of range is still the watch they want
+         to pick, so it stays selectable and just says where it stands. */
+      var sub = device.connected ? "Connected" : "Not connected right now";
+      if (model) sub = model + " — " + sub;
       return '<button class="gdPlayerSettingsRow" type="button" onclick="ClarityGarmin.choose(&quot;' + id +
         '&quot;,&quot;' + name + '&quot;,&quot;' + model + '&quot;)">' +
-        "<div><strong>" + name + "</strong><span>" + (model || "Tap to connect") + "</span></div></button>";
+        "<div><strong>" + name + "</strong><span>" + escapeHTML(sub) + "</span></div></button>";
     }).join("");
+  }
+
+  /* On iOS the button leaves the app, so it should say so rather than
+     implying an in-app scan. selectionStyle comes from the native state. */
+  function connectLabel() {
+    return (state && state.selectionStyle === "handoff") ? "Choose in Garmin Connect" : "Connect a Watch";
   }
 
   function disconnectedHTML() {
@@ -238,7 +273,7 @@
       "<span>Connect a Garmin to see distances and your Bubble on your wrist.</span></div>",
       '<div class="clarityPaymentActions">',
       '<button type="button" onclick="ClarityGarmin.scan()"' + (busy ? " disabled" : "") + ">" +
-        (busy ? "Looking…" : "Connect a Watch") + "</button>",
+        (busy ? "Looking…" : connectLabel()) + "</button>",
       "</div>",
       deviceListHTML()
     ].join("");
