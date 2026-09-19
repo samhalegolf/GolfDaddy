@@ -1,6 +1,8 @@
 # Clarity Caddy — Garmin Connect IQ Upload Readiness Audit
 
-**Date:** 2026-09-20 (NZ) · **Audited revision:** `c611f667e61185d4b20fae53830845b37ac8e0f5` (merge of PR #80 `garmin-first-build`) · **Branch:** `claude/happy-brown-wb38a7`
+**Date:** 2026-09-20 (NZ) · **Audited revision:** `c611f667e61185d4b20fae53830845b37ac8e0f5` (merge of PR #80 `garmin-first-build`), re-checked against `main` at `6d0fbae` (PR #81, which wired the Connect IQ Mobile SDK on iOS and Android) · **Branch:** `claude/happy-brown-wb38a7`
+
+> **Revision note (PR #81, merged after the first pass).** PR #81 vendored the Connect IQ Mobile SDK on both phone platforms (iOS Swift package 1.8.0, Android Maven 2.4.0) and rewrote both `GarminTransport`s against the real SDK headers. That removes the "phone cannot talk to a watch at all" blocker as a *code* fact, so GA-001 is downgraded from P0 to P1. It does not add any runtime evidence: `garmin/UPLOAD.md` now says "Neither has yet run against a watch", and GA-002 (never run) still stands as the blocker that covers the end-to-end link. PR #81 also changed `GarminBubbleEngine.layupAlong` (a `haveBest` flag replacing null-checks so SDK 9's type checker stops reporting the branches unreachable); behaviour is unchanged and no finding is affected.
 **Audit type:** static evidence-gathering. No application code was modified. No build, package, deploy or Store action was taken.
 
 > **Evidence labels used throughout**
@@ -28,7 +30,7 @@ RUNTIME HARDENING    🔴 BLOCK
 FINAL STATUS:        NOT READY
 ```
 
-Four P0 blockers (GA-001 to GA-004). The two that matter most are outside the watch code: the phone app cannot talk to a Garmin at all yet (the Connect IQ Mobile SDK is not bundled, so `send()` returns `false` on both platforms), and the watch app has never been launched in the simulator or on a device. Uploading now would give a reviewer an app that says "Waiting for round" forever. Full finding list in §32, gate rationale in §36.
+Three P0 blockers (GA-002 to GA-004). The one that matters most is that nothing has ever run: the watch app has never been launched in the simulator or on a device, and the phone-side Connect IQ link that PR #81 added has never carried a message. Until one Scene has crossed from a phone to a watch, uploading would give a reviewer an app that says "Waiting for round" forever. Full finding list in §32, gate rationale in §36.
 
 ---
 
@@ -48,7 +50,8 @@ Four P0 blockers (GA-001 to GA-004). The two that matter most are outside the wa
 | Target devices | `approachs62`, `approachs7042mm`, `approachs7047mm`, `fenix6`, `fr55` |
 | Build scripts | `garmin/build.sh` (`check` / `build` / `package`) |
 | Test config | `npm run test:garmin` → `dev/garmin-settings-surface.test.js`, `dev/garmin-launcher-icons.test.js`. **Not wired into CI** (`.github/workflows/structural-smoke.yml` has no Garmin reference). No Monkey C tests; no simulator config. |
-| External libraries | None. No barrels, no third-party Monkey C. |
+| External libraries | None on the watch. No barrels, no third-party Monkey C. |
+| Phone-side Connect IQ Mobile SDK | Added in PR #81 (2026-09-20): iOS Swift package `garmin/connectiq-companion-app-sdk-ios` pinned at 1.8.0 in `App.xcodeproj` (Garmin's own licence, not Apache); Android `com.garmin.connectiq:ciq-companion-app-sdk:2.4.0` from Maven Central. iOS adds the `claritycaddy-ciq` URL scheme and `gcm-ciq` in `LSApplicationQueriesSchemes` (`Info.plist`). **Never run against a watch** (`UPLOAD.md` §5). |
 | Network endpoints (watch) | Phone via `Toybox.Communications`; hole imagery via `Communications.makeImageRequest` to `<GDNative.apiOrigin>/api/course-watch-map-assets?path=…` (URL is attached by the phone in `app/js/watch-map-delivery.js`). No direct Supabase or other endpoint from the watch. |
 | Watch/phone comms docs | `garmin/README.md`, `garmin/UPLOAD.md`, `app/js/caddy-watch.js` (Scene/command contract), `ios/App/App/Wearables/Garmin/GarminTransport.swift`, `android/.../wearables/garmin/GarminTransport.java` |
 
@@ -407,7 +410,7 @@ Trace: physical → `CaddyInputDelegate` → `InputRouter.dispatch(InputAction.*
 
 Flows of the "WATCH → PHONE → SERVER → PHONE → WATCH" shape for things that should be local: **hole change** (watch command → phone Marshal → Scene → watch) and **front/centre/back** (phone computes, watch displays). Both are documented as Phase 1 design, but they are exactly what §20 says to flag. The Apple wrist already does F/C/B locally, so this is a parity gap rather than a shared design choice.
 
-**And the phone side of this boundary does not exist yet:** `GarminTransport.swift:send()` (line 221-233) and the Java twin return failure unconditionally because the Connect IQ Mobile SDK is not linked. Every Scene publish to a Garmin currently ends in `completion(false)`. This is GA-001.
+**The phone side of this boundary now exists in code but has never been exercised.** As of PR #81, `GarminTransport.swift` sends through `ConnectIQ.sharedInstance().sendMessage(_:to:progress:completion:)` and `GarminTransport.java` through `connectIQ.sendMessage(device, app, message, listener)`, both gated on the paid `entitled` flag and on a bound device. `UPLOAD.md` §5 records that neither has run against a watch, and lists the iOS hand-off's silent failure modes (URL scheme mismatch, missing `LSApplicationQueriesSchemes`, Garmin Connect not signed in). This is GA-001 (now P1) and GA-002.
 
 ---
 
@@ -567,9 +570,9 @@ No listing text, screenshots or category exist in the repo; `UPLOAD.md` §7 list
 | External account | Clarity account + paid membership. | Test account. |
 | External hardware | A supported Garmin paired to Garmin Connect. | Unavoidable for hardware review; simulator path covers layout only — but the simulator cannot receive phone messages from the real Clarity app, so **the simulator cannot show a round at all**. |
 | Special setup | Course package must exist in `course_watch_maps` for the demo course. | Pre-bake it. |
-| Unavailable service | **The phone cannot send to a Garmin at all today** (SDK not bundled). | Nothing a reviewer can do → GA-001. |
+| Unavailable service | The phone-side Connect IQ link exists in code since PR #81 but has never carried a message, and no shipped phone build (TestFlight / App Store / Play) is known to contain it. | Ship a phone build with PR #81 and prove one round-trip before submission → GA-001, GA-002. |
 
-**Verdict:** no reviewer path exists today. This is a P0 under the spec ("Reviewer cannot access core functionality and no review path exists").
+**Verdict:** no *proven* reviewer path exists today. The code path is there; the evidence is not. GA-002 (P0) covers this until one Scene has crossed phone → watch on hardware.
 
 ---
 
@@ -613,18 +616,18 @@ strings build/ClarityCaddy.iq | grep -Ei 'http|key|token|secret' # expect only t
 ## 32. Findings
 
 ### GA-001
-- **Severity:** P0 · **Status:** BLOCK · **Category:** Store / Architecture
-- **Location:** `ios/App/App/Wearables/Garmin/GarminTransport.swift` `send()` (lines 221-233, `completion(false)` unconditionally); `android/.../garmin/GarminTransport.java` (SDK calls commented out); `garmin/UPLOAD.md` §5 last bullet.
-- **Finding:** The Connect IQ Mobile SDK is not bundled in either phone build. The phone cannot send a Scene, manifest, player snapshot or ACK to any Garmin, and cannot receive commands from one.
-- **Evidence:** `UPLOAD.md`: "the phone cannot talk to a watch at all… Nothing below matters until this is done." Both transports' `availableDevices()` return `sdkLinked:false`.
-- **Requirement type:** Official Garmin requirement **[VERIFY exact wording]** that submitted apps function as described / companion requirements be met, plus the spec's P0 "Reviewer cannot access core functionality".
-- **Impact:** Every installer, including the Store reviewer, sees "Waiting for round" forever. Rejection is near-certain.
-- **Recommendation:** Vendor the Connect IQ Mobile SDK on iOS (xcframework + URL scheme) and Android (Maven), implement the commented calls, and prove one round end-to-end on hardware before any upload. Also add a watch-side hint on the no-round face ("Start a round in Clarity Caddy on your phone").
+- **Severity:** P1 (was P0 before PR #81) · **Status:** REVIEW · **Category:** Store / Architecture
+- **Location:** `ios/App/App/Wearables/Garmin/GarminTransport.swift` (`activate`, `beginDeviceSelection`, `handleOpenURL`, `send`); `android/.../garmin/GarminTransport.java` (`activate`, `bindSelectedDevice`, `send`); `ios/App/App/Info.plist` (`CFBundleURLTypes` `claritycaddy-ciq`, `LSApplicationQueriesSchemes` `gcm-ciq`); `android/variables.gradle` (`connectIqSdkVersion = '2.4.0'`); `garmin/UPLOAD.md` §5.
+- **Finding:** PR #81 vendored the Connect IQ Mobile SDK on both platforms and rewrote both transports against the real headers. The link has never carried a message. On iOS, device selection is a hand-off to the Garmin Connect app and back via URL scheme, which `UPLOAD.md` itself lists as having "several silent failure modes". `IQApp` is built with `store: nil` because no Store UUID exists until first publish; after publish, that value needs to be filled in **[VERIFY whether the SDK requires it for message routing]**. No shipped phone build is known to contain this code.
+- **Evidence:** `UPLOAD.md` §5: "Both `GarminTransport`s are now written against the real APIs… **Neither has yet run against a watch.**" `dev/garmin-settings-surface.test.js` pins the SDK dependency, the `List<Object>` message shape on Android, the checked exceptions, and the two `Info.plist` entries by source assertion only.
+- **Requirement type:** Human verification required; Garmin review guidance that a companion-dependent app must be testable **[GARMIN-DOC, VERIFY]**.
+- **Impact:** If any of the untested pieces is wrong, every installer, including the Store reviewer, sees "Waiting for round" forever. Rejection is near-certain in that case.
+- **Recommendation:** Before upload: (1) TestFlight / internal-track a phone build containing PR #81; (2) pair a watch on each platform and confirm one Scene arrives (watch leaves "Waiting for round") and one LOCK acknowledgement returns; (3) record device, firmware, SDK versions and date here. Also add a watch-side hint on the no-round face ("Start a round in Clarity Caddy on your phone"). Minor: Android `garminState()` still hard-codes `sdkLinked:false` (see GA-026).
 
 ### GA-002
 - **Severity:** P0 · **Status:** BLOCK · **Category:** Runtime
-- **Location:** whole `garmin/` build; `garmin/UPLOAD.md` §0 ("It has never run"); `garmin/README.md` line 3 (stale "never been compiled").
-- **Finding:** No runtime evidence of any kind — never launched in the simulator, never on a device.
+- **Location:** whole `garmin/` build; `garmin/UPLOAD.md` §0 ("It has never run") and §5 ("Nothing has been tested against real hardware"); `garmin/README.md` line 3 (stale "never been compiled").
+- **Finding:** No runtime evidence of any kind — never launched in the simulator, never on a device, and (after PR #81) the phone ↔ watch link has never carried a single message in either direction.
 - **Requirement type:** Spec §33 "Core application crash — treat as blocker unless strong evidence proves otherwise"; Garmin review rejects apps that crash on launch **[GARMIN-DOC]**.
 - **Impact:** Unknown crash surface (touch API shape, `KEY_LAP`, `drawBitmap2` options, Storage limits, bitmap memory on FR 55).
 - **Recommendation:** Run in the simulator on all five devices with a GPX track and a fake phone message (the simulator can inject `Communications` messages), then on at least one CIQ-3 MIP device and one S70. Record evidence in this file.
@@ -798,15 +801,21 @@ strings build/ClarityCaddy.iq | grep -Ei 'http|key|token|secret' # expect only t
 - **Severity:** P3 · **Status:** PASS · **Category:** Security
 - **Finding:** No secrets, credentials, dev endpoints, unexpected binaries or libraries in the watch source or resources. Map URLs are public-by-design and the proxy holds the only secret server-side. (Package not scannable — see §30.)
 
+### GA-026
+- **Severity:** P3 · **Status:** REVIEW · **Category:** UX (phone)
+- **Location:** `android/.../garmin/GarminTransport.java` `garminState()` (`out.put("sdkLinked", false)`), added before PR #81 and not updated by it; iOS `garminStateDictionary()` correctly reports `true`.
+- **Finding:** Android's richer state still claims the SDK is not linked. `scripts/clarity-garmin.js` reads `sdkLinked` from `availableDevices()` (which is correct) rather than from this state, so nothing is visibly wrong today, but the two answers disagree and the next reader of `garminState()` will be misled.
+- **Recommendation:** Report `sdkReady` (or `true`) there, matching iOS.
+
 ---
 
 ## 33-35. Blocker / risk / improvement lists
 
-**P0 BLOCKERS:** GA-001 (phone SDK not bundled — no path for any user or reviewer), GA-002 (never run anywhere), GA-003 (RECEIVING dead end blocks watch take-over), GA-004 (map raster can attach to the wrong hole/course and be persisted as ready).
+**P0 BLOCKERS:** GA-002 (never run anywhere; phone ↔ watch link never exercised), GA-003 (RECEIVING dead end blocks watch take-over), GA-004 (map raster can attach to the wrong hole/course and be persisted as ready).
 
-**P1 RISKS:** GA-005 (Float timestamps / command-id uniqueness), GA-006 (`drawBitmap2` fallback misalignment on CIQ 3.x devices; option keys), GA-007 (infinite map retry loop), GA-008 (BACK never exits), GA-009 (F/C/B not local; parity gap vs Apple), GA-010 (Scene lost on relaunch; no request/republish), GA-011 (cross-round Scene ordering), GA-012 (stale/poor fix trusted), GA-013 (touch/LAP/UP-DOWN unverified), GA-014 (bitmap and Storage sizes on small devices), GA-015 (no reviewer path), GA-016 (privacy/listing text), GA-017 (no package provenance; SDK unpinned; tests not in CI), GA-018 (stale `AIM_AT` replay), GA-024 (rejections invisible).
+**P1 RISKS:** GA-001 (Connect IQ Mobile SDK wired in PR #81 but untested; iOS hand-off failure modes; no shipped phone build), GA-005 (Float timestamps / command-id uniqueness), GA-006 (`drawBitmap2` fallback misalignment on CIQ 3.x devices; option keys), GA-007 (infinite map retry loop), GA-008 (BACK never exits), GA-009 (F/C/B not local; parity gap vs Apple), GA-010 (Scene lost on relaunch; no request/republish), GA-011 (cross-round Scene ordering), GA-012 (stale/poor fix trusted), GA-013 (touch/LAP/UP-DOWN unverified), GA-014 (bitmap and Storage sizes on small devices), GA-015 (no reviewer path), GA-016 (privacy/listing text), GA-017 (no package provenance; SDK unpinned; tests not in CI), GA-018 (stale `AIM_AT` replay), GA-024 (rejections invisible).
 
-**P2 IMPROVEMENTS:** GA-019 (ready-set persisted without bitmaps), GA-020 (1 Hz full recompute), GA-021 (parity fixtures), GA-022 (35 px icon, missing-revision default, dead field), GA-023 (explicit failure copy).
+**P2 IMPROVEMENTS:** GA-019 (ready-set persisted without bitmaps), GA-020 (1 Hz full recompute), GA-021 (parity fixtures), GA-022 (35 px icon, missing-revision default, dead field), GA-023 (explicit failure copy). **P3:** GA-026 (Android `garminState().sdkLinked` stale).
 
 ---
 
@@ -817,16 +826,16 @@ CLARITY CADDY — GARMIN AUDIT
 
 GARMIN PACKAGE       🟠 REVIEW   no .iq to hash; compile claimed (SDK 9.2.0) but not reproducible here; SDK unpinned; README stale
 DEVICE COMPATIBILITY 🟠 REVIEW   static only; 3/5 devices take the unscaled-bitmap fallback; touch/LAP unverified; FR55 memory unknown
-CADDY ARCHITECTURE   🔴 BLOCK    GA-001, GA-003, GA-004 (+ GA-009/010/011/018 as P1)
-RUNTIME HARDENING    🔴 BLOCK    GA-002 (never run) (+ GA-005/007/008/012/014 as P1)
+CADDY ARCHITECTURE   🔴 BLOCK    GA-003, GA-004 (+ GA-001/009/010/011/018 as P1)
+RUNTIME HARDENING    🔴 BLOCK    GA-002 (never run, link never exercised) (+ GA-005/007/008/012/014 as P1)
 
 P0 BLOCKERS:
-  GA-001  Connect IQ Mobile SDK not bundled on iOS/Android — phone cannot reach any Garmin; no reviewer path
-  GA-002  App has never been launched in the simulator or on hardware
+  GA-002  App has never been launched in the simulator or on hardware; phone ↔ watch link has never carried a message
   GA-003  RECEIVING face never progresses (maps fetched only from the map view) — watch take-over unreachable
   GA-004  Downloaded raster attributed to "first in-flight hole" — wrong hole/course map can be shown and persisted
 
 P1 RISKS:
+  GA-001  Connect IQ Mobile SDK wired on iOS/Android (PR #81) but untested; iOS hand-off has silent failure modes; no shipped phone build
   GA-005  32-bit Float epoch-millis (≈131 s resolution) and overflowing/unseeded command ids
   GA-006  drawBitmap2 fallback misaligns overlays on CIQ 3.x devices; :destWidth/:destHeight keys suspect
   GA-007  Map fetch failure → silent 1 Hz retry forever, no failure state
@@ -867,7 +876,7 @@ COMMAND                      REVIEW   (id/round/revision carried ✓; ids may re
   ↓
 ID + REVISION               REVIEW   (see §19 table; two boundaries lack identity: image response, cross-round Scene)
   ↓
-PHONE                       BLOCK    (transport is a stub — SDK not linked on either platform)
+PHONE                       REVIEW   (real SDK calls on both platforms since PR #81; never run; iOS hand-off unverified)
 
 FINAL STATUS:
 NOT READY
@@ -875,7 +884,7 @@ NOT READY
 
 ### What would move this to CONDITIONALLY READY
 
-1. Wire the Connect IQ Mobile SDK on at least one phone platform and complete one round end-to-end on hardware (GA-001, GA-002).
+1. Put a phone build containing PR #81 on a device, pair a watch, and complete one round end-to-end on hardware (GA-001, GA-002).
 2. Fix GA-003 and GA-004 (small, local changes in `face()`/`mapsExpectedCount()` and `GarminMapDownloader`).
 3. Fix GA-005 (Double timestamps, seeded/unique ids) and GA-008 (BACK exits) — both are a few lines.
 4. Resolve GA-006 against the SDK docs on the Mac and pick one scaling strategy.
