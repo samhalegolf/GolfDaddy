@@ -38,20 +38,10 @@ class GarminBubbleResult {
     var aimOffsetM;
     var engineVersion;
 
-    function initialize(target, targetDistanceM, shotBearingDeg, club, centre, ring,
-            widthM, depthM, tiltDeg, aimOffsetDeg, aimOffsetM, engineVersion) {
-        self.target = target;
-        self.targetDistanceM = targetDistanceM;
-        self.shotBearingDeg = shotBearingDeg;
-        self.club = club;
-        self.centre = centre;
-        self.ring = ring;
-        self.widthM = widthM;
-        self.depthM = depthM;
-        self.tiltDeg = tiltDeg;
-        self.aimOffsetDeg = aimOffsetDeg;
-        self.aimOffsetM = aimOffsetM;
-        self.engineVersion = engineVersion;
+    // Monkey C caps a method at 9 arguments and this record carries 12
+    // fields. Construct with `new GarminBubbleResult()` and assign every
+    // field — calculate() below is the only site.
+    function initialize() {
     }
 }
 
@@ -84,13 +74,20 @@ module GarminBubbleEngine {
         var aimOffsetM = gpsAimOffsetM(payload, distanceM);
         var centre = renderCentre(target, payload, shotBearing, aimOffsetM);
 
-        return new GarminBubbleResult(
-            target, distanceM, compassBearingDeg(player, target),
-            new GarminClubSelection(row.club, row.carryM, row.totalM, bag.isGhost),
-            centre, buildRing(centre, payload, shotBearing),
-            payload.visual.visualWidthM, payload.visual.visualDepthM, payload.visual.visualTiltDeg,
-            payload.aimOffsetDeg, aimOffsetM, GarminEngineVersion.CURRENT
-        );
+        var out = new GarminBubbleResult();
+        out.target = target;
+        out.targetDistanceM = distanceM;
+        out.shotBearingDeg = compassBearingDeg(player, target);
+        out.club = new GarminClubSelection(row.club, row.carryM, row.totalM, bag.isGhost);
+        out.centre = centre;
+        out.ring = buildRing(centre, payload, shotBearing);
+        out.widthM = payload.visual.visualWidthM;
+        out.depthM = payload.visual.visualDepthM;
+        out.tiltDeg = payload.visual.visualTiltDeg;
+        out.aimOffsetDeg = payload.aimOffsetDeg;
+        out.aimOffsetM = aimOffsetM;
+        out.engineVersion = GarminEngineVersion.CURRENT;
+        return out;
     }
 
     // gdGpsAimOffsetM — tan(My Bubble degrees) x the SHOT distance, not the

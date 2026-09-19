@@ -33,17 +33,10 @@ class GarminMapSpatialReference {
     var rotationDegrees;
     var metresPerPixel;
 
-    function initialize(version, refZoom, a, b, tx, ty, imageWidth, imageHeight, rotationDegrees, metresPerPixel) {
-        self.version = version;
-        self.refZoom = refZoom;
-        self.a = a;
-        self.b = b;
-        self.tx = tx;
-        self.ty = ty;
-        self.imageWidth = imageWidth;
-        self.imageHeight = imageHeight;
-        self.rotationDegrees = rotationDegrees;
-        self.metresPerPixel = metresPerPixel;
+    // Monkey C caps a method at 9 arguments and this record carries 10
+    // fields. Construct with `new GarminMapSpatialReference()` and assign
+    // every field — fromDict() below is the only site.
+    function initialize() {
     }
 
     // A package from a newer recipe, or one whose transform is degenerate,
@@ -91,7 +84,10 @@ class GarminMapSpatialReference {
         if (clamped < -MAX_MERCATOR_LATITUDE) { clamped = -MAX_MERCATOR_LATITUDE; }
         var latRad = degToRad(clamped);
         var x = ((lng + 180.0) / 360.0) * scale;
-        var y = ((1.0 - Math.log(Math.tan(latRad) + 1.0 / Math.cos(latRad)) / Math.PI) / 2.0) * scale;
+        // Toybox.Math.log takes an explicit base — Math.log(x, Math.E) is the
+        // natural log the Web Mercator formula (and the JS Math.log this
+        // mirrors) means. Without the base this is not the same projection.
+        var y = ((1.0 - Math.log(Math.tan(latRad) + 1.0 / Math.cos(latRad), Math.E) / Math.PI) / 2.0) * scale;
         return { "x" => x, "y" => y };
     }
 
@@ -118,6 +114,17 @@ class GarminMapSpatialReference {
         if (a == null || b == null || tx == null || ty == null) { return null; }
         var rotationDegrees = GarminWire.num(raw, "rotationDegrees");
         var metresPerPixel = GarminWire.num(raw, "metresPerPixel");
-        return new GarminMapSpatialReference(version, refZoom, a, b, tx, ty, imageWidth, imageHeight, rotationDegrees, metresPerPixel);
+        var out = new GarminMapSpatialReference();
+        out.version = version;
+        out.refZoom = refZoom;
+        out.a = a;
+        out.b = b;
+        out.tx = tx;
+        out.ty = ty;
+        out.imageWidth = imageWidth;
+        out.imageHeight = imageHeight;
+        out.rotationDegrees = rotationDegrees;
+        out.metresPerPixel = metresPerPixel;
+        return out;
     }
 }

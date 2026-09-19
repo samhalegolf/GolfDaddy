@@ -25,24 +25,13 @@ class GarminBubblePayload {
     var depthRadiusM;
     var isGhostBag;
 
-    function initialize(club, baseCarryM, totalM, rolloutM, aimOffsetDeg, aimOffsetM,
-            clusterWidthM, clusterDepthM, clusterTiltDeg, distanceTendencyPct, visual,
-            radiusM, lateralRadiusM, depthRadiusM, isGhostBag) {
-        self.club = club;
-        self.baseCarryM = baseCarryM;
-        self.totalM = totalM;
-        self.rolloutM = rolloutM;
-        self.aimOffsetDeg = aimOffsetDeg;
-        self.aimOffsetM = aimOffsetM;
-        self.clusterWidthM = clusterWidthM;
-        self.clusterDepthM = clusterDepthM;
-        self.clusterTiltDeg = clusterTiltDeg;
-        self.distanceTendencyPct = distanceTendencyPct;
-        self.visual = visual;
-        self.radiusM = radiusM;
-        self.lateralRadiusM = lateralRadiusM;
-        self.depthRadiusM = depthRadiusM;
-        self.isGhostBag = isGhostBag;
+    // Monkey C caps a method at 9 arguments and this record carries 15
+    // fields, so there is no memberwise initialize() to be had. Construct
+    // with `new GarminBubblePayload()` and assign every field. The three
+    // sites below are the only ones; each sets all 15, deliberately, because
+    // a field left unset here is a null that only shows up as a missing
+    // Bubble on the watch.
+    function initialize() {
     }
 
     // getGDBForClub. The roll-out term gets a DEEPER Bubble: a Driver
@@ -80,14 +69,23 @@ class GarminBubblePayload {
         if (lateralRadius > radius) { radius = lateralRadius; }
         if (depthRadius > radius) { radius = depthRadius; }
 
-        return new GarminBubblePayload(
-            profile.club, carryM, GarminJS.roundTo(totalM, 1), GarminJS.roundTo(rolloutM, 1),
-            profile.aimOffsetDeg, profile.aimOffsetM,
-            profile.clusterWidthM, profile.clusterDepthM, profile.clusterTiltDeg,
-            profile.distanceTendencyPct, visual,
-            GarminJS.roundTo(radius, 1), GarminJS.roundTo(lateralRadius, 1), GarminJS.roundTo(depthRadius, 1),
-            isGhostBag
-        );
+        var out = new GarminBubblePayload();
+        out.club = profile.club;
+        out.baseCarryM = carryM;
+        out.totalM = GarminJS.roundTo(totalM, 1);
+        out.rolloutM = GarminJS.roundTo(rolloutM, 1);
+        out.aimOffsetDeg = profile.aimOffsetDeg;
+        out.aimOffsetM = profile.aimOffsetM;
+        out.clusterWidthM = profile.clusterWidthM;
+        out.clusterDepthM = profile.clusterDepthM;
+        out.clusterTiltDeg = profile.clusterTiltDeg;
+        out.distanceTendencyPct = profile.distanceTendencyPct;
+        out.visual = visual;
+        out.radiusM = GarminJS.roundTo(radius, 1);
+        out.lateralRadiusM = GarminJS.roundTo(lateralRadius, 1);
+        out.depthRadiusM = GarminJS.roundTo(depthRadius, 1);
+        out.isGhostBag = isGhostBag;
+        return out;
     }
 
     // gdNormalizeGpsBubblePayload — floors, applied after the engine has had
@@ -107,21 +105,29 @@ class GarminBubblePayload {
         if (lateral > radius) { radius = lateral; }
         if (depth > radius) { radius = depth; }
 
-        return new GarminBubblePayload(
-            club, baseCarryM, totalM, rolloutM,
-            aimOffsetDeg, GarminJS.roundTo(aimOffsetM, 2),
-            clusterWidthM, clusterDepthM, clusterTiltDeg,
-            GarminJS.roundTo(GarminJS.clamp(distanceTendencyPct, -10.0, 10.0), 2),
-            new GarminVisualBubble(
-                GarminJS.roundTo(visual.visualWidthM, 1),
-                GarminJS.roundTo(visual.visualDepthM, 1),
-                GarminJS.roundTo(GarminJS.clamp(visual.visualTiltDeg, -18.0, 18.0), 2),
-                GarminJS.roundTo(GarminJS.clamp(visual.visualSkewDeg, -16.0, 16.0), 2),
-                GarminJS.roundTo(GarminJS.clamp(visual.visualYBias, -0.18, 0.18), 3)
-            ),
-            GarminJS.roundTo(radius, 1), GarminJS.roundTo(lateral, 1), GarminJS.roundTo(depth, 1),
-            isGhostBag
+        var out = new GarminBubblePayload();
+        out.club = club;
+        out.baseCarryM = baseCarryM;
+        out.totalM = totalM;
+        out.rolloutM = rolloutM;
+        out.aimOffsetDeg = aimOffsetDeg;
+        out.aimOffsetM = GarminJS.roundTo(aimOffsetM, 2);
+        out.clusterWidthM = clusterWidthM;
+        out.clusterDepthM = clusterDepthM;
+        out.clusterTiltDeg = clusterTiltDeg;
+        out.distanceTendencyPct = GarminJS.roundTo(GarminJS.clamp(distanceTendencyPct, -10.0, 10.0), 2);
+        out.visual = new GarminVisualBubble(
+            GarminJS.roundTo(visual.visualWidthM, 1),
+            GarminJS.roundTo(visual.visualDepthM, 1),
+            GarminJS.roundTo(GarminJS.clamp(visual.visualTiltDeg, -18.0, 18.0), 2),
+            GarminJS.roundTo(GarminJS.clamp(visual.visualSkewDeg, -16.0, 16.0), 2),
+            GarminJS.roundTo(GarminJS.clamp(visual.visualYBias, -0.18, 0.18), 3)
         );
+        out.radiusM = GarminJS.roundTo(radius, 1);
+        out.lateralRadiusM = GarminJS.roundTo(lateral, 1);
+        out.depthRadiusM = GarminJS.roundTo(depth, 1);
+        out.isGhostBag = isGhostBag;
+        return out;
     }
 
     // gdGpsBubbleDisplayPayload, minus the pixel clamp. Caps first, then
@@ -165,17 +171,25 @@ class GarminBubblePayload {
         var r = radiusM > 1.0 ? radiusM : 1.0;
         var lat = lateralRadiusM > 1.0 ? lateralRadiusM : 1.0;
         var dr = depthRadiusM > 1.0 ? depthRadiusM : 1.0;
-        return new GarminBubblePayload(
-            club, baseCarryM, totalM, rolloutM,
-            aimOffsetDeg, aimOffsetM,
-            clusterWidthM, clusterDepthM, clusterTiltDeg,
-            distanceTendencyPct,
-            new GarminVisualBubble(
-                GarminJS.roundTo(w * scale, 1), GarminJS.roundTo(dep * scale, 1),
-                visual.visualTiltDeg, visual.visualSkewDeg, visual.visualYBias
-            ),
-            GarminJS.roundTo(r * scale, 1), GarminJS.roundTo(lat * scale, 1), GarminJS.roundTo(dr * scale, 1),
-            isGhostBag
+        var out = new GarminBubblePayload();
+        out.club = club;
+        out.baseCarryM = baseCarryM;
+        out.totalM = totalM;
+        out.rolloutM = rolloutM;
+        out.aimOffsetDeg = aimOffsetDeg;
+        out.aimOffsetM = aimOffsetM;
+        out.clusterWidthM = clusterWidthM;
+        out.clusterDepthM = clusterDepthM;
+        out.clusterTiltDeg = clusterTiltDeg;
+        out.distanceTendencyPct = distanceTendencyPct;
+        out.visual = new GarminVisualBubble(
+            GarminJS.roundTo(w * scale, 1), GarminJS.roundTo(dep * scale, 1),
+            visual.visualTiltDeg, visual.visualSkewDeg, visual.visualYBias
         );
+        out.radiusM = GarminJS.roundTo(r * scale, 1);
+        out.lateralRadiusM = GarminJS.roundTo(lat * scale, 1);
+        out.depthRadiusM = GarminJS.roundTo(dr * scale, 1);
+        out.isGhostBag = isGhostBag;
+        return out;
     }
 }
