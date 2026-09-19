@@ -220,10 +220,30 @@ module GarminBubbleEngine {
         var minProgress = samples[nearestIndex]["progress"];
         if (minProgress < 0) { minProgress = 0.0; }
 
+        /* `haveBest` rather than testing `bestPoint == null`, and it is not a
+           style preference. These four start as null, so SDK 9's type checker
+           infers their type as Null, concludes `bestPoint == null` is always
+           true, and reports the two `else if` branches below as unreachable
+           ("Statement is not reachable", GarminBubbleEngine.mc:235). The code
+           was correct at runtime — the first qualifying sample fills them in
+           and later ones compare properly — but those two branches ARE the
+           whole "closest to the edge of the bag" choice. The first branch on
+           its own just keeps whichever qualifying sample came last. If a
+           release optimisation ever acted on the checker's reachability
+           conclusion, the layup would silently degrade to the wrong sample,
+           and a wrong club on a par 5 is not something anyone would trace back
+           to a compiler warning. A Boolean the checker can see taking both
+           values removes the inference entirely. */
+        var haveBest = false;
         var bestPoint = null;
-        var bestProgress = null;
-        var bestDirect = null;
-        var bestScore = null;
+        /* Zero rather than null, and never read as zero: `haveBest` guards
+           every use until a real sample has filled them in. Left as null they
+           type as Null, and the comparisons below become `Null - Float`, which
+           is the error the checker raises the moment it stops believing those
+           branches are dead. */
+        var bestProgress = 0.0;
+        var bestDirect = 0.0;
+        var bestScore = 0.0;
         for (var i = 0; i < samples.size(); i += 1) {
             var progress = samples[i]["progress"];
             if (progress < minProgress + 6.0) { continue; }
@@ -231,17 +251,18 @@ module GarminBubbleEngine {
             if (direct == null || !direct.isFinite() || direct > maxM + 3.0) { continue; }
             var score = (maxM - direct).abs();
             var take = false;
-            if (bestPoint == null) { take = true; }
+            if (!haveBest) { take = true; }
             else if (score < bestScore - 0.75) { take = true; }
             else if ((score - bestScore).abs() <= 0.75 && progress > bestProgress) { take = true; }
             if (take) {
+                haveBest = true;
                 bestPoint = samples[i]["point"];
                 bestProgress = progress;
                 bestDirect = direct;
                 bestScore = score;
             }
         }
-        if (bestPoint == null) { return null; }
+        if (!haveBest) { return null; }
         var floor = maxM * 0.58;
         if (floor < 45.0) { floor = 45.0; }
         if (bestDirect < floor) { return null; }
