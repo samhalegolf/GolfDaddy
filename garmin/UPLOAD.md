@@ -112,11 +112,15 @@ its own screen shape.
 
 ## 5. Before you package — the things that are still placeholders
 
-- [ ] **Launcher icon.** `resources/drawables/launcher_icon.png` is a 40×40
-      solid-colour placeholder. Replace it with the real Clarity Caddy mark —
-      and note the sizes differ per device, so one bitmap is not enough:
-      Approach S62 35×35, S70 42mm 60×60, S70 47mm 70×70, fenix 6 40×40,
-      Forerunner 55 35×35.
+- [x] ~~**Launcher icon.**~~ Done 2026-09-19. The 105-byte solid-colour
+      placeholder is gone; the real Clarity Caddy pin now ships at each
+      device's own size out of `resources-icons/<size>/`, selected per product
+      in `monkey.jungle`. Guarded by `npm run test:garmin`.
+
+      Worth knowing if you ever redraw it: at 35×35 (Approach S62, Forerunner
+      55) the G's counter closes up and the golf ball reads as a plain dot.
+      The pin silhouette still carries it, but a hand-simplified mark for the
+      two small sizes would read better than the downscale does.
 - [ ] **Bubble Engine parity fixtures.** `dev/fixtures/bubble-engine-parity.json`
       is the project's own stated completion bar for the engine and has never
       been run against the Monkey C port. Tolerances: 0.1 m, 0.01°, 1e-7 coord.

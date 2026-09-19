@@ -1,0 +1,7 @@
+<drawables>
+    <!-- 70x70 launcher icon. Connect IQ asks a different size per device
+         and does not scale for you, so each size is its own resource folder
+         selected by monkey.jungle. See that file for which devices take this
+         one, and garmin/README.md for how the images are produced. -->
+    <bitmap id="LauncherIcon" filename="launcher_icon.png"/>
+</drawables>

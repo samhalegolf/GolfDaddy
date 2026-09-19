@@ -5,4 +5,29 @@ project.manifest = manifest.xml
 # beyond `using Toybox.X` for SDK modules) — see garmin/README.md for the
 # directory map.
 base.sourcePath = source
+
+# `resources` holds everything that is the same on every device (strings).
+# The launcher icon is NOT: Connect IQ asks a different pixel size per device
+# and does not scale for you, so a single bitmap is stretched or shrunk by the
+# device and looks it. Each size therefore lives in its own folder, and each
+# product picks the one it actually wants.
+#
+# Sizes come from each device's own compiler.json (`launcherIcon`), not from
+# guesswork:
+#
+#     Approach S62      35x35      Forerunner 55     35x35
+#     fenix 6           40x40      Approach S70 42mm 60x60
+#     Approach S70 47mm 70x70
+#
+# Deliberately no icon in `base`. A product with no line below fails the build
+# on a missing LauncherIcon, which is a loud, immediate error — far better
+# than silently inheriting a wrong-size bitmap that nobody notices until the
+# store listing screenshots come back looking soft. If you add a product to
+# manifest.xml, add its line here too.
 base.resourcePath = resources
+
+approachs62.resourcePath = $(base.resourcePath);resources-icons/35
+fr55.resourcePath = $(base.resourcePath);resources-icons/35
+fenix6.resourcePath = $(base.resourcePath);resources-icons/40
+approachs7042mm.resourcePath = $(base.resourcePath);resources-icons/60
+approachs7047mm.resourcePath = $(base.resourcePath);resources-icons/70
