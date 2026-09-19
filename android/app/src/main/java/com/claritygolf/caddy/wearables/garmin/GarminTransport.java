@@ -1,46 +1,65 @@
 package com.claritygolf.caddy.wearables.garmin;
 
 import android.content.Context;
+import android.util.Log;
+
+import com.garmin.android.connectiq.ConnectIQ;
+import com.garmin.android.connectiq.IQApp;
+import com.garmin.android.connectiq.IQDevice;
+import com.garmin.android.connectiq.exception.InvalidStateException;
+import com.garmin.android.connectiq.exception.ServiceUnavailableException;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
- * UNVERIFIED Connect IQ Mobile SDK calls — see below. NOW CALLED from
- * {@link com.claritygolf.caddy.NativeRoundBridge}, Android's Capacitor
- * plugin (built after this class, in a later session — see the
- * Garmin-on-Android scope note this repo's memory records for why Android
- * has no WearableCoordinator-style indirection above this transport).
+ * Talks to a Garmin wearable through the Garmin Connect Mobile app, using the
+ * Connect IQ Mobile SDK (com.garmin.connectiq:ciq-companion-app-sdk, declared
+ * in android/app/build.gradle). Called from
+ * {@link com.claritygolf.caddy.NativeRoundBridge}, Android's Capacitor plugin.
  *
- * Everything referencing the Connect IQ Mobile SDK for Android below
- * ({@code com.garmin.android.connectiq.ConnectIQ}/{@code IQDevice}/
- * {@code IQApp}) is commented out and written against this session's best
- * understanding of that SDK's public shape — a singleton-ish
- * {@code ConnectIQ.getInstance(context, ConnectIQ.IQConnectType)}, an
- * {@code IQDevice} for a paired device, an {@code IQApp} scoping a message to
- * one installed watch app, and listener interfaces for device/app events and
- * send results. It has NOT been checked against the actual SDK, which is not
- * vendored in this repo (no Maven coordinate is declared in
- * android/app/build.gradle) — obtain it from Garmin's developer portal
- * before uncommenting anything here. Because the SDK-specific code stays
- * commented, this file compiles as an inert stub today and will not break
- * the existing Android build, which auto-includes every .java file under
- * src/main/java.
+ * <p><b>Written against the real SDK as of 2026-09-20</b>, verified by
+ * javap-ing the 2.4.0 AAR rather than from documentation. Until then every
+ * call in here was commented out and written from inference; those inferences
+ * were wrong in ways worth recording:
  *
- * Mirrors GarminTransport.swift's responsibilities and — per the
- * Garmin-on-Android scope note — talks directly to whatever calls it, with
- * no WearableCoordinator-style indirection: Android has exactly one
- * wearable target, so that abstraction (built for iOS to arbitrate Apple
- * Watch vs Garmin) has nothing to arbitrate here.
+ * <ul>
+ *   <li>{@code IQApplicationEventListener.onMessageReceived} delivers a
+ *       {@code List<Object>}, NOT the {@code Map} the old code tested for with
+ *       {@code instanceof}. One watch message arrives as a list holding the
+ *       Monkey C Dictionary. That shape would have compiled, run, and silently
+ *       dropped every inbound command forever.</li>
+ *   <li>Device status is {@code IQDevice.IQDeviceStatus} with four cases
+ *       including {@code NOT_PAIRED} and {@code UNKNOWN}, not the two the old
+ *       code collapsed to.</li>
+ *   <li>Nearly every SDK call throws {@code InvalidStateException} (used
+ *       before the SDK is ready) or {@code ServiceUnavailableException}
+ *       (Garmin Connect Mobile missing, stopped or too old). Both are checked,
+ *       so the old shape would not have compiled once uncommented.</li>
+ * </ul>
  *
- * Does NOT implement a bytes-over-the-wire map asset path, for the same
- * reason GarminTransport.swift does not: Garmin pulls hole imagery by URL
- * (see garmin/GarminMapDownloader.mc's header comment) rather than
- * receiving pushed bytes, so publishMapManifest is the only map-related
- * method here — PROVIDED the manifest it is given already carries a `url`
- * per hole.
+ * <p>Whether the app is installed on the watch is a real answer here, from
+ * {@code getApplicationInfo}, rather than the "device is connected" proxy the
+ * stub used. The two differ exactly when it matters: a connected watch with no
+ * Clarity Caddy on it.
  *
- * <p>DONE 2026-09-19: app/js/watch-map-delivery.js now attaches an absolute
- * {@code url} to every manifest hole, so the manifest this forwards is
- * complete.
+ * <p>Mirrors GarminTransport.swift's responsibilities and talks directly to
+ * whatever calls it, with no WearableCoordinator-style indirection: Android
+ * has exactly one wearable target, so that abstraction (built for iOS to
+ * arbitrate Apple Watch vs Garmin) has nothing to arbitrate here.
+ *
+ * <p>Does NOT implement a bytes-over-the-wire map asset path, for the same
+ * reason GarminTransport.swift does not: Garmin pulls hole imagery by URL (see
+ * garmin/source/Maps/GarminMapDownloader.mc) rather than receiving pushed
+ * bytes, so publishMapManifest is the only map-related method here. The
+ * manifest it forwards carries an absolute {@code url} per hole as of
+ * 2026-09-19 (app/js/watch-map-delivery.js).
+ *
+ * <p>Package visibility needs nothing in our own manifest: the AAR declares
+ * {@code <queries><package android:name="com.garmin.android.apps.connectmobile"/>}
+ * itself, and manifest merging folds it in.
  */
 public final class GarminTransport {
 
@@ -92,6 +111,22 @@ public final class GarminTransport {
 
     private Listener listener;
 
+    private static final String TAG = "GarminTransport";
+
+    private ConnectIQ connectIQ;
+    private IQApp app;
+    /** The device we are registered against. Held so we can unregister before
+     *  registering a different one — the SDK keeps per-device listeners and
+     *  would otherwise leak the old one and keep delivering its events. */
+    private volatile IQDevice registeredDevice;
+    /* Written from SDK callbacks (main thread), read from state() on the
+       Capacitor bridge thread — same reasoning as `entitled` above. */
+    private volatile boolean sdkReady;
+    /** Real answer from getApplicationInfo, not "the device is connected".
+     *  The two differ on a connected watch with no Clarity Caddy installed,
+     *  which is exactly the case the pairing UI has to explain. */
+    private volatile boolean appInstalledOnDevice;
+
     public GarminTransport(Context context, GarminDeviceStore deviceStore, String connectIqAppId) {
         this.context = context.getApplicationContext();
         this.deviceStore = deviceStore;
@@ -102,28 +137,165 @@ public final class GarminTransport {
         this.listener = listener;
     }
 
+    /** Brings the SDK up and, once it is ready, binds to whichever device the
+     *  store currently holds. Safe to call repeatedly: initialize() is done
+     *  once, and a later call just re-binds (which is what selectDevice wants
+     *  after the player picks a different watch).
+     *
+     *  <p>autoUI = true lets the SDK put up Garmin's own dialogs when Garmin
+     *  Connect Mobile is missing or too old. That is the right call here —
+     *  those are the two failure modes a player can actually fix, and
+     *  Garmin's wording for them is better than anything invented. */
     public void activate() {
-        // UNVERIFIED:
-        // ConnectIQ connectIQ = ConnectIQ.getInstance(context, ConnectIQ.IQConnectType.WIRELESS);
-        // connectIQ.initialize(context, true, new ConnectIQ.ConnectIQListener() {
-        //     public void onSdkReady() {
-        //         GarminDeviceStore.SelectedDevice selected = deviceStore.getSelectedDevice();
-        //         if (selected == null) { return; }
-        //         IQDevice device = new IQDevice(Long.parseLong(selected.deviceId), selected.deviceName);
-        //         IQApp app = new IQApp(connectIqAppId);
-        //         connectIQ.registerForDeviceEvents(device, (d, status) -> {
-        //             deviceStore.recordConnectionState(status == IQDevice.IQDeviceStatus.CONNECTED
-        //                 ? GarminDeviceStore.ConnectionState.CONNECTED
-        //                 : GarminDeviceStore.ConnectionState.NOT_CONNECTED);
-        //             if (listener != null) { listener.onStateChanged(); }
-        //         });
-        //         connectIQ.registerForAppEvents(device, app, (d, a, message, status) -> {
-        //             if (message instanceof Map) { handleIncoming((Map<String, Object>) message); }
-        //         });
-        //     }
-        //     public void onInitializeError(ConnectIQ.IQSdkErrorStatus status) { /* record + surface */ }
-        //     public void onSdkShutDown() { /* no-op */ }
-        // });
+        if (connectIQ == null) {
+            connectIQ = ConnectIQ.getInstance(context, ConnectIQ.IQConnectType.WIRELESS);
+            app = new IQApp(connectIqAppId);
+        }
+        if (sdkReady) { bindSelectedDevice(); return; }
+        connectIQ.initialize(context, true, new ConnectIQ.ConnectIQListener() {
+            @Override
+            public void onSdkReady() {
+                sdkReady = true;
+                bindSelectedDevice();
+                notifyStateChanged();
+            }
+
+            @Override
+            public void onInitializeError(ConnectIQ.IQSdkErrorStatus status) {
+                /* GCM_NOT_INSTALLED, GCM_UPGRADE_NEEDED or SERVICE_ERROR. The
+                   first two are already on screen via autoUI; all three leave
+                   us not ready, which state() reports honestly rather than
+                   pretending the transport is live. */
+                sdkReady = false;
+                Log.w(TAG, "Connect IQ SDK did not initialise: " + status);
+                notifyStateChanged();
+            }
+
+            @Override
+            public void onSdkShutDown() {
+                sdkReady = false;
+                registeredDevice = null;
+                appInstalledOnDevice = false;
+                notifyStateChanged();
+            }
+        });
+    }
+
+    /** Releases the SDK. Paired with activate(); the selected device survives
+     *  in the store, so coming back does not mean re-pairing. */
+    public void deactivate() {
+        if (connectIQ == null || !sdkReady) { return; }
+        try {
+            unregisterCurrentDevice();
+            connectIQ.shutdown(context);
+        } catch (InvalidStateException error) {
+            /* Already down. Nothing to undo. */
+        }
+        sdkReady = false;
+        registeredDevice = null;
+        appInstalledOnDevice = false;
+    }
+
+    private void bindSelectedDevice() {
+        GarminDeviceStore.SelectedDevice selected = deviceStore.getSelectedDevice();
+        if (selected == null) { unregisterCurrentDevice(); return; }
+        IQDevice device = toIQDevice(selected);
+        if (device == null) { return; }
+        if (registeredDevice != null && registeredDevice.getDeviceIdentifier() == device.getDeviceIdentifier()) { return; }
+        unregisterCurrentDevice();
+        try {
+            connectIQ.registerForDeviceEvents(device, new ConnectIQ.IQDeviceEventListener() {
+                @Override
+                public void onDeviceStatusChanged(IQDevice changed, IQDevice.IQDeviceStatus status) {
+                    deviceStore.recordConnectionState(connectionStateOf(status));
+                    /* Whether the watch app is there can only be asked of a
+                       connected device, so this is the moment to ask. */
+                    if (status == IQDevice.IQDeviceStatus.CONNECTED) { refreshAppInstalled(changed); }
+                    else { appInstalledOnDevice = false; }
+                    notifyStateChanged();
+                }
+            });
+            connectIQ.registerForAppEvents(device, app, new ConnectIQ.IQApplicationEventListener() {
+                @Override
+                public void onMessageReceived(IQDevice from, IQApp fromApp, List<Object> messages, ConnectIQ.IQMessageStatus status) {
+                    if (status != ConnectIQ.IQMessageStatus.SUCCESS || messages == null) { return; }
+                    /* A LIST, not a Map — one watch send arrives as a list
+                       holding the Monkey C Dictionary. Testing the list itself
+                       with `instanceof Map` (as the pre-SDK stub did) is false
+                       every time and drops the message without a trace. */
+                    for (Object message : messages) {
+                        if (message instanceof Map) {
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> dictionary = (Map<String, Object>) message;
+                            handleIncoming(dictionary);
+                        }
+                    }
+                }
+            });
+            registeredDevice = device;
+            deviceStore.recordConnectionState(connectionStateOf(currentStatusOf(device)));
+            if (currentStatusOf(device) == IQDevice.IQDeviceStatus.CONNECTED) { refreshAppInstalled(device); }
+        } catch (InvalidStateException | ServiceUnavailableException error) {
+            Log.w(TAG, "could not bind Garmin device", error);
+            registeredDevice = null;
+        }
+    }
+
+    private void unregisterCurrentDevice() {
+        if (connectIQ == null || registeredDevice == null) { return; }
+        try { connectIQ.unregisterForEvents(registeredDevice); }
+        catch (InvalidStateException error) { /* SDK already down */ }
+        registeredDevice = null;
+        appInstalledOnDevice = false;
+    }
+
+    private IQDevice.IQDeviceStatus currentStatusOf(IQDevice device) {
+        try { return connectIQ.getDeviceStatus(device); }
+        catch (InvalidStateException | ServiceUnavailableException error) { return IQDevice.IQDeviceStatus.UNKNOWN; }
+    }
+
+    private void refreshAppInstalled(IQDevice device) {
+        try {
+            connectIQ.getApplicationInfo(connectIqAppId, device, new ConnectIQ.IQApplicationInfoListener() {
+                @Override
+                public void onApplicationInfoReceived(IQApp installed) {
+                    appInstalledOnDevice = true;
+                    notifyStateChanged();
+                }
+
+                @Override
+                public void onApplicationNotInstalled(String applicationId) {
+                    appInstalledOnDevice = false;
+                    notifyStateChanged();
+                }
+            });
+        } catch (InvalidStateException | ServiceUnavailableException error) {
+            appInstalledOnDevice = false;
+        }
+    }
+
+    /** GarminDeviceStore keeps the id as a String because that is what crosses
+     *  the JavaScript bridge; the SDK wants the long it really is. A value
+     *  that is not a long cannot name a device, so it yields null rather than
+     *  a device that will never match. */
+    private IQDevice toIQDevice(GarminDeviceStore.SelectedDevice selected) {
+        try {
+            return new IQDevice(Long.parseLong(selected.deviceId), selected.deviceName);
+        } catch (NumberFormatException error) {
+            Log.w(TAG, "stored Garmin device id is not a device identifier: " + selected.deviceId);
+            return null;
+        }
+    }
+
+    private static GarminDeviceStore.ConnectionState connectionStateOf(IQDevice.IQDeviceStatus status) {
+        if (status == IQDevice.IQDeviceStatus.CONNECTED) { return GarminDeviceStore.ConnectionState.CONNECTED; }
+        if (status == IQDevice.IQDeviceStatus.NOT_PAIRED) { return GarminDeviceStore.ConnectionState.UNAVAILABLE; }
+        if (status == IQDevice.IQDeviceStatus.NOT_CONNECTED) { return GarminDeviceStore.ConnectionState.NOT_CONNECTED; }
+        return GarminDeviceStore.ConnectionState.UNKNOWN;
+    }
+
+    private void notifyStateChanged() {
+        if (listener != null) { listener.onStateChanged(); }
     }
 
     public void publishScene(Map<String, Object> scene, Callback<Boolean> completion) {
@@ -149,10 +321,18 @@ public final class GarminTransport {
         GarminDeviceStore.SelectedDevice selected = deviceStore.getSelectedDevice();
         boolean connected = deviceStore.getLastKnownConnectionState() == GarminDeviceStore.ConnectionState.CONNECTED;
         return new State(
-            true, // UNVERIFIED: should reflect ConnectIQ actually initialising
+            /* supported: the SDK actually came up. False means Garmin Connect
+               Mobile is missing, too old, or its service failed — all real,
+               all worth showing differently from "no watch chosen". */
+            sdkReady,
+            /* activated: bound to a device and listening. */
+            registeredDevice != null,
+            /* paired: the player has chosen a watch. Survives disconnection
+               and a membership lapse. */
             selected != null,
-            selected != null,
-            connected, // best-effort proxy until device-status callbacks are wired
+            /* appInstalled: the real answer from getApplicationInfo, not a
+               proxy — a connected watch without Clarity Caddy reports false. */
+            appInstalledOnDevice,
             connected
         );
     }
@@ -178,22 +358,63 @@ public final class GarminTransport {
      *  honestly that it cannot look rather than returning a misleading empty
      *  list. */
     public Map<String, Object> availableDevices() {
-        java.util.HashMap<String, Object> out = new java.util.HashMap<>();
-        out.put("devices", new java.util.ArrayList<Map<String, Object>>());
-        out.put("sdkLinked", false);
-        out.put("reason", "The Connect IQ Mobile SDK is not bundled in this build yet.");
+        HashMap<String, Object> out = new HashMap<>();
+        ArrayList<Map<String, Object>> devices = new ArrayList<>();
+        out.put("devices", devices);
+        out.put("sdkLinked", true);
+        if (connectIQ == null || !sdkReady) {
+            /* Distinct from "looked and found none", and the settings page
+               words it differently. activate() is called here so the common
+               case — player opens the page before anything else has woken the
+               SDK — resolves itself on their second tap rather than needing an
+               app restart. */
+            activate();
+            out.put("reason", "Garmin Connect is not ready yet. Make sure the Garmin Connect app is installed and signed in, then try again.");
+            return out;
+        }
+        try {
+            /* Known, not connected: a watch that is paired in Garmin Connect
+               but currently out of range is still the watch the player wants
+               to choose. Its live status rides along so the page can say so. */
+            for (IQDevice device : connectIQ.getKnownDevices()) {
+                HashMap<String, Object> entry = new HashMap<>();
+                entry.put("deviceId", String.valueOf(device.getDeviceIdentifier()));
+                entry.put("deviceName", device.getFriendlyName());
+                entry.put("model", partNumberOf(device));
+                entry.put("connected", currentStatusOf(device) == IQDevice.IQDeviceStatus.CONNECTED);
+                devices.add(entry);
+            }
+        } catch (InvalidStateException | ServiceUnavailableException error) {
+            Log.w(TAG, "could not list Garmin devices", error);
+            out.put("reason", "Could not reach Garmin Connect to list your watches.");
+        }
         return out;
+    }
+
+    /** The device's part number, which is as close to a model name as the SDK
+     *  offers. Best-effort: it needs a live service, and a missing model is
+     *  cosmetic on the pairing row. */
+    private String partNumberOf(IQDevice device) {
+        try {
+            String partNumber = connectIQ.getDevicePartNumber(device);
+            return partNumber == null ? "" : partNumber;
+        } catch (InvalidStateException | ServiceUnavailableException | IllegalArgumentException error) {
+            return "";
+        }
     }
 
     public void selectDevice(String deviceId, String deviceName, String model) {
         deviceStore.select(deviceId, deviceName, model);
+        /* Re-binds listeners onto the newly chosen device; activate() is
+           idempotent and unregisters the previous one first. */
         activate();
-        if (listener != null) { listener.onStateChanged(); }
+        notifyStateChanged();
     }
 
     public void clearSelectedDevice() {
+        unregisterCurrentDevice();
         deviceStore.clearSelection();
-        if (listener != null) { listener.onStateChanged(); }
+        notifyStateChanged();
     }
 
     /** The richer state the settings page needs, over and above the five
@@ -225,12 +446,28 @@ public final class GarminTransport {
         // nothing leaves the phone.
         if (!entitled) { completion.onResult(false); return; }
         if (deviceStore.getSelectedDevice() == null) { completion.onResult(false); return; }
-        // UNVERIFIED: connectIQ.sendMessage(device, app, message, listener) —
-        // the real send call. Until the SDK is linked this stub reports
-        // failure honestly, matching the "native transport never infers
-        // success" rule (Garmin Phase 1 plan step 8): a stub must not claim
-        // it sent something it did not.
-        completion.onResult(false);
+        if (connectIQ == null || !sdkReady || registeredDevice == null) { completion.onResult(false); return; }
+        try {
+            connectIQ.sendMessage(registeredDevice, app, message, new ConnectIQ.IQSendMessageListener() {
+                @Override
+                public void onMessageStatus(IQDevice device, IQApp sentApp, ConnectIQ.IQMessageStatus status) {
+                    /* Reported, never inferred: only the SDK's own SUCCESS
+                       counts as sent (Garmin Phase 1 plan step 8). The other
+                       seven cases are all genuine failures, and
+                       FAILURE_MESSAGE_TOO_LARGE in particular is one the
+                       caller must see rather than have smoothed over — a
+                       Scene that outgrew the link fails every time, not
+                       intermittently. */
+                    if (status != ConnectIQ.IQMessageStatus.SUCCESS) {
+                        Log.w(TAG, "Garmin send failed: " + status);
+                    }
+                    completion.onResult(status == ConnectIQ.IQMessageStatus.SUCCESS);
+                }
+            });
+        } catch (InvalidStateException | ServiceUnavailableException error) {
+            Log.w(TAG, "Garmin send could not be attempted", error);
+            completion.onResult(false);
+        }
     }
 
     private void handleIncoming(Map<String, Object> message) {

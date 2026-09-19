@@ -13,4 +13,9 @@ ext {
     androidxJunitVersion = '1.3.0'
     androidxEspressoCoreVersion = '3.7.0'
     cordovaAndroidVersion = '14.0.1'
+    /* Connect IQ Mobile SDK for Android, from Maven Central. Note this is
+       NOT the version the garmin/connectiq-android-sdk README prints (2.2.0);
+       that README is stale. 2.4.0 is the current release — checked against
+       repo1.maven.org's maven-metadata.xml on 2026-09-20. */
+    connectIqSdkVersion = '2.4.0'
 }

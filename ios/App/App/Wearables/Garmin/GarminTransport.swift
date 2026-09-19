@@ -1,54 +1,51 @@
 import Foundation
-// import ConnectIQ  // Garmin Connect IQ Mobile SDK for iOS — not vendored in
-                      // this repo yet. Add the .xcframework from Garmin's
-                      // developer portal (developer.garmin.com/connect-iq),
-                      // then uncomment this import and the commented
-                      // conformances/calls below. This file IS in
-                      // App.xcodeproj's Sources build phase and IS
-                      // registered with WearableCoordinator
-                      // (NativeRoundBridge.load()) — it compiles and runs
-                      // today as a safe stub that never claims to reach a
-                      // device (see `state()`/`send()` below), not because
-                      // it's excluded from the build.
+import UIKit
+import ConnectIQ
 
 /*
- UNVERIFIED Connect IQ Mobile SDK calls — see below. WIRED INTO THE BUILD
- (Garmin Phase 1 plan step 4): registered alongside AppleWatchTransport in
- NativeRoundBridge.load(), and WearableCoordinator now fans out to both
- rather than only the first-registered transport — see
- WearableCoordinator.swift's header comment for why that had to change here
- rather than staying "deliberately left undefined."
+ Talks to a Garmin wearable through the Garmin Connect Mobile app, using the
+ Connect IQ Mobile SDK for iOS (the ConnectIQ Swift package, pinned in
+ App.xcodeproj). Registered alongside AppleWatchTransport in
+ NativeRoundBridge.load(); WearableCoordinator fans out to both.
 
- Everything that calls into `ConnectIQ`/`IQDevice`/`IQApp` below is written
- against this session's best understanding of the Connect IQ Mobile SDK for
- iOS's public API shape (ConnectIQ.sharedInstance() singleton; IQDevice for a
- paired device; IQApp scoping a message to one installed watch app;
- IQDeviceEventDelegate / IQAppMessageDelegate for callbacks). It has not been
- checked against the actual SDK headers — do that before trusting any single
- method or parameter name here. The ARCHITECTURE (what this class is
- responsible for, and the shape of WearableTransport it implements) is the
- part this session is confident about; the exact Garmin API calls are not.
+ WRITTEN AGAINST THE REAL SDK as of 2026-09-20, read from the xcframework's
+ own headers rather than documentation. Until then every call here was
+ commented out and written from inference, and most of those inferences were
+ wrong:
 
- Mirrors AppleWatchTransport.swift's shape and responsibilities, adapted for
- Connect IQ:
-   - initialise the Connect IQ SDK
-   - discover/select a Garmin device (delegates the actual selection to
-     GarminDeviceStore — this class only acts on whatever is already chosen)
-   - register for device + app events
-   - send/receive messages
-   - expose state
+   - IQApp is built with `appWith(uuid:storeUuid:device:)` — THREE arguments,
+     including the Store UUID Garmin issues at publish time. The inferred
+     `IQApp(uuid:store:device:)` and its `IQAppStore()` do not exist at all.
+   - A device is `IQDevice.deviceWith(id:modelName:friendlyName:)`, a class
+     factory, and the id is an NSUUID. (Android's is a `long`. Same concept,
+     different type, and GarminDeviceStore keeps the String that crosses the
+     JavaScript bridge either way.)
+   - Messages go to an APP, not a device: `sendMessage(_:toApp:progress:completion:)`.
+     The IQApp carries its device.
+   - IQDeviceStatus has five cases, including BluetoothNotReady and NotFound,
+     which are worth telling apart from NotConnected when explaining to a
+     player why their watch is not there.
+
+ THE BIG STRUCTURAL DIFFERENCE FROM ANDROID, and the reason this file cannot
+ mirror GarminTransport.java: iOS has no way to enumerate paired devices in
+ process. There is no getKnownDevices(). Instead `showConnectIQDeviceSelection()`
+ hands off to the Garmin Connect app, which comes back into this app through a
+ registered URL scheme, and `parseDeviceSelectionResponseFromURL(_:)` turns that
+ URL into the chosen devices. So on iOS "Connect a Watch" leaves the app and
+ returns, where on Android it fills a list in place. AppDelegate routes the URL
+ here via `handleOpenURL`.
+
+ Two Info.plist entries make that work, and both fail silently when missing:
+ our own `claritycaddy-ciq` scheme under CFBundleURLTypes (or Garmin Connect
+ has nowhere to hand control back to), and `gcm-ciq` under
+ LSApplicationQueriesSchemes (or canOpenURL returns false and the SDK reports
+ Garmin Connect as not installed even when it is).
 
  Does NOT own Caddy golf state — it is transport, exactly like
  AppleWatchTransport. Does NOT implement WearableFileAssetTransport: Garmin
- pulls map imagery by URL (see garmin/GarminMapDownloader.mc's header
- comment for why), so there is no bytes-over-the-wire asset path to
- implement on the phone side — publishMapManifest is enough, PROVIDED the
- manifest handed to this transport already carries a `url` per hole.
-
- DONE 2026-09-19: app/js/watch-map-delivery.js now attaches an absolute `url`
- to every manifest hole, so the manifest this forwards is complete. Apple
- Watch ignores the field and keeps taking bytes, which is why one generic
- manifest still serves both transports.
+ pulls map imagery by URL (see garmin/source/Maps/GarminMapDownloader.mc), so
+ publishMapManifest is the only map path. The manifest carries an absolute
+ `url` per hole as of 2026-09-19 (app/js/watch-map-delivery.js).
 */
 final class GarminTransport: NSObject, WearableTransport {
     let platform: WearablePlatform = .garmin
@@ -67,6 +64,27 @@ final class GarminTransport: NSObject, WearableTransport {
 
     private var latestScene: [String: Any]?
 
+    /* The URL scheme Garmin Connect uses to hand control back after device
+       selection. Must match an entry in Info.plist's CFBundleURLTypes. */
+    static let urlScheme = "claritycaddy-ciq"
+
+    /* AppDelegate posts every incoming URL here rather than reaching into the
+       plugin for the transport. Keeps AppDelegate ignorant of Garmin and this
+       class free of a mutable global, and means a URL that arrives before the
+       plugin has loaded is simply ignored rather than crashing. */
+    static let openURLNotification = Notification.Name("com.claritygolf.caddy.garmin.openURL")
+
+    private var initialized = false
+    private var boundApp: IQApp?
+    private var boundDevice: IQDevice?
+    /* Real answer from getAppStatus, not "the device is connected". The two
+       differ on a connected watch with no Clarity Caddy installed. */
+    private var appInstalledOnDevice = false
+    /* Set while a hand-off to Garmin Connect is outstanding, so the settings
+       page can say what it is waiting for. */
+    private var awaitingSelection = false
+    private var urlObserver: NSObjectProtocol?
+
     init(deviceStore: GarminDeviceStore = GarminDeviceStore(), connectIQAppId: String) {
         self.deviceStore = deviceStore
         self.connectIQAppId = connectIQAppId
@@ -74,20 +92,139 @@ final class GarminTransport: NSObject, WearableTransport {
     }
 
     func activate() {
-        // UNVERIFIED: ConnectIQ.sharedInstance().initialize(withUrlScheme:uiOverrideDelegate:)
-        // or similar — the SDK needs a URL scheme registered in Info.plist
-        // for the Connect Mobile app to hand control back to Caddy after
-        // any device-pairing UI it presents. Also register for device
-        // events on whichever device GarminDeviceStore currently holds, so
-        // reachability/pairing changes reach `delegate` the same way
-        // AppleWatchTransport's WCSessionDelegate callbacks do.
-        //
-        // if let selected = deviceStore.selectedDevice {
-        //     let device = IQDevice(id: selected.deviceId, modelName: selected.model, friendlyName: selected.deviceName)
-        //     ConnectIQ.sharedInstance().register(forDeviceEvents: device, delegate: self)
-        //     let app = IQApp(uuid: UUID(uuidString: connectIQAppId), store: IQAppStore(), device: device)
-        //     ConnectIQ.sharedInstance().register(forAppMessages: app, delegate: self)
-        // }
+        if urlObserver == nil {
+            urlObserver = NotificationCenter.default.addObserver(
+                forName: Self.openURLNotification, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let url = note.userInfo?["url"] as? URL else { return }
+                self?.handleOpenURL(url)
+            }
+        }
+        if !initialized {
+            /* uiOverrideDelegate lets us answer "Garmin Connect is not
+               installed" ourselves rather than letting the SDK decide; see the
+               IQUIOverrideDelegate conformance at the foot of this file. */
+            ConnectIQ.sharedInstance().initialize(withUrlScheme: Self.urlScheme, uiOverrideDelegate: self)
+            initialized = true
+        }
+        bindSelectedDevice()
+    }
+
+    /* Hands off to the Garmin Connect app to choose a watch. iOS has no
+       in-process device list, so this LEAVES the app; the answer arrives back
+       through handleOpenURL below. Returns false when Garmin Connect is not
+       there to hand off to, which the caller words for the player. */
+    func beginDeviceSelection() -> Bool {
+        activate()
+        awaitingSelection = true
+        ConnectIQ.sharedInstance().showDeviceSelection()
+        return true
+    }
+
+    /* Called by AppDelegate for any URL on our scheme. Returns true when this
+       was a device-selection response and it has been consumed. */
+    @discardableResult
+    func handleOpenURL(_ url: URL) -> Bool {
+        guard url.scheme == Self.urlScheme else { return false }
+        awaitingSelection = false
+        guard let devices = ConnectIQ.sharedInstance().parseDeviceSelectionResponse(from: url) as? [IQDevice] else {
+            return false
+        }
+        /* Garmin Connect can return several. The transport speaks to exactly
+           one, and the first is the one the player picked first — the settings
+           page shows which one landed. */
+        guard let chosen = devices.first else {
+            /* An empty response means the player backed out, which is not an
+               error and must not clear a device they already had. */
+            delegate?.wearableTransportStateDidChange(self)
+            return true
+        }
+        deviceStore.select(
+            deviceId: chosen.uuid.uuidString,
+            deviceName: chosen.friendlyName ?? "Garmin watch",
+            model: chosen.modelName ?? ""
+        )
+        bindSelectedDevice()
+        delegate?.wearableTransportStateDidChange(self)
+        return true
+    }
+
+    private func bindSelectedDevice() {
+        guard initialized else { return }
+        guard let selected = deviceStore.selectedDevice, let device = iqDevice(from: selected) else {
+            unbind()
+            return
+        }
+        if let bound = boundDevice, bound.uuid == device.uuid { return }
+        unbind()
+
+        ConnectIQ.sharedInstance().register(forDeviceEvents: device, delegate: self)
+        /* storeUuid is the id Garmin issues when the app is first published,
+           which does not exist until then; nil is what the SDK expects in the
+           meantime and the app uuid alone scopes the messages. */
+        let app = IQApp(uuid: UUID(uuidString: connectIQAppId), store: nil, device: device)
+        if let app {
+            ConnectIQ.sharedInstance().register(forAppMessages: app, delegate: self)
+            boundApp = app
+            refreshAppStatus(app)
+        }
+        boundDevice = device
+        deviceStore.recordConnectionState(Self.connectionStateFor(ConnectIQ.sharedInstance().getDeviceStatus(device)))
+    }
+
+    private func unbind() {
+        if let app = boundApp {
+            ConnectIQ.sharedInstance().unregister(forAppMessages: app, delegate: self)
+        }
+        if let device = boundDevice {
+            ConnectIQ.sharedInstance().unregister(forDeviceEvents: device, delegate: self)
+        }
+        boundApp = nil
+        boundDevice = nil
+        appInstalledOnDevice = false
+    }
+
+    func clearSelectedDevice() {
+        unbind()
+        deviceStore.clearSelection()
+        delegate?.wearableTransportStateDidChange(self)
+    }
+
+    private func refreshAppStatus(_ app: IQApp) {
+        ConnectIQ.sharedInstance().getAppStatus(app) { [weak self] status in
+            guard let self else { return }
+            self.appInstalledOnDevice = status?.isInstalled ?? false
+            self.delegate?.wearableTransportStateDidChange(self)
+        }
+    }
+
+    /* Whether Garmin Connect is on the phone at all. This is the whole reason
+       `gcm-ciq` is in Info.plist's LSApplicationQueriesSchemes: without that
+       entry canOpenURL always answers false and we would tell every player
+       Garmin Connect is missing. The SDK offers no synchronous check of its
+       own — IQUIOverrideDelegate.needsToInstallConnectMobile only fires after
+       the fact, which is too late to word the button. */
+    static var isConnectMobileInstalled: Bool {
+        guard let url = URL(string: "gcm-ciq://") else { return false }
+        return UIApplication.shared.canOpenURL(url)
+    }
+
+    /* GarminDeviceStore keeps the id as the String that crosses the JavaScript
+       bridge; the SDK wants the UUID it really is. A value that is not a UUID
+       cannot name a device, so this yields nil rather than one that will never
+       match. */
+    private func iqDevice(from selected: GarminDeviceStore.SelectedDevice) -> IQDevice? {
+        guard let uuid = UUID(uuidString: selected.deviceId) else { return nil }
+        return IQDevice(id: uuid, modelName: selected.model, friendlyName: selected.deviceName)
+    }
+
+    fileprivate static func connectionStateFor(_ status: IQDeviceStatus) -> GarminDeviceStore.ConnectionState {
+        switch status {
+        case .connected: return .connected
+        case .notConnected, .notFound: return .notConnected
+        case .invalidDevice, .bluetoothNotReady: return .unavailable
+        @unknown default: return .unknown
+        }
     }
 
     // MARK: - WearableTransport
@@ -129,10 +266,16 @@ final class GarminTransport: NSObject, WearableTransport {
         let selected = deviceStore.selectedDevice
         let connected = deviceStore.lastKnownConnectionState == .connected
         return WearableTransportState(
-            supported: true, // UNVERIFIED: should reflect ConnectIQ.sharedInstance() actually initialising
-            activated: selected != nil,
+            /* supported: the SDK came up and has somewhere to hand off to. */
+            supported: initialized,
+            /* activated: bound to a device and listening. */
+            activated: boundApp != nil,
+            /* paired: the player has chosen a watch. Survives disconnection
+               and a membership lapse. */
             paired: selected != nil,
-            appInstalled: connected, // best-effort proxy until device-status callbacks are wired
+            /* appInstalled: the real getAppStatus answer, not a proxy — a
+               connected watch without Clarity Caddy reports false. */
+            appInstalled: appInstalledOnDevice,
             reachable: connected
         )
     }
@@ -175,15 +318,28 @@ final class GarminTransport: NSObject, WearableTransport {
        selection back through the registered URL scheme — there is no
        in-process device list to enumerate. Until the .xcframework is
        vendored this reports honestly that it cannot look. */
+    /* iOS has no getKnownDevices(): the only way to choose is to hand off to
+       the Garmin Connect app and be called back on our URL scheme. So this
+       never returns a list — it starts the hand-off and tells the caller what
+       is about to happen, and the answer arrives later through handleOpenURL.
+       Android fills a list in place; the settings page branches on
+       `selectionStyle`. */
     func availableDevices() -> [String: Any] {
-        // if ConnectIQ is linked:
-        //   ConnectIQ.sharedInstance().showDeviceSelection()  // hands off to Garmin Connect
-        //   and the chosen devices arrive via the URL-scheme callback, which
-        //   should then call selectDevice(...) below.
+        guard Self.isConnectMobileInstalled else {
+            return [
+                "devices": [[String: Any]](),
+                "sdkLinked": true,
+                "selectionStyle": "handoff",
+                "reason": "The Garmin Connect app is needed to choose a watch. Install it, sign in, then try again."
+            ]
+        }
+        _ = beginDeviceSelection()
         return [
             "devices": [[String: Any]](),
-            "sdkLinked": false,
-            "reason": "The Connect IQ Mobile SDK is not bundled in this build yet."
+            "sdkLinked": true,
+            "selectionStyle": "handoff",
+            "handoff": true,
+            "reason": "Choose your watch in the Garmin Connect app — you will come straight back here."
         ]
     }
 
@@ -193,9 +349,18 @@ final class GarminTransport: NSObject, WearableTransport {
         delegate?.wearableTransportStateDidChange(self)
     }
 
-    func clearSelectedDevice() {
-        deviceStore.clearSelection()
-        delegate?.wearableTransportStateDidChange(self)
+    // MARK: - Receiving
+
+    private func handleIncoming(_ message: [String: Any]) {
+        if let command = message["command"] as? [String: Any] {
+            delegate?.wearableTransport(self, didReceiveCommand: command)
+        }
+        if let inventory = message["watchMapHave"] as? [String: Any] {
+            delegate?.wearableTransport(self, didReceiveMapInventory: inventory)
+        }
+        if let held = message["watchPlayerHave"] as? [String: Any] {
+            delegate?.wearableTransport(self, didReceivePlayerInventory: held)
+        }
     }
 
     /* The richer state the settings page needs, over and above the five
@@ -203,7 +368,11 @@ final class GarminTransport: NSObject, WearableTransport {
     func garminStateDictionary() -> [String: Any] {
         var out = state().asDictionary
         out["entitled"] = queue.sync { entitled }
-        out["sdkLinked"] = false
+        out["sdkLinked"] = true
+        /* iOS chooses a device by leaving the app for Garmin Connect, so the
+           settings page has a waiting state Android does not. */
+        out["awaitingSelection"] = awaitingSelection
+        out["selectionStyle"] = "handoff"
         if let selected = deviceStore.selectedDevice {
             out["selectedDevice"] = [
                 "deviceId": selected.deviceId,
@@ -221,45 +390,50 @@ final class GarminTransport: NSObject, WearableTransport {
         // The paid gate, enforced where it cannot be talked around from the
         // web layer: no entitlement, nothing leaves the phone.
         guard entitled else { completion(false); return }
-        guard deviceStore.selectedDevice != nil else { completion(false); return }
-        // UNVERIFIED: ConnectIQ.sharedInstance().sendMessage(_:toDevice:progress:completion:)
-        // — the real send call. Until the SDK is linked this is a stub that
-        // reports failure honestly rather than pretending to have sent
-        // anything, matching the "native transport never infers success"
-        // rule (Garmin Phase 1 plan step 8) — a stub must not claim
-        // `published: true` it cannot back up.
-        completion(false)
+        guard let app = boundApp else { completion(false); return }
+        /* Messages go to an APP, not a device — the IQApp carries its device.
+           Reported, never inferred: only the SDK's own Success counts as sent
+           (Garmin Phase 1 plan step 8). */
+        ConnectIQ.sharedInstance().sendMessage(message, to: app, progress: nil) { result in
+            if result != .success {
+                NSLog("Garmin send failed: %@", NSStringFromSendMessageResult(result))
+            }
+            completion(result == .success)
+        }
     }
 
-    // MARK: - Receiving (wired once IQAppMessageDelegate is implemented)
+}
 
-    private func handleIncoming(_ message: [String: Any]) {
-        if let command = message["command"] as? [String: Any] {
-            delegate?.wearableTransport(self, didReceiveCommand: command)
-        }
-        if let inventory = message["watchMapHave"] as? [String: Any] {
-            delegate?.wearableTransport(self, didReceiveMapInventory: inventory)
-        }
-        if let held = message["watchPlayerHave"] as? [String: Any] {
-            delegate?.wearableTransport(self, didReceivePlayerInventory: held)
-        }
+// MARK: - SDK delegates
+
+extension GarminTransport: IQDeviceEventDelegate {
+    func deviceStatusChanged(_ device: IQDevice, status: IQDeviceStatus) {
+        deviceStore.recordConnectionState(Self.connectionStateFor(status))
+        /* Whether the watch app is there can only be asked of a connected
+           device, so this is the moment to ask. */
+        if status == .connected, let app = boundApp { refreshAppStatus(app) }
+        else { appInstalledOnDevice = false }
+        delegate?.wearableTransportStateDidChange(self)
     }
 }
 
-/*
- UNVERIFIED conformances, commented out until ConnectIQ types are linked:
+extension GarminTransport: IQAppMessageDelegate {
+    func receivedMessage(_ message: Any!, from app: IQApp!) {
+        /* Unlike Android — where the payload is a List holding the Dictionary —
+           iOS hands back the Monkey C Dictionary itself, as an NSDictionary. */
+        guard let dictionary = message as? [String: Any] else { return }
+        handleIncoming(dictionary)
+    }
+}
 
- extension GarminTransport: IQDeviceEventDelegate {
-     func deviceStatusChanged(_ device: IQDevice, status: IQDeviceStatus) {
-         deviceStore.recordConnectionState(status == .connected ? .connected : .notConnected)
-         delegate?.wearableTransportStateDidChange(self)
-     }
- }
-
- extension GarminTransport: IQAppMessageDelegate {
-     func receivedMessage(_ message: Any, from app: IQApp) {
-         guard let dict = message as? [String: Any] else { return }
-         handleIncoming(dict)
-     }
- }
-*/
+extension GarminTransport: IQUIOverrideDelegate {
+    func needsToInstallConnectMobile() {
+        /* Deliberately NOT sending the player to the App Store from here.
+           This fires from inside an SDK call that may have been triggered by
+           background work, and a store page appearing unbidden is worse than
+           the settings page saying plainly what is missing — which it does,
+           via the `reason` availableDevices() returns. */
+        NSLog("Garmin Connect is not installed; device selection is unavailable")
+        delegate?.wearableTransportStateDidChange(self)
+    }
+}
