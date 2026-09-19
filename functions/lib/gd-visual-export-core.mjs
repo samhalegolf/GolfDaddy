@@ -715,6 +715,12 @@ function unworld(x, y) {
    that grid (fractional captureZoom encodes the downscale), so the client can hand it to the
    existing renderer as a manifest with ONE tile - no new client-side projection code at all.
    Rotation-free compositing also makes it the cheapest render in the family. */
+/* greenSurface: the fitted green, which switches on every piece of green work here - palette
+   sampling, tier paint, contour ink, and the descriptor that tells the phone what was drawn.
+   Only the GREEN FRAME is handed one. The hole frame is rendered without, on purpose: the
+   green design is authored against the green frame's resolution, and the same recipe on a
+   z18 hole frame gave lines 4x thicker and paint that did not match. Keeping all green work
+   on the overlay also makes a missing overlay visible - a bare green means it did not load. */
 export async function renderHoleSurfaceMercator({ pins, captures, underlay = null, terrain, greenSurface, settings, maxDim = 2048, quality = 82 }) {
   const rects = captures.map(item => ({ item, pb: projectedBounds(item.entry.bounds) })).filter(r => r.pb);
   if (!rects.length) throw new Error("no positioned captures for mercator surface");
@@ -873,7 +879,9 @@ export async function renderHoleSurfaceMercator({ pins, captures, underlay = nul
        again. Published beside the palette: the phone's contour layer used to re-stroke the ink
        unconditionally, on top of a frame that had it baked in, and with the ink switched off
        here that layer was the only thing still drawing lines. */
-    greenDrawing: greenDrawingDescriptor(contourCfg, paintCfg),
+    /* Honest about THIS render: a frame rendered without a green surface drew nothing, whatever
+       the recipe says, and must not tell the phone otherwise. */
+    greenDrawing: greenSurface ? greenDrawingDescriptor(contourCfg, paintCfg) : greenDrawingDescriptor(null, null),
     diagnostics: frame.diagnostics
   };
 }

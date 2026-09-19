@@ -1952,10 +1952,13 @@
      descriptor existed gets the old behaviour - it has ink burnt in, so re-stroking it is what
      it always looked like - until its course is re-baked. */
   function greenDrawingOptions(meta) {
-    var gd = meta && meta.greenDrawing;
+    /* The green work lives on the green frame now; the hole frame draws none and says so.
+       Read the frame the popup is actually showing. */
+    var src = meta && meta.greenFrame && meta.greenFrame.greenDrawing ? meta.greenFrame : meta;
+    var gd = src && src.greenDrawing;
     if (!gd) return {};
     var ink = gd.contours !== false && Number(gd.contourOpacity) > 0;
-    var paintHere = !!gd.paint && gd.target === "phone" && meta.greenPalette && meta.greenPalette.lut;
+    var paintHere = !!gd.paint && gd.target === "phone" && src.greenPalette && src.greenPalette.lut;
     if (!ink && !paintHere) return null;
     var options = {
       opacity: ink ? Number(gd.contourOpacity) : 0,
@@ -1963,7 +1966,7 @@
     };
     if (ink && Number.isFinite(Number(gd.arrowMinSlopePercent))) options.arrowMinSlopePercent = Number(gd.arrowMinSlopePercent);
     if (paintHere) {
-      options.palette = meta.greenPalette;
+      options.palette = src.greenPalette;
       if (Number.isFinite(Number(gd.spread))) options.bandSpread = Number(gd.spread);
       if (Number.isFinite(Number(gd.strength))) options.bandOpacity = Number(gd.strength) * 0.85;
       if (Number.isFinite(Number(gd.maxExtrapLuma))) options.bandMaxExtrapLuma = Number(gd.maxExtrapLuma);

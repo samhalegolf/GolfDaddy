@@ -204,9 +204,9 @@
     <canvas id="surfaceMesh"></canvas>
     <!-- The green at its own resolution: the export's green frame (the green alone, shot at
          the imagery's best zoom), placed over the hole frame by the same solved camera so
-         the two pictures agree on where the ground is. Shown only in green focus, where the
-         hole frame is being stretched past its pixels; above the mesh because the mesh
-         textures the hole frame, and in that stage the mesh applies no relief lift. -->
+         the two pictures agree on where the ground is. Above the mesh because the mesh
+         textures the z18 hole frame; in the tilted lock stage the mesh's relief lift can put
+         it a few px off this flat overlay at the green. -->
     <img id="surfaceGreen" alt="">
     <svg id="bubbleSvg" class="hiddenState"></svg>
     <!-- The club the bubble is sized from, sitting at the head of the aim line.

@@ -83,8 +83,10 @@ const RELIEF_STAMP = "relief2-perhole-x" + RELIEF_DEFAULTS.exaggeration + "-az" 
    resuming a frame that still has the lines burnt in. */
 /* greenframe3: the green surround left the hole frame (corridor only, tightly framed) and is
    shot at the source's best zoom. greenframe4: the course backdrop underlays the hole frame so
-   the uncovered corners of the north-up box are low-res ground, not black. */
-const GREEN_FRAME_STAMP = "greenframe4";
+   the uncovered corners of the north-up box are low-res ground, not black. greenframe5: the
+   hole frame carries no green work at all (no ink, no paint, no palette); the green frame
+   carries all of it. */
+const GREEN_FRAME_STAMP = "greenframe5";
 /* Plan ids hash each capture's PADDED BOUNDS, not the grid captureGrid derives from them - so
    a change to how a capture is framed (lens, bleed, zoom policy) leaves every id, and so the
    planKey, exactly as it was, and a re-snapshot would happily reuse stored masters shot under
@@ -1111,7 +1113,8 @@ async function runExportJob(job, deadlineAt) {
          (originPx + captureZoom + one image). The runtime does the play-axis framing, same
          as it does for locally captured surfaces. */
       const underlay = backdropEntry ? { entry: backdropEntry, buffer: await bufferFor(backdropEntry) } : null;
-      const frame = await renderHoleSurfaceMercator({ pins, captures, underlay, terrain, greenSurface, settings, maxDim: EXPORT_RENDITION_PX });
+      /* No greenSurface: the hole frame carries no green work at all. See renderHoleSurfaceMercator. */
+      const frame = await renderHoleSurfaceMercator({ pins, captures, underlay, terrain, greenSurface: null, settings, maxDim: EXPORT_RENDITION_PX });
       if (frame.diagnostics) console.log(normaliseLogLine("h" + holeNumber, frame.diagnostics));
       await storageUpload(path, frame.jpeg, "image/jpeg");
       width = frame.width; height = frame.height; bytes = frame.jpeg.length;
@@ -1167,7 +1170,10 @@ async function runExportJob(job, deadlineAt) {
             path: greenPath, width: g.width, height: g.height, bytes: g.jpeg.length,
             bounds: g.bounds, captureZoom: g.captureZoom, originPx: g.originPx,
             outputDimensions: { width: g.width, height: g.height },
-            greenPalette: g.greenPalette || null
+            greenPalette: g.greenPalette || null,
+            /* What the green frame drew, for the phone's popup layer - the hole frame's own
+               descriptor now always says "nothing", because it draws nothing on the green. */
+            greenDrawing: g.greenDrawing || null
           };
           playSurface.greenFrame = greenFrame;
           console.log("[visual-worker] green frame h" + holeNumber + " " + g.width + "x" + g.height +

@@ -180,9 +180,16 @@ body.surface-published.tilt-lock #surfaceStage {
 body.surface-published.surface-mesh #surfaceMesh { display: block; }
 body.surface-published #surfaceImage { display: block; }
 /* The green frame rides the same camera as the hole frame (painter writes its matrix from the
-   solved one) and only shows in green focus, where its extra pixels are what is on screen. */
-#surfaceGreen { position: absolute; top: 0; left: 0; display: none; pointer-events: none; transform-origin: 0 0; }
-body.surface-published[data-frame-stage="zoom"] #surfaceGreen[src] { display: block; }
+   solved one) and shows in every stage: it is the green at native resolution, composited over
+   the z18 hole frame by the GPU - the only way two resolutions can share one picture. The
+   radial mask feathers its edge into the hole frame so there is no hard seam; the green sits
+   in the middle of the square with ~23m of margin, so the fade lives in the margin. */
+#surfaceGreen {
+  position: absolute; top: 0; left: 0; display: none; pointer-events: none; transform-origin: 0 0;
+  -webkit-mask-image: radial-gradient(circle closest-side, #000 68%, transparent 100%);
+  mask-image: radial-gradient(circle closest-side, #000 68%, transparent 100%);
+}
+body.surface-published #surfaceGreen[src] { display: block; }
 
 /* The player's projected position, on whichever presentation is up.
    Positioned by play.js in viewport pixels; hidden whenever there is no fix
