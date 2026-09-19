@@ -90,7 +90,8 @@
     "test:canonical-users": "node dev/canonical-users.test.js",
     "test:account-email": "node dev/account-email-change.test.js",
     "test:effective-player-play": "node dev/effective-player-play-context.test.js",
-    "test:demo": "node dev/demo-session-practice-isolation.test.js && node dev/demo-session-gps-course-data-isolation.test.js && node dev/demo-session-flow-shape.test.js"
+    "test:demo": "node dev/demo-session-practice-isolation.test.js && node dev/demo-session-gps-course-data-isolation.test.js && node dev/demo-session-flow-shape.test.js",
+    "test:garmin": "node dev/garmin-settings-surface.test.js"
   },
   "codex": {
     "entry": "index.html",

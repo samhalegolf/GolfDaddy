@@ -168,6 +168,52 @@ public class NativeRoundBridge extends Plugin implements GarminTransport.Listene
         call.resolve(stateAsJSObject());
     }
 
+    // ------------------------------------ Garmin pairing (Settings > Garmin)
+
+    @PluginMethod
+    public void garminState(PluginCall call) {
+        call.resolve(JsonBridge.toJSObject(transport.garminState()));
+    }
+
+    /** Resolves with { devices: [...], sdkLinked, reason }. An empty list with
+     *  sdkLinked false means "we cannot look", which the settings page words
+     *  differently from "we looked and found none". */
+    @PluginMethod
+    public void garminDevices(PluginCall call) {
+        call.resolve(JsonBridge.toJSObject(transport.availableDevices()));
+    }
+
+    @PluginMethod
+    public void selectGarminDevice(PluginCall call) {
+        String deviceId = call.getString("deviceId");
+        if (deviceId == null || deviceId.trim().isEmpty()) {
+            call.reject("A deviceId is required");
+            return;
+        }
+        transport.selectDevice(
+            deviceId,
+            call.getString("deviceName", ""),
+            call.getString("model", "")
+        );
+        call.resolve(JsonBridge.toJSObject(transport.garminState()));
+    }
+
+    @PluginMethod
+    public void clearGarminDevice(PluginCall call) {
+        transport.clearSelectedDevice();
+        call.resolve(JsonBridge.toJSObject(transport.garminState()));
+    }
+
+    /* The paid gate. JavaScript owns the membership question
+       (ClarityPayments.hasActiveAccess) and pushes the answer down; the
+       transport refuses to send while it is false. Defaults to false, so
+       nothing reaches a Garmin until something affirmatively says it may. */
+    @PluginMethod
+    public void setGarminEnabled(PluginCall call) {
+        transport.setEntitled(Boolean.TRUE.equals(call.getBoolean("enabled", Boolean.FALSE)));
+        call.resolve();
+    }
+
     /* This is the only authoritative acknowledgement path. Native transport
        does not infer success: JavaScript returns the result after Marshal
        has accepted or rejected the command. */

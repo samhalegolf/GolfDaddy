@@ -137,9 +137,90 @@ final class GarminTransport: NSObject, WearableTransport {
         )
     }
 
+    // MARK: - Entitlement
+
+    /* Garmin is a paid feature. This is the gate that actually enforces it:
+       `send()` refuses while it is false, so a membership that lapses stops
+       the watch receiving rather than merely greying out a settings row.
+
+       It defaults to FALSE and is only ever raised by JavaScript
+       (NativeRoundBridge.setGarminEnabled, driven by
+       ClarityPayments.hasActiveAccess). Failing closed is deliberate: if the
+       payments module never loads we would rather a paying player reports a
+       dead Garmin than every non-paying player quietly gets the feature.
+       Apple Watch is untouched by this — it has its own rules. */
+    private var entitled = false
+
+    func setEntitled(_ value: Bool) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            guard self.entitled != value else { return }
+            self.entitled = value
+            /* A lapse does not clear the chosen device. The player keeps their
+               pairing and it starts working again the moment access returns —
+               re-pairing after every billing hiccup would be its own bug. */
+            self.delegate?.wearableTransportStateDidChange(self)
+        }
+    }
+
+    // MARK: - Device selection (the Settings > Garmin Watch page)
+
+    /* What the settings page lists. Returns the devices plus whether the SDK
+       is actually linked, because "no devices" and "we cannot look" are
+       different answers and the page says so in different words.
+
+       UNVERIFIED / NOT YET POSSIBLE: the real implementation asks
+       ConnectIQ.sharedInstance() for known devices, which on iOS means
+       handing off to the Garmin Connect Mobile app and receiving the
+       selection back through the registered URL scheme — there is no
+       in-process device list to enumerate. Until the .xcframework is
+       vendored this reports honestly that it cannot look. */
+    func availableDevices() -> [String: Any] {
+        // if ConnectIQ is linked:
+        //   ConnectIQ.sharedInstance().showDeviceSelection()  // hands off to Garmin Connect
+        //   and the chosen devices arrive via the URL-scheme callback, which
+        //   should then call selectDevice(...) below.
+        return [
+            "devices": [[String: Any]](),
+            "sdkLinked": false,
+            "reason": "The Connect IQ Mobile SDK is not bundled in this build yet."
+        ]
+    }
+
+    func selectDevice(id: String, name: String, model: String) {
+        deviceStore.select(deviceId: id, deviceName: name, model: model)
+        activate()
+        delegate?.wearableTransportStateDidChange(self)
+    }
+
+    func clearSelectedDevice() {
+        deviceStore.clearSelection()
+        delegate?.wearableTransportStateDidChange(self)
+    }
+
+    /* The richer state the settings page needs, over and above the five
+       booleans every transport reports through WearableTransportState. */
+    func garminStateDictionary() -> [String: Any] {
+        var out = state().asDictionary
+        out["entitled"] = queue.sync { entitled }
+        out["sdkLinked"] = false
+        if let selected = deviceStore.selectedDevice {
+            out["selectedDevice"] = [
+                "deviceId": selected.deviceId,
+                "deviceName": selected.deviceName,
+                "model": selected.model
+            ]
+        }
+        out["connectionState"] = deviceStore.lastKnownConnectionState.rawValue
+        return out
+    }
+
     // MARK: - Sending
 
     private func send(_ message: [String: Any], completion: @escaping (Bool) -> Void) {
+        // The paid gate, enforced where it cannot be talked around from the
+        // web layer: no entitlement, nothing leaves the phone.
+        guard entitled else { completion(false); return }
         guard deviceStore.selectedDevice != nil else { completion(false); return }
         // UNVERIFIED: ConnectIQ.sharedInstance().sendMessage(_:toDevice:progress:completion:)
         // — the real send call. Until the SDK is linked this is a stub that

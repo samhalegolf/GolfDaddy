@@ -31,10 +31,20 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WearableCoord
         CAPPluginMethod(name: "watchMapInventory", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "publishWatchPlayer", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "watchPlayerInventory", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "watchState", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "watchState", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "garminState", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "garminDevices", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "selectGarminDevice", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "clearGarminDevice", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setGarminEnabled", returnType: CAPPluginReturnPromise)
     ]
 
     private let coordinator = WearableCoordinator()
+    /* Held separately from the coordinator because the Settings > Garmin
+       Watch page talks to this one transport directly — device selection and
+       the paid gate are Garmin-specific and have no Apple Watch counterpart,
+       so they do not belong on WearableTransport. */
+    private lazy var garmin = GarminTransport(connectIQAppId: Self.garminConnectIQAppId)
     private let queue = DispatchQueue(label: "com.claritygolf.caddy.native-round-bridge")
     /* The last inventory each side reported. Only a hint: JavaScript uses it
        to skip re-sending a package the wrist already has, and sending
@@ -81,7 +91,7 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WearableCoord
         // it now, rather than waiting for the SDK, is what makes
         // WearableCoordinator's fan-out (see its own header comment) a real
         // two-transport path instead of untested code.
-        coordinator.register(GarminTransport(connectIQAppId: Self.garminConnectIQAppId))
+        coordinator.register(garmin)
         coordinator.activateAll()
     }
 
@@ -173,6 +183,46 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WearableCoord
 
     @objc public func watchState(_ call: CAPPluginCall) {
         call.resolve(coordinator.state())
+    }
+
+    // MARK: - Garmin device pairing (Settings > Garmin Watch)
+
+    @objc public func garminState(_ call: CAPPluginCall) {
+        call.resolve(garmin.garminStateDictionary())
+    }
+
+    /* Resolves with { devices: [...], sdkLinked: Bool, reason: String? }.
+       An empty list with sdkLinked false means "we cannot look", which the
+       settings page words differently from "we looked and found none". */
+    @objc public func garminDevices(_ call: CAPPluginCall) {
+        call.resolve(garmin.availableDevices())
+    }
+
+    @objc public func selectGarminDevice(_ call: CAPPluginCall) {
+        guard let deviceId = call.getString("deviceId"), !deviceId.isEmpty else {
+            call.reject("A deviceId is required")
+            return
+        }
+        garmin.selectDevice(
+            id: deviceId,
+            name: call.getString("deviceName") ?? "",
+            model: call.getString("model") ?? ""
+        )
+        call.resolve(garmin.garminStateDictionary())
+    }
+
+    @objc public func clearGarminDevice(_ call: CAPPluginCall) {
+        garmin.clearSelectedDevice()
+        call.resolve(garmin.garminStateDictionary())
+    }
+
+    /* The paid gate. JavaScript owns the membership question
+       (ClarityPayments.hasActiveAccess) and pushes the answer down; the
+       transport refuses to send while it is false. Defaults to false, so
+       nothing reaches a Garmin until something affirmatively says it may. */
+    @objc public func setGarminEnabled(_ call: CAPPluginCall) {
+        garmin.setEntitled(call.getBool("enabled") ?? false)
+        call.resolve()
     }
 
     /* This is the only authoritative acknowledgement path. Native transport
