@@ -48,7 +48,16 @@ public class NativeRoundBridge extends Plugin implements GarminTransport.Listene
     // once that placeholder is replaced — this is what scopes a message to
     // Caddy specifically among any other Connect IQ apps a paired device
     // might have installed.
-    private static final String CONNECT_IQ_APP_ID = "GARMIN-APP-ID-PLACEHOLDER";
+    /** The same app as garmin/manifest.xml's {@code <iq:application id="...">}.
+     *  Undashed 32-hex, exactly as the manifest spells it — the Connect IQ
+     *  SDK for Android takes the application id as a String, not a
+     *  java.util.UUID, so no reformatting is wanted here. (iOS deliberately
+     *  holds the DASHED form of these same 128 bits, because its
+     *  UUID(uuidString:) rejects the undashed one — see
+     *  NativeRoundBridge.swift. Do not "fix" the two to match by spelling.)
+     *  UNVERIFIED with the rest of this file's SDK assumptions: confirm the
+     *  expected format against the real SDK before trusting it. */
+    private static final String CONNECT_IQ_APP_ID = "fac5991c01f348ddb7577553071ddd0f";
 
     private GarminTransport transport;
 

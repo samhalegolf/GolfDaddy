@@ -58,9 +58,11 @@ final class GarminTransport: NSObject, WearableTransport {
     private let queue = DispatchQueue(label: "com.claritygolf.caddy.garmin-transport")
 
     // The Connect IQ app identifier — the same UUID as garmin/manifest.xml's
-    // <iq:application id="..."> once that placeholder is replaced. Both
-    // must always agree: this is what scopes a message to Caddy specifically
-    // among any other Connect IQ apps the paired device might have.
+    // <iq:application id="...">, supplied DASHED by NativeRoundBridge because
+    // UUID(uuidString:) below rejects the undashed form the manifest uses (see
+    // that constant's comment). Both must always agree: this is what scopes a
+    // message to Caddy specifically among any other Connect IQ apps the paired
+    // device might have.
     private let connectIQAppId: String
 
     private var latestScene: [String: Any]?

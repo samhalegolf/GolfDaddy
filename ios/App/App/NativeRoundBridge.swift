@@ -60,9 +60,15 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WearableCoord
         return value
     }
 
-    // Must always equal garmin/manifest.xml's <iq:application id="...">
-    // once that placeholder is replaced — see GarminTransport.swift.
-    private static let garminConnectIQAppId = "GARMIN-APP-ID-PLACEHOLDER"
+    // The same app as garmin/manifest.xml's <iq:application id="...">, which
+    // is the undashed 32-hex form Connect IQ manifests use:
+    //     fac5991c01f348ddb7577553071ddd0f
+    // Written DASHED here on purpose. GarminTransport feeds this to
+    // UUID(uuidString:), which returns nil for the undashed form — the app
+    // would then scope every message to a nil IQApp and deliver nothing,
+    // with no error to show for it. Same 128 bits, different spelling.
+    // If the manifest id ever changes, change both.
+    private static let garminConnectIQAppId = "fac5991c-01f3-48dd-b757-7553071ddd0f"
 
     public override func load() {
         coordinator.delegate = self
