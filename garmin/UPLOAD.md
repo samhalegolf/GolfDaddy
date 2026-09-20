@@ -164,12 +164,22 @@ DevTools `Runtime.evaluate` of `Capacitor.Plugins.NativeRoundBridge.garminDevice
 > from. Untethered, the same transmits are silent no-ops, so the watch app
 > itself is fine.
 >
+> Also tried and also crashing, identically: simulator 8.4.1, and the phone
+> built against companion SDK 2.2.0 instead of 2.4.0. So it is not a recent
+> simulator regression and not the phone SDK's wire format. The common
+> factor left is this machine (macOS 26.6.2, M4).
+>
 > Consequence: commands from the watch (TAKE_OVER, LOCK, AIM_AT, the
 > inventory reports) and the phone's `onMessageReceived` path in
-> `GarminTransport.java` can only be verified on a real watch. Untried
-> workarounds: the 8.x SDK line (install from the SDK Manager and point
-> `CIQ_SDK=` at it), and companion SDK 2.2.0 on the phone, which
-> `GarminTransport.java` does not compile against without edits.
+> `GarminTransport.java` can only be verified on a real watch, or on a
+> different Mac / an older macOS. Note the phone-side knock-on: the watch's
+> reply kills the simulator, the phone sees the watch drop, and the
+> "Play on Watch" card hides — so the card never shows in this setup even
+> though it renders fine (proved by forcing
+> `ClarityApp.caddyWatch.setWatchState({paired:true, appInstalled:true, reachable:true})`
+> in the WebView). Also, once the watch is gone mid-round the phone retries
+> the Scene once a second and logs `Garmin send failed: FAILURE_UNKNOWN`
+> each time; harmless, but worth rate-limiting.
 
 ---
 
