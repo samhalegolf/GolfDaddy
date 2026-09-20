@@ -55,12 +55,9 @@ class GarminMapStore {
         if (manifest == null) { return; }
         var hole = manifest.hole(holeNumber);
         if (hole == null) { return; }
-        downloader.requestHole(hole);
-    }
-
-    function readyHoleCount(courseKey) {
-        if (manifest == null || courseKey == null || !manifest.courseKey.equals(courseKey)) { return 0; }
-        return readyHoles.keys().size();
+        // The package identity travels with the request so the response can
+        // be checked against whatever manifest is current when it lands.
+        downloader.requestHole(hole, manifest.courseKey, manifest.version);
     }
 
     // What the phone needs in order to know Garmin already has a hole and
@@ -96,7 +93,9 @@ class GarminMapStore {
     }
 
     // Callback from GarminMapDownloader once a hole's image has actually
-    // decoded. Marks it ready, persists the ready-set, and keeps at most
+    // decoded, for THIS manifest — the downloader has already dropped any
+    // response whose package identity no longer matches `manifest`. Marks
+    // the hole ready, persists the ready-set, and keeps at most
     // RESIDENT_BITMAP_LIMIT decoded bitmaps in memory.
     function onImageDecoded(holeNumber, bitmap) {
         readyHoles[holeNumber] = true;

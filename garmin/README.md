@@ -62,7 +62,7 @@ garmin/
     UI/
       InputRouter.mc                 Semantic action vocabulary (plan step 12)
       NumbersView.mc                  Phase 1's numbers-first playing face
-      StatusView.mc                   noRound/receiving/ready/taking faces
+      StatusView.mc                   noRound/ready/taking faces (no `receiving` — see GarminSessionManager)
     Device/
       DeviceCapabilities.mc           Screen shape/size/touch/memory-tier
       LayoutProfile.mc                Small layout derivations
@@ -155,10 +155,13 @@ communications/**image request** APIs."
    `makeImageRequest(url, parameters, options, responseCallback)`: four
    arguments, **no request-context argument**, callback
    `(responseCode as Number, data as BitmapResource|BitmapReference|Null)`.
-   So the hole number genuinely cannot be threaded through the request, and
-   `GarminMapDownloader.onImageResponse`'s "whichever hole is currently
-   awaited" is the answer rather than a fallback — safe under Phase 1's
-   one-bitmap-resident discipline. What remains unconfirmed is only its
+   So the hole number genuinely cannot be threaded through the request.
+   `GarminMapDownloader` therefore allows exactly one request at a time and
+   records the hole, course key and package version it was made for; a
+   response is credited to that record only while the store still holds the
+   same package. (The earlier "whichever hole is currently awaited" over a
+   set of in-flight holes could credit hole 3's picture to hole 4 after a
+   hole change mid-fetch.) What remains unconfirmed is only the API's
    cross-relaunch caching behaviour.
 6. **`Application.Storage` capacity** — total and per-key limits vary by
    device and were not verified against the specific devices in the Phase 1

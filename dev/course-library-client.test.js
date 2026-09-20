@@ -105,7 +105,9 @@ test("no manifest means no conclusion - never assume current", () => {
 });
 
 test("the expensive full pull is skipped only when nothing changed", () => {
-  const idx = src.indexOf("async function syncPublishedCourseMaps(");
+  /* syncPublishedCourseMaps is now a thin in-flight dedupe wrapper; the
+     manifest check, the skip and the full pull live in runPublishedCourseMapSync. */
+  const idx = src.indexOf("async function runPublishedCourseMapSync(");
   assert.notStrictEqual(idx, -1);
   const fn = src.slice(idx, idx + 1800);
   assert.ok(/fetchCourseLibraryManifest\(\)/.test(fn), "the manifest must be consulted first");

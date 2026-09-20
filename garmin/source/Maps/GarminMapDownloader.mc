@@ -38,19 +38,30 @@ using Toybox.WatchUi;
 // matters, because makeImageRequest cannot send one -- and it serves
 // `immutable, max-age=31536000` over a versioned vN path. Nothing is signed
 // and nothing expires, so a URL is good for as long as the package is.
+//
+// ONE REQUEST AT A TIME, BY CONSTRUCTION. makeImageRequest's callback
+// carries no context — just a response code and a bitmap — so the only way
+// to know which hole a bitmap belongs to is to have asked for exactly one.
+// `awaiting` is that one: the hole number plus the course key and package
+// version it was requested under. A second request while one is pending is
+// refused (the map face asks again on its next redraw, so nothing is lost),
+// and a response is dropped unless the store still holds the same package.
+// Before this, `inFlight` was a set: change hole mid-fetch and two were
+// pending, the response was credited to whichever key came first, and hole
+// 3's picture was stored — and persisted as ready — under hole 4.
 class GarminMapDownloader {
     var store;       // GarminMapStore, set by the store itself on construction
-    var inFlight;     // Dictionary used as a Set of hole numbers currently fetching
+    var awaiting;     // Dictionary { "holeNumber", "courseKey", "version" } or null
 
     function initialize(store) {
         self.store = store;
-        inFlight = {};
+        awaiting = null;
     }
 
-    function requestHole(hole) {
-        if (hole == null || hole.url == null) { return; }
-        if (inFlight.hasKey(hole.holeNumber)) { return; }
-        inFlight[hole.holeNumber] = true;
+    function requestHole(hole, courseKey, version) {
+        if (hole == null || hole.url == null || courseKey == null || version == null) { return; }
+        if (awaiting != null) { return; }
+        awaiting = { "holeNumber" => hole.holeNumber, "courseKey" => courseKey, "version" => version };
 
         var options = {
             :maxWidth => hole.width.toNumber(),
@@ -62,28 +73,27 @@ class GarminMapDownloader {
             Communications.makeImageRequest(
                 hole.url, null, options, method(:onImageResponse));
         } catch (e) {
-            inFlight.remove(hole.holeNumber);
+            awaiting = null;
         }
     }
 
     // Signature matches the documented image-request callback exactly:
     // (responseCode as Number, data as BitmapResource/BitmapReference/Null).
-    // There is no context argument on this API, so the hole number cannot be
-    // threaded through the request — Phase 1 only ever has one hole in
-    // flight at a time per GarminMapStore's decoded-bitmap discipline, so
-    // resolving against the awaited hole is unambiguous in practice.
+    // The bitmap is credited to `awaiting`, and only if the store's manifest
+    // is still the package it was requested from: a course or version change
+    // while the fetch was out means this picture belongs to nothing current.
     function onImageResponse(
             responseCode as Lang.Number,
             data as WatchUi.BitmapResource or Graphics.BitmapReference or Null) as Void {
-        var holeNumber = currentlyAwaitedHole();
-        if (holeNumber != null) { inFlight.remove(holeNumber); }
-        if (responseCode == 200 && data != null && holeNumber != null) {
-            store.onImageDecoded(holeNumber, data);
+        var requested = awaiting;
+        awaiting = null;
+        if (requested == null || responseCode != 200 || data == null) { return; }
+        var manifest = store.manifest;
+        if (manifest == null
+                || !manifest.courseKey.equals(requested["courseKey"])
+                || manifest.version != requested["version"]) {
+            return;
         }
-    }
-
-    function currentlyAwaitedHole() {
-        var keys = inFlight.keys();
-        return keys.size() > 0 ? keys[0] : null;
+        store.onImageDecoded(requested["holeNumber"], data);
     }
 }

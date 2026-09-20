@@ -20,10 +20,15 @@ using Toybox.Time;
 // *inside* the Watch app).
 class GarminSessionManager {
 
-    // Face mirrors WatchSessionManager.Face: noRound, receiving, ready,
-    // taking, playing.
+    // Face mirrors WatchSessionManager.Face: noRound, ready, taking, playing.
+    // Apple's `receiving` face has no Garmin equivalent and is deliberately
+    // absent: the phone pushes every hole image to an Apple Watch up front,
+    // so "Receiving course 7/18" counts real progress there. Garmin pulls
+    // each hole by URL the first time the map face asks for it
+    // (GarminMapStore.bitmapFor), so nothing downloads while a status face
+    // is showing — a Garmin "receiving" face could only ever sit at 0/18,
+    // and it did, with SELECT (TAKE_OVER) unreachable behind it.
     static var FACE_NO_ROUND = "noRound";
-    static var FACE_RECEIVING = "receiving";
     static var FACE_READY = "ready";
     static var FACE_TAKING = "taking";
     static var FACE_PLAYING = "playing";
@@ -69,19 +74,10 @@ class GarminSessionManager {
 
     function isDriving() { return scene != null && scene.isDriving(); }
 
-    function mapsExpectedCount() {
-        // Phase 1 does not yet carry a maps.total on the Scene the way the
-        // Apple contract does (Surface.watch.maps) — Garmin reads it the
-        // same way once GarminScene exposes it; until then this defers to
-        // the map store's own manifest hole count when a manifest exists.
-        var manifest = mapStore.manifest;
-        return (manifest != null) ? manifest.holes.size() : 0;
-    }
-
-    function mapsHeldCount() {
-        return mapStore.readyHoleCount(scene != null ? scene.courseKey() : null);
-    }
-
+    // A round that is not being driven from this wrist is READY to take
+    // over the moment its Scene arrives. Maps never gate this: the map face
+    // fetches its own hole on demand and says "Loading map..." until it has
+    // it, and the numbers face needs no map at all.
     function face() {
         if (scene == null || !scene.hasRound()) { return FACE_NO_ROUND; }
         if (scene.isDriving()) { return FACE_PLAYING; }
@@ -89,8 +85,6 @@ class GarminSessionManager {
                 || outbox.pendingOfType(GarminCommandKind.TAKE_OVER) != null) {
             return FACE_TAKING;
         }
-        var expected = mapsExpectedCount();
-        if (expected > 0 && mapsHeldCount() < expected) { return FACE_RECEIVING; }
         return FACE_READY;
     }
 
