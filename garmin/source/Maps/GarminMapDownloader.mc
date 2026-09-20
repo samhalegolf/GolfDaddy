@@ -1,6 +1,7 @@
 using Toybox.Lang;
 using Toybox.Communications;
 using Toybox.Graphics;
+using Toybox.System;
 using Toybox.WatchUi;
 
 // Fetches one hole's raster and hands the decoded bitmap to GarminMapStore.
@@ -87,6 +88,12 @@ class GarminMapDownloader {
             data as WatchUi.BitmapResource or Graphics.BitmapReference or Null) as Void {
         var requested = awaiting;
         awaiting = null;
+        // Simulator-only build: the only window into why a hole never
+        // draws. Compiled out of every live build.
+        if (GarminTransmitPolicy.muted()) {
+            System.println("image response: code " + responseCode + " data=" + data
+                + (requested != null ? " hole " + requested["holeNumber"] : " (nothing requested)"));
+        }
         if (requested == null || responseCode != 200 || data == null) { return; }
         var manifest = store.manifest;
         if (manifest == null
