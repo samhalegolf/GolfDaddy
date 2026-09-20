@@ -1,3 +1,4 @@
+using Toybox.System;
 using Toybox.Lang;
 using Toybox.Application.Storage;
 using Toybox.Graphics;
@@ -79,6 +80,13 @@ class GarminMapStore {
     // ignores an older package for a course already held at a newer version.
     function receiveManifest(raw) {
         var incoming = GarminMapManifest.fromDict(raw);
+        // Simulator-only build trace; compiled out of every live build.
+        if (GarminTransmitPolicy.muted()) {
+            System.println("manifest in: " + (incoming == null ? "unparseable"
+                : ("v" + incoming.version + " holes=" + incoming.holes.size() + " usable=" + incoming.isUsable()
+                    + " url0=" + (incoming.holes.size() > 0 ? incoming.holes[0].url : null)
+                    + " current=" + (manifest == null ? "none" : "v" + manifest.version))));
+        }
         if (incoming == null || !incoming.isUsable()) { return; }
         if (manifest != null && manifest.courseKey.equals(incoming.courseKey) && manifest.version > incoming.version) { return; }
         if (manifest == null || !manifest.courseKey.equals(incoming.courseKey) || manifest.version != incoming.version) {

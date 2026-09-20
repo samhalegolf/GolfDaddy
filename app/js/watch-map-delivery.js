@@ -193,7 +193,13 @@
          "Invalid asset path". A bare slash is legal in a query string and
          survives the re-encode untouched. */
       var encodedPath = encodeURIComponent(String(path || "")).replace(/%2F/gi, "/");
-      var url = apiUrl(ASSET_ENDPOINT + "?path=" + encodedPath);
+      /* JPEG, not the stored WebP: Garmin's image service (which is what
+         makeImageRequest really talks to) answers 400 to WebP and 200 to
+         the same picture as PNG or JPEG - verified 2026-09-21 in the
+         simulator. The endpoint re-encodes on the way out
+         (functions/course-watch-map-assets.mjs); the stored package is
+         untouched, and the Apple Watch keeps receiving bytes as before. */
+      var url = apiUrl(ASSET_ENDPOINT + "?path=" + encodedPath + "&format=jpeg");
       return /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : null;
     }
     var now = options.now || function () { return Date.now(); };

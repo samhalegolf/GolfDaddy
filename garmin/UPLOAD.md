@@ -221,6 +221,31 @@ Two more things learned this way (2026-09-20), both fixed in
   showing stale revisions after a phone rebuild, quit and relaunch the
   simulator (`connectiq`), then `monkeydo` again.
 
+And three more about hole maps on the simulated watch (2026-09-21):
+
+- **The manifest must be small.** Millbrook's 18-hole manifest was 27 KB
+  with each hole's full `reference` block and the link refused it outright
+  (`FAILURE_MESSAGE_TOO_LARGE`), so the wrist never saw a hole. The Android
+  transport now sends only the green coordinate out of `reference`, which
+  is all `GarminMapManifest.mc` reads; the result is under 10 KB.
+- **Image fetches need a Garmin login in the simulator.** `makeImageRequest`
+  goes through Garmin's image service even in the simulator, and the first
+  request raises a Garmin Connect sign-in prompt (plus a "Reading password
+  ... failed" error if the keychain entry is missing). Until you sign in,
+  the map face sits on "Loading map..." and the simulator's menus are
+  disabled behind the dialog.
+- **WebP is refused, JPEG works.** The same URL came back 400 as the stored
+  WebP and 200 as PNG. The Garmin URL therefore asks the asset endpoint for
+  `format=jpeg` (`functions/course-watch-map-assets.mjs` re-encodes with
+  sharp; ~29 KB per hole against 15 KB of WebP), and the phone builds the
+  URL with literal slashes because Connect IQ re-encodes it. The muted
+  build prints `image request` / `image response: code N` lines for each
+  fetch, and `manifest in: ...` for each manifest it adopts.
+
+Every simulator relaunch needs **adb Connection > Start** again, and so
+does every phone-app restart (the simulator's link dies with the phone's
+socket even though `lsof` may still show it).
+
 ---
 
 ## 5. Before you package — the things that are still placeholders

@@ -347,11 +347,12 @@ function fakeEnvironment(report, options) {
     check("each manifest hole carries an absolute, fetchable image URL for Garmin", () => {
       const holes = calls.manifests[0].manifest.holes;
       /* Slashes literal, not %2F: Connect IQ re-encodes the URL it fetches,
-         and a %2F reached the endpoint as %252F and was refused (2026-09-21). */
+         and a %2F reached the endpoint as %252F and was refused (2026-09-21).
+         And JPEG, because Garmin's image service refuses the stored WebP. */
       assert.strictEqual(
         holes[0].url,
-        "https://caddy.claritygolf.app/api/course-watch-map-assets?path=millbrook-remarkables-18/v1788278423353/h1.webp",
-        "the URL must be the public asset proxy, absolute, with the path's slashes left literal"
+        "https://caddy.claritygolf.app/api/course-watch-map-assets?path=millbrook-remarkables-18/v1788278423353/h1.webp&format=jpeg",
+        "the URL must be the public asset proxy, absolute, slashes literal, asking for JPEG"
       );
       assert.ok(holes.every(h => /^https:\/\//.test(h.url)), "every hole needs one, not just the first");
       assert.ok(!("path" in holes[0]), "the raw storage path still must not cross to the wrist");
