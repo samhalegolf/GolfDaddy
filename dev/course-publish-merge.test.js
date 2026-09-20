@@ -27,7 +27,10 @@ function loadMerge() {
     .replace(/export default /g, "")
     .replace(/^export /gm, "");
   // eslint-disable-next-line no-new-func
-  return new Function(body + "\nreturn mergeGeneratedCourse;")();
+  /* course-maps.mjs builds its Supabase fetch at module top level from an
+     import stripped above; a stub keeps the eval loadable and is never called. */
+  const stubs = "const createSupabaseFetch = function () { return null; };\n";
+  return new Function(stubs + body + "\nreturn mergeGeneratedCourse;")();
 }
 
 const merge = loadMerge();
