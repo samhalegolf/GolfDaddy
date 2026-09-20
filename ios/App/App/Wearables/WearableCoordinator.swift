@@ -80,13 +80,21 @@ final class WearableCoordinator: WearableTransportDelegate {
     func state() -> [String: Any] {
         guard !transports.isEmpty else { return WearableTransportState.unsupported.asDictionary }
         let states = transports.map { $0.state() }
-        return WearableTransportState(
+        var merged = WearableTransportState(
             supported: states.contains { $0.supported },
             activated: states.contains { $0.activated },
             paired: states.contains { $0.paired },
             appInstalled: states.contains { $0.appInstalled },
             reachable: states.contains { $0.reachable }
         ).asDictionary
+        /* Which make of watch the phone's handover card should draw. The
+           paired transport wins; with nothing paired the first registered
+           one stands in, so the answer is never absent on a platform that
+           has a wearable at all. Android reports "garmin" unconditionally
+           (NativeRoundBridge.java). */
+        let vendor = transports.first { $0.state().paired } ?? transports.first
+        merged["vendor"] = vendor?.platform.rawValue
+        return merged
     }
 
     /* Sends to every transport in parallel and resolves once all have

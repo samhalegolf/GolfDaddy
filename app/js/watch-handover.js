@@ -63,18 +63,28 @@
     var card = el("watchHandoverCard");
     var mask = el("watchHandoverScreen");
     var driving = phase === "playing";
+    /* Which make of watch is on the other end decides the case the card
+       draws: a rounded-square Apple Watch, or a round Garmin with its side
+       buttons. The Scene carries it (caddy-watch.js watchState.vendor) so
+       the card never has to guess from the platform itself. */
+    var vendor = phase && scene.surface.watch.vendor === "garmin" ? "garmin" : "apple";
+    var vendorName = vendor === "garmin" ? "Garmin" : "Apple Watch";
     show(card, !!phase);
     show(mask, driving);
     document.body.classList.toggle("watchCard", !!phase && !driving);
     document.body.classList.toggle("watchCardTall", driving);
     document.body.classList.toggle("watchDriving", driving);
+    document.body.classList.toggle("watchGarmin", !!phase && vendor === "garmin");
+    if (card && card.dataset.vendor !== vendor) card.dataset.vendor = vendor;
+    if (mask && mask.dataset.vendor !== vendor) mask.dataset.vendor = vendor;
+    text("watchHandoverMaskTitle", "Playing on " + vendorName);
     if (!phase || !card) return;
     if (card.dataset.phase !== phase) card.dataset.phase = phase;
     card.setAttribute("aria-label",
-      phase === "uploading" ? "Loading course onto Apple Watch"
-        : phase === "ready" ? "Play on Apple Watch"
-          : phase === "handing" ? "Handing over to Apple Watch"
-            : "Playing on Apple Watch. Play on phone");
+      phase === "uploading" ? "Loading course onto " + vendorName
+        : phase === "ready" ? "Play on " + vendorName
+          : phase === "handing" ? "Handing over to " + vendorName
+            : "Playing on " + vendorName + ". Play on phone");
 
     var maps = scene.surface.watch.maps || { total: 0, have: 0 };
     var pct = maps.total > 0 ? Math.round((maps.have / maps.total) * 100) : 0;

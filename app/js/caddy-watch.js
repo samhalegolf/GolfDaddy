@@ -135,7 +135,12 @@
        for one round only, so it carries the round it was made for and lapses
        with it. */
     var surface = { active: "phone", roundId: null, handover: null };
-    var watchState = { paired: false, appInstalled: false, reachable: false };
+    /* `vendor` is which make of watch is on the other end - "apple" or
+       "garmin" - so the phone's handover card draws the right case. Native
+       reports it with the rest of the presence facts; when it does not (an
+       older native build), the platform decides: Android only ever talks to
+       a Garmin, everything else is an Apple Watch. */
+    var watchState = { paired: false, appInstalled: false, reachable: false, vendor: defaultVendor() };
     /* How much of the course's lite-map package the wrist has. Reported by
        watch-map-delivery.js from what it sent and what the Watch says it
        holds; the phone's card and the Watch's Receiving face both read it. */
@@ -168,6 +173,7 @@
         handover: surface.handover ? { id: surface.handover.id, state: surface.handover.state, from: surface.handover.from } : null,
         watch: {
           paired: !!watchState.paired, appInstalled: !!watchState.appInstalled, reachable: !!watchState.reachable,
+          vendor: watchState.vendor,
           maps: { total: watchMaps.total, have: watchMaps.have }
         }
       };
@@ -227,10 +233,24 @@
       return true;
     }
 
+    function defaultVendor() {
+      var platform = null;
+      try {
+        var cap = typeof window !== "undefined" && window.Capacitor;
+        platform = cap && typeof cap.getPlatform === "function" ? cap.getPlatform() : null;
+      } catch (e) { platform = null; }
+      return platform === "android" ? "garmin" : "apple";
+    }
+    function vendorOf(state) {
+      var v = state && typeof state.vendor === "string" ? state.vendor.toLowerCase() : "";
+      return v === "garmin" || v === "apple" ? v : defaultVendor();
+    }
+
     function setWatchState(state) {
       state = state || {};
-      var next = { paired: !!state.paired, appInstalled: !!state.appInstalled, reachable: !!state.reachable };
-      if (next.paired === watchState.paired && next.appInstalled === watchState.appInstalled && next.reachable === watchState.reachable) return false;
+      var next = { paired: !!state.paired, appInstalled: !!state.appInstalled, reachable: !!state.reachable, vendor: vendorOf(state) };
+      if (next.paired === watchState.paired && next.appInstalled === watchState.appInstalled &&
+          next.reachable === watchState.reachable && next.vendor === watchState.vendor) return false;
       watchState = next;
       publish();
       return true;

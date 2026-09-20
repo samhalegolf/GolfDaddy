@@ -78,10 +78,19 @@ console.log("\n— Phone <-> Watch handover —");
 check("the phone drives by default and the Watch's presence rides the scene", () => {
   const { w } = ready(), s = w.scene();
   assert.equal(s.surface.active, "phone"); assert.equal(s.surface.handover, null);
-  assert.deepEqual(s.surface.watch, { paired: false, appInstalled: false, reachable: false, maps: { total: 0, have: 0 } });
+  assert.deepEqual(s.surface.watch, { paired: false, appInstalled: false, reachable: false, vendor: "apple", maps: { total: 0, have: 0 } });
   assert.equal(w.setWatchState({ paired: true, appInstalled: true, reachable: true }), true);
-  assert.deepEqual(w.scene().surface.watch, { paired: true, appInstalled: true, reachable: true, maps: { total: 0, have: 0 } });
+  assert.deepEqual(w.scene().surface.watch, { paired: true, appInstalled: true, reachable: true, vendor: "apple", maps: { total: 0, have: 0 } });
   assert.equal(w.setWatchState({ paired: true, appInstalled: true, reachable: true }), false, "an unchanged report does not republish");
+  /* Which make of watch rides the Scene so the phone's card draws the right
+     case. Native says; an unknown or missing answer falls back to the
+     platform default (Apple everywhere but Android, and there is no
+     Capacitor under node). */
+  assert.equal(w.setWatchState({ paired: true, appInstalled: true, reachable: true, vendor: "garmin" }), true, "a vendor change republishes");
+  assert.equal(w.scene().surface.watch.vendor, "garmin");
+  assert.equal(w.setWatchState({ paired: true, appInstalled: true, reachable: true, vendor: "Garmin" }), false, "case does not matter");
+  w.setWatchState({ paired: true, appInstalled: true, reachable: true, vendor: "casio" });
+  assert.equal(w.scene().surface.watch.vendor, "apple", "an unknown make falls back to the platform default");
 });
 check("a phone-initiated handover is only OFFERED until the wrist answers TAKE_OVER", () => {
   const { w } = ready();

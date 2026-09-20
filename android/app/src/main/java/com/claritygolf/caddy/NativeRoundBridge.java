@@ -281,6 +281,10 @@ public class NativeRoundBridge extends Plugin implements GarminTransport.Listene
         result.put("paired", state.paired);
         result.put("appInstalled", state.appInstalled);
         result.put("reachable", state.reachable);
+        /* Which make of watch this is, so the phone's handover card can draw
+           the right case. Android only ever talks to a Garmin; iOS reports
+           whichever transport is paired (WearableCoordinator.state()). */
+        result.put("vendor", "garmin");
         return result;
     }
 }

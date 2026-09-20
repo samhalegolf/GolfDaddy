@@ -970,6 +970,41 @@ body.watchDriving .playChrome { z-index: 700; }
 .whMaskWatchScreen { display: block; width: 100%; height: 100%; border-radius: 28px; background: #000; }
 .whMaskTitle { font: 900 22px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: -.02em; color: #f2f7f2; animation: whRise .5s ease .2s both; }
 .whMaskCopy { max-width: 230px; font: 400 12.5px/1.55 -apple-system, system-ui, sans-serif; color: rgba(255, 255, 255, .55); animation: whRise .5s ease .28s both; }
+/* Garmin case. The Scene says which make of watch is on the other end
+   (surface.watch.vendor) and watch-handover.js stamps it on the card and the
+   mask as data-vendor. A Garmin golf watch (Approach S62 and kin) is round,
+   with a dark bezel carrying tick marks and two push buttons on the right at
+   two and four o'clock, the upper one ringed in red. Same three faces, same
+   phases, same tap targets: only the case changes. The Playing phase is
+   left alone - the card is a PHONE by then, whichever watch took the round. */
+#watchHandoverCard[data-vendor="garmin"]:not([data-phase="playing"]) { --whW: 140px; --whH: 140px; --whR: 50%; --whSR: 50%; padding: 12px;
+  border-color: rgba(255, 255, 255, .16);
+  background: radial-gradient(circle at 50% 50%, #050907 0 57%, #2a2f31 57.5% 61%, #14181a 61.5% 100%); }
+#watchHandoverCard[data-vendor="garmin"][data-phase="ready"] { border-color: rgba(60, 255, 141, .5); }
+/* The bezel's twelve tick marks: a conic gradient masked to a thin ring. */
+#watchHandoverCard[data-vendor="garmin"]:not([data-phase="playing"])::before { content: ""; position: absolute; inset: 1px; border-radius: 50%; pointer-events: none;
+  background: repeating-conic-gradient(from -1.5deg, rgba(255, 255, 255, .62) 0 3deg, transparent 3deg 30deg);
+  -webkit-mask: radial-gradient(circle, transparent 0 60%, #000 61% 66%, transparent 67%); mask: radial-gradient(circle, transparent 0 60%, #000 61% 66%, transparent 67%); }
+/* Side buttons, tangent to the case at two and four o'clock. */
+#watchHandoverCard[data-vendor="garmin"] .whCrown { right: 6px; top: 26px; width: 7px; height: 17px; border-radius: 3px; background: linear-gradient(90deg, #4a5154, #262b2d); box-shadow: inset 0 0 0 1.5px #d23a2c, 0 0 0 1px rgba(0, 0, 0, .6); transform: rotate(-30deg); }
+#watchHandoverCard[data-vendor="garmin"] .whCrown2 { top: 97px; height: 15px; width: 6px; right: 7px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .6); transform: rotate(30deg); }
+/* The faces pull in from the rim so nothing is lost to the circle. */
+#watchHandoverCard[data-vendor="garmin"] .whUploading { padding: 24px 22px 20px; gap: 8px; }
+#watchHandoverCard[data-vendor="garmin"] .whReady { padding: 15px 16px 12px; }
+#watchHandoverCard[data-vendor="garmin"] .whHead { justify-content: center; gap: 6px; padding-bottom: 5px; }
+#watchHandoverCard[data-vendor="garmin"] .whReady .whThumb { border-radius: 14px; margin: 0 2px; }
+#watchHandoverCard[data-vendor="garmin"] .whReady .whAction { height: 24px; flex-basis: 24px; margin: 6px 8px 0; border-radius: 999px; font-size: 9.5px; }
+#watchHandoverCard[data-vendor="garmin"] .whReady .whThumbNum { right: 8px; bottom: 5px; font-size: 12px; }
+#watchHandoverCard[data-vendor="garmin"] .whHanding { padding: 20px; }
+/* The tool rail steps down under the shorter round case. */
+body.watchGarmin.watchCard #toolRailTab { top: calc(env(safe-area-inset-top, 0px) + 64px + 140px + 8px); }
+body.watchGarmin.watchCard #toolRail { top: calc(env(safe-area-inset-top, 0px) + 64px + 140px + 8px + 48px); }
+/* The mask's watch, same case. */
+#watchHandoverScreen[data-vendor="garmin"] .whMaskWatch { width: 150px; height: 150px; border-radius: 50%; padding: 13px;
+  background: radial-gradient(circle at 50% 50%, #050907 0 57%, #2a2f31 57.5% 61%, #14181a 61.5% 100%); }
+#watchHandoverScreen[data-vendor="garmin"] .whMaskWatchScreen { border-radius: 50%; }
+#watchHandoverScreen[data-vendor="garmin"] .whMaskCrown { right: 6px; top: 28px; width: 7px; height: 18px; background: linear-gradient(90deg, #4a5154, #262b2d); box-shadow: inset 0 0 0 1.5px #d23a2c, 0 0 0 1px rgba(0, 0, 0, .6); transform: rotate(-30deg); }
+#watchHandoverScreen[data-vendor="garmin"] .whMaskCrown2 { top: 104px; height: 16px; width: 6px; right: 7px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .6); transform: rotate(30deg); }
 
 /* ── The logging popup ────────────────────────────────────────────────────
    Where a shot finished, placed on a snapshot of the green and its
