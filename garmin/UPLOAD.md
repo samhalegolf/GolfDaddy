@@ -14,11 +14,17 @@ first compile found are fixed (see the git history for what they were; one,
 `Math.log` missing its base, was a real Web Mercator bug rather than a
 compiler complaint).
 
-**It has never run.** Nothing has been in the simulator or on a wrist.
-Compiling is not running, and the items still listed as unverified in
-`README.md` — the touch-drag event shape, `WatchUi.KEY_LAP`,
-`Position.Info.accuracy` — are precisely the kind that compile clean and
-misbehave on a device.
+**It runs in the simulator, and the phone can drive it.** As of 2026-09-20 the
+Approach S62 build launches clean, shows the "Waiting for round" face, and a
+Scene published from the Android debug build over the adb tether (section 4)
+lands on it and moves it to "Ready - press SELECT". Nothing has been on a
+wrist yet, and the items still listed as unverified in `README.md` — the
+touch-drag event shape, `WatchUi.KEY_LAP`, `Position.Info.accuracy` — are
+precisely the kind that compile clean and misbehave on a device.
+
+**The watch → phone direction cannot be tested in the simulator on this Mac.**
+See the warning in section 4. Every command the watch sends (TAKE_OVER, LOCK,
+the inventory reports) is unverified until a real watch is in hand.
 
 There is no system Java on this Mac; `monkeyc` is a Java launcher, so every
 build needs a JDK on PATH first. Android Studio's bundled one works:
@@ -133,10 +139,37 @@ needs an iPhone and a watch in hand.
    Or set `garminTethered=true` in `~/.gradle/gradle.properties` while you are
    working this way, so Android Studio's normal Run picks it up.
 
-Settings > Garmin Watch then lists a single device called "Simulator". Select
-it and the phone app's messages land in the simulator's running watch app,
-and the watch app's commands come back the same way. Garmin Connect Mobile
-is not involved at all in this mode.
+Then, in the simulator, **adb Connection > Start**. Settings > Garmin Watch
+on the phone lists a single device called "Simulator". Select it and the
+phone app's messages land in the simulator's running watch app. Garmin
+Connect Mobile is not involved at all in this mode.
+
+Verified 2026-09-20: `publishScene` from the phone reaches the watch and
+changes its face. The phone side can be driven without tapping through the
+UI — the debug WebView is inspectable over
+`adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`, and a
+DevTools `Runtime.evaluate` of `Capacitor.Plugins.NativeRoundBridge.garminDevices()`
+/ `selectGarminDevice(...)` / `publishScene({scene})` does the whole flow.
+
+> **Known simulator bug — watch → phone crashes the simulator.** On macOS
+> 26.6 (Apple Silicon) with Connect IQ SDK 9.2.0 *and* 9.1.0, any
+> `Communications.transmit` from the watch app while the adb tether is live
+> segfaults the simulator process (SIGSEGV on its "TVM main" thread, same
+> fault address every time; reports land in
+> `~/Library/Logs/DiagnosticReports/simulator-*.ips`). This is not our
+> payload: it reproduces with a one-key `{"ping"=>1}` dictionary and with
+> Garmin's own `samples/Comm` sending a plain string, and it reproduces with
+> no device registered on the phone. launchd relaunches the simulator empty
+> afterwards, which is where the "There is no data connection" dialog comes
+> from. Untethered, the same transmits are silent no-ops, so the watch app
+> itself is fine.
+>
+> Consequence: commands from the watch (TAKE_OVER, LOCK, AIM_AT, the
+> inventory reports) and the phone's `onMessageReceived` path in
+> `GarminTransport.java` can only be verified on a real watch. Untried
+> workarounds: the 8.x SDK line (install from the SDK Manager and point
+> `CIQ_SDK=` at it), and companion SDK 2.2.0 on the phone, which
+> `GarminTransport.java` does not compile against without edits.
 
 ---
 
