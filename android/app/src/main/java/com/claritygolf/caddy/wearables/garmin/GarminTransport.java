@@ -440,7 +440,10 @@ public final class GarminTransport {
         out.put("appInstalled", current.appInstalled);
         out.put("reachable", current.reachable);
         out.put("entitled", entitled);
-        out.put("sdkLinked", false);
+        // The SDK is bundled and this build talked to it: only false when
+        // initialize() failed or has not run. A stub-era hard-coded false
+        // survived here until 2026-09-20 and contradicted garminDevices().
+        out.put("sdkLinked", sdkReady);
         out.put("connectionState", String.valueOf(deviceStore.getLastKnownConnectionState()));
         GarminDeviceStore.SelectedDevice selected = deviceStore.getSelectedDevice();
         if (selected != null) {
