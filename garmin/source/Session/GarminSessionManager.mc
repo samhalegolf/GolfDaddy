@@ -221,6 +221,15 @@ class GarminSessionManager {
     function onPhoneAppMessage(msg as Communications.PhoneAppMessage) as Void {
         var data = msg.data;
         if (!(data instanceof Lang.Dictionary)) { return; }
+        // Simulator-only build: the console is the only window into what
+        // the tether delivered. Compiled out of every live build.
+        if (GarminTransmitPolicy.muted()) {
+            var sc = data.hasKey("scene") ? GarminWire.dictVal(data, "scene") : null;
+            var rev = (sc != null) ? sc["revision"] : null;
+            var surf = (sc != null && sc.hasKey("surface")) ? sc["surface"] : null;
+            System.println("rx: " + data.keys() + (rev != null ? " rev " + rev : "")
+                + " surface=" + surf + " face=" + face());
+        }
         if (data.hasKey("scene")) { receiveScene(GarminWire.dictVal(data, "scene")); return; }
         // Garmin does not receive pushed map-asset bytes the way Apple does
         // (see GarminMapDownloader.mc's header comment): the manifest
@@ -369,6 +378,13 @@ class GarminSessionManager {
     // -------------------------------------------------------- transport
 
     function transmit(dict) {
+        // Simulator-only muted build (GarminTransmitPolicy.mc): the reply
+        // is logged and dropped, because sending it would kill the
+        // simulator. A normal build compiles this branch to `false`.
+        if (GarminTransmitPolicy.muted()) {
+            System.println("transmit muted: " + dict.keys());
+            return;
+        }
         try {
             Communications.transmit(dict, null, new GarminTransmitListener());
         } catch (e) {

@@ -6,6 +6,13 @@ project.manifest = manifest.xml
 # directory map.
 base.sourcePath = source
 
+# Live transport by default: the `tx_muted` definition of
+# GarminTransmitPolicy.muted() is compiled out, so every normal build - and
+# the store package - talks to the phone. monkey-sim-mute.jungle, chained on
+# by `CIQ_MUTE_TX=1 ./build.sh build`, flips this for the simulator. See
+# source/Session/GarminTransmitPolicy.mc.
+base.excludeAnnotations = tx_muted
+
 # `resources` holds everything that is the same on every device (strings).
 # The launcher icon is NOT: Connect IQ asks a different pixel size per device
 # and does not scale for you, so a single bitmap is stretched or shrunk by the

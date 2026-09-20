@@ -316,8 +316,101 @@ public final class GarminTransport {
         if (listener != null) { listener.onStateChanged(); }
     }
 
+    /* Scenes are LATEST-WINS, not a queue.
+
+       Apple gets this for free: updateApplicationContext keeps only the
+       newest dictionary. The Connect IQ link does not - every sendMessage is
+       queued and delivered in order, and the tether drains it at roughly one
+       message every few seconds. JavaScript republishes the Scene on every
+       GPS fix (twice a second under simulated jitter), so without this the
+       wrist was showing revision 582 while the phone was on 744, and the gap
+       only grew. Seen 2026-09-20 against the simulator; a real watch over
+       Bluetooth is slower still.
+
+       So: every publish only REPLACES the waiting Scene, and the waiting
+       Scene goes out at most once per SCENE_MIN_INTERVAL_MS, never while a
+       previous send is still being reported on. A superseded Scene is never
+       sent, because everything it said is already in the newer revision;
+       its caller is answered with the newer send's result, which is the
+       honest answer: "the picture you asked for reached the watch, in a
+       later revision".
+
+       Waiting on the SDK's own status alone would not have been enough: it
+       reports SUCCESS when the message is queued, not delivered (measured
+       2026-09-20 - with in-flight gating only, every revision still arrived,
+       three seconds apart, and the gap kept growing). Hence the interval.
+       Three seconds is the simulator's drain rate; the wrist keeps its own
+       GPS and computes its own distances (GarminLocationManager /
+       GarminPlayState), so a Scene that is a few seconds old costs nothing
+       a player can see. If the SDK ever fails to report on a send at all,
+       the in-flight mark expires after SCENE_IN_FLIGHT_MAX_MS rather than
+       stalling every Scene for the rest of the round.
+
+       The manifest and player snapshot are left alone: they are sent once
+       per round or on a real change, never on a timer. */
+    private static final long SCENE_MIN_INTERVAL_MS = 3000L;
+    private static final long SCENE_IN_FLIGHT_MAX_MS = 5000L;
+    private final Object sceneLock = new Object();
+    /* Its own thread, NOT the main one: in TETHERED mode the SDK's
+       sendMessage writes straight to the adb socket on the calling thread,
+       and Android throws NetworkOnMainThreadException for that (it took the
+       app down the first time this flush was posted to the main looper).
+       The Capacitor bridge thread the direct path used was a background
+       thread all along, which is why send() never hit it. */
+    private final android.os.Handler sceneHandler;
+    {
+        android.os.HandlerThread thread = new android.os.HandlerThread("garmin-scene");
+        thread.start();
+        sceneHandler = new android.os.Handler(thread.getLooper());
+    }
+    private boolean sceneInFlight = false;
+    private boolean sceneFlushScheduled = false;
+    private long sceneInFlightSince = 0L;
+    private long sceneLastSentAt = 0L;
+    private Map<String, Object> sceneWaiting;
+    private final ArrayList<Callback<Boolean>> sceneWaitingCompletions = new ArrayList<>();
+
     public void publishScene(Map<String, Object> scene, Callback<Boolean> completion) {
-        send(mapOf("scene", scene), completion);
+        synchronized (sceneLock) {
+            sceneWaiting = scene;
+            sceneWaitingCompletions.add(completion);
+            scheduleSceneFlushLocked();
+        }
+    }
+
+    /** Caller holds sceneLock. Arms one flush for when the interval allows;
+     *  while a send is still being reported on, its completion arms it. */
+    private void scheduleSceneFlushLocked() {
+        if (sceneFlushScheduled) { return; }
+        long now = System.currentTimeMillis();
+        boolean busy = sceneInFlight && now - sceneInFlightSince <= SCENE_IN_FLIGHT_MAX_MS;
+        if (busy) { return; }
+        long delay = Math.max(0L, sceneLastSentAt + SCENE_MIN_INTERVAL_MS - now);
+        sceneFlushScheduled = true;
+        sceneHandler.postDelayed(this::flushWaitingScene, delay);
+    }
+
+    private void flushWaitingScene() {
+        Map<String, Object> next;
+        ArrayList<Callback<Boolean>> completions;
+        synchronized (sceneLock) {
+            sceneFlushScheduled = false;
+            next = sceneWaiting;
+            if (next == null) { return; }
+            sceneWaiting = null;
+            completions = new ArrayList<>(sceneWaitingCompletions);
+            sceneWaitingCompletions.clear();
+            sceneInFlight = true;
+            sceneInFlightSince = System.currentTimeMillis();
+            sceneLastSentAt = sceneInFlightSince;
+        }
+        send(mapOf("scene", next), sent -> {
+            for (Callback<Boolean> waiting : completions) { waiting.onResult(sent); }
+            synchronized (sceneLock) {
+                sceneInFlight = false;
+                if (sceneWaiting != null) { scheduleSceneFlushLocked(); }
+            }
+        });
     }
 
     /** See this class's header: {@code manifest} must carry a Garmin-specific

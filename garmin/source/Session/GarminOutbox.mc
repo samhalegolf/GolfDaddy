@@ -22,6 +22,15 @@ class GarminOutbox {
 
     function initialize() {
         pending = [];
+        // The muted simulator build (GarminTransmitPolicy.mc) can never
+        // deliver a command, so a queue restored from a previous run would
+        // only wedge the face on "Taking over..." forever. Start empty and
+        // forget what the last run left behind.
+        if (GarminTransmitPolicy.muted()) {
+            System.println("outbox muted: dropping persisted queue");
+            persist();
+            return;
+        }
         restore();
     }
 
@@ -49,6 +58,13 @@ class GarminOutbox {
     // Enqueues a new command and persists immediately, so a crash right
     // after this call cannot lose an already-accepted-by-the-UI command.
     function enqueue(command) {
+        // Muted build: the command would never leave, and a queued one would
+        // hold the UI in its "busy" state until the end of time. Say so and
+        // drop it, so SELECT/LOCK on the simulator stay harmless presses.
+        if (GarminTransmitPolicy.muted()) {
+            System.println("outbox muted: dropping " + command.wire()["type"]);
+            return;
+        }
         pending.add({ "command" => command.wire(), "attemptCount" => 0, "lastAttemptAt" => null });
         persist();
     }

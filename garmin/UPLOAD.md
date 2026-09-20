@@ -181,6 +181,46 @@ DevTools `Runtime.evaluate` of `Capacitor.Plugins.NativeRoundBridge.garminDevice
 > the Scene once a second and logs `Garmin send failed: FAILURE_UNKNOWN`
 > each time; harmless, but worth rate-limiting.
 
+### Seeing the round on the simulated watch anyway: the muted build
+
+The phone → watch direction is fine, so a watch build that never replies
+lets the whole phone-side flow be watched landing on the simulator: the face
+changes, the hole numbers, the map, the Bubble. Only the watch's own
+commands are missing, and the phone can stand in for them.
+
+```bash
+cd garmin && CIQ_MUTE_TX=1 ./build.sh build     # writes build/ClarityCaddy-<device>-muted.prg
+```
+
+`monkeydo` that file instead of the plain one, then **adb Connection >
+Start** as above. The muted build logs every dropped reply to the
+simulator console (`transmit muted: [...]`), starts with an empty command
+queue so a SELECT from a previous run cannot wedge it on "Taking over...",
+and traces each Scene it receives (`rx: [scene] rev N ...`). It is compiled
+from the same sources via an annotation swap (`GarminTransmitPolicy.mc`,
+`monkey-sim-mute.jungle`); `./build.sh package` never reads the flag.
+
+To reach the playing faces, hand the round over from the phone side, since
+the watch's TAKE_OVER never leaves. Over the debug WebView (port 9222):
+
+```js
+var w = ClarityApp.caddyWatch, s = w.scene();
+w.receiveCommand({ commandId: "sim-" + Date.now(), roundId: s.roundId, baseRevision: s.revision, type: "TAKE_OVER", payload: {} });
+```
+
+Two more things learned this way (2026-09-20), both fixed in
+`GarminTransport.java`:
+
+- The Connect IQ link is a queue, not latest-wins, and it reports SUCCESS
+  on enqueue. The phone republishes the Scene on every GPS fix, the tether
+  drains one message per ~3 s, and the wrist fell minutes behind. Scenes
+  are now coalesced on the phone: newest waiting, at most one every 3 s,
+  sent from a background thread (the tethered SDK writes to its socket on
+  the calling thread, and the main thread is not allowed to).
+- The simulator keeps its own inbox across phone restarts. If the wrist is
+  showing stale revisions after a phone rebuild, quit and relaunch the
+  simulator (`connectiq`), then `monkeydo` again.
+
 ---
 
 ## 5. Before you package — the things that are still placeholders

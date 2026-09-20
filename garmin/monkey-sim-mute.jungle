@@ -1,0 +1,8 @@
+# Simulator-only overlay: a build that never transmits to the phone.
+#
+# Chained AFTER monkey.jungle by `CIQ_MUTE_TX=1 ./build.sh build`, so this
+# line overrides the default exclusion and compiles the muted definition of
+# GarminTransmitPolicy.muted() instead of the live one. See that file for why
+# this exists (the simulator segfaults on transmit while tethered). Never
+# used by `./build.sh package`.
+base.excludeAnnotations = tx_live

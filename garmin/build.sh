@@ -91,15 +91,27 @@ cmd_check() {
 cmd_build() {
   ensure_key
   mkdir -p "$OUT"
-  echo "Building $DEVICE (debug)..."
+  # CIQ_MUTE_TX=1: a simulator-only build that never transmits to the phone,
+  # because the simulator on this Mac segfaults on any transmit while the
+  # adb tether is live (see UPLOAD.md, "Known simulator bug"). The overlay
+  # jungle flips which GarminTransmitPolicy.muted() gets compiled, and the
+  # output carries "-muted" so it can never be confused with a real build.
+  # Only this verb honours the variable; package never sees it.
+  local jungles="monkey.jungle" suffix="" label="debug"
+  if [[ "${CIQ_MUTE_TX:-0}" == "1" ]]; then
+    jungles="monkey.jungle;monkey-sim-mute.jungle"
+    suffix="-muted"
+    label="debug, TRANSMIT MUTED - simulator only"
+  fi
+  echo "Building $DEVICE ($label)..."
   "$MONKEYC" \
-    --jungles monkey.jungle \
+    --jungles "$jungles" \
     --device "$DEVICE" \
-    --output "$OUT/ClarityCaddy-$DEVICE.prg" \
+    --output "$OUT/ClarityCaddy-$DEVICE$suffix.prg" \
     --private-key "$KEY" \
     --warn
-  echo "Wrote $OUT/ClarityCaddy-$DEVICE.prg"
-  echo "Run it with:  \"$SDK_ROOT/bin/connectiq\" &  then  \"$SDK_ROOT/bin/monkeydo\" \"$OUT/ClarityCaddy-$DEVICE.prg\" $DEVICE"
+  echo "Wrote $OUT/ClarityCaddy-$DEVICE$suffix.prg"
+  echo "Run it with:  \"$SDK_ROOT/bin/connectiq\" &  then  \"$SDK_ROOT/bin/monkeydo\" \"$OUT/ClarityCaddy-$DEVICE$suffix.prg\" $DEVICE"
 }
 
 cmd_package() {
