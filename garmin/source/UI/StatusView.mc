@@ -3,9 +3,10 @@ using Toybox.WatchUi;
 using Toybox.Graphics;
 
 // The non-playing faces — mirrors WatchSessionManager.Face's noRound/
-// receiving/ready/taking states (ios/App/ClarityCaddyWatch/
-// WatchSessionManager.swift), drawn as plain status text since Phase 1 has
-// no SwiftUI-style per-face view hierarchy to lean on.
+// ready/taking states (ios/App/ClarityCaddyWatch/WatchSessionManager.swift),
+// drawn as plain status text since Phase 1 has no SwiftUI-style per-face
+// view hierarchy to lean on. Apple's `receiving` face is absent on purpose
+// — see GarminSessionManager's Face constants for why.
 class StatusView extends WatchUi.View {
     var session;   // GarminSessionManager
 
@@ -24,10 +25,6 @@ class StatusView extends WatchUi.View {
 
         if (face.equals(GarminSessionManager.FACE_NO_ROUND)) {
             line2 = "Waiting for round";
-        } else if (face.equals(GarminSessionManager.FACE_RECEIVING)) {
-            var have = session.mapsHeldCount();
-            var total = session.mapsExpectedCount();
-            line2 = "Receiving course " + have.toString() + "/" + total.toString();
         } else if (face.equals(GarminSessionManager.FACE_READY)) {
             line2 = "Ready - press SELECT";
         } else if (face.equals(GarminSessionManager.FACE_TAKING)) {

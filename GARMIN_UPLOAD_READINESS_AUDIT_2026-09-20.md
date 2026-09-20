@@ -640,6 +640,7 @@ strings build/ClarityCaddy.iq | grep -Ei 'http|key|token|secret' # expect only t
 - **Requirement type:** Caddy architectural invariant; spec P0 "Critical failure state causes infinite loading".
 - **Impact:** Watch-initiated take-over is impossible whenever a manifest is present; only a phone-initiated handover escapes.
 - **Recommendation:** Smallest fix: make READY not depend on maps (maps are lazy on Garmin by design), i.e. drop the RECEIVING branch or gate it on `readyHoleCount(courseKey) > 0`; and check `manifest.courseKey` in `mapsExpectedCount()`. Alternatively prefetch the current hole from `receiveScene`.
+- **Fixed on this branch (2026-09-20, static only):** the RECEIVING face, `mapsExpectedCount()`, `mapsHeldCount()` and `GarminMapStore.readyHoleCount()` are removed; `face()` returns READY as soon as a non-driven round exists. Not compiled or run here — verify in the simulator that a phone-driven round shows "Ready - press SELECT" and that SELECT sends `TAKE_OVER`.
 
 ### GA-004
 - **Severity:** P0 · **Status:** BLOCK · **Category:** Architecture (ID + revision)
@@ -649,6 +650,7 @@ strings build/ClarityCaddy.iq | grep -Ei 'http|key|token|secret' # expect only t
 - **Requirement type:** Caddy invariant (§14 "Incompatible map cannot silently attach to scene"); spec P0 "Wrong course/hole data can silently become authoritative".
 - **Impact:** Player aims on hole 3's picture while overlays and coordinates are hole 4's; the mis-aim is sent to the phone as a valid `AIM_AT`.
 - **Recommendation:** Keep a single `awaiting = {courseKey, version, holeNumber}` set at request time, refuse new requests while one is pending, and discard any response whose `awaiting` no longer matches the current scene hole/manifest. Clear it in `receiveManifest`.
+- **Fixed on this branch (2026-09-20, static only):** `GarminMapDownloader` now holds one `awaiting` record (hole, course key, package version), refuses a second request while it is pending, and drops a response unless the store's manifest still has the same course key and version. `GarminMapStore.requestHole` passes the identity. Not compiled or run here — verify in the simulator by changing hole during a fetch and confirming the bitmap lands under the requested hole.
 
 ### GA-005
 - **Severity:** P1 · **Status:** REVIEW · **Category:** Runtime / Architecture (command identity)
@@ -811,7 +813,7 @@ strings build/ClarityCaddy.iq | grep -Ei 'http|key|token|secret' # expect only t
 
 ## 33-35. Blocker / risk / improvement lists
 
-**P0 BLOCKERS:** GA-002 (never run anywhere; phone ↔ watch link never exercised), GA-003 (RECEIVING dead end blocks watch take-over), GA-004 (map raster can attach to the wrong hole/course and be persisted as ready).
+**P0 BLOCKERS:** GA-002 (never run anywhere; phone ↔ watch link never exercised), GA-003 (RECEIVING dead end blocks watch take-over — **fixed on this branch, unverified at runtime**), GA-004 (map raster can attach to the wrong hole/course and be persisted as ready — **fixed on this branch, unverified at runtime**).
 
 **P1 RISKS:** GA-001 (Connect IQ Mobile SDK wired in PR #81 but untested; iOS hand-off failure modes; no shipped phone build), GA-005 (Float timestamps / command-id uniqueness), GA-006 (`drawBitmap2` fallback misalignment on CIQ 3.x devices; option keys), GA-007 (infinite map retry loop), GA-008 (BACK never exits), GA-009 (F/C/B not local; parity gap vs Apple), GA-010 (Scene lost on relaunch; no request/republish), GA-011 (cross-round Scene ordering), GA-012 (stale/poor fix trusted), GA-013 (touch/LAP/UP-DOWN unverified), GA-014 (bitmap and Storage sizes on small devices), GA-015 (no reviewer path), GA-016 (privacy/listing text), GA-017 (no package provenance; SDK unpinned; tests not in CI), GA-018 (stale `AIM_AT` replay), GA-024 (rejections invisible).
 
@@ -831,8 +833,8 @@ RUNTIME HARDENING    🔴 BLOCK    GA-002 (never run, link never exercised) (+ G
 
 P0 BLOCKERS:
   GA-002  App has never been launched in the simulator or on hardware; phone ↔ watch link has never carried a message
-  GA-003  RECEIVING face never progresses (maps fetched only from the map view) — watch take-over unreachable
-  GA-004  Downloaded raster attributed to "first in-flight hole" — wrong hole/course map can be shown and persisted
+  GA-003  RECEIVING face never progresses — watch take-over unreachable   [fixed on this branch; needs simulator run]
+  GA-004  Raster credited to "first in-flight hole" — wrong hole/course map [fixed on this branch; needs simulator run]
 
 P1 RISKS:
   GA-001  Connect IQ Mobile SDK wired on iOS/Android (PR #81) but untested; iOS hand-off has silent failure modes; no shipped phone build

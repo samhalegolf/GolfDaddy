@@ -1,8 +1,8 @@
 using Toybox.WatchUi;
 using Toybox.Lang;
 
-// Root view. Chooses between StatusView (no round / receiving / ready /
-// taking), NumbersView and GarminMapView (playing) based on
+// Root view. Chooses between StatusView (no round / ready / taking),
+// NumbersView and GarminMapView (playing) based on
 // GarminSessionManager.face() plus the player's own Numbers<->Map choice —
 // mirroring WatchSessionManager.Face's role driving which SwiftUI face
 // shows on the Apple Watch, and the Garmin Phase 1+2 plan step 23's "two
