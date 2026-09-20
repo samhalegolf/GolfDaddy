@@ -415,9 +415,42 @@ public final class GarminTransport {
 
     /** See this class's header: {@code manifest} must carry a Garmin-specific
      *  `url` per hole for GarminMapDownloader to have anything to fetch.
-     *  That attachment is not implemented here. */
+     *  That attachment is done in JavaScript (watch-map-delivery.js), not here.
+     *
+     *  <p>What IS done here is slimming. One manifest is built for every
+     *  wearable, and the Apple Watch wants each hole's full {@code reference}
+     *  (tee, route, green outline) for its own drawing. That block is two
+     *  thirds of the payload - Millbrook's 18 holes came to 27 KB with it and
+     *  under 10 KB without - and the Connect IQ link refused the whole
+     *  manifest with FAILURE_MESSAGE_TOO_LARGE (2026-09-21), so the wrist
+     *  never learned a single hole existed. The watch app reads exactly one
+     *  thing out of {@code reference}: the green's coordinate
+     *  (garmin/source/Maps/GarminMapManifest.mc). So that is all that is
+     *  sent. If the watch ever needs more of the reference, extend the
+     *  copy below AND revisit the size, because the ceiling has not moved. */
     public void publishMapManifest(Map<String, Object> manifest, Callback<Boolean> completion) {
-        send(mapOf("watchMapManifest", manifest), completion);
+        send(mapOf("watchMapManifest", slimManifestForWatch(manifest)), completion);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> slimManifestForWatch(Map<String, Object> manifest) {
+        if (manifest == null) { return null; }
+        Object holes = manifest.get("holes");
+        if (!(holes instanceof List)) { return manifest; }
+        ArrayList<Object> slimHoles = new ArrayList<>();
+        for (Object entry : (List<Object>) holes) {
+            if (!(entry instanceof Map)) { slimHoles.add(entry); continue; }
+            HashMap<String, Object> hole = new HashMap<>((Map<String, Object>) entry);
+            Object reference = hole.remove("reference");
+            if (reference instanceof Map) {
+                Object green = ((Map<String, Object>) reference).get("green");
+                if (green instanceof Map) { hole.put("reference", mapOf("green", green)); }
+            }
+            slimHoles.add(hole);
+        }
+        HashMap<String, Object> slim = new HashMap<>(manifest);
+        slim.put("holes", slimHoles);
+        return slim;
     }
 
     public void publishPlayer(Map<String, Object> player, Callback<Boolean> completion) {

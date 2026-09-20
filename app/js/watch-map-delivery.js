@@ -186,7 +186,14 @@
        serving immutable/max-age=31536000 over a versioned vN path. Nothing is
        signed and nothing expires. */
     function assetUrl(path) {
-      var url = apiUrl(ASSET_ENDPOINT + "?path=" + encodeURIComponent(String(path || "")));
+      /* Slashes stay literal. Connect IQ's makeImageRequest re-encodes the
+         URL it is given, so an encoded slash (%2F) reaches the server as
+         %252F and the endpoint's allow-list rejects the path with a 400 -
+         seen 2026-09-21: every hole the simulated Garmin asked for came back
+         "Invalid asset path". A bare slash is legal in a query string and
+         survives the re-encode untouched. */
+      var encodedPath = encodeURIComponent(String(path || "")).replace(/%2F/gi, "/");
+      var url = apiUrl(ASSET_ENDPOINT + "?path=" + encodedPath);
       return /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : null;
     }
     var now = options.now || function () { return Date.now(); };

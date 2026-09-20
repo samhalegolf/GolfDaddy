@@ -60,8 +60,14 @@ class GarminMapDownloader {
     }
 
     function requestHole(hole, courseKey, version) {
-        if (hole == null || hole.url == null || courseKey == null || version == null) { return; }
-        if (awaiting != null) { return; }
+        if (hole == null || hole.url == null || courseKey == null || version == null) {
+            if (GarminTransmitPolicy.muted()) { System.println("image request skipped: hole=" + hole + " url=" + (hole != null ? hole.url : null)); }
+            return;
+        }
+        if (awaiting != null) {
+            if (GarminTransmitPolicy.muted()) { System.println("image request waiting on hole " + awaiting["holeNumber"]); }
+            return;
+        }
         awaiting = { "holeNumber" => hole.holeNumber, "courseKey" => courseKey, "version" => version };
 
         var options = {
@@ -69,11 +75,13 @@ class GarminMapDownloader {
             :maxHeight => hole.height.toNumber()
         };
         try {
+            if (GarminTransmitPolicy.muted()) { System.println("image request: hole " + hole.holeNumber + " " + hole.url); }
             // parameters == null, not {}: these URLs may be signed, and an
             // empty dictionary can still append a bare "?" on some versions.
             Communications.makeImageRequest(
                 hole.url, null, options, method(:onImageResponse));
         } catch (e) {
+            if (GarminTransmitPolicy.muted()) { System.println("image request threw: " + e.getErrorMessage()); }
             awaiting = null;
         }
     }
