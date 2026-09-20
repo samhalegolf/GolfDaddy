@@ -125,8 +125,27 @@ android {
             }
         }
     }
+    buildFeatures {
+        buildConfig = true
+    }
     buildTypes {
+        /* Garmin: talk to the Connect IQ simulator instead of a real watch.
+         *
+         * The Connect IQ Mobile SDK has a TETHERED mode that reaches the
+         * desktop simulator over an adb port forward (see
+         * GarminTransport.java). Opt in per build with
+         *
+         *     ./gradlew assembleDebug -PgarminTethered=true
+         *
+         * or put garminTethered=true in ~/.gradle/gradle.properties while
+         * working against the simulator. Debug only: release never carries
+         * it, so a shipped build cannot be pointed at a simulator. */
+        debug {
+            buildConfigField "boolean", "GARMIN_TETHERED",
+                    project.findProperty("garminTethered") == "true" ? "true" : "false"
+        }
         release {
+            buildConfigField "boolean", "GARMIN_TETHERED", "false"
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
             if (hasReleaseSigning) {

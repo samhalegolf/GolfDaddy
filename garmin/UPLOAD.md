@@ -108,6 +108,36 @@ Do not skip the simulator. The store review will reject an app that crashes on
 launch, and a device you have not visually checked will have layout problems on
 its own screen shape.
 
+### Phone and watch together, no hardware (Android only)
+
+The Connect IQ Mobile SDK on Android has a tethered mode that talks to the
+desktop simulator over adb. iOS has no equivalent: the iOS SDK only reaches a
+real watch through the real Garmin Connect app, so an end-to-end iOS check
+needs an iPhone and a watch in hand.
+
+1. Build and launch the watch app in the simulator as above.
+2. Forward the simulator's port to the phone or emulator running the Android
+   build:
+
+   ```bash
+   adb forward tcp:7381 tcp:7381
+   ```
+
+3. Build the Android app with the tethered flag (debug only; release ignores
+   it):
+
+   ```bash
+   cd android && ./gradlew installDebug -PgarminTethered=true
+   ```
+
+   Or set `garminTethered=true` in `~/.gradle/gradle.properties` while you are
+   working this way, so Android Studio's normal Run picks it up.
+
+Settings > Garmin Watch then lists a single device called "Simulator". Select
+it and the phone app's messages land in the simulator's running watch app,
+and the watch app's commands come back the same way. Garmin Connect Mobile
+is not involved at all in this mode.
+
 ---
 
 ## 5. Before you package — the things that are still placeholders
@@ -140,8 +170,9 @@ its own screen shape.
       from the xcframework headers and the AAR respectively rather than from
       documentation. **Neither has yet run against a watch.**
 
-- [ ] **Nothing has been tested against real hardware.** The two device
-      flows differ and only one can be checked without a phone in hand:
+- [ ] **Nothing has been tested against real hardware.** The Android side
+      can be exercised against the simulator (tethered mode, section 4)
+      before a watch arrives; iOS cannot. The two device flows also differ:
       Android lists paired watches in-process (`getKnownDevices`), iOS hands
       off to the Garmin Connect app and is called back on the
       `claritycaddy-ciq` URL scheme. The hand-off in particular has several
