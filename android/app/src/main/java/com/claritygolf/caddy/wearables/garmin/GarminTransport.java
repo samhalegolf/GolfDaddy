@@ -3,6 +3,7 @@ package com.claritygolf.caddy.wearables.garmin;
 import android.content.Context;
 import android.util.Log;
 
+import com.claritygolf.caddy.BuildConfig;
 import com.garmin.android.connectiq.ConnectIQ;
 import com.garmin.android.connectiq.IQApp;
 import com.garmin.android.connectiq.IQDevice;
@@ -148,7 +149,7 @@ public final class GarminTransport {
      *  Garmin's wording for them is better than anything invented. */
     public void activate() {
         if (connectIQ == null) {
-            connectIQ = ConnectIQ.getInstance(context, ConnectIQ.IQConnectType.WIRELESS);
+            connectIQ = ConnectIQ.getInstance(context, connectType());
             app = new IQApp(connectIqAppId);
         }
         if (sdkReady) { bindSelectedDevice(); return; }
@@ -179,6 +180,23 @@ public final class GarminTransport {
                 notifyStateChanged();
             }
         });
+    }
+
+    /** WIRELESS goes through Garmin Connect Mobile to a real watch. TETHERED
+     *  is the SDK's simulator hook: it opens a socket on port 7381 and expects
+     *  the desktop Connect IQ simulator on the other end of an adb forward, so
+     *  the phone app and the watch app can be exercised together with no
+     *  hardware. In that mode the SDK reports exactly one device, "Simulator",
+     *  and getApplicationInfo answers for whatever the simulator is running.
+     *
+     *  <p>Chosen at build time (android/app/build.gradle, debug builds only)
+     *  rather than at runtime so the choice cannot leak into a release. */
+    private static ConnectIQ.IQConnectType connectType() {
+        if (BuildConfig.GARMIN_TETHERED) {
+            Log.i(TAG, "Connect IQ in TETHERED mode: expecting the simulator via `adb forward tcp:7381 tcp:7381`");
+            return ConnectIQ.IQConnectType.TETHERED;
+        }
+        return ConnectIQ.IQConnectType.WIRELESS;
     }
 
     /** Releases the SDK. Paired with activate(); the selected device survives
@@ -350,13 +368,7 @@ public final class GarminTransport {
 
     /** What the Settings > Garmin Watch page lists: the devices, plus whether
      *  the SDK is actually linked — "no devices" and "we cannot look" are
-     *  different answers and the page words them differently.
-     *
-     *  UNVERIFIED / NOT YET POSSIBLE: the real implementation is
-     *  {@code connectIQ.getKnownDevices()} (or getConnectedDevices()), which
-     *  needs the SDK this repo does not vendor. Until then this reports
-     *  honestly that it cannot look rather than returning a misleading empty
-     *  list. */
+     *  different answers and the page words them differently. */
     public Map<String, Object> availableDevices() {
         HashMap<String, Object> out = new HashMap<>();
         ArrayList<Map<String, Object>> devices = new ArrayList<>();
