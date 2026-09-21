@@ -9,13 +9,15 @@
                                      its version, and only for holes whose own geometry has
                                      not moved since. See backfillHoleReferences.
 
-   Deliberately synchronous, not a job queue like course-visual-jobs.mjs/course-mapper-jobs.mjs:
-   those exist because their work fetches tens of thousands of external map tiles. This pipeline
-   reads geometry already sitting in course_maps and draws flat SVG shapes from it - no network
-   fetch per hole - so an 18-hole course bakes in low single-digit seconds, comfortably inside a
-   normal (non-background) Netlify function's budget. If a future course-size outlier changes
-   that, this is the seam to convert to the same queue+worker shape, not a reason to build one
-   pre-emptively now.
+   The bake runs in functions/course-watch-maps-background.mjs (a Netlify background function,
+   15-minute budget) since 2026-09-21; this file's POST checks the caller, writes "queued" to the
+   progress column, wakes the worker and answers 202. It was synchronous until then - flat SVG
+   from geometry already in course_maps bakes in seconds - but the v3 terrain shading and the
+   per-hole delivery ladder took Millbrook to over a minute, and the request was cut off at hole
+   11 with no package written. No queue table: the progress column that Studio already polls is
+   the whole job state, and generateWatchPackage is exported below so the worker runs the very
+   same code (`sync: true` on the POST still runs it inline, for a caller that wants the report
+   in the response).
 
    Never touches course_maps, course_visuals, course_visual_jobs, or course_mapper_jobs (the
    DATABASE TABLES) - the task this generates from is READ, everything it writes lands only in
@@ -839,8 +841,31 @@ export default async function courseWatchMaps(req) {
     });
   }
 
+  /* The bake itself runs in course-watch-maps-background.mjs (15-minute budget). This
+     handler only checks the caller may ask, marks the row "queued" so Studio's bar appears
+     before the worker has even started, wakes the worker and answers 202. Studio then reads
+     the same progress column it always did and fetches the finished report when the column
+     clears (see pollProgress in scripts/studio/gd-admin-watch-map-viewer.js).
+
+     `sync: true` keeps the old in-process path for a caller that wants the report in the
+     response - a test, or a course small enough to fit - and returns exactly what it used to. */
+  if (payload && payload.sync === true) return generateInline(courseId, map, user.email);
+
+  const holeTotal = holeNumbersFromObjects(map.objects_json).length;
+  const startedAt = new Date().toISOString();
+  await writeProgress(courseId, "queued", holeTotal, startedAt);
+  const woken = await wakeWorker(req, courseId);
+  if (!woken) {
+    await clearProgress(courseId);
+    return json(502, { courseId, status: "failed", error: "could not start the Watch Map worker", failure: { stage: "queue", reason: "worker unreachable" } });
+  }
+  return json(202, { courseId, status: "generating", holeCount: holeTotal, progress: { stage: "queued", holeCount: holeTotal, startedAt, updatedAt: startedAt } });
+}
+
+/* The synchronous bake, as it was before the worker existed. */
+async function generateInline(courseId, map, actorEmail) {
   try {
-    const row = await generateWatchPackage({ courseId, map, actorEmail: user.email });
+    const row = await generateWatchPackage({ courseId, map, actorEmail });
     /* Not part of reportShape: pruning is an outcome of THIS run, not a
        property of the stored package, and the GET path must never claim it. */
     return json(200, Object.assign({ courseId }, reportShape(row), {
@@ -861,6 +886,27 @@ export default async function courseWatchMaps(req) {
     return json(502, { courseId, status: "failed", error: String(error && error.message || error), failure: { stage: "generation", reason: String(error && error.message || error) } });
   }
 }
+
+/* Wake the background worker with the caller's own bearer, so the worker can re-verify the
+   admin itself rather than trusting whoever reached its URL. AWAITED, not fire-and-forget -
+   serverless freezes the process the moment the handler returns, so an un-awaited fetch never
+   leaves the building (same rule as course-visual-jobs.mjs's pingWorker). The worker acks 202
+   at once, so this costs a few hundred ms. */
+async function wakeWorker(req, courseId) {
+  try {
+    const origin = new URL(req.url).origin;
+    const response = await fetch(origin + "/.netlify/functions/course-watch-maps-background", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: String(req.headers.get("authorization") || "") },
+      body: JSON.stringify({ courseId })
+    });
+    return response.status === 202 || response.ok;
+  } catch (error) {
+    return false;
+  }
+}
+
+export { generateWatchPackage, verifiedUser, slug, supabaseFetch, hasSupabase, clearProgress, MAPS_TABLE };
 
 export const config = {
   path: "/api/course-watch-maps",

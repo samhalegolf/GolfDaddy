@@ -22,6 +22,8 @@
   var debugByCourse = {};// courseId -> boolean
   var generatingByCourse = {}; // courseId -> true while a generate() POST is in flight
   var progressByCourse = {};   // courseId -> the bake's own {stage,...} block, while it runs
+  var awaitingWorker = {};     // courseId -> true once the POST answered 202: the bake is the
+                               // background worker's now, and pollProgress learns the outcome
   var progressTimer = null;
   var dragState = null;
 
@@ -63,7 +65,24 @@
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (data) {
         if (!generatingByCourse[courseId]) return;
-        if (data && data.progress) { progressByCourse[courseId] = data.progress; rerender(); }
+        if (data && data.progress) { progressByCourse[courseId] = data.progress; rerender(); return; }
+        /* No progress on the row any more: the worker has finished, one way or the other
+           (it clears the column on every exit, success or failure). The POST that started
+           it only ever said "queued", so this is where the result is learned - from the
+           stored package itself. */
+        if (data && awaitingWorker[courseId]) {
+          delete awaitingWorker[courseId];
+          generatingByCourse[courseId] = false;
+          delete progressByCourse[courseId];
+          var pcoreDone = progressCore();
+          if (pcoreDone) pcoreDone.clearFloor(courseId + ":watch");
+          reports[courseId] = data;
+          holeByCourse[courseId] = data.holes && data.holes[0] ? data.holes[0].holeNumber : null;
+          var word = data.status === "ready" ? "ready" : data.status === "partial" ? "partial (" + data.readyHoleCount + "/" + data.holeCount + " holes)" : "failed";
+          toast("Watch maps " + word + " — " + Math.round((data.totalBytes || 0) / 1024) + " KB");
+          if (typeof gdAdminCourseDbShowWatchMaps === "function") gdAdminCourseDbShowWatchMaps(courseId);
+          else rerender();
+        }
       })
       .catch(function () { /* A missed poll is a stale bar for two seconds, not an error. */ })
       .then(function () {
@@ -84,6 +103,8 @@
        it says "working", not a percentage this code has no way to know. */
     generatingByCourse[courseId] = true;
     delete progressByCourse[courseId];
+    delete awaitingWorker[courseId];
+    var handedToWorker = false;
     var pcore = progressCore();
     if (pcore) pcore.clearFloor(courseId + ":watch");
     rerender();
@@ -97,6 +118,16 @@
         body: JSON.stringify({ courseId: courseId })
       });
       var data = await res.json().catch(function () { return null; });
+      /* 202: the server has queued the bake with its background worker (functions/
+         course-watch-maps-background.mjs) and will say nothing more on this request. The
+         bar keeps polling the progress column; the result arrives when that column clears. */
+      if (res.status === 202) {
+        awaitingWorker[courseId] = true;
+        handedToWorker = true;
+        if (data && data.progress) { progressByCourse[courseId] = data.progress; rerender(); }
+        toast("Watch maps generating…");
+        return true;
+      }
       if (res.status === 403) { toast("Admin only"); return false; }
       if (res.status === 404) { toast((data && data.error) || "Course has no geometry to generate from"); return false; }
       if (!res.ok) {
@@ -112,6 +143,9 @@
     } catch (error) {
       toast("Generate Watch Maps failed to send");
     } finally {
+      /* Handed to the worker: the bar stays up and pollProgress owns the ending. Everything
+         below is for the paths that finished (or failed) inside this request. */
+      if (handedToWorker) return true;
       generatingByCourse[courseId] = false;
       delete progressByCourse[courseId];
       if (progressTimer) { clearTimeout(progressTimer); progressTimer = null; }
