@@ -1,0 +1,7 @@
+<drawables>
+    <!-- 30x30 launcher icon (vivoactive 4S). Connect IQ asks a different
+         size per device and does not scale for you, so each size is its own
+         resource folder selected by monkey.jungle. Downsampled from the 60px
+         master; see garmin/README.md for how the images are produced. -->
+    <bitmap id="LauncherIcon" filename="launcher_icon.png"/>
+</drawables>

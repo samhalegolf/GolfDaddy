@@ -61,7 +61,7 @@ class GarminOutbox {
         // Muted build: the command would never leave, and a queued one would
         // hold the UI in its "busy" state until the end of time. Say so and
         // drop it, so SELECT/LOCK on the simulator stay harmless presses.
-        if (GarminTransmitPolicy.muted()) {
+        if (GarminTransmitPolicy.muted() && GarminTransmitPolicy.relayUrl() == null) {
             System.println("outbox muted: dropping " + command.wire()["type"]);
             return;
         }

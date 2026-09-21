@@ -44,6 +44,11 @@
             <iq:product id="approachs7047mm"/>
             <iq:product id="fenix6"/>
             <iq:product id="fr55"/>
+            <!-- Not a golf watch; on the list because it is the first real
+                 Garmin this app ran on (2026-09-21, sideloaded), and the only
+                 place the watch -> phone direction can be tested while the
+                 simulator segfaults on transmit - see UPLOAD.md. -->
+            <iq:product id="vivoactive4s"/>
         </iq:products>
         <iq:permissions>
             <iq:uses-permission id="Positioning"/>

@@ -246,6 +246,39 @@ Every simulator relaunch needs **adb Connection > Start** again, and so
 does every phone-app restart (the simulator's link dies with the phone's
 socket even though `lsof` may still show it).
 
+### Driving a round from the simulator: the relay
+
+The muted build cannot transmit, but the simulator's web requests are fine,
+so since 2026-09-21 the muted build POSTs every message it would have
+transmitted to `http://127.0.0.1:7382/watch` (`GarminTransmitPolicy.relayUrl`)
+instead of dropping it. `garmin/tools/sim-relay.js` listens there and hands
+each message to the phone app's WebView over the Chrome DevTools protocol,
+where `garmin/tools/sim-relay-phone.js` (injected by the relay, never
+shipped) feeds it into the exact code path a real Garmin message takes -
+same `receiveCommand`, same acknowledgement through the real native plugin,
+same inventory notes. Acknowledgements and Scenes still travel phone → watch
+over the tether, which works. Result: SELECT on the simulated watch takes
+the round over, SELECT again locks, and the phone's rules run for real.
+
+```bash
+adb forward tcp:7381 tcp:7381
+adb forward tcp:9222 localabstract:webview_devtools_remote_$(adb shell pidof com.claritygolf.caddy)
+node garmin/tools/sim-relay.js        # keep it running; logs every hop
+```
+
+Then `monkeydo` the muted `.prg`, **adb Connection > Start**, and press
+SELECT on the watch. The relay log shows `<- watch command TAKE_OVER` and
+`-> phone command => {...accepted:true...}`; the watch console shows
+`transmit relayed: [command]` then `rx: [acknowledgement]`. Re-run the
+9222 forward whenever the phone app restarts (its pid changes); the relay
+reconnects and re-injects its phone half on the next message.
+
+What the relay does NOT exercise: `Communications.transmit` itself and the
+phone's `onMessageReceived(List<Object>)` path in `GarminTransport.java`.
+Those two remain real-watch-only. (The watch console's
+`relay answered -1001` after each post is the simulator's own response-code
+quirk for a plain-HTTP JSON reply; the message has already been queued.)
+
 **Hole 1 of Millbrook drew on the simulated S62 on 2026-09-21**, after two
 drawing fixes the simulator surfaced (the muted build's `map frame:` line
 gives focus/scale/origin/player per framing):

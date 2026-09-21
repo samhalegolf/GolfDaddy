@@ -20,4 +20,17 @@ class GarminTransmitPolicy {
 
     (:tx_muted)
     static function muted() { return true; }
+
+    // Where a muted build sends what it would have transmitted, so a round
+    // can be DRIVEN from the simulator: tools/sim-relay.js listens here on
+    // the Mac and hands each message to the phone app over its debug
+    // channel, where it enters the very same code path a real Garmin
+    // message does (see garmin/UPLOAD.md, "Driving a round from the
+    // simulator"). The simulator's web requests do not crash; only its
+    // transmits do. Null in the live build, where transmit() is real.
+    (:tx_live)
+    static function relayUrl() { return null; }
+
+    (:tx_muted)
+    static function relayUrl() { return "http://127.0.0.1:7382/watch"; }
 }

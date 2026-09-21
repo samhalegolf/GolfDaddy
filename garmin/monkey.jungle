@@ -24,7 +24,7 @@ base.excludeAnnotations = tx_muted
 #
 #     Approach S62      35x35      Forerunner 55     35x35
 #     fenix 6           40x40      Approach S70 42mm 60x60
-#     Approach S70 47mm 70x70
+#     Approach S70 47mm 70x70      vivoactive 4S     30x30
 #
 # Deliberately no icon in `base`. A product with no line below fails the build
 # on a missing LauncherIcon, which is a loud, immediate error — far better
@@ -38,3 +38,4 @@ fr55.resourcePath = $(base.resourcePath);resources-icons/35
 fenix6.resourcePath = $(base.resourcePath);resources-icons/40
 approachs7042mm.resourcePath = $(base.resourcePath);resources-icons/60
 approachs7047mm.resourcePath = $(base.resourcePath);resources-icons/70
+vivoactive4s.resourcePath = $(base.resourcePath);resources-icons/30

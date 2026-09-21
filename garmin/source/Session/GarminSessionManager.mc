@@ -382,7 +382,24 @@ class GarminSessionManager {
         // is logged and dropped, because sending it would kill the
         // simulator. A normal build compiles this branch to `false`.
         if (GarminTransmitPolicy.muted()) {
-            System.println("transmit muted: " + dict.keys());
+            var relay = GarminTransmitPolicy.relayUrl();
+            if (relay == null) {
+                System.println("transmit muted: " + dict.keys());
+                return;
+            }
+            // Simulator relay (GarminTransmitPolicy.relayUrl): the message
+            // goes to the Mac as an HTTP POST instead of over the tether.
+            // Same dictionary, same moment; only the wire differs.
+            System.println("transmit relayed: " + dict.keys());
+            try {
+                Communications.makeWebRequest(relay, dict, {
+                    :method => Communications.HTTP_REQUEST_METHOD_POST,
+                    :headers => { "Content-Type" => Communications.REQUEST_CONTENT_TYPE_JSON },
+                    :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
+                }, method(:onRelayResponse));
+            } catch (e) {
+                System.println("relay threw: " + e.getErrorMessage());
+            }
             return;
         }
         try {
@@ -392,6 +409,15 @@ class GarminSessionManager {
             // data, never a command-style outbox item, so a dropped send
             // simply waits for the next opportunity.
         }
+    }
+
+    // The relay's answer is only ever informative: a command is settled by
+    // the phone's acknowledgement (which still arrives over the tether, the
+    // direction that works), never by "the relay took it". Compiled into
+    // every build so the method reference above always resolves; the live
+    // build simply never calls it.
+    function onRelayResponse(responseCode as Lang.Number, data as Lang.Dictionary or Lang.String or Null) as Void {
+        if (responseCode != 200) { System.println("relay answered " + responseCode + " " + data); }
     }
 
     // Communications.transmit takes a ConnectionListener object (onComplete /
