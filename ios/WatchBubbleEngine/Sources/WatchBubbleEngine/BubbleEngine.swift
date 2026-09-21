@@ -289,11 +289,16 @@ public enum BubbleEngine {
             let a = route[i - 1], b = route[i]
             let segment = Geo.distance(a, b)
             guard segment.isFinite, segment > 0 else { continue }
-            let brg = Geo.bearing(a, b)
             let steps = max(1, Int(ceil(segment / max(3, stepM))))
             for s in 1...steps {
-                let along = segment * (Double(s) / Double(steps))
-                samples.append((Geo.project(a, brg, along), progress + along))
+                /* Interpolated along the segment itself, matching the phone
+                   (bubble-engine-v2). Geo.bearing is the degree-space angle and
+                   Geo.project moves in metres, so projecting along that bearing
+                   veered ~9.5 degrees off the line at 45 degrees south - 42 m of
+                   rough at 250 m. */
+                let t = Double(s) / Double(steps)
+                let point = Coordinate(lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t)
+                samples.append((point, progress + segment * t))
             }
             progress += segment
         }

@@ -52,7 +52,7 @@ const CORE_FUNCS = [
   "gdActiveShotBagRows", "gdHasPlayableBag", "gdResolveShotBagClub",
   "gdMaxPlayableCarryM",
   // target rule
-  "gdTargetForGreenCentre", "gdStartIsInMappedTeeArea", "gdFairwayLineGrabAllowed",
+  "gdTargetForGreenCentre", "gdPointAlongLine", "gdStartIsInMappedTeeArea", "gdFairwayLineGrabAllowed",
   // wind (display-target drift only — never touches dispersion shape)
   "gdNormAngle", "gdWindEffectMeters", "gdWindLandingFromAim", "gdSyncWindLandingFromAim",
   // profile / pattern derivation

@@ -15363,7 +15363,21 @@ function gdTargetForGreenCentre(center,opts={}){
     const fairwayTarget=gdFairwayLineGrabAllowed()&&typeof window.gdMappedFairwayLayupTarget==="function"?window.gdMappedFairwayLayupTarget(start,center,maxCarry,{hole:opts.hole||gdMappedStartHoleNumber?.()}):null;
     if(fairwayTarget)return fairwayTarget;
   }catch(e){}
-  return project(start,bearing(start,center),maxCarry);
+  return gdPointAlongLine(start,center,maxCarry)||center;
+}
+/* The point `metres` along the straight line from `from` towards `to`, by
+   interpolating the segment itself. NOT project(from,bearing(from,to),metres):
+   bearing() is the engine's degree-space angle (atan2 of raw degree deltas)
+   and project() moves in metres with the latitude scaled in, so pairing them
+   veers off the line by ~9.5 degrees at 45 degrees south - 42 m of rough at
+   250 m (Millbrook hole 1, 2026-09-22). Returns null when the two points
+   coincide. */
+function gdPointAlongLine(from,to,metres){
+  if(!from||!to)return null;
+  const total=map.distance(from,to);
+  if(!Number.isFinite(total)||total<=0)return null;
+  const t=Math.max(0,Math.min(1,Number(metres)/total));
+  return L.latLng(from.lat+(to.lat-from.lat)*t,from.lng+(to.lng-from.lng)*t);
 }
 function gdWindIconMarkup(){
   return '<svg aria-hidden="true" viewBox="0 0 48 48"><path d="M9 17h20c4.4 0 6.6-5.4 3.5-8.5-2.4-2.4-6.5-1.5-7.6 1.7" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M8 25h28c5.2 0 7.8 6.3 4.1 10-2.9 2.9-7.8 1.7-9.1-2.1" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M13 33h11" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>';
@@ -17656,7 +17670,7 @@ function gdApplyHeadToTeeBagTarget(hole){
     }
   }catch(e){}
   if(!next){
-    try{next=project(start,bearing(start,greenCentre),maxCarry);}catch(e){}
+    try{next=gdPointAlongLine(start,greenCentre,maxCarry);}catch(e){}
   }
   if(!next)return false;
   gdSetTargetFromDisplayedLanding(next);

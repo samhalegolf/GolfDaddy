@@ -110,7 +110,14 @@ function gdTargetForGreenCentre(center,opts={}){
     const fairwayTarget=gdFairwayLineGrabAllowed()&&typeof window.gdMappedFairwayLayupTarget==="function"?window.gdMappedFairwayLayupTarget(start,center,maxCarry,{hole:opts.hole||gdMappedStartHoleNumber?.()}):null;
     if(fairwayTarget)return fairwayTarget;
   }catch(e){}
-  return project(start,bearing(start,center),maxCarry);
+  return gdPointAlongLine(start,center,maxCarry)||center;
+}
+function gdPointAlongLine(from,to,metres){
+  if(!from||!to)return null;
+  const total=map.distance(from,to);
+  if(!Number.isFinite(total)||total<=0)return null;
+  const t=Math.max(0,Math.min(1,Number(metres)/total));
+  return L.latLng(from.lat+(to.lat-from.lat)*t,from.lng+(to.lng-from.lng)*t);
 }
 function gdStartIsInMappedTeeArea(radiusM=78){
   if(!start||!map)return false;
@@ -621,12 +628,17 @@ function localPointToLatLng(center, shotBrg, x, y){
       const a=pts[i-1],b=pts[i];
       const seg=distance(a,b);
       if(!Number.isFinite(seg)||seg<=0)continue;
-      const brg=typeof bearing==='function'?bearing(a,b):Math.atan2(b.lng-a.lng,b.lat-a.lat);
       const steps=Math.max(1,Math.ceil(seg/Math.max(3,Number(stepM)||7)));
       for(let s=1;s<=steps;s++){
-        const along=seg*(s/steps);
-        const point=projectFramePoint(a,brg,along);
-        if(point)samples.push({point,progress:progress+along});
+        /* Interpolated along the segment itself, never projected along a
+           bearing. `bearing()` is the engine's degree-space angle (atan2 of raw
+           degree deltas) while project() moves in metres with the latitude
+           scaled in, and the two disagree by ~9.5 degrees at 45 degrees south -
+           every sample veered right of the fairway line and the layup landed
+           42 m into the rough at 250 m (Millbrook hole 1, 2026-09-22). */
+        const t=s/steps;
+        const point={lat:a.lat+(b.lat-a.lat)*t,lng:a.lng+(b.lng-a.lng)*t};
+        samples.push({point,progress:progress+seg*t});
       }
       progress+=seg;
     }

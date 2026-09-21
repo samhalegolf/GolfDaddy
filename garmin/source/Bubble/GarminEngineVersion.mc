@@ -12,7 +12,7 @@ module GarminEngineVersion {
 
     // Bump in step with BUBBLE_ENGINE_VERSION in app/js/caddy-watch.js and
     // with the bubbleEngineVersion recorded in the parity fixtures.
-    var CURRENT = "bubble-engine-v1";
+    var CURRENT = "bubble-engine-v2";
 
     // Agreement outcomes, as strings (Monkey C has no enum-with-payload):
     //   "agreed"              - same engine on both ends; local compute is on

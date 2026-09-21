@@ -29,7 +29,13 @@
      and a wrist that implements a different version stops computing locally
      and renders the phone's Bubble instead - which is a slightly staler
      answer, and far better than two engines silently disagreeing. */
-  var BUBBLE_ENGINE_VERSION = "bubble-engine-v1";
+  /* v2 (2026-09-22): the route sampler behind the default target interpolates
+     each segment instead of projecting along the degree-space bearing, which
+     drifted ~9.5 degrees at 45 degrees south. Bumped in step in
+     ios/WatchBubbleEngine EngineVersion.swift and garmin GarminEngineVersion.mc;
+     a wrist still on v1 stops computing locally and shows the phone's answer,
+     which is exactly the disagreement the check exists to catch. */
+  var BUBBLE_ENGINE_VERSION = "bubble-engine-v2";
   var LOCATION_SOURCES = ["phone-web", "phone-native", "apple-watch", "wear-os", "garmin"];
 
   function finite(n) { return Number.isFinite(Number(n)); }

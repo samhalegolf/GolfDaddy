@@ -30,7 +30,7 @@ public enum BubbleEngineVersion {
     /// The engine this build of the Watch implements. Bump it in step with
     /// `BUBBLE_ENGINE_VERSION` in app/js/caddy-watch.js and with the
     /// `bubbleEngineVersion` recorded in the parity fixtures.
-    public static let current = "bubble-engine-v1"
+    public static let current = "bubble-engine-v2"
 
     /* What the phone has told us, from the two places it says so.
      *

@@ -281,13 +281,18 @@ module GarminBubbleEngine {
             var b = route[i];
             var segment = GarminGeo.distance(a, b);
             if (segment == null || !GarminJS.isFinite(segment) || segment <= 0) { continue; }
-            var brg = GarminGeo.bearing(a, b);
             var stepFloor = stepM > 3.0 ? stepM : 3.0;
             var steps = Math.ceil(segment / stepFloor).toNumber();
             if (steps < 1) { steps = 1; }
             for (var s = 1; s <= steps; s += 1) {
-                var along = segment * (s.toDouble() / steps.toDouble());
-                samples.add({ "point" => GarminGeo.project(a, brg, along), "progress" => progress + along });
+                // Interpolated along the segment itself, matching the phone
+                // (bubble-engine-v2). GarminGeo.bearing is the degree-space
+                // angle and GarminGeo.project moves in metres, so projecting
+                // along that bearing veered ~9.5 degrees off the line at 45
+                // degrees south - 42 m of rough at 250 m.
+                var t = s.toDouble() / steps.toDouble();
+                var point = new GarminCoordinate(a.lat + (b.lat - a.lat) * t, a.lng + (b.lng - a.lng) * t);
+                samples.add({ "point" => point, "progress" => progress + segment * t });
             }
             progress += segment;
         }

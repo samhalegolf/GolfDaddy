@@ -14,7 +14,7 @@
     "only covers a mid-iron from the middle of the fairway would pass on an engine",
     "that had lost handedness, lost the ghost bag, or fabricated an aim offset."
   ],
-  "bubbleEngineVersion": "bubble-engine-v1",
+  "bubbleEngineVersion": "bubble-engine-v2",
   "tolerances": {
     "$comment": "Per-field, because 0.1 means different things to a metre, a degree and a latitude. 1e-7 degrees is ~11mm.",
     "metres": 0.1,
@@ -798,8 +798,8 @@
           }
         ],
         "defaultTarget": {
-          "lat": -36.9144171,
-          "lng": 174.740381
+          "lat": -36.9144098,
+          "lng": 174.7405293
         },
         "targetDistanceM": 420.799,
         "shotBearingDeg": 202.35,
@@ -954,8 +954,8 @@
           }
         ],
         "defaultTarget": {
-          "lat": -36.915222,
-          "lng": 174.7399238
+          "lat": -36.9152429,
+          "lng": 174.7399905
         },
         "targetDistanceM": 227.95,
         "shotBearingDeg": 202.35,
@@ -1350,16 +1350,16 @@
           }
         ],
         "defaultTarget": {
-          "lat": -36.91433,
-          "lng": 174.740254
+          "lat": -36.9143952,
+          "lng": 174.7403762
         },
-        "targetDistanceM": 127.871,
-        "shotBearingDeg": 216.03,
+        "targetDistanceM": 128.015,
+        "shotBearingDeg": 210.18,
         "club": "9i",
         "carryM": 118,
         "totalM": 127,
         "aimOffsetDeg": 3.2,
-        "aimOffsetM": 7.15,
+        "aimOffsetM": 7.16,
         "clusterWidthM": 17.5,
         "clusterDepthM": 23,
         "clusterTiltDeg": 5.35,
@@ -1368,43 +1368,43 @@
         "visualTiltDeg": 6.71,
         "ghostBag": false,
         "bubbleCentre": {
-          "lat": -36.9142884,
-          "lng": 174.7401928
+          "lat": -36.9143591,
+          "lng": 174.7403096
         },
         "ringSampleCount": 8,
         "ringResolution": 168,
         "ringSample": [
           {
-            "lat": -36.9143441,
-            "lng": 174.7401094
+            "lat": -36.9144218,
+            "lng": 174.7402342
           },
           {
-            "lat": -36.9142677,
-            "lng": 174.7400685
+            "lat": -36.9143494,
+            "lng": 174.7401832
           },
           {
-            "lat": -36.9142033,
-            "lng": 174.7401004
+            "lat": -36.9142827,
+            "lng": 174.7402061
           },
           {
-            "lat": -36.9141887,
-            "lng": 174.7401865
+            "lat": -36.9142606,
+            "lng": 174.7402897
           },
           {
-            "lat": -36.9142325,
-            "lng": 174.7402764
+            "lat": -36.9142963,
+            "lng": 174.7403851
           },
           {
-            "lat": -36.914309,
-            "lng": 174.7403173
+            "lat": -36.9143688,
+            "lng": 174.7404362
           },
           {
-            "lat": -36.9143734,
-            "lng": 174.7402853
+            "lat": -36.9144356,
+            "lng": 174.7404131
           },
           {
-            "lat": -36.9143879,
-            "lng": 174.7401991
+            "lat": -36.9144575,
+            "lng": 174.7403294
           }
         ]
       }
@@ -1678,7 +1678,7 @@
       "snapshot against its own recomputation, so a disagreement here is not cosmetic: it would",
       "make the wrist reject every bag the phone sends."
     ],
-    "engineVersion": "bubble-engine-v1",
+    "engineVersion": "bubble-engine-v2",
     "cases": [
       {
         "name": "account bag with a saved aim",
@@ -1707,7 +1707,7 @@
           "handedness": "right"
         },
         "expect": {
-          "fingerprint": "v1|g0|Driver:205:228|5i:155:167|PW:103:108|b:3.20:right|e:bubble-engine-v1",
+          "fingerprint": "v1|g0|Driver:205:228|5i:155:167|PW:103:108|b:3.20:right|e:bubble-engine-v2",
           "clubs": [
             {
               "club": "Driver",
@@ -1759,7 +1759,7 @@
           "handedness": "right"
         },
         "expect": {
-          "fingerprint": "v1|g0|Driver:205:228|5i:155:167|PW:103:108|b:3.20:right|e:bubble-engine-v1",
+          "fingerprint": "v1|g0|Driver:205:228|5i:155:167|PW:103:108|b:3.20:right|e:bubble-engine-v2",
           "clubs": [
             {
               "club": "Driver",
@@ -1799,7 +1799,7 @@
           "handedness": "right"
         },
         "expect": {
-          "fingerprint": "v1|g0|Driver:205:228|b:-:right|e:bubble-engine-v1",
+          "fingerprint": "v1|g0|Driver:205:228|b:-:right|e:bubble-engine-v2",
           "clubs": [
             {
               "club": "Driver",
@@ -1830,7 +1830,7 @@
           "handedness": "right"
         },
         "expect": {
-          "fingerprint": "v1|g0|Driver:205:228|b:0.00:right|e:bubble-engine-v1",
+          "fingerprint": "v1|g0|Driver:205:228|b:0.00:right|e:bubble-engine-v2",
           "clubs": [
             {
               "club": "Driver",
@@ -1862,7 +1862,7 @@
           "handedness": "left"
         },
         "expect": {
-          "fingerprint": "v1|g0|Driver:205:228|b:3.20:left|e:bubble-engine-v1",
+          "fingerprint": "v1|g0|Driver:205:228|b:3.20:left|e:bubble-engine-v2",
           "clubs": [
             {
               "club": "Driver",
@@ -1895,7 +1895,7 @@
           "handedness": "right"
         },
         "expect": {
-          "fingerprint": "v1|g1|Driver:205:228|b:3.20:right|e:bubble-engine-v1",
+          "fingerprint": "v1|g1|Driver:205:228|b:3.20:right|e:bubble-engine-v2",
           "clubs": [
             {
               "club": "Driver",
@@ -1927,7 +1927,7 @@
           "handedness": "right"
         },
         "expect": {
-          "fingerprint": "v1|g0|7i:138:148|b:1.67:right|e:bubble-engine-v1",
+          "fingerprint": "v1|g0|7i:138:148|b:1.67:right|e:bubble-engine-v2",
           "clubs": [
             {
               "club": "7i",
@@ -1959,7 +1959,7 @@
           "handedness": "right"
         },
         "expect": {
-          "fingerprint": "v1|g0|7i:138:138|b:1.60:right|e:bubble-engine-v1",
+          "fingerprint": "v1|g0|7i:138:138|b:1.60:right|e:bubble-engine-v2",
           "clubs": [
             {
               "club": "7i",
@@ -1979,7 +1979,7 @@
   "playerWire": {
     "accountBag": {
       "version": 1,
-      "fingerprint": "v1|g0|Driver:205:228|7i:138:148|b:3.20:right|e:bubble-engine-v1",
+      "fingerprint": "v1|g0|Driver:205:228|7i:138:148|b:3.20:right|e:bubble-engine-v2",
       "bag": {
         "isGhost": false,
         "clubs": [
@@ -1999,11 +1999,11 @@
         "handedness": "right",
         "offsetDeg": 3.2
       },
-      "engineVersion": "bubble-engine-v1"
+      "engineVersion": "bubble-engine-v2"
     },
     "noMyBubble": {
       "version": 1,
-      "fingerprint": "v1|g0|Driver:205:228|b:-:left|e:bubble-engine-v1",
+      "fingerprint": "v1|g0|Driver:205:228|b:-:left|e:bubble-engine-v2",
       "bag": {
         "isGhost": false,
         "clubs": [
@@ -2017,11 +2017,11 @@
       "bubble": {
         "handedness": "left"
       },
-      "engineVersion": "bubble-engine-v1"
+      "engineVersion": "bubble-engine-v2"
     },
     "ghostBag": {
       "version": 1,
-      "fingerprint": "v1|g1|Driver:230:255|b:0.00:right|e:bubble-engine-v1",
+      "fingerprint": "v1|g1|Driver:230:255|b:0.00:right|e:bubble-engine-v2",
       "bag": {
         "isGhost": true,
         "clubs": [
@@ -2036,7 +2036,7 @@
         "handedness": "right",
         "offsetDeg": 0
       },
-      "engineVersion": "bubble-engine-v1"
+      "engineVersion": "bubble-engine-v2"
     }
   }
 }
