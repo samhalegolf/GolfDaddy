@@ -1,3 +1,4 @@
+using Toybox.System;
 using Toybox.WatchUi;
 using Toybox.Lang;
 
@@ -21,8 +22,9 @@ using Toybox.Lang;
 // — no device in the Phase 1 matrix (Approach S62/S70, Fenix 6, Forerunner
 // 55) has a physical left/right control, and inventing an unproven
 // axis-toggle UX without real hardware to test it against would be a guess
-// dressed up as a decision. Touch devices get full 2D freedom via drag
-// (onTouch below). See garmin/README.md's Phase 3 section.
+// dressed up as a decision. Touch devices get full 2D freedom via tap
+// (every touch device) and drag (API 3.3+) — onTap/onDrag below. See
+// garmin/README.md's Phase 3 section.
 class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
     var session;    // GarminSessionManager
     var view;        // CaddyAppView
@@ -36,6 +38,7 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
     }
 
     function onSelect() {
+        if (GarminTransmitPolicy.muted()) { System.println("onSelect (map=" + view.showingMap + ")"); }
         router.dispatch(InputAction.SELECT);
         return true;
     }
@@ -101,40 +104,86 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
         return false;
     }
 
-    // ---- Touch drag (plan step 13) ----
+    // ---- Touch: tap and drag on the map (plan step 13) ----
     //
-    // UNVERIFIED: this session does not have high confidence in Connect
-    // IQ's exact touch-event API shape (constant names for start/move/end,
-    // and whether coordinates arrive via getCoordinates() returning
-    // [x, y]). Written defensively — every field access is guarded with
-    // `has :symbol` so this degrades to doing nothing rather than crashing
-    // on an SDK version where the shape differs. GarminMapView's
-    // dragStart/dragTo/dragEnd (the state machine + screen->image->
-    // coordinate->Bubble pipeline) are the part of this session's work that
-    // IS confident; only this OS-event binding needs real-device
-    // confirmation.
-    function onTouch(touchEvent) {
-        if (!view.showingMap || !session.face().equals(GarminSessionManager.FACE_PLAYING)) { return false; }
-        if (!(touchEvent has :getCoordinates)) { return false; }
-        var coords = touchEvent.getCoordinates();
-        if (coords == null || coords.size() < 2) { return false; }
-        var x = coords[0];
-        var y = coords[1];
+    // VERIFIED 2026-09-22 against the installed SDK and the S62 simulator.
+    // The first pass here defined `onTouch`, which is not a Connect IQ
+    // callback and so never fired; the base BehaviorDelegate turned every
+    // screen tap into onSelect instead. What the OS actually delivers:
+    //
+    //   onTap(ClickEvent)   every touch device, API 1.0+. getCoordinates()
+    //                       is [x, y] in screen points; getType() is
+    //                       CLICK_TYPE_TAP / _HOLD / _RELEASE.
+    //   onDrag(DragEvent)   API 3.3.0+ only (vivoactive 4S, Approach S70).
+    //                       getType() is DRAG_TYPE_START / _CONTINUE / _STOP.
+    //                       The Approach S62 is Connect IQ 3.0 and never
+    //                       sends one, so on it a tap is the whole gesture.
+    //
+    // Semantics: a tap on the map moves the target to the tapped point and
+    // confirms it (AIM_AT once); a drag moves it under the finger and
+    // confirms on release. Either enters Aim Mode by itself. Off the map,
+    // or when the wrist cannot aim, the tap falls through to the base
+    // delegate and stays a SELECT, so the Numbers face's LOCK still works.
+    function mapAimable() {
+        return view.showingMap && session.face().equals(GarminSessionManager.FACE_PLAYING) && view.mapView.canAimNow();
+    }
 
-        var type = (touchEvent has :getType) ? touchEvent.getType() : null;
-        if (type != null && WatchUi has :TOUCH_START && type == WatchUi.TOUCH_START) {
-            view.mapView.dragStart(x, y);
-        } else if (type != null && WatchUi has :TOUCH_MOVE && type == WatchUi.TOUCH_MOVE) {
-            view.mapView.dragTo(x, y);
-        } else if (type != null && WatchUi has :TOUCH_END && type == WatchUi.TOUCH_END) {
-            view.mapView.dragEnd();
-        } else if (type != null && WatchUi has :TOUCH_RELEASE && type == WatchUi.TOUCH_RELEASE) {
-            view.mapView.dragEnd();
-        } else if (!view.mapView.dragActive) {
-            // No recognised type constant on this SDK: treat a bare touch
-            // report as a tap-start-and-end so the target still moves under
-            // a single tap even without continuous drag tracking.
-            view.mapView.dragStart(x, y);
+    function onTap(clickEvent) {
+        if (GarminTransmitPolicy.muted()) {
+            System.println("onTap type=" + clickEvent.getType() + " at " + clickEvent.getCoordinates()
+                + " map=" + view.showingMap + " aimable=" + mapAimable());
+        }
+        if (!mapAimable()) { return false; }
+        var coords = clickEvent.getCoordinates();
+        if (coords == null || coords.size() < 2) { return false; }
+        if (clickEvent.getType() != WatchUi.CLICK_TYPE_TAP) { return true; }
+        view.mapView.dragStart(coords[0], coords[1]);
+        view.mapView.dragEnd();
+        WatchUi.requestUpdate();
+        return true;
+    }
+
+    // Press-and-hold on the map places the target at the finger and
+    // confirms on release. Real callbacks on every touch device (ClickEvent
+    // CLICK_TYPE_HOLD / CLICK_TYPE_RELEASE), and the one positional touch
+    // the simulator actually delivers to this delegate - its profiles hand
+    // a plain tap straight to onSelect with no coordinates - so this is
+    // also how tap-to-aim's screen->image->coordinate path gets exercised
+    // without a watch in hand.
+    function onHold(clickEvent) {
+        if (GarminTransmitPolicy.muted()) { System.println("onHold at " + clickEvent.getCoordinates() + " aimable=" + mapAimable()); }
+        if (!mapAimable()) { return false; }
+        var coords = clickEvent.getCoordinates();
+        if (coords == null || coords.size() < 2) { return false; }
+        view.mapView.dragStart(coords[0], coords[1]);
+        WatchUi.requestUpdate();
+        return true;
+    }
+
+    function onRelease(clickEvent) {
+        if (GarminTransmitPolicy.muted()) { System.println("onRelease at " + clickEvent.getCoordinates() + " dragActive=" + view.mapView.dragActive); }
+        if (!view.mapView.dragActive) { return false; }
+        var coords = clickEvent.getCoordinates();
+        if (coords != null && coords.size() >= 2) { view.mapView.dragTo(coords[0], coords[1]); }
+        view.mapView.dragEnd();
+        WatchUi.requestUpdate();
+        return true;
+    }
+
+    function onDrag(dragEvent) {
+        if (GarminTransmitPolicy.muted()) {
+            System.println("onDrag type=" + dragEvent.getType() + " at " + dragEvent.getCoordinates() + " aimable=" + mapAimable());
+        }
+        if (!mapAimable()) { return false; }
+        var coords = dragEvent.getCoordinates();
+        if (coords == null || coords.size() < 2) { return false; }
+        var type = dragEvent.getType();
+        if (WatchUi has :DRAG_TYPE_START && type == WatchUi.DRAG_TYPE_START) {
+            view.mapView.dragStart(coords[0], coords[1]);
+        } else if (WatchUi has :DRAG_TYPE_CONTINUE && type == WatchUi.DRAG_TYPE_CONTINUE) {
+            view.mapView.dragTo(coords[0], coords[1]);
+        } else if (WatchUi has :DRAG_TYPE_STOP && type == WatchUi.DRAG_TYPE_STOP) {
+            view.mapView.dragTo(coords[0], coords[1]);
             view.mapView.dragEnd();
         }
         WatchUi.requestUpdate();

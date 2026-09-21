@@ -273,6 +273,20 @@ SELECT on the watch. The relay log shows `<- watch command TAKE_OVER` and
 9222 forward whenever the phone app restarts (its pid changes); the relay
 reconnects and re-injects its phone half on the next message.
 
+Aiming from the simulated watch (verified 2026-09-22): on the map face
+SELECT enters Aim Mode (the target seeds at the phone's own placement - the
+green when the bag reaches it, otherwise the bag's layup point on the
+fairway line, `targetForGreenCentre`), swipe up/down nudges it, SELECT again
+sends AIM_AT and the phone's target moves. The wrist's own Bubble ring
+needs the simulator's Settings > Set Position AND Set GPS Quality = Good
+(both reset on every simulator relaunch). Positional aiming works here too,
+by **press-and-hold on the map**: the simulator delivers `onHold` /
+`onRelease` with coordinates (a plain tap it turns into a bare onSelect), and
+so does every touch Garmin. Verified: a hold moved the ring to the finger and
+AIM_AT moved the phone's target. Plain tap-to-aim (`onTap`) and drag-to-aim
+(`onDrag`, API 3.3+) go through the same code and can only be seen on a real
+watch. The delegate's earlier `onTouch` was never a Connect IQ callback.
+
 What the relay does NOT exercise: `Communications.transmit` itself and the
 phone's `onMessageReceived(List<Object>)` path in `GarminTransport.java`.
 Those two remain real-watch-only. (The watch console's
