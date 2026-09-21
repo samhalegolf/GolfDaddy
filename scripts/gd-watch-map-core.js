@@ -49,19 +49,35 @@
        see buildGroundSvg/buildMarkersSvg and functions/course-watch-maps.mjs's
        terrain step. Both are purely cosmetic: they change no framing, no
        projection, and nothing buildHoleReference measures, so a v2 package still
-       reads correctly and only needs a re-bake to pick up the new look. */
-    version: 3,
+       reads correctly and only needs a re-bake to pick up the new look.
+
+       v4 trimmed the vertical surplus. v3 padded the frame by a fraction of its
+       own span, above and below whatever surface vertex reached furthest, so a
+       500m hole carried 100-160m of ground behind the tee and 75-95m past the
+       green - 38% of Millbrook's rows lay outside tee..green, and on a device
+       that draws 1:1 (Approach S62) that surplus is what set the scale and left
+       the hole 200px wide on a 260px face. Now the frame's height is the hole
+       itself (tee to the back of the green) plus fixed metres either end, and
+       a surface vertex beyond that no longer stretches it - it is still drawn,
+       and simply runs off the edge, exactly as the corridor rule already treats
+       ground to the side. The freed rows go to scale: the same 1536-row cap now
+       covers ~560m instead of ~760m on a long hole, so it bakes wider and
+       sharper for the same pixels, and short holes just get shorter. */
+    version: 4,
     canvas: {
       /* Ceiling, not a fixed size - see computeCanvasFit. Most holes land under both ceilings;
          a long narrow par 5 is height-limited, a short wide-corridor hole is width-limited. */
       targetWidthPx: 448,
       maxHeightPx: 1536,
       minSpanPx: 96,
-      /* Padding around the framed corridor, as a fraction of its own span.
-         teeMarginFraction is extra padding added only below the tee, so the Watch
-         viewport has room to show the player standing behind their ball. */
+      /* Side padding, as a fraction of the framed width. */
       marginFraction: 0.14,
-      teeMarginFraction: 0.16
+      /* Vertical padding, in metres of ground, measured from the hole itself:
+         behind the tee, room to show the player standing behind their ball; past
+         the back of the green, room for the longest putt's overshoot. Fixed rather
+         than a fraction because the need does not grow with the hole's length. */
+      behindTeeM: 20,
+      beyondGreenM: 30
     },
     /* The play corridor: how far either side of the hole's own route this map is
        about. It decides FRAMING ONLY - which ground the canvas is fitted to -
@@ -447,19 +463,33 @@
      no taller than canvas.maxHeightPx - a "contain" fit (same idea as play-surface.js's
      fitContain), computed in the hole-oriented rotated space so the fit respects the
      tee-up/green-up framing rather than the raw unrotated bounding box. */
-  function computeCanvasFit(rotatedPoints, canvas) {
+  /* `vertical`, when given, is the frame's own top-to-bottom extent in rotated
+     units - {top, bottom} - and wins over the points: the points still set the
+     width, but a vertex above `top` or below `bottom` no longer stretches the
+     frame (recipe v4). Without it (v3 and earlier recipes, which carry
+     teeMarginFraction instead), the points set both axes and the padding is a
+     fraction of the span. */
+  function computeCanvasFit(rotatedPoints, canvas, vertical) {
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     rotatedPoints.forEach(function (p) {
       if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
       if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
     });
-    var spanX = Math.max(1, maxX - minX), spanY = Math.max(1, maxY - minY);
+    var spanX = Math.max(1, maxX - minX);
     var marginX = spanX * canvas.marginFraction;
-    var marginTop = spanY * canvas.marginFraction;
-    var marginBottom = spanY * (canvas.marginFraction + canvas.teeMarginFraction);
-    var boundsMinX = minX - marginX, boundsMinY = minY - marginTop;
+    var boundsMinX = minX - marginX;
     var boundsWidth = spanX + marginX * 2;
-    var boundsHeight = spanY + marginTop + marginBottom;
+    var boundsMinY, boundsHeight;
+    if (vertical && Number.isFinite(vertical.top) && Number.isFinite(vertical.bottom)) {
+      boundsMinY = vertical.top;
+      boundsHeight = Math.max(1, vertical.bottom - vertical.top);
+    } else {
+      var spanY = Math.max(1, maxY - minY);
+      var marginTop = spanY * canvas.marginFraction;
+      var marginBottom = spanY * (canvas.marginFraction + (canvas.teeMarginFraction || 0));
+      boundsMinY = minY - marginTop;
+      boundsHeight = spanY + marginTop + marginBottom;
+    }
     var scale = Math.min(canvas.targetWidthPx / boundsWidth, canvas.maxHeightPx / boundsHeight);
     if (!(scale > 0) || !Number.isFinite(scale)) scale = 1;
     var imageWidth = Math.max(canvas.minSpanPx, Math.round(boundsWidth * scale));
@@ -688,11 +718,32 @@
         if (distanceToPolyline(worldPx(p.lat, p.lng, refZoom), routeWorld) <= corridorPx) framePoints.push(p);
       });
     });
-    var rotated = framePoints.map(function (p) {
+    var toRotated = function (p) {
       var world = worldPx(p.lat, p.lng, refZoom);
       return rotate({ x: world.x - teeWorld.x, y: world.y - teeWorld.y }, bearing);
-    });
-    var fit = computeCanvasFit(rotated, recipe.canvas);
+    };
+    var rotated = framePoints.map(toRotated);
+
+    /* Recipe v4: the frame's height is the hole itself plus fixed metres. In
+       rotated space the tee sits at the origin and the green is "up" (negative
+       y), so the top is the furthest-up point of the green - its back edge when
+       the outline is mapped, its centre otherwise - and the bottom is the tee.
+       A fairway or bunker vertex beyond either end is still drawn; it simply no
+       longer decides the frame. Metres become rotated units through the same
+       ground resolution the rest of this projection uses. */
+    var vertical = null;
+    if (Number.isFinite(recipe.canvas.behindTeeM) && Number.isFinite(recipe.canvas.beyondGreenM)) {
+      var unitsPerMetre = 1 / groundResolutionMPerPx(tee.lat, refZoom);
+      var holeTop = Infinity, holeBottom = -Infinity;
+      [green].concat(geometry.greenShape || []).map(toRotated).forEach(function (p) { if (p.y < holeTop) holeTop = p.y; });
+      [tee].map(toRotated).forEach(function (p) { if (p.y > holeBottom) holeBottom = p.y; });
+      if (holeTop > holeBottom) { var swap = holeTop; holeTop = holeBottom; holeBottom = swap; }
+      vertical = {
+        top: holeTop - recipe.canvas.beyondGreenM * unitsPerMetre,
+        bottom: holeBottom + recipe.canvas.behindTeeM * unitsPerMetre
+      };
+    }
+    var fit = computeCanvasFit(rotated, recipe.canvas, vertical);
     var teeImagePx = { x: -fit.originRotated.x * fit.scale, y: -fit.originRotated.y * fit.scale };
     var transform = anchoredTransform(teeWorld, teeImagePx, bearing, fit.scale);
 

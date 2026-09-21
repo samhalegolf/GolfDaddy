@@ -439,4 +439,50 @@ function sawtoothSquare() {
   assert.strictEqual(core.wearableDeliveryVerdict(null).ok, false);
 })();
 
+// --- recipe v4: the frame's height is the hole plus fixed metres, never a surface ------------
+
+(function testVerticalFrameIsTheHoleNotTheSurfaces() {
+  const recipe = core.WATCH_MAP_RECIPE_V1;
+  assert.strictEqual(recipe.version, 4);
+  const plain = longHole();
+  const base = core.buildWatchHoleFrame(recipe, plain, {});
+  assert.ok(base.ok, base.reason);
+
+  /* The whole image, top to bottom, is the tee-to-green span plus the two
+     fixed margins - within a pixel of rounding. */
+  const sr = base.spatialReference;
+  const teePx = core.projectLatLngToImage(sr, plain.tee.lat, plain.tee.lng);
+  const greenBackPx = Math.min(...[plain.green].concat(plain.greenShape).map(p => core.projectLatLngToImage(sr, p.lat, p.lng).y));
+  assert.ok(Math.abs(greenBackPx * sr.metresPerPixel - recipe.canvas.beyondGreenM) < 1.5,
+    "the back of the green sits beyondGreenM below the top edge, got " + (greenBackPx * sr.metresPerPixel).toFixed(1) + "m");
+  assert.ok(Math.abs((sr.imageHeight - teePx.y) * sr.metresPerPixel - recipe.canvas.behindTeeM) < 1.5,
+    "the tee sits behindTeeM above the bottom edge, got " + ((sr.imageHeight - teePx.y) * sr.metresPerPixel).toFixed(1) + "m");
+
+  /* A fairway ribbon that runs 150m past the green and 150m behind the tee
+     (both inside the corridor, straight along the play line) must not change
+     the frame's height or its scale. Under v3 it widened the span both ways
+     and the whole hole shrank to fit around it. */
+  const stretched = longHole();
+  const dLat = plain.green.lat - plain.tee.lat, dLng = plain.green.lng - plain.tee.lng;
+  const far = 150 / 445; // ~150m along a ~445m hole
+  stretched.fairways.push([
+    { lat: plain.tee.lat - dLat * far, lng: plain.tee.lng - dLng * far },
+    { lat: plain.green.lat + dLat * far, lng: plain.green.lng + dLng * far },
+    { lat: plain.green.lat + dLat * far + 0.00002, lng: plain.green.lng + dLng * far }
+  ]);
+  const withRibbon = core.buildWatchHoleFrame(recipe, stretched, {});
+  assert.ok(withRibbon.ok, withRibbon.reason);
+  assert.strictEqual(withRibbon.height, base.height, "ground beyond the ends must not add rows");
+  assert.ok(Math.abs(withRibbon.spatialReference.metresPerPixel - sr.metresPerPixel) < 1e-9,
+    "ground beyond the ends must not change the scale");
+
+  /* And the point of it all: against the v3 rule on the same hole, the rows
+     that used to be padding now go to resolution. */
+  const v3 = JSON.parse(JSON.stringify(recipe));
+  v3.version = 3; delete v3.canvas.behindTeeM; delete v3.canvas.beyondGreenM; v3.canvas.teeMarginFraction = 0.16;
+  const oldWay = core.buildWatchHoleFrame(v3, stretched, {});
+  assert.ok(oldWay.spatialReference.metresPerPixel > withRibbon.spatialReference.metresPerPixel * 1.15,
+    "v4 must be materially sharper than v3 on a hole with surfaces past its ends");
+})();
+
 console.log("watch-map-core passed");
