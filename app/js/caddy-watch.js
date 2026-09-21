@@ -256,6 +256,14 @@
       return true;
     }
 
+    function targetDistanceM(scene) {
+      var d = scene && scene.distances;
+      var from = d && point(d.from);
+      var aim = scene && scene.bubble && scene.bubble.show ? point(scene.bubble.target) : null;
+      if (from && aim) return rounded(distance.haversineMeters(from, aim), 0);
+      return d ? d.centre : null;
+    }
+
     function project(scene) {
       var b = bubbleFor(scene, bubbleModel);
       var r = scene && scene.hole && scene.hole.rec || null;
@@ -291,7 +299,14 @@
              before anyone is standing anywhere. */
           teeToGreenM: r && point(r.tee) && point(r.green) ? rounded(distance.haversineMeters(point(r.tee), point(r.green)), 0) : null
         },
-        distance: { target: scene && scene.distances && scene.distances.centre, front: scene && scene.distances && scene.distances.front, centre: scene && scene.distances && scene.distances.centre, back: scene && scene.distances && scene.distances.back },
+        /* `target` is the distance to the AIM when there is one - the number the
+           Garmin numbers face shows above the club when it cannot compute its
+           own Bubble, and the number the phone's card shows while the wrist
+           drives. It used to be the green centre under that name, so a wrist
+           without a local engine showed 506 m over "DRIVER" on a 275 m aim
+           (2026-09-22). With no aim it stays the centre, which is what the
+           Apple ShotView reads as "the phone offers a distance". */
+        distance: { target: targetDistanceM(scene), front: scene && scene.distances && scene.distances.front, centre: scene && scene.distances && scene.distances.centre, back: scene && scene.distances && scene.distances.back },
         suggestion: b ? { club: b.club, carryM: b.carryM, totalM: b.totalM } : null,
         shot: { locked: mode === "aim", open: !!(scene && scene.finishControl && scene.finishControl.show) || mode === "aim" },
         target: scene && scene.bubble && scene.bubble.show ? copyPoint(scene.bubble.target) : null,

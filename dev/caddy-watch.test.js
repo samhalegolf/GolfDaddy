@@ -17,6 +17,19 @@ function ready() {
   return { m, w: createWatchBridge({ marshal: m, now: () => 1000, bubbleModel: () => ({ payload: { club: "8i", baseCarry: 135, totalM: 146, clusterWidthM: 18, clusterDepthM: 24, clusterTiltDeg: 4 } }) }) };
 }
 console.log("\n— Caddy Watch compatibility —");
+check("distance.target is the distance to the aim, not the green centre", () => {
+  const { w } = ready();
+  const lock = w.receiveCommand({ commandId: "lock-d", roundId: "round-1", baseRevision: w.scene().revision, type: "LOCK", payload: {} });
+  const s = w.scene();
+  assert.ok(s.bubble && s.target, "a locked shot carries a Bubble and its target");
+  const toRad = d => d * Math.PI / 180, R = 6371000;
+  const dLat = toRad(s.target.lat - TEE.lat), dLng = toRad(s.target.lng - TEE.lng);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(TEE.lat)) * Math.cos(toRad(s.target.lat)) * Math.sin(dLng / 2) ** 2;
+  const toAim = 2 * R * Math.asin(Math.sqrt(a));
+  assert.ok(Math.abs(s.distance.target - toAim) <= 1, "target distance must be the metres to the aim, got " + s.distance.target + " vs " + toAim.toFixed(1));
+  assert.notStrictEqual(s.distance.target, s.distance.centre, "the aim is not the green centre on this hole");
+  void lock;
+});
 check("projects Marshal state into a platform-neutral Standard scene", () => {
   const { w } = ready(), s = w.scene();
   assert.equal(s.schemaVersion, 1); assert.equal(s.roundId, "round-1"); assert.equal(s.mode, "standard"); assert.equal(s.hole.par, 4);
