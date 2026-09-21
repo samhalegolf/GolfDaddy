@@ -125,11 +125,18 @@ class GarminMapCamera {
 
     static function axisOrigin(scaledLength, viewLength, focus) {
         if (scaledLength <= viewLength) { return (viewLength - scaledLength) / 2.0; }
+        // The origin that puts `focus` at the view's centre, clamped so the
+        // image still covers the whole view: no further right/down than 0,
+        // no further left/up than (view - image). That is max(b, min(a, c)).
+        // It used to be min(b, c), which is never above b, so every framing
+        // pinned the image's far edge to the view's far edge and the player
+        // sat off-screen above it (seen 2026-09-21 on the simulator: focus
+        // 1158 of 1536 rows, origin -1736.8 = exactly the bottom-edge clamp).
         var a = 0.0;
         var b = viewLength - scaledLength;
         var c = viewLength / 2.0 - focus;
-        var lower = a < b ? a : b;
-        return lower < c ? lower : c;
+        var centred = c < a ? c : a;
+        return centred > b ? centred : b;
     }
 
     // The inverse of place() — Phase 3's whole interaction path starts here:

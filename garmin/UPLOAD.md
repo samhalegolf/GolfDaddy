@@ -246,6 +246,19 @@ Every simulator relaunch needs **adb Connection > Start** again, and so
 does every phone-app restart (the simulator's link dies with the phone's
 socket even though `lsof` may still show it).
 
+**Hole 1 of Millbrook drew on the simulated S62 on 2026-09-21**, after two
+drawing fixes the simulator surfaced (the muted build's `map frame:` line
+gives focus/scale/origin/player per framing):
+
+- `GarminMapCamera.axisOrigin` clamped to the wrong edge (`min(b, c)` where
+  the Swift original is `min(0, max(b, c))`), so every framing pinned the
+  image's far edge to the view and the player sat above the screen.
+- The Approach S62 runs Connect IQ 3.0 and has only `drawBitmap`: no
+  `drawBitmap2`, no `drawScaledBitmap`. `GarminMapView` now pins the camera
+  to scale 1.0 on such devices and uses `drawScaledBitmap` on 3.2+ devices
+  without `drawBitmap2`; before, the unscaled bitmap was drawn at an origin
+  computed for the scaled size, i.e. entirely off-screen.
+
 ---
 
 ## 5. Before you package — the things that are still placeholders

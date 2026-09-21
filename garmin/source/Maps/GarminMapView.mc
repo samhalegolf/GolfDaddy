@@ -1,3 +1,4 @@
+using Toybox.System;
 using Toybox.Lang;
 using Toybox.WatchUi;
 using Toybox.Graphics;
@@ -130,7 +131,23 @@ class GarminMapView extends WatchUi.View {
 
         if (framedHoleNumber != holeNumber || camera == null) {
             camera = restingCamera(local, playerImg, targetImg, greenImg, reference, imageWidth, imageHeight, viewWidth, viewHeight);
+            // A device with no scaled bitmap draw (Connect IQ 3.0/3.1, the
+            // Approach S62 among them: drawBitmap only, no drawScaledBitmap
+            // and no drawBitmap2) can only show the image at 1:1. The camera
+            // has to know, or every overlay marker is placed for a scale the
+            // bitmap was never drawn at and the picture lands off-screen.
+            if (!(dc has :drawBitmap2) && !(dc has :drawScaledBitmap)) { camera.scale = 1.0; }
             framedHoleNumber = holeNumber;
+            // Simulator-only build trace, once per framing; compiled out of
+            // every live build.
+            if (GarminTransmitPolicy.muted()) {
+                System.println("map frame: hole " + holeNumber + " image " + imageWidth + "x" + imageHeight
+                    + " view " + viewWidth + "x" + viewHeight
+                    + " focus " + camera.focusX + "," + camera.focusY + " scale " + camera.scale
+                    + " origin " + camera.originX(imageWidth, viewWidth) + "," + camera.originY(imageHeight, viewHeight)
+                    + " player " + playerImg + " green " + greenImg + " target " + targetImg
+                    + " drawBitmap2=" + (dc has :drawBitmap2));
+            }
         }
 
         // Cached for dragTo()/nudge(), called from CaddyInputDelegate
@@ -241,7 +258,13 @@ class GarminMapView extends WatchUi.View {
         // versions that truly lack scaled bitmap drawing.
         if (dc has :drawBitmap2) {
             dc.drawBitmap2(x, y, bitmap, { :destWidth => destW, :destHeight => destH, :filterMode => Graphics.FILTER_MODE_BILINEAR });
+        } else if (dc has :drawScaledBitmap) {
+            // Connect IQ 3.2+ without drawBitmap2 (Approach S70 and kin).
+            dc.drawScaledBitmap(x, y, destW, destH, bitmap);
         } else {
+            // Connect IQ 3.0/3.1 (Approach S62): 1:1 only. onUpdate has
+            // already pinned camera.scale to 1.0 for this case, so x/y and
+            // every overlay marker agree with what is drawn.
             dc.drawBitmap(x, y, bitmap);
         }
     }
