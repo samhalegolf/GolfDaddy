@@ -1,3 +1,4 @@
+using Toybox.System;
 using Toybox.Lang;
 using Toybox.Position;
 using Toybox.Time;
@@ -37,8 +38,17 @@ class GarminLocationManager {
         started = true;
         try {
             Position.enableLocationEvents(Position.LOCATION_CONTINUOUS, method(:onPositionInfo));
+            if (GarminTransmitPolicy.muted()) { System.println("location events enabled"); }
+            // Seed from the device's current answer rather than waiting for
+            // the first event. On a watch that is the last known fix, which
+            // the accuracy bound below will usually refuse until GPS is warm
+            // - harmless. In the simulator it is the only fix there is:
+            // Settings > Set Position answers getInfo() but never raises an
+            // event, so without this read the wrist never has a position.
+            poll();
         } catch (e) {
             started = false;
+            if (GarminTransmitPolicy.muted()) { System.println("location enable threw: " + e.getErrorMessage()); }
         }
     }
 
@@ -53,13 +63,37 @@ class GarminLocationManager {
         lastFix = null;
         lastAccuracy = null;
         lastFixEpochMillis = null;
+        eventSeen = false;
         if (onFix != null) { onFix.invoke(null, null, null); }
+    }
+
+    var eventSeen = false;   // a real event has arrived; polling can stop
+
+    // Reads the device's current answer once, until the event stream has
+    // delivered anything. Called from start() and on every Scene, because
+    // the simulator's Settings > Set Position only ever answers this read
+    // and never raises an event (2026-09-21); a real watch answers with its
+    // last known fix and then takes over with events, at which point this
+    // is a no-op.
+    function poll() {
+        if (!started || eventSeen) { return; }
+        try {
+            var info = Position.getInfo();
+            if (info != null) { onPositionInfo(info); }
+        } catch (e) {
+            // best-effort; the event stream is the real source
+        }
+        eventSeen = false; // the read above is not an event
     }
 
     // Typed: Position.enableLocationEvents wants Method(loc as Position.Info) as Void.
     function onPositionInfo(info as Position.Info) as Void {
+        eventSeen = true;
         if (info == null || info.position == null) { return; }
         var degrees = info.position.toDegrees(); // [lat, lng] in decimal degrees
+        // The simulator reports 180,180 when it has no position at all; a
+        // watch never produces a latitude beyond the poles either way.
+        if (degrees[0] > 90.0 || degrees[0] < -90.0 || degrees[1] > 180.0 || degrees[1] < -180.0) { return; }
         var coordinate = new GarminCoordinate(degrees[0], degrees[1]);
         // Position.Info.accuracy is a coarse enum on many CIQ API levels
         // (Position.QUALITY_*) rather than a metre figure; where a device
@@ -70,6 +104,11 @@ class GarminLocationManager {
         // this is one of the pieces flagged unverified in garmin/README.md.
         var accuracyM = estimateAccuracyMetres(info);
         var nowMs = Time.now().value() * 1000.0;
+        // Simulator-only trace, once per accuracy change; compiled out of
+        // live builds. Says what the simulator actually delivers.
+        if (GarminTransmitPolicy.muted() && (lastAccuracy == null || accuracyM == null || lastAccuracy != accuracyM)) {
+            System.println("position event: " + degrees[0] + "," + degrees[1] + " raw accuracy=" + ((info has :accuracy) ? info.accuracy : "n/a") + " -> " + accuracyM + "m");
+        }
 
         lastFixEpochMillis = nowMs;
         lastAccuracy = accuracyM;

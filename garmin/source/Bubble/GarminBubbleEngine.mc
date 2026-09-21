@@ -60,7 +60,7 @@ module GarminBubbleEngine {
         var heldClub = input.hasKey("heldClub") ? input["heldClub"] : null;
 
         var distanceM = GarminGeo.distance(player, target);
-        if (distanceM == null || !distanceM.isFinite() || distanceM <= 0) { return null; }
+        if (distanceM == null || !GarminJS.isFinite(distanceM) || distanceM <= 0) { return null; }
 
         var row = GarminBag.resolveClub(bag, distanceM, heldClub);
         if (row == null) { return null; }
@@ -197,7 +197,7 @@ module GarminBubbleEngine {
         var maxM = GarminBag.maxPlayableM(bag);
         if (maxM == null || maxM <= 0) { return null; }
         var toGreen = GarminGeo.distance(player, green);
-        if (toGreen == null || !toGreen.isFinite()) { return null; }
+        if (toGreen == null || !GarminJS.isFinite(toGreen)) { return null; }
         if (toGreen <= maxM + 3.0) { return green; }
         return layupAlong(route, player, maxM);
     }
@@ -248,7 +248,7 @@ module GarminBubbleEngine {
             var progress = samples[i]["progress"];
             if (progress < minProgress + 6.0) { continue; }
             var direct = GarminGeo.distance(player, samples[i]["point"]);
-            if (direct == null || !direct.isFinite() || direct > maxM + 3.0) { continue; }
+            if (direct == null || !GarminJS.isFinite(direct) || direct > maxM + 3.0) { continue; }
             var score = (maxM - direct).abs();
             var take = false;
             if (!haveBest) { take = true; }
@@ -280,7 +280,7 @@ module GarminBubbleEngine {
             var a = route[i - 1];
             var b = route[i];
             var segment = GarminGeo.distance(a, b);
-            if (segment == null || !segment.isFinite() || segment <= 0) { continue; }
+            if (segment == null || !GarminJS.isFinite(segment) || segment <= 0) { continue; }
             var brg = GarminGeo.bearing(a, b);
             var stepFloor = stepM > 3.0 ? stepM : 3.0;
             var steps = Math.ceil(segment / stepFloor).toNumber();

@@ -135,7 +135,7 @@ class GarminBubblePayload {
     // within 1.5% of 1 is left alone entirely. Order matters: a Bubble can be
     // pushed UP by the floors after being pushed down by the caps.
     function displayed(shotDistanceM) {
-        var d = (shotDistanceM != null && shotDistanceM.toDouble().isFinite() && shotDistanceM > 0) ? shotDistanceM : 155.0;
+        var d = (shotDistanceM != null && GarminJS.isFinite(shotDistanceM.toDouble()) && shotDistanceM > 0) ? shotDistanceM : 155.0;
         var lateral = lateralRadiusM > 1.0 ? lateralRadiusM : 1.0;
         var depth = depthRadiusM > 1.0 ? depthRadiusM : 1.0;
 

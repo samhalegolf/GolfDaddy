@@ -81,7 +81,7 @@ class GarminPlayState {
         var roof = GarminBag.maxPlayableM(bag);
         if (roof == null || roof <= 0) { return target; }
         var metres = GarminGeo.distance(player, target);
-        if (metres == null || !metres.isFinite() || metres <= roof) { return target; }
+        if (metres == null || !GarminJS.isFinite(metres) || metres <= roof) { return target; }
         // Scaled back along the player->target vector itself, not
         // re-projected from a bearing — GarminGeo.bearing is the engine's
         // degree-space convention, not a geodesic, so projecting along it

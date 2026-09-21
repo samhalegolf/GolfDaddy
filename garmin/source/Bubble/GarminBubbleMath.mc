@@ -39,8 +39,20 @@ module GarminJS {
         return v;
     }
 
+    // JavaScript's Number.isFinite. Monkey C's Float/Double have no such
+    // method on any API level (the port called `.isFinite()` on them and
+    // crashed with Symbol Not Found the first time the engine ran on a
+    // simulator with a GPS fix, 2026-09-21). x - x is 0 for every finite
+    // number and NaN for NaN and both infinities, and NaN compares false.
+    function isFinite(value) {
+        if (value == null) { return false; }
+        if (!(value instanceof Lang.Number || value instanceof Lang.Long
+              || value instanceof Lang.Float || value instanceof Lang.Double)) { return false; }
+        return (value - value) == 0;
+    }
+
     function finiteOr(value, fallback) {
-        if (value == null) { return fallback; }
+        if (!isFinite(value)) { return fallback; }
         return value.toDouble();
     }
 

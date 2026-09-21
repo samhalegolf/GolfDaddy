@@ -111,17 +111,30 @@ class GarminSessionManager {
     // playState's own target/bubble once GarminMapView has actually moved
     // one (drag, nudge, or the seed move `enterAimMode()` makes) — see
     // GarminMapView.mc's header comment for how playState gets driven.
+    var lastBubbleReason = "";
+    // Simulator-only trace: says which of the four honest causes is holding
+    // the local Bubble back, once per change. Compiled out of live builds.
+    function noteBubbleReason(reason) {
+        if (!GarminTransmitPolicy.muted()) { return; }
+        if (reason.equals(lastBubbleReason)) { return; }
+        lastBubbleReason = reason;
+        System.println("local bubble: " + reason
+            + " (fix=" + locationManager.lastFix + " accuracy=" + locationManager.lastAccuracy + ")");
+    }
+
     function localBubble() {
         var agreement = engineAgreement();
-        if (!agreement["mayComputeLocally"]) { return null; }
-        if (playerStore.snapshot == null) { return null; }
+        if (!agreement["mayComputeLocally"]) { noteBubbleReason("engine " + agreement["state"]); return null; }
+        if (playerStore.snapshot == null) { noteBubbleReason("no player snapshot"); return null; }
         var fix = locationManager.lastFix;
-        if (fix == null) { return null; }
+        if (fix == null) { noteBubbleReason("no usable fix"); return null; }
         if (playState.target != null && playState.bubble != null) {
+            noteBubbleReason("local aim bubble");
             return playState.bubble;
         }
         var aim = (scene != null) ? scene.aimTarget() : null;
-        if (aim == null) { return null; }
+        if (aim == null) { noteBubbleReason("no aim target"); return null; }
+        noteBubbleReason("computing for scene aim");
         return GarminBubbleEngine.calculate({
             "player" => fix, "target" => aim,
             "bag" => playerStore.snapshot.bag, "bubble" => playerStore.snapshot.bubble
@@ -279,6 +292,7 @@ class GarminSessionManager {
             playState.enter(incomingHole);
         }
         locationManager.start();
+        locationManager.poll();
         reconcileOutbox(incoming);
         noteSurface(previous, incoming);
     }
