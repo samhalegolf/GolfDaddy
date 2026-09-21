@@ -55,6 +55,7 @@ class GarminMapView extends WatchUi.View {
     // rule: "the framing STAYS. A re-fit here slid the map under a player
     // who had just put the target where they wanted it."
     var framedHoleNumber;
+    var framedPackageVersion;   // manifest.version the camera was fitted to
     var camera;         // GarminMapCamera or null
 
     // Phase 3 interaction state — mirrors AimableHoleMap.swift's @State
@@ -79,6 +80,7 @@ class GarminMapView extends WatchUi.View {
         View.initialize();
         self.session = session;
         framedHoleNumber = null;
+        framedPackageVersion = null;
         camera = null;
         aiming = false;
         dragActive = false;
@@ -129,7 +131,12 @@ class GarminMapView extends WatchUi.View {
         var greenImg = imagePoint(greenGeo, reference);
         var targetImg = imagePoint(targetGeo, reference);
 
-        if (framedHoleNumber != holeNumber || camera == null) {
+        // A new package mid-round is a new picture with its own size and
+        // projection, so it reframes like a hole change would - the old
+        // camera's focus is in pixels of an image that no longer exists.
+        var packageVersion = (manifest != null) ? manifest.version : null;
+        if (framedHoleNumber != holeNumber || camera == null || framedPackageVersion != packageVersion) {
+            framedPackageVersion = packageVersion;
             camera = restingCamera(local, playerImg, targetImg, greenImg, reference, imageWidth, imageHeight, viewWidth, viewHeight);
             // A device with no scaled bitmap draw (Connect IQ 3.0/3.1, the
             // Approach S62 among them: drawBitmap only, no drawScaledBitmap
