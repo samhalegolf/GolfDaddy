@@ -38,4 +38,8 @@ fr55.resourcePath = $(base.resourcePath);resources-icons/35
 fenix6.resourcePath = $(base.resourcePath);resources-icons/40
 approachs7042mm.resourcePath = $(base.resourcePath);resources-icons/60
 approachs7047mm.resourcePath = $(base.resourcePath);resources-icons/70
+# vivoactive4s is not in manifest.xml (see the comment there): it is a
+# sideload-only test device, not a shipped product. This line and
+# resources-icons/30 stay so that re-adding the product for a sideload build
+# is a one-line manifest edit and nothing else.
 vivoactive4s.resourcePath = $(base.resourcePath);resources-icons/30

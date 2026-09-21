@@ -181,6 +181,15 @@ DevTools `Runtime.evaluate` of `Capacitor.Plugins.NativeRoundBridge.garminDevice
 > the Scene once a second and logs `Garmin send failed: FAILURE_UNKNOWN`
 > each time; harmless, but worth rate-limiting.
 
+### Sideloading to the vivoactive 4S
+
+That watch is the only hardware the watch -> phone direction has ever run on,
+and it is **not** in `manifest.xml` — it is not a golf watch and the store
+package must not ship it (see the comment in `manifest.xml`). To build for it,
+add a product line for it back to the products list for the duration of that
+build and remove it again before `./build.sh package`. Its `resourcePath` line
+and 30x30 icon are still in place, so the manifest line is the only edit.
+
 ### Seeing the round on the simulated watch anyway: the muted build
 
 The phone → watch direction is fine, so a watch build that never replies
