@@ -443,7 +443,7 @@ function sawtoothSquare() {
 
 (function testVerticalFrameIsTheHoleNotTheSurfaces() {
   const recipe = core.WATCH_MAP_RECIPE_V1;
-  assert.strictEqual(recipe.version, 4);
+  assert.ok(recipe.version >= 4, "the fixed vertical margins arrived in v4");
   const plain = longHole();
   const base = core.buildWatchHoleFrame(recipe, plain, {});
   assert.ok(base.ok, base.reason);
@@ -483,6 +483,48 @@ function sawtoothSquare() {
   const oldWay = core.buildWatchHoleFrame(v3, stretched, {});
   assert.ok(oldWay.spatialReference.metresPerPixel > withRibbon.spatialReference.metresPerPixel * 1.15,
     "v4 must be materially sharper than v3 on a hole with surfaces past its ends");
+})();
+
+// --- recipe v5: the tee->green axis is the centre column, whatever sits beside it ------------
+
+(function testFrameIsCentredOnThePlayLine() {
+  const recipe = core.WATCH_MAP_RECIPE_V1;
+  assert.strictEqual(recipe.version, 5);
+  /* A hole with a bunker field well to the right and nothing to the left. */
+  const lopsided = longHole();
+  const dLat = lopsided.green.lat - lopsided.tee.lat, dLng = lopsided.green.lng - lopsided.tee.lng;
+  /* ~50m right of the mid-point: perpendicular-ish offset in degrees. */
+  const mid = { lat: lopsided.tee.lat + dLat / 2, lng: lopsided.tee.lng + dLng / 2 };
+  lopsided.bunkers.push([
+    { lat: mid.lat + 0.00030, lng: mid.lng + 0.00040 }, { lat: mid.lat + 0.00033, lng: mid.lng + 0.00046 }, { lat: mid.lat + 0.00028, lng: mid.lng + 0.00047 }
+  ]);
+  const frame = core.buildWatchHoleFrame(recipe, lopsided, {});
+  assert.ok(frame.ok, frame.reason);
+  const sr = frame.spatialReference;
+  const teePx = core.projectLatLngToImage(sr, lopsided.tee.lat, lopsided.tee.lng);
+  const greenPx = core.projectLatLngToImage(sr, lopsided.green.lat, lopsided.green.lng);
+  const centre = sr.imageWidth / 2;
+  assert.ok(Math.abs(teePx.x - centre) <= 1, "the tee sits on the centre column, got " + teePx.x.toFixed(1) + " of " + sr.imageWidth);
+  assert.ok(Math.abs(greenPx.x - centre) <= 1, "the green sits on the centre column, got " + greenPx.x.toFixed(1) + " of " + sr.imageWidth);
+  /* One corridor either side of the axis, plus the side margin. */
+  const expectedWidthM = 2 * recipe.corridor.halfWidthM * (1 + recipe.canvas.marginFraction);
+  assert.ok(Math.abs(sr.imageWidth * sr.metresPerPixel - expectedWidthM) < 2,
+    "a straight hole is exactly one corridor wide either side, got " + (sr.imageWidth * sr.metresPerPixel).toFixed(1) + "m");
+
+  /* A dogleg's bend widens the frame so the bend stays inside it. */
+  const dogleg = longHole();
+  dogleg.route = [{ lat: mid.lat + 0.00050, lng: mid.lng + 0.00070 }];
+  const bent = core.buildWatchHoleFrame(recipe, dogleg, {});
+  const bendPx = core.projectLatLngToImage(bent.spatialReference, dogleg.route[0].lat, dogleg.route[0].lng);
+  assert.ok(bendPx.x > 0 && bendPx.x < bent.spatialReference.imageWidth, "the bend is inside the image");
+  assert.ok(bent.spatialReference.imageWidth > sr.imageWidth, "a dogleg frames wider than a straight hole");
+  /* On a dogleg the centre column is the middle of the route's own band -
+     between the axis (tee and green) and the bend - so no half of the canvas
+     is spent on ground the hole never visits. */
+  const bentTee = core.projectLatLngToImage(bent.spatialReference, dogleg.tee.lat, dogleg.tee.lng);
+  const bandMid = (bentTee.x + bendPx.x) / 2;
+  assert.ok(Math.abs(bandMid - bent.spatialReference.imageWidth / 2) <= 1.5,
+    "the route's band is centred on a dogleg, got " + bandMid.toFixed(1) + " of " + bent.spatialReference.imageWidth);
 })();
 
 console.log("watch-map-core passed");

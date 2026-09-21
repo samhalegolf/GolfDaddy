@@ -62,8 +62,16 @@
        and simply runs off the edge, exactly as the corridor rule already treats
        ground to the side. The freed rows go to scale: the same 1536-row cap now
        covers ~560m instead of ~760m on a long hole, so it bakes wider and
-       sharper for the same pixels, and short holes just get shorter. */
-    version: 4,
+       sharper for the same pixels, and short holes just get shorter.
+
+       v5 centred the frame on the tee->green axis. v4 set the width from the
+       union of corridor points, so a hole with bunkers on one side and nothing
+       on the other framed off-centre - Millbrook's 1st put the play line at
+       column 89 of 267, and on a wrist that centres on the image (the S62,
+       drawing 1:1) the Bubble sat left of the face. Now the frame is
+       symmetric about the axis: one corridor either side, widened only as far
+       as a route bend needs. The play line IS the centre column. */
+    version: 5,
     canvas: {
       /* Ceiling, not a fixed size - see computeCanvasFit. Most holes land under both ceilings;
          a long narrow par 5 is height-limited, a short wide-corridor hole is width-limited. */
@@ -469,16 +477,30 @@
      frame (recipe v4). Without it (v3 and earlier recipes, which carry
      teeMarginFraction instead), the points set both axes and the padding is a
      fraction of the span. */
-  function computeCanvasFit(rotatedPoints, canvas, vertical) {
+  /* `lateral`, when given, is {halfWidth} in rotated units: the frame is then
+     centred on the tee->green axis and that wide either side of it, whatever
+     the points span (recipe v5). Without it the points set the width. */
+  function computeCanvasFit(rotatedPoints, canvas, vertical, lateral) {
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     rotatedPoints.forEach(function (p) {
       if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
       if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
     });
-    var spanX = Math.max(1, maxX - minX);
-    var marginX = spanX * canvas.marginFraction;
-    var boundsMinX = minX - marginX;
-    var boundsWidth = spanX + marginX * 2;
+    var boundsMinX, boundsWidth;
+    if (lateral && Number.isFinite(lateral.halfWidth) && lateral.halfWidth > 0) {
+      /* Recipe v5: symmetric about `lateral.centre` (the tee->green axis, x = 0
+         in rotated space, on a straight hole; the route's lateral midpoint on a
+         dogleg), so the play line is the image's centre column whatever lies
+         to either side of it. */
+      var half = lateral.halfWidth * (1 + canvas.marginFraction);
+      boundsMinX = (Number.isFinite(lateral.centre) ? lateral.centre : 0) - half;
+      boundsWidth = half * 2;
+    } else {
+      var spanX = Math.max(1, maxX - minX);
+      var marginX = spanX * canvas.marginFraction;
+      boundsMinX = minX - marginX;
+      boundsWidth = spanX + marginX * 2;
+    }
     var boundsMinY, boundsHeight;
     if (vertical && Number.isFinite(vertical.top) && Number.isFinite(vertical.bottom)) {
       boundsMinY = vertical.top;
@@ -743,7 +765,26 @@
         bottom: holeBottom + recipe.canvas.behindTeeM * unitsPerMetre
       };
     }
-    var fit = computeCanvasFit(rotated, recipe.canvas, vertical);
+    /* Recipe v5: the frame is symmetric about the tee->green axis, so the
+       axis is the image's centre column and a target on the play line sits
+       at the centre of any wrist that centres on the image (the Approach S62
+       draws 1:1 and cannot pan to it otherwise). Half the width is the
+       corridor's half width, pushed out only as far as a route bend needs it
+       - a dogleg keeps its bend, a straight hole gets exactly one corridor
+       either side. Surfaces beyond that still draw and run off the edge. */
+    var lateral = null;
+    if (Number.isFinite(recipe.canvas.behindTeeM) && Number.isFinite(recipe.canvas.beyondGreenM)) {
+      /* The route's lateral extent: tee and green are at x = 0, a dogleg's
+         bend is wherever it is. Centring on the midpoint of that extent keeps
+         a straight hole centred on its axis and a dogleg centred on its own
+         band, one corridor either side, at no more width than the bend needs
+         (centring a dogleg on the axis instead would spend half the canvas on
+         ground the hole never visits). */
+      var minX = 0, maxX = 0;
+      routeLatLng.map(toRotated).forEach(function (p) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; });
+      lateral = { centre: (minX + maxX) / 2, halfWidth: (maxX - minX) / 2 + corridorPx };
+    }
+    var fit = computeCanvasFit(rotated, recipe.canvas, vertical, lateral);
     var teeImagePx = { x: -fit.originRotated.x * fit.scale, y: -fit.originRotated.y * fit.scale };
     var transform = anchoredTransform(teeWorld, teeImagePx, bearing, fit.scale);
 
