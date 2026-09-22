@@ -23,6 +23,10 @@ class ClarityCaddyApp extends Application.AppBase {
         // Apple's SwiftUI @Published bindings get for free.
         refreshTimer = new Timer.Timer();
         refreshTimer.start(method(:onTick), 1000, true);
+        // Nothing in an ordinary build: GarminParityPolicy.run() compiles to
+        // an empty body unless this is a `CIQ_PARITY=1` build, which runs the
+        // Bubble Engine parity fixtures here and prints the verdict.
+        GarminParityPolicy.run();
     }
 
     // Typed because Timer.start resolves method(:onTick) against Method() as Void.

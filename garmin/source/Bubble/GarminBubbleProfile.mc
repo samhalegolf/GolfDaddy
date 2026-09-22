@@ -46,7 +46,7 @@ class GarminBubbleProfile {
         var carryWindowPct = GarminJS.roundTo(GarminBubbleTables.BASE_CARRY_WINDOW_PCT, 2);
 
         // gdDeriveBasePatternSize
-        var multiplier = GarminJS.clamp(GarminBubbleTables.BASE_DISPERSION_MULTIPLIER, 0.6, 1.8);
+        var multiplier = GarminJS.clamp(GarminBubbleTables.BASE_DISPERSION_MULTIPLIER, 0.6d, 1.8d);
         var clusterWidthM = GarminJS.roundTo(baseCarryM * ratios["width"] * multiplier * GarminBubbleTables.GEOMETRY_WIDTH_SCALE, 1);
         var clusterDepthM = GarminJS.roundTo(baseCarryM * ratios["depth"] * multiplier * GarminBubbleTables.GEOMETRY_DEPTH_SCALE, 1);
 
@@ -58,16 +58,16 @@ class GarminBubbleProfile {
         // the player's aim.
         var hand = handedness.handSign();
         var strength;
-        if (group.equals("driver")) { strength = 0.42; }
-        else if (group.equals("woodHybrid")) { strength = 0.36; }
-        else if (group.equals("wedge")) { strength = 0.18; }
-        else { strength = 0.30; } // iron
-        var distanceTendencyPct = GarminJS.roundTo(GarminJS.clamp(-(hand * faceWindowDeg) * strength, -5.0, 5.0), 2);
+        if (group.equals("driver")) { strength = 0.42d; }
+        else if (group.equals("woodHybrid")) { strength = 0.36d; }
+        else if (group.equals("wedge")) { strength = 0.18d; }
+        else { strength = 0.30d; } // iron
+        var distanceTendencyPct = GarminJS.roundTo(GarminJS.clamp(-(hand * faceWindowDeg) * strength, -5.0d, 5.0d), 2);
 
         // gdDeriveClusterTilt
-        var offsetInfluence = faceAlignmentOffsetDeg.abs() * 0.12;
-        var windowInfluence = faceWindowDeg.abs() * 0.9;
-        var carryInfluence = carryWindowPct.abs() * 0.08;
+        var offsetInfluence = faceAlignmentOffsetDeg.abs() * 0.12d;
+        var windowInfluence = faceWindowDeg.abs() * 0.9d;
+        var carryInfluence = carryWindowPct.abs() * 0.08d;
         var tiltRaw = hand * (ratios["tiltBaseDeg"] + offsetInfluence + windowInfluence + carryInfluence) * GarminBubbleTables.GEOMETRY_TILT_SCALE;
         var clusterTiltDeg = GarminJS.roundTo(
             GarminJS.clamp(tiltRaw, -GarminBubbleTables.GEOMETRY_TILT_MAX_DEG, GarminBubbleTables.GEOMETRY_TILT_MAX_DEG), 2);
@@ -116,18 +116,18 @@ class GarminVisualBubble {
     }
 
     static function render(profile) {
-        var hand = 1.0; // deliberately not profile handedness — see note above
-        var offsetNorm = GarminJS.clamp((hand * profile.faceAlignmentOffsetDeg) / 6.0, -1.0, 1.0);
-        var faceWindow = (profile.faceWindowDeg == 0) ? 0.7 : profile.faceWindowDeg;
-        var windowNorm = GarminJS.clamp(faceWindow / 1.5, 0.0, 1.0);
-        var carryWindow = (profile.carryWindowPct == 0) ? 4.2 : profile.carryWindowPct;
-        var carryNorm = GarminJS.clamp(carryWindow / 8.0, 0.0, 1.0);
+        var hand = 1.0d; // deliberately not profile handedness — see note above
+        var offsetNorm = GarminJS.clamp((hand * profile.faceAlignmentOffsetDeg) / 6.0d, -1.0d, 1.0d);
+        var faceWindow = (profile.faceWindowDeg == 0) ? 0.7d : profile.faceWindowDeg;
+        var windowNorm = GarminJS.clamp(faceWindow / 1.5d, 0.0d, 1.0d);
+        var carryWindow = (profile.carryWindowPct == 0) ? 4.2d : profile.carryWindowPct;
+        var carryNorm = GarminJS.clamp(carryWindow / 8.0d, 0.0d, 1.0d);
         return new GarminVisualBubble(
-            GarminJS.roundTo(profile.clusterWidthM * (1.0 + windowNorm * 0.1 + offsetNorm.abs() * 0.06), 1),
-            GarminJS.roundTo(profile.clusterDepthM * (1.0 + carryNorm * 0.08 + windowNorm * 0.06), 1),
-            GarminJS.roundTo(profile.clusterTiltDeg + offsetNorm * 1.5 + hand * windowNorm * 1.2, 2),
-            GarminJS.roundTo(offsetNorm * 5.0, 2),
-            GarminJS.roundTo(offsetNorm * 0.035, 3)
+            GarminJS.roundTo(profile.clusterWidthM * (1.0d + windowNorm * 0.1d + offsetNorm.abs() * 0.06d), 1),
+            GarminJS.roundTo(profile.clusterDepthM * (1.0d + carryNorm * 0.08d + windowNorm * 0.06d), 1),
+            GarminJS.roundTo(profile.clusterTiltDeg + offsetNorm * 1.5d + hand * windowNorm * 1.2d, 2),
+            GarminJS.roundTo(offsetNorm * 5.0d, 2),
+            GarminJS.roundTo(offsetNorm * 0.035d, 3)
         );
     }
 }

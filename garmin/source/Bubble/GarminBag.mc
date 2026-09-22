@@ -10,11 +10,11 @@ module GarminBag {
     // gdBagTotalForCarry — carry plus roll-out, never less than the carry.
     // Only reached for a row that arrived without a total of its own.
     function totalForCarry(club, carryM) {
-        var c = carryM > 0 ? GarminJS.round(carryM) : 0.0;
-        if (c <= 0) { return 0.0; }
+        var c = carryM > 0 ? GarminJS.round(carryM) : 0.0d;
+        if (c <= 0) { return 0.0d; }
         var pct = GarminBubbleTables.rolloutBasePctFor(club) * GarminBubbleTables.FIRMNESS_MULTIPLIER;
-        if (pct < 0) { pct = 0.0; }
-        var withRollout = GarminJS.round(c * (1.0 + pct));
+        if (pct < 0) { pct = 0.0d; }
+        var withRollout = GarminJS.round(c * (1.0d + pct));
         return c > withRollout ? c : withRollout;
     }
 
@@ -39,7 +39,7 @@ module GarminBag {
         }
 
         var d = targetDistanceM;
-        if (d == null || d < 1) { d = 155.0; }
+        if (d == null || d < 1) { d = 155.0d; }
 
         var seed = rows[0];
         for (var i = 0; i < rows.size(); i += 1) {

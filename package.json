@@ -70,7 +70,7 @@
     "test:bubble-parity": "node dev/bubble-engine-parity.test.js",
     "test:bubble-parity:swift": "swift test --package-path ios/WatchBubbleEngine",
     "test:bubble-parity:update": "node dev/bubble-engine-parity.test.js --update",
-  "test:nearest-loop": "node dev/nearest-loop-tightening.test.js",
+    "test:nearest-loop": "node dev/nearest-loop-tightening.test.js",
     "test:unlicensed-region": "node dev/unlicensed-region-live-map.test.js",
     "build:app": "node scripts/clarity-deploy-build.js --app-only",
     "demo:list": "node demo/run-demo.mjs --list",
@@ -81,7 +81,7 @@
     "marketing:login": "node marketing/run-snapshots.mjs --login",
     "marketing:snapshots": "node marketing/run-snapshots.mjs",
     "test:marketing": "node dev/marketing-snapshot-core.test.js && node dev/marketing-hole-intel.test.js",
-  "native:sync": "npm run build:app && npx cap sync && node scripts/register-native-round-bridge.js",
+    "native:sync": "npm run build:app && npx cap sync && node scripts/register-native-round-bridge.js",
     "native:android": "npm run native:sync && npx cap open android",
     "native:ios": "npm run native:sync && npx cap open ios",
     "native:release:aab": "npm run build:app && npx cap sync android && cd android && ./gradlew bundleRelease",
@@ -91,7 +91,8 @@
     "test:account-email": "node dev/account-email-change.test.js",
     "test:effective-player-play": "node dev/effective-player-play-context.test.js",
     "test:demo": "node dev/demo-session-practice-isolation.test.js && node dev/demo-session-gps-course-data-isolation.test.js && node dev/demo-session-flow-shape.test.js",
-    "test:garmin": "node dev/garmin-settings-surface.test.js && node dev/garmin-launcher-icons.test.js"
+    "test:garmin": "node dev/garmin-settings-surface.test.js && node dev/garmin-launcher-icons.test.js && node dev/generate-garmin-parity-fixture.js --check",
+    "test:garmin:parity": "node garmin/tools/run-parity.js"
   },
   "codex": {
     "entry": "index.html",

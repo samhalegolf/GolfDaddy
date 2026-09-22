@@ -97,8 +97,16 @@ cmd_build() {
   # jungle flips which GarminTransmitPolicy.muted() gets compiled, and the
   # output carries "-muted" so it can never be confused with a real build.
   # Only this verb honours the variable; package never sees it.
+  #
+  # CIQ_PARITY=1: a simulator-only build that runs the Bubble Engine parity
+  # fixtures at startup and prints the verdict (tools/run-parity.js reads it).
+  # Implies muted, since a harness has no business talking to a phone.
   local jungles="monkey.jungle" suffix="" label="debug"
-  if [[ "${CIQ_MUTE_TX:-0}" == "1" ]]; then
+  if [[ "${CIQ_PARITY:-0}" == "1" ]]; then
+    jungles="monkey.jungle;monkey-parity.jungle"
+    suffix="-parity"
+    label="debug, PARITY HARNESS - simulator only"
+  elif [[ "${CIQ_MUTE_TX:-0}" == "1" ]]; then
     jungles="monkey.jungle;monkey-sim-mute.jungle"
     suffix="-muted"
     label="debug, TRANSMIT MUTED - simulator only"

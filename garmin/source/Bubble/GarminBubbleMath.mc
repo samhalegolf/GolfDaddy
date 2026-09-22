@@ -19,21 +19,21 @@ module GarminJS {
     // rounds a value that might be exactly on a half.
     function round(value) {
         if (value == null || !(value instanceof Lang.Float or value instanceof Lang.Double or value instanceof Lang.Number)) {
-            return 0.0;
+            return 0.0d;
         }
-        return Math.floor(value.toDouble() + 0.5);
+        return Math.floor(value.toDouble() + 0.5d);
     }
 
     // gdRound(value, decimals) — Math.round(v * 10^d) / 10^d.
     function roundTo(value, decimals) {
-        var p = Math.pow(10.0, decimals);
-        var v = (value != null) ? value.toDouble() : 0.0;
+        var p = Math.pow(10.0d, decimals);
+        var v = (value != null) ? value.toDouble() : 0.0d;
         return round(v * p) / p;
     }
 
     // gdClamp — coerces non-finite to 0 BEFORE clamping.
     function clamp(value, minimum, maximum) {
-        var v = (value != null) ? value.toDouble() : 0.0;
+        var v = (value != null) ? value.toDouble() : 0.0d;
         if (v < minimum) { return minimum; }
         if (v > maximum) { return maximum; }
         return v;
@@ -70,16 +70,16 @@ module GarminJS {
 module GarminGeo {
 
     // The engine's own flat-earth metres-per-degree, used by `project`.
-    var METRES_PER_DEGREE = 111320.0;
+    var METRES_PER_DEGREE = 111320.0d;
 
     // The radius `map.distance` uses — app/js/distance.js's haversine.
-    var EARTH_RADIUS_M = 6371008.8;
+    var EARTH_RADIUS_M = 6371008.8d;
 
     function degToRad(deg) {
-        return deg * Math.PI / 180.0;
+        return deg * Math.PI / 180.0d;
     }
     function radToDeg(rad) {
-        return rad * 180.0 / Math.PI;
+        return rad * 180.0d / Math.PI;
     }
 
     // bearing(a, b) — atan2(dLng, dLat), with NO cosine correction. This is
@@ -107,7 +107,7 @@ module GarminGeo {
     // once from the origin, and must match exactly.
     function projectOffset(origin, angle, forward, side) {
         var p = project(origin, angle, forward);
-        var perpendicular = angle + Math.PI / 2.0;
+        var perpendicular = angle + Math.PI / 2.0d;
         var lat = p.lat + (Math.cos(perpendicular) * side) / METRES_PER_DEGREE;
         var lng = p.lng + (Math.sin(perpendicular) * side) / (METRES_PER_DEGREE * Math.cos(degToRad(p.lat)));
         return new GarminCoordinate(lat, lng);
@@ -118,11 +118,11 @@ module GarminGeo {
     function distance(a, b) {
         var dLat = degToRad(b.lat - a.lat);
         var dLng = degToRad(b.lng - a.lng);
-        var h = Math.sin(dLat / 2.0) * Math.sin(dLat / 2.0)
-            + Math.cos(degToRad(a.lat)) * Math.cos(degToRad(b.lat)) * Math.sin(dLng / 2.0) * Math.sin(dLng / 2.0);
-        var root = h > 0 ? Math.sqrt(h) : 0.0;
-        if (root > 1.0) { root = 1.0; }
-        return 2.0 * EARTH_RADIUS_M * Math.asin(root);
+        var h = Math.sin(dLat / 2.0d) * Math.sin(dLat / 2.0d)
+            + Math.cos(degToRad(a.lat)) * Math.cos(degToRad(b.lat)) * Math.sin(dLng / 2.0d) * Math.sin(dLng / 2.0d);
+        var root = h > 0 ? Math.sqrt(h) : 0.0d;
+        if (root > 1.0d) { root = 1.0d; }
+        return 2.0d * EARTH_RADIUS_M * Math.asin(root);
     }
 
     // localPointToLatLng — a point in the shot's own frame, placed on the map.

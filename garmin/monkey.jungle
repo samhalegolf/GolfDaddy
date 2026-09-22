@@ -11,7 +11,10 @@ base.sourcePath = source
 # the store package - talks to the phone. monkey-sim-mute.jungle, chained on
 # by `CIQ_MUTE_TX=1 ./build.sh build`, flips this for the simulator. See
 # source/Session/GarminTransmitPolicy.mc.
-base.excludeAnnotations = tx_muted
+# `parity` excludes the Bubble Engine parity harness and its generated
+# fixture table (garmin/source/Test/) from every ordinary build — see
+# source/Test/GarminParityPolicy.mc and monkey-parity.jungle.
+base.excludeAnnotations = tx_muted;parity
 
 # `resources` holds everything that is the same on every device (strings).
 # The launcher icon is NOT: Connect IQ asks a different pixel size per device

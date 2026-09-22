@@ -38,33 +38,33 @@ class GarminBubblePayload {
     // carrying 205 and finishing at 228 gets 23m of roll-out folded into its
     // depth; a wedge that stops dead gets none.
     static function build(profile, isGhostBag) {
-        var carryM = profile.baseCarryM > 0 ? profile.baseCarryM : 0.0;
+        var carryM = profile.baseCarryM > 0 ? profile.baseCarryM : 0.0d;
         var derivedTotal = profile.totalM != null ? profile.totalM : GarminBag.totalForCarry(profile.club, carryM);
         var totalM = carryM > derivedTotal ? carryM : derivedTotal;
         var rolloutM = totalM - carryM;
-        if (rolloutM < 0) { rolloutM = 0.0; }
+        if (rolloutM < 0) { rolloutM = 0.0d; }
 
         var baseVisual = GarminVisualBubble.render(profile);
-        var lateralRadius = profile.clusterWidthM / 2.0;
-        if (lateralRadius < 1.0) { lateralRadius = 1.0; }
-        var baseDepthRadius = profile.clusterDepthM / 2.0;
-        if (baseDepthRadius < 1.0) { baseDepthRadius = 1.0; }
+        var lateralRadius = profile.clusterWidthM / 2.0d;
+        if (lateralRadius < 1.0d) { lateralRadius = 1.0d; }
+        var baseDepthRadius = profile.clusterDepthM / 2.0d;
+        if (baseDepthRadius < 1.0d) { baseDepthRadius = 1.0d; }
 
         var totalDepthRadius;
         if (rolloutM > 0) {
-            var alt = rolloutM + (7.0 < baseDepthRadius * 0.22 ? 7.0 : baseDepthRadius * 0.22);
+            var alt = rolloutM + (7.0d < baseDepthRadius * 0.22d ? 7.0d : baseDepthRadius * 0.22d);
             totalDepthRadius = baseDepthRadius > alt ? baseDepthRadius : alt;
         } else {
             totalDepthRadius = baseDepthRadius;
         }
 
-        var visualDepthCandidate = totalDepthRadius * 2.0;
+        var visualDepthCandidate = totalDepthRadius * 2.0d;
         var visualDepthM = GarminJS.roundTo(
             baseVisual.visualDepthM > visualDepthCandidate ? baseVisual.visualDepthM : visualDepthCandidate, 1);
         var visual = new GarminVisualBubble(
             baseVisual.visualWidthM, visualDepthM, baseVisual.visualTiltDeg, baseVisual.visualSkewDeg, baseVisual.visualYBias);
 
-        var depthRadius = totalDepthRadius > (visual.visualDepthM / 2.0) ? totalDepthRadius : (visual.visualDepthM / 2.0);
+        var depthRadius = totalDepthRadius > (visual.visualDepthM / 2.0d) ? totalDepthRadius : (visual.visualDepthM / 2.0d);
         var radius = GarminBubbleTables.DEV_MINIMUM_BUBBLE_RADIUS_M;
         if (lateralRadius > radius) { radius = lateralRadius; }
         if (depthRadius > radius) { radius = depthRadius; }
@@ -93,13 +93,13 @@ class GarminBubblePayload {
     // floor is on the Bubble as a whole.
     function normalised() {
         var minRadius = GarminBubbleTables.DEV_MINIMUM_BUBBLE_RADIUS_M;
-        if (minRadius < 1.0) { minRadius = 1.0; }
+        if (minRadius < 1.0d) { minRadius = 1.0d; }
         if (visual.visualWidthM <= 0 || visual.visualDepthM <= 0) { return self; }
 
-        var lateral = visual.visualWidthM / 2.0;
-        if (lateral < minRadius * 0.55) { lateral = minRadius * 0.55; }
-        var depth = visual.visualDepthM / 2.0;
-        if (depth < minRadius * 0.55) { depth = minRadius * 0.55; }
+        var lateral = visual.visualWidthM / 2.0d;
+        if (lateral < minRadius * 0.55d) { lateral = minRadius * 0.55d; }
+        var depth = visual.visualDepthM / 2.0d;
+        if (depth < minRadius * 0.55d) { depth = minRadius * 0.55d; }
         var radius = minRadius;
         if (radiusM > radius) { radius = radiusM; }
         if (lateral > radius) { radius = lateral; }
@@ -115,13 +115,13 @@ class GarminBubblePayload {
         out.clusterWidthM = clusterWidthM;
         out.clusterDepthM = clusterDepthM;
         out.clusterTiltDeg = clusterTiltDeg;
-        out.distanceTendencyPct = GarminJS.roundTo(GarminJS.clamp(distanceTendencyPct, -10.0, 10.0), 2);
+        out.distanceTendencyPct = GarminJS.roundTo(GarminJS.clamp(distanceTendencyPct, -10.0d, 10.0d), 2);
         out.visual = new GarminVisualBubble(
             GarminJS.roundTo(visual.visualWidthM, 1),
             GarminJS.roundTo(visual.visualDepthM, 1),
-            GarminJS.roundTo(GarminJS.clamp(visual.visualTiltDeg, -18.0, 18.0), 2),
-            GarminJS.roundTo(GarminJS.clamp(visual.visualSkewDeg, -16.0, 16.0), 2),
-            GarminJS.roundTo(GarminJS.clamp(visual.visualYBias, -0.18, 0.18), 3)
+            GarminJS.roundTo(GarminJS.clamp(visual.visualTiltDeg, -18.0d, 18.0d), 2),
+            GarminJS.roundTo(GarminJS.clamp(visual.visualSkewDeg, -16.0d, 16.0d), 2),
+            GarminJS.roundTo(GarminJS.clamp(visual.visualYBias, -0.18d, 0.18d), 3)
         );
         out.radiusM = GarminJS.roundTo(radius, 1);
         out.lateralRadiusM = GarminJS.roundTo(lateral, 1);
@@ -135,42 +135,42 @@ class GarminBubblePayload {
     // within 1.5% of 1 is left alone entirely. Order matters: a Bubble can be
     // pushed UP by the floors after being pushed down by the caps.
     function displayed(shotDistanceM) {
-        var d = (shotDistanceM != null && GarminJS.isFinite(shotDistanceM.toDouble()) && shotDistanceM > 0) ? shotDistanceM : 155.0;
-        var lateral = lateralRadiusM > 1.0 ? lateralRadiusM : 1.0;
-        var depth = depthRadiusM > 1.0 ? depthRadiusM : 1.0;
+        var d = (shotDistanceM != null && GarminJS.isFinite(shotDistanceM.toDouble()) && shotDistanceM > 0) ? shotDistanceM : 155.0d;
+        var lateral = lateralRadiusM > 1.0d ? lateralRadiusM : 1.0d;
+        var depth = depthRadiusM > 1.0d ? depthRadiusM : 1.0d;
 
-        var maxLateral = GarminJS.clamp(d * GarminBubbleTables.GEOMETRY_GPS_MAX_LATERAL_PCT, 9.0, GarminBubbleTables.GEOMETRY_GPS_MAX_LATERAL_M);
-        var maxDepth = GarminJS.clamp(d * GarminBubbleTables.GEOMETRY_GPS_MAX_DEPTH_PCT, 12.0, GarminBubbleTables.GEOMETRY_GPS_MAX_DEPTH_M);
-        var minLateral = GarminJS.clamp(d * 0.028, 3.8, 7.5);
-        var minDepth = GarminJS.clamp(d * 0.038, 5.2, 11.0);
+        var maxLateral = GarminJS.clamp(d * GarminBubbleTables.GEOMETRY_GPS_MAX_LATERAL_PCT, 9.0d, GarminBubbleTables.GEOMETRY_GPS_MAX_LATERAL_M);
+        var maxDepth = GarminJS.clamp(d * GarminBubbleTables.GEOMETRY_GPS_MAX_DEPTH_PCT, 12.0d, GarminBubbleTables.GEOMETRY_GPS_MAX_DEPTH_M);
+        var minLateral = GarminJS.clamp(d * 0.028d, 3.8d, 7.5d);
+        var minDepth = GarminJS.clamp(d * 0.038d, 5.2d, 11.0d);
 
-        var scale = 1.0;
+        var scale = 1.0d;
         var latScale = maxLateral / lateral;
         var depScale = maxDepth / depth;
         if (latScale < scale) { scale = latScale; }
         if (depScale < scale) { scale = depScale; }
-        if (scale < 1.0) {
+        if (scale < 1.0d) {
             lateral *= scale;
             depth *= scale;
         }
         var minScaleCandidate = minLateral / lateral;
         var minScaleCandidate2 = minDepth / depth;
         var minScale = minScaleCandidate > minScaleCandidate2 ? minScaleCandidate : minScaleCandidate2;
-        if (minScale > 1.0) { minScale = 1.0; }
+        if (minScale > 1.0d) { minScale = 1.0d; }
         if (minScale > scale) { scale = minScale; }
-        scale = GarminJS.clamp(scale, 0.42, 1.08);
+        scale = GarminJS.clamp(scale, 0.42d, 1.08d);
 
-        if ((scale - 1.0).abs() < 0.015) { return self; }
+        if ((scale - 1.0d).abs() < 0.015d) { return self; }
         return scaledForDisplay(scale);
     }
 
     // gdScaleGpsBubblePayloadForDisplay.
     function scaledForDisplay(scale) {
-        var w = visual.visualWidthM > 1.0 ? visual.visualWidthM : 1.0;
-        var dep = visual.visualDepthM > 1.0 ? visual.visualDepthM : 1.0;
-        var r = radiusM > 1.0 ? radiusM : 1.0;
-        var lat = lateralRadiusM > 1.0 ? lateralRadiusM : 1.0;
-        var dr = depthRadiusM > 1.0 ? depthRadiusM : 1.0;
+        var w = visual.visualWidthM > 1.0d ? visual.visualWidthM : 1.0d;
+        var dep = visual.visualDepthM > 1.0d ? visual.visualDepthM : 1.0d;
+        var r = radiusM > 1.0d ? radiusM : 1.0d;
+        var lat = lateralRadiusM > 1.0d ? lateralRadiusM : 1.0d;
+        var dr = depthRadiusM > 1.0d ? depthRadiusM : 1.0d;
         var out = new GarminBubblePayload();
         out.club = club;
         out.baseCarryM = baseCarryM;

@@ -299,16 +299,70 @@ had, just now driven by the player instead of only by the Scene), and
   Garmin and Apple Watch could plausibly be paired to the same phone at once
   and need to be told apart in the UI — not before.
 
-## Parity fixtures (plan step 15)
+## Parity fixtures (plan step 15) — done, and they pass
 
-Not wired up — there is no Monkey C test runner available in this
-environment to validate against `dev/fixtures/bubble-engine-parity.json`.
-Once the SDK is installed, the fixture format matches the Bubble Engine's
-input contract 1:1 (see `PlayerSnapshot.swift`'s header comment) — write a
-small Monkey C test harness that reads the same JSON (or a generated `.mc`
-constant table, since Monkey C has no JSON file I/O at compile time in the
-general case) and asserts `GarminBubbleEngine.calculate()`'s output against
-each case's expectations within the fixture's documented tolerances
-(metres: 0.1, degrees: 0.01, coordinate: 1e-7). Do not consider Garmin
-support complete until this passes — this is Phase 1's own stated
-completion bar for the Bubble Engine.
+`npm run test:garmin:parity` runs all 11 cases of
+`dev/fixtures/bubble-engine-parity.json` through this port's
+`GarminBubbleEngine` on the simulated watch and prints a verdict:
+
+```
+parity: RESULT PASS 11/11
+```
+
+It needs the Connect IQ simulator already running, and a parity build:
+
+```bash
+connectiq &                                  # if it is not up
+cd garmin && CIQ_PARITY=1 ./build.sh build   # writes ClarityCaddy-<device>-parity.prg
+cd .. && npm run test:garmin:parity          # exits 0 on PASS, 1 on anything else
+```
+
+Three pieces, none of which ship:
+
+- `dev/generate-garmin-parity-fixture.js` compiles the JSON into
+  `source/Test/GarminParityFixture.mc`. Monkey C has no file I/O and no JSON
+  parser, so the fixture has to become source — and `npm run test:garmin`
+  runs the generator with `--check` so an edited fixture that was never
+  regenerated fails a test instead of quietly testing old numbers.
+- `source/Test/GarminParityHarness.mc` is a direct port of
+  `BubbleEngineParityTests.testEveryCaseMatchesTheJavaScriptEngine`: same bag
+  (`expect.bagSent`, because the wrist is sent a finished bag rather than
+  deriving the ghost stand-in), same default-target call first, same fields at
+  the same per-field tolerances.
+- `tools/run-parity.js` pushes the build and reads the verdict off monkeydo's
+  stdout.
+
+All three are annotated `(:parity)` and excluded by `monkey.jungle`, so the
+store package carries neither the harness nor the ~600-line fixture table.
+
+### What running them actually found
+
+Ten of eleven cases passed first time. The eleventh,
+`driver-off-the-tee`, gave `visualWidthM` 41.5 against the JavaScript's 41.6,
+and the cause was not the visual step at all:
+
+**Monkey C decimal literals are 32-bit Floats.** `205 * 0.19` is exactly 38.95
+in Double, which `gdRound` takes up to 39.0; in Float it is 38.949997, which
+rounds DOWN to 38.9. That 0.1m in the cluster width multiplied through to 0.1m
+in the visual width. Every decimal literal in `GarminBubbleTables`,
+`GarminBubbleProfile`, `GarminBubblePayload`, `GarminBubbleEngine`,
+`GarminBubbleMath` and `GarminBag` now carries a `d` suffix (214 of them), so
+the arithmetic runs at the same precision as the JavaScript it was ported
+from. **Keep it that way** — a new bare literal in any of those files is a
+rounding bug waiting for the right carry distance.
+
+Worth knowing for anything else ported here: the failure was invisible to the
+compiler, invisible in the simulator, and would have shipped. Only the fixture
+caught it, and only once it was actually run.
+
+### Two things the harness had to work around
+
+- **`String.toDouble()` does not exist** on this API level — it compiles and
+  then dies at runtime with "Could not find symbol 'toDouble'". The fixture's
+  numbers are strings (a bare literal would be a Float, which is the very
+  thing being tested), so the harness parses them digit by digit with
+  `toNumber()`.
+- **All eleven cases in one call trips the watchdog** ("Code Executed Too
+  Long"). Not slowness — the live map builds the same 168-point ring every
+  frame of a drag — but a limit on how long one callback may run. Each case
+  therefore runs on its own timer tick.

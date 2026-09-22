@@ -328,9 +328,13 @@ gives focus/scale/origin/player per framing):
       55) the G's counter closes up and the golf ball reads as a plain dot.
       The pin silhouette still carries it, but a hand-simplified mark for the
       two small sizes would read better than the downscale does.
-- [ ] **Bubble Engine parity fixtures.** `dev/fixtures/bubble-engine-parity.json`
-      is the project's own stated completion bar for the engine and has never
-      been run against the Monkey C port. Tolerances: 0.1 m, 0.01°, 1e-7 coord.
+- [x] ~~**Bubble Engine parity fixtures.**~~ Done 2026-09-22 — all 11 cases
+      pass (`npm run test:garmin:parity`, needs the simulator running and a
+      `CIQ_PARITY=1` build). Running them found one real defect: Monkey C
+      decimal literals are 32-bit Floats, and `205 * 0.19` rounds to 38.9
+      there against the JavaScript's 39.0, which moved the driver's Bubble
+      width by 0.1m. Every decimal in the Bubble maths now carries a `d`
+      suffix. See README.md, "Parity fixtures".
 - [x] ~~**Per-hole map URLs.**~~ Done 2026-09-19 —
       `app/js/watch-map-delivery.js` attaches an absolute `url` per hole and
       the asset endpoint is public, unsigned and immutable. See README.

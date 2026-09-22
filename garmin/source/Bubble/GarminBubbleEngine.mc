@@ -96,8 +96,8 @@ module GarminBubbleEngine {
     function gpsAimOffsetM(payload, shotDistanceM) {
         var deg = payload.aimOffsetDeg;
         if (shotDistanceM == null || shotDistanceM <= 0) { return GarminJS.roundTo(payload.aimOffsetM, 2); }
-        var limit = shotDistanceM * 0.25;
-        if (limit < 2.0) { limit = 2.0; }
+        var limit = shotDistanceM * 0.25d;
+        if (limit < 2.0d) { limit = 2.0d; }
         return GarminJS.roundTo(GarminJS.clamp(Math.tan(GarminGeo.degToRad(deg)) * shotDistanceM, -limit, limit), 2);
     }
 
@@ -106,12 +106,12 @@ module GarminBubbleEngine {
     // at a quarter of the aim base; either bound can bind first depending on
     // the shot, so both are reproduced.
     function renderCentre(target, payload, shotBearing, aimOffsetM) {
-        var aimBase = payload.baseCarryM > 0 ? payload.baseCarryM : payload.radiusM * 10.0;
-        if (aimBase < 1.0) { aimBase = 1.0; }
-        var sideLimit = aimBase * 0.25;
-        if (sideLimit < 2.0) { sideLimit = 2.0; }
+        var aimBase = payload.baseCarryM > 0 ? payload.baseCarryM : payload.radiusM * 10.0d;
+        if (aimBase < 1.0d) { aimBase = 1.0d; }
+        var sideLimit = aimBase * 0.25d;
+        if (sideLimit < 2.0d) { sideLimit = 2.0d; }
         var sideOffset = GarminJS.clamp(aimOffsetM, -sideLimit, sideLimit);
-        var forwardBias = GarminJS.clamp(payload.visual.visualYBias, -0.18, 0.18) * (payload.depthRadiusM > 1.0 ? payload.depthRadiusM : 1.0);
+        var forwardBias = GarminJS.clamp(payload.visual.visualYBias, -0.18d, 0.18d) * (payload.depthRadiusM > 1.0d ? payload.depthRadiusM : 1.0d);
         return GarminGeo.projectOffset(target, shotBearing, forwardBias, sideOffset);
     }
 
@@ -121,12 +121,12 @@ module GarminBubbleEngine {
     // equivalent of, and the fixtures were recorded with it inactive.
     function radiusFactor(rel, payload) {
         var front = Math.cos(rel);
-        var frontPos = front > 0 ? front : 0.0;
-        var backPos = front < 0 ? -front : 0.0;
-        var tendency = GarminJS.clamp(payload.distanceTendencyPct, -5.0, 5.0) / 5.0;
-        var factor = 1.0 + tendency * (0.026 * frontPos - 0.018 * backPos);
-        if (factor < 0.96) { return 0.96; }
-        if (factor > 1.04) { return 1.04; }
+        var frontPos = front > 0 ? front : 0.0d;
+        var backPos = front < 0 ? -front : 0.0d;
+        var tendency = GarminJS.clamp(payload.distanceTendencyPct, -5.0d, 5.0d) / 5.0d;
+        var factor = 1.0d + tendency * (0.026d * frontPos - 0.018d * backPos);
+        if (factor < 0.96d) { return 0.96d; }
+        if (factor > 1.04d) { return 1.04d; }
         return factor;
     }
 
@@ -139,16 +139,16 @@ module GarminBubbleEngine {
     // the other way round lays the Bubble's longer axis straight down the
     // target line.
     function buildRing(centre, payload, shotBearing) {
-        var lateral = payload.lateralRadiusM > 1.0 ? payload.lateralRadiusM : 1.0;
+        var lateral = payload.lateralRadiusM > 1.0d ? payload.lateralRadiusM : 1.0d;
         lateral *= GarminBubbleTables.MAIN_RING_SCALE;
-        var depth = payload.depthRadiusM > 1.0 ? payload.depthRadiusM : 1.0;
+        var depth = payload.depthRadiusM > 1.0d ? payload.depthRadiusM : 1.0d;
         depth *= GarminBubbleTables.MAIN_RING_SCALE;
         var steps = GarminBubbleTables.RING_STEPS;
 
         var xs = new [steps];
         var ys = new [steps];
         for (var i = 0; i < steps; i += 1) {
-            var rel = (Math.PI * 2.0 * i) / steps;
+            var rel = (Math.PI * 2.0d * i) / steps;
             var rf = radiusFactor(rel, payload);
             xs[i] = Math.cos(rel) * lateral * rf;
             ys[i] = Math.sin(rel) * depth * rf;
@@ -163,8 +163,8 @@ module GarminBubbleEngine {
             for (var i = 0; i < steps; i += 1) {
                 var prev = (i - 1 + steps) % steps;
                 var next = (i + 1) % steps;
-                sx[i] = xs[i] * 0.72 + (xs[prev] + xs[next]) * 0.14;
-                sy[i] = ys[i] * 0.72 + (ys[prev] + ys[next]) * 0.14;
+                sx[i] = xs[i] * 0.72d + (xs[prev] + xs[next]) * 0.14d;
+                sy[i] = ys[i] * 0.72d + (ys[prev] + ys[next]) * 0.14d;
             }
             xs = sx;
             ys = sy;
@@ -174,7 +174,7 @@ module GarminBubbleEngine {
         var skew = GarminGeo.degToRad(payload.visual.visualSkewDeg);
         var ring = new [steps];
         for (var i = 0; i < steps; i += 1) {
-            var skewedY = ys[i] + Math.tan(skew) * xs[i] * 0.42;
+            var skewedY = ys[i] + Math.tan(skew) * xs[i] * 0.42d;
             var rx = xs[i] * Math.cos(tilt) - skewedY * Math.sin(tilt);
             var ry = xs[i] * Math.sin(tilt) + skewedY * Math.cos(tilt);
             ring[i] = GarminGeo.localPointToLatLng(centre, shotBearing, rx, ry);
@@ -198,7 +198,7 @@ module GarminBubbleEngine {
         if (maxM == null || maxM <= 0) { return null; }
         var toGreen = GarminGeo.distance(player, green);
         if (toGreen == null || !GarminJS.isFinite(toGreen)) { return null; }
-        if (toGreen <= maxM + 3.0) { return green; }
+        if (toGreen <= maxM + 3.0d) { return green; }
         return layupAlong(route, player, maxM);
     }
 
@@ -208,7 +208,7 @@ module GarminBubbleEngine {
     // the player stands; the final floor (max(45, maxM*0.58)) refuses an
     // answer so short it would be a worse suggestion than none.
     function layupAlong(route, player, maxM) {
-        var samples = sampleRoute(route, 7.0);
+        var samples = sampleRoute(route, 7.0d);
         if (samples.size() < 2) { return null; }
 
         var nearestIndex = 0;
@@ -218,7 +218,7 @@ module GarminBubbleEngine {
             if (score < nearestScore) { nearestIndex = i; nearestScore = score; }
         }
         var minProgress = samples[nearestIndex]["progress"];
-        if (minProgress < 0) { minProgress = 0.0; }
+        if (minProgress < 0) { minProgress = 0.0d; }
 
         /* `haveBest` rather than testing `bestPoint == null`, and it is not a
            style preference. These four start as null, so SDK 9's type checker
@@ -241,19 +241,19 @@ module GarminBubbleEngine {
            type as Null, and the comparisons below become `Null - Float`, which
            is the error the checker raises the moment it stops believing those
            branches are dead. */
-        var bestProgress = 0.0;
-        var bestDirect = 0.0;
-        var bestScore = 0.0;
+        var bestProgress = 0.0d;
+        var bestDirect = 0.0d;
+        var bestScore = 0.0d;
         for (var i = 0; i < samples.size(); i += 1) {
             var progress = samples[i]["progress"];
-            if (progress < minProgress + 6.0) { continue; }
+            if (progress < minProgress + 6.0d) { continue; }
             var direct = GarminGeo.distance(player, samples[i]["point"]);
-            if (direct == null || !GarminJS.isFinite(direct) || direct > maxM + 3.0) { continue; }
+            if (direct == null || !GarminJS.isFinite(direct) || direct > maxM + 3.0d) { continue; }
             var score = (maxM - direct).abs();
             var take = false;
             if (!haveBest) { take = true; }
-            else if (score < bestScore - 0.75) { take = true; }
-            else if ((score - bestScore).abs() <= 0.75 && progress > bestProgress) { take = true; }
+            else if (score < bestScore - 0.75d) { take = true; }
+            else if ((score - bestScore).abs() <= 0.75d && progress > bestProgress) { take = true; }
             if (take) {
                 haveBest = true;
                 bestPoint = samples[i]["point"];
@@ -263,8 +263,8 @@ module GarminBubbleEngine {
             }
         }
         if (!haveBest) { return null; }
-        var floor = maxM * 0.58;
-        if (floor < 45.0) { floor = 45.0; }
+        var floor = maxM * 0.58d;
+        if (floor < 45.0d) { floor = 45.0d; }
         if (bestDirect < floor) { return null; }
         return bestPoint;
     }
@@ -274,14 +274,14 @@ module GarminBubbleEngine {
     // Dictionary { "point" => Coordinate, "progress" => Double }.
     function sampleRoute(route, stepM) {
         if (route.size() == 0) { return []; }
-        var samples = [{ "point" => route[0], "progress" => 0.0 }];
-        var progress = 0.0;
+        var samples = [{ "point" => route[0], "progress" => 0.0d }];
+        var progress = 0.0d;
         for (var i = 1; i < route.size(); i += 1) {
             var a = route[i - 1];
             var b = route[i];
             var segment = GarminGeo.distance(a, b);
             if (segment == null || !GarminJS.isFinite(segment) || segment <= 0) { continue; }
-            var stepFloor = stepM > 3.0 ? stepM : 3.0;
+            var stepFloor = stepM > 3.0d ? stepM : 3.0d;
             var steps = Math.ceil(segment / stepFloor).toNumber();
             if (steps < 1) { steps = 1; }
             for (var s = 1; s <= steps; s += 1) {
@@ -305,10 +305,10 @@ module GarminBubbleEngine {
     // down: this one is a number a person might read.
     function compassBearingDeg(from, to) {
         var north = (to.lat - from.lat) * GarminGeo.METRES_PER_DEGREE;
-        var east = (to.lng - from.lng) * GarminGeo.METRES_PER_DEGREE * Math.cos(GarminGeo.degToRad((from.lat + to.lat) / 2.0));
-        var deg = GarminGeo.radToDeg(Math.atan2(east, north)) + 360.0;
+        var east = (to.lng - from.lng) * GarminGeo.METRES_PER_DEGREE * Math.cos(GarminGeo.degToRad((from.lat + to.lat) / 2.0d));
+        var deg = GarminGeo.radToDeg(Math.atan2(east, north)) + 360.0d;
         // truncatingRemainder(dividingBy: 360) equivalent
-        var wrapped = deg - (Math.floor(deg / 360.0) * 360.0);
+        var wrapped = deg - (Math.floor(deg / 360.0d) * 360.0d);
         return GarminJS.roundTo(wrapped, 2);
     }
 }

@@ -1,0 +1,15 @@
+# Simulator-only overlay: a build that runs the Bubble Engine parity fixtures
+# at startup and prints the result.
+#
+# Chained AFTER monkey.jungle by `CIQ_PARITY=1 ./build.sh build`. Two things
+# change against the default exclusion list:
+#
+#   parity_off  is excluded, so GarminParityPolicy.run() becomes the real one
+#               and GarminParityFixture / GarminParityHarness compile in.
+#   tx_live     is excluded, so this build is muted like the sim build is —
+#               a harness has no business transmitting to a phone, and the
+#               simulator segfaults on transmit while tethered anyway.
+#
+# Never used by `./build.sh package`: the store binary carries neither the
+# harness nor the ~600-line fixture table.
+base.excludeAnnotations = tx_live;parity_off
