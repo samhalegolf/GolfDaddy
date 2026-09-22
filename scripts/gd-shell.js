@@ -189,9 +189,6 @@
   }
   function showHome(opts){
     opts=opts||{};
-    var leavingGps=state.route==="gps"||!!(document.body&&document.body.classList.contains("shell-gps")&&!document.body.classList.contains("gdCoursePickerOpen"));
-    if(leavingGps&&window.GDGpsPlayRuntime&&typeof window.GDGpsPlayRuntime.leave==="function")safe(function(){window.GDGpsPlayRuntime.leave({reason:opts.source||"shell-home"});});
-    else if(leavingGps)safe(function(){window.gdGpsPlayRuntimeLeave?.({reason:opts.source||"shell-home"});});
     safe(function(){window.GolfDaddyAccounts?.returnToOwnProfile?.({silent:true});});
     safe(function(){window.ClaritySession?.sync?.("home");});
     clearPickerDatasets();
@@ -240,7 +237,6 @@
     }
     clearPickerDatasets();
     transition("gps",Object.assign({source:"gps",dock:"gps"},opts));
-    safe(function(){window.gdApplyGpsMapVisibilityOwner?.("shell-enter-gps");});
     safe(function(){if(typeof map!=="undefined"&&map&&map.invalidateSize)setTimeout(function(){map.invalidateSize();},80);});
     safe(function(){window.gdHydrateGpsBadge?.(true);});
     // This is the shell's OWN enter-GPS path (window.enterGpsModule gets
@@ -252,8 +248,6 @@
   }
   function leaveGps(opts){
     opts=opts||{};
-    if(window.GDGpsPlayRuntime&&typeof window.GDGpsPlayRuntime.leave==="function")safe(function(){window.GDGpsPlayRuntime.leave({reason:opts.source||"shell-leave-gps"});});
-    else safe(function(){window.gdGpsPlayRuntimeLeave?.({reason:opts.source||"shell-leave-gps"});});
     return opts.to==="home"?showHome(opts):false;
   }
   function normalModuleName(name){
@@ -316,11 +310,7 @@
     opts=opts||{};
     if(state.route==="module")return closeModule(opts);
     if(state.route==="course-picker")return closeCoursePicker({to:"origin",source:"course-picker-back"});
-    if(state.route==="gps"){
-      safe(function(){window.GDGpsPlayRuntime?.back?.({source:"shell-back"});});
-      if(window.GDGpsPlayRuntime&&typeof window.GDGpsPlayRuntime.back==="function")return false;
-      return openCoursePicker({source:"gps-back",returnTarget:"gps"});
-    }
+    if(state.route==="gps")return openCoursePicker({source:"gps-back",returnTarget:"gps"});
     return false;
   }
   function backPointer(event){

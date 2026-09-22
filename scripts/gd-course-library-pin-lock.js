@@ -4277,7 +4277,6 @@
     try{
       document.body.classList.remove('gdGpsInteractiveGreenFallbackActive');
       document.body.dataset.gdInteractiveGreenFallbackClearedBy=String(reason||'clear');
-      if(typeof window.gdApplyGpsMapVisibilityOwner==='function')window.gdApplyGpsMapVisibilityOwner(reason||'interactive-green-fallback-clear');
     }catch(e){}
     if(state&&state.debugRunId&&reason!=='green-selected'){
       const superseded=reason==='superseded';
@@ -4590,7 +4589,6 @@
         else if(focus&&map&&map.panTo)try{map.panTo(focus,{animate:true});}catch(e){}
       },40);
     }catch(e){}
-    try{if(typeof window.gdApplyGpsMapVisibilityOwner==='function')window.gdApplyGpsMapVisibilityOwner('interactive-green-fallback');}catch(e){}
     const mapEl=(map&&map.getContainer&&map.getContainer())||document.getElementById('map');
     if(!mapEl){
       /* The phase:'fallback' event above has already fired and closed the

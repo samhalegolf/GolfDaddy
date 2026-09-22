@@ -15915,7 +15915,6 @@ function gdStoreCoursePickerSelection(payload){
 function gdEnsureGpsCourseSurface(){
   try{window.GDShell?.enterGps?.({source:"core-ensure-gps-course-surface",replace:true,fromCoursePicker:true});}catch(e){}
   try{document.body.classList.remove("gdProfileOpen","gdStatsOpen","gdBubbleStudioOpen");document.body.classList.add("gps-open","manual-gps-active","gdModeTwoTap");}catch(e){}
-	  try{window.gdApplyGpsMapVisibilityOwner?.("ensure-gps-course-surface-before-map");}catch(e){}
 	  const mapEl=document.getElementById("map");
 		  if(mapEl){
 		    mapEl.classList.remove("hidden");
@@ -15925,7 +15924,6 @@ function gdEnsureGpsCourseSurface(){
 		    mapEl.style.opacity=liveAllowed?"1":"0";
 		    mapEl.style.pointerEvents=liveAllowed?"auto":"none";
 		  }
-		  try{window.gdApplyGpsMapVisibilityOwner?.("ensure-gps-course-surface");}catch(e){}
 		}
 function gdCoursePayloadIsManual(payload){
   return /^manual gps$/i.test(String(payload?.name||payload?.courseName||"").trim());
@@ -16364,7 +16362,6 @@ function gdShowCoursePinScreen(payload){
     const proposal=gdCoursePickerMapCenterPoint()||gdCoursePickerFinitePoint(payload)||gdCoursePickerDefaultPoint();
     if(owner&&typeof owner.propose==="function"&&proposal)owner.propose(payload,proposal,{source:"course-picker-pin-proposal",confidence:.35});
   }catch(e){}
-  try{window.gdApplyGpsMapVisibilityOwner?.("course-picker-pin-prompt");}catch(e){}
   try{if(typeof toast==="function")toast("Pin the course location");}catch(e){}
   return false;
 }
@@ -16596,7 +16593,6 @@ function gdRefreshGpsMapAfterCourseOpen(payload,opts={}){
         if(setCourseView&&hasCoursePoint&&payload&&typeof map!=="undefined"&&map&&typeof map.setView==="function")map.setView([payload.lat,payload.lng],18,{animate:false});
       }catch(e){}
 	      try{if(typeof gdV62Refresh==="function")gdV62Refresh();}catch(e){}
-	      try{window.gdApplyGpsMapVisibilityOwner?.("course-open-refresh");}catch(e){}
 	      try{window.gdHydrateGpsBadge?.(true);}catch(e){}
       try{
         const line=document.getElementById("courseLine");
@@ -16642,7 +16638,6 @@ function gdApplyCourseVisualForPlay(loaded,loadedKey,keys,source){
   try{window.gdResetHoleImageFresh?.();}catch(e){}
   try{window.gdEnsureCurrentCapturedSurfaceManifest?.(source||"course-visual-cloud-loaded");}catch(e){}
   try{window.gdQueueMappedPreLockHoleFrame?.({source:source||"course-visual-cloud-loaded"});}catch(e){}
-  try{window.gdApplyGpsMapVisibilityOwner?.(source||"course-visual-cloud-loaded");}catch(e){}
   try{window.gdHydrateGpsBadge?.(true);}catch(e){}
 }
 async function gdLoadCourseVisualForPlay(payload,opts={}){

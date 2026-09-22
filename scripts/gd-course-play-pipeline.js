@@ -968,7 +968,6 @@
         lastSyncStatusByKey[key]=transitionKey;
       }
     }
-    safe(function(){if(typeof window.gdApplyGpsMapVisibilityOwner==="function")window.gdApplyGpsMapVisibilityOwner("course-play-pipeline-"+(reason||"sync"));});
     return state;
   }
   function installGpsPlayAdapter(){

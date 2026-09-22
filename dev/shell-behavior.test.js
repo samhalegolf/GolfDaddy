@@ -111,7 +111,7 @@ function makeDocument() {
 
 function createHarness() {
   const document = makeDocument();
-  const calls = { gpsLeave: 0, settings: 0, profileReturn: 0 };
+  const calls = { settings: 0, profileReturn: 0 };
   const window = {
     document,
     console,
@@ -123,7 +123,6 @@ function createHarness() {
     ClarityRouter: { remember() {} },
     ClaritySession: { sync() {} },
     GolfDaddyAccounts: { returnToOwnProfile() {} },
-    GDGpsPlayRuntime: { leave() { calls.gpsLeave++; } },
     openSettings() { calls.settings++; return false; },
     gdReturnToProfileWorkspace() { calls.profileReturn++; return false; }
   };
@@ -172,6 +171,14 @@ shell.back();
 assert.strictEqual(shell.getState().route, "home", "Back from picker returns Home");
 assertOneSurface(document, "home");
 
+/* No course loaded: the GPS route has nothing to draw, so the shell sends the
+   caller to the course picker instead of a black GPS surface. */
+shell.enterGps({ source: "no-course" });
+assert.strictEqual(shell.getState().route, "course-picker", "entering GPS without a loaded course opens the picker");
+assertOneSurface(document, "picker");
+shell.home();
+
+window.currentCourse = { name: "Test Course" };
 shell.enterGps({ source: "playable-course" });
 assert.strictEqual(shell.getState().route, "gps", "valid course enters GPS route");
 assert(document.body.classList.contains("shell-gps"), "GPS compatibility class is active");
@@ -195,7 +202,6 @@ assertOneSurface(document, "gps");
 
 shell.home();
 assert.strictEqual(shell.getState().route, "home", "Home command returns Home");
-assert.strictEqual(calls.gpsLeave, 1, "Home from GPS calls GPS runtime leave hook once");
 assertOneSurface(document, "home");
 
 document.getElementById("shellSettingsBtn").onclick({ preventDefault() {}, stopPropagation() {} });

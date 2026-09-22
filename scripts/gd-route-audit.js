@@ -8899,7 +8899,6 @@
     setRouteLabel("GPS");
     remember("gps",!!(opts&&opts.replace));
 		    if(typeof oldEnterGps==="function")safe(()=>oldEnterGps.call(window,Object.assign({replace:true},opts||{})));
-		    safe(()=>window.gdApplyGpsMapVisibilityOwner?.("open-gps-stable-before-map-reset"));
 		    safe(()=>{
 		      const mapEl=byId("map");
 			      if(mapEl){
@@ -8910,7 +8909,6 @@
 			        mapEl.style.pointerEvents=liveAllowed?"":"none";
 			      }
 			    });
-		    safe(()=>window.gdApplyGpsMapVisibilityOwner?.("open-gps-stable"));
 		    const selectedCourseForHole=opts?.fromCoursePicker||opts?.selectedCourse
 	      ?(opts.selectedCourse||activeCourseForGpsStable()||visibleCourseForGpsStable())
 	      :null;
