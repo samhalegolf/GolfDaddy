@@ -331,11 +331,44 @@ class GarminMapView extends WatchUi.View {
         dc.drawCircle(x, y, radius);
     }
 
+    // The club name beside the target dot. (x, y) is where the target IS,
+    // which on a magnified framing is regularly off the glass or hard
+    // against its edge — the label is then clamped back into the visible
+    // band and stops tracking the dot exactly. That is the intended
+    // trade: a club name that has come away from its dot still reads, a
+    // club name half off the screen does not. (Before 2026-09-22 there was
+    // no clamp at all and a target near the left edge rendered "DRIVER" as
+    // "VER".)
     function drawLabel(dc, text, x, y) {
+        var font = Graphics.FONT_XTINY;
+        var up = text.toUpper();
+        var viewWidth = dc.getWidth();
+        var viewHeight = dc.getHeight();
+        var lineHeight = dc.getFontHeight(font);
+
+        var ty = y;
+        if (ty < 0) { ty = 0; }
+        if (ty > viewHeight - lineHeight) { ty = viewHeight - lineHeight; }
+
+        var halfText = dc.getTextWidthInPixels(up, font) / 2 + 2;
+        var half = LayoutProfile.chordHalfWidthPx(ty, ty + lineHeight, viewWidth, viewHeight);
+        var centreX = viewWidth / 2;
+        var minX = centreX - half + halfText;
+        var maxX = centreX + half - halfText;
+
+        var tx = x;
+        if (minX > maxX) {
+            tx = centreX;        // wider than the band: centre it and let it bleed
+        } else if (tx < minX) {
+            tx = minX;
+        } else if (tx > maxX) {
+            tx = maxX;
+        }
+
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x + 1, y + 1, Graphics.FONT_XTINY, text.toUpper(), Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(tx + 1, ty + 1, font, up, Graphics.TEXT_JUSTIFY_CENTER);
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(x, y, Graphics.FONT_XTINY, text.toUpper(), Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(tx, ty, font, up, Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     function drawCentredText(dc, text, y, font) {
@@ -348,21 +381,34 @@ class GarminMapView extends WatchUi.View {
     }
 
     // Small UI chrome only — the map stays visually dominant (plan step 11).
+    //
+    // Hole number left, distance-to-green right, AIMING between them, all on
+    // one row near the top. The row's ends are the chord of the glass at that
+    // height, NOT the edges of the drawing buffer: on a round screen the
+    // buffer's top corners are behind the bezel, which is where all of this
+    // used to be drawn and why none of it had ever been seen on a device.
+    // See LayoutProfile.chordHalfWidthPx.
     function drawChrome(dc, scene, viewWidth, viewHeight) {
+        var font = Graphics.FONT_XTINY;
+        var top = LayoutProfile.chromeTopY(viewHeight);
+        var half = LayoutProfile.chordHalfWidthPx(top, top + dc.getFontHeight(font), viewWidth, viewHeight);
+        var centreX = viewWidth / 2;
+        var pad = 2;
+
         var holeNumber = scene.holeNumber();
         var label = "H" + (holeNumber != null ? holeNumber.toString() : "-");
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(4, 2, Graphics.FONT_XTINY, label, Graphics.TEXT_JUSTIFY_LEFT);
+        dc.drawText(centreX - half + pad, top, font, label, Graphics.TEXT_JUSTIFY_LEFT);
 
         var centreM = scene.distanceCentreM();
         if (centreM != null) {
             var text = centreM.toNumber().toString() + "m";
-            dc.drawText(viewWidth - 4, 2, Graphics.FONT_XTINY, text, Graphics.TEXT_JUSTIFY_RIGHT);
+            dc.drawText(centreX + half - pad, top, font, text, Graphics.TEXT_JUSTIFY_RIGHT);
         }
 
         if (aiming) {
             dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(viewWidth / 2, 2, Graphics.FONT_XTINY, "AIMING", Graphics.TEXT_JUSTIFY_CENTER);
+            dc.drawText(centreX, top, font, "AIMING", Graphics.TEXT_JUSTIFY_CENTER);
         }
     }
 
