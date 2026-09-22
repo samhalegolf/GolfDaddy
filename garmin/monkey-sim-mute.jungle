@@ -5,4 +5,9 @@
 # GarminTransmitPolicy.muted() instead of the live one. See that file for why
 # this exists (the simulator segfaults on transmit while tethered). Never
 # used by `./build.sh package`.
-base.excludeAnnotations = tx_live
+# NOTE the `parity` half. A jungle's excludeAnnotations is an ASSIGNMENT, not
+# an addition: dropping it here would un-exclude the parity harness, and both
+# definitions of GarminParityPolicy.run() would compile — "Redefinition of
+# 'run'". Every overlay must therefore repeat one annotation out of EACH pair.
+# dev/garmin-build-flavours.test.js holds that in place.
+base.excludeAnnotations = tx_live;parity
