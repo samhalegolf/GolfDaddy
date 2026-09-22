@@ -8877,11 +8877,23 @@
 	  }
 	  function openGpsStable(opts){
     const preserve=!!(opts&&(opts.preserveState||opts.preserve||opts.fromBack||opts.fromWand||opts.keepGps));
+    /* A round is loaded when gdStoreCoursePickerSelection has run and nothing
+       cleared it since. Without one the GPS route has nothing to draw - the
+       picker is hidden and the map stays hidden - so "preserve"/"back" lands on
+       a black screen with only Back / Home / Settings. Those go to the picker
+       instead (GDShell.enterGps carries the same guard for direct callers).
+       The localStorage session is deliberately not enough: Resume lives in
+       the picker, so showing the picker is what offers it. */
+    const courseLoaded=safe(()=>!!(window.currentCourse&&window.currentCourse.name),false);
     closeLegacyPanels();
     closeModules();
     hideOverlays();
     clearBody();
 	    byId("shellHome")?.classList.add("hidden");
+    if(!courseLoaded&&!opts?.fromCoursePicker&&!opts?.selectedCourse){
+      remember("gps",!!(opts&&opts.replace));
+      return showCoursePicker();
+    }
 	    safe(()=>window.GDShell?.enterGps?.(Object.assign({source:"route-audit-open-gps"},opts||{})));
     setDock("gps");
     setRouteLabel("GPS");

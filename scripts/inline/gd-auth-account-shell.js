@@ -1618,6 +1618,12 @@
         if (tool === 'shot' && typeof gdOpenCourseData === 'function') return gdOpenCourseData({fromProfile:true});
         if (tool === 'shot' && typeof openCourseData === 'function') return openCourseData({fromProfile:true});
         if (tool === 'shot' && typeof openStats === 'function') return openStats({fromProfile:true});
+        /* The course picker is the GPS entry, exactly as the Home Play tile.
+           enterGpsModule() alone lands on the GPS route with no course loaded
+           - a black screen with only Back / Home / Settings on it - unless a
+           previous round happened to leave one in memory. The picker returns
+           to this player's profile via GDPlayContext's coach-player context. */
+        if (tool === 'play' && window.GDCoursePicker && typeof window.GDCoursePicker.open === 'function') return window.GDCoursePicker.open({source:'coach-player-play', returnTarget:'coach-player'});
         if (tool === 'play' && typeof enterGpsModule === 'function') return enterGpsModule();
       } catch(e) {}
       safeToast('Tool unavailable');

@@ -219,8 +219,25 @@
     if(opts.to==="previous"&&state.previousRoute&&state.previousRoute!=="course-picker")return back(opts);
     return showHome(Object.assign({source:"course-picker-close"},opts));
   }
+  /* A course is loaded when gdStoreCoursePickerSelection has run and nothing
+     has cleared it since - the same value the GPS surface itself draws from. */
+  function courseLoaded(){
+    try{return !!(window.currentCourse&&window.currentCourse.name);}catch(e){return false;}
+  }
   function enterGps(opts){
     opts=opts||{};
+    /* The GPS route has nothing to draw without a course: the picker is hidden
+       (wrong route) and the map stays hidden until a course allows it, so the
+       screen is black with only Back / Home / Settings on it. Every "back to
+       GPS" and "enter GPS" call used to trust its caller that a round was in
+       progress; a fresh launch, a reload, or Settings opened from the picker
+       and closed again all proved otherwise. Send those to the picker, which
+       is the real GPS entry and offers Resume when a round exists. */
+    if(!opts.fromCoursePicker&&!opts.selectedCourse&&!courseLoaded()){
+      var pickerOpts={source:(opts.source||"gps")+"-no-course",returnTarget:opts.returnTarget||"home",replace:!!opts.replace};
+      if(window.GDCoursePicker&&typeof window.GDCoursePicker.open==="function")return window.GDCoursePicker.open(pickerOpts);
+      return openCoursePicker(pickerOpts);
+    }
     clearPickerDatasets();
     transition("gps",Object.assign({source:"gps",dock:"gps"},opts));
     safe(function(){window.gdApplyGpsMapVisibilityOwner?.("shell-enter-gps");});
