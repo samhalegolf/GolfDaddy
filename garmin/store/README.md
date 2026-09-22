@@ -1,9 +1,14 @@
 # Connect IQ store listing
 
 The text and images the portal asks for alongside `ClarityCaddy.iq`, kept here
-because the binary itself is git-ignored (`garmin/build/`) and everything below
-was otherwise living only in a chat window. Upload steps are in
-[../UPLOAD.md](../UPLOAD.md) §7.
+because everything below was otherwise living only in a chat window. Upload
+steps are in [../UPLOAD.md](../UPLOAD.md) §7.
+
+The binary itself stays at `garmin/build/ClarityCaddy.iq`. `garmin/build/` is
+git-ignored, but that one file is tracked by an explicit `git add -f`, so the
+exact artifact that was uploaded is recoverable. Being tracked, it now shows
+as modified after every `./build.sh package` — commit it when the version you
+upload changes, and leave it alone otherwise.
 
 | File | Portal field | Limit | Actual |
 | --- | --- | --- | --- |
