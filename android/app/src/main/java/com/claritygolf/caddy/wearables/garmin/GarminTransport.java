@@ -138,22 +138,34 @@ public final class GarminTransport {
         this.listener = listener;
     }
 
-    /** Brings the SDK up and, once it is ready, binds to whichever device the
-     *  store currently holds. Safe to call repeatedly: initialize() is done
-     *  once, and a later call just re-binds (which is what selectDevice wants
-     *  after the player picks a different watch).
+    /** Brings the SDK up quietly and, once it is ready, binds to whichever
+     *  device the store currently holds. Safe to call repeatedly: initialize()
+     *  is done once, and a later call just re-binds (which is what
+     *  selectDevice wants after the player picks a different watch).
      *
-     *  <p>autoUI = true lets the SDK put up Garmin's own dialogs when Garmin
-     *  Connect Mobile is missing or too old. That is the right call here —
-     *  those are the two failure modes a player can actually fix, and
-     *  Garmin's wording for them is better than anything invented. */
+     *  <p>Quiet means autoUI = false: the SDK must NOT show its own "install
+     *  Garmin Connect" dialog from here. This runs on every cold launch (via
+     *  NativeRoundBridge.load), and most Android players have no Garmin and
+     *  no Garmin Connect Mobile, so with autoUI on they were greeted by a
+     *  Garmin install prompt before touching anything Garmin-related
+     *  (reported 2026-09-26). iOS never surfaces that case outside Settings >
+     *  Garmin Watch; Android now matches. */
     public void activate() {
+        activate(false);
+    }
+
+    /** {@link #activate()} with the SDK's own dialogs switched on. Only the
+     *  Settings > Garmin Watch page should ask for this: there the player has
+     *  said they own a Garmin, and Garmin's wording for "Connect Mobile is
+     *  missing or too old" is better than anything invented. Everywhere else
+     *  state() and availableDevices() report the failure without a popup. */
+    private void activate(boolean showGarminPrompts) {
         if (connectIQ == null) {
             connectIQ = ConnectIQ.getInstance(context, connectType());
             app = new IQApp(connectIqAppId);
         }
         if (sdkReady) { bindSelectedDevice(); return; }
-        connectIQ.initialize(context, true, new ConnectIQ.ConnectIQListener() {
+        connectIQ.initialize(context, showGarminPrompts, new ConnectIQ.ConnectIQListener() {
             @Override
             public void onSdkReady() {
                 sdkReady = true;
@@ -164,9 +176,10 @@ public final class GarminTransport {
             @Override
             public void onInitializeError(ConnectIQ.IQSdkErrorStatus status) {
                 /* GCM_NOT_INSTALLED, GCM_UPGRADE_NEEDED or SERVICE_ERROR. The
-                   first two are already on screen via autoUI; all three leave
-                   us not ready, which state() reports honestly rather than
-                   pretending the transport is live. */
+                   first two are on screen via Garmin's own dialog only when
+                   showGarminPrompts was true (Settings > Garmin Watch); all
+                   three leave us not ready, which state() reports honestly
+                   rather than pretending the transport is live. */
                 sdkReady = false;
                 Log.w(TAG, "Connect IQ SDK did not initialise: " + status);
                 notifyStateChanged();
@@ -502,11 +515,13 @@ public final class GarminTransport {
         out.put("sdkLinked", true);
         if (connectIQ == null || !sdkReady) {
             /* Distinct from "looked and found none", and the settings page
-               words it differently. activate() is called here so the common
-               case — player opens the page before anything else has woken the
-               SDK — resolves itself on their second tap rather than needing an
-               app restart. */
-            activate();
+               words it differently. activate(true) is called here so the
+               common case — player opens the page before anything else has
+               woken the SDK — resolves itself on their second tap rather than
+               needing an app restart. This is the one place Garmin's own
+               "install / update Garmin Connect" dialog is allowed: the player
+               is on the Garmin page, so they have told us they own one. */
+            activate(true);
             out.put("reason", "Garmin Connect is not ready yet. Make sure the Garmin Connect app is installed and signed in, then try again.");
             return out;
         }
