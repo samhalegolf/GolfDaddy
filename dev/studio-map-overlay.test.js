@@ -103,6 +103,11 @@ test("the overlay endpoint is registered, admin-only, and reads OSM through the 
   assert.ok(endpoint.includes("normalizeOverlayFeatures("), "features must be normalised before they are stored");
   assert.ok(endpoint.includes("osmGuideQuery(") && endpoint.includes("fetchOverpass("), "the OSM context must come from the same query the mapper runs");
   assert.ok(endpoint.includes('method: "DELETE"'), "an empty overlay must delete the row, not store []");
+  /* An AI's answer arrives in image pixels with a georef; the conversion is the georef core's,
+     never re-derived here, and a georef the core cannot use is a 400 with its reason. */
+  assert.ok(endpoint.includes('from "./lib/gd-overlay-georef-core.mjs"'), "the endpoint does not use the georef core for pixel-space posts");
+  assert.ok(endpoint.includes("aiShapesToOverlay(raw, payload.georef"), "pixel-space features are not converted through aiShapesToOverlay");
+  assert.ok(endpoint.includes('error: "bad georef"'), "a georef the core rejects must be refused with its reason");
 });
 
 /* ---------- the worker ---------- */

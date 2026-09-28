@@ -9,6 +9,13 @@
  *      the mapper's.
  * POST {courseId, features:[...]}  (admin) -> saves the overlay, normalised. An empty list
  *      deletes the row: "no overlay" is the absence of a row, not a row holding [].
+ * POST {courseId, georef, features:[...], units?, append?}  (admin) -> the same, but the
+ *      features are in IMAGE PIXELS - an AI's answer about a satellite picture - and georef
+ *      says where that picture is (gd-overlay-georef-core.mjs: a frame's playSurface,
+ *      centre+zoom, or bounds). They are converted to lat/lng here, stamped source:"ai", and
+ *      saved. append:true keeps the shapes already saved and adds these, for an AI run one
+ *      picture at a time; the default replaces, like a hand-drawn save. The response carries
+ *      what was dropped and why, so a bad answer is visible rather than silently thinner.
  *
  * The overlay is read by functions/course-mapper-worker-background.mjs and merged into the
  * Overpass payload (functions/lib/gd-map-overlay-core.mjs). Saving here changes nothing on
@@ -18,6 +25,7 @@ import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { osmQueryScope, osmGuideQuery, osmGuidePointsFromElement } from "./lib/gd-automapper-core.mjs";
 import { normalizeOverlayFeatures, overlaySummary, OVERLAY_MAX_FEATURES } from "./lib/gd-map-overlay-core.mjs";
+import { aiShapesToOverlay } from "./lib/gd-overlay-georef-core.mjs";
 
 const TABLE = "course_map_overlays";
 const MAPS_TABLE = "course_maps";
@@ -119,12 +127,25 @@ export default async function courseMapOverlay(req) {
   if (!courseId) return json(400, { error: "courseId required" });
   const course = await loadCourse(courseId);
   if (!course) return json(404, { error: "no course_maps row for " + courseId, detail: "An overlay belongs to a course the picker already knows. Add the course first." });
-  const raw = payload && Array.isArray(payload.features) ? payload.features : [];
+  let raw = payload && Array.isArray(payload.features) ? payload.features : [];
+  let converted = null;
+  if (payload && payload.georef) {
+    converted = aiShapesToOverlay(raw, payload.georef, { units: payload.units });
+    if (converted.error) return json(400, { error: "bad georef", detail: converted.error });
+    raw = converted.features;
+    if (payload.append) {
+      const saved = await loadOverlay(courseId);
+      /* Saved ids win: a re-run over the same picture replaces its own earlier shapes rather
+         than stacking a second copy under a fresh id. */
+      const incoming = new Set(raw.map(f => f.id));
+      raw = saved.features.filter(f => !incoming.has(f.id)).concat(raw);
+    }
+  }
   if (raw.length > OVERLAY_MAX_FEATURES) return json(400, { error: "too many features", detail: "At most " + OVERLAY_MAX_FEATURES + " features per course." });
   const features = normalizeOverlayFeatures(raw);
   /* Features the caller sent but that did not survive normalisation are reported, not
      silently dropped: a two-point "fairway" is a drawing slip the operator wants to hear about. */
-  const dropped = raw.length - features.length;
+  const dropped = raw.length - features.length + (converted ? converted.dropped.length : 0);
 
   if (!features.length) {
     await supabaseFetch(TABLE + "?course_id=eq." + encodeURIComponent(courseId), { method: "DELETE" });
@@ -141,7 +162,8 @@ export default async function courseMapOverlay(req) {
     courseId,
     overlay: { features, updatedAt: row ? row.updated_at : now, updatedBy: admin },
     summary: overlaySummary(features),
-    dropped
+    dropped,
+    converted: converted ? { georef: converted.georef, dropped: converted.dropped, pixels: converted.pixels } : undefined
   });
 }
 

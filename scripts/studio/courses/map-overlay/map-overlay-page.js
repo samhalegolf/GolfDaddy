@@ -321,7 +321,7 @@
       el.list.innerHTML = '<table class="gdStudioOverlayTable"><thead><tr><th>#</th><th>Kind</th><th>Hole</th><th>Points</th><th></th></tr></thead><tbody>' +
         session.features.map(function (f, i) {
           return '<tr data-gd-overlay-row="' + esc(f.id) + '"' + (f.id === selectedId ? ' class="isSelected"' : "") + ">" +
-            "<td>" + (i + 1) + "</td><td>" + esc(kindLabel(f.kind)) + "</td>" +
+            "<td>" + (i + 1) + "</td><td>" + esc(kindLabel(f.kind)) + (f.source ? ' <span class="gdStudioMuted">· ' + esc(f.source) + "</span>" : "") + "</td>" +
             '<td><input type="number" min="1" max="36" class="gdStudioOverlayHole" data-gd-overlay-hole="' + esc(f.id) + '" value="' + (f.hole || "") + '"></td>' +
             "<td>" + f.points.length + "</td>" +
             '<td><button type="button" class="gdStudioDiagramBtn" data-gd-overlay-remove="' + esc(f.id) + '">Remove</button></td></tr>';
