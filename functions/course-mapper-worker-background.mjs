@@ -45,6 +45,7 @@ import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
 import { classifyMapperFailure, failureKind, buildMapperDebugText } from "./lib/gd-mapper-failure-kinds.mjs";
 import { captureMapperDebugImagery } from "./lib/gd-mapper-debug-captures.mjs";
+import { mergeOverlayIntoPayload, overlaySummary } from "./lib/gd-map-overlay-core.mjs";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
 const { fireClaudeRoutine, sendSystemAlert, claudeRoutineConfigured } = alerts;
 
@@ -52,6 +53,7 @@ const JOBS_TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
 const SCORECARDS_TABLE = "course_scorecards";
 const VISUAL_JOBS_TABLE = "course_visual_jobs";
+const OVERLAYS_TABLE = "course_map_overlays";
 
 function env(name) { return process.env[name] || ""; }
 function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
@@ -235,7 +237,34 @@ async function loadCourseCenter(courseId) {
     objects: row.objects_json || {}, holes: row.holes_json || {}
   };
   await ensureCoursePlace(course);
+  await attachCourseOverlay(course);
   return course;
+}
+
+/* The mapping overlay for this course (supabase/migrations/20260928_create_course_map_overlays.sql):
+   hand-drawn fairways and hole lines the resolver reads as if OSM had them. Loaded once per
+   job and merged into every payload the job fetches - see fetchCoursePayload. Best-effort:
+   a read failure must not fail the run, but it is not silent either. The failure rides on
+   the course so the job's diagnostics can say the overlay was asked for and not read, which
+   is a different finding from "there was no overlay". */
+async function attachCourseOverlay(course) {
+  course.overlay = [];
+  course.overlayError = null;
+  try {
+    const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features&course_id=eq." + encodeURIComponent(course.courseId) + "&limit=1");
+    const row = Array.isArray(rows) ? rows[0] : null;
+    course.overlay = row && Array.isArray(row.features) ? row.features : [];
+  } catch (error) {
+    course.overlayError = String(error && error.message || error).slice(0, 200);
+  }
+  return course;
+}
+
+/* Every Overpass payload a job works from goes through here, so the overlay is in ALL of
+   them - the first query, the footprint requery, the widened frames, the hole-gap boxes.
+   A merge at one call site would leave the overlay out of whichever requery got adopted. */
+function fetchCoursePayload(course, query) {
+  return fetchOverpass(query).then(payload => mergeOverlayIntoPayload(payload, course.overlay));
 }
 
 /* Where in the world this course is, filled from its coordinates when the row
@@ -456,7 +485,7 @@ async function requeryHoleGaps(job, course, payload, loops) {
   await heartbeatJob(job, { stage: "requerying-hole-gaps" });
   let merged = payload;
   for (const gap of gaps.slice(0, HOLE_GAP_MAX_QUERIES)) {
-    const gapPayload = await fetchOverpass(osmGuideQuery(osmQueryScope({ osmFrame: gap.frame }, course.center)))
+    const gapPayload = await fetchCoursePayload(course, osmGuideQuery(osmQueryScope({ osmFrame: gap.frame }, course.center)))
       .catch(() => null);
     record.queries += 1;
     if (!gapPayload) continue;
@@ -1528,7 +1557,7 @@ async function runObjectCollectionJob(job) {
   const frame = savedCourseQueryFrame(objects, course.holes);
   const scope = frame ? osmQueryScope({ osmFrame: frame }, course.center) : osmQueryScope({}, course.center);
   const queryStages = [frame ? "saved-holes-bbox" : "around:" + scope.radiusM];
-  const payload = await fetchOverpass(osmGuideQuery(scope));
+  const payload = await fetchCoursePayload(course, osmGuideQuery(scope));
 
   await heartbeatJob(job, { stage: "collecting-objects" });
   const before = surfaceCounts(objects);
@@ -1576,6 +1605,7 @@ async function runObjectCollectionJob(job) {
     holes: holeNumbers.length,
     queryStages,
     osmFeatures: golfFeatureCounts(payload),
+    overlay: course.overlayError ? { error: course.overlayError } : overlaySummary(course.overlay),
     surfacesFound: enrichment.surfaces,
     surfacesWritten: enrichment.cloned,
     added,
@@ -1598,7 +1628,10 @@ async function runMapperJob(job, origin) {
      geometry within range" while its centre sat in Michigan, and the row had no way to say so. */
   const diagnostics = {
     centre: { lat: course.center.lat, lng: course.center.lng },
-    courseName: course.courseName || null
+    courseName: course.courseName || null,
+    /* What the overlay contributed, or that it could not be read. osmFeatures below counts
+       the merged payload, so its fairway/hole numbers include these. */
+    overlay: course.overlayError ? { error: course.overlayError } : overlaySummary(course.overlay)
   };
   const fail = message => {
     const error = new Error(message);
@@ -1607,12 +1640,12 @@ async function runMapperJob(job, origin) {
   };
   await heartbeatJob(job, { stage: "querying-overpass" });
   let scope = osmQueryScope({}, course.center);
-  let payload = await fetchOverpass(osmGuideQuery(scope));
+  let payload = await fetchCoursePayload(course, osmGuideQuery(scope));
   const queryStages = ["around:" + scope.radiusM];
   const footprint = courseFootprintFrame(payload);
   if (footprint && !scopeContainsFrame(scope, footprint)) {
     scope = osmQueryScope({ osmFrame: footprint }, course.center);
-    payload = await fetchOverpass(osmGuideQuery(scope));
+    payload = await fetchCoursePayload(course, osmGuideQuery(scope));
     queryStages.push("footprint-bbox");
   }
   diagnostics.queryStages = queryStages;
@@ -1836,7 +1869,7 @@ async function runMapperJob(job, origin) {
       reason: widerFrame ? null : "could-not-build-wider-frame"
     };
     if (widerFrame) {
-      const widerPayload = await fetchOverpass(osmGuideQuery(osmQueryScope({ osmFrame: widerFrame }, course.center)));
+      const widerPayload = await fetchCoursePayload(course, osmGuideQuery(osmQueryScope({ osmFrame: widerFrame }, course.center)));
       const widerCollision = detectHoleNumberCollision(widerPayload);
       const widerCounts = golfFeatureCounts(widerPayload);
       diagnostics.widened.holeFeaturesAfter = widerCollision.holeFeatures;
@@ -2170,7 +2203,7 @@ async function runMapperJob(job, origin) {
       holeFeatureFrame(payload, WIDEN_DATA_PAD_M)
     );
     if (widerFrame) {
-      const widerPayload = await fetchOverpass(osmGuideQuery(osmQueryScope({ osmFrame: widerFrame }, course.center)));
+      const widerPayload = await fetchCoursePayload(course, osmGuideQuery(osmQueryScope({ osmFrame: widerFrame }, course.center)));
       const widerGeometry = resolveCourseGeometry(widerPayload, course.courseId, course.center, existingObjects, siblingCentres);
       if (widerGeometry.holesResolved > geometry.holesResolved) {
         geometry = widerGeometry;

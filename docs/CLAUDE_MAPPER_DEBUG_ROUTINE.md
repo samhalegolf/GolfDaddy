@@ -42,9 +42,11 @@ The fire text is built by `buildMapperDebugText` in
    URL, with their bounds and the pixel-to-coordinate rule so Claude can draw greens
    and fairways from the imagery and return real coordinates.
 4. **The output contract**: drawn or numbered geometry comes back as one fenced
-   `geojson` block (Polygons for greens/fairways/tees, LineStrings for holes, with
-   `golf`, `hole`, `confidence`, `note` properties). Nothing ingests it automatically
-   yet; an operator reads the report and applies it.
+   `json` block in the mapping overlay's own shape, `{ courseId, features: [{ id,
+   kind: fairway | hole | green, hole, points: [{lat, lng}] }] }`. That is what
+   Studio > Courses > Mapping Overlay saves through `/api/course-map-overlay` and what
+   the next mapper run merges into the Overpass payload, so an operator pastes the
+   block, saves, and requests a remap. Nothing saves it automatically.
 5. **The diagnostics JSON**, cut to fit the 16000-character fire limit.
 
 The captures and the prompt lookup only happen when the Routine is configured. The

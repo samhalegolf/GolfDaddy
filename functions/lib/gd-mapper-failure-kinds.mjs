@@ -66,8 +66,8 @@ export const FAILURE_KINDS = [
     defaultPrompt:
       "OpenStreetMap has {{greens}} greens and {{fairways}} fairways for {{courseName}} " +
       "({{courseId}}) but no hole lines, so the resolver could not build centre-lines or number " +
-      "anything. The scorecard says {{expectedHoles}} holes. The OSM greens are listed in the " +
-      "diagnostics; keep them and add what is missing. " + DRAW_FROM_IMAGERY
+      "anything. The scorecard says {{expectedHoles}} holes. The OSM greens are in the OSM " +
+      "capture; draw only what is missing around them. " + DRAW_FROM_IMAGERY
   },
   {
     kind: "holes-unnumbered",
@@ -182,17 +182,25 @@ export function promptValues({ job, failure, classified, courseName, centre }) {
 }
 
 /* What Claude must hand back when it draws or numbers geometry. Stated in the payload
-   every time so the operator's prompt never has to repeat it. There is no automatic
-   ingest yet: the operator pastes the block into Studio. */
+   every time so the operator's prompt never has to repeat it. The shape is the mapping
+   overlay's own (functions/lib/gd-map-overlay-core.mjs): what Studio > Mapping Overlay
+   draws and POST /api/course-map-overlay saves, merged into the Overpass payload on the
+   next mapper run. So a block pasted straight from the report is a working overlay. */
 export const OUTPUT_CONTRACT = [
   "--- output contract ---",
-  "If you draw or number geometry, put it in your report as one fenced ```geojson block:",
-  "a FeatureCollection in WGS84, coordinates as [lng, lat]. Each Feature is a Polygon",
-  "(greens, fairways, tees) or a LineString (a hole line from tee to green centre) with",
-  "properties { \"golf\": \"green\" | \"fairway\" | \"tee\" | \"hole\", \"hole\": <number or null>,",
-  "\"confidence\": 0..1, \"note\": \"<why>\" }. Close every ring, keep rings under 60 points,",
-  "and include the OSM greens you kept unchanged so the block is the whole course.",
-  "Nothing ingests this automatically: an operator reads the report and applies it."
+  "If you draw or number geometry, put it in your report as ONE fenced ```json block in",
+  "exactly this shape, ready to paste into Studio > Courses > Mapping Overlay (or POST to",
+  "/api/course-map-overlay as an admin):",
+  "{ \"courseId\": \"<course id>\", \"features\": [",
+  "  { \"id\": \"f-1\", \"kind\": \"fairway\", \"hole\": 7, \"points\": [ { \"lat\": 0, \"lng\": 0 }, ... ] },",
+  "  { \"id\": \"f-2\", \"kind\": \"hole\", \"hole\": 7, \"points\": [ <tee>, <green centre> ] },",
+  "  { \"id\": \"f-3\", \"kind\": \"green\", \"hole\": null, \"points\": [ ... ] } ] }",
+  "kind is fairway (polygon, 3+ points), hole (tee-to-green line, 2+ points) or green",
+  "(polygon, 3+ points); hole is the number or null; at most 80 features and 64 points each.",
+  "Draw only what OpenStreetMap lacks: the overlay is merged on top of OSM and real OSM",
+  "data wins, so repeating an OSM green adds nothing. A numbered hole line is the",
+  "strongest evidence the resolver gets, so number every line you are sure of.",
+  "Nothing saves this automatically: an operator pastes it, then requests a remap."
 ].join("\n");
 
 /* Pixel <-> coordinate rule for the captures, in words Claude can apply. */

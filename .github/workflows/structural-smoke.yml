@@ -38,6 +38,7 @@ jobs:
         run: |
           node dev/surface-split.test.js
           node dev/studio-wiring.test.js
+          node dev/studio-map-viewport.test.js
           node dev/marketing-snapshot-core.test.js
           node dev/marketing-hole-intel.test.js
           node dev/icon-assets.test.js
@@ -109,6 +110,8 @@ jobs:
           node dev/course-mapper-worker-integration.test.js
           node dev/automapper-core.test.js
           node dev/geometry-resolver-core.test.js
+          node dev/map-overlay-core.test.js
+          node dev/studio-map-overlay.test.js
           node dev/green-shape-core-smoke.test.js
           node dev/course-package.test.js
           node dev/course-package-trigger.test.js

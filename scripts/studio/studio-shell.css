@@ -206,6 +206,39 @@
 #gdStudioShellRoot .gdStudioViewportScan { margin-top: 10px; font-size: 12.5px; color: var(--gdStudioText); }
 #gdStudioShellRoot .gdStudioWarnText { color: var(--gdStudioWarn); }
 
+/* ---- Mapping Overlay ----
+   Same viewport chrome as Map Viewport, plus the drawing affordances: a crosshair so the map
+   reads as a canvas, an active-tool state on the pill buttons, permanent hole labels on the
+   shapes, and a compact table of what has been drawn. */
+#gdStudioShellRoot .gdStudioOverlayMap { cursor: crosshair; }
+#gdStudioShellRoot .gdStudioDiagramBtn.isActive { color: var(--gdStudioAccent); border-color: var(--gdStudioAccent); background: rgba(60, 255, 141, 0.12); }
+#gdStudioShellRoot .gdStudioOverlayHole {
+  width: 56px;
+  background: var(--gdStudioPanelAlt);
+  color: var(--gdStudioText);
+  border: 1px solid var(--gdStudioBorder);
+  border-radius: 8px;
+  padding: 5px 6px;
+  font-size: 12px;
+}
+#gdStudioShellRoot .gdStudioOverlayList { margin-top: 12px; }
+#gdStudioShellRoot .gdStudioOverlayTable { border-collapse: collapse; font-size: 12.5px; width: 100%; max-width: 560px; }
+#gdStudioShellRoot .gdStudioOverlayTable th { text-align: left; font-weight: 600; color: var(--gdStudioMuted); padding: 4px 8px; border-bottom: 1px solid var(--gdStudioBorder); }
+#gdStudioShellRoot .gdStudioOverlayTable td { padding: 4px 8px; border-bottom: 1px solid var(--gdStudioBorder); cursor: pointer; }
+#gdStudioShellRoot .gdStudioOverlayTable tr.isSelected td { background: rgba(60, 255, 141, 0.08); }
+.leaflet-tooltip.gdStudioOverlayLabel {
+  background: rgba(5, 10, 7, 0.75);
+  color: #3cff8d;
+  border: 1px solid #3cff8d;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: none;
+}
+.leaflet-tooltip.gdStudioOverlayLabel.isOsm { color: #b7ff5c; border-color: #b7ff5c; opacity: 0.85; }
+.leaflet-tooltip.gdStudioOverlayLabel::before { display: none; }
+
 @media (max-width: 860px) {
   #gdStudioShellRoot .gdStudioShell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   #gdStudioShellRoot .gdStudioNavRail { border-right: none; border-bottom: 1px solid var(--gdStudioBorder); max-height: 40vh; }

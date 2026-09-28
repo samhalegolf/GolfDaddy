@@ -29,6 +29,7 @@ function test(name, fn) { tests.push({ name: name, fn: fn }); }
 function read(rel) { return fs.readFileSync(path.join(ROOT, rel), "utf8"); }
 
 const page = read(PAGE);
+const pick = read("scripts/studio/gd-studio-course-pick.js");
 const core = read("scripts/gd-app-core.js");
 const picker = read("scripts/inline/gd-course-picker-search-v2.js");
 const shell = read("scripts/studio/studio-shell.js");
@@ -138,12 +139,15 @@ test("a pick-only selection never enters the play pipeline or the player's recen
   });
 });
 
-test("the page opens the real picker in pick-only mode and never rolls its own search", () => {
-  assert.ok(page.includes("window.GDCoursePicker.open({"), "the page does not open the real course picker");
-  assert.ok(page.includes("onPick: function (course)"), "the page does not use pick-only mode");
-  ["/api/courses-near", "nominatim", "searchInput"].forEach((snippet) => {
-    assert.ok(!page.includes(snippet), "the page appears to run its own course search: " + snippet);
+test("the page opens the real picker through the shared hand-off and never rolls its own search", () => {
+  assert.ok(page.includes("window.GDStudioCoursePick"), "the page does not use the shared course pick hand-off");
+  assert.ok(pick.includes("window.GDCoursePicker.open({"), "the hand-off does not open the real course picker");
+  assert.ok(pick.includes("onPick: function (course)"), "the hand-off does not use pick-only mode");
+  ["/api/courses-near", "nominatim", "searchInput", "GDCoursePicker.open("].forEach((snippet) => {
+    assert.ok(!page.includes(snippet), "the page appears to run its own course selection: " + snippet);
   });
+  assert.ok(/data-gd-surface="studio"[^>]*src="scripts\/studio\/gd-studio-course-pick\.js/.test(source),
+    "gd-studio-course-pick.js is not loaded studio-only in index.html");
 });
 
 test("the shell can step aside for the picker and come back", () => {
@@ -151,11 +155,12 @@ test("the shell can step aside for the picker and come back", () => {
   ["hide:", "show:"].forEach((snippet) => {
     assert.ok(shell.includes(snippet), "GDStudioShell is missing: " + snippet);
   });
-  assert.ok(page.includes("window.GDStudioShell.hide()") && page.includes("GDStudioShell.show()"),
-    "the page must hide the shell to hand over the picker and show it again afterwards");
+  assert.ok(pick.includes("window.GDStudioShell.hide()") && pick.includes("GDStudioShell.show()"),
+    "the hand-off must hide the shell to hand over the picker and show it again afterwards");
   /* The picker's Back and Home buttons live in gd-app-core.js and just hide #courseScreen —
      they fire no callback, so a cancel is only observable on the DOM. */
-  assert.ok(page.includes("MutationObserver"), "no watch on the picker surface — cancelling would leave Studio hidden");
+  assert.ok(pick.includes("MutationObserver"), "no watch on the picker surface — cancelling would leave Studio hidden");
+  assert.ok(page.includes("GDStudioCoursePick.cancel()"), "the page must stop the watch on cleanup, or a route change mid-pick leaves it armed");
 });
 
 /* ---------- the page writes nothing ---------- */

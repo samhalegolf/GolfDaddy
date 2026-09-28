@@ -71,7 +71,7 @@ const SOPHIA = {
       }
     });
     assert.ok(text.startsWith("Route 18 holes between the 11 greens at Royal Belfast Golf Club."), "prompt first, filled: " + text.slice(0, 80));
-    const order = ["--- failure ---", "failure_kind: surfaces-only", "job_id: job-1", "--- captures ---", "satellite: https://x/sat.png", "osm: https://x/osm.png", "pixel to coordinate", "--- output contract ---", "```geojson", "--- diagnostics ---", "\"greens\":11"];
+    const order = ["--- failure ---", "failure_kind: surfaces-only", "job_id: job-1", "--- captures ---", "satellite: https://x/sat.png", "osm: https://x/osm.png", "pixel to coordinate", "--- output contract ---", "```json", "\"kind\": \"fairway\"", "--- diagnostics ---", "\"greens\":11"];
     let at = -1;
     order.forEach(needle => { const next = text.indexOf(needle); assert.ok(next > at, needle + " comes in order"); at = next; });
   });
