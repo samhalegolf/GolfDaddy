@@ -17,9 +17,15 @@ export const AI_SCAN_MAX_FEATURES = 60;
 export const AI_SCAN_MAX_POINTS = 24;
 
 /* The answer, as a JSON schema for structured output. Pixels as [x, y] integer pairs in the
-   image the model was shown; kind limited to what the overlay stores. `hole` is allowed but
-   optional and the prompt says not to guess it. `confidence` is the model's own, kept on the
-   feature for the operator to read, never used to filter here. */
+   image the model was shown; kind limited to what the overlay stores. `hole` is optional and
+   the prompt says not to guess it. `confidence` is the model's own, kept on the feature for
+   the operator to read, never used to filter here.
+
+   Deliberately no minItems/maxItems/minimum/maximum: the structured-output schema language
+   rejects them ("For 'array' type, property 'maxItems' is not supported" - the first live
+   scan died on exactly that). The limits live in the prompt and in parseScanAnswer, which
+   caps the list and drops thin shapes, and in the georef core, which drops what is off the
+   image. A schema that the API refuses is a scan that never runs. */
 export const AI_SCAN_OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -27,7 +33,6 @@ export const AI_SCAN_OUTPUT_SCHEMA = {
   properties: {
     features: {
       type: "array",
-      maxItems: AI_SCAN_MAX_FEATURES,
       items: {
         type: "object",
         additionalProperties: false,
@@ -36,12 +41,10 @@ export const AI_SCAN_OUTPUT_SCHEMA = {
           kind: { type: "string", enum: ["fairway", "green"] },
           points: {
             type: "array",
-            minItems: 3,
-            maxItems: AI_SCAN_MAX_POINTS,
-            items: { type: "array", minItems: 2, maxItems: 2, items: { type: "integer" } }
+            items: { type: "array", items: { type: "integer" } }
           },
-          hole: { type: ["integer", "null"], minimum: 1, maximum: 36 },
-          confidence: { type: "number", minimum: 0, maximum: 1 }
+          hole: { type: "integer" },
+          confidence: { type: "number" }
         }
       }
     },
@@ -89,7 +92,7 @@ export function buildScanPrompt({ course, scorecard, georef, existing, notes }) 
     "- one \"fairway\" polygon for each mown fairway corridor, from the landing area to the approach, stopping short of the green (do not include the green or the tee box in a fairway),",
     "- one \"green\" polygon for each putting green, as an estimate of its shape and position - the centre matters more than the exact edge,",
     "- nothing for tees, bunkers, water, practice greens, driving ranges, or ground you cannot see clearly.",
-    "Polygons are lists of [x, y] integer pixel corners, 4 to " + AI_SCAN_MAX_POINTS + " points, in order around the shape, entirely inside the image. Leave \"hole\" null unless a number is painted on the ground. Set \"confidence\" between 0 and 1 for each shape. Put anything you want the operator to know in \"notes\" - cut-off holes at the image edge, areas you were unsure about."
+    "Polygons are lists of [x, y] integer pixel corners, 4 to " + AI_SCAN_MAX_POINTS + " points, in order around the shape, entirely inside the image. Omit \"hole\" unless a number is painted on the ground. Set \"confidence\" between 0 and 1 for each shape. Put anything you want the operator to know in \"notes\" - cut-off holes at the image edge, areas you were unsure about."
   ].join("\n"));
   if (notes) parts.push("From the operator: " + String(notes).slice(0, 600));
   return parts.join("\n\n");
@@ -125,12 +128,19 @@ export function parseScanAnswer(answer) {
   }
   if (Array.isArray(value)) value = { features: value };
   if (!value || typeof value !== "object") return { features: [], notes: "", error: "answer was empty" };
-  const features = (Array.isArray(value.features) ? value.features : []).slice(0, AI_SCAN_MAX_FEATURES).map((f, i) => ({
-    id: (f && f.kind === "green" ? "green" : "fairway") + "-ai-" + (i + 1),
-    kind: f && f.kind,
-    points: f && f.points,
-    hole: f && f.hole != null ? f.hole : null,
-    confidence: f && Number.isFinite(Number(f.confidence)) ? Number(f.confidence) : null
-  }));
+  /* The limits the schema cannot carry are applied here: at most AI_SCAN_MAX_FEATURES
+     shapes, at most AI_SCAN_MAX_POINTS corners each, confidence clamped to 0..1, a hole
+     number only when it is one. */
+  const features = (Array.isArray(value.features) ? value.features : []).slice(0, AI_SCAN_MAX_FEATURES).map((f, i) => {
+    const hole = num(f && f.hole);
+    const confidence = num(f && f.confidence);
+    return {
+      id: (f && f.kind === "green" ? "green" : "fairway") + "-ai-" + (i + 1),
+      kind: f && f.kind,
+      points: (f && Array.isArray(f.points) ? f.points : []).slice(0, AI_SCAN_MAX_POINTS),
+      hole: hole != null && Number.isInteger(hole) && hole >= 1 && hole <= 36 ? hole : null,
+      confidence: confidence == null ? null : Math.max(0, Math.min(1, confidence))
+    };
+  });
   return { features, notes: String(value.notes || "").slice(0, 2000) };
 }
