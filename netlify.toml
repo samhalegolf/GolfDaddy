@@ -98,6 +98,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/course-mapper-prompts"
+  to = "/.netlify/functions/course-mapper-prompts"
+  status = 200
+
+[[redirects]]
   from = "/api/course-map-overlay"
   to = "/.netlify/functions/course-map-overlay"
   status = 200

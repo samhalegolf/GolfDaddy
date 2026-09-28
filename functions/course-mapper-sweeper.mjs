@@ -1,6 +1,24 @@
 /* Scheduled safety net for the mapper worker queue. Structural copy of
    course-visual-sweeper.mjs's pattern, applied to course-mapper-worker-background instead. */
 
+import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
+import { purgeMapperDebugCaptures } from "./lib/gd-mapper-debug-captures.mjs";
+
+/* The mapper-debug captures are temporary by contract (lib/gd-mapper-debug-captures.mjs):
+   date folders older than the retention window go here, on the same schedule that wakes
+   the worker. Best-effort: a Storage hiccup must not stop the worker being woken. */
+async function purgeCaptures() {
+  const base = () => String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
+  const key = () => String(process.env.SUPABASE_SERVICE_ROLE_KEY || "");
+  if (!base() || !key()) return { purged: false, reason: "no supabase" };
+  try {
+    const result = await purgeMapperDebugCaptures(createSupabaseStorage({ base, key, bucket: "course-visuals" }));
+    return { purged: true, removed: result.removed.length };
+  } catch (error) {
+    return { purged: false, reason: String(error && error.message || error).slice(0, 200) };
+  }
+}
+
 export default async function courseMapperSweeper(req) {
   let origin = "";
   try { origin = new URL(req && req.url).origin; } catch (error) { origin = ""; }
@@ -17,7 +35,7 @@ export default async function courseMapperSweeper(req) {
       headers: { "Content-Type": "application/json" },
       body: "{}"
     });
-    return json(200, { swept: true, origin, workerStatus: response.status });
+    return json(200, { swept: true, origin, workerStatus: response.status, captures: await purgeCaptures() });
   } catch (error) {
     console.warn("course-mapper-sweeper ping failed", error && error.message || error);
     return json(502, { swept: false, origin, reason: String(error && error.message || error).slice(0, 200) });
