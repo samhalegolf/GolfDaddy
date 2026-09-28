@@ -284,12 +284,13 @@
         { role: "Page (owner)", path: "scripts/studio/courses/map-overlay/map-overlay-page.js" },
         { role: "Overlay API — admin-verified read/write of course_map_overlays, plus what OSM has here", path: "functions/course-map-overlay.mjs" },
         { role: "Overlay → OSM elements, merge into the payload (pure)", path: "functions/lib/gd-map-overlay-core.mjs" },
+        { role: "Image pixels → lat/lng for AI-read shapes (playSurface, centre+zoom or bounds georeference)", path: "functions/lib/gd-overlay-georef-core.mjs" },
         { role: "Merges the overlay into every payload a mapper job fetches (fetchCoursePayload)", path: "functions/course-mapper-worker-background.mjs" },
         { role: "Table", path: "supabase/migrations/20260928_create_course_map_overlays.sql" },
         { role: "Course selection (shared pick-only hand-off)", path: "scripts/studio/gd-studio-course-pick.js" },
         { role: "Provider list + layer building (window.GDMapSources, do not copy)", path: "scripts/gd-app-core.js" }
       ],
-      inputs: ["Course selection from the real picker or Course Database", "OSM greens/fairways/tees/hole lines near the course, from the mapper's own query", "Shapes drawn over live imagery"],
+      inputs: ["Course selection from the real picker or Course Database", "OSM greens/fairways/tees/hole lines near the course, from the mapper's own query", "Shapes drawn over live imagery", "Shapes an AI read off a satellite image, in that image's pixels, with its georeference (POST with georef)"],
       outputs: ["course_map_overlays row for the course", "A mapper run request (kind: remap) through /api/course-mapper-jobs"],
       owns: ["The overlay editor UI", "The overlay feature shape ({id, kind, hole, points})"],
       doesNotOwn: [
