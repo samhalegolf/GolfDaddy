@@ -40,8 +40,10 @@ import { eliminateInferredCourses } from "./lib/gd-inferred-course-claims-core.m
 import { OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND } from "./course-mapper-jobs.mjs";
 import { refineSurfaceShape, applyRefinedShape, REFINED_SHAPE_SOURCE } from "./lib/gd-surface-refine-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
+import alerts from "./alert-utils.js";
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
+const { fireClaudeRoutine, sendSystemAlert } = alerts;
 
 const JOBS_TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
@@ -120,6 +122,49 @@ function transientMapperFailure(error) {
    sweeper supplies the spacing, and gd-overpass-client.mjs still throttles. */
 const MAX_TRANSIENT_ATTEMPTS = 4;
 
+/* A job that is failed for good is handed to Claude.
+ *
+ * Fires the mapper-debug Routine (functions/alert-utils.js fireClaudeRoutine) with
+ * everything the row knows - error, attempts, diagnostics - and returns what happened
+ * so it can sit on the job result as `debugSession`: the failed row in the admin view
+ * then links to the session that looked at it, or says why none did (feature off,
+ * throttled, rejected). Best-effort throughout: a failed job is still a failed job if
+ * the hand-off does not go through.
+ *
+ * Only terminal failures come here. Transient ones are requeued and never seen by
+ * anyone unless they run out of attempts, so an Overpass blip does not wake a session. */
+async function requestMapperDebug(job, failure) {
+  const lines = [
+    "A course mapping job has failed for good and needs investigating.",
+    "",
+    "job_id: " + job.id,
+    "course_id: " + (job.course_id || "unknown"),
+    "kind: " + (job.kind || "automap"),
+    "attempts: " + (failure.attempts || 1),
+    "error: " + String(failure.message || "").slice(0, 900),
+    "",
+    "diagnostics: " + JSON.stringify(failure.diagnostics || null).slice(0, 6000),
+    "",
+    "Other courses may have failed in the same window and been throttled; check course_mapper_jobs for every status=failed row from the last hour, not only this one."
+  ];
+  let outcome;
+  try {
+    outcome = await fireClaudeRoutine({ key: "mapper_failed", text: lines.join("\n") });
+  } catch (error) {
+    outcome = { fired: false, reason: "threw", details: String(error && error.message || error).slice(0, 300) };
+  }
+  if (outcome.fired) {
+    await sendSystemAlert({
+      eventType: "mapper_debug_session",
+      key: job.id,
+      title: "Claude is looking at a failed mapping job",
+      detail: "Course " + (job.course_id || "unknown") + " failed: " + String(failure.message || "").slice(0, 300) + ". A report follows when the session finishes.",
+      context: { jobId: job.id, courseId: job.course_id || null, session: outcome.sessionUrl }
+    }).catch(() => {});
+  }
+  return outcome;
+}
+
 /* Jobs stuck "running" belong to a worker that died mid-run. Same reasoning and cutoff as
    course-visual-worker-background.mjs's reapStaleJobs, sized to this job's much shorter
    expected runtime (one Overpass fetch + per-hole resolution, not a multi-minute tile
@@ -127,11 +172,12 @@ const MAX_TRANSIENT_ATTEMPTS = 4;
 async function reapStaleJobs() {
   const cutoff = new Date(Date.now() - 2 * 60 * 1000).toISOString();
   try {
-    const stale = await supabaseFetch(JOBS_TABLE + "?select=id,result&status=eq.running&updated_at=lt." + encodeURIComponent(cutoff));
+    const stale = await supabaseFetch(JOBS_TABLE + "?select=id,course_id,kind,result&status=eq.running&updated_at=lt." + encodeURIComponent(cutoff));
     for (const row of Array.isArray(stale) ? stale : []) {
       const attempts = (row.result && Number(row.result.attempts) || 0) + 1;
+      const reapedError = "stale-running-reaped: worker died mid-job " + attempts + " times";
       const patch = attempts >= 8
-        ? { status: "failed", error: "stale-running-reaped: worker died mid-job " + attempts + " times", updated_at: new Date().toISOString() }
+        ? { status: "failed", error: reapedError, result: Object.assign({}, row.result || {}, { attempts, debugSession: await requestMapperDebug(row, { message: reapedError, attempts }) }), updated_at: new Date().toISOString() }
         : { status: "queued", error: null, result: Object.assign({}, row.result || {}, { attempts }), updated_at: new Date().toISOString() };
       await supabaseFetch(JOBS_TABLE + "?id=eq." + row.id, { method: "PATCH", body: JSON.stringify(patch) });
     }
@@ -2542,6 +2588,7 @@ export default async function courseMapperWorker(req) {
       const patch = retryable
         ? { status: "queued", error: null, result: Object.assign({}, job.result || {}, { attempts, lastTransientError: message }, diagnostics ? { diagnostics } : {}) }
         : { status: "failed", error: attempts > 1 ? message + " (after " + attempts + " attempts)" : message, result: Object.assign({}, job.result || {}, { attempts }, diagnostics ? { diagnostics } : {}) };
+      if (!retryable) patch.result.debugSession = await requestMapperDebug(job, { message, attempts, diagnostics });
       await finishJob(job.id, patch).catch(() => {});
     }
     job = await claimJob(null);
@@ -2549,4 +2596,4 @@ export default async function courseMapperWorker(req) {
   return new Response("ok", { status: 200 });
 }
 
-export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, loadCourseCenter, ensureCoursePlace, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, MAX_TRANSIENT_ATTEMPTS };
+export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, loadCourseCenter, ensureCoursePlace, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, requestMapperDebug, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, MAX_TRANSIENT_ATTEMPTS };

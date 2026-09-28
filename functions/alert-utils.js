@@ -83,10 +83,64 @@ async function sendSystemAlert(input) {
   return { sent: true, id: responseBody && responseBody.id || null };
 }
 
+/* Hand a failure to Claude.
+ *
+ * A Claude Code Routine (https://code.claude.com/docs/en/routines) with an API
+ * trigger is a cloud session with its repo, connectors and network policy fixed
+ * in advance. Firing it starts that session with `text` as the run's context.
+ * The Routine's own prompt decides what Claude does with it - here, debug the
+ * mapping system and send a report - so nothing in this repo grants anything.
+ *
+ * Two env vars, both from the Routine's "API trigger" panel:
+ *   CLAUDE_MAPPER_ROUTINE_URL    the fire URL (ends in /routines/<id>/fire)
+ *   CLAUDE_MAPPER_ROUTINE_TOKEN  the token generated for that trigger
+ * Unset means the feature is off and the call is a no-op.
+ *
+ * Throttled globally, not per course: twenty courses failing on one bad deploy
+ * is one investigation, not twenty sessions. The Routine prompt is told to look
+ * at every failed job of the last hour, so the ones the throttle swallows are
+ * still seen. CLAUDE_MAPPER_ROUTINE_THROTTLE_MINUTES overrides the 60 minutes. */
+async function fireClaudeRoutine(input) {
+  const url = text(env("CLAUDE_MAPPER_ROUTINE_URL"), 400);
+  const token = env("CLAUDE_MAPPER_ROUTINE_TOKEN");
+  if (!/^https:\/\/api\.anthropic\.com\/v1\/claude_code\/routines\/[A-Za-z0-9_-]+\/fire$/.test(url)) return { fired: false, reason: "missing_routine_url" };
+  if (!token) return { fired: false, reason: "missing_routine_token" };
+
+  const throttleMinutes = Number(env("CLAUDE_MAPPER_ROUTINE_THROTTLE_MINUTES") || 60);
+  const key = "claude_routine:" + (text(input && input.key, 100) || "global");
+  const allowed = await shouldSend(key, throttleMinutes);
+  if (!allowed) return { fired: false, reason: "throttled" };
+
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + token,
+        "anthropic-beta": "experimental-cc-routine-2026-04-01",
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ text: text(input && input.text, 16000) }),
+      signal: AbortSignal.timeout(15000)
+    });
+  } catch (error) {
+    return { fired: false, reason: "network_error", details: String(error && error.message || error).slice(0, 300) };
+  }
+  const body = await response.json().catch(() => null);
+  if (!response.ok) return { fired: false, reason: "provider_rejected", status: response.status, details: body };
+  return {
+    fired: true,
+    sessionId: body && body.claude_code_session_id || null,
+    sessionUrl: body && body.claude_code_session_url || null,
+    firedAt: new Date().toISOString()
+  };
+}
+
 function escapeHTML(value) {
   return String(value == null ? "" : value).replace(/[&<>"']/g, function (ch) {
     return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
   });
 }
 
-module.exports = { sendSystemAlert };
+module.exports = { sendSystemAlert, fireClaudeRoutine };
