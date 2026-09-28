@@ -65,8 +65,14 @@ async function runScan(courseId) {
   const request = saved.aiScan;
   if (!request || request.status !== "queued" || !request.image) return { ran: false, reason: request ? "status " + request.status : "no request" };
 
-  const base = { requestedAt: request.requestedAt, requestedBy: request.requestedBy, append: !!request.append, georef: request.georef };
-  await writeAiScan(courseId, Object.assign({}, base, { status: "running", startedAt: new Date().toISOString(), image: request.image, notes: request.notes, anchors: request.anchors, grid: request.grid }));
+  /* Everything the model was given except the picture stays on the finished row: a poor
+     result has to be readable afterwards as "what did it see" - zoom, size, grid, anchors -
+     not guessed at. The second Belfast scan was diagnosed from exactly these. */
+  const base = {
+    requestedAt: request.requestedAt, requestedBy: request.requestedBy, append: !!request.append, georef: request.georef,
+    grid: request.grid || 0, anchors: Array.isArray(request.anchors) ? request.anchors : [], notes: request.notes || ""
+  };
+  await writeAiScan(courseId, Object.assign({}, base, { status: "running", startedAt: new Date().toISOString(), image: request.image }));
 
   const finish = async outcome => {
     /* The picture never outlives the scan: the outcome row carries counts and words, not a
