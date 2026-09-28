@@ -112,6 +112,8 @@ jobs:
           node dev/geometry-resolver-core.test.js
           node dev/map-overlay-core.test.js
           node dev/overlay-georef-core.test.js
+          node dev/ai-scan-core.test.js
+          node dev/course-map-ai-scan.test.js
           node dev/studio-map-overlay.test.js
           node dev/green-shape-core-smoke.test.js
           node dev/course-package.test.js

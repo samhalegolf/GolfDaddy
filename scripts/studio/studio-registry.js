@@ -303,13 +303,17 @@
         { role: "Overlay API — admin-verified read/write of course_map_overlays, plus what OSM has here", path: "functions/course-map-overlay.mjs" },
         { role: "Overlay → OSM elements, merge into the payload (pure)", path: "functions/lib/gd-map-overlay-core.mjs" },
         { role: "Image pixels → lat/lng for AI-read shapes (playSurface, centre+zoom or bounds georeference)", path: "functions/lib/gd-overlay-georef-core.mjs" },
+        { role: "AI scan request — proves the caller, parks the picture on the overlay row, pings the background half", path: "functions/course-map-ai-scan.mjs" },
+        { role: "AI scan run — Claude reads the picture, answer → georef core → overlay (background function)", path: "functions/course-map-ai-scan-background.mjs" },
+        { role: "AI scan prompt, output schema and answer parsing (pure)", path: "functions/lib/gd-ai-scan-core.mjs" },
+        { role: "Overlay row store shared by the overlay and AI scan endpoints (save semantics, admin proof)", path: "functions/lib/gd-map-overlay-store.mjs" },
         { role: "Merges the overlay into every payload a mapper job fetches (fetchCoursePayload)", path: "functions/course-mapper-worker-background.mjs" },
         { role: "Table", path: "supabase/migrations/20260928_create_course_map_overlays.sql" },
         { role: "Course selection (shared pick-only hand-off)", path: "scripts/studio/gd-studio-course-pick.js" },
         { role: "Provider list + layer building (window.GDMapSources, do not copy)", path: "scripts/gd-app-core.js" }
       ],
-      inputs: ["Course selection from the real picker or Course Database", "OSM greens/fairways/tees/hole lines near the course, from the mapper's own query", "Shapes drawn over live imagery", "Shapes an AI read off a satellite image, in that image's pixels, with its georeference (POST with georef)"],
-      outputs: ["course_map_overlays row for the course", "A mapper run request (kind: remap) through /api/course-mapper-jobs"],
+      inputs: ["Course selection from the real picker or Course Database", "OSM greens/fairways/tees/hole lines near the course, from the mapper's own query", "Shapes drawn over live imagery", "Shapes an AI read off a satellite image, in that image's pixels, with its georeference (POST with georef)", "The current map view captured tile-by-tile for the AI scan (Scan this view with AI)"],
+      outputs: ["course_map_overlays row for the course (features, and ai_scan while a scan runs)", "A mapper run request (kind: remap) through /api/course-mapper-jobs"],
       owns: ["The overlay editor UI", "The overlay feature shape ({id, kind, hole, points})"],
       doesNotOwn: [
         "Hole resolution — the resolver reads the merged payload exactly as it reads OSM",
@@ -325,10 +329,11 @@
       keyFunctions: [
         { name: "GET/POST /api/course-map-overlay", purpose: "Read or save a course's overlay; ?osm=1 also returns OSM's golf features for the ground so fairways are drawn against the greens the resolver will link them to.", codePath: "functions/course-map-overlay.mjs" },
         { name: "mergeOverlayIntoPayload", purpose: "Overlay features -> golf=fairway / golf=hole / golf=green ways with negative ids, appended to the payload. Empty overlay returns the payload untouched.", codePath: "functions/lib/gd-map-overlay-core.mjs" },
+        { name: "POST /api/course-map-ai-scan", purpose: "Queue an AI scan of a captured view: the picture and its georef go on the overlay row, the background function runs Claude Opus 5.5 with the scorecard as context, and the answer is saved as overlay shapes (source: ai). Studio polls GET /api/course-map-overlay's aiScan for the outcome.", codePath: "functions/course-map-ai-scan.mjs" },
         { name: "fetchCoursePayload", purpose: "Every Overpass fetch in a mapper job goes through it, so the overlay is in the first query, the footprint requery, the widened frames and the hole-gap boxes alike.", codePath: "functions/course-mapper-worker-background.mjs" }
       ],
       status: "implemented", needsVerification: false,
-      warnings: ["A fairway must end within ~230m of a green the resolver accepts, and span at least 60m along its long axis, or it produces no centre-line (GREEN_FAIRWAY_LINK_MAX_M / fairwayMajorAxis in gd-geometry-resolver-core.mjs). Numbering still comes from the scorecard unless hole lines carry numbers."]
+      warnings: ["The AI scan captures whatever provider is mounted. Esri World Imagery is licensed for DISPLAY; sending a captured view to a model for analysis is a use the licence does not obviously cover - check the ArcGIS Location Platform terms before scanning over it, or scan over an open regional source where one exists.", "A fairway must end within ~230m of a green the resolver accepts, and span at least 60m along its long axis, or it produces no centre-line (GREEN_FAIRWAY_LINK_MAX_M / fairwayMajorAxis in gd-geometry-resolver-core.mjs). Numbering still comes from the scorecard unless hole lines carry numbers."]
     },
     {
       id: "course-visuals", label: "Course Visuals", parent: "courses",
