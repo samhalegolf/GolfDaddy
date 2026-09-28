@@ -9,6 +9,9 @@
  *      the mapper's.
  * POST {courseId, features:[...]}  (admin) -> saves the overlay, normalised. An empty list
  *      deletes the row: "no overlay" is the absence of a row, not a row holding [].
+ * POST {courseId, courseMap: {mediaType, data, name, width, height} | null}  (admin) -> stores
+ *      or removes the club's course map for the course; the AI scan sends it as a second
+ *      image. Touches nothing else on the row.
  * POST {courseId, georef, features:[...], units?, append?}  (admin) -> the same, but the
  *      features are in IMAGE PIXELS - an AI's answer about a satellite picture - and georef
  *      says where that picture is (gd-overlay-georef-core.mjs: a frame's playSurface,
@@ -25,7 +28,7 @@ import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { osmQueryScope, osmGuideQuery, osmGuidePointsFromElement } from "./lib/gd-automapper-core.mjs";
 import { overlaySummary } from "./lib/gd-map-overlay-core.mjs";
 import { aiShapesToOverlay } from "./lib/gd-overlay-georef-core.mjs";
-import { hasSupabase, slug, verifiedAdminEmail, loadCourse, loadOverlay, saveOverlay, json } from "./lib/gd-map-overlay-store.mjs";
+import { hasSupabase, slug, verifiedAdminEmail, loadCourse, loadOverlay, saveOverlay, normalizeCourseMap, writeCourseMap, publicCourseMap, json } from "./lib/gd-map-overlay-store.mjs";
 
 /* The AI scan's state, for a poller: everything on it but the picture, which is a megabyte
    of base64 no caller needs back. */
@@ -74,6 +77,7 @@ export default async function courseMapOverlay(req) {
       courseId, course,
       overlay: { features: overlay.features, updatedAt: overlay.updatedAt, updatedBy: overlay.updatedBy },
       aiScan: publicAiScan(overlay.aiScan),
+      courseMap: publicCourseMap(overlay.courseMap),
       summary: overlaySummary(overlay.features)
     };
     if (url.searchParams.get("osm") === "1") {
@@ -90,6 +94,14 @@ export default async function courseMapOverlay(req) {
   if (!courseId) return json(400, { error: "courseId required" });
   const course = await loadCourse(courseId);
   if (!course) return json(404, { error: "no course_maps row for " + courseId, detail: "An overlay belongs to a course the picker already knows. Add the course first." });
+  /* A course map save is its own request and touches nothing else on the row: {courseMap}
+     stores it, {courseMap: null} removes it. */
+  if (payload && Object.prototype.hasOwnProperty.call(payload, "courseMap")) {
+    const courseMap = normalizeCourseMap(payload.courseMap);
+    if (payload.courseMap && !courseMap) return json(400, { error: "bad course map", detail: "image/jpeg, image/png or image/webp, base64, under ~1MB" });
+    await writeCourseMap(courseId, courseMap);
+    return json(200, { courseId, courseMap: publicCourseMap(courseMap) });
+  }
   let raw = payload && Array.isArray(payload.features) ? payload.features : [];
   let converted = null;
   if (payload && payload.georef) {

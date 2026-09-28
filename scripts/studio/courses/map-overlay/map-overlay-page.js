@@ -26,13 +26,21 @@
      so the capture is scaled to that here and georeferenced AFTER scaling - the picture we
      describe is the picture it gets, to the pixel. */
   var AI_MAX_EDGE_PX = 1568;
+  /* The API also rescales anything over ~1.15 megapixels, silently, and the model then answers
+     in pixels of a picture we never saw. The first live scan was 1536x768 = 1.18MP. Stay under. */
+  var AI_MAX_PIXELS = 1100000;
   var AI_MAX_TILES = 110;
+  /* A labelled coordinate grid burned into the picture the model reads. A vision model asked
+     for pixel coordinates estimates them; given gridlines with numbers on the margins it reads
+     them, and the shapes land where the ground is. 128px is coarse enough to leave a 20-40px
+     green legible under it. */
+  var AI_GRID_PX = 128;
   var AI_POLL_MS = 4000;
   var AI_TIMEOUT_MS = 8 * 60 * 1000;
 
   /* Survives leaving and re-entering the page - the shell tears the DOM down on every route
      change, and losing half-drawn fairways to a mis-click on the nav is not acceptable. */
-  var session = { course: null, features: [], loadedFor: "", osm: null, dirty: false, view: null, sourceKey: "", showOsm: true };
+  var session = { course: null, features: [], loadedFor: "", osm: null, courseMap: null, dirty: false, view: null, sourceKey: "", showOsm: true };
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -63,8 +71,11 @@
     features.forEach(function (f) { var m = /^f-(\d+)$/.exec(f.id || ""); if (m) n = Math.max(n, Number(m[1])); });
     return "f-" + (n + 1);
   }
-  function kindLabel(kind) { return kind === "hole" ? "Hole line" : kind === "green" ? "Green" : "Fairway"; }
-  function isPolygon(kind) { return kind === "fairway" || kind === "green"; }
+  function kindLabel(kind) { return kind === "hole" ? "Hole line" : kind === "green" ? "Green" : kind === "tee" ? "Tee" : "Fairway"; }
+  function isPolygon(kind) { return kind === "fairway" || kind === "green" || kind === "tee"; }
+  /* A course map is a small schematic; 1200px on the long side is plenty for the model to
+     read hole numbers off, and keeps the row it is stored on light. */
+  var COURSE_MAP_MAX_EDGE_PX = 1200;
   function minPoints(kind) { return isPolygon(kind) ? 3 : 2; }
 
   var STYLE = {
@@ -74,6 +85,8 @@
     holeSelected: { color: "#ffffff", weight: 4, dashArray: "8 6" },
     green: { color: "#b7ff5c", weight: 2, fillColor: "#b7ff5c", fillOpacity: 0.4 },
     greenSelected: { color: "#ffffff", weight: 3, fillColor: "#b7ff5c", fillOpacity: 0.5 },
+    tee: { color: "#6cc7ff", weight: 2, fillColor: "#6cc7ff", fillOpacity: 0.4 },
+    teeSelected: { color: "#ffffff", weight: 3, fillColor: "#6cc7ff", fillOpacity: 0.5 },
     draft: { color: "#ffb54c", weight: 2, dashArray: "4 4", fillColor: "#ffb54c", fillOpacity: 0.12 },
     vertex: { radius: 4, color: "#ffb54c", weight: 2, fillColor: "#1a1a1a", fillOpacity: 1 },
     osmGreen: { color: "#b7ff5c", weight: 2, fillColor: "#b7ff5c", fillOpacity: 0.28 },
@@ -104,7 +117,7 @@
       "are the greens OSM already has - the mapper links each fairway to the nearest one, so draw the " +
       "fairway to within about 200m of its green. A numbered <strong>hole line</strong> from tee to green is " +
       "quicker and is the strongest evidence the resolver gets. Where OSM has no green at all, draw the " +
-      "<strong>green</strong> too - a fairway with no green to link to is not a hole. Or let the AI trace the view you are " +
+      "<strong>green</strong> too - a fairway with no green to link to is not a hole. Upload the club's <strong>course map</strong> and the AI gets it as a second picture to settle doubts. Or let the AI trace the view you are " +
       "looking at: <strong>Scan this view with AI</strong> sends the current picture to the model and saves what it finds. Then run the mapper. " +
       "The overlay is temporary: delete it once OSM carries the real shapes.</p></div>" +
       '<div class="gdStudioViewportBar">' +
@@ -114,12 +127,15 @@
       '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="osm" checked> Show OSM greens</label>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ai" disabled>Scan this view with AI</button>' +
       '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="ai-replace"> replace saved shapes</label>' +
+      '<label class="gdStudioViewportField gdStudioDiagramBtn">Course map… <input type="file" accept="image/*" data-gd-overlay="course-map" hidden></label>' +
+      '<span class="gdStudioViewportField" data-gd-overlay="course-map-state"></span>' +
       "</div>" +
       '<div class="gdStudioViewportBar">' +
       '<span class="gdStudioViewportField">Draw</span>' +
       '<button type="button" class="gdStudioDiagramBtn isActive" data-gd-overlay="tool-fairway">Fairway polygon</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-hole">Hole line</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-green">Green polygon</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-tee">Tee polygon</button>' +
       '<label class="gdStudioViewportField">Hole # <input type="number" min="1" max="36" data-gd-overlay="hole" class="gdStudioOverlayHole"></label>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="finish" disabled>Finish shape</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="undo" disabled>Undo point</button>' +
@@ -138,7 +154,7 @@
       '<div class="gdStudioOverlayList" data-gd-overlay="list"></div>';
 
     var el = {};
-    ["pick", "course", "provider", "osm", "ai", "ai-replace", "tool-fairway", "tool-hole", "tool-green", "hole", "finish", "undo", "cancel", "map", "readout", "credit", "save", "reload", "clear", "run", "status", "list"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "ai", "ai-replace", "course-map", "course-map-state", "tool-fairway", "tool-hole", "tool-green", "tool-tee", "hole", "finish", "undo", "cancel", "map", "readout", "credit", "save", "reload", "clear", "run", "status", "list"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -198,10 +214,11 @@
     /* ---- drawing ---- */
 
     function setTool(next) {
-      tool = next === "hole" || next === "green" ? next : "fairway";
+      tool = next === "hole" || next === "green" || next === "tee" ? next : "fairway";
       el["tool-fairway"].classList.toggle("isActive", tool === "fairway");
       el["tool-hole"].classList.toggle("isActive", tool === "hole");
       el["tool-green"].classList.toggle("isActive", tool === "green");
+      el["tool-tee"].classList.toggle("isActive", tool === "tee");
       if (draft.length) cancelDraft();
       updateReadout();
     }
@@ -289,6 +306,7 @@
         var selected = f.id === selectedId;
         var shape = f.kind === "fairway" ? L.polygon(latlngs, selected ? STYLE.fairwaySelected : STYLE.fairway)
           : f.kind === "green" ? L.polygon(latlngs, selected ? STYLE.greenSelected : STYLE.green)
+          : f.kind === "tee" ? L.polygon(latlngs, selected ? STYLE.teeSelected : STYLE.tee)
           : L.polyline(latlngs, selected ? STYLE.holeSelected : STYLE.hole);
         shape.addTo(mapObj);
         shape.on("click", function (e) {
@@ -425,6 +443,55 @@
       el.run.title = session.dirty ? "Save the overlay first - the mapper reads what is saved" : "";
     }
 
+    /* ---- course map: the club's schematic, stored on the course and sent to the AI as image 2 ---- */
+
+    function renderCourseMapState() {
+      var m = session.courseMap;
+      el["course-map-state"].innerHTML = m
+        ? esc((m.name || "course map") + " · " + (m.width || "?") + "×" + (m.height || "?") + " · sent to the AI as image 2 ") +
+          '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="course-map-clear">remove</button>'
+        : "no course map";
+      var clear = el["course-map-state"].querySelector('[data-gd-overlay="course-map-clear"]');
+      if (clear) clear.addEventListener("click", function () {
+        if (!window.confirm("Remove the course map from this course?")) return;
+        saveCourseMap(null);
+      });
+    }
+
+    function uploadCourseMap(file) {
+      if (!session.course) { setStatus("Pick a course first.", true); return; }
+      var reader = new FileReader();
+      reader.onload = function () {
+        var img = new Image();
+        img.onload = function () {
+          var scale = Math.min(1, COURSE_MAP_MAX_EDGE_PX / Math.max(img.width, img.height));
+          var c = document.createElement("canvas");
+          c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+          var dataUrl = c.toDataURL("image/jpeg", 0.85);
+          saveCourseMap({ data: dataUrl.replace(/^data:[^,]+,/, ""), mediaType: "image/jpeg", name: String(file.name || "").slice(0, 80), width: c.width, height: c.height });
+        };
+        img.onerror = function () { setStatus("That file is not an image the browser can read.", true); };
+        img.src = String(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function saveCourseMap(courseMap) {
+      var id = courseIdOf(session.course);
+      if (!id) return;
+      setStatus(courseMap ? "Saving course map…" : "Removing course map…");
+      api("POST", "", { courseId: id, courseMap: courseMap }).then(function (data) {
+        if (destroyed) return;
+        session.courseMap = (data && data.courseMap) || null;
+        renderCourseMapState();
+        setStatus(session.courseMap ? "Course map saved - the next AI scan will see it." : "Course map removed.");
+      }).catch(function (error) {
+        if (destroyed) return;
+        setStatus("Course map not saved: " + (error && error.message || error), true);
+      });
+    }
+
     /* ---- server ---- */
 
     function api(method, query, body, endpoint) {
@@ -453,6 +520,8 @@
         if (destroyed || courseIdOf(session.course) !== id) return;
         session.features = (data && data.overlay && data.overlay.features) || [];
         session.osm = (data && data.osm) || null;
+        session.courseMap = (data && data.courseMap) || null;
+        renderCourseMapState();
         session.loadedFor = id;
         session.dirty = false;
         selectedId = "";
@@ -574,7 +643,7 @@
         }
         Promise.all(loads).then(function () {
           if (failed === loads.length) return reject(new Error("no tiles loaded for this view"));
-          var scale = Math.min(1, AI_MAX_EDGE_PX / Math.max(full.width, full.height));
+          var scale = Math.min(1, AI_MAX_EDGE_PX / Math.max(full.width, full.height), Math.sqrt(AI_MAX_PIXELS / (full.width * full.height)));
           var out = full;
           if (scale < 1) {
             out = document.createElement("canvas");
@@ -582,6 +651,13 @@
             out.getContext("2d").drawImage(full, 0, 0, out.width, out.height);
             scale = out.width / full.width;
           }
+          /* Pixel position in the SENT picture of a ground point: tile-grid origin, then scale. */
+          function toPx(latlng) {
+            var p = mapObj.project(latlng, z);
+            return { x: (p.x - x0 * 256) * scale, y: (p.y - y0 * 256) * scale };
+          }
+          var anchors = drawAnchors(out, toPx);
+          drawGrid(out, AI_GRID_PX);
           var dataUrl;
           try { dataUrl = out.toDataURL("image/jpeg", 0.88); }
           catch (e) { return reject(new Error("this provider's tiles cannot be read back (no CORS) - switch provider")); }
@@ -589,6 +665,7 @@
             data: dataUrl.replace(/^data:[^,]+,/, ""),
             mediaType: "image/jpeg",
             width: out.width, height: out.height, tiles: loads.length, failed: failed,
+            anchors: anchors, grid: AI_GRID_PX,
             bounds: L.latLngBounds(mapObj.unproject(L.point(x0 * 256, y0 * 256), z), mapObj.unproject(L.point((x1 + 1) * 256, (y1 + 1) * 256), z)),
             georef: {
               playSurface: {
@@ -602,6 +679,63 @@
       });
     }
 
+    /* What the model is shown that is not ground: the greens OSM already has (bright outline)
+       and the shapes already saved (white outline), so it traces fairways TO known greens and
+       adds only the greens nobody has yet. Returns the anchors as pixel centres for the prompt.
+       Only shapes inside the picture are drawn or listed. */
+    function drawAnchors(canvas, toPx) {
+      var ctx = canvas.getContext("2d");
+      var anchors = [];
+      function outline(points, style, label) {
+        var px = points.map(toPx);
+        if (px.length < 2) return null;
+        var inside = px.some(function (p) { return p.x >= 0 && p.y >= 0 && p.x <= canvas.width && p.y <= canvas.height; });
+        if (!inside) return null;
+        ctx.save();
+        ctx.strokeStyle = style; ctx.lineWidth = 3; ctx.setLineDash([]);
+        ctx.beginPath();
+        px.forEach(function (p, i) { if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
+        ctx.closePath(); ctx.stroke();
+        var cx = Math.round(px.reduce(function (a, p) { return a + p.x; }, 0) / px.length);
+        var cy = Math.round(px.reduce(function (a, p) { return a + p.y; }, 0) / px.length);
+        if (label) {
+          ctx.font = "bold 14px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.fillRect(cx - 12, cy - 9, 24, 18);
+          ctx.fillStyle = style; ctx.fillText(label, cx, cy);
+        }
+        ctx.restore();
+        return { x: cx, y: cy };
+      }
+      var osm = session.osm && !session.osm.error ? session.osm : null;
+      ((osm && osm.greens) || []).forEach(function (g, i) {
+        var c = outline(g.points.map(function (p) { return L.latLng(p.lat, p.lng); }), "#39ff14", "G" + (i + 1));
+        if (c) anchors.push({ kind: "green", label: "G" + (i + 1), x: c.x, y: c.y, ref: g.ref || "" });
+      });
+      session.features.forEach(function (f) {
+        var c = outline(f.points.map(function (p) { return L.latLng(p.lat, p.lng); }), "#ffffff", "");
+        if (c) anchors.push({ kind: f.kind, label: "saved", x: c.x, y: c.y, saved: true });
+      });
+      return anchors;
+    }
+
+    function drawGrid(canvas, step) {
+      var ctx = canvas.getContext("2d");
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 1;
+      ctx.font = "bold 13px monospace"; ctx.textBaseline = "top";
+      for (var x = 0; x < canvas.width; x += step) {
+        ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, canvas.height); ctx.stroke();
+        ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(x + 2, 1, 42, 15);
+        ctx.fillStyle = "#ffe14d"; ctx.textAlign = "left"; ctx.fillText(String(x), x + 4, 2);
+      }
+      for (var y = 0; y < canvas.height; y += step) {
+        ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(canvas.width, y + 0.5); ctx.stroke();
+        ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(1, y + 2, 42, 15);
+        ctx.fillStyle = "#ffe14d"; ctx.textAlign = "left"; ctx.fillText(String(y), 3, y + 3);
+      }
+      ctx.restore();
+    }
+
     function stopScanPoll() {
       if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
       if (scanFrame) { try { mapObj.removeLayer(scanFrame); } catch (e) {} scanFrame = null; }
@@ -612,7 +746,7 @@
     function describeScan(scan) {
       var s = scan.summary || {};
       var bits = ["AI found " + (scan.found || 0) + " shape" + (scan.found === 1 ? "" : "s") + ", saved " + (scan.saved || 0) +
-        " (" + (s.fairways || 0) + " fairways, " + (s.greens || 0) + " greens) · overlay now " + (scan.overlayTotal || 0)];
+        " (" + (s.fairways || 0) + " fairways, " + (s.greens || 0) + " greens, " + (s.tees || 0) + " tees) · overlay now " + (scan.overlayTotal || 0)];
       if (scan.dropped && scan.dropped.length) bits.push(scan.dropped.length + " dropped: " + scan.dropped.map(function (d) { return d.reason; }).join("; "));
       if (scan.usage) bits.push((scan.usage.inputTokens || 0) + " in / " + (scan.usage.outputTokens || 0) + " out tokens");
       if (scan.notes) bits.push("model notes: " + scan.notes);
@@ -658,9 +792,9 @@
       updateActions();
       setStatus("Capturing the view…");
       captureView().then(function (capture) {
-        setStatus("Sending " + capture.width + "×" + capture.height + " px (" + capture.tiles + " tiles" + (capture.failed ? ", " + capture.failed + " missing" : "") + ")…");
+        setStatus("Sending " + capture.width + "×" + capture.height + " px (" + capture.tiles + " tiles" + (capture.failed ? ", " + capture.failed + " missing" : "") + ", " + capture.anchors.length + " known shapes drawn on)…");
         scanFrame = L.rectangle(capture.bounds, { color: "#ffb54c", weight: 1, dashArray: "6 6", fill: false, interactive: false }).addTo(mapObj);
-        return api("POST", "", { courseId: id, image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, append: !replace }, AI_API);
+        return api("POST", "", { courseId: id, image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, append: !replace, anchors: capture.anchors, grid: capture.grid }, AI_API);
       }).then(function (data) {
         if (destroyed) return;
         setStatus("AI scan queued (" + Math.round(((data && data.georef && data.georef.metresPerPixel) || 0) * 100) / 100 + " m/px). Waiting for the model…");
@@ -695,6 +829,7 @@
       if (session.loadedFor !== id) {
         session.features = [];
         session.osm = null;
+        session.courseMap = null;
         session.dirty = false;
         clearOsmLayers();
         clearFeatureLayers();
@@ -758,6 +893,12 @@
     el["tool-fairway"].addEventListener("click", function () { setTool("fairway"); });
     el["tool-hole"].addEventListener("click", function () { setTool("hole"); });
     el["tool-green"].addEventListener("click", function () { setTool("green"); });
+    el["tool-tee"].addEventListener("click", function () { setTool("tee"); });
+    el["course-map"].addEventListener("change", function () {
+      var file = el["course-map"].files && el["course-map"].files[0];
+      el["course-map"].value = "";
+      if (file) uploadCourseMap(file);
+    });
     el.finish.addEventListener("click", finishDraft);
     el.undo.addEventListener("click", undoVertex);
     el.cancel.addEventListener("click", cancelDraft);

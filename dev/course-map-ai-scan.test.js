@@ -67,7 +67,7 @@ test("the background half trusts only the course id and clears the picture whate
 test("the store owns the row and both endpoints share it", () => {
   assert.ok(store.includes("export async function writeAiScan"), "no writeAiScan in the store");
   assert.ok(store.includes('Prefer: "resolution=merge-duplicates" }'), "a status write must merge, never overwrite the saved features");
-  assert.ok(store.includes("ai_scan&course_id=eq."), "loadOverlay must read the scan state with the features");
+  assert.ok(store.includes("ai_scan,course_map&course_id=eq."), "loadOverlay must read the scan state with the features");
   assert.ok(fs.existsSync(path.join(ROOT, "supabase/migrations/20260929_add_course_map_overlay_ai_scan.sql")), "no migration adds the ai_scan column");
   const overlay = read("functions/course-map-overlay.mjs");
   assert.ok(overlay.includes("aiScan: publicAiScan(overlay.aiScan)"), "GET /api/course-map-overlay must expose the scan state for polling");
@@ -80,11 +80,30 @@ test("Studio captures the view it shows, georeferences the scaled picture, posts
   assert.ok(page.includes("captureZoom: z + Math.log2(scale)"), "the georef must describe the SCALED picture - the pixels the model answers in");
   assert.ok(page.includes("originPx: { x: x0 * 256 * scale, y: y0 * 256 * scale }"), "the origin must scale with the picture");
   assert.ok(page.includes("AI_MAX_EDGE_PX = 1568"), "the capture is scaled to the model's reading size client-side, so no server-side resize changes the pixels");
+  assert.ok(page.includes("Math.sqrt(AI_MAX_PIXELS / (full.width * full.height))"), "the capture must also stay under the API's megapixel threshold - the first live scan was over it and would have been resized behind our back");
+  assert.ok(page.includes("function drawGrid(") && page.includes("drawGrid(out, AI_GRID_PX)"), "a labelled coordinate grid must be burned into the picture");
+  assert.ok(page.includes("function drawAnchors(") && page.includes("anchors: capture.anchors, grid: capture.grid"), "known greens and saved shapes are drawn on and sent as anchors");
+  assert.ok(page.includes("var anchors = drawAnchors(out, toPx);") && page.indexOf("var anchors = drawAnchors(out, toPx);") < page.indexOf("drawGrid(out, AI_GRID_PX)"), "anchors are drawn before the grid so the grid labels stay legible on top");
+  assert.ok(sync.includes("anchors: (Array.isArray(payload.anchors)") && sync.includes("grid: Number.isFinite(Number(payload.grid))"), "the sync half must park anchors and grid with the request");
+  assert.ok(background.includes("anchors: request.anchors, grid: request.grid"), "the background half must hand anchors and grid to the prompt");
   assert.ok(page.includes('toDataURL("image/jpeg"'), "JPEG, or a satellite view is megabytes of PNG");
   assert.ok(page.includes("append: !replace"), "a scan appends unless the operator asks to replace");
   assert.ok(page.includes("function pollScan(") && page.includes("AI_TIMEOUT_MS"), "the page must poll for the outcome and give up eventually");
   assert.ok(page.includes('scan.status === "queued" || scan.status === "running"'), "a scan in flight is resumed on re-entry");
   assert.ok(page.includes("if (scanTimer) clearTimeout(scanTimer);"), "cleanup must stop the poll");
+});
+
+test("the course map is stored per course and sent to the model as image 2, never as coordinates", () => {
+  const overlay = read("functions/course-map-overlay.mjs");
+  assert.ok(store.includes("export function normalizeCourseMap") && store.includes("export async function writeCourseMap"), "the store owns the course map");
+  assert.ok(store.includes("ai_scan,course_map&course_id=eq."), "loadOverlay must read the course map with the rest of the row");
+  assert.ok(overlay.includes('Object.prototype.hasOwnProperty.call(payload, "courseMap")') && overlay.includes("writeCourseMap(courseId, courseMap)"), "a course map save is its own request on the overlay API");
+  assert.ok(overlay.includes("courseMap: publicCourseMap(overlay.courseMap)"), "GET exposes that a map exists without handing the picture back");
+  assert.ok(background.includes('{ type: "text", text: "Image 2 (course map, schematic):" }'), "the map goes to the model labelled as image 2");
+  assert.ok(background.includes("courseMap: !!courseMap"), "the prompt is told whether image 2 exists, never handed the picture");
+  assert.ok(page.includes('data-gd-overlay="course-map"') && page.includes("function uploadCourseMap(") && page.includes("COURSE_MAP_MAX_EDGE_PX"), "Studio lets an operator upload and scales the map down");
+  assert.ok(page.includes('data-gd-overlay="tool-tee"') && page.includes('setTool("tee")'), "tees can be drawn by hand too");
+  assert.ok(fs.existsSync(path.join(ROOT, "supabase/migrations/20260929_add_course_map_overlay_course_map.sql")), "no migration adds the course_map column");
 });
 
 test("the new tests run in CI", () => {

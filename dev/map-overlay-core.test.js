@@ -100,7 +100,10 @@ test("merging adds to the payload and never replaces it", () => {
   assert.strictEqual(overlay.mergeOverlayIntoPayload(GREENS_ONLY, []), GREENS_ONLY, "an empty overlay returns the very same payload");
   assert.strictEqual(overlay.mergeOverlayIntoPayload(GREENS_ONLY, null), GREENS_ONLY);
   assert.deepStrictEqual(overlay.overlaySummary([fairwayFeature("a", 0, 100, 0, 3), fairwayFeature("b", 0, 100, 60), { kind: "hole", hole: 1, points: [at(0, 0), at(1, 100)] }]),
-    { features: 3, fairways: 2, holeLines: 1, greens: 0, numbered: 2 });
+    { features: 3, fairways: 2, holeLines: 1, greens: 0, tees: 0, numbered: 2 });
+  const tee = overlay.overlayToOsmElements([{ kind: "tee", points: [at(0, 0), at(8, 0), at(8, 6), at(0, 6)] }]);
+  assert.strictEqual(tee[0].tags.golf, "tee", "a tee polygon becomes a golf=tee way");
+  assert.strictEqual(tee[0].geometry.length, 5, "closed like every polygon kind");
 });
 
 test("the automapper's surface pass sees an overlay fairway as a fairway_area", () => {
