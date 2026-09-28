@@ -6,10 +6,11 @@
  * Three things it deliberately does NOT own:
  *
  *   1. The course list. Establishing the first view goes through the REAL course picker
- *      (scripts/inline/gd-course-picker-search-v2.js) in its pick-only mode, so search,
- *      nearby and the database list behave exactly as they do for a player. A private
- *      "admin course search" would be a second list to keep true, and the first time it
- *      disagreed with the real one it would send someone chasing a bug in the wrong place.
+ *      (scripts/inline/gd-course-picker-search-v2.js) in its pick-only mode, via the shared
+ *      hand-off in scripts/studio/gd-studio-course-pick.js, so search, nearby and the
+ *      database list behave exactly as they do for a player. A private "admin course search"
+ *      would be a second list to keep true, and the first time it disagreed with the real
+ *      one it would send someone chasing a bug in the wrong place.
  *
  *   2. The provider list. It draws scripts/gd-app-core.js's own mapSources through
  *      window.GDMapSources - the same entries, bboxes, keys and zoom ceilings a course
@@ -55,8 +56,6 @@
     var mapObj = null;
     var layer = null;
     var marker = null;
-    var pickerWatch = null;
-    var pickerTimer = null;
     var destroyed = false;
 
     containerEl.innerHTML =
@@ -256,59 +255,21 @@
     }
 
     /* ---- the picker hand-off ----
-       Studio is a fixed layer over the whole app, so handing over the real picker means
-       stepping aside for it (GDStudioShell.hide) and coming back when it is done. "Done" has
-       two shapes: a selection, which arrives on onPick, and a cancel, which does not - the
-       picker's Back and Home buttons live in gd-app-core.js and simply hide #courseScreen.
-       So the close is watched on the DOM rather than through a callback that only one of the
-       two exits would ever fire. */
-    function stopWatch() {
-      if (pickerWatch) { try { pickerWatch.disconnect(); } catch (e) {} pickerWatch = null; }
-      if (pickerTimer) { clearTimeout(pickerTimer); pickerTimer = null; }
-    }
-
-    function restoreStudio() {
-      if (window.GDStudioShell) window.GDStudioShell.show();
-      /* The map was laid out inside a hidden root; Leaflet has to be told the box is back. */
+       The real picker, in pick-only mode, through the shared Studio hand-off. The map was laid
+       out inside a hidden root while the picker had the screen; Leaflet has to be told the
+       box is back on every return, picked or cancelled. */
+    function remeasure() {
       setTimeout(function () { if (!destroyed && mapObj) { try { mapObj.invalidateSize(); } catch (e) {} } }, 60);
     }
 
-    function watchPicker() {
-      stopWatch();
-      var screen = document.getElementById("courseScreen");
-      if (!screen) return;
-      var seenOpen = false;
-      pickerWatch = new MutationObserver(function () {
-        var hidden = screen.classList.contains("hidden");
-        if (!hidden) { seenOpen = true; return; }
-        if (!seenOpen) return;
-        stopWatch();
-        restoreStudio();
-      });
-      pickerWatch.observe(screen, { attributes: true, attributeFilter: ["class"] });
-      /* If the picker never actually opened, do not leave the operator staring at the app with
-         no way back to Studio. */
-      pickerTimer = setTimeout(function () {
-        if (!seenOpen) { stopWatch(); restoreStudio(); }
-      }, 4000);
-    }
-
     function pickCourse() {
-      if (!window.GDCoursePicker || typeof window.GDCoursePicker.open !== "function") {
-        el.readout.textContent = "The course picker is not loaded on this surface.";
-        return;
-      }
-      watchPicker();
-      if (window.GDStudioShell) window.GDStudioShell.hide();
-      window.GDCoursePicker.open({
+      var pick = window.GDStudioCoursePick;
+      var opened = pick && typeof pick.open === "function" && pick.open({
         source: "studio-map-viewport",
-        returnTarget: "home",
-        onPick: function (course) {
-          stopWatch();
-          restoreStudio();
-          if (!destroyed) showCourse(course);
-        }
+        onReturn: remeasure,
+        onPick: function (course) { if (!destroyed) showCourse(course); }
       });
+      if (!opened) el.readout.textContent = "The course picker is not loaded on this surface.";
     }
 
     /* ---- boot ---- */
@@ -351,7 +312,7 @@
 
     return function cleanup() {
       destroyed = true;
-      stopWatch();
+      if (window.GDStudioCoursePick) window.GDStudioCoursePick.cancel();
       if (window.GDStudioShell) window.GDStudioShell.show();
       if (mapObj) { try { mapObj.remove(); } catch (e) {} }
       mapObj = null;

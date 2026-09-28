@@ -274,6 +274,43 @@
       status: "implemented", needsVerification: false,
       warnings: ["The providers shown here are LIVE display sources. Several (Esri, Queensland) are licensed for display only and must never be added to functions/lib/gd-imagery-sources.mjs — seeing a course over one of them here says nothing about whether it can be scanned."]
     },
+
+    {
+      id: "map-overlay", label: "Mapping Overlay", parent: "courses",
+      function: "Draws the fairway polygons, tee-to-green hole lines and greens OSM does not have, so the mapper can resolve a course whose OSM data is greens and nothing else (Royal Belfast: 11 greens, 0 fairways, 0 hole lines). Saves one thing - the course's overlay row - which the mapper worker merges into the Overpass payload as ordinary golf=fairway / golf=hole / golf=green ways before it resolves. Nothing on the course changes until a mapper run is requested. Temporary by design: delete the overlay once OSM carries the real shapes.",
+      owner: "scripts/studio/courses/map-overlay/map-overlay-page.js",
+      runtime: { app: false, studio: true, server: true },
+      code: [
+        { role: "Page (owner)", path: "scripts/studio/courses/map-overlay/map-overlay-page.js" },
+        { role: "Overlay API — admin-verified read/write of course_map_overlays, plus what OSM has here", path: "functions/course-map-overlay.mjs" },
+        { role: "Overlay → OSM elements, merge into the payload (pure)", path: "functions/lib/gd-map-overlay-core.mjs" },
+        { role: "Merges the overlay into every payload a mapper job fetches (fetchCoursePayload)", path: "functions/course-mapper-worker-background.mjs" },
+        { role: "Table", path: "supabase/migrations/20260928_create_course_map_overlays.sql" },
+        { role: "Course selection (shared pick-only hand-off)", path: "scripts/studio/gd-studio-course-pick.js" },
+        { role: "Provider list + layer building (window.GDMapSources, do not copy)", path: "scripts/gd-app-core.js" }
+      ],
+      inputs: ["Course selection from the real picker or Course Database", "OSM greens/fairways/tees/hole lines near the course, from the mapper's own query", "Shapes drawn over live imagery"],
+      outputs: ["course_map_overlays row for the course", "A mapper run request (kind: remap) through /api/course-mapper-jobs"],
+      owns: ["The overlay editor UI", "The overlay feature shape ({id, kind, hole, points})"],
+      doesNotOwn: [
+        "Hole resolution — the resolver reads the merged payload exactly as it reads OSM",
+        "objects_json / holes_json — never written here",
+        "The provider list (gd-app-core.js) and the course picker (gd-course-picker-search-v2.js)"
+      ],
+      connections: [
+        { target: "courses", direction: "child-of", label: "" },
+        { target: "osm-scan", direction: "writes", label: "Adds elements to the Overpass payload" },
+        { target: "geometry-resolution", direction: "writes", label: "Fairway centre-lines / numbered hole lines" },
+        { target: "course-mapping", direction: "see-also", label: "Where the mapper run is watched" }
+      ],
+      keyFunctions: [
+        { name: "GET/POST /api/course-map-overlay", purpose: "Read or save a course's overlay; ?osm=1 also returns OSM's golf features for the ground so fairways are drawn against the greens the resolver will link them to.", codePath: "functions/course-map-overlay.mjs" },
+        { name: "mergeOverlayIntoPayload", purpose: "Overlay features -> golf=fairway / golf=hole / golf=green ways with negative ids, appended to the payload. Empty overlay returns the payload untouched.", codePath: "functions/lib/gd-map-overlay-core.mjs" },
+        { name: "fetchCoursePayload", purpose: "Every Overpass fetch in a mapper job goes through it, so the overlay is in the first query, the footprint requery, the widened frames and the hole-gap boxes alike.", codePath: "functions/course-mapper-worker-background.mjs" }
+      ],
+      status: "implemented", needsVerification: false,
+      warnings: ["A fairway must end within ~230m of a green the resolver accepts, and span at least 60m along its long axis, or it produces no centre-line (GREEN_FAIRWAY_LINK_MAX_M / fairwayMajorAxis in gd-geometry-resolver-core.mjs). Numbering still comes from the scorecard unless hole lines carry numbers."]
+    },
     {
       id: "course-visuals", label: "Course Visuals", parent: "courses",
       function: "Converts accepted course data and imagery into Clarity course visuals: source imagery, visual recipes, preview generation, frame inspection, terrain/presentation controls, generated assets, and visual review.",
@@ -690,7 +727,7 @@
 
   var NAV_TREE = [
     { id: "overview" },
-    { id: "courses", children: ["course-database", "course-mapping", "map-viewport", "course-visuals", "publishing"] },
+    { id: "courses", children: ["course-database", "course-mapping", "map-viewport", "map-overlay", "course-visuals", "publishing"] },
     { id: "shot-system", children: ["photo-scan", "practice-data", "practice-email", "bubble-geometry", "pattern-finder", "my-bubble", "shot-system-course-data", "conditions", "recommendations"] },
     { id: "gps-play", children: ["gps-course-selection", "gps-round-setup", "gps-hole-lifecycle", "gps-map-camera", "gps-shot-planning", "gps-shot-capture", "gps-scorecard", "gps-course-data-capture", "gps-sync-recovery", "gps-demo-mode"] },
     { id: "players-coaches" },
