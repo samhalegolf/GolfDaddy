@@ -26,7 +26,15 @@
      so the capture is scaled to that here and georeferenced AFTER scaling - the picture we
      describe is the picture it gets, to the pixel. */
   var AI_MAX_EDGE_PX = 1568;
+  /* The API also rescales anything over ~1.15 megapixels, silently, and the model then answers
+     in pixels of a picture we never saw. The first live scan was 1536x768 = 1.18MP. Stay under. */
+  var AI_MAX_PIXELS = 1100000;
   var AI_MAX_TILES = 110;
+  /* A labelled coordinate grid burned into the picture the model reads. A vision model asked
+     for pixel coordinates estimates them; given gridlines with numbers on the margins it reads
+     them, and the shapes land where the ground is. 128px is coarse enough to leave a 20-40px
+     green legible under it. */
+  var AI_GRID_PX = 128;
   var AI_POLL_MS = 4000;
   var AI_TIMEOUT_MS = 8 * 60 * 1000;
 
@@ -574,7 +582,7 @@
         }
         Promise.all(loads).then(function () {
           if (failed === loads.length) return reject(new Error("no tiles loaded for this view"));
-          var scale = Math.min(1, AI_MAX_EDGE_PX / Math.max(full.width, full.height));
+          var scale = Math.min(1, AI_MAX_EDGE_PX / Math.max(full.width, full.height), Math.sqrt(AI_MAX_PIXELS / (full.width * full.height)));
           var out = full;
           if (scale < 1) {
             out = document.createElement("canvas");
@@ -582,6 +590,13 @@
             out.getContext("2d").drawImage(full, 0, 0, out.width, out.height);
             scale = out.width / full.width;
           }
+          /* Pixel position in the SENT picture of a ground point: tile-grid origin, then scale. */
+          function toPx(latlng) {
+            var p = mapObj.project(latlng, z);
+            return { x: (p.x - x0 * 256) * scale, y: (p.y - y0 * 256) * scale };
+          }
+          var anchors = drawAnchors(out, toPx);
+          drawGrid(out, AI_GRID_PX);
           var dataUrl;
           try { dataUrl = out.toDataURL("image/jpeg", 0.88); }
           catch (e) { return reject(new Error("this provider's tiles cannot be read back (no CORS) - switch provider")); }
@@ -589,6 +604,7 @@
             data: dataUrl.replace(/^data:[^,]+,/, ""),
             mediaType: "image/jpeg",
             width: out.width, height: out.height, tiles: loads.length, failed: failed,
+            anchors: anchors, grid: AI_GRID_PX,
             bounds: L.latLngBounds(mapObj.unproject(L.point(x0 * 256, y0 * 256), z), mapObj.unproject(L.point((x1 + 1) * 256, (y1 + 1) * 256), z)),
             georef: {
               playSurface: {
@@ -600,6 +616,63 @@
           });
         });
       });
+    }
+
+    /* What the model is shown that is not ground: the greens OSM already has (bright outline)
+       and the shapes already saved (white outline), so it traces fairways TO known greens and
+       adds only the greens nobody has yet. Returns the anchors as pixel centres for the prompt.
+       Only shapes inside the picture are drawn or listed. */
+    function drawAnchors(canvas, toPx) {
+      var ctx = canvas.getContext("2d");
+      var anchors = [];
+      function outline(points, style, label) {
+        var px = points.map(toPx);
+        if (px.length < 2) return null;
+        var inside = px.some(function (p) { return p.x >= 0 && p.y >= 0 && p.x <= canvas.width && p.y <= canvas.height; });
+        if (!inside) return null;
+        ctx.save();
+        ctx.strokeStyle = style; ctx.lineWidth = 3; ctx.setLineDash([]);
+        ctx.beginPath();
+        px.forEach(function (p, i) { if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
+        ctx.closePath(); ctx.stroke();
+        var cx = Math.round(px.reduce(function (a, p) { return a + p.x; }, 0) / px.length);
+        var cy = Math.round(px.reduce(function (a, p) { return a + p.y; }, 0) / px.length);
+        if (label) {
+          ctx.font = "bold 14px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.fillRect(cx - 12, cy - 9, 24, 18);
+          ctx.fillStyle = style; ctx.fillText(label, cx, cy);
+        }
+        ctx.restore();
+        return { x: cx, y: cy };
+      }
+      var osm = session.osm && !session.osm.error ? session.osm : null;
+      ((osm && osm.greens) || []).forEach(function (g, i) {
+        var c = outline(g.points.map(function (p) { return L.latLng(p.lat, p.lng); }), "#39ff14", "G" + (i + 1));
+        if (c) anchors.push({ kind: "green", label: "G" + (i + 1), x: c.x, y: c.y, ref: g.ref || "" });
+      });
+      session.features.forEach(function (f) {
+        var c = outline(f.points.map(function (p) { return L.latLng(p.lat, p.lng); }), "#ffffff", "");
+        if (c) anchors.push({ kind: f.kind, label: "saved", x: c.x, y: c.y, saved: true });
+      });
+      return anchors;
+    }
+
+    function drawGrid(canvas, step) {
+      var ctx = canvas.getContext("2d");
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 1;
+      ctx.font = "bold 13px monospace"; ctx.textBaseline = "top";
+      for (var x = 0; x < canvas.width; x += step) {
+        ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, canvas.height); ctx.stroke();
+        ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(x + 2, 1, 42, 15);
+        ctx.fillStyle = "#ffe14d"; ctx.textAlign = "left"; ctx.fillText(String(x), x + 4, 2);
+      }
+      for (var y = 0; y < canvas.height; y += step) {
+        ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(canvas.width, y + 0.5); ctx.stroke();
+        ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(1, y + 2, 42, 15);
+        ctx.fillStyle = "#ffe14d"; ctx.textAlign = "left"; ctx.fillText(String(y), 3, y + 3);
+      }
+      ctx.restore();
     }
 
     function stopScanPoll() {
@@ -658,9 +731,9 @@
       updateActions();
       setStatus("Capturing the view…");
       captureView().then(function (capture) {
-        setStatus("Sending " + capture.width + "×" + capture.height + " px (" + capture.tiles + " tiles" + (capture.failed ? ", " + capture.failed + " missing" : "") + ")…");
+        setStatus("Sending " + capture.width + "×" + capture.height + " px (" + capture.tiles + " tiles" + (capture.failed ? ", " + capture.failed + " missing" : "") + ", " + capture.anchors.length + " known shapes drawn on)…");
         scanFrame = L.rectangle(capture.bounds, { color: "#ffb54c", weight: 1, dashArray: "6 6", fill: false, interactive: false }).addTo(mapObj);
-        return api("POST", "", { courseId: id, image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, append: !replace }, AI_API);
+        return api("POST", "", { courseId: id, image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, append: !replace, anchors: capture.anchors, grid: capture.grid }, AI_API);
       }).then(function (data) {
         if (destroyed) return;
         setStatus("AI scan queued (" + Math.round(((data && data.georef && data.georef.metresPerPixel) || 0) * 100) / 100 + " m/px). Waiting for the model…");

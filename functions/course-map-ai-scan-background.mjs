@@ -63,7 +63,7 @@ async function runScan(courseId) {
   if (!request || request.status !== "queued" || !request.image) return { ran: false, reason: request ? "status " + request.status : "no request" };
 
   const base = { requestedAt: request.requestedAt, requestedBy: request.requestedBy, append: !!request.append, georef: request.georef };
-  await writeAiScan(courseId, Object.assign({}, base, { status: "running", startedAt: new Date().toISOString(), image: request.image, notes: request.notes }));
+  await writeAiScan(courseId, Object.assign({}, base, { status: "running", startedAt: new Date().toISOString(), image: request.image, notes: request.notes, anchors: request.anchors, grid: request.grid }));
 
   const finish = async outcome => {
     /* The picture never outlives the scan: the outcome row carries counts and words, not a
@@ -80,7 +80,7 @@ async function runScan(courseId) {
     if (!course) return await finish({ status: "failed", error: "no course_maps row for " + courseId });
     const scorecard = await loadScorecard(course.name, scorecardCourseKey);
     const existing = request.append ? describeExisting(saved.features, p => georef.toPx(p)) : [];
-    const prompt = buildScanPrompt({ course, scorecard, georef, existing, notes: request.notes });
+    const prompt = buildScanPrompt({ course, scorecard, georef, existing, notes: request.notes, anchors: request.anchors, grid: request.grid });
 
     const answer = await callModel({ image: request.image, prompt });
     if (answer.stopReason === "refusal") {

@@ -70,7 +70,7 @@ export function scorecardLines(evidence) {
   }).filter(Boolean);
 }
 
-export function buildScanPrompt({ course, scorecard, georef, existing, notes }) {
+export function buildScanPrompt({ course, scorecard, georef, existing, notes, anchors, grid }) {
   const name = String(course && course.name || "the course");
   const lines = scorecardLines(scorecard);
   const parts = [];
@@ -79,12 +79,26 @@ export function buildScanPrompt({ course, scorecard, georef, existing, notes }) 
     " metres per pixel, north up. Pixel (0,0) is the top-left corner; x runs right, y runs down. " +
     "For scale: a green is typically 20-40 m across (" + Math.round(20 / georef.metresPerPixel) + "-" + Math.round(40 / georef.metresPerPixel) +
     " px) and a fairway 25-50 m wide.");
+  if (grid > 0) {
+    parts.push("A coordinate grid is drawn over the image: thin white lines every " + grid + " pixels, with the x value of each vertical line printed in yellow along the top edge and the y value of each horizontal line along the left edge. " +
+      "Read every coordinate you return off this grid - it is authoritative. A point midway between the lines labelled 256 and 384 is at 320.");
+  }
+  const known = (anchors || []).filter(a => a && !a.saved && a.kind === "green");
+  const saved = (anchors || []).filter(a => a && a.saved);
+  if (known.length) {
+    parts.push("Greens already mapped are outlined in bright green on the image and labelled " + known[0].label + " to " + known[known.length - 1].label +
+      ". Their pixel centres: " + known.map(a => a.label + " (" + a.x + ", " + a.y + ")").join(", ") + ". " +
+      "Do NOT return these greens. Every one of them has a fairway leading to it: find and return that fairway. Return a green polygon only for a green that is NOT outlined.");
+  }
+  if (saved.length) {
+    parts.push("Shapes outlined in white are already recorded (" + saved.map(a => a.kind + " at (" + a.x + ", " + a.y + ")").join(", ") + "); do not return them.");
+  }
   if (lines.length) {
     parts.push("The course's scorecard, for context about how many holes there are and how long they are (NOT for numbering - do not try to match holes to numbers):\n" + lines.join("\n"));
   } else {
     parts.push("No scorecard is available; use what you can see.");
   }
-  if (existing && existing.length) {
+  if (existing && existing.length && !saved.length) {
     parts.push("Shapes already recorded for this course (do not repeat these, but you may trace the ground around them): " + existing.join("; ") + ".");
   }
   parts.push([

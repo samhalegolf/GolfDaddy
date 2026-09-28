@@ -8,6 +8,9 @@
  *            centre+zoom, or bounds - gd-overlay-georef-core.mjs.
  *   append - keep the shapes already saved and add these (a course scanned one view at a
  *            time). Default replaces.
+ *   anchors - what Studio drew onto the picture that is not ground: known OSM greens and
+ *            saved shapes, as pixel centres, so the prompt can name them. grid - the pixel
+ *            spacing of the coordinate grid drawn on the picture, so the prompt can say so.
  * -> 202 {status:"queued"}. The scan itself runs in course-map-ai-scan-background.mjs: a
  *    vision call with thinking takes longer than a synchronous function is allowed, so this
  *    endpoint only proves the caller, checks the request, parks it on the course's overlay
@@ -81,7 +84,14 @@ export default async function courseMapAiScan(req) {
     georef: payload.georef,
     image: { mediaType, data },
     append: !!payload.append,
-    notes: String(payload.notes || "").slice(0, 600)
+    notes: String(payload.notes || "").slice(0, 600),
+    anchors: (Array.isArray(payload.anchors) ? payload.anchors : []).slice(0, 120).map(a => ({
+      kind: String(a && a.kind || "").slice(0, 12),
+      label: String(a && a.label || "").slice(0, 12),
+      x: Math.round(Number(a && a.x)), y: Math.round(Number(a && a.y)),
+      saved: !!(a && a.saved)
+    })).filter(a => Number.isFinite(a.x) && Number.isFinite(a.y)),
+    grid: Number.isFinite(Number(payload.grid)) && Number(payload.grid) > 0 ? Math.round(Number(payload.grid)) : 0
   };
   await writeAiScan(courseId, requested);
   await pingBackground(new URL(req.url).origin, courseId);

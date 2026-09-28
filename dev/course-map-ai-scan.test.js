@@ -80,6 +80,12 @@ test("Studio captures the view it shows, georeferences the scaled picture, posts
   assert.ok(page.includes("captureZoom: z + Math.log2(scale)"), "the georef must describe the SCALED picture - the pixels the model answers in");
   assert.ok(page.includes("originPx: { x: x0 * 256 * scale, y: y0 * 256 * scale }"), "the origin must scale with the picture");
   assert.ok(page.includes("AI_MAX_EDGE_PX = 1568"), "the capture is scaled to the model's reading size client-side, so no server-side resize changes the pixels");
+  assert.ok(page.includes("Math.sqrt(AI_MAX_PIXELS / (full.width * full.height))"), "the capture must also stay under the API's megapixel threshold - the first live scan was over it and would have been resized behind our back");
+  assert.ok(page.includes("function drawGrid(") && page.includes("drawGrid(out, AI_GRID_PX)"), "a labelled coordinate grid must be burned into the picture");
+  assert.ok(page.includes("function drawAnchors(") && page.includes("anchors: capture.anchors, grid: capture.grid"), "known greens and saved shapes are drawn on and sent as anchors");
+  assert.ok(page.includes("var anchors = drawAnchors(out, toPx);") && page.indexOf("var anchors = drawAnchors(out, toPx);") < page.indexOf("drawGrid(out, AI_GRID_PX)"), "anchors are drawn before the grid so the grid labels stay legible on top");
+  assert.ok(sync.includes("anchors: (Array.isArray(payload.anchors)") && sync.includes("grid: Number.isFinite(Number(payload.grid))"), "the sync half must park anchors and grid with the request");
+  assert.ok(background.includes("anchors: request.anchors, grid: request.grid"), "the background half must hand anchors and grid to the prompt");
   assert.ok(page.includes('toDataURL("image/jpeg"'), "JPEG, or a satellite view is megabytes of PNG");
   assert.ok(page.includes("append: !replace"), "a scan appends unless the operator asks to replace");
   assert.ok(page.includes("function pollScan(") && page.includes("AI_TIMEOUT_MS"), "the page must poll for the outcome and give up eventually");

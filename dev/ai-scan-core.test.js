@@ -57,6 +57,26 @@ test("the prompt tells the model the picture's scale, the card as context, and n
   assert.ok(noCard.includes("No scorecard is available"));
 });
 
+test("the grid and the known greens drawn on the picture are explained, and known greens are not asked for again", () => {
+  const g = georef.imageGeoreference({ centre: { lat: 54.66015, lng: -5.78477 }, zoom: 17, width: 1024, height: 768 });
+  const prompt = core.buildScanPrompt({
+    course: COURSE, scorecard: null, georef: g, existing: ["green around (1, 1)"], grid: 128,
+    anchors: [
+      { kind: "green", label: "G1", x: 300, y: 400 }, { kind: "green", label: "G2", x: 700, y: 120 },
+      { kind: "fairway", label: "saved", x: 500, y: 500, saved: true }
+    ]
+  });
+  assert.ok(prompt.includes("every 128 pixels"), "the grid spacing is stated");
+  assert.ok(/Read every coordinate you return off this grid/.test(prompt), "the grid is declared authoritative");
+  assert.ok(prompt.includes("G1 (300, 400), G2 (700, 120)"), "known greens are listed with their pixel centres");
+  assert.ok(prompt.includes("Do NOT return these greens"), "known greens are excluded from the answer");
+  assert.ok(prompt.includes("find and return that fairway"), "each known green's fairway is asked for");
+  assert.ok(prompt.includes("fairway at (500, 500)"), "saved shapes outlined on the picture are named");
+  assert.ok(!prompt.includes("green around (1, 1)"), "the text-only description of saved shapes is replaced by the drawn ones when anchors carry them");
+  const bare = core.buildScanPrompt({ course: COURSE, scorecard: null, georef: g, existing: [] });
+  assert.ok(!bare.includes("coordinate grid") && !bare.includes("already mapped"), "no grid or anchors, nothing said about them");
+});
+
 test("existing shapes are described at their pixel centre in THIS picture", () => {
   const g = georef.imageGeoreference({ centre: { lat: 54.66015, lng: -5.78477 }, zoom: 17, width: 1024, height: 768 });
   const centreLatLng = g.toLatLng({ x: 300, y: 400 });
