@@ -179,6 +179,28 @@ test("the picker never renders a parent, only a distance", () => {
   assert.ok(/distanceM/.test(src), "the meta line must still carry distance");
 });
 
+test("a name with nothing Latin in it does not mint a shared id", () => {
+  const source = [
+    pickerFn("function slug(s){"),
+    pickerFn("function cleanName(s){"),
+    pickerFn("function keyForName(name){"),
+    pickerFn("function keyForCourse(name,src){")
+  ].join("\n") + "\nmodule.exports = { keyForCourse, keyForName };";
+  const m = { exports: {} };
+  new Function("module", "exports", source)(m, m.exports);
+  const { keyForCourse } = m.exports;
+  assert.strictEqual(keyForCourse("Royal Belfast Golf Club", { osmType: "way", osmId: 1 }), "royal-belfast",
+    "a distinctive name still mints the id every existing row was minted under");
+  /* 소피아그린CC slugged to "cc" and was published under it; every Korean and
+     Japanese "...CC" club would have landed on that same row. */
+  assert.strictEqual(keyForCourse("소피아그린CC", { osmType: "way", osmId: 123456 }), "osm-way-123456");
+  assert.strictEqual(keyForCourse("Golf course", { osmType: "relation", osmId: 77 }), "osm-relation-77",
+    "OSM's placeholder name is not an identity either");
+  assert.strictEqual(keyForCourse("소피아그린CC", { lat: 37.1780373, lng: 127.7075087 }), "cc-37-178n-127-708e",
+    "the geocoder route has no OSM ref, so the coordinates carry the identity");
+  assert.notStrictEqual(keyForCourse("소피아그린CC", { lat: 37.178, lng: 127.708 }), keyForCourse("레이크사이드CC", { lat: 37.290, lng: 127.020 }));
+});
+
 (async () => {
   let failed = 0;
   for (const t of tests) {

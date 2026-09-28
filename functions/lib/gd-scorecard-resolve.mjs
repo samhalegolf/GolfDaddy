@@ -122,7 +122,12 @@ export function cardNameMatchesCourse(cardName, courseName) {
   const words = text => String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && !stop.test(w));
   const wanted = words(courseName);
-  if (!wanted.length) return true;
+  /* A name with nothing distinctive left - "Golf course", the OSM placeholder,
+     or a Korean club name that the Latin filter reduces to "CC" - cannot
+     vouch for any card, so no card is accepted. This used to return true,
+     which took the University of Georgia's card for a course in Uljin and a
+     resort 100 km away for 소피아그린CC, and stored both as evidence. */
+  if (!wanted.length) return false;
   const got = new Set(words(cardName));
   const hits = wanted.filter(word => got.has(word)).length;
   /* Every distinctive word, so "Te Arai" clears and "Ayren" does not. One-word
