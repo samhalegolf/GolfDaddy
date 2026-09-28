@@ -25,9 +25,14 @@ test("the output schema is strict JSON of fairway/green pixel polygons, nothing 
   const feature = schema.properties.features.items;
   assert.deepStrictEqual(feature.properties.kind.enum, ["fairway", "green"], "the model is never asked for tees, bunkers or hole numbers as shapes");
   assert.strictEqual(feature.properties.points.items.items.type, "integer", "pixels are integer [x, y] pairs");
-  assert.strictEqual(feature.properties.points.minItems, 3);
   assert.ok(feature.required.includes("confidence"));
   assert.ok(!feature.required.includes("hole"), "hole is optional - the resolver numbers, not the model");
+  /* The API's schema language refuses these; the first live scan died on maxItems. */
+  const text = JSON.stringify(schema);
+  ["minItems", "maxItems", "minimum", "maximum", "minLength", "maxLength", "pattern"].forEach(word => {
+    assert.ok(!text.includes('"' + word + '"'), "schema uses an unsupported constraint: " + word);
+  });
+  assert.ok(!text.includes('["integer","null"]'), "no type unions - keep the schema to what structured outputs accepts");
 });
 
 test("scorecard lines tolerate every parser's field names and skip junk", () => {
@@ -69,6 +74,10 @@ test("the answer is read whether it arrives as an object, JSON text, a fenced bl
   assert.strictEqual(fromObject.features.length, 2);
   assert.deepStrictEqual(fromObject.features.map(f => f.id), ["fairway-ai-1", "green-ai-2"]);
   assert.strictEqual(fromObject.features[0].confidence, 0.8);
+  const limits = core.parseScanAnswer({ features: [{ kind: "fairway", points: Array.from({ length: 40 }, (_, i) => [i, i]), confidence: 7, hole: 99 }], notes: "" });
+  assert.strictEqual(limits.features[0].points.length, core.AI_SCAN_MAX_POINTS, "the parser caps corners since the schema cannot");
+  assert.strictEqual(limits.features[0].confidence, 1, "confidence is clamped");
+  assert.strictEqual(limits.features[0].hole, null, "99 is not a hole number");
   assert.strictEqual(fromObject.notes, "hole at the edge");
   assert.strictEqual(core.parseScanAnswer(JSON.stringify(shape)).features.length, 2);
   assert.strictEqual(core.parseScanAnswer("```json\n" + JSON.stringify(shape) + "\n```").features.length, 2);
