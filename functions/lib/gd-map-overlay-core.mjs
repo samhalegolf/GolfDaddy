@@ -31,10 +31,12 @@
  *   green   - a closed polygon (3+ points). Becomes golf=green. For the greens OSM has not
  *             got at all (Royal Belfast has eleven of eighteen): a fairway with no green to
  *             link to is not a candidate, so the missing seven need their greens too.
+ *   tee     - a closed polygon (3+ points). Becomes golf=tee. The resolver reads a tee near a
+ *             green or fairway as course context, and the mapper writes tee objects from it.
  */
 
-export const OVERLAY_KINDS = new Set(["fairway", "hole", "green"]);
-const POLYGON_KINDS = new Set(["fairway", "green"]);
+export const OVERLAY_KINDS = new Set(["fairway", "hole", "green", "tee"]);
+const POLYGON_KINDS = new Set(["fairway", "green", "tee"]);
 export function overlayKindIsPolygon(kind) { return POLYGON_KINDS.has(String(kind || "").toLowerCase()); }
 export const OVERLAY_MAX_FEATURES = 80;
 export const OVERLAY_MAX_POINTS = 64;
@@ -138,6 +140,7 @@ export function overlaySummary(features) {
     fairways: list.filter(f => f.kind === "fairway").length,
     holeLines: list.filter(f => f.kind === "hole").length,
     greens: list.filter(f => f.kind === "green").length,
+    tees: list.filter(f => f.kind === "tee").length,
     numbered: list.filter(f => f.hole).length
   };
 }

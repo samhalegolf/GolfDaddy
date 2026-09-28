@@ -70,14 +70,49 @@ export async function loadScorecard(courseName, scorecardCourseKey) {
 }
 
 export async function loadOverlay(courseId) {
-  const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features,updated_at,updated_by,ai_scan&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
+  const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features,updated_at,updated_by,ai_scan,course_map&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
   const row = Array.isArray(rows) ? rows[0] : null;
   return {
     features: normalizeOverlayFeatures(row ? row.features : []),
     updatedAt: row ? row.updated_at : null,
     updatedBy: row ? row.updated_by : null,
-    aiScan: row && row.ai_scan && typeof row.ai_scan === "object" ? row.ai_scan : null
+    aiScan: row && row.ai_scan && typeof row.ai_scan === "object" ? row.ai_scan : null,
+    courseMap: row && row.course_map && typeof row.course_map === "object" ? row.course_map : null
   };
+}
+
+/* The club's course map for this course, or null to remove it. {mediaType, data (base64),
+   name, width, height}. Stored on the overlay row like the scan state - one row per course,
+   created if the course has no overlay yet - and read by the AI scan as its second image. */
+const COURSE_MAP_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const COURSE_MAP_MAX_CHARS = 1500000;
+export function normalizeCourseMap(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const mediaType = String(raw.mediaType || "").toLowerCase();
+  const data = String(raw.data || "").replace(/^data:[^,]+,/, "");
+  if (!COURSE_MAP_TYPES.has(mediaType) || !data || data.length > COURSE_MAP_MAX_CHARS) return null;
+  return {
+    mediaType, data,
+    name: String(raw.name || "").slice(0, 80),
+    width: Number.isFinite(Number(raw.width)) ? Math.round(Number(raw.width)) : null,
+    height: Number.isFinite(Number(raw.height)) ? Math.round(Number(raw.height)) : null,
+    savedAt: new Date().toISOString()
+  };
+}
+export async function writeCourseMap(courseId, courseMap) {
+  await supabaseFetch(OVERLAYS_TABLE + "?on_conflict=course_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify({ course_id: courseId, course_map: courseMap })
+  });
+  return courseMap;
+}
+/* What a caller is told about the map: everything but the picture. */
+export function publicCourseMap(courseMap) {
+  if (!courseMap) return null;
+  const out = Object.assign({}, courseMap);
+  delete out.data;
+  return out;
 }
 
 /* Saves a feature list as the course's overlay. append:true keeps what is saved and adds

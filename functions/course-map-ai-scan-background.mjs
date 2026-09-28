@@ -23,7 +23,7 @@ import { hasSupabase, slug, loadCourse, loadOverlay, loadScorecard, saveOverlay,
 const DEFAULT_MODEL = "claude-opus-5-5";
 function scanModel() { return process.env.CLARITY_AI_SCAN_MODEL || DEFAULT_MODEL; }
 
-async function callModel({ image, prompt }) {
+async function callModel({ image, prompt, courseMap }) {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   /* Streamed so a long answer (dozens of polygons) cannot hit an HTTP timeout; the server
      side fallback re-runs on another model if a safety classifier declines - a golf course
@@ -37,9 +37,12 @@ async function callModel({ image, prompt }) {
     messages: [{
       role: "user",
       content: [
-        { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
-        { type: "text", text: prompt }
-      ]
+        { type: "text", text: "Image 1 (satellite):" },
+        { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } }
+      ].concat(courseMap ? [
+        { type: "text", text: "Image 2 (course map, schematic):" },
+        { type: "image", source: { type: "base64", media_type: courseMap.mediaType, data: courseMap.data } }
+      ] : []).concat([{ type: "text", text: prompt }])
     }]
   });
   const message = await stream.finalMessage();
@@ -80,9 +83,10 @@ async function runScan(courseId) {
     if (!course) return await finish({ status: "failed", error: "no course_maps row for " + courseId });
     const scorecard = await loadScorecard(course.name, scorecardCourseKey);
     const existing = request.append ? describeExisting(saved.features, p => georef.toPx(p)) : [];
-    const prompt = buildScanPrompt({ course, scorecard, georef, existing, notes: request.notes, anchors: request.anchors, grid: request.grid });
+    const courseMap = saved.courseMap && saved.courseMap.data ? saved.courseMap : null;
+    const prompt = buildScanPrompt({ course, scorecard, georef, existing, notes: request.notes, anchors: request.anchors, grid: request.grid, courseMap: !!courseMap });
 
-    const answer = await callModel({ image: request.image, prompt });
+    const answer = await callModel({ image: request.image, prompt, courseMap });
     if (answer.stopReason === "refusal") {
       return await finish({ status: "failed", error: "the model declined: " + String(answer.stopDetails && answer.stopDetails.explanation || answer.stopDetails && answer.stopDetails.category || "refusal"), model: answer.model, usage: answer.usage });
     }
@@ -108,7 +112,8 @@ async function runScan(courseId) {
       usage: answer.usage,
       found: parsed.features.length,
       saved: converted.features.length,
-      summary: savedResult ? savedResult.summary : { features: 0, fairways: 0, holeLines: 0, greens: 0, numbered: 0 },
+      summary: savedResult ? savedResult.summary : { features: 0, fairways: 0, holeLines: 0, greens: 0, tees: 0, numbered: 0 },
+      courseMapUsed: !!courseMap,
       overlayTotal: savedResult ? savedResult.overlay.features.length : saved.features.length,
       features: converted.features.map(f => ({ id: f.id, kind: f.kind, confidence: confidence[f.id] != null ? confidence[f.id] : null })),
       pixels: converted.pixels,

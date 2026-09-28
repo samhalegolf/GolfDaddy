@@ -40,7 +40,7 @@
 
   /* Survives leaving and re-entering the page - the shell tears the DOM down on every route
      change, and losing half-drawn fairways to a mis-click on the nav is not acceptable. */
-  var session = { course: null, features: [], loadedFor: "", osm: null, dirty: false, view: null, sourceKey: "", showOsm: true };
+  var session = { course: null, features: [], loadedFor: "", osm: null, courseMap: null, dirty: false, view: null, sourceKey: "", showOsm: true };
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -71,8 +71,11 @@
     features.forEach(function (f) { var m = /^f-(\d+)$/.exec(f.id || ""); if (m) n = Math.max(n, Number(m[1])); });
     return "f-" + (n + 1);
   }
-  function kindLabel(kind) { return kind === "hole" ? "Hole line" : kind === "green" ? "Green" : "Fairway"; }
-  function isPolygon(kind) { return kind === "fairway" || kind === "green"; }
+  function kindLabel(kind) { return kind === "hole" ? "Hole line" : kind === "green" ? "Green" : kind === "tee" ? "Tee" : "Fairway"; }
+  function isPolygon(kind) { return kind === "fairway" || kind === "green" || kind === "tee"; }
+  /* A course map is a small schematic; 1200px on the long side is plenty for the model to
+     read hole numbers off, and keeps the row it is stored on light. */
+  var COURSE_MAP_MAX_EDGE_PX = 1200;
   function minPoints(kind) { return isPolygon(kind) ? 3 : 2; }
 
   var STYLE = {
@@ -82,6 +85,8 @@
     holeSelected: { color: "#ffffff", weight: 4, dashArray: "8 6" },
     green: { color: "#b7ff5c", weight: 2, fillColor: "#b7ff5c", fillOpacity: 0.4 },
     greenSelected: { color: "#ffffff", weight: 3, fillColor: "#b7ff5c", fillOpacity: 0.5 },
+    tee: { color: "#6cc7ff", weight: 2, fillColor: "#6cc7ff", fillOpacity: 0.4 },
+    teeSelected: { color: "#ffffff", weight: 3, fillColor: "#6cc7ff", fillOpacity: 0.5 },
     draft: { color: "#ffb54c", weight: 2, dashArray: "4 4", fillColor: "#ffb54c", fillOpacity: 0.12 },
     vertex: { radius: 4, color: "#ffb54c", weight: 2, fillColor: "#1a1a1a", fillOpacity: 1 },
     osmGreen: { color: "#b7ff5c", weight: 2, fillColor: "#b7ff5c", fillOpacity: 0.28 },
@@ -112,7 +117,7 @@
       "are the greens OSM already has - the mapper links each fairway to the nearest one, so draw the " +
       "fairway to within about 200m of its green. A numbered <strong>hole line</strong> from tee to green is " +
       "quicker and is the strongest evidence the resolver gets. Where OSM has no green at all, draw the " +
-      "<strong>green</strong> too - a fairway with no green to link to is not a hole. Or let the AI trace the view you are " +
+      "<strong>green</strong> too - a fairway with no green to link to is not a hole. Upload the club's <strong>course map</strong> and the AI gets it as a second picture to settle doubts. Or let the AI trace the view you are " +
       "looking at: <strong>Scan this view with AI</strong> sends the current picture to the model and saves what it finds. Then run the mapper. " +
       "The overlay is temporary: delete it once OSM carries the real shapes.</p></div>" +
       '<div class="gdStudioViewportBar">' +
@@ -122,12 +127,15 @@
       '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="osm" checked> Show OSM greens</label>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ai" disabled>Scan this view with AI</button>' +
       '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="ai-replace"> replace saved shapes</label>' +
+      '<label class="gdStudioViewportField gdStudioDiagramBtn">Course map… <input type="file" accept="image/*" data-gd-overlay="course-map" hidden></label>' +
+      '<span class="gdStudioViewportField" data-gd-overlay="course-map-state"></span>' +
       "</div>" +
       '<div class="gdStudioViewportBar">' +
       '<span class="gdStudioViewportField">Draw</span>' +
       '<button type="button" class="gdStudioDiagramBtn isActive" data-gd-overlay="tool-fairway">Fairway polygon</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-hole">Hole line</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-green">Green polygon</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-tee">Tee polygon</button>' +
       '<label class="gdStudioViewportField">Hole # <input type="number" min="1" max="36" data-gd-overlay="hole" class="gdStudioOverlayHole"></label>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="finish" disabled>Finish shape</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="undo" disabled>Undo point</button>' +
@@ -146,7 +154,7 @@
       '<div class="gdStudioOverlayList" data-gd-overlay="list"></div>';
 
     var el = {};
-    ["pick", "course", "provider", "osm", "ai", "ai-replace", "tool-fairway", "tool-hole", "tool-green", "hole", "finish", "undo", "cancel", "map", "readout", "credit", "save", "reload", "clear", "run", "status", "list"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "ai", "ai-replace", "course-map", "course-map-state", "tool-fairway", "tool-hole", "tool-green", "tool-tee", "hole", "finish", "undo", "cancel", "map", "readout", "credit", "save", "reload", "clear", "run", "status", "list"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -206,10 +214,11 @@
     /* ---- drawing ---- */
 
     function setTool(next) {
-      tool = next === "hole" || next === "green" ? next : "fairway";
+      tool = next === "hole" || next === "green" || next === "tee" ? next : "fairway";
       el["tool-fairway"].classList.toggle("isActive", tool === "fairway");
       el["tool-hole"].classList.toggle("isActive", tool === "hole");
       el["tool-green"].classList.toggle("isActive", tool === "green");
+      el["tool-tee"].classList.toggle("isActive", tool === "tee");
       if (draft.length) cancelDraft();
       updateReadout();
     }
@@ -297,6 +306,7 @@
         var selected = f.id === selectedId;
         var shape = f.kind === "fairway" ? L.polygon(latlngs, selected ? STYLE.fairwaySelected : STYLE.fairway)
           : f.kind === "green" ? L.polygon(latlngs, selected ? STYLE.greenSelected : STYLE.green)
+          : f.kind === "tee" ? L.polygon(latlngs, selected ? STYLE.teeSelected : STYLE.tee)
           : L.polyline(latlngs, selected ? STYLE.holeSelected : STYLE.hole);
         shape.addTo(mapObj);
         shape.on("click", function (e) {
@@ -433,6 +443,55 @@
       el.run.title = session.dirty ? "Save the overlay first - the mapper reads what is saved" : "";
     }
 
+    /* ---- course map: the club's schematic, stored on the course and sent to the AI as image 2 ---- */
+
+    function renderCourseMapState() {
+      var m = session.courseMap;
+      el["course-map-state"].innerHTML = m
+        ? esc((m.name || "course map") + " · " + (m.width || "?") + "×" + (m.height || "?") + " · sent to the AI as image 2 ") +
+          '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="course-map-clear">remove</button>'
+        : "no course map";
+      var clear = el["course-map-state"].querySelector('[data-gd-overlay="course-map-clear"]');
+      if (clear) clear.addEventListener("click", function () {
+        if (!window.confirm("Remove the course map from this course?")) return;
+        saveCourseMap(null);
+      });
+    }
+
+    function uploadCourseMap(file) {
+      if (!session.course) { setStatus("Pick a course first.", true); return; }
+      var reader = new FileReader();
+      reader.onload = function () {
+        var img = new Image();
+        img.onload = function () {
+          var scale = Math.min(1, COURSE_MAP_MAX_EDGE_PX / Math.max(img.width, img.height));
+          var c = document.createElement("canvas");
+          c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+          var dataUrl = c.toDataURL("image/jpeg", 0.85);
+          saveCourseMap({ data: dataUrl.replace(/^data:[^,]+,/, ""), mediaType: "image/jpeg", name: String(file.name || "").slice(0, 80), width: c.width, height: c.height });
+        };
+        img.onerror = function () { setStatus("That file is not an image the browser can read.", true); };
+        img.src = String(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function saveCourseMap(courseMap) {
+      var id = courseIdOf(session.course);
+      if (!id) return;
+      setStatus(courseMap ? "Saving course map…" : "Removing course map…");
+      api("POST", "", { courseId: id, courseMap: courseMap }).then(function (data) {
+        if (destroyed) return;
+        session.courseMap = (data && data.courseMap) || null;
+        renderCourseMapState();
+        setStatus(session.courseMap ? "Course map saved - the next AI scan will see it." : "Course map removed.");
+      }).catch(function (error) {
+        if (destroyed) return;
+        setStatus("Course map not saved: " + (error && error.message || error), true);
+      });
+    }
+
     /* ---- server ---- */
 
     function api(method, query, body, endpoint) {
@@ -461,6 +520,8 @@
         if (destroyed || courseIdOf(session.course) !== id) return;
         session.features = (data && data.overlay && data.overlay.features) || [];
         session.osm = (data && data.osm) || null;
+        session.courseMap = (data && data.courseMap) || null;
+        renderCourseMapState();
         session.loadedFor = id;
         session.dirty = false;
         selectedId = "";
@@ -685,7 +746,7 @@
     function describeScan(scan) {
       var s = scan.summary || {};
       var bits = ["AI found " + (scan.found || 0) + " shape" + (scan.found === 1 ? "" : "s") + ", saved " + (scan.saved || 0) +
-        " (" + (s.fairways || 0) + " fairways, " + (s.greens || 0) + " greens) · overlay now " + (scan.overlayTotal || 0)];
+        " (" + (s.fairways || 0) + " fairways, " + (s.greens || 0) + " greens, " + (s.tees || 0) + " tees) · overlay now " + (scan.overlayTotal || 0)];
       if (scan.dropped && scan.dropped.length) bits.push(scan.dropped.length + " dropped: " + scan.dropped.map(function (d) { return d.reason; }).join("; "));
       if (scan.usage) bits.push((scan.usage.inputTokens || 0) + " in / " + (scan.usage.outputTokens || 0) + " out tokens");
       if (scan.notes) bits.push("model notes: " + scan.notes);
@@ -768,6 +829,7 @@
       if (session.loadedFor !== id) {
         session.features = [];
         session.osm = null;
+        session.courseMap = null;
         session.dirty = false;
         clearOsmLayers();
         clearFeatureLayers();
@@ -831,6 +893,12 @@
     el["tool-fairway"].addEventListener("click", function () { setTool("fairway"); });
     el["tool-hole"].addEventListener("click", function () { setTool("hole"); });
     el["tool-green"].addEventListener("click", function () { setTool("green"); });
+    el["tool-tee"].addEventListener("click", function () { setTool("tee"); });
+    el["course-map"].addEventListener("change", function () {
+      var file = el["course-map"].files && el["course-map"].files[0];
+      el["course-map"].value = "";
+      if (file) uploadCourseMap(file);
+    });
     el.finish.addEventListener("click", finishDraft);
     el.undo.addEventListener("click", undoVertex);
     el.cancel.addEventListener("click", cancelDraft);
