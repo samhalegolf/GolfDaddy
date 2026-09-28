@@ -151,6 +151,21 @@
       .trim();
   }
   function keyForName(name){return slug(cleanName(name)||name)}
+  /* The id a course is minted under. slug() keeps only a-z0-9, so a name with
+     nothing else in it collapses: "소피아그린CC" became "cc" and every Korean
+     and Japanese "…CC" club would have shared that row, and OSM's placeholder
+     "Golf course" became "golf-course". When fewer than three characters of
+     the name survive, the OSM way or relation id is the identity instead, and
+     a result with no OSM ref (the geocoder route) carries its coordinates. */
+  function keyForCourse(name,src){
+    const key=keyForName(name);
+    if(cleanName(name).replace(/[^a-z0-9]/g,"").length>=3)return key;
+    const osmType=String(src&&src.osmType||"").toLowerCase(),osmId=Number(src&&src.osmId);
+    if(/^(way|relation|node)$/.test(osmType)&&Number.isFinite(osmId))return slug("osm-"+osmType+"-"+osmId);
+    const lat=Number(src&&(src.lat??src.courseLat)),lng=Number(src&&(src.lng??src.courseLng));
+    if(Number.isFinite(lat)&&Number.isFinite(lng))return slug(key+"-"+Math.abs(lat).toFixed(3)+(lat<0?"s":"n")+"-"+Math.abs(lng).toFixed(3)+(lng<0?"w":"e"));
+    return key;
+  }
   /* Where a course is, in words. "Riverside" is four different clubs in four
      different countries, so a name on its own is not an identification - the
      region and country under it are what let a player pick the right one.
@@ -293,7 +308,7 @@
     const lng=rawLng===""||rawLng==null?NaN:Number(rawLng);
     const finderLat=rawFinderLat===""||rawFinderLat==null?NaN:Number(rawFinderLat);
     const finderLng=rawFinderLng===""||rawFinderLng==null?NaN:Number(rawFinderLng);
-    const canonicalKey=src.canonicalKey||keyForName(name);
+    const canonicalKey=src.canonicalKey||keyForCourse(name,src);
     return Object.assign({},src,{
       name,
       courseName:name,
@@ -1168,6 +1183,8 @@
       lat:course.lat,
       lng:course.lng,
       courseId:course.courseId||undefined,
+      osmType:course.osmType,
+      osmId:course.osmId,
       /* Reuse the two states the picker already renders rather than inventing a
          third: one we hold a map for behaves exactly like a database course. */
       source:course.hasMap?"database-course":"remote-search",
@@ -1206,10 +1223,10 @@
     coursesNear(area).then(result=>{
       if(run!==searchRun||!result)return;
       const have=new Set();
-      view.rows.forEach(course=>{have.add(rowKey(course));have.add(keyForName(course.name));});
+      view.rows.forEach(course=>{have.add(rowKey(course));have.add(keyForCourse(course.name,course));});
       const center=currentPoint();
       const extra=nearbyPayloads(result.courses,area)
-        .filter(course=>!have.has(rowKey(course))&&!have.has(keyForName(course.name)))
+        .filter(course=>!have.has(rowKey(course))&&!have.has(keyForCourse(course.name,course)))
         .slice(0,8);
       extra.forEach(course=>{const d=distance(center,course);if(Number.isFinite(d))course.distanceM=d;});
       view.extraRows=extra;

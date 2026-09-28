@@ -117,6 +117,10 @@ function scorecardHtml(rows) {
   assert.strictEqual(r.cardNameMatchesCourse("Ayren Links Golf Club - Detailed Scorecard", "Te Arai Links"), false,
     "the real false positive: a cleanly-parsing card for another club entirely");
   assert.strictEqual(r.cardNameMatchesCourse("Tara Iti Golf Club", "Te Arai Links"), false, "the neighbour is not the course");
+  assert.strictEqual(r.cardNameMatchesCourse("Seosan/Sansu", "소피아그린CC"), false,
+    "a name the Latin filter empties cannot vouch for any card - it took a resort 100km away");
+  assert.strictEqual(r.cardNameMatchesCourse("Front 9", "Golf course"), false,
+    "nor can OSM's placeholder name - it took a university course on another continent");
   const wrongClub = await r.resolveScorecard({ courseName: "Te Arai Links" }, {
     search: async () => [{ url: "https://course.bluegolf.com/x/ayrenlinksgc/detailedscorecard.htm" }],
     fetchHtml: async () => scorecardHtml(SOUTH_ROWS).replace("Te Arai Links Golf Club - South Course", "Ayren Links Golf Club")
