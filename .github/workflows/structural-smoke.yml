@@ -104,6 +104,8 @@ jobs:
           node dev/course-mapper-jobs.test.js
           node dev/course-mapper-worker.test.js
           node dev/mapper-debug-routine.test.js
+          node dev/mapper-failure-kinds.test.js
+          node dev/mapper-debug-payload.test.js
           node dev/course-mapper-worker-integration.test.js
           node dev/automapper-core.test.js
           node dev/geometry-resolver-core.test.js

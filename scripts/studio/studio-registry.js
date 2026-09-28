@@ -193,6 +193,24 @@
       connections: [{ target: "course-mapping", direction: "child-of", label: "" }],
       keyFunctions: [{ name: "resolve", purpose: "Resolve centre point.", codePath: "scripts/gd-course-location.js" }],
       status: "documented-only", needsVerification: false },
+    { id: "mapper-prompts", label: "Claude Debug Prompts", parent: "course-mapping",
+      function: "The prompt Claude is given for each kind of mapping failure (no OSM data, greens only, unnumbered holes...) when a job fails for good and is handed to the mapper-debug Routine. Edits here change what the next failed job says; the payload facts and captures follow automatically.",
+      owner: "scripts/studio/courses/course-mapping/mapper-prompts-page.js", runtime: { app: false, studio: true, server: true },
+      code: [
+        { role: "Studio page", path: "scripts/studio/courses/course-mapping/mapper-prompts-page.js" },
+        { role: "Kinds, defaults, payload text (shared)", path: "functions/lib/gd-mapper-failure-kinds.mjs" },
+        { role: "Satellite/OSM captures and their purge", path: "functions/lib/gd-mapper-debug-captures.mjs" },
+        { role: "Admin read/write of stored prompts", path: "functions/course-mapper-prompts.mjs" },
+        { role: "Fires the Routine on a terminal failure (requestMapperDebug)", path: "functions/course-mapper-worker-background.mjs" }
+      ],
+      inputs: ["Failed job diagnostics", "mapper_failure_prompts rows"], outputs: ["Routine fire text", "Temporary captures in course-visuals/mapper-debug"],
+      owns: ["Per-kind prompt text"], doesNotOwn: ["The Routine's own standing prompt (set in claude.ai/code/routines)", "Course geometry"],
+      connections: [{ target: "course-mapping", direction: "child-of", label: "" }],
+      keyFunctions: [
+        { name: "classifyMapperFailure", purpose: "Turns a failed job's error and diagnostics into one failure kind.", codePath: "functions/lib/gd-mapper-failure-kinds.mjs" },
+        { name: "buildMapperDebugText", purpose: "Builds the text the Routine is fired with: prompt, facts, captures, output contract, diagnostics.", codePath: "functions/lib/gd-mapper-failure-kinds.mjs" }
+      ],
+      status: "implemented", needsVerification: false },
     { id: "osm-scan", label: "OSM Scan", parent: "course-mapping",
       function: "Fetches and caches OpenStreetMap/Overpass course objects used as mapping candidates.",
       owner: "scripts/gd-course-library-pin-lock.js (mapperOsmGuideFetch/Memory)", runtime: { app: true, studio: false, server: false },

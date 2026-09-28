@@ -100,10 +100,18 @@ async function sendSystemAlert(input) {
  * is one investigation, not twenty sessions. The Routine prompt is told to look
  * at every failed job of the last hour, so the ones the throttle swallows are
  * still seen. CLAUDE_MAPPER_ROUTINE_THROTTLE_MINUTES overrides the 60 minutes. */
+const ROUTINE_FIRE_URL = /^https:\/\/api\.anthropic\.com\/v1\/claude_code\/routines\/[A-Za-z0-9_-]+\/fire$/;
+
+/* Whether a fire could go anywhere. The worker asks before doing the work that only
+   a fire can use (loading the operator's prompt, capturing imagery). */
+function claudeRoutineConfigured() {
+  return ROUTINE_FIRE_URL.test(text(env("CLAUDE_MAPPER_ROUTINE_URL"), 400)) && !!env("CLAUDE_MAPPER_ROUTINE_TOKEN");
+}
+
 async function fireClaudeRoutine(input) {
   const url = text(env("CLAUDE_MAPPER_ROUTINE_URL"), 400);
   const token = env("CLAUDE_MAPPER_ROUTINE_TOKEN");
-  if (!/^https:\/\/api\.anthropic\.com\/v1\/claude_code\/routines\/[A-Za-z0-9_-]+\/fire$/.test(url)) return { fired: false, reason: "missing_routine_url" };
+  if (!ROUTINE_FIRE_URL.test(url)) return { fired: false, reason: "missing_routine_url" };
   if (!token) return { fired: false, reason: "missing_routine_token" };
 
   const throttleMinutes = Number(env("CLAUDE_MAPPER_ROUTINE_THROTTLE_MINUTES") || 60);
@@ -143,4 +151,4 @@ function escapeHTML(value) {
   });
 }
 
-module.exports = { sendSystemAlert, fireClaudeRoutine };
+module.exports = { sendSystemAlert, fireClaudeRoutine, claudeRoutineConfigured };

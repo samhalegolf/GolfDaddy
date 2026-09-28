@@ -21,7 +21,39 @@ Nothing merges on its own.
 - A short "Claude is looking at this" email goes to `CLARITY_ALERT_EMAIL` with the
   session link. The report itself comes from the session.
 
-Tests: `node dev/mapper-debug-routine.test.js`.
+## What the Routine receives
+
+The fire text is built by `buildMapperDebugText` in
+`functions/lib/gd-mapper-failure-kinds.mjs`, in this order:
+
+1. **The operator's prompt for this kind of failure.** `classifyMapperFailure` sorts the
+   job's error and diagnostics into one kind: `no-osm-data-with-scorecard`,
+   `no-osm-data-no-scorecard`, `surfaces-only` (greens or fairways but no hole lines),
+   `holes-unnumbered`, `partial-numbering`, `no-course-location`, `worker-died`, `other`.
+   Each kind has a default prompt in that file; a row in `mapper_failure_prompts`
+   overrides it. Edit them in Studio > Courses > Course Mapping > **Claude Debug
+   Prompts** (`/api/course-mapper-prompts`, admin only). Placeholders such as
+   `{{courseName}}`, `{{expectedHoles}}` and `{{greens}}` are filled from the job.
+2. **The facts**: kind, job id, course id and name, centre, attempts, error, the OSM
+   feature counts and whether a scorecard was found.
+3. **Two captures**, satellite (Esri World Imagery, needs `ARCGIS_API_KEY`) and
+   OpenStreetMap, of the same 4x4 tiles at zoom 16 around the centre, uploaded to the
+   public `course-visuals` bucket under `mapper-debug/<date>/<job id>/` and linked by
+   URL, with their bounds and the pixel-to-coordinate rule so Claude can draw greens
+   and fairways from the imagery and return real coordinates.
+4. **The output contract**: drawn or numbered geometry comes back as one fenced
+   `geojson` block (Polygons for greens/fairways/tees, LineStrings for holes, with
+   `golf`, `hole`, `confidence`, `note` properties). Nothing ingests it automatically
+   yet; an operator reads the report and applies it.
+5. **The diagnostics JSON**, cut to fit the 16000-character fire limit.
+
+The captures and the prompt lookup only happen when the Routine is configured. The
+mapper sweeper deletes capture folders older than seven days
+(`purgeMapperDebugCaptures`). The job row records `failureKind`, and when a fire was
+possible `debugPayload` (prompt source and capture URLs) next to `debugSession`.
+
+Tests: `node dev/mapper-debug-routine.test.js`, `node dev/mapper-failure-kinds.test.js`,
+`node dev/mapper-debug-payload.test.js`.
 
 ## One-time setup
 
@@ -40,7 +72,9 @@ Tests: `node dev/mapper-debug-routine.test.js`.
    CLAUDE_MAPPER_ROUTINE_TOKEN=<token>
    ```
 
-   Optional: `CLAUDE_MAPPER_ROUTINE_THROTTLE_MINUTES` (default 60).
+   Optional: `CLAUDE_MAPPER_ROUTINE_THROTTLE_MINUTES` (default 60). The satellite
+   capture uses the `ARCGIS_API_KEY` the app's live map already needs; without it the
+   payload says `satellite: not captured (no-esri-key)` and the OSM capture still goes.
 
 4. Redeploy. With the two vars unset the feature is off and the worker behaves as
    before.
@@ -60,8 +94,11 @@ You are the on-call engineer for Clarity Caddy's course mapping system. A mappin
 job has failed for good. Investigate it, fix what you can, and report back.
 
 The failure to investigate is in the routine-fire-payload block: act on it. It
-carries the job id, course id, attempts, the error, and the diagnostics the run
-saved before it died.
+opens with the task for this kind of failure, written by the operator, then the
+job id, course id, attempts, the error, links to a satellite and an OpenStreetMap
+capture of the course with the rule for turning a pixel into a coordinate, the
+shape any geometry you draw must come back in, and the diagnostics the run saved
+before it died. Do the task first; the standing steps below still apply.
 
 Where things live:
 - Worker: functions/course-mapper-worker-background.mjs (claims course_mapper_jobs

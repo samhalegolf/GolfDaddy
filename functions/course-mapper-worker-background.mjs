@@ -42,8 +42,11 @@ import { refineSurfaceShape, applyRefinedShape, REFINED_SHAPE_SOURCE } from "./l
 import pkg from "./lib/safe-remote-url.js";
 import alerts from "./alert-utils.js";
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
+import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
+import { classifyMapperFailure, failureKind, buildMapperDebugText } from "./lib/gd-mapper-failure-kinds.mjs";
+import { captureMapperDebugImagery } from "./lib/gd-mapper-debug-captures.mjs";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
-const { fireClaudeRoutine, sendSystemAlert } = alerts;
+const { fireClaudeRoutine, sendSystemAlert, claudeRoutineConfigured } = alerts;
 
 const JOBS_TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
@@ -124,45 +127,81 @@ const MAX_TRANSIENT_ATTEMPTS = 4;
 
 /* A job that is failed for good is handed to Claude.
  *
- * Fires the mapper-debug Routine (functions/alert-utils.js fireClaudeRoutine) with
- * everything the row knows - error, attempts, diagnostics - and returns what happened
- * so it can sit on the job result as `debugSession`: the failed row in the admin view
- * then links to the session that looked at it, or says why none did (feature off,
- * throttled, rejected). Best-effort throughout: a failed job is still a failed job if
- * the hand-off does not go through.
+ * Fires the mapper-debug Routine (functions/alert-utils.js fireClaudeRoutine) and
+ * returns what to record on the job result: `debugSession` (the session that took it,
+ * or why none did), `failureKind` (lib/gd-mapper-failure-kinds.mjs) and, when a fire
+ * was possible, `debugPayload` - which prompt was used and where the captures went.
+ *
+ * What the Routine receives is the operator's prompt for this KIND of failure (stored
+ * in mapper_failure_prompts, default from the kinds table), then the facts, then two
+ * georeferenced captures of the course - satellite and OSM - so a course with no OSM
+ * data can have its greens and fairways drawn from imagery. The captures are uploaded
+ * only when a fire can actually happen; nothing is fetched or stored for a feature
+ * that is off. Best-effort throughout: a failed job is still a failed job if any of
+ * this does not go through.
  *
  * Only terminal failures come here. Transient ones are requeued and never seen by
  * anyone unless they run out of attempts, so an Overpass blip does not wake a session. */
+const PROMPTS_TABLE = "mapper_failure_prompts";
+const CAPTURE_BUCKET = "course-visuals";
+
+async function storedFailurePrompt(kind) {
+  const rows = await supabaseFetch(PROMPTS_TABLE + "?select=prompt&kind=eq." + encodeURIComponent(kind) + "&limit=1").catch(() => null);
+  const row = Array.isArray(rows) ? rows[0] : null;
+  return row && String(row.prompt || "").trim() ? String(row.prompt) : null;
+}
+
+async function fetchTileBuffer(url, headers) {
+  const response = await fetch(url, { headers: headers || {}, signal: AbortSignal.timeout(12000) });
+  if (!response || !response.ok || typeof response.arrayBuffer !== "function") throw new Error("tile " + (response && response.status) + " " + url.split("?")[0].slice(-40));
+  return Buffer.from(await response.arrayBuffer());
+}
+
+async function captureForDebug(job, diagnostics) {
+  let centre = diagnostics && diagnostics.centre;
+  if (!centre) {
+    const course = await loadCourseCenter(job.course_id).catch(() => null);
+    centre = course && course.center;
+  }
+  if (!centre) return { reason: "no-centre" };
+  const sharp = (await import("sharp")).default;
+  const storage = createSupabaseStorage({ base: supabaseBase, key: supabaseKey, bucket: CAPTURE_BUCKET });
+  return captureMapperDebugImagery({ centre, jobId: job.id }, {
+    fetchTile: fetchTileBuffer, upload: storage.upload, publicUrl: storage.publicUrl, sharp,
+    esriKey: env("ARCGIS_API_KEY") || env("ESRI_API_KEY")
+  });
+}
+
 async function requestMapperDebug(job, failure) {
-  const lines = [
-    "A course mapping job has failed for good and needs investigating.",
-    "",
-    "job_id: " + job.id,
-    "course_id: " + (job.course_id || "unknown"),
-    "kind: " + (job.kind || "automap"),
-    "attempts: " + (failure.attempts || 1),
-    "error: " + String(failure.message || "").slice(0, 900),
-    "",
-    "diagnostics: " + JSON.stringify(failure.diagnostics || null).slice(0, 6000),
-    "",
-    "Other courses may have failed in the same window and been throttled; check course_mapper_jobs for every status=failed row from the last hour, not only this one."
-  ];
+  const classified = classifyMapperFailure({ error: failure.message, diagnostics: failure.diagnostics });
+  const record = { failureKind: classified.kind };
+  let prompt = failureKind(classified.kind).defaultPrompt;
+  let promptSource = "default";
+  let captures = null;
+  if (claudeRoutineConfigured()) {
+    const stored = await storedFailurePrompt(classified.kind);
+    if (stored) { prompt = stored; promptSource = "stored"; }
+    captures = await captureForDebug(job, failure.diagnostics).catch(error => ({ reason: String(error && error.message || error).slice(0, 160) }));
+    record.debugPayload = { failureKind: classified.kind, promptSource, captures };
+  }
+  const text = buildMapperDebugText({ job, failure, classified, prompt, captures });
   let outcome;
   try {
-    outcome = await fireClaudeRoutine({ key: "mapper_failed", text: lines.join("\n") });
+    outcome = await fireClaudeRoutine({ key: "mapper_failed", text });
   } catch (error) {
     outcome = { fired: false, reason: "threw", details: String(error && error.message || error).slice(0, 300) };
   }
+  record.debugSession = outcome;
   if (outcome.fired) {
     await sendSystemAlert({
       eventType: "mapper_debug_session",
       key: job.id,
       title: "Claude is looking at a failed mapping job",
-      detail: "Course " + (job.course_id || "unknown") + " failed: " + String(failure.message || "").slice(0, 300) + ". A report follows when the session finishes.",
-      context: { jobId: job.id, courseId: job.course_id || null, session: outcome.sessionUrl }
+      detail: "Course " + (job.course_id || "unknown") + " failed (" + classified.label + "): " + String(failure.message || "").slice(0, 300) + ". A report follows when the session finishes.",
+      context: { jobId: job.id, courseId: job.course_id || null, failureKind: classified.kind, session: outcome.sessionUrl }
     }).catch(() => {});
   }
-  return outcome;
+  return record;
 }
 
 /* Jobs stuck "running" belong to a worker that died mid-run. Same reasoning and cutoff as
@@ -177,7 +216,7 @@ async function reapStaleJobs() {
       const attempts = (row.result && Number(row.result.attempts) || 0) + 1;
       const reapedError = "stale-running-reaped: worker died mid-job " + attempts + " times";
       const patch = attempts >= 8
-        ? { status: "failed", error: reapedError, result: Object.assign({}, row.result || {}, { attempts, debugSession: await requestMapperDebug(row, { message: reapedError, attempts }) }), updated_at: new Date().toISOString() }
+        ? { status: "failed", error: reapedError, result: Object.assign({}, row.result || {}, { attempts }, await requestMapperDebug(row, { message: reapedError, attempts, diagnostics: row.result && row.result.diagnostics })), updated_at: new Date().toISOString() }
         : { status: "queued", error: null, result: Object.assign({}, row.result || {}, { attempts }), updated_at: new Date().toISOString() };
       await supabaseFetch(JOBS_TABLE + "?id=eq." + row.id, { method: "PATCH", body: JSON.stringify(patch) });
     }
@@ -2588,7 +2627,7 @@ export default async function courseMapperWorker(req) {
       const patch = retryable
         ? { status: "queued", error: null, result: Object.assign({}, job.result || {}, { attempts, lastTransientError: message }, diagnostics ? { diagnostics } : {}) }
         : { status: "failed", error: attempts > 1 ? message + " (after " + attempts + " attempts)" : message, result: Object.assign({}, job.result || {}, { attempts }, diagnostics ? { diagnostics } : {}) };
-      if (!retryable) patch.result.debugSession = await requestMapperDebug(job, { message, attempts, diagnostics });
+      if (!retryable) Object.assign(patch.result, await requestMapperDebug(job, { message, attempts, diagnostics }));
       await finishJob(job.id, patch).catch(() => {});
     }
     job = await claimJob(null);
