@@ -20,7 +20,15 @@
   "use strict";
 
   var API = "/api/course-map-overlay";
+  var AI_API = "/api/course-map-ai-scan";
   var JOBS_API = "/api/course-mapper-jobs";
+  /* The model reads an image at ~1568px on its long side and answers in the pixels it saw,
+     so the capture is scaled to that here and georeferenced AFTER scaling - the picture we
+     describe is the picture it gets, to the pixel. */
+  var AI_MAX_EDGE_PX = 1568;
+  var AI_MAX_TILES = 110;
+  var AI_POLL_MS = 4000;
+  var AI_TIMEOUT_MS = 8 * 60 * 1000;
 
   /* Survives leaving and re-entering the page - the shell tears the DOM down on every route
      change, and losing half-drawn fairways to a mis-click on the nav is not acceptable. */
@@ -85,6 +93,9 @@
     var osmLayers = [];
     var selectedId = "";
     var busy = false;
+    var scanning = false;
+    var scanFrame = null;
+    var scanTimer = null;
 
     containerEl.innerHTML =
       '<div class="gdStudioLede" style="margin-bottom:12px">' +
@@ -93,13 +104,16 @@
       "are the greens OSM already has - the mapper links each fairway to the nearest one, so draw the " +
       "fairway to within about 200m of its green. A numbered <strong>hole line</strong> from tee to green is " +
       "quicker and is the strongest evidence the resolver gets. Where OSM has no green at all, draw the " +
-      "<strong>green</strong> too - a fairway with no green to link to is not a hole. Save, then run the mapper. " +
+      "<strong>green</strong> too - a fairway with no green to link to is not a hole. Or let the AI trace the view you are " +
+      "looking at: <strong>Scan this view with AI</strong> sends the current picture to the model and saves what it finds. Then run the mapper. " +
       "The overlay is temporary: delete it once OSM carries the real shapes.</p></div>" +
       '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="pick">Pick course</button>' +
       '<span class="gdStudioViewportCourse" data-gd-overlay="course">No course picked</span>' +
       '<label class="gdStudioViewportField">Provider <select data-gd-overlay="provider"></select></label>' +
       '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="osm" checked> Show OSM greens</label>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ai" disabled>Scan this view with AI</button>' +
+      '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="ai-replace"> replace saved shapes</label>' +
       "</div>" +
       '<div class="gdStudioViewportBar">' +
       '<span class="gdStudioViewportField">Draw</span>' +
@@ -124,7 +138,7 @@
       '<div class="gdStudioOverlayList" data-gd-overlay="list"></div>';
 
     var el = {};
-    ["pick", "course", "provider", "osm", "tool-fairway", "tool-hole", "tool-green", "hole", "finish", "undo", "cancel", "map", "readout", "credit", "save", "reload", "clear", "run", "status", "list"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "ai", "ai-replace", "tool-fairway", "tool-hole", "tool-green", "hole", "finish", "undo", "cancel", "map", "readout", "credit", "save", "reload", "clear", "run", "status", "list"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -211,6 +225,7 @@
     }
 
     function draftButtons() {
+      updateActions();
       el.finish.disabled = draft.length < minPoints(tool);
       el.undo.disabled = !draft.length;
       el.cancel.disabled = !draft.length;
@@ -401,6 +416,8 @@
 
     function updateActions() {
       var has = !!session.course && !busy;
+      el.ai.disabled = !has || scanning || !!draft.length;
+      el.ai.title = draft.length ? "Finish or cancel the shape you are drawing first" : scanning ? "A scan is running" : "";
       el.save.disabled = !has || !session.dirty;
       el.reload.disabled = !has;
       el.clear.disabled = !has || (!session.features.length && !session.dirty);
@@ -410,10 +427,10 @@
 
     /* ---- server ---- */
 
-    function api(method, query, body) {
+    function api(method, query, body, endpoint) {
       return accessToken().then(function (token) {
         if (!token) throw new Error("Sign in again - no session token");
-        return fetch(API + (query || ""), {
+        return fetch((endpoint || API) + (query || ""), {
           method: method,
           headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: "Bearer " + token },
           cache: "no-store",
@@ -442,6 +459,12 @@
         drawOsm();
         drawFeatures();
         renderList();
+        /* A scan started before the page was left (or from another tab) is picked back up. */
+        var scan = data && data.aiScan;
+        if (scan && (scan.status === "queued" || scan.status === "running") && !scanning) {
+          var since = Date.parse(scan.requestedAt || "") || Date.now();
+          if (Date.now() - since < AI_TIMEOUT_MS) { scanning = true; pollScan(id, since); }
+        }
         var when = data && data.overlay && data.overlay.updatedAt ? " · saved " + new Date(data.overlay.updatedAt).toLocaleString() : "";
         setStatus(session.features.length ? session.features.length + " saved shape" + (session.features.length === 1 ? "" : "s") + when : "No overlay saved for this course yet.");
       }).catch(function (error) {
@@ -507,6 +530,145 @@
         if (destroyed) return;
         setStatus("Could not queue the mapper: " + (error && error.message || error), true);
       }).then(function () { busy = false; if (!destroyed) updateActions(); });
+    }
+
+    /* ---- AI scan: the current view, as the model will see it ----
+       The picture is built from the mounted provider's own tiles, re-fetched with CORS so a
+       canvas can read them (every source in GDMapSources sets crossOrigin for this reason).
+       Tiles at the layer's effective zoom, nothing resampled; the tile grid's top-left
+       mercator pixel and that zoom ARE the georeference - the same playSurface shape a
+       published frame carries, exact to the pixel. Then one downscale to the model's edge
+       limit, folded into the zoom as a fraction, so the georef still describes the picture
+       that is actually sent. */
+    function captureView() {
+      return new Promise(function (resolve, reject) {
+        if (!mapObj || !layer || typeof layer.getTileUrl !== "function") return reject(new Error("no tile layer to capture"));
+        var native = num(layer.options && layer.options.maxNativeZoom);
+        var z = num(layer._tileZoom);
+        if (z == null) z = Math.round(mapObj.getZoom());
+        if (native && z > native) z = native;
+        var bounds = mapObj.getBounds();
+        var nw = mapObj.project(bounds.getNorthWest(), z), se = mapObj.project(bounds.getSouthEast(), z);
+        var x0 = Math.floor(nw.x / 256), y0 = Math.floor(nw.y / 256);
+        var x1 = Math.floor((se.x - 1) / 256), y1 = Math.floor((se.y - 1) / 256);
+        var cols = x1 - x0 + 1, rows = y1 - y0 + 1;
+        if (cols < 1 || rows < 1) return reject(new Error("nothing in view"));
+        if (cols * rows > AI_MAX_TILES) return reject(new Error("too much ground in view (" + cols * rows + " tiles) - zoom in"));
+        var full = document.createElement("canvas");
+        full.width = cols * 256; full.height = rows * 256;
+        var ctx = full.getContext("2d");
+        ctx.fillStyle = "#000"; ctx.fillRect(0, 0, full.width, full.height);
+        var loads = [];
+        var failed = 0;
+        for (var ty = y0; ty <= y1; ty++) {
+          for (var tx = x0; tx <= x1; tx++) {
+            loads.push(new Promise(function (done) {
+              var img = new Image();
+              var cx = tx, cy = ty;
+              img.crossOrigin = "anonymous";
+              img.onload = function () { try { ctx.drawImage(img, (cx - x0) * 256, (cy - y0) * 256, 256, 256); } catch (e) { failed++; } done(); };
+              img.onerror = function () { failed++; done(); };
+              try { img.src = layer.getTileUrl({ x: cx, y: cy, z: z }); } catch (e) { failed++; done(); }
+            }));
+          }
+        }
+        Promise.all(loads).then(function () {
+          if (failed === loads.length) return reject(new Error("no tiles loaded for this view"));
+          var scale = Math.min(1, AI_MAX_EDGE_PX / Math.max(full.width, full.height));
+          var out = full;
+          if (scale < 1) {
+            out = document.createElement("canvas");
+            out.width = Math.round(full.width * scale); out.height = Math.round(full.height * scale);
+            out.getContext("2d").drawImage(full, 0, 0, out.width, out.height);
+            scale = out.width / full.width;
+          }
+          var dataUrl;
+          try { dataUrl = out.toDataURL("image/jpeg", 0.88); }
+          catch (e) { return reject(new Error("this provider's tiles cannot be read back (no CORS) - switch provider")); }
+          resolve({
+            data: dataUrl.replace(/^data:[^,]+,/, ""),
+            mediaType: "image/jpeg",
+            width: out.width, height: out.height, tiles: loads.length, failed: failed,
+            bounds: L.latLngBounds(mapObj.unproject(L.point(x0 * 256, y0 * 256), z), mapObj.unproject(L.point((x1 + 1) * 256, (y1 + 1) * 256), z)),
+            georef: {
+              playSurface: {
+                originPx: { x: x0 * 256 * scale, y: y0 * 256 * scale },
+                captureZoom: z + Math.log2(scale),
+                outputDimensions: { width: out.width, height: out.height }
+              }
+            }
+          });
+        });
+      });
+    }
+
+    function stopScanPoll() {
+      if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
+      if (scanFrame) { try { mapObj.removeLayer(scanFrame); } catch (e) {} scanFrame = null; }
+      scanning = false;
+      updateActions();
+    }
+
+    function describeScan(scan) {
+      var s = scan.summary || {};
+      var bits = ["AI found " + (scan.found || 0) + " shape" + (scan.found === 1 ? "" : "s") + ", saved " + (scan.saved || 0) +
+        " (" + (s.fairways || 0) + " fairways, " + (s.greens || 0) + " greens) · overlay now " + (scan.overlayTotal || 0)];
+      if (scan.dropped && scan.dropped.length) bits.push(scan.dropped.length + " dropped: " + scan.dropped.map(function (d) { return d.reason; }).join("; "));
+      if (scan.usage) bits.push((scan.usage.inputTokens || 0) + " in / " + (scan.usage.outputTokens || 0) + " out tokens");
+      if (scan.notes) bits.push("model notes: " + scan.notes);
+      return bits.join(" · ");
+    }
+
+    function pollScan(id, startedAt) {
+      scanTimer = setTimeout(function () {
+        if (destroyed || courseIdOf(session.course) !== id) return stopScanPoll();
+        api("GET", "?courseId=" + encodeURIComponent(id)).then(function (data) {
+          if (destroyed || courseIdOf(session.course) !== id) return stopScanPoll();
+          var scan = data && data.aiScan;
+          var state = scan && scan.status;
+          if (state === "done" || state === "failed") {
+            stopScanPoll();
+            if (state === "failed") { setStatus("AI scan failed: " + (scan.error || "unknown"), true); return; }
+            session.features = (data.overlay && data.overlay.features) || [];
+            session.dirty = false;
+            selectedId = "";
+            drawFeatures();
+            renderList();
+            updateActions();
+            setStatus(describeScan(scan), !!(scan.dropped && scan.dropped.length));
+            return;
+          }
+          if (Date.now() - startedAt > AI_TIMEOUT_MS) { stopScanPoll(); setStatus("AI scan is taking too long - check back with Reload saved", true); return; }
+          setStatus("AI scan " + (state || "queued") + "… " + Math.round((Date.now() - startedAt) / 1000) + "s");
+          pollScan(id, startedAt);
+        }).catch(function (error) {
+          stopScanPoll();
+          setStatus("Lost track of the scan: " + (error && error.message || error), true);
+        });
+      }, AI_POLL_MS);
+    }
+
+    function scanWithAi() {
+      var id = courseIdOf(session.course);
+      if (!id || scanning || draft.length) return;
+      if (session.dirty && !window.confirm("You have unsaved shapes. The scan saves on the server and reloads the overlay, so they will be lost. Continue?")) return;
+      var replace = !!el["ai-replace"].checked;
+      if (replace && session.features.length && !window.confirm("Replace the " + session.features.length + " saved shape(s) with whatever the AI finds in this view?")) return;
+      scanning = true;
+      updateActions();
+      setStatus("Capturing the view…");
+      captureView().then(function (capture) {
+        setStatus("Sending " + capture.width + "×" + capture.height + " px (" + capture.tiles + " tiles" + (capture.failed ? ", " + capture.failed + " missing" : "") + ")…");
+        scanFrame = L.rectangle(capture.bounds, { color: "#ffb54c", weight: 1, dashArray: "6 6", fill: false, interactive: false }).addTo(mapObj);
+        return api("POST", "", { courseId: id, image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, append: !replace }, AI_API);
+      }).then(function (data) {
+        if (destroyed) return;
+        setStatus("AI scan queued (" + Math.round(((data && data.georef && data.georef.metresPerPixel) || 0) * 100) / 100 + " m/px). Waiting for the model…");
+        pollScan(id, Date.now());
+      }).catch(function (error) {
+        stopScanPoll();
+        setStatus("AI scan not started: " + (error && error.message || error), true);
+      });
     }
 
     /* ---- course ---- */
@@ -592,6 +754,7 @@
     el.provider.addEventListener("change", function () { useSource(el.provider.value); });
     el.osm.checked = session.showOsm;
     el.osm.addEventListener("change", function () { session.showOsm = el.osm.checked; drawOsm(); });
+    el.ai.addEventListener("click", scanWithAi);
     el["tool-fairway"].addEventListener("click", function () { setTool("fairway"); });
     el["tool-hole"].addEventListener("click", function () { setTool("hole"); });
     el["tool-green"].addEventListener("click", function () { setTool("green"); });
@@ -619,6 +782,7 @@
 
     return function cleanup() {
       destroyed = true;
+      if (scanTimer) clearTimeout(scanTimer);
       document.removeEventListener("keydown", onKey);
       if (window.GDStudioCoursePick) window.GDStudioCoursePick.cancel();
       if (window.GDStudioShell) window.GDStudioShell.show();

@@ -27,6 +27,7 @@ function read(rel) { return fs.readFileSync(path.join(ROOT, rel), "utf8"); }
 const page = read(PAGE);
 const worker = read("functions/course-mapper-worker-background.mjs");
 const endpoint = read("functions/course-map-overlay.mjs");
+const store = read("functions/lib/gd-map-overlay-store.mjs");
 const adminDb = read("scripts/studio/gd-admin-course-db.js");
 const source = read("index.html");
 const toml = read("netlify.toml");
@@ -98,15 +99,19 @@ test("the mapper run is gated on a saved overlay, so what runs is what is on scr
 test("the overlay endpoint is registered, admin-only, and reads OSM through the mapper's own query", () => {
   assert.ok(endpoint.includes('path: "/api/course-map-overlay"'), "the function does not declare its /api path");
   assert.ok(toml.includes("/api/course-map-overlay"), "no /api/course-map-overlay redirect in netlify.toml");
-  assert.ok(endpoint.includes("/auth/v1/user"), "admin identity must be proven against Supabase auth, not asserted");
+  assert.ok(endpoint.includes('from "./lib/gd-map-overlay-store.mjs"'), "the endpoint must use the shared overlay store");
+  assert.ok(store.includes("/auth/v1/user"), "admin identity must be proven against Supabase auth, not asserted");
+  assert.ok(!endpoint.includes("/auth/v1/user"), "the endpoint must not carry its own copy of the admin proof - the store owns it");
   assert.ok(endpoint.includes("if (!admin) return json(403"), "a non-admin must be refused before anything is read or written");
-  assert.ok(endpoint.includes("normalizeOverlayFeatures("), "features must be normalised before they are stored");
+  assert.ok(store.includes("normalizeOverlayFeatures("), "features must be normalised before they are stored");
   assert.ok(endpoint.includes("osmGuideQuery(") && endpoint.includes("fetchOverpass("), "the OSM context must come from the same query the mapper runs");
-  assert.ok(endpoint.includes('method: "DELETE"'), "an empty overlay must delete the row, not store []");
+  assert.ok(store.includes('method: "DELETE"'), "an empty overlay must delete the row, not store []");
+  assert.ok(endpoint.includes("delete out.image"), "a poller must never be handed the scan's picture back");
   /* An AI's answer arrives in image pixels with a georef; the conversion is the georef core's,
      never re-derived here, and a georef the core cannot use is a 400 with its reason. */
   assert.ok(endpoint.includes('from "./lib/gd-overlay-georef-core.mjs"'), "the endpoint does not use the georef core for pixel-space posts");
   assert.ok(endpoint.includes("aiShapesToOverlay(raw, payload.georef"), "pixel-space features are not converted through aiShapesToOverlay");
+  assert.ok(endpoint.includes("saveOverlay({ courseId, features: raw, savedBy: admin, append:"), "saving must go through the store's saveOverlay so both endpoints mean the same thing by a save");
   assert.ok(endpoint.includes('error: "bad georef"'), "a georef the core rejects must be refused with its reason");
 });
 
