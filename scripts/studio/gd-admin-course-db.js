@@ -44,7 +44,7 @@ function gdAdminCourseLocationMarkup(selected,payload={}){
     gdAdminCourseDbMetric("Source",info.source),
     gdAdminCourseDbMetric("Status",info.resolved?info.confirmed:"missing"),
     gdAdminCourseDbMetric("Updated",info.updated||"")
-  ].join("")}</div><div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseLocationEdit(${id})">Edit location</button><button type="button" onclick="return gdAdminCourseLocationViewport(${id})">Map viewport</button><button class="danger" type="button" onclick="return gdAdminCourseLocationRemove(${id})">Remove</button></div></div></details>`;
+  ].join("")}</div><div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseLocationEdit(${id})">Edit location</button><button type="button" onclick="return gdAdminCourseLocationViewport(${id})">Map viewport</button><button type="button" onclick="return gdAdminCourseLocationOverlay(${id})">Draw overlay</button><button class="danger" type="button" onclick="return gdAdminCourseLocationRemove(${id})">Remove</button></div></div></details>`;
 }
 function gdAdminCourseDbBadge(label,tone=""){
   return `<span class="gdAdminCourseBadge ${gdEscapeHTML(tone)}">${gdEscapeHTML(label)}</span>`;
@@ -473,6 +473,24 @@ function gdAdminCourseLocationViewport(courseId){
     payload.lng=Number(centre.lng);
   }
   if(window.GDStudioMapViewport&&typeof window.GDStudioMapViewport.open==="function")return window.GDStudioMapViewport.open(payload);
+  return false;
+}
+
+/* Draw the fairways OSM is missing for this course. Same course payload as the viewport, a
+   different page: this one writes the overlay row and nothing else. */
+function gdAdminCourseLocationOverlay(courseId){
+  const course=gdAdminCourseLocationSelected(courseId);
+  if(!course)return false;
+  const owner=window.GDCourseLocation;
+  const resolved=owner&&typeof owner.resolve==="function"?owner.resolve(course,{requireConfirmed:false}):null;
+  const centre=resolved&&resolved.centre;
+  const payload=Object.assign({},course);
+  if(centre&&Number.isFinite(Number(centre.lat))&&Number.isFinite(Number(centre.lng))){
+    payload.lat=Number(centre.lat);
+    payload.lng=Number(centre.lng);
+  }
+  if(window.GDStudioMapOverlay&&typeof window.GDStudioMapOverlay.open==="function")return window.GDStudioMapOverlay.open(payload);
+  gdAdminCourseVisualToast("Mapping Overlay is not loaded on this surface");
   return false;
 }
 function gdAdminCourseLocationRemove(courseId){
@@ -4719,6 +4737,7 @@ window.gdAdminCourseDbShowDebug=gdAdminCourseDbShowDebug;
 window.gdAdminCourseDbShowWatchMaps=gdAdminCourseDbShowWatchMaps;
 window.gdAdminCourseLocationEdit=gdAdminCourseLocationEdit;
 window.gdAdminCourseLocationViewport=gdAdminCourseLocationViewport;
+window.gdAdminCourseLocationOverlay=gdAdminCourseLocationOverlay;
 window.gdAdminCourseLocationRemove=gdAdminCourseLocationRemove;
 window.gdAdminCourseDebugRefresh=gdAdminCourseDebugRefresh;
 window.gdAdminCourseVisualOpenRecipeTool=gdAdminCourseVisualOpenRecipeTool;
