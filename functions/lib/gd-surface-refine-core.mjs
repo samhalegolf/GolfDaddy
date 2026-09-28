@@ -190,6 +190,90 @@ export async function refineSurfaceShape({ image, playSurface, guideShape, mode 
   return { ok: true, shape: best.shape, ratio: best.ratio, confidence: best.confidence, area: best.area, guideArea, params };
 }
 
+/* A green from a pin: the Mapping Overlay's "drop a pin on the green, get its outline" tool.
+
+   There is no guide here - a person has clicked on a green and wants its edge - so the size
+   has to come from the wand itself. The tell is stability: once the wand's bubble has snapped
+   to a real edge, nudging the bubble size barely changes the ring, whereas a bubble with no
+   edge to find just grows with the bubble (its area goes as the bubble squared). So the sweep
+   runs from well under to a little over a typical green (~14m radius) and keeps the ring from
+   the pair of neighbouring bubble sizes whose areas agree best. Measured on synthetic greens
+   of 1,600-20,000px2 the plateau sits at ~0.6-0.75 of the painted area every time - the wand
+   traces an inset of the surface, as refineSurfaceShape's notes say. With no plateau at all
+   the ring closest to a typical green is used and flagged unstable.
+
+   Uncalibrated on real imagery like the rest of the wand: a first draft of the outline for a
+   person to drag into shape, never a finished green.
+
+   image: a picture sharp reads; playSurface: where it is (originPx / captureZoom /
+   outputDimensions); seed: the pin, {lat, lng}. Returns {ok, shape, confidence, area, params}
+   or {ok:false, reason}. */
+export const WAND_GREEN_RADIUS_M = 14;
+export const WAND_GREEN_SWEEP = [0.2, 0.3, 0.4, 0.55, 0.7, 0.85, 1, 1.2];
+export const WAND_GREEN_AREA_M2 = { min: 100, max: 2500 };
+/* Neighbouring rings whose areas differ by less than ~28% count as the same edge. */
+export const WAND_GREEN_STABLE_LOG = 0.25;
+export const WAND_GREEN_MAX_POINTS = 16;
+
+export async function wandGreenAtPoint({ image, playSurface, seed, radiusM = WAND_GREEN_RADIUS_M, sweep = WAND_GREEN_SWEEP, mode = "robustTonal", maxPoints = WAND_GREEN_MAX_POINTS }) {
+  const projector = frameProjector(playSurface);
+  if (!projector) return { ok: false, reason: "frame-has-no-projection" };
+  const lat = Number(seed && seed.lat), lng = Number(seed && seed.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { ok: false, reason: "no-seed" };
+  const seedPx = projector.toPx({ lat, lng });
+  if (seedPx.x < 0 || seedPx.y < 0 || seedPx.x > projector.width || seedPx.y > projector.height) return { ok: false, reason: "seed-outside-frame" };
+  const east = projector.toPx({ lat, lng: lng + 0.001 });
+  const metresPerPx = 0.001 * 111320 * Math.cos(lat * Math.PI / 180) / Math.max(1e-9, Math.abs(east.x - seedPx.x));
+  const radiusPx = radiusM / metresPerPx;
+  const nominalArea = Math.PI * radiusM * radiusM;
+  /* Room for the biggest green the area bound allows, slid back inside the frame when the pin
+     is near an edge - the seed moves with it, so it still marks the pin. */
+  const maxRadiusPx = Math.sqrt(WAND_GREEN_AREA_M2.max / Math.PI) / metresPerPx;
+  const span = Math.round(clamp(maxRadiusPx * 2 * 1.6, REFINE_CROP_MIN_PX, Math.min(projector.width, projector.height)));
+  const left = Math.round(clamp(seedPx.x - span / 2, 0, projector.width - span));
+  const top = Math.round(clamp(seedPx.y - span / 2, 0, projector.height - span));
+  const crop = await sharp(image).extract({ left, top, width: span, height: span }).png().toBuffer();
+  const cropSeed = { x: seedPx.x - left, y: seedPx.y - top };
+
+  /* One slot per sweep step, in order, so neighbours stay neighbours; a ring outside the
+     believable green size leaves its slot empty. */
+  const rings = [];
+  for (const multiplier of sweep) {
+    const baseBubbleSize = Math.round(radiusPx * BUBBLE_PER_GUIDE_RADIUS_PX * multiplier);
+    let slot = null;
+    if (baseBubbleSize > 0) {
+      const out = await detect({ image: crop, imageWidth: span, imageHeight: span, candidateCentrePx: cropSeed, mode, baseBubbleSize });
+      const ring = (out.polygonPixels || []).map(p => projector.toLatLng({ x: left + p.x, y: top + p.y }));
+      const shape = ring.length >= 3 ? resampleRing(ring, maxPoints) : null;
+      const area = shape ? polygonAreaM2(shape) : 0;
+      if (area >= WAND_GREEN_AREA_M2.min && area <= WAND_GREEN_AREA_M2.max) {
+        slot = { shape, area, confidence: Number(out.confidence) || 0, baseBubbleSize, multiplier };
+      }
+    }
+    rings.push(slot);
+  }
+
+  let best = null, bestSpread = Infinity;
+  for (let i = 1; i < rings.length; i++) {
+    const a = rings[i - 1], b = rings[i];
+    if (!a || !b) continue;
+    const spread = Math.abs(Math.log(b.area / a.area));
+    if (spread < bestSpread - 1e-9) { bestSpread = spread; best = b; }
+  }
+  const stable = !!best && bestSpread <= WAND_GREEN_STABLE_LOG;
+  if (!stable) {
+    best = null;
+    rings.forEach(r => {
+      if (r && (!best || Math.abs(Math.log(r.area / nominalArea)) < Math.abs(Math.log(best.area / nominalArea)))) best = r;
+    });
+  }
+  if (!best) return { ok: false, reason: "no-green-sized-edge" };
+  return {
+    ok: true, shape: best.shape, confidence: best.confidence, area: best.area, stable,
+    params: { baseBubbleSize: best.baseBubbleSize, multiplier: best.multiplier, mode, cropSpanPx: span, metresPerPx, spread: Number.isFinite(bestSpread) ? bestSpread : null }
+  };
+}
+
 /* What a refined surface records about itself. The OSM id stays - it is what pointed us at the
    feature - but shapeSource says plainly that the geometry is no longer OSM's, which is what
    stops a later Collect Extra Objects run writing the OSM ring back over it (see

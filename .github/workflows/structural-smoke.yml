@@ -115,6 +115,7 @@ jobs:
           node dev/ai-scan-core.test.js
           node dev/course-map-ai-scan.test.js
           node dev/studio-map-overlay.test.js
+          node dev/map-overlay-shapes.test.js
           node dev/green-shape-core-smoke.test.js
           node dev/course-package.test.js
           node dev/course-package-trigger.test.js

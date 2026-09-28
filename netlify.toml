@@ -113,6 +113,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/course-map-wand"
+  to = "/.netlify/functions/course-map-wand"
+  status = 200
+
+[[redirects]]
   from = "/api/course-library"
   to = "/.netlify/functions/course-library"
   status = 200

@@ -207,12 +207,18 @@
 #gdStudioShellRoot .gdStudioWarnText { color: var(--gdStudioWarn); }
 
 /* ---- Mapping Overlay ----
-   Same viewport chrome as Map Viewport, plus the drawing affordances: a crosshair so the map
-   reads as a canvas, an active-tool state on the pill buttons, permanent hole labels on the
-   shapes, and a compact table of what has been drawn. */
-#gdStudioShellRoot .gdStudioOverlayMap { cursor: crosshair; }
+   Same viewport chrome as Map Viewport, plus the placing affordances: a crosshair while a
+   placing tool is armed, a grab hand over shapes in Move, drag handles, an instruction chip
+   over the map, and the bin a shape is dropped on to delete it. */
+#gdStudioShellRoot .gdStudioOverlayStage { position: relative; }
+#gdStudioShellRoot .gdStudioOverlayStage .gdStudioOverlayMap { cursor: crosshair; }
+#gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayMap { cursor: default; }
+#gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayShape { cursor: grab; }
+#gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayShape:active { cursor: grabbing; }
+#gdStudioShellRoot .gdStudioOverlayStage .gdStudioOverlayHandle { cursor: move; }
+#gdStudioShellRoot .gdStudioOverlayStage:not(.isTool-move) .gdStudioOverlayShape { cursor: crosshair; }
 #gdStudioShellRoot .gdStudioDiagramBtn.isActive { color: var(--gdStudioAccent); border-color: var(--gdStudioAccent); background: rgba(60, 255, 141, 0.12); }
-#gdStudioShellRoot .gdStudioOverlayHole {
+#gdStudioShellRoot .gdStudioOverlayWidth {
   width: 56px;
   background: var(--gdStudioPanelAlt);
   color: var(--gdStudioText);
@@ -221,11 +227,45 @@
   padding: 5px 6px;
   font-size: 12px;
 }
-#gdStudioShellRoot .gdStudioOverlayList { margin-top: 12px; }
-#gdStudioShellRoot .gdStudioOverlayTable { border-collapse: collapse; font-size: 12.5px; width: 100%; max-width: 560px; }
-#gdStudioShellRoot .gdStudioOverlayTable th { text-align: left; font-weight: 600; color: var(--gdStudioMuted); padding: 4px 8px; border-bottom: 1px solid var(--gdStudioBorder); }
-#gdStudioShellRoot .gdStudioOverlayTable td { padding: 4px 8px; border-bottom: 1px solid var(--gdStudioBorder); cursor: pointer; }
-#gdStudioShellRoot .gdStudioOverlayTable tr.isSelected td { background: rgba(60, 255, 141, 0.08); }
+#gdStudioShellRoot .gdStudioOverlayHint {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 800;
+  max-width: calc(100% - 120px);
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(5, 10, 7, 0.8);
+  color: var(--gdStudioText);
+  font-size: 12px;
+  text-align: center;
+  pointer-events: none;
+}
+#gdStudioShellRoot .gdStudioOverlayHint:empty { display: none; }
+#gdStudioShellRoot .gdStudioOverlayBin {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 800;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px dashed rgba(231, 243, 236, 0.35);
+  background: rgba(5, 10, 7, 0.78);
+  color: var(--gdStudioMuted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+#gdStudioShellRoot .gdStudioOverlayBin[hidden] { display: none; }
+#gdStudioShellRoot .gdStudioOverlayBin.hasSelection { color: var(--gdStudioText); }
+#gdStudioShellRoot .gdStudioOverlayBin.isArmed { color: var(--gdStudioWarn); border-color: var(--gdStudioWarn); transform: scale(1.08); }
+#gdStudioShellRoot .gdStudioOverlayBin.isHot { color: #fff; background: rgba(214, 64, 64, 0.9); border-style: solid; border-color: #ff8a8a; transform: scale(1.2); }
 .leaflet-tooltip.gdStudioOverlayLabel {
   background: rgba(5, 10, 7, 0.75);
   color: #3cff8d;

@@ -295,11 +295,14 @@
 
     {
       id: "map-overlay", label: "Mapping Overlay", parent: "courses",
-      function: "Draws the fairway polygons, tee-to-green hole lines and greens OSM does not have, so the mapper can resolve a course whose OSM data is greens and nothing else (Royal Belfast: 11 greens, 0 fairways, 0 hole lines). Saves one thing - the course's overlay row - which the mapper worker merges into the Overpass payload as ordinary golf=fairway / golf=hole / golf=green ways before it resolves. Nothing on the course changes until a mapper run is requested. Temporary by design: delete the overlay once OSM carries the real shapes.",
+      function: "Places the fairways, greens and tees OSM does not have, by eye: a line laid down a fairway becomes a fairway polygon with draggable corners plus a tee 20m behind it, a pin on a green becomes its outline through the green wand, and a click drops a tee. Shapes drag, reshape and go in the bin; every change autosaves. So the mapper can resolve a course whose OSM data is greens and nothing else (Royal Belfast: 11 greens, 0 fairways, 0 hole lines). Saves one thing - the course's overlay row - which the mapper worker merges into the Overpass payload as ordinary golf=fairway / golf=hole / golf=green ways before it resolves. Nothing on the course changes until a mapper run is requested. Temporary by design: delete the overlay once OSM carries the real shapes.",
       owner: "scripts/studio/courses/map-overlay/map-overlay-page.js",
       runtime: { app: false, studio: true, server: true },
       code: [
         { role: "Page (owner)", path: "scripts/studio/courses/map-overlay/map-overlay-page.js" },
+        { role: "Shape builders — fairway around a laid line, tee behind it, default round green (pure, browser + node)", path: "scripts/studio/courses/map-overlay/map-overlay-shapes.js" },
+        { role: "Green wand from a pin — admin-verified, answers with an outline, writes nothing", path: "functions/course-map-wand.mjs" },
+        { role: "wandGreenAtPoint — runs the Green Wand around the pin and keeps the most stable ring", path: "functions/lib/gd-surface-refine-core.mjs" },
         { role: "Overlay API — admin-verified read/write of course_map_overlays, plus what OSM has here", path: "functions/course-map-overlay.mjs" },
         { role: "Overlay → OSM elements, merge into the payload (pure)", path: "functions/lib/gd-map-overlay-core.mjs" },
         { role: "Image pixels → lat/lng for AI-read shapes (playSurface, centre+zoom or bounds georeference)", path: "functions/lib/gd-overlay-georef-core.mjs" },
@@ -312,7 +315,7 @@
         { role: "Course selection (shared pick-only hand-off)", path: "scripts/studio/gd-studio-course-pick.js" },
         { role: "Provider list + layer building (window.GDMapSources, do not copy)", path: "scripts/gd-app-core.js" }
       ],
-      inputs: ["Course selection from the real picker or Course Database", "OSM greens/fairways/tees/hole lines near the course, from the mapper's own query", "Shapes drawn over live imagery", "Shapes an AI read off a satellite image, in that image's pixels, with its georeference (POST with georef)", "The current map view captured tile-by-tile for the AI scan (Scan this view with AI)"],
+      inputs: ["Course selection from the real picker or Course Database", "OSM greens/fairways/tees/hole lines near the course, from the mapper's own query", "Fairway lines, green pins and tee clicks placed over live imagery, then dragged into shape", "A few tiles around a green pin, captured for the wand", "Shapes an AI read off a satellite image, in that image's pixels, with its georeference (POST with georef)", "The current map view captured tile-by-tile for the AI scan (Scan this view with AI)"],
       outputs: ["course_map_overlays row for the course (features, and ai_scan while a scan runs)", "A mapper run request (kind: remap) through /api/course-mapper-jobs"],
       owns: ["The overlay editor UI", "The overlay feature shape ({id, kind, hole, points})"],
       doesNotOwn: [
@@ -328,12 +331,13 @@
       ],
       keyFunctions: [
         { name: "GET/POST /api/course-map-overlay", purpose: "Read or save a course's overlay; ?osm=1 also returns OSM's golf features for the ground so fairways are drawn against the greens the resolver will link them to.", codePath: "functions/course-map-overlay.mjs" },
+        { name: "POST /api/course-map-wand", purpose: "A pin on a green plus a small picture around it -> a first-draft green outline from the Green Wand. The page adds it as a green (source: wand) and autosaves; a pin the wand cannot read gets a round default.", codePath: "functions/course-map-wand.mjs" },
         { name: "mergeOverlayIntoPayload", purpose: "Overlay features -> golf=fairway / golf=hole / golf=green ways with negative ids, appended to the payload. Empty overlay returns the payload untouched.", codePath: "functions/lib/gd-map-overlay-core.mjs" },
         { name: "POST /api/course-map-ai-scan", purpose: "Queue an AI scan of a captured view: the picture and its georef go on the overlay row, the background function runs Claude Opus 5.5 with the scorecard as context, and the answer is saved as overlay shapes (source: ai). Studio polls GET /api/course-map-overlay's aiScan for the outcome.", codePath: "functions/course-map-ai-scan.mjs" },
         { name: "fetchCoursePayload", purpose: "Every Overpass fetch in a mapper job goes through it, so the overlay is in the first query, the footprint requery, the widened frames and the hole-gap boxes alike.", codePath: "functions/course-mapper-worker-background.mjs" }
       ],
       status: "implemented", needsVerification: false,
-      warnings: ["The AI scan captures whatever provider is mounted. Esri World Imagery is licensed for DISPLAY; sending a captured view to a model for analysis is a use the licence does not obviously cover - check the ArcGIS Location Platform terms before scanning over it, or scan over an open regional source where one exists.", "A fairway must end within ~230m of a green the resolver accepts, and span at least 60m along its long axis, or it produces no centre-line (GREEN_FAIRWAY_LINK_MAX_M / fairwayMajorAxis in gd-geometry-resolver-core.mjs). Numbering still comes from the scorecard unless hole lines carry numbers."]
+      warnings: ["The AI scan and the green wand capture whatever provider is mounted. Esri World Imagery is licensed for DISPLAY; sending a captured view to a model for analysis is a use the licence does not obviously cover - check the ArcGIS Location Platform terms before scanning over it, or scan over an open regional source where one exists.", "A fairway must end within ~230m of a green the resolver accepts, and span at least 60m along its long axis, or it produces no centre-line (GREEN_FAIRWAY_LINK_MAX_M / fairwayMajorAxis in gd-geometry-resolver-core.mjs). Numbering still comes from the scorecard unless hole lines carry numbers."]
     },
     {
       id: "course-visuals", label: "Course Visuals", parent: "courses",
