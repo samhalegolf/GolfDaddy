@@ -41,6 +41,9 @@
        and GDI18n.htmlN("key", n, vars) are t()/tn() escaped for innerHTML -
        the translation AND the values filled into it. Such panels redraw
        themselves from onChange().
+     - Language picker: any <select data-i18n-language-picker> on the page is
+       filled with "phone language" plus every language in its own name, and
+       choosing one saves it - bindPicker(select) does the same by hand.
 
    Browser global (window.GDI18n) and a node module, so tests run it for
    real. */
@@ -288,6 +291,28 @@
     return current;
   }
 
+  /* The one language picker, for every screen that offers one. The first
+     option follows the phone; the rest are each language in its own name, so
+     a player can find theirs whatever the app is currently showing. */
+  function bindPicker(select) {
+    if (!select || select.__gdLanguagePicker) return;
+    select.__gdLanguagePicker = true;
+    function fill() {
+      var options = [{ tag: "", name: t("gpsSettings.languageAuto") }].concat(api.languages());
+      select.innerHTML = "";
+      options.forEach(function (lang) {
+        var opt = root.document.createElement("option");
+        opt.value = lang.tag;
+        opt.textContent = lang.name;
+        select.appendChild(opt);
+      });
+      select.value = api.saved() || "";
+    }
+    fill();
+    listeners.push(fill);
+    select.addEventListener("change", function () { setLocale(select.value || null); });
+  }
+
   var api = {
     t: t,
     tn: tn,
@@ -295,6 +320,7 @@
     setPlural: setPlural,
     setAttr: setAttr,
     plain: plain,
+    bindPicker: bindPicker,
     html: function (key, vars) { return escapeHtml(t(key, vars)); },
     htmlN: function (key, n, vars) { return escapeHtml(tn(key, n, vars)); },
     add: add,
@@ -316,6 +342,10 @@
 
   load(locale());
   if (root.document && root.document.addEventListener) {
-    root.document.addEventListener("DOMContentLoaded", function () { apply(); });
+    root.document.addEventListener("DOMContentLoaded", function () {
+      apply();
+      var pickers = root.document.querySelectorAll("select[data-i18n-language-picker]");
+      for (var i = 0; i < pickers.length; i++) bindPicker(pickers[i]);
+    });
   }
 })(typeof window !== "undefined" ? window : globalThis);

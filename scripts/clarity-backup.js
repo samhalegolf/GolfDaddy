@@ -5,6 +5,15 @@
   var DANGEROUS_KEYS = /token|secret|password/i;
   var statusTimer = null;
 
+  function L(key, vars){return window.GDI18n.t(key, vars);}
+  function H(key, vars){return window.GDI18n.html(key, vars);}
+  function LN(key, n, vars){return window.GDI18n.tn(key, n, vars);}
+  function esc(text){
+    return String(text).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+
   function safe(fn, fallback){
     try{return fn();}catch(e){return fallback;}
   }
@@ -84,12 +93,12 @@
     a.click();
     a.remove();
     setTimeout(function(){URL.revokeObjectURL(url);}, 1000);
-    setStatus("Backup exported: " + Object.keys(backup.localStorage).length + " local keys.", "good");
+    setStatus(LN("backup.exported", Object.keys(backup.localStorage).length), "good");
   }
 
   function validateBackup(data){
-    if(!data || data.format !== BACKUP_FORMAT) throw new Error("This is not a Clarity backup file.");
-    if(!data.localStorage || typeof data.localStorage !== "object") throw new Error("Backup has no localStorage data.");
+    if(!data || data.format !== BACKUP_FORMAT) throw new Error(L("backup.notBackupFile"));
+    if(!data.localStorage || typeof data.localStorage !== "object") throw new Error(L("backup.noData"));
     return data;
   }
 
@@ -119,7 +128,7 @@
     }
     writeStorage(window.localStorage, data.localStorage);
     writeStorage(window.sessionStorage, data.sessionStorage);
-    setStatus("Backup imported. Reloading app...", "good");
+    setStatus(L("backup.imported"), "good");
     setTimeout(function(){
       location.href = location.pathname + "?v=backup-restore-" + Date.now();
     }, 800);
@@ -137,24 +146,24 @@
         // showing anything, which made importing a backup impossible there.
         var ask = typeof window.gdConfirmDialog === "function"
           ? window.gdConfirmDialog({
-              title: "Import " + keys + " Clarity keys?",
-              message: "From " + (data.exportedAt || "backup") + ". " + (replace ? "Replaces existing keys." : "Merges with existing keys."),
-              confirmLabel: "Import"
+              title: LN("backup.importTitle", keys),
+              message: L(replace ? "backup.fromReplace" : "backup.fromMerge", {date: data.exportedAt || L("backup.unknownSource")}),
+              confirmLabel: L("backup.importButton")
             })
-          : Promise.resolve(window.confirm("Import " + keys + " Clarity keys from " + (data.exportedAt || "backup") + "?"));
+          : Promise.resolve(window.confirm(LN("backup.importConfirm", keys, {date: data.exportedAt || L("backup.unknownSource")})));
         ask.then(function(ok){
-          if(!ok) return setStatus("Import cancelled.", "warn");
+          if(!ok) return setStatus(L("backup.cancelled"), "warn");
           try{
             importBackup(data, {replace: replace});
           }catch(error){
-            setStatus(error && error.message ? error.message : "Import failed.", "bad");
+            setStatus(error && error.message ? error.message : L("backup.failed"), "bad");
           }
         });
       }catch(error){
-        setStatus(error && error.message ? error.message : "Import failed.", "bad");
+        setStatus(error && error.message ? error.message : L("backup.failed"), "bad");
       }
     };
-    reader.onerror = function(){setStatus("Could not read backup file.", "bad");};
+    reader.onerror = function(){setStatus(L("backup.couldNotRead"), "bad");};
     reader.readAsText(file);
   }
 
@@ -178,7 +187,11 @@
 
   function summaryText(){
     var stats = storageStats();
-    return stats.accounts + " local accounts, " + stats.profiles + " profiles, " + stats.localKeys + " local keys.";
+    return L("backup.summary", {
+      accounts: LN("backup.localAccounts", stats.accounts),
+      profiles: LN("backup.profiles", stats.profiles),
+      keys: LN("backup.localKeys", stats.localKeys)
+    });
   }
 
   function renderCard(){
@@ -219,11 +232,12 @@
     overlay.className = "clarityBackupOverlay";
     overlay.innerHTML = [
       '<div class="clarityBackupSheet" role="dialog" aria-modal="true" aria-labelledby="clarityBackupOverlayTitle">',
-      '<div class="clarityBackupHead"><strong id="clarityBackupOverlayTitle">Data Safety</strong><button class="clarityBackupClose" type="button" aria-label="Close backup">x</button></div>',
+      '<div class="clarityBackupHead"><strong id="clarityBackupOverlayTitle" data-i18n="backup.dataSafety">Data Safety</strong><button class="clarityBackupClose" type="button" aria-label="Close backup" data-i18n-aria-label="backup.closeAria">x</button></div>',
       '<div class="clarityBackupCard" id="clarityBackupOverlayCard"></div>',
       '</div>'
     ].join("");
     document.body.append(overlay);
+    window.GDI18n.apply(overlay);
     overlay.querySelector(".clarityBackupClose").addEventListener("click", closeOverlay);
     overlay.addEventListener("click", function(event){if(event.target === overlay) closeOverlay();});
   }
@@ -231,19 +245,19 @@
   function overlayMarkup(){
     var stats = storageStats();
     return [
-      "<h3>Browser Backup</h3>",
-      "<p>Export or restore this browser's Clarity data before cloud sync changes. Backups include local profiles, linked coach/player accounts, course mapping, shot data, practice data, and app settings.</p>",
+      "<h3>" + H("backup.browserBackup") + "</h3>",
+      "<p>" + H("backup.intro") + "</p>",
       '<div class="clarityBackupStats">',
-      '<div class="clarityBackupStat"><strong>' + stats.accounts + '</strong><span>Accounts</span></div>',
-      '<div class="clarityBackupStat"><strong>' + stats.profiles + '</strong><span>Profiles</span></div>',
-      '<div class="clarityBackupStat"><strong>' + stats.localKeys + '</strong><span>Local keys</span></div>',
+      '<div class="clarityBackupStat"><strong>' + stats.accounts + '</strong><span>' + H("backup.accounts") + '</span></div>',
+      '<div class="clarityBackupStat"><strong>' + stats.profiles + '</strong><span>' + H("backup.profilesLabel") + '</span></div>',
+      '<div class="clarityBackupStat"><strong>' + stats.localKeys + '</strong><span>' + H("backup.localKeysLabel") + '</span></div>',
       "</div>",
-      '<label class="clarityBackupOption"><input id="clarityBackupReplaceOverlay" type="checkbox" checked><span>Replace existing Clarity browser keys before import. Leave checked for a full restore.</span></label>',
+      '<label class="clarityBackupOption"><input id="clarityBackupReplaceOverlay" type="checkbox" checked><span>' + H("backup.replaceOption") + '</span></label>',
       '<div class="clarityBackupActions">',
-      '<button type="button" class="primary" id="clarityBackupExportOverlayBtn">Export Backup</button>',
-      '<label class="clarityBackupFileLabel">Import Backup<input id="clarityBackupImportOverlayInput" type="file" accept="application/json,.json"></label>',
+      '<button type="button" class="primary" id="clarityBackupExportOverlayBtn">' + H("backup.exportButton") + '</button>',
+      '<label class="clarityBackupFileLabel">' + H("backup.importBackup") + '<input id="clarityBackupImportOverlayInput" type="file" accept="application/json,.json"></label>',
       "</div>",
-      '<div class="clarityBackupStatus" id="clarityBackupOverlayStatus">' + summaryText() + "</div>"
+      '<div class="clarityBackupStatus" id="clarityBackupOverlayStatus">' + esc(summaryText()) + "</div>"
     ].join("");
   }
 
@@ -289,6 +303,10 @@
   if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
   setInterval(boot, 1000);
+  window.GDI18n.onChange(function(){
+    var overlay = document.getElementById("clarityBackupOverlay");
+    if(overlay && overlay.classList.contains("open")) openOverlay();
+  });
   window.ClarityBackup = {
     buildBackup: buildBackup,
     export: downloadBackup,

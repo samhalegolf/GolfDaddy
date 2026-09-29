@@ -3,6 +3,8 @@
 
   var activeSection = "menu";
 
+  function L(key, vars) { return window.GDI18n.t(key, vars); }
+
   function safe(fn, fallback) {
     try {
       return fn();
@@ -38,6 +40,13 @@
     }, activeAccount && activeAccount.role || "Player");
   }
 
+  var ROLE_KEYS = { Admin: "account.roleAdmin", Coach: "account.roleCoach", "Subscribed Player": "settings.roleSubscribedPlayer", Player: "account.rolePlayer" };
+
+  function roleText(activeAccount) {
+    var role = publicRole(activeAccount);
+    return ROLE_KEYS[role] ? L(ROLE_KEYS[role]) : role;
+  }
+
   function isStaff(activeAccount) {
     return safe(function () {
       if (window.gdAccountIsStaff) return window.gdAccountIsStaff(activeAccount);
@@ -46,16 +55,31 @@
     }, false);
   }
 
+  /* The words only - render() also resets the form fields, which a language
+     switch must not do to a half-typed edit. */
+  function renderText(activeAccount) {
+    var sub = document.getElementById("gdPlayerSettingsSub");
+    var line = document.getElementById("gdPlayerSettingsProfileLine");
+    var accountLine = document.getElementById("gdPlayerSettingsAccountLine");
+    var coachLine = document.getElementById("gdPlayerSettingsCoachLine");
+    var password = document.getElementById("gdPlayerSettingsPassword");
+    if (sub) sub.textContent = activeAccount ? L("settings.nameRole", { name: activeAccount.name || L("settings.accountFallback"), role: roleText(activeAccount) }) : L("settings.accountAndProfile");
+    if (line) line.textContent = activeAccount && activeAccount.requiresPasswordSetup ? L("settings.setOwnPassword") : activeAccount ? (activeAccount.email || activeAccount.name ? L("settings.signedInAs", { who: activeAccount.email || activeAccount.name }) : L("settings.signedInAsThisAccount")) : L("settings.signInToEdit");
+    if (accountLine) accountLine.textContent = activeAccount ? L("settings.nameRole", { name: activeAccount.email || activeAccount.name || L("settings.signedIn"), role: roleText(activeAccount) }) : L("settings.signInToManage");
+    if (coachLine) {
+      var coachId = Array.isArray(activeAccount && activeAccount.linkedCoachIds) ? activeAccount.linkedCoachIds[0] : "";
+      var coach = coachId && window.gdAccountById ? window.gdAccountById(coachId) : null;
+      coachLine.textContent = coach ? L("settings.connectedTo", { name: coach.name || coach.email || L("account.roleCoach") }) : L("settings.enterCoachCode");
+    }
+    if (password) password.placeholder = activeAccount && activeAccount.requiresPasswordSetup ? L("settings.chooseOwnPassword") : L("settings.newPassword");
+  }
+
   function render() {
     var activeAccount = account();
     var activeProfile = profile(activeAccount);
     var name = document.getElementById("gdPlayerSettingsName");
     var email = document.getElementById("gdPlayerSettingsEmail");
     var password = document.getElementById("gdPlayerSettingsPassword");
-    var sub = document.getElementById("gdPlayerSettingsSub");
-    var line = document.getElementById("gdPlayerSettingsProfileLine");
-    var accountLine = document.getElementById("gdPlayerSettingsAccountLine");
-    var coachLine = document.getElementById("gdPlayerSettingsCoachLine");
     var connectRow = document.getElementById("gdPlayerSettingsConnectRow");
     var photoImg = document.getElementById("gdPlayerSettingsPhotoPreviewImg");
     var photoPreview = document.querySelector(".gdPlayerSettingsPhotoPreview");
@@ -64,16 +88,8 @@
     if (name) name.value = activeAccount && activeAccount.name || activeProfile && activeProfile.name || "";
     if (email) email.value = activeAccount && activeAccount.email || activeProfile && activeProfile.email || "";
     if (password) password.value = "";
-    if (sub) sub.textContent = activeAccount ? (activeAccount.name || "Account") + " · " + publicRole(activeAccount) : "Account and profile";
-    if (line) line.textContent = activeAccount && activeAccount.requiresPasswordSetup ? "Set your own password before continuing." : activeAccount ? "Signed in as " + (activeAccount.email || activeAccount.name || "this account") : "Sign in to edit settings";
-    if (accountLine) accountLine.textContent = activeAccount ? (activeAccount.email || activeAccount.name || "Signed in") + " · " + publicRole(activeAccount) : "Sign in to manage your account";
+    renderText(activeAccount);
     if (connectRow) connectRow.hidden = !activeAccount || isStaff(activeAccount);
-    if (coachLine) {
-      var coachId = Array.isArray(activeAccount && activeAccount.linkedCoachIds) ? activeAccount.linkedCoachIds[0] : "";
-      var coach = coachId && window.gdAccountById ? window.gdAccountById(coachId) : null;
-      coachLine.textContent = coach ? "Connected to " + (coach.name || coach.email || "Coach") : "Enter the code from your coach.";
-    }
-    if (password) password.placeholder = activeAccount && activeAccount.requiresPasswordSetup ? "Choose your own password" : "New password";
     if (photoImg) photoImg.src = photo || "assets/home/profile.png?v=040483c4";
     if (photoPreview) photoPreview.classList.toggle("hasPhoto", !!photo);
 
@@ -124,9 +140,6 @@
     safe(function () { window.GDShell?.openModule?.("playerSettings", { source: "player-settings", fromGps: returnToGps, fromProfile: returnToProfile }); });
     safe(function () { document.body.classList.remove("gps-open", "manual-gps-active", "gdProfileOpen"); });
     safe(function () { if (typeof window.hideGpsSurface === "function") window.hideGpsSurface(); });
-    safe(function () { if (typeof window.showShellChrome === "function") window.showShellChrome(true); });
-    safe(function () { if (typeof window.setShellLayer === "function") window.setShellLayer("module"); });
-    safe(function () { if (typeof window.setDockActive === "function") window.setDockActive(""); });
     safe(function () { if (typeof window.setRouteLabel === "function") window.setRouteLabel("Settings"); });
     safe(function () {
       window.__gdBackTarget = returnToProfile ? "profile" : returnToGps ? "gps" : "home";
@@ -169,10 +182,10 @@
   function save() {
     var api = window.GolfDaddyAccounts;
     try {
-      if (!api || typeof api.update !== "function") throw new Error("Account system not ready");
+      if (!api || typeof api.update !== "function") throw new Error(L("account.notReady"));
       var activeAccount = account();
       var passwordValue = document.getElementById("gdPlayerSettingsPassword") && document.getElementById("gdPlayerSettingsPassword").value || "";
-      if (activeAccount && activeAccount.requiresPasswordSetup && !String(passwordValue).trim()) throw new Error("Choose your own password");
+      if (activeAccount && activeAccount.requiresPasswordSetup && !String(passwordValue).trim()) throw new Error(L("settings.chooseOwnPassword"));
       api.update({
         name: document.getElementById("gdPlayerSettingsName") && document.getElementById("gdPlayerSettingsName").value,
         email: document.getElementById("gdPlayerSettingsEmail") && document.getElementById("gdPlayerSettingsEmail").value,
@@ -183,9 +196,9 @@
       safe(function () { if (typeof window.renderProfilePanel === "function") window.renderProfilePanel(); });
       safe(function () { if (typeof window.updateProfileHomeUI === "function") window.updateProfileHomeUI(); });
       safe(function () { if (window.ClaritySession) window.ClaritySession.sync("settings-save"); });
-      safe(function () { return window.toast && window.toast("Settings saved"); });
+      safe(function () { return window.toast && window.toast(L("account.settingsSaved")); });
     } catch (error) {
-      safe(function () { return window.toast && window.toast(error && error.message ? error.message : "Could not save settings"); });
+      safe(function () { return window.toast && window.toast(error && error.message ? error.message : L("settings.couldNotSave")); });
     }
   }
 
@@ -199,14 +212,14 @@
   function connectCoach() {
     var api = window.GolfDaddyAccounts;
     try {
-      if (!api || typeof api.connectCoachByCode !== "function") throw new Error("Coach connection is not ready");
+      if (!api || typeof api.connectCoachByCode !== "function") throw new Error(L("settings.coachNotReady"));
       var coach = api.connectCoachByCode(document.getElementById("gdPlayerSettingsCoachCode") && document.getElementById("gdPlayerSettingsCoachCode").value);
       var code = document.getElementById("gdPlayerSettingsCoachCode");
       if (code) code.value = "";
       render();
-      safe(function () { return window.toast && window.toast("Connected to " + (coach.name || "Coach")); });
+      safe(function () { return window.toast && window.toast(L("settings.connectedTo", { name: coach.name || L("account.roleCoach") })); });
     } catch (error) {
-      safe(function () { return window.toast && window.toast(error && error.message ? error.message : "Could not connect coach"); });
+      safe(function () { return window.toast && window.toast(error && error.message ? error.message : L("settings.couldNotConnectCoach")); });
     }
   }
 
@@ -216,9 +229,9 @@
         window.ClarityBackup.open();
         return false;
       }
-      throw new Error("Backup is not ready yet");
+      throw new Error(L("settings.backupNotReady"));
     } catch (error) {
-      safe(function () { return window.toast && window.toast(error && error.message ? error.message : "Could not open backup"); });
+      safe(function () { return window.toast && window.toast(error && error.message ? error.message : L("settings.couldNotOpenBackup")); });
     }
     return false;
   }
@@ -234,9 +247,9 @@
         btn.click();
         return false;
       }
-      throw new Error("Support is not ready yet");
+      throw new Error(L("settings.supportNotReady"));
     } catch (error) {
-      safe(function () { return window.toast && window.toast(error && error.message ? error.message : "Could not open support"); });
+      safe(function () { return window.toast && window.toast(error && error.message ? error.message : L("settings.couldNotOpenSupport")); });
     }
     return false;
   }
@@ -245,7 +258,7 @@
     var file = event && event.target && event.target.files && event.target.files[0];
     if (!file) return;
     if (!file.type || !file.type.startsWith("image/")) {
-      safe(function () { return window.toast && window.toast("Choose an image file"); });
+      safe(function () { return window.toast && window.toast(L("account.chooseImage")); });
       return;
     }
     var reader = new FileReader();
@@ -276,13 +289,13 @@
           }
           render();
           safe(function () { if (typeof window.renderProfilePanel === "function") window.renderProfilePanel(); });
-          safe(function () { return window.toast && window.toast("Profile photo saved"); });
+          safe(function () { return window.toast && window.toast(L("account.photoSaved")); });
         }
       };
-      img.onerror = function () { safe(function () { return window.toast && window.toast("Could not read photo"); }); };
+      img.onerror = function () { safe(function () { return window.toast && window.toast(L("account.couldNotReadPhoto")); }); };
       img.src = String(reader.result || "");
     };
-    reader.onerror = function () { safe(function () { return window.toast && window.toast("Could not open photo"); }); };
+    reader.onerror = function () { safe(function () { return window.toast && window.toast(L("account.couldNotOpenPhoto")); }); };
     reader.readAsDataURL(file);
   }
 
@@ -303,8 +316,8 @@
     document.querySelectorAll(".gdHomePlayerSettings").forEach(function (btn) {
       btn.classList.toggle("visible", !gps);
       btn.title = activeAccount
-        ? "Settings for " + (activeAccount.name || activeAccount.email || "account")
-        : "Access & Membership";
+        ? (activeAccount.name || activeAccount.email ? L("settings.settingsFor", { name: activeAccount.name || activeAccount.email }) : L("settings.settingsForAccount"))
+        : L("pay.title");
     });
   }
 
@@ -312,6 +325,10 @@
   document.addEventListener("click", function () { setTimeout(refreshButton, 80); }, true);
   window.addEventListener("clarity:session-changed", refreshButton);
   window.addEventListener("clarity:route-changed", refreshButton);
+  window.GDI18n.onChange(function () {
+    refreshButton();
+    renderText(account());
+  });
 
   window.gdOpenPlayerSettingsPanel = open;
   window.gdPlayerSettingsShowSection = showSection;

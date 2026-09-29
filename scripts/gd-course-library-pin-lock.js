@@ -76,6 +76,18 @@
   }
   window.gdCancelMappedPlayAsync=cancelMappedPlayAsync;
 
+  function i18nT(key,vars){const i=window.GDI18n;return i?i.t(key,vars):key;}
+  function i18nN(key,n,vars){const i=window.GDI18n;return i?i.tn(key,n,vars):key;}
+  function i18nH(key,vars){return esc(i18nT(key,vars));}
+  function i18nSet(el,key,vars){const i=window.GDI18n;if(!el)return;if(i)i.set(el,key,vars);else el.textContent=key;}
+  function i18nPlain(el,text){const i=window.GDI18n;if(!el)return;if(i)i.plain(el,text);else el.textContent=text;}
+  /* showHint() in gd-app-core.js reads this exact English sentence as the signal to draw
+     its "set your position" pill, so it is passed through untouched when it will be. */
+  function standingHintText(){
+    const signal='Tap where you are standing';
+    try{if(typeof gdHintWantsMappedStartPill==='function'&&gdHintWantsMappedStartPill(signal))return signal;}catch(e){}
+    return i18nT('course.tapWhereStanding');
+  }
   function toastSafe(msg){try{if(typeof toast==='function')toast(msg);}catch(e){}}
   function hintSafe(msg){try{if(typeof showHint==='function')showHint(msg);}catch(e){}}
   function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -320,7 +332,7 @@
   function nowIso(){return new Date().toISOString();}
   function dateLabel(v){
     const d=new Date(v||Date.now());
-    return Number.isNaN(d.getTime())?'today':d.toLocaleDateString();
+    return Number.isNaN(d.getTime())?i18nT('course.today'):d.toLocaleDateString(window.GDI18n?window.GDI18n.locale():undefined);
   }
   function setMapperContext(value){
     window.gdMapperToolContext=value||'';
@@ -989,7 +1001,7 @@
         storePersistFailures++;
         lastStorePersistFailure={at:Date.now(),key,label:label||'',error:String(retryError&&retryError.message||retryError),name:retryError&&retryError.name||'',quota:true,evicted:evicted.length};
         try{console.warn(`[Clarity Caddy] device storage full - ${label||key} could not be saved even after evicting ${evicted.length} cache entries`,retryError);}catch(e){}
-        toastSafe('Device storage full - map save failed');
+        toastSafe(i18nT('course.storageFull'));
         return false;
       }
     }
@@ -2463,9 +2475,9 @@
       lastFrameAt:Date.now()
     };
     if(data.complete){
-      try{setState(`Hole ${data.hole}`);}catch(e){}
-      if(opts.promptStart)hintSafe('Tap where you are standing');
-      else if(!opts.quiet)hintSafe('Mapped hole ready');
+      try{setState(i18nT('common.hole',{n:data.hole}));}catch(e){}
+      if(opts.promptStart)hintSafe(standingHintText());
+      else if(!opts.quiet)hintSafe(i18nT('course.mappedHoleReady'));
       try{
         if(start&&!opts.promptStart&&!opts.skipAutoLock){
           scheduleMappedLockTask(lockRun,80,()=>maybeLockMappedHoleFromStart(start,'mapped-hole-frame',{allowAnyStart:!!opts.allowAnyStart,lockRun}));
@@ -2527,9 +2539,9 @@
     if(!drawSavedGreen(green,{quiet:true,applyTarget:true,frame:true,stablePreLock:true}))return false;
     mappedPlayAssist.locked=true;
     try{window.gdMappedGreenAutoLockedUntil=Date.now()+1600;}catch(e){}
-    try{setState(`Hole ${data.hole}`);}catch(e){}
+    try{setState(i18nT('common.hole',{n:data.hole}));}catch(e){}
     try{hideHint&&hideHint();}catch(e){}
-    toastSafe('Mapped hole locked');
+    toastSafe(i18nT('course.mappedHoleLocked'));
     return true;
   }
   function forceLockMappedGreenFromStart(ll,reason='gps-start',opts={}){
@@ -2750,7 +2762,7 @@
       if(shouldReplace&&typeof window.renderCourses==='function'){
         window.renderCourses([candidate]);
         const count=document.getElementById('countLine');
-        if(count)count.textContent='Search';
+        if(count)count.textContent=i18nT('course.search');
       }
     }catch(e){}
   }
@@ -2783,7 +2795,7 @@
     el=document.createElement('div');
     el.id='gdCourseConfirmOverlay';
     el.className='gdCourseConfirmOverlay hidden';
-    el.innerHTML=`<div class="gdCourseConfirmSheet"><div class="gdCourseConfirmHead"><div><h2>Playing at</h2><p>Confirm which course this round is saved under.</p></div><button class="gdSheetClose" type="button" onclick="gdCloseCourseConfirmation()">×</button></div><div id="gdCourseConfirmBody"></div></div>`;
+    el.innerHTML=`<div class="gdCourseConfirmSheet"><div class="gdCourseConfirmHead"><div><h2 data-i18n="course.playingAt">${i18nH('course.playingAt')}</h2><p data-i18n="course.confirmWhich">${i18nH('course.confirmWhich')}</p></div><button class="gdSheetClose" type="button" onclick="gdCloseCourseConfirmation()">×</button></div><div id="gdCourseConfirmBody"></div></div>`;
     el.addEventListener('click',ev=>{if(ev.target===el)gdCloseCourseConfirmation();});
     document.body.appendChild(el);
     return el;
@@ -2800,13 +2812,13 @@
       .slice(0,5)
       .map(course=>`<button class="gdCourseCandidate" type="button" data-course-name="${esc(course.courseName)}"><strong>${esc(course.courseName)}</strong><span>${esc(distanceLabel(course.distanceM))} · ${esc(savedDataLabel(course))}</span></button>`)
       .join('');
-    body.innerHTML=`<div class="gdCourseCurrent"><span>Playing now</span><strong>${esc(label)}</strong><small>${isUsefulCourseName(label)?'You chose this':'Guessed from your location'}</small></div>${rows?`<div class="gdCourseCandidateList"><p>Saved courses nearby</p>${rows}</div>`:`<div class="gdCourseCandidateEmpty">No saved courses nearby. Search by name if this is wrong.</div>`}<div class="gdCourseConfirmActions"><button type="button" id="gdKeepCourseGuessBtn">Keep this</button><button type="button" id="gdSearchCourseGuessBtn">Change course</button></div>`;
+    body.innerHTML=`<div class="gdCourseCurrent"><span>${i18nH('course.playingNow')}</span><strong>${esc(label)}</strong><small>${isUsefulCourseName(label)?i18nH('course.youChoseThis'):i18nH('course.guessedFromLocation')}</small></div>${rows?`<div class="gdCourseCandidateList"><p>${i18nH('course.savedNearby')}</p>${rows}</div>`:`<div class="gdCourseCandidateEmpty">${i18nH('course.noSavedNearby')}</div>`}<div class="gdCourseConfirmActions"><button type="button" id="gdKeepCourseGuessBtn">${i18nH('course.keepThis')}</button><button type="button" id="gdSearchCourseGuessBtn">${i18nH('course.changeCourse')}</button></div>`;
     body.querySelectorAll('[data-course-name]').forEach(btn=>{
       btn.onclick=function(ev){
         ev.preventDefault();
         setAssumedCourseName(btn.getAttribute('data-course-name')||'');
         gdCloseCourseConfirmation();
-        toastSafe('Course label updated');
+        toastSafe(i18nT('course.labelUpdated'));
       };
     });
     const keep=body.querySelector('#gdKeepCourseGuessBtn');
@@ -2815,6 +2827,7 @@
     if(search)search.onclick=function(ev){ev.preventDefault();window.gdSearchCourseForCurrentSession&&window.gdSearchCourseForCurrentSession();};
   }
   window.gdOpenCourseConfirmation=function(){
+    try{if(window.GDI18n&&!window.__gdCourseConfirmI18n){window.__gdCourseConfirmI18n=true;window.GDI18n.onChange(()=>{const o=document.getElementById('gdCourseConfirmOverlay');if(o&&!o.classList.contains('hidden'))renderCourseConfirmation();});}}catch(e){}
     ensureCourseConfirmationOverlay().classList.remove('hidden');
     renderCourseConfirmation();
     ensureAssumedCourseBadge();
@@ -2825,7 +2838,7 @@
   window.gdUseCourseForCurrentSession=function(name){
     setAssumedCourseName(name);
     gdCloseCourseConfirmation();
-    toastSafe('Course label updated');
+    toastSafe(i18nT('course.labelUpdated'));
   };
   window.gdSearchCourseForCurrentSession=function(){
     gdCloseCourseConfirmation();
@@ -2840,7 +2853,7 @@
         if(screen)screen.classList.remove('hidden');
         if(input){input.value=isUsefulCourseName(currentCourseStorageLabel())?currentCourseStorageLabel():'';input.focus();}
         syncCoursePickerAssumption();
-        toastSafe('Search or choose the course label');
+        toastSafe(i18nT('course.searchOrChooseLabel'));
       }catch(e){}
     },80);
   };
@@ -3608,7 +3621,7 @@
     el=document.createElement('div');
     el.id='gdCourseLoadingOverlay';
     el.className='gdCourseLoadingOverlay hidden';
-    el.innerHTML=`<div class="gdCourseLoadingSheet"><div class="gdCourseLoadingEyebrow">Clarity Caddy</div><strong id="gdCourseLoadingTitle">Loading course</strong><span id="gdCourseLoadingSub">Preparing Hole 1</span><div class="gdCourseLoadingTrack"><i id="gdCourseLoadingBar"></i></div></div>`;
+    el.innerHTML=`<div class="gdCourseLoadingSheet"><div class="gdCourseLoadingEyebrow">Clarity Caddy</div><strong id="gdCourseLoadingTitle">${i18nH('loading.course')}</strong><span id="gdCourseLoadingSub">${i18nH('course.preparingHole',{n:1})}</span><div class="gdCourseLoadingTrack"><i id="gdCourseLoadingBar"></i></div></div>`;
     const style=document.createElement('style');
     style.id='gdCourseLoadingOverlayStyles';
     style.textContent=`
@@ -3638,8 +3651,8 @@
     const title=el.querySelector('#gdCourseLoadingTitle');
     const sub=el.querySelector('#gdCourseLoadingSub');
     const bar=el.querySelector('#gdCourseLoadingBar');
-    if(title)title.textContent=courseName||'Loading course';
-    if(sub)sub.textContent=subText||'Preparing Hole 1';
+    if(title){if(courseName)i18nPlain(title,courseName);else i18nSet(title,'loading.course');}
+    if(sub){if(subText)i18nPlain(sub,subText);else i18nSet(sub,'course.preparingHole',{n:1});}
     /* A re-show over an overlay that is already up keeps its bar where it is;
        only a fresh show starts the bar over. */
     if(bar&&Number.isFinite(Number(pct)))bar.style.width=`${Math.max(8,Math.min(100,Number(pct)))}%`;
@@ -3652,7 +3665,7 @@
     const el=ensureCourseLoadingOverlay();
     const sub=el.querySelector('#gdCourseLoadingSub');
     const bar=el.querySelector('#gdCourseLoadingBar');
-    if(sub&&text)sub.textContent=text;
+    if(sub&&text)i18nPlain(sub,text);
     if(bar&&Number.isFinite(Number(pct)))bar.style.width=`${Math.max(8,Math.min(100,Number(pct)))}%`;
   }
   function hideCourseLoading(delay=180){
@@ -3724,8 +3737,8 @@
       el.classList.add('hidden');
       return false;
     }
-    el.textContent=`Play H${h}?`;
-    el.setAttribute('aria-label',`Play hole ${h}`);
+    el.textContent=i18nT('course.playHoleShort',{n:h});
+    el.setAttribute('aria-label',i18nT('course.playHoleAria',{n:h}));
     el.onclick=function(ev){
       ev.preventDefault();
       ev.stopPropagation();
@@ -3787,7 +3800,7 @@
   }
   function showCourseLoadingIfNeeded(course,hole=1){
     if(!course||isManualGpsCourse(course)||courseOpenAlreadySettled(course,hole)||courseOpenInFlight(course,hole))return null;
-    return showCourseLoading(course.name||course.courseName||'Loading course');
+    return showCourseLoading(course.name||course.courseName||i18nT('loading.course'));
   }
   const coursePlayResolverInFlight={};
   let interactiveGreenFallbackState=null;
@@ -4093,7 +4106,7 @@
 	    if(!keys.length)return {attempted:false,reason:'cloud-pull-unavailable'};
 	    recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'started',event:'course-map-cloud-lookup-started',summary:'Course map loading',details:{courseId:request.courseId,courseName:request.courseName,hole:request.hole,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken,keys,lookup:'published-course-maps'}});
 	    recordCoursePlayDebug('course-map-cloud-lookup-started',request.course,request.hole,{resolutionKey:request.resolutionKey,attemptToken:request.attemptToken,keys});
-	    updateCourseLoading('Course map loading',32);
+	    updateCourseLoading(i18nT('course.mapLoading'),32);
 	    try{
 	      const maps=await syncPublishedCourseMaps({quiet:true,throwOnError:true});
 	      const published=publishedCourses().find(course=>keys.some(key=>courseMatchesIdentity(course,key,request.courseName,request.course)))||null;
@@ -4308,7 +4321,7 @@
     try{if(typeof gdSuppressMapPlacementClick==='function')gdSuppressMapPlacementClick(900);}catch(e){}
     try{window.__gdManualStandingPlacementActiveUntil=0;}catch(e){}
     clearInteractiveGreenFallback('green-selected');
-    try{toastSafe('Green selected');}catch(e){}
+    try{toastSafe(i18nT('course.greenSelected'));}catch(e){}
     try{setMappedPlayMode('mapped',{skipFrame:true,silent:true,preserveAssist:true});}catch(e){}
     try{mode='start';}catch(e){}
     const playable=requestedHolePlayable(saved.course,h);
@@ -4317,8 +4330,8 @@
       setTimeout(()=>{try{if(typeof window.gdFocusMappedPreLockHole==='function')window.gdFocusMappedPreLockHole(h,{source:'interactive-green-fallback',preserveGpsSession:true,reenterGps:false,refreshGps:false});}catch(e){}},80);
       markCourseOpenReady(saved.course,h);
     }else{
-      try{setState('Green selected');}catch(e){}
-      try{showHint('Tap where you are standing');}catch(e){}
+      try{setState(i18nT('course.greenSelected'));}catch(e){}
+      try{showHint(standingHintText());}catch(e){}
     }
     return true;
   }
@@ -4343,7 +4356,7 @@
     el.type='button';
     el.id='gdServerMapReadyPrompt';
     el.className='gdServerMapReadyPrompt hidden';
-    el.textContent='Course map ready - tap to use it';
+    el.textContent=i18nT('course.mapReadyTap');
     document.body.appendChild(el);
     if(!document.getElementById('gdServerMapReadyPromptStyle')){
       const style=document.createElement('style');
@@ -4389,7 +4402,7 @@
     el=document.createElement('div');
     el.id='gdServerMapWaitPrompt';
     el.className='gdServerMapWaitPrompt hidden';
-    el.innerHTML='<strong data-gd-wait-title>Still preparing this course...</strong><span>First-time setup can take a little longer.</span><div class="gdServerMapWaitActions"><button type="button" data-gd-wait-keep>Keep waiting</button><button type="button" data-gd-wait-basic>Use basic GPS for now</button></div>';
+    el.innerHTML='<strong data-gd-wait-title>'+i18nH('course.stillPreparingThisDots')+'</strong><span data-i18n="course.firstTimeSetup">'+i18nH('course.firstTimeSetup')+'</span><div class="gdServerMapWaitActions"><button type="button" data-gd-wait-keep data-i18n="course.keepWaiting">'+i18nH('course.keepWaiting')+'</button><button type="button" data-gd-wait-basic data-i18n="course.useBasicGps">'+i18nH('course.useBasicGps')+'</button></div>';
     document.body.appendChild(el);
     if(!document.getElementById('gdServerMapWaitPromptStyle')){
       const style=document.createElement('style');
@@ -4407,7 +4420,7 @@
     const prompt=ensureServerMapWaitPrompt();
     try{
       const title=prompt.querySelector('[data-gd-wait-title]');
-      if(title)title.textContent='Still preparing '+(courseName(course)||'this course')+'...';
+      if(title){const n=courseName(course);if(n)i18nSet(title,'course.stillPreparingNamedDots',{course:n});else i18nSet(title,'course.stillPreparingThisDots');}
       const keep=prompt.querySelector('[data-gd-wait-keep]');
       const basic=prompt.querySelector('[data-gd-wait-basic]');
       /* "Keep waiting" only dismisses the panel - nothing here was ever conditional on it. The
@@ -4449,7 +4462,7 @@
     recordCoursePlayDebug('course-mapping-wait-extended',c,h,{resolutionKey:key,attemptToken:opts.attemptToken||'',serverPackageStatus:opts.serverPackageStatus||'processing'});
     /* The loading screen stays up and keeps saying something true. The prompt sits over it
        with the escape hatch, so "I am stuck" and "I want to play now" have different answers. */
-    try{updateCourseLoading('Still preparing '+(courseName(c)||'this course'),82);}catch(e){}
+    try{updateCourseLoading(courseName(c)?i18nT('course.stillPreparingNamed',{course:courseName(c)}):i18nT('course.stillPreparingThis'),82);}catch(e){}
     try{window.__gdCoursePlayServerMapWaitActive={courseId:courseId(c),courseName:courseName(c),hole:h,resolutionKey:key,at:Date.now()};}catch(e){}
     try{document.body.classList.add('gdServerMapWaitActive');}catch(e){}
     showServerMapWaitPrompt(c,h,key,{onBasicGps:()=>{
@@ -4580,8 +4593,8 @@
     }catch(e){}
     try{setMappedPlayMode('mapped',{skipFrame:true,silent:true,preserveAssist:true});}catch(e){}
     try{mode='green';}catch(e){}
-    try{setState('Select green');}catch(e){}
-    try{showHint('Tap the green');}catch(e){}
+    try{setState(i18nT('course.selectGreen'));}catch(e){}
+    try{showHint(i18nT('course.tapTheGreen'));}catch(e){}
     try{
       if(map&&map.invalidateSize)setTimeout(()=>{
         try{map.invalidateSize(false);}catch(e){}
@@ -4636,14 +4649,14 @@
     const mappedCourse=loadUserCourseData(userId(),courseId(course))||course;
     ingestRequestedHoleToPipeline(mappedCourse,h,reason||'course-play-resolver');
     const frameCollection=collectCoursePlayFrames(mappedCourse,reason||'course-play-resolver',{activeHole:h,warmFrames:opts.collectCoursePlayFrames!==false});
-    updateCourseLoading(`Preparing Hole ${h}`,86);
+    updateCourseLoading(i18nT('course.preparingHole',{n:h}),86);
     await sleep(80);
     let framed=false;
     try{framed=!!focusMappedHoleOrSavedGreen(h,{quiet:true,frame:true,promptStart:true,allowAnyStart:true,stablePreLock:true,course:mappedCourse});}catch(e){}
     if(!framed&&typeof window.gdFocusMappedPreLockHole==='function'){
       try{window.gdFocusMappedPreLockHole(h,{source:reason||'course-play-resolver',preserveGpsSession:true,reenterGps:false,refreshGps:false});framed=true;}catch(e){}
     }
-    updateCourseLoading(`Hole ${h} ready`,100);
+    updateCourseLoading(i18nT('course.holeReady',{n:h}),100);
     markCourseOpenReady(mappedCourse,h);
     hideCourseLoading(220);
     setTimeout(()=>checkClosestMappedHolePrompt(loadUserCourseData()),900);
@@ -4918,7 +4931,7 @@
 	     runCourseMappingAttempt's quiet background check) this IS the user-visible action. */
 	  async function runServerAutoMapTool(){
 	    const course=sessionCourse(courseObj());
-	    if(!course||isManualGpsCourse(course)){toastSafe('Select a course first');return null;}
+	    if(!course||isManualGpsCourse(course)){toastSafe(i18nT('course.selectCourseFirst'));return null;}
 	    toastSafe('Requesting server mapping...');
 	    /* Explicit enqueue, not just the course-package side effect. Since "failed" became a
 	       terminal package state (2026-08-18), polling course-package never restarts a failed
@@ -5044,8 +5057,8 @@
       recordMappingDebug(debugRunId,{source:'course-loader',phase:'requested',event:'course-selected',summary:'Course selected',details:{courseId:request.courseId,courseName:request.courseName,hole:h,invokedBy:request.reason,resolutionKey:key,attemptToken}});
       recordMappingDebug(debugRunId,{source:'course-loader',phase:'started',event:'mapping-attempt-started',summary:'Course mapping attempt started',details:{courseId:request.courseId,courseName:request.courseName,courseCentre:request.courseCentre,hole:h,revision,attemptToken}});
       recordCoursePlayDebug('course-mapping-attempt-started',c,h,{reason:request.reason,resolutionKey:key,attemptToken,revision});
-      if(request.showLoading)showCourseLoading(c.name||c.courseName||'Loading course');
-      updateCourseLoading(`Opening Hole ${h}`,24);
+      if(request.showLoading)showCourseLoading(c.name||c.courseName||i18nT('loading.course'));
+      updateCourseLoading(i18nT('course.openingHole',{n:h}),24);
 	      try{
 	        rememberRequestedPlayHole(h);
 	        const resumeAvailableBeforeOpen=resumeRoundAvailableForCloudMap();
@@ -5071,7 +5084,7 @@
           return showResolvedCoursePlayHole(c,h,'saved-map',opts);
         }
         if(!mappingAttemptStillCurrent(request,attempt,'saved-map'))return {playable:false,stale:true,reason:'superseded-before-automapper'};
-        updateCourseLoading('Checking server map',42);
+        updateCourseLoading(i18nT('course.checkingServerMap'),42);
         /* No client AutoMapper below this line - per the course-package architecture doc's
            acceptance criteria, "No AutoMapper logic runs on the user's phone". The server
            (functions/course-mapper-jobs.mjs / gd-automapper-core.mjs) owns OSM querying and
@@ -5096,7 +5109,7 @@
                  whether this is the Overpass leg or the geometry resolver. After 30s the
                  copy admits this is a longer wait - honest feedback beats a stuck bar. */
               const pct=Math.min(80,45+35*((info.waitedMs||0)/(info.budgetMs||SERVER_PACKAGE_WAIT_MS)));
-              updateCourseLoading((info.waitedMs||0)>30000?'Preparing course - first-time setup can take a little longer':'Preparing course...',pct);
+              updateCourseLoading((info.waitedMs||0)>30000?i18nT('loading.preparingSlow'):i18nT('loading.preparing'),pct);
               /* Once the wait is clearly a long one, say so and offer the way out. The wait
                  itself carries on regardless - this adds a choice, it does not take one. */
               if((info.waitedMs||0)>SERVER_WAIT_OFFER_MS)showServerMapWaitPrompt(c,h,key,{onBasicGps:()=>{serverWaitOptOut=key;}});
@@ -5293,7 +5306,7 @@
             window.gdCourseChangeMode='';
             setAssumedCourseName(c.name||'');
             try{document.getElementById('courseScreen')?.classList.add('hidden');}catch(e){}
-            toastSafe('Course label updated');
+            toastSafe(i18nT('course.labelUpdated'));
             return c;
           }
           if(window.gdCourseChangeMode==='assumed-label'&&c&&isManualGpsCourse(c)){
@@ -5352,9 +5365,9 @@
 
   function profileCardHtml(){
     const entries=downloadedCourseEntries();
-    if(!entries.length)return 'No courses downloaded';
+    if(!entries.length)return i18nT('course.noCoursesDownloaded');
     const bytes=entries.reduce((sum,e)=>sum+(Number(e&&e.bytes)||0),0);
-    return `${entries.length} course${entries.length===1?'':'s'} downloaded · ${sizeLabel(bytes)}`;
+    return i18nN('course.coursesDownloaded',entries.length,{size:sizeLabel(bytes)});
   }
   function isCoachProfileCardView(){
     const kicker=document.querySelector('#gdProfileV67 .kicker');
@@ -5385,7 +5398,7 @@
     btn.id='gdProfileCoursesCard';
     btn.className='card';
     btn.type='button';
-    btn.innerHTML=`<img class="gdCourseLibraryCardIcon" src="assets/home/clarity-caddy-course-library-icon.png?v=defd0c72" alt=""><div><strong>Courses</strong><span>${profileCardHtml()}</span></div>`;
+    btn.innerHTML=`<img class="gdCourseLibraryCardIcon" src="assets/home/clarity-caddy-course-library-icon.png?v=defd0c72" alt=""><div><strong>${i18nH('course.profileCardTitle')}</strong><span>${esc(profileCardHtml())}</span></div>`;
     btn.onclick=function(ev){ev.preventDefault();openCourseLibraryPanel();return false;};
     grid.appendChild(btn);
   }
@@ -5432,7 +5445,7 @@
     el=document.createElement('div');
     el.id='gdCourseLibraryOverlay';
     el.className='gdCourseLibraryOverlay hidden';
-    el.innerHTML=`<div class="gdCourseLibrarySheet"><div class="gdCourseLibraryHead"><div><h2>Course Library</h2><p>Courses downloaded to this device for offline play.</p></div><button class="gdSheetClose" type="button" onclick="closeCourseLibraryPanel()">×</button></div><div class="gdCourseLibrarySearch"><input id="gdCourseLibrarySearchInput" type="search" placeholder="Search downloaded courses"><button id="gdCourseLibraryFindCourseBtn" type="button">Find course</button></div><div id="gdCourseLibraryList"></div></div>`;
+    el.innerHTML=`<div class="gdCourseLibrarySheet"><div class="gdCourseLibraryHead"><div><h2>${i18nH('course.libraryTitle')}</h2><p>${i18nH('course.librarySubtitle')}</p></div><button class="gdSheetClose" type="button" onclick="closeCourseLibraryPanel()">×</button></div><div class="gdCourseLibrarySearch"><input id="gdCourseLibrarySearchInput" type="search" placeholder="${i18nH('course.librarySearch')}" data-i18n-placeholder="course.librarySearch"><button id="gdCourseLibraryFindCourseBtn" type="button" data-i18n="course.findCourse">${i18nH('course.findCourse')}</button></div><div id="gdCourseLibraryList"></div></div>`;
     document.body.appendChild(el);
     el.addEventListener('click',ev=>{if(ev.target===el)closeCourseLibraryPanel();});
     el.querySelector('#gdCourseLibrarySearchInput').addEventListener('input',ev=>{
@@ -5499,7 +5512,7 @@
     }catch(e){return false;}
   }
   function mapTypeLabel(mapType){
-    return mapType==='published'?'Published map':'Course map';
+    return mapType==='published'?i18nT('course.publishedMap'):i18nT('course.courseMap');
   }
   function mapTypeForPackage(pkg){
     if(pkg&&pkg.status==='full-map-ready')return 'published';
@@ -5591,7 +5604,7 @@
   function updateBadgeText(entry){
     const label=downloadedEntryRemoteLabel(entry);
     const shared=window.ClarityApp&&window.ClarityApp.courseVersionLabel;
-    if(!shared||typeof shared.updateAvailable!=='function')return 'Update Available';
+    if(!shared||typeof shared.updateAvailable!=='function')return i18nT('mapUpdate.updateAvailable');
     return shared.updateAvailable(label);
   }
   function refreshCourseLibraryManifest(){
@@ -5623,23 +5636,23 @@
      that moment, and named internals the reader cannot act on from there. */
   function savedDataLabel(course){
     const holes=mappedHoleNumbers(course,courseSummary(course)).length;
-    return holes?holes+' hole'+(holes===1?'':'s')+' saved':'nothing saved yet';
+    return holes?i18nN('course.holesSaved',holes):i18nT('course.nothingSavedYet');
   }
   /* Candidates come from a 1.4km radius, so the tail of that range reads better in
      kilometres than as a four-digit metre count. */
   function distanceLabel(metres){
     const m=Number(metres);
-    if(!Number.isFinite(m))return 'nearby';
+    if(!Number.isFinite(m))return i18nT('course.nearby');
     /* Switch at a full kilometre, not before it: rounding 950m to one decimal
        prints "0.9km away", which reads as nearer than the "949m away" a metre
        earlier. */
-    return m<1000?Math.round(m)+'m away':(m/1000).toFixed(1)+'km away';
+    return m<1000?i18nT('course.metresAway',{n:Math.round(m)}):i18nT('course.kmAway',{n:(m/1000).toFixed(1)});
   }
   function sizeLabel(bytes){
-    if(!(bytes>0))return '0 KB';
-    if(bytes<1024)return bytes+' B';
-    if(bytes<1048576)return Math.round(bytes/1024)+' KB';
-    return (bytes/1048576).toFixed(1)+' MB';
+    if(!(bytes>0))return i18nT('course.sizeKb',{n:0});
+    if(bytes<1024)return i18nT('course.sizeBytes',{n:bytes});
+    if(bytes<1048576)return i18nT('course.sizeKb',{n:Math.round(bytes/1024)});
+    return i18nT('course.sizeMb',{n:(bytes/1048576).toFixed(1)});
   }
   function storageSummaryLine(stats){
     const parts=[stats.holes+' hole'+(stats.holes===1?'':'s'),sizeLabel(stats.bytes)];
@@ -5684,8 +5697,8 @@
     const overlay=document.getElementById('gdCourseLibraryOverlay');
     const title=overlay&&overlay.querySelector('.gdCourseLibraryHead h2');
     const sub=overlay&&overlay.querySelector('.gdCourseLibraryHead p');
-    if(title)title.textContent='Course Library';
-    if(sub)sub.textContent='Courses downloaded to this device for offline play.';
+    if(title)title.textContent=i18nT('course.libraryTitle');
+    if(sub)sub.textContent=i18nT('course.librarySubtitle');
     const search=document.getElementById('gdCourseLibrarySearchInput');
     if(search&&search.value!==courseLibraryFilter)search.value=courseLibraryFilter;
     const filter=normalizeCourseName(courseLibraryFilter);
@@ -5693,29 +5706,29 @@
       .filter(e=>!filter||normalizeCourseName(e.courseName).includes(filter))
       .sort((a,b)=>String(a.courseName).localeCompare(String(b.courseName)));
     if(!entries.length){
-      list.innerHTML=`<div class="gdCourseCard"><strong>${filter?'No matching courses':'No courses downloaded yet'}</strong><span>${filter?'Try another search.':'Courses download automatically the first time you play them.'}</span></div>`;
+      list.innerHTML=`<div class="gdCourseCard"><strong>${filter?i18nH('course.noMatching'):i18nH('course.noneDownloadedYet')}</strong><span>${filter?i18nH('course.tryAnotherSearch'):i18nH('course.downloadAutomatically')}</span></div>`;
       return;
     }
     if(detailKey){
       const entry=entries.find(e=>e.courseId===detailKey)||downloadedCourseEntries().find(e=>e.courseId===detailKey);
       if(!entry){renderCourseLibraryPanel();return;}
       const stale=downloadedEntryHasUpdate(entry);
-      const updateAction=stale?`<button type="button" data-action="update" class="gdCourseUpdateBtn">Update map</button>`:'';
+      const updateAction=stale?`<button type="button" data-action="update" class="gdCourseUpdateBtn">${i18nH('course.updateMap')}</button>`:'';
       const heldLabel=downloadedEntryLabel(entry);
       const offeredLabel=downloadedEntryRemoteLabel(entry);
       /* Version in the subtext beside map type and size. Omitted entirely when unknown -
          a course downloaded before versions existed shows the line it always showed
          rather than an empty pair of brackets. */
       const detailSub=[mapTypeLabel(entry.mapType),sizeLabel(entry.bytes)].concat(heldLabel?[heldLabel]:[]).join(' · ');
-      list.innerHTML=`<div class="gdCourseCard${entry.mapType==='published'?' published':''}"><strong>${esc(entry.courseName)}</strong><span>${esc(detailSub)}</span><div class="gdCourseActions"><button type="button" data-action="back">Back</button>${updateAction}<button class="danger" type="button" data-action="remove">Remove from device</button></div></div>`;
+      list.innerHTML=`<div class="gdCourseCard${entry.mapType==='published'?' published':''}"><strong>${esc(entry.courseName)}</strong><span>${esc(detailSub)}</span><div class="gdCourseActions"><button type="button" data-action="back">${i18nH('common.back')}</button>${updateAction}<button class="danger" type="button" data-action="remove">${i18nH('course.removeFromDevice')}</button></div></div>`;
       const facts=[
-        ['Map type',mapTypeLabel(entry.mapType)],
-        ['Storage used',sizeLabel(entry.bytes)],
-        ['Downloaded',entry.savedAt?dateLabel(entry.savedAt):'—'],
+        [i18nT('course.mapType'),mapTypeLabel(entry.mapType)],
+        [i18nT('course.storageUsed'),sizeLabel(entry.bytes)],
+        [i18nT('course.downloaded'),entry.savedAt?dateLabel(entry.savedAt):'—'],
         /* Two versions, not one: the copy you are holding, and - when they differ - the
            one the server has. "v1.4 → v1.5" says what an update would actually do. */
-        ['Version',heldLabel?(stale&&offeredLabel&&offeredLabel!==heldLabel?heldLabel+' → '+offeredLabel:heldLabel):'—'],
-        ['Status',stale?updateBadgeText(entry):'Up to date']
+        [i18nT('course.version'),heldLabel?(stale&&offeredLabel&&offeredLabel!==heldLabel?heldLabel+' → '+offeredLabel:heldLabel):'—'],
+        [i18nT('course.status'),stale?updateBadgeText(entry):i18nT('course.upToDate')]
       ];
       list.insertAdjacentHTML('beforeend',`<div class="gdCourseCard gdCourseStorageFacts">${facts.map(([k,v])=>`<div class="gdCourseStorageRow"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join('')}</div>`);
       list.querySelector('[data-action="back"]').onclick=()=>renderCourseLibraryPanel();
@@ -5723,7 +5736,7 @@
       if(updateBtn)updateBtn.onclick=async()=>{
         if(updateBtn.disabled)return;
         updateBtn.disabled=true;
-        updateBtn.textContent='Updating…';
+        updateBtn.textContent=i18nT('mapUpdate.updating');
         const result=await updateDownloadedCourseEntry(entry);
         if(result.ok){
           /* Re-check freshness against the server rather than assuming the
@@ -5733,14 +5746,14 @@
           refreshCourseLibraryManifest();
           gdCLRefreshProfileCard();
           renderCourseLibraryPanel(entry.courseId);
-          toastSafe('Map updated');
+          toastSafe(i18nT('course.mapUpdated'));
           return;
         }
         updateBtn.disabled=false;
-        updateBtn.textContent='Update map';
-        toastSafe(result.reason==='not-ready'?'No newer map published yet'
-          :result.reason==='storage'?'Not enough space to save the update'
-          :'Could not reach the server');
+        updateBtn.textContent=i18nT('course.updateMap');
+        toastSafe(result.reason==='not-ready'?i18nT('course.noNewerMap')
+          :result.reason==='storage'?i18nT('course.notEnoughSpace')
+          :i18nT('course.couldNotReachServer'));
       };
       const removeBtn=list.querySelector('[data-action="remove"]');
       /* Two taps rather than confirm(): this shell has already been seen to throw
@@ -5750,8 +5763,8 @@
       removeBtn.onclick=()=>{
         if(!armed){
           armed=true;
-          removeBtn.textContent='Tap again to remove';
-          setTimeout(()=>{if(armed){armed=false;removeBtn.textContent='Remove from device';}},4000);
+          removeBtn.textContent=i18nT('course.tapAgainToRemove');
+          setTimeout(()=>{if(armed){armed=false;removeBtn.textContent=i18nT('course.removeFromDevice');}},4000);
           return;
         }
         removeDownloadedCourseEntry(entry.courseId);
@@ -5778,6 +5791,7 @@
   }
   window.renderCourseLibraryPanel=renderCourseLibraryPanel;
   window.openCourseLibraryPanel=function(){
+    try{if(window.GDI18n&&!window.__gdCourseLibraryI18n){window.__gdCourseLibraryI18n=true;window.GDI18n.onChange(()=>{const o=document.getElementById('gdCourseLibraryOverlay');if(o&&!o.classList.contains('hidden'))renderCourseLibraryPanel(courseLibraryDetailKey);gdCLRefreshProfileCard();});}}catch(e){}
     ensureCourseLibraryOverlay().classList.remove('hidden');
     renderCourseLibraryPanel();
     refreshCourseLibraryManifest();
@@ -5988,7 +6002,7 @@
         const input=document.getElementById('searchInput');
         if(screen)screen.classList.remove('hidden');
         if(input){input.value=courseLibraryFilter||'';input.focus();if(input.value&&typeof manualSearch==='function')manualSearch();}
-        toastSafe('Find or change course');
+        toastSafe(i18nT('course.findOrChange'));
       }catch(e){}
     },100);
   };
@@ -6154,7 +6168,8 @@
     el=document.createElement('div');
     el.id='gdPinToolFlyout';
     el.className='gdPinToolFlyout hidden';
-    el.innerHTML=`<button class="gdPinToolAction primary" data-pin-choice="drag" type="button" aria-label="Drag pin"><span class="ico">⚑</span><span class="txt">Drag<br>Pin</span></button><button class="gdPinToolAction" data-pin-choice="lock" type="button" aria-label="Pin-Lock"><span class="ico">⌖</span><span class="txt">Pin<br>Lock</span></button>`;
+    renderPinToolFlyout(el);
+    try{if(window.GDI18n&&!window.__gdPinToolFlyoutI18n){window.__gdPinToolFlyoutI18n=true;window.GDI18n.onChange(()=>{const fly=document.getElementById('gdPinToolFlyout');if(fly)renderPinToolFlyout(fly);});}}catch(e){}
     document.body.appendChild(el);
     el.addEventListener('pointerdown',ev=>ev.stopPropagation());
     el.addEventListener('click',ev=>{
@@ -6176,6 +6191,11 @@
     },true);
     window.addEventListener('resize',positionPinToolFlyout);
     return el;
+  }
+  /* Two-line button labels: the break goes after the first word of the label. */
+  function pinToolLines(key){return i18nH(key).replace(' ','<br>');}
+  function renderPinToolFlyout(el){
+    el.innerHTML=`<button class="gdPinToolAction primary" data-pin-choice="drag" type="button" aria-label="${i18nH('course.dragPinAria')}"><span class="ico">⚑</span><span class="txt">${pinToolLines('course.dragPin')}</span></button><button class="gdPinToolAction" data-pin-choice="lock" type="button" aria-label="${i18nH('course.pinLockTitle')}"><span class="ico">⌖</span><span class="txt">${pinToolLines('pin.lock')}</span></button>`;
   }
   function positionPinToolFlyout(){
     const el=document.getElementById('gdPinToolFlyout');
@@ -6201,10 +6221,10 @@
 	    let origin=null, center=null;
 	    try{origin=start||null;center=pinLockCenterForHole(selectedHole);}catch(e){}
 	    const mappingMode=!!window.gdFullMappingMode;
-	    if(!origin&&!mappingMode){toastSafe('Set ball/start first');return;}
+	    if(!origin&&!mappingMode){toastSafe(i18nT('course.setBallFirst'));return;}
 	    const currentDistance=(()=>{try{return origin&&((pin||center))?Math.round(map.distance(origin,pin||center)):'';}catch(e){return ''}})();
 	    const el=ensurePinLockOverlay();
-	    el.innerHTML=`<div class="gdPinLockSheet"><div class="gdPinLockHead"><div><h2>Pin-Lock</h2><p>${mappingMode&&!origin?'Mapping mode: place a pin by green area without a ball/start.':'Laser distance is strongest. The pad only gives a rough green area.'}</p></div><button class="gdSheetClose" type="button" onclick="gdClosePinLock()">×</button></div><input id="gdPinLockHole" type="hidden" value="${esc(selectedHole)}"><b id="gdPinLockGreenStatus" hidden></b><label class="gdPinLockLabel" for="gdPinLockDistance">Rangefinder distance</label><input id="gdPinLockDistance" class="gdPinLockInput" inputmode="decimal" value="${esc(currentDistance)}" aria-label="Rangefinder distance in metres" ${mappingMode&&!origin?'placeholder="Optional in mapping mode"':''}><label class="gdPinLockLabel">Approximate pin area</label><div id="gdPinLockPad" class="gdPinLockPad"><span id="gdPinLockDot" class="gdPinLockDot"></span></div><div class="gdPinLockActions"><button type="button" onclick="gdClosePinLock()">Cancel</button><button id="gdPinLockPlaceBtn" class="primary" type="button" onclick="gdPlacePinLock()">Place Pin</button></div></div>`;
+	    el.innerHTML=`<div class="gdPinLockSheet"><div class="gdPinLockHead"><div><h2>${i18nH('course.pinLockTitle')}</h2><p>${mappingMode&&!origin?'Mapping mode: place a pin by green area without a ball/start.':i18nH('course.pinLockHint')}</p></div><button class="gdSheetClose" type="button" onclick="gdClosePinLock()">×</button></div><input id="gdPinLockHole" type="hidden" value="${esc(selectedHole)}"><b id="gdPinLockGreenStatus" hidden></b><label class="gdPinLockLabel" for="gdPinLockDistance">${i18nH('pinLock.rangefinder')}</label><input id="gdPinLockDistance" class="gdPinLockInput" inputmode="decimal" value="${esc(currentDistance)}" aria-label="${i18nH('course.rangefinderAria')}" ${mappingMode&&!origin?'placeholder="Optional in mapping mode"':''}><label class="gdPinLockLabel">${i18nH('course.approxPinArea')}</label><div id="gdPinLockPad" class="gdPinLockPad"><span id="gdPinLockDot" class="gdPinLockDot"></span></div><div class="gdPinLockActions"><button type="button" onclick="gdClosePinLock()">${i18nH('common.cancel')}</button><button id="gdPinLockPlaceBtn" class="primary" type="button" onclick="gdPlacePinLock()">${i18nH('course.placePin')}</button></div></div>`;
 	    el.classList.remove('hidden');
     window.__gdPinLockOpen=true;
     pinLockRegion={x:0,y:0};
@@ -6213,7 +6233,7 @@
       holeInput.addEventListener('input',updatePinLockGreenUi);
       holeInput.addEventListener('change',()=>{
         const h=validHoleNumber(holeInput.value);
-        if(!h){holeInput.value=mapperHole();toastSafe('Enter a hole from 1 to 18');}
+        if(!h){holeInput.value=mapperHole();toastSafe(i18nT('course.enterHole'));}
         updatePinLockGreenUi();
       });
     }
@@ -6267,13 +6287,13 @@
 	    let origin=null, center=null;
 	    const selectedHole=pinLockSelectedHole();
 	    try{origin=start||null;center=pinLockCenterForHole(selectedHole);}catch(e){}
-	    if(!center){toastSafe('Set the green first');return;}
+	    if(!center){toastSafe(i18nT('course.setGreenFirst'));return;}
 	    const green=getPinGreenShape(selectedHole,center);
-	    if(!green.shape){toastSafe('Set the green first');return;}
+	    if(!green.shape){toastSafe(i18nT('course.setGreenFirst'));return;}
 	    const range=Number(document.getElementById('gdPinLockDistance')?.value);
 	    const mappingMode=!!window.gdFullMappingMode;
-	    if(!origin&&!mappingMode){toastSafe('Set ball/start first');return;}
-	    if(origin&&(!Number.isFinite(range)||range<=0)){toastSafe('Enter a distance');return;}
+	    if(!origin&&!mappingMode){toastSafe(i18nT('course.setBallFirst'));return;}
+	    if(origin&&(!Number.isFinite(range)||range<=0)){toastSafe(i18nT('course.enterDistance'));return;}
 	    const solved=origin
 	      ? solvePinLock({origin,rangefinderDistanceM:range,greenCenter:center,greenShape:green.shape,regionBias:pinLockRegion})
 	      : {latLng:project(center,Math.atan2(pinLockRegion.x||0,pinLockRegion.y||1),Math.min(12,Math.hypot(pinLockRegion.x||0,pinLockRegion.y||0)*10)),distanceError:0,regionError:0};
@@ -6282,7 +6302,7 @@
 	    const uid=userId(),cid=courseId(),h=selectedHole;
 	    window.gdActivePin={id:`pin-${Date.now()}`,userId:uid,courseId:cid,holeNumber:h,pinPosition:toPlain(solved.latLng),source:'rangefinder',rangefinderDistanceM:origin?range:null,wasAdjusted:false,createdAt:nowIso(),updatedAt:nowIso()};
 	    gdClosePinLock();
-	    toastSafe(!origin?'Pin placed for mapping':(solved.distanceError>5||green.fallback?'Pin placed · check it':'Pin-Lock placed'));
+	    toastSafe(!origin?'Pin placed for mapping':(solved.distanceError>5||green.fallback?i18nT('course.pinPlacedCheck'):i18nT('course.pinLockPlaced')));
 	  };
 
   function wrapPinFunctions(){

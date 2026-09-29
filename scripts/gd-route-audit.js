@@ -185,8 +185,15 @@
     if(!btn)return;
     const active=window.__gdBackTarget==="profile"&&!!window.__gdProfileReturnProfileId;
     btn.classList.toggle("visible",active);
-    btn.setAttribute("aria-label",active?`Return to ${window.__gdProfileReturnName||"selected profile"}`:"Return to selected profile");
-    btn.title=active?`Back to ${window.__gdProfileReturnName||"profile"}`:"Profile";
+    const i18n=window.GDI18n;
+    const name=window.__gdProfileReturnName;
+    if(active&&name){
+      i18n.setAttr(btn,"aria-label","topbar.returnToName",{name});
+      i18n.setAttr(btn,"title","topbar.backToName",{name});
+    }else{
+      i18n.setAttr(btn,"aria-label","topbar.profileReturnAria");
+      i18n.setAttr(btn,"title","topbar.profile");
+    }
   }
   function clearProfileReturn(){
     window.__gdProfileReturnProfileId="";

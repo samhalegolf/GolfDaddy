@@ -178,6 +178,10 @@ function createHarness(options = {}) {
     fetch: fetchFor(net)
   });
   const context = vm.createContext(Object.assign(window, { window, globalThis: window }));
+  /* The page loads the translation layer and its English base first. */
+  for (const f of ["scripts/gd-i18n.js", "scripts/i18n/en.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8"), context, { filename: f });
+  }
   vm.runInContext(pickerSource, context, { filename: "gd-course-picker-search-v2.js" });
   /* The competing code, lifted from gd-app-core.js as it is today. */
   vm.runInContext(coreFn("function gdWireCoursePickerPlay(){") + "\ngdWireCoursePickerPlay();\n" + coreEnterLine, context, { filename: "gd-app-core.js (lifted)" });

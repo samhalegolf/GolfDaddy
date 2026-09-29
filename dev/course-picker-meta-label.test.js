@@ -20,7 +20,7 @@ const src = fs.readFileSync(PICKER, "utf8");
    it because metaText calls it for the region/country subtitle - lifting metaText
    on its own would throw on the first call instead of testing anything. */
 function loadMetaText() {
-  const idx = src.indexOf("function metaText(course)");
+  const idx = src.indexOf("function metaText(course");
   assert.notStrictEqual(idx, -1, "metaText must exist");
   const end = src.indexOf("\n  }", idx);
   assert.notStrictEqual(end, -1, "could not bound metaText");
@@ -28,10 +28,13 @@ function loadMetaText() {
   assert.notStrictEqual(placeStart, -1, "placeLabel must exist");
   const placeEnd = src.indexOf("\n  }", placeStart);
   assert.notStrictEqual(placeEnd, -1, "could not bound placeLabel");
+  /* metaText speaks through the translation layer, English here. */
+  const i18n = require(path.join(ROOT, "scripts", "gd-i18n.js"));
+  require(path.join(ROOT, "scripts", "i18n", "en.js"));
   // eslint-disable-next-line no-new-func
-  return new Function(
+  return new Function("L",
     src.slice(placeStart, placeEnd + 4) + "\n" + src.slice(idx, end + 4) + "\nreturn metaText;"
-  )();
+  )(function (key, vars) { return i18n.t(key, vars); });
 }
 
 const metaText = loadMetaText();

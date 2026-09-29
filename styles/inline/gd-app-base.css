@@ -3354,6 +3354,22 @@ body.gdGpsActive #shellRouteLabel{
   color:rgba(255,255,255,.45);
   font-weight:950;
 }
+/* The Language row holds its own picker rather than opening a page, so it
+   drops the row arrow and styles the select as the row's control. */
+.gdPlayerSettingsLanguageRow{cursor:default}
+.gdPlayerSettingsLanguageRow:after{content:none}
+.gdPlayerSettingsLanguageRow select{
+  flex:0 0 auto;
+  max-width:46%;
+  border:1px solid rgba(255,255,255,.18);
+  border-radius:999px;
+  padding:8px 12px;
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  font-size:13px;
+  font-weight:800;
+}
+.gdPlayerSettingsLanguageRow select option{color:#06110b}
 .gdPlayerSettingsToggleList{
   display:grid;
   gap:10px;

@@ -19,6 +19,10 @@ const path = require("path");
 const ROOT = path.join(__dirname, "..");
 const LIB = path.join(ROOT, "scripts", "gd-course-library-pin-lock.js");
 const src = fs.readFileSync(LIB, "utf8");
+/* The words themselves now live in the translation base (scripts/i18n/en.js);
+   the code names them by key. Wording checks read both. */
+const english = fs.readFileSync(path.join(ROOT, "scripts", "i18n", "en.js"), "utf8");
+const words = src + "\n" + english;
 
 const tests = [];
 function test(name, fn) { tests.push({ name: name, fn: fn }); }
@@ -38,7 +42,7 @@ const RETIRED = [
 ];
 
 test("the retired mapping wording is gone", () => {
-  const left = RETIRED.filter(s => src.includes(s));
+  const left = RETIRED.filter(s => words.includes(s));
   assert.deepStrictEqual(left, [], "still present in source: " + left.join(" | "));
 });
 
@@ -50,13 +54,13 @@ test("the object-type breakdown builder is gone entirely", () => {
 });
 
 test("the library describes itself as device storage", () => {
-  assert.ok(/Golf course data saved on this device, listed by course name\./.test(src), "library subtitle must say what it is");
-  assert.ok(/Course Data/.test(src), "library heading must be the plain one");
+  assert.ok(/"course\.librarySubtitle": "[^"]*this device[^"]*"/.test(english), "library subtitle must say what it is");
+  assert.ok(/"course\.libraryTitle": "Course Library"/.test(english), "library heading must be the plain one");
 });
 
 test("the confirmation sheet asks a plain question", () => {
-  assert.ok(/Confirm which course this round is saved under\./.test(src), "confirmation subtitle must be plain");
-  assert.ok(/Guessed from your location/.test(src), "the assumed-course line must not read as GPS/map internals");
+  assert.ok(/Confirm which course this round is saved under\./.test(words), "confirmation subtitle must be plain");
+  assert.ok(/Guessed from your location/.test(words), "the assumed-course line must not read as GPS/map internals");
 });
 
 test("the mapper has no entry point left in the library", () => {
@@ -74,7 +78,11 @@ test("candidates are described by what is stored, not by object type", () => {
 function distanceLabelFrom(src) {
   const m = src.match(/function distanceLabel\(metres\)\{([\s\S]*?)\n  \}/);
   assert.ok(m, "distanceLabel must be a single extractable function");
-  return new Function("metres", m[1]);
+  /* It speaks through the translation layer, English here. */
+  const i18n = require(path.join(ROOT, "scripts", "gd-i18n.js"));
+  require(path.join(ROOT, "scripts", "i18n", "en.js"));
+  const i18nT = (key, vars) => i18n.t(key, vars);
+  return new Function("i18nT", "return function (metres) {" + m[1] + "};")(i18nT);
 }
 
 test("distance reads in metres up close and kilometres further out", () => {
