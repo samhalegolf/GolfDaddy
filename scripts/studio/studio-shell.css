@@ -211,6 +211,44 @@
    placing tool is armed, a grab hand over shapes in Move, drag handles, an instruction chip
    over the map, and the bin a shape is dropped on to delete it. */
 #gdStudioShellRoot .gdStudioOverlayStage { position: relative; }
+/* The overlay map is the work surface, so it takes most of the screen rather than the
+   viewport page's fixed 560px, and full screen gives it all of it (tools and status kept). */
+#gdStudioShellRoot .gdStudioOverlayStage .gdStudioViewportMap { height: clamp(420px, 72vh, 1000px); }
+#gdStudioShellRoot .gdStudioOverlayWorkspace.isFullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  background: var(--gdStudioBg);
+}
+#gdStudioShellRoot .gdStudioOverlayWorkspace.isFullscreen .gdStudioOverlayStage { flex: 1 1 auto; min-height: 0; }
+#gdStudioShellRoot .gdStudioOverlayWorkspace.isFullscreen .gdStudioOverlayStage .gdStudioViewportMap { height: 100%; }
+#gdStudioShellRoot .gdStudioOverlayWorkspace.isFullscreen .gdStudioViewportBar { margin-top: 0 !important; }
+html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidden; }
+#gdStudioShellRoot .gdStudioOverlayNav {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 800;
+  display: flex;
+  gap: 4px;
+}
+#gdStudioShellRoot .gdStudioOverlayNav button {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(231, 243, 236, 0.25);
+  background: rgba(5, 10, 7, 0.8);
+  color: var(--gdStudioText);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioOverlayNav button:hover { border-color: var(--gdStudioAccent); color: var(--gdStudioAccent); }
+#gdStudioShellRoot .gdStudioDiagramBtn.gdStudioOverlayNext { color: #06120b; background: var(--gdStudioAccent); border-color: var(--gdStudioAccent); font-weight: 700; }
+#gdStudioShellRoot .gdStudioDiagramBtn.gdStudioOverlayNext[hidden] { display: none; }
 #gdStudioShellRoot .gdStudioOverlayStage .gdStudioOverlayMap { cursor: crosshair; }
 #gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayMap { cursor: default; }
 #gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayShape { cursor: grab; }
@@ -233,7 +271,7 @@
   left: 50%;
   transform: translateX(-50%);
   z-index: 800;
-  max-width: calc(100% - 120px);
+  max-width: calc(100% - 340px);
   padding: 5px 12px;
   border-radius: 999px;
   background: rgba(5, 10, 7, 0.8);

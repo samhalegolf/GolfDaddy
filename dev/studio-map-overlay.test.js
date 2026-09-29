@@ -113,6 +113,20 @@ test("shapes come from the shared builders: a fairway line with a tee behind it,
   assert.ok(!page.includes('data-gd-overlay="hole"') && !page.includes('data-gd-overlay="tool-hole"'), "no hole numbering or hole-line tool at this stage");
 });
 
+test("captured tiles are fetched at the capture zoom, not whatever zoom the map shows", () => {
+  /* Leaflet's template layers take {z} from the map's own tile zoom; the green wand read the
+     wrong ground at every map zoom but its capture zoom until this was pinned. */
+  assert.ok(/function tileUrlAt\(cx, cy, z\) \{[\s\S]*?layer\._tileZoom = z;[\s\S]*?finally \{ layer\._tileZoom = saved; \}/.test(page), "tileUrlAt must point the layer's tile zoom at z for the call and restore it");
+  assert.ok(page.includes("img.src = tileUrlAt(cx, cy, z)"), "stitched tiles must be addressed through tileUrlAt");
+  assert.ok(page.includes("attempt(1)"), "the wand retries one zoom coarser before falling back to a circle");
+});
+
+test("Enter means done, next: finish the line, or save the shape and arm the next step", () => {
+  assert.ok(page.includes('var NEXT_TOOL = { fairway: "green", green: "fairway", tee: "fairway", hole: "fairway" }'), "the hole order is fairway, green, next fairway");
+  assert.ok(page.includes('if (event.key === "Enter") { event.preventDefault(); doneAndNext(); return; }'), "Enter must run doneAndNext");
+  assert.ok(/function doneAndNext\(\) \{[\s\S]*?flushSave\(\);[\s\S]*?setTool\(step\.tool\)/.test(page), "done saves now and arms the next tool");
+});
+
 test("shapes are deleted by dropping them on the bin", () => {
   assert.ok(page.includes('data-gd-overlay="bin"'), "no bin on the map");
   assert.ok(/if \(overBin\(event\)\) \{[\s\S]*?removeFeature\(f\.id\)/.test(page), "dropping a shape on the bin must delete it");
