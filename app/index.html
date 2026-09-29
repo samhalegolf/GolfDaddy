@@ -32,6 +32,10 @@
      and no onerror handler of its own. Posts to /api/client-errors, which
      resolves natively only because the bootstrap above ran first. -->
 <script src="../scripts/clarity-error-reporter.js"></script>
+<!-- Translation layer and its English base, ahead of every module that
+     writes text (see scripts/gd-i18n.js). -->
+<script src="../scripts/gd-i18n.js"></script>
+<script src="../scripts/i18n/en.js"></script>
 <link rel="stylesheet" href="../assets/vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="styles.css?v=log-popup-20260917c">
 <link rel="stylesheet" href="../styles/inline/gd-editable-bag-panel-v1.css">
@@ -362,7 +366,7 @@
     <button id="railPin" type="button" class="railBtn" aria-label="Pin" aria-pressed="false"><img src="../assets/icons/flag.svg" alt="" draggable="false"></button>
     <button id="railGpsPin" type="button" class="railBtn" aria-label="GPS locate"><img src="../assets/brand/cg-gps-pin.png?v=deb3313b" alt=""></button>
     <button id="railScorecard" type="button" class="railBtn" aria-label="Scorecard"><img src="../assets/icons/scorecard.png" alt=""></button>
-    <button id="railGpsSettings" type="button" class="railBtn" aria-label="GPS Settings">
+    <button id="railGpsSettings" type="button" class="railBtn" aria-label="GPS Settings" data-i18n-aria-label="gpsSettings.openButton">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
     </button>
   </div>
@@ -480,26 +484,26 @@
        text is its current value. -->
   <div id="gpsSettingsPanel" class="sheet hiddenState">
     <div class="sheetHeader">
-      <strong>GPS Settings</strong>
-      <button id="gpsSettingsClose" type="button" class="sheetClose">Done</button>
+      <strong data-i18n="gpsSettings.title">GPS Settings</strong>
+      <button id="gpsSettingsClose" type="button" class="sheetClose" data-i18n="gpsSettings.done">Done</button>
     </div>
     <div class="sheetBody">
-      <div class="setGroup">Round</div>
+      <div class="setGroup" data-i18n="gpsSettings.groupRound">Round</div>
       <div class="setRow">
-        <div><strong>Units</strong><span>Distances shown in metres or yards.</span></div>
-        <button id="setUnits" type="button" class="toggle">Meters</button>
+        <div><strong data-i18n="gpsSettings.units">Units</strong><span data-i18n="gpsSettings.unitsHint">Distances shown in metres or yards.</span></div>
+        <button id="setUnits" type="button" class="toggle">Metres</button>
       </div>
-      <div class="setGroup">Shot view</div>
+      <div class="setGroup" data-i18n="gpsSettings.groupShotView">Shot view</div>
       <div class="setRow">
-        <div><strong>Show aim line</strong><span>Start to target guide.</span></div>
+        <div><strong data-i18n="gpsSettings.aimLine">Show aim line</strong><span data-i18n="gpsSettings.aimLineHint">Start to target guide.</span></div>
         <button id="setAimLine" type="button" class="toggle">On</button>
       </div>
       <div class="setRow">
-        <div><strong>Shot-up frame</strong><span>Rotate the view so the shot runs up the screen.</span></div>
+        <div><strong data-i18n="gpsSettings.shotUp">Shot-up frame</strong><span data-i18n="gpsSettings.shotUpHint">Rotate the view so the shot runs up the screen.</span></div>
         <button id="setShotUp" type="button" class="toggle">On</button>
       </div>
       <div class="setRow">
-        <div><strong>Lock frame tightness</strong><span id="setFrameTightSub">Balanced shot view</span></div>
+        <div><strong data-i18n="gpsSettings.tightness">Lock frame tightness</strong><span id="setFrameTightSub">Balanced shot view</span></div>
         <button id="setFrameTight" type="button" class="toggle">Medium</button>
       </div>
     </div>

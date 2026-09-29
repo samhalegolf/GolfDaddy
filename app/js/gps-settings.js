@@ -20,10 +20,11 @@
   var app = (window.ClarityApp = window.ClarityApp || {});
   var STORE_KEY = "clarity:gps-settings:v1";
 
+  /* label/sub are translation keys (scripts/i18n/en.js). */
   var TIGHTNESS = {
-    tight:  { label: "Tight",  sub: "Tight shot focus",     factor: 1.18 },
-    medium: { label: "Medium", sub: "Balanced shot view",   factor: 1 },
-    wide:   { label: "Wide",   sub: "More of the hole",     factor: 0.84 }
+    tight:  { label: "gpsSettings.tightnessTight",  sub: "gpsSettings.tightnessTightHint",  factor: 1.18 },
+    medium: { label: "gpsSettings.tightnessMedium", sub: "gpsSettings.tightnessMediumHint", factor: 1 },
+    wide:   { label: "gpsSettings.tightnessWide",   sub: "gpsSettings.tightnessWideHint",   factor: 0.84 }
   };
   var TIGHTNESS_ORDER = ["tight", "medium", "wide"];
 
@@ -55,6 +56,8 @@
   function notify() { listeners.forEach(function (fn) { try { fn(state); } catch (e) {} }); }
 
   var YARDS_PER_METRE = 1.0936133;
+
+  function t(key) { return window.GDI18n ? window.GDI18n.t(key) : key; }
 
   app.gpsSettings = {
     get: function () { return Object.assign({}, state); },
@@ -117,26 +120,26 @@
   function render() {
     var unitsBtn = document.getElementById("setUnits");
     if (unitsBtn) {
-      unitsBtn.textContent = state.units === "yd" ? "Yards" : "Meters";
+      unitsBtn.textContent = t(state.units === "yd" ? "gpsSettings.unitsYards" : "gpsSettings.unitsMetres");
       unitsBtn.setAttribute("aria-pressed", "true");
     }
     var aimBtn = document.getElementById("setAimLine");
     if (aimBtn) {
-      aimBtn.textContent = state.aimLine ? "On" : "Off";
+      aimBtn.textContent = t(state.aimLine ? "common.on" : "common.off");
       aimBtn.setAttribute("aria-pressed", state.aimLine ? "true" : "false");
     }
     var shotUpBtn = document.getElementById("setShotUp");
     if (shotUpBtn) {
-      shotUpBtn.textContent = state.shotUp ? "On" : "Off";
+      shotUpBtn.textContent = t(state.shotUp ? "common.on" : "common.off");
       shotUpBtn.setAttribute("aria-pressed", state.shotUp ? "true" : "false");
     }
     var tightBtn = document.getElementById("setFrameTight");
     var tightSub = document.getElementById("setFrameTightSub");
     if (tightBtn) {
-      tightBtn.textContent = TIGHTNESS[state.frameTightness].label;
+      tightBtn.textContent = t(TIGHTNESS[state.frameTightness].label);
       tightBtn.setAttribute("aria-pressed", "true");
     }
-    if (tightSub) tightSub.textContent = TIGHTNESS[state.frameTightness].sub;
+    if (tightSub) tightSub.textContent = t(TIGHTNESS[state.frameTightness].sub);
   }
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -159,6 +162,7 @@
     });
     var close = document.getElementById("gpsSettingsClose");
     if (close) close.addEventListener("click", function () { app.gpsSettings.close(); });
+    if (window.GDI18n) window.GDI18n.onChange(render);
     render();
   });
 })();

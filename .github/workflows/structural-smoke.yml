@@ -52,6 +52,7 @@ jobs:
           node dev/store-billing-client.test.js
           node dev/native-back-button.test.js
           node dev/fresh-app-boot.test.js
+          node dev/i18n.test.js
           node dev/app-native-contract.test.js
           node dev/app-course-data-feed.test.js
           node dev/course-identity-resolution.test.js
