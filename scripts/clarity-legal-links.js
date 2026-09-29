@@ -18,9 +18,12 @@
   "use strict";
 
   var LINKS = [
-    { href: "terms.html", label: "Terms of Service", hint: "How paid access and renewals work" },
-    { href: "privacy.html", label: "Privacy Policy", hint: "What we collect, and how to delete it" }
+    { href: "terms.html", label: "pay.termsOfService", hint: "pay.termsHint" },
+    { href: "privacy.html", label: "pay.privacyPolicy", hint: "pay.privacyHint" }
   ];
+
+  /* label and hint are translation keys (scripts/i18n/en.js). */
+  function words(key) { return window.GDI18n.html(key); }
 
   function safe(fn, fallback) {
     try { return fn(); } catch (error) { return fallback; }
@@ -34,7 +37,7 @@
      reader was dumped on the home screen with the paywall gone. */
   function markup() {
     var anchors = LINKS.map(function (link) {
-      return '<a href="' + link.href + '?from=membership">' + link.label + '</a>';
+      return '<a href="' + link.href + '?from=membership">' + words(link.label) + '</a>';
     }).join(" · ");
     return '<div class="clarityPaymentLegal">' + anchors + '</div>';
   }
@@ -53,7 +56,8 @@
       row.className = "gdPlayerSettingsRow";
       row.id = id;
       row.href = link.href;
-      row.innerHTML = '<div><strong>' + link.label + '</strong><span>' + link.hint + '</span></div>';
+      row.innerHTML = '<div><strong data-i18n="' + link.label + '">' + words(link.label) + '</strong>'
+        + '<span data-i18n="' + link.hint + '">' + words(link.hint) + '</span></div>';
       /* Legal links sit above "Delete account" so the destructive row stays last. */
       if (danger && danger.parentNode === list) list.insertBefore(row, danger);
       else list.appendChild(row);

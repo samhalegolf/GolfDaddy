@@ -7,8 +7,8 @@ exports.handler = async function(event) {
   let body = {}; try { body = JSON.parse(event.body || "{}"); } catch (_e) { return json(400, { error: "Invalid JSON" }); }
   if (!hasAuth()) return json(503, { error: "Supabase Auth is not configured. Add SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and SUPABASE_ANON_KEY.", code: "auth_not_configured" });
   const accountEmail = email(body.email); const password = String(body.password || "");
-  if (!accountEmail) return json(400, { error: "Enter a valid email" });
-  if (!password) return json(400, { error: "Enter your password" });
+  if (!accountEmail) return json(400, { error: "Enter a valid email", code: "invalid_email" });
+  if (!password) return json(400, { error: "Enter your password", code: "password_required" });
   try {
     const token = await supabaseAuth("token?grant_type=password", { method: "POST", body: JSON.stringify({ email: accountEmail, password }) }, false);
     const authUser = token && token.user;
@@ -27,6 +27,8 @@ exports.handler = async function(event) {
       ? "Incorrect password. If this is right after a password change, clear local auth state and sign in again."
       : (error.message || "Could not sign in with Supabase Auth");
     const status = error.status || 401;
-    return json(status, { error: message, code: "sign_in_failed", details: error.body || error.message || null });
+    /* The code is what the app translates into the player's language; the
+       English message stays for logs and older clients. */
+    return json(status, { error: message, code: error.status === 400 ? "wrong_password" : "sign_in_failed", details: error.body || error.message || null });
   }
 };

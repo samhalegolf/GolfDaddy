@@ -2870,7 +2870,7 @@
     return safe(()=>!!window.__gdDemoAdoptInFlight,false);
   }
   function gdPracticeSaveBubbleFromAction(){
-    if(!gdPracticeDemoAdoptActive()&&window.ClarityPayments?.requireAccess&&!window.ClarityPayments.requireAccess("save your own bubble"))return false;
+    if(!gdPracticeDemoAdoptActive()&&window.ClarityPayments?.requireAccess&&!window.ClarityPayments.requireAccess("saveBubble"))return false;
     const p=safe(()=>ensureProfile(),null);
     const pending=p?.practiceBubblePendingSource;
     if(!pending||!pending.active||!Number.isFinite(Number(pending.offsetDeg))){
@@ -2903,7 +2903,7 @@
     return gdPracticeRefreshProjectionSurfaces();
   }
   function gdPracticeAdoptBubbleFromAction(){
-    if(!gdPracticeDemoAdoptActive()&&window.ClarityPayments?.requireAccess&&!window.ClarityPayments.requireAccess("adopt a bubble from your own data"))return false;
+    if(!gdPracticeDemoAdoptActive()&&window.ClarityPayments?.requireAccess&&!window.ClarityPayments.requireAccess("adoptBubble"))return false;
     const analysis=gdPracticeProjectionReadyAnalysis();
     const ctx=gdPracticeProjectionContext(analysis);
     if(!ctx.canProject){
@@ -3257,7 +3257,7 @@
     /* "keep" changes nothing, so it never has to ask - refusing to leave a bag
        alone would be an odd thing to charge for. */
     if(action!=="keep"&&window.ClarityPayments?.requireAccess
-       &&!window.ClarityPayments.requireAccess("apply practice distances to your bag"))return false;
+       &&!window.ClarityPayments.requireAccess("practiceToBag"))return false;
     if(action==="keep"){
       gdPracticeBagSuggestionOpen=false;
       gdPracticeBagAdaptOpen=false;
@@ -5858,7 +5858,7 @@
        honoured at this level too or the staged bubble is never committed and
        GDDemoSession.adopt() silently reports failure. See
        gdPracticeDemoAdoptActive. */
-    if(!gdPracticeDemoAdoptActive()&&window.ClarityPayments?.requireAccess&&!window.ClarityPayments.requireAccess("set your own bubble centre"))return false;
+    if(!gdPracticeDemoAdoptActive()&&window.ClarityPayments?.requireAccess&&!window.ClarityPayments.requireAccess("bubbleCentre"))return false;
     const {p}=gdBubbleDataContext();
     const previewPending=gdMyBubbleLanePreviewPendingSource();
     const pending=previewPending||p.practiceBubblePendingSource||{};

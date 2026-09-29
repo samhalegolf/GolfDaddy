@@ -7,15 +7,15 @@ exports.handler = async function(event) {
   let body = {}; try { body = JSON.parse(event.body || "{}"); } catch (_e) { return json(400, { error: "Invalid JSON" }); }
   if (!hasAuth()) return json(503, { error: "Supabase Auth is not configured. Add SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and SUPABASE_ANON_KEY." });
   const accountEmail = email(body.email); const password = String(body.password || ""); const name = text(body.name, 160); const accountRole = role(body.role);
-  if (!name) return json(400, { error: "Enter a name" });
-  if (!accountEmail) return json(400, { error: "Enter a valid email" });
-  if (password.length < 6) return json(400, { error: "Password needs at least 6 characters" });
+  if (!name) return json(400, { error: "Enter a name", code: "name_required" });
+  if (!accountEmail) return json(400, { error: "Enter a valid email", code: "invalid_email" });
+  if (password.length < 6) return json(400, { error: "Password needs at least 6 characters", code: "password_too_short", minLength: 6 });
   try {
     let created;
     try {
       created = await supabaseAuth("admin/users", { method: "POST", body: JSON.stringify({ email: accountEmail, password, email_confirm: true, user_metadata: { name, role: accountRole } }) }, true);
     } catch (error) {
-      if (error.status === 422 || error.status === 400) return json(409, { error: "That email is already registered in Supabase Auth." });
+      if (error.status === 422 || error.status === 400) return json(409, { error: "That email is already registered in Supabase Auth.", code: "email_taken" });
       throw error;
     }
     const authUser = created && (created.user || created);

@@ -118,12 +118,20 @@ test("the invite cap is read from the server, never printed as a literal", () =>
 });
 
 test("the app never promises a referral reward against the next bill", () => {
+  /* The words live in the translation files now (scripts/i18n/en.js); the
+     code names them by key. */
+  const english = fs.readFileSync(path.join(ROOT, "scripts", "i18n", "en.js"), "utf8");
+  const referralWords = english.split("\n").filter(function (row) { return /"ref\./.test(row); }).join("\n");
+  assert.ok(!/next eligible bill|next bill|off your next|discount/i.test(referralWords),
+    "a reward is entitlement days stacked after existing access, not a bill discount: scripts/i18n/en.js");
+  assert.ok(/"ref\.earned": "[^"]*end of your Caddy Access/.test(english),
+    "say where the earned month actually goes: scripts/i18n/en.js ref.earned");
   eachClient(function (src, file) {
     const copy = referralCopy(src);
     assert.ok(!/next eligible bill|next bill|off your next|discount/i.test(copy),
       "a reward is entitlement days stacked after existing access, not a bill discount: " + file);
     const line = bodyOf(src, "function renderReferralRewardLine()");
-    assert.ok(/end of your Caddy Access/.test(line),
+    assert.ok(/end of your Caddy Access/.test(line) || /"ref\.earned"/.test(line),
       "say where the earned month actually goes: " + file);
   });
 });

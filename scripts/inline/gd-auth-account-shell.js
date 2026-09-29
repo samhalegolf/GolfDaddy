@@ -42,6 +42,14 @@
     catch(e) { return String(value ?? ''); }
   }
 
+  /* Words for the sign-in and account panels (scripts/gd-i18n.js). H() is
+     for the template strings below: translated and escaped for innerHTML. */
+  function L(key, vars) { return window.GDI18n.t(key, vars); }
+  function H(key, vars) { return window.GDI18n.html(key, vars); }
+  function roleWord(role) {
+    return L(role === 'admin' ? 'account.roleAdmin' : (role === 'coach' ? 'account.roleCoach' : 'account.rolePlayer'));
+  }
+
   function loadSafe() { try { if (typeof loadPlayerProfiles === 'function') loadPlayerProfiles(); } catch(e) {} }
   function saveSafe() {
     try { if (typeof savePlayerProfiles === 'function') savePlayerProfiles(); } catch(e) {}
@@ -245,18 +253,16 @@
 		      return itemEmail === key && item.accountId !== exceptAccountId;
 		    }) || null;
 		  }
-		  function duplicateEmailMessage(email,existing=null) {
-		    const role = existing ? roleLabel(existing.role).toLowerCase() : 'account';
+		  function duplicateEmailMessage(email) {
 		    const label = String(email || '').trim().toLowerCase();
-		    const article = /^[aeiou]/i.test(role) ? 'an' : 'a';
-		    return label ? `That email is already used by ${article} ${role}. Sign in with ${label} or use a different email.` : 'That email already has an account.';
+		    return label ? L('auth.emailTaken', { email: label }) : L('auth.emailTakenShort');
 		  }
 		  function blockDuplicateEmail(emailInputId,feedbackId,exceptAccountId='') {
 		    const input = document.getElementById(emailInputId);
 		    const email = String(input?.value || '').trim().toLowerCase();
 		    const duplicate = accountByFormEmail(email,accountsApi(),exceptAccountId);
 		    if (!duplicate) return false;
-		    const message = duplicateEmailMessage(email,duplicate);
+		    const message = duplicateEmailMessage(email);
 		    setFieldFeedback(feedbackId || 'gd67AuthFeedback',message,'error');
 		    safeToast(message);
 		    focusField(emailInputId);
@@ -266,15 +272,18 @@
 		  function loginFailureMessage(error) {
 	    const code = String((error && error.code) || (error && error.body && error.body.code) || '').trim();
 	    const message = String(error && error.message || '').trim();
-	    if (code === 'account_not_found' || /account.*not found|not found/i.test(message)) return 'Account does not exist.';
-	    if (code === 'auth_not_configured' || /not configured/i.test(message)) return 'Sign-in is not available right now. Please try again later.';
-	    if (code === 'password_changed_relogin_required') return 'Password changed in another session. Sign in again with your new password.';
-	    if (code === 'sign_in_failed' && /wrong|expired|invalid|stale|site/i.test(message)) return 'Sign in failed. Check your password, and if you recently changed it, sign in again with the new password.';
-	    if (/password/i.test(message)) return 'Incorrect password.';
-	    if (/local storage|signed out/i.test(message)) return 'A stale local session was found. Sign in again with your current password.';
-	    if (/valid email/i.test(message)) return 'Enter a valid email.';
-	    if (/account system/i.test(message)) return 'Login failed. Try again in a moment.';
-	    return 'Login failed.';
+	    /* Already in the player's language (clarity-supabase-auth.js) - the
+	       English patterns below would not recognise it. */
+	    if (error && error.localized && message) return message;
+	    if (code === 'account_not_found' || /account.*not found|not found/i.test(message)) return L('auth.errNotFound');
+	    if (code === 'auth_not_configured' || /not configured/i.test(message)) return L('auth.errUnavailable');
+	    if (code === 'password_changed_relogin_required') return L('auth.errPasswordChanged');
+	    if (code === 'sign_in_failed' && /wrong|expired|invalid|stale|site/i.test(message)) return L('auth.errSignInFailed');
+	    if (/password/i.test(message)) return L('auth.errIncorrectPassword');
+	    if (/local storage|signed out/i.test(message)) return L('auth.errStaleSession');
+	    if (/valid email/i.test(message)) return L('auth.errValidEmail');
+	    if (/account system/i.test(message)) return L('auth.errTryAgain');
+	    return L('auth.errLoginFailed');
 	  }
 
 	  function passwordResetParams() {
@@ -360,20 +369,20 @@
         return `
         <section class="accountPanel">
           <div class="panelHead">
-            <div><strong>Create account</strong><span>New player accounts start with their own profile.</span></div>
+            <div><strong>${H('auth.modeCreate')}</strong><span>${H('auth.createHint')}</span></div>
           </div>
-          <button class="authDismiss" type="button" onclick="gd67ExitAuth()">‹ Continue without an account</button>
+          <button class="authDismiss" type="button" onclick="gd67ExitAuth()">${H('auth.continueWithout')}</button>
           <div class="accountGrid">
-            <label class="full">Name<input id="gd67AuthName" autocomplete="name" placeholder="Your name"></label>
-            <label class="full">Email<input id="gd67AuthEmail" type="email" autocomplete="email" placeholder="email@example.com"></label>
-            <label class="full">Password<input id="gd67AuthPassword" type="password" autocomplete="new-password" placeholder="Create password"></label>
+            <label class="full">${H('auth.name')}<input id="gd67AuthName" autocomplete="name" placeholder="${H('auth.namePlaceholder')}"></label>
+            <label class="full">${H('signIn.email')}<input id="gd67AuthEmail" type="email" autocomplete="email" placeholder="email@example.com"></label>
+            <label class="full">${H('signIn.password')}<input id="gd67AuthPassword" type="password" autocomplete="new-password" placeholder="${H('auth.createPasswordPlaceholder')}"></label>
           </div>
 	          <div class="authOptions">
-	            <label class="authKeep"><input id="gd67KeepLoggedIn" type="checkbox" checked>Keep me logged in</label>
+	            <label class="authKeep"><input id="gd67KeepLoggedIn" type="checkbox" checked>${H('auth.keepLoggedIn')}</label>
 	          </div>
 	          ${authFeedbackMarkup()}
-	          <button class="saveBtn" type="button" onclick="gd67Signup()">Create Account</button>
-	          <div class="authSwitch"><span>Already have an account?</span><button class="textLink" type="button" onclick="gd67SetAuthMode('login')">Sign in</button></div>
+	          <button class="saveBtn" type="button" onclick="gd67Signup()">${H('auth.createAccountButton')}</button>
+	          <div class="authSwitch"><span>${H('auth.haveAccount')}</span><button class="textLink" type="button" onclick="gd67SetAuthMode('login')">${H('common.signIn')}</button></div>
 	        </section>`;
 	      }
 	      if (authMode === 'reset') {
@@ -381,36 +390,36 @@
 	        return `
 	        <section class="accountPanel">
 	          <div class="panelHead">
-	            <div><strong>${setupRoute ? 'Set up account' : 'Set new password'}</strong><span>${setupRoute ? 'Choose your password to finish your Clarity account.' : 'Use the email address that received the reset link.'}</span></div>
+	            <div><strong>${H(setupRoute ? 'auth.modeSetUp' : 'auth.setNewPassword')}</strong><span>${H(setupRoute ? 'auth.setUpHint' : 'auth.resetHint')}</span></div>
 	          </div>
 	          <div class="accountGrid">
-	            <label class="full">Email<input id="gd67ResetEmail" type="email" autocomplete="email" placeholder="email@example.com" value="${esc(resetEmail)}"></label>
-	            <label class="full">New Password<input id="gd67ResetPassword" type="password" autocomplete="new-password" placeholder="New password"></label>
-	            <label class="full">Confirm Password<input id="gd67ResetConfirm" type="password" autocomplete="new-password" placeholder="Confirm password"></label>
+	            <label class="full">${H('signIn.email')}<input id="gd67ResetEmail" type="email" autocomplete="email" placeholder="email@example.com" value="${esc(resetEmail)}"></label>
+	            <label class="full">${H('auth.newPassword')}<input id="gd67ResetPassword" type="password" autocomplete="new-password" placeholder="${H('auth.newPasswordPlaceholder')}"></label>
+	            <label class="full">${H('auth.confirmPassword')}<input id="gd67ResetConfirm" type="password" autocomplete="new-password" placeholder="${H('auth.confirmPlaceholder')}"></label>
 	          </div>
 	          ${authFeedbackMarkup()}
-	          <button class="saveBtn" type="button" onclick="gd67ResetPasswordFromLink()">${setupRoute ? 'Set Up Account' : 'Save New Password'}</button>
-	          <div class="authSwitch"><span>Already know it?</span><button class="textLink" type="button" onclick="gd67SetAuthMode('login')">Sign in</button></div>
+	          <button class="saveBtn" type="button" onclick="gd67ResetPasswordFromLink()">${H(setupRoute ? 'auth.setUpButton' : 'auth.saveNewPassword')}</button>
+	          <div class="authSwitch"><span>${H('auth.alreadyKnowIt')}</span><button class="textLink" type="button" onclick="gd67SetAuthMode('login')">${H('common.signIn')}</button></div>
 	        </section>`;
 	      }
 	      return `
 	        <section class="accountPanel">
 	          <div class="panelHead">
-	            <div><strong>Login</strong><span>Distances and the rangefinder are free - an account saves your rounds, scores and practice data.</span></div>
+	            <div><strong>${H('auth.loginTitle')}</strong><span>${H('auth.loginHint')}</span></div>
 	          </div>
-	          <button class="authDismiss" type="button" onclick="gd67ExitAuth()">‹ Continue without an account</button>
+	          <button class="authDismiss" type="button" onclick="gd67ExitAuth()">${H('auth.continueWithout')}</button>
           <div class="accountGrid">
-            <label class="full">Email<input id="gd67AuthEmail" type="email" autocomplete="email" placeholder="email@example.com"></label>
-            <label class="full">Password<input id="gd67AuthPassword" type="password" autocomplete="current-password" placeholder="Password"></label>
+            <label class="full">${H('signIn.email')}<input id="gd67AuthEmail" type="email" autocomplete="email" placeholder="email@example.com"></label>
+            <label class="full">${H('signIn.password')}<input id="gd67AuthPassword" type="password" autocomplete="current-password" placeholder="${H('signIn.password')}"></label>
           </div>
           <div class="authOptions">
-	            <label class="authKeep"><input id="gd67KeepLoggedIn" type="checkbox" checked>Keep me logged in</label>
-	            <button class="textLink" type="button" onclick="gd67ForgotPassword()">Forgot password?</button>
+	            <label class="authKeep"><input id="gd67KeepLoggedIn" type="checkbox" checked>${H('auth.keepLoggedIn')}</label>
+	            <button class="textLink" type="button" onclick="gd67ForgotPassword()">${H('auth.forgotPassword')}</button>
 	          </div>
 	          ${authFeedbackMarkup()}
 	          <div class="authHelp" id="gd67ForgotPasswordHelp" role="status"></div>
-	          <button class="saveBtn" type="button" onclick="gd67Login()">Login</button>
-	          <div class="authSwitch"><span>New to Clarity Caddy?</span><button class="textLink" type="button" onclick="gd67SetAuthMode('signup')">Create account</button></div>
+	          <button class="saveBtn" type="button" onclick="gd67Login()">${H('auth.loginButton')}</button>
+	          <div class="authSwitch"><span>${H('auth.newToClarity')}</span><button class="textLink" type="button" onclick="gd67SetAuthMode('signup')">${H('auth.modeCreate')}</button></div>
         </section>`;
     }
     const role = String(account.role || 'player') === 'admin' ? 'admin' : (String(account.role || 'player') === 'coach' ? 'coach' : 'player');
@@ -419,33 +428,33 @@
       return `
         <section class="accountPanel">
           <div class="panelHead">
-            <div><strong>Set Login</strong><span>${esc(roleLabel(role))} login · ${esc(account.email || '')}</span></div>
+            <div><strong>${H('account.setLoginTitle')}</strong><span>${H('account.roleLogin', { role: roleWord(role), email: account.email || '' })}</span></div>
           </div>
-          <div class="smallNote">Open Settings to confirm your details and choose your own password.</div>
+          <div class="smallNote">${H('account.setLoginHint')}</div>
           <div class="accountActions">
-            <button class="saveBtn" type="button" onclick="gdOpenPlayerSettingsPanel()">Open Settings</button>
-            <button class="secondaryBtn" type="button" onclick="gd67Logout()">Sign Out</button>
+            <button class="saveBtn" type="button" onclick="gdOpenPlayerSettingsPanel()">${H('account.openSettings')}</button>
+            <button class="secondaryBtn" type="button" onclick="gd67Logout()">${H('account.signOut')}</button>
           </div>
         </section>`;
     }
     return `
       <section class="accountPanel">
         <div class="panelHead">
-          <div><strong>Player Settings</strong><span>${esc(roleLabel(role))} login · ${esc(account.email || '')}</span></div>
+          <div><strong>${H('account.playerSettings')}</strong><span>${H('account.roleLogin', { role: roleWord(role), email: account.email || '' })}</span></div>
         </div>
         <div class="accountGrid">
-          <label>Name<input id="gd67AccountName" autocomplete="name" value="${esc(account.name || '')}"></label>
-          <label>Email<input id="gd67AccountEmail" type="email" autocomplete="email" value="${esc(account.email || '')}"></label>
-          ${role === 'admin' ? `<label class="full">Account Type<select id="gd67AccountRole"><option value="player" ${role === 'player' ? 'selected' : ''}>Player</option><option value="coach" ${role === 'coach' ? 'selected' : ''}>Coach</option><option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option></select></label>` : ''}
+          <label>${H('auth.name')}<input id="gd67AccountName" autocomplete="name" value="${esc(account.name || '')}"></label>
+          <label>${H('signIn.email')}<input id="gd67AccountEmail" type="email" autocomplete="email" value="${esc(account.email || '')}"></label>
+          ${role === 'admin' ? `<label class="full">${H('account.accountType')}<select id="gd67AccountRole"><option value="player" ${role === 'player' ? 'selected' : ''}>${H('account.rolePlayer')}</option><option value="coach" ${role === 'coach' ? 'selected' : ''}>${H('account.roleCoach')}</option><option value="admin" ${role === 'admin' ? 'selected' : ''}>${H('account.roleAdmin')}</option></select></label>` : ''}
         </div>
         <div class="accountSettingsBody">
-          <div class="photoUpload"><label>Profile Photo<input id="gd67ProfilePhoto" type="file" accept="image/*" onchange="gd67UploadProfilePhoto(event)"></label></div>
-          <label>Change Password<input id="gd67AccountPassword" type="password" autocomplete="new-password" placeholder="Leave blank to keep current"></label>
+          <div class="photoUpload"><label>${H('account.profilePhoto')}<input id="gd67ProfilePhoto" type="file" accept="image/*" onchange="gd67UploadProfilePhoto(event)"></label></div>
+          <label>${H('account.changePassword')}<input id="gd67AccountPassword" type="password" autocomplete="new-password" placeholder="${H('account.keepCurrent')}"></label>
         </div>
         <div class="accountActions">
-          <button class="saveBtn" type="button" onclick="gd67SaveAccount()">Save Settings</button>
-          <button class="secondaryBtn" type="button" onclick="gd67Logout()">Sign Out</button>
-          <button class="secondaryBtn" type="button" onclick="gd67ClosePlayerSettings()">Close</button>
+          <button class="saveBtn" type="button" onclick="gd67SaveAccount()">${H('account.saveSettings')}</button>
+          <button class="secondaryBtn" type="button" onclick="gd67Logout()">${H('account.signOut')}</button>
+          <button class="secondaryBtn" type="button" onclick="gd67ClosePlayerSettings()">${H('account.close')}</button>
         </div>
       </section>`;
   }
@@ -1457,7 +1466,7 @@
             <span class="authMark" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=1e5a26e2" alt=""></span>
             <div class="authTitle">Clarity Caddy</div>
           </div>
-	          <div class="authMode">${authMode === 'signup' ? 'Create account' : (authMode === 'reset' ? (isAccountSetupRoute() ? 'Set up account' : 'Set password') : 'Sign in')}</div>
+	          <div class="authMode">${H(authMode === 'signup' ? 'auth.modeCreate' : (authMode === 'reset' ? (isAccountSetupRoute() ? 'auth.modeSetUp' : 'auth.modeSetPassword') : 'common.signIn'))}</div>
         </div>
         ${accountPanel(null)}
       </div>
@@ -1724,7 +1733,7 @@
 	      if (feedbackId && message) setFieldFeedback(feedbackId,message,'success');
 	      if (message) safeToast(message);
 	    } catch(e) {
-	      const message = e && e.message ? e.message : 'Account action failed';
+	      const message = e && e.message ? e.message : L('account.actionFailed');
 	      if (feedbackId) setFieldFeedback(feedbackId,message,'error');
 	      safeToast(message);
 	    }
@@ -1740,7 +1749,7 @@
 	      if (feedbackId && message) setFieldFeedback(feedbackId,message,'success');
 	      if (message) safeToast(message);
 	    } catch(e) {
-	      const message = e && e.message ? e.message : 'Account action failed';
+	      const message = e && e.message ? e.message : L('account.actionFailed');
 	      if (feedbackId) setFieldFeedback(feedbackId,message,'error');
 	      safeToast(message);
 	    }
@@ -1806,7 +1815,7 @@
 		    }
 		    resetEmail = passwordResetEmailFromRoute();
 		    authMode = 'reset';
-	    try { document.title = isAccountSetupRoute() ? 'Set up account - Clarity Caddy' : 'Set password - Clarity Caddy'; } catch(e) {}
+	    try { document.title = L(isAccountSetupRoute() ? 'auth.pageTitleSetUp' : 'auth.pageTitleSetPassword'); } catch(e) {}
 	    authFeedback = '';
 	    authFeedbackKind = 'info';
 	    render();
@@ -1820,19 +1829,19 @@
 	    const email = String(document.getElementById('gd67ResetEmail')?.value || '').trim().toLowerCase();
 	    const password = String(document.getElementById('gd67ResetPassword')?.value || '');
 	    const confirm = String(document.getElementById('gd67ResetConfirm')?.value || '');
-	    if (!email || !email.includes('@')) return setAuthFeedback('Enter the account email.', 'error');
-	    if (password.length < 4) return setAuthFeedback('Password needs at least 4 characters.', 'error');
-	    if (password !== confirm) return setAuthFeedback('Passwords do not match.', 'error');
+	    if (!email || !email.includes('@')) return setAuthFeedback(L('auth.enterAccountEmail'), 'error');
+	    if (password.length < 4) return setAuthFeedback(L('auth.passwordTooShort', { n: 4 }), 'error');
+	    if (password !== confirm) return setAuthFeedback(L('auth.passwordsDontMatch'), 'error');
 	    try {
 	      const api = accountsApi();
-	      if (!api || typeof api.state !== 'function') throw new Error('Account system not ready');
+	      if (!api || typeof api.state !== 'function') throw new Error(L('account.notReady'));
 	      if (typeof api.load === 'function') api.load();
 	      let state = api.state() || {};
 	      let accounts = Array.isArray(state.accounts) ? state.accounts : [];
 	      const loginEmail = typeof gdAccountLoginEmail === 'function' ? gdAccountLoginEmail(email) : email;
 	      let account = accounts.find(item => String(item && item.email || '').trim().toLowerCase() === loginEmail);
 	      if (!account && window.ClarityCloudSync && typeof window.ClarityCloudSync.restoreAccounts === 'function') {
-	        setAuthFeedback('Finding your account...', 'info');
+	        setAuthFeedback(L('auth.findingAccount'), 'info');
 	        try {
 	          await window.ClarityCloudSync.restoreAccounts(setupRoute ? 'account-setup' : 'password-reset');
 	          if (typeof api.load === 'function') api.load();
@@ -1841,7 +1850,7 @@
 	          account = accounts.find(item => String(item && item.email || '').trim().toLowerCase() === loginEmail);
 	        } catch(restoreError) {}
 	      }
-	      if (!account) return setAuthFeedback('We could not find this account yet. Ask your coach to confirm the email, then try the setup link again.', 'error');
+	      if (!account) return setAuthFeedback(L('auth.accountNotFoundYet'), 'error');
 	      const now = new Date().toISOString();
 	      account.passwordSalt = typeof gdNewId === 'function' ? gdNewId('salt') : `salt_${Date.now().toString(36)}`;
 	      account.passwordHash = gdAccountHashPassword(password, account.passwordSalt);
@@ -1864,7 +1873,7 @@
 		      document.body.classList.remove('gdAuthLocked','gdPasswordResetRoute');
 	      close();
 	      try { if (typeof showShellHome === 'function') showShellHome(); } catch(e) {}
-	      safeToast(setupRoute ? 'Account set up' : 'Password updated');
+	      safeToast(L(setupRoute ? 'auth.accountSetUp' : 'auth.passwordUpdated'));
 	      /* Only for a first-time setup. A password RESET is someone who already knows what
 	         Clarity is - offering them the app here would be a nag, not a next step. */
 	      if (setupRoute) {
@@ -1875,7 +1884,7 @@
 	        } catch(e) {}
 	      }
 	    } catch(e) {
-	      setAuthFeedback(e && e.message ? e.message : 'Could not update password.', 'error');
+	      setAuthFeedback(e && e.message ? e.message : L('auth.couldNotUpdatePassword'), 'error');
 	    }
 	  }
 
@@ -1883,18 +1892,16 @@
 	    const email = String(document.getElementById('gd67AuthEmail')?.value || '').trim();
 	    const help = document.getElementById('gd67ForgotPasswordHelp');
 	    setAuthFeedback('', 'info');
-	    const message = email
-	      ? `Password reset for ${email} will be sent by email. An admin or coach can still issue a temporary password if needed.`
-	      : 'Enter your email first. Password reset is sent by email.';
+	    const message = email ? L('auth.resetWillBeSent', { email: email }) : L('auth.enterEmailFirst');
     if (help) help.textContent = message;
-    safeToast('Password reset email requested');
+    safeToast(L('auth.resetRequested'));
   }
 
 			  async function signup() {
 		    const api = accountsApi();
 		    setAuthFeedback('', 'info');
 		    try {
-		      if (!api || typeof api.signup !== 'function') throw new Error('Account system not ready');
+		      if (!api || typeof api.signup !== 'function') throw new Error(L('account.notReady'));
 		      if (blockDuplicateEmail('gd67AuthEmail','gd67AuthFeedback')) return;
 	      const created = await api.signup({
         name: document.getElementById('gd67AuthName')?.value,
@@ -1902,13 +1909,13 @@
         password: document.getElementById('gd67AuthPassword')?.value,
         role: 'player'
       });
-      setAuthFeedback('Setting up your account...', 'info');
+      setAuthFeedback(L('auth.settingUp'), 'info');
       try {
-        if (!window.ClarityCloudSync || typeof window.ClarityCloudSync.requireAccountSynced !== 'function') throw new Error('Account sync is not ready');
+        if (!window.ClarityCloudSync || typeof window.ClarityCloudSync.requireAccountSynced !== 'function') throw new Error(L('account.syncNotReady'));
         await window.ClarityCloudSync.requireAccountSynced(created, 'signup');
       } catch(syncError) {
         try { if (window.ClarityCloudSync && typeof window.ClarityCloudSync.discardLocalAccount === 'function') window.ClarityCloudSync.discardLocalAccount(created && created.accountId); } catch(discardError) {}
-        throw new Error(syncError && syncError.message ? syncError.message : 'We could not confirm this account, so it was not created. Please try again.');
+        throw new Error(syncError && syncError.message ? syncError.message : L('auth.couldNotConfirm'));
       }
       setAuthFeedback('', 'info');
       gdSafeLocalSet('gd_account_keep_logged_in_v1',document.getElementById('gd67KeepLoggedIn')?.checked===false?'0':'1');
@@ -1917,11 +1924,11 @@
 	      document.documentElement.classList.remove('gdAuthRouteBoot','gdResetRouteBoot');
 	      close();
 	      try { if (typeof showShellHome === 'function') showShellHome(); } catch(e) {}
-	      safeToast(created && created.name ? `Welcome, ${created.name}` : 'Account created');
+	      safeToast(created && created.name ? L('auth.welcome', { name: created.name }) : L('auth.accountCreated'));
 		    } catch(e) {
-		      const message = e && e.message ? e.message : 'Could not create account.';
+		      const message = e && e.message ? e.message : L('auth.couldNotCreate');
 		      setAuthFeedback(message, 'error');
-		      if (/email|account/i.test(message)) focusField('gd67AuthEmail');
+		      if (/email|account/i.test(message) || e?.code === 'invalid_email' || e?.code === 'email_taken') focusField('gd67AuthEmail');
 		      safeToast(message);
 		    }
 		  }
@@ -1947,17 +1954,17 @@
 	        close();
 	        try { if (typeof showShellHome === 'function') showShellHome(); } catch(e) {}
 	      }
-	      safeToast('Logged in');
+	      safeToast(L('auth.loggedIn'));
 	    };
 	    try {
-	      if (!api || typeof api.login !== 'function') throw new Error('Account system not ready');
+	      if (!api || typeof api.login !== 'function') throw new Error(L('account.notReady'));
       const loggedIn = await api.login(
         document.getElementById('gd67AuthEmail')?.value,
         document.getElementById('gd67AuthPassword')?.value,
         {keepLoggedIn: document.getElementById('gd67KeepLoggedIn')?.checked !== false}
       );
-      setAuthFeedback('Signing you in...', 'info');
-      if (!window.ClarityCloudSync || typeof window.ClarityCloudSync.requireAccountSynced !== 'function') throw new Error('Account sync is not ready');
+      setAuthFeedback(L('auth.signingYouIn'), 'info');
+      if (!window.ClarityCloudSync || typeof window.ClarityCloudSync.requireAccountSynced !== 'function') throw new Error(L('account.syncNotReady'));
       await window.ClarityCloudSync.requireAccountSynced(loggedIn, 'login');
 	      /* Clear the progress message before closing - it used to be left set,
 	         so the next time the login card rendered it still read as if a
@@ -1983,15 +1990,15 @@
   function logout() {
     const api = accountsApi();
     accountAction(() => {
-      if (!api || typeof api.logout !== 'function') throw new Error('Account system not ready');
+      if (!api || typeof api.logout !== 'function') throw new Error(L('account.notReady'));
       api.logout();
-    }, 'Signed out');
+    }, L('auth.signedOut'));
   }
 
 	  async function saveAccount() {
 	    const api = accountsApi();
 	    try {
-	      if (!api || typeof api.update !== 'function') throw new Error('Account system not ready');
+	      if (!api || typeof api.update !== 'function') throw new Error(L('account.notReady'));
 	      const current = currentAccount();
 	      const wasSetup = !!current?.requiresPasswordSetup;
 	      if (blockDuplicateEmail('gd67AccountEmail','gd67AuthFeedback',current?.accountId || '')) return;
@@ -2006,14 +2013,14 @@
         playerSettingsOpen = false;
         close();
         try { if (typeof showShellHome === 'function') showShellHome(); } catch(e) {}
-        safeToast('Login saved');
+        safeToast(L('account.loginSaved'));
         return;
       }
       playerSettingsOpen = false;
       render();
-      safeToast('Settings saved');
+      safeToast(L('account.settingsSaved'));
 	    } catch(e) {
-	      const message = e && e.message ? e.message : 'Account action failed';
+	      const message = e && e.message ? e.message : L('account.actionFailed');
 	      setFieldFeedback('gd67AuthFeedback',message,'error');
 	      if (/email|account/i.test(message)) focusField('gd67AccountEmail');
 	      safeToast(message);
@@ -2024,7 +2031,7 @@
     const file = event?.target?.files?.[0];
     if (!file) return;
     if (!file.type || !file.type.startsWith('image/')) {
-      safeToast('Choose an image file');
+      safeToast(L('account.chooseImage'));
       return;
     }
     const reader = new FileReader();
@@ -2047,12 +2054,12 @@
           saveSafe();
         }
         render();
-        safeToast('Profile photo saved');
+        safeToast(L('account.photoSaved'));
       };
-      imgEl.onerror = () => safeToast('Could not read photo');
+      imgEl.onerror = () => safeToast(L('account.couldNotReadPhoto'));
       imgEl.src = String(reader.result || '');
     };
-    reader.onerror = () => safeToast('Could not open photo');
+    reader.onerror = () => safeToast(L('account.couldNotOpenPhoto'));
     reader.readAsDataURL(file);
   }
 
@@ -2482,6 +2489,11 @@
 	    if (currentAccount()) return false;
 	    return authIntent || authMode === 'reset';
 	  };
+	  /* The panel is built from template strings, so a language switch while it
+	     is open redraws it. */
+	  window.GDI18n.onChange(function () {
+	    try { if (!overlay().classList.contains('hidden')) render(); } catch(e) {}
+	  });
 	  window.gd67OpenPasswordResetRoute = openPasswordResetRoute;
 	  window.gd67ResetPasswordFromLink = resetPasswordFromLink;
 	  window.gd67Signup = signup;

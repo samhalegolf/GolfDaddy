@@ -10,6 +10,25 @@
   window[INSTALLED_KEY] = true;
 
   function safe(fn, fallback) { try { return fn(); } catch (_e) { return fallback; } }
+  function L(key, vars) { return window.GDI18n.t(key, vars); }
+  function H(key, vars) { return window.GDI18n.html(key, vars); }
+
+  /* The server's refusals carry a code; the player reads it in their own
+     language. `localized` tells the sign-in form the message is final, so it
+     does not go on to pattern-match English it no longer contains. */
+  var SERVER_ERRORS = {
+    invalid_email: "auth.errValidEmail",
+    password_required: "auth.passwordRequired",
+    name_required: "auth.nameRequired",
+    password_too_short: "auth.passwordTooShort",
+    email_taken: "auth.emailTakenShort",
+    wrong_password: "auth.errIncorrectPassword",
+    account_not_found: "auth.errNotFound",
+    auth_not_configured: "auth.errUnavailable",
+    invalid_token: "auth.sessionExpired",
+    token_required: "auth.signInAgain",
+    user_mismatch: "auth.onlyOwnAccount"
+  };
   function nowISO() { return new Date().toISOString(); }
   function normalizeEmail(value) { return String(value || "").trim().toLowerCase(); }
   function loadJson(key, fallback) { return safe(function () { return JSON.parse(localStorage.getItem(key) || "null"); }, null) || fallback; }
@@ -29,13 +48,15 @@
     if (authed) {
       var token = "";
       try { token = await freshAccessToken(); } catch (_error) { token = ""; }
-      if (!token) throw new Error("Sign in again to continue");
+      if (!token) throw new Error(L("auth.signInAgain"));
       headers.Authorization = "Bearer " + token;
     }
     var response = await fetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload || {}) });
     var body = await response.json().catch(function () { return {}; });
     if (!response.ok || body.ok === false) {
-      var error = new Error(body.error || "Sign-in request failed. Please try again.");
+      var known = SERVER_ERRORS[body.code];
+      var error = new Error(known ? L(known, { n: body.minLength }) : (body.error || L("auth.requestFailed")));
+      error.localized = !!known;
       error.code = body.code || "request_failed";
       error.status = response.status;
       error.body = body;
@@ -136,8 +157,8 @@
 
   async function updateAccount(data) {
     var existing = currentAccount();
-    if (!existing) throw new Error("Sign in first");
-    if (!existing.supabaseUserId) throw new Error("This account needs to be re-linked. Sign out and sign back in, then try again.");
+    if (!existing) throw new Error(L("auth.signInFirst"));
+    if (!existing.supabaseUserId) throw new Error(L("auth.relinkNeeded"));
     var nextPassword = String(data && data.password || "");
     /* The access token is the proof of identity - the endpoint resolves the user
        from it and refuses a request without one. Sending the account's own
@@ -151,7 +172,7 @@
        is the server's. */
     var token = await freshAccessToken();
     if (!token) {
-      var expired = new Error("Your session has expired. Sign in again to update your account.");
+      var expired = new Error(L("auth.sessionExpired"));
       expired.code = "session_expired";
       throw expired;
     }
@@ -165,7 +186,7 @@
         return await login(nextEmail, nextPassword, { keepLoggedIn: true });
       } catch (error) {
         clearStaleAuthState();
-        var message = new Error("Password changed. Please sign in again with the new password.");
+        var message = new Error(L("auth.passwordChangedSignIn"));
         message.code = "password_changed_relogin_required";
         message.body = error && error.body || null;
         throw message;
@@ -269,7 +290,7 @@
       /* Supabase answers "Email link is invalid or has expired", which is accurate and
          useless - it leaves someone holding a dead link with nowhere to go. Say what to do
          instead; the raw reason stays on the error for diagnosis. */
-      var failure = new Error("That link has expired or has already been used. Ask your coach to resend the welcome email, or use Forgot password on the sign-in screen.");
+      var failure = new Error(L("auth.linkExpired"));
       failure.detail = body.message || body.error_description || body.msg || body.error || ("HTTP " + response.status);
       failure.code = body.error_code || "";
       throw failure;
@@ -315,7 +336,7 @@
   async function fetchAuthConfig() {
     var response = await fetch("/api/auth-public-config");
     var body = await response.json().catch(function () { return {}; });
-    if (!response.ok || !usableAuthConfig(body)) throw new Error("Sign-in is not available right now. Please try again later.");
+    if (!response.ok || !usableAuthConfig(body)) throw new Error(L("auth.errUnavailable"));
     authConfigMemo = body;
     saveJson(AUTH_CONFIG_KEY, body);
     publishAuthConfigExtras(body);
@@ -355,7 +376,7 @@
       headers: { apikey: config.supabaseAnonKey, Authorization: "Bearer " + accessToken }
     });
     var body = await response.json().catch(function () { return {}; });
-    if (!response.ok) throw new Error(body.message || body.error_description || "Could not verify setup link");
+    if (!response.ok) throw new Error(body.message || body.error_description || L("setup.couldNotVerify"));
     return body;
   }
 
@@ -366,7 +387,7 @@
       body: JSON.stringify({ password: nextPassword })
     });
     var body = await response.json().catch(function () { return {}; });
-    if (!response.ok) throw new Error(body.message || body.error_description || "Could not set password");
+    if (!response.ok) throw new Error(body.message || body.error_description || L("setup.couldNotSetPassword"));
     return body;
   }
 
@@ -501,11 +522,11 @@
     overlay.innerHTML = [
       "<div style='width:min(420px,100%);background:#101b15;border:1px solid rgba(255,255,255,.16);border-radius:22px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.45)'>",
       "<div style='color:#42b66a;font-weight:900;letter-spacing:.12em;text-transform:uppercase;font-size:12px;margin-bottom:10px'>Clarity Caddy</div>",
-      "<h1 style='font-size:28px;line-height:1.05;margin:0 0 10px'>Set your password</h1>",
-      "<p style='margin:0 0 16px;color:#c8d1cc;line-height:1.4'>Create a password for this Clarity account. This setup link can only be used with the email it was sent to.</p>",
-      "<input id='claritySetupPassword1' type='password' autocomplete='new-password' placeholder='New password' style='box-sizing:border-box;width:100%;margin:0 0 10px;padding:14px;border-radius:14px;border:1px solid rgba(255,255,255,.18);background:#07100b;color:#fff;font-size:16px'>",
-      "<input id='claritySetupPassword2' type='password' autocomplete='new-password' placeholder='Confirm password' style='box-sizing:border-box;width:100%;margin:0 0 14px;padding:14px;border-radius:14px;border:1px solid rgba(255,255,255,.18);background:#07100b;color:#fff;font-size:16px'>",
-      "<button id='claritySetupPasswordSave' style='width:100%;border:0;border-radius:999px;background:#ff9f2f;color:#06110b;font-weight:900;padding:13px 16px;font-size:15px'>Save password</button>",
+      "<h1 style='font-size:28px;line-height:1.05;margin:0 0 10px'>" + H("setup.title") + "</h1>",
+      "<p style='margin:0 0 16px;color:#c8d1cc;line-height:1.4'>" + H("setup.intro") + "</p>",
+      "<input id='claritySetupPassword1' type='password' autocomplete='new-password' placeholder='" + H("auth.newPasswordPlaceholder") + "' style='box-sizing:border-box;width:100%;margin:0 0 10px;padding:14px;border-radius:14px;border:1px solid rgba(255,255,255,.18);background:#07100b;color:#fff;font-size:16px'>",
+      "<input id='claritySetupPassword2' type='password' autocomplete='new-password' placeholder='" + H("auth.confirmPlaceholder") + "' style='box-sizing:border-box;width:100%;margin:0 0 14px;padding:14px;border-radius:14px;border:1px solid rgba(255,255,255,.18);background:#07100b;color:#fff;font-size:16px'>",
+      "<button id='claritySetupPasswordSave' style='width:100%;border:0;border-radius:999px;background:#ff9f2f;color:#06110b;font-weight:900;padding:13px 16px;font-size:15px'>" + H("setup.save") + "</button>",
       "<p id='claritySetupPasswordStatus' style='min-height:20px;margin:14px 0 0;color:#c8d1cc;font-size:13px;line-height:1.35'></p>",
       "</div>"
     ].join("");
@@ -520,7 +541,7 @@
       ? Promise.resolve(token.accessToken)
       : (function () {
           button.disabled = true;
-          status.textContent = "Checking your link...";
+          status.textContent = L("setup.checkingLink");
           return publicAuthConfig()
             .then(function (config) { return exchangeTokenHash(config, token.tokenHash, token.type); })
             .then(function (session) {
@@ -536,27 +557,27 @@
         })();
     ready.catch(function (error) {
       button.disabled = true;
-      status.textContent = (error && error.message) || "That setup link has expired or has already been used.";
+      status.textContent = (error && error.message) || L("setup.linkUsed");
       clearRecoveryUrl();
     });
 
     button.onclick = async function () {
     var p1 = document.getElementById("claritySetupPassword1").value || "";
     var p2 = document.getElementById("claritySetupPassword2").value || "";
-      if (p1.length < MIN_PASSWORD_LENGTH) { status.textContent = "Password needs at least " + MIN_PASSWORD_LENGTH + " characters."; return; }
-      if (p1 !== p2) { status.textContent = "Passwords do not match."; return; }
+      if (p1.length < MIN_PASSWORD_LENGTH) { status.textContent = L("auth.passwordTooShort", { n: MIN_PASSWORD_LENGTH }); return; }
+      if (p1 !== p2) { status.textContent = L("auth.passwordsDontMatch"); return; }
       button.disabled = true;
-      status.textContent = "Saving password...";
+      status.textContent = L("setup.saving");
       try {
         var accessToken = await ready;
         var config = await publicAuthConfig();
         var user = await supabaseUser(config, accessToken);
         var accountEmail = normalizeEmail(user && user.email || "");
         await setSupabasePassword(config, accessToken, p1);
-        if (!accountEmail) throw new Error("Could not read account email from setup link");
+        if (!accountEmail) throw new Error(L("setup.noEmail"));
         await login(accountEmail, p1, { keepLoggedIn: true });
         clearRecoveryUrl();
-        status.textContent = "Password saved. Opening Clarity...";
+        status.textContent = L("setup.saved");
         /* The moment they are activated is the moment the app is worth offering - see
            scripts/gd-app-download-prompt.js. It resolves immediately on native, or when the
            player dismisses it, so this never blocks the reload. */
@@ -569,8 +590,10 @@
         setTimeout(function () { overlay.remove(); location.reload(); }, 600);
       } catch (error) {
         button.disabled = false;
-        var message = error && error.message || "Could not save password. Try the latest setup email link.";
-        if (/access token|expired|invalid|wrong|site|wrong site/i.test(message)) message = "That reset link is invalid or from the wrong site. Request a new reset email from Sign in > Forgot password.";
+        var message = error && error.message || L("setup.couldNotSave");
+        if (!error || !error.localized) {
+          if (/access token|expired|invalid|wrong|site|wrong site/i.test(message)) message = L("setup.wrongSite");
+        }
         status.textContent = message;
       } finally {
         clearRecoveryUrl();

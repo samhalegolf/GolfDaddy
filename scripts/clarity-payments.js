@@ -35,6 +35,20 @@
   var PERMISSION_KEYS = ["gps_round_start", "gps_round_pass", "gps_live_bubble", "practice_bubble_view", "my_bubble_view", "course_data_view", "course_bubble_view", "coach_admin_grant", "trial_access"];
 
   function safe(fn, fallback) { try { return fn(); } catch (_e) { return fallback; } }
+  function L(key, vars) { return window.GDI18n.t(key, vars); }
+  function LN(key, n, vars) { return window.GDI18n.tn(key, n, vars); }
+  /* Product names and descriptions are editable in the payment settings, so
+     English shows exactly what was saved there; every other language shows
+     the translation for that product. */
+  var PRODUCT_WORDS = {
+    month_pass: { name: "pay.product.monthPass", description: "pay.product.monthPassDesc", price_label: "pay.product.monthPassPrice" },
+    monthly_membership: { name: "pay.product.membership", description: "pay.product.membershipDesc", price_label: "pay.product.membershipPrice" }
+  };
+  function productWord(product, field) {
+    var keys = PRODUCT_WORDS[String(product && product.product_key || "")];
+    if (keys && window.GDI18n.locale() !== "en") return L(keys[field]);
+    return product && product[field] || "";
+  }
   function escapeHTML(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, function (ch) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]; }); }
   function moneyText(value) { return String(value || "").trim(); }
   function isStripePriceId(value) { return /^price_[A-Za-z0-9_]+$/.test(String(value || "").trim()); }
@@ -166,12 +180,17 @@
     })[0] || null;
   }
   function membership() { return status && status.membership || null; }
-  function formatDate(value) { if (!value) return ""; var date = new Date(value); if (Number.isNaN(date.getTime())) return ""; return date.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); }
+  function formatDate(value) { if (!value) return ""; var date = new Date(value); if (Number.isNaN(date.getTime())) return ""; return date.toLocaleString(window.GDI18n.locale(), { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); }
   /* Day only. formatDate carries the time because a Month Pass expires at an
      hour that matters to the person holding it; an invite's dates are things
      like "shared 1 Sept", where a timestamp is just noise in a list. */
-  function formatDay(value) { if (!value) return ""; var date = new Date(value); if (Number.isNaN(date.getTime())) return ""; return date.toLocaleDateString([], { day: "numeric", month: "short" }); }
-  function durationLabel(hours) { var value = Number(hours); if (!Number.isFinite(value) || value <= 0) return ""; if (value % 720 === 0) return (value / 720) + " month" + (value === 720 ? "" : "s"); if (value % 24 === 0) return (value / 24) + " day" + (value === 24 ? "" : "s"); return value + " hour" + (value === 1 ? "" : "s"); }
+  function formatDay(value) { if (!value) return ""; var date = new Date(value); if (Number.isNaN(date.getTime())) return ""; return date.toLocaleDateString(window.GDI18n.locale(), { day: "numeric", month: "short" }); }
+  /* The dated sentence when there is a date, its undated twin when not. */
+  function dated(key, undatedKey, value) {
+    var date = formatDate(value);
+    return date ? L(key, { date: date }) : L(undatedKey);
+  }
+  function durationLabel(hours) { var value = Number(hours); if (!Number.isFinite(value) || value <= 0) return ""; if (value % 720 === 0) return LN("pay.duration.months", value / 720); if (value % 24 === 0) return LN("pay.duration.days", value / 24); return LN("pay.duration.hours", value); }
   function daysUntil(value) { var date = value ? new Date(value).getTime() : NaN; if (!Number.isFinite(date)) return null; return Math.ceil((date - Date.now()) / (24 * 60 * 60 * 1000)); }
 
   /* The store's own answer for this device, held by clarity-store-billing. A
@@ -195,42 +214,45 @@
 
   function accessLabel() {
     var activeAccount = account();
-    if (isStaff(activeAccount)) return "Staff access";
+    if (isStaff(activeAccount)) return L("pay.status.staff");
     var member = membership();
     var monthPass = monthPassEntitlement();
     var referral = referralEntitlement();
-    if (status && status.paymentState === "membership_active" && member) return "Membership active";
-    if (status && status.paymentState === "membership_ending" && member) return "Membership cancelled";
-    if (status && status.paymentState === "payment_problem_grace" && member) return "Payment problem";
-    if (status && status.paymentState === "referral_access_active" && referral) return "Referral month active";
-    if (status && status.paymentState === "month_pass_active" && monthPass) return "Month Pass active";
-    if (status && status.paymentState === "legacy_access_active") return "Legacy paid access active";
-    if (status && status.paymentState === "paid_access_expired") return "Paid access expired";
-    if (storeEntitlementActive()) return activeAccount ? "Membership active" : "Membership active on this device";
+    if (status && status.paymentState === "membership_active" && member) return L("pay.status.membershipActive");
+    if (status && status.paymentState === "membership_ending" && member) return L("pay.status.membershipCancelled");
+    if (status && status.paymentState === "payment_problem_grace" && member) return L("pay.status.paymentProblem");
+    if (status && status.paymentState === "referral_access_active" && referral) return L("pay.status.referralActive");
+    if (status && status.paymentState === "month_pass_active" && monthPass) return L("pay.status.monthPassActive");
+    if (status && status.paymentState === "legacy_access_active") return L("pay.status.legacyActive");
+    if (status && status.paymentState === "paid_access_expired") return L("pay.status.expired");
+    if (storeEntitlementActive()) return L(activeAccount ? "pay.status.membershipActive" : "pay.status.activeOnDevice");
     if (hasActiveAccess()) {
       var entitlement = bestEntitlement();
-      if (entitlement) return "Paid access active";
+      if (entitlement) return L("pay.status.paidActive");
     }
-    if (status && status.configured === false) return "Payments not configured yet";
-    return "Free access";
+    if (status && status.configured === false) return L("pay.status.notConfigured");
+    return L("pay.status.free");
   }
 
   function accessDetail() {
     var member = membership();
     var monthPass = monthPassEntitlement();
     var referral = referralEntitlement();
-    if (status && status.connectionIssue) return "Supabase could not confirm payment access. Paid features stay locked until the backend confirms the entitlement.";
+    if (status && status.connectionIssue) return L("pay.detail.connectionIssue");
     if (status && status.error) return status.error;
-    if (pending) return "Checking payment status...";
-    if (status && status.paymentState === "membership_active" && member) return "Renews on " + (formatDate(member.current_period_end || member.access_until) || "the next billing date") + ".";
-    if (status && status.paymentState === "membership_ending" && member) return "Access continues until " + (formatDate(member.access_until || member.current_period_end) || "the paid-through date") + ".";
-    if (status && status.paymentState === "payment_problem_grace" && member) return "Grace period active until " + (formatDate(member.grace_until) || "the grace-period end") + ".";
-    if (status && status.paymentState === "referral_access_active" && referral) return "Your referral Membership access ends on " + (formatDate(referral.expires_at) || "the referral end date") + ".";
-    if (status && status.paymentState === "month_pass_active" && monthPass) return "Access until " + (formatDate(monthPass.expires_at) || "the pass expiry date") + ".";
-    if (status && status.paymentState === "legacy_access_active") return "A still-valid older pass is providing access.";
-    if (status && status.paymentState === "paid_access_expired") return "Choose how you would like to continue.";
-    if (!account() && storeEntitlementActive()) return "Bought on this device. Create a free account to keep score and use your membership everywhere.";
-    return account() ? "Choose a pass or membership to unlock full Clarity Caddy access." : "Choose a pass or membership. No account is needed to buy.";
+    if (pending) return L("pay.detail.checking");
+    /* Each has its own sentence for "no date on record" rather than a phrase
+       dropped into the dated one: "Renews on {date}" cannot take "the next
+       billing date" in most languages without breaking the grammar. */
+    if (status && status.paymentState === "membership_active" && member) return dated("pay.detail.renewsOn", "pay.detail.renewsNext", member.current_period_end || member.access_until);
+    if (status && status.paymentState === "membership_ending" && member) return dated("pay.detail.continuesUntil", "pay.detail.continuesPaid", member.access_until || member.current_period_end);
+    if (status && status.paymentState === "payment_problem_grace" && member) return dated("pay.detail.graceUntil", "pay.detail.graceActive", member.grace_until);
+    if (status && status.paymentState === "referral_access_active" && referral) return dated("pay.detail.referralEnds", "pay.detail.referralEndsLater", referral.expires_at);
+    if (status && status.paymentState === "month_pass_active" && monthPass) return dated("pay.detail.accessUntil", "pay.detail.accessUntilExpiry", monthPass.expires_at);
+    if (status && status.paymentState === "legacy_access_active") return L("pay.detail.legacy");
+    if (status && status.paymentState === "paid_access_expired") return L("pay.detail.chooseContinue");
+    if (!account() && storeEntitlementActive()) return L("pay.detail.boughtOnDevice");
+    return L(account() ? "pay.detail.choose" : "pay.detail.chooseNoAccount");
   }
 
   /* Which badge artwork matches the current paid state. Month Pass has its own
@@ -242,9 +264,9 @@
     if (!(status && status.active) && !storeEntitlementActive()) return null;
     var state = String(status.paymentState || "");
     if (state === "month_pass_active" || state === "store_month_pass_active") {
-      return { src: "assets/brand/clarity-month-pass-badge.png?v=fd5af913", alt: "Month Pass" };
+      return { src: "assets/brand/clarity-month-pass-badge.png?v=fd5af913", alt: L("pay.badge.monthPass") };
     }
-    return { src: "assets/brand/clarity-member-badge.png?v=7d48a79a", alt: "Member" };
+    return { src: "assets/brand/clarity-member-badge.png?v=7d48a79a", alt: L("pay.badge.member") };
   }
 
   function accessBadgeHTML(context) {
@@ -279,7 +301,7 @@
     /* A checkout session id alone is no longer enough to ask. It never actually
        was - the server echoed it without querying it, so a signed-out return
        from Stripe got a blank "free_access" answer - and it is now a 401. */
-    if (!signedIn.accountId && !signedIn.email) return saveStatus({ active: false, entitlements: [], configured: null, message: "Sign in to check payment status" });
+    if (!signedIn.accountId && !signedIn.email) return saveStatus({ active: false, entitlements: [], configured: null, message: L("pay.signInToCheck") });
     if (pending && refreshKey === lastRefreshKey) return status;
     pending = true; lastRefreshKey = refreshKey; render();
     try {
@@ -291,11 +313,11 @@
         response = await fetch(STATUS_ENDPOINT, { method: "POST", headers: await authedHeaders(true), body: requestBody });
       }
       var body = await response.json().catch(function () { return {}; });
-      if (!response.ok) throw new Error(body.error || "Could not check payment status");
+      if (!response.ok) throw new Error(body.error || L("pay.couldNotCheck"));
       pending = false; return saveStatus(body);
     } catch (error) {
       pending = false;
-      var message = error && error.message ? error.message : "Could not check payment status";
+      var message = error && error.message ? error.message : L("pay.couldNotCheck");
       /* A failed request is not evidence of no entitlement, so the last
          known-good access survives it. Only the success path above may downgrade,
          because only the server knows.
@@ -316,7 +338,7 @@
       if (opts.silent || opts.auto) {
         safe(function () { console.warn("[ClarityPayments] payment status refresh skipped", message); });
       } else {
-        safe(function () { return window.toast && window.toast(status.error || "Could not check payment status"); });
+        safe(function () { return window.toast && window.toast(status.error || L("pay.couldNotCheck")); });
       }
       return status;
     }
@@ -461,7 +483,7 @@
         response = await fetch(REFERRAL_ENDPOINT, { method: "POST", headers: await authedHeaders(true), body: requestBody });
       }
       var body = await response.json().catch(function () { return {}; });
-      if (!response.ok) throw new Error(body.error || "Referral action failed");
+      if (!response.ok) throw new Error(body.error || L("ref.actionFailed"));
       referralPending = false;
       if (body && (body.summary || body.eligibility || body.invites || body.rewards || body.invitee)) {
         saveReferralState(Object.assign({}, referralState, { dashboard: body, error: "", lastChecked: new Date().toISOString() }));
@@ -469,8 +491,8 @@
       return body;
     } catch (error) {
       referralPending = false;
-      saveReferralState(Object.assign({}, referralState, { error: error && error.message ? error.message : "Referral action failed", lastChecked: new Date().toISOString() }));
-      if (!opts.silent) safe(function () { return window.toast && window.toast(referralState.error || "Referral action failed"); });
+      saveReferralState(Object.assign({}, referralState, { error: error && error.message ? error.message : L("ref.actionFailed"), lastChecked: new Date().toISOString() }));
+      if (!opts.silent) safe(function () { return window.toast && window.toast(referralState.error || L("ref.actionFailed")); });
       throw error;
     }
   }
@@ -487,7 +509,7 @@
       var body = await referralAction("dashboard", {}, { silent: true });
       return body;
     } catch (_error) {
-      if (!opts.silent) safe(function () { return window.toast && window.toast(referralState.error || "Could not load referrals"); });
+      if (!opts.silent) safe(function () { return window.toast && window.toast(referralState.error || L("ref.couldNotLoad")); });
       return referralState.dashboard;
     }
   }
@@ -519,7 +541,7 @@
     var textValue = String(value || "").trim();
     if (!textValue) return false;
     if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(textValue);
-    safe(function () { return window.toast && window.toast("Referral link copied"); });
+    safe(function () { return window.toast && window.toast(L("ref.linkCopied")); });
     return true;
   }
 
@@ -531,8 +553,8 @@
     if (navigator.share) {
       var sender = accountPayload().name;
       await navigator.share({
-        title: "A month of Clarity Caddy",
-        text: (sender ? sender + " has given you" : "You have been given") + " a free month of Clarity Caddy. No card, no automatic renewal.",
+        title: L("ref.shareTitle"),
+        text: sender ? L("ref.shareFrom", { name: sender }) : L("ref.shareAnon"),
         url: textValue
       });
       return true;
@@ -549,7 +571,7 @@
       safe(function () { localStorage.removeItem(REFERRAL_TOKEN_KEY); });
       await refresh({ silent: true });
       await loadReferralDashboard({ silent: true });
-      safe(function () { return window.toast && window.toast("Your free referral month is active"); });
+      safe(function () { return window.toast && window.toast(L("ref.activeToast")); });
       return body;
     } catch (_error) {
       if (referralState.error && !/sign in/i.test(referralState.error)) safe(function () { localStorage.removeItem(REFERRAL_TOKEN_KEY); });
@@ -578,17 +600,17 @@
 
   function showReferralLanding(preview) {
     if (document.getElementById("clarityReferralLanding")) return;
-    var inviter = preview && preview.invitation && preview.invitation.inviterName || "A Clarity member";
+    var inviter = preview && preview.invitation && preview.invitation.inviterName || L("ref.aMember");
     var overlay = document.createElement("div");
     overlay.id = "clarityReferralLanding";
     overlay.className = "clarityReferralLanding";
     overlay.innerHTML = [
       '<div class="clarityReferralLandingBox">',
-      '<strong>' + escapeHTML(inviter) + ' has given you a month of Clarity</strong>',
-      '<span>Experience a full month of Clarity Membership.</span>',
-      '<ul><li>No card required</li><li>No automatic renewal</li><li>Your access simply ends after 30 days</li><li>Choose whether to continue afterward</li></ul>',
-      '<button type="button" onclick="ClarityPayments.acceptReferralLanding()">Accept free month</button>',
-      '<button class="secondary" type="button" onclick="ClarityPayments.acceptReferralLanding()">Already have an account?</button>',
+      '<strong>' + escapeHTML(L("ref.landingTitle", { name: inviter })) + '</strong>',
+      '<span>' + escapeHTML(L("ref.landingBody")) + '</span>',
+      '<ul>' + ["ref.landingNoCard", "ref.landingNoRenewal", "ref.landingEnds", "ref.landingChoose"].map(function (key) { return '<li>' + escapeHTML(L(key)) + '</li>'; }).join("") + '</ul>',
+      '<button type="button" onclick="ClarityPayments.acceptReferralLanding()">' + escapeHTML(L("ref.landingAccept")) + '</button>',
+      '<button class="secondary" type="button" onclick="ClarityPayments.acceptReferralLanding()">' + escapeHTML(L("auth.haveAccount")) + '</button>',
       '</div>'
     ].join("");
     document.body.appendChild(overlay);
@@ -626,7 +648,7 @@
     if (window.ClarityStoreBilling && typeof window.ClarityStoreBilling.restore === "function") {
       return window.ClarityStoreBilling.restore();
     }
-    safe(function () { return window.toast && window.toast("Purchases are unavailable right now"); });
+    safe(function () { return window.toast && window.toast(L("pay.unavailable")); });
     return false;
   }
 
@@ -635,7 +657,7 @@
       if (window.ClarityStoreBilling && typeof window.ClarityStoreBilling.buy === "function") {
         return window.ClarityStoreBilling.buy(productKey);
       }
-      safe(function () { return window.toast && window.toast("Purchases are unavailable right now"); });
+      safe(function () { return window.toast && window.toast(L("pay.unavailable")); });
       return false;
     }
     /* Local "is anyone signed in" check only, so a signed-out tap opens the
@@ -645,7 +667,7 @@
        never reads payload identity. */
     var signedIn = accountPayload();
     if (!signedIn.accountId && !signedIn.email) {
-      safe(function () { return window.toast && window.toast("Sign in before buying access"); });
+      safe(function () { return window.toast && window.toast(L("pay.signInToBuy")); });
       safe(function () { if (window.gdOpenProfileV67) window.gdOpenProfileV67(); });
       return false;
     }
@@ -665,14 +687,14 @@
       if (body && body.existingMembership) {
         pending = false; render();
         if (body.action === "manage_membership" || body.action === "complete_payment_setup") return manageMembership();
-        safe(function () { return window.toast && window.toast(body.message || "Membership already exists"); });
+        safe(function () { return window.toast && window.toast(body.message || L("pay.membershipExists")); });
         return false;
       }
-      if (!response.ok || !body.url) throw new Error(body.error || "Could not start checkout");
+      if (!response.ok || !body.url) throw new Error(body.error || L("pay.couldNotCheckout"));
       window.location.assign(body.url);
     } catch (error) {
       pending = false; render();
-      safe(function () { return window.toast && window.toast(error && error.message ? error.message : "Could not start checkout"); });
+      safe(function () { return window.toast && window.toast(error && error.message ? error.message : L("pay.couldNotCheckout")); });
     }
     return false;
   }
@@ -683,7 +705,7 @@
        subscription in the store account that owns it; web-billed members are
        reminded by email and manage it on the website. Neither needs a link here. */
     if (storeBillingBlocksWebCheckout()) {
-      safe(function () { return window.toast && window.toast("Your membership renews outside this app"); });
+      safe(function () { return window.toast && window.toast(L("pay.renewsOutside")); });
       return false;
     }
     /* Local signed-in check only; see buy(). create-billing-portal-session reads
@@ -691,7 +713,7 @@
        Stripe customer from the account - so the request carries no payload. */
     var signedIn = accountPayload();
     if (!signedIn.accountId && !signedIn.email) {
-      safe(function () { return window.toast && window.toast("Sign in before managing membership"); });
+      safe(function () { return window.toast && window.toast(L("pay.signInToManage")); });
       safe(function () { if (window.gdOpenProfileV67) window.gdOpenProfileV67(); });
       return false;
     }
@@ -704,11 +726,11 @@
         response = await fetch(PORTAL_ENDPOINT, { method: "POST", headers: await authedHeaders(true), body: requestBody });
       }
       var body = await response.json().catch(function () { return {}; });
-      if (!response.ok || !body.url) throw new Error(body.error || "Could not open membership management");
+      if (!response.ok || !body.url) throw new Error(body.error || L("pay.couldNotManage"));
       window.location.assign(body.url);
     } catch (error) {
       pending = false; render();
-      safe(function () { return window.toast && window.toast(error && error.message ? error.message : "Could not open membership management"); });
+      safe(function () { return window.toast && window.toast(error && error.message ? error.message : L("pay.couldNotManage")); });
     }
     return false;
   }
@@ -723,9 +745,9 @@
     panel.id = "gdPlayerSettingsPaymentsSection";
     panel.hidden = true;
     panel.innerHTML = [
-      '<button class="gdPlayerSettingsSubBack" type="button" onclick="gdPlayerSettingsShowSection(&quot;menu&quot;)">' + (account() ? "‹ Settings" : "‹ Back") + '</button>',
-      "<strong>Access & Membership</strong>",
-      '<span id="clarityPaymentSectionLine">Month Pass and Membership access.</span>',
+      '<button class="gdPlayerSettingsSubBack" type="button" onclick="gdPlayerSettingsShowSection(&quot;menu&quot;)">' + escapeHTML(L(account() ? "pay.backSettings" : "pay.back")) + '</button>',
+      '<strong data-i18n="pay.title">' + escapeHTML(L("pay.title")) + '</strong>',
+      '<span id="clarityPaymentSectionLine" data-i18n="pay.sectionLine">' + escapeHTML(L("pay.sectionLine")) + '</span>',
       '<div class="clarityPaymentSection" id="clarityPaymentSection"></div>'
     ].join("");
     sheet.appendChild(panel);
@@ -742,9 +764,9 @@
     panel.id = "gdPlayerSettingsReferralSection";
     panel.hidden = true;
     panel.innerHTML = [
-      '<button class="gdPlayerSettingsSubBack" type="button" onclick="gdPlayerSettingsShowSection(&quot;menu&quot;)">‹ Settings</button>',
-      "<strong>Invite a Golfer</strong>",
-      '<span>Give a friend a month of Clarity Caddy.</span>',
+      '<button class="gdPlayerSettingsSubBack" type="button" onclick="gdPlayerSettingsShowSection(&quot;menu&quot;)" data-i18n="pay.backSettings">' + escapeHTML(L("pay.backSettings")) + '</button>',
+      '<strong data-i18n="ref.title">' + escapeHTML(L("ref.title")) + '</strong>',
+      '<span data-i18n="ref.subtitle">' + escapeHTML(L("ref.subtitle")) + '</span>',
       '<div class="clarityPaymentSection" id="clarityReferralSection"></div>'
     ].join("");
     sheet.appendChild(panel);
@@ -761,7 +783,7 @@
       row.id = "gdPlayerSettingsPaymentsRow";
       row.type = "button";
       row.onclick = function () { showSection("payments"); };
-      row.innerHTML = '<div><strong>Access & Membership</strong><span id="gdPlayerSettingsPaymentsLine">Free access</span></div>';
+      row.innerHTML = '<div><strong data-i18n="pay.title">' + escapeHTML(L("pay.title")) + '</strong><span id="gdPlayerSettingsPaymentsLine">' + escapeHTML(L("pay.status.free")) + '</span></div>';
       if (accountRow) list.insertBefore(row, accountRow); else list.appendChild(row);
     }
     syncReferralMenuRow(list);
@@ -786,7 +808,7 @@
       row.id = "gdPlayerSettingsReferralRow";
       row.type = "button";
       row.onclick = function () { showSection("referrals"); };
-      row.innerHTML = '<div><strong>Invite a Golfer</strong><span id="gdPlayerSettingsReferralLine">Give a friend a month free.</span></div>';
+      row.innerHTML = '<div><strong data-i18n="ref.title">' + escapeHTML(L("ref.title")) + '</strong><span id="gdPlayerSettingsReferralLine"></span></div>';
       var paymentsRow = document.getElementById("gdPlayerSettingsPaymentsRow");
       if (paymentsRow && paymentsRow.nextSibling) list.insertBefore(row, paymentsRow.nextSibling);
       else if (paymentsRow) list.appendChild(row);
@@ -796,8 +818,8 @@
     if (line) {
       var openInvites = number(referralSummary().openInvitations);
       line.textContent = openInvites
-        ? openInvites + " of " + referralInviteCap() + " open invites"
-        : "Give a friend a month free.";
+        ? L("ref.openInvites", { open: openInvites, cap: referralInviteCap() })
+        : L("ref.rowHint");
     }
   }
 
@@ -863,7 +885,7 @@
        must not leave "‹ Back" pointing at a menu that now exists. */
     safe(function () {
       var back = panel && panel.querySelector(".gdPlayerSettingsSubBack");
-      if (back) back.textContent = account() ? "‹ Settings" : "‹ Back";
+      if (back) back.textContent = L(account() ? "pay.backSettings" : "pay.back");
     });
     var line = document.getElementById("gdPlayerSettingsPaymentsLine");
     if (line) line.textContent = accessLabel();
@@ -881,8 +903,8 @@
       /* Restore Purchases only exists on store builds: Apple rejects a
          subscription app without a visible restore path (3.1.1), and on the
          web there is nothing to restore - Stripe access follows the account. */
-      '<div class="clarityPaymentActions"><button class="secondary" type="button" onclick="ClarityPayments.refreshStatusAndPrices()">Refresh Status</button>'
-        + (storeBillingBlocksWebCheckout() ? '<button class="secondary" type="button" onclick="ClarityPayments.restorePurchases()">Restore Purchases</button>' : '')
+      '<div class="clarityPaymentActions"><button class="secondary" type="button" onclick="ClarityPayments.refreshStatusAndPrices()">' + escapeHTML(L("pay.refresh")) + '</button>'
+        + (storeBillingBlocksWebCheckout() ? '<button class="secondary" type="button" onclick="ClarityPayments.restorePurchases()">' + escapeHTML(L("pay.restore")) + '</button>' : '')
         + '</div>',
       /* Store-build diagnostic, written into the page rather than a toast: a
          TestFlight device has no console, and the one time this matters is
@@ -904,12 +926,10 @@
      Native builds therefore describe the store that actually charges them. */
   function renderBillingNote() {
     if (storeBillingBlocksWebCheckout()) {
-      var store = window.GDNative && window.GDNative.platform === "android"
-        ? "Google Play" : "the App Store";
-      return '<div class="clarityPaymentNote">Purchases are handled by ' + store
-        + '. Access unlocks once the purchase is confirmed.</div>';
+      var note = window.GDNative && window.GDNative.platform === "android" ? "pay.noteGooglePlay" : "pay.noteAppStore";
+      return '<div class="clarityPaymentNote">' + escapeHTML(L(note)) + '</div>';
     }
-    return '<div class="clarityPaymentNote">Card details are handled by Stripe Checkout. Clarity unlocks access only after the Stripe webhook creates a Supabase entitlement.</div>';
+    return '<div class="clarityPaymentNote">' + escapeHTML(L("pay.noteStripe")) + '</div>';
   }
 
   function renderStoreDiagnostics() {
@@ -931,19 +951,19 @@
     if (window.ClarityLegalLinks && typeof window.ClarityLegalLinks.markup === "function") {
       return window.ClarityLegalLinks.markup();
     }
-    return '<div class="clarityPaymentLegal"><a href="terms.html">Terms of Service</a> · <a href="privacy.html">Privacy Policy</a></div>';
+    return '<div class="clarityPaymentLegal"><a href="terms.html">' + escapeHTML(L("pay.termsOfService")) + '</a> · <a href="privacy.html">' + escapeHTML(L("pay.privacyPolicy")) + '</a></div>';
   }
 
   function renderExpiryBanner() {
     var monthPass = monthPassEntitlement();
     if (status && status.paymentState === "paid_access_expired") {
-      return '<div class="clarityPaymentStatus warning"><strong>Your paid access has ended.</strong><span>Choose how you would like to continue.</span></div>';
+      return '<div class="clarityPaymentStatus warning"><strong>' + escapeHTML(L("pay.expiredTitle")) + '</strong><span>' + escapeHTML(L("pay.detail.chooseContinue")) + '</span></div>';
     }
     if (!monthPass || !monthPass.expires_at || status && status.paymentState !== "month_pass_active") return "";
     var days = daysUntil(monthPass.expires_at);
     if (days == null || days > 5 || days < 0) return "";
-    var message = days <= 1 ? "Your Month Pass ends in 1 day." : "Your Month Pass ends in " + days + " days.";
-    return '<div class="clarityPaymentStatus warning"><strong>' + escapeHTML(message) + '</strong><span>Buy another Month Pass or become a Member when you are ready.</span></div>';
+    var message = LN("pay.passEndsIn", Math.max(1, days));
+    return '<div class="clarityPaymentStatus warning"><strong>' + escapeHTML(message) + '</strong><span>' + escapeHTML(L("pay.passEndsHint")) + '</span></div>';
   }
 
   function renderProductCards() {
@@ -955,9 +975,9 @@
       var rowPriceId = String(product.stripe_price_id || "").trim();
       var rowPriceMalformed = !!(rowPriceId && !isStripePriceId(rowPriceId));
       var priceConfigured = (isMembershipProduct ? settings.monthlyMembershipPriceConfigured : settings.monthPassPriceConfigured) || isStripePriceId(rowPriceId);
-      var price = rowPriceMalformed ? "Invalid Price ID" : (moneyText(product.price_label) || (priceConfigured || product.stripe_price_id ? "Configured in Stripe" : "Not linked yet"));
+      var price = rowPriceMalformed ? L("pay.card.invalidPrice") : (moneyText(productWord(product, "price_label")) || L(priceConfigured || product.stripe_price_id ? "pay.card.configured" : "pay.card.notLinked"));
       var disabledReason = "";
-      if (product.active === false) disabledReason = "Not active yet";
+      if (product.active === false) disabledReason = L("pay.card.notActive");
       if (storeBillingBlocksWebCheckout()) {
         /* A store build charges the store's price, so the card must quote the
            store - the Stripe label is the web price and can differ by currency
@@ -965,7 +985,7 @@
            payment taken outside the store. Stripe link problems are equally a
            web-only concern: the store path never touches a Price ID, so they
            must not disable a store card either. */
-        price = storePrice(key) || "Price shown at purchase";
+        price = storePrice(key) || L("pay.card.priceAtPurchase");
         /* On a store build the store is the authority on what can be sold: if
            RevenueCat returns a package, it is buyable, and buy() fails loudly if
            it is not. A stale local "active" flag must not be able to grey out a
@@ -973,13 +993,13 @@
            safeguard. */
         disabledReason = "";
       } else {
-        if (rowPriceMalformed) disabledReason = "Invalid Price ID";
-        if (!priceConfigured && !product.stripe_price_id) disabledReason = "Not linked yet";
+        if (rowPriceMalformed) disabledReason = L("pay.card.invalidPrice");
+        if (!priceConfigured && !product.stripe_price_id) disabledReason = L("pay.card.notLinked");
       }
-      var action = isMembershipProduct ? "Start Membership" : "Buy One Month";
+      var action = L(isMembershipProduct ? "pay.card.startMembership" : "pay.card.buyMonth");
       var onclick = 'ClarityPayments.buy(&quot;' + escapeHTML(key) + '&quot;)';
       if (isMembershipProduct && hasMembership) {
-        action = member && String(member.status || "").toLowerCase() === "incomplete" ? "Complete payment setup" : "Manage Membership";
+        action = L(member && String(member.status || "").toLowerCase() === "incomplete" ? "pay.card.completeSetup" : "pay.card.manage");
         onclick = "ClarityPayments.manageMembership()";
         disabledReason = "";
       }
@@ -989,25 +1009,25 @@
          and carries its own period suffix so "NZ$14.99 / month" reads as one
          fact. Trial or intro wording, if ever added, goes in the small print
          BELOW the billed amount, never above or bigger. */
-      var billedPeriod = isMembershipProduct ? " / month" : " one-time";
+      var billedPeriod = isMembershipProduct ? "pay.card.perMonth" : "pay.card.oneTime";
       /* Store prices arrive as a bare localized amount ("$14.99") and need the
          period stated beside them; web price labels are written with it. */
       var onStore = storeBillingBlocksWebCheckout();
-      var billed = onStore && storePrice(key) ? storePrice(key) + billedPeriod : (onStore ? "" : price);
+      var billed = onStore && storePrice(key) ? L(billedPeriod, { price: storePrice(key) }) : (onStore ? "" : price);
       /* No price yet - the store has not answered, or the product is not live in
          App Store Connect. Say so in SMALL print and leave the billed-amount
          slot empty rather than filling it with a placeholder: Apple 3.1.2(c)
          asks for the billed amount to be the clearest element on the card, and
          a stand-in phrase set in the price's size and colour reads as a price
          that is not one. An empty slot is honest; a fake one is a rejection. */
-      var billedNote = onStore && !storePrice(key) ? "Price shown at purchase" : "";
+      var billedNote = onStore && !storePrice(key) ? L("pay.card.priceAtPurchase") : "";
       var lines = isMembershipProduct
-        ? ["Full access", "1-month subscription, renews automatically until cancelled"]
-        : ["Full access", "One payment for 30 days, does not renew"];
-      return '<button class="clarityPaymentPass" type="button" ' + (disabledReason ? 'disabled title="' + escapeHTML(disabledReason) + '"' : 'onclick="' + onclick + '"') + '><strong>' + escapeHTML(product.name) + '</strong>'
+        ? [L("pay.card.fullAccess"), L("pay.card.membershipLine")]
+        : [L("pay.card.fullAccess"), L("pay.card.passLine")];
+      return '<button class="clarityPaymentPass" type="button" ' + (disabledReason ? 'disabled title="' + escapeHTML(disabledReason) + '"' : 'onclick="' + onclick + '"') + '><strong>' + escapeHTML(productWord(product, "name")) + '</strong>'
         + (billed ? '<b>' + escapeHTML(billed) + '</b>' : '')
         + (billedNote ? '<i class="clarityPaymentPricePending">' + escapeHTML(billedNote) + '</i>' : '')
-        + '<span>' + lines.map(escapeHTML).join(" · ") + '</span><small>' + escapeHTML(disabledReason || product.description || durationLabel(product.duration_hours)) + '</small><em>' + escapeHTML(disabledReason || action) + '</em></button>';
+        + '<span>' + lines.map(escapeHTML).join(" · ") + '</span><small>' + escapeHTML(disabledReason || productWord(product, "description") || durationLabel(product.duration_hours)) + '</small><em>' + escapeHTML(disabledReason || action) + '</em></button>';
     }).join("");
     return '<div class="clarityPaymentPassGrid">' + cards + '</div>';
   }
@@ -1017,15 +1037,14 @@
      Store builds only - the web flow states its terms on the Stripe page. */
   function renderStoreSubscriptionTerms() {
     if (!storeBillingBlocksWebCheckout()) return "";
-    var store = window.GDNative && window.GDNative.platform === "android" ? "Google Play" : "App Store";
+    var android = window.GDNative && window.GDNative.platform === "android";
     var monthly = storePrice("monthly_membership");
     var pass = storePrice("month_pass");
-    return '<div class="clarityPaymentNote">Monthly Membership is a 1-month auto-renewing subscription'
-      + (monthly ? ", billed at " + escapeHTML(monthly) + " per month" : "")
-      + ". It renews automatically unless cancelled in your " + store
-      + " account settings at least 24 hours before the current month ends. One Month Pass is a single payment"
-      + (pass ? " of " + escapeHTML(pass) : "")
-      + " for 30 days of access and never renews.</div>";
+    return '<div class="clarityPaymentNote">' + escapeHTML([
+      monthly ? L("pay.terms.membershipPrice", { price: monthly }) : L("pay.terms.membership"),
+      L(android ? "pay.terms.renewGooglePlay" : "pay.terms.renewAppStore"),
+      pass ? L("pay.terms.passPrice", { price: pass }) : L("pay.terms.pass")
+    ].join(" ")) + "</div>";
   }
 
   /* Membership shows referrals as STATUS, not as their home.
@@ -1044,16 +1063,16 @@
     return [
       invitee ? renderInviteeReferral(invitee) : "",
       referralEligible() ? renderReferralStatusBlock() : "",
-      referralState.error ? '<div class="clarityPaymentStatus warning"><strong>Referral update failed</strong><span>' + escapeHTML(referralState.error) + '</span></div>' : ""
+      referralState.error ? '<div class="clarityPaymentStatus warning"><strong>' + escapeHTML(L("ref.updateFailed")) + '</strong><span>' + escapeHTML(referralState.error) + '</span></div>' : ""
     ].join("");
   }
 
   function renderReferralStatusBlock() {
     return [
       '<div class="clarityReferralPanel">',
-      '<div class="clarityReferralHead"><strong>Invite a Golfer</strong><span>Give a friend a month free. If they become a member, you get a month too.</span></div>',
+      '<div class="clarityReferralHead"><strong>' + escapeHTML(L("ref.title")) + '</strong><span>' + escapeHTML(L("ref.blockHint")) + '</span></div>',
       renderReferralRewardLine(),
-      '<div class="clarityPaymentActions"><button type="button" onclick="ClarityPayments.openReferrals()">Invite a Golfer</button></div>',
+      '<div class="clarityPaymentActions"><button type="button" onclick="ClarityPayments.openReferrals()">' + escapeHTML(L("ref.title")) + '</button></div>',
       '</div>'
     ].join("");
   }
@@ -1070,13 +1089,9 @@
     var waiting = number(summary.pendingRewards);
     if (!earned && !waiting) return "";
     var parts = [];
-    if (earned) parts.push(monthCount(earned) + " earned, added to the end of your Caddy Access");
-    if (waiting) parts.push(monthCount(waiting) + " waiting to be added");
-    return '<div class="clarityPaymentNote">Referral rewards: ' + escapeHTML(parts.join(". ")) + '.</div>';
-  }
-
-  function monthCount(value) {
-    return value === 1 ? "1 free month" : value + " free months";
+    if (earned) parts.push(L("ref.earned", { months: LN("ref.freeMonths", earned) }));
+    if (waiting) parts.push(L("ref.waiting", { months: LN("ref.freeMonths", waiting) }));
+    return '<div class="clarityPaymentNote">' + escapeHTML(L("ref.rewards", { list: parts.join(". ") })) + '</div>';
   }
 
   function number(value) {
@@ -1114,9 +1129,9 @@
     var ends = invitee.freeAccessEndsAt || invitee.invitation && invitee.invitation.freeAccessEndsAt || "";
     return [
       '<div class="clarityReferralPanel invitee">',
-      '<div class="clarityReferralHead"><strong>Your free month is active</strong><span>Your referral Membership access ends on ' + escapeHTML(formatDate(ends) || "the referral end date") + '.</span></div>',
-      '<div class="clarityPaymentNote">Nothing will be charged. Add payment details only if you choose to continue.</div>',
-      '<div class="clarityPaymentActions"><button type="button" onclick="ClarityPayments.buy(&quot;monthly_membership&quot;)">Continue after ' + escapeHTML(formatDate(ends) || "this month") + '</button><button class="secondary" type="button" onclick="ClarityPayments.buy(&quot;month_pass&quot;)">Buy Month Pass later</button></div>',
+      '<div class="clarityReferralHead"><strong>' + escapeHTML(L("ref.inviteeTitle")) + '</strong><span>' + escapeHTML(dated("pay.detail.referralEnds", "pay.detail.referralEndsLater", ends)) + '</span></div>',
+      '<div class="clarityPaymentNote">' + escapeHTML(L("ref.nothingCharged")) + '</div>',
+      '<div class="clarityPaymentActions"><button type="button" onclick="ClarityPayments.buy(&quot;monthly_membership&quot;)">' + escapeHTML(dated("ref.continueAfter", "ref.continueLater", ends)) + '</button><button class="secondary" type="button" onclick="ClarityPayments.buy(&quot;month_pass&quot;)">' + escapeHTML(L("ref.buyPassLater")) + '</button></div>',
       '</div>'
     ].join("");
   }
@@ -1135,11 +1150,13 @@
      Reached from its own Settings row and from the Membership card, never
      rendered inside the billing screen itself. */
   function renderReferralHome() {
-    if (!account()) return '<div class="gdShotAdminEmpty">Sign in to invite a golfer.</div>';
+    if (!account()) return '<div class="gdShotAdminEmpty">' + escapeHTML(L("ref.signIn")) + '</div>';
     if (!referralEligible()) {
+      /* The server's reason is English; other languages get the general one. */
       var eligibility = referralDashboard() && referralDashboard().eligibility;
-      return '<div class="clarityPaymentStatus"><strong>Invites come with Membership</strong><span>'
-        + escapeHTML(eligibility && eligibility.reason || "Monthly Membership is required to invite a golfer.")
+      var reason = window.GDI18n.locale() === "en" && eligibility && eligibility.reason;
+      return '<div class="clarityPaymentStatus"><strong>' + escapeHTML(L("ref.needsMembershipTitle")) + '</strong><span>'
+        + escapeHTML(reason || L("ref.needsMembership"))
         + '</span></div>';
     }
     var cap = referralInviteCap();
@@ -1147,17 +1164,17 @@
     var full = openInvites >= cap;
     return [
       '<div class="clarityReferralPanel">',
-      '<div class="clarityReferralHead"><strong>Give a friend 1 month of Clarity Caddy</strong><span>They get a full month with no card and no automatic renewal. If they become a member, you get a month too.</span></div>',
+      '<div class="clarityReferralHead"><strong>' + escapeHTML(L("ref.giveTitle")) + '</strong><span>' + escapeHTML(L("ref.giveBody")) + '</span></div>',
       renderReferralRewardLine(),
       full
-        ? '<div class="clarityPaymentStatus warning"><strong>All ' + cap + ' invites are out</strong><span>You can send another when one is accepted, expires, or you close an unused link.</span></div>'
+        ? '<div class="clarityPaymentStatus warning"><strong>' + escapeHTML(L("ref.allOut", { cap: cap })) + '</strong><span>' + escapeHTML(L("ref.allOutHint")) + '</span></div>'
         : renderReferralCreateForm(),
       '</div>',
       '<div class="clarityReferralPanel">',
-      '<div class="clarityReferralHead"><strong>Your invites</strong><span>' + escapeHTML(openInvites + " of " + cap + " open invites") + '</span></div>',
+      '<div class="clarityReferralHead"><strong>' + escapeHTML(L("ref.yourInvites")) + '</strong><span>' + escapeHTML(L("ref.openInvites", { open: openInvites, cap: cap })) + '</span></div>',
       renderReferralInviteList(referralDashboard() && referralDashboard().invites || []),
       '</div>',
-      referralState.error ? '<div class="clarityPaymentStatus warning"><strong>Referral update failed</strong><span>' + escapeHTML(referralState.error) + '</span></div>' : ""
+      referralState.error ? '<div class="clarityPaymentStatus warning"><strong>' + escapeHTML(L("ref.updateFailed")) + '</strong><span>' + escapeHTML(referralState.error) + '</span></div>' : ""
     ].join("");
   }
 
@@ -1169,15 +1186,15 @@
   function renderReferralCreateForm() {
     return [
       '<form class="clarityReferralForm" onsubmit="return ClarityPayments.createReferralFromForm(this, &quot;share&quot;)">',
-      '<input name="friendName" placeholder="Their name (optional)">',
+      '<input name="friendName" placeholder="' + escapeHTML(L("ref.namePlaceholder")) + '">',
       '<div class="clarityPaymentActions">',
-      '<button type="submit">' + (referralPending ? "Creating..." : "Share Invite") + '</button>',
-      '<button class="secondary" type="button" onclick="ClarityPayments.createReferralFromForm(this.form, &quot;copy&quot;)">Copy link</button>',
+      '<button type="submit">' + escapeHTML(L(referralPending ? "ref.creating" : "ref.share")) + '</button>',
+      '<button class="secondary" type="button" onclick="ClarityPayments.createReferralFromForm(this.form, &quot;copy&quot;)">' + escapeHTML(L("ref.copy")) + '</button>',
       '</div>',
       '<details class="clarityReferralEmail">',
-      '<summary>Send it by email instead</summary>',
-      '<input name="friendEmail" type="email" placeholder="Their email">',
-      '<div class="clarityPaymentActions"><button class="secondary" type="button" onclick="ClarityPayments.createReferralFromForm(this.form, &quot;email&quot;)">Open email draft</button></div>',
+      '<summary>' + escapeHTML(L("ref.byEmail")) + '</summary>',
+      '<input name="friendEmail" type="email" placeholder="' + escapeHTML(L("ref.emailPlaceholder")) + '">',
+      '<div class="clarityPaymentActions"><button class="secondary" type="button" onclick="ClarityPayments.createReferralFromForm(this.form, &quot;email&quot;)">' + escapeHTML(L("ref.openDraft")) + '</button></div>',
       '</details>',
       '</form>'
     ].join("");
@@ -1186,11 +1203,11 @@
   function renderReferralInviteList(invites) {
     var rows = (Array.isArray(invites) ? invites : []).slice(0, 12).map(function (invite) {
       var open = invite.status === "open" || invite.status === "opened";
-      var title = invite.friendName || invite.inviteeEmail || "Invite";
+      var title = invite.friendName || invite.inviteeEmail || L("ref.invite");
       var status = referralStatusText(invite);
-      return '<div class="clarityReferralRow"><div><strong>' + escapeHTML(title) + '</strong><span>' + escapeHTML(status.primary) + '</span><em>' + escapeHTML(status.detail) + '</em></div>' + (open ? '<button class="secondary" type="button" onclick="ClarityPayments.revokeReferralInvite(&quot;' + escapeHTML(invite.id) + '&quot;)">Close</button>' : '') + '</div>';
+      return '<div class="clarityReferralRow"><div><strong>' + escapeHTML(title) + '</strong><span>' + escapeHTML(status.primary) + '</span><em>' + escapeHTML(status.detail) + '</em></div>' + (open ? '<button class="secondary" type="button" onclick="ClarityPayments.revokeReferralInvite(&quot;' + escapeHTML(invite.id) + '&quot;)">' + escapeHTML(L("account.close")) + '</button>' : '') + '</div>';
     }).join("");
-    if (!rows) rows = '<div class="gdShotAdminEmpty">No invites yet. Share your first one above.</div>';
+    if (!rows) rows = '<div class="gdShotAdminEmpty">' + escapeHTML(L("ref.none")) + '</div>';
     return '<div class="clarityReferralList">' + rows + '</div>';
   }
 
@@ -1199,15 +1216,17 @@
      "Reward will apply to your next eligible bill" was also simply untrue - the
      reward is entitlement days on the end of their access, not a bill discount. */
   function referralStatusText(invite) {
-    var created = formatDay(invite.createdAt) || "recently";
-    if (invite.status === "open") return { primary: "Invite sent", detail: "Shared " + created };
-    if (invite.status === "opened") return { primary: "Invite opened", detail: "Not claimed yet" };
-    if (invite.status === "accepted" || invite.status === "free_month_active") return { primary: "Joined", detail: "Free month active until " + (formatDay(invite.freeAccessEndsAt) || "the end of their 30 days") };
-    if (invite.status === "free_month_ended") return { primary: "Free month finished", detail: "Not a member yet" };
-    if (invite.status === "converted") return { primary: "Became a member", detail: "Your free month is being added" };
-    if (invite.status === "reward_earned") return { primary: "Became a member", detail: "✓ Your free month added" };
-    if (invite.status === "revoked" || invite.status === "invalid") return { primary: "Invite closed", detail: invite.revokedReason || invite.invalidReason || "No action needed" };
-    return { primary: String(invite.status || "Invite"), detail: "Shared " + created };
+    var created = formatDay(invite.createdAt);
+    var shared = created ? L("ref.stShared", { date: created }) : L("ref.stSharedRecently");
+    var freeUntil = formatDay(invite.freeAccessEndsAt);
+    if (invite.status === "open") return { primary: L("ref.stSent"), detail: shared };
+    if (invite.status === "opened") return { primary: L("ref.stOpened"), detail: L("ref.stNotClaimed") };
+    if (invite.status === "accepted" || invite.status === "free_month_active") return { primary: L("ref.stJoined"), detail: freeUntil ? L("ref.stFreeUntil", { date: freeUntil }) : L("ref.stFreeUntilUnknown") };
+    if (invite.status === "free_month_ended") return { primary: L("ref.stFinished"), detail: L("ref.stNotMember") };
+    if (invite.status === "converted") return { primary: L("ref.stBecame"), detail: L("ref.stBeingAdded") };
+    if (invite.status === "reward_earned") return { primary: L("ref.stBecame"), detail: L("ref.stAdded") };
+    if (invite.status === "revoked" || invite.status === "invalid") return { primary: L("ref.stClosed"), detail: L("ref.stNoAction") };
+    return { primary: L("ref.invite"), detail: shared };
   }
 
   function renderAdminSettings() {
@@ -1488,19 +1507,26 @@
   }
 
   function install() {
+    if (!languageHooked) {
+      languageHooked = true;
+      /* The panels are built as strings; a language switch rebuilds them. */
+      window.GDI18n.onChange(function () { safe(function () { render(); }); });
+    }
     installMenuRow(); section();
     if (window.gdPlayerSettingsShowSection !== showSection) { originalShowSection = window.gdPlayerSettingsShowSection; window.gdPlayerSettingsShowSection = showSection; }
     render(); applyStatus();
   }
+
+  var languageHooked = false;
 
   function handleReturn() {
     var params = safe(function () { return new URLSearchParams(window.location.search || ""); }, null);
     if (!params) return;
     var handledReferral = handleReferralRoute(params);
     var payment = params.get("payment"); var sessionId = params.get("session_id");
-    if (payment === "success" && sessionId) refresh({ sessionId: sessionId }).then(function () { safe(function () { return window.toast && window.toast(hasActiveAccess() ? "Pass active" : "Payment received. Access is updating."); }); });
-    if (payment === "cancelled") safe(function () { return window.toast && window.toast("Checkout cancelled"); });
-    if (payment === "portal_return") refresh({ silent: true }).then(function () { safe(function () { return window.toast && window.toast("Membership settings updated"); }); });
+    if (payment === "success" && sessionId) refresh({ sessionId: sessionId }).then(function () { safe(function () { return window.toast && window.toast(L(hasActiveAccess() ? "pay.passActive" : "pay.received")); }); });
+    if (payment === "cancelled") safe(function () { return window.toast && window.toast(L("pay.cancelled")); });
+    if (payment === "portal_return") refresh({ silent: true }).then(function () { safe(function () { return window.toast && window.toast(L("pay.portalUpdated")); }); });
     /* app/js/access.js sends a rangefinder-only player here when they reach for
        something a membership covers. Without this the "Membership" button would
        drop them on the home screen to go and find it themselves. */
@@ -1561,9 +1587,17 @@
        what costs is making them yours. Setting your own club distances, and
        adopting a bubble out of your own practice or course data, are the two
        ways to do that, so they are the two things that ask. */
-    requireAccess: function (what) {
+    /* `feature` names what was reached for, and picks the whole sentence. */
+    requireAccess: function (feature) {
       if (hasActiveAccess()) return true;
-      safe(function () { return window.toast && window.toast("A Clarity membership is needed to " + what + "."); });
+      var NEED = {
+        garmin: "pay.need.garmin",
+        saveBubble: "pay.need.saveBubble",
+        adoptBubble: "pay.need.adoptBubble",
+        practiceToBag: "pay.need.practiceToBag",
+        bubbleCentre: "pay.need.bubbleCentre"
+      };
+      safe(function () { return window.toast && window.toast(L(NEED[feature] || "pay.need.generic")); });
       openPaywall();
       return false;
     },
@@ -1675,9 +1709,9 @@
       createReferralInvite({ copy: mode === "copy", share: mode === "share", payload: data }).then(function (body) {
         if (!body || !body.shareUrl) return;
         if (mode === "email") {
-          var subject = encodeURIComponent("A free month of Clarity Membership");
-          var sender = accountPayload().name || "A Clarity member";
-          var message = sender + " has given you a month of Clarity. Experience a full month of Clarity Membership with no card and no automatic renewal: " + body.shareUrl;
+          var subject = encodeURIComponent(L("ref.emailSubject"));
+          var sender = accountPayload().name || L("ref.aMember");
+          var message = L("ref.emailBody", { name: sender, url: body.shareUrl });
           var to = encodeURIComponent(data.friendEmail || "");
           window.location.href = "mailto:" + to + "?subject=" + subject + "&body=" + encodeURIComponent(message);
         }
@@ -1689,7 +1723,7 @@
       if (!id) return false;
       referralAction("revokeInvite", { referralId: id, reason: "revoked_by_member" })
         .then(function () {
-          safe(function () { return window.toast && window.toast("Referral link revoked"); });
+          safe(function () { return window.toast && window.toast(L("ref.revoked")); });
           loadReferralDashboard({ silent: true });
         });
       return false;

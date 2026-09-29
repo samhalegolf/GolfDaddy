@@ -21,6 +21,20 @@
   var busy = false;
 
   function safe(fn) { try { return fn(); } catch (_e) { return undefined; } }
+  function L(key, vars) { return window.GDI18n.t(key, vars); }
+  function H(key, vars) { return window.GDI18n.html(key, vars); }
+  /* The confirmation word in the player's language; DELETE always works too.
+     The server is still sent DELETE either way. */
+  function confirmed(value) {
+    var typed = plainWord(value);
+    return typed === "DELETE" || typed === plainWord(L("deleteAccount.confirmWord"));
+  }
+  /* Capitals and accents do not count: LOSCHEN is LÖSCHEN, STERGE is ȘTERGE -
+     phone keyboards make the accented letter the slow one to find. */
+  function plainWord(value) {
+    return String(value || "").trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toLocaleUpperCase(window.GDI18n.locale());
+  }
   function escapeHTML(value) {
     return String(value == null ? "" : value).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
@@ -44,9 +58,9 @@
      the difference between a clean exit and a chargeback. */
   function subscriptionWarning() {
     if (isNative()) {
-      return "If you have a paid membership, cancel it in your App Store or Google Play subscriptions first - deleting your account here does not cancel it, and you would keep being charged.";
+      return L("deleteAccount.warnStore");
     }
-    return "If you have a paid membership, tell us when you contact support if you also need billing cancelled.";
+    return L("deleteAccount.warnWeb");
   }
 
   function close() {
@@ -62,15 +76,15 @@
     overlay.className = "clarityAccountDeleteOverlay";
     overlay.innerHTML = [
       '<div class="clarityAccountDeleteBox" role="dialog" aria-modal="true" aria-labelledby="clarityAccountDeleteTitle">',
-      '<strong id="clarityAccountDeleteTitle">Delete your account</strong>',
-      "<span>This permanently deletes your account and your golf data: your profile, bag, practice records, rounds, scores and shots. It cannot be undone.</span>",
+      '<strong id="clarityAccountDeleteTitle">' + H("deleteAccount.title") + '</strong>',
+      "<span>" + H("deleteAccount.body") + "</span>",
       "<span>" + escapeHTML(subscriptionWarning()) + "</span>",
-      '<label for="clarityAccountDeleteConfirm">Type DELETE to confirm</label>',
-      '<input id="clarityAccountDeleteConfirm" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="DELETE">',
+      '<label for="clarityAccountDeleteConfirm">' + H("deleteAccount.typeToConfirm", { word: L("deleteAccount.confirmWord") }) + '</label>',
+      '<input id="clarityAccountDeleteConfirm" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="' + H("deleteAccount.confirmWord") + '">',
       '<span class="clarityAccountDeleteError" id="clarityAccountDeleteError" hidden></span>',
       '<div class="clarityAccountDeleteActions">',
-      '<button type="button" class="secondary" id="clarityAccountDeleteCancel">Keep my account</button>',
-      '<button type="button" id="clarityAccountDeleteConfirmBtn" disabled>Delete permanently</button>',
+      '<button type="button" class="secondary" id="clarityAccountDeleteCancel">' + H("deleteAccount.keep") + '</button>',
+      '<button type="button" id="clarityAccountDeleteConfirmBtn" disabled>' + H("deleteAccount.confirm") + '</button>',
       "</div>",
       "</div>"
     ].join("");
@@ -82,7 +96,7 @@
     /* The button stays disabled until the word is typed exactly. A tap-through
        confirmation is not a confirmation. */
     input.addEventListener("input", function () {
-      confirmBtn.disabled = input.value.trim().toUpperCase() !== "DELETE";
+      confirmBtn.disabled = !confirmed(input.value);
     });
     document.getElementById("clarityAccountDeleteCancel").addEventListener("click", close);
     confirmBtn.addEventListener("click", function () { run(); });
@@ -102,7 +116,7 @@
     var cancelBtn = document.getElementById("clarityAccountDeleteCancel");
     if (confirmBtn) {
       confirmBtn.disabled = state;
-      confirmBtn.textContent = state ? "Deleting..." : "Delete permanently";
+      confirmBtn.textContent = L(state ? "deleteAccount.busy" : "deleteAccount.confirm");
     }
     if (cancelBtn) cancelBtn.disabled = state;
   }
@@ -110,13 +124,13 @@
   async function run() {
     if (busy) return false;
     var input = document.getElementById("clarityAccountDeleteConfirm");
-    if (!input || input.value.trim().toUpperCase() !== "DELETE") return false;
+    if (!input || !confirmed(input.value)) return false;
 
     setBusy(true);
     var token = await accessToken();
     if (!token) {
       setBusy(false);
-      showError("Your session has expired. Sign in again, then delete your account.");
+      showError(L("deleteAccount.sessionExpired"));
       return false;
     }
 
@@ -129,11 +143,11 @@
       });
       body = await response.json().catch(function () { return {}; });
       if (!response.ok || !body || !body.ok) {
-        throw new Error(body && body.error || "Your account could not be deleted. Please try again.");
+        throw new Error(body && body.error || L("deleteAccount.failed"));
       }
     } catch (error) {
       setBusy(false);
-      showError(error && error.message ? error.message : "Your account could not be deleted. Please try again.");
+      showError(error && error.message ? error.message : L("deleteAccount.failed"));
       return false;
     }
 
@@ -142,7 +156,7 @@
     safe(function () { localStorage.clear(); });
     safe(function () { sessionStorage.clear(); });
     close();
-    toast("Your account has been deleted");
+    toast(L("deleteAccount.done"));
     safe(function () { location.replace(location.origin + location.pathname); });
     return true;
   }
@@ -155,7 +169,8 @@
     row.id = "gdPlayerSettingsDeleteAccountRow";
     row.type = "button";
     row.onclick = function () { open(); };
-    row.innerHTML = '<div><strong>Delete account</strong><span>Permanently delete your account and data</span></div>';
+    row.innerHTML = '<div><strong data-i18n="deleteAccount.row">' + H("deleteAccount.row") + '</strong>'
+      + '<span data-i18n="deleteAccount.rowHint">' + H("deleteAccount.rowHint") + '</span></div>';
     list.appendChild(row);
   }
 
