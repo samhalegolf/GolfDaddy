@@ -62,6 +62,7 @@
 
   function categoryBadge(entry) {
     if (entry.category === "optional") return '<span class="gdStudioEmailBadge">Player can opt out</span>';
+    if (entry.category === "requested") return '<span class="gdStudioEmailBadge">Player asked for it</span>';
     var isService = entry.category === "service";
     return '<span class="gdStudioEmailBadge' + (isService ? " isService" : "") + '">'
       + (isService ? "Always sends" : "Opt-in") + "</span>";
