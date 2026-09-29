@@ -18,6 +18,14 @@
     "scripts/gd-course-version-label.js"
   ]
 
+# The mapper worker reaches @netlify/blobs only through alert-utils.js (CommonJS,
+# loaded lazily when a job fails for good). The bundler does not follow that
+# require, so the package was missing from the deployed worker: "Cannot find
+# module '@netlify/blobs'" - which, while the import sat at the top of the file,
+# stopped the worker starting at all (2026-09-28/29). Ship it as a real module.
+[functions."course-mapper-worker-background"]
+  external_node_modules = ["@netlify/blobs"]
+
 # Local dev with the /api/* functions actually running. `python3 -m http.server`
 # alone serves the source tree but no functions, so /api/auth-public-config 404s
 # — and with no LINZ key the live map falls all the way through to OSM instead
