@@ -44,7 +44,7 @@ test("every catalogue entry is complete enough to audit", () => {
     ["id", "eventType", "label", "recipient", "trigger", "gating", "sender", "cta"].forEach((field) => {
       assert.ok(entry[field] && String(entry[field]).trim(), entry.id + " is missing " + field);
     });
-    assert.ok(["service", "activity", "optional"].includes(entry.category), entry.id + " has an unknown category");
+    assert.ok(["service", "activity", "optional", "requested"].includes(entry.category), entry.id + " has an unknown category");
     assert.ok(!seen.has(entry.id), "duplicate catalogue id: " + entry.id);
     seen.add(entry.id);
     /* The page names the owning file; a stale pointer is worse than none. */

@@ -4267,6 +4267,7 @@
   function clearInteractiveGreenFallback(reason,details={}){
     const state=interactiveGreenFallbackState;
     interactiveGreenFallbackState=null;
+    try{window.GDCourseMapNotify?.hide();}catch(e){}
     try{
       const el=state&&state.mapEl;
       const handler=state&&state.handler;
@@ -4622,6 +4623,9 @@
        still be running. */
     const watchStatus=String(opts.serverPackageStatus||'');
     if(watchStatus!=='none'&&watchStatus!=='failed'&&watchStatus!=='manual-required')try{startFallbackPackageWatch(c,h,key);}catch(e){}
+    /* The scan failed for good - offer to email the player when the map is done
+       (scripts/gd-course-map-notify.js). */
+    if(watchStatus==='failed'||watchStatus==='manual-required')try{window.GDCourseMapNotify?.offer({courseId:courseId(c),courseName:courseName(c)});}catch(e){}
     return {playable:false,fallback:'interactive-green',armed:true};
   }
   async function showResolvedCoursePlayHole(course,hole,reason,opts={}){

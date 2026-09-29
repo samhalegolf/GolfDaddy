@@ -251,6 +251,22 @@
       }
     },
     {
+      id: "course_map_ready",
+      eventType: "course_map_ready",
+      label: "Your course is ready to play",
+      category: "requested",
+      recipient: "A signed-in player who asked to be told when a course they tried to open was mapped",
+      trigger: "Their course scan failed and they tapped \"Email me when it's ready\" (or signed up from that prompt). Sent by the course-mapper sweeper once that course has a playable map, however the map got there - a later scan or a Studio fix.",
+      gating: "Once per request - the row is stamped when sent. Asked for by the player, so it is not held back by EMAIL_NOTIFICATIONS_ENABLED.",
+      sender: "functions/course-mapper-sweeper.mjs → functions/course-map-notify.mjs → functions/email-notification.js",
+      cta: "Open Clarity.",
+      sample: {
+        recipientName: "Alex Fenwick",
+        actorName: "Clarity Golf",
+        courseName: "Fancourt Golf Estate"
+      }
+    },
+    {
       id: "account_activity",
       eventType: "account_activity",
       label: "Connected-account activity",
@@ -526,6 +542,16 @@
         ctaLabel: "Set your password & get started"
       };
     }
+    if (eventType === "course_map_ready") {
+      var courseLabel = text(input.courseName, 160) || "Your course";
+      return {
+        subject: courseLabel + " is ready to play",
+        title: courseLabel + " is ready to play",
+        detail: "You asked us to let you know when " + courseLabel + " was mapped. It's done - open Clarity Caddy "
+          + "and pick the course to play it with full distances.",
+        ctaLabel: "Open Clarity"
+      };
+    }
     if (eventType === "password_recovery") {
       return {
         subject: "Reset your Clarity password",
@@ -620,7 +646,9 @@
     var detailHtml = escapeHTML(message.detail).replace(/\r?\n/g, "<br>");
     var footer = isServiceEventType(message.eventType)
       ? "You are receiving this because it relates to your Clarity account access."
-      : "You can change email notifications in Settings &gt; Notifications.";
+      : message.eventType === "course_map_ready"
+        ? "You are receiving this because you asked to be told when this course was ready. We only send it once."
+        : "You can change email notifications in Settings &gt; Notifications.";
     var storeCta = storeBadges(message, site);
 
     var html = [

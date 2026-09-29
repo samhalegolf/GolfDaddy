@@ -284,6 +284,25 @@ async function sendAccountSetupEmail(options){
   return sendSignupWelcomeEmail(options);
 }
 
+/* "Your course is ready", sent by the course-mapper sweeper to a player who asked for it when
+ * their course scan failed (functions/course-map-notify.mjs). Requested by the player, so
+ * EMAIL_NOTIFICATIONS_ENABLED does not hold it back. */
+async function sendCourseMapReadyEmail(options){
+  options = options || {};
+  var to = email(options.to);
+  if(!to)return {sent: false, reason: "invalid_email"};
+  var siteUrl = env("CLARITY_SITE_URL") || templates.DEFAULT_SITE;
+  return deliver("course_map_ready", {
+    to: to,
+    siteUrl: siteUrl,
+    recipientName: options.recipientName,
+    actorName: "Clarity Golf",
+    courseName: options.courseName,
+    ctaUrl: siteUrl
+  }, "Email provider rejected the course-ready message");
+}
+
+exports.sendCourseMapReadyEmail = sendCourseMapReadyEmail;
 exports.sendCompedAccessEmail = sendCompedAccessEmail;
 exports.sendAccountSetupEmail = sendAccountSetupEmail;
 exports.sendSignupWelcomeEmail = sendSignupWelcomeEmail;

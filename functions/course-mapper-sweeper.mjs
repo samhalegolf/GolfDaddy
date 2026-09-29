@@ -3,6 +3,7 @@
 
 import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
 import { purgeMapperDebugCaptures } from "./lib/gd-mapper-debug-captures.mjs";
+import { sendReadyCourseMapNotifications } from "./course-map-notify.mjs";
 
 /* The mapper-debug captures are temporary by contract (lib/gd-mapper-debug-captures.mjs):
    date folders older than the retention window go here, on the same schedule that wakes
@@ -20,6 +21,10 @@ async function purgeCaptures() {
 }
 
 export default async function courseMapperSweeper(req) {
+  /* Players who asked to be told when a failed course got mapped (course-map-notify.mjs).
+     On this schedule because a finished map is exactly what this sweeper exists to chase.
+     First, and independent of the worker ping: a missed ping must not hold up an email. */
+  const notifications = await sendReadyCourseMapNotifications();
   let origin = "";
   try { origin = new URL(req && req.url).origin; } catch (error) { origin = ""; }
   if (!origin || /^https?:\/\/(localhost|127\.)/.test(origin)) {
@@ -27,7 +32,7 @@ export default async function courseMapperSweeper(req) {
   }
   if (!origin) {
     console.warn("course-mapper-sweeper: no site url, worker not woken");
-    return json(503, { swept: false, reason: "no site url" });
+    return json(503, { swept: false, reason: "no site url", notifications });
   }
   try {
     const response = await fetch(origin + "/.netlify/functions/course-mapper-worker-background", {
@@ -35,10 +40,10 @@ export default async function courseMapperSweeper(req) {
       headers: { "Content-Type": "application/json" },
       body: "{}"
     });
-    return json(200, { swept: true, origin, workerStatus: response.status, captures: await purgeCaptures() });
+    return json(200, { swept: true, origin, workerStatus: response.status, captures: await purgeCaptures(), notifications });
   } catch (error) {
     console.warn("course-mapper-sweeper ping failed", error && error.message || error);
-    return json(502, { swept: false, origin, reason: String(error && error.message || error).slice(0, 200) });
+    return json(502, { swept: false, origin, reason: String(error && error.message || error).slice(0, 200), notifications });
   }
 }
 
