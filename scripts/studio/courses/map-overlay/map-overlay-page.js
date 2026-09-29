@@ -1,26 +1,36 @@
 /* Clarity Studio — Mapping Overlay. Studio-only.
  *
- * What it is for: drawing the fairway polygons (and, when quicker, tee-to-green hole lines)
- * that OSM does not have, so the mapper can resolve a course whose OSM data is greens and
- * nothing else. Royal Belfast is the case: eleven greens in OSM, no fairways, no hole lines,
- * and the resolver has nothing to build a centre-line from.
+ * What it is for: placing the fairways, greens and tees that OSM does not have, so the mapper
+ * can resolve a course whose OSM data is greens and nothing else. Royal Belfast is the case:
+ * eleven greens in OSM, no fairways, no hole lines, and the resolver has nothing to build a
+ * centre-line from.
+ *
+ * How it is used: by eye, not by tracing. A fairway is a line laid down its middle, which
+ * becomes a fairway-width polygon with corners to drag into shape, plus a tee box just behind
+ * the start of the line. A green is a pin, which the green wand (/api/course-map-wand) turns
+ * into an outline. A tee is a click. Every shape can be dragged, reshaped by its corners, and
+ * deleted by dropping it on the bin. Every change saves on its own. Shapes carry no hole
+ * number - the mapper numbers holes from the scorecard.
  *
  * What it writes: one thing, the course's overlay row (course_map_overlays) through
  * /api/course-map-overlay. The mapper worker merges that overlay into the Overpass payload as
- * ordinary golf=fairway / golf=hole ways (functions/lib/gd-map-overlay-core.mjs), so nothing
- * downstream knows the difference. It does NOT write objects, holes, a pin or a package - the
- * overlay changes nothing on the course until a mapper run is requested, which the button at
- * the bottom does through the same /api/course-mapper-jobs path Course Database uses.
+ * ordinary golf=fairway / golf=green / golf=tee ways (functions/lib/gd-map-overlay-core.mjs),
+ * so nothing downstream knows the difference. It does NOT write objects, holes, a pin or a
+ * package - the overlay changes nothing on the course until a mapper run is requested, which
+ * the button at the bottom does through the same /api/course-mapper-jobs path Course Database
+ * uses.
  *
  * Borrowed, not owned: the course list (the real picker, through gd-studio-course-pick.js),
- * the provider list (window.GDMapSources from gd-app-core.js), and what OSM has here (asked
- * of the server, which runs the mapper's own query, so the greens drawn under your cursor are
- * the greens the resolver will link your fairway to). */
+ * the provider list (window.GDMapSources from gd-app-core.js), the shape builders
+ * (window.GDOverlayShapes, map-overlay-shapes.js), and what OSM has here (asked of the server,
+ * which runs the mapper's own query, so the greens drawn under your cursor are the greens the
+ * resolver will link your fairway to). */
 (function () {
   "use strict";
 
   var API = "/api/course-map-overlay";
   var AI_API = "/api/course-map-ai-scan";
+  var WAND_API = "/api/course-map-wand";
   var JOBS_API = "/api/course-mapper-jobs";
   /* The model reads an image at ~1568px on its long side and answers in the pixels it saw,
      so the capture is scaled to that here and georeferenced AFTER scaling - the picture we
@@ -37,10 +47,24 @@
   var AI_GRID_PX = 128;
   var AI_POLL_MS = 4000;
   var AI_TIMEOUT_MS = 8 * 60 * 1000;
+  /* The wand reads a green best at roughly 0.3m a pixel - a typical green ~45px across its
+     radius, the scale its bubble sizes were tuned at. The picture is sized to hold the largest
+     green the server will accept (gd-surface-refine-core WAND_GREEN_AREA_M2.max) with room. */
+  var WAND_TARGET_MPP = 0.3;
+  var WAND_MAX_GREEN_M2 = 2500;
+  /* Autosave waits for a pause, so a burst of drags is one save. */
+  var SAVE_DELAY_MS = 700;
+  var SAVE_RETRY_MS = 6000;
+  var MAX_POINTS = 64;
+  var MAX_FEATURES = 80;
 
   /* Survives leaving and re-entering the page - the shell tears the DOM down on every route
-     change, and losing half-drawn fairways to a mis-click on the nav is not acceptable. */
-  var session = { course: null, features: [], loadedFor: "", osm: null, courseMap: null, dirty: false, view: null, sourceKey: "", showOsm: true };
+     change. The save state lives here too, so a save still in flight when the page is left
+     lands on the same state the next render reads. */
+  var session = {
+    course: null, features: [], loadedFor: "", osm: null, courseMap: null, view: null, sourceKey: "", showOsm: true,
+    dirty: false, rev: 0, saving: false, saveError: "", fairwayWidth: 0
+  };
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -49,6 +73,7 @@
   }
   function num(v) { var n = Number(v); return Number.isFinite(n) ? n : null; }
   function sourcesApi() { return window.GDMapSources || null; }
+  function shapesApi() { return window.GDOverlayShapes || null; }
   function liveSources() { var api = sourcesApi(); return api && Array.isArray(api.list) ? api.list : []; }
   function courseIdOf(course) {
     return String(course && (course.courseId || course.id || course.canonicalKey) || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
@@ -73,10 +98,11 @@
   }
   function kindLabel(kind) { return kind === "hole" ? "Hole line" : kind === "green" ? "Green" : kind === "tee" ? "Tee" : "Fairway"; }
   function isPolygon(kind) { return kind === "fairway" || kind === "green" || kind === "tee"; }
+  function minPoints(kind) { return isPolygon(kind) ? 3 : 2; }
+  function toLatLngs(points) { return points.map(function (p) { return [p.lat, p.lng]; }); }
   /* A course map is a small schematic; 1200px on the long side is plenty for the model to
      read hole numbers off, and keeps the row it is stored on light. */
   var COURSE_MAP_MAX_EDGE_PX = 1200;
-  function minPoints(kind) { return isPolygon(kind) ? 3 : 2; }
 
   var STYLE = {
     fairway: { color: "#3cff8d", weight: 2, fillColor: "#3cff8d", fillOpacity: 0.22 },
@@ -87,39 +113,49 @@
     greenSelected: { color: "#ffffff", weight: 3, fillColor: "#b7ff5c", fillOpacity: 0.5 },
     tee: { color: "#6cc7ff", weight: 2, fillColor: "#6cc7ff", fillOpacity: 0.4 },
     teeSelected: { color: "#ffffff", weight: 3, fillColor: "#6cc7ff", fillOpacity: 0.5 },
-    draft: { color: "#ffb54c", weight: 2, dashArray: "4 4", fillColor: "#ffb54c", fillOpacity: 0.12 },
-    vertex: { radius: 4, color: "#ffb54c", weight: 2, fillColor: "#1a1a1a", fillOpacity: 1 },
+    draft: { color: "#ffb54c", weight: 3, dashArray: "6 6", interactive: false },
+    draftPreview: { color: "#ffb54c", weight: 1, fillColor: "#3cff8d", fillOpacity: 0.12, interactive: false },
+    draftPoint: { radius: 4, color: "#ffb54c", weight: 2, fillColor: "#1a1a1a", fillOpacity: 1, interactive: false },
+    vertex: { radius: 6, color: "#ffffff", weight: 2, fillColor: "#ffb54c", fillOpacity: 1, className: "gdStudioOverlayHandle" },
+    midpoint: { radius: 4, color: "#ffffff", weight: 1, opacity: 0.8, fillColor: "#ffffff", fillOpacity: 0.35, className: "gdStudioOverlayHandle" },
+    pin: { radius: 7, color: "#ffffff", weight: 2, fillColor: "#b7ff5c", fillOpacity: 1, interactive: false },
     osmGreen: { color: "#b7ff5c", weight: 2, fillColor: "#b7ff5c", fillOpacity: 0.28 },
     osmFairway: { color: "#8fa79c", weight: 1, dashArray: "3 5", fillOpacity: 0 },
     osmTee: { color: "#6cc7ff", weight: 2, fillColor: "#6cc7ff", fillOpacity: 0.3 },
     osmHole: { color: "#ffffff", weight: 1, dashArray: "2 6", opacity: 0.7 }
   };
 
+  var BIN_ICON = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>';
+
   function render(containerEl) {
     var mapObj = null;
     var layer = null;
     var destroyed = false;
-    var tool = "fairway";
+    var tool = "move";
     var draft = [];
     var draftLayers = [];
-    var featureLayers = [];
+    var cursorLatLng = null;
+    var featureLayers = {};
     var osmLayers = [];
     var selectedId = "";
     var busy = false;
     var scanning = false;
     var scanFrame = null;
     var scanTimer = null;
+    var saveTimer = null;
+    var drag = null;
+    var dragEndedAt = 0;
+    var wandsRunning = 0;
 
     containerEl.innerHTML =
       '<div class="gdStudioLede" style="margin-bottom:12px">' +
-      "<p>Draw what OSM is missing. Pick a course, then click around each fairway to trace it and " +
-      "<strong>finish</strong> the shape (double-click, Enter, or the button). The bright green outlines " +
-      "are the greens OSM already has - the mapper links each fairway to the nearest one, so draw the " +
-      "fairway to within about 200m of its green. A numbered <strong>hole line</strong> from tee to green is " +
-      "quicker and is the strongest evidence the resolver gets. Where OSM has no green at all, draw the " +
-      "<strong>green</strong> too - a fairway with no green to link to is not a hole. Upload the club's <strong>course map</strong> and the AI gets it as a second picture to settle doubts. Or let the AI trace the view you are " +
-      "looking at: <strong>Scan this view with AI</strong> sends the current picture to the model and saves what it finds. Then run the mapper. " +
-      "The overlay is temporary: delete it once OSM carries the real shapes.</p></div>" +
+      "<p>Place what OSM is missing, by eye. Pick a course, then: <strong>Fairway</strong> - click along the middle of the fairway " +
+      "and double-click to finish; you get a fairway with corners to drag into shape, and a tee 20m behind the start. " +
+      "<strong>Green</strong> - click the middle of a green and the wand draws its outline. <strong>Tee</strong> - click to drop one. " +
+      "Drag any shape to move it, drag its corners to reshape it (the faint dots between corners add a new one), and drop a shape " +
+      "or a corner on the <strong>bin</strong> to delete it. Everything saves as you go. When the course looks right, run the mapper. " +
+      "The bright green outlines are the greens OSM already has - there is no need to place those again.</p></div>" +
       '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="pick">Pick course</button>' +
       '<span class="gdStudioViewportCourse" data-gd-overlay="course">No course picked</span>' +
@@ -131,37 +167,41 @@
       '<span class="gdStudioViewportField" data-gd-overlay="course-map-state"></span>' +
       "</div>" +
       '<div class="gdStudioViewportBar">' +
-      '<span class="gdStudioViewportField">Draw</span>' +
-      '<button type="button" class="gdStudioDiagramBtn isActive" data-gd-overlay="tool-fairway">Fairway polygon</button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-hole">Hole line</button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-green">Green polygon</button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-tee">Tee polygon</button>' +
-      '<label class="gdStudioViewportField">Hole # <input type="number" min="1" max="36" data-gd-overlay="hole" class="gdStudioOverlayHole"></label>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="finish" disabled>Finish shape</button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="undo" disabled>Undo point</button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="cancel" disabled>Cancel</button>' +
+      '<span class="gdStudioViewportField">Place</span>' +
+      '<button type="button" class="gdStudioDiagramBtn isActive" data-gd-overlay="tool-move" title="Select, move and reshape (V)">Move</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-fairway" title="Lay a line down the fairway (F)">Fairway line</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-green" title="Pin a green (G)">Green pin</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-tee" title="Drop a tee (T)">Tee</button>' +
+      '<label class="gdStudioViewportField">Fairway width <input type="number" min="10" max="90" step="1" data-gd-overlay="width" class="gdStudioOverlayWidth"> m</label>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="finish" hidden>Finish fairway</button>' +
       "</div>" +
+      '<div class="gdStudioOverlayStage isTool-move" data-gd-overlay="stage">' +
       '<div class="gdStudioViewportMap gdStudioOverlayMap" data-gd-overlay="map"></div>' +
+      '<div class="gdStudioOverlayHint" data-gd-overlay="hint"></div>' +
+      '<button type="button" class="gdStudioOverlayBin" data-gd-overlay="bin" title="Drag a shape or corner here to delete it, or click to delete the selected shape">' +
+      BIN_ICON + "<span>Bin</span></button>" +
+      "</div>" +
       '<div class="gdStudioViewportReadout" data-gd-overlay="readout"></div>' +
       '<div class="gdStudioViewportCredit" data-gd-overlay="credit"></div>' +
       '<div class="gdStudioViewportBar" style="margin-top:12px">' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="save" disabled>Save overlay</button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="reload" disabled>Reload saved</button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="clear" disabled>Delete overlay</button>' +
+      '<span class="gdStudioViewportField" data-gd-overlay="saved"></span>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="clear" disabled>Delete all shapes</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="run" disabled>Run mapper with overlay</button>' +
       '<span class="gdStudioViewportScan" data-gd-overlay="status"></span>' +
-      "</div>" +
-      '<div class="gdStudioOverlayList" data-gd-overlay="list"></div>';
+      "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "ai", "ai-replace", "course-map", "course-map-state", "tool-fairway", "tool-hole", "tool-green", "tool-tee", "hole", "finish", "undo", "cancel", "map", "readout", "credit", "save", "reload", "clear", "run", "status", "list"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "ai", "ai-replace", "course-map", "course-map-state", "tool-move", "tool-fairway", "tool-green", "tool-tee", "width", "finish", "stage", "map", "hint", "bin", "readout", "credit", "saved", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
-    if (typeof window.L === "undefined" || !sourcesApi()) {
-      el.map.innerHTML = '<p class="gdStudioMuted" style="padding:16px">Leaflet or the map source list did not load on this surface.</p>';
+    if (typeof window.L === "undefined" || !sourcesApi() || !shapesApi()) {
+      el.map.innerHTML = '<p class="gdStudioMuted" style="padding:16px">Leaflet, the map source list or the overlay shape builders did not load on this surface.</p>';
       return null;
     }
+    var shapes = shapesApi();
+    if (!session.fairwayWidth) session.fairwayWidth = shapes.FAIRWAY_WIDTH_M;
+    el.width.value = session.fairwayWidth;
 
     /* ---- providers (borrowed from gd-app-core, same list the app plays over) ---- */
 
@@ -187,10 +227,10 @@
       el.provider.innerHTML = rows.map(function (r) { return '<option value="' + esc(r.key) + '">' + esc(r.text) + "</option>"; }).join("");
       if (current) el.provider.value = current;
     }
-    /* Imagery first: a fairway is traced off the ground, and the OSM line guide has no ground
-       to trace. First covering source in list order is the app's own preference, which puts
-       regional aerial before the global fallback; the line guide is what is left when nothing
-       aerial covers the view. */
+    /* Imagery first: shapes are placed by eye off the ground, and the OSM line guide has no
+       ground to look at. First covering source in list order is the app's own preference, which
+       puts regional aerial before the global fallback; the line guide is what is left when
+       nothing aerial covers the view. */
     function bestSourceKey() {
       var here = centre();
       var api = sourcesApi();
@@ -211,172 +251,432 @@
       el.credit.innerHTML = esc(source.label) + (source.attribution ? " — " + esc(source.attribution) : "");
     }
 
-    /* ---- drawing ---- */
+    /* ---- tools ---- */
+
+    /* Shapes can only change once the course's saved overlay is on screen and no AI scan is
+       about to replace it - an edit made under a scan would be overwritten by its result. */
+    function canEdit() {
+      return !!session.course && session.loadedFor === courseIdOf(session.course) && !scanning && !busy;
+    }
 
     function setTool(next) {
-      tool = next === "hole" || next === "green" || next === "tee" ? next : "fairway";
-      el["tool-fairway"].classList.toggle("isActive", tool === "fairway");
-      el["tool-hole"].classList.toggle("isActive", tool === "hole");
-      el["tool-green"].classList.toggle("isActive", tool === "green");
-      el["tool-tee"].classList.toggle("isActive", tool === "tee");
-      if (draft.length) cancelDraft();
-      updateReadout();
+      tool = next === "fairway" || next === "green" || next === "tee" ? next : "move";
+      ["move", "fairway", "green", "tee"].forEach(function (name) {
+        el["tool-" + name].classList.toggle("isActive", tool === name);
+        el.stage.classList.toggle("isTool-" + name, tool === name);
+      });
+      if (draft.length && tool !== "fairway") cancelDraft();
+      if (tool !== "move" && selectedId) select("");
+      updateHint();
     }
+
+    function allGreens() {
+      var list = [];
+      if (session.osm && !session.osm.error) (session.osm.greens || []).forEach(function (g) { if (g.points && g.points.length >= 3) list.push(g.points); });
+      session.features.forEach(function (f) { if (f.kind === "green") list.push(f.points); });
+      return list;
+    }
+
+    function nearestGreen(latlng, withinM) {
+      var best = null, bestD = withinM;
+      allGreens().forEach(function (ring) {
+        var c = shapes.centroid(ring);
+        var d = shapes.distanceM({ lat: latlng.lat, lng: latlng.lng }, c);
+        if (d < bestD) { bestD = d; best = c; }
+      });
+      return best;
+    }
+
+    function handleMapClick(latlng) {
+      if (Date.now() - dragEndedAt < 300) return;
+      if (!session.course) { setStatus("Pick a course first."); return; }
+      if (tool === "move") { if (selectedId) select(""); return; }
+      if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
+      if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
+      var point = { lat: latlng.lat, lng: latlng.lng };
+      if (tool === "fairway") addDraftPoint(point);
+      else if (tool === "green") { placeGreen(point); setTool("move"); }
+      else if (tool === "tee") {
+        var towards = nearestGreen(point, 600);
+        setTool("move");
+        addFeature({ kind: "tee", points: shapes.teeAt(point, towards) });
+      }
+    }
+
+    /* ---- fairway line ---- */
 
     function clearDraftLayers() {
       draftLayers.forEach(function (l) { try { mapObj.removeLayer(l); } catch (e) {} });
       draftLayers = [];
     }
 
+    /* The line so far, the rubber band to the cursor, and the fairway it would make - so the
+       width is visible before the line is finished. */
     function drawDraft() {
       clearDraftLayers();
       if (!draft.length) return;
-      var latlngs = draft.map(function (p) { return [p.lat, p.lng]; });
-      var shape = isPolygon(tool) && draft.length >= 3 ? L.polygon(latlngs, STYLE.draft) : L.polyline(latlngs, STYLE.draft);
-      shape.addTo(mapObj);
-      draftLayers.push(shape);
-      draft.forEach(function (p) {
-        var v = L.circleMarker([p.lat, p.lng], STYLE.vertex).addTo(mapObj);
-        draftLayers.push(v);
-      });
+      var line = cursorLatLng ? draft.concat([cursorLatLng]) : draft;
+      if (line.length >= 2) {
+        var preview = shapes.fairwayFromLine(line, session.fairwayWidth);
+        if (preview) draftLayers.push(L.polygon(toLatLngs(preview), STYLE.draftPreview).addTo(mapObj));
+        draftLayers.push(L.polyline(toLatLngs(line), STYLE.draft).addTo(mapObj));
+      }
+      draft.forEach(function (p) { draftLayers.push(L.circleMarker([p.lat, p.lng], STYLE.draftPoint).addTo(mapObj)); });
     }
 
-    function draftButtons() {
-      updateActions();
-      el.finish.disabled = draft.length < minPoints(tool);
-      el.undo.disabled = !draft.length;
-      el.cancel.disabled = !draft.length;
-    }
-
-    function addVertex(latlng) {
-      if (!session.course) { setStatus("Pick a course first."); return; }
+    function addDraftPoint(point) {
       var last = draft[draft.length - 1];
       /* A double-click delivers two clicks first; the second lands on the first's point and
-         would leave a zero-length edge behind the finish. */
-      if (last && Math.abs(last.lat - latlng.lat) < 1e-7 && Math.abs(last.lng - latlng.lng) < 1e-7) return;
-      draft.push({ lat: latlng.lat, lng: latlng.lng });
+         would leave a zero-length segment behind the finish. */
+      if (last && Math.abs(last.lat - point.lat) < 1e-7 && Math.abs(last.lng - point.lng) < 1e-7) return;
+      draft.push(point);
       drawDraft();
-      draftButtons();
-      updateReadout();
+      updateDraftUi();
     }
 
-    function undoVertex() {
+    function undoDraftPoint() {
       draft.pop();
       drawDraft();
-      draftButtons();
-      updateReadout();
+      updateDraftUi();
     }
 
     function cancelDraft() {
       draft = [];
+      cursorLatLng = null;
       clearDraftLayers();
-      draftButtons();
-      updateReadout();
+      updateDraftUi();
     }
 
-    function finishDraft() {
-      if (draft.length < minPoints(tool)) return;
-      var hole = num(el.hole.value);
-      hole = hole && hole >= 1 && hole <= 36 ? Math.round(hole) : null;
-      session.features.push({ id: nextFeatureId(session.features), kind: tool, hole: hole, points: draft.slice() });
-      session.dirty = true;
-      /* Hole numbers usually run in sequence; stepping the box saves retyping it 18 times
-         and a wrong guess is one keystroke to fix. */
-      if (hole) el.hole.value = hole < 36 ? hole + 1 : "";
-      draft = [];
-      clearDraftLayers();
-      draftButtons();
-      drawFeatures();
-      renderList();
+    function updateDraftUi() {
+      el.finish.hidden = !draft.length;
+      el.finish.disabled = draft.length < 2;
       updateActions();
-      updateReadout();
+      updateHint();
     }
 
-    /* ---- saved features ---- */
+    function finishFairway() {
+      if (draft.length < 2) return;
+      var line = draft.slice();
+      var ring = shapes.fairwayFromLine(line, session.fairwayWidth);
+      cancelDraft();
+      if (!ring) { setStatus("That line is too short to be a fairway.", true); return; }
+      var fairway = addFeature({ kind: "fairway", points: ring }, true);
+      if (session.features.length < MAX_FEATURES) {
+        var tee = shapes.teeBeyondLine(line, allGreens());
+        if (tee) addFeature({ kind: "tee", points: tee }, true);
+      }
+      setTool("move");
+      select(fairway.id);
+      changed();
+      setStatus("Fairway placed with a tee behind it. Drag the corners to fit, or drag the tee where it belongs.");
+    }
+
+    /* ---- green pin ---- */
+
+    function placeGreen(point) {
+      var id = session.loadedFor;
+      var pin = L.circleMarker([point.lat, point.lng], STYLE.pin).addTo(mapObj);
+      pin.bindTooltip("Finding the green's edge…", { permanent: true, direction: "top", className: "gdStudioOverlayLabel" });
+      wandsRunning++;
+      updateHint();
+      captureAround(point).then(function (capture) {
+        return api("POST", "", { image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, seed: point }, WAND_API);
+      }).then(function (data) {
+        return data && data.ok && Array.isArray(data.shape) && data.shape.length >= 3
+          ? { shape: data.shape, note: data.stable === false ? "The wand was unsure of this edge - check it." : "" }
+          : { shape: null, note: "The wand could not find an edge here (" + ((data && data.reason) || "no answer") + ")." };
+      }, function (error) {
+        return { shape: null, note: "The wand could not run: " + (error && error.message || error) + "." };
+      }).then(function (result) {
+        try { mapObj && mapObj.removeLayer(pin); } catch (e) {}
+        wandsRunning--;
+        if (destroyed) return;
+        updateHint();
+        if (session.loadedFor !== id) return;
+        if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold.", true); return; }
+        var f = addFeature({ kind: "green", points: result.shape || shapes.circle(point, shapes.GREEN_RADIUS_M), source: result.shape ? "wand" : "" });
+        if (tool === "move" && !drag) select(f.id);
+        setStatus(result.shape ? "Green placed. " + result.note + " Drag its corners to fit." : result.note + " Placed a round green - drag its corners to fit.", !result.shape);
+      });
+    }
+
+    /* ---- shapes ---- */
+
+    function findFeature(id) { return session.features.filter(function (f) { return f.id === id; })[0] || null; }
+
+    function addFeature(raw, quiet) {
+      var f = { id: nextFeatureId(session.features), kind: raw.kind, hole: null, points: raw.points.slice(0, MAX_POINTS) };
+      if (raw.source) f.source = raw.source;
+      session.features.push(f);
+      if (!quiet) { selectedId = tool === "move" ? f.id : selectedId; drawFeatures(); changed(); }
+      return f;
+    }
+
+    function removeFeature(id) {
+      session.features = session.features.filter(function (f) { return f.id !== id; });
+      if (selectedId === id) selectedId = "";
+      drawFeatures();
+      changed();
+    }
+
+    function removeVertex(f, index) {
+      if (f.points.length <= minPoints(f.kind)) { setStatus("A " + kindLabel(f.kind).toLowerCase() + " needs at least " + minPoints(f.kind) + " corners - bin the whole shape instead.", true); return false; }
+      f.points.splice(index, 1);
+      drawFeatures();
+      changed();
+      return true;
+    }
 
     function clearFeatureLayers() {
-      featureLayers.forEach(function (l) { try { mapObj.removeLayer(l); } catch (e) {} });
-      featureLayers = [];
+      Object.keys(featureLayers).forEach(function (id) {
+        var entry = featureLayers[id];
+        [entry.shape].concat(entry.vertices, entry.mids).forEach(function (l) { try { mapObj.removeLayer(l); } catch (e) {} });
+      });
+      featureLayers = {};
+    }
+
+    function midpoints(f) {
+      var out = [];
+      var n = f.points.length;
+      var last = isPolygon(f.kind) ? n : n - 1;
+      for (var i = 0; i < last; i++) {
+        var a = f.points[i], b = f.points[(i + 1) % n];
+        out.push({ after: i, lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 });
+      }
+      return out;
     }
 
     function drawFeatures() {
       clearFeatureLayers();
       session.features.forEach(function (f) {
-        var latlngs = f.points.map(function (p) { return [p.lat, p.lng]; });
         var selected = f.id === selectedId;
-        var shape = f.kind === "fairway" ? L.polygon(latlngs, selected ? STYLE.fairwaySelected : STYLE.fairway)
-          : f.kind === "green" ? L.polygon(latlngs, selected ? STYLE.greenSelected : STYLE.green)
-          : f.kind === "tee" ? L.polygon(latlngs, selected ? STYLE.teeSelected : STYLE.tee)
-          : L.polyline(latlngs, selected ? STYLE.holeSelected : STYLE.hole);
+        var style = Object.assign({ className: "gdStudioOverlayShape" }, STYLE[f.kind + (selected ? "Selected" : "")] || STYLE.fairway);
+        var latlngs = toLatLngs(f.points);
+        var shape = isPolygon(f.kind) ? L.polygon(latlngs, style) : L.polyline(latlngs, style);
         shape.addTo(mapObj);
         shape.on("click", function (e) {
-          /* Selecting a saved shape must not also drop a vertex under it. */
+          /* Selecting a shape must not also count as a click on the map under it. */
           if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
+          if (tool !== "move") { handleMapClick(e.latlng); return; }
+          if (Date.now() - dragEndedAt < 300) return;
           select(f.id);
         });
-        if (f.hole) {
-          shape.bindTooltip(String(f.hole), { permanent: true, direction: "center", className: "gdStudioOverlayLabel" });
+        shape.on("mousedown", function (e) {
+          if (tool !== "move" || !canEdit()) return;
+          if (selectedId !== f.id) select(f.id);
+          beginDrag(f.id, "body", -1, e);
+        });
+        if (f.hole) shape.bindTooltip(String(f.hole), { permanent: true, direction: "center", className: "gdStudioOverlayLabel" });
+        var entry = { shape: shape, vertices: [], mids: [] };
+        if (selected && canEdit() && bigEnoughForHandles(f)) {
+          f.points.forEach(function (p, i) {
+            var v = L.circleMarker([p.lat, p.lng], STYLE.vertex).addTo(mapObj);
+            v.on("mousedown", function (e) { beginDrag(f.id, "vertex", i, e); });
+            v.on("click", function (e) { if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent); });
+            v.on("contextmenu", function (e) {
+              if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
+              removeVertex(f, i);
+            });
+            entry.vertices.push(v);
+          });
+          if (f.points.length < MAX_POINTS) {
+            midpoints(f).forEach(function (m) {
+              var h = L.circleMarker([m.lat, m.lng], STYLE.midpoint).addTo(mapObj);
+              h.on("mousedown", function (e) {
+                if (tool !== "move" || !canEdit()) return;
+                f.points.splice(m.after + 1, 0, { lat: m.lat, lng: m.lng });
+                drawFeatures();
+                beginDrag(f.id, "vertex", m.after + 1, e, true);
+              });
+              h.on("click", function (e) { if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent); });
+              entry.mids.push(h);
+            });
+          }
         }
-        featureLayers.push(shape);
+        featureLayers[f.id] = entry;
       });
+      updateBin();
+      updateReadout();
+    }
+
+    /* Corner handles on a shape only a few pixels across would cover it entirely and make it
+       impossible to grab by its body; zoomed out, a small shape is moved whole, and zooming in
+       brings its corners back. */
+    function bigEnoughForHandles(f) {
+      try {
+        var b = L.latLngBounds(toLatLngs(f.points));
+        var a = mapObj.latLngToLayerPoint(b.getNorthWest()), c = mapObj.latLngToLayerPoint(b.getSouthEast());
+        return Math.max(Math.abs(c.x - a.x), Math.abs(c.y - a.y)) >= 36;
+      } catch (e) { return true; }
+    }
+
+    /* Mid-drag, only the dragged shape moves: its outline and handles follow the points
+       without rebuilding every layer on the map. */
+    function refreshFeature(f) {
+      var entry = featureLayers[f.id];
+      if (!entry) return;
+      entry.shape.setLatLngs(toLatLngs(f.points));
+      entry.vertices.forEach(function (v, i) { if (f.points[i]) v.setLatLng([f.points[i].lat, f.points[i].lng]); });
+      midpoints(f).forEach(function (m, i) { if (entry.mids[i]) entry.mids[i].setLatLng([m.lat, m.lng]); });
     }
 
     function select(id) {
-      selectedId = selectedId === id ? "" : id;
+      selectedId = id || "";
       drawFeatures();
-      renderList();
+      updateHint();
     }
 
-    function removeFeature(id) {
-      session.features = session.features.filter(function (f) { return f.id !== id; });
-      session.dirty = true;
-      if (selectedId === id) selectedId = "";
-      drawFeatures();
-      renderList();
-      updateActions();
+    /* ---- dragging and the bin ---- */
+
+    function overBin(event) {
+      var r = el.bin.getBoundingClientRect();
+      var pad = 10;
+      return event.clientX >= r.left - pad && event.clientX <= r.right + pad && event.clientY >= r.top - pad && event.clientY <= r.bottom + pad;
     }
 
-    function renumber(id, value) {
-      var f = session.features.filter(function (x) { return x.id === id; })[0];
+    function beginDrag(id, mode, index, e, inserted) {
+      var f = findFeature(id);
+      if (!f || tool !== "move" || !canEdit() || !e || !e.originalEvent) return;
+      L.DomEvent.stop(e.originalEvent);
+      mapObj.dragging.disable();
+      drag = {
+        id: id, mode: mode, index: index, inserted: !!inserted, moved: false,
+        start: e.latlng, x: e.originalEvent.clientX, y: e.originalEvent.clientY,
+        orig: f.points.map(function (p) { return { lat: p.lat, lng: p.lng }; })
+      };
+      document.addEventListener("mousemove", onDragMove);
+      document.addEventListener("mouseup", onDragEnd);
+    }
+
+    function onDragMove(event) {
+      if (!drag || destroyed) return;
+      if (!drag.moved) {
+        if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 3) return;
+        drag.moved = true;
+        el.bin.classList.add("isArmed");
+      }
+      var f = findFeature(drag.id);
       if (!f) return;
-      var hole = num(value);
-      f.hole = hole && hole >= 1 && hole <= 36 ? Math.round(hole) : null;
-      session.dirty = true;
-      drawFeatures();
-      updateActions();
+      var ll = mapObj.mouseEventToLatLng(event);
+      if (drag.mode === "body") {
+        var dLat = ll.lat - drag.start.lat, dLng = ll.lng - drag.start.lng;
+        f.points = drag.orig.map(function (p) { return { lat: p.lat + dLat, lng: p.lng + dLng }; });
+      } else {
+        f.points[drag.index] = { lat: ll.lat, lng: ll.lng };
+      }
+      refreshFeature(f);
+      el.bin.classList.toggle("isHot", overBin(event));
     }
 
-    function renderList() {
-      if (!session.features.length) {
-        el.list.innerHTML = session.course ? '<p class="gdStudioMuted">No overlay shapes yet.</p>' : "";
+    function onDragEnd(event) {
+      document.removeEventListener("mousemove", onDragMove);
+      document.removeEventListener("mouseup", onDragEnd);
+      var d = drag;
+      drag = null;
+      if (destroyed) return;
+      try { mapObj.dragging.enable(); } catch (e) {}
+      el.bin.classList.remove("isArmed", "isHot");
+      if (!d) return;
+      var f = findFeature(d.id);
+      /* Also on a plain click: the mousedown may have re-drawn the shape under the pointer, and
+         the click that follows would land on the map and undo the selection it just made. */
+      dragEndedAt = Date.now();
+      if (!d.moved) {
+        if (d.inserted) changed();
         return;
       }
-      el.list.innerHTML = '<table class="gdStudioOverlayTable"><thead><tr><th>#</th><th>Kind</th><th>Hole</th><th>Points</th><th></th></tr></thead><tbody>' +
-        session.features.map(function (f, i) {
-          return '<tr data-gd-overlay-row="' + esc(f.id) + '"' + (f.id === selectedId ? ' class="isSelected"' : "") + ">" +
-            "<td>" + (i + 1) + "</td><td>" + esc(kindLabel(f.kind)) + (f.source ? ' <span class="gdStudioMuted">· ' + esc(f.source) + "</span>" : "") + "</td>" +
-            '<td><input type="number" min="1" max="36" class="gdStudioOverlayHole" data-gd-overlay-hole="' + esc(f.id) + '" value="' + (f.hole || "") + '"></td>' +
-            "<td>" + f.points.length + "</td>" +
-            '<td><button type="button" class="gdStudioDiagramBtn" data-gd-overlay-remove="' + esc(f.id) + '">Remove</button></td></tr>';
-        }).join("") + "</tbody></table>";
+      if (!f) return;
+      if (overBin(event)) {
+        if (d.mode === "body") { removeFeature(f.id); setStatus(kindLabel(f.kind) + " deleted."); return; }
+        f.points = d.orig;
+        if (d.inserted) { f.points.splice(d.index, 1); drawFeatures(); return; }
+        if (removeVertex(f, d.index)) setStatus("Corner deleted.");
+        else drawFeatures();
+        return;
+      }
+      drawFeatures();
+      changed();
     }
 
-    el.list.addEventListener("click", function (event) {
-      var remove = event.target.closest("[data-gd-overlay-remove]");
-      if (remove) { removeFeature(remove.getAttribute("data-gd-overlay-remove")); return; }
-      if (event.target.closest("input")) return;
-      var row = event.target.closest("[data-gd-overlay-row]");
-      if (row) {
-        var id = row.getAttribute("data-gd-overlay-row");
-        select(id);
-        var f = session.features.filter(function (x) { return x.id === id; })[0];
-        if (f && mapObj) { try { mapObj.fitBounds(L.latLngBounds(f.points.map(function (p) { return [p.lat, p.lng]; })).pad(0.6)); } catch (e) {} }
-      }
-    });
-    el.list.addEventListener("change", function (event) {
-      var input = event.target.closest("[data-gd-overlay-hole]");
-      if (input) renumber(input.getAttribute("data-gd-overlay-hole"), input.value);
-    });
+    function updateBin() {
+      el.bin.classList.toggle("hasSelection", !!selectedId);
+      el.bin.hidden = !session.course;
+    }
+
+    /* ---- autosave ---- */
+
+    function changed() {
+      session.dirty = true;
+      session.rev++;
+      scheduleSave(SAVE_DELAY_MS);
+      updateActions();
+      updateReadout();
+    }
+
+    function scheduleSave(delay) {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(function () { saveTimer = null; saveOverlay(); }, delay);
+    }
+
+    function renderSaveState() {
+      if (destroyed) return;
+      var text = !session.course ? ""
+        : session.saving ? "Saving…"
+        : session.saveError ? "Not saved - " + session.saveError + " (retrying)"
+        : session.dirty ? "Unsaved changes…"
+        : session.loadedFor ? "All changes saved" : "";
+      el.saved.innerHTML = session.saveError ? '<span class="gdStudioWarnText">' + esc(text) + "</span>" : esc(text);
+    }
+
+    /* Saves what is on screen. If anything changed while the save was in flight, the local
+       shapes win and another save follows; only a save of the current revision adopts the
+       server's normalised copy. Finishes even if the page is left mid-save. */
+    function saveOverlay() {
+      var id = session.loadedFor;
+      if (!id || !session.dirty) { renderSaveState(); return Promise.resolve(); }
+      if (session.saving) { session.saveAgain = true; return session.savePromise; }
+      var sentRev = session.rev;
+      session.saving = true;
+      renderSaveState();
+      session.savePromise = api("POST", "", { courseId: id, features: session.features }).then(function (data) {
+        session.saveError = "";
+        if (session.loadedFor !== id) return;
+        if (session.rev === sentRev) {
+          session.dirty = false;
+          if (!drag) session.features = (data && data.overlay && data.overlay.features) || [];
+          if (!destroyed && !drag) { if (selectedId && !findFeature(selectedId)) selectedId = ""; drawFeatures(); }
+        }
+        if (!destroyed && data && data.dropped) setStatus(data.dropped + " shape" + (data.dropped === 1 ? " was" : "s were") + " too small to keep and dropped.", true);
+      }).catch(function (error) {
+        session.saveError = String(error && error.message || error);
+        if (!destroyed) scheduleSave(SAVE_RETRY_MS);
+      }).then(function () {
+        session.saving = false;
+        var again = session.saveAgain || (session.dirty && session.rev !== sentRev);
+        session.saveAgain = false;
+        if (!destroyed) { renderSaveState(); updateActions(); }
+        /* The promise settles once the follow-up save has too, so a caller waiting on it (the
+           AI scan, leaving the page) sees the last change saved, not the one before it. */
+        if (again && session.loadedFor === id) return saveOverlay();
+      });
+      return session.savePromise;
+    }
+
+    function flushSave() {
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      return session.dirty ? saveOverlay() : Promise.resolve();
+    }
+
+    function deleteOverlay() {
+      if (!canEdit()) return;
+      if (!window.confirm("Delete every overlay shape for this course? The mapper will go back to reading OSM alone.")) return;
+      session.features = [];
+      selectedId = "";
+      cancelDraft();
+      drawFeatures();
+      changed();
+      flushSave();
+    }
 
     /* ---- what OSM has here ---- */
 
@@ -403,6 +703,8 @@
       add(osm.greens, STYLE.osmGreen, true);
       add(osm.tees, STYLE.osmTee, true);
       add(osm.holes, STYLE.osmHole, false);
+      /* OSM sits under the overlay, so a placed shape is never hidden behind what OSM has. */
+      osmLayers.forEach(function (l) { try { l.bringToBack(); } catch (e) {} });
     }
 
     /* ---- readouts ---- */
@@ -411,19 +713,31 @@
       el.status.innerHTML = warn ? '<span class="gdStudioWarnText">' + esc(text) + "</span>" : esc(text);
     }
 
+    function updateHint() {
+      if (destroyed) return;
+      var text = "";
+      if (!session.course) text = "Pick a course to start";
+      else if (scanning) text = "AI scan running - shapes are locked until it finishes";
+      else if (tool === "fairway") text = draft.length ? (draft.length >= 2 ? "Keep clicking along the fairway · double-click or Enter to finish · Backspace undoes · Esc cancels" : "Click the next point along the fairway") : "Click at the tee end of the fairway, then along its middle";
+      else if (tool === "green") text = "Click the middle of a green";
+      else if (tool === "tee") text = "Click where the tee is";
+      else if (selectedId && !bigEnoughForHandles(findFeature(selectedId) || { points: [] })) text = "Drag to move · zoom in to reshape its corners · Delete or the bin removes it";
+      else if (selectedId) text = "Drag to move · drag corners to reshape · faint dots add a corner · right-click a corner to remove it · Delete or the bin removes the shape";
+      else text = "Choose Fairway line, Green pin or Tee to place · click a shape to adjust it";
+      if (wandsRunning) text = "Finding the green's edge… · " + text;
+      el.hint.textContent = text;
+    }
+
     function updateReadout() {
       if (destroyed || !mapObj) return;
       var bits = [];
       var here = centre();
       if (here) bits.push("centre " + here.lat.toFixed(6) + ", " + here.lng.toFixed(6));
       bits.push("z" + mapObj.getZoom());
-      if (draft.length) {
-        bits.push("drawing " + kindLabel(tool).toLowerCase() + " — " + draft.length + " point" + (draft.length === 1 ? "" : "s") +
-          (draft.length >= minPoints(tool) ? " · double-click or Enter to finish" : ""));
-      } else if (session.course) {
-        bits.push("click the map to start a " + kindLabel(tool).toLowerCase());
-      } else {
-        bits.push("pick a course to start");
+      if (session.course) {
+        var count = function (kind) { return session.features.filter(function (f) { return f.kind === kind; }).length; };
+        var holes = count("hole");
+        bits.push("placed: " + count("fairway") + " fairways, " + count("green") + " greens, " + count("tee") + " tees" + (holes ? ", " + holes + " hole lines" : ""));
       }
       var osm = session.osm;
       if (osm && !osm.error) bits.push("OSM here: " + (osm.greens || []).length + " greens, " + (osm.fairways || []).length + " fairways, " + (osm.holes || []).length + " hole lines");
@@ -435,12 +749,12 @@
     function updateActions() {
       var has = !!session.course && !busy;
       el.ai.disabled = !has || scanning || !!draft.length;
-      el.ai.title = draft.length ? "Finish or cancel the shape you are drawing first" : scanning ? "A scan is running" : "";
-      el.save.disabled = !has || !session.dirty;
-      el.reload.disabled = !has;
-      el.clear.disabled = !has || (!session.features.length && !session.dirty);
+      el.ai.title = draft.length ? "Finish or cancel the fairway you are placing first" : scanning ? "A scan is running" : "";
+      el.clear.disabled = !canEdit() || !session.features.length;
       el.run.disabled = !has || session.dirty;
-      el.run.title = session.dirty ? "Save the overlay first - the mapper reads what is saved" : "";
+      el.run.title = session.dirty ? "Wait for the overlay to save - the mapper reads what is saved" : "";
+      ["tool-fairway", "tool-green", "tool-tee"].forEach(function (name) { el[name].disabled = !canEdit(); });
+      renderSaveState();
     }
 
     /* ---- course map: the club's schematic, stored on the course and sent to the AI as image 2 ---- */
@@ -524,10 +838,11 @@
         renderCourseMapState();
         session.loadedFor = id;
         session.dirty = false;
+        session.saveError = "";
         selectedId = "";
+        busy = false;
         drawOsm();
         drawFeatures();
-        renderList();
         /* A scan started before the page was left (or from another tab) is picked back up. */
         var scan = data && data.aiScan;
         if (scan && (scan.status === "queued" || scan.status === "running") && !scanning) {
@@ -535,46 +850,14 @@
           if (Date.now() - since < AI_TIMEOUT_MS) { scanning = true; pollScan(id, since); }
         }
         var when = data && data.overlay && data.overlay.updatedAt ? " · saved " + new Date(data.overlay.updatedAt).toLocaleString() : "";
-        setStatus(session.features.length ? session.features.length + " saved shape" + (session.features.length === 1 ? "" : "s") + when : "No overlay saved for this course yet.");
+        setStatus(session.features.length ? session.features.length + " saved shape" + (session.features.length === 1 ? "" : "s") + when : "Nothing placed on this course yet.");
       }).catch(function (error) {
         if (destroyed) return;
         setStatus("Could not load: " + (error && error.message || error), true);
       }).then(function () {
         busy = false;
-        if (!destroyed) { updateActions(); updateReadout(); }
+        if (!destroyed) { updateActions(); updateReadout(); updateHint(); updateBin(); }
       });
-    }
-
-    function saveOverlay() {
-      var id = courseIdOf(session.course);
-      if (!id || busy) return;
-      busy = true; updateActions();
-      setStatus("Saving…");
-      api("POST", "", { courseId: id, features: session.features }).then(function (data) {
-        if (destroyed) return;
-        session.features = (data && data.overlay && data.overlay.features) || [];
-        session.dirty = false;
-        drawFeatures();
-        renderList();
-        var s = (data && data.summary) || {};
-        setStatus("Saved: " + (s.fairways || 0) + " fairways, " + (s.holeLines || 0) + " hole lines, " + (s.greens || 0) + " greens" +
-          (data && data.dropped ? " · " + data.dropped + " shape" + (data.dropped === 1 ? "" : "s") + " dropped as too small" : "") +
-          ". Now run the mapper.", !!(data && data.dropped));
-      }).catch(function (error) {
-        if (destroyed) return;
-        setStatus("Save failed: " + (error && error.message || error), true);
-      }).then(function () { busy = false; if (!destroyed) updateActions(); });
-    }
-
-    function deleteOverlay() {
-      var id = courseIdOf(session.course);
-      if (!id || busy) return;
-      if (!window.confirm("Delete every overlay shape for this course? The mapper will go back to reading OSM alone.")) return;
-      session.features = [];
-      session.dirty = true;
-      drawFeatures();
-      renderList();
-      saveOverlay();
     }
 
     function runMapper() {
@@ -598,17 +881,68 @@
       }).catch(function (error) {
         if (destroyed) return;
         setStatus("Could not queue the mapper: " + (error && error.message || error), true);
-      }).then(function () { busy = false; if (!destroyed) updateActions(); });
+      }).then(function () { busy = false; if (!destroyed) { updateActions(); drawFeatures(); } });
+    }
+
+    /* ---- imagery capture ----
+       Pictures are built from the mounted provider's own tiles, re-fetched with CORS so a
+       canvas can read them (every source in GDMapSources sets crossOrigin for this reason).
+       Tiles at one zoom, nothing resampled; the tile grid's top-left mercator pixel and that
+       zoom ARE the georeference - the same playSurface shape a published frame carries, exact
+       to the pixel. */
+    function stitchTiles(z, x0, y0, x1, y1) {
+      var full = document.createElement("canvas");
+      full.width = (x1 - x0 + 1) * 256; full.height = (y1 - y0 + 1) * 256;
+      var ctx = full.getContext("2d");
+      ctx.fillStyle = "#000"; ctx.fillRect(0, 0, full.width, full.height);
+      var loads = [];
+      var failed = 0;
+      for (var ty = y0; ty <= y1; ty++) {
+        for (var tx = x0; tx <= x1; tx++) {
+          loads.push(new Promise(function (done) {
+            var img = new Image();
+            var cx = tx, cy = ty;
+            img.crossOrigin = "anonymous";
+            img.onload = function () { try { ctx.drawImage(img, (cx - x0) * 256, (cy - y0) * 256, 256, 256); } catch (e) { failed++; } done(); };
+            img.onerror = function () { failed++; done(); };
+            try { img.src = layer.getTileUrl({ x: cx, y: cy, z: z }); } catch (e) { failed++; done(); }
+          }));
+        }
+      }
+      return Promise.all(loads).then(function () { return { canvas: full, tiles: loads.length, failed: failed }; });
+    }
+
+    /* The picture the wand reads: a few tiles around a pin at the zoom nearest WAND_TARGET_MPP
+       the provider really has, unscaled. */
+    function captureAround(point) {
+      return new Promise(function (resolve, reject) {
+        if (!mapObj || !layer || typeof layer.getTileUrl !== "function") return reject(new Error("this provider cannot be captured - switch provider"));
+        var native = num(layer.options && layer.options.maxNativeZoom) || num(layer.options && layer.options.maxZoom) || 19;
+        var mppZ0 = 156543.03392 * Math.cos(point.lat * Math.PI / 180);
+        var z = Math.max(14, Math.min(native, Math.round(Math.log2(mppZ0 / WAND_TARGET_MPP))));
+        var mpp = mppZ0 / Math.pow(2, z);
+        var half = Math.ceil(Math.sqrt(WAND_MAX_GREEN_M2 / Math.PI) / mpp * 1.6 + 24);
+        var p = mapObj.project(L.latLng(point.lat, point.lng), z);
+        var x0 = Math.floor((p.x - half) / 256), y0 = Math.floor((p.y - half) / 256);
+        var x1 = Math.floor((p.x + half) / 256), y1 = Math.floor((p.y + half) / 256);
+        stitchTiles(z, x0, y0, x1, y1).then(function (out) {
+          if (out.failed === out.tiles) return reject(new Error("no imagery loaded here"));
+          var dataUrl;
+          try { dataUrl = out.canvas.toDataURL("image/jpeg", 0.92); }
+          catch (e) { return reject(new Error("this provider's tiles cannot be read back (no CORS) - switch provider")); }
+          resolve({
+            data: dataUrl.replace(/^data:[^,]+,/, ""),
+            mediaType: "image/jpeg",
+            georef: { playSurface: { originPx: { x: x0 * 256, y: y0 * 256 }, captureZoom: z, outputDimensions: { width: out.canvas.width, height: out.canvas.height } } }
+          });
+        });
+      });
     }
 
     /* ---- AI scan: the current view, as the model will see it ----
-       The picture is built from the mounted provider's own tiles, re-fetched with CORS so a
-       canvas can read them (every source in GDMapSources sets crossOrigin for this reason).
-       Tiles at the layer's effective zoom, nothing resampled; the tile grid's top-left
-       mercator pixel and that zoom ARE the georeference - the same playSurface shape a
-       published frame carries, exact to the pixel. Then one downscale to the model's edge
-       limit, folded into the zoom as a fraction, so the georef still describes the picture
-       that is actually sent. */
+       Tiles at the layer's effective zoom, then one downscale to the model's edge limit,
+       folded into the zoom as a fraction, so the georef still describes the picture that is
+       actually sent. */
     function captureView() {
       return new Promise(function (resolve, reject) {
         if (!mapObj || !layer || typeof layer.getTileUrl !== "function") return reject(new Error("no tile layer to capture"));
@@ -623,26 +957,9 @@
         var cols = x1 - x0 + 1, rows = y1 - y0 + 1;
         if (cols < 1 || rows < 1) return reject(new Error("nothing in view"));
         if (cols * rows > AI_MAX_TILES) return reject(new Error("too much ground in view (" + cols * rows + " tiles) - zoom in"));
-        var full = document.createElement("canvas");
-        full.width = cols * 256; full.height = rows * 256;
-        var ctx = full.getContext("2d");
-        ctx.fillStyle = "#000"; ctx.fillRect(0, 0, full.width, full.height);
-        var loads = [];
-        var failed = 0;
-        for (var ty = y0; ty <= y1; ty++) {
-          for (var tx = x0; tx <= x1; tx++) {
-            loads.push(new Promise(function (done) {
-              var img = new Image();
-              var cx = tx, cy = ty;
-              img.crossOrigin = "anonymous";
-              img.onload = function () { try { ctx.drawImage(img, (cx - x0) * 256, (cy - y0) * 256, 256, 256); } catch (e) { failed++; } done(); };
-              img.onerror = function () { failed++; done(); };
-              try { img.src = layer.getTileUrl({ x: cx, y: cy, z: z }); } catch (e) { failed++; done(); }
-            }));
-          }
-        }
-        Promise.all(loads).then(function () {
-          if (failed === loads.length) return reject(new Error("no tiles loaded for this view"));
+        stitchTiles(z, x0, y0, x1, y1).then(function (stitched) {
+          var full = stitched.canvas;
+          if (stitched.failed === stitched.tiles) return reject(new Error("no tiles loaded for this view"));
           var scale = Math.min(1, AI_MAX_EDGE_PX / Math.max(full.width, full.height), Math.sqrt(AI_MAX_PIXELS / (full.width * full.height)));
           var out = full;
           if (scale < 1) {
@@ -664,7 +981,7 @@
           resolve({
             data: dataUrl.replace(/^data:[^,]+,/, ""),
             mediaType: "image/jpeg",
-            width: out.width, height: out.height, tiles: loads.length, failed: failed,
+            width: out.width, height: out.height, tiles: stitched.tiles, failed: stitched.failed,
             anchors: anchors, grid: AI_GRID_PX,
             bounds: L.latLngBounds(mapObj.unproject(L.point(x0 * 256, y0 * 256), z), mapObj.unproject(L.point((x1 + 1) * 256, (y1 + 1) * 256), z)),
             georef: {
@@ -740,7 +1057,7 @@
       if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
       if (scanFrame) { try { mapObj.removeLayer(scanFrame); } catch (e) {} scanFrame = null; }
       scanning = false;
-      updateActions();
+      if (!destroyed) { updateActions(); updateHint(); drawFeatures(); }
     }
 
     function describeScan(scan) {
@@ -754,6 +1071,7 @@
     }
 
     function pollScan(id, startedAt) {
+      updateHint();
       scanTimer = setTimeout(function () {
         if (destroyed || courseIdOf(session.course) !== id) return stopScanPoll();
         api("GET", "?courseId=" + encodeURIComponent(id)).then(function (data) {
@@ -761,18 +1079,15 @@
           var scan = data && data.aiScan;
           var state = scan && scan.status;
           if (state === "done" || state === "failed") {
-            stopScanPoll();
-            if (state === "failed") { setStatus("AI scan failed: " + (scan.error || "unknown"), true); return; }
+            if (state === "failed") { stopScanPoll(); setStatus("AI scan failed: " + (scan.error || "unknown"), true); return; }
             session.features = (data.overlay && data.overlay.features) || [];
             session.dirty = false;
             selectedId = "";
-            drawFeatures();
-            renderList();
-            updateActions();
+            stopScanPoll();
             setStatus(describeScan(scan), !!(scan.dropped && scan.dropped.length));
             return;
           }
-          if (Date.now() - startedAt > AI_TIMEOUT_MS) { stopScanPoll(); setStatus("AI scan is taking too long - check back with Reload saved", true); return; }
+          if (Date.now() - startedAt > AI_TIMEOUT_MS) { stopScanPoll(); setStatus("AI scan is taking too long - pick the course again to check on it", true); return; }
           setStatus("AI scan " + (state || "queued") + "… " + Math.round((Date.now() - startedAt) / 1000) + "s");
           pollScan(id, startedAt);
         }).catch(function (error) {
@@ -785,13 +1100,19 @@
     function scanWithAi() {
       var id = courseIdOf(session.course);
       if (!id || scanning || draft.length) return;
-      if (session.dirty && !window.confirm("You have unsaved shapes. The scan saves on the server and reloads the overlay, so they will be lost. Continue?")) return;
       var replace = !!el["ai-replace"].checked;
       if (replace && session.features.length && !window.confirm("Replace the " + session.features.length + " saved shape(s) with whatever the AI finds in this view?")) return;
       scanning = true;
+      selectedId = "";
+      setTool("move");
+      drawFeatures();
       updateActions();
-      setStatus("Capturing the view…");
-      captureView().then(function (capture) {
+      /* The scan appends to what is SAVED, so anything still waiting to save goes first. */
+      setStatus("Saving, then capturing the view…");
+      flushSave().then(function () {
+        if (session.dirty) throw new Error("the overlay did not save (" + (session.saveError || "unknown") + ")");
+        return captureView();
+      }).then(function (capture) {
         setStatus("Sending " + capture.width + "×" + capture.height + " px (" + capture.tiles + " tiles" + (capture.failed ? ", " + capture.failed + " missing" : "") + ", " + capture.anchors.length + " known shapes drawn on)…");
         scanFrame = L.rectangle(capture.bounds, { color: "#ffb54c", weight: 1, dashArray: "6 6", fill: false, interactive: false }).addTo(mapObj);
         return api("POST", "", { courseId: id, image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, append: !replace, anchors: capture.anchors, grid: capture.grid }, AI_API);
@@ -822,18 +1143,20 @@
       if (restoring && session.loadedFor === id) {
         drawOsm();
         drawFeatures();
-        renderList();
         updateActions();
+        updateHint();
+        if (session.dirty && !session.saving) scheduleSave(SAVE_DELAY_MS);
         return;
       }
       if (session.loadedFor !== id) {
         session.features = [];
         session.osm = null;
         session.courseMap = null;
+        session.loadedFor = "";
         session.dirty = false;
+        selectedId = "";
         clearOsmLayers();
         clearFeatureLayers();
-        renderList();
       }
       loadOverlay(course);
     }
@@ -843,12 +1166,13 @@
     }
 
     function pickCourse() {
-      if (session.dirty && !window.confirm("You have unsaved overlay shapes. Pick another course and lose them?")) return;
+      if (session.saveError && session.dirty && !window.confirm("The last change has not saved (" + session.saveError + "). Pick another course and lose it?")) return;
+      flushSave();
       var pick = window.GDStudioCoursePick;
       var opened = pick && typeof pick.open === "function" && pick.open({
         source: "studio-map-overlay",
         onReturn: remeasure,
-        onPick: function (course) { if (!destroyed) { cancelDraft(); showCourse(course); } }
+        onPick: function (course) { if (!destroyed) { cancelDraft(); setTool("move"); showCourse(course); } }
       });
       if (!opened) setStatus("The course picker is not loaded on this surface.", true);
     }
@@ -858,8 +1182,8 @@
     mapObj = L.map(el.map, {
       zoomControl: true,
       attributionControl: false,
-      /* Double-click finishes a shape; zooming on it would move the ground under the last
-         point. Zoom stays on the wheel and the control. */
+      /* Double-click finishes a fairway line; zooming on it would move the ground under the
+         last point. Zoom stays on the wheel and the control. */
       doubleClickZoom: false,
       scrollWheelZoom: true,
       maxZoom: 22
@@ -868,20 +1192,41 @@
     buildProviderOptions();
     useSource(session.sourceKey || bestSourceKey());
 
-    mapObj.on("click", function (e) { addVertex(e.latlng); });
+    mapObj.on("click", function (e) { handleMapClick(e.latlng); });
     mapObj.on("dblclick", function (e) {
       if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
-      finishDraft();
+      if (tool === "fairway") finishFairway();
     });
+    mapObj.on("mousemove", function (e) {
+      if (tool !== "fairway" || !draft.length) return;
+      cursorLatLng = { lat: e.latlng.lat, lng: e.latlng.lng };
+      drawDraft();
+    });
+    mapObj.on("mouseout", function () { if (cursorLatLng) { cursorLatLng = null; drawDraft(); } });
     mapObj.on("moveend zoomend", function () { buildProviderOptions(); updateReadout(); });
+    mapObj.on("zoomend", function () { if (selectedId && !drag) { drawFeatures(); updateHint(); } });
 
     function onKey(event) {
-      if (!draft.length) return;
       var target = event.target;
       if (target && /^(input|textarea|select)$/i.test(target.tagName)) return;
-      if (event.key === "Enter") { event.preventDefault(); finishDraft(); }
-      else if (event.key === "Escape") { event.preventDefault(); cancelDraft(); }
-      else if (event.key === "Backspace") { event.preventDefault(); undoVertex(); }
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (draft.length) {
+        if (event.key === "Enter") { event.preventDefault(); finishFairway(); }
+        else if (event.key === "Escape") { event.preventDefault(); cancelDraft(); }
+        else if (event.key === "Backspace") { event.preventDefault(); undoDraftPoint(); }
+        return;
+      }
+      if (!session.course || !containerEl.isConnected) return;
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedId && canEdit() && !drag) {
+        event.preventDefault();
+        var f = findFeature(selectedId);
+        removeFeature(selectedId);
+        if (f) setStatus(kindLabel(f.kind) + " deleted.");
+        return;
+      }
+      if (event.key === "Escape") { setTool("move"); if (selectedId) select(""); return; }
+      var shortcut = { v: "move", f: "fairway", g: "green", t: "tee" }[String(event.key || "").toLowerCase()];
+      if (shortcut && (shortcut === "move" || canEdit())) setTool(shortcut);
     }
     document.addEventListener("keydown", onKey);
 
@@ -890,23 +1235,27 @@
     el.osm.checked = session.showOsm;
     el.osm.addEventListener("change", function () { session.showOsm = el.osm.checked; drawOsm(); });
     el.ai.addEventListener("click", scanWithAi);
+    el["tool-move"].addEventListener("click", function () { setTool("move"); });
     el["tool-fairway"].addEventListener("click", function () { setTool("fairway"); });
-    el["tool-hole"].addEventListener("click", function () { setTool("hole"); });
     el["tool-green"].addEventListener("click", function () { setTool("green"); });
     el["tool-tee"].addEventListener("click", function () { setTool("tee"); });
+    el.width.addEventListener("change", function () {
+      var w = num(el.width.value);
+      session.fairwayWidth = w && w >= 10 && w <= 90 ? w : shapes.FAIRWAY_WIDTH_M;
+      el.width.value = session.fairwayWidth;
+      drawDraft();
+    });
+    el.finish.addEventListener("click", finishFairway);
+    el.bin.addEventListener("click", function () {
+      if (!selectedId || !canEdit()) { setStatus("Drag a shape or a corner onto the bin to delete it."); return; }
+      var f = findFeature(selectedId);
+      removeFeature(selectedId);
+      if (f) setStatus(kindLabel(f.kind) + " deleted.");
+    });
     el["course-map"].addEventListener("change", function () {
       var file = el["course-map"].files && el["course-map"].files[0];
       el["course-map"].value = "";
       if (file) uploadCourseMap(file);
-    });
-    el.finish.addEventListener("click", finishDraft);
-    el.undo.addEventListener("click", undoVertex);
-    el.cancel.addEventListener("click", cancelDraft);
-    el.save.addEventListener("click", saveOverlay);
-    el.reload.addEventListener("click", function () {
-      if (session.dirty && !window.confirm("Reload the saved overlay and lose unsaved shapes?")) return;
-      session.loadedFor = "";
-      loadOverlay(session.course);
     });
     el.clear.addEventListener("click", deleteOverlay);
     el.run.addEventListener("click", runMapper);
@@ -919,19 +1268,26 @@
     }
     updateActions();
     updateReadout();
+    updateHint();
+    updateBin();
     remeasure();
 
     return function cleanup() {
+      /* Whatever is waiting to save goes now - leaving the page must not lose the last drag. */
+      flushSave();
       destroyed = true;
       if (scanTimer) clearTimeout(scanTimer);
+      if (saveTimer) clearTimeout(saveTimer);
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousemove", onDragMove);
+      document.removeEventListener("mouseup", onDragEnd);
       if (window.GDStudioCoursePick) window.GDStudioCoursePick.cancel();
       if (window.GDStudioShell) window.GDStudioShell.show();
       if (mapObj) { try { mapObj.remove(); } catch (e) {} }
       mapObj = null;
       layer = null;
       draftLayers = [];
-      featureLayers = [];
+      featureLayers = {};
       osmLayers = [];
     };
   }

@@ -108,6 +108,28 @@ test("a guide over a real edge refines to a lighter ring of about the right size
   assert.ok(out.params.baseBubbleSize > 0, "the bubble is derived from the guide, not the 61 default");
 });
 
+/* The Mapping Overlay's green pin: no guide, just a click on a green. The wand's ring should
+   settle on the painted edge (an inset of it - the wand traces inside the surface) rather than
+   on the typical-green size the sweep starts from. */
+test("a pin on a green finds that green's edge, not the typical size", async () => {
+  const SIZE = 512;
+  const frame = syntheticFrame(54.62, -5.85, SIZE);
+  const proj = core.frameProjector(frame);
+  const mpp = 0.001 * 111320 * Math.cos(54.62 * Math.PI / 180) / Math.abs(proj.toPx({ lat: 54.62, lng: -5.849 }).x - proj.toPx({ lat: 54.62, lng: -5.85 }).x);
+  for (const [rx, ry] of [[40, 32], [70, 55]]) {
+    const image = await sharp({ create: { width: SIZE, height: SIZE, channels: 3, background: { r: 52, g: 98, b: 44 } } })
+      .composite([{ input: Buffer.from(`<svg width="${SIZE}" height="${SIZE}"><ellipse cx="260" cy="250" rx="${rx}" ry="${ry}" fill="#7fc15a"/></svg>`), top: 0, left: 0 }])
+      .png().toBuffer();
+    const out = await core.wandGreenAtPoint({ image, playSurface: frame, seed: proj.toLatLng({ x: 255, y: 255 }) });
+    const painted = Math.PI * rx * ry * mpp * mpp;
+    assert.strictEqual(out.ok, true, "expected a green, got " + out.reason);
+    assert.strictEqual(out.stable, true, "the ring should come from a stable plateau");
+    assert.ok(out.area > painted * 0.45 && out.area < painted * 1.05, rx + "x" + ry + ": area " + Math.round(out.area) + " vs painted " + Math.round(painted));
+    assert.ok(out.shape.length <= core.WAND_GREEN_MAX_POINTS);
+  }
+  assert.strictEqual((await core.wandGreenAtPoint({ image: Buffer.alloc(0), playSurface: null, seed: { lat: 1, lng: 1 } })).reason, "frame-has-no-projection");
+});
+
 /* The claim the module header makes about itself, asserted so it cannot quietly stop being
    true: refining REPLACES the geometry but keeps what pointed us at the feature. */
 test("applyRefinedShape keeps the osmId and says the geometry is no longer OSM's", () => {

@@ -94,6 +94,39 @@ test("the mapper run is gated on a saved overlay, so what runs is what is on scr
   assert.ok(page.includes("el.run.disabled = !has || session.dirty"), "Run mapper must be disabled while there are unsaved shapes");
 });
 
+/* ---------- placing by eye ---------- */
+
+test("every change autosaves, and leaving the page flushes what is waiting", () => {
+  assert.ok(/function changed\(\) \{[\s\S]*?scheduleSave\(SAVE_DELAY_MS\)/.test(page), "changed() must schedule a save");
+  assert.ok(!page.includes('data-gd-overlay="save"'), "there is no Save button - saving is automatic");
+  assert.ok(/return function cleanup\(\) \{\s*\/\*[^*]*\*\/\s*flushSave\(\);/.test(page), "cleanup must flush a pending save before tearing down");
+  assert.ok(page.includes("if (session.rev === sentRev)"), "a save only adopts the server copy when nothing changed while it was in flight");
+});
+
+test("shapes come from the shared builders: a fairway line with a tee behind it, a pinned green through the wand", () => {
+  assert.ok(source.includes('src="scripts/studio/courses/map-overlay/map-overlay-shapes.js'), "the shape builders are not loaded");
+  assert.ok(source.indexOf("map-overlay-shapes.js") < source.indexOf("map-overlay-page.js"), "the builders must load before the page");
+  assert.ok(page.includes("shapes.fairwayFromLine(line, session.fairwayWidth)"), "a finished line must become a fairway polygon");
+  assert.ok(page.includes("shapes.teeBeyondLine(line, allGreens())"), "a fairway must bring its tee");
+  assert.ok(page.includes('var WAND_API = "/api/course-map-wand"'), "a green pin must go through the wand endpoint");
+  assert.ok(page.includes("shapes.circle(point, shapes.GREEN_RADIUS_M)"), "a pin the wand cannot read still leaves a green to shape");
+  assert.ok(!page.includes('data-gd-overlay="hole"') && !page.includes('data-gd-overlay="tool-hole"'), "no hole numbering or hole-line tool at this stage");
+});
+
+test("shapes are deleted by dropping them on the bin", () => {
+  assert.ok(page.includes('data-gd-overlay="bin"'), "no bin on the map");
+  assert.ok(/if \(overBin\(event\)\) \{[\s\S]*?removeFeature\(f\.id\)/.test(page), "dropping a shape on the bin must delete it");
+});
+
+test("the wand endpoint is registered, admin-only and writes nothing", () => {
+  const wand = read("functions/course-map-wand.mjs");
+  assert.ok(wand.includes('path: "/api/course-map-wand"'));
+  assert.ok(toml.includes("/api/course-map-wand"), "no /api/course-map-wand redirect in netlify.toml");
+  assert.ok(wand.includes("if (!admin) return json(403"), "a non-admin must be refused");
+  assert.ok(wand.includes("wandGreenAtPoint("), "the endpoint must use the shared wand engine");
+  assert.ok(!/saveOverlay|supabaseFetch|writeAiScan/.test(wand), "the wand only answers; the page saves");
+});
+
 /* ---------- the endpoint ---------- */
 
 test("the overlay endpoint is registered, admin-only, and reads OSM through the mapper's own query", () => {

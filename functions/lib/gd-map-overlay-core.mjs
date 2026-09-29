@@ -19,8 +19,8 @@
  * Feature shape (what course_map_overlays.features stores, and what Studio draws):
  *   { id: "f-1", kind: "fairway" | "hole" | "green", hole: 7 | null, points: [{lat, lng}, ...],
  *     source?: "ai" }
- *   source says who produced the shape (gd-overlay-georef-core.mjs stamps "ai"; a hand-drawn
- *   one has none). Display only - the mapper treats every feature the same.
+ *   source says who produced the shape (gd-overlay-georef-core.mjs stamps "ai"; Studio stamps
+ *   "wand" on a green the wand outlined from a pin; a hand-placed one has none). Display only - the mapper treats every feature the same.
  *
  *   fairway - a closed polygon (3+ points). Becomes golf=fairway. The resolver takes its major
  *             axis as the centre-line and links it to the nearest green (within 230m); the
