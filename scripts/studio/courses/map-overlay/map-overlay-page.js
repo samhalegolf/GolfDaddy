@@ -8,17 +8,27 @@
  * How it is used: by eye, not by tracing. A fairway is a line laid down its middle, which
  * becomes a fairway-width polygon with corners to drag into shape, plus a tee box just behind
  * the start of the line. A green is a pin, which the green wand (/api/course-map-wand) turns
- * into an outline. A tee is a click. Every shape can be dragged, reshaped by its corners, and
- * deleted by dropping it on the bin. Every change saves on its own. Shapes carry no hole
- * number - the mapper numbers holes from the scorecard.
+ * into an outline; a bunker is a pin the same wand outlines on its bunker profile. A tee is a
+ * click. Every shape can be dragged, reshaped by its corners, and deleted by dropping it on
+ * the bin. Every change saves on its own. Hole numbers are optional: set "Hole" and new shapes
+ * carry it (it moves on to the next hole after each green), or select a shape and change its
+ * number. Unnumbered shapes are numbered by the mapper from the scorecard.
+ *
+ * Drafts: a session is a draft until "Mark ready" is pressed, and the mapper ignores a draft
+ * overlay. Any shape change puts it back to draft, so what the mapper reads is always
+ * something a person signed off (supabase/migrations/20260929_add_course_map_overlay_status.sql).
+ *
+ * What it shows to draw against, none of it copied into the overlay: what OSM has here (the
+ * mapper's own query, so exactly what the last run collected), the course's saved objects,
+ * and the last mapper run - opened from a failed course, the drawer says why it failed.
  *
  * What it writes: one thing, the course's overlay row (course_map_overlays) through
- * /api/course-map-overlay. The mapper worker merges that overlay into the Overpass payload as
- * ordinary golf=fairway / golf=green / golf=tee ways (functions/lib/gd-map-overlay-core.mjs),
- * so nothing downstream knows the difference. It does NOT write objects, holes, a pin or a
- * package - the overlay changes nothing on the course until a mapper run is requested, which
- * the button at the bottom does through the same /api/course-mapper-jobs path Course Database
- * uses.
+ * /api/course-map-overlay. The mapper worker merges a ready overlay into the Overpass payload
+ * as ordinary golf=fairway / golf=green / golf=tee / golf=bunker ways
+ * (functions/lib/gd-map-overlay-core.mjs), so nothing downstream knows the difference. It does
+ * NOT write objects, holes, a pin or a package - the overlay changes nothing on the course
+ * until a mapper run is requested, which the button at the bottom does through the same
+ * /api/course-mapper-jobs path Course Database uses.
  *
  * Borrowed, not owned: the course list (the real picker, through gd-studio-course-pick.js),
  * the provider list (window.GDMapSources from gd-app-core.js), the shape builders
@@ -48,10 +58,11 @@
   var AI_POLL_MS = 4000;
   var AI_TIMEOUT_MS = 8 * 60 * 1000;
   /* The wand reads a green best at roughly 0.3m a pixel - a typical green ~45px across its
-     radius, the scale its bubble sizes were tuned at. The picture is sized to hold the largest
-     green the server will accept (gd-surface-refine-core WAND_GREEN_AREA_M2.max) with room. */
-  var WAND_TARGET_MPP = 0.3;
-  var WAND_MAX_GREEN_M2 = 2500;
+     radius, the scale its bubble sizes were tuned at - and a bunker at half that, since it is
+     under half the size. The picture is sized to hold the largest surface of that kind the
+     server will accept (gd-surface-refine-core WAND_PROFILES[kind].areaM2.max) with room. */
+  var WAND_TARGET_MPP = { green: 0.3, bunker: 0.15 };
+  var WAND_MAX_M2 = { green: 2500, bunker: 1200 };
   /* Autosave waits for a pause, so a burst of drags is one save. */
   var SAVE_DELAY_MS = 700;
   var SAVE_RETRY_MS = 6000;
@@ -62,9 +73,23 @@
      change. The save state lives here too, so a save still in flight when the page is left
      lands on the same state the next render reads. */
   var session = {
-    course: null, features: [], loadedFor: "", osm: null, courseMap: null, view: null, sourceKey: "", showOsm: true,
+    course: null, features: [], loadedFor: "", osm: null, objects: [], lastRun: null, courseMap: null, view: null, sourceKey: "",
+    showOsm: true, showObjects: true, status: "draft", hole: null,
     dirty: false, rev: 0, saving: false, saveError: "", fairwayWidth: 0
   };
+
+  /* Everything that belongs to one course, dropped when another is picked or opened. */
+  function forgetCourse() {
+    session.features = [];
+    session.osm = null;
+    session.objects = [];
+    session.lastRun = null;
+    session.courseMap = null;
+    session.loadedFor = "";
+    session.dirty = false;
+    session.status = "draft";
+    session.hole = null;
+  }
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -96,8 +121,9 @@
     features.forEach(function (f) { var m = /^f-(\d+)$/.exec(f.id || ""); if (m) n = Math.max(n, Number(m[1])); });
     return "f-" + (n + 1);
   }
-  function kindLabel(kind) { return kind === "hole" ? "Hole line" : kind === "green" ? "Green" : kind === "tee" ? "Tee" : "Fairway"; }
-  function isPolygon(kind) { return kind === "fairway" || kind === "green" || kind === "tee"; }
+  function kindLabel(kind) { return kind === "hole" ? "Hole line" : kind === "green" ? "Green" : kind === "tee" ? "Tee" : kind === "bunker" ? "Bunker" : "Fairway"; }
+  function isPolygon(kind) { return kind === "fairway" || kind === "green" || kind === "tee" || kind === "bunker"; }
+  function holeNumber(value) { var n = num(value); return n != null && Number.isInteger(n) && n >= 1 && n <= 36 ? n : null; }
   function minPoints(kind) { return isPolygon(kind) ? 3 : 2; }
   function toLatLngs(points) { return points.map(function (p) { return [p.lat, p.lng]; }); }
   /* A course map is a small schematic; 1200px on the long side is plenty for the model to
@@ -113,16 +139,24 @@
     greenSelected: { color: "#ffffff", weight: 3, fillColor: "#b7ff5c", fillOpacity: 0.5 },
     tee: { color: "#6cc7ff", weight: 2, fillColor: "#6cc7ff", fillOpacity: 0.4 },
     teeSelected: { color: "#ffffff", weight: 3, fillColor: "#6cc7ff", fillOpacity: 0.5 },
+    bunker: { color: "#f2dfa0", weight: 2, fillColor: "#f2dfa0", fillOpacity: 0.45 },
+    bunkerSelected: { color: "#ffffff", weight: 3, fillColor: "#f2dfa0", fillOpacity: 0.55 },
     draft: { color: "#ffb54c", weight: 3, dashArray: "6 6", interactive: false },
     draftPreview: { color: "#ffb54c", weight: 1, fillColor: "#3cff8d", fillOpacity: 0.12, interactive: false },
     draftPoint: { radius: 4, color: "#ffb54c", weight: 2, fillColor: "#1a1a1a", fillOpacity: 1, interactive: false },
     vertex: { radius: 6, color: "#ffffff", weight: 2, fillColor: "#ffb54c", fillOpacity: 1, className: "gdStudioOverlayHandle" },
     midpoint: { radius: 4, color: "#ffffff", weight: 1, opacity: 0.8, fillColor: "#ffffff", fillOpacity: 0.35, className: "gdStudioOverlayHandle" },
     pin: { radius: 7, color: "#ffffff", weight: 2, fillColor: "#b7ff5c", fillOpacity: 1, interactive: false },
+    bunkerPin: { radius: 6, color: "#ffffff", weight: 2, fillColor: "#f2dfa0", fillOpacity: 1, interactive: false },
     osmGreen: { color: "#b7ff5c", weight: 2, fillColor: "#b7ff5c", fillOpacity: 0.28 },
     osmFairway: { color: "#8fa79c", weight: 1, dashArray: "3 5", fillOpacity: 0 },
     osmTee: { color: "#6cc7ff", weight: 2, fillColor: "#6cc7ff", fillOpacity: 0.3 },
-    osmHole: { color: "#ffffff", weight: 1, dashArray: "2 6", opacity: 0.7 }
+    osmHole: { color: "#ffffff", weight: 1, dashArray: "2 6", opacity: 0.7 },
+    osmBunker: { color: "#f2dfa0", weight: 1, fillColor: "#f2dfa0", fillOpacity: 0.25 },
+    /* The course's saved objects: thin amber outlines, so they read as "already there" and
+       never as something drawn this session. */
+    object: { color: "#ffd98a", weight: 1, dashArray: "4 4", fillColor: "#ffd98a", fillOpacity: 0.08 },
+    objectPoint: { radius: 4, color: "#ffd98a", weight: 1, fillColor: "#ffd98a", fillOpacity: 0.6 }
   };
 
   var BIN_ICON = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -138,6 +172,7 @@
     var cursorLatLng = null;
     var featureLayers = {};
     var osmLayers = [];
+    var objectLayers = [];
     var selectedId = "";
     var busy = false;
     var scanning = false;
@@ -152,16 +187,19 @@
       '<div class="gdStudioLede" style="margin-bottom:12px">' +
       "<p>Place what OSM is missing, by eye. Pick a course, then: <strong>Fairway</strong> - click along the middle of the fairway " +
       "and press Enter to finish; you get a fairway with corners to drag into shape, and a tee 20m behind the start. " +
-      "<strong>Green</strong> - click the middle of a green and the wand draws its outline. <strong>Tee</strong> - click to drop one. " +
+      "<strong>Green</strong> / <strong>Bunker</strong> - click the middle of one and the wand draws its outline. <strong>Tee</strong> - click to drop one. " +
       "Drag any shape to move it, drag its corners to reshape it (the faint dots between corners add a new one), and drop a shape " +
       "or a corner on the <strong>bin</strong> to delete it. <strong>Enter</strong> always means done, next: it saves what you are on and " +
-      "arms the next step (fairway → green → next fairway). Scroll to zoom, drag or use the arrow keys to pan, <strong>Full screen</strong> for room. Everything saves as you go. When the course looks right, run the mapper. " +
-      "The bright green outlines are the greens OSM already has - there is no need to place those again.</p></div>" +
+      "arms the next step (fairway → green → next fairway). <strong>Hole</strong> is optional: set it and new shapes carry that number, moving on a hole after each green; select a shape to change its number. " +
+      "Scroll to zoom, drag or use the arrow keys to pan, <strong>Full screen</strong> for room. Everything saves as you go, as a <strong>draft</strong> the mapper ignores - press <strong>Mark ready</strong> when the course looks right, then run the mapper. " +
+      "The bright outlines are what OSM already has and the dashed amber ones are the course's saved objects - there is no need to place those again.</p></div>" +
+      '<div class="gdStudioOverlayRun" data-gd-overlay="last-run"></div>' +
       '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="pick">Pick course</button>' +
       '<span class="gdStudioViewportCourse" data-gd-overlay="course">No course picked</span>' +
       '<label class="gdStudioViewportField">Provider <select data-gd-overlay="provider"></select></label>' +
-      '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="osm" checked> Show OSM greens</label>' +
+      '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="osm" checked> Show OSM</label>' +
+      '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="objects" checked> Show course objects</label>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ai" disabled>Scan this view with AI</button>' +
       '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="ai-replace"> replace saved shapes</label>' +
       '<label class="gdStudioViewportField gdStudioDiagramBtn">Course map… <input type="file" accept="image/*" data-gd-overlay="course-map" hidden></label>' +
@@ -174,7 +212,9 @@
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-fairway" title="Lay a line down the fairway (F)">Fairway line</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-green" title="Pin a green (G)">Green pin</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-tee" title="Drop a tee (T)">Tee</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-bunker" title="Pin a bunker (B)">Bunker pin</button>' +
       '<label class="gdStudioViewportField">Fairway width <input type="number" min="10" max="90" step="1" data-gd-overlay="width" class="gdStudioOverlayWidth"> m</label>' +
+      '<label class="gdStudioViewportField" data-gd-overlay="hole-label">Hole <input type="number" min="1" max="36" step="1" placeholder="–" data-gd-overlay="hole" class="gdStudioOverlayWidth gdStudioOverlayHole"></label>' +
       '<button type="button" class="gdStudioDiagramBtn gdStudioOverlayNext" data-gd-overlay="next" hidden></button>' +
       "</div>" +
       '<div class="gdStudioOverlayStage isTool-move" data-gd-overlay="stage">' +
@@ -191,7 +231,9 @@
       '<div class="gdStudioViewportReadout" data-gd-overlay="readout"></div>' +
       '<div class="gdStudioViewportCredit" data-gd-overlay="credit"></div>' +
       '<div class="gdStudioViewportBar" style="margin-top:12px">' +
+      '<span class="gdStudioOverlayDraft" data-gd-overlay="draft"></span>' +
       '<span class="gdStudioViewportField" data-gd-overlay="saved"></span>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ready" disabled>Mark ready</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="clear" disabled>Delete all shapes</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="run" disabled>Run mapper with overlay</button>' +
       '<span class="gdStudioViewportScan" data-gd-overlay="status"></span>' +
@@ -199,7 +241,7 @@
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "ai", "ai-replace", "course-map", "course-map-state", "tool-move", "tool-fairway", "tool-green", "tool-tee", "width", "next", "workspace", "fit", "zoom-shape", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "saved", "clear", "run", "status"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "objects", "ai", "ai-replace", "course-map", "course-map-state", "last-run", "tool-move", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "width", "hole", "hole-label", "next", "workspace", "fit", "zoom-shape", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "saved", "ready", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -268,8 +310,8 @@
     }
 
     function setTool(next) {
-      tool = next === "fairway" || next === "green" || next === "tee" ? next : "move";
-      ["move", "fairway", "green", "tee"].forEach(function (name) {
+      tool = next === "fairway" || next === "green" || next === "tee" || next === "bunker" ? next : "move";
+      ["move", "fairway", "green", "tee", "bunker"].forEach(function (name) {
         el["tool-" + name].classList.toggle("isActive", tool === name);
         el.stage.classList.toggle("isTool-" + name, tool === name);
       });
@@ -285,9 +327,10 @@
     /* ---- Enter: done with this, on to the next ----
        The order a hole is placed in: a fairway (which brings its tee), then its green, then
        the next hole's fairway. Enter finishes a line in progress, or saves the shape being
-       adjusted and arms whatever comes after it. */
-    var NEXT_TOOL = { fairway: "green", green: "fairway", tee: "fairway", hole: "fairway" };
-    var TOOL_WORD = { fairway: "Fairway line", green: "Green pin", tee: "Tee", move: "Move" };
+       adjusted and arms whatever comes after it. Bunkers come in clusters, so a bunker arms
+       the next bunker. */
+    var NEXT_TOOL = { fairway: "green", green: "fairway", tee: "fairway", hole: "fairway", bunker: "bunker" };
+    var TOOL_WORD = { fairway: "Fairway line", green: "Green pin", tee: "Tee", bunker: "Bunker pin", move: "Move" };
 
     function nextStep() {
       if (draft.length) return draft.length >= 2 ? { label: "Finish fairway ↵" } : null;
@@ -308,10 +351,15 @@
       if (draft.length) { finishFairway(); return; }
       var step = nextStep();
       if (step && step.tool) {
+        var done = findFeature(selectedId);
+        /* A green finishes a hole: numbering, when it is on, moves to the next one. */
+        if (done && done.kind === "green" && session.hole && session.hole < 36) setHole(session.hole + 1);
         select("");
         flushSave();
         setTool(step.tool);
-        setStatus(step.tool === "green" ? "Saved. Now click the middle of this hole's green." : "Saved. Next hole: click at the tee end of its fairway.");
+        setStatus(step.tool === "green" ? "Saved. Now click the middle of this hole's green."
+          : step.tool === "bunker" ? "Saved. Click the next bunker, or pick another tool."
+          : "Saved. Next hole" + (session.hole ? " (" + session.hole + ")" : "") + ": click at the tee end of its fairway.");
         return;
       }
       if (tool === "move") setTool("fairway");
@@ -368,7 +416,7 @@
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
       var point = { lat: latlng.lat, lng: latlng.lng };
       if (tool === "fairway") addDraftPoint(point);
-      else if (tool === "green") { placeGreen(point); setTool("move"); }
+      else if (tool === "green" || tool === "bunker") { var kind = tool; placeWand(point, kind); setTool("move"); }
       else if (tool === "tee") {
         var towards = nearestGreen(point, 600);
         setTool("move");
@@ -443,19 +491,20 @@
       setStatus("Fairway placed with a tee behind it. Drag the corners to fit, or drag the tee where it belongs.");
     }
 
-    /* ---- green pin ---- */
+    /* ---- green and bunker pins ---- */
 
-    function placeGreen(point) {
+    function placeWand(point, kind) {
       var id = session.loadedFor;
-      var pin = L.circleMarker([point.lat, point.lng], STYLE.pin).addTo(mapObj);
-      pin.bindTooltip("Finding the green's edge…", { permanent: true, direction: "top", className: "gdStudioOverlayLabel" });
+      var hole = session.hole;
+      var pin = L.circleMarker([point.lat, point.lng], kind === "bunker" ? STYLE.bunkerPin : STYLE.pin).addTo(mapObj);
+      pin.bindTooltip("Finding the " + kind + "'s edge…", { permanent: true, direction: "top", className: "gdStudioOverlayLabel" });
       wandsRunning++;
       updateHint();
       /* The provider's sharpest zoom first; where that has gaps or the wand finds no edge, one
          zoom coarser - some providers' top zoom is patchy, and a green reads fine at 0.6m/px. */
       function attempt(coarser) {
-        return captureAround(point, coarser).then(function (capture) {
-          return api("POST", "", { image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, seed: point }, WAND_API);
+        return captureAround(point, coarser, kind).then(function (capture) {
+          return api("POST", "", { image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, seed: point, kind: kind }, WAND_API);
         });
       }
       attempt(0).then(function (data) {
@@ -473,9 +522,11 @@
         updateHint();
         if (session.loadedFor !== id) return;
         if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold.", true); return; }
-        var f = addFeature({ kind: "green", points: result.shape || shapes.circle(point, shapes.GREEN_RADIUS_M), source: result.shape ? "wand" : "" });
+        var fallback = shapes.circle(point, kind === "bunker" ? shapes.BUNKER_RADIUS_M : shapes.GREEN_RADIUS_M);
+        var f = addFeature({ kind: kind, points: result.shape || fallback, source: result.shape ? "wand" : "", hole: hole });
         if (tool === "move" && !drag) select(f.id);
-        setStatus(result.shape ? "Green placed. " + result.note + " Drag its corners to fit." : result.note + " Placed a round green - drag its corners to fit.", !result.shape);
+        var word = kindLabel(kind);
+        setStatus(result.shape ? word + " placed. " + result.note + " Drag its corners to fit." : result.note + " Placed a round " + word.toLowerCase() + " - drag its corners to fit.", !result.shape);
       });
     }
 
@@ -483,8 +534,11 @@
 
     function findFeature(id) { return session.features.filter(function (f) { return f.id === id; })[0] || null; }
 
+    /* New shapes carry the hole number being worked on, when numbering is on. A wand pin keeps
+       the number it was placed under, even if the number has moved on by the time it lands. */
     function addFeature(raw, quiet) {
-      var f = { id: nextFeatureId(session.features), kind: raw.kind, hole: null, points: raw.points.slice(0, MAX_POINTS) };
+      var hole = Object.prototype.hasOwnProperty.call(raw, "hole") ? raw.hole : session.hole;
+      var f = { id: nextFeatureId(session.features), kind: raw.kind, hole: holeNumber(hole), points: raw.points.slice(0, MAX_POINTS) };
       if (raw.source) f.source = raw.source;
       session.features.push(f);
       if (!quiet) { selectedId = tool === "move" ? f.id : selectedId; drawFeatures(); changed(); }
@@ -576,6 +630,7 @@
       });
       updateBin();
       updateReadout();
+      renderHoleField();
     }
 
     /* Corner handles on a shape only a few pixels across would cover it entirely and make it
@@ -604,6 +659,40 @@
       drawFeatures();
       updateHint();
       updateNext();
+    }
+
+    /* ---- hole numbers ----
+       One field, two jobs, said by its label: with a shape selected it is that shape's number;
+       with nothing selected it is the number new shapes get. Empty means unnumbered - the
+       mapper numbers those from the scorecard. */
+
+    function setHole(n) {
+      session.hole = holeNumber(n);
+      renderHoleField();
+    }
+
+    function renderHoleField() {
+      if (destroyed || !el.hole) return;
+      var f = selectedId ? findFeature(selectedId) : null;
+      var value = f ? f.hole : session.hole;
+      if (document.activeElement !== el.hole) el.hole.value = value ? String(value) : "";
+      el["hole-label"].firstChild.nodeValue = f ? kindLabel(f.kind) + " hole " : "Hole ";
+      el.hole.title = f ? "This shape's hole number - empty leaves it for the mapper to number" : "Number new shapes with this hole - empty leaves them unnumbered";
+    }
+
+    function holeFieldChanged() {
+      var n = holeNumber(el.hole.value);
+      var f = selectedId ? findFeature(selectedId) : null;
+      if (f) {
+        if (f.hole === n) return;
+        f.hole = n;
+        drawFeatures();
+        changed();
+        setStatus(kindLabel(f.kind) + (n ? " numbered hole " + n + "." : " left unnumbered."));
+      } else {
+        setHole(n);
+        setStatus(n ? "New shapes will be numbered hole " + n + "." : "New shapes will be left unnumbered.");
+      }
     }
 
     /* ---- dragging and the bin ---- */
@@ -706,6 +795,10 @@
         : session.dirty ? "Unsaved changes…"
         : session.loadedFor ? "All changes saved" : "";
       el.saved.innerHTML = session.saveError ? '<span class="gdStudioWarnText">' + esc(text) + "</span>" : esc(text);
+      var shown = !!session.loadedFor && session.features.length > 0;
+      var ready = shown && session.status === "ready" && !session.dirty;
+      el.draft.textContent = !shown ? "" : ready ? "Ready - the mapper uses this" : "Draft - the mapper ignores this until it is marked ready";
+      el.draft.classList.toggle("isReady", ready);
     }
 
     /* Saves what is on screen. If anything changed while the save was in flight, the local
@@ -721,6 +814,8 @@
       session.savePromise = api("POST", "", { courseId: id, features: session.features }).then(function (data) {
         session.saveError = "";
         if (session.loadedFor !== id) return;
+        /* Every save is a draft again: a changed shape has not been signed off. */
+        session.status = (data && data.overlay && data.overlay.status) || "draft";
         if (session.rev === sentRev) {
           session.dirty = false;
           if (!drag) session.features = (data && data.overlay && data.overlay.features) || [];
@@ -745,6 +840,31 @@
     function flushSave() {
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
       return session.dirty ? saveOverlay() : Promise.resolve();
+    }
+
+    /* Draft -> ready: the one step that lets the mapper read this overlay. Saves first, so what
+       is marked is what is on screen. */
+    function markReady() {
+      var id = session.loadedFor;
+      if (!canEdit() || !session.features.length) return Promise.resolve(false);
+      busy = true; updateActions();
+      setStatus("Saving, then marking ready…");
+      return flushSave().then(function () {
+        if (session.dirty) throw new Error("the overlay did not save (" + (session.saveError || "unknown") + ")");
+        return api("POST", "", { courseId: id, status: "ready" });
+      }).then(function (data) {
+        if (session.loadedFor !== id) return false;
+        session.status = (data && data.status) || "ready";
+        if (!destroyed) setStatus("Marked ready. The next mapper run will use these " + session.features.length + " shapes.");
+        return true;
+      }).catch(function (error) {
+        if (!destroyed) setStatus("Not marked ready: " + (error && error.message || error), true);
+        return false;
+      }).then(function (ok) {
+        busy = false;
+        if (!destroyed) { updateActions(); drawFeatures(); }
+        return ok;
+      });
     }
 
     function deleteOverlay() {
@@ -782,9 +902,50 @@
       add(osm.fairways, STYLE.osmFairway, true);
       add(osm.greens, STYLE.osmGreen, true);
       add(osm.tees, STYLE.osmTee, true);
+      add(osm.bunkers, STYLE.osmBunker, true);
       add(osm.holes, STYLE.osmHole, false);
       /* OSM sits under the overlay, so a placed shape is never hidden behind what OSM has. */
       osmLayers.forEach(function (l) { try { l.bringToBack(); } catch (e) {} });
+    }
+
+    /* ---- what the course already has saved ----
+       Reference only, like OSM: drawn under everything, never clickable, never copied into the
+       overlay. A failed run writes no objects, so these are what an earlier run left. */
+
+    function clearObjectLayers() {
+      objectLayers.forEach(function (l) { try { mapObj.removeLayer(l); } catch (e) {} });
+      objectLayers = [];
+    }
+
+    function drawObjects() {
+      clearObjectLayers();
+      if (!session.showObjects) return;
+      (session.objects || []).forEach(function (o) {
+        var shape = o.points && o.points.length >= 3
+          ? L.polygon(toLatLngs(o.points), Object.assign({ interactive: false }, STYLE.object))
+          : o.point ? L.circleMarker([o.point.lat, o.point.lng], Object.assign({ interactive: false }, STYLE.objectPoint)) : null;
+        if (!shape) return;
+        shape.addTo(mapObj);
+        if (o.hole && (o.type === "green" || o.type === "tee")) shape.bindTooltip(String(o.hole), { permanent: true, direction: "center", className: "gdStudioOverlayLabel isObject" });
+        objectLayers.push(shape);
+      });
+      objectLayers.forEach(function (l) { try { l.bringToBack(); } catch (e) {} });
+    }
+
+    /* The last mapper run, above the map: why it failed and what it found. */
+    function renderLastRun() {
+      var run = session.lastRun;
+      var box = el["last-run"];
+      box.classList.toggle("isFailed", !!run && run.status === "failed");
+      if (!run) { box.innerHTML = ""; return; }
+      var found = run.osmFeatures;
+      var bits = ["Last mapper run: <strong>" + esc(run.status) + "</strong>" + (run.kind ? " (" + esc(run.kind) + ")" : "") +
+        (run.finishedAt ? " · " + esc(new Date(run.finishedAt).toLocaleString()) : "")];
+      if (found) bits.push("found in OSM: " + [["greens", "greens"], ["fairways", "fairways"], ["tees", "tees"], ["bunkers", "bunkers"], ["holes", "hole lines"]].map(function (k) { return (found[k[0]] || 0) + " " + k[1]; }).join(", "));
+      if (run.overlay && run.overlay.draft) bits.push("the overlay was a draft, so the run ignored it");
+      var html = bits.join(" · ");
+      if (run.status === "failed" && run.error) html += '<br><span class="gdStudioWarnText">' + esc(run.error) + "</span>";
+      box.innerHTML = html;
     }
 
     /* ---- readouts ---- */
@@ -800,11 +961,12 @@
       else if (scanning) text = "AI scan running - shapes are locked until it finishes";
       else if (tool === "fairway") text = draft.length ? (draft.length >= 2 ? "Keep clicking along the fairway · double-click or Enter to finish · Backspace undoes · Esc cancels" : "Click the next point along the fairway") : "Click at the tee end of the fairway, then along its middle";
       else if (tool === "green") text = "Click the middle of a green";
+      else if (tool === "bunker") text = "Click the middle of a bunker";
       else if (tool === "tee") text = "Click where the tee is";
       else if (selectedId && !bigEnoughForHandles(findFeature(selectedId) || { points: [] })) text = "Drag to move · zoom in to reshape its corners · Delete or the bin removes it";
       else if (selectedId) text = "Drag to move · drag corners to reshape · faint dots add a corner · right-click a corner to remove it · Delete or the bin removes the shape";
-      else text = "Choose Fairway line, Green pin or Tee to place · click a shape to adjust it";
-      if (wandsRunning) text = "Finding the green's edge… · " + text;
+      else text = "Choose Fairway line, Green pin, Tee or Bunker pin to place · click a shape to adjust it";
+      if (wandsRunning) text = "Finding the edge… · " + text;
       el.hint.textContent = text;
     }
 
@@ -817,10 +979,11 @@
       if (session.course) {
         var count = function (kind) { return session.features.filter(function (f) { return f.kind === kind; }).length; };
         var holes = count("hole");
-        bits.push("placed: " + count("fairway") + " fairways, " + count("green") + " greens, " + count("tee") + " tees" + (holes ? ", " + holes + " hole lines" : ""));
+        bits.push("placed: " + count("fairway") + " fairways, " + count("green") + " greens, " + count("tee") + " tees, " + count("bunker") + " bunkers" + (holes ? ", " + holes + " hole lines" : ""));
       }
       var osm = session.osm;
-      if (osm && !osm.error) bits.push("OSM here: " + (osm.greens || []).length + " greens, " + (osm.fairways || []).length + " fairways, " + (osm.holes || []).length + " hole lines");
+      if (osm && !osm.error) bits.push("OSM here: " + (osm.greens || []).length + " greens, " + (osm.fairways || []).length + " fairways, " + (osm.bunkers || []).length + " bunkers, " + (osm.holes || []).length + " hole lines");
+      if (session.objects && session.objects.length) bits.push("saved objects: " + session.objects.length);
       else if (osm && osm.error) bits.push("OSM: " + osm.error);
       el.readout.textContent = bits.join(" · ");
       session.view = here ? { lat: here.lat, lng: here.lng, zoom: mapObj.getZoom() } : session.view;
@@ -833,7 +996,9 @@
       el.clear.disabled = !canEdit() || !session.features.length;
       el.run.disabled = !has || session.dirty;
       el.run.title = session.dirty ? "Wait for the overlay to save - the mapper reads what is saved" : "";
-      ["tool-fairway", "tool-green", "tool-tee"].forEach(function (name) { el[name].disabled = !canEdit(); });
+      el.ready.disabled = !canEdit() || !session.features.length || (session.status === "ready" && !session.dirty);
+      el.ready.title = session.status === "ready" && !session.dirty ? "Already ready - change a shape and it goes back to draft" : "Let the mapper use this overlay";
+      ["tool-fairway", "tool-green", "tool-tee", "tool-bunker"].forEach(function (name) { el[name].disabled = !canEdit(); });
       renderSaveState();
       updateNext();
     }
@@ -914,16 +1079,22 @@
       api("GET", "?courseId=" + encodeURIComponent(id) + "&osm=1").then(function (data) {
         if (destroyed || courseIdOf(session.course) !== id) return;
         session.features = (data && data.overlay && data.overlay.features) || [];
+        session.status = (data && data.overlay && data.overlay.status) || "draft";
         session.osm = (data && data.osm) || null;
+        session.objects = (data && data.objects) || [];
+        session.lastRun = (data && data.lastRun) || null;
         session.courseMap = (data && data.courseMap) || null;
         renderCourseMapState();
+        renderLastRun();
         session.loadedFor = id;
         session.dirty = false;
         session.saveError = "";
         selectedId = "";
         busy = false;
         drawOsm();
+        drawObjects();
         drawFeatures();
+        renderHoleField();
         /* A scan started before the page was left (or from another tab) is picked back up. */
         var scan = data && data.aiScan;
         if (scan && (scan.status === "queued" || scan.status === "running") && !scanning) {
@@ -931,7 +1102,7 @@
           if (Date.now() - since < AI_TIMEOUT_MS) { scanning = true; pollScan(id, since); }
         }
         var when = data && data.overlay && data.overlay.updatedAt ? " · saved " + new Date(data.overlay.updatedAt).toLocaleString() : "";
-        setStatus(session.features.length ? session.features.length + " saved shape" + (session.features.length === 1 ? "" : "s") + when : "Nothing placed on this course yet.");
+        setStatus(session.features.length ? session.features.length + " saved shape" + (session.features.length === 1 ? "" : "s") + " (" + session.status + ")" + when : "Nothing placed on this course yet.");
       }).catch(function (error) {
         if (destroyed) return;
         setStatus("Could not load: " + (error && error.message || error), true);
@@ -944,7 +1115,19 @@
     function runMapper() {
       var id = courseIdOf(session.course);
       if (!id || busy || session.dirty) return;
-      if (!window.confirm("Run the mapper on " + (session.course.name || session.course.courseName || id) + " with this overlay?\n\nThis clears the course's existing geometry and resolves it again from OSM plus the overlay. Visuals are not touched.")) return;
+      var name = session.course.name || session.course.courseName || id;
+      /* A draft is not read by the mapper, so running "with this overlay" means marking it
+         ready first - asked, never assumed. */
+      if (session.features.length && session.status !== "ready") {
+        if (!window.confirm("This overlay is still a draft, and the mapper ignores drafts.\n\nMark it ready and run the mapper on " + name + "?\n\nThis clears the course's existing geometry and resolves it again from OSM plus the overlay. Visuals are not touched.")) return;
+        markReady().then(function (ok) { if (ok && !destroyed) queueMapper(id); });
+        return;
+      }
+      if (!window.confirm("Run the mapper on " + name + (session.features.length ? " with this overlay" : "") + "?\n\nThis clears the course's existing geometry and resolves it again from OSM" + (session.features.length ? " plus the overlay" : "") + ". Visuals are not touched.")) return;
+      queueMapper(id);
+    }
+
+    function queueMapper(id) {
       busy = true; updateActions();
       setStatus("Queueing mapper run…");
       accessToken().then(function (token) {
@@ -1004,16 +1187,16 @@
       return Promise.all(loads).then(function () { return { canvas: full, tiles: loads.length, failed: failed }; });
     }
 
-    /* The picture the wand reads: a few tiles around a pin at the zoom nearest WAND_TARGET_MPP
-       the provider really has, unscaled. */
-    function captureAround(point, coarser) {
+    /* The picture the wand reads: a few tiles around a pin at the zoom nearest the kind's
+       WAND_TARGET_MPP the provider really has, unscaled. */
+    function captureAround(point, coarser, kind) {
       return new Promise(function (resolve, reject) {
         if (!mapObj || !layer || typeof layer.getTileUrl !== "function") return reject(new Error("this provider cannot be captured - switch provider"));
         var native = num(layer.options && layer.options.maxNativeZoom) || num(layer.options && layer.options.maxZoom) || 19;
         var mppZ0 = 156543.03392 * Math.cos(point.lat * Math.PI / 180);
-        var z = Math.max(14, Math.min(native, Math.round(Math.log2(mppZ0 / WAND_TARGET_MPP))) - (coarser || 0));
+        var z = Math.max(14, Math.min(native, Math.round(Math.log2(mppZ0 / WAND_TARGET_MPP[kind]))) - (coarser || 0));
         var mpp = mppZ0 / Math.pow(2, z);
-        var half = Math.ceil(Math.sqrt(WAND_MAX_GREEN_M2 / Math.PI) / mpp * 1.6 + 24);
+        var half = Math.ceil(Math.sqrt(WAND_MAX_M2[kind] / Math.PI) / mpp * 1.6 + 24);
         var p = mapObj.project(L.latLng(point.lat, point.lng), z);
         var x0 = Math.floor((p.x - half) / 256), y0 = Math.floor((p.y - half) / 256);
         var x1 = Math.floor((p.x + half) / 256), y1 = Math.floor((p.y + half) / 256);
@@ -1175,6 +1358,7 @@
           if (state === "done" || state === "failed") {
             if (state === "failed") { stopScanPoll(); setStatus("AI scan failed: " + (scan.error || "unknown"), true); return; }
             session.features = (data.overlay && data.overlay.features) || [];
+            session.status = (data.overlay && data.overlay.status) || "draft";
             session.dirty = false;
             selectedId = "";
             stopScanPoll();
@@ -1236,6 +1420,9 @@
       var id = courseIdOf(course);
       if (restoring && session.loadedFor === id) {
         drawOsm();
+        drawObjects();
+        renderLastRun();
+        renderHoleField();
         drawFeatures();
         updateActions();
         updateHint();
@@ -1243,14 +1430,13 @@
         return;
       }
       if (session.loadedFor !== id) {
-        session.features = [];
-        session.osm = null;
-        session.courseMap = null;
-        session.loadedFor = "";
-        session.dirty = false;
+        forgetCourse();
         selectedId = "";
         clearOsmLayers();
+        clearObjectLayers();
         clearFeatureLayers();
+        renderLastRun();
+        renderHoleField();
       }
       loadOverlay(course);
     }
@@ -1342,7 +1528,7 @@
       var key = String(event.key || "").toLowerCase();
       if (key === "h") { fitCourse(); return; }
       if (key === "z") { zoomToSelected(); return; }
-      var shortcut = { v: "move", f: "fairway", g: "green", t: "tee" }[key];
+      var shortcut = { v: "move", f: "fairway", g: "green", t: "tee", b: "bunker" }[key];
       if (shortcut && (shortcut === "move" || canEdit())) setTool(shortcut);
     }
     document.addEventListener("keydown", onKey);
@@ -1351,11 +1537,15 @@
     el.provider.addEventListener("change", function () { useSource(el.provider.value); });
     el.osm.checked = session.showOsm;
     el.osm.addEventListener("change", function () { session.showOsm = el.osm.checked; drawOsm(); });
+    el.objects.checked = session.showObjects;
+    el.objects.addEventListener("change", function () { session.showObjects = el.objects.checked; drawObjects(); });
     el.ai.addEventListener("click", scanWithAi);
     el["tool-move"].addEventListener("click", function () { setTool("move"); });
     el["tool-fairway"].addEventListener("click", function () { setTool("fairway"); });
     el["tool-green"].addEventListener("click", function () { setTool("green"); });
     el["tool-tee"].addEventListener("click", function () { setTool("tee"); });
+    el["tool-bunker"].addEventListener("click", function () { setTool("bunker"); });
+    el.hole.addEventListener("change", holeFieldChanged);
     el.width.addEventListener("change", function () {
       var w = num(el.width.value);
       session.fairwayWidth = w && w >= 10 && w <= 90 ? w : shapes.FAIRWAY_WIDTH_M;
@@ -1378,6 +1568,7 @@
       if (file) uploadCourseMap(file);
     });
     el.clear.addEventListener("click", deleteOverlay);
+    el.ready.addEventListener("click", markReady);
     el.run.addEventListener("click", runMapper);
 
     if (session.course) {
@@ -1390,6 +1581,7 @@
     updateReadout();
     updateHint();
     updateBin();
+    renderHoleField();
     remeasure();
 
     return function cleanup() {
@@ -1410,23 +1602,21 @@
       draftLayers = [];
       featureLayers = {};
       osmLayers = [];
+      objectLayers = [];
     };
   }
 
   window.GDStudioPages = window.GDStudioPages || {};
   window.GDStudioPages["map-overlay"] = render;
 
-  /* The way in from Course Database's "Draw overlay" button. Seeds the course and routes; the
-     page's own render loads the overlay. Takes any object carrying a courseId, lat/lng and a
-     name. */
+  /* The way in from Course Database - the "Draw" button on a course's row and the "Draw
+     overlay" button in its location panel. Seeds the course and routes; the page's own render
+     loads the overlay, what OSM has, the course's saved objects and the last mapper run, so a
+     course opened from a failed row arrives with everything that run saw. Takes any object
+     carrying a courseId, lat/lng and a name. */
   window.GDStudioMapOverlay = {
     open: function (course) {
-      if (course && courseIdOf(course) !== courseIdOf(session.course)) {
-        session.features = [];
-        session.osm = null;
-        session.loadedFor = "";
-        session.dirty = false;
-      }
+      if (course && courseIdOf(course) !== courseIdOf(session.course)) forgetCourse();
       session.course = course || null;
       session.view = null;
       if (window.GDStudioRouter && typeof window.GDStudioRouter.go === "function") {

@@ -295,14 +295,14 @@
 
     {
       id: "map-overlay", label: "Mapping Overlay", parent: "courses",
-      function: "Places the fairways, greens and tees OSM does not have, by eye: a line laid down a fairway becomes a fairway polygon with draggable corners plus a tee 20m behind it, a pin on a green becomes its outline through the green wand, and a click drops a tee. Shapes drag, reshape and go in the bin; every change autosaves. So the mapper can resolve a course whose OSM data is greens and nothing else (Royal Belfast: 11 greens, 0 fairways, 0 hole lines). Saves one thing - the course's overlay row - which the mapper worker merges into the Overpass payload as ordinary golf=fairway / golf=hole / golf=green ways before it resolves. Nothing on the course changes until a mapper run is requested. Temporary by design: delete the overlay once OSM carries the real shapes.",
+      function: "Places the fairways, greens, tees and bunkers OSM does not have, by eye: a line laid down a fairway becomes a fairway polygon with draggable corners plus a tee 20m behind it, a pin on a green or a bunker becomes its outline through the wand, and a click drops a tee. Hole numbers are optional - set Hole and new shapes carry it, or renumber a selected shape. Shapes drag, reshape and go in the bin; every change autosaves as a draft the mapper ignores until it is marked ready. Opened from a Course Database row (Draw), it arrives with what OSM has here, the course's saved objects and the last mapper run's outcome, all as reference. So the mapper can resolve a course whose OSM data is greens and nothing else (Royal Belfast: 11 greens, 0 fairways, 0 hole lines). Saves one thing - the course's overlay row - which the mapper worker merges, once ready, into the Overpass payload as ordinary golf=fairway / golf=hole / golf=green / golf=tee / golf=bunker ways before it resolves. Nothing on the course changes until a mapper run is requested. Temporary by design: delete the overlay once OSM carries the real shapes.",
       owner: "scripts/studio/courses/map-overlay/map-overlay-page.js",
       runtime: { app: false, studio: true, server: true },
       code: [
         { role: "Page (owner)", path: "scripts/studio/courses/map-overlay/map-overlay-page.js" },
-        { role: "Shape builders — fairway around a laid line, tee behind it, default round green (pure, browser + node)", path: "scripts/studio/courses/map-overlay/map-overlay-shapes.js" },
-        { role: "Green wand from a pin — admin-verified, answers with an outline, writes nothing", path: "functions/course-map-wand.mjs" },
-        { role: "wandGreenAtPoint — runs the Green Wand around the pin and keeps the most stable ring", path: "functions/lib/gd-surface-refine-core.mjs" },
+        { role: "Shape builders — fairway around a laid line, tee behind it, default round green or bunker (pure, browser + node)", path: "scripts/studio/courses/map-overlay/map-overlay-shapes.js" },
+        { role: "Green and bunker wand from a pin — admin-verified, answers with an outline, writes nothing", path: "functions/course-map-wand.mjs" },
+        { role: "wandAtPoint — runs the Green Wand around a green or bunker pin (one engine, two size profiles) and keeps the most stable ring", path: "functions/lib/gd-surface-refine-core.mjs" },
         { role: "Overlay API — admin-verified read/write of course_map_overlays, plus what OSM has here", path: "functions/course-map-overlay.mjs" },
         { role: "Overlay → OSM elements, merge into the payload (pure)", path: "functions/lib/gd-map-overlay-core.mjs" },
         { role: "Image pixels → lat/lng for AI-read shapes (playSurface, centre+zoom or bounds georeference)", path: "functions/lib/gd-overlay-georef-core.mjs" },
@@ -312,6 +312,8 @@
         { role: "Overlay row store shared by the overlay and AI scan endpoints (save semantics, admin proof)", path: "functions/lib/gd-map-overlay-store.mjs" },
         { role: "Merges the overlay into every payload a mapper job fetches (fetchCoursePayload)", path: "functions/course-mapper-worker-background.mjs" },
         { role: "Table", path: "supabase/migrations/20260928_create_course_map_overlays.sql" },
+        { role: "Draft / ready status", path: "supabase/migrations/20260929_add_course_map_overlay_status.sql" },
+        { role: "Draw button on every course row", path: "scripts/studio/gd-admin-course-db.js" },
         { role: "Course selection (shared pick-only hand-off)", path: "scripts/studio/gd-studio-course-pick.js" },
         { role: "Provider list + layer building (window.GDMapSources, do not copy)", path: "scripts/gd-app-core.js" }
       ],
@@ -330,9 +332,9 @@
         { target: "course-mapping", direction: "see-also", label: "Where the mapper run is watched" }
       ],
       keyFunctions: [
-        { name: "GET/POST /api/course-map-overlay", purpose: "Read or save a course's overlay; ?osm=1 also returns OSM's golf features for the ground so fairways are drawn against the greens the resolver will link them to.", codePath: "functions/course-map-overlay.mjs" },
-        { name: "POST /api/course-map-wand", purpose: "A pin on a green plus a small picture around it -> a first-draft green outline from the Green Wand. The page adds it as a green (source: wand) and autosaves; a pin the wand cannot read gets a round default.", codePath: "functions/course-map-wand.mjs" },
-        { name: "mergeOverlayIntoPayload", purpose: "Overlay features -> golf=fairway / golf=hole / golf=green ways with negative ids, appended to the payload. Empty overlay returns the payload untouched.", codePath: "functions/lib/gd-map-overlay-core.mjs" },
+        { name: "GET/POST /api/course-map-overlay", purpose: "Read or save a course's overlay, or mark it draft/ready; ?osm=1 also returns OSM's golf features for the ground, the course's saved objects and the last mapper run, so shapes are drawn against what is already there.", codePath: "functions/course-map-overlay.mjs" },
+        { name: "POST /api/course-map-wand", purpose: "A pin on a green or bunker plus a small picture around it -> a first-draft outline from the Green Wand on that kind's size profile. The page adds it (source: wand) and autosaves; a pin the wand cannot read gets a round default.", codePath: "functions/course-map-wand.mjs" },
+        { name: "mergeOverlayIntoPayload", purpose: "Overlay features -> golf=fairway / golf=hole / golf=green / golf=tee / golf=bunker ways with negative ids, appended to the payload. Empty overlay returns the payload untouched.", codePath: "functions/lib/gd-map-overlay-core.mjs" },
         { name: "POST /api/course-map-ai-scan", purpose: "Queue an AI scan of a captured view: the picture and its georef go on the overlay row, the background function runs Claude Opus 5.5 with the scorecard as context, and the answer is saved as overlay shapes (source: ai). Studio polls GET /api/course-map-overlay's aiScan for the outcome.", codePath: "functions/course-map-ai-scan.mjs" },
         { name: "fetchCoursePayload", purpose: "Every Overpass fetch in a mapper job goes through it, so the overlay is in the first query, the footprint requery, the widened frames and the hole-gap boxes alike.", codePath: "functions/course-mapper-worker-background.mjs" }
       ],

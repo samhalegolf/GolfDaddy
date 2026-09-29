@@ -109,8 +109,50 @@ test("shapes come from the shared builders: a fairway line with a tee behind it,
   assert.ok(page.includes("shapes.fairwayFromLine(line, session.fairwayWidth)"), "a finished line must become a fairway polygon");
   assert.ok(page.includes("shapes.teeBeyondLine(line, allGreens())"), "a fairway must bring its tee");
   assert.ok(page.includes('var WAND_API = "/api/course-map-wand"'), "a green pin must go through the wand endpoint");
-  assert.ok(page.includes("shapes.circle(point, shapes.GREEN_RADIUS_M)"), "a pin the wand cannot read still leaves a green to shape");
-  assert.ok(!page.includes('data-gd-overlay="hole"') && !page.includes('data-gd-overlay="tool-hole"'), "no hole numbering or hole-line tool at this stage");
+  assert.ok(page.includes('shapes.circle(point, kind === "bunker" ? shapes.BUNKER_RADIUS_M : shapes.GREEN_RADIUS_M)'), "a pin the wand cannot read still leaves a green to shape");
+  assert.ok(!page.includes('data-gd-overlay="tool-hole"'), "no hole-line tool at this stage");
+});
+
+test("a bunker is a pin the same wand outlines, on its bunker profile", () => {
+  assert.ok(page.includes('data-gd-overlay="tool-bunker"'), "no Bunker pin tool");
+  assert.ok(page.includes("seed: point, kind: kind }, WAND_API"), "the pin must tell the wand which kind it is outlining");
+  assert.ok(page.includes("WAND_TARGET_MPP[kind]") && page.includes("WAND_MAX_M2[kind]"), "the capture must be sized for the kind being outlined");
+  assert.ok(page.includes("shapes.BUNKER_RADIUS_M"), "a bunker pin the wand cannot read still leaves a bunker to shape");
+  const wand = read("functions/course-map-wand.mjs");
+  assert.ok(wand.includes("WAND_PROFILES, kind"), "the endpoint must refuse a kind the wand has no profile for");
+});
+
+test("hole numbers are optional: new shapes carry the working hole, a selected shape can be renumbered", () => {
+  assert.ok(page.includes('data-gd-overlay="hole"'), "no hole number field");
+  assert.ok(/function addFeature\(raw, quiet\) \{[\s\S]*?session\.hole[\s\S]*?hole: holeNumber\(hole\)/.test(page), "new shapes must take the working hole number");
+  assert.ok(page.includes('if (done && done.kind === "green" && session.hole && session.hole < 36) setHole(session.hole + 1)'), "finishing a green must move numbering to the next hole");
+  assert.ok(/function holeFieldChanged\(\) \{[\s\S]*?f\.hole = n;[\s\S]*?changed\(\);/.test(page), "renumbering a selected shape must save");
+});
+
+/* ---------- drafts ---------- */
+
+test("a session is a draft the mapper ignores until it is marked ready", () => {
+  const sql = read("supabase/migrations/20260929_add_course_map_overlay_status.sql");
+  assert.ok(sql.includes("alter column status set default 'draft'"), "new overlays must start as drafts");
+  assert.ok(sql.includes("add column if not exists status text not null default 'ready'"), "overlays already in use must stay readable");
+  assert.ok(store.includes('status: "draft", updated_by: savedBy'), "every shape save must put the overlay back to draft");
+  assert.ok(endpoint.includes("writeOverlayStatus(courseId, payload.status)"), "marking ready must be its own request that leaves the shapes alone");
+  assert.ok(worker.includes('if (row && row.status === "ready") course.overlay = features;'), "the worker must merge only a ready overlay");
+  assert.ok(worker.includes("ignoredFeatures: course.overlayDraft"), "a skipped draft must show on the job's diagnostics");
+  assert.ok(page.includes('data-gd-overlay="ready"') && page.includes('api("POST", "", { courseId: id, status: "ready" })'), "no Mark ready in the page");
+  assert.ok(page.includes("This overlay is still a draft, and the mapper ignores drafts."), "running the mapper on a draft must ask before marking it ready");
+});
+
+/* ---------- opened from a failed row ---------- */
+
+test("Course Database rows open the drawer, and it arrives with what the last run saw", () => {
+  assert.ok(adminDb.includes('onclick="event.stopPropagation();return gdAdminCourseLocationOverlay('), "no Draw button on the course rows");
+  assert.ok(adminDb.includes("${gdAdminCourseDbDrawButton(item,status)}"), "the Draw button is not in the row markup");
+  assert.ok(endpoint.includes("body.objects = await loadCourseObjects(courseId)") && endpoint.includes("body.lastRun = await loadLastRun(courseId)"), "the drawer's load must carry the saved objects and the last run");
+  assert.ok(endpoint.includes('bunker: "bunkers"'), "OSM bunkers must be drawn so they are not placed twice");
+  assert.ok(page.includes("function drawObjects()") && page.includes("function renderLastRun()"), "the page must show the saved objects and the last run");
+  assert.ok(/function drawObjects\(\) \{[\s\S]*?interactive: false[\s\S]*?\n    \}/.test(page), "saved objects are reference only - never clickable");
+  assert.ok(!/session\.features[^\n]*session\.objects|session\.objects[^\n]*session\.features\.push/.test(page), "saved objects must never be copied into the overlay");
 });
 
 test("captured tiles are fetched at the capture zoom, not whatever zoom the map shows", () => {
@@ -122,7 +164,7 @@ test("captured tiles are fetched at the capture zoom, not whatever zoom the map 
 });
 
 test("Enter means done, next: finish the line, or save the shape and arm the next step", () => {
-  assert.ok(page.includes('var NEXT_TOOL = { fairway: "green", green: "fairway", tee: "fairway", hole: "fairway" }'), "the hole order is fairway, green, next fairway");
+  assert.ok(page.includes('var NEXT_TOOL = { fairway: "green", green: "fairway", tee: "fairway", hole: "fairway", bunker: "bunker" }'), "the hole order is fairway, green, next fairway; a bunker arms the next bunker");
   assert.ok(page.includes('if (event.key === "Enter") { event.preventDefault(); doneAndNext(); return; }'), "Enter must run doneAndNext");
   assert.ok(/function doneAndNext\(\) \{[\s\S]*?flushSave\(\);[\s\S]*?setTool\(step\.tool\)/.test(page), "done saves now and arms the next tool");
 });
@@ -137,7 +179,7 @@ test("the wand endpoint is registered, admin-only and writes nothing", () => {
   assert.ok(wand.includes('path: "/api/course-map-wand"'));
   assert.ok(toml.includes("/api/course-map-wand"), "no /api/course-map-wand redirect in netlify.toml");
   assert.ok(wand.includes("if (!admin) return json(403"), "a non-admin must be refused");
-  assert.ok(wand.includes("wandGreenAtPoint("), "the endpoint must use the shared wand engine");
+  assert.ok(wand.includes("wandAtPoint("), "the endpoint must use the shared wand engine");
   assert.ok(!/saveOverlay|supabaseFetch|writeAiScan/.test(wand), "the wand only answers; the page saves");
 });
 
@@ -175,8 +217,8 @@ test("every Overpass fetch in the worker carries the overlay", () => {
   assert.strictEqual(bare, 1, "expected exactly one fetchOverpass( call (inside fetchCoursePayload), found " + bare);
   assert.ok(worker.includes("await attachCourseOverlay(course)"), "loadCourseCenter does not attach the overlay, so no job would see it");
   assert.ok(worker.includes('OVERLAYS_TABLE = "course_map_overlays"'), "the worker reads a different table than the migration creates");
-  assert.ok(worker.includes("overlay: course.overlayError ? { error: course.overlayError } : overlaySummary(course.overlay)"),
-    "job diagnostics must say what the overlay contributed, or that it could not be read");
+  assert.ok(worker.includes("overlay: overlayDiagnostics(course)") && worker.includes("if (course.overlayError) return { error: course.overlayError };"),
+    "job diagnostics must say what the overlay contributed, that it was a draft, or that it could not be read");
 });
 
 test("the table migration exists and is service-role only", () => {

@@ -120,14 +120,41 @@ test("a pin on a green finds that green's edge, not the typical size", async () 
     const image = await sharp({ create: { width: SIZE, height: SIZE, channels: 3, background: { r: 52, g: 98, b: 44 } } })
       .composite([{ input: Buffer.from(`<svg width="${SIZE}" height="${SIZE}"><ellipse cx="260" cy="250" rx="${rx}" ry="${ry}" fill="#7fc15a"/></svg>`), top: 0, left: 0 }])
       .png().toBuffer();
-    const out = await core.wandGreenAtPoint({ image, playSurface: frame, seed: proj.toLatLng({ x: 255, y: 255 }) });
+    const out = await core.wandAtPoint({ image, playSurface: frame, seed: proj.toLatLng({ x: 255, y: 255 }) });
     const painted = Math.PI * rx * ry * mpp * mpp;
     assert.strictEqual(out.ok, true, "expected a green, got " + out.reason);
     assert.strictEqual(out.stable, true, "the ring should come from a stable plateau");
     assert.ok(out.area > painted * 0.45 && out.area < painted * 1.05, rx + "x" + ry + ": area " + Math.round(out.area) + " vs painted " + Math.round(painted));
-    assert.ok(out.shape.length <= core.WAND_GREEN_MAX_POINTS);
+    assert.ok(out.shape.length <= core.WAND_MAX_POINTS);
   }
-  assert.strictEqual((await core.wandGreenAtPoint({ image: Buffer.alloc(0), playSurface: null, seed: { lat: 1, lng: 1 } })).reason, "frame-has-no-projection");
+  assert.strictEqual((await core.wandAtPoint({ image: Buffer.alloc(0), playSurface: null, seed: { lat: 1, lng: 1 } })).reason, "frame-has-no-projection");
+});
+
+/* The bunker pin: the same engine on the bunker profile. A bunker is a fraction of a green's
+   size - an 8x5m one is under the green profile's area floor - so it needs its own sweep and
+   bounds, and must still land near the painted edge. */
+test("a bunker pin finds that bunker's edge on the bunker profile", async () => {
+  const SIZE = 512;
+  /* Zoom 19, ~0.17m/px - the resolution Studio captures a bunker at (WAND_TARGET_MPP.bunker). */
+  const p = plan.projectPoint(54.62, -5.85, 19);
+  const frame = { originPx: { x: p.x, y: p.y }, captureZoom: 19, outputDimensions: { width: SIZE, height: SIZE } };
+  const proj = core.frameProjector(frame);
+  const mpp = 0.001 * 111320 * Math.cos(54.62 * Math.PI / 180) / Math.abs(proj.toPx({ lat: 54.62, lng: -5.849 }).x - proj.toPx({ lat: 54.62, lng: -5.85 }).x);
+  for (const [mx, my] of [[8, 5], [12, 8], [20, 12]]) {
+    const rx = Math.round(mx / mpp), ry = Math.round(my / mpp);
+    const image = await sharp({ create: { width: SIZE, height: SIZE, channels: 3, background: { r: 52, g: 98, b: 44 } } })
+      .composite([{ input: Buffer.from(`<svg width="${SIZE}" height="${SIZE}"><ellipse cx="258" cy="252" rx="${rx}" ry="${ry}" fill="#e8dcb0"/></svg>`), top: 0, left: 0 }])
+      .png().toBuffer();
+    const seed = proj.toLatLng({ x: 256, y: 254 });
+    const painted = Math.PI * rx * ry * mpp * mpp;
+    const out = await core.wandAtPoint({ image, playSurface: frame, seed, kind: "bunker" });
+    assert.strictEqual(out.ok, true, mx + "x" + my + "m: expected a bunker, got " + out.reason);
+    assert.strictEqual(out.params.kind, "bunker");
+    assert.strictEqual(out.stable, true, mx + "x" + my + "m: the ring should come from a stable plateau");
+    /* The wand traces an inset of the surface, as it does on a green. */
+    assert.ok(out.area > painted * 0.45 && out.area < painted * 1.05, mx + "x" + my + "m: area " + Math.round(out.area) + " vs painted " + Math.round(painted));
+  }
+  assert.strictEqual((await core.wandAtPoint({ image: Buffer.alloc(0), playSurface: null, seed: { lat: 1, lng: 1 }, kind: "water" })).reason, "unknown-kind");
 });
 
 /* The claim the module header makes about itself, asserted so it cannot quietly stop being

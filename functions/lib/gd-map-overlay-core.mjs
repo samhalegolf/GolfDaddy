@@ -17,7 +17,7 @@
  * with, or be mistaken for, a real OSM way.
  *
  * Feature shape (what course_map_overlays.features stores, and what Studio draws):
- *   { id: "f-1", kind: "fairway" | "hole" | "green", hole: 7 | null, points: [{lat, lng}, ...],
+ *   { id: "f-1", kind: "fairway" | "hole" | "green" | "tee" | "bunker", hole: 7 | null, points: [{lat, lng}, ...],
  *     source?: "ai" }
  *   source says who produced the shape (gd-overlay-georef-core.mjs stamps "ai"; Studio stamps
  *   "wand" on a green the wand outlined from a pin; a hand-placed one has none). Display only - the mapper treats every feature the same.
@@ -33,10 +33,16 @@
  *             link to is not a candidate, so the missing seven need their greens too.
  *   tee     - a closed polygon (3+ points). Becomes golf=tee. The resolver reads a tee near a
  *             green or fairway as course context, and the mapper writes tee objects from it.
+ *   bunker  - a closed polygon (3+ points). Becomes golf=bunker, which the surface pass
+ *             (enrichSurfaceObjects) writes onto the nearest hole as a bunker object. Placed
+ *             with the bunker wand the same way a green is.
+ *
+ *   hole numbers are optional on every kind. A numbered green or fairway is matched to that
+ *   hole's guide (ref), a numbered hole line is the resolver's strongest evidence.
  */
 
-export const OVERLAY_KINDS = new Set(["fairway", "hole", "green", "tee"]);
-const POLYGON_KINDS = new Set(["fairway", "green", "tee"]);
+export const OVERLAY_KINDS = new Set(["fairway", "hole", "green", "tee", "bunker"]);
+const POLYGON_KINDS = new Set(["fairway", "green", "tee", "bunker"]);
 export function overlayKindIsPolygon(kind) { return POLYGON_KINDS.has(String(kind || "").toLowerCase()); }
 export const OVERLAY_MAX_FEATURES = 80;
 export const OVERLAY_MAX_POINTS = 64;
@@ -141,6 +147,7 @@ export function overlaySummary(features) {
     holeLines: list.filter(f => f.kind === "hole").length,
     greens: list.filter(f => f.kind === "green").length,
     tees: list.filter(f => f.kind === "tee").length,
+    bunkers: list.filter(f => f.kind === "bunker").length,
     numbered: list.filter(f => f.hole).length
   };
 }

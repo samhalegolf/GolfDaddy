@@ -56,7 +56,7 @@ test("normalisation keeps only features that mean something on the ground", () =
     { id: "ok", kind: "fairway", hole: "7", points: [at(0, 0), at(100, 0), at(100, 40), at(0, 40), at(0, 0)] },
     { id: "two-points", kind: "fairway", points: [at(0, 0), at(100, 0)] },
     { id: "line", kind: "hole", hole: 99, points: [at(0, 0), at(300, 0)] },
-    { id: "what", kind: "bunker", points: [at(0, 0), at(10, 0), at(10, 10)] },
+    { id: "what", kind: "water", points: [at(0, 0), at(10, 0), at(10, 10)] },
     { id: "ok", kind: "hole", points: [[54.66, -5.78], [54.661, -5.78]] },
     null, "junk"
   ]);
@@ -100,7 +100,7 @@ test("merging adds to the payload and never replaces it", () => {
   assert.strictEqual(overlay.mergeOverlayIntoPayload(GREENS_ONLY, []), GREENS_ONLY, "an empty overlay returns the very same payload");
   assert.strictEqual(overlay.mergeOverlayIntoPayload(GREENS_ONLY, null), GREENS_ONLY);
   assert.deepStrictEqual(overlay.overlaySummary([fairwayFeature("a", 0, 100, 0, 3), fairwayFeature("b", 0, 100, 60), { kind: "hole", hole: 1, points: [at(0, 0), at(1, 100)] }]),
-    { features: 3, fairways: 2, holeLines: 1, greens: 0, tees: 0, numbered: 2 });
+    { features: 3, fairways: 2, holeLines: 1, greens: 0, tees: 0, bunkers: 0, numbered: 2 });
   const tee = overlay.overlayToOsmElements([{ kind: "tee", points: [at(0, 0), at(8, 0), at(8, 6), at(0, 6)] }]);
   assert.strictEqual(tee[0].tags.golf, "tee", "a tee polygon becomes a golf=tee way");
   assert.strictEqual(tee[0].geometry.length, 5, "closed like every polygon kind");
@@ -178,6 +178,22 @@ test("a numbered overlay hole line is the resolver's strongest evidence", async 
   const byHole = {};
   result.holes.forEach(h => { byHole[h.holeNumber] = h; });
   assert.ok(byHole[1].candidate.evidence.some(e => e === "existing-ref:1"), "the drawn number is carried as an existing ref: " + JSON.stringify(byHole[1].candidate.evidence));
+});
+
+test("a drawn bunker reaches the mapper as a golf=bunker way and lands as a bunker object", () => {
+  const merged = overlay.mergeOverlayIntoPayload(GREENS_ONLY, [
+    { id: "h1", kind: "hole", hole: 1, points: [at(0, 0), at(410, 0)] },
+    { id: "h2", kind: "hole", hole: 2, points: [at(0, 0), at(0, 290)] },
+    { id: "b1", kind: "bunker", hole: 1, points: [at(380, 14), at(392, 14), at(392, 24), at(380, 24)] }
+  ]);
+  const way = merged.elements.filter(e => e.tags && e.tags.golf === "bunker")[0];
+  assert.ok(way, "no golf=bunker way in the merged payload");
+  assert.strictEqual(way.tags.ref, "1", "a numbered bunker carries its hole as ref");
+  assert.strictEqual(way.geometry.length, 5, "and its ring is closed");
+  assert.strictEqual(overlay.overlaySummary([{ id: "b1", kind: "bunker", points: [at(0, 0), at(10, 0), at(10, 10)] }]).bunkers, 1);
+  const geometry = core.resolveCourseGeometry(merged, "bunkers", at(0, 0), [], []);
+  const bunkers = Object.values(geometry.objects || {}).filter(o => o && o.type === "bunker");
+  assert.strictEqual(bunkers.length, 1, "the surface pass writes the drawn bunker as a bunker object: " + JSON.stringify(Object.values(geometry.objects || {}).map(o => o.type)));
 });
 
 (async () => {
