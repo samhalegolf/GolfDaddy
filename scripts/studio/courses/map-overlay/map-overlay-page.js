@@ -151,10 +151,11 @@
     containerEl.innerHTML =
       '<div class="gdStudioLede" style="margin-bottom:12px">' +
       "<p>Place what OSM is missing, by eye. Pick a course, then: <strong>Fairway</strong> - click along the middle of the fairway " +
-      "and double-click to finish; you get a fairway with corners to drag into shape, and a tee 20m behind the start. " +
+      "and press Enter to finish; you get a fairway with corners to drag into shape, and a tee 20m behind the start. " +
       "<strong>Green</strong> - click the middle of a green and the wand draws its outline. <strong>Tee</strong> - click to drop one. " +
       "Drag any shape to move it, drag its corners to reshape it (the faint dots between corners add a new one), and drop a shape " +
-      "or a corner on the <strong>bin</strong> to delete it. Everything saves as you go. When the course looks right, run the mapper. " +
+      "or a corner on the <strong>bin</strong> to delete it. <strong>Enter</strong> always means done, next: it saves what you are on and " +
+      "arms the next step (fairway → green → next fairway). Scroll to zoom, drag or use the arrow keys to pan, <strong>Full screen</strong> for room. Everything saves as you go. When the course looks right, run the mapper. " +
       "The bright green outlines are the greens OSM already has - there is no need to place those again.</p></div>" +
       '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="pick">Pick course</button>' +
@@ -166,6 +167,7 @@
       '<label class="gdStudioViewportField gdStudioDiagramBtn">Course map… <input type="file" accept="image/*" data-gd-overlay="course-map" hidden></label>' +
       '<span class="gdStudioViewportField" data-gd-overlay="course-map-state"></span>' +
       "</div>" +
+      '<div class="gdStudioOverlayWorkspace" data-gd-overlay="workspace">' +
       '<div class="gdStudioViewportBar">' +
       '<span class="gdStudioViewportField">Place</span>' +
       '<button type="button" class="gdStudioDiagramBtn isActive" data-gd-overlay="tool-move" title="Select, move and reshape (V)">Move</button>' +
@@ -173,11 +175,16 @@
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-green" title="Pin a green (G)">Green pin</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-tee" title="Drop a tee (T)">Tee</button>' +
       '<label class="gdStudioViewportField">Fairway width <input type="number" min="10" max="90" step="1" data-gd-overlay="width" class="gdStudioOverlayWidth"> m</label>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="finish" hidden>Finish fairway</button>' +
+      '<button type="button" class="gdStudioDiagramBtn gdStudioOverlayNext" data-gd-overlay="next" hidden></button>' +
       "</div>" +
       '<div class="gdStudioOverlayStage isTool-move" data-gd-overlay="stage">' +
       '<div class="gdStudioViewportMap gdStudioOverlayMap" data-gd-overlay="map"></div>' +
       '<div class="gdStudioOverlayHint" data-gd-overlay="hint"></div>' +
+      '<div class="gdStudioOverlayNav">' +
+      '<button type="button" data-gd-overlay="fit" title="Fit the whole course (H)">Course</button>' +
+      '<button type="button" data-gd-overlay="zoom-shape" title="Zoom to the selected shape (Z)">Shape</button>' +
+      '<button type="button" data-gd-overlay="fullscreen" title="Full screen (Esc to leave)">Full screen</button>' +
+      "</div>" +
       '<button type="button" class="gdStudioOverlayBin" data-gd-overlay="bin" title="Drag a shape or corner here to delete it, or click to delete the selected shape">' +
       BIN_ICON + "<span>Bin</span></button>" +
       "</div>" +
@@ -188,10 +195,11 @@
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="clear" disabled>Delete all shapes</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="run" disabled>Run mapper with overlay</button>' +
       '<span class="gdStudioViewportScan" data-gd-overlay="status"></span>' +
+      "</div>" +
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "ai", "ai-replace", "course-map", "course-map-state", "tool-move", "tool-fairway", "tool-green", "tool-tee", "width", "finish", "stage", "map", "hint", "bin", "readout", "credit", "saved", "clear", "run", "status"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "ai", "ai-replace", "course-map", "course-map-state", "tool-move", "tool-fairway", "tool-green", "tool-tee", "width", "next", "workspace", "fit", "zoom-shape", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "saved", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -267,7 +275,72 @@
       });
       if (draft.length && tool !== "fairway") cancelDraft();
       if (tool !== "move" && selectedId) select("");
+      /* Double-click zooms, except while laying a fairway line, where it would move the ground
+         under the last point. */
+      if (mapObj) { try { if (tool === "fairway") mapObj.doubleClickZoom.disable(); else mapObj.doubleClickZoom.enable(); } catch (e) {} }
       updateHint();
+      updateNext();
+    }
+
+    /* ---- Enter: done with this, on to the next ----
+       The order a hole is placed in: a fairway (which brings its tee), then its green, then
+       the next hole's fairway. Enter finishes a line in progress, or saves the shape being
+       adjusted and arms whatever comes after it. */
+    var NEXT_TOOL = { fairway: "green", green: "fairway", tee: "fairway", hole: "fairway" };
+    var TOOL_WORD = { fairway: "Fairway line", green: "Green pin", tee: "Tee", move: "Move" };
+
+    function nextStep() {
+      if (draft.length) return draft.length >= 2 ? { label: "Finish fairway ↵" } : null;
+      var f = selectedId ? findFeature(selectedId) : null;
+      if (f) return { label: "Done · next: " + TOOL_WORD[NEXT_TOOL[f.kind] || "fairway"] + " ↵", tool: NEXT_TOOL[f.kind] || "fairway" };
+      return null;
+    }
+
+    function updateNext() {
+      if (destroyed || !el.next) return;
+      var step = canEdit() ? nextStep() : null;
+      el.next.hidden = !step;
+      if (step) el.next.textContent = step.label;
+    }
+
+    function doneAndNext() {
+      if (!canEdit()) return;
+      if (draft.length) { finishFairway(); return; }
+      var step = nextStep();
+      if (step && step.tool) {
+        select("");
+        flushSave();
+        setTool(step.tool);
+        setStatus(step.tool === "green" ? "Saved. Now click the middle of this hole's green." : "Saved. Next hole: click at the tee end of its fairway.");
+        return;
+      }
+      if (tool === "move") setTool("fairway");
+    }
+
+    /* ---- navigation ---- */
+
+    var fullscreen = false;
+    function setFullscreen(on) {
+      fullscreen = !!on;
+      el.workspace.classList.toggle("isFullscreen", fullscreen);
+      el.fullscreen.textContent = fullscreen ? "Exit full screen" : "Full screen";
+      document.documentElement.classList.toggle("gdStudioOverlayNoScroll", fullscreen);
+      remeasure();
+    }
+
+    function fitCourse() {
+      var pts = [];
+      session.features.forEach(function (f) { pts = pts.concat(toLatLngs(f.points)); });
+      if (session.osm && !session.osm.error) (session.osm.greens || []).forEach(function (g) { pts = pts.concat(toLatLngs(g.points || [])); });
+      if (pts.length) { try { mapObj.fitBounds(L.latLngBounds(pts).pad(0.08)); return; } catch (e) {} }
+      var point = courseLatLng(session.course);
+      if (point) mapObj.setView(point, 16);
+    }
+
+    function zoomToSelected() {
+      var f = selectedId ? findFeature(selectedId) : null;
+      if (!f) { setStatus("Click a shape first, then zoom to it."); return; }
+      try { mapObj.fitBounds(L.latLngBounds(toLatLngs(f.points)).pad(f.kind === "fairway" ? 0.15 : 1.2), { maxZoom: 20 }); } catch (e) {}
     }
 
     function allGreens() {
@@ -348,10 +421,9 @@
     }
 
     function updateDraftUi() {
-      el.finish.hidden = !draft.length;
-      el.finish.disabled = draft.length < 2;
       updateActions();
       updateHint();
+      updateNext();
     }
 
     function finishFairway() {
@@ -379,9 +451,16 @@
       pin.bindTooltip("Finding the green's edge…", { permanent: true, direction: "top", className: "gdStudioOverlayLabel" });
       wandsRunning++;
       updateHint();
-      captureAround(point).then(function (capture) {
-        return api("POST", "", { image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, seed: point }, WAND_API);
-      }).then(function (data) {
+      /* The provider's sharpest zoom first; where that has gaps or the wand finds no edge, one
+         zoom coarser - some providers' top zoom is patchy, and a green reads fine at 0.6m/px. */
+      function attempt(coarser) {
+        return captureAround(point, coarser).then(function (capture) {
+          return api("POST", "", { image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, seed: point }, WAND_API);
+        });
+      }
+      attempt(0).then(function (data) {
+        return data && data.ok ? data : attempt(1).catch(function () { return data; });
+      }, function () { return attempt(1); }).then(function (data) {
         return data && data.ok && Array.isArray(data.shape) && data.shape.length >= 3
           ? { shape: data.shape, note: data.stable === false ? "The wand was unsure of this edge - check it." : "" }
           : { shape: null, note: "The wand could not find an edge here (" + ((data && data.reason) || "no answer") + ")." };
@@ -524,6 +603,7 @@
       selectedId = id || "";
       drawFeatures();
       updateHint();
+      updateNext();
     }
 
     /* ---- dragging and the bin ---- */
@@ -755,6 +835,7 @@
       el.run.title = session.dirty ? "Wait for the overlay to save - the mapper reads what is saved" : "";
       ["tool-fairway", "tool-green", "tool-tee"].forEach(function (name) { el[name].disabled = !canEdit(); });
       renderSaveState();
+      updateNext();
     }
 
     /* ---- course map: the club's schematic, stored on the course and sent to the AI as image 2 ---- */
@@ -890,6 +971,17 @@
        Tiles at one zoom, nothing resampled; the tile grid's top-left mercator pixel and that
        zoom ARE the georeference - the same playSurface shape a published frame carries, exact
        to the pixel. */
+    /* Leaflet's template layers fill {z} from the zoom the MAP is showing (_getZoomForUrl
+       reads _tileZoom), not from coords.z - so asking for a tile at any other zoom silently
+       fetched the wrong ground. That is why the green wand only worked when the map happened
+       to sit at its capture zoom. The layer's tile zoom is pointed at z for the one call. */
+    function tileUrlAt(cx, cy, z) {
+      var saved = layer._tileZoom;
+      layer._tileZoom = z;
+      try { return layer.getTileUrl({ x: cx, y: cy, z: z }); }
+      finally { layer._tileZoom = saved; }
+    }
+
     function stitchTiles(z, x0, y0, x1, y1) {
       var full = document.createElement("canvas");
       full.width = (x1 - x0 + 1) * 256; full.height = (y1 - y0 + 1) * 256;
@@ -905,7 +997,7 @@
             img.crossOrigin = "anonymous";
             img.onload = function () { try { ctx.drawImage(img, (cx - x0) * 256, (cy - y0) * 256, 256, 256); } catch (e) { failed++; } done(); };
             img.onerror = function () { failed++; done(); };
-            try { img.src = layer.getTileUrl({ x: cx, y: cy, z: z }); } catch (e) { failed++; done(); }
+            try { img.src = tileUrlAt(cx, cy, z); } catch (e) { failed++; done(); }
           }));
         }
       }
@@ -914,19 +1006,21 @@
 
     /* The picture the wand reads: a few tiles around a pin at the zoom nearest WAND_TARGET_MPP
        the provider really has, unscaled. */
-    function captureAround(point) {
+    function captureAround(point, coarser) {
       return new Promise(function (resolve, reject) {
         if (!mapObj || !layer || typeof layer.getTileUrl !== "function") return reject(new Error("this provider cannot be captured - switch provider"));
         var native = num(layer.options && layer.options.maxNativeZoom) || num(layer.options && layer.options.maxZoom) || 19;
         var mppZ0 = 156543.03392 * Math.cos(point.lat * Math.PI / 180);
-        var z = Math.max(14, Math.min(native, Math.round(Math.log2(mppZ0 / WAND_TARGET_MPP))));
+        var z = Math.max(14, Math.min(native, Math.round(Math.log2(mppZ0 / WAND_TARGET_MPP))) - (coarser || 0));
         var mpp = mppZ0 / Math.pow(2, z);
         var half = Math.ceil(Math.sqrt(WAND_MAX_GREEN_M2 / Math.PI) / mpp * 1.6 + 24);
         var p = mapObj.project(L.latLng(point.lat, point.lng), z);
         var x0 = Math.floor((p.x - half) / 256), y0 = Math.floor((p.y - half) / 256);
         var x1 = Math.floor((p.x + half) / 256), y1 = Math.floor((p.y + half) / 256);
         stitchTiles(z, x0, y0, x1, y1).then(function (out) {
-          if (out.failed === out.tiles) return reject(new Error("no imagery loaded here"));
+          /* A missing tile is a black square next to the green, and the wand reads its edge as
+             the green's. Refuse rather than send it; the caller tries a coarser zoom. */
+          if (out.failed) return reject(new Error(out.failed === out.tiles ? "no imagery loaded here" : out.failed + " of " + out.tiles + " tiles did not load"));
           var dataUrl;
           try { dataUrl = out.canvas.toDataURL("image/jpeg", 0.92); }
           catch (e) { return reject(new Error("this provider's tiles cannot be read back (no CORS) - switch provider")); }
@@ -1182,10 +1276,14 @@
     mapObj = L.map(el.map, {
       zoomControl: true,
       attributionControl: false,
-      /* Double-click finishes a fairway line; zooming on it would move the ground under the
-         last point. Zoom stays on the wheel and the control. */
-      doubleClickZoom: false,
+      doubleClickZoom: true,
       scrollWheelZoom: true,
+      /* Quarter-step zoom so the wheel eases in rather than jumping a whole level, and a
+         trackpad pinch lands where it stops. */
+      zoomSnap: 0.25,
+      zoomDelta: 0.5,
+      wheelPxPerZoomLevel: 90,
+      wheelDebounceTime: 20,
       maxZoom: 22
     }).setView([0, 0], 2);
 
@@ -1206,10 +1304,25 @@
     mapObj.on("moveend zoomend", function () { buildProviderOptions(); updateReadout(); });
     mapObj.on("zoomend", function () { if (selectedId && !drag) { drawFeatures(); updateHint(); } });
 
+    /* Arrow keys pan and +/- zoom from anywhere on the page, not only once the map has focus
+       (Leaflet's own keyboard handler covers that case, so it is left to it). */
+    function navKey(event) {
+      if (!mapObj || (event.target && el.map.contains(event.target))) return false;
+      var step = 160;
+      var pan = { ArrowUp: [0, -step], ArrowDown: [0, step], ArrowLeft: [-step, 0], ArrowRight: [step, 0] }[event.key];
+      if (pan) { event.preventDefault(); mapObj.panBy(pan); return true; }
+      if (event.key === "+" || event.key === "=") { event.preventDefault(); mapObj.zoomIn(0.5); return true; }
+      if (event.key === "-" || event.key === "_") { event.preventDefault(); mapObj.zoomOut(0.5); return true; }
+      return false;
+    }
+
     function onKey(event) {
       var target = event.target;
       if (target && /^(input|textarea|select)$/i.test(target.tagName)) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (!containerEl.isConnected) return;
+      if (event.key === "Escape" && fullscreen && !draft.length && !selectedId && tool === "move") { event.preventDefault(); setFullscreen(false); return; }
+      if (navKey(event)) return;
       if (draft.length) {
         if (event.key === "Enter") { event.preventDefault(); finishFairway(); }
         else if (event.key === "Escape") { event.preventDefault(); cancelDraft(); }
@@ -1224,8 +1337,12 @@
         if (f) setStatus(kindLabel(f.kind) + " deleted.");
         return;
       }
+      if (event.key === "Enter") { event.preventDefault(); doneAndNext(); return; }
       if (event.key === "Escape") { setTool("move"); if (selectedId) select(""); return; }
-      var shortcut = { v: "move", f: "fairway", g: "green", t: "tee" }[String(event.key || "").toLowerCase()];
+      var key = String(event.key || "").toLowerCase();
+      if (key === "h") { fitCourse(); return; }
+      if (key === "z") { zoomToSelected(); return; }
+      var shortcut = { v: "move", f: "fairway", g: "green", t: "tee" }[key];
       if (shortcut && (shortcut === "move" || canEdit())) setTool(shortcut);
     }
     document.addEventListener("keydown", onKey);
@@ -1245,7 +1362,10 @@
       el.width.value = session.fairwayWidth;
       drawDraft();
     });
-    el.finish.addEventListener("click", finishFairway);
+    el.next.addEventListener("click", doneAndNext);
+    el.fit.addEventListener("click", fitCourse);
+    el["zoom-shape"].addEventListener("click", zoomToSelected);
+    el.fullscreen.addEventListener("click", function () { setFullscreen(!fullscreen); });
     el.bin.addEventListener("click", function () {
       if (!selectedId || !canEdit()) { setStatus("Drag a shape or a corner onto the bin to delete it."); return; }
       var f = findFeature(selectedId);
@@ -1279,6 +1399,7 @@
       if (scanTimer) clearTimeout(scanTimer);
       if (saveTimer) clearTimeout(saveTimer);
       document.removeEventListener("keydown", onKey);
+      document.documentElement.classList.remove("gdStudioOverlayNoScroll");
       document.removeEventListener("mousemove", onDragMove);
       document.removeEventListener("mouseup", onDragEnd);
       if (window.GDStudioCoursePick) window.GDStudioCoursePick.cancel();
