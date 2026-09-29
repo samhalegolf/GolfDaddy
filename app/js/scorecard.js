@@ -102,10 +102,12 @@
     var list = document.getElementById("scoreList");
     if (!list) return;
     var t = total();
+    var i18n = window.GDI18n;
     if (totalEl) {
-      totalEl.textContent = t
-        ? (t.relative ? (t.value > 0 ? "+" + t.value : t.value === 0 ? "E" : String(t.value)) : t.value + " strokes")
-        : "–";
+      if (!t) i18n.plain(totalEl, "–");
+      else if (!t.relative) i18n.setPlural(totalEl, "scorecard.strokes", t.value);
+      else if (t.value === 0) i18n.set(totalEl, "scorecard.even");
+      else i18n.plain(totalEl, t.value > 0 ? "+" + t.value : String(t.value));
     }
     var strokes = courseScores();
     var currentHole = (app.marshal && app.marshal.round().hole) || 0;
@@ -130,9 +132,9 @@
     parInput.inputMode = "numeric";
     parInput.min = "3";
     parInput.max = "6";
-    parInput.setAttribute("aria-label", "Par for hole " + hole);
+    window.GDI18n.setAttr(parInput, "aria-label", "scorecard.parForHole", { n: hole });
     parInput.value = parByHole[hole] > 0 ? String(parByHole[hole]) : "";
-    parInput.placeholder = "Par";
+    window.GDI18n.setAttr(parInput, "placeholder", "common.parWord");
     parInput.addEventListener("change", function () {
       setPar(hole, Math.round(Number(parInput.value)));
       render();
@@ -144,7 +146,7 @@
     var minus = document.createElement("button");
     minus.type = "button";
     minus.textContent = "–";
-    minus.setAttribute("aria-label", "Decrease score for hole " + hole);
+    window.GDI18n.setAttr(minus, "aria-label", "scorecard.decrease", { n: hole });
     minus.addEventListener("click", function () {
       setScore(hole, Math.max(0, strokes - 1));
       render();
@@ -155,7 +157,7 @@
     var plus = document.createElement("button");
     plus.type = "button";
     plus.textContent = "+";
-    plus.setAttribute("aria-label", "Increase score for hole " + hole);
+    window.GDI18n.setAttr(plus, "aria-label", "scorecard.increase", { n: hole });
     plus.addEventListener("click", function () {
       setScore(hole, strokes + 1);
       render();

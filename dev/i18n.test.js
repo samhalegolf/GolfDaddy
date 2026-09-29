@@ -152,30 +152,120 @@ assert.strictEqual(boot({ languages: [], extra: { es: SPANISH } }).GDI18n.locale
   });
   const english = captured.en;
   const placeholders = (text) => (text.match(/\{\w+\}/g) || []).sort().join(',');
+  const PLURAL = /\.(zero|one|two|few|many|other)$/;
+  /* Plural keys ("x.one", "x.other") are checked per base: each language has
+     exactly the forms its own grammar picks for a whole number of shots,
+     clubs or strokes (0-200) - Polish one/few/many, Latvian zero/one/other -
+     rather than English's two. */
+  const pluralBases = new Set(Object.keys(english).filter((k) => PLURAL.test(k)).map((k) => k.replace(PLURAL, '')));
+  const formsFor = (tag) => {
+    const rules = new Intl.PluralRules(tag);
+    const forms = new Set(['other']);
+    for (let n = 0; n <= 200; n++) forms.add(rules.select(n));
+    return forms;
+  };
+  const isPlural = (k) => PLURAL.test(k) && pluralBases.has(k.replace(PLURAL, ''));
   files.filter((tag) => tag !== 'en').forEach((tag) => {
     const dict = captured[tag];
-    const extra = Object.keys(dict).filter((k) => !(k in english));
-    const missing = Object.keys(english).filter((k) => !(k in dict));
+    const extra = Object.keys(dict).filter((k) => !(k in english) && !isPlural(k));
+    const missing = Object.keys(english).filter((k) => !isPlural(k) && !(k in dict));
     assert.deepStrictEqual(extra, [], tag + '.js has keys English does not (typo?)');
     assert.deepStrictEqual(missing, [], tag + '.js is missing translations');
-    Object.keys(english).forEach((k) => {
+    const forms = formsFor(tag);
+    pluralBases.forEach((base) => {
+      const have = Object.keys(dict).filter((k) => k.replace(PLURAL, '') === base && PLURAL.test(k)).map((k) => k.match(PLURAL)[1]).sort();
+      assert.deepStrictEqual(have, [...forms].sort(), tag + ' ' + base + ' needs exactly the plural forms ' + [...forms].sort().join('/'));
+    });
+    Object.keys(dict).forEach((k) => {
       assert.ok(typeof dict[k] === 'string' && dict[k].trim(), tag + ' ' + k + ' is empty');
-      assert.strictEqual(placeholders(dict[k]), placeholders(english[k]), tag + ' ' + k + ' changes the {placeholders}');
+      const source = isPlural(k) ? english[k.replace(PLURAL, '') + '.other'] : english[k];
+      assert.strictEqual(placeholders(dict[k]), placeholders(source), tag + ' ' + k + ' changes the {placeholders}');
     });
   });
 }
 
-/* ---- Every key the play page and GPS Settings use exists in English ---- */
+/* ---- Every key the play page uses exists in English ---- */
 {
   const { GDI18n } = boot();
-  const html = fs.readFileSync(path.join(ROOT, 'app', 'index.html'), 'utf8');
-  const settingsSrc = fs.readFileSync(path.join(ROOT, 'app', 'js', 'gps-settings.js'), 'utf8');
-  const used = new Set();
-  for (const m of html.matchAll(/data-i18n(?:-[a-z-]+)?="([^"]+)"/g)) used.add(m[1]);
-  for (const m of settingsSrc.matchAll(/"((?:gpsSettings|common)\.[A-Za-z]+)"/g)) used.add(m[1]);
-  assert.ok(used.size >= 15, 'expected the GPS Settings keys to be found, got ' + used.size);
-  const missing = [...used].filter((key) => !GDI18n.has(key));
+  const english = new Set();
+  const capture = { GDI18n: { add: (tag, dict) => Object.keys(dict).forEach((k) => english.add(k)) } };
+  capture.window = capture;
+  vm.runInContext(EN_SRC, vm.createContext(capture));
+  const known = (key) => english.has(key) || english.has(key + '.other');
+  /* A key is any quoted "namespace.word" whose namespace English uses, so a
+     typo'd key in code fails here instead of shipping as a raw label. */
+  const namespaces = new Set([...english].map((k) => k.split('.')[0]));
+  const sources = [path.join('app', 'index.html')]
+    .concat(fs.readdirSync(path.join(ROOT, 'app', 'js')).filter((f) => f.endsWith('.js')).map((f) => path.join('app', 'js', f)))
+    .concat([path.join('scripts', 'gd-bag-core.js'), path.join('scripts', 'gd-practice-bubble-preview.js')]);
+  const used = new Map();
+  sources.forEach((file) => {
+    const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
+    for (const m of src.matchAll(/["']([a-z][A-Za-z]*\.[a-z][A-Za-z]*)["']/g)) {
+      if (namespaces.has(m[1].split('.')[0])) used.set(m[1], file);
+    }
+  });
+  assert.ok(used.size >= 150, 'expected the play page keys to be found, got ' + used.size);
+  const missing = [...used.keys()].filter((key) => !known(key)).map((key) => key + ' (' + used.get(key) + ')');
   assert.deepStrictEqual(missing, [], 'keys used but not in scripts/i18n/en.js');
+  /* And the other way: a word nothing asks for is one more thing to
+     translate 22 times for no reason. */
+  const unused = [...english].filter((k) => !used.has(k) && !used.has(k.replace(/\.(zero|one|two|few|many|other)$/, '')));
+  assert.deepStrictEqual(unused, [], 'keys in scripts/i18n/en.js that nothing uses');
+  assert.ok(GDI18n.has('common.hole'));
+}
+
+/* ---- Plurals follow each language's own rules ---- */
+{
+  const { GDI18n } = boot({ languages: ['pl'], extra: { pl: {
+    'complete.shotsLogged.one': '{n} strzał', 'complete.shotsLogged.few': '{n} strzały',
+    'complete.shotsLogged.many': '{n} strzałów', 'complete.shotsLogged.other': '{n} strzału' } } });
+  assert.strictEqual(GDI18n.tn('complete.shotsLogged', 1), '1 strzał');
+  assert.strictEqual(GDI18n.tn('complete.shotsLogged', 3), '3 strzały');
+  assert.strictEqual(GDI18n.tn('complete.shotsLogged', 5), '5 strzałów');
+  const en = boot().GDI18n;
+  assert.strictEqual(en.tn('complete.shotsLogged', 1), '1 shot logged');
+  assert.strictEqual(en.tn('complete.shotsLogged', 2), '2 shots logged');
+  assert.strictEqual(en.tn('no.such.plural', 2), 'no.such.plural');
+}
+
+/* ---- Text written through set() re-translates on a language switch ---- */
+{
+  const made = [];
+  const node = () => {
+    const n = { attrs: {}, textContent: '',
+      setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
+      removeAttribute(k) { delete this.attrs[k]; } };
+    made.push(n);
+    return n;
+  };
+  const document = {
+    documentElement: node(),
+    querySelectorAll: (sel) => {
+      const attr = sel.slice(1, -1);
+      return made.filter((n) => n.getAttribute(attr) !== null);
+    },
+    addEventListener() {}
+  };
+  const window = boot({ languages: ['en'], document, extra: { es: { 'common.hole': 'Hoyo {n}', 'complete.shotsLogged.one': '{n} golpe registrado', 'complete.shotsLogged.other': '{n} golpes registrados', 'rail.windLevel': 'Viento {n}' } } });
+  const { GDI18n } = window;
+  const title = node(), shots = node(), button = node(), course = node();
+  GDI18n.set(title, 'common.hole', { n: 7 });
+  GDI18n.setPlural(shots, 'complete.shotsLogged', 2);
+  GDI18n.setAttr(button, 'aria-label', 'rail.windLevel', { n: 3 });
+  course.setAttribute('data-i18n', 'loading.course');
+  GDI18n.plain(course, 'Akarana Golf Club');
+  assert.strictEqual(title.textContent, 'Hole 7');
+  assert.strictEqual(shots.textContent, '2 shots logged');
+  assert.strictEqual(button.attrs['aria-label'], 'Wind 3');
+  GDI18n.setLocale('es');
+  assert.strictEqual(title.textContent, 'Hoyo 7');
+  assert.strictEqual(shots.textContent, '2 golpes registrados');
+  assert.strictEqual(button.attrs['aria-label'], 'Viento 3');
+  assert.strictEqual(course.textContent, 'Akarana Golf Club', 'plain() text is never re-translated');
+  GDI18n.set(title, null);
+  assert.strictEqual(title.textContent, '');
+  assert.strictEqual(title.getAttribute('data-i18n'), null, 'a cleared element is forgotten');
 }
 
 /* ---- The page loads the layer before GPS Settings ---- */

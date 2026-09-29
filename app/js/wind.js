@@ -82,9 +82,9 @@
     btn.classList.toggle("live", !!state && liveActive);
     icon.textContent = state ? String(state.level) : "";
     if (!state) icon.innerHTML = WIND_SVG;
-    btn.setAttribute("aria-label", state
-      ? (liveActive ? "Live wind " + state.level : "Wind " + state.level)
-      : "Wind");
+    window.GDI18n.setAttr(btn, "aria-label", state
+      ? (liveActive ? "rail.liveWindLevel" : "rail.windLevel")
+      : "rail.wind", state ? { n: state.level } : undefined);
   }
 
   function openPicker() {
@@ -101,11 +101,11 @@
 
   /* The fallback path: live wind could not answer, so the compass takes the
      question, with the reason on its status line rather than a silent open. */
-  function fallBackToPicker(message) {
+  function fallBackToPicker(key) {
     openPicker();
     var status = document.getElementById("windAutoStatus");
-    if (status && message) {
-      status.textContent = message;
+    if (status && key) {
+      window.GDI18n.set(status, key);
       status.classList.remove("hiddenState");
     }
   }
@@ -171,11 +171,11 @@
     var status = document.getElementById("windAutoStatus");
     var pos = app.marshal && app.marshal.player();
     if (!pos) {
-      if (opts.fallbackToPicker) { fallBackToPicker("No position yet — tap the wind origin"); return; }
-      if (status) { status.textContent = "No position yet"; status.classList.remove("hiddenState"); }
+      if (opts.fallbackToPicker) { fallBackToPicker("wind.noPositionTap"); return; }
+      if (status) { window.GDI18n.set(status, "wind.noPosition"); status.classList.remove("hiddenState"); }
       return;
     }
-    if (!opts.fallbackToPicker && status) { status.textContent = "Checking wind…"; status.classList.remove("hiddenState"); }
+    if (!opts.fallbackToPicker && status) { window.GDI18n.set(status, "wind.checking"); status.classList.remove("hiddenState"); }
     checking = true;
     notify();   // the banner shows the check, so a rail tap is never silent
     var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -214,8 +214,8 @@
       changed();
     } catch (e) {
       checking = false;
-      if (opts.fallbackToPicker) fallBackToPicker("Live wind unavailable — tap the wind origin");
-      else if (status) { status.textContent = "Live wind unavailable"; status.classList.remove("hiddenState"); }
+      if (opts.fallbackToPicker) fallBackToPicker("wind.unavailableTap");
+      else if (status) { window.GDI18n.set(status, "wind.unavailable"); status.classList.remove("hiddenState"); }
       notify();
     } finally {
       if (timer) clearTimeout(timer);

@@ -159,11 +159,11 @@
        refused, and clamping first turns it into a legitimate 20 m club and
        rebuilds the whole bag around it. */
     var typed = number(carry, NaN);
-    if (!label) return { error: "Give the club a name first", rows: [] };
-    if (!(typed > 0)) return { error: "Give the club a distance", rows: [] };
+    if (!label) return { error: "Give the club a name first", code: "nameFirst", rows: [] };
+    if (!(typed > 0)) return { error: "Give the club a distance", code: "needsDistance", rows: [] };
     var metres = Math.round(clamp(typed, 20, 400));
     var seven = sevenIronForCarry(label, metres);
-    if (seven == null) return { error: "Give the club a distance", rows: [] };
+    if (seven == null) return { error: "Give the club a distance", code: "needsDistance", rows: [] };
     var list = (Array.isArray(labels) && labels.length ? labels.slice() : defaultLabels())
       .map(function (item) { return String(item && item.club != null ? item.club : item || "").trim(); })
       .filter(Boolean);
@@ -177,7 +177,7 @@
       var row = existing.filter(function (item) { return /^7\s*i(?:ron)?$/i.test(String(item && (item.club || item.name) || "")); })[0];
       seven = number(row && (row.baseCarry != null ? row.baseCarry : row.carry), NaN);
     }
-    if (!(seven > 0)) return { error: "Enter your 7-iron carry first", rows: existing.slice(), added: 0, retained: existing.length };
+    if (!(seven > 0)) return { error: "Enter your 7-iron carry first", code: "sevenIronFirst", rows: existing.slice(), added: 0, retained: existing.length };
     var estimates = generate(seven);
     var present = new Set(existing.map(function (row) { return key(row && (row.club || row.name)); }));
     var additions = estimates.filter(function (row) { return !present.has(key(row.club)); });

@@ -24,8 +24,19 @@
        runs over the whole page on DOMContentLoaded, and the English text
        stays in the HTML as first paint.
      - JS: GDI18n.t("key", { n: 3 }) for text a module writes itself;
-       "{n} holes" fills in {n}. Modules that write text register onChange()
-       to redraw when the language changes or arrives.
+       "{n} holes" fills in {n}. GDI18n.tn("key", n) is the same for text that
+       changes with a number: it reads "key.one", "key.few", "key.other"...,
+       whichever form the language's own plural rules (Intl.PluralRules) ask
+       for, so Polish gets its three forms and English its two. Modules that
+       write text register onChange() to redraw when the language changes or
+       arrives.
+     - JS writing into the page: GDI18n.set(el, "key", vars),
+       GDI18n.setPlural(el, "key", n, vars) and GDI18n.setAttr(el, "aria-label",
+       "key", vars) write the words AND remember the key on the element
+       (data-i18n, data-i18n-vars, data-i18n-plural), so apply() re-translates
+       them when the language changes, same as text written in the HTML.
+       GDI18n.plain(el, text) writes text that is not ours to translate (a
+       course name) and drops any key, so apply() leaves it alone.
 
    Browser global (window.GDI18n) and a node module, so tests run it for
    real. */
@@ -138,14 +149,49 @@
     return dict && Object.prototype.hasOwnProperty.call(dict, key) ? dict[key] : null;
   }
 
-  function t(key, vars) {
-    var text = lookup(dictionaries[locale()], key);
-    if (text === null) text = lookup(dictionaries[BASE], key);
-    if (text === null) text = key;
+  function fill(text, vars) {
     if (!vars) return text;
     return text.replace(/\{(\w+)\}/g, function (whole, name) {
       return Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : whole;
     });
+  }
+
+  function t(key, vars) {
+    var text = lookup(dictionaries[locale()], key);
+    if (text === null) text = lookup(dictionaries[BASE], key);
+    if (text === null) text = key;
+    return fill(text, vars);
+  }
+
+  function pluralForm(tag, n) {
+    try { return new Intl.PluralRules(tag).select(n); } catch (e) { return n === 1 ? "one" : "other"; }
+  }
+
+  /* The language's own form for n, then its "other", then English's. */
+  function pluralText(tag, key, n) {
+    var dict = dictionaries[tag];
+    var text = lookup(dict, key + "." + pluralForm(tag, n));
+    return text !== null ? text : lookup(dict, key + ".other");
+  }
+
+  function tn(key, n, vars) {
+    var text = pluralText(locale(), key, n);
+    if (text === null) text = pluralText(BASE, key, n);
+    if (text === null) text = key;
+    return fill(text, Object.assign({ n: n }, vars || {}));
+  }
+
+  function varsOf(node, name) {
+    var raw = node.getAttribute(name);
+    if (!raw) return undefined;
+    try { return JSON.parse(raw); } catch (e) { return undefined; }
+  }
+
+  function textFor(node) {
+    var key = node.getAttribute("data-i18n");
+    var vars = varsOf(node, "data-i18n-vars");
+    var plural = node.getAttribute("data-i18n-plural");
+    return plural !== null && plural !== "" ? tn(key, Number(plural), vars) : t(key, vars);
   }
 
   function apply(scope) {
@@ -154,11 +200,58 @@
     if (!base || !base.querySelectorAll) return;
     if (!scope && doc.documentElement) doc.documentElement.setAttribute("lang", locale());
     var nodes = base.querySelectorAll("[data-i18n]");
-    for (var i = 0; i < nodes.length; i++) nodes[i].textContent = t(nodes[i].getAttribute("data-i18n"));
+    /* Only what changed is written: an English page re-applying English
+       touches nothing, which keeps the Painter's trace (app/js/trace.js)
+       free of writes it did not order. */
+    for (var i = 0; i < nodes.length; i++) {
+      var text = textFor(nodes[i]);
+      if (nodes[i].textContent !== text) nodes[i].textContent = text;
+    }
     ATTRS.forEach(function (attr) {
       var marked = base.querySelectorAll("[data-i18n-" + attr + "]");
-      for (var j = 0; j < marked.length; j++) marked[j].setAttribute(attr, t(marked[j].getAttribute("data-i18n-" + attr)));
+      for (var j = 0; j < marked.length; j++) {
+        var value = t(marked[j].getAttribute("data-i18n-" + attr), varsOf(marked[j], "data-i18n-" + attr + "-vars"));
+        if (marked[j].getAttribute(attr) !== value) marked[j].setAttribute(attr, value);
+      }
     });
+  }
+
+  function remember(el, name, value) {
+    if (value === undefined || value === null) el.removeAttribute(name);
+    else el.setAttribute(name, typeof value === "string" ? value : JSON.stringify(value));
+  }
+
+  /* Translated text that stays translated: see the header. A null key
+     empties the element and forgets it. */
+  function set(el, key, vars) {
+    if (!el) return;
+    remember(el, "data-i18n", key || null);
+    remember(el, "data-i18n-vars", key ? vars : null);
+    remember(el, "data-i18n-plural", null);
+    el.textContent = key ? t(key, vars) : "";
+  }
+
+  function setPlural(el, key, n, vars) {
+    if (!el) return;
+    remember(el, "data-i18n", key);
+    remember(el, "data-i18n-vars", vars);
+    remember(el, "data-i18n-plural", String(n));
+    el.textContent = tn(key, n, vars);
+  }
+
+  function setAttr(el, attr, key, vars) {
+    if (!el) return;
+    remember(el, "data-i18n-" + attr, key);
+    remember(el, "data-i18n-" + attr + "-vars", vars);
+    el.setAttribute(attr, t(key, vars));
+  }
+
+  function plain(el, text) {
+    if (!el) return;
+    remember(el, "data-i18n", null);
+    remember(el, "data-i18n-vars", null);
+    remember(el, "data-i18n-plural", null);
+    el.textContent = text == null ? "" : String(text);
   }
 
   function changed() {
@@ -187,6 +280,11 @@
 
   var api = {
     t: t,
+    tn: tn,
+    set: set,
+    setPlural: setPlural,
+    setAttr: setAttr,
+    plain: plain,
     add: add,
     apply: apply,
     locale: locale,

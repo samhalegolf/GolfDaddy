@@ -38,21 +38,22 @@
 
   var NOTICE_MS = 7000;
 
-  /* Signals that write round history, and the plain-language thing each one
-     is for. Everything absent from this list - FIX_RECEIVED, PLACED,
+  /* Signals that write round history, and which feature each one is for:
+     "logShots" or "keepScore", the two things the notice below names.
+     Everything absent from this list - FIX_RECEIVED, PLACED,
      BALL_MOVED, LOCK, UNLOCK, AIM_DRAGGED, hole navigation - IS the
      rangefinder and stays open. LOCK is deliberately not here: locking a shot
      is how you choose the point distances are measured from. */
   var GATED_SIGNALS = {
-    SHOT_END: "log where your shots finish",
-    FINISH_OPENED: "log where your shots finish",
-    FINISH_LOGGED: "log where your shots finish",
-    LOG_OPENED: "log where your shots finish",
-    SCORE_SET: "keep score",
+    SHOT_END: "logShots",
+    FINISH_OPENED: "logShots",
+    FINISH_LOGGED: "logShots",
+    LOG_OPENED: "logShots",
+    SCORE_SET: "keepScore",
     /* The holding screen writes par the moment it opens, so reaching it is
        keeping score whether or not the stepper is ever touched. */
-    HOLE_COMPLETED: "keep score",
-    SCORE_STEP: "keep score"
+    HOLE_COMPLETED: "keepScore",
+    SCORE_STEP: "keepScore"
   };
 
   function rangefinderParam() {
@@ -80,19 +81,26 @@
      without a membership needs a plan. Telling them apart matters - sending a
      signed-in player to a sign-in form is the kind of dead end that gets an
      app rejected in the first place. */
-  function notice(what) {
+  var NOTICE_KEYS = {
+    logShots: { guest: "access.signInLogShots", member: "access.memberLogShots" },
+    keepScore: { guest: "access.signInKeepScore", member: "access.memberKeepScore" }
+  };
+
+  function notice(feature) {
+    var keys = NOTICE_KEYS[feature] || NOTICE_KEYS.keepScore;
+    var i18n = window.GDI18n;
     var bar = document.getElementById("accessNotice");
     var label = document.getElementById("accessNoticeLabel");
     var action = document.getElementById("accessNoticeAction");
     if (!bar || !label || !action) return;
 
     if (signedIn()) {
-      label.textContent = "A Clarity membership is needed to " + what + ". Distances stay free.";
-      action.textContent = "Membership";
+      i18n.set(label, keys.member);
+      i18n.set(action, "access.membership");
       action.onclick = function () { window.location.href = "/?membership=1"; };
     } else {
-      label.textContent = "Sign in to " + what + ". Distances stay free.";
-      action.textContent = "Sign in";
+      i18n.set(label, keys.guest);
+      i18n.set(action, "common.signIn");
       action.onclick = function () {
         hideNotice();
         if (typeof app.showRoute === "function") app.showRoute("signin");

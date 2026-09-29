@@ -850,13 +850,13 @@ check("Shot End on the green offers Hole complete; mid-hole it offers the rest o
   onGreen.m.signal("FINISH_LOGGED");
   const logged = onGreen.m.scene().logged;
   assert.strictEqual(logged.show, true);
-  assert.strictEqual(logged.next.label, "Hole complete");
+  assert.strictEqual(logged.next.label, "next.holeComplete");
   assert.strictEqual(logged.next.signal, "HOLE_COMPLETED");
 
   const midHole = playing();
   midHole.m.signal("LOCK");
   midHole.m.signal("SHOT_END");                                        // still on the tee
-  assert.strictEqual(midHole.m.scene().logged.next.label, "Keep playing");
+  assert.strictEqual(midHole.m.scene().logged.next.label, "next.keepPlaying");
   assert.strictEqual(midHole.m.scene().logged.next.signal, "BACK");
 });
 
@@ -1000,7 +1000,7 @@ check("an older outstanding hole does not hijack the Logged button", () => {
   walkTo(m, 2);
   m.signal("LOCK");
   m.signal("SHOT_END");                           // 2 logged, 1 still outstanding
-  assert.strictEqual(m.scene().logged.next.label, "Keep playing", "hole 2 is not over");
+  assert.strictEqual(m.scene().logged.next.label, "next.keepPlaying", "hole 2 is not over");
   assert.strictEqual(m.scene().picker.marks[1].open, 1, "1 is still flagged on the card");
 });
 

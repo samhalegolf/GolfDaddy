@@ -18,6 +18,7 @@
   function el(id) { return document.getElementById(id); }
   function show(node, on) { if (node) node.classList.toggle("hiddenState", !on); }
   function text(id, value) { var node = el(id); if (node) node.textContent = value; }
+  function words(id, key, vars) { var node = el(id); if (node) window.GDI18n.set(node, key, vars); }
   function settings() { return window.ClarityApp && window.ClarityApp.gpsSettings || null; }
   function units(m) {
     if (m === null || m === undefined || !Number.isFinite(Number(m))) return "–";
@@ -68,7 +69,8 @@
        buttons. The Scene carries it (caddy-watch.js watchState.vendor) so
        the card never has to guess from the platform itself. */
     var vendor = phase && scene.surface.watch.vendor === "garmin" ? "garmin" : "apple";
-    var vendorName = vendor === "garmin" ? "Garmin" : "Apple Watch";
+    var i18n = window.GDI18n;
+    var vendorName = vendor === "garmin" ? "Garmin" : i18n.t("watch.appleWatch");
     show(card, !!phase);
     show(mask, driving);
     document.body.classList.toggle("watchCard", !!phase && !driving);
@@ -77,26 +79,28 @@
     document.body.classList.toggle("watchGarmin", !!phase && vendor === "garmin");
     if (card && card.dataset.vendor !== vendor) card.dataset.vendor = vendor;
     if (mask && mask.dataset.vendor !== vendor) mask.dataset.vendor = vendor;
-    text("watchHandoverMaskTitle", "Playing on " + vendorName);
+    words("watchHandoverMaskTitle", "watch.playingOn", { watch: vendorName });
     if (!phase || !card) return;
     if (card.dataset.phase !== phase) card.dataset.phase = phase;
-    card.setAttribute("aria-label",
-      phase === "uploading" ? "Loading course onto " + vendorName
-        : phase === "ready" ? "Play on " + vendorName
-          : phase === "handing" ? "Handing over to " + vendorName
-            : "Playing on " + vendorName + ". Play on phone");
+    i18n.setAttr(card, "aria-label",
+      phase === "uploading" ? "watch.loadingOnto"
+        : phase === "ready" ? "watch.playOn"
+          : phase === "handing" ? "watch.handingOverTo"
+            : "watch.playingOnAria", { watch: vendorName });
 
     var maps = scene.surface.watch.maps || { total: 0, have: 0 };
     var pct = maps.total > 0 ? Math.round((maps.have / maps.total) * 100) : 0;
     var bar = el("watchHandoverBar");
     if (bar) bar.style.width = pct + "%";
     text("watchHandoverPct", pct + "%");
-    text("watchHandoverHoles", maps.have + " of " + maps.total + " holes");
+    words("watchHandoverHoles", "watch.holesLoaded", { have: maps.have, total: maps.total });
 
     var number = scene.hole && scene.hole.number;
     var par = scene.hole && scene.hole.par;
-    text("watchHandoverHole", number ? "Hole " + number : "Hole");
-    text("watchHandoverPar", par ? "PAR " + par : "");
+    if (number) words("watchHandoverHole", "common.hole", { n: number });
+    else words("watchHandoverHole", "common.holeWord");
+    if (par) words("watchHandoverPar", "common.parCaps", { n: par });
+    else words("watchHandoverPar", null);
     Array.prototype.forEach.call(document.querySelectorAll(".watchHandoverUnit"), function (node) { node.textContent = unitLabel(); });
     /* Ready shows the hole's own length; Playing shows the shot in front of
        the player, the same number the Watch is showing. */

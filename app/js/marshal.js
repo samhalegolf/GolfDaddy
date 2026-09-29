@@ -1386,8 +1386,10 @@
        It used to branch three more ways, for finding the next outstanding hole
        and getting back from it. That is the picker's job now, and none of those
        branches were reachable any more. */
+    /* label is a translation key (scripts/i18n/en.js); the Painter turns it
+       into words. */
     function nextAfterLogged() {
-      if (S.live.hole === null) return { label: "Done", signal: "BACK", payload: null };
+      if (S.live.hole === null) return { label: "next.done", signal: "BACK", payload: null };
       /* Where the shot ENDED decides what comes next, because that is the only
          thing that distinguishes the last shot of a hole from any other one.
          Ended on the green: the hole is done, and the holding screen is next.
@@ -1396,17 +1398,17 @@
       var end = S.logged && S.logged.record && S.logged.record.end;
       var d = end ? toGreen(end, S.live.hole) : null;
       return (d !== null && d <= GREEN_FOCUS_M)
-        ? { label: "Hole complete", signal: "HOLE_COMPLETED", payload: { hole: S.live.hole } }
-        : { label: "Keep playing", signal: "BACK", payload: null };
+        ? { label: "next.holeComplete", signal: "HOLE_COMPLETED", payload: { hole: S.live.hole } }
+        : { label: "next.keepPlaying", signal: "BACK", payload: null };
     }
 
     /* And the holding screen's own button: the next hole, queued up. */
     function nextAfterComplete() {
-      if (S.live.hole === null) return { label: "Done", signal: "BACK", payload: null };
+      if (S.live.hole === null) return { label: "next.done", signal: "BACK", payload: null };
       var next = stepHole(S.live.hole, 1);
       return next !== S.live.hole
-        ? { label: "Next hole", hole: next, signal: "ADVANCE_TO_HOLE", payload: { hole: next } }
-        : { label: "End round", hole: null, signal: "END_ROUND", payload: null };
+        ? { label: "next.nextHole", hole: next, signal: "ADVANCE_TO_HOLE", payload: { hole: next } }
+        : { label: "next.endRound", hole: null, signal: "END_ROUND", payload: null };
     }
 
     // ------------------------------------------------------------------ api

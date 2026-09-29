@@ -151,9 +151,9 @@
     var list = sortRows(rows);
     var label = String(club || "").trim();
     var metres = Math.round(num(carry));
-    if (!label) return { rows: list, error: "Give the club a name first" };
-    if (!(metres > 0)) return { rows: list, error: "Give the club a distance" };
-    if (list.some(function (r) { return sameLabel(r.club, label); })) return { rows: list, error: label + " is already in the bag" };
+    if (!label) return { rows: list, error: "Give the club a name first", code: "nameFirst" };
+    if (!(metres > 0)) return { rows: list, error: "Give the club a distance", code: "needsDistance" };
+    if (list.some(function (r) { return sameLabel(r.club, label); })) return { rows: list, error: label + " is already in the bag", code: "alreadyInBag", duplicate: label };
     return { rows: sortRows(list.concat([{ club: label, baseCarry: metres, totalM: totalForCarry(label, metres) }])), club: label };
   }
 
@@ -162,9 +162,9 @@
     var next = String(label || "").trim();
     var current = list.filter(function (r) { return sameLabel(r.club, club); })[0];
     if (!current) return { rows: list, error: "" };
-    if (!next) return { rows: list, error: "A club needs a name" };
+    if (!next) return { rows: list, error: "A club needs a name", code: "needsName" };
     if (sameLabel(next, current.club)) return { rows: list, club: current.club };
-    if (list.some(function (r) { return sameLabel(r.club, next); })) return { rows: list, error: next + " is already in the bag" };
+    if (list.some(function (r) { return sameLabel(r.club, next); })) return { rows: list, error: next + " is already in the bag", code: "alreadyInBag", duplicate: next };
     return {
       rows: sortRows(list.map(function (r) {
         /* Re-derive the total from the new label: roll-out is a property of the
@@ -208,6 +208,17 @@
     return "blade";
   }
 
+  /* The list's own words. Translated where the page loads the translation
+     layer (scripts/gd-i18n.js - the play surface); English where it does not
+     yet (the legacy shell). The keys live in scripts/i18n/en.js. */
+  function word(key, english, vars) {
+    var i18n = typeof window !== "undefined" ? window.GDI18n : null;
+    if (i18n && i18n.has(key)) return i18n.t(key, vars);
+    return english.replace(/\{(\w+)\}/g, function (whole, name) {
+      return vars && Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : whole;
+    });
+  }
+
   function elem(tag, className, text) {
     var node = document.createElement(tag);
     if (className) node.className = className;
@@ -223,12 +234,12 @@
        say it was actually a 5-wood. Same order as adding one - name, then
        number. */
     var nameField = elem("label", "gdBagRowName");
-    nameField.appendChild(elem("span", null, "Club"));
+    nameField.appendChild(elem("span", null, word("bag.club", "Club")));
     var nameInput = document.createElement("input");
     nameInput.type = "text";
     nameInput.value = row.club;
     nameInput.autocomplete = "off";
-    nameInput.setAttribute("aria-label", "Club name");
+    nameInput.setAttribute("aria-label", word("bag.clubNameAria", "Club name"));
     nameInput.addEventListener("change", function () { opts.onRename(row.club, nameInput.value); });
     nameInput.addEventListener("keydown", function (event) { if (event.key === "Enter") nameInput.blur(); });
     nameField.appendChild(nameInput);
@@ -237,19 +248,19 @@
     var step = elem("div", "gdBagRowStep");
     var less = elem("button", null, "−");
     less.type = "button";
-    less.setAttribute("aria-label", "Less carry");
+    less.setAttribute("aria-label", word("bag.lessCarry", "Less carry"));
     less.addEventListener("click", function () { opts.onCarry(row.club, row.baseCarry - 1); });
     var carryField = elem("label");
-    carryField.appendChild(elem("span", null, "Carry"));
+    carryField.appendChild(elem("span", null, word("bag.carry", "Carry")));
     var carryInput = document.createElement("input");
     carryInput.inputMode = "numeric";
     carryInput.value = String(row.baseCarry);
-    carryInput.setAttribute("aria-label", "Carry metres");
+    carryInput.setAttribute("aria-label", word("bag.carryAria", "Carry metres"));
     carryInput.addEventListener("change", function () { opts.onCarry(row.club, carryInput.value); });
     carryField.appendChild(carryInput);
     var more = elem("button", null, "+");
     more.type = "button";
-    more.setAttribute("aria-label", "More carry");
+    more.setAttribute("aria-label", word("bag.moreCarry", "More carry"));
     more.addEventListener("click", function () { opts.onCarry(row.club, row.baseCarry + 1); });
     step.appendChild(less);
     step.appendChild(carryField);
@@ -257,12 +268,12 @@
     wrap.appendChild(step);
 
     var foot = elem("div", "gdBagRowFoot");
-    foot.appendChild(elem("span", "gdBagRowNote", "Runs on to " + row.totalM + " m"));
+    foot.appendChild(elem("span", "gdBagRowNote", word("bag.runsOnTo", "Runs on to {distance}", { distance: row.totalM + " m" })));
     var actions = elem("div", "gdBagRowActions");
-    var remove = elem("button", "gdBagRowRemove", "Remove");
+    var remove = elem("button", "gdBagRowRemove", word("common.remove", "Remove"));
     remove.type = "button";
     remove.addEventListener("click", function () { opts.onRemove(row.club); });
-    var done = elem("button", "gdBagRowDone", "Done");
+    var done = elem("button", "gdBagRowDone", word("common.done", "Done"));
     done.type = "button";
     done.addEventListener("click", function () { opts.onEdit(null); });
     actions.appendChild(remove);
