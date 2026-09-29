@@ -197,13 +197,13 @@
 
     function placeLockedPin() {
       var status = document.getElementById("pinLockStatus");
-      function fail(message) {
+      function fail(key) {
         if (!status) return;
-        status.textContent = message;
+        window.GDI18n.set(status, key);
         status.classList.remove("hiddenState");
       }
       var chosen = quadrantGrid && quadrantGrid.querySelector("[data-quadrant].active");
-      if (!chosen) { fail("Pick the quadrant the flag is in"); return; }
+      if (!chosen) { fail("pinLock.pickQuadrant"); return; }
       var input = document.getElementById("pinLockDistance");
       /* The reading is in the player's units; the pin maths is in metres.
          Blank is allowed (the quadrant stands on its own); a number that is
@@ -212,14 +212,14 @@
       var distanceM = null;
       if (typed) {
         distanceM = app.gpsSettings ? app.gpsSettings.fromDisplay(typed) : Number(typed);
-        if (!Number.isFinite(distanceM) || distanceM <= 0) { fail("Enter the distance as a number"); return; }
+        if (!Number.isFinite(distanceM) || distanceM <= 0) { fail("pinLock.enterNumber"); return; }
       }
       var hole = app.painter && app.painter.holeGeometry ? app.painter.holeGeometry() : null;
       var position = app.marshal && app.marshal.player();
       /* Named failures rather than a pin dropped somewhere plausible: without
          a position or a green there is nothing to calculate FROM. */
-      if (!position) { fail("No position yet - place yourself first"); return; }
-      if (!hole || !hole.green) { fail("This hole has no mapped green"); return; }
+      if (!position) { fail("pinLock.noPosition"); return; }
+      if (!hole || !hole.green) { fail("pinLock.noGreen"); return; }
       var placed = app.pin.lockedPin({
         position: position,
         green: hole.green,
@@ -227,7 +227,7 @@
         quadrant: chosen.dataset.quadrant,
         distanceM: distanceM
       });
-      if (!placed) { fail("Could not work out the pin from that"); return; }
+      if (!placed) { fail("pinLock.couldNotWork"); return; }
       app.pin.set(placed);
       closePinLock();
     }
@@ -261,7 +261,7 @@
     var scoreBtn = document.getElementById("railScorecard");
     if (scoreBtn) scoreBtn.addEventListener("click", function () {
       close();
-      if (app.access && !app.access.roundFeatures()) { app.access.prompt("keep score"); return; }
+      if (app.access && !app.access.roundFeatures()) { app.access.prompt("keepScore"); return; }
       if (app.scorecard) app.scorecard.open();
     });
 

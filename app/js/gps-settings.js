@@ -20,10 +20,11 @@
   var app = (window.ClarityApp = window.ClarityApp || {});
   var STORE_KEY = "clarity:gps-settings:v1";
 
+  /* label/sub are translation keys (scripts/i18n/en.js). */
   var TIGHTNESS = {
-    tight:  { label: "Tight",  sub: "Tight shot focus",     factor: 1.18 },
-    medium: { label: "Medium", sub: "Balanced shot view",   factor: 1 },
-    wide:   { label: "Wide",   sub: "More of the hole",     factor: 0.84 }
+    tight:  { label: "gpsSettings.tightnessTight",  sub: "gpsSettings.tightnessTightHint",  factor: 1.18 },
+    medium: { label: "gpsSettings.tightnessMedium", sub: "gpsSettings.tightnessMediumHint", factor: 1 },
+    wide:   { label: "gpsSettings.tightnessWide",   sub: "gpsSettings.tightnessWideHint",   factor: 0.84 }
   };
   var TIGHTNESS_ORDER = ["tight", "medium", "wide"];
 
@@ -55,6 +56,8 @@
   function notify() { listeners.forEach(function (fn) { try { fn(state); } catch (e) {} }); }
 
   var YARDS_PER_METRE = 1.0936133;
+
+  function t(key) { return window.GDI18n ? window.GDI18n.t(key) : key; }
 
   app.gpsSettings = {
     get: function () { return Object.assign({}, state); },
@@ -117,26 +120,45 @@
   function render() {
     var unitsBtn = document.getElementById("setUnits");
     if (unitsBtn) {
-      unitsBtn.textContent = state.units === "yd" ? "Yards" : "Meters";
+      unitsBtn.textContent = t(state.units === "yd" ? "gpsSettings.unitsYards" : "gpsSettings.unitsMetres");
       unitsBtn.setAttribute("aria-pressed", "true");
     }
     var aimBtn = document.getElementById("setAimLine");
     if (aimBtn) {
-      aimBtn.textContent = state.aimLine ? "On" : "Off";
+      aimBtn.textContent = t(state.aimLine ? "common.on" : "common.off");
       aimBtn.setAttribute("aria-pressed", state.aimLine ? "true" : "false");
     }
     var shotUpBtn = document.getElementById("setShotUp");
     if (shotUpBtn) {
-      shotUpBtn.textContent = state.shotUp ? "On" : "Off";
+      shotUpBtn.textContent = t(state.shotUp ? "common.on" : "common.off");
       shotUpBtn.setAttribute("aria-pressed", state.shotUp ? "true" : "false");
     }
     var tightBtn = document.getElementById("setFrameTight");
     var tightSub = document.getElementById("setFrameTightSub");
     if (tightBtn) {
-      tightBtn.textContent = TIGHTNESS[state.frameTightness].label;
+      tightBtn.textContent = t(TIGHTNESS[state.frameTightness].label);
       tightBtn.setAttribute("aria-pressed", "true");
     }
-    if (tightSub) tightSub.textContent = TIGHTNESS[state.frameTightness].sub;
+    if (tightSub) tightSub.textContent = t(TIGHTNESS[state.frameTightness].sub);
+    renderLanguage();
+  }
+
+  /* Language is not a GPS setting and is not stored here: GDI18n owns the
+     choice. The first option means "follow the phone"; the rest are each
+     language in its own name, so a player can find theirs in any language. */
+  function renderLanguage() {
+    var select = document.getElementById("setLanguage");
+    var i18n = window.GDI18n;
+    if (!select || !i18n) return;
+    var options = [{ tag: "", name: t("gpsSettings.languageAuto") }].concat(i18n.languages());
+    select.innerHTML = "";
+    options.forEach(function (lang) {
+      var opt = document.createElement("option");
+      opt.value = lang.tag;
+      opt.textContent = lang.name;
+      select.appendChild(opt);
+    });
+    select.value = i18n.saved() || "";
   }
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -157,8 +179,13 @@
       var i = TIGHTNESS_ORDER.indexOf(state.frameTightness);
       app.gpsSettings.set("frameTightness", TIGHTNESS_ORDER[(i + 1) % TIGHTNESS_ORDER.length]);
     });
+    var langSelect = document.getElementById("setLanguage");
+    if (langSelect && window.GDI18n) langSelect.addEventListener("change", function () {
+      window.GDI18n.setLocale(langSelect.value || null);
+    });
     var close = document.getElementById("gpsSettingsClose");
     if (close) close.addEventListener("click", function () { app.gpsSettings.close(); });
+    if (window.GDI18n) window.GDI18n.onChange(render);
     render();
   });
 })();

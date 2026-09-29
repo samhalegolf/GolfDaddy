@@ -24,6 +24,7 @@
 (function () {
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
+  var i18n = window.GDI18n;
   var surfaceLib = app.playSurface;
 
   var marshal = null;
@@ -988,7 +989,7 @@
     if (!state && !checking) return;
     banner.classList.toggle("checkingWind", !state && checking);
     var label = el("windBannerLabel");
-    if (label) label.textContent = state ? "WIND " + state.level : "WIND …";
+    if (label) i18n.set(label, state ? "wind.banner" : "wind.bannerChecking", state ? { n: state.level } : undefined);
     show(el("windBannerLive"), !!state && !!(app.wind && app.wind.isLive && app.wind.isLive()));
     var arrow = el("windBannerArrow");
     if (!arrow) return;
@@ -1177,9 +1178,9 @@
     var r = scene.hole.rec;
     var green = r && r.green;
     var title = el("logPopupTitle");
-    if (title) title.textContent = "Hole " + scene.finish.hole;
+    if (title) i18n.set(title, "common.hole", { n: scene.finish.hole });
     var zoom = el("logPopupZoom");
-    if (zoom) zoom.textContent = unitsWithLabel(snapSpanM()) + " wide";
+    if (zoom) i18n.set(zoom, "logPopup.wide", { distance: unitsWithLabel(snapSpanM()) });
     var hint = el("logPopupHint");
     var logBtn = el("logPopupLog");
     if (logBtn) logBtn.disabled = !scene.finish.canLog;
@@ -1187,7 +1188,7 @@
     var size = box ? box.clientWidth : 0;
     var ball = el("greenFocusBall");
     if (!green || !(size > 0)) {
-      if (hint) hint.textContent = green ? "" : "This hole has no green mapped yet";
+      if (hint) i18n.set(hint, green ? null : "logPopup.noGreen");
       show(ball, false);
       return;
     }
@@ -1227,9 +1228,9 @@
     ball.style.left = at.left + "px";
     ball.style.top = at.top + "px";
     if (hint) {
-      hint.textContent = !scene.finish.canLog ? "Nothing on this hole is waiting to be logged"
-        : edged ? "You are outside this view - drag the ball to where the shot finished"
-        : scene.finish.placed ? "" : "Drag the ball to where the shot finished";
+      i18n.set(hint, !scene.finish.canLog ? "logPopup.nothingToLog"
+        : edged ? "logPopup.outsideView"
+        : scene.finish.placed ? null : "logPopup.dragBall");
     }
 
     var origin = el("finishOrigin");
@@ -1246,8 +1247,9 @@
       var pin = app.pin && app.pin.current ? app.pin.current() : null;
       var toPin = pin && from ? app.distance.haversineMeters(from, pin) : null;
       var toMid = from ? app.distance.haversineMeters(from, green) : null;
-      dist.textContent = Number.isFinite(toPin) ? unitsWithLabel(toPin) + " to pin"
-        : Number.isFinite(toMid) ? unitsWithLabel(toMid) + " to middle" : "";
+      if (Number.isFinite(toPin)) i18n.set(dist, "logPopup.toPin", { distance: unitsWithLabel(toPin) });
+      else if (Number.isFinite(toMid)) i18n.set(dist, "logPopup.toMiddle", { distance: unitsWithLabel(toMid) });
+      else i18n.set(dist, null);
     }
     drawGreenContours(scene);
   }
@@ -1261,9 +1263,9 @@
     var play = el("playButton");
     show(play, scene.playButton.show);
     if (play && scene.playButton.show) {
-      play.textContent = scene.banner.returnTo !== null
-        ? "Play This Hole · " + scene.playButton.hole
-        : (scene.playButton.hole ? "Play hole " + scene.playButton.hole : "Play");
+      if (scene.banner.returnTo !== null) i18n.set(play, "play.playThisHole", { n: scene.playButton.hole });
+      else if (scene.playButton.hole) i18n.set(play, "play.playHole", { n: scene.playButton.hole });
+      else i18n.set(play, "play.play");
     }
 
     var bar = el("distanceBar");
@@ -1279,7 +1281,7 @@
       var pin = app.pin && app.pin.current ? app.pin.current() : null;
       var anchor = scene.distances.from || scene.finish.ball || scene.player;
       var toPin = pin && anchor ? app.distance.haversineMeters(anchor, pin) : null;
-      el("cardFocusLabel").textContent = Number.isFinite(toPin) ? "TO PIN" : "TO MIDDLE";
+      i18n.set(el("cardFocusLabel"), Number.isFinite(toPin) ? "card.toPin" : "card.toMiddle");
       el("shotDist").textContent = units(Number.isFinite(toPin) ? toPin : scene.distances.centre);
       var focusUnit = el("cardUnit");
       if (focusUnit) focusUnit.textContent = settings() ? settings().unitLabel() : "m";
@@ -1362,7 +1364,7 @@
      hole you are not standing on, and the Shot End button in it writes to the
      card. */
   var BADGE_STATES = ["live", "preview", "logging", "demo"];
-  var BADGE_WORDS = { live: "LIVE", preview: "PREVIEW", logging: "LOGGING", demo: "DEMO" };
+  var BADGE_WORDS = { live: "common.live", preview: "badge.preview", logging: "badge.logging", demo: "badge.demo" };
 
   function drawBadge(scene) {
     var badge = el("playerBadge");
@@ -1375,7 +1377,7 @@
     });
 
     var word = el("playerBadgeState");
-    if (word) word.textContent = BADGE_WORDS[state];
+    if (word) i18n.set(word, BADGE_WORDS[state]);
     var number = el("playerBadgeNumber");
     if (number) number.textContent = String(scene.banner.hole);
     /* Par comes off the same card the scorecard scores against, so the badge
@@ -1384,7 +1386,7 @@
     var par = el("playerBadgePar");
     if (par) {
       var value = app.scorecard && app.scorecard.parFor ? app.scorecard.parFor(scene.banner.hole) : null;
-      par.textContent = value ? "PAR " + value : "";
+      i18n.set(par, value ? "common.parCaps" : null, value ? { n: value } : undefined);
     }
 
     var name = el("playerBadgeName");
@@ -1395,7 +1397,8 @@
     var back = el("playerBadgeReturn");
     show(back, scene.banner.returnTo !== null);
     if (back && scene.banner.returnTo !== null) {
-      back.textContent = scene.banner.flow === "logging" ? "Cancel" : "Hole " + scene.banner.returnTo;
+      if (scene.banner.flow === "logging") i18n.set(back, "common.cancel");
+      else i18n.set(back, "common.hole", { n: scene.banner.returnTo });
     }
     show(badge, true);
   }
@@ -1405,22 +1408,23 @@
   function playerName() {
     var context = window.GDPlayContext;
     var who = context && typeof context.identity === "function" ? context.identity() : null;
-    return (who && who.name) || "Guest";
+    return (who && who.name) || i18n.t("badge.guest");
   }
 
+  /* label and aria are translation keys. */
   var DOCK = {
-    lock: { label: "Lock", aria: "Lock in the shot", icon: "../assets/home/clarity-caddy-lock-shot-icon.png?v=e9a3e4ea" },
-    unlock: { label: "Unlock Shot", aria: "Unlock Shot", icon: "../assets/home/clarity-caddy-unlock-shot-icon.png?v=d410cc7f" },
-    shotEnd: { label: "Shot End", aria: "Shot End", icon: "../assets/home/clarity-caddy-shot-end-icon.png?v=0b094e11" }
+    lock: { label: "dock.lock", aria: "dock.lockAria", icon: "../assets/home/clarity-caddy-lock-shot-icon.png?v=e9a3e4ea" },
+    unlock: { label: "dock.unlock", aria: "dock.unlock", icon: "../assets/home/clarity-caddy-unlock-shot-icon.png?v=d410cc7f" },
+    shotEnd: { label: "dock.shotEnd", aria: "dock.shotEnd", icon: "../assets/home/clarity-caddy-shot-end-icon.png?v=0b094e11" }
   };
 
   function setDockFace(dock, scene) {
     var face = DOCK[scene.dock.face] || DOCK.lock;
     if (dock.dataset.action === scene.dock.face) return;
     dock.dataset.action = scene.dock.face;
-    dock.setAttribute("aria-label", face.aria);
+    i18n.setAttr(dock, "aria-label", face.aria);
     var label = el("shotActionLabel");
-    if (label) label.textContent = face.label;
+    if (label) i18n.set(label, face.label);
     var icon = el("shotActionIcon");
     if (!icon) return;
     dock.classList.remove("noIcon");
@@ -1445,18 +1449,18 @@
      through as they typed it — the shorthand table is not a whitelist, and the
      band ellipsises whatever will not fit. */
   var SPOKEN_CLUB = {
-    PW: "Pitching Wedge", GW: "Gap Wedge", SW: "Sand Wedge", LW: "Lob Wedge"
+    PW: "club.pitchingWedge", GW: "club.gapWedge", SW: "club.sandWedge", LW: "club.lobWedge"
   };
 
   function clubName(label) {
     var raw = String(label || "").trim();
     if (!raw) return "–";
     var spoken = SPOKEN_CLUB[raw.toUpperCase()];
-    if (spoken) return spoken.toUpperCase();
+    if (spoken) return i18n.t(spoken);
     var numbered = /^(\d{1,2})\s*(i|w|h)$/i.exec(raw);
     if (numbered) {
-      var kind = { i: " IRON", w: " WOOD", h: " HYBRID" }[numbered[2].toLowerCase()];
-      return numbered[1] + kind;
+      var kind = { i: "club.iron", w: "club.wood", h: "club.hybrid" }[numbered[2].toLowerCase()];
+      return i18n.t(kind, { n: numbered[1] });
     }
     return raw.toUpperCase();
   }
@@ -1505,7 +1509,7 @@
       var model = window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
       var club = model && model.payload ? compactClub(model.payload.club) : null;
       detail.textContent = [
-        "Hole " + scene.logged.hole,
+        i18n.t("common.hole", { n: scene.logged.hole }),
         Number.isFinite(flat) ? units(flat) + (settings() && settings().unitLabel ? "" : "m") : null,
         club
       ].filter(Boolean).join(" · ");
@@ -1514,7 +1518,7 @@
     if (score) score.textContent = String(scene.logged.score || parFor(scene.logged.hole) || 4);
     var next = el("loggedNext");
     if (next && scene.logged.next) {
-      next.textContent = scene.logged.next.label;
+      i18n.set(next, scene.logged.next.label);
       next.dataset.signal = scene.logged.next.signal;
       next.dataset.payload = JSON.stringify(scene.logged.next.payload || null);
     }
@@ -1531,13 +1535,13 @@
     if (!scene.holeComplete.show) return;
     var state = scene.holeComplete;
     var title = el("completeTitle");
-    if (title) title.textContent = "Hole " + state.hole;
+    if (title) i18n.set(title, "common.hole", { n: state.hole });
     var detail = el("completeDetail");
     if (detail) {
       var par = state.par != null ? state.par : parFor(state.hole);
       detail.textContent = [
-        par ? "Par " + par : null,
-        state.shots ? state.shots + (state.shots === 1 ? " shot logged" : " shots logged") : null
+        par ? i18n.t("common.par", { n: par }) : null,
+        state.shots ? i18n.tn("complete.shotsLogged", state.shots) : null
       ].filter(Boolean).join(" · ");
     }
     var score = el("completeScore");
@@ -1545,12 +1549,12 @@
     var note = el("completeScoreNote");
     if (note) {
       var par2 = state.par != null ? state.par : parFor(state.hole);
-      note.textContent = (par2 && state.score === par2) ? "Par unless you say otherwise"
-        : par2 ? scoreWord(state.score, par2) : "Tap + to record a score";
+      i18n.plain(note, (par2 && state.score === par2) ? i18n.t("complete.parUnlessSaid")
+        : par2 ? scoreWord(state.score, par2) : i18n.t("complete.tapToScore"));
     }
     var next = el("completeNext");
     if (next && state.next) {
-      next.textContent = state.next.hole ? state.next.label + " · " + state.next.hole : state.next.label;
+      i18n.plain(next, state.next.hole ? i18n.t(state.next.label) + " · " + state.next.hole : i18n.t(state.next.label));
       next.dataset.signal = state.next.signal;
       next.dataset.payload = JSON.stringify(state.next.payload || null);
     }
@@ -1561,13 +1565,13 @@
   function scoreWord(score, par) {
     if (!Number.isFinite(score) || !Number.isFinite(par)) return "";
     var d = score - par;
-    if (score === 1) return "Hole in one";
-    if (d <= -3) return "Albatross";
-    if (d === -2) return "Eagle";
-    if (d === -1) return "Birdie";
-    if (d === 0) return "Par";
-    if (d === 1) return "Bogey";
-    return d + " over";
+    if (score === 1) return i18n.t("score.holeInOne");
+    if (d <= -3) return i18n.t("score.albatross");
+    if (d === -2) return i18n.t("score.eagle");
+    if (d === -1) return i18n.t("score.birdie");
+    if (d === 0) return i18n.t("score.par");
+    if (d === 1) return i18n.t("score.bogey");
+    return i18n.t("score.over", { n: d });
   }
 
   /* The queued hole's card. It says how far the walk to the tee is precisely
@@ -1579,15 +1583,15 @@
     show(card, scene.queued.show);
     if (!scene.queued.show) return;
     var title = el("queuedTitle");
-    if (title) title.textContent = "Hole " + scene.queued.hole;
+    if (title) i18n.set(title, "common.hole", { n: scene.queued.hole });
     var detail = el("queuedDetail");
     if (detail) {
       var par = scene.queued.par != null ? scene.queued.par : parFor(scene.queued.hole);
       detail.textContent = [
-        par ? "Par " + par : null,
+        par ? i18n.t("common.par", { n: par }) : null,
         Number.isFinite(scene.queued.lengthM) ? unitsWithLabel(scene.queued.lengthM) : null,
-        scene.queued.atTee ? "at the tee"
-          : Number.isFinite(scene.queued.arrivalM) ? unitsWithLabel(scene.queued.arrivalM) + " to the tee" : null
+        scene.queued.atTee ? i18n.t("queued.atTee")
+          : Number.isFinite(scene.queued.arrivalM) ? i18n.t("queued.toTee", { distance: unitsWithLabel(scene.queued.arrivalM) }) : null
       ].filter(Boolean).join(" · ");
     }
   }
@@ -2537,6 +2541,11 @@
        scene publish. */
     if (app.wind && app.wind.onChange) app.wind.onChange(function () {
       if (marshal) repaint("WIND_CHANGED", function () { render(marshal.scene()); });
+    });
+    /* A language switch: the texts written with GDI18n.set follow on their
+       own, but the joined lines ("Par 4 · 2 shots logged") are rebuilt here. */
+    i18n.onChange(function () {
+      if (marshal) repaint("LANGUAGE_CHANGED", function () { render(marshal.scene()); });
     });
   }
 

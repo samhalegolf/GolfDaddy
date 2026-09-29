@@ -63,8 +63,13 @@
       if (top) top.appendChild(banner);
       else play.insertBefore(banner, play.firstChild);
     }
-    banner.innerHTML = '<div><strong>Bubble Preview</strong><span>Your practice Bubble is temporary and stays out of My Bubble until you unlock it.</span></div>'
-      + '<button type="button" id="gdPracticeBubblePreviewSignup">' + (preview.guest ? 'Create account' : 'View plans') + '</button>';
+    /* English as written, tagged for the play surface's translation layer
+       (scripts/gd-i18n.js), which re-applies it once the page has loaded. */
+    var action = preview.guest ? ["practicePreview.createAccount", "Create account"] : ["practicePreview.viewPlans", "View plans"];
+    banner.innerHTML = '<div><strong data-i18n="practicePreview.title">Bubble Preview</strong>'
+      + '<span data-i18n="practicePreview.body">Your practice Bubble is temporary and stays out of My Bubble until you unlock it.</span></div>'
+      + '<button type="button" id="gdPracticeBubblePreviewSignup" data-i18n="' + action[0] + '">' + action[1] + '</button>';
+    if (window.GDI18n) window.GDI18n.apply(banner);
     var button = document.getElementById("gdPracticeBubblePreviewSignup");
     if (button) button.onclick = preview.guest ? createAccount : viewPlans;
     document.body.classList.add("gdPracticeBubblePreviewRoute");

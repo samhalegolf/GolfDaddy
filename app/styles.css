@@ -568,6 +568,10 @@ body.map-update-in-progress #surfaceStage { opacity: .72; transition: opacity 12
 .setRow span { font-size: 11px; opacity: .62; line-height: 1.35; }
 .setRow .toggle { flex: 0 0 auto; min-width: 74px; border: 1px solid rgba(255, 255, 255, .16); border-radius: 999px; padding: 8px 14px; background: rgba(255, 255, 255, .08); color: #f2f7f2; font-size: 12px; font-weight: 800; }
 .setRow .toggle[aria-pressed="true"] { background: #1fd36d; color: #06110b; border-color: #1fd36d; }
+/* The language picker wears the toggle pill; long names truncate rather than
+   pushing the row's label off screen. */
+.setRow select.toggle { max-width: 150px; appearance: none; -webkit-appearance: none; text-overflow: ellipsis; text-align: center; }
+.setRow select.toggle option { color: #06110b; }
 
 /* Layout lives in styles/inline/gd-editable-bag-panel-v1.css now: GDBagCore
    renders the same two-column, longest-first grid here as it does in the

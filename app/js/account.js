@@ -29,7 +29,8 @@
     },
     label: function () {
       var account = activeAccount();
-      return account ? (account.name || account.email || "Signed in") : "Signed in";
+      var fallback = window.GDI18n ? window.GDI18n.t("home.signedIn") : "Signed in";
+      return account ? (account.name || account.email || fallback) : fallback;
     },
     email: function () {
       var account = activeAccount();

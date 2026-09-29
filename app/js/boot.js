@@ -3,6 +3,7 @@
 (function () {
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
+  var i18n = window.GDI18n;
 
   /* The round currently in play, and which kind of map it's using - drives
      the background update check below. Cleared whenever play stops so a
@@ -62,16 +63,14 @@
     manualGreenArmed = false;
     tapPrompt.classList.add("hiddenState");
     intro.classList.add("hiddenState");
-    eyebrow.textContent = value.state === "PROCESSING" ? "COURSE MAP PREPARING"
-      : value.state === "MANUAL_ACTION_REQUIRED" ? "COURSE MAP NEEDS ATTENTION"
-      : "COURSE MAP NOT AVAILABLE";
-    title.textContent = value.state === "CURRENT_HOLE_MISSING" ? "This hole is not mapped yet"
-      : value.state === "PROCESSING" ? "We're still preparing this course"
-      : value.state === "MANUAL_ACTION_REQUIRED" ? "This course map needs correction"
-      : "We couldn't load a usable map";
-    copy.textContent = value.state === "PROCESSING"
-      ? "You can wait here or use GPS manually. We'll open the mapped hole automatically if it becomes ready."
-      : "You can still use GPS manually. We'll keep checking for an updated map.";
+    i18n.set(eyebrow, value.state === "PROCESSING" ? "mapRecovery.preparingEyebrow"
+      : value.state === "MANUAL_ACTION_REQUIRED" ? "mapRecovery.attentionEyebrow"
+      : "mapRecovery.notAvailable");
+    i18n.set(title, value.state === "CURRENT_HOLE_MISSING" ? "mapRecovery.holeNotMapped"
+      : value.state === "PROCESSING" ? "mapRecovery.stillPreparing"
+      : value.state === "MANUAL_ACTION_REQUIRED" ? "mapRecovery.needsCorrection"
+      : "mapRecovery.couldNotLoad");
+    i18n.set(copy, value.state === "PROCESSING" ? "mapRecovery.waitOrManual" : "mapRecovery.useManual");
     screen.classList.remove("hiddenState");
     scheduleReadinessRetry();
   }
@@ -404,15 +403,15 @@
     var el = document.getElementById("loadingScreen");
     if (el) el.classList.add("hiddenState");
   }
-  function setLoading(text, pct) {
+  function setLoading(key, pct) {
     var sub = document.getElementById("loadingSub");
     var bar = document.getElementById("loadingBar");
-    if (sub && text) sub.textContent = text;
+    if (sub && key) i18n.set(sub, key);
     if (bar && Number.isFinite(Number(pct))) bar.style.width = Math.max(8, Math.min(100, Number(pct))) + "%";
   }
   function setLoadingTitle(text) {
     var title = document.getElementById("loadingTitle");
-    if (title && text) title.textContent = text;
+    if (title && text) i18n.plain(title, text);
   }
 
   /* Back is semantic navigation. The handoff context, not browser history,
@@ -513,8 +512,9 @@
     var state = document.getElementById("accountState");
     var action = document.getElementById("accountAction");
     var signedIn = app.account.signedIn();
-    state.textContent = signedIn ? app.account.label() : "Not signed in";
-    action.textContent = signedIn ? "Sign out" : "Sign in";
+    if (signedIn) i18n.plain(state, app.account.label());
+    else i18n.set(state, "home.notSignedIn");
+    i18n.set(action, signedIn ? "common.signOut" : "common.signIn");
   }
 
   async function submitSignIn(event) {
@@ -522,17 +522,18 @@
     var status = document.getElementById("signInStatus");
     var submit = document.getElementById("signInSubmit");
     submit.disabled = true;
-    status.textContent = "Signing in…";
+    i18n.set(status, "signIn.signingIn");
     try {
       await app.account.login(
         document.getElementById("signInEmail").value,
         document.getElementById("signInPassword").value
       );
       document.getElementById("signInPassword").value = "";
-      status.textContent = "";
+      i18n.plain(status, "");
       show("home");
     } catch (error) {
-      status.textContent = (error && error.message) || "Could not sign in. Check your connection.";
+      if (error && error.message) i18n.plain(status, error.message);
+      else i18n.set(status, "signIn.failed");
     } finally {
       submit.disabled = false;
     }
@@ -728,7 +729,7 @@
     if (!round || round.liveHole === null) return adoptMapUpdate(course, pkg, mapType);
     saveCourseToLibrary(course, pkg);
     pendingMapUpdate = { course: course, pkg: pkg, mapType: mapType, stagedHole: round.hole };
-    document.getElementById("mapUpdateLabel").textContent = "Map ready · applies next hole";
+    i18n.set(document.getElementById("mapUpdateLabel"), "mapUpdate.appliesNextHole");
   }
 
   function applyMapUpdateWithProgress(course, pkg, mapType) {
@@ -737,20 +738,20 @@
     var button = document.getElementById("mapUpdateDownload");
     if (!bar || !label || !button || button.disabled) return;
     button.disabled = true;
-    button.textContent = "Updating…";
-    label.textContent = "Updating course map · Preparing…";
+    i18n.set(button, "mapUpdate.updating");
+    i18n.set(label, "mapUpdate.preparing");
     document.body.classList.add("map-update-in-progress");
     requestAnimationFrame(function () {
-      label.textContent = "Updating course map · Refreshing playing surface…";
+      i18n.set(label, "mapUpdate.refreshing");
       setTimeout(function () {
         stageOrAdoptMapUpdate(course, pkg, mapType);
         document.body.classList.remove("map-update-in-progress");
-        label.textContent = pendingMapUpdate ? "Ready for next hole ✓" : "Map updated ✓";
-        button.textContent = "Ready";
+        i18n.set(label, pendingMapUpdate ? "mapUpdate.readyNextHole" : "mapUpdate.updated");
+        i18n.set(button, "mapUpdate.ready");
         setTimeout(function () {
           bar.classList.add("hiddenState");
           button.disabled = false;
-          button.textContent = "Update";
+          i18n.set(button, "mapUpdate.update");
         }, 900);
       }, 120);
     });
@@ -772,14 +773,14 @@
        (v1.5)". Appended only when the server reported one, so a course with no countable
        revision reads exactly as it did before rather than as "Update Available ()". */
     var message =
-      repair ? "COURSE MAP FIXED · Complete map ready"
-      : local ? "Update Available"
-        : mapType === "published" ? "Published map available" : "Course map available";
-    document.getElementById("mapUpdateLabel").textContent =
-      app.courseVersionLabel.suffixed(message, versionLabelOf(pkg));
+      repair ? "mapUpdate.fixed"
+      : local ? "mapUpdate.updateAvailable"
+        : mapType === "published" ? "mapUpdate.publishedAvailable" : "mapUpdate.courseAvailable";
+    i18n.plain(document.getElementById("mapUpdateLabel"),
+      app.courseVersionLabel.suffixed(i18n.t(message), versionLabelOf(pkg)));
     document.getElementById("mapUpdateBar").classList.remove("hiddenState");
     mapUpdatePrompt = { course: course, pkg: pkg, mapType: mapType };
-    document.getElementById("mapUpdateDownload").textContent = "Update";
+    i18n.set(document.getElementById("mapUpdateDownload"), "mapUpdate.update");
     document.getElementById("mapUpdateDownload").disabled = false;
     document.getElementById("mapUpdateDownload").onclick = function () {
       applyMapUpdateWithProgress(course, pkg, mapType);
@@ -838,16 +839,14 @@
          live-map-only round they would have to leave and re-enter to fix.
          A terminal answer or a timeout still falls through to the live map
          exactly as a plain null fetch always has. */
-      setLoading("Downloading course map", 24);
+      setLoading("loading.downloading", 24);
       pkg = await app.awaitCoursePackage({
         courseId: course.courseId,
         courseName: course.courseName,
         courseLat: course.courseLat,
         courseLng: course.courseLng,
         onProgress: function (info) {
-          setLoading(info.waitedMs > 30000
-            ? "Preparing course - first-time setup can take a little longer"
-            : "Preparing course...",
+          setLoading(info.waitedMs > 30000 ? "loading.preparingSlow" : "loading.preparing",
             Math.min(90, 30 + 60 * (info.waitedMs / info.budgetMs)));
         }
       });

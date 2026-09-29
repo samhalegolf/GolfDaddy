@@ -32,6 +32,10 @@
      and no onerror handler of its own. Posts to /api/client-errors, which
      resolves natively only because the bootstrap above ran first. -->
 <script src="../scripts/clarity-error-reporter.js"></script>
+<!-- Translation layer and its English base, ahead of every module that
+     writes text (see scripts/gd-i18n.js). -->
+<script src="../scripts/gd-i18n.js"></script>
+<script src="../scripts/i18n/en.js"></script>
 <link rel="stylesheet" href="../assets/vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="styles.css?v=log-popup-20260917c">
 <link rel="stylesheet" href="../styles/inline/gd-editable-bag-panel-v1.css">
@@ -49,12 +53,12 @@
 <div id="loadingScreen">
   <div class="loadingSheet">
     <div class="loadingEyebrow">Clarity Caddy</div>
-    <strong id="loadingTitle">Loading course</strong>
-    <span id="loadingSub">Getting ready</span>
+    <strong id="loadingTitle" data-i18n="loading.course">Loading course</strong>
+    <span id="loadingSub" data-i18n="loading.gettingReady">Getting ready</span>
     <div class="loadingTrack"><i id="loadingBar"></i></div>
   </div>
 </div>
-<button type="button" id="gdDemoCourseDataCta" hidden>See Course Data</button>
+<button type="button" id="gdDemoCourseDataCta" hidden data-i18n="loading.seeCourseData">See Course Data</button>
 
 <!-- Entered exclusively via ?courseId=... from the course picker on the main
      site - there is no picker or Play tile here any more. This screen only
@@ -68,11 +72,11 @@
 
 <section id="signInScreen" class="screen">
   <form id="signInForm" class="signInCard">
-    <h2>Sign in</h2>
-    <input id="signInEmail" type="email" autocomplete="email" placeholder="Email" required>
-    <input id="signInPassword" type="password" autocomplete="current-password" placeholder="Password" required>
-    <button id="signInSubmit" type="submit">Sign in</button>
-    <button id="signInBack" type="button" class="linkButton">Back</button>
+    <h2 data-i18n="common.signIn">Sign in</h2>
+    <input id="signInEmail" type="email" autocomplete="email" placeholder="Email" data-i18n-placeholder="signIn.email" required>
+    <input id="signInPassword" type="password" autocomplete="current-password" placeholder="Password" data-i18n-placeholder="signIn.password" required>
+    <button id="signInSubmit" type="submit" data-i18n="common.signIn">Sign in</button>
+    <button id="signInBack" type="button" class="linkButton" data-i18n="common.back">Back</button>
     <p id="signInStatus"></p>
   </form>
 </section>
@@ -86,8 +90,8 @@
        - safe-area insets vary by device. -->
   <div id="playTopBar">
     <div id="globalNav">
-      <button id="globalBackBtn" type="button" aria-label="Back">Back</button>
-      <button id="globalHomeBtn" type="button" class="homeTextBtn" aria-label="Home">Home</button>
+      <button id="globalBackBtn" type="button" aria-label="Back" data-i18n-aria-label="common.back" data-i18n="common.back">Back</button>
+      <button id="globalHomeBtn" type="button" class="homeTextBtn" aria-label="Home" data-i18n-aria-label="common.home" data-i18n="common.home">Home</button>
     </div>
     <!-- The wind tell. Wind is easy to leave on and invisible when the bubble
          is down, so while wind is set this says so out loud: the level, LIVE
@@ -98,7 +102,7 @@
     <div id="windBanner" class="hiddenState" role="status">
       <span id="windBannerArrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h15M13.5 6.5 19 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       <span id="windBannerLabel">WIND</span>
-      <span id="windBannerLive" class="hiddenState">LIVE</span>
+      <span id="windBannerLive" class="hiddenState" data-i18n="common.live">LIVE</span>
     </div>
     <!-- A published map arriving mid-round is a prompt, not an auto-switch -
          the loading screen already covered the "available from the start"
@@ -106,7 +110,7 @@
     <div id="mapUpdateBar" class="hiddenState">
       <span id="mapUpdateLabel">Published map available</span>
       <button id="mapUpdateDownload" type="button">Download</button>
-      <button id="mapUpdateDismiss" type="button" aria-label="Dismiss">&times;</button>
+      <button id="mapUpdateDismiss" type="button" aria-label="Dismiss" data-i18n-aria-label="common.dismiss">&times;</button>
     </div>
     <!-- Shown only when location was actually DENIED, which is the one GPS
          state that will not resolve by waiting. "No fix yet" stays silent -
@@ -114,9 +118,9 @@
          every hole. Without this a denial looked identical to a slow fix: a
          permanently dotless map with no explanation. -->
     <div id="gpsNotice" class="hiddenState" role="status">
-      <span id="gpsNoticeLabel">Location is off, so distances can't follow you. Turn it on for Clarity Caddy in Settings.</span>
-      <button id="gpsNoticeEnable" type="button">Enable Location</button>
-      <button id="gpsNoticeDismiss" type="button" aria-label="Dismiss">&times;</button>
+      <span id="gpsNoticeLabel" data-i18n="gpsNotice.off">Location is off, so distances can't follow you. Turn it on for Clarity Caddy in Settings.</span>
+      <button id="gpsNoticeEnable" type="button" data-i18n="gpsNotice.enable">Enable Location</button>
+      <button id="gpsNoticeDismiss" type="button" aria-label="Dismiss" data-i18n-aria-label="common.dismiss">&times;</button>
     </div>
     <!-- Raised when a rangefinder-only session reaches something that writes
          round history. Same bar shape as the two above so it stacks with them
@@ -124,7 +128,7 @@
     <div id="accessNotice" class="hiddenState" role="status">
       <span id="accessNoticeLabel"></span>
       <button id="accessNoticeAction" type="button">Sign in</button>
-      <button id="accessNoticeDismiss" type="button" aria-label="Dismiss">&times;</button>
+      <button id="accessNoticeDismiss" type="button" aria-label="Dismiss" data-i18n-aria-label="common.dismiss">&times;</button>
     </div>
   </div>
   <!-- Player badge. One plate answers the three questions the top of the
@@ -171,20 +175,20 @@
       <span id="mapRecoveryEyebrow">COURSE MAP NOT AVAILABLE</span>
       <h2 id="mapRecoveryTitle">This hole is not mapped yet</h2>
       <p id="mapRecoveryCopy">You can still use GPS manually. We'll keep checking for an updated map.</p>
-      <button id="mapRecoveryManual" type="button">Use Manual GPS</button>
-      <button id="mapRecoveryBack" type="button" class="linkButton">Back to Courses</button>
+      <button id="mapRecoveryManual" type="button" data-i18n="mapRecovery.useManualButton">Use Manual GPS</button>
+      <button id="mapRecoveryBack" type="button" class="linkButton" data-i18n="mapRecovery.backToCourses">Back to Courses</button>
     </div>
   </section>
   <section id="manualGpsIntro" class="hiddenState" aria-live="polite">
     <div class="mapRecoveryCard">
-      <span>MANUAL GPS</span>
-      <h2>Your location is already known.</h2>
-      <p>Tap the centre of the green to set your target. Distances and your Bubble will then work normally.</p>
-      <button id="manualGpsBegin" type="button">Tap Green</button>
-      <button id="manualGpsCancel" type="button" class="linkButton">Cancel</button>
+      <span data-i18n="manualGps.eyebrow">MANUAL GPS</span>
+      <h2 data-i18n="manualGps.locationKnown">Your location is already known.</h2>
+      <p data-i18n="manualGps.tapGreenHint">Tap the centre of the green to set your target. Distances and your Bubble will then work normally.</p>
+      <button id="manualGpsBegin" type="button" data-i18n="manualGps.tapGreen">Tap Green</button>
+      <button id="manualGpsCancel" type="button" class="linkButton" data-i18n="common.cancel">Cancel</button>
     </div>
   </section>
-  <div id="manualTapPrompt" class="hiddenState">MANUAL GPS · Tap centre of green</div>
+  <div id="manualTapPrompt" class="hiddenState" data-i18n="manualGps.tapPrompt">MANUAL GPS · Tap centre of green</div>
   <!-- The stage carries the lock-stage tilt and nothing else. It is the screen
        grown by the overscan (styles.css) purely so the tilted box still covers
        the screen once perspective has pushed its far edge toward the vanishing
@@ -237,12 +241,12 @@
     <!-- Offered when this hole has a shot with no end on it AND you are near
          its green (marshal LOG_NEAR_GREEN_M). It opens the logging popup;
          catching up on an earlier hole is the picker's Shot logging switch. -->
-    <button id="finishControl" type="button" class="hiddenState dockSide" aria-label="Log where the shot finished">Log shot</button>
+    <button id="finishControl" type="button" class="hiddenState dockSide" aria-label="Log where the shot finished" data-i18n-aria-label="dock.logShotAria" data-i18n="dock.logShot">Log shot</button>
     <!-- The hole is done. Offered on the green and on the Logged screen that
          follows closing a shot there, because those are the two places where
          "done" is an honest thing to say. It goes to the holding screen; it
          does not move the round on by itself. -->
-    <button id="holeCompleteControl" type="button" class="hiddenState dockSide" aria-label="Hole complete">Hole done</button>
+    <button id="holeCompleteControl" type="button" class="hiddenState dockSide" aria-label="Hole complete" data-i18n-aria-label="dock.holeCompleteAria" data-i18n="dock.holeDone">Hole done</button>
   </div>
 
   <!-- Where Shot End and Finish both land. It reports the shot, takes the
@@ -251,16 +255,16 @@
        you. "Back" matters — after logging the approach you still have to putt. -->
   <div id="loggedScreen" class="hiddenState">
     <div class="loggedCard">
-      <strong class="loggedTitle">Shot logged</strong>
+      <strong class="loggedTitle" data-i18n="logged.title">Shot logged</strong>
       <span id="loggedDetail" class="loggedDetail"></span>
       <div class="loggedScoreRow">
-        <span class="loggedScoreLabel">Score</span>
-        <button id="loggedScoreDown" type="button" aria-label="One less">&minus;</button>
+        <span class="loggedScoreLabel" data-i18n="logged.score">Score</span>
+        <button id="loggedScoreDown" type="button" aria-label="One less" data-i18n-aria-label="common.oneLess">&minus;</button>
         <span id="loggedScore">4</span>
-        <button id="loggedScoreUp" type="button" aria-label="One more">+</button>
+        <button id="loggedScoreUp" type="button" aria-label="One more" data-i18n-aria-label="common.oneMore">+</button>
       </div>
       <button id="loggedNext" type="button" class="loggedNext"></button>
-      <button id="loggedBack" type="button" class="linkButton">Back to this hole</button>
+      <button id="loggedBack" type="button" class="linkButton" data-i18n="logged.backToHole">Back to this hole</button>
     </div>
   </div>
 
@@ -274,17 +278,17 @@
        design: walking off a green having made par should cost nothing. -->
   <div id="holeCompleteScreen" class="hiddenState">
     <div class="loggedCard">
-      <span class="completeEyebrow">HOLE COMPLETE</span>
+      <span class="completeEyebrow" data-i18n="complete.eyebrow">HOLE COMPLETE</span>
       <strong id="completeTitle" class="loggedTitle">Hole 1</strong>
       <span id="completeDetail" class="loggedDetail"></span>
       <div class="loggedScoreRow">
-        <button id="completeScoreDown" type="button" aria-label="One less">&minus;</button>
+        <button id="completeScoreDown" type="button" aria-label="One less" data-i18n-aria-label="common.oneLess">&minus;</button>
         <span id="completeScore">4</span>
-        <button id="completeScoreUp" type="button" aria-label="One more">+</button>
+        <button id="completeScoreUp" type="button" aria-label="One more" data-i18n-aria-label="common.oneMore">+</button>
       </div>
       <span id="completeScoreNote" class="completeNote">Par unless you say otherwise</span>
       <button id="completeNext" type="button" class="loggedNext"></button>
-      <button id="completeBack" type="button" class="linkButton">Back to the green</button>
+      <button id="completeBack" type="button" class="linkButton" data-i18n="complete.backToGreen">Back to the green</button>
     </div>
   </div>
 
@@ -294,7 +298,7 @@
        as the hole, with its own numbers, and Play waits for the tee — or for
        you to say we are wrong about the tee. -->
   <div id="queuedCard" class="hiddenState">
-    <span class="queuedEyebrow">NEXT UP</span>
+    <span class="queuedEyebrow" data-i18n="queued.eyebrow">NEXT UP</span>
     <strong id="queuedTitle">Hole 2</strong>
     <span id="queuedDetail"></span>
   </div>
@@ -315,7 +319,7 @@
     <span class="whSide whSideR" aria-hidden="true"></span><span class="whSide whSideL1" aria-hidden="true"></span><span class="whSide whSideL2" aria-hidden="true"></span>
     <span class="whScreen">
       <span class="whFace whUploading">
-        <span class="whEyebrow">Loading course</span>
+        <span class="whEyebrow" data-i18n="watch.loadingCourse">Loading course</span>
         <span class="whBar"><span id="watchHandoverBar" class="whBarFill"></span></span>
         <span id="watchHandoverPct" class="whPct">0%</span>
         <span id="watchHandoverHoles" class="whHoles">0 of 18 holes</span>
@@ -323,46 +327,46 @@
       <span class="whFace whReady">
         <span class="whHead"><span id="watchHandoverHole">Hole 1</span><span id="watchHandoverPar"></span></span>
         <span class="whThumb"><img id="watchHandoverThumb" alt="" hidden><span class="whThumbNum"><span id="watchHandoverThumbDist">–</span><span class="whUnit watchHandoverUnit">m</span></span></span>
-        <span class="whAction">Play on Watch</span>
+        <span class="whAction" data-i18n="watch.playOnWatch">Play on Watch</span>
       </span>
       <span class="whFace whHanding">
         <span class="whSweep" aria-hidden="true"></span>
         <span class="whSpin" aria-hidden="true"></span>
-        <span class="whEyebrow">Handing over</span>
+        <span class="whEyebrow" data-i18n="watch.handingOver">Handing over</span>
       </span>
       <span class="whFace whPlaying">
         <span class="whGrip" aria-hidden="true"></span>
         <span class="whThumb"><img id="watchHandoverThumb2" alt="" hidden><span class="whThumbNum"><span id="watchHandoverDist2">–</span><span class="whUnit watchHandoverUnit">m</span></span></span>
-        <span class="whAction">Play on phone</span>
+        <span class="whAction" data-i18n="watch.playOnPhone">Play on phone</span>
       </span>
     </span>
   </button>
   <div id="watchHandoverScreen" class="hiddenState" role="status">
     <div class="whMaskWatch" aria-hidden="true"><span class="whMaskCrown"></span><span class="whMaskCrown whMaskCrown2"></span><span class="whMaskWatchScreen"></span></div>
     <div class="whMaskTitle" id="watchHandoverMaskTitle">Playing on Watch</div>
-    <div class="whMaskCopy">Phone can sleep. It keeps the round and every shot rule; the Watch draws it.</div>
+    <div class="whMaskCopy" data-i18n="watch.phoneCanSleep">Phone can sleep. It keeps the round and every shot rule; the Watch draws it.</div>
   </div>
   <!-- Preview's way of answering "where am I playing from". Tapping works
        without arming anything — placing yourself IS the plan here, so there is
        no Standing Here button to press first and no armed-tap state to leave
        switched on. -->
   <div id="startPill" class="hiddenState">
-    <button id="headToTeeBtn" type="button" class="headToTee">Head To the Tee</button>
-    <span id="startPillHint">or tap where you'd stand</span>
+    <button id="headToTeeBtn" type="button" class="headToTee" data-i18n="play.headToTee">Head To the Tee</button>
+    <span id="startPillHint" data-i18n="play.orTapWhereYouStand">or tap where you'd stand</span>
   </div>
-  <button id="toolRailTab" type="button" aria-label="Tools" aria-expanded="false">
+  <button id="toolRailTab" type="button" aria-label="Tools" data-i18n-aria-label="rail.tools" aria-expanded="false">
     <img src="../assets/home/tool-rail.png?v=930770b2" alt="">
   </button>
   <div id="toolRail" class="hiddenState">
-    <button id="railBag" type="button" class="railBtn" aria-label="Bag"><img src="../assets/icons/bag.png" alt=""></button>
+    <button id="railBag" type="button" class="railBtn" aria-label="Bag" data-i18n-aria-label="rail.bag"><img src="../assets/icons/bag.png" alt=""></button>
     <button id="railWind" type="button" class="railBtn" aria-label="Wind"><span id="railWindIcon" class="railIcon"></span></button>
     <!-- draggable="false" on the flag images: the flag is a pointer-drag
          source, and an <img> that starts a native drag cancels the pointer
          stream (pointercancel) before it can ever drop. -->
-    <button id="railPin" type="button" class="railBtn" aria-label="Pin" aria-pressed="false"><img src="../assets/icons/flag.svg" alt="" draggable="false"></button>
-    <button id="railGpsPin" type="button" class="railBtn" aria-label="GPS locate"><img src="../assets/brand/cg-gps-pin.png?v=deb3313b" alt=""></button>
-    <button id="railScorecard" type="button" class="railBtn" aria-label="Scorecard"><img src="../assets/icons/scorecard.png" alt=""></button>
-    <button id="railGpsSettings" type="button" class="railBtn" aria-label="GPS Settings">
+    <button id="railPin" type="button" class="railBtn" aria-label="Pin" data-i18n-aria-label="rail.pin" aria-pressed="false"><img src="../assets/icons/flag.svg" alt="" draggable="false"></button>
+    <button id="railGpsPin" type="button" class="railBtn" aria-label="GPS locate" data-i18n-aria-label="rail.gpsLocate"><img src="../assets/brand/cg-gps-pin.png?v=deb3313b" alt=""></button>
+    <button id="railScorecard" type="button" class="railBtn" aria-label="Scorecard" data-i18n-aria-label="rail.scorecard"><img src="../assets/icons/scorecard.png" alt=""></button>
+    <button id="railGpsSettings" type="button" class="railBtn" aria-label="GPS Settings" data-i18n-aria-label="gpsSettings.openButton">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
     </button>
   </div>
@@ -373,57 +377,57 @@
        anything itself. Crosshair = calculated Pin Lock; flag = pick it up and
        drag it onto the green. -->
   <div id="pinChoicePopover" class="popover hiddenState">
-    <button id="pinChoiceLock" type="button" class="pinChoice" aria-label="Pin Lock">
+    <button id="pinChoiceLock" type="button" class="pinChoice" aria-label="Pin Lock" data-i18n-aria-label="pin.lock">
       <span class="pinChoiceIcon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
           <circle cx="12" cy="12" r="7"/><path d="M12 1v5M12 18v5M1 12h5M18 12h5" stroke-linecap="round"/>
         </svg>
       </span>
-      <span class="pinChoiceLabel">Pin Lock</span>
+      <span class="pinChoiceLabel" data-i18n="pin.lock">Pin Lock</span>
     </button>
-    <button id="pinChoiceDrag" type="button" class="pinChoice" aria-label="Drag and place">
+    <button id="pinChoiceDrag" type="button" class="pinChoice" aria-label="Drag and place" data-i18n-aria-label="pin.dragPlaceAria">
       <span class="pinChoiceIcon pinChoiceFlag" aria-hidden="true"><img src="../assets/icons/flag.svg" alt="" draggable="false"></span>
-      <span class="pinChoiceLabel">Drag &amp; place</span>
+      <span class="pinChoiceLabel" data-i18n="pin.dragPlace">Drag &amp; place</span>
     </button>
   </div>
 
   <!-- Pin Lock: the quadrant of the green the flag is in, plus what the
        rangefinder read. -->
   <div id="pinLockPanel" class="sheet hiddenState">
-    <h2>Pin Lock</h2>
-    <p class="sheetHint">Which quarter of the green is the flag in?</p>
+    <h2 data-i18n="pin.lock">Pin Lock</h2>
+    <p class="sheetHint" data-i18n="pinLock.question">Which quarter of the green is the flag in?</p>
     <div id="pinQuadrantGrid" class="pinQuadrantGrid">
-      <button type="button" data-quadrant="back-left">Back left</button>
-      <button type="button" data-quadrant="back-right">Back right</button>
-      <button type="button" data-quadrant="front-left">Front left</button>
-      <button type="button" data-quadrant="front-right">Front right</button>
+      <button type="button" data-quadrant="back-left" data-i18n="pinLock.backLeft">Back left</button>
+      <button type="button" data-quadrant="back-right" data-i18n="pinLock.backRight">Back right</button>
+      <button type="button" data-quadrant="front-left" data-i18n="pinLock.frontLeft">Front left</button>
+      <button type="button" data-quadrant="front-right" data-i18n="pinLock.frontRight">Front right</button>
     </div>
     <!-- Read in the player's units (GPS Settings); tool-rail.js converts to
          metres before the pin maths, which only ever speaks metres. -->
-    <label class="pinLockField" for="pinLockDistance">Rangefinder distance <span id="pinLockUnit">(m)</span></label>
-    <input id="pinLockDistance" type="number" inputmode="decimal" min="1" max="450" step="1" placeholder="e.g. 148" enterkeyhint="done">
+    <label class="pinLockField" for="pinLockDistance"><span data-i18n="pinLock.rangefinder">Rangefinder distance</span> <span id="pinLockUnit">(m)</span></label>
+    <input id="pinLockDistance" type="number" inputmode="decimal" min="1" max="450" step="1" placeholder="e.g. 148" data-i18n-placeholder="pinLock.example" enterkeyhint="done">
     <p id="pinLockStatus" class="windAutoStatus hiddenState"></p>
     <div class="windPopoverActions">
-      <button id="pinLockPlace" type="button" class="linkButton">Place pin</button>
-      <button id="pinLockCancel" type="button" class="linkButton">Cancel</button>
+      <button id="pinLockPlace" type="button" class="linkButton" data-i18n="pinLock.place">Place pin</button>
+      <button id="pinLockCancel" type="button" class="linkButton" data-i18n="common.cancel">Cancel</button>
     </div>
   </div>
 
   <div id="windPopover" class="popover hiddenState">
     <div id="windCompass" class="windCompass">
-      <div class="windCompassLabel">Tap wind origin</div>
+      <div class="windCompassLabel" data-i18n="wind.tapOrigin">Tap wind origin</div>
     </div>
     <div class="windPopoverActions">
-      <button id="windAuto" type="button" class="linkButton">Use live wind</button>
-      <button id="windClear" type="button" class="linkButton">Clear wind</button>
+      <button id="windAuto" type="button" class="linkButton" data-i18n="wind.useLive">Use live wind</button>
+      <button id="windClear" type="button" class="linkButton" data-i18n="wind.clear">Clear wind</button>
     </div>
     <p id="windAutoStatus" class="windAutoStatus hiddenState"></p>
   </div>
 
   <div id="bagPanel" class="sheet hiddenState">
     <div class="sheetHeader">
-      <strong>Golf Bag</strong>
-      <button id="bagClose" type="button" class="sheetClose">Done</button>
+      <strong data-i18n="bag.title">Golf Bag</strong>
+      <button id="bagClose" type="button" class="sheetClose" data-i18n="common.done">Done</button>
     </div>
     <div class="sheetBody">
       <!-- Handedness sits with the bag because both are "about you" rather than
@@ -431,7 +435,7 @@
            same shared profile store the clubs are, so the two shells cannot
            disagree about which way round you swing. -->
       <div class="setRow bagHandRow">
-        <div><strong>Handedness</strong><span>Which way your bubble leans.</span></div>
+        <div><strong data-i18n="bag.handedness">Handedness</strong><span data-i18n="bag.handednessHint">Which way your bubble leans.</span></div>
         <button id="bagHandToggle" type="button" class="toggle">Right handed</button>
       </div>
       <div id="bagNotice" class="bagNotice hiddenState"></div>
@@ -445,13 +449,13 @@
            nobody was answering. Same shape as the shell's bag sheet, which is
            the point: this is the same bag through a different door. -->
       <div class="bagFooter">
-        <button id="bagAddTab" class="bagEditAction bagFootBtn" type="button">Add a club</button>
+        <button id="bagAddTab" class="bagEditAction bagFootBtn" type="button" data-i18n="bag.addClub">Add a club</button>
         <button id="bagGenTab" class="bagEditAction bagFootBtn" type="button">Generate bag</button>
       </div>
-      <div class="bagFirmnessRow" id="bagFirmness" aria-label="Total distance setting">
-        <button type="button" data-firmness="soft">Soft</button>
-        <button type="button" data-firmness="medium">Normal</button>
-        <button type="button" data-firmness="hard">Firm</button>
+      <div class="bagFirmnessRow" id="bagFirmness" aria-label="Total distance setting" data-i18n-aria-label="bag.firmnessAria">
+        <button type="button" data-firmness="soft" data-i18n="bag.soft">Soft</button>
+        <button type="button" data-firmness="medium" data-i18n="bag.normal">Normal</button>
+        <button type="button" data-firmness="hard" data-i18n="bag.firm">Firm</button>
       </div>
     </div>
     <!-- Temporary overlays, dismissed by the scrim, Cancel or Escape. Name
@@ -460,17 +464,17 @@
          attach it to. The carry field and Add appear once the club has a name. -->
     <div id="bagOverlayScrim" class="bagScrim hiddenState"></div>
     <div id="bagAddPanel" class="bagCard hiddenState">
-      <div class="bagCardTitle">What is the club called?</div>
-      <input id="bagAddClub" type="text" autocomplete="off" placeholder="e.g. 5W" aria-label="New club name">
-      <input id="bagAddCarry" class="hiddenState" type="number" inputmode="numeric" min="1" step="1" placeholder="Carry m" aria-label="New club carry metres">
-      <button id="bagAddBtn" class="hiddenState" type="button">Add</button>
-      <button id="bagAddCancel" class="bagCardCancel" type="button">Cancel</button>
+      <div class="bagCardTitle" data-i18n="bag.clubCalled">What is the club called?</div>
+      <input id="bagAddClub" type="text" autocomplete="off" placeholder="e.g. 5W" aria-label="New club name" data-i18n-placeholder="bag.clubExample" data-i18n-aria-label="bag.newClubAria">
+      <input id="bagAddCarry" class="hiddenState" type="number" inputmode="numeric" min="1" step="1" placeholder="Carry m" aria-label="New club carry metres" data-i18n-placeholder="bag.carryPlaceholder" data-i18n-aria-label="bag.newCarryAria">
+      <button id="bagAddBtn" class="hiddenState" type="button" data-i18n="common.add">Add</button>
+      <button id="bagAddCancel" class="bagCardCancel" type="button" data-i18n="common.cancel">Cancel</button>
     </div>
     <div id="bagQuickPanel" class="bagCard hiddenState">
-      <div class="bagCardTitle">How far do you carry your 7&#8209;iron?</div>
-      <input id="bagQuick7i" type="number" inputmode="numeric" min="1" step="1" placeholder="7-iron carry (m)" aria-label="7-iron carry metres">
+      <div class="bagCardTitle" data-i18n="bag.sevenIronQuestion">How far do you carry your 7&#8209;iron?</div>
+      <input id="bagQuick7i" type="number" inputmode="numeric" min="1" step="1" placeholder="7-iron carry (m)" aria-label="7-iron carry metres" data-i18n-placeholder="bag.sevenIronPlaceholder" data-i18n-aria-label="bag.sevenIronAria">
       <button id="bagQuickBtn" type="button">Generate bag</button>
-      <button id="bagQuickCancel" class="bagCardCancel" type="button">Cancel</button>
+      <button id="bagQuickCancel" class="bagCardCancel" type="button" data-i18n="common.cancel">Cancel</button>
     </div>
   </div>
 
@@ -480,35 +484,41 @@
        text is its current value. -->
   <div id="gpsSettingsPanel" class="sheet hiddenState">
     <div class="sheetHeader">
-      <strong>GPS Settings</strong>
-      <button id="gpsSettingsClose" type="button" class="sheetClose">Done</button>
+      <strong data-i18n="gpsSettings.title">GPS Settings</strong>
+      <button id="gpsSettingsClose" type="button" class="sheetClose" data-i18n="gpsSettings.done">Done</button>
     </div>
     <div class="sheetBody">
-      <div class="setGroup">Round</div>
+      <div class="setGroup" data-i18n="gpsSettings.groupRound">Round</div>
       <div class="setRow">
-        <div><strong>Units</strong><span>Distances shown in metres or yards.</span></div>
-        <button id="setUnits" type="button" class="toggle">Meters</button>
+        <div><strong data-i18n="gpsSettings.units">Units</strong><span data-i18n="gpsSettings.unitsHint">Distances shown in metres or yards.</span></div>
+        <button id="setUnits" type="button" class="toggle">Metres</button>
       </div>
-      <div class="setGroup">Shot view</div>
+      <div class="setGroup" data-i18n="gpsSettings.groupShotView">Shot view</div>
       <div class="setRow">
-        <div><strong>Show aim line</strong><span>Start to target guide.</span></div>
+        <div><strong data-i18n="gpsSettings.aimLine">Show aim line</strong><span data-i18n="gpsSettings.aimLineHint">Start to target guide.</span></div>
         <button id="setAimLine" type="button" class="toggle">On</button>
       </div>
       <div class="setRow">
-        <div><strong>Shot-up frame</strong><span>Rotate the view so the shot runs up the screen.</span></div>
+        <div><strong data-i18n="gpsSettings.shotUp">Shot-up frame</strong><span data-i18n="gpsSettings.shotUpHint">Rotate the view so the shot runs up the screen.</span></div>
         <button id="setShotUp" type="button" class="toggle">On</button>
       </div>
       <div class="setRow">
-        <div><strong>Lock frame tightness</strong><span id="setFrameTightSub">Balanced shot view</span></div>
+        <div><strong data-i18n="gpsSettings.tightness">Lock frame tightness</strong><span id="setFrameTightSub">Balanced shot view</span></div>
         <button id="setFrameTight" type="button" class="toggle">Medium</button>
+      </div>
+      <div class="setGroup" data-i18n="gpsSettings.groupApp">App</div>
+      <div class="setRow">
+        <div><strong data-i18n="gpsSettings.language">Language</strong><span data-i18n="gpsSettings.languageHint">Language used in the app.</span></div>
+        <!-- Options filled by js/gps-settings.js from GDI18n.languages(). -->
+        <select id="setLanguage" class="toggle" data-i18n-aria-label="gpsSettings.language" aria-label="Language"></select>
       </div>
     </div>
   </div>
 
   <div id="scorePanel" class="sheet hiddenState">
     <div class="sheetHeader">
-      <strong>Scorecard</strong>
-      <button id="scoreClose" type="button" class="sheetClose">Done</button>
+      <strong data-i18n="scorecard.title">Scorecard</strong>
+      <button id="scoreClose" type="button" class="sheetClose" data-i18n="common.done">Done</button>
     </div>
     <div class="sheetBody">
       <div id="scoreTotal" class="scoreTotal"></div>
@@ -516,22 +526,22 @@
     </div>
   </div>
   <div class="playChrome">
-    <button id="nextHole" type="button" aria-label="Next hole">&#8250;</button>
-    <button id="holeNumber" type="button" aria-label="Choose a hole">1</button>
-    <button id="prevHole" type="button" aria-label="Previous hole">&#8249;</button>
+    <button id="nextHole" type="button" aria-label="Next hole" data-i18n-aria-label="nav.nextHole">&#8250;</button>
+    <button id="holeNumber" type="button" aria-label="Choose a hole" data-i18n-aria-label="nav.chooseHole">1</button>
+    <button id="prevHole" type="button" aria-label="Previous hole" data-i18n-aria-label="nav.previousHole">&#8249;</button>
   </div>
   <div id="holePickerPanel" class="sheet hiddenState">
     <div class="sheetHeader">
-      <strong>Choose a hole</strong>
+      <strong data-i18n="nav.chooseHole">Choose a hole</strong>
       <!-- Shot logging: switched on, the grid shows what the record says
            about each hole (0 for an origin still waiting on an outcome, 0-0
            for a shot with both ends) and the holes with something outstanding
            become the way into the logging popup. Switched off it is a plain
            hole chooser. Members only; the painter hides it for a guest. -->
       <button id="pickerLogToggle" type="button" class="pickerLogToggle hiddenState" aria-pressed="false">
-        <span class="pickerLogLabel">Shot logging</span><span class="pickerLogKnob" aria-hidden="true"></span>
+        <span class="pickerLogLabel" data-i18n="picker.shotLogging">Shot logging</span><span class="pickerLogKnob" aria-hidden="true"></span>
       </button>
-      <button id="holePickerClose" type="button" class="sheetClose">Done</button>
+      <button id="holePickerClose" type="button" class="sheetClose" data-i18n="common.done">Done</button>
     </div>
     <div class="sheetBody">
       <div id="holePickerGrid" class="holePickerGrid"></div>
@@ -547,14 +557,14 @@
        snapshot is the green frame the export published when there is one,
        the hole frame otherwise, and a small live map for an unpublished hole;
        the painter draws it (drawLogPopup) and decides nothing. -->
-  <div id="logPopup" class="hiddenState" role="dialog" aria-label="Log where the shot finished">
+  <div id="logPopup" class="hiddenState" role="dialog" aria-label="Log where the shot finished" data-i18n-aria-label="dock.logShotAria">
     <div id="logPopupScrim"></div>
     <div class="logPopupBox">
       <div class="logPopupHead">
         <div class="logPopupHeadRow">
           <strong id="logPopupTitle">Hole 1</strong>
           <!-- How much ground the snapshot shows; taps cycle the widths. -->
-          <button id="logPopupZoom" type="button" aria-label="Change how much of the green surrounds is shown">120m wide</button>
+          <button id="logPopupZoom" type="button" aria-label="Change how much of the green surrounds is shown" data-i18n-aria-label="logPopup.zoomAria">120m wide</button>
         </div>
         <span id="logPopupHint">Drag the ball to where the shot finished</span>
       </div>
@@ -564,11 +574,11 @@
         <canvas id="greenContours"></canvas>
         <svg id="logSnapSvg" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
         <div id="finishOrigin" class="hiddenState" aria-hidden="true"></div>
-        <div id="greenFocusBall" role="button" aria-label="Ball position"></div>
+        <div id="greenFocusBall" role="button" aria-label="Ball position" data-i18n-aria-label="logPopup.ballAria"></div>
       </div>
       <div class="logPopupFoot">
         <span id="logPopupDist"></span>
-        <button id="logPopupLog" type="button">Log</button>
+        <button id="logPopupLog" type="button" data-i18n="logPopup.log">Log</button>
       </div>
     </div>
   </div>
@@ -586,10 +596,10 @@
          double-tap resets every box. Overhangs the card's corner, which is why
          #distanceBar stays overflow:visible and the rounding lives on
          .cardInner instead. -->
-    <button id="cardEditToggle" type="button" aria-label="Edit card layout">&#9881;</button>
+    <button id="cardEditToggle" type="button" aria-label="Edit card layout" data-i18n-aria-label="card.editAria">&#9881;</button>
     <div class="cardInner">
       <div class="cardWell cardBack">
-        <span id="backLabel" class="cardWellLabel" data-move>BACK</span>
+        <span id="backLabel" class="cardWellLabel" data-move data-i18n="card.back">BACK</span>
         <span id="distBack" class="cardWellValue" data-move>–</span>
       </div>
       <!-- The hero number: the shot's distance once one is locked, the green's
@@ -607,7 +617,7 @@
           <span id="cardUnit" class="cardUnit">m</span>
         </div>
         <div id="playsRow" class="cardPlays hiddenState" data-move>
-          <span class="cardPlaysLabel">PLAYS</span>
+          <span class="cardPlaysLabel" data-i18n="card.plays">PLAYS</span>
           <span id="playsValue" class="cardPlaysValue">–</span>
         </div>
       </div>
@@ -621,7 +631,7 @@
         <span id="shotCarry" class="cardClubCarry" data-move>–</span>
       </div>
       <div class="cardWell cardFront">
-        <span id="frontLabel" class="cardWellLabel" data-move>FRONT</span>
+        <span id="frontLabel" class="cardWellLabel" data-move data-i18n="card.front">FRONT</span>
         <span id="distFront" class="cardWellValue" data-move>–</span>
       </div>
     </div>

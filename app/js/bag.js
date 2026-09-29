@@ -33,6 +33,7 @@
 (function () {
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
+  var i18n = window.GDI18n;
   var PROFILE_KEY = "gd_player_profiles_v27";      // gd-app-core.js GD_PROFILE_STORE_KEY
   var FIRMNESS_KEY = "gd_bag_total_firmness_v1";   // same key bubble-engine.js already reads
 
@@ -171,7 +172,7 @@
     var button = document.getElementById("bagHandToggle");
     if (!button) return;
     var left = handedness() === "left";
-    button.textContent = left ? "Left handed" : "Right handed";
+    i18n.set(button, left ? "bag.leftHanded" : "bag.rightHanded");
     button.setAttribute("aria-pressed", left ? "true" : "false");
   }
 
@@ -195,7 +196,7 @@
      clubs. Saying that plainly beats sending the player to a membership page
      that would not change the answer. */
   function refuse() {
-    note("Sign in to keep your own club distances. The ones shown are the standard set.");
+    note("bag.signInToKeep");
     return false;
   }
 
@@ -214,7 +215,7 @@
      name, a duplicate club) says why instead of silently doing nothing. */
   function apply(result) {
     if (!result) return;
-    if (result.error) { render(); note(result.error); return; }
+    if (result.error) { render(); noteError(result); return; }
     editing = result.club || editing;
     clubs = result.rows;
     sync();
@@ -223,11 +224,28 @@
 
   /* No toast on this surface - the notice line above the list is where the bag
      panel already explains itself. */
-  function note(message) {
+  function note(key, vars) {
     var el = document.getElementById("bagNotice");
     if (!el) return;
     el.classList.remove("hiddenState");
-    el.textContent = message;
+    i18n.set(el, key, vars);
+  }
+
+  /* The cores (gd-bag-core.js, gd-bag-generator-core.js) refuse in English
+     for the legacy shell and name the refusal with a code for this one. */
+  var ERROR_KEYS = {
+    nameFirst: "bag.nameFirst",
+    needsDistance: "bag.needsDistance",
+    needsName: "bag.needsName",
+    alreadyInBag: "bag.alreadyInBag",
+    sevenIronFirst: "bag.sevenIronFirst"
+  };
+
+  function noteError(result) {
+    var key = result && ERROR_KEYS[result.code];
+    if (key) { note(key, { club: result.duplicate }); return; }
+    var el = document.getElementById("bagNotice");
+    if (el) { el.classList.remove("hiddenState"); i18n.plain(el, (result && result.error) || ""); }
   }
 
   /* What the list shows is not always what the engine is using: with no real
@@ -243,11 +261,9 @@
     var notice = document.getElementById("bagNotice");
     if (notice) {
       notice.classList.toggle("hiddenState", editable && !showingGhost);
-      notice.textContent = !editable
-        ? "These are the standard distances driving your bubble. Sign in to set your own."
-        : showingGhost
-          ? "Standard distances, until you set your own."
-          : "";
+      i18n.set(notice, !editable ? "bag.standardSignIn"
+        : showingGhost ? "bag.standardUntilSet"
+          : null);
     }
 
     /* One renderer, shared with the shell's Bag panel: two columns filled left
@@ -296,9 +312,9 @@
        same way the shell's build button does: a bag with clubs in it is never
        offered a "Generate bag" that would replace them. */
     var genTab = document.getElementById("bagGenTab");
-    if (genTab) genTab.textContent = clubs.length ? "Generate rest" : "Generate bag";
+    if (genTab) i18n.set(genTab, clubs.length ? "bag.generateRest" : "bag.generateBag");
     var genBtn = document.getElementById("bagQuickBtn");
-    if (genBtn) genBtn.textContent = clubs.length ? "Generate rest" : "Generate bag";
+    if (genBtn) i18n.set(genBtn, clubs.length ? "bag.generateRest" : "bag.generateBag");
   }
 
   /* Name first, then distance - and through the core's add, so a blank name or
@@ -307,7 +323,7 @@
     if (!canEdit()) return refuse();
     var result = safe(function () { return core().addRow(clubs, club, carry); }, null);
     if (!result) return false;
-    if (result.error) { render(); note(result.error); return false; }
+    if (result.error) { render(); noteError(result); return false; }
     clubs = result.rows;
     editing = result.club;
     sync();
@@ -323,7 +339,7 @@
   function generateQuickSet(sevenIronCarry) {
     var base = Number(sevenIronCarry);
     var generated = safe(function () { return window.GDBagGenerator.generate(base); }, null);
-    if (!(base > 0) || !generated || !generated.length) { note("Enter your 7-iron carry first"); return false; }
+    if (!(base > 0) || !generated || !generated.length) { note("bag.sevenIronFirst"); return false; }
     clubs = normalise(generated);
     editing = null;
     editingAnchorRows = null;
@@ -334,8 +350,14 @@
 
   function generateRest(sevenIronCarry) {
     var result = safe(function () { return window.GDBagGenerator.generateRest(clubs, sevenIronCarry); }, null);
-    if (!result || result.error) { note((result && result.error) || "Enter your 7-iron carry first"); return false; }
-    var message = "Generate the rest of your bag?\n\nWe'll use your 7-iron carry to estimate " + result.added + " missing club" + (result.added === 1 ? "" : "s") + ". Your " + result.retained + " existing club" + (result.retained === 1 ? " stays" : "s stay") + " unchanged. You can edit every distance afterwards.";
+    if (!result || result.error) {
+      if (result && result.code) noteError(result); else note("bag.sevenIronFirst");
+      return false;
+    }
+    var message = i18n.t("bag.generateRestTitle") + "\n\n"
+      + i18n.tn("bag.generateRestAdded", result.added) + " "
+      + i18n.tn("bag.generateRestKept", result.retained) + " "
+      + i18n.t("bag.generateRestEdit");
     if (!window.confirm(message)) return false;
     clubs = normalise(result.rows);
     editing = null;
@@ -429,6 +451,9 @@
   };
 
   document.addEventListener("DOMContentLoaded", function () {
+    /* The club rows are drawn by the shared core with plain text, so a
+       language switch redraws them. */
+    i18n.onChange(render);
     if (window.GDBubbleEngine) window.GDBubbleEngine.setBag(clubs);
 
     var close = document.getElementById("bagClose");
