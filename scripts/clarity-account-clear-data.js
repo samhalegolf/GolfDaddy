@@ -50,6 +50,20 @@
   var busy = false;
 
   function safe(fn) { try { return fn(); } catch (_e) { return undefined; } }
+  function L(key, vars) { return window.GDI18n.t(key, vars); }
+  function H(key, vars) { return window.GDI18n.html(key, vars); }
+  /* The confirmation word in the player's language; CLEAR always works too.
+     The server is still sent CLEAR either way. */
+  function confirmed(value) {
+    var typed = plainWord(value);
+    return typed === "CLEAR" || typed === plainWord(L("clearData.confirmWord"));
+  }
+  /* Capitals and accents do not count: LOSCHEN is LÖSCHEN, STERGE is ȘTERGE -
+     phone keyboards make the accented letter the slow one to find. */
+  function plainWord(value) {
+    return String(value || "").trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toLocaleUpperCase(window.GDI18n.locale());
+  }
   function toast(message) {
     safe(function () { if (window.toast) window.toast(message); });
   }
@@ -98,15 +112,15 @@
     overlay.className = "clarityAccountDeleteOverlay clarityAccountClearOverlay";
     overlay.innerHTML = [
       '<div class="clarityAccountDeleteBox" role="dialog" aria-modal="true" aria-labelledby="clarityAccountClearTitle">',
-      '<strong id="clarityAccountClearTitle">Clear my golf data</strong>',
-      "<span>This permanently deletes your rounds, scores, shots, practice records, launch monitor imports and saved course captures. It cannot be undone.</span>",
-      "<span>Your account, sign-in, player profile, bag setup and any paid membership are kept. Course maps you added to the shared library stay published for other players.</span>",
-      '<label for="clarityAccountClearConfirm">Type CLEAR to confirm</label>',
-      '<input id="clarityAccountClearConfirm" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="CLEAR">',
+      '<strong id="clarityAccountClearTitle">' + H("clearData.row") + '</strong>',
+      "<span>" + H("clearData.body") + "</span>",
+      "<span>" + H("clearData.kept") + "</span>",
+      '<label for="clarityAccountClearConfirm">' + H("deleteAccount.typeToConfirm", { word: L("clearData.confirmWord") }) + '</label>',
+      '<input id="clarityAccountClearConfirm" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="' + H("clearData.confirmWord") + '">',
       '<span class="clarityAccountDeleteError" id="clarityAccountClearError" hidden></span>',
       '<div class="clarityAccountDeleteActions">',
-      '<button type="button" class="secondary" id="clarityAccountClearCancel">Keep my data</button>',
-      '<button type="button" id="clarityAccountClearConfirmBtn" disabled>Clear permanently</button>',
+      '<button type="button" class="secondary" id="clarityAccountClearCancel">' + H("clearData.keep") + '</button>',
+      '<button type="button" id="clarityAccountClearConfirmBtn" disabled>' + H("clearData.confirm") + '</button>',
       "</div>",
       "</div>"
     ].join("");
@@ -116,7 +130,7 @@
     var confirmBtn = document.getElementById("clarityAccountClearConfirmBtn");
 
     input.addEventListener("input", function () {
-      confirmBtn.disabled = input.value.trim().toUpperCase() !== "CLEAR";
+      confirmBtn.disabled = !confirmed(input.value);
     });
     document.getElementById("clarityAccountClearCancel").addEventListener("click", close);
     confirmBtn.addEventListener("click", function () { run(); });
@@ -136,7 +150,7 @@
     var cancelBtn = document.getElementById("clarityAccountClearCancel");
     if (confirmBtn) {
       confirmBtn.disabled = state;
-      confirmBtn.textContent = state ? "Clearing..." : "Clear permanently";
+      confirmBtn.textContent = L(state ? "clearData.busy" : "clearData.confirm");
     }
     if (cancelBtn) cancelBtn.disabled = state;
   }
@@ -144,13 +158,13 @@
   async function run() {
     if (busy) return false;
     var input = document.getElementById("clarityAccountClearConfirm");
-    if (!input || input.value.trim().toUpperCase() !== "CLEAR") return false;
+    if (!input || !confirmed(input.value)) return false;
 
     setBusy(true);
     var token = await accessToken();
     if (!token) {
       setBusy(false);
-      showError("Your session has expired. Sign in again, then clear your data.");
+      showError(L("clearData.sessionExpired"));
       return false;
     }
 
@@ -163,18 +177,18 @@
       });
       body = await response.json().catch(function () { return {}; });
       if (!response.ok || !body || !body.ok) {
-        throw new Error(body && body.error || "Your data could not be cleared. Please try again.");
+        throw new Error(body && body.error || L("clearData.failed"));
       }
     } catch (error) {
       setBusy(false);
-      showError(error && error.message ? error.message : "Your data could not be cleared. Please try again.");
+      showError(error && error.message ? error.message : L("clearData.failed"));
       return false;
     }
 
     /* Server confirmed, so the rows are gone and a resync cannot restore them. */
     clearLocal();
     close();
-    toast("Your golf data has been cleared");
+    toast(L("clearData.done"));
 
     /* Reload rather than reset the URL: the account is still signed in, and half
        the app holds cleared data in memory from before the wipe. */
@@ -190,7 +204,8 @@
     row.id = "gdPlayerSettingsClearDataRow";
     row.type = "button";
     row.onclick = function () { open(); };
-    row.innerHTML = '<div><strong>Clear my golf data</strong><span>Delete your rounds and practice records, keep your account</span></div>';
+    row.innerHTML = '<div><strong data-i18n="clearData.row">' + H("clearData.row") + '</strong>'
+      + '<span data-i18n="clearData.rowHint">' + H("clearData.rowHint") + '</span></div>';
 
     /* Above Delete account when that row already exists, so the menu reads from
        least to most destructive. */

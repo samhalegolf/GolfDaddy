@@ -61,6 +61,8 @@
     return window.GDNative && window.GDNative.platform === "ios" ? "ios" : "android";
   }
 
+  function L(key, vars) { return window.GDI18n.t(key, vars); }
+
   function toast(message) {
     try { if (window.toast) window.toast(message); } catch (_e) {}
   }
@@ -150,11 +152,11 @@
   async function loadConfig() {
     if (config) return config;
     var response = await fetch(CONFIG_ENDPOINT, { cache: "no-store" });
-    if (!response.ok) throw new Error("Store billing is unavailable");
+    if (!response.ok) throw new Error(L("store.unavailable"));
     var body = await response.json();
-    if (!body || !body.configured) throw new Error("Store billing is not set up yet");
+    if (!body || !body.configured) throw new Error(L("store.notSetUp"));
     var key = body.apiKeys && body.apiKeys[platform()];
-    if (!key) throw new Error("Store billing is not set up for this platform");
+    if (!key) throw new Error(L("store.notSetUpPlatform"));
     config = body;
     return config;
   }
@@ -164,7 +166,7 @@
   async function ensureConfigured() {
     if (configured) return;
     var api = plugin();
-    if (!api) throw new Error("Store billing is unavailable");
+    if (!api) throw new Error(L("store.unavailable"));
     var cfg = await loadConfig();
     var account = currentAccount();
     await api.configure({
@@ -371,18 +373,18 @@
       /* Immediate feedback: the store sheet can take a few seconds to present,
          and a tap that visibly does nothing gets tapped again - which the busy
          guard then swallows, which reads as "the app did not respond". */
-      toast("Contacting the App Store…");
+      toast(L(platform() === "ios" ? "store.contactingAppStore" : "store.contactingGooglePlay"));
       await ensureConfigured();
       if (account && account.accountId) await identify(account.accountId);
 
       var api = plugin();
       var cfg = await loadConfig();
       var storeProductId = cfg.products && cfg.products[productKey];
-      if (!storeProductId) throw new Error("That option is not available in the app");
+      if (!storeProductId) throw new Error(L("store.optionNotInApp"));
 
       var offerings = await api.getOfferings();
       var pkg = findPackage(offerings, storeProductId, productKey);
-      if (!pkg) throw new Error("That option is not available right now");
+      if (!pkg) throw new Error(L("store.optionNotNow"));
 
       var result = await api.purchasePackage({ aPackage: pkg });
 
@@ -394,23 +396,21 @@
         var entitlement = await awaitEntitlement(account);
         refreshPaymentsUi();
         if (entitlement) {
-          toast("Membership active");
+          toast(L("pay.status.membershipActive"));
         } else {
           /* The money was taken and the webhook has not landed yet. Say so plainly
              rather than implying the purchase failed - it did not. */
-          toast("Purchase complete. Access will appear shortly.");
+          toast(L("store.purchaseComplete"));
         }
       } else {
-        toast(entitlementActive()
-          ? "Membership active on this device"
-          : "Purchase complete. Access will appear shortly.");
+        toast(L(entitlementActive() ? "pay.status.activeOnDevice" : "store.purchaseComplete"));
       }
       return true;
     } catch (error) {
       /* A user backing out of the store sheet is not an error worth shouting
          about. RevenueCat flags exactly that case on the error object. */
       if (error && error.userCancelled) return false;
-      toast(error && error.message ? error.message : "Could not complete purchase");
+      toast(error && error.message ? error.message : L("store.couldNotPurchase"));
       /* Keep the last failure visible to the paywall's diagnostic line - a
          sheet that never presents otherwise leaves no trace on a device. */
       lastPriceDiagnostic = "purchase failed: " + (error && error.message ? error.message : String(error));
@@ -437,11 +437,11 @@
       var restored = account && account.accountId
         ? !!(await awaitEntitlement(account))
         : entitlementActive();
-      toast(restored ? "Purchases restored" : "No purchases found to restore");
+      toast(L(restored ? "store.restored" : "store.nothingToRestore"));
       return restored;
     } catch (error) {
       if (error && error.userCancelled) return false;
-      toast(error && error.message ? error.message : "Could not restore purchases");
+      toast(error && error.message ? error.message : L("store.couldNotRestore"));
       return false;
     } finally {
       busy = false;

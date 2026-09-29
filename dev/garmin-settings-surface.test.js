@@ -176,7 +176,7 @@ test("both native transports refuse to send while unentitled", function () {
 
 test("the UI asks ClarityPayments before pairing, and pairing is the thing it asks about", function () {
   const src = fs.readFileSync(GARMIN_JS, "utf8");
-  assert.ok(/requireAccess\("use a Garmin watch"\)/.test(src), "the membership question should be asked through ClarityPayments.requireAccess");
+  assert.ok(/requireAccess\("garmin"\)/.test(src), "the membership question should be asked through ClarityPayments.requireAccess");
   assert.ok(/function scan\(\)[^}]*if \(!requireAccess\(\)\) return false;/s.test(src), "scan() must ask before looking for watches");
   assert.ok(/function choose\([^)]*\)[^}]*if \(!requireAccess\(\)\) return false;/s.test(src), "choose() must ask before selecting a watch");
 });

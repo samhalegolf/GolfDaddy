@@ -37,6 +37,10 @@
        them when the language changes, same as text written in the HTML.
        GDI18n.plain(el, text) writes text that is not ours to translate (a
        course name) and drops any key, so apply() leaves it alone.
+     - HTML built as a string (the shell's panels): GDI18n.html("key", vars)
+       and GDI18n.htmlN("key", n, vars) are t()/tn() escaped for innerHTML -
+       the translation AND the values filled into it. Such panels redraw
+       themselves from onChange().
 
    Browser global (window.GDI18n) and a node module, so tests run it for
    real. */
@@ -246,6 +250,12 @@
     el.setAttribute(attr, t(key, vars));
   }
 
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
   function plain(el, text) {
     if (!el) return;
     remember(el, "data-i18n", null);
@@ -285,6 +295,8 @@
     setPlural: setPlural,
     setAttr: setAttr,
     plain: plain,
+    html: function (key, vars) { return escapeHtml(t(key, vars)); },
+    htmlN: function (key, n, vars) { return escapeHtml(tn(key, n, vars)); },
     add: add,
     apply: apply,
     locale: locale,

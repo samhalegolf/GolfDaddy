@@ -197,15 +197,19 @@ assert.strictEqual(boot({ languages: [], extra: { es: SPANISH } }).GDI18n.locale
   const namespaces = new Set([...english].map((k) => k.split('.')[0]));
   const sources = [path.join('app', 'index.html')]
     .concat(fs.readdirSync(path.join(ROOT, 'app', 'js')).filter((f) => f.endsWith('.js')).map((f) => path.join('app', 'js', f)))
-    .concat([path.join('scripts', 'gd-bag-core.js'), path.join('scripts', 'gd-practice-bubble-preview.js')]);
+    .concat([
+      'gd-bag-core.js', 'gd-practice-bubble-preview.js', 'clarity-supabase-auth.js', 'clarity-payments.js',
+      'clarity-store-billing.js', 'clarity-account-delete.js', 'clarity-account-clear-data.js', 'clarity-legal-links.js'
+    ].map((f) => path.join('scripts', f)))
+    .concat([path.join('scripts', 'inline', 'gd-auth-account-shell.js')]);
   const used = new Map();
   sources.forEach((file) => {
     const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
-    for (const m of src.matchAll(/["']([a-z][A-Za-z]*\.[a-z][A-Za-z]*)["']/g)) {
+    for (const m of src.matchAll(/["']([a-z][A-Za-z]*(?:\.[a-z][A-Za-z]*)+)["']/g)) {
       if (namespaces.has(m[1].split('.')[0])) used.set(m[1], file);
     }
   });
-  assert.ok(used.size >= 150, 'expected the play page keys to be found, got ' + used.size);
+  assert.ok(used.size >= 400, 'expected the play, sign-in and payment keys to be found, got ' + used.size);
   const missing = [...used.keys()].filter((key) => !known(key)).map((key) => key + ' (' + used.get(key) + ')');
   assert.deepStrictEqual(missing, [], 'keys used but not in scripts/i18n/en.js');
   /* And the other way: a word nothing asks for is one more thing to

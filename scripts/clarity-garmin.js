@@ -297,7 +297,7 @@
   function requireAccess() {
     var pay = payments();
     if (!pay || typeof pay.requireAccess !== "function") return hasAccess();
-    return !!pay.requireAccess("use a Garmin watch");
+    return !!pay.requireAccess("garmin");
   }
 
   function scan() {

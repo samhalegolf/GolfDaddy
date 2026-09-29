@@ -112,7 +112,7 @@ exports.handler = async function (event) {
   if (accountEmail) update.email = accountEmail;
   const passwordUpdated = !!password;
   if (password) {
-    if (password.length < 8) return json(400, { error: "Password needs at least 8 characters" });
+    if (password.length < 8) return json(400, { error: "Password needs at least 8 characters", code: "password_too_short", minLength: 8 });
     update.password = password;
   }
 
