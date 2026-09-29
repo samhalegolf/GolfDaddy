@@ -140,6 +140,25 @@
       tightBtn.setAttribute("aria-pressed", "true");
     }
     if (tightSub) tightSub.textContent = t(TIGHTNESS[state.frameTightness].sub);
+    renderLanguage();
+  }
+
+  /* Language is not a GPS setting and is not stored here: GDI18n owns the
+     choice. The first option means "follow the phone"; the rest are each
+     language in its own name, so a player can find theirs in any language. */
+  function renderLanguage() {
+    var select = document.getElementById("setLanguage");
+    var i18n = window.GDI18n;
+    if (!select || !i18n) return;
+    var options = [{ tag: "", name: t("gpsSettings.languageAuto") }].concat(i18n.languages());
+    select.innerHTML = "";
+    options.forEach(function (lang) {
+      var opt = document.createElement("option");
+      opt.value = lang.tag;
+      opt.textContent = lang.name;
+      select.appendChild(opt);
+    });
+    select.value = i18n.saved() || "";
   }
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -159,6 +178,10 @@
     if (tightBtn) tightBtn.addEventListener("click", function () {
       var i = TIGHTNESS_ORDER.indexOf(state.frameTightness);
       app.gpsSettings.set("frameTightness", TIGHTNESS_ORDER[(i + 1) % TIGHTNESS_ORDER.length]);
+    });
+    var langSelect = document.getElementById("setLanguage");
+    if (langSelect && window.GDI18n) langSelect.addEventListener("change", function () {
+      window.GDI18n.setLocale(langSelect.value || null);
     });
     var close = document.getElementById("gpsSettingsClose");
     if (close) close.addEventListener("click", function () { app.gpsSettings.close(); });

@@ -1,15 +1,21 @@
 /* Translation layer: the one place the app turns a text key into words.
 
-   Every language is a plain dictionary of flat keys ("gpsSettings.title")
-   registered by a file in scripts/i18n/ (en.js, and one file per language
-   added later). English is the base: a key missing from the player's language
-   falls back to the English wording, and a key missing from English too comes
-   back as the key itself, so a gap shows up as an odd label instead of a blank.
+   Every language is a plain dictionary of flat keys ("gpsSettings.title") in
+   its own file in scripts/i18n/ (en.js, fr.js, ...), listed in LANGUAGES
+   below. English is the base and always loaded: a key missing from the
+   player's language falls back to the English wording, and a key missing
+   from English too comes back as the key itself, so a gap shows up as an
+   odd label instead of a blank.
+
+   Only the player's own language is fetched, on demand, right after this
+   file loads - shipping every language to every phone at boot would grow
+   with each screen translated. Until it arrives the page is in English;
+   when it lands the page is re-applied and onChange listeners redraw.
 
    Language choice, first match wins:
      1. a saved choice (localStorage "clarity:locale"), set via setLocale()
-     2. the device languages (navigator.languages), "pt-BR" trying "pt-BR"
-        then "pt"
+     2. the device languages (navigator.languages), "fr-CA" trying "fr-ca"
+        then "fr"
      3. English
 
    Two ways to use it:
@@ -19,7 +25,7 @@
        stays in the HTML as first paint.
      - JS: GDI18n.t("key", { n: 3 }) for text a module writes itself;
        "{n} holes" fills in {n}. Modules that write text register onChange()
-       to redraw when the language is switched.
+       to redraw when the language changes or arrives.
 
    Browser global (window.GDI18n) and a node module, so tests run it for
    real. */
@@ -30,9 +36,46 @@
   var BASE = "en";
   var ATTRS = ["placeholder", "aria-label", "title"];
 
+  /* Tag -> the language's name in itself, for the picker. Adding a language
+     is a file in scripts/i18n/ plus a line here. */
+  var LANGUAGES = {
+    en: "English",
+    bg: "Български",
+    cs: "Čeština",
+    da: "Dansk",
+    de: "Deutsch",
+    el: "Ελληνικά",
+    es: "Español",
+    et: "Eesti",
+    fi: "Suomi",
+    fr: "Français",
+    hr: "Hrvatski",
+    hu: "Magyar",
+    it: "Italiano",
+    lt: "Lietuvių",
+    lv: "Latviešu",
+    nb: "Norsk",
+    nl: "Nederlands",
+    pl: "Polski",
+    pt: "Português",
+    ro: "Română",
+    sk: "Slovenčina",
+    sl: "Slovenščina",
+    sv: "Svenska"
+  };
+  /* Device tags that should read another file: "no" and Nynorsk phones get
+     Bokmål, the only Norwegian written here. */
+  var ALIASES = { no: "nb", nn: "nb" };
+
   var dictionaries = {};
   var listeners = [];
+  var requested = {};
   var current = null;
+
+  /* Where the language files live, from this script's own URL, so it works
+     from / and /app/ on the web and from capacitor://localhost natively. */
+  var script = root.document && root.document.currentScript;
+  var FILES = script && script.src ? script.src.replace(/[^/]*$/, "") + "i18n/" : null;
 
   function storage() {
     try { return root.localStorage || null; } catch (e) { return null; }
@@ -49,13 +92,18 @@
     return nav.language ? [nav.language] : [];
   }
 
-  /* "pt-BR" -> the first of "pt-br", "pt" that has a dictionary. */
+  function known(tag) {
+    return Object.prototype.hasOwnProperty.call(LANGUAGES, tag) || !!dictionaries[tag];
+  }
+
+  /* "fr-CA" -> the first of "fr-ca", "fr" this app has. */
   function match(tag) {
     if (!tag) return null;
     var lower = String(tag).toLowerCase().replace(/_/g, "-");
-    if (dictionaries[lower]) return lower;
+    if (known(lower)) return lower;
     var primary = lower.split("-")[0];
-    return dictionaries[primary] ? primary : null;
+    primary = ALIASES[primary] || primary;
+    return known(primary) ? primary : null;
   }
 
   function resolve() {
@@ -70,17 +118,30 @@
   }
 
   function locale() {
-    /* Resolved lazily: language files register after this one loads, so the
-       answer is only known once something asks for a word. */
-    if (!current || !dictionaries[current]) current = resolve();
+    if (!current) current = resolve();
     return current;
   }
 
+  /* Fetch a language file once. English never is: the page loads en.js
+     itself, straight after this file. Failure leaves the page in English,
+     which is the same state it was already showing. */
+  function load(tag) {
+    if (tag === BASE || dictionaries[tag] || requested[tag] || !FILES || !root.document) return;
+    requested[tag] = true;
+    var el = root.document.createElement("script");
+    el.src = FILES + tag + ".js";
+    el.async = true;
+    (root.document.head || root.document.documentElement).appendChild(el);
+  }
+
+  function lookup(dict, key) {
+    return dict && Object.prototype.hasOwnProperty.call(dict, key) ? dict[key] : null;
+  }
+
   function t(key, vars) {
-    var dict = dictionaries[locale()] || {};
-    var text = Object.prototype.hasOwnProperty.call(dict, key) ? dict[key]
-      : (dictionaries[BASE] && Object.prototype.hasOwnProperty.call(dictionaries[BASE], key)) ? dictionaries[BASE][key]
-      : key;
+    var text = lookup(dictionaries[locale()], key);
+    if (text === null) text = lookup(dictionaries[BASE], key);
+    if (text === null) text = key;
     if (!vars) return text;
     return text.replace(/\{(\w+)\}/g, function (whole, name) {
       return Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : whole;
@@ -100,8 +161,16 @@
     });
   }
 
+  function changed() {
+    apply();
+    listeners.forEach(function (fn) { try { fn(current); } catch (e) {} });
+  }
+
   function add(tag, dict) {
-    dictionaries[String(tag).toLowerCase()] = Object.assign(dictionaries[String(tag).toLowerCase()] || {}, dict);
+    var key = String(tag).toLowerCase();
+    dictionaries[key] = Object.assign(dictionaries[key] || {}, dict);
+    /* The player's language arriving after first paint. */
+    if (key === current && key !== BASE) changed();
   }
 
   /* null clears the saved choice and goes back to following the device. */
@@ -110,9 +179,9 @@
     try {
       if (s) { if (tag) s.setItem(STORE_KEY, String(tag)); else s.removeItem(STORE_KEY); }
     } catch (e) {}
-    current = tag ? (match(tag) || resolve()) : resolve();
-    apply();
-    listeners.forEach(function (fn) { try { fn(current); } catch (e) {} });
+    current = resolve();
+    load(current);
+    changed();
     return current;
   }
 
@@ -122,14 +191,20 @@
     apply: apply,
     locale: locale,
     setLocale: setLocale,
-    languages: function () { return Object.keys(dictionaries); },
-    has: function (key) { return !!(dictionaries[BASE] && Object.prototype.hasOwnProperty.call(dictionaries[BASE], key)); },
+    /* The saved choice as a supported tag, or null when following the device. */
+    saved: function () { return match(savedLocale()); },
+    /* [{ tag, name }] in picker order: English first, the rest by tag. */
+    languages: function () {
+      return Object.keys(LANGUAGES).map(function (tag) { return { tag: tag, name: LANGUAGES[tag] }; });
+    },
+    has: function (key) { return lookup(dictionaries[BASE], key) !== null; },
     onChange: function (fn) { listeners.push(fn); }
   };
 
   root.GDI18n = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 
+  load(locale());
   if (root.document && root.document.addEventListener) {
     root.document.addEventListener("DOMContentLoaded", function () { apply(); });
   }

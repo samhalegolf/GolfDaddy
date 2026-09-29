@@ -26,6 +26,10 @@
     "gpsSettings.tightnessWide": "Wide",
     "gpsSettings.tightnessWideHint": "More of the hole",
     "gpsSettings.openButton": "GPS Settings",
+    "gpsSettings.groupApp": "App",
+    "gpsSettings.language": "Language",
+    "gpsSettings.languageHint": "Language used in the app.",
+    "gpsSettings.languageAuto": "Phone language",
 
     /* Shared words */
     "common.on": "On",

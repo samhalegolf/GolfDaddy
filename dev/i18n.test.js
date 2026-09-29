@@ -4,13 +4,18 @@
  *
  * Pinned here:
  *   - the language is picked saved choice -> device -> English, with "pt-BR"
- *     falling back to "pt";
+ *     falling back to "pt" and "no" to Norwegian Bokmal;
+ *   - only the player's language file is fetched, and the page redraws when
+ *     it arrives;
+ *   - every language file in scripts/i18n/ is listed, has exactly English's
+ *     keys (no typos, nothing silently left in English) and keeps the same
+ *     {placeholders};
  *   - a word missing from a language falls back to English, then to the key;
  *   - {name} placeholders fill in;
  *   - every key app/index.html and gps-settings.js ask for exists in English,
  *     so a typo'd key cannot ship as a raw "gpsSettings.foo" label;
- *   - GPS Settings writes its toggle text through the layer and redraws when
- *     the language is switched.
+ *   - GPS Settings writes its toggle text through the layer, redraws when
+ *     the language is switched, and its picker saves or clears the choice.
  *
  * Run: node dev/i18n.test.js
  */
@@ -57,8 +62,11 @@ const SPANISH = { 'common.on': 'Sí', 'gpsSettings.unitsYards': 'Yardas' };
 assert.strictEqual(boot().GDI18n.locale(), 'en', 'a device with no matching dictionary uses English');
 assert.strictEqual(boot({ languages: ['es-MX', 'en'], extra: { es: SPANISH } }).GDI18n.locale(), 'es',
   '"es-MX" falls back to "es"');
-assert.strictEqual(boot({ languages: ['fr-FR', 'es'], extra: { es: SPANISH } }).GDI18n.locale(), 'es',
-  'the first device language with a dictionary wins');
+assert.strictEqual(boot({ languages: ['ja-JP', 'es'], extra: { es: SPANISH } }).GDI18n.locale(), 'es',
+  'the first device language the app has wins');
+assert.strictEqual(boot({ languages: ['fr-CA'] }).GDI18n.locale(), 'fr', 'a listed language counts before its file loads');
+assert.strictEqual(boot({ languages: ['no-NO'] }).GDI18n.locale(), 'nb', '"no" reads Norwegian Bokmal');
+assert.strictEqual(boot({ languages: ['nn'] }).GDI18n.locale(), 'nb', 'Nynorsk reads Norwegian Bokmal');
 assert.strictEqual(boot({ languages: ['es'], saved: 'en', extra: { es: SPANISH } }).GDI18n.locale(), 'en',
   'a saved choice beats the device language');
 assert.strictEqual(boot({ languages: [], extra: { es: SPANISH } }).GDI18n.locale(), 'en',
@@ -101,6 +109,62 @@ assert.strictEqual(boot({ languages: [], extra: { es: SPANISH } }).GDI18n.locale
   assert.strictEqual(window.GDI18n.setLocale('en'), 'en');
 }
 
+/* ---- Only the player's language file is fetched, and its arrival redraws ---- */
+{
+  const appended = [];
+  const document = {
+    currentScript: { src: 'https://caddy.example/scripts/gd-i18n.js?v=1' },
+    head: { appendChild: (el) => appended.push(el) },
+    createElement: () => ({}),
+    documentElement: { setAttribute() {} },
+    querySelectorAll: () => [],
+    addEventListener() {}
+  };
+  const window = boot({ languages: ['de-AT', 'en'], document });
+  assert.deepStrictEqual(appended.map((el) => el.src), ['https://caddy.example/scripts/i18n/de.js'],
+    'exactly the German file, next to gd-i18n.js');
+  const heard = [];
+  window.GDI18n.onChange((tag) => heard.push(tag));
+  assert.strictEqual(window.GDI18n.t('common.on'), 'On', 'English until German arrives');
+  vm.runInContext(fs.readFileSync(path.join(ROOT, 'scripts', 'i18n', 'de.js'), 'utf8'), vm.createContext(window));
+  assert.strictEqual(window.GDI18n.t('common.on'), 'An');
+  assert.deepStrictEqual(heard, ['de'], 'listeners redraw when the language lands');
+  window.GDI18n.setLocale('de');
+  assert.strictEqual(appended.length, 1, 'a loaded language is never fetched twice');
+  boot({ languages: ['en-GB'], document });
+  assert.strictEqual(appended.length, 1, 'English players fetch nothing extra');
+}
+
+/* ---- Every language file is listed and complete ---- */
+{
+  const { GDI18n } = boot();
+  const listed = Array.from(GDI18n.languages(), (l) => l.tag).sort();
+  const files = fs.readdirSync(path.join(ROOT, 'scripts', 'i18n')).filter((f) => f.endsWith('.js'))
+    .map((f) => f.replace(/\.js$/, '')).sort();
+  assert.deepStrictEqual(listed, files, 'LANGUAGES in gd-i18n.js and the files in scripts/i18n/ must match');
+
+  const captured = {};
+  const capture = { GDI18n: { add: (tag, dict) => { captured[tag] = dict; } } };
+  capture.window = capture;
+  files.forEach((tag) => {
+    vm.runInContext(fs.readFileSync(path.join(ROOT, 'scripts', 'i18n', tag + '.js'), 'utf8'), vm.createContext(capture));
+    assert.ok(captured[tag], tag + '.js must register itself as "' + tag + '"');
+  });
+  const english = captured.en;
+  const placeholders = (text) => (text.match(/\{\w+\}/g) || []).sort().join(',');
+  files.filter((tag) => tag !== 'en').forEach((tag) => {
+    const dict = captured[tag];
+    const extra = Object.keys(dict).filter((k) => !(k in english));
+    const missing = Object.keys(english).filter((k) => !(k in dict));
+    assert.deepStrictEqual(extra, [], tag + '.js has keys English does not (typo?)');
+    assert.deepStrictEqual(missing, [], tag + '.js is missing translations');
+    Object.keys(english).forEach((k) => {
+      assert.ok(typeof dict[k] === 'string' && dict[k].trim(), tag + ' ' + k + ' is empty');
+      assert.strictEqual(placeholders(dict[k]), placeholders(english[k]), tag + ' ' + k + ' changes the {placeholders}');
+    });
+  });
+}
+
 /* ---- Every key the play page and GPS Settings use exists in English ---- */
 {
   const { GDI18n } = boot();
@@ -132,11 +196,15 @@ assert.strictEqual(boot({ languages: [], extra: { es: SPANISH } }).GDI18n.locale
     setAttribute(k, v) { this.attrs[k] = String(v); },
     getAttribute(k) { return this.attrs[k]; },
     addEventListener() {},
-    classList: { add() {}, remove() {} }
+    classList: { add() {}, remove() {} },
+    children: [],
+    set innerHTML(v) { this.children = []; },
+    appendChild(child) { this.children.push(child); }
   });
   const document = {
     documentElement: el('html'),
     getElementById: el,
+    createElement: () => ({}),
     querySelectorAll: () => [],
     addEventListener: (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); }
   };
@@ -157,6 +225,15 @@ assert.strictEqual(boot({ languages: [], extra: { es: SPANISH } }).GDI18n.locale
   assert.strictEqual(elements.setAimLine.textContent, 'Sí');
   assert.strictEqual(elements.setFrameTight.textContent, 'Medium', 'untranslated words fall back to English');
   assert.strictEqual(elements.html.attrs.lang, 'es', '<html lang> follows the language');
+
+  /* The picker: "follow the phone" first, then every language in its own name. */
+  const picker = elements.setLanguage;
+  assert.strictEqual(picker.children[0].value, '');
+  assert.ok(picker.children.some((o) => o.value === 'de' && o.textContent === 'Deutsch'));
+  assert.strictEqual(picker.value, 'es', 'shows the saved choice');
+  window.GDI18n.setLocale(null);
+  assert.strictEqual(picker.value, '', 'following the phone again');
+  assert.strictEqual(picker.children[0].textContent, 'Phone language');
 }
 
 console.log('i18n tests passed');
