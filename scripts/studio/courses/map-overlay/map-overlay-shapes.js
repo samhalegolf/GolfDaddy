@@ -28,6 +28,8 @@
   var TEE_LENGTH_M = 16;
   var TEE_WIDTH_M = 10;
   var GREEN_RADIUS_M = 14;
+  /* The round bunker left when the wand cannot find an edge - a typical greenside bunker. */
+  var BUNKER_RADIUS_M = 6;
   /* A green further than this from either end of the line is not telling us which way the
      hole plays. */
   var GREEN_HINT_M = 350;
@@ -165,7 +167,7 @@
 
   var api = {
     FAIRWAY_WIDTH_M: FAIRWAY_WIDTH_M, TEE_BEYOND_M: TEE_BEYOND_M, TEE_LENGTH_M: TEE_LENGTH_M,
-    TEE_WIDTH_M: TEE_WIDTH_M, GREEN_RADIUS_M: GREEN_RADIUS_M, MAX_POINTS: MAX_POINTS,
+    TEE_WIDTH_M: TEE_WIDTH_M, GREEN_RADIUS_M: GREEN_RADIUS_M, BUNKER_RADIUS_M: BUNKER_RADIUS_M, MAX_POINTS: MAX_POINTS,
     distanceM: distanceM, lineLengthM: lineLengthM, centroid: centroid,
     fairwayFromLine: fairwayFromLine, teeBeyondLine: teeBeyondLine, teeAt: teeAt, teeEnd: teeEnd, circle: circle
   };

@@ -4560,6 +4560,15 @@ function gdAdminCourseDbToggleRow(courseId){
   gdRenderAdminCourseDatabase();
   return false;
 }
+/* The Mapping Overlay, straight from a course's row. Offered on every row and pressed-looking
+   on a failed one, because a failed run is the case the overlay exists for: the drawer opens on
+   the course with what that run found in OSM, the course's saved objects and the failure
+   reason already on screen. stopPropagation so drawing does not also open or close the row. */
+function gdAdminCourseDbDrawButton(item,status){
+  const failed=status==="failed";
+  const title=failed?"Draw what the failed run was missing - opens with what it found":"Draw fairways, greens, tees and bunkers OSM is missing";
+  return ` <button type="button" class="gdAdminCourseRowDraw${failed?" isFailed":""}" title="${gdEscapeHTML(title)}" onclick="event.stopPropagation();return gdAdminCourseLocationOverlay(${gdAdminJsArg(item.id)})">Draw</button>`;
+}
 function gdAdminCourseDbDiagRow(label,value){
   return `<div class="gdAdminCourseDiagRow"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value==null||value===""?"—":String(value))}</strong></div>`;
 }
@@ -4658,7 +4667,7 @@ function gdRenderAdminCourseDatabaseNow(){
     const active=item.id===gdAdminCourseDatabaseSelected?" active":"";
     const open=item.id===gdAdminCourseDbExpanded;
     const caret=open?"▾":"▸";
-    const row=`<tr class="${active}${open?" expanded":""}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${caret}</span> ${gdEscapeHTML(item.name)}</td><td>${version?`<span class="gdAdminCourseVersion">${gdEscapeHTML(version)}</span>`:`<span class="gdAdminCourseMuted" title="No countable version yet - this course has not been rebuilt since versions existed">\u2014</span>`}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(status)}</span></td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${item.playReadyCount==null?"<span class=\"gdAdminCourseMuted\" title=\"Open the row to load this course's geometry\">\u2014</span>":gdEscapeHTML(item.playReadyCount)+"/"+gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
+    const row=`<tr class="${active}${open?" expanded":""}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${caret}</span> ${gdEscapeHTML(item.name)}</td><td>${version?`<span class="gdAdminCourseVersion">${gdEscapeHTML(version)}</span>`:`<span class="gdAdminCourseMuted" title="No countable version yet - this course has not been rebuilt since versions existed">\u2014</span>`}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(status)}</span>${gdAdminCourseDbDrawButton(item,status)}</td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${item.playReadyCount==null?"<span class=\"gdAdminCourseMuted\" title=\"Open the row to load this course's geometry\">\u2014</span>":gdEscapeHTML(item.playReadyCount)+"/"+gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
     return open?row+gdAdminCourseDbExpandedRow(item):row;
   }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current search.</div>');
   const selected=filtered.find(item=>item.id===gdAdminCourseDatabaseSelected);

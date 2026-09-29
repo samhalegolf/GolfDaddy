@@ -266,14 +266,27 @@ async function loadCourseCenter(courseId) {
 async function attachCourseOverlay(course) {
   course.overlay = [];
   course.overlayError = null;
+  course.overlayDraft = 0;
   try {
-    const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features&course_id=eq." + encodeURIComponent(course.courseId) + "&limit=1");
+    const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features,status&course_id=eq." + encodeURIComponent(course.courseId) + "&limit=1");
     const row = Array.isArray(rows) ? rows[0] : null;
-    course.overlay = row && Array.isArray(row.features) ? row.features : [];
+    const features = row && Array.isArray(row.features) ? row.features : [];
+    /* A draft is still being drawn (20260929_add_course_map_overlay_status.sql): it is left
+       out, and the count rides on the diagnostics so "the overlay was ignored" is visible. */
+    if (row && row.status === "ready") course.overlay = features;
+    else course.overlayDraft = features.length;
   } catch (error) {
     course.overlayError = String(error && error.message || error).slice(0, 200);
   }
   return course;
+}
+
+/* What a job row says about the overlay it ran with: an unreadable one, a draft it skipped, or
+   the counts of what it merged. */
+function overlayDiagnostics(course) {
+  if (course.overlayError) return { error: course.overlayError };
+  if (course.overlayDraft) return { draft: true, ignoredFeatures: course.overlayDraft };
+  return overlaySummary(course.overlay);
 }
 
 /* Every Overpass payload a job works from goes through here, so the overlay is in ALL of
@@ -1621,7 +1634,7 @@ async function runObjectCollectionJob(job) {
     holes: holeNumbers.length,
     queryStages,
     osmFeatures: golfFeatureCounts(payload),
-    overlay: course.overlayError ? { error: course.overlayError } : overlaySummary(course.overlay),
+    overlay: overlayDiagnostics(course),
     surfacesFound: enrichment.surfaces,
     surfacesWritten: enrichment.cloned,
     added,
@@ -1647,7 +1660,7 @@ async function runMapperJob(job, origin) {
     courseName: course.courseName || null,
     /* What the overlay contributed, or that it could not be read. osmFeatures below counts
        the merged payload, so its fairway/hole numbers include these. */
-    overlay: course.overlayError ? { error: course.overlayError } : overlaySummary(course.overlay)
+    overlay: overlayDiagnostics(course)
   };
   const fail = message => {
     const error = new Error(message);

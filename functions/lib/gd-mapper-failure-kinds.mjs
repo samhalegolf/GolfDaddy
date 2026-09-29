@@ -200,7 +200,8 @@ export const OUTPUT_CONTRACT = [
   "Draw only what OpenStreetMap lacks: the overlay is merged on top of OSM and real OSM",
   "data wins, so repeating an OSM green adds nothing. A numbered hole line is the",
   "strongest evidence the resolver gets, so number every line you are sure of.",
-  "Nothing saves this automatically: an operator pastes it, then requests a remap."
+  "Nothing saves this automatically: an operator pastes it, marks it ready (the mapper",
+  "ignores a draft overlay), then requests a remap."
 ].join("\n");
 
 /* Pixel <-> coordinate rule for the captures, in words Claude can apply. */
