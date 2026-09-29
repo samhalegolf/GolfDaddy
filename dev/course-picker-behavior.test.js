@@ -204,6 +204,10 @@ function createHarness(options = {}) {
     fetch() { return Promise.resolve({ ok: true, json: () => Promise.resolve({ courses: {} }) }); }
   });
   const context = vm.createContext(Object.assign(window, { window, globalThis: window }));
+  /* The page loads the translation layer and its English base first. */
+  for (const f of ["scripts/gd-i18n.js", "scripts/i18n/en.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8"), context, { filename: f });
+  }
   vm.runInContext(pickerSource, context, { filename: "gd-course-picker-search-v2.js" });
   return { window, document, calls, pendingGeo, mappingDeferred };
 }

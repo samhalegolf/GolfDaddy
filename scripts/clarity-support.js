@@ -3,6 +3,8 @@
   var errors = [];
   var lastAction = null;
 
+  function L(key, vars){return window.GDI18n.t(key, vars);}
+
   function nowIso(){
     try{return new Date().toISOString();}catch(e){return "";}
   }
@@ -128,19 +130,20 @@
     overlay.className = "claritySupportOverlay";
     overlay.innerHTML = [
       '<div class="claritySupportSheet" role="dialog" aria-modal="true" aria-labelledby="claritySupportTitle">',
-      '<div class="claritySupportHead"><div><strong id="claritySupportTitle">Beta report</strong><span>Email a short note with safe debug context so the issue can be reproduced later.</span></div><button class="claritySupportClose" type="button" aria-label="Close beta report">×</button></div>',
+      '<div class="claritySupportHead"><div><strong id="claritySupportTitle" data-i18n="support.title">Beta report</strong><span data-i18n="support.intro">Email a short note with safe debug context so the issue can be reproduced later.</span></div><button class="claritySupportClose" type="button" aria-label="Close beta report" data-i18n-aria-label="support.closeAria">×</button></div>',
       '<form class="claritySupportForm" id="claritySupportForm">',
-      '<label>What happened<textarea id="claritySupportHappened" required maxlength="1200"></textarea></label>',
-      '<label>What you expected<textarea id="claritySupportExpected" maxlength="1200"></textarea></label>',
-      '<label>Your contact optional<input id="claritySupportContact" maxlength="240" autocomplete="email"></label>',
+      '<label><span data-i18n="support.happened">What happened</span><textarea id="claritySupportHappened" required maxlength="1200"></textarea></label>',
+      '<label><span data-i18n="support.expected">What you expected</span><textarea id="claritySupportExpected" maxlength="1200"></textarea></label>',
+      '<label><span data-i18n="support.contact">Your contact optional</span><input id="claritySupportContact" maxlength="240" autocomplete="email"></label>',
       '<div class="claritySupportMeta" id="claritySupportMeta"></div>',
-      '<div class="claritySupportActions"><button type="button" class="claritySupportCloseAction">Cancel</button><button type="submit" class="primary">Email report</button></div>',
+      '<div class="claritySupportActions"><button type="button" class="claritySupportCloseAction" data-i18n="common.cancel">Cancel</button><button type="submit" class="primary" data-i18n="support.send">Email report</button></div>',
       '<div class="claritySupportStatus" id="claritySupportStatus" role="status"></div>',
       '</form>',
       '</div>'
     ].join("");
 
     document.body.append(overlay);
+    window.GDI18n.apply(overlay);
     overlay.querySelector(".claritySupportClose").addEventListener("click", close);
     overlay.querySelector(".claritySupportCloseAction").addEventListener("click", close);
     overlay.addEventListener("click", function(event){if(event.target === overlay) close();});
@@ -151,7 +154,12 @@
     var overlay = document.getElementById("claritySupportOverlay");
     var meta = document.getElementById("claritySupportMeta");
     var context = buildContext();
-    meta.textContent = "Build " + (context.build.buildId || "unknown") + " · " + (context.build.channel || "beta") + " · " + (context.route || "unknown route") + " · " + (context.activeCourseLabel || "no active course");
+    meta.textContent = L("support.meta", {
+      build: context.build.buildId || L("support.unknown"),
+      channel: context.build.channel || "beta",
+      route: context.route || L("support.unknownRoute"),
+      course: context.activeCourseLabel || L("support.noActiveCourse")
+    });
     overlay.classList.add("open");
     safe(function(){document.getElementById("claritySupportHappened").focus();}, null);
   }
@@ -172,11 +180,11 @@
     };
     if(!payload.happened){
       status.className = "claritySupportStatus warn";
-      status.textContent = "Add what happened first.";
+      window.GDI18n.set(status, "support.addHappened");
       return;
     }
     status.className = "claritySupportStatus";
-    status.textContent = "Sending…";
+    window.GDI18n.set(status, "support.sending");
     try{
       var res = await fetch("/api/support-ticket", {
         method: "POST",
@@ -186,13 +194,14 @@
       var data = await res.json().catch(function(){return {};});
       if(!res.ok) throw new Error(data.error || "Support endpoint unavailable");
       status.className = "claritySupportStatus good";
-      var ticket = data.ticketId ? "Ticket " + data.ticketId : "Report received";
-      var email = data.emailed ? " · emailed" : (data.emailQueued ? " · email queued" : "");
-      status.textContent = ticket + email;
+      var key = data.ticketId
+        ? (data.emailed ? "support.ticketEmailed" : (data.emailQueued ? "support.ticketEmailQueued" : "support.ticket"))
+        : (data.emailed ? "support.receivedEmailed" : (data.emailQueued ? "support.receivedEmailQueued" : "support.received"));
+      window.GDI18n.set(status, key, {id:data.ticketId || ""});
       setTimeout(close, 1100);
     }catch(error){
       status.className = "claritySupportStatus warn";
-      status.textContent = "Could not send yet. Your note stayed on this screen.";
+      window.GDI18n.set(status, "support.couldNotSend");
       pushError("support-submit", error.message || error, "");
     }
   }

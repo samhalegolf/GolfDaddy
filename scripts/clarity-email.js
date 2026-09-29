@@ -7,6 +7,7 @@
   var lastEventKey = "";
   var lastEventAt = 0;
 
+  function L(key, vars){return window.GDI18n.t(key, vars);}
   function safe(fn, fallback){
     try{return fn();}catch(e){return fallback;}
   }
@@ -115,16 +116,16 @@
     var prefs = getPreferences(account);
     /* Coach updates are not governed by the master switch any more, so "Off" would be a lie
        to anyone who still has them on. Report what actually sends. */
-    if(!prefs.emailEnabled)return prefs.coachUpdates ? "Coach updates only" : "Off";
-    var bits = [];
-    if(prefs.coachUpdates)bits.push("coach updates");
-    if(prefs.playerUpdates)bits.push("player updates");
-    return bits.length ? "On - " + bits.join(", ") : "On";
+    if(!prefs.emailEnabled)return prefs.coachUpdates ? L("notify.coachUpdatesOnly") : L("common.off");
+    if(prefs.coachUpdates && prefs.playerUpdates)return L("notify.onCoachAndPlayer");
+    if(prefs.coachUpdates)return L("notify.onCoach");
+    if(prefs.playerUpdates)return L("notify.onPlayer");
+    return L("common.on");
   }
   function renderToggle(id, on){
     var btn = document.getElementById(id);
     if(!btn)return;
-    btn.textContent = on ? "On" : "Off";
+    btn.textContent = on ? L("common.on") : L("common.off");
     btn.classList.toggle("active", !!on);
     btn.setAttribute("aria-pressed", on ? "true" : "false");
   }
@@ -133,22 +134,23 @@
     var prefs = getPreferences(account);
     var line = document.getElementById("gdPlayerSettingsNotificationsLine");
     var sub = document.getElementById("gdEmailNotificationsSub");
-    if(line)line.textContent = account ? statusText(account) : "Sign in to manage email updates.";
-    if(sub)sub.textContent = prefs.emailEnabled ? "On for " + (prefs.email || account && account.email || "this account") : "Off";
+    if(line)line.textContent = account ? statusText(account) : L("notify.signInToManage");
+    if(sub)sub.textContent = prefs.emailEnabled ? (prefs.email || account && account.email ? L("notify.onFor", {email:prefs.email || account.email}) : L("notify.onForThisAccount")) : L("common.off");
     renderToggle("gdEmailNotificationsToggle", prefs.emailEnabled);
     renderToggle("gdEmailCoachUpdatesToggle", prefs.coachUpdates);
     renderToggle("gdEmailPlayerUpdatesToggle", prefs.playerUpdates);
   }
-  function setStatus(message){
+  /* Takes a translation key, so a language switch re-translates the line. */
+  function setStatus(key){
     var el = document.getElementById("gdEmailNotificationsStatus");
-    if(el)el.textContent = message || "";
+    if(el)window.GDI18n.set(el, key || null);
   }
   function toggleEmailNotifications(){
     var account = currentAccount();
     if(!account)return false;
     var prefs = getPreferences(account);
     setPreferences({emailEnabled:!prefs.emailEnabled}, account);
-    setStatus(!prefs.emailEnabled ? "Email update notifications are on." : "Email update notifications are off.");
+    setStatus(!prefs.emailEnabled ? "notify.emailOn" : "notify.emailOff");
     return false;
   }
   function toggleKind(kind){
@@ -159,7 +161,7 @@
     var next = {};
     next[kind] = !prefs[kind];
     setPreferences(next, account);
-    setStatus("Notification preference saved.");
+    setStatus("notify.prefSaved");
     return false;
   }
   /* Every URL that goes INTO an email body must be the public site, not the page
@@ -345,7 +347,7 @@
   function sendTest(){
     var account = currentAccount();
     if(!account)return false;
-    setStatus("Preparing test email...");
+    setStatus("notify.preparingTest");
     recordActivity({
       kind:"profile",
       test:true,
@@ -355,7 +357,7 @@
       detail:"This is the base Clarity email template with automatic account naming."
     }).then(function(results){
       var result = results && results[0] || {};
-      setStatus(result.sent ? "Test email sent." : (result.error || result.status >= 400 ? "Test email could not be sent." : "Test email queued."));
+      setStatus(result.sent ? "notify.testSent" : (result.error || result.status >= 400 ? "notify.testFailed" : "notify.testQueued"));
     });
     return false;
   }
@@ -433,17 +435,17 @@
           var help = document.getElementById("gd67ForgotPasswordHelp");
           if(help && sendResult){
             if(sendResult.sent){
-              help.textContent = "Password reset email sent.";
+              help.textContent = L("notify.resetSent");
             }else if(sendResult.code === "email_not_configured"){
-              help.textContent = "Email delivery is not configured. Contact support for password reset help.";
+              help.textContent = L("notify.emailNotConfigured");
             }else if(sendResult.code === "auth_not_configured"){
-              help.textContent = "Supabase Auth is not configured. Contact support.";
+              help.textContent = L("notify.authNotConfigured");
             }else if(sendResult.error || sendResult.status >= 400){
-              help.textContent = "Password reset email could not be sent. Check the account uses a real email address.";
+              help.textContent = L("notify.resetFailed");
             }else if(sendResult.queued !== false){
-              help.textContent = "Password reset email queued.";
+              help.textContent = L("notify.resetQueued");
             }else{
-              help.textContent = "No Clarity account found for that email.";
+              help.textContent = L("notify.noAccount");
             }
           }
         }).catch(function(){});
@@ -479,6 +481,8 @@
   window.gdToggleEmailNotifications = toggleEmailNotifications;
   window.gdToggleEmailNotificationKind = toggleKind;
   window.gdSendTestEmailNotification = sendTest;
+
+  window.GDI18n.onChange(renderSettings);
 
   if(document.readyState === "loading")document.addEventListener("DOMContentLoaded", installHooks);
   else installHooks();

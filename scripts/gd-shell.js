@@ -2,20 +2,32 @@
   "use strict";
   if(window.GDShell&&window.GDShell.__owner==="GDShell")return;
 
+  /* Values are GDI18n keys ("shell.*"); anything else (brand, admin) is shown as-is. */
   var ROUTE_LABELS={
-    home:"Home",
+    home:"shell.home",
     "course-picker":"GPS",
     gps:"GPS",
-    "module:profile":"Profile",
-    "module:bag":"Bag",
-    "module:settings":"Settings",
-    "module:playerSettings":"Settings",
+    "module:profile":"shell.profile",
+    "module:bag":"shell.bag",
+    "module:settings":"shell.settings",
+    "module:playerSettings":"shell.settings",
     "module:admin":"Admin",
-    "module:dataHub":"Data",
-    "module:shotData":"Shot Data",
-    "module:courseData":"Course Data",
-    "module:practiceData":"Practice Data",
-    auth:"Profile"
+    "module:dataHub":"shell.data",
+    "module:shotData":"shell.shotData",
+    "module:courseData":"shell.courseData",
+    "module:practiceData":"shell.practiceData",
+    auth:"shell.profile"
+  };
+  /* Callers (gd-route-audit.js) still pass English labels in opts.label. */
+  var LABEL_KEYS={
+    "Home":"shell.home",
+    "Profile":"shell.profile",
+    "Bag":"shell.bag",
+    "Settings":"shell.settings",
+    "Data":"shell.data",
+    "Shot Data":"shell.shotData",
+    "Course Data":"shell.courseData",
+    "Practice Data":"shell.practiceData"
   };
   var MODULE_IDS={
     profile:"profilePanel",
@@ -55,9 +67,16 @@
   function byId(id){return document.getElementById(id)}
   function clone(){return Object.assign({},state,{history:state.history.slice()})}
   function routeLabel(route,module,label){
-    if(label)return label;
+    if(label)return LABEL_KEYS[label]||label;
     if(route==="module")return ROUTE_LABELS["module:"+module]||String(module||"Module").replace(/Panel$/,"").replace(/([A-Z])/g," $1").trim();
-    return ROUTE_LABELS[route]||"Home";
+    return ROUTE_LABELS[route]||"shell.home";
+  }
+  function isLabelKey(label){return /^shell\.[A-Za-z]+$/.test(String(label||""));}
+  function labelText(label){return isLabelKey(label)?window.GDI18n.t(label):label;}
+  function showLabel(el,label){
+    if(!el)return;
+    if(isLabelKey(label))window.GDI18n.set(el,label);
+    else window.GDI18n.plain(el,label);
   }
   function remember(route,replace){
     state.previousRoute=replace?state.previousRoute:state.route;
@@ -160,11 +179,10 @@
     applyBodyClasses();
     if(document.body&&document.body.dataset){
       document.body.dataset.clarityRoute=route==="course-picker"?"course-picker":route==="module"?(state.module||"module"):route;
-      document.body.dataset.clarityRouteLabel=label;
+      document.body.dataset.clarityRouteLabel=labelText(label);
       document.body.dataset.gdToolScreen=route==="home"?"home":route==="course-picker"?"picker":route==="module"?"module":"unmapped";
     }
-    var labelEl=byId("shellRouteLabel");
-    if(labelEl)labelEl.textContent=label;
+    showLabel(byId("shellRouteLabel"),label);
     var back=byId("shellBackBtn");
     if(back)back.style.visibility=route==="home"?"hidden":"visible";
     var settings=byId("shellSettingsBtn");
@@ -302,8 +320,7 @@
     document.body.classList.add("gdAuthLocked","gdProfileOpen");
     var profile=byId("gdProfileV67");
     if(profile)profile.classList.remove("hidden");
-    var label=byId("shellRouteLabel");
-    if(label)label.textContent=routeLabel("auth");
+    showLabel(byId("shellRouteLabel"),routeLabel("auth"));
     return false;
   }
   function back(opts){

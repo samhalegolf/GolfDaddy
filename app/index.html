@@ -509,8 +509,9 @@
       <div class="setGroup" data-i18n="gpsSettings.groupApp">App</div>
       <div class="setRow">
         <div><strong data-i18n="gpsSettings.language">Language</strong><span data-i18n="gpsSettings.languageHint">Language used in the app.</span></div>
-        <!-- Options filled by js/gps-settings.js from GDI18n.languages(). -->
-        <select id="setLanguage" class="toggle" data-i18n-aria-label="gpsSettings.language" aria-label="Language"></select>
+        <!-- Language is not a GPS setting: scripts/gd-i18n.js owns the choice
+             and fills this picker (data-i18n-language-picker). -->
+        <select id="setLanguage" class="toggle" data-i18n-language-picker data-i18n-aria-label="gpsSettings.language" aria-label="Language"></select>
       </div>
     </div>
   </div>

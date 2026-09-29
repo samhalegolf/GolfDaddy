@@ -198,10 +198,13 @@ assert.strictEqual(boot({ languages: [], extra: { es: SPANISH } }).GDI18n.locale
   const sources = [path.join('app', 'index.html')]
     .concat(fs.readdirSync(path.join(ROOT, 'app', 'js')).filter((f) => f.endsWith('.js')).map((f) => path.join('app', 'js', f)))
     .concat([
-      'gd-bag-core.js', 'gd-practice-bubble-preview.js', 'clarity-supabase-auth.js', 'clarity-payments.js',
-      'clarity-store-billing.js', 'clarity-account-delete.js', 'clarity-account-clear-data.js', 'clarity-legal-links.js'
+      'gd-i18n.js', 'gd-bag-core.js', 'gd-practice-bubble-preview.js', 'clarity-supabase-auth.js', 'clarity-payments.js',
+      'clarity-store-billing.js', 'clarity-account-delete.js', 'clarity-account-clear-data.js', 'clarity-legal-links.js',
+      'gd-shell.js', 'gd-course-library-pin-lock.js', 'clarity-player-settings.js', 'clarity-email.js',
+      'clarity-support.js', 'clarity-backup.js', 'gd-route-audit.js'
     ].map((f) => path.join('scripts', f)))
-    .concat([path.join('scripts', 'inline', 'gd-auth-account-shell.js')]);
+    .concat(['gd-auth-account-shell.js', 'gd-course-picker-search-v2.js'].map((f) => path.join('scripts', 'inline', f)))
+    .concat(['index.html']);
   const used = new Map();
   sources.forEach((file) => {
     const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
@@ -320,14 +323,25 @@ assert.strictEqual(boot({ languages: [], extra: { es: SPANISH } }).GDI18n.locale
   assert.strictEqual(elements.setFrameTight.textContent, 'Medium', 'untranslated words fall back to English');
   assert.strictEqual(elements.html.attrs.lang, 'es', '<html lang> follows the language');
 
-  /* The picker: "follow the phone" first, then every language in its own name. */
-  const picker = elements.setLanguage;
+  /* The shared picker (GDI18n.bindPicker, used by the play page and the main
+     Settings): "follow the phone" first, then every language in its own name,
+     and choosing one saves it. */
+  const picker = el('setLanguage');
+  const pickerListeners = {};
+  picker.addEventListener = (type, fn) => { pickerListeners[type] = fn; };
+  window.GDI18n.bindPicker(picker);
+  window.GDI18n.bindPicker(picker);
+  assert.strictEqual(picker.children.length, window.GDI18n.languages().length + 1, 'bound once, filled once');
   assert.strictEqual(picker.children[0].value, '');
   assert.ok(picker.children.some((o) => o.value === 'de' && o.textContent === 'Deutsch'));
   assert.strictEqual(picker.value, 'es', 'shows the saved choice');
   window.GDI18n.setLocale(null);
   assert.strictEqual(picker.value, '', 'following the phone again');
   assert.strictEqual(picker.children[0].textContent, 'Phone language');
+  picker.value = 'de';
+  pickerListeners.change();
+  assert.strictEqual(window.GDI18n.locale(), 'de', 'choosing in the picker switches the language');
+  assert.strictEqual(window.localStorage.data['clarity:locale'], 'de');
 }
 
 console.log('i18n tests passed');
