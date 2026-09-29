@@ -40,14 +40,12 @@ import { eliminateInferredCourses } from "./lib/gd-inferred-course-claims-core.m
 import { OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND } from "./course-mapper-jobs.mjs";
 import { refineSurfaceShape, applyRefinedShape, REFINED_SHAPE_SOURCE } from "./lib/gd-surface-refine-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
-import alerts from "./alert-utils.js";
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
 import { classifyMapperFailure, failureKind, buildMapperDebugText } from "./lib/gd-mapper-failure-kinds.mjs";
 import { captureMapperDebugImagery } from "./lib/gd-mapper-debug-captures.mjs";
 import { mergeOverlayIntoPayload, overlaySummary } from "./lib/gd-map-overlay-core.mjs";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
-const { fireClaudeRoutine, sendSystemAlert, claudeRoutineConfigured } = alerts;
 
 const JOBS_TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
@@ -174,9 +172,27 @@ async function captureForDebug(job, diagnostics) {
   });
 }
 
+/* alert-utils.js is CommonJS and requires @netlify/blobs at load time. Imported at the top of
+   this file it ran on every cold start, and from the deploy that added it the worker stopped
+   reaching the queue at all (last claim 2026-09-28 19:51 UTC; jobs sat "queued" from then on).
+   Loaded here instead, it only runs when a job has already failed for good - and if it cannot
+   load, that failure is recorded on the job rather than taking the whole worker down. */
+async function loadAlerts() {
+  const mod = await import("./alert-utils.js");
+  return mod.default || mod;
+}
+
 async function requestMapperDebug(job, failure) {
   const classified = classifyMapperFailure({ error: failure.message, diagnostics: failure.diagnostics });
   const record = { failureKind: classified.kind };
+  let alerts;
+  try {
+    alerts = await loadAlerts();
+  } catch (error) {
+    record.debugSession = { fired: false, reason: "alerts-unavailable", details: String(error && error.message || error).slice(0, 300) };
+    return record;
+  }
+  const { fireClaudeRoutine, sendSystemAlert, claudeRoutineConfigured } = alerts;
   let prompt = failureKind(classified.kind).defaultPrompt;
   let promptSource = "default";
   let captures = null;
