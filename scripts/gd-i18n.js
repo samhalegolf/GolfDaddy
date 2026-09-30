@@ -20,7 +20,8 @@
 
    Two ways to use it:
      - HTML: data-i18n="key" replaces an element's text; data-i18n-placeholder,
-       data-i18n-aria-label and data-i18n-title set those attributes. apply()
+       data-i18n-aria-label, data-i18n-title and data-i18n-alt set those
+       attributes. apply()
        runs over the whole page on DOMContentLoaded, and the English text
        stays in the HTML as first paint.
      - JS: GDI18n.t("key", { n: 3 }) for text a module writes itself;
@@ -52,7 +53,7 @@
 
   var STORE_KEY = "clarity:locale";
   var BASE = "en";
-  var ATTRS = ["placeholder", "aria-label", "title"];
+  var ATTRS = ["placeholder", "aria-label", "title", "alt"];
 
   /* Tag -> the language's name in itself, for the picker. Adding a language
      is a file in scripts/i18n/ plus a line here. */

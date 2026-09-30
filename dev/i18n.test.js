@@ -207,7 +207,7 @@ assert.strictEqual(boot({ languages: [], extra: { es: SPANISH } }).GDI18n.locale
     ].map((f) => path.join('scripts', f)))
     .concat(['gd-auth-account-shell.js', 'gd-course-picker-search-v2.js',
       'gd-action-feedback-v1.js', 'gd-resume-round-picker-v1.js', 'gd-brand-icon-render.js', 'gd-durable-storage.js'].map((f) => path.join('scripts', 'inline', f)))
-    .concat(['index.html', path.join('functions', 'auth-reset-password.js')]);
+    .concat(['index.html', 'welcome.html', path.join('functions', 'auth-reset-password.js')]);
   const used = new Map();
   sources.forEach((file) => {
     const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
@@ -276,6 +276,37 @@ assert.strictEqual(boot({ languages: [], extra: { es: SPANISH } }).GDI18n.locale
   GDI18n.set(title, null);
   assert.strictEqual(title.textContent, '');
   assert.strictEqual(title.getAttribute('data-i18n'), null, 'a cleared element is forgotten');
+}
+
+/* ---- data-i18n-alt translates image alt text like the other attributes ---- */
+{
+  const made = [];
+  const node = () => {
+    const n = { attrs: {}, textContent: '',
+      setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
+      removeAttribute(k) { delete this.attrs[k]; } };
+    made.push(n);
+    return n;
+  };
+  const document = {
+    documentElement: node(),
+    querySelectorAll: (sel) => {
+      const attr = sel.slice(1, -1);
+      return made.filter((n) => n.getAttribute(attr) !== null);
+    },
+    addEventListener() {}
+  };
+  const window = boot({ languages: ['en'], document, extra: { es: { 'welcome.gpsPlayImageAlt': 'Pantalla de juego GPS' } } });
+  const { GDI18n } = window;
+  const img = node();
+  img.setAttribute('alt', 'GPS play screen');
+  img.setAttribute('data-i18n-alt', 'welcome.gpsPlayImageAlt');
+  GDI18n.apply();
+  assert.strictEqual(img.attrs.alt, 'GPS play screen');
+  GDI18n.setLocale('es');
+  assert.strictEqual(img.attrs.alt, 'Pantalla de juego GPS', 'data-i18n-alt follows a language switch');
+  GDI18n.setAttr(img, 'alt', 'welcome.gpsPlayImageAlt');
+  assert.strictEqual(img.getAttribute('data-i18n-alt'), 'welcome.gpsPlayImageAlt');
 }
 
 /* ---- The page loads the layer before GPS Settings ---- */
