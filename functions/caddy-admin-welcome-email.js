@@ -74,7 +74,11 @@ async function resolvePlayer(player) {
   /* Admin -> Users is always someone inviting a player, never a self-signup, so the resend is
      a Coach Invite - standard or comped, decided by the entitlement rather than by the
      request. */
-  return { player, authUser, account, recipientEmail, comped, templateKey: signupTemplates.keyForComped(comped), accountState: authUser ? "existing" : "needs_setup" };
+  /* A login that has never been used is still waiting on its password: the invite minted it
+     with a random one. Resending "Open Clarity" to that player is a dead end, so they get a
+     fresh set-password link like anyone without a login. */
+  const setUp = !!(authUser && authUser.last_sign_in_at);
+  return { player, authUser, account, recipientEmail, comped, templateKey: signupTemplates.keyForComped(comped), accountState: setUp ? "existing" : "needs_setup" };
 }
 /* The player's own language when their account has recorded one; a preview or test send
    (no account) is English. */
