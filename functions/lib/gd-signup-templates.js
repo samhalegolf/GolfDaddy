@@ -91,14 +91,14 @@ function variablesFor(input) {
   const name = text(input.recipientName, 160) || text(input.email, 240) || "Player";
   const site = String(input.siteUrl || templates.DEFAULT_SITE).replace(/\/+$/, "");
   return Object.assign({
-    firstName: (name.split(/\s+/)[0] || "there").replace(/[^\w'-]/g, "") || "there",
+    firstName: (name.split(/\s+/)[0] || "").replace(/[^\p{L}\p{N}'-]/gu, ""),
     fullName: name,
     email: text(input.email, 240),
     coachName: text(input.actorName, 120) || "Clarity Golf",
     appUrl: site,
     appStoreUrl: text(input.appStoreUrl, 900) || "",
     playStoreUrl: text(input.playStoreUrl, 900) || ""
-  }, templates.accessVariables(input.comped));
+  }, templates.accessVariables(input.comped, input.i18n));
 }
 
 /* Claim the right to send one coach-update email to this address.

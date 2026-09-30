@@ -1,30 +1,8 @@
-/* A storage write must never be able to crash the app.
-
-   localStorage throws QuotaExceededError once full, and an unguarded setItem in a boot path takes
-   the rest of boot with it - a full disk then presents as unrelated breakage (missing shell,
-   features that never initialise) rather than as a storage error. Writes are allowed to fail here;
-   they are never allowed to throw. Failures are reported rather than swallowed, and the
-   quota warning is shown once rather than on every subsequent write. */
-var GD_STORAGE_QUOTA_WARNED=false;
-/* Canonical implementation lives in gd-durable-storage.js, which loads first. This is the
-   fallback for contexts where that module is absent, so the 17 call sites below can never
-   become a ReferenceError. */
-function gdSafeLocalSet(key,value){
-  if(window.gdSafeLocalSet&&window.gdSafeLocalSet!==gdSafeLocalSet)return window.gdSafeLocalSet(key,value);
-  try{
-    localStorage.setItem(key,value);
-    return true;
-  }catch(error){
-    var quota=error&&(error.name==="QuotaExceededError"||error.code===22||error.code===1014);
-    console.warn("[GolfDaddy] storage write failed for "+key+(quota?" - localStorage is full":""),error);
-    try{window.ClarityErrorReporter&&window.ClarityErrorReporter.report&&window.ClarityErrorReporter.report(error,{source:"gdSafeLocalSet",key:key,quotaExceeded:!!quota});}catch(e){}
-    if(quota&&!GD_STORAGE_QUOTA_WARNED){
-      GD_STORAGE_QUOTA_WARNED=true;
-      try{toast("Device storage is full - some settings can't be saved. Clear site data to recover.");}catch(e){}
-    }
-    return false;
-  }
-}
+function gdT(key,vars){return window.GDI18n?window.GDI18n.t(key,vars):key;}
+function gdTn(key,n,vars){return window.GDI18n?window.GDI18n.tn(key,n,vars):key;}
+function gdH(key,vars){return window.GDI18n?window.GDI18n.html(key,vars):key;}
+/* gdSafeLocalSet (the quota-safe storage write) is window.gdSafeLocalSet from
+   scripts/inline/gd-durable-storage.js, which loads before this file. */
 
 /* GolfDaddy app core. Extracted verbatim (split-02) from the inline
    <script> block at index.html:6547. Classic script: top-level const/
@@ -1734,11 +1712,11 @@ async function gdImportLaunchMonitorPayload(payload,sourceLabel){
     if(typeof window.gdRenderPracticeData==="function")window.gdRenderPracticeData();
     if(typeof window.gdRenderDataHubStatus==="function")window.gdRenderDataHubStatus();
     if(typeof gdPracticeQuietPostImportSurface==="function")gdPracticeQuietPostImportSurface();
-    if(payload?.quietImport!==true)gdLmToast(`${sourceLabel||"Launch monitor data"} loaded (${count} shot${count===1?"":"s"})`);
+    if(payload?.quietImport!==true)gdLmToast(gdTn("practice.sourceLoaded",count,{source:sourceLabel||gdT("practice.launchMonitorData")}));
     return result;
   }catch(e){
     if(gdPracticeDebugCurrentRun())gdPracticeDebugCheckpointSafe("save_failed","failed",{outputSummary:"Practice Data save failed",error:e,technicalDetails:e&&e.stack});
-    gdPracticeFailImportJob(e,e&&e.message?e.message:"Practice save failed");
+    gdPracticeFailImportJob(e,e&&e.message?e.message:gdT("practice.saveFailed"));
     throw e;
   }
 }
@@ -1791,7 +1769,7 @@ function gdPickPracticePhotoFile(event,mode="photo"){
   const input=document.getElementById(mode==="camera"?"gdPracticeCameraInput":"gdPracticePhotoInput");
   if(!input){
     gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Photo picker failed",errors:["Photo picker is not ready"],nextStep:"Reopen Practice Data and try again."});
-    gdPracticeFeedback("Photo picker is not ready. Reopen Practice Data and try again.","error");
+    gdPracticeFeedback(gdT("practice.photoPickerNotReady"),"error",{state:"ready"});
     return false;
   }
   try{input.value="";}catch(e){}
@@ -1803,7 +1781,7 @@ function gdPickPracticePhotoFile(event,mode="photo"){
     photoAction:false,
     nextStep:mode==="camera"?"Take a photo. The generated box adjustment will appear after selection.":"Choose a photo. The generated box adjustment will appear after selection."
   });
-  gdPracticeFeedback(mode==="camera"?"Opening camera...":"Opening photo picker...");
+  gdPracticeFeedback(mode==="camera"?gdT("practice.openingCamera"):gdT("practice.openingPhotoPicker"),"",{state:"idle"});
   gdPracticeSchedulePhotoPickerWatch(input,mode);
   try{
     if(typeof input.click==="function")input.click();
@@ -1812,7 +1790,7 @@ function gdPickPracticePhotoFile(event,mode="photo"){
     try{input.showPicker();}
     catch(err){
       gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Photo picker failed",errors:["Photo picker could not open"],nextStep:"Try the other photo button or refresh the app."});
-      gdPracticeFeedback("Photo picker could not open. Try the other photo button or refresh the app.","error");
+      gdPracticeFeedback(gdT("practice.photoPickerCouldNotOpen"),"error",{state:"error"});
     }
   }
   return false;
@@ -2036,7 +2014,7 @@ function gdAdjustPracticeGeneratedBox(){
     try{target.scrollIntoView({behavior:"smooth",block:"start"});}catch(e){}
     return false;
   }
-  gdPracticeFeedback("Choose a practice table photo first.","error");
+  gdPracticeFeedback(gdT("practice.chooseTablePhotoFirst"),"error",{state:"idle"});
   return false;
 }
 function gdPickLaunchMonitorFile(){
@@ -2135,11 +2113,11 @@ async function gdHandleLaunchMonitorUpload(file){
     const payload=gdPracticeNativePayloadFromText(text,file.name||"Practice data file");
     const rejected=payload.invalidCount||0;
     if(!(payload.clubGroups||[]).length){
-      const reason=rejected?`Every row was rejected (${rejected}). Check the club and distance columns.`:"No rows detected in that file.";
+      const reason=rejected?gdT("practice.everyRowRejected",{n:rejected}):gdT("practice.noRowsDetected");
       gdPracticeFailImportJob(new Error("No usable shots found"),reason);
       gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Upload parsed 0 usable rows",errors:[reason],nextStep:"A file needs a club column and a carry or total column."});
       gdLmSetStatus("Status","No usable shots found",reason,"conflict_check");
-      gdLmToast("No practice shots found in that file");
+      gdLmToast(gdT("practice.noShotsInFile"));
       return;
     }
     // Provenance the file never stated. Advisory, exactly as it is on the email
@@ -2165,10 +2143,10 @@ async function gdHandleLaunchMonitorUpload(file){
     gdNativePracticeFeedbackBridge({status:"saved",lastAction:`Upload imported ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length+rejected,validCount:payload.clubGroups.length,invalidCount:rejected,warnings:notes,errors:[],nextStep:"Saved to the Clarity Shot Library."});
   }catch(e){
     console.warn("[GolfDaddy] launch monitor upload failed",e);
-    gdPracticeFailImportJob(e,e&&e.message?e.message:"Could not read file");
+    gdPracticeFailImportJob(e,e&&e.message?e.message:gdT("practice.couldNotReadFile"));
     gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Text upload failed",errors:[e&&e.message?e.message:"Could not read file"],nextStep:"Try pasted CSV/text in the native import lane."});
     gdLmSetStatus("Status","Upload failed",e&&e.message?e.message:"Could not read file","conflict_check");
-    gdLmToast("Launch monitor upload failed");
+    gdLmToast(gdT("practice.uploadFailed"));
   }finally{
     gdSetPracticePhotoProcessing(false,{skipJob:true});
   }
@@ -2347,32 +2325,37 @@ function gdPracticeFriendlyScanFailureMessage(message){
   if(/^Couldn.?t read values|^Could not read values/i.test(text))return text;
   if(/^Couldn.?t find the table|^Could not find the table/i.test(text))return text;
   if(/header allocation|header strip|mapped value fields|known metric|metric headers|column names|identify the columns|assigned headers|no allocated column strips/i.test(text)){
-    return "Couldn't find headers. Keep the header row visible and re-frame the value grid.";
+    return gdT("practice.scanFailHeaders");
   }
   if(/no usable rows|no valid native practice rows|cell ocr|reading values|read values|raw values|no rows lined up|no aligned rows|column strip read|usable shots|0 valid rows/i.test(text)){
-    return "Couldn't read values. Use a clearer crop, brighter photo, or pasted CSV/text.";
+    return gdT("practice.scanFailValues");
   }
   if(/column split|value grid|flattened value grid|usable grid|number-like|value corridors|frame|crop|re-frame|cluster/i.test(text)){
-    return "Couldn't find the table. Keep the practice table inside the frame and scan again.";
+    return gdT("practice.scanFailTable");
   }
   return text;
 }
+/* opts.state ("scanning"|"ready"|"error"|"idle") skips the English-wording
+   classification below: pass it with already-translated text, whose wording the
+   regexes cannot read. Without it the message is treated as raw English. */
 function gdSetPracticeScanStatus(message,opts={}){
   let text=String(message||"");
-  const failureLike=/failed|could not|couldn't|no |needs attention|stopped|blocked|missing|unable|did not|without saving|before values|0 valid|incomplete/i.test(text)||String(opts.debugState||"")==="error";
+  const forcedState=String(opts.state||"");
+  const failureLike=!forcedState&&(/failed|could not|couldn't|no |needs attention|stopped|blocked|missing|unable|did not|without saving|before values|0 valid|incomplete/i.test(text)||String(opts.debugState||"")==="error");
   const friendly=failureLike?gdPracticeFriendlyScanFailureMessage(text):text;
-  if(friendly&&friendly!==text)text=friendly;
+  const friendlyReplaced=!!(friendly&&friendly!==text);
+  if(friendlyReplaced)text=friendly;
   const diagnostic=String(opts.rawMessage||text);
-  const state=/failed|could not|couldn't|no column|too small|no usable|timed out|timeout|stopped|nothing was saved/i.test(diagnostic+" "+text)
+  const state=forcedState||(friendlyReplaced||/failed|could not|couldn't|no column|too small|no usable|timed out|timeout|stopped|nothing was saved/i.test(diagnostic+" "+text)
     ?"error"
-    :(/reading|finding|fitting|flattening|cropping|generating|checking|masking|scan started|scanning/i.test(diagnostic+" "+text)?"scanning":(/ready|imported|checkpoint ready|complete|cluster found|column crops ready|columns cropped/i.test(diagnostic+" "+text)?"ready":"idle"));
+    :(/reading|finding|fitting|flattening|cropping|generating|checking|masking|scan started|scanning/i.test(diagnostic+" "+text)?"scanning":(/ready|imported|checkpoint ready|complete|cluster found|column crops ready|columns cropped/i.test(diagnostic+" "+text)?"ready":"idle")));
   const progressActive=gdPracticeScanProgressIsActive();
   const scanRunning=state==="scanning"&&progressActive;
   const debugState=gdPracticeResolveLiveDebugState(text,state,progressActive,opts.debugState);
   ["gdPracticeScanStatus","gdPracticeDebugStatus"].forEach(id=>{
     const el=document.getElementById(id);
     if(!el)return;
-    el.textContent=state==="scanning"?`Scanning: ${text}`:text;
+    el.textContent=state==="scanning"?gdT("practice.scanningStatus",{text}):text;
     el.classList.remove("scanning","ready","error","active");
     if(state!=="idle")el.classList.add(state);
     if(id==="gdPracticeDebugStatus"&&text&&gdPracticeCanShowScanDebug())el.classList.add("active");
@@ -2412,11 +2395,12 @@ function gdPracticeQuietScanSurface(opts={}){
     }
   }
 }
-function gdPracticeFeedback(message,tone=""){
+function gdPracticeFeedback(message,tone="",opts={}){
   const kind=String(tone||"").toLowerCase();
-  const text=kind==="error"?gdPracticeFriendlyScanFailureMessage(message):String(message||"");
+  const text=kind==="error"&&!opts.state?gdPracticeFriendlyScanFailureMessage(message):String(message||"");
   if(!text)return;
-  gdSetPracticeScanStatus(text,{rawMessage:message,debugState:(kind==="error"||kind==="ready"||kind==="warning")?kind:""});
+  const state=opts.state||(kind==="error"&&text!==String(message||"").trim()?"error":"");
+  gdSetPracticeScanStatus(text,{rawMessage:message,debugState:(kind==="error"||kind==="ready"||kind==="warning")?kind:"",state});
   if(kind==="error")gdLmSetStatus("Status","Practice scan needs attention",text,"conflict_check");
   else if(kind==="ready")gdLmSetStatus("Status","Practice scan ready",text,"corroborated");
 }
@@ -2586,7 +2570,7 @@ function gdPracticePhotoSourceSize(){
 function gdPracticePhotoSmallMessage(){
   const size=gdPracticePhotoSourceSize();
   if(!size)return "";
-  if(size.width<520||size.height<180||size.width*size.height<140000)return `Image is only ${size.width}x${size.height}. Use a larger screenshot or exported CSV for a reliable scan.`;
+  if(size.width<520||size.height<180||size.width*size.height<140000)return gdT("practice.imageTooSmall",{width:size.width,height:size.height});
   return "";
 }
 async function gdPrepareLaunchMonitorImage(source,opts={}){
@@ -4939,7 +4923,7 @@ async function gdAttachFittedCellDirection(Tesseract,cell,item,key){
     wordBox:numberBox,
     numberBox
   });
-  try{gdSetPracticeScanStatus(`Masking number and checking L/R for ${key}...`);}catch(e){}
+  try{gdSetPracticeScanStatus(gdT("practice.checkingDirection",{column:key}),{state:"scanning"});}catch(e){}
   const rowDirection=await gdRecognizeColumnValueDirection(Tesseract,directionCrop,localItem,Number(canvas.height)||40,key);
   item.directionDebug=rowDirection?.debug||null;
   if(rowDirection?.direction){
@@ -5475,7 +5459,7 @@ async function gdAttachColumnValueDirections(Tesseract,result){
   const gap=gdLmMedianGap(gaps)||48;
   const directionLabel=String(result?.column?.label||result?.key||"").trim();
   for(const [itemIndex,item] of result.values.entries()){
-    try{gdSetPracticeScanStatus(`Masking number and checking L/R for ${directionLabel} (${itemIndex+1}/${result.values.length})...`);}catch(e){}
+    try{gdSetPracticeScanStatus(gdT("practice.checkingDirectionProgress",{column:directionLabel,n:itemIndex+1,total:result.values.length}),{state:"scanning"});}catch(e){}
     const rowBand=gdColumnRowBandCrop(result.crop,item,gap);
     const rowDirection=await gdRecognizeColumnValueDirection(Tesseract,rowBand.crop,rowBand.item,gap,result.key);
     item.directionDebug=rowDirection?.debug||null;
@@ -8798,8 +8782,8 @@ function gdBuildFittedCellOcrCapture(columnScan,label="Fitted cell OCR"){
 async function gdRunFittedCellGridOcr(columnScan,opts={}){
   if(opts?.allowParkedFittedCellOcr!==true){
     gdPracticeDebugCheckpointSafe("extraction_started","warning",{outputSummary:"Fitted-cell OCR is parked; generated grid values were not read"});
-    gdSetPracticeScanStatus("Fitted-cell OCR is parked. Review the OCR-generated grid only.");
-    gdPracticeFeedback("Fitted-cell OCR is parked; generated grid values were not read.","warning");
+    gdSetPracticeScanStatus(gdT("practice.fittedCellParked"),{state:"idle"});
+    gdPracticeFeedback(gdT("practice.fittedCellParkedNotRead"),"warning",{state:"idle"});
     return null;
   }
   gdEnsurePracticeValueCellGrid(columnScan);
@@ -8807,7 +8791,7 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   const rows=Array.isArray(cellGrid?.cells)?cellGrid.cells:[];
   if(!rows.length){
     gdPracticeDebugCheckpointSafe("rows_parsed","failed",{outputSummary:"No fitted cells available for OCR"});
-    gdSetPracticeScanStatus("Fit the output grid before scanning fitted cells.");
+    gdSetPracticeScanStatus(gdT("practice.fitGridFirst"),{state:"scanning"});
     return null;
   }
   gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:"Column-major fitted-cell OCR starting"});
@@ -8842,7 +8826,7 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   let completedWork=0;
   try{
     if(clubColumnIndex>=0){
-      gdSetPracticeScanStatus(`Reading club column (${totalRows} cells)...`);
+      gdSetPracticeScanStatus(gdTn("practice.readingClubColumn",totalRows),{state:"scanning"});
       for(const [rowIndex,row] of rows.entries()){
         if(importJobId)gdPracticeAssertCurrentImportJob(importJobId,"Practice photo club column OCR");
         const cell=Array.isArray(row)?row[clubColumnIndex]:null;
@@ -8862,7 +8846,7 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
       if(gdPracticeFittedCellRowIsSummary(row,clubColumnIndex))row.__gdPracticeSummaryRow=true;
     });
     for(const [columnIndex,column] of valueColumns.entries()){
-      gdSetPracticeScanStatus(`Reading ${column.label} column (${columnIndex+1}/${valueColumns.length})...`);
+      gdSetPracticeScanStatus(gdT("practice.readingColumnProgress",{column:column.label,n:columnIndex+1,total:valueColumns.length}),{state:"scanning"});
       for(const [rowIndex,row] of rows.entries()){
         if(importJobId)gdPracticeAssertCurrentImportJob(importJobId,"Practice photo cell OCR");
         const cell=Array.isArray(row)?row[column.index]:null;
@@ -8938,7 +8922,8 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   if(!payload?.clubGroups?.length){
     const digitizedRows=Number(columnScan?.digitizedTable?.rows?.length)||0;
     gdPracticeDebugCheckpointSafe("rows_accepted","warning",{outputSummary:"Column values read; scanner result is available for the next filter, but no native Practice rows were formed yet",counts:{accepted:0,digitizedRows,headersAllocated:allocated,headersTotal:totalAllocated,rowNotes:rowNoteCount},tableScanOutcome:valueScanOutcome});
-    gdSetPracticeScanStatus(digitizedRows?`Column value read complete: ${valueColumns.length} columns scanned and ${digitizedRows} aligned row${digitizedRows===1?"":"s"} built. Headers allocated ${allocated}/${totalAllocated}; scanner result is ready for review.`:"Cell OCR ran, but no aligned rows produced values yet.");
+    if(digitizedRows)gdSetPracticeScanStatus(gdTn("practice.columnValueReadRows",digitizedRows,{columns:valueColumns.length,allocated,total:totalAllocated}),{state:"ready"});
+    else gdSetPracticeScanStatus("Cell OCR ran, but no aligned rows produced values yet.");
     return columnScan;
   }
   gdPracticeDebugCheckpointSafe("rows_accepted","success",{outputSummary:`${payload.clubGroups.length} usable OCR shots`,counts:{accepted:payload.clubGroups.length},tableScanOutcome:valueScanOutcome});
@@ -8952,7 +8937,7 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
     return payload;
   }
   gdPracticeSetExtractionPreview(payload,opts.label||"Raw cell value read");
-  gdSetPracticeScanStatus(`Column value read complete: ${valueColumns.length} columns scanned; Clarity Shot Library preview has ${payload.clubGroups.length} OCR shots. No native save has run.`);
+  gdSetPracticeScanStatus(gdT("practice.columnValueReadPreview",{columns:valueColumns.length,n:payload.clubGroups.length}),{state:"ready"});
   return payload;
 }
 async function gdRunColumnImageOrderOcr(columnScan){
@@ -8963,7 +8948,7 @@ async function gdRunColumnImageOrderOcr(columnScan){
     const key=String(result?.key||"");
     if(!key||key==="toPin"||!result?.crop?.canvas)continue;
     const columnLabel=String(result?.column?.label||key);
-    gdSetPracticeScanStatus(`Reading ${columnLabel} column image (${index+1}/${results.length})...`);
+    gdSetPracticeScanStatus(gdT("practice.readingColumnImage",{column:columnLabel,n:index+1,total:results.length}),{state:"scanning"});
     try{gdSetPracticePhotoProcessing(true,{progress:Math.min(84,56+Math.round((index/Math.max(1,results.length))*28)),preserveClubs:true});}catch(e){}
     const localData=await gdRecognizeColumnCrop(Tesseract,result.crop,key,{acceptXLocal:result.acceptXLocal});
     result.localData=localData;
@@ -8984,7 +8969,8 @@ async function gdFinishPracticeColumnScan(columnScan,emptyMessage){
   gdRenderPracticeColumnStripsOnly(columnScan);
   const stripCount=Array.isArray(columnScan?.results)?columnScan.results.length:0;
   if(!stripCount){
-    gdSetPracticeScanStatus(emptyMessage||"No column images found. Keep the full table visible.");
+    if(emptyMessage)gdSetPracticeScanStatus(emptyMessage);
+    else gdSetPracticeScanStatus(gdT("practice.noColumnImages"),{state:"error"});
     return null;
   }
   gdPracticeSetContinueScanReady(false);
@@ -9001,7 +8987,7 @@ async function gdFinishPracticeColumnScan(columnScan,emptyMessage){
   const rowCount=Number(payload?.clubGroups?.length)||0;
   if(rowCount){
     gdPracticeSetExtractionPreview(payload,"Photo column image OCR");
-    gdSetPracticeScanStatus(`Column OCR ready (${rowCount} shots from ${stripCount} column images). Review the extraction checkpoint before importing.`);
+    gdSetPracticeScanStatus(gdTn("practice.columnOcrReady",rowCount,{columns:stripCount}),{state:"ready"});
     return columnScan;
   }
   gdSetPracticeScanStatus(`Column crops ready (${stripCount} columns). Column OCR did not find usable shots yet.`);
@@ -9027,7 +9013,7 @@ function gdSyncColumnStripAllocatedKeys(columnScan){
 }
 async function gdRunPracticeColumnStripValueScan(columnScan,opts={}){
   if(!columnScan){
-    gdSetPracticeScanStatus("Run Header Strip Scan before reading column values.");
+    gdSetPracticeScanStatus(gdT("practice.runHeaderScanFirst"),{state:"scanning"});
     return null;
   }
   gdSyncColumnStripAllocatedKeys(columnScan);
@@ -9039,7 +9025,7 @@ async function gdRunPracticeColumnStripValueScan(columnScan,opts={}){
     return null;
   }
   gdSetPracticePhotoProcessing(true,{progress:56,stageIndex:1,preserveClubs:true});
-  gdSetPracticeScanStatus(`Reading ${readableResults.length} column strip${readableResults.length===1?"":"s"} top to bottom...`);
+  gdSetPracticeScanStatus(gdTn("practice.readingColumnStrips",readableResults.length),{state:"scanning"});
   gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`${readableResults.length} allocated column strips`});
   try{
     const payload=await gdRunColumnImageOrderOcr(columnScan);
@@ -9057,19 +9043,20 @@ async function gdRunPracticeColumnStripValueScan(columnScan,opts={}){
       return columnScan;
     }
     if(opts.importToNative===true){
-      gdSetPracticeScanStatus(`Saving ${rowCount} shot${rowCount===1?"":"s"} to the Clarity Shot Library...`);
+      gdSetPracticeScanStatus(gdTn("practice.savingShots",rowCount),{state:"idle"});
       // Keep a read-only record of exactly what was saved under the Extraction marker.
       gdPracticeSetExtractionPreview(payload,opts.label||opts.sourceLabel||"Column strip value read");
       await gdImportLaunchMonitorPayload(payload,opts.sourceLabel||opts.label||"Practice photo scan");
       return payload;
     }
     gdPracticeSetExtractionPreview(payload,opts.label||"Column strip value read");
-    gdSetPracticeScanStatus(`Column strip read complete: ${rowCount} row${rowCount===1?"":"s"} found across ${readableResults.length} allocated columns. Review the extraction checkpoint before saving to the Shot Library.`);
+    gdSetPracticeScanStatus(gdTn("practice.columnStripReadComplete",rowCount,{columns:readableResults.length}),{state:"ready"});
     return payload;
   }catch(e){
     console.warn("[GolfDaddy] Column strip value scan failed",e);
     gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"Column strip value read failed",error:e,technicalDetails:e&&e.stack});
-    gdSetPracticeScanStatus(e&&e.message?e.message:"Column strip value read failed.");
+    if(e&&e.message)gdSetPracticeScanStatus(e.message);
+    else gdSetPracticeScanStatus(gdT("practice.columnStripReadFailed"),{state:"error"});
     return null;
   }finally{
     gdPracticeReleaseProcessingControlsSafe("column-strip-value-finally");
@@ -11442,7 +11429,7 @@ function gdPracticeSetContinueScanReady(ready,opts={}){
   const manualBtn=document.getElementById("gdPracticeManualQuadBtn");
   if(defaultBtn)defaultBtn.hidden=true;
   if(manualBtn)manualBtn.hidden=true;
-  if(scanBtn)scanBtn.textContent="Scan";
+  if(scanBtn)scanBtn.textContent=gdT("practice.scan");
   if(btn){
     btn.hidden=!ready;
     if(ready){
@@ -11887,7 +11874,7 @@ function gdOpenPracticeManualQuadTool(){
   document.body.classList.remove("gdPracticeScanRunning");
   document.getElementById("gdPracticeScanner")?.classList.remove("active");
   document.getElementById("gdPracticeOcrReview")?.classList.remove("active","stripOnly");
-  gdPracticeManualQuadStatus(checkpoint.manualFallback?"Frame the value table with the four pins, then scan.":"Pins loaded from the detected value shape. Stretch flat when the four corners look right.","ready");
+  gdPracticeManualQuadStatus(checkpoint.manualFallback?gdT("practice.framePinsThenScan"):gdT("practice.pinsLoadedFromShape"),"ready");
   gdBindPracticeManualQuadEvents();
   gdRenderPracticeManualQuad();
   try{root.scrollIntoView({behavior:"smooth",block:"start"});}catch(e){}
@@ -11904,14 +11891,14 @@ function gdResetPracticeManualQuad(){
   const state=gdPracticeManualQuadState;
   if(!state)return;
   state.quad=state.originalQuad.map(point=>({x:point.x,y:point.y}));
-  gdPracticeManualQuadStatus("Pins reset to the detected shape.","ready");
+  gdPracticeManualQuadStatus(gdT("practice.pinsReset"),"ready");
   gdRenderPracticeManualQuad();
 }
 async function gdApplyPracticeManualQuad(){
   if(gdPracticeScanReentryBlocked())return null;
   const state=gdPracticeManualQuadState;
   if(!state?.source||!gdPracticeQuadPoints(state.quad)){
-    gdPracticeManualQuadStatus("Manual shape is not ready.","error");
+    gdPracticeManualQuadStatus(gdT("practice.manualShapeNotReady"),"error");
     return;
   }
   if(!gdPracticeImportCanStart(gdPracticePhotoName||"Adjusted practice photo scan"))return null;
@@ -11938,7 +11925,7 @@ async function gdApplyPracticeManualQuad(){
   const flattened=gdWarpQuadToCanvas(warpSource,warpQuad,1800);
   if(!flattened){
     gdSetPracticePhotoProcessing(false,{immediate:true,skipJob:true});
-    gdPracticeManualQuadStatus("Could not stretch the manual shape flat.","error");
+    gdPracticeManualQuadStatus(gdT("practice.manualStretchFailed"),"error");
     return;
   }
   flattened.__gdNormalizeMode="manual-corner-flatten";
@@ -11977,24 +11964,25 @@ async function gdApplyPracticeManualQuad(){
   }catch(e){
     console.warn("[GolfDaddy] adjusted practice photo scan failed",e);
     gdPracticeReleaseProcessingControlsSafe("adjusted-photo-scan-failed");
-    gdSetPracticeScanStatus(e&&e.message?e.message:"Adjusted photo scan failed");
+    if(e&&e.message)gdSetPracticeScanStatus(e.message);
+    else gdSetPracticeScanStatus(gdT("practice.adjustedScanFailed"),{state:"error"});
     return null;
   }
 }
 async function gdBuildPracticeClusterCheckpoint(){
-  if(!gdPracticePhotoBitmap){gdPracticeFeedback("Choose a photo first.","error");return null;}
+  if(!gdPracticePhotoBitmap){gdPracticeFeedback(gdT("practice.choosePhotoFirst"),"error",{state:"idle"});return null;}
   const smallMessage=gdPracticePhotoSmallMessage();
   if(smallMessage){
-    gdPracticeFeedback(smallMessage,"error");
+    gdPracticeFeedback(smallMessage,"error",{state:"idle"});
     gdLmSetStatus("Status","Image too small",smallMessage,"conflict_check");
     return null;
   }
   gdPracticeSetContinueScanReady(false);
-  gdSetPracticeScanStatus("Scanning whole page for value-cluster shape...");
+  gdSetPracticeScanStatus(gdT("practice.scanningWholePage"),{state:"scanning"});
   gdLmSetStatus("Status","Scanning whole page for value shape",gdPracticePhotoName||"Camera image","needs_more_data");
   const source=gdPracticeNormalizedCanvas||gdNormalizeLaunchMonitorTable(gdPracticePhotoBitmap)||gdPracticePhotoBitmap;
   const normalizeMode=String(source?.__gdNormalizeMode||"unknown");
-  gdSetPracticeScanStatus(normalizeMode.startsWith("perspective-warp")?"Table squared. Fitting four value-track lines...":"Table prepared. Fitting four value-track lines...");
+  gdSetPracticeScanStatus(normalizeMode.startsWith("perspective-warp")?gdT("practice.tableSquaredFitting"):gdT("practice.tablePreparedFitting"),{state:"scanning"});
   const visualCluster=typeof gdVisualValueClusterIsolation==="function"
     ?gdVisualValueClusterIsolation(source,{targetW:1800})
     :null;
@@ -13581,11 +13569,11 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
   const sourceLabel=opts.sourceLabel||gdPracticePhotoName||"Practice photo scan";
   const flat=checkpoint?.scanImage||checkpoint?.directColumnSource||checkpoint?.cluster?.displayCutoutCanvas||checkpoint?.cluster?.cutoutCanvas||gdPracticeNormalizedCanvas||null;
   if(!OCR||!PIX||!REG){
-    gdPracticeFeedback("Clarity Table OCR module is not loaded.","error");
+    gdPracticeFeedback(gdT("shots.scanModuleNotLoaded"),"error",{state:"idle"});
     return null;
   }
   if(!flat||typeof flat.width!=="number"){
-    gdPracticeFeedback("No flattened value grid available. Re-frame and scan again.","error");
+    gdPracticeFeedback(gdT("practice.scanFailTable"),"error",{state:"error"});
     gdOpenPracticeManualQuadTool();
     return null;
   }
@@ -13599,7 +13587,7 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
   window.__gdPracticeClusterCheckpoint=checkpoint;
   gdClosePracticeManualQuadTool();
   gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:8,preserveClubs:true});
-  gdPracticeFeedback("Scanning: splitting columns...");
+  gdPracticeFeedback(gdT("shots.scanningSplittingColumns"),"",{state:"scanning"});
   await gdPracticeYieldScanPaint();
   try{
     // Detect boxes from pixels (reliable geometry, no misses), then OCR EACH box
@@ -13641,7 +13629,7 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     }).join("  |  ");
     gdPracticeDebugCheckpointSafe("value_corridor_mapping",columns.length>=4?"success":"failed",{outputSummary:`${columns.length} columns from ${numberBoxes.length} number boxes (${readBoxes.length} read) across ${valueRows.length} value rows\nPer-column: ${columnBreakdown}`,counts:{columns:columns.length,numberBoxes:numberBoxes.length,textBoxes:textBoxes.length,rows:valueRows.length},snapshot:{canvas:gdClarityScanOverlay(flat,{numberBoxes:numberBoxes,textBoxes:textBoxes,columns:columns}),label:"Column split: value boxes green, text boxes blue, cuts yellow"}});
     if(columns.length<4||valueRows.length<1){
-      gdPracticeFeedback("Column split did not find a usable grid. Re-frame and scan again.","error");
+      gdPracticeFeedback(gdT("practice.scanFailTable"),"error",{state:"error"});
       gdOpenPracticeManualQuadTool();
       return null;
     }
@@ -13671,7 +13659,7 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     const allocatedCount=namedStrips.length;
     gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Named ${allocatedCount}/${strips.length}: ${strips.map(s=>s.metricKey||("?"+(s.headerText?"["+s.headerText+"]":""))).join(" | ")}`,counts:{allocated:allocatedCount,strips:strips.length},snapshot:{canvas:gdClarityStripsMontage(strips),label:"Physical strips: green=named, red=unnamed"}});
     if(allocatedCount<4){
-      gdPracticeFeedback("Header allocation could not identify the columns. Re-frame and scan again.","error");
+      gdPracticeFeedback(gdT("practice.scanFailHeaders"),"error",{state:"error"});
       gdOpenPracticeManualQuadTool();
       return null;
     }
@@ -13773,14 +13761,14 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     const rowCount=Number(payload?.clubGroups?.length)||0;
     gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots (${scanRows.length} rows x ${allocatedCount} strips)\nPer-strip band counts (after head-trim to consensus): ${(readResult.stripCounts||[]).join(" ")}\n${readDump}\nRow filter (summary/sparse):\n${rowFilterLog.join("\n")}`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityStripsMontage(namedStrips),label:`Extraction: ${rowCount} shots read from ${namedStrips.length} physical strips`}});
     if(!rowCount){
-      gdPracticeFeedback("No usable rows were read. Re-frame the value grid and scan again.","error");
+      gdPracticeFeedback(gdT("practice.scanFailValues"),"error",{state:"error"});
       gdOpenPracticeManualQuadTool();
       return null;
     }
     gdPracticeSetExtractionPreview(payload,sourceLabel);
     await gdImportLaunchMonitorPayload(payload,sourceLabel);
-    gdSetPracticeScanStatus(`Scan complete: saved ${rowCount} shot${rowCount===1?"":"s"} to the Clarity Shot Library.`);
-    gdPracticeFeedback(`Saved ${rowCount} shot${rowCount===1?"":"s"} to the Shot Library.`,"ready");
+    gdSetPracticeScanStatus(gdTn("shots.scanCompleteSaved",rowCount),{state:"ready"});
+    gdPracticeFeedback(gdTn("shots.savedToLibrary",rowCount),"ready",{state:"idle"});
     return payload;
   }catch(e){
     if(typeof gdPracticeIsQuietScanStop==="function"&&gdPracticeIsQuietScanStop(e)){
@@ -13789,13 +13777,13 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     }
     console.warn("[GolfDaddy] Clarity table OCR scan failed",e);
     gdPracticeDebugFailedSafe("extraction_started",e,{outputSummary:"Clarity table OCR failed",technicalDetails:e&&e.stack});
-    gdPracticeFeedback(e&&e.message?e.message:"Table OCR scan failed. Adjust the frame and scan again.","error");
+    gdPracticeFeedback(e&&e.message?e.message:gdT("practice.scanFailTable"),"error",e&&e.message?{}:{state:"error"});
     return null;
   }finally{
     // Single fail boundary: if this job is still active here (any early return,
     // stall, or throw that didn't complete the import), fail it so the UI is
     // released and a new scan isn't blocked as "still running".
-    try{if(gdPracticeImportJobIsCurrent(jobId))gdPracticeFailImportJob(new Error("Clarity table OCR ended without saving"),"Scan ended without saving. Adjust the frame and scan again.");}catch(e){}
+    try{if(gdPracticeImportJobIsCurrent(jobId))gdPracticeFailImportJob(new Error("Clarity table OCR ended without saving"),gdT("shots.scanEndedWithoutSaving"));}catch(e){}
     gdSetPracticePhotoProcessing(false,{skipJob:true});
     gdPracticeReleaseProcessingControlsSafe("clarity-table-ocr-finally");
   }
@@ -13804,7 +13792,7 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
   // Rebuilt path: delegate to the isolated Clarity Table OCR module. The old
   // corridor/header/column pipeline is bypassed (kept as dead code for now).
   if(!checkpoint){
-    gdPracticeFeedback("Frame the value grid first, then scan.","error");
+    gdPracticeFeedback(gdT("practice.scanFailTable"),"error",{state:"error"});
     return null;
   }
   return gdClarityTableOcrScanFromCheckpoint(checkpoint,opts);
@@ -13828,7 +13816,7 @@ async function gdHandleLaunchMonitorPhoto(file){
   if(!file){
     gdPracticeDebugStartRunSafe({sourceName:"Practice photo",sourceType:"image"});
     gdPracticeDebugFailedSafe("photo_selected",new Error("No image selected"),{outputSummary:"No image selected"});
-    gdPracticeFeedback("No image selected. Choose a practice photo to scan.","error");
+    gdPracticeFeedback(gdT("shots.noImageSelected"),"error",{state:"idle"});
     return;
   }
   gdPracticeDebugStartRunSafe({sourceName:file.name||"Photo shot data scan",sourceType:file.type||"image",fileName:file.name||"",fileSize:file.size||0});
@@ -13852,7 +13840,7 @@ async function gdHandleLaunchMonitorPhoto(file){
     gdPracticeClearScanCheckpoint();
     gdPracticeHideDebug();
     gdPracticeSetContinueScanReady(false);
-    gdPracticeFeedback("Photo ready. Checking for a value-grid shape...");
+    gdPracticeFeedback(gdT("shots.photoReadyChecking"),"",{state:"scanning"});
     const smallMessage=gdPracticePhotoSmallMessage();
     if(smallMessage){
       gdPracticeDebugFailedSafe("image_metadata",new Error(smallMessage),{outputSummary:"Image too small for reliable scan"});
@@ -13882,7 +13870,7 @@ async function gdHandleLaunchMonitorPhoto(file){
   }catch(e){
     console.warn("[GolfDaddy] launch monitor photo prepare failed",e);
     gdPracticeDebugFailedSafe("photo_selected",e,{outputSummary:"Could not open or prepare photo",technicalDetails:e&&e.stack});
-    gdPracticeFeedback(e&&e.message?e.message:"Could not open photo","error");
+    gdPracticeFeedback(e&&e.message?e.message:gdT("shots.couldNotOpenPhoto"),"error",e&&e.message?{}:{state:"error"});
   }
 }
 async function gdScanPracticePhotoCrop(){
@@ -13915,7 +13903,7 @@ async function gdScanPracticePhotoCrop(){
     releaseScanLoader();
     console.warn("[GolfDaddy] launch monitor photo cluster failed",e);
     gdPracticeDebugFailedSafe("crop_cleanup",e,{outputSummary:"Photo cluster failed",technicalDetails:e&&e.stack});
-    gdPracticeFeedback(e&&e.message?e.message:"Photo cluster failed. Frame it manually, then scan.","error");
+    gdPracticeFeedback(e&&e.message?e.message:gdT("practice.scanFailTable"),"error",e&&e.message?{}:{state:"error"});
     gdLmSetStatus("Status","Photo cluster failed",e&&e.message?e.message:"Could not find OCR cluster","conflict_check");
     gdOpenPracticeManualQuadTool();
   }
@@ -13941,17 +13929,17 @@ async function gdImportReviewedPracticeOcr(){
   payload.inputType="photo-ocr-reviewed";
   payload.sourceIdentity={providerGuess:"photo_ocr_reviewed",confidence:.72,evidence:cleaned.split(/\n/).slice(0,6)};
   if(!(payload.clubGroups||[]).length){
-    gdSetPracticeScanStatus("No usable shots found. Keep the header row and at least Club plus Carry.");
+    gdSetPracticeScanStatus(gdT("practice.scanFailValues"),{state:"error"});
     gdLmSetStatus("Status","No usable shots found","Review OCR text before importing.","conflict_check");
     return;
   }
   if(gdPracticeToleranceCanEditSafe()){
-    gdPracticeSetExtractionPreview(payload,"Reviewed photo scan");
-    gdSetPracticeScanStatus(`Extraction checkpoint ready with ${payload.clubGroups.length} shots`);
+    gdPracticeSetExtractionPreview(payload,gdT("shots.reviewedPhotoScan"));
+    gdSetPracticeScanStatus(gdT("shots.extractionCheckpointReady",{n:payload.clubGroups.length}),{state:"ready"});
     return;
   }
-  await gdImportLaunchMonitorPayload(payload,"Reviewed photo scan");
-  gdSetPracticeScanStatus(`Reviewed scan imported ${payload.clubGroups.length} shot${payload.clubGroups.length===1?"":"s"}`);
+  await gdImportLaunchMonitorPayload(payload,gdT("shots.reviewedPhotoScan"));
+  gdSetPracticeScanStatus(gdTn("shots.reviewedScanImported",payload.clubGroups.length),{state:"ready"});
   gdCancelPracticePhotoScan(false);
 }
 function gdDownloadFlattenedGrid(){
@@ -13990,14 +13978,14 @@ function gdCancelPracticePhotoScan(clearStatus=true){
   gdPracticeSetContinueScanReady(false);
   const preview=document.getElementById("gdPracticeScanPreview");
   if(preview)preview.removeAttribute("src");
-  if(clearStatus)gdSetPracticeScanStatus("Upload a practice photo, adjust the box, then generate the OCR grid.");
+  if(clearStatus)gdSetPracticeScanStatus(gdT("shots.uploadPracticePhoto"),{state:"idle"});
 }
 function gdCancelPracticeOcrReview(){
   document.getElementById("gdPracticeOcrReview")?.classList.remove("active","stripOnly");
   gdClosePracticeManualQuadTool();
   gdPracticeClearScanCheckpoint();
   gdPracticeHideDebug();
-  gdSetPracticeScanStatus("Line the value grid up in the guide or choose another photo.");
+  gdSetPracticeScanStatus(gdT("shots.lineUpValueGrid"),{state:"idle"});
 }
 function gdClearCourseShotData(){
   try{
@@ -14008,7 +13996,7 @@ function gdClearCourseShotData(){
     if(typeof renderStats==="function")renderStats();
     if(typeof renderDataHubStatus==="function")renderDataHubStatus();
     if(typeof renderCompareData==="function")renderCompareData();
-    gdLmToast("Course data cleared");
+    gdLmToast(gdT("shots.courseDataCleared"));
   }catch(e){
     console.warn("[GolfDaddy] course data clear failed",e);
   }
@@ -14166,7 +14154,7 @@ async function gdHandleRawCourseDataUpload(file){
     const store=nativeStore||gdBuildCourseStoreFromRawRows(Array.isArray(data)?data:[],file.name||"raw-course-upload");
     const rows=store?.outcomes?.length||0;
     if(!rows){
-    gdLmToast("No course shots found");
+    gdLmToast(gdT("shots.noCourseShotsFound"));
       return;
     }
     const api=window.GolfDaddyShotEvents;
@@ -14175,10 +14163,10 @@ async function gdHandleRawCourseDataUpload(file){
     if(typeof renderStats==="function")renderStats();
     if(typeof renderDataHubStatus==="function")renderDataHubStatus();
     if(typeof renderCompareData==="function")renderCompareData();
-    gdLmToast(`Raw course data loaded (${rows} shot${rows===1?"":"s"})`);
+    gdLmToast(gdTn("shots.rawCourseDataLoaded",rows));
   }catch(e){
     console.warn("[GolfDaddy] raw course upload failed",e);
-    gdLmToast("Course upload failed");
+    gdLmToast(gdT("shots.courseUploadFailed"));
   }
 }
 function gdClearLaunchMonitorDemo(){
@@ -14189,7 +14177,7 @@ function gdClearLaunchMonitorDemo(){
     gdRenderLaunchMonitorAdmin();
     if(typeof window.gdRenderPracticeData==="function")window.gdRenderPracticeData();
     if(typeof window.gdRenderDataHubStatus==="function")window.gdRenderDataHubStatus();
-    gdLmToast("Launch monitor data cleared");
+    gdLmToast(gdT("shots.launchMonitorDataCleared"));
   }catch(e){
     console.warn("[GolfDaddy] launch monitor clear failed",e);
   }
@@ -14597,7 +14585,7 @@ function setMapSource(index, reason="manual"){
 
   baseLayer.once("load",()=>{
     if(reason==="security"){
-      toast(`Switched to ${current.name}`);
+      toast(gdT("shots.switchedToSource",{name:current.name}));
     }
   });
 }
@@ -14683,10 +14671,11 @@ let gdCurrentShotTargetMode="greenTarget", gdLastShotTargetMode="greenTarget", g
    because the toggle is about how this phone reads, not who is signed in. */
 const GD_UNITS_KEY="gd_units_v1";
 function gdStoredUnits(){try{const stored=localStorage.getItem(GD_UNITS_KEY);if(stored==="m"||stored==="yd")return stored}catch(e){}return"m"}
-function gdUnitsLabel(unit){return unit==="yd"?"Yards":"Meters"}
+function gdUnitsLabel(unit){return unit==="yd"?gdT("gpsSettings.unitsYards"):gdT("shots.unitsMeters")}
 /* The Settings row is written in HTML as Meters; this is what makes it tell the
    truth when the remembered setting is yards. */
 function gdSyncUnitsButtons(){const label=gdUnitsLabel(units);const btn=document.getElementById("unitsToggle");if(btn)btn.textContent=label;const sub=document.getElementById("unitsSub");if(sub)sub.textContent=label}
+try{if(window.GDI18n)window.GDI18n.onChange(()=>{try{gdSyncUnitsButtons()}catch(e){}})}catch(e){}
 let units=gdStoredUnits(), showAim=true, showFilter=true, gpsWatch=null, gpsOk=false, shotTracking=false, trackedShots=[], shotId=0, currentShotLogged=false;
 let gdLastAutoNextShotAt=0;
 let gdWindActive=false, gdWindLevel=1, gdWindOriginAngle=null, gdWindLandingTarget=null;
@@ -14723,18 +14712,26 @@ const pinIcon=L.divIcon({className:"",html:"<div class='pinDot'></div>",iconSize
 const demoCourses=[];
 function gdHonestGpsStateLabel(s){
   const label=String(s||"");
-  if(label!=="GPS ready")return label;
+  /* "GPS ready" is a code, not text: it is always replaced by one of the labels below.
+     The other fixed states some callers pass (gd-flag-pin.js, gd-route-audit.js) are codes
+     too, shown in the player's language; anything else arrives already translated. */
+  if(label!=="GPS ready"){
+    const key={"Aim":"roundPlay.stateAim","Manual GPS":"roundPlay.manualGps","Place pin":"roundPlay.statePlacePin","Mapped: set position":"roundPlay.mappedSetPosition"}[label];
+    return key?gdT(key):label;
+  }
   try{
-    if(typeof lockedFrame!=="undefined"&&lockedFrame&&start&&target)return "GPS locked";
-    if(typeof gpsOk!=="undefined"&&gpsOk)return (typeof gdMappedCourseAssistActive==="function"&&gdMappedCourseAssistActive())?"Mapped: set position":"GPS fixed · set green";
+    if(typeof lockedFrame!=="undefined"&&lockedFrame&&start&&target)return gdT("roundPlay.gpsLocked");
+    if(typeof gpsOk!=="undefined"&&gpsOk)return (typeof gdMappedCourseAssistActive==="function"&&gdMappedCourseAssistActive())?gdT("roundPlay.mappedSetPosition"):gdT("roundPlay.gpsFixedSetGreen");
   }catch(e){}
-  return "GPS not started";
+  return gdT("roundPlay.gpsNotStarted");
 }
 function setState(s){document.getElementById("stateLine").textContent=gdHonestGpsStateLabel(s)}
 function fmt(m){return units==="yd"?{value:Math.round(m*1.09361),unit:"yd"}:{value:Math.round(m),unit:"m"}}
 function setGps(on,label="GPS"){const el=document.getElementById("gpsLive");el.classList.toggle("off",!on);el.innerHTML=`<i></i>${label}`}
-function gdHintWantsMappedStartPill(text){
-  return String(text||"").trim()==="Tap where you are standing"&&typeof gdMappedCourseAssistActive==="function"&&gdMappedCourseAssistActive();
+/* The mapped-start pill is asked for by whoever sets the hint - showHint(text,{mappedStart:true}) -
+   not by reading the words, which change with the language. */
+function gdHintWantsMappedStartPill(text,opts){
+  return !!(opts&&opts.mappedStart)&&typeof gdMappedCourseAssistActive==="function"&&gdMappedCourseAssistActive();
 }
 function gdInstallMappedStartHintActions(h){
   if(!h||h.__gdMappedStartActionsInstalled)return;
@@ -14754,14 +14751,14 @@ function gdInstallMappedStartHintActions(h){
 function gdRenderMappedStartHint(h){
   gdInstallMappedStartHintActions(h);
   h.classList.add("gdMappedStartPill");
-  h.innerHTML='<button class="gdMappedStartAction" type="button" data-gd-mapped-start-action="manual">Set Start Point</button><button class="gdMappedStartAction gdHeadToTee" type="button" data-gd-mapped-start-action="tee">Head To the Tee</button>';
+  h.innerHTML='<button class="gdMappedStartAction" type="button" data-gd-mapped-start-action="manual">'+gdH("roundPlay.setStartPoint")+'</button><button class="gdMappedStartAction gdHeadToTee" type="button" data-gd-mapped-start-action="tee">'+gdH("play.headToTee")+'</button>';
   try{document.body.classList.add("gdMappedStartPromptActive")}catch(e){}
   try{document.getElementById("app")?.classList.add("gdPreLockFrame");}catch(e){}
 }
-function showHint(t){
+function showHint(t,opts){
   const h=document.getElementById("hint");
   if(!h)return;
-  const mappedStartPill=gdHintWantsMappedStartPill(t);
+  const mappedStartPill=gdHintWantsMappedStartPill(t,opts);
   if(mappedStartPill)gdRenderMappedStartHint(h);
   else{
     h.classList.remove("gdMappedStartPill");
@@ -14797,7 +14794,7 @@ function clearSoftActive(){
 function toggleShotUpFrame(){
   shotUpFrame=!shotUpFrame;
   const b=document.getElementById("shotUpToggle");
-  b.textContent=shotUpFrame?"On":"Off";
+  b.textContent=shotUpFrame?gdT("common.on"):gdT("common.off");
   b.classList.toggle("active",shotUpFrame);
   if(start&&target&&lockedFrame) lockFrame(false); applyShotUpAfterPlacement();
   if(!shotUpFrame) clearMapRotation();
@@ -15050,23 +15047,23 @@ function applyShotUpAfterPlacement(){
 
 function toggleSearchViewMode(){
   searchViewMode = searchViewMode==="browse" ? "phone" : "browse";
-  document.getElementById("pinModeToggle").textContent = searchViewMode==="browse" ? "Browse" : "Phone";
-  document.getElementById("pinModeSub").textContent = searchViewMode==="browse" ? "500m browse helper" : "Phone direction helper";
+  document.getElementById("pinModeToggle").textContent = searchViewMode==="browse" ? gdT("roundPlay.searchBrowse") : gdT("roundPlay.searchPhone");
+  document.getElementById("pinModeSub").textContent = searchViewMode==="browse" ? gdT("roundPlay.searchBrowseHelper") : gdT("roundPlay.searchPhoneHelper");
   if(searchViewMode==="phone") startOrientation();
 }
 function cycleFrameTightness(){
   if(lockFrameTightness===0.62){
     lockFrameTightness=0.48;
-    document.getElementById("frameTightToggle").textContent="Very tight";
-    document.getElementById("frameTightSub").textContent="Maximum shot focus";
+    document.getElementById("frameTightToggle").textContent=gdT("roundPlay.frameVeryTight");
+    document.getElementById("frameTightSub").textContent=gdT("roundPlay.frameVeryTightHint");
   }else if(lockFrameTightness===0.48){
     lockFrameTightness=0.82;
-    document.getElementById("frameTightToggle").textContent="Roomy";
-    document.getElementById("frameTightSub").textContent="More context";
+    document.getElementById("frameTightToggle").textContent=gdT("roundPlay.frameRoomy");
+    document.getElementById("frameTightSub").textContent=gdT("roundPlay.frameRoomyHint");
   }else{
     lockFrameTightness=0.62;
-    document.getElementById("frameTightToggle").textContent="Tight";
-    document.getElementById("frameTightSub").textContent="Tight shot focus";
+    document.getElementById("frameTightToggle").textContent=gdT("gpsSettings.tightnessTight");
+    document.getElementById("frameTightSub").textContent=gdT("gpsSettings.tightnessTightHint");
   }
   if(start&&target&&lockedFrame) lockFrame(false); applyShotUpAfterPlacement();
 }
@@ -15111,10 +15108,10 @@ function showSearchView(){
     startOrientation();
     framePhoneDirection();
     drawPhoneDirectionHelper();
-    setState("Search · phone direction");
+    setState(gdT("roundPlay.stateSearchPhone"));
   }else{
     frameBrowseAroundStart();
-    setState("Search · 500m browse");
+    setState(gdT("roundPlay.stateSearchBrowse"));
   }
 }
 function frameBrowseAroundStart(){
@@ -15202,7 +15199,7 @@ function setBubbleOnlyLock(on){
   const btn=document.getElementById("frameLockBtn");
   if(btn) btn.classList.toggle("softActive", lockedFrame);
   if(lockedFrame){
-    setState("Locked · move shot target");
+    setState(gdT("roundPlay.stateLockedMoveTarget"));
     hideHint();
   }
 }
@@ -15271,7 +15268,7 @@ function gdToggleSimpleGreenZoom(ev){
     return false;
   }
   const focus=gdActiveGreenZoomTarget();
-  if(!focus){try{toast("Set a shot target first")}catch(e){};return false;}
+  if(!focus){try{toast(gdT("roundPlay.setShotTargetFirst"))}catch(e){};return false;}
   try{gdSimpleGreenZoomReturnView={center:map.getCenter(),zoom:map.getZoom()};}catch(e){gdSimpleGreenZoomReturnView=null;}
   gdSimpleGreenZoomActive=true;
   document.body.classList.add("gd-green-zoom-active");
@@ -15469,7 +15466,7 @@ function gdApplyLiveWind(data,render=true){
   gdCloseWindPicker();
   gdApplyWindToCurrentShot(render);
   gdSyncWindButton();
-  try{toast(`Live wind ${gdWindLevel}`)}catch(e){}
+  try{toast(gdT("roundPlay.liveWindLevel",{n:gdWindLevel}))}catch(e){}
   return true;
 }
 function gdHasWindVector(){
@@ -15554,8 +15551,9 @@ function gdSyncWindButton(){
   btn.classList.toggle("windActive",active);
   btn.classList.toggle("windReady",ready);
   btn.classList.toggle("windLoading",!!gdLiveWindState.loading);
-  btn.setAttribute("aria-label",active?`Wind ${gdWindLevel}`:(ready?"Live wind ready":"Wind"));
-  btn.title=active?`Wind ${gdWindLevel}`:(ready?"Live wind ready":"Wind");
+  const windLabel=active?gdT("roundPlay.windLevel",{n:gdWindLevel}):(ready?gdT("roundPlay.liveWindReady"):gdT("rail.wind"));
+  btn.setAttribute("aria-label",windLabel);
+  btn.title=windLabel;
   const html=active?`<span class="gdWindLevelText">${gdWindLevel}</span>`:gdWindIconMarkup();
   if(btn.dataset.gdWindHtml!==html){
     btn.innerHTML=html;
@@ -15566,14 +15564,14 @@ async function gdWindToolPressed(event){
   if(event){event.preventDefault?.();event.stopPropagation?.();event.stopImmediatePropagation?.();}
   if(Date.now()<gdWindLongPressSuppressUntil)return false;
   if(typeof gdTournamentModeEnabled==="function"&&gdTournamentModeEnabled()){
-    try{toast("Wind off in tournament mode")}catch(e){}
+    try{toast(gdT("roundPlay.windOffTournament"))}catch(e){}
     return false;
   }
   if(!gdHasWindVector()){
     if(gdLiveWindEnabled()){
       const live=gdLiveWindFresh()?gdLiveWindState.data:await gdFetchLiveWind();
       if(live&&gdApplyLiveWind(live,true))return false;
-      try{toast("Live wind unavailable")}catch(e){}
+      try{toast(gdT("roundPlay.liveWindUnavailable"))}catch(e){}
     }
     gdOpenWindPicker();
     gdSyncWindButton();
@@ -15589,13 +15587,13 @@ async function gdWindToolPressed(event){
     renderShot();
     updatePinLine();
     gdSyncWindButton();
-    try{toast("Wind off")}catch(e){}
+    try{toast(gdT("roundPlay.windOff"))}catch(e){}
     return false;
   }
   gdWindLevel=gdWindLevel+1;
   gdWindSelectionSource="user";
   gdApplyWindToCurrentShot(true);
-  try{toast(`Wind ${gdWindLevel}`)}catch(e){}
+  try{toast(gdT("roundPlay.windLevel",{n:gdWindLevel}))}catch(e){}
   return false;
 }
 function gdWindPickDirection(event){
@@ -15607,7 +15605,7 @@ function gdWindPickDirection(event){
   const cy=rect.top+rect.height/2;
   const dx=event.clientX-cx;
   const dy=event.clientY-cy;
-  if(Math.sqrt(dx*dx+dy*dy)<22){try{toast("Tap wind origin near the edge")}catch(e){};return false;}
+  if(Math.sqrt(dx*dx+dy*dy)<22){try{toast(gdT("roundPlay.tapWindOriginEdge"))}catch(e){};return false;}
   const screenAngle=Math.atan2(dx,-dy);
   const mapRotation=((Number(currentMapRotation)||0)*Math.PI)/180;
   gdWindOriginAngle=gdNormAngle(screenAngle-mapRotation);
@@ -15617,7 +15615,7 @@ function gdWindPickDirection(event){
   gdCloseWindPicker();
   gdApplyWindToCurrentShot(true);
   gdSyncWindButton();
-  try{toast("Wind 1")}catch(e){}
+  try{toast(gdT("roundPlay.windLevel",{n:1}))}catch(e){}
   return false;
 }
 window.gdWindToolPressed=gdWindToolPressed;
@@ -15637,7 +15635,7 @@ function gdInstallWindLongPress(){
       press.long=true;
       gdWindLongPressSuppressUntil=Date.now()+650;
       gdOpenWindPicker();
-      try{toast("Set wind direction")}catch(e){}
+      try{toast(gdT("roundPlay.setWindDirection"))}catch(e){}
     },560);
   },true);
   btn.addEventListener("pointermove",ev=>{
@@ -15721,8 +15719,8 @@ function gdCoursePickerDefaultPoint(){
 }
 function gdAssumedCourseLabelForPicker(point=gdCoursePickerDefaultPoint()){
   const lat=Number(point?.lat),lng=Number(point?.lng);
-  if(Number.isFinite(lat)&&Number.isFinite(lng))return `Assumed course ${lat.toFixed(2)}, ${lng.toFixed(2)}`;
-  return "Assumed course";
+  if(Number.isFinite(lat)&&Number.isFinite(lng))return gdT("roundPlay.assumedCourseAt",{lat:lat.toFixed(2),lng:lng.toFixed(2)});
+  return gdT("roundPlay.assumedCourse");
 }
 function gdCurrentAssumedCoursePayload(){
   try{
@@ -15745,8 +15743,8 @@ function gdRefreshCourseAssumedOption(course){
   const name=document.getElementById("gdCourseAssumedName");
   const button=document.getElementById("gdCourseAssumedPlayBtn");
   const option=document.getElementById("gdCourseAssumedOption");
-  if(name)name.textContent=payload.name;
-  if(button)button.textContent=window.gdCourseChangeMode==="assumed-label"?"Confirm":"Play";
+  if(name)name.textContent=payload.name==="Manual GPS"?gdT("roundPlay.manualGps"):payload.name;
+  if(button)button.textContent=window.gdCourseChangeMode==="assumed-label"?gdT("roundPlay.confirm"):gdT("picker.play");
   if(option){
     option.__gdCoursePayload=payload;
     option.dataset.gdCourseName=payload.name;
@@ -15784,14 +15782,14 @@ function renderCourses(courses){
     row.__gdCoursePayload=c;
     row.dataset.gdCourseName=c.name;
     gdCoursePickerSetDatasetPoint(row,c);
-    row.innerHTML=`<div><div class="name"></div><div class="meta">Course result</div></div><button class="play">Play</button>`;
-    row.querySelector(".name").textContent=c.name||"Course";
+    row.innerHTML=`<div><div class="name"></div><div class="meta">${gdH("roundPlay.courseResult")}</div></div><button class="play">${gdH("picker.play")}</button>`;
+    row.querySelector(".name").textContent=c.name||gdT("roundPlay.courseFallbackName");
     row.onclick=()=>gdOpenCoursePickerCourse(c);
     row.querySelector("button").onclick=e=>{e.preventDefault();e.stopPropagation();if(e.stopImmediatePropagation)e.stopImmediatePropagation();gdOpenCoursePickerCourse(c);return false;};
     list.appendChild(row);
   });
   const count=document.getElementById("countLine");
-  if(count)count.textContent=courses.length?`${courses.length} found`:"Search";
+  if(count)count.textContent=courses.length?gdTn("picker.foundCount",courses.length):gdT("picker.search");
 }
 function gdNormalizeCoursePickerPayload(c){
   const src=c&&typeof c==="object"?c:{};
@@ -15884,7 +15882,7 @@ function gdOpenChangeCourse(event){
     renderCourses([]);
     gdRefreshAssumedCourseFromLocation();
     const count=document.getElementById("countLine");
-    if(count)count.textContent="Search";
+    if(count)count.textContent=gdT("picker.search");
   }catch(e){}
   try{setTimeout(()=>document.getElementById("searchInput")?.focus(),80);}catch(e){}
   return false;
@@ -16114,7 +16112,7 @@ function gdEnsureCoursePinScreen(){
   panel=document.createElement("div");
   panel.id="gdCoursePinScreen";
   panel.className="gdCoursePinScreen hidden";
-  panel.innerHTML='<div class="gdCoursePinCrosshair" aria-hidden="true"></div><div class="gdCoursePinPanel" role="dialog" aria-live="polite" aria-labelledby="gdCoursePinTitle"><div class="gdCoursePinKicker" id="gdCoursePinKicker">Check the course</div><div class="gdCoursePinTitle" id="gdCoursePinTitle">Pin course</div><div class="gdCoursePinText" id="gdCoursePinText">Move the map over the course, then pin it.</div><div class="gdCoursePinActions"><button type="button" class="gdCoursePinSecondary" onclick="gdCancelCoursePin(event)">Back</button><button type="button" class="gdCoursePinPrimary" onclick="gdConfirmCoursePin(event)">Pin Course</button></div></div>';
+  panel.innerHTML='<div class="gdCoursePinCrosshair" aria-hidden="true"></div><div class="gdCoursePinPanel" role="dialog" aria-live="polite" aria-labelledby="gdCoursePinTitle"><div class="gdCoursePinKicker" id="gdCoursePinKicker">'+gdH("roundPlay.checkCourse")+'</div><div class="gdCoursePinTitle" id="gdCoursePinTitle">'+gdH("roundPlay.pinCourseTitle")+'</div><div class="gdCoursePinText" id="gdCoursePinText">'+gdH("roundPlay.moveMapOverCourse")+'</div><div class="gdCoursePinActions"><button type="button" class="gdCoursePinSecondary" onclick="gdCancelCoursePin(event)" data-i18n="common.back">'+gdH("common.back")+'</button><button type="button" class="gdCoursePinPrimary" onclick="gdConfirmCoursePin(event)" data-i18n="roundPlay.pinCourseButton">'+gdH("roundPlay.pinCourseButton")+'</button></div></div>';
   (document.getElementById("courseScreen")||document.body).appendChild(panel);
   return panel;
 }
@@ -16173,12 +16171,12 @@ function gdEnsurePlayOrderScreen(){
      for both, so they cannot drift apart visually. */
   panel.className="gdCoursePinScreen hidden";
   panel.innerHTML='<div class="gdCoursePinPanel" role="dialog" aria-live="polite" aria-labelledby="gdPlayOrderTitle">'
-    +'<div class="gdCoursePinKicker" id="gdPlayOrderKicker">27 holes here</div>'
-    +'<div class="gdCoursePinTitle" id="gdPlayOrderTitle">Pick your play order</div>'
-    +'<div class="gdCoursePinText" id="gdPlayOrderText">Tap the nine you start on, then the one you finish on.</div>'
+    +'<div class="gdCoursePinKicker" id="gdPlayOrderKicker">'+gdH("roundPlay.holesHere.other",{n:27})+'</div>'
+    +'<div class="gdCoursePinTitle" id="gdPlayOrderTitle" data-i18n="roundPlay.pickPlayOrder">'+gdH("roundPlay.pickPlayOrder")+'</div>'
+    +'<div class="gdCoursePinText" id="gdPlayOrderText">'+gdH("roundPlay.playOrderTapStart")+'</div>'
     +'<div class="gdCoursePinActions">'
-    +'<button type="button" class="gdCoursePinSecondary" onclick="gdResetPlayOrder(event)">Start again</button>'
-    +'<button type="button" class="gdCoursePinPrimary" onclick="gdConfirmPlayOrder(event)">Play these 18</button>'
+    +'<button type="button" class="gdCoursePinSecondary" onclick="gdResetPlayOrder(event)" data-i18n="roundPlay.startAgain">'+gdH("roundPlay.startAgain")+'</button>'
+    +'<button type="button" class="gdCoursePinPrimary" onclick="gdConfirmPlayOrder(event)" data-i18n="roundPlay.playTheseEighteen">'+gdH("roundPlay.playTheseEighteen")+'</button>'
     +'</div></div>';
   (document.getElementById("courseScreen")||document.body).appendChild(panel);
   return panel;
@@ -16222,9 +16220,10 @@ function gdRenderPlayOrder(){
   const text=document.getElementById("gdPlayOrderText");
   if(text){
     const named=state.picks.map(id=>(state.nines.filter(n=>n.courseId===id)[0]||{}).courseName).filter(Boolean);
-    text.textContent=state.picks.length===0?"Tap the nine you start on, then the one you finish on."
-      :state.picks.length===1?"Now tap the nine you finish on."
-      :named.join(" then ")+". That's your 18.";
+    text.textContent=state.picks.length===0?gdT("roundPlay.playOrderTapStart")
+      :state.picks.length===1?gdT("roundPlay.playOrderTapFinish")
+      :named.length>=2?gdT("roundPlay.playOrderChosen",{first:named[0],second:named[1]})
+      :gdT("roundPlay.playOrderChosenOne",{name:named[0]||""});
   }
   const primary=document.querySelector("#gdPlayOrderScreen .gdCoursePinPrimary");
   if(primary)primary.disabled=state.picks.length!==2;
@@ -16282,7 +16281,7 @@ function gdShowPlayOrderScreen(payload,facility){
       .filter(id=>facility.nines.some(n=>n.courseId===id))
   };
   const kicker=document.getElementById("gdPlayOrderKicker");
-  if(kicker)kicker.textContent=(facility.nines.length*9)+" holes here";
+  if(kicker)kicker.textContent=gdTn("roundPlay.holesHere",facility.nines.length*9);
   try{
     facility.nines.forEach(nine=>{
       const marker=L.marker([nine.lat,nine.lng],{icon:gdPlayOrderPinIcon(0),title:nine.courseName})
@@ -16346,14 +16345,14 @@ function gdShowCoursePinScreen(payload){
   const title=panel.querySelector("#gdCoursePinTitle");
   const text=panel.querySelector("#gdCoursePinText");
   const kicker=panel.querySelector("#gdCoursePinKicker");
-  if(title)title.textContent=`Pin ${payload.name||"course"}`;
+  if(title)title.textContent=payload.name?gdT("roundPlay.pinNamedCourse",{name:payload.name}):gdT("roundPlay.pinCourseTitle");
   /* This screen is now only ever a repair - the picker trusts the search
      result's coordinate until the mapper reports it was clearly wrong - so it
      leads with what went wrong rather than the old blanket "GPS not available",
      which was never the reason and is now never true. */
   const fitMessage=payload&&payload.gdCourseFitMessage?String(payload.gdCourseFitMessage):"";
-  if(kicker)kicker.textContent=fitMessage?"We could not place this course":"Check the course";
-  if(text)text.textContent=fitMessage?`${fitMessage} Move the map over it, then pin it.`:"Move the map over the course, then pin it.";
+  if(kicker)kicker.textContent=fitMessage?gdT("roundPlay.couldNotPlaceCourse"):gdT("roundPlay.checkCourse");
+  if(text)text.textContent=fitMessage?gdT("roundPlay.fitMessageMoveMap",{message:fitMessage}):gdT("roundPlay.moveMapOverCourse");
   gdSetCoursePickerPinMode(true);
   panel.classList.remove("hidden");
   gdCenterCoursePinMap(payload);
@@ -16362,7 +16361,7 @@ function gdShowCoursePinScreen(payload){
     const proposal=gdCoursePickerMapCenterPoint()||gdCoursePickerFinitePoint(payload)||gdCoursePickerDefaultPoint();
     if(owner&&typeof owner.propose==="function"&&proposal)owner.propose(payload,proposal,{source:"course-picker-pin-proposal",confidence:.35});
   }catch(e){}
-  try{if(typeof toast==="function")toast("Pin the course location");}catch(e){}
+  try{if(typeof toast==="function")toast(gdT("roundPlay.pinCourseLocation"));}catch(e){}
   return false;
 }
 function gdCancelCoursePin(event){
@@ -16386,7 +16385,7 @@ function gdConfirmCoursePin(event){
   const payload=gdNormalizeCoursePickerPayload(window.__gdPendingCoursePinPayload||window.__gdLiveCoursePickerSelection||gdCurrentAssumedCoursePayload());
   const point=gdCoursePickerPinPointForPayload(payload);
   if(!point){
-    try{if(typeof toast==="function")toast("Move the map over the course first");}catch(e){}
+    try{if(typeof toast==="function")toast(gdT("roundPlay.moveMapOverCourseFirst"));}catch(e){}
     return false;
   }
   const owner=window.GDCourseLocation;
@@ -16544,8 +16543,8 @@ function gdPrepareCoursePickerFirstHoleState(payload){
   try{if(typeof window.gdSetMappedPlayMode==="function")window.gdSetMappedPlayMode("mapped");}catch(e){}
   try{if(typeof setHole==="function")setHole({hole:1});}catch(e){}
   try{mode="start";}catch(e){}
-  try{if(typeof setState==="function")setState(typeof gdMappedStartState==="function"?gdMappedStartState():"Mapped: set position");}catch(e){}
-  try{if(typeof showHint==="function")showHint(typeof gdMappedStartHint==="function"?gdMappedStartHint():"Tap where you are standing");}catch(e){}
+  try{if(typeof setState==="function")setState(typeof gdMappedStartState==="function"?gdMappedStartState():gdT("roundPlay.mappedSetPosition"));}catch(e){}
+  try{if(typeof showHint==="function")showHint(typeof gdMappedStartHint==="function"?gdMappedStartHint():gdT("course.tapWhereStanding"),{mappedStart:true});}catch(e){}
   return true;
 }
 function gdScheduleCoursePickerFirstHoleOpen(payload){
@@ -16703,21 +16702,21 @@ function gdCourseOfflineOfferEl(){
 function gdFormatBytes(bytes){
   const n=Number(bytes);
   if(!Number.isFinite(n)||n<=0)return "";
-  return n>=1048576?(n/1048576).toFixed(1)+" MB":Math.max(1,Math.round(n/1024))+" KB";
+  return n>=1048576?gdT("course.sizeMb",{n:(n/1048576).toFixed(1)}):gdT("course.sizeKb",{n:Math.max(1,Math.round(n/1024))});
 }
 function gdShowCourseOfflineOffer(courseId,payload,course){
   if(gdCourseOfflineOfferDismissed[courseId])return;
   const el=gdCourseOfflineOfferEl();
   const size=gdFormatBytes(payload&&payload.totalBytes);
   const holes=Number(payload&&payload.holes)||0;
-  const name=String(course&&(course.name||course.courseName)||"this course");
+  const name=String(course&&(course.name||course.courseName)||gdT("roundPlay.thisCourse"));
   el.dataset.courseId=courseId;
   el.innerHTML=
-    `<div class="gdCourseOfflineOfferText"><strong>Offline map available</strong>`
-    +`<span>${gdEscapeAttr(name)}${holes?` · ${holes} holes`:""}${size?` · ${size}`:""}</span></div>`
+    `<div class="gdCourseOfflineOfferText"><strong>${gdH("roundPlay.offlineMapAvailable")}</strong>`
+    +`<span>${gdEscapeAttr(name)}${holes?` · ${gdEscapeAttr(gdTn("roundPlay.holeCount",holes))}`:""}${size?` · ${size}`:""}</span></div>`
     +`<div class="gdCourseOfflineOfferActions">`
-    +`<button type="button" class="gdCourseOfflineDismiss">Not now</button>`
-    +`<button type="button" class="gdCourseOfflineDownload">Download</button></div>`;
+    +`<button type="button" class="gdCourseOfflineDismiss">${gdH("roundPlay.notNow")}</button>`
+    +`<button type="button" class="gdCourseOfflineDownload">${gdH("roundPlay.download")}</button></div>`;
   el.hidden=false;
   el.querySelector(".gdCourseOfflineDismiss").onclick=()=>{
     gdCourseOfflineOfferDismissed[courseId]=true;
@@ -16729,8 +16728,8 @@ function gdCourseOfflineOfferProgress(done,total){
   const el=document.getElementById("gdCourseOfflineOffer");
   if(!el||el.hidden)return;
   const pct=total?Math.round(done/total*100):0;
-  el.innerHTML=`<div class="gdCourseOfflineOfferText"><strong>Downloading map</strong>`
-    +`<span>${done} of ${total} · ${pct}%</span></div>`
+  el.innerHTML=`<div class="gdCourseOfflineOfferText"><strong>${gdH("roundPlay.downloadingMap")}</strong>`
+    +`<span>${gdH("roundPlay.downloadProgress",{done,total,pct})}</span></div>`
     +`<div class="gdCourseOfflineBar"><i style="width:${pct}%"></i></div>`;
 }
 function gdHideCourseOfflineOffer(){
@@ -16849,7 +16848,7 @@ async function gdEnsureCourseFramesForPlay(payload,opts={}){
         gdHideCourseOfflineOffer();
         if(!(frames&&frames.fromCache)){
           gdCourseOfflineOfferDismissed[courseId]=true;
-          toast("Course saved for offline play");
+          toast(gdT("roundPlay.courseSavedOffline"));
         }
       }catch(e){}
       /* The frames are in the asset store keyed by path; hydration is what puts their pixels
@@ -16945,7 +16944,7 @@ window.GDCoursePickerCoreBridge={
       gdEnsureGpsCourseSurface();
       try{const line=document.getElementById("courseLine");if(line){line.textContent="";line.style.display="none";}if(typeof gdMakeCourseLabelsClickable==="function")gdMakeCourseLabelsClickable();}catch(_){}
       try{if(typeof resetPlay==="function")resetPlay(true);}catch(_){}
-      try{if(typeof toast==="function")toast("Manual GPS selected");}catch(_){}
+      try{if(typeof toast==="function")toast(gdT("roundPlay.manualGpsSelected"));}catch(_){}
       gdRefreshGpsMapAfterCourseOpen(payload,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
       return false;
     }
@@ -16971,7 +16970,7 @@ window.GDCoursePickerCoreBridge={
     gdRefreshGpsMapAfterCourseOpen(playCourse,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
     gdPrepareCoursePickerFirstHoleState(playCourse);
     if(payload?.gdDatabaseMapAvailable===true)gdScheduleCourseVisualPullForPlay(payload);
-    try{if(typeof toast==="function")toast("Course ready");}catch(e){}
+    try{if(typeof toast==="function")toast(gdT("roundPlay.courseReady"));}catch(e){}
     return true;
   }
 };
@@ -17109,7 +17108,7 @@ function manualSearch(){
   const q=document.getElementById("searchInput")?.value.trim()||"";
   renderCourses([]);
   const count=document.getElementById("countLine");
-  if(count)count.textContent=q?"No course found":"Search";
+  if(count)count.textContent=q?gdT("picker.noCourseFound"):gdT("picker.search");
 }
 /* The picker owner binds Enter itself; a second listener here ran every search
    twice and fired two Nominatim requests in the same millisecond. */
@@ -17137,9 +17136,9 @@ function openCourse(c){
   try{ resetPlay(true); }catch(e){console.warn("[GolfDaddy] course reset failed",e);}
   try{ setHole(null); }catch(e){}
   try{ localStorage.setItem('gd_gps_play_mode','twoTap'); localStorage.setItem('gdGpsPlayMode','twoTap'); }catch(e){}
-  try{ if(typeof setGps==='function') setGps(false,'Manual'); }catch(e){}
+  try{ if(typeof setGps==='function') setGps(false,gdH('roundPlay.gpsBadgeManual')); }catch(e){}
   try{ var two=document.getElementById('gpsTwoTapBtn'), live=document.getElementById('gpsLiveModeBtn'); if(two)two.classList.add('active'); if(live)live.classList.remove('active'); }catch(e){}
-  try{ if(typeof toast==="function")toast(c.name==='Manual GPS' ? "Manual GPS selected" : "Course selected"); }catch(e){}
+  try{ if(typeof toast==="function")toast(c.name==='Manual GPS' ? gdT("roundPlay.manualGpsSelected") : gdT("roundPlay.courseSelected")); }catch(e){}
   gdScheduleCourseVisualPullForPlay(c);
 	  gdRefreshGpsMapAfterCourseOpen(c,{setCourseView:hasCoursePoint});
   return false;
@@ -17154,8 +17153,8 @@ function gdMappedCourseAssistActive(){
   try{if(typeof window.gdMappedCourseAssistEnabled==="function")return !!window.gdMappedCourseAssistEnabled();}catch(e){}
   return document.body.classList.contains("gdMappedCourseMode");
 }
-function gdMappedStartHint(){return gdMappedCourseAssistActive()?"Tap where you are standing":"Tap twice: ball then green"}
-function gdMappedStartState(){return gdMappedCourseAssistActive()?"Mapped: set position":"Manual: set start"}
+function gdMappedStartHint(){return gdMappedCourseAssistActive()?gdT("course.tapWhereStanding"):gdT("roundPlay.tapTwiceBallGreen")}
+function gdMappedStartState(){return gdMappedCourseAssistActive()?gdT("roundPlay.mappedSetPosition"):gdT("roundPlay.manualSetStart")}
 function gdShowMappedDropout(){
   let hole=1;
   try{hole=Number(currentPlayingHole||selectedHole||1)||1}catch(e){}
@@ -17416,13 +17415,13 @@ function gdRenderMappedLayupReference(payloadInput=null){
   return gdAddMappedReferenceGeometry(gdLayupReferenceLayers,data,{context:"layup"}).length>0;
 }
 function gdArmMappedStartPoint(){
-  if(lockedFrame){toast("Unlock to change start");return false}
+  if(lockedFrame){toast(gdT("roundPlay.unlockToChangeStart"));return false}
   try{sessionStorage.setItem("gd_gps_session_activated","1")}catch(e){}
   mode="start";
   try{document.body.classList.add("gdManualStartPlacementActive")}catch(e){}
   setState(gdMappedStartState());
-  showHint("Tap where you are standing");
-  toast("Tap the map to set start");
+  showHint(gdT("course.tapWhereStanding"),{mappedStart:true});
+  toast(gdT("roundPlay.tapMapToSetStart"));
   return true;
 }
 let gdGreenFocusOutcomePoint=null,gdGreenFocusOutcomeAccuracy=null,gdGreenFocusHadShotToLog=false,gdGreenFocusScreenPoint=null;
@@ -17512,7 +17511,7 @@ function gdEnsureGreenFocusBall(){
     ball.id="gdGreenFocusScreenBall";
     ball.className="gdGreenFocusScreenBall";
     ball.setAttribute("role","button");
-    ball.setAttribute("aria-label","Green focus ball position");
+    ball.setAttribute("aria-label",gdT("roundPlay.greenFocusBallAria"));
     document.body.appendChild(ball);
   }
   if(!ball.__gdActiveGreenFocusDrag){
@@ -17560,12 +17559,12 @@ function gdEnterActiveGreenFocus(point,source,opts={}){
   try{document.getElementById("shotTile")?.classList.remove("visible")}catch(e){}
   try{document.getElementById("app")?.classList.remove("framed","gdPreLockFrame")}catch(e){}
   hideHint();
-  setState("On green · adjust ball then Shot End");
+  setState(gdT("roundPlay.stateOnGreenAdjust"));
   gdEnsureGreenFocusBall();
   if(!screenFallback)gdGreenFocusFrame(gdGreenFocusOutcomePoint,green);
   try{window.gdGpsState=window.gdGpsState||{};window.gdGpsState.lastFix={lat:Number(point.lat),lng:Number(point.lng),accuracy:gdGreenFocusOutcomeAccuracy,source:source||"green-focus",simulated:/tap|click/i.test(String(source||""))};window.gdGpsState.lastFixAt=Date.now()}catch(e){}
   window.__gdLastGreenFocusAttempt={source:source||"tap-where-standing",point:{lat:Number(point.lat),lng:Number(point.lng)},green:{lat:Number(green.lat),lng:Number(green.lng)},distanceM:Number.isFinite(Number(distance))?Number(distance):null,radiusM:gdGreenFocusRadiusM(),allowPrompt:allowedPrompt,result:true,screenFallback:!!screenFallback};
-  toast("Green focus");
+  toast(gdT("roundPlay.greenFocus"));
   return true;
 }
 function gdTryEnterGreenFocusFromPoint(point,source,opts={}){
@@ -17588,8 +17587,8 @@ function gdUseMappedTeeAsStart(){
   try{payload=gdActiveMappedHolePlayData()}catch(e){}
   let ll=null;
   try{ll=gdMappedPointToLatLng(payload?.data?.tee?.position)||gdMappedPointToLatLng(payload?.data?.route?.[0])||gdActiveMappedTeeStartPoint()}catch(e){}
-  if(!ll){toast("Tee box not mapped yet");return false}
-  if(lockedFrame){toast("Unlock to change start");return false}
+  if(!ll){toast(gdT("roundPlay.teeNotMapped"));return false}
+  if(lockedFrame){toast(gdT("roundPlay.unlockToChangeStart"));return false}
   try{document.body.classList.add("gdHeadToTeeFrameActive")}catch(e){}
   try{sessionStorage.setItem("gd_gps_session_activated","1")}catch(e){}
   try{if(Number.isFinite(Number(payload?.hole)))currentPlayingHole=selectedHole=Number(payload.hole);}catch(e){}
@@ -17610,11 +17609,11 @@ function gdUseMappedTeeAsStart(){
       gdFinalizeHeadToTeeShot(payload?.hole||gdMappedStartHoleNumber());
       return true;
     }
-    toast("Tee start set");
+    toast(gdT("roundPlay.teeStartSet"));
     return true;
   }
   try{document.body.classList.remove("gdHeadToTeeFrameActive")}catch(e){}
-  toast("Open the course first");
+  toast(gdT("roundPlay.openCourseFirst"));
   return false;
 }
 function gdHeadToTeeShotFrame(){
@@ -17671,7 +17670,7 @@ function gdApplyHeadToTeeBagTarget(hole){
   gdSetTargetFromDisplayedLanding(next);
   targetWasMoved=false;
   if(targetMarker)targetMarker.setLatLng(gdShotDisplayTarget()||target);
-  try{setState("Layup · move shot target")}catch(e){}
+  try{setState(gdT("roundPlay.stateLayupMoveTarget"))}catch(e){}
   return true;
 }
 function gdFinalizeHeadToTeeShot(hole){
@@ -17688,11 +17687,11 @@ function gdFinalizeHeadToTeeShot(hole){
   try{if(!lockedFrame&&typeof lockFrame==="function")lockFrame(false);else if(!lockedFrame&&typeof setBubbleOnlyLock==="function")setBubbleOnlyLock(true);}catch(e){}
   try{if(typeof renderShot==="function")renderShot();}catch(e){}
   try{if(typeof updatePinLine==="function")updatePinLine();}catch(e){}
-  try{if(!gdIsLayupTarget(greenCentre,target))setState(`Hole ${hole||""}`.trim()||"Hole")}catch(e){}
+  try{if(!gdIsLayupTarget(greenCentre,target))setState(hole?gdT("common.hole",{n:hole}):gdT("common.holeWord"))}catch(e){}
   try{hideHint()}catch(e){}
   try{const hint=document.getElementById("hint");if(hint){hint.classList.remove("visible","gdMappedStartPill");hint.textContent="";}}catch(e){}
   [180,520,980].forEach(delay=>setTimeout(runHeadToTeeFrame,delay));
-  toast("Tee start set");
+  toast(gdT("roundPlay.teeStartSet"));
   return true;
 }
 window.gdMappedCourseAssistActive=gdMappedCourseAssistActive;
@@ -17700,7 +17699,7 @@ window.gdMappedStartHint=gdMappedStartHint;
 window.gdMappedStartState=gdMappedStartState;
 window.gdShowMappedDropout=gdShowMappedDropout;
 window.gdUseMappedTeeAsStart=gdUseMappedTeeAsStart;
-function resetPlay(showManual){try{if(window.gdClearWandLive)window.gdClearWandLive();}catch(e){}unlockFrameForReset();clearAllLayers();mode="start";start=target=greenCentre=pin=null;gdWindLandingTarget=null;lockedFrame=false;targetWasMoved=false;currentShotLogged=false;gdCurrentPlannedShotId=null;window.gdPendingManualShotVerification=false;document.getElementById("shotTile").classList.remove("visible");app.classList.remove("framed","gdPreLockFrame");setState(gpsOk?"GPS ready":gdMappedStartState());if(showManual)showHint(gdMappedStartHint())}
+function resetPlay(showManual){try{if(window.gdClearWandLive)window.gdClearWandLive();}catch(e){}unlockFrameForReset();clearAllLayers();mode="start";start=target=greenCentre=pin=null;gdWindLandingTarget=null;lockedFrame=false;targetWasMoved=false;currentShotLogged=false;gdCurrentPlannedShotId=null;window.gdPendingManualShotVerification=false;document.getElementById("shotTile").classList.remove("visible");app.classList.remove("framed","gdPreLockFrame");setState(gpsOk?"GPS ready":gdMappedStartState());if(showManual)showHint(gdMappedStartHint(),{mappedStart:true})}
 function gdRemoveOrphanTargetMarkerDom(){
   const activeTargetEl=target&&targetMarker&&targetMarker.getElement?targetMarker.getElement():null;
   document.querySelectorAll(".targetDot,.gdBubbleDragHit").forEach(el=>{
@@ -17822,8 +17821,9 @@ function gdMapPlacementClickSuppressed(){
 	    }catch(e){}
 	    if(mappedLocked){
 	      hideHint();
-	      setState("Hole "+((typeof currentPlayingHole!=="undefined"&&currentPlayingHole)||(typeof selectedHole!=="undefined"&&selectedHole)||""));
-	      toast(verifying?"Outcome logged":"Start set");
+	      const lockedHole=(typeof currentPlayingHole!=="undefined"&&currentPlayingHole)||(typeof selectedHole!=="undefined"&&selectedHole)||"";
+	      setState(lockedHole?gdT("common.hole",{n:lockedHole}):gdT("common.holeWord"));
+	      toast(verifying?gdT("roundPlay.outcomeLogged"):gdT("roundPlay.startSet"));
       return true;
     }
     if(mappedCourseAssist){
@@ -17833,9 +17833,9 @@ function gdMapPlacementClickSuppressed(){
       return true;
     }
     mode="green";
-	    showHint("Tap twice: ball then green");
-	    setState("Manual: set green");
-	    toast(verifying?"Outcome logged":"Start set");
+	    showHint(gdT("roundPlay.tapTwiceBallGreen"));
+	    setState(gdT("roundPlay.manualSetGreen"));
+	    toast(verifying?gdT("roundPlay.outcomeLogged"):gdT("roundPlay.startSet"));
 	    return true;
 	}
 	function gdCompleteTwoTapPlacement(ll){
@@ -17964,7 +17964,7 @@ function setGreenTarget(ll,lock){try{if(window.gdClearWandLive)window.gdClearWan
     gdCaptureCurrentPlannedShot("lock-in");
   }else{
     applyShotUpAfterPlacement();
-  }hideHint();toast(gdIsLayupTarget(greenCentre,target)?"Green beyond bag · bubble set to max carry":"Shot framed");logShot("target-set")}
+  }hideHint();toast(gdIsLayupTarget(greenCentre,target)?gdT("roundPlay.greenBeyondBag"):gdT("roundPlay.shotFramed"));logShot("target-set")}
 
 let gdSmoothBubbleDragState=null;
 const GD_BUBBLE_LONG_PRESS_ZOOM_MS=460;
@@ -18291,8 +18291,8 @@ const GD_BAG_FIRMNESS_KEY="gd_bag_total_firmness_v1";
 const GD_BAG_FIRMNESS_PRESETS={soft:{label:"Soft",multiplier:.45},medium:{label:"Medium",multiplier:1},hard:{label:"Hard",multiplier:1.65}};
 const GD_CLUB_PATTERN_RATIOS={driver:{width:.19,depth:.23,carryWindowPct:5.4,faceWindowDeg:.95,tiltBaseDeg:5},woodHybrid:{width:.17,depth:.215,carryWindowPct:4.9,faceWindowDeg:.85,tiltBaseDeg:4.5},iron:{width:.148,depth:.195,carryWindowPct:4.2,faceWindowDeg:.7,tiltBaseDeg:4},wedge:{width:.12,depth:.16,carryWindowPct:3.4,faceWindowDeg:.55,tiltBaseDeg:2.5}};
 function gdBagFirmness(){try{const stored=localStorage.getItem(GD_BAG_FIRMNESS_KEY);if(GD_BAG_FIRMNESS_PRESETS[stored])return stored}catch(e){}return"medium"}
-function gdBagFirmnessLabel(preset=gdBagFirmness()){return GD_BAG_FIRMNESS_PRESETS[preset]?.label||"Medium"}
-function gdBagTotalLabel(preset=gdBagFirmness()){return `Total (${gdBagFirmnessLabel(preset)})`}
+function gdBagFirmnessLabel(preset=gdBagFirmness()){const key={soft:"bag.soft",medium:"shots.firmnessMedium",hard:"shots.firmnessHard"}[GD_BAG_FIRMNESS_PRESETS[preset]?preset:"medium"];return gdT(key)}
+function gdBagTotalLabel(preset=gdBagFirmness()){return gdT("shots.bagTotalLabel",{firmness:gdBagFirmnessLabel(preset)})}
 function gdBagFirmnessMultiplier(preset=gdBagFirmness()){return GD_BAG_FIRMNESS_PRESETS[preset]?.multiplier??1}
 function gdRolloutBasePct(club="7i"){
   const group=gdGetClubGroup(club);
@@ -19192,7 +19192,7 @@ function gdSlopeAdjustedDistanceData(origin,target,flatDistanceM){
     const adjustedM=Math.max(0,Number(flatDistanceM)+Number(result.deltaM));
     const adjusted=fmt(adjustedM);
     const delta=result.deltaMRounded>0?`+${result.deltaMRounded}`:`${result.deltaMRounded}`;
-    const label=result.plays==="level"?"level":`${delta}m ${result.plays}`;
+    const label=result.plays==="level"?gdT("bubble.slopeLevel"):gdT(result.plays==="uphill"?"bubble.slopeUphill":"bubble.slopeDownhill",{delta});
     const relation=adjustedM>Number(flatDistanceM)+.5?"over":(adjustedM<Number(flatDistanceM)-.5?"under":"level");
     return {adjusted,relation,label};
   }
@@ -19216,8 +19216,8 @@ function gdRenderShotCardSlope(tilePlays,slopeData){
   if(!slopeData){tilePlays.classList.remove("gdPlaysOut");return;}
   const tone=slopeData.relation==="over"?"slopeOver":(slopeData.relation==="under"?"slopeUnder":"slopeLevel");
   tilePlays.classList.add(tone);
-  tilePlays.title=`Plays: ${slopeData.label||""}`;
-  tilePlays.innerHTML=gdShotMetricHtml("Plays",slopeData.adjusted);
+  tilePlays.title=gdT("bubble.playsTitle",{slope:slopeData.label||""});
+  tilePlays.innerHTML=gdShotMetricHtml(gdH("bubble.plays"),slopeData.adjusted);
   /* Force a reflow between the tucked-in state and the reveal, so the transition
      has a start value to run from. Deliberately NOT requestAnimationFrame: a frame
      callback never fires in a view that is not painting - a backgrounded tab, or a
@@ -19257,9 +19257,9 @@ function gdShotStockDeltaData(payload,centreDistanceM){
 }
 function gdShotStockDeltaHtml(payload,centreDistanceM){
   const data=gdShotStockDeltaData(payload,centreDistanceM);
-  if(!data)return "Good stock number";
+  if(!data)return gdH("bubble.goodStockNumber");
   const label=data.tone==="even"?"±0":`${data.sign}${data.value}`;
-  return `Stock carry <span class="tileStockDelta ${data.tone}">${label}${data.unit}</span>`;
+  return `${gdH("bubble.stockCarry")} <span class="tileStockDelta ${data.tone}">${label}${data.unit}</span>`;
 }
 function gdShotTotalDeltaData(payload,centreDistanceM){
   if(!payload)return null;
@@ -19288,7 +19288,7 @@ function gdShotMetricHtml(label,metric,options={}){
 function gdShotDistanceStackHtml(totalMetric,carryMetric){
   const total=gdShotMetricValueHtml(totalMetric,{});
   const carry=gdShotMetricValueHtml(carryMetric,{valueClass:"tileCarryValue"});
-  return `<span class="tileMetricLabel">Total</span>${total}<span class="tileCarryLabel">Carry</span>${carry}`;
+  return `<span class="tileMetricLabel">${gdH("bubble.total")}</span>${total}<span class="tileCarryLabel">${gdH("bag.carry")}</span>${carry}`;
 }
 function gdCompactClubCode(label){
   const raw=String(label||"").trim();
@@ -19337,7 +19337,7 @@ function gdResetShotDistanceDisplay(){
 function gdShotBagIconHtml(){
   const railSrc=document.querySelector("#bagRailBtn img")?.getAttribute("src");
   const src=railSrc||"assets/home/bag.png?v=ae58e8eb";
-  return `<button class="gdSetBagLink" onclick="gdOpenBagFromGps(event)" aria-label="Open bag"><img src="${src}" alt=""></button>`;
+  return `<button class="gdSetBagLink" onclick="gdOpenBagFromGps(event)" aria-label="${gdH("bubble.openBag")}"><img src="${src}" alt=""></button>`;
 }
 function gdShotPlaysData(origin,targetPoint,flatDistanceM){
   const data=gdSlopeAdjustedDistanceData(origin,targetPoint,flatDistanceM);
@@ -19370,9 +19370,9 @@ function gdShotStockDecisionText(payload,centreDistanceM){
   const endLabel=pin?"pin":"centre";
   const endDistanceM=pin?map.distance(start,pin):centreDistanceM;
   const deltaM=endDistanceM-stockM;
-  if(Math.abs(deltaM)<0.5)return `Stock carry is on the ${endLabel}`;
+  if(Math.abs(deltaM)<0.5)return gdT(pin?"bubble.stockOnPin":"bubble.stockOnCentre");
   const shown=fmt(Math.abs(deltaM));
-  return `Stock carry is ${shown.value}${shown.unit} ${deltaM>0?"short":"long"}`;
+  return gdT(deltaM>0?"bubble.stockShort":"bubble.stockLong",{distance:`${shown.value}${shown.unit}`});
 }
 function gdRenderCarryLandingLine(payload){
   if(!start||!target||!payload||!map)return;
@@ -19448,7 +19448,7 @@ function gdShotGreenEdgeMetrics(){
 function gdShotGreenEdgesHtml(){
   const metrics=gdShotGreenEdgeMetrics();
   if(!metrics)return "";
-  return `<span>Front ${metrics.front.value}${metrics.front.unit}</span><span>Back ${metrics.back.value}${metrics.back.unit}</span>`;
+  return `<span>${gdH("bubble.frontDistance",{distance:`${metrics.front.value}${metrics.front.unit}`})}</span><span>${gdH("bubble.backDistance",{distance:`${metrics.back.value}${metrics.back.unit}`})}</span>`;
 }
 
 window.GolfDaddyElevationChannel={
@@ -19841,22 +19841,22 @@ function gdPendingCourseShot(){
   }
 }
 function gdOutcomeLogMessage(logged){
-  if(!logged)return "No locked shot to log";
+  if(!logged)return gdT("appCore.noLockedShotToLog");
   const reason=String(logged.excludedReason||logged.outcome?.excludedReason||"");
   if(logged.excluded||logged.outcome?.excluded){
-    if(reason==="weak_gps")return "Shot saved but not counted: GPS was weak";
-    if(reason==="stale_outcome")return "Shot saved but not counted: too much time passed";
-    return "Shot saved but not counted";
+    if(reason==="weak_gps")return gdT("appCore.shotNotCountedWeakGps");
+    if(reason==="stale_outcome")return gdT("appCore.shotNotCountedStale");
+    return gdT("appCore.shotNotCounted");
   }
-  return "Outcome logged";
+  return gdT("appCore.outcomeLogged");
 }
 function gdBeginManualShotVerification(reason="manual_outcome_button"){
   window.gdPendingManualShotVerification=true;
   window.gdPendingManualShotVerificationReason=reason;
   gdClearShotForNextStart(null);
-  setState("Verify shot");
-  showHint("Tap where the shot finished");
-  toast("Tap your ball to verify the shot");
+  setState(gdT("appCore.stateVerifyShot"));
+  showHint(gdT("appCore.hintTapShotFinished"));
+  toast(gdT("appCore.tapBallToVerify"));
   try{gdSyncNewShotButtonState();}catch(e){}
 }
 function gdCompleteManualShotVerification(ll){
@@ -19865,8 +19865,8 @@ function gdCompleteManualShotVerification(ll){
   const reason=window.gdPendingManualShotVerificationReason||"manual_shot_hit_verification";
   window.gdPendingManualShotVerificationReason="";
   const logged=gdLogBallPositionForTracking(ll,reason,null);
-  if(gdMappedCourseAssistActive()){setState("Mapped: set position");showHint("Tap where you are standing")}
-  else{setState("Set green");showHint("Tap green centre")}
+  if(gdMappedCourseAssistActive()){setState(gdT("appCore.stateMappedSetPosition"));showHint(gdT("course.tapWhereStanding"),{mappedStart:true})}
+  else{setState(gdT("appCore.stateSetGreen"));showHint(gdT("appCore.hintTapGreenCentre"))}
   toast(gdOutcomeLogMessage(logged));
   try{gdSyncNewShotButtonState();}catch(e){}
 }
@@ -19876,9 +19876,9 @@ function gdUseNextShotPosition(ll,reason,gpsAccuracyM){
   const logged=gdLogBallPositionForTracking(ll,reason||"next_shot_button",gpsAccuracyM);
   gdClearShotForNextStart(ll);
   if(previousShot)undoStack=[previousShot];
-  if(gdMappedCourseAssistActive()){setState("Mapped: set position");showHint("Tap where you are standing")}
-  else{setState("Set green");showHint("Tap green centre")}
-  toast(logged?`${gdOutcomeLogMessage(logged)} · New shot ready`:"Lock a shot before logging outcome");
+  if(gdMappedCourseAssistActive()){setState(gdT("appCore.stateMappedSetPosition"));showHint(gdT("course.tapWhereStanding"),{mappedStart:true})}
+  else{setState(gdT("appCore.stateSetGreen"));showHint(gdT("appCore.hintTapGreenCentre"))}
+  toast(logged?gdT("appCore.outcomeNewShotReady",{message:gdOutcomeLogMessage(logged)}):gdT("appCore.lockShotBeforeOutcome"));
   try{gdSyncNewShotButtonState();}catch(e){}
 }
 function gdAutoNextShotSetting(path,fallback){
@@ -19900,7 +19900,7 @@ function gdGpsNewShot(reason="next_shot_button"){
   if(document.body.classList.contains("gdGreenArrivalMode"))return gdFinishActiveGreenFocus(reason||"shot_end_green_focus");
   const pending=gdPendingCourseShot();
   if(!pending&&!target){
-    toast("Lock in a shot first");
+    toast(gdT("appCore.lockShotFirst"));
     return false;
   }
   if(target){
@@ -19911,8 +19911,8 @@ function gdGpsNewShot(reason="next_shot_button"){
     gdBeginManualShotVerification(reason||"manual_outcome_button");
     return false;
   }
-  setState("Logging outcome");
-  toast("Checking GPS for outcome");
+  setState(gdT("appCore.stateLoggingOutcome"));
+  toast(gdT("appCore.checkingGpsOutcome"));
   navigator.geolocation.getCurrentPosition(pos=>{
     const here=L.latLng(pos.coords.latitude,pos.coords.longitude);
     gdUseNextShotPosition(here,reason||"next_shot_button",pos.coords.accuracy);
@@ -19945,16 +19945,16 @@ function gdSyncNewShotButtonState(){
   </svg>`;
   if(unlockBtn){
     unlockBtn.classList.remove("pending","unlock-ready");
-    unlockBtn.textContent="Unlock";
-    unlockBtn.title=hasLockedShot||target?"Unlock the current shot frame":"Unlock shot setup";
+    unlockBtn.textContent=gdT("appCore.unlock");
+    unlockBtn.title=hasLockedShot||target?gdT("appCore.unlockShotFrame"):gdT("appCore.unlockShotSetup");
     unlockBtn.setAttribute("aria-label",unlockBtn.title);
   }
   if(logBtn){
     logBtn.classList.toggle("pending",pending);
     logBtn.classList.toggle("disabled",!hasLockedShot&&!pending);
     logBtn.setAttribute("aria-disabled",(!hasLockedShot&&!pending)?"true":"false");
-    logBtn.innerHTML=`${icon}<span class="gdLogShotText">Shot End</span>`;
-    logBtn.title=greenFocusActive?"Log green position":pending?"Tap where the shot finished. You can also shake your phone to log it.":hasLockedShot?"Log this shot outcome":"Lock in a shot first";
+    logBtn.innerHTML=`${icon}<span class="gdLogShotText">${gdH("appCore.shotEnd")}</span>`;
+    logBtn.title=greenFocusActive?gdT("appCore.logGreenPosition"):pending?gdT("appCore.logShotPendingTitle"):hasLockedShot?gdT("appCore.logShotOutcome"):gdT("appCore.lockShotFirst");
     logBtn.setAttribute("aria-label",logBtn.title);
   }
 }
@@ -19975,7 +19975,7 @@ function gdMaybeLogOutcomeFromShake(event){
     if(now-gdOutcomeShakeLastAt<3500)return;
     if(gdOutcomeShakeMagnitude(event)<26)return;
     gdOutcomeShakeLastAt=now;
-    toast("Shake detected");
+    toast(gdT("appCore.shakeDetected"));
     gdGpsNewShot("phone_shake");
   }catch(e){}
 }
@@ -20387,7 +20387,7 @@ function gdRenderMiddleDistanceGuide(payloadInput=null){
     keyboard:false,
     icon:L.divIcon({
       className:"",
-      html:`<div class="gdMiddleGuideLabel">${remaining?`Green ${remaining.value}${remaining.unit}`:"Green"}</div>`,
+      html:`<div class="gdMiddleGuideLabel">${remaining?gdH("bubble.greenDistance",{distance:`${remaining.value}${remaining.unit}`}):gdH("bubble.green")}</div>`,
       iconSize:[84,18],
       iconAnchor:[42,9]
     })
@@ -20558,7 +20558,7 @@ function renderShot(){
     clearShot();
     clearPendingGreenTarget();
     gdResetShotDistanceDisplay();
-    if(mode==="green")showHint(gdMappedCourseAssistActive()?"Tap where you are standing":"Tap green centre");
+    if(mode==="green")showHint(gdMappedCourseAssistActive()?gdT("course.tapWhereStanding"):gdT("appCore.hintTapGreenCentre"),{mappedStart:gdMappedCourseAssistActive()});
     return;
   }
   if(!start||!target){clearShot();gdResetShotDistanceDisplay();return;}
@@ -20587,8 +20587,8 @@ function renderShot(){
   const clubLabel=gdb.club||shot.club||"GPS";
   const aimOffset=Number(gdb.aimOffsetM);
   const aimText=Number.isFinite(aimOffset)&&Math.abs(aimOffset)>=0.5
-    ?`Aim offset ${aimOffset>0?"+":""}${Math.round(aimOffset)}m`
-    :"Aim at centre";
+    ?gdT("bubble.aimOffset",{offset:`${aimOffset>0?"+":""}${Math.round(aimOffset)}`})
+    :gdT("bubble.aimAtCentre");
   const tile=document.getElementById("shotTile");
   const labelEl=tile?tile.querySelector(".tileLabel"):null;
   const clubEl=tile?tile.querySelector(".tileClub"):null;
@@ -20606,14 +20606,14 @@ function renderShot(){
   }
   if(labelEl)labelEl.textContent="";
   if(clubEl){
-    if(readyBag)clubEl.innerHTML=gdShotMetricHtml("Club",{value:gdShotDisplayClubLabel(clubLabel),unit:""});
+    if(readyBag)clubEl.innerHTML=gdShotMetricHtml(gdH("bag.club"),{value:gdShotDisplayClubLabel(clubLabel),unit:""});
     else clubEl.innerHTML=gdShotBagIconHtml();
   }
   const edgeMetrics=isLayup?null:gdShotGreenEdgeMetrics();
   const slopeData=isLayup?null:gdSlopeAdjustedDistanceData(start,bubbleCenter,bubbleCenterDistance);
   const pinDiffMetric=gdShotPinDiffData();
-  if(tileBack)tileBack.innerHTML=isLayup?"":gdShotMetricHtml("Back",edgeMetrics?edgeMetrics.back:null);
-  if(tileFront)tileFront.innerHTML=isLayup?"":gdShotMetricHtml("Front",edgeMetrics?edgeMetrics.front:null);
+  if(tileBack)tileBack.innerHTML=isLayup?"":gdShotMetricHtml(gdH("bubble.back"),edgeMetrics?edgeMetrics.back:null);
+  if(tileFront)tileFront.innerHTML=isLayup?"":gdShotMetricHtml(gdH("bubble.front"),edgeMetrics?edgeMetrics.front:null);
   gdRenderShotCardSlope(tilePlays,slopeData);
   const tileDist=document.getElementById("tileDist");
   if(tileDist){
@@ -20624,8 +20624,8 @@ function renderShot(){
   const totalDelta=readyBag?gdShotTotalDeltaData(gdb,clubComparisonDistance):null;
   if(tileSub){
     tileSub.innerHTML=pinDiffMetric
-      ? gdShotMetricHtml("Pin diff",pinDiffMetric,{valueClass:"tileSmallValue"})
-      : gdShotMetricHtml("Stock",totalDelta?{value:`${totalDelta.sign}${totalDelta.value}`,unit:totalDelta.unit}:null,{valueClass:"tileSmallValue"});
+      ? gdShotMetricHtml(gdH("bubble.pinDiff"),pinDiffMetric,{valueClass:"tileSmallValue"})
+      : gdShotMetricHtml(gdH("bubble.stock"),totalDelta?{value:`${totalDelta.sign}${totalDelta.value}`,unit:totalDelta.unit}:null,{valueClass:"tileSmallValue"});
     tileSub.classList.toggle("tileStockMetric",!pinDiffMetric);
     tileSub.classList.toggle("tileFlagMetric",!!pinDiffMetric);
   }
@@ -20674,7 +20674,7 @@ const GD_PIN_LONG_PRESS_MS=650;
 const GD_PIN_LONG_PRESS_CANCEL_PX=9;
 function gdHasPlacedPin(){try{return !!(pin||pinMarker)}catch(e){return false}}
 function gdClearPlacedPin(message){
-  if(typeof gdUndoPinOnly==="function"){gdUndoPinOnly(message||"Pin cleared");return}
+  if(typeof gdUndoPinOnly==="function"){gdUndoPinOnly(message||gdT("appCore.pinCleared"));return}
   try{
     pin=null;
     if(pinMarker&&map)map.removeLayer(pinMarker);
@@ -20684,7 +20684,7 @@ function gdClearPlacedPin(message){
     pinLine=pinLabel=null;
     if(typeof renderShot==="function")renderShot();
     if(typeof updatePinLine==="function")updatePinLine();
-    if(typeof toast==="function")toast(message||"Pin cleared");
+    if(typeof toast==="function")toast(message||gdT("appCore.pinCleared"));
   }catch(e){}
 }
 function gdOpenPinLockStart(){
@@ -20693,8 +20693,8 @@ function gdOpenPinLockStart(){
   return false;
 }
 function gdClearPinAndOpenPinLock(message){
-  if(gdHasPlacedPin())gdClearPlacedPin(message||"Pin cleared");
-  setTimeout(()=>{if(!gdOpenPinLockStart())try{toast(message||"Pin cleared")}catch(e){}},30);
+  if(gdHasPlacedPin())gdClearPlacedPin(message||gdT("appCore.pinCleared"));
+  setTimeout(()=>{if(!gdOpenPinLockStart())try{toast(message||gdT("appCore.pinCleared"))}catch(e){}},30);
 }
 function gdInstallPinDrag(marker){
   if(!marker||marker.__gdPinDragInstalled)return;
@@ -20745,7 +20745,7 @@ function gdInstallPinDrag(marker){
         el.classList.add("gdPinDragUnlocked");
         el.style.cursor="grabbing";
         try{if(typeof haptic==="function")haptic(18)}catch(e){}
-        try{toast("Pin unlocked")}catch(e){}
+        try{toast(gdT("appCore.pinUnlocked"))}catch(e){}
       };
       press.timer=setTimeout(unlockDrag,GD_PIN_LONG_PRESS_MS);
       const pointToLatLng=moveEv=>{
@@ -20821,9 +20821,9 @@ function gdInstallPinDrag(marker){
           renderShot();
           updatePinLine();
         }else if(!attemptedMove){
-          gdClearPinAndOpenPinLock("Pin cleared");
+          gdClearPinAndOpenPinLock(gdT("appCore.pinCleared"));
         }else{
-          try{toast("Hold pin to move")}catch(e){}
+          try{toast(gdT("appCore.holdPinToMove"))}catch(e){}
         }
         try{el.releasePointerCapture(endEv.pointerId);}catch(e){}
       };
@@ -20836,7 +20836,7 @@ function gdInstallPinDrag(marker){
   requestAnimationFrame(install);
 }
 function placePin(ll){undoStack.push({type:"pin",value:pin});pin=ll;if(!pinMarker){pinMarker=L.marker(pin,{icon:pinIcon,draggable:false,autoPan:false}).addTo(map);gdInstallPinDrag(pinMarker);}else{pinMarker.setLatLng(pin);gdInstallPinDrag(pinMarker);}renderShot();updatePinLine()}
-function updatePinLine(){[pinLine,pinLabel].forEach(l=>l&&map.removeLayer(l));pinLine=pinLabel=null;const el=document.getElementById("pinDiff");if(el)el.style.display="none";if(typeof gdTournamentModeEnabled==="function"&&gdTournamentModeEnabled()){return;}const bubbleTarget=gdShotDisplayTarget();const diff=gdShotPinDiffData();if(!pin||!bubbleTarget||!diff)return;if(el){el.classList.add("tilePinMetric");el.textContent=`Pin diff ${diff.value}${diff.unit}`;el.style.display="block";}pinLine=L.polyline([bubbleTarget,pin],{color:"#fff",weight:2,opacity:.52,dashArray:"3,7"}).addTo(map)}
+function updatePinLine(){[pinLine,pinLabel].forEach(l=>l&&map.removeLayer(l));pinLine=pinLabel=null;const el=document.getElementById("pinDiff");if(el)el.style.display="none";if(typeof gdTournamentModeEnabled==="function"&&gdTournamentModeEnabled()){return;}const bubbleTarget=gdShotDisplayTarget();const diff=gdShotPinDiffData();if(!pin||!bubbleTarget||!diff)return;if(el){el.classList.add("tilePinMetric");el.textContent=gdT("bubble.pinDiffValue",{distance:`${diff.value}${diff.unit}`});el.style.display="block";}pinLine=L.polyline([bubbleTarget,pin],{color:"#fff",weight:2,opacity:.52,dashArray:"3,7"}).addTo(map)}
 
 
 /* Standalone Wand UI retired. The Green Shape Engine is server-side only now -
@@ -20937,7 +20937,7 @@ function drawGreenDistances(pts){
       interactive:false,
       icon:L.divIcon({
         className:"",
-        html:`<div class="yardLabel edgeLabel" style="--label-rot:${rotDeg}deg">Front ${v.value}${v.unit}</div>`,
+        html:`<div class="yardLabel edgeLabel" style="--label-rot:${rotDeg}deg">${gdH("bubble.frontDistance",{distance:`${v.value}${v.unit}`})}</div>`,
         iconSize:[70,16],
         iconAnchor:[35,8]
       })
@@ -20950,7 +20950,7 @@ function drawGreenDistances(pts){
       interactive:false,
       icon:L.divIcon({
         className:"",
-        html:`<div class="yardLabel edgeLabel" style="--label-rot:${rotDeg}deg">Back ${v.value}${v.unit}</div>`,
+        html:`<div class="yardLabel edgeLabel" style="--label-rot:${rotDeg}deg">${gdH("bubble.backDistance",{distance:`${v.value}${v.unit}`})}</div>`,
         iconSize:[70,16],
         iconAnchor:[35,8]
       })
@@ -21026,7 +21026,7 @@ function toggleTracking(){shotTracking=!shotTracking;const b=document.getElement
 function toggleBubbleRenderMode(){bubbleRenderMode=bubbleRenderMode==="classic"?"custom":"classic";const b=document.getElementById("bubbleModeToggle");b.textContent=bubbleRenderMode==="classic"?"Classic":"Custom";b.classList.toggle("active",bubbleRenderMode!=="classic");renderShot()}
 function cycleBubbleBias(){const order=["neutral","right","left","long"];bubbleBiasMode=order[(order.indexOf(bubbleBiasMode)+1)%order.length];const labels={neutral:"Neutral",right:"Right",left:"Left",long:"Long"};const b=document.getElementById("bubbleBiasToggle");b.textContent=labels[bubbleBiasMode];b.classList.toggle("active",bubbleBiasMode!=="neutral");renderShot()}
 function toggleBubbleOrganic(){bubbleOrganic=!bubbleOrganic;const b=document.getElementById("bubbleOrganicToggle");b.textContent=bubbleOrganic?"On":"Off";b.classList.toggle("active",bubbleOrganic);renderShot()}
-function toggleAimLine(){showAim=!showAim;const b=document.getElementById("aimToggle");b.textContent=showAim?"On":"Off";b.classList.toggle("active",showAim);renderShot()}
+function toggleAimLine(){showAim=!showAim;const b=document.getElementById("aimToggle");b.textContent=gdT(showAim?"common.on":"common.off");b.classList.toggle("active",showAim);renderShot()}
 function toggleFilter(){showFilter=!showFilter;const b=document.getElementById("filterToggle");b.textContent=showFilter?"On":"Off";b.classList.toggle("active",showFilter);app.classList.toggle("framed",showFilter&&lockedFrame)}
 function gdScoreDisplayValue(){return playerScore===0?"E":playerScore>0?"+"+playerScore:String(playerScore)}
 function gdScoreTone(){return playerScore<0?"negative":playerScore>0?"positive":"even"}
@@ -21267,12 +21267,12 @@ function gdPracticeScanReentryBlocked(){
 function gdPracticeScanStoppedMessage(reason=""){
   const text=String(reason||"").trim();
   if(/header|column name|metric/i.test(text)){
-    return "Couldn't find headers. Nothing was saved. Keep the header row visible and re-frame the value grid.";
+    return gdT("appCore.scanStoppedHeaders");
   }
   if(/reading values|cell ocr|ocr|timeout|timed out|exceeded/i.test(text)){
-    return "Couldn't read values. Nothing was saved. Try a tighter crop or clearer table photo.";
+    return gdT("appCore.scanStoppedValues");
   }
-  return "Scan stopped before values were saved. Try a tighter crop or clearer table photo.";
+  return gdT("appCore.scanStoppedGeneric");
 }
 function gdPracticeReleaseStoppedScan(reason=""){
   console.warn("[GolfDaddy] releasing stopped practice scan",reason);
@@ -21292,7 +21292,9 @@ function gdPracticeReleaseStoppedScan(reason=""){
     document.getElementById("practiceDataPanel")?.classList.remove("gdPracticePhotoProcessing");
     gdPracticeClearLibraryProcessingSurface();
     gdPracticeQuietScanSurface({clearStatus:false});
-    gdSetPracticeScanStatus(stoppedMessage);
+    /* The English generic message used to be swapped for the "couldn't find the
+       table" wording by the status line's English matcher; keep that outcome. */
+    gdSetPracticeScanStatus(stoppedMessage===gdT("appCore.scanStoppedGeneric")?gdT("practice.scanFailTable"):stoppedMessage,{state:"error"});
     if(typeof renderPracticeData==="function")renderPracticeData(true);
   }catch(e){}
   return true;
@@ -21329,12 +21331,12 @@ function gdPracticeHardStopScan(reason="Manual stop"){
   }catch(e){}
   try{gdPracticeRecordLiveDebugEvent("manual_stop","Manual scan cleared. You can adjust the box or scan again.",{state:"cleared"});}catch(e){}
   try{gdPracticeDebugFinishSafe("canceled",{dataSaved:false,errorMessage:"Manual scan cleared"});}catch(e){}
-  gdPracticeFeedback("Manual scan cleared. You can adjust the box or scan again.","warning");
+  gdPracticeFeedback(gdT("appCore.manualScanCleared"),"warning",{state:"idle"});
   try{gdNativePracticeFeedbackBridge({status:"canceled",lastAction:"Manual scan hard-stopped",warnings:["The in-flight scan job and loader were cleared."],errors:[],nextStep:"Adjust the box or scan again."});}catch(e){}
   try{if(typeof gdPracticeSetContinueScanReady==="function")gdPracticeSetContinueScanReady(!!(gdPracticeClusterCheckpoint||window.__gdPracticeClusterCheckpoint));}catch(e){}
   try{if(typeof gdPracticeRefreshDebugTools==="function")gdPracticeRefreshDebugTools();}catch(e){}
   try{if(typeof renderPracticeData==="function")renderPracticeData(true);}catch(e){}
-  try{gdLmToast("Practice scan stopped");}catch(e){}
+  try{gdLmToast(gdT("appCore.practiceScanStopped"));}catch(e){}
   return false;
 }
 function gdPracticeReleaseInactiveProcessingSurface(){
@@ -21360,23 +21362,23 @@ function gdPracticeReleaseInactiveProcessingSurface(){
   return true;
 }
 function gdPracticeImportStatusLabel(status){
-  return ({
-    queued:"Import queued",
-    scanning:"Import running in background",
-    parsing:"Import running in background",
-    validating:"Import running in background",
-    saving:"Import saving",
-    completed:"Import completed",
-    failed:"Import failed - review",
-    interrupted:"Scan interrupted",
-    canceled:"Import canceled"
-  })[String(status||"")]||"Import status";
+  return gdT(({
+    queued:"appCore.importQueued",
+    scanning:"appCore.importRunning",
+    parsing:"appCore.importRunning",
+    validating:"appCore.importRunning",
+    saving:"appCore.importSaving",
+    completed:"appCore.importCompleted",
+    failed:"appCore.importFailedReview",
+    interrupted:"appCore.importScanInterrupted",
+    canceled:"appCore.importCanceled"
+  })[String(status||"")]||"appCore.importStatus");
 }
 function gdPracticeImportCanStart(sourceLabel){
   const job=gdPracticeHydrateImportJob();
   if(!gdPracticeImportBlocksNew(job))gdPracticeReleaseInactiveProcessingSurface();
   if(gdPracticeImportBlocksNew(job)){
-    gdLmToast("Practice import already running");
+    gdLmToast(gdT("appCore.practiceImportRunning"));
     gdLmSetStatus("Status","Practice import already running",`${job.sourceLabel||sourceLabel||"Current import"} is ${String(job.status||"running")}. Review, cancel, or finish it before starting another.`,"needs_more_data");
     try{if(typeof renderPracticeData==="function")renderPracticeData(true);}catch(e){}
     return false;
@@ -21426,7 +21428,7 @@ function gdPracticeUpdateImportJob(patch={}){
   return next;
 }
 function gdPracticeFailImportJob(error,userMessage){
-  const message=userMessage||error?.message||"Practice import failed";
+  const message=userMessage||error?.message||gdT("appCore.practiceImportFailed");
   const failedJob=gdPracticeUpdateImportJob({
     status:"failed",
     checkpointText:message,
@@ -21465,7 +21467,7 @@ function gdPracticeCompleteImportJob(result,payload,extra={}){
   gdPracticePhotoProcessingCompletedAt=Date.now();
   return gdPracticeUpdateImportJob({
     status:"completed",
-    checkpointText:"Saved to Clarity Shot Library",
+    checkpointText:gdT("appCore.savedToShotLibrary"),
     accepted:groups.length||Number(extra.validCount)||0,
     rejected:rejected||Number(extra.invalidCount)||0,
     rawRows:groups.length+rejected||Number(extra.rawRows)||0,
@@ -21492,11 +21494,11 @@ function gdPracticeCancelImportJob(){
   if(!job)return false;
   gdPracticeMarkManualScanStop();
   if(String(job.status)==="saving"){
-    gdPracticeUpdateImportJob({checkpointText:"Save already started. The import will finish or become recoverable.",userMessage:"Save already started. The import will finish or become recoverable."});
-    gdLmToast("Import save already started");
+    gdPracticeUpdateImportJob({checkpointText:"Save already started. The import will finish or become recoverable.",userMessage:gdT("appCore.saveAlreadyStarted")});
+    gdLmToast(gdT("appCore.importSaveStarted"));
     return false;
   }
-  gdPracticeUpdateImportJob({status:"canceled",checkpointText:"Canceled by user",userMessage:"Canceled by user",progress:100});
+  gdPracticeUpdateImportJob({status:"canceled",checkpointText:"Canceled by user",userMessage:gdT("appCore.canceledByUser"),progress:100});
   gdSetPracticePhotoProcessing(false,{immediate:true,skipJob:true});
   return false;
 }
@@ -21624,9 +21626,9 @@ function gdPracticeCheckScanStall(job){
   gdPracticeResetScanStallWatch();
   gdPracticeFailImportJob(
     new Error("Scan stalled with no progress for "+Math.round(GD_PRACTICE_SCAN_STALL_MS/1000)+"s"),
-    "Scan stopped. The photo took too long to read - try again, or use a clearer picture of the table."
+    gdT("appCore.scanStalled")
   );
-  try{gdLmToast("Scan stopped - try again");}catch(e){}
+  try{gdLmToast(gdT("appCore.scanStoppedTryAgain"));}catch(e){}
   return true;
 }
 function gdPracticeProcessingStart(){
@@ -21689,29 +21691,35 @@ if(!window.__gdShotDataLibraryToggleBound){
 // engineering log - "Reading the offcut (club + summary rows)", "Deep scan strip
 // 2/5" - and it keeps flowing, unchanged, to the Studio debug feed. It is not a
 // sentence to put in front of someone waiting for their shots.
-const GD_PRACTICE_SCAN_USER_STATUS=["Scanning","Reading shot data","Preparing your data","Almost finished"];
+const GD_PRACTICE_SCAN_USER_STATUS=["appCore.scanStatusScanning","appCore.scanStatusReading","appCore.scanStatusPreparing","appCore.scanStatusAlmostFinished"];
 function gdPracticeUserFacingScanStatus(job,stageIndex){
   const status=String(job?.status||"");
-  if(status==="queued")return "Getting ready";
-  if(status==="saving")return "Almost finished";
-  if(status==="parsing"||status==="validating")return "Preparing your data";
+  if(status==="queued")return gdT("appCore.scanStatusGettingReady");
+  if(status==="saving")return gdT("appCore.scanStatusAlmostFinished");
+  if(status==="parsing"||status==="validating")return gdT("appCore.scanStatusPreparing");
   const index=Number.isFinite(Number(stageIndex))?Number(stageIndex):0;
-  return GD_PRACTICE_SCAN_USER_STATUS[Math.max(0,Math.min(GD_PRACTICE_SCAN_USER_STATUS.length-1,index))]||"Scanning";
+  return gdT(GD_PRACTICE_SCAN_USER_STATUS[Math.max(0,Math.min(GD_PRACTICE_SCAN_USER_STATUS.length-1,index))]||"appCore.scanStatusScanning");
 }
 function gdNativeShotDataProcessingTrackHTML(clubLabel=""){
   const job=gdPracticeHydrateImportJob();
   const state=gdPracticeProcessingStageState();
   const label=gdPracticeImportIsActive(job)
     ?gdPracticeUserFacingScanStatus(job,state.index)
-    :(job?.userMessage?String(job.userMessage):(GD_PRACTICE_PROCESSING_STAGES[state.index]||"Processing"));
+    :(job?.userMessage?String(job.userMessage):(gdPracticeProcessingStageLabel(GD_PRACTICE_PROCESSING_STAGES[state.index])||gdT("appCore.processing")));
   const stages=GD_PRACTICE_PROCESSING_STAGES.map((stageLabel,index)=>{
     const tone=index<state.index?"done":(index===state.index?"active":"pending");
-    return `<span class="gdNativeProcessingNode ${tone}" aria-label="${gdEscapeHTML(stageLabel)}"><span>${index+1}</span></span>`;
+    return `<span class="gdNativeProcessingNode ${tone}" aria-label="${gdEscapeHTML(gdPracticeProcessingStageLabel(stageLabel))}"><span>${index+1}</span></span>`;
   }).join("");
   return `<span class="gdNativeProcessingBadge" aria-live="polite"><span class="gdNativeProcessingTrack" aria-hidden="true"><span class="gdNativeProcessingRail"></span><span class="gdNativeProcessingFill" style="width:${state.progress}%"></span><span class="gdNativeProcessingNodes">${stages}</span></span><span class="gdNativeProcessingLabel">${gdEscapeHTML(label)}</span></span>`;
 }
+/* The stage names stay English in GD_PRACTICE_PROCESSING_STAGES (the debug feed reads
+   them); this gives the player's copy. "Clarity Pattern Finder" is a product name. */
+function gdPracticeProcessingStageLabel(stage){
+  const key=({"Scan":"appCore.scanStageScan","Read values":"appCore.scanStageReadValues","Saved to library":"appCore.scanStageSaved"})[stage];
+  return key?gdT(key):stage;
+}
 function gdNativeShotDataProcessingStopHTML(){
-  return `<button type="button" class="gdNativeProcessingStop" onclick="return gdPracticeHardStopScan('Manual stop from library progress')">Stop scan</button>`;
+  return `<button type="button" class="gdNativeProcessingStop" onclick="return gdPracticeHardStopScan('Manual stop from library progress')">${gdH("appCore.stopScan")}</button>`;
 }
 function gdNativeShotDataProcessingStackHTML(extraClass=""){
   const cls=`gdNativeProcessingStack${extraClass?` ${extraClass}`:""}`;
@@ -21868,7 +21876,7 @@ function gdSetPracticePhotoProcessing(active,opts={}){
         // Interrupted, not failed: the work stopped because the page went away,
         // which is not the same as the scan going wrong. The photo is still
         // there, so the honest offer is "start it again", not an error.
-        gdPracticeUpdateImportJob({status:"interrupted",checkpointText:"Scan interrupted",userMessage:"Scan interrupted before it finished. Start the scan again when you are ready.",progress:0});
+        gdPracticeUpdateImportJob({status:"interrupted",checkpointText:"Scan interrupted",userMessage:gdT("appCore.scanInterruptedMessage"),progress:0});
       }
     }
   }
@@ -21890,12 +21898,12 @@ function gdCourseBubbleValueLabel(analysis, filteredAnalysis, records){
   let source=null;
   try{source=typeof gdCourseBubbleSource==="function"?gdCourseBubbleSource(analysis,filteredAnalysis,records,p):null;}catch(e){source=null;}
   const offset=Number(source?.offsetDeg);
-  return source&&Number.isFinite(offset)?"Bubble ready":"Bubble not ready";
+  return source&&Number.isFinite(offset)?gdT("bubble.bubbleReady"):gdT("bubble.bubbleNotReady");
 }
 function gdCourseLibraryClubTabsHTML(analysis, filteredRecords){
   const allRows=Array.isArray(analysis?.records)?analysis.records:[];
   const rows=allRows.length?allRows:(Array.isArray(filteredRecords)?filteredRecords:[]);
-    if(!rows.length)return `<div class="gdCourseLibraryClubTabs empty"><span>No course shots yet</span></div>`;
+    if(!rows.length)return `<div class="gdCourseLibraryClubTabs empty"><span>${gdH("appCore.noCourseShotsYet")}</span></div>`;
   const selected=gdStatsView.club||"all";
   const grouped={};
   rows.forEach(record=>{
@@ -21904,7 +21912,7 @@ function gdCourseLibraryClubTabsHTML(analysis, filteredRecords){
     grouped[club].push(record);
   });
   const allActive=selected==="all";
-  const all=`<button type="button" class="gdCourseLibraryClubTab ${allActive?"active":""}" onclick="gdStatsSelectClub('all');return false"><span>All</span><strong>${rows.length}</strong></button>`;
+  const all=`<button type="button" class="gdCourseLibraryClubTab ${allActive?"active":""}" onclick="gdStatsSelectClub('all');return false"><span>${gdH("appCore.allClubsTab")}</span><strong>${rows.length}</strong></button>`;
   const clubs=Object.keys(grouped).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).map(club=>{
     const active=selected===club;
     const clubRows=grouped[club]||[];
@@ -21923,13 +21931,13 @@ function gdRenderCourseDataLanding(analysis, filteredRecords, filteredAnalysis){
   const root=document.getElementById("gdCourseDataLanding");
   if(!root)return;
   const counts=gdCourseDataLandingCounts(analysis,filteredRecords);
-  const status=counts.shown?`${counts.shown} shown`:
-    counts.records?`${counts.records} paired`:
-    counts.paired?`${counts.paired} paired, waiting for usable shots`:
-    counts.planned?`${counts.planned} planned`:
-    counts.rawEvents?`${counts.rawEvents} ball events`:"No data yet";
-  const countedLabel=counts.shown?`${counts.counted}/${counts.shown} counted`:"0 shown";
-  const body=`<div class="gdCourseDataLandingHead"><span>Stored shots</span><strong>${gdEscapeHTML(status)}</strong></div><div class="gdCourseDataLandingStats"><b>${counts.planned} plans</b><b>${counts.paired} pairs</b><b>${countedLabel}</b></div>${gdCourseLibraryClubTabsHTML(analysis,filteredRecords)}`;
+  const status=counts.shown?gdTn("appCore.landingShown",counts.shown):
+    counts.records?gdTn("appCore.landingPaired",counts.records):
+    counts.paired?gdTn("appCore.landingPairedWaiting",counts.paired):
+    counts.planned?gdTn("appCore.landingPlanned",counts.planned):
+    counts.rawEvents?gdTn("appCore.landingBallEvents",counts.rawEvents):gdT("appCore.noDataYet");
+  const countedLabel=counts.shown?gdT("appCore.landingCounted",{counted:counts.counted,shown:counts.shown}):gdTn("appCore.landingShown",0);
+  const body=`<div class="gdCourseDataLandingHead"><span>${gdH("appCore.storedShots")}</span><strong>${gdEscapeHTML(status)}</strong></div><div class="gdCourseDataLandingStats"><b>${gdEscapeHTML(gdTn("appCore.landingPlans",counts.planned))}</b><b>${gdEscapeHTML(gdTn("appCore.landingPairs",counts.paired))}</b><b>${gdEscapeHTML(countedLabel)}</b></div>${gdCourseLibraryClubTabsHTML(analysis,filteredRecords)}`;
   root.innerHTML=body;
 }
 function gdCourseDataCanManage(){
@@ -21947,7 +21955,7 @@ function gdEnsureCourseDataAdminFallback(){
 }
 function gdSetCourseDataTab(tab, forceOpen){
   if(tab==="admin"&&!gdCourseDataCanManage()){
-    try{toast("Course Data admin is coach/admin only");}catch(e){}
+    try{toast(gdT("appCore.courseAdminStaffOnly"));}catch(e){}
     return false;
   }
   const panel=document.getElementById("statsPanel");
@@ -22027,7 +22035,7 @@ function gdShotDataPlayerLabel(){
     const session=window.ClaritySession&&typeof window.ClaritySession.get==="function"?window.ClaritySession.get():null;
     if(session?.accountName)return String(session.accountName);
   }catch(e){}
-  return "Player";
+  return gdT("profileScreen.defaultPlayer");
 }
 function gdShotDataGraphTitle(base){
   const name=gdShotDataPlayerLabel();
@@ -22149,9 +22157,9 @@ function gdShotChartOfflineGridSvg(plot){
       const y=plot.plotMidY+direction*(metres/Math.max(1,plot.lateralMax))*half;
       if(y<=plot.plotTop+2||y>=plot.plotBottom-2)return;
       const major=metres%(step*2)===0;
-      const label=direction<0?"L":"R";
+      const label=gdH(direction<0?"bubble.chartLeft":"bubble.chartRight",{n:Math.round(metres)});
       rows.push(`<line x1="${plot.plotLeft}" y1="${y.toFixed(1)}" x2="${plot.plotRight}" y2="${y.toFixed(1)}" stroke="rgba(238,245,242,${major?".12":".075"})" stroke-width="1" stroke-dasharray="${major?"4 10":"2 12"}" stroke-linecap="round"/>`);
-      rows.push(`<text x="${plot.labelX.toFixed(1)}" y="${(y+2.6).toFixed(1)}" fill="rgba(238,245,242,${major?".44":".34"})" font-size="8" font-weight="850" text-anchor="start">${label} ${Math.round(metres)}m</text>`);
+      rows.push(`<text x="${plot.labelX.toFixed(1)}" y="${(y+2.6).toFixed(1)}" fill="rgba(238,245,242,${major?".44":".34"})" font-size="8" font-weight="850" text-anchor="start">${label}</text>`);
     });
   }
   return rows.join("");
@@ -22168,7 +22176,7 @@ function gdShotChartBackdropSvg(plot,title){
     <path d="M ${(plot.plotLeft+8).toFixed(1)} ${plot.plotMidY.toFixed(1)} H ${(plot.plotLeft+40).toFixed(1)}" stroke="rgba(238,245,242,.55)" stroke-width="1.4" stroke-linecap="round"/>
     <circle cx="${plot.plotLeft}" cy="${plot.plotMidY}" r="6.2" fill="#f8faf7" stroke="rgba(0,0,0,.55)" stroke-width="1.4"/>
     <circle cx="${plot.plotLeft}" cy="${plot.plotMidY}" r="2.1" fill="#07100d"/>
-    <text x="${plot.plotLeft+10}" y="${plot.plotMidY+21}" fill="rgba(238,245,242,.62)" font-size="8.5" font-weight="900">Origin</text>
+    <text x="${plot.plotLeft+10}" y="${plot.plotMidY+21}" fill="rgba(238,245,242,.62)" font-size="8.5" font-weight="900">${gdH("bubble.chartOrigin")}</text>
     ${gdShotChartTicksSvg(plot)}
     <text x="22" y="34" fill="#fff" font-size="21" font-weight="950">${gdStatsSvgText(title)}</text>`;
 }
@@ -22302,16 +22310,16 @@ function gdShotChartFitOvalsSvg(plot,fits,rows,opts={}){
   return ovals?`<g class="gdShotChartClubOvals gdShotChartFitOvals" aria-hidden="true">${ovals}</g>`:"";
 }
 function gdShotChartSourceLegendSvg(x=320,y=58){
-  const course=`<circle cx="${x}" cy="${y-1}" r="3.6" fill="#4abfe7" opacity=".84"/><text x="${x+8}" y="${y+2}" fill="rgba(255,255,255,.62)" font-size="8.5" font-weight="850">Course</text>`;
+  const course=`<circle cx="${x}" cy="${y-1}" r="3.6" fill="#4abfe7" opacity=".84"/><text x="${x+8}" y="${y+2}" fill="rgba(255,255,255,.62)" font-size="8.5" font-weight="850">${gdH("bubble.legendCourse")}</text>`;
   const practicePoint={x:x+66,y:y-1};
-  const practice=`<circle cx="${practicePoint.x}" cy="${practicePoint.y}" r="3.6" fill="#22c978" opacity=".88"/><text x="${x+74}" y="${y+2}" fill="rgba(255,255,255,.62)" font-size="8.5" font-weight="850">Practice</text>`;
+  const practice=`<circle cx="${practicePoint.x}" cy="${practicePoint.y}" r="3.6" fill="#22c978" opacity=".88"/><text x="${x+74}" y="${y+2}" fill="rgba(255,255,255,.62)" font-size="8.5" font-weight="850">${gdH("bubble.legendPractice")}</text>`;
   return course+practice;
 }
 function gdOffsetLabel(value){
   const n=Number(value);
   if(!Number.isFinite(n))return "-";
   if(Math.abs(n)<.05)return "0.0°";
-  return `${n>0?"R":"L"} ${Math.abs(n).toFixed(1)}°`;
+  return gdT(n>0?"bubble.offsetRight":"bubble.offsetLeft",{deg:Math.abs(n).toFixed(1)});
 }
 function gdParseOffsetValue(value,fallback=NaN){
   if(typeof value==="number")return Number.isFinite(value)?value:fallback;
@@ -22358,8 +22366,8 @@ function gdShotDataJsArg(value){
 function gdShotDataLibraryShellHTML(opts={}){
   const kind=String(opts.kind||"practice").toLowerCase()==="course"?"course":"practice";
   const isPractice=kind==="practice";
-  const title=opts.title||(isPractice?"Clarity Shot Library":"Course Library");
-  const bubbleLabel=opts.bubbleLabel||(isPractice?"Practice Bubble":"Course Bubble");
+  const title=opts.title||(isPractice?"Clarity Shot Library":gdT("bubble.courseLibrary"));
+  const bubbleLabel=opts.bubbleLabel||gdT(isPractice?"bubble.practiceBubble":"bubble.courseBubble");
   const bubbleValue=opts.bubbleValue||"-";
   const count=Number(opts.count);
   const countLabel=opts.countLabel||String(Number.isFinite(count)?count:0);
@@ -22443,7 +22451,7 @@ function gdSetShotBubbleOverlay(view,enabled,event){
       window.gdShotBubbleOverlayState=gdShotBubbleOverlayState;
       document.documentElement.dataset.gdOverlayPractice="off";
       setTimeout(()=>gdSyncShotBubbleOverlayControls(view),0);
-      gdShotBubbleSafe(()=>typeof gdLmToast==="function"&&gdLmToast("Practice Bubble needed before projection"));
+      gdShotBubbleSafe(()=>typeof gdLmToast==="function"&&gdLmToast(gdT("bubble.practiceBubbleNeeded")));
       return false;
     }
   }
@@ -22493,8 +22501,8 @@ function gdSyncShotBubbleOverlayControls(view){
 	    btn.classList.toggle("active",active);
 	    btn.setAttribute("aria-pressed",active?"true":"false");
 	    btn.textContent=customLabel
-	      ? active?`Hide ${customLabel}`:`Overlay ${customLabel}`
-	      : active?"Hide Shot Data Overlay":"Overlay Shot Data";
+	      ? gdT(active?"bubble.overlayHideLabel":"bubble.overlayShowLabel",{label:customLabel})
+	      : gdT(active?"bubble.overlayHide":"bubble.overlayShow");
 	  });
 	}
 function gdWireShotBubbleOverlayToggle(){
@@ -22992,12 +23000,12 @@ function gdShotBubbleOverlayBubblePath(bubble,plot,xForDistance,yForLateral){
 // like "an engine's candidate" than "the confirmed active pattern".
 function gdBubbleRoleStyle(bubble,role){
   if(bubble?.shapeSource==="coach-set"){
-    return{colour:"#c58bf2",label:"Starter Bubble",graphLabel:"START",source:"starter-bubble"};
+    return{colour:"#c58bf2",label:gdT("bubble.starterBubble"),graphLabel:gdT("bubble.graphStart"),source:"starter-bubble"};
   }
   const roles={
     playing:{colour:"#f4f8f3",label:"My Bubble",graphLabel:"MY",source:"my-bubble"},
-    course:{colour:"#37f28d",label:"Course Bubble",graphLabel:"COURSE",source:"course"},
-    practice:{colour:"#62d2ff",label:"Practice Bubble",graphLabel:"PRACTICE",source:"practice-bubble-projection"}
+    course:{colour:"#37f28d",label:gdT("bubble.courseBubble"),graphLabel:gdT("bubble.graphCourse"),source:"course"},
+    practice:{colour:"#62d2ff",label:gdT("bubble.practiceBubble"),graphLabel:gdT("bubble.graphPractice"),source:"practice-bubble-projection"}
   };
   return roles[role]||roles.playing;
 }
@@ -23037,7 +23045,7 @@ function gdShotBubbleOverlayLayerMarkup(rows,plot,view,opts={}){
     const path=gdShotBubbleOverlayBubblePath(bubble,plot,xForDistance,yForLateral);
     if(!path)return "";
     const sourceKey=String(source||"").toLowerCase();
-    const labelWord=opts.labelText||(sourceKey==="practice-bubble-projection"?"PRACTICE":sourceKey==="my-bubble"?"MY":"");
+    const labelWord=opts.labelText||(sourceKey==="practice-bubble-projection"?gdT("bubble.graphPractice"):sourceKey==="my-bubble"?"MY":"");
     const showLabel=!!labelWord&&opts.label!==false&&bubbles.length===1;
     const label=showLabel?(()=>{
       const cx=xForDistance(Number(bubble.centerDistanceM)||Number(bubble.baseDistanceM)||0);
@@ -23194,7 +23202,7 @@ function gdShotBubbleOverlayStandaloneSvg(view,title,width=480,height=260){
   const rows=view==="practice"&&hasPracticeOffset(practiceOffset)&&typeof window.gdPracticeProjectionRows==="function"?window.gdPracticeProjectionRows([],practiceAnalysis):gdShotBubbleOverlayReferenceRows([]);
   if(!gdShotBubbleOverlayEnabled(view)||!rows.length){
     const plot=gdShotChartLayout([],[],{plotLeft:30,plotRight:450,plotTop:82,plotBottom:224});
-    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${gdStatsSvgText(title)} visual">
+    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${gdH("bubble.chartAria",{title})}">
       ${gdShotChartBackdropSvg(plot,title)}
     </svg>${gdShotBubbleOverlayButton(view)}`;
   }
@@ -23207,7 +23215,7 @@ function gdShotBubbleOverlayStandaloneSvg(view,title,width=480,height=260){
     : gdShotBubbleOverlayLayer([],plot,view,{offsetDeg:offset});
   const clubKey=rows.map(row=>row.club).sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true})).slice(0,6);
   const clubKeySvg=clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
-  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${gdStatsSvgText(title)} visual">
+  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${gdH("bubble.chartAria",{title})}">
     ${gdShotChartBackdropSvg(plot,title)}
     ${overlaySvg}
     ${clubKeySvg}
@@ -23292,7 +23300,7 @@ function gdStatsPopulateFilters(analysis){
     return a.localeCompare(b,undefined,{numeric:true});
   });
   const current=gdStatsView.club||"all";
-  clubSelect.innerHTML=`<option value="all">All clubs</option>`+clubs.map(club=>`<option value="${gdEscapeHTML(club)}">${gdEscapeHTML(club)}</option>`).join("");
+  clubSelect.innerHTML=`<option value="all">${gdH("bubble.allClubs")}</option>`+clubs.map(club=>`<option value="${gdEscapeHTML(club)}">${gdEscapeHTML(club)}</option>`).join("");
   clubSelect.value=clubs.includes(current)?current:"all";
   gdStatsView.club=clubSelect.value;
 }
@@ -23319,7 +23327,7 @@ function gdStatsVisualSummary(analysis, filteredRecords, filteredAnalysis){
   const timeMode=gdStatsView.colourMode==="time";
   const clubKey=showAllClubs?[...new Set(records.map(r=>r.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6):[];
   const clubKeySvg=clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
-  const timeKeySvg=gdStatsTimePalette.map((color,i)=>`<circle cx="${26+i*52}" cy="58" r="4.2" fill="${color}"/><text x="${34+i*52}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${i===0?"old":i===gdStatsTimePalette.length-1?"new":""}</text>`).join("");
+  const timeKeySvg=gdStatsTimePalette.map((color,i)=>`<circle cx="${26+i*52}" cy="58" r="4.2" fill="${color}"/><text x="${34+i*52}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${i===0?gdH("bubble.timeOld"):i===gdStatsTimePalette.length-1?gdH("bubble.timeNew"):""}</text>`).join("");
   // Course Data plots on the SAME fixed normalised domain as Practice and
   // Comparison (gdPracticeNormalisedPlotLayout, via gdCourseDataSurfaceSvg) so
   // identical bubble data renders at an identical shape on every screen. The
@@ -23340,7 +23348,7 @@ function gdStatsVisualSummary(analysis, filteredRecords, filteredAnalysis){
     return;
   }
 	  if(!hasVisualData){
-	    visual.innerHTML=gdShotBubbleOverlayStandaloneSvg("course",gdShotDataGraphTitle("Course Data"),width,height);
+	    visual.innerHTML=gdShotBubbleOverlayStandaloneSvg("course",gdShotDataGraphTitle(gdT("bubble.courseDataTitle")),width,height);
     return;
   }
   const fitsByClub={};
@@ -23386,8 +23394,8 @@ function gdStatsVisualSummary(analysis, filteredRecords, filteredAnalysis){
   const overlaySvg=gdShotBubbleOverlayLayer(dataRows,plot,"course",{offsetDeg:gdStatsCurrentModelOffsetDeg()});
   const clubOvals=gdShotChartFitOvalsSvg(plot,fitSource,dataRows,{source:"course"})||gdShotChartClubOvalsSvg(plot,dataRows);
   visual.innerHTML=`
-    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Shot pattern stats visual">
-      ${gdShotChartBackdropSvg(plot,gdShotDataGraphTitle("Course Data"))}
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${gdH("bubble.statsVisualAria")}">
+      ${gdShotChartBackdropSvg(plot,gdShotDataGraphTitle(gdT("bubble.courseDataTitle")))}
       ${hubUnderlaySvg}
       ${overlaySvg}
       ${clubOvals}
@@ -23414,12 +23422,12 @@ function gdRenderCourseClubGroups(list, records, filteredAnalysis, cfg){
   if(!rows.length){
     list.innerHTML=gdShotDataLibraryShellHTML({
       kind:"course",
-      title:"Course Shot Library",
-      bubbleLabel:"Course Bubble",
+      title:gdT("bubble.courseShotLibrary"),
+      bubbleLabel:gdT("bubble.courseBubble"),
       bubbleValue,
       count:0,
       // No title here: the pill directly above this body already says it.
-      bodyHTML:`<div class="gdPracticeEvidenceHead"><div><span>Paired GPS course shots will appear here, filed by club.</span></div></div>`,
+      bodyHTML:`<div class="gdPracticeEvidenceHead"><div><span>${gdH("bubble.courseShotsEmpty")}</span></div></div>`,
       dropdown:true,
       open:gdShotDataLibraryIsOpen("course")
     });
@@ -23445,14 +23453,14 @@ function gdRenderCourseClubGroups(list, records, filteredAnalysis, cfg){
     const open=gdCourseLibraryOpenClubs[club]!==undefined?!!gdCourseLibraryOpenClubs[club]:index===0;
     const shotRows=clubRows.map(record=>{
       const meta=[gdCourseShotDateLabel(record),record.holeId||record.roundId||""].filter(Boolean).join(" · ");
-      return `<div class="bagRow gdClubShotRow ${record.counted?"":"filtered"}"><span>${Number(record.actualDistanceM||0).toFixed(0)}m · ${record.counted?"counted":"filtered"}${meta?` · ${gdEscapeHTML(meta)}`:""}</span><strong>${gdOffsetLabel(record.normalizedDeg||0)}</strong></div>`;
+      return `<div class="bagRow gdClubShotRow ${record.counted?"":"filtered"}"><span>${gdH(record.counted?"bubble.shotRowCounted":"bubble.shotRowFiltered",{distance:Number(record.actualDistanceM||0).toFixed(0)})}${meta?` · ${gdEscapeHTML(meta)}`:""}</span><strong>${gdOffsetLabel(record.normalizedDeg||0)}</strong></div>`;
     }).join("");
-    return `<details class="gdCourseLibraryClub" data-gd-course-club="${gdEscapeHTML(club)}" ${open?"open":""} ontoggle="gdCourseLibraryToggleClub(this)"><summary class="bagRow gdClubGroupRow"><span>${gdEscapeHTML(club)} · ${counted}/${clubRows.length} counted</span><strong>${gdOffsetLabel(offset||0)}</strong></summary><div class="gdCourseLibraryClubRows">${shotRows}</div></details>`;
+    return `<details class="gdCourseLibraryClub" data-gd-course-club="${gdEscapeHTML(club)}" ${open?"open":""} ontoggle="gdCourseLibraryToggleClub(this)"><summary class="bagRow gdClubGroupRow"><span>${gdH("bubble.clubCounted",{club,counted,total:clubRows.length})}</span><strong>${gdOffsetLabel(offset||0)}</strong></summary><div class="gdCourseLibraryClubRows">${shotRows}</div></details>`;
   }).join("");
   list.innerHTML=gdShotDataLibraryShellHTML({
     kind:"course",
-    title:"Course Shot Library",
-    bubbleLabel:"Course Bubble",
+    title:gdT("bubble.courseShotLibrary"),
+    bubbleLabel:gdT("bubble.courseBubble"),
     bubbleValue,
     count:rows.length,
     bodyHTML:sections,
@@ -23483,12 +23491,12 @@ function gdRenderStatsAnalysis(list){
   }
 }
 function gdStatsHeaderText(analysis){
-  if(!analysis)return shotTracking?`${trackedShots.length} shots logged`:"Shot tracking off";
+  if(!analysis)return shotTracking?gdTn("bubble.shotsLogged",trackedShots.length):gdT("bubble.shotTrackingOff");
   const rawCount=(analysis.records||[]).length;
   const shownCount=gdStatsFilteredRecords(analysis).length;
-  if(shownCount)return `${shownCount} paired results · cluster rules active`;
-  if(rawCount)return `${rawCount} stored · no paired results shown`;
-  return "No paired results yet";
+  if(shownCount)return gdTn("bubble.pairedResultsActive",shownCount);
+  if(rawCount)return gdTn("bubble.storedNoPairedShown",rawCount);
+  return gdT("bubble.noPairedResultsYet");
 }
 function renderStats(){
   const stats=gdCurrentStatsAnalysis();
@@ -23498,7 +23506,7 @@ function renderStats(){
   list.innerHTML="";
   if(gdRenderStatsAnalysis(list)){gdRenderCourseDataAdminPanel();return;}
   gdRenderCourseDataLanding(stats,[],stats);
-  trackedShots.slice().reverse().forEach(s=>{const v=fmt(s.distanceM);const row=document.createElement("div");row.className="bagRow";row.innerHTML=`<span>Shot ${s.id} · ${s.reason}</span><strong>${v.value}${v.unit}</strong>`;list.appendChild(row)})
+  trackedShots.slice().reverse().forEach(s=>{const v=fmt(s.distanceM);const row=document.createElement("div");row.className="bagRow";row.innerHTML=`<span>${gdH("bubble.trackedShotRow",{id:s.id,reason:s.reason})}</span><strong>${v.value}${v.unit}</strong>`;list.appendChild(row)})
   gdRenderCourseDataAdminPanel();
 }
 /* GPS scorecard ownership moved to scripts/inline/gd-gps-scorecard-owner-v1.js. */
@@ -23512,14 +23520,14 @@ function gdCancelMappedAsyncWork(reason="gps-state-change"){
   try{if(map&&typeof map.stop==="function")map.stop();}catch(e){}
   try{clearTimeout(shotCameraTimer);clearTimeout(shotAlignTimer);}catch(e){}
 }
-function gdResetShotChrome(nextMode,stateText,hintText){
+function gdResetShotChrome(nextMode,stateText,hintText,hintOpts){
   mode=nextMode;
   lockedFrame=false;
   targetWasMoved=false;
   app.classList.remove("framed");
   document.getElementById("shotTile").classList.remove("visible");
   setState(stateText);
-  showHint(hintText);
+  showHint(hintText,hintOpts);
 }
 function gdUndoPinOnly(message){
   pin=null;
@@ -23529,7 +23537,7 @@ function gdUndoPinOnly(message){
   if(pinLabel){gdRemoveMapLayer(pinLabel);pinLabel=null}
   renderShot();
   updatePinLine();
-  toast(message||"Pin removed");
+  toast(message||gdT("appCore.pinRemoved"));
 }
 function gdUndoPlainLatLng(ll){
   if(!ll||!Number.isFinite(Number(ll.lat))||!Number.isFinite(Number(ll.lng)))return null;
@@ -23586,16 +23594,16 @@ function gdRestoreShotStateSnapshot(snapshot,message){
   if(lockedFrame)frameShotView();
   gdReframeShotAfterUndo({refit:false});
   if(lockedFrame){
-    setState("Locked · move shot target");
+    setState(gdT("appCore.stateLockedMoveTarget"));
     hideHint();
   }else if(start&&target){
-    setState("Aim");
+    setState(gdT("appCore.stateAim"));
   }else if(start){
-    setState(gdMappedCourseAssistActive()?"Mapped: set position":"Set green");
+    setState(gdT(gdMappedCourseAssistActive()?"appCore.stateMappedSetPosition":"appCore.stateSetGreen"));
   }else{
     setState(gdMappedStartState());
   }
-  toast(message||"Shot restored");
+  toast(message||gdT("appCore.shotRestored"));
   return true;
 }
 function gdReframeShotAfterUndo(opts={}){
@@ -23623,19 +23631,19 @@ function gdUndoTargetOnly(message){
   greenPolygon=null;
   target=greenCentre=pin=null;
   gdWindLandingTarget=null;
-  if(gdMappedCourseAssistActive())gdResetShotChrome("start","Mapped: set position","Tap where you are standing");
-  else gdResetShotChrome(start?"green":"start",start?"Set green":"Manual: set start",start?"Tap green centre":"Tap twice: ball then green");
+  if(gdMappedCourseAssistActive())gdResetShotChrome("start",gdT("appCore.stateMappedSetPosition"),gdT("course.tapWhereStanding"),{mappedStart:true});
+  else gdResetShotChrome(start?"green":"start",gdT(start?"appCore.stateSetGreen":"appCore.stateManualSetStart"),gdT(start?"appCore.hintTapGreenCentre":"appCore.hintTapTwice"));
   clearMapRotation();
-  toast(message||"Green undone");
+  toast(message||gdT("appCore.greenUndone"));
 }
 function gdUndoStartOnly(message){
   gdCancelMappedAsyncWork("undo-start");
   unlockFrameForReset();
   clearAllLayers();
   start=target=greenCentre=pin=null;
-  gdResetShotChrome("start",gdMappedCourseAssistActive()?"Mapped: set position":"Manual: set start",gdMappedStartHint());
+  gdResetShotChrome("start",gdT(gdMappedCourseAssistActive()?"appCore.stateMappedSetPosition":"appCore.stateManualSetStart"),gdMappedStartHint(),{mappedStart:true});
   clearMapRotation();
-  toast(message||"Start undone");
+  toast(message||gdT("appCore.startUndone"));
 }
 function gdRefocusMappedStartPromptAfterUndo(hole){
   if(!gdMappedCourseAssistActive())return false;
@@ -23647,24 +23655,24 @@ function gdRefocusMappedStartPromptAfterUndo(hole){
     }
   }catch(e){}
   try{mode="start"}catch(e){}
-  try{setState("Mapped: set position")}catch(e){}
-  try{showHint("Tap where you are standing")}catch(e){}
+  try{setState(gdT("appCore.stateMappedSetPosition"))}catch(e){}
+  try{showHint(gdT("course.tapWhereStanding"),{mappedStart:true})}catch(e){}
   return focused;
 }
 function gdUndoMappedStartPlacement(entry,message){
   if(entry?.previous&&entry.previous.type==="shotState"){
-    gdRestoreShotStateSnapshot(entry.previous,message||"Shot restored");
+    gdRestoreShotStateSnapshot(entry.previous,message||gdT("appCore.shotRestored"));
     return true;
   }
-  gdUndoStartOnly(message||"Mapped start undone");
+  gdUndoStartOnly(message||gdT("appCore.mappedStartUndone"));
   gdRefocusMappedStartPromptAfterUndo(entry?.hole);
   return true;
 }
 function gdUndoCurrentGpsStep(){
-  if(placingPin){cancelPinPlacement("Pin cancelled");return true}
-  if(pin||pinMarker){gdUndoPinOnly("Pin removed");return true}
-  if(target||greenCentre||targetMarker||greenMarker||lockedFrame){gdUndoTargetOnly("Green undone");return true}
-  if(gdGpsPlayMode()!=="live"&&(start||startMarker)){gdUndoStartOnly("Start undone");return true}
+  if(placingPin){cancelPinPlacement(gdT("appCore.pinCancelled"));return true}
+  if(pin||pinMarker){gdUndoPinOnly(gdT("appCore.pinRemoved"));return true}
+  if(target||greenCentre||targetMarker||greenMarker||lockedFrame){gdUndoTargetOnly(gdT("appCore.greenUndone"));return true}
+  if(gdGpsPlayMode()!=="live"&&(start||startMarker)){gdUndoStartOnly(gdT("appCore.startUndone"));return true}
   return false;
 }
 function undoLast(){
@@ -23672,19 +23680,19 @@ function undoLast(){
   const u=undoStack.pop();
   if(!u){
     if(gdUndoCurrentGpsStep())return;
-    toast("Nothing to undo");
+    toast(gdT("appCore.nothingToUndo"));
     return;
   }
   haptic(8);
   if(u.type==="start"){
-    if(lockedFrame){toast("Frame locked · undo green first");undoStack.push(u);return}
+    if(lockedFrame){toast(gdT("appCore.frameLockedUndoGreen"));undoStack.push(u);return}
     if(u.value){
       start=u.value;
       if(startMarker)startMarker.setLatLng(start);else startMarker=L.marker(start,{icon:startIcon,interactive:false}).addTo(map);
       if(!gdReframeShotAfterUndo({refit:false}))renderShot();
-      toast("Start restored");
+      toast(gdT("appCore.startRestored"));
     }else{
-      gdUndoStartOnly("Start undone");
+      gdUndoStartOnly(gdT("appCore.startUndone"));
     }
     return;
   }
@@ -23694,9 +23702,9 @@ function undoLast(){
       if(gdHasWindVector())gdSyncWindLandingFromAim();else gdWindLandingTarget=null;
       if(targetMarker)targetMarker.setLatLng(gdShotDisplayTarget()||target);else createTargetMarker(target);
       gdReframeShotAfterUndo({refit:true});
-      toast("Shot target restored");
+      toast(gdT("appCore.shotTargetRestored"));
     }else{
-      gdUndoTargetOnly("Shot target removed");
+      gdUndoTargetOnly(gdT("appCore.shotTargetRemoved"));
     }
     return;
   }
@@ -23709,32 +23717,32 @@ function undoLast(){
       renderShot();
       updatePinLine();
     }
-    toast(pin?"Pin restored":"Pin removed");
+    toast(gdT(pin?"appCore.pinRestored":"appCore.pinRemoved"));
     return;
   }
   if(u.type==="lockIn"){
     const previous=undoStack[undoStack.length-1];
     if(previous&&previous.type==="shotState"){
       undoStack.pop();
-      gdRestoreShotStateSnapshot(previous,"Shot restored");
+      gdRestoreShotStateSnapshot(previous,gdT("appCore.shotRestored"));
       return;
     }
     if(previous&&previous.type==="placeStart"&&previous.mappedAutoLock){
       undoStack.pop();
-      gdUndoMappedStartPlacement(previous,"Mapped start undone");
+      gdUndoMappedStartPlacement(previous,gdT("appCore.mappedStartUndone"));
       return;
     }
-    gdUndoTargetOnly("Green undone");
+    gdUndoTargetOnly(gdT("appCore.greenUndone"));
     return;
   }
   if(u.type==="shotState"){
-    gdRestoreShotStateSnapshot(u,"Shot restored");
+    gdRestoreShotStateSnapshot(u,gdT("appCore.shotRestored"));
     return;
   }
   if(u.type==="placeStart"){
-    if(u.mappedAutoLock)gdUndoMappedStartPlacement(u,"Mapped start undone");
-    else if(u.previous&&u.previous.type==="shotState")gdRestoreShotStateSnapshot(u.previous,"Start restored");
-    else gdUndoStartOnly("Start undone");
+    if(u.mappedAutoLock)gdUndoMappedStartPlacement(u,gdT("appCore.mappedStartUndone"));
+    else if(u.previous&&u.previous.type==="shotState")gdRestoreShotStateSnapshot(u.previous,gdT("appCore.startRestored"));
+    else gdUndoStartOnly(gdT("appCore.startUndone"));
     return;
   }
 }
@@ -23875,7 +23883,7 @@ function gdSyncGpsPlayerBadge(){
     if(!el)return;
     if(gdIsCoachPlayingAsPlayer()){
       const p=activePlayerProfile();
-      el.textContent=`Playing as ${p?.name||'Player'}`;
+      el.textContent=gdT('appCore.playingAs',{name:p?.name||gdT('profileScreen.defaultPlayer')});
       el.hidden=false;
     }else{
       el.textContent='';
@@ -23941,7 +23949,7 @@ function shellBack(){
     try{const hint=document.getElementById("hint");if(hint){hint.classList.remove("visible","gdMappedStartPill");hint.textContent="";}}catch(e){}
     try{if(typeof gdEnsureResumeRoundPicker==="function")gdEnsureResumeRoundPicker();}catch(e){}
     try{if(typeof gdRefreshAssumedCourseFromLocation==="function")gdRefreshAssumedCourseFromLocation();}catch(e){}
-    try{toast("Course picker");}catch(e){}
+    try{toast(gdT("appCore.coursePicker"));}catch(e){}
     return false;
   }
   closeAllPanels();
@@ -24046,7 +24054,7 @@ function gdNewProfileId(){
   while(typeof gdProfileById==='function'&&gdProfileById(id)&&guard++<200)id=gen();
   return id;
 }
-function gdConsistencyLabel(v){return({elite:'Very consistent',good:'Pretty consistent',mid:'Mixed',high:'Wild sometimes',beginner:'Very variable'})[v]||'Mixed'}
+function gdConsistencyLabel(v){return gdT(({elite:'profileScreen.consistencyElite',good:'profileScreen.consistencyGood',mid:'profileScreen.consistencyMid',high:'profileScreen.consistencyHigh',beginner:'profileScreen.consistencyBeginner'})[v]||'profileScreen.consistencyMid')}
 	const GD_DEFAULT_BAG_CELL_COUNT=12;
 	const GD_DEFAULT_BAG_7I_CARRY=155;
 	function gdDefaultBagRows(){return gdGenerateQuickBag(GD_DEFAULT_BAG_7I_CARRY).slice(0,GD_DEFAULT_BAG_CELL_COUNT)}
@@ -24124,7 +24132,7 @@ function savePlayerProfiles(){
       /* Player profiles failing to save is a player-facing problem, so this
          cannot borrow the admin dock's toast helper - that lives in the studio
          build now, and the app build would silently swallow the warning. */
-      try{toast("Device storage is full — settings can't be saved. Clear site data to recover.");}catch(e){}
+      try{toast(gdT("profileScreen.storageFull"));}catch(e){}
     }
     return false;
   }
@@ -24171,8 +24179,8 @@ function updateProfileHomeUI(){
 }
 function openOnboarding(restart=false){ensureProfile();savePlayerProfiles();showShellHome();}
 function openProfilePanel(opts={}){ensureProfile();syncCoreProfileFromActive();closeAllPanels();closeModulePanels();hideGpsSurface();document.getElementById('shellHome')?.classList.add('hidden');showShellChrome(true);setShellLayer('module');setDockActive('');document.getElementById('profilePanel')?.classList.add('open');opts.replace?replaceShellRoute('profilePanel'):pushShellRoute('profilePanel');renderProfilePanel();}
-function renderProfilePanel(){const p=ensureProfile();const setVal=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v??''};const permission=gdPermissionPublicLabel(p.permission||p.accountPermission||p.mode);setVal('profileNameInput',p.name);setVal('profileModeInput',p.mode||'player');setVal('profileHandInput',p.handedness||'right');setVal('profileConsistencyInput',p.consistency||'mid');setVal('profile7iInput',(p.bag||[]).find(c=>c.club==='7i')?.baseCarry||155);const sum=document.getElementById('profileSummary');if(sum)sum.innerHTML=`<div class="profileMetric"><strong>${gdEscapeHTML(permission)}</strong><span>Account</span></div><div class="profileMetric"><strong>${p.bag?.length||0}</strong><span>Bag clubs</span></div><div class="profileMetric"><strong>${p.handedness}</strong><span>Hand</span></div><div class="profileMetric"><strong>${gdConsistencyLabel(p.consistency)}</strong><span>Pattern size</span></div>`;renderProfileBagEditor();}
-function renderProfileBagEditor(){const p=ensureProfile();const box=document.getElementById('profileBagEditor');if(!box)return;const bag=(Array.isArray(p.bag)?p.bag:[]).map(gdNormaliseBagRow).filter(Boolean);box.innerHTML=bag.length?bag.map((c,i)=>`<div class="bagEditRow"><input id="bagClub_${i}" aria-label="Club" value="${gdEscapeHTML(c.club)}"><input id="bagCarry_${i}" aria-label="Carry metres" type="number" step="1" value="${Number(c.baseCarry)||0}"><input id="bagTotal_${i}" aria-label="Total metres" type="number" step="1" value="${Number(c.totalM)||0}"></div>`).join(''):`<div class="lockNotice">No bag has been built yet. Add clubs from the Bag tile, or generate a quick set only when you want one.</div>`;}
+function renderProfilePanel(){const p=ensureProfile();const setVal=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v??''};const permission=gdPermissionPublicLabel(p.permission||p.accountPermission||p.mode);setVal('profileNameInput',p.name);setVal('profileModeInput',p.mode||'player');setVal('profileHandInput',p.handedness||'right');setVal('profileConsistencyInput',p.consistency||'mid');setVal('profile7iInput',(p.bag||[]).find(c=>c.club==='7i')?.baseCarry||155);const sum=document.getElementById('profileSummary');if(sum)sum.innerHTML=`<div class="profileMetric"><strong>${gdEscapeHTML(permission)}</strong><span>${gdH("profileScreen.account")}</span></div><div class="profileMetric"><strong>${p.bag?.length||0}</strong><span>${gdH("profileScreen.bagClubs")}</span></div><div class="profileMetric"><strong>${p.handedness==="left"?gdH("profileScreen.handLeft"):p.handedness==="right"?gdH("profileScreen.handRight"):gdEscapeHTML(p.handedness)}</strong><span>${gdH("profileScreen.hand")}</span></div><div class="profileMetric"><strong>${gdEscapeHTML(gdConsistencyLabel(p.consistency))}</strong><span>${gdH("profileScreen.patternSize")}</span></div>`;renderProfileBagEditor();}
+function renderProfileBagEditor(){const p=ensureProfile();const box=document.getElementById('profileBagEditor');if(!box)return;const bag=(Array.isArray(p.bag)?p.bag:[]).map(gdNormaliseBagRow).filter(Boolean);box.innerHTML=bag.length?bag.map((c,i)=>`<div class="bagEditRow"><input id="bagClub_${i}" aria-label="${gdH("bag.club")}" value="${gdEscapeHTML(c.club)}"><input id="bagCarry_${i}" aria-label="${gdH("bag.carryAria")}" type="number" step="1" value="${Number(c.baseCarry)||0}"><input id="bagTotal_${i}" aria-label="${gdH("profileScreen.totalMetresAria")}" type="number" step="1" value="${Number(c.totalM)||0}"></div>`).join(''):`<div class="lockNotice">${gdH("profileScreen.noBagYet")}</div>`;}
 function readProfileBagEditor(){const rows=[];document.querySelectorAll('[id^="bagClub_"]').forEach((el)=>{const i=el.id.split('_')[1], club=el.value.trim(), carry=Number(document.getElementById('bagCarry_'+i)?.value||0), total=Number(document.getElementById('bagTotal_'+i)?.value||0);const row=gdNormaliseBagRow({club,baseCarry:carry,totalM:total});if(row)rows.push(row);});return gdBagSortRows(rows);}
 function gdNormaliseBagRow(c){const club=String(c?.club||c?.name||'').trim();const baseCarry=Math.round(Number(c?.baseCarry??c?.carry??c?.distance??c?.meters)||0);if(!club||baseCarry<=0)return null;const totalM=Math.max(baseCarry,gdTotalM({...c,club,baseCarry}));return{club,baseCarry,totalM}}
 function gdEnsureDefaultBagCells(p=ensureProfile()){
@@ -24213,7 +24221,7 @@ function gdBagPersistRows(rows,{silent=false,render=true}={}){
   syncCoreProfileFromActive();
   if(typeof window.gdPracticeSyncBubbleSourcesToBag==="function"){try{window.gdPracticeSyncBubbleSourcesToBag();}catch(e){}}
   if(render){renderBagPanel();renderProfilePanel();if(typeof renderShot==="function")renderShot();}
-  if(!silent)toast('Bag saved');
+  if(!silent)toast(gdT('bagScreen.bagSaved'));
   return p.bag;
 }
 function gdBagToggleAddClub(){const panel=document.getElementById('gdBagAddPanel'),tab=document.getElementById('gdBagAddTab');if(!panel)return;panel.hidden=!panel.hidden;if(tab)tab.setAttribute('aria-expanded',String(!panel.hidden));if(!panel.hidden)document.getElementById('gdBagAddClub')?.focus()}
@@ -24222,11 +24230,11 @@ function gdBagClearAddInputs(){const clubEl=document.getElementById('gdBagAddClu
 function gdBagTryAddClub(){
   const clubEl=document.getElementById('gdBagAddClub'),carryEl=document.getElementById('gdBagAddCarry');
   const club=clubEl?.value.trim(),carry=Math.round(Number(carryEl?.value||0));
-  if(!club||carry<=0){toast('Enter club and carry');return}
+  if(!club||carry<=0){toast(gdT('bagScreen.enterClubAndCarry'));return}
   const rows=readBagPanel().filter(row=>row.club.toLowerCase()!==club.toLowerCase());
   gdBagPersistRows([...rows,{club,baseCarry:carry,totalM:gdBagTotalForCarry(club,carry)}],{silent:true});
   gdBagClearAddInputs();
-  toast('Club added');
+  toast(gdT('bagScreen.clubAdded'));
 }
 function gdBagNextDefaultSlot(rows=readBagPanel()){
   const used=new Set(rows.map(row=>row.club.toLowerCase()));
@@ -24234,7 +24242,7 @@ function gdBagNextDefaultSlot(rows=readBagPanel()){
   if(next)return next;
   const carryBase=rows.length?Math.min(...rows.map(row=>Number(row.baseCarry)||GD_DEFAULT_BAG_7I_CARRY)):GD_DEFAULT_BAG_7I_CARRY;
   const carry=Math.max(35,Math.round(carryBase-8));
-  const club=`Club ${rows.length+1}`;
+  const club=gdT('bagScreen.defaultClubName',{n:rows.length+1});
   return {club,baseCarry:carry,totalM:gdBagTotalForCarry(club,carry)};
 }
 function gdBagAddSlot(){
@@ -24245,16 +24253,16 @@ function gdBagAddSlot(){
     const idx=gdBagSourceRows().findIndex(row=>row.club===next.club&&Number(row.baseCarry)===Number(next.baseCarry));
     if(idx>=0)gdBagToggleRowEdit(idx);
   },30);
-  toast('Cell added');
+  toast(gdT('bagScreen.cellAdded'));
 }
 function gdBagDeleteClub(index){
   const rows=readBagPanel();
   const removed=rows.splice(index,1)[0];
   gdBagPersistRows(rows,{silent:true});
-  toast(removed?`${removed.club} deleted`:'Cell deleted');
+  toast(removed?gdT('bagScreen.clubDeleted',{club:removed.club}):gdT('bagScreen.cellDeleted'));
 }
 function gdBagSyncFirmnessButtons(){const active=gdBagFirmness();document.querySelectorAll('[data-gd-bag-firmness]').forEach(btn=>btn.classList.toggle('active',btn.dataset.gdBagFirmness===active))}
-function gdBagSetFirmness(mode){const preset=GD_BAG_FIRMNESS_PRESETS[mode]?mode:"medium";try{localStorage.setItem(GD_BAG_FIRMNESS_KEY,preset)}catch(e){}const source=readBagPanel().length?readBagPanel():gdBagSourceRows();gdBagPersistRows(source.map(row=>({...row,totalM:gdBagTotalForCarry(row.club,row.baseCarry,preset)})),{silent:true});toast(`${gdBagFirmnessLabel(preset)} totals generated`)}
+function gdBagSetFirmness(mode){const preset=GD_BAG_FIRMNESS_PRESETS[mode]?mode:"medium";try{localStorage.setItem(GD_BAG_FIRMNESS_KEY,preset)}catch(e){}const source=readBagPanel().length?readBagPanel():gdBagSourceRows();gdBagPersistRows(source.map(row=>({...row,totalM:gdBagTotalForCarry(row.club,row.baseCarry,preset)})),{silent:true});toast(gdT('bagScreen.firmnessTotalsGenerated',{firmness:gdBagFirmnessLabel(preset)}))}
 function renderBagPanel(){
   const p=ensureProfile();
   const bag=gdEnsureDefaultBagCells(p);
@@ -24267,18 +24275,29 @@ function renderBagPanel(){
   gdBagSyncFirmnessButtons();
   if(quick)quick.value=(bag.find(c=>c.club==='7i')?.baseCarry)||'';
   if(sub)sub.textContent="";
-  if(title)title.textContent=bag.length?`${bag.length} bag cells`:'Build your bag';
-  if(text)text.textContent=bag.length?`${totalLabel} generated.`:'Add a club or create a new cell.';
+  if(title)title.textContent=bag.length?gdTn('bagScreen.bagCells',bag.length):gdT('bagScreen.buildYourBag');
+  if(text)text.textContent=bag.length?gdT('bagScreen.totalsGeneratedLine',{label:totalLabel}):gdT('bagScreen.addClubOrCell');
   if(!box)return;
-  box.innerHTML=bag.length?bag.map((c,i)=>`<div class="gdBagEditRow" id="gdBagRow_${i}"><label class="gdBagField gdBagClubField"><span>Club</span><input id="gdBagClub_${i}" aria-label="Club name" value="${gdEscapeHTML(c.club)}" readonly oninput="gdBagRefreshQuickTab()"></label><label class="gdBagField"><span>Carry</span><input id="gdBagCarry_${i}" aria-label="Carry metres" inputmode="numeric" type="number" min="1" step="1" value="${Number(c.baseCarry)||0}" readonly oninput="gdBagRefreshQuickTab()"></label><label class="gdBagField"><span>${gdEscapeHTML(totalLabel)}</span><input id="gdBagTotal_${i}" aria-label="${gdEscapeHTML(totalLabel)} metres" inputmode="numeric" type="number" min="1" step="1" value="${Number(c.totalM)||Number(c.baseCarry)||0}" readonly oninput="gdBagRefreshQuickTab()"></label><div class="gdBagRowActions"><button class="gdBagRowEdit" id="gdBagEdit_${i}" type="button" aria-label="Edit club" onclick="gdBagToggleRowEdit(${i})">Edit</button><button class="gdBagRowDelete" id="gdBagDelete_${i}" type="button" aria-label="Delete club" onclick="gdBagDeleteClub(${i})">×</button></div></div>`).join(''):`<div class="lockNotice">No clubs yet.</div>`;
+  box.innerHTML=bag.length?bag.map((c,i)=>`<div class="gdBagEditRow" id="gdBagRow_${i}"><label class="gdBagField gdBagClubField"><span>${gdH("bag.club")}</span><input id="gdBagClub_${i}" aria-label="${gdH("bag.clubNameAria")}" value="${gdEscapeHTML(c.club)}" readonly oninput="gdBagRefreshQuickTab()"></label><label class="gdBagField"><span>${gdH("bag.carry")}</span><input id="gdBagCarry_${i}" aria-label="${gdH("bag.carryAria")}" inputmode="numeric" type="number" min="1" step="1" value="${Number(c.baseCarry)||0}" readonly oninput="gdBagRefreshQuickTab()"></label><label class="gdBagField"><span>${gdEscapeHTML(totalLabel)}</span><input id="gdBagTotal_${i}" aria-label="${gdH("bagScreen.totalMetresAria",{label:totalLabel})}" inputmode="numeric" type="number" min="1" step="1" value="${Number(c.totalM)||Number(c.baseCarry)||0}" readonly oninput="gdBagRefreshQuickTab()"></label><div class="gdBagRowActions"><button class="gdBagRowEdit" id="gdBagEdit_${i}" type="button" aria-label="${gdH("bagScreen.editClub")}" onclick="gdBagToggleRowEdit(${i})">${gdH("bagScreen.edit")}</button><button class="gdBagRowDelete" id="gdBagDelete_${i}" type="button" aria-label="${gdH("bagScreen.deleteClub")}" onclick="gdBagDeleteClub(${i})">×</button></div></div>`).join(''):`<div class="lockNotice">${gdH("bagScreen.noClubsYet")}</div>`;
   gdBagRefreshQuickTab();
 }
 function readBagPanel(){const rows=[];document.querySelectorAll('#gdBagEditor [id^="gdBagClub_"]').forEach(el=>{const i=el.id.split('_')[1], club=el.value.trim(), carry=Math.round(Number(document.getElementById('gdBagCarry_'+i)?.value||0)), total=Math.round(Number(document.getElementById('gdBagTotal_'+i)?.value||0));const row=gdNormaliseBagRow({club,baseCarry:carry,totalM:total});if(row)rows.push(row);});return rows}
-function gdBagToggleRowEdit(index){const row=document.getElementById('gdBagRow_'+index),club=document.getElementById('gdBagClub_'+index),carry=document.getElementById('gdBagCarry_'+index),total=document.getElementById('gdBagTotal_'+index),btn=document.getElementById('gdBagEdit_'+index);if(!row||!club||!carry||!total||!btn)return;const editing=!row.classList.contains('editing');row.classList.toggle('editing',editing);club.readOnly=!editing;carry.readOnly=!editing;total.readOnly=!editing;btn.textContent=editing?'Done':'Edit';btn.setAttribute('aria-label',editing?'Save club':'Edit club');if(editing){club.focus();club.select?.();return}gdBagSave(true)}
-function gdBagGenerateQuick(){const raw=document.getElementById('gdBagQuick7i')?.value;const quick=Number(raw);if(!quick||quick<=0){toast('Enter your 7i carry first');return}gdBagPersistRows(gdGenerateQuickBag(quick),{silent:true});toast('Quick bag generated')}
-function gdBagSave(silent=false){const rows=gdBagSortRows(readBagPanel());if(!rows.length){toast('Add at least one club');return}gdBagPersistRows(rows,{silent});}
-function saveProfilePanel(){const p=ensureProfile();const v=id=>document.getElementById(id)?.value;p.name=v('profileNameInput')||p.name;p.permission=gdGetAccountPermission();p.accountPermission=p.permission;p.mode=gdPermissionToMode(p.permission);p.handedness=v('profileHandInput')||p.handedness;p.consistency=v('profileConsistencyInput')||p.consistency;p.skillLevel=p.consistency;p.bag=readProfileBagEditor();if(!Number.isFinite(Number(p.faceOffsetDeg)))p.faceOffsetDeg=Number(p.centralFaceOffsetDeg||1.4);p.onboardingComplete=true;p.updatedAt=new Date().toISOString();savePlayerProfiles();syncCoreProfileFromActive();toast('Profile saved');renderProfilePanel();}
-function profileGenerateQuickBag(){const val=Number(document.getElementById('profile7iInput')?.value||155);const p=ensureProfile();p.bag=gdGenerateQuickBag(val);savePlayerProfiles();syncCoreProfileFromActive();renderProfilePanel();if(typeof renderShot==="function")renderShot();toast('Quick bag generated');}
+function gdBagToggleRowEdit(index){const row=document.getElementById('gdBagRow_'+index),club=document.getElementById('gdBagClub_'+index),carry=document.getElementById('gdBagCarry_'+index),total=document.getElementById('gdBagTotal_'+index),btn=document.getElementById('gdBagEdit_'+index);if(!row||!club||!carry||!total||!btn)return;const editing=!row.classList.contains('editing');row.classList.toggle('editing',editing);club.readOnly=!editing;carry.readOnly=!editing;total.readOnly=!editing;btn.textContent=gdT(editing?'common.done':'bagScreen.edit');btn.setAttribute('aria-label',gdT(editing?'bagScreen.saveClub':'bagScreen.editClub'));if(editing){club.focus();club.select?.();return}gdBagSave(true)}
+function gdBagGenerateQuick(){const raw=document.getElementById('gdBagQuick7i')?.value;const quick=Number(raw);if(!quick||quick<=0){toast(gdT('bagScreen.enterSevenIronFirst'));return}gdBagPersistRows(gdGenerateQuickBag(quick),{silent:true});toast(gdT('bagScreen.quickBagGenerated'))}
+function gdBagSave(silent=false){const rows=gdBagSortRows(readBagPanel());if(!rows.length){toast(gdT('bagScreen.addAtLeastOneClub'));return}gdBagPersistRows(rows,{silent});}
+function saveProfilePanel(){const p=ensureProfile();const v=id=>document.getElementById(id)?.value;p.name=v('profileNameInput')||p.name;p.permission=gdGetAccountPermission();p.accountPermission=p.permission;p.mode=gdPermissionToMode(p.permission);p.handedness=v('profileHandInput')||p.handedness;p.consistency=v('profileConsistencyInput')||p.consistency;p.skillLevel=p.consistency;p.bag=readProfileBagEditor();if(!Number.isFinite(Number(p.faceOffsetDeg)))p.faceOffsetDeg=Number(p.centralFaceOffsetDeg||1.4);p.onboardingComplete=true;p.updatedAt=new Date().toISOString();savePlayerProfiles();syncCoreProfileFromActive();toast(gdT('profileScreen.profileSaved'));renderProfilePanel();}
+function profileGenerateQuickBag(){const val=Number(document.getElementById('profile7iInput')?.value||155);const p=ensureProfile();p.bag=gdGenerateQuickBag(val);savePlayerProfiles();syncCoreProfileFromActive();renderProfilePanel();if(typeof renderShot==="function")renderShot();toast(gdT('bagScreen.quickBagGenerated'));}
+/* Redraw the open bag, profile and Course Data panels when the language changes. */
+if(window.GDI18n&&!window.__gdAppCorePanelsI18nBound){
+  window.__gdAppCorePanelsI18nBound=true;
+  window.GDI18n.onChange(()=>{
+    try{if(document.getElementById('bagPanel')?.classList.contains('open'))renderBagPanel();}catch(e){}
+    try{if(document.getElementById('profilePanel')?.classList.contains('open'))renderProfilePanel();}catch(e){}
+    try{if(document.getElementById('statsPanel')?.classList.contains('open'))renderStats();}catch(e){}
+    try{gdSyncNewShotButtonState();gdSyncShotBubbleOverlayControls();gdSyncGpsPlayerBadge();}catch(e){}
+    try{if(typeof renderShot==="function")renderShot();}catch(e){}
+  });
+}
 const GD_ACCOUNT_STORE_KEY='gd_accounts_v1';
 const GD_ACCOUNT_SIGNED_OUT_KEY='gd_account_signed_out_v1';
 const GD_ACCOUNT_KEEP_LOGGED_IN_KEY='gd_account_keep_logged_in_v1';
@@ -24302,9 +24321,9 @@ function gdAccountLoginEmail(value){
 function gdAccountPublicRole(value){const role=gdAccountRole(value);return role==='admin'?'Admin':(role==='coach'?'Coach':(role==='subscribedPlayer'?'Subscribed Player':'Player'))}
 function gdAccountDuplicateEmailMessage(email,existing=null){
   const label=gdAccountEmail(email);
-  const role=existing?gdAccountPublicRole(existing.role):'account';
-  const article=/^[aeiou]/i.test(role)?'an':'a';
-  return label?`That email is already used by ${article} ${role}. Sign in with ${label} or use a different email.`:'That email already has an account.';
+  const role=existing?gdAccountRole(existing.role):'account';
+  const key=({admin:'profileScreen.emailUsedByAdmin',coach:'profileScreen.emailUsedByCoach',subscribedPlayer:'profileScreen.emailUsedBySubscribedPlayer',player:'profileScreen.emailUsedByPlayer'})[role]||'profileScreen.emailUsedByAccount';
+  return label?gdT(key,{email:label}):gdT('profileScreen.emailAlreadyHasAccount');
 }
 function gdAccountHashPassword(password,salt){
   let a=2166136261,b=16777619;
@@ -24633,9 +24652,9 @@ function gdAccountCreate(data,opts={}){
   const email=rawEmail===GD_ADMIN_LEGACY_EMAIL?GD_ADMIN_EMAIL:rawEmail;
   const password=String(data?.password||'');
   const role=gdAccountRole(data?.role);
-  if(!name)throw new Error('Enter a name');
-  if(!email||!email.includes('@'))throw new Error('Enter a valid email');
-  if(password.length<4)throw new Error('Password needs at least 4 characters');
+  if(!name)throw new Error(gdT('profileScreen.errEnterName'));
+  if(!email||!email.includes('@'))throw new Error(gdT('profileScreen.errValidEmail'));
+  if(password.length<4)throw new Error(gdT('profileScreen.errPasswordLength'));
   const duplicate=gdAccountEmailInUse(email);
   if(duplicate)throw new Error(gdAccountDuplicateEmailMessage(email,duplicate));
   const now=new Date().toISOString();
@@ -24694,9 +24713,9 @@ function gdAccountLogin(email,password,opts={}){
     gdAccountsLoad();
     account=gdAccountByEmail(loginEmail)||account;
   }
-  if(!account)throw new Error('Account not found');
+  if(!account)throw new Error(gdT('profileScreen.errAccountNotFound'));
   const hash=gdAccountHashPassword(password,account.passwordSalt);
-  if(hash!==account.passwordHash)throw new Error('Password does not match');
+  if(hash!==account.passwordHash)throw new Error(gdT('profileScreen.errPasswordMismatch'));
   account.lastLoginAt=new Date().toISOString();
   GD_ACCOUNT_STATE.activeId=account.accountId;
   GD_ACCOUNT_STATE.viewingProfileId=account.profileId;
@@ -24720,15 +24739,15 @@ function gdAccountLogout(){
 function gdAccountUpdate(data){
   gdAccountsLoad();
   const account=gdCurrentAccount();
-  if(!account)throw new Error('Sign in first');
+  if(!account)throw new Error(gdT('profileScreen.errSignInFirst'));
   const name=String(data?.name||'').trim();
   const rawEmail=gdAccountEmail(data?.email);
   const email=rawEmail===GD_ADMIN_LEGACY_EMAIL?GD_ADMIN_EMAIL:rawEmail;
   const requestedRole=data?.role?gdAccountRole(data.role):gdAccountRole(account.role);
-  if(requestedRole!==gdAccountRole(account.role)&&gdAccountRole(account.role)!=='admin')throw new Error('Only admin can change account type');
+  if(requestedRole!==gdAccountRole(account.role)&&gdAccountRole(account.role)!=='admin')throw new Error(gdT('profileScreen.errOnlyAdminAccountType'));
   const role=requestedRole;
-  if(!name)throw new Error('Enter a name');
-  if(!email||!email.includes('@'))throw new Error('Enter a valid email');
+  if(!name)throw new Error(gdT('profileScreen.errEnterName'));
+  if(!email||!email.includes('@'))throw new Error(gdT('profileScreen.errValidEmail'));
   const duplicate=gdAccountEmailInUse(email,account.accountId);
   if(duplicate)throw new Error(gdAccountDuplicateEmailMessage(email,duplicate));
   account.name=name;
@@ -24736,7 +24755,7 @@ function gdAccountUpdate(data){
   account.role=role;
   if(String(data?.password||'').trim()){
     const password=String(data.password);
-    if(password.length<4)throw new Error('Password needs at least 4 characters');
+    if(password.length<4)throw new Error(gdT('profileScreen.errPasswordLength'));
     account.passwordSalt=gdNewId('salt');
     account.passwordHash=gdAccountHashPassword(password,account.passwordSalt);
     account.requiresPasswordSetup=false;
@@ -24848,14 +24867,14 @@ function gdCoachGenerateInvite(account=gdCurrentAccount()){
 function gdAccountConnectCoachByCode(rawCode){
   gdAccountsLoad();
   const player=gdCurrentAccount();
-  if(!player)throw new Error('Sign in first');
-  if(gdAccountIsStaff(player))throw new Error('Use a player account to connect to a coach');
+  if(!player)throw new Error(gdT('profileScreen.errSignInFirst'));
+  if(gdAccountIsStaff(player))throw new Error(gdT('profileScreen.errUsePlayerAccount'));
   const code=String(rawCode||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
-  if(!code)throw new Error('Enter a coach code');
+  if(!code)throw new Error(gdT('profileScreen.errEnterCoachCode'));
   const invite=gdCoachInviteLoad().find(item=>item&&item.active!==false&&String(item.code||'').toUpperCase().replace(/[^A-Z0-9]/g,'')===code);
-  if(!invite)throw new Error('Coach code not found');
+  if(!invite)throw new Error(gdT('profileScreen.errCoachCodeNotFound'));
   const coach=gdAccountById(invite.coachAccountId);
-  if(!coach||!gdAccountIsStaff(coach))throw new Error('Coach account is not available');
+  if(!coach||!gdAccountIsStaff(coach))throw new Error(gdT('profileScreen.errCoachUnavailable'));
   coach.linkedPlayerIds=Array.isArray(coach.linkedPlayerIds)?coach.linkedPlayerIds:[];
   if(!coach.linkedPlayerIds.includes(player.accountId))coach.linkedPlayerIds.push(player.accountId);
   player.linkedCoachIds=Array.isArray(player.linkedCoachIds)?player.linkedCoachIds:[];
@@ -25073,7 +25092,7 @@ function gdAccountReturnToOwnProfile(opts={}){
   syncCoreProfileFromActive();
   gdRefreshPermissionChrome();
   try{window.ClaritySession&&window.ClaritySession.sync("account-return-own");}catch(e){}
-  if(!opts.silent)try{toast(`Signed in as ${account.name}`)}catch(e){}
+  if(!opts.silent)try{toast(gdT('profileScreen.signedInAs',{name:account.name}))}catch(e){}
   return account;
 }
 function gdAccountApplySession(opts={}){
@@ -25102,7 +25121,7 @@ function gdAccountApplySession(opts={}){
   syncCoreProfileFromActive();
   gdRefreshPermissionChrome();
   try{window.ClaritySession&&window.ClaritySession.sync("account-apply");}catch(e){}
-  if(!opts.silent)try{toast(`Signed in as ${account.name}`)}catch(e){}
+  if(!opts.silent)try{toast(gdT('profileScreen.signedInAs',{name:account.name}))}catch(e){}
   return account;
 }
 /* opts.seedAdmin - create the owner's local admin login when the store is

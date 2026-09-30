@@ -7,6 +7,8 @@ const templates = require("../scripts/gd-email-templates-core.js");
 /* Reading and writing the two Studio-managed welcome templates lives in one place. */
 const signupTemplates = require("./lib/gd-signup-templates.js");
 const { buildSetupLink } = require("./lib/gd-setup-link.js");
+const { translator } = require("../scripts/gd-i18n-node.js");
+const { recipientLocale } = require("./lib/gd-email-locale.js");
 
 exports.handler = async function(event){
   if(event.httpMethod !== "POST")return json(405, {error: "Method not allowed"});
@@ -21,11 +23,11 @@ exports.handler = async function(event){
   var siteUrl = env("CLARITY_SITE_URL") || "https://caddy.claritygolf.app";
   var message = {
     to: to,
-    recipientName: text(payload.recipientName, 120) || "there",
+    recipientName: text(payload.recipientName, 120),
     actorName: text(payload.actorName, 120) || "Clarity",
-    title: text(payload.title, 180) || "Your Clarity account was updated",
+    title: text(payload.title, 180),
     detail: text(payload.detail, 1200),
-    ctaLabel: text(payload.ctaLabel, 80) || "Open Clarity",
+    ctaLabel: text(payload.ctaLabel, 80),
     ctaUrl: safeUrl(payload.ctaUrl, siteUrl),
     eventType: text(payload.eventType, 80) || "account_activity",
     appStoreUrl: "",
@@ -43,6 +45,8 @@ exports.handler = async function(event){
     ? templates.resolveTemplateKey(message.eventType)
     : "";
   var subjectFromTemplate = "";
+  /* The recipient's language when their account has one, else the sender's. */
+  message.locale = await recipientLocale(message.to, payload.locale);
   try{
     if(signupKey){
       message.eventType = signupKey;
@@ -69,6 +73,7 @@ exports.handler = async function(event){
       }
       var loaded = await signupTemplates.loadTemplate(signupKey);
       var copy = templates.compose(signupKey, {
+        locale: message.locale,
         siteUrl: siteUrl,
         welcomeTemplate: loaded.template,
         variables: signupTemplates.variablesFor({
@@ -93,6 +98,12 @@ exports.handler = async function(event){
     return json(error.status || 502, {error: "Could not prepare account email", details: error.body || error.message});
   }
 
+  if(!signupKey){
+    var activity = templates.compose(message.eventType, message);
+    message.title = activity.title;
+    message.detail = activity.detail;
+    message.ctaLabel = activity.ctaLabel;
+  }
   var rendered = renderEmail(message);
   var subject = subjectFromTemplate || text(payload.subject, 140) || subjectFor(message);
   /* bypassesActivitySwitch, not isServiceEventType: the coach-update email ships working
@@ -181,6 +192,7 @@ function json(statusCode, body){ return {statusCode: statusCode, headers: {"Cont
 async function deliver(eventType, input, failureLabel){
   var resendKey = env("RESEND_API_KEY");
   if(!resendKey)return {sent: false, reason: "not_configured"};
+  if(!input.locale)input.locale = await recipientLocale(input.to);
   var built = templates.build(eventType, input);
   var from = env("CLARITY_EMAIL_FROM") || templates.DEFAULT_FROM;
   var response = await fetch("https://api.resend.com/emails", {method: "POST", headers: {"Authorization": "Bearer " + resendKey, "Content-Type": "application/json"}, body: JSON.stringify({from: from, to: [built.message.to], subject: built.subject, html: built.html, text: built.text})});
@@ -213,8 +225,9 @@ async function sendCompedAccessEmail(options){
     siteUrl: siteUrl,
     recipientName: options.recipientName,
     actorName: options.issuedByName || "Clarity Golf",
-    periodLabel: options.periodLabel,
-    expiresLabel: options.expiresLabel,
+    locale: await recipientLocale(to, options.locale),
+    days: options.days,
+    expiresAt: options.expiresAt,
     membership: options.membership !== false,
     hasAccount: !!options.hasAccount,
     ctaUrl: siteUrl,
@@ -250,7 +263,9 @@ async function sendSignupWelcomeEmail(options){
   var loaded = await signupTemplates.loadTemplate(key);
   var store = appStoreUrl();
   var play = playStoreUrl();
+  var locale = await recipientLocale(to, options.locale);
   return deliver(key, {
+    locale: locale,
     to: to,
     siteUrl: siteUrl,
     recipientName: options.recipientName,
@@ -263,7 +278,8 @@ async function sendSignupWelcomeEmail(options){
       siteUrl: siteUrl,
       appStoreUrl: store,
       playStoreUrl: play,
-      comped: comped
+      comped: comped,
+      i18n: translator(locale)
     }),
     /* A one-use set-password link, when there is one, always wins over the destination on the
        template - it cannot be typed into a settings box, and it is the whole point of the

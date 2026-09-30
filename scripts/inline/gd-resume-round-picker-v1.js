@@ -26,6 +26,7 @@
   var LEGACY_KEY = "gd_gps_resume_round_v1";
 
   function safe(fn, fallback) { try { return fn(); } catch (e) { return fallback; } }
+  function L(key, vars) { return window.GDI18n.t(key, vars); }
 
   function read() {
     var saved = safe(function () { return window.GDPlayContext ? window.GDPlayContext.readJson("resume-round", KEY) : JSON.parse(localStorage.getItem(KEY) || "null"); }, null);
@@ -46,15 +47,15 @@
     var ms = Date.now() - Number(saved.updatedAt || 0);
     if (!Number.isFinite(ms) || ms < 0) return "";
     var mins = Math.round(ms / 60000);
-    if (mins < 2) return "just now";
-    if (mins < 60) return mins + "m ago";
+    if (mins < 2) return L("resumeRound.justNow");
+    if (mins < 60) return L("resumeRound.minutesAgo", { n: mins });
     var hours = Math.floor(mins / 60);
     var rest = mins % 60;
-    return rest ? hours + "h " + rest + "m ago" : hours + "h ago";
+    return rest ? L("resumeRound.hoursMinutesAgo", { h: hours, m: rest }) : L("resumeRound.hoursAgo", { n: hours });
   }
 
   function detail(saved) {
-    var parts = [saved.courseName || "Round", "H" + (Number(saved.hole) || 1)];
+    var parts = [saved.courseName || L("resumeRound.round"), L("resumeRound.holeShort", { n: Number(saved.hole) || 1 })];
     var when = age(saved);
     if (when) parts.push(when);
     return parts.join(" · ");
@@ -87,8 +88,9 @@
       panel = document.createElement("div");
       panel.id = "gdCourseResumeRound";
       panel.innerHTML = '<button class="gdCourseResumePrimary" type="button">'
-        + "<strong>Resume Round</strong><span></span></button>"
-        + '<button class="gdCourseResumeNew" type="button">End Round</button>';
+        + '<strong data-i18n="resumeRound.resume">Resume Round</strong><span></span></button>'
+        + '<button class="gdCourseResumeNew" type="button" data-i18n="resumeRound.end">End Round</button>';
+      window.GDI18n.apply(panel);
       var header = screen.querySelector(".courseHeader");
       if (header && header.parentNode) header.parentNode.insertBefore(panel, header.nextSibling);
       else screen.insertBefore(panel, screen.firstChild);
@@ -123,9 +125,12 @@
     stop(event);
     clear();
     ensurePanel();
-    safe(function () { if (typeof toast === "function") toast("Round ended"); });
+    safe(function () { if (typeof toast === "function") toast(L("resumeRound.ended")); });
     return false;
   }
+
+  /* The detail line is written by code: refresh it in the new words. */
+  window.GDI18n.onChange(function () { ensurePanel(); });
 
   window.gdEnsureResumeRoundPicker = ensurePanel;
   window.gdResumeRoundFromPicker = resumeRound;

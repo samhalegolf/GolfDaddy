@@ -13,7 +13,7 @@ exports.handler = async function(event) {
     const token = await supabaseAuth("token?grant_type=password", { method: "POST", body: JSON.stringify({ email: accountEmail, password }) }, false);
     const authUser = token && token.user;
     if (!authUser || !authUser.id) return json(401, { error: "Supabase Auth did not return a user" });
-    const pack = await upsertAccount(authUser, { email: accountEmail, name: authUser.user_metadata && authUser.user_metadata.name, role: authUser.user_metadata && authUser.user_metadata.role, eventType: "supabase_auth_login" });
+    const pack = await upsertAccount(authUser, { email: accountEmail, name: authUser.user_metadata && authUser.user_metadata.name, role: authUser.user_metadata && authUser.user_metadata.role, eventType: "supabase_auth_login", locale: body.locale });
     return json(200, { ok: true, source: "supabase_auth", account: pack.account, profile: pack.profile, session: { access_token: token.access_token, refresh_token: token.refresh_token, expires_at: token.expires_at, token_type: token.token_type } });
   } catch (error) {
     if (error.status === 400 && accountEmail && hasAuthWithServiceKey()) {

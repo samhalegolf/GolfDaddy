@@ -123,6 +123,9 @@
 
   /* ------------------------------------------------------------- menu row */
 
+  function L(key, vars) { return window.GDI18n.t(key, vars); }
+  function H(key, vars) { return window.GDI18n.html(key, vars); }
+
   function menuList() {
     return document.querySelector("#gdPlayerSettingsMenu .gdPlayerSettingsList");
   }
@@ -136,7 +139,9 @@
     row.id = ROW_ID;
     row.type = "button";
     row.onclick = function () { show(SECTION); };
-    row.innerHTML = '<div><strong>Garmin Watch</strong><span id="' + LINE_ID + '">Play from your wrist.</span></div>';
+    row.innerHTML = '<div><strong data-i18n="garmin.title">Garmin Watch</strong><span id="' + LINE_ID + '"></span></div>';
+    window.GDI18n.apply(row);
+    window.GDI18n.set(row.querySelector("#" + LINE_ID), "garmin.rowHint");
     /* Sits with the other device/access rows rather than among profile
        fields: after Access & Membership when clarity-payments has installed
        it, otherwise at the end. */
@@ -152,10 +157,10 @@
     var line = document.getElementById(LINE_ID);
     if (!line) return;
     var device = selectedDevice();
-    if (!hasAccess()) { line.textContent = "Membership required."; return; }
-    if (!device) { line.textContent = "No watch connected."; return; }
-    line.textContent = (device.deviceName || "Garmin watch") +
-      (state && state.reachable ? " — connected" : " — not connected");
+    if (!hasAccess()) { window.GDI18n.set(line, "garmin.membershipRequiredLine"); return; }
+    if (!device) { window.GDI18n.set(line, "garmin.noWatchLine"); return; }
+    window.GDI18n.set(line, state && state.reachable ? "garmin.deviceConnected" : "garmin.deviceNotConnected",
+      { device: device.deviceName || L("garmin.defaultDevice") });
   }
 
   /* ----------------------------------------------------------- the page */
@@ -170,11 +175,12 @@
     panel.id = PAGE_ID;
     panel.hidden = true;
     panel.innerHTML = [
-      '<button class="gdPlayerSettingsSubBack" type="button" onclick="gdPlayerSettingsShowSection(&quot;menu&quot;)">‹ Settings</button>',
-      "<strong>Garmin Watch</strong>",
-      "<span>Distances, your Bubble and shot logging on your wrist.</span>",
+      '<button class="gdPlayerSettingsSubBack" type="button" onclick="gdPlayerSettingsShowSection(&quot;menu&quot;)" data-i18n="garmin.backToSettings">‹ Settings</button>',
+      '<strong data-i18n="garmin.title">Garmin Watch</strong>',
+      '<span data-i18n="garmin.pageHint">Distances, your Bubble and shot logging on your wrist.</span>',
       '<div class="clarityPaymentSection" id="' + BODY_ID + '"></div>'
     ].join("");
+    window.GDI18n.apply(panel);
     sheet.appendChild(panel);
     return panel;
   }
@@ -185,12 +191,11 @@
       return pay && pay.accessLabel ? pay.accessLabel() : "";
     }, "");
     return [
-      '<div class="clarityReferralHead"><strong>Membership required</strong>',
-      "<span>Playing from a Garmin watch is part of a Clarity membership. ",
-      "The rangefinder on your phone stays free.</span></div>",
+      '<div class="clarityReferralHead"><strong>' + H("garmin.lockedTitle") + '</strong>',
+      "<span>" + H("garmin.lockedBody") + "</span></div>",
       label ? "<p>" + escapeHTML(label) + "</p>" : "",
       '<div class="clarityPaymentActions">',
-      '<button type="button" onclick="ClarityGarmin.openMembership()">See Membership</button>',
+      '<button type="button" onclick="ClarityGarmin.openMembership()">' + H("garmin.seeMembership") + '</button>',
       "</div>"
     ].join("");
   }
@@ -198,8 +203,8 @@
   function connectedHTML(device) {
     var reachable = !!(state && state.reachable);
     return [
-      '<div class="clarityReferralHead"><strong>' + escapeHTML(device.deviceName || "Garmin watch") + "</strong>",
-      "<span>" + (reachable ? "Connected." : "Saved, but not currently connected.") + "</span></div>",
+      '<div class="clarityReferralHead"><strong>' + escapeHTML(device.deviceName || L("garmin.defaultDevice")) + "</strong>",
+      "<span>" + H(reachable ? "garmin.connected" : "garmin.savedNotConnected") + "</span></div>",
       device.model ? "<p>" + escapeHTML(device.model) + "</p>" : "",
       /* appInstalled is a real answer from the SDK now, not a proxy for "the
          device is connected", so this only appears when the watch genuinely
@@ -207,10 +212,10 @@
          install it is useful rather than noise. It stays silent while we
          cannot tell (watch out of range), rather than nagging. */
       (state && state.reachable && state.appInstalled === false)
-        ? "<p><strong>Clarity Caddy is not installed on this watch.</strong> Install it from the Connect IQ store, then start a round on your phone.</p>"
-        : "<p>Start a round on your phone and it appears on your wrist.</p>",
+        ? "<p><strong>" + H("garmin.notInstalled") + "</strong> " + H("garmin.installHint") + "</p>"
+        : "<p>" + H("garmin.startRound") + "</p>",
       '<div class="clarityPaymentActions">',
-      '<button type="button" onclick="ClarityGarmin.disconnect()">Disconnect</button>',
+      '<button type="button" onclick="ClarityGarmin.disconnect()">' + H("garmin.disconnect") + '</button>',
       "</div>"
     ].join("");
   }
@@ -227,8 +232,8 @@
        watch that was never the problem. */
     if (devices.sdkLinked === false) {
       return [
-        "<p><strong>Not available in this build.</strong></p>",
-        "<p>" + escapeHTML(devices.reason || "Garmin support is not bundled in this build yet.") + "</p>"
+        "<p><strong>" + H("garmin.notInBuild") + "</strong></p>",
+        "<p>" + escapeHTML(devices.reason || L("garmin.notBundled")) + "</p>"
       ].join("");
     }
     /* iOS cannot list paired watches in-process — there is no equivalent of
@@ -238,23 +243,23 @@
        time this renders, and the answer arrives as a state change. Saying
        "no watches found" in that moment would be both wrong and alarming. */
     if (devices.handoff) {
-      return "<p>" + escapeHTML(devices.reason || "Choose your watch in the Garmin Connect app.") + "</p>";
+      return "<p>" + escapeHTML(devices.reason || L("garmin.chooseInConnectApp")) + "</p>";
     }
     var list = (devices.devices || []);
     if (devices.reason) {
       return "<p>" + escapeHTML(devices.reason) + "</p>";
     }
     if (!list.length) {
-      return "<p>No Garmin watches found. Open the Garmin Connect app, make sure your watch is paired there, then try again.</p>";
+      return "<p>" + H("garmin.noneFound") + "</p>";
     }
     return list.map(function (device) {
       var id = escapeHTML(device.deviceId);
-      var name = escapeHTML(device.deviceName || "Garmin watch");
+      var name = escapeHTML(device.deviceName || L("garmin.defaultDevice"));
       var model = escapeHTML(device.model || "");
       /* A watch that is paired but out of range is still the watch they want
          to pick, so it stays selectable and just says where it stands. */
-      var sub = device.connected ? "Connected" : "Not connected right now";
-      if (model) sub = model + " — " + sub;
+      var sub = L(device.connected ? "garmin.rowConnected" : "garmin.rowNotConnected");
+      if (model) sub = L("garmin.rowModel", { model: device.model, status: sub });
       return '<button class="gdPlayerSettingsRow" type="button" onclick="ClarityGarmin.choose(&quot;' + id +
         '&quot;,&quot;' + name + '&quot;,&quot;' + model + '&quot;)">' +
         "<div><strong>" + name + "</strong><span>" + escapeHTML(sub) + "</span></div></button>";
@@ -264,16 +269,16 @@
   /* On iOS the button leaves the app, so it should say so rather than
      implying an in-app scan. selectionStyle comes from the native state. */
   function connectLabel() {
-    return (state && state.selectionStyle === "handoff") ? "Choose in Garmin Connect" : "Connect a Watch";
+    return H((state && state.selectionStyle === "handoff") ? "garmin.chooseInConnect" : "garmin.connectWatch");
   }
 
   function disconnectedHTML() {
     return [
-      '<div class="clarityReferralHead"><strong>No watch connected</strong>',
-      "<span>Connect a Garmin to see distances and your Bubble on your wrist.</span></div>",
+      '<div class="clarityReferralHead"><strong>' + H("garmin.noWatchTitle") + '</strong>',
+      "<span>" + H("garmin.noWatchHint") + "</span></div>",
       '<div class="clarityPaymentActions">',
       '<button type="button" onclick="ClarityGarmin.scan()"' + (busy ? " disabled" : "") + ">" +
-        (busy ? "Looking…" : connectLabel()) + "</button>",
+        (busy ? H("garmin.looking") : connectLabel()) + "</button>",
       "</div>",
       deviceListHTML()
     ].join("");
@@ -308,7 +313,7 @@
     render();
     Promise.resolve(safe(function () { return p.garminDevices(); }, null))
       .then(function (answer) { devices = answer || { devices: [], sdkLinked: false }; })
-      .catch(function () { devices = { devices: [], sdkLinked: false, reason: "Could not look for watches." }; })
+      .catch(function () { devices = { devices: [], sdkLinked: false, reason: L("garmin.couldNotLook") }; })
       .then(function () { busy = false; render(); });
     return false;
   }
@@ -327,10 +332,10 @@
            sync: the player has just paid for this and pressed the button. */
         setEntitlement(true);
         render();
-        safe(function () { return window.toast && window.toast("Watch connected."); });
+        safe(function () { return window.toast && window.toast(L("garmin.watchConnected")); });
       })
       .catch(function () {
-        safe(function () { return window.toast && window.toast("Could not connect that watch."); });
+        safe(function () { return window.toast && window.toast(L("garmin.couldNotConnect")); });
       });
     return false;
   }
@@ -434,6 +439,13 @@
     installSwitcher();
     setTimeout(install, 400);
   }
+  /* The page body is drawn from template strings: redraw it in the new words. */
+  safe(function () {
+    window.GDI18n.onChange(function () {
+      var panel = document.getElementById(PAGE_ID);
+      if (panel && !panel.hidden) render();
+    });
+  });
   window.addEventListener("clarity:session-changed", function () {
     lastEntitlementSent = null;
     setEntitlement(true);

@@ -89,6 +89,8 @@
     return btn;
   }
 
+  function L(key) { return window.GDI18n.t(key); }
+
   function ensureRightRail() {
     if (!railAllowed()) {
       removeRightRail();
@@ -97,14 +99,14 @@
     const rail = ensureShell();
 
     const spec = [
-      { id: 'flagTool', key: 'flag', icon: 'flag', label: 'Place flag', className: 'railBtn', html: icon('flag'), handler: function() { try { if (typeof startPinPlacement === 'function') startPinPlacement(); } catch(e) {} } },
-      { id: 'windToolBtn', key: 'wind', label: 'Wind', className: 'railBtn gdWindToolBtn', html: WIND_SVG, handler: function(ev) { try { if (typeof gdWindToolPressed === 'function') return gdWindToolPressed(ev); } catch(e) {} return false; } },
-      { id: 'gpsRailBtn', key: 'cgGps', icon: 'gps', label: 'GPS locate', className: 'railBtn gdGpsRecenterBtn', html: icon('cgGps'), handler: function() { try { if (typeof refreshGPS === 'function') refreshGPS(); } catch(e) {} } },
-      { id: 'gdGreenZoomBtn', key: 'green-zoom', label: 'Frame tightness', className: 'railBtn gdGreenZoomBtn', html: ZOOM_SVG, handler: function(ev) { try { if (typeof gdToggleSimpleGreenZoom === 'function') return gdToggleSimpleGreenZoom(ev); } catch(e) {} return false; } },
+      { id: 'flagTool', key: 'flag', icon: 'flag', label: L('brandIcon.placeFlag'), className: 'railBtn', html: icon('flag'), handler: function() { try { if (typeof startPinPlacement === 'function') startPinPlacement(); } catch(e) {} } },
+      { id: 'windToolBtn', key: 'wind', label: L('rail.wind'), className: 'railBtn gdWindToolBtn', html: WIND_SVG, handler: function(ev) { try { if (typeof gdWindToolPressed === 'function') return gdWindToolPressed(ev); } catch(e) {} return false; } },
+      { id: 'gpsRailBtn', key: 'cgGps', icon: 'gps', label: L('rail.gpsLocate'), className: 'railBtn gdGpsRecenterBtn', html: icon('cgGps'), handler: function() { try { if (typeof refreshGPS === 'function') refreshGPS(); } catch(e) {} } },
+      { id: 'gdGreenZoomBtn', key: 'green-zoom', label: L('brandIcon.frameTightness'), className: 'railBtn gdGreenZoomBtn', html: ZOOM_SVG, handler: function(ev) { try { if (typeof gdToggleSimpleGreenZoom === 'function') return gdToggleSimpleGreenZoom(ev); } catch(e) {} return false; } },
       { id: 'gdMapperToolsBtn', key: 'mapper-tools', label: 'Map tools', className: 'railBtn gdMapperToolsBtn', html: 'MAP', handler: function(ev) { try { if (typeof gdOpenMapperTools === 'function') return gdOpenMapperTools(ev); } catch(e) {} return false; } },
-      { id: 'gdGpsSettingsRailBtn', key: 'gps-settings', label: 'GPS settings', className: 'railBtn gdGpsSettingsRailBtn', html: SETTINGS_SVG, handler: function(ev) { try { if (typeof gdOpenGpsToolSettings === 'function') return gdOpenGpsToolSettings(ev); } catch(e) {} return false; } },
-      { id: 'scorecardRailBtn', key: 'scorecard', icon: 'scorecard', label: 'Scorecard', className: 'railBtn', html: icon('scorecard'), handler: function() { try { if (typeof openScorecard === 'function') openScorecard(); } catch(e) {} } },
-      { id: 'bagRailBtn', key: 'bag', icon: 'bag', label: 'Bag', className: 'railBtn', html: icon('bag'), handler: function() { try { if (typeof openBag === 'function') openBag(); } catch(e) {} } }
+      { id: 'gdGpsSettingsRailBtn', key: 'gps-settings', label: L('brandIcon.gpsSettings'), className: 'railBtn gdGpsSettingsRailBtn', html: SETTINGS_SVG, handler: function(ev) { try { if (typeof gdOpenGpsToolSettings === 'function') return gdOpenGpsToolSettings(ev); } catch(e) {} return false; } },
+      { id: 'scorecardRailBtn', key: 'scorecard', icon: 'scorecard', label: L('rail.scorecard'), className: 'railBtn', html: icon('scorecard'), handler: function() { try { if (typeof openScorecard === 'function') openScorecard(); } catch(e) {} } },
+      { id: 'bagRailBtn', key: 'bag', icon: 'bag', label: L('rail.bag'), className: 'railBtn', html: icon('bag'), handler: function() { try { if (typeof openBag === 'function') openBag(); } catch(e) {} } }
     ];
 
     spec.forEach(item => ensureRailButton(rail, item));
@@ -147,6 +149,7 @@
   }
   document.addEventListener('click', () => setTimeout(refreshV66, 100));
   window.addEventListener('resize', () => setTimeout(refreshV66, 100));
+  window.GDI18n.onChange(() => setTimeout(refreshV66, 0));
 
   ['enterGpsModule','gdV62Refresh','showShellHome','openScorecard','refreshGPS'].forEach(name => {
     const old = window[name];

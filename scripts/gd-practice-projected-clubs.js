@@ -49,6 +49,10 @@
 
   var VIEW_KEY = 'gd_practice_bubble_view_v1';
   var STYLE_ID = 'gdPracticeProjectedClubsStyle';
+  var redrawComparison = null;
+
+  function L(key, vars) { return window.GDI18n.t(key, vars); }
+  function H(key, vars) { return window.GDI18n.html(key, vars); }
 
   function core() { return window.GDBubbleSignalsCore || null; }
   function view() { return window.GDBubbleGeometryView || null; }
@@ -202,8 +206,7 @@
     var model = modelFor(rows);
     var clubs = projectionClubs(model);
     if (!clubs.length) {
-      return '<p class="gdProjectedNote">No practice data yet. Import a session and the same model will be shown '
-        + 'projected through the bag.</p>';
+      return '<p class="gdProjectedNote">' + H('projectedClubs.noData') + '</p>';
     }
 
     var geometry = approvedGeometry();
@@ -216,7 +219,7 @@
       return '<figure>'
         + drawer.bubbleSvg(payloads[index], geometry, {
           width: 150, height: 150, exaggeration: 1, scaleTo: scaleTo,
-          showLabels: false, ariaLabel: 'Projected bubble for ' + entry.club
+          showLabels: false, ariaLabel: L('projectedClubs.bubbleAria', { club: entry.club })
         })
         + '<figcaption>' + esc(entry.club) + ' &middot; ' + Math.round(entry.carryM) + 'm</figcaption>'
         + '</figure>';
@@ -224,10 +227,7 @@
 
     var moulded = !api.isIdentityGeometry(geometry);
     return '<div class="gdProjectedClubs">' + figures + '</div>'
-      + '<p class="gdProjectedNote">One player model, projected through the bag. These are not separate bubbles built '
-      + 'from each club\'s own shots - a projected club exists whether or not that club was hit.'
-      + (moulded ? ' Micro-Geometry moulding is applied at production scale, which is deliberately almost invisible here.' : '')
-      + '</p>';
+      + '<p class="gdProjectedNote">' + H(moulded ? 'projectedClubs.noteMoulded' : 'projectedClubs.note') + '</p>';
   }
 
   /* The switcher plus whichever view is active. gd-route-audit.js calls this
@@ -237,15 +237,15 @@
   function practiceVisualHtml(normalisedHtml, analysis) {
     ensureStyle();
     var mode = currentView();
-    var switcher = '<div class="gdPracticeViewSwitch" role="tablist" aria-label="Practice bubble view">'
+    var switcher = '<div class="gdPracticeViewSwitch" role="tablist" aria-label="' + H('projectedClubs.viewAria') + '">'
       + '<button type="button" role="tab" aria-selected="' + (mode === 'normalised') + '"'
       + ' class="' + (mode === 'normalised' ? 'isOn' : '') + '"'
-      + ' onclick="return window.gdSetPracticeBubbleView(\'normalised\')">Normalised</button>'
+      + ' onclick="return window.gdSetPracticeBubbleView(\'normalised\')">' + H('projectedClubs.normalised') + '</button>'
       + '<button type="button" role="tab" aria-selected="' + (mode === 'projected') + '"'
       + ' class="' + (mode === 'projected' ? 'isOn' : '') + '"'
-      + ' onclick="return window.gdSetPracticeBubbleView(\'projected\')">Projected Clubs</button>'
+      + ' onclick="return window.gdSetPracticeBubbleView(\'projected\')">' + H('projectedClubs.projected') + '</button>'
       + '<span class="gdPracticeViewSpacer"></span>'
-      + '<button type="button" onclick="return window.gdOpenPracticeSessionComparison()">Compare sessions</button>'
+      + '<button type="button" onclick="return window.gdOpenPracticeSessionComparison()">' + H('projectedClubs.compare') + '</button>'
       + '</div>';
     return switcher + (mode === 'projected' ? projectedClubsHtml(analysis) : normalisedHtml);
   }
@@ -273,23 +273,23 @@
       return {
         id: id,
         shots: byId[id],
-        label: (session.label || 'Practice session')
-          + (when ? ' · ' + String(when).slice(0, 10) : '')
-          + ' · ' + byId[id].length + ' shots'
+        label: when
+          ? window.GDI18n.tn('projectedClubs.sessionOptionDated', byId[id].length, { label: session.label || L('projectedClubs.defaultSession'), date: String(when).slice(0, 10) })
+          : window.GDI18n.tn('projectedClubs.sessionOption', byId[id].length, { label: session.label || L('projectedClubs.defaultSession') })
       };
     }).sort(function (a, b) { return a.label < b.label ? 1 : -1; });
   }
 
   function summaryDl(model) {
-    if (!model) return '<p class="gdSessionEmpty">No model.</p>';
+    if (!model) return '<p class="gdSessionEmpty">' + H('projectedClubs.noModel') + '</p>';
     var fired = Object.keys(model.signals).filter(function (id) { return model.signals[id].fired; });
     return '<dl>'
-      + '<dt>Shots</dt><dd>' + model.base.sampleShots + '</dd>'
-      + '<dt>Clubs</dt><dd>' + model.base.clubsSeen + '</dd>'
-      + '<dt>Pattern</dt><dd>' + esc(model.base.playerPattern) + '</dd>'
-      + '<dt>Dispersion</dt><dd>' + Number(model.base.dispersionScale).toFixed(2) + '&times;</dd>'
-      + '<dt>Signals firing</dt><dd>' + (fired.length ? esc(fired.join(', ')) : 'none') + '</dd>'
-      + '<dt>Axis</dt><dd>' + Number(model.geometry.axisAdjustmentDeg || 0).toFixed(3) + '&deg;</dd>'
+      + '<dt>' + H('projectedClubs.shots') + '</dt><dd>' + model.base.sampleShots + '</dd>'
+      + '<dt>' + H('projectedClubs.clubs') + '</dt><dd>' + model.base.clubsSeen + '</dd>'
+      + '<dt>' + H('projectedClubs.pattern') + '</dt><dd>' + esc(model.base.playerPattern) + '</dd>'
+      + '<dt>' + H('projectedClubs.dispersion') + '</dt><dd>' + Number(model.base.dispersionScale).toFixed(2) + '&times;</dd>'
+      + '<dt>' + H('projectedClubs.signalsFiring') + '</dt><dd>' + (fired.length ? esc(fired.join(', ')) : H('projectedClubs.none')) + '</dd>'
+      + '<dt>' + H('projectedClubs.axis') + '</dt><dd>' + Number(model.geometry.axisAdjustmentDeg || 0).toFixed(3) + '&deg;</dd>'
       + '</dl>';
   }
 
@@ -310,8 +310,7 @@
     var drawer = view();
     var sessions = state.sessions;
     if (sessions.length < 2) {
-      return '<div class="gdSessionCard"><p class="gdSessionEmpty">Comparing sessions needs at least two practice '
-        + 'sessions in the Shot Library. There ' + (sessions.length === 1 ? 'is one' : 'are none') + ' right now.</p></div>';
+      return '<div class="gdSessionCard"><p class="gdSessionEmpty">' + H(sessions.length === 1 ? 'projectedClubs.needTwoOne' : 'projectedClubs.needTwoNone') + '</p></div>';
     }
 
     var a = sessions.filter(function (s) { return s.id === state.a; })[0] || sessions[0];
@@ -351,23 +350,22 @@
         return '<figure>' + drawer.bubbleSvg(payloads[index], model.geometry, {
           width: 132, height: 132, exaggeration: state.exaggeration, scaleTo: scaleTo,
           showLabels: false, showAxes: false, adjColour: colour,
-          ariaLabel: 'Projected bubble for ' + entry.club
+          ariaLabel: L('projectedClubs.bubbleAria', { club: entry.club })
         }) + '<figcaption>' + esc(entry.club) + '</figcaption></figure>';
       }).join('') + '</div>';
     }
 
     return '<div class="gdSessionCompareGrid">'
-      + '<div class="gdSessionCard"><h3>Session A</h3>' + picker('a', a.id) + summaryDl(modelA) + '</div>'
-      + '<div class="gdSessionCard"><h3>Session B</h3>' + picker('b', b.id) + summaryDl(modelB) + '</div>'
+      + '<div class="gdSessionCard"><h3>' + H('projectedClubs.sessionA') + '</h3>' + picker('a', a.id) + summaryDl(modelA) + '</div>'
+      + '<div class="gdSessionCard"><h3>' + H('projectedClubs.sessionB') + '</h3>' + picker('b', b.id) + summaryDl(modelB) + '</div>'
       + '</div>'
-      + '<div class="gdSessionCard"><h3>Projected through the same clubs</h3>'
-      + '<p class="gdProjectedNote">What player model does Session A imply, versus Session B? Both are projected '
-      + 'through the same representative clubs - not rebuilt from each club\'s own rows.</p>'
+      + '<div class="gdSessionCard"><h3>' + H('projectedClubs.sameClubs') + '</h3>'
+      + '<p class="gdProjectedNote">' + H('projectedClubs.compareNote') + '</p>'
       + strip(modelA, '#7fd0ff') + strip(modelB, '#3cff8d')
       + '<div class="gdSessionCompareLegend">'
-      + '<span><i style="border-color:#7fd0ff"></i>Session A</span>'
-      + '<span><i style="border-color:#3cff8d"></i>Session B</span>'
-      + '<span>Exaggeration ' + state.exaggeration + '&times;</span>'
+      + '<span><i style="border-color:#7fd0ff"></i>' + H('projectedClubs.sessionA') + '</span>'
+      + '<span><i style="border-color:#3cff8d"></i>' + H('projectedClubs.sessionB') + '</span>'
+      + '<span>' + H('projectedClubs.exaggeration', { n: state.exaggeration }) + '</span>'
       + '</div>'
       + '<div class="gdPracticeViewSwitch" style="margin-top:10px">'
       + [1, 5, 10].map(function (value) {
@@ -375,15 +373,15 @@
           + (state.exaggeration === value ? ' class="isOn"' : '') + '>' + value + '&times;</button>';
       }).join('')
       + '</div></div>'
-      + '<div class="gdSessionCard"><h3>Region difference</h3>'
-      + '<p class="gdProjectedNote">Session A &rarr; Session B, per region.</p>'
+      + '<div class="gdSessionCard"><h3>' + H('projectedClubs.regionDiff') + '</h3>'
+      + '<p class="gdProjectedNote">' + H('projectedClubs.perRegion') + '</p>'
       + regionDelta(modelA.geometry, modelB.geometry) + '</div>';
   }
 
   function openComparison() {
     ensureStyle();
     if (!core() || !view()) {
-      window.alert('The Bubble model is not loaded on this build, so sessions cannot be compared.');
+      window.alert(L('projectedClubs.notLoaded'));
       return false;
     }
     var existing = document.getElementById('gdPracticeSessionCompare');
@@ -404,8 +402,8 @@
 
     function draw() {
       host.innerHTML = '<div class="gdSessionCompareInner">'
-        + '<div class="gdSessionCompareHead"><h2>Compare Practice Sessions</h2>'
-        + '<button type="button" data-gd-session-close>Close</button></div>'
+        + '<div class="gdSessionCompareHead"><h2>' + H('projectedClubs.compareTitle') + '</h2>'
+        + '<button type="button" data-gd-session-close>' + H('account.close') + '</button></div>'
         + comparisonHtml(state) + '</div>';
       host.querySelector('[data-gd-session-close]').addEventListener('click', function () { host.remove(); });
       Array.prototype.forEach.call(host.querySelectorAll('[data-gd-session]'), function (select) {
@@ -422,9 +420,15 @@
       });
     }
 
+    redrawComparison = draw;
     draw();
     return false;
   }
+
+  /* The comparison sheet is drawn from template strings: redraw it in the new words. */
+  if (window.GDI18n) window.GDI18n.onChange(function () {
+    if (redrawComparison && document.getElementById('gdPracticeSessionCompare')) redrawComparison();
+  });
 
   /* ------------------------------------------------------------------
      Exports. On window rather than a namespace object because the Practice

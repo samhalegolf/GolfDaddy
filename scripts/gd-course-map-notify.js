@@ -27,6 +27,8 @@
   function writeJson(key, value) {
     try { if (value == null) localStorage.removeItem(key); else localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
   }
+  function L(key, vars) { return window.GDI18n.t(key, vars); }
+  function H(key, vars) { return window.GDI18n.html(key, vars); }
   function toastSafe(msg) { try { if (typeof window.toast === "function") window.toast(msg); } catch (e) {} }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
 
@@ -64,7 +66,7 @@
     });
     var body = await res.json().catch(function () { return null; });
     if (!res.ok) {
-      var error = new Error(body && body.error || "Could not save your request");
+      var error = new Error(body && body.error || L("mapNotify.couldNotSave"));
       error.status = res.status;
       throw error;
     }
@@ -99,24 +101,27 @@
   }
 
   function showDone(card, name, email) {
-    card.innerHTML = "<strong>We'll let you know</strong><span>" + esc(email ? "We'll email " + email + " when " + name + " is ready." : "We'll email you when " + name + " is ready.") + "</span>";
+    card.innerHTML = "<strong>" + H("mapNotify.letYouKnow") + "</strong><span>"
+      + (email ? H(name ? "mapNotify.willEmailAddress" : "mapNotify.willEmailAddressThis", { email: email, course: name })
+        : H(name ? "mapNotify.willEmailYou" : "mapNotify.willEmailYouThis", { course: name })) + "</span>";
     setTimeout(hide, 4000);
   }
 
   async function offer(course) {
     var ref = courseRef(course);
     if (!ref) return false;
-    var name = ref.courseName || "this course";
+    var name = ref.courseName;
+    var couldNotMap = H(name ? "mapNotify.couldNotMap" : "mapNotify.couldNotMapThis", { course: name });
     var card = ensureCard();
     if (alreadyRequested(ref.courseId)) {
-      card.innerHTML = "<strong>We couldn't map " + esc(name) + " yet</strong><span>You're on the list - we'll email you when it's ready. Basic GPS works in the meantime.</span>"
-        + '<div class="gdCourseMapNotifyActions"><button type="button" data-gd-notify-close>OK</button></div>';
+      card.innerHTML = "<strong>" + couldNotMap + "</strong><span>" + H("mapNotify.onList") + "</span>"
+        + '<div class="gdCourseMapNotifyActions"><button type="button" data-gd-notify-close>' + H("mapNotify.ok") + '</button></div>';
     } else {
       var signedIn = !!(await accessToken());
-      card.innerHTML = "<strong>We couldn't map " + esc(name) + " yet</strong><span>Basic GPS works in the meantime. We'll keep working on the full map.</span>"
+      card.innerHTML = "<strong>" + couldNotMap + "</strong><span>" + H("mapNotify.basicGps") + "</span>"
         + '<div class="gdCourseMapNotifyActions">'
-        + '<button type="button" data-gd-notify-go>' + (signedIn ? "Email me when it's ready" : "Sign up to get notified") + "</button>"
-        + '<button type="button" data-gd-notify-close>No thanks</button></div>';
+        + '<button type="button" data-gd-notify-go>' + H(signedIn ? "mapNotify.emailMe" : "mapNotify.signUp") + "</button>"
+        + '<button type="button" data-gd-notify-close>' + H("mapNotify.noThanks") + '</button></div>';
       var go = card.querySelector("[data-gd-notify-go]");
       if (go) go.onclick = async function () {
         var token = await accessToken();
@@ -133,7 +138,7 @@
           showDone(card, name, result.email);
         } catch (e) {
           go.disabled = false;
-          toastSafe(e && e.message || "Could not save your request");
+          toastSafe(e && e.message || L("mapNotify.couldNotSave"));
         }
       };
     }
@@ -152,9 +157,9 @@
     writeJson(PENDING_KEY, null);
     try {
       await sendRequest(ref, token);
-      toastSafe("We'll email you when " + (ref.courseName || "your course") + " is ready");
+      toastSafe(ref.courseName ? L("mapNotify.toastWillEmail", { course: ref.courseName }) : L("mapNotify.toastWillEmailYours"));
     } catch (e) {
-      toastSafe(e && e.message || "Could not save your request");
+      toastSafe(e && e.message || L("mapNotify.couldNotSave"));
     }
   }
 

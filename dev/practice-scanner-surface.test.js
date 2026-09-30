@@ -31,7 +31,7 @@ const scannerBlock = markup.slice(
   markup.indexOf('id="gdPracticeScanPhotoBtn"')
 );
 assert(scannerBlock.length > 0, 'the scanner block was found in the markup');
-assert(/gdPracticeBetaChip">Beta</.test(scannerBlock), 'the scanner carries a Beta marker above the frame');
+assert(/gdPracticeBetaChip"[^>]*>Beta</.test(scannerBlock), 'the scanner carries a Beta marker above the frame');
 assert(
   /check the shots it reads before you save/i.test(scannerBlock),
   'and says plainly what beta means here - check the shots before saving'
@@ -47,7 +47,14 @@ const statusFn = core.slice(
 assert(statusFn.length > 0, 'the user-facing status mapping exists');
 
 const ctx = { GD_PRACTICE_SCAN_USER_STATUS: null };
+ctx.window = ctx;
 vm.createContext(ctx);
+/* The page loads the translation layer and its English base first; the status
+   words go through gd-app-core.js's gdT helper. */
+for (const f of ['scripts/gd-i18n.js', 'scripts/i18n/en.js']) {
+  vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
+}
+core.split('\n').filter((row) => /^function gd(T|Tn|H)\(/.test(row)).forEach((row) => vm.runInContext(row, ctx));
 vm.runInContext(statusFn + '\nthis.map = gdPracticeUserFacingScanStatus;', ctx);
 const map = ctx.map;
 
@@ -105,7 +112,9 @@ const stallMs = Number((core.match(/const GD_PRACTICE_SCAN_STALL_MS=(\d+)/) || [
 assert(stallMs >= 30000 && stallMs <= 180000, 'the threshold is a sane wait (30s-3min), got ' + stallMs);
 const stallFn = core.slice(core.indexOf('function gdPracticeCheckScanStall'), core.indexOf('function gdPracticeProcessingStart'));
 assert(stallFn.includes('gdPracticeFailImportJob'), 'a stalled scan fails the job rather than leaving it spinning');
-assert(/try again/i.test(stallFn), 'and the message tells the player to try again');
+/* The words live in the translation base (scripts/i18n/en.js) now. */
+const stallText = [...stallFn.matchAll(/gdT\("([A-Za-z.]+)"\)/g)].map((m) => ctx.GDI18n.t(m[1])).join(' ');
+assert(/try again/i.test(stallText), 'and the message tells the player to try again');
 assert(
   stallFn.includes('job.checkpointText') && stallFn.includes('job.progress'),
   'the stall watch keys off real progress, so a slow-but-moving scan is never killed'
@@ -126,7 +135,7 @@ assert(
   'the old "Import stopped before it completed" wording is gone'
 );
 assert(
-  core.includes('interrupted:"Scan interrupted"'),
+  /interrupted:"(appCore\.[A-Za-z]+)"/.test(core) && ctx.GDI18n.t(core.match(/interrupted:"(appCore\.[A-Za-z]+)"/)[1]) === 'Scan interrupted',
   'interrupted has its own label rather than falling through to "Import status"'
 );
 assert(

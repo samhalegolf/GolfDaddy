@@ -19,10 +19,14 @@
  */
 (function (root, factory) {
   "use strict";
-  var api = factory();
-  if (typeof module === "object" && module.exports) module.exports = api;
-  else root.GDEmailTemplatesCore = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+  /* The words come from the app's language files (scripts/i18n). A function reads them with
+     scripts/gd-i18n-node.js; a page (Studio's preview) already has window.GDI18n. */
+  if (typeof module === "object" && module.exports) module.exports = factory(require("./gd-i18n-node.js").translator);
+  else root.GDEmailTemplatesCore = factory(function (locale) {
+    var i18n = root.GDI18n;
+    return i18n && i18n.translator ? i18n.translator(locale) : { locale: "en", t: function (k) { return k; }, tn: function (k) { return k; } };
+  });
+})(typeof globalThis !== "undefined" ? globalThis : this, function (translator) {
   "use strict";
 
   var DEFAULT_SITE = "https://caddy.claritygolf.app";
@@ -36,8 +40,8 @@
      widths are each asset's true aspect ratio at 47px, so neither official badge is stretched.
      Assets are rasterised at 3x that for retina. */
   var BADGE_HEIGHT = 47;
-  var APP_STORE_BADGE = { path: "/assets/brand/app-store-badge.png", width: 159, label: "Download Clarity Caddy on the App Store" };
-  var PLAY_STORE_BADGE = { path: "/assets/brand/google-play-badge.png", width: 158, label: "Get Clarity Caddy on Google Play" };
+  var APP_STORE_BADGE = { path: "/assets/brand/app-store-badge.png", width: 159, label: "email.appStoreBadge" };
+  var PLAY_STORE_BADGE = { path: "/assets/brand/google-play-badge.png", width: 158, label: "email.playStoreBadge" };
 
   /* A "service" email describes a change to the recipient's own account access. It is sent
      regardless of the EMAIL_NOTIFICATIONS_ENABLED switch and regardless of the recipient's
@@ -207,8 +211,8 @@
       sample: {
         recipientName: "Alex Fenwick",
         actorName: "Clarity Golf",
-        periodLabel: "a month",
-        expiresLabel: "3 October 2026",
+        days: 30,
+        expiresAt: "2026-10-03T00:00:00Z",
         membership: true,
         hasAccount: true
       }
@@ -239,15 +243,12 @@
       gating: "Always sends, to both addresses. Service email — the old address has to be told, or an account move is indistinguishable from a takeover.",
       sender: "functions/account-change-email.js",
       cta: "Open Clarity.",
-      /* The only sender that still owns its own layout, deliberately: it prints a
-         previous/new address table and a "your password has not changed" security line, and
-         the shared single-detail layout has nowhere to put either. Flagged so the preview does
-         not quietly claim to be the real thing. */
-      previewNote: "This sender keeps its own layout — it adds a previous/new address table and a security line the shared template has no slot for. The preview below shows the wording and branding, not that extra block.",
       sample: {
         recipientName: "Alex Fenwick",
         actorName: "Sam Hale",
-        detail: "Your Clarity sign-in email was changed from alex.old@example.com to alex@example.com by Sam Hale."
+        actorRole: "coach",
+        previousEmail: "alex.old@example.com",
+        nextEmail: "alex@example.com"
       }
     },
     {
@@ -317,8 +318,24 @@
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
     });
   }
+  /* Letters in any alphabet: \w alone turned "José" into "Jos" and "Łukasz" into "ukasz". */
   function firstName(value) {
-    return (String(value || "there").trim().split(/\s+/)[0] || "there").replace(/[^\w'-]/g, "") || "there";
+    return (String(value || "").trim().split(/\s+/)[0] || "").replace(/[^\p{L}\p{N}'-]/gu, "");
+  }
+  /* The language an email is written in: the recipient's, when the caller knows it, else
+     English. Every function that produces words takes it from here. */
+  function words(input) {
+    return (input && input.i18n) || translator(input && input.locale);
+  }
+  /* "3 October 2026" in the reader's language. English keeps the NZ order it always had. */
+  function longDate(value, locale) {
+    var date = value ? new Date(value) : null;
+    if (!date || isNaN(date.getTime())) return "";
+    try {
+      return date.toLocaleDateString(locale === "en" ? "en-NZ" : locale, { day: "numeric", month: "long", year: "numeric" });
+    } catch (e) {
+      return date.toISOString().slice(0, 10);
+    }
   }
   function trimSite(value) {
     return String(value || DEFAULT_SITE).trim().replace(/\/+$/, "") || DEFAULT_SITE;
@@ -342,8 +359,9 @@
   /* No greeting line in any default body: render() already prints "Hi <first name>," above
      the headline, and the first version of this template repeated it. {{firstName}} is still
      available to an admin who wants it somewhere else. */
-  function defaultSignupTemplate(key) {
+  function defaultSignupTemplate(key, lang) {
     key = resolveTemplateKey(key);
+    var t = (lang || translator("en")).t;
 
     if (key === "coach_invite_comped") {
       /* Descended from the account_created_comped copy: one message that covers BOTH the
@@ -351,10 +369,10 @@
          read as a mistake - and the second one, the one carrying the thing of value, is the
          one that gets ignored. */
       return {
-        subject: "Your Clarity account is ready — with {{accessType}} on us",
-        headline: "Your Clarity account is ready",
-        body: "{{coachName}} has set up your Clarity Caddy account and included {{accessType}} — no card, and it does not auto-renew.\n\nYour access runs until {{accessUntil}}.\n\nClarity Caddy is a golf GPS built around the way you actually play. Use the button below to get started — your access is live the moment you sign in.\n\nClarity Golf",
-        ctaLabel: "Get started",
+        subject: t("email.invitedComped.subject"),
+        headline: t("email.invitedComped.headline"),
+        body: t("email.invitedComped.body"),
+        ctaLabel: t("email.invitedComped.cta"),
         ctaUrl: ""
       };
     }
@@ -364,10 +382,10 @@
          own password and was invited by nobody, so anything about "your coach" or "set your
          password" would be describing an event that did not happen to them. */
       return {
-        subject: "Welcome to Clarity Caddy",
-        headline: "Welcome to Clarity Caddy",
-        body: "Thanks for signing up.\n\nClarity Caddy is a golf GPS built around the way you actually play — start by building your bag, then let your practice data sharpen it.\n\nYour account is ready and your password is already set. Sign in on the app and everything is there.\n\nClarity Golf",
-        ctaLabel: "Open Clarity",
+        subject: t("email.selfSignup.subject"),
+        headline: t("email.selfSignup.subject"),
+        body: t("email.selfSignup.body"),
+        ctaLabel: t("email.openClarity"),
         ctaUrl: ""
       };
     }
@@ -378,19 +396,19 @@
          moment they also changed something else, and right only by luck. Say that something
          changed and send them to the place they can see it. */
       return {
-        subject: "{{coachName}} updated your Clarity account",
-        headline: "Your coach updated your account",
-        body: "{{coachName}} has updated some information on your Clarity Caddy account.\n\nOpen the app and you will have the latest — everything syncs to your device when you sign in.\n\nClarity Golf",
-        ctaLabel: "Open Clarity",
+        subject: t("email.coachUpdate.subject"),
+        headline: t("email.coachUpdate.headline"),
+        body: t("email.coachUpdate.body"),
+        ctaLabel: t("email.openClarity"),
         ctaUrl: ""
       };
     }
 
     return {
-      subject: "Welcome to Clarity Caddy",
-      headline: "Welcome to Clarity Caddy",
-      body: "Clarity Caddy is a golf GPS built around the way you actually play.\n\nYour account gives you a place to build your bag, bring your practice data into your game, and use Clarity on the course.\n\nUse the button below to get started.\n\nClarity Golf",
-      ctaLabel: "Open Clarity",
+      subject: t("email.selfSignup.subject"),
+      headline: t("email.selfSignup.subject"),
+      body: t("email.welcome.body"),
+      ctaLabel: t("email.openClarity"),
       ctaUrl: ""
     };
   }
@@ -405,16 +423,27 @@
     return /^https?:\/\/[^\s]+$/i.test(input) ? input : "";
   }
 
-  function signupTemplate(key, input) {
+  /* A stored field that still reads exactly like the English default was never really
+     edited (Studio shows the default in the box), so the reader gets the default in their
+     own language. A field an admin actually rewrote is sent as written, to everyone. */
+  function sameText(a, b) {
+    return String(a || "").replace(/\r\n/g, "\n").trim() === String(b || "").replace(/\r\n/g, "\n").trim();
+  }
+  function signupTemplate(key, input, lang) {
     input = input || {};
     key = resolveTemplateKey(key);
-    var fallback = defaultSignupTemplate(key);
+    var english = defaultSignupTemplate(key);
+    var fallback = lang ? defaultSignupTemplate(key, lang) : english;
+    function field(name, limit) {
+      var stored = text(input[name], limit);
+      return stored && !sameText(stored, english[name]) ? stored : fallback[name];
+    }
     return {
       templateKey: key,
-      subject: text(input.subject, 140) || fallback.subject,
-      headline: text(input.headline, 180) || fallback.headline,
-      body: text(input.body, 4000) || fallback.body,
-      ctaLabel: text(input.ctaLabel, 80) || fallback.ctaLabel,
+      subject: field("subject", 140),
+      headline: field("headline", 180),
+      body: field("body", 4000),
+      ctaLabel: field("ctaLabel", 80),
       ctaUrl: safeCtaUrl(input.ctaUrl)
     };
   }
@@ -461,28 +490,32 @@
   }
 
   /* What a comp actually is, in the words the email uses. Built from the entitlement that was
-     written - periodLabel and expiresLabel come back from writeCompedEntitlement - so the
-     message can only describe access that exists. */
-  function accessVariables(comped) {
+     written - days and expiresAt come back from writeCompedEntitlement - so the message can
+     only describe access that exists. */
+  function accessPhrase(comped, lang) {
+    var membership = comped.membership !== false;
+    var days = Math.round(Number(comped.days));
+    if (!(days > 0)) return lang.t(membership ? "email.access.membership" : "email.access.full");
+    if (days >= 28 && days <= 31) return lang.t(membership ? "email.access.monthMembership" : "email.access.monthFull");
+    return lang.tn(membership ? "email.access.daysMembership" : "email.access.daysFull", days);
+  }
+  function accessVariables(comped, lang) {
     if (!comped) return { accessType: "", accessUntil: "" };
-    var giftLabel = comped.membership === false ? "full Clarity access" : "Clarity Membership";
-    var periodLabel = text(comped.periodLabel, 40);
-    return {
-      accessType: periodLabel ? periodLabel + " of " + giftLabel : giftLabel,
-      accessUntil: text(comped.expiresLabel, 60)
-    };
+    lang = lang || translator("en");
+    return { accessType: accessPhrase(comped, lang), accessUntil: longDate(comped.expiresAt, lang.locale) };
   }
 
   function signupCopy(eventType, input) {
     input = input || {};
+    var lang = words(input);
     var key = resolveTemplateKey(eventType);
-    var template = signupTemplate(key, input.welcomeTemplate);
+    var template = signupTemplate(key, input.welcomeTemplate, lang);
     var variables = input.variables || {};
     /* The comped template is only ever selected once access has actually been issued, so
        accessType is known. Floor it anyway: a message that says "included  \u2014 no card" is a
        worse failure than one that is slightly vague about which comp it was. */
     if (key === "coach_invite_comped" && !text(variables.accessType)) {
-      variables = Object.assign({}, variables, { accessType: "full Clarity access" });
+      variables = Object.assign({}, variables, { accessType: lang.t("email.access.full") });
     }
     /* A one-use set-password link cannot be typed into a settings box, so when the send has
        one it beats the template destination, and the button says what the link actually
@@ -492,7 +525,7 @@
       subject: substituteVariables(template.subject, variables),
       title: substituteVariables(template.headline, variables),
       detail: substituteBody(template.body, variables),
-      ctaLabel: needsSetup ? "Set up your password & get started" : substituteVariables(template.ctaLabel, variables),
+      ctaLabel: needsSetup ? lang.t("email.setUpPassword") : substituteVariables(template.ctaLabel, variables),
       ctaUrl: needsSetup ? text(input.ctaUrl, 900) || trimSite(input.siteUrl)
         : safeCtaUrl(substituteVariables(template.ctaUrl, variables)) || text(input.ctaUrl, 900) || trimSite(input.siteUrl)
     };
@@ -500,17 +533,15 @@
   function welcomeCopy(input) { return signupCopy("player_signup_basic", input); }
 
   /* ---------------------------------------------------------------------------
-     Copy. Every subject/title/detail in the product is written here, so the
-     Communications page and the live send are reading the same words.
+     Copy. Every subject/title/detail in the product is written here (the words
+     themselves in scripts/i18n), so the Communications page and the live send
+     are reading the same text.
      --------------------------------------------------------------------------- */
   function compose(eventType, input) {
     input = input || {};
+    var lang = words(input);
+    var t = lang.t;
     var site = trimSite(input.siteUrl);
-    var actorName = text(input.actorName, 120) || "Clarity Golf Systems";
-    var periodLabel = text(input.periodLabel, 40) || "a month";
-    var giftLabel = input.membership === false ? "full Clarity access" : "Clarity Membership";
-    var expiresLabel = text(input.expiresLabel, 60);
-    var expirySentence = expiresLabel ? " Your access runs until " + expiresLabel + " and won't auto-renew or ask for a card." : "";
 
     /* Every Studio-managed event type renders from a stored template, including the keys
        these shipped under before Coach Invite and Sign Up Welcome were separated - an old
@@ -519,75 +550,94 @@
       return signupCopy(eventType, input);
     }
 
-    /* account_created and account_created_comped used to have hard-coded branches here. They
-       are now the Coach Invite templates and resolve above, via LEGACY_TEMPLATE_KEYS - which
-       is what stops an old caller quietly getting copy no admin can edit. */
     if (eventType === "comped_access_granted") {
+      var access = accessPhrase(input, lang);
+      var until = longDate(input.expiresAt, lang.locale);
+      var title = t("email.gift.title", { access: access });
       if (input.hasAccount) {
         return {
-          subject: "You've been given " + periodLabel + " of " + giftLabel,
-          title: "You've been given " + periodLabel + " of " + giftLabel,
-          detail: "Full access has been added to your Clarity account (this email address). There's nothing "
-            + "to set up and nothing to pay - open the app and it's live." + expirySentence,
-          ctaLabel: "Open Clarity"
+          subject: title,
+          title: title,
+          detail: until ? t("email.gift.liveDetailUntil", { date: until }) : t("email.gift.liveDetail"),
+          ctaLabel: t("email.openClarity")
         };
       }
       return {
-        subject: sentenceCase(periodLabel) + " of " + giftLabel + " is waiting for you",
-        title: "You've been given " + periodLabel + " of " + giftLabel,
-        detail: "You've been set up with free full access to Clarity Caddy - no card, no auto-renewal. "
-          + "It's tied to this email address: set your password below, then sign in on the app or at "
-          + siteHost(site) + " and your access unlocks automatically."
-          + (expiresLabel ? " Your access runs until " + expiresLabel + "." : ""),
-        ctaLabel: "Set your password & get started"
+        subject: sentenceCase(t("email.gift.waiting", { access: access })),
+        title: title,
+        detail: until ? t("email.gift.newDetailUntil", { site: siteHost(site), date: until }) : t("email.gift.newDetail", { site: siteHost(site) }),
+        ctaLabel: t("email.gift.setPassword")
       };
     }
     if (eventType === "course_map_ready") {
-      var courseLabel = text(input.courseName, 160) || "Your course";
+      var course = text(input.courseName, 160);
       return {
-        subject: courseLabel + " is ready to play",
-        title: courseLabel + " is ready to play",
-        detail: "You asked us to let you know when " + courseLabel + " was mapped. It's done - open Clarity Caddy "
-          + "and pick the course to play it with full distances.",
-        ctaLabel: "Open Clarity"
+        subject: course ? t("email.courseReady.subject", { course: course }) : t("email.courseReady.unnamedSubject"),
+        title: course ? t("email.courseReady.subject", { course: course }) : t("email.courseReady.unnamedSubject"),
+        detail: course ? t("email.courseReady.detail", { course: course }) : t("email.courseReady.unnamedDetail"),
+        ctaLabel: t("email.openClarity")
       };
     }
     if (eventType === "password_recovery") {
       return {
-        subject: "Reset your Clarity password",
-        title: "Reset your Clarity password",
-        detail: "Use the secure button below to choose a new password. This link is unique to your account "
-          + "and can only be used once. If you did not ask for it, nothing has changed and you can ignore this email.",
-        ctaLabel: "Choose a new password"
+        subject: t("email.reset.subject"),
+        title: t("email.reset.subject"),
+        detail: t("email.reset.detail"),
+        ctaLabel: t("email.reset.cta")
       };
     }
     if (eventType === "sign_in_email_changed") {
+      /* Sent to BOTH addresses: the new one is told to sign in with it, the old one that it
+         no longer works - a login that moves without warning looks exactly like a takeover. */
+      var actor = actorPhrase(input, lang);
+      var next = text(input.nextEmail, 240);
+      var previous = text(input.previousEmail, 240);
       return {
-        subject: "Your Clarity sign-in email has changed",
-        title: "Your Clarity sign-in email has changed",
-        detail: text(input.detail, 1200) || "The email address you sign in to Clarity with has been changed by " + actorName + ".",
-        ctaLabel: "Open Clarity"
+        subject: t("email.signInChanged.subject"),
+        title: t("email.signInChanged.subject"),
+        detail: input.toPrevious
+          ? t("email.signInChanged.toPrevious", { previous: previous, next: next, actor: actor })
+          : t("email.signInChanged.toNew", { next: next, actor: actor }),
+        ctaLabel: t("email.signInChanged.cta"),
+        facts: [
+          [t("email.signInChanged.previous"), previous || t("email.signInChanged.notSet")],
+          [t("email.signInChanged.next"), next]
+        ],
+        note: t("email.signInChanged.note", { actor: actor })
       };
     }
-    var title = text(input.title, 180) || "Your Clarity account was updated";
+    var activityTitle = text(input.title, 180) || t("email.activity.title");
     return {
-      subject: "Clarity update: " + title,
-      title: title,
-      detail: text(input.detail, 1200) || "Profile activity was saved in Clarity Caddy.",
-      ctaLabel: text(input.ctaLabel, 80) || "Open Clarity"
+      subject: t("email.activity.subject", { title: activityTitle }),
+      title: activityTitle,
+      detail: text(input.detail, 1200) || t("email.activity.detail"),
+      ctaLabel: text(input.ctaLabel, 80) || t("email.openClarity")
     };
+  }
+
+  /* Who made a change, as the account holder will read it: a name they recognise and the
+     authority behind it, or "your coach" when a service caller has no account row to name. */
+  function actorPhrase(input, lang) {
+    var name = text(input.actorName, 160);
+    var role = String(input.actorRole || "").toLowerCase();
+    if (!name) return lang.t(role === "admin" ? "email.actor.admin" : "email.actor.coach");
+    if (role === "admin") return lang.t("email.actor.namedAdmin", { name: name });
+    if (role === "coach") return lang.t("email.actor.namedCoach", { name: name });
+    return name;
   }
 
   /* Fill in everything the layout needs, from a caller's partial input. Exposed on its own so
      the Studio preview can show exactly the message object a live send would build. */
   function buildMessage(eventType, input) {
     input = input || {};
+    var lang = words(input);
     var site = trimSite(input.siteUrl);
-    var copy = compose(eventType, input);
+    var copy = compose(eventType, Object.assign({}, input, { i18n: lang }));
     return {
       eventType: String(eventType || "account_activity"),
+      locale: lang.locale,
       to: text(input.to, 240),
-      recipientName: text(input.recipientName, 120) || "there",
+      recipientName: text(input.recipientName, 120),
       actorName: text(input.actorName, 120) || "Clarity Golf Systems",
       subject: text(input.subject, 140) || copy.subject,
       title: text(input.title, 180) || copy.title,
@@ -597,6 +647,8 @@
          preferred over the caller's raw one - signupCopy has already decided between
          a secure link, the template destination and the site. */
       ctaUrl: text(copy.ctaUrl, 900) || text(input.ctaUrl, 900) || site,
+      facts: copy.facts || null,
+      note: copy.note || "",
       appStoreUrl: text(input.appStoreUrl, 900),
       playStoreUrl: text(input.playStoreUrl, 900),
       logoUrl: text(input.logoUrl, 900) || site + LOGO_PATH,
@@ -615,79 +667,99 @@
    *
    * Both stores or neither is not the rule: whichever URLs the caller has are shown, so a
    * platform that is not live yet simply does not appear. */
-  function storeBadge(url, badge, site) {
-    return '<a href="' + escapeHTML(url) + '" style="display:block;text-decoration:none" aria-label="' + escapeHTML(badge.label) + '">'
-      + '<img src="' + escapeHTML(site + badge.path) + '" alt="' + escapeHTML(badge.label) + '"'
+  function storeBadge(url, badge, site, lang) {
+    var label = lang.t(badge.label);
+    return '<a href="' + escapeHTML(url) + '" style="display:block;text-decoration:none" aria-label="' + escapeHTML(label) + '">'
+      + '<img src="' + escapeHTML(site + badge.path) + '" alt="' + escapeHTML(label) + '"'
       + ' width="' + badge.width + '" height="' + BADGE_HEIGHT + '"'
       + ' style="display:block;width:' + badge.width + 'px;height:' + BADGE_HEIGHT + 'px;border:0"></a>';
   }
-  function storeBadges(message, site) {
+  function storeBadges(message, site, lang) {
     var cells = [];
-    if (message.appStoreUrl) cells.push(storeBadge(message.appStoreUrl, APP_STORE_BADGE, site));
-    if (message.playStoreUrl) cells.push(storeBadge(message.playStoreUrl, PLAY_STORE_BADGE, site));
+    if (message.appStoreUrl) cells.push(storeBadge(message.appStoreUrl, APP_STORE_BADGE, site, lang));
+    if (message.playStoreUrl) cells.push(storeBadge(message.playStoreUrl, PLAY_STORE_BADGE, site, lang));
     if (!cells.length) return "";
     return '<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:16px 0 0"><tr>'
       + cells.map(function (cell, index) {
           return '<td style="padding:0 ' + (index < cells.length - 1 ? "10" : "0") + 'px 0 0">' + cell + "</td>";
         }).join("")
       + "</tr></table>"
-      + '<p style="margin:8px 0 0;color:#b9c4bd;font-size:13px;line-height:1.4">Download Clarity Caddy, then sign in with this email address.</p>';
+      + '<p style="margin:8px 0 0;color:#b9c4bd;font-size:13px;line-height:1.4">' + escapeHTML(lang.t("email.downloadThenSignIn")) + "</p>";
+  }
+  /* Label/value rows under the detail - the old and new address on a sign-in change. */
+  function factsTable(facts) {
+    if (!facts || !facts.length) return "";
+    return '<table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border:1px solid #24342c;border-radius:14px;margin:0 0 18px">'
+      + facts.map(function (row, index) {
+          var border = index ? ";border-top:1px solid #24342c" : "";
+          return '<tr><td style="padding:12px 14px;color:#8fa199;font-size:13px' + border + '">' + escapeHTML(row[0]) + "</td>"
+            + '<td style="padding:12px 14px;color:' + (index ? "#fff;font-weight:700" : "#c8d1cc") + ";font-size:14px" + border + '">' + escapeHTML(row[1]) + "</td></tr>";
+        }).join("")
+      + "</table>";
   }
 
   /* ---- the one layout ---- */
   function render(message) {
     message = message || {};
+    var lang = words(message);
     var site = trimSite(message.siteUrl);
     var logo = text(message.logoUrl) || site + LOGO_PATH;
-    var recipientName = firstName(message.recipientName);
+    var name = firstName(message.recipientName);
+    var greeting = name ? lang.t("email.hi", { name: name }) : lang.t("email.hiNoName");
     /* Editable welcome copy is plain text, never HTML. Preserve its intentional
        paragraph breaks only after escaping, so an admin cannot turn a template
        field into markup. */
     var detailHtml = escapeHTML(message.detail).replace(/\r?\n/g, "<br>");
-    var footer = isServiceEventType(message.eventType)
-      ? "You are receiving this because it relates to your Clarity account access."
-      : message.eventType === "course_map_ready"
-        ? "You are receiving this because you asked to be told when this course was ready. We only send it once."
-        : "You can change email notifications in Settings &gt; Notifications.";
-    var storeCta = storeBadges(message, site);
+    var footer = lang.t(isServiceEventType(message.eventType) ? "email.footerService"
+      : message.eventType === "course_map_ready" ? "email.footerCourseReady"
+        : "email.footerActivity");
+    var updateFrom = lang.t("email.updateFrom", { actor: message.actorName });
+    var storeCta = storeBadges(message, site, lang);
+    var facts = message.facts || [];
 
     var html = [
       /* charset first, and before anything else in <head>. The copy is full of em dashes and
          curly quotes; without this a client that does not inherit the transport encoding
          renders them as "a\u20ac\u201d" mojibake, which is exactly how the comped invite read in
          preview. It has to be inside the first 1024 bytes to be honoured, so it leads. */
-      "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>",
+      "<!doctype html><html lang=\"" + escapeHTML(lang.locale) + "\"><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>",
       "<body style=\"margin:0;background:#07100b;color:#f7faf7;font-family:Arial,Helvetica,sans-serif\">",
       "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#07100b;padding:28px 14px\"><tr><td align=\"center\">",
       "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:560px;background:#101b15;border:1px solid #24342c;border-radius:20px;overflow:hidden\">",
       "<tr><td style=\"padding:24px 24px 16px;background:#07100b\"><img src=\"" + escapeHTML(logo) + "\" width=\"44\" height=\"44\" alt=\"Clarity Golf\" style=\"vertical-align:middle;margin-right:12px\"><span style=\"font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:#b9c4bd;font-weight:700\">Clarity Golf Systems</span></td></tr>",
       "<tr><td style=\"padding:24px\">",
-      "<p style=\"margin:0 0 10px;color:#42b66a;font-weight:700\">Hi " + escapeHTML(recipientName) + ",</p>",
+      "<p style=\"margin:0 0 10px;color:#42b66a;font-weight:700\">" + escapeHTML(greeting) + "</p>",
       "<h1 style=\"margin:0 0 12px;color:#fff;font-size:28px;line-height:1.05\">" + escapeHTML(message.title) + "</h1>",
       "<p style=\"margin:0 0 18px;color:#c8d1cc;font-size:16px;line-height:1.45\">" + detailHtml + "</p>",
-      "<p style=\"margin:0 0 22px;color:#8fa199;font-size:13px;line-height:1.4\">Update from " + escapeHTML(message.actorName) + ".</p>",
+      factsTable(facts),
+      "<p style=\"margin:0 0 22px;color:#8fa199;font-size:13px;line-height:1.4\">" + escapeHTML(updateFrom) + "</p>",
       "<a href=\"" + escapeHTML(message.ctaUrl) + "\" style=\"display:inline-block;background:#ff9f2f;color:#06110b;text-decoration:none;font-weight:800;border-radius:999px;padding:12px 18px\">" + escapeHTML(message.ctaLabel) + "</a>",
+      message.note ? "<p style=\"margin:18px 0 0;color:#8fa199;font-size:13px;line-height:1.4\">" + escapeHTML(message.note) + "</p>" : "",
       storeCta,
       "</td></tr>",
-      "<tr><td style=\"padding:16px 24px 24px;color:#708178;font-size:12px;line-height:1.45\">" + footer + "</td></tr>",
+      "<tr><td style=\"padding:16px 24px 24px;color:#708178;font-size:12px;line-height:1.45\">" + escapeHTML(footer) + "</td></tr>",
       "</table></td></tr></table></body></html>"
     ].join("");
 
     var body = [
-      "Hi " + recipientName,
+      greeting,
       "",
       message.title,
       "",
-      message.detail,
-      "",
-      "Update from " + message.actorName + ".",
-      "",
-      message.ctaUrl
-    ].concat(message.appStoreUrl || message.playStoreUrl
-      ? ["", "Download Clarity Caddy and sign in with this email address:"]
-        .concat(message.appStoreUrl ? ["App Store: " + message.appStoreUrl] : [])
-        .concat(message.playStoreUrl ? ["Google Play: " + message.playStoreUrl] : [])
-      : []).join("\n");
+      message.detail
+    ].concat(facts.length ? [""].concat(facts.map(function (row) { return row[0] + ": " + row[1]; })) : [])
+      .concat([
+        "",
+        updateFrom,
+        "",
+        message.ctaUrl
+      ])
+      .concat(message.note ? ["", message.note] : [])
+      .concat(message.appStoreUrl || message.playStoreUrl
+        ? ["", lang.t("email.downloadAndSignIn")]
+          .concat(message.appStoreUrl ? ["App Store: " + message.appStoreUrl] : [])
+          .concat(message.playStoreUrl ? ["Google Play: " + message.playStoreUrl] : [])
+        : []).join("\n");
 
     return { subject: message.subject, html: html, text: body };
   }

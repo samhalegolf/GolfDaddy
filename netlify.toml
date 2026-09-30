@@ -15,6 +15,9 @@
     "scripts/gd-green-contours-core.js",
     "scripts/gd-watch-map-core.js",
     "scripts/gd-email-templates-core.js",
+    # Emails are written in the recipient's language from the app's own translations.
+    "scripts/gd-i18n-node.js",
+    "scripts/i18n/*.js",
     "scripts/gd-course-version-label.js"
   ]
 

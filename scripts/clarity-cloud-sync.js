@@ -136,7 +136,7 @@
       var response = await fetch("/api/auth-restore-account", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accessToken: token })
+        body: JSON.stringify({ accessToken: token, locale: window.GDI18n.locale() })
       });
       var body = await response.json().catch(function () { return {}; });
       if (!response.ok || !body.ok || !body.account) {
@@ -173,7 +173,8 @@
     var response = await fetch(ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      /* The player's language rides every sync, so the account row keeps up with a switch. */
+      body: JSON.stringify(Object.assign({ locale: window.GDI18n.locale() }, payload))
     });
     var body = await response.json().catch(function () { return {}; });
     if (!response.ok || body.synced === false) {
@@ -446,8 +447,9 @@
       existing.onclick = function () { syncNow("badge-click").catch(function () {}); };
       document.body.appendChild(existing);
     }
-    existing.textContent = status.label || "Pending sync";
-    existing.title = status.error || "Tap to retry sync";
+    /* Only these two states reach the badge; their words follow the app's language. */
+    existing.textContent = window.GDI18n.t(status.state === "blocked" ? "cloudSync.blocked" : "cloudSync.pending");
+    existing.title = window.GDI18n.t("cloudSync.tapRetry");
   }
 
   function installStyles() {

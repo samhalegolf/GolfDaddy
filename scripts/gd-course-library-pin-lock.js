@@ -81,15 +81,8 @@
   function i18nH(key,vars){return esc(i18nT(key,vars));}
   function i18nSet(el,key,vars){const i=window.GDI18n;if(!el)return;if(i)i.set(el,key,vars);else el.textContent=key;}
   function i18nPlain(el,text){const i=window.GDI18n;if(!el)return;if(i)i.plain(el,text);else el.textContent=text;}
-  /* showHint() in gd-app-core.js reads this exact English sentence as the signal to draw
-     its "set your position" pill, so it is passed through untouched when it will be. */
-  function standingHintText(){
-    const signal='Tap where you are standing';
-    try{if(typeof gdHintWantsMappedStartPill==='function'&&gdHintWantsMappedStartPill(signal))return signal;}catch(e){}
-    return i18nT('course.tapWhereStanding');
-  }
   function toastSafe(msg){try{if(typeof toast==='function')toast(msg);}catch(e){}}
-  function hintSafe(msg){try{if(typeof showHint==='function')showHint(msg);}catch(e){}}
+  function hintSafe(msg,opts){try{if(typeof showHint==='function')showHint(msg,opts);}catch(e){}}
   function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
   function slug(s){return String(s||'item').toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'item';}
   function finiteMappingPoint(point){
@@ -2476,7 +2469,8 @@
     };
     if(data.complete){
       try{setState(i18nT('common.hole',{n:data.hole}));}catch(e){}
-      if(opts.promptStart)hintSafe(standingHintText());
+      /* mappedStart asks showHint() for its "set your position" pill. */
+      if(opts.promptStart)hintSafe(i18nT('course.tapWhereStanding'),{mappedStart:true});
       else if(!opts.quiet)hintSafe(i18nT('course.mappedHoleReady'));
       try{
         if(start&&!opts.promptStart&&!opts.skipAutoLock){
@@ -4331,7 +4325,7 @@
       markCourseOpenReady(saved.course,h);
     }else{
       try{setState(i18nT('course.greenSelected'));}catch(e){}
-      try{showHint(standingHintText());}catch(e){}
+      try{showHint(i18nT('course.tapWhereStanding'),{mappedStart:true});}catch(e){}
     }
     return true;
   }

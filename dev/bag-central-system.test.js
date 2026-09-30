@@ -248,7 +248,10 @@ test("the three doors into the bag are one panel", () => {
 
 test("adding a club asks for the label first", () => {
   const support = read("scripts/clarity-support.js");
-  assert.ok(support.includes("What is the club called?"), "step one is the name");
+  /* The words live in the translation base (scripts/i18n/en.js); the sheet asks for them by key. */
+  const english = read("scripts/i18n/en.js");
+  assert.ok(/"bag\.clubCalled": "What is the club called\?"/.test(english) && support.includes("L('bag.clubCalled')"),
+    "step one is the name");
   assert.ok(support.includes("ui.addStep = 2"), "the distance is a second step");
   assert.ok(!/quickBag\(seven\)\.find\(/.test(support),
     "Add a club must not guess a club and drop it straight into the bag");

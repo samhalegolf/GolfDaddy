@@ -117,7 +117,7 @@
       });
       if (quota && !quotaWarned) {
         quotaWarned = true;
-        safe(function () { window.toast && window.toast("Device storage is full - some settings can't be saved. Clear site data to recover."); });
+        safe(function () { window.toast && window.toast(window.GDI18n.t("common.storageFull")); });
       }
       return false;
     }

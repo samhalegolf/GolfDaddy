@@ -366,7 +366,9 @@
   async function adminAction(action, payload) {
     adminPending = true; render();
     try {
-      var requestBody = JSON.stringify(Object.assign({ action: action }, payload || {}));
+      /* locale: the language a comped-access email falls back to when the recipient's
+         account has never recorded one. */
+      var requestBody = JSON.stringify(Object.assign({ action: action, locale: window.GDI18n.locale() }, payload || {}));
       var response = await fetch(ADMIN_ENDPOINT, { method: "POST", headers: await adminHeaders(), body: requestBody });
       if (response.status === 401) {
         response = await fetch(ADMIN_ENDPOINT, { method: "POST", headers: await adminHeaders(true), body: requestBody });

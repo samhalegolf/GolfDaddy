@@ -626,11 +626,9 @@ async function writeCompedEntitlement(options) {
     allowMemberReferrals,
     startsAt: starts,
     expiresAt: expires,
-    days,
-    /* "a month" reads better than "30 days" and is what the copy expects for a month pass;
-       anything else is described honestly in days. */
-    periodLabel: days >= 28 && days <= 31 ? "a month" : days + " days",
-    expiresLabel: expires.toLocaleDateString("en-NZ", { day: "numeric", month: "long", year: "numeric" })
+    /* The email words the period and the date in the reader's language
+       (gd-email-templates-core.js accessPhrase/longDate). */
+    days
   };
 }
 

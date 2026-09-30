@@ -224,6 +224,14 @@
   var win = window;
   function safe(fn, fallback){ try { return fn(); } catch(e) { return fallback; } }
   function toast(message){ safe(function(){ if(typeof win.toast === "function") win.toast(message); else console.log(message); }, null); }
+  function L(key, vars){ return win.GDI18n.t(key, vars); }
+  /* The core's refusals carry a code; say them in the player's language. */
+  var ERROR_KEYS = { nameFirst:'bag.nameFirst', needsDistance:'bag.needsDistance', needsName:'bag.needsName',
+                     alreadyInBag:'bag.alreadyInBag', sevenIronFirst:'bag.sevenIronFirst' };
+  function errorText(result){
+    var key = result && ERROR_KEYS[result.code];
+    return key ? L(key, { club: result.duplicate }) : (result && result.error) || '';
+  }
   function num(value){ var n = Number(value); return Number.isFinite(n) ? n : 0; }
   function clubName(row){
     if(!row) return "";
@@ -368,7 +376,7 @@
       safe(function(){ win.renderProfilePanel(); }, null);
       safe(function(){ if(typeof win.renderShot === "function") win.renderShot(); }, null);
     }
-    if(!opts.silent) toast('Bag saved');
+    if(!opts.silent) toast(L('bagEditor.saved'));
     return clean;
   }
 
@@ -383,7 +391,8 @@
      longest-first, left-column-first order. What stays here is this sheet's own
      chrome: the generator, the roll-out chip, the fly-into-the-bag animation
      and the panel's state. */
-  var ROLL_LABEL = { soft:'Soft', medium:'Normal', hard:'Firm' };
+  var ROLL_LABEL = { soft:'bag.soft', medium:'bag.normal', hard:'bag.firm' };
+  var ROLL_SET = { soft:'bagEditor.rollSetSoft', medium:'bagEditor.rollSetNormal', hard:'bagEditor.rollSetFirm' };
   /* genMode is a MODE, not a card. See gdBagToggleGenerator. */
   var ui = { editing:null, editingAnchorRows:null, rollOpen:false, genMode:false, genLeaving:false, setupCarry:0, busy:false,
              addOpen:false, addClub:"", addCarry:0, addStep:1 };
@@ -438,8 +447,8 @@
     if(sheet) sheet.classList.toggle('gdBagGenMode', genMode);
 
     var sub = el('gdBagPanelSub');
-    if(sub) sub.textContent = genMode ? 'Set one club · the rest follow'
-      : hasBag ? (bag.length + ' clubs · metres') : 'No clubs yet';
+    if(sub) sub.textContent = genMode ? L('bagEditor.setOneClub')
+      : hasBag ? win.GDI18n.tn('bagEditor.clubsMetres', bag.length) : L('bagEditor.noClubs');
     var setup = el('gdBagSetupCarry');
     if(setup) setup.textContent = String(ui.setupCarry);
 
@@ -455,7 +464,7 @@
     if(add){
       add.hidden = !listRows;
       add.setAttribute('aria-expanded', ui.addOpen ? 'true' : 'false');
-      add.textContent = ui.addOpen ? 'Cancel' : 'Add a club';
+      add.textContent = ui.addOpen ? L('common.cancel') : L('bag.addClub');
     }
     renderAddPanel();
     var chip = el('gdBagGenChip');
@@ -464,12 +473,12 @@
       chip.classList.toggle('active', genMode);
       chip.setAttribute('aria-pressed', genMode ? 'true' : 'false');
       var chipLabel = el('gdBagGenChipLabel');
-      if(chipLabel) chipLabel.textContent = genMode ? 'Generating' : 'Generate';
+      if(chipLabel) chipLabel.textContent = genMode ? L('bagEditor.generating') : L('bagEditor.generate');
     }
 
     var preset = rollPreset();
     var chipRoll = el('gdBagRollChip');
-    if(chipRoll) chipRoll.textContent = 'Roll · ' + (ROLL_LABEL[preset] || 'Normal');
+    if(chipRoll) chipRoll.textContent = L('bagEditor.rollChip', { preset: L(ROLL_LABEL[preset] || 'bag.normal') });
     var rollPanel = el('gdBagRollPanel');
     if(rollPanel) rollPanel.hidden = !ui.rollOpen;
     document.querySelectorAll('[data-gd-bag-firmness]').forEach(function(btn){
@@ -500,7 +509,7 @@
           var result = win.GDBagCore.removeRow(readBagPanelSafe(), club);
           ui.editing = null;
           persistRows(result.rows, { silent:true });
-          if(result.club) toast(result.club + ' removed');
+          if(result.club) toast(L('bagEditor.removed', { club: result.club }));
         }
       });
     }, null);
@@ -516,7 +525,7 @@
       return win.GDBagGenerator.generateFrom(club, metres, rows.map(function(r){ return r.club; }));
     }, null);
     if(!result || result.error || !result.rows || !result.rows.length){
-      return { rows: rows, error: (result && result.error) || 'Could not generate from that number' };
+      return { rows: rows, error: result && result.error ? errorText(result) : L('bagEditor.couldNotGenerate') };
     }
     return {
       rows: result.rows.map(function(r){ return { club:r.club, baseCarry:r.baseCarry, totalM: totalFor(r.club, r.baseCarry) }; }),
@@ -528,7 +537,7 @@
      name, persist, and say why nothing happened when the core refused. */
   function applyEdit(result){
     if(!result) return;
-    if(result.error){ toast(result.error); renderBagPanelHotfix(); return; }
+    if(result.error){ toast(errorText(result)); renderBagPanelHotfix(); return; }
     ui.editing = result.club || ui.editing;
     persistRows(result.rows, { silent:true });
   }
@@ -554,21 +563,21 @@
     panel.appendChild(question);
 
     if(ui.addStep === 1){
-      question.textContent = 'What is the club called?';
+      question.textContent = L('bag.clubCalled');
       var field = document.createElement('label');
       field.className = 'gdBagAddField';
       var caption = document.createElement('span');
-      caption.textContent = 'Club';
+      caption.textContent = L('bag.club');
       var input = document.createElement('input');
       input.type = 'text';
       input.autocomplete = 'off';
-      input.placeholder = 'e.g. 5W';
+      input.placeholder = L('bag.clubExample');
       input.value = ui.addClub;
-      input.setAttribute('aria-label', 'New club name');
+      input.setAttribute('aria-label', L('bag.newClubAria'));
       var next = document.createElement('button');
       next.className = 'gdBagBuild';
       next.type = 'button';
-      next.textContent = 'Next';
+      next.textContent = L('bagEditor.next');
       next.disabled = !ui.addClub.trim();
       /* Typed, not committed: the button has to unlock as the name appears, so
          'input' rather than 'change'. */
@@ -593,24 +602,24 @@
       return;
     }
 
-    question.textContent = 'How far does ' + ui.addClub.trim() + ' carry?';
+    question.textContent = L('bagEditor.howFarCarry', { club: ui.addClub.trim() });
     var stepper = document.createElement('div');
     stepper.className = 'gdBagGenStepper';
     var less = document.createElement('button');
     less.type = 'button';
-    less.setAttribute('aria-label', 'Less');
+    less.setAttribute('aria-label', L('bagEditor.less'));
     less.textContent = '−';
     var value = document.createElement('div');
     value.className = 'gdBagGenValue';
     var carryInput = document.createElement('input');
     carryInput.inputMode = 'numeric';
     carryInput.value = String(ui.addCarry);
-    carryInput.setAttribute('aria-label', 'Carry metres');
+    carryInput.setAttribute('aria-label', L('bag.carryAria'));
     var unit = document.createElement('small');
-    unit.textContent = 'metres';
+    unit.textContent = L('bagEditor.metres');
     var more = document.createElement('button');
     more.type = 'button';
-    more.setAttribute('aria-label', 'More');
+    more.setAttribute('aria-label', L('bagEditor.more'));
     more.textContent = '+';
     function setCarryValue(next){
       ui.addCarry = Math.max(20, Math.min(400, Math.round(num(next) || ui.addCarry)));
@@ -629,14 +638,14 @@
     var confirm = document.createElement('button');
     confirm.className = 'gdBagBuild';
     confirm.type = 'button';
-    confirm.textContent = 'Add ' + ui.addClub.trim();
+    confirm.textContent = L('bagEditor.addNamed', { club: ui.addClub.trim() });
     confirm.addEventListener('click', function(){ setCarryValue(carryInput.value); commitAdd(); });
     panel.appendChild(confirm);
 
     var back = document.createElement('button');
     back.className = 'gdBagAddBack';
     back.type = 'button';
-    back.textContent = 'Back';
+    back.textContent = L('common.back');
     back.addEventListener('click', function(){ ui.addStep = 1; renderBagPanelHotfix(); });
     panel.appendChild(back);
   }
@@ -656,7 +665,7 @@
 
   function commitAdd(){
     var result = win.GDBagCore.addRow(readBagPanelSafe(), ui.addClub, ui.addCarry);
-    if(result.error){ toast(result.error); return; }
+    if(result.error){ toast(errorText(result)); return; }
     ui.addOpen = false;
     ui.addStep = 1;
     ui.addClub = '';
@@ -664,7 +673,7 @@
     ui.editing = result.club;
     ui.editingAnchorRows = null;
     persistRows(result.rows, { silent:true });
-    toast(result.club + ' added');
+    toast(L('bagEditor.added', { club: result.club }));
   }
 
   /* ---- build / unbuild choreography ---- */
@@ -761,7 +770,7 @@
       flyClubs('out');
       pulseBag();
       popChip();
-      toast('Bag built');
+      toast(L('bagEditor.built'));
     });
     at(2600, function(){ ui.busy = false; clearClubAnim(); });
   };
@@ -821,7 +830,7 @@
     var result = win.GDBagCore.removeRow(readBagPanelSafe(), club);
     ui.editing = null;
     persistRows(result.rows, { silent:true });
-    toast(club + ' removed');
+    toast(L('bagEditor.removed', { club: club }));
   };
   /* Opens the two-step add card. It used to add a guessed club outright. */
   win.gdBagAddSlot = function(){
@@ -856,7 +865,7 @@
         return { club: r.club, baseCarry: r.baseCarry, totalM: totalFor(r.club, r.baseCarry, preset) };
       }), { silent:true });
     } else renderBagPanelHotfix();
-    toast('Roll set to ' + ROLL_LABEL[preset].toLowerCase());
+    toast(L(ROLL_SET[preset]));
   };
 
   win.gdNormaliseBagRow = normalise;
@@ -904,6 +913,14 @@
     event.stopPropagation();
     closeOverlays();
   }, true);
+
+  /* A language switch redraws the open sheet in the new words. */
+  safe(function(){
+    win.GDI18n.onChange(function(){
+      var panel = el('bagPanel');
+      if(panel && panel.classList.contains('open')) renderBagPanelHotfix();
+    });
+  }, null);
 
   win.ClarityBagHotfix = { version: 'bag-sheet-20260906-generate-mode', rows: currentRows,
     generateMode: function(){ return !!ui.genMode; } };

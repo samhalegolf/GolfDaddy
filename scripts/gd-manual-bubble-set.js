@@ -116,6 +116,9 @@
     }, null);
   }
 
+  function L(key, vars) { return window.GDI18n.t(key, vars); }
+  function H(key, vars) { return window.GDI18n.html(key, vars); }
+
   function toast(message) {
     safe(function () {
       if (typeof window.gdLmToast === 'function') window.gdLmToast(message);
@@ -263,8 +266,8 @@
   function offsetLabel(offsetDeg) {
     var n = Number(offsetDeg);
     if (!Number.isFinite(n)) return '-';
-    if (Math.abs(n) < 0.05) return 'Straight at the target';
-    return (n > 0 ? 'Right ' : 'Left ') + Math.abs(n).toFixed(1) + '°';
+    if (Math.abs(n) < 0.05) return L('manualBubble.straight');
+    return L(n > 0 ? 'manualBubble.rightDeg' : 'manualBubble.leftDeg', { deg: Math.abs(n).toFixed(1) });
   }
 
   /* The generated Bubble for the club and placement showing right now. Resolved
@@ -328,11 +331,11 @@
 
   function laneSvg(reference) {
     var laneFrame = frame();
-    if (!laneFrame) return '<div class="gdManualBubbleSetUnavailable">The Bubble preview is not ready on this screen.</div>';
-    if (!reference) return '<div class="gdManualBubbleSetUnavailable">No Bubble can be generated for ' + escapeHtml((state && state.club) || 'this club') + ' yet.</div>';
+    if (!laneFrame) return '<div class="gdManualBubbleSetUnavailable">' + H('manualBubble.previewNotReadyHere') + '</div>';
+    if (!reference) return '<div class="gdManualBubbleSetUnavailable">' + (state && state.club ? H('manualBubble.noBubbleFor', { club: state.club }) : H('manualBubble.noBubbleForThis')) + '</div>';
 
     var aim = endpointFor(state.offsetDeg, laneFrame);
-    if (!aim) return '<div class="gdManualBubbleSetUnavailable">The Bubble preview is not ready on this screen.</div>';
+    if (!aim) return '<div class="gdManualBubbleSetUnavailable">' + H('manualBubble.previewNotReadyHere') + '</div>';
 
     var originX = laneFrame.x(laneFrame.startXModel);
     var originY = laneFrame.y(laneFrame.yModel);
@@ -362,15 +365,15 @@
 
     return '<svg class="gdManualBubbleSetLane" id="gdManualBubbleSetLane" viewBox="0 0 ' + VIEW_WIDTH + ' ' + VIEW_HEIGHT + '"'
       + ' preserveAspectRatio="xMidYMid meet" role="img"'
-      + ' aria-label="Bubble placed ' + escapeHtml(offsetLabel(state.offsetDeg)) + '">'
+      + ' aria-label="' + H('manualBubble.placedAria', { offset: offsetLabel(state.offsetDeg) }) + '">'
       + '<rect x="0" y="0" width="' + VIEW_WIDTH + '" height="' + VIEW_HEIGHT + '" rx="18" fill="rgba(3,12,11,.42)"/>'
       + markerLayer(laneFrame, reference.baseDistanceM)
       /* Left is left and right is right, now that the player is standing at the
          bottom of the lane looking up it. The labels sit either side of the
          ball, where the eye starts, and are the whole reason the drag can be
          trusted. They are drawn upright, outside the turned group. */
-      + '<text class="gdManualBubbleSetSide" x="12" y="' + (VIEW_HEIGHT - 14) + '" text-anchor="start">LEFT</text>'
-      + '<text class="gdManualBubbleSetSide" x="' + (VIEW_WIDTH - 12) + '" y="' + (VIEW_HEIGHT - 14) + '" text-anchor="end">RIGHT</text>'
+      + '<text class="gdManualBubbleSetSide" x="12" y="' + (VIEW_HEIGHT - 14) + '" text-anchor="start">' + H('manualBubble.sideLeft') + '</text>'
+      + '<text class="gdManualBubbleSetSide" x="' + (VIEW_WIDTH - 12) + '" y="' + (VIEW_HEIGHT - 14) + '" text-anchor="end">' + H('manualBubble.sideRight') + '</text>'
       + '<g transform="' + UPRIGHT_TRANSFORM + '">'
       + '<line x1="' + originX.toFixed(1) + '" y1="' + originY.toFixed(1) + '" x2="' + (LANE_WIDTH - 16) + '" y2="' + originY.toFixed(1) + '"'
       + ' stroke="rgba(238,245,242,.42)" stroke-width="1.4" stroke-dasharray="7 7" stroke-linecap="round"/>'
@@ -398,28 +401,28 @@
           + ' aria-pressed="' + (active ? 'true' : 'false') + '"'
           + ' data-gd-manual-bubble-action="club" data-value="' + escapeHtml(club) + '">' + escapeHtml(club) + '</button>';
       }).join('')
-      : '<span class="gdManualBubbleSetEmpty">Build your Bag first - Manual Set places the Bubble for a club you carry.</span>';
+      : '<span class="gdManualBubbleSetEmpty">' + H('manualBubble.buildBagFirst') + '</span>';
 
     var distance = Number(reference && reference.baseDistanceM);
     var distanceNote = Number.isFinite(distance) && distance > 0
-      ? escapeHtml(state.club) + ' · ' + displayDistance(distance) + ' from your Bag'
+      ? H('manualBubble.fromBag', { club: state.club, distance: displayDistance(distance) })
       : '';
 
     return '<div class="gdManualBubbleSetSheet" role="dialog" aria-modal="true" aria-labelledby="gdManualBubbleSetTitle">'
       + '<div class="gdManualBubbleSetHead">'
-      + '<button type="button" class="gdManualBubbleSetBack" data-gd-manual-bubble-action="close" aria-label="Close Manual Set">‹</button>'
-      + '<div><strong id="gdManualBubbleSetTitle">Manual Set</strong><span>' + (state.hasManualSet ? 'Edit your Bubble' : 'Set your Bubble without practice data') + '</span></div>'
+      + '<button type="button" class="gdManualBubbleSetBack" data-gd-manual-bubble-action="close" aria-label="' + H('manualBubble.closeAria') + '">‹</button>'
+      + '<div><strong id="gdManualBubbleSetTitle">' + H('manualBubble.title') + '</strong><span>' + H(state.hasManualSet ? 'manualBubble.editBubble' : 'manualBubble.setWithoutData') + '</span></div>'
       + '</div>'
-      + '<p class="gdManualBubbleSetLead">Choose the club that best represents your smoothest swing.</p>'
+      + '<p class="gdManualBubbleSetLead">' + H('manualBubble.chooseClubLead') + '</p>'
       + '<div class="gdManualBubbleSetClubs">' + chips + '</div>'
-      + '<p class="gdManualBubbleSetLead">Set the Bubble where that shot naturally finishes.</p>'
+      + '<p class="gdManualBubbleSetLead">' + H('manualBubble.setWhereLead') + '</p>'
       + '<div class="gdManualBubbleSetStage">' + laneSvg(reference) + '</div>'
       + '<div class="gdManualBubbleSetReadout"><strong id="gdManualBubbleSetReadout">' + escapeHtml(offsetLabel(state.offsetDeg)) + '</strong>'
       + (distanceNote ? '<span>' + distanceNote + '</span>' : '') + '</div>'
-      + '<p class="gdManualBubbleSetLead gdManualBubbleSetScale">We’ll scale it across the rest of your bag.</p>'
+      + '<p class="gdManualBubbleSetLead gdManualBubbleSetScale">' + H('manualBubble.scaleLead') + '</p>'
       + '<div class="gdManualBubbleSetActions">'
-      + '<button type="button" class="gdManualBubbleSetPrimary" data-gd-manual-bubble-action="save"' + (state.club ? '' : ' disabled') + '>' + (hasPaidAccess() ? 'Use This Bubble' : 'Use in Bubble Preview') + '</button>'
-      + '<button type="button" data-gd-manual-bubble-action="close">Cancel</button>'
+      + '<button type="button" class="gdManualBubbleSetPrimary" data-gd-manual-bubble-action="save"' + (state.club ? '' : ' disabled') + '>' + H(hasPaidAccess() ? 'manualBubble.useThis' : 'manualBubble.useInPreview') + '</button>'
+      + '<button type="button" data-gd-manual-bubble-action="close">' + H('common.cancel') + '</button>'
       + '</div>'
       + '</div>';
   }
@@ -450,9 +453,9 @@
 
   function open() {
     var api = core();
-    if (!api) { toast('Manual Set is not available on this screen'); return false; }
+    if (!api) { toast(L('manualBubble.notAvailable')); return false; }
     var p = profile();
-    if (!p) { toast('Sign in to set your Bubble'); return false; }
+    if (!p) { toast(L('manualBubble.signIn')); return false; }
 
     var restored = api.restoreState(p, deps());
     var preview = safe(function () { return previewApi() && previewApi().current(); }, null);
@@ -499,11 +502,11 @@
     var api = core();
     var p = profile();
     if (!api || !p || !state) return false;
-    if (!state.club) { toast('Choose a club first'); return false; }
-    if (typeof window.gdBubbleOffsetSave !== 'function') { toast('My Bubble is not ready'); return false; }
+    if (!state.club) { toast(L('manualBubble.chooseClubFirst')); return false; }
+    if (typeof window.gdBubbleOffsetSave !== 'function') { toast(L('manualBubble.myBubbleNotReady')); return false; }
 
     var reference = api.referenceBubbleFor(state.club, state.offsetDeg, deps());
-    if (!reference) { toast('No Bubble can be generated for that club yet'); return false; }
+    if (!reference) { toast(L('manualBubble.noBubbleForThat')); return false; }
 
     var storageClub = safe(function () {
       return typeof window.gdMyBubbleStorageClub === 'function' ? window.gdMyBubbleStorageClub(reference.club) : reference.club;
@@ -533,14 +536,14 @@
         handedness: p.handedness || 'right'
       })
     });
-    if (!pending) { toast('That placement could not be read'); return false; }
+    if (!pending) { toast(L('manualBubble.placementUnreadable')); return false; }
 
     /* Free and guest players can build and view this Bubble, but the placement
        remains a session-only Practice preview. It never touches the profile
        fields the GPS/Watch/cloud paths understand as My Bubble. */
     if (!hasPaidAccess()) {
       var preview = previewApi();
-      if (!preview || typeof preview.stage !== 'function') { toast('Bubble Preview is not ready'); return false; }
+      if (!preview || typeof preview.stage !== 'function') { toast(L('manualBubble.previewNotReady')); return false; }
       preview.stage({
         offsetDeg: pending.offsetDeg,
         handedness: p.handedness || 'right',
@@ -550,7 +553,7 @@
       });
       close();
       safe(function () { if (typeof window.renderPracticeData === 'function') window.renderPracticeData(true); });
-      toast('Manual Bubble ready to preview');
+      toast(L('manualBubble.readyToPreview'));
       return false;
     }
 
@@ -584,7 +587,7 @@
       return false;
     }
     close();
-    toast('My Bubble set - ' + offsetLabel(pending.offsetDeg));
+    toast(L('manualBubble.set', { offset: offsetLabel(pending.offsetDeg) }));
     return false;
   }
 
@@ -660,6 +663,8 @@
   }
 
   bind();
+  /* The sheet is built from template strings: redraw it in the new words. */
+  safe(function () { window.GDI18n.onChange(function () { if (state) render(); }); });
 
   var api = { open: open, close: close, save: save, SOURCE: 'user_manual_set' };
   window.GolfDaddyManualBubbleSet = api;

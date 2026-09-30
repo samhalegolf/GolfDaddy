@@ -194,8 +194,10 @@ test("both the new and the old address are emailed, naming the actor and their r
   assert.ok(/sendChangeEmail\(nextEmail/.test(code), "the new address is the new login and must be told");
   assert.ok(/sendChangeEmail\(previousEmail/.test(code),
     "a login moving without warning is indistinguishable from a takeover");
-  assert.ok(/function actorLabel/.test(code), "the message has to name who did it");
-  assert.ok(/roleLabel/.test(code), "and with what authority");
+  assert.ok(/function actorOf/.test(code) && /actorRole: input\.actor\.role/.test(code), "the message has to name who did it, and with what authority");
+  /* The words themselves live in the shared template, in the holder's language. */
+  assert.ok(/templates\.build\("sign_in_email_changed"/.test(code), "the change email renders from the shared template");
+  assert.ok(/storedLocale\(targetRow\)/.test(code), "and in the language the holder's account recorded");
 });
 
 test("a mail failure never rolls the change back or fails the request", () => {

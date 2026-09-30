@@ -29,7 +29,7 @@ exports.handler = async function(event) {
       profileId: claimed.profileId,
       bag: claimed.player && claimed.player.bag_json,
       profileJson: claimed.player && claimed.player.profile_json,
-      email: accountEmail, name, role: accountRole, eventType: "supabase_auth_signup"
+      email: accountEmail, name, role: accountRole, eventType: "supabase_auth_signup", locale: body.locale
     });
     return json(200, { ok: true, source: "supabase_auth", claimedPlayerId: claimed.player && claimed.player.id || null, account: pack.account, profile: pack.profile });
   } catch (error) {

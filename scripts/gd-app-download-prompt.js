@@ -19,6 +19,7 @@
   var SEEN_KEY = "clarity:app-download-prompt-seen:v1";
   var BADGE_HEIGHT = 47;
 
+  function L(key) { return window.GDI18n.html(key); }
   function safe(fn, fallback) {
     try { return fn(); } catch (_e) { return fallback; }
   }
@@ -56,19 +57,19 @@
       if (document.getElementById("clarityAppDownloadPrompt")) return resolve(false);
 
       var badges = [];
-      if (urls.apple) badges.push(badge(urls.apple, "/assets/brand/app-store-badge.png", "Download Clarity Caddy on the App Store", 159));
-      if (urls.play) badges.push(badge(urls.play, "/assets/brand/google-play-badge.png", "Get Clarity Caddy on Google Play", 158));
+      if (urls.apple) badges.push(badge(urls.apple, "/assets/brand/app-store-badge.png", L("downloadPrompt.appStoreBadge"), 159));
+      if (urls.play) badges.push(badge(urls.play, "/assets/brand/google-play-badge.png", L("downloadPrompt.playBadge"), 158));
 
       var host = document.createElement("div");
       host.id = "clarityAppDownloadPrompt";
       host.style.cssText = "position:fixed;inset:0;z-index:1000000;background:rgba(3,8,5,.92);display:flex;align-items:center;justify-content:center;padding:20px;font-family:Arial,Helvetica,sans-serif;color:#fff";
       host.innerHTML = [
         "<div role='dialog' aria-modal='true' aria-labelledby='clarityAppDownloadTitle' style='width:min(420px,100%);background:#101b15;border:1px solid rgba(255,255,255,.16);border-radius:22px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.45)'>",
-        "<div style='color:#42b66a;font-weight:900;letter-spacing:.12em;text-transform:uppercase;font-size:12px;margin-bottom:10px'>You're all set</div>",
-        "<h1 id='clarityAppDownloadTitle' style='font-size:26px;line-height:1.1;margin:0 0 10px'>Get Clarity Caddy on your phone</h1>",
-        "<p style='margin:0 0 18px;color:#c8d1cc;line-height:1.45'>Your password is saved and your account is live. Clarity Caddy is built to be used on the course — install it and sign in with this email address.</p>",
+        "<div style='color:#42b66a;font-weight:900;letter-spacing:.12em;text-transform:uppercase;font-size:12px;margin-bottom:10px'>" + L("downloadPrompt.allSet") + "</div>",
+        "<h1 id='clarityAppDownloadTitle' style='font-size:26px;line-height:1.1;margin:0 0 10px'>" + L("downloadPrompt.title") + "</h1>",
+        "<p style='margin:0 0 18px;color:#c8d1cc;line-height:1.45'>" + L("downloadPrompt.body") + "</p>",
         "<div style='display:flex;gap:10px;flex-wrap:wrap;margin:0 0 18px'>" + badges.join("") + "</div>",
-        "<button id='clarityAppDownloadDismiss' style='width:100%;border:1px solid rgba(255,255,255,.18);border-radius:999px;background:transparent;color:#c8d1cc;font-weight:700;padding:12px 16px;font-size:14px'>Continue in this browser</button>",
+        "<button id='clarityAppDownloadDismiss' style='width:100%;border:1px solid rgba(255,255,255,.18);border-radius:999px;background:transparent;color:#c8d1cc;font-weight:700;padding:12px 16px;font-size:14px'>" + L("downloadPrompt.continueBrowser") + "</button>",
         "</div>"
       ].join("");
 

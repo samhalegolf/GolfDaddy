@@ -51,7 +51,10 @@
       if (!token) throw new Error(L("auth.signInAgain"));
       headers.Authorization = "Bearer " + token;
     }
-    var response = await fetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload || {}) });
+    /* Every auth call says which language this player uses: the server records it on the
+       account (metadata.locale) so emails reach them in it. */
+    var body = Object.assign({ locale: window.GDI18n.locale() }, payload || {});
+    var response = await fetch(url, { method: "POST", headers: headers, body: JSON.stringify(body) });
     var body = await response.json().catch(function () { return {}; });
     if (!response.ok || body.ok === false) {
       var known = SERVER_ERRORS[body.code];

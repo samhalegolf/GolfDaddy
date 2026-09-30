@@ -185,7 +185,8 @@
       const text=document.body?.innerText||'';
       const card=document.getElementById('gdPracticeDataOpenBtn');
       return document.body.classList.contains('gdShotDataOpen')
-        && (card?.getAttribute('aria-expanded')==='true'||/Sam Hale - Practice Data|Generate Bubble|Adopt Bubble/.test(text));
+        /* The demo session's name is data, the same in every language; button words are not. */
+        && (card?.getAttribute('aria-expanded')==='true'||/Sam Hale - Practice Data/.test(text));
     },false);
   }
   function applyPracticeDemoOffset(){
