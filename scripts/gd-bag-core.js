@@ -47,7 +47,7 @@
      the iron figure by 1.35 - so this is the number a wood actually runs on. */
   var ROLLOUT_PCT = { driver: 0.11, iron: 0.075, wedge: 0.047 };
   ROLLOUT_PCT.woodHybrid = ROLLOUT_PCT.iron * 1.35;
-  var FIRMNESS = { soft: { label: "Soft", multiplier: 0.45 }, medium: { label: "Normal", multiplier: 1 }, hard: { label: "Firm", multiplier: 1.65 } };
+  var FIRMNESS = { soft: { label: "Soft", key: "bag.soft", multiplier: 0.45 }, medium: { label: "Normal", key: "bag.normal", multiplier: 1 }, hard: { label: "Firm", key: "bag.firm", multiplier: 1.65 } };
   var FIRMNESS_KEY = "gd_bag_total_firmness_v1";
   var ART_ASPECT = { driver: "710 / 302", wood: "681 / 208", hybrid: "666 / 146", blade: "674 / 222" };
 
@@ -87,7 +87,7 @@
     var stored = safe(function () { return localStorage.getItem(FIRMNESS_KEY); }, null);
     return FIRMNESS[stored] ? stored : "medium";
   }
-  function firmnessLabel(preset) { return (FIRMNESS[preset || firmness()] || FIRMNESS.medium).label; }
+  function firmnessLabel(preset) { var f = FIRMNESS[preset || firmness()] || FIRMNESS.medium; return word(f.key, f.label); }
 
   /* The legacy shell tunes roll-out through its developer settings, so defer to
      its calculator when it is loaded. The formula below is the same one, with
@@ -151,9 +151,9 @@
     var list = sortRows(rows);
     var label = String(club || "").trim();
     var metres = Math.round(num(carry));
-    if (!label) return { rows: list, error: "Give the club a name first", code: "nameFirst" };
-    if (!(metres > 0)) return { rows: list, error: "Give the club a distance", code: "needsDistance" };
-    if (list.some(function (r) { return sameLabel(r.club, label); })) return { rows: list, error: label + " is already in the bag", code: "alreadyInBag", duplicate: label };
+    if (!label) return { rows: list, error: word("bag.nameFirst", "Give the club a name first"), code: "nameFirst" };
+    if (!(metres > 0)) return { rows: list, error: word("bag.needsDistance", "Give the club a distance"), code: "needsDistance" };
+    if (list.some(function (r) { return sameLabel(r.club, label); })) return { rows: list, error: word("bag.alreadyInBag", "{club} is already in the bag", { club: label }), code: "alreadyInBag", duplicate: label };
     return { rows: sortRows(list.concat([{ club: label, baseCarry: metres, totalM: totalForCarry(label, metres) }])), club: label };
   }
 
@@ -162,9 +162,9 @@
     var next = String(label || "").trim();
     var current = list.filter(function (r) { return sameLabel(r.club, club); })[0];
     if (!current) return { rows: list, error: "" };
-    if (!next) return { rows: list, error: "A club needs a name", code: "needsName" };
+    if (!next) return { rows: list, error: word("bag.needsName", "A club needs a name"), code: "needsName" };
     if (sameLabel(next, current.club)) return { rows: list, club: current.club };
-    if (list.some(function (r) { return sameLabel(r.club, next); })) return { rows: list, error: next + " is already in the bag", code: "alreadyInBag", duplicate: next };
+    if (list.some(function (r) { return sameLabel(r.club, next); })) return { rows: list, error: word("bag.alreadyInBag", "{club} is already in the bag", { club: next }), code: "alreadyInBag", duplicate: next };
     return {
       rows: sortRows(list.map(function (r) {
         /* Re-derive the total from the new label: roll-out is a property of the

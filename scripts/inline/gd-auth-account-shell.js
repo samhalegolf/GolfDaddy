@@ -46,6 +46,11 @@
      for the template strings below: translated and escaped for innerHTML. */
   function L(key, vars) { return window.GDI18n.t(key, vars); }
   function H(key, vars) { return window.GDI18n.html(key, vars); }
+  /* The account type as the profile screen names it (gdAccountPublicRole's four). */
+  function publicRoleWord(role) {
+    const key = String(role || 'player').toLowerCase().replace(/[\s_-]+/g, '');
+    return (key === 'subscribed' || key === 'subscriber' || key === 'subscribedplayer') ? L('permissions.subscribedPlayer') : roleWord(key);
+  }
   function roleWord(role) {
     return L(role === 'admin' ? 'account.roleAdmin' : (role === 'coach' ? 'account.roleCoach' : 'account.rolePlayer'));
   }
@@ -153,12 +158,12 @@
     const photo = p.profilePhotoDataUrl || p.photoDataUrl || '';
     const key = hasBubble
       ? ['bubble',p.id||'',src.club||'',src.baseCarry||'',src.aimOffsetM||'',src.clusterWidthM||'',src.clusterDepthM||'',src.clusterTiltDeg||'',src.visual?.visualWidthM||'',src.visual?.visualDepthM||''].join('|')
-      : ['profile',p.id||'',p.name||'',photo].join('|');
+      : ['profile',p.id||'',p.name||'',photo,window.GDI18n.locale()].join('|');
     if (profileVisualCache.key === key) return profileVisualCache.html;
     profileVisualCache.key = key;
     profileVisualCache.html = hasBubble
       ? `<div class="bubblePreview" style="--x:${b.x}%;--w:${b.w}px;--h:${b.h}px;--t:${b.t}deg"></div>`
-      : `<button class="profileIconPreview ${photo ? 'hasPhoto' : ''}" type="button" onclick="gd67OpenProfilePhotoPicker()" aria-label="Change profile photo"><img src="${esc(photo || 'assets/home/profile.png?v=040483c4')}" alt="profile"></button>`;
+      : `<button class="profileIconPreview ${photo ? 'hasPhoto' : ''}" type="button" onclick="gd67OpenProfilePhotoPicker()" aria-label="${H('profileAccount.changePhotoAria')}"><img src="${esc(photo || 'assets/home/profile.png?v=040483c4')}" alt="${H('profileAccount.photoAlt')}"></button>`;
     return profileVisualCache.html;
   }
 
@@ -1160,21 +1165,21 @@
     return `
         <div class="topbar">
           <div class="nav">
-            <button class="pillBtn" type="button" onclick="gd67BackProfile()">Back</button>
-            <button class="pillBtn" type="button" onclick="try{if(window.gdCanonicalShellHome)return window.gdCanonicalShellHome();showShellHome();}catch(e){}; window.gdCloseProfileV67()">Home</button>
-            <button class="pillBtn" type="button" onclick="gd67OpenProfileSettings()">Settings</button>
+            <button class="pillBtn" type="button" data-gd-profile-nav="back" onclick="gd67BackProfile()">${H('common.back')}</button>
+            <button class="pillBtn" type="button" data-gd-profile-nav="home" onclick="try{if(window.gdCanonicalShellHome)return window.gdCanonicalShellHome();showShellHome();}catch(e){}; window.gdCloseProfileV67()">${H('common.home')}</button>
+            <button class="pillBtn" type="button" onclick="gd67OpenProfileSettings()">${H('shell.settings')}</button>
           </div>
         </div>`;
   }
 
   function setupStatusStrip(readyBag, hasBubble) {
     if (readyBag && hasBubble) {
-      return `<div class="statusStrip ready"><span><i class="dot"></i>Bag ready</span><span>Shot data ready</span></div>`;
+      return `<div class="statusStrip ready"><span><i class="dot"></i>${H('profileAccount.bagReady')}</span><span>${H('profileAccount.shotDataReady')}</span></div>`;
     }
     return `
-          <div class="setupStrip" aria-label="Profile setup">
-            <button class="setupBag ${readyBag ? 'done' : ''}" type="button" onclick="gd67OpenProfileTool('bag')"><i class="dot"></i>${readyBag ? 'Bag ready' : '+ Add Bag'}</button>
-            <button class="setupShot ${hasBubble ? 'done' : ''}" type="button" onclick="gd67OpenProfileTool('shot')"><i class="dot"></i>${hasBubble ? 'Shot data ready' : '+ Enter Shot Data'}</button>
+          <div class="setupStrip" aria-label="${H('profileAccount.setupAria')}">
+            <button class="setupBag ${readyBag ? 'done' : ''}" type="button" onclick="gd67OpenProfileTool('bag')"><i class="dot"></i>${H(readyBag ? 'profileAccount.bagReady' : 'profileAccount.addBag')}</button>
+            <button class="setupShot ${hasBubble ? 'done' : ''}" type="button" onclick="gd67OpenProfileTool('shot')"><i class="dot"></i>${H(hasBubble ? 'profileAccount.shotDataReady' : 'profileAccount.enterShotData')}</button>
           </div>`;
   }
 
@@ -1196,16 +1201,16 @@
         ${profileTopbar()}
 
         <div class="heading">
-          <div class="kicker">Guest Profile</div>
+          <div class="kicker">${H('profileAccount.guestKicker')}</div>
           <h1>${esc(p.name)}</h1>
-          <p>Playing as a guest on this device. Distances, your bag and the course library are yours to use now; an account saves them.</p>
+          <p>${H('profileAccount.guestIntro')}</p>
         </div>
 
         <section class="hero">
           <div class="heroMain">
             <div>
               <div class="name">${esc(p.name)}</div>
-              <div class="meta">Handicap ${esc(view.hcp)} · ${esc(view.hand)} handed · Guest</div>
+              <div class="meta">${H('profileAccount.guestMeta', { hcp: view.hcp, handed: view.handed })}</div>
               ${window.ClarityPayments && typeof window.ClarityPayments.accessBadgeHTML === 'function' ? window.ClarityPayments.accessBadgeHTML('profile') : ''}
             </div>
             ${profileVisual(p, view.b, view.hasBubble)}
@@ -1215,28 +1220,28 @@
         <section class="cards">
           <button class="card ${view.readyBag ? 'good' : 'warn'}" onclick="gd67OpenProfileTool('bag')">
             ${icon('bag')}
-            <div><strong>Bag</strong><span>${view.readyBag ? 'Carry distances are set.' : 'Set carry distances before play.'}</span></div>
+            <div><strong>${H('shell.bag')}</strong><span>${H(view.readyBag ? 'profileAccount.bagSet' : 'profileAccount.bagUnset')}</span></div>
           </button>
           <button class="card" onclick="gd67OpenProfileTool('shot')">
             ${icon('scorecard')}
-            <div><strong>Shot Data</strong><span>Demo mode - try the pattern engine on sample shots.</span></div>
+            <div><strong>${H('shell.shotData')}</strong><span>${H('profileAccount.shotDataDemo')}</span></div>
           </button>
           <button class="card" id="gdProfileCoursesCard" type="button" onclick="try{openCourseLibraryPanel()}catch(e){}">
             <img class="gdCourseLibraryCardIcon" src="assets/home/clarity-caddy-course-library-icon.png?v=defd0c72" alt="">
-            <div><strong>Courses</strong><span>Recent courses.</span></div>
+            <div><strong>${H('course.profileCardTitle')}</strong><span>${H('profileAccount.recentCourses')}</span></div>
           </button>
           <button class="card" onclick="gd67OpenMembershipSettings()">
             ${icon('profile') || icon('scorecard')}
-            <div><strong>Membership</strong><span>Manage access, Month Pass and Membership.</span></div>
+            <div><strong>${H('access.membership')}</strong><span>${H('profileAccount.membershipHint')}</span></div>
           </button>
         </section>
         <section class="accountPanel gdGuestAccountCta">
           <div class="panelHead">
-            <div><strong>Save this to an account</strong><span>Scores, rounds and your own practice data need somewhere to live. Guest work stays on this device.</span></div>
+            <div><strong>${H('profileAccount.saveToAccount')}</strong><span>${H('profileAccount.saveToAccountHint')}</span></div>
           </div>
           <div class="accountActions">
-            <button class="saveBtn" type="button" onclick="gd67OpenAuth('signup')">Create Account</button>
-            <button class="secondaryBtn" type="button" onclick="gd67OpenAuth('login')">Sign In</button>
+            <button class="saveBtn" type="button" onclick="gd67OpenAuth('signup')">${H('auth.createAccountButton')}</button>
+            <button class="secondaryBtn" type="button" onclick="gd67OpenAuth('login')">${H('profileAccount.signInButton')}</button>
           </div>
         </section>
       </div>
@@ -1438,6 +1443,7 @@
     const el = overlay();
     const hcp = p.handicap || '—';
     const hand = (p.handedness || 'right').replace(/^./, c => c.toUpperCase());
+    const handed = L(String(p.handedness || 'right').toLowerCase() === 'left' ? 'bag.leftHanded' : 'bag.rightHanded');
 	    const account = authMode === 'reset' ? null : currentAccount();
     const owner = accountForProfile(p);
     const isCoach = isCoachAccount(account);
@@ -1448,15 +1454,15 @@
        own-profile screen: exactly the wrong-person bug, by another route. */
     const coachViewingPlayer = !!(isCoach && account && p.id && p.id !== account.profileId);
     const playerPrefix = isCoach ? 'My' : '';
-    const mode = owner ? roleLabel(owner.role) : (typeof gdPermissionPublicLabel === 'function' ? gdPermissionPublicLabel(p.permission || p.accountPermission || p.mode) : (p.mode || 'player').replace(/^./, c => c.toUpperCase()));
-    const signedInLine = account ? `Signed in as ${account.name}.` : 'Create or log into a local account.';
-    const profileKicker = isCoach ? 'Coach Portal · My Golf' : 'Player Profile';
+    const mode = owner ? publicRoleWord(owner.role) : (typeof gdPermissionPublicLabel === 'function' ? gdPermissionPublicLabel(p.permission || p.accountPermission || p.mode) : (p.mode || 'player').replace(/^./, c => c.toUpperCase()));
+    const signedInLine = account ? L('profileAccount.signedInIntro', { name: account.name }) : L('profileAccount.localIntro');
+    const profileKicker = isCoach ? 'Coach Portal · My Golf' : L('profileAccount.playerKicker');
 
     if (!account) {
       /* Signed out and not here to sign in: the guest profile, not the login
          form. See renderGuestProfile. */
       if (!authIntent && authMode !== 'reset') {
-        el.innerHTML = renderGuestProfile({ p: p, b: b, hasBubble: hasBubble, readyBag: readyBag, hcp: hcp, hand: hand });
+        el.innerHTML = renderGuestProfile({ p: p, b: b, hasBubble: hasBubble, readyBag: readyBag, hcp: hcp, hand: hand, handed: handed });
         return;
       }
       el.innerHTML = `
@@ -1516,14 +1522,14 @@
         <div class="heading">
           <div class="kicker">${esc(profileKicker)}</div>
           <h1>${esc(p.name)}</h1>
-          <p>${esc(signedInLine)} The deeper pattern data stays inside the engine.</p>
+          <p>${esc(signedInLine)}</p>
         </div>
 
         <section class="hero">
           <div class="heroMain">
             <div>
               <div class="name">${esc(p.name)}</div>
-              <div class="meta">Handicap ${esc(hcp)} · ${esc(hand)} handed · ${esc(mode)} account</div>
+              <div class="meta">${H('profileAccount.meta', { hcp: hcp, handed: handed, mode: mode })}</div>
               ${window.ClarityPayments && typeof window.ClarityPayments.accessBadgeHTML === 'function' ? window.ClarityPayments.accessBadgeHTML('profile') : ''}
             </div>
             ${profileVisual(p,b,hasBubble)}
@@ -1533,19 +1539,19 @@
         <section class="cards">
           <button class="card ${readyBag ? 'good' : 'warn'}" onclick="gd67OpenProfileTool('bag')">
             ${icon('bag')}
-            <div><strong>${esc(playerPrefix ? `${playerPrefix} Bag` : 'Bag')}</strong><span>${readyBag ? 'Carry distances are set.' : 'Set carry distances before play.'}</span></div>
+            <div><strong>${playerPrefix ? esc(`${playerPrefix} Bag`) : H('shell.bag')}</strong><span>${H(readyBag ? 'profileAccount.bagSet' : 'profileAccount.bagUnset')}</span></div>
           </button>
           <button class="card" onclick="gd67OpenProfileTool('shot')">
             ${icon('scorecard')}
-            <div><strong>${esc(playerPrefix ? `${playerPrefix} Shot Data` : 'Shot Data')}</strong><span>Compare course and practice patterns.</span></div>
+            <div><strong>${playerPrefix ? esc(`${playerPrefix} Shot Data`) : H('shell.shotData')}</strong><span>${H('profileAccount.comparePatterns')}</span></div>
           </button>
           <button class="card" id="gdProfileCoursesCard" type="button" onclick="try{openCourseLibraryPanel()}catch(e){}">
             <img class="gdCourseLibraryCardIcon" src="assets/home/clarity-caddy-course-library-icon.png?v=defd0c72" alt="">
-            <div><strong>Courses</strong><span>Recent courses.</span></div>
+            <div><strong>${H('course.profileCardTitle')}</strong><span>${H('profileAccount.recentCourses')}</span></div>
           </button>
           <button class="card" onclick="gd67OpenMembershipSettings()">
             ${icon('profile') || icon('scorecard')}
-            <div><strong>Membership</strong><span>Manage access, Month Pass and Membership.</span></div>
+            <div><strong>${H('access.membership')}</strong><span>${H('profileAccount.membershipHint')}</span></div>
           </button>
         </section>
         ${isCoach ? `<button class="coachChangePlayer" type="button" onclick="gd67ChangePlayer()">Coach Dashboard</button>` : ''}
@@ -1600,7 +1606,7 @@
         targetProfileId = p.id;
         window.__gdBackTarget = 'profile';
         window.__gdProfileReturnProfileId = p.id;
-        window.__gdProfileReturnName = p.name || 'Profile';
+        window.__gdProfileReturnName = p.name || L('shell.profile');
       }
     } catch(e) {}
     close();
@@ -1635,7 +1641,7 @@
         if (tool === 'play' && window.GDCoursePicker && typeof window.GDCoursePicker.open === 'function') return window.GDCoursePicker.open({source:'coach-player-play', returnTarget:'coach-player'});
         if (tool === 'play' && typeof enterGpsModule === 'function') return enterGpsModule();
       } catch(e) {}
-      safeToast('Tool unavailable');
+      safeToast(L('profileAccount.toolUnavailable'));
     }, 0);
   }
 
@@ -1701,7 +1707,7 @@
     editing = false;
     saveSafe();
     render();
-    safeToast('Profile saved');
+    safeToast(L('profileAccount.profileSaved'));
   }
 
   function resetDemo() {
@@ -1720,7 +1726,7 @@
     editing = false;
     saveSafe();
     render();
-    safeToast('Demo profile reset');
+    safeToast(L('profileAccount.demoReset'));
   }
 
 	  function accountAction(fn, success, feedbackId='') {

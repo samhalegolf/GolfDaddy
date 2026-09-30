@@ -107,7 +107,7 @@ test("the client exchanges token_hash for a session before showing the form", ()
   assert.ok(/token_hash: tokenHash/.test(auth), "the exchange does not send the token");
   assert.ok(/exchangeTokenHash/.test(auth), "the exchange helper is gone");
   /* Nothing is verified until the exchange returns, so the form must not be usable first. */
-  assert.ok(/button\.disabled = true;[\s\S]{0,120}Checking your link/.test(auth),
+  assert.ok(/button\.disabled = true;[\s\S]{0,120}setup\.checkingLink/.test(auth),
     "the password form is live before the link has been verified");
   assert.ok(/clearRecoveryUrl\(\)/.test(auth), "the consumed token is not stripped from the URL");
 });

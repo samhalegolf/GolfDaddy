@@ -37,9 +37,12 @@ function ensureDeliveryConfigured() {
    body rather than templated separately: it is the one fact this send has that the shared copy
    does not. */
 const templates = require("../scripts/gd-email-templates-core.js");
+const { translator } = require("../scripts/gd-i18n-node.js");
+const { recipientLocale } = require("./lib/gd-email-locale.js");
 
-async function sendRecoveryEmail(delivery, emailAddress, link, requestedAt) {
+async function sendRecoveryEmail(delivery, emailAddress, link, requestedAt, locale) {
   const built = templates.build("password_recovery", {
+    locale,
     to: emailAddress,
     siteUrl: env("CLARITY_SITE_URL") || templates.DEFAULT_SITE,
     actorName: "Clarity Golf Systems",
@@ -53,7 +56,7 @@ async function sendRecoveryEmail(delivery, emailAddress, link, requestedAt) {
       to: [emailAddress],
       subject: built.subject,
       html: built.html,
-      text: built.text + "\n\nRequested on " + requestedAt + "."
+      text: built.text + "\n\n" + translator(locale).t("email.reset.requestedOn", { date: requestedAt })
     })
   });
   const body = await response.json().catch(function () { return null; });
@@ -90,7 +93,8 @@ exports.handler = async function(event) {
        so an installed app takes the tap. */
     const resetUrl = buildSetupLink(reset, origin, { claritySetPassword: 1 }).link;
     if (!resetUrl) return json(502, { error: "Could not generate a password reset link.", code: "reset_link_failed" });
-    await sendRecoveryEmail(delivery, accountEmail, resetUrl, new Date().toISOString());
+    const locale = await recipientLocale(accountEmail, payload.locale, existing);
+    await sendRecoveryEmail(delivery, accountEmail, resetUrl, new Date().toISOString(), locale);
     return json(200, { ok: true, code: "password_reset_sent", sent: true });
   } catch (error) {
     await sendSystemAlert({

@@ -17,18 +17,19 @@
   function labelFor(btn){
     var explicit=btn.getAttribute("data-gd-feedback")||btn.getAttribute("title")||btn.getAttribute("aria-label")||"";
     var text=String(explicit||btn.textContent||"").replace(/\s+/g," ").trim();
-    return text||"This action";
+    return text;
   }
+  function L(key,vars){return window.GDI18n.t(key,vars);}
   function disabledMessage(btn){
     var message=btn.getAttribute("data-gd-disabled-message")||"";
     if(message)return message;
     var text=labelFor(btn);
-    if(/practice bubble not ready/i.test(text))return "Practice Bubble is not ready yet.";
-    if(/lock in a shot first/i.test(text))return "Lock in a shot first.";
-    if(/previous hole/i.test(text))return "You are already on the first hole.";
-    if(/next hole/i.test(text))return "You are already on the last hole.";
-    if(/upload|import/i.test(text))return text+" is not available yet.";
-    return text+" is not available yet.";
+    if(!text)return L("actionFeedback.thisNotAvailable");
+    if(/practice bubble not ready/i.test(text))return L("actionFeedback.bubbleNotReady");
+    if(/lock in a shot first/i.test(text))return L("actionFeedback.lockShotFirst");
+    if(/previous hole/i.test(text))return L("actionFeedback.firstHole");
+    if(/next hole/i.test(text))return L("actionFeedback.lastHole");
+    return L("actionFeedback.notAvailable",{action:text});
   }
   document.addEventListener("pointerdown",function(event){
     var btn=event.target&&event.target.closest&&event.target.closest("button,[role='button']");

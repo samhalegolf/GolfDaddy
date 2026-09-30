@@ -52,90 +52,48 @@
 const { email, hasAuth, hasAuthWithServiceKey, json, supabaseAuth, supabaseRest, text } = require("./auth-utils");
 const { sendSystemAlert } = require("./alert-utils");
 const { accountById, isStaffRole, resolveCaller } = require("./clarity-caller");
+const templates = require("../scripts/gd-email-templates-core.js");
+const { storedLocale, cleanLocale } = require("./lib/gd-email-locale.js");
 
 function env(name) { return process.env[name] || ""; }
 function siteUrl() { return (env("CLARITY_SITE_URL") || env("APP_URL") || "https://caddy.claritygolf.app").replace(/\/+$/, ""); }
 function encodeFilter(value) { return encodeURIComponent(String(value || "")); }
 function cleanId(value) { return text(value, 120); }
 function idList(value) { return Array.isArray(value) ? value.map(cleanId).filter(Boolean) : []; }
-function escapeHTML(value) {
-  return String(value == null ? "" : value).replace(/[&<>"']/g, function (ch) {
-    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
-  });
-}
-function firstName(value) { return (String(value || "there").trim().split(/\s+/)[0] || "there").replace(/[^\w'-]/g, "") || "there"; }
-
-function roleLabel(value) {
-  const raw = String(value || "").trim().toLowerCase();
-  if (raw === "admin") return "Admin";
-  if (raw === "coach") return "Coach";
-  return "Clarity";
-}
-
-/* The actor as the account holder will read it: a name they recognise, and the
-   authority behind it. "your coach" rather than a bare blank when a service
-   caller has no account row to name. */
-function actorLabel(caller) {
+/* The actor as the account holder will read it: a name they recognise and the authority
+   behind it, or "your coach" when a service caller has no account row to name. The wording
+   is the email template's; this only says who and in what role. */
+function actorOf(caller) {
   const account = caller && caller.account;
   const name = text(account && (account.name || account.email), 160);
-  const label = roleLabel(account && account.role);
-  if (name) return label === "Clarity" ? name : name + " (" + label + ")";
-  return caller && caller.isAdmin ? "a Clarity admin" : "your coach";
+  if (name) return { name, role: String(account && account.role || "").toLowerCase() };
+  return { name: "", role: caller && caller.isAdmin ? "admin" : "coach" };
 }
 
 /* ---------- email ---------- */
 
-function emailShell(bodyRows) {
-  const logoUrl = siteUrl() + "/assets/brand/cg-logo-white-g.png?v=1e5a26e2";
-  return [
-    "<!doctype html><html><body style=\"margin:0;background:#07100b;color:#f7faf7;font-family:Arial,Helvetica,sans-serif\">",
-    "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#07100b;padding:28px 14px\"><tr><td align=\"center\">",
-    "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:560px;background:#101b15;border:1px solid #24342c;border-radius:20px;overflow:hidden\">",
-    "<tr><td style=\"padding:24px 24px 16px;background:#07100b\"><img src=\"" + escapeHTML(logoUrl) + "\" width=\"44\" height=\"44\" alt=\"Clarity Golf\" style=\"vertical-align:middle;margin-right:12px\"><span style=\"font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:#b9c4bd;font-weight:700\">Clarity Golf Systems</span></td></tr>",
-    bodyRows,
-    "</table></td></tr></table></body></html>"
-  ].join("");
-}
-
-function changeEmailHtml(input) {
-  const rows = [
-    "<tr><td style=\"padding:24px\"><p style=\"margin:0 0 10px;color:#42b66a;font-weight:700\">Hi " + escapeHTML(firstName(input.name)) + ",</p>",
-    "<h1 style=\"margin:0 0 12px;color:#fff;font-size:28px;line-height:1.05\">" + escapeHTML(input.heading) + "</h1>",
-    "<p style=\"margin:0 0 18px;color:#c8d1cc;font-size:16px;line-height:1.45\">" + escapeHTML(input.detail) + "</p>",
-    "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:100%;border:1px solid #24342c;border-radius:14px;margin:0 0 18px\">",
-    "<tr><td style=\"padding:12px 14px;color:#8fa199;font-size:13px\">Previous sign-in</td><td style=\"padding:12px 14px;color:#c8d1cc;font-size:14px\">" + escapeHTML(input.previousEmail) + "</td></tr>",
-    "<tr><td style=\"padding:12px 14px;color:#8fa199;font-size:13px;border-top:1px solid #24342c\">New sign-in</td><td style=\"padding:12px 14px;color:#fff;font-size:14px;font-weight:700;border-top:1px solid #24342c\">" + escapeHTML(input.nextEmail) + "</td></tr>",
-    "</table>",
-    "<a href=\"" + escapeHTML(siteUrl()) + "\" style=\"display:inline-block;background:#ff9f2f;color:#06110b;text-decoration:none;font-weight:800;border-radius:999px;padding:12px 18px\">Open Clarity Caddy</a>",
-    "<p style=\"margin:18px 0 0;color:#8fa199;font-size:13px;line-height:1.4\">Your password has not changed. If you were not expecting this, reply to this email or contact " + escapeHTML(input.actor) + " straight away.</p>",
-    "</td></tr><tr><td style=\"padding:16px 24px 24px;color:#708178;font-size:12px;line-height:1.45\">You are receiving this because it relates to your Clarity account access.</td></tr>"
-  ].join("");
-  return emailShell(rows);
-}
-
+/* The layout and wording are the shared template's (scripts/gd-email-templates-core.js),
+   in the account holder's language. */
 async function sendChangeEmail(to, input) {
   const resendKey = env("RESEND_API_KEY");
   if (!resendKey) return { sent: false, provider: "not_configured" };
-  const from = env("CLARITY_EMAIL_FROM") || "Clarity Golf Systems <notifications@claritygolf.app>";
-  const html = changeEmailHtml(input);
-  const plain = [
-    "Hi " + firstName(input.name) + ",",
-    "",
-    input.heading,
-    "",
-    input.detail,
-    "",
-    "Previous sign-in: " + input.previousEmail,
-    "New sign-in: " + input.nextEmail,
-    "",
-    "Your password has not changed. If you were not expecting this, contact " + input.actor + " straight away.",
-    "",
-    siteUrl()
-  ].join("\n");
+  const from = env("CLARITY_EMAIL_FROM") || templates.DEFAULT_FROM;
+  const built = templates.build("sign_in_email_changed", {
+    locale: input.locale,
+    to,
+    siteUrl: siteUrl(),
+    ctaUrl: siteUrl(),
+    recipientName: input.name,
+    actorName: input.actor.name,
+    actorRole: input.actor.role,
+    previousEmail: input.previousEmail,
+    nextEmail: input.nextEmail,
+    toPrevious: !!input.toPrevious
+  });
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: "Bearer " + resendKey, "Content-Type": "application/json" },
-    body: JSON.stringify({ from, to: [to], subject: input.subject, html, text: plain })
+    body: JSON.stringify({ from, to: [to], subject: built.subject, html: built.html, text: built.text })
   });
   const body = await response.json().catch(function () { return null; });
   if (!response.ok) return { sent: false, provider: "resend", status: response.status, details: body };
@@ -420,20 +378,13 @@ exports.handler = async function (event) {
     })
   }).catch(function () { /* the audit row is a breadcrumb, not the change */ });
 
-  const actor = actorLabel(caller);
+  const actor = actorOf(caller);
   const holderName = text(targetRow.name, 160) || nextEmail.split("@")[0];
+  const locale = cleanLocale(storedLocale(targetRow)) || "en";
   const notified = { next: { sent: false }, previous: { sent: false } };
 
   try {
-    notified.next = await sendChangeEmail(nextEmail, {
-      name: holderName,
-      actor,
-      heading: "Your Clarity sign-in email has changed",
-      detail: "Your Clarity Caddy login email was changed to " + nextEmail + " by " + actor + ". Sign in with this address from now on.",
-      subject: "Your Clarity sign-in email has changed",
-      previousEmail: previousEmail || "Not set",
-      nextEmail
-    });
+    notified.next = await sendChangeEmail(nextEmail, { locale, name: holderName, actor, previousEmail, nextEmail });
   } catch (_error) { notified.next = { sent: false, provider: "error" }; }
 
   /* The old address is told too. A login that moves without warning is
@@ -441,15 +392,7 @@ exports.handler = async function (event) {
      holder can still be reached at if the new one is wrong. */
   if (previousEmail) {
     try {
-      notified.previous = await sendChangeEmail(previousEmail, {
-        name: holderName,
-        actor,
-        heading: "Your Clarity sign-in email has changed",
-        detail: "The login email for your Clarity Caddy account was changed from " + previousEmail + " to " + nextEmail + " by " + actor + ". This address can no longer sign in.",
-        subject: "Your Clarity sign-in email has changed",
-        previousEmail,
-        nextEmail
-      });
+      notified.previous = await sendChangeEmail(previousEmail, { locale, name: holderName, actor, previousEmail, nextEmail, toPrevious: true });
     } catch (_error) { notified.previous = { sent: false, provider: "error" }; }
   }
 

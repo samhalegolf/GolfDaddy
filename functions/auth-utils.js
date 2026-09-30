@@ -1,5 +1,7 @@
 "use strict";
 
+const { clean: cleanLocale } = require("../scripts/gd-i18n-node.js");
+
 function env(name) { return process.env[name] || ""; }
 function json(statusCode, body) {
   return { statusCode, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" }, body: JSON.stringify(body) };
@@ -91,6 +93,13 @@ async function findAccountById(accountId) {
  * auth_user_id is the identity that survives an address change, so it is asked
  * first. Email stays as the fallback for rows written before that column was
  * populated, which is the only case where it is still the best key available. */
+/* The language the player uses, as the app reported it. Emails are written in it
+   (functions/lib/gd-email-locale.js). Only a language the app has is stored, and a request
+   without one leaves the stored value alone. */
+function localeField(input) {
+  const locale = cleanLocale(input && input.locale);
+  return locale ? { locale } : {};
+}
 async function upsertAccount(authUser, input) {
   const accountEmail = email(authUser && authUser.email || input && input.email);
   const existing = (await findAccountByAuthUserId(authUser && authUser.id))
@@ -120,7 +129,7 @@ async function upsertAccount(authUser, input) {
     email: pack.account.email, name: pack.account.name, role: pack.account.role,
     created_by_coach_id: pack.account.createdByCoachId || null, linked_coach_ids: pack.account.linkedCoachIds, linked_player_ids: pack.account.linkedPlayerIds,
     requires_password_setup: false, password_salt: null, password_hash: null,
-    last_login_at: now, metadata: Object.assign({}, existingMetadata, { source: "supabase-auth", authProvider: "supabase" }), updated_at: now
+    last_login_at: now, metadata: Object.assign({}, existingMetadata, { source: "supabase-auth", authProvider: "supabase" }, localeField(input)), updated_at: now
   }) });
   await supabaseRest("app_profiles?on_conflict=profile_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({
     profile_id: pack.profile.id, account_id: pack.account.accountId, auth_user_id: authUser.id,

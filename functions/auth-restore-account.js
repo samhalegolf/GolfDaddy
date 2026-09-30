@@ -57,7 +57,8 @@ exports.handler = async function (event) {
       email: email(authUser.email),
       name: authUser.user_metadata && authUser.user_metadata.name,
       role: authUser.user_metadata && authUser.user_metadata.role,
-      eventType: "supabase_auth_restore"
+      eventType: "supabase_auth_restore",
+      locale: body.locale
     });
 
     return json(200, { ok: true, source: "supabase_auth_restore", account: pack.account, profile: pack.profile });

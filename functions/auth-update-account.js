@@ -128,7 +128,8 @@ exports.handler = async function (event) {
     email: accountEmail,
     name,
     role: nextRole || undefined,
-    eventType: "supabase_auth_update"
+    eventType: "supabase_auth_update",
+    locale: body.locale
   });
 
   return json(200, { ok: true, passwordUpdated, account: pack.account, profile: pack.profile });

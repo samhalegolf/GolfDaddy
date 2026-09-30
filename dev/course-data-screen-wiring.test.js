@@ -126,9 +126,14 @@ const insightSource = read("scripts/course-data/gd-course-implementation-insight
     }
   };
   sandbox.window = sandbox;
-  vm.runInNewContext(
+  const context = vm.createContext(sandbox);
+  /* The page loads the translation layer and its English base first. */
+  for (const f of ["scripts/gd-i18n.js", "scripts/i18n/en.js"]) {
+    vm.runInContext(read(f), context, { filename: f });
+  }
+  vm.runInContext(
     block + "\nthis.__api={gdCourseRangeKey,gdCourseSetRangeKey,gdCourseRangeRowHTML,gdCourseRecordsInRange};",
-    sandbox
+    context
   );
   const api = sandbox.__api;
 

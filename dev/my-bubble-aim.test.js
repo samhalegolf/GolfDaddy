@@ -161,7 +161,14 @@ function grab(src, signature) {
   return src.slice(start, i + 1);
 }
 const chart = {};
+chart.window = chart;
 vm.createContext(chart);
+/* The page loads the translation layer and its English base first, and the
+   chart labels go through gd-app-core.js's gdT/gdH helpers. */
+for (const f of ["scripts/gd-i18n.js", "scripts/i18n/en.js"]) {
+  vm.runInContext(read(f), chart, { filename: f });
+}
+core.split("\n").filter((row) => /^function gd(T|Tn|H)\(/.test(row)).forEach((row) => vm.runInContext(row, chart));
 vm.runInContext("function gdShotChartClamp(v,a,b){return Math.max(a,Math.min(b,Number(v)||0))}", chart);
 vm.runInContext("function gdShotBubbleClamp(v,a,b){return Math.max(a,Math.min(b,v))}", chart);
 vm.runInContext(grab(core, "function gdShotChartYForLateral"), chart);

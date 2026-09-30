@@ -86,7 +86,6 @@
       + categoryBadge(entry)
       + "</header>"
       + factsHTML(entry)
-      + (entry.previewNote ? '<p class="gdStudioNeedsVerification">' + esc(entry.previewNote) + "</p>" : "")
       + '<div class="gdStudioEmailActions">'
       + '<button type="button" class="gdStudioDiagramBtn" data-gd-email-preview="' + esc(entry.id) + '">Preview this email</button>'
       + '<button type="button" class="gdStudioDiagramBtn" data-gd-email-source="' + esc(entry.id) + '">Show subject &amp; plain text</button>'

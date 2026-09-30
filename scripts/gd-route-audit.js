@@ -11,6 +11,10 @@
   const oldOpenProfilePanel=window.openProfilePanel;
   function safe(fn,fallback){try{return fn();}catch(e){console.warn("[GolfDaddy] route audit",e);return fallback;}}
   function byId(id){return document.getElementById(id);}
+  function L(key,vars){return window.GDI18n.t(key,vars);}
+  function LN(key,n,vars){return window.GDI18n.tn(key,n,vars);}
+  function LH(key,vars){return window.GDI18n.html(key,vars);}
+  function LHN(key,n,vars){return window.GDI18n.htmlN(key,n,vars);}
   function closeLegacyPanels(){document.querySelectorAll(".panel.open").forEach(panel=>panel.classList.remove("open"));}
   function closeModules(){document.querySelectorAll(".modulePanel.open").forEach(panel=>panel.classList.remove("open"));}
   function hideOverlays(){
@@ -99,7 +103,7 @@
 	      if(!h)return;
 	      h.classList.add("gdMappedStartPill","visible");
 	      if(typeof gdRenderMappedStartHint==="function")gdRenderMappedStartHint(h);
-	      else h.innerHTML='<button class="gdMappedStartAction" type="button" data-gd-mapped-start-action="manual">Set Start Point</button><button class="gdMappedStartAction gdHeadToTee" type="button" data-gd-mapped-start-action="tee">Head To the Tee</button>';
+	      else h.innerHTML='<button class="gdMappedStartAction" type="button" data-gd-mapped-start-action="manual">'+LH("profileHub.setStartPoint")+'</button><button class="gdMappedStartAction gdHeadToTee" type="button" data-gd-mapped-start-action="tee">'+LH("play.headToTee")+'</button>';
 	      if(typeof gdQueueMappedPreLockHoleFrame==="function")gdQueueMappedPreLockHoleFrame();
 	    });
 	    safe(()=>{window.gdStableMappedHoleOneLast={reason:reason||"gps-stable",course:payload,at:Date.now()};});
@@ -359,7 +363,7 @@
     if(!p||!p.id)return;
     window.__gdBackTarget="profile";
     window.__gdProfileReturnProfileId=p.id;
-    window.__gdProfileReturnName=p.name||"Profile";
+    window.__gdProfileReturnName=p.name||L("topbar.profile");
     setProfileReturnButton();
   }
   function returnToProfileWorkspace(){
@@ -542,7 +546,7 @@
   function gdPracticeSetSelectedPlotExcluded(exclude=true){
     const ids=Object.keys(gdPracticeEvidenceSelectedShots||{}).filter(Boolean);
     if(!ids.length){
-      gdLmToast("Select practice shots first");
+      gdLmToast(L("practiceHub.selectShotsFirst"));
       return false;
     }
     const map=gdPracticePlotExcludedShotMap();
@@ -553,7 +557,7 @@
     gdPracticeSavePlotExcludedShotMap(map);
     renderPracticeData(true);
     if(document.getElementById("dataHubPanel")?.classList.contains("open"))renderCompareData();
-    gdLmToast(exclude?`Deselected ${ids.length} shot${ids.length===1?"":"s"} from plot`:`Restored ${ids.length} shot${ids.length===1?"":"s"} to plot`);
+    gdLmToast(exclude?LN("practiceHub.deselectedFromPlot",ids.length):LN("practiceHub.restoredToPlot",ids.length));
     return false;
   }
   function gdPracticePlotModeControls(){
@@ -849,7 +853,7 @@
     const key=gdShotBubbleOverlayClubKey(club);
     const nextCarry=Math.round(Number(rawValue));
     if(!key||!Number.isFinite(nextCarry)||nextCarry<=0){
-      gdLmToast("Enter a carry distance");
+      gdLmToast(L("practiceHub.enterCarryDistance"));
       return gdPracticeRefreshProjectionSurfaces();
     }
     const rows=gdPracticeBagDraftRows();
@@ -876,7 +880,7 @@
     const draft=gdPracticeLoadBagDraftRows();
     const diffs=gdPracticeBagDiffRows(draft);
     if(!draft.length||!diffs.length){
-      gdLmToast("No bag changes");
+      gdLmToast(L("practiceHub.noBagChanges"));
       return false;
     }
     if(!gdPracticeBagWidgetConfirm){
@@ -900,16 +904,16 @@
     safe(()=>typeof renderBagPanel==="function"&&renderBagPanel());
     safe(()=>typeof renderProfilePanel==="function"&&renderProfilePanel());
     safe(()=>typeof renderShot==="function"&&renderShot());
-    gdLmToast("Bag saved");
+    gdLmToast(L("practiceHub.bagSaved"));
     return gdPracticeRefreshProjectionSurfaces();
   }
   function gdPracticeBagDiffHTML(diffs){
-    if(!diffs.length)return `<div class="gdPracticeBagEmpty">No changes</div>`;
+    if(!diffs.length)return `<div class="gdPracticeBagEmpty">${LH("practiceHub.noChanges")}</div>`;
     return `<div class="gdPracticeBagDiffList">${diffs.map(diff=>{
       const before=diff.before==null?"--":`${diff.before}m`;
       const after=diff.after==null?"--":`${diff.after}m`;
       const delta=diff.delta>0?`+${diff.delta}m`:`${diff.delta}m`;
-      return `<div class="gdPracticeBagDiff"><span>${gdEscapeHTML(diff.type)}</span><strong>${gdEscapeHTML(diff.club)}</strong><small>${before} -> ${after} - ${delta}</small></div>`;
+      return `<div class="gdPracticeBagDiff"><span>${LH(diff.type==="Removed"?"practiceHub.bagDiffRemoved":(diff.type==="Added"?"practiceHub.bagDiffAdded":"practiceHub.bagDiffChanged"))}</span><strong>${gdEscapeHTML(diff.club)}</strong><small>${before} -> ${after} - ${delta}</small></div>`;
     }).join("")}</div>`;
   }
   function gdPracticeBagWidgetHTML(analysis,ctx){
@@ -924,10 +928,10 @@
       const club=String(row.club||"");
       const key=gdShotBubbleOverlayClubKey(club);
       const active=key&&key===selectedKey;
-      return `<div class="gdPracticeBagRow ${active?"active":""}"><button type="button" aria-pressed="${active?"true":"false"}" data-gd-practice-bag-club="${gdEscapeHTML(club)}">${gdEscapeHTML(club)}</button><input type="number" inputmode="numeric" min="1" step="1" value="${Math.round(Number(row.actualDistanceM)||0)}" aria-label="${gdEscapeHTML(club)} carry" data-gd-practice-bag-carry="${gdEscapeHTML(club)}"><span>m</span></div>`;
+      return `<div class="gdPracticeBagRow ${active?"active":""}"><button type="button" aria-pressed="${active?"true":"false"}" data-gd-practice-bag-club="${gdEscapeHTML(club)}">${gdEscapeHTML(club)}</button><input type="number" inputmode="numeric" min="1" step="1" value="${Math.round(Number(row.actualDistanceM)||0)}" aria-label="${LH("practiceHub.clubCarryAria",{club})}" data-gd-practice-bag-carry="${gdEscapeHTML(club)}"><span>m</span></div>`;
     }).join("")}</div>`;
-    const meta=dirty?`${diffs.length} unsaved`:`${rows.length} clubs`;
-    return `<div class="gdPracticeBagWidget ${dirty?"dirty":""} ${confirm?"confirm":""}"><div class="gdPracticeBagWidgetHead"><div class="gdPracticeBagWidgetTitle"><strong>Bag widget</strong><span>${gdEscapeHTML(meta)}</span></div><button type="button" class="gdPracticeBagScaleButton ${scaleAll?"active":""}" aria-pressed="${scaleAll?"true":"false"}" data-gd-practice-bag-action="scale">Scale all</button></div>${body}<div class="gdPracticeBagWidgetActions">${confirm?`<button type="button" data-gd-practice-bag-action="back">Back</button><button type="button" class="active" data-gd-practice-bag-action="save">Confirm save</button>`:`<button type="button" ${dirty?"":"disabled"} data-gd-practice-bag-action="reset">Reset</button><button type="button" class="${dirty?"active":""}" ${dirty?"":"disabled"} data-gd-practice-bag-action="save">Review save</button>`}</div></div>`;
+    const meta=dirty?LN("practiceHub.unsavedCount",diffs.length):LN("practiceHub.clubCount",rows.length);
+    return `<div class="gdPracticeBagWidget ${dirty?"dirty":""} ${confirm?"confirm":""}"><div class="gdPracticeBagWidgetHead"><div class="gdPracticeBagWidgetTitle"><strong>${LH("practiceHub.bagWidget")}</strong><span>${gdEscapeHTML(meta)}</span></div><button type="button" class="gdPracticeBagScaleButton ${scaleAll?"active":""}" aria-pressed="${scaleAll?"true":"false"}" data-gd-practice-bag-action="scale">${LH("practiceHub.scaleAll")}</button></div>${body}<div class="gdPracticeBagWidgetActions">${confirm?`<button type="button" data-gd-practice-bag-action="back">${LH("common.back")}</button><button type="button" class="active" data-gd-practice-bag-action="save">${LH("practiceHub.confirmSave")}</button>`:`<button type="button" ${dirty?"":"disabled"} data-gd-practice-bag-action="reset">${LH("practiceHub.reset")}</button><button type="button" class="${dirty?"active":""}" ${dirty?"":"disabled"} data-gd-practice-bag-action="save">${LH("practiceHub.reviewSave")}</button>`}</div></div>`;
   }
   function gdPracticeProjectionContext(analysis){
     const readyAnalysis=gdPracticeProjectionReadyAnalysis(analysis);
@@ -950,12 +954,12 @@
   }
   function gdPracticeProjectionStatusText(analysis,ctx){
     const context=ctx||gdPracticeProjectionContext(analysis);
-    if(!context.hasRealPracticeData)return "Waiting for practice shots.";
-    if(!context.canProject)return "Clarity Pattern Finder needs more shots.";
+    if(!context.hasRealPracticeData)return L("practiceHub.waitingForShots");
+    if(!context.canProject)return L("practiceHub.patternFinderNeedsShots");
     const mode=gdPracticeProjectionMode();
     const selected=gdPracticeProjectionSelectedClubNames(analysis,context.dataRows);
-    const target=mode==="all"?`${context.overlayRows.length} clubs`:(selected.length?selected.join(", "):"selected clubs");
-    return `${context.visible?"Showing":"Available"}: ${target}`;
+    const target=mode==="all"?LN("practiceHub.clubCount",context.overlayRows.length):(selected.length?selected.join(", "):L("practiceHub.selectedClubs"));
+    return L(context.visible?"practiceHub.projectionShowing":"practiceHub.projectionAvailable",{target});
   }
   function gdPracticeProjectionMode(){
     try{
@@ -976,7 +980,7 @@
     gdShotBubbleOverlayState.practice=next;
     window.gdShotBubbleOverlayState=gdShotBubbleOverlayState;
     document.documentElement.dataset.gdOverlayPractice=next?"on":"off";
-    if(enabled&&!ctx.canProject)gdShotBubbleSafe(()=>typeof gdLmToast==="function"&&gdLmToast("Practice Bubble needed before projection"));
+    if(enabled&&!ctx.canProject)gdShotBubbleSafe(()=>typeof gdLmToast==="function"&&gdLmToast(L("practiceHub.bubbleNeededForProjection")));
     gdPracticeRefreshProjectionSurfaces();
 	    setTimeout(()=>gdSyncShotBubbleOverlayControls("practice"),0);
 	    return false;
@@ -1020,7 +1024,7 @@
     return gdPracticeRefreshProjectionSurfaces();
   }
   function gdPracticeProjectorSummary(analysis,ctx){
-    return ctx?.hasRealPracticeData&&ctx?.canProject?"Bubble ready":"Bubble not ready";
+    return ctx?.hasRealPracticeData&&ctx?.canProject?L("practiceHub.bubbleReady"):L("practiceHub.bubbleNotReady");
   }
   function gdRenderPracticeImportPanel(){
     const panel=document.getElementById("gdPracticeImportPanel");
@@ -1061,7 +1065,7 @@
     gdRenderPracticeImportPanel();
     gdRenderPracticeAdminChrome();
   }
-  let gdPracticeEmailLaneState={address:"",playerKey:"",status:"Address generated locally",configured:false,batches:[],loading:false,error:""};
+  let gdPracticeEmailLaneState={address:"",playerKey:"",status:"practiceHub.emailStatusLocal",configured:false,batches:[],loading:false,error:""};
   function gdPracticeEmailSlug(value,fallback="player"){
     const raw=String(value||fallback||"player").trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
     return raw||fallback||"player";
@@ -1085,9 +1089,9 @@
      nothing here can work it out. Printing a derived practice+<id> address as a
      stand-in would show the player an address that does not receive mail, which
      is worse than saying we could not fetch it. */
-  const GD_PRACTICE_EMAIL_UNKNOWN="Not issued yet - refresh to fetch it";
+  const GD_PRACTICE_EMAIL_UNKNOWN="practiceHub.emailNotIssued";
   function gdPracticeEmailAddressLocal(){
-    return GD_PRACTICE_EMAIL_UNKNOWN;
+    return L(GD_PRACTICE_EMAIL_UNKNOWN);
   }
   function gdPracticeEmailAddressIsKnown(value){
     return !!String(value||"").includes("@");
@@ -1149,15 +1153,15 @@
     };
   }
   function gdPracticeEmailBatchLabel(batch){
-    const source=batch?.source_name||batch?.source_type||"Practice email";
+    const source=batch?.source_name||batch?.source_type||L("practiceHub.practiceEmail");
     const valid=Number(batch?.valid_count)||0;
     const invalid=Number(batch?.invalid_count)||0;
-    return `${source} · ${valid} valid${invalid?` · ${invalid} flags`:""}`;
+    return invalid?LN("practiceHub.emailBatchValidFlags",valid,{source,flags:invalid}):LN("practiceHub.emailBatchValid",valid,{source});
   }
   function gdPracticeEmailBatchesHTML(){
     const state=gdPracticeEmailLaneState||{};
-    if(state.loading)return `<div class="gdPracticeEmailRecent"><span>Checking receiver...</span></div>`;
-    if(state.error)return `<div class="gdPracticeEmailRecent warn"><span>${gdEscapeHTML(state.error)}</span></div>`;
+    if(state.loading)return `<div class="gdPracticeEmailRecent"><span>${LH("practiceHub.emailChecking")}</span></div>`;
+    if(state.error)return `<div class="gdPracticeEmailRecent warn"><span>${state.errorDetail?LH("practiceHub.emailCheckFailedDetail",{detail:state.errorDetail}):LH("practiceHub.emailCheckFailed")}</span></div>`;
     const batches=Array.isArray(state.batches)?state.batches:[];
     if(!batches.length)return "";
     return `<div class="gdPracticeEmailRecent">${batches.slice(0,5).map(batch=>{
@@ -1168,22 +1172,22 @@
       const unapproved=batch.metadata?.senderVerified===false;
       const senderEmail=String(batch.metadata?.from||"").trim();
       const flag=unapproved
-        ? `<button type="button" class="gdPracticeEmailFlag" onclick="return gdPracticeApproveEmailSender(${gdEscapeHTML(JSON.stringify(senderEmail))},${gdEscapeHTML(JSON.stringify(batch.intake_id||""))})" title="${gdEscapeHTML(senderEmail||"Unknown sender")} is not on your approved list">Approve ${gdEscapeHTML(senderEmail||"sender")}</button>`
+        ? `<button type="button" class="gdPracticeEmailFlag" onclick="return gdPracticeApproveEmailSender(${gdEscapeHTML(JSON.stringify(senderEmail))},${gdEscapeHTML(JSON.stringify(batch.intake_id||""))})" title="${senderEmail?LH("practiceHub.senderNotApproved",{sender:senderEmail}):LH("practiceHub.unknownSenderNotApproved")}">${senderEmail?LH("practiceHub.approveSenderNamed",{sender:senderEmail}):LH("practiceHub.approveSender")}</button>`
         : "";
       if(batch.source_type==="email_photo"){
         const photoCount=Array.isArray(batch.photos)?batch.photos.length:0;
-        const label=`${batch.source_name||"Practice email photo"} · ${photoCount} photo${photoCount===1?"":"s"}`;
-        return `<div class="gdPracticeEmailRow${unapproved?" unapproved":""}"><button type="button" onclick="return gdPracticeLoadEmailPhotoBatch(${gdEscapeHTML(JSON.stringify(id))})"><span>${unapproved?"⚑ ":""}${gdEscapeHTML(label)}</span><b>Scan</b></button>${flag}</div>`;
+        const label=LN("practiceHub.emailPhotoBatch",photoCount,{source:batch.source_name||L("practiceHub.practiceEmailPhoto")});
+        return `<div class="gdPracticeEmailRow${unapproved?" unapproved":""}"><button type="button" onclick="return gdPracticeLoadEmailPhotoBatch(${gdEscapeHTML(JSON.stringify(id))})"><span>${unapproved?"⚑ ":""}${gdEscapeHTML(label)}</span><b>${LH("practiceHub.scan")}</b></button>${flag}</div>`;
       }
       const label=gdPracticeEmailBatchLabel(batch);
       /* No button. A CSV from an approved sender is already in the library by
          the time this renders, so the row reports what happened rather than
          offering an action that has nothing left to do. */
       const state=unapproved
-        ? "waiting for you to approve the sender"
+        ? L("practiceHub.emailWaitingApproval")
         : (gdPracticeEmailBatchInLibrary(id)
-          ? `${Number(batch.valid_count)||0} shot${Number(batch.valid_count)===1?"":"s"} imported`
-          : (Number(batch.valid_count) ? "could not be imported" : "no readable rows"));
+          ? LN("practiceHub.emailShotsImported",Number(batch.valid_count)||0)
+          : (Number(batch.valid_count) ? L("practiceHub.emailCouldNotImport") : L("practiceHub.emailNoReadableRows")));
       return `<div class="gdPracticeEmailRow${unapproved?" unapproved":""}"><div class="gdPracticeEmailRowMain"><span>${unapproved?"⚑ ":""}${gdEscapeHTML(label)}</span><b>${gdEscapeHTML(state)}</b></div>${flag}</div>`;
     }).join("")}</div>`;
   }
@@ -1199,15 +1203,16 @@
     root.hidden=false;
     root.classList.add("active");
     const identity=gdPracticeEmailIdentity();
-    const address=gdPracticeEmailLaneState.address||gdPracticeEmailAddressLocal(identity);
-    const status=gdPracticeEmailLaneState.status||"Address generated locally";
-    root.innerHTML=`<div class="gdPracticeEmailHead"><div><strong>Email receiver</strong><span>${gdEscapeHTML(status)}</span></div><div class="gdPracticeEmailActions"><button type="button" onclick="return gdPracticeRefreshEmailLane()">Refresh</button><button type="button" onclick="return gdPracticeCopyEmailAddress()">Copy</button></div></div><div class="gdPracticeEmailAddress">${gdEscapeHTML(address)}</div>${gdPracticeEmailBatchesHTML()}`;
+    const storedAddress=gdPracticeEmailLaneState.address||"";
+    const address=gdPracticeEmailAddressIsKnown(storedAddress)?storedAddress:gdPracticeEmailAddressLocal(identity);
+    const status=gdPracticeEmailLaneState.status||"practiceHub.emailStatusLocal";
+    root.innerHTML=`<div class="gdPracticeEmailHead"><div><strong>${LH("practiceHub.emailReceiver")}</strong><span>${LH(status)}</span></div><div class="gdPracticeEmailActions"><button type="button" onclick="return gdPracticeRefreshEmailLane()">${LH("practiceHub.refresh")}</button><button type="button" onclick="return gdPracticeCopyEmailAddress()">${LH("practiceHub.copy")}</button></div></div><div class="gdPracticeEmailAddress">${gdEscapeHTML(address)}</div>${gdPracticeEmailBatchesHTML()}`;
   }
   async function gdPracticeApproveEmailSender(sender,intakeId){
     const auth=window.ClaritySupabaseAuth;
     const token=await safe(()=>typeof auth?.freshAccessToken==="function"?auth.freshAccessToken():"",null)||"";
     if(!token){
-      gdLmToast("Sign in to approve a sender");
+      gdLmToast(L("practiceHub.signInToApproveSender"));
       return false;
     }
     const identity=gdPracticeEmailIdentity();
@@ -1219,26 +1224,26 @@
       });
       const body=await response.json().catch(()=>null);
       if(!response.ok||!body?.approved)throw new Error(body?.error||`HTTP ${response.status}`);
-      gdLmToast(`${sender} approved - their imports will stop being flagged`);
+      gdLmToast(L("practiceHub.senderApproved",{sender}));
       return gdPracticeRefreshEmailLane();
     }catch(e){
-      gdLmToast(e&&e.message?`Could not approve sender: ${e.message}`:"Could not approve sender");
+      gdLmToast(e&&e.message?L("practiceHub.approveSenderFailedDetail",{detail:e.message}):L("practiceHub.approveSenderFailed"));
       return false;
     }
   }
   function gdPracticeCopyEmailAddress(){
     const address=gdPracticeEmailLaneState.address||"";
     if(!gdPracticeEmailAddressIsKnown(address)){
-      gdLmToast("No address to copy yet - refresh the receiver");
+      gdLmToast(L("practiceHub.noAddressToCopy"));
       return false;
     }
     safe(()=>navigator?.clipboard?.writeText?.(address),null);
-    gdLmToast("Practice email address copied");
+    gdLmToast(L("practiceHub.emailAddressCopied"));
     return false;
   }
   async function gdPracticeRefreshEmailLane(){
     const identity=gdPracticeEmailIdentity();
-    gdPracticeEmailLaneState=Object.assign({},gdPracticeEmailLaneState,{address:gdPracticeEmailLaneState.address||gdPracticeEmailAddressLocal(identity),loading:true,error:"",status:"Checking receiver..."});
+    gdPracticeEmailLaneState=Object.assign({},gdPracticeEmailLaneState,{address:gdPracticeEmailLaneState.address||gdPracticeEmailAddressLocal(identity),loading:true,error:"",errorDetail:"",status:"practiceHub.emailChecking"});
     gdRenderPracticeEmailLane();
     try{
       const response=await fetch(`/api/practice-email-intake?${gdPracticeEmailQuery(identity).toString()}`,{cache:"no-store"});
@@ -1247,18 +1252,20 @@
       gdPracticeEmailLaneState={
         address:body.address||gdPracticeEmailAddressLocal(identity),
         playerKey:body.playerKey||gdPracticeEmailSlug(identity.profileId||identity.accountId||identity.email||identity.name,"player"),
-        status:body.configured?"Player-specific practice intake address":"Receiver address ready - storage not configured",
+        status:body.configured?"practiceHub.emailStatusConfigured":"practiceHub.emailStatusNoStorage",
         configured:!!body.configured,
         batches:body.recent?.batches||[],
         loading:false,
-        error:""
+        error:"",
+        errorDetail:""
       };
     }catch(e){
       gdPracticeEmailLaneState=Object.assign({},gdPracticeEmailLaneState,{
         address:gdPracticeEmailLaneState.address||gdPracticeEmailAddressLocal(),
-        status:"Could not reach the receiver",
+        status:"practiceHub.emailStatusUnreachable",
         loading:false,
-        error:e&&e.message?`Receiver check failed: ${e.message}`:"Receiver check failed"
+        error:"practiceHub.emailCheckFailed",
+        errorDetail:e&&e.message?e.message:""
       });
     }
     /* Import before the render, so the lane paints its final state once rather
@@ -1357,7 +1364,7 @@
       }
     });
     if(importedBatches){
-      gdLmToast(`Imported ${importedShots} shot${importedShots===1?"":"s"} from ${importedBatches} email${importedBatches===1?"":"s"}`);
+      gdLmToast(importedBatches===1?LN("practiceHub.importedFromOneEmail",importedShots):LN("practiceHub.importedFromEmails",importedShots,{emails:importedBatches}));
       try{gdRenderShotDataPanel?.();}catch(e){}
       try{gdRenderPracticeDataVisual?.();}catch(e){}
     }
@@ -1369,10 +1376,10 @@
     const photo=batch&&Array.isArray(batch.photos)?batch.photos[0]:null;
     if(!batch||!photo||!photo.url){
       gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Email photo missing",errors:["Staged email photo was not found or the link expired"],nextStep:"Refresh the email receiver and try again."});
-      gdLmToast("Email photo not available - refresh and try again");
+      gdLmToast(L("practiceHub.emailPhotoUnavailable"));
       return false;
     }
-    gdPracticeFeedback("Loading photo from email...");
+    gdPracticeFeedback(L("practiceHub.loadingEmailPhoto"));
     try{
       const response=await fetch(photo.url,{cache:"no-store"});
       if(!response.ok)throw new Error(`HTTP ${response.status}`);
@@ -1383,7 +1390,7 @@
       await gdHandleLaunchMonitorPhoto(file);
     }catch(e){
       gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Email photo load failed",errors:[e&&e.message?e.message:"Could not load photo"],nextStep:"Refresh the email receiver and try again."});
-      gdPracticeFeedback(`Could not load the emailed photo: ${e&&e.message?e.message:e}`,"error");
+      gdPracticeFeedback(L("practiceHub.emailPhotoLoadFailed",{detail:e&&e.message?e.message:e}),"error");
     }
     return false;
   }
@@ -1403,7 +1410,7 @@
       nextStep:"Copy the receiver address or load a staged email batch into native review."
     });
     gdPracticeRefreshEmailLane();
-    gdLmToast("Practice email receiver ready");
+    gdLmToast(L("practiceHub.emailReceiverReady"));
     return false;
   }
   function gdTogglePracticePlot(event){
@@ -2765,7 +2772,7 @@
       },null);
     });
     safe(()=>localStorage.removeItem(KEY),null);
-    if(moved)gdLmToast(`Moved ${moved} earlier practice shot${moved===1?"":"s"} into the Clarity Shot Library`);
+    if(moved)gdLmToast(LN("practiceHub.movedEarlierShots",moved));
     return {moved};
   }
   function gdSaveNativePracticeImport(){
@@ -2881,7 +2888,7 @@
     const p=safe(()=>ensureProfile(),null);
     const pending=p?.practiceBubblePendingSource;
     if(!pending||!pending.active||!Number.isFinite(Number(pending.offsetDeg))){
-      gdLmToast("Adopt a bubble before saving");
+      gdLmToast(L("practiceHub.adoptBeforeSaving"));
       return false;
     }
     gdBubbleOffsetSave();
@@ -2891,7 +2898,7 @@
     const analysis=gdPracticeProjectionReadyAnalysis();
     const ctx=gdPracticeProjectionContext(analysis);
     if(!ctx.canProject){
-      gdLmToast(ctx.hasRealPracticeData?"Cluster finder needs more shots":"Add practice shot data first");
+      gdLmToast(ctx.hasRealPracticeData?L("practiceHub.clusterFinderNeedsShots"):L("practiceHub.addShotDataFirst"));
       return false;
     }
     const source=gdPracticeBubbleSource(analysis);
@@ -2914,14 +2921,14 @@
     const analysis=gdPracticeProjectionReadyAnalysis();
     const ctx=gdPracticeProjectionContext(analysis);
     if(!ctx.canProject){
-      gdLmToast("Practice Bubble not ready");
+      gdLmToast(L("practiceHub.practiceBubbleNotReady"));
       return false;
     }
     // No ctx.visible check: that required the overlay to be switched on, which was
     // the old Generate button's job. With Generate gone this guard refused every
     // adopt while the dock button sat enabled - a dead end with a misleading toast.
     if(gdPracticeCurrentBubbleWasAdopted(safe(()=>ensureProfile(),null),analysis)){
-      gdLmToast("Practice Bubble already adopted");
+      gdLmToast(L("practiceHub.practiceBubbleAlreadyAdopted"));
       return false;
     }
     gdPracticeBagAdaptOpen=false;
@@ -2932,8 +2939,8 @@
     gdPracticeBagSuggestionOpen=!!hasDistanceSuggestions;
     gdPracticeAdoptBubbleAsPlayingBubble();
     gdLmToast(hasDistanceSuggestions
-      ?"Direction adopted - review distance suggestions"
-      :"Direction adopted");
+      ?L("practiceHub.directionAdoptedReview")
+      :L("practiceHub.directionAdopted"));
     safe(()=>gdPracticeRefreshProjectionSurfaces());
     return false;
   }
@@ -2944,7 +2951,7 @@
   function gdPracticeUnadoptBubbleFromAction(){
     const p=safe(()=>ensureProfile(),null);
     if(!p||!gdPracticePendingBubbleIsActive(p)){
-      gdLmToast("Nothing pending to undo");
+      gdLmToast(L("practiceHub.nothingPendingToUndo"));
       return false;
     }
     const pendingMode=String(p.practiceBubblePendingSource?.distanceMode||"");
@@ -2961,11 +2968,11 @@
     renderPracticeData(true);
     gdShotBubbleSafe(()=>typeof renderDataHubStatus==="function"&&renderDataHubStatus());
     gdShotBubbleSafe(()=>typeof renderCompareData==="function"&&renderCompareData());
-    gdLmToast("Bubble un-adopted");
+    gdLmToast(L("practiceHub.bubbleUnadopted"));
     return false;
   }
   function gdPracticeProjectorSummary(analysis,ctx){
-    return ctx?.hasRealPracticeData&&ctx?.canProject?"Bubble ready":"Bubble not ready";
+    return ctx?.hasRealPracticeData&&ctx?.canProject?L("practiceHub.bubbleReady"):L("practiceHub.bubbleNotReady");
   }
   function gdPracticeRawSavedBagRows(){
     const p=safe(()=>typeof gdShotActiveProfile==="function"?gdShotActiveProfile():ensureProfile(),null)||safe(()=>ensureProfile(),null)||{};
@@ -3235,12 +3242,12 @@
   function gdPracticeUndoBagAdapt(){
     const step=gdPracticeBagAdaptUndoStack.pop();
     if(!step){
-      gdLmToast("Nothing to undo");
+      gdLmToast(L("practiceHub.nothingToUndo"));
       return false;
     }
     const input=[...document.querySelectorAll("[data-gd-practice-adapt-club]")].find(item=>String(item.dataset.gdPracticeAdaptClub||"")===step.club);
     if(!input){
-      gdLmToast("Field no longer visible");
+      gdLmToast(L("practiceHub.fieldNoLongerVisible"));
       return false;
     }
     input.value=step.value;
@@ -3269,12 +3276,12 @@
       gdPracticeBagSuggestionOpen=false;
       gdPracticeBagAdaptOpen=false;
       gdPracticeBagAdaptUndoStack=[];
-      gdLmToast("Bag left unchanged");
+      gdLmToast(L("practiceHub.bagLeftUnchanged"));
       return gdPracticeRefreshProjectionSurfaces();
     }
     const rows=action==="adapted"?gdPracticeAdaptedBagRowsFromDOM():gdPracticeSuggestionRowsForApply(action);
     if(!rows.length){
-      gdLmToast("No distance suggestion ready");
+      gdLmToast(L("practiceHub.noDistanceSuggestion"));
       return false;
     }
     if(typeof gdBagPersistRows==="function")gdBagPersistRows(rows,{silent:true,render:false});
@@ -3293,7 +3300,7 @@
     safe(()=>typeof renderBagPanel==="function"&&renderBagPanel());
     safe(()=>typeof renderProfilePanel==="function"&&renderProfilePanel());
     safe(()=>typeof renderShot==="function"&&renderShot());
-    gdLmToast(action==="adapted"?"Adapted bag saved":"Bag distances adopted");
+    gdLmToast(action==="adapted"?L("practiceHub.adaptedBagSaved"):L("practiceHub.bagDistancesAdopted"));
     return gdPracticeRefreshProjectionSurfaces();
   }
   // Auto-bag from the shots themselves.
@@ -3349,7 +3356,7 @@
         syncCoreProfileFromActive();
       });
       gdPracticeSyncBubbleSourcesToBag({skipRender:true});
-      gdLmToast("Set generated from data");
+      gdLmToast(L("practiceHub.setGeneratedFromData"));
     }finally{
       gdPracticeAutoBagInFlight=false;
     }
@@ -3384,25 +3391,25 @@
 	    const signature=gdPracticeBagSuggestionSignature(estimate,prefillRows,hasBag);
 	    const notify=!gdPracticeBagSuggestionSeen(signature);
 	    if(!gdPracticeBagSuggestionOpen){
-	      return `<button type="button" class="gdPracticeBagSuggestionIcon ${notify?"unseen":""} ${hasBag?"hasBag":"noBag"}" aria-label="Open bag distance suggestions" onclick="return gdPracticeToggleBagSuggestions(true)"><span class="gdPracticeBagSuggestionIconFrame"><img src="assets/home/bag.png?v=ae58e8eb" alt=""></span></button>`;
+	      return `<button type="button" class="gdPracticeBagSuggestionIcon ${notify?"unseen":""} ${hasBag?"hasBag":"noBag"}" aria-label="${LH("practiceHub.openBagSuggestionsAria")}" onclick="return gdPracticeToggleBagSuggestions(true)"><span class="gdPracticeBagSuggestionIconFrame"><img src="assets/home/bag.png?v=ae58e8eb" alt=""></span></button>`;
 	    }
     const body=previewRows.map(row=>{
       const currentValue=row.currentCarry==null?"":String(Math.round(Number(row.currentCarry)||0));
       const current=gdPracticeBagAdaptOpen
-        ? `<input type="number" min="1" step="1" value="${gdEscapeHTML(currentValue)}" placeholder="m" data-gd-practice-adapt-club="${gdEscapeHTML(row.club)}" aria-label="${gdEscapeHTML(row.club)} current bag distance" onfocus="gdPracticeBagAdaptRemember(this)" oninput="gdPracticeBagAdaptChanged(this)">`
-        : `<span class="gdPracticeCurrentCell ${row.currentCarry==null?"empty":"readonly"}">${gdEscapeHTML(row.currentCarry==null?"Empty":`${row.currentCarry}m`)}</span>`;
+        ? `<input type="number" min="1" step="1" value="${gdEscapeHTML(currentValue)}" placeholder="m" data-gd-practice-adapt-club="${gdEscapeHTML(row.club)}" aria-label="${LH("practiceHub.currentBagDistanceAria",{club:row.club})}" onfocus="gdPracticeBagAdaptRemember(this)" oninput="gdPracticeBagAdaptChanged(this)">`
+        : `<span class="gdPracticeCurrentCell ${row.currentCarry==null?"empty":"readonly"}">${row.currentCarry==null?LH("practiceHub.empty"):gdEscapeHTML(`${row.currentCarry}m`)}</span>`;
       const suggestion=`<span class="gdPracticeSuggestedSide">${Math.round(Number(row.suggestedCarry)||0)}m</span>`;
-      const delta=Number.isFinite(Number(row.diff))?(row.diff>0?`+${row.diff}m`:`${row.diff}m`):"new";
+      const delta=Number.isFinite(Number(row.diff))?(row.diff>0?`+${row.diff}m`:`${row.diff}m`):L("practiceHub.newClub");
       return `<div class="gdPracticeBagSuggestionRow ${row.link?"link":""} ${gdPracticeBagAdaptOpen?"editable":"locked"}"><strong>${gdEscapeHTML(row.club)}</strong>${current}${suggestion}<b>${gdEscapeHTML(delta)}</b></div>`;
     }).join("");
     const actions=gdPracticeBagAdaptOpen
-      ? `<button type="button" onclick="return gdPracticeApplyBagSuggestions('adapted')">Save adapted</button><button type="button" onclick="return gdPracticeUndoBagAdapt()">Undo</button><button type="button" onclick="return gdPracticeToggleBagAdapt(false)">Back</button>`
+      ? `<button type="button" onclick="return gdPracticeApplyBagSuggestions('adapted')">${LH("practiceHub.saveAdapted")}</button><button type="button" onclick="return gdPracticeUndoBagAdapt()">${LH("practiceHub.undo")}</button><button type="button" onclick="return gdPracticeToggleBagAdapt(false)">${LH("common.back")}</button>`
       : (hasBag
-        ? `<button type="button" onclick="return gdPracticeApplyBagSuggestions('suggested')">Adopt</button><button type="button" onclick="return gdPracticeToggleBagAdapt(true)">Adapt</button><button type="button" onclick="return gdPracticeApplyBagSuggestions('keep')">Not now</button>`
-        : `<button type="button" onclick="return gdPracticeApplyBagSuggestions('suggested')">Adopt</button><button type="button" onclick="return gdPracticeApplyBagSuggestions('keep')">Not now</button>`);
-	    const linkCopy=link?`<div class="gdPracticeDistanceLink"><span>Distance link</span><strong>${gdEscapeHTML(link.club)} / ${Math.round(Number(link.trueDistanceM)||0)}m</strong></div>`:"";
-	    const generatedCopy=gdPracticeBagGeneratedFromData()?`<div class="gdPracticeBagGeneratedNote">Set generated from data</div>`:"";
-	    return `<div class="gdPracticeBagSuggestionPanel ${hasBag?"hasBag":"noBag"} ${gdPracticeBagAdaptOpen?"adapt":""}"><div class="gdPracticeBagSuggestionHead"><div class="gdPracticeBagSuggestionTitle"><img src="assets/home/bag.png?v=ae58e8eb" alt=""><span>Bag</span></div><button type="button" aria-label="Close" onclick="return gdPracticeToggleBagSuggestions(false)">×</button></div>${generatedCopy}${linkCopy}${linkChoices}<div class="gdPracticeBagSuggestionGrid"><span>Club</span><span>${gdPracticeBagAdaptOpen?"Edit current":hasBag?"Current":"Bag"}</span><span>Suggested</span><span>Diff</span>${body}</div><div class="gdPracticeBagSuggestionActions">${actions}</div></div>`;
+        ? `<button type="button" onclick="return gdPracticeApplyBagSuggestions('suggested')">${LH("practiceHub.adopt")}</button><button type="button" onclick="return gdPracticeToggleBagAdapt(true)">${LH("practiceHub.adapt")}</button><button type="button" onclick="return gdPracticeApplyBagSuggestions('keep')">${LH("practiceHub.notNow")}</button>`
+        : `<button type="button" onclick="return gdPracticeApplyBagSuggestions('suggested')">${LH("practiceHub.adopt")}</button><button type="button" onclick="return gdPracticeApplyBagSuggestions('keep')">${LH("practiceHub.notNow")}</button>`);
+	    const linkCopy=link?`<div class="gdPracticeDistanceLink"><span>${LH("practiceHub.distanceLink")}</span><strong>${gdEscapeHTML(link.club)} / ${Math.round(Number(link.trueDistanceM)||0)}m</strong></div>`:"";
+	    const generatedCopy=gdPracticeBagGeneratedFromData()?`<div class="gdPracticeBagGeneratedNote">${LH("practiceHub.setGeneratedFromData")}</div>`:"";
+	    return `<div class="gdPracticeBagSuggestionPanel ${hasBag?"hasBag":"noBag"} ${gdPracticeBagAdaptOpen?"adapt":""}"><div class="gdPracticeBagSuggestionHead"><div class="gdPracticeBagSuggestionTitle"><img src="assets/home/bag.png?v=ae58e8eb" alt=""><span>${LH("practiceHub.bag")}</span></div><button type="button" aria-label="${LH("practiceHub.close")}" onclick="return gdPracticeToggleBagSuggestions(false)">×</button></div>${generatedCopy}${linkCopy}${linkChoices}<div class="gdPracticeBagSuggestionGrid"><span>${LH("practiceHub.club")}</span><span>${gdPracticeBagAdaptOpen?LH("practiceHub.editCurrent"):hasBag?LH("practiceHub.current"):LH("practiceHub.bag")}</span><span>${LH("practiceHub.suggested")}</span><span>${LH("practiceHub.diff")}</span>${body}</div><div class="gdPracticeBagSuggestionActions">${actions}</div></div>`;
 	  }
 	  function gdPracticeBagSuggestionNoticeHTML(analysis){
 	    if(gdPracticeDemoSuppressesBag())return"";
@@ -3413,7 +3420,7 @@
 	    if(!prefillRows.length)return"";
 	    const signature=gdPracticeBagSuggestionSignature(estimate,prefillRows,hasBag);
 	    if(gdPracticeBagSuggestionSeen(signature))return"";
-	    return `<div class="gdPracticeBagSuggestionNoticeRow"><button type="button" class="gdPracticeBagSuggestionNotice ${hasBag?"hasBag":"noBag"}" onclick="return gdPracticeToggleBagSuggestions(true)">Distance Suggestion Available</button></div>`;
+	    return `<div class="gdPracticeBagSuggestionNoticeRow"><button type="button" class="gdPracticeBagSuggestionNotice ${hasBag?"hasBag":"noBag"}" onclick="return gdPracticeToggleBagSuggestions(true)">${LH("practiceHub.distanceSuggestionAvailable")}</button></div>`;
 	  }
 
   function gdPracticeProjectionControlsHTML(analysis){
@@ -3446,10 +3453,10 @@
     // otherwise removing Generate would have left it permanently disabled.
     const savedLocked=adopted&&!pendingActive;
     const saveDisabled=pendingActive?"":"disabled";
-    const saveLabel=savedLocked?"Saved":"Save Bubble";
+    const saveLabel=savedLocked?L("practiceHub.saved"):L("practiceHub.saveBubble");
     const adoptDisabled=pendingActive?"":(ctx.canProject&&!adopted?"":"disabled");
 	    const tone=generated?"generated":ctx.canProject?"ready":"waiting";
-	    const adoptLabel=pendingActive?"Undo":adopted?"Adopted":"Adopt";
+	    const adoptLabel=pendingActive?L("practiceHub.undo"):adopted?L("practiceHub.adopted"):L("practiceHub.adopt");
 	    // Demo Mode stages+saves in one press (there's no separate Save step in
 	    // the demo story), so it dispatches to DemoSession.adopt() instead of the
 	    // real Adopt/Unadopt handlers - those still write onto the real profile
@@ -3459,15 +3466,15 @@
 	    // The state line is the "locked in" feedback: it has to be unambiguous that
 	    // Undo has stopped being an option once Save has been pressed.
 	    const adoptStatus=pendingActive
-	      ?`<div class="gdPracticeAdoptStatus pending"><strong>Direction adopted, not saved</strong><span>Review the distance suggestions in the bag, then Save to lock it in — or Undo to drop it.</span></div>`
+	      ?`<div class="gdPracticeAdoptStatus pending"><strong>${LH("practiceHub.adoptPendingTitle")}</strong><span>${LH("practiceHub.adoptPendingBody")}</span></div>`
 	      :savedLocked
-	        ?`<div class="gdPracticeAdoptStatus saved"><strong>Saved to My Bubble</strong><span>Locked in — Undo is no longer available. Adopt a new bubble to replace it.</span></div>`
+	        ?`<div class="gdPracticeAdoptStatus saved"><strong>${LH("practiceHub.adoptSavedTitle")}</strong><span>${LH("practiceHub.adoptSavedBody")}</span></div>`
 	        :hasStaleSaved
-	          ?`<div class="gdPracticeAdoptStatus fresh"><strong>New practice bubble</strong><span>This is not the bubble you saved. Adopting replaces it.</span></div>`
+	          ?`<div class="gdPracticeAdoptStatus fresh"><strong>${LH("practiceHub.adoptFreshTitle")}</strong><span>${LH("practiceHub.adoptFreshBody")}</span></div>`
 	          :"";
 	    const bagSuggestion=gdPracticeBagSuggestionHTML(analysis);
 	    const bagNotice=gdPracticeBagSuggestionNoticeHTML(analysis);
-	    return `<div class="gdPracticeActionDock ${tone} ${bagSuggestion?"hasBagSuggestion":""} ${gdPracticeBagSuggestionOpen?"bagOpen":""}"><div class="gdPracticePrimaryActions gdDemoCalloutAnchor">${demoPulse?`<div class="gdDemoCallout" role="status">Press me</div>`:""}<button type="button" class="gdPracticeBubbleAction save ${pendingActive?"ready":""} ${savedLocked?"locked":""}" ${saveDisabled} onclick="return gdPracticeSaveBubbleFromAction()">${gdEscapeHTML(saveLabel)}</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""} ${pendingActive?"pending":""} ${demoPulse?"gdDemoPulse":""}" aria-pressed="${adopted||pendingActive?"true":"false"}" ${adoptDisabled} onclick="return ${adoptAction}">${gdEscapeHTML(adoptLabel)}</button></div>${adoptStatus}${bagSuggestion?`<div class="gdPracticeBagSuggestionSlot">${bagSuggestion}</div>`:""}</div>${gdPracticeSandboxControlsHTML("compact")}${bagNotice}`;
+	    return `<div class="gdPracticeActionDock ${tone} ${bagSuggestion?"hasBagSuggestion":""} ${gdPracticeBagSuggestionOpen?"bagOpen":""}"><div class="gdPracticePrimaryActions gdDemoCalloutAnchor">${demoPulse?`<div class="gdDemoCallout" role="status">${LH("practiceHub.pressMe")}</div>`:""}<button type="button" class="gdPracticeBubbleAction save ${pendingActive?"ready":""} ${savedLocked?"locked":""}" ${saveDisabled} onclick="return gdPracticeSaveBubbleFromAction()">${gdEscapeHTML(saveLabel)}</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""} ${pendingActive?"pending":""} ${demoPulse?"gdDemoPulse":""}" aria-pressed="${adopted||pendingActive?"true":"false"}" ${adoptDisabled} onclick="return ${adoptAction}">${gdEscapeHTML(adoptLabel)}</button></div>${adoptStatus}${bagSuggestion?`<div class="gdPracticeBagSuggestionSlot">${bagSuggestion}</div>`:""}</div>${gdPracticeSandboxControlsHTML("compact")}${bagNotice}`;
 	  }
 	  function gdRenderPracticeProjectionControls(analysis){
 	    const root=byId("gdPracticeProjectionControls");
@@ -3485,8 +3492,8 @@
 	  }
 	  function gdPracticePlayingBubbleActionLabel(){
 	    const p=safe(()=>ensureProfile(),null)||{};
-	    if(gdPracticePlayingBubbleIsAdopted(p))return "Restore My Bubble";
-	    return "Play With Practice Bubble";
+	    if(gdPracticePlayingBubbleIsAdopted(p))return L("practiceHub.restoreMyBubble");
+	    return L("practiceHub.playWithPracticeBubble");
 	  }
   function gdPracticeHasPaidAccess(){
     return safe(()=>!!window.ClarityPayments?.hasActiveAccess?.(),false);
@@ -3495,7 +3502,7 @@
     const demoActive=safe(()=>!!window.GDDemoSession?.active,false);
     const picker=window.GDCoursePicker;
     if(!picker||typeof picker.open!=="function"){
-      gdLmToast("Play preview is not ready");
+      gdLmToast(L("practiceHub.playPreviewNotReady"));
       return false;
     }
     if(demoActive||gdPracticeHasPaidAccess()){
@@ -3504,7 +3511,7 @@
     }
     const preview=window.GolfDaddyPracticeBubblePreview;
     if(!preview||typeof preview.stage!=="function"){
-      gdLmToast("Bubble Preview is not ready");
+      gdLmToast(L("practiceHub.bubblePreviewNotReady"));
       return false;
     }
     const existing=safe(()=>preview.current?.(),null);
@@ -3512,7 +3519,7 @@
       const analysis=gdPracticeProjectionReadyAnalysis();
       const source=gdPracticeBubbleSource(analysis);
       if(!source||!Number.isFinite(Number(source.offsetDeg))){
-        gdLmToast("Add practice shots or set a Bubble manually first");
+        gdLmToast(L("practiceHub.addShotsOrSetManually"));
         return false;
       }
       const p=safe(()=>ensureProfile(),null)||{};
@@ -3571,7 +3578,7 @@
 		    const method=gdPracticeBubbleMethod(analysis);
 		    const offset=Number(source?.offsetDeg??method?.anchorDeg);
 		    if(!Number.isFinite(offset)){
-		      gdLmToast("Practice Bubble not ready");
+		      gdLmToast(L("practiceHub.practiceBubbleNotReady"));
 		      return false;
 		    }
 	    const previousOffset=gdPracticeMyBubbleOffsetDeg(p);
@@ -3645,8 +3652,8 @@
 	      }
 	    },1500);
 	    const distanceLabel=distanceResult.changed
-	      ? adoptDistance?"Distance + direction ready to save":"Direction ready to save; distance sent to bag review"
-	      : "Direction ready to save";
+	      ? adoptDistance?L("practiceHub.distanceDirectionReady"):L("practiceHub.directionReadyDistanceToBag")
+	      : L("practiceHub.directionReady");
 	    gdLmToast(distanceLabel);
 	    return false;
 	  }
@@ -3852,15 +3859,15 @@
     const pendingOffset=Number(pendingSource.offsetDeg);
     if(pendingSource.active&&Number.isFinite(pendingOffset)){
       const pendingStyle=gdBubbleRoleStyle(pendingSource.bubble,"playing");
-      return{offset:pendingOffset,kind:"pending",label:`Save ${pendingStyle.label}`,graphLabel:pendingStyle.graphLabel,isStarter:pendingStyle.source==="starter-bubble"};
+      return{offset:pendingOffset,kind:"pending",label:L("practiceHub.saveBubbleLabel",{label:pendingStyle.label}),graphLabel:pendingStyle.graphLabel,isStarter:pendingStyle.source==="starter-bubble"};
     }
     const adoptedSource=p.practiceBubbleSource||{};
     const adoptedOffset=Number(adoptedSource.offsetDeg);
     const currentAdopted=gdPracticeCurrentBubbleWasAdopted(p,analysis);
     if(adoptedSource.active&&Number.isFinite(adoptedOffset)){
-      return{offset:adoptedOffset,kind:currentAdopted?"adopted-current":"saved",label:currentAdopted?`${style.label} active`:`${style.label} saved`,graphLabel:style.graphLabel,isStarter};
+      return{offset:adoptedOffset,kind:currentAdopted?"adopted-current":"saved",label:currentAdopted?L("practiceHub.bubbleLabelActive",{label:style.label}):L("practiceHub.bubbleLabelSaved",{label:style.label}),graphLabel:style.graphLabel,isStarter};
     }
-    const defaultState={offset:0,kind:"default",label:"Default My Bubble",graphLabel:"DEFAULT"};
+    const defaultState={offset:0,kind:"default",label:L("practiceHub.defaultMyBubble"),graphLabel:"DEFAULT"};
     if(!p||p.placeholderProfile)return defaultState;
     const sources=[];
     if(p.previewBubbleSet)sources.push(p.previewBubbleSet);
@@ -3869,7 +3876,7 @@
     }
     if(!sources.some(gdPracticeBubbleSourceLooksReal))return defaultState;
     const offset=Number(p.faceOffsetDeg??p.centralFaceOffsetDeg??p.previewBubbleSet?.faceOffsetDeg??p.previewBubbleSet?.faceAlignmentOffsetDeg??p.previewBubbleSet?.offsetDeg);
-    return Number.isFinite(offset)?{offset,kind:"saved",label:`${style.label} saved`,graphLabel:style.graphLabel,isStarter}:defaultState;
+    return Number.isFinite(offset)?{offset,kind:"saved",label:L("practiceHub.bubbleLabelSaved",{label:style.label}),graphLabel:style.graphLabel,isStarter}:defaultState;
   }
   function gdPracticeMyBubbleOffsetDeg(profile){
     const state=gdPracticeMyBubbleState(profile,gdPracticeProjectionReadyAnalysis());
@@ -3881,14 +3888,14 @@
     const state=gdPracticeMyBubbleState(p,analysis||gdPracticeProjectionReadyAnalysis());
     if(state&&Number.isFinite(Number(state.offset)))return state;
     const offset=gdProfileCentralOffset(p,0);
-    return{offset:Number.isFinite(Number(offset))?Number(offset):0,kind:"default",label:"Default My Bubble",graphLabel:"DEFAULT"};
+    return{offset:Number.isFinite(Number(offset))?Number(offset):0,kind:"default",label:L("practiceHub.defaultMyBubble"),graphLabel:"DEFAULT"};
   }
   function gdMyBubbleDisplayLabel(state,editing=false){
-    if(editing)return"Manual centre";
+    if(editing)return L("practiceHub.manualCentre");
     // gdPracticeMyBubbleState already resolved the correct label (via
     // gdBubbleRoleStyle) for every kind, coach-set included - no need to
     // re-decide My-Bubble-vs-Starter-Bubble here too.
-    if(String(state?.kind||"")==="default")return"Default";
+    if(String(state?.kind||"")==="default")return L("practiceHub.defaultLabel");
     return state?.label||"My Bubble";
   }
   function gdPracticeProjectionSelectedClubNames(analysis,dataRows){
@@ -4197,7 +4204,7 @@
 	    ).join("");
 	    return `<rect width="${width}" height="${height}" fill="rgba(0,0,0,.08)"/>
 	      ${titleText&&!hideText?`<text x="24" y="30" fill="rgba(255,255,255,.82)" font-size="14" font-weight="950">${gdStatsSvgText(titleText)}</text>`:""}
-	      ${hideText?"":`<text x="24" y="${subtitleY}" fill="rgba(255,255,255,.46)" font-size="9" font-weight="850">${gdStatsSvgText(opts.subtitle||"Depth against expected carry · lateral angle")}</text>`}
+	      ${hideText?"":`<text x="24" y="${subtitleY}" fill="rgba(255,255,255,.46)" font-size="9" font-weight="850">${gdStatsSvgText(opts.subtitle||L("practiceHub.plotSubtitle"))}</text>`}
 	      <rect x="${(plot.plotLeft-8).toFixed(1)}" y="${(plot.plotTop-8).toFixed(1)}" width="${(plot.plotRight-plot.plotLeft+16).toFixed(1)}" height="${(plot.plotBottom-plot.plotTop+16).toFixed(1)}" rx="8" fill="rgba(255,255,255,.012)" stroke="rgba(255,255,255,.045)" stroke-width="1"/>
 	      ${grid}
 	      <line x1="${plot.plotLeft}" y1="${plot.plotMidY.toFixed(1)}" x2="${plot.plotRight}" y2="${plot.plotMidY.toFixed(1)}" stroke="rgba(255,255,255,.18)" stroke-width="1" stroke-dasharray="4 8" stroke-linecap="round"/>
@@ -4209,7 +4216,7 @@
 	  function gdPracticeClubKeyDropdownHTML(clubs){
 	    const rows=(Array.isArray(clubs)?clubs:[]).filter(Boolean);
 	    if(!rows.length)return "";
-	    return `<details class="gdPracticeClubKeyDrop"><summary>Club key</summary><div class="gdPracticeClubKeyList">${rows.map(club=>`<span class="gdPracticeClubKeyItem"><i class="gdPracticeClubKeySwatch" style="background:${gdStatsClubColor(club)}"></i><span>${gdEscapeHTML(club)}</span></span>`).join("")}</div></details>`;
+	    return `<details class="gdPracticeClubKeyDrop"><summary>${LH("practiceHub.clubKey")}</summary><div class="gdPracticeClubKeyList">${rows.map(club=>`<span class="gdPracticeClubKeyItem"><i class="gdPracticeClubKeySwatch" style="background:${gdStatsClubColor(club)}"></i><span>${gdEscapeHTML(club)}</span></span>`).join("")}</div></details>`;
 	  }
 	  function gdPracticeDisplayShotCount(){
     const store=gdPracticeDisplayStore();
@@ -5151,8 +5158,8 @@
 	    const currentStyle=gdBubbleRoleStyle(currentSource,"playing");
 	    const items=[
 	      {kind:"playing",label:currentStyle.label,offset:Number(ctx.current),source:currentSource,styleSource:currentStyle.source,stroke:currentStyle.colour,fillOpacity:".10",strokeOpacity:".78"},
-	      {kind:"course",label:"Course Bubble",offset:Number(ctx.course),source:courseSource,stroke:"#37f28d",fillOpacity:".13",strokeOpacity:".84"},
-	      {kind:"practice",label:"Practice Bubble",offset:Number(ctx.practice),source:practiceSource,stroke:"#62d2ff",fillOpacity:".13",strokeOpacity:".84"}
+	      {kind:"course",label:L("dataHub.courseBubble"),offset:Number(ctx.course),source:courseSource,stroke:"#37f28d",fillOpacity:".13",strokeOpacity:".84"},
+	      {kind:"practice",label:L("dataHub.practiceBubble"),offset:Number(ctx.practice),source:practiceSource,stroke:"#62d2ff",fillOpacity:".13",strokeOpacity:".84"}
 	    ];
 	    // Anchor for the relative-% depth axis. Prefer My Bubble's own distance,
 	    // tied to the bag - never a generic/display club.
@@ -5173,7 +5180,7 @@
 	    const anchorDistanceM=anchorFor(anchorSource);
 	    const anchorLabel=!anchorSource?""
 	      :anchorSource===currentSource?"My Bubble"
-	      :anchorSource===practiceSource?"Practice Bubble":"Course Bubble";
+	      :anchorSource===practiceSource?L("dataHub.practiceBubble"):L("dataHub.courseBubble");
 	    const bubblePartsByItem=items.map(item=>gdCompareBubbleParts(item,anchorDistanceM));
 	    const allParts=bubblePartsByItem.flat();
 	    // Same plot box as Practice's chart (gd-route-audit.js practiceSvg) so
@@ -5186,8 +5193,8 @@
 	    const bufferPct=gdCourseBubbleBufferPct();
 	    const playingPart=(bubblePartsByItem[0]||[])[0];
 	    const bufferSvg=gdGraphBufferBandMarkup(playingPart,gdGraphBufferPart(playingPart,1+bufferPct/100),plot);
-	    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="My Bubble, Course and Practice bubble comparison">
-	      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Comparison"),{subtitle:`Distance vs ${anchorLabel||"My Bubble"} (%) \u00b7 aim angle (\u00b0)${playingPart?` \u00b7 band = My Bubble +${Math.round(bufferPct)}%`:""}`})}
+	    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${LH("dataHub.compareChartAria")}">
+	      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle(L("dataHub.comparison")),{subtitle:playingPart?L("dataHub.compareSubtitleBand",{anchor:anchorLabel||"My Bubble",pct:Math.round(bufferPct)}):L("dataHub.compareSubtitle",{anchor:anchorLabel||"My Bubble"})})}
 	      ${bufferSvg}
 	      ${bubbleSvg}
 	    </svg>`;
@@ -5241,11 +5248,16 @@
     if(next!=="compare")gdRenderComparePracticeProjector(null);
     return false;
   }
-  const gdDataHubCardCopy={
-    course:`<div class="ico">⛳</div><div><strong>Course Data</strong><span>GPS and scorecard shot data filed under a course label. This is the on-course truth layer.</span></div>`,
-    practice:`<div class="ico">◉</div><div><strong>Practice Data</strong><span>Launch monitor captures and Clarity Pattern Finder evidence. Kept separate from course rounds.</span></div>`,
-    compare:`<div class="ico">↔</div><div><strong>Comparison</strong><span>View Course and Practice recommendation values together. Jump back to each source to change the evidence.</span></div>`
+  const gdDataHubCardIcons={course:"⛳",practice:"◉",compare:"↔"};
+  const gdDataHubCardKeys={
+    course:["dataHub.courseDataTitle","dataHub.courseDataBody"],
+    practice:["dataHub.practiceDataTitle","dataHub.practiceDataBody"],
+    compare:["dataHub.comparison","dataHub.comparisonBody"]
   };
+  function gdDataHubCardCopy(key){
+    const keys=gdDataHubCardKeys[key];
+    return `<div class="ico">${gdDataHubCardIcons[key]}</div><div><strong>${LH(keys[0])}</strong><span>${LH(keys[1])}</span></div>`;
+  }
   function gdCompareSetSource(source){
     gdCompareExpandedSource=source==="course"?"course":"practice";
     if(gdDataHubActiveSection!=="compare")return gdHubSetSection("compare",{force:true});
@@ -5269,7 +5281,7 @@
       btn.classList.toggle("active",expanded&&key===active);
       btn.classList.remove("widget","title");
       btn.setAttribute("aria-expanded",expanded&&key===active?"true":"false");
-      btn.innerHTML=gdDataHubCardCopy[key];
+      btn.innerHTML=gdDataHubCardCopy(key);
       // While Comparison is expanded the Practice tab carries the compact
       // Generate / Adopt Bubble + bag controls (same maths and handlers as
       // the practice screen) instead of duplicating them inside the
@@ -5315,7 +5327,7 @@
     return gdHubSetSection("practice");
   }
   function gdCompareSourceTab(source,title,control,active=false){
-    const openButton=`<button class="gdCompareSourceOpen" data-gd-card-control type="button" onclick="return gdOpenCompareSourcePage('${source}',event)">Open</button>`;
+    const openButton=`<button class="gdCompareSourceOpen" data-gd-card-control type="button" onclick="return gdOpenCompareSourcePage('${source}',event)">${LH("dataHub.open")}</button>`;
     if(active||control)return `<div class="gdCompareSourceShell active${control?"":" simple"}"><div class="gdCompareSourceTitle active"><strong>${gdStatsSvgText(title)}</strong>${openButton}</div>${control?`<div class="gdCompareSourceControl">${control}</div>`:""}</div>`;
     return `<div class="gdCompareSourceShell"><div class="gdCompareSourceTitle"><strong>${gdStatsSvgText(title)}</strong>${openButton}</div></div>`;
   }
@@ -5333,8 +5345,8 @@
     // The second copy of the consistency slider lived here. The percentile is
     // pinned now (gd-app-core.js gdStatsConsistencyPct), so this card just says
     // what it holds.
-    const body=`<div class="gdCompareLibraryStats"><span>${counted}/${rows.length} counted</span></div>`;
-    return gdShotDataLibraryShellHTML({kind:"course",title:"Course Library",bubbleLabel:"Course Bubble",bubbleValue:bubble,count:rows.length,bodyHTML:body,compact:true,stopPropagation:true,dropdown:true,open:gdShotDataLibraryIsOpen("course")});
+    const body=`<div class="gdCompareLibraryStats"><span>${LH("dataHub.countedOfTotal",{counted,total:rows.length})}</span></div>`;
+    return gdShotDataLibraryShellHTML({kind:"course",title:L("dataHub.courseLibrary"),bubbleLabel:L("dataHub.courseBubble"),bubbleValue:bubble,count:rows.length,bodyHTML:body,compact:true,stopPropagation:true,dropdown:true,open:gdShotDataLibraryIsOpen("course")});
   }
   function gdComparePracticeAdminIsOpen(){
     return !!byId("dataHubPanel")?.classList.contains("gdComparePracticeAdminExpanded");
@@ -5360,8 +5372,8 @@
         <input data-gd-card-control type="range" min="0" max="100" step="1" value="${pct}" onpointerdown="event.stopPropagation()" onclick="event.stopPropagation()" oninput="gdComparePreviewPracticeToleranceMaster(this)" onchange="gdCompareSetPracticeToleranceMaster(this.value,this)" ${canEdit?"":"disabled"}>
       </div>
     </div>`:"";
-    const body=`<div class="gdCompareLibraryStats"><span>${count} stored shot${count===1?"":"s"}</span>${adminButton}</div>${adminControls}`;
-    return gdShotDataLibraryShellHTML({kind:"practice",title:"Clarity Shot Library",bubbleLabel:"Practice Bubble",bubbleValue:bubble,count,bodyHTML:body,compact:true,stopPropagation:true,dropdown:true,open:gdShotDataLibraryIsOpen("practice")});
+    const body=`<div class="gdCompareLibraryStats"><span>${LHN("dataHub.storedShots",count)}</span>${adminButton}</div>${adminControls}`;
+    return gdShotDataLibraryShellHTML({kind:"practice",title:"Clarity Shot Library",bubbleLabel:L("dataHub.practiceBubble"),bubbleValue:bubble,count,bodyHTML:body,compact:true,stopPropagation:true,dropdown:true,open:gdShotDataLibraryIsOpen("practice")});
   }
   function gdCompareSliderValueEl(input){
     return input?.parentElement?.querySelector(".gdCompareCompactValue")||null;
@@ -5373,9 +5385,9 @@
 	  function gdCompareFallbackSvg(error){
 	    const width=480,height=260;
 	    const plot=gdShotChartLayout([],[],{plotLeft:30,plotRight:450,plotTop:82,plotBottom:224});
-	    const note=error?`<text x="240" y="142" text-anchor="middle" fill="rgba(255,255,255,.52)" font-size="10" font-weight="850">Comparison data will appear here.</text>`:"";
-	    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Course and Practice comparison visual">
-	      ${gdShotChartBackdropSvg(plot,gdShotDataGraphTitle("Comparison"))}
+	    const note=error?`<text x="240" y="142" text-anchor="middle" fill="rgba(255,255,255,.52)" font-size="10" font-weight="850">${LH("dataHub.compareEmpty")}</text>`:"";
+	    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${LH("dataHub.compareFallbackAria")}">
+	      ${gdShotChartBackdropSvg(plot,gdShotDataGraphTitle(L("dataHub.comparison")))}
 	      ${note}
 	    </svg>`;
 	  }
@@ -5591,9 +5603,9 @@
       hub.dataset.gdBubbleKind=stateKind;
       hub.classList.toggle("gdMyBubbleActive",stateKind==="adopted-current"||stateKind==="pending");
       const buttons=[...hub.querySelectorAll(".gdBubbleOffsetActions button")];
-      if(buttons[0])buttons[0].textContent=stateKind==="pending"?"Undo":"Edit";
+      if(buttons[0])buttons[0].textContent=stateKind==="pending"?L("practiceHub.undo"):L("dataHub.edit");
       if(buttons[1]){
-        buttons[1].textContent=stateKind==="pending"?"Save":"Apply";
+        buttons[1].textContent=stateKind==="pending"?L("dataHub.save"):L("dataHub.apply");
         buttons[1].classList.toggle("gdBubbleSaveReady",stateKind==="pending");
       }
     });
@@ -5649,28 +5661,28 @@
     const state=gdMyBubbleState(p,analysis);
     const offset=Number(state?.offset);
     if(!Number.isFinite(offset)){
-      gdLmToast("My Bubble not ready");
+      gdLmToast(L("dataHub.myBubbleNotReady"));
       return false;
     }
 	    const ctx=gdComparisonContext();
 	    const club=safe(()=>gdCompareLoadClub(ctx),gdCompareClub)||p?.previewBubbleSet?.club||"7i";
 	    const baseSource=gdMyBubbleHubSource(ctx,club,offset,{ignoreLanePreview:true});
 	    if(!baseSource){
-	      gdLmToast("GPS Bubble needed");
+	      gdLmToast(L("dataHub.gpsBubbleNeeded"));
 	      return false;
 	    }
 	    const sourceClub=gdCompareClubKey(baseSource.club||club)||"7i";
 	    const nextDistance=gdMyBubbleClampLaneDistance(requestedDistance,sourceClub,baseSource);
 	    const sourceDistance=Number(baseSource.baseDistanceM||baseSource.expectedDistanceM||baseSource.meanExpectedM||baseSource.baseCarry);
 	    if(!Number.isFinite(sourceDistance)||sourceDistance<=0){
-	      gdLmToast("GPS Bubble needed");
+	      gdLmToast(L("dataHub.gpsBubbleNeeded"));
 	      return false;
 	    }
 	    const presentation=gdMyBubblePresentationMetrics(baseSource,{distanceM:nextDistance,offsetDeg:offset,club:sourceClub,handedness:p.handedness||baseSource.handedness});
 	    const width=Number(presentation?.widthM);
 	    const depth=Number(presentation?.depthM);
 	    if(!Number.isFinite(depth)||depth<=0||!Number.isFinite(width)||width<=0){
-	      gdLmToast("GPS Bubble needed");
+	      gdLmToast(L("dataHub.gpsBubbleNeeded"));
 	      return false;
 	    }
 	    const baseTilt=Number(presentation.tiltDeg);
@@ -5772,7 +5784,7 @@
       if(svg)svg.classList.remove("dragging");
       gdMyBubbleLaneDrag=null;
       if(drag.active&&Number.isFinite(Number(distance))&&gdMyBubbleStageLaneDistance(distance,{persist:true})){
-        gdLmToast("My Bubble distance ready to save");
+        gdLmToast(L("dataHub.myBubbleDistanceReady"));
       }
     };
     document.addEventListener("pointerup",finish,true);
@@ -5791,7 +5803,7 @@
       renderPracticeData(true);
       renderDataHubStatus();
       renderCompareData();
-      gdLmToast("Preview cleared");
+      gdLmToast(L("dataHub.previewCleared"));
       return;
     }
     if(gdPracticePendingBubbleIsActive(p)){
@@ -5809,7 +5821,7 @@
       renderPracticeData(true);
       renderDataHubStatus();
       renderCompareData();
-      gdLmToast("Pending My Bubble cleared");
+      gdLmToast(L("dataHub.pendingMyBubbleCleared"));
       return;
     }
     const offset=gdParseOffsetValue(face.value,gdBubbleCentralOffset(gdBubbleDataContext().p));
@@ -5827,13 +5839,13 @@
     if(!p)return false;
     const hasAnything=!!(p.practiceBubbleSource||p.practiceBubblePendingSource||p.previewBubbleSet||(p.bubbleProfiles&&Object.keys(p.bubbleProfiles).length));
     if(!hasAnything){
-      gdLmToast("No My Bubble to clear");
+      gdLmToast(L("dataHub.noMyBubbleToClear"));
       return false;
     }
     return gdConfirmAction({
-      title:"Clear My Bubble?",
-      message:"Removes the saved bubble, its shape and any pending adoption. Your practice and course data are untouched.",
-      confirmLabel:"Clear"
+      title:L("dataHub.clearMyBubbleTitle"),
+      message:L("dataHub.clearMyBubbleMessage"),
+      confirmLabel:L("dataHub.clear")
     },()=>{
       delete p.practiceBubbleSource;
       delete p.practiceBubblePendingSource;
@@ -5857,7 +5869,7 @@
       if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
       renderCompareData();
       safe(()=>typeof renderShot==="function"&&renderShot());
-      gdLmToast("My Bubble cleared");
+      gdLmToast(L("dataHub.myBubbleCleared"));
     });
   }
   function gdBubbleOffsetSave(){
@@ -5935,12 +5947,12 @@
       if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
       renderCompareData();
       safe(()=>typeof renderShot==="function"&&renderShot());
-      gdLmToast("My Bubble saved");
+      gdLmToast(L("dataHub.myBubbleSaved"));
       return;
     }
     const face=gdActiveOffsetInput();
     const offset=gdParseOffsetValue(face?.value,gdBubbleCentralOffset(p));
-    if(!Number.isFinite(offset)){toast("Enter a face offset");return}
+    if(!Number.isFinite(offset)){toast(L("dataHub.enterFaceOffset"));return}
     p.faceOffsetDeg=offset;
     p.centralFaceOffsetDeg=offset;
     const applyOffset=source=>source&&typeof source==="object"
@@ -5969,7 +5981,7 @@
     if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
     renderCompareData();
     renderDataHubStatus();
-    toast("Offset saved");
+    toast(L("dataHub.offsetSaved"));
   }
   function gdCourseDataAdminCanManage(){
     return safe(()=>typeof gdCourseDataCanManage==="function"&&gdCourseDataCanManage(),false);
@@ -6528,10 +6540,10 @@
   const GD_COURSE_RANGE_KEY="gd_course_data_range_v1";
   const GD_COURSE_RANGE_DEFAULT="month";
   const GD_COURSE_RANGES=[
-    {key:"week",label:"Week",days:7},
-    {key:"month",label:"Month",days:30},
-    {key:"year",label:"Year",days:365},
-    {key:"all",label:"All",days:null}
+    {key:"week",labelKey:"dataHub.rangeWeek",days:7},
+    {key:"month",labelKey:"dataHub.rangeMonth",days:30},
+    {key:"year",labelKey:"dataHub.rangeYear",days:365},
+    {key:"all",labelKey:"dataHub.rangeAll",days:null}
   ];
   function gdCourseRangeFor(key){
     return GD_COURSE_RANGES.filter(range=>range.key===key)[0]||null;
@@ -6567,10 +6579,10 @@
   }
   function gdCourseRangeRowHTML(){
     const active=gdCourseRangeKey();
-    const pills=GD_COURSE_RANGES.map(range=>`<button type="button" class="gdCourseRangePill${range.key===active?" active":""}" aria-pressed="${range.key===active}" onclick="return gdCourseRangeChanged('${range.key}')">${gdEscapeHTML(range.label)}</button>`).join("");
+    const pills=GD_COURSE_RANGES.map(range=>`<button type="button" class="gdCourseRangePill${range.key===active?" active":""}" aria-pressed="${range.key===active}" onclick="return gdCourseRangeChanged('${range.key}')">${window.GDI18n.html(range.labelKey)}</button>`).join("");
     return `<div class="gdCourseRangeRow">
       <span class="gdCourseRangeIcon" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="rgba(255,255,255,.65)" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 9.5 H20.5"/><path d="M8 2.8 V5.6"/><path d="M16 2.8 V5.6"/></svg></span>
-      <div class="gdCourseRangePills" role="group" aria-label="Date range">${pills}</div>
+      <div class="gdCourseRangePills" role="group" aria-label="${window.GDI18n.html("dataHub.dateRangeAria")}">${pills}</div>
     </div>`;
   }
   // A full re-render, not a live update: the range changes which shots exist, so
@@ -6842,10 +6854,10 @@
       const leftW=cx-plot.plotLeft,rightW=plot.plotRight-cx;
       const topH=cy-plot.plotTop,bottomH=plot.plotBottom-cy;
       const corners=[
-        {label:"LONG LEFT",share:courseAnalysis.longLeftShare,x:plot.plotLeft+10,anchor:"start",labelY:plot.plotTop+16,valueY:plot.plotTop+30,rectX:plot.plotLeft,rectY:plot.plotTop,w:leftW,h:topH},
-        {label:"LONG RIGHT",share:courseAnalysis.longRightShare,x:plot.plotRight-10,anchor:"end",labelY:plot.plotTop+16,valueY:plot.plotTop+30,rectX:cx,rectY:plot.plotTop,w:rightW,h:topH},
-        {label:"SHORT LEFT",share:courseAnalysis.shortLeftShare,x:plot.plotLeft+10,anchor:"start",labelY:plot.plotBottom-26,valueY:plot.plotBottom-12,rectX:plot.plotLeft,rectY:cy,w:leftW,h:bottomH},
-        {label:"SHORT RIGHT",share:courseAnalysis.shortRightShare,x:plot.plotRight-10,anchor:"end",labelY:plot.plotBottom-26,valueY:plot.plotBottom-12,rectX:cx,rectY:cy,w:rightW,h:bottomH}
+        {label:LH("dataHub.quadrantLongLeft"),share:courseAnalysis.longLeftShare,x:plot.plotLeft+10,anchor:"start",labelY:plot.plotTop+16,valueY:plot.plotTop+30,rectX:plot.plotLeft,rectY:plot.plotTop,w:leftW,h:topH},
+        {label:LH("dataHub.quadrantLongRight"),share:courseAnalysis.longRightShare,x:plot.plotRight-10,anchor:"end",labelY:plot.plotTop+16,valueY:plot.plotTop+30,rectX:cx,rectY:plot.plotTop,w:rightW,h:topH},
+        {label:LH("dataHub.quadrantShortLeft"),share:courseAnalysis.shortLeftShare,x:plot.plotLeft+10,anchor:"start",labelY:plot.plotBottom-26,valueY:plot.plotBottom-12,rectX:plot.plotLeft,rectY:cy,w:leftW,h:bottomH},
+        {label:LH("dataHub.quadrantShortRight"),share:courseAnalysis.shortRightShare,x:plot.plotRight-10,anchor:"end",labelY:plot.plotBottom-26,valueY:plot.plotBottom-12,rectX:cx,rectY:cy,w:rightW,h:bottomH}
       ];
       return corners.map(corner=>{
         const share=Number(corner.share)||0;
@@ -6873,7 +6885,7 @@
     // lives in the info tab under the score - stating either one twice was the
     // graph competing with its own header for the top of the screen.
     const playerName=safe(()=>typeof gdShotDataPlayerLabel==="function"?gdShotDataPlayerLabel():"","")||"";
-    const svg=`<svg viewBox="${gdPracticeNormalisedViewBox(plot)}" role="img" aria-label="Course Data visual">
+    const svg=`<svg viewBox="${gdPracticeNormalisedViewBox(plot)}" role="img" aria-label="${LH("dataHub.courseDataVisualAria")}">
       ${gdPracticeNormalisedBackdropSvg(plot,"",{hideText:true})}
       ${playerName?`<text x="24" y="34" fill="rgba(255,255,255,.82)" font-size="14" font-weight="950">${gdStatsSvgText(playerName)}</text>`:""}
       ${clubKeySvg}
@@ -6884,12 +6896,12 @@
     return `${gdCourseRangeRowHTML()}<div class="gdCourseChartWrap">${svg}</div>${gdCourseInsightHTML(courseAnalysis)}`;
   }
 	  function gdCourseDataLandingStatus(counts){
-	    if(counts.shown)return `${counts.shown} shown`;
-	    if(counts.records)return `${counts.records} paired`;
-    if(counts.paired)return `${counts.paired} paired, waiting for usable shots`;
-    if(counts.planned)return `${counts.planned} planned`;
-    if(counts.rawEvents)return `${counts.rawEvents} ball events`;
-    return "No data yet";
+	    if(counts.shown)return LN("dataHub.landingShown",counts.shown);
+	    if(counts.records)return LN("dataHub.landingPaired",counts.records);
+    if(counts.paired)return LN("dataHub.landingPairedWaiting",counts.paired);
+    if(counts.planned)return LN("dataHub.landingPlanned",counts.planned);
+    if(counts.rawEvents)return LN("dataHub.landingBallEvents",counts.rawEvents);
+    return L("dataHub.noDataYet");
   }
   function gdRenderCourseDataSurfaceFallback(){
     const surfaceCounts=gdCourseDataSurfaceCounts();
@@ -6899,8 +6911,8 @@
     const counts=gdCourseDataLandingCounts(analysis,filteredRecords);
     const landing=byId("gdCourseDataLanding");
     if(landing){
-      const countedLabel=counts.shown?`${counts.counted}/${counts.shown} counted`:"0 shown";
-      const body=`<div class="gdCourseDataLandingHead"><span>Stored shots</span><strong>${gdCourseDataLandingStatus(counts)}</strong></div><div class="gdCourseDataLandingStats"><b>${counts.planned} plans</b><b>${counts.paired} pairs</b><b>${countedLabel}</b></div>${gdCourseLibraryClubTabsHTML(analysis,filteredRecords)}`;
+      const countedLabel=counts.shown?L("dataHub.countedOfTotal",{counted:counts.counted,total:counts.shown}):LN("dataHub.landingShown",0);
+      const body=`<div class="gdCourseDataLandingHead"><span>${LH("dataHub.storedShotsTitle")}</span><strong>${gdEscapeHTML(gdCourseDataLandingStatus(counts))}</strong></div><div class="gdCourseDataLandingStats"><b>${LHN("dataHub.planCount",counts.planned)}</b><b>${LHN("dataHub.pairCount",counts.paired)}</b><b>${gdEscapeHTML(countedLabel)}</b></div>${gdCourseLibraryClubTabsHTML(analysis,filteredRecords)}`;
       // Plain strip, not a second library pill - see gdRenderCourseDataLanding.
       landing.innerHTML=body;
     }
@@ -7200,7 +7212,7 @@
 		    if(!shots.length){
 		      const emptyPlot=gdPracticeNormalisedPlotLayout();
 		      const myBubbleOnlyLayer=safe(()=>gdPracticeMyBubbleOnlyLayerMarkup(),"")||"";
-		      return `<svg class="gdPracticeGraphSvg" viewBox="${gdPracticeNormalisedViewBox(emptyPlot)}" role="img" aria-label="Practice Data relative plot"><g class="gdPracticeGraphCanvas">${gdPracticeNormalisedBackdropSvg(emptyPlot,"",{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}${myBubbleOnlyLayer}</g></svg>${gdShotBubbleOverlayButton("practice")}`;
+		      return `<svg class="gdPracticeGraphSvg" viewBox="${gdPracticeNormalisedViewBox(emptyPlot)}" role="img" aria-label="${LH("practiceHub.plotAria")}"><g class="gdPracticeGraphCanvas">${gdPracticeNormalisedBackdropSvg(emptyPlot,"",{subtitle:L("dataHub.compareSubtitle",{anchor:"My Bubble"})})}${myBubbleOnlyLayer}</g></svg>${gdShotBubbleOverlayButton("practice")}`;
 	    }
     const plotAll=gdPracticePlotAllRowsForTest();
     const cfg=safe(()=>window.GolfDaddyLaunchMonitorData?.settings?.(),{})||{};
@@ -7515,7 +7527,7 @@
 	    const myBubbleKind=String(myBubbleState?.kind||"default");
 	    const myBubbleCombined=myBubbleKind==="adopted-current"||adoptionMotionActive;
 	    const myBubbleIsStarter=!!myBubbleState?.isStarter;
-	    const myBubbleLabel=myBubbleCombined?(myBubbleIsStarter?"Starter Bubble":"My Bubble"):String(myBubbleState?.graphLabel||"MY");
+	    const myBubbleLabel=myBubbleCombined?(myBubbleIsStarter?L("practiceHub.starterBubble"):"My Bubble"):(myBubbleState?.graphLabel==="DEFAULT"?L("practiceHub.graphDefault"):String(myBubbleState?.graphLabel||"MY"));
 	    const myBubbleLayer=myBubbleParts.length?gdPracticeNormalisedBubbleLayerMarkup(myBubbleParts,normalisedPlot,{
 	      offsetDeg:hubOffset,
 	      groupClass:`gdShotBubbleOverlayLayer gdPracticeMyBubbleLayer gdPracticeMyBubbleLayer-${myBubbleKind} gdShotBubbleOverlayLens ${adoptionMotionActive?"gdPracticeMyBubbleAdopting":""}`,
@@ -7527,12 +7539,12 @@
 	      offsetDeg:practiceBubbleOffset,
 	      groupClass:`gdShotBubbleOverlayLayer gdPracticeBubbleProjectionLayer gdShotBubbleOverlayLens ${myBubbleCombined?"gdPracticeBubbleProjectionLayer-combined":""} ${adoptionMotionActive?"gdPracticeBubbleAdoptionGhost":""}`,
 	      source:"practice-bubble-projection",
-	      labelText:"PRACTICE",
+	      labelText:L("practiceHub.graphPractice"),
 	      label:!myBubbleCombined
 	    }):"";
-		    return `<svg class="gdPracticeGraphSvg" viewBox="${gdPracticeNormalisedViewBox(normalisedPlot)}" role="img" aria-label="Practice Data relative plot" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${gdPracticeHasBubbleOffset(hubOffset)?Number(hubOffset).toFixed(2):""}" data-anchor-distance-m="${anchorDistanceM?Number(anchorDistanceM).toFixed(1):""}">
+		    return `<svg class="gdPracticeGraphSvg" viewBox="${gdPracticeNormalisedViewBox(normalisedPlot)}" role="img" aria-label="${LH("practiceHub.plotAria")}" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${gdPracticeHasBubbleOffset(hubOffset)?Number(hubOffset).toFixed(2):""}" data-anchor-distance-m="${anchorDistanceM?Number(anchorDistanceM).toFixed(1):""}">
 		      <g class="gdPracticeGraphCanvas">
-		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,"",{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}
+		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,"",{subtitle:L("dataHub.compareSubtitle",{anchor:"My Bubble"})})}
       ${pts}
       ${practiceBubbleLayer}
       ${myBubbleLayer}
@@ -7708,7 +7720,7 @@
   function gdPracticeBubbleValueLabel(analysis){
     const method=gdPracticeBubbleMethod(analysis);
     const offset=Number(method?.anchorDeg);
-    return method&&Number.isFinite(offset)?"Bubble ready":"Bubble not ready";
+    return method&&Number.isFinite(offset)?L("practiceHub.bubbleReady"):L("practiceHub.bubbleNotReady");
   }
   function gdPracticeImportJobHTML(){
     const job=gdPracticeHydrateImportJob();
@@ -7719,20 +7731,20 @@
     const completed=status==="completed";
     if(active||completed)return "";
     const title=gdPracticeImportStatusLabel(status);
-    const source=job.sourceLabel||job.source||"Practice import";
-    const date=job.importDate?gdPracticeEvidenceDateLabel(job.importDate):"Import date pending";
+    const source=job.sourceLabel||job.source||L("practiceHub.practiceImport");
+    const date=job.importDate?gdPracticeEvidenceDateLabel(job.importDate):L("practiceHub.importDatePending");
     const counts=[
-      Number(job.accepted)?`${Number(job.accepted)} accepted`:"",
-      Number(job.rejected)?`${Number(job.rejected)} rejected`:"",
-      Number(job.nativeRows)?`${Number(job.nativeRows)} saved`:""
+      Number(job.accepted)?LN("practiceHub.acceptedCount",Number(job.accepted)):"",
+      Number(job.rejected)?LN("practiceHub.rejectedCount",Number(job.rejected)):"",
+      Number(job.nativeRows)?LN("practiceHub.savedCount",Number(job.nativeRows)):""
     ].filter(Boolean).join(" · ");
-    const detail=job.userMessage||job.checkpointText||"Import progress is saved.";
+    const detail=job.userMessage||job.checkpointText||L("practiceHub.importProgressSaved");
     const diagnostic="";
     const actions=failed
-      ? `<button type="button" data-gd-practice-import-action="review" onclick="return gdPracticeHandleImportJobAction('review',event)">Resume/review import</button><button type="button" data-gd-practice-import-action="discard" onclick="return gdPracticeHandleImportJobAction('discard',event)">Discard failed import</button>`
+      ? `<button type="button" data-gd-practice-import-action="review" onclick="return gdPracticeHandleImportJobAction('review',event)">${LH("practiceHub.resumeReviewImport")}</button><button type="button" data-gd-practice-import-action="discard" onclick="return gdPracticeHandleImportJobAction('discard',event)">${LH("practiceHub.discardFailedImport")}</button>`
       : active
-        ? (status==="saving"?`<button type="button" data-gd-practice-import-action="review" onclick="return gdPracticeHandleImportJobAction('review',event)">Review import</button>`:`<button type="button" data-gd-practice-import-action="review" onclick="return gdPracticeHandleImportJobAction('review',event)">Review import</button><button type="button" data-gd-practice-import-action="cancel" onclick="return gdPracticeHandleImportJobAction('cancel',event)">Cancel import</button>`)
-        : `<button type="button" data-gd-practice-import-action="clear" onclick="return gdPracticeHandleImportJobAction('clear',event)">Clear import status</button>`;
+        ? (status==="saving"?`<button type="button" data-gd-practice-import-action="review" onclick="return gdPracticeHandleImportJobAction('review',event)">${LH("practiceHub.reviewImport")}</button>`:`<button type="button" data-gd-practice-import-action="review" onclick="return gdPracticeHandleImportJobAction('review',event)">${LH("practiceHub.reviewImport")}</button><button type="button" data-gd-practice-import-action="cancel" onclick="return gdPracticeHandleImportJobAction('cancel',event)">${LH("practiceHub.cancelImport")}</button>`)
+        : `<button type="button" data-gd-practice-import-action="clear" onclick="return gdPracticeHandleImportJobAction('clear',event)">${LH("practiceHub.clearImportStatus")}</button>`;
     return `<div class="gdPracticeImportJob ${active?"active":failed?"failed":"done"}">
       <div class="gdPracticeImportJobMain"><strong>${gdEscapeHTML(title)}</strong><span>${gdEscapeHTML(detail)}</span><small>${gdEscapeHTML(source)} · ${gdEscapeHTML(date)}${counts?` · ${gdEscapeHTML(counts)}`:""}</small></div>
       <div class="gdPracticeImportJobActions">${actions}</div>
@@ -7757,7 +7769,7 @@
     return gdShotDataLibraryShellHTML({
       kind:"practice",
       title:"Clarity Shot Library",
-      bubbleLabel:"Practice Bubble",
+      bubbleLabel:L("dataHub.practiceBubble"),
       bubbleValue:bubble,
       count:Number(totalRows)||0,
       bodyHTML:jobHTML+bodyHTML,
@@ -8116,7 +8128,7 @@
 	  }
 	  function gdPracticeEvidenceDateLabel(value){
 	    const time=gdPracticeEvidenceTime(value);
-	    if(!time)return "Undated upload";
+	    if(!time)return L("practiceHub.undatedUpload");
 	    try{return new Intl.DateTimeFormat(undefined,{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(time));}
 	    catch(e){return new Date(time).toLocaleString();}
 	  }
@@ -8134,7 +8146,7 @@
 	      uploads[capture.captureId]={
 	        id:capture.captureId,
 	        sessionId:capture.sessionId||"",
-	        label:session.label||"Practice upload",
+	        label:session.label||L("practiceHub.practiceUpload"),
 	        inputType:capture.inputType||"",
 	        timestamp,
 	        time:gdPracticeEvidenceTime(timestamp),
@@ -8151,7 +8163,7 @@
 	    return{
 	      id,
 	      sessionId:row.sessionId||"",
-	      label:row.providerGuess?String(row.providerGuess).replace(/_/g," "):"Practice upload",
+	      label:row.providerGuess?String(row.providerGuess).replace(/_/g," "):L("practiceHub.practiceUpload"),
 	      inputType:"",
 	      timestamp,
 	      time:gdPracticeEvidenceTime(timestamp),
@@ -8167,8 +8179,8 @@
 		      map[id]=Object.assign({},map[id]||{},{
 		        id,
 		        sessionId:session.sessionId||"",
-		        label:session.label||map[id]?.label||"Practice import",
-		        sourceName:session.label||map[id]?.sourceName||"Practice import",
+		        label:session.label||map[id]?.label||L("practiceHub.practiceImport"),
+		        sourceName:session.label||map[id]?.sourceName||L("practiceHub.practiceImport"),
 		        sourceType:session.sourceIdentity?.providerGuess||map[id]?.sourceType||"",
 		        timestamp:session.importedAt||session.startedAt||map[id]?.timestamp||"",
 		        playerId:session.playerId||map[id]?.playerId||"",
@@ -8182,8 +8194,8 @@
 		        id,
 		        captureId:capture.captureId||"",
 		        sessionId:capture.sessionId||map[id]?.sessionId||"",
-		        label:map[id]?.label||capture.sourceIdentity?.providerGuess||"Practice import",
-		        sourceName:map[id]?.sourceName||capture.sourceIdentity?.providerGuess||"Practice import",
+		        label:map[id]?.label||capture.sourceIdentity?.providerGuess||L("practiceHub.practiceImport"),
+		        sourceName:map[id]?.sourceName||capture.sourceIdentity?.providerGuess||L("practiceHub.practiceImport"),
 		        sourceType:capture.inputType||map[id]?.sourceType||"",
 		        timestamp:capture.timestamp||map[id]?.timestamp||"",
 		        playerId:capture.playerId||map[id]?.playerId||"",
@@ -8194,11 +8206,11 @@
 		  }
 		  function gdPracticeImportLabel(value){
 		    const text=String(value||"").replace(/[_-]+/g," ").trim();
-		    return text?text.replace(/\b\w/g,char=>char.toUpperCase()):"Practice import";
+		    return text?text.replace(/\b\w/g,char=>char.toUpperCase()):L("practiceHub.practiceImport");
 		  }
 		  function gdPracticeImportDate(value){
-		    const label=gdPracticeEvidenceDateLabel(value);
-		    return label==="Undated upload"?"Undated import":label;
+		    if(!gdPracticeEvidenceTime(value))return L("practiceHub.undatedImport");
+		    return gdPracticeEvidenceDateLabel(value);
 		  }
 		  function gdPracticeClubKey(value){
 		    const text=String(value||"").trim()||"Unknown / Unmatched";
@@ -8238,7 +8250,7 @@
 		    // No shot IDs, no accepted/rejected status, no player/account plumbing —
 		    // those live in debug tooling, not the library.
 		    const sorted=(Array.isArray(rows)?rows:[]).slice().sort((a,b)=>a.index-b.index);
-		    const TEMPLATE=[["ballSpeed","Ball mph"],["launchAngle","Launch"],["sideAngle","Side"],["backspin","Backspin"],["sideSpin","Side Spin"],["descentAngle","Descent"],["offline","Offline"],["peakHeight","Peak"],["carryDistance","Carry"],["totalDistance","Total"]];
+		    const TEMPLATE=[["ballSpeed","practiceHub.colBallMph"],["launchAngle","practiceHub.colLaunch"],["sideAngle","practiceHub.colSide"],["backspin","practiceHub.colBackspin"],["sideSpin","practiceHub.colSideSpin"],["descentAngle","practiceHub.colDescent"],["offline","practiceHub.colOffline"],["peakHeight","practiceHub.colPeak"],["carryDistance","practiceHub.colCarry"],["totalDistance","practiceHub.colTotal"]];
 		    const DIRECTIONAL=["sideAngle","sideSpin","offline"];
 		    const metricOf=(row,key)=>{
 		      const list=row&&row.rawSource&&Array.isArray(row.rawSource.metrics)?row.rawSource.metrics:[];
@@ -8258,7 +8270,7 @@
 		    };
 		    const cols=TEMPLATE.filter(([key])=>sorted.some(row=>metricOf(row,key)!=null));
 		    const gridStyle=`grid-template-columns:26px repeat(${cols.length},minmax(54px,1fr))`;
-		    const head=`<div class="gdPracticeRawShotHead" style="${gridStyle}"><span>#</span>${cols.map(([,label])=>`<span>${gdEscapeHTML(label)}</span>`).join("")}</div>`;
+		    const head=`<div class="gdPracticeRawShotHead" style="${gridStyle}"><span>#</span>${cols.map(([,label])=>`<span>${LH(label)}</span>`).join("")}</div>`;
 		    const tableRows=sorted.map((row,i)=>
 		      `<div class="gdPracticeRawShotRow" style="${gridStyle}"><span>${i+1}</span>${cols.map(([key])=>`<span>${gdEscapeHTML(fmt(key,metricOf(row,key)))}</span>`).join("")}</div>`
 		    ).join("");
@@ -8285,8 +8297,8 @@
 		    const ids=new Set((Array.isArray(importIds)?importIds:[importIds]).map(String));
 		    const source=safe(()=>ensureProfile()?.practiceBubbleSource,null)||{};
 		    const sourceIds=[source.importBatchId,source.importId].concat(Array.isArray(source.importBatchIds)?source.importBatchIds:[]).filter(Boolean).map(String);
-		    if(sourceIds.some(id=>ids.has(id)))return " This import was used for the current My Bubble. My Bubble will remain unchanged.";
-		    return source?.active&&ids.size?" My Bubble will remain unchanged. Reset My Bubble separately if needed.":"";
+		    if(sourceIds.some(id=>ids.has(id)))return "used";
+		    return source?.active&&ids.size?"active":"";
 		  }
 		  // IN-APP CONFIRMATION. window.confirm is silently suppressed in the app's
 		  // embedded webview: it returns false INSTANTLY without ever showing a dialog.
@@ -8305,12 +8317,12 @@
 		      const overlay=document.createElement("div");
 		      overlay.id="gdConfirmOverlay";
 		      overlay.className="gdConfirmOverlay";
-		      overlay.innerHTML=`<div class="gdConfirmSheet" role="alertdialog" aria-modal="true" aria-label="${gdEscapeHTML(opts.title||"Are you sure?")}">
-		        <strong>${gdEscapeHTML(opts.title||"Are you sure?")}</strong>
+		      overlay.innerHTML=`<div class="gdConfirmSheet" role="alertdialog" aria-modal="true" aria-label="${gdEscapeHTML(opts.title||L("practiceHub.confirmAreYouSure"))}">
+		        <strong>${gdEscapeHTML(opts.title||L("practiceHub.confirmAreYouSure"))}</strong>
 		        <p>${gdEscapeHTML(opts.message||"")}</p>
 		        <div class="gdConfirmActions">
-		          <button type="button" data-gd-confirm="cancel">${gdEscapeHTML(opts.cancelLabel||"Cancel")}</button>
-		          <button type="button" class="danger" data-gd-confirm="ok">${gdEscapeHTML(opts.confirmLabel||"Delete")}</button>
+		          <button type="button" data-gd-confirm="cancel">${gdEscapeHTML(opts.cancelLabel||L("common.cancel"))}</button>
+		          <button type="button" class="danger" data-gd-confirm="ok">${gdEscapeHTML(opts.confirmLabel||L("practiceHub.delete"))}</button>
 		        </div>
 		      </div>`;
 		      let settled=false;
@@ -8334,13 +8346,13 @@
 		  }
 		  function gdPracticeDeleteImports(importIds){
 		    const ids=(Array.isArray(importIds)?importIds:[importIds]).map(id=>String(id||"").trim()).filter(Boolean);
-		    if(!ids.length){gdLmToast("No practice imports selected");return false;}
+		    if(!ids.length){gdLmToast(L("practiceHub.noImportsSelected"));return false;}
 		    const warning=gdPracticeCurrentMyBubbleImportWarning(ids);
 		    const count=ids.length;
 		    return gdConfirmAction({
-		      title:`Delete ${count} practice import${count===1?"":"s"}?`,
-		      message:`This hides import metadata, source rows, native shots, debug events and the generated Practice Bubble for the import.${warning}`,
-		      confirmLabel:"Delete"
+		      title:LN("practiceHub.deleteImportsTitle",count),
+		      message:L(warning==="used"?"practiceHub.deleteImportsMessageUsed":(warning==="active"?"practiceHub.deleteImportsMessageActive":"practiceHub.deleteImportsMessage")),
+		      confirmLabel:L("practiceHub.delete")
 		    },()=>gdPracticeDeleteImportsConfirmed(ids));
 		  }
 		  function gdPracticeDeleteImportsConfirmed(ids){
@@ -8370,8 +8382,8 @@
 		    gdPracticeDebugCheckpoint("practice_import_deleted",deletedNothing?"warning":"success",{counts:{imports:deletedImports,rows:deletedRows,requested:ids.length},raw:{importIds:ids}});
 		    renderPracticeData(true);
 		    if(typeof window.gdRenderDataHubStatus==="function")window.gdRenderDataHubStatus();
-		    if(deletedNothing)gdLmToast(`Nothing deleted - no stored rows matched ${ids.length===1?"that import":"those imports"}`);
-		    else gdLmToast(`Deleted ${deletedImports||1} practice import${(deletedImports||1)===1?"":"s"} (${deletedRows} row${deletedRows===1?"":"s"})`);
+		    if(deletedNothing)gdLmToast(ids.length===1?L("practiceHub.nothingDeletedOne"):L("practiceHub.nothingDeletedMany"));
+		    else gdLmToast(deletedRows===1?LN("practiceHub.deletedImportsOneRow",deletedImports||1):LN("practiceHub.deletedImportsRows",deletedImports||1,{rows:deletedRows}));
 		    return false;
 		  }
 		  function gdPracticeDeleteSelectedImports(){
@@ -8489,25 +8501,25 @@
 	  async function gdPracticeDeleteSelectedEvidenceShots(){
 	    const ids=Object.keys(gdPracticeEvidenceSelectedShots).filter(Boolean);
 	    if(!ids.length){
-	      gdLmToast("No practice shots selected");
+	      gdLmToast(L("practiceHub.noShotsSelected"));
 	      return false;
 	    }
 	    return gdConfirmAction({
-      title:`Delete ${ids.length} practice shot${ids.length===1?"":"s"}?`,
-      message:"The selected shots are removed from practice data.",
-      confirmLabel:"Delete"
+      title:LN("practiceHub.deleteShotsTitle",ids.length),
+      message:L("practiceHub.deleteShotsMessage"),
+      confirmLabel:L("practiceHub.delete")
     },()=>gdPracticeDeleteSelectedEvidenceShotsConfirmed(ids));
   }
   function gdPracticeDeleteSelectedEvidenceShotsConfirmed(ids){
 	    const api=window.GolfDaddyLaunchMonitorData;
 	    if(!api||typeof api.deleteShots!=="function"){
-	      gdLmToast("Practice delete is not ready");
+	      gdLmToast(L("practiceHub.deleteNotReady"));
 	      return false;
 	    }
 	    const result=api.deleteShots(ids);
 	    gdPracticeClearEvidenceSelection();
 	    if(typeof window.gdRenderDataHubStatus==="function")window.gdRenderDataHubStatus();
-	    gdLmToast(`Deleted ${Number(result?.deleted)||ids.length} practice shot${ids.length===1?"":"s"}`);
+	    gdLmToast(LN("practiceHub.deletedShots",Number(result?.deleted)||ids.length));
 	    return false;
 	  }
 	  function gdPracticeClusterByClub(analysis){
@@ -8662,7 +8674,7 @@
 			    const adminOpen=gdPracticeAdminIsOpen();
 			    if(!rows.length){
 			      const adminClear=adminOpen?`<button type="button" class="danger" onclick="return gdPracticeClearLibraryForPlayer()">Clear player imports</button>`:"";
-			      root.innerHTML=gdPracticeLibraryShellHTML(analysis,0,`<div class="gdPracticeEvidenceHead"><div><strong>Clarity Shot Library</strong><span>Imported practice shots will appear here after a scan or upload.</span></div>${adminClear}</div>`);
+			      root.innerHTML=gdPracticeLibraryShellHTML(analysis,0,`<div class="gdPracticeEvidenceHead"><div><strong>Clarity Shot Library</strong><span>${LH("practiceHub.libraryEmpty")}</span></div>${adminClear}</div>`);
 			      return;
 			    }
 			    const importMeta=gdPracticeImportMetadataMap();
@@ -8714,8 +8726,8 @@
 			        const selected=!!gdPracticeImportSelected[importId];
 			        const checkbox=adminOpen&&gdPracticeImportSelectMode?`<label class="gdPracticeEvidenceUploadSelect" onclick="event.stopPropagation()"><input type="checkbox" value="${gdEscapeHTML(importId)}" ${selected?"checked":""} onchange="gdPracticeToggleImportSelection(this)"><span>Select</span></label>`:"";
 			        const importActions=group.deletable
-			          ?`<button type="button" class="danger gdPracticeDeleteX" title="Delete this import" aria-label="Delete this import" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">&times;</button>`
-			          :`<button type="button" class="danger gdPracticeDeleteX" disabled title="These rows carry no import id, so they cannot be deleted as an import. Use Clear practice library." aria-label="Not deletable - no import id">&times;</button>`;
+			          ?`<button type="button" class="danger gdPracticeDeleteX" title="${LH("practiceHub.deleteThisImport")}" aria-label="${LH("practiceHub.deleteThisImport")}" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">&times;</button>`
+			          :`<button type="button" class="danger gdPracticeDeleteX" disabled title="${LH("practiceHub.notDeletableTitle")}" aria-label="${LH("practiceHub.notDeletableAria")}">&times;</button>`;
 			        // Quiet row: just the upload date (club is the section header). Clicking
 			        // the row expands the import's raw data table directly beneath it.
 			        // (Buttons/inputs inside <summary> activate themselves, not the toggle.)
@@ -8725,7 +8737,7 @@
 			      }).join("");
 			      // Quiet header: club label + latest upload date only. Shot/upload counts
 			      // and bubble status are admin/raw-data concerns, not library chrome.
-			      return `<section class="gdPracticeShotClub ${open?"open":""}" data-club="${gdEscapeHTML(club)}"><button type="button" class="gdPracticeShotClubHead" data-gd-practice-club-toggle aria-expanded="${open?"true":"false"}"><div><span>${gdEscapeHTML(club)}</span></div><small>${gdEscapeHTML(gdPracticeImportDate(latest))}</small><b class="gdPracticeEvidenceChevron">${open?"-":"+"}</b></button><div class="gdPracticeShotClubBody">${uploadRows}</div></section>`;
+			      return `<section class="gdPracticeShotClub ${open?"open":""}" data-club="${gdEscapeHTML(club)}"><button type="button" class="gdPracticeShotClubHead" data-gd-practice-club-toggle aria-expanded="${open?"true":"false"}"><div><span>${club==="Unknown / Unmatched"?LH("practiceHub.unknownClub"):gdEscapeHTML(club)}</span></div><small>${gdEscapeHTML(gdPracticeImportDate(latest))}</small><b class="gdPracticeEvidenceChevron">${open?"-":"+"}</b></button><div class="gdPracticeShotClubBody">${uploadRows}</div></section>`;
 			    }).join("");
 			    root.innerHTML=gdPracticeLibraryShellHTML(analysis,rows.length,`${gdPracticePlotModeControls()}${tools}<div class="gdPracticeShotLibrary${rows.length>18?" gdPracticeEvidenceClubRowsScrollable":""}">${clubSections}</div>`);
 			  }
@@ -8747,7 +8759,7 @@
 			    const api=window.GolfDaddyLaunchMonitorData;
 			    const manualApi=window.GolfDaddyManualPracticeData;
     const manualOverride=safe(()=>typeof manualApi?.isOverrideActive==="function"?manualApi.isOverrideActive():false,false);
-		    if(visualTitle)visualTitle.textContent=`${gdShotDataPlayerLabel()} - ${manualOverride?"Practice Data (trusted override)":"Practice Data"}`;
+		    if(visualTitle)visualTitle.textContent=L(manualOverride?"practiceHub.visualTitleOverride":"practiceHub.visualTitle",{name:gdShotDataPlayerLabel()});
 		    if(result)gdRenderPracticeAutoFlow(null);
 	    gdRenderPracticeMasterTolerance();
     gdRenderPracticeAdminChrome();
@@ -8813,7 +8825,7 @@
 	    return false;
 	  }
   async function loadPracticeDemo(){
-    safe(()=>typeof toast==="function"&&toast("Demo data removed"));
+    safe(()=>typeof toast==="function"&&toast(L("practiceHub.demoDataRemoved")));
     renderPracticeData();
     renderDataHubStatus();
     return false;
@@ -9018,7 +9030,7 @@
 	    safe(()=>{const hint=byId("hint");if(hint){hint.classList.remove("visible","gdMappedStartPill");hint.textContent=""}});
 	    safe(()=>{if(typeof window.gdEnsureResumeRoundPicker==="function")window.gdEnsureResumeRoundPicker()});
 	    safe(()=>{if(typeof gdRefreshAssumedCourseFromLocation==="function")gdRefreshAssumedCourseFromLocation()});
-	    safe(()=>{if(typeof toast==="function")toast("Course picker")});
+	    safe(()=>{if(typeof toast==="function")toast(L("profileHub.coursePicker"))});
 	    return false;
 	  }
 	  function gpsBackWithinSession(){
@@ -9042,7 +9054,7 @@
 	      if(window.gdPendingManualShotVerification){
 	        window.gdPendingManualShotVerification=false;
 	        if(typeof gdSyncNewShotButtonState==="function")gdSyncNewShotButtonState();
-	        if(typeof toast==="function")toast("Result logging cancelled");
+	        if(typeof toast==="function")toast(L("profileHub.resultLoggingCancelled"));
 	        return false;
 	      }
 	    }catch(e){}
@@ -9053,7 +9065,7 @@
 	        return false;
 	      }
 	    }catch(e){}
-	    try{if(typeof toast==="function")toast("Course picker");}catch(e){}
+	    try{if(typeof toast==="function")toast(L("profileHub.coursePicker"));}catch(e){}
 	    return openGpsStable({replace:false});
 	  }
 	  function backStable(){
@@ -9468,6 +9480,14 @@
   expose();
   wireClicks();
   gdInstallBrowserRouteBridge();
+  /* The hub panels are built from template strings, so a language switch
+     redraws whichever of them is on screen. */
+  window.GDI18n.onChange(()=>{
+    safe(()=>gdRenderBubbleOffsetHub());
+    safe(()=>{if(byId("practiceDataPanel")?.classList.contains("open"))renderPracticeData(true);});
+    safe(()=>{if(byId("dataHubPanel")?.classList.contains("open"))renderCompareData();});
+    safe(()=>{if(byId("statsPanel")?.classList.contains("open")&&typeof renderStats==="function")renderStats();});
+  });
   document.documentElement.setAttribute("data-gd-route-wired","1");
   setTimeout(()=>{safe(()=>expose());safe(()=>wireClicks());safe(()=>typeof gdRefreshPermissionChrome==="function"&&gdRefreshPermissionChrome());safe(()=>renderDataHubStatus());safe(()=>renderPracticeData());},250);
   setTimeout(()=>{safe(()=>expose());safe(()=>wireClicks());safe(()=>typeof gdRefreshPermissionChrome==="function"&&gdRefreshPermissionChrome());},1200);

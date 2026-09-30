@@ -1,5 +1,7 @@
 "use strict";
 
+const { clean: cleanLocale } = require("../scripts/gd-i18n-node.js");
+
 const {
   email,
   encodeFilter,
@@ -159,7 +161,7 @@ async function upsertAccount(payload, action) {
         updatedAt: account.updatedAt || account.updated_at || null,
         profileWasDerived: !(account.profileId || account.profile_id || profile.id || profile.profileId || profile.profile_id || payload.profileId),
         mergedFromLocalAccountId: merged ? localAccountId : null
-      })),
+      }, cleanLocale(payload.locale) ? { locale: cleanLocale(payload.locale) } : {})),
       updated_at: now
     })
   });

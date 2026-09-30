@@ -77,8 +77,10 @@ assert(
   lane0.includes('GD_PRACTICE_EMAIL_UNKNOWN'),
   'it says the address is not fetched yet instead'
 );
+/* The words themselves now live in the translation base (scripts/i18n/en.js). */
+const english0 = fs.readFileSync(path.join(ROOT, 'scripts/i18n/en.js'), 'utf8');
 assert(
-  /No address to copy yet/.test(lane0),
+  lane0.includes('practiceHub.noAddressToCopy') && /"practiceHub\.noAddressToCopy": "No address to copy yet/.test(english0),
   'and copying a placeholder is refused rather than putting it on the clipboard'
 );
 

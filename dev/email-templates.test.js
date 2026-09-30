@@ -112,7 +112,7 @@ function compedBuild(overrides) {
     welcomeTemplate: core.defaultSignupTemplate("coach_invite_comped"),
     variables: Object.assign(
       { firstName: "Alex", fullName: "Alex Fenwick", email: "player@example.com", coachName: "Sam Hale", appUrl: "https://example.test" },
-      core.accessVariables({ periodLabel: "a month", expiresLabel: "3 October 2026", membership: true })
+      core.accessVariables({ days: 30, expiresAt: "2026-10-03T00:00:00Z", membership: true })
     ),
     accountState: "needs_setup",
     ctaUrl: "https://example.test/set-password"
@@ -247,7 +247,7 @@ test("the invite endpoint sends exactly one email, comped or not", () => {
   const src = read("functions", "admin-user-invite.js");
   const sends = src.match(/await sendEmail\(/g) || [];
   assert.strictEqual(sends.length, 1, "the invite endpoint should send one email, found " + sends.length);
-  assert.ok(/sendEmail\(accountEmail, name, actorName, link, comped\)/.test(src),
+  assert.ok(/sendEmail\(accountEmail, name, actorName, link, comped, body\.locale\)/.test(src),
     "the single send does not carry the comp, so a comped account would get the plain setup email");
   assert.ok(src.indexOf("writeCompedEntitlement") < src.indexOf("await sendEmail("),
     "the entitlement must be written BEFORE the email, or the email cannot state a real expiry");
@@ -255,7 +255,7 @@ test("the invite endpoint sends exactly one email, comped or not", () => {
      null on failure - which is what stops a Comped Sign Up email describing access nobody
      holds. If this stops being the shape, the send-safety rule has gone with it. */
   assert.ok(/let comped = null;/.test(src), "the comp result is no longer null until it succeeds");
-  assert.ok(/comped = \{ periodLabel: pass\.periodLabel/.test(src), "the comp result no longer comes from the written pass");
+  assert.ok(/comped = \{ days: pass\.days, expiresAt: pass\.expiresAt/.test(src), "the comp result no longer comes from the written pass");
   assert.ok(/compError = error/.test(src), "a failed comp no longer leaves comped null");
 
   /* And the signup flow must not carry a second copy of the wording. */
@@ -461,6 +461,51 @@ test("the Studio Communications page reads the catalogue rather than restating i
   assert.strictEqual(record.needsVerification, false, "the registry still flags Communications as unverified");
   assert.ok(record.code.some((c) => c.path === "scripts/gd-email-templates-core.js"),
     "the registry does not point at the shared template core");
+});
+
+/* ---- Emails in the recipient's language ---- */
+test("an email is written in the language it is asked for, dates and plurals included", () => {
+  const es = core.build("comped_access_granted", { locale: "es", to: "a@example.com", recipientName: "José Núñez", days: 30, expiresAt: "2026-10-03T00:00:00Z", membership: true, hasAccount: true });
+  assert.strictEqual(es.message.locale, "es");
+  assert.ok(/lang="es"/.test(es.html), "the html declares its language");
+  assert.ok(/José/.test(es.text), "an accented first name survives the greeting: " + es.text.split("\n")[0]);
+  assert.ok(/octubre/.test(es.text), "the expiry date is written in Spanish");
+  const en = core.build("comped_access_granted", { to: "a@example.com", recipientName: "Alex", days: 30, expiresAt: "2026-10-03T00:00:00Z", membership: true, hasAccount: true });
+  assert.strictEqual(en.subject, "You've been given a month of Clarity Membership");
+  assert.ok(/3 October 2026/.test(en.text), "English keeps the day-month-year date");
+  assert.notStrictEqual(es.subject, en.subject, "the Spanish subject is not the English one");
+  const days = core.build("comped_access_granted", { to: "a@example.com", days: 1, membership: false, hasAccount: true });
+  assert.strictEqual(days.subject, "You've been given 1 day of full Clarity access");
+  assert.ok(/^Hi there,/.test(days.text), "no name still greets");
+  assert.ok(core.build("password_recovery", { locale: "xx-YY" }).message.locale === "en", "an unknown language falls back to English");
+});
+
+test("a Studio edit is sent as written; an untouched default is translated", () => {
+  const english = core.defaultSignupTemplate("coach_updated_account");
+  const untouched = core.compose("coach_updated_account", { locale: "de", welcomeTemplate: english, variables: { coachName: "Sam" } });
+  assert.notStrictEqual(untouched.title, english.headline, "an unedited default reads in the recipient's language");
+  const edited = core.compose("coach_updated_account", { locale: "de", welcomeTemplate: Object.assign({}, english, { headline: "Big news from your coach" }), variables: { coachName: "Sam" } });
+  assert.strictEqual(edited.title, "Big news from your coach", "an admin's own wording is never replaced");
+  assert.ok(/Sam/.test(untouched.subject), "{{coachName}} still fills in a translated subject");
+});
+
+test("the sign-in change email shows both addresses and the security note in the shared layout", () => {
+  const built = core.build("sign_in_email_changed", { to: "old@example.com", recipientName: "Alex", actorName: "Sam Hale", actorRole: "coach", previousEmail: "old@example.com", nextEmail: "new@example.com", toPrevious: true });
+  assert.ok(/changed from old@example\.com to new@example\.com by Sam Hale \(Coach\)/.test(built.text), built.text);
+  assert.ok(/Previous sign-in: old@example\.com/.test(built.text) && /New sign-in: new@example\.com/.test(built.text));
+  assert.ok(/Your password has not changed/.test(built.html));
+  const unnamed = core.build("sign_in_email_changed", { to: "n@example.com", actorRole: "admin", nextEmail: "n@example.com" });
+  assert.ok(/by a Clarity admin\./.test(unnamed.text) && /Previous sign-in: Not set/.test(unnamed.text));
+});
+
+test("every email word is in the app's language files", () => {
+  const src = fs.readFileSync(path.join(ROOT, "scripts", "gd-email-templates-core.js"), "utf8");
+  const en = fs.readFileSync(path.join(ROOT, "scripts", "i18n", "en.js"), "utf8");
+  const used = new Set((src.match(/"email\.[a-zA-Z.]+"/g) || []).map((k) => k.slice(1, -1)));
+  const missing = [...used].filter((k) => en.indexOf('"' + k + '"') === -1 && en.indexOf('"' + k + '.other"') === -1);
+  assert.deepStrictEqual(missing, [], "email keys missing from en.js");
+  const netlify = fs.readFileSync(path.join(ROOT, "netlify.toml"), "utf8");
+  assert.ok(/"scripts\/i18n\/\*\.js"/.test(netlify) && /"scripts\/gd-i18n-node\.js"/.test(netlify), "functions must bundle the language files");
 });
 
 (async () => {

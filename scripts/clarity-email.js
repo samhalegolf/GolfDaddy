@@ -229,7 +229,9 @@
        the words. */
     var payload = Object.assign({}, event, {
       to:recipientEmail,
-      recipientName:recipient.name || recipient.email || "there",
+      recipientName:recipient.name || "",
+      /* The sender's language: used only when the recipient's account has none recorded. */
+      locale:window.GDI18n.locale(),
       logoUrl:logoUrl()
     });
     var queued = Object.assign({}, event, {
@@ -289,7 +291,7 @@
     return fetch("/api/auth-reset-password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: String(emailValue || "").trim() })
+      body: JSON.stringify({ email: String(emailValue || "").trim(), locale: window.GDI18n.locale() })
     }).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (body) {
         if (!response.ok || body.ok === false) {

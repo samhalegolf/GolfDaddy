@@ -463,8 +463,9 @@ async function issueFreePass(payload, auth) {
         recipientName: existingAccount && existingAccount.name || "",
         hasAccount: !!existingAccount,
         membership: pass.membership,
-        periodLabel: pass.periodLabel,
-        expiresLabel: pass.expiresLabel,
+        days: pass.days,
+        expiresAt: pass.expiresAt,
+        locale: payload.locale,
         issuedByName: "Clarity Golf"
       });
       emailStatus = result && result.sent ? "sent" : "skipped";

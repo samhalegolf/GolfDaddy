@@ -33,6 +33,7 @@ function lineStartingWith(prefix) {
 }
 
 const BLOCK = [
+  lineStartingWith('function gdT('),
   lineStartingWith('const GD_UNITS_KEY='),
   lineStartingWith('function gdStoredUnits()'),
   lineStartingWith('function gdUnitsLabel('),
@@ -53,7 +54,12 @@ function launch(store) {
     renderScorecard() {},
     drawGreenDistances() {}
   };
+  context.window = context;
   vm.createContext(context);
+  /* The page loads the translation layer and its English base first. */
+  for (const f of ['scripts/gd-i18n.js', 'scripts/i18n/en.js']) {
+    vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), context, { filename: f });
+  }
   vm.runInContext(BLOCK + '\nthis.__read=()=>units;\nthis.__sync=gdSyncUnitsButtons;\nthis.__toggle=toggleUnits;\nthis.__fmt=fmt;', context);
   context.__sync();
   return {

@@ -11,6 +11,8 @@
 const { hasAuthWithServiceKey, json, supabaseAuth, supabaseRest, text, upsertAccount, claimCanonicalPlayer } = require("./auth-utils");
 const { resolveCaller } = require("./clarity-caller");
 const templates = require("../scripts/gd-email-templates-core.js");
+const { translator } = require("../scripts/gd-i18n-node.js");
+const { storedLocale, cleanLocale } = require("./lib/gd-email-locale.js");
 const signupTemplates = require("./lib/gd-signup-templates.js");
 const { buildSetupLink } = require("./lib/gd-setup-link.js");
 const { ADMIN_COMPED_MEMBERSHIP_KEY } = require("./payment-utils");
@@ -59,8 +61,8 @@ async function compedAccess(player, account, recipientEmail) {
   const days = Number.isFinite(hours) && hours > 0 ? Math.round(hours / 24) : 0;
   return {
     membership: String(comp.entitlement_reason || "") === ADMIN_COMPED_MEMBERSHIP_KEY,
-    periodLabel: days ? (days >= 28 && days <= 31 ? "a month" : days + " days") : "",
-    expiresLabel: comp.expires_at ? new Date(comp.expires_at).toLocaleDateString("en-NZ", { day: "numeric", month: "long", year: "numeric" }) : ""
+    days,
+    expiresAt: comp.expires_at || null
   };
 }
 async function resolvePlayer(player) {
@@ -74,8 +76,14 @@ async function resolvePlayer(player) {
      request. */
   return { player, authUser, account, recipientEmail, comped, templateKey: signupTemplates.keyForComped(comped), accountState: authUser ? "existing" : "needs_setup" };
 }
+/* The player's own language when their account has recorded one; a preview or test send
+   (no account) is English. */
+function localeOf(resolved) {
+  return cleanLocale(storedLocale(resolved.account)) || "en";
+}
 function variables(resolved, caller) {
   return signupTemplates.variablesFor({
+    i18n: translator(localeOf(resolved)),
     recipientName: resolved.player.display_name,
     email: resolved.recipientEmail,
     actorName: (caller && caller.account && caller.account.name) || "Clarity Golf",
@@ -87,6 +95,7 @@ function variables(resolved, caller) {
 }
 function render(resolved, template, caller, ctaUrl) {
   return templates.build(resolved.templateKey || KEYS[0], {
+    locale: localeOf(resolved),
     to: resolved.recipientEmail, siteUrl: siteUrl(), recipientName: resolved.player.display_name,
     actorName: "Clarity Golf", welcomeTemplate: template, variables: variables(resolved, caller),
     accountState: resolved.accountState, ctaUrl: ctaUrl || "",
@@ -162,7 +171,7 @@ exports.handler = async function(event) {
         player: { id: null, display_name: "Alex Fenwick" },
         recipientEmail: email(caller.account && caller.account.email),
         templateKey: key,
-        comped: key === "coach_invite_comped" ? { membership: true, periodLabel: "a month", expiresLabel: new Date(Date.now() + 30 * 86400000).toLocaleDateString("en-NZ", { day: "numeric", month: "long", year: "numeric" }) } : null,
+        comped: key === "coach_invite_comped" ? { membership: true, days: 30, expiresAt: new Date(Date.now() + 30 * 86400000).toISOString() } : null,
         accountState: "existing"
       };
       if (!sample.recipientEmail) { const e = new Error("Your admin account has no usable email address"); e.status = 400; throw e; }

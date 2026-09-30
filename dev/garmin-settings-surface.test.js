@@ -256,7 +256,10 @@ test("the settings page tells apart 'cannot look' from 'looked and found none'",
   assert.ok(/if \(devices\.reason\)/.test(src),
     "a reason with sdkLinked true means we could not look — sending the player to re-pair a watch that was " +
     "never the problem is the failure this branch exists to avoid");
-  assert.ok(/No Garmin watches found/.test(src), "the genuinely-empty case still needs its own wording");
+  /* The words live in the translation base (scripts/i18n/en.js); the page asks for them by key. */
+  const english = fs.readFileSync(path.join(ROOT, "scripts", "i18n", "en.js"), "utf8");
+  assert.ok(/"garmin\.noneFound": "No Garmin watches found/.test(english) && /"garmin\.noneFound"/.test(src),
+    "the genuinely-empty case still needs its own wording");
 });
 
 let failed = 0;

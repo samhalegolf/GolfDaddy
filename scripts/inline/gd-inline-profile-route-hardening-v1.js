@@ -127,8 +127,12 @@
       return;
     }
     const closeTarget=ev.target&&ev.target.closest&&ev.target.closest('#gdProfileV67 .pillBtn');
-    if(closeTarget && /back|home/i.test(closeTarget.textContent||closeTarget.getAttribute('aria-label')||'')){
-      if(/back/i.test(closeTarget.textContent||closeTarget.getAttribute('aria-label')||'')&&document.querySelector('#gdProfileV67 .coachChangePlayer'))return;
+    /* data-gd-profile-nav names the button in any language; the English text
+       match is the fallback for markup that does not carry it. */
+    const nav=closeTarget&&(closeTarget.getAttribute('data-gd-profile-nav')||'');
+    const navText=closeTarget?(nav||closeTarget.textContent||closeTarget.getAttribute('aria-label')||''):'';
+    if(closeTarget && /back|home/i.test(navText)){
+      if(/back/i.test(navText)&&document.querySelector('#gdProfileV67 .coachChangePlayer'))return;
       setTimeout(forceProfileHome,0);
     }
   },true);

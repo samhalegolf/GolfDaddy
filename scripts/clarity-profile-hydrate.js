@@ -139,7 +139,7 @@
       }));
     });
     safe(function () {
-      if (window.toast) window.toast("Restored " + restored.length + " player" + (restored.length === 1 ? "" : "s"));
+      if (window.toast) window.toast(window.GDI18n.tn("profileRestore.restored", restored.length));
     });
     return true;
   }

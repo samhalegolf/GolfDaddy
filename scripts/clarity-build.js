@@ -61,8 +61,8 @@
       var chip=document.getElementById("gdShotHoleChip");
       var chipNumber=writeNumber(chip,current)||current;
       if(chip){
-        chip.title="Long press to pick hole";
-        chip.setAttribute("aria-label","Current hole H"+chipNumber+". Long press to pick hole.");
+        chip.title=window.GDI18n.t("holeChip.title");
+        chip.setAttribute("aria-label",window.GDI18n.t("holeChip.aria",{n:chipNumber}));
       }
 
       var pickerHead=document.querySelector(".gdHoleSelectHead strong");

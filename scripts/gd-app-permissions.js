@@ -2,10 +2,10 @@
 const GD_PERMISSION_STORE_KEY='gd_account_permission_v1';
 const GD_COACH_PROFILE_VISIBILITY_KEY='gd_coach_profile_visibility_v1';
 const GD_PERMISSIONS={
-  admin:{label:'Admin',publicLabel:'Coach',desc:'Coach-facing app plus Admin Settings and Developer Settings.'},
-  coach:{label:'Coach',publicLabel:'Coach',desc:'Coach tools without developer tuning.'},
-  player:{label:'Player',publicLabel:'Player',desc:'Core GPS, bag, profile and Shot Data.'},
-  subscribedPlayer:{label:'Subscribed Player',publicLabel:'Subscribed Player',desc:'Player flow plus subscribed features and saved data.'}
+  admin:{label:'Admin',publicLabel:'Coach',publicKey:'account.roleCoach',desc:'Coach-facing app plus Admin Settings and Developer Settings.'},
+  coach:{label:'Coach',publicLabel:'Coach',publicKey:'account.roleCoach',desc:'Coach tools without developer tuning.'},
+  player:{label:'Player',publicLabel:'Player',publicKey:'account.rolePlayer',desc:'Core GPS, bag, profile and Shot Data.'},
+  subscribedPlayer:{label:'Subscribed Player',publicLabel:'Subscribed Player',publicKey:'permissions.subscribedPlayer',desc:'Player flow plus subscribed features and saved data.'}
 };
 /* Play / GPS used to sit in this list, defaulted off, so opening GPS as the
    player you are looking at needed an admin to unlock it first. That is a
@@ -27,7 +27,8 @@ function gdNormalizePermission(v){
   return 'player';
 }
 function gdPermissionLabel(v){return GD_PERMISSIONS[gdNormalizePermission(v)].label}
-function gdPermissionPublicLabel(v){return GD_PERMISSIONS[gdNormalizePermission(v)].publicLabel}
+/* The label players see (profile badge and screen) goes through the translation layer. */
+function gdPermissionPublicLabel(v){const item=GD_PERMISSIONS[gdNormalizePermission(v)];return window.GDI18n?window.GDI18n.t(item.publicKey):item.publicLabel}
 function gdPermissionToMode(v){const p=gdNormalizePermission(v);return p==='admin'||p==='coach'?'coach':'player'}
 function gdModeLabel(v){return gdPermissionPublicLabel(gdNormalizePermission(v))}
 function gdGetCoachProfileVisibility(){
@@ -119,7 +120,7 @@ function gdQuickSignOut(){
   try{
     if(window.GolfDaddyAccounts&&typeof window.GolfDaddyAccounts.logout==="function")window.GolfDaddyAccounts.logout();
     else gdAccountLogout();
-  }catch(e){try{toast(e.message||'Could not sign out')}catch(_e){}}
+  }catch(e){try{toast(e.message||window.GDI18n.t('permissions.couldNotSignOut'))}catch(_e){}}
   try{showShellHome();}catch(e){}
   try{gdRefreshAccountQuickSignOut();}catch(e){}
   setTimeout(()=>{try{if(window.gdOpenProfileV67)window.gdOpenProfileV67();else if(window.openProfilePanel)window.openProfilePanel();}catch(e){}},30);
