@@ -812,6 +812,7 @@
       </dl>
       <div class="gdRosterDetailActions">
         <button type="button" class="gdRosterDetailAction" onclick="${openArg}">Open profile</button>
+        ${admin && item.email && !item.managed ? `<button type="button" class="gdRosterDetailAction" onclick="gd67ResendInvite(this)">Resend invite</button>` : ''}
         ${admin && item.profileId ? `<button type="button" class="gdRosterDetailAction" onclick="gd67MergeIntoPlayer(this)">Merge a duplicate into this player</button>` : ''}
       </div>
     </div>`;
@@ -870,6 +871,18 @@
       return api.mergeInto(id);
     }).then(merged => { if (merged) render(); })
       .catch(err => { alert((err && err.message) || 'Merge failed'); });
+  }
+
+  /* Same preview-and-send screen as Admin > Users, reached from the player's own row. The
+     server decides the template and whether a set-password link is needed. */
+  function resendInvite(button) {
+    const detail = button && button.closest('.gdProfileRosterDetail');
+    const api = adminUsersApi();
+    if (!detail || !api) return;
+    Promise.resolve(detail.dataset.playerId || fillCanonicalPlayerId(detail)).then(id => {
+      if (!id) throw new Error('No canonical Player ID for this row yet');
+      return api.welcome(id);
+    }).catch(err => { alert((err && err.message) || 'Could not open the invite'); });
   }
 
   function playerRosterRow(item) {
@@ -2526,6 +2539,7 @@
   window.gd67ToggleRosterDetail = toggleRosterDetail;
   window.gd67CopyRosterId = copyRosterId;
   window.gd67MergeIntoPlayer = mergeIntoPlayer;
+  window.gd67ResendInvite = resendInvite;
   window.ClarityCaddieBookingPort = {
     registerUpcomingProvider: registerBookingProvider,
     clearUpcomingProvider: () => registerBookingProvider(null),
