@@ -15,6 +15,7 @@
     "common.done": "Done",
     "common.cancel": "Cancel",
     "common.back": "Back",
+    "common.loading": "Loading",
     "common.home": "Home",
     "common.dismiss": "Dismiss",
     "common.signIn": "Sign in",

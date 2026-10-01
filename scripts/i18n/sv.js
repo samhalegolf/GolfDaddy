@@ -9,6 +9,7 @@
     "common.done": "Klar",
     "common.cancel": "Avbryt",
     "common.back": "Tillbaka",
+    "common.loading": "Laddar",
     "common.home": "Hem",
     "common.dismiss": "Stäng",
     "common.signIn": "Logga in",

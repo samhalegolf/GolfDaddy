@@ -9,6 +9,7 @@
     "common.done": "Готово",
     "common.cancel": "Отказ",
     "common.back": "Назад",
+    "common.loading": "Зареждане",
     "common.home": "Начало",
     "common.dismiss": "Затвори",
     "common.signIn": "Вход",

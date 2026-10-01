@@ -9,6 +9,7 @@
     "common.done": "Gotowe",
     "common.cancel": "Anuluj",
     "common.back": "Wstecz",
+    "common.loading": "Ładowanie",
     "common.home": "Start",
     "common.dismiss": "Zamknij",
     "common.signIn": "Zaloguj się",

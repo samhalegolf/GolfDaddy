@@ -1931,7 +1931,6 @@
     published = false;
     liveTerrainUp = false;
     liveTerrainHold = null;
-    document.body.classList.remove("live-terrain-hold");
     hideVersionStamp();
     document.body.classList.remove("surface-published");
     var img = el("surfaceImage");
@@ -2083,22 +2082,30 @@
      elevation published beside this frame, a texture that will not decode, a shader that will
      not compile on some driver - leaves the picture exactly as it was and says so once. What
      must never happen is a half-state, so the class that reveals the canvas goes on only
-     after a frame has actually been drawn into it. */
+     after a frame has actually been drawn into it.
+
+     It also ends the hole loading screen: once the mesh is drawn, or straight away when no mesh
+     is coming and the flat frame is the final picture. A failure with an onFail goes there
+     instead - that caller decides what the final picture is. */
   function attachMesh(meta, surfaceUrlValue, onFail) {
     disposeMesh();
+    var token = transitionToken;
+    function noMesh(reason) {
+      if (onFail && reason) onFail(reason);
+      else revealHole(token);
+    }
     var elevation = meta && meta.elevation;
     var canvas = el("surfaceMesh");
-    if (!canvas || !elevation || !(elevation.path || elevation.url)) return;
-    if (!(reliefExaggeration() > 0)) return;   /* the player turned relief off */
-    if (!meshSupported()) return;
+    if (!canvas || !elevation || !(elevation.path || elevation.url)) { noMesh(""); return; }
+    if (!(reliefExaggeration() > 0)) { noMesh(""); return; }   /* the player turned relief off */
+    if (!meshSupported()) { noMesh(""); return; }
 
-    var token = transitionToken;
     var meshStarted = Date.now();
     /* A live terrain frame (live-terrain.js) carries its elevation as an object URL. */
     var elevationUrl = elevation.url || apiUrl(surfaceLib.assetUrl(elevation.path));
     var out = meta.outputDimensions || {};
     var frameW = Number(out.width) || 0, frameH = Number(out.height) || 0;
-    if (!frameW || !frameH) return;
+    if (!frameW || !frameH) { noMesh(""); return; }
 
     var loaded = 0, aerialImg = new Image(), elevationImg = new Image();
     aerialImg.crossOrigin = elevationImg.crossOrigin = "anonymous";
@@ -2113,7 +2120,7 @@
            the shear is pixels-per-metre, so this number IS the height scale. */
         var metresX = Number(elevation.metresPerPixel) * Number(elevation.width) || 0;
         var metresY = Number(elevation.metresPerPixel) * Number(elevation.height) || 0;
-        if (!metresX || !metresY) return;
+        if (!metresX || !metresY) { noMesh(""); return; }
         mesh = window.GDTerrainMesh.create(canvas, {
           aerial: aerialImg,
           elevation: elevationImg,
@@ -2142,6 +2149,7 @@
         /* The overlays already on screen were placed on the flat frame. Now that the
            ground has relief, place them again on it (the projector lifts from here on). */
         if (marshal) render(marshal.scene());
+        revealHole(token);
       } catch (error) {
         /* Reported rather than swallowed: a driver that will not compile the shader is
            something to learn about from the field, not from a support ticket describing a
@@ -2155,7 +2163,7 @@
             });
           }
         } catch (e) {}
-        if (onFail) onFail("mesh failed: " + ((error && error.message) || error));
+        noMesh("mesh failed: " + ((error && error.message) || error));
       }
     }
     function failed() {
@@ -2163,7 +2171,7 @@
       /* Not a fallback - there is nothing to fall back to. The frame is up. A live terrain
          frame is the exception: without its mesh it is only a worse copy of the live map. */
       disposeMesh();
-      if (onFail) onFail("mesh textures did not load");
+      noMesh("mesh textures did not load");
     }
     aerialImg.onload = elevationImg.onload = ready;
     aerialImg.onerror = elevationImg.onerror = failed;
@@ -2211,7 +2219,7 @@
   var mapboxBudget = null;      // the device's daily Mapbox tile allowance (live-hybrid.js)
   var LIVE_MESH_AMBIENT = 0.42;
   var liveTerrainHold = null;   // the transition whose frame is being waited for, screen held
-  var LIVE_TERRAIN_HOLD_MS = 5000;
+  var liveTerrainGaveUp = null; // the transition that stopped waiting for its frame (coverHole)
   var meshSupportedCache = null;
 
   function meshSupported() {
@@ -2269,30 +2277,76 @@
     liveTerrain = null;
   }
 
-  /* Hold the screen for this transition's frame. Lifted when it is up (presentSurface), on any
-     fallback (clearSurface), or after LIVE_TERRAIN_HOLD_MS - a slow network shows the live map
-     rather than a frozen previous hole, and the frame still replaces it when it lands. */
+  /* Wait for this transition's frame rather than showing the live map. Lifted when the frame is
+     up (presentSurface), on any fallback, or by the hole loading screen's cap (coverHole). */
   function holdForLiveTerrain(token) {
     presentation = "loading";
     liveTerrainHold = token;
-    document.body.classList.add("live-terrain-hold");
-    setTimeout(function () { if (liveTerrainHold === token) releaseLiveTerrainHold(); }, LIVE_TERRAIN_HOLD_MS);
   }
 
   function releaseLiveTerrainHold() {
-    if (!liveTerrainHold) return;
-    repaint("LIVE_TERRAIN_RELEASE", function () {
-      presentation = "live";
-      clearSurface();
-      if (liveTerrainNote) noteLiveTerrain(liveTerrainNote);
-      lastCameraKey = null;
-      if (marshal) render(marshal.scene());
-    });
+    if (liveTerrainHold) {
+      repaint("LIVE_TERRAIN_RELEASE", function () {
+        presentation = "live";
+        clearSurface();
+        if (liveTerrainNote) noteLiveTerrain(liveTerrainNote);
+        lastCameraKey = null;
+        if (marshal) render(marshal.scene());
+      });
+    }
+    revealLiveMap(transitionToken);
   }
 
-  /* The hole may build: on the live map, or while its own transition holds the screen. */
+  /* The hole may build: on the live map, or while its own transition holds the screen - but not
+     once the loading screen has given up on it and shown the live map as the final picture. */
   function liveTerrainMayPresent(token) {
-    return token === transitionToken && (presentation === "live" || liveTerrainHold === token);
+    return token === transitionToken && liveTerrainGaveUp !== token
+      && (presentation === "live" || liveTerrainHold === token);
+  }
+
+  /* The hole loading screen. Every hole goes up behind it and comes out as its final picture:
+     the published frame, the 3D mesh, or the live map with its tiles drawn. Nothing in between
+     is ever shown - no previous hole, no bare green, no flat Esri map that the hybrid then
+     replaces a second later.
+
+     Capped, because a round must never stop for want of a picture: past HOLE_LOADING_MAX_MS
+     the hole stops waiting for its hybrid frame and plays on whatever the live map has. */
+  var coveredToken = null;
+  var HOLE_LOADING_MAX_MS = 12000;
+
+  function coverHole(token) {
+    coveredToken = token;
+    repaint("HOLE_LOADING", function () { document.body.classList.add("hole-loading"); });
+    setTimeout(function () {
+      if (coveredToken !== token || token !== transitionToken) return;
+      if (liveTerrainHold === token) {
+        liveTerrainGaveUp = token;
+        noteLiveTerrain("frame took longer than " + (HOLE_LOADING_MAX_MS / 1000) + "s");
+        releaseLiveTerrainHold();
+      }
+      revealHole(token);
+    }, HOLE_LOADING_MAX_MS);
+  }
+
+  function revealHole(token) {
+    if (token !== transitionToken || coveredToken !== token) return;
+    coveredToken = null;
+    repaint("HOLE_REVEALED", function () { document.body.classList.remove("hole-loading"); });
+  }
+
+  /* The live map is the final picture: uncover once its imagery has drawn. Before the imagery
+     keys arrive no layer is mounted at all (setBaseFor), so wait for those first. */
+  function revealLiveMap(token) {
+    if (token !== transitionToken || coveredToken !== token || presentation !== "live") return;
+    if (!baseLayer && app.basemap.isSettled && !app.basemap.isSettled()) {
+      app.basemap.ready().then(function () { setTimeout(function () { revealLiveMap(token); }, 0); });
+      return;
+    }
+    if (baseLayer && baseLayer.isLoading && baseLayer.isLoading()) {
+      baseLayer.once("load", function () { revealLiveMap(token); });
+      return;
+    }
+    revealHole(token);
   }
 
   function startLiveTerrain(scene, token, reason) {
@@ -2367,15 +2421,17 @@
   /* Back to the live map, which never left - it is only uncovered again. */
   function liveTerrainFallback(reason) {
     noteLiveTerrain(reason);
-    if (!liveTerrainUp && presentation !== "loading") return;
-    repaint("LIVE_TERRAIN_FALLBACK", function () {
-      presentation = "live";
-      clearSurface();
-      /* clearSurface hides the stamp; the reason is the one thing worth keeping on it. */
-      if (liveTerrainNote) noteLiveTerrain(liveTerrainNote);
-      lastCameraKey = null;
-      if (marshal) render(marshal.scene());
-    });
+    if (liveTerrainUp || presentation === "loading") {
+      repaint("LIVE_TERRAIN_FALLBACK", function () {
+        presentation = "live";
+        clearSurface();
+        /* clearSurface hides the stamp; the reason is the one thing worth keeping on it. */
+        if (liveTerrainNote) noteLiveTerrain(liveTerrainNote);
+        lastCameraKey = null;
+        if (marshal) render(marshal.scene());
+      });
+    }
+    revealLiveMap(transitionToken);
   }
 
   function noteLiveTerrain(reason) {
@@ -2468,7 +2524,6 @@
         surfaceFailed = null;
         document.body.classList.add("surface-published");
         liveTerrainHold = null;
-        document.body.classList.remove("live-terrain-hold");
         publishedFrameUrl = url;
         liveTerrainUp = live;
         showVersionStamp(asset);
@@ -2517,6 +2572,7 @@
       lastCameraKey = null;
       if (marshal) render(marshal.scene());
     });
+    revealLiveMap(transitionToken);
   }
 
   async function loadSurfaceFor(scene) {
@@ -2524,14 +2580,14 @@
     var r = scene.hole.rec;
     var courseKey = marshal.round().courseKey;
     var token = ++transitionToken;
+    coverHole(token);
     loadedHole = hole;
     loadedVisual = (r && r.visual && (r.visual.url || r.visual.path)) || null;
     lastCameraKey = null;
     surfaceFailed = null;
     /* The stale METADATA goes at once, so nothing is ever projected against the
-       previous hole's surface. The stale IMAGE stays: it is the only thing on
-       screen until the new one decodes, and blanking it is what put a map in
-       between two published holes. */
+       previous hole's surface. The stale IMAGE stays, under the loading screen,
+       until the new picture is up. */
     var img = el("surfaceImage");
     if (img) img.dataset.playSurface = "";
 
@@ -2542,9 +2598,8 @@
     }
     /* Absence is the answer for this hole: the live map IS the presentation,
        so create it now. */
-    /* In the 3D mesh test mode the hole about to be built is held off-screen: the previous
-       picture stays (as a published hole's does) rather than the live map flashing up for the
-       second the new frame takes. */
+    /* When the 3D mesh is wanted the hole waits for its frame behind the loading screen,
+       rather than showing the live map for the seconds the frame takes and then swapping. */
     if (liveTerrainWanted()) holdForLiveTerrain(token);
     else { presentation = "live"; clearSurface(); }
     if (courseKey) {

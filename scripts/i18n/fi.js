@@ -9,6 +9,7 @@
     "common.done": "Valmis",
     "common.cancel": "Peruuta",
     "common.back": "Takaisin",
+    "common.loading": "Ladataan",
     "common.home": "Koti",
     "common.dismiss": "Sulje",
     "common.signIn": "Kirjaudu",

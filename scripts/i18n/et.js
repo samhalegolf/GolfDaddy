@@ -9,6 +9,7 @@
     "common.done": "Valmis",
     "common.cancel": "Tühista",
     "common.back": "Tagasi",
+    "common.loading": "Laadimine",
     "common.home": "Avaleht",
     "common.dismiss": "Sulge",
     "common.signIn": "Logi sisse",

@@ -9,6 +9,7 @@
     "common.done": "Končano",
     "common.cancel": "Prekliči",
     "common.back": "Nazaj",
+    "common.loading": "Nalaganje",
     "common.home": "Domov",
     "common.dismiss": "Zapri",
     "common.signIn": "Prijava",

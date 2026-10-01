@@ -9,6 +9,7 @@
     "common.done": "Atlikta",
     "common.cancel": "Atšaukti",
     "common.back": "Atgal",
+    "common.loading": "Įkeliama",
     "common.home": "Pradžia",
     "common.dismiss": "Uždaryti",
     "common.signIn": "Prisijungti",
