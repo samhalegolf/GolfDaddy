@@ -20,10 +20,38 @@
  *
  * What the scan writes is the same overlay a person draws - the mapper cannot tell the
  * difference and does not need to. Nothing on the course changes until a mapper run is
- * requested. */
+ * requested.
+ *
+ * dryRun (and provenance) - a dry run reads the picture the same way and reports the shapes
+ * on the outcome, but saves nothing to the overlay. Forced on for any picture whose provenance
+ * names a non-storable source (Mapbox): that imagery may be judged, never kept. */
 
 import { imageGeoreference } from "./lib/gd-overlay-georef-core.mjs";
 import { hasSupabase, slug, verifiedAdminEmail, loadCourse, loadOverlay, writeAiScan, json } from "./lib/gd-map-overlay-store.mjs";
+import { MAPBOX_PROVIDER_ID } from "./lib/gd-mapbox-source.mjs";
+
+/* Providers whose pictures may be looked at but never turned into stored course data - see
+   gd-mapbox-source.mjs. A picture from one of these is ALWAYS a dry run, whatever the request
+   says: the fence is here, server-side, not in Studio's button. */
+const NON_STORABLE_PROVIDERS = new Set([MAPBOX_PROVIDER_ID]);
+
+/* Where the picture came from, when the caller knows (the map source test sends it). An
+   allow-list of plain values, so nothing else - and never a URL or token - rides on the row. */
+function cleanProvenance(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const text = v => v == null ? null : String(v).slice(0, 80);
+  const number = v => Number.isFinite(Number(v)) ? Number(v) : null;
+  const box = b => b && typeof b === "object" && ["north", "south", "east", "west"].every(k => Number.isFinite(Number(b[k])))
+    ? { north: Number(b.north), south: Number(b.south), east: Number(b.east), west: Number(b.west) } : null;
+  return {
+    imageryProvider: text(raw.imageryProvider), imageryProduct: text(raw.imageryProduct),
+    imageryZoom: number(raw.imageryZoom), imageryMetresPerPixel: number(raw.imageryMetresPerPixel), imageryBounds: box(raw.imageryBounds),
+    terrainProvider: text(raw.terrainProvider), terrainProduct: text(raw.terrainProduct),
+    terrainZoom: number(raw.terrainZoom), terrainMetresPerSample: number(raw.terrainMetresPerSample),
+    generatedAt: text(raw.generatedAt),
+    storable: raw.storable === false || NON_STORABLE_PROVIDERS.has(String(raw.imageryProvider || "")) ? false : raw.storable === true ? true : null
+  };
+}
 
 const MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 /* Base64 of a ~4MB picture. Netlify caps a function body at 6MB anyway; this just makes the
@@ -78,8 +106,13 @@ export default async function courseMapAiScan(req) {
     return json(409, { error: "a scan is already running for " + courseId, detail: "Wait for it to finish - its outcome lands on the overlay." });
   }
 
+  const provenance = cleanProvenance(payload.provenance);
+  const dryRun = payload.dryRun === true || !!(provenance && provenance.storable === false);
+
   const requested = {
     status: "queued",
+    dryRun,
+    provenance,
     requestedAt: new Date().toISOString(),
     requestedBy: admin,
     georef: payload.georef,
@@ -96,7 +129,7 @@ export default async function courseMapAiScan(req) {
   };
   await writeAiScan(courseId, requested);
   await pingBackground(new URL(req.url).origin, courseId);
-  return json(202, { courseId, status: "queued", requestedAt: requested.requestedAt, georef: { width: georef.width, height: georef.height, metresPerPixel: georef.metresPerPixel } });
+  return json(202, { courseId, status: "queued", dryRun, requestedAt: requested.requestedAt, georef: { width: georef.width, height: georef.height, metresPerPixel: georef.metresPerPixel } });
 }
 
 export const config = {

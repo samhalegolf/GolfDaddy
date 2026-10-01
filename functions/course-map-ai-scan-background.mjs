@@ -81,6 +81,7 @@ async function runScan(courseId) {
      result has to be readable afterwards as "what did it see" - zoom, size, grid, anchors -
      not guessed at. The second Belfast scan was diagnosed from exactly these. */
   const base = {
+    dryRun: request.dryRun === true, provenance: request.provenance || null,
     requestedAt: request.requestedAt, requestedBy: request.requestedBy, georef: request.georef,
     grid: request.grid || 0, anchors: Array.isArray(request.anchors) ? request.anchors : [], notes: request.notes || ""
   };
@@ -119,6 +120,27 @@ async function runScan(courseId) {
     if (converted.error) return await finish({ status: "failed", error: converted.error, model: answer.model, usage: answer.usage });
     const confidence = {};
     parsed.features.forEach(f => { if (f.confidence != null) confidence[f.id] = f.confidence; });
+
+    /* A dry run stops here: the shapes go on the outcome for Studio to draw over the picture
+       they came from, and the overlay is not touched. */
+    if (base.dryRun) {
+      const counts = { features: converted.features.length, fairways: 0, greens: 0, tees: 0, bunkers: 0, holeLines: 0 };
+      converted.features.forEach(f => {
+        const key = f.kind === "hole" ? "holeLines" : f.kind + "s";
+        if (key in counts) counts[key] += 1;
+      });
+      return await finish({
+        status: "done", job, replaced: 0, added: 0,
+        model: answer.model, usage: answer.usage,
+        found: parsed.features.length, saved: 0,
+        summary: counts, courseMapUsed: !!courseMap, overlayTotal: saved.features.length,
+        shapes: converted.features,
+        pixels: converted.pixels,
+        dropped: parsed.dropped.concat(converted.dropped),
+        notes: parsed.notes,
+        scorecard: scorecard ? { holes: scorecard.holes.length, source: scorecard.source } : null
+      });
+    }
 
     const savedResult = converted.features.length
       ? await saveOverlay({ courseId, features: converted.features, savedBy: request.requestedBy, append: true })

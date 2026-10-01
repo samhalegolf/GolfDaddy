@@ -109,8 +109,19 @@ test("the course map is stored per course and sent to the model as image 2, neve
   assert.ok(fs.existsSync(path.join(ROOT, "supabase/migrations/20260929_add_course_map_overlay_course_map.sql")), "no migration adds the course_map column");
 });
 
+test("a picture from a non-storable source (Mapbox) is always a dry run that saves nothing", () => {
+  assert.ok(sync.includes("NON_STORABLE_PROVIDERS = new Set([MAPBOX_PROVIDER_ID])"), "the sync half must know which sources may not be stored");
+  assert.ok(sync.includes("payload.dryRun === true || !!(provenance && provenance.storable === false)"), "dryRun must be forced from provenance, not left to the caller");
+  assert.ok(/storable: raw\.storable === false \|\| NON_STORABLE_PROVIDERS\.has/.test(sync), "a Mapbox provenance must read as not storable whatever the caller claims");
+  const dry = background.indexOf("if (base.dryRun) {");
+  const save = background.indexOf("await saveOverlay(");
+  assert.ok(dry > 0 && dry < save, "a dry run must return before the overlay is saved");
+  assert.ok(background.slice(dry, save).includes("return await finish("), "the dry run must finish without falling through to the save");
+  assert.ok(page.includes("dryRun: true, provenance: sourceTest.provenance"), "Studio sends Mapbox scans as dry runs with their provenance");
+});
+
 test("the new tests run in CI", () => {
-  ["dev/ai-scan-core.test.js", "dev/course-map-ai-scan.test.js"].forEach(t => {
+  ["dev/ai-scan-core.test.js", "dev/course-map-ai-scan.test.js", "dev/map-source-providers.test.mjs"].forEach(t => {
     assert.ok(workflow.includes("node " + t), t + " is not in structural-smoke.yml");
   });
 });

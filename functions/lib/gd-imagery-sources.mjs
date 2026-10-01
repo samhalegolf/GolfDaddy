@@ -203,6 +203,10 @@ const GSI_JP_ATTRIBUTION = {
   perSurvey: false
 };
 
+/* Mapbox Satellite / Terrain-DEM are deliberately NOT in this table: Mapbox's terms are
+   display-only for our use (no commercial derivatives without a Commercial Satellite licence).
+   They exist only as a forced, dev/test source - see gd-mapbox-source.mjs and
+   gd-map-sources.mjs - and resolveImagerySource can never return them. */
 export const IMAGERY_SOURCES = [
   {
     key: "linz-nz",

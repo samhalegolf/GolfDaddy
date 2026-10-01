@@ -116,6 +116,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/course-map-source-test"
+  to = "/.netlify/functions/course-map-source-test"
+  status = 200
+
+[[redirects]]
   from = "/api/course-map-wand"
   to = "/.netlify/functions/course-map-wand"
   status = 200
