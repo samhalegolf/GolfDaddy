@@ -586,23 +586,29 @@
     element.dataset.gdCourseId=course.courseId||"";
   }
 
+  /* Nothing nearby means no block at all. There used to be a "Manual mode" card
+     here; manual play is now only offered after a failed scan, from the
+     map-not-available banner (scripts/gd-course-map-notify.js). */
   function renderNearby(){
     const option=byId("gdCourseAssumedOption");
     if(!option)return null;
-    const center=currentPoint();
-    const nearby=rank(localMatches("",{nearbyOnly:true}),"").slice(0,3);
-    const courses=nearby.length?nearby:[basePayload({name:"Manual GPS",lat:center?.lat??null,lng:center?.lng??null,source:"manual-gps"})];
-    const selected=courses[0];
-    setPayloadOn(option,selected);
+    const courses=rank(localMatches("",{nearbyOnly:true}),"").slice(0,3);
+    const selected=courses[0]||null;
+    if(selected)setPayloadOn(option,selected);
+    else{
+      option.__gdCoursePayload=null;
+      option.dataset.gdCourseName="";
+    }
+    option.hidden=!selected;
     const html=courses.map((course,idx)=>{
       const detail=metaText(course,{noCourseResult:true});
       return `<div class="courseAssumedBlock" role="button" tabindex="0" data-course-key="${esc(course.canonicalKey||course.name)}" data-course-index="${idx}">
         <div class="courseAssumedMain">
-          <div class="courseAssumedLabel">${course.name==="Manual GPS"?H("picker.manualMode"):H("picker.nearbyCourse")}</div>
+          <div class="courseAssumedLabel">${H("picker.nearbyCourse")}</div>
           <div class="courseAssumedName"${idx===0?' id="gdCourseAssumedName"':""}>${esc(course.name)}</div>
-          <div class="courseAssumedMeta">${esc(course.name==="Manual GPS"?(center?L("picker.manualNoNearby"):L("picker.manualSearchOrGps")):detail)}</div>
+          <div class="courseAssumedMeta">${esc(detail)}</div>
         </div>
-        <button type="button"${idx===0?' id="gdCourseAssumedPlayBtn"':""}>${course.name==="Manual GPS"?H("picker.manual"):H("picker.play")}</button>
+        <button type="button"${idx===0?' id="gdCourseAssumedPlayBtn"':""}>${H("picker.play")}</button>
       </div>`;
     }).join("");
     /* Only touch the DOM when the block would look different. This is called
@@ -883,6 +889,9 @@
     return promise;
   }
   function selectCourseForPlay(raw,opts={}){
+    /* No course, no play. Manual GPS is not something the picker opens - it is only
+       offered after a failed scan, from the map-not-available banner. */
+    if(!raw||isManualCourse(normalizeCourse(raw)))return false;
     let course=normalizeCourse(raw);
     course.courseId=course.savedCourseId||course.courseId||course.canonicalKey;
     course=applyStoredPin(course);
@@ -913,7 +922,7 @@
     rememberRecentCourse(course);
     state.activeSelection=course;
     safe(()=>{window.__gdLiveCoursePickerSelection=course;window.__gdLiveCoursePickerSelectionAt=Date.now();});
-    if(!course.gdDatabaseMapChecked&&!isManualCourse(course)){
+    if(!course.gdDatabaseMapChecked){
       const token=`${Date.now()}-${Math.random()}`;
       state.activeToken=token;
       safe(()=>{
@@ -941,7 +950,7 @@
       window.__gdCoursePickerChangingAt=0;
       window.__gdCoursePickerFirstHoleOpenToken=null;
       window.gdCourseChangeMode="";
-      if(!isManualCourse(course))window.__gdCoursePickerOwnsOpenResolverUntil=Date.now()+45000;
+      window.__gdCoursePickerOwnsOpenResolverUntil=Date.now()+45000;
       localStorage.removeItem("gd_active_course_v1");
     });
     const needsPin=bridge().needsCoursePin;
@@ -949,13 +958,6 @@
       clearSelecting();
       const showPin=bridge().showPin;
       return typeof showPin==="function"?showPin(course):false;
-    }
-    if(isManualCourse(course)){
-      clearSelecting();
-      if(typeof bridge().hidePin==="function")bridge().hidePin();
-      closePickerSurface("manual-gps-selected");
-      const manualOpen=bridge().openManualCourse;
-      return typeof manualOpen==="function"?manualOpen(course):false;
     }
     if(course.gdDatabaseMapAvailable===true&&localSavedPlayable(course)){
       if(typeof bridge().hidePin==="function")bridge().hidePin();

@@ -49,7 +49,8 @@ assert(appCore.includes("function gdCoursePickerNeedsCoursePin(payload)"), "cour
  * These three lines are the shape of the fix; losing any of them brings that back. */
 assert(library.includes("if(serverWait&&serverWait.timedOut&&serverWait.stillProcessing){"), "a wait that ran out on a LIVE job must extend, not fall back");
 assert(library.includes("timedOut:true,stillProcessing:status==='processing'"), "the wait has to report WHICH way it ran out, or the branch above cannot tell");
-assert(library.includes("'player-chose-basic-gps'"), "manual green-tapping while the server is still working is only ever reached by the player choosing it");
+assert(!library.includes("'player-chose-basic-gps'"), "there is no way into manual green-tapping while the server is still working");
+assert(library.includes("'player-chose-manual-gps'"), "manual green-tapping is only reached from the failed-scan banner, by the player choosing it");
 /* "A published map beats the pin prompt" used to be a branch in the gate. It is
    now the default for every course, mapped or not: the pin prompt is a repair
    reached only from a failed mapper verdict, so having a map is no longer a
