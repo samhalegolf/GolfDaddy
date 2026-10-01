@@ -28,6 +28,16 @@
   function safe(fn, fallback) { try { return fn(); } catch (e) { return fallback; } }
   function L(key, vars) { return window.GDI18n.t(key, vars); }
 
+  /* The hole the round actually reached, or null when the course was opened
+     and no hole started. Only v2 records (app/js/resume.js) carry one: v1's
+     `hole` was the last hole on screen, browsed or played, and resuming it
+     made a browsed hole live. */
+  function liveHoleOf(saved) {
+    if (Number(saved.version) < 2) return null;
+    var n = Number(saved.liveHole);
+    return Number.isFinite(n) && n >= 1 ? n : null;
+  }
+
   function read() {
     var saved = safe(function () { return window.GDPlayContext ? window.GDPlayContext.readJson("resume-round", KEY) : JSON.parse(localStorage.getItem(KEY) || "null"); }, null);
     if (!saved || !saved.courseId) return null;
@@ -55,7 +65,9 @@
   }
 
   function detail(saved) {
-    var parts = [saved.courseName || L("resumeRound.round"), L("resumeRound.holeShort", { n: Number(saved.hole) || 1 })];
+    var parts = [saved.courseName || L("resumeRound.round")];
+    var hole = liveHoleOf(saved);
+    if (hole) parts.push(L("resumeRound.holeShort", { n: hole }));
     var when = age(saved);
     if (when) parts.push(when);
     return parts.join(" · ");
@@ -66,7 +78,10 @@
     if (saved.courseName) parts.push("courseName=" + encodeURIComponent(saved.courseName));
     if (Number.isFinite(Number(saved.courseLat))) parts.push("courseLat=" + encodeURIComponent(saved.courseLat));
     if (Number.isFinite(Number(saved.courseLng))) parts.push("courseLng=" + encodeURIComponent(saved.courseLng));
-    parts.push("hole=" + encodeURIComponent(Number(saved.hole) || 1));
+    /* No live hole, no hole on the URL: /app/ opens the course in Preview
+       rather than being told hole 1 was being played. */
+    var hole = liveHoleOf(saved);
+    if (hole) parts.push("hole=" + encodeURIComponent(hole));
     /* index.html explicitly, not "/app/" — a bare directory path is treated as
        an SPA route by the native shells and re-enters the old app. Same reason
        navigateToAppPlay in the picker spells it out. */

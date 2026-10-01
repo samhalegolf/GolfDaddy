@@ -561,6 +561,96 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const replay = await look(() => JSON.parse(ClarityApp.trace.exportLog()).signals.length);
   check("and the round is replayable from its signal log", replay > 20, `${replay} signals`);
 
+  console.log("\n— the resume note belongs to the LIVE hole —");
+
+  /* The Royal Belfast bug, through the real boot: the resume note was written
+     from holeEntered (a view effect), so a hole only browsed in Preview came
+     back LIVE when openPlay next ran. Each reload here is a real one, so
+     openPlay reads what the previous page actually wrote.
+     dev/resume-live-hole.test.js has the full matrix in node. */
+  const courseUrl = `http://127.0.0.1:${port}/app/index.html?courseId=verify&courseName=Verify`;
+  const rp = await context.newPage();
+  const rpErrors = [];
+  rp.on("pageerror", (e) => rpErrors.push(String(e).split("\n")[0]));
+  const reopen = async () => {
+    await rp.goto(courseUrl, { waitUntil: "load" });
+    await rp.waitForFunction(() => window.ClarityApp && window.ClarityApp.marshal, { timeout: 15000 });
+    await wait(600);
+  };
+  const rLook = (fn, arg) => rp.evaluate(fn, arg);
+  const rBadge = () => rLook(() => document.getElementById("playerBadgeState").textContent
+    + "/" + document.getElementById("playerBadgeNumber").textContent);
+  const rState = () => rLook(() => ({
+    live: ClarityApp.marshal.state().live.hole,
+    view: ClarityApp.marshal.state().viewHole,
+    note: ClarityApp.resume.read()
+  }));
+  const H2_NEAR_TEE = offsetM(TEE, -340 + 36, 60);
+
+  await context.setGeolocation({ latitude: TEE.lat, longitude: TEE.lng });
+  await reopen();
+  await rLook(() => ClarityApp.resume.clear());
+  await reopen();
+  let r = await rState();
+  check("opening a course records it with NO live hole - hole 1 is not assumed",
+    !!r.note && r.note.courseId === "verify" && r.note.liveHole === null && r.live === null,
+    JSON.stringify(r.note));
+
+  await rLook(() => ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: 3 }));
+  r = await rState();
+  check("browsing to 3 in Preview writes nothing resumable", r.view === 3 && r.note.liveHole === null,
+    `view ${r.view}, note ${r.note.liveHole}`);
+  await reopen();
+  r = await rState();
+  check("and reopening stays in Preview rather than resurrecting 3",
+    r.live === null && (await rBadge()) === "PREVIEW/1", `${await rBadge()}, live ${r.live}`);
+
+  await context.setGeolocation({ latitude: H2_NEAR_TEE.lat, longitude: H2_NEAR_TEE.lng });
+  await wait(420);
+  await rLook(() => ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: 2 }));
+  await rp.click("#playButton");
+  await wait(300);
+  r = await rState();
+  check("Play on hole 2 is what writes the note", r.live === 2 && r.note.liveHole === 2,
+    `live ${r.live}, note ${r.note.liveHole}`);
+
+  await rLook(() => ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: 3 }));
+  await wait(250);
+  r = await rState();
+  const returnLabel = await rLook(() => document.getElementById("playerBadgeReturn").textContent);
+  check("previewing 3 while live on 2: PREVIEW 3, return to 2, note still 2",
+    (await rBadge()) === "PREVIEW/3" && /2/.test(returnLabel) && r.live === 2 && r.note.liveHole === 2,
+    `${await rBadge()}, return "${returnLabel}", note ${r.note.liveHole}`);
+  await rp.click("#playerBadgeReturn");
+  await wait(300);
+  r = await rState();
+  check("Return goes back to live 2 without touching the live hole",
+    (await rBadge()) === "LIVE/2" && r.live === 2 && r.view === 2);
+
+  await rLook(() => ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: 3 }));
+  await reopen();
+  r = await rState();
+  check("reload while previewing 3 resumes LIVE 2, not 3",
+    r.live === 2 && (await rBadge()) === "LIVE/2", `${await rBadge()}, live ${r.live}`);
+
+  /* The reported shape: a note left by the pre-fix build, naming a hole the
+     player only browsed, read on a phone nowhere near the course. */
+  await context.setGeolocation({ latitude: 54.6566, longitude: -5.7969 });
+  await rLook(() => {
+    const note = { version: 1, courseId: "verify", courseName: "Verify", hole: 3,
+      updatedAt: Date.now(), expiresAt: Date.now() + 3600000 };
+    if (window.GDPlayContext) window.GDPlayContext.writeJson("resume-round", note);
+    else localStorage.setItem("clarity:resume-round:v1", JSON.stringify(note));
+  });
+  await reopen();
+  r = await rState();
+  check("a pre-fix note's browsed hole never becomes canonical live state on reopen",
+    r.live === null && (await rBadge()) === "PREVIEW/1"
+      && !(await rLook(() => !document.getElementById("playerBadgeReturn").classList.contains("hiddenState"))),
+    `${await rBadge()}, live ${r.live}`);
+  check("no uncaught exceptions across the reloads", rpErrors.length === 0, rpErrors.slice(0, 3).join(" | "));
+  await rp.close();
+
   await browser.close();
   server.close();
 
