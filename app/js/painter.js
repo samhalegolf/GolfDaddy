@@ -2058,6 +2058,7 @@
     var elevation = meta && meta.elevation;
     var canvas = el("surfaceMesh");
     if (!canvas || !elevation || !elevation.path) return;
+    if (!(reliefExaggeration() > 0)) return;   /* the player turned relief off */
     if (!window.GDTerrainMesh || !window.GDTerrainMesh.supported()) return;
 
     var token = transitionToken;
@@ -2094,7 +2095,7 @@
            mesh runs mostly ambient and contributes geometry - the silhouette, the pad edges,
            the occlusion - rather than a second set of shadows. */
         mesh.state.ambient = 0.78;
-        mesh.state.exaggeration = 2.5;
+        mesh.state.exaggeration = reliefExaggeration();
         applyMeshFrame();
         document.body.classList.add("surface-mesh");
         /* The overlays already on screen were placed on the flat frame. Now that the
@@ -2124,6 +2125,26 @@
     aerialImg.onerror = elevationImg.onerror = failed;
     aerialImg.src = surfaceUrlValue;
     elevationImg.src = elevationUrl;
+  }
+
+  /* The player's Terrain relief setting. 0 means no mesh at all. */
+  function reliefExaggeration() {
+    var s = settings();
+    return s && s.reliefExaggeration ? s.reliefExaggeration() : 2.5;
+  }
+
+  /* A settings change can turn relief off, on, or to a new height. Off drops the mesh back
+     to the flat frame; on rebuilds it from the frame already showing; a new height is just
+     a uniform, picked up by the render that follows every settings change. */
+  function syncMeshRelief() {
+    var exaggeration = reliefExaggeration();
+    if (!(exaggeration > 0)) { disposeMesh(); return; }
+    if (mesh) { mesh.state.exaggeration = exaggeration; return; }
+    var img = el("surfaceImage");
+    if (!published || !publishedFrameUrl || !img || !img.dataset.playSurface) return;
+    var meta;
+    try { meta = JSON.parse(img.dataset.playSurface); } catch (e) { return; }
+    attachMesh(meta, publishedFrameUrl);
   }
 
   /* Put the canvas where the image is, and tell the mesh which way is up.
@@ -2598,6 +2619,7 @@
     });
 
     if (app.gpsSettings) app.gpsSettings.onChange(function () {
+      syncMeshRelief();
       lastCameraKey = null;
       if (marshal) repaint("SETTINGS_CHANGED", function () { render(marshal.scene()); });
     });
