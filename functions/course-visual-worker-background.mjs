@@ -35,6 +35,8 @@ import greenCore from "../scripts/gd-green-contours-core.js";
 import courseVersionLabel from "../scripts/gd-course-version-label.js";
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
+import { isTestKind, testRunFromJob, TEST_BAKE_BUCKET, TEST_SNAPSHOT_KIND, TEST_EXPORT_KIND } from "./lib/gd-test-bake-core.mjs";
+import { mapboxCaptureSource } from "./lib/gd-mapbox-source.mjs";
 const JOBS_TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
 const RECIPES_TABLE = "course_visual_recipes";
@@ -111,8 +113,8 @@ const supabaseFetch = createSupabaseFetch({
   label: "course-visual-worker-background"
 });
 
-async function storageUpload(path, buffer, contentType) {
-  const response = await fetch(supabaseBase() + "/storage/v1/object/" + BUCKET + "/" + path, {
+async function storageUpload(path, buffer, contentType, bucket = BUCKET) {
+  const response = await fetch(supabaseBase() + "/storage/v1/object/" + bucket + "/" + path, {
     method: "POST",
     headers: {
       apikey: supabaseKey(),
@@ -146,6 +148,35 @@ async function finishJob(id, patch) {
     method: "PATCH",
     body: JSON.stringify(Object.assign({ updated_at: new Date().toISOString() }, patch))
   });
+}
+
+/* Where a job's captures and frames live. A live job writes the course's own folder in the
+   public course-visuals bucket - the folder Play reads. A test job writes its run folder in
+   the private test bucket and nothing else (gd-test-bake-core.mjs); every path below is built
+   from space.root and every Storage call is given space.bucket, so a test job has no path
+   that reaches the live course. */
+function spaceFor(job) {
+  if (isTestKind(job.kind)) {
+    const run = testRunFromJob(job);
+    return { test: true, bucket: TEST_BAKE_BUCKET, root: run.root, run };
+  }
+  return { test: false, bucket: BUCKET, root: String(job.course_id), run: null };
+}
+
+/* The private test bucket, created on first use - idempotent, and private so test frames are
+   reachable only through signed links (functions/course-test-bakes.mjs). Also declared in
+   supabase/migrations/20261001_create_course_visual_tests_bucket.sql. */
+let testBucketReady = false;
+async function ensureTestBucket() {
+  if (testBucketReady) return;
+  const response = await fetch(supabaseBase() + "/storage/v1/bucket", {
+    method: "POST",
+    headers: { apikey: supabaseKey(), Authorization: "Bearer " + supabaseKey(), "Content-Type": "application/json" },
+    body: JSON.stringify({ id: TEST_BAKE_BUCKET, name: TEST_BAKE_BUCKET, public: false })
+  });
+  const text = response.ok ? "" : await response.text();
+  if (!response.ok && !/already exists|duplicate/i.test(text)) throw new Error("could not create the " + TEST_BAKE_BUCKET + " bucket: " + response.status + " " + text.slice(0, 200));
+  testBucketReady = true;
 }
 
 async function loadCoursePackage(courseId) {
@@ -373,14 +404,27 @@ async function buildCapture(grid, { format }) {
    if the course geometry moved, the key changes and every capture is re-shot rather than
    silently reusing a stale image under the same captureKey. */
 async function runSnapshotJob(job, deadlineAt) {
+  const space = spaceFor(job);
   const pkg = await loadCoursePackage(job.course_id);
   if (!pkg) throw new Error("course " + job.course_id + " not found in " + MAPS_TABLE);
   /* Licensing gate, before a single tile is fetched. No licensed source covering this course
      is a legitimate answer - that course runs live-only - so the job fails with the reason
-     rather than falling back to whatever imagery happens to respond. */
+     rather than falling back to whatever imagery happens to respond.
+
+     A test job names its source instead (Mapbox today) and never consults the registry: it
+     may only ever write the private test space, which is what makes a non-storable source
+     acceptable there. A live job can never be handed a non-storable source. */
   const bounds = courseBoundsFor(pkg);
-  const source = resolveImagerySource(bounds);
-  if (!source) throw new Error("imagery-source-unavailable: " + unscannableReason(bounds));
+  let source;
+  if (space.test) {
+    source = space.run.source === "mapbox" ? mapboxCaptureSource() : null;
+    if (!source) throw new Error("test-source-unavailable: " + space.run.source + " is not configured (MAPBOX_PUBLIC_TOKEN)");
+    await ensureTestBucket();
+  } else {
+    source = resolveImagerySource(bounds);
+    if (!source) throw new Error("imagery-source-unavailable: " + unscannableReason(bounds));
+    if (source.storable === false) throw new Error("imagery-source-unavailable: " + source.key + " is not storable");
+  }
   const attribution = attributionFor(source, null);
   /* Relief is computed, not fetched: source.terrain is the DEM spec tagged for the job, and
      is null wherever the DEM is not tiled terrain-RGB. Null plans no terrain capture and the
@@ -404,7 +448,7 @@ async function runSnapshotJob(job, deadlineAt) {
      planKey and every capture is re-shot from tiles rather than re-renditioned from a master
      that frames the old geometry. Snapshots written before this field existed have no planKey
      and are therefore never trusted - they re-shoot once, then carry one. */
-  const storedPlanKey = await storedSnapshotPlanKey(pkg.courseId);
+  const storedPlanKey = await storedSnapshotPlanKey(space);
   const mastersMatchPlan = !!storedPlanKey && storedPlanKey === planKey;
   const index = {
     version: 1, planKey, renditionPx: EXPORT_RENDITION_PX,
@@ -412,7 +456,8 @@ async function runSnapshotJob(job, deadlineAt) {
     generatedAt: new Date().toISOString(),
     /* Travels with the captures so the credit is attached to the pixels, not reconstructed
        later from whatever the registry happens to say at read time. */
-    source: { key: source.key, label: source.label, license: source.license && source.license.name || "", attribution },
+    source: { key: source.key, label: source.label, license: source.license && source.license.name || "", attribution, storable: source.storable !== false },
+    testRun: space.run,
     captures: []
   };
   const failures = [];
@@ -432,20 +477,20 @@ async function runSnapshotJob(job, deadlineAt) {
        ground, while still drawing relief over it. */
     let elevationGaps = [];
     const ext = isTerrain ? "png" : "jpg";
-    const fullPath = pkg.courseId + "/captures/" + item.captureKey.replace(/:/g, "/") + "." + ext;
-    const renditionPath = pkg.courseId + "/captures/" + EXPORT_RENDITION_PX + "/" + item.captureKey.replace(/:/g, "/") + "." + ext;
+    const fullPath = space.root + "/captures/" + item.captureKey.replace(/:/g, "/") + "." + ext;
+    const renditionPath = space.root + "/captures/" + EXPORT_RENDITION_PX + "/" + item.captureKey.replace(/:/g, "/") + "." + ext;
     /* The export-ready rendition is what the export reads, so its presence is what "already
        shot" means. path stays pointed at whichever object actually exists. */
     const path = KEEP_FULL_RES_MASTER ? fullPath : renditionPath;
     try {
-      if (!(resumable && await storageExists(renditionPath))) {
+      if (!(resumable && await storageExists(renditionPath, space.bucket))) {
         await heartbeatJob(job, { planKey, capturesDone: index.captures.length, capturesTotal: plan.length, stage: "shooting " + item.captureKey, rssMb: Math.round(process.memoryUsage().rss / 1048576) });
         /* Raising the output size must not cost 6.6k tile fetches per course. When a master
            for this exact plan is already in storage, the rendition is derived from it and the
            tile source is never touched - that is the whole reason KEEP_FULL_RES_MASTER exists. */
         let buffer = null;
-        if (mastersMatchPlan && await storageExists(fullPath)) {
-          buffer = await storageDownload(fullPath);
+        if (mastersMatchPlan && await storageExists(fullPath, space.bucket)) {
+          buffer = await storageDownload(fullPath, space.bucket);
         } else {
           const built = await buildCapture(grid, { format: isTerrain ? "png" : "jpeg" });
           buffer = built.buffer;
@@ -462,7 +507,7 @@ async function runSnapshotJob(job, deadlineAt) {
              Storing elevation is the better artefact anyway. It is the input to the terrain
              mesh, and to real slope for plays-like, neither of which can be recovered from a
              greyscale of one lighting choice. */
-          if (KEEP_FULL_RES_MASTER) await storageUpload(fullPath, buffer, isTerrain ? "image/png" : "image/jpeg");
+          if (KEEP_FULL_RES_MASTER) await storageUpload(fullPath, buffer, isTerrain ? "image/png" : "image/jpeg", space.bucket);
         }
         /* Export-ready rendition: pre-downscaled to the frame output resolution so the export
            never has to download and decode the full-resolution capture again. Decoding 17MP
@@ -484,7 +529,7 @@ async function runSnapshotJob(job, deadlineAt) {
           const small = sharp(buffer, { limitInputPixels: false }).resize({ width: EXPORT_RENDITION_PX, height: EXPORT_RENDITION_PX, fit: "inside", withoutEnlargement: true });
           return (isTerrain ? small.png({ compressionLevel: 6 }) : small.jpeg({ quality: 88 })).toBuffer();
         })();
-        await storageUpload(renditionPath, renditionBuffer, isTerrain ? "image/png" : "image/jpeg");
+        await storageUpload(renditionPath, renditionBuffer, isTerrain ? "image/png" : "image/jpeg", space.bucket);
         buffer = null;
         shot += 1;
       }
@@ -525,7 +570,7 @@ async function runSnapshotJob(job, deadlineAt) {
     }
   }
   if (!index.captures.length) throw new Error("every capture failed: " + JSON.stringify(failures.slice(0, 3)));
-  await storageUpload(pkg.courseId + "/captures/index.json", Buffer.from(JSON.stringify(index)), "application/json");
+  await storageUpload(space.root + "/captures/index.json", Buffer.from(JSON.stringify(index)), "application/json", space.bucket);
   return {
     planItems: plan.length,
     captured: index.captures.length,
@@ -536,14 +581,15 @@ async function runSnapshotJob(job, deadlineAt) {
     source: source.key,
     license: source.license && source.license.name || "",
     failures: failures.slice(0, 12),
-    indexPath: pkg.courseId + "/captures/index.json"
+    test: space.test,
+    indexPath: space.root + "/captures/index.json"
   };
 }
 
 /* ---------- export job: recipe compose using the REAL engine ----------------------------- */
 
-async function storageDownload(path) {
-  const response = await fetch(supabaseBase() + "/storage/v1/object/" + BUCKET + "/" + path, {
+async function storageDownload(path, bucket = BUCKET) {
+  const response = await fetch(supabaseBase() + "/storage/v1/object/" + bucket + "/" + path, {
     headers: { apikey: supabaseKey(), Authorization: "Bearer " + supabaseKey() }
   });
   if (!response.ok) throw new Error("Storage download " + response.status + " for " + path);
@@ -744,6 +790,16 @@ async function latestPublishedRecipe(courseId) {
   return normalizeRecipe({ presetId: NATURAL_PRESET_ID, courseOverrides: {} });
 }
 
+/* A finished test snapshot chains its own test export, carrying the same run - the follow-up
+   live export is never queued for a test, so the live recipe and frames are untouched. */
+async function enqueueTestExport(job) {
+  const run = testRunFromJob(job);
+  await supabaseFetch(JOBS_TABLE, {
+    method: "POST",
+    body: JSON.stringify([{ course_id: job.course_id, kind: TEST_EXPORT_KIND, status: "queued", recipe: { testRun: run }, requested_by: "auto-after-test-snapshot" }])
+  });
+}
+
 async function enqueueFollowUpExport(courseId) {
   const existing = await supabaseFetch(JOBS_TABLE + "?select=id&course_id=eq." + encodeURIComponent(courseId) + "&kind=eq.export&status=in.(queued,running)&limit=1");
   if (Array.isArray(existing) && existing.length) return;
@@ -884,17 +940,17 @@ function hashText(text) {
 /* planKey of the snapshot currently in storage, or "" when there is no index or it predates
    the field. Read once per snapshot run to decide whether stored masters frame current
    geometry (see runSnapshotJob). */
-async function storedSnapshotPlanKey(courseId) {
+async function storedSnapshotPlanKey(space) {
   try {
-    const index = JSON.parse((await storageDownload(courseId + "/captures/index.json")).toString("utf8"));
+    const index = JSON.parse((await storageDownload(space.root + "/captures/index.json", space.bucket)).toString("utf8"));
     return String(index && index.planKey || "");
   } catch (e) {
     return "";
   }
 }
 
-async function storageExists(path) {
-  const response = await fetch(supabaseBase() + "/storage/v1/object/info/" + BUCKET + "/" + path, {
+async function storageExists(path, bucket = BUCKET) {
+  const response = await fetch(supabaseBase() + "/storage/v1/object/info/" + bucket + "/" + path, {
     headers: { apikey: supabaseKey(), Authorization: "Bearer " + supabaseKey() }
   });
   return response.ok;
@@ -928,11 +984,17 @@ function normaliseLogLine(label, diagnostics) {
 }
 
 async function runExportJob(job, deadlineAt) {
+  const space = spaceFor(job);
   const pkg = await loadCoursePackage(job.course_id);
   if (!pkg) throw new Error("course " + job.course_id + " not found in " + MAPS_TABLE);
-  const capturesIndex = JSON.parse((await storageDownload(job.course_id + "/captures/index.json")).toString("utf8"));
+  const capturesIndex = JSON.parse((await storageDownload(space.root + "/captures/index.json", space.bucket)).toString("utf8"));
   const entries = Array.isArray(capturesIndex && capturesIndex.captures) ? capturesIndex.captures : [];
   if (!entries.length) throw new Error("no captures in index - run a snapshot job first");
+  /* The fence on the publishing side: captures from a source we may not store can be baked
+     into the test space, never into the course Play reads. */
+  if (!space.test && capturesIndex.source && capturesIndex.source.storable === false) {
+    throw new Error("refusing to publish: captures come from " + capturesIndex.source.key + ", which is not storable");
+  }
   const recipe = job.recipe && (job.recipe.presetId || job.recipe.preset_id || job.recipe.overrides || job.recipe.courseOverrides || job.recipe.settings)
     ? normalizeRecipe(job.recipe)
     : await latestPublishedRecipe(job.course_id);
@@ -943,7 +1005,7 @@ async function runExportJob(job, deadlineAt) {
      RELIEF_STAMP rides along for the same reason - relief changes published pixels, and
      without it every already-exported frame resumes as current and nothing re-renders. */
   const version = "r" + hashText(JSON.stringify({ presetId, settings, snapshot: capturesIndex.generatedAt, out: "mercator-" + EXPORT_RENDITION_PX + "-iz1-" + RELIEF_STAMP + "-" + PAINT_STAMP + "-" + GREEN_FRAME_STAMP }));
-  const framesDir = pkg.courseId + "/frames/" + version;
+  const framesDir = space.root + "/frames/" + version;
   const holeData = packageHoleData(pkg);
   const terrainEntry = entries.find(e => e.role === "terrain-reference");
   const backdropEntry = entries.find(e => e.role === "course-backdrop");
@@ -956,9 +1018,9 @@ async function runExportJob(job, deadlineAt) {
     if (!cachedBuffers[entry.path]) {
       const rendition = entry.pathExport || entry.path2048 || "";
       if (rendition) {
-        cachedBuffers[entry.path] = await storageDownload(rendition);
+        cachedBuffers[entry.path] = await storageDownload(rendition, space.bucket);
       } else {
-        const raw = await storageDownload(entry.path);
+        const raw = await storageDownload(entry.path, space.bucket);
         const isPng = entry.path.endsWith(".png");
         const resized = sharp(raw, { limitInputPixels: false }).resize({ width: EXPORT_RENDITION_PX, height: EXPORT_RENDITION_PX, fit: "inside", withoutEnlargement: true });
         cachedBuffers[entry.path] = await (isPng ? resized.png({ compressionLevel: 9 }) : resized.jpeg({ quality: 88 })).toBuffer();
@@ -971,7 +1033,7 @@ async function runExportJob(job, deadlineAt) {
   const holeNumbers = [...new Set(entries.filter(e => e.holeNumber && !e.terrainStageOnly && e.role !== "green-surround").map(e => Number(e.holeNumber)))].sort((a, b) => a - b);
   /* Carried through from the captures so a frame always ships with the credit for the imagery
      it was made from - Play renders it from here, not from a client-side lookup table. */
-  const framesIndex = { version: 1, courseId: pkg.courseId, exportVersion: version, presetId, generatedAt: capturesIndex.generatedAt, source: capturesIndex.source || null, overview: null, holes: [] };
+  const framesIndex = { version: 1, courseId: pkg.courseId, exportVersion: version, presetId, generatedAt: capturesIndex.generatedAt, source: capturesIndex.source || null, testRun: space.run, overview: null, holes: [] };
   let rendered = 0;
   for (const holeNumber of holeNumbers) {
     const path = framesDir + "/h" + holeNumber + ".jpg";
@@ -996,8 +1058,8 @@ async function runExportJob(job, deadlineAt) {
        livelock: that file only exists after a COMPLETE run, so relayed runs re-rendered from
        h1 forever and died at the soft deadline every time. */
     let sidecar = null;
-    if (await storageExists(path)) {
-      try { sidecar = JSON.parse((await storageDownload(path + ".json")).toString("utf8")); } catch (e) { sidecar = null; }
+    if (await storageExists(path, space.bucket)) {
+      try { sidecar = JSON.parse((await storageDownload(path + ".json", space.bucket)).toString("utf8")); } catch (e) { sidecar = null; }
     }
     if (sidecar && sidecar.playSurface && sidecar.playSurface.originPx) {
       width = sidecar.width; height = sidecar.height; playSurface = sidecar.playSurface;
@@ -1116,7 +1178,7 @@ async function runExportJob(job, deadlineAt) {
       /* No greenSurface: the hole frame carries no green work at all. See renderHoleSurfaceMercator. */
       const frame = await renderHoleSurfaceMercator({ pins, captures, underlay, terrain, greenSurface: null, settings, maxDim: EXPORT_RENDITION_PX });
       if (frame.diagnostics) console.log(normaliseLogLine("h" + holeNumber, frame.diagnostics));
-      await storageUpload(path, frame.jpeg, "image/jpeg");
+      await storageUpload(path, frame.jpeg, "image/jpeg", space.bucket);
       width = frame.width; height = frame.height; bytes = frame.jpeg.length;
       playSurface = {
         model: "mercator-image",
@@ -1142,7 +1204,7 @@ async function runExportJob(job, deadlineAt) {
           Math.round(gp.beyondSampledRange * 100) + "% beyond sampled range" : "painted"));
       }
       if (elevation) {
-        await storageUpload(elevation.path, elevation.buffer, "image/png");
+        await storageUpload(elevation.path, elevation.buffer, "image/png", space.bucket);
         playSurface.elevation = Object.assign({ path: elevation.path }, elevation.meta);
         console.log("[visual-worker] elevation h" + holeNumber + " " + elevation.meta.width + "x" + elevation.meta.height +
           " " + elevation.meta.elevationRange.min.toFixed(1) + ".." + elevation.meta.elevationRange.max.toFixed(1) + "m" +
@@ -1161,7 +1223,7 @@ async function runExportJob(job, deadlineAt) {
           const greenCap = { entry: greenEntry, buffer: await bufferFor(greenEntry) };
           const g = await renderHoleSurfaceMercator({ pins, captures: [greenCap], terrain, greenSurface, settings, maxDim: GREEN_FRAME_MAX_PX });
           const greenPath = framesDir + "/h" + holeNumber + ".green.jpg";
-          await storageUpload(greenPath, g.jpeg, "image/jpeg");
+          await storageUpload(greenPath, g.jpeg, "image/jpeg", space.bucket);
           /* Flat, and carried INSIDE playSurface. The client is handed the published asset's
              metadata.playSurface and nothing beside it, so a sibling field would never arrive -
              and everything here is what drawing it needs: where the pixels are, and the mercator
@@ -1185,7 +1247,7 @@ async function runExportJob(job, deadlineAt) {
           greenFrame = null;
         }
       }
-      await storageUpload(path + ".json", Buffer.from(JSON.stringify({ width, height, bytes, bounds, playSurface, greenFrame })), "application/json");
+      await storageUpload(path + ".json", Buffer.from(JSON.stringify({ width, height, bytes, bounds, playSurface, greenFrame })), "application/json", space.bucket);
       rendered += 1;
     }
     framesIndex.holes.push({ holeNumber, path, width, height, bytes, bounds, playSurface, greenFrame });
@@ -1200,14 +1262,14 @@ async function runExportJob(job, deadlineAt) {
   }
   const overviewPath = framesDir + "/overview.jpg";
   if (backdropEntry) {
-    if (!(await storageExists(overviewPath))) {
+    if (!(await storageExists(overviewPath, space.bucket))) {
       const overview = await renderOverview({
         backdrop: { entry: backdropEntry, buffer: await bufferFor(backdropEntry) },
         terrain: terrainEntry ? { entry: terrainEntry, buffer: await bufferFor(terrainEntry) } : null,
         settings
       });
       if (overview.diagnostics) console.log(normaliseLogLine("overview", overview.diagnostics));
-      await storageUpload(overviewPath, overview.jpeg, "image/jpeg");
+      await storageUpload(overviewPath, overview.jpeg, "image/jpeg", space.bucket);
       framesIndex.overview = { path: overviewPath, width: overview.width, height: overview.height, bytes: overview.jpeg.length, bounds: backdropEntry.bounds };
     } else {
       framesIndex.overview = { path: overviewPath, width: backdropEntry.width, height: backdropEntry.height, bounds: backdropEntry.bounds };
@@ -1222,7 +1284,21 @@ async function runExportJob(job, deadlineAt) {
   framesIndex.totalBytes = framesIndex.holes.every(h => Number(h.bytes) > 0)
     ? framesIndex.holes.reduce((sum, h) => sum + Number(h.bytes), 0) + Number(framesIndex.overview && framesIndex.overview.bytes || 0)
     : null;
-  await storageUpload(pkg.courseId + "/frames/index.json", Buffer.from(JSON.stringify(framesIndex)), "application/json");
+  await storageUpload(space.root + "/frames/index.json", Buffer.from(JSON.stringify(framesIndex)), "application/json", space.bucket);
+  /* A test bake ends here: its frames are in the test space for Studio to look at. No
+     course_visuals row (that is what publishes to Play) and no sweep of the live versions. */
+  if (space.test) {
+    return {
+      test: true,
+      testRun: space.run,
+      exportVersion: version,
+      presetId,
+      holes: framesIndex.holes.length,
+      overview: !!framesIndex.overview,
+      source: framesIndex.source && framesIndex.source.key || null,
+      indexPath: space.root + "/frames/index.json"
+    };
+  }
   await writeCourseVisualRow(job, pkg, framesIndex, recipe);
   /* Index + row now point at this version, so every OTHER frame dir is dead. Retire them.
      Best-effort: a sweep failure must never fail an otherwise-good export. */
@@ -1274,7 +1350,9 @@ export default async function courseVisualWorker(req) {
   let job = await claimJob(payload && payload.jobId || null);
   while (job) {
     try {
-      const result = job.kind === "snapshot" ? await runSnapshotJob(job, deadlineAt) : job.kind === "export" ? await runExportJob(job, deadlineAt) : { skipped: "unknown kind " + job.kind };
+      const result = job.kind === "snapshot" || job.kind === TEST_SNAPSHOT_KIND ? await runSnapshotJob(job, deadlineAt)
+        : job.kind === "export" || job.kind === TEST_EXPORT_KIND ? await runExportJob(job, deadlineAt)
+        : { skipped: "unknown kind " + job.kind };
       if (result && result.requeue) {
         /* Soft deadline reached: hand the job back and chain a fresh invocation, which
            resumes instantly from the work already uploaded.
@@ -1302,6 +1380,7 @@ export default async function courseVisualWorker(req) {
       await finishJob(job.id, { status: "done", result, error: null });
       /* Hybrid: fresh captures always get re-exported with the live recipe (or natural). */
       if (job.kind === "snapshot") await enqueueFollowUpExport(job.course_id).catch(() => {});
+      if (job.kind === TEST_SNAPSHOT_KIND) await enqueueTestExport(job).catch(() => {});
     } catch (error) {
       console.error("course-visual-worker job failed", job.id, error);
       await finishJob(job.id, { status: "failed", error: String(error && error.message || error).slice(0, 900) }).catch(() => {});

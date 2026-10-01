@@ -11,7 +11,27 @@
    Returns what it actually did. It used to answer "ok" whether it had pinged the worker or bailed
    out on a missing site URL, so the one failure mode it has looked exactly like success. */
 
+import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
+import { purgeTestBakes, TEST_BAKE_BUCKET } from "./lib/gd-test-bake-core.mjs";
+
+/* Test bakes are temporary by contract (lib/gd-test-bake-core.mjs): date folders past the
+   retention window are deleted here. Once an hour is plenty for a day-granular rule, and
+   best-effort: a Storage hiccup must never stop the worker being woken. */
+async function purgeOldTestBakes() {
+  if (new Date().getUTCMinutes() >= 3) return { purged: false, reason: "not this tick" };
+  const base = () => String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
+  const key = () => String(process.env.SUPABASE_SERVICE_ROLE_KEY || "");
+  if (!base() || !key()) return { purged: false, reason: "no supabase" };
+  try {
+    const result = await purgeTestBakes(createSupabaseStorage({ base, key, bucket: TEST_BAKE_BUCKET }));
+    return { purged: true, removed: result.removed };
+  } catch (error) {
+    return { purged: false, reason: String(error && error.message || error).slice(0, 200) };
+  }
+}
+
 export default async function courseVisualSweeper(req) {
+  const testBakes = await purgeOldTestBakes();
   /* Prefer the request's own origin - it is always right, needs no environment, and cannot go
      stale against a renamed site. The env vars stay as the fallback for invocation paths that
      do not carry a usable URL. */
@@ -30,7 +50,7 @@ export default async function courseVisualSweeper(req) {
       headers: { "Content-Type": "application/json" },
       body: "{}"
     });
-    return json(200, { swept: true, origin, workerStatus: response.status });
+    return json(200, { swept: true, origin, workerStatus: response.status, testBakes });
   } catch (error) {
     console.warn("course-visual-sweeper ping failed", error && error.message || error);
     return json(502, { swept: false, origin, reason: String(error && error.message || error).slice(0, 200) });

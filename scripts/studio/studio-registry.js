@@ -357,7 +357,10 @@
         { role: "Preview/recipe/tuning UI (unmoved this branch)", path: "scripts/studio/gd-admin-course-db.js" },
         { role: "Studio page wrapper", path: "scripts/studio/courses/course-visuals/course-visuals-page.js" },
         { role: "Full authoring engine (Studio-only)", path: "scripts/gd-course-visual-engine.js" },
-        { role: "Generated app-facing client (do not hand-edit)", path: "scripts/gd-course-visual-client.js" }
+        { role: "Generated app-facing client (do not hand-edit)", path: "scripts/gd-course-visual-client.js" },
+        { role: "Test bakes (Mapbox) — Studio view, started from Rebuild → Test bake with Mapbox", path: "scripts/studio/gd-admin-course-test-bakes.js" },
+        { role: "Test bakes API — admin-only queue + signed links to the private test bucket", path: "functions/course-test-bakes.mjs" },
+        { role: "Test bake rules — job kinds, private bucket, run roots, 7-day purge", path: "functions/lib/gd-test-bake-core.mjs" }
       ],
       inputs: ["Accepted course record + geometry (Course Database)", "Captured imagery"],
       outputs: ["Visual recipes", "Generated preview assets", "Cloud visual jobs"],

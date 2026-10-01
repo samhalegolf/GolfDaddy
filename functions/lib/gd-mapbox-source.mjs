@@ -54,6 +54,7 @@
  * does needs one, and accepting one would put it in tile URLs. */
 
 import { MapSourceError, MemoryTileCache, tiledImagery, tiledElevation } from "./gd-tile-fetch.mjs";
+import { reliefSpec } from "./gd-imagery-sources.mjs";
 
 export const MAPBOX_PROVIDER_ID = "mapbox";
 export const MAPBOX_TOKEN_ENV = "MAPBOX_PUBLIC_TOKEN";
@@ -113,6 +114,44 @@ function terrainSource(token) {
     tilePx: 512, format: "pngraw", minZoom: 1, maxZoom: 14, cacheVersion: MAPBOX_CACHE_VERSION,
     encoding: "terrain-rgb", attribution: TERRAIN_ATTRIBUTION,
     tileUrl: t => mapboxTileUrl(MAPBOX_TERRAIN_PRODUCT, t, { token, format: "pngraw" })
+  };
+}
+
+/* Mapbox in the shape the capture planner and the visual worker read a registry source in
+   (gd-imagery-sources resolveEndpoints), for TEST BAKES ONLY - see gd-test-bake-core.mjs.
+
+   256px tiles (no @2x), because the planner grids captures in 256px cells; the bake picks its
+   own zoom per capture, so nothing is lost. storable:false travels with it, and the worker
+   refuses to publish anything whose captures carry it. Returns null when no token is
+   configured. The token is inside the URL templates and nowhere else - the worker stores
+   source key/label/licence/attribution, never the templates. */
+export function mapboxCaptureSource(env) {
+  const token = mapboxToken(env);
+  if (!token) return null;
+  const q = "?access_token=" + encodeURIComponent(token);
+  const dem = {
+    adapter: "xyz",
+    urlTemplate: MAPBOX_API_BASE + "/" + MAPBOX_TERRAIN_PRODUCT + "/{z}/{x}/{y}.pngraw" + q,
+    encoding: "terrain-rgb",
+    nativeResolutionM: 30,
+    fallbackResolutionM: 30,
+    maxUsefulZoom: 14
+  };
+  return {
+    key: MAPBOX_PROVIDER_ID,
+    label: "Mapbox Satellite (test only)",
+    storable: false,
+    license: MAPBOX_LICENSE,
+    demLicense: MAPBOX_LICENSE,
+    attribution: { text: SATELLITE_ATTRIBUTION, url: "https://www.mapbox.com/about/maps/", perSurvey: false },
+    imagery: {
+      adapter: "xyz",
+      urlTemplate: MAPBOX_API_BASE + "/" + MAPBOX_SATELLITE_PRODUCT + "/{z}/{x}/{y}.jpg90" + q,
+      maxUsefulZoom: 19,
+      minTrustedZoom: 12
+    },
+    dem,
+    terrain: reliefSpec(dem)
   };
 }
 
