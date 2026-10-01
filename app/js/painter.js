@@ -195,8 +195,17 @@
   function writeCredit() {
     var credit = el("mapAttribution");
     if (!credit) return;
-    var full = [baseCredit, reliefLayer ? reliefCredit : ""].filter(Boolean).join(" · ");
-    var short = baseCredit.split(" — ")[0];
+    /* A baked surface replaces the imagery the credit is for. A 3D Mesh frame does not: it is
+       built from Esri and Mapbox pixels, so it carries their credit, plus its elevation's. */
+    if (published && !liveTerrainUp) { show(credit, false); return; }
+    var sources = [baseCredit], detail = reliefLayer ? reliefCredit : "";
+    if (liveTerrainUp && liveTerrain) {
+      sources = app.liveTerrain.providers(liveTerrain.debug).map(app.basemap.attributionFor);
+      detail = liveTerrain.debug.elevationCredit || "";
+    }
+    sources = sources.filter(Boolean);
+    var full = sources.concat(detail ? [detail] : []).join(" · ");
+    var short = sources.map(function (c) { return c.split(" — ")[0]; }).join(" · ");
     credit.textContent = "";
     if (short !== full) {
       var toggle = document.createElement("button");
@@ -1907,7 +1916,7 @@
     var admin = false;
     try { admin = !!(app.account && app.account.isAdmin && app.account.isAdmin()); } catch (e) { admin = false; }
     if (!admin || !asset) { hideVersionStamp(); return; }
-    if (asset.live) { writeStamp(liveTerrainLabel()); return; }
+    if (asset.live) { hideVersionStamp(); return; }
     var label = surfaceLib.assetVersionLabel(asset);
     var file = surfaceLib.assetFileName(asset);
     var text = [label, file].filter(Boolean).join(" · ");
@@ -1943,6 +1952,7 @@
     setGreenFrame(null);
     disposeMesh();
     activeFrame = null;
+    writeCredit();
   }
 
   /* The image is preloaded off-DOM and swapped only once decodable, so the
@@ -2141,11 +2151,7 @@
         mesh.state.exaggeration = reliefExaggeration();
         applyMeshFrame();
         document.body.classList.add("surface-mesh");
-        if (meta.liveTerrain && liveTerrain) {
-          liveTerrainMesh = "on";
-          liveTerrain.debug.meshMs = Date.now() - meshStarted;
-          if (isAdmin()) writeStamp(liveTerrainLabel());
-        }
+        if (meta.liveTerrain && liveTerrain) liveTerrain.debug.meshMs = Date.now() - meshStarted;
         /* The overlays already on screen were placed on the flat frame. Now that the
            ground has relief, place them again on it (the projector lifts from here on). */
         if (marshal) render(marshal.scene());
@@ -2214,7 +2220,6 @@
   var liveTerrainUp = false;    // is the surface on screen a live terrain frame
   var liveTerrainNote = "";     // why the mode is not showing, for the admin readout
   var liveTerrainLoading = null; // key of the frame being fetched, so a repaint cannot ask twice
-  var liveTerrainMesh = "";     // "on", or why the mesh is not up, for the readout
   var tileSession = null;       // the round's provider tiles (live-hybrid.js), per course
   var mapboxBudget = null;      // the device's daily Mapbox tile allowance (live-hybrid.js)
   var LIVE_MESH_AMBIENT = 0.42;
@@ -2246,12 +2251,6 @@
       relief: reliefExaggeration(),
       webgl: meshSupported()
     });
-  }
-
-  function liveTerrainLabel() {
-    if (!liveTerrain) return "";
-    return app.liveTerrain.debugLabel(liveTerrain.debug, reliefExaggeration(),
-      liveTerrainMesh || (liveTerrain.asset.playSurface.elevation ? "pending" : "off"), greenLinesForced());
   }
 
   /* The operator's "green lines on coarse elevation" test switch. Admin only, whatever is stored. */
@@ -2289,7 +2288,6 @@
       repaint("LIVE_TERRAIN_RELEASE", function () {
         presentation = "live";
         clearSurface();
-        if (liveTerrainNote) noteLiveTerrain(liveTerrainNote);
         lastCameraKey = null;
         if (marshal) render(marshal.scene());
       });
@@ -2398,7 +2396,6 @@
       entry.key = key;
       entry.view = view;
       entry.debug.rebuild = reason;
-      liveTerrainMesh = "";
       try { if (window.console && console.info) console.info("[live-terrain] built", entry.debug); } catch (e) {}
       entry.debug.loadMs = Date.now() - started;
       liveTerrain = entry;
@@ -2425,8 +2422,6 @@
       repaint("LIVE_TERRAIN_FALLBACK", function () {
         presentation = "live";
         clearSurface();
-        /* clearSurface hides the stamp; the reason is the one thing worth keeping on it. */
-        if (liveTerrainNote) noteLiveTerrain(liveTerrainNote);
         lastCameraKey = null;
         if (marshal) render(marshal.scene());
       });
@@ -2437,7 +2432,6 @@
   function noteLiveTerrain(reason) {
     liveTerrainNote = String(reason || "");
     if (!liveTerrainNote) return;
-    if (isAdmin()) writeStamp("3D mesh off · " + liveTerrainNote);
     try { if (window.console && console.info) console.info("[live-terrain] fallback: " + liveTerrainNote); } catch (e) {}
   }
 
@@ -2448,7 +2442,6 @@
     if (liveTerrainUp && !wanted) {
       releaseLiveTerrain();
       liveTerrainFallback("");
-      hideVersionStamp();
       return;
     }
     if (!wanted) { if (liveTerrain) releaseLiveTerrain(); releaseLiveTerrainHold(); return; }
@@ -2464,8 +2457,6 @@
         if (marshal) render(marshal.scene());
       });
       startLiveTerrain(currentScene, transitionToken, "view");
-    } else if (liveTerrainUp) {
-      writeStamp(liveTerrainLabel());
     }
   }
 
@@ -2526,6 +2517,7 @@
         liveTerrainHold = null;
         publishedFrameUrl = url;
         liveTerrainUp = live;
+        writeCredit();
         showVersionStamp(asset);
         attachMesh(asset.playSurface, url, live ? liveTerrainFallback : null);
         lastCameraKey = null;

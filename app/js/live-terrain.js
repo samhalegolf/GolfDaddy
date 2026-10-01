@@ -291,25 +291,15 @@
     entry.urls = [];
   }
 
-  /* The admin's one-line readout, drawn where a published hole shows its bake stamp. mesh is
-     "on", "off" (relief off, or no elevation) or the reason it failed. */
-  function debugLabel(debug, exaggeration, mesh, greenForced) {
-    if (!debug) return "";
-    var mb = debug.mapbox || {}, ctx = debug.esri || {};
-    var imagery = debug.context === "esri"
-      ? "Esri " + (ctx.network || 0) + "+" + (ctx.reused || 0) + "r · Mapbox " + (mb.network || 0) + "+" + (mb.reused || 0) + "r"
-        + " (" + debug.maskPct + "% frame, session " + debug.sessionMapbox + ")" + (debug.mapboxFailed ? " FAILED" : "")
-      : "Mapbox only " + (mb.network || 0) + "+" + (mb.reused || 0) + "r";
-    if (debug.mapboxSkipped) imagery = "Esri " + (ctx.network || 0) + "+" + (ctx.reused || 0) + "r · Mapbox off (" + debug.mapboxSkipped + ")";
-    return ["3D mesh " + (mesh || "pending"), debug.view !== "composite" ? "view " + debug.view : "",
-      "z" + debug.window.z + " " + debug.rasterPx + " " + (debug.metresPerPx ? debug.metresPerPx.toFixed(2) + "m/px" : ""),
-      imagery,
-      debug.elevation ? "DEM " + debug.elevation + (debug.elevationFrom === "asset" ? " (baked v" + (debug.terrainVersion || "?") + ")" : debug.elevationFrom ? " (live)" : "") + " " + debug.demPx + " " + debug.elevationRange
-        + (debug.demSampleM ? " ~" + debug.demSampleM.toFixed(1) + "m" : "") + (debug.greenLines ? " · green lines" : greenForced ? " · green lines FORCED (coarse)" : " · no green lines")
-        : "DEM none (" + (debug.elevationFailed || "?") + ")",
-      debug.metres, exaggeration + "x", debug.rebuild || "",
-      debug.composeMs != null ? "img " + debug.composeMs + "ms" : "",
-      debug.meshMs != null ? "mesh " + debug.meshMs + "ms" : ""].filter(Boolean).join(" · ");
+  /* Whose imagery is in the frame, for its on-screen credit: Esri as the context unless there
+     was no Esri key, Mapbox wherever it was actually drawn (not skipped, not failed, not an
+     empty mask). */
+  function providers(debug) {
+    if (!debug) return [];
+    if (debug.context !== "esri") return ["mapbox"];
+    var mb = debug.mapbox || {};
+    var mapbox = !debug.mapboxSkipped && !debug.mapboxFailed && (mb.network || 0) + (mb.reused || 0) > 0;
+    return mapbox ? ["esri", "mapbox"] : ["esri"];
   }
 
   return {
@@ -321,6 +311,6 @@
     load: load,
     greenReadable: greenReadable,
     release: release,
-    debugLabel: debugLabel
+    providers: providers
   };
 });

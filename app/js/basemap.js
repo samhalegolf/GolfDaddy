@@ -152,7 +152,7 @@
          tile of the same ground, drawn into Leaflet's 256px cell — the same
          detail the Studio source test judges. maxNativeZoom 19 to match Esri. */
       tileUrl: "https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token={mapboxToken}",
-      attribution: "© Mapbox — © OpenStreetMap © Maxar",
+      attribution: "© Mapbox © OpenStreetMap — © Maxar",
       options: { maxZoom: 21, maxNativeZoom: 19, crossOrigin: true }
     },
     {
@@ -332,6 +332,11 @@
         .replace("{z}", z).replace("{x}", x).replace("{y}", y)
         .replace("{linzKey}", linzKey || "").replace("{esriKey}", esriKey || "")
         .replace("{mapboxToken}", mapboxToken || "");
+    },
+    /* A source's credit by kind, for a picture built from it (the 3D Mesh frame). */
+    attributionFor: function (kind) {
+      var source = sourceOf(kind);
+      return source ? source.attribution : "";
     },
     /* Which source is up, for the on-screen source tag. */
     kindFor: function (centre) { return pick(centre).kind; },

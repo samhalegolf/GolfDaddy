@@ -187,9 +187,7 @@ async function ok(name, fn) { await fn(); passed++; console.log('ok  - ' + name)
     assert.deepStrictEqual(entry.urls, ['blob:0', 'blob:1']);
     assert.strictEqual(entry.debug.elevation, 'linz-nz');
     assert.strictEqual(entry.debug.elevationCredit, 'LINZ CC BY');
-    const label = lt.debugLabel(Object.assign(entry.debug, { rebuild: 'hole change', meshMs: 90 }), 2.5, 'on');
-    ['3D mesh on', 'z' + WIN.z, 'Esri 24+0r', 'Mapbox 16+0r', '38.3% frame', 'DEM linz-nz 300x400', '2.5x',
-      'hole change', 'img 120ms', 'mesh 90ms'].forEach((bit) => assert.ok(label.includes(bit), label + ' has ' + bit));
+    assert.deepStrictEqual(lt.providers(entry.debug), ['esri', 'mapbox'], 'both providers are credited');
     lt.release(entry, f.deps.revokeObjectURL);
     assert.deepStrictEqual(f.revoked, ['blob:0', 'blob:1'], 'release revokes both');
   });
@@ -200,7 +198,6 @@ async function ok(name, fn) { await fn(); passed++; console.log('ok  - ' + name)
     assert.strictEqual(entry.asset.playSurface.elevation, undefined, 'no elevation, so no mesh');
     assert.deepStrictEqual(entry.urls, ['blob:0']);
     assert.match(entry.debug.elevationFailed, /elevation 502: no elevation/);
-    assert.match(lt.debugLabel(entry.debug, 2.5, 'off'), /DEM none \(elevation 502/);
   });
 
   await ok('load: an elevation for another window, or with no size, is dropped rather than trusted', async () => {
