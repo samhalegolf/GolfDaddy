@@ -149,6 +149,10 @@ await ok("elevation: terrain-RGB on the window's grid, with its range and source
   assert.ok(Math.abs(decoded.min - Number(res.headers.get("X-Elevation-Min"))) < 0.11);
   assert.ok(Math.abs(decoded.max - Number(res.headers.get("X-Elevation-Max"))) < 0.11);
   assert.ok(res.headers.get("X-Elevation-Source"));
+  /* The source's real spacing, which decides whether the phone draws green slope lines. */
+  const sampleM = Number(res.headers.get("X-Elevation-Sample-M"));
+  assert.ok(sampleM > 0, "spacing reported");
+  assert.match(res.headers.get("Access-Control-Expose-Headers"), /X-Elevation-Sample-M/);
   assert.strictEqual(res.headers.get("X-Window"), [WIN.z, WIN.x, WIN.y, WIN.w, WIN.h].join("/"));
 });
 

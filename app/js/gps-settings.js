@@ -43,7 +43,7 @@
      corridor from the v2 bubble design, off until it has been played with.
      Stored like the rest so turning it on survives a reload. */
   var DEFAULTS = { units: "m", aimLine: true, shotUp: true, frameTightness: "medium", relief: "enhanced", corridor: false,
-    hybridView: "composite" };
+    hybridView: "composite", greenLinesCoarse: false };
 
   /* Operator-only debug views of the Clarity 3D Mesh picture (live-hybrid.js VIEWS - keep the
      two lists in step; dev/live-hybrid.test.js checks they are). */
@@ -66,6 +66,7 @@
         frameTightness: TIGHTNESS[raw.frameTightness] ? raw.frameTightness : DEFAULTS.frameTightness,
         relief: RELIEF[raw.relief] ? raw.relief : DEFAULTS.relief,
         hybridView: HYBRID_VIEWS.indexOf(raw.hybridView) !== -1 ? raw.hybridView : DEFAULTS.hybridView,
+        greenLinesCoarse: raw.greenLinesCoarse === true,
         corridor: raw.corridor === true
       };
     } catch (e) { return Object.assign({}, DEFAULTS); }
@@ -95,6 +96,9 @@
     reliefExaggeration: function () { return RELIEF[state.relief].factor; },
     hybridView: function () { return state.hybridView; },
     hybridViews: function () { return HYBRID_VIEWS.slice(); },
+    /* Operator test switch: draw green slope lines even from elevation too coarse to read a
+       green (painter.js drawGreenContours honours it for the admin only). */
+    greenLinesCoarse: function () { return state.greenLinesCoarse === true; },
 
     /* Metres in (everything upstream computes in metres, always), display
        number out. Rounded, never a unit suffix — callers own their own
@@ -201,6 +205,13 @@
     if (viewRow) viewRow.classList.toggle("hiddenState", current !== "mesh");
     var viewBtn = document.getElementById("setHybridView");
     if (viewBtn) viewBtn.textContent = HYBRID_VIEW_LABELS[state.hybridView] || state.hybridView;
+    var coarseRow = document.getElementById("setGreenCoarseRow");
+    if (coarseRow) coarseRow.classList.toggle("hiddenState", current !== "mesh");
+    var coarseBtn = document.getElementById("setGreenCoarse");
+    if (coarseBtn) {
+      coarseBtn.textContent = state.greenLinesCoarse ? "On" : "Off";
+      coarseBtn.setAttribute("aria-pressed", state.greenLinesCoarse ? "true" : "false");
+    }
   }
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -230,6 +241,10 @@
     if (hybridViewBtn) hybridViewBtn.addEventListener("click", function () {
       var i = HYBRID_VIEWS.indexOf(state.hybridView);
       app.gpsSettings.set("hybridView", HYBRID_VIEWS[(i + 1) % HYBRID_VIEWS.length]);
+    });
+    var coarseBtn = document.getElementById("setGreenCoarse");
+    if (coarseBtn) coarseBtn.addEventListener("click", function () {
+      app.gpsSettings.set("greenLinesCoarse", !state.greenLinesCoarse);
     });
     var mapSourceBtn = document.getElementById("setMapSource");
     if (mapSourceBtn) mapSourceBtn.addEventListener("click", function () {

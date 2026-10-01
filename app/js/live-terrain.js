@@ -32,6 +32,9 @@
      far ground onto the screen, so a hole needs a generous apron - a third of its length, and
      never less than a short pitch either side. */
   var PAD_FRACTION = 0.33, PAD_MIN_M = 90;
+  /* Past the green, for the tilted lock view: half the hole's length, at least 150m, opening
+     out by 0.6 of that to each side. */
+  var THROW_FRACTION = 0.5, THROW_MIN_M = 150, THROW_SPREAD = 0.6;
 
   /* The whole activation rule, in one place so a test can pin it. */
   function wanted(ctx) {
@@ -53,6 +56,10 @@
     return (Math.atan(Math.sinh(n)) * 180) / Math.PI;
   }
 
+  function lngAt(px, z) {
+    return (px / (TILE * Math.pow(2, z))) * 360 - 180;
+  }
+
   function metresPerPx(lat, z) {
     return (156543.03392804097 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, z);
   }
@@ -63,27 +70,53 @@
      hole plus the apron, at the finest zoom that keeps it inside the size limit. Depends on the
      hole only - never on the camera, the player or the aim - so a round re-uses it for every
      stage and every fix, and only a different hole asks for a new one. Null without a tee and
-     a green. */
+     a green.
+
+     The lock view is tilted, so the top of the screen looks well past the target: beyond the
+     green and out to both sides of it. The frame reaches that far too (a "throw" past the green,
+     widening as it goes), because ground outside the frame draws as a dark band. That ground is
+     only ever Esri - the Mapbox mask stops at the playing area - so it costs no Mapbox. It is
+     the first thing given up for resolution: the zoom is chosen for the hole and its apron, and
+     the throw shrinks to fit that zoom rather than pushing the whole picture a zoom coarser. */
   function frameWindow(hole) {
     if (!hole || !valid(hole.tee) || !valid(hole.green)) return null;
     var pts = [hole.tee, hole.green].concat(hole.route || [], hole.greenShape || []).filter(valid);
-    var minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
-    pts.forEach(function (p) {
-      minLat = Math.min(minLat, Number(p.lat)); maxLat = Math.max(maxLat, Number(p.lat));
-      minLng = Math.min(minLng, Number(p.lng)); maxLng = Math.max(maxLng, Number(p.lng));
-    });
-    var midLat = (minLat + maxLat) / 2;
     var ref = 20;
-    var a = worldPx(maxLat, minLng, ref), b = worldPx(minLat, maxLng, ref);
+    var px = pts.map(function (p) { return worldPx(p.lat, p.lng, ref); });
+    var midLat = pts.reduce(function (sum, p) { return sum + Number(p.lat); }, 0) / pts.length;
+    var mpp = metresPerPx(midLat, ref);
     var t = worldPx(hole.tee.lat, hole.tee.lng, ref), g = worldPx(hole.green.lat, hole.green.lng, ref);
-    var lengthM = Math.hypot(g.x - t.x, g.y - t.y) * metresPerPx(midLat, ref);
-    var padPx = Math.max(PAD_MIN_M, lengthM * PAD_FRACTION) / metresPerPx(midLat, ref);
-    var x0 = a.x - padPx, y0 = a.y - padPx, x1 = b.x + padPx, y1 = b.y + padPx;
-    for (var z = MAX_Z; z >= MIN_Z; z--) {
+    var len = Math.hypot(g.x - t.x, g.y - t.y);
+    var lengthM = len * mpp;
+    var padPx = Math.max(PAD_MIN_M, lengthM * PAD_FRACTION) / mpp;
+    var throwPx = Math.max(THROW_MIN_M, lengthM * THROW_FRACTION) / mpp;
+    var ux = len > 0 ? (g.x - t.x) / len : 0, uy = len > 0 ? (g.y - t.y) / len : -1;
+
+    function box(fraction) {
+      var all = px.slice();
+      if (fraction > 0) {
+        var reach = throwPx * fraction, spread = reach * THROW_SPREAD;
+        var far = { x: g.x + ux * reach, y: g.y + uy * reach };
+        all.push(far, { x: far.x - uy * spread, y: far.y + ux * spread }, { x: far.x + uy * spread, y: far.y - ux * spread });
+      }
+      var b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+      all.forEach(function (p) { b.x0 = Math.min(b.x0, p.x); b.y0 = Math.min(b.y0, p.y); b.x1 = Math.max(b.x1, p.x); b.y1 = Math.max(b.y1, p.y); });
+      return { x0: b.x0 - padPx, y0: b.y0 - padPx, x1: b.x1 + padPx, y1: b.y1 + padPx };
+    }
+    function at(b, z) {
       var k = Math.pow(2, ref - z);
-      var x = Math.floor(x0 / k), y = Math.floor(y0 / k);
-      var w = Math.ceil(x1 / k) - x, h = Math.ceil(y1 / k) - y;
-      if (w <= MAX_SIDE && h <= MAX_SIDE) return { z: z, x: x, y: y, w: w, h: h };
+      var x = Math.floor(b.x0 / k), y = Math.floor(b.y0 / k);
+      var w = Math.ceil(b.x1 / k) - x, h = Math.ceil(b.y1 / k) - y;
+      return w <= MAX_SIDE && h <= MAX_SIDE ? { z: z, x: x, y: y, w: w, h: h } : null;
+    }
+    var core = box(0);
+    for (var z = MAX_Z; z >= MIN_Z; z--) {
+      if (!at(core, z)) continue;
+      for (var f = 1; f > 0; f -= 0.25) {
+        var withThrow = at(box(f), z);
+        if (withThrow) return withThrow;
+      }
+      return at(core, z);
     }
     return null;
   }
@@ -115,12 +148,29 @@
     meta.elevation = {
       url: elevation.url,
       encoding: "terrain-rgb",
+      /* The ground the grid covers - the window itself. The green contour fit
+         (gd-green-contours.js) places the green on the DEM through these. */
+      bounds: { north: latAt(win.y, win.z), south: latAt(win.y + win.h, win.z),
+        west: lngAt(win.x, win.z), east: lngAt(win.x + win.w, win.z) },
       width: elevation.width,
       height: elevation.height,
       metresPerPixel: metres.width / elevation.width,
-      elevationRange: { min: elevation.min, max: elevation.max }
+      elevationRange: { min: elevation.min, max: elevation.max },
+      /* The source's own spacing, before the resample onto this grid. */
+      sourceMetresPerSample: elevation.sampleM || null
     };
     return meta;
+  }
+
+  /* Whether this elevation can read a green. A green's shape lives in the metre or two between
+     samples; the contour fit's own gate catches a mis-fit, but a 10-25m DEM resampled onto a
+     fine grid can pass it while knowing nothing about the green, so a live frame that knows its
+     source is that coarse draws no slope lines at all. Elevation that does not say (a published
+     bake) is left to the fit's gate, as before. */
+  var GREEN_MAX_SAMPLE_M = 2.5;
+  function greenReadable(elevation) {
+    var m = Number(elevation && elevation.sourceMetresPerSample);
+    return !(m > GREEN_MAX_SAMPLE_M);
   }
 
   function header(res, name) {
@@ -159,6 +209,7 @@
       try { credit = decodeURIComponent(header(res, "X-Elevation-Credit") || ""); } catch (e) { credit = ""; }
       return res.blob().then(function (blob) {
         return { blob: blob, width: size[0], height: size[1], min: min, max: max, credit: credit,
+          sampleM: Number(header(res, "X-Elevation-Sample-M")) || null,
           source: header(res, "X-Elevation-Source") || "?", zoom: Number(header(res, "X-Elevation-Zoom")) || null };
       });
     }, function (e) {
@@ -182,7 +233,8 @@
         meta = surfaceMeta(win, null);
       } else {
         var elevationUrl = deps.createObjectURL(elev.blob); made.push(elevationUrl);
-        meta = surfaceMeta(win, { url: elevationUrl, width: elev.width, height: elev.height, min: elev.min, max: elev.max });
+        meta = surfaceMeta(win, { url: elevationUrl, width: elev.width, height: elev.height, min: elev.min, max: elev.max,
+          sampleM: elev.sampleM });
       }
       var metres = windowMetres(win);
       var d = pic.debug;
@@ -198,7 +250,9 @@
           elevationFailed: elev.error || null,
           demZoom: elev.error ? null : elev.zoom,
           demPx: elev.error ? null : elev.width + "x" + elev.height,
-          elevationRange: elev.error ? null : elev.min.toFixed(1) + ".." + elev.max.toFixed(1) + "m"
+          elevationRange: elev.error ? null : elev.min.toFixed(1) + ".." + elev.max.toFixed(1) + "m",
+          demSampleM: elev.error ? null : elev.sampleM,
+          greenLines: elev.error ? false : greenReadable({ sourceMetresPerSample: elev.sampleM })
         })
       };
     });
@@ -213,7 +267,7 @@
 
   /* The admin's one-line readout, drawn where a published hole shows its bake stamp. mesh is
      "on", "off" (relief off, or no elevation) or the reason it failed. */
-  function debugLabel(debug, exaggeration, mesh) {
+  function debugLabel(debug, exaggeration, mesh, greenForced) {
     if (!debug) return "";
     var mb = debug.mapbox || {}, ctx = debug.esri || {};
     var imagery = debug.context === "esri"
@@ -224,6 +278,7 @@
       "z" + debug.window.z + " " + debug.rasterPx + " " + (debug.metresPerPx ? debug.metresPerPx.toFixed(2) + "m/px" : ""),
       imagery,
       debug.elevation ? "DEM " + debug.elevation + (debug.demZoom ? " z" + debug.demZoom : "") + " " + debug.demPx + " " + debug.elevationRange
+        + (debug.demSampleM ? " ~" + debug.demSampleM.toFixed(1) + "m" : "") + (debug.greenLines ? " · green lines" : greenForced ? " · green lines FORCED (coarse)" : " · no green lines")
         : "DEM none (" + (debug.elevationFailed || "?") + ")",
       debug.metres, exaggeration + "x", debug.rebuild || "",
       debug.composeMs != null ? "img " + debug.composeMs + "ms" : "",
@@ -237,6 +292,7 @@
     windowMetres: windowMetres,
     surfaceMeta: surfaceMeta,
     load: load,
+    greenReadable: greenReadable,
     release: release,
     debugLabel: debugLabel
   };
