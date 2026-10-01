@@ -1,15 +1,16 @@
 /* AI scan: ask a model to trace fairways and greens off a satellite picture of a course.
  *
- * POST {courseId, image:{data, mediaType}, georef, append?, notes?}  (admin)
+ * POST {courseId, image:{data, mediaType}, georef, anchors?, grid?, notes?}  (admin)
  *   image  - the picture, base64, JPEG/PNG/WebP, as the model will see it (Studio captures
  *            the current map view and scales it to the size the model reads at, so the
  *            pixels it answers in are the pixels we georeference).
  *   georef - where that picture is: a playSurface (originPx / captureZoom / dimensions), a
  *            centre+zoom, or bounds - gd-overlay-georef-core.mjs.
- *   append - keep the shapes already saved and add these (a course scanned one view at a
- *            time). Default replaces.
- *   anchors - what Studio drew onto the picture that is not ground: known OSM greens and
- *            saved shapes, as pixel centres, so the prompt can name them. grid - the pixel
+ *   anchors - what Studio drew onto the picture that is not ground: known OSM greens, and the
+ *            course's recorded shapes and pins by label and id, so the prompt can name them
+ *            and the answer can replace them. Which of those are in the picture decides the
+ *            job (gd-ai-scan-core scanJob): pins - finish them; shapes only - refine them;
+ *            nothing - trace from scratch. The answer is always saved onto what is there. grid - the pixel
  *            spacing of the coordinate grid drawn on the picture, so the prompt can say so.
  * -> 202 {status:"queued"}. The scan itself runs in course-map-ai-scan-background.mjs: a
  *    vision call with thinking takes longer than a synchronous function is allowed, so this
@@ -83,11 +84,11 @@ export default async function courseMapAiScan(req) {
     requestedBy: admin,
     georef: payload.georef,
     image: { mediaType, data },
-    append: !!payload.append,
     notes: String(payload.notes || "").slice(0, 600),
-    anchors: (Array.isArray(payload.anchors) ? payload.anchors : []).slice(0, 120).map(a => ({
+    anchors: (Array.isArray(payload.anchors) ? payload.anchors : []).slice(0, 240).map(a => ({
       kind: String(a && a.kind || "").slice(0, 12),
       label: String(a && a.label || "").slice(0, 12),
+      id: String(a && a.id || "").replace(/[^a-z0-9_-]/gi, "").slice(0, 60),
       x: Math.round(Number(a && a.x)), y: Math.round(Number(a && a.y)),
       saved: !!(a && a.saved)
     })).filter(a => Number.isFinite(a.x) && Number.isFinite(a.y)),

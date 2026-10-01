@@ -4,7 +4,8 @@
  * Reads the request course-map-ai-scan.mjs parked on the overlay row (ai_scan, status
  * queued), sends the picture to Claude with the course's scorecard and the picture's scale
  * as context, converts the pixel answer to lat/lng through the same georef core the overlay
- * API uses, saves it as the overlay (append or replace, as asked), and writes the outcome
+ * API uses, saves it onto the overlay - a shape that replaces a recorded one is saved over it,
+ * anything new is added - and writes the outcome
  * back on the row - what was found, what was dropped and why, what the model said, what it
  * cost. The picture is cleared from the row whatever happens.
  *
@@ -13,7 +14,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { imageGeoreference, aiShapesToOverlay } from "./lib/gd-overlay-georef-core.mjs";
-import { buildScanPrompt, describeExisting, parseScanAnswer, AI_SCAN_OUTPUT_SCHEMA } from "./lib/gd-ai-scan-core.mjs";
+import { buildScanPrompt, parseScanAnswer, scanJob, AI_SCAN_OUTPUT_SCHEMA } from "./lib/gd-ai-scan-core.mjs";
 import { scorecardCourseKey } from "./lib/gd-scorecard-resolve.mjs";
 import { hasSupabase, slug, loadCourse, loadOverlay, loadScorecard, saveOverlay, writeAiScan, json } from "./lib/gd-map-overlay-store.mjs";
 
@@ -30,7 +31,7 @@ async function callModel({ image, prompt, courseMap }) {
      never should, but the answer is then "no shapes" rather than a 200 with nothing in it. */
   const stream = client.beta.messages.stream({
     model: scanModel(),
-    max_tokens: 32000,
+    max_tokens: 64000,
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
     output_config: { effort: "high", format: { type: "json_schema", schema: AI_SCAN_OUTPUT_SCHEMA } },
@@ -60,6 +61,17 @@ async function callModel({ image, prompt, courseMap }) {
   };
 }
 
+/* The recorded shapes Studio drew on the picture, with where they are in it: the anchors name
+   them by label and id, the saved overlay says what they are. An anchor whose shape has since
+   gone is left out. */
+function recordedShapes(anchors, features, georef) {
+  const byId = new Map((features || []).map(f => [f.id, f]));
+  return (anchors || []).filter(a => a && a.saved && a.id && byId.has(a.id)).map(a => {
+    const f = byId.get(a.id);
+    return { label: a.label, id: f.id, kind: f.kind, hole: f.hole || null, pin: !!f.pin, pixels: f.points.map(p => georef.toPx(p)) };
+  });
+}
+
 async function runScan(courseId) {
   const saved = await loadOverlay(courseId);
   const request = saved.aiScan;
@@ -69,7 +81,7 @@ async function runScan(courseId) {
      result has to be readable afterwards as "what did it see" - zoom, size, grid, anchors -
      not guessed at. The second Belfast scan was diagnosed from exactly these. */
   const base = {
-    requestedAt: request.requestedAt, requestedBy: request.requestedBy, append: !!request.append, georef: request.georef,
+    requestedAt: request.requestedAt, requestedBy: request.requestedBy, georef: request.georef,
     grid: request.grid || 0, anchors: Array.isArray(request.anchors) ? request.anchors : [], notes: request.notes || ""
   };
   await writeAiScan(courseId, Object.assign({}, base, { status: "running", startedAt: new Date().toISOString(), image: request.image }));
@@ -88,9 +100,10 @@ async function runScan(courseId) {
     const course = await loadCourse(courseId);
     if (!course) return await finish({ status: "failed", error: "no course_maps row for " + courseId });
     const scorecard = await loadScorecard(course.name, scorecardCourseKey);
-    const existing = request.append ? describeExisting(saved.features, p => georef.toPx(p)) : [];
+    const shapes = recordedShapes(request.anchors, saved.features, georef);
+    const job = scanJob(shapes);
     const courseMap = saved.courseMap && saved.courseMap.data ? saved.courseMap : null;
-    const prompt = buildScanPrompt({ course, scorecard, georef, existing, notes: request.notes, anchors: request.anchors, grid: request.grid, courseMap: !!courseMap });
+    const prompt = buildScanPrompt({ course, scorecard, georef, notes: request.notes, anchors: request.anchors, grid: request.grid, courseMap: !!courseMap, shapes });
 
     const answer = await callModel({ image: request.image, prompt, courseMap });
     if (answer.stopReason === "refusal") {
@@ -99,8 +112,8 @@ async function runScan(courseId) {
     if (answer.stopReason === "max_tokens") {
       return await finish({ status: "failed", error: "the answer was cut off at max_tokens - capture a smaller view", model: answer.model, usage: answer.usage });
     }
-    const parsed = parseScanAnswer(answer.text);
-    if (parsed.error) return await finish({ status: "failed", error: parsed.error, model: answer.model, usage: answer.usage, raw: answer.text.slice(0, 2000) });
+    const parsed = parseScanAnswer(answer.text, shapes);
+    if (parsed.error) return await finish({ status: "failed", job, error: parsed.error, model: answer.model, usage: answer.usage, raw: answer.text.slice(0, 2000) });
 
     const converted = aiShapesToOverlay(parsed.features, georef);
     if (converted.error) return await finish({ status: "failed", error: converted.error, model: answer.model, usage: answer.usage });
@@ -108,12 +121,17 @@ async function runScan(courseId) {
     parsed.features.forEach(f => { if (f.confidence != null) confidence[f.id] = f.confidence; });
 
     const savedResult = converted.features.length
-      ? await saveOverlay({ courseId, features: converted.features, savedBy: request.requestedBy, append: request.append })
+      ? await saveOverlay({ courseId, features: converted.features, savedBy: request.requestedBy, append: true })
       : null;
     if (savedResult && savedResult.error) return await finish({ status: "failed", error: savedResult.error + (savedResult.detail ? " - " + savedResult.detail : ""), model: answer.model, usage: answer.usage });
 
+    const recordedIds = new Set(shapes.map(shape => shape.id));
+    const replaced = converted.features.filter(f => recordedIds.has(f.id)).length;
     return await finish({
       status: "done",
+      job,
+      replaced,
+      added: converted.features.length - replaced,
       model: answer.model,
       usage: answer.usage,
       found: parsed.features.length,
@@ -123,7 +141,7 @@ async function runScan(courseId) {
       overlayTotal: savedResult ? savedResult.overlay.features.length : saved.features.length,
       features: converted.features.map(f => ({ id: f.id, kind: f.kind, confidence: confidence[f.id] != null ? confidence[f.id] : null })),
       pixels: converted.pixels,
-      dropped: converted.dropped,
+      dropped: parsed.dropped.concat(converted.dropped),
       notes: parsed.notes,
       scorecard: scorecard ? { holes: scorecard.holes.length, source: scorecard.source } : null
     });

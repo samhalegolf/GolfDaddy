@@ -83,7 +83,7 @@ test("the AI's answer converts, whatever it called things, and every drop is exp
       { type: "fairways", polygon: [[100, 100], [400, 100], [400, 160], [100, 160]] },
       { kind: "green", hole: 7, points: [{ x: 430, y: 120 }, { x: 460, y: 110 }, { x: 470, y: 140 }, { x: 440, y: 150 }] },
       { label: "centerline", line: [[100, 400], [600, 400]] },
-      { kind: "bunker", points: [[1, 1], [2, 2], [3, 3]] },
+      { kind: "water", points: [[1, 1], [2, 2], [3, 3]] },
       { kind: "fairway", points: [[10, 10], [20, 10]] },
       { kind: "green", points: [[5000, 5000], [5100, 5000], [5100, 5100], [5000, 5100]] },
       "junk"
@@ -97,9 +97,15 @@ test("the AI's answer converts, whatever it called things, and every drop is exp
   assert.strictEqual(out.features[0].points.length, 4, "a rectangle stays four corners");
   close(out.features[0].points[0], g.toLatLng({ x: 100, y: 100 }), 0.001, "the first corner is where the pixel is");
   assert.deepStrictEqual(out.dropped.map(d => d.reason), [
-    "unknown kind: bunker", "too few points", "4 of 4 points outside the image", "not an object"
+    "unknown kind: water", "too few points", "4 of 4 points outside the image", "not an object"
   ]);
   assert.strictEqual(out.pixels.length, 3, "kept shapes come back with their pixels for drawing over the image");
+  /* Tees and bunkers convert too: the first live tee answers were all dropped as unknown. */
+  const more = georef.aiShapesToOverlay({ features: [
+    { kind: "tee", points: [[100, 100], [130, 100], [130, 120], [100, 120]] },
+    { kind: "bunker", points: [[200, 200], [220, 200], [220, 215], [200, 215]] }
+  ] }, g);
+  assert.deepStrictEqual(more.features.map(f => f.kind), ["tee", "bunker"], JSON.stringify(more.dropped));
   assert.strictEqual(out.georef.width, 1024);
   assert.ok(out.georef.bounds.north > out.georef.bounds.south);
 

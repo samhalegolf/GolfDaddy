@@ -131,6 +131,8 @@ export function georefSummary(georef) {
 const KIND_ALIASES = {
   fairway: "fairway", fairways: "fairway", fairway_area: "fairway",
   green: "green", greens: "green", putting_green: "green",
+  tee: "tee", tees: "tee", tee_box: "tee",
+  bunker: "bunker", bunkers: "bunker", sand: "bunker",
   hole: "hole", hole_line: "hole", centreline: "hole", centerline: "hole", line: "hole"
 };
 
