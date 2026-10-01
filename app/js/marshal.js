@@ -560,7 +560,14 @@
     /* The one way a hole becomes the live hole. PLAY_PRESSED calls it, and so
        does walking into the tee zone of the hole you have queued up — which is
        the same commitment made with your feet instead of your thumb. Keeping
-       both doors in one function is what stops them drifting apart. */
+       both doors in one function is what stops them drifting apart.
+
+       liveHoleChanged is the round's own effect, and this is the only place
+       it fires. holeEntered is a VIEW effect - every arrow, picker tap and
+       return-to-live reaches it - so anything that records "which hole am I
+       playing" (the resume note) hangs off this instead. It used to hang off
+       holeEntered, and a hole you had only browsed came back as your live
+       hole the next time the course was opened. */
     function startHole(hole) {
       S.live = { hole: hole, mode: "track", awayFixes: 0 };
       S.preview = { mode: "setup", placement: null, target: null };
@@ -569,6 +576,7 @@
       S.greenClosed = null;
       S.viewChosen = false;
       if (S.viewHole !== hole) enterHole(hole);
+      if (typeof fx.liveHoleChanged === "function") { try { fx.liveHoleChanged(hole); } catch (e) {} }
       syncEngine();
     }
 

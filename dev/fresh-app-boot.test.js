@@ -1818,7 +1818,7 @@ async function bootCheck() {
       accounts: [{ accountId: "acct-admin", profileId: "profile-admin", name: "Sam", role: "admin" }]
     }));
     localStorage.setItem("clarity:player:profile-admin:resume-round:v1", JSON.stringify({
-      version: 1, courseId: "store-test-course", courseName: "Store Test", hole: 2,
+      version: 2, courseId: "store-test-course", courseName: "Store Test", liveHole: 2,
       updatedAt: Date.now(), expiresAt: Date.now() + 3600000
     }));
     sessionStorage.removeItem("clarity:play-context:v1");

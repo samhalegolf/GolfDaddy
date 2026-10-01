@@ -181,13 +181,21 @@
               hole: hole, tee: rec.tee, green: rec.green, route: rec.route
             });
           }
-          /* Resume is free (2026-09-17): it is a local note of which course
-             and hole you were on, written to this device and read by the
-             picker's Continue Round pill. It records no shot and no score, so
-             a rangefinder-only session gets it too — without it a guest who
-             backs out to the picker had no way back in but the nearby course
-             block, which starts them on hole 1. */
-          if (app.resume) app.resume.setHole(hole);
+        },
+        /* The round's live hole, never the viewed one: this fires only when
+           the Marshal makes a hole live (startHole), so browsing in Preview
+           cannot write the resume note. It used to ride on holeEntered, and a
+           hole you had only looked at came back LIVE when the course was next
+           opened.
+
+           Resume is free (2026-09-17): it is a local note of which course
+           and hole you were on, written to this device and read by the
+           picker's Continue Round pill. It records no shot and no score, so
+           a rangefinder-only session gets it too — without it a guest who
+           backs out to the picker had no way back in but the nearby course
+           block. */
+        liveHoleChanged: function (hole) {
+          if (app.resume) app.resume.setLiveHole(hole);
         },
         shotChanged: function (start, target) {
           if (window.GDBubbleEngine) window.GDBubbleEngine.setShot(start || null, target || null);
@@ -804,17 +812,19 @@
     gpsNoticeDismissed = false;
     /* A WebView rebuilt after backgrounding returns directly to this course
        URL, which carries no hole. Read the durable round BEFORE setCourse()
-       writes its initial Hole 1 record, or the reload destroys the very hole
-       it is meant to resume. The player-scoped storage key also ensures a
-       different signed-in player cannot inherit it. */
+       resets it to "no live hole", or the reload destroys the very hole it is
+       meant to resume. Only a hole that was LIVE is ever in there (see the
+       liveHoleChanged effect), so this cannot promote a browsed one. The
+       player-scoped storage key also ensures a different signed-in player
+       cannot inherit it. */
     if ((!Number.isFinite(Number(resumeHole)) || Number(resumeHole) < 1) && app.resume) {
       var savedRound = app.resume.read();
-      if (savedRound && String(savedRound.courseId) === String(course.courseId)) resumeHole = savedRound.hole;
+      if (savedRound && String(savedRound.courseId) === String(course.courseId)) resumeHole = savedRound.liveHole;
     }
-    /* Record the round the moment it is genuinely up, so a phone that dies on
-       the 7th tee still has somewhere to come back to. The holeEntered effect
-       keeps the hole current from here on. Not gated on an account — see the
-       note there. */
+    /* Record the course the moment it is open, with no live hole, so a phone
+       that dies before the first tee still has a way back in. The
+       liveHoleChanged effect records the hole once one is actually started.
+       Not gated on an account — see the note there. */
     if (app.resume) app.resume.setCourse(course);
     /* Before the cached/uncached split: the main site's overlay already shows
        the course name, so the title here must not flip to "Loading course" for
