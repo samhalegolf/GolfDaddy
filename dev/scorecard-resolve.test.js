@@ -51,7 +51,7 @@ function scorecardHtml(rows) {
   assert.strictEqual(r.classifySource("not a url").id, "club-site", "garbage does not throw");
   assert.strictEqual(r.classifySource("https://www.golfpass.com/x").unit, "yards", "GolfPass prints yards by default");
 
-  /* ---------- aggregators are read before club sites ------------------ */
+  /* ---------- strong official identity beats provider reputation ------ */
   const order = [];
   const result = await r.resolveScorecard({ courseName: "Te Arai Links" }, {
     search: async () => [
@@ -60,8 +60,8 @@ function scorecardHtml(rows) {
     ],
     fetchHtml: async url => { order.push(r.classifySource(url).id); return scorecardHtml(SOUTH_ROWS); }
   }, { want: 2 });
-  assert.strictEqual(order[0], "golfpass",
-    "GolfPass is read first even though search returned the club site first");
+  assert.strictEqual(order[0], "club-site",
+    "an exact official-domain identity is inspected before a matching listing");
   assert.strictEqual(result.cards.length, 2, "both readable pages kept when two courses are wanted");
   assert.strictEqual(result.cards[0].holes.length, 18);
   assert.strictEqual(result.cards[0].par, 72);

@@ -14,6 +14,7 @@
     "test:payments": "node dev/payment-rollout-tests.js",
     "test:referrals": "node dev/referral-surfaces.test.js && node dev/referral-invite-target.test.js && node dev/referrals-auth.test.js && node dev/referral-reward-entitlements.test.js && node dev/store-referral-reversal.test.js",
     "test:scorecard-resolve": "node dev/scorecard-resolve.test.js",
+    "test:scorecard-international": "node dev/international-scorecard-resolver.test.js",
     "test:scorecard-parse": "node dev/scorecard-parse-core.test.js",
     "test:course-rename": "node dev/course-rename-core.test.js",
     "test:multi-course": "node dev/multi-course-separation.test.js",

@@ -101,7 +101,8 @@ async function loadLastRun(courseId) {
     kind: row.kind, status: row.status, error: row.error || null, finishedAt: row.updated_at,
     osmFeatures: diagnostics.osmFeatures || null,
     overlay: diagnostics.overlay || null,
-    resolverStatus: diagnostics.resolverStatus || null
+    resolverStatus: diagnostics.resolverStatus || null,
+    scorecardResolve: diagnostics.scorecardResolve || null
   };
 }
 
