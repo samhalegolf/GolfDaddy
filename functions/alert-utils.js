@@ -1,6 +1,18 @@
 "use strict";
 
-const { getStore } = require("@netlify/blobs");
+/* The blob store behind the throttles. Required on first use, or handed in by a caller that
+   cannot let this file require it - the mapper worker is an ES module, Netlify bundles this file
+   into it, and a require() inside that bundle is invisible to the file tracer, so the package
+   was never shipped with the worker ("Cannot find module '@netlify/blobs'"). The worker imports
+   it itself and passes getStore to useBlobStore. */
+let blobGetStore = null;
+function useBlobStore(getStore) {
+  blobGetStore = getStore;
+}
+function getStore(name) {
+  if (!blobGetStore) blobGetStore = require("@netlify/blobs").getStore;
+  return blobGetStore(name);
+}
 
 function env(name) {
   return process.env[name] || "";
@@ -151,4 +163,4 @@ function escapeHTML(value) {
   });
 }
 
-module.exports = { sendSystemAlert, fireClaudeRoutine, claudeRoutineConfigured };
+module.exports = { sendSystemAlert, fireClaudeRoutine, claudeRoutineConfigured, useBlobStore };

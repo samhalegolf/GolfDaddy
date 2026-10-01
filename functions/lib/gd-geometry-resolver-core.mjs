@@ -28,6 +28,7 @@ const MEDIUM_CONFIDENCE = 0.58;
 const EARTH_RADIUS_M = 6371008.8;
 const MAX_BEAM_WIDTH = 360;
 const GREEN_FAIRWAY_LINK_MAX_M = 230;
+const USABLE_CANDIDATE_CONFIDENCE = 0.38;
 const RESOLVER_VERSION = "course-geometry-resolver-v1";
 const SOURCE = "automapper-course-geometry-resolver";
 
@@ -399,41 +400,175 @@ function buildCandidate(id, rawPath, greens, elements, source, extraEvidence, fo
     confidence: clamp(confidence, 0, 1), evidence
   };
 }
-function fairwayCenterlineForGreen(green, fairway, index, boundary) {
-  const polygon = cleanPolygon(elementPoints(fairway));
+/* The fairway's playing axis, oriented for one green: `far` is the end the hole is played
+   from, `near` the end at the green. */
+function fairwayAxisForGreen(green, fairway) {
+  const polygon = cleanPolygon(elementPoints(fairway.element));
   if (!green || !polygon) return null;
-  const center = centroid(polygon);
-  if (center && !pointInPolygon(center, boundary)) return null;
-  const fairwayDistance = distancePointToPolygonM(green.centre, polygon);
-  if (fairwayDistance > GREEN_FAIRWAY_LINK_MAX_M) return null;
   const axis = fairwayMajorAxis(polygon);
   if (!axis) return null;
   const aDistance = distanceM(axis.a, green.centre), bDistance = distanceM(axis.b, green.centre);
-  const near = aDistance <= bDistance ? axis.a : axis.b;
-  const far = aDistance <= bDistance ? axis.b : axis.a;
+  return { axis, near: aDistance <= bDistance ? axis.a : axis.b, far: aDistance <= bDistance ? axis.b : axis.a, nearDistanceM: Math.min(aDistance, bDistance) };
+}
+function fairwayCenterlineForGreen(green, fairway, oriented, tee, extraEvidence) {
+  const { axis, near, far } = oriented;
   const greenProjection = axis.projectionForPoint(green.centre);
   let projectedGreenSide = Number.isFinite(greenProjection) ? axis.pointAt(clamp(greenProjection, axis.min, axis.max)) : near;
   if (distanceM(projectedGreenSide, green.centre) > distanceM(near, green.centre) + 35) projectedGreenSide = near;
-  const rawPath = [far, axis.center, projectedGreenSide, green.centre].filter(Boolean);
-  const evidence = ["fairway:" + elementId(fairway, "fairway-" + index), "green-led", "fairway-distance:" + Math.round(fairwayDistance) + "m", "fairway-axis-span:" + Math.round(axis.spanM) + "m"];
-  return buildCandidate(elementId(fairway, "fairway-" + index) + "-" + green.id, rawPath, [green], [fairway], "fairway-centreline", evidence, green);
+  const rawPath = [tee && tee.centre, far, axis.center, projectedGreenSide, green.centre].filter(Boolean);
+  const fairwayId = elementId(fairway.element, "fairway-" + fairway.index);
+  const evidence = ["fairway:" + fairwayId, "green-led", "fairway-distance:" + Math.round(fairway.distance) + "m", "fairway-axis-span:" + Math.round(axis.spanM) + "m"]
+    .concat(tee ? ["tee:" + tee.id] : [], extraEvidence || []);
+  const candidate = buildCandidate(fairwayId + "-" + green.id, rawPath, [green], [fairway.element], "fairway-centreline", evidence, green);
+  if (candidate) candidate.featureKeys = [green.id, fairwayId].concat(tee ? [tee.id] : []);
+  return candidate;
 }
+function teeToGreenCandidate(green, tee, elements) {
+  const candidate = buildCandidate(tee.id + "-" + green.id, [tee.centre, green.centre], [green], elements, "tee-to-green", ["tee:" + tee.id, "green-led", "tee-distance:" + Math.round(distanceM(tee.centre, green.centre)) + "m"], green);
+  if (candidate) { candidate.confidence = clamp(candidate.confidence + 0.16, 0, 1); candidate.featureKeys = [green.id, tee.id]; }
+  return candidate;
+}
+/* Greedy one-to-one pairing, shortest first: each left and each right item is used once. */
+function pairOneToOne(pairs) {
+  const leftUsed = new Set(), rightUsed = new Set(), out = [];
+  pairs.slice().sort((a, b) => a.cost - b.cost).forEach(pair => {
+    if (leftUsed.has(pair.left) || rightUsed.has(pair.right)) return;
+    leftUsed.add(pair.left); rightUsed.add(pair.right); out.push(pair);
+  });
+  return out;
+}
+/* Hole lines built from surfaces when nothing draws the hole itself.
+ *
+ * A fairway belongs to ONE green - the one at its end - and a tee to one hole. Letting every
+ * green take its nearest fairway is how a par 3 with no fairway of its own borrowed the
+ * neighbouring hole's, and how one fairway became the opening of two holes on two different
+ * nines at Sophia Green. So fairways pair with greens one-to-one, nearest end first.
+ *
+ * Where tees are mapped they start the hole: a fairway-led line begins at the tee behind its
+ * far end, and a green left without a fairway (a par 3) is played from the nearest unclaimed
+ * tee. Starting at the fairway's far end instead measured every hole a third short of its
+ * card. A green with neither a fairway nor a tee still borrows the nearest fairway, flagged
+ * and marked down, because a weak line is better than a hole the card cannot be matched to. */
+const TEE_BEHIND_FAIRWAY_MAX_M = 170;
+const TEE_COMPLEX_M = 35;
+const PAR3_TEE_MIN_M = 60;
+const PAR3_TEE_MAX_M = 260;
+/* The tee nearest a green is usually the NEXT hole's, sat beside the green just finished. A par
+   3 is played from further back, so a par-3 tee is the one closest to a typical par-3 length. */
+const PAR3_TYPICAL_M = 150;
+/* How many other readings each green offers the card - enough to correct a wrong pairing,
+   few enough that a big site's matcher stays quick. */
+const ALTERNATIVE_FAIRWAYS_PER_GREEN = 2;
+const ALTERNATIVE_TEES_PER_GREEN = 3;
 function greenLedFairwayCandidates(elements, greens, boundary) {
   const fairways = (elements || []).map((element, index) => {
     if (golfTag(element) !== "fairway") return null;
     const polygon = cleanPolygon(elementPoints(element));
-    return polygon ? { element, index, polygon } : null;
+    if (!polygon) return null;
+    const center = centroid(polygon);
+    if (center && !pointInPolygon(center, boundary)) return null;
+    return { element, index, polygon, id: elementId(element, "fairway-" + index) };
   }).filter(Boolean);
-  if (!fairways.length || !(greens || []).length) return [];
+  const tees = (elements || []).map((element, index) => {
+    if (golfTag(element) !== "tee") return null;
+    const pts = elementPoints(element);
+    const centre = pts.length ? centroid(pts) : null;
+    if (!centre || !pointInPolygon(centre, boundary)) return null;
+    return { element, centre, id: elementId(element, "tee-" + index) };
+  }).filter(Boolean);
+  /* Tees refine fairway-led lines and fill the par 3s between them; on their own they are
+     not enough to read a course from, and unnumbered OSM hole lines do that better. */
+  if (!(greens || []).length || !fairways.length) return [];
+
+  const oriented = new Map();
+  const fairwayPairs = [];
+  (greens || []).forEach(green => fairways.forEach(fairway => {
+    const distance = distancePointToPolygonM(green.centre, fairway.polygon);
+    if (!Number.isFinite(distance) || distance > GREEN_FAIRWAY_LINK_MAX_M) return;
+    const axis = fairwayAxisForGreen(green, fairway);
+    if (!axis) return;
+    oriented.set(green.id + "::" + fairway.id, axis);
+    fairwayPairs.push({ left: green.id, right: fairway.id, green, fairway: Object.assign({}, fairway, { distance }), cost: axis.nearDistanceM + distance });
+  }));
+  const fairwayFor = new Map(pairOneToOne(fairwayPairs).map(pair => [pair.left, pair]));
+
+  const claimedTees = new Set();
+  const claimComplex = tee => tees.forEach(other => { if (distanceM(other.centre, tee.centre) <= TEE_COMPLEX_M) claimedTees.add(other.id); });
+  const teePairs = [];
+  fairwayFor.forEach(pair => {
+    const axis = oriented.get(pair.green.id + "::" + pair.fairway.id);
+    const direction = { lat: axis.far.lat - axis.near.lat, lng: axis.far.lng - axis.near.lng };
+    tees.forEach(tee => {
+      const fromFar = distanceM(axis.far, tee.centre);
+      if (fromFar > TEE_BEHIND_FAIRWAY_MAX_M) return;
+      /* Behind the far end, or level with it - never back up the fairway towards the green. */
+      const along = (tee.centre.lat - axis.far.lat) * direction.lat + (tee.centre.lng - axis.far.lng) * direction.lng;
+      if (along < 0 && fromFar > 40) return;
+      teePairs.push({ left: pair.green.id, right: tee.id, tee, cost: fromFar });
+    });
+  });
+  const teeFor = new Map(pairOneToOne(teePairs).map(pair => [pair.left, pair.tee]));
+  teeFor.forEach(claimComplex);
+
   const candidates = [];
+  fairwayFor.forEach(pair => {
+    const candidate = fairwayCenterlineForGreen(pair.green, pair.fairway, oriented.get(pair.green.id + "::" + pair.fairway.id), teeFor.get(pair.green.id) || null);
+    if (candidate) candidates.push(candidate);
+  });
+
+  const withoutFairway = (greens || []).filter(green => !fairwayFor.has(green.id));
+  const par3Pairs = [];
+  withoutFairway.forEach(green => tees.forEach(tee => {
+    if (claimedTees.has(tee.id)) return;
+    const distance = distanceM(tee.centre, green.centre);
+    if (distance >= PAR3_TEE_MIN_M && distance <= PAR3_TEE_MAX_M) par3Pairs.push({ left: green.id, right: tee.id, green, tee, cost: Math.abs(distance - PAR3_TYPICAL_M) });
+  }));
+  const par3For = new Map();
+  pairOneToOne(par3Pairs).forEach(pair => {
+    /* Best fit first, so a complex a better-fitting green already took is off the table. */
+    if (claimedTees.has(pair.tee.id)) return;
+    par3For.set(pair.green.id, pair);
+    claimComplex(pair.tee);
+  });
+  par3For.forEach(pair => {
+    const candidate = teeToGreenCandidate(pair.green, pair.tee, elements);
+    if (candidate) candidates.push(candidate);
+  });
+
+  /* The other readings of each green, for the card to choose between. Pairing above is the
+     ground's best guess at which fairway or tee is whose; the card often knows better - a
+     green paired with a fairway that its card says is a 124m par 3 is wrong, and the tee
+     that makes it right is one of these. Marked down, and never sharing a fairway or tee with
+     another hole on the same card (see candidateFeatureKeys). */
   (greens || []).forEach(green => {
-    const ranked = fairways.map(fairway => ({ fairway, distance: distancePointToPolygonM(green.centre, fairway.polygon) }))
-      .filter(entry => Number.isFinite(entry.distance) && entry.distance <= GREEN_FAIRWAY_LINK_MAX_M)
-      .sort((a, b) => a.distance - b.distance);
-    for (const entry of ranked) {
-      const candidate = fairwayCenterlineForGreen(green, entry.fairway.element, entry.fairway.index, boundary);
-      if (candidate) { candidates.push(candidate); break; }
-    }
+    const primary = fairwayFor.get(green.id);
+    fairwayPairs.filter(pair => pair.left === green.id && (!primary || pair.fairway.id !== primary.fairway.id))
+      .sort((a, b) => a.cost - b.cost).slice(0, ALTERNATIVE_FAIRWAYS_PER_GREEN).forEach(pair => {
+      const axis = oriented.get(green.id + "::" + pair.fairway.id);
+      const tee = tees.filter(t => distanceM(axis.far, t.centre) <= TEE_BEHIND_FAIRWAY_MAX_M).sort((a, b) => distanceM(axis.far, a.centre) - distanceM(axis.far, b.centre))[0] || null;
+      const candidate = fairwayCenterlineForGreen(green, pair.fairway, axis, tee, ["alternative"]);
+      if (candidate) { candidate.alternative = true; candidate.confidence = clamp(candidate.confidence - 0.06, 0, 1); candidates.push(candidate); }
+    });
+    const par3 = par3For.get(green.id);
+    tees.map(tee => ({ tee, distance: distanceM(tee.centre, green.centre) }))
+      .filter(entry => !(par3 && par3.tee.id === entry.tee.id) && entry.distance >= PAR3_TEE_MIN_M && entry.distance <= PAR3_TEE_MAX_M)
+      .sort((a, b) => Math.abs(a.distance - PAR3_TYPICAL_M) - Math.abs(b.distance - PAR3_TYPICAL_M))
+      .slice(0, ALTERNATIVE_TEES_PER_GREEN)
+      .forEach(({ tee }) => {
+      const candidate = teeToGreenCandidate(green, tee, elements);
+      if (candidate) { candidate.alternative = true; candidate.evidence.push("alternative"); candidate.confidence = clamp(candidate.confidence - 0.06, 0, 1); candidates.push(candidate); }
+    });
+  });
+
+  withoutFairway.filter(green => !par3For.has(green.id)).forEach(green => {
+    const nearest = fairwayPairs.filter(pair => pair.left === green.id).sort((a, b) => a.cost - b.cost)[0];
+    if (!nearest) return;
+    const candidate = fairwayCenterlineForGreen(green, nearest.fairway, oriented.get(green.id + "::" + nearest.fairway.id), null, ["borrowed-fairway"]);
+    if (!candidate) return;
+    candidate.confidence = clamp(candidate.confidence - 0.1, 0, 1);
+    /* Its fairway is another hole's, so only its green is its own. */
+    candidate.featureKeys = [green.id];
+    candidates.push(candidate);
   });
   return candidates;
 }
@@ -624,9 +759,18 @@ function median(values) {
 function distanceScale(candidates, scorecard) {
   const candidateDistances = candidates.map(c => c.pathDistanceM).filter(Number.isFinite).sort((a, b) => a - b);
   const cardDistances = scorecard.map(h => h.distanceM).filter(Number.isFinite).sort((a, b) => a - b);
+  /* Same place in each spread, not the first N of each. On a 27-hole site a nine's card was
+     set against the nine SHORTEST holes on the ground, which read every multi-loop site as
+     about a third smaller than its cards. */
   const pairs = [];
-  const count = Math.min(candidateDistances.length, cardDistances.length);
-  for (let i = 0; i < count; i++) if (cardDistances[i] > 0) pairs.push(candidateDistances[i] / cardDistances[i]);
+  const n = candidateDistances.length, m = cardDistances.length;
+  if (!n || !m) return 1;
+  const sample = (list, i, of) => list[of <= 1 ? 0 : Math.round(i * (list.length - 1) / (of - 1))];
+  const count = Math.min(n, m);
+  for (let i = 0; i < count; i++) {
+    const card = sample(cardDistances, i, count), ground = sample(candidateDistances, i, count);
+    if (card > 0) pairs.push(ground / card);
+  }
   return median(pairs) || 1;
 }
 function rankMap(items, getValue, getKey) {
@@ -707,23 +851,35 @@ function scorePair(candidate, hole, context) {
     }
   };
 }
+/* Green to next tee. A course is walked, so consecutive holes sit together: the walk to the
+   next tee is rarely past 450m and never most of a kilometre. A matcher that only rewarded
+   short walks and barely minded long ones dealt three look-alike nines across the whole of
+   Sophia Green, hopping 700-1400m between holes, because the cards alone could not tell them
+   apart. The long walk has to cost more than a slightly better length match is worth. */
 function routeContinuityScore(prevCandidate, candidate) {
   if (!prevCandidate || !candidate) return 0;
   const d = distanceM(prevCandidate.path[prevCandidate.path.length - 1], candidate.path[0]);
   if (!Number.isFinite(d)) return 0;
-  if (d <= 90) return 0.08;
-  if (d <= 230) return 0.04;
-  if (d >= 850) return -0.08;
-  return 0;
+  /* Graded, not banded: +0.1 for a tee beside the green, nothing at 300m, -0.16 at 700m. */
+  return clamp(0.12 - d / 2500, -0.6, 0.1);
 }
-function matchCandidatesToScorecard(candidates, scorecard, expectedHoleCount, normalizedScorecardSources) {
+/* The pieces of ground a candidate is built from - its green, and its fairway and tee where it
+   has its own. Two holes on one card can never share one, and ground another card claimed
+   takes every candidate built on it off the table, not just the one it chose. */
+function candidateFeatureKeys(candidate) {
+  return (candidate && candidate.featureKeys && candidate.featureKeys.length) ? candidate.featureKeys : [String(candidate && candidate.candidateId)];
+}
+function matchCandidatesToScorecard(candidates, scorecard, expectedHoleCount, normalizedScorecardSources, routeOrder) {
   const warnings = [];
   const holes = scorecard.slice().sort((a, b) => a.holeNumber - b.holeNumber);
   if (!holes.length) {
     warnings.push("No scorecard evidence available; resolver refused to number geometry.");
     return { assignments: [], unresolvedScorecardHoles: [], confidence: 0, warnings, alternatives: [] };
   }
-  const usefulCandidates = candidates.filter(c => c.path && c.path.length >= 2 && c.confidence >= 0.38).slice(0, Math.max(expectedHoleCount || holes.length || 18, holes.length) + 8);
+  /* Every usable candidate, not the most confident few. Capping at the card's length plus
+     eight showed a nine on a 27-hole site only 17 of its 27 holes, ranked by confidence
+     rather than by where they are - often not the ground the card describes at all. */
+  const usefulCandidates = candidates.filter(c => c.path && c.path.length >= 2 && c.confidence >= USABLE_CANDIDATE_CONFIDENCE);
   if (!usefulCandidates.length) {
     warnings.push("No usable hole geometry candidates found inside the analysis boundary.");
     return { assignments: [], unresolvedScorecardHoles: holes, confidence: 0, warnings, alternatives: [] };
@@ -738,19 +894,49 @@ function matchCandidatesToScorecard(candidates, scorecard, expectedHoleCount, no
   };
   const pair = {};
   holes.forEach(hole => { usefulCandidates.forEach(candidate => { pair[hole.holeNumber + "::" + candidate.candidateId] = scorePair(candidate, hole, context); }); });
+  /* A loop already routed on the ground (gd-ground-loops-core.mjs) is played in its walking
+     order, so the card only says where hole 1 is: every starting point tried, best fit wins.
+     Otherwise the beam below orders the holes itself. */
+  /* Each green in the route is read whichever way fits the card best - its own line or one of
+     its alternatives - as long as no fairway or tee is used twice. */
+  const byId = new Map(candidates.map(candidate => [String(candidate.candidateId), candidate]));
+  const routeGreens = Array.isArray(routeOrder) && routeOrder.length === holes.length ? routeOrder.map(id => (byId.get(String(id)) || {}).greenId) : null;
+  const readingsOf = greenId => usefulCandidates.filter(candidate => candidate.greenId === greenId);
   let states = [{ score: 0, assignments: [], used: {}, last: null }];
-  holes.forEach(hole => {
+  if (routeGreens && routeGreens.every(greenId => greenId && readingsOf(greenId).length)) {
+    states = routeGreens.map((_, start) => {
+      let score = 0, last = null;
+      const used = {};
+      const assignments = holes.map((hole, i) => {
+        const options = readingsOf(routeGreens[(start + i) % routeGreens.length])
+          .filter(candidate => !candidateFeatureKeys(candidate).some(key => used[key]))
+          .map(candidate => ({ candidate, scored: pair[hole.holeNumber + "::" + candidate.candidateId], continuity: routeContinuityScore(last, candidate) }))
+          .sort((a, b) => (b.scored.score + b.continuity) - (a.scored.score + a.continuity));
+        const pick = options[0];
+        if (!pick) return null;
+        candidateFeatureKeys(pick.candidate).forEach(key => { used[key] = true; });
+        score += pick.scored.score + pick.continuity;
+        last = pick.candidate;
+        return { hole, candidate: pick.candidate, pair: pick.scored, continuity: pick.continuity };
+      });
+      return { score, assignments: assignments.filter(Boolean), used, last };
+    }).sort((a, b) => b.assignments.length - a.assignments.length || b.score - a.score);
+  }
+  else holes.forEach(hole => {
     const nextStates = [];
     states.forEach(state => {
       usefulCandidates.forEach(candidate => {
-        if (state.used[candidate.candidateId]) return;
+        const keys = candidateFeatureKeys(candidate);
+        if (keys.some(key => state.used[key])) return;
         const scored = pair[hole.holeNumber + "::" + candidate.candidateId];
         if (!scored || scored.score < 0.18) return;
         const continuity = routeContinuityScore(state.last, candidate);
+        const used = Object.assign({}, state.used);
+        keys.forEach(key => { used[key] = true; });
         nextStates.push({
           score: state.score + scored.score + continuity,
           assignments: state.assignments.concat([{ hole, candidate, pair: scored, continuity }]),
-          used: Object.assign({}, state.used, { [candidate.candidateId]: true }),
+          used,
           last: candidate
         });
       });
@@ -897,14 +1083,24 @@ export async function resolveCourseGeometryForAutoMapper(input) {
    * match the same nine holes the first one took, because nothing in the
    * matching says a piece of ground can only belong to one course. */
   const excluded = new Set((input.excludeCandidateIds || []).map(String));
-  const candidates = excluded.size ? allCandidates.filter(c => !excluded.has(String(c.candidateId))) : allCandidates;
+  const excludedGround = new Set();
+  allCandidates.forEach(c => { if (excluded.has(String(c.candidateId))) candidateFeatureKeys(c).forEach(key => excludedGround.add(key)); });
+  /* Or the other way round: only these holes - one routed loop the ground has already been
+     split into, numbered by one card (see gd-ground-loops-core.mjs). routeOrder, when given,
+     is the walking order of the loop's greens, as the ground's own reading of each. */
+  const only = Array.isArray(input.onlyCandidateIds) ? new Set(input.onlyCandidateIds.map(String)) : null;
+  const candidates = allCandidates.filter(c => {
+    if (only && !only.has(String(c.candidateId))) return false;
+    if (!excluded.size) return true;
+    return !excluded.has(String(c.candidateId)) && !candidateFeatureKeys(c).some(key => excludedGround.has(key));
+  });
   const expected = expectedHoleCount(input, scorecard);
   const requiredDistanceCount = scorecard.length ? Math.max(1, Math.min(expected || scorecard.length || 18, scorecard.length, 18)) : Math.max(1, Math.min(expected || 18, 18));
   const distanceEvidenceCount = scorecardDistanceCount(scorecard);
   const scorecardUsableForNumbering = !!scorecard.length && distanceEvidenceCount >= requiredDistanceCount;
   let match;
   if (scorecardUsableForNumbering) {
-    match = matchCandidatesToScorecard(candidates, scorecard, expected, scorecardSources);
+    match = matchCandidatesToScorecard(candidates, scorecard, expected, scorecardSources, input.routeOrder);
   } else {
     const unavailableReason = scorecard.length ? "Scorecard distances unavailable" : "Scorecard unavailable";
     match = {
@@ -939,6 +1135,31 @@ export async function resolveCourseGeometryForAutoMapper(input) {
   };
   result.feedback = buildFeedback(result);
   return result;
+}
+
+/* Every hole line the resolver would choose from on this ground, before any card is read.
+   `primary` is one per green - the ground's own best reading, and the input to splitting a
+   multi-loop site into routed loops; `all` adds the alternative readings a card may prefer.
+   Same boundary, detection and usability floor as a resolve over this payload. */
+export function resolverHoleCandidates(input) {
+  input = input || {};
+  const payload = input.osmPayload || {};
+  const elements = payload.elements || input.elements || [];
+  const analysisBoundary = deriveAnalysisBoundary(input, elements);
+  if (sourceEvidenceError(input, elements, analysisBoundary)) return [];
+  const greens = detectGreenCandidates(elements, analysisBoundary).accepted;
+  const usable = detectHoleGeometryCandidates(elements, greens, analysisBoundary)
+    .filter(c => c.path && c.path.length >= 2 && c.confidence >= USABLE_CANDIDATE_CONFIDENCE);
+  /* A green answers to one hole. Where two lines reach it (a numbered hole line and a
+     fairway centreline, say) the more confident one stands for it. */
+  const byGreen = new Map();
+  usable.forEach(candidate => {
+    const key = candidate.greenId || candidate.candidateId;
+    const held = byGreen.get(key);
+    const better = !held || (!!held.alternative !== !!candidate.alternative ? !candidate.alternative : candidate.confidence > held.confidence);
+    if (better) byGreen.set(key, candidate);
+  });
+  return { primary: [...byGreen.values()], all: usable };
 }
 
 /* Converts one resolver assignment (result.holes[i]) into the same {hole, points, source,

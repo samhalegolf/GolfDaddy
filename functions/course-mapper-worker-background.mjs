@@ -28,7 +28,8 @@ import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete, scorecardIdentityMismatch } from "./lib/gd-course-fit-core.mjs";
 import { reverseGeocodePlace } from "./lib/gd-course-place.mjs";
 import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
-import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
+import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole, resolverHoleCandidates } from "./lib/gd-geometry-resolver-core.mjs";
+import { partitionLoops, walkCost } from "./lib/gd-ground-loops-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
 import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow, stitchedCardVerdict, shouldReplaceFacilityCard } from "./lib/gd-scorecard-resolve.mjs";
@@ -40,12 +41,14 @@ import { eliminateInferredCourses } from "./lib/gd-inferred-course-claims-core.m
 import { OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND } from "./course-mapper-jobs.mjs";
 import { refineSurfaceShape, applyRefinedShape, REFINED_SHAPE_SOURCE } from "./lib/gd-surface-refine-core.mjs";
 import pkg from "./lib/safe-remote-url.js";
+import courseSearchIdentity from "./lib/gd-course-search-identity.js";
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
 import { classifyMapperFailure, failureKind, buildMapperDebugText } from "./lib/gd-mapper-failure-kinds.mjs";
 import { captureMapperDebugImagery } from "./lib/gd-mapper-debug-captures.mjs";
 import { mergeOverlayIntoPayload, overlaySummary } from "./lib/gd-map-overlay-core.mjs";
 const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
+const { loopDisplayName, stripParSuffix } = courseSearchIdentity;
 
 const JOBS_TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
@@ -172,14 +175,21 @@ async function captureForDebug(job, diagnostics) {
   });
 }
 
-/* alert-utils.js is CommonJS and requires @netlify/blobs at load time. Imported at the top of
-   this file it ran on every cold start, and from the deploy that added it the worker stopped
-   reaching the queue at all (last claim 2026-09-28 19:51 UTC; jobs sat "queued" from then on).
-   Loaded here instead, it only runs when a job has already failed for good - and if it cannot
-   load, that failure is recorded on the job rather than taking the whole worker down. */
+/* Loaded only when a job has already failed for good, so a problem here is recorded on the job
+   rather than taking the whole worker down (an import at the top of this file once stopped it
+   reaching the queue at all, 2026-09-28).
+ *
+ * @netlify/blobs is imported HERE, as an ES import, and handed to alert-utils. Netlify bundles
+ * alert-utils.js into this file and the file tracer cannot see the require() inside it, so the
+ * package was never shipped and every debug fire failed with "Cannot find module
+ * '@netlify/blobs'" - external_node_modules in netlify.toml did not help, because this function
+ * is traced, not bundled with esbuild. An import() with a literal name is traced and shipped,
+ * the same way sharp is above. */
 async function loadAlerts() {
-  const mod = await import("./alert-utils.js");
-  return mod.default || mod;
+  const [mod, blobs] = await Promise.all([import("./alert-utils.js"), import("@netlify/blobs")]);
+  const alerts = mod.default || mod;
+  alerts.useBlobStore(blobs.getStore);
+  return alerts;
 }
 
 async function requestMapperDebug(job, failure) {
@@ -683,27 +693,48 @@ async function resolveScorecardForCourse(course, origin, want) {
  * visuals, shot events and captured surfaces and renaming one orphans all three.
  *
  * osm_course_ref is the stable identity across rescans. Names get edited in OSM and
- * slugs move with them; element ids do not. Matched before the slug for that reason. */
-async function findExistingLoopRow(loop, courseId) {
+ * slugs move with them; element ids do not. Matched before the id for that reason.
+ *
+ * Both lookups are scoped to the facility: an OSM course ref is only trusted on a row of
+ * ours, and an id is only reused if its row is ours - a row another facility owns is
+ * never adopted and overwritten. */
+async function findExistingLoopRow(loop, courseId, facilityKey) {
+  const ours = "&facility_key=eq." + encodeURIComponent(facilityKey);
   if (loop.osmRef) {
-    const byRef = await supabaseFetch(MAPS_TABLE + "?select=course_id&osm_course_ref=eq." + encodeURIComponent(loop.osmRef) + "&limit=1").catch(() => null);
+    const byRef = await supabaseFetch(MAPS_TABLE + "?select=course_id&osm_course_ref=eq." + encodeURIComponent(loop.osmRef) + ours + "&limit=1").catch(() => null);
     if (Array.isArray(byRef) && byRef.length) return byRef[0].course_id;
   }
-  const bySlug = await supabaseFetch(MAPS_TABLE + "?select=course_id&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => null);
-  return Array.isArray(bySlug) && bySlug.length ? bySlug[0].course_id : null;
+  const byId = await supabaseFetch(MAPS_TABLE + "?select=course_id,facility_key&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => null);
+  const row = Array.isArray(byId) ? byId[0] : null;
+  if (!row) return null;
+  if (row.facility_key && row.facility_key !== facilityKey) throw new Error("course id " + courseId + " already belongs to facility " + row.facility_key);
+  return row.course_id;
 }
 
-function loopCourseId(loop, course, index) {
-  if (loop.name) {
-    const fromName = slug(loop.name);
-    /* A polygon named for the whole site tells the courses apart no better than a
-       number does, so fall through rather than minting two identical ids. */
-    if (fromName && fromName !== slug(course.courseName || "") && fromName !== course.courseId) return fromName;
-  }
-  /* course-1 as well as course-2: leaving the first loop on the bare facility id
-     made one row "te-rai" and the other "te-rai-course-2", which reads as a course
-     and an afterthought rather than as two courses. */
-  return slug(course.courseId + "-course-" + (index + 1));
+/* A sibling's course_id: always under the facility's own id, never a bare name.
+ *
+ * Ids used to be the slug of the loop's name alone. That made them global - two clubs
+ * with a "North Course" both minted "north", and the second scan of either adopted and
+ * overwrote the other's row through findExistingLoopRow. Non-Latin names made it worse:
+ * slugging "세종(世宗) 코스 | Par 36" and "여강(驪江)코스 | Par 36" leaves "par-36" for
+ * both, so at Sophia Green one nine overwrote another inside the same run. And a
+ * provisional name ("Course 2 - 5444m East") minted ids from a length that changes on
+ * every rescan.
+ *
+ * So: the facility's id, then the course's name romanised and stripped of card noise
+ * ("cc-37-178n-127-708e-sejong"), or its position when there is no real name. `taken`
+ * holds every id this run has already used, the pinned one included; a clash falls
+ * back to the position, which is unique within the run by construction. */
+function loopCourseId(loop, course, index, taken) {
+  const facility = slug(course.courseId);
+  const real = loop.name && loop.nameSource !== "provisional" ? slug(loopDisplayName(loop.name)) : "";
+  /* "Course", "item" and the facility's own name tell the courses apart no better than a
+     number does. */
+  const usable = real && !["course", "item"].includes(real) && real !== slug(course.courseName || "") && real !== facility;
+  const named = usable ? (real.startsWith(facility + "-") ? real : slug(facility + "-" + real)) : "";
+  const numbered = slug(facility + "-course-" + (index + 1));
+  if (named && !taken.has(named)) return named;
+  return numbered;
 }
 
 /* Which separated loop is which named course.
@@ -812,14 +843,17 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
   const failures = [];
   /* Mutates loops[].name in place, so this must run before ids are derived. */
   const naming = nameLoopsFromCards(loops, course.scorecardCards);
+  const taken = new Set([course.courseId]);
   for (let index = 0; index < loops.length; index++) {
     const loop = loops[index];
     await heartbeatJob(job, { stage: "publishing-course-" + (index + 1) + "-of-" + loops.length });
     /* index 0 is the pinned loop - separateLoops sorts by distance from the pin. */
     const isPinned = index === 0;
-    const derivedId = loopCourseId(loop, course, index);
+    const derivedId = loopCourseId(loop, course, index, taken);
     try {
-      const courseId = isPinned ? course.courseId : (await findExistingLoopRow(loop, derivedId)) || derivedId;
+      const existing = isPinned ? null : await findExistingLoopRow(loop, derivedId, course.courseId);
+      const courseId = isPinned ? course.courseId : (existing && !taken.has(existing) ? existing : derivedId);
+      taken.add(courseId);
       /* NO sibling centres, deliberately.
        *
        * guideBelongsToCourse drops any guide that sits closer to a sibling's centre
@@ -863,7 +897,7 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
            before anything has actually identified it. */
         course_name: loop.name && /^course \d+\b/i.test(loop.name)
           ? (course.courseName ? splitCourseName(course.courseName).facility + " - " + loop.name : loop.name)
-          : (loop.name || course.courseName || courseId),
+          : (stripParSuffix(loop.name) || course.courseName || courseId),
         course_lat: loop.centre ? loop.centre.lat : course.center.lat,
         course_lng: loop.centre ? loop.centre.lng : course.center.lng,
         /* Same ground, same place: a sibling published out of this separation
@@ -889,7 +923,8 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
          "Course 1" today can become "South Course" tomorrow without losing the name
          anything already referred to it by. Built after the row so it can exclude
          whichever of them became the display name. */
-      row.course_aliases = [...new Set([course.courseName, loop.matchedCard, loop.name].filter(Boolean))]
+      /* The romanised name too ("Sejong" for 세종 코스), so the course is findable in Latin script. */
+      row.course_aliases = [...new Set([course.courseName, loop.matchedCard, loop.name, loop.name && loop.nameSource !== "provisional" ? loopDisplayName(loop.name) : ""].filter(Boolean))]
         .filter(alias => alias !== row.course_name);
       /* The pinned row exists by definition and must not have its name replaced by a
          blank one when the polygon carried no name. */
@@ -1114,16 +1149,21 @@ async function publishUnnumberedFacility(context) {
     record.stitchedCards = stitched;
 
     await heartbeatJob(job, { stage: "resolving-facility-loops-" + (round + 1) });
-    let pass = await claimFacilityGround({
-      cards: usableCards, course, payload, deadline, resolution, seeded
-    });
+    /* Ground first where the cards allow it. The seed is left out when it does: it is one
+       card matched over the whole site, which is the very reading this replaces. */
+    const byGround = await claimByGround({ cards: usableCards, course, payload });
+    record.groundFirst = Object.assign({ used: !!byGround.claims, reason: byGround.reason || null }, byGround.ground || {});
+    let pass = byGround.claims
+      ? { claims: byGround.claims, rejected: [], excludedAtStart: 0, excludedWithinRound: 0 }
+      : await claimFacilityGround({ cards: usableCards, course, payload, deadline, resolution, seeded });
+    if (byGround.claims && !resolution.mappingMethods.includes(MAPPING_METHOD.NATIVE_RESOLVER)) resolution.mappingMethods.push(MAPPING_METHOD.NATIVE_RESOLVER);
 
     /* Two cards that matched the same ground mean the open pass could not
        separate them, not that the site has two loops there. Run it again with
        the strongest claim's ground taken away, so the loser has to find its own
        - the progressive reduction this whole path exists for, brought forward to
-       the round that actually needs it. */
-    const contested = contestedClaims(pass.claims);
+       the round that actually needs it. Ground-first claims never share a hole. */
+    const contested = byGround.claims ? [] : contestedClaims(pass.claims);
     if (contested.length) {
       record.contested = contested;
       await heartbeatJob(job, { stage: "separating-contested-loops-" + (round + 1) });
@@ -1293,6 +1333,123 @@ async function publishUnnumberedFacility(context) {
   return { published, record };
 }
 
+/* A card's resolved holes as a claim on the ground. The guide rides along with its hole so
+   reconciliation can slice a composite card into nines and still hand back publishable
+   geometry. */
+function claimFromResolution(card, result, guides) {
+  const byHole = new Map((result.holes || []).map(hole => [hole.holeNumber, hole]));
+  return {
+    cardName: card.name || "",
+    confidence: result.confidence || 0,
+    method: MAPPING_METHOD.NATIVE_RESOLVER,
+    resolverGreens: (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon })),
+    holes: guides.map(guide => ({
+      holeNumber: guide.hole,
+      candidateId: String((byHole.get(guide.hole) || {}).candidate ? byHole.get(guide.hole).candidate.candidateId : guide.id),
+      guide
+    }))
+  };
+}
+
+/* GROUND FIRST, WHEN THE CARDS DESCRIBE LOOPS OF ONE SIZE.
+ *
+ * Several cards of the same length (three nines, two eighteens) over a site with about that
+ * many holes: split the ground into that many routed loops - the split that keeps every
+ * green-to-next-tee walk short (gd-ground-loops-core.mjs) - then let each card number each
+ * loop and pair cards with loops for the best total fit.
+ *
+ * The card-led pass below lets each card take the holes that fit its lengths best from
+ * anywhere on the site. Where the cards look alike that is close to a coin toss per hole, and
+ * at Sophia Green it published three nines that hopped up to 1.5km between holes, the last
+ * card getting whatever the first two left. A course is walked; the ground knows which holes
+ * go together before any card is read.
+ *
+ * Returns null - and the card-led pass runs as before - whenever this does not fit: cards of
+ * mixed length (an 18 alongside its nines is a composite, which that pass exists for), more
+ * loops than the ground can hold, or a card that cannot number its loop whole. */
+const GROUND_FIRST_MAX_CARDS = 6;
+const GROUND_FIRST_SPARE_HOLES = 2;
+function claimByGround(input) {
+  const { cards, course, payload } = input;
+  const usable = (cards || []).filter(card => (card.holes || []).length >= MIN_CARD_HOLES);
+  if (usable.length < 2 || usable.length > GROUND_FIRST_MAX_CARDS) return { claims: null, reason: "card-count-" + usable.length };
+  const holesPerLoop = usable[0].holes.length;
+  if (usable.some(card => card.holes.length !== holesPerLoop)) return { claims: null, reason: "cards-of-mixed-length" };
+
+  const base = { osmPayload: payload, courseId: course.courseId, course: { courseId: course.courseId, courseName: course.courseName, courseCentre: course.center }, courseCentre: course.center };
+  const readings = resolverHoleCandidates(base);
+  const candidates = readings.primary;
+  const walks = candidates.map(from => candidates.map(to => {
+    const green = from.path[from.path.length - 1], tee = to.path[0];
+    return from === to ? 0 : distance(green, tee);
+  }));
+  const split = partitionLoops(walks.map(row => row.map(walkCost)), { loops: usable.length, holesPerLoop, spare: GROUND_FIRST_SPARE_HOLES });
+  if (!split) return { claims: null, reason: "ground-does-not-hold-" + usable.length + "-loops-of-" + holesPerLoop, candidates: candidates.length };
+
+  /* Every card against every loop. In walking order first - the card picks where hole 1 is
+     and which reading of each green fits - and only where that cannot number the loop whole
+     does the card order the loop's holes itself. Either way it never reaches outside it. */
+  const fitCard = (card, route, own) => {
+    const holes = card.holes.map(hole => ({ holeNumber: hole.hole, par: hole.par, distanceM: hole.distanceM }));
+    const resolve = extra => resolveCourseGeometryForAutoMapper(Object.assign({}, base, {
+      course: Object.assign({}, base.course, { courseName: card.name || course.courseName }),
+      expectedHoleCount: holes.length,
+      scorecardHoles: holes,
+      scorecardEvidence: { holes }
+    }, extra)).then(result => {
+      const guides = (result.holes || []).map(hole => guideFromResolvedHole(hole, result)).filter(Boolean);
+      return { card, result, guides, whole: guides.length === holes.length, score: (result.debugEvidence && result.debugEvidence.assignmentScore) || 0 };
+    });
+    return resolve({ routeOrder: route, onlyCandidateIds: own }).then(fit => (fit.whole ? Object.assign(fit, { order: "walking" })
+      : resolve({ onlyCandidateIds: own }).then(free => Object.assign(free, { order: "card" }))));
+  };
+  /* A loop's own readings: any line onto one of its greens that uses no fairway or tee the
+     other loops' holes stand on. */
+  const keysOf = candidate => (candidate.featureKeys && candidate.featureKeys.length ? candidate.featureKeys : [String(candidate.candidateId)]);
+  const fits = split.groups.map((group, groupIndex) => {
+    const route = group.order.map(index => String(candidates[index].candidateId));
+    const greens = new Set(group.order.map(index => candidates[index].greenId));
+    const elsewhere = new Set();
+    split.groups.forEach((other, otherIndex) => {
+      if (otherIndex !== groupIndex) other.order.forEach(index => keysOf(candidates[index]).forEach(key => elsewhere.add(key)));
+    });
+    const own = readings.all
+      .filter(candidate => greens.has(candidate.greenId) && !keysOf(candidate).some(key => elsewhere.has(key)))
+      .map(candidate => String(candidate.candidateId));
+    return usable.map(card => fitCard(card, route, own));
+  });
+  return Promise.all(fits.map(row => Promise.all(row))).then(table => {
+    /* Which card is which loop: every pairing tried, best total fit wins. Six cards is 720
+       pairings, which is nothing beside the resolves above. */
+    let best = null;
+    const permute = (loopIndex, usedCards, chosen, total) => {
+      if (loopIndex === table.length) { if (!best || total > best.total) best = { total, chosen: chosen.slice() }; return; }
+      table[loopIndex].forEach((fit, cardIndex) => {
+        if (usedCards.has(cardIndex) || !fit.whole) return;
+        usedCards.add(cardIndex); chosen.push(fit);
+        permute(loopIndex + 1, usedCards, chosen, total + fit.score);
+        usedCards.delete(cardIndex); chosen.pop();
+      });
+    };
+    permute(0, new Set(), [], 0);
+    const ground = {
+      loops: split.groups.map(group => ({
+        holes: group.order.length,
+        walksM: group.order.map((at, i) => Math.round(walks[at][group.order[(i + 1) % group.order.length]]))
+      })),
+      spare: split.spare.length,
+      candidates: candidates.length
+    };
+    if (!best) {
+      ground.reason = "no-card-numbers-every-loop-whole";
+      ground.whole = table.map(row => row.map(fit => (fit.card.name || "(unnamed)") + ":" + fit.guides.length + "/" + fit.card.holes.length));
+      return { claims: null, reason: ground.reason, ground };
+    }
+    ground.pairing = best.chosen.map((fit, loop) => ({ loop, card: fit.card.name || "(unnamed)", order: fit.order, score: Number(fit.score.toFixed(3)) }));
+    return { claims: best.chosen.map(fit => claimFromResolution(fit.card, fit.result, fit.guides)), ground };
+  });
+}
+
 /* One matching pass: every card over the ground still unspoken for.
  *
  * The strongest evidence goes first and takes its ground with it. At a facility
@@ -1367,20 +1524,7 @@ async function claimFacilityGround(input) {
       rejected.push({ card: card.name || "", reason: "matched-" + guides.length + "-of-" + holes.length });
       continue;
     }
-    const byHole = new Map((result.holes || []).map(hole => [hole.holeNumber, hole]));
-    const claim = {
-      cardName: card.name || "",
-      confidence: result.confidence || 0,
-      method: MAPPING_METHOD.NATIVE_RESOLVER,
-      resolverGreens: (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon })),
-      /* The guide rides along with its hole so reconciliation can slice a
-         composite card into nines and still hand back publishable geometry. */
-      holes: guides.map(guide => ({
-        holeNumber: guide.hole,
-        candidateId: String((byHole.get(guide.hole) || {}).candidate ? byHole.get(guide.hole).candidate.candidateId : guide.id),
-        guide
-      }))
-    };
+    const claim = claimFromResolution(card, result, guides);
     claims.push(claim);
     if (!resolution.mappingMethods.includes(MAPPING_METHOD.NATIVE_RESOLVER)) resolution.mappingMethods.push(MAPPING_METHOD.NATIVE_RESOLVER);
 
