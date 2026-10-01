@@ -224,12 +224,18 @@ export const WAND_PROFILES = {
 };
 /* Neighbouring rings whose areas differ by less than ~28% count as the same edge. */
 export const WAND_STABLE_LOG = 0.25;
+/* How far Studio's wand size control can push a profile: the radius the sweep starts from and
+   the believable area band both scale with it, so "bigger" reaches for a wider edge. */
+export const WAND_SCALE = { min: 0.5, max: 2 };
 export const WAND_MAX_POINTS = 16;
 
-export async function wandAtPoint({ image, playSurface, seed, kind = "green", mode = "robustTonal", maxPoints = WAND_MAX_POINTS }) {
+export async function wandAtPoint({ image, playSurface, seed, kind = "green", scale = 1, mode = "robustTonal", maxPoints = WAND_MAX_POINTS }) {
   const profile = WAND_PROFILES[kind];
   if (!profile) return { ok: false, reason: "unknown-kind" };
-  const { radiusM, sweep, areaM2 } = profile;
+  const size = clamp(Number(scale) || 1, WAND_SCALE.min, WAND_SCALE.max);
+  const { sweep } = profile;
+  const radiusM = profile.radiusM * size;
+  const areaM2 = { min: profile.areaM2.min * size * size, max: profile.areaM2.max * size * size };
   const projector = frameProjector(playSurface);
   if (!projector) return { ok: false, reason: "frame-has-no-projection" };
   const lat = Number(seed && seed.lat), lng = Number(seed && seed.lng);
@@ -284,7 +290,7 @@ export async function wandAtPoint({ image, playSurface, seed, kind = "green", mo
   if (!best) return { ok: false, reason: "no-" + kind + "-sized-edge" };
   return {
     ok: true, shape: best.shape, confidence: best.confidence, area: best.area, stable,
-    params: { kind, baseBubbleSize: best.baseBubbleSize, multiplier: best.multiplier, mode, cropSpanPx: span, metresPerPx, spread: Number.isFinite(bestSpread) ? bestSpread : null }
+    params: { kind, scale: size, baseBubbleSize: best.baseBubbleSize, multiplier: best.multiplier, mode, cropSpanPx: span, metresPerPx, spread: Number.isFinite(bestSpread) ? bestSpread : null }
   };
 }
 

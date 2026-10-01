@@ -18,7 +18,7 @@
  *
  * Feature shape (what course_map_overlays.features stores, and what Studio draws):
  *   { id: "f-1", kind: "fairway" | "hole" | "green" | "tee" | "bunker", hole: 7 | null, points: [{lat, lng}, ...],
- *     source?: "ai" }
+ *     source?: "ai", pin?: true }
  *   source says who produced the shape (gd-overlay-georef-core.mjs stamps "ai"; Studio stamps
  *   "wand" on a green the wand outlined from a pin; a hand-placed one has none). Display only - the mapper treats every feature the same.
  *
@@ -39,14 +39,30 @@
  *
  *   hole numbers are optional on every kind. A numbered green or fairway is matched to that
  *   hole's guide (ref), a numbered hole line is the resolver's strongest evidence.
+ *
+ *   pin     - a placeholder put down quickly, to be shaped later: the centre of a green, tee or
+ *             bunker (one point), or a fairway's start and end (two points). Stored as pins so
+ *             Studio can turn them into outlines afterwards; in the payload each pin becomes the
+ *             plain default shape for its kind (pinShape), so a course pinned and nothing more
+ *             still gives the resolver greens to hang fairways off.
  */
 
 export const OVERLAY_KINDS = new Set(["fairway", "hole", "green", "tee", "bunker"]);
 const POLYGON_KINDS = new Set(["fairway", "green", "tee", "bunker"]);
 export function overlayKindIsPolygon(kind) { return POLYGON_KINDS.has(String(kind || "").toLowerCase()); }
-export const OVERLAY_MAX_FEATURES = 80;
+/* Room for a whole course placed as pins - 18 greens, fairways and tees plus the bunkers - with
+   space to spare. */
+export const OVERLAY_MAX_FEATURES = 200;
 export const OVERLAY_MAX_POINTS = 64;
 export const OVERLAY_TAG = "clarity:overlay";
+
+/* How many points a pin of each kind holds. A hole line has no pin form. */
+export const OVERLAY_PIN_POINTS = { fairway: 2, green: 1, tee: 1, bunker: 1 };
+/* The default shape a pin stands for. Same sizes Studio's shape builders use for a pin it
+   cannot read (map-overlay-shapes.js FAIRWAY_WIDTH_M / GREEN_RADIUS_M / BUNKER_RADIUS_M). */
+const PIN_RADIUS_M = { green: 14, tee: 6, bunker: 6 };
+const PIN_FAIRWAY_WIDTH_M = 35;
+const M_PER_DEG = 111320;
 
 /* Ids start well below anything Overpass hands out (its ids are positive) and stay stable per
    feature index so a merge into two payloads in one job dedupes on the same key. */
@@ -75,16 +91,23 @@ export function normalizeOverlayFeature(raw, index) {
   const kind = String(raw.kind || "").toLowerCase();
   if (!OVERLAY_KINDS.has(kind)) return null;
   const polygon = overlayKindIsPolygon(kind);
+  const pin = raw.pin === true && Object.prototype.hasOwnProperty.call(OVERLAY_PIN_POINTS, kind);
   const points = (Array.isArray(raw.points) ? raw.points : []).map(cleanPoint).filter(Boolean).slice(0, OVERLAY_MAX_POINTS);
-  if (points.length > 3 && polygon) {
-    const first = points[0], last = points[points.length - 1];
-    if (Math.abs(first.lat - last.lat) < 1e-7 && Math.abs(first.lng - last.lng) < 1e-7) points.pop();
+  if (pin) {
+    if (points.length < OVERLAY_PIN_POINTS[kind]) return null;
+    points.length = OVERLAY_PIN_POINTS[kind];
+  } else {
+    if (points.length > 3 && polygon) {
+      const first = points[0], last = points[points.length - 1];
+      if (Math.abs(first.lat - last.lat) < 1e-7 && Math.abs(first.lng - last.lng) < 1e-7) points.pop();
+    }
+    if (points.length < (polygon ? 3 : 2)) return null;
   }
-  if (points.length < (polygon ? 3 : 2)) return null;
   const id = String(raw.id || "").replace(/[^a-z0-9_-]/gi, "").slice(0, 40) || ("f-" + (index + 1));
   const source = String(raw.source || "").replace(/[^a-z0-9_-]/gi, "").slice(0, 24);
   const feature = { id, kind, hole: validHoleNumber(raw.hole), points };
   if (source) feature.source = source;
+  if (pin) feature.pin = true;
   return feature;
 }
 
@@ -103,6 +126,32 @@ export function normalizeOverlayFeatures(raw) {
   return out;
 }
 
+/* A pin's default shape, in flat-earth metres about its first point: a round green, tee or
+   bunker on its centre, or a fairway of the default width along the line from start to end with
+   a point beyond each end, so its long axis is the line the resolver takes as the centre-line. */
+export function pinShape(feature) {
+  const origin = feature.points[0];
+  const k = Math.cos(origin.lat * Math.PI / 180);
+  const toXY = p => ({ x: (p.lng - origin.lng) * M_PER_DEG * k, y: (p.lat - origin.lat) * M_PER_DEG });
+  const toLL = v => ({ lat: origin.lat + v.y / M_PER_DEG, lng: origin.lng + v.x / (M_PER_DEG * k) });
+  if (feature.kind === "fairway") {
+    const b = toXY(feature.points[1]);
+    const length = Math.hypot(b.x, b.y);
+    const d = length > 1e-6 ? { x: b.x / length, y: b.y / length } : { x: 0, y: 1 };
+    const n = { x: -d.y, y: d.x };
+    const half = PIN_FAIRWAY_WIDTH_M / 2;
+    const at = (along, across) => toLL({ x: d.x * along + n.x * across, y: d.y * along + n.y * across });
+    return [at(-half / 2, 0), at(0, -half), at(length, -half), at(length + half / 2, 0), at(length, half), at(0, half)];
+  }
+  const r = PIN_RADIUS_M[feature.kind] || PIN_RADIUS_M.green;
+  const out = [];
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    out.push(toLL({ x: Math.cos(a) * r, y: Math.sin(a) * r }));
+  }
+  return out;
+}
+
 /* The overlay as Overpass would have returned it: one way per feature, geometry as {lat,lon},
    a polygon ring closed the way OSM closes areas. The tag set is exactly what the parsers key
    on (golf=fairway / golf=hole / golf=green + ref) plus the overlay marker. */
@@ -110,8 +159,9 @@ export function overlayToOsmElements(features) {
   return normalizeOverlayFeatures(features).map((feature, index) => {
     const tags = { [OVERLAY_TAG]: feature.id, golf: feature.kind };
     if (feature.hole) tags.ref = String(feature.hole);
-    const geometry = feature.points.map(p => ({ lat: p.lat, lon: p.lng }));
-    if (overlayKindIsPolygon(feature.kind)) geometry.push({ lat: feature.points[0].lat, lon: feature.points[0].lng });
+    const points = feature.pin ? pinShape(feature) : feature.points;
+    const geometry = points.map(p => ({ lat: p.lat, lon: p.lng }));
+    if (overlayKindIsPolygon(feature.kind)) geometry.push({ lat: points[0].lat, lon: points[0].lng });
     return { type: "way", id: OVERLAY_ID_BASE - index, tags, geometry };
   });
 }
@@ -148,6 +198,7 @@ export function overlaySummary(features) {
     greens: list.filter(f => f.kind === "green").length,
     tees: list.filter(f => f.kind === "tee").length,
     bunkers: list.filter(f => f.kind === "bunker").length,
+    pins: list.filter(f => f.pin).length,
     numbered: list.filter(f => f.hole).length
   };
 }
