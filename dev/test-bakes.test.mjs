@@ -73,16 +73,14 @@ test("retention deletes whole date folders past the window, recursively, and not
   assert.deepEqual(removed.sort(), files.slice(0, 3).sort());
 });
 
-test("Mapbox as a capture source: 256px xyz tiles, terrain-RGB relief, not storable, and absent without a token", () => {
+test("Mapbox as a capture source: 256px xyz tiles, imagery only, not storable, and absent without a token", () => {
   assert.equal(mapbox.mapboxCaptureSource({}), null);
   const src = mapbox.mapboxCaptureSource({ MAPBOX_PUBLIC_TOKEN: "pk.TEST" });
   assert.equal(src.storable, false);
   assert.equal(src.imagery.adapter, "xyz");
   assert.ok(src.imagery.urlTemplate.includes("/mapbox.satellite/{z}/{x}/{y}.jpg90?access_token="), "256px tiles - no @2x, the planner grids in 256px cells");
   assert.ok(!src.imagery.urlTemplate.includes("@2x"));
-  assert.ok(src.dem.urlTemplate.includes("/mapbox.mapbox-terrain-dem-v1/{z}/{x}/{y}.pngraw?"));
-  assert.equal(src.terrain.role, "relief", "the DEM must be usable for relief and green surfaces");
-  assert.equal(src.terrain.encoding, "terrain-rgb");
+  assert.ok(!("dem" in src) && !("terrain" in src), "test bakes read the course terrain asset, never Mapbox Terrain-DEM");
   assert.equal(src.license.storage, false);
   /* A grid the planner builds from it carries the token only in tile URLs. */
   const grid = plan.captureGrid({ role: "course-backdrop", bounds: { north: 37.1835, south: 37.1692, west: 127.696, east: 127.714 }, paddedBounds: { north: 37.1835, south: 37.1692, west: 127.696, east: 127.714 }, targetZoom: 16, minZoom: 14, maxTiles: 64 }, { source: src });

@@ -65,7 +65,7 @@
   function start(courseId) {
     var id = String(courseId || "");
     if (!id) return false;
-    if (!window.confirm("Test bake " + id + " with Mapbox?\n\nRuns the normal capture and bake from Mapbox Satellite + Terrain, using this course's current geometry.\n\nTest only: shown in Studio → Test Bakes, never published to players, deleted after 7 days.")) return false;
+    if (!window.confirm("Test bake " + id + " with Mapbox?\n\nRuns the normal capture and bake from Mapbox Satellite, using this course's current geometry and its terrain asset.\n\nTest only: shown in Studio → Test Bakes, never published to players, deleted after 7 days.")) return false;
     call("POST", "", { courseId: id, source: "mapbox" }).then(function (data) {
       toast(data && data.deduped ? "A test bake is already running for this course" : "Mapbox test bake queued");
       if (typeof gdAdminCourseDbOpen === "function") gdAdminCourseDbOpen(id, "testbakes");
@@ -100,7 +100,7 @@
     var id = typeof gdAdminJsArg === "function" ? gdAdminJsArg(courseId) : JSON.stringify(courseId);
     var entry = state[courseId] || { status: "loading" };
     var head = '<div class="gdAdminCourseActionHead"><div><h4>Test Bakes</h4>'
-      + "<span>The normal capture and bake, from Mapbox Satellite + Terrain. Test only: never published to players, deleted after "
+      + "<span>The normal capture and bake, from Mapbox Satellite over the course's own terrain asset. Test only: never published to players, deleted after "
       + esc(entry.data && entry.data.retentionDays || 7) + " days.</span></div>"
       + '<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseTestBakeStart(' + id + ')">Test bake with Mapbox</button>'
       + '<button type="button" onclick="return gdAdminCourseTestBakesRefresh(' + id + ')">Refresh</button></div></div>';

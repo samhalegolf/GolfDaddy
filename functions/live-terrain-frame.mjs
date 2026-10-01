@@ -1,92 +1,88 @@
 /* Live terrain frame - one hole's elevation, for the admin-only "Clarity 3D Mesh" map source
    (app/js/live-terrain.js). TEST PATH.
 
-   GET /api/live-terrain-frame?layer=elevation&z=&x=&y=&w=&h=
+   GET /api/live-terrain-frame?layer=elevation&z=&x=&y=&w=&h=[&course=<courseId>]
      Authorization: Bearer <admin session>
 
    z/x/y/w/h is a rectangle of web-mercator pixels (gd-live-terrain-core parseWindow) - the same
    rectangle the browser builds its hybrid Esri + Mapbox picture on (app/js/live-hybrid.js), so
    the heights cover exactly the ground of the picture. The mesh needs that and cannot check it.
 
-   The answer is a terrain-RGB PNG from the best DEM for the ground: the regional one (LINZ in
-   NZ, and so on) through resolveElevationSource, else the global terrain tiles, else Mapbox
-   Terrain-DEM. Headers carry the height range and the source, which the mesh needs and an image
-   cannot.
+   The heights come from the course's BAKED terrain asset when a course is named and its asset
+   covers the window - no elevation provider is contacted. Outside one, the terrain resolver
+   picks the best approved source for the ground (functions/lib/terrain/gd-terrain-window.mjs),
+   falling through to the next when one fails. Headers carry the height range, the source, its
+   real sample spacing and the asset's terrain quality, which the mesh and the green-line gate
+   need and an image cannot carry.
 
    Nothing is stored and nothing is published: the answer is private to the device that asked
-   and never cached at the CDN. Admin only, because this is a test of whether the look is worth
-   having. The pictures are not fetched here - they are display tiles the browser draws itself,
-   so it can reuse them hole to hole. */
+   and never cached at the CDN. */
 
 import sharp from "sharp";
 import { verifiedAdminEmail } from "./lib/gd-map-overlay-store.mjs";
-import { mapboxCaptureSource } from "./lib/gd-mapbox-source.mjs";
-import { resolveElevationSource, reliefSpec, GLOBAL_ELEVATION } from "./lib/gd-imagery-sources.mjs";
-import { decodeElevation, terrainRgbPngFromHeights, metresPerPixel } from "./lib/gd-relief-core.mjs";
-import { mosaic } from "./lib/gd-relief-fetch.mjs";
-import { parseWindow, windowBounds, windowMetres, demPlan, resampleToWindow, heightRange } from "./lib/gd-live-terrain-core.mjs";
+import { terrainRgbPngFromHeights, decodeElevation } from "./lib/gd-relief-core.mjs";
+import { parseWindow, windowMetres, demGrid } from "./lib/gd-live-terrain-core.mjs";
+import { terrainForWindow } from "./lib/terrain/gd-terrain-window.mjs";
+import { loadCourseTerrainHeights, TERRAIN_BUCKET } from "./lib/terrain/gd-terrain-service.mjs";
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 
-/* The DEMs to try, best first. A regional DEM that fails (an outage, a hole in its coverage)
-   falls through to the next rather than leaving the hole flat. */
-export function elevationCandidates(bounds, env) {
-  const out = [];
-  const regional = resolveElevationSource(bounds, { env });
-  if (regional) out.push({ key: regional.key, label: regional.label, attribution: regional.attribution, dem: reliefSpec(regional.dem) });
-  out.push({ key: GLOBAL_ELEVATION.key, label: GLOBAL_ELEVATION.label, attribution: GLOBAL_ELEVATION.attribution, dem: reliefSpec(GLOBAL_ELEVATION.dem) });
-  const mapbox = mapboxCaptureSource(env);
-  if (mapbox) out.push({ key: "mapbox-terrain-dem", label: "Mapbox Terrain-DEM v1", attribution: { text: "© Mapbox" }, dem: mapbox.terrain });
-  return out.filter(c => c.dem);
+function envOf(deps) { return deps.env || process.env; }
+
+function defaultLoadAsset(deps) {
+  const env = envOf(deps);
+  const base = () => String(env.SUPABASE_URL || "").replace(/\/+$/, "");
+  const key = () => String(env.SUPABASE_SERVICE_ROLE_KEY || "");
+  const supabaseFetch = createSupabaseFetch({ base, key, label: "live-terrain-frame" });
+  return async courseId => {
+    if (!base() || !key()) return null;
+    return loadCourseTerrainHeights(courseId, {
+      supabaseFetch, sharp, decodeElevation,
+      download: async path => {
+        const res = await fetch(base() + "/storage/v1/object/public/" + TERRAIN_BUCKET + "/" + path);
+        if (!res.ok) throw new Error("terrain asset " + res.status);
+        return Buffer.from(await res.arrayBuffer());
+      }
+    });
+  };
 }
 
-export async function elevationFor(win, deps = {}) {
-  const bounds = windowBounds(win);
-  const tried = [];
-  for (const candidate of elevationCandidates(bounds, deps.env)) {
-    const plan = demPlan(win, candidate.dem.maxUsefulZoom);
-    let decoded = null;
-    try {
-      const png = await (deps.mosaic || mosaic)(candidate.dem, plan.demZoom, { x: plan.fetch.left, y: plan.fetch.top },
-        { width: plan.fetch.width, height: plan.fetch.height }, { requireAll: true });
-      if (png) {
-        const { data, info } = await sharp(png, { limitInputPixels: false }).raw().toBuffer({ resolveWithObject: true });
-        /* A float32 source arrives already transcoded to terrain-RGB by mosaic(). */
-        decoded = decodeElevation(data, info.width, info.height, info.channels,
-          candidate.dem.encoding === "float32" ? "terrain-rgb" : candidate.dem.encoding);
-        decoded.width = info.width; decoded.height = info.height;
-      }
-    } catch (e) {
-      decoded = null;
-    }
-    if (!decoded) { tried.push(candidate.key); continue; }
-    const heights = resampleToWindow(decoded.heights, decoded.width, decoded.height, plan);
-    const range = heightRange(heights);
-    const body = await terrainRgbPngFromHeights(heights, plan.grid.width, plan.grid.height);
-    const metres = windowMetres(win);
-    /* How far apart the source's real heights are, whatever grid they were resampled onto: its
-       tile spacing at the zoom it was read at, or its stated resolution if that is coarser. The
-       phone draws green slope lines only from elevation fine enough to know a green's shape
-       (app/js/live-terrain.js greenReadable). */
-    const latitude = (windowBounds(win).north + windowBounds(win).south) / 2;
-    const sampleM = Math.max(metresPerPixel(latitude, plan.demZoom), Number(candidate.dem.nativeResolutionM) || 0);
-    return {
-      body, type: "image/png",
-      headers: {
-        "X-Elevation-Source": candidate.key,
-        "X-Elevation-Credit": encodeURIComponent(String((candidate.attribution && candidate.attribution.text) || "")),
-        "X-Elevation-Min": range.min.toFixed(2),
-        "X-Elevation-Max": range.max.toFixed(2),
-        "X-Elevation-Zoom": String(plan.demZoom),
-        "X-Elevation-Size": plan.grid.width + "x" + plan.grid.height,
-        "X-Window-Metres": metres.width.toFixed(1) + "x" + metres.height.toFixed(1),
-        "X-Elevation-Sample-M": sampleM.toFixed(2)
-      }
-    };
+export async function elevationFor(win, deps = {}, courseId = "") {
+  const grid = demGrid(win);
+  let asset = null;
+  if (courseId) {
+    try { asset = await (deps.loadAsset || defaultLoadAsset(deps))(courseId); } catch (e) { asset = null; }
   }
-  return { error: "no elevation for this window (tried " + (tried.join(", ") || "nothing") + ")", status: 502 };
+  const result = await (deps.terrainForWindow || terrainForWindow)({ grid, asset, env: envOf(deps) }, deps.terrain || {});
+  if (!result || !result.heights) {
+    return { error: "no elevation for this window (tried " + ((result && result.tried || []).join(", ") || "nothing") + ")", status: 502 };
+  }
+  const body = await terrainRgbPngFromHeights(result.heights, grid.width, grid.height);
+  const metres = windowMetres(win);
+  const quality = result.quality || null;
+  return {
+    body, type: "image/png",
+    headers: {
+      "X-Elevation-Source": (result.source && result.source.id) || "?",
+      "X-Elevation-From": result.from,
+      "X-Elevation-Credit": encodeURIComponent(String((result.source && result.source.attribution && result.source.attribution.text) || "")),
+      "X-Elevation-Min": result.range.min.toFixed(2),
+      "X-Elevation-Max": result.range.max.toFixed(2),
+      "X-Elevation-Size": grid.width + "x" + grid.height,
+      "X-Window-Metres": metres.width.toFixed(1) + "x" + metres.height.toFixed(1),
+      /* How far apart the source's real heights are, whatever grid they were resampled onto.
+         The phone draws green slope lines only from elevation fine enough to know a green's
+         shape (app/js/live-terrain.js greenReadable). */
+      "X-Elevation-Sample-M": Number(result.sampleM || 0).toFixed(2),
+      "X-Terrain-Version": result.terrainVersion ? String(result.terrainVersion) : "",
+      "X-Terrain-Quality": quality ? String(quality.class || "") : "",
+      "X-Green-Detail": quality ? String(quality.greenDetail || "") : ""
+    }
+  };
 }
 
-const EXPOSED = ["X-Window", "X-Elevation-Source", "X-Elevation-Credit", "X-Elevation-Min",
-  "X-Elevation-Max", "X-Elevation-Zoom", "X-Elevation-Size", "X-Window-Metres", "X-Elevation-Sample-M"].join(", ");
+const EXPOSED = ["X-Window", "X-Elevation-Source", "X-Elevation-From", "X-Elevation-Credit", "X-Elevation-Min",
+  "X-Elevation-Max", "X-Elevation-Size", "X-Window-Metres", "X-Elevation-Sample-M",
+  "X-Terrain-Version", "X-Terrain-Quality", "X-Green-Detail"].join(", ");
 
 function cors(headers) {
   return Object.assign({
@@ -113,9 +109,10 @@ export function createHandler(deps = {}) {
     const win = parseWindow(params);
     if (win.error) return fail(400, win.error);
     if (params.get("layer") !== "elevation") return fail(400, "layer must be elevation");
+    const courseId = String(params.get("course") || "").slice(0, 200);
     let result;
     try {
-      result = await elevationFor(win, deps);
+      result = await elevationFor(win, deps, courseId);
     } catch (e) {
       return fail(502, String((e && e.message) || e));
     }
@@ -124,8 +121,6 @@ export function createHandler(deps = {}) {
       status: 200,
       headers: cors(Object.assign({
         "Content-Type": result.type,
-        /* The device may keep it a while (Mapbox allows caching on the requesting device);
-           a shared cache may not. */
         "Cache-Control": "private, max-age=3600",
         "Netlify-CDN-Cache-Control": "no-store",
         /* Echoed so the client can prove the answer is for the window it asked about. */

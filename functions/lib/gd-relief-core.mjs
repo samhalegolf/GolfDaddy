@@ -32,7 +32,7 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
    Both are tried and the one landing in a plausible range wins. "Plausible" is deliberately
    generous - it is a sanity gate against reading a rendered hillshade or an error page as
    elevation, not an assertion about any particular course. */
-const ENCODINGS = {
+export const ELEVATION_ENCODINGS = {
   "terrain-rgb": (R, G, B) => -10000 + (R * 65536 + G * 256 + B) * 0.1,
   terrarium: (R, G, B) => R * 256 + G + B / 256 - 32768,
   /* GSI Japan's PNG elevation tiles (標高タイル): x = R*2^16 + G*2^8 + B packs centimetres,
@@ -48,12 +48,12 @@ const ENCODINGS = {
 };
 
 export function decodeElevation(raw, width, height, channels, declaredEncoding) {
-  const names = declaredEncoding && ENCODINGS[declaredEncoding]
-    ? [declaredEncoding, ...Object.keys(ENCODINGS).filter(n => n !== declaredEncoding)]
-    : Object.keys(ENCODINGS);
+  const names = declaredEncoding && ELEVATION_ENCODINGS[declaredEncoding]
+    ? [declaredEncoding, ...Object.keys(ELEVATION_ENCODINGS).filter(n => n !== declaredEncoding)]
+    : Object.keys(ELEVATION_ENCODINGS);
   const attempts = [];
   for (const name of names) {
-    const decode = ENCODINGS[name];
+    const decode = ELEVATION_ENCODINGS[name];
     const heights = new Float32Array(width * height);
     for (let i = 0, p = 0; i < heights.length; i++, p += channels) {
       heights[i] = decode(raw[p], raw[p + 1], raw[p + 2]);

@@ -20,7 +20,8 @@
  * Adding a provider later (Korea VWorld/NGII, another national source) is one more entry in
  * PROVIDERS - nothing downstream of the results changes. */
 
-import { resolveImagerySource, reliefSpec, GLOBAL_ELEVATION, unscannableReason } from "./gd-imagery-sources.mjs";
+import { resolveImagerySource, unscannableReason } from "./gd-imagery-sources.mjs";
+import { resolveTerrain, planSources } from "./terrain/gd-terrain-resolver.mjs";
 import { MapSourceError, MemoryTileCache, tiledImagery, tiledElevation } from "./gd-tile-fetch.mjs";
 import { createMapboxProvider, MAPBOX_PROVIDER_ID } from "./gd-mapbox-source.mjs";
 
@@ -73,20 +74,18 @@ export function createExistingProvider(deps = {}) {
       }, bounds, options, { cache, fetchImpl, sharp: await sharpFn() });
     },
     async getElevation(bounds, options = {}) {
-      /* The region's own DEM where it has a tiled one, else the global terrain tiles - the
-         same order relief-tile.mjs uses for the live map. */
-      const resolved = resolveImagerySource(bounds, { env });
-      const regional = resolved && reliefSpec(resolved.dem);
-      const useRegional = regional && regional.adapter === "xyz";
-      const dem = useRegional ? regional : GLOBAL_ELEVATION.dem;
-      const key = useRegional ? resolved.key : GLOBAL_ELEVATION.key;
-      const label = useRegional ? resolved.label : GLOBAL_ELEVATION.label;
+      /* The terrain resolver's best approved source for these bounds where it is a tiled one,
+         else the global terrain tiles - the same registry a course bake reads. */
+      const resolution = resolveTerrain({ bounds, env, marginM: 0 });
+      const planned = resolution.ok ? planSources(resolution, { env }) : [];
+      const dem = planned.find(s => s.sourceType === "xyz-elevation") || null;
+      if (!dem) throw new MapSourceError("existing", "unsupported-bounds", "no tiled terrain source covers these bounds");
       return tiledElevation({
-        provider: key, product: dem.layer || key, label,
+        provider: dem.id, product: dem.layer || dem.id, label: dem.name,
         tilePx: 256, format: extensionOf(dem.urlTemplate),
         minZoom: 1, maxZoom: Number(dem.maxUsefulZoom) || 13,
         encoding: dem.encoding,
-        attribution: useRegional ? (resolved.attribution && resolved.attribution.text || "") : GLOBAL_ELEVATION.attribution.text,
+        attribution: dem.attribution && dem.attribution.text || "",
         tileUrl: tileUrlFrom(dem.urlTemplate)
       }, bounds, options, { cache, fetchImpl, sharp: await sharpFn() });
     }

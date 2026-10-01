@@ -1,10 +1,8 @@
-/* Fetching the DEM (and imagery) for a window of web-mercator pixels, shared by the two
-   endpoints that shade on demand: relief-preview (one hole, for tuning in Studio) and
-   relief-tile (the live map's hillshade layer). Both shade with gd-relief-core; this is the
-   fetch leg only, so the two cannot drift on how a window is assembled. */
+/* Fetching imagery for a window of web-mercator pixels, for relief-preview (one hole, for
+   tuning in Studio). Elevation is not fetched here: every on-demand elevation read goes through
+   the terrain system (functions/lib/terrain/gd-terrain-window.mjs). */
 
 import sharp from "sharp";
-import { heightsFromFloat32Tiff, terrainRgbPngFromHeights } from "./gd-relief-core.mjs";
 import { exportImageUrl } from "./gd-imagery-sources.mjs";
 
 const TILE = 256;
@@ -15,8 +13,7 @@ const TILE_TIMEOUT_MS = 10000;
    A simpler fetcher than the worker's on purpose. The worker refuses a capture with any
    missing tile, because a stored master with a hole in it is a permanent artefact; a preview
    is transient, so a missing edge tile draws dark and the picture is still useful. Different
-   requirement, not a duplicated one. The live relief tiles (relief-tile.mjs) ask for
-   requireAll instead: a missing DEM tile inside one of those is a cliff along its edge. */
+   requirement, not a duplicated one. */
 async function fetchTile(url) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TILE_TIMEOUT_MS);
@@ -38,19 +35,14 @@ function tileUrl(spec, z, x, y) {
 
 /* size is a side length (the square windows the shading endpoints ask for) or
    {width, height} (the live terrain frame, which is as wide and tall as the hole). */
-export async function mosaic(spec, zoom, originPx, size, options = {}) {
+export async function mosaic(spec, zoom, originPx, size) {
   const sizeW = typeof size === "object" ? size.width : size;
   const sizeH = typeof size === "object" ? size.height : size;
   /* arcgis-export sources (US) answer the whole preview window in ONE exportImage request -
      a preview is at most 1536px against the service's 4000px cap, so there is no grid to
-     assemble. A float32 elevation answer is transcoded to terrain-RGB here, exactly as the
-     capture path does, so everything downstream of mosaic() stays one format. */
+     assemble. */
   if (spec.adapter === "arcgis-export") {
-    const buf = await fetchTile(exportImageUrl(spec, { left: originPx.x, top: originPx.y, width: sizeW, height: sizeH }, zoom));
-    if (!buf) return null;
-    if (spec.encoding !== "float32") return buf;
-    const { heights, width, height } = await heightsFromFloat32Tiff(buf);
-    return terrainRgbPngFromHeights(heights, width, height);
+    return fetchTile(exportImageUrl(spec, { left: originPx.x, top: originPx.y, width: sizeW, height: sizeH }, zoom));
   }
   const tx0 = Math.floor(originPx.x / TILE), ty0 = Math.floor(originPx.y / TILE);
   const tx1 = Math.floor((originPx.x + sizeW - 1) / TILE), ty1 = Math.floor((originPx.y + sizeH - 1) / TILE);
@@ -69,7 +61,7 @@ export async function mosaic(spec, zoom, originPx, size, options = {}) {
   }
   await Promise.all(Array.from({ length: Math.min(TILE_CONCURRENCY, jobs.length) }, pump));
   const layers = placed.filter(Boolean);
-  if (!layers.length || (options.requireAll && layers.length < jobs.length)) return null;
+  if (!layers.length) return null;
 
   const sheet = await sharp({
     create: { width: (tx1 - tx0 + 1) * TILE, height: (ty1 - ty0 + 1) * TILE, channels: 3, background: { r: 16, g: 19, b: 15 } },

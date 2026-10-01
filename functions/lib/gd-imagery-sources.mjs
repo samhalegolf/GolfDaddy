@@ -26,18 +26,9 @@
                       hundreds of tiles. Emitted as a block grid so the compositor that
                       assembles tiles assembles these unchanged.
 
-   Each region carries `imagery` and `dem`, and NOT a hillshade source. Hillshade is a lighting
-   computation over elevation, not a thing to fetch: one DEM fetch feeds both terrain shading
-   in frames and the offline plays-like maths, so a separate hillshade raster would be a second
-   download of the same information under a second licence. The DEM is also what the elevation
-   grid shipped with each course package is resampled from.
-
-   That computation now lands in gd-relief-core.mjs, so the terrain-reference capture is
-   planned wherever the DEM has a decode the pipeline speaks - tiled terrain-RGB fetched
-   as-is, or arcgis float32 blocks transcoded to terrain-RGB at capture: the planner shoots
-   elevation through the same grid it shoots imagery through, and the worker stores a
-   terrain-RGB mosaic either way. See reliefSpec below for why that is still narrower than
-   "wherever there is a DEM". */
+   Imagery only. Elevation has its own registry, licence gate and resolver
+   (functions/lib/terrain/gd-terrain-sources.mjs): a course's terrain no longer depends on
+   whether its imagery may be stored. */
 
 /* ---------- license predicate ------------------------------------------------------------ */
 
@@ -80,73 +71,11 @@ function isDraft(entry) {
   return !!(entry && entry.draft === true);
 }
 
-/* Imagery and elevation are not always the same provider on the same terms, and pretending
-   otherwise costs real coverage. Australia is the case that forced this: Queensland's imagery
-   is ShareAlike, but the national elevation from Geoscience Australia is plain CC BY 4.0 - so
-   one licence per entry would refuse the elevation for no reason other than the company the
-   imagery keeps.
-
-   So each spec may carry its own `license` and falls back to the entry's when it does not.
-   The two are then gated separately: imagery that fails takes the entry down, elevation that
-   fails simply does not ship, exactly as an unconfigured DEM already behaves. */
 function licenseFor(entry, spec) {
   return (spec && spec.license) || (entry && entry.license) || null;
 }
 
 /* ---------- registry --------------------------------------------------------------------- */
-
-/* One elevation source for anywhere without a national one: Mapzen/Tilezen Terrain Tiles on
-   AWS Open Data (global coverage - Europe, Africa, Australia, everywhere) -
-   keyless xyz PNG in the terrarium encoding gd-relief-core already decodes, so this rides the
-   existing tiled path end to end (the capture normalises terrarium to terrain-RGB before
-   storing, so the artefact on disk stays one format - see buildCapture).
-
-   What it actually is over Europe: Copernicus EU-DEM at 25m as the base, with better national
-   data patched in where Tilezen ingested it (Austria 10m, Norway 10m, parts of England 2m).
-   That is an honest but COARSE answer - "this fairway rolls away left" renders; green-scale
-   moulding does not - and it is the deliberate v1 trade: the national LiDAR that would match
-   LINZ (AHN 0.5m, RGE ALTI 1m, MDT02 2m) ships as WCS/downloads in national projections,
-   which is a new adapter plus reprojection nothing else needs yet. Carried per-spec so the
-   licence is the DEM's own (public-domain/attribution mix, NOT the imagery entry's national
-   licence) and so swapping in real LiDAR later means editing this one constant.
-
-   z13 is ~13m/px at European golf latitudes - at or finer than the 10m patches, one step of
-   honest upscale over the 25m base. Above it there is nothing left to fetch. */
-const GLOBAL_TERRAIN_TILES_DEM = {
-  adapter: "xyz",
-  urlTemplate: "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
-  apiKeyEnv: "",
-  encoding: "terrarium",
-  nativeResolutionM: 10,
-  fallbackResolutionM: 25,
-  maxUsefulZoom: 13,
-  license: {
-    name: "Open (Mapzen Terrain Tiles: SRTM public domain, EU-DEM Copernicus attribution)",
-    url: "https://github.com/tilezen/joerd/blob/master/docs/attribution.md",
-    storage: true, derivatives: true, redistribution: true, commercial: true,
-    attributionRequired: true
-  }
-};
-const GLOBAL_TERRAIN_TILES_ATTRIBUTION = {
-  /* Only the wording Copernicus requires. The joerd doc's other lines (Mapzen, "SRTM data
-     courtesy of the U.S. Geological Survey") are courtesies - SRTM is public domain - and
-     on a phone they pushed the credit to three lines over every hole, naming the US on a
-     course in Belfast. The full list stays one tap away at `url`. */
-  text: "Elevation: Produced using Copernicus data and information funded by the European Union - EU-DEM layers",
-  url: "https://github.com/tilezen/joerd/blob/master/docs/attribution.md",
-  perSurvey: false
-};
-
-/* The global DEM on its own, for a caller that only shades and has no national entry to go
-   through: the live map's relief tiles (relief-tile.mjs) fall back to it for a course outside
-   every region below. Scanning never does - resolveImagerySource stays the gate for that. */
-export const GLOBAL_ELEVATION = Object.freeze({
-  key: "global-terrain-tiles",
-  label: "Mapzen Terrain Tiles",
-  license: GLOBAL_TERRAIN_TILES_DEM.license,
-  attribution: GLOBAL_TERRAIN_TILES_ATTRIBUTION,
-  dem: GLOBAL_TERRAIN_TILES_DEM
-});
 
 /* GSI Japan, shared by the two Japanese region entries below.
 
@@ -178,24 +107,6 @@ const GSI_JP_IMAGERY = {
   maxUsefulZoom: 18,
   minTrustedZoom: 14
 };
-const GSI_JP_DEM = {
-  adapter: "xyz",
-  /* GSI's PNG elevation tiles: heights packed as centimetres in RGB with RGB(128,0,0) as the
-     NoData sentinel over the sea - the gsi-dem-png encoding in gd-relief-core, which fills
-     sentinels with the lowest real ground so coastal courses decode. dem_png is the DEM10B
-     10m grid, NATIONWIDE, capped at z14 (~9.6m/px - native). The 5m dem5a_png tiles reach
-     z15 but cover only part of the country, and a partial source fails the all-or-nothing
-     coverage check wherever it thins out - pin GSI_DEM_LAYER to dem5a_png per-scan if a
-     course is known to be covered; the default must be the tier that cannot strand a course. */
-  urlTemplate: "https://cyberjapandata.gsi.go.jp/xyz/{layer}/{z}/{x}/{y}.png",
-  layerEnv: "GSI_DEM_LAYER",
-  defaultLayer: "dem_png",
-  apiKeyEnv: "",
-  encoding: "gsi-dem-png",
-  nativeResolutionM: 10,
-  fallbackResolutionM: 10,
-  maxUsefulZoom: 14
-};
 const GSI_JP_ATTRIBUTION = {
   /* GSI's required 出典 wording, plus the per-source credits the seamless mosaic's own
      catalogue entry asks for where satellite fill appears. */
@@ -205,7 +116,7 @@ const GSI_JP_ATTRIBUTION = {
   perSurvey: false
 };
 
-/* Mapbox Satellite / Terrain-DEM are deliberately NOT in this table: Mapbox's terms are
+/* Mapbox Satellite is deliberately NOT in this table: Mapbox's terms are
    display-only for our use (no commercial derivatives without a Commercial Satellite licence).
    They exist only as a forced, dev/test source - see gd-mapbox-source.mjs and
    gd-map-sources.mjs - and resolveImagerySource can never return them. */
@@ -249,26 +160,6 @@ export const IMAGERY_SOURCES = [
          last zoom carrying real detail for a rural course rather than resampled pixels. */
       maxUsefulZoom: 20,
       minTrustedZoom: 14
-    },
-    /* LINZ elevation - source of both the course elevation grid and the computed relief.
-
-       The `pipeline=terrain-rgb` parameter is not optional: without it the tileset returns its
-       own rendering rather than elevation packed into RGB, i.e. a picture of the terrain
-       instead of the terrain. URL taken verbatim from LINZ's MapLibre elevation example. */
-    dem: {
-      adapter: "xyz",
-      urlTemplate: "https://basemaps.linz.govt.nz/v1/tiles/{layer}/WebMercatorQuad/{z}/{x}/{y}.png?pipeline=terrain-rgb&api={key}",
-      layerEnv: "LINZ_ELEVATION_LAYER",
-      defaultLayer: "elevation",
-      apiKeyEnv: ["LINZ_BASEMAPS_API_KEY", "LINZ_BASEMAPS_PUBLIC_KEY"],
-      encoding: "terrain-rgb",
-      /* Two-tier, per linz/basemaps-config: an 8m national DEM with 1m LiDAR laid over most
-         populated regions. Course-wide grids are fine on either; the fine green-surround grid
-         only exists where the LiDAR does, which is what nativeResolutionM vs fallback records. */
-      nativeResolutionM: 1,
-      fallbackResolutionM: 8,
-      /* z17 is ~0.95m/px at NZ latitudes - native for the 1m LiDAR. Higher only upscales. */
-      maxUsefulZoom: 17
     },
     attribution: {
       text: "Sourced from the LINZ Data Service and licensed for re-use under CC BY 4.0",
@@ -331,28 +222,6 @@ export const IMAGERY_SOURCES = [
          TILE_CONCURRENCY 16 that is 768MB in a 1024MB worker, which is the OOM this pipeline
          has already been bitten by once. 2048 is 12.6MB a block. Raise only alongside the
          concurrency. */
-      blockPx: 2048
-    },
-    /* 3DEP, requested as raw float elevation rather than as a pre-shaded image - shading is
-       computed downstream, and the same fetch feeds plays-like. 1m LiDAR where flown, 10m
-       nationally, which is comfortably fit for relative elevation over a few hundred metres.
-
-       Requesting raw is not the default here either: the service publishes Hillshade Gray,
-       Hillshade Multidirectional, Slope and Contour raster functions, so leaving renderingRule
-       unset is what gets measurements rather than a picture of them. Confirmed against a live
-       block: 32-bit sampleFormat 3, sensible metres. */
-    dem: {
-      adapter: "arcgis-export",
-      endpoint: "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage",
-      apiKeyEnv: "",
-      format: "tiff",
-      encoding: "float32",
-      nativeResolutionM: 1,
-      fallbackResolutionM: 10,
-      /* The service reports pixelSize 1.0m. z17 is ~0.96m/px at US latitudes - native - which
-         is the same number and the same reasoning as the LINZ 1m LiDAR above. 16 was 1.92m/px,
-         throwing away half the elevation detail the service actually holds. */
-      maxUsefulZoom: 17,
       blockPx: 2048
     },
     attribution: {
@@ -432,15 +301,6 @@ export const IMAGERY_SOURCES = [
       minTrustedZoom: 12,
       blockPx: 2048
     },
-    /* Was Geoscience Australia's DEM_LiDAR_5m ImageServer, and it is GONE: the endpoint
-       404s (checked 2026-08-19) and GA's own catalogue now points at a DEM_LiDAR_5m_2025
-       MapServer/WMS - which serves a RENDERED PICTURE of the terrain, not float measurements,
-       so it cannot replace it (the CC BY 4.0 licence survives; the delivery shape does not).
-       GA also lists a WCS for the same grid, which is the same follow-up adapter the European
-       national LiDAR needs. Until either lands, the global terrain tiles carry Australia at
-       SRTM ~30m - coarse, but real, and it un-blocks relief the day any AU imagery clears. */
-    dem: { ...GLOBAL_TERRAIN_TILES_DEM },
-    demAttribution: GLOBAL_TERRAIN_TILES_ATTRIBUTION,
     attribution: {
       /* Wording is a placeholder: the Queensland department that owns this has been renamed
          more than once, and CC BY-SA requires the licensor be named correctly. */
@@ -521,25 +381,6 @@ export const IMAGERY_SOURCES = [
       minTrustedZoom: 12,
       blockPx: 2048
     },
-    /* Same national CC BY 4.0 elevation as Queensland, under its own licence. NSW imagery may
-       stay blocked indefinitely on the per-series question while elevation is never in doubt. */
-    dem: {
-      adapter: "arcgis-export",
-      endpoint: "https://services.ga.gov.au/gis/rest/services/DEM_LiDAR_5m/ImageServer/exportImage",
-      apiKeyEnv: "",
-      format: "tiff",
-      encoding: "float32",
-      license: {
-        name: "CC BY 4.0",
-        url: "https://www.ga.gov.au/scientific-topics/national-location-information/digital-elevation-data",
-        storage: true, derivatives: true, redistribution: true, commercial: true,
-        attributionRequired: true
-      },
-      nativeResolutionM: 5,
-      fallbackResolutionM: 30,
-      maxUsefulZoom: 15,
-      blockPx: 2048
-    },
     attribution: {
       /* Per series, like LINZ: CC BY names the licensor and the licensor is whoever captured
          the pinned survey, which is the whole reason the series must be named. */
@@ -548,11 +389,6 @@ export const IMAGERY_SOURCES = [
       shortText: "© Spatial Services NSW CC BY",
       perSurvey: true,
       perSurveyText: "© State of New South Wales (Spatial Services, DCS), imagery captured by {licensor}, licensed CC BY"
-    },
-    demAttribution: {
-      text: "Elevation © Commonwealth of Australia (Geoscience Australia), CC BY 4.0",
-      url: "https://www.ga.gov.au/scientific-topics/national-location-information/digital-elevation-data",
-      perSurvey: false
     }
     /* To take this out of draft:
          1. Identify one Spatial Services ortho series that is theirs, openly licensed, and
@@ -588,11 +424,8 @@ export const IMAGERY_SOURCES = [
      buildCapture's all-or-nothing coverage check refuses the capture rather than baking
      blank frames. Polygon regions are the real fix if border-zone courses ever matter.
 
-     Elevation: every entry shares GLOBAL_TERRAIN_TILES_DEM below - honest but coarse. The
-     national LiDAR that would match LINZ quality (AHN 0.5m, RGE ALTI 1m, MDT02 2m) ships as
-     WCS/download services in national projections, which is a new adapter plus reprojection;
-     until that exists, 25m relief that says "this rolls away from you" beats no relief, and
-     the DEM is gated per-spec so improving it later touches one constant. */
+     Elevation for these countries comes from the terrain registry (global terrain tiles until a
+     national DTM adapter lands - AHN, RGE ALTI and MDT02 ship as WCS/downloads). */
   {
     key: "pdok-nl",
     label: "Beeldmateriaal Nederland aerial (PDOK)",
@@ -626,8 +459,6 @@ export const IMAGERY_SOURCES = [
       maxUsefulZoom: 21,
       minTrustedZoom: 13
     },
-    dem: { ...GLOBAL_TERRAIN_TILES_DEM },
-    demAttribution: GLOBAL_TERRAIN_TILES_ATTRIBUTION,
     attribution: {
       text: "Luchtfoto © Beeldmateriaal Nederland, via PDOK, CC BY 4.0",
       url: "https://www.pdok.nl/introductie/-/article/luchtfoto-pdok",
@@ -674,8 +505,6 @@ export const IMAGERY_SOURCES = [
       maxUsefulZoom: 19,
       minTrustedZoom: 13
     },
-    dem: { ...GLOBAL_TERRAIN_TILES_DEM },
-    demAttribution: GLOBAL_TERRAIN_TILES_ATTRIBUTION,
     attribution: {
       text: "PNOA orthophotography © Instituto Geográfico Nacional de España, CC BY 4.0 scne.es",
       url: "https://www.ign.es/",
@@ -725,8 +554,6 @@ export const IMAGERY_SOURCES = [
       maxUsefulZoom: 19,
       minTrustedZoom: 13
     },
-    dem: { ...GLOBAL_TERRAIN_TILES_DEM },
-    demAttribution: GLOBAL_TERRAIN_TILES_ATTRIBUTION,
     attribution: {
       text: "Orthophotographie © IGN France, Licence Ouverte 2.0 (Etalab)",
       url: "https://www.ign.fr/geoplateforme",
@@ -759,7 +586,6 @@ export const IMAGERY_SOURCES = [
     region: { bbox: { south: 30.1, west: 129.6, north: 45.65, east: 146.0 }, country: "JP" },
     license: GSI_JP_LICENSE,
     imagery: { ...GSI_JP_IMAGERY },
-    dem: { ...GSI_JP_DEM },
     attribution: GSI_JP_ATTRIBUTION
   },
   {
@@ -771,7 +597,6 @@ export const IMAGERY_SOURCES = [
     region: { bbox: { south: 23.9, west: 122.8, north: 28.6, east: 130.1 }, country: "JP" },
     license: GSI_JP_LICENSE,
     imagery: { ...GSI_JP_IMAGERY },
-    dem: { ...GSI_JP_DEM },
     attribution: GSI_JP_ATTRIBUTION
   },
 
@@ -792,8 +617,7 @@ export const IMAGERY_SOURCES = [
      real shape is fetching NGI GeoTIFFs per course bbox - an adapter decision for whoever
      clears step 1.
 
-     Elevation needs neither of those answers: the global terrain tiles carry SRTM 30m over
-     South Africa today, so the moment imagery clears, relief and plays-like ship with it. */
+     Elevation is not tied to any of this: the terrain registry carries South Africa today. */
   {
     key: "ngi-za",
     label: "CD:NGI South Africa 25cm orthophotos",
@@ -822,8 +646,6 @@ export const IMAGERY_SOURCES = [
       maxUsefulZoom: 19,
       minTrustedZoom: 13
     },
-    dem: { ...GLOBAL_TERRAIN_TILES_DEM },
-    demAttribution: GLOBAL_TERRAIN_TILES_ATTRIBUTION,
     attribution: {
       text: "Aerial imagery © Chief Directorate: National Geo-spatial Information, South Africa",
       url: "https://ngi.dalrrd.gov.za/",
@@ -919,56 +741,17 @@ function missingConfig(spec, envs) {
 }
 
 /* Resolve an entry's endpoints, or null when it cannot be used right now - which in practice
-   means its imagery API key is not configured. The DEM is resolved on the same terms but is
-   NOT required: a region with usable imagery and an unconfigured DEM still scans, and simply
-   ships no elevation grid and no computed relief. */
+   means its imagery API key is not configured. */
 export function resolveEndpoints(entry, envs) {
   if (!entry || !entry.imagery) return null;
   if (!grantsStorageRights(licenseFor(entry, entry.imagery))) return null;
   const imagery = resolveSpec(entry.imagery, envs);
   if (!imagery) return null;
-  /* The DEM is gated on its own licence and dropped on its own, never taking imagery with it. */
-  const demLicensed = entry.dem && grantsStorageRights(licenseFor(entry, entry.dem));
-  const dem = demLicensed ? resolveSpec(entry.dem, envs) : null;
   return {
     key: entry.key, label: entry.label,
     license: licenseFor(entry, entry.imagery),
-    demLicense: dem ? licenseFor(entry, entry.dem) : null,
-    attribution: entry.attribution, imagery, dem,
-    terrain: reliefSpec(dem)
+    attribution: entry.attribution, imagery
   };
-}
-
-/* The relief source, which is the DEM wearing a different hat.
-
-   The note at the top of this file rules out fetching a hillshade raster: relief is computed
-   from elevation, so there is nothing to add to the table for it. What the capture planner
-   needs is a spec it can grid and fetch tiles from, and the DEM already is one - the planner
-   shoots terrain-RGB tiles exactly as it shoots imagery tiles, and the worker turns the
-   mosaic into shading before it is stored. Hence: same spec, tagged so the fetcher knows the
-   bytes are heights rather than a picture.
-
-   Two shapes qualify. Tiled terrain-RGB (LINZ) is fetched and stored as-is. ArcGIS float32
-   exports (US 3DEP, AU ELVIS) carry the same information as measurements rather than packed
-   RGB, so they are tagged with their encoding and the capture path transcodes the floats to
-   terrain-RGB before anything is stored (gd-relief-core's heightsFromFloat32Tiff /
-   terrainRgbPngFromHeights) - the stored artefact is then identical in kind to a LINZ one and
-   every consumer after the fetch is unchanged. Feeding float bytes to the terrain-RGB decoder
-   directly would produce shading from noise, which is why the encoding tag travels on the
-   spec instead of being sniffed later. Anything else - no DEM, or a shape without a decode -
-   returns null: that region plans no relief capture and composites no relief, rather than
-   shipping something wrong. */
-export function reliefSpec(dem) {
-  if (!dem) return null;
-  /* Every tiled encoding gd-relief-core's ENCODINGS table speaks - keep this list in step
-     with that table. terrain-rgb is stored as-is; the others (terrarium for the global
-     terrain tiles, gsi-dem-png for Japan) are normalised to terrain-RGB at capture, so only
-     the fetch leg ever sees the difference. */
-  const TILED_ENCODINGS = ["terrain-rgb", "terrarium", "gsi-dem-png"];
-  const tiled = dem.adapter === "xyz" && TILED_ENCODINGS.includes(dem.encoding);
-  const floatExport = dem.adapter === "arcgis-export" && dem.encoding === "float32";
-  if (!tiled && !floatExport) return null;
-  return { ...dem, role: "relief", computed: "hillshade-from-dem" };
 }
 
 /* The gate. Returns a usable, licensed source for these course bounds, or null.
@@ -981,29 +764,6 @@ export function resolveImagerySource(bounds, options = {}) {
     if (!regionCovers(entry.region, bounds)) continue;
     const resolved = resolveEndpoints(entry, options.env);
     if (resolved) return resolved;
-  }
-  return null;
-}
-
-/* Elevation, asked for on its own.
-
-   Plays-like distance is elevation arithmetic - it needs a DEM and does not care whether a
-   single pixel of imagery was ever stored. Tying the two together meant a course whose imagery
-   is unlicensed got no elevation either, which is a licensing answer applied to a question
-   nobody asked. This resolves a DEM for bounds independently: same containment, same draft
-   gate, same rights test, run against the dem spec's own licence.
-
-   NOTE: nothing consumes this yet. The snapshot worker still enters through
-   resolveImagerySource, so wiring elevation-only packages into the course build is follow-up
-   work - this is the mechanism, not the feature. */
-export function resolveElevationSource(bounds, options = {}) {
-  const table = Array.isArray(options.sources) ? options.sources : IMAGERY_SOURCES;
-  for (const entry of table) {
-    if (isDraft(entry) || !entry.dem) continue;
-    if (!grantsStorageRights(licenseFor(entry, entry.dem))) continue;
-    if (!regionCovers(entry.region, bounds)) continue;
-    const dem = resolveSpec(entry.dem, options.env);
-    if (dem) return { key: entry.key, label: entry.label, license: licenseFor(entry, entry.dem), attribution: entry.demAttribution || entry.attribution, dem };
   }
   return null;
 }

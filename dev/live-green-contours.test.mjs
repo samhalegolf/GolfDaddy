@@ -14,7 +14,9 @@
  */
 import assert from "node:assert";
 import { createRequire } from "node:module";
-import { demPlan, resampleToWindow } from "../functions/lib/gd-live-terrain-core.mjs";
+import { demGrid } from "../functions/lib/gd-live-terrain-core.mjs";
+import { reprojectToGrid } from "../functions/lib/terrain/gd-terrain-normalise.mjs";
+import { mercMetresPerPixel } from "../functions/lib/terrain/gd-terrain-adapters.mjs";
 import { terrainRgbFromHeights, metresPerPixel } from "../functions/lib/gd-relief-core.mjs";
 
 const require = createRequire(import.meta.url);
@@ -43,33 +45,40 @@ function latLngAt(px, py, z) {
   return { lat: (Math.atan(Math.sinh(n)) * 180) / Math.PI, lng: (px / scale) * 360 - 180 };
 }
 
-/* What a DEM at `zoom` would hand the endpoint: one sample per pixel centre, quantised to 0.1m. */
-function sourceDem(plan) {
-  const { left, top, width, height } = plan.fetch;
-  const out = new Float32Array(width * height);
-  for (let j = 0; j < height; j++) for (let i = 0; i < width; i++) {
-    const ll = latLngAt(left + i + 0.5, top + j + 0.5, plan.demZoom);
-    out[j * width + i] = Math.round(groundAt(ll.lat, ll.lng) * 10) / 10;
+/* What a DEM at `zoom` would hand the endpoint: one sample per pixel centre, quantised to
+   0.1m, covering the window with a margin - in the RawTerrainData shape the adapters return. */
+const MERC_HALF = 20037508.342789244;
+function sourceDem(win, demZoom) {
+  const scale = Math.pow(2, demZoom - win.z);
+  const rect = { left: Math.floor(win.x * scale) - 3, top: Math.floor(win.y * scale) - 3 };
+  rect.width = Math.ceil((win.x + win.w) * scale) + 3 - rect.left;
+  rect.height = Math.ceil((win.y + win.h) * scale) + 3 - rect.top;
+  const heights = new Float32Array(rect.width * rect.height);
+  for (let j = 0; j < rect.height; j++) for (let i = 0; i < rect.width; i++) {
+    const ll = latLngAt(rect.left + i + 0.5, rect.top + j + 0.5, demZoom);
+    heights[j * rect.width + i] = Math.round(groundAt(ll.lat, ll.lng) * 10) / 10;
   }
-  return out;
+  const mpp = mercMetresPerPixel(demZoom);
+  return { crs: "EPSG:3857", width: rect.width, height: rect.height, heights,
+    transform: { originX: rect.left * mpp - MERC_HALF, originY: MERC_HALF - rect.top * mpp, pixelSize: mpp } };
 }
 
 /* The endpoint's answer, as the phone decodes it: terrain-RGB bytes back to heights. */
 function liveElevation(win, zoom) {
-  const plan = demPlan(win, zoom);
-  const heights = resampleToWindow(sourceDem(plan), plan.fetch.width, plan.fetch.height, plan);
-  const rgb = terrainRgbFromHeights(heights, plan.grid.width, plan.grid.height);
-  const decoded = new Float32Array(plan.grid.width * plan.grid.height);
+  const grid = demGrid(win);
+  const heights = reprojectToGrid(sourceDem(win, Math.min(win.z, zoom)), grid);
+  const rgb = terrainRgbFromHeights(heights, grid.width, grid.height);
+  const decoded = new Float32Array(grid.width * grid.height);
   for (let i = 0, p = 0; i < decoded.length; i++, p += 3) decoded[i] = -10000 + (rgb[p] * 65536 + rgb[p + 1] * 256 + rgb[p + 2]) * 0.1;
-  return { heights: decoded, width: plan.grid.width, height: plan.grid.height };
+  return { heights: decoded, width: grid.width, height: grid.height };
 }
 
-/* nativeM: the source's stated resolution (gd-imagery-sources nativeResolutionM). */
+/* nativeM: the source's stated resolution (gd-terrain-sources resolutionM). */
 function fitOn(zoom, nativeM) {
   const win = lt.frameWindow(HOLE);
   const elev = liveElevation(win, zoom);
   /* What live-terrain-frame.mjs sends as X-Elevation-Sample-M. */
-  const sampleM = Math.max(metresPerPixel(GREEN.lat, demPlan(win, zoom).demZoom), nativeM);
+  const sampleM = Math.max(metresPerPixel(GREEN.lat, Math.min(win.z, zoom)), nativeM);
   const meta = lt.surfaceMeta(win, { url: "blob:e", width: elev.width, height: elev.height, min: 0, max: 0, sampleM });
   const surface = core.fitGreenSurface(elev.heights, {
     width: elev.width, height: elev.height,

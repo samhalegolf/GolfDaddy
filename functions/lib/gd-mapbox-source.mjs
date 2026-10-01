@@ -54,7 +54,6 @@
  * does needs one, and accepting one would put it in tile URLs. */
 
 import { MapSourceError, MemoryTileCache, tiledImagery, tiledElevation } from "./gd-tile-fetch.mjs";
-import { reliefSpec } from "./gd-imagery-sources.mjs";
 
 export const MAPBOX_PROVIDER_ID = "mapbox";
 export const MAPBOX_TOKEN_ENV = "MAPBOX_PUBLIC_TOKEN";
@@ -129,29 +128,20 @@ export function mapboxCaptureSource(env) {
   const token = mapboxToken(env);
   if (!token) return null;
   const q = "?access_token=" + encodeURIComponent(token);
-  const dem = {
-    adapter: "xyz",
-    urlTemplate: MAPBOX_API_BASE + "/" + MAPBOX_TERRAIN_PRODUCT + "/{z}/{x}/{y}.pngraw" + q,
-    encoding: "terrain-rgb",
-    nativeResolutionM: 30,
-    fallbackResolutionM: 30,
-    maxUsefulZoom: 14
-  };
   return {
     key: MAPBOX_PROVIDER_ID,
     label: "Mapbox Satellite (test only)",
     storable: false,
     license: MAPBOX_LICENSE,
-    demLicense: MAPBOX_LICENSE,
     attribution: { text: SATELLITE_ATTRIBUTION, url: "https://www.mapbox.com/about/maps/", perSurvey: false },
     imagery: {
       adapter: "xyz",
       urlTemplate: MAPBOX_API_BASE + "/" + MAPBOX_SATELLITE_PRODUCT + "/{z}/{x}/{y}.jpg90" + q,
       maxUsefulZoom: 19,
       minTrustedZoom: 12
-    },
-    dem,
-    terrain: reliefSpec(dem)
+    }
+    /* No elevation: a test bake reads the course's own terrain asset like a live one
+       (functions/lib/terrain/), so Mapbox Terrain-DEM is never baked from. */
   };
 }
 

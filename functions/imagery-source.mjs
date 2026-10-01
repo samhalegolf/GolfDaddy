@@ -19,6 +19,7 @@
  */
 
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
+import { resolveTerrain } from "./lib/terrain/gd-terrain-resolver.mjs";
 
 const DEFAULT_SPAN_M = 600;
 const MIN_SPAN_M = 50;
@@ -62,7 +63,6 @@ function publicView(source) {
        imagery it already has, below minTrustedZoom it is looking at a mosaic's filler. */
     maxUsefulZoom: Number(imagery.maxUsefulZoom) || null,
     minTrustedZoom: Number(imagery.minTrustedZoom) || null,
-    hasElevation: !!source.dem,
     license: {
       name: String(license.name || ""),
       url: String(license.url || ""),
@@ -72,6 +72,18 @@ function publicView(source) {
       text: String(attribution.text || ""),
       url: String(attribution.url || "")
     }
+  };
+}
+
+/* Terrain has its own registry (functions/lib/terrain/), independent of imagery: name what this
+   ground would bake from - including where there is no scan source at all. */
+function terrainView(bounds) {
+  const r = resolveTerrain({ bounds, marginM: 0 });
+  if (!r.ok) return null;
+  return {
+    source: String(r.primarySource.name || ""),
+    resolutionM: Number(r.primarySource.resolutionM) || null,
+    global: r.strategy === "global-only"
   };
 }
 
@@ -103,6 +115,7 @@ export default async function imagerySource(req) {
       bounds,
       scannable: false,
       source: null,
+      terrain: terrainView(bounds),
       reason: unscannableReason(bounds)
     });
   }
@@ -113,6 +126,7 @@ export default async function imagerySource(req) {
     bounds,
     scannable: true,
     source: publicView(resolved),
+    terrain: terrainView(bounds),
     reason: ""
   });
 }

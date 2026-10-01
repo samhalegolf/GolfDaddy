@@ -7,8 +7,9 @@
  * to fail the whole capture, which cost the course its elevation, which silently cost all 18
  * greens their contours and tiers.
  *
- * The hole is patched from its nearest real neighbours so relief still draws, and the patched
- * footprint travels with the capture so nothing MEASURES it.
+ * The terrain bake keeps the bad block as nodata, fills it from its nearest real neighbours so
+ * relief still draws, and marks every filled pixel in the asset mask so nothing MEASURES it
+ * (functions/lib/terrain/gd-terrain-normalise.mjs fillGaps / filledRegions).
  */
 const assert = require("assert");
 const path = require("path");
@@ -16,76 +17,59 @@ const { pathToFileURL } = require("url");
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
+const load = rel => import(pathToFileURL(path.join(__dirname, "..", rel)).href);
 
-/* patchElevationGaps is module-private, so exercise the algorithm it implements against the
-   same contract: nearest real neighbour wins, and nothing finite is disturbed. */
-function patch(heights, width, height) {
-  const total = width * height;
-  let holes = 0;
-  for (let i = 0; i < total; i++) if (!Number.isFinite(heights[i])) holes++;
-  if (!holes) return { filled: 0, remaining: 0 };
-  const queue = [];
-  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const i = y * width + x;
-    if (!Number.isFinite(heights[i])) continue;
-    if ((x > 0 && !Number.isFinite(heights[i - 1])) || (x < width - 1 && !Number.isFinite(heights[i + 1])) ||
-        (y > 0 && !Number.isFinite(heights[i - width])) || (y < height - 1 && !Number.isFinite(heights[i + width]))) queue.push(i);
-  }
-  let head = 0, filled = 0;
-  while (head < queue.length) {
-    const i = queue[head++], v = heights[i], x = i % width, y = (i / width) | 0;
-    if (x > 0 && !Number.isFinite(heights[i - 1])) { heights[i - 1] = v; filled++; queue.push(i - 1); }
-    if (x < width - 1 && !Number.isFinite(heights[i + 1])) { heights[i + 1] = v; filled++; queue.push(i + 1); }
-    if (y > 0 && !Number.isFinite(heights[i - width])) { heights[i - width] = v; filled++; queue.push(i - width); }
-    if (y < height - 1 && !Number.isFinite(heights[i + width])) { heights[i + width] = v; filled++; queue.push(i + width); }
-  }
-  return { filled: filled / total, remaining: (holes - filled) / total };
-}
-
-test("a hole is filled from its nearest real ground, not a global average", () => {
+test("a hole is filled from its nearest real ground, not a global average - and marked", async () => {
+  const { fillGaps, filledRegions, MASK_FILLED } = await load("functions/lib/terrain/gd-terrain-normalise.mjs");
   const W = 64, H = 64;
   const h = new Float32Array(W * H);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) h[y * W + x] = 100 + x;   // 1m per px ramp
   for (let y = 20; y < 40; y++) for (let x = 20; x < 40; x++) h[y * W + x] = NaN;   // punch a block out
   const before = h.slice();
-  const r = patch(h, W, H);
-  assert.ok(r.remaining === 0, "every hole must be filled");
+  const mask = new Uint8Array(W * H).fill(1);
+  for (let y = 20; y < 40; y++) for (let x = 20; x < 40; x++) mask[y * W + x] = 0;
+  const r = fillGaps(h, mask, W, H);
+  assert.ok(Math.abs(r.filledFraction - 400 / 4096) < 1e-9, "filled fraction reported");
   for (let i = 0; i < h.length; i++) assert.ok(Number.isFinite(h[i]), "no NaN may survive");
-  /* untouched ground must be bit-identical */
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    if (x >= 20 && x < 40 && y >= 20 && y < 40) continue;
-    assert.equal(h[y * W + x], before[y * W + x], "real ground must not be disturbed");
+    const inside = x >= 20 && x < 40 && y >= 20 && y < 40;
+    if (!inside) assert.equal(h[y * W + x], before[y * W + x], "real ground must not be disturbed");
+    assert.equal(mask[y * W + x] === MASK_FILLED, inside, "exactly the filled pixels are marked");
   }
-  /* a nearest-neighbour fill tracks the ramp; a flat fill would not */
   const left = h[30 * W + 21], right = h[30 * W + 38];
   assert.ok(right > left + 5, "fill must follow the surrounding ground, got " + left + " -> " + right);
+  const regions = filledRegions(mask, W, H, 16);
+  assert.ok(regions.length && regions.every(g => g.x + g.w > 20 && g.x < 40 && g.y + g.h > 20 && g.y < 40), "regions cover the hole only");
   return "20x20 hole in a ramp filled " + left.toFixed(0) + " -> " + right.toFixed(0);
 });
 
-test("an all-NaN mosaic fills nothing and is reported as unusable", () => {
+test("an all-nodata grid cannot be filled and says so", async () => {
+  const { fillGaps } = await load("functions/lib/terrain/gd-terrain-normalise.mjs");
   const W = 16, H = 16;
-  const h = new Float32Array(W * H).fill(NaN);
-  const r = patch(h, W, H);
-  assert.equal(r.filled, 0);
-  assert.ok(r.remaining > 0.9, "must report the mosaic as empty, got " + r.remaining);
-  return "remaining " + (r.remaining * 100).toFixed(0) + "%";
+  assert.throws(() => fillGaps(new Float32Array(W * H).fill(NaN), new Uint8Array(W * H), W, H), /no real ground/);
 });
 
-test("exportImage blocks carry the footprint a gap needs", async () => {
-  const mod = await import(pathToFileURL(path.join(__dirname, "..", "functions", "lib", "gd-visual-plan-core.mjs")).href);
-  /* a terrain-reference item takes source.terrain, not source.imagery (specForItem) */
-  const spec = { adapter: "arcgis-export", endpoint: "https://x/exportImage", format: "tiff",
-                 encoding: "float32", maxUsefulZoom: 17, blockPx: 512 };
-  const SOURCE = { key: "t", label: "T", imagery: spec, terrain: spec };
-  const item = { role: "terrain-reference", bounds: { north: -36.74, south: -36.76, west: 174.75, east: 174.78 },
-    targetZoom: 16, minZoom: 14, maxZoom: 17, maxTiles: 260, bleedMeters: 130, bleedPx: 380, frameZoom: 17 };
-  const g = mod.captureGrid(item, { source: SOURCE });
-  assert.ok(g && g.tiles.length > 1, "need a multi-block grid, got " + (g ? g.tiles.length : 0));
-  for (const t of g.tiles) {
-    assert.ok(Number.isFinite(t.w) && t.w > 0, "block must report its width");
-    assert.ok(Number.isFinite(t.h) && t.h > 0, "block must report its height");
-  }
-  return g.tiles.length + " blocks, all carrying w/h";
+test("an undecodable exportImage block stays nodata and the rest of the course is kept", async () => {
+  const { ADAPTERS } = await load("functions/lib/terrain/gd-terrain-adapters.mjs");
+  const { float32Tiff } = await load("dev/float32-tiff-fixture.mjs");
+  const arcgis = ADAPTERS.find(a => a.sourceType === "arcgis-image-server");
+  const source = { id: "t", sourceType: "arcgis-image-server", endpoint: "https://x/exportImage", format: "tiff",
+    encoding: "float32", maxUsefulZoom: 17, blockPx: 256, resolutionM: 1, verticalDatum: "NAVD88" };
+  let n = 0;
+  const fetchImpl = async url => {
+    const u = new URL(url);
+    const [W, H] = u.searchParams.get("size").split(",").map(Number);
+    const bad = (n++ === 1);
+    const body = bad ? Buffer.from("II*\0garbage-not-a-tiff") : await float32Tiff(new Float32Array(W * H).fill(12.5), W, H);
+    return { ok: true, status: 200, headers: { get: k => (k === "content-type" ? "image/tiff" : null) }, arrayBuffer: async () => body };
+  };
+  const raw = await arcgis.fetchTerrain({ source, bounds: { north: 36.57, south: 36.565, west: -121.945, east: -121.938 }, zoom: 17 }, { fetchImpl });
+  assert.ok(raw.requests.total > 1, "multi-block window");
+  assert.equal(raw.requests.failed, 1, "one block failed");
+  let nan = 0, real = 0;
+  for (const v of raw.heights) { if (Number.isFinite(v)) { real++; assert.equal(v, 12.5); } else nan++; }
+  assert.ok(nan > 0 && real > 0, "the bad block is nodata, the rest is real ground");
+  return raw.requests.total + " blocks, 1 left as nodata";
 });
 
 (async () => {

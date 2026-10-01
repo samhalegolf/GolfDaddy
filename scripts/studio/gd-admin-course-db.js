@@ -586,6 +586,7 @@ function gdAdminCourseDbActionRail(selected){
     <button type="button" class="${active("watchmaps")}" onclick="return gdAdminCourseDbShowWatchMaps(${id})">Watch Maps</button>
     <button type="button" class="${active("snapshots")}" onclick="return gdAdminCourseDbShowSnapshots(${id})">Snapshots</button>
     <button type="button" class="${active("testbakes")}" onclick="return gdAdminCourseDbShowTestBakes(${id})">Test Bakes</button>
+    <button type="button" class="${active("terrain")}" onclick="return gdAdminCourseDbShowTerrain(${id})">Terrain</button>
     <button type="button" class="danger" onclick="return gdAdminCourseDbDelete(${id})">Delete</button>
     ${gdAdminCourseMaintenanceMenu(selected)}
     ${gdAdminCourseVisualUpdateButton(selected&&selected.id||"","primary")}
@@ -678,6 +679,11 @@ function gdAdminCourseDbShowSnapshots(courseId){
    scripts/studio/gd-admin-course-test-bakes.js. Studio only; nothing here is published. */
 function gdAdminCourseDbShowTestBakes(courseId){
   return gdAdminCourseDbOpen(courseId,"testbakes");
+}
+/* The course's terrain asset and the resolver's reasoning - rendered by
+   scripts/studio/gd-admin-course-terrain.js. */
+function gdAdminCourseDbShowTerrain(courseId){
+  return gdAdminCourseDbOpen(courseId,"terrain");
 }
 /* Mirrors ADMIN_EMAILS in functions/course-maps.mjs - the server is the real
    gate (it 403s a non-admin actor); this only decides whether we bother asking. */
@@ -4785,6 +4791,12 @@ function gdRenderAdminCourseDatabaseNow(){
     if(typeof window.gdAdminCourseTestBakesAfterRender==="function")window.gdAdminCourseTestBakesAfterRender(selected);
     return;
   }
+  if(gdAdminCourseDatabaseTab==="terrain"){
+    const markup=typeof window.gdAdminCourseTerrainMarkup==="function"?window.gdAdminCourseTerrainMarkup(selected):'<div class="gdCoursePlayDebugEmpty">Terrain view not loaded.</div>';
+    gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}${markup}</div>`);
+    if(typeof window.gdAdminCourseTerrainAfterRender==="function")window.gdAdminCourseTerrainAfterRender(selected);
+    return;
+  }
   if(gdAdminCourseDatabaseTab==="watchmaps"){
     const markup=typeof window.gdAdminCourseWatchMapsMarkup==="function"?window.gdAdminCourseWatchMapsMarkup(selected):'<div class="gdCoursePlayDebugEmpty">Watch Map viewer not loaded.</div>';
     gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}${markup}</div>`);
@@ -4819,6 +4831,7 @@ window.gdAdminCourseDbShowGeometry=gdAdminCourseDbShowGeometry;
 window.gdAdminCourseDbShowDebug=gdAdminCourseDbShowDebug;
 window.gdAdminCourseDbShowWatchMaps=gdAdminCourseDbShowWatchMaps;
 window.gdAdminCourseDbShowTestBakes=gdAdminCourseDbShowTestBakes;
+window.gdAdminCourseDbShowTerrain=gdAdminCourseDbShowTerrain;
 window.gdAdminCourseLocationEdit=gdAdminCourseLocationEdit;
 window.gdAdminCourseLocationViewport=gdAdminCourseLocationViewport;
 window.gdAdminCourseLocationOverlay=gdAdminCourseLocationOverlay;

@@ -12,6 +12,9 @@ node_modules/
 /marketing-output/
 /marketing/.auth.json
 
+# Local output of scripts/terrain/stage-terrain-source.mjs (provider data, staged once)
+/staged-terrain/
+
 # Archives / large binaries (keep source, not zipped bundles)
 *.zip
 

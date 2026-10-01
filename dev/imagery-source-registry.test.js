@@ -58,16 +58,13 @@ test("the LINZ key is honoured under either env name it is published as", () => 
   /* The live map reads LINZ_BASEMAPS_PUBLIC_KEY or LINZ_BASEMAPS_API_KEY; the scanner used to
      require only the second. Rotating the key under the first name would have left the map
      working while every NZ capture failed as unconfigured - a split failure that looks fine
-     from the app, which is the worst kind. Either name must work, for imagery AND elevation. */
+     from the app, which is the worst kind. Either name must work (elevation is checked in
+     dev/terrain-sources.test.mjs against the terrain registry). */
   const underPublic = mod.resolveImagerySource(PUPUKE_NZ, { env: { LINZ_BASEMAPS_PUBLIC_KEY: "public-name-key" } });
   assert.ok(underPublic, "PUBLIC_KEY alone must configure the scanner");
   assert.strictEqual(underPublic.key, "linz-nz");
   assert.ok(underPublic.imagery.urlTemplate.includes("api=public-name-key"),
     "the key from PUBLIC_KEY is substituted into the imagery template");
-
-  const dem = mod.resolveElevationSource(PUPUKE_NZ, { env: { LINZ_BASEMAPS_PUBLIC_KEY: "public-name-key" } });
-  assert.ok(dem && dem.dem && dem.dem.urlTemplate.includes("api=public-name-key"),
-    "elevation is keyed from PUBLIC_KEY too - a DEM left unconfigured ships no plays-like");
 
   /* API_KEY stays the preferred name, so a deployment carrying both is unchanged. */
   const both = mod.resolveImagerySource(PUPUKE_NZ, {
@@ -228,7 +225,6 @@ test("the US ceilings match what the services actually resolve", () => {
     "NAIP is served at 0.3m - a ceiling coarser than that discards imagery we are paying to fetch");
   assert.ok(mPerPx(source.imagery.maxUsefulZoom + 1) < 0.3 / 1.5,
     "and one zoom higher must be a genuine upscale, or the ceiling is set too low");
-  assert.ok(mPerPx(source.dem.maxUsefulZoom) <= 1.0, "3DEP is served at 1m");
 });
 
 /* ---- Europe ------------------------------------------------------------------------------ */
@@ -253,20 +249,6 @@ test("the three European entries resolve keylessly on the xyz adapter", () => {
   assert.ok(es.imagery.urlTemplate.includes("OI.OrthoimageCoverage"));
 });
 
-test("every European entry ships the shared terrarium DEM as a relief source", () => {
-  [CHANTILLY_FR, NOORDWIJK_NL, VALDERRAMA_ES].forEach(bounds => {
-    const source = mod.resolveImagerySource(bounds, { env: {} });
-    assert.ok(source.dem, source.key + " must carry elevation");
-    assert.strictEqual(source.dem.encoding, "terrarium");
-    assert.ok(source.terrain, source.key + " terrarium DEM must be offered as relief - the decoder speaks it");
-    assert.strictEqual(source.terrain.encoding, "terrarium");
-    /* The DEM's licence is its own (Mapzen/Copernicus mix), never the national imagery
-       licence - same per-spec separation the QLD entry exists to prove. */
-    assert.ok(source.demLicense && /Mapzen/.test(source.demLicense.name),
-      source.key + " elevation must be licensed as the terrain tiles, not as the national imagery");
-  });
-});
-
 test("the Iberian ordering holds: Spain resolves before France's wider box", () => {
   /* Barcelona sits inside BOTH boxes; pnoa-es is ordered first precisely so this stays
      Spanish. If this fails, someone reordered the registry. */
@@ -289,7 +271,7 @@ test("the UK stays truthfully unscannable - no open national imagery exists", ()
 
 /* ---- Japan ------------------------------------------------------------------------------- */
 
-test("Japan resolves keylessly on both boxes, with GSI elevation offered as relief", () => {
+test("Japan resolves keylessly on both boxes", () => {
   const main = mod.resolveImagerySource(KAWAGOE_JP, { env: {} });
   const ryukyu = mod.resolveImagerySource(NAHA_JP, { env: {} });
   assert.strictEqual(main && main.key, "gsi-jp");
@@ -297,10 +279,6 @@ test("Japan resolves keylessly on both boxes, with GSI elevation offered as reli
   [main, ryukyu].forEach(source => {
     assert.ok(source.imagery.urlTemplate.includes("seamlessphoto"), "the layer is substituted at resolve time");
     assert.ok(!source.imagery.urlTemplate.includes("{key}"), "GSI needs no key");
-    assert.strictEqual(source.dem.encoding, "gsi-dem-png");
-    assert.ok(source.dem.urlTemplate.includes("dem_png"), "the default DEM tier must be the nationwide one - dem5a strands courses outside its coverage");
-    assert.ok(source.terrain, "the GSI encoding is decodable, so relief must be offered");
-    assert.strictEqual(source.terrain.encoding, "gsi-dem-png");
   });
   /* The mosaic only exists from z14, so nothing below it may be trusted or requested. */
   assert.strictEqual(main.imagery.minTrustedZoom, 14);
@@ -317,38 +295,22 @@ test("the main-islands box excludes Korea entirely", () => {
 test("South Africa is drafted and refused until NGI's licence exists in writing", () => {
   /* The entry is research, not a source: no published licence and no stable endpoint. When
      the NGI confirmation lands and the entry is de-drafted, this flips to asserting ngi-za
-     resolves - with its terrarium elevation already in place. */
+     resolves. Elevation does not wait for it: the terrain registry covers ZA today. */
   assert.strictEqual(mod.resolveImagerySource(FANCOURT_ZA, { env: {} }), null);
   const entry = mod.IMAGERY_SOURCES.find(e => e.key === "ngi-za");
   assert.ok(entry, "the research entry must exist in the table");
   assert.ok(entry.draft === true, "and must stay draft until the licence is confirmed");
   assert.strictEqual(entry.license.storage, false, "no right may be claimed that nobody granted");
   assert.strictEqual(entry.imagery.urlTemplate, "", "no endpoint may be named that does not exist");
-  assert.strictEqual(entry.dem.encoding, "terrarium", "elevation is already solvable - SRTM covers ZA today");
-});
-
-/* Relief for the US rides the same DEM: 3DEP is public domain and float32-decodable, so the
-   planner must be offered a terrain spec, tagged so the capture path transcodes floats to
-   terrain-RGB instead of compositing them as an image. Before the float32 decode existed this
-   came back null by design - see reliefSpec. */
-test("the US elevation is offered as a relief source, tagged for the float32 transcode", () => {
-  const source = mod.resolveImagerySource(PEBBLE_US, { env: {} });
-  assert.ok(source.terrain, "3DEP is licensed and decodable - US courses must plan relief");
-  assert.strictEqual(source.terrain.adapter, "arcgis-export");
-  assert.strictEqual(source.terrain.encoding, "float32");
-  assert.strictEqual(source.terrain.computed, "hillshade-from-dem");
 });
 
 /* NAIP is 4-band and publishes false-colour and NDVI renderings beside the natural one. The
    default happens to be natural colour today; these pixels are stored for years. */
-test("the US imagery pins its rendering and the US elevation does not", () => {
+test("the US imagery pins its rendering", () => {
   const source = mod.resolveImagerySource(PEBBLE_US, { env: {} });
   const imagery = new URL(mod.exportImageUrl(source.imagery, { left: 0, top: 0, width: 256, height: 256 }, 19));
   assert.strictEqual(JSON.parse(imagery.searchParams.get("renderingRule")).rasterFunction, "NaturalColor",
     "a stored derivative must not depend on a remote default");
-  const dem = new URL(mod.exportImageUrl(source.dem, { left: 0, top: 0, width: 256, height: 256 }, 17));
-  assert.strictEqual(dem.searchParams.get("renderingRule"), null,
-    "3DEP's own functions are all hillshades and slope maps - raw is what elevation means");
 });
 
 /* This bbox IS the containment gate, so claiming ground the service has no rasters for turns a
@@ -369,34 +331,13 @@ test("the LINZ endpoints match LINZ's own published form", () => {
   const source = mod.resolveImagerySource(PUPUKE_NZ, { env: NZ_ENV });
   assert.strictEqual(source.imagery.urlTemplate,
     "https://basemaps.linz.govt.nz/v1/tiles/aerial/WebMercatorQuad/{z}/{x}/{y}.webp?api=linz-test-key");
-  assert.ok(source.dem, "NZ ships an elevation source");
-  assert.ok(source.dem.urlTemplate.includes("pipeline=terrain-rgb"),
-    "without the pipeline parameter the tileset returns a picture of the terrain, not the terrain");
-  assert.ok(source.dem.urlTemplate.includes("api=linz-test-key"), "the DEM shares the imagery key");
-  assert.strictEqual(source.dem.encoding, "terrain-rgb");
 });
 
-test("every region carries a DEM and no region carries a hillshade raster", () => {
+test("imagery entries carry no elevation and no hillshade raster - terrain has its own registry", () => {
   mod.IMAGERY_SOURCES.forEach(entry => {
-    assert.ok(entry.dem, entry.key + " must carry a DEM - it feeds both relief and plays-like");
+    assert.ok(!("dem" in entry), entry.key + " must not carry a DEM - elevation lives in functions/lib/terrain/gd-terrain-sources.mjs");
     assert.ok(!("hillshade" in entry), entry.key + " must not fetch pre-shaded relief");
   });
-});
-
-test("an unconfigured DEM drops elevation without failing the course", () => {
-  /* Imagery and DEM share the LINZ key here, so test the shape directly: a resolved entry may
-     legitimately come back with dem null, and that must not take imagery down with it. */
-  const entry = {
-    key: "dem-less", label: "DEM-less",
-    region: { bbox: { south: -90, west: -180, north: 90, east: 180 } },
-    license: { name: "Open", storage: true, derivatives: true, redistribution: true },
-    imagery: { adapter: "xyz", urlTemplate: "https://example.test/{z}/{x}/{y}.jpg" },
-    dem: { adapter: "xyz", urlTemplate: "https://example.test/dem/{z}/{x}/{y}.png", apiKeyEnv: "MISSING_DEM_KEY" },
-    attribution: {}
-  };
-  const source = mod.resolveImagerySource(PUPUKE_NZ, { sources: [entry], env: {} });
-  assert.ok(source, "the course still scans");
-  assert.strictEqual(source.dem, null, "and simply ships no elevation grid");
 });
 
 test("attribution reads back the licensor per survey where the licence demands it", () => {
@@ -406,47 +347,6 @@ test("attribution reads back the licensor per survey where the licence demands i
   assert.strictEqual(generic.license, "CC BY 4.0");
   const perSurvey = mod.attributionFor(source, { licensor: "Auckland Council" });
   assert.ok(perSurvey.text.includes("licensed by Auckland Council"), "CC BY names the licensor, which varies per survey");
-});
-
-/* Per-spec licences. The point is not tidiness - it is that an entry blocked on imagery can
-   still ship elevation, because plays-like is arithmetic over a DEM and does not care whether
-   a pixel was ever stored. */
-test("a ShareAlike imagery source does not infect a CC BY elevation source", () => {
-  const split = [{
-    key: "split-licence", label: "Copyleft imagery, open elevation",
-    region: { bbox: { south: -90, west: -180, north: 90, east: 180 } },
-    license: { name: "CC BY-SA", storage: true, derivatives: true, redistribution: true, shareAlike: true },
-    imagery: { adapter: "xyz", urlTemplate: "https://example.test/{z}/{x}/{y}.jpg" },
-    dem: {
-      adapter: "arcgis-export", endpoint: "https://example.test/dem/exportImage", apiKeyEnv: "",
-      license: { name: "CC BY 4.0", storage: true, derivatives: true, redistribution: true }
-    },
-    attribution: {}
-  }];
-  assert.strictEqual(mod.resolveImagerySource(PUPUKE_NZ, { sources: split, env: {} }), null,
-    "the imagery is still refused - the split does not launder ShareAlike");
-
-  const elevation = mod.resolveElevationSource(PUPUKE_NZ, { sources: split, env: {} });
-  assert.ok(elevation, "and the elevation, on its own licence, is still available");
-  assert.strictEqual(elevation.license.name, "CC BY 4.0", "reported under ITS licence, not the imagery's");
-});
-
-test("an unlicensed DEM is dropped without taking licensed imagery down", () => {
-  const badDem = [{
-    key: "bad-dem", label: "Open imagery, display-only elevation",
-    region: { bbox: { south: -90, west: -180, north: 90, east: 180 } },
-    license: { name: "CC BY 4.0", storage: true, derivatives: true, redistribution: true },
-    imagery: { adapter: "xyz", urlTemplate: "https://example.test/{z}/{x}/{y}.jpg" },
-    dem: {
-      adapter: "xyz", urlTemplate: "https://example.test/dem/{z}/{x}/{y}.png",
-      license: { name: "Display only", storage: false, derivatives: false, redistribution: false }
-    },
-    attribution: {}
-  }];
-  const source = mod.resolveImagerySource(PUPUKE_NZ, { sources: badDem, env: {} });
-  assert.ok(source, "the course still scans");
-  assert.strictEqual(source.dem, null, "and simply ships no elevation grid");
-  assert.strictEqual(mod.resolveElevationSource(PUPUKE_NZ, { sources: badDem, env: {} }), null);
 });
 
 /* NSW: the source that is only safe one named layer at a time. Without the pin the service

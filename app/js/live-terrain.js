@@ -157,18 +157,28 @@
       metresPerPixel: metres.width / elevation.width,
       elevationRange: { min: elevation.min, max: elevation.max },
       /* The source's own spacing, before the resample onto this grid. */
-      sourceMetresPerSample: elevation.sampleM || null
+      sourceMetresPerSample: elevation.sampleM || null,
+      /* What the course's baked terrain asset says the ground is good for, when the frame was
+         cut from one (functions/lib/terrain/gd-terrain-config.mjs terrainCapabilities). */
+      terrain: elevation.greenDetail ? { greenDetail: elevation.greenDetail, qualityClass: elevation.qualityClass || null, version: elevation.terrainVersion || null } : null
     };
     return meta;
   }
 
   /* Whether this elevation can read a green. A green's shape lives in the metre or two between
      samples; the contour fit's own gate catches a mis-fit, but a 10-25m DEM resampled onto a
-     fine grid can pass it while knowing nothing about the green, so a live frame that knows its
-     source is that coarse draws no slope lines at all. Elevation that does not say (a published
-     bake) is left to the fit's gate, as before. */
+     fine grid can pass it while knowing nothing about the green, so terrain that knows it is
+     that coarse draws no slope lines at all.
+
+     The terrain asset's own verdict wins when the elevation carries one (every bake since
+     terrain became a course asset, and live frames cut from one): "allowed" and "conditional"
+     draw - conditional still has to pass the fit's measured gate - "coarse" and "none" do not.
+     Otherwise the source spacing decides, with the same threshold the asset uses. Elevation
+     that says neither (a bake older than both) is left to the fit's gate, as before. */
   var GREEN_MAX_SAMPLE_M = 2.5;
   function greenReadable(elevation) {
+    var detail = elevation && elevation.terrain && elevation.terrain.greenDetail;
+    if (detail) return detail === "allowed" || detail === "conditional";
     var m = Number(elevation && elevation.sourceMetresPerSample);
     return !(m > GREEN_MAX_SAMPLE_M);
   }
@@ -188,7 +198,10 @@
      The elevation answer must echo the exact window asked for and say how big its grid is - the
      mesh would draw whatever it was given and has no way to notice the two do not agree. */
   function elevationFor(win, deps) {
-    var query = "&z=" + win.z + "&x=" + win.x + "&y=" + win.y + "&w=" + win.w + "&h=" + win.h;
+    var query = "&z=" + win.z + "&x=" + win.x + "&y=" + win.y + "&w=" + win.w + "&h=" + win.h
+      /* Named so the server can cut the window from the course's baked terrain asset rather
+         than go to an elevation provider. */
+      + (deps.courseKey ? "&course=" + encodeURIComponent(deps.courseKey) : "");
     var expect = [win.z, win.x, win.y, win.w, win.h].join("/");
     return Promise.resolve(deps.token ? deps.token() : "").then(function (token) {
       var headers = token ? { Authorization: "Bearer " + token } : {};
@@ -210,7 +223,11 @@
       return res.blob().then(function (blob) {
         return { blob: blob, width: size[0], height: size[1], min: min, max: max, credit: credit,
           sampleM: Number(header(res, "X-Elevation-Sample-M")) || null,
-          source: header(res, "X-Elevation-Source") || "?", zoom: Number(header(res, "X-Elevation-Zoom")) || null };
+          from: header(res, "X-Elevation-From") || null,
+          greenDetail: header(res, "X-Green-Detail") || null,
+          qualityClass: header(res, "X-Terrain-Quality") || null,
+          terrainVersion: Number(header(res, "X-Terrain-Version")) || null,
+          source: header(res, "X-Elevation-Source") || "?" };
       });
     }, function (e) {
       throw new Error("elevation request failed: " + ((e && e.message) || e));
@@ -234,7 +251,7 @@
       } else {
         var elevationUrl = deps.createObjectURL(elev.blob); made.push(elevationUrl);
         meta = surfaceMeta(win, { url: elevationUrl, width: elev.width, height: elev.height, min: elev.min, max: elev.max,
-          sampleM: elev.sampleM });
+          sampleM: elev.sampleM, greenDetail: elev.greenDetail, qualityClass: elev.qualityClass, terrainVersion: elev.terrainVersion });
       }
       var metres = windowMetres(win);
       var d = pic.debug;
@@ -246,13 +263,16 @@
           rasterPx: win.w + "x" + win.h,
           metres: Math.round(metres.width) + "x" + Math.round(metres.height) + "m",
           elevation: elev.error ? null : elev.source,
+          elevationFrom: elev.error ? null : elev.from,
+          terrainVersion: elev.error ? null : elev.terrainVersion,
           elevationCredit: elev.error ? "" : elev.credit,
           elevationFailed: elev.error || null,
-          demZoom: elev.error ? null : elev.zoom,
           demPx: elev.error ? null : elev.width + "x" + elev.height,
           elevationRange: elev.error ? null : elev.min.toFixed(1) + ".." + elev.max.toFixed(1) + "m",
           demSampleM: elev.error ? null : elev.sampleM,
-          greenLines: elev.error ? false : greenReadable({ sourceMetresPerSample: elev.sampleM })
+          greenLines: elev.error ? false : greenReadable({ sourceMetresPerSample: elev.sampleM,
+            terrain: elev.greenDetail ? { greenDetail: elev.greenDetail } : null }),
+          greenDetail: elev.error ? null : elev.greenDetail
         })
       };
     });
@@ -277,7 +297,7 @@
     return ["3D mesh " + (mesh || "pending"), debug.view !== "composite" ? "view " + debug.view : "",
       "z" + debug.window.z + " " + debug.rasterPx + " " + (debug.metresPerPx ? debug.metresPerPx.toFixed(2) + "m/px" : ""),
       imagery,
-      debug.elevation ? "DEM " + debug.elevation + (debug.demZoom ? " z" + debug.demZoom : "") + " " + debug.demPx + " " + debug.elevationRange
+      debug.elevation ? "DEM " + debug.elevation + (debug.elevationFrom === "asset" ? " (baked v" + (debug.terrainVersion || "?") + ")" : debug.elevationFrom ? " (live)" : "") + " " + debug.demPx + " " + debug.elevationRange
         + (debug.demSampleM ? " ~" + debug.demSampleM.toFixed(1) + "m" : "") + (debug.greenLines ? " · green lines" : greenForced ? " · green lines FORCED (coarse)" : " · no green lines")
         : "DEM none (" + (debug.elevationFailed || "?") + ")",
       debug.metres, exaggeration + "x", debug.rebuild || "",

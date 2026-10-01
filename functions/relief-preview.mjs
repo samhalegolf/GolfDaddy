@@ -15,9 +15,13 @@
    Whatever wins here gets written into RELIEF_DEFAULTS and baked. */
 
 import sharp from "sharp";
-import { reliefFromTerrainRgb, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS } from "./lib/gd-relief-core.mjs";
+import { reliefFromTerrainRgb, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, terrainRgbPngFromHeights, decodeElevation } from "./lib/gd-relief-core.mjs";
 import { resolveImagerySource } from "./lib/gd-imagery-sources.mjs";
 import { mosaic } from "./lib/gd-relief-fetch.mjs";
+import { resolveTerrain, planSources } from "./lib/terrain/gd-terrain-resolver.mjs";
+import { terrainForWindow, nativeZoomFor } from "./lib/terrain/gd-terrain-window.mjs";
+import { loadCourseTerrainHeights, TERRAIN_BUCKET } from "./lib/terrain/gd-terrain-service.mjs";
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 
 const MAPS_TABLE = "course_maps";
 const TILE = 256;
@@ -37,6 +41,19 @@ const numParam = (params, name, dflt, lo, hi) => {
   const n = Number(raw);
   return Number.isFinite(n) ? clamp(n, lo, hi) : dflt;
 };
+
+/* The course's baked terrain heights, or null. */
+const supabaseFetch = createSupabaseFetch({ base: supabaseBase, key: supabaseKey, label: "relief-preview" });
+async function loadAsset(courseId) {
+  return loadCourseTerrainHeights(courseId, {
+    supabaseFetch, sharp, decodeElevation,
+    download: async path => {
+      const res = await fetch(supabaseBase() + "/storage/v1/object/public/" + TERRAIN_BUCKET + "/" + path);
+      if (!res.ok) throw new Error("terrain asset " + res.status);
+      return Buffer.from(await res.arrayBuffer());
+    }
+  });
+}
 
 /* ---- mercator (same maths as gd-visual-export-core / gd-relief-core) ---- */
 function world(lat, lng) {
@@ -129,12 +146,6 @@ export default async function reliefPreview(req) {
   };
   const source = resolveImagerySource(bounds);
   if (!source) return json(422, { error: "No licensed imagery covers this course" });
-  if (!source.terrain) {
-    return json(422, {
-      error: "No relief source for this region",
-      detail: source.key + " has no elevation source the pipeline can decode, so relief cannot be computed here."
-    });
-  }
 
   /* Match the bake: azimuth is measured off this hole's play axis unless one is given
      explicitly, in which case that is taken as a world bearing so the tuning knob can still
@@ -146,27 +157,37 @@ export default async function reliefPreview(req) {
 
   const frame = frameHole(hole.tee, hole.green, size);
   const aerialZoom = Math.min(frame.zoom, source.imagery.maxUsefulZoom || frame.zoom);
-  const demZoom = Math.min(frame.zoom, source.terrain.maxUsefulZoom || 17);
   const scaleAt = z => Math.pow(2, z - frame.zoom);
 
   const originAt = z => ({ x: Math.round(frame.originPx.x * scaleAt(z)), y: Math.round(frame.originPx.y * scaleAt(z)) });
   const sizeAt = z => Math.max(64, Math.round(size * scaleAt(z)));
 
-  const [aerialPng, demPng] = await Promise.all([
+  /* Elevation the way the bake reads it: the course's terrain asset when it has one, else the
+     terrain resolver's best source - so what is tuned here is the ground that bakes. */
+  let asset = null;
+  try { asset = await loadAsset(courseId); } catch (e) { asset = null; }
+  let demZoom;
+  if (asset) demZoom = Math.min(frame.zoom, asset.manifest.grid.captureZoom);
+  else {
+    const resolution = resolveTerrain({ bounds, marginM: 0 });
+    const best = resolution.ok ? planSources(resolution)[0] : null;
+    if (!best) return json(422, { error: "No terrain source for this region" });
+    demZoom = Math.min(frame.zoom, nativeZoomFor(best, frame.centre.lat));
+  }
+  const demGrid = { zoom: demZoom, originPx: originAt(demZoom), width: sizeAt(demZoom), height: sizeAt(demZoom) };
+
+  const [aerialPng, terrain] = await Promise.all([
     mosaic(source.imagery, aerialZoom, originAt(aerialZoom), sizeAt(aerialZoom)),
-    mosaic(source.terrain, demZoom, originAt(demZoom), sizeAt(demZoom))
+    terrainForWindow({ grid: demGrid, asset })
   ]);
   if (!aerialPng) return json(502, { error: "No imagery tiles returned" });
-  if (!demPng) return json(502, { error: "No elevation tiles returned" });
+  if (!terrain || !terrain.heights) return json(502, { error: "No elevation for this hole", detail: (terrain && terrain.tried || []).join(", ") });
+  const demPng = await terrainRgbPngFromHeights(terrain.heights, demGrid.width, demGrid.height);
 
   let relief;
   try {
-    /* A float32 source was transcoded to terrain-RGB by mosaic(), so that is what the bytes
-       in hand actually are - declaring "float32" here would just cost decodeElevation a
-       wasted first attempt. */
-    const heldEncoding = source.terrain.encoding === "float32" ? "terrain-rgb" : source.terrain.encoding;
     relief = await reliefFromTerrainRgb(demPng, { latitude: frame.centre.lat, zoom: demZoom }, {
-      ...shade, encoding: heldEncoding, outputWidth: size, outputHeight: size
+      ...shade, encoding: "terrain-rgb", outputWidth: size, outputHeight: size
     });
   } catch (e) {
     /* The decoder refuses greys that are not plausible ground. Nearly always this means the
@@ -203,6 +224,7 @@ export default async function reliefPreview(req) {
       "Cache-Control": "public, max-age=600",
       "X-Relief-Course": hole.courseName,
       "X-Relief-Source": source.key,
+      "X-Relief-Terrain": (terrain.from === "asset" ? "baked v" + terrain.terrainVersion + " " : "live ") + ((terrain.source && terrain.source.id) || "?"),
       "X-Relief-Encoding": relief.encoding,
       "X-Relief-Zoom": String(frame.zoom) + " aerial z" + aerialZoom + " dem z" + demZoom,
       "X-Relief-Elevation": relief.elevation.min.toFixed(1) + ".." + relief.elevation.max.toFixed(1) + "m",
