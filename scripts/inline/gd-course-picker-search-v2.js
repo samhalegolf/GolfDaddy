@@ -402,6 +402,7 @@
 	    course.hasDatabaseMap=true;
 	    course.databaseCourseId=raw?.id||course.courseId;
 	    course.facilityKey=raw?.facilityKey||"";
+	    course.facilityName=raw?.facilityName||"";
 	    return course.name&&!/^manual gps$/i.test(course.name)?course:null;
 	  }
 	  /* A course_maps row is not proof of a map.
@@ -1040,7 +1041,10 @@
     const row=document.createElement("div");
     row.className="course";
     row.__gdFacilityPayload={members:group.members};
-    row.innerHTML=`<div><div class="name">${esc(facilityLabelFromNames(group.members.map(m=>m.name)))}</div><div class="meta">${HN("picker.coursesHere",group.members.length)}</div></div><button class="play" type="button">${H("picker.choose")}</button>`;
+    /* The stored parent name when the mapper wrote one ("Millbrook Golf Resort"); the
+       words the course names share only for facilities published before it did. */
+    const named=group.members.map(m=>m&&m.facilityName).find(Boolean);
+    row.innerHTML=`<div><div class="name">${esc(named||facilityLabelFromNames(group.members.map(m=>m.name)))}</div><div class="meta">${HN("picker.coursesHere",group.members.length)}</div></div><button class="play" type="button">${H("picker.choose")}</button>`;
     return row;
   }
   function areaRow(area){

@@ -36,7 +36,7 @@ import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRo
 import { reconcileFacilityClaims, atomicLoopCount, HOLES_PER_LOOP } from "./lib/gd-facility-loops-core.mjs";
 import { assessFacilityStructure, contestedClaims, describeClaimGround, isIndependentClaim, mappingMethodFor, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
 import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry, cardLengths } from "./lib/gd-scorecard-match-core.mjs";
-import { planListingResolution, RESOLUTION_MODE } from "./lib/gd-course-listing-core.mjs";
+import { planListingResolution, courseLabelOf, RESOLUTION_MODE } from "./lib/gd-course-listing-core.mjs";
 import { eliminateInferredCourses } from "./lib/gd-inferred-course-claims-core.mjs";
 import { OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND } from "./course-mapper-jobs.mjs";
 import { refineSurfaceShape, applyRefinedShape, REFINED_SHAPE_SOURCE } from "./lib/gd-surface-refine-core.mjs";
@@ -252,13 +252,13 @@ async function reapStaleJobs() {
 }
 
 async function loadCourseCenter(courseId) {
-  const rows = await supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,course_lat,course_lng,region,country,country_code,objects_json,holes_json&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
+  const rows = await supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,facility_name,course_lat,course_lng,region,country,country_code,objects_json,holes_json&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return null;
   const lat = Number(row.course_lat), lng = Number(row.course_lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   const course = {
-    courseId: row.course_id, courseName: row.course_name, center: { lat, lng },
+    courseId: row.course_id, courseName: row.course_name, facilityName: row.facility_name || "", center: { lat, lng },
     region: row.region || "", country: row.country || "", countryCode: row.country_code || "",
     objects: row.objects_json || {}, holes: row.holes_json || {}
   };
@@ -561,7 +561,7 @@ async function requeryHoleGaps(job, course, payload, loops) {
   if (!record.elementsAdded) { record.reason = "no-new-elements"; return { record, next: null }; }
 
   const nextCollision = detectHoleNumberCollision(merged);
-  const nextLoops = separateLoops(merged, course.center);
+  const nextLoops = separateLoops(merged, course.center, { facilityName: splitCourseName(course.courseName || "").facility });
   if (!nextLoops || nextLoops.length < loops.length) { record.reason = "separation-regressed"; return { record, next: null }; }
 
   record.before = separationScore(loops);
@@ -711,6 +711,14 @@ async function findExistingLoopRow(loop, courseId, facilityKey) {
   return row.course_id;
 }
 
+/* What the facility's courses are listed under in the picker. Once set it is kept: after
+   the first scan the pinned row carries a COURSE's name ("Fancourt Golf Estate - Course 1"),
+   and re-deriving the parent from that would rename the facility after one of its courses.
+   The first time, it is the facility half of the name the player searched for. */
+function facilityNameOf(course) {
+  return course.facilityName || splitCourseName(course.courseName || "").facility || course.courseName || null;
+}
+
 /* A sibling's course_id: always under the facility's own id, never a bare name.
  *
  * Ids used to be the slug of the loop's name alone. That made them global - two clubs
@@ -721,13 +729,16 @@ async function findExistingLoopRow(loop, courseId, facilityKey) {
  * provisional name ("Course 2 - 5444m East") minted ids from a length that changes on
  * every rescan.
  *
- * So: the facility's id, then the course's name romanised and stripped of card noise
- * ("cc-37-178n-127-708e-sejong"), or its position when there is no real name. `taken`
+ * So: the facility's id, then the course's own name romanised and stripped of card noise
+ * ("cc-37-178n-127-708e-sejong", "te-rai-north"), or its position when there is no real name. `taken`
  * holds every id this run has already used, the pinned one included; a clash falls
  * back to the position, which is unique within the run by construction. */
 function loopCourseId(loop, course, index, taken) {
   const facility = slug(course.courseId);
-  const real = loop.name && loop.nameSource !== "provisional" ? slug(loopDisplayName(loop.name)) : "";
+  /* The course's own part of its name - "North Course" out of "Te Arai Links Golf Club -
+     North Course" - so the id is te-rai-north, not the facility's name spelt out twice. */
+  const own = loop.name ? (courseLabelOf(loop.name) || loop.name) : "";
+  const real = own && loop.nameSource !== "provisional" ? slug(loopDisplayName(own)) : "";
   /* "Course", "item" and the facility's own name tell the courses apart no better than a
      number does. */
   const usable = real && !["course", "item"].includes(real) && real !== slug(course.courseName || "") && real !== facility;
@@ -911,6 +922,7 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
            offer the choice without re-deriving the link from proximity. The pinned
            course's id: unique, stable, and readable. */
         facility_key: course.courseId,
+        facility_name: facilityNameOf(course),
         objects_json: geometry.objects,
         holes_json: geometry.holes,
         geometry_version: MAPPER_VERSION,
@@ -2126,7 +2138,7 @@ async function runMapperJob(job, origin) {
     if (loops && Array.isArray(loops.excluded) && loops.excluded.length) diagnostics.neighbouringClubs = loops.excluded;
   };
   if (collision.multiLoop) {
-    loops = separateLoops(payload, course.center);
+    loops = separateLoops(payload, course.center, { facilityName: splitCourseName(course.courseName || "").facility });
     noteExcludedLoops();
     diagnostics.collision = {
       loops: collision.loops,
@@ -2895,4 +2907,4 @@ export default async function courseMapperWorker(req) {
   return new Response("ok", { status: 200 });
 }
 
-export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, loadCourseCenter, ensureCoursePlace, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, requestMapperDebug, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, MAX_TRANSIENT_ATTEMPTS };
+export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, loadCourseCenter, ensureCoursePlace, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, requestMapperDebug, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, loopCourseId, MAX_TRANSIENT_ATTEMPTS };
