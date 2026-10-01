@@ -5,13 +5,14 @@
    map source is chosen by imagery licence and region (basemap.js), mapped vs
    manual play is decided by whether the package has geometry, and the bubble
    render/bias/texture toggles were dev tuning for comparing renderers that
-   bubble-engine.js now bakes in. What is left is the four things that are
+   bubble-engine.js now bakes in. What is left is the five things that are
    genuinely the player's call, none of which app/ could express before:
 
      units          - metres or yards, everywhere a distance is shown
      aimLine        - draw the start-to-target guide at all
      shotUp         - rotate the view so the shot runs up the screen
      frameTightness - how much of the shot the lock stage fills
+     relief         - how far the terrain mesh lifts the ground (off to 5x)
 
    Owns its own storage, same as bag.js and scorecard.js do. Nothing here
    talks to a server or to any course/surface table. */
@@ -28,10 +29,20 @@
   };
   var TIGHTNESS_ORDER = ["tight", "medium", "wide"];
 
+  /* Vertical exaggeration for the terrain mesh (gd-terrain-mesh.js). Off
+     leaves the flat published frame, which is a complete picture on its own. */
+  var RELIEF = {
+    off:      { label: "gpsSettings.reliefOff",      sub: "gpsSettings.reliefOffHint",      factor: 0 },
+    natural:  { label: "gpsSettings.reliefNatural",  sub: "gpsSettings.reliefNaturalHint",  factor: 1 },
+    enhanced: { label: "gpsSettings.reliefEnhanced", sub: "gpsSettings.reliefEnhancedHint", factor: 2.5 },
+    dramatic: { label: "gpsSettings.reliefDramatic", sub: "gpsSettings.reliefDramaticHint", factor: 5 }
+  };
+  var RELIEF_ORDER = ["off", "natural", "enhanced", "dramatic"];
+
   /* corridor is deliberately not in the panel yet: it is the dispersion
      corridor from the v2 bubble design, off until it has been played with.
      Stored like the rest so turning it on survives a reload. */
-  var DEFAULTS = { units: "m", aimLine: true, shotUp: true, frameTightness: "medium", corridor: false };
+  var DEFAULTS = { units: "m", aimLine: true, shotUp: true, frameTightness: "medium", relief: "enhanced", corridor: false };
 
   var state = load();
   var listeners = [];
@@ -44,6 +55,7 @@
         aimLine: raw.aimLine !== false,
         shotUp: raw.shotUp !== false,
         frameTightness: TIGHTNESS[raw.frameTightness] ? raw.frameTightness : DEFAULTS.frameTightness,
+        relief: RELIEF[raw.relief] ? raw.relief : DEFAULTS.relief,
         corridor: raw.corridor === true
       };
     } catch (e) { return Object.assign({}, DEFAULTS); }
@@ -69,6 +81,8 @@
        the player anchor, so the same real distance spans more pixels — a
        tighter, more zoomed shot view. */
     lockTightness: function () { return TIGHTNESS[state.frameTightness].factor; },
+    /* 0 means no mesh at all, not a flat mesh. */
+    reliefExaggeration: function () { return RELIEF[state.relief].factor; },
 
     /* Metres in (everything upstream computes in metres, always), display
        number out. Rounded, never a unit suffix — callers own their own
@@ -140,6 +154,13 @@
       tightBtn.setAttribute("aria-pressed", "true");
     }
     if (tightSub) tightSub.textContent = t(TIGHTNESS[state.frameTightness].sub);
+    var reliefBtn = document.getElementById("setRelief");
+    if (reliefBtn) {
+      reliefBtn.textContent = t(RELIEF[state.relief].label);
+      reliefBtn.setAttribute("aria-pressed", state.relief === "off" ? "false" : "true");
+    }
+    var reliefSub = document.getElementById("setReliefSub");
+    if (reliefSub) reliefSub.textContent = t(RELIEF[state.relief].sub);
     renderMapSource();
   }
 
@@ -182,6 +203,11 @@
     if (tightBtn) tightBtn.addEventListener("click", function () {
       var i = TIGHTNESS_ORDER.indexOf(state.frameTightness);
       app.gpsSettings.set("frameTightness", TIGHTNESS_ORDER[(i + 1) % TIGHTNESS_ORDER.length]);
+    });
+    var reliefBtn = document.getElementById("setRelief");
+    if (reliefBtn) reliefBtn.addEventListener("click", function () {
+      var i = RELIEF_ORDER.indexOf(state.relief);
+      app.gpsSettings.set("relief", RELIEF_ORDER[(i + 1) % RELIEF_ORDER.length]);
     });
     var mapSourceBtn = document.getElementById("setMapSource");
     if (mapSourceBtn) mapSourceBtn.addEventListener("click", function () {
