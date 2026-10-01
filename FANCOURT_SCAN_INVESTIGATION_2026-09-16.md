@@ -227,3 +227,5 @@ widened payload separates as Links 17 + east 18 contiguous, George Golf Club exc
 Failure 4 (unscoped sibling ids). `package.json`'s `test:nearest-loop` points at a file that
 no longer exists — pre-existing, not touched. The Fancourt rows in `course_maps` are still the
 17/15 publish; a rescan is needed to replace them.
+
+**2026-10-01:** Failure 4 fixed — sibling ids are now `<facility id>-<name>` or `<facility id>-course-<n>`. See `SOPHIA_GREEN_SCAN_INVESTIGATION_2026-10-01.md`.

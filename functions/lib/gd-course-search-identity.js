@@ -247,9 +247,13 @@ function detectFacilityStructure(cards) {
   return { holeCount: loops.reduce((sum, loop) => sum + loop.holes, 0), loops, loopCount: loops.length };
 }
 
+/* "세종(世宗) 코스 | Par 36" is how a club page titles a card, not what the course is called. */
+function stripParSuffix(value) {
+  return text(value).replace(/\s*[|·-]\s*par\s*\d+.*$/i, "").trim();
+}
+
 function loopDisplayName(value) {
-  let clean = text(value || "Course")
-    .replace(/\s*[|·-]\s*par\s*\d+.*$/i, "")
+  let clean = stripParSuffix(value || "Course")
     .replace(/\([^)]*\)/g, " ")
     .replace(/\b(?:scorecard|course guide)\b/gi, " ")
     .replace(/(?:\s+course|\s*코스|\s*コース)\s*$/i, "")
@@ -262,5 +266,5 @@ function loopDisplayName(value) {
 module.exports = {
   SEARCH_LOCALES, text, comparable, romanizeHangul, suffixVariants, buildCourseSearchIdentity,
   buildSearchQueries, domainQueries, similarity, haversineKm, scoreSearchCandidate,
-  scoreScorecardPage, detectFacilityStructure, loopDisplayName
+  scoreScorecardPage, detectFacilityStructure, loopDisplayName, stripParSuffix
 };
