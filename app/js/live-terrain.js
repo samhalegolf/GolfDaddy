@@ -267,7 +267,7 @@
 
   /* The admin's one-line readout, drawn where a published hole shows its bake stamp. mesh is
      "on", "off" (relief off, or no elevation) or the reason it failed. */
-  function debugLabel(debug, exaggeration, mesh) {
+  function debugLabel(debug, exaggeration, mesh, greenForced) {
     if (!debug) return "";
     var mb = debug.mapbox || {}, ctx = debug.esri || {};
     var imagery = debug.context === "esri"
@@ -278,7 +278,7 @@
       "z" + debug.window.z + " " + debug.rasterPx + " " + (debug.metresPerPx ? debug.metresPerPx.toFixed(2) + "m/px" : ""),
       imagery,
       debug.elevation ? "DEM " + debug.elevation + (debug.demZoom ? " z" + debug.demZoom : "") + " " + debug.demPx + " " + debug.elevationRange
-        + (debug.demSampleM ? " ~" + debug.demSampleM.toFixed(1) + "m" : "") + (debug.greenLines ? " · green lines" : " · no green lines")
+        + (debug.demSampleM ? " ~" + debug.demSampleM.toFixed(1) + "m" : "") + (debug.greenLines ? " · green lines" : greenForced ? " · green lines FORCED (coarse)" : " · no green lines")
         : "DEM none (" + (debug.elevationFailed || "?") + ")",
       debug.metres, exaggeration + "x", debug.rebuild || "",
       debug.composeMs != null ? "img " + debug.composeMs + "ms" : "",

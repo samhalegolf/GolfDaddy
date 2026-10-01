@@ -1992,7 +1992,10 @@
     /* A stored path on a published frame, an object URL on a live terrain frame. */
     var elevationKey = elevation && (elevation.path || elevation.url);
     if (!elevationKey) { clear(); return; }
-    if (app.liveTerrain && !app.liveTerrain.greenReadable(elevation)) { clear(); return; }
+    /* Live terrain frames only: a published bake keeps its own gate whatever the switch says. */
+    var forceGreen = !!meta.liveTerrain && greenLinesForced();
+    if (!forceGreen && app.liveTerrain && !app.liveTerrain.greenReadable(elevation)) { clear(); return; }
+    elevationKey += forceGreen ? "|forced" : "";
 
     var r = scene.hole.rec;
     var shape = (meta.anchorPins && meta.anchorPins.greenShape) || (r && r.greenShape) || [];
@@ -2003,7 +2006,7 @@
     if (greenSurfaceKey !== elevationKey) {
       greenSurfaceKey = elevationKey;
       window.GDGreenContours.resolveUrl = function (path) { return apiUrl(surfaceLib.assetUrl(path)); };
-      greenSurfacePromise = window.GDGreenContours.surfaceFor(meta, shape);
+      greenSurfacePromise = window.GDGreenContours.surfaceFor(meta, shape, { force: forceGreen });
       greenSurfacePromise.then(function () {
         /* The fit finished after this paint. Ask for another one rather than leaving the green
            blank until something else happens to trigger a repaint. */
@@ -2228,7 +2231,12 @@
   function liveTerrainLabel() {
     if (!liveTerrain) return "";
     return app.liveTerrain.debugLabel(liveTerrain.debug, reliefExaggeration(),
-      liveTerrainMesh || (liveTerrain.asset.playSurface.elevation ? "pending" : "off"));
+      liveTerrainMesh || (liveTerrain.asset.playSurface.elevation ? "pending" : "off"), greenLinesForced());
+  }
+
+  /* The operator's "green lines on coarse elevation" test switch. Admin only, whatever is stored. */
+  function greenLinesForced() {
+    return isAdmin() && !!(settings() && settings().greenLinesCoarse && settings().greenLinesCoarse());
   }
 
   function hybridView() {

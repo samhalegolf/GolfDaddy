@@ -54,6 +54,7 @@ function launch(store) {
   ready();
   const settings = context.ClarityApp.gpsSettings;
   return {
+    raw: { settings, nodes },
     relief: () => settings.get().relief,
     factor: () => settings.reliefExaggeration(),
     click: () => nodes.setRelief.listeners.click(),
@@ -101,6 +102,17 @@ ok('relief off never builds a mesh, and a settings change re-syncs it', () => {
   assert.ok(/if \(!\(reliefExaggeration\(\) > 0\)\) return;/.test(attach.slice(0, 600)));
   const handler = PAINTER_SRC.slice(PAINTER_SRC.indexOf('gpsSettings.onChange(function () {')).slice(0, 300);
   assert.ok(/syncMeshRelief\(\);/.test(handler), 'a settings change must re-sync the mesh height');
+});
+
+const launchRaw = (store) => launch(store).raw;
+
+ok('the coarse green-lines test switch is off by default and remembered', () => {
+  const store = deviceStore();
+  const ctx = launchRaw(store);
+  assert.strictEqual(ctx.settings.greenLinesCoarse(), false);
+  ctx.nodes.setGreenCoarse.listeners.click();   // the panel's own button
+  assert.strictEqual(ctx.settings.greenLinesCoarse(), true);
+  assert.strictEqual(launchRaw(store).settings.greenLinesCoarse(), true);
 });
 
 console.log(`\nterrain-relief-setting: ${passed} passed`);

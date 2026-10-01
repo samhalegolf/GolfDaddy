@@ -99,6 +99,11 @@ console.log("      fine: " + fine.summary.confidence + ", " + fine.summary.meanS
 const coarse = fitOn(13, 10);
 ok("the global terrain tiles draw no green lines - their samples are ~" + coarse.sampleM.toFixed(0) + "m apart",
   !coarse.readable, { sampleM: coarse.sampleM, fit: coarse.summary && coarse.summary.confidence });
+/* The operator's test switch skips both gates (painter greenLinesForced). What it then draws
+   from coarse elevation is a real fit of real - if coarse - heights, and it does draw. */
+const forcedDrawing = coarse.surface && core.buildGreenDrawing(coarse.surface, {});
+ok("forced, the coarse fit still gives something to draw (for the operator to judge)",
+  forcedDrawing && forcedDrawing.runs.length > 0, coarse.summary && { confidence: coarse.summary.confidence });
 ok("a published bake, which does not state its spacing, is left to the fit's own gate as before",
   lt.greenReadable({ path: "frames/h1.elevation.png" }) === true, null);
 

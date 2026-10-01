@@ -367,12 +367,14 @@ try {
       document.getElementById("setMapSource").click();
       document.getElementById("setMapSource").click();
       document.getElementById("setMapSource").click();               // ...and back to `source`
-      seen[source] = getComputedStyle(row).display !== "none" && row.offsetHeight > 0;
+      const coarse = document.getElementById("setGreenCoarseRow");
+      seen[source] = getComputedStyle(row).display !== "none" && row.offsetHeight > 0
+        && getComputedStyle(coarse).display !== "none" && coarse.offsetHeight > 0;
     }
     app.gpsSettings.close();
     return seen;
   });
-  ok("the 3D Mesh view row is visible only on Clarity 3D Mesh", !rowShown.auto && !rowShown.esri && !rowShown.mapbox && rowShown.mesh, rowShown);
+  ok("the 3D Mesh view and coarse green-lines rows are visible only on Clarity 3D Mesh", !rowShown.auto && !rowShown.esri && !rowShown.mapbox && rowShown.mesh, rowShown);
   await page.evaluate(() => window.__lm.until(() => window.__lm.debug().active, "the mesh after the settings round trip"));
 
   /* 5. Mapbox fails: an Esri surface, still on the mesh, with the reason. */

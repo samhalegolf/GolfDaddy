@@ -59,7 +59,10 @@
      Resolves to a surface, or to null for every failure - no elevation, no polygon, a tainted
      canvas, a fit that will not converge, or a fit the confidence gate refuses. The caller
      treats all of those the same way: draw nothing. A green map is a finish, not the frame. */
-  function surfaceFor(meta, greenShape) {
+  /* options.force (operator only, painter decides): keep a fit the confidence gate would refuse,
+     to see what coarse elevation draws. Cached apart from the gated answer. */
+  function surfaceFor(meta, greenShape, options) {
+    var force = !!(options && options.force);
     var elevation = meta && meta.elevation;
     /* A published frame names a stored path; a live terrain frame (live-terrain.js) carries its
        elevation as an object URL already in memory. */
@@ -67,7 +70,7 @@
     if (!greenShape || greenShape.length < 8) return Promise.resolve(null);
     if (!elevation.bounds || !elevation.metresPerPixel) return Promise.resolve(null);
 
-    var key = elevation.path || elevation.url;
+    var key = (elevation.path || elevation.url) + (force ? "|forced" : "");
     if (key in cache) return Promise.resolve(cache[key]);
     if (key in inflight) return inflight[key];
 
@@ -89,7 +92,7 @@
             /* The gate. A residual far above quantisation means this is not a putting surface;
                far below means the source was coarse DEM upsampled and knows nothing. Either way
                the honest output is no map at all. */
-            if (surface && surface.summary && surface.summary.confidence === "low") surface = null;
+            if (!force && surface && surface.summary && surface.summary.confidence === "low") surface = null;
           } catch (e) { surface = null; }
         }
         cache[key] = surface;
