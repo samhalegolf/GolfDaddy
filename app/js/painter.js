@@ -2238,16 +2238,11 @@
     try { return !!(app.account && app.account.isAdmin && app.account.isAdmin()); } catch (e) { return false; }
   }
 
-  function signedIn() {
-    try { return !!(app.account && app.account.signedIn && app.account.signedIn()); } catch (e) { return false; }
-  }
-
   function liveTerrainWanted() {
     var lt = app.liveTerrain;
     if (!lt || !app.basemap || !app.basemap.activeOverride) return false;
     return lt.wanted({
       override: app.basemap.activeOverride(),
-      signedIn: signedIn(),
       relief: reliefExaggeration(),
       webgl: meshSupported()
     });
@@ -2378,11 +2373,6 @@
       },
       apiUrl: apiUrl,
       courseKey: courseKey,
-      token: function () {
-        var auth = window.ClaritySupabaseAuth;
-        return auth && typeof auth.freshAccessToken === "function"
-          ? Promise.resolve(auth.freshAccessToken()).catch(function () { return ""; }) : Promise.resolve("");
-      },
       createObjectURL: function (blob) { return URL.createObjectURL(blob); },
       revokeObjectURL: function (u) { URL.revokeObjectURL(u); }
     }, { view: view }).then(function (entry) {

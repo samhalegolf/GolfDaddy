@@ -9,8 +9,8 @@
    grounds taps from it. One camera, one mesh, one projector.
 
    The fallbacks, cheapest first: Mapbox off (failed, refused, or over our daily limit) is the
-   same mesh on Esri alone; no elevation is the same picture, flat; no Esri tiles, no WebGL or
-   no signed-in player is the Leaflet live map, which never left.
+   same mesh on Esri alone; no elevation is the same picture, flat; no Esri tiles or no WebGL
+   is the Leaflet live map, which never left.
 
    What this file owns is only the part the published path never needed:
      - whether the mode is on at all (wanted)
@@ -40,12 +40,12 @@
      out by 0.6 of that to each side. */
   var THROW_FRACTION = 0.5, THROW_MIN_M = 150, THROW_SPREAD = 0.6;
 
-  /* The whole activation rule, in one place so a test can pin it. On for every signed-in
-     player on the normal map source; the operator forcing Esri or Mapbox gets that flat live
-     map to compare against. Signed in because the elevation endpoint is. */
+  /* The whole activation rule, in one place so a test can pin it. On for every player, signed
+     in or not, on the normal map source; the operator forcing Esri or Mapbox gets that flat live
+     map to compare against. */
   function wanted(ctx) {
     if (!ctx) return false;
-    return ctx.override === "auto" && ctx.signedIn === true && Number(ctx.relief) > 0 && ctx.webgl === true;
+    return ctx.override === "auto" && Number(ctx.relief) > 0 && ctx.webgl === true;
   }
 
   function worldPx(lat, lng, z) {
@@ -198,7 +198,7 @@
      picture at all. A missing elevation is not a rejection: the picture is presented flat, which
      is still the hole, and debug says why.
 
-     deps: { fetch, apiUrl(path), token() -> Promise<string>, createObjectURL(blob),
+     deps: { fetch, apiUrl(path), createObjectURL(blob),
      revokeObjectURL(url), hybrid: { session, tileUrl, canvas, decode } }.
 
      The elevation answer must echo the exact window asked for and say how big its grid is - the
@@ -209,10 +209,7 @@
          than go to an elevation provider. */
       + (deps.courseKey ? "&course=" + encodeURIComponent(deps.courseKey) : "");
     var expect = [win.z, win.x, win.y, win.w, win.h].join("/");
-    return Promise.resolve(deps.token ? deps.token() : "").then(function (token) {
-      var headers = token ? { Authorization: "Bearer " + token } : {};
-      return deps.fetch(deps.apiUrl("/api/live-terrain-frame?layer=elevation" + query), { headers: headers });
-    }).then(function (res) {
+    return deps.fetch(deps.apiUrl("/api/live-terrain-frame?layer=elevation" + query)).then(function (res) {
       if (!res || !res.ok) {
         return (res && res.json ? res.json().catch(function () { return null; }) : Promise.resolve(null)).then(function (body) {
           throw new Error("elevation " + (res ? res.status : "no answer") + (body && body.error ? ": " + body.error : ""));

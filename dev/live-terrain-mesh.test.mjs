@@ -59,7 +59,6 @@ const ESRI_RGB = { r: 70, g: 95, b: 90 }, MAPBOX_RGB = { r: 80, g: 125, b: 70 };
 const counts = { elevation: 0 };
 let failElevation = false;
 const handler = createHandler({
-  verifyUser: async () => "user-1",
   env: { MAPBOX_PUBLIC_TOKEN: "pk.test" },
   mosaic: async (spec, zoom, origin, size) => {
     if (failElevation) return null;
@@ -407,16 +406,14 @@ try {
   ok("Esri failing leaves the live map up", !s.published && !s.meshUp && s.presentation === "live" && /esri tile 503/.test(s.debug.fallback), s);
   fail.esri = false;
 
-  /* 8. A signed-out player never asks. */
-  const asked = { ...tiles, elevation: counts.elevation };
+  /* 8. A signed-out player gets the mesh too. */
   await page.evaluate(async () => {
     window.ClarityApp.account.signedIn = () => false;
     await window.__lm.hole(1);
-    await new Promise((r) => setTimeout(r, 900));
+    await window.__lm.until(() => window.__lm.debug().active, "the signed-out mesh");
   });
   s = await page.evaluate(() => window.__lm.state());
-  ok("a signed-out player gets the normal live map and no requests",
-    tiles.esri === asked.esri && tiles.mapbox === asked.mapbox && counts.elevation === asked.elevation && !s.debug.wanted && !s.published, { tiles, s });
+  ok("a signed-out player gets the 3D Mesh like everyone else", s.debug.wanted && s.debug.active && s.published, s);
 
   /* 9. Published holes, one after another, each get their mesh. */
   const published = { courseId: "published-course", status: "full-map-ready", packageVersion: 1,

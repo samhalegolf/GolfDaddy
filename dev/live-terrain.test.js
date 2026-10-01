@@ -49,13 +49,13 @@ let passed = 0;
 async function ok(name, fn) { await fn(); passed++; console.log('ok  - ' + name); }
 
 (async () => {
-  await ok('every signed-in player on auto, with relief on and WebGL, gets the mode', () => {
-    const on = { override: 'auto', signedIn: true, relief: 2.5, webgl: true };
+  await ok('every player on auto, signed in or not, with relief on and WebGL, gets the mode', () => {
+    const on = { override: 'auto', relief: 2.5, webgl: true };
     assert.strictEqual(lt.wanted(on), true);
     assert.strictEqual(lt.wanted({ ...on, override: 'mapbox' }), false, 'forced Mapbox stays the flat live map');
     assert.strictEqual(lt.wanted({ ...on, override: 'esri' }), false, 'forced Esri stays the flat live map');
     assert.strictEqual(lt.wanted({ ...on, override: 'mesh' }), false, 'the retired override is not a way in');
-    assert.strictEqual(lt.wanted({ ...on, signedIn: false }), false, 'signed out: the live map, no requests');
+    assert.strictEqual(lt.wanted({ ...on, signedIn: false }), true, 'signed out: the mesh all the same');
     assert.strictEqual(lt.wanted({ ...on, relief: 0 }), false, 'terrain off disables the mesh');
     assert.strictEqual(lt.wanted({ ...on, webgl: false }), false);
     assert.strictEqual(lt.wanted(null), false);
@@ -149,14 +149,13 @@ async function ok(name, fn) { await fn(); passed++; console.log('ok  - ' + name)
       made, revoked, asked,
       deps: {
         fetch: (url, opts) => {
-          asked.push({ url, auth: opts && opts.headers && opts.headers.Authorization });
+          asked.push({ url });
           const layer = /layer=(\w+)/.exec(url)[1];
           return Promise.resolve(answers[layer](url));
         },
         liveHybrid: { build: () => picture || Promise.resolve({ blob: { composite: true }, debug: PICTURE_DEBUG() }) },
         hybrid: {},
         apiUrl: (u) => u,
-        token: () => Promise.resolve('tok'),
         createObjectURL: () => { const u = 'blob:' + made.length; made.push(u); return u; },
         revokeObjectURL: (u) => revoked.push(u)
       }
@@ -171,11 +170,10 @@ async function ok(name, fn) { await fn(); passed++; console.log('ok  - ' + name)
   const goodElevation = () => answer(200, { 'X-Window': echo, 'X-Elevation-Size': '300x400', 'X-Elevation-Min': '20.5',
     'X-Elevation-Max': '61.0', 'X-Elevation-Source': 'linz-nz', 'X-Elevation-Zoom': '17', 'X-Elevation-Credit': 'LINZ%20CC%20BY' });
 
-  await ok('load: the composite and the elevation, signed in, in the published shape', async () => {
+  await ok('load: the composite and the elevation, in the published shape', async () => {
     const f = fakeDeps({ elevation: goodElevation });
     const entry = await lt.load(WIN, {}, f.deps, { view: 'composite' });
     assert.strictEqual(f.asked.length, 1, 'only the elevation comes from the server');
-    assert.strictEqual(f.asked[0].auth, 'Bearer tok');
     assert.ok(f.asked[0].url.includes('layer=elevation&z=' + WIN.z + '&x=' + WIN.x + '&y=' + WIN.y + '&w=' + WIN.w + '&h=' + WIN.h));
     assert.strictEqual(entry.asset.live, true);
     assert.strictEqual(entry.asset.url, 'blob:0', 'the mesh is given the composite, not a provider image');
