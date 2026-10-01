@@ -9,6 +9,7 @@
     "common.done": "Fine",
     "common.cancel": "Annulla",
     "common.back": "Indietro",
+    "common.loading": "Caricamento",
     "common.home": "Home",
     "common.dismiss": "Chiudi",
     "common.signIn": "Accedi",

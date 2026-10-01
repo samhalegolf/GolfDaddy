@@ -9,6 +9,7 @@
     "common.done": "Hotovo",
     "common.cancel": "Zrušit",
     "common.back": "Zpět",
+    "common.loading": "Načítání",
     "common.home": "Domů",
     "common.dismiss": "Zavřít",
     "common.signIn": "Přihlásit se",

@@ -9,6 +9,7 @@
     "common.done": "Klaar",
     "common.cancel": "Annuleren",
     "common.back": "Terug",
+    "common.loading": "Laden",
     "common.home": "Start",
     "common.dismiss": "Sluiten",
     "common.signIn": "Inloggen",

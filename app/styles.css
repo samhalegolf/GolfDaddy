@@ -53,10 +53,13 @@ body.route-signin #signInScreen { display: flex; align-items: center; justify-co
    unrelated aerial. visibility, not display: Leaflet keeps its size and the
    next live hole re-frames without an invalidateSize round-trip. */
 body.surface-published #map { visibility: hidden; }
-/* Clarity 3D Mesh (admin test mode) holds the screen on the previous hole while the next hole's
-   frame is built, instead of flashing the live map for a beat. painter.js lifts it the moment
-   the frame is up, on any fallback, and after a few seconds regardless. */
-body.live-terrain-hold #map { visibility: hidden; }
+/* The hole loading screen (painter.js coverHole). Up from the moment a hole starts loading
+   until its final picture is drawn, so nothing in between shows. Above the map and the
+   overlays, below the hole controls and Back so the player is never stuck behind it. Shown
+   instantly (an in-between state must never peek through a fade-in), faded out. */
+#holeLoading { position: absolute; inset: 0; z-index: 590; display: grid; place-items: center; background: #16281c; opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .22s ease, visibility 0s linear .22s; }
+body.hole-loading #holeLoading { opacity: 1; visibility: visible; pointer-events: auto; transition: none; }
+.holeLoadingWheel { width: 38px; height: 38px; border-radius: 50%; border: 3.5px solid rgba(60, 255, 141, .22); border-top-color: #3cff8d; box-sizing: border-box; animation: whSpin .8s linear infinite; }
 
 /* Live-map stage framing. The map element is over-provisioned to a square of
    the viewport diagonal and placed entirely by play.js's matrix, so rotating

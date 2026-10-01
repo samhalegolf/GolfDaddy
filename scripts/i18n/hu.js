@@ -9,6 +9,7 @@
     "common.done": "Kész",
     "common.cancel": "Mégse",
     "common.back": "Vissza",
+    "common.loading": "Betöltés",
     "common.home": "Főoldal",
     "common.dismiss": "Bezárás",
     "common.signIn": "Bejelentkezés",

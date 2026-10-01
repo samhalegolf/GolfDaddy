@@ -9,6 +9,7 @@
     "common.done": "Gata",
     "common.cancel": "Anulează",
     "common.back": "Înapoi",
+    "common.loading": "Se încarcă",
     "common.home": "Acasă",
     "common.dismiss": "Închide",
     "common.signIn": "Conectează-te",

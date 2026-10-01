@@ -9,6 +9,7 @@
     "common.done": "Ferdig",
     "common.cancel": "Avbryt",
     "common.back": "Tilbake",
+    "common.loading": "Laster inn",
     "common.home": "Hjem",
     "common.dismiss": "Lukk",
     "common.signIn": "Logg inn",

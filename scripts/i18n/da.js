@@ -9,6 +9,7 @@
     "common.done": "Færdig",
     "common.cancel": "Annuller",
     "common.back": "Tilbage",
+    "common.loading": "Indlæser",
     "common.home": "Hjem",
     "common.dismiss": "Luk",
     "common.signIn": "Log ind",

@@ -9,6 +9,7 @@
     "common.done": "Gatavs",
     "common.cancel": "Atcelt",
     "common.back": "Atpakaļ",
+    "common.loading": "Ielādē",
     "common.home": "Sākums",
     "common.dismiss": "Aizvērt",
     "common.signIn": "Pieteikties",

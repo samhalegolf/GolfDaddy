@@ -9,6 +9,7 @@
     "common.done": "Τέλος",
     "common.cancel": "Ακύρωση",
     "common.back": "Πίσω",
+    "common.loading": "Φόρτωση",
     "common.home": "Αρχική",
     "common.dismiss": "Κλείσιμο",
     "common.signIn": "Σύνδεση",
