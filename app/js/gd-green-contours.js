@@ -61,16 +61,18 @@
      treats all of those the same way: draw nothing. A green map is a finish, not the frame. */
   function surfaceFor(meta, greenShape) {
     var elevation = meta && meta.elevation;
-    if (!core || !elevation || !elevation.path) return Promise.resolve(null);
+    /* A published frame names a stored path; a live terrain frame (live-terrain.js) carries its
+       elevation as an object URL already in memory. */
+    if (!core || !elevation || !(elevation.path || elevation.url)) return Promise.resolve(null);
     if (!greenShape || greenShape.length < 8) return Promise.resolve(null);
     if (!elevation.bounds || !elevation.metresPerPixel) return Promise.resolve(null);
 
-    var key = elevation.path;
+    var key = elevation.path || elevation.url;
     if (key in cache) return Promise.resolve(cache[key]);
     if (key in inflight) return inflight[key];
 
-    var url = (root.GDGreenContours && root.GDGreenContours.resolveUrl)
-      ? root.GDGreenContours.resolveUrl(elevation.path) : elevation.path;
+    var url = elevation.url || ((root.GDGreenContours && root.GDGreenContours.resolveUrl)
+      ? root.GDGreenContours.resolveUrl(elevation.path) : elevation.path);
 
     inflight[key] = new Promise(function (resolve) {
       var img = new Image();

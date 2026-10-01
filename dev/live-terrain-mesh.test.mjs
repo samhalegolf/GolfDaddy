@@ -378,7 +378,8 @@ try {
   /* 5. Mapbox fails: an Esri surface, still on the mesh, with the reason. */
   fail.mapbox = true;
   await page.evaluate(() => window.__lm.hole(3));
-  await page.evaluate(() => window.__lm.until(() => window.__lm.debug().active && /tile 503/.test(window.__lm.debug().frame.mapboxFailed || ""), "the Esri surface"));
+  await page.evaluate(() => window.__lm.until(() => window.__lm.debug().active && /tile 503/.test(window.__lm.debug().frame.mapboxFailed || "")
+    && /FAILED/.test(document.getElementById("assetVersionStamp").textContent), "the Esri surface"));
   s = await page.evaluate(() => window.__lm.state());
   ok("Mapbox failing still gives an Esri mesh surface", s.debug.active && s.meshUp && s.stamp.includes("FAILED") && !s.debug.frame.colour.applied, s);
   fail.mapbox = false;
@@ -386,7 +387,10 @@ try {
   /* 6. The DEM fails: the composite, flat. */
   failElevation = true;
   await page.evaluate(() => window.__lm.hole(4));
-  await page.evaluate(() => window.__lm.until(() => { const d = window.__lm.debug(); return d.frame && d.frame.elevationFailed && document.body.classList.contains("surface-published"); }, "the flat composite"));
+  /* Wait for the new hole's own readout: until it is presented, the hold keeps the previous
+     hole (and its mesh) on screen. */
+  await page.evaluate(() => window.__lm.until(() => { const d = window.__lm.debug(); return d.frame && d.frame.elevationFailed
+    && document.body.classList.contains("surface-published") && /DEM none/.test(document.getElementById("assetVersionStamp").textContent); }, "the flat composite"));
   s = await page.evaluate(() => window.__lm.state());
   ok("a failed DEM gives the flat composite", s.published && !s.meshUp && /DEM none \(elevation 502/.test(s.stamp) && /3D mesh off/.test(s.stamp), s);
   failElevation = false;

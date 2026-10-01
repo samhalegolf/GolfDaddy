@@ -1989,7 +1989,10 @@
     var meta = null;
     try { meta = img && img.dataset.playSurface ? JSON.parse(img.dataset.playSurface) : null; } catch (e) { meta = null; }
     var elevation = meta && meta.elevation;
-    if (!elevation || !elevation.path) { clear(); return; }
+    /* A stored path on a published frame, an object URL on a live terrain frame. */
+    var elevationKey = elevation && (elevation.path || elevation.url);
+    if (!elevationKey) { clear(); return; }
+    if (app.liveTerrain && !app.liveTerrain.greenReadable(elevation)) { clear(); return; }
 
     var r = scene.hole.rec;
     var shape = (meta.anchorPins && meta.anchorPins.greenShape) || (r && r.greenShape) || [];
@@ -1997,14 +2000,14 @@
 
     /* One fit per hole. The promise is held rather than the surface so a repaint arriving while
        the elevation is still decoding does not start a second decode of the same PNG. */
-    if (greenSurfaceKey !== elevation.path) {
-      greenSurfaceKey = elevation.path;
+    if (greenSurfaceKey !== elevationKey) {
+      greenSurfaceKey = elevationKey;
       window.GDGreenContours.resolveUrl = function (path) { return apiUrl(surfaceLib.assetUrl(path)); };
       greenSurfacePromise = window.GDGreenContours.surfaceFor(meta, shape);
       greenSurfacePromise.then(function () {
         /* The fit finished after this paint. Ask for another one rather than leaving the green
            blank until something else happens to trigger a repaint. */
-        if (greenSurfaceKey === elevation.path && currentScene) repaint("green-contours", function () { render(currentScene); });
+        if (greenSurfaceKey === elevationKey && currentScene) repaint("green-contours", function () { render(currentScene); });
       });
       return;
     }
@@ -2018,7 +2021,7 @@
       return p ? { left: p.left + rect.left, top: p.top + rect.top } : null;
     };
     greenSurfacePromise.then(function (surface) {
-      if (!surface || greenSurfaceKey !== elevation.path || !snap || !currentScene || !currentScene.finish.show) { clear(); return; }
+      if (!surface || greenSurfaceKey !== elevationKey || !snap || !currentScene || !currentScene.finish.show) { clear(); return; }
       var options = greenDrawingOptions(meta);
       if (!options || !window.GDGreenContours.draw(canvas, surface, project, options)) clear();
     });

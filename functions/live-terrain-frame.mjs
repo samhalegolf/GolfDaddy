@@ -22,7 +22,7 @@ import sharp from "sharp";
 import { verifiedAdminEmail } from "./lib/gd-map-overlay-store.mjs";
 import { mapboxCaptureSource } from "./lib/gd-mapbox-source.mjs";
 import { resolveElevationSource, reliefSpec, GLOBAL_ELEVATION } from "./lib/gd-imagery-sources.mjs";
-import { decodeElevation, terrainRgbPngFromHeights } from "./lib/gd-relief-core.mjs";
+import { decodeElevation, terrainRgbPngFromHeights, metresPerPixel } from "./lib/gd-relief-core.mjs";
 import { mosaic } from "./lib/gd-relief-fetch.mjs";
 import { parseWindow, windowBounds, windowMetres, demPlan, resampleToWindow, heightRange } from "./lib/gd-live-terrain-core.mjs";
 
@@ -62,6 +62,12 @@ export async function elevationFor(win, deps = {}) {
     const range = heightRange(heights);
     const body = await terrainRgbPngFromHeights(heights, plan.grid.width, plan.grid.height);
     const metres = windowMetres(win);
+    /* How far apart the source's real heights are, whatever grid they were resampled onto: its
+       tile spacing at the zoom it was read at, or its stated resolution if that is coarser. The
+       phone draws green slope lines only from elevation fine enough to know a green's shape
+       (app/js/live-terrain.js greenReadable). */
+    const latitude = (windowBounds(win).north + windowBounds(win).south) / 2;
+    const sampleM = Math.max(metresPerPixel(latitude, plan.demZoom), Number(candidate.dem.nativeResolutionM) || 0);
     return {
       body, type: "image/png",
       headers: {
@@ -71,7 +77,8 @@ export async function elevationFor(win, deps = {}) {
         "X-Elevation-Max": range.max.toFixed(2),
         "X-Elevation-Zoom": String(plan.demZoom),
         "X-Elevation-Size": plan.grid.width + "x" + plan.grid.height,
-        "X-Window-Metres": metres.width.toFixed(1) + "x" + metres.height.toFixed(1)
+        "X-Window-Metres": metres.width.toFixed(1) + "x" + metres.height.toFixed(1),
+        "X-Elevation-Sample-M": sampleM.toFixed(2)
       }
     };
   }
@@ -79,7 +86,7 @@ export async function elevationFor(win, deps = {}) {
 }
 
 const EXPOSED = ["X-Window", "X-Elevation-Source", "X-Elevation-Credit", "X-Elevation-Min",
-  "X-Elevation-Max", "X-Elevation-Zoom", "X-Elevation-Size", "X-Window-Metres"].join(", ");
+  "X-Elevation-Max", "X-Elevation-Zoom", "X-Elevation-Size", "X-Window-Metres", "X-Elevation-Sample-M"].join(", ");
 
 function cors(headers) {
   return Object.assign({

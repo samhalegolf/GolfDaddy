@@ -56,6 +56,10 @@
     return (Math.atan(Math.sinh(n)) * 180) / Math.PI;
   }
 
+  function lngAt(px, z) {
+    return (px / (TILE * Math.pow(2, z))) * 360 - 180;
+  }
+
   function metresPerPx(lat, z) {
     return (156543.03392804097 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, z);
   }
@@ -144,12 +148,29 @@
     meta.elevation = {
       url: elevation.url,
       encoding: "terrain-rgb",
+      /* The ground the grid covers - the window itself. The green contour fit
+         (gd-green-contours.js) places the green on the DEM through these. */
+      bounds: { north: latAt(win.y, win.z), south: latAt(win.y + win.h, win.z),
+        west: lngAt(win.x, win.z), east: lngAt(win.x + win.w, win.z) },
       width: elevation.width,
       height: elevation.height,
       metresPerPixel: metres.width / elevation.width,
-      elevationRange: { min: elevation.min, max: elevation.max }
+      elevationRange: { min: elevation.min, max: elevation.max },
+      /* The source's own spacing, before the resample onto this grid. */
+      sourceMetresPerSample: elevation.sampleM || null
     };
     return meta;
+  }
+
+  /* Whether this elevation can read a green. A green's shape lives in the metre or two between
+     samples; the contour fit's own gate catches a mis-fit, but a 10-25m DEM resampled onto a
+     fine grid can pass it while knowing nothing about the green, so a live frame that knows its
+     source is that coarse draws no slope lines at all. Elevation that does not say (a published
+     bake) is left to the fit's gate, as before. */
+  var GREEN_MAX_SAMPLE_M = 2.5;
+  function greenReadable(elevation) {
+    var m = Number(elevation && elevation.sourceMetresPerSample);
+    return !(m > GREEN_MAX_SAMPLE_M);
   }
 
   function header(res, name) {
@@ -188,6 +209,7 @@
       try { credit = decodeURIComponent(header(res, "X-Elevation-Credit") || ""); } catch (e) { credit = ""; }
       return res.blob().then(function (blob) {
         return { blob: blob, width: size[0], height: size[1], min: min, max: max, credit: credit,
+          sampleM: Number(header(res, "X-Elevation-Sample-M")) || null,
           source: header(res, "X-Elevation-Source") || "?", zoom: Number(header(res, "X-Elevation-Zoom")) || null };
       });
     }, function (e) {
@@ -211,7 +233,8 @@
         meta = surfaceMeta(win, null);
       } else {
         var elevationUrl = deps.createObjectURL(elev.blob); made.push(elevationUrl);
-        meta = surfaceMeta(win, { url: elevationUrl, width: elev.width, height: elev.height, min: elev.min, max: elev.max });
+        meta = surfaceMeta(win, { url: elevationUrl, width: elev.width, height: elev.height, min: elev.min, max: elev.max,
+          sampleM: elev.sampleM });
       }
       var metres = windowMetres(win);
       var d = pic.debug;
@@ -227,7 +250,9 @@
           elevationFailed: elev.error || null,
           demZoom: elev.error ? null : elev.zoom,
           demPx: elev.error ? null : elev.width + "x" + elev.height,
-          elevationRange: elev.error ? null : elev.min.toFixed(1) + ".." + elev.max.toFixed(1) + "m"
+          elevationRange: elev.error ? null : elev.min.toFixed(1) + ".." + elev.max.toFixed(1) + "m",
+          demSampleM: elev.error ? null : elev.sampleM,
+          greenLines: elev.error ? false : greenReadable({ sourceMetresPerSample: elev.sampleM })
         })
       };
     });
@@ -253,6 +278,7 @@
       "z" + debug.window.z + " " + debug.rasterPx + " " + (debug.metresPerPx ? debug.metresPerPx.toFixed(2) + "m/px" : ""),
       imagery,
       debug.elevation ? "DEM " + debug.elevation + (debug.demZoom ? " z" + debug.demZoom : "") + " " + debug.demPx + " " + debug.elevationRange
+        + (debug.demSampleM ? " ~" + debug.demSampleM.toFixed(1) + "m" : "") + (debug.greenLines ? " · green lines" : " · no green lines")
         : "DEM none (" + (debug.elevationFailed || "?") + ")",
       debug.metres, exaggeration + "x", debug.rebuild || "",
       debug.composeMs != null ? "img " + debug.composeMs + "ms" : "",
@@ -266,6 +292,7 @@
     windowMetres: windowMetres,
     surfaceMeta: surfaceMeta,
     load: load,
+    greenReadable: greenReadable,
     release: release,
     debugLabel: debugLabel
   };
