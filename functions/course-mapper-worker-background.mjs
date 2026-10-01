@@ -30,6 +30,7 @@ import { reverseGeocodePlace } from "./lib/gd-course-place.mjs";
 import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole, resolverHoleCandidates } from "./lib/gd-geometry-resolver-core.mjs";
 import { partitionLoops, walkCost } from "./lib/gd-ground-loops-core.mjs";
+import { courseNameFromCard } from "./lib/gd-facility-organise-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
 import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow, stitchedCardVerdict, shouldReplaceFacilityCard } from "./lib/gd-scorecard-resolve.mjs";
@@ -731,6 +732,39 @@ function facilityNameOf(course) {
   return course.facilityName || splitCourseName(course.courseName || "").facility || course.courseName || null;
 }
 
+/* The row each separated course was published under last time, found by WHERE it is.
+ *
+ * Placeholder ids are positional ("millbrook-remarkables-18-course-2"), and the order loops
+ * come back in is not stable between scans: Millbrook's 2026-10-01 rescan put the 6724m East
+ * course under the id the 6264m West course had held an hour earlier. Anything keyed on the
+ * id - a round, its frames, a watch map - would have followed the id to the wrong course.
+ * So a course takes the id of the facility's existing row whose centre it sits on, nearest
+ * first, one row per course. Only an unmatched course gets a fresh id. */
+const SAME_GROUND_M = 300;
+async function siblingRowsOnSameGround(loops, course) {
+  const byIndex = new Map();
+  const rows = await supabaseFetch(MAPS_TABLE + "?select=course_id,course_lat,course_lng,hole_count&facility_key=eq." + encodeURIComponent(course.courseId)).catch(() => []);
+  const siblings = (Array.isArray(rows) ? rows : []).filter(row => row && row.course_id && row.course_id !== course.courseId
+    && Number.isFinite(Number(row.course_lat)) && Number.isFinite(Number(row.course_lng)));
+  const pairs = [];
+  loops.forEach((loop, index) => {
+    if (index === 0 || !loop.centre) return;
+    const holes = (loop.holeNumbers || []).length;
+    siblings.forEach(row => {
+      if (holes && row.hole_count && Math.abs(Number(row.hole_count) - holes) > 2) return;
+      const metres = distance(loop.centre, { lat: Number(row.course_lat), lng: Number(row.course_lng) });
+      if (metres <= SAME_GROUND_M) pairs.push({ index, courseId: row.course_id, metres });
+    });
+  });
+  const used = new Set();
+  pairs.sort((a, b) => a.metres - b.metres).forEach(pair => {
+    if (byIndex.has(pair.index) || used.has(pair.courseId)) return;
+    byIndex.set(pair.index, pair.courseId);
+    used.add(pair.courseId);
+  });
+  return byIndex;
+}
+
 /* A sibling's course_id: always under the facility's own id, never a bare name.
  *
  * Ids used to be the slug of the loop's name alone. That made them global - two clubs
@@ -798,7 +832,7 @@ function loopTotalM(loop) {
   return Object.values(lengths).reduce((sum, value) => sum + (Number(value) || 0), 0);
 }
 
-function nameLoopsFromCards(loops, cards) {
+function nameLoopsFromCards(loops, cards, facilityName) {
   /* Provisional names first, so two courses are never both called the facility.
    *
    * "Te Arai Links" twice in the picker is unusable - the player cannot tell which
@@ -820,8 +854,11 @@ function nameLoopsFromCards(loops, cards) {
     }
   });
 
+  /* One card is enough to name the one course it clearly describes. It still has to beat
+     every other course on the site by the match margin (matchLoopsToCards chooses WHICH
+     course gets it), and the rest keep their provisional names. */
   const usable = distinctCards(cards || []).filter(card => card && card.name);
-  if (usable.length < 2) return { resolved: false, reason: "fewer-than-two-cards", cards: usable.length };
+  if (!usable.length) return { resolved: false, reason: "no-cards", cards: 0 };
 
   const measured = loops
     .map((loop, index) => ({ index, id: "loop-" + index, lengths: loopLengthsFromOsm(loop.payload.elements) }))
@@ -840,7 +877,9 @@ function nameLoopsFromCards(loops, cards) {
     /* Only a card whose name actually identifies a course replaces the provisional
        one - "Scorecard" is not a course name. */
     if (result.resolved && cardName && !/^course \d+$/i.test(cardName)) {
-      loops[entry.index].name = cardName;
+      /* The facility, then the course the card names - "Millbrook Golf Resort -
+         Remarkables / Arrow" - decoded and without the page's noise. */
+      loops[entry.index].name = courseNameFromCard(cardName, facilityName) || cardName;
       loops[entry.index].nameSource = "scorecard-match";
     }
   });
@@ -865,8 +904,9 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
    * fill, and reporting success without it would be a lie. */
   const failures = [];
   /* Mutates loops[].name in place, so this must run before ids are derived. */
-  const naming = nameLoopsFromCards(loops, course.scorecardCards);
+  const naming = nameLoopsFromCards(loops, course.scorecardCards, facilityNameOf(course));
   const taken = new Set([course.courseId]);
+  const onGround = await siblingRowsOnSameGround(loops, course);
   for (let index = 0; index < loops.length; index++) {
     const loop = loops[index];
     await heartbeatJob(job, { stage: "publishing-course-" + (index + 1) + "-of-" + loops.length });
@@ -874,8 +914,12 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
     const isPinned = index === 0;
     const derivedId = loopCourseId(loop, course, index, taken);
     try {
-      const existing = isPinned ? null : await findExistingLoopRow(loop, derivedId, course.courseId);
-      const courseId = isPinned ? course.courseId : (existing && !taken.has(existing) ? existing : derivedId);
+      /* Which row this course already is: the one on the same ground first, so a rescan that
+         lists the courses in a different order cannot move a course onto another's id. */
+      const sameGround = isPinned ? null : onGround.get(index) || null;
+      const existing = isPinned || (sameGround && !taken.has(sameGround)) ? null : await findExistingLoopRow(loop, derivedId, course.courseId);
+      const courseId = isPinned ? course.courseId
+        : (sameGround && !taken.has(sameGround) ? sameGround : (existing && !taken.has(existing) ? existing : derivedId));
       taken.add(courseId);
       /* NO sibling centres, deliberately.
        *

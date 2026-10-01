@@ -215,7 +215,9 @@ export function toEngineCard(parsed, name) {
   })).filter(row => row.par !== null || row.distanceM !== null);
   if (!holes.length) return null;
   return {
-    name: name || "",
+    /* Decoded here, where every card gets its name: a page title arrives as raw HTML
+       ("Millbrook Resort &amp; Country Club") and was stored that way. */
+    name: decodeEntities(name || "").replace(/\s+/g, " ").trim(),
     holes,
     holeCount: holes.length,
     par: holes.reduce((sum, row) => sum + (row.par || 0), 0) || null,
@@ -286,7 +288,7 @@ export function parseScorecardPage(grids, options = {}) {
 
 const HTML_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'", apos: "'", nbsp: " ", ndash: "-", mdash: "-" };
 
-function decodeEntities(text) {
+export function decodeEntities(text) {
   return String(text || "").replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (whole, code) => {
     const key = code.toLowerCase();
     if (HTML_ENTITIES[key]) return HTML_ENTITIES[key];

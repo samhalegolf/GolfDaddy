@@ -3976,7 +3976,7 @@ function gdAdminCourseVisualControls(record,courseId){
      the group is off. */
   const mowingField=`<label>Visibility level<select id="gdCourseVisualMowing"><option value="Unknown" hidden ${mowing==="Unknown"?"selected":""}>Off</option>${["Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>`;
   const mowingPanel=gdAdminCourseVisualEffectHeader("mowing","Mow lines",mowingOn)+gdAdminCourseVisualEffectBody(mowingOn,mowingField);
-  const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseRemap('${key}')">Remap from OSM</button><button type="button" onclick="return gdAdminCourseUpdateScorecards('${key}')">Update Scorecards</button><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div>`;
+  const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseRemap('${key}')">Remap from OSM</button><button type="button" onclick="return gdAdminCourseUpdateScorecards('${key}')">Update Scorecards</button><button type="button" onclick="return gdAdminCourseOrganiseFacility('${key}')">Organise facility</button><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div><div id="gdAdminOrganisePlan" class="gdAdminOrganisePlan"></div>`;
   const groups=[
     {id:"preset",icon:"🎨",label:"Preset",body:presetField+presetRail},
     /* The recipe area is its own tab, not a footnote under Preset: a preset is one ingredient
@@ -4360,6 +4360,63 @@ async function gdAdminCourseUpdateScorecards(courseId){
     gdAdminCourseVisualToast("Update Scorecards failed to send");
     return false;
   }
+}
+
+/* Organise facility (FACILITY_ORGANISE_PLAN_2026-10-01.md, phase 1). Works out which stored
+   card describes which course under this course's facility, renames the ones it is sure of,
+   and lists everything else it would do - combinations, splits, courses no card explains - so
+   an admin can see it before phase 2 is allowed to act on any of it. */
+async function gdAdminCourseOrganiseFacility(courseId){
+  courseId=String(courseId||"");
+  if(!courseId)return false;
+  try{
+    const token=await gdAdminCourseDbAccessToken();
+    if(!token){gdAdminCourseVisualToast("Sign in again to organise this facility");return false;}
+    gdAdminCourseVisualToast("Organising facility…");
+    const res=await fetch("/api/facility-organise",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+      body:JSON.stringify({courseId:courseId})
+    });
+    const data=await res.json().catch(()=>null);
+    if(res.status===403){gdAdminCourseVisualToast("Admin only");return false;}
+    if(res.status===404){gdAdminCourseVisualToast((data&&data.error)||"No published course found");return false;}
+    if(!res.ok){gdAdminCourseVisualToast("Organise failed ("+res.status+")");return false;}
+    gdAdminCourseVisualToast((data&&data.message)||"Organise finished");
+    gdAdminCourseRenderOrganisePlan(data);
+    if(data&&Array.isArray(data.applied)&&data.applied.length){
+      await gdLoadAdminCourseDbCloud({force:true});
+      gdRenderAdminCourseDatabase();
+      gdAdminCourseRenderOrganisePlan(data);
+    }
+    return true;
+  }catch(error){
+    gdAdminCourseVisualToast("Organise failed to send");
+    return false;
+  }
+}
+const GD_ORGANISE_REASONS={
+  "no-card-matches-this-course":"No stored card matches this course - its card may be missing, or it may be a neighbouring club.",
+  "no-cards-stored":"No cards stored for this facility yet - run Update Scorecards.",
+  "unusual-hole-count":"Not a nine or an 18 - check what this course is."
+};
+function gdAdminCourseRenderOrganisePlan(data){
+  const box=document.getElementById("gdAdminOrganisePlan");
+  if(!box||!data||!data.plan)return;
+  const plan=data.plan;
+  const applied=new Set((data.applied||[]).map(change=>change.courseId));
+  const line=(tag,text,note)=>`<li><strong>${gdEscapeHTML(tag)}</strong> ${gdEscapeHTML(text)}${note?` <em>${gdEscapeHTML(note)}</em>`:""}</li>`;
+  const rows=plan.changes.map(change=>{
+    if(change.type==="rename")return line(applied.has(change.courseId)?"Renamed":"Rename (not applied)",change.from+" → "+change.to,applied.has(change.courseId)?"":(change.why||""));
+    if(change.type==="combination")return line("Combination (needs phase 2)",change.name,"");
+    if(change.type==="split")return line("Split (needs approval)",change.courseId+" is "+change.front+" + "+change.back,change.why||"");
+    if(change.type==="review")return line("Check",change.name||change.courseId,GD_ORGANISE_REASONS[change.reason]||change.reason);
+    return "";
+  }).join("");
+  const cards=(plan.cards||[]).map(card=>gdEscapeHTML(card.label)+" ("+card.holes+")").join(", ")||"none";
+  box.innerHTML=`<h5>${gdEscapeHTML(data.facilityName||plan.facilityName||"Facility")}</h5>`+
+    `<p>${plan.summary.courses} courses · cards: ${cards}</p>`+
+    (rows?`<ul>${rows}</ul>`:`<p>Nothing to change.</p>`);
 }
 
 async function gdAdminCourseVisualEnqueueCloudJob(courseId,kind,recipe){

@@ -30,6 +30,14 @@ export function isPublishableCourseName(name) {
   return true;
 }
 
+/* Our own placeholder: "Course 2", and since provisionalLoopName grew its length and
+   compass hint, "Course 2 - 6264m West" - with or without the facility in front. Only the
+   first shape used to count, so every placeholder published since then looked like a real
+   name and nothing could replace it. */
+export function isProvisionalCourseName(name) {
+  return /\bcourse\s*\d+(\s*-\s*\d+\s*m(\s+[a-z][a-z-]*)?)?$/i.test(String(name || "").trim());
+}
+
 /* Is the new name actually better than the one the row has?
  *
  * A provisional name loses to anything publishable. A real name is only replaced by
@@ -40,7 +48,7 @@ export function shouldRename(current, candidate) {
   const now = String(current || "").trim();
   if (!now) return true;
   if (now === candidate) return false;
-  if (/course\s*\d+$/i.test(now)) return true;
+  if (isProvisionalCourseName(now)) return true;
   /* Longer only counts when it CONTAINS the current name - "Foo - South Course"
      supersedes "Foo"; an unrelated longer string does not. */
   const a = now.toLowerCase(), b = candidate.toLowerCase();
