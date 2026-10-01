@@ -296,8 +296,7 @@ function pxOf(win, p) {
     assert.strictEqual(f.asked.length, hy.frameTiles(win).length, 'the whole frame from Esri');
     assert.match(res.debug.mapboxSkipped, /daily Mapbox limit/);
     assert.strictEqual(res.debug.colour.applied, false);
-    const label = lt.debugLabel(Object.assign(res.debug, { window: win }), 2.5, 'on');
-    assert.ok(label.includes('Mapbox off (daily Mapbox limit reached)'), label);
+    assert.deepStrictEqual(lt.providers(res.debug), ['esri'], 'Mapbox is not credited when it was not drawn');
   });
 
   await ok('build: a 503 costs one hole its Mapbox, a refusal (401/403/429) costs the round', async () => {

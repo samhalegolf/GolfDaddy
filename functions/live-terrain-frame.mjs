@@ -2,7 +2,6 @@
    with no published surface (app/js/live-terrain.js).
 
    GET /api/live-terrain-frame?layer=elevation&z=&x=&y=&w=&h=[&course=<courseId>]
-     Authorization: Bearer <signed-in session>
 
    z/x/y/w/h is a rectangle of web-mercator pixels (gd-live-terrain-core parseWindow) - the same
    rectangle the browser builds its hybrid Esri + Mapbox picture on (app/js/live-hybrid.js), so
@@ -16,12 +15,11 @@
    need and an image cannot carry.
 
    Nothing is stored and nothing is published: the answer is private to the device that asked
-   and never cached at the CDN. Signed-in players only, so the terrain sources behind it are not
-   an open proxy. The pictures are not fetched here - they are display tiles the browser draws
+   and never cached at the CDN. Open to every player, signed in or not, like /api/relief-tile:
+   the 3D Mesh is the default picture for everyone. The pictures are not fetched here - they are display tiles the browser draws
    itself, so it can reuse them hole to hole. */
 
 import sharp from "sharp";
-import { verifiedUserId } from "./lib/gd-map-overlay-store.mjs";
 import { terrainRgbPngFromHeights, decodeElevation } from "./lib/gd-relief-core.mjs";
 import { parseWindow, windowMetres, demGrid } from "./lib/gd-live-terrain-core.mjs";
 import { terrainForWindow } from "./lib/terrain/gd-terrain-window.mjs";
@@ -102,11 +100,9 @@ function fail(status, message) {
 }
 
 export function createHandler(deps = {}) {
-  const verifyUser = deps.verifyUser || verifiedUserId;
   return async function liveTerrainFrame(req) {
     if (req.method === "OPTIONS") return new Response("", { status: 204, headers: cors({}) });
     if (req.method !== "GET") return fail(405, "Method not allowed");
-    if (!(await verifyUser(req))) return fail(401, "Sign in to load terrain");
     const params = new URL(req.url).searchParams;
     const win = parseWindow(params);
     if (win.error) return fail(400, win.error);

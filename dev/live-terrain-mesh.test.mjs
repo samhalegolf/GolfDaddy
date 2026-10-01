@@ -59,7 +59,6 @@ const ESRI_RGB = { r: 70, g: 95, b: 90 }, MAPBOX_RGB = { r: 80, g: 125, b: 70 };
 const counts = { elevation: 0 };
 let failElevation = false;
 const handler = createHandler({
-  verifyUser: async () => "user-1",
   env: { MAPBOX_PUBLIC_TOKEN: "pk.test" },
   mosaic: async (spec, zoom, origin, size) => {
     if (failElevation) return null;
@@ -237,6 +236,8 @@ try {
         published: document.body.classList.contains("surface-published"),
         meshUp: document.body.classList.contains("surface-mesh"),
         stamp: document.getElementById("assetVersionStamp").textContent,
+        credit: document.getElementById("mapAttribution").classList.contains("hiddenState") ? ""
+          : document.querySelector("#mapAttribution .mapAttributionShort").textContent,
         revoked: window.__revoked
       }),
       /* The picture the mesh was handed, read back at a frame pixel. */
@@ -261,7 +262,7 @@ try {
         await window.__lm.until(() => app.marshal.round().hole === n, "hole " + n);
       }
     };
-    /* Signed in, and the admin account as far as the display gates (the readout) are concerned. */
+    /* Signed in, and the admin account, which once had an on-screen readout and now must not. */
     app.account.signedIn = () => true;
     app.account.isAdmin = () => true;
     app.gpsSettings.set("relief", "enhanced");
@@ -279,8 +280,8 @@ try {
   ok("Esri for every frame tile, Mapbox for the playing area only", tiles.esri === f1.tiles.frame && tiles.mapbox === f1.tiles.mapbox
     && tiles.mapbox < tiles.esri && counts.elevation === 1, { tiles, f1: f1.tiles });
   ok("the Leaflet map underneath asks Mapbox for nothing", tiles.leafletMapbox === 0, tiles);
-  ok("the readout says the mesh is on and what it cost", /^3D mesh on · z\d+ \d+x\d+ [\d.]+m\/px · Esri \d+\+0r · Mapbox \d+\+0r \([\d.]+% frame, session \d+\)/.test(s.stamp)
-    && s.stamp.includes("2.5x") && /mesh \d+ms/.test(s.stamp), s.stamp);
+  ok("the frame is credited to exactly its sources, and no testing readout is drawn",
+    s.credit === "Powered by Esri · © Mapbox © OpenStreetMap" && s.stamp === "", s);
   const teeAt = await page.evaluate((t) => {
     const scale = 256 * Math.pow(2, t.z), r = t.lat * Math.PI / 180;
     return { x: ((t.lng + 180) / 360) * scale - t.x, y: ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * scale - t.y };
@@ -310,12 +311,12 @@ try {
   });
   ok("GPS fixes, Play and a new height fetch nothing", tiles.esri === before.esri && tiles.mapbox === before.mapbox
     && counts.elevation === before.elevation, { tiles, counts });
-  ok("the height follows the setting", s.debug.active && s.debug.exaggeration === 5 && s.stamp.includes("5x"), s);
+  ok("the height follows the setting", s.debug.active && s.debug.exaggeration === 5, s);
   await page.evaluate(() => window.ClarityApp.gpsSettings.set("hybridView", "mask"));
   await page.evaluate(() => window.__lm.until(() => { const d = window.__lm.debug(); return d.active && d.frame.view === "mask"; }, "the mask view"));
   s = await page.evaluate(() => window.__lm.state());
   ok("a debug view is rebuilt from the round's tiles, fetching none", tiles.esri === before.esri && tiles.mapbox === before.mapbox
-    && s.debug.frame.mapbox.reused === f1.tiles.mapbox && s.stamp.includes("view mask"), { tiles, s: s.stamp });
+    && s.debug.frame.mapbox.reused === f1.tiles.mapbox && s.debug.frame.view === "mask", { tiles, s });
   await page.evaluate(() => window.ClarityApp.gpsSettings.set("hybridView", "composite"));
   await page.evaluate(() => window.__lm.until(() => { const d = window.__lm.debug(); return d.active && d.frame.view === "composite"; }, "back to composite"));
 
@@ -380,21 +381,21 @@ try {
   /* 5. Mapbox fails: an Esri surface, still on the mesh, with the reason. */
   fail.mapbox = true;
   await page.evaluate(() => window.__lm.hole(3));
-  await page.evaluate(() => window.__lm.until(() => window.__lm.debug().active && /tile 503/.test(window.__lm.debug().frame.mapboxFailed || "")
-    && /FAILED/.test(document.getElementById("assetVersionStamp").textContent), "the Esri surface"));
+  await page.evaluate(() => window.__lm.until(() => window.__lm.debug().active && /tile 503/.test(window.__lm.debug().frame.mapboxFailed || ""),
+    "the Esri surface"));
   s = await page.evaluate(() => window.__lm.state());
-  ok("Mapbox failing still gives an Esri mesh surface", s.debug.active && s.meshUp && s.stamp.includes("FAILED") && !s.debug.frame.colour.applied, s);
+  ok("Mapbox failing still gives an Esri mesh surface", s.debug.active && s.meshUp && !s.debug.frame.colour.applied, s);
+  ok("and only Esri is credited for it", s.credit === "Powered by Esri", s.credit);
   fail.mapbox = false;
 
   /* 6. The DEM fails: the composite, flat. */
   failElevation = true;
   await page.evaluate(() => window.__lm.hole(4));
-  /* Wait for the new hole's own readout: until it is presented, the hold keeps the previous
-     hole (and its mesh) on screen. */
+  /* Wait for the new hole to be uncovered: until then the loading screen is over it. */
   await page.evaluate(() => window.__lm.until(() => { const d = window.__lm.debug(); return d.frame && d.frame.elevationFailed
-    && document.body.classList.contains("surface-published") && /DEM none/.test(document.getElementById("assetVersionStamp").textContent); }, "the flat composite"));
+    && document.body.classList.contains("surface-published") && !document.body.classList.contains("hole-loading"); }, "the flat composite"));
   s = await page.evaluate(() => window.__lm.state());
-  ok("a failed DEM gives the flat composite", s.published && !s.meshUp && /DEM none \(elevation 502/.test(s.stamp) && /3D mesh off/.test(s.stamp), s);
+  ok("a failed DEM gives the flat composite", s.published && !s.meshUp && /elevation 502/.test(s.debug.frame.elevationFailed), s);
   failElevation = false;
 
   /* 7. Esri fails: the live map stays, with the reason. */
@@ -402,19 +403,17 @@ try {
   await page.evaluate(() => window.__lm.hole(5));
   await page.evaluate(() => window.__lm.until(() => /esri tile 503/.test(window.__lm.debug().fallback || ""), "the fallback reason"));
   s = await page.evaluate(() => window.__lm.state());
-  ok("Esri failing leaves the live map up", !s.published && !s.meshUp && s.presentation === "live" && /3D mesh off · esri tile 503/.test(s.stamp), s);
+  ok("Esri failing leaves the live map up", !s.published && !s.meshUp && s.presentation === "live" && /esri tile 503/.test(s.debug.fallback), s);
   fail.esri = false;
 
-  /* 8. A signed-out player never asks. */
-  const asked = { ...tiles, elevation: counts.elevation };
+  /* 8. A signed-out player gets the mesh too. */
   await page.evaluate(async () => {
     window.ClarityApp.account.signedIn = () => false;
     await window.__lm.hole(1);
-    await new Promise((r) => setTimeout(r, 900));
+    await window.__lm.until(() => window.__lm.debug().active, "the signed-out mesh");
   });
   s = await page.evaluate(() => window.__lm.state());
-  ok("a signed-out player gets the normal live map and no requests",
-    tiles.esri === asked.esri && tiles.mapbox === asked.mapbox && counts.elevation === asked.elevation && !s.debug.wanted && !s.published, { tiles, s });
+  ok("a signed-out player gets the 3D Mesh like everyone else", s.debug.wanted && s.debug.active && s.published, s);
 
   /* 9. Published holes, one after another, each get their mesh. */
   const published = { courseId: "published-course", status: "full-map-ready", packageVersion: 1,
