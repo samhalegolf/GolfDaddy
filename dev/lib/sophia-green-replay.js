@@ -43,7 +43,8 @@ async function replaySophiaGreen(options = {}) {
   const pinnedId = fixture.courseId;
   const maps = new Map([[pinnedId, {
     course_id: pinnedId, course_name: fixture.courseName, course_lat: fixture.centre.lat, course_lng: fixture.centre.lng,
-    country: "South Korea", country_code: "KR", region: "Yeoju-si", objects_json: {}, holes_json: {}
+    country: "South Korea", country_code: "KR", region: "Yeoju-si", objects_json: {}, holes_json: {},
+    ...(options.pinned || {})
   }]].concat((options.existingMaps || []).map(row => [row.course_id, row])));
   const job = { id: "job-sophia", course_id: pinnedId, kind: "automap", status: "queued", mapper_version: "v2" };
   const writes = [];

@@ -417,7 +417,7 @@ const LIST_VIEW = "course_maps_list";
    counts come from the course_maps_list view so they are computed from the
    geometry itself and cannot drift. */
 const LIST_COLUMNS = "id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng," +
-  "region,country,country_code,facility_key,course_aliases,published,published_at," +
+  "region,country,country_code,facility_key,facility_name,course_aliases,published,published_at," +
   "created_at,updated_at,hole_count,object_count,tee_count,green_count,fairway_count";
 
 function listRowToCourse(row) {
@@ -438,6 +438,7 @@ function listRowToCourse(row) {
     countryCode: text(row.country_code, 8).toUpperCase(),
     aliases: Array.isArray(row.course_aliases) ? row.course_aliases : [],
     facilityKey: text(row.facility_key, 160),
+    facilityName: text(row.facility_name, 200),
     published: true,
     publishedAt: text(row.published_at, 80),
     createdAt: text(row.created_at, 80),
@@ -511,7 +512,7 @@ async function readOneCourse(courseId) {
 }
 
 const FULL_COLUMNS = "id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng," +
-  "region,country,country_code,facility_key,course_aliases,published,published_at," +
+  "region,country,country_code,facility_key,facility_name,course_aliases,published,published_at," +
   "published_by_json,objects_json,holes_json,assets_json,course_json,created_at,updated_at";
 
 async function readSupabaseMaps() {
@@ -649,6 +650,7 @@ function courseFromSupabaseRow(row) {
     countryCode: text(row.country_code ?? base.countryCode, 8).toUpperCase(),
     aliases: Array.isArray(row.course_aliases) ? row.course_aliases : (Array.isArray(base.aliases) ? base.aliases : []),
     facilityKey: text(row.facility_key ?? base.facilityKey, 160),
+    facilityName: text(row.facility_name ?? base.facilityName, 200),
     published: true,
     publishedAt: text(row.published_at || base.publishedAt, 80),
     publishedBy: jsonObject(row.published_by_json || base.publishedBy),

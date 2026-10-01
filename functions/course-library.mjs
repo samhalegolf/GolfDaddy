@@ -104,7 +104,7 @@ export default async function courseLibrary(req) {
 
   try {
     let query = COURSE_TABLE
-      + "?select=course_id,course_name,course_lat,course_lng,hole_count,facility_key,objects_revision,published_at,updated_at"
+      + "?select=course_id,course_name,course_lat,course_lng,hole_count,facility_key,facility_name,objects_revision,published_at,updated_at"
       + "&published=eq.true&order=updated_at.desc&limit=1000";
     if (since) query += "&updated_at=gt." + encodeURIComponent(since);
 
@@ -150,6 +150,8 @@ export default async function courseLibrary(req) {
         /* Carried to the client so a search result can group the courses that came
            out of one scan, rather than guessing the link from distance. */
         facilityKey: row.facility_key || null,
+        /* What that group is called - "Millbrook Golf Resort" over its courses. */
+        facilityName: row.facility_name || null,
         lat: row.course_lat == null ? null : Number(row.course_lat),
         lng: row.course_lng == null ? null : Number(row.course_lng),
         /* Null means the course was published before hole_count existed and has

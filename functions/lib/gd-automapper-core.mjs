@@ -736,6 +736,9 @@ export function coursePolygonsFrom(payload) {
       ref: String(element.type || "way") + "/" + String(element.id || ""),
       name: String((element.tags && element.tags.name) || "").trim(),
       holesTag: Number(element.tags && element.tags.holes) || null,
+      /* Who runs it. Two outlines with different websites or operators are two clubs,
+         whatever their names share - see markNeighbouringClubs. */
+      owner: ownerOf(element.tags),
       ring: osmGuidePointsFromElement(element)
     }))
     .filter(polygon => polygon.ring.length >= 4);
@@ -865,6 +868,74 @@ function routeUnclaimed(features) {
   const loopCount = Math.max(...multiplicity.values());
   return assignByRouting(features, loopCount)
     || [{ name: "", osmRef: "", holesTag: null, features: features.slice(), method: "routing" }];
+}
+
+/* ---------- neighbouring clubs, whatever separated the loops (Fancourt, 2026-10-01) -------
+ *
+ * Containment only sets a neighbour aside when OSM has drawn the facility's own outline
+ * around the site. When it has not - or containment cannot run - the loops come from
+ * routing, and a wide sweep's neighbouring club published as a sibling: the 2026-10-01
+ * rescan of Fancourt Golf Estate put George Golf Club up as "Course 3".
+ *
+ * So after any separation, a loop whose holes sit (mostly) inside one named course outline
+ * is a different club when that outline holds none of the pinned course's holes and EITHER
+ *   its owner (website / operator / brand) differs from the pinned course outline's, or
+ *   it names a CLUB ("George Golf Club", "Arrowtown Golf Club", "… Country Club") and
+ *   shares no distinctive word with the facility the player searched for.
+ * A course-named outline ("Coronet 18", "The Hills") is never ruled out by its name: resort
+ * courses are routinely outlined under their own name alone, and losing a real course is
+ * worse than publishing a neighbour. */
+const CLUB_DESIGNATOR = /\b(golf\s+club|country\s+club|golf\s+&\s+country\s+club|g\.?\s?c\.?|c\.?\s?c\.?)\b/i;
+const GENERIC_NAME_WORDS = new Set(["golf", "club", "country", "course", "courses", "links", "the", "and", "resort", "estate", "at", "of", "de", "la", "le", "gc", "cc", "international", "national", "championship", "north", "south", "east", "west", "par", "holes", "hole"]);
+const OWNED_MAJORITY = 0.6;
+
+function ownerOf(tags) {
+  const t = tags || {};
+  const site = String(t.website || t["contact:website"] || "").toLowerCase()
+    .replace(/^https?:\/\//, "").replace(/^www\./, "").split(/[/?#]/)[0];
+  return site || String(t.operator || t.brand || "").trim().toLowerCase();
+}
+
+function distinctiveWords(name) {
+  return new Set(String(name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .split(/[^a-z0-9]+/).filter(word => word.length >= 3 && !GENERIC_NAME_WORDS.has(word)));
+}
+
+function outlineHolding(group, polygons) {
+  const named = (polygons || []).filter(polygon => polygon.name || polygon.owner);
+  let best = null;
+  named.forEach(polygon => {
+    const inside = group.features.filter(feature => pointInRing(feature.centre, polygon.ring)).length;
+    if (inside / Math.max(1, group.features.length) >= OWNED_MAJORITY && (!best || inside > best.inside)) best = { polygon, inside };
+  });
+  return best ? best.polygon : null;
+}
+
+export function markNeighbouringClubs(groups, polygons, centre, facilityName) {
+  const live = (groups || []).filter(group => !group.foreign);
+  if (live.length < 2) return groups;
+  const centreOf = group => centroidOfPoints(group.features.map(feature => feature.centre));
+  const pinned = centre
+    ? live.slice().sort((a, b) => distance(centre, centreOf(a)) - distance(centre, centreOf(b)))[0]
+    : live[0];
+  const pinnedOutline = outlineHolding(pinned, polygons);
+  const facilityWords = distinctiveWords([facilityName, pinnedOutline && pinnedOutline.name].filter(Boolean).join(" "));
+  live.forEach(group => {
+    if (group === pinned) return;
+    const outline = outlineHolding(group, polygons);
+    if (!outline || outline === pinnedOutline) return;
+    if (pinned.features.some(feature => pointInRing(feature.centre, outline.ring))) return;
+    const otherOwner = !!(outline.owner && pinnedOutline && pinnedOutline.owner && outline.owner !== pinnedOutline.owner);
+    const words = distinctiveWords(outline.name);
+    const otherClub = CLUB_DESIGNATOR.test(outline.name) && facilityWords.size > 0 && words.size > 0
+      && ![...words].some(word => facilityWords.has(word));
+    if (!otherOwner && !otherClub) return;
+    group.foreign = true;
+    group.foreignReason = otherOwner ? "course-outline-run-by-another-owner" : "course-outline-names-another-club";
+    if (!group.name) group.name = outline.name;
+    if (!group.osmRef) group.osmRef = outline.ref;
+  });
+  return groups;
 }
 
 function assignByContainment(features, polygons) {
@@ -1046,7 +1117,7 @@ export function holeGapFrames(payload, opts = {}) {
     .slice(0, maxFrames);
 }
 
-export function separateLoops(payload, centre) {
+export function separateLoops(payload, centre, options) {
   const features = holeFeatures(payload);
   if (!features.length) return null;
 
@@ -1054,6 +1125,7 @@ export function separateLoops(payload, centre) {
   const polygons = coursePolygonsFrom(payload);
   const groups = assignByContainment(features, polygons) || assignByRouting(features, collision.loops);
   if (!groups || groups.length < 2) return null;
+  markNeighbouringClubs(groups, polygons, centre, (options && options.facilityName) || "");
 
   const { buckets, shared } = partitionSupportingElements(payload, groups);
 
@@ -1066,6 +1138,7 @@ export function separateLoops(payload, centre) {
       holesTag: group.holesTag,
       method: group.method,
       foreign: !!group.foreign,
+      foreignReason: group.foreignReason || null,
       centre: loopCentre,
       holeNumbers: [...new Set(numbers)].sort((a, b) => a - b),
       /* The PHYSICAL holes, number and OSM element together. holeNumbers cannot
@@ -1098,7 +1171,7 @@ export function separateLoops(payload, centre) {
     holes: loop.holeNumbers.length,
     contiguous: loop.contiguous,
     awayFromPinM: loop.awayFromPinM,
-    reason: "course-outline-outside-facility-outline"
+    reason: loop.foreignReason || "course-outline-outside-facility-outline"
   }));
   /* Nearest first, so a caller that has to pick one - the row the job was
      enqueued against - picks the one the player pinned. */
