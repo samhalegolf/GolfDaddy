@@ -363,7 +363,7 @@
          the server answers the same either way (buildCoursePackageWithTrigger returns processing
          for a fresh enqueue AND a deduped one), so the label must not claim to know which. */
       if (status === "processing") return { ok: true, inProgress: true };
-      if (status === "manual-required" || status === "failed") {
+      if (status === "failed") {
         return { ok: false, detail: "Mapping " + status + ": " + (body.reason || "no reason given") + "." };
       }
       /* "none" with a triggerError is terminal - nothing was queued, so nothing is coming. */

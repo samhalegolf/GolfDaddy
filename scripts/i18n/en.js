@@ -81,10 +81,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "COURSE MAP NOT AVAILABLE",
     "mapRecovery.preparingEyebrow": "COURSE MAP PREPARING",
-    "mapRecovery.attentionEyebrow": "COURSE MAP NEEDS ATTENTION",
     "mapRecovery.holeNotMapped": "This hole is not mapped yet",
     "mapRecovery.stillPreparing": "We're still preparing this course",
-    "mapRecovery.needsCorrection": "This course map needs correction",
     "mapRecovery.couldNotLoad": "We couldn't load a usable map",
     "mapRecovery.waitOrManual": "You can wait here or use GPS manually. We'll open the mapped hole automatically if it becomes ready.",
     "mapRecovery.useManual": "You can still use GPS manually. We'll keep checking for an updated map.",

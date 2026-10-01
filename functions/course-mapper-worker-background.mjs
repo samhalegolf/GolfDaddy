@@ -228,6 +228,18 @@ async function requestMapperDebug(job, failure) {
       detail: "Course " + (job.course_id || "unknown") + " failed (" + classified.label + "): " + String(failure.message || "").slice(0, 300) + ". A report follows when the session finishes.",
       context: { jobId: job.id, courseId: job.course_id || null, failureKind: classified.kind, session: outcome.sessionUrl }
     }).catch(() => {});
+  } else {
+    /* The player was told "a mapping request has been sent" (scripts/gd-course-map-notify.js),
+       so one must reach a person even when no session took the job - the Routine is
+       throttled to one fire an hour across every course, and may not be configured at all.
+       Throttled per course, so a second course failing in the same hour still gets its own. */
+    record.mappingRequest = await sendSystemAlert({
+      eventType: "mapper_mapping_request",
+      key: job.course_id || job.id,
+      title: "A course needs mapping",
+      detail: "Course " + (job.course_id || "unknown") + " could not be mapped automatically (" + classified.label + "): " + String(failure.message || "").slice(0, 300) + ". The player was told to expect a map within 1-3 days.",
+      context: { jobId: job.id, courseId: job.course_id || null, failureKind: classified.kind, debugSession: outcome }
+    }).catch(error => ({ sent: false, reason: String(error && error.message || error).slice(0, 200) }));
   }
   return record;
 }

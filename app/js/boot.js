@@ -64,11 +64,9 @@
     tapPrompt.classList.add("hiddenState");
     intro.classList.add("hiddenState");
     i18n.set(eyebrow, value.state === "PROCESSING" ? "mapRecovery.preparingEyebrow"
-      : value.state === "MANUAL_ACTION_REQUIRED" ? "mapRecovery.attentionEyebrow"
       : "mapRecovery.notAvailable");
     i18n.set(title, value.state === "CURRENT_HOLE_MISSING" ? "mapRecovery.holeNotMapped"
       : value.state === "PROCESSING" ? "mapRecovery.stillPreparing"
-      : value.state === "MANUAL_ACTION_REQUIRED" ? "mapRecovery.needsCorrection"
       : "mapRecovery.couldNotLoad");
     i18n.set(copy, value.state === "PROCESSING" ? "mapRecovery.waitOrManual" : "mapRecovery.useManual");
     screen.classList.remove("hiddenState");
@@ -542,7 +540,7 @@
   function mapTypeOf(pkg) {
     if (pkg && pkg.status === "full-map-ready") return "published";
     if (pkg && pkg.status === "lite-geo-ready") return "object";
-    return null;   // processing/manual-required/none - nothing worth keeping yet
+    return null;   // processing/failed/none - nothing worth keeping yet
   }
 
   /* Only called with a package that actually has geometry - the course

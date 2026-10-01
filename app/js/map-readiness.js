@@ -13,8 +13,7 @@
 
   var STATES = {
     READY: "READY", PARTIAL_READY: "PARTIAL_READY", PROCESSING: "PROCESSING",
-    CURRENT_HOLE_MISSING: "CURRENT_HOLE_MISSING", FAILED: "FAILED",
-    MANUAL_ACTION_REQUIRED: "MANUAL_ACTION_REQUIRED"
+    CURRENT_HOLE_MISSING: "CURRENT_HOLE_MISSING", FAILED: "FAILED"
   };
 
   function point(value) {
@@ -32,7 +31,6 @@
     if (manualHoles && manualHoles[Number(hole)]) return { state: STATES.READY, manual: true, hole: Number(hole) };
     var status = pkg && String(pkg.status || "");
     if (status === "processing") return { state: STATES.PROCESSING, hole: Number(hole) };
-    if (status === "manual-required") return { state: STATES.MANUAL_ACTION_REQUIRED, hole: Number(hole), reason: pkg.reason || "" };
     if (status === "failed") return { state: STATES.FAILED, hole: Number(hole), reason: pkg.reason || "" };
     if (status !== "full-map-ready" && status !== "lite-geo-ready") {
       return { state: STATES.FAILED, hole: Number(hole), reason: "package-unavailable" };

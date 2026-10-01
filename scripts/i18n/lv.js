@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "LAUKUMA KARTE NAV PIEEJAMA",
     "mapRecovery.preparingEyebrow": "LAUKUMA KARTE TIEK GATAVOTA",
-    "mapRecovery.attentionEyebrow": "LAUKUMA KARTEI VAJAG UZMANĪBU",
     "mapRecovery.holeNotMapped": "Šī bedrīte vēl nav kartēta",
     "mapRecovery.stillPreparing": "Mēs vēl gatavojam šo laukumu",
-    "mapRecovery.needsCorrection": "Šī laukuma kartei vajag labojumus",
     "mapRecovery.couldNotLoad": "Neizdevās ielādēt lietojamu karti",
     "mapRecovery.waitOrManual": "Vari pagaidīt šeit vai izmantot GPS manuāli. Kartēto bedrīti atvērsim automātiski, tiklīdz tā būs gatava.",
     "mapRecovery.useManual": "Tu joprojām vari izmantot GPS manuāli. Mēs turpināsim meklēt atjauninātu karti.",

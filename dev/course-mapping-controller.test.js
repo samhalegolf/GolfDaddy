@@ -585,11 +585,6 @@ async function main() {
   assert.strictEqual(env.calls.packageFetches, 1, "'none' is terminal - it is never polled");
   assert(env.events.some((event) => event.event === "server-course-package-pending"), "a course the server never started is logged as pending, not timed out");
 
-  /* Likewise manual-required: the server has already given up on this course. */
-  env = await runScenario({ serverCoursePackage: [{ status: "manual-required", reason: "no numbered hole geometry" }] });
-  assert.strictEqual(env.result.fallback, "interactive-green", "manual-required falls through to the manual fallback");
-  assert.strictEqual(env.calls.packageFetches, 1, "manual-required is terminal - it is never polled");
-
   /* And "failed" (2026-08-18): the server tried, the run died, and it says why. Polling
      cannot change the answer - the server no longer re-enqueues a failed course as a side
      effect of reading its state, so waiting here would stall the player behind nothing. The

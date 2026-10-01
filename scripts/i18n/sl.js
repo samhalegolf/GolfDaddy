@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "ZEMLJEVID IGRIŠČA NI NA VOLJO",
     "mapRecovery.preparingEyebrow": "PRIPRAVLJAMO ZEMLJEVID IGRIŠČA",
-    "mapRecovery.attentionEyebrow": "ZEMLJEVID IGRIŠČA POTREBUJE POPRAVEK",
     "mapRecovery.holeNotMapped": "Ta luknja še ni vrisana",
     "mapRecovery.stillPreparing": "To igrišče še pripravljamo",
-    "mapRecovery.needsCorrection": "Ta zemljevid igrišča potrebuje popravek",
     "mapRecovery.couldNotLoad": "Uporabnega zemljevida nismo mogli naložiti",
     "mapRecovery.waitOrManual": "Lahko počakaš tukaj ali GPS uporabljaš ročno. Vrisano luknjo bomo odprli samodejno, ko bo pripravljena.",
     "mapRecovery.useManual": "GPS lahko še vedno uporabljaš ročno. Še naprej bomo preverjali, ali je na voljo posodobljen zemljevid.",

@@ -324,7 +324,6 @@ export function deriveCoursePackageState({ map, visual, visualJobs, mapperJobs }
   const liveMapperJob = liveJob(mapperJobs);
   const liveVisualJob = liveJob(visualJobs);
   const lastMapperJob = (mapperJobs || [])[0];
-  const manualRequired = !!(lastMapperJob && lastMapperJob.status === "manual-required");
   /* "failed" is a real state, not a flavor of "none". Collapsing it into "none" meant
      buildCoursePackageWithTrigger re-enqueued a fresh mapper job on every poll of a course
      whose runs fail fast: 2026-08-18, a mis-matched "california" course burned 5 identical
@@ -336,7 +335,6 @@ export function deriveCoursePackageState({ map, visual, visualJobs, mapperJobs }
   const lastFailed = !!(lastMapperJob && lastMapperJob.status === "failed");
   if (fullReady) return "full-map-ready";
   if (hasGeometry) return "lite-geo-ready";
-  if (manualRequired) return "manual-required";
   if (liveMapperJob || liveVisualJob) return "processing";
   if (lastFailed) return "failed";
   return "none";

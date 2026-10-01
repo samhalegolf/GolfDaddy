@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "Ο ΧΑΡΤΗΣ ΓΗΠΕΔΟΥ ΔΕΝ ΕΙΝΑΙ ΔΙΑΘΕΣΙΜΟΣ",
     "mapRecovery.preparingEyebrow": "ΠΡΟΕΤΟΙΜΑΣΙΑ ΧΑΡΤΗ ΓΗΠΕΔΟΥ",
-    "mapRecovery.attentionEyebrow": "Ο ΧΑΡΤΗΣ ΓΗΠΕΔΟΥ ΘΕΛΕΙ ΠΡΟΣΟΧΗ",
     "mapRecovery.holeNotMapped": "Αυτή η τρύπα δεν έχει χαρτογραφηθεί ακόμα",
     "mapRecovery.stillPreparing": "Ακόμα προετοιμάζουμε αυτό το γήπεδο",
-    "mapRecovery.needsCorrection": "Ο χάρτης αυτού του γηπέδου χρειάζεται διόρθωση",
     "mapRecovery.couldNotLoad": "Δεν μπορέσαμε να φορτώσουμε έναν χρήσιμο χάρτη",
     "mapRecovery.waitOrManual": "Μπορείς να περιμένεις εδώ ή να χρησιμοποιήσεις το GPS χειροκίνητα. Θα ανοίξουμε αυτόματα τη χαρτογραφημένη τρύπα μόλις είναι έτοιμη.",
     "mapRecovery.useManual": "Μπορείς ακόμα να χρησιμοποιήσεις το GPS χειροκίνητα. Θα συνεχίσουμε να ελέγχουμε για ενημερωμένο χάρτη.",

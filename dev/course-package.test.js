@@ -215,13 +215,6 @@ test("a failed job is outranked by a newer live run - a retry reports processing
   assert.strictEqual(result.status, "processing");
 });
 
-test("a mapper job explicitly flagged manual-required is surfaced as manual-required", async () => {
-  stubFetch({ mapperJobs: [{ id: "job-1", kind: "automap", status: "manual-required", error: "ambiguous course boundary" }] });
-  const result = await buildCoursePackage("brand-new-course");
-  assert.strictEqual(result.status, "manual-required");
-  assert.ok(result.reason.includes("ambiguous"));
-});
-
 test("repeated requests for the same course are stable and side-effect-free (read-only)", async () => {
   const world = { maps: [{ course_id: "pupuke", published: true, geometry_version: "v1", objects_json: { "green-1": { type: "green", holeNumber: 1, position: { lat: -36.8, lng: 174.7 } } }, holes_json: {} }] };
   stubFetch(world);

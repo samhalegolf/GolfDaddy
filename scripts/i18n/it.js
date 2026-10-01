@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "MAPPA DEL PERCORSO NON DISPONIBILE",
     "mapRecovery.preparingEyebrow": "MAPPA DEL PERCORSO IN PREPARAZIONE",
-    "mapRecovery.attentionEyebrow": "MAPPA DEL PERCORSO DA VERIFICARE",
     "mapRecovery.holeNotMapped": "Questa buca non è ancora mappata",
     "mapRecovery.stillPreparing": "Stiamo ancora preparando questo percorso",
-    "mapRecovery.needsCorrection": "La mappa di questo percorso va corretta",
     "mapRecovery.couldNotLoad": "Non siamo riusciti a caricare una mappa utilizzabile",
     "mapRecovery.waitOrManual": "Puoi attendere qui o usare il GPS manualmente. Apriremo automaticamente la buca mappata appena sarà pronta.",
     "mapRecovery.useManual": "Puoi comunque usare il GPS manualmente. Continueremo a cercare una mappa aggiornata.",

@@ -419,7 +419,6 @@
       warnings: [
         "Live refresh (2200ms interval + 2 CustomEvent listeners) is gated on #developerPanel.open — will not auto-refresh when only the new Studio shell is open. See CLARITY_STUDIO_WIRING_COMPARISON.md.",
         "The Server Job History section only shows the last 8 jobs (functions/course-mapper-jobs.mjs's mapperBuildState query is limit=8) and only for one course at a time — there is still no cross-course \"show me every currently failing course\" view. A future improvement worth doing: a dashboard query across all courses' latest job status.",
-        "The player-facing app itself still cannot see a job's error — GET /api/course-package's response never surfaces course_mapper_jobs.error to the client (functions/gd-course-package-shape.mjs's \"manual-required\" state is derived but never actually written by the worker). This Studio view is currently the only place a human can see why a course failed to map without querying Supabase directly."
       ]
     },
 

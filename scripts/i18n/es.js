@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "MAPA DEL CAMPO NO DISPONIBLE",
     "mapRecovery.preparingEyebrow": "PREPARANDO MAPA DEL CAMPO",
-    "mapRecovery.attentionEyebrow": "EL MAPA DEL CAMPO NECESITA REVISIÓN",
     "mapRecovery.holeNotMapped": "Este hoyo aún no está mapeado",
     "mapRecovery.stillPreparing": "Todavía estamos preparando este campo",
-    "mapRecovery.needsCorrection": "El mapa de este campo necesita una corrección",
     "mapRecovery.couldNotLoad": "No hemos podido cargar un mapa utilizable",
     "mapRecovery.waitOrManual": "Puedes esperar aquí o usar el GPS manualmente. Abriremos el hoyo mapeado automáticamente cuando esté listo.",
     "mapRecovery.useManual": "Aún puedes usar el GPS manualmente. Seguiremos buscando un mapa actualizado.",

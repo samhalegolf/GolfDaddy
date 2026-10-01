@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "MAPA DO CAMPO INDISPONÍVEL",
     "mapRecovery.preparingEyebrow": "MAPA DO CAMPO EM PREPARAÇÃO",
-    "mapRecovery.attentionEyebrow": "MAPA DO CAMPO PRECISA DE ATENÇÃO",
     "mapRecovery.holeNotMapped": "Este buraco ainda não está mapeado",
     "mapRecovery.stillPreparing": "Ainda estamos a preparar este campo",
-    "mapRecovery.needsCorrection": "O mapa deste campo precisa de correção",
     "mapRecovery.couldNotLoad": "Não conseguimos carregar um mapa utilizável",
     "mapRecovery.waitOrManual": "Podes esperar aqui ou usar o GPS manualmente. Abrimos o buraco mapeado automaticamente quando estiver pronto.",
     "mapRecovery.useManual": "Podes continuar a usar o GPS manualmente. Vamos continuar à procura de um mapa atualizado.",

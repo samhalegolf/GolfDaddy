@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "BAANKAART NIET BESCHIKBAAR",
     "mapRecovery.preparingEyebrow": "BAANKAART IN VOORBEREIDING",
-    "mapRecovery.attentionEyebrow": "BAANKAART VRAAGT AANDACHT",
     "mapRecovery.holeNotMapped": "Deze hole is nog niet in kaart gebracht",
     "mapRecovery.stillPreparing": "We zijn deze baan nog aan het voorbereiden",
-    "mapRecovery.needsCorrection": "Deze baankaart moet worden gecorrigeerd",
     "mapRecovery.couldNotLoad": "We konden geen bruikbare kaart laden",
     "mapRecovery.waitOrManual": "Je kunt hier wachten of GPS handmatig gebruiken. We openen de hole automatisch zodra de kaart ervan klaar is.",
     "mapRecovery.useManual": "Je kunt GPS nog steeds handmatig gebruiken. We blijven zoeken naar een bijgewerkte kaart.",

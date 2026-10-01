@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "HARTA TERENULUI INDISPONIBILĂ",
     "mapRecovery.preparingEyebrow": "HARTA TERENULUI ÎN PREGĂTIRE",
-    "mapRecovery.attentionEyebrow": "HARTA TERENULUI NECESITĂ ATENȚIE",
     "mapRecovery.holeNotMapped": "Această gaură nu este încă cartografiată",
     "mapRecovery.stillPreparing": "Încă pregătim acest teren",
-    "mapRecovery.needsCorrection": "Harta acestui teren trebuie corectată",
     "mapRecovery.couldNotLoad": "Nu am putut încărca o hartă utilizabilă",
     "mapRecovery.waitOrManual": "Poți aștepta aici sau poți folosi GPS-ul manual. Vom deschide automat gaura cartografiată când va fi gata.",
     "mapRecovery.useManual": "Poți folosi în continuare GPS-ul manual. Vom verifica în continuare dacă apare o hartă actualizată.",

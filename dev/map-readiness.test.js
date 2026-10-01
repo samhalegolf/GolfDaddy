@@ -11,7 +11,6 @@ assert.strictEqual(readiness.classify(partial, 1).state, "PARTIAL_READY", "a map
 assert.strictEqual(readiness.classify(partial, 2).state, "CURRENT_HOLE_MISSING", "only the absent hole falls back");
 assert.strictEqual(readiness.classify(partial, 3).state, "PARTIAL_READY", "mapped play resumes after the absent hole");
 assert.strictEqual(readiness.classify({ status: "processing" }, 1).state, "PROCESSING");
-assert.strictEqual(readiness.classify({ status: "manual-required" }, 1).state, "MANUAL_ACTION_REQUIRED");
 assert.strictEqual(readiness.classify({ status: "failed" }, 1).state, "FAILED");
 assert.strictEqual(readiness.classify({ status: "full-map-ready", holes: [] }, 1).state, "FAILED", "an unreadable ready package is a runtime failure");
 
@@ -26,4 +25,4 @@ assert.strictEqual(controller.current().state, "PARTIAL_READY", "manual fallback
 controller.observePackage({ status: "full-map-ready", readiness: "complete", mappedHoleCount: 3, expectedHoleCount: 3, missingHoles: [], holes: [green(1), green(2), green(3)] });
 assert.strictEqual(controller.current().state, "READY", "a repaired package recovers without recreating the controller");
 
-console.log("map-readiness passed: 10 checks");
+console.log("map-readiness passed: 9 checks");

@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "MAPA IHRISKA NIE JE K DISPOZÍCII",
     "mapRecovery.preparingEyebrow": "MAPA IHRISKA SA PRIPRAVUJE",
-    "mapRecovery.attentionEyebrow": "MAPA IHRISKA POTREBUJE POZORNOSŤ",
     "mapRecovery.holeNotMapped": "Táto jamka ešte nie je zmapovaná",
     "mapRecovery.stillPreparing": "Toto ihrisko ešte pripravujeme",
-    "mapRecovery.needsCorrection": "Mapa tohto ihriska potrebuje opravu",
     "mapRecovery.couldNotLoad": "Nepodarilo sa načítať použiteľnú mapu",
     "mapRecovery.waitOrManual": "Môžeš počkať tu alebo použiť GPS ručne. Keď bude zmapovaná jamka pripravená, automaticky ju otvoríme.",
     "mapRecovery.useManual": "GPS môžeš naďalej používať ručne. Budeme ďalej kontrolovať, či nie je aktualizovaná mapa.",
