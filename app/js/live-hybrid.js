@@ -35,10 +35,10 @@
   var CELL = 4;
 
   var DEFAULTS = {
-    corridorM: 40,        // half-width of the tee-route-green corridor
-    greenM: 35,           // radius around the green centre
+    corridorM: 30,        // half-width of the tee-route-green corridor
+    greenM: 30,           // radius around the green centre
     greenShapeM: 15,      // around each mapped green vertex
-    featherM: 50,         // Mapbox fades 1 -> 0 across this many metres outside the area
+    featherM: 40,         // Mapbox fades 1 -> 0 across this many metres outside the area
     context: { saturation: 0.95, contrast: 0.97 },   // outer Esri, very slightly quieter
     limits: { gain: [0.8, 1.25], contrast: [0.85, 1.2], saturation: [0.85, 1.2] },
     minSamples: 400

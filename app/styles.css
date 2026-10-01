@@ -53,6 +53,10 @@ body.route-signin #signInScreen { display: flex; align-items: center; justify-co
    unrelated aerial. visibility, not display: Leaflet keeps its size and the
    next live hole re-frames without an invalidateSize round-trip. */
 body.surface-published #map { visibility: hidden; }
+/* Clarity 3D Mesh (admin test mode) holds the screen on the previous hole while the next hole's
+   frame is built, instead of flashing the live map for a beat. painter.js lifts it the moment
+   the frame is up, on any fallback, and after a few seconds regardless. */
+body.live-terrain-hold #map { visibility: hidden; }
 
 /* Live-map stage framing. The map element is over-provisioned to a square of
    the viewport diagonal and placed entirely by play.js's matrix, so rotating

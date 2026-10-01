@@ -80,6 +80,22 @@ async function ok(name, fn) { await fn(); passed++; console.log('ok  - ' + name)
     assert.ok(lt.frameWindow(LONG_PAR5).z <= lt.frameWindow(AKARANA_H1).z, 'a longer hole never asks for a finer zoom');
   });
 
+  await ok('the frame reaches past the green for the tilted lock view, without losing zoom', () => {
+    for (const hole of [AKARANA_H1, LONG_PAR5]) {
+      const win = lt.frameWindow(hole);
+      assert.strictEqual(win.z, 18, 'still z18');
+      const meta = lt.surfaceMeta(win, null);
+      const mpp = lt.windowMetres(win).width / win.w;
+      /* 150m on from the green, along tee -> green, is still on the frame. */
+      const dLat = hole.green.lat - hole.tee.lat, dLng = hole.green.lng - hole.tee.lng;
+      const lenM = Math.hypot(dLat * 111320, dLng * 111320 * Math.cos(hole.tee.lat * Math.PI / 180));
+      const k = 150 / lenM;
+      const beyond = { lat: hole.green.lat + dLat * k, lng: hole.green.lng + dLng * k };
+      assert.ok(surface.projectToSurface(meta, beyond.lat, beyond.lng), 'ground 150m past the green is pictured');
+      assert.ok(mpp < 0.6);
+    }
+  });
+
   await ok('no tee or green, no window', () => {
     assert.strictEqual(lt.frameWindow(null), null);
     assert.strictEqual(lt.frameWindow({ tee: AKARANA_H1.tee }), null);

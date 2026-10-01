@@ -1926,6 +1926,8 @@
   function clearSurface() {
     published = false;
     liveTerrainUp = false;
+    liveTerrainHold = null;
+    document.body.classList.remove("live-terrain-hold");
     hideVersionStamp();
     document.body.classList.remove("surface-published");
     var img = el("surfaceImage");
@@ -2194,6 +2196,8 @@
   var liveTerrainMesh = "";     // "on", or why the mesh is not up, for the readout
   var tileSession = null;       // the round's provider tiles (live-hybrid.js), per course
   var LIVE_MESH_AMBIENT = 0.42;
+  var liveTerrainHold = null;   // the transition whose frame is being waited for, screen held
+  var LIVE_TERRAIN_HOLD_MS = 5000;
   var meshSupportedCache = null;
 
   function meshSupported() {
@@ -2242,11 +2246,37 @@
     liveTerrain = null;
   }
 
+  /* Hold the screen for this transition's frame. Lifted when it is up (presentSurface), on any
+     fallback (clearSurface), or after LIVE_TERRAIN_HOLD_MS - a slow network shows the live map
+     rather than a frozen previous hole, and the frame still replaces it when it lands. */
+  function holdForLiveTerrain(token) {
+    presentation = "loading";
+    liveTerrainHold = token;
+    document.body.classList.add("live-terrain-hold");
+    setTimeout(function () { if (liveTerrainHold === token) releaseLiveTerrainHold(); }, LIVE_TERRAIN_HOLD_MS);
+  }
+
+  function releaseLiveTerrainHold() {
+    if (!liveTerrainHold) return;
+    repaint("LIVE_TERRAIN_RELEASE", function () {
+      presentation = "live";
+      clearSurface();
+      if (liveTerrainNote) noteLiveTerrain(liveTerrainNote);
+      lastCameraKey = null;
+      if (marshal) render(marshal.scene());
+    });
+  }
+
+  /* The hole may build: on the live map, or while its own transition holds the screen. */
+  function liveTerrainMayPresent(token) {
+    return token === transitionToken && (presentation === "live" || liveTerrainHold === token);
+  }
+
   function startLiveTerrain(scene, token, reason) {
-    if (!liveTerrainWanted()) return;
+    if (!liveTerrainWanted()) { releaseLiveTerrainHold(); return; }
     var hole = scene && (scene.camera.hole || scene.hole.rec);
     var win = app.liveTerrain.frameWindow(hole);
-    if (!win) { noteLiveTerrain("this hole has no tee and green to frame"); return; }
+    if (!win) { noteLiveTerrain("this hole has no tee and green to frame"); releaseLiveTerrainHold(); return; }
     var courseKey = marshal ? marshal.round().courseKey : "";
     var view = hybridView();
     var key = app.liveTerrain.windowKey(courseKey, scene.hole.number, win) + "|" + view;
@@ -2280,7 +2310,7 @@
     }, { view: view }).then(function (entry) {
       if (liveTerrainLoading === key) liveTerrainLoading = null;
       /* Arrived for a hole that is no longer up, or one that turned out to be published. */
-      if (token !== transitionToken || presentation !== "live" || !liveTerrainWanted()) {
+      if (!liveTerrainMayPresent(token) || !liveTerrainWanted()) {
         app.liveTerrain.release(entry, function (u) { URL.revokeObjectURL(u); });
         return;
       }
@@ -2297,11 +2327,12 @@
       if (liveTerrainLoading === key) liveTerrainLoading = null;
       if (token !== transitionToken) return;
       noteLiveTerrain((error && error.message) || String(error));
+      releaseLiveTerrainHold();
     });
   }
 
   function presentLiveTerrain(token) {
-    if (!liveTerrain || token !== transitionToken || presentation !== "live") return;
+    if (!liveTerrain || !liveTerrainMayPresent(token)) return;
     liveTerrainNote = "";
     presentation = "loading";
     presentSurface(liveTerrain.asset);
@@ -2338,7 +2369,7 @@
       hideVersionStamp();
       return;
     }
-    if (!wanted) { if (liveTerrain) releaseLiveTerrain(); return; }
+    if (!wanted) { if (liveTerrain) releaseLiveTerrain(); releaseLiveTerrainHold(); return; }
     if (!liveTerrainUp && presentation === "live" && currentScene) {
       startLiveTerrain(currentScene, transitionToken, reason);
     } else if (liveTerrainUp && liveTerrain && liveTerrain.view !== hybridView()) {
@@ -2410,6 +2441,8 @@
         presentation = "published";
         surfaceFailed = null;
         document.body.classList.add("surface-published");
+        liveTerrainHold = null;
+        document.body.classList.remove("live-terrain-hold");
         publishedFrameUrl = url;
         liveTerrainUp = live;
         showVersionStamp(asset);
@@ -2483,8 +2516,11 @@
     }
     /* Absence is the answer for this hole: the live map IS the presentation,
        so create it now. */
-    presentation = "live";
-    clearSurface();
+    /* In the 3D mesh test mode the hole about to be built is held off-screen: the previous
+       picture stays (as a published hole's does) rather than the live map flashing up for the
+       second the new frame takes. */
+    if (liveTerrainWanted()) holdForLiveTerrain(token);
+    else { presentation = "live"; clearSurface(); }
     if (courseKey) {
       var answer = await ensureStore().surfaceFor(courseKey, hole);
       if (token !== transitionToken) return;

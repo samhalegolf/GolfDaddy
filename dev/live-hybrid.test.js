@@ -108,6 +108,11 @@ function pxOf(win, p) {
     assert.strictEqual(Math.round(narrow.innerM2), Math.round(wide.innerM2), 'the full-strength area does not move');
   });
 
+  await ok('the defaults keep Mapbox to the playing area: 30m corridor, 30m green, 40m feather', () => {
+    assert.deepStrictEqual([hy.DEFAULTS.corridorM, hy.DEFAULTS.greenM, hy.DEFAULTS.featherM], [30, 30, 40]);
+    assert.ok(field.framePct < 40, 'Mapbox mask ' + field.framePct.toFixed(1) + '% of the frame');
+  });
+
   await ok('the same hole always gives the same mask', () => {
     const again = hy.maskField(lt.frameWindow(JSON.parse(JSON.stringify(H1))), hy.holeGeometry(JSON.parse(JSON.stringify(H1)), PKG_H1));
     assert.deepStrictEqual(Array.from(again.alpha), Array.from(field.alpha));
@@ -223,7 +228,7 @@ function pxOf(win, p) {
     assert.strictEqual(d.context, 'esri');
     assert.strictEqual(d.mapbox.network, mapbox.length);
     assert.strictEqual(d.sessionMapbox, mapbox.length);
-    assert.ok(d.colour.applied && d.maskPct > 0 && d.featherM === 50 && d.composeMs >= 0);
+    assert.ok(d.colour.applied && d.maskPct > 0 && d.featherM === hy.DEFAULTS.featherM && d.composeMs >= 0);
     console.log('      hole 1: Esri ' + esri.length + ' tiles, Mapbox ' + mapbox.length + ' of ' + esri.length
       + ' (' + d.maskPct + '% of the frame masked)');
   });

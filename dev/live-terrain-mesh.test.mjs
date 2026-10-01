@@ -14,7 +14,8 @@
  *   - the Leaflet map underneath fetches no Mapbox at all in this mode;
  *   - GPS fixes, Play, a relief change and a debug view change fetch no provider tiles;
  *   - relief off goes back to the live map and lets the frame go; on again rebuilds from cache;
- *   - the next hole reuses the round's tiles and fetches only what it does not share;
+ *   - the next hole reuses the round's tiles and fetches only what it does not share, and the
+ *     live map never flashes up while it is built;
  *   - Mapbox failing still gives an Esri mesh surface; a failed DEM gives a flat composite;
  *     Esri failing leaves the live map up - each with its reason on the readout;
  *   - a non-admin never asks for anything;
@@ -332,6 +333,16 @@ try {
 
   /* 4. The next hole: a new frame from the round's tiles plus only the ones it lacks. */
   const beforeH2 = { ...tiles };
+  /* Watch every frame of the change: the live map must never be what is on screen. */
+  const flashed = page.evaluate(() => new Promise((resolve) => {
+    const map = document.getElementById("map");
+    let seen = 0, frames = 0;
+    (function look() {
+      frames++;
+      if (getComputedStyle(map).visibility !== "hidden") seen++;
+      if (frames < 90) requestAnimationFrame(look); else resolve({ seen, frames });
+    })();
+  }));
   await page.evaluate(() => window.__lm.hole(2));
   await page.evaluate(() => window.__lm.until(() => window.__lm.debug().active && window.__lm.debug().frame.rebuild === "hole change", "hole 2 on the mesh"));
   s = await page.evaluate(() => window.__lm.state());
@@ -339,6 +350,8 @@ try {
   ok("the next hole reuses the round's tiles", f2.mapbox.reused > 0 && f2.esri.reused > 0
     && tiles.mapbox - beforeH2.mapbox === f2.mapbox.network && tiles.esri - beforeH2.esri === f2.esri.network, { f2, tiles });
   ok("and the readout counts the round's Mapbox total", f2.sessionMapbox === tiles.mapbox, { f2, tiles });
+  const flash = await flashed;
+  ok("changing hole holds the last picture instead of flashing the live map", flash.seen === 0, flash);
   console.log("      hole 1: Esri " + f1.esri.network + ", Mapbox " + f1.mapbox.network + " of " + f1.tiles.frame + " frame tiles ("
     + f1.maskPct + "% masked); hole 2: Esri " + f2.esri.network + " new + " + f2.esri.reused + " reused, Mapbox "
     + f2.mapbox.network + " new + " + f2.mapbox.reused + " reused");
