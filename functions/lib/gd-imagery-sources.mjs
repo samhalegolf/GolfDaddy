@@ -128,9 +128,11 @@ const GLOBAL_TERRAIN_TILES_DEM = {
   }
 };
 const GLOBAL_TERRAIN_TILES_ATTRIBUTION = {
-  /* The wording Copernicus itself asks for, plus the courtesy credits the joerd attribution
-     doc lists for the patched-in sources. */
-  text: "Elevation: Mapzen Terrain Tiles. Produced using Copernicus data and information funded by the European Union - EU-DEM layers; SRTM data courtesy of the U.S. Geological Survey",
+  /* Only the wording Copernicus requires. The joerd doc's other lines (Mapzen, "SRTM data
+     courtesy of the U.S. Geological Survey") are courtesies - SRTM is public domain - and
+     on a phone they pushed the credit to three lines over every hole, naming the US on a
+     course in Belfast. The full list stays one tap away at `url`. */
+  text: "Elevation: Produced using Copernicus data and information funded by the European Union - EU-DEM layers",
   url: "https://github.com/tilezen/joerd/blob/master/docs/attribution.md",
   perSurvey: false
 };
