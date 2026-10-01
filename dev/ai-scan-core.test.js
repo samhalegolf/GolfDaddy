@@ -18,12 +18,14 @@ const CARD = { holes: [
   { holeNumber: 1, par: 4, distanceM: 366 }, { hole: 2, par: 3, yards: 165 }, { number: 3, par: 5, metres: 480 }, { holeNumber: "x" }
 ] };
 
-test("the output schema is strict JSON of fairway/green pixel polygons, nothing else", () => {
+test("the output schema is strict JSON of pixel polygons, each optionally replacing a recorded shape", () => {
   const schema = core.AI_SCAN_OUTPUT_SCHEMA;
   assert.strictEqual(schema.additionalProperties, false);
   assert.deepStrictEqual(schema.required, ["features", "notes"]);
   const feature = schema.properties.features.items;
-  assert.deepStrictEqual(feature.properties.kind.enum, ["fairway", "green", "tee"], "greens, fairways and tees - never bunkers, water or hole numbers as shapes");
+  assert.deepStrictEqual(feature.properties.kind.enum, ["fairway", "green", "tee", "bunker"], "bunkers only to shape a pin or refit a recorded bunker - never water or hole numbers as shapes");
+  assert.strictEqual(feature.properties.replaces.type, "string", "a shape can name the recorded one it replaces");
+  assert.ok(!feature.required.includes("replaces"), "replaces is optional - a traced shape is new");
   assert.strictEqual(feature.properties.points.items.items.type, "integer", "pixels are integer [x, y] pairs");
   assert.ok(feature.required.includes("confidence"));
   assert.ok(!feature.required.includes("hole"), "hole is optional - the resolver numbers, not the model");
@@ -42,14 +44,13 @@ test("scorecard lines tolerate every parser's field names and skip junk", () => 
 
 test("the prompt tells the model the picture's scale, the card as context, and not to number", () => {
   const g = georef.imageGeoreference({ centre: { lat: 54.66015, lng: -5.78477 }, zoom: 17, width: 1024, height: 768 });
-  const prompt = core.buildScanPrompt({ course: COURSE, scorecard: CARD, georef: g, existing: ["green around (100, 200)"], notes: "the 9th is by the clubhouse" });
+  const prompt = core.buildScanPrompt({ course: COURSE, scorecard: CARD, georef: g, notes: "the 9th is by the clubhouse" });
   assert.ok(prompt.includes("Royal Belfast Golf Club"));
   assert.ok(prompt.includes("1024 x 768 pixels"));
   assert.ok(/about 0\.6\d metres per pixel/.test(prompt), "metres per pixel is stated: " + prompt.match(/about [\d.]+ metres per pixel/));
   assert.ok(/a green is typically 20-40 m across \(\d+-\d+ px\)/.test(prompt), "the green's size is given in this picture's pixels");
   assert.ok(prompt.includes("hole 2 par 3 165yd"), "the card is in the prompt");
   assert.ok(/never for numbering/.test(prompt), "the card is context, never a numbering key");
-  assert.ok(prompt.includes("green around (100, 200)"), "already-saved shapes are named so they are not re-traced");
   assert.ok(prompt.includes("From the operator: the 9th is by the clubhouse"));
   assert.ok(prompt.includes("stopping short of the green"), "fairways must not swallow the green - the resolver measures fairway-to-green distance");
   assert.ok(prompt.includes("practice greens"), "practice areas are excluded, the resolver has no image to tell them apart by");
@@ -60,42 +61,82 @@ test("the prompt tells the model the picture's scale, the card as context, and n
   assert.ok(prompt.includes("Never place a green because the routing suggests one should be there"), "an inferred green is forbidden");
   assert.ok(prompt.includes("At the far end of each fairway from its green"), "tees are looked for beyond the fairway start");
   assert.ok(!prompt.includes("Image 2"), "no course map, no mention of one");
-  const withMap = core.buildScanPrompt({ course: COURSE, scorecard: CARD, georef: g, existing: [], courseMap: true });
+  const withMap = core.buildScanPrompt({ course: COURSE, scorecard: CARD, georef: g, courseMap: true });
   assert.ok(withMap.includes("Image 2 is the club's own course map"), "the course map is introduced as image 2");
   assert.ok(withMap.includes("never take a coordinate from it"), "the course map is a tie-breaker, never a coordinate source");
   assert.ok(withMap.indexOf("Image 2") < withMap.indexOf("1. GREENS"), "the map is described before the steps that may use it");
-  const noCard = core.buildScanPrompt({ course: COURSE, scorecard: null, georef: g, existing: [] });
+  const noCard = core.buildScanPrompt({ course: COURSE, scorecard: null, georef: g });
   assert.ok(noCard.includes("No scorecard is available"));
 });
 
 test("the grid and the known greens drawn on the picture are explained, and known greens are not asked for again", () => {
   const g = georef.imageGeoreference({ centre: { lat: 54.66015, lng: -5.78477 }, zoom: 17, width: 1024, height: 768 });
   const prompt = core.buildScanPrompt({
-    course: COURSE, scorecard: null, georef: g, existing: ["green around (1, 1)"], grid: 128,
-    anchors: [
-      { kind: "green", label: "G1", x: 300, y: 400 }, { kind: "green", label: "G2", x: 700, y: 120 },
-      { kind: "fairway", label: "saved", x: 500, y: 500, saved: true }
-    ]
+    course: COURSE, scorecard: null, georef: g, grid: 128,
+    anchors: [{ kind: "green", label: "G1", x: 300, y: 400 }, { kind: "green", label: "G2", x: 700, y: 120 }]
   });
   assert.ok(prompt.includes("every 128 pixels"), "the grid spacing is stated");
   assert.ok(/Read every coordinate you return off this grid/.test(prompt), "the grid is declared authoritative");
   assert.ok(prompt.includes("G1 (300, 400), G2 (700, 120)"), "known greens are listed with their pixel centres");
   assert.ok(prompt.includes("Do not return them; find every other green by the same appearance"), "known greens are examples of appearance and excluded from the answer");
-  assert.ok(prompt.includes("fairway at (500, 500)"), "saved shapes outlined on the picture are named");
-  assert.ok(!prompt.includes("green around (1, 1)"), "the text-only description of saved shapes is replaced by the drawn ones when anchors carry them");
-  const bare = core.buildScanPrompt({ course: COURSE, scorecard: null, georef: g, existing: [] });
-  assert.ok(!bare.includes("coordinate grid") && !bare.includes("already mapped"), "no grid or anchors, nothing said about them");
+  const bare = core.buildScanPrompt({ course: COURSE, scorecard: null, georef: g });
+  assert.ok(!bare.includes("coordinate grid") && !bare.includes("already been mapped"), "no grid or anchors, nothing said about them");
 });
 
-test("existing shapes are described at their pixel centre in THIS picture", () => {
+const SHAPE = { label: "S1", id: "f-3", kind: "green", hole: 7, pixels: [{ x: 290, y: 390 }, { x: 310, y: 390 }, { x: 310, y: 410 }, { x: 290, y: 410 }] };
+const PIN = { label: "P1", id: "f-9", kind: "bunker", hole: null, pin: true, pixels: [{ x: 500, y: 200 }] };
+const FAIRWAY_PIN = { label: "P2", id: "f-10", kind: "fairway", hole: 4, pin: true, pixels: [{ x: 100, y: 600 }, { x: 400, y: 300 }] };
+
+test("the job follows what is in view: pins - complete, shapes only - refine, nothing - trace", () => {
+  assert.strictEqual(core.scanJob([]), "trace");
+  assert.strictEqual(core.scanJob([SHAPE]), "refine");
+  assert.strictEqual(core.scanJob([SHAPE, PIN]), "complete", "one pin in view makes it the full job");
+});
+
+test("a refine pass asks only for corrections to the recorded shapes, by label", () => {
   const g = georef.imageGeoreference({ centre: { lat: 54.66015, lng: -5.78477 }, zoom: 17, width: 1024, height: 768 });
-  const centreLatLng = g.toLatLng({ x: 300, y: 400 });
-  const out = core.describeExisting([
-    { kind: "green", hole: 7, points: [g.toLatLng({ x: 290, y: 390 }), g.toLatLng({ x: 310, y: 390 }), g.toLatLng({ x: 310, y: 410 }), g.toLatLng({ x: 290, y: 410 })] },
-    { kind: "fairway", points: [] }
-  ], p => g.toPx(p));
-  assert.deepStrictEqual(out, ["green (hole 7) around (300, 400)"]);
-  assert.ok(centreLatLng);
+  const prompt = core.buildScanPrompt({ course: COURSE, scorecard: CARD, georef: g, shapes: [SHAPE] });
+  assert.ok(prompt.includes("This is a REFINE pass. Do not map the course again."));
+  assert.ok(prompt.includes("S1: green outline [[290, 390], [310, 390], [310, 410], [290, 410]] (hole 7)"), "each recorded shape is listed with its corners in this picture");
+  assert.ok(prompt.includes("Leave out every shape that already fits well. Return no new shapes"), "fitting shapes are left alone and nothing new is added");
+  assert.ok(prompt.includes("never move a shape onto different ground"));
+  assert.ok(!prompt.includes("1. GREENS"), "no trace steps on a refine pass");
+});
+
+test("a complete pass shapes every pin, refits recorded shapes, then traces what is missing", () => {
+  const g = georef.imageGeoreference({ centre: { lat: 54.66015, lng: -5.78477 }, zoom: 17, width: 1024, height: 768 });
+  const prompt = core.buildScanPrompt({ course: COURSE, scorecard: CARD, georef: g, shapes: [SHAPE, PIN, FAIRWAY_PIN] });
+  assert.ok(prompt.includes("This is a COMPLETE pass."));
+  assert.ok(prompt.includes("P1: bunker pin, centre [[500, 200]]") && prompt.includes("P2: fairway pin, start and end [[100, 600], [400, 300]] (hole 4)"), "pins are listed with their points");
+  assert.ok(prompt.includes("never drop a pin or move it to other ground"), "the pins are trusted");
+  assert.ok(prompt.includes("2. RECORDED SHAPES. Where a recorded outline (S1)"), "recorded shapes are refitted on the same pass");
+  const order = ["1. PINS", "2. RECORDED SHAPES", "3. ANYTHING STILL MISSING", "1. GREENS"].map(step => prompt.indexOf(step));
+  assert.ok(order.every((i, n) => i >= 0 && (n === 0 || i > order[n - 1])), "pins first, then shapes, then the trace: " + JSON.stringify(order));
+  assert.ok(prompt.includes("Never return a new bunker"));
+});
+
+test("an answer that replaces a recorded shape is saved under its id, kind and hole; what was not asked for is dropped", () => {
+  const box = [[1, 1], [9, 1], [9, 9], [1, 9]];
+  const complete = core.parseScanAnswer({ features: [
+    { kind: "bunker", points: box, replaces: "p1", confidence: 0.7 },
+    { kind: "green", points: box, replaces: "S1", hole: 2, confidence: 0.8 },
+    { kind: "fairway", points: box, replaces: "S1", confidence: 0.5 },
+    { kind: "green", points: box, replaces: "S9", confidence: 0.5 },
+    { kind: "bunker", points: box, confidence: 0.5 },
+    { kind: "tee", points: box, confidence: 0.6 }
+  ], notes: "" }, [SHAPE, PIN]);
+  assert.strictEqual(complete.job, "complete");
+  assert.deepStrictEqual(complete.features.map(f => f.id), ["f-9", "f-3", "tee-ai-6"], "replacements take the recorded id; a new tee is new");
+  assert.strictEqual(complete.features[1].hole, 7, "a replacement keeps the recorded hole number, not one the model gave");
+  assert.strictEqual(complete.features[0].kind, "bunker");
+  assert.deepStrictEqual(complete.dropped.map(d => d.index), [2, 3, 4], "a second answer for S1, an unknown label and a new bunker are dropped: " + JSON.stringify(complete.dropped));
+  const refine = core.parseScanAnswer({ features: [
+    { kind: "fairway", points: box, replaces: "S1", confidence: 0.5 },
+    { kind: "green", points: box, confidence: 0.9 }
+  ], notes: "" }, [SHAPE]);
+  assert.strictEqual(refine.job, "refine");
+  assert.deepStrictEqual(refine.features.map(f => [f.id, f.kind]), [["f-3", "green"]], "a correction keeps the recorded kind; a new shape on a refine pass is dropped");
+  assert.strictEqual(refine.dropped[0].reason, "a new shape on a refine pass");
 });
 
 test("the answer is read whether it arrives as an object, JSON text, a fenced block or prose around JSON", () => {

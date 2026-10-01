@@ -222,8 +222,7 @@
       '<label class="gdStudioViewportField">Provider <select data-gd-overlay="provider"></select></label>' +
       '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="osm" checked> Show OSM</label>' +
       '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="objects" checked> Show course objects</label>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ai" disabled>Scan this view with AI</button>' +
-      '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="ai-replace"> replace saved shapes</label>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ai" disabled title="Pins in view: the AI shapes them and fills in the rest. Only shapes in view: it refits them to the ground. Nothing in view: it traces from scratch.">Scan this view with AI</button>' +
       '<label class="gdStudioViewportField gdStudioDiagramBtn">Course map… <input type="file" accept="image/*" data-gd-overlay="course-map" hidden></label>' +
       '<span class="gdStudioViewportField" data-gd-overlay="course-map-state"></span>' +
       "</div>" +
@@ -271,7 +270,7 @@
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "objects", "ai", "ai-replace", "course-map", "course-map-state", "last-run", "mode-shapes", "mode-pins", "tool-move", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "width", "width-label", "wand-size-label", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "hole", "hole-label", "shape-pins", "workspace", "fit", "zoom-shape", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "saved", "ready", "clear", "run", "status"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "objects", "ai", "course-map", "course-map-state", "last-run", "mode-shapes", "mode-pins", "tool-move", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "width", "width-label", "wand-size-label", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "hole", "hole-label", "shape-pins", "workspace", "fit", "zoom-shape", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "saved", "ready", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -1500,42 +1499,72 @@
       });
     }
 
-    /* What the model is shown that is not ground: the greens OSM already has (bright outline)
-       and the shapes already saved (white outline), so it traces fairways TO known greens and
-       adds only the greens nobody has yet. Returns the anchors as pixel centres for the prompt.
-       Only shapes inside the picture are drawn or listed. */
+    /* What the model is shown that is not ground: the greens OSM already has (bright outline,
+       G1..), the shapes already recorded (thin white outline, S1..) and the pins (white-ringed
+       dot or dashed line, P1..). Recorded shapes and pins carry their id, so the answer can
+       name the one it replaces; which of them are in the picture decides the scan's job
+       (gd-ai-scan-core scanJob). Only what is inside the picture is drawn or listed. */
     function drawAnchors(canvas, toPx) {
       var ctx = canvas.getContext("2d");
       var anchors = [];
-      function outline(points, style, label) {
-        var px = points.map(toPx);
-        if (px.length < 2) return null;
-        var inside = px.some(function (p) { return p.x >= 0 && p.y >= 0 && p.x <= canvas.width && p.y <= canvas.height; });
-        if (!inside) return null;
-        ctx.save();
-        ctx.strokeStyle = style; ctx.lineWidth = 3; ctx.setLineDash([]);
+      function pixels(points) { return points.map(function (p) { return toPx(L.latLng(p.lat, p.lng)); }); }
+      function inside(px) { return px.some(function (p) { return p.x >= 0 && p.y >= 0 && p.x <= canvas.width && p.y <= canvas.height; }); }
+      function centreOf(px) {
+        return {
+          x: Math.round(px.reduce(function (a, p) { return a + p.x; }, 0) / px.length),
+          y: Math.round(px.reduce(function (a, p) { return a + p.y; }, 0) / px.length)
+        };
+      }
+      function tag(label, c, colour) {
+        ctx.font = "bold 14px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        var w = ctx.measureText(label).width + 8;
+        ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.fillRect(c.x - w / 2, c.y - 9, w, 18);
+        ctx.fillStyle = colour; ctx.fillText(label, c.x, c.y);
+      }
+      function path(px, close, width, dash, colour) {
+        ctx.strokeStyle = colour; ctx.lineWidth = width; ctx.setLineDash(dash);
         ctx.beginPath();
         px.forEach(function (p, i) { if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
-        ctx.closePath(); ctx.stroke();
-        var cx = Math.round(px.reduce(function (a, p) { return a + p.x; }, 0) / px.length);
-        var cy = Math.round(px.reduce(function (a, p) { return a + p.y; }, 0) / px.length);
-        if (label) {
-          ctx.font = "bold 14px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-          ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.fillRect(cx - 12, cy - 9, 24, 18);
-          ctx.fillStyle = style; ctx.fillText(label, cx, cy);
-        }
-        ctx.restore();
-        return { x: cx, y: cy };
+        if (close) ctx.closePath();
+        ctx.stroke();
       }
+      function dot(p) {
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = "#ff3df2"; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+      }
+      ctx.save();
       var osm = session.osm && !session.osm.error ? session.osm : null;
       ((osm && osm.greens) || []).forEach(function (g, i) {
-        var c = outline(g.points.map(function (p) { return L.latLng(p.lat, p.lng); }), "#39ff14", "G" + (i + 1));
-        if (c) anchors.push({ kind: "green", label: "G" + (i + 1), x: c.x, y: c.y, ref: g.ref || "" });
+        var px = pixels(g.points || []);
+        if (px.length < 3 || !inside(px)) return;
+        path(px, true, 3, [], "#39ff14");
+        var c = centreOf(px);
+        tag("G" + (i + 1), c, "#39ff14");
+        anchors.push({ kind: "green", label: "G" + (i + 1), x: c.x, y: c.y, ref: g.ref || "" });
       });
+      var shapeCount = 0, pinCount = 0;
       session.features.forEach(function (f) {
-        var c = outline(f.points.map(function (p) { return L.latLng(p.lat, p.lng); }), "#ffffff", "");
-        if (c) anchors.push({ kind: f.kind, label: "saved", x: c.x, y: c.y, saved: true });
+        var px = pixels(f.points);
+        if (!px.length || !inside(px)) return;
+        var label, c;
+        if (f.pin) {
+          label = "P" + (++pinCount);
+          if (px.length > 1) path(px, false, 2, [8, 6], "#ffffff");
+          px.forEach(dot);
+          c = centreOf(px);
+          tag(label, { x: c.x, y: c.y - 16 }, "#ffffff");
+        } else {
+          label = "S" + (++shapeCount);
+          /* Thin, so the edge the model is asked to judge is not hidden under the line. */
+          path(px, isPolygon(f.kind), 1.5, [], "#ffffff");
+          c = centreOf(px);
+          tag(label, c, "#ffffff");
+        }
+        anchors.push({ kind: f.kind, label: label, id: f.id, x: c.x, y: c.y, saved: true });
       });
+      ctx.restore();
       return anchors;
     }
 
@@ -1566,8 +1595,9 @@
 
     function describeScan(scan) {
       var s = scan.summary || {};
-      var bits = ["AI found " + (scan.found || 0) + " shape" + (scan.found === 1 ? "" : "s") + ", saved " + (scan.saved || 0) +
-        " (" + (s.fairways || 0) + " fairways, " + (s.greens || 0) + " greens, " + (s.tees || 0) + " tees) · overlay now " + (scan.overlayTotal || 0)];
+      var job = scan.job === "refine" ? "AI refine pass: " : scan.job === "complete" ? "AI complete pass: " : "AI trace: ";
+      var bits = [job + (scan.replaced || 0) + " shape" + (scan.replaced === 1 ? "" : "s") + " refitted or pins shaped, " + (scan.added || 0) + " added" +
+        " · overlay now " + (scan.overlayTotal || 0) + " (" + (s.fairways || 0) + " fairways, " + (s.greens || 0) + " greens, " + (s.tees || 0) + " tees, " + (s.bunkers || 0) + " bunkers" + (s.pins ? ", " + s.pins + " pins left" : "") + ")"];
       if (scan.dropped && scan.dropped.length) bits.push(scan.dropped.length + " dropped: " + scan.dropped.map(function (d) { return d.reason; }).join("; "));
       if (scan.usage) bits.push((scan.usage.inputTokens || 0) + " in / " + (scan.usage.outputTokens || 0) + " out tokens");
       if (scan.notes) bits.push("model notes: " + scan.notes);
@@ -1605,8 +1635,6 @@
     function scanWithAi() {
       var id = courseIdOf(session.course);
       if (!id || scanning || draft.length) return;
-      var replace = !!el["ai-replace"].checked;
-      if (replace && session.features.length && !window.confirm("Replace the " + session.features.length + " saved shape(s) with whatever the AI finds in this view?")) return;
       scanning = true;
       selectedId = "";
       setTool("move");
@@ -1618,9 +1646,14 @@
         if (session.dirty) throw new Error("the overlay did not save (" + (session.saveError || "unknown") + ")");
         return captureView();
       }).then(function (capture) {
-        setStatus("Sending " + capture.width + "×" + capture.height + " px (" + capture.tiles + " tiles" + (capture.failed ? ", " + capture.failed + " missing" : "") + ", " + capture.anchors.length + " known shapes drawn on)…");
+        var recorded = capture.anchors.filter(function (a) { return a.saved; });
+        var pins = recorded.filter(function (a) { return /^P/.test(a.label); }).length;
+        var job = pins ? "complete pass - shaping " + pins + " pin" + (pins === 1 ? "" : "s") + " and filling in the rest"
+          : recorded.length ? "refine pass - fitting the " + recorded.length + " shape" + (recorded.length === 1 ? "" : "s") + " in view"
+          : "full trace";
+        setStatus("Sending " + capture.width + "×" + capture.height + " px (" + capture.tiles + " tiles" + (capture.failed ? ", " + capture.failed + " missing" : "") + "), " + job + "…");
         scanFrame = L.rectangle(capture.bounds, { color: "#ffb54c", weight: 1, dashArray: "6 6", fill: false, interactive: false }).addTo(mapObj);
-        return api("POST", "", { courseId: id, image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, append: !replace, anchors: capture.anchors, grid: capture.grid }, AI_API);
+        return api("POST", "", { courseId: id, image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, anchors: capture.anchors, grid: capture.grid }, AI_API);
       }).then(function (data) {
         if (destroyed) return;
         setStatus("AI scan queued (" + Math.round(((data && data.georef && data.georef.metresPerPixel) || 0) * 100) / 100 + " m/px). Waiting for the model…");

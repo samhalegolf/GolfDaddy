@@ -54,7 +54,8 @@ test("the background half trusts only the course id and clears the picture whate
   assert.ok(background.includes('format: { type: "json_schema", schema: AI_SCAN_OUTPUT_SCHEMA }'), "the answer is constrained by the core's schema");
   assert.ok(background.includes('DEFAULT_MODEL = "claude-opus-5-5"'), "the default model is Claude Opus 5.5");
   assert.ok(background.includes("aiShapesToOverlay(parsed.features, georef)"), "pixels go through the georef core, never a local conversion");
-  assert.ok(background.includes("saveOverlay({ courseId, features: converted.features, savedBy: request.requestedBy, append: request.append })"), "the result is saved through the store, as the person who asked");
+  assert.ok(background.includes("saveOverlay({ courseId, features: converted.features, savedBy: request.requestedBy, append: true })"), "the result is saved onto what is there, through the store, as the person who asked");
+  assert.ok(background.includes("parseScanAnswer(answer.text, shapes)"), "the answer is read against the recorded shapes, so a correction lands on the one it replaces");
   /* finish() writes base + outcome; base carries no image, and the outcome never does. */
   const finish = background.slice(background.indexOf("const finish = async outcome =>"), background.indexOf("try {"));
   assert.ok(finish.includes("Object.assign({}, base, outcome, { finishedAt"), "the outcome row is built from base + outcome");
@@ -87,7 +88,9 @@ test("Studio captures the view it shows, georeferences the scaled picture, posts
   assert.ok(sync.includes("anchors: (Array.isArray(payload.anchors)") && sync.includes("grid: Number.isFinite(Number(payload.grid))"), "the sync half must park anchors and grid with the request");
   assert.ok(background.includes("anchors: request.anchors, grid: request.grid"), "the background half must hand anchors and grid to the prompt");
   assert.ok(page.includes('toDataURL("image/jpeg"'), "JPEG, or a satellite view is megabytes of PNG");
-  assert.ok(page.includes("append: !replace"), "a scan appends unless the operator asks to replace");
+  assert.ok(!page.includes('data-gd-overlay="ai-replace"'), "no replace option - a scan always saves onto what is there");
+  assert.ok(page.includes("anchors.push({ kind: f.kind, label: label, id: f.id"), "recorded shapes and pins go to the scan by label and id");
+  assert.ok(sync.includes('id: String(a && a.id || "")'), "the sync half must keep each anchor's id");
   assert.ok(page.includes("function pollScan(") && page.includes("AI_TIMEOUT_MS"), "the page must poll for the outcome and give up eventually");
   assert.ok(page.includes('scan.status === "queued" || scan.status === "running"'), "a scan in flight is resumed on re-entry");
   assert.ok(page.includes("if (scanTimer) clearTimeout(scanTimer);"), "cleanup must stop the poll");
