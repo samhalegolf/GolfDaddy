@@ -1,5 +1,10 @@
 "use strict";
 
+function mapboxPublicToken() {
+  const token = String(process.env.MAPBOX_PUBLIC_TOKEN || "").trim();
+  return token.startsWith("pk.") ? token : "";
+}
+
 exports.handler = async function(event) {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: { "Cache-Control": "no-store" }, body: "" };
@@ -24,7 +29,12 @@ exports.handler = async function(event) {
          fetches) - restrict it to this domain in the ArcGIS dashboard and grant it basemap
          privileges only. The scan pipeline must never read it: Esri's licence here is display,
          not storage. */
-      esriApiKey: process.env.ARCGIS_API_KEY || process.env.ESRI_API_KEY || ""
+      esriApiKey: process.env.ARCGIS_API_KEY || process.env.ESRI_API_KEY || "",
+      /* Mapbox public token, for the operator's live-map source override only (Esri vs
+         Mapbox comparison in GPS Settings; app/js/basemap.js). Public by design like the two
+         above - restrict it to this domain in the Mapbox dashboard. Only a pk. token is ever
+         published: a secret sk. token in this variable would otherwise leak into tile URLs. */
+      mapboxPublicToken: mapboxPublicToken()
     })
   };
 };

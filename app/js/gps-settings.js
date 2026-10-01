@@ -140,6 +140,29 @@
       tightBtn.setAttribute("aria-pressed", "true");
     }
     if (tightSub) tightSub.textContent = t(TIGHTNESS[state.frameTightness].sub);
+    renderMapSource();
+  }
+
+  /* Operator-only map source override, owned by basemap.js; this is only its
+     button. Hidden for everyone but the admin account. */
+  var MAP_SOURCE_LABELS = { auto: "Auto", esri: "Esri", mapbox: "Mapbox" };
+  var MAP_SOURCE_SUBS = {
+    auto: "Auto: chosen by region.",
+    esri: "Forced: Esri World Imagery.",
+    mapbox: "Forced: Mapbox Satellite. Falls back to Auto if no token is set."
+  };
+  function renderMapSource() {
+    var group = document.getElementById("setMapSourceGroup");
+    if (!group) return;
+    var operator = false;
+    try { operator = !!(app.account && app.account.isAdmin && app.account.isAdmin()); } catch (e) {}
+    if (!operator || !app.basemap || !app.basemap.override) { group.classList.add("hiddenState"); return; }
+    group.classList.remove("hiddenState");
+    var current = app.basemap.override();
+    var btn = document.getElementById("setMapSource");
+    if (btn) btn.textContent = MAP_SOURCE_LABELS[current] || current;
+    var sub = document.getElementById("setMapSourceSub");
+    if (sub) sub.textContent = MAP_SOURCE_SUBS[current] || "";
   }
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -159,6 +182,14 @@
     if (tightBtn) tightBtn.addEventListener("click", function () {
       var i = TIGHTNESS_ORDER.indexOf(state.frameTightness);
       app.gpsSettings.set("frameTightness", TIGHTNESS_ORDER[(i + 1) % TIGHTNESS_ORDER.length]);
+    });
+    var mapSourceBtn = document.getElementById("setMapSource");
+    if (mapSourceBtn) mapSourceBtn.addEventListener("click", function () {
+      if (!app.basemap || !app.basemap.setOverride) return;
+      var order = app.basemap.overrides();
+      var i = order.indexOf(app.basemap.override());
+      app.basemap.setOverride(order[(i + 1) % order.length]);
+      renderMapSource();
     });
     var close = document.getElementById("gpsSettingsClose");
     if (close) close.addEventListener("click", function () { app.gpsSettings.close(); });

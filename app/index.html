@@ -509,6 +509,15 @@
         <div><strong data-i18n="gpsSettings.tightness">Lock frame tightness</strong><span id="setFrameTightSub">Balanced shot view</span></div>
         <button id="setFrameTight" type="button" class="toggle">Medium</button>
       </div>
+      <!-- Operator only (app.account.isAdmin): force the live map onto Esri or
+           Mapbox to compare them. English only on purpose - no player sees it. -->
+      <div id="setMapSourceGroup" class="hiddenState">
+        <div class="setGroup">Map source (test)</div>
+        <div class="setRow">
+          <div><strong>Live map imagery</strong><span id="setMapSourceSub">Auto: chosen by region.</span></div>
+          <button id="setMapSource" type="button" class="toggle">Auto</button>
+        </div>
+      </div>
       <div class="setGroup" data-i18n="gpsSettings.groupApp">App</div>
       <div class="setRow">
         <div><strong data-i18n="gpsSettings.language">Language</strong><span data-i18n="gpsSettings.languageHint">Language used in the app.</span></div>

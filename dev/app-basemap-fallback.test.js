@@ -92,6 +92,54 @@ test("OSM is never watched — there is nothing below it to demote to", () => {
   for (let i = 0; i < 10; i++) osm.layer.fire("tileerror");
 });
 
+/* Operator source override (Esri vs Mapbox comparison). Uses a fresh centre so the
+   dead cells marked above cannot interfere. */
+const ST_ANDREWS = { lat: 56.34, lng: -2.80 };
+function asOperator(yes) { global.window.ClarityApp.account = { isAdmin: () => yes }; }
+
+test("auto never picks Mapbox, even with a token", () => {
+  asOperator(true);
+  basemap.setOverride("auto");
+  basemap.configure({ esriApiKey: "e", mapboxPublicToken: "pk.test" });
+  assert.strictEqual(basemap.baseFor(ST_ANDREWS).kind, "esri");
+});
+
+test("the operator can force Mapbox and Esri, and back to auto", () => {
+  asOperator(true);
+  basemap.configure({ esriApiKey: "e", mapboxPublicToken: "pk.test" });
+  let flips = 0;
+  basemap.onOverrideChange(() => { flips++; });
+  basemap.setOverride("mapbox");
+  const mb = basemap.baseFor(ST_ANDREWS);
+  assert.strictEqual(mb.kind, "mapbox");
+  assert.ok(mb.layer.url.includes("access_token=pk.test"), "the token lands in the tile URL");
+  /* Forced beats a regional open source too - the point is a like-for-like comparison. */
+  assert.strictEqual(basemap.baseFor(MADRID_ES).kind, "mapbox");
+  basemap.setOverride("esri");
+  assert.strictEqual(basemap.baseFor(MADRID_ES).kind, "esri");
+  basemap.setOverride("auto");
+  assert.strictEqual(basemap.baseFor(MADRID_ES).kind, "pnoa");
+  assert.strictEqual(flips, 3, "every flip tells the painter");
+});
+
+test("the override does nothing for any other account", () => {
+  asOperator(true);
+  basemap.configure({ esriApiKey: "e", mapboxPublicToken: "pk.test" });
+  basemap.setOverride("mapbox");
+  asOperator(false);
+  assert.strictEqual(basemap.baseFor(ST_ANDREWS).kind, "esri");
+  asOperator(true);
+  basemap.setOverride("auto");
+});
+
+test("a forced source with no key falls back to auto", () => {
+  asOperator(true);
+  basemap.configure({ esriApiKey: "e" });
+  basemap.setOverride("mapbox");
+  assert.strictEqual(basemap.baseFor(ST_ANDREWS).kind, "esri");
+  basemap.setOverride("auto");
+});
+
 (function run() {
   let failures = 0;
   for (const item of tests) {

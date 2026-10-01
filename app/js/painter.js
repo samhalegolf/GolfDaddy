@@ -144,6 +144,14 @@
   var lastBaseCentre = null;
   var basemapWaiting = false;
 
+  /* The operator flipped the map source in GPS Settings: swap it now. */
+  if (app.basemap && app.basemap.onOverrideChange) app.basemap.onOverrideChange(function () {
+    repaint("BASEMAP_OVERRIDE", function () {
+      baseKind = null;
+      setBaseFor(lastBaseCentre);
+    });
+  });
+
   function setBaseFor(centre) {
     if (!map) return;
     lastBaseCentre = centre || lastBaseCentre;
