@@ -8,6 +8,7 @@
  *            outputDimensions), the same shape a published frame carries.
  *   seed   - the pin.
  *   kind   - "green" (the default) or "bunker": which size profile the wand sweeps.
+ *   scale  - optional, 0.5-2 (default 1): Studio's wand size control, scaling that profile.
  * -> 200 {ok:true, shape:[{lat,lng}...], confidence, area, stable} or {ok:false, reason}.
  *
  * Writes nothing. Studio adds the shape to the overlay as that kind and autosaves it the same
@@ -43,7 +44,7 @@ export default async function courseMapWand(req) {
   if (!Object.prototype.hasOwnProperty.call(WAND_PROFILES, kind)) return json(400, { error: "kind must be green or bunker" });
 
   try {
-    const out = await wandAtPoint({ image: Buffer.from(data, "base64"), playSurface, seed, kind });
+    const out = await wandAtPoint({ image: Buffer.from(data, "base64"), playSurface, seed, kind, scale: payload.scale });
     return json(200, out);
   } catch (error) {
     return json(200, { ok: false, reason: "wand-failed", detail: String(error && error.message || error).slice(0, 200) });

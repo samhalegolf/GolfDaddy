@@ -100,7 +100,7 @@ test("merging adds to the payload and never replaces it", () => {
   assert.strictEqual(overlay.mergeOverlayIntoPayload(GREENS_ONLY, []), GREENS_ONLY, "an empty overlay returns the very same payload");
   assert.strictEqual(overlay.mergeOverlayIntoPayload(GREENS_ONLY, null), GREENS_ONLY);
   assert.deepStrictEqual(overlay.overlaySummary([fairwayFeature("a", 0, 100, 0, 3), fairwayFeature("b", 0, 100, 60), { kind: "hole", hole: 1, points: [at(0, 0), at(1, 100)] }]),
-    { features: 3, fairways: 2, holeLines: 1, greens: 0, tees: 0, bunkers: 0, numbered: 2 });
+    { features: 3, fairways: 2, holeLines: 1, greens: 0, tees: 0, bunkers: 0, pins: 0, numbered: 2 });
   const tee = overlay.overlayToOsmElements([{ kind: "tee", points: [at(0, 0), at(8, 0), at(8, 6), at(0, 6)] }]);
   assert.strictEqual(tee[0].tags.golf, "tee", "a tee polygon becomes a golf=tee way");
   assert.strictEqual(tee[0].geometry.length, 5, "closed like every polygon kind");
@@ -194,6 +194,39 @@ test("a drawn bunker reaches the mapper as a golf=bunker way and lands as a bunk
   const geometry = core.resolveCourseGeometry(merged, "bunkers", at(0, 0), [], []);
   const bunkers = Object.values(geometry.objects || {}).filter(o => o && o.type === "bunker");
   assert.strictEqual(bunkers.length, 1, "the surface pass writes the drawn bunker as a bunker object: " + JSON.stringify(Object.values(geometry.objects || {}).map(o => o.type)));
+});
+
+test("pins keep only their points, and a hole line has no pin form", () => {
+  const out = overlay.normalizeOverlayFeatures([
+    { id: "g", kind: "green", pin: true, points: [at(0, 0), at(5, 5)] },
+    { id: "f", kind: "fairway", pin: true, points: [at(0, 0), at(0, 200)] },
+    { id: "short", kind: "fairway", pin: true, points: [at(0, 0)] },
+    { id: "h", kind: "hole", pin: true, points: [at(0, 0)] },
+    { id: "b", kind: "bunker", pin: "yes", points: [at(0, 0)] }
+  ]);
+  assert.deepStrictEqual(out.map(f => f.id), ["g", "f"], "a one-point fairway, a hole 'pin' and a non-boolean pin flag are refused");
+  assert.strictEqual(out[0].points.length, 1, "a green pin is its centre");
+  assert.strictEqual(out[0].pin, true);
+  assert.strictEqual(out[1].points.length, 2, "a fairway pin is its start and end");
+  assert.strictEqual(overlay.overlaySummary(out).pins, 2);
+});
+
+test("a course placed as pins alone resolves: pinned greens and fairway start/end pins", async () => {
+  const pinned = overlay.mergeOverlayIntoPayload({ elements: [] }, [
+    { id: "g1", kind: "green", pin: true, points: [at(420, 0)] },
+    { id: "g2", kind: "green", pin: true, points: [at(0, 300)] },
+    { id: "f1", kind: "fairway", pin: true, points: [at(20, 0), at(390, 0)] },
+    { id: "f2", kind: "fairway", pin: true, points: [at(0, 20), at(0, 270)] },
+    { id: "t1", kind: "tee", pin: true, points: [at(-10, 0)] }
+  ]);
+  const greens = pinned.elements.filter(e => e.tags.golf === "green");
+  assert.strictEqual(greens.length, 2, "each green pin is a golf=green way");
+  assert.strictEqual(greens[0].geometry.length, 17, "a round green, closed");
+  const result = await resolver.resolveCourseGeometryForAutoMapper({ osmPayload: pinned, courseId: "pins", expectedHoleCount: 2, scorecardHoles: [{ holeNumber: 1, distanceM: 400 }, { holeNumber: 2, distanceM: 290 }] });
+  assert.strictEqual(result.holes.length, 2, JSON.stringify(result.warnings));
+  const byHole = {};
+  result.holes.forEach(h => { byHole[h.holeNumber] = h; });
+  assert.ok(byHole[1].candidate.pathDistanceM > byHole[2].candidate.pathDistanceM, "the longer card hole took the longer fairway pin");
 });
 
 (async () => {

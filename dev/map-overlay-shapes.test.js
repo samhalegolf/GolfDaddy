@@ -1,5 +1,6 @@
 /* scripts/studio/courses/map-overlay/map-overlay-shapes.js: the shapes the Mapping Overlay
- * places by eye - a fairway around a laid line, a tee behind it, a default round green.
+ * places by eye - a fairway around a laid line, a tee box, a default round green, and two
+ * overlapping bunkers merged into one.
  *
  * Run: node dev/map-overlay-shapes.test.js */
 const assert = require("assert");
@@ -41,21 +42,31 @@ test("too short a line, or one point, makes no fairway", () => {
   assert.strictEqual(shapes.fairwayFromLine([at(0, 0), at(0, 2)], 35), null);
 });
 
-test("the tee lands about 20m behind the start of the line, facing down it", () => {
-  const tee = shapes.teeBeyondLine([at(0, 0), at(0, 300)], []);
+test("a tee box is the tee's size, its long side facing the green", () => {
+  const tee = shapes.teeAt(at(0, 0), at(0, 300));
   assert.strictEqual(tee.length, 4);
-  const c = shapes.centroid(tee);
-  const dy = (c.lat - LAT) / mLat, dx = (c.lng - LNG) / mLng;
-  assert.ok(Math.abs(dy + shapes.TEE_BEYOND_M) < 0.5 && Math.abs(dx) < 0.5, "tee centre at " + dx.toFixed(1) + "," + dy.toFixed(1));
-  const a = area(tee);
-  assert.ok(Math.abs(a - shapes.TEE_LENGTH_M * shapes.TEE_WIDTH_M) < 1, "tee area " + a);
+  assert.ok(Math.abs(area(tee) - shapes.TEE_LENGTH_M * shapes.TEE_WIDTH_M) < 1, "tee area " + area(tee));
+  const ys = tee.map(p => (p.lat - LAT) / mLat);
+  assert.ok(Math.abs(Math.max(...ys) - Math.min(...ys) - shapes.TEE_LENGTH_M) < 0.5, "the long side should run towards the green");
 });
 
-test("a line laid green-to-tee is flipped when a green sits by its start", () => {
-  const green = shapes.circle(at(0, -10), 14);
-  const tee = shapes.teeBeyondLine([at(0, 0), at(0, 300)], [green]);
-  const dy = (shapes.centroid(tee).lat - LAT) / mLat;
-  assert.ok(Math.abs(dy - (300 + shapes.TEE_BEYOND_M)) < 0.5, "tee should sit beyond the far end, got " + dy.toFixed(1));
+test("two overlapping bunkers merge into one outline covering both", () => {
+  const a = shapes.circle(at(0, 0), 6, 16), b = shapes.circle(at(8, 0), 6, 16);
+  const merged = shapes.mergeOverlapping(a, b);
+  assert.ok(merged && merged.length >= 3 && merged.length <= shapes.MAX_POINTS, "got " + (merged && merged.length));
+  /* Two r=6 discs 8m apart cover ~201m2; the 16-gons a little less. */
+  assert.ok(area(merged) > 190 && area(merged) < 205, "merged area " + area(merged).toFixed(1));
+  const xs = merged.map(p => (p.lng - LNG) / mLng);
+  assert.ok(Math.min(...xs) < -5.5 && Math.max(...xs) > 13.5, "the outline must reach both ends");
+});
+
+test("bunkers that do not overlap are not merged", () => {
+  assert.strictEqual(shapes.mergeOverlapping(shapes.circle(at(0, 0), 6), shapes.circle(at(20, 0), 6)), null);
+});
+
+test("a bunker inside another merges to the bigger one", () => {
+  const merged = shapes.mergeOverlapping(shapes.circle(at(0, 0), 10, 16), shapes.circle(at(1, 0), 3, 16));
+  assert.ok(Math.abs(area(merged) - area(shapes.circle(at(0, 0), 10, 16))) < 8, "area " + area(merged).toFixed(1));
 });
 
 test("a default green is a round ring of the requested size", () => {

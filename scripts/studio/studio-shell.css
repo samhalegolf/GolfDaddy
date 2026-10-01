@@ -247,8 +247,12 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
   cursor: pointer;
 }
 #gdStudioShellRoot .gdStudioOverlayNav button:hover { border-color: var(--gdStudioAccent); color: var(--gdStudioAccent); }
-#gdStudioShellRoot .gdStudioDiagramBtn.gdStudioOverlayNext { color: #06120b; background: var(--gdStudioAccent); border-color: var(--gdStudioAccent); font-weight: 700; }
-#gdStudioShellRoot .gdStudioDiagramBtn.gdStudioOverlayNext[hidden] { display: none; }
+#gdStudioShellRoot .gdStudioOverlayWorkspace [hidden] { display: none; }
+#gdStudioShellRoot .gdStudioOverlayModes { display: inline-flex; gap: 0; margin-right: 6px; }
+#gdStudioShellRoot .gdStudioOverlayModes .gdStudioDiagramBtn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+#gdStudioShellRoot .gdStudioOverlayModes .gdStudioDiagramBtn:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+#gdStudioShellRoot .gdStudioDiagramBtn.gdStudioOverlayStep { min-width: 28px; padding-left: 0; padding-right: 0; justify-content: center; }
+#gdStudioShellRoot .gdStudioOverlayStepValue { min-width: 38px; text-align: center; color: var(--gdStudioText); font-variant-numeric: tabular-nums; }
 #gdStudioShellRoot .gdStudioOverlayStage .gdStudioOverlayMap { cursor: crosshair; }
 #gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayMap { cursor: default; }
 #gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayShape { cursor: grab; }

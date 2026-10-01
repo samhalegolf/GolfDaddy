@@ -103,11 +103,11 @@ test("every change autosaves, and leaving the page flushes what is waiting", () 
   assert.ok(page.includes("if (session.rev === sentRev)"), "a save only adopts the server copy when nothing changed while it was in flight");
 });
 
-test("shapes come from the shared builders: a fairway line with a tee behind it, a pinned green through the wand", () => {
+test("shapes come from the shared builders: a fairway line, a clicked green through the wand", () => {
   assert.ok(source.includes('src="scripts/studio/courses/map-overlay/map-overlay-shapes.js'), "the shape builders are not loaded");
   assert.ok(source.indexOf("map-overlay-shapes.js") < source.indexOf("map-overlay-page.js"), "the builders must load before the page");
   assert.ok(page.includes("shapes.fairwayFromLine(line, session.fairwayWidth)"), "a finished line must become a fairway polygon");
-  assert.ok(page.includes("shapes.teeBeyondLine(line, allGreens())"), "a fairway must bring its tee");
+  assert.ok(!page.includes("teeBeyondLine"), "a fairway no longer drops a tee of its own - tees are placed by hand");
   assert.ok(page.includes('var WAND_API = "/api/course-map-wand"'), "a green pin must go through the wand endpoint");
   assert.ok(page.includes('shapes.circle(point, kind === "bunker" ? shapes.BUNKER_RADIUS_M : shapes.GREEN_RADIUS_M)'), "a pin the wand cannot read still leaves a green to shape");
   assert.ok(!page.includes('data-gd-overlay="tool-hole"'), "no hole-line tool at this stage");
@@ -115,7 +115,7 @@ test("shapes come from the shared builders: a fairway line with a tee behind it,
 
 test("a bunker is a pin the same wand outlines, on its bunker profile", () => {
   assert.ok(page.includes('data-gd-overlay="tool-bunker"'), "no Bunker pin tool");
-  assert.ok(page.includes("seed: point, kind: kind }, WAND_API"), "the pin must tell the wand which kind it is outlining");
+  assert.ok(page.includes("seed: point, kind: kind, scale: size }, WAND_API"), "the click must tell the wand which kind it is outlining, and at what size");
   assert.ok(page.includes("WAND_TARGET_MPP[kind]") && page.includes("WAND_MAX_M2[kind]"), "the capture must be sized for the kind being outlined");
   assert.ok(page.includes("shapes.BUNKER_RADIUS_M"), "a bunker pin the wand cannot read still leaves a bunker to shape");
   const wand = read("functions/course-map-wand.mjs");
@@ -125,7 +125,6 @@ test("a bunker is a pin the same wand outlines, on its bunker profile", () => {
 test("hole numbers are optional: new shapes carry the working hole, a selected shape can be renumbered", () => {
   assert.ok(page.includes('data-gd-overlay="hole"'), "no hole number field");
   assert.ok(/function addFeature\(raw, quiet\) \{[\s\S]*?session\.hole[\s\S]*?hole: holeNumber\(hole\)/.test(page), "new shapes must take the working hole number");
-  assert.ok(page.includes('if (done && done.kind === "green" && session.hole && session.hole < 36) setHole(session.hole + 1)'), "finishing a green must move numbering to the next hole");
   assert.ok(/function holeFieldChanged\(\) \{[\s\S]*?f\.hole = n;[\s\S]*?changed\(\);/.test(page), "renumbering a selected shape must save");
 });
 
@@ -163,10 +162,36 @@ test("captured tiles are fetched at the capture zoom, not whatever zoom the map 
   assert.ok(page.includes("attempt(1)"), "the wand retries one zoom coarser before falling back to a circle");
 });
 
-test("Enter means done, next: finish the line, or save the shape and arm the next step", () => {
-  assert.ok(page.includes('var NEXT_TOOL = { fairway: "green", green: "fairway", tee: "fairway", hole: "fairway", bunker: "bunker" }'), "the hole order is fairway, green, next fairway; a bunker arms the next bunker");
-  assert.ok(page.includes('if (event.key === "Enter") { event.preventDefault(); doneAndNext(); return; }'), "Enter must run doneAndNext");
-  assert.ok(/function doneAndNext\(\) \{[\s\S]*?flushSave\(\);[\s\S]*?setTool\(step\.tool\)/.test(page), "done saves now and arms the next tool");
+test("the tool picked stays picked: placing never switches tools, and there is no next-step chain", () => {
+  ["NEXT_TOOL", "doneAndNext", 'data-gd-overlay="next"'].forEach((snippet) => {
+    assert.ok(!page.includes(snippet), "the set workflow is gone - found: " + snippet);
+  });
+  const placing = page.slice(page.indexOf("function handleMapClick("), page.indexOf("/* ---- pins into shapes ----"));
+  assert.ok(placing.length > 0 && !placing.includes("setTool("), "placing a fairway, green, tee or bunker must not change the tool");
+});
+
+test("bunker wand: its reach steps smaller and bigger, and overlapping bunkers merge into one", () => {
+  const core = read("functions/lib/gd-surface-refine-core.mjs");
+  const wand = read("functions/course-map-wand.mjs");
+  assert.ok(page.includes('data-gd-overlay="wand-smaller"') && page.includes('data-gd-overlay="wand-bigger"'), "no bunker wand size control");
+  assert.ok(wand.includes("scale: payload.scale"), "the endpoint must pass the size to the wand");
+  assert.ok(core.includes("const radiusM = profile.radiusM * size;"), "the wand's sweep must scale with the size");
+  assert.ok(page.includes('data-gd-overlay="merge"') && page.includes("shapes.mergeOverlapping(f.points, merged)"), "overlapping bunker outlines must merge through the shared builder");
+});
+
+test("pins mode: centres and fairway ends, stored as pins and shaped later", () => {
+  assert.ok(page.includes('data-gd-overlay="mode-pins"'), "no Pins mode");
+  assert.ok(page.includes('addFeature({ kind: tool, pin: true, points: [point] })'), "a green, tee or bunker pin is its centre");
+  assert.ok(page.includes('addFeature({ kind: "fairway", pin: true, points: line })'), "a fairway pin is its start and end");
+  assert.ok(page.includes('data-gd-overlay="shape-pins"') && page.includes("function shapePin(pinId)"), "pins must be able to become shapes");
+  const core = read("functions/lib/gd-map-overlay-core.mjs");
+  assert.ok(core.includes("const points = feature.pin ? pinShape(feature) : feature.points;"), "the mapper must read a pin as its default shape");
+});
+
+test("past the provider's imagery the map blows up the last tiles instead of going black", () => {
+  assert.ok(page.includes("watchImageryCeiling(layer);"), "the mounted layer must be watched for its zoom ceiling");
+  assert.ok(page.includes("tiles.options.maxNativeZoom = z - 1;"), "a zoom whose tiles all fail must become the layer's ceiling");
+  assert.ok(page.includes("mapObj.setMaxZoom(DRAW_MAX_ZOOM)"), "the map keeps zooming past the ceiling");
 });
 
 test("shapes are deleted by dropping them on the bin", () => {
