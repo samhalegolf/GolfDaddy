@@ -36,20 +36,24 @@ function tileUrl(spec, z, x, y) {
     .replace(/\{ *z *\}/g, z).replace(/\{ *x *\}/g, x).replace(/\{ *y *\}/g, y);
 }
 
+/* size is a side length (the square windows the shading endpoints ask for) or
+   {width, height} (the live terrain frame, which is as wide and tall as the hole). */
 export async function mosaic(spec, zoom, originPx, size, options = {}) {
+  const sizeW = typeof size === "object" ? size.width : size;
+  const sizeH = typeof size === "object" ? size.height : size;
   /* arcgis-export sources (US) answer the whole preview window in ONE exportImage request -
      a preview is at most 1536px against the service's 4000px cap, so there is no grid to
      assemble. A float32 elevation answer is transcoded to terrain-RGB here, exactly as the
      capture path does, so everything downstream of mosaic() stays one format. */
   if (spec.adapter === "arcgis-export") {
-    const buf = await fetchTile(exportImageUrl(spec, { left: originPx.x, top: originPx.y, width: size, height: size }, zoom));
+    const buf = await fetchTile(exportImageUrl(spec, { left: originPx.x, top: originPx.y, width: sizeW, height: sizeH }, zoom));
     if (!buf) return null;
     if (spec.encoding !== "float32") return buf;
     const { heights, width, height } = await heightsFromFloat32Tiff(buf);
     return terrainRgbPngFromHeights(heights, width, height);
   }
   const tx0 = Math.floor(originPx.x / TILE), ty0 = Math.floor(originPx.y / TILE);
-  const tx1 = Math.floor((originPx.x + size - 1) / TILE), ty1 = Math.floor((originPx.y + size - 1) / TILE);
+  const tx1 = Math.floor((originPx.x + sizeW - 1) / TILE), ty1 = Math.floor((originPx.y + sizeH - 1) / TILE);
   const jobs = [];
   for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) jobs.push({ tx, ty });
 
@@ -75,6 +79,6 @@ export async function mosaic(spec, zoom, originPx, size, options = {}) {
   return sharp(sheet, { limitInputPixels: false }).extract({
     left: Math.round(originPx.x - tx0 * TILE),
     top: Math.round(originPx.y - ty0 * TILE),
-    width: size, height: size
+    width: sizeW, height: sizeH
   }).png().toBuffer();
 }

@@ -166,11 +166,12 @@
 
   /* Operator-only map source override, owned by basemap.js; this is only its
      button. Hidden for everyone but the admin account. */
-  var MAP_SOURCE_LABELS = { auto: "Auto", esri: "Esri", mapbox: "Mapbox" };
+  var MAP_SOURCE_LABELS = { auto: "Auto", esri: "Esri", mapbox: "Mapbox", mesh: "Clarity 3D Mesh" };
   var MAP_SOURCE_SUBS = {
     auto: "Auto: chosen by region.",
     esri: "Forced: Esri World Imagery.",
-    mapbox: "Forced: Mapbox Satellite. Falls back to Auto if no token is set."
+    mapbox: "Forced: Mapbox Satellite. Falls back to Auto if no token is set.",
+    mesh: "Mapbox on the 3D terrain mesh, unpublished holes only. Needs Terrain relief on."
   };
   function renderMapSource() {
     var group = document.getElementById("setMapSourceGroup");

@@ -99,7 +99,8 @@ ok('painter takes the height from the setting, not a constant', () => {
 ok('relief off never builds a mesh, and a settings change re-syncs it', () => {
   const attach = PAINTER_SRC.slice(PAINTER_SRC.indexOf('function attachMesh('));
   assert.ok(/if \(!\(reliefExaggeration\(\) > 0\)\) return;/.test(attach.slice(0, 600)));
-  assert.ok(/gpsSettings\.onChange\(function \(\) \{\s*syncMeshRelief\(\);/.test(PAINTER_SRC));
+  const handler = PAINTER_SRC.slice(PAINTER_SRC.indexOf('gpsSettings.onChange(function () {')).slice(0, 300);
+  assert.ok(/syncMeshRelief\(\);/.test(handler), 'a settings change must re-sync the mesh height');
 });
 
 console.log(`\nterrain-relief-setting: ${passed} passed`);

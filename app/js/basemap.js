@@ -33,7 +33,12 @@
    for a live map, never a scan source — so it is not in the auto order at all:
    only the override reaches it. The override is ignored for every other
    account, and a forced source with no key (or one proven blank) falls back to
-   the normal auto pick. */
+   the normal auto pick.
+
+   "mesh" (Clarity 3D Mesh) is Mapbox as far as this file is concerned: the
+   Leaflet map under it is Mapbox, and painter.js (via live-terrain.js) stands
+   an unpublished hole up on the terrain mesh over it. If the mesh cannot be
+   built the Mapbox map is what stays. */
 (function () {
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
@@ -169,9 +174,9 @@
     return true;
   }
 
-  /* The operator override: "auto", "esri" or "mapbox". Stored per device. */
+  /* The operator override: "auto", "esri", "mapbox" or "mesh". Stored per device. */
   var OVERRIDE_KEY = "clarity:basemap-override:v1";
-  var OVERRIDES = ["auto", "esri", "mapbox"];
+  var OVERRIDES = ["auto", "esri", "mapbox", "mesh"];
   var override = "auto";
   try {
     var stored = localStorage.getItem(OVERRIDE_KEY);
@@ -213,7 +218,7 @@
 
   function pick(centre) {
     if (override !== "auto" && operator()) {
-      var forced = sourceOf(override);
+      var forced = sourceOf(override === "mesh" ? "mapbox" : override);
       if (forced && hasKey(forced) && !deadCells[cellKey(forced.kind, centre)]) return forced;
     }
     for (var i = 0; i < SOURCES.length; i++) {
@@ -300,6 +305,10 @@
        with no key falls back to auto. onOverrideChange lets the painter
        re-pick the moment it flips. */
     override: function () { return override; },
+    /* What the operator chose, for anything gated on it: the override only
+       counts on the admin account, so a stored "mesh" on a shared device does
+       nothing for a player. */
+    activeOverride: function () { return operator() ? override : "auto"; },
     overrides: function () { return OVERRIDES.slice(); },
     setOverride: function (kind) {
       if (OVERRIDES.indexOf(kind) === -1 || kind === override) return;
