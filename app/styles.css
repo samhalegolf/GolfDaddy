@@ -582,6 +582,9 @@ body.map-update-in-progress #surfaceStage { opacity: .72; transition: opacity 12
 .setGroup { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; opacity: .55; margin-top: 4px; }
 .setGroup:first-child { margin-top: 0; }
 .setRow { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, .06); }
+/* After .setRow on purpose: a row that hides itself (the operator-only 3D Mesh view row) needs
+   to beat .setRow's display, and the generic .hiddenState rule above is too early to. */
+.setRow.hiddenState { display: none; }
 .setRow > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .setRow strong { font-size: 14px; font-weight: 700; }
 .setRow span { font-size: 11px; opacity: .62; line-height: 1.35; }

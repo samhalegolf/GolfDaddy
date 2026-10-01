@@ -343,6 +343,25 @@ try {
     + f1.maskPct + "% masked); hole 2: Esri " + f2.esri.network + " new + " + f2.esri.reused + " reused, Mapbox "
     + f2.mapbox.network + " new + " + f2.mapbox.reused + " reused");
 
+  /* The "3D Mesh view" row shows on Clarity 3D Mesh and on nothing else - actually hidden, not
+     just classed hidden (.setRow's own display once beat .hiddenState). */
+  const rowShown = await page.evaluate(() => {
+    const app = window.ClarityApp, row = document.getElementById("setHybridViewRow"), seen = {};
+    app.gpsSettings.open();
+    for (const source of ["auto", "esri", "mapbox", "mesh"]) {
+      app.basemap.setOverride(source);
+      document.getElementById("setMapSource").click();               // re-renders the panel...
+      document.getElementById("setMapSource").click();
+      document.getElementById("setMapSource").click();
+      document.getElementById("setMapSource").click();               // ...and back to `source`
+      seen[source] = getComputedStyle(row).display !== "none" && row.offsetHeight > 0;
+    }
+    app.gpsSettings.close();
+    return seen;
+  });
+  ok("the 3D Mesh view row is visible only on Clarity 3D Mesh", !rowShown.auto && !rowShown.esri && !rowShown.mapbox && rowShown.mesh, rowShown);
+  await page.evaluate(() => window.__lm.until(() => window.__lm.debug().active, "the mesh after the settings round trip"));
+
   /* 5. Mapbox fails: an Esri surface, still on the mesh, with the reason. */
   fail.mapbox = true;
   await page.evaluate(() => window.__lm.hole(3));
