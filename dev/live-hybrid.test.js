@@ -188,18 +188,19 @@ function pxOf(win, p) {
 
   /* ---- build(): fetching, the round's cache, and the fallbacks ---- */
 
-  function fakeDeps({ failMapbox = false, failEsri = false, noEsri = false, session } = {}) {
+  function fakeDeps({ failMapbox = false, mapboxStatus = 503, failEsri = false, noEsri = false, session, budget } = {}) {
     const asked = [];
     return {
       asked,
       deps: {
         session: session || hy.createSession('akarana'),
+        budget,
         tileUrl: (kind, z, x, y) => (kind === 'esri' && noEsri ? null : kind + ':' + z + '/' + x + '/' + y),
         fetch: (url) => {
           asked.push(url);
           const kind = url.split(':')[0];
           const fail = (kind === 'mapbox' && failMapbox) || (kind === 'esri' && failEsri);
-          return Promise.resolve(fail ? { ok: false, status: 503 } : { ok: true, blob: () => Promise.resolve({ kind }) });
+          return Promise.resolve(fail ? { ok: false, status: kind === 'mapbox' ? mapboxStatus : 503 } : { ok: true, blob: () => Promise.resolve({ kind }) });
         },
         decode: (blob) => Promise.resolve(blob),
         canvas: (w, h) => {
@@ -267,6 +268,56 @@ function pxOf(win, p) {
     const res = await hy.build(win, geom, retry.deps);
     assert.strictEqual(res.debug.mapbox.reused, 0);
     assert.ok(!res.debug.mapboxFailed);
+  });
+
+  function memoryBudget(limit, day = () => 'd1') {
+    let saved = null;
+    return hy.createBudget({ get: () => saved, set: (v) => { saved = JSON.parse(JSON.stringify(v)); } }, limit, day);
+  }
+
+  await ok('the daily budget counts Mapbox network tiles only, and starts again the next day', async () => {
+    let today = 'd1';
+    const budget = memoryBudget(1000, () => today);
+    const session = hy.createSession('x');
+    const f = fakeDeps({ session, budget });
+    await hy.build(win, geom, f.deps);
+    const mapbox = f.asked.filter((u) => u.startsWith('mapbox')).length;
+    assert.strictEqual(budget.remaining(), 1000 - mapbox, 'Esri tiles are not counted');
+    await hy.build(win, geom, fakeDeps({ session, budget }).deps);
+    assert.strictEqual(budget.remaining(), 1000 - mapbox, 'cache hits are free');
+    today = 'd2';
+    assert.strictEqual(budget.remaining(), 1000);
+  });
+
+  await ok('build: over the daily Mapbox limit, the hole is Esri alone and Mapbox is never asked', async () => {
+    const f = fakeDeps({ budget: memoryBudget(hy.maskTiles(field).length - 1) });
+    const res = await hy.build(win, geom, f.deps);
+    assert.strictEqual(f.asked.filter((u) => u.startsWith('mapbox')).length, 0);
+    assert.strictEqual(f.asked.length, hy.frameTiles(win).length, 'the whole frame from Esri');
+    assert.match(res.debug.mapboxSkipped, /daily Mapbox limit/);
+    assert.strictEqual(res.debug.colour.applied, false);
+    const label = lt.debugLabel(Object.assign(res.debug, { window: win }), 2.5, 'on');
+    assert.ok(label.includes('Mapbox off (daily Mapbox limit reached)'), label);
+  });
+
+  await ok('build: a 503 costs one hole its Mapbox, a refusal (401/403/429) costs the round', async () => {
+    const session = hy.createSession('x');
+    await hy.build(win, geom, fakeDeps({ session, failMapbox: true }).deps);
+    assert.strictEqual(session.mapboxOff, null, 'a plain failure is tried again next hole');
+    await new Promise((r) => setTimeout(r, 0));
+    await hy.build(win, geom, fakeDeps({ session, failMapbox: true, mapboxStatus: 429 }).deps);
+    assert.match(session.mapboxOff, /429/);
+    await new Promise((r) => setTimeout(r, 0));
+    const next = fakeDeps({ session });
+    const res = await hy.build(win, geom, next.deps);
+    assert.strictEqual(next.asked.filter((u) => u.startsWith('mapbox')).length, 0, 'not asked again this round');
+    assert.match(res.debug.mapboxSkipped, /refused \(429\)/);
+  });
+
+  await ok('build: no Esri and no Mapbox allowance is a rejection, for the live map', async () => {
+    const f = fakeDeps({ noEsri: true, budget: memoryBudget(0) });
+    await assert.rejects(hy.build(win, geom, f.deps), /Mapbox is off: daily Mapbox limit/);
+    assert.strictEqual(f.asked.length, 0);
   });
 
   await ok('build: no Esri key makes Mapbox the whole frame', async () => {

@@ -45,6 +45,25 @@ export async function verifiedAdminEmail(req) {
   }
 }
 
+/* Any real signed-in identity, by the same proof: the user id /auth/v1/user answers for the
+   bearer token, or "". */
+export async function verifiedUserId(req) {
+  const header = String((req && req.headers && typeof req.headers.get === "function" && req.headers.get("authorization")) || "");
+  const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  if (!token) return "";
+  const base = supabaseBase();
+  const key = anonKey() || supabaseKey();
+  if (!base || !key) return "";
+  try {
+    const response = await fetch(base + "/auth/v1/user", { method: "GET", headers: { apikey: key, Authorization: "Bearer " + token } });
+    if (!response.ok) return "";
+    const user = await response.json();
+    return user && user.id ? String(user.id) : "";
+  } catch (error) {
+    return "";
+  }
+}
+
 export async function loadCourse(courseId) {
   const rows = await supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,course_lat,course_lng&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
   const row = Array.isArray(rows) ? rows[0] : null;

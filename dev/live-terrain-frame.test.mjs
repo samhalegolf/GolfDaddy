@@ -1,5 +1,5 @@
 /*
- * /api/live-terrain-frame - the Clarity 3D Mesh test mode's server half.
+ * /api/live-terrain-frame - Clarity 3D Mesh's server half.
  *
  * Pinned here:
  *   - the window is validated (integers, golf zooms, size limits, on the map);
@@ -7,7 +7,7 @@
  *     same linear field at the grid's pixel centres, whatever zoom it was stored at;
  *   - the grid keeps the window's aspect and stays inside its size limits;
  *   - a named course's baked terrain asset answers without any provider being contacted;
- *   - the handler refuses non-admins, answers only the elevation layer (pictures are fetched
+ *   - the handler refuses anyone not signed in, answers only the elevation layer (pictures are fetched
  *     by the browser), echoes the window, falls through to the next source when one fails,
  *     says why when none works, and never lets a CDN cache the answer.
  *
@@ -119,24 +119,24 @@ const ENV = { LINZ_BASEMAPS_API_KEY: "k" };
 const req = (q, method = "GET") => new Request("http://x/api/live-terrain-frame?" + q, { method });
 const query = (layer, win = WIN) => "layer=" + layer + "&z=" + win.z + "&x=" + win.x + "&y=" + win.y + "&w=" + win.w + "&h=" + win.h;
 
-await ok("non-admins are refused before anything is fetched", async () => {
+await ok("a caller who is not signed in is refused before anything is fetched", async () => {
   const log = [];
-  const handler = createHandler({ verifyAdmin: async () => "", env: ENV, terrain: fakeTerrain({ log }) });
+  const handler = createHandler({ verifyUser: async () => "", env: ENV, terrain: fakeTerrain({ log }) });
   const res = await handler(req(query("elevation")));
-  assert.strictEqual(res.status, 403);
+  assert.strictEqual(res.status, 401);
   assert.strictEqual(log.length, 0);
 });
 
 await ok("a bad window or layer is a 400 - pictures are the browser's, not this endpoint's", async () => {
   const log = [];
-  const handler = createHandler({ verifyAdmin: async () => "a@b", env: ENV, terrain: fakeTerrain({ log }) });
+  const handler = createHandler({ verifyUser: async () => "user-1", env: ENV, terrain: fakeTerrain({ log }) });
   assert.strictEqual((await handler(req(query("elevation", { ...WIN, z: 11 })))).status, 400);
   assert.strictEqual((await handler(req(query("aerial")))).status, 400);
   assert.strictEqual(log.length, 0, "and no picture is ever fetched here");
 });
 
 await ok("elevation: terrain-RGB on the window's grid, with its range and source", async () => {
-  const handler = createHandler({ verifyAdmin: async () => "a@b", env: ENV, terrain: fakeTerrain() });
+  const handler = createHandler({ verifyUser: async () => "user-1", env: ENV, terrain: fakeTerrain() });
   const res = await handler(req(query("elevation")));
   assert.strictEqual(res.status, 200);
   assert.match(res.headers.get("Cache-Control"), /^private/);
@@ -175,7 +175,7 @@ await ok("a named course's baked asset answers - no provider is contacted", asyn
     heights: raw.heights
   };
   const asked = [];
-  const handler = createHandler({ verifyAdmin: async () => "a@b", env: ENV, terrain: fakeTerrain({ log }), loadAsset: async id => { asked.push(id); return asset; } });
+  const handler = createHandler({ verifyUser: async () => "user-1", env: ENV, terrain: fakeTerrain({ log }), loadAsset: async id => { asked.push(id); return asset; } });
   const res = await handler(req(query("elevation") + "&course=akarana"));
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual(asked, ["akarana"]);
@@ -188,13 +188,13 @@ await ok("a named course's baked asset answers - no provider is contacted", asyn
 
 await ok("a source that fails falls through to the next, and none at all is a 502 that says so", async () => {
   const log = [];
-  const handler = createHandler({ verifyAdmin: async () => "a@b", env: ENV, terrain: fakeTerrain({ fail: ["linz-nz-elevation"], log }) });
+  const handler = createHandler({ verifyUser: async () => "user-1", env: ENV, terrain: fakeTerrain({ fail: ["linz-nz-elevation"], log }) });
   const res = await handler(req(query("elevation")));
   assert.strictEqual(res.status, 200);
   assert.strictEqual(res.headers.get("X-Elevation-Source"), "global-terrain-tiles");
   assert.deepStrictEqual(log, ["linz-nz-elevation", "global-terrain-tiles"]);
 
-  const none = createHandler({ verifyAdmin: async () => "a@b", env: ENV, terrain: fakeTerrain({ fail: ["linz-nz-elevation", "global-terrain-tiles"] }) });
+  const none = createHandler({ verifyUser: async () => "user-1", env: ENV, terrain: fakeTerrain({ fail: ["linz-nz-elevation", "global-terrain-tiles"] }) });
   const bad = await none(req(query("elevation")));
   assert.strictEqual(bad.status, 502);
   assert.match((await bad.json()).error, /no elevation/);

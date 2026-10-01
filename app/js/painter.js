@@ -2193,8 +2193,8 @@
 
   /* ---------------------------------------------------- Clarity 3D Mesh (live)
 
-     Admin test mode (map source "Clarity 3D Mesh", live-terrain.js). A hole with no published
-     surface is pictured once - a Mapbox raster and the DEM on exactly the same ground - and that
+     The default for a hole with no published surface (live-terrain.js wanted). It is pictured
+     once - Esri with Mapbox over the playing area, and the DEM, on exactly the same ground - and that
      pair is presented through presentSurface exactly as a published frame would be. So the
      camera, the mesh, the overlay lift and tap grounding are the published path's own, and the
      Leaflet map underneath stays mounted as the fallback: every failure lands back on it.
@@ -2208,6 +2208,7 @@
   var liveTerrainLoading = null; // key of the frame being fetched, so a repaint cannot ask twice
   var liveTerrainMesh = "";     // "on", or why the mesh is not up, for the readout
   var tileSession = null;       // the round's provider tiles (live-hybrid.js), per course
+  var mapboxBudget = null;      // the device's daily Mapbox tile allowance (live-hybrid.js)
   var LIVE_MESH_AMBIENT = 0.42;
   var liveTerrainHold = null;   // the transition whose frame is being waited for, screen held
   var LIVE_TERRAIN_HOLD_MS = 5000;
@@ -2224,12 +2225,16 @@
     try { return !!(app.account && app.account.isAdmin && app.account.isAdmin()); } catch (e) { return false; }
   }
 
+  function signedIn() {
+    try { return !!(app.account && app.account.signedIn && app.account.signedIn()); } catch (e) { return false; }
+  }
+
   function liveTerrainWanted() {
     var lt = app.liveTerrain;
     if (!lt || !app.basemap || !app.basemap.activeOverride) return false;
     return lt.wanted({
       override: app.basemap.activeOverride(),
-      admin: isAdmin(),
+      signedIn: signedIn(),
       relief: reliefExaggeration(),
       webgl: meshSupported()
     });
@@ -2299,6 +2304,7 @@
     var view = hybridView();
     var key = app.liveTerrain.windowKey(courseKey, scene.hole.number, win) + "|" + view;
     if (!tileSession || tileSession.courseKey !== courseKey) tileSession = app.liveHybrid.createSession(courseKey);
+    if (!mapboxBudget) mapboxBudget = app.liveHybrid.browserBudget();
     var raster = app.liveHybrid.browserRaster();
     var geom = app.liveHybrid.holeGeometry(hole, packageHole(scene.hole.number));
     if (liveTerrain && liveTerrain.key === key) {
@@ -2313,6 +2319,7 @@
       fetch: function (url, opts) { return fetch(url, opts); },
       hybrid: {
         session: tileSession,
+        budget: mapboxBudget,
         tileUrl: function (kind, z, x, y) { return app.basemap.tileUrlFor(kind, z, x, y); },
         canvas: raster.canvas,
         decode: raster.decode

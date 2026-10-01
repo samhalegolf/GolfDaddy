@@ -49,12 +49,13 @@ let passed = 0;
 async function ok(name, fn) { await fn(); passed++; console.log('ok  - ' + name); }
 
 (async () => {
-  await ok('only the admin, on Clarity 3D Mesh, with relief on and WebGL, gets the mode', () => {
-    const on = { override: 'mesh', admin: true, relief: 2.5, webgl: true };
+  await ok('every signed-in player on auto, with relief on and WebGL, gets the mode', () => {
+    const on = { override: 'auto', signedIn: true, relief: 2.5, webgl: true };
     assert.strictEqual(lt.wanted(on), true);
-    assert.strictEqual(lt.wanted({ ...on, override: 'mapbox' }), false, 'plain Mapbox stays the flat live map');
-    assert.strictEqual(lt.wanted({ ...on, override: 'auto' }), false);
-    assert.strictEqual(lt.wanted({ ...on, admin: false }), false, 'never for a player');
+    assert.strictEqual(lt.wanted({ ...on, override: 'mapbox' }), false, 'forced Mapbox stays the flat live map');
+    assert.strictEqual(lt.wanted({ ...on, override: 'esri' }), false, 'forced Esri stays the flat live map');
+    assert.strictEqual(lt.wanted({ ...on, override: 'mesh' }), false, 'the retired override is not a way in');
+    assert.strictEqual(lt.wanted({ ...on, signedIn: false }), false, 'signed out: the live map, no requests');
     assert.strictEqual(lt.wanted({ ...on, relief: 0 }), false, 'terrain off disables the mesh');
     assert.strictEqual(lt.wanted({ ...on, webgl: false }), false);
     assert.strictEqual(lt.wanted(null), false);
