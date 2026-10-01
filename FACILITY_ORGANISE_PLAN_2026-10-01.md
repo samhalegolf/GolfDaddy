@@ -100,10 +100,11 @@ with the rest.
 - `nameLoopsFromCards` needs two cards; with one card and one clearly matching course it should still name that one.
 - Rename `loop` → `course` / `nine` in this code as it is touched (agreed in `HANDOVER_MULTI_COURSE_2026-08-25.md`).
 
-## Questions for Sam
+## Decisions (Sam, 2026-10-01)
 
-1. Should a combination show in the picker as its own line ("Remarkables / Arrow") under the parent, or should the
-   player pick two nines? (Recommended: show the combinations the club actually sells; "pick two nines" as a fallback
-   when no cards exist.)
-2. Is one-click Studio approval right for splits and retirements, or do you want those automatic too once trusted?
-3. Phase 3 (playing two nines as one round) touches scoring and round history — do it in this project, or later?
+1. **Combinations show in the picker** as their own lines under the parent ("Remarkables / Arrow"). Picking two
+   nines by hand stays as the fallback when no cards exist.
+2. **Splits and retirements wait for one-click approval in Studio.** Renames and new combinations apply
+   automatically above the confidence bar.
+3. **Phase 3 (playing two nines as one 18-hole round) is later.** Phases 1, 2 and 4 go first; until phase 3, picking
+   a combination opens its front nine as today.
