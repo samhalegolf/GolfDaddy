@@ -696,6 +696,45 @@ async function bootCheck() {
     return { setup, atTee, afterTap };
   }, AKARANA_H1);
 
+  /* The lock tilt on the LIVE map. Both stages lean by the same transform, so
+     the Leaflet layers and the overlays cannot disagree; the map grows upward
+     so the far edge the tilt pulls on screen is still map; and a tap at the
+     top of the screen grounds through the tilt to the point that is drawn
+     there - checked by putting the dot on the grounded point and reading where
+     it actually lands on screen. */
+  const liveTilt = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp, gd = window.__gd;
+    const pkg = { holes: [{ holeNumber: 1, tee: h1.tee, green: h1.green,
+      greenShape: h1.greenShape, route: [] }] };
+    await gd.open("live-tilt-course", pkg, { lat: -36.918, lng: 174.735 }, 900);
+    await gd.tap("headToTeeBtn", 200);
+    await gd.until(() => document.body.dataset.frameStage === "lock", "the live lock stage");
+    /* The stage transition is 1s; the geometry below reads the settled tilt. */
+    await gd.wait(1150);
+    const mapStage = document.getElementById("mapStage"), surfaceStage = document.getElementById("surfaceStage");
+    const rect = (id) => { const r = document.getElementById(id).getBoundingClientRect();
+      return [r.left, r.top, r.width, r.height].map(Math.round).join(","); };
+    const W = window.innerWidth, H = window.innerHeight;
+    /* Under the chrome (the top bar sits over the corners), so the whole stack
+       at the point is read, not just the topmost element. #map's own box is
+       the test, not a tile: tiles do not load offline. */
+    const onMap = (x, y) => document.elementsFromPoint(x, y)
+      .some((e) => document.getElementById("map").contains(e));
+    const tapAt = { x: Math.round(W * 0.5), y: Math.round(H * 0.18) };
+    const ll = app.painter.latLngAt(tapAt.x, tapAt.y);
+    if (ll) await gd.fix(ll, 250);
+    const dot = document.getElementById("gpsDot").getBoundingClientRect();
+    return {
+      presentation: app.painter.presentation().kind,
+      tilted: getComputedStyle(mapStage).transform.startsWith("matrix3d"),
+      sameTilt: getComputedStyle(mapStage).transform === getComputedStyle(surfaceStage).transform,
+      sameViewport: rect("mapViewport") === rect("surfaceViewport"),
+      topCornersOnMap: onMap(2, 2) && onMap(W - 3, 2),
+      tapAt, grounded: !!ll,
+      dotAt: { x: dot.left + dot.width / 2, y: dot.top + dot.height / 2 }
+    };
+  }, AKARANA_H1);
+
   /* A fresh live fix, delivered while placed, must also be ignored: in Preview
      the fix is the locator, never the player. */
   await context.setGeolocation({ latitude: -36.9179, longitude: 174.7409 });
@@ -2039,6 +2078,15 @@ async function bootCheck() {
   assert.strictEqual(rebuiltPlay.liveHole, 2, "a handoff-less GPS page rebuild restores the canonical live hole");
   assert.strictEqual(rebuiltPlay.viewHole, 2, "the rebuilt surface returns to that live hole, not Hole 1 or a preview");
   assert.strictEqual(rebuiltPlay.flow, "live", "resume restoration re-enters Live rather than merely viewing the saved hole");
+  assert.strictEqual(liveTilt.presentation, "live", "the tilt check must be on the live map");
+  assert.ok(liveTilt.tilted, "the live map leans in lock, as the published surface does");
+  assert.ok(liveTilt.sameTilt && liveTilt.sameViewport,
+    "the map stage and the overlay stage must carry the identical tilt and box, or the layers drift apart");
+  assert.ok(liveTilt.topCornersOnMap,
+    "the tilt pulls ground above the screen into view - the live map must be grown to cover it");
+  assert.ok(liveTilt.grounded, "a tap near the top of the tilted live map must ground to a point");
+  assert.ok(Math.hypot(liveTilt.dotAt.x - liveTilt.tapAt.x, liveTilt.dotAt.y - liveTilt.tapAt.y) < 2,
+    "the grounded tap must draw back where the finger was, got " + JSON.stringify(liveTilt));
   assert.ok(play.mapDisplayed, "rule 2: #map must be visible by default on the play route");
   assert.strictEqual(play.hole, 1, "play must start on hole 1");
   assert.strictEqual(play.courseKey, "akarana-golf-club");
