@@ -25,7 +25,15 @@
      Canada, the rest of Australia — play over instead of the drawn map. NOT
      the anonymous arcgisonline endpoint the first paragraph is about: that one
      grants nothing; ibasemaps-api with a token grants display.
-   - OSM — global, last, always able to draw. */
+   - OSM — global, last, always able to draw.
+
+   Operator source override (TEST ONLY). The admin account can force the live
+   map onto Esri or Mapbox from GPS Settings, to compare the two over the same
+   courses over time. Mapbox is display-only under its Product Terms — fine
+   for a live map, never a scan source — so it is not in the auto order at all:
+   only the override reaches it. The override is ignored for every other
+   account, and a forced source with no key (or one proven blank) falls back to
+   the normal auto pick. */
 (function () {
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
@@ -33,6 +41,7 @@
   var MERCATOR_HALF_M = 20037508.342789244;
   var linzKey = null;
   var esriKey = null;
+  var mapboxToken = null;
   var pending = null;
   /* Has the imagery-key question been answered (keys, no keys, or gave up)?
      Until it has, no basemap is mounted: picking now would always pick OSM,
@@ -127,6 +136,18 @@
       options: { maxZoom: 21, maxNativeZoom: 19, crossOrigin: true }
     },
     {
+      kind: "mapbox",
+      requiresMapboxToken: true,
+      overrideOnly: true,
+      /* Raster Tiles API reading the mapbox.satellite tileset's own pixels
+         (functions/lib/gd-mapbox-source.mjs has the API notes). @2x is a 512px
+         tile of the same ground, drawn into Leaflet's 256px cell — the same
+         detail the Studio source test judges. maxNativeZoom 19 to match Esri. */
+      tileUrl: "https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token={mapboxToken}",
+      attribution: "© Mapbox — © OpenStreetMap © Maxar",
+      options: { maxZoom: 21, maxNativeZoom: 19, crossOrigin: true }
+    },
+    {
       kind: "osm",
       tileUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
       attribution: "© OpenStreetMap contributors",
@@ -137,7 +158,35 @@
   function configure(config) {
     linzKey = (config && String(config.linzBasemapsKey || "")) || null;
     esriKey = (config && String(config.esriApiKey || "")) || null;
+    mapboxToken = (config && String(config.mapboxPublicToken || "")) || null;
     settled = true;
+  }
+
+  function hasKey(source) {
+    if (source.requiresLinzKey && !linzKey) return false;
+    if (source.requiresEsriKey && !esriKey) return false;
+    if (source.requiresMapboxToken && !mapboxToken) return false;
+    return true;
+  }
+
+  /* The operator override: "auto", "esri" or "mapbox". Stored per device. */
+  var OVERRIDE_KEY = "clarity:basemap-override:v1";
+  var OVERRIDES = ["auto", "esri", "mapbox"];
+  var override = "auto";
+  try {
+    var stored = localStorage.getItem(OVERRIDE_KEY);
+    if (OVERRIDES.indexOf(stored) !== -1) override = stored;
+  } catch (e) {}
+  var overrideListeners = [];
+
+  function operator() {
+    try { return !!(app.account && app.account.isAdmin && app.account.isAdmin()); }
+    catch (e) { return false; }
+  }
+
+  function sourceOf(kind) {
+    for (var i = 0; i < SOURCES.length; i++) if (SOURCES[i].kind === kind) return SOURCES[i];
+    return null;
   }
 
   function covers(source, centre) {
@@ -163,10 +212,13 @@
   }
 
   function pick(centre) {
+    if (override !== "auto" && operator()) {
+      var forced = sourceOf(override);
+      if (forced && hasKey(forced) && !deadCells[cellKey(forced.kind, centre)]) return forced;
+    }
     for (var i = 0; i < SOURCES.length; i++) {
       var source = SOURCES[i];
-      if (source.requiresLinzKey && !linzKey) continue;
-      if (source.requiresEsriKey && !esriKey) continue;
+      if (source.overrideOnly || !hasKey(source)) continue;
       if (deadCells[cellKey(source.kind, centre)]) continue;
       if (covers(source, centre)) return source;
     }
@@ -179,7 +231,8 @@
       options.gdSource = source;
       return new BboxTileLayer("", options);
     }
-    return L.tileLayer(String(source.tileUrl).replace("{linzKey}", linzKey || "").replace("{esriKey}", esriKey || ""), options);
+    return L.tileLayer(String(source.tileUrl).replace("{linzKey}", linzKey || "").replace("{esriKey}", esriKey || "")
+      .replace("{mapboxToken}", mapboxToken || ""), options);
   }
 
   function prefetch() {
@@ -242,6 +295,19 @@
     /* True once baseFor() can give its real answer. Before that it would only
        ever say OSM, so the painter mounts nothing rather than flash it. */
     isSettled: function () { return settled; },
+    /* Operator-only source override (see the header). override() is what is
+       chosen, not what is drawing — kindFor() says that, since a forced source
+       with no key falls back to auto. onOverrideChange lets the painter
+       re-pick the moment it flips. */
+    override: function () { return override; },
+    overrides: function () { return OVERRIDES.slice(); },
+    setOverride: function (kind) {
+      if (OVERRIDES.indexOf(kind) === -1 || kind === override) return;
+      override = kind;
+      try { localStorage.setItem(OVERRIDE_KEY, kind); } catch (e) {}
+      overrideListeners.forEach(function (fn) { try { fn(kind); } catch (e) {} });
+    },
+    onOverrideChange: function (fn) { if (typeof fn === "function") overrideListeners.push(fn); },
     /* Which source is up, for the on-screen source tag. */
     kindFor: function (centre) { return pick(centre).kind; },
     /* → {kind, layer, attribution} for the given course centre. Never throws,
