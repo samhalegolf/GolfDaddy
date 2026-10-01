@@ -341,13 +341,19 @@ export function matchLoopsToCards(loops, cards) {
     card: cardSum > 0 ? cardTotals[ci] / cardSum : null
   })));
 
-  const cardIndexes = cardList.map((_, index) => index);
   /* Shorter side governs: three loops and two cards leaves one loop unnamed rather
-     than forcing a card onto it. */
+     than forcing a card onto it. Which loop goes unnamed is part of the decision -
+     injecting cards into the first `take` loops only ever offered Millbrook's one card
+     to "Course 1", whichever course it actually described. So the longer side is the
+     one chosen from. */
+  const moreLoops = loopList.length > cardList.length;
   const take = Math.min(loopList.length, cardList.length);
-  const scored = injections(cardIndexes, take)
+  const pool = (moreLoops ? loopList : cardList).map((_, index) => index);
+  const scored = injections(pool, take)
     .map(order => {
-      const pairs = order.map((cardIndex, li) => grid[li][cardIndex]);
+      const pairs = moreLoops
+        ? order.map((loopIndex, ci) => grid[loopIndex][ci])
+        : order.map((cardIndex, li) => grid[li][cardIndex]);
       if (!pairs.length) return null;
       return { pairs, score: pairs.reduce((sum, pair) => sum + pair.score, 0) / pairs.length };
     })

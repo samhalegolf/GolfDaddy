@@ -20,6 +20,7 @@
     "test:multi-course": "node dev/multi-course-separation.test.js",
     "test:multi-nine": "node dev/multi-nine-ground-first.test.js",
     "test:facility-parent": "node dev/facility-parent-and-neighbours.test.js",
+    "test:facility-organise": "node dev/facility-organise.test.js",
     "test:listing-led": "node dev/listing-led-resolution.test.js",
     "test:unnumbered-facility": "node dev/unnumbered-multi-loop.test.js",
     "test:facility-loops": "node dev/facility-loops.test.js",
