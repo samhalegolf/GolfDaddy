@@ -150,6 +150,7 @@
       baseKind = null;
       setBaseFor(lastBaseCentre);
     });
+    syncLiveTerrain("map source");
   });
 
   function setBaseFor(centre) {
@@ -1754,7 +1755,7 @@
      headers is exactly what it expects. */
   function apiUrl(url) {
     var origin = (window.GDNative && window.GDNative.apiOrigin) || "";
-    if (!origin || !url || /^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return url;
+    if (!origin || !url || /^[a-z][a-z0-9+.-]*:\/\//i.test(url) || /^(blob|data):/i.test(url)) return url;
     return origin + url;
   }
 
@@ -1902,9 +1903,15 @@
     var admin = false;
     try { admin = !!(app.account && app.account.isAdmin && app.account.isAdmin()); } catch (e) { admin = false; }
     if (!admin || !asset) { hideVersionStamp(); return; }
+    if (asset.live) { writeStamp(liveTerrainLabel()); return; }
     var label = surfaceLib.assetVersionLabel(asset);
     var file = surfaceLib.assetFileName(asset);
     var text = [label, file].filter(Boolean).join(" · ");
+    writeStamp(text);
+  }
+  function writeStamp(text) {
+    var node = el("assetVersionStamp");
+    if (!node) return;
     if (!text) { hideVersionStamp(); return; }
     node.textContent = text;
     node.classList.remove("hiddenState");
@@ -1918,6 +1925,7 @@
 
   function clearSurface() {
     published = false;
+    liveTerrainUp = false;
     hideVersionStamp();
     document.body.classList.remove("surface-published");
     var img = el("surfaceImage");
@@ -1937,14 +1945,22 @@
      load to the transition that asked for it; the bounded stall timer exists so
      a hung request cannot leave the player with no presentation at all. */
   function disposeMesh() {
+    var disposed = !!mesh;
     if (mesh && mesh.dispose) { try { mesh.dispose(); } catch (e) { /* context already lost */ } }
     mesh = null;
     document.body.classList.remove("surface-mesh");
     var canvas = el("surfaceMesh");
-    if (canvas) {
-      canvas.style.width = ""; canvas.style.height = "";
-      canvas.style.transform = ""; canvas.style.transformOrigin = "";
+    if (!canvas) return;
+    /* dispose() loses the WebGL context on purpose (gd-terrain-mesh.js), and a canvas hands
+       back that same lost context forever after - so the next hole's mesh would fail to
+       compile and every hole after the first stayed flat. A fresh canvas gets a fresh context. */
+    if (disposed && canvas.parentNode) {
+      var fresh = canvas.cloneNode(false);
+      canvas.parentNode.replaceChild(fresh, canvas);
+      canvas = fresh;
     }
+    canvas.style.width = ""; canvas.style.height = "";
+    canvas.style.transform = ""; canvas.style.transformOrigin = "";
   }
 
   /* The green, read as contours.
@@ -2053,16 +2069,17 @@
      not compile on some driver - leaves the picture exactly as it was and says so once. What
      must never happen is a half-state, so the class that reveals the canvas goes on only
      after a frame has actually been drawn into it. */
-  function attachMesh(meta, surfaceUrlValue) {
+  function attachMesh(meta, surfaceUrlValue, onFail) {
     disposeMesh();
     var elevation = meta && meta.elevation;
     var canvas = el("surfaceMesh");
-    if (!canvas || !elevation || !elevation.path) return;
+    if (!canvas || !elevation || !(elevation.path || elevation.url)) return;
     if (!(reliefExaggeration() > 0)) return;   /* the player turned relief off */
-    if (!window.GDTerrainMesh || !window.GDTerrainMesh.supported()) return;
+    if (!meshSupported()) return;
 
     var token = transitionToken;
-    var elevationUrl = apiUrl(surfaceLib.assetUrl(elevation.path));
+    /* A live terrain frame (live-terrain.js) carries its elevation as an object URL. */
+    var elevationUrl = elevation.url || apiUrl(surfaceLib.assetUrl(elevation.path));
     var out = meta.outputDimensions || {};
     var frameW = Number(out.width) || 0, frameH = Number(out.height) || 0;
     if (!frameW || !frameH) return;
@@ -2095,6 +2112,9 @@
            mesh runs mostly ambient and contributes geometry - the silhouette, the pad edges,
            the occlusion - rather than a second set of shadows. */
         mesh.state.ambient = 0.78;
+        /* A live terrain frame is a raw photograph with no relief baked in, so the mesh's own
+           light has to do the shading the bake would have done. */
+        if (meta.liveTerrain) mesh.state.ambient = LIVE_MESH_AMBIENT;
         mesh.state.exaggeration = reliefExaggeration();
         applyMeshFrame();
         document.body.classList.add("surface-mesh");
@@ -2114,12 +2134,15 @@
             });
           }
         } catch (e) {}
+        if (onFail) onFail("mesh failed: " + ((error && error.message) || error));
       }
     }
     function failed() {
       if (token !== transitionToken) return;
-      /* Not a fallback - there is nothing to fall back to. The frame is up. */
+      /* Not a fallback - there is nothing to fall back to. The frame is up. A live terrain
+         frame is the exception: without its mesh it is only a worse copy of the live map. */
       disposeMesh();
+      if (onFail) onFail("mesh textures did not load");
     }
     aerialImg.onload = elevationImg.onload = ready;
     aerialImg.onerror = elevationImg.onerror = failed;
@@ -2145,6 +2168,147 @@
     var meta;
     try { meta = JSON.parse(img.dataset.playSurface); } catch (e) { return; }
     attachMesh(meta, publishedFrameUrl);
+  }
+
+  /* ---------------------------------------------------- Clarity 3D Mesh (live)
+
+     Admin test mode (map source "Clarity 3D Mesh", live-terrain.js). A hole with no published
+     surface is pictured once - a Mapbox raster and the DEM on exactly the same ground - and that
+     pair is presented through presentSurface exactly as a published frame would be. So the
+     camera, the mesh, the overlay lift and tap grounding are the published path's own, and the
+     Leaflet map underneath stays mounted as the fallback: every failure lands back on it.
+
+     One frame is held at a time. The window depends on the hole only, so GPS fixes, aim moves
+     and stage changes never rebuild it; a new hole, the map source or relief being switched
+     back on are what do. */
+  var liveTerrain = null;       // { key, asset, urls, debug } - the frame held for this hole
+  var liveTerrainUp = false;    // is the surface on screen a live terrain frame
+  var liveTerrainNote = "";     // why the mode is not showing, for the admin readout
+  var liveTerrainLoading = null; // key of the frame being fetched, so a repaint cannot ask twice
+  var LIVE_MESH_AMBIENT = 0.42;
+  var meshSupportedCache = null;
+
+  function meshSupported() {
+    if (meshSupportedCache === null) {
+      meshSupportedCache = !!(window.GDTerrainMesh && window.GDTerrainMesh.supported());
+    }
+    return meshSupportedCache;
+  }
+
+  function isAdmin() {
+    try { return !!(app.account && app.account.isAdmin && app.account.isAdmin()); } catch (e) { return false; }
+  }
+
+  function liveTerrainWanted() {
+    var lt = app.liveTerrain;
+    if (!lt || !app.basemap || !app.basemap.activeOverride) return false;
+    return lt.wanted({
+      override: app.basemap.activeOverride(),
+      admin: isAdmin(),
+      relief: reliefExaggeration(),
+      webgl: meshSupported()
+    });
+  }
+
+  function liveTerrainLabel() {
+    if (!liveTerrain) return "";
+    return app.liveTerrain.debugLabel(liveTerrain.debug, reliefExaggeration());
+  }
+
+  function releaseLiveTerrain() {
+    if (!liveTerrain) return;
+    app.liveTerrain.release(liveTerrain, function (u) { URL.revokeObjectURL(u); });
+    liveTerrain = null;
+  }
+
+  function startLiveTerrain(scene, token, reason) {
+    if (!liveTerrainWanted()) return;
+    var hole = scene && (scene.camera.hole || scene.hole.rec);
+    var win = app.liveTerrain.frameWindow(hole);
+    if (!win) { noteLiveTerrain("this hole has no tee and green to frame"); return; }
+    var key = app.liveTerrain.windowKey(marshal ? marshal.round().courseKey : "", scene.hole.number, win);
+    if (liveTerrain && liveTerrain.key === key) {
+      liveTerrain.debug.rebuild = "reused";
+      presentLiveTerrain(token);
+      return;
+    }
+    if (liveTerrainLoading === key) return;
+    liveTerrainLoading = key;
+    var started = Date.now();
+    app.liveTerrain.load(win, {
+      fetch: function (url, opts) { return fetch(url, opts); },
+      apiUrl: apiUrl,
+      token: function () {
+        var auth = window.ClaritySupabaseAuth;
+        return auth && typeof auth.freshAccessToken === "function"
+          ? Promise.resolve(auth.freshAccessToken()).catch(function () { return ""; }) : Promise.resolve("");
+      },
+      createObjectURL: function (blob) { return URL.createObjectURL(blob); },
+      revokeObjectURL: function (u) { URL.revokeObjectURL(u); }
+    }).then(function (entry) {
+      if (liveTerrainLoading === key) liveTerrainLoading = null;
+      /* Arrived for a hole that is no longer up, or one that turned out to be published. */
+      if (token !== transitionToken || presentation !== "live" || !liveTerrainWanted()) {
+        app.liveTerrain.release(entry, function (u) { URL.revokeObjectURL(u); });
+        return;
+      }
+      releaseLiveTerrain();
+      entry.key = key;
+      entry.debug.rebuild = reason;
+      entry.debug.loadMs = Date.now() - started;
+      liveTerrain = entry;
+      presentLiveTerrain(token);
+    }, function (error) {
+      if (liveTerrainLoading === key) liveTerrainLoading = null;
+      if (token !== transitionToken) return;
+      noteLiveTerrain((error && error.message) || String(error));
+    });
+  }
+
+  function presentLiveTerrain(token) {
+    if (!liveTerrain || token !== transitionToken || presentation !== "live") return;
+    liveTerrainNote = "";
+    presentation = "loading";
+    presentSurface(liveTerrain.asset);
+  }
+
+  /* Back to the live map, which never left - it is only uncovered again. */
+  function liveTerrainFallback(reason) {
+    noteLiveTerrain(reason);
+    if (!liveTerrainUp && presentation !== "loading") return;
+    repaint("LIVE_TERRAIN_FALLBACK", function () {
+      presentation = "live";
+      clearSurface();
+      /* clearSurface hides the stamp; the reason is the one thing worth keeping on it. */
+      if (liveTerrainNote) noteLiveTerrain(liveTerrainNote);
+      lastCameraKey = null;
+      if (marshal) render(marshal.scene());
+    });
+  }
+
+  function noteLiveTerrain(reason) {
+    liveTerrainNote = String(reason || "");
+    if (!liveTerrainNote) return;
+    if (isAdmin()) writeStamp("3D mesh off · " + liveTerrainNote);
+    try { if (window.console && console.info) console.info("[live-terrain] fallback: " + liveTerrainNote); } catch (e) {}
+  }
+
+  /* The map source or the relief setting changed. Showing and not wanted: back to the live
+     map and let the frame go. Wanted and not showing, on a hole that is playing live: build it. */
+  function syncLiveTerrain(reason) {
+    var wanted = liveTerrainWanted();
+    if (liveTerrainUp && !wanted) {
+      releaseLiveTerrain();
+      liveTerrainFallback("");
+      hideVersionStamp();
+      return;
+    }
+    if (!wanted) { if (liveTerrain) releaseLiveTerrain(); return; }
+    if (!liveTerrainUp && presentation === "live" && currentScene) {
+      startLiveTerrain(currentScene, transitionToken, reason);
+    } else if (liveTerrainUp) {
+      writeStamp(liveTerrainLabel());
+    }
   }
 
   /* Put the canvas where the image is, and tell the mesh which way is up.
@@ -2176,11 +2340,15 @@
     if (!img) return;
     var token = transitionToken;
     var url = surfaceUrl(asset);
+    var live = !!(asset && asset.live);
+    /* A live terrain frame that will not show is not a published surface failing: the live
+       map it replaced is the answer, quietly, with the reason on the admin readout. */
+    var fallback = live ? function (reason) { liveTerrainFallback("aerial " + reason); } : surfaceFallback;
     var settled = false;
     var stall = setTimeout(function () {
       if (settled || token !== transitionToken) return;
       settled = true;
-      surfaceFallback("timeout", url);
+      fallback("timeout", url);
     }, 8000);
     var pre = new Image();
     pre.onload = function () {
@@ -2198,8 +2366,9 @@
         surfaceFailed = null;
         document.body.classList.add("surface-published");
         publishedFrameUrl = url;
+        liveTerrainUp = live;
         showVersionStamp(asset);
-        attachMesh(asset.playSurface, url);
+        attachMesh(asset.playSurface, url, live ? liveTerrainFallback : null);
         lastCameraKey = null;
         /* Draw it. Without this the image appeared with no solved frame — a
            letterboxed picture with the dot still placed from the live map's
@@ -2213,7 +2382,7 @@
       if (settled) return;
       settled = true;
       clearTimeout(stall);
-      if (token === transitionToken) surfaceFallback("load-error", url);
+      if (token === transitionToken) fallback("load-error", url);
     };
     pre.src = url;
   }
@@ -2271,13 +2440,18 @@
        so create it now. */
     presentation = "live";
     clearSurface();
-    if (!courseKey) return;
-    var answer = await ensureStore().surfaceFor(courseKey, hole);
-    if (token !== transitionToken) return;
-    if (answer.state === "published") {
-      presentation = "loading";
-      presentSurface(answer.asset);
+    if (courseKey) {
+      var answer = await ensureStore().surfaceFor(courseKey, hole);
+      if (token !== transitionToken) return;
+      if (answer.state === "published") {
+        presentation = "loading";
+        presentSurface(answer.asset);
+        return;
+      }
     }
+    /* No published surface: this hole plays on the live map, which is up already. The admin
+       test mode stands it up on the terrain mesh over that map when it can. */
+    startLiveTerrain(scene, token, "hole change");
   }
 
   // ---------------------------------------------------------------- render
@@ -2619,6 +2793,7 @@
     });
 
     if (app.gpsSettings) app.gpsSettings.onChange(function () {
+      syncLiveTerrain("relief");
       syncMeshRelief();
       lastCameraKey = null;
       if (marshal) repaint("SETTINGS_CHANGED", function () { render(marshal.scene()); });
@@ -2741,6 +2916,16 @@
        inferable from a body class. */
     presentation: function () {
       return { kind: presentation, basemap: published ? null : baseKind };
+    },
+    /* The admin readout for Clarity 3D Mesh, as data: what is up, from where, and why not. */
+    liveTerrainDebug: function () {
+      return {
+        wanted: liveTerrainWanted(),
+        active: liveTerrainUp && !!mesh,
+        frame: liveTerrain ? liveTerrain.debug : null,
+        exaggeration: reliefExaggeration(),
+        fallback: liveTerrainNote || null
+      };
     },
     /* Exposed so the native-origin rewrite can be tested without a phone. */
     apiUrl: apiUrl,
