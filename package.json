@@ -49,6 +49,7 @@
     "test:bubble-hazard": "node dev/bubble-hazard-core.test.js",
     "test:bubble-reveal": "node dev/bubble-hazard-reveal.test.js",
     "test:terrain-lift": "node dev/terrain-lift.test.js",
+    "test:map-sources": "node dev/map-source-providers.test.mjs",
     "test:package-surfaces": "node dev/course-package-surfaces.test.js",
     "test:manual-practice": "node dev/manual-practice-core.test.js && node dev/manual-practice-integration.test.js",
     "test:manual-bubble-set": "node dev/manual-bubble-set-core.test.js",

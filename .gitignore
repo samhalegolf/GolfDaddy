@@ -60,3 +60,6 @@ garmin/build/
 *.iq
 *.prg
 *developer_key*
+
+# Live map-source diagnostic output (dev/mapbox-korea-diagnostic.mjs)
+/dev/out/

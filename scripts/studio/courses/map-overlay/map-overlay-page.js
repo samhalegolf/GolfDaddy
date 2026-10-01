@@ -45,6 +45,10 @@
   var AI_API = "/api/course-map-ai-scan";
   var WAND_API = "/api/course-map-wand";
   var JOBS_API = "/api/course-mapper-jobs";
+  /* DEV/TEST: fetch this view from a forced map source (Mapbox) server-side - see
+     functions/course-map-source-test.mjs. Mapbox may be looked at, never stored, so a scan of
+     its picture is always a dry run. */
+  var SOURCE_TEST_API = "/api/course-map-source-test";
   /* The model reads an image at ~1568px on its long side and answers in the pixels it saw,
      so the capture is scaled to that here and georeferenced AFTER scaling - the picture we
      describe is the picture it gets, to the pixel. */
@@ -202,6 +206,8 @@
     var drag = null;
     var dragEndedAt = 0;
     var wandsRunning = 0;
+    var sourceTesting = false;
+    var sourceTest = null;
 
     containerEl.innerHTML =
       '<div class="gdStudioLede" style="margin-bottom:12px">' +
@@ -225,7 +231,9 @@
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ai" disabled title="Pins in view: the AI shapes them and fills in the rest. Only shapes in view: it refits them to the ground. Nothing in view: it traces from scratch.">Scan this view with AI</button>' +
       '<label class="gdStudioViewportField gdStudioDiagramBtn">Course map… <input type="file" accept="image/*" data-gd-overlay="course-map" hidden></label>' +
       '<span class="gdStudioViewportField" data-gd-overlay="course-map-state"></span>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="source-test" disabled title="Dev test: fetch this view from Mapbox Satellite and Mapbox Terrain server-side, to judge the imagery. Nothing is stored.">Test Mapbox source</button>' +
       "</div>" +
+      '<div class="gdStudioSourceTest" data-gd-overlay="source-panel" hidden></div>' +
       '<div class="gdStudioOverlayWorkspace" data-gd-overlay="workspace">' +
       '<div class="gdStudioViewportBar">' +
       '<span class="gdStudioOverlayModes">' +
@@ -270,7 +278,7 @@
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "objects", "ai", "course-map", "course-map-state", "last-run", "mode-shapes", "mode-pins", "tool-move", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "width", "width-label", "wand-size-label", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "hole", "hole-label", "shape-pins", "workspace", "fit", "zoom-shape", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "saved", "ready", "clear", "run", "status"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "mode-shapes", "mode-pins", "tool-move", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "width", "width-label", "wand-size-label", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "hole", "hole-label", "shape-pins", "workspace", "fit", "zoom-shape", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "saved", "ready", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -1214,6 +1222,9 @@
       var has = !!session.course && !busy;
       el.ai.disabled = !has || scanning || !!draft.length;
       el.ai.title = draft.length ? "Finish or cancel the fairway you are placing first" : scanning ? "A scan is running" : "";
+      el["source-test"].disabled = !has || scanning || sourceTesting;
+      var sourceScan = el["source-panel"].querySelector('[data-gd-source-test="scan"]');
+      if (sourceScan) sourceScan.disabled = scanning;
       el.clear.disabled = !canEdit() || !session.features.length;
       el.run.disabled = !has || session.dirty;
       el.run.title = session.dirty ? "Wait for the overlay to save - the mapper reads what is saved" : "";
@@ -1595,6 +1606,11 @@
 
     function describeScan(scan) {
       var s = scan.summary || {};
+      if (scan.dryRun) {
+        var from = scan.provenance && scan.provenance.imageryProvider ? " on " + scan.provenance.imageryProvider + " imagery" : "";
+        return "AI dry run" + from + " - nothing saved: found " + (scan.found || 0) + " (" + (s.fairways || 0) + " fairways, " + (s.greens || 0) + " greens, " + (s.tees || 0) + " tees, " + (s.bunkers || 0) + " bunkers)" +
+          (scan.dropped && scan.dropped.length ? " · " + scan.dropped.length + " dropped" : "") + (scan.notes ? " · model notes: " + scan.notes : "");
+      }
       var job = scan.job === "refine" ? "AI refine pass: " : scan.job === "complete" ? "AI complete pass: " : "AI trace: ";
       var bits = [job + (scan.replaced || 0) + " shape" + (scan.replaced === 1 ? "" : "s") + " refitted or pins shaped, " + (scan.added || 0) + " added" +
         " · overlay now " + (scan.overlayTotal || 0) + " (" + (s.fairways || 0) + " fairways, " + (s.greens || 0) + " greens, " + (s.tees || 0) + " tees, " + (s.bunkers || 0) + " bunkers" + (s.pins ? ", " + s.pins + " pins left" : "") + ")"];
@@ -1620,6 +1636,7 @@
             selectedId = "";
             stopScanPoll();
             setStatus(describeScan(scan), !!(scan.dropped && scan.dropped.length));
+            if (scan.dryRun) drawDryRun(scan);
             return;
           }
           if (Date.now() - startedAt > AI_TIMEOUT_MS) { stopScanPoll(); setStatus("AI scan is taking too long - pick the course again to check on it", true); return; }
@@ -1664,6 +1681,108 @@
       });
     }
 
+    /* ---- map source test (dev) ----
+       The view's bounds go to the server, which fetches them from the forced source and sends
+       back the picture, its georef and the terrain read. The picture is already sized to the AI
+       scan's limits; the only thing added here is the same coordinate grid captureView burns
+       in, so the dry-run scan reads it exactly as it reads a normal capture. No anchors: the
+       scan is a trace from scratch, which is the honest test of what the imagery shows. */
+    function fmt(v, unit) { return v == null ? "–" : String(v) + (unit || ""); }
+
+    function renderSourceTest() {
+      var t = sourceTest;
+      var panel = el["source-panel"];
+      if (!t) { panel.hidden = true; panel.innerHTML = ""; return; }
+      panel.hidden = false;
+      var im = t.imagery || {}, te = t.terrain || {};
+      function failed(part) { return '<span class="gdStudioWarnText">' + esc((part.error && (part.error.code + ": " + part.error.message)) || "failed") + "</span>"; }
+      var rb = t.requestedBounds || {};
+      var rows = [
+        ["Course", esc(t.course.name || t.course.id) + " · " + t.course.lat.toFixed(5) + ", " + t.course.lng.toFixed(5)],
+        ["Requested bounds", [rb.north, rb.south, rb.west, rb.east].map(function (v) { return Number(v).toFixed(5); }).join(" / ") + " (N/S/W/E)"],
+        ["Imagery", im.ok ? esc(im.label) + " · " + esc(im.product) + (im.storable ? "" : ' · <strong>not storable - test only</strong>') : failed(im)],
+        ["", im.ok ? "zoom " + im.zoom + " @" + im.pixelRatio + "x · " + im.tilesRequested + " tiles · " + im.width + "×" + im.height + " px · " + fmt(im.metresPerPixel, " m/px") : ""],
+        ["Terrain", te.ok ? esc(te.label) + " · " + esc(te.product) + (te.storable ? "" : ' · <strong>not storable - test only</strong>') : failed(te)],
+        ["", te.ok ? "zoom " + te.zoom + " · " + te.tilesRequested + " tiles · " + te.width + "×" + te.height + " samples · " + fmt(te.metresPerSample, " m/sample") +
+          " · " + fmt(te.minElevation, "m") + " – " + fmt(te.maxElevation, "m") + " · centre " + fmt(te.centre && te.centre.elevation, "m") + " · course pin " + fmt(te.courseLocationElevation, "m") + " · largest neighbour step " + fmt(te.maxNeighbourStep, "m") : ""]
+      ].filter(function (r) { return r[1]; });
+      panel.innerHTML =
+        '<table class="gdStudioSourceTestTable">' + rows.map(function (r) { return "<tr><th>" + esc(r[0]) + "</th><td>" + r[1] + "</td></tr>"; }).join("") + "</table>" +
+        '<div class="gdStudioViewportBar">' +
+        (im.ok ? '<button type="button" class="gdStudioDiagramBtn" data-gd-source-test="scan">AI scan this picture (dry run)</button>' : "") +
+        '<button type="button" class="gdStudioDiagramBtn" data-gd-source-test="close">Close</button>' +
+        '<span class="gdStudioViewportField">' + esc([im.ok ? im.attribution : "", te.ok && te.attribution !== im.attribution ? te.attribution : ""].filter(Boolean).join(" · ")) + "</span>" +
+        "</div>" +
+        '<div class="gdStudioSourceTestImages">' +
+        (im.ok ? '<figure><div class="gdStudioSourceTestFrame"><img alt="Source imagery" src="data:' + im.image.mediaType + ";base64," + im.image.data + '"><svg data-gd-source-test="shapes" viewBox="0 0 ' + im.width + " " + im.height + '" preserveAspectRatio="none"></svg></div><figcaption>Source imagery · AI dry-run shapes drawn over it when a scan finishes</figcaption></figure>' : "") +
+        (te.ok && te.preview ? '<figure><img alt="Terrain" src="data:' + te.preview.mediaType + ";base64," + te.preview.data + '"><figcaption>Terrain (hillshade of the decoded heights, 3× exaggerated)</figcaption></figure>' : "") +
+        "</div>";
+      var scanBtn = panel.querySelector('[data-gd-source-test="scan"]');
+      if (scanBtn) { scanBtn.disabled = scanning; scanBtn.addEventListener("click", scanSourceTest); }
+      panel.querySelector('[data-gd-source-test="close"]').addEventListener("click", function () { sourceTest = null; renderSourceTest(); });
+    }
+
+    function runSourceTest() {
+      var id = courseIdOf(session.course);
+      if (!id || !mapObj || sourceTesting) return;
+      var b = mapObj.getBounds();
+      sourceTesting = true; updateActions();
+      setStatus("Fetching this view from Mapbox Satellite and Mapbox Terrain…");
+      api("POST", "", {
+        courseId: id, imagery: "mapbox", terrain: "mapbox",
+        bounds: { north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() }
+      }, SOURCE_TEST_API).then(function (data) {
+        if (destroyed) return;
+        sourceTest = data;
+        renderSourceTest();
+        var im = data.imagery || {}, te = data.terrain || {};
+        setStatus("Source test: imagery " + (im.ok ? "ok" : "failed (" + (im.error && im.error.code) + ")") + ", terrain " + (te.ok ? "ok" : "failed (" + (te.error && te.error.code) + ")"), !(im.ok && te.ok));
+      }).catch(function (error) {
+        if (destroyed) return;
+        setStatus("Source test failed: " + (error && error.message || error), true);
+      }).then(function () { sourceTesting = false; if (!destroyed) updateActions(); });
+    }
+
+    function scanSourceTest() {
+      var id = courseIdOf(session.course);
+      var im = sourceTest && sourceTest.imagery;
+      if (!id || !im || !im.ok || scanning) return;
+      scanning = true; updateActions();
+      setStatus("Preparing the Mapbox picture for a dry-run scan…");
+      new Promise(function (resolve, reject) {
+        var img = new Image();
+        img.onload = function () { resolve(img); };
+        img.onerror = function () { reject(new Error("the picture did not decode")); };
+        img.src = "data:" + im.image.mediaType + ";base64," + im.image.data;
+      }).then(function (img) {
+        var canvas = document.createElement("canvas");
+        canvas.width = im.width; canvas.height = im.height;
+        canvas.getContext("2d").drawImage(img, 0, 0, im.width, im.height);
+        drawGrid(canvas, AI_GRID_PX);
+        var data = canvas.toDataURL("image/jpeg", 0.88).replace(/^data:[^,]+,/, "");
+        return api("POST", "", { courseId: id, image: { data: data, mediaType: "image/jpeg" }, georef: im.georef, anchors: [], grid: AI_GRID_PX, dryRun: true, provenance: sourceTest.provenance }, AI_API);
+      }).then(function (data) {
+        if (destroyed) return;
+        setStatus("AI dry run queued (" + Math.round(((data && data.georef && data.georef.metresPerPixel) || 0) * 100) / 100 + " m/px). Waiting for the model…");
+        pollScan(id, Date.now());
+      }).catch(function (error) {
+        stopScanPoll();
+        setStatus("AI dry run not started: " + (error && error.message || error), true);
+      });
+    }
+
+    /* The dry run's shapes, over the picture they were read from, in that picture's pixels. */
+    function drawDryRun(scan) {
+      var svg = el["source-panel"].querySelector('[data-gd-source-test="shapes"]');
+      if (!svg) return;
+      var colour = { fairway: "#7CFC00", green: "#00e5ff", tee: "#ffffff", bunker: "#ffe14d", hole: "#ff6ad5" };
+      svg.innerHTML = (scan.pixels || []).map(function (f) {
+        var pts = (f.pixels || []).map(function (p) { return Math.round(p.x) + "," + Math.round(p.y); }).join(" ");
+        var tag = f.kind === "hole" ? "polyline" : "polygon";
+        return "<" + tag + ' points="' + pts + '" fill="none" stroke="' + (colour[f.kind] || "#fff") + '" stroke-width="3" vector-effect="non-scaling-stroke"></' + tag + ">";
+      }).join("");
+    }
+
     /* ---- course ---- */
 
     function showCourse(course, opts) {
@@ -1691,6 +1810,8 @@
       }
       if (session.loadedFor !== id) {
         forgetCourse();
+        sourceTest = null;
+        renderSourceTest();
         selectedId = "";
         clearOsmLayers();
         clearObjectLayers();
@@ -1801,6 +1922,7 @@
     el.objects.checked = session.showObjects;
     el.objects.addEventListener("change", function () { session.showObjects = el.objects.checked; drawObjects(); });
     el.ai.addEventListener("click", scanWithAi);
+    el["source-test"].addEventListener("click", runSourceTest);
     el["tool-move"].addEventListener("click", function () { setTool("move"); });
     el["tool-fairway"].addEventListener("click", function () { setTool("fairway"); });
     el["tool-green"].addEventListener("click", function () { setTool("green"); });
