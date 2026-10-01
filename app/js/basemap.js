@@ -35,10 +35,13 @@
    account, and a forced source with no key (or one proven blank) falls back to
    the normal auto pick.
 
-   "mesh" (Clarity 3D Mesh) is Mapbox as far as this file is concerned: the
-   Leaflet map under it is Mapbox, and painter.js (via live-terrain.js) stands
-   an unpublished hole up on the terrain mesh over it. If the mesh cannot be
-   built the Mapbox map is what stays. */
+   "mesh" (Clarity 3D Mesh) leaves the Leaflet map on the normal auto pick.
+   painter.js (via live-terrain.js and live-hybrid.js) covers an unpublished
+   hole with its own Esri + Mapbox picture, fetched once per hole, so the map
+   underneath is only the backdrop while that loads and the fallback if it
+   cannot - paying for Mapbox tiles there as well, at every zoom the camera
+   visits, was most of the experiment's Mapbox bill. tileUrlFor() hands the
+   compositor the keyed tile URLs. */
 (function () {
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
@@ -218,7 +221,7 @@
 
   function pick(centre) {
     if (override !== "auto" && operator()) {
-      var forced = sourceOf(override === "mesh" ? "mapbox" : override);
+      var forced = override === "mesh" ? null : sourceOf(override);
       if (forced && hasKey(forced) && !deadCells[cellKey(forced.kind, centre)]) return forced;
     }
     for (var i = 0; i < SOURCES.length; i++) {
@@ -317,6 +320,18 @@
       overrideListeners.forEach(function (fn) { try { fn(kind); } catch (e) {} });
     },
     onOverrideChange: function (fn) { if (typeof fn === "function") overrideListeners.push(fn); },
+    /* One 256px tile's URL for the live terrain compositor (live-hybrid.js), or
+       null when that provider has no key. Esri's template orders {y} before {x};
+       substituting by name keeps that right. Mapbox without @2x: the compositor
+       draws every provider on the frame's own 256px grid. */
+    tileUrlFor: function (kind, z, x, y) {
+      var source = sourceOf(kind);
+      if (!source || !source.tileUrl || !hasKey(source)) return null;
+      return String(source.tileUrl).replace("@2x", "")
+        .replace("{z}", z).replace("{x}", x).replace("{y}", y)
+        .replace("{linzKey}", linzKey || "").replace("{esriKey}", esriKey || "")
+        .replace("{mapboxToken}", mapboxToken || "");
+    },
     /* Which source is up, for the on-screen source tag. */
     kindFor: function (centre) { return pick(centre).kind; },
     /* → {kind, layer, attribution} for the given course centre. Never throws,

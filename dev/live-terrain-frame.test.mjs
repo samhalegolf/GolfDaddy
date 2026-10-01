@@ -6,9 +6,9 @@
  *   - the DEM is resampled onto EXACTLY the window: a linear height field comes back as the
  *     same linear field at the grid's pixel centres, whatever the DEM zoom;
  *   - the grid keeps the window's aspect and stays inside its size limits;
- *   - the handler refuses non-admins, echoes the window, answers both layers, falls through
- *     to the next DEM when one fails, says why when none works, and never lets a CDN cache
- *     the answer.
+ *   - the handler refuses non-admins, answers only the elevation layer (pictures are fetched
+ *     by the browser), echoes the window, falls through to the next DEM when one fails, says
+ *     why when none works, and never lets a CDN cache the answer.
  *
  * Run: node dev/live-terrain-frame.test.mjs
  */
@@ -108,13 +108,9 @@ function demPng(spec, w, h, base) {
 
 function fakeMosaic({ failDem = [], log = [] } = {}) {
   return async (spec, zoom, origin, size) => {
-    const isDem = !!spec.encoding;
-    log.push({ dem: isDem, url: spec.urlTemplate, zoom, origin, size });
-    if (isDem) {
-      if (failDem.some(f => spec.urlTemplate.includes(f))) return null;
-      return demPng(spec, size.width, size.height, 40);
-    }
-    return sharp({ create: { width: size.width, height: size.height, channels: 3, background: { r: 40, g: 120, b: 50 } } }).png().toBuffer();
+    log.push({ url: spec.urlTemplate, zoom, origin, size });
+    if (failDem.some(f => spec.urlTemplate.includes(f))) return null;
+    return demPng(spec, size.width, size.height, 40);
   };
 }
 
@@ -125,44 +121,26 @@ const query = (layer, win = WIN) => "layer=" + layer + "&z=" + win.z + "&x=" + w
 await ok("non-admins are refused before anything is fetched", async () => {
   const log = [];
   const handler = createHandler({ verifyAdmin: async () => "", env: ENV, mosaic: fakeMosaic({ log }) });
-  const res = await handler(req(query("aerial")));
+  const res = await handler(req(query("elevation")));
   assert.strictEqual(res.status, 403);
   assert.strictEqual(log.length, 0);
 });
 
-await ok("a bad window or layer is a 400", async () => {
-  const handler = createHandler({ verifyAdmin: async () => "a@b", env: ENV, mosaic: fakeMosaic() });
-  assert.strictEqual((await handler(req(query("aerial", { ...WIN, z: 11 })))).status, 400);
-  assert.strictEqual((await handler(req(query("hillshade")))).status, 400);
-});
-
-await ok("aerial: the window's own size, from Mapbox, private to the device", async () => {
+await ok("a bad window or layer is a 400 - pictures are the browser's, not this endpoint's", async () => {
   const log = [];
   const handler = createHandler({ verifyAdmin: async () => "a@b", env: ENV, mosaic: fakeMosaic({ log }) });
-  const res = await handler(req(query("aerial")));
-  assert.strictEqual(res.status, 200);
-  assert.strictEqual(res.headers.get("Content-Type"), "image/jpeg");
-  assert.strictEqual(res.headers.get("X-Window"), [WIN.z, WIN.x, WIN.y, WIN.w, WIN.h].join("/"));
-  assert.match(res.headers.get("Cache-Control"), /^private/);
-  assert.strictEqual(res.headers.get("Netlify-CDN-Cache-Control"), "no-store");
-  assert.match(res.headers.get("Access-Control-Expose-Headers"), /X-Window/);
-  const meta = await sharp(Buffer.from(await res.arrayBuffer())).metadata();
-  assert.deepStrictEqual([meta.width, meta.height], [WIN.w, WIN.h]);
-  assert.match(log[0].url, /mapbox\.satellite/);
-  assert.deepStrictEqual(log[0].origin, { x: WIN.x, y: WIN.y });
-});
-
-await ok("aerial without a Mapbox token says so", async () => {
-  const handler = createHandler({ verifyAdmin: async () => "a@b", env: {}, mosaic: fakeMosaic() });
-  const res = await handler(req(query("aerial")));
-  assert.strictEqual(res.status, 503);
-  assert.match((await res.json()).error, /MAPBOX_PUBLIC_TOKEN/);
+  assert.strictEqual((await handler(req(query("elevation", { ...WIN, z: 11 })))).status, 400);
+  assert.strictEqual((await handler(req(query("aerial")))).status, 400);
+  assert.strictEqual(log.length, 0, "and no Mapbox picture is ever fetched here");
 });
 
 await ok("elevation: terrain-RGB on the window's grid, with its range and source", async () => {
   const handler = createHandler({ verifyAdmin: async () => "a@b", env: ENV, mosaic: fakeMosaic() });
   const res = await handler(req(query("elevation")));
   assert.strictEqual(res.status, 200);
+  assert.match(res.headers.get("Cache-Control"), /^private/);
+  assert.strictEqual(res.headers.get("Netlify-CDN-Cache-Control"), "no-store");
+  assert.match(res.headers.get("Access-Control-Expose-Headers"), /X-Window/);
   const size = res.headers.get("X-Elevation-Size").split("x").map(Number);
   const png = Buffer.from(await res.arrayBuffer());
   const { data, info } = await sharp(png).raw().toBuffer({ resolveWithObject: true });

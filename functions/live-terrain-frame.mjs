@@ -1,23 +1,22 @@
-/* Live terrain frame - one hole's Mapbox picture and its elevation, for the admin-only
-   "Clarity 3D Mesh" map source (app/js/live-terrain.js). TEST PATH.
+/* Live terrain frame - one hole's elevation, for the admin-only "Clarity 3D Mesh" map source
+   (app/js/live-terrain.js). TEST PATH.
 
-   GET /api/live-terrain-frame?layer=aerial|elevation&z=&x=&y=&w=&h=
+   GET /api/live-terrain-frame?layer=elevation&z=&x=&y=&w=&h=
      Authorization: Bearer <admin session>
 
-   z/x/y/w/h is a rectangle of web-mercator pixels (gd-live-terrain-core parseWindow). Both
-   layers are cut to exactly that rectangle, so the picture and the heights cover the same ground
-   by construction - the terrain mesh needs that and has no way to check it.
+   z/x/y/w/h is a rectangle of web-mercator pixels (gd-live-terrain-core parseWindow) - the same
+   rectangle the browser builds its hybrid Esri + Mapbox picture on (app/js/live-hybrid.js), so
+   the heights cover exactly the ground of the picture. The mesh needs that and cannot check it.
 
-     aerial     JPEG, w x h, from mapbox.satellite at z.
-     elevation  terrain-RGB PNG covering the same rectangle, from the best DEM for the ground:
-                the regional one (LINZ in NZ, and so on) through resolveElevationSource, else the
-                global terrain tiles, else Mapbox Terrain-DEM. Headers carry the height range
-                and the source, which the mesh needs and an image cannot.
+   The answer is a terrain-RGB PNG from the best DEM for the ground: the regional one (LINZ in
+   NZ, and so on) through resolveElevationSource, else the global terrain tiles, else Mapbox
+   Terrain-DEM. Headers carry the height range and the source, which the mesh needs and an image
+   cannot.
 
-   Nothing is stored and nothing is published. Mapbox's terms allow display, not derivatives
-   or storage (gd-mapbox-source.mjs), so the answer is private to the device that asked and is
-   never cached at the CDN; the course visual pipeline never sees any of it. Admin only, because
-   this is a test of whether the look is worth having and every call spends Mapbox quota. */
+   Nothing is stored and nothing is published: the answer is private to the device that asked
+   and never cached at the CDN. Admin only, because this is a test of whether the look is worth
+   having. The pictures are not fetched here - they are display tiles the browser draws itself,
+   so it can reuse them hole to hole. */
 
 import sharp from "sharp";
 import { verifiedAdminEmail } from "./lib/gd-map-overlay-store.mjs";
@@ -37,15 +36,6 @@ export function elevationCandidates(bounds, env) {
   const mapbox = mapboxCaptureSource(env);
   if (mapbox) out.push({ key: "mapbox-terrain-dem", label: "Mapbox Terrain-DEM v1", attribution: { text: "© Mapbox" }, dem: mapbox.terrain });
   return out.filter(c => c.dem);
-}
-
-export async function aerialFor(win, deps = {}) {
-  const source = mapboxCaptureSource(deps.env);
-  if (!source) return { error: "MAPBOX_PUBLIC_TOKEN is not configured", status: 503 };
-  const png = await (deps.mosaic || mosaic)(source.imagery, win.z, { x: win.x, y: win.y }, { width: win.w, height: win.h }, { requireAll: true });
-  if (!png) return { error: "Mapbox imagery did not load for this window", status: 502 };
-  const jpeg = await sharp(png, { limitInputPixels: false }).jpeg({ quality: 88 }).toBuffer();
-  return { body: jpeg, type: "image/jpeg", headers: { "X-Live-Imagery": "mapbox.satellite" } };
 }
 
 export async function elevationFor(win, deps = {}) {
@@ -88,7 +78,7 @@ export async function elevationFor(win, deps = {}) {
   return { error: "no elevation for this window (tried " + (tried.join(", ") || "nothing") + ")", status: 502 };
 }
 
-const EXPOSED = ["X-Window", "X-Live-Imagery", "X-Elevation-Source", "X-Elevation-Credit", "X-Elevation-Min",
+const EXPOSED = ["X-Window", "X-Elevation-Source", "X-Elevation-Credit", "X-Elevation-Min",
   "X-Elevation-Max", "X-Elevation-Zoom", "X-Elevation-Size", "X-Window-Metres"].join(", ");
 
 function cors(headers) {
@@ -115,12 +105,10 @@ export function createHandler(deps = {}) {
     const params = new URL(req.url).searchParams;
     const win = parseWindow(params);
     if (win.error) return fail(400, win.error);
-    const layer = params.get("layer");
+    if (params.get("layer") !== "elevation") return fail(400, "layer must be elevation");
     let result;
     try {
-      if (layer === "aerial") result = await aerialFor(win, deps);
-      else if (layer === "elevation") result = await elevationFor(win, deps);
-      else return fail(400, "layer must be aerial or elevation");
+      result = await elevationFor(win, deps);
     } catch (e) {
       return fail(502, String((e && e.message) || e));
     }

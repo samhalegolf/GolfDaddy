@@ -1,19 +1,20 @@
 /* Clarity 3D Mesh on the live map - TEST PATH, admin only.
 
    A hole with no published surface plays on the Leaflet map: tiles, plus the hillshade layer.
-   This builds one temporary picture of the hole instead - a single Mapbox raster and the DEM
-   resampled onto exactly the same ground (/api/live-terrain-frame) - and hands painter.js the
-   pair in the shape of a published surface's metadata. From there nothing is new: the published
-   path frames it (stageFrameTransform), stands it up (gd-terrain-mesh.js), lifts the overlays
-   onto it and grounds taps from it. One camera, one mesh, one projector.
+   This builds one temporary picture of the hole instead - Esri across the frame with Mapbox over
+   the playing area (live-hybrid.js), and the DEM resampled onto exactly the same ground
+   (/api/live-terrain-frame) - and hands painter.js the pair in the shape of a published
+   surface's metadata. From there nothing is new: the published path frames it
+   (stageFrameTransform), stands it up (gd-terrain-mesh.js), lifts the overlays onto it and
+   grounds taps from it. One camera, one mesh, one projector.
 
    What this file owns is only the part the published path never needed:
      - whether the mode is on at all (wanted)
      - which rectangle of ground covers the hole (frameWindow)
-     - fetching the two layers and proving they are the window that was asked for (load)
+     - putting the picture and the elevation together and proving they agree (load)
      - letting go of them (release)
-   Nothing is stored or published. The two images live as object URLs for as long as the hole
-   is on screen and are revoked when it is not. */
+   Nothing is stored or published. The images live as object URLs for as long as the hole is on
+   screen and are revoked when it is not. */
 (function (root, factory) {
   var api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
@@ -103,85 +104,103 @@
      published bake. */
   function surfaceMeta(win, elevation) {
     var metres = windowMetres(win);
-    return {
+    var meta = {
       liveTerrain: true,
       captureZoom: win.z,
       originPx: { x: win.x, y: win.y },
-      outputDimensions: { width: win.w, height: win.h },
-      elevation: {
-        url: elevation.url,
-        encoding: "terrain-rgb",
-        width: elevation.width,
-        height: elevation.height,
-        metresPerPixel: metres.width / elevation.width,
-        elevationRange: { min: elevation.min, max: elevation.max }
-      }
+      outputDimensions: { width: win.w, height: win.h }
     };
+    /* No elevation: a flat picture, which the published path presents without a mesh. */
+    if (!elevation) return meta;
+    meta.elevation = {
+      url: elevation.url,
+      encoding: "terrain-rgb",
+      width: elevation.width,
+      height: elevation.height,
+      metresPerPixel: metres.width / elevation.width,
+      elevationRange: { min: elevation.min, max: elevation.max }
+    };
+    return meta;
   }
 
   function header(res, name) {
     try { return res.headers.get(name); } catch (e) { return null; }
   }
 
-  /* Both layers for a window, or a rejection whose message is the fallback reason the admin
-     sees. deps: { fetch, apiUrl(path), token() -> Promise<string>, createObjectURL(blob),
-     revokeObjectURL(url) }.
+  /* The hole's surface: the hybrid picture (live-hybrid.js build) and the elevation from
+     /api/live-terrain-frame, for one window. Rejects with the fallback reason when there is no
+     picture at all. A missing elevation is not a rejection: the picture is presented flat, which
+     is still the hole, and debug says why.
 
-     "Alignment cannot be proven" is a failure like any other: each answer must echo the exact
-     window asked for, and the elevation must say how big its grid is - the mesh would draw
-     whatever it was given and has no way to notice the two do not agree. */
-  function load(win, deps) {
+     deps: { fetch, apiUrl(path), token() -> Promise<string>, createObjectURL(blob),
+     revokeObjectURL(url), hybrid: { session, tileUrl, canvas, decode } }.
+
+     The elevation answer must echo the exact window asked for and say how big its grid is - the
+     mesh would draw whatever it was given and has no way to notice the two do not agree. */
+  function elevationFor(win, deps) {
     var query = "&z=" + win.z + "&x=" + win.x + "&y=" + win.y + "&w=" + win.w + "&h=" + win.h;
     var expect = [win.z, win.x, win.y, win.w, win.h].join("/");
-    var made = [];
-    function revokeAll() { made.forEach(function (u) { try { deps.revokeObjectURL(u); } catch (e) {} }); }
     return Promise.resolve(deps.token ? deps.token() : "").then(function (token) {
       var headers = token ? { Authorization: "Bearer " + token } : {};
-      function get(layer) {
-        return deps.fetch(deps.apiUrl("/api/live-terrain-frame?layer=" + layer + query), { headers: headers })
-          .then(function (res) {
-            if (!res || !res.ok) {
-              return (res && res.json ? res.json().catch(function () { return null; }) : Promise.resolve(null))
-                .then(function (body) {
-                  throw new Error(layer + " " + (res ? res.status : "no answer") + (body && body.error ? ": " + body.error : ""));
-                });
-            }
-            if (header(res, "X-Window") !== expect) throw new Error(layer + " answered for a different window");
-            return res.blob().then(function (blob) { return { res: res, blob: blob }; });
-          }, function (e) { throw new Error(layer + " request failed: " + ((e && e.message) || e)); });
+      return deps.fetch(deps.apiUrl("/api/live-terrain-frame?layer=elevation" + query), { headers: headers });
+    }).then(function (res) {
+      if (!res || !res.ok) {
+        return (res && res.json ? res.json().catch(function () { return null; }) : Promise.resolve(null)).then(function (body) {
+          throw new Error("elevation " + (res ? res.status : "no answer") + (body && body.error ? ": " + body.error : ""));
+        });
       }
-      return Promise.all([get("aerial"), get("elevation")]);
-    }).then(function (both) {
-      var aerial = both[0], elevation = both[1];
-      var size = String(header(elevation.res, "X-Elevation-Size") || "").split("x").map(Number);
-      var min = Number(header(elevation.res, "X-Elevation-Min")), max = Number(header(elevation.res, "X-Elevation-Max"));
+      if (header(res, "X-Window") !== expect) throw new Error("elevation answered for a different window");
+      var size = String(header(res, "X-Elevation-Size") || "").split("x").map(Number);
+      var min = Number(header(res, "X-Elevation-Min")), max = Number(header(res, "X-Elevation-Max"));
       if (!(size[0] > 1 && size[1] > 1) || !Number.isFinite(min) || !Number.isFinite(max)) {
         throw new Error("elevation answer is missing its size or range");
       }
-      var aerialUrl = deps.createObjectURL(aerial.blob); made.push(aerialUrl);
-      var elevationUrl = deps.createObjectURL(elevation.blob); made.push(elevationUrl);
-      var meta = surfaceMeta(win, { url: elevationUrl, width: size[0], height: size[1], min: min, max: max });
-      var metres = windowMetres(win);
       var credit = "";
-      try { credit = decodeURIComponent(header(elevation.res, "X-Elevation-Credit") || ""); } catch (e) { credit = ""; }
+      try { credit = decodeURIComponent(header(res, "X-Elevation-Credit") || ""); } catch (e) { credit = ""; }
+      return res.blob().then(function (blob) {
+        return { blob: blob, width: size[0], height: size[1], min: min, max: max, credit: credit,
+          source: header(res, "X-Elevation-Source") || "?", zoom: Number(header(res, "X-Elevation-Zoom")) || null };
+      });
+    }, function (e) {
+      throw new Error("elevation request failed: " + ((e && e.message) || e));
+    });
+  }
+
+  function load(win, geom, deps, options) {
+    var hybrid = (typeof window !== "undefined" && window.ClarityApp && window.ClarityApp.liveHybrid)
+      || (deps.liveHybrid) || null;
+    if (!hybrid) return Promise.reject(new Error("hybrid compositor missing"));
+    var hybridDeps = Object.assign({ fetch: deps.fetch, now: deps.now }, deps.hybrid);
+    var picture = hybrid.build(win, geom, hybridDeps, options);
+    var elevation = elevationFor(win, deps).then(null, function (e) { return { error: (e && e.message) || String(e) }; });
+    return Promise.all([picture, elevation]).then(function (both) {
+      var pic = both[0], elev = both[1];
+      var made = [];
+      var aerialUrl = deps.createObjectURL(pic.blob); made.push(aerialUrl);
+      var meta;
+      if (elev.error) {
+        meta = surfaceMeta(win, null);
+      } else {
+        var elevationUrl = deps.createObjectURL(elev.blob); made.push(elevationUrl);
+        meta = surfaceMeta(win, { url: elevationUrl, width: elev.width, height: elev.height, min: elev.min, max: elev.max });
+      }
+      var metres = windowMetres(win);
+      var d = pic.debug;
       return {
-        urls: made.slice(),
+        urls: made,
         asset: { live: true, url: aerialUrl, playSurface: meta },
-        debug: {
-          imagery: header(aerial.res, "X-Live-Imagery") || "mapbox.satellite",
-          elevation: header(elevation.res, "X-Elevation-Source") || "?",
-          elevationCredit: credit,
-          demZoom: Number(header(elevation.res, "X-Elevation-Zoom")) || null,
+        debug: Object.assign(d, {
           window: win,
           rasterPx: win.w + "x" + win.h,
-          demPx: size[0] + "x" + size[1],
           metres: Math.round(metres.width) + "x" + Math.round(metres.height) + "m",
-          elevationRange: min.toFixed(1) + ".." + max.toFixed(1) + "m"
-        }
+          elevation: elev.error ? null : elev.source,
+          elevationCredit: elev.error ? "" : elev.credit,
+          elevationFailed: elev.error || null,
+          demZoom: elev.error ? null : elev.zoom,
+          demPx: elev.error ? null : elev.width + "x" + elev.height,
+          elevationRange: elev.error ? null : elev.min.toFixed(1) + ".." + elev.max.toFixed(1) + "m"
+        })
       };
-    }).catch(function (e) {
-      revokeAll();
-      throw e;
     });
   }
 
@@ -192,13 +211,23 @@
     entry.urls = [];
   }
 
-  /* The admin's one-line readout, drawn where a published hole shows its bake stamp. */
-  function debugLabel(debug, exaggeration) {
+  /* The admin's one-line readout, drawn where a published hole shows its bake stamp. mesh is
+     "on", "off" (relief off, or no elevation) or the reason it failed. */
+  function debugLabel(debug, exaggeration, mesh) {
     if (!debug) return "";
-    return ["3D mesh", "Mapbox z" + debug.window.z + " " + debug.rasterPx,
-      "DEM " + debug.elevation + (debug.demZoom ? " z" + debug.demZoom : "") + " " + debug.demPx,
-      debug.metres, debug.elevationRange, exaggeration + "x",
-      debug.rebuild || "", debug.loadMs != null ? debug.loadMs + "ms" : ""].filter(Boolean).join(" · ");
+    var mb = debug.mapbox || {}, ctx = debug.esri || {};
+    var imagery = debug.context === "esri"
+      ? "Esri " + (ctx.network || 0) + "+" + (ctx.reused || 0) + "r · Mapbox " + (mb.network || 0) + "+" + (mb.reused || 0) + "r"
+        + " (" + debug.maskPct + "% frame, session " + debug.sessionMapbox + ")" + (debug.mapboxFailed ? " FAILED" : "")
+      : "Mapbox only " + (mb.network || 0) + "+" + (mb.reused || 0) + "r";
+    return ["3D mesh " + (mesh || "pending"), debug.view !== "composite" ? "view " + debug.view : "",
+      "z" + debug.window.z + " " + debug.rasterPx + " " + (debug.metresPerPx ? debug.metresPerPx.toFixed(2) + "m/px" : ""),
+      imagery,
+      debug.elevation ? "DEM " + debug.elevation + (debug.demZoom ? " z" + debug.demZoom : "") + " " + debug.demPx + " " + debug.elevationRange
+        : "DEM none (" + (debug.elevationFailed || "?") + ")",
+      debug.metres, exaggeration + "x", debug.rebuild || "",
+      debug.composeMs != null ? "img " + debug.composeMs + "ms" : "",
+      debug.meshMs != null ? "mesh " + debug.meshMs + "ms" : ""].filter(Boolean).join(" · ");
   }
 
   return {

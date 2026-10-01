@@ -140,6 +140,30 @@ test("a forced source with no key falls back to auto", () => {
   basemap.setOverride("auto");
 });
 
+test("Clarity 3D Mesh keeps the live map on auto - the hole picture brings its own Mapbox", () => {
+  asOperator(true);
+  basemap.configure({ esriApiKey: "e", mapboxPublicToken: "pk.test" });
+  basemap.setOverride("mesh");
+  assert.strictEqual(basemap.baseFor(ST_ANDREWS).kind, "esri");
+  assert.strictEqual(basemap.baseFor(MADRID_ES).kind, "pnoa");
+  assert.strictEqual(basemap.activeOverride(), "mesh");
+  asOperator(false);
+  assert.strictEqual(basemap.activeOverride(), "auto", "a player never inherits the operator's choice");
+  asOperator(true);
+  basemap.setOverride("auto");
+});
+
+test("tileUrlFor builds the compositor's 256px tiles, Esri y before x, and nothing without a key", () => {
+  basemap.configure({ esriApiKey: "e-key", mapboxPublicToken: "pk.test" });
+  assert.strictEqual(basemap.tileUrlFor("esri", 18, 258000, 160000),
+    "https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/18/160000/258000?token=e-key");
+  assert.strictEqual(basemap.tileUrlFor("mapbox", 18, 258000, 160000),
+    "https://api.mapbox.com/v4/mapbox.satellite/18/258000/160000.jpg90?access_token=pk.test");
+  basemap.configure({ esriApiKey: "e-key" });
+  assert.strictEqual(basemap.tileUrlFor("mapbox", 18, 1, 2), null);
+  assert.strictEqual(basemap.tileUrlFor("nope", 18, 1, 2), null);
+});
+
 (function run() {
   let failures = 0;
   for (const item of tests) {
