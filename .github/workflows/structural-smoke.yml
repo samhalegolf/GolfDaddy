@@ -124,6 +124,7 @@ jobs:
           node dev/course-snapshots.test.js
           node dev/imagery-source-registry.test.js
           node dev/map-source-providers.test.mjs
+          node dev/test-bakes.test.mjs
           node dev/map-source-coverage.test.js
           node dev/shell-navigation-owner.test.js
           node dev/payment-rollout-tests.js

@@ -12,6 +12,7 @@
    The worker itself is functions/course-visual-worker-background.mjs. */
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import courseVersionLabel from "../scripts/gd-course-version-label.js";
+import { isTestKind } from "./lib/gd-test-bake-core.mjs";
 
 const TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
@@ -84,7 +85,10 @@ function summarizeCheckpoint(kind, status) {
 }
 
 function deriveCourseBuildStateFromRows({ jobs, visual }) {
-  const orderedJobs = Array.isArray(jobs) ? jobs : [];
+  /* Test bakes (gd-test-bake-core.mjs) share the queue but are not builds of this course: a
+     running test must never show a player the course as building, and a failed one must
+     never read as this course's failure. */
+  const orderedJobs = (Array.isArray(jobs) ? jobs : []).filter(job => !isTestKind(job && job.kind));
   const live = latestJob(orderedJobs, job => job.status === "running") || latestJob(orderedJobs, job => job.status === "queued");
   const latestTerminal = latestJob(orderedJobs, job => (job.kind === "snapshot" || job.kind === "export") && (job.status === "done" || job.status === "failed"));
   const latestSnapshotSuccess = latestJob(orderedJobs, job => job.kind === "snapshot" && job.status === "done");
@@ -131,7 +135,7 @@ function deriveCourseBuildStateFromRows({ jobs, visual }) {
 async function courseBuildState(courseId) {
   const [visualRows, jobRows, mapRows] = await Promise.all([
     supabaseFetch(VISUALS_TABLE + "?select=published_version,bake_number,bake_objects_revision,current_version,status,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []),
-    supabaseFetch(TABLE + "?select=id,kind,status,error,result,created_at,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&order=created_at.desc&limit=8").catch(() => []),
+    supabaseFetch(TABLE + "?select=id,kind,status,error,result,created_at,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&kind=in.(snapshot,export)&order=created_at.desc&limit=8").catch(() => []),
     /* The app tries several candidate keys for a course it has just selected (id, saved id,
        name, name minus "Golf Club"...). Without this it cannot tell "this key is not a course"
        from "this course has never been built", and both look like state "none". */
@@ -188,7 +192,7 @@ async function courseBuildStateAll() {
   const jobs = Array.isArray(jobRows) ? jobRows : [];
   jobs.forEach((job) => {
     const id = String(job && job.course_id || "");
-    if (!id) return;
+    if (!id || isTestKind(job.kind)) return;
     const list = jobsByCourse.get(id) || [];
     if (list.length < JOBS_PER_COURSE) list.push(job);
     jobsByCourse.set(id, list);

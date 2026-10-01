@@ -585,6 +585,7 @@ function gdAdminCourseDbActionRail(selected){
     <button type="button" class="${active("debug")}" onclick="return gdAdminCourseDbShowDebug(${id})">Debug</button>
     <button type="button" class="${active("watchmaps")}" onclick="return gdAdminCourseDbShowWatchMaps(${id})">Watch Maps</button>
     <button type="button" class="${active("snapshots")}" onclick="return gdAdminCourseDbShowSnapshots(${id})">Snapshots</button>
+    <button type="button" class="${active("testbakes")}" onclick="return gdAdminCourseDbShowTestBakes(${id})">Test Bakes</button>
     <button type="button" class="danger" onclick="return gdAdminCourseDbDelete(${id})">Delete</button>
     ${gdAdminCourseMaintenanceMenu(selected)}
     ${gdAdminCourseVisualUpdateButton(selected&&selected.id||"","primary")}
@@ -610,6 +611,7 @@ function gdAdminCourseMaintenanceMenu(selected){
     ${item("refine_surface_shapes","Refine Shapes","Re-traces those shapes from this course's own frames. Lighter, and ours")}
     ${item("recapture_visuals","Re-Capture Visuals","Fresh source imagery for the existing map, then a bake")}
     ${item("rebake_visuals","Re-Bake Visuals","Existing captures, current recipe. No re-scan")}
+    ${item("test_bake_mapbox","Test bake with Mapbox","Normal capture + bake from Mapbox, current geometry. Studio only - never published, deleted after 7 days")}
     ${item("generate_watch_maps","Generate Watch Maps","Bakes lightweight spatially-referenced hole maps for Apple Watch from the existing geometry. Does not remap, recollect objects, or touch native visuals, tees/greens, or GPS Play imagery")}
     ${item("rebuild_local","Rebuild local","This browser's copy only. Nothing on the server changes")}
   </div></details>`;
@@ -626,6 +628,10 @@ function gdAdminCourseMaintenance(mode,courseId){
   if(mode==="collect_extra_objects")return gdAdminCourseCollectExtraObjects(id);
   if(mode==="refine_surface_shapes")return gdAdminCourseRefineShapes(id);
   if(mode==="rebuild_local")return gdAdminCourseDbUpdate(id);
+  if(mode==="test_bake_mapbox"){
+    if(typeof window.gdAdminCourseTestBakeStart!=="function"){gdAdminCourseVisualToast("Test bakes not loaded");return false;}
+    return window.gdAdminCourseTestBakeStart(id);
+  }
   if(mode==="rebake_visuals")return gdAdminCourseVisualUpdateWithActiveRecipe(id);
   if(mode==="generate_watch_maps"){
     if(typeof window.gdAdminCourseWatchMapsGenerate!=="function"){gdAdminCourseVisualToast("Watch Map generator not loaded");return false;}
@@ -667,6 +673,11 @@ function gdAdminCourseDbShowWatchMaps(courseId){
    Rendered by scripts/studio/gd-admin-course-snapshots.js, same delegation as Watch Maps. */
 function gdAdminCourseDbShowSnapshots(courseId){
   return gdAdminCourseDbOpen(courseId,"snapshots");
+}
+/* Test bakes from a test-only imagery source (Mapbox) - rendered by
+   scripts/studio/gd-admin-course-test-bakes.js. Studio only; nothing here is published. */
+function gdAdminCourseDbShowTestBakes(courseId){
+  return gdAdminCourseDbOpen(courseId,"testbakes");
 }
 /* Mirrors ADMIN_EMAILS in functions/course-maps.mjs - the server is the real
    gate (it 403s a non-admin actor); this only decides whether we bother asking. */
@@ -4711,6 +4722,12 @@ function gdRenderAdminCourseDatabaseNow(){
     if(typeof window.gdAdminCourseSnapshotsAfterRender==="function")window.gdAdminCourseSnapshotsAfterRender(selected);
     return;
   }
+  if(gdAdminCourseDatabaseTab==="testbakes"){
+    const markup=typeof window.gdAdminCourseTestBakesMarkup==="function"?window.gdAdminCourseTestBakesMarkup(selected):'<div class="gdCoursePlayDebugEmpty">Test bakes not loaded.</div>';
+    gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}${markup}</div>`);
+    if(typeof window.gdAdminCourseTestBakesAfterRender==="function")window.gdAdminCourseTestBakesAfterRender(selected);
+    return;
+  }
   if(gdAdminCourseDatabaseTab==="watchmaps"){
     const markup=typeof window.gdAdminCourseWatchMapsMarkup==="function"?window.gdAdminCourseWatchMapsMarkup(selected):'<div class="gdCoursePlayDebugEmpty">Watch Map viewer not loaded.</div>';
     gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}${markup}</div>`);
@@ -4744,6 +4761,7 @@ window.gdAdminCourseDbOpen=gdAdminCourseDbOpen;
 window.gdAdminCourseDbShowGeometry=gdAdminCourseDbShowGeometry;
 window.gdAdminCourseDbShowDebug=gdAdminCourseDbShowDebug;
 window.gdAdminCourseDbShowWatchMaps=gdAdminCourseDbShowWatchMaps;
+window.gdAdminCourseDbShowTestBakes=gdAdminCourseDbShowTestBakes;
 window.gdAdminCourseLocationEdit=gdAdminCourseLocationEdit;
 window.gdAdminCourseLocationViewport=gdAdminCourseLocationViewport;
 window.gdAdminCourseLocationOverlay=gdAdminCourseLocationOverlay;
