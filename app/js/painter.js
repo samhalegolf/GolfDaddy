@@ -230,17 +230,21 @@
     var axis = shotUp && r && r.tee && r.green ? app.distance.bearingRad(r.tee, r.green) : null;
     var az = 315 + (Number.isFinite(axis) ? axis * 180 / Math.PI : 0);
     az = ((Math.round(az / 5) * 5) % 360 + 360) % 360;
+    /* The course rides in the URL so the server shades from the course's baked terrain asset
+       instead of going to an elevation provider. */
+    var course = (marshal && marshal.round().courseKey) || "";
     if (!reliefLayer) {
       /* maxNativeZoom 17: past ~1m/px there is no DEM detail left, so Leaflet upscales
          instead of asking the server for four times the tiles per zoom. */
-      reliefLayer = L.tileLayer(apiUrl("/api/relief-tile?z={z}&x={x}&y={y}&az={az}&v=" + RELIEF_VERSION), {
-        pane: "reliefPane", az: az, minZoom: 12, maxNativeZoom: 17, maxZoom: 21
+      reliefLayer = L.tileLayer(apiUrl("/api/relief-tile?z={z}&x={x}&y={y}&az={az}&course={course}&v=" + RELIEF_VERSION), {
+        pane: "reliefPane", az: az, course: encodeURIComponent(course), minZoom: 12, maxNativeZoom: 17, maxZoom: 21
       }).addTo(map);
       reliefAz = az;
       writeCredit();
-    } else if (az !== reliefAz) {
+    } else if (az !== reliefAz || reliefLayer.options.course !== encodeURIComponent(course)) {
       reliefAz = az;
       reliefLayer.options.az = az;
+      reliefLayer.options.course = encodeURIComponent(course);
       reliefLayer.redraw();
     }
     /* The credit belongs to the DEM the hole is shaded from, which the server picks by
@@ -1992,9 +1996,12 @@
     /* A stored path on a published frame, an object URL on a live terrain frame. */
     var elevationKey = elevation && (elevation.path || elevation.url);
     if (!elevationKey) { clear(); return; }
-    /* Live terrain frames only: a published bake keeps its own gate whatever the switch says. */
-    var forceGreen = !!meta.liveTerrain && greenLinesForced();
-    if (!forceGreen && app.liveTerrain && !app.liveTerrain.greenReadable(elevation)) { clear(); return; }
+    /* The terrain-quality gate (live-terrain.js greenReadable) applies to published bakes and
+       live frames alike. The admin test switch overrides it on both - it exists to look at what
+       coarse terrain would draw - and also waives the fit's low-confidence refusal. */
+    var gated = app.liveTerrain && !app.liveTerrain.greenReadable(elevation);
+    var forceGreen = greenLinesForced() && (!!meta.liveTerrain || gated);
+    if (!forceGreen && gated) { clear(); return; }
     elevationKey += forceGreen ? "|forced" : "";
 
     var r = scene.hole.rec;
@@ -2318,6 +2325,7 @@
         decode: raster.decode
       },
       apiUrl: apiUrl,
+      courseKey: courseKey,
       token: function () {
         var auth = window.ClaritySupabaseAuth;
         return auth && typeof auth.freshAccessToken === "function"

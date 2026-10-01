@@ -360,6 +360,9 @@
         { role: "Generated app-facing client (do not hand-edit)", path: "scripts/gd-course-visual-client.js" },
         { role: "Test bakes (Mapbox) — Studio view, started from Rebuild → Test bake with Mapbox", path: "scripts/studio/gd-admin-course-test-bakes.js" },
         { role: "Test bakes API — admin-only queue + signed links to the private test bucket", path: "functions/course-test-bakes.mjs" },
+        { role: "Terrain — Studio view: resolver result + log, asset provenance/quality, rebuild", path: "scripts/studio/gd-admin-course-terrain.js" },
+        { role: "Terrain API — status, source/upgrade reports, rebuild (one course or every course a source improves)", path: "functions/course-terrain.mjs" },
+        { role: "Terrain system — registry, resolver, adapters, normaliser, bake, versioned asset", path: "functions/lib/terrain/" },
         { role: "Test bake rules — job kinds, private bucket, run roots, 7-day purge", path: "functions/lib/gd-test-bake-core.mjs" }
       ],
       inputs: ["Accepted course record + geometry (Course Database)", "Captured imagery"],

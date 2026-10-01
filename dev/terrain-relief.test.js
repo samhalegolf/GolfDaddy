@@ -9,64 +9,48 @@
 
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
-import { resolveEndpoints, IMAGERY_SOURCES, resolveImagerySource } from "../functions/lib/gd-imagery-sources.mjs";
+import { IMAGERY_SOURCES, resolveImagerySource } from "../functions/lib/gd-imagery-sources.mjs";
 import { planCourseCaptures } from "../functions/lib/gd-visual-plan-core.mjs";
 import { renderHoleSurfaceMercator } from "../functions/lib/gd-visual-export-core.mjs";
 import { reliefFromTerrainRgb, decodeElevation, heightsFromFloat32Tiff, terrainRgbPngFromHeights, fillNoData } from "../functions/lib/gd-relief-core.mjs";
+import { TERRAIN_SOURCES, configureSource } from "../functions/lib/terrain/gd-terrain-sources.mjs";
+import { adapterFor } from "../functions/lib/terrain/gd-terrain-adapters.mjs";
 
 const envs = { LINZ_BASEMAPS_API_KEY: 'TESTKEY' };
 
-// ---- 1. LINZ now exposes a relief source, derived from its DEM
-const linz = IMAGERY_SOURCES.find(e => e.key === 'linz-nz');
-const r = resolveEndpoints(linz, envs);
-assert.ok(r.terrain, 'LINZ must expose a relief source');
-assert.equal(r.terrain.adapter, 'xyz');
-assert.equal(r.terrain.encoding, 'terrain-rgb');
-assert.ok(r.terrain.urlTemplate.includes('pipeline=terrain-rgb'),
-  'relief tiles must keep pipeline=terrain-rgb or they return a picture, not heights');
-assert.ok(r.terrain.urlTemplate.includes('TESTKEY'), 'key must be substituted');
-assert.equal(r.terrain.computed, 'hillshade-from-dem');
-console.log('1. LINZ relief source:', r.terrain.urlTemplate.replace('TESTKEY','<key>').slice(0,78)+'…');
+// ---- 1. Relief is computed from the terrain registry's elevation - LINZ keeps its pipeline
+const linz = configureSource(TERRAIN_SOURCES.find(s => s.id === 'linz-nz-elevation'), envs).source;
+assert.ok(linz, 'LINZ elevation must configure with the key');
+assert.equal(linz.encoding, 'terrain-rgb');
+assert.ok(linz.urlTemplate.includes('pipeline=terrain-rgb'),
+  'elevation tiles must keep pipeline=terrain-rgb or they return a picture, not heights');
+assert.ok(linz.urlTemplate.includes('TESTKEY'), 'key must be substituted');
+assert.ok(adapterFor(linz), 'and an adapter reads it');
+console.log('1. LINZ elevation source:', linz.urlTemplate.replace('TESTKEY','<key>').slice(0,78)+'…');
 
-// ---- 2. Float32 export DEMs (US 3DEP, AU ELVIS) are offered as relief too, tagged with
-//         their encoding so the capture path decodes floats and transcodes to terrain-RGB
-//         instead of feeding measurement bytes to an image compositor. This used to assert
-//         the opposite - that these DEMs were refused - back when no float decode existed.
+// ---- 2. Float32 export DEMs (US 3DEP, AU) are read as measurements: format tiff, encoding
+//         float32, and NO renderingRule (the services' own functions are all hillshades).
 let arcgisChecked = 0;
-for (const e of IMAGERY_SOURCES) {
-  if (!e.dem || e.dem.adapter === 'xyz') continue;
+for (const s of TERRAIN_SOURCES.filter(s => s.sourceType === 'arcgis-image-server')) {
   arcgisChecked++;
-  const res = resolveEndpoints(e, { ...envs, USGS_API_KEY:'x', QLD_API_KEY:'x' });
-  if (!res || !res.dem) continue;
-  assert.ok(res.terrain, e.key + ' has a licensed float32 DEM - it must be offered as relief');
-  assert.equal(res.terrain.encoding, 'float32', e.key + ' relief must carry the float32 tag or the fetcher decodes it as an image');
-  assert.equal(res.terrain.computed, 'hillshade-from-dem');
+  assert.equal(s.encoding, 'float32', s.id);
+  assert.equal(s.format, 'tiff', s.id + ' - a JPEG of a DEM is not a DEM');
+  assert.ok(!('renderingRule' in s), s.id + ' must not pin a rendering');
 }
-console.log('2. offered', arcgisChecked, 'float32 DEM(s) as relief sources, tagged for transcode');
-// A DEM shape with no decode at all must still be refused rather than guessed at.
-assert.equal(
-  (await import("../functions/lib/gd-imagery-sources.mjs")).resolveImagerySource(
-    { south: -36.76, west: 174.74, north: -36.75, east: 174.76 },
-    { sources: [{
-      key: 'mystery-dem', label: 'Mystery DEM',
-      region: { bbox: { south: -90, west: -180, north: 90, east: 180 } },
-      license: { name: 'Open', storage: true, derivatives: true, redistribution: true },
-      imagery: { adapter: 'xyz', urlTemplate: 'https://example.test/{z}/{x}/{y}.jpg' },
-      dem: { adapter: 'xyz', urlTemplate: 'https://example.test/dem/{z}/{x}/{y}.png', encoding: 'lerc' },
-      attribution: {}
-    }], env: {} }
-  ).terrain, null, 'an encoding without a decode must not be offered as relief');
+console.log('2.', arcgisChecked, 'float32 export DEM(s) read as measurements');
+// An encoding with no decode is refused by the adapters rather than guessed at.
+assert.equal(adapterFor(Object.assign({}, linz, { encoding: 'lerc' })), null, 'an encoding without a decode must not be read');
 
-// ---- 3. The planner now plans a terrain capture when given one
+// ---- 3. Terrain is not a capture: the planner never plans one - the export reads the
+//         course's terrain asset (functions/lib/terrain/) instead.
 const pkg = { courseId:'test', courseName:'Test', holes:{ 1:{holeNumber:1} },
   objects:{ t1:{id:'t1',type:'tee',holeNumber:1,confirmed:true,position:{lat:-36.7525,lng:174.7515}},
             g1:{id:'g1',type:'green',holeNumber:1,confirmed:true,position:{lat:-36.7505,lng:174.7530}} } };
-const withTerrain = planCourseCaptures(pkg, { terrainSource: r.terrain, source: r, maxOutputPx: 3072 });
-const without    = planCourseCaptures(pkg, { terrainSource: null,      source: r, maxOutputPx: 3072 });
-const tItem = withTerrain.find(i => i.role === 'terrain-reference');
-assert.ok(tItem, 'terrain-reference must now be planned');
-assert.ok(!without.find(i => i.role === 'terrain-reference'), 'and must stay unplanned without a source');
-console.log('3. planned terrain-reference (%d items with, %d without)', withTerrain.length, without.length);
+const r = resolveImagerySource({ south:-36.76, west:174.74, north:-36.74, east:174.76 }, { env: envs });
+const planned = planCourseCaptures(pkg, { source: r, maxOutputPx: 3072 });
+assert.ok(planned.length && !planned.find(i => i.role === 'terrain-reference'), 'no terrain capture is planned');
+assert.ok(IMAGERY_SOURCES.every(e => !('dem' in e)), 'and no imagery entry carries elevation');
+console.log('3. planned %d captures, none of them terrain', planned.length);
 
 // ---- 4. Relief actually changes exported pixels, and strength scales it
 const D = 512;

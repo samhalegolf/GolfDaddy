@@ -188,7 +188,7 @@ async function ok(name, fn) { await fn(); passed++; console.log('ok  - ' + name)
     assert.strictEqual(entry.debug.elevation, 'linz-nz');
     assert.strictEqual(entry.debug.elevationCredit, 'LINZ CC BY');
     const label = lt.debugLabel(Object.assign(entry.debug, { rebuild: 'hole change', meshMs: 90 }), 2.5, 'on');
-    ['3D mesh on', 'z' + WIN.z, 'Esri 24+0r', 'Mapbox 16+0r', '38.3% frame', 'DEM linz-nz z17 300x400', '2.5x',
+    ['3D mesh on', 'z' + WIN.z, 'Esri 24+0r', 'Mapbox 16+0r', '38.3% frame', 'DEM linz-nz 300x400', '2.5x',
       'hole change', 'img 120ms', 'mesh 90ms'].forEach((bit) => assert.ok(label.includes(bit), label + ' has ' + bit));
     lt.release(entry, f.deps.revokeObjectURL);
     assert.deepStrictEqual(f.revoked, ['blob:0', 'blob:1'], 'release revokes both');

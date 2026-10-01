@@ -30,7 +30,9 @@ sharp.concurrency(1);
 import { planCourseCaptures, captureGrid, packageHoleData, courseBoundsFor, GREEN_FRAME_MAX_PX } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason, attributionFor } from "./lib/gd-imagery-sources.mjs";
 import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
-import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, heightsFromFloat32Tiff, terrainRgbPngFromHeights, decodeElevation } from "./lib/gd-relief-core.mjs";
+import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, terrainRgbPngFromHeights, decodeElevation } from "./lib/gd-relief-core.mjs";
+import { ensureCourseTerrain, loadCourseTerrain, TERRAIN_BUCKET } from "./lib/terrain/gd-terrain-service.mjs";
+import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
 import greenCore from "../scripts/gd-green-contours-core.js";
 import courseVersionLabel from "../scripts/gd-course-version-label.js";
 
@@ -180,14 +182,15 @@ async function ensureTestBucket() {
 }
 
 async function loadCoursePackage(courseId) {
-  const rows = await supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,objects_json,holes_json&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1");
+  const rows = await supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,objects_json,holes_json,country_code,country,region&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1");
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return null;
   return {
     courseId: row.course_id,
     courseName: row.course_name || row.course_id,
     objects: row.objects_json || {},
-    holes: row.holes_json || {}
+    holes: row.holes_json || {},
+    place: { countryCode: row.country_code || null, country: row.country || null, region: row.region || null }
   };
 }
 
@@ -259,47 +262,10 @@ async function fetchTileUncached(url) {
   throw lastError || new Error("tile fetch failed");
 }
 
-/* Fill NaN holes from their nearest real neighbours.
-
-   A multi-source flood from every real pixel that touches a hole, so each filled pixel takes the
-   value of the nearest measured ground rather than a global average - a whole missing block
-   filled with one number would read as a plateau, and relief would draw a cliff round it.
-
-   This is a REPAIR for the drawing, not a measurement. Callers get the footprint of what was
-   filled so anything that measures (the green fit, plays-like) can refuse to read it. */
-function patchElevationGaps(heights, width, height) {
-  const total = width * height;
-  let holes = 0;
-  for (let i = 0; i < total; i++) if (!Number.isFinite(heights[i])) holes++;
-  if (!holes) return { filled: 0, remaining: 0 };
-  const queue = [];
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const i = y * width + x;
-      if (!Number.isFinite(heights[i])) continue;
-      if ((x > 0 && !Number.isFinite(heights[i - 1])) ||
-          (x < width - 1 && !Number.isFinite(heights[i + 1])) ||
-          (y > 0 && !Number.isFinite(heights[i - width])) ||
-          (y < height - 1 && !Number.isFinite(heights[i + width]))) queue.push(i);
-    }
-  }
-  let head = 0, filled = 0;
-  while (head < queue.length) {
-    const i = queue[head++];
-    const v = heights[i];
-    const x = i % width, y = (i / width) | 0;
-    if (x > 0 && !Number.isFinite(heights[i - 1])) { heights[i - 1] = v; filled++; queue.push(i - 1); }
-    if (x < width - 1 && !Number.isFinite(heights[i + 1])) { heights[i + 1] = v; filled++; queue.push(i + 1); }
-    if (y > 0 && !Number.isFinite(heights[i - width])) { heights[i - width] = v; filled++; queue.push(i - width); }
-    if (y < height - 1 && !Number.isFinite(heights[i + width])) { heights[i + width] = v; filled++; queue.push(i + width); }
-  }
-  return { filled: filled / total, remaining: (holes - filled) / total };
-}
-
 /* Composite one capture: fetch its tile grid (bounded concurrency) and flatten onto a single
    canvas. Coverage is enforced like the browser flatten - a capture with missing tiles is
    refused rather than baked with holes in it. */
-async function buildCapture(grid, { format }) {
+async function buildCapture(grid) {
   const tiles = grid.tiles;
   const buffers = new Array(tiles.length);
   let failed = 0;
@@ -316,57 +282,6 @@ async function buildCapture(grid, { format }) {
   }
   await Promise.all(Array.from({ length: Math.min(TILE_CONCURRENCY, tiles.length) }, pump));
   if (failed > 0) throw new Error("tile coverage incomplete: " + failed + "/" + tiles.length + " failed");
-  /* Float32 DEM blocks (US 3DEP, AU ELVIS) cannot go through the image compositor below - it
-     flattens onto an 8-bit canvas, which would clamp every height into 0..255m. They are
-     decoded as measurements, assembled as floats, and stored as the SAME terrain-RGB PNG a
-     LINZ course stores, so the crop/shade/mesh/plays-like consumers never learn a second
-     format existed. Decoded one block at a time: a 2048px block is 16.8MB of floats, and the
-     mosaic itself is already width*height*4 bytes of headroom this worker has to find. */
-  if (grid.encoding === "float32") {
-    const mosaic = new Float32Array(grid.imageWidth * grid.imageHeight).fill(NaN);
-    /* A block that arrives HTTP 200, the right size and with a valid TIFF header can still
-       carry a malformed internal tile - 3DEP does this intermittently over some regions, and
-       libtiff reports "Invalid tile byte count". Measured over Trump National: 13 of 16 blocks
-       decoded, at every block size tried, with the bad tile index moving between attempts.
-
-       Losing one block used to lose the whole capture, and with it the course's elevation - so
-       all 18 greens silently shipped with no contours and no tiers because of one bad response.
-       The hole is left as NaN here and patched below instead. What is NOT done is pretending the
-       patch is ground: the filled rectangles travel with the capture so the green fit can refuse
-       a green that sits on one, because a flat invented patch fits a cubic beautifully and would
-       otherwise read as a confident, wrong answer. */
-    const gaps = [];
-    for (let index = 0; index < tiles.length; index++) {
-      const left = tiles[index].x, top = tiles[index].y;
-      let block = null;
-      try {
-        block = await heightsFromFloat32Tiff(buffers[index]);
-      } catch (error) {
-        gaps.push({ x: left, y: top, w: tiles[index].w || 0, h: tiles[index].h || 0,
-                    reason: String(error && error.message || error).slice(0, 120) });
-        buffers[index] = null;
-        continue;
-      }
-      buffers[index] = null;
-      const w = Math.min(block.width, grid.imageWidth - left);
-      const h = Math.min(block.height, grid.imageHeight - top);
-      for (let y = 0; y < h; y++) {
-        const src = y * block.width, dst = (top + y) * grid.imageWidth + left;
-        for (let x = 0; x < w; x++) mosaic[dst + x] = block.heights[src + x];
-      }
-    }
-    buffers.length = 0;
-    if (gaps.length) {
-      const patched = patchElevationGaps(mosaic, grid.imageWidth, grid.imageHeight);
-      if (patched.remaining > 0.25) {
-        throw new Error("elevation coverage too thin: " + gaps.length + "/" + tiles.length +
-          " blocks undecodable (" + Math.round(patched.remaining * 100) + "% of the mosaic)");
-      }
-      console.log("[visual-worker] elevation: patched " + gaps.length + "/" + tiles.length +
-        " undecodable block(s), " + (patched.filled * 100).toFixed(1) + "% of pixels filled");
-    }
-    return { buffer: await terrainRgbPngFromHeights(mosaic, grid.imageWidth, grid.imageHeight), gaps };
-  }
   const canvas = sharp({
     create: { width: grid.imageWidth, height: grid.imageHeight, channels: 3, background: { r: 16, g: 19, b: 15 } },
     limitInputPixels: false
@@ -378,22 +293,9 @@ async function buildCapture(grid, { format }) {
      after it, which is exactly when the headroom is needed. */
   buffers.length = 0;
   const composed = canvas.composite(composites);
-  const out = format === "png"
-    ? await composed.png({ compressionLevel: 9 }).toBuffer()
-    : await composed.jpeg({ quality: 85 }).toBuffer();
+  const out = await composed.jpeg({ quality: 85 }).toBuffer();
   composites.length = 0;
-  /* Foreign-encoded elevation tiles (terrarium for Europe, gsi-dem-png for Japan) composite
-     losslessly - they are ordinary 8-bit RGB - but they must not be STORED as themselves:
-     the stored terrain artefact is terrain-RGB everywhere else, and the phone's terrain mesh
-     decodes only that. Decode the stitched mosaic under its declared encoding (which also
-     fills NoData sentinels - GSI paints the sea RGB(128,0,0)) and re-pack, the same
-     normalisation the float32 branch above performs for the US. */
-  if (format === "png" && grid.encoding && grid.encoding !== "terrain-rgb") {
-    const { data, info } = await sharp(out, { limitInputPixels: false }).raw().toBuffer({ resolveWithObject: true });
-    const decoded = decodeElevation(data, info.width, info.height, info.channels, grid.encoding);
-    return { buffer: await terrainRgbPngFromHeights(decoded.heights, info.width, info.height), gaps: [] };
-  }
-  return { buffer: out, gaps: [] };
+  return out;
 }
 
 /* Snapshot is resumable the same way export is, but cheaper: every field in a capture's index
@@ -415,6 +317,12 @@ async function runSnapshotJob(job, deadlineAt) {
      may only ever write the private test space, which is what makes a non-storable source
      acceptable there. A live job can never be handed a non-storable source. */
   const bounds = courseBoundsFor(pkg);
+  /* Terrain first, and independent of imagery: a course whose imagery may not be stored (all
+     of Northern Ireland, today) still gets its terrain baked from the terrain registry. Never
+     fails the snapshot - a terrain failure is recorded on course_terrain and the course carries
+     on without it. Test jobs only read the live asset; they never write course data. */
+  const terrain = await ensureTerrainForCourse(pkg, bounds, { readOnly: space.test });
+  if (terrain) console.log("[visual-worker] terrain " + pkg.courseId + ": " + terrain.status + (terrain.manifest ? " v" + terrain.manifest.terrainVersion + " " + (terrain.manifest.sourceIds || []).join("+") : "") + (terrain.error ? " (" + terrain.error + ")" : ""));
   let source;
   if (space.test) {
     source = space.run.source === "mapbox" ? mapboxCaptureSource() : null;
@@ -426,13 +334,10 @@ async function runSnapshotJob(job, deadlineAt) {
     if (source.storable === false) throw new Error("imagery-source-unavailable: " + source.key + " is not storable");
   }
   const attribution = attributionFor(source, null);
-  /* Relief is computed, not fetched: source.terrain is the DEM spec tagged for the job, and
-     is null wherever the DEM is not tiled terrain-RGB. Null plans no terrain capture and the
-     course renders exactly as it does without relief. */
   /* source is passed so the planner can grid each capture once and clamp every zoom to the
      frame that capture actually lands in; maxOutputPx must be the export's own cap or the two
      disagree and we go back to shooting detail the compositor throws away. */
-  const plan = planCourseCaptures(pkg, { terrainSource: source.terrain || null, source, maxOutputPx: EXPORT_RENDITION_PX });
+  const plan = planCourseCaptures(pkg, { source, maxOutputPx: EXPORT_RENDITION_PX });
   if (!plan.length) throw new Error("capture plan is empty - no play-ready geometry");
   /* The source is part of the key: masters shot from a different provider must never be
      re-renditioned under a new one, both because the pixels differ and because the stored
@@ -468,15 +373,9 @@ async function runSnapshotJob(job, deadlineAt) {
   let skipped = 0;
   for (const item of plan) {
     const grid = captureGrid(item, { source });
-    /* No licensed endpoint for this role (relief in a region with imagery but no elevation) -
-       drop the capture, keep the course. */
+    /* No licensed endpoint for this capture - drop it, keep the course. */
     if (!grid) { skipped += 1; continue; }
-    const isTerrain = item.role === "terrain-reference";
-    /* Footprint of any elevation block that could not be decoded and had to be patched. Rides
-       with the capture so the export can refuse to MEASURE a green that sits on invented
-       ground, while still drawing relief over it. */
-    let elevationGaps = [];
-    const ext = isTerrain ? "png" : "jpg";
+    const ext = "jpg";
     const fullPath = space.root + "/captures/" + item.captureKey.replace(/:/g, "/") + "." + ext;
     const renditionPath = space.root + "/captures/" + EXPORT_RENDITION_PX + "/" + item.captureKey.replace(/:/g, "/") + "." + ext;
     /* The export-ready rendition is what the export reads, so its presence is what "already
@@ -492,22 +391,8 @@ async function runSnapshotJob(job, deadlineAt) {
         if (mastersMatchPlan && await storageExists(fullPath, space.bucket)) {
           buffer = await storageDownload(fullPath, space.bucket);
         } else {
-          const built = await buildCapture(grid, { format: isTerrain ? "png" : "jpeg" });
-          buffer = built.buffer;
-          elevationGaps = built.gaps || [];
-          /* A terrain capture is stored as the elevation it arrived as, not as shading.
-
-             It used to be shaded here, once per course, which was cheaper - but the frames
-             are baked north-up and Play rotates them so the hole runs up the screen, so one
-             fixed light swings around the screen hole by hole and ends up below the eye on
-             roughly half of them. Light from below inverts perceived relief: those greens
-             read as craters. Shading per hole at export, aimed off the play axis, is what
-             fixes that, and it needs the heights rather than somebody's picture of them.
-
-             Storing elevation is the better artefact anyway. It is the input to the terrain
-             mesh, and to real slope for plays-like, neither of which can be recovered from a
-             greyscale of one lighting choice. */
-          if (KEEP_FULL_RES_MASTER) await storageUpload(fullPath, buffer, isTerrain ? "image/png" : "image/jpeg", space.bucket);
+          buffer = await buildCapture(grid);
+          if (KEEP_FULL_RES_MASTER) await storageUpload(fullPath, buffer, "image/jpeg", space.bucket);
         }
         /* Export-ready rendition: pre-downscaled to the frame output resolution so the export
            never has to download and decode the full-resolution capture again. Decoding 17MP
@@ -518,23 +403,15 @@ async function runSnapshotJob(job, deadlineAt) {
            was LARGER than the one it came from. For those, resizing is a no-op and the encode
            is a full decode + re-encode that changes nothing but the JPEG quality number. Skip
            it and ship the composite as shot. */
-        /* A terrain capture is NEVER resampled on the way to its rendition: the pixels are
-           packed heights, and bilinear interpolation of terrain-RGB blends the byte planes
-           into elevations that were never measured. Terrain mosaics are shot at z16-17 and
-           essentially always fit anyway; on the rare course where one would not, storing it
-           full-size costs bytes where resizing it would cost the ground truth. (Latent for
-           NZ before the float32 path made it explicit - no NZ course has tripped it.) */
-        const fitsAlready = isTerrain || (grid.imageWidth <= EXPORT_RENDITION_PX && grid.imageHeight <= EXPORT_RENDITION_PX);
-        const renditionBuffer = fitsAlready ? buffer : await (() => {
-          const small = sharp(buffer, { limitInputPixels: false }).resize({ width: EXPORT_RENDITION_PX, height: EXPORT_RENDITION_PX, fit: "inside", withoutEnlargement: true });
-          return (isTerrain ? small.png({ compressionLevel: 6 }) : small.jpeg({ quality: 88 })).toBuffer();
-        })();
-        await storageUpload(renditionPath, renditionBuffer, isTerrain ? "image/png" : "image/jpeg", space.bucket);
+        const fitsAlready = grid.imageWidth <= EXPORT_RENDITION_PX && grid.imageHeight <= EXPORT_RENDITION_PX;
+        const renditionBuffer = fitsAlready ? buffer : await sharp(buffer, { limitInputPixels: false })
+          .resize({ width: EXPORT_RENDITION_PX, height: EXPORT_RENDITION_PX, fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 88 }).toBuffer();
+        await storageUpload(renditionPath, renditionBuffer, "image/jpeg", space.bucket);
         buffer = null;
         shot += 1;
       }
       index.captures.push({
-        elevationGaps,
         pathExport: renditionPath,
         renditionPx: EXPORT_RENDITION_PX,
         sourceKey: grid.sourceKey || source.key,
@@ -554,7 +431,6 @@ async function runSnapshotJob(job, deadlineAt) {
         originPx: grid.originPx,
         anchorPins: item.anchorPins,
         captureAnchorPins: item.captureAnchorPins,
-        terrainStageOnly: !!item.terrainStageOnly,
         tileCount: grid.tiles.length,
         bytes: null,
         path
@@ -983,6 +859,104 @@ function normaliseLogLine(label, diagnostics) {
   return "[visual-worker] normalise " + label + " " + tone + " turf " + turf;
 }
 
+/* ---------- course terrain ----------------------------------------------------------------- */
+
+const terrainStorage = createSupabaseStorage({ base: supabaseBase, key: supabaseKey, bucket: TERRAIN_BUCKET });
+
+function terrainDeps() {
+  return {
+    supabaseFetch,
+    storage: {
+      upload: (p, buffer, type) => terrainStorage.upload(p, buffer, type),
+      list: prefix => terrainStorage.list(prefix),
+      remove: paths => terrainStorage.remove(paths)
+    },
+    sharp,
+    terrainRgbPngFromHeights
+  };
+}
+
+/* Bake or reuse the course's terrain asset. Never throws: terrain is an improvement to a
+   course, never a precondition for it. */
+async function ensureTerrainForCourse(pkg, bounds, options = {}) {
+  if (!bounds) return null;
+  try {
+    return await ensureCourseTerrain({
+      courseId: pkg.courseId, courseBounds: bounds,
+      countryCode: pkg.place && pkg.place.countryCode, regionName: pkg.place && (pkg.place.region || pkg.place.country),
+      force: !!options.force, readOnly: !!options.readOnly
+    }, terrainDeps());
+  } catch (error) {
+    console.warn("[visual-worker] terrain step failed for " + pkg.courseId + ": " + (error && error.message || error));
+    return null;
+  }
+}
+
+/* The terrain the export reads: the course's current asset, baked first if a live export finds
+   none (a course snapshotted before terrain became its own asset). */
+async function terrainForExport(pkg, space) {
+  let manifest = null;
+  try { manifest = await loadCourseTerrain(pkg.courseId, { supabaseFetch }); } catch (e) { manifest = null; }
+  if (manifest || space.test) return manifest;
+  const ensured = await ensureTerrainForCourse(pkg, courseBoundsFor(pkg));
+  return ensured && ensured.manifest || null;
+}
+
+/* The terrain asset in the shape the export's crop/shade/fit code already reads. */
+function terrainCaptureEntry(manifest) {
+  if (!manifest || !manifest.files || !manifest.grid) return null;
+  return {
+    role: "terrain-reference",
+    bucket: TERRAIN_BUCKET,
+    path: manifest.files.heights,
+    pathExport: manifest.files.heights,
+    bounds: manifest.grid.bounds,
+    captureZoom: manifest.grid.captureZoom,
+    width: manifest.grid.width,
+    height: manifest.grid.height,
+    elevationGaps: manifest.filledRegions || [],
+    terrain: {
+      version: manifest.terrainVersion,
+      sourceIds: manifest.sourceIds,
+      qualityClass: manifest.quality.class,
+      confidence: manifest.quality.confidence,
+      greenDetail: manifest.quality.greenDetail,
+      sourceResolutionM: manifest.sourceResolutionM,
+      verticalDatum: manifest.verticalDatum,
+      attribution: (manifest.sources || []).map(x => x.attribution && x.attribution.text).filter(Boolean)
+    }
+  };
+}
+
+/* A terrain job: rebake (or confirm) one course's terrain, then re-export its frames if it has
+   published ones, so the new terrain reaches Play without re-shooting imagery. */
+async function runTerrainJob(job) {
+  const pkg = await loadCoursePackage(job.course_id);
+  if (!pkg) throw new Error("course " + job.course_id + " not found in " + MAPS_TABLE);
+  const bounds = courseBoundsFor(pkg);
+  if (!bounds) throw new Error("course has no play-ready geometry to bound its terrain");
+  const force = !!(job.recipe && job.recipe.force);
+  const result = await ensureTerrainForCourse(pkg, bounds, { force });
+  if (!result) throw new Error("terrain step failed");
+  if (result.status === "failed" && !result.manifest) throw new Error("terrain bake failed: " + result.error);
+  let reexport = false;
+  if (result.status === "baked") {
+    const published = await supabaseFetch("course_visuals?select=course_id&course_id=eq." + encodeURIComponent(pkg.courseId) + "&limit=1").catch(() => []);
+    if (Array.isArray(published) && published.length) { await enqueueFollowUpExport(pkg.courseId).catch(() => {}); reexport = true; }
+  }
+  const m = result.manifest;
+  return {
+    terrain: result.status,
+    error: result.error || null,
+    terrainVersion: m ? m.terrainVersion : null,
+    sources: m ? m.sourceIds : [],
+    qualityClass: m ? m.quality.class : null,
+    greenDetail: m ? m.quality.greenDetail : null,
+    reason: result.decision ? result.decision.reason || null : null,
+    reexport
+  };
+}
+
 async function runExportJob(job, deadlineAt) {
   const space = spaceFor(job);
   const pkg = await loadCoursePackage(job.course_id);
@@ -1003,11 +977,14 @@ async function runExportJob(job, deadlineAt) {
   /* out tag bumped to iz1 when captureZoom went integer-only (gd-visual-export-core): old
      fractional-zoom frames must NOT be resumed/reused, so the version dir has to change.
      RELIEF_STAMP rides along for the same reason - relief changes published pixels, and
-     without it every already-exported frame resumes as current and nothing re-renders. */
-  const version = "r" + hashText(JSON.stringify({ presetId, settings, snapshot: capturesIndex.generatedAt, out: "mercator-" + EXPORT_RENDITION_PX + "-iz1-" + RELIEF_STAMP + "-" + PAINT_STAMP + "-" + GREEN_FRAME_STAMP }));
+     without it every already-exported frame resumes as current and nothing re-renders.
+     The terrain version rides along too: a rebaked terrain asset must re-render the frames
+     even when nothing else about the course changed. */
+  const terrainManifest = await terrainForExport(pkg, space);
+  const terrainEntry = terrainCaptureEntry(terrainManifest);
+  const version = "r" + hashText(JSON.stringify({ presetId, settings, snapshot: capturesIndex.generatedAt, terrain: terrainManifest ? terrainManifest.terrainVersion : 0, out: "mercator-" + EXPORT_RENDITION_PX + "-iz1-" + RELIEF_STAMP + "-" + PAINT_STAMP + "-" + GREEN_FRAME_STAMP }));
   const framesDir = space.root + "/frames/" + version;
   const holeData = packageHoleData(pkg);
-  const terrainEntry = entries.find(e => e.role === "terrain-reference");
   const backdropEntry = entries.find(e => e.role === "course-backdrop");
   const cachedBuffers = {};
   /* Prefer the pre-downscaled rendition written at snapshot time - small download, no 17MP
@@ -1018,7 +995,8 @@ async function runExportJob(job, deadlineAt) {
     if (!cachedBuffers[entry.path]) {
       const rendition = entry.pathExport || entry.path2048 || "";
       if (rendition) {
-        cachedBuffers[entry.path] = await storageDownload(rendition, space.bucket);
+        /* The terrain asset lives in the live bucket even for a test export. */
+        cachedBuffers[entry.path] = await storageDownload(rendition, entry.bucket || space.bucket);
       } else {
         const raw = await storageDownload(entry.path, space.bucket);
         const isPng = entry.path.endsWith(".png");
@@ -1030,14 +1008,14 @@ async function runExportJob(job, deadlineAt) {
   }
   /* A hole is its corridor. A green surround on its own (its corridor failed to shoot) is not a
      hole frame and must not take the export down with it. */
-  const holeNumbers = [...new Set(entries.filter(e => e.holeNumber && !e.terrainStageOnly && e.role !== "green-surround").map(e => Number(e.holeNumber)))].sort((a, b) => a - b);
+  const holeNumbers = [...new Set(entries.filter(e => e.holeNumber && e.role !== "green-surround").map(e => Number(e.holeNumber)))].sort((a, b) => a - b);
   /* Carried through from the captures so a frame always ships with the credit for the imagery
      it was made from - Play renders it from here, not from a client-side lookup table. */
   const framesIndex = { version: 1, courseId: pkg.courseId, exportVersion: version, presetId, generatedAt: capturesIndex.generatedAt, source: capturesIndex.source || null, testRun: space.run, overview: null, holes: [] };
   let rendered = 0;
   for (const holeNumber of holeNumbers) {
     const path = framesDir + "/h" + holeNumber + ".jpg";
-    const allHoleEntries = entries.filter(e => Number(e.holeNumber) === holeNumber && !e.terrainStageOnly);
+    const allHoleEntries = entries.filter(e => Number(e.holeNumber) === holeNumber);
     /* The hole frame is the corridor only. The green surround is shot for the green frame
        below; composited into the hole frame it added ground around the green at the hole's
        zoom, never detail, and widened the frame to fit it. */
@@ -1110,7 +1088,11 @@ async function runExportJob(job, deadlineAt) {
               /* Recorded so a consumer can tell drawing decisions from measurements: the
                  heights in this file are true, the exaggeration is only how the sibling
                  frame was drawn. */
-              reliefExaggeration: shaded.exaggeration
+              reliefExaggeration: shaded.exaggeration,
+              /* How far apart the SOURCE's real samples are, whatever grid they were resampled
+                 onto - the phone's green-line gate reads this (live-terrain.js greenReadable). */
+              sourceMetresPerSample: terrainEntry.terrain.sourceResolutionM,
+              terrain: terrainEntry.terrain
             }
           };
           /* The green, fitted from the SAME crop the relief was drawn from. No extra fetch, no
@@ -1142,7 +1124,14 @@ async function runExportJob(job, deadlineAt) {
                 " skipped: sits on a patched elevation block (" + (gapsHere[0].reason || "undecodable") + ")");
             }
           }
-          if (!onPatchedGround && greenShape && greenShape.length >= 8) {
+          /* Terrain too coarse to know a green's shape publishes no slope lines at all - a
+             10-25m DTM resampled onto a fine grid can pass the fit's own confidence gate while
+             knowing nothing about the green. */
+          const greenDetailOk = terrainEntry.terrain.greenDetail === "allowed" || terrainEntry.terrain.greenDetail === "conditional";
+          if (!greenDetailOk && greenShape && greenShape.length >= 8) {
+            console.log("[visual-worker] green contours skipped for h" + holeNumber + ": terrain is " + terrainEntry.terrain.greenDetail + " (" + terrainEntry.terrain.sourceResolutionM + "m source)");
+          }
+          if (greenDetailOk && !onPatchedGround && greenShape && greenShape.length >= 8) {
             const raw = await sharp(crop.buffer, { limitInputPixels: false })
               .raw().toBuffer({ resolveWithObject: true });
             const decoded = decodeElevation(raw.data, raw.info.width, raw.info.height, raw.info.channels, shaded.encoding);
@@ -1263,9 +1252,22 @@ async function runExportJob(job, deadlineAt) {
   const overviewPath = framesDir + "/overview.jpg";
   if (backdropEntry) {
     if (!(await storageExists(overviewPath, space.bucket))) {
+      /* The overview's relief: the terrain asset cut to exactly the backdrop's ground and
+         shaded - renderOverview lays a SHADE over the picture edge to edge, so handing it the
+         raw heights (or ground of a different extent) would draw nonsense. */
+      let overviewTerrain = null;
+      if (terrainEntry && backdropEntry.bounds) {
+        try {
+          const crop = await cropByBounds(await bufferFor(terrainEntry), terrainEntry.bounds, backdropEntry.bounds, { padPx: 0 });
+          const shaded = await reliefFromTerrainRgb(crop.buffer, { latitude: (crop.bounds.north + crop.bounds.south) / 2, zoom: terrainEntry.captureZoom });
+          overviewTerrain = { entry: { role: "terrain-reference", bounds: crop.bounds }, buffer: shaded.png };
+        } catch (error) {
+          console.log("[visual-worker] overview relief skipped: " + (error && error.message || error));
+        }
+      }
       const overview = await renderOverview({
         backdrop: { entry: backdropEntry, buffer: await bufferFor(backdropEntry) },
-        terrain: terrainEntry ? { entry: terrainEntry, buffer: await bufferFor(terrainEntry) } : null,
+        terrain: overviewTerrain,
         settings
       });
       if (overview.diagnostics) console.log(normaliseLogLine("overview", overview.diagnostics));
@@ -1352,6 +1354,7 @@ export default async function courseVisualWorker(req) {
     try {
       const result = job.kind === "snapshot" || job.kind === TEST_SNAPSHOT_KIND ? await runSnapshotJob(job, deadlineAt)
         : job.kind === "export" || job.kind === TEST_EXPORT_KIND ? await runExportJob(job, deadlineAt)
+        : job.kind === "terrain" ? await runTerrainJob(job)
         : { skipped: "unknown kind " + job.kind };
       if (result && result.requeue) {
         /* Soft deadline reached: hand the job back and chain a fresh invocation, which

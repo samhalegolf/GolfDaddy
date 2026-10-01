@@ -171,6 +171,11 @@
       session.view = here ? { lat: here.lat, lng: here.lng, zoom: zoom } : session.view;
     }
 
+    /* Terrain is resolved separately from imagery, so it is reported even where nothing scans. */
+    function terrainLine(t) {
+      return t ? " · terrain: " + esc(t.source) + (t.resolutionM ? " (" + t.resolutionM + "m)" : "") : " · no terrain source";
+    }
+
     function renderScanPanel() {
       if (session.scanError) {
         el.scan.innerHTML = '<span class="gdStudioWarnText">Scan source unknown — ' + esc(session.scanError) + "</span>";
@@ -180,7 +185,7 @@
       if (!scan) { el.scan.textContent = ""; return; }
       if (!scan.scannable) {
         el.scan.innerHTML = '<span class="gdStudioWarnText">No scan source here — ' + esc(scan.reason || "unknown") +
-          ". The course still plays over live tiles; it just gets no stored frames.</span>";
+          ". The course still plays over live tiles; it just gets no stored frames.</span>" + terrainLine(scan.terrain);
         return;
       }
       var s = scan.source || {};
@@ -193,7 +198,7 @@
         (ceiling ? " · resolves to z" + ceiling : "") +
         (s.minTrustedZoom ? " · trusted from z" + s.minTrustedZoom : "") +
         (s.license && s.license.name ? " · " + esc(s.license.name) : "") +
-        (s.hasElevation ? " · has elevation" : " · no elevation") +
+        terrainLine(scan.terrain) +
         (live ? "" : ' · <span class="gdStudioWarnText">no live twin in the app\'s provider list</span>') +
         (over ? ' · <span class="gdStudioWarnText">you are above z' + ceiling + " — a stored frame could not carry this detail</span>" : "");
     }

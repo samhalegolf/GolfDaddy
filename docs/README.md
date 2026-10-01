@@ -14,6 +14,7 @@ Key files:
 - `PROTECTED_SYSTEMS.md`
 - `GPS_STABILISATION_PLAN.md`
 - `GPS_PLAY_BEHAVIOUR.md`
+- `TERRAIN_INGESTION.md`
 
 ### reports/
 

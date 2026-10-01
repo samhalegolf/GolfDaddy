@@ -61,11 +61,11 @@ let plan9;
 
   test("no capture is shot above the frame it lands in", () => {
     const pkg = course();
-    const plan = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX, terrainSource: null });
+    const plan = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX });
     const holes = [...new Set(plan.filter(i => i.holeNumber).map(i => i.holeNumber))];
     assert.ok(holes.length >= 6, "the fixture must actually produce holes");
     holes.forEach(hole => {
-      const items = plan.filter(i => Number(i.holeNumber) === hole && !i.terrainStageOnly);
+      const items = plan.filter(i => Number(i.holeNumber) === hole);
       const grids = items.map(i => captureGrid(i, { source: SOURCE })).filter(Boolean);
       /* The export merges the capture image bounds - this is the same maths it uses. */
       const frameZoom = frameZoomFor(mergeBounds(grids.map(g => g.imageBounds)), MAX_OUTPUT_PX);
@@ -97,7 +97,7 @@ let plan9;
     const pkg = course(6, 0.008);
     /* Same plan with the planner's frame zoom stripped, so the policy zooms stand. If this
        ever stops overshooting the test above proves nothing. */
-    const clamped = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX, terrainSource: null });
+    const clamped = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX });
     const unclamped = clamped.map(item => Object.assign({}, item, { frameZoom: 0 }));
     const tilesOf = (plan) => plan.reduce((sum, item) => {
       const g = captureGrid(item, { source: SOURCE });
@@ -111,7 +111,7 @@ let plan9;
     /* The feedback loop this prevents: unscaled, one step down doubles the bleed's footprint,
        which enlarges the capture, which lowers the frame zoom, which steps down again. */
     const pkg = course(2);
-    const item = planCourseCaptures(pkg, { terrainSource: null }).find(i => i.role === "play-corridor");
+    const item = planCourseCaptures(pkg, {}).find(i => i.role === "play-corridor");
     assert.ok(item, "fixture must produce a corridor");
     const wide = captureGrid(Object.assign({}, item, { frameZoom: 19 }), { source: SOURCE });
     const narrow = captureGrid(Object.assign({}, item, { frameZoom: 17 }), { source: SOURCE });
@@ -159,7 +159,7 @@ let plan9;
       imagery: Object.assign({}, SOURCE.imagery, { maxUsefulZoom: 17 })
     });
     const pkg = course(2);
-    const plan = planCourseCaptures(pkg, { source: naip, maxOutputPx: MAX_OUTPUT_PX, terrainSource: null });
+    const plan = planCourseCaptures(pkg, { source: naip, maxOutputPx: MAX_OUTPUT_PX });
     plan.forEach(item => {
       const g = captureGrid(item, { source: naip });
       if (g) assert.ok(g.captureZoom <= 17, `${item.role} shot at z${g.captureZoom} from a z17 source`);
@@ -177,7 +177,7 @@ let plan9;
        be defended instead is the COST that drop was protecting, which is why the megapixel
        ceiling below is the real assertion. */
     const pkg = course(4);
-    const plan = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX, terrainSource: null });
+    const plan = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX });
     const greens = plan.filter(i => i.role === "green-surround");
     assert.ok(greens.length, "green surrounds must survive planning");
     greens.forEach(green => {
@@ -197,7 +197,7 @@ let plan9;
        fixture that was 540m of ground at 6.55MP for a 96m green box. Framed on the green it is
        ~143m at ~1.8MP, and the same 45m green lands at ~426px instead of ~106px. */
     const pkg = course(3);
-    const plan = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX, terrainSource: null });
+    const plan = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX });
     const greens = plan.filter(i => i.role === "green-surround");
     assert.ok(greens.length, "green surrounds must survive planning");
     greens.forEach(green => {
@@ -223,14 +223,14 @@ let plan9;
        lateral ground beside the green, which is exactly where a player who has missed stands.
        Compare the pruned plan against one that keeps every green. */
     const pkg = course(4, 0.0009);  /* short holes - the case that broke */
-    const pruned = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX, terrainSource: null });
+    const pruned = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX });
     const holes = [...new Set(pruned.filter(i => i.holeNumber).map(i => i.holeNumber))];
     assert.ok(holes.length >= 4, "fixture must produce short holes");
     holes.forEach(hole => {
-      const extent = (plan) => mergeBounds(plan.filter(i => Number(i.holeNumber) === hole && !i.terrainStageOnly)
+      const extent = (plan) => mergeBounds(plan.filter(i => Number(i.holeNumber) === hole)
         .map(i => captureGrid(i, { source: SOURCE })).filter(Boolean).map(g => g.imageBounds));
       /* Everything the unpruned plan would have covered must still be covered. */
-      const keptAll = planCourseCaptures(pkg, { terrainSource: null });
+      const keptAll = planCourseCaptures(pkg, {});
       assert.ok(mod.boundsContain(extent(pruned), extent(keptAll)) ||
         JSON.stringify(extent(pruned)) === JSON.stringify(extent(keptAll)),
         `hole ${hole} lost frame extent to pruning`);
@@ -245,7 +245,7 @@ let plan9;
     assert.ok(policy.targetZoom >= 22 && policy.minZoom === 20, "green policy reaches for the ceiling");
     assert.strictEqual(capturePolicy("play-corridor").targetZoom, 19);
     const sharp = Object.assign({}, SOURCE, { imagery: Object.assign({}, SOURCE.imagery, { maxUsefulZoom: 21 }) });
-    const plan = planCourseCaptures(course(2), { source: sharp, maxOutputPx: MAX_OUTPUT_PX, terrainSource: null });
+    const plan = planCourseCaptures(course(2), { source: sharp, maxOutputPx: MAX_OUTPUT_PX });
     plan.filter(i => i.role === "green-surround").forEach(item => {
       const g = captureGrid(item, { source: sharp });
       assert.strictEqual(g.captureZoom, 21, `green shot at z${g.captureZoom} from a z21 source`);

@@ -5,9 +5,10 @@
    The window is the whole contract. The browser asks for z/x/y/w/h - an integer zoom and a
    pixel rectangle at it - and both the picture and the elevation are cut to that rectangle, so
    they cover the same ground by construction rather than by two bounds that happen to agree.
-   The picture is fetched at z itself. The DEM is fetched at its own best zoom (coarser) and
-   resampled onto a grid spanning the same rectangle, so pixel (0,0) of either image is the
-   window's north-west corner and pixel (w,h) its south-east one. */
+   The picture is fetched at z itself. The elevation is cut from the course's baked terrain
+   asset (or, outside one, from the terrain resolver's best source) and resampled onto a grid
+   spanning the same rectangle, so pixel (0,0) of either image is the window's north-west corner
+   and pixel (w,h) its south-east one. */
 
 const TILE = 256;
 
@@ -64,67 +65,19 @@ export function windowMetres(win) {
   return { width: mpp * win.w, height: mpp * win.h, metresPerPixel: mpp };
 }
 
-/* Where to fetch the DEM and how big the resampled grid is.
+/* The DEM grid for a window: the window's own rectangle at its own zoom, sampled more coarsely.
+   About a metre a sample (finer would only upsample a DEM), never below DEM_MIN_SIDE on the
+   long side (smooth per-fragment normals) or above DEM_MAX_SIDE or the picture itself. The
+   aspect is the window's, so pixel (0,0) of the picture and of the grid are the same corner.
 
-   demZoom is the source's own best zoom, never finer than the window. The fetch rectangle is
-   the window scaled to demZoom with a two-pixel margin, so the cubic resample below always has
-   its neighbours. The grid keeps the window's aspect and is never larger than the picture. */
-export function demPlan(win, maxUsefulZoom) {
-  const demZoom = Math.min(win.z, Math.max(1, Number(maxUsefulZoom) || 17));
-  const k = Math.pow(2, win.z - demZoom);
-  const x0 = win.x / k, y0 = win.y / k, x1 = (win.x + win.w) / k, y1 = (win.y + win.h) / k;
-  const left = Math.floor(x0) - 2, top = Math.floor(y0) - 2;
-  const fetch = { left, top, width: Math.ceil(x1) + 2 - left, height: Math.ceil(y1) + 2 - top };
-  const longNative = Math.max(win.w, win.h) / k;
-  const longOut = Math.min(DEM_MAX_SIDE, Math.max(win.w, win.h), Math.max(DEM_MIN_SIDE, Math.ceil(longNative)));
-  const scale = longOut / Math.max(win.w, win.h);
-  const grid = { width: Math.max(2, Math.round(win.w * scale)), height: Math.max(2, Math.round(win.h * scale)) };
-  return { demZoom, k, window: { x0, y0, x1, y1 }, fetch, grid };
-}
-
-/* Catmull-Rom weights: smooth (no facets in the mesh's lighting when the DEM is upsampled 8x)
-   and exact at the samples, so a measured height is never moved. */
-function cubicWeights(t) {
-  const t2 = t * t, t3 = t2 * t;
-  return [
-    -0.5 * t3 + t2 - 0.5 * t,
-    1.5 * t3 - 2.5 * t2 + 1,
-    -1.5 * t3 + 2 * t2 + 0.5 * t,
-    0.5 * t3 - 0.5 * t2
-  ];
-}
-
-/* Heights of the fetched DEM rectangle -> heights on the plan's grid, covering exactly the
-   window. Grid pixel (i, j)'s centre is the ground at window fraction ((i+.5)/W, (j+.5)/H). */
-export function resampleToWindow(heights, srcW, srcH, plan) {
-  const { window: wnd, fetch, grid } = plan;
-  const out = new Float32Array(grid.width * grid.height);
-  const at = (x, y) => heights[Math.min(srcH - 1, Math.max(0, y)) * srcW + Math.min(srcW - 1, Math.max(0, x))];
-  const sx = (wnd.x1 - wnd.x0) / grid.width, sy = (wnd.y1 - wnd.y0) / grid.height;
-  for (let j = 0; j < grid.height; j++) {
-    /* DEM pixel centres sit at +0.5, hence the -0.5 into sample space. */
-    const fy = wnd.y0 + (j + 0.5) * sy - fetch.top - 0.5;
-    const y0 = Math.floor(fy), wy = cubicWeights(fy - y0);
-    for (let i = 0; i < grid.width; i++) {
-      const fx = wnd.x0 + (i + 0.5) * sx - fetch.left - 0.5;
-      const x0 = Math.floor(fx), wx = cubicWeights(fx - x0);
-      let v = 0;
-      for (let m = 0; m < 4; m++) {
-        const row = y0 - 1 + m;
-        v += wy[m] * (wx[0] * at(x0 - 1, row) + wx[1] * at(x0, row) + wx[2] * at(x0 + 1, row) + wx[3] * at(x0 + 2, row));
-      }
-      out[j * grid.width + i] = v;
-    }
-  }
-  return out;
-}
-
-export function heightRange(heights) {
-  let min = Infinity, max = -Infinity;
-  for (let i = 0; i < heights.length; i++) {
-    const v = heights[i];
-    if (v < min) min = v;
-    if (v > max) max = v;
-  }
-  return { min, max };
+   The result is a target grid in gd-terrain-normalise's shape, so the course asset or any
+   terrain source is resampled onto exactly the window by the same code the bake uses. */
+export function demGrid(win) {
+  const metres = windowMetres(win);
+  const longPx = Math.max(win.w, win.h);
+  const longM = longPx * metres.metresPerPixel;
+  const longOut = Math.min(DEM_MAX_SIDE, longPx, Math.max(DEM_MIN_SIDE, Math.ceil(longM / 1.0)));
+  const scale = longOut / longPx;
+  const width = Math.max(2, Math.round(win.w * scale)), height = Math.max(2, Math.round(win.h * scale));
+  return { zoom: win.z, originPx: { x: win.x, y: win.y }, width, height, stepX: win.w / width, stepY: win.h / height };
 }

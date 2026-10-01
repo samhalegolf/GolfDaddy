@@ -1,6 +1,6 @@
 /* Relief tiles - the live map's hillshade layer.
 
-   GET /api/relief-tile?z=16&x=64600&y=40100&az=315&v=1
+   GET /api/relief-tile?z=16&x=64600&y=40100&az=315&v=1[&course=<courseId>]
 
    A published hole carries its relief baked into the frame. A live-map hole has no frame, so
    without this it plays on a flat photograph while the published course next door stands up.
@@ -9,12 +9,13 @@
    aerial with a soft-light blend - the compositor the bake uses (gd-visual-export-core), at
    the bake's default strength. Same recipe, so a live hole reads like a captured one.
 
-   Elevation only, through resolveElevationSource: the DEM carries its own licence, so a course
-   whose imagery is unlicensed (exactly the courses that play on the live map) still gets
-   relief. Outside every national region it falls back to the global terrain tiles - coarse
-   (25-30m), so a fairway's roll shows and a green's moulding does not, but honest. A DEM that
-   cannot be fetched or decoded answers a neutral tile - mid-grey, which a soft-light blend
-   leaves untouched - rather than an error the map would draw as a hole.
+   Elevation only, from the terrain system (functions/lib/terrain/): when the map names its
+   course and the tile lies inside that course's baked terrain asset, the tile is shaded from
+   the asset and no elevation provider is contacted. Elsewhere the terrain resolver picks the
+   best approved source for the tile - a national DTM where one is registered, else the global
+   terrain tiles (coarse, 25-30m: a fairway's roll shows, a green's moulding does not). A tile
+   nothing can answer is a neutral tile - mid-grey, which a soft-light blend leaves untouched -
+   rather than an error the map would draw as a hole.
 
    The DEM's licence wants a credit, and an <img> tile cannot carry one, so the same endpoint
    answers ?credit=1&lat=&lng= with the credit for the DEM that point is shaded from.
@@ -25,13 +26,17 @@
    - Each tile shades a padded DEM window and keeps the middle, so the gradient and the
      smoothing at a tile's edge see the same neighbours the next tile does.
 
-   Every input is in the URL (v is bumped when the recipe changes), so a tile is immutable
-   and cached hard at the CDN: a course is shaded once, not once per player. */
+   Every input is in the URL (v is bumped when the recipe changes; course is part of it), so a
+   tile is immutable and cached hard at the CDN: a course is shaded once, not once per player.
+   A course whose terrain is later rebaked keeps its cached shade until v is bumped - accepted
+   for the live map, which is the fallback presentation, and the same hill either way. */
 
 import sharp from "sharp";
 import { decodeElevation, hillshade, metresPerPixel, RELIEF_DEFAULTS } from "./lib/gd-relief-core.mjs";
-import { resolveElevationSource, reliefSpec, GLOBAL_ELEVATION } from "./lib/gd-imagery-sources.mjs";
-import { mosaic } from "./lib/gd-relief-fetch.mjs";
+import { resolveTerrain, planSources } from "./lib/terrain/gd-terrain-resolver.mjs";
+import { terrainForWindow, nativeZoomFor } from "./lib/terrain/gd-terrain-window.mjs";
+import { loadCourseTerrainHeights, TERRAIN_BUCKET } from "./lib/terrain/gd-terrain-service.mjs";
+import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 
 const TILE = 256;
 /* The zooms a golf hole is looked at from. Below 12 the shading is of hills, not holes; the
@@ -64,41 +69,67 @@ async function neutralTile() {
   return neutral;
 }
 
-/* The shade for one tile as greyscale PNG bytes, or null when there is nothing honest to
-   draw (no DEM here, a missing DEM tile, or a decode that does not look like ground). */
-function elevationFor(bounds, options) {
-  return resolveElevationSource(bounds, options) || GLOBAL_ELEVATION;
+/* The approved source the resolver picks for some bounds, configured, or null. */
+function bestSourceFor(bounds, options) {
+  const resolution = resolveTerrain({ bounds, env: options.env, marginM: 0 });
+  if (!resolution.ok) return null;
+  return planSources(resolution, { env: options.env })[0] || null;
 }
 
+let loadAssetDefault = null;
+function assetLoader(options) {
+  if (options.loadAsset) return options.loadAsset;
+  if (!loadAssetDefault) {
+    const base = () => String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
+    const key = () => String(process.env.SUPABASE_SERVICE_ROLE_KEY || "");
+    const supabaseFetch = createSupabaseFetch({ base, key, label: "relief-tile" });
+    loadAssetDefault = async courseId => {
+      if (!base() || !key()) return null;
+      return loadCourseTerrainHeights(courseId, {
+        supabaseFetch, sharp, decodeElevation,
+        download: async path => {
+          const res = await fetch(base() + "/storage/v1/object/public/" + TERRAIN_BUCKET + "/" + path);
+          if (!res.ok) throw new Error("terrain asset " + res.status);
+          return Buffer.from(await res.arrayBuffer());
+        }
+      });
+    };
+  }
+  return loadAssetDefault;
+}
+
+/* The shade for one tile as greyscale PNG bytes, or null when there is nothing honest to
+   draw (no terrain here, a source that failed, or a decode that does not look like ground). */
 export async function shadeTile(z, x, y, azimuth, options = {}) {
   const bounds = tileBounds(z, x, y);
-  const dem = reliefSpec(elevationFor(bounds, options).dem);
-  if (!dem) return null;
+  const latitude = (bounds.north + bounds.south) / 2;
+  let asset = null;
+  if (options.courseId) {
+    try { asset = await assetLoader(options)(options.courseId); } catch (e) { asset = null; }
+  }
 
-  /* The DEM is fetched at its own best zoom and the shade scaled up to the tile, the way
+  /* The DEM is read at its own best zoom and the shade scaled up to the tile, the way
      reliefFromTerrainRgb does it: gradients of upsampled heights are gradients of the
-     interpolation. */
-  const demZoom = Math.min(z, Number(dem.maxUsefulZoom) || 17);
+     interpolation. From an asset that zoom is the asset's grid; otherwise the source's. */
+  let nativeZoom;
+  if (asset && asset.manifest) nativeZoom = asset.manifest.grid.captureZoom;
+  else {
+    const source = bestSourceFor(bounds, options);
+    if (!source) return null;
+    nativeZoom = nativeZoomFor(source, latitude);
+  }
+  const demZoom = Math.min(z, nativeZoom);
   const k = Math.pow(2, z - demZoom);
   const footprint = TILE / k;
   const ox = (x * TILE) / k, oy = (y * TILE) / k;
   const left = Math.floor(ox) - PAD, top = Math.floor(oy) - PAD;
   const size = Math.ceil(ox + footprint) - Math.floor(ox) + 2 * PAD;
 
-  const png = await mosaic(dem, demZoom, { x: left, y: top }, size, { requireAll: true });
-  if (!png) return null;
-  const { data, info } = await sharp(png, { limitInputPixels: false }).raw().toBuffer({ resolveWithObject: true });
-  let decoded;
-  try {
-    /* A float32 source was transcoded to terrain-RGB by mosaic(). */
-    decoded = decodeElevation(data, info.width, info.height, info.channels,
-      dem.encoding === "float32" ? "terrain-rgb" : dem.encoding);
-  } catch (e) {
-    return null;
-  }
+  const grid = { zoom: demZoom, originPx: { x: left, y: top }, width: size, height: size };
+  const result = await (options.terrainForWindow || terrainForWindow)({ grid, asset, env: options.env }, options.terrain || {});
+  if (!result || !result.heights) return null;
 
-  const latitude = (bounds.north + bounds.south) / 2;
-  const shade = hillshade(decoded.heights, info.width, info.height, metresPerPixel(latitude, demZoom), {
+  const shade = hillshade(result.heights, size, size, metresPerPixel(latitude, demZoom), {
     exaggeration: RELIEF_DEFAULTS.exaggeration,
     azimuth,
     altitude: RELIEF_DEFAULTS.altitude,
@@ -109,8 +140,8 @@ export async function shadeTile(z, x, y, azimuth, options = {}) {
   for (let i = 0; i < shade.length; i++) grey[i] = Math.round(clamp(0.5 + (shade[i] - 0.5) * OPACITY, 0, 1) * 255);
 
   /* Scale the padded window by k and cut the tile out of the middle. */
-  const scaled = Math.round(info.width * k);
-  return sharp(grey, { raw: { width: info.width, height: info.height, channels: 1 }, limitInputPixels: false })
+  const scaled = Math.round(size * k);
+  return sharp(grey, { raw: { width: size, height: size, channels: 1 }, limitInputPixels: false })
     .resize({ width: scaled, height: scaled, fit: "fill", kernel: "cubic" })
     .extract({ left: Math.round((ox - left) * k), top: Math.round((oy - top) * k), width: TILE, height: TILE })
     .png({ compressionLevel: 9 })
@@ -130,8 +161,8 @@ export default async function reliefTile(req) {
     /* A point, asked as a sliver of bounds - the same containment test a tile at that point
        goes through. */
     const e = 1e-6;
-    const source = elevationFor({ north: lat + e, south: lat - e, west: lng - e, east: lng + e });
-    const credit = source.attribution || {};
+    const source = bestSourceFor({ north: lat + e, south: lat - e, west: lng - e, east: lng + e }, {});
+    const credit = (source && source.attribution) || {};
     return new Response(JSON.stringify({ text: String(credit.text || ""), url: String(credit.url || "") }), {
       status: 200,
       headers: cors({ "Content-Type": "application/json", "Cache-Control": "public, max-age=86400" })
@@ -148,7 +179,7 @@ export default async function reliefTile(req) {
 
   let body = null;
   try {
-    body = await shadeTile(z, x, y, azimuth);
+    body = await shadeTile(z, x, y, azimuth, { courseId: String(params.get("course") || "").slice(0, 200) });
   } catch (e) {
     body = null;
   }

@@ -105,9 +105,9 @@ res=await call(`z=${sz}&x=${sx}&y=${sy}&az=315`);
 assert.equal(res.headers.get('X-Relief-Tile'),'shaded');
 assert.ok(calls.terrarium>before,'the global DEM must be fetched');
 const credit=await (await call('credit=1&lat=56.3433&lng=-2.8133')).json();
-assert.match(credit.text,/Mapzen/,'and credited');
+assert.match(credit.text,/Copernicus/,'and credited');
 const nzCredit=await (await call('credit=1&lat=-36.7515&lng=174.7515')).json();
-assert.ok(nzCredit.text && !/Mapzen/.test(nzCredit.text),'a national DEM is credited as itself: '+nzCredit.text);
+assert.ok(nzCredit.text && /LINZ/.test(nzCredit.text),'a national DEM is credited as itself: '+nzCredit.text);
 console.log('6. global DEM fallback + credit: %s | NZ: %s',credit.text.slice(0,40)+'...',nzCredit.text.slice(0,40));
 
 // 7. bad requests

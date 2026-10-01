@@ -29,7 +29,6 @@ export function capturePolicy(role) {
      frame (Jacks Point h1: a 333m hole in a 697x844m picture), pushing the frame zoom down a
      step to fit the cap. */
   if (role === "play-corridor") return { role, label: "HD play corridor", quality: "hd", targetZoom: 19, minZoom: 19, maxZoom: 19, maxTiles: 320, bleedMeters: 32, bleedPx: 220, stitchLayer: 20, maxSegmentMeters: 320, segmentOverlapMeters: 42, maxSegments: 6 };
-  if (role === "terrain-reference") return { role, label: "Terrain relief reference", quality: "terrain-map", targetZoom: 16, minZoom: 14, maxZoom: 17, maxTiles: 260, bleedMeters: 130, bleedPx: 380, stitchLayer: 5, terrainStageOnly: true };
   return { role: "course-backdrop", label: "Live map underlay", quality: "live-map-base", targetZoom: 17, minZoom: 16, maxZoom: 18, maxTiles: 260, bleedMeters: 120, bleedPx: 420, stitchLayer: 0 };
 }
 
@@ -297,18 +296,8 @@ export function planCourseCaptures(pkg, opts = {}) {
   if (backdropBounds) {
     const backdrop = item("course-backdrop", backdropBounds, null, null);
     if (backdrop) plan.push(backdrop);
-    /* The relief capture fetches a ready-made hillshade RASTER, and no region has a licensed
-       one - shading is computed from the DEM instead, which is one fetch that also feeds the
-       offline plays-like maths. So this is planned only when a caller explicitly supplies a
-       terrain raster source, which today nothing does. It stays here rather than being deleted
-       because the capture slot itself survives the move to computed relief; only where the
-       pixels come from changes. Callers that resolve no sources at all (plan-shape tests) keep
-       the original behaviour. */
-    const wantsTerrain = !("terrainSource" in opts) || !!opts.terrainSource;
-    if (wantsTerrain) {
-      const terrain = item("terrain-reference", backdropBounds, null, null);
-      if (terrain) plan.push(terrain);
-    }
+    /* Terrain is not a capture. It is the course's own terrain asset (functions/lib/terrain/),
+       baked once per course from the terrain registry and read by the export directly. */
   }
   holeNumbers.forEach(holeNumber => {
     const data = holeData[holeNumber];
@@ -356,7 +345,7 @@ export function planCourseCaptures(pkg, opts = {}) {
   const imageryCeiling = Number(opts.source && opts.source.imagery && opts.source.imagery.maxUsefulZoom) || 19;
   holeNumbers.forEach(holeNumber => {
     /* The green surround renders its own frame, so it has no say in the hole frame's extent. */
-    const items = plan.filter(i => Number(i.holeNumber) === holeNumber && !i.terrainStageOnly && i.role !== "green-surround");
+    const items = plan.filter(i => Number(i.holeNumber) === holeNumber && i.role !== "green-surround");
     let bounds = null;
     if (opts.source) {
       const grids = items.map(i => captureGrid(i, { source: opts.source })).filter(Boolean);
@@ -542,12 +531,6 @@ function tileCountFor(rect) {
   return Math.max(0, maxTx - minTx + 1) * Math.max(0, maxTy - minTy + 1);
 }
 
-/* Which half of a resolved source a capture reads from: relief comes off the elevation
-   endpoint, everything else off imagery. */
-function specForItem(item, source) {
-  if (!source) return null;
-  return item.role === "terrain-reference" ? (source.terrain || null) : (source.imagery || null);
-}
 
 /* Slippy tiles - the original path, unchanged apart from taking its template from the
    resolved source instead of a module constant. */
@@ -598,9 +581,8 @@ function exportBlocks(spec, rect, origin, zoom) {
 
 export function captureGrid(item, opts = {}) {
   const source = opts.source || null;
-  const spec = specForItem(item, source);
-  /* No licensed endpoint for this role means no capture. Returning an empty grid rather than
-     throwing lets the planner drop one role (relief) without failing the course. */
+  const spec = source ? source.imagery || null : null;
+  /* No licensed imagery endpoint means no capture. */
   if (!spec || !(spec.urlTemplate || spec.endpoint)) return null;
   /* Resolution ceiling from the source, not from the policy. NAIP is 0.6m, so asking it for
      z19 buys nothing but upscaled mush at the same cost; and a policy whose floor sits above
@@ -638,9 +620,6 @@ export function captureGrid(item, opts = {}) {
     sourceKey: source.key || "",
     sourceLabel: source.label || "",
     adapter: String(spec.adapter || "xyz"),
-    /* Travels so the fetch side knows HOW to read the bytes, not just where from - a float32
-       DEM block decoded as an image quietly clamps every height into 0..255. */
-    encoding: String(spec.encoding || ""),
     tiles
   };
 }
