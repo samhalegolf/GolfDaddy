@@ -140,13 +140,13 @@ test("a forced source with no key falls back to auto", () => {
   basemap.setOverride("auto");
 });
 
-test("Clarity 3D Mesh keeps the live map on auto - the hole picture brings its own Mapbox", () => {
+test("the retired \"mesh\" override is refused - Clarity 3D Mesh is what auto means now", () => {
   asOperator(true);
   basemap.configure({ esriApiKey: "e", mapboxPublicToken: "pk.test" });
   basemap.setOverride("mesh");
-  assert.strictEqual(basemap.baseFor(ST_ANDREWS).kind, "esri");
-  assert.strictEqual(basemap.baseFor(MADRID_ES).kind, "pnoa");
-  assert.strictEqual(basemap.activeOverride(), "mesh");
+  assert.strictEqual(basemap.override(), "auto");
+  assert.deepStrictEqual(basemap.overrides(), ["auto", "esri", "mapbox"]);
+  basemap.setOverride("esri");
   asOperator(false);
   assert.strictEqual(basemap.activeOverride(), "auto", "a player never inherits the operator's choice");
   asOperator(true);

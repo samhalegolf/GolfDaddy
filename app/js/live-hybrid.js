@@ -1,4 +1,4 @@
-/* The hybrid hole picture for Clarity 3D Mesh - TEST PATH, admin only.
+/* The hybrid hole picture for Clarity 3D Mesh - the default picture of an unpublished hole.
 
    One temporary aerial for the hole frame (live-terrain.js frameWindow), built from two
    providers on one pixel grid:
@@ -16,6 +16,11 @@
    Tiles are cached for the round (createSession), keyed provider/z/x/y, so a neighbouring hole
    only asks for the tiles it does not share. The cache holds encoded bytes, not decoded images,
    and lives as long as the course is open - never in course storage.
+
+   Mapbox is the part that costs, so it is the part that gives way. It is skipped - Esri alone
+   is the picture - when the device has used its daily Mapbox allowance (createBudget), and for
+   the rest of the round once Mapbox refuses us outright (401/403/429). A Mapbox tile that just
+   fails costs that one hole its Mapbox, not the round.
 
    The pixel work is plain functions over RGBA arrays (maskField, colourCorrection, compose)
    so it is tested without a browser; build() is the thin glue that fetches and draws. */
@@ -335,7 +340,60 @@
   var SESSION_MAX_TILES = 900;
 
   function createSession(courseKey) {
-    return { courseKey: courseKey || "", tiles: new Map(), network: { esri: 0, mapbox: 0 }, failed: { esri: 0, mapbox: 0 } };
+    return { courseKey: courseKey || "", tiles: new Map(), network: { esri: 0, mapbox: 0 }, failed: { esri: 0, mapbox: 0 },
+      mapboxOff: null };
+  }
+
+  /* Mapbox answers like these will not change by the next hole: a bad or restricted token, or
+     the account's own rate limit. */
+  var MAPBOX_REFUSED = [401, 403, 429];
+
+  /* Our own cap on Mapbox tiles fetched over the network, per device per day. A round is a few
+     hundred tiles (cache hits are free), so this is several rounds - it exists so one device, or
+     one runaway bug, can never run the Mapbox bill up. store is { get(), set(value) }; today()
+     names the day, so the count starts again each morning. */
+  var MAPBOX_DAILY_TILES = 1500;
+
+  function createBudget(store, limit, today) {
+    function state() {
+      var day = today(), saved = null;
+      try { saved = store.get(); } catch (e) { saved = null; }
+      return saved && saved.day === day && Number.isFinite(saved.used) ? saved : { day: day, used: 0 };
+    }
+    return {
+      limit: limit,
+      remaining: function () { return Math.max(0, limit - state().used); },
+      spend: function (n) {
+        var s = state();
+        s.used += n;
+        try { store.set(s); } catch (e) {}
+      }
+    };
+  }
+
+  function localDay() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  /* The device's budget, kept in localStorage. If storage is unavailable the count lives for
+     the page instead, which still bounds a round. */
+  function browserBudget() {
+    var KEY = "clarity:mapbox-tiles:v1", memory = null;
+    return createBudget({
+      get: function () {
+        try { return JSON.parse(localStorage.getItem(KEY) || "null"); } catch (e) { return memory; }
+      },
+      set: function (value) {
+        memory = value;
+        try { localStorage.setItem(KEY, JSON.stringify(value)); } catch (e) {}
+      }
+    }, MAPBOX_DAILY_TILES, localDay);
+  }
+
+  /* How many of these tiles the session would have to fetch. */
+  function uncached(session, provider, tiles) {
+    return tiles.filter(function (t) { return !session.tiles.has(provider + "/" + t.z + "/" + t.x + "/" + t.y); }).length;
   }
 
   /* One tile's bytes, from the session if it has them. A failure is not cached, so the next
@@ -350,8 +408,13 @@
     }
     count.network++;
     session.network[provider]++;
+    if (provider === "mapbox" && deps.budget) deps.budget.spend(1);
     var job = deps.fetch(url).then(function (res) {
-      if (!res || !res.ok) throw new Error(provider + " tile " + (res ? res.status : "failed"));
+      if (!res || !res.ok) {
+        var error = new Error(provider + " tile " + (res ? res.status : "failed"));
+        error.status = res ? res.status : 0;
+        throw error;
+      }
       return res.blob();
     });
     session.tiles.set(key, job);
@@ -383,9 +446,16 @@
     });
   }
 
+  /* Why Mapbox is not being asked for these tiles, or null if it may be. */
+  function mapboxBlocked(session, tiles, budget) {
+    if (session.mapboxOff) return session.mapboxOff;
+    if (budget && uncached(session, "mapbox", tiles) > budget.remaining()) return "daily Mapbox limit reached";
+    return null;
+  }
+
   /* The hole's picture. Resolves { blob, debug }, or rejects when there is no context imagery
-     at all (the caller's fallback is the live map). Mapbox failing is not a rejection: the
-     surface is Esri on its own, and debug says why. */
+     at all (the caller's fallback is the live map). Mapbox failing or being skipped is not a
+     rejection: the surface is Esri on its own, and debug says why. */
   function build(win, geom, deps, options) {
     var o = Object.assign({}, DEFAULTS, options || {});
     var started = deps.now ? deps.now() : Date.now();
@@ -402,10 +472,19 @@
       featherM: o.featherM, view: o.view || "composite", context: context,
       tiles: { frame: allTiles.length, mapbox: mapboxTiles.length }
     };
+    var blocked = mapboxBlocked(deps.session, mapboxTiles, deps.budget);
+    if (deps.budget) debug.mapboxBudget = deps.budget.remaining();
+    if (blocked && !esriReady) {
+      var refused = new Error("no Esri, and Mapbox is off: " + blocked);
+      refused.debug = debug;
+      return Promise.reject(refused);
+    }
+    if (blocked) debug.mapboxSkipped = blocked;
     var base = acquire(win, allTiles, context, deps.session, deps);
-    var premium = esriReady ? acquire(win, mapboxTiles, "mapbox", deps.session, deps).then(null, function (e) {
+    var premium = esriReady && !blocked ? acquire(win, mapboxTiles, "mapbox", deps.session, deps).then(null, function (e) {
       debug.mapboxFailed = (e && e.message) || String(e);
       debug.mapbox = e && e.count;
+      if (e && MAPBOX_REFUSED.indexOf(e.status) !== -1) deps.session.mapboxOff = "Mapbox refused (" + e.status + ")";
       return null;
     }) : Promise.resolve(null);
     return Promise.all([base, premium]).then(function (both) {
@@ -466,6 +545,9 @@
     colourCorrection: colourCorrection,
     compose: compose,
     createSession: createSession,
+    createBudget: createBudget,
+    browserBudget: browserBudget,
+    MAPBOX_DAILY_TILES: MAPBOX_DAILY_TILES,
     acquire: acquire,
     build: build,
     browserRaster: browserRaster

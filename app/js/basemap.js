@@ -35,13 +35,13 @@
    account, and a forced source with no key (or one proven blank) falls back to
    the normal auto pick.
 
-   "mesh" (Clarity 3D Mesh) leaves the Leaflet map on the normal auto pick.
-   painter.js (via live-terrain.js and live-hybrid.js) covers an unpublished
-   hole with its own Esri + Mapbox picture, fetched once per hole, so the map
-   underneath is only the backdrop while that loads and the fallback if it
-   cannot - paying for Mapbox tiles there as well, at every zoom the camera
-   visits, was most of the experiment's Mapbox bill. tileUrlFor() hands the
-   compositor the keyed tile URLs. */
+   Clarity 3D Mesh is what "auto" means for a hole with no published surface:
+   painter.js (via live-terrain.js and live-hybrid.js) covers it with its own
+   Esri + Mapbox picture, fetched once per hole, so the map underneath is only
+   the backdrop while that loads and the fallback if it cannot - which is why
+   this map never pays for Mapbox on auto. Forcing Esri or Mapbox turns the
+   mesh off, so the operator can compare against the flat map. tileUrlFor()
+   hands the compositor the keyed tile URLs. */
 (function () {
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
@@ -177,9 +177,10 @@
     return true;
   }
 
-  /* The operator override: "auto", "esri", "mapbox" or "mesh". Stored per device. */
+  /* The operator override: "auto", "esri" or "mapbox". Stored per device; a
+     stored value that is no longer one of these (the old "mesh") reads as auto. */
   var OVERRIDE_KEY = "clarity:basemap-override:v1";
-  var OVERRIDES = ["auto", "esri", "mapbox", "mesh"];
+  var OVERRIDES = ["auto", "esri", "mapbox"];
   var override = "auto";
   try {
     var stored = localStorage.getItem(OVERRIDE_KEY);
@@ -221,7 +222,7 @@
 
   function pick(centre) {
     if (override !== "auto" && operator()) {
-      var forced = override === "mesh" ? null : sourceOf(override);
+      var forced = sourceOf(override);
       if (forced && hasKey(forced) && !deadCells[cellKey(forced.kind, centre)]) return forced;
     }
     for (var i = 0; i < SOURCES.length; i++) {
@@ -309,8 +310,8 @@
        re-pick the moment it flips. */
     override: function () { return override; },
     /* What the operator chose, for anything gated on it: the override only
-       counts on the admin account, so a stored "mesh" on a shared device does
-       nothing for a player. */
+       counts on the admin account, so a stored "esri" on a shared device does
+       not switch a player's mesh off. */
     activeOverride: function () { return operator() ? override : "auto"; },
     overrides: function () { return OVERRIDES.slice(); },
     setOverride: function (kind) {
