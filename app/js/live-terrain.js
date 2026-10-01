@@ -1,12 +1,16 @@
-/* Clarity 3D Mesh on the live map - TEST PATH, admin only.
+/* Clarity 3D Mesh on the live map - the default for any hole with no published surface.
 
-   A hole with no published surface plays on the Leaflet map: tiles, plus the hillshade layer.
-   This builds one temporary picture of the hole instead - Esri across the frame with Mapbox over
-   the playing area (live-hybrid.js), and the DEM resampled onto exactly the same ground
-   (/api/live-terrain-frame) - and hands painter.js the pair in the shape of a published
+   A hole with no published surface used to play on the Leaflet map: tiles, plus the hillshade
+   layer. This builds one temporary picture of the hole instead - Esri across the frame with
+   Mapbox over the playing area (live-hybrid.js), and the DEM resampled onto exactly the same
+   ground (/api/live-terrain-frame) - and hands painter.js the pair in the shape of a published
    surface's metadata. From there nothing is new: the published path frames it
    (stageFrameTransform), stands it up (gd-terrain-mesh.js), lifts the overlays onto it and
    grounds taps from it. One camera, one mesh, one projector.
+
+   The fallbacks, cheapest first: Mapbox off (failed, refused, or over our daily limit) is the
+   same mesh on Esri alone; no elevation is the same picture, flat; no Esri tiles, no WebGL or
+   no signed-in player is the Leaflet live map, which never left.
 
    What this file owns is only the part the published path never needed:
      - whether the mode is on at all (wanted)
@@ -36,10 +40,12 @@
      out by 0.6 of that to each side. */
   var THROW_FRACTION = 0.5, THROW_MIN_M = 150, THROW_SPREAD = 0.6;
 
-  /* The whole activation rule, in one place so a test can pin it. */
+  /* The whole activation rule, in one place so a test can pin it. On for every signed-in
+     player on the normal map source; the operator forcing Esri or Mapbox gets that flat live
+     map to compare against. Signed in because the elevation endpoint is. */
   function wanted(ctx) {
     if (!ctx) return false;
-    return ctx.override === "mesh" && ctx.admin === true && Number(ctx.relief) > 0 && ctx.webgl === true;
+    return ctx.override === "auto" && ctx.signedIn === true && Number(ctx.relief) > 0 && ctx.webgl === true;
   }
 
   function worldPx(lat, lng, z) {
@@ -274,6 +280,7 @@
       ? "Esri " + (ctx.network || 0) + "+" + (ctx.reused || 0) + "r · Mapbox " + (mb.network || 0) + "+" + (mb.reused || 0) + "r"
         + " (" + debug.maskPct + "% frame, session " + debug.sessionMapbox + ")" + (debug.mapboxFailed ? " FAILED" : "")
       : "Mapbox only " + (mb.network || 0) + "+" + (mb.reused || 0) + "r";
+    if (debug.mapboxSkipped) imagery = "Esri " + (ctx.network || 0) + "+" + (ctx.reused || 0) + "r · Mapbox off (" + debug.mapboxSkipped + ")";
     return ["3D mesh " + (mesh || "pending"), debug.view !== "composite" ? "view " + debug.view : "",
       "z" + debug.window.z + " " + debug.rasterPx + " " + (debug.metresPerPx ? debug.metresPerPx.toFixed(2) + "m/px" : ""),
       imagery,

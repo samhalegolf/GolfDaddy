@@ -3,12 +3,12 @@
  *
  * The page is the shipped /app/index.html. Esri and Mapbox tiles are answered by Playwright
  * routes (flat colours, so the composite can be read back), and /api/live-terrain-frame is the
- * real handler (functions/live-terrain-frame.mjs) with only its tile fetch faked and the admin
- * check stubbed - so the compositor, the round's tile cache, the DEM resample and the mesh all
+ * real handler (functions/live-terrain-frame.mjs) with only its tile fetch faked and the
+ * sign-in check stubbed - so the compositor, the round's tile cache, the DEM resample and the mesh all
  * run for real.
  *
  * Pinned here:
- *   - admin + "mesh" + relief on: an unpublished hole comes up on the terrain mesh, built from
+ *   - a signed-in player on auto + relief on: an unpublished hole comes up on the terrain mesh, built from
  *     Esri across the frame and Mapbox only where the playing area needs it, with Mapbox colour
  *     at the tee and corrected Esri in the corners of the picture the mesh is given;
  *   - the Leaflet map underneath fetches no Mapbox at all in this mode;
@@ -18,7 +18,7 @@
  *     live map never flashes up while it is built;
  *   - Mapbox failing still gives an Esri mesh surface; a failed DEM gives a flat composite;
  *     Esri failing leaves the live map up - each with its reason on the readout;
- *   - a non-admin never asks for anything;
+ *   - a signed-out player never asks for anything;
  *   - published holes one after another each get their mesh (the disposed canvas regression).
  *
  * Run: node dev/live-terrain-mesh.test.mjs   (GD_BOOT_CHROMIUM=<chrome> to pick a browser)
@@ -59,7 +59,7 @@ const ESRI_RGB = { r: 70, g: 95, b: 90 }, MAPBOX_RGB = { r: 80, g: 125, b: 70 };
 const counts = { elevation: 0 };
 let failElevation = false;
 const handler = createHandler({
-  verifyAdmin: async () => "admin@test",
+  verifyUser: async () => "user-1",
   env: { MAPBOX_PUBLIC_TOKEN: "pk.test" },
   mosaic: async (spec, zoom, origin, size) => {
     if (failElevation) return null;
@@ -261,11 +261,12 @@ try {
         await window.__lm.until(() => app.marshal.round().hole === n, "hole " + n);
       }
     };
-    /* The admin account, as far as the display gates are concerned. */
+    /* Signed in, and the admin account as far as the display gates (the readout) are concerned. */
+    app.account.signedIn = () => true;
     app.account.isAdmin = () => true;
     app.gpsSettings.set("relief", "enhanced");
     app.gpsSettings.set("hybridView", "composite");
-    app.basemap.setOverride("mesh");
+    app.basemap.setOverride("auto");
   }, PKG);
   await page.evaluate(() => window.ClarityApp.basemap.ready());
 
@@ -356,15 +357,14 @@ try {
     + f1.maskPct + "% masked); hole 2: Esri " + f2.esri.network + " new + " + f2.esri.reused + " reused, Mapbox "
     + f2.mapbox.network + " new + " + f2.mapbox.reused + " reused");
 
-  /* The "3D Mesh view" row shows on Clarity 3D Mesh and on nothing else - actually hidden, not
+  /* The "3D Mesh view" row shows on auto (Clarity 3D Mesh) and on nothing else - actually hidden, not
      just classed hidden (.setRow's own display once beat .hiddenState). */
   const rowShown = await page.evaluate(() => {
     const app = window.ClarityApp, row = document.getElementById("setHybridViewRow"), seen = {};
     app.gpsSettings.open();
-    for (const source of ["auto", "esri", "mapbox", "mesh"]) {
+    for (const source of ["esri", "mapbox", "auto"]) {               // auto last: the mesh carries on
       app.basemap.setOverride(source);
       document.getElementById("setMapSource").click();               // re-renders the panel...
-      document.getElementById("setMapSource").click();
       document.getElementById("setMapSource").click();
       document.getElementById("setMapSource").click();               // ...and back to `source`
       const coarse = document.getElementById("setGreenCoarseRow");
@@ -374,7 +374,7 @@ try {
     app.gpsSettings.close();
     return seen;
   });
-  ok("the 3D Mesh view and coarse green-lines rows are visible only on Clarity 3D Mesh", !rowShown.auto && !rowShown.esri && !rowShown.mapbox && rowShown.mesh, rowShown);
+  ok("the 3D Mesh view and coarse green-lines rows are visible only on auto", rowShown.auto && !rowShown.esri && !rowShown.mapbox, rowShown);
   await page.evaluate(() => window.__lm.until(() => window.__lm.debug().active, "the mesh after the settings round trip"));
 
   /* 5. Mapbox fails: an Esri surface, still on the mesh, with the reason. */
@@ -405,15 +405,15 @@ try {
   ok("Esri failing leaves the live map up", !s.published && !s.meshUp && s.presentation === "live" && /3D mesh off · esri tile 503/.test(s.stamp), s);
   fail.esri = false;
 
-  /* 8. A player never asks. */
+  /* 8. A signed-out player never asks. */
   const asked = { ...tiles, elevation: counts.elevation };
   await page.evaluate(async () => {
-    window.ClarityApp.account.isAdmin = () => false;
+    window.ClarityApp.account.signedIn = () => false;
     await window.__lm.hole(1);
     await new Promise((r) => setTimeout(r, 900));
   });
   s = await page.evaluate(() => window.__lm.state());
-  ok("a non-admin with a stored mesh override gets the normal live map and no requests",
+  ok("a signed-out player gets the normal live map and no requests",
     tiles.esri === asked.esri && tiles.mapbox === asked.mapbox && counts.elevation === asked.elevation && !s.debug.wanted && !s.published, { tiles, s });
 
   /* 9. Published holes, one after another, each get their mesh. */

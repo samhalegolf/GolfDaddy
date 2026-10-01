@@ -1,8 +1,8 @@
-/* Live terrain frame - one hole's elevation, for the admin-only "Clarity 3D Mesh" map source
-   (app/js/live-terrain.js). TEST PATH.
+/* Live terrain frame - one hole's elevation, for Clarity 3D Mesh, the default picture of a hole
+   with no published surface (app/js/live-terrain.js).
 
    GET /api/live-terrain-frame?layer=elevation&z=&x=&y=&w=&h=
-     Authorization: Bearer <admin session>
+     Authorization: Bearer <signed-in session>
 
    z/x/y/w/h is a rectangle of web-mercator pixels (gd-live-terrain-core parseWindow) - the same
    rectangle the browser builds its hybrid Esri + Mapbox picture on (app/js/live-hybrid.js), so
@@ -14,12 +14,12 @@
    cannot.
 
    Nothing is stored and nothing is published: the answer is private to the device that asked
-   and never cached at the CDN. Admin only, because this is a test of whether the look is worth
-   having. The pictures are not fetched here - they are display tiles the browser draws itself,
+   and never cached at the CDN. Signed-in players only, so the DEM sources behind it are not an
+   open proxy. The pictures are not fetched here - they are display tiles the browser draws itself,
    so it can reuse them hole to hole. */
 
 import sharp from "sharp";
-import { verifiedAdminEmail } from "./lib/gd-map-overlay-store.mjs";
+import { verifiedUserId } from "./lib/gd-map-overlay-store.mjs";
 import { mapboxCaptureSource } from "./lib/gd-mapbox-source.mjs";
 import { resolveElevationSource, reliefSpec, GLOBAL_ELEVATION } from "./lib/gd-imagery-sources.mjs";
 import { decodeElevation, terrainRgbPngFromHeights, metresPerPixel } from "./lib/gd-relief-core.mjs";
@@ -104,11 +104,11 @@ function fail(status, message) {
 }
 
 export function createHandler(deps = {}) {
-  const verifyAdmin = deps.verifyAdmin || verifiedAdminEmail;
+  const verifyUser = deps.verifyUser || verifiedUserId;
   return async function liveTerrainFrame(req) {
     if (req.method === "OPTIONS") return new Response("", { status: 204, headers: cors({}) });
     if (req.method !== "GET") return fail(405, "Method not allowed");
-    if (!(await verifyAdmin(req))) return fail(403, "Admin verification failed");
+    if (!(await verifyUser(req))) return fail(401, "Sign in to load terrain");
     const params = new URL(req.url).searchParams;
     const win = parseWindow(params);
     if (win.error) return fail(400, win.error);

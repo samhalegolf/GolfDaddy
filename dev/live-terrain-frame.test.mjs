@@ -1,12 +1,12 @@
 /*
- * /api/live-terrain-frame - the Clarity 3D Mesh test mode's server half.
+ * /api/live-terrain-frame - Clarity 3D Mesh's server half.
  *
  * Pinned here:
  *   - the window is validated (integers, golf zooms, size limits, on the map);
  *   - the DEM is resampled onto EXACTLY the window: a linear height field comes back as the
  *     same linear field at the grid's pixel centres, whatever the DEM zoom;
  *   - the grid keeps the window's aspect and stays inside its size limits;
- *   - the handler refuses non-admins, answers only the elevation layer (pictures are fetched
+ *   - the handler refuses anyone not signed in, answers only the elevation layer (pictures are fetched
  *     by the browser), echoes the window, falls through to the next DEM when one fails, says
  *     why when none works, and never lets a CDN cache the answer.
  *
@@ -118,24 +118,24 @@ const ENV = { MAPBOX_PUBLIC_TOKEN: "pk.test" };
 const req = (q, method = "GET") => new Request("http://x/api/live-terrain-frame?" + q, { method });
 const query = (layer, win = WIN) => "layer=" + layer + "&z=" + win.z + "&x=" + win.x + "&y=" + win.y + "&w=" + win.w + "&h=" + win.h;
 
-await ok("non-admins are refused before anything is fetched", async () => {
+await ok("a caller who is not signed in is refused before anything is fetched", async () => {
   const log = [];
-  const handler = createHandler({ verifyAdmin: async () => "", env: ENV, mosaic: fakeMosaic({ log }) });
+  const handler = createHandler({ verifyUser: async () => "", env: ENV, mosaic: fakeMosaic({ log }) });
   const res = await handler(req(query("elevation")));
-  assert.strictEqual(res.status, 403);
+  assert.strictEqual(res.status, 401);
   assert.strictEqual(log.length, 0);
 });
 
 await ok("a bad window or layer is a 400 - pictures are the browser's, not this endpoint's", async () => {
   const log = [];
-  const handler = createHandler({ verifyAdmin: async () => "a@b", env: ENV, mosaic: fakeMosaic({ log }) });
+  const handler = createHandler({ verifyUser: async () => "user-1", env: ENV, mosaic: fakeMosaic({ log }) });
   assert.strictEqual((await handler(req(query("elevation", { ...WIN, z: 11 })))).status, 400);
   assert.strictEqual((await handler(req(query("aerial")))).status, 400);
   assert.strictEqual(log.length, 0, "and no Mapbox picture is ever fetched here");
 });
 
 await ok("elevation: terrain-RGB on the window's grid, with its range and source", async () => {
-  const handler = createHandler({ verifyAdmin: async () => "a@b", env: ENV, mosaic: fakeMosaic() });
+  const handler = createHandler({ verifyUser: async () => "user-1", env: ENV, mosaic: fakeMosaic() });
   const res = await handler(req(query("elevation")));
   assert.strictEqual(res.status, 200);
   assert.match(res.headers.get("Cache-Control"), /^private/);
@@ -162,12 +162,12 @@ await ok("a DEM that fails falls through to the next, and none at all is a 502 t
   assert.ok(candidates.length >= 2, "global and Mapbox at least");
   assert.strictEqual(candidates[candidates.length - 1].key, "mapbox-terrain-dem", "Mapbox is the last resort, never first");
   const first = candidates[0].dem.urlTemplate.split("?")[0].slice(0, 40);
-  const handler = createHandler({ verifyAdmin: async () => "a@b", env: ENV, mosaic: fakeMosaic({ failDem: [first] }) });
+  const handler = createHandler({ verifyUser: async () => "user-1", env: ENV, mosaic: fakeMosaic({ failDem: [first] }) });
   const res = await handler(req(query("elevation")));
   assert.strictEqual(res.status, 200);
   assert.notStrictEqual(res.headers.get("X-Elevation-Source"), candidates[0].key);
 
-  const none = createHandler({ verifyAdmin: async () => "a@b", env: ENV, mosaic: fakeMosaic({ failDem: ["http"] }) });
+  const none = createHandler({ verifyUser: async () => "user-1", env: ENV, mosaic: fakeMosaic({ failDem: ["http"] }) });
   const bad = await none(req(query("elevation")));
   assert.strictEqual(bad.status, 502);
   assert.match((await bad.json()).error, /no elevation/);

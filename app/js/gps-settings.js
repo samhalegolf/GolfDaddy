@@ -182,12 +182,11 @@
 
   /* Operator-only map source override, owned by basemap.js; this is only its
      button. Hidden for everyone but the admin account. */
-  var MAP_SOURCE_LABELS = { auto: "Auto", esri: "Esri", mapbox: "Mapbox", mesh: "Clarity 3D Mesh" };
+  var MAP_SOURCE_LABELS = { auto: "Auto (Clarity 3D Mesh)", esri: "Esri", mapbox: "Mapbox" };
   var MAP_SOURCE_SUBS = {
-    auto: "Auto: chosen by region.",
-    esri: "Forced: Esri World Imagery.",
-    mapbox: "Forced: Mapbox Satellite. Falls back to Auto if no token is set.",
-    mesh: "Esri + Mapbox (playing area only) on the 3D terrain mesh, unpublished holes. Needs Terrain relief on."
+    auto: "Unpublished holes on the 3D mesh: Esri + Mapbox over the playing area, Esri alone if Mapbox fails or hits the daily limit. Needs Terrain relief on.",
+    esri: "Forced: flat Esri World Imagery, no 3D mesh.",
+    mapbox: "Forced: flat Mapbox Satellite, no 3D mesh. Falls back to Auto if no token is set."
   };
   function renderMapSource() {
     var group = document.getElementById("setMapSourceGroup");
@@ -202,11 +201,11 @@
     var sub = document.getElementById("setMapSourceSub");
     if (sub) sub.textContent = MAP_SOURCE_SUBS[current] || "";
     var viewRow = document.getElementById("setHybridViewRow");
-    if (viewRow) viewRow.classList.toggle("hiddenState", current !== "mesh");
+    if (viewRow) viewRow.classList.toggle("hiddenState", current !== "auto");
     var viewBtn = document.getElementById("setHybridView");
     if (viewBtn) viewBtn.textContent = HYBRID_VIEW_LABELS[state.hybridView] || state.hybridView;
     var coarseRow = document.getElementById("setGreenCoarseRow");
-    if (coarseRow) coarseRow.classList.toggle("hiddenState", current !== "mesh");
+    if (coarseRow) coarseRow.classList.toggle("hiddenState", current !== "auto");
     var coarseBtn = document.getElementById("setGreenCoarse");
     if (coarseBtn) {
       coarseBtn.textContent = state.greenLinesCoarse ? "On" : "Off";

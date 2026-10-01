@@ -30,8 +30,9 @@ exports.handler = async function(event) {
          privileges only. The scan pipeline must never read it: Esri's licence here is display,
          not storage. */
       esriApiKey: process.env.ARCGIS_API_KEY || process.env.ESRI_API_KEY || "",
-      /* Mapbox public token, for the operator's live-map source override only (Esri vs
-         Mapbox comparison in GPS Settings; app/js/basemap.js). Public by design like the two
+      /* Mapbox public token, for the Clarity 3D Mesh hole picture (Mapbox over the playing
+         area, app/js/live-hybrid.js) and the operator's flat-map override in GPS Settings
+         (app/js/basemap.js). Public by design like the two
          above - restrict it to this domain in the Mapbox dashboard. Only a pk. token is ever
          published: a secret sk. token in this variable would otherwise leak into tile URLs. */
       mapboxPublicToken: mapboxPublicToken()
