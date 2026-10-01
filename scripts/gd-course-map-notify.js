@@ -1,8 +1,8 @@
-/* "Email me when this course is ready" - offered when a course scan fails.
+/* The map-not-available banner - shown when a course scan fails.
  *
- * gd-course-library-pin-lock.js calls GDCourseMapNotify.offer(course) when the server has
- * given its final answer on a course (status "failed") and the player is
- * dropped into basic GPS. A small card says so and offers to email them once the map is done:
+ * gd-course-library-pin-lock.js (endFailedScan) sends the player back to a fresh course
+ * picker and calls GDCourseMapNotify.offer(course). A small card says the map is not
+ * available yet and, when we know which course it was, offers to email them once it is done:
  *
  *   signed in -> one tap posts to /api/course-map-notify, which stores the request against
  *                their verified account email.
@@ -13,6 +13,10 @@
  *
  * The email itself goes out from the server (course-mapper-sweeper.mjs) once the course has a
  * playable map, however it got one.
+ *
+ * If the player's GPS is on and they are near that course, endFailedScan then calls
+ * offerManualGps, which adds a small "Use Manual GPS" button. That button is the only way
+ * into manual play.
  */
 (function () {
   "use strict";
@@ -20,6 +24,9 @@
   var PENDING_KEY = "gd_course_map_notify_pending_v1";
   var REQUESTED_KEY = "gd_course_map_notify_requested_v1";
   var CARD_ID = "gdCourseMapNotifyCard";
+  /* Which failed scan the card is showing, so a slow GPS answer for an earlier course
+     cannot add its manual button to a later card. */
+  var currentOffer = 0;
 
   function readJson(key, fallback) {
     try { var raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } catch (e) { return fallback; }
@@ -33,10 +40,11 @@
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
 
   function courseRef(course) {
-    if (!course) return null;
-    var id = String(course.courseId || course.id || "").trim();
-    if (!id) return null;
-    return { courseId: id, courseName: String(course.courseName || course.name || "").trim() };
+    if (!course) return { courseId: "", courseName: "" };
+    return {
+      courseId: String(course.courseId || course.id || "").trim(),
+      courseName: String(course.courseName || course.name || "").trim()
+    };
   }
 
   /* Already asked on this device - show that, rather than the button again. */
@@ -85,11 +93,12 @@
     if (!document.getElementById(CARD_ID + "Style")) {
       var style = document.createElement("style");
       style.id = CARD_ID + "Style";
-      style.textContent = ".gdCourseMapNotifyCard{position:fixed;left:50%;bottom:calc(max(12px,env(safe-area-inset-bottom)) + 148px);transform:translateX(-50%);z-index:1900;display:flex;flex-direction:column;gap:6px;align-items:center;width:min(92vw,360px);box-sizing:border-box;border:1px solid rgba(255,159,47,.34);border-radius:18px;background:rgba(3,18,9,.92);color:#f6fff7;padding:13px 16px;text-align:center;box-shadow:0 12px 28px rgba(0,0,0,.34);backdrop-filter:blur(14px)}"
+      style.textContent = ".gdCourseMapNotifyCard{position:fixed;left:50%;bottom:calc(max(12px,env(safe-area-inset-bottom)) + 148px);transform:translateX(-50%);z-index:7700;display:flex;flex-direction:column;gap:6px;align-items:center;width:min(92vw,360px);box-sizing:border-box;border:1px solid rgba(255,159,47,.34);border-radius:18px;background:rgba(3,18,9,.92);color:#f6fff7;padding:13px 16px;text-align:center;box-shadow:0 12px 28px rgba(0,0,0,.34);backdrop-filter:blur(14px)}"
         + ".gdCourseMapNotifyCard strong{font-size:14px;font-weight:950}.gdCourseMapNotifyCard span{font-size:12px;opacity:.78}"
         + ".gdCourseMapNotifyActions{display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;justify-content:center}"
         + ".gdCourseMapNotifyActions button{border:1px solid rgba(246,255,247,.22);border-radius:999px;background:rgba(246,255,247,.08);color:#f6fff7;padding:7px 13px;font-size:12px;font-weight:900}"
         + ".gdCourseMapNotifyActions button[data-gd-notify-go]{border-color:rgba(255,159,47,.55);background:rgba(255,159,47,.2)}"
+        + ".gdCourseMapNotifyCard button[data-gd-notify-manual]{border:0;background:none;color:#f6fff7;opacity:.78;padding:4px 8px;font-size:11px;font-weight:800;text-decoration:underline}"
         + ".gdCourseMapNotifyActions button:disabled{opacity:.55}.gdCourseMapNotifyCard.hidden{display:none!important}";
       document.head.appendChild(style);
     }
@@ -97,6 +106,7 @@
   }
 
   function hide() {
+    currentOffer++;
     try { var el = document.getElementById(CARD_ID); if (el) el.classList.add("hidden"); } catch (e) {}
   }
 
@@ -109,16 +119,18 @@
 
   async function offer(course) {
     var ref = courseRef(course);
-    if (!ref) return false;
+    var offerId = ++currentOffer;
     var name = ref.courseName;
     var couldNotMap = H(name ? "mapNotify.couldNotMap" : "mapNotify.couldNotMapThis", { course: name });
     var card = ensureCard();
-    if (alreadyRequested(ref.courseId)) {
-      card.innerHTML = "<strong>" + couldNotMap + "</strong><span>" + H("mapNotify.onList") + "</span>"
+    card.dataset.gdNotifyOffer = String(offerId);
+    if (!ref.courseId || alreadyRequested(ref.courseId)) {
+      card.innerHTML = "<strong>" + couldNotMap + "</strong><span>" + H(ref.courseId ? "mapNotify.onList" : "mapNotify.requestSent") + "</span>"
         + '<div class="gdCourseMapNotifyActions"><button type="button" data-gd-notify-close>' + H("mapNotify.ok") + '</button></div>';
     } else {
       var signedIn = !!(await accessToken());
-      card.innerHTML = "<strong>" + couldNotMap + "</strong><span>" + H("mapNotify.basicGps") + "</span>"
+      if (offerId !== currentOffer) return false;
+      card.innerHTML = "<strong>" + couldNotMap + "</strong><span>" + H("mapNotify.requestSent") + "</span>"
         + '<div class="gdCourseMapNotifyActions">'
         + '<button type="button" data-gd-notify-go>' + H(signedIn ? "mapNotify.emailMe" : "mapNotify.signUp") + "</button>"
         + '<button type="button" data-gd-notify-close>' + H("mapNotify.noThanks") + '</button></div>';
@@ -145,6 +157,22 @@
     var close = card.querySelector("[data-gd-notify-close]");
     if (close) close.onclick = hide;
     card.classList.remove("hidden");
+    return offerId;
+  }
+
+  /* Adds the small "Use Manual GPS" button to the card for this failed scan. The caller has
+     already checked the player's GPS is on and that they are near the course. */
+  function offerManualGps(offerId, onUse) {
+    if (!offerId || offerId !== currentOffer || typeof onUse !== "function") return false;
+    var card = document.getElementById(CARD_ID);
+    if (!card || card.classList.contains("hidden") || card.dataset.gdNotifyOffer !== String(offerId)) return false;
+    if (card.querySelector("[data-gd-notify-manual]")) return true;
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.setAttribute("data-gd-notify-manual", "");
+    btn.innerHTML = H("mapRecovery.useManualButton");
+    btn.onclick = function () { hide(); onUse(); };
+    card.appendChild(btn);
     return true;
   }
 
@@ -167,5 +195,5 @@
   /* And once at startup, for a sign-up that finished with a reload in between. */
   setTimeout(flushPending, 4000);
 
-  window.GDCourseMapNotify = { offer: offer, hide: hide, flushPending: flushPending };
+  window.GDCourseMapNotify = { offer: offer, offerManualGps: offerManualGps, hide: hide, flushPending: flushPending };
 })();

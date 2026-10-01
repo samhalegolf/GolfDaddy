@@ -168,7 +168,7 @@ function createHarness(options = {}) {
       },
       databaseMapAvailable() { net.dbChecks++; return new Promise(() => {}); /* slow manifest fetch that never returns */ },
       needsCoursePin() { return false; }, showPin() { return false; }, hidePin() {},
-      hasMappedPlayData() { return false; }, prepareMappingSurface() {}, openManualCourse() { return false; }
+      hasMappedPlayData() { return false; }, prepareMappingSurface() {}
     },
     runCourseMappingAttempt() { return new Promise(() => {}); },
     gdEnsureResumeRoundPicker() { return null; },

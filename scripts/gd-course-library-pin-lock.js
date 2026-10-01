@@ -4377,18 +4377,17 @@
    *
    * So a wait that runs out while the server is STILL PROCESSING no longer ends anything. The
    * player is told the truth - this is taking longer than usual - the package keeps being
-   * polled, and when it lands the round opens by itself. Manual GPS stays available, but as
-   * something the player chooses, not somewhere they are put.
+   * polled, and when it lands the round opens by itself. The player can leave the wait and go
+   * back to the courses; manual GPS is not offered here - only after a scan has failed.
    */
   let serverMapWaitState=null;
-  /* Set to the resolution key the player pressed "Use basic GPS for now" on. Read by the poll
+  /* Set to the resolution key the player pressed "Back to Courses" on. Read by the poll
      loop rather than acted on directly, because the wait owns the attempt: tearing down the
      loading screen from a click handler while awaitServerCoursePackage was still polling meant
      the wait's own exhausted-branch could arrive afterwards and overwrite the choice. */
   let serverWaitOptOut='';
   /* Offered well before the wait's own budget runs out. Four minutes of a moving bar with no
-     way out is not "waiting", it is being stuck - and the player who knows the course and just
-     wants distances should not have to sit through a scan to get them. */
+     way out is not "waiting", it is being stuck. */
   const SERVER_WAIT_OFFER_MS=45000;
   function ensureServerMapWaitPrompt(){
     let el=document.getElementById('gdServerMapWaitPrompt');
@@ -4396,7 +4395,7 @@
     el=document.createElement('div');
     el.id='gdServerMapWaitPrompt';
     el.className='gdServerMapWaitPrompt hidden';
-    el.innerHTML='<strong data-gd-wait-title>'+i18nH('course.stillPreparingThisDots')+'</strong><span data-i18n="course.firstTimeSetup">'+i18nH('course.firstTimeSetup')+'</span><div class="gdServerMapWaitActions"><button type="button" data-gd-wait-keep data-i18n="course.keepWaiting">'+i18nH('course.keepWaiting')+'</button><button type="button" data-gd-wait-basic data-i18n="course.useBasicGps">'+i18nH('course.useBasicGps')+'</button></div>';
+    el.innerHTML='<strong data-gd-wait-title>'+i18nH('course.stillPreparingThisDots')+'</strong><span data-i18n="course.firstTimeSetup">'+i18nH('course.firstTimeSetup')+'</span><div class="gdServerMapWaitActions"><button type="button" data-gd-wait-keep data-i18n="course.keepWaiting">'+i18nH('course.keepWaiting')+'</button><button type="button" data-gd-wait-leave data-i18n="mapRecovery.backToCourses">'+i18nH('mapRecovery.backToCourses')+'</button></div>';
     document.body.appendChild(el);
     if(!document.getElementById('gdServerMapWaitPromptStyle')){
       const style=document.createElement('style');
@@ -4416,13 +4415,13 @@
       const title=prompt.querySelector('[data-gd-wait-title]');
       if(title){const n=courseName(course);if(n)i18nSet(title,'course.stillPreparingNamedDots',{course:n});else i18nSet(title,'course.stillPreparingThisDots');}
       const keep=prompt.querySelector('[data-gd-wait-keep]');
-      const basic=prompt.querySelector('[data-gd-wait-basic]');
+      const leave=prompt.querySelector('[data-gd-wait-leave]');
       /* "Keep waiting" only dismisses the panel - nothing here was ever conditional on it. The
          player is agreeing to what is already happening. */
       if(keep)keep.onclick=()=>{try{prompt.classList.add('hidden');}catch(e){}};
-      if(basic)basic.onclick=()=>{
+      if(leave)leave.onclick=()=>{
         try{prompt.classList.add('hidden');}catch(e){}
-        if(typeof opts.onBasicGps==='function')opts.onBasicGps();
+        if(typeof opts.onLeave==='function')opts.onLeave();
       };
       prompt.classList.remove('hidden');
     }catch(e){}
@@ -4459,10 +4458,9 @@
     try{updateCourseLoading(courseName(c)?i18nT('course.stillPreparingNamed',{course:courseName(c)}):i18nT('course.stillPreparingThis'),82);}catch(e){}
     try{window.__gdCoursePlayServerMapWaitActive={courseId:courseId(c),courseName:courseName(c),hole:h,resolutionKey:key,at:Date.now()};}catch(e){}
     try{document.body.classList.add('gdServerMapWaitActive');}catch(e){}
-    showServerMapWaitPrompt(c,h,key,{onBasicGps:()=>{
-      const state=stopServerMapWait('player-chose-basic-gps');
-      const waited=state||{course:c,hole:h,resolutionKey:key};
-      beginInteractiveGreenFallback(waited.course||c,waited.hole||h,'player-chose-basic-gps',{resolutionKey:key,activeResolutionKey:key,attemptToken:opts.attemptToken,debugRunId:opts.debugRunId,source:'server-map-wait',callerFunction:'beginServerMapWait',serverPackageStatus:'processing'});
+    showServerMapWaitPrompt(c,h,key,{onLeave:()=>{
+      stopServerMapWait('player-left-wait');
+      returnToCoursePicker('player-left-wait');
     }});
     startServerPackageWatch(c,h,key,'waiting');
     return {playable:false,waiting:true,armed:true,debugRunId:opts.debugRunId||''};
@@ -4496,8 +4494,8 @@
              looking at a loading screen, so ending silently would strand them - offer the
              green-tap they were spared earlier, now as the only thing left. */
           if(waiting){
-            stopServerMapWait('watch-budget-exhausted');
-            beginInteractiveGreenFallback(course,hole,'server-map-timed-out',{resolutionKey,activeResolutionKey:resolutionKey,source:'server-map-wait',callerFunction:'startServerPackageWatch',serverPackageStatus:'processing'});
+            const waited=stopServerMapWait('watch-budget-exhausted')||{};
+            endFailedScan(course,hole,'server-map-timed-out',{resolutionKey,attemptToken:waited.attemptToken,debugRunId:waited.debugRunId,serverPackageStatus:'processing'});
             return;
           }
           return stopFallbackPackageWatch();
@@ -4508,8 +4506,8 @@
         /* A terminal answer during an extended wait ends the wait honestly rather than
            polling out the clock: the server has said it stopped and why. */
         if(waiting&&pkg&&pkg.status==='failed'){
-          stopServerMapWait('server-'+pkg.status);
-          beginInteractiveGreenFallback(course,hole,pkg.status==='failed'?'server-map-failed':'server-map-not-ready',{resolutionKey,activeResolutionKey:resolutionKey,source:'server-map-wait',callerFunction:'startServerPackageWatch',serverPackageStatus:pkg.status});
+          const waited=stopServerMapWait('server-failed')||{};
+          endFailedScan(course,hole,'server-map-failed',{resolutionKey,attemptToken:waited.attemptToken,debugRunId:waited.debugRunId,serverPackageStatus:'failed'});
           return;
         }
         if(!serverPackageIsReady(pkg))continue;
@@ -4541,6 +4539,64 @@
         return;   // polling done - the prompt holds the result; the fallback clearing hides it
       }
     })();
+  }
+  /* How close the player has to be to the course they tried to scan for manual GPS to be
+     offered. Far enough to cover the car park and the far end of a big course; anyone further
+     away is not about to play it. */
+  const MANUAL_GPS_NEAR_COURSE_M=2000;
+  /* A real fix from the device, asked for now - not the last point anything wrote into
+     gdGpsState, which can be a tapped green or a map centre. Resolves null when GPS is off,
+     denied or too slow to answer. */
+  function deviceGpsPoint(timeoutMs=8000){
+    return new Promise(resolve=>{
+      let done=false;
+      const finish=point=>{if(!done){done=true;resolve(point);}};
+      try{
+        if(!navigator.geolocation)return finish(null);
+        navigator.geolocation.getCurrentPosition(pos=>{
+          const point={lat:Number(pos&&pos.coords&&pos.coords.latitude),lng:Number(pos&&pos.coords&&pos.coords.longitude)};
+          finish(Number.isFinite(point.lat)&&Number.isFinite(point.lng)?point:null);
+        },()=>finish(null),{enableHighAccuracy:true,maximumAge:60000,timeout:timeoutMs});
+        /* Backstop for a platform that never calls either callback. */
+        setTimeout(()=>finish(null),timeoutMs+1000);
+      }catch(e){finish(null);}
+    });
+  }
+  async function playerIsNearCourse(course){
+    const centre=guideCoursePoint(course);
+    if(!centre||!Number.isFinite(Number(centre.lat))||!Number.isFinite(Number(centre.lng)))return false;
+    const here=await deviceGpsPoint();
+    return !!here&&distance(here,centre)<=MANUAL_GPS_NEAR_COURSE_M;
+  }
+  function returnToCoursePicker(reason){
+    hideCourseLoading(0);
+    try{
+      const picker=window.GDCoursePicker;
+      if(picker&&typeof picker.open==='function')picker.open({source:reason||'scan-ended',replace:true});
+    }catch(e){}
+  }
+  /* What a failed scan does. There is no automatic drop into manual GPS: the player goes back
+     to a fresh course picker with the map-not-available banner over it. Only if their GPS is
+     on and they are standing near that course does the banner also offer "Use Manual GPS",
+     which is the one way into manual play. */
+  function endFailedScan(course,hole,reason,opts={}){
+    const h=validHoleNumber(hole)||1;
+    const c=sessionCourse(course||courseObj());
+    const key=opts.resolutionKey||coursePlayResolverKey(c,h);
+    recordCoursePlayDebug('course-scan-failed',c,h,{reason:reason||'scan-failed',resolutionKey:key,attemptToken:opts.attemptToken||'',serverPackageStatus:opts.serverPackageStatus||''});
+    if(opts.debugRunId)recordMappingDebug(opts.debugRunId,{source:'course-loader',phase:'failed',event:'scan-failed-back-to-picker',summary:'Scan failed - player sent back to the course picker',details:{hole:h,reason:reason||'scan-failed',resolutionKey:key,attemptToken:opts.attemptToken||''}});
+    returnToCoursePicker('scan-failed');
+    const notify=window.GDCourseMapNotify;
+    if(notify&&typeof notify.offer==='function')Promise.resolve(notify.offer({courseId:courseId(c),courseName:courseName(c)})).then(async offerId=>{
+      if(!offerId||!(await playerIsNearCourse(c)))return;
+      try{
+        notify.offerManualGps(offerId,()=>{
+          try{window.GDCoursePicker?.close?.({reason:'manual-gps-after-failed-scan'});}catch(e){}
+          beginInteractiveGreenFallback(c,h,'player-chose-manual-gps',{resolutionKey:key,activeResolutionKey:key,attemptToken:opts.attemptToken,debugRunId:opts.debugRunId,source:'scan-failed-banner',callerFunction:'endFailedScan',serverPackageStatus:opts.serverPackageStatus||''});
+        });
+      }catch(e){}
+    }).catch(()=>{});
+    return {playable:false,failed:true,reason:reason||'scan-failed'};
   }
   function beginInteractiveGreenFallback(course,hole,reason,opts={}){
     const h=validHoleNumber(hole||opts.hole)||1;
@@ -4630,9 +4686,6 @@
        still be running. */
     const watchStatus=String(opts.serverPackageStatus||'');
     if(watchStatus!=='none'&&watchStatus!=='failed')try{startFallbackPackageWatch(c,h,key);}catch(e){}
-    /* The scan failed for good - offer to email the player when the map is done
-       (scripts/gd-course-map-notify.js). */
-    if(watchStatus==='failed')try{window.GDCourseMapNotify?.offer({courseId:courseId(c),courseName:courseName(c)});}catch(e){}
     return {playable:false,fallback:'interactive-green',armed:true};
   }
   async function showResolvedCoursePlayHole(course,hole,reason,opts={}){
@@ -4995,6 +5048,8 @@
     /* A wait for a DIFFERENT course is over the moment this one starts. Left running it would
        keep polling and could yank a player out of the round they just opened. */
     if(serverMapWaitState&&String(serverMapWaitState.resolutionKey||'')!==String(key))stopServerMapWait('new-mapping-attempt');
+    /* A new scan replaces the last one's failure banner, and with it any manual GPS offer. */
+    try{window.GDCourseMapNotify?.hide();}catch(e){}
     /* A choice made about a previous attempt is not a choice about this one - left standing it
        would abort a fresh scan the moment it started. */
     if(serverWaitOptOut&&String(serverWaitOptOut)!==String(key))serverWaitOptOut='';
@@ -5106,7 +5161,7 @@
               updateCourseLoading((info.waitedMs||0)>30000?i18nT('loading.preparingSlow'):i18nT('loading.preparing'),pct);
               /* Once the wait is clearly a long one, say so and offer the way out. The wait
                  itself carries on regardless - this adds a choice, it does not take one. */
-              if((info.waitedMs||0)>SERVER_WAIT_OFFER_MS)showServerMapWaitPrompt(c,h,key,{onBasicGps:()=>{serverWaitOptOut=key;}});
+              if((info.waitedMs||0)>SERVER_WAIT_OFFER_MS)showServerMapWaitPrompt(c,h,key,{onLeave:()=>{serverWaitOptOut=key;}});
             }
           });
           autoMapResult=serverWait&&serverWait.result||null;
@@ -5121,14 +5176,14 @@
         }
         if(autoMapResult)recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'server-course-package-hit',summary:serverWait&&serverWait.polls>1?'Server finished mapping while play waited':'Server already had this course mapped',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:autoMapResult.serverPackageStatus,holes:autoMapResult.holes,saved:autoMapResult.saved,polls:serverWait&&serverWait.polls||1}});
         if(!mappingAttemptStillCurrent(request,attempt,'server-course-package'))return {playable:false,stale:true,reason:'superseded-after-server-course-package'};
-        /* The player asked for the rangefinder rather than the scan. Honoured before anything
-           below can reinterpret it: this is the ONE route into manual green-tapping that is a
-           choice rather than a verdict, and it must not be reported as a mapping failure. */
+        /* The player left the wait for the course picker. Honoured before anything below can
+           reinterpret it: it is a choice, not a mapping failure, so no failure banner. */
         if(serverWait&&serverWait.optedOut){
           serverWaitOptOut='';
           try{document.getElementById('gdServerMapWaitPrompt')?.classList.add('hidden');}catch(e){}
-          recordMappingDebug(debugRunId,{source:'automapper',phase:'skipped',event:'server-map-wait-opted-out',summary:'Player chose basic GPS while the server was still mapping',details:{hole:h,resolutionKey:key,attemptToken,polls:serverWait.polls||0}});
-          return beginInteractiveGreenFallback(c,h,'player-chose-basic-gps',{resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',source:'mapping-controller',serverPackageStatus:'processing'});
+          recordMappingDebug(debugRunId,{source:'automapper',phase:'cancelled',event:'server-map-wait-left',summary:'Player went back to the courses while the server was still mapping',details:{hole:h,resolutionKey:key,attemptToken,polls:serverWait.polls||0}});
+          returnToCoursePicker('player-left-wait');
+          return {playable:false,cancelled:true,reason:'player-left-wait'};
         }
         if(!autoMapResult){
           const waitStatus=serverWait&&serverWait.status||'unreachable';
@@ -5183,19 +5238,22 @@
         }
         recordMappingDebug(debugRunId,{source:'automapper',phase:'failed',event:'automapper-failed',summary:'Server has no playable map for this course yet',details:{hole:h,resolutionKey:key,attemptToken,saved:autoMapResult&&autoMapResult.saved||0,serverPackageStatus:autoMapResult&&autoMapResult.serverPackageStatus||'',reason:unresolvedReason}});
         recordCoursePlayDebug('course-mapping-automatic-unresolved',c,h,{reason:unresolvedReason,resolutionKey:key,attemptToken});
-        /* The green-tap fallback is what a player gets when mapping could not
-           finish. When the server said WHY - and the why is "we could not tell
-           which course this is" - the picker offers a pin instead, which beats
-           asking someone to tap a green on a map of six overlapping courses. */
+        /* When the server said WHY - and the why is "we could not tell which course this
+           is" - the picker offers a pin instead of the failure banner: that is a repair the
+           player can make, not a map that is missing. */
         const unresolvedFit=autoMapResult&&autoMapResult.fit||null;
-        const fellBack=beginInteractiveGreenFallback(c,h,unresolvedReason,{resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',source:'mapping-controller',serverPackageStatus:autoMapResult&&autoMapResult.serverPackageStatus||''});
-        return unresolvedFit?Object.assign({},fellBack,{fit:unresolvedFit}):fellBack;
+        if(unresolvedFit&&unresolvedFit.trusted===false){
+          hideCourseLoading(0);
+          return {playable:false,failed:true,reason:unresolvedReason,fit:unresolvedFit};
+        }
+        const ended=endFailedScan(c,h,unresolvedReason,{resolutionKey:key,attemptToken,debugRunId,serverPackageStatus:autoMapResult&&autoMapResult.serverPackageStatus||''});
+        return unresolvedFit?Object.assign({},ended,{fit:unresolvedFit}):ended;
       }catch(error){
         try{console.warn('[Clarity Caddy] course mapping attempt failed',error);}catch(e){}
         recordCoursePlayDebug('course-mapping-attempt-error',c,h,{reason:error&&error.message||'mapping-controller-error',resolutionKey:key,attemptToken});
         recordMappingDebug(debugRunId,{source:'course-loader',phase:'failed',event:'mapping-attempt-failed',summary:'Course mapping attempt failed',details:{resolutionKey:key,attemptToken},error:{message:error&&error.message||String(error),name:error&&error.name||''}});
         if(!mappingAttemptStillCurrent(request,attempt,'course-loader'))return {playable:false,stale:true,reason:'superseded-after-error'};
-        return beginInteractiveGreenFallback(c,h,'mapping-controller-error',{resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',source:'mapping-controller'});
+        return endFailedScan(c,h,'mapping-controller-error',{resolutionKey:key,attemptToken,debugRunId});
       }finally{
         try{if(window.__gdCoursePlayResolverActive&&window.__gdCoursePlayResolverActive.attemptToken===attemptToken)delete window.__gdCoursePlayResolverActive;}catch(e){}
       }

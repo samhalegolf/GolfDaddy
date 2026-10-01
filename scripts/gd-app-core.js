@@ -16937,18 +16937,6 @@ window.GDCoursePickerCoreBridge={
      only path by which a course package reaches the device. */
   downloadCourseToLibrary:payload=>gdEnsureCourseFramesForPlay(payload,{acquire:true}),
   framesWaitMode:gdCourseFramesWaitMode,
-  openManualCourse:function(payload){
-    try{return openCourse(payload)}catch(e){
-      console.warn("Clarity Caddy course picker fallback",e);
-      gdStoreCoursePickerSelection(payload);
-      gdEnsureGpsCourseSurface();
-      try{const line=document.getElementById("courseLine");if(line){line.textContent="";line.style.display="none";}if(typeof gdMakeCourseLabelsClickable==="function")gdMakeCourseLabelsClickable();}catch(_){}
-      try{if(typeof resetPlay==="function")resetPlay(true);}catch(_){}
-      try{if(typeof toast==="function")toast(gdT("roundPlay.manualGpsSelected"));}catch(_){}
-      gdRefreshGpsMapAfterCourseOpen(payload,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
-      return false;
-    }
-  },
   prepareMappingSurface:function(payload,opts={}){
     gdHideCoursePinScreen();
     gdResetCoursePickerPresentationReadiness(payload,{forceScanner:!!opts.fromPinnedSeed});
@@ -16986,7 +16974,7 @@ function gdOpenCoursePickerLegacyCourse(course){
   if(!payload.gdDatabaseMapChecked&&!gdCoursePayloadIsManual(payload))return gdCoursePickerCheckDatabaseThenOpen(payload);
   const usePinSeed=!payload.gdDatabaseMapAvailable&&gdCoursePickerUsesPinSeed(payload);
   if(gdCoursePickerNeedsCoursePin(payload))return gdShowCoursePinScreen(payload);
-  if(gdCoursePayloadIsManual(payload))return window.GDCoursePickerCoreBridge.openManualCourse(payload);
+  if(gdCoursePayloadIsManual(payload))return false;
   /* A published 27-hole facility asks which two nines before opening one.
    *
    * Deliberately BELOW the pin branch and gated on a published map existing:

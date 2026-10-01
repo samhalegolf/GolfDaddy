@@ -148,7 +148,7 @@ function serverPackage(holeCount = 1) {
 
 function loadController(options = {}) {
   const events = [];
-  const calls = { fetch: 0, courseMapsGet: 0, courseLibraryGet: 0, courseMapsPost: 0, courseMapsBodies: [], courseVisualsGet: 0, courseVisualsPost: 0, fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [], manual: 0, packageFetches: 0 };
+  const calls = { fetch: 0, courseMapsGet: 0, courseLibraryGet: 0, courseMapsPost: 0, courseMapsBodies: [], courseVisualsGet: 0, courseVisualsPost: 0, fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [], manual: 0, packageFetches: 0, notifyOffers: [], manualOffers: [], pickerOpens: [] };
   const testConsole = Object.assign({}, console, { warn() {}, info() {} });
   const localStorage = storage({
     gd_user_course_library_v1: JSON.stringify(options.savedMap ? playableStore() : { courses: {} })
@@ -255,7 +255,17 @@ function loadController(options = {}) {
     clearTimeout() {},
     setInterval() { return 1; },
     clearInterval() {},
-    MutationObserver: class { observe() {} disconnect() {} }
+    MutationObserver: class { observe() {} disconnect() {} },
+    /* The failure banner and the picker it sends the player back to. */
+    GDCourseMapNotify: {
+      offer(ref) { calls.notifyOffers.push(ref); return calls.notifyOffers.length; },
+      offerManualGps(offerId, onUse) { calls.manualOffers.push({ offerId, onUse }); return true; },
+      hide() {}
+    },
+    GDCoursePicker: {
+      open(opts) { calls.pickerOpens.push(opts); return false; },
+      close() {}
+    }
   };
   if (options.resumeRound) {
     win.gdReadResumeRound = () => ({ updatedAt: Date.now(), course: course(), courseLabel: "Controller Test Golf Club", hole: 1, activated: true });
@@ -288,6 +298,9 @@ function loadController(options = {}) {
   }
 
   const context = {
+    /* The player's device position, for the "near the course" check after a failed scan.
+       Absent by default - GPS off. */
+    navigator: options.deviceGps ? { geolocation: { getCurrentPosition(ok) { ok({ coords: { latitude: options.deviceGps.lat, longitude: options.deviceGps.lng } }); } } } : {},
     window: win,
     document,
     localStorage,
@@ -478,20 +491,26 @@ async function main() {
   assert(env.events.some((event) => event.event === "automapper-succeeded"), "a server hit is reported through the existing automapper-succeeded event");
 
   /* No server package, and nothing saved or published: the client has no second geometry
-     source of its own left to try (that used to be the native resolver's job) - it must fall
-     straight through to the interactive manual fallback. */
+     source of its own left to try (that used to be the native resolver's job). A failed scan
+     no longer drops the player into manual GPS - it sends them back to a fresh course picker
+     with the map-not-available banner. */
   env = await runScenario({});
   assert.strictEqual(env.result.playable, false, "a miss with nothing else to try is not playable");
-  assert.strictEqual(env.result.fallback, "interactive-green", "a miss opens the interactive green fallback");
+  assert.strictEqual(env.result.failed, true, "a miss is reported as a failed scan");
+  assert.strictEqual(env.result.fallback, undefined, "a failed scan never arms the manual fallback by itself");
   assert.strictEqual(env.calls.fetch, 0, "a miss makes no unexpected fetch - there is no client geometry source left to query");
   assert(env.events.some((event) => event.event === "server-course-package-pending"), "an unmapped course is logged as pending on the server");
   assert(env.events.some((event) => event.event === "automapper-failed"), "the miss is logged as automapper-failed for continuity with existing dashboards");
-  assert(env.events.some((event) => event.event === "manual-fallback-opened" && event.details && event.details.reason === "server-map-not-ready"), "the fallback records why: the server has not produced a map yet");
-  assert.strictEqual(env.calls.manual, 1, "exactly one manual fallback opens per miss");
+  assert(env.events.some((event) => event.event === "scan-failed-back-to-picker" && event.details && event.details.reason === "server-map-not-ready"), "the failure records why: the server has not produced a map yet");
+  assert.strictEqual(env.calls.manual, 0, "no manual fallback opens on a miss");
+  assert.strictEqual(env.calls.pickerOpens.length, 1, "the player is sent back to a fresh course picker");
+  assert.strictEqual(env.calls.notifyOffers.length, 1, "the map-not-available banner is shown once");
+  assert.strictEqual(env.calls.notifyOffers[0].courseId, "controller-test", "the banner is for the course that failed");
+  for (let i = 0; i < 50; i += 1) await Promise.resolve();
+  assert.strictEqual(env.calls.manualOffers.length, 0, "with GPS off there is no manual GPS offer");
 
-  /* Re-entry into a course whose fallback is already open must be blocked, not silently
-     restart the mapping attempt. */
-  const reentry = await env.win.runCourseMappingAttempt({
+  /* Nothing terminal was armed, so pressing Play on that course again scans again. */
+  await env.win.runCourseMappingAttempt({
     course: env.course,
     hole: 1,
     wholeCourse: false,
@@ -501,10 +520,22 @@ async function main() {
     debugRunId: "debug-run-reentry",
     reason: "open-course-quarantine"
   });
-  assert.strictEqual(reentry.terminal, true, "manual fallback blocks course-loader re-entry");
-  assert.strictEqual(env.events.filter((event) => event.event === "mapping-attempt-started").length, 1, "manual fallback does not trigger course-loader re-entry");
-  assert.strictEqual(env.events.filter((event) => event.event === "manual-fallback-opened").length, 1, "one attempt produces exactly one manual fallback opened event");
-  assert(env.events.some((event) => event.event === "manual-fallback-terminal-reentry-blocked"), "blocked re-entry is explicitly logged");
+  assert.strictEqual(env.events.filter((event) => event.event === "mapping-attempt-started").length, 2, "a failed scan does not block trying again");
+
+  /* Far from the course with GPS on: still no manual offer. */
+  env = await runScenario({ deviceGps: { lat: -37.2, lng: 174.75 } });
+  for (let i = 0; i < 50; i += 1) await Promise.resolve();
+  assert.strictEqual(env.calls.manualOffers.length, 0, "a player far from the course is not offered manual GPS");
+
+  /* Standing at the course with GPS on: the banner offers manual GPS, and only taking it
+     arms the green-tap. */
+  env = await runScenario({ deviceGps: { lat: -36.9005, lng: 174.7505 } });
+  for (let i = 0; i < 50; i += 1) await Promise.resolve();
+  assert.strictEqual(env.calls.manualOffers.length, 1, "a player near the course is offered manual GPS on the banner");
+  assert.strictEqual(env.calls.manual, 0, "the offer alone does not start manual play");
+  env.calls.manualOffers[0].onUse();
+  assert.strictEqual(env.calls.manual, 1, "tapping Use Manual GPS opens the green-tap");
+  assert(env.events.some((event) => event.event === "manual-fallback-opened" && event.details && event.details.reason === "player-chose-manual-gps"), "manual play is recorded as the player's choice");
 
   /* The Taupo case: the very first request for an unmapped course is what ENQUEUES the mapper
      job (functions/course-package.mjs buildCoursePackageWithTrigger), so the server's first
@@ -571,17 +602,17 @@ async function main() {
   assert.ok(!afterWait.fit, "and asks for nothing - there is a map, so there is no pin to place");
 
   /* The other exhaustion, which is NOT the same event: the wait ran out on misses, so nothing
-     is known to be running. That still hands the player the green-tap, because waiting on a
-     job nobody can confirm exists is just a stuck screen. */
+     is known to be running. That ends as a failed scan, because waiting on a job nobody can
+     confirm exists is just a stuck screen. */
   env = await runScenario({ serverCoursePackage: [null], serverWaitBudgetMs: 400, serverWaitPollMs: 10 });
-  assert.strictEqual(env.result.fallback, "interactive-green", "an unreachable server still opens the manual fallback");
+  assert.strictEqual(env.result.failed, true, "an unreachable server ends as a failed scan");
   assert.strictEqual(env.result.waiting, undefined, "a wait is only extended for a job the server confirms is running");
 
   /* "none" means the server did NOT enqueue anything - anonymous caller, no location, or the
      per-user rate limit tripped. There is no job to wait on, so waiting would only stall the
      player behind a job that will never exist. */
   env = await runScenario({ serverCoursePackage: [{ status: "none" }] });
-  assert.strictEqual(env.result.fallback, "interactive-green", "a 'none' answer falls through to the manual fallback");
+  assert.strictEqual(env.result.failed, true, "a 'none' answer ends as a failed scan");
   assert.strictEqual(env.calls.packageFetches, 1, "'none' is terminal - it is never polled");
   assert(env.events.some((event) => event.event === "server-course-package-pending"), "a course the server never started is logged as pending, not timed out");
 
@@ -591,7 +622,7 @@ async function main() {
      reason must reach the debug report; "all the debug reports are showing null" for a
      rate-limit-starved course is the failure mode that motivated this state. */
   env = await runScenario({ serverCoursePackage: [{ status: "failed", reason: "no OSM hole geometry within range" }] });
-  assert.strictEqual(env.result.fallback, "interactive-green", "failed falls through to the manual fallback");
+  assert.strictEqual(env.result.failed, true, "failed ends as a failed scan");
   assert.strictEqual(env.calls.packageFetches, 1, "failed is terminal - it is never polled");
   assert(env.events.some((event) => event.event === "server-course-package-failed" && event.details && event.details.serverReason === "no OSM hole geometry within range"), "the server's failure reason lands in the debug timeline instead of null");
 

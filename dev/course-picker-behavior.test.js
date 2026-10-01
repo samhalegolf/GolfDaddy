@@ -186,7 +186,6 @@ function createHarness(options = {}) {
       hidePin() {},
       hasMappedPlayData(course) { return !!course.savedPlayable; },
       prepareMappingSurface() {},
-      openManualCourse() { calls.manual = (calls.manual || 0) + 1; return false; },
       enterGpsPlayAfterMapping(course, result) { calls.gps++; calls.lastGps = { course, result }; return true; }
     },
     runCourseMappingAttempt(request) {
@@ -246,7 +245,9 @@ async function tickEntry() {
 
   env.window.gdGpsState = { lastFix: { lat: -36.9175, lng: 174.74, source: "manual" }, lastFixAt: Date.now(), permissionKnown: true, permissionGranted: true };
   const manualNearby = api.refreshNearby();
-  assert.strictEqual(manualNearby.name, "Manual GPS", "manual/map-derived fixes are rejected for nearby course GPS");
+  assert.strictEqual(manualNearby, null, "manual/map-derived fixes are rejected for nearby course GPS");
+  assert.strictEqual(env.document.getElementById("gdCourseAssumedOption").hidden, true, "no nearby course means no nearby block - there is no manual card");
+  assert.strictEqual(api.selectCourse({ name: "Manual GPS" }), false, "the picker never opens Manual GPS");
   env.window.gdGpsState = { lastFix: { lat: -36.9175, lng: 174.74, source: "course-picker", simulated: false }, lastFixAt: Date.now(), permissionKnown: true, permissionGranted: true };
   const realNearby = api.refreshNearby();
   assert.strictEqual(realNearby.name, "Akarana Golf Club", "real picker GPS drives nearby presentation");
