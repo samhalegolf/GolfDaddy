@@ -71,7 +71,7 @@
      normal first answer for a course nobody has opened before, because the request
      itself enqueues the mapping job (functions/course-package.mjs). Mirrors
      awaitServerCoursePackage in scripts/gd-course-library-pin-lock.js: "none" and
-     "manual-required" are terminal, anything else short of ready is a transient miss
+     "failed" are terminal, anything else short of ready is a transient miss
      tolerated a few times in a row, and the ~4-minute budget covers the mapper
      sweeper's 3-minute worst case. Resolves to the last body seen (or null), so the
      caller's ready/not-ready branch is unchanged - a timeout here just means the
@@ -95,7 +95,7 @@
       polls++;
       var status = pkg && pkg.status ? String(pkg.status) : "unreachable";
       if (status === "full-map-ready" || status === "lite-geo-ready") return pkg;
-      if (status === "none" || status === "manual-required") return pkg;
+      if (status === "none" || status === "failed") return pkg;
       if (status === "processing") misses = 0;
       else if (++misses >= WAIT_MAX_CONSECUTIVE_MISSES) return pkg;
       var remaining = deadline - Date.now();

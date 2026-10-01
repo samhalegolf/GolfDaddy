@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "CARTE DU PARCOURS INDISPONIBLE",
     "mapRecovery.preparingEyebrow": "CARTE DU PARCOURS EN PRÉPARATION",
-    "mapRecovery.attentionEyebrow": "CARTE DU PARCOURS À VÉRIFIER",
     "mapRecovery.holeNotMapped": "Ce trou n’est pas encore cartographié",
     "mapRecovery.stillPreparing": "Nous préparons encore ce parcours",
-    "mapRecovery.needsCorrection": "La carte de ce parcours doit être corrigée",
     "mapRecovery.couldNotLoad": "Impossible de charger une carte utilisable",
     "mapRecovery.waitOrManual": "Vous pouvez patienter ici ou utiliser le GPS en mode manuel. Nous ouvrirons automatiquement le trou cartographié dès qu’il sera prêt.",
     "mapRecovery.useManual": "Vous pouvez toujours utiliser le GPS en mode manuel. Nous continuons à chercher une carte à jour.",

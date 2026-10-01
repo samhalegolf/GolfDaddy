@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "MAPA POLA NIEDOSTĘPNA",
     "mapRecovery.preparingEyebrow": "MAPA POLA W PRZYGOTOWANIU",
-    "mapRecovery.attentionEyebrow": "MAPA POLA WYMAGA UWAGI",
     "mapRecovery.holeNotMapped": "Ten dołek nie ma jeszcze mapy",
     "mapRecovery.stillPreparing": "Wciąż przygotowujemy to pole",
-    "mapRecovery.needsCorrection": "Mapa tego pola wymaga poprawek",
     "mapRecovery.couldNotLoad": "Nie udało się wczytać użytecznej mapy",
     "mapRecovery.waitOrManual": "Możesz poczekać tutaj albo użyć GPS ręcznie. Gdy dołek z mapą będzie gotowy, otworzymy go automatycznie.",
     "mapRecovery.useManual": "Nadal możesz używać GPS ręcznie. Będziemy dalej sprawdzać, czy jest zaktualizowana mapa.",

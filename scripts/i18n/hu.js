@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "NINCS ELÉRHETŐ PÁLYATÉRKÉP",
     "mapRecovery.preparingEyebrow": "PÁLYATÉRKÉP ELŐKÉSZÍTÉSE",
-    "mapRecovery.attentionEyebrow": "A PÁLYATÉRKÉP JAVÍTÁSRA SZORUL",
     "mapRecovery.holeNotMapped": "Ez a lyuk még nincs feltérképezve",
     "mapRecovery.stillPreparing": "Még előkészítjük ezt a pályát",
-    "mapRecovery.needsCorrection": "Ez a pályatérkép javításra szorul",
     "mapRecovery.couldNotLoad": "Nem sikerült használható térképet betölteni",
     "mapRecovery.waitOrManual": "Várhatsz itt, vagy használhatod a GPS-t kézi módban. Ha a feltérképezett lyuk elkészül, automatikusan megnyitjuk.",
     "mapRecovery.useManual": "A GPS-t kézi módban továbbra is használhatod. Folyamatosan keressük a frissített térképet.",

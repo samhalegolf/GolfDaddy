@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "KARTA TERENA NIJE DOSTUPNA",
     "mapRecovery.preparingEyebrow": "PRIPREMA KARTE TERENA",
-    "mapRecovery.attentionEyebrow": "KARTU TERENA TREBA ISPRAVITI",
     "mapRecovery.holeNotMapped": "Ova rupa još nije ucrtana",
     "mapRecovery.stillPreparing": "Još pripremamo ovaj teren",
-    "mapRecovery.needsCorrection": "Ovu kartu terena treba ispraviti",
     "mapRecovery.couldNotLoad": "Nismo uspjeli učitati upotrebljivu kartu",
     "mapRecovery.waitOrManual": "Možeš pričekati ovdje ili ručno koristiti GPS. Ucrtanu rupu otvorit ćemo automatski čim bude spremna.",
     "mapRecovery.useManual": "GPS i dalje možeš koristiti ručno. Nastavit ćemo provjeravati ima li ažurirane karte.",

@@ -4507,7 +4507,7 @@
         if(fallbackPackageWatch!==token)return;
         /* A terminal answer during an extended wait ends the wait honestly rather than
            polling out the clock: the server has said it stopped and why. */
-        if(waiting&&pkg&&(pkg.status==='failed'||pkg.status==='manual-required')){
+        if(waiting&&pkg&&pkg.status==='failed'){
           stopServerMapWait('server-'+pkg.status);
           beginInteractiveGreenFallback(course,hole,pkg.status==='failed'?'server-map-failed':'server-map-not-ready',{resolutionKey,activeResolutionKey:resolutionKey,source:'server-map-wait',callerFunction:'startServerPackageWatch',serverPackageStatus:pkg.status});
           return;
@@ -4621,7 +4621,7 @@
     try{window.__gdInteractiveGreenFallback=interactiveGreenFallbackState;}catch(e){}
     try{window.__gdCoursePlayInteractiveFallbackActive={course:c,courseId:courseId(c),courseName:courseName(c),hole:h,reason:reason||'automatic-resolution-failed',key,resolutionKey:key,attemptToken,debugRunId,runId:debugRunId,source:opts.source||'unknown',callerFunction:incomingAttempt.callerFunction||'beginInteractiveGreenFallback',at:Date.now()};}catch(e){}
     /* Only watch for a server map that could actually arrive. "none" (the server declined to
-       enqueue - signed out, no location, rate limited), "failed" and "manual-required" are
+       enqueue - signed out, no location, rate limited) and "failed" are
        terminal answers: nothing is building, so a 10-minute 6s poll would be 100 pointless
        requests - and before "failed" became terminal server-side (2026-08-18), each of those
        polls RE-ENQUEUED the same doomed mapper job, which is how one bad course burned the
@@ -4629,10 +4629,10 @@
        caller that does not know the status) still watches, because there a job may genuinely
        still be running. */
     const watchStatus=String(opts.serverPackageStatus||'');
-    if(watchStatus!=='none'&&watchStatus!=='failed'&&watchStatus!=='manual-required')try{startFallbackPackageWatch(c,h,key);}catch(e){}
+    if(watchStatus!=='none'&&watchStatus!=='failed')try{startFallbackPackageWatch(c,h,key);}catch(e){}
     /* The scan failed for good - offer to email the player when the map is done
        (scripts/gd-course-map-notify.js). */
-    if(watchStatus==='failed'||watchStatus==='manual-required')try{window.GDCourseMapNotify?.offer({courseId:courseId(c),courseName:courseName(c)});}catch(e){}
+    if(watchStatus==='failed')try{window.GDCourseMapNotify?.offer({courseId:courseId(c),courseName:courseName(c)});}catch(e){}
     return {playable:false,fallback:'interactive-green',armed:true};
   }
   async function showResolvedCoursePlayHole(course,hole,reason,opts={}){
@@ -4855,7 +4855,7 @@
 	     "none" is terminal here, not pending. The server answers "none" only when it did NOT
 	     enqueue anything (anonymous caller, no location supplied, or the per-user rate limit
 	     tripped), so there is no job to wait on and waiting would just stall the player.
-	     "manual-required" and "failed" are terminal for the same reason - the server has
+	     "failed" is terminal for the same reason - the server has
 	     already tried and said why it stopped. "failed" carries the job's error in `reason`;
 	     waiting longer cannot change it, and (since 2026-08-18) the server no longer
 	     re-enqueues a failed course as a side effect of polling, so there is nothing coming.
@@ -4895,7 +4895,7 @@
 	      /* fit rides off a terminal package too. A refusal is exactly when the
 	         player should be offered a pin - "there are six courses here" - and
 	         dropping it here is why the Balgove failure asked for nothing. */
-	      if(status==='none'||status==='manual-required'||status==='failed')return {result:null,status,polls,timedOut:false,serverReason:pkg&&pkg.reason||null,fit:pkg&&pkg.fit||null};
+	      if(status==='none'||status==='failed')return {result:null,status,polls,timedOut:false,serverReason:pkg&&pkg.reason||null,fit:pkg&&pkg.fit||null};
 	      if(status==='processing')consecutiveMisses=0;
 	      else{
 	        consecutiveMisses++;
@@ -5511,7 +5511,7 @@
   function mapTypeForPackage(pkg){
     if(pkg&&pkg.status==='full-map-ready')return 'published';
     if(pkg&&pkg.status==='lite-geo-ready')return 'object';
-    return null;   // processing/manual-required/none - nothing worth keeping
+    return null;   // processing/failed/none - nothing worth keeping
   }
   /* Re-download a course whose stored copy the manifest says is stale.
 

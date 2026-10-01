@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "KENTTÄKARTTA EI SAATAVILLA",
     "mapRecovery.preparingEyebrow": "KENTTÄKARTTAA VALMISTELLAAN",
-    "mapRecovery.attentionEyebrow": "KENTTÄKARTTA VAATII HUOMIOTA",
     "mapRecovery.holeNotMapped": "Tätä reikää ei ole vielä kartoitettu",
     "mapRecovery.stillPreparing": "Valmistelemme vielä tätä kenttää",
-    "mapRecovery.needsCorrection": "Tämä kenttäkartta vaatii korjausta",
     "mapRecovery.couldNotLoad": "Käyttökelpoista karttaa ei voitu ladata",
     "mapRecovery.waitOrManual": "Voit odottaa tässä tai käyttää manuaalista GPS-tilaa. Avaamme kartoitetun reiän automaattisesti, kun se on valmis.",
     "mapRecovery.useManual": "Voit silti käyttää manuaalista GPS-tilaa. Tarkistamme edelleen, onko päivitetty kartta saatavilla.",

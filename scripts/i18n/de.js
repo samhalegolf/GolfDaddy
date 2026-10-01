@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "PLATZKARTE NICHT VERFÜGBAR",
     "mapRecovery.preparingEyebrow": "PLATZKARTE IN VORBEREITUNG",
-    "mapRecovery.attentionEyebrow": "PLATZKARTE MUSS GEPRÜFT WERDEN",
     "mapRecovery.holeNotMapped": "Dieses Loch ist noch nicht kartiert",
     "mapRecovery.stillPreparing": "Wir bereiten diesen Platz noch vor",
-    "mapRecovery.needsCorrection": "Diese Platzkarte muss korrigiert werden",
     "mapRecovery.couldNotLoad": "Wir konnten keine brauchbare Karte laden",
     "mapRecovery.waitOrManual": "Du kannst hier warten oder GPS manuell nutzen. Sobald das Loch kartiert ist, öffnen wir es automatisch.",
     "mapRecovery.useManual": "Du kannst GPS weiterhin manuell nutzen. Wir suchen weiter nach einer aktualisierten Karte.",

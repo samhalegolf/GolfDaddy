@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "BANKARTA SAKNAS",
     "mapRecovery.preparingEyebrow": "BANKARTA FÖRBEREDS",
-    "mapRecovery.attentionEyebrow": "BANKARTAN BEHÖVER ÅTGÄRDAS",
     "mapRecovery.holeNotMapped": "Det här hålet är inte kartlagt än",
     "mapRecovery.stillPreparing": "Vi förbereder fortfarande den här banan",
-    "mapRecovery.needsCorrection": "Den här bankartan behöver rättas",
     "mapRecovery.couldNotLoad": "Vi kunde inte ladda en användbar karta",
     "mapRecovery.waitOrManual": "Du kan vänta här eller använda GPS manuellt. Vi öppnar det kartlagda hålet automatiskt när det blir klart.",
     "mapRecovery.useManual": "Du kan fortfarande använda GPS manuellt. Vi fortsätter att leta efter en uppdaterad karta.",

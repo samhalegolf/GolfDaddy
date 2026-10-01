@@ -1,7 +1,7 @@
 /* "Email me when this course is ready" - offered when a course scan fails.
  *
  * gd-course-library-pin-lock.js calls GDCourseMapNotify.offer(course) when the server has
- * given its final answer on a course (status "failed" or "manual-required") and the player is
+ * given its final answer on a course (status "failed") and the player is
  * dropped into basic GPS. A small card says so and offers to email them once the map is done:
  *
  *   signed in -> one tap posts to /api/course-map-notify, which stores the request against

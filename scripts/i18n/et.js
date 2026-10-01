@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "VÄLJAKUKAART POLE SAADAVAL",
     "mapRecovery.preparingEyebrow": "VÄLJAKUKAARTI VALMISTATAKSE",
-    "mapRecovery.attentionEyebrow": "VÄLJAKUKAART VAJAB TÄHELEPANU",
     "mapRecovery.holeNotMapped": "Seda rada pole veel kaardistatud",
     "mapRecovery.stillPreparing": "Valmistame seda väljakut alles ette",
-    "mapRecovery.needsCorrection": "See väljakukaart vajab parandamist",
     "mapRecovery.couldNotLoad": "Kasutatavat kaarti ei õnnestunud laadida",
     "mapRecovery.waitOrManual": "Võid siin oodata või kasutada GPS-i käsitsi. Avame kaardistatud raja automaatselt, kui see valmis saab.",
     "mapRecovery.useManual": "Saad GPS-i endiselt käsitsi kasutada. Otsime jätkuvalt uuendatud kaarti.",

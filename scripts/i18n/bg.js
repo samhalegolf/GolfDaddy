@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "НЯМА КАРТА НА ИГРИЩЕТО",
     "mapRecovery.preparingEyebrow": "КАРТАТА СЕ ПОДГОТВЯ",
-    "mapRecovery.attentionEyebrow": "КАРТАТА ИЗИСКВА КОРЕКЦИЯ",
     "mapRecovery.holeNotMapped": "Тази дупка още не е картографирана",
     "mapRecovery.stillPreparing": "Все още подготвяме това игрище",
-    "mapRecovery.needsCorrection": "Тази карта на игрището се нуждае от корекция",
     "mapRecovery.couldNotLoad": "Не успяхме да заредим използваема карта",
     "mapRecovery.waitOrManual": "Можеш да изчакаш тук или да ползваш GPS ръчно. Ще отворим картографираната дупка автоматично, щом стане готова.",
     "mapRecovery.useManual": "Все още можеш да ползваш GPS ръчно. Ще продължим да проверяваме за обновена карта.",

@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "BANEKART IKKE TILGJENGELIG",
     "mapRecovery.preparingEyebrow": "BANEKART KLARGJØRES",
-    "mapRecovery.attentionEyebrow": "BANEKART MÅ SJEKKES",
     "mapRecovery.holeNotMapped": "Dette hullet er ikke kartlagt ennå",
     "mapRecovery.stillPreparing": "Vi klargjør fortsatt denne banen",
-    "mapRecovery.needsCorrection": "Dette banekartet må rettes",
     "mapRecovery.couldNotLoad": "Vi kunne ikke laste inn et brukbart kart",
     "mapRecovery.waitOrManual": "Du kan vente her eller bruke GPS manuelt. Vi åpner det kartlagte hullet automatisk når det blir klart.",
     "mapRecovery.useManual": "Du kan fortsatt bruke GPS manuelt. Vi fortsetter å se etter et oppdatert kart.",

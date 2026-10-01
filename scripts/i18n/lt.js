@@ -75,10 +75,8 @@
     /* Course map not available / manual GPS (boot.js) */
     "mapRecovery.notAvailable": "LAUKO ŽEMĖLAPIS NEPASIEKIAMAS",
     "mapRecovery.preparingEyebrow": "RUOŠIAMAS LAUKO ŽEMĖLAPIS",
-    "mapRecovery.attentionEyebrow": "LAUKO ŽEMĖLAPIUI REIKIA DĖMESIO",
     "mapRecovery.holeNotMapped": "Ši duobutė dar nepažymėta žemėlapyje",
     "mapRecovery.stillPreparing": "Šį lauką dar ruošiame",
-    "mapRecovery.needsCorrection": "Šio lauko žemėlapį reikia pataisyti",
     "mapRecovery.couldNotLoad": "Nepavyko įkelti tinkamo žemėlapio",
     "mapRecovery.waitOrManual": "Gali palaukti čia arba naudoti GPS rankiniu būdu. Kai duobutės žemėlapis bus paruoštas, ją atidarysime automatiškai.",
     "mapRecovery.useManual": "Vis tiek gali naudoti GPS rankiniu būdu. Toliau tikrinsime, ar yra atnaujintas žemėlapis.",
