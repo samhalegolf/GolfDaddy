@@ -163,6 +163,12 @@
   to = "/.netlify/functions/relief-preview"
   status = 200
 
+# The live map's hillshade layer: the bake's relief recipe, one map tile at a time.
+[[redirects]]
+  from = "/api/relief-tile"
+  to = "/.netlify/functions/relief-tile"
+  status = 200
+
 # Which scan source covers a point, read straight off the imagery registry. Studio's map
 # viewport asks; nothing in the app does.
 [[redirects]]

@@ -30,7 +30,13 @@
   var marshal = null;
   var map = null;
   var objectLayer = null;
-  var baseKind = null, baseLayer = null;
+  var baseKind = null, baseLayer = null, baseCredit = "";
+  /* The hillshade over the live map (/api/relief-tile): the bake's relief recipe drawn per
+     map tile, so a live hole stands up the way a captured one does. reliefAz is the light's
+     bearing, aimed per hole off the play axis exactly as the bake aims it; reliefCredit is the
+     DEM's licence credit, which an image tile cannot carry itself. */
+  var reliefLayer = null, reliefAz = null, reliefCredit = "", reliefCreditAt = null;
+  var RELIEF_VERSION = 1;     // bump when relief-tile.mjs's recipe changes, so cached tiles go
   var store = null;
 
   /* Presentation state. Not play state — the Marshal owns that. */
@@ -119,6 +125,13 @@
         if (!native) return;
         onSurfaceTap(native.clientX, native.clientY);
       });
+      /* Above the imagery, below the hole layers, blended soft-light: the same compositor
+         the bake lays its relief on with (gd-visual-export-core), at full opacity because the
+         tile's grey already carries the bake's strength. Mid-grey leaves the photo as it is. */
+      var pane = map.createPane("reliefPane");
+      pane.style.zIndex = 250;
+      pane.style.mixBlendMode = "soft-light";
+      pane.style.pointerEvents = "none";
     }
     setBaseFor(centre);
     return map;
@@ -161,11 +174,58 @@
         setBaseFor(lastBaseCentre);
       });
     });
+    baseCredit = base.attribution || "";
+    writeCredit();
+  }
+
+  function writeCredit() {
     var credit = el("mapAttribution");
-    if (credit) {
-      credit.textContent = base.attribution || "";
-      show(credit, !!base.attribution);
+    if (!credit) return;
+    var text = [baseCredit, reliefLayer ? reliefCredit : ""].filter(Boolean).join(" · ");
+    credit.textContent = text;
+    show(credit, !!text);
+  }
+
+  /* Light the live hole the way the bake lights a captured one: from the north-west of the
+     SCREEN, which on a map turned tee-at-bottom means offsetting the bearing by the play axis
+     (reliefAzimuthForPlayAxis in gd-relief-core). Tee to green, not the aim: the light is per
+     hole, so it does not swing - and every tile reload with it - each time the aim moves.
+     North-up when shot-up is off. Rounded to 5 degrees so nearby holes share cached tiles. */
+  function applyRelief(scene) {
+    if (!map) return;
+    var r = scene && scene.camera.hole;
+    var shotUp = !settings() || settings().shotUp();
+    var axis = shotUp && r && r.tee && r.green ? app.distance.bearingRad(r.tee, r.green) : null;
+    var az = 315 + (Number.isFinite(axis) ? axis * 180 / Math.PI : 0);
+    az = ((Math.round(az / 5) * 5) % 360 + 360) % 360;
+    if (!reliefLayer) {
+      /* maxNativeZoom 17: past ~1m/px there is no DEM detail left, so Leaflet upscales
+         instead of asking the server for four times the tiles per zoom. */
+      reliefLayer = L.tileLayer(apiUrl("/api/relief-tile?z={z}&x={x}&y={y}&az={az}&v=" + RELIEF_VERSION), {
+        pane: "reliefPane", az: az, minZoom: 12, maxNativeZoom: 17, maxZoom: 21
+      }).addTo(map);
+      reliefAz = az;
+      writeCredit();
+    } else if (az !== reliefAz) {
+      reliefAz = az;
+      reliefLayer.options.az = az;
+      reliefLayer.redraw();
     }
+    /* The credit belongs to the DEM the hole is shaded from, which the server picks by
+       region - asked once per course-sized step rather than per hole. */
+    var at = (r && (r.green || r.tee)) || (scene && scene.camera.centre);
+    if (!at) return;
+    var cell = Math.round(at.lat * 10) + "," + Math.round(at.lng * 10);
+    if (cell === reliefCreditAt) return;
+    reliefCreditAt = cell;
+    fetch(apiUrl("/api/relief-tile?credit=1&lat=" + at.lat.toFixed(4) + "&lng=" + at.lng.toFixed(4)))
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (body) {
+        if (reliefCreditAt !== cell) return;
+        reliefCredit = body && body.text ? String(body.text) : "";
+        repaint("RELIEF_CREDIT", writeCredit);
+      })
+      .catch(function () { if (reliefCreditAt === cell) reliefCreditAt = null; });
   }
 
 
@@ -258,27 +318,36 @@
 
   /* Undo the lock stage's CSS tilt so the 2D frame inverse stays exact. The
      tilt is perspective(d) rotateX(θ) scale(s) about (50%, originY); a 2D
-     inverse is simply wrong under it, which is what used to flatten the view
-     on drag and spring back on release. Identity when the tilt is off. */
+     frame inverse alone would put the dot and the aim off under it. Both
+     presentations lean in lock (styles.css: #surfaceStage and #mapStage), so
+     this answers for the live map as well. Identity when the tilt is off. */
   function unTilt(clientX, clientY) {
     var flat = { left: clientX, top: clientY };
-    var vp = el("surfaceViewport");
-    if (!vp || !published) return flat;
     if (!currentScene || currentScene.camera.stage !== "shot") return flat;
+    return tiltPlaneAt(clientX, clientY) || flat;
+  }
+
+  /* The pure inverse: where a screen point sits on the untilted plane, or null
+     when the tilt's numbers cannot be read. Split out because the live camera
+     asks it about the screen's corners while the stage is still changing, before
+     currentScene has caught up. */
+  function tiltPlaneAt(clientX, clientY) {
+    var vp = el("surfaceViewport");
+    if (!vp) return null;
     var css = getComputedStyle(document.documentElement);
     var deg = parseFloat(css.getPropertyValue("--tiltDeg"));
     var d = parseFloat(css.getPropertyValue("--tiltPerspective"));
     var s = parseFloat(css.getPropertyValue("--tiltScale"));
     var originY = parseFloat(css.getPropertyValue("--tiltOriginY"));
     if (!(Number.isFinite(deg) && Number.isFinite(d) && d > 0 && Number.isFinite(s) && s > 0
-      && Number.isFinite(originY))) return flat;
+      && Number.isFinite(originY))) return null;
     var w = vp.offsetWidth, h = vp.offsetHeight;
-    if (!(w > 0 && h > 0)) return flat;
+    if (!(w > 0 && h > 0)) return null;
     var ox = w / 2, oy = h * originY;
     var sx = clientX - ox, sy = clientY - oy;
     var t = Math.tan((deg * Math.PI) / 180), c = Math.cos((deg * Math.PI) / 180);
     var denom = d + sy * t;
-    if (!(Math.abs(denom) > 1e-6) || !(Math.abs(c) > 1e-6)) return flat;
+    if (!(Math.abs(denom) > 1e-6) || !(Math.abs(c) > 1e-6)) return null;
     var y1 = (sy * d) / denom;
     return { left: (sx * (d - y1 * t)) / d / s + w / 2, top: y1 / c / s + h * originY };
   }
@@ -555,6 +624,7 @@
     var anchor = (scene.camera.hole && (scene.camera.hole.green || scene.camera.hole.tee))
       || scene.camera.centre || null;
     if (!ensureMap(anchor)) return;
+    applyRelief(scene);
     var view = { width: window.innerWidth, height: window.innerHeight };
     if (!(view.width > 0 && view.height > 0)) return;
     var solved = surfaceLib.stageFrame(refPx, stage, framePoints(scene, null), view, {
@@ -571,12 +641,40 @@
 
     var centreWorld = surfaceLib.transformInvert(solved, { left: view.width / 2, top: view.height / 2 });
     if (!centreWorld) { plainMap(scene); return; }
-    var centre = surfaceLib.latLngFromWorldPx(centreWorld, REF_ZOOM);
-    if (!Number.isFinite(centre.lat) || !Number.isFinite(centre.lng)) { plainMap(scene); return; }
 
-    /* The viewport diagonal: the smallest square that still covers the viewport
-       after an arbitrary rotation about its own centre. */
-    var side = Math.ceil(Math.hypot(view.width, view.height));
+    /* The ground the map has to cover, in untilted screen pixels: the screen,
+       plus - in lock - whatever the tilt pulls onto it from above (the screen's
+       top corners, inverted through the tilt, land well above the screen).
+       The map is a square centred on that region, sized to its farthest
+       corner, so rotating it to tee-at-bottom about its own centre can never
+       expose a corner. Unlocked this is exactly the viewport diagonal. */
+    var cover = [{ left: 0, top: 0 }, { left: view.width, top: 0 },
+      { left: 0, top: view.height }, { left: view.width, top: view.height }];
+    if (stage === "lock") {
+      [tiltPlaneAt(0, 0), tiltPlaneAt(view.width, 0)].forEach(function (p) { if (p) cover.push(p); });
+    }
+    var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    cover.forEach(function (p) {
+      minX = Math.min(minX, p.left); maxX = Math.max(maxX, p.left);
+      minY = Math.min(minY, p.top); maxY = Math.max(maxY, p.top);
+    });
+    var hub = { left: (minX + maxX) / 2, top: (minY + maxY) / 2 };
+    var reach = 0;
+    cover.forEach(function (p) { reach = Math.max(reach, Math.hypot(p.left - hub.left, p.top - hub.top)); });
+    /* Container pixels, not screen pixels: past Leaflet's max zoom the residual
+       magnifies the container, so it needs fewer of them. */
+    var side = Math.ceil(2 * reach / residual);
+    /* The map is centred on the hub, not the screen centre. The picture must not
+       move for that, so the hub's ground point is read through the frame actually
+       applied - the screen centre's point, rotation angle and scale - rather than
+       through solved, whose rotation differs whenever shot-up is off. */
+    var dx = (hub.left - view.width / 2) / scale, dy = (hub.top - view.height / 2) / scale;
+    var cos = Math.cos(angle), sin = Math.sin(angle);
+    var centre = surfaceLib.latLngFromWorldPx({
+      x: centreWorld.x + cos * dx + sin * dy,
+      y: centreWorld.y - sin * dx + cos * dy
+    }, REF_ZOOM);
+    if (!Number.isFinite(centre.lat) || !Number.isFinite(centre.lng)) { plainMap(scene); return; }
     var node = el("map");
     if (!node) return;
     /* Leaflet caches its container size and only re-measures on invalidateSize.
@@ -596,8 +694,7 @@
        its own pixel origin, and half a pixel here shows up as the dot sitting
        beside the player. */
     var c = map.latLngToContainerPoint([centre.lat, centre.lng]);
-    liveFrame = surfaceLib.anchoredTransform({ x: c.x, y: c.y },
-      { left: view.width / 2, top: view.height / 2 }, angle, residual);
+    liveFrame = surfaceLib.anchoredTransform({ x: c.x, y: c.y }, hub, angle, residual);
     node.style.transform = "matrix(" + liveFrame.a + "," + liveFrame.b + "," + (-liveFrame.b) + ","
       + liveFrame.a + "," + liveFrame.tx + "," + liveFrame.ty + ")";
     mapSide = side;

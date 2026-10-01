@@ -156,7 +156,10 @@
       </div>
     </div>
   </div>
-  <div id="map"></div>
+  <!-- The live map's stage: the same overscanned, tilted box as #surfaceStage below, so the
+       lock tilt leans the live map and the overlays together. #mapViewport is the screen
+       rectangle inside it; #map positions against that exactly as it always has. -->
+  <div id="mapStage"><div id="mapViewport"><div id="map"></div></div></div>
   <!-- Basemap credit, outside #map on purpose: the stage camera rotates and
        oversizes the map element, so Leaflet's own attribution control would
        ride off-screen with it. The imagery licences require it stays visible. -->

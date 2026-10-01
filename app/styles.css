@@ -126,7 +126,7 @@ body.surface-published #mapAttribution { display: none; }
    and a transformed descendant still grows the scrollable overflow — without
    the clip, focusing a button (the start pill) scroll-jumps the whole play
    screen. */
-#surfaceStage {
+#surfaceStage, #mapStage {
   position: absolute;
   left: calc(var(--surfaceOverscanX) * -100%);
   right: calc(var(--surfaceOverscanX) * -100%);
@@ -140,13 +140,28 @@ body.surface-published #mapAttribution { display: none; }
   transition: transform 1000ms cubic-bezier(.18, .82, .24, 1);
 }
 body.surface-published #surfaceStage { background: #0d1b12; }
-/* Tilt is published-surface only. The live map is not tilted (Leaflet has no
-   3D camera and a CSS-perspectived tile grid would break its hit testing), so
-   the overlay it hosts must not be tilted either or the two would disagree. */
-body.surface-published.tilt-lock #surfaceStage {
+/* The live map's own stage: the same box, pivot and tilt as #surfaceStage, so
+   the Leaflet layers inside it (route, hazards, green) lean exactly as the
+   overlays in #surfaceViewport do and the two cannot disagree. Underneath the
+   overlay stage, and it takes taps - the click lands on Leaflet's container
+   and painter.js inverts the tilt (unTilt) before projecting it. Leaflet never
+   sees a tilted coordinate: every gesture handler it has is off. */
+#mapStage { z-index: 0; pointer-events: auto; background: #16281c; }
+/* #mapViewport is the screen rectangle inside the stage, exactly as
+   #surfaceViewport is, so #map keeps positioning against the screen. */
+#mapViewport {
+  position: absolute;
+  left: calc(var(--surfaceOverscanX) / (1 + 2 * var(--surfaceOverscanX)) * 100%);
+  top: calc(var(--surfaceOverscanY) / (1 + var(--surfaceOverscanY)) * 100%);
+  width: calc(100% / (1 + 2 * var(--surfaceOverscanX)));
+  height: calc(100% / (1 + var(--surfaceOverscanY)));
+}
+/* The lock tilt, on both presentations. painter.js grows the live map upward
+   in lock so the far edge the tilt pulls onto the screen still has tiles. */
+body.tilt-lock #surfaceStage, body.tilt-lock #mapStage {
   transform: perspective(calc(var(--tiltPerspective) * 1px)) rotateX(calc(var(--tiltDeg) * 1deg)) scale(var(--tiltScale));
 }
-@media (prefers-reduced-motion: reduce) { #surfaceStage { transition-duration: 1ms; } }
+@media (prefers-reduced-motion: reduce) { #surfaceStage, #mapStage { transition-duration: 1ms; } }
 
 /* The viewport stays exactly the screen rectangle inside the stage, because
    everything in it is positioned in VIEWPORT PIXELS by the painter's one

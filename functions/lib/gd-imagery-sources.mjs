@@ -135,6 +135,17 @@ const GLOBAL_TERRAIN_TILES_ATTRIBUTION = {
   perSurvey: false
 };
 
+/* The global DEM on its own, for a caller that only shades and has no national entry to go
+   through: the live map's relief tiles (relief-tile.mjs) fall back to it for a course outside
+   every region below. Scanning never does - resolveImagerySource stays the gate for that. */
+export const GLOBAL_ELEVATION = Object.freeze({
+  key: "global-terrain-tiles",
+  label: "Mapzen Terrain Tiles",
+  license: GLOBAL_TERRAIN_TILES_DEM.license,
+  attribution: GLOBAL_TERRAIN_TILES_ATTRIBUTION,
+  dem: GLOBAL_TERRAIN_TILES_DEM
+});
+
 /* GSI Japan, shared by the two Japanese region entries below.
 
    Licence: the Government of Japan Standard Terms of Use via GSI's own content terms
@@ -941,7 +952,7 @@ export function resolveEndpoints(entry, envs) {
    spec instead of being sniffed later. Anything else - no DEM, or a shape without a decode -
    returns null: that region plans no relief capture and composites no relief, rather than
    shipping something wrong. */
-function reliefSpec(dem) {
+export function reliefSpec(dem) {
   if (!dem) return null;
   /* Every tiled encoding gd-relief-core's ENCODINGS table speaks - keep this list in step
      with that table. terrain-rgb is stored as-is; the others (terrarium for the global
