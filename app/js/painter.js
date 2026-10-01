@@ -179,12 +179,34 @@
     writeCredit();
   }
 
+  /* Short by default, full on tap - the way Esri's own Leaflet plugin does it. The short form
+     is the imagery owner's name (what comes before " — ", so "Powered by Esri" stays on screen
+     the whole time, which Esri requires); the data providers and the elevation credit sit
+     behind the "ⓘ". Every source credit is still in the DOM, only collapsed. */
   function writeCredit() {
     var credit = el("mapAttribution");
     if (!credit) return;
-    var text = [baseCredit, reliefLayer ? reliefCredit : ""].filter(Boolean).join(" · ");
-    credit.textContent = text;
-    show(credit, !!text);
+    var full = [baseCredit, reliefLayer ? reliefCredit : ""].filter(Boolean).join(" · ");
+    var short = baseCredit.split(" — ")[0];
+    credit.textContent = "";
+    if (short !== full) {
+      var toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "mapAttributionToggle";
+      toggle.textContent = "ⓘ";
+      toggle.setAttribute("aria-expanded", String(credit.classList.contains("open")));
+      credit.appendChild(toggle);
+    }
+    var shortNode = document.createElement("span");
+    shortNode.className = "mapAttributionShort";
+    shortNode.textContent = short;
+    var fullNode = document.createElement("span");
+    fullNode.className = "mapAttributionFull";
+    fullNode.textContent = full;
+    credit.appendChild(shortNode);
+    credit.appendChild(fullNode);
+    if (short === full) credit.classList.remove("open");
+    show(credit, !!full);
   }
 
   /* Light the live hole the way the bake lights a captured one: from the north-west of the
@@ -2443,6 +2465,14 @@
 
     var img = el("surfaceImage");
     if (img) img.addEventListener("click", function (e) { onSurfaceTap(e.clientX, e.clientY); });
+    var credit = el("mapAttribution");
+    if (credit) credit.addEventListener("click", function (e) {
+      var toggle = e.target.closest && e.target.closest(".mapAttributionToggle");
+      if (!toggle) return;
+      e.stopPropagation();
+      var open = credit.classList.toggle("open");
+      toggle.setAttribute("aria-expanded", String(open));
+    });
 
     /* Three faces, three meanings — the dock is the one control that always
        says what there is to do with the shot right now. */
