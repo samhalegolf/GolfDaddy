@@ -42,7 +42,16 @@
   /* corridor is deliberately not in the panel yet: it is the dispersion
      corridor from the v2 bubble design, off until it has been played with.
      Stored like the rest so turning it on survives a reload. */
-  var DEFAULTS = { units: "m", aimLine: true, shotUp: true, frameTightness: "medium", relief: "enhanced", corridor: false };
+  var DEFAULTS = { units: "m", aimLine: true, shotUp: true, frameTightness: "medium", relief: "enhanced", corridor: false,
+    hybridView: "composite" };
+
+  /* Operator-only debug views of the Clarity 3D Mesh picture (live-hybrid.js VIEWS - keep the
+     two lists in step; dev/live-hybrid.test.js checks they are). */
+  var HYBRID_VIEWS = ["composite", "mask", "seam", "esri-raw", "esri-corrected", "mapbox-raw"];
+  var HYBRID_VIEW_LABELS = {
+    composite: "Composite", mask: "Mapbox mask", seam: "Seam", "esri-raw": "Esri raw",
+    "esri-corrected": "Esri corrected", "mapbox-raw": "Mapbox raw"
+  };
 
   var state = load();
   var listeners = [];
@@ -56,6 +65,7 @@
         shotUp: raw.shotUp !== false,
         frameTightness: TIGHTNESS[raw.frameTightness] ? raw.frameTightness : DEFAULTS.frameTightness,
         relief: RELIEF[raw.relief] ? raw.relief : DEFAULTS.relief,
+        hybridView: HYBRID_VIEWS.indexOf(raw.hybridView) !== -1 ? raw.hybridView : DEFAULTS.hybridView,
         corridor: raw.corridor === true
       };
     } catch (e) { return Object.assign({}, DEFAULTS); }
@@ -83,6 +93,8 @@
     lockTightness: function () { return TIGHTNESS[state.frameTightness].factor; },
     /* 0 means no mesh at all, not a flat mesh. */
     reliefExaggeration: function () { return RELIEF[state.relief].factor; },
+    hybridView: function () { return state.hybridView; },
+    hybridViews: function () { return HYBRID_VIEWS.slice(); },
 
     /* Metres in (everything upstream computes in metres, always), display
        number out. Rounded, never a unit suffix — callers own their own
@@ -171,7 +183,7 @@
     auto: "Auto: chosen by region.",
     esri: "Forced: Esri World Imagery.",
     mapbox: "Forced: Mapbox Satellite. Falls back to Auto if no token is set.",
-    mesh: "Mapbox on the 3D terrain mesh, unpublished holes only. Needs Terrain relief on."
+    mesh: "Esri + Mapbox (playing area only) on the 3D terrain mesh, unpublished holes. Needs Terrain relief on."
   };
   function renderMapSource() {
     var group = document.getElementById("setMapSourceGroup");
@@ -185,6 +197,10 @@
     if (btn) btn.textContent = MAP_SOURCE_LABELS[current] || current;
     var sub = document.getElementById("setMapSourceSub");
     if (sub) sub.textContent = MAP_SOURCE_SUBS[current] || "";
+    var viewRow = document.getElementById("setHybridViewRow");
+    if (viewRow) viewRow.classList.toggle("hiddenState", current !== "mesh");
+    var viewBtn = document.getElementById("setHybridView");
+    if (viewBtn) viewBtn.textContent = HYBRID_VIEW_LABELS[state.hybridView] || state.hybridView;
   }
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -209,6 +225,11 @@
     if (reliefBtn) reliefBtn.addEventListener("click", function () {
       var i = RELIEF_ORDER.indexOf(state.relief);
       app.gpsSettings.set("relief", RELIEF_ORDER[(i + 1) % RELIEF_ORDER.length]);
+    });
+    var hybridViewBtn = document.getElementById("setHybridView");
+    if (hybridViewBtn) hybridViewBtn.addEventListener("click", function () {
+      var i = HYBRID_VIEWS.indexOf(state.hybridView);
+      app.gpsSettings.set("hybridView", HYBRID_VIEWS[(i + 1) % HYBRID_VIEWS.length]);
     });
     var mapSourceBtn = document.getElementById("setMapSource");
     if (mapSourceBtn) mapSourceBtn.addEventListener("click", function () {

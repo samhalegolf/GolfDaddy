@@ -10,8 +10,8 @@
  *   - the metadata is the published playSurface shape, so the published projection works on
  *     it, and the terrain mesh's overlay lift works on it at the player's exaggeration (and is
  *     the identity with relief off);
- *   - load() refuses an answer for a different window, a failed layer, or an elevation with no
- *     size/range, and revokes anything it made when it does.
+ *   - load() hands the mesh the composite, drops an elevation for a different window or with no
+ *     size/range (a flat picture, not a failure), and rejects only when there is no picture.
  *
  * Run: node dev/live-terrain.test.js
  */
@@ -122,7 +122,11 @@ async function ok(name, fn) { await fn(); passed++; console.log('ok  - ' + name)
     assert.ok(Math.abs(metres[0] / metres[1] - win.w / win.h) < 0.01, 'metres keep the frame\'s aspect');
   });
 
-  function fakeDeps(answers) {
+  /* The compositor is live-hybrid.js's job (dev/live-hybrid.test.js); here it is a stub, so
+     these cases are about putting picture and elevation together. */
+  const PICTURE_DEBUG = () => ({ context: 'esri', esri: { network: 24, reused: 0 }, mapbox: { network: 16, reused: 0 },
+    maskPct: 38.3, sessionMapbox: 16, view: 'composite', metresPerPx: 0.46, composeMs: 120, featherM: 50 });
+  function fakeDeps(answers, picture) {
     const made = [], revoked = [], asked = [];
     return {
       made, revoked, asked,
@@ -132,6 +136,8 @@ async function ok(name, fn) { await fn(); passed++; console.log('ok  - ' + name)
           const layer = /layer=(\w+)/.exec(url)[1];
           return Promise.resolve(answers[layer](url));
         },
+        liveHybrid: { build: () => picture || Promise.resolve({ blob: { composite: true }, debug: PICTURE_DEBUG() }) },
+        hybrid: {},
         apiUrl: (u) => u,
         token: () => Promise.resolve('tok'),
         createObjectURL: () => { const u = 'blob:' + made.length; made.push(u); return u; },
@@ -147,18 +153,15 @@ async function ok(name, fn) { await fn(); passed++; console.log('ok  - ' + name)
   const echo = [WIN.z, WIN.x, WIN.y, WIN.w, WIN.h].join('/');
   const goodElevation = () => answer(200, { 'X-Window': echo, 'X-Elevation-Size': '300x400', 'X-Elevation-Min': '20.5',
     'X-Elevation-Max': '61.0', 'X-Elevation-Source': 'linz-nz', 'X-Elevation-Zoom': '17', 'X-Elevation-Credit': 'LINZ%20CC%20BY' });
-  const goodAerial = () => answer(200, { 'X-Window': echo, 'X-Live-Imagery': 'mapbox.satellite' });
 
-  await ok('load: both layers, signed in, into the published shape with a readout', async () => {
-    const f = fakeDeps({ aerial: goodAerial, elevation: goodElevation });
-    const entry = await lt.load(WIN, f.deps);
-    assert.strictEqual(f.asked.length, 2);
-    f.asked.forEach((a) => {
-      assert.strictEqual(a.auth, 'Bearer tok');
-      assert.ok(a.url.includes('&z=' + WIN.z + '&x=' + WIN.x + '&y=' + WIN.y + '&w=' + WIN.w + '&h=' + WIN.h));
-    });
+  await ok('load: the composite and the elevation, signed in, in the published shape', async () => {
+    const f = fakeDeps({ elevation: goodElevation });
+    const entry = await lt.load(WIN, {}, f.deps, { view: 'composite' });
+    assert.strictEqual(f.asked.length, 1, 'only the elevation comes from the server');
+    assert.strictEqual(f.asked[0].auth, 'Bearer tok');
+    assert.ok(f.asked[0].url.includes('layer=elevation&z=' + WIN.z + '&x=' + WIN.x + '&y=' + WIN.y + '&w=' + WIN.w + '&h=' + WIN.h));
     assert.strictEqual(entry.asset.live, true);
-    assert.strictEqual(entry.asset.url, 'blob:0');
+    assert.strictEqual(entry.asset.url, 'blob:0', 'the mesh is given the composite, not a provider image');
     const m = entry.asset.playSurface;
     assert.strictEqual(m.liveTerrain, true);
     assert.deepStrictEqual(m.outputDimensions, { width: WIN.w, height: WIN.h });
@@ -167,34 +170,34 @@ async function ok(name, fn) { await fn(); passed++; console.log('ok  - ' + name)
     assert.deepStrictEqual(entry.urls, ['blob:0', 'blob:1']);
     assert.strictEqual(entry.debug.elevation, 'linz-nz');
     assert.strictEqual(entry.debug.elevationCredit, 'LINZ CC BY');
-    const label = lt.debugLabel(Object.assign(entry.debug, { rebuild: 'hole change', loadMs: 412 }), 2.5);
-    ['3D mesh', 'Mapbox z' + WIN.z, 'DEM linz-nz z17 300x400', '2.5x', 'hole change', '412ms'].forEach((bit) =>
-      assert.ok(label.includes(bit), label + ' has ' + bit));
+    const label = lt.debugLabel(Object.assign(entry.debug, { rebuild: 'hole change', meshMs: 90 }), 2.5, 'on');
+    ['3D mesh on', 'z' + WIN.z, 'Esri 24+0r', 'Mapbox 16+0r', '38.3% frame', 'DEM linz-nz z17 300x400', '2.5x',
+      'hole change', 'img 120ms', 'mesh 90ms'].forEach((bit) => assert.ok(label.includes(bit), label + ' has ' + bit));
     lt.release(entry, f.deps.revokeObjectURL);
     assert.deepStrictEqual(f.revoked, ['blob:0', 'blob:1'], 'release revokes both');
   });
 
-  await ok('load: an answer for another window is refused, and nothing is left behind', async () => {
-    const f = fakeDeps({ aerial: goodAerial, elevation: () => answer(200, { 'X-Window': '18/1/1/1/1' }) });
-    await assert.rejects(lt.load(WIN, f.deps), /different window/);
+  await ok('load: no elevation is a flat picture, not a failure', async () => {
+    const f = fakeDeps({ elevation: () => answer(502, {}, { error: 'no elevation for this window' }) });
+    const entry = await lt.load(WIN, {}, f.deps);
+    assert.strictEqual(entry.asset.playSurface.elevation, undefined, 'no elevation, so no mesh');
+    assert.deepStrictEqual(entry.urls, ['blob:0']);
+    assert.match(entry.debug.elevationFailed, /elevation 502: no elevation/);
+    assert.match(lt.debugLabel(entry.debug, 2.5, 'off'), /DEM none \(elevation 502/);
+  });
+
+  await ok('load: an elevation for another window, or with no size, is dropped rather than trusted', async () => {
+    for (const bad of [answer(200, { 'X-Window': '18/1/1/1/1' }), answer(200, { 'X-Window': echo, 'X-Elevation-Min': '1' })]) {
+      const entry = await lt.load(WIN, {}, fakeDeps({ elevation: () => bad }).deps);
+      assert.strictEqual(entry.asset.playSurface.elevation, undefined);
+      assert.match(entry.debug.elevationFailed, /different window|size or range/);
+    }
+  });
+
+  await ok('load: no picture is a rejection, and nothing is left behind', async () => {
+    const f = fakeDeps({ elevation: goodElevation }, Promise.reject(new Error('esri tile 503')));
+    await assert.rejects(lt.load(WIN, {}, f.deps), /esri tile 503/);
     assert.strictEqual(f.made.length, 0);
-  });
-
-  await ok('load: a failed elevation is a reason, not a flat mesh', async () => {
-    const f = fakeDeps({ aerial: goodAerial, elevation: () => answer(502, {}, { error: 'no elevation for this window' }) });
-    await assert.rejects(lt.load(WIN, f.deps), /elevation 502: no elevation/);
-    assert.strictEqual(f.made.length, 0);
-  });
-
-  await ok('load: an elevation with no size or range is refused', async () => {
-    const f = fakeDeps({ aerial: goodAerial, elevation: () => answer(200, { 'X-Window': echo, 'X-Elevation-Min': '1' }) });
-    await assert.rejects(lt.load(WIN, f.deps), /size or range/);
-  });
-
-  await ok('load: a network failure is a reason too', async () => {
-    const f = fakeDeps({ aerial: goodAerial, elevation: goodElevation });
-    f.deps.fetch = () => Promise.reject(new Error('offline'));
-    await assert.rejects(lt.load(WIN, f.deps), /request failed: offline/);
   });
 
   console.log('\nlive-terrain: ' + passed + ' passed');

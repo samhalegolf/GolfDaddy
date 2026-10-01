@@ -30,7 +30,7 @@
     "test:units": "node dev/units-setting.test.js",
     "test:i18n": "node dev/i18n.test.js",
     "test:terrain-relief": "node dev/terrain-relief-setting.test.js",
-    "test:live-terrain": "node dev/live-terrain.test.js && node dev/live-terrain-frame.test.mjs && node dev/live-terrain-mesh.test.mjs",
+    "test:live-terrain": "node dev/live-hybrid.test.js && node dev/live-terrain.test.js && node dev/live-terrain-frame.test.mjs && node dev/live-terrain-mesh.test.mjs",
     "test:bag": "node dev/bag-central-system.test.js",
     "test:bag-generator": "node dev/bag-generator-model.test.js",
     "test:bubble-handedness": "node dev/bubble-handedness.test.js",

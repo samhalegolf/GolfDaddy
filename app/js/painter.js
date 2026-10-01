@@ -2078,6 +2078,7 @@
     if (!meshSupported()) return;
 
     var token = transitionToken;
+    var meshStarted = Date.now();
     /* A live terrain frame (live-terrain.js) carries its elevation as an object URL. */
     var elevationUrl = elevation.url || apiUrl(surfaceLib.assetUrl(elevation.path));
     var out = meta.outputDimensions || {};
@@ -2118,6 +2119,11 @@
         mesh.state.exaggeration = reliefExaggeration();
         applyMeshFrame();
         document.body.classList.add("surface-mesh");
+        if (meta.liveTerrain && liveTerrain) {
+          liveTerrainMesh = "on";
+          liveTerrain.debug.meshMs = Date.now() - meshStarted;
+          if (isAdmin()) writeStamp(liveTerrainLabel());
+        }
         /* The overlays already on screen were placed on the flat frame. Now that the
            ground has relief, place them again on it (the projector lifts from here on). */
         if (marshal) render(marshal.scene());
@@ -2185,6 +2191,8 @@
   var liveTerrainUp = false;    // is the surface on screen a live terrain frame
   var liveTerrainNote = "";     // why the mode is not showing, for the admin readout
   var liveTerrainLoading = null; // key of the frame being fetched, so a repaint cannot ask twice
+  var liveTerrainMesh = "";     // "on", or why the mesh is not up, for the readout
+  var tileSession = null;       // the round's provider tiles (live-hybrid.js), per course
   var LIVE_MESH_AMBIENT = 0.42;
   var meshSupportedCache = null;
 
@@ -2212,7 +2220,20 @@
 
   function liveTerrainLabel() {
     if (!liveTerrain) return "";
-    return app.liveTerrain.debugLabel(liveTerrain.debug, reliefExaggeration());
+    return app.liveTerrain.debugLabel(liveTerrain.debug, reliefExaggeration(),
+      liveTerrainMesh || (liveTerrain.asset.playSurface.elevation ? "pending" : "off"));
+  }
+
+  function hybridView() {
+    return settings() && settings().hybridView ? settings().hybridView() : "composite";
+  }
+
+  /* The hole's own entry in the package, for its fairway, bunker and water shapes. */
+  function packageHole(number) {
+    var pkg = marshal && marshal.pkg ? marshal.pkg() : null;
+    var holes = pkg && Array.isArray(pkg.holes) ? pkg.holes : [];
+    for (var i = 0; i < holes.length; i++) if (holes[i] && Number(holes[i].holeNumber) === Number(number)) return holes[i];
+    return null;
   }
 
   function releaseLiveTerrain() {
@@ -2226,7 +2247,12 @@
     var hole = scene && (scene.camera.hole || scene.hole.rec);
     var win = app.liveTerrain.frameWindow(hole);
     if (!win) { noteLiveTerrain("this hole has no tee and green to frame"); return; }
-    var key = app.liveTerrain.windowKey(marshal ? marshal.round().courseKey : "", scene.hole.number, win);
+    var courseKey = marshal ? marshal.round().courseKey : "";
+    var view = hybridView();
+    var key = app.liveTerrain.windowKey(courseKey, scene.hole.number, win) + "|" + view;
+    if (!tileSession || tileSession.courseKey !== courseKey) tileSession = app.liveHybrid.createSession(courseKey);
+    var raster = app.liveHybrid.browserRaster();
+    var geom = app.liveHybrid.holeGeometry(hole, packageHole(scene.hole.number));
     if (liveTerrain && liveTerrain.key === key) {
       liveTerrain.debug.rebuild = "reused";
       presentLiveTerrain(token);
@@ -2235,8 +2261,14 @@
     if (liveTerrainLoading === key) return;
     liveTerrainLoading = key;
     var started = Date.now();
-    app.liveTerrain.load(win, {
+    app.liveTerrain.load(win, geom, {
       fetch: function (url, opts) { return fetch(url, opts); },
+      hybrid: {
+        session: tileSession,
+        tileUrl: function (kind, z, x, y) { return app.basemap.tileUrlFor(kind, z, x, y); },
+        canvas: raster.canvas,
+        decode: raster.decode
+      },
       apiUrl: apiUrl,
       token: function () {
         var auth = window.ClaritySupabaseAuth;
@@ -2245,7 +2277,7 @@
       },
       createObjectURL: function (blob) { return URL.createObjectURL(blob); },
       revokeObjectURL: function (u) { URL.revokeObjectURL(u); }
-    }).then(function (entry) {
+    }, { view: view }).then(function (entry) {
       if (liveTerrainLoading === key) liveTerrainLoading = null;
       /* Arrived for a hole that is no longer up, or one that turned out to be published. */
       if (token !== transitionToken || presentation !== "live" || !liveTerrainWanted()) {
@@ -2254,7 +2286,10 @@
       }
       releaseLiveTerrain();
       entry.key = key;
+      entry.view = view;
       entry.debug.rebuild = reason;
+      liveTerrainMesh = "";
+      try { if (window.console && console.info) console.info("[live-terrain] built", entry.debug); } catch (e) {}
       entry.debug.loadMs = Date.now() - started;
       liveTerrain = entry;
       presentLiveTerrain(token);
@@ -2306,6 +2341,16 @@
     if (!wanted) { if (liveTerrain) releaseLiveTerrain(); return; }
     if (!liveTerrainUp && presentation === "live" && currentScene) {
       startLiveTerrain(currentScene, transitionToken, reason);
+    } else if (liveTerrainUp && liveTerrain && liveTerrain.view !== hybridView()) {
+      /* A different debug view is a different picture of the same tiles: rebuilt from the
+         round's cache, so it costs no provider requests. */
+      repaint("LIVE_TERRAIN_VIEW", function () {
+        presentation = "live";
+        clearSurface();
+        lastCameraKey = null;
+        if (marshal) render(marshal.scene());
+      });
+      startLiveTerrain(currentScene, transitionToken, "view");
     } else if (liveTerrainUp) {
       writeStamp(liveTerrainLabel());
     }

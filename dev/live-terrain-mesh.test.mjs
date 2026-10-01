@@ -1,20 +1,22 @@
 /*
- * Clarity 3D Mesh in the real app (headless Chromium).
+ * Clarity 3D Mesh in the real app (headless Chromium, WebGL through SwiftShader).
  *
- * The page is the shipped /app/index.html. /api/live-terrain-frame is the real handler
- * (functions/live-terrain-frame.mjs) with only the outbound tile fetch faked and the admin check
- * stubbed - so the window maths, the DEM resample, the headers and the client's alignment check
- * all run for real.
+ * The page is the shipped /app/index.html. Esri and Mapbox tiles are answered by Playwright
+ * routes (flat colours, so the composite can be read back), and /api/live-terrain-frame is the
+ * real handler (functions/live-terrain-frame.mjs) with only its tile fetch faked and the admin
+ * check stubbed - so the compositor, the round's tile cache, the DEM resample and the mesh all
+ * run for real.
  *
  * Pinned here:
- *   - admin + "mesh" + relief on: an unpublished hole comes up as a published-style surface with
- *     the terrain mesh on it, from exactly one aerial and one elevation request;
- *   - GPS fixes, Play and a relief change between heights rebuild nothing;
- *   - relief off goes back to the live map and lets the frame go (object URLs revoked); on again
- *     builds it again, from the device's cache;
- *   - a new hole builds a new frame and releases the old one;
- *   - leaving the map source goes back to the live map;
- *   - an elevation failure leaves the live map up with the reason on the readout;
+ *   - admin + "mesh" + relief on: an unpublished hole comes up on the terrain mesh, built from
+ *     Esri across the frame and Mapbox only where the playing area needs it, with Mapbox colour
+ *     at the tee and corrected Esri in the corners of the picture the mesh is given;
+ *   - the Leaflet map underneath fetches no Mapbox at all in this mode;
+ *   - GPS fixes, Play, a relief change and a debug view change fetch no provider tiles;
+ *   - relief off goes back to the live map and lets the frame go; on again rebuilds from cache;
+ *   - the next hole reuses the round's tiles and fetches only what it does not share;
+ *   - Mapbox failing still gives an Esri mesh surface; a failed DEM gives a flat composite;
+ *     Esri failing leaves the live map up - each with its reason on the readout;
  *   - a non-admin never asks for anything;
  *   - published holes one after another each get their mesh (the disposed canvas regression).
  *
@@ -44,46 +46,40 @@ const HOLE_2 = {
   green: { lat: -36.9188, lng: 174.7432 },
   greenShape: [], route: []
 };
-/* Never visited before the failure case, so nothing of it is in the device's cache. */
-const HOLE_3 = {
-  holeNumber: 3,
-  tee: { lat: -36.9195, lng: 174.7440 },
-  green: { lat: -36.9210, lng: 174.7405 },
-  greenShape: [], route: []
-};
-const PKG = { holes: [HOLE_1, HOLE_2, HOLE_3] };
+/* Further off, for the failure cases, so nothing of them is cached yet. */
+const HOLE_3 = { holeNumber: 3, tee: { lat: -36.9230, lng: 174.7480 }, green: { lat: -36.9250, lng: 174.7440 }, greenShape: [], route: [] };
+const HOLE_4 = { holeNumber: 4, tee: { lat: -36.9290, lng: 174.7520 }, green: { lat: -36.9310, lng: 174.7480 }, greenShape: [], route: [] };
+const HOLE_5 = { holeNumber: 5, tee: { lat: -36.9350, lng: 174.7560 }, green: { lat: -36.9370, lng: 174.7520 }, greenShape: [], route: [] };
+const PKG = { holes: [HOLE_1, HOLE_2, HOLE_3, HOLE_4, HOLE_5] };
 
-/* ---- the endpoint, real apart from the tiles ---- */
-const counts = { aerial: 0, elevation: 0 };
+const ESRI_RGB = { r: 70, g: 95, b: 90 }, MAPBOX_RGB = { r: 80, g: 125, b: 70 };
+
+/* ---- the elevation endpoint, real apart from its tiles ---- */
+const counts = { elevation: 0 };
 let failElevation = false;
 const handler = createHandler({
   verifyAdmin: async () => "admin@test",
   env: { MAPBOX_PUBLIC_TOKEN: "pk.test" },
   mosaic: async (spec, zoom, origin, size) => {
-    if (spec.encoding) {
-      if (failElevation) return null;
-      /* A ridge across the hole, in whichever encoding the DEM speaks. */
-      const raw = Buffer.alloc(size.width * size.height * 3);
-      for (let j = 0; j < size.height; j++) for (let i = 0; i < size.width; i++) {
-        const v = 30 + 25 * Math.exp(-(((i / size.width) - 0.5) ** 2) * 30);
-        const p = (j * size.width + i) * 3;
-        if (spec.encoding === "terrarium") {
-          const t = v + 32768;
-          raw[p] = Math.floor(t / 256); raw[p + 1] = Math.floor(t) % 256; raw[p + 2] = Math.round((t % 1) * 256) % 256;
-        } else {
-          const n = Math.round((v + 10000) * 10);
-          raw[p] = (n >> 16) & 255; raw[p + 1] = (n >> 8) & 255; raw[p + 2] = n & 255;
-        }
+    if (failElevation) return null;
+    /* A ridge across the hole, in whichever encoding the DEM speaks. */
+    const raw = Buffer.alloc(size.width * size.height * 3);
+    for (let j = 0; j < size.height; j++) for (let i = 0; i < size.width; i++) {
+      const v = 30 + 25 * Math.exp(-(((i / size.width) - 0.5) ** 2) * 30);
+      const p = (j * size.width + i) * 3;
+      if (spec.encoding === "terrarium") {
+        const t = v + 32768;
+        raw[p] = Math.floor(t / 256); raw[p + 1] = Math.floor(t) % 256; raw[p + 2] = Math.round((t % 1) * 256) % 256;
+      } else {
+        const n = Math.round((v + 10000) * 10);
+        raw[p] = (n >> 16) & 255; raw[p + 1] = (n >> 8) & 255; raw[p + 2] = n & 255;
       }
-      return sharp(raw, { raw: { width: size.width, height: size.height, channels: 3 } }).png().toBuffer();
     }
-    return sharp({ create: { width: size.width, height: size.height, channels: 3, background: { r: 52, g: 110, b: 58 } } }).png().toBuffer();
+    return sharp(raw, { raw: { width: size.width, height: size.height, channels: 3 } }).png().toBuffer();
   }
 });
 
-/* A published course, for the regression the live mode exposed: dispose() loses the mesh's
-   WebGL context and the canvas kept handing that dead context back, so only the FIRST
-   published hole of a session ever got its mesh. */
+/* ---- a published course, for the disposed-canvas regression ---- */
 let elevationPngCache = null;
 async function publishedElevationPng() {
   if (!elevationPngCache) {
@@ -127,13 +123,17 @@ function startServer() {
     const server = http.createServer(async (req, res) => {
       const urlPath = decodeURIComponent(req.url.split("?")[0]);
       if (urlPath === "/api/live-terrain-frame") {
-        const layer = new URL(req.url, "http://x").searchParams.get("layer");
-        if (counts[layer] !== undefined) counts[layer]++;
+        counts.elevation++;
         const answer = await handler(new Request("http://127.0.0.1" + req.url, { method: req.method, headers: req.headers }));
         const headers = {};
         answer.headers.forEach((v, k) => { headers[k] = v; });
         res.writeHead(answer.status, headers);
         res.end(Buffer.from(await answer.arrayBuffer()));
+        return;
+      }
+      if (urlPath === "/api/auth-public-config") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ esriApiKey: "esri-test", mapboxPublicToken: "pk.test" }));
         return;
       }
       if (urlPath === "/api/course-visual-assets") {
@@ -173,11 +173,34 @@ function ok(name, cond, detail) {
   console.log("ok  - " + name);
 }
 
+/* ---- the providers ---- */
+const tiles = { esri: 0, mapbox: 0, leafletMapbox: 0 };
+const fail = { esri: false, mapbox: false };
+const tileCache = {};
+async function tileJpeg(rgb) {
+  const key = rgb.r + "," + rgb.g + "," + rgb.b;
+  if (!tileCache[key]) tileCache[key] = await sharp({ create: { width: 256, height: 256, channels: 3, background: rgb } }).jpeg({ quality: 95 }).toBuffer();
+  return tileCache[key];
+}
+
 const playwright = require("playwright-core");
 const server = await startServer();
 const browser = await launchBrowser(playwright);
 try {
-  const context = await browser.newContext({ geolocation: { latitude: -36.9150, longitude: 174.7400 }, permissions: ["geolocation"] });
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 },
+    geolocation: { latitude: -36.9150, longitude: 174.7400 }, permissions: ["geolocation"] });
+  await context.route(/ibasemaps-api\.arcgis\.com|api\.mapbox\.com|tile\.openstreetmap\.org/, async (route) => {
+    const url = route.request().url();
+    const fromCompositor = route.request().resourceType() === "fetch";
+    const kind = url.includes("mapbox") ? "mapbox" : url.includes("arcgis") ? "esri" : "osm";
+    if (kind === "mapbox" && !fromCompositor) tiles.leafletMapbox++;
+    if (fromCompositor && (kind === "esri" || kind === "mapbox")) {
+      tiles[kind]++;
+      if (fail[kind]) return route.fulfill({ status: 503, headers: { "Access-Control-Allow-Origin": "*" }, body: "" });
+    }
+    return route.fulfill({ status: 200, contentType: "image/jpeg", headers: { "Access-Control-Allow-Origin": "*" },
+      body: await tileJpeg(kind === "mapbox" ? MAPBOX_RGB : ESRI_RGB) });
+  });
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (err) => errors.push((err && err.message) || String(err)));
@@ -202,7 +225,7 @@ try {
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     window.__lm = {
       async until(fn, label, ms) {
-        const deadline = Date.now() + (ms || 8000);
+        const deadline = Date.now() + (ms || 10000);
         while (Date.now() < deadline) { try { if (fn()) return true; } catch (e) {} await wait(40); }
         throw new Error("timed out waiting for " + label + " - " + JSON.stringify(app.painter.liveTerrainDebug()));
       },
@@ -215,30 +238,61 @@ try {
         stamp: document.getElementById("assetVersionStamp").textContent,
         revoked: window.__revoked
       }),
+      /* The picture the mesh was handed, read back at a frame pixel. */
+      async pixel(fx, fy) {
+        const img = document.getElementById("surfaceImage");
+        await img.decode();
+        const c = document.createElement("canvas");
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        const ctx = c.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        return Array.from(ctx.getImageData(Math.floor(fx), Math.floor(fy), 1, 1).data.slice(0, 3));
+      },
       async open() {
         app.painter.detach();
         app.marshal.signal("ROUND_OPENED", { courseKey: "live-mesh-course", pkg, centre: { lat: -36.915, lng: 174.74 }, nines: null });
         document.body.classList.remove("route-home");
         document.body.classList.add("route-play");
         await wait(400);
+      },
+      async hole(n) {
+        app.marshal.signal("VIEW_HOLE_CHANGED", { hole: n });
+        await window.__lm.until(() => app.marshal.round().hole === n, "hole " + n);
       }
     };
     /* The admin account, as far as the display gates are concerned. */
     app.account.isAdmin = () => true;
     app.gpsSettings.set("relief", "enhanced");
+    app.gpsSettings.set("hybridView", "composite");
     app.basemap.setOverride("mesh");
   }, PKG);
+  await page.evaluate(() => window.ClarityApp.basemap.ready());
 
-  /* 1. Up on the mesh, from one request per layer. */
+  /* 1. Up on the mesh, from Esri across the frame and Mapbox over the playing area. */
   await page.evaluate(() => window.__lm.open());
   await page.evaluate(() => window.__lm.until(() => window.__lm.debug().active, "the live mesh"));
   let s = await page.evaluate(() => window.__lm.state());
+  const f1 = s.debug.frame;
   ok("an unpublished hole comes up on the terrain mesh", s.debug.active && s.published && s.meshUp && s.presentation === "published", s);
-  ok("from exactly one aerial and one elevation request", counts.aerial === 1 && counts.elevation === 1, counts);
-  ok("the admin readout names the sources and the height", /3D mesh · Mapbox z\d+ \d+x\d+ · DEM \S+ z\d+ \d+x\d+/.test(s.stamp) && s.stamp.includes("2.5x"), s.stamp);
-  ok("the frame is the window's own size and metres", s.debug.frame && /^\d+x\d+m$/.test(s.debug.frame.metres) && s.debug.frame.rebuild === "hole change", s.debug.frame);
+  ok("Esri for every frame tile, Mapbox for the playing area only", tiles.esri === f1.tiles.frame && tiles.mapbox === f1.tiles.mapbox
+    && tiles.mapbox < tiles.esri && counts.elevation === 1, { tiles, f1: f1.tiles });
+  ok("the Leaflet map underneath asks Mapbox for nothing", tiles.leafletMapbox === 0, tiles);
+  ok("the readout says the mesh is on and what it cost", /^3D mesh on · z\d+ \d+x\d+ [\d.]+m\/px · Esri \d+\+0r · Mapbox \d+\+0r \([\d.]+% frame, session \d+\)/.test(s.stamp)
+    && s.stamp.includes("2.5x") && /mesh \d+ms/.test(s.stamp), s.stamp);
+  const teeAt = await page.evaluate((t) => {
+    const scale = 256 * Math.pow(2, t.z), r = t.lat * Math.PI / 180;
+    return { x: ((t.lng + 180) / 360) * scale - t.x, y: ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * scale - t.y };
+  }, { ...HOLE_1.tee, z: f1.window.z, x: f1.window.x, y: f1.window.y });
+  const atTee = await page.evaluate((p) => window.__lm.pixel(p.x, p.y), teeAt);
+  const atCorner = await page.evaluate(() => window.__lm.pixel(3, 3));
+  const near = (a, b, tol) => a.every((v, i) => Math.abs(v - b[i]) <= tol);
+  ok("the mesh is given the composite: Mapbox at the tee", near(atTee, [MAPBOX_RGB.r, MAPBOX_RGB.g, MAPBOX_RGB.b], 6), atTee);
+  ok("and corrected Esri in the corner, nearer Mapbox than raw Esri is", !near(atCorner, [ESRI_RGB.r, ESRI_RGB.g, ESRI_RGB.b], 2)
+    && Math.abs(atCorner[1] - MAPBOX_RGB.g) < Math.abs(ESRI_RGB.g - MAPBOX_RGB.g), atCorner);
+  ok("colour correction applied within its limits", f1.colour.applied && f1.colour.gain.every((g) => g >= 0.8 && g <= 1.25), f1.colour);
 
-  /* 2. GPS, Play and a new height rebuild nothing. */
+  /* 2. GPS, Play, a new height and a debug view fetch no tiles. */
+  const before = { ...tiles, elevation: counts.elevation };
   s = await page.evaluate(async () => {
     const app = window.ClarityApp;
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -252,11 +306,19 @@ try {
     await wait(300);
     return window.__lm.state();
   });
-  ok("GPS fixes, Play and a new height do not rebuild the frame", counts.aerial === 1 && counts.elevation === 1, counts);
+  ok("GPS fixes, Play and a new height fetch nothing", tiles.esri === before.esri && tiles.mapbox === before.mapbox
+    && counts.elevation === before.elevation, { tiles, counts });
   ok("the height follows the setting", s.debug.active && s.debug.exaggeration === 5 && s.stamp.includes("5x"), s);
+  await page.evaluate(() => window.ClarityApp.gpsSettings.set("hybridView", "mask"));
+  await page.evaluate(() => window.__lm.until(() => { const d = window.__lm.debug(); return d.active && d.frame.view === "mask"; }, "the mask view"));
+  s = await page.evaluate(() => window.__lm.state());
+  ok("a debug view is rebuilt from the round's tiles, fetching none", tiles.esri === before.esri && tiles.mapbox === before.mapbox
+    && s.debug.frame.mapbox.reused === f1.tiles.mapbox && s.stamp.includes("view mask"), { tiles, s: s.stamp });
+  await page.evaluate(() => window.ClarityApp.gpsSettings.set("hybridView", "composite"));
+  await page.evaluate(() => window.__lm.until(() => { const d = window.__lm.debug(); return d.active && d.frame.view === "composite"; }, "back to composite"));
 
-  /* 3. Relief off: back to the live map, frame released. On again: rebuilt. */
-  const revokedBefore = s.revoked;
+  /* 3. Relief off: back to the live map, frame released. On again: rebuilt from cache. */
+  const revokedBefore = await page.evaluate(() => window.__revoked);
   await page.evaluate(() => window.ClarityApp.gpsSettings.set("relief", "off"));
   await page.evaluate(() => window.__lm.until(() => window.ClarityApp.painter.presentation().kind === "live", "the live map"));
   s = await page.evaluate(() => window.__lm.state());
@@ -265,55 +327,58 @@ try {
   await page.evaluate(() => window.ClarityApp.gpsSettings.set("relief", "natural"));
   await page.evaluate(() => window.__lm.until(() => window.__lm.debug().active, "the mesh again"));
   s = await page.evaluate(() => window.__lm.state());
-  ok("terrain on again builds it again", s.debug.active && s.debug.exaggeration === 1 && s.debug.frame.rebuild === "relief", s);
-  /* The same window is the same URL, and the answer is private-cacheable on the device. */
-  ok("from the device's own cache, not the server", counts.aerial === 1 && counts.elevation === 1, counts);
+  ok("terrain on again rebuilds it, without fetching a tile", s.debug.exaggeration === 1 && s.debug.frame.rebuild === "relief"
+    && tiles.esri === before.esri && tiles.mapbox === before.mapbox, { tiles, s });
 
-  /* 4. A new hole is a new frame, and the old one is released. */
-  const before = await page.evaluate(() => ({ win: window.__lm.debug().frame.window, revoked: window.__revoked }));
-  await page.evaluate(() => window.ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: 2 }));
-  await page.evaluate(() => window.__lm.until(() => {
-    const d = window.__lm.debug();
-    return d.active && window.ClarityApp.marshal.round().hole === 2;
-  }, "hole 2 on the mesh"));
+  /* 4. The next hole: a new frame from the round's tiles plus only the ones it lacks. */
+  const beforeH2 = { ...tiles };
+  await page.evaluate(() => window.__lm.hole(2));
+  await page.evaluate(() => window.__lm.until(() => window.__lm.debug().active && window.__lm.debug().frame.rebuild === "hole change", "hole 2 on the mesh"));
   s = await page.evaluate(() => window.__lm.state());
-  ok("a new hole builds a new frame", counts.aerial === 2 && counts.elevation === 2
-    && JSON.stringify(s.debug.frame.window) !== JSON.stringify(before.win), { counts, frame: s.debug.frame });
-  ok("and releases the old one", s.revoked >= before.revoked + 2, s);
+  const f2 = s.debug.frame;
+  ok("the next hole reuses the round's tiles", f2.mapbox.reused > 0 && f2.esri.reused > 0
+    && tiles.mapbox - beforeH2.mapbox === f2.mapbox.network && tiles.esri - beforeH2.esri === f2.esri.network, { f2, tiles });
+  ok("and the readout counts the round's Mapbox total", f2.sessionMapbox === tiles.mapbox, { f2, tiles });
+  console.log("      hole 1: Esri " + f1.esri.network + ", Mapbox " + f1.mapbox.network + " of " + f1.tiles.frame + " frame tiles ("
+    + f1.maskPct + "% masked); hole 2: Esri " + f2.esri.network + " new + " + f2.esri.reused + " reused, Mapbox "
+    + f2.mapbox.network + " new + " + f2.mapbox.reused + " reused");
 
-  /* 5. Another map source: back to the live map. */
-  await page.evaluate(() => window.ClarityApp.basemap.setOverride("mapbox"));
-  await page.evaluate(() => window.__lm.until(() => window.ClarityApp.painter.presentation().kind === "live", "the live map"));
+  /* 5. Mapbox fails: an Esri surface, still on the mesh, with the reason. */
+  fail.mapbox = true;
+  await page.evaluate(() => window.__lm.hole(3));
+  await page.evaluate(() => window.__lm.until(() => window.__lm.debug().active && /tile 503/.test(window.__lm.debug().frame.mapboxFailed || ""), "the Esri surface"));
   s = await page.evaluate(() => window.__lm.state());
-  ok("plain Mapbox is the flat live map", !s.debug.active && !s.published, s);
+  ok("Mapbox failing still gives an Esri mesh surface", s.debug.active && s.meshUp && s.stamp.includes("FAILED") && !s.debug.frame.colour.applied, s);
+  fail.mapbox = false;
 
-  /* 6. Back on the mesh (hole 2 again, from the device cache), then a hole whose elevation
-     fails: the live map stays, with the reason. */
-  await page.evaluate(() => window.ClarityApp.basemap.setOverride("mesh"));
-  await page.evaluate(() => window.__lm.until(() => window.__lm.debug().active, "the mesh back on"));
-  s = await page.evaluate(() => window.__lm.state());
-  ok("choosing Clarity 3D Mesh again brings it back", s.debug.frame.rebuild === "map source", s.debug.frame);
+  /* 6. The DEM fails: the composite, flat. */
   failElevation = true;
-  await page.evaluate(() => window.ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: 3 }));
-  await page.evaluate(() => window.__lm.until(() => /elevation 502/.test(window.__lm.debug().fallback || ""), "the fallback reason"));
+  await page.evaluate(() => window.__lm.hole(4));
+  await page.evaluate(() => window.__lm.until(() => { const d = window.__lm.debug(); return d.frame && d.frame.elevationFailed && document.body.classList.contains("surface-published"); }, "the flat composite"));
   s = await page.evaluate(() => window.__lm.state());
-  ok("a failed DEM leaves the live map up", !s.published && !s.meshUp && s.presentation === "live", s);
-  ok("with the reason on the admin readout", /3D mesh off · elevation 502: no elevation/.test(s.stamp), s.stamp);
+  ok("a failed DEM gives the flat composite", s.published && !s.meshUp && /DEM none \(elevation 502/.test(s.stamp) && /3D mesh off/.test(s.stamp), s);
   failElevation = false;
 
-  /* 7. A player never asks. */
-  const asked = { ...counts };
+  /* 7. Esri fails: the live map stays, with the reason. */
+  fail.esri = true;
+  await page.evaluate(() => window.__lm.hole(5));
+  await page.evaluate(() => window.__lm.until(() => /esri tile 503/.test(window.__lm.debug().fallback || ""), "the fallback reason"));
+  s = await page.evaluate(() => window.__lm.state());
+  ok("Esri failing leaves the live map up", !s.published && !s.meshUp && s.presentation === "live" && /3D mesh off · esri tile 503/.test(s.stamp), s);
+  fail.esri = false;
+
+  /* 8. A player never asks. */
+  const asked = { ...tiles, elevation: counts.elevation };
   await page.evaluate(async () => {
-    const app = window.ClarityApp;
-    app.account.isAdmin = () => false;
-    app.marshal.signal("VIEW_HOLE_CHANGED", { hole: 1 });
+    window.ClarityApp.account.isAdmin = () => false;
+    await window.__lm.hole(1);
     await new Promise((r) => setTimeout(r, 900));
   });
   s = await page.evaluate(() => window.__lm.state());
   ok("a non-admin with a stored mesh override gets the normal live map and no requests",
-    counts.aerial === asked.aerial && counts.elevation === asked.elevation && !s.debug.wanted && !s.published, { counts, s });
+    tiles.esri === asked.esri && tiles.mapbox === asked.mapbox && counts.elevation === asked.elevation && !s.debug.wanted && !s.published, { tiles, s });
 
-  /* 8. Published holes, one after another, each get their mesh. */
+  /* 9. Published holes, one after another, each get their mesh. */
   const published = { courseId: "published-course", status: "full-map-ready", packageVersion: 1,
     holes: [await publishedHole(HOLE_1, 40), await publishedHole(HOLE_2, 80)] };
   const meshes = await page.evaluate(async (pkg) => {
