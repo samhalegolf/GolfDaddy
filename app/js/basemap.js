@@ -34,6 +34,13 @@
   var linzKey = null;
   var esriKey = null;
   var pending = null;
+  /* Has the imagery-key question been answered (keys, no keys, or gave up)?
+     Until it has, no basemap is mounted: picking now would always pick OSM,
+     and mounting it is the street-map flash before the aerial swaps in. */
+  var settled = false;
+  /* A hung config request must not leave the map blank: past this, settle
+     keyless and let OSM draw. A late answer still configures and re-picks. */
+  var SETTLE_TIMEOUT_MS = 4000;
 
   /* An ArcGIS ImageServer answers a bbox, not a {z}/{x}/{y} cell: the tile's
      own mercator bbox at 256px lands on Leaflet's grid unresampled. coords are
@@ -130,6 +137,7 @@
   function configure(config) {
     linzKey = (config && String(config.linzBasemapsKey || "")) || null;
     esriKey = (config && String(config.esriApiKey || "")) || null;
+    settled = true;
   }
 
   function covers(source, centre) {
@@ -175,10 +183,15 @@
   }
 
   function prefetch() {
-    if (linzKey || pending || typeof fetch !== "function") return pending;
-    pending = fetch("/api/auth-public-config", { headers: { Accept: "application/json" } })
+    if (linzKey || pending) return pending;
+    if (typeof fetch !== "function") { settled = true; return pending; }
+    var request = fetch("/api/auth-public-config", { headers: { Accept: "application/json" } })
       .then(function (res) { return res.ok ? res.json() : null; })
-      .then(configure, function () {});
+      .then(configure, function () { settled = true; });
+    var timeout = new Promise(function (resolve) {
+      setTimeout(function () { settled = true; resolve(); }, SETTLE_TIMEOUT_MS);
+    });
+    pending = Promise.race([request, timeout]);
     return pending;
   }
 
@@ -226,6 +239,9 @@
         if (typeof onDead === "function") onDead();
       });
     },
+    /* True once baseFor() can give its real answer. Before that it would only
+       ever say OSM, so the painter mounts nothing rather than flash it. */
+    isSettled: function () { return settled; },
     /* Which source is up, for the on-screen source tag. */
     kindFor: function (centre) { return pick(centre).kind; },
     /* → {kind, layer, attribution} for the given course centre. Never throws,
