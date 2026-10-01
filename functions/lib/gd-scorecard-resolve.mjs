@@ -20,22 +20,19 @@
  *
  * WHERE IT LOOKS, AND IN WHAT ORDER
  *
- * Course-profile and handicapping sites first, club websites last. That is the
- * reverse of the old ladder, which guessed club domains up front and reached an
- * aggregator only on its fourth attempt, and the reversal is not a preference -
- * it is what the evidence says. Te Arai Links is in the world top 100 and its own
- * site publishes no hole-by-hole card at all, just "18 hole, par 72" and four tee
- * totals. GolfPass publishes the full card for both of its courses, server-
- * rendered, in plain HTML.
- *
- * It is also the difference between a bounded problem and an unbounded one: a few
- * aggregators with stable layouts, versus every club in the world with its own.
- *
- * The club site still gets read last, because the fields it does reliably carry -
- * hole count, par, the course's real name - are exactly the ones the mapper needs
- * most and the cheapest to extract. */
+ * Candidates are ranked by identity and location first, with known scorecard
+ * sources as a tie-breaker. A strong official-domain match is therefore inspected
+ * early, but an aggregator that carries the exact club/course identity still wins
+ * over weak or generic pages. Semantic structure, not the page title or literal
+ * word "scorecard", decides whether the fetched document is useful. */
 
 import { parseScorecardCardsHtml, courseFactsFromText, pageText } from "./gd-scorecard-parse-core.mjs";
+import courseSearchIdentity from "./gd-course-search-identity.js";
+
+const {
+  buildCourseSearchIdentity, scoreSearchCandidate, scoreScorecardPage,
+  detectFacilityStructure, similarity
+} = courseSearchIdentity;
 
 export const SCORECARD_SOURCE_PRIORITY = ["golfpass", "18birdies", "golfshot", "swingu", "club-site", "search"];
 
@@ -133,6 +130,15 @@ export function cardNameMatchesCourse(cardName, courseName) {
   /* Every distinctive word, so "Te Arai" clears and "Ayren" does not. One-word
      club names still work because the bar is the whole set, however small. */
   return hits === wanted.length;
+}
+
+/* The old guard above remains exported for callers that compare two Latin names.
+   Discovery uses the complete identity instead: an exact Korean/Japanese/Chinese
+   alias is valid evidence, as is an English provider alias supplied alongside it. */
+export function cardNameMatchesIdentity(cardName, identity) {
+  const claimed = String(cardName || "").trim();
+  if (!claimed) return false;
+  return (identity.aliases || []).some(alias => similarity(alias, claimed) >= 0.78);
 }
 
 /* course_scorecards.course_key is the DISPLAY NAME lowercased and whitespace-
@@ -327,7 +333,18 @@ export function distinctCardCount(cards) {
 export async function resolveScorecard(course, deps, options) {
   const name = String((course && (course.courseName || course.name)) || "").trim();
   const key = scorecardCourseKey(name);
-  const out = { courseKey: key, courseName: name, cards: [], stored: false, statedHoleCount: null, attempts: [] };
+  const identity = buildCourseSearchIdentity(course);
+  const out = {
+    courseKey: key, courseName: name, identity, cards: [], stored: false,
+    statedHoleCount: null, attempts: [], searchTrace: {
+      originalCourseName: name,
+      canonicalCourseName: identity.englishName || name,
+      aliases: identity.aliases,
+      transliterations: identity.transliterations,
+      location: { city: identity.city, region: identity.region, country: identity.country, countryCode: identity.countryCode, lat: identity.lat, lng: identity.lng },
+      queries: [], domainsDiscovered: [], candidates: []
+    }
+  };
   if (!key) return Object.assign(out, { reason: "no-course-name" });
 
   if (deps.readStore) {
@@ -340,7 +357,14 @@ export async function resolveScorecard(course, deps, options) {
   /* The number of courses the scan actually separated, when the caller knows it.
      Without it, 2 is the floor that still lets a plain single course stop early. */
   const want = Math.max(1, Number(options && options.want) || 1);
-  const candidates = await gatherCandidates(course, name, deps);
+  const gathered = await gatherCandidates(course, identity, deps);
+  const candidates = gathered.candidates;
+  out.searchTrace.queries = gathered.trace.queries || [];
+  out.searchTrace.domainsDiscovered = gathered.trace.domainsDiscovered || [];
+  out.searchTrace.candidates = candidates.map(candidate => ({
+    url: candidate.url, title: candidate.name || "", score: candidate.candidateScore,
+    reasons: candidate.scoreReasons || [], why: candidate.why
+  }));
   const queued = new Set(candidates.map(candidate => candidate.url));
   const parsed = [];
   for (let i = 0; i < candidates.length; i++) {
@@ -369,9 +393,13 @@ export async function resolveScorecard(course, deps, options) {
        which is the cheapest possible route to "one card per course". */
     const pageName = courseNameFromHtml(html, candidate.name || name);
     const cards = parseScorecardCardsHtml(html, { name: pageName, unit: source.unit });
+    const pageConfidence = scoreScorecardPage(html, cards);
     out.attempts.push({
       url: candidate.url, ok: !!cards.length, source: source.id,
-      cards: cards.length, holes: cards[0] ? cards[0].holes.length : 0
+      cards: cards.length, holes: cards[0] ? cards[0].holes.length : 0,
+      candidateScore: candidate.candidateScore || 0,
+      scorecardConfidence: pageConfidence.score,
+      scorecardSignals: pageConfidence.details
     });
     const attempt = out.attempts[out.attempts.length - 1];
     /* Prose facts are worth keeping even from a page whose table was unreadable -
@@ -389,16 +417,34 @@ export async function resolveScorecard(course, deps, options) {
       if (!quality.usable) { attempt.reason = quality.reason; return; }
       /* A card's own heading can be just "Scorecard", so it is checked against the
          page's name too before being called a different club's card. */
-      if (!cardNameMatchesCourse(card.name, name) && !cardNameMatchesCourse(pageName, name)) {
+      const identityMatched = cardNameMatchesIdentity(card.name, identity)
+        || cardNameMatchesIdentity(pageName, identity)
+        || cardNameMatchesCourse(card.name, name)
+        || cardNameMatchesCourse(pageName, name);
+      const searchIdentityMatched = Number(candidate.nameSimilarity) >= 0.78;
+      const officialSemanticMatch = !!candidate.officialDomain && pageConfidence.score >= 55;
+      if (!identityMatched && !searchIdentityMatched && !officialSemanticMatch) {
         attempt.rejected = "name-mismatch:" + (card.name || "").slice(0, 60);
         return;
       }
       attempt.usable = true;
+      if (!out.searchTrace.canonicalCourseName || out.searchTrace.canonicalCourseName === name) {
+        const latinPageName = /[a-z]/i.test(pageName) ? pageName : "";
+        if (latinPageName) out.searchTrace.canonicalCourseName = latinPageName;
+      }
+      const cardLabel = String(card.name || "").trim();
+      const usefulCardLabel = cardLabel && !/^(?:scorecard|course|course guide|golf course)$/i.test(cardLabel);
       parsed.push(Object.assign({}, card, {
         /* Falls back to the page's name when the table heading is generic, so two
            cards from one page stay distinguishable but a lone card is still named. */
-        name: cardNameMatchesCourse(card.name, name) ? card.name : pageName,
-        sourceUrl: candidate.url, source: source.id, quality: quality.score
+        name: usefulCardLabel ? cardLabel : pageName,
+        sourceUrl: candidate.url, source: source.id,
+        quality: quality.score + pageConfidence.score * 0.1 + (candidate.candidateScore || 0) * 0.05,
+        resolution: {
+          identity, officialDomain: candidate.officialDomain ? safeHostname(candidate.url) : "",
+          confidence: Math.min(1, (pageConfidence.score + Math.max(0, candidate.candidateScore || 0)) / 140),
+          fetchedAt: new Date().toISOString(), scorecardConfidence: pageConfidence.score
+        }
       }));
     });
   }
@@ -407,6 +453,7 @@ export async function resolveScorecard(course, deps, options) {
      courses yields two cards, and the loop matcher needs both to tell them apart. */
   parsed.sort((a, b) => b.quality - a.quality);
   out.cards = parsed;
+  out.facility = detectFacilityStructure(distinctCards(parsed));
   out.want = want;
   out.distinct = distinctCardCount(parsed);
   /* Says so when it came up short rather than letting the caller assume the pool is
@@ -431,29 +478,67 @@ export async function resolveScorecard(course, deps, options) {
  * search is how they are found, and without a search provider configured this
  * degrades to the club's own site. That is a real limitation, not a silent one:
  * the caller gets it back on `attempts`. */
-async function gatherCandidates(course, name, deps) {
+async function gatherCandidates(course, identity, deps) {
   const seen = new Set();
   const list = [];
-  const add = (url, label, why) => {
+  const add = (url, label, why, metadata) => {
     const clean = String(url || "").replace(/\/+$/, "");
     if (!clean || seen.has(clean)) return;
     seen.add(clean);
-    list.push({ url: clean, name: label || name, why });
+    const scored = scoreSearchCandidate(Object.assign({ url: clean, title: label || "" }, metadata || {}), identity);
+    list.push(Object.assign({
+      url: clean, name: label || identity.rawName, why,
+      candidateScore: Number(metadata && metadata.candidateScore) || scored.score,
+      scoreReasons: (metadata && metadata.scoreReasons) || scored.reasons,
+      nameSimilarity: scored.nameSimilarity,
+      officialDomain: scored.officialDomain || !!(metadata && metadata.official)
+    }, metadata || {}));
   };
 
+  let trace = { queries: [], domainsDiscovered: [] };
   if (deps.search) {
-    const region = String((course && (course.region || course.country)) || "");
-    const hits = await deps.search(name, region).catch(() => []);
-    (hits || []).forEach(hit => add(hit.url || hit, hit.name, "search"));
+    const region = identity.region || identity.country || "";
+    const response = await deps.search(identity.rawName, region, identity).catch(() => []);
+    const hits = Array.isArray(response) ? response : ((response && response.results) || []);
+    if (response && !Array.isArray(response)) {
+      trace = { queries: response.queries || [], domainsDiscovered: response.domainsDiscovered || [] };
+      if (response.identity) {
+        (response.identity.aliases || []).forEach(alias => {
+          if (!identity.aliases.some(existing => similarity(existing, alias) >= 1)) identity.aliases.push(alias);
+        });
+      }
+    }
+    hits.forEach(hit => add(hit.url || hit, hit.title || hit.name, "search", hit));
   }
-  [course && course.website, course && course.url].filter(Boolean).forEach(site => add(site, name, "club-site"));
+  [course && course.website, course && course.url].filter(Boolean).forEach(site => add(site, identity.rawName, "club-site", { official: true }));
 
-  /* Known sources first, then everything else in the order search ranked it. */
+  /* A likely official root is useful even when search landed on news or booking.
+     Probe conventional course paths; fetch failures are recorded and harmless. */
+  const roots = new Set();
+  list.filter(candidate => candidate.officialDomain || candidate.why === "club-site").forEach(candidate => {
+    try { roots.add(new URL(candidate.url).origin); } catch (e) {}
+  });
+  const paths = ["/course", "/course-info", "/courseguide", "/course-guide", "/golf", "/scorecard", "/holes"];
+  [...roots].slice(0, 2).forEach(root => paths.forEach(path => add(root + path, identity.rawName, "official-path", { official: true })));
+
+  /* Identity/location evidence leads. Source reputation breaks close ties, so a
+     strongly matching aggregator still wins while an unrelated one cannot jump
+     ahead of the official club page merely because its host is familiar. */
   const rank = url => {
     const index = SCORECARD_SOURCE_PRIORITY.indexOf(classifySource(url).id);
     return index === -1 ? SCORECARD_SOURCE_PRIORITY.length : index;
   };
-  return list.sort((a, b) => rank(a.url) - rank(b.url)).slice(0, 8);
+  return {
+    candidates: list.sort((a, b) => {
+      const scoreDelta = b.candidateScore - a.candidateScore;
+      return Math.abs(scoreDelta) >= 8 ? scoreDelta : (rank(a.url) - rank(b.url) || scoreDelta);
+    }).slice(0, 18),
+    trace
+  };
+}
+
+function safeHostname(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch (e) { return ""; }
 }
 
 /* Which course_key a distinct card should be written under, when the facility
@@ -515,7 +600,29 @@ export function facilityScorecardRow(card, courseName, facilityKey, existingRows
     hole_count: payload.holes.length,
     distance_count: payload.holes.filter(hole => Number.isFinite(hole.metres)).length,
     holes_json: payload.holes,
-    sources_json: [{ source: card.source || "", sourceUrl: card.sourceUrl || "", holes: (card.holes || []).length }],
+    sources_json: [{
+      source: card.source || "", sourceUrl: card.sourceUrl || "", holes: (card.holes || []).length,
+      resolution: card.resolution || null
+    }],
     updated_at: new Date().toISOString()
   };
+}
+
+/* A high-confidence or manually confirmed cached identity is sticky. Refreshes
+   may improve it, but a weaker scrape cannot silently replace it. */
+export function shouldReplaceFacilityCard(existing, incoming) {
+  if (!existing) return true;
+  const resolution = row => {
+    const first = Array.isArray(row && row.sources_json) ? row.sources_json[0] : null;
+    return (first && first.resolution) || {};
+  };
+  const oldResolution = resolution(existing), nextResolution = resolution(incoming);
+  const oldConfidence = Number(oldResolution.confidence) || 0;
+  const nextConfidence = Number(nextResolution.confidence) || 0;
+  const confirmed = oldResolution.confirmed === true
+    || oldConfidence >= 0.8
+    || /manual|confirmed/i.test(String(existing.source || ""));
+  if (!confirmed) return true;
+  if (!nextConfidence) return false;
+  return nextConfidence >= oldConfidence;
 }

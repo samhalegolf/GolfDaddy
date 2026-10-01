@@ -18,6 +18,9 @@
 
 const { safeRemoteUrl } = require("./lib/safe-remote-url");
 const { pickProvider } = require("./lib/gd-web-search");
+const {
+  buildCourseSearchIdentity, buildSearchQueries, domainQueries, scoreSearchCandidate
+} = require("./lib/gd-course-search-identity");
 
 const MAX_RESULTS = 8;
 
@@ -55,7 +58,16 @@ exports.handler = async function scorecardSearch(event) {
 
   const region = cleanName(payload && payload.region).slice(0, 60);
   const limit = clamp(Number(payload && payload.limit) || MAX_RESULTS, 1, MAX_RESULTS);
-  const query = `${name}${region ? " " + region : ""} golf scorecard hole by hole par`;
+  const identity = buildCourseSearchIdentity(Object.assign({}, payload && payload.identity, {
+    courseName: name,
+    region: (payload && payload.identity && payload.identity.region) || region,
+    country: payload && (payload.country || (payload.identity && payload.identity.country)),
+    countryCode: payload && (payload.countryCode || (payload.identity && payload.identity.countryCode)),
+    lat: payload && (payload.lat != null ? payload.lat : payload.identity && payload.identity.lat),
+    lng: payload && (payload.lng != null ? payload.lng : payload.identity && payload.identity.lng)
+  }));
+  const queryPlan = buildSearchQueries(identity, { max: 12 });
+  const query = queryPlan[0] && queryPlan[0].query;
 
   const provider = pickProvider();
   if (!provider) {
@@ -64,7 +76,40 @@ exports.handler = async function scorecardSearch(event) {
 
   let raw;
   try {
-    raw = await provider.search(query);
+    const batches = [];
+    raw = [];
+    /* Three at a time avoids bursting a provider with the full ladder. Stop once
+       identity evidence exposes a strong official domain; its internal search is
+       more useful than spending the rest of the broad queries. */
+    for (let offset = 0; offset < queryPlan.length; offset += 3) {
+      const next = await Promise.all(queryPlan.slice(offset, offset + 3).map(item => provider.search(item.query)
+        .then(results => ({ item, results: results || [], error: null }))
+        .catch(error => ({ item, results: [], error: String(error && error.message || error).slice(0, 160) }))));
+      batches.push(...next);
+      raw.push(...next.flatMap(batch => batch.results.map(result => Object.assign({}, result, {
+        matchedQuery: batch.item.query, queryKind: batch.item.kind
+      }))));
+      if (rankResults(raw, identity).some(result => result.identityScore
+        && result.identityScore.officialDomain && result.score >= 65)) break;
+    }
+
+    /* Once the broad ladder exposes a likely official host, search inside it. The
+       course page often has a generic title and is invisible to exact-name ranking. */
+    const firstRank = rankResults(raw, identity);
+    const officialDomains = [...new Set(firstRank.filter(result => result.identityScore && result.identityScore.officialDomain)
+      .map(result => { try { return new URL(result.url).hostname.replace(/^www\./, ""); } catch (e) { return ""; } })
+      .filter(Boolean))].slice(0, 2);
+    const insidePlan = officialDomains.flatMap(domain => domainQueries(domain, identity).slice(0, 3));
+    const inside = await Promise.all(insidePlan.map(item => provider.search(item.query)
+      .then(results => ({ item, results: results || [], error: null }))
+      .catch(error => ({ item, results: [], error: String(error && error.message || error).slice(0, 160) }))));
+    raw = raw.concat(inside.flatMap(batch => batch.results.map(result => Object.assign({}, result, {
+      matchedQuery: batch.item.query, queryKind: batch.item.kind, official: true
+    }))));
+    payload.__trace = {
+      queries: batches.concat(inside).map(batch => ({ query: batch.item.query, kind: batch.item.kind, results: batch.results.length, error: batch.error })),
+      domainsDiscovered: officialDomains
+    };
   } catch (error) {
     return json(502, {
       error: "Scorecard search failed",
@@ -74,18 +119,28 @@ exports.handler = async function scorecardSearch(event) {
     });
   }
 
-  const results = rankResults(raw, name)
+  const results = rankResults(raw, identity)
     .slice(0, limit)
-    .map(result => ({ url: result.url, title: result.title, snippet: result.snippet }));
+    .map(result => ({
+      url: result.url, title: result.title, snippet: result.snippet,
+      matchedQuery: result.matchedQuery || "", queryKind: result.queryKind || "",
+      candidateScore: result.score,
+      scoreReasons: result.identityScore ? result.identityScore.reasons : []
+    }));
 
-  return json(200, { query, provider: provider.name, results });
+  return json(200, {
+    query, provider: provider.name, identity,
+    queries: (payload.__trace && payload.__trace.queries) || [],
+    domainsDiscovered: (payload.__trace && payload.__trace.domainsDiscovered) || [],
+    results
+  });
 };
 
 /* Reorders provider results so the pages most likely to hold a hole-by-hole table
    come first, and drops anything the fetcher would refuse anyway - no point
    handing back a URL that /api/scorecard-fetch will reject. */
-function rankResults(results, name) {
-  const nameTokens = tokenize(name);
+function rankResults(results, identity) {
+  const nameTokens = (identity.aliases || []).flatMap(tokenize);
   const seen = new Set();
   const scored = [];
 
@@ -97,7 +152,8 @@ function rankResults(results, name) {
     seen.add(key);
 
     const haystack = `${parsed.href} ${result.title || ""} ${result.snippet || ""}`;
-    let score = 0;
+    const identityScore = scoreSearchCandidate(result, identity);
+    let score = identityScore.score;
     SCORECARD_HINTS.forEach(hint => {
       if (hint.pattern.test(haystack)) score += hint.weight;
     });
@@ -117,7 +173,10 @@ function rankResults(results, name) {
     /* Keep the provider's own ordering as the tiebreak. */
     score -= index * 0.1;
 
-    scored.push({ url: parsed.href, title: result.title || "", snippet: result.snippet || "", score });
+    scored.push({
+      url: parsed.href, title: result.title || "", snippet: result.snippet || "", score,
+      matchedQuery: result.matchedQuery || "", queryKind: result.queryKind || "", identityScore
+    });
   });
 
   return scored.sort((a, b) => b.score - a.score);

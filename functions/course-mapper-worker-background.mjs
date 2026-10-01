@@ -31,7 +31,7 @@ import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoO
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
-import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow, stitchedCardVerdict } from "./lib/gd-scorecard-resolve.mjs";
+import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow, stitchedCardVerdict, shouldReplaceFacilityCard } from "./lib/gd-scorecard-resolve.mjs";
 import { reconcileFacilityClaims, atomicLoopCount, HOLES_PER_LOOP } from "./lib/gd-facility-loops-core.mjs";
 import { assessFacilityStructure, contestedClaims, describeClaimGround, isIndependentClaim, mappingMethodFor, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
 import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry, cardLengths } from "./lib/gd-scorecard-match-core.mjs";
@@ -449,6 +449,32 @@ function golfFeatureCounts(payload) {
   return counts;
 }
 
+/* Pull multilingual identity from the OSM response we already paid for. Course
+   polygons commonly carry name/name:en/alt_name even when the picked database
+   row only has one spelling. Hole ways also expose the local loop names. */
+function enrichCourseSearchMetadata(course, payload) {
+  const elements = (payload && payload.elements) || [];
+  const namedFacilities = elements.filter(element => {
+    const tags = (element && element.tags) || {};
+    return String(tags.leisure || "").toLowerCase() === "golf_course"
+      || String(tags.golf || "").toLowerCase() === "course";
+  });
+  const nearest = namedFacilities[0] || null;
+  const tags = (nearest && nearest.tags) || {};
+  const names = [tags.name, tags["name:en"], tags.alt_name, tags.official_name, tags.short_name]
+    .map(value => String(value || "").trim()).filter(Boolean);
+  course.osmName = String(tags.name || course.courseName || "").trim();
+  course.localName = /[^\u0000-\u024f]/.test(course.osmName) ? course.osmName : "";
+  course.englishName = String(tags["name:en"] || "").trim();
+  course.aliases = [...new Set(names.concat(course.courseName || ""))];
+  course.expectedHoleCount = Number(tags.holes) || null;
+  course.candidateLoopNames = [...new Set(elements.map(element => {
+    const t = (element && element.tags) || {};
+    if (String(t.golf || "").toLowerCase() !== "hole") return "";
+    return String(t.course || t.loop || t["course:name"] || "").trim();
+  }).filter(Boolean))];
+}
+
 /* fetch OSM golf geometry -> resolve into tee/green/fairway objects -> persist.
 
    Query area, in order of preference: the course's own footprint bbox when it spills outside
@@ -571,16 +597,25 @@ async function fetchPageHtml(url, signal) {
   return text.slice(0, 650000);
 }
 
-async function searchScorecardPages(name, region, origin, signal) {
+async function searchScorecardPages(name, region, identity, origin, signal) {
   if (!origin) return [];
   const response = await fetch(origin + "/.netlify/functions/scorecard-search", {
     method: "POST", signal,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, region })
+    body: JSON.stringify({
+      name, region, identity,
+      country: identity && identity.country,
+      countryCode: identity && identity.countryCode,
+      lat: identity && identity.lat,
+      lng: identity && identity.lng
+    })
   });
   if (!response.ok) return [];
   const payload = await response.json().catch(() => null);
-  return ((payload && payload.results) || []).map(result => ({ url: result.url, name: result.title || "" }));
+  if (!payload) return [];
+  return Object.assign({}, payload, {
+    results: (payload.results || []).map(result => Object.assign({}, result, { name: result.title || "" }))
+  });
 }
 
 async function resolveScorecardForCourse(course, origin, want) {
@@ -592,9 +627,24 @@ async function resolveScorecardForCourse(course, origin, want) {
      including from Update Scorecards without re-fetching. */
   const facilityKey = course.courseId || null;
   try {
-    return await resolveScorecard({ courseName: course.courseName, region: course.region, country: course.country }, {
+    return await resolveScorecard({
+      courseName: course.courseName,
+      rawName: course.courseName,
+      osmName: course.osmName,
+      localName: course.localName,
+      englishName: course.englishName,
+      aliases: course.aliases,
+      transliterations: course.transliterations,
+      region: course.region,
+      country: course.country,
+      countryCode: course.countryCode,
+      city: course.city,
+      center: course.center,
+      expectedHoleCount: course.expectedHoleCount,
+      candidateLoopNames: course.candidateLoopNames
+    }, {
       fetchHtml: url => fetchPageHtml(url, signal),
-      search: (name, region) => searchScorecardPages(name, region, origin, signal),
+      search: (name, region, identity) => searchScorecardPages(name, region, identity, origin, signal),
       /* Reads go through fetchScorecardEvidence already; passing readStore here
          would just repeat the query the caller has done. */
       writeStore: async (key, name, cards) => {
@@ -604,7 +654,8 @@ async function resolveScorecardForCourse(course, origin, want) {
            is already stored for this facility, so a card re-resolved under a
            different title updates its existing row instead of duplicating it. */
         const existing = await fetchFacilityScorecardEvidence(facilityKey);
-        const rows = distinctCards(cards).map(card => facilityScorecardRow(card, name, facilityKey, existing)).filter(Boolean);
+        const rows = distinctCards(cards).map(card => facilityScorecardRow(card, name, facilityKey, existing)).filter(Boolean)
+          .filter(row => shouldReplaceFacilityCard(existing.find(old => old.course_key === row.course_key), row));
         if (!rows.length) return;
         await supabaseFetch(SCORECARDS_TABLE + "?on_conflict=course_key", {
           method: "POST",
@@ -1679,6 +1730,7 @@ async function runMapperJob(job, origin) {
   }
   diagnostics.queryStages = queryStages;
   diagnostics.osmFeatures = golfFeatureCounts(payload);
+  enrichCourseSearchMetadata(course, payload);
   await heartbeatJob(job, { stage: "resolving-geometry" });
   const existingObjects = Object.values(course.objects || {}).filter(Boolean);
   const siblingCentres = await loadSiblingCentres(course).catch(() => []);
@@ -1697,7 +1749,9 @@ async function runMapperJob(job, origin) {
       statedHoleCount: resolved.statedHoleCount || null,
       stored: !!resolved.stored,
       reason: resolved.reason || null,
-      attempts: (resolved.attempts || []).slice(0, 6)
+      facility: resolved.facility || null,
+      trace: resolved.searchTrace || null,
+      attempts: (resolved.attempts || []).slice(0, 18)
     };
     if (resolved.cards && resolved.cards.length) {
       const best = resolved.cards[0];

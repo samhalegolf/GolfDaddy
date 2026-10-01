@@ -1131,6 +1131,37 @@
       if (run.overlay && run.overlay.draft) bits.push("the overlay was a draft, so the run ignored it");
       var html = bits.join(" · ");
       if (run.status === "failed" && run.error) html += '<br><span class="gdStudioWarnText">' + esc(run.error) + "</span>";
+      var scorecard = run.scorecardResolve;
+      if (scorecard) {
+        var facility = scorecard.facility || {};
+        var loops = (facility.loops || []).map(function (loop) { return loop.name; }).filter(Boolean);
+        if (scorecard.cards) {
+          html += '<br><span class="gdStudioOkText">Scorecard matched: ' + esc((scorecard.trace && (scorecard.trace.canonicalCourseName || scorecard.trace.originalCourseName)) || "course")
+            + (facility.holeCount ? " · " + esc(facility.holeCount) + " holes" : "")
+            + (loops.length ? " · " + esc(loops.join(" / ")) : "") + "</span>";
+        } else {
+          html += '<br><span class="gdStudioWarnText">Scorecard not resolved</span>';
+        }
+        var trace = scorecard.trace || {};
+        var candidates = trace.candidates || [];
+        var attempts = scorecard.attempts || [];
+        html += '<details class="gdStudioScorecardTrace"><summary>Scorecard search details</summary>'
+          + '<div><strong>Original:</strong> ' + esc(trace.originalCourseName || "—") + "</div>"
+          + '<div><strong>Aliases:</strong> ' + esc((trace.aliases || []).join(" · ") || "—") + "</div>"
+          + '<div><strong>Transliterations:</strong> ' + esc((trace.transliterations || []).join(" · ") || "—") + "</div>"
+          + '<div><strong>Location:</strong> ' + esc([trace.location && trace.location.city, trace.location && trace.location.region, trace.location && trace.location.country].filter(Boolean).join(", ") || "—") + "</div>"
+          + '<div><strong>Queries:</strong><ol>' + (trace.queries || []).map(function (query) {
+            return "<li>" + esc(query.query || query) + (query.error ? " — " + esc(query.error) : "") + "</li>";
+          }).join("") + "</ol></div>"
+          + '<div><strong>Domains:</strong> ' + esc((trace.domainsDiscovered || []).join(" · ") || "—") + "</div>"
+          + '<div><strong>Candidates:</strong><ol>' + candidates.map(function (candidate) {
+            return "<li>" + esc(candidate.url) + " — " + esc(candidate.score) + " (" + esc((candidate.reasons || []).join(", ")) + ")</li>";
+          }).join("") + "</ol></div>"
+          + '<div><strong>Page decisions:</strong><ol>' + attempts.map(function (attempt) {
+            return "<li>" + esc(attempt.url) + " — scorecard " + esc(attempt.scorecardConfidence || 0)
+              + (attempt.usable ? " — accepted" : " — rejected: " + esc(attempt.rejected || attempt.reason || "no readable structure")) + "</li>";
+          }).join("") + "</ol></div></details>";
+      }
       box.innerHTML = html;
     }
 
