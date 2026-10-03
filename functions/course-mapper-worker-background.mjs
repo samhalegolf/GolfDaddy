@@ -27,7 +27,7 @@
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete, scorecardIdentityMismatch } from "./lib/gd-course-fit-core.mjs";
 import { reverseGeocodePlace } from "./lib/gd-course-place.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, intersectOsmFrames, SIBLING_SWEEP_M, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole, resolverHoleCandidates } from "./lib/gd-geometry-resolver-core.mjs";
 import { partitionLoops, walkCost } from "./lib/gd-ground-loops-core.mjs";
 import { courseNameFromCard } from "./lib/gd-facility-organise-core.mjs";
@@ -37,7 +37,7 @@ import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRo
 import { reconcileFacilityClaims, atomicLoopCount, HOLES_PER_LOOP } from "./lib/gd-facility-loops-core.mjs";
 import { assessFacilityStructure, contestedClaims, describeClaimGround, isIndependentClaim, mappingMethodFor, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
 import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry, cardLengths } from "./lib/gd-scorecard-match-core.mjs";
-import { planListingResolution, courseLabelOf, RESOLUTION_MODE } from "./lib/gd-course-listing-core.mjs";
+import { planListingResolution, courseLabelOf, looksLikeCourseLabel, RESOLUTION_MODE } from "./lib/gd-course-listing-core.mjs";
 import { eliminateInferredCourses } from "./lib/gd-inferred-course-claims-core.mjs";
 import { OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND } from "./course-mapper-jobs.mjs";
 import { refineSurfaceShape, applyRefinedShape, REFINED_SHAPE_SOURCE } from "./lib/gd-surface-refine-core.mjs";
@@ -574,7 +574,7 @@ async function requeryHoleGaps(job, course, payload, loops) {
   if (!record.elementsAdded) { record.reason = "no-new-elements"; return { record, next: null }; }
 
   const nextCollision = detectHoleNumberCollision(merged);
-  const nextLoops = separateLoops(merged, course.center, { facilityName: splitCourseName(course.courseName || "").facility });
+  const nextLoops = separateLoops(merged, course.center, { facilityName: splitCourseName(course.courseName || "").facility, selectedName: course.courseName || "" });
   if (!nextLoops || nextLoops.length < loops.length) { record.reason = "separation-regressed"; return { record, next: null }; }
 
   record.before = separationScore(loops);
@@ -1058,6 +1058,102 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
      facility will offer this course again. */
   if (failures.length) published.failures = failures;
   return published;
+}
+
+/* A neighbouring course the sweep caught whole, published as its OWN course.
+ *
+ * Not a sibling: its own id, its own name, and no facility grouping - a single course. A player standing near
+ * Poppy Hills is likely to play Spyglass Hill some day, so the geometry already in hand
+ * is worth keeping - but under "Spyglass Hill Golf Course", never as poppy-hills-*.
+ *
+ * Only what can be published honestly: a neighbour needs a name from its own OSM outline
+ * (an unnamed one would be "Course 4" of nothing) and a complete 1..n routing of at least
+ * NEIGHBOUR_MIN_HOLES. And it never touches a course we already have - same OSM outline,
+ * or any mapped course on the same ground - because that row may have been scanned on its
+ * own, from its own listing, and is better evidence than a by-product of someone else's.
+ *
+ * Failures are recorded and swallowed: a neighbour is a bonus to this run, never a reason
+ * for the player's own course to fail. */
+const NEIGHBOUR_MIN_HOLES = 9;
+const ESTABLISHMENT_WORD = /\b(golf|club|links)\b/i;
+
+async function neighbourAlreadyMapped(loop, courseId) {
+  if (loop.osmRef) {
+    const byRef = await supabaseFetch(MAPS_TABLE + "?select=course_id&osm_course_ref=eq." + encodeURIComponent(loop.osmRef) + "&limit=1");
+    if (Array.isArray(byRef) && byRef.length) return { courseId: byRef[0].course_id, by: "osm-outline" };
+  }
+  const byId = await supabaseFetch(MAPS_TABLE + "?select=course_id&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
+  if (Array.isArray(byId) && byId.length) return { courseId: byId[0].course_id, by: "course-id" };
+  const pad = 0.01;
+  const nearby = await supabaseFetch(MAPS_TABLE + "?select=course_id,course_lat,course_lng"
+    + "&course_lat=gte." + (loop.centre.lat - pad) + "&course_lat=lte." + (loop.centre.lat + pad)
+    + "&course_lng=gte." + (loop.centre.lng - pad) + "&course_lng=lte." + (loop.centre.lng + pad) + "&limit=50");
+  const onGround = (Array.isArray(nearby) ? nearby : []).find(row => Number.isFinite(Number(row.course_lat)) && Number.isFinite(Number(row.course_lng))
+    && distance(loop.centre, { lat: Number(row.course_lat), lng: Number(row.course_lng) }) <= SAME_GROUND_M);
+  return onGround ? { courseId: onGround.course_id, by: "same-ground" } : null;
+}
+
+async function publishNeighbourCourses(job, course, neighbours, origin) {
+  const outcomes = [];
+  const taken = new Set([course.courseId]);
+  for (const loop of neighbours || []) {
+    const name = stripParSuffix(loop.name || "") || "";
+    const entry = { name: name || null, osmRef: loop.osmRef || null, holes: loop.holeNumbers.length, awayFromPinM: loop.awayFromPinM, reason: loop.foreignReason || null };
+    outcomes.push(entry);
+    if (!name) { entry.skipped = "no-name"; continue; }
+    /* "North Course" or "Coronet 18" names a course of some facility, not which one - as a
+       stand-alone row it would be a course called "North Course" in the picker. */
+    if (looksLikeCourseLabel(name) && !ESTABLISHMENT_WORD.test(name)) { entry.skipped = "name-is-only-a-course-label"; continue; }
+    if (!loop.contiguous || loop.holeNumbers.length < NEIGHBOUR_MIN_HOLES || !loop.centre) { entry.skipped = "incomplete"; continue; }
+    const courseId = slug(name);
+    if (taken.has(courseId)) { entry.skipped = "duplicate-in-run"; continue; }
+    taken.add(courseId);
+    try {
+      const existing = await neighbourAlreadyMapped(loop, courseId);
+      if (existing) { entry.skipped = "already-mapped"; entry.existing = existing; continue; }
+      const geometry = resolveCourseGeometry(loop.payload, courseId, loop.centre, [], []);
+      const holeNumbers = Object.keys(geometry.holes || {}).map(Number).filter(Number.isFinite);
+      if (!loopIsContiguous(holeNumbers) || holeNumbers.length < loop.holeNumbers.length) {
+        entry.skipped = "geometry-incomplete";
+        entry.holesResolved = holeNumbers.length;
+        continue;
+      }
+      const row = {
+        course_id: courseId,
+        course_name: name,
+        course_lat: loop.centre.lat,
+        course_lng: loop.centre.lng,
+        region: course.region || null,
+        country: course.country || null,
+        country_code: course.countryCode || null,
+        osm_course_ref: loop.osmRef || null,
+        /* A course on its own, like any single-course row: no facility grouping. */
+        facility_key: null,
+        facility_name: null,
+        objects_json: geometry.objects,
+        holes_json: geometry.holes,
+        geometry_version: MAPPER_VERSION,
+        hole_count: holeNumbers.length,
+        published: true,
+        updated_at: new Date().toISOString()
+      };
+      await supabaseFetch(MAPS_TABLE + "?on_conflict=course_id", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+        body: JSON.stringify([Object.assign({ id: "published::" + courseId, published_at: new Date().toISOString() }, row)])
+      });
+      const coverage = courseCoverageComplete({ holeNumbers, expectedHoles: loop.holeNumbers.length });
+      const courseBounds = courseBoundsFor({ courseId, objects: geometry.objects, holes: geometry.holes });
+      entry.courseId = courseId;
+      entry.holesResolved = geometry.holesResolved;
+      entry.visualChain = await chainVisualSnapshot(courseId, courseBounds, origin, coverage)
+        .catch(error => ({ chained: false, reason: String(error && error.message || error).slice(0, 300) }));
+    } catch (error) {
+      entry.skipped = "write-failed";
+      entry.error = String((error && error.message) || error).slice(0, 200);
+    }
+  }
+  return outcomes;
 }
 
 /* How long a facility run may take, and how many passes it may make.
@@ -2129,13 +2225,24 @@ async function runMapperJob(job, origin) {
     const scopeFrame = osmScopeFrame(scope, course.center);
     const dataFrame = holeFeatureFrame(payload);
     const anchor = frameCentre(dataFrame) || course.center;
+    /* ...but never further from the pin than a sibling can sit.
+     *
+     * The widest gap between two hole 1s is only the site's extent when every course in
+     * the sweep belongs to it. On a peninsula of clubs it is not: Poppy Hills' first
+     * sweep saw hole numbers repeat 3.5km apart, the widen took that as the size of the
+     * site, and the run went on to publish six other clubs' courses as Poppy Hills.
+     * Nothing beyond SIBLING_SWEEP_M can be this facility's (see SIBLING_REACH_M), so
+     * fetching it only drags neighbours in. */
+    const siblingBox = expandOsmFrame({ south: course.center.lat, west: course.center.lng, north: course.center.lat, east: course.center.lng }, SIBLING_SWEEP_M);
     const widerFrame = unionOsmFrames(
       /* never lose first-pass coverage */
       scopeFrame,
-      /* the site is at least needM across, centred on where its holes actually are */
-      expandOsmFrame({ south: anchor.lat, west: anchor.lng, north: anchor.lat, east: anchor.lng }, needM),
-      /* and never sit tighter than a clear margin around the holes already in hand */
-      holeFeatureFrame(payload, WIDEN_DATA_PAD_M)
+      intersectOsmFrames(siblingBox, unionOsmFrames(
+        /* the site is at least needM across, centred on where its holes actually are */
+        expandOsmFrame({ south: anchor.lat, west: anchor.lng, north: anchor.lat, east: anchor.lng }, needM),
+        /* and never sit tighter than a clear margin around the holes already in hand */
+        holeFeatureFrame(payload, WIDEN_DATA_PAD_M)
+      ))
     );
     /* Recorded whether or not it helps.
      *
@@ -2187,14 +2294,17 @@ async function runMapperJob(job, origin) {
     }
   }
 
-  /* What separation set aside. A course outline wholly outside the facility outline is
-     another club the widened sweep caught - George Golf Club beside Fancourt - and it is
-     neither published nor silently dropped. */
+  /* What separation set aside as neighbouring courses - George Golf Club beside Fancourt,
+     Spyglass Hill beside Poppy Hills. Never published as this facility's siblings; held
+     here so the ones that came back named and whole can be published as courses of their
+     own once this run's own courses are settled (publishNeighbourCourses). */
+  let neighbourLoops = [];
   const noteExcludedLoops = () => {
+    neighbourLoops = (loops && Array.isArray(loops.neighbours)) ? loops.neighbours : [];
     if (loops && Array.isArray(loops.excluded) && loops.excluded.length) diagnostics.neighbouringClubs = loops.excluded;
   };
   if (collision.multiLoop) {
-    loops = separateLoops(payload, course.center, { facilityName: splitCourseName(course.courseName || "").facility });
+    loops = separateLoops(payload, course.center, { facilityName: splitCourseName(course.courseName || "").facility, selectedName: course.courseName || "" });
     noteExcludedLoops();
     diagnostics.collision = {
       loops: collision.loops,
@@ -2291,6 +2401,19 @@ async function runMapperJob(job, origin) {
     };
     loops = null;
   };
+
+  /* Neighbours set aside and one course of this site's own left: that course is the run.
+     Poppy Hills Golf Course is one course, whatever else the sweep caught. */
+  if (loops && loops.length === 1) scopeRunToLoop(loops[0], "one-course-left-after-neighbours-set-aside");
+
+  /* Published before this run's own courses, which can still fail or fall through to the
+     resolver below: the neighbours' geometry is already separated and does not depend on
+     how this course resolves. */
+  if (neighbourLoops.length) {
+    await heartbeatJob(job, { stage: "publishing-neighbouring-courses" });
+    diagnostics.neighbourCourses = await publishNeighbourCourses(job, course, neighbourLoops, origin)
+      .catch(error => [{ skipped: "publish-failed", error: String((error && error.message) || error).slice(0, 200) }]);
+  }
 
   if (loops && loops.length > 1) {
     const plan = planListingResolution({ courseName: course.courseName, loops });

@@ -61,7 +61,8 @@
       { stage: "retry-wider-frame", from: 70, to: 76, label: "Retrying on a wider frame" },
       { stage: "gathering-cards-for-facility", from: 76, to: 82, label: "Gathering facility cards" },
       { stage: "resolving-facility-loops", from: 82, to: 88, label: "Resolving facility loops" },
-      { stage: "separating-contested-loops", from: 88, to: 92, label: "Separating contested loops" },
+      { stage: "separating-contested-loops", from: 88, to: 90, label: "Separating contested loops" },
+      { stage: "publishing-neighbouring-courses", from: 90, to: 92, label: "Publishing nearby courses" },
       { stage: "publishing-course", from: 92, to: 100, label: "Publishing" }
     ],
     collect_extra_objects: [
