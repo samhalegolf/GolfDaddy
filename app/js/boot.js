@@ -705,6 +705,12 @@
       stageOrAdoptMapUpdate(course, pkg, mapType);
       return;
     }
+    /* The reverse is never an update. The server answers with the lite pack while a
+       published map is between states (a re-bake, frames that lost their geometry),
+       and a newer objects timestamp on it read as a "geometry" update - so the
+       captured map was swapped for the lite one mid-round without a word. A blocked
+       hole the lite pack can fix is still taken, by the recovery branch above. */
+    if (mapType === "object" && activeMapType === "published") return;
     var local = heldCopy(course);
     /* Playing on the live map with nothing held: the first map to appear is
        genuinely new to this device, whatever its version. */

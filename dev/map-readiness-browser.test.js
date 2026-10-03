@@ -17,7 +17,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   if (url.pathname === "/api/course-package") {
     const id = url.searchParams.get("courseId");
-    const body = id === "late-course" ? latePackage : id === "repair-course" ? complete() : partial();
+    const body = id === "downgrade-course" ? Object.assign(complete(), { objectsVersion: "2026-09-03T00:00:00Z" }) : id === "late-course" ? latePackage : id === "repair-course" ? complete() : partial();
     res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(body)); return;
   }
   if (url.pathname.startsWith("/api/")) { res.writeHead(404); res.end("{}"); return; }
@@ -83,7 +83,23 @@ const server = http.createServer((req, res) => {
     await page.waitForTimeout(900);
     assert.strictEqual(await page.evaluate(() => document.getElementById("mapUpdateBar").classList.contains("hiddenState")), true,
       "an up-to-date round is not offered its own map again because the library write failed");
-    console.log("map-readiness browser passed: partial hole, manual choice, mapped resume, corrupt package, late recovery, repair banner");
+
+    /* Holding the captured map while the server answers with the lite pack (a re-bake
+       in flight) must never swap it out, however new the lite pack's objects are. */
+    await page.goto(base, { waitUntil: "load" });   /* a fresh page drops the failing-storage stub above */
+    const published = Object.assign(complete(), { status: "full-map-ready", packageVersion: 2, bakeNumber: 2,
+      holes: [1, 2, 3].map(n => ({ holeNumber: n, geometry: { tee, green: green(n), greenShape: [], route: [tee, green(n)] }, visual: null })) });
+    await page.evaluate(pkg => window.ClarityApp.courseStore.save({ courseId: "downgrade-course", courseName: "Downgrade", mapType: "published", objectsVersion: pkg.objectsVersion, mapVersion: 2, bakeNumber: 2, pkg }), published);
+    await page.goto(base + "?courseId=downgrade-course&courseName=Downgrade&courseLat=" + tee.lat + "&courseLng=" + tee.lng, { waitUntil: "load" });
+    await page.waitForTimeout(1900);
+    await page.evaluate(() => window.ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: 2 }));
+    await page.waitForTimeout(900);
+    assert.deepStrictEqual(await page.evaluate(() => ({
+      playing: window.ClarityApp.marshal.pkg().status,
+      saved: window.ClarityApp.courseStore.load("downgrade-course").mapType,
+      bar: document.getElementById("mapUpdateBar").classList.contains("hiddenState")
+    })), { playing: "full-map-ready", saved: "published", bar: true }, "a published round is never downgraded to the lite pack");
+    console.log("map-readiness browser passed: partial hole, manual choice, mapped resume, corrupt package, late recovery, repair banner, no lite downgrade");
   } finally {
     if (browser) await browser.close();
     server.close();
