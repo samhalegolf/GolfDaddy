@@ -1062,7 +1062,7 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
 
 /* A neighbouring course the sweep caught whole, published as its OWN course.
  *
- * Not a sibling: its own id, its own name, its own facility. A player standing near
+ * Not a sibling: its own id, its own name, and no facility grouping - a single course. A player standing near
  * Poppy Hills is likely to play Spyglass Hill some day, so the geometry already in hand
  * is worth keeping - but under "Spyglass Hill Golf Course", never as poppy-hills-*.
  *
@@ -1127,8 +1127,9 @@ async function publishNeighbourCourses(job, course, neighbours, origin) {
         country: course.country || null,
         country_code: course.countryCode || null,
         osm_course_ref: loop.osmRef || null,
-        facility_key: courseId,
-        facility_name: name,
+        /* A course on its own, like any single-course row: no facility grouping. */
+        facility_key: null,
+        facility_name: null,
         objects_json: geometry.objects,
         holes_json: geometry.holes,
         geometry_version: MAPPER_VERSION,

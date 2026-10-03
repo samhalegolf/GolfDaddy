@@ -9,7 +9,7 @@
  *   an unnamed 18       ~2.5km, nobody's outline
  *
  * What should come out: Poppy Hills maps as one course on its own row; Spyglass is published
- * as a course of its own (own id, own facility, own name); the unnamed 18 is skipped, since
+ * as a course of its own (own id and name, no facility grouping); the unnamed 18 is skipped, since
  * it has no name to publish under; nothing is published as poppy-hills-*.
  *
  * Run: node dev/poppy-hills-neighbours.test.js */
@@ -136,8 +136,8 @@ test("a single course maps alone, and a named neighbour is published as a course
   assert.strictEqual(Object.keys(poppy.holes_json || {}).length, 18, "Poppy Hills keeps its own 18");
   const spyglass = maps.get("spyglass-hill-golf-course");
   assert.strictEqual(spyglass.course_name, "Spyglass Hill Golf Course");
-  assert.strictEqual(spyglass.facility_key, "spyglass-hill-golf-course", "its own facility, not Poppy Hills'");
-  assert.strictEqual(spyglass.facility_name, "Spyglass Hill Golf Course");
+  assert.strictEqual(spyglass.facility_key, null, "a course on its own, not one of Poppy Hills'");
+  assert.strictEqual(spyglass.facility_name, null);
   assert.strictEqual(spyglass.osm_course_ref, "way/281477606");
   assert.strictEqual(Object.keys(spyglass.holes_json || {}).length, 18);
 
