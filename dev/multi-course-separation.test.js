@@ -181,8 +181,9 @@ function buildPayload({ withPolygons }) {
     chainedCourse(1000, ESTATE, { unnumbered: [3] }).forEach(way => elements.push(way));
     elements.push({ type: "way", id: 9101, tags: { leisure: "golf_course", name: "The Links at Fancourt" }, geometry: box(-33.9700, 22.4038, -33.9645, 22.4130) });
     elements.push({ type: "way", id: 9100, tags: { leisure: "golf_course", name: "Fancourt Golf Estate" }, geometry: box(-33.9740, 22.3980, -33.9620, 22.4160) });
-    /* East 18: outside both Fancourt outlines, no outline of its own. */
-    chainedCourse(2000, { lat: -33.9680, lng: 22.4300 }).forEach(way => elements.push(way));
+    /* East 18: outside both Fancourt outlines, no outline of its own. ~1.5km from the
+       clubhouse pin, inside SIBLING_REACH_M as the real one (1.3km) is. */
+    chainedCourse(2000, { lat: -33.9680, lng: 22.4170 }).forEach(way => elements.push(way));
     if (withNeighbour) {
       /* The club next door: its own outline, wholly outside the estate outline. */
       chainedCourse(3000, { lat: -33.9550, lng: 22.4400 }).forEach(way => elements.push(way));
@@ -192,7 +193,9 @@ function buildPayload({ withPolygons }) {
     return { elements };
   }
 
-  const fc = core.separateLoops(fancourt(), ESTATE);
+  /* The clubhouse sits mid-estate, nearest the west 18. */
+  const CLUBHOUSE = { lat: -33.9680, lng: 22.4060 };
+  const fc = core.separateLoops(fancourt(), CLUBHOUSE);
   assert.strictEqual(fc.length, 2, "the two Fancourt courses, and only those, separate");
   const links = fc.find(loop => loop.name === "The Links at Fancourt");
   const east = fc.find(loop => loop.method === "routing");
@@ -212,7 +215,7 @@ function buildPayload({ withPolygons }) {
   assert(!east.payload.elements.some(e => e.id === 3900), "the neighbour's greens go with the neighbour");
 
   /* Same site with no neighbour in the sweep: nothing excluded, same two courses. */
-  const fcAlone = core.separateLoops(fancourt({ withNeighbour: false }), ESTATE);
+  const fcAlone = core.separateLoops(fancourt({ withNeighbour: false }), CLUBHOUSE);
   assert.strictEqual(fcAlone.length, 2);
   assert.deepStrictEqual(fcAlone.excluded, []);
 

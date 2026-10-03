@@ -171,7 +171,7 @@ test("two courses are never both called the facility", () => {
   /* "Te Arai Links" twice in the picker is unusable - the player cannot tell which
      is which. Course 1 / Course 2 is honest, and the geometry is matched to a card
      regardless of whether a publishable label was found. */
-  assert.notStrictEqual(src.indexOf('"Course " + (index + 1)'), -1,
+  assert.notStrictEqual(src.indexOf("provisionalLoopName(index"), -1,
     "an unnamed loop takes a provisional name that distinguishes it");
   assert.notStrictEqual(src.indexOf("loops[entry.index].matchedCard = cardName"), -1,
     "the loop-to-card match is recorded even when the card cannot supply a name");
@@ -187,9 +187,9 @@ test("a site wider than its own sweep is re-queried before separation", () => {
      courseFootprintFrame could not help (no golf=course polygon in OSM) and the
      wider-retry excluded multi-loop sites - the very sites most likely to outgrow a
      fixed radius. */
-  const widenAt = src.indexOf("collision.widestSeparationM > scope.radiusM");
+  const widenAt = src.indexOf("collision.widestSeparationM > reachM");
   assert.notStrictEqual(widenAt, -1, "a site wider than the sweep must trigger a wider query");
-  const separateAt = src.indexOf("separateLoops(payload, course.center)");
+  const separateAt = src.indexOf("separateLoops(payload, course.center");
   assert.notStrictEqual(separateAt, -1);
   assert.ok(widenAt < separateAt, "and it must widen BEFORE separating, or the loops are built from a clipped payload");
 });
@@ -205,7 +205,7 @@ test("the worker separates a multi-course site before it considers refusing", ()
      still genuinely unresolvable: separation could not tell the courses apart, and
      the geometry resolver could not either. */
   const after = src.slice(idx);
-  const separateAt = after.indexOf("separateLoops(payload, course.center)");
+  const separateAt = after.indexOf("separateLoops(payload, course.center");
   const refuseAt = after.indexOf("throw fail(");
   assert.notStrictEqual(separateAt, -1, "the worker must try to separate the loops before giving up");
   assert.notStrictEqual(refuseAt, -1, "the refusal must survive for the cases separation cannot fix");
@@ -279,6 +279,23 @@ function teAraiSitePayload() {
   return { elements };
 }
 const frameHas = (frame, lat, lng) => lat >= frame.south && lat <= frame.north && lng >= frame.west && lng <= frame.east;
+
+test("the widen never reaches further from the pin than a sibling can sit - Poppy Hills", async () => {
+  const core = await import("file://" + path.join(ROOT, "functions", "lib", "gd-automapper-core.mjs"));
+  /* Poppy Hills: hole numbers repeated 3.5km apart across a peninsula of other clubs, and
+     the widen read that as the size of the site. The box is now clipped to SIBLING_SWEEP_M
+     around the pin; the first sweep's own coverage is never lost. */
+  const pin = { lat: 36.5848, lng: -121.9400 };
+  const box = core.expandOsmFrame({ south: pin.lat, west: pin.lng, north: pin.lat, east: pin.lng }, core.SIBLING_SWEEP_M);
+  const huge = core.expandOsmFrame({ south: pin.lat, west: pin.lng, north: pin.lat, east: pin.lng }, 8000);
+  const clipped = core.intersectOsmFrames(box, huge);
+  assert.deepStrictEqual(clipped, box, "a widen bigger than the reach is cut back to it");
+  assert.strictEqual(core.intersectOsmFrames(box, core.expandOsmFrame({ south: 0, west: 0, north: 0, east: 0 }, 100)), null,
+    "frames that do not meet have no overlap");
+  const fs = require("fs");
+  const src = fs.readFileSync(path.join(ROOT, "functions", "course-mapper-worker-background.mjs"), "utf8");
+  assert.notStrictEqual(src.indexOf("intersectOsmFrames(siblingBox,"), -1, "the worker clips its widen frame to the sibling box");
+});
 
 test("the widen box is centred on the holes, not on the clubhouse pin", async () => {
   const core = await import(path.join(ROOT, "functions", "lib", "gd-automapper-core.mjs"));
@@ -370,7 +387,7 @@ test("the gap requery runs after separation, and only adopts a result that impro
      so searching the whole file would compare against its definition and fail for
      the wrong reason. */
   const run = src.slice(src.indexOf("async function runMapperJob(job, origin) {"));
-  const separateAt = run.indexOf("separateLoops(payload, course.center)");
+  const separateAt = run.indexOf("separateLoops(payload, course.center");
   const gapAt = run.indexOf("requeryHoleGaps(job, course, payload, loops)");
   assert.notStrictEqual(gapAt, -1, "the worker must attempt a gap requery");
   assert.ok(separateAt < gapAt, "a gap is only visible after separation - the site as a whole looks complete");

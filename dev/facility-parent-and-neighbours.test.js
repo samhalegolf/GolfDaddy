@@ -42,7 +42,9 @@ function ring(origin, spanLat, spanLng, tags, id) {
 }
 
 const WEST = { lat: -33.970, lng: 22.405 };
-const EAST = { lat: -33.972, lng: 22.425 };
+/* Fancourt's real east 18 sits ~1.3km from the pin; this one ~1.8km, inside SIBLING_REACH_M.
+   George sits ~4km out, as the club next door does. */
+const EAST = { lat: -33.972, lng: 22.418 };
 const GEORGE = { lat: -33.960, lng: 22.445 };
 
 test("a neighbouring club is set aside when OSM has drawn no outline around the facility itself", async () => {
@@ -65,8 +67,48 @@ test("a resort course outlined under its own name is kept", async () => {
     ring(GEORGE, 0.008, 0.016, { golf: "course", name: "The Hills" }, 9003)
   ]) };
   const loops = core.separateLoops(payload, WEST, { facilityName: "Millbrook Golf Resort" });
-  assert.strictEqual(loops.length, 3, "no club designator, no exclusion - losing a real course is the worse mistake");
-  assert.deepStrictEqual(loops.excluded, []);
+  assert.ok(loops.some(loop => loop.name === "Coronet 18"), "no club designator, no exclusion - losing a real course is the worse mistake");
+  /* The Hills is outlined under its own name too, but ~4km out: too far to be a sibling,
+     so it is set aside on distance - never on its name. */
+  assert.strictEqual(loops.length, 2);
+  assert.deepStrictEqual(loops.excluded.map(entry => [entry.name, entry.reason]), [["The Hills", "beyond-facility-reach"]]);
+});
+
+test("a course nobody outlined, beyond the facility's reach, is a neighbour - Pebble Beach from Poppy Hills", async () => {
+  const core = await import("file://" + path.join(root, "functions", "lib", "gd-automapper-core.mjs"));
+  const payload = { elements: course(1000, WEST).concat(course(2000, EAST), course(3000, GEORGE)) };
+  const loops = core.separateLoops(payload, WEST, { facilityName: "Fancourt Golf Estate" });
+  assert.strictEqual(loops.length, 2, "the near unnamed 18 stays a sibling");
+  assert.deepStrictEqual(loops.excluded.map(entry => entry.reason), ["beyond-facility-reach"]);
+  assert.strictEqual(loops.neighbours.length, 1, "and the far one travels whole, for the worker to publish or skip");
+  assert.ok(loops.neighbours[0].payload.elements.length >= 18);
+});
+
+test("a selected single course keeps only its own loop - Poppy Hills Golf Course", async () => {
+  const core = await import("file://" + path.join(root, "functions", "lib", "gd-automapper-core.mjs"));
+  const payload = { elements: course(1000, WEST).concat(course(2000, EAST), [
+    ring(EAST, 0.008, 0.016, { leisure: "golf_course", name: "The Hay" }, 1065983050)
+  ]) };
+  const loops = core.separateLoops(payload, WEST, { facilityName: "Poppy Hills Golf Course" });
+  assert.strictEqual(loops.length, 1, "one course of its own, still returned so the worker knows which one");
+  assert.deepStrictEqual(loops.excluded.map(entry => [entry.name, entry.reason]), [["The Hay", "selected-listing-is-one-course"]]);
+  assert.strictEqual(core.namesSingleCourse("Pebble Beach Golf Links"), true);
+  assert.strictEqual(core.namesSingleCourse("Te Arai Links Golf Club"), false);
+  assert.strictEqual(core.namesSingleCourse("Millbrook Golf Resort"), false);
+  assert.strictEqual(core.namesSingleCourse("Te Arai Links Golf Course - North Course"), false,
+    "one course OF a facility is not a facility that is one course");
+  const labelled = core.separateLoops(payload, WEST, { facilityName: "Poppy Hills Golf Course", selectedName: "Poppy Hills Golf Course - North" });
+  assert.strictEqual(labelled.length, 2, "the whole selected name decides, not its facility half");
+});
+
+test("a full course name that shares nothing with the facility is another club - Spyglass Hill", async () => {
+  const core = await import("file://" + path.join(root, "functions", "lib", "gd-automapper-core.mjs"));
+  const payload = { elements: course(1000, WEST).concat(course(2000, EAST), [
+    ring(EAST, 0.008, 0.016, { leisure: "golf_course", name: "Spyglass Hill Golf Course" }, 281477606)
+  ]) };
+  const loops = core.separateLoops(payload, WEST, { facilityName: "Monterey Golf Club" });
+  assert.strictEqual(loops.length, 1);
+  assert.deepStrictEqual(loops.excluded.map(entry => [entry.name, entry.reason]), [["Spyglass Hill Golf Course", "course-outline-names-another-club"]]);
 });
 
 test("a club that shares the facility's distinctive name is kept", async () => {

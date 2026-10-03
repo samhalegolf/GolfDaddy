@@ -25,7 +25,9 @@ const ROOT = path.join(__dirname, "..");
 
 const REMARKABLES = { lat: -45.0300, lng: 168.8100 };
 const CORONET = { lat: -45.0380, lng: 168.8200 };
-const ARROW = { lat: -45.0450, lng: 168.8300 };
+/* North-west of the pin, ~1.4km out - Millbrook's real courses sit 1.2-1.4km apart, inside
+   SIBLING_REACH_M. */
+const ARROW = { lat: -45.0220, lng: 168.8000 };
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }

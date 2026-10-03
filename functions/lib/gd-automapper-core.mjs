@@ -341,6 +341,15 @@ export function unionOsmFrames(...frames) {
   return frameOfPoints(corners);
 }
 
+/* The overlap of two frames, or null when they do not overlap. */
+export function intersectOsmFrames(a, b) {
+  if (!a || !b) return null;
+  const south = Math.max(Number(a.south), Number(b.south)), north = Math.min(Number(a.north), Number(b.north));
+  const west = Math.max(Number(a.west), Number(b.west)), east = Math.min(Number(a.east), Number(b.east));
+  if (![south, west, north, east].every(Number.isFinite) || south >= north || west >= east) return null;
+  return { south, west, north, east };
+}
+
 export function courseFootprintFrame(payload, padM = 160) {
   const pts = [];
   ((payload && payload.elements) || []).filter(isCourseFootprintElement).forEach(element => {
@@ -870,24 +879,53 @@ function routeUnclaimed(features) {
     || [{ name: "", osmRef: "", holesTag: null, features: features.slice(), method: "routing" }];
 }
 
-/* ---------- neighbouring clubs, whatever separated the loops (Fancourt, 2026-10-01) -------
+/* ---------- neighbouring clubs, whatever separated the loops (Fancourt, Poppy Hills) -------
  *
- * Containment only sets a neighbour aside when OSM has drawn the facility's own outline
- * around the site. When it has not - or containment cannot run - the loops come from
- * routing, and a wide sweep's neighbouring club published as a sibling: the 2026-10-01
- * rescan of Fancourt Golf Estate put George Golf Club up as "Course 3".
+ * A sweep wide enough to finish a multi-course site also catches the clubs next door.
+ * Fancourt's 2026-10-01 rescan put George Golf Club up as "Course 3"; Poppy Hills'
+ * 2026-10-02 scan published Spyglass Hill, Cypress Point, The Hay, Pebble Beach, Spanish
+ * Bay and Pacific Grove as six "Poppy Hills" courses, under poppy-hills-* ids.
  *
- * So after any separation, a loop whose holes sit (mostly) inside one named course outline
- * is a different club when that outline holds none of the pinned course's holes and EITHER
- *   its owner (website / operator / brand) differs from the pinned course outline's, or
- *   it names a CLUB ("George Golf Club", "Arrowtown Golf Club", "… Country Club") and
- *   shares no distinctive word with the facility the player searched for.
- * A course-named outline ("Coronet 18", "The Hills") is never ruled out by its name: resort
- * courses are routinely outlined under their own name alone, and losing a real course is
- * worse than publishing a neighbour. */
-const CLUB_DESIGNATOR = /\b(golf\s+club|country\s+club|golf\s+&\s+country\s+club|g\.?\s?c\.?|c\.?\s?c\.?)\b/i;
+ * A loop other than the pinned one is a NEIGHBOUR - its own course, never this
+ * facility's sibling - when any of these holds:
+ *
+ *   the player selected a single course. "Poppy Hills Golf Course" and "Pebble Beach
+ *     Golf Links" name one course, not a resort, so nothing else on the ground is theirs;
+ *   its centre sits more than SIBLING_REACH_M from the pin and no facility outline
+ *     holds it. Measured across every multi-course site scanned so far, real siblings
+ *     sat at most ~1.7km from the pin (Te Arai North 1711m) and the nearest unnamed
+ *     neighbour 2.2km (Pebble Beach from Poppy Hills);
+ *   its outline is run by a different owner (website / operator / brand) than the
+ *     pinned course's outline;
+ *   its outline carries a full club or course name - "George Golf Club", "Monterey
+ *     Peninsula Country Club", "Spyglass Hill Golf Course", "Pacific Grove Golf Links" -
+ *     and shares no distinctive word with the facility the player searched for.
+ *
+ * An outline named only as a course label ("Coronet 18", "The Hills", "North Course")
+ * is never ruled out by its name: resort courses are routinely outlined under their own
+ * name alone. Being a neighbour is not being dropped - a named, complete neighbour is
+ * published as a course of its own by the worker, under its own name and facility. */
+const CLUB_DESIGNATOR = /\b(golf\s+club|country\s+club|golf\s+&\s+country\s+club|golf\s+course|golf\s+links|g\.?\s?c\.?|c\.?\s?c\.?)\b/i;
 const GENERIC_NAME_WORDS = new Set(["golf", "club", "country", "course", "courses", "links", "the", "and", "resort", "estate", "at", "of", "de", "la", "le", "gc", "cc", "international", "national", "championship", "north", "south", "east", "west", "par", "holes", "hole"]);
 const OWNED_MAJORITY = 0.6;
+
+/* How far from the pin a course's centre may sit and still be taken as this facility's
+   own without an outline saying so. See the header above for where 2000m comes from. */
+export const SIBLING_REACH_M = 2000;
+
+/* How far the multi-course widen may reach from the pin: a sibling's centre at the reach
+   limit, plus the ~1km an 18-hole routing spreads around its own centre. Anything
+   further out cannot hold a sibling, so fetching it only drags in other clubs. */
+export const SIBLING_SWEEP_M = SIBLING_REACH_M + 1000;
+
+/* A name that ends in a single-course designator names one course, not a facility:
+   "Poppy Hills Golf Course", "Pebble Beach Golf Links". "Golf Club", "Resort", "Estate"
+   and "Country Club" can all hold several courses and are left alone. */
+const SINGLE_COURSE_NAME = /\bgolf\s+(course|links)\s*$/i;
+
+export function namesSingleCourse(name) {
+  return SINGLE_COURSE_NAME.test(String(name || "").replace(/\s+/g, " ").trim());
+}
 
 function ownerOf(tags) {
   const t = tags || {};
@@ -911,7 +949,38 @@ function outlineHolding(group, polygons) {
   return best ? best.polygon : null;
 }
 
-export function markNeighbouringClubs(groups, polygons, centre, facilityName) {
+function insideAnyOutline(group, outlines) {
+  return outlines.some(outline => group.features.filter(feature => pointInRing(feature.centre, outline.ring)).length
+    / Math.max(1, group.features.length) >= OWNED_MAJORITY);
+}
+
+/* Why this loop is a neighbour, or null when it is the facility's own. Outline evidence
+   first - an owner or a name says more than a distance - and the reach last. An outline
+   that shares the facility's own distinctive word ("The Links at Fancourt") is the
+   facility's whatever its distance. */
+function neighbourReason(group, ctx) {
+  if (ctx.singleCourse) return "selected-listing-is-one-course";
+  const outline = outlineHolding(group, ctx.polygons);
+  const foreignOutline = outline && outline !== ctx.pinnedOutline
+    && !ctx.pinned.features.some(feature => pointInRing(feature.centre, outline.ring));
+  if (foreignOutline) {
+    if (outline.owner && ctx.pinnedOutline && ctx.pinnedOutline.owner && outline.owner !== ctx.pinnedOutline.owner) {
+      return "course-outline-run-by-another-owner";
+    }
+    const words = distinctiveWords(outline.name);
+    const sharesName = [...words].some(word => ctx.facilityWords.has(word));
+    if (sharesName) return null;
+    if (CLUB_DESIGNATOR.test(outline.name) && ctx.facilityWords.size > 0 && words.size > 0) return "course-outline-names-another-club";
+  }
+  const awayM = ctx.centre ? distance(ctx.centre, ctx.centreOf(group)) : 0;
+  if (awayM > SIBLING_REACH_M && !insideAnyOutline(group, ctx.facilityOutlines)) return "beyond-facility-reach";
+  return null;
+}
+
+/* selectedName is the whole name the player picked; facilityName its facility half. The
+   single-course test reads the whole name, so "X Golf Course - North" (one course OF a
+   facility) is not mistaken for "X Golf Course" (a facility that is one course). */
+export function markNeighbouringClubs(groups, polygons, centre, facilityName, selectedName) {
   const live = (groups || []).filter(group => !group.foreign);
   if (live.length < 2) return groups;
   const centreOf = group => centroidOfPoints(group.features.map(feature => feature.centre));
@@ -919,21 +988,25 @@ export function markNeighbouringClubs(groups, polygons, centre, facilityName) {
     ? live.slice().sort((a, b) => distance(centre, centreOf(a)) - distance(centre, centreOf(b)))[0]
     : live[0];
   const pinnedOutline = outlineHolding(pinned, polygons);
-  const facilityWords = distinctiveWords([facilityName, pinnedOutline && pinnedOutline.name].filter(Boolean).join(" "));
+  const ctx = {
+    centre,
+    centreOf,
+    polygons,
+    pinned,
+    pinnedOutline,
+    singleCourse: namesSingleCourse(selectedName == null ? facilityName : selectedName),
+    facilityWords: distinctiveWords([facilityName, pinnedOutline && pinnedOutline.name].filter(Boolean).join(" ")),
+    facilityOutlines: classifyCoursePolygons(polygons, groups.flatMap(group => group.features)).facilities
+  };
   live.forEach(group => {
     if (group === pinned) return;
-    const outline = outlineHolding(group, polygons);
-    if (!outline || outline === pinnedOutline) return;
-    if (pinned.features.some(feature => pointInRing(feature.centre, outline.ring))) return;
-    const otherOwner = !!(outline.owner && pinnedOutline && pinnedOutline.owner && outline.owner !== pinnedOutline.owner);
-    const words = distinctiveWords(outline.name);
-    const otherClub = CLUB_DESIGNATOR.test(outline.name) && facilityWords.size > 0 && words.size > 0
-      && ![...words].some(word => facilityWords.has(word));
-    if (!otherOwner && !otherClub) return;
+    const reason = neighbourReason(group, ctx);
+    if (!reason) return;
     group.foreign = true;
-    group.foreignReason = otherOwner ? "course-outline-run-by-another-owner" : "course-outline-names-another-club";
-    if (!group.name) group.name = outline.name;
-    if (!group.osmRef) group.osmRef = outline.ref;
+    group.foreignReason = reason;
+    const outline = outlineHolding(group, polygons);
+    if (outline && !group.name) group.name = outline.name;
+    if (outline && !group.osmRef) group.osmRef = outline.ref;
   });
   return groups;
 }
@@ -1125,7 +1198,7 @@ export function separateLoops(payload, centre, options) {
   const polygons = coursePolygonsFrom(payload);
   const groups = assignByContainment(features, polygons) || assignByRouting(features, collision.loops);
   if (!groups || groups.length < 2) return null;
-  markNeighbouringClubs(groups, polygons, centre, (options && options.facilityName) || "");
+  markNeighbouringClubs(groups, polygons, centre, (options && options.facilityName) || "", options && options.selectedName);
 
   const { buckets, shared } = partitionSupportingElements(payload, groups);
 
@@ -1158,14 +1231,20 @@ export function separateLoops(payload, centre, options) {
     };
   });
 
-  /* A neighbouring club's outline, caught by a wide sweep, is separated from the
-     site's own courses so its greens and holes cannot be paired with theirs - and then
-     kept OFF the list, because the only thing worse than dropping it silently would be
-     publishing George Golf Club as Fancourt's Course 3. Reported on the array the way
-     publishSeparatedLoops reports failures, so the job row can say what was set aside. */
+  /* A neighbouring club, caught by a wide sweep, is separated from the site's own courses
+     so its greens and holes cannot be paired with theirs - and then kept OFF the list,
+     because publishing George Golf Club as Fancourt's Course 3 is the failure this exists
+     to prevent. It travels on `neighbours` instead, whole, so the worker can publish it
+     as a course of its own; `excluded` is the job-row summary of the same set.
+   *
+   * One course of this site's own plus neighbours is still a result: it is how a
+   * single-course selection (Poppy Hills) tells the worker which loop is the player's
+   * and which belong to the clubs around it. */
   const loops = everyLoop.filter(loop => !loop.foreign);
-  if (loops.length < 2) return null;
-  loops.excluded = everyLoop.filter(loop => loop.foreign).map(loop => ({
+  const neighbours = everyLoop.filter(loop => loop.foreign);
+  if (!loops.length || (loops.length < 2 && !neighbours.length)) return null;
+  loops.neighbours = neighbours;
+  loops.excluded = neighbours.map(loop => ({
     name: loop.name || null,
     osmRef: loop.osmRef || null,
     holes: loop.holeNumbers.length,
