@@ -9,15 +9,15 @@ const ROOT = path.join(__dirname, "..");
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png" };
 const tee = { lat: -36.9174, lng: 174.74 };
 const green = n => ({ lat: -36.919 - n / 10000, lng: 174.74 });
-const complete = () => ({ courseId: "readiness", status: "lite-geo-ready", readiness: "complete", objectsVersion: "v5", mappedHoleCount: 3, expectedHoleCount: 3, missingHoles: [], holes: [1, 2, 3].map(n => ({ holeNumber: n, tee, green: green(n), route: [tee, green(n)] })) });
-const partial = () => ({ courseId: "readiness", status: "lite-geo-ready", readiness: "partial", objectsVersion: "v4", mappedHoleCount: 2, expectedHoleCount: 3, missingHoles: [2], holes: [1, 3].map(n => ({ holeNumber: n, tee, green: green(n), route: [tee, green(n)] })) });
+const complete = () => ({ courseId: "readiness", status: "lite-geo-ready", readiness: "complete", objectsVersion: "2026-09-02T00:00:00Z", mappedHoleCount: 3, expectedHoleCount: 3, missingHoles: [], holes: [1, 2, 3].map(n => ({ holeNumber: n, tee, green: green(n), route: [tee, green(n)] })) });
+const partial = () => ({ courseId: "readiness", status: "lite-geo-ready", readiness: "partial", objectsVersion: "2026-09-01T00:00:00Z", mappedHoleCount: 2, expectedHoleCount: 3, missingHoles: [2], holes: [1, 3].map(n => ({ holeNumber: n, tee, green: green(n), route: [tee, green(n)] })) });
 
 let latePackage = { status: "failed", reason: "temporary read failure" };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   if (url.pathname === "/api/course-package") {
     const id = url.searchParams.get("courseId");
-    const body = id === "late-course" ? latePackage : id === "repair-course" ? complete() : partial();
+    const body = id === "downgrade-course" ? Object.assign(complete(), { objectsVersion: "2026-09-03T00:00:00Z" }) : id === "late-course" ? latePackage : id === "repair-course" ? complete() : partial();
     res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(body)); return;
   }
   if (url.pathname.startsWith("/api/")) { res.writeHead(404); res.end("{}"); return; }
@@ -60,13 +60,46 @@ const server = http.createServer((req, res) => {
     await page.waitForFunction(() => document.getElementById("mapRecoveryScreen").classList.contains("hiddenState"), { timeout: 7000 });
     assert.strictEqual(await page.evaluate(() => window.ClarityApp.mapReadiness.controller.current().state), "READY", "a late package recovers without restart");
 
-    await page.evaluate(pkg => window.ClarityApp.courseStore.save({ courseId: "repair-course", courseName: "Repair", mapType: "object", objectsVersion: "v4", mapVersion: null, pkg }), partial());
+    await page.evaluate(pkg => window.ClarityApp.courseStore.save({ courseId: "repair-course", courseName: "Repair", mapType: "object", objectsVersion: "2026-09-01T00:00:00Z", mapVersion: null, pkg }), partial());
     await page.goto(base + "?courseId=repair-course&courseName=Repair&courseLat=" + tee.lat + "&courseLng=" + tee.lng, { waitUntil: "load" });
     await page.waitForFunction(() => !document.getElementById("mapUpdateBar").classList.contains("hiddenState"), { timeout: 5000 });
     assert.match(await page.locator("#mapUpdateLabel").textContent(), /COURSE MAP FIXED/, "partial-to-complete uses the repair banner");
     await page.locator("#mapUpdateDownload").click();
     await page.waitForFunction(() => /Ready|updated/.test(document.getElementById("mapUpdateLabel").textContent), { timeout: 3000 });
-    console.log("map-readiness browser passed: partial hole, manual choice, mapped resume, corrupt package, late recovery, repair banner");
+    await page.waitForFunction(() => document.getElementById("mapUpdateBar").classList.contains("hiddenState"), { timeout: 3000 });
+    await page.waitForTimeout(1200);   /* past the completion state's own close */
+    assert.strictEqual(await page.evaluate(() => document.body.classList.contains("map-update-in-progress")), false, "the surface is never left dimmed");
+
+    /* Full storage: the library copy stays on the old version. The bar must ask the
+       ROUND what it is playing, not the library, or it comes back after every update. */
+    await page.evaluate(() => {
+      const all = JSON.parse(localStorage.getItem("clarity:course-library:v1") || "{}");
+      all["repair-course"].pkg.readiness = "partial";
+      all["repair-course"].objectsVersion = "2026-09-01T00:00:00Z";
+      localStorage.setItem("clarity:course-library:v1", JSON.stringify(all));
+      Storage.prototype.setItem = function () { throw new Error("QuotaExceededError"); };
+      window.ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: 2 });
+    });
+    await page.waitForTimeout(900);
+    assert.strictEqual(await page.evaluate(() => document.getElementById("mapUpdateBar").classList.contains("hiddenState")), true,
+      "an up-to-date round is not offered its own map again because the library write failed");
+
+    /* Holding the captured map while the server answers with the lite pack (a re-bake
+       in flight) must never swap it out, however new the lite pack's objects are. */
+    await page.goto(base, { waitUntil: "load" });   /* a fresh page drops the failing-storage stub above */
+    const published = Object.assign(complete(), { status: "full-map-ready", packageVersion: 2, bakeNumber: 2,
+      holes: [1, 2, 3].map(n => ({ holeNumber: n, geometry: { tee, green: green(n), greenShape: [], route: [tee, green(n)] }, visual: null })) });
+    await page.evaluate(pkg => window.ClarityApp.courseStore.save({ courseId: "downgrade-course", courseName: "Downgrade", mapType: "published", objectsVersion: pkg.objectsVersion, mapVersion: 2, bakeNumber: 2, pkg }), published);
+    await page.goto(base + "?courseId=downgrade-course&courseName=Downgrade&courseLat=" + tee.lat + "&courseLng=" + tee.lng, { waitUntil: "load" });
+    await page.waitForTimeout(1900);
+    await page.evaluate(() => window.ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: 2 }));
+    await page.waitForTimeout(900);
+    assert.deepStrictEqual(await page.evaluate(() => ({
+      playing: window.ClarityApp.marshal.pkg().status,
+      saved: window.ClarityApp.courseStore.load("downgrade-course").mapType,
+      bar: document.getElementById("mapUpdateBar").classList.contains("hiddenState")
+    })), { playing: "full-map-ready", saved: "published", bar: true }, "a published round is never downgraded to the lite pack");
+    console.log("map-readiness browser passed: partial hole, manual choice, mapped resume, corrupt package, late recovery, repair banner, no lite downgrade");
   } finally {
     if (browser) await browser.close();
     server.close();

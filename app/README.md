@@ -38,8 +38,6 @@ or writes course data back.
 
 - `index.html` — the shell. Home + play, `#map` visible by default.
 - `js/course-key.js` — canonical course key (rule 1).
-- `js/course-library.js` — GET `/api/course-library` consumer for the picker,
-  fail-open to an empty list.
 - `js/course-package.js` — GET `/api/course-package` consumer, fail-open.
 - `js/play-surface.js` — published-surface lookup (`/api/course-visuals`) and
   the mercator-image projection. Pure functions are node-requirable for tests.
@@ -83,7 +81,7 @@ or writes course data back.
   never the dispersion shape.
 - `js/scorecard.js` — score entry + running total. Par is read from the
   existing `/api/scorecard-store` cache (fail-open, same pattern as
-  course-library.js/course-package.js); score state is its own storage
+  course-package.js); score state is its own storage
   (`clarity:scorecard:v1`), keyed by course.
 - `js/play.js` — play state machine: enter/leave hole, frame from objects,
   present/remove surface, render the GPS fix on map and surface. Owns the

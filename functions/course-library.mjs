@@ -135,7 +135,14 @@ export default async function courseLibrary(req) {
     const tagNames = nameVersionTagEnabled(env);
     const manifest = courses.map((row) => {
       const id = text(row.course_id, 160);
-      const visual = visualsByCourse[id] || null;
+      const visualRow = visualsByCourse[id] || null;
+      /* The visual counts only once it is published - the same test
+         deriveCoursePackageState uses before /api/course-package serves a full map.
+         Until then the package serves the lite pack (bake 0, label v0.n), and a
+         manifest still reporting the unpublished bake's number told every downloaded
+         copy it was behind. Updating re-downloaded the same lite pack, so the
+         "Update Available" badge could never clear. */
+      const visual = visualRow && Number(visualRow.published_version) > 0 ? visualRow : null;
       const version = courseVersionLabel.courseVersion({
         bakeNumber: visual ? visual.bake_number : null,
         objectsRevision: row.objects_revision,
@@ -159,7 +166,7 @@ export default async function courseLibrary(req) {
         hole_count: integer(row.hole_count),
         objects_version: objectsVersion(row),
         clarity_map_version: visual ? integer(visual.published_version) : null,
-        clarity_map_status: visual ? text(visual.status, 40) || null : null,
+        clarity_map_status: visualRow ? text(visualRow.status, 40) || null : null,
         /* The readable version and the two counters behind it. bake_number is what the
            freshness check compares (published_version never counted); version_label is
            what a card, a badge or an update prompt prints. Null when the course has no
