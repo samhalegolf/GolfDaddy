@@ -1,7 +1,7 @@
 /* Scorecard: score entry + running total. Par comes from the existing
    read-only cache (GET /api/scorecard-store) the legacy scraper already built
    and keeps warm — the fresh app only reads it, exactly like
-   course-library.js/course-package.js already do for other data, never
+   course-package.js already does for other data, never
    reviving the scraper itself (the app authors nothing). Fail-open: no cached
    card for this course is a normal state, holes just render with blank/
    editable par, same as an unmapped hole falls back to the live map. */

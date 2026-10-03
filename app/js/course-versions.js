@@ -57,8 +57,8 @@
     comparableVersion: comparableVersion,
     frameMoved: frameMoved,
     /* The one definition of "the downloaded copy is out of date", shared by
-       app/js/course-store.js and the old shell's Course Library panel so the
-       two cannot disagree about what the badge means.
+       /app/'s in-round update bar (boot.js checkForMapUpdate) and the old
+       shell's Course Library panel so the two cannot disagree about what the badge means.
 
        local:  a saved record {objectsVersion, mapVersion, bakeNumber, savedAt}
        remote: the manifest row {objectsVersion, mapVersion, bakeNumber} */

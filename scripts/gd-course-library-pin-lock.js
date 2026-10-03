@@ -5620,11 +5620,11 @@
       return {ok:true,mapType:mapType};
     }catch(e){return {ok:false,reason:'storage'};}
   }
-  /* Background freshness check against the same lightweight manifest /app/
-     uses (fetchCourseLibraryManifest, above) - the panel opens instantly from
+  /* Background freshness check against the lightweight manifest
+     (fetchCourseLibraryManifest, below) - the panel opens instantly from
      what is already on the device, then a badge appears if the server turns
      out to have moved on. Delegates to app.courseVersions.isStale(), the same
-     rule app.courseStore.updateAvailable() uses, since it is answering the same
+     rule /app/'s in-round update bar uses, since it is answering the same
      question and a second copy of it would drift. */
   let courseLibraryManifestById=null;
   function downloadedEntryHasUpdate(entry){

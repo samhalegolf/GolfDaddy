@@ -64,19 +64,6 @@
       var all = readAll();
       delete all[courseId];
       return writeAll(all);
-    },
-    /* Is the server's manifest row (from /api/course-library: objectsVersion
-       a sortable timestamp string, mapVersion an integer) newer than what's
-       saved locally? No local copy is not "an update" - that's a fresh
-       download, a different action. */
-    updateAvailable: function (courseId, remote) {
-      var local = this.load(courseId);
-      if (!local || !remote) return false;
-      return app.courseVersions.isStale(local, {
-        objectsVersion: remote.objectsVersion,
-        mapVersion: remote.mapVersion,
-        bakeNumber: remote.bakeNumber
-      });
     }
   };
 })();

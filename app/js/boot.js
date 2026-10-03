@@ -605,6 +605,34 @@
     return pkg && typeof pkg.versionLabel === "string" ? pkg.versionLabel : "";
   }
 
+  function versionsOf(pkg) {
+    return {
+      objectsVersion: pkg && pkg.objectsVersion || null,
+      mapVersion: pkg && pkg.packageVersion || null,
+      bakeNumber: pkg && pkg.bakeNumber != null ? pkg.bakeNumber : null
+    };
+  }
+
+  /* The copy this round is actually on - the one already staged for the next
+     hole if there is one, else the package in play - in the record shape
+     app.courseVersions compares. Null means the round is on the live map.
+
+     Asked of the round, not the saved library. The library record is only a
+     cache of it, and a cache can be missing or behind: a localStorage write
+     that hit its quota left the device "holding" the old version forever, so
+     the bar came back after every update it had just applied. savedAt is the
+     one thing still borrowed from the library - the legacy freshness fallback
+     needs to know when the copy was downloaded. */
+  function heldCopy(course) {
+    var pkg = (pendingMapUpdate && pendingMapUpdate.pkg) || (app.marshal && app.marshal.pkg && app.marshal.pkg());
+    if (!pkg || !mapTypeOf(pkg)) return null;
+    var saved = app.courseStore.load(course.courseId);
+    var held = versionsOf(pkg);
+    held.pkg = pkg;
+    held.savedAt = saved && saved.savedAt || null;
+    return held;
+  }
+
   function dismissedUpdates() {
     try { return JSON.parse(localStorage.getItem(UPDATE_DISMISS_KEY) || "null") || {}; }
     catch (e) { return {}; }
@@ -677,18 +705,14 @@
       stageOrAdoptMapUpdate(course, pkg, mapType);
       return;
     }
-    var local = app.courseStore.load(course.courseId);
-    /* Playing on the live map with nothing saved: the first map to appear is
+    var local = heldCopy(course);
+    /* Playing on the live map with nothing held: the first map to appear is
        genuinely new to this device, whatever its version. */
     if (!local) {
       if (!updateWasDismissed(course, pkg, mapType)) showMapUpdateBar(course, pkg, mapType);
       return;
     }
-    var kind = app.courseVersions.updateKind(local, {
-      objectsVersion: pkg.objectsVersion || null,
-      mapVersion: pkg.packageVersion || null,
-      bakeNumber: pkg.bakeNumber == null ? null : pkg.bakeNumber
-    });
+    var kind = app.courseVersions.updateKind(local, versionsOf(pkg));
     if (kind === "none") return;
     /* Partial -> complete is not an ordinary invisible geometry refresh. It
        repairs holes the player may have had to play manually, so say that
@@ -726,41 +750,60 @@
     if (app.painter && app.painter.refreshSurface) app.painter.refreshSurface(app.courseKey(course.courseId));
     app.marshal.signal("PACKAGE_UPDATED", { pkg: pkg });
     if (mapReadiness) mapReadiness.observePackage(pkg);
-    mapUpdatePrompt = null;
-    if (!(opts && opts.keepBar)) document.getElementById("mapUpdateBar").classList.add("hiddenState");
+    if (!(opts && opts.keepBar)) hideMapUpdateBar();
   }
 
-  function stageOrAdoptMapUpdate(course, pkg, mapType) {
+  function stageOrAdoptMapUpdate(course, pkg, mapType, opts) {
     var round = app.marshal && app.marshal.round();
-    if (!round || round.liveHole === null) return adoptMapUpdate(course, pkg, mapType);
+    if (!round || round.liveHole === null) return adoptMapUpdate(course, pkg, mapType, opts);
     saveCourseToLibrary(course, pkg);
     pendingMapUpdate = { course: course, pkg: pkg, mapType: mapType, stagedHole: round.hole };
-    i18n.set(document.getElementById("mapUpdateLabel"), "mapUpdate.appliesNextHole");
+    mapUpdatePrompt = null;
+  }
+
+  /* The bar's one timer. Every path that shows, hides or re-labels the bar
+     clears it first, so a close scheduled by an earlier update can never land
+     on a prompt shown after it. */
+  var mapUpdateBarTimer = null;
+  function clearMapUpdateBarTimer() {
+    if (mapUpdateBarTimer) clearTimeout(mapUpdateBarTimer);
+    mapUpdateBarTimer = null;
+  }
+  function hideMapUpdateBar() {
+    clearMapUpdateBarTimer();
+    mapUpdatePrompt = null;
+    document.getElementById("mapUpdateBar").classList.add("hiddenState");
+    document.body.classList.remove("map-update-in-progress");
+    var button = document.getElementById("mapUpdateDownload");
+    button.disabled = false;
+    i18n.set(button, "mapUpdate.update");
   }
 
   function applyMapUpdateWithProgress(course, pkg, mapType) {
-    var bar = document.getElementById("mapUpdateBar");
     var label = document.getElementById("mapUpdateLabel");
     var button = document.getElementById("mapUpdateDownload");
-    if (!bar || !label || !button || button.disabled) return;
+    if (button.disabled) return;
+    clearMapUpdateBarTimer();
     button.disabled = true;
     i18n.set(button, "mapUpdate.updating");
-    i18n.set(label, "mapUpdate.preparing");
+    i18n.set(label, "mapUpdate.refreshing");
     document.body.classList.add("map-update-in-progress");
-    requestAnimationFrame(function () {
-      i18n.set(label, "mapUpdate.refreshing");
-      setTimeout(function () {
-        stageOrAdoptMapUpdate(course, pkg, mapType);
-        document.body.classList.remove("map-update-in-progress");
+    /* One short timeout so the label paints before the swap, which is
+       synchronous and can be heavy. It used to be requestAnimationFrame and
+       then a timeout - a backgrounded WebView never runs the frame, so the
+       surface sat dimmed on "Refreshing" until the app came back. */
+    mapUpdateBarTimer = setTimeout(function () {
+      try {
+        stageOrAdoptMapUpdate(course, pkg, mapType, { keepBar: true });
         i18n.set(label, pendingMapUpdate ? "mapUpdate.readyNextHole" : "mapUpdate.updated");
         i18n.set(button, "mapUpdate.ready");
-        setTimeout(function () {
-          bar.classList.add("hiddenState");
-          button.disabled = false;
-          i18n.set(button, "mapUpdate.update");
-        }, 900);
-      }, 120);
-    });
+      } finally {
+        /* Whatever the swap did, the dim and the disabled button end here -
+           a throw inside it used to leave both on for the rest of the round. */
+        document.body.classList.remove("map-update-in-progress");
+        mapUpdateBarTimer = setTimeout(hideMapUpdateBar, 900);
+      }
+    }, 120);
   }
 
   /* A prompt, not an auto-switch - the auto-download bias only applies to a
@@ -769,12 +812,15 @@
      player is already using the map they have. */
   function showMapUpdateBar(course, pkg, mapType) {
     if (updateWasDismissed(course, pkg, mapType)) return;
+    /* An update the player accepted is still running. Replacing the bar now would
+       cancel it; the next hole's check offers anything newer. */
+    if (document.getElementById("mapUpdateDownload").disabled) return;
     /* Three different things, three different sentences. With nothing saved this is a
        MAP becoming available and the bar says so; with a copy already saved it is an
        UPDATE to the copy you hold, and calling that "map available" was the same
        overclaim checkForMapUpdate stopped making. */
-    var local = app.courseStore.load(course.courseId);
-    var repair = !!(local && local.pkg && local.pkg.readiness === "partial" && pkg.readiness === "complete");
+    var local = heldCopy(course);
+    var repair = !!(local && local.pkg.readiness === "partial" && pkg.readiness === "complete");
     /* The version being OFFERED, in brackets after the message - "Update Available
        (v1.5)". Appended only when the server reported one, so a course with no countable
        revision reads exactly as it did before rather than as "Update Available ()". */
@@ -782,12 +828,11 @@
       repair ? "mapUpdate.fixed"
       : local ? "mapUpdate.updateAvailable"
         : mapType === "published" ? "mapUpdate.publishedAvailable" : "mapUpdate.courseAvailable";
+    hideMapUpdateBar();
     i18n.plain(document.getElementById("mapUpdateLabel"),
       app.courseVersionLabel.suffixed(i18n.t(message), versionLabelOf(pkg)));
     document.getElementById("mapUpdateBar").classList.remove("hiddenState");
     mapUpdatePrompt = { course: course, pkg: pkg, mapType: mapType };
-    i18n.set(document.getElementById("mapUpdateDownload"), "mapUpdate.update");
-    document.getElementById("mapUpdateDownload").disabled = false;
     document.getElementById("mapUpdateDownload").onclick = function () {
       applyMapUpdateWithProgress(course, pkg, mapType);
     };
@@ -893,8 +938,7 @@
     document.getElementById("holePickerClose").addEventListener("click", closeHolePicker);
     document.getElementById("mapUpdateDismiss").addEventListener("click", function () {
       if (mapUpdatePrompt) dismissMapUpdate(mapUpdatePrompt.course, mapUpdatePrompt.pkg, mapUpdatePrompt.mapType);
-      mapUpdatePrompt = null;
-      document.getElementById("mapUpdateBar").classList.add("hiddenState");
+      hideMapUpdateBar();
     });
     var demoCourseDataCta = document.getElementById("gdDemoCourseDataCta");
     if (demoCourseDataCta) demoCourseDataCta.addEventListener("click", seeDemoCourseData);

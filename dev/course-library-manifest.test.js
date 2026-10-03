@@ -133,6 +133,21 @@ test("names the version it is offering, so a client can say which one it means",
   });
 });
 
+test("an unpublished bake is not offered - the package still serves the lite pack", async () => {
+  await withEnv(async () => {
+    const course = Object.assign({}, COURSE, { objects_revision: 4 });
+    const r = await callHandler({
+      course_maps: [course],
+      course_visuals: [{ course_id: "takapuna-golf-course", published_version: 0, bake_number: 3, bake_objects_revision: 4, status: "rendering" }]
+    });
+    const c = r.body.courses[0];
+    assert.strictEqual(c.bake_number, null, "a bake nobody can download must not mark the lite copy stale");
+    assert.strictEqual(c.clarity_map_version, null);
+    assert.strictEqual(c.version_label, "v0.4", "labelled as what /api/course-package actually serves");
+    assert.strictEqual(c.clarity_map_status, "rendering", "the visual's progress is still reported");
+  });
+});
+
 test("an object-only course is v0.n, and an uncountable one is named not at all", async () => {
   await withEnv(async () => {
     const mapped = Object.assign({}, COURSE, { objects_revision: 4 });
