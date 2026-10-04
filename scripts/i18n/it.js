@@ -64,6 +64,8 @@
     "access.memberLogShots": "Serve un abbonamento Clarity per registrare dove finiscono i tuoi colpi. Le distanze restano gratuite.",
     "access.memberKeepScore": "Serve un abbonamento Clarity per segnare il punteggio. Le distanze restano gratuite.",
     "access.membership": "Abbonamento",
+    "access.freeAccountCourseMaps": "Crea un account gratuito per preparare altri campi da golf.",
+    "access.mapServerBusy": "Il server delle mappe è occupato in questo momento. Riprova tra poco.",
 
     /* Player badge */
     "badge.preview": "ANTEPRIMA",
@@ -824,6 +826,7 @@
     "course.noneDownloadedYet": "Nessun percorso ancora scaricato",
     "course.tryAnotherSearch": "Prova un'altra ricerca.",
     "course.downloadAutomatically": "I percorsi si scaricano automaticamente la prima volta che ci giochi.",
+    "course.offlineMembership": "I download dei campi da golf per l’uso offline sono inclusi nell’abbonamento Clarity. Puoi comunque visualizzare i campi online.",
     "course.publishedMap": "Mappa pubblicata",
     "course.courseMap": "Mappa del percorso",
     "course.mapType": "Tipo di mappa",
