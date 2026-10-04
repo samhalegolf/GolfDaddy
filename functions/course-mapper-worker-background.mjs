@@ -34,6 +34,7 @@ import { courseNameFromCard } from "./lib/gd-facility-organise-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
 import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow, stitchedCardVerdict, shouldReplaceFacilityCard } from "./lib/gd-scorecard-resolve.mjs";
+import { makeScorecardVisualReader } from "./lib/gd-scorecard-vision.mjs";
 import { reconcileFacilityClaims, atomicLoopCount, HOLES_PER_LOOP } from "./lib/gd-facility-loops-core.mjs";
 import { assessFacilityStructure, contestedClaims, describeClaimGround, isIndependentClaim, mappingMethodFor, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
 import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry, cardLengths } from "./lib/gd-scorecard-match-core.mjs";
@@ -649,6 +650,9 @@ async function resolveScorecardForCourse(course, origin, want) {
      sibling's facility_key - so cards found here are findable by facility later,
      including from Update Scorecards without re-fetching. */
   const facilityKey = course.courseId || null;
+  /* The picture fallback, for clubs whose only card is an image. Its own clock,
+     started only if the HTML pages all come up empty - see gd-scorecard-vision. */
+  const visual = makeScorecardVisualReader({ fetchHtml: fetchPageHtml });
   try {
     return await resolveScorecard({
       courseName: course.courseName,
@@ -668,6 +672,7 @@ async function resolveScorecardForCourse(course, origin, want) {
     }, {
       fetchHtml: url => fetchPageHtml(url, signal),
       search: (name, region, identity) => searchScorecardPages(name, region, identity, origin, signal),
+      visual,
       /* Reads go through fetchScorecardEvidence already; passing readStore here
          would just repeat the query the caller has done. */
       writeStore: async (key, name, cards) => {
@@ -689,6 +694,7 @@ async function resolveScorecardForCourse(course, origin, want) {
     }, { want });
   } finally {
     if (timer) clearTimeout(timer);
+    if (visual) visual.done();
   }
 }
 
@@ -1765,6 +1771,8 @@ async function gatherFacilityCards(course, origin, target, held, record, opts) {
     fromNetwork: (found.cards || []).length,
     distinctAfter: all.length,
     reason: found.reason || null,
+    debugStages: (found.debug && found.debug.stages) || [],
+    visual: visualSummary(found.visual),
     /* Every page the engine opened and what it made of it. This is the raw
        material for the follow-up hunt: a sibling course page that was found and
        REJECTED names a loop we know exists and could not read, which is a far
@@ -1774,10 +1782,25 @@ async function gatherFacilityCards(course, origin, target, held, record, opts) {
       source: attempt.source || null,
       cards: attempt.cards || 0,
       usable: !!attempt.usable,
-      rejected: attempt.rejected || attempt.reason || null
+      rejected: attempt.rejected || attempt.reason || null,
+      stage: attempt.stage || null
     }))
   };
   return all;
+}
+
+/* The resolver's picture-fallback report, trimmed for a job row. */
+function visualSummary(visual) {
+  if (!visual) return null;
+  return {
+    status: visual.status,
+    pagesInspected: visual.pagesInspected || 0,
+    holePages: visual.holePages || 0,
+    images: (visual.images || []).slice(0, 8).map(image => ({ url: String(image.url || "").slice(0, 160), kind: image.kind, hole: image.hole || null })),
+    accepted: (visual.accepted || []).map(card => ({ layout: card.layout, confidence: card.confidence, checks: card.checks, holes: card.holes })),
+    rejected: (visual.rejected || []).slice(0, 8).map(entry => ({ url: String(entry.url || "").slice(0, 160), reason: entry.reason, confidence: entry.confidence ?? null })),
+    readErrors: (visual.reads || []).filter(read => read.error).slice(0, 6).map(read => ({ url: read.url ? String(read.url).slice(0, 160) : null, error: read.error }))
+  };
 }
 
 
@@ -2057,6 +2080,11 @@ async function runMapperJob(job, origin) {
       statedHoleCount: resolved.statedHoleCount || null,
       stored: !!resolved.stored,
       reason: resolved.reason || null,
+      /* html-resolved, or html-extraction-failed -> scorecard-image-found ->
+         visual-extraction-failed / visual-scorecard-resolved. */
+      stage: (resolved.debug && resolved.debug.stage) || null,
+      stages: (resolved.debug && resolved.debug.stages) || [],
+      visual: visualSummary(resolved.visual),
       facility: resolved.facility || null,
       trace: resolved.searchTrace || null,
       attempts: (resolved.attempts || []).slice(0, 18)

@@ -28,6 +28,10 @@
 
 import { parseScorecardCardsHtml, courseFactsFromText, pageText } from "./gd-scorecard-parse-core.mjs";
 import courseSearchIdentity from "./gd-course-search-identity.js";
+import {
+  scorecardImageCandidates, holePageLinks, assembleVisualCards,
+  MAX_CARD_IMAGES, VISUAL_STORED_CONFIDENCE_CAP
+} from "./gd-scorecard-visual-core.mjs";
 
 const {
   buildCourseSearchIdentity, scoreSearchCandidate, scoreScorecardPage,
@@ -166,8 +170,6 @@ export function cardQuality(card) {
   return { usable: true, score: withPar + withDistance * 0.5, reason: null, withPar, withDistance };
 }
 
-/* deps: { fetchHtml, search, readStore, writeStore, log } - all injected so this
-   module stays testable without a network, in keeping with every other core here. */
 /* Are these two cards the same course?
  *
  * Names are the first answer and the weakest one. An aggregator serves the same
@@ -326,7 +328,12 @@ export function distinctCardCount(cards) {
   return distinctCards(cards).length;
 }
 
-/* course: { courseName, region, country }
+/* deps: { fetchHtml, search, readStore, writeStore, visual } - all injected so this
+   module stays testable without a network, in keeping with every other core here.
+   deps.visual (optional, from gd-scorecard-vision.mjs): { fetchHtml, readImages }
+   for the picture fallback when no page held a readable table.
+
+   course: { courseName, region, country }
    options.want: how many DISTINCT courses this site is known to have. The scan has
    already separated the loops by the time this runs, so the target is a fact, not a
    guess - keep reading candidates until that many distinct cards are in hand. */
@@ -343,7 +350,10 @@ export async function resolveScorecard(course, deps, options) {
       transliterations: identity.transliterations,
       location: { city: identity.city, region: identity.region, country: identity.country, countryCode: identity.countryCode, lat: identity.lat, lng: identity.lng },
       queries: [], domainsDiscovered: [], candidates: []
-    }
+    },
+    /* Where the run got to, in order - see resolveVisualScorecard. */
+    debug: { stage: null, stages: [] },
+    visual: null
   };
   if (!key) return Object.assign(out, { reason: "no-course-name" });
 
@@ -367,6 +377,9 @@ export async function resolveScorecard(course, deps, options) {
   }));
   const queued = new Set(candidates.map(candidate => candidate.url));
   const parsed = [];
+  /* Pages that are about this course but held no readable table - where the
+     picture fallback looks if every page comes up empty. */
+  const visualPages = [];
   for (let i = 0; i < candidates.length; i++) {
     const candidate = candidates[i];
     /* Stop on DISTINCT courses found, not pages read. A site with two courses keeps
@@ -405,6 +418,12 @@ export async function resolveScorecard(course, deps, options) {
     /* Prose facts are worth keeping even from a page whose table was unreadable -
        "18 hole, par 72" is the field three of the mapper's guards depend on. */
     cards.forEach(card => { if (card.statedHoleCount && !out.statedHoleCount) out.statedHoleCount = card.statedHoleCount; });
+    if (!cards.length) {
+      attempt.stage = "html-extraction-failed";
+      const pageIdentity = cardNameMatchesIdentity(pageName, identity) || cardNameMatchesCourse(pageName, name)
+        || Number(candidate.nameSimilarity) >= 0.78 || !!candidate.officialDomain;
+      if (pageIdentity && visualPages.length < 4) visualPages.push({ candidate, html, pageName, source });
+    }
     /* A page with no readable table at all still answers the one question three of
        the mapper's guards depend on. Te Arai's own site is exactly this: no card
        anywhere, but "The 18 hole, par 72 golf course" in plain English. */
@@ -449,6 +468,14 @@ export async function resolveScorecard(course, deps, options) {
     });
   }
 
+  if (parsed.length) {
+    out.debug.stages.push("html-resolved");
+  } else {
+    out.debug.stages.push("html-extraction-failed");
+    await resolveVisualScorecard(visualPages, { name, identity }, deps.visual, out, parsed);
+  }
+  out.debug.stage = out.debug.stages[out.debug.stages.length - 1];
+
   /* Best first, and every card kept rather than only the winner: a site with two
      courses yields two cards, and the loop matcher needs both to tell them apart. */
   parsed.sort((a, b) => b.quality - a.quality);
@@ -459,8 +486,9 @@ export async function resolveScorecard(course, deps, options) {
   /* Says so when it came up short rather than letting the caller assume the pool is
      complete - a two-course site with one card cannot name anything, and the job row
      should show that as a shortfall, not a silence. */
-  if (out.distinct < want) out.reason = parsed.length ? "found-" + out.distinct + "-of-" + want + "-courses" : "no-readable-card";
-  if (!parsed.length) return Object.assign(out, { reason: "no-readable-card" });
+  const nothingReason = out.visual && out.visual.status === "visual-extraction-failed" ? "visual-extraction-failed" : "no-readable-card";
+  if (out.distinct < want) out.reason = parsed.length ? "found-" + out.distinct + "-of-" + want + "-courses" : nothingReason;
+  if (!parsed.length) return Object.assign(out, { reason: nothingReason });
 
   if (deps.writeStore) {
     out.stored = await deps.writeStore(key, name, parsed).then(() => true).catch(error => {
@@ -469,6 +497,108 @@ export async function resolveScorecard(course, deps, options) {
     });
   }
   return out;
+}
+
+/* THE PICTURE FALLBACK
+ *
+ * Runs only when no page held a readable table. Looks at the pages that were about
+ * this course (and at their per-hole pages) for images of the card, has them
+ * transcribed, and keeps only what gd-scorecard-visual-core can corroborate.
+ *
+ * Two model calls at most: the card-like images first, then - only if those did
+ * not resolve - the per-hole graphics as one batch.
+ *
+ * out.debug.stages records the route, so a job row says which of these happened:
+ *   html-extraction-failed -> (no image)                      nothing to look at
+ *   html-extraction-failed -> scorecard-image-found -> visual-extraction-failed
+ *   html-extraction-failed -> scorecard-image-found -> visual-scorecard-resolved */
+async function resolveVisualScorecard(pages, context, visual, out, parsed) {
+  const report = out.visual = { status: null, pagesInspected: 0, holePages: 0, images: [], reads: [], accepted: [], rejected: [] };
+  if (!visual) { report.status = "unavailable"; return; }
+  if (!pages.length) { report.status = "no-scorecard-image"; return; }
+
+  const cardImages = [];
+  let holeImages = [];
+  for (const page of pages.slice(0, 3)) {
+    report.pagesInspected += 1;
+    scorecardImageCandidates(page.html, page.candidate.url).forEach(image => {
+      if (!cardImages.some(existing => existing.url === image.url)) cardImages.push(Object.assign({ page }, image));
+    });
+    /* One page's hole set, the fullest one found: hole graphics from two different
+       sites are not one course's card. */
+    const links = holePageLinks(page.html, page.candidate.url);
+    if (links.length < 9 || links.length <= holeImages.length) continue;
+    const fetched = await Promise.all(links.map(link => visual.fetchHtml(link.url)
+      .then(html => ({ link, html }))
+      .catch(error => ({ link, error: String(error && error.message || error).slice(0, 120) }))));
+    report.holePages += fetched.filter(entry => entry.html).length;
+    const perHole = fetched.map(entry => {
+      if (!entry.html) return null;
+      const best = scorecardImageCandidates(entry.html, entry.link.url, { holeNumber: entry.link.hole })[0];
+      return best ? Object.assign({ page, fromHolePage: true, pageUrl: entry.link.url }, best, { kind: "single-hole", hole: entry.link.hole }) : null;
+    }).filter(Boolean);
+    if (perHole.length > holeImages.length) holeImages = perHole;
+  }
+  /* A full card that is also a hole page's picture is a card, not a hole graphic. */
+  holeImages = holeImages.filter(image => !cardImages.some(card => card.url === image.url && card.kind !== "single-hole"));
+  const cardBatch = cardImages.filter(image => image.kind !== "single-hole").slice(0, MAX_CARD_IMAGES);
+
+  report.images = cardBatch.concat(holeImages).map(image => ({ url: image.url, kind: image.kind, hole: image.hole, score: image.score, page: image.page.candidate.url }));
+  if (!report.images.length) { report.status = "no-scorecard-image"; return; }
+  out.debug.stages.push("scorecard-image-found");
+
+  const reads = [];
+  const runBatch = async (batch, label) => {
+    if (!batch.length) return null;
+    const answers = await visual.readImages(batch).catch(error => {
+      report.reads.push({ batch: label, error: String(error && error.message || error).slice(0, 200) });
+      return [];
+    });
+    answers.forEach(answer => {
+      report.reads.push({ batch: label, url: answer.image.url, ok: !!answer.raw, error: answer.error || null, kind: answer.raw ? answer.raw.kind : null, legibility: answer.raw ? answer.raw.legibility : null });
+      if (answer.raw) reads.push({ raw: answer.raw, image: answer.image });
+    });
+    return assembleVisualCards(reads);
+  };
+
+  let assembled = await runBatch(cardBatch, "card-images");
+  if (!(assembled && assembled.accepted.length) && holeImages.length >= 9) assembled = await runBatch(holeImages, "hole-graphics");
+  report.rejected = assembled ? assembled.rejected : [];
+
+  const accepted = [];
+  (assembled ? assembled.accepted : []).forEach(result => {
+    /* A name printed on the card that is plainly another club's sinks it, the same
+       guard the HTML path applies to an aggregator's heading. */
+    if (result.printedName && /[a-z]/i.test(result.printedName)
+      && !cardNameMatchesIdentity(result.printedName, context.identity) && !cardNameMatchesCourse(result.printedName, context.name)) {
+      report.rejected.push({ url: result.images.join(" + "), reason: "name-mismatch:" + result.printedName.slice(0, 60) });
+      return;
+    }
+    accepted.push(result);
+  });
+
+  accepted.forEach(result => {
+    const firstImage = cardImages.concat(holeImages).find(image => image.url === result.images[0]);
+    const page = firstImage ? firstImage.page : pages[0];
+    const quality = cardQuality(result.card);
+    if (!quality.usable) { report.rejected.push({ url: result.images.join(" + "), reason: quality.reason }); return; }
+    const confidence = Math.min(VISUAL_STORED_CONFIDENCE_CAP, result.confidence);
+    parsed.push(Object.assign({}, result.card, {
+      name: result.card.name || page.pageName || context.name,
+      sourceUrl: page.candidate.url, source: "visual-" + page.source.id,
+      quality: quality.score * result.confidence,
+      resolution: {
+        identity: context.identity, officialDomain: page.candidate.officialDomain ? safeHostname(page.candidate.url) : "",
+        method: "visual", confidence, visualConfidence: result.confidence,
+        visualChecks: result.checks, visualLayout: result.layout, visualProblems: result.problems,
+        imageUrls: result.images, fetchedAt: new Date().toISOString()
+      }
+    }));
+    report.accepted.push({ images: result.images, layout: result.layout, confidence: result.confidence, checks: result.checks, holes: result.card.holes.length });
+  });
+
+  report.status = report.accepted.length ? "visual-scorecard-resolved" : "visual-extraction-failed";
+  out.debug.stages.push(report.status);
 }
 
 /* Pages worth reading, best-known source first.
