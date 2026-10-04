@@ -64,6 +64,8 @@
     "access.memberLogShots": "Ai nevoie de un abonament Clarity ca să înregistrezi unde se opresc loviturile. Distanțele rămân gratuite.",
     "access.memberKeepScore": "Ai nevoie de un abonament Clarity ca să ții scorul. Distanțele rămân gratuite.",
     "access.membership": "Abonament",
+    "access.freeAccountCourseMaps": "Creați un cont gratuit pentru a pregăti mai multe terenuri de golf.",
+    "access.mapServerBusy": "Serverul de hărți este ocupat momentan. Încercați din nou în curând.",
 
     /* Player badge */
     "badge.preview": "PREVIZUALIZARE",
@@ -846,6 +848,7 @@
     "course.noneDownloadedYet": "Niciun teren descărcat încă",
     "course.tryAnotherSearch": "Încearcă altă căutare.",
     "course.downloadAutomatically": "Terenurile se descarcă automat prima dată când joci pe ele.",
+    "course.offlineMembership": "Descărcările terenurilor de golf pentru utilizare offline sunt incluse în abonamentul Clarity. Puteți vedea în continuare terenurile online.",
     "course.publishedMap": "Hartă publicată",
     "course.courseMap": "Harta terenului",
     "course.mapType": "Tip de hartă",
