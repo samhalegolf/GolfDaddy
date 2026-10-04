@@ -460,6 +460,12 @@ const PAR3_TYPICAL_M = 150;
    few enough that a big site's matcher stays quick. */
 const ALTERNATIVE_FAIRWAYS_PER_GREEN = 2;
 const ALTERNATIVE_TEES_PER_GREEN = 3;
+/* Courses with no tees mapped at all. A hole's tee usually sits just past the green before
+   it, so a par 3 with no fairway is read from each other green a par-3 length away, stepped
+   off that green towards the hole. Guesses, so marked down and used only where nothing
+   better exists - see guessedTeeCandidates. */
+const TEE_GUESS_OFFSET_M = 25;
+const GUESSED_TEES_PER_GREEN = 2;
 function greenLedFairwayCandidates(elements, greens, boundary) {
   const fairways = (elements || []).map((element, index) => {
     if (golfTag(element) !== "fairway") return null;
@@ -560,7 +566,8 @@ function greenLedFairwayCandidates(elements, greens, boundary) {
     });
   });
 
-  withoutFairway.filter(green => !par3For.has(green.id)).forEach(green => {
+  const guessed = tees.length ? new Set() : guessedTeeCandidates(greens, elements, fairwayFor, candidates);
+  withoutFairway.filter(green => !par3For.has(green.id) && !guessed.has(green.id)).forEach(green => {
     const nearest = fairwayPairs.filter(pair => pair.left === green.id).sort((a, b) => a.cost - b.cost)[0];
     if (!nearest) return;
     const candidate = fairwayCenterlineForGreen(green, nearest.fairway, oriented.get(green.id + "::" + nearest.fairway.id), null, ["borrowed-fairway"]);
@@ -571,6 +578,47 @@ function greenLedFairwayCandidates(elements, greens, boundary) {
     candidates.push(candidate);
   });
   return candidates;
+}
+/* Par-3 readings for a course OSM mapped without a single tee.
+ *
+ * Cebu Country Club has 19 greens, 20 fairways and no tees. Its par 3s have no fairway, so the
+ * only reading of them was a borrowed neighbour's fairway - a length that has nothing to do
+ * with the hole - and the card's four par 3s could not find their greens. The tee of a hole is
+ * usually a short walk past the green before it, so each other green a par-3 length away is
+ * offered as where this hole is played from.
+ *
+ * A green with no fairway takes its best guess as its own line; every green also offers its
+ * guesses as alternatives for the card to prefer (a fairway pairing can be wrong). A guess is
+ * keyed to the green it starts from, so one green cannot be the tee of two holes on one card.
+ * Returns the greens that got a line of their own, which then no longer borrow a fairway. */
+function guessedTeeCandidates(greens, elements, fairwayFor, candidates) {
+  const own = new Set();
+  (greens || []).forEach(green => {
+    (greens || []).filter(other => other.id !== green.id)
+      .map(other => ({ other, distance: distanceM(other.centre, green.centre) }))
+      .filter(entry => entry.distance - TEE_GUESS_OFFSET_M >= PAR3_TEE_MIN_M && entry.distance - TEE_GUESS_OFFSET_M <= PAR3_TEE_MAX_M)
+      .sort((a, b) => Math.abs(a.distance - TEE_GUESS_OFFSET_M - PAR3_TYPICAL_M) - Math.abs(b.distance - TEE_GUESS_OFFSET_M - PAR3_TYPICAL_M))
+      .slice(0, GUESSED_TEES_PER_GREEN)
+      .forEach(({ other, distance }, index) => {
+        const step = TEE_GUESS_OFFSET_M / distance;
+        const tee = { lat: other.centre.lat + (green.centre.lat - other.centre.lat) * step, lng: other.centre.lng + (green.centre.lng - other.centre.lng) * step };
+        const candidate = buildCandidate("tee-after-" + other.id + "-" + green.id, [tee, green.centre], [green], elements, "tee-to-green",
+          ["guessed-tee:after-" + other.id, "green-led"], green);
+        if (!candidate) return;
+        candidate.guessedTee = true;
+        candidate.featureKeys = [green.id, "tee-after:" + other.id];
+        if (index === 0 && !fairwayFor.has(green.id)) {
+          own.add(green.id);
+          candidate.confidence = clamp(candidate.confidence - 0.04, 0, 1);
+        } else {
+          candidate.alternative = true;
+          candidate.evidence.push("alternative");
+          candidate.confidence = clamp(candidate.confidence - 0.1, 0, 1);
+        }
+        candidates.push(candidate);
+      });
+  });
+  return own;
 }
 function greenLedHoleLineCorridorCandidates(elements, greens, boundary) {
   const lines = (elements || []).map((element, index) => {
@@ -779,6 +827,33 @@ function rankMap(items, getValue, getKey) {
   sorted.forEach((item, index) => { map[getKey(item)] = sorted.length <= 1 ? 0.5 : index / (sorted.length - 1); });
   return map;
 }
+/* Where each candidate's length falls among the ground's main readings - one per green, the
+   set a card's holes correspond to. Ranking every reading together compared a hole's place
+   among 18 card holes with a line's place among every alternative as well: at Cebu, 53 lines
+   for 19 greens, the 4th-longest hole on the card had to match the 4th-longest of 53, and a
+   line of exactly the right length could rank worse than a wrong one. An alternative reading
+   is placed by length between the main readings either side of it. */
+function candidateRankMap(candidates) {
+  const primary = candidates.filter(c => !c.alternative && Number.isFinite(c.pathDistanceM));
+  if (primary.length < 2) return rankMap(candidates, c => c.pathDistanceM, c => c.candidateId);
+  const lengths = primary.map(c => c.pathDistanceM).sort((a, b) => a - b);
+  const last = lengths.length - 1;
+  const map = {};
+  candidates.forEach(candidate => {
+    const length = candidate.pathDistanceM;
+    if (!Number.isFinite(length)) return;
+    if (!candidate.alternative) {
+      map[candidate.candidateId] = primary.filter(c => c.pathDistanceM < length).length / last;
+      return;
+    }
+    const k = lengths.findIndex(value => value > length);
+    if (k === 0) { map[candidate.candidateId] = 0; return; }
+    if (k === -1) { map[candidate.candidateId] = 1; return; }
+    const span = lengths[k] - lengths[k - 1];
+    map[candidate.candidateId] = clamp((k - 1 + (span > 0 ? (length - lengths[k - 1]) / span : 0)) / last, 0, 1);
+  });
+  return map;
+}
 function scorePair(candidate, hole, context) {
   let score = 0.22 * candidate.confidence;
   const evidence = candidate.evidence.slice();
@@ -886,7 +961,7 @@ function matchCandidatesToScorecard(candidates, scorecard, expectedHoleCount, no
   }
   const context = {
     scale: distanceScale(usefulCandidates, holes),
-    candidateRanks: rankMap(usefulCandidates, c => c.pathDistanceM, c => c.candidateId),
+    candidateRanks: candidateRankMap(usefulCandidates),
     scorecardRanks: rankMap(holes, h => h.distanceM, h => h.holeNumber),
     sourceRankMaps: (normalizedScorecardSources || []).filter(source => source.distanceCount >= 2).map(source => rankMap(source.holes, h => h.distanceM, h => h.holeNumber)),
     scorecardLengthOrder: scorecardLengthOrder(holes),

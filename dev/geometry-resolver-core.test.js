@@ -38,6 +38,41 @@ test("a card read back from the store, whose sources rows carry a hole COUNT, st
   assert.strictEqual(t.normalizeScorecard({ scorecardEvidence: withList }).length, 3);
 });
 
+test("with no tees mapped, a par 3 is read from the green before it, and lengths rank against one reading per green", async () => {
+  /* Cebu Country Club: greens and fairways, not one tee. Its par 3s have no fairway, so they
+     only had a borrowed neighbour's fairway to be read from, and every alternative reading was
+     ranked alongside the real holes - a line of the right length could rank worse than a
+     wrong one. Here: a 345m par 4, a par 3 ~165m past its green with no fairway, a 400m par 4. */
+  const box = (id, tag, south, north, west, east) => ({ type: "way", id, tags: { golf: tag }, geometry: [
+    { lat: south, lon: west }, { lat: south, lon: east }, { lat: north, lon: east }, { lat: north, lon: west }, { lat: south, lon: west }
+  ] });
+  const payload = { elements: [
+    box(1, "fairway", 0, 0.0028, -0.00015, 0.00015), box(2, "green", 0.0030, 0.0032, -0.0001, 0.0001),
+    box(3, "green", 0.0045, 0.0047, -0.0001, 0.0001),
+    box(4, "fairway", 0.0052, 0.0085, -0.00015, 0.00015), box(5, "green", 0.0087, 0.0089, -0.0001, 0.0001)
+  ] };
+  const result = await resolver.resolveCourseGeometryForAutoMapper({
+    osmPayload: payload, courseId: "no-tees", expectedHoleCount: 3,
+    scorecardHoles: [{ holeNumber: 1, par: 4, distanceM: 345 }, { holeNumber: 2, par: 3, distanceM: 140 }, { holeNumber: 3, par: 4, distanceM: 400 }]
+  });
+  const par3 = result.debugEvidence.holeCandidates.find(c => c.candidateId === "tee-after-way-2-way-3");
+  assert.ok(par3 && !par3.alternative, "the fairway-less green is read from a guessed tee off the previous green");
+  assert.ok(!result.debugEvidence.holeCandidates.some(c => c.evidence.includes("borrowed-fairway")), "it no longer borrows a fairway");
+  assert.strictEqual(result.status, "resolved");
+  const byHole = {};
+  result.holes.forEach(h => { byHole[h.holeNumber] = h.candidate.candidateId; });
+  assert.deepStrictEqual(byHole, { 1: "way-1-way-2", 2: "tee-after-way-2-way-3", 3: "way-4-way-5" });
+});
+
+test("a course with tees mapped gets no guessed tees", async () => {
+  const withTee = JSON.parse(JSON.stringify(fixture));
+  withTee.elements.push({ type: "way", id: 900, tags: { golf: "tee" }, geometry: [
+    { lat: -0.0003, lon: -0.00005 }, { lat: -0.0003, lon: 0.00005 }, { lat: -0.0002, lon: 0.00005 }, { lat: -0.0002, lon: -0.00005 }, { lat: -0.0003, lon: -0.00005 }
+  ] });
+  const result = await resolver.resolveCourseGeometryForAutoMapper({ osmPayload: withTee, courseId: "with-tee" });
+  assert.ok(!result.debugEvidence.holeCandidates.some(c => c.guessedTee));
+});
+
 test("hasNumberingIssue is false when there is no golf geometry at all", () => {
   assert.strictEqual(resolver.hasNumberingIssue({ osmPayload: { elements: [] } }), false);
 });

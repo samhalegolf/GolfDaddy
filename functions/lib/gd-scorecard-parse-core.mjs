@@ -207,12 +207,22 @@ export function toEngineCard(parsed, name) {
   if (!parsed) return null;
   const tee = preferredTee(parsed.tees);
   const metres = tee ? toMetres(tee.distances, parsed.unit) : {};
-  const holes = parsed.holes.map(hole => ({
-    hole,
-    par: parsed.par[hole] ?? null,
-    distanceM: metres[hole] ?? null,
-    strokeIndex: parsed.handicap[hole] ?? null
-  })).filter(row => row.par !== null || row.distanceM !== null);
+  /* Every tee's lengths too, in the unit the preferred tee was read in - a forward tee's
+     mean can sit under the 300 that tells yards from metres. The mapper compares a course
+     with no tees mapped against the forward tee, which starts near the end of the fairway. */
+  const unit = parsed.unit || (tee && Object.keys(metres).some(hole => metres[hole] !== tee.distances[hole]) ? "yards" : "metres");
+  const teeMetres = (parsed.tees || []).map(t => ({ name: t.name, metres: toMetres(t.distances, unit) }));
+  const holes = parsed.holes.map(hole => {
+    const tees = {};
+    teeMetres.forEach(t => { if (Number.isFinite(t.metres[hole])) tees[t.name] = t.metres[hole]; });
+    return {
+      hole,
+      par: parsed.par[hole] ?? null,
+      distanceM: metres[hole] ?? null,
+      strokeIndex: parsed.handicap[hole] ?? null,
+      teesM: tees
+    };
+  }).filter(row => row.par !== null || row.distanceM !== null);
   if (!holes.length) return null;
   return {
     /* Decoded here, where every card gets its name: a page title arrives as raw HTML
