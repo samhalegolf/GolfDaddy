@@ -64,6 +64,8 @@
     "access.memberLogShots": "Du skal have et Clarity-medlemskab for at registrere, hvor dine slag lander. Afstande er stadig gratis.",
     "access.memberKeepScore": "Du skal have et Clarity-medlemskab for at føre score. Afstande er stadig gratis.",
     "access.membership": "Medlemskab",
+    "access.freeAccountCourseMaps": "Opret en gratis konto for at klargøre flere golfbaner.",
+    "access.mapServerBusy": "Kortserveren er optaget lige nu. Prøv igen om lidt.",
 
     /* Player badge */
     "badge.preview": "PRØVE",
@@ -824,6 +826,7 @@
     "course.noneDownloadedYet": "Ingen baner hentet endnu",
     "course.tryAnotherSearch": "Prøv en anden søgning.",
     "course.downloadAutomatically": "Baner hentes automatisk, første gang du spiller dem.",
+    "course.offlineMembership": "Offline-downloads af golfbaner er inkluderet i Clarity-medlemskabet. Du kan stadig se baner online.",
     "course.publishedMap": "Udgivet kort",
     "course.courseMap": "Banekort",
     "course.mapType": "Korttype",
