@@ -274,6 +274,8 @@
     "auth.modeSetUp": "Set up account",
     "auth.modeSetPassword": "Set password",
     "auth.createHint": "New player accounts start with their own profile.",
+    "auth.promptTitle": "Create your free account",
+    "auth.promptHint": "It's free. Your bag, practice sessions and profile are saved to your account and follow you to any device.",
     "auth.continueWithout": "‹ Continue without an account",
     "auth.name": "Name",
     "auth.namePlaceholder": "Your name",

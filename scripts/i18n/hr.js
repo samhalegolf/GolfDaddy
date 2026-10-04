@@ -272,6 +272,8 @@
     "auth.modeSetUp": "Postavi račun",
     "auth.modeSetPassword": "Postavi lozinku",
     "auth.createHint": "Novi igrački računi počinju s vlastitim profilom.",
+    "auth.promptTitle": "Izradite besplatan račun",
+    "auth.promptHint": "Besplatno je. Vaša torba, treninzi i profil spremaju se na vaš račun i prate vas na svakom uređaju.",
     "auth.continueWithout": "‹ Nastavi bez računa",
     "auth.name": "Ime",
     "auth.namePlaceholder": "Tvoje ime",

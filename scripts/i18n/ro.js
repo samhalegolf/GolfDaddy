@@ -272,6 +272,8 @@
     "auth.modeSetUp": "Configurează contul",
     "auth.modeSetPassword": "Setează parola",
     "auth.createHint": "Conturile noi de jucător pornesc cu propriul profil.",
+    "auth.promptTitle": "Creează-ți contul gratuit",
+    "auth.promptHint": "Este gratuit. Geanta, sesiunile de antrenament și profilul tău sunt salvate în cont și te urmează pe orice dispozitiv.",
     "auth.continueWithout": "‹ Continuă fără cont",
     "auth.name": "Nume",
     "auth.namePlaceholder": "Numele tău",

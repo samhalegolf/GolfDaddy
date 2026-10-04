@@ -272,6 +272,8 @@
     "auth.modeSetUp": "Nustatyti paskyrą",
     "auth.modeSetPassword": "Nustatyti slaptažodį",
     "auth.createHint": "Naujos žaidėjų paskyros pradedamos su savo profiliu.",
+    "auth.promptTitle": "Susikurkite nemokamą paskyrą",
+    "auth.promptHint": "Tai nemokama. Jūsų krepšys, treniruotės ir profilis išsaugomi paskyroje ir pasiekiami bet kuriame įrenginyje.",
     "auth.continueWithout": "‹ Tęsti be paskyros",
     "auth.name": "Vardas",
     "auth.namePlaceholder": "Tavo vardas",

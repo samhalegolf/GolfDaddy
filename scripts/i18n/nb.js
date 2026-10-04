@@ -268,6 +268,8 @@
     "auth.modeSetUp": "Sett opp konto",
     "auth.modeSetPassword": "Velg passord",
     "auth.createHint": "Nye spillerkontoer starter med sin egen profil.",
+    "auth.promptTitle": "Opprett din gratis konto",
+    "auth.promptHint": "Det er gratis. Bagen, treningsøktene og profilen din lagres på kontoen din og følger deg til alle enheter.",
     "auth.continueWithout": "‹ Fortsett uten konto",
     "auth.name": "Navn",
     "auth.namePlaceholder": "Navnet ditt",

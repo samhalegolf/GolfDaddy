@@ -267,6 +267,22 @@ test("the auth gate lets a guest into the shot system and keeps admin out", () =
   assert.strictEqual(member.gdAuthGateAllows("admin"), true);
 });
 
+/* Bag, shot system and Profile show the free sign-up form on a guest's first
+   tap. It is a prompt, not a gate: once per session, never for an account. */
+test("the sign-up prompt is claimed once per session and never for an account", () => {
+  const guest = bootAuthGate(null);
+  guest.gd67OpenAuth = () => {};
+  assert.strictEqual(guest.gdClaimSignupPrompt(), true, "a guest's first tap shows the sign-up prompt");
+  assert.strictEqual(guest.gdClaimSignupPrompt(), false, "the second tap goes straight through");
+
+  const early = bootAuthGate(null);
+  assert.strictEqual(early.gdClaimSignupPrompt(), false, "no form to show yet means no prompt, not a dead tap");
+
+  const member = bootAuthGate({ accountId: "acc-1" });
+  member.gd67OpenAuth = () => {};
+  assert.strictEqual(member.gdClaimSignupPrompt(), false);
+});
+
 /* The guest profile screen says "Sign In" and "Create Account" on its account
    call to action. Two files used to read those words off the panel and conclude
    the sign-in FORM was up - which locked the shell (gdAuthLocked) behind a

@@ -268,6 +268,8 @@
     "auth.modeSetUp": "Fiók beállítása",
     "auth.modeSetPassword": "Jelszó beállítása",
     "auth.createHint": "Az új játékosfiókok saját profillal indulnak.",
+    "auth.promptTitle": "Hozd létre ingyenes fiókodat",
+    "auth.promptHint": "Ingyenes. A táskád, az edzéseid és a profilod a fiókodba mentődik, és minden eszközön elérhető.",
     "auth.continueWithout": "‹ Folytatás fiók nélkül",
     "auth.name": "Név",
     "auth.namePlaceholder": "A neved",

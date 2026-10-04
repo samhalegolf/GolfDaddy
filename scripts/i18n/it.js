@@ -268,6 +268,8 @@
     "auth.modeSetUp": "Configura account",
     "auth.modeSetPassword": "Imposta password",
     "auth.createHint": "I nuovi account giocatore partono con un proprio profilo.",
+    "auth.promptTitle": "Crea il tuo account gratuito",
+    "auth.promptHint": "È gratis. La tua sacca, le sessioni di allenamento e il profilo vengono salvati nel tuo account e ti seguono su ogni dispositivo.",
     "auth.continueWithout": "‹ Continua senza account",
     "auth.name": "Nome",
     "auth.namePlaceholder": "Il tuo nome",

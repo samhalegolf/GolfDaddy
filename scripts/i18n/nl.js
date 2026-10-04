@@ -268,6 +268,8 @@
     "auth.modeSetUp": "Account instellen",
     "auth.modeSetPassword": "Wachtwoord instellen",
     "auth.createHint": "Nieuwe spelersaccounts beginnen met een eigen profiel.",
+    "auth.promptTitle": "Maak je gratis account aan",
+    "auth.promptHint": "Het is gratis. Je tas, oefensessies en profiel worden in je account bewaard en gaan mee naar elk apparaat.",
     "auth.continueWithout": "‹ Doorgaan zonder account",
     "auth.name": "Naam",
     "auth.namePlaceholder": "Je naam",
