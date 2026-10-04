@@ -64,6 +64,8 @@
     "access.memberLogShots": "Lyöntien päätymiskohtien kirjaaminen vaatii Clarity-jäsenyyden. Etäisyydet pysyvät ilmaisina.",
     "access.memberKeepScore": "Tulosten kirjaaminen vaatii Clarity-jäsenyyden. Etäisyydet pysyvät ilmaisina.",
     "access.membership": "Jäsenyys",
+    "access.freeAccountCourseMaps": "Luo ilmainen tili, jotta voit valmistella lisää golfkenttiä.",
+    "access.mapServerBusy": "Karttapalvelin on juuri nyt varattu. Yritä pian uudelleen.",
 
     /* Player badge */
     "badge.preview": "ESIKATSELU",
@@ -824,6 +826,7 @@
     "course.noneDownloadedYet": "Kenttiä ei ole vielä ladattu",
     "course.tryAnotherSearch": "Kokeile toista hakua.",
     "course.downloadAutomatically": "Kentät latautuvat automaattisesti, kun pelaat niitä ensimmäistä kertaa.",
+    "course.offlineMembership": "Golfkenttien offline-lataukset sisältyvät Clarity-jäsenyyteen. Voit silti tarkastella kenttiä verkossa.",
     "course.publishedMap": "Julkaistu kartta",
     "course.courseMap": "Kenttäkartta",
     "course.mapType": "Kartan tyyppi",
