@@ -15,6 +15,7 @@
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
   var STORE_KEY = "clarity:course-library:v1";
+  var lastSaveFailure = "";
 
   function readAll() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || "{}") || {}; } catch (e) { return {}; }
@@ -29,7 +30,15 @@
        Returns the saved record (with byte size + timestamp filled in), or
        null if localStorage rejected the write (quota, private browsing). */
     save: function (entry) {
-      if (!entry || !entry.courseId) return null;
+      lastSaveFailure = "";
+      if (!entry || !entry.courseId) { lastSaveFailure = "invalid"; return null; }
+      /* Fetching a package to VIEW and retaining it for OFFLINE play are deliberately
+         separate. Free/guest sessions may use the package in memory, but only an active
+         paid/staff entitlement may put it in the device Course Library. */
+      if (!app.access || typeof app.access.offlineDownloads !== "function" || !app.access.offlineDownloads()) {
+        lastSaveFailure = "access";
+        return null;
+      }
       var body = JSON.stringify(entry.pkg || null);
       var record = {
         courseId: entry.courseId,
@@ -50,8 +59,11 @@
       };
       var all = readAll();
       all[record.courseId] = record;
-      return writeAll(all) ? record : null;
+      if (writeAll(all)) return record;
+      lastSaveFailure = "storage";
+      return null;
     },
+    lastSaveFailure: function () { return lastSaveFailure; },
     load: function (courseId) {
       return readAll()[courseId] || null;
     },
