@@ -276,6 +276,8 @@
     "auth.modeSetUp": "Nastavi račun",
     "auth.modeSetPassword": "Nastavi geslo",
     "auth.createHint": "Novi igralski računi začnejo z lastnim profilom.",
+    "auth.promptTitle": "Ustvarite brezplačen račun",
+    "auth.promptHint": "Brezplačno je. Vaša torba, treningi in profil se shranijo v vaš račun in vas spremljajo na vsaki napravi.",
     "auth.continueWithout": "‹ Nadaljuj brez računa",
     "auth.name": "Ime",
     "auth.namePlaceholder": "Tvoje ime",

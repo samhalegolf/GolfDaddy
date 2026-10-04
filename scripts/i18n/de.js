@@ -268,6 +268,8 @@
     "auth.modeSetUp": "Konto einrichten",
     "auth.modeSetPassword": "Passwort festlegen",
     "auth.createHint": "Neue Spielerkonten starten mit einem eigenen Profil.",
+    "auth.promptTitle": "Erstelle dein kostenloses Konto",
+    "auth.promptHint": "Es ist kostenlos. Dein Bag, deine Trainingseinheiten und dein Profil werden in deinem Konto gespeichert und sind auf jedem Gerät verfügbar.",
     "auth.continueWithout": "‹ Ohne Konto fortfahren",
     "auth.name": "Name",
     "auth.namePlaceholder": "Dein Name",

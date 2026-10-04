@@ -8954,6 +8954,17 @@
     setTimeout(()=>safe(()=>window.gdHydrateGpsBadge?.(true)),120);
     return false;
   }
+  /* A guest's first tap on the Bag, the shot system or the Profile shows the
+     free sign-up form before it (gd-auth-gate-v1.js, gdClaimSignupPrompt). Only
+     the tap handlers ask: browser back/restore and in-app hops go straight
+     through. "Continue without an account" runs next() and lands where they
+     were heading. */
+  function gdSignupPromptFirst(route,next,opts){
+    if(!window.gdClaimSignupPrompt||!window.gdClaimSignupPrompt(route))return false;
+    openProfileStable(opts);
+    safe(()=>window.gd67OpenAuth("signup",{prompt:true,next}));
+    return true;
+  }
   function openBubbleStable(opts){
     /* openDataHub carries the gate and the guest demo entry; stop here too
        rather than re-labelling the shell for a panel that never opened. */
@@ -9318,17 +9329,19 @@
         },true);
       });
     }
-    bindDirect(".gdBubbleTile,#dockBubble",()=>openBubbleStable());
+    bindDirect(".gdBubbleTile,#dockBubble",()=>gdSignupPromptFirst("shotSystem",()=>openBubbleStable())||openBubbleStable());
     bindDirect("#dockGps",event=>openGpsStable({replace:false,fromHome:!!event?.target?.closest?.("#gdV62Home")}));
     bindDirect(".gdBagTile,#dockBag,[onclick*='openBag']",event=>{
       const gpsContext=document.body.classList.contains("shell-gps")||document.body.classList.contains("gdGpsActive")||document.body.classList.contains("gps-active");
       const homeContext=document.body.classList.contains("shell-home")||!!event?.target?.closest?.("#gdV62Home");
-      return openBagStable({fromGps:gpsContext&&!homeContext,fromHome:homeContext||!gpsContext});
+      const opts={fromGps:gpsContext&&!homeContext,fromHome:homeContext||!gpsContext};
+      return gdSignupPromptFirst("bag",()=>openBagStable(opts),opts)||openBagStable(opts);
     });
     bindDirect(".gdProfileTile",event=>{
       const gpsContext=document.body.classList.contains("shell-gps")||document.body.classList.contains("gdGpsActive")||document.body.classList.contains("gps-active");
       const homeContext=document.body.classList.contains("shell-home")||!!event?.target?.closest?.("#gdV62Home");
-      return openProfileStable({fromGps:gpsContext&&!homeContext,fromHome:homeContext||!gpsContext,replace:homeContext});
+      const opts={fromGps:gpsContext&&!homeContext,fromHome:homeContext||!gpsContext,replace:homeContext};
+      return gdSignupPromptFirst("profile",()=>openProfileStable(opts),opts)||openProfileStable(opts);
     });
     bindDirect("#gdCourseDataOpenBtn",()=>gdHubSetSection("course"));
     bindDirect("#gdPracticeDataOpenBtn",()=>gdHubSetSection("practice"));
@@ -9448,13 +9461,13 @@
 	      const gpsContext=document.body.classList.contains("shell-gps")||document.body.classList.contains("gdGpsActive")||document.body.classList.contains("gps-active");
       const homeContext=document.body.classList.contains("shell-home")||!!target.closest("#gdV62Home");
       if(target.id==="dockAdmin"||on.includes("openDeveloperPanel")){event.preventDefault();event.stopImmediatePropagation();openDeveloper({fromGps:gpsContext&&!homeContext,fromHome:homeContext||!gpsContext});return;}
-      if(target.id==="dockBag"||target.classList.contains("gdBagTile")||on.includes("openBag")){event.preventDefault();event.stopImmediatePropagation();openBagStable({fromGps:gpsContext&&!homeContext,fromHome:homeContext||!gpsContext});return;}
+      if(target.id==="dockBag"||target.classList.contains("gdBagTile")||on.includes("openBag")){event.preventDefault();event.stopImmediatePropagation();const opts={fromGps:gpsContext&&!homeContext,fromHome:homeContext||!gpsContext};if(!gdSignupPromptFirst("bag",()=>openBagStable(opts),opts))openBagStable(opts);return;}
 	      if(target.id==="dockGps"||target.classList.contains("gdPlayTile")||on.includes("enterGpsModule")){
 	        event.preventDefault();
 	        event.stopImmediatePropagation();
 	        return openGpsStable({replace:false,fromHome:homeContext});
 	      }
-      if(target.id==="dockBubble"||target.classList.contains("gdBubbleTile")){event.preventDefault();event.stopImmediatePropagation();openBubbleStable();return;}
+      if(target.id==="dockBubble"||target.classList.contains("gdBubbleTile")){event.preventDefault();event.stopImmediatePropagation();if(!gdSignupPromptFirst("shotSystem",()=>openBubbleStable()))openBubbleStable();return;}
       /* gdGuestDemoEntry() after the section switch, not instead of it: a guest
          who has already started a demo gets the section they asked for, and one
          who has not is put back on the only section with something in it. */
@@ -9466,7 +9479,8 @@
       if(target.classList.contains("gdProfileTile")){
         event.preventDefault();
         event.stopImmediatePropagation();
-        openProfileStable({fromGps:gpsContext&&!homeContext,fromHome:homeContext||!gpsContext,replace:homeContext});
+        const opts={fromGps:gpsContext&&!homeContext,fromHome:homeContext||!gpsContext,replace:homeContext};
+        if(!gdSignupPromptFirst("profile",()=>openProfileStable(opts),opts))openProfileStable(opts);
         return;
       }
       if(on.includes("openStats")){event.preventDefault();event.stopImmediatePropagation();openDataHub();return;}

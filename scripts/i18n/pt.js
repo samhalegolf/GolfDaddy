@@ -268,6 +268,8 @@
     "auth.modeSetUp": "Configurar conta",
     "auth.modeSetPassword": "Definir palavra-passe",
     "auth.createHint": "As novas contas de jogador começam com o seu próprio perfil.",
+    "auth.promptTitle": "Crie a sua conta gratuita",
+    "auth.promptHint": "É gratuito. O seu saco, as sessões de treino e o perfil ficam guardados na sua conta e acompanham-no em qualquer dispositivo.",
     "auth.continueWithout": "‹ Continuar sem conta",
     "auth.name": "Nome",
     "auth.namePlaceholder": "O teu nome",

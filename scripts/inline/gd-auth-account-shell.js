@@ -9,6 +9,12 @@
 	     as one who tapped Profile. authIntent is that decision, set by whoever
 	     opened the panel and cleared when the guest backs out of the form. */
 	  let authIntent = false;
+	  /* Set when gd-auth-gate-v1.js's sign-up prompt put the form in front of the
+	     Bag, the shot system or the Profile. afterAuth is where the player was
+	     heading; "Continue without an account" and a successful sign-up or login
+	     both carry on there rather than dropping them on Home. */
+	  let signupPrompt = false;
+	  let afterAuth = null;
 	  let resetEmail = '';
 	  let authFeedback = '';
 	  let authFeedbackKind = 'info';
@@ -374,7 +380,7 @@
         return `
         <section class="accountPanel">
           <div class="panelHead">
-            <div><strong>${H('auth.modeCreate')}</strong><span>${H('auth.createHint')}</span></div>
+            <div><strong>${H(signupPrompt ? 'auth.promptTitle' : 'auth.modeCreate')}</strong><span>${H(signupPrompt ? 'auth.promptHint' : 'auth.createHint')}</span></div>
           </div>
           <button class="authDismiss" type="button" onclick="gd67ExitAuth()">${H('auth.continueWithout')}</button>
           <div class="accountGrid">
@@ -1580,6 +1586,8 @@
 	       returning from a player - is a request for the profile screen, which
 	       for a guest is now a real screen rather than a login wall. */
 	    authIntent = !!(opts && (opts.authGate || opts.signIn));
+	    signupPrompt = false;
+	    afterAuth = null;
 	    const account = currentAccount();
 	    const state = accountsApi()?.state?.() || {};
 	    const viewingOwn = !account || !state.viewingProfileId || state.viewingProfileId === account.profileId;
@@ -1781,8 +1789,10 @@
 		     profile rather than closing the panel - closing was the old behaviour,
 		     and for a guest it meant "Continue without an account" threw away the
 		     screen they had just come from. */
-		  function openAuth(mode) {
+		  function openAuth(mode, opts) {
 		    authIntent = true;
+		    signupPrompt = !!(opts && opts.prompt);
+		    afterAuth = opts && typeof opts.next === 'function' ? opts.next : null;
 		    setAuthMode(mode === 'signup' ? 'signup' : 'login');
 		    overlay().classList.remove('hidden');
 		    document.body.classList.add('gdProfileOpen');
@@ -1796,9 +1806,23 @@
 		    authMode = 'login';
 		    authFeedback = '';
 		    document.body.classList.remove('gdAuthLocked');
+		    if (continueAfterAuth()) return false;
 		    render();
 		    scrollProfileTop();
 		    return false;
+		  }
+
+		  /* Hands the player on to where the sign-up prompt stopped them. Returns
+		     false when nothing was waiting, so the caller keeps its own behaviour. */
+		  function continueAfterAuth() {
+		    const next = afterAuth;
+		    signupPrompt = false;
+		    afterAuth = null;
+		    if (!next) return false;
+		    overlay().classList.add('hidden');
+		    document.body.classList.remove('gdProfileOpen', 'gdAuthLocked');
+		    try { next(); } catch(e) { console.warn('[GD signup prompt]', e); }
+		    return true;
 		  }
 
 		  function setAuthMode(mode) {
@@ -1943,6 +1967,7 @@
 	      document.documentElement.classList.remove('gdAuthRouteBoot','gdResetRouteBoot');
 	      close();
 	      try { if (typeof showShellHome === 'function') showShellHome(); } catch(e) {}
+	      continueAfterAuth();
 	      safeToast(created && created.name ? L('auth.welcome', { name: created.name }) : L('auth.accountCreated'));
 		    } catch(e) {
 		      const message = e && e.message ? e.message : L('auth.couldNotCreate');
@@ -1972,6 +1997,7 @@
 	        document.documentElement.classList.remove('gdAuthRouteBoot','gdResetRouteBoot');
 	        close();
 	        try { if (typeof showShellHome === 'function') showShellHome(); } catch(e) {}
+	        continueAfterAuth();
 	      }
 	      safeToast(L('auth.loggedIn'));
 	    };

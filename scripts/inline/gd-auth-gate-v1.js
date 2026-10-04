@@ -119,6 +119,24 @@
     return false;
   };
 
+  /* The sign-up prompt. Not a gate: the Bag, the shot system and the Profile
+     stay open to guests (5.1.1(v), see the top of this file). A signed-out
+     player tapping one of them is shown the free sign-up form first, with
+     "Continue without an account" taking them straight on to where they were
+     going. The Bag asks on every tap; the shot system and the Profile once per
+     app session. True means the prompt should go on screen and the route hand
+     over to it. */
+  const EVERY_TAP={bag:true};
+  let signupPromptShown=false;
+  window.gdClaimSignupPrompt=function(route){
+    if(signedIn()||passwordResetRoute())return false;
+    if(typeof window.gd67OpenAuth!=='function')return false;
+    if(EVERY_TAP[route])return true;
+    if(signupPromptShown)return false;
+    signupPromptShown=true;
+    return true;
+  };
+
   function wrapAccounts(){
     const api=window.GolfDaddyAccounts;
     if(!api||api.__gdAuthGate)return;

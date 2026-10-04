@@ -276,6 +276,8 @@
     "auth.modeSetUp": "Skonfiguruj konto",
     "auth.modeSetPassword": "Ustaw hasło",
     "auth.createHint": "Nowe konta graczy zaczynają z własnym profilem.",
+    "auth.promptTitle": "Załóż darmowe konto",
+    "auth.promptHint": "To nic nie kosztuje. Twoja torba, sesje treningowe i profil zapisują się na koncie i są dostępne na każdym urządzeniu.",
     "auth.continueWithout": "‹ Kontynuuj bez konta",
     "auth.name": "Imię",
     "auth.namePlaceholder": "Twoje imię",

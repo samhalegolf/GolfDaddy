@@ -272,6 +272,8 @@
     "auth.modeSetUp": "Iestatīt kontu",
     "auth.modeSetPassword": "Iestatīt paroli",
     "auth.createHint": "Jauni spēlētāju konti sākas ar savu profilu.",
+    "auth.promptTitle": "Izveidojiet bezmaksas kontu",
+    "auth.promptHint": "Tas ir bez maksas. Jūsu soma, treniņi un profils tiek saglabāti jūsu kontā un ir pieejami jebkurā ierīcē.",
     "auth.continueWithout": "‹ Turpināt bez konta",
     "auth.name": "Vārds",
     "auth.namePlaceholder": "Tavs vārds",

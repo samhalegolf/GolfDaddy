@@ -268,6 +268,8 @@
     "auth.modeSetUp": "Seadista konto",
     "auth.modeSetPassword": "Määra parool",
     "auth.createHint": "Uued mängijakontod saavad kohe oma profiili.",
+    "auth.promptTitle": "Loo tasuta konto",
+    "auth.promptHint": "See on tasuta. Sinu kott, treeningud ja profiil salvestatakse kontole ning on sinuga igas seadmes.",
     "auth.continueWithout": "‹ Jätka ilma kontota",
     "auth.name": "Nimi",
     "auth.namePlaceholder": "Sinu nimi",

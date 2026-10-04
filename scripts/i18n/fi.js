@@ -268,6 +268,8 @@
     "auth.modeSetUp": "Ota tili käyttöön",
     "auth.modeSetPassword": "Aseta salasana",
     "auth.createHint": "Uudet pelaajatilit saavat oman profiilin.",
+    "auth.promptTitle": "Luo ilmainen tili",
+    "auth.promptHint": "Se on ilmaista. Bägisi, harjoituskertasi ja profiilisi tallentuvat tiliisi ja kulkevat mukanasi kaikilla laitteilla.",
     "auth.continueWithout": "‹ Jatka ilman tiliä",
     "auth.name": "Nimi",
     "auth.namePlaceholder": "Nimesi",

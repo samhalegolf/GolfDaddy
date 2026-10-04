@@ -272,6 +272,8 @@
     "auth.modeSetUp": "Nastaviť účet",
     "auth.modeSetPassword": "Nastaviť heslo",
     "auth.createHint": "Nové hráčske účty začínajú s vlastným profilom.",
+    "auth.promptTitle": "Vytvorte si bezplatný účet",
+    "auth.promptHint": "Je to zadarmo. Váš bag, tréningy a profil sa uložia do účtu a budete ich mať na každom zariadení.",
     "auth.continueWithout": "‹ Pokračovať bez účtu",
     "auth.name": "Meno",
     "auth.namePlaceholder": "Tvoje meno",
