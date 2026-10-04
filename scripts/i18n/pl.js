@@ -64,6 +64,8 @@
     "access.memberLogShots": "Aby zapisywać, gdzie kończą się twoje uderzenia, potrzebne jest członkostwo Clarity. Odległości pozostają bezpłatne.",
     "access.memberKeepScore": "Aby zapisywać wynik, potrzebne jest członkostwo Clarity. Odległości pozostają bezpłatne.",
     "access.membership": "Członkostwo",
+    "access.freeAccountCourseMaps": "Utwórz bezpłatne konto, aby przygotować więcej pól golfowych.",
+    "access.mapServerBusy": "Serwer map jest teraz zajęty. Spróbuj ponownie za chwilę.",
 
     /* Player badge */
     "badge.preview": "PODGLĄD",
@@ -868,6 +870,7 @@
     "course.noneDownloadedYet": "Nie pobrano jeszcze żadnych pól",
     "course.tryAnotherSearch": "Spróbuj innego wyszukiwania.",
     "course.downloadAutomatically": "Pola pobierają się automatycznie, gdy zagrasz na nich pierwszy raz.",
+    "course.offlineMembership": "Pobieranie pól golfowych do użytku offline jest dostępne w ramach członkostwa Clarity. Nadal możesz przeglądać pola online.",
     "course.publishedMap": "Opublikowana mapa",
     "course.courseMap": "Mapa pola",
     "course.mapType": "Typ mapy",

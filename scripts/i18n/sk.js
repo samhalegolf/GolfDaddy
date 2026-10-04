@@ -64,6 +64,8 @@
     "access.memberLogShots": "Na zapisovanie, kde skončili tvoje údery, potrebuješ členstvo Clarity. Vzdialenosti zostávajú zadarmo.",
     "access.memberKeepScore": "Na zapisovanie skóre potrebuješ členstvo Clarity. Vzdialenosti zostávajú zadarmo.",
     "access.membership": "Členstvo",
+    "access.freeAccountCourseMaps": "Vytvorte si bezplatný účet, aby ste mohli pripraviť ďalšie golfové ihriská.",
+    "access.mapServerBusy": "Mapový server je momentálne vyťažený. Skúste to prosím znova o chvíľu.",
 
     /* Player badge */
     "badge.preview": "NÁHĽAD",
@@ -846,6 +848,7 @@
     "course.noneDownloadedYet": "Zatiaľ žiadne stiahnuté ihriská",
     "course.tryAnotherSearch": "Skús iné hľadanie.",
     "course.downloadAutomatically": "Ihriská sa stiahnu automaticky, keď na nich prvýkrát hráš.",
+    "course.offlineMembership": "Sťahovanie golfových ihrísk na použitie offline je súčasťou členstva Clarity. Ihriská si stále môžete prezerať online.",
     "course.publishedMap": "Publikovaná mapa",
     "course.courseMap": "Mapa ihriska",
     "course.mapType": "Typ mapy",

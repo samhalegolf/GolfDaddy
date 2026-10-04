@@ -104,6 +104,8 @@ jobs:
           node dev/course-mapping-debug-wiring.test.js
           node dev/course-visual-engine.test.js
           node dev/course-mapper-jobs.test.js
+          node dev/course-offline-entitlement.test.js
+          node dev/course-package-client-identity.test.js
           node dev/course-mapper-worker.test.js
           node dev/mapper-debug-routine.test.js
           node dev/mapper-failure-kinds.test.js

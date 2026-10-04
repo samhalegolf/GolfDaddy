@@ -64,6 +64,8 @@
     "access.memberLogShots": "Χρειάζεσαι συνδρομή Clarity για να καταγράφεις πού καταλήγουν τα χτυπήματά σου. Οι αποστάσεις μένουν δωρεάν.",
     "access.memberKeepScore": "Χρειάζεσαι συνδρομή Clarity για να κρατάς σκορ. Οι αποστάσεις μένουν δωρεάν.",
     "access.membership": "Συνδρομή",
+    "access.freeAccountCourseMaps": "Δημιουργήστε έναν δωρεάν λογαριασμό για να προετοιμάσετε περισσότερα γήπεδα γκολφ.",
+    "access.mapServerBusy": "Ο διακομιστής χαρτών είναι απασχολημένος αυτή τη στιγμή. Δοκιμάστε ξανά σε λίγο.",
 
     /* Player badge */
     "badge.preview": "ΠΡΟΕΠΙΣΚΟΠΗΣΗ",
@@ -824,6 +826,7 @@
     "course.noneDownloadedYet": "Δεν έχουν ληφθεί γήπεδα ακόμα",
     "course.tryAnotherSearch": "Δοκίμασε άλλη αναζήτηση.",
     "course.downloadAutomatically": "Τα γήπεδα λαμβάνονται αυτόματα την πρώτη φορά που τα παίζεις.",
+    "course.offlineMembership": "Οι λήψεις γηπέδων γκολφ για χρήση εκτός σύνδεσης περιλαμβάνονται στη συνδρομή Clarity. Μπορείτε ακόμη να βλέπετε γήπεδα online.",
     "course.publishedMap": "Δημοσιευμένος χάρτης",
     "course.courseMap": "Χάρτης γηπέδου",
     "course.mapType": "Τύπος χάρτη",

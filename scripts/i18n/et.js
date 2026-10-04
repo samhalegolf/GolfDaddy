@@ -64,6 +64,8 @@
     "access.memberLogShots": "Löökide lõpp-punktide salvestamiseks on vaja Clarity liikmesust. Kaugused jäävad tasuta.",
     "access.memberKeepScore": "Skoori pidamiseks on vaja Clarity liikmesust. Kaugused jäävad tasuta.",
     "access.membership": "Liikmesus",
+    "access.freeAccountCourseMaps": "Loo tasuta konto, et valmistada ette rohkem golfiväljakuid.",
+    "access.mapServerBusy": "Kaardiserver on praegu hõivatud. Palun proovi varsti uuesti.",
 
     /* Player badge */
     "badge.preview": "EELVAADE",
@@ -824,6 +826,7 @@
     "course.noneDownloadedYet": "Ühtegi väljakut pole veel alla laaditud",
     "course.tryAnotherSearch": "Proovi teist otsingut.",
     "course.downloadAutomatically": "Väljakud laaditakse alla automaatselt, kui neid esimest korda mängid.",
+    "course.offlineMembership": "Golfiväljakute võrguühenduseta allalaadimine kuulub Clarity liikmesuse juurde. Väljakuid saad endiselt veebis vaadata.",
     "course.publishedMap": "Avaldatud kaart",
     "course.courseMap": "Väljakukaart",
     "course.mapType": "Kaardi tüüp",

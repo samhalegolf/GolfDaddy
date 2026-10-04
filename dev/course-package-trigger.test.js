@@ -48,6 +48,12 @@ function stubFetch(world) {
         world.mapperJobs = [Object.assign({ id: "job-new" }, rows[0])].concat(world.mapperJobs || []);
         return jsonResponse(201, rows.map(r => Object.assign({ id: "job-new" }, r)));
       }
+      if (rest.includes("requested_by=eq.") && rest.includes("status=eq.done")) {
+        return jsonResponse(200, world.successfulJobs || []);
+      }
+      if (rest.includes("requested_by=eq.") && rest.includes("status=in.(queued,running)")) {
+        return jsonResponse(200, world.actorLiveJobs || []);
+      }
       if (rest.includes("requested_by=eq.")) return jsonResponse(200, world.userJobs || []);
       return jsonResponse(200, world.mapperJobs || []);
     }
@@ -57,6 +63,7 @@ function stubFetch(world) {
 }
 
 let buildCoursePackageWithTrigger = null;
+let mapperTest = null;
 
 test("a duplicate course nearby with geometry is returned instead of starting a new mapper job", async () => {
   const calls = stubFetch({
@@ -136,10 +143,47 @@ test("a course whose last run failed is NOT re-enqueued by a poll - failed comes
   assert.deepStrictEqual(calls.mapperJobInserts, [], "a failed course must not be re-enqueued as a side effect of reading its state");
 });
 
-test("a rate-limited caller gets the underlying state back with a trigger error, not a fabricated success", async () => {
-  stubFetch({ nearbyMaps: [], userJobs: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }, { id: "e" }] });
-  const result = await buildCoursePackageWithTrigger("brand-new-course", { center: { lat: -36.8, lng: 174.7 }, userId: "user-1", origin: "https://clarity.example" });
-  assert.strictEqual(result.triggerError, "rate-limited");
+test("a guest who already received one successful prepared map gets the free-signup gate", async () => {
+  const calls = stubFetch({
+    nearbyMaps: [],
+    successfulJobs: [{ id: "done-1", kind: "automap", status: "done" }]
+  });
+  const result = await buildCoursePackageWithTrigger("second-course", {
+    center: { lat: -36.8, lng: 174.7 },
+    guestId: GUEST,
+    origin: "https://clarity.example"
+  });
+  assert.strictEqual(result.triggerError, "guest-signup-required");
+  assert.strictEqual(result.status, "none");
+  assert.deepStrictEqual(calls.mapperJobInserts, []);
+  assert.deepStrictEqual(calls.mapUpserts, [], "a gated preview must not create a course_maps stub");
+});
+
+test("five recent signed-in preparations are still allowed", async () => {
+  const calls = stubFetch({
+    nearbyMaps: [],
+    userJobs: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }, { id: "e" }]
+  });
+  const result = await buildCoursePackageWithTrigger("brand-new-course", {
+    center: { lat: -36.8, lng: 174.7 },
+    userId: "user-1",
+    origin: "https://clarity.example"
+  });
+  assert.strictEqual(result.status, "processing");
+  assert.strictEqual(calls.mapperJobInserts.length, 1);
+});
+
+test("a protective throttle gets the neutral server-busy trigger, not a product-limit error", async () => {
+  stubFetch({
+    nearbyMaps: [],
+    userJobs: Array.from({ length: mapperTest.AUTO_RATE_MAX_PER_USER }, (_, i) => ({ id: "u" + i }))
+  });
+  const result = await buildCoursePackageWithTrigger("brand-new-course", {
+    center: { lat: -36.8, lng: 174.7 },
+    userId: "user-1",
+    origin: "https://clarity.example"
+  });
+  assert.strictEqual(result.triggerError, "server-busy");
   assert.strictEqual(result.status, "none");
 });
 
@@ -149,6 +193,7 @@ test("a rate-limited caller gets the underlying state back with a trigger error,
   process.env.SUPABASE_ANON_KEY = "anon-stub";
   const mod = await import(path.join(root, "functions", "course-package.mjs"));
   buildCoursePackageWithTrigger = mod.buildCoursePackageWithTrigger;
+  mapperTest = (await import(path.join(root, "functions", "course-mapper-jobs.mjs"))).__courseMapperJobsTest;
   let failures = 0;
   for (const item of tests) {
     try {

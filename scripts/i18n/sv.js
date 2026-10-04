@@ -64,6 +64,8 @@
     "access.memberLogShots": "Du behöver ett Clarity-medlemskap för att registrera var dina slag hamnar. Avstånden är fortfarande gratis.",
     "access.memberKeepScore": "Du behöver ett Clarity-medlemskap för att föra score. Avstånden är fortfarande gratis.",
     "access.membership": "Medlemskap",
+    "access.freeAccountCourseMaps": "Skapa ett kostnadsfritt konto för att förbereda fler golfbanor.",
+    "access.mapServerBusy": "Kartservern är upptagen just nu. Försök igen om en stund.",
 
     /* Player badge */
     "badge.preview": "FÖRHANDSVY",
@@ -824,6 +826,7 @@
     "course.noneDownloadedYet": "Inga banor nedladdade än",
     "course.tryAnotherSearch": "Prova en annan sökning.",
     "course.downloadAutomatically": "Banor laddas ner automatiskt första gången du spelar dem.",
+    "course.offlineMembership": "Offlinehämtningar av golfbanor ingår i Clarity-medlemskapet. Du kan fortfarande visa banor online.",
     "course.publishedMap": "Publicerad karta",
     "course.courseMap": "Bankarta",
     "course.mapType": "Karttyp",

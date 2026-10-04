@@ -64,6 +64,8 @@
     "access.memberLogShots": "Je hebt een Clarity-lidmaatschap nodig om vast te leggen waar je slagen eindigen. Afstanden blijven gratis.",
     "access.memberKeepScore": "Je hebt een Clarity-lidmaatschap nodig om je score bij te houden. Afstanden blijven gratis.",
     "access.membership": "Lidmaatschap",
+    "access.freeAccountCourseMaps": "Maak een gratis account aan om meer golfbanen voor te bereiden.",
+    "access.mapServerBusy": "De kaartserver is momenteel bezet. Probeer het binnenkort opnieuw.",
 
     /* Player badge */
     "badge.preview": "VOORBEELD",
@@ -824,6 +826,7 @@
     "course.noneDownloadedYet": "Nog geen banen gedownload",
     "course.tryAnotherSearch": "Probeer een andere zoekopdracht.",
     "course.downloadAutomatically": "Banen worden automatisch gedownload de eerste keer dat je ze speelt.",
+    "course.offlineMembership": "Offline downloads van golfbanen zijn inbegrepen bij het Clarity-lidmaatschap. Je kunt golfbanen nog steeds online bekijken.",
     "course.publishedMap": "Gepubliceerde kaart",
     "course.courseMap": "Baankaart",
     "course.mapType": "Kaarttype",

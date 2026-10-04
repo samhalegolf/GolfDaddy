@@ -64,6 +64,8 @@
     "access.memberLogShots": "Um festzuhalten, wo deine Schläge landen, brauchst du eine Clarity-Mitgliedschaft. Entfernungen bleiben kostenlos.",
     "access.memberKeepScore": "Um deinen Score zu führen, brauchst du eine Clarity-Mitgliedschaft. Entfernungen bleiben kostenlos.",
     "access.membership": "Mitgliedschaft",
+    "access.freeAccountCourseMaps": "Erstelle ein kostenloses Konto, um weitere Golfplätze vorzubereiten.",
+    "access.mapServerBusy": "Der Kartenserver ist gerade ausgelastet. Bitte versuche es gleich noch einmal.",
 
     /* Player badge */
     "badge.preview": "VORSCHAU",
@@ -824,6 +826,7 @@
     "course.noneDownloadedYet": "Noch keine Plätze heruntergeladen",
     "course.tryAnotherSearch": "Versuche eine andere Suche.",
     "course.downloadAutomatically": "Plätze werden automatisch heruntergeladen, wenn du sie zum ersten Mal spielst.",
+    "course.offlineMembership": "Offline-Downloads von Golfplätzen sind in der Clarity-Mitgliedschaft enthalten. Du kannst Golfplätze weiterhin online ansehen.",
     "course.publishedMap": "Veröffentlichte Karte",
     "course.courseMap": "Platzkarte",
     "course.mapType": "Kartentyp",

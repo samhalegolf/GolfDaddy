@@ -17,6 +17,19 @@
     } catch (e) { return ""; }
   }
 
+  function signedIn() {
+    try { return !!(app.account && typeof app.account.signedIn === "function" && app.account.signedIn()); }
+    catch (e) { return false; }
+  }
+
+  function guestId() {
+    try {
+      var identity = window.GDGuestIdentity;
+      return identity && typeof identity.getOrCreateGuestId === "function"
+        ? String(identity.getOrCreateGuestId() || "") : "";
+    } catch (e) { return ""; }
+  }
+
   /* opts: {courseId, courseLat, courseLng, courseName, timeoutMs} → parsed body or null. */
   app.fetchCoursePackage = async function (opts) {
     opts = opts || {};
@@ -31,8 +44,17 @@
     var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     var timer = controller ? setTimeout(function () { controller.abort(); }, opts.timeoutMs || DEFAULT_TIMEOUT_MS) : null;
     var headers = { Accept: "application/json" };
+    var hadSignedInSession = signedIn();
     var token = await accessToken();
-    if (token) headers.Authorization = "Bearer " + token;
+    if (token) {
+      headers.Authorization = "Bearer " + token;
+    } else if (!hadSignedInSession) {
+      /* A real guest gets the installation id that buys exactly one successful prepared map.
+         A signed-in session whose token refresh failed deliberately does NOT fall back to this:
+         doing that is how a member could silently become a guest and hit the anonymous gate. */
+      var gid = guestId();
+      if (gid) params += "&guestId=" + encodeURIComponent(gid);
+    }
     /* Same reasoning as scripts/gd-course-package-client.js: null stays the answer, because
        the caller only branches on ready/not-ready, but the reason is recorded rather than
        thrown away. A signed-out player and an unmapped course looked identical from here. */
@@ -44,7 +66,7 @@
         else delete document.body.dataset.gdCoursePackageDetail;
       } catch (e) {}
     }
-    if (!token) note("no-token");
+    if (!token) note(hadSignedInSession ? "account-token-unavailable" : "guest");
     try {
       var response = await fetch(ENDPOINT + "?" + params, { headers: headers, signal: controller ? controller.signal : undefined });
       if (!response.ok) {
@@ -55,7 +77,13 @@
       }
       var body = await response.json();
       var state = body && body.status ? String(body.status) : "none";
-      note(state === "none" && !token ? "none-signed-out" : state,
+      /* Existing mapped courses remain readable without auth, so only turn a NONE into an
+         account-verification error. A ready package should still open even if the token
+         refresh happened to fail on the tee. */
+      if (state === "none" && hadSignedInSession && !token && body && !body.triggerError) {
+        body.triggerError = "account-verification-unavailable";
+      }
+      note(state === "none" && !token && !hadSignedInSession ? "none-signed-out" : state,
         body && body.triggerError ? String(body.triggerError) : "");
       return body;
     } catch (e) {

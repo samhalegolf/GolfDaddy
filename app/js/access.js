@@ -65,6 +65,39 @@
     try { return !!(app.account && app.account.signedIn()); } catch (e) { return false; }
   }
 
+  /* Offline course packages are the paid boundary. Keep this lightweight on the GPS page:
+     the root shell has already refreshed these caches, and the store entitlement cache is
+     itself refreshed on native boot. This mirrors ClarityPayments.hasActiveAccess() without
+     loading the whole payments/settings UI into the round surface. */
+  function offlineDownloads() {
+    var accountSignedIn = signedIn();
+    if (accountSignedIn) {
+      try {
+        var accounts = JSON.parse(localStorage.getItem("gd_accounts_v1") || "null") || {};
+        var rows = Array.isArray(accounts.accounts) ? accounts.accounts : [];
+        var active = rows.find(function (row) { return row && row.accountId === accounts.activeId; }) || null;
+        var role = String(active && active.role || "").trim().toLowerCase();
+        if (role === "admin" || role === "coach") return true;
+      } catch (e) {}
+
+      /* The backend payment cache belongs to the signed-in account. Do not trust a stale
+         active:true after sign-out; a native store entitlement below is the one paid state
+         deliberately allowed to survive without an account. */
+      try {
+        var payment = JSON.parse(localStorage.getItem("clarity:payments:status:v1") || "null");
+        if (payment && payment.active) return true;
+      } catch (e) {}
+    }
+
+    try {
+      var store = JSON.parse(localStorage.getItem("clarity:store-entitlement:v1") || "null");
+      if (!store || !store.active) return false;
+      if (!store.expiresAt) return true;
+      var expiry = new Date(store.expiresAt).getTime();
+      return Number.isFinite(expiry) && expiry > Date.now();
+    } catch (e) { return false; }
+  }
+
   /* True when this session may use the scored-round features. */
   function roundFeatures() {
     return signedIn() && !rangefinderParam();
@@ -108,14 +141,50 @@
       };
     }
 
+    action.classList.remove("hiddenState");
     bar.classList.remove("hiddenState");
     clearTimeout(noticeTimer);
     noticeTimer = setTimeout(hideNotice, NOTICE_MS);
   }
 
+  /* Course preparation/save failures use the same unobtrusive top bar but are not scored-round
+     gates. In particular, a free signed-in player may VIEW a fetched package online; only
+     writing it into the offline library is paid. */
+  function courseIssue(kind) {
+    var i18n = window.GDI18n;
+    var bar = document.getElementById("accessNotice");
+    var label = document.getElementById("accessNoticeLabel");
+    var action = document.getElementById("accessNoticeAction");
+    if (!bar || !label || !action) return;
+
+    action.classList.add("hiddenState");
+    action.onclick = null;
+    if (kind === "guest-signup-required") {
+      i18n.set(label, "access.freeAccountCourseMaps");
+      i18n.set(action, "auth.modeCreate");
+      action.classList.remove("hiddenState");
+      action.onclick = function () { window.location.href = "/?login=1"; };
+    } else if (kind === "account-verification-unavailable") {
+      i18n.set(label, "auth.errUnavailable");
+      i18n.set(action, "pay.refresh");
+      action.classList.remove("hiddenState");
+      action.onclick = function () { window.location.reload(); };
+    } else if (kind === "storage") {
+      i18n.set(label, "course.notEnoughSpace");
+    } else {
+      i18n.set(label, "access.mapServerBusy");
+    }
+
+    bar.classList.remove("hiddenState");
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(hideNotice, kind === "guest-signup-required" ? 12000 : NOTICE_MS);
+  }
+
   app.access = {
     roundFeatures: roundFeatures,
     signedIn: signedIn,
+    offlineDownloads: offlineDownloads,
+    courseIssue: courseIssue,
     /* Returns false AND explains itself, so callers stay one line. */
     signalAllowed: function (name) {
       if (!GATED_SIGNALS[name] || roundFeatures()) return true;

@@ -557,7 +557,7 @@
   function saveCourseToLibrary(course, pkg) {
     var mapType = mapTypeOf(pkg);
     if (!mapType) return null;
-    return app.courseStore.save({
+    var saved = app.courseStore.save({
       courseId: course.courseId,
       courseName: course.courseName,
       mapType: mapType,
@@ -573,6 +573,22 @@
       versionLabel: pkg.versionLabel || null,
       pkg: pkg
     });
+    /* "Not entitled" is the normal free-online path, so it stays quiet. A paid
+       save that actually hit device storage pressure is not normal and must not
+       look successful merely because play can continue from the in-memory package. */
+    if (!saved && app.courseStore.lastSaveFailure && app.courseStore.lastSaveFailure() === "storage"
+        && app.access && app.access.courseIssue) {
+      app.access.courseIssue("storage");
+    }
+    return saved;
+  }
+
+  function reportCoursePackageIssue(pkg) {
+    var issue = pkg && pkg.triggerError ? String(pkg.triggerError) : "";
+    if (!issue || !app.access || typeof app.access.courseIssue !== "function") return;
+    if (issue === "guest-signup-required" || issue === "server-busy" || issue === "account-verification-unavailable") {
+      app.access.courseIssue(issue);
+    }
   }
 
   /* Deferred so the check never sits on the Signal path that entered the
@@ -915,6 +931,7 @@
       goResumeHole(resumeHole);
       hideLoadingScreen();
       startDemoCourseDataTimerIfNeeded();
+      reportCoursePackageIssue(pkg);
       saveCourseToLibrary(course, pkg);
       /* The package on this branch is seconds old; the first-hole check that
          startRound scheduled would only fetch it again. */

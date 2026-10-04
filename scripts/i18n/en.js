@@ -70,6 +70,8 @@
     "access.memberLogShots": "A Clarity membership is needed to log where your shots finish. Distances stay free.",
     "access.memberKeepScore": "A Clarity membership is needed to keep score. Distances stay free.",
     "access.membership": "Membership",
+    "access.freeAccountCourseMaps": "Create a free account to prepare more courses.",
+    "access.mapServerBusy": "The map server is busy right now. Please try again soon.",
 
     /* Player badge */
     "badge.preview": "PREVIEW",
@@ -830,6 +832,7 @@
     "course.noneDownloadedYet": "No courses downloaded yet",
     "course.tryAnotherSearch": "Try another search.",
     "course.downloadAutomatically": "Courses download automatically the first time you play them.",
+    "course.offlineMembership": "Offline course downloads are included with Clarity membership. You can still view courses online.",
     "course.publishedMap": "Published map",
     "course.courseMap": "Course map",
     "course.mapType": "Map type",
@@ -843,7 +846,7 @@
     "course.tapAgainToRemove": "Tap again to remove",
     "course.mapUpdated": "Map updated",
     "course.noNewerMap": "No newer map published yet",
-    "course.notEnoughSpace": "Not enough space to save the update",
+    "course.notEnoughSpace": "Not enough space to save this course for offline play. Remove a downloaded course and try again.",
     "course.couldNotReachServer": "Could not reach the server",
     "course.today": "today",
     "course.sizeBytes": "{n} B",

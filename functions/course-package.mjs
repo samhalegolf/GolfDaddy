@@ -185,7 +185,8 @@ export async function buildCoursePackageWithTrigger(courseId, { center, courseNa
      client treats as terminal: no job was started, so there is nothing to wait for and
      holding the player on a loading screen would be a lie. The reason rides alongside so the
      app can say which it was instead of showing the same silence for both. */
-  if (enqueued.rateLimited) return Object.assign({}, result, { triggerError: "rate-limited" });
+  if (enqueued.signupRequired) return Object.assign({}, result, { triggerError: "guest-signup-required" });
+  if (enqueued.rateLimited) return Object.assign({}, result, { triggerError: "server-busy" });
   if (enqueued.unauthorized) return Object.assign({}, result, { triggerError: "no-actor" });
   /* A deduped enqueue means a run for this course is already in flight - reuse it and report
      it as what it is. Answering "none" here would have told the client to stop waiting for a

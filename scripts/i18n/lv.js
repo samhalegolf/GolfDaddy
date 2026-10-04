@@ -64,6 +64,8 @@
     "access.memberLogShots": "Lai reģistrētu, kur beidzas tavi sitieni, vajadzīga Clarity dalība. Attālumi paliek bez maksas.",
     "access.memberKeepScore": "Lai skaitītu rezultātu, vajadzīga Clarity dalība. Attālumi paliek bez maksas.",
     "access.membership": "Dalība",
+    "access.freeAccountCourseMaps": "Izveidojiet bezmaksas kontu, lai sagatavotu vairāk golfa laukumu.",
+    "access.mapServerBusy": "Karšu serveris pašlaik ir aizņemts. Lūdzu, pēc brīža mēģiniet vēlreiz.",
 
     /* Player badge */
     "badge.preview": "PRIEKŠSKATĪJUMS",
@@ -846,6 +848,7 @@
     "course.noneDownloadedYet": "Vēl nav lejupielādētu laukumu",
     "course.tryAnotherSearch": "Mēģini meklēt citādi.",
     "course.downloadAutomatically": "Laukumi tiek lejupielādēti automātiski, kad tos spēlē pirmo reizi.",
+    "course.offlineMembership": "Golfa laukumu lejupielāde lietošanai bezsaistē ir iekļauta Clarity abonementā. Laukumus joprojām varat skatīt tiešsaistē.",
     "course.publishedMap": "Publicētā karte",
     "course.courseMap": "Laukuma karte",
     "course.mapType": "Kartes veids",
