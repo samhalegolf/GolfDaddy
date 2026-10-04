@@ -29,7 +29,7 @@
 import { parseScorecardCardsHtml, courseFactsFromText, pageText } from "./gd-scorecard-parse-core.mjs";
 import courseSearchIdentity from "./gd-course-search-identity.js";
 import {
-  scorecardImageCandidates, holePageLinks, assembleVisualCards,
+  scorecardImageCandidates, holePageLinks, assembleVisualCards, imageKindHint,
   MAX_CARD_IMAGES, VISUAL_STORED_CONFIDENCE_CAP
 } from "./gd-scorecard-visual-core.mjs";
 
@@ -502,8 +502,14 @@ export async function resolveScorecard(course, deps, options) {
 /* THE PICTURE FALLBACK
  *
  * Runs only when no page held a readable table. Looks at the pages that were about
- * this course (and at their per-hole pages) for images of the card, has them
- * transcribed, and keeps only what gd-scorecard-visual-core can corroborate.
+ * this course (and at their per-hole pages) for images of the card, then tops that
+ * up with an image search, has them transcribed, and keeps only what
+ * gd-scorecard-visual-core can corroborate.
+ *
+ * The image search is there because the card often lives on a page we cannot
+ * read. Cebu Country Club's is on BlueGolf and mScorecard, both of which refuse our
+ * page fetch, and its own site shows none - but an image search for
+ * "Cebu Country Club scorecard" turns up the card itself.
  *
  * Two model calls at most: the card-like images first, then - only if those did
  * not resolve - the per-hole graphics as one batch.
@@ -513,9 +519,8 @@ export async function resolveScorecard(course, deps, options) {
  *   html-extraction-failed -> scorecard-image-found -> visual-extraction-failed
  *   html-extraction-failed -> scorecard-image-found -> visual-scorecard-resolved */
 async function resolveVisualScorecard(pages, context, visual, out, parsed) {
-  const report = out.visual = { status: null, pagesInspected: 0, holePages: 0, images: [], reads: [], accepted: [], rejected: [] };
+  const report = out.visual = { status: null, pagesInspected: 0, holePages: 0, imageSearch: null, images: [], reads: [], accepted: [], rejected: [] };
   if (!visual) { report.status = "unavailable"; return; }
-  if (!pages.length) { report.status = "no-scorecard-image"; return; }
 
   const cardImages = [];
   let holeImages = [];
@@ -542,6 +547,25 @@ async function resolveVisualScorecard(pages, context, visual, out, parsed) {
   /* A full card that is also a hole page's picture is a card, not a hole graphic. */
   holeImages = holeImages.filter(image => !cardImages.some(card => card.url === image.url && card.kind !== "single-hole"));
   const cardBatch = cardImages.filter(image => image.kind !== "single-hole").slice(0, MAX_CARD_IMAGES);
+
+  /* Page images first - they come from pages already matched to this course - and
+     the image search fills whatever room is left in the same model call. */
+  if (cardBatch.length < MAX_CARD_IMAGES && visual.searchImages) {
+    const query = context.name + " scorecard";
+    const search = report.imageSearch = { query, results: 0, kept: [], error: null };
+    const results = await visual.searchImages(query).catch(error => {
+      search.error = String(error && error.message || error).slice(0, 160);
+      return [];
+    });
+    search.results = results.length;
+    imageSearchCandidates(results, context.identity, context.name)
+      .filter(image => !cardBatch.some(existing => existing.url === image.url))
+      .slice(0, MAX_CARD_IMAGES - cardBatch.length)
+      .forEach(image => {
+        cardBatch.push(image);
+        search.kept.push({ url: image.url, page: image.page.candidate.url, title: image.context });
+      });
+  }
 
   report.images = cardBatch.concat(holeImages).map(image => ({ url: image.url, kind: image.kind, hole: image.hole, score: image.score, page: image.page.candidate.url }));
   if (!report.images.length) { report.status = "no-scorecard-image"; return; }
@@ -578,13 +602,14 @@ async function resolveVisualScorecard(pages, context, visual, out, parsed) {
   });
 
   accepted.forEach(result => {
-    const firstImage = cardImages.concat(holeImages).find(image => image.url === result.images[0]);
-    const page = firstImage ? firstImage.page : pages[0];
+    const page = cardBatch.concat(holeImages).find(image => image.url === result.images[0]).page;
     const quality = cardQuality(result.card);
     if (!quality.usable) { report.rejected.push({ url: result.images.join(" + "), reason: quality.reason }); return; }
     const confidence = Math.min(VISUAL_STORED_CONFIDENCE_CAP, result.confidence);
     parsed.push(Object.assign({}, result.card, {
-      name: result.card.name || page.pageName || context.name,
+      /* The page's name, not the one printed on the card: a printed heading is
+         "Scorecard: Cebu Country Club", and that would end up on a course row. */
+      name: page.pageName || context.name,
       sourceUrl: page.candidate.url, source: "visual-" + page.source.id,
       quality: quality.score * result.confidence,
       resolution: {
@@ -599,6 +624,38 @@ async function resolveVisualScorecard(pages, context, visual, out, parsed) {
 
   report.status = report.accepted.length ? "visual-scorecard-resolved" : "visual-extraction-failed";
   out.debug.stages.push(report.status);
+}
+
+/* Image search results worth sending to the reader, best first.
+ *
+ * These come from no page we have matched to the course, so the bar is the result's
+ * own title: it must name this course and say it is a card. The name printed on
+ * the card is checked again after it is read. */
+export function imageSearchCandidates(results, identity, courseName) {
+  const confidenceRank = { high: 3, medium: 2, low: 1 };
+  const seen = new Set();
+  return (results || []).map(result => {
+    const url = String((result && result.imageUrl) || "");
+    const pageUrl = String((result && result.pageUrl) || "");
+    const title = String((result && result.title) || "").trim();
+    if (!/^https:\/\//i.test(url) || /\.svg(\?|#|$)/i.test(url) || seen.has(url)) return null;
+    seen.add(url);
+    if (Number.isFinite(result.width) && result.width > 0 && result.width < 400) return null;
+    const text = title + " " + pageUrl + " " + url;
+    if (!/score[\s_-]?card|yardage|course[\s_-]?card/i.test(text)) return null;
+    if (!cardNameMatchesIdentity(title, identity) && !cardNameMatchesCourse(title, courseName)) return null;
+    const hint = imageKindHint(title);
+    const score = (confidenceRank[result.confidence] || 1) + (/score[\s_-]?card/i.test(title) ? 2 : 0);
+    return {
+      url, thumbnailUrl: result.thumbnailUrl || null, score, kind: hint.kind === "single-hole" ? "full-card" : hint.kind, hole: null,
+      context: title.slice(0, 160),
+      page: {
+        candidate: { url: pageUrl || url, officialDomain: false },
+        pageName: courseName,
+        source: { id: "image-search" }
+      }
+    };
+  }).filter(Boolean).sort((a, b) => b.score - a.score);
 }
 
 /* Pages worth reading, best-known source first.

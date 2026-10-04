@@ -60,9 +60,57 @@ async function searchGoogleCse(query) {
   }));
 }
 
+/* Image search, for scorecards that only exist as pictures. Same shape from both
+   providers: the image itself, the page it sits on, and its size when known. */
+async function searchBraveImages(query, count) {
+  const url = new URL("https://api.search.brave.com/res/v1/images/search");
+  url.searchParams.set("q", query);
+  url.searchParams.set("count", String(count || 20));
+  /* A course's card can be hosted anywhere, not just in its own country. */
+  url.searchParams.set("country", "ALL");
+  const res = await fetch(url.href, {
+    headers: {
+      "Accept": "application/json",
+      "X-Subscription-Token": env("BRAVE_SEARCH_API_KEY")
+    }
+  });
+  if (!res.ok) throw new Error("Brave image search returned " + res.status);
+  const body = await res.json();
+  return ((body && body.results) || []).map(item => ({
+    imageUrl: item && item.properties && item.properties.url,
+    thumbnailUrl: item && item.thumbnail && item.thumbnail.src,
+    pageUrl: item && item.url,
+    title: stripTags(item && item.title),
+    width: Number(item && item.properties && item.properties.width) || null,
+    height: Number(item && item.properties && item.properties.height) || null,
+    confidence: (item && item.confidence) || null
+  }));
+}
+
+async function searchGoogleCseImages(query) {
+  const url = new URL("https://www.googleapis.com/customsearch/v1");
+  url.searchParams.set("key", env("GOOGLE_CSE_KEY"));
+  url.searchParams.set("cx", env("GOOGLE_CSE_ID"));
+  url.searchParams.set("q", query);
+  url.searchParams.set("searchType", "image");
+  url.searchParams.set("num", "10");
+  const res = await fetch(url.href, { headers: { "Accept": "application/json" } });
+  if (!res.ok) throw new Error("Google CSE image search returned " + res.status);
+  const body = await res.json();
+  return ((body && body.items) || []).map(item => ({
+    imageUrl: item && item.link,
+    thumbnailUrl: item && item.image && item.image.thumbnailLink,
+    pageUrl: item && item.image && item.image.contextLink,
+    title: stripTags(item && item.title),
+    width: Number(item && item.image && item.image.width) || null,
+    height: Number(item && item.image && item.image.height) || null,
+    confidence: null
+  }));
+}
+
 function pickProvider() {
-  if (env("BRAVE_SEARCH_API_KEY")) return { name: "brave", search: searchBrave };
-  if (env("GOOGLE_CSE_KEY") && env("GOOGLE_CSE_ID")) return { name: "google-cse", search: searchGoogleCse };
+  if (env("BRAVE_SEARCH_API_KEY")) return { name: "brave", search: searchBrave, searchImages: searchBraveImages };
+  if (env("GOOGLE_CSE_KEY") && env("GOOGLE_CSE_ID")) return { name: "google-cse", search: searchGoogleCse, searchImages: searchGoogleCseImages };
   return null;
 }
 

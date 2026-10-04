@@ -12,6 +12,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import safeRemote from "./safe-remote-url.js";
+import webSearch from "./gd-web-search.js";
 import { VISUAL_SCORECARD_SCHEMA, buildVisualPrompt } from "./gd-scorecard-visual-core.mjs";
 
 const { safeRemoteUrl, resolvesToPublicAddress } = safeRemote;
@@ -130,12 +131,23 @@ export function makeScorecardVisualReader({ fetchHtml, budgetMs = SCORECARD_VISU
     return controller ? controller.signal : undefined;
   };
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const provider = webSearch.pickProvider();
   return {
+    /* Straight to an image search, for cards no page we read was showing. Null
+       when no search provider is configured. */
+    searchImages: provider && provider.searchImages
+      ? query => provider.searchImages(query, 20)
+      : null,
     fetchHtml: url => fetchHtml(url, signal()),
     /* images: [{url, kind, hole, context}] -> [{image, raw|null, error?}] in the same order. */
     async readImages(images) {
       const list = (images || []).slice(0, MAX_IMAGES_PER_CALL);
-      const loaded = await Promise.all(list.map(image => fetchImage(image.url, signal())
+      /* An image search also hands back the search engine's own copy. It is
+         smaller, but it is used when the site holding the original refuses us -
+         the same sites that refuse a page fetch often refuse an image fetch. */
+      const load = image => fetchImage(image.url, signal())
+        .catch(error => image.thumbnailUrl ? fetchImage(image.thumbnailUrl, signal()) : Promise.reject(error));
+      const loaded = await Promise.all(list.map(image => load(image)
         .then(file => ({ image, file }))
         .catch(error => ({ image, error: String(error && error.message || error).slice(0, 160) }))));
       const ready = loaded.filter(entry => entry.file);

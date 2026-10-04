@@ -247,5 +247,69 @@ function holeGraphic(h, extra = {}) {
   assert.deepStrictEqual(viaHtml.debug.stages, ["html-resolved"]);
   assert.strictEqual(htmlFirst.calls.length, 0, "no model call when the HTML already answered");
 
+  /* ---------- image search: Cebu Country Club ------------------------ */
+  /* The real case. The card is on BlueGolf and mScorecard, which both refuse the
+     page fetch, and the club's own pages show no card - so only an image search
+     finds it. Read from a small screenshot of it: the Blue and White back-nine
+     figures as read do not add up to the printed IN (3301, 3148), which is exactly
+     the misread the totals are there to catch. Par, HCP and Red all add up. */
+  const cebuHoles = Array.from({ length: 18 }, (_, i) => i + 1);
+  const cebu = {
+    par: [4, 5, 3, 4, 3, 4, 5, 4, 4, 4, 5, 4, 3, 4, 3, 5, 4, 4],
+    hcp: [11, 1, 17, 7, 15, 5, 3, 13, 9, 10, 2, 12, 18, 8, 16, 4, 14, 6],
+    blue: [390, 510, 175, 371, 156, 311, 524, 424, 384, 344, 513, 413, 197, 354, 192, 529, 383, 366],
+    white: [375, 498, 165, 363, 152, 300, 482, 374, 376, 329, 503, 407, 191, 335, 165, 495, 383, 360],
+    red: [361, 337, 160, 351, 127, 292, 450, 305, 305, 325, 460, 326, 152, 323, 149, 430, 343, 297]
+  };
+  const cebuTee = (name, list, printedOut, printedIn) => ({
+    name, distances: cebuHoles.map(h => ({ hole: h, value: list[h - 1] })), printedOut, printedIn, printedTotal: null
+  });
+  const cebuRead = {
+    imageIndex: 1, isScorecard: true, kind: "full-card", legibility: "clear", courseName: "Cebu Country Club", unit: "yards",
+    holes: cebuHoles.map(h => ({ hole: h, par: cebu.par[h - 1], strokeIndex: cebu.hcp[h - 1] })),
+    tees: [cebuTee("Blue", cebu.blue, 3245, 3301), cebuTee("White", cebu.white, 3085, 3148), cebuTee("Red", cebu.red, 2688, 2805)],
+    printedParOut: 36, printedParIn: 36, printedParTotal: 72
+  };
+  const cebuPages = "<html><h1>Cebu Country Club</h1><p>Championship golf in Cebu.</p></html>";
+  const searched = [];
+  const cebuVisual = {
+    calls: [],
+    fetchHtml: async () => { throw new Error("HTTP 404"); },
+    searchImages: async query => {
+      searched.push(query);
+      return [
+        { imageUrl: "https://img.example/cebu-golf-sunset.jpg", pageUrl: "https://travel.example/cebu", title: "Cebu Country Club fairway at sunset", width: 1600, confidence: "high" },
+        { imageUrl: "https://img.example/alta-vista.png", pageUrl: "https://cards.example/alta", title: "Scorecard: Alta Vista Golf and Country Club", width: 620, confidence: "high" },
+        { imageUrl: "https://img.example/cebu-thumb.png", pageUrl: "https://cards.example/cebu-small", title: "Cebu Country Club scorecard", width: 120, confidence: "medium" },
+        { imageUrl: "https://www.mscorecard.com/cards/cebucc.png", thumbnailUrl: "https://imgs.search.brave.com/x.png", pageUrl: "https://www.mscorecard.com/mscorecard/showcourse.php?cid=1177285338650", title: "Scorecard: Cebu Country Club", width: 620, confidence: "high" }
+      ];
+    },
+    readImages: async batch => { cebuVisual.calls.push(batch.map(i => i.url)); return batch.map(image => ({ image, raw: cebuRead })); }
+  };
+
+  const picked = r.imageSearchCandidates(await cebuVisual.searchImages("x"), { aliases: ["Cebu Country Club"] }, "Cebu Country Club");
+  assert.deepStrictEqual(picked.map(p => p.url), ["https://www.mscorecard.com/cards/cebucc.png"],
+    "only the card titled for this course: not a photo, not another club's card, not a thumbnail");
+  assert.strictEqual(picked[0].thumbnailUrl, "https://imgs.search.brave.com/x.png", "the search engine's copy rides along in case the original is refused");
+
+  const viaSearch = await r.resolveScorecard({ courseName: "Cebu Country Club" }, {
+    search: async () => [{ url: "https://www.cebucountryclub.com/golf" }],
+    fetchHtml: async () => cebuPages,
+    visual: cebuVisual
+  });
+  assert.strictEqual(searched[searched.length - 1], "Cebu Country Club scorecard");
+  assert.strictEqual(viaSearch.cards.length, 1, "Cebu resolves from an image search when no page shows the card");
+  assert.deepStrictEqual(viaSearch.debug.stages, ["html-extraction-failed", "scorecard-image-found", "visual-scorecard-resolved"]);
+  const cebuCard = viaSearch.cards[0];
+  assert.strictEqual(cebuCard.name, "Cebu Country Club", "named for the course, not the printed 'Scorecard:' heading");
+  assert.strictEqual(cebuCard.par, 72);
+  assert.strictEqual(cebuCard.source, "visual-image-search");
+  assert.strictEqual(cebuCard.sourceUrl, "https://www.mscorecard.com/mscorecard/showcourse.php?cid=1177285338650");
+  assert.deepStrictEqual(cebuCard.teeOptions, ["Red"], "Blue and White are dropped: their back nine does not add up to the printed IN");
+  assert.strictEqual(cebuCard.holes[0].distanceM, Math.round(361 * 0.9144));
+  assert.ok(cebuCard.resolution.visualChecks.parTotalsMatched && cebuCard.resolution.visualChecks.strokeIndexComplete);
+  assert.strictEqual(viaSearch.visual.imageSearch.kept.length, 1);
+  assert.strictEqual(cebuVisual.calls.length, 1, "one model call");
+
   console.log("scorecard visual fallback tests passed");
 })().catch(error => { console.error(error); process.exit(1); });

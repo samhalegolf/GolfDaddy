@@ -1166,6 +1166,10 @@
           html += '<br><span>' + (accepted
             ? "Visual card: " + esc(accepted.holes) + " holes, confidence " + esc(Math.round(accepted.confidence * 100)) + "% (" + esc((accepted.layout || []).length > 2 ? "hole graphics" : (accepted.layout || []).join(" + ")) + ")"
             : "Visual: " + esc(visual.status) + ((visual.rejected || [])[0] ? " — " + esc(visual.rejected[0].reason) : "")) + "</span>";
+          if (visual.imageSearch) {
+            html += '<br><span>Image search "' + esc(visual.imageSearch.query) + '": ' + esc(visual.imageSearch.results) + " results, "
+              + esc((visual.imageSearch.kept || []).length) + " kept" + (visual.imageSearch.error ? " — " + esc(visual.imageSearch.error) : "") + "</span>";
+          }
         } else if (visual && visual.status === "unavailable") {
           html += '<br><span>Visual fallback unavailable (no vision key)</span>';
         }
