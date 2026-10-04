@@ -3,11 +3,10 @@
 Paste-ready. Category **Golf**. Privacy policy `https://claritygolf.app/privacy.html`,
 support `https://claritygolf.app/support.html`.
 
-Two things in the description are deliberate and should survive editing: it
-states the membership requirement outright, and it explains that "Waiting for
-round" is normal. A reviewer opens this app with no phone paired and no
-membership and sees exactly that screen — and an undisclosed subscription gate
-is a standard rejection reason.
+One thing in the description is deliberate and should survive editing: it
+explains that "Waiting for round" is normal. A reviewer opens this app with no
+phone paired and sees exactly that screen. Watch play is free, so there is no
+subscription to disclose.
 
 ## Title (50 max)
 
@@ -36,12 +35,12 @@ ON THE WATCH
 • Take the round over from the watch, lock a shot as you play it, and move
   between holes.
 
-REQUIRES THE CLARITY CADDY PHONE APP AND AN ACTIVE MEMBERSHIP
+REQUIRES THE CLARITY CADDY PHONE APP
 This is a companion app — it has nothing of its own to show. Open a round in
 Clarity Caddy on your iPhone or Android phone and the watch fills in. With no
 round running on the phone, the watch shows "Waiting for round", which is the
-app working correctly, not a fault. Watch play is part of Clarity Caddy
-Membership; without an active membership the phone will not send to the watch.
+app working correctly, not a fault. Watch play is free — no membership is
+needed.
 
 WHY IT ASKS FOR THESE PERMISSIONS
 • Positioning (GPS): every distance on the screen is measured from where you are

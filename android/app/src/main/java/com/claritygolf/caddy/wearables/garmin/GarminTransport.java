@@ -97,19 +97,6 @@ public final class GarminTransport {
     // why Android holds the undashed spelling and iOS the dashed one.
     private final String connectIqAppId;
 
-    /* Garmin is a paid feature, and this is the gate that enforces it:
-       send() refuses while it is false, so a membership that lapses stops the
-       watch receiving rather than merely greying out a settings row.
-
-       Defaults to FALSE and is only raised by JavaScript
-       (NativeRoundBridge.setGarminEnabled, driven by
-       ClarityPayments.hasActiveAccess). Failing closed is deliberate: if the
-       payments module never loads we would rather one paying player reports a
-       dead Garmin than every non-paying player quietly gets the feature.
-       Volatile because setEntitled is called from the Capacitor bridge thread
-       and read on whichever thread happens to be publishing. */
-    private volatile boolean entitled = false;
-
     private Listener listener;
 
     private static final String TAG = "GarminTransport";
@@ -121,7 +108,7 @@ public final class GarminTransport {
      *  would otherwise leak the old one and keep delivering its events. */
     private volatile IQDevice registeredDevice;
     /* Written from SDK callbacks (main thread), read from state() on the
-       Capacitor bridge thread — same reasoning as `entitled` above. */
+       Capacitor bridge thread, so volatile. */
     private volatile boolean sdkReady;
     /** Real answer from getApplicationInfo, not "the device is connected".
      *  The two differ on a connected watch with no Clarity Caddy installed,
@@ -484,23 +471,13 @@ public final class GarminTransport {
             sdkReady,
             /* activated: bound to a device and listening. */
             registeredDevice != null,
-            /* paired: the player has chosen a watch. Survives disconnection
-               and a membership lapse. */
+            /* paired: the player has chosen a watch. Survives disconnection. */
             selected != null,
             /* appInstalled: the real answer from getApplicationInfo, not a
                proxy — a connected watch without Clarity Caddy reports false. */
             appInstalledOnDevice,
             connected
         );
-    }
-
-    public void setEntitled(boolean value) {
-        if (entitled == value) { return; }
-        entitled = value;
-        /* A lapse does not clear the chosen device: the pairing survives and
-           starts working again the moment access returns. Re-pairing after
-           every billing hiccup would be its own bug. */
-        if (listener != null) { listener.onStateChanged(); }
     }
 
     // ------------------------------------------- device selection (Settings)
@@ -580,7 +557,6 @@ public final class GarminTransport {
         out.put("paired", current.paired);
         out.put("appInstalled", current.appInstalled);
         out.put("reachable", current.reachable);
-        out.put("entitled", entitled);
         // The SDK is bundled and this build talked to it: only false when
         // initialize() failed or has not run. A stub-era hard-coded false
         // survived here until 2026-09-20 and contradicted garminDevices().
@@ -598,9 +574,6 @@ public final class GarminTransport {
     }
 
     private void send(Map<String, Object> message, Callback<Boolean> completion) {
-        // The paid gate, enforced below the web layer: no entitlement,
-        // nothing leaves the phone.
-        if (!entitled) { completion.onResult(false); return; }
         if (deviceStore.getSelectedDevice() == null) { completion.onResult(false); return; }
         if (connectIQ == null || !sdkReady || registeredDevice == null) { completion.onResult(false); return; }
         try {

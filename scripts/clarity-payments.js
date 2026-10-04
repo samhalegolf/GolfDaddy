@@ -1593,7 +1593,6 @@
     requireAccess: function (feature) {
       if (hasActiveAccess()) return true;
       var NEED = {
-        garmin: "pay.need.garmin",
         saveBubble: "pay.need.saveBubble",
         adoptBubble: "pay.need.adoptBubble",
         practiceToBag: "pay.need.practiceToBag",

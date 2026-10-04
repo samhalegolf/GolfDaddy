@@ -1,4 +1,4 @@
-/* Settings > Garmin Watch: the wrapper order, and the paid gate.
+/* Settings > Garmin Watch: the wrapper order, and the native SDK wiring.
  *
  * THE BUG THIS EXISTS TO STOP COMING BACK. scripts/clarity-garmin.js wraps
  * window.gdPlayerSettingsShowSection, and so does clarity-payments.js. But
@@ -15,12 +15,6 @@
  * so payments wraps Garmin and its guard never fires again. That is a property
  * of WHEN the call is made, which no amount of reading the wrapper body will
  * tell you, so this test builds both wrappers and runs them.
- *
- * It also pins the two things a reader might otherwise "tidy" away:
- *   - the native entitlement flag defaults to false on both platforms, so the
- *     feature fails closed if the web layer never loads;
- *   - send() on both transports checks it, so a lapsed membership stops the
- *     watch receiving rather than only greying out a settings row.
  */
 const assert = require("assert");
 const fs = require("fs");
@@ -146,39 +140,6 @@ test("wrapping happens once, however many times install() is called", function (
   calls.length = 0;
   ctx.win.gdPlayerSettingsShowSection("support");
   assert.deepStrictEqual(calls, ["base:support"], "a double wrap would show the base call twice");
-});
-
-/* ------------------------------------------------------- the paid gate
-
-   Source assertions, because the gate lives in native code this harness
-   cannot run. They pin the two properties that make it a gate rather than a
-   label: it starts closed, and the send path consults it. */
-
-test("both native transports default the entitlement to false", function () {
-  const swift = fs.readFileSync(path.join(ROOT, "ios", "App", "App", "Wearables", "Garmin", "GarminTransport.swift"), "utf8");
-  const java = fs.readFileSync(path.join(ROOT, "android", "app", "src", "main", "java", "com", "claritygolf", "caddy", "wearables", "garmin", "GarminTransport.java"), "utf8");
-  assert.ok(/private var entitled = false/.test(swift), "iOS: entitled must default to false so the feature fails closed");
-  assert.ok(/private volatile boolean entitled = false/.test(java), "Android: entitled must default to false so the feature fails closed");
-});
-
-test("both native transports refuse to send while unentitled", function () {
-  const swift = fs.readFileSync(path.join(ROOT, "ios", "App", "App", "Wearables", "Garmin", "GarminTransport.swift"), "utf8");
-  const java = fs.readFileSync(path.join(ROOT, "android", "app", "src", "main", "java", "com", "claritygolf", "caddy", "wearables", "garmin", "GarminTransport.java"), "utf8");
-  assert.ok(
-    /func send\([^)]*\)[^}]*?guard entitled else \{ completion\(false\); return \}/s.test(swift),
-    "iOS: send() must check `entitled` before anything else — the settings row is not the gate"
-  );
-  assert.ok(
-    /private void send\([^)]*\) \{\s*(?:\/\/[^\n]*\n\s*)*if \(!entitled\) \{ completion\.onResult\(false\); return; \}/.test(java),
-    "Android: send() must check `entitled` before anything else — the settings row is not the gate"
-  );
-});
-
-test("the UI asks ClarityPayments before pairing, and pairing is the thing it asks about", function () {
-  const src = fs.readFileSync(GARMIN_JS, "utf8");
-  assert.ok(/requireAccess\("garmin"\)/.test(src), "the membership question should be asked through ClarityPayments.requireAccess");
-  assert.ok(/function scan\(\)[^}]*if \(!requireAccess\(\)\) return false;/s.test(src), "scan() must ask before looking for watches");
-  assert.ok(/function choose\([^)]*\)[^}]*if \(!requireAccess\(\)\) return false;/s.test(src), "choose() must ask before selecting a watch");
 });
 
 /* ------------------------------------------- the Android SDK integration
