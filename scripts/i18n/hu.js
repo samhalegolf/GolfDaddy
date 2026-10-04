@@ -675,6 +675,17 @@
     "picker.alsoNear": "{place} közelében is",
     "picker.alsoNearby": "A közelben is",
     "picker.thisArea": "Ez a környék",
+    "picker.advanced": "Részletes keresés",
+    "picker.country": "Ország",
+    "picker.region": "Régió",
+    "picker.anyCountry": "Bármely ország",
+    "picker.optional": "Nem kötelező",
+    "picker.whichCountry": "Melyik ország?",
+    "picker.whichRegion": "Melyik régió?",
+    "picker.allCountries": "Minden ország",
+    "picker.allRegions": "Minden régió",
+    "picker.otherCountries": "Más országok",
+    "picker.otherRegions": "Más régiók",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Főoldal",

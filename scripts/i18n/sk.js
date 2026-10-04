@@ -690,6 +690,17 @@
     "picker.alsoNear": "Aj v blízkosti: {place}",
     "picker.alsoNearby": "Aj v blízkosti",
     "picker.thisArea": "Táto oblasť",
+    "picker.advanced": "Rozšírené vyhľadávanie",
+    "picker.country": "Krajina",
+    "picker.region": "Región",
+    "picker.anyCountry": "Akákoľvek krajina",
+    "picker.optional": "Voliteľné",
+    "picker.whichCountry": "Ktorá krajina?",
+    "picker.whichRegion": "Ktorý región?",
+    "picker.allCountries": "Všetky krajiny",
+    "picker.allRegions": "Všetky regióny",
+    "picker.otherCountries": "Ďalšie krajiny",
+    "picker.otherRegions": "Ďalšie regióny",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Domov",

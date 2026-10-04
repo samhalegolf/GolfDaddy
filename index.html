@@ -12,7 +12,7 @@
 <!-- Translation layer and its English base (scripts/gd-i18n.js), ahead of
      every script that writes text. -->
 <script src="scripts/gd-i18n.js?v=i18n-001"></script>
-<script src="scripts/i18n/en.js?v=manual-after-failed-scan-20261001"></script>
+<script src="scripts/i18n/en.js?v=course-search-20261004"></script>
 <script src="clarity-caddy-app-store.js?v=store-badges-004"></script>
 <script src="scripts/gd-app-download-prompt.js?v=store-badges-004"></script>
 <script src="scripts/inline/gd-landing-redirect-v1.js?v=20260811a"></script>
@@ -41,7 +41,7 @@
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
 <script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260712a"></script>
 <script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260712a"></script>
-<link rel="stylesheet" href="styles/inline/gd-app-base.css?v=overlay-draw-20260929">
+<link rel="stylesheet" href="styles/inline/gd-app-base.css?v=course-search-20261004">
 
 <link rel="stylesheet" id="gdHomeButtonsHandoffCssV1" href="styles/inline/gd-home-buttons-handoff-css-v1.css?v=split04">
 </head>
@@ -321,6 +321,8 @@
 <div class="meta" id="countLine">Search</div>
 </div>
 <div class="search courseSearchEdit"><input id="searchInput" placeholder="Search golf course" data-i18n-placeholder="home.searchPlaceholder"><button type="button" onclick="manualSearch()" data-i18n="home.search">Search</button></div>
+<div class="courseAdvanced"><button type="button" class="courseAdvancedToggle" id="gdCourseAdvancedToggle" aria-expanded="false" aria-controls="gdCourseAdvancedFields" data-i18n="picker.advanced">Advanced search</button>
+<div class="courseAdvancedFields" id="gdCourseAdvancedFields" hidden><label><span data-i18n="picker.country">Country</span><select id="gdCourseSearchCountry"><option value="" data-i18n="picker.anyCountry">Any country</option></select></label><label><span data-i18n="picker.region">Region</span><input id="gdCourseSearchRegion" autocomplete="off" placeholder="Optional" data-i18n-placeholder="picker.optional" disabled></label></div></div>
 <div class="courseList" id="courseList"></div>
 </div></div>
 </div>
@@ -491,7 +493,7 @@
 
 <!-- Removed gdFinalStructureGuardCssV3: final CSS hiders masked retired-panel bleed-through. -->
 <!-- Removed gdFinalStructureGuardV3: blank-route recovery masked route ownership problems. -->
-<script id="gdCoursePickerSearchV2" src="scripts/inline/gd-course-picker-search-v2.js?v=manual-after-failed-scan-20261001"></script>
+<script id="gdCoursePickerSearchV2" src="scripts/inline/gd-course-picker-search-v2.js?v=course-search-20261004"></script>
 <script id="gdResumeRoundPickerV1" src="scripts/inline/gd-resume-round-picker-v1.js?v=20261001a"></script>
 <link rel="stylesheet" id="gdGpsRequestButtonFixV1" href="styles/inline/gd-gps-request-button-fix-v1.css?v=split04">
 <link rel="stylesheet" id="gdStableGpsModeSwitchV1" href="styles/inline/gd-stable-gps-mode-switch-v1.css?v=split04">

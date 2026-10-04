@@ -140,6 +140,13 @@
   to = "/.netlify/functions/courses-near"
   status = 200
 
+# The picker's typed search: Clarity + Mapbox POI + Nominatim, deduped, with a
+# physical-course confidence check. Needs MAPBOX_PUBLIC_TOKEN for Mapbox POIs.
+[[redirects]]
+  from = "/api/course-search"
+  to = "/.netlify/functions/course-search"
+  status = 200
+
 [[redirects]]
   from = "/api/course-package"
   to = "/.netlify/functions/course-package"

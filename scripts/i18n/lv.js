@@ -690,6 +690,17 @@
     "picker.alsoNear": "Arī netālu: {place}",
     "picker.alsoNearby": "Arī netālu",
     "picker.thisArea": "Šis apgabals",
+    "picker.advanced": "Paplašināta meklēšana",
+    "picker.country": "Valsts",
+    "picker.region": "Reģions",
+    "picker.anyCountry": "Jebkura valsts",
+    "picker.optional": "Neobligāti",
+    "picker.whichCountry": "Kura valsts?",
+    "picker.whichRegion": "Kurš reģions?",
+    "picker.allCountries": "Visas valstis",
+    "picker.allRegions": "Visi reģioni",
+    "picker.otherCountries": "Citas valstis",
+    "picker.otherRegions": "Citi reģioni",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Sākums",

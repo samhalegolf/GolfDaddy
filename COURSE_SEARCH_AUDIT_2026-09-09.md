@@ -181,3 +181,7 @@ Keep `GDCoursePicker` as the public API, but give it a single model and a single
    is still attached after the search settles; a second tap on the same course while a
    check is in flight is a no-op. Fix the stale `returnTarget` assertion in
    `dev/course-picker-owner.test.js`.
+
+## Follow-up: 2026-10-04
+
+The remote stage (client-side Nominatim, `remoteMatches`) has been replaced by `/api/course-search`, a server-side search across Clarity, Mapbox POIs and Nominatim, with country and region grouping. See `COURSE_DISCOVERY_2026-10-04.md`. The single render owner described above is unchanged.

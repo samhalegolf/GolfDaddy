@@ -56,6 +56,8 @@ jobs:
           node dev/app-native-contract.test.js
           node dev/app-course-data-feed.test.js
           node dev/course-identity-resolution.test.js
+          node dev/course-search.test.js
+          node dev/course-search-owner.test.js
           node dev/auth-route-boot-release.test.js
           node dev/password-reset-surface.test.js
           node dev/email-templates.test.js

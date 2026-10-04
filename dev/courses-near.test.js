@@ -184,7 +184,8 @@ test("a name with nothing Latin in it does not mint a shared id", () => {
     pickerFn("function slug(s){"),
     pickerFn("function cleanName(s){"),
     pickerFn("function keyForName(name){"),
-    pickerFn("function keyForCourse(name,src){")
+    pickerFn("function keyForCourse(name,src){"),
+    pickerFn("function locatedKey(key,src){")
   ].join("\n") + "\nmodule.exports = { keyForCourse, keyForName };";
   const m = { exports: {} };
   new Function("module", "exports", source)(m, m.exports);

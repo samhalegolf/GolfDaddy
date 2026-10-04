@@ -675,6 +675,17 @@
     "picker.alsoNear": "Επίσης κοντά: {place}",
     "picker.alsoNearby": "Επίσης κοντά",
     "picker.thisArea": "Αυτή η περιοχή",
+    "picker.advanced": "Σύνθετη αναζήτηση",
+    "picker.country": "Χώρα",
+    "picker.region": "Περιοχή",
+    "picker.anyCountry": "Οποιαδήποτε χώρα",
+    "picker.optional": "Προαιρετικό",
+    "picker.whichCountry": "Ποια χώρα;",
+    "picker.whichRegion": "Ποια περιοχή;",
+    "picker.allCountries": "Όλες οι χώρες",
+    "picker.allRegions": "Όλες οι περιοχές",
+    "picker.otherCountries": "Άλλες χώρες",
+    "picker.otherRegions": "Άλλες περιοχές",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Αρχική",

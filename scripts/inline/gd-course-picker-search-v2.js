@@ -4,8 +4,23 @@
 	  const RECENTS_KEY="gd_recent_course_picks_v1";
 	  const COURSE_MAPS_API="/api/course-maps";
 	  const NEARBY_M=5200;
-	  const REMOTE_LIMIT=12;
+	  const LIST_CAP=12;
 	  const COURSES_NEAR_API="/api/courses-near";
+	  /* Typed search. One query out, one normalised, deduped, confidence-checked
+	     answer back: Clarity's own courses, Mapbox POIs and Nominatim, merged
+	     server-side (functions/course-search.mjs). The picker used to call
+	     Nominatim itself with "<query> golf course" glued on, which missed every
+	     club OSM does not know and rewrote what the player typed. */
+	  const COURSE_SEARCH_API="/api/course-search";
+	  /* The server may climb its fallback ladder and run a ground check; give it
+	     room. The local matches are on screen the whole time. */
+	  const COURSE_SEARCH_TIMEOUT_MS=15000;
+	  /* Two rows with the same name key are one course only when they are this
+	     close. "Royal Golf Club" in Canada and in Sweden share a name and nothing
+	     else; keyed on name alone they merged into one row at whichever point was
+	     nearer the player. */
+	  const SAME_COURSE_M=2000;
+	  const SEARCH_DEBUG_KEY="gd_course_search_debug";
 	  /* Two search results belong to the same place when they are within this of
 	     each other. Uncritical by nature: the thing it separates is "St Andrews,
 	     Scotland" from "St Andrews, Iowa", which are thousands of km apart, so
@@ -65,6 +80,14 @@
     areaFallback:[],
     areaRun:0,
     chooser:null,
+    groups:[],           /* country or region choices for a worldwide-ambiguous name */
+    groupLevel:"",       /* countries | regions */
+    backTo:null,         /* {label,level} - a row back up to the group list */
+    lateRows:[],         /* ambiguous results a scorecard check has since confirmed */
+    debug:null,          /* admin-only: the server's diagnostics for this search */
+    countryGroup:null,   /* the country row the player opened, if any */
+    countryGroupsSnapshot:null,countryGroupsRows:null,
+    regionGroupsSnapshot:null,regionGroupsRows:null,
     countText:()=>L("picker.search"), /* a function, so a language switch re-reads it */
     selecting:null,      /* {key,name,at} while a tapped course is being checked or mapped */
     renderQueued:false,
@@ -129,8 +152,9 @@
     courses=Array.isArray(courses)?courses:[];
     view.phase=courses.length?"results":"idle";
     view.rows=courses;
-    view.extraRows=[];view.extraLabel="";view.partial=false;
+    view.extraRows=[];view.extraLabel="";view.partial=false;view.lateRows=[];
     view.areas=[];view.areaFallback=[];view.chooser=null;
+    view.groups=[];view.groupLevel="";view.backTo=null;
     view.countText=countText==null?countFor(courses):countText;
     requestRender();
   }
@@ -149,9 +173,12 @@
      the id in the first place. */
   function slug(s){return String(s||"course").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"course"}
   function cleanName(s){
-    return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase()
+    /* Non-Latin letters are kept (and recomposed after the accent strip):
+       dropping them cleaned every Korean or Japanese name to "", which read as
+       "nothing typed" and sorted a typed search by distance. */
+    return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").normalize("NFC").toLowerCase()
       .replace(/\b(golf club|golf course|country club|links|club|course|gc|cub)\b/g," ")
-      .replace(/[^a-z0-9]+/g," ")
+      .replace(/[^a-z0-9\u00c0-\uffff]+/g," ")
       .replace(/\s+/g," ")
       .trim();
   }
@@ -167,6 +194,9 @@
     if(cleanName(name).replace(/[^a-z0-9]/g,"").length>=3)return key;
     const osmType=String(src&&src.osmType||"").toLowerCase(),osmId=Number(src&&src.osmId);
     if(/^(way|relation|node)$/.test(osmType)&&Number.isFinite(osmId))return slug("osm-"+osmType+"-"+osmId);
+    return locatedKey(key,src);
+  }
+  function locatedKey(key,src){
     const lat=Number(src&&(src.lat??src.courseLat)),lng=Number(src&&(src.lng??src.courseLng));
     if(Number.isFinite(lat)&&Number.isFinite(lng))return slug(key+"-"+Math.abs(lat).toFixed(3)+(lat<0?"s":"n")+"-"+Math.abs(lng).toFixed(3)+(lng<0?"w":"e"));
     return key;
@@ -174,27 +204,8 @@
   /* Where a course is, in words. "Riverside" is four different clubs in four
      different countries, so a name on its own is not an identification - the
      region and country under it are what let a player pick the right one.
-
-     Region, not town. Nominatim's settlement fields answer "which body
-     administers this point", not "what do people call here": reverse geocoding
-     the real course database returned Kaipatiki for Takapuna and Puketapapa for
-     Akarana, correct local-board names no golfer uses. The state/region field
-     gave Auckland, Otago, Waikato, California, Scotland - recognisable, and
-     present on every course tried. Matches the key order in
-     functions/lib/gd-course-place.mjs, which does the same job server-side. */
-  const PLACE_REGION_KEYS=["state","region","state_district","county","city","town","municipality","village"];
-  function placeFromAddress(address){
-    if(!address||typeof address!=="object")return null;
-    const country=String(address.country||"").trim().slice(0,80);
-    const countryCode=String(address.country_code||"").trim().slice(0,8).toUpperCase();
-    if(!country&&!countryCode)return null;
-    let region="";
-    for(const key of PLACE_REGION_KEYS){
-      region=String(address[key]||"").trim().slice(0,120);
-      if(region)break;
-    }
-    return {region,country,countryCode};
-  }
+     Region, not town: see functions/lib/gd-course-place.mjs, which the course
+     search uses to read the geocoder. */
   /* "Auckland, New Zealand", or just the country when the region is unknown, or
      "" when nothing is known - callers render "" as no subtitle rather than a
      stray separator. Falls back to the country code so a course geocoded
@@ -447,8 +458,18 @@
     const mapByKey=new Map();
     courses.map(basePayload).forEach(course=>{
       if(!course.name||/^manual gps$/i.test(course.name))return;
-      const key=course.canonicalKey||keyForName(course.name);
-      const existing=mapByKey.get(key);
+      let key=course.canonicalKey||keyForName(course.name);
+      let existing=mapByKey.get(key);
+      /* Same name, different place: a second course, not a duplicate. It gets
+         a key (and, when it has no id of its own, an id) that carries where
+         it is, so the two never share a mapping identity either. */
+      if(existing&&finitePoint(existing)&&finitePoint(course)&&distance(existing,course)>SAME_COURSE_M){
+        const located=locatedKey(key,course);
+        if(course.courseId===course.canonicalKey)course.courseId=located;
+        course.canonicalKey=located;
+        key=located;
+        existing=mapByKey.get(key);
+      }
       course.distanceM=Number.isFinite(Number(course.distanceM))?Number(course.distanceM):distance(center,course);
       if(existing){
         existing.aliases=[...(existing.aliases||[]),...(course.aliases||[]),course.name].filter(Boolean);
@@ -477,7 +498,10 @@
           existing.finderLat=course.finderLat;
           existing.finderLng=course.finderLng;
         }
-        if(!Number.isFinite(existing.distanceM)||course.distanceM<existing.distanceM){
+        /* A mapped course's own point is canonical; a provider's pin for the
+           same course never moves it. */
+        const canonicalPoint=existing.hasDatabaseMap&&!course.hasDatabaseMap&&finitePoint(existing);
+        if(!canonicalPoint&&(!Number.isFinite(existing.distanceM)||course.distanceM<existing.distanceM)){
           existing.lat=course.lat;
           existing.lng=course.lng;
           existing.distanceM=course.distanceM;
@@ -490,42 +514,118 @@
     });
     return [...mapByKey.values()];
   }
+  /* Words, not substrings. cleanName drops the club words for comparison, so
+     "Ba Golf Club" cleans to "ba" - and "ba" as a substring matched Balgove,
+     Barnbougle and every other name starting with those letters. A short
+     cleaned name is matched as whole words of the full name instead. */
+  function nameWords(value){
+    return String(value||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9À-￿]+/g," ").trim().split(" ").filter(Boolean);
+  }
+  function nameTier(course,q){
+    if(!q)return 0;
+    const short=q.replace(/[^a-z0-9]/g,"").length<3;
+    const qWords=q.split(" ").filter(Boolean);
+    const names=[course.name,course.courseName,...(course.aliases||[])].filter(Boolean);
+    let best=0;
+    names.forEach(name=>{
+      const clean=cleanName(name);
+      const words=new Set(nameWords(clean));
+      let tier=0;
+      if(clean===q)tier=3;
+      else if(qWords.every(w=>words.has(w)))tier=2;
+      else if(!short&&clean.startsWith(q))tier=2;
+      else if(!short&&clean.includes(q))tier=1;
+      best=Math.max(best,tier);
+    });
+    return best;
+  }
   function localMatches(query,opts={}){
     const center=currentPoint();
     const q=cleanName(query);
     if(opts.nearbyOnly&&!center)return [];
+    const countryCode=String(opts.countryCode||"").toUpperCase();
     return mergeDedupe(allLocalCourses(),center).filter(course=>{
       if(opts.nearbyOnly)return Number.isFinite(course.distanceM)&&course.distanceM<=NEARBY_M;
+      if(countryCode&&course.countryCode&&course.countryCode!==countryCode)return false;
       if(!q&&!center)return false;
       if(!q)return Number.isFinite(course.distanceM)&&course.distanceM<=NEARBY_M;
-      const hay=[course.name,course.courseName,course.courseId,...(course.aliases||[])].map(cleanName).join(" ");
-      return hay.includes(q)||q.includes(course.canonicalKey)||course.canonicalKey.includes(q);
+      return nameTier(course,q)>0||(q.length>=3&&(q.includes(course.canonicalKey)||course.canonicalKey.includes(q)));
     });
   }
-  async function remoteMatches(query){
+  /* A server result as the picker's own payload. Region and country always
+     travel with it: they are what tells two same-named clubs apart on screen
+     and what the mapping flow is handed alongside the point. */
+  function searchResultPayload(item){
+    const mapped=!!item.hasMap;
+    return basePayload({
+      name:item.name,
+      lat:item.lat,
+      lng:item.lng,
+      courseId:item.courseId||undefined,
+      canonicalKey:item.courseId||undefined,
+      region:item.region,
+      country:item.country,
+      countryCode:item.countryCode,
+      osmType:item.osmType,
+      osmId:item.osmId,
+      facilityKey:item.facilityKey||"",
+      facilityName:item.facilityName||"",
+      source:mapped?"database-course":"remote-search",
+      hasDatabaseMap:mapped,
+      searchConfidence:item.confidence||"",
+      searchProvider:item.source||"",
+      searchProviderId:item.providerId||""
+    });
+  }
+  function searchDebugEnabled(){
+    return safe(()=>{
+      const permission=typeof gdGetAccountPermission==="function"?gdGetAccountPermission():String(document.body?.dataset?.gdPermission||"");
+      return permission==="admin"&&localStorage.getItem(SEARCH_DEBUG_KEY)==="1";
+    },false);
+  }
+  function queryString(params){
+    return Object.keys(params).filter(key=>params[key]!=null&&params[key]!=="").map(key=>encodeURIComponent(key)+"="+encodeURIComponent(params[key])).join("&");
+  }
+  async function courseSearch(query,context){
     const q=String(query||"").trim();
-    if(q.length<3)return [];
+    if(q.length<2)return null;
     const controller=new AbortController();
-    const timer=setTimeout(()=>controller.abort(),4200);
+    const timer=setTimeout(()=>controller.abort(),COURSE_SEARCH_TIMEOUT_MS);
     try{
-      const url=`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=${REMOTE_LIMIT}&addressdetails=1&q=${encodeURIComponent(q+" golf course")}`;
-      const res=await fetch(url,{signal:controller.signal,headers:{Accept:"application/json"}});
-      if(!res.ok)return [];
-      const data=await res.json();
-      return (Array.isArray(data)?data:[]).map(item=>{
-        const first=String(item.name||item.display_name||"").split(",")[0].trim();
-        const label=first||q;
-        const lat=Number(item.lat),lng=Number(item.lon);
-        if(!label||!Number.isFinite(lat)||!Number.isFinite(lng))return null;
-        const text=`${label} ${item.display_name||""} ${item.type||""} ${item.class||""}`;
-        if(!/golf|course|club|links/i.test(text))return null;
-        /* addressdetails=1 was already on the request but the address was being
-           thrown away - this is the only place in the app that gets a course's
-           region and country for free, so it is where they enter the system. */
-        const place=placeFromAddress(item.address)||{};
-        return basePayload({name:label,lat,lng,region:place.region,country:place.country,countryCode:place.countryCode,source:"remote-search"});
-      }).filter(Boolean);
-    }catch(e){return []}
+      const near=recentGpsPoint();
+      const params={
+        q,
+        country:context&&context.countryCode,
+        region:context&&context.region,
+        lat:near?near.lat.toFixed(4):"",
+        lng:near?near.lng.toFixed(4):"",
+        debug:searchDebugEnabled()?"1":""
+      };
+      const res=await fetch(`${COURSE_SEARCH_API}?${queryString(params)}`,{signal:controller.signal,headers:{Accept:"application/json"}});
+      if(!res.ok)return null;
+      const body=await res.json();
+      return {
+        results:(Array.isArray(body&&body.results)?body.results:[]).map(searchResultPayload),
+        groups:body&&body.groups||{mode:"list",countries:[]},
+        ambiguous:Array.isArray(body&&body.ambiguous)?body.ambiguous:[],
+        diagnostics:body&&body.diagnostics||null,
+        debug:body&&body.debug||null
+      };
+    }catch(e){return null}
+    finally{clearTimeout(timer)}
+  }
+  /* The late check for a candidate nothing cheap could confirm or rule out.
+     Only ever asked about the one or two the server flagged ambiguous. */
+  async function confirmCandidate(item){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),COURSE_SEARCH_TIMEOUT_MS);
+    try{
+      const params={confirm:"1",name:item.name,lat:String(item.lat),lng:String(item.lng),region:item.region||"",country:item.country||""};
+      const res=await fetch(`${COURSE_SEARCH_API}?${queryString(params)}`,{signal:controller.signal,headers:{Accept:"application/json"}});
+      if(!res.ok)return null;
+      const body=await res.json();
+      return body&&body.confirmed?body:null;
+    }catch(e){return null}
     finally{clearTimeout(timer)}
   }
   function rank(courses,query){
@@ -533,21 +633,22 @@
     const center=gps||currentPoint();
     const q=cleanName(query);
     return mergeDedupe(courses,center).map(course=>{
-      const nameClean=cleanName(course.name);
+      course.__tier=nameTier(course,q);
       let score=100;
-      if(q&&nameClean===q)score-=55;
-      else if(q&&nameClean.startsWith(q))score-=38;
-      else if(q&&nameClean.includes(q))score-=24;
       if(Number.isFinite(course.distanceM))score-=Math.max(0,34-(course.distanceM/130));
 	    if(course.source==="recent-course")score-=14;
 	      if(course.source==="database-course"||course.hasDatabaseMap)score-=12;
 	      if(course.source==="known-course"||course.source==="built-in-course")score-=7;
+      if(course.searchConfidence==="confirmed_course")score-=6;
       course.__rank=score;
       return course;
     }).sort((a,b)=>{
-      /* Distance decides only when nothing is typed - that is the nearby list.
-         With a query, how well the name matches is the question the player
-         asked; distance still nudges the score above but no longer overrides it. */
+      /* With a query, how well the name matches is the question the player
+         asked, and it is decided first: an exact name further away always
+         beats a partial name next door. Distance, recents and maps only order
+         courses that answer the name equally well. Distance decides outright
+         only when nothing is typed - that is the nearby list. */
+      if(q&&a.__tier!==b.__tier)return b.__tier-a.__tier;
       if(!q&&gps&&Number.isFinite(a.distanceM)&&Number.isFinite(b.distanceM)){
         const distanceDelta=a.distanceM-b.distanceM;
         if(Math.abs(distanceDelta)>25)return distanceDelta;
@@ -1061,6 +1162,58 @@
     row.innerHTML=`<div><div class="name">${esc(area.label)}</div><div class="meta">${HN("picker.resultsCount",area.count)}</div></div><button class="play" type="button">${H("picker.show")}</button>`;
     return row;
   }
+  /* A country or region is a question, like an area: it carries its answer
+     on the row so the one delegated handler can tell it from a course. */
+  function groupRow(group){
+    const row=document.createElement("div");
+    row.className="course";
+    row.__gdGroupPayload={group,run:view.areaRun};
+    const label=group.other?(view.groupLevel==="countries"?L("picker.otherCountries"):L("picker.otherRegions")):group.label;
+    row.innerHTML=`<div><div class="name">${esc(label)}</div><div class="meta">${HN("picker.resultsCount",group.count)}</div></div><button class="play" type="button">${H("picker.show")}</button>`;
+    return row;
+  }
+  function backRow(){
+    const row=document.createElement("div");
+    row.className="course courseGroupBack";
+    row.__gdGroupPayload={back:view.backTo.level,run:view.areaRun};
+    row.innerHTML=`<div><div class="name">${esc(view.backTo.level==="countries"?L("picker.allCountries"):L("picker.allRegions"))}</div></div><button class="play" type="button">${H("common.back")}</button>`;
+    return row;
+  }
+  /* Admin only (and only when switched on - see setSearchDebug): what each
+     provider returned and why each candidate was kept or hidden. Its own
+     node, written only here, so it can never disturb the rows. */
+  function renderSearchDebug(){
+    const card=byId("courseList")?.parentNode;
+    let panel=byId("gdCourseSearchDebug");
+    const info=view.debug&&view.debug.show?view.debug:null;
+    if(!info){if(panel)panel.hidden=true;return;}
+    if(!panel&&card&&typeof document.createElement==="function"){
+      panel=document.createElement("pre");
+      panel.id="gdCourseSearchDebug";
+      panel.className="courseSearchDebug";
+      card.appendChild(panel);
+    }
+    if(!panel)return;
+    panel.hidden=false;
+    const d=info.diagnostics||{};
+    const lines=[
+      "Query: "+(d.query||view.query)+(d.countryCode?" · "+d.countryCode:"")+(d.region?" · "+d.region:""),
+      "Clarity "+(d.providers?d.providers.clarity:"?")+" · Mapbox "+(d.providers?d.providers.mapbox:"?")+" ("+(d.mapbox||"")+") · Nominatim "+(d.providers?d.providers.nominatim:"?"),
+      "Ladder: "+(d.rungs||[]).map(r=>r.rung+"“"+r.text+"”").join(" → "),
+      "After dedupe: "+d.afterDedupe+" · shown "+d.visible+" · hidden "+d.hidden+" · ground check "+(d.ground?d.ground.status:"?")+" · "+d.ms+"ms",
+      "Countries: "+Object.entries(d.countries||{}).map(([k,v])=>k+" "+v).join(", ")
+    ];
+    ((info.debug&&info.debug.candidates)||[]).forEach(c=>{
+      const g=c.ground||{};
+      lines.push("",c.name+" — "+[c.region,c.countryCode].filter(Boolean).join(", "),
+        "  Name match: "+c.nameMatch+" · Golf POI: "+(c.golfCategory?"yes":"no")+" · course words: "+(c.golfName?"yes":"no")+" · sources: "+(c.sources||[]).join("+"),
+        "  OSM golf_course: "+(g.coursePolygon?"yes ("+g.coursePolygon.distanceM+"m)":"no")+" · holes nearby: "+(g.holes||0)+" · greens/tees/fairways: "+(g.features||0)+" · outdoor: "+(g.outdoorHa||0)+"ha"+(g.commercial?" · commercial ground":"")+" · ground: "+c.groundStatus,
+        "  Scorecard check: "+(c.ambiguous?"candidate":"not required")+(c.nonCourse&&c.nonCourse.length?" · non-course: "+c.nonCourse.join(","):""),
+        "  Confidence: "+c.confidence+" ("+c.score+") "+(c.reasons||[]).join("; "));
+    });
+    const text=lines.join("\n");
+    if(panel.textContent!==text)panel.textContent=text;
+  }
   function removeExtraRows(list){
     (list.__gdExtraNodes||[]).forEach(node=>{
       if(typeof list.removeChild==="function"&&node.parentNode===list)list.removeChild(node);
@@ -1070,14 +1223,18 @@
   }
   function appendExtraRows(list){
     list.__gdExtraNodes=[];
-    if(!view.extraRows.length)return;
     const before=list.children?list.children.length:0;
+    if(view.lateRows.length){
+      renderFlatCourseRows(list,view.lateRows);
+      list.__gdExtraNodes=list.children?Array.from(list.children).slice(before):[];
+    }
+    if(!view.extraRows.length)return;
     const divider=document.createElement("div");
     divider.className="courseListDivider";
     divider.textContent=view.extraLabel?L("picker.alsoNear",{place:view.extraLabel}):L("picker.alsoNearby");
     list.appendChild(divider);
     renderFlatCourseRows(list,view.extraRows);
-    list.__gdExtraNodes=list.children?Array.from(list.children).slice(before):[divider];
+    list.__gdExtraNodes=list.children?Array.from(list.children).slice(before):list.__gdExtraNodes.concat([divider]);
   }
   /* The only writer of #courseList and #countLine. Rows are rebuilt when the
      ranked set changes; the "also nearby" tail is rebuilt on its own when only
@@ -1087,15 +1244,17 @@
     renderNearby();
     const list=byId("courseList");
     if(list){
-      const one=view.phase==="chooser"?(view.chooser||[]).map(rowSignature):view.phase==="areas"?view.areas.map(area=>`${area.label}|${area.count}|${view.areaRun}`):view.rows.map(rowSignature);
-      const rowsSignature=JSON.stringify([view.phase,one]);
-      const extrasSignature=JSON.stringify([view.extraLabel,view.extraRows.map(rowSignature)]);
+      const one=view.phase==="chooser"?(view.chooser||[]).map(rowSignature):view.phase==="areas"?view.areas.map(area=>`${area.label}|${area.count}|${view.areaRun}`):view.phase==="groups"?view.groups.map(group=>`${view.groupLevel}|${group.key}|${group.count}|${view.areaRun}`):view.rows.map(rowSignature);
+      const rowsSignature=JSON.stringify([view.phase,view.backTo&&view.backTo.level,one]);
+      const extrasSignature=JSON.stringify([view.extraLabel,view.extraRows.map(rowSignature),view.lateRows.map(rowSignature)]);
       if(rowsSignature!==view.rowsSignature){
         view.rowsSignature=rowsSignature;
         view.extrasSignature=extrasSignature;
         list.innerHTML="";
         list.__gdExtraNodes=[];
-        if(view.phase==="areas")view.areas.forEach(area=>list.appendChild(areaRow(area)));
+        if(view.backTo)list.appendChild(backRow());
+        if(view.phase==="groups")view.groups.forEach(group=>list.appendChild(groupRow(group)));
+        else if(view.phase==="areas")view.areas.forEach(area=>list.appendChild(areaRow(area)));
         else if(view.phase==="chooser")renderFlatCourseRows(list,view.chooser||[]);
         else{
           /* One subtly-promoted chooser row per facility with 2+ known siblings in
@@ -1120,6 +1279,7 @@
         row.classList.toggle("selecting",on);
       });
     }
+    renderSearchDebug();
     const count=byId("countLine");
     if(count)count.textContent=selectingActive()?(view.selecting.name?L("picker.openingCourse",{name:view.selecting.name}):L("picker.openingUnnamedCourse")):(typeof view.countText==="function"?view.countText():String(view.countText||""));
   }
@@ -1226,7 +1386,9 @@
     const results=Array.isArray(fallback)?fallback:[];
     const members=results.filter(course=>finitePoint(course)&&metresBetween(course,area)<=AREA_M);
     const shown=members.length?members:results;
+    const back=view.backTo;
     showRows(shown,()=>LN("picker.foundCount",shown.length));
+    view.backTo=back;
     return expandArea(area,run);
   }
   /* Leaves the ranked list alone whenever the nearby lookup gives nothing -
@@ -1250,6 +1412,84 @@
     });
     return false;
   }
+  /* Where the Advanced search fields stand. Both optional; an empty country
+     means anywhere. */
+  function searchContext(){
+    const country=String(byId("gdCourseSearchCountry")?.value||"").trim().toUpperCase();
+    const region=String(byId("gdCourseSearchRegion")?.value||"").trim();
+    return {countryCode:/^[A-Z]{2}$/.test(country)?country:"",region:country?region:""};
+  }
+  /* The list as it always was: one place goes straight there (ranked rows,
+     neighbourhood added below), more than one place asks which first. */
+  function presentList(results,run){
+    const areas=clusterAreas(results);
+    /* Only ask "which place?" when a place holds more than one result -
+       otherwise every area row is one course behind an extra tap, and the
+       region under each row already says where it is. */
+    if(areas.length>1&&areas.some(area=>area.count>1))return renderAreasOwner(areas,results,run);
+    const shown=results.slice(0,LIST_CAP);
+    showRows(shown,shown.length?()=>LN("picker.foundCount",shown.length):()=>L("picker.noCourseFound"));
+    if(areas.length===1)expandArea(areas[0],run);
+    return false;
+  }
+  /* Worldwide ambiguity, condensed. Whether to ask "which country?" is the
+     server's call (functions/lib/gd-course-search-core.mjs groupResults - a
+     rule about how many countries and how many results, never about a
+     particular course); which rows belong to which country is worked out
+     here, because the list also carries the player's own local matches. */
+  function groupsFor(results,serverGroups,level){
+    const defs=level==="countries"?(serverGroups.countries||[]):(serverGroups.regions||[]);
+    const keyOf=level==="countries"?(course=>String(course.countryCode||"").toUpperCase()):(course=>cleanName(course.region));
+    const named=defs.filter(def=>!def.other);
+    const known=new Set(named.map(def=>level==="countries"?String(def.countryCode||def.key).toUpperCase():cleanName(def.label)));
+    const groups=named.map(def=>{
+      const key=level==="countries"?String(def.countryCode||def.key).toUpperCase():cleanName(def.label);
+      return {key,label:def.label||key,members:results.filter(course=>keyOf(course)===key)};
+    }).filter(group=>group.members.length);
+    const rest=results.filter(course=>!known.has(keyOf(course)));
+    if(rest.length)groups.push({key:"other",label:"",other:true,members:rest});
+    return groups.map(group=>Object.assign(group,{count:group.members.length,regions:level==="countries"?((defs.find(def=>(def.countryCode||def.key)===group.key)||{}).regions||[]):[]}));
+  }
+  function showGroups(groups,level,results,run){
+    view.phase="groups";
+    view.groups=groups;
+    view.groupLevel=level;
+    view.areaRun=run;
+    view.rows=[];view.extraRows=[];view.extraLabel="";view.lateRows=[];view.chooser=null;view.areas=[];
+    view.backTo=level==="regions"&&view.countryGroup?{level:"countries"}:null;
+    view.countText=level==="countries"?()=>L("picker.whichCountry"):()=>L("picker.whichRegion");
+    requestRender();
+    return false;
+  }
+  function openGroup(payload){
+    if(payload.run!==searchRun)return false;
+    if(payload.back){
+      if(payload.back==="countries"&&view.countryGroupsSnapshot){view.countryGroup=null;return showGroups(view.countryGroupsSnapshot,"countries",view.countryGroupsRows,payload.run);}
+      if(payload.back==="regions"&&view.regionGroupsSnapshot)return showGroups(view.regionGroupsSnapshot,"regions",view.regionGroupsRows,payload.run);
+      return false;
+    }
+    const group=payload.group;
+    if(view.groupLevel==="countries"){
+      view.countryGroup=group;
+      /* A country that is still long splits again by region - the same rule,
+         one level down, from the regions the server counted for it. */
+      if(group.regions&&group.regions.length){
+        const regions=groupsFor(group.members,{regions:group.regions},"regions");
+        if(regions.length>1){
+          view.regionGroupsSnapshot=regions;view.regionGroupsRows=group.members;
+          return showGroups(regions,"regions",group.members,payload.run);
+        }
+      }
+      presentList(group.members,payload.run);
+      view.backTo={level:"countries"};
+      requestRender();
+      return false;
+    }
+    presentList(group.members,payload.run);
+    view.backTo={level:"regions"};
+    requestRender();
+    return false;
+  }
   function searchOwner(query){
     const q=byId("searchInput")?.value.trim()||"";
     const requested=query==null?q:String(query||"").trim();
@@ -1258,7 +1498,10 @@
       if(input)input.value=requested;
     }
     const run=++searchRun;
+    const context=searchContext();
     view.query=requested;
+    view.debug=null;
+    view.countryGroup=null;view.countryGroupsSnapshot=null;view.regionGroupsSnapshot=null;
     state.lastSearchQuery=requested;
     clearSelecting();
     if(!requested){
@@ -1266,22 +1509,45 @@
       loadDatabaseCourses().then(()=>{if(run===searchRun)requestRender();});
       return false;
     }
-    const immediate=rank(localMatches(requested),requested);
+    const immediate=rank(localMatches(requested,context),requested);
     showRows(immediate,()=>L("picker.searching"));
     view.phase="searching";
-    Promise.all([loadDatabaseCourses(),remoteMatches(requested)]).then(([,remote])=>{
+    Promise.all([loadDatabaseCourses(),courseSearch(requested,context)]).then(([,found])=>{
       if(run!==searchRun)return;
-      const results=rank(localMatches(requested).concat(remote),requested).slice(0,12);
-      /* One rule, no branch: a result names a PLACE, and a place expands to
-         the courses on it. More than one place worth the name asks which
-         first. One place goes straight there - and "there" means the ranked
-         results stay on top, with the neighbourhood added underneath. */
-      const areas=clusterAreas(results);
-      if(areas.length>1)return renderAreasOwner(areas,results,run);
-      showRows(results,results.length?()=>LN("picker.foundCount",results.length):()=>L("picker.noCourseFound"));
-      if(areas.length===1)expandArea(areas[0],run);
+      const remote=found?found.results:[];
+      const results=rank(localMatches(requested,context).concat(remote),requested);
+      view.debug=found&&(found.debug||found.diagnostics)?{diagnostics:found.diagnostics,debug:found.debug,show:searchDebugEnabled()}:null;
+      const mode=found&&found.groups&&found.groups.mode;
+      let presented=false;
+      if(mode==="countries"||mode==="regions"){
+        const level=mode;
+        const groups=groupsFor(results,found.groups,level);
+        if(groups.length>1){
+          if(level==="countries"){view.countryGroupsSnapshot=groups;view.countryGroupsRows=results;}
+          else{view.regionGroupsSnapshot=groups;view.regionGroupsRows=results;}
+          showGroups(groups,level,results,run);
+          presented=true;
+        }
+      }
+      if(!presented)presentList(results,run);
+      confirmAmbiguous(found&&found.ambiguous,run);
     });
     return false;
+  }
+  /* Rows the server could not place either way get one late look - a web
+     page with a hole-by-hole card - and join the list only if that confirms
+     them. Added below what is already there, never in place of it. */
+  function confirmAmbiguous(items,run){
+    (Array.isArray(items)?items:[]).slice(0,2).forEach(item=>{
+      confirmCandidate(item).then(result=>{
+        if(!result||run!==searchRun||view.phase!=="results")return;
+        const course=searchResultPayload(Object.assign({},item,{confidence:result.confidence}));
+        const have=new Set(view.rows.concat(view.lateRows).map(rowKey));
+        if(have.has(rowKey(course)))return;
+        view.lateRows=view.lateRows.concat([course]);
+        requestRender();
+      });
+    });
   }
 
   /* The pin-lock candidate refresh and the core both arrive here. The nearby
@@ -1438,6 +1704,8 @@
         if(event.stopImmediatePropagation)event.stopImmediatePropagation();
         const area=target.__gdAreaPayload;
         if(area)return showArea(area.area,area.fallback,area.run);
+        const group=target.__gdGroupPayload;
+        if(group)return openGroup(group);
         const facility=target.__gdFacilityPayload;
         if(facility)return showFacilityChooser(facility.members);
         return selectCourseForPlay(selectionFromElement(target),{source:"picker-list-click"});
@@ -1448,6 +1716,8 @@
         const target=event.target.closest("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course");
         const area=target.__gdAreaPayload;
         if(area)return showArea(area.area,area.fallback,area.run);
+        const group=target.__gdGroupPayload;
+        if(group)return openGroup(group);
         const facility=target.__gdFacilityPayload;
         if(facility)return showFacilityChooser(facility.members);
         return selectCourseForPlay(selectionFromElement(target),{source:"picker-list-key"});
@@ -1458,7 +1728,51 @@
       input.__gdCoursePickerSearchBound=true;
       input.addEventListener("keydown",event=>{if(event.key==="Enter")searchOwner();});
     }
+    bindAdvancedSearch();
     return true;
+  }
+  /* Advanced search: course name (the main box), country, optional region.
+     Country and region reach the server as filters - Mapbox's country
+     parameter, Nominatim's countrycodes, a region bounding box - never as
+     words glued onto the name. */
+  const COUNTRY_CODES="AD AE AF AG AI AL AM AO AR AT AU AW AZ BA BB BD BE BF BG BH BI BJ BM BN BO BR BS BT BW BY BZ CA CD CF CG CH CI CK CL CM CN CO CR CU CV CW CY CZ DE DJ DK DM DO DZ EC EE EG ER ES ET FI FJ FM FO FR GA GB GD GE GG GH GI GL GM GN GP GQ GR GT GU GW GY HK HN HR HT HU ID IE IL IM IN IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NG NI NL NO NP NR NZ OM PA PE PF PG PH PK PL PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SI SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TG TH TJ TL TM TN TO TR TT TV TW TZ UA UG US UY UZ VA VC VE VG VI VN VU WS XK YE ZA ZM ZW".split(" ");
+  function fillCountryOptions(){
+    const select=byId("gdCourseSearchCountry");
+    if(!select||typeof document.createElement!=="function")return;
+    const locale=safe(()=>window.GDI18n.locale(),"")||"en";
+    const names=safe(()=>new Intl.DisplayNames([locale,"en"],{type:"region"}),null);
+    const chosen=select.value;
+    const options=COUNTRY_CODES.map(code=>({code,name:safe(()=>names.of(code),code)||code}))
+      .sort((a,b)=>a.name.localeCompare(b.name,locale));
+    while(select.options&&select.options.length>1)select.remove(1);
+    options.forEach(({code,name})=>{
+      const option=document.createElement("option");
+      option.value=code;
+      option.textContent=name;
+      select.appendChild(option);
+    });
+    select.value=chosen;
+  }
+  function bindAdvancedSearch(){
+    const toggle=byId("gdCourseAdvancedToggle"),fields=byId("gdCourseAdvancedFields");
+    const country=byId("gdCourseSearchCountry"),region=byId("gdCourseSearchRegion");
+    if(!toggle||!fields||toggle.__gdBound)return;
+    toggle.__gdBound=true;
+    fillCountryOptions();
+    toggle.addEventListener("click",event=>{
+      event.preventDefault();
+      fields.hidden=!fields.hidden;
+      toggle.setAttribute("aria-expanded",String(!fields.hidden));
+    });
+    /* A changed filter re-asks the same question; with nothing typed there
+       is no question yet. */
+    const rerun=()=>{if(byId("searchInput")?.value.trim())searchOwner();};
+    country?.addEventListener("change",()=>{
+      if(region){region.disabled=!country.value;if(!country.value)region.value="";}
+      rerun();
+    });
+    region?.addEventListener("keydown",event=>{if(event.key==="Enter")rerun();});
+    region?.addEventListener("change",rerun);
   }
   function init(){
     if(state.destroyed)return false;
@@ -1467,7 +1781,7 @@
       state.i18nBound=true;
       /* Rows, the nearby block and the count line are built from template
          strings; forget what was drawn so the next render rebuilds them. */
-      window.GDI18n.onChange(()=>{view.rowsSignature=null;view.extrasSignature=null;requestRender();});
+      window.GDI18n.onChange(()=>{view.rowsSignature=null;view.extrasSignature=null;fillCountryOptions();requestRender();});
     }
     state.initialized=true;
     showRows(readRecentCourses());
@@ -1506,6 +1820,9 @@
     selectFromElement:function(element,opts={}){return selectCourseForPlay(selectionFromElement(element),Object.assign({source:"selection-element"},opts||{}));},
     resumeRound,
     getState,
+    /* Admin tooling: show what each provider returned and why candidates were
+       kept or hidden. Only takes effect for an admin account. */
+    setSearchDebug:function(on){safe(()=>{if(on)localStorage.setItem(SEARCH_DEBUG_KEY,"1");else localStorage.removeItem(SEARCH_DEBUG_KEY);});return searchDebugEnabled();},
     destroy
   };
   window.GDCoursePicker=api;

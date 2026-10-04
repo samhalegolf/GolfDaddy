@@ -690,6 +690,17 @@
     "picker.alsoNear": "Također u blizini: {place}",
     "picker.alsoNearby": "Također u blizini",
     "picker.thisArea": "Ovo područje",
+    "picker.advanced": "Napredno pretraživanje",
+    "picker.country": "Država",
+    "picker.region": "Regija",
+    "picker.anyCountry": "Bilo koja država",
+    "picker.optional": "Neobavezno",
+    "picker.whichCountry": "Koja država?",
+    "picker.whichRegion": "Koja regija?",
+    "picker.allCountries": "Sve države",
+    "picker.allRegions": "Sve regije",
+    "picker.otherCountries": "Ostale države",
+    "picker.otherRegions": "Ostale regije",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Početna",
