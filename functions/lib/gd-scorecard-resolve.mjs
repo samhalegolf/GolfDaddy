@@ -728,6 +728,43 @@ function safeHostname(url) {
   try { return new URL(url).hostname.replace(/^www\./, ""); } catch (e) { return ""; }
 }
 
+/* The card's holes measured from its forward tee, for a course OSM mapped without tees.
+ *
+ * With no tee to start from, a par 4 or 5 is measured from the far end of its fairway, and
+ * the forward tee is the one that plays from about there - so it is the card's best match for
+ * those lines. Par 3s keep the card's own length: their line runs from a guessed tee off the
+ * green before, which is not where the forward tee is.
+ *
+ * Takes holes in either shape the mapper holds them (engine card teesM, or a stored row's
+ * tees: { name: { metres } }). The forward tee is the shortest tee with a length on every par
+ * 4 and 5. Returns null when the card does not carry two tees, so there is nothing to change. */
+export function forwardTeeHoles(holes) {
+  const list = holes || [];
+  const teesOf = hole => {
+    const out = {};
+    Object.entries(hole.teesM || hole.tees || {}).forEach(([name, value]) => {
+      const metres = Number(value && typeof value === "object" ? value.metres : value);
+      if (Number.isFinite(metres)) out[name] = metres;
+    });
+    return out;
+  };
+  const long = list.filter(hole => Number(hole.par) >= 4);
+  if (!long.length) return null;
+  const names = new Set();
+  list.forEach(hole => Object.keys(teesOf(hole)).forEach(name => names.add(name)));
+  if (names.size < 2) return null;
+  const complete = [...names].filter(name => long.every(hole => Number.isFinite(teesOf(hole)[name])));
+  if (!complete.length) return null;
+  const total = name => long.reduce((sum, hole) => sum + teesOf(hole)[name], 0);
+  const forward = complete.sort((a, b) => total(a) - total(b))[0];
+  return {
+    tee: forward,
+    holes: list.map(hole => Number(hole.par) >= 4
+      ? Object.assign({}, hole, { distanceM: teesOf(hole)[forward], metres: teesOf(hole)[forward] })
+      : hole)
+  };
+}
+
 /* Which course_key a distinct card should be written under, when the facility
    already has rows in the shared store.
  *
@@ -764,7 +801,7 @@ export function toStorePayload(card, courseName) {
       par: hole.par,
       index: hole.strokeIndex ?? null,
       metres: hole.distanceM ?? null,
-      tees: {},
+      tees: Object.fromEntries(Object.entries(hole.teesM || {}).map(([name, metres]) => [name, { metres }])),
       sourceUrl: card.sourceUrl || ""
     }))
   };

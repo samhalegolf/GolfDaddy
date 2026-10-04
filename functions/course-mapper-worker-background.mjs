@@ -33,7 +33,7 @@ import { partitionLoops, walkCost } from "./lib/gd-ground-loops-core.mjs";
 import { courseNameFromCard } from "./lib/gd-facility-organise-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
-import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow, stitchedCardVerdict, shouldReplaceFacilityCard } from "./lib/gd-scorecard-resolve.mjs";
+import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow, stitchedCardVerdict, shouldReplaceFacilityCard, forwardTeeHoles } from "./lib/gd-scorecard-resolve.mjs";
 import { makeScorecardVisualReader } from "./lib/gd-scorecard-vision.mjs";
 import { reconcileFacilityClaims, atomicLoopCount, HOLES_PER_LOOP } from "./lib/gd-facility-loops-core.mjs";
 import { assessFacilityStructure, contestedClaims, describeClaimGround, isIndependentClaim, mappingMethodFor, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
@@ -1515,7 +1515,7 @@ function claimFromResolution(card, result, guides) {
     cardName: card.name || "",
     confidence: result.confidence || 0,
     method: MAPPING_METHOD.NATIVE_RESOLVER,
-    resolverGreens: (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon })),
+    resolverGreens: resolverGreensOf(result),
     holes: guides.map(guide => ({
       holeNumber: guide.hole,
       candidateId: String((byHole.get(guide.hole) || {}).candidate ? byHole.get(guide.hole).candidate.candidateId : guide.id),
@@ -1540,6 +1540,42 @@ function claimFromResolution(card, result, guides) {
  * Returns null - and the card-led pass runs as before - whenever this does not fit: cards of
  * mixed length (an 18 alongside its nines is a composite, which that pass exists for), more
  * loops than the ground can hold, or a card that cannot number its loop whole. */
+/* The resolver's accepted greens, in the shape resolveGuidesIntoObjects matches guides to.
+   The id matters: assignGreensToGuides gives each green to one hole by id, and without it
+   every green shared one key - so one hole kept its OSM green polygon and every other hole
+   got a placeholder circle at the same spot. Cebu published 15 of 16 greens that way. */
+/* How the resolver matched the card, hole by hole, for the job row: the card's length
+   against the line it chose and how that line was built. A wrong numbering is otherwise
+   unexplainable after the fact - Cebu's published 16 holes, several far off their card
+   lengths, with nothing on the row saying which lines were borrowed or alternative. */
+function resolverMatchingSummary(result) {
+  const feedback = (result && result.feedback) || {};
+  const debug = (result && result.debugEvidence) || {};
+  return {
+    greens: (debug.greenCandidates || []).length,
+    lines: (debug.holeCandidates || []).length,
+    distance: feedback.distance || null,
+    holes: ((result && result.holes) || []).map(hole => {
+      const evidence = (hole.candidate && hole.candidate.evidence) || [];
+      return {
+        hole: hole.holeNumber, par: hole.par || null,
+        cardM: Number.isFinite(hole.officialDistanceM) ? Math.round(hole.officialDistanceM) : null,
+        lineM: hole.candidate && Number.isFinite(hole.candidate.pathDistanceM) ? Math.round(hole.candidate.pathDistanceM) : null,
+        reading: evidence.includes("borrowed-fairway") ? "borrowed-fairway"
+          : evidence.some(item => /^guessed-tee:/.test(item)) ? "guessed-tee"
+          : evidence.includes("alternative") ? "alternative"
+          : evidence.some(item => /^tee:/.test(item)) ? "from-tee" : "from-fairway-end",
+        confidence: Math.round((Number(hole.confidence) || 0) * 100) / 100
+      };
+    })
+  };
+}
+
+function resolverGreensOf(result) {
+  return ((result && result.debugEvidence && result.debugEvidence.greenCandidates) || [])
+    .map(green => ({ id: green.id, center: green.centre, shape: green.polygon }));
+}
+
 const GROUND_FIRST_MAX_CARDS = 6;
 const GROUND_FIRST_SPARE_HOLES = 2;
 function claimByGround(input) {
@@ -2104,7 +2140,7 @@ async function runMapperJob(job, origin) {
          evidence gets published as when the facility turns out to be bigger
          than the card - without it a correctly identified nine publishes as
          "Course 1" while its name sits unused two lines above. */
-      scorecardEvidence = { holes: best.holes.map(hole => ({ holeNumber: hole.hole, par: hole.par, distanceM: hole.distanceM })), cardName: best.name || "", source: best.source || "scorecard-engine", sourceUrl: best.sourceUrl || "", sources: [] };
+      scorecardEvidence = { holes: best.holes.map(hole => ({ holeNumber: hole.hole, par: hole.par, distanceM: hole.distanceM, teesM: hole.teesM || {} })), cardName: best.name || "", source: best.source || "scorecard-engine", sourceUrl: best.sourceUrl || "", sources: [] };
     }
     /* A page that says "18 hole, par 72" but whose table would not parse still
        answers the only question expectedHoles asks. */
@@ -2613,11 +2649,11 @@ async function runMapperJob(job, origin) {
       scorecardHoles: scorecardEvidence ? scorecardEvidence.holes : [],
       scorecardEvidence: scorecardEvidence || {}
     });
-    resolverStatus = { status: result.status, confidence: result.confidence, warnings: result.warnings, hadScorecard: !!scorecardEvidence, trigger: "multi-loop" };
+    resolverStatus = { status: result.status, confidence: result.confidence, warnings: result.warnings, hadScorecard: !!scorecardEvidence, trigger: "multi-loop", matching: resolverMatchingSummary(result) };
     diagnostics.resolverStatus = resolverStatus;
     const guides = (result.holes || []).map(hole => guideFromResolvedHole(hole, result)).filter(Boolean);
     if (guides.length > collision.distinctNumbers) {
-      const resolverGreens = (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon }));
+      const resolverGreens = resolverGreensOf(result);
       const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, existingObjects, payload);
       /* The resolver is answering here because loop separation could not tell
          the courses apart, so its numbering stands alone - the colliding OSM
@@ -2725,16 +2761,34 @@ async function runMapperJob(job, origin) {
   }
   if (numberingIssue || shortOfExpected) {
     await heartbeatJob(job, { stage: "geometry-resolver" });
-    const result = await resolveCourseGeometryForAutoMapper({
+    const resolveWith = holes => resolveCourseGeometryForAutoMapper({
       osmPayload: payload,
       courseId: course.courseId,
       course: { courseId: course.courseId, courseName: course.courseName, courseCentre: course.center },
       courseCentre: course.center,
       expectedHoleCount: expectedHoles || undefined,
-      scorecardHoles: scorecardEvidence ? scorecardEvidence.holes : [],
-      scorecardEvidence: scorecardEvidence || {}
+      scorecardHoles: holes,
+      scorecardEvidence: scorecardEvidence ? Object.assign({}, scorecardEvidence, { holes }) : {}
     });
-    resolverStatus = { status: result.status, confidence: result.confidence, warnings: result.warnings, hadScorecard: !!scorecardEvidence, trigger: numberingIssue ? "no-osm-numbering" : "short-of-expected" };
+    let result = await resolveWith(scorecardEvidence ? scorecardEvidence.holes : []);
+    resolverStatus = { status: result.status, confidence: result.confidence, warnings: result.warnings, hadScorecard: !!scorecardEvidence, trigger: numberingIssue ? "no-osm-numbering" : "short-of-expected", matching: resolverMatchingSummary(result) };
+    /* Second check, for a course OSM mapped without a single tee. Its par 4s and 5s are then
+       measured from the far end of the fairway, which is about where the card's forward tee
+       plays from - so when the card's own lengths did not resolve the course, the same match
+       is run against the forward tee's lengths for those holes, and whichever numbers more
+       of the course (then with more confidence) is kept. */
+    const forward = !(diagnostics.osmFeatures && diagnostics.osmFeatures.tees) && result.status !== "resolved" && scorecardEvidence
+      ? forwardTeeHoles(scorecardEvidence.holes) : null;
+    if (forward) {
+      const second = await resolveWith(forward.holes);
+      const better = (second.holes || []).length > (result.holes || []).length
+        || ((second.holes || []).length === (result.holes || []).length && (second.confidence || 0) > (result.confidence || 0));
+      resolverStatus.secondCheck = { tee: forward.tee, status: second.status, holes: (second.holes || []).length, confidence: second.confidence, adopted: better, matching: resolverMatchingSummary(second) };
+      if (better) {
+        result = second;
+        Object.assign(resolverStatus, { status: second.status, confidence: second.confidence, warnings: second.warnings });
+      }
+    }
     diagnostics.resolverStatus = resolverStatus;
 
     /* A scorecard describes a COURSE. The ground is the facility.
@@ -2765,7 +2819,7 @@ async function runMapperJob(job, origin) {
         cardName: (scorecardEvidence && scorecardEvidence.cardName) || "",
         confidence: result.confidence || 0,
         method: MAPPING_METHOD.NATIVE_RESOLVER,
-        resolverGreens: (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon })),
+        resolverGreens: resolverGreensOf(result),
         holes: seedGuides.map(guide => ({
           holeNumber: guide.hole,
           candidateId: String((seedByHole.get(guide.hole) || {}).candidate ? seedByHole.get(guide.hole).candidate.candidateId : guide.id),
@@ -2845,7 +2899,7 @@ async function runMapperJob(job, origin) {
        OSM-numbered answer when it genuinely covers MORE holes - a lower-coverage resolver run
        must not clobber good numbered geometry. In the no-numbering case anything it found is
        strictly better than the nothing OSM numbering produced. */
-    const resolverGreens = (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon }));
+    const resolverGreens = resolverGreensOf(result);
     if (numberingIssue) {
       /* OSM had shapes and no numbers at all, so every published number is the
          resolver's - and anything it found beats the nothing OSM produced. */

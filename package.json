@@ -16,6 +16,7 @@
     "test:scorecard-resolve": "node dev/scorecard-resolve.test.js",
     "test:scorecard-international": "node dev/international-scorecard-resolver.test.js",
     "test:scorecard-visual": "node dev/scorecard-visual-fallback.test.js",
+    "test:forward-tee": "node dev/forward-tee.test.js",
     "test:scorecard-parse": "node dev/scorecard-parse-core.test.js",
     "test:course-rename": "node dev/course-rename-core.test.js",
     "test:multi-course": "node dev/multi-course-separation.test.js",
