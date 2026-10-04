@@ -1650,13 +1650,20 @@ async function bootCheck() {
   }));
   await handoffPage.close();
 
-  /* Course library: a course auto-downloads on its first visit with no
+  /* Paid Course Library: a course auto-downloads on its first visit with no
      prompt (the auto-download bias only needs confirmation for a map
      arriving mid-round, not one already there when play starts) - and a
      second hand-off to the SAME course must load from that saved copy with
      no second network call. A published map that arrives mid-round is a
-     PROMPT, and only becomes the saved copy once that prompt is accepted. */
+     PROMPT, and only becomes the saved copy once that prompt is accepted.
+     Free online play is covered separately by course-offline-entitlement.test.js. */
   const storeContext = await browser.newContext();
+  await storeContext.addInitScript(() => {
+    localStorage.setItem("clarity:store-entitlement:v1", JSON.stringify({
+      active: true,
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }));
+  });
   const storePage = await storeContext.newPage();
   const storeErrors = [];
   storePage.on("pageerror", (err) => storeErrors.push(err && err.message || String(err)));
