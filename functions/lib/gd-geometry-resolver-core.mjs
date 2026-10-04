@@ -617,13 +617,36 @@ function greenLedFairwayCandidates(elements, greens, boundary) {
      green paired with a fairway that its card says is a 124m par 3 is wrong, and the tee
      that makes it right is one of these. Marked down, and never sharing a fairway or tee with
      another hole on the same card (see candidateFeatureKeys). */
+  /* Every fairway played both ways. A green sitting at a fairway's back end is usually the
+     hole before's - the next tee is beside it - and being closer than the real green, set back
+     beyond the far end, it wins the pairing: at Cebu the par 5's fairway went to the green at
+     its tee end and the par 5's own green was left with par-3 readings. So the green beyond
+     each end of each fairway is always offered that fairway, whatever its pairing cost. */
+  const endGreens = new Set();
+  fairways.forEach(fairway => {
+    const axis = fairwayMajorAxis(fairway.polygon);
+    if (!axis) return;
+    [[axis.a, axis.b], [axis.b, axis.a]].forEach(([end, other]) => {
+      const out = { lat: end.lat - other.lat, lng: end.lng - other.lng };
+      const beyond = (greens || []).filter(green => {
+        const d = distanceM(end, green.centre);
+        if (d > GREEN_FAIRWAY_LINK_MAX_M) return false;
+        return d < 30 || (green.centre.lat - end.lat) * out.lat + (green.centre.lng - end.lng) * out.lng > 0;
+      }).sort((x, y) => distanceM(end, x.centre) - distanceM(end, y.centre))[0];
+      if (beyond) endGreens.add(beyond.id + "::" + fairway.id);
+    });
+  });
   (greens || []).forEach(green => {
     const primary = fairwayFor.get(green.id);
-    fairwayPairs.filter(pair => pair.left === green.id && (!primary || pair.fairway.id !== primary.fairway.id))
-      .sort((a, b) => a.cost - b.cost).slice(0, ALTERNATIVE_FAIRWAYS_PER_GREEN).forEach(pair => {
+    const others = fairwayPairs.filter(pair => pair.left === green.id && (!primary || pair.fairway.id !== primary.fairway.id))
+      .sort((a, b) => a.cost - b.cost);
+    others.filter((pair, index) => index < ALTERNATIVE_FAIRWAYS_PER_GREEN || endGreens.has(green.id + "::" + pair.fairway.id)).forEach(pair => {
       const axis = oriented.get(green.id + "::" + pair.fairway.id);
-      const tee = tees.filter(t => distanceM(axis.far, t.centre) <= TEE_BEHIND_FAIRWAY_MAX_M).sort((a, b) => distanceM(axis.far, a.centre) - distanceM(axis.far, b.centre))[0] || null;
-      const candidate = fairwayCenterlineForGreen(green, pair.fairway, axis, tee, ["alternative"]);
+      /* Walked back through any pieces behind it too, as the main readings are. */
+      const pieces = fairwayPiecesBehind(axis, pair.fairway, fairways, null);
+      const start = pieces.length ? pieces[pieces.length - 1].far : axis.far;
+      const tee = tees.filter(t => distanceM(start, t.centre) <= TEE_BEHIND_FAIRWAY_MAX_M).sort((a, b) => distanceM(start, a.centre) - distanceM(start, b.centre))[0] || null;
+      const candidate = fairwayCenterlineForGreen(green, pair.fairway, axis, tee, ["alternative"], pieces);
       if (candidate) { candidate.alternative = true; candidate.confidence = clamp(candidate.confidence - 0.06, 0, 1); candidates.push(candidate); }
     });
     const par3 = par3For.get(green.id);
