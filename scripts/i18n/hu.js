@@ -64,6 +64,8 @@
     "access.memberLogShots": "Az ütések végpontjának naplózásához Clarity-tagság kell. A távolságok ingyenesek maradnak.",
     "access.memberKeepScore": "Az eredmény vezetéséhez Clarity-tagság kell. A távolságok ingyenesek maradnak.",
     "access.membership": "Tagság",
+    "access.freeAccountCourseMaps": "Hozzon létre ingyenes fiókot további golfpályák előkészítéséhez.",
+    "access.mapServerBusy": "A térképszerver jelenleg foglalt. Kérjük, próbálja újra hamarosan.",
 
     /* Player badge */
     "badge.preview": "ELŐNÉZET",
@@ -824,6 +826,7 @@
     "course.noneDownloadedYet": "Még nincs letöltött pálya",
     "course.tryAnotherSearch": "Próbálj másik keresést.",
     "course.downloadAutomatically": "A pályák automatikusan letöltődnek, amikor először játszol rajtuk.",
+    "course.offlineMembership": "A golfpályák offline letöltése a Clarity-tagság része. A pályákat továbbra is megtekintheti online.",
     "course.publishedMap": "Közzétett térkép",
     "course.courseMap": "Pályatérkép",
     "course.mapType": "Térkép típusa",
