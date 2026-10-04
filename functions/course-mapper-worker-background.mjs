@@ -2746,7 +2746,7 @@ async function runMapperJob(job, origin) {
      * answer is adopted, ask whether the card was ever describing the whole
      * place. See detectUnnumberedMultiLoop. */
     const facility = detectUnnumberedMultiLoop({
-      candidateCount: (result.debugEvidence && result.debugEvidence.totalHoleCandidates) || 0,
+      candidateCount: (result.debugEvidence && result.debugEvidence.totalHoleGreens) || 0,
       cardHoles: expectedHoles
     });
     diagnostics.unnumberedFacility = facility;
