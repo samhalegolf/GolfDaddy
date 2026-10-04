@@ -196,8 +196,20 @@ test("past the provider's imagery the map blows up the last tiles instead of goi
 
 test("shapes are deleted by dropping them on the bin", () => {
   assert.ok(page.includes('data-gd-overlay="bin"'), "no bin on the map");
-  assert.ok(/if \(overBin\(event\)\) \{[\s\S]*?removeFeature\(f\.id\)/.test(page), "dropping a shape on the bin must delete it");
+  assert.ok(/if \(event\.type !== "pointercancel" && overBin\(event\)\) \{[\s\S]*?removeFeature\(f\.id\)/.test(page), "dropping a shape on the bin must delete it");
 });
+
+test("shapes and corners drag by touch as well as by mouse", () => {
+  assert.ok(page.includes('node.addEventListener("pointerdown"'), "a drag must start from a pointer press, which a finger sends");
+  assert.ok(page.includes('document.addEventListener("pointermove", onDragMove)') && page.includes('document.addEventListener("pointercancel", onDragEnd)'), "a drag must follow pointer moves and end on a cancelled touch");
+  assert.ok(!/\.on\("mousedown"/.test(page), "no drag may still start from a mouse-only press");
+});
+
+test("a fairway line can be finished, undone and cancelled without a keyboard", () => {
+  ["draft-finish", "draft-undo", "draft-cancel"].forEach((name) => assert.ok(page.includes('data-gd-overlay="' + name + '"'), name + " missing from the map"));
+  assert.ok(page.includes('el["draft-finish"].addEventListener("click", finishFairway)'), "Finish must finish the fairway");
+});
+
 
 test("the wand endpoint is registered, admin-only and writes nothing", () => {
   const wand = read("functions/course-map-wand.mjs");
