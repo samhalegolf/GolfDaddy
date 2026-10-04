@@ -1149,6 +1149,26 @@
         } else {
           html += '<br><span class="gdStudioWarnText">Scorecard not resolved</span>';
         }
+        /* Which route the resolver took: the HTML tables, or the picture fallback
+           and how far it got. */
+        var STAGE_LABELS = {
+          "html-resolved": "read from page HTML",
+          "html-extraction-failed": "HTML extraction failed",
+          "scorecard-image-found": "scorecard image found",
+          "visual-extraction-failed": "visual extraction failed",
+          "visual-scorecard-resolved": "visual scorecard resolved"
+        };
+        var stages = (scorecard.stages || []).map(function (stage) { return STAGE_LABELS[stage] || stage; });
+        if (stages.length) html += '<br><span>Scorecard route: ' + esc(stages.join(" → ")) + "</span>";
+        var visual = scorecard.visual;
+        if (visual && visual.status && visual.status !== "unavailable") {
+          var accepted = (visual.accepted || [])[0];
+          html += '<br><span>' + (accepted
+            ? "Visual card: " + esc(accepted.holes) + " holes, confidence " + esc(Math.round(accepted.confidence * 100)) + "% (" + esc((accepted.layout || []).length > 2 ? "hole graphics" : (accepted.layout || []).join(" + ")) + ")"
+            : "Visual: " + esc(visual.status) + ((visual.rejected || [])[0] ? " — " + esc(visual.rejected[0].reason) : "")) + "</span>";
+        } else if (visual && visual.status === "unavailable") {
+          html += '<br><span>Visual fallback unavailable (no vision key)</span>';
+        }
         var trace = scorecard.trace || {};
         var candidates = trace.candidates || [];
         var attempts = scorecard.attempts || [];
@@ -1166,8 +1186,15 @@
           }).join("") + "</ol></div>"
           + '<div><strong>Page decisions:</strong><ol>' + attempts.map(function (attempt) {
             return "<li>" + esc(attempt.url) + " — scorecard " + esc(attempt.scorecardConfidence || 0)
-              + (attempt.usable ? " — accepted" : " — rejected: " + esc(attempt.rejected || attempt.reason || "no readable structure")) + "</li>";
-          }).join("") + "</ol></div></details>";
+              + (attempt.usable ? " — accepted" : " — rejected: " + esc(attempt.rejected || attempt.reason || (attempt.stage ? STAGE_LABELS[attempt.stage] : "no readable structure"))) + "</li>";
+          }).join("") + "</ol></div>"
+          + (visual && (visual.images || []).length ? '<div><strong>Scorecard images:</strong><ol>' + visual.images.map(function (image) {
+            return "<li>" + esc(image.url) + " — " + esc(image.kind) + (image.hole ? " " + esc(image.hole) : "") + "</li>";
+          }).join("") + "</ol></div>" : "")
+          + (visual && (visual.rejected || []).length ? '<div><strong>Visual rejections:</strong><ol>' + visual.rejected.map(function (entry) {
+            return "<li>" + esc(entry.url) + " — " + esc(entry.reason) + "</li>";
+          }).join("") + "</ol></div>" : "")
+          + "</details>";
       }
       box.innerHTML = html;
     }
