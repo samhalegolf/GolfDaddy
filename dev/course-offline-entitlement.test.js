@@ -42,8 +42,9 @@ function context(seed, failCourseWrites) {
   return ctx;
 }
 
-function loadAccess(seed) {
+function loadAccess(seed, signedIn) {
   const ctx = context(seed);
+  ctx.ClarityApp.account = { signedIn() { return !!signedIn; } };
   vm.runInContext(ACCESS, ctx, { filename: "app/js/access.js" });
   return ctx;
 }
@@ -73,7 +74,7 @@ function entry(id) {
   const ctx = loadAccess({
     "gd_accounts_v1": JSON.stringify({ activeId: "p1", accounts: [{ accountId: "p1", role: "player" }] }),
     "clarity:payments:status:v1": JSON.stringify({ active: false })
-  });
+  }, true);
   assert.strictEqual(ctx.ClarityApp.access.offlineDownloads(), false,
     "a signed-in free player may view online packages but must not get a device download");
 }
@@ -81,15 +82,23 @@ function entry(id) {
 {
   const ctx = loadAccess({
     "gd_accounts_v1": JSON.stringify({ activeId: "coach", accounts: [{ accountId: "coach", role: "coach" }] })
-  });
+  }, true);
   assert.strictEqual(ctx.ClarityApp.access.offlineDownloads(), true, "staff access includes offline courses");
 }
 
 {
   const ctx = loadAccess({
     "clarity:payments:status:v1": JSON.stringify({ active: true })
-  });
+  }, true);
   assert.strictEqual(ctx.ClarityApp.access.offlineDownloads(), true, "active backend paid access includes offline courses");
+}
+
+{
+  const ctx = loadAccess({
+    "clarity:payments:status:v1": JSON.stringify({ active: true })
+  }, false);
+  assert.strictEqual(ctx.ClarityApp.access.offlineDownloads(), false,
+    "a stale paid-account cache must not unlock guest downloads after sign-out");
 }
 
 {
