@@ -71,10 +71,6 @@
     "access.memberKeepScore": "A Clarity membership is needed to keep score. Distances stay free.",
     "access.membership": "Membership",
     "access.freeAccountCourseMaps": "Create a free account to prepare more courses.",
-    "access.freeAccount": "Free account",
-    "access.accountCheckFailed": "We couldn't verify your account right now. Please try again.",
-    "access.tryAgain": "Try again",
-    "access.offlineStorageFull": "This course is ready to play, but it couldn't be saved for offline play. Remove a downloaded course in Profile > Courses, then try again.",
     "access.mapServerBusy": "The map server is busy right now. Please try again soon.",
 
     /* Player badge */
@@ -443,7 +439,6 @@
     "pay.need.adoptBubble": "A Clarity membership is needed to adopt a bubble from your own data.",
     "pay.need.practiceToBag": "A Clarity membership is needed to apply practice distances to your bag.",
     "pay.need.bubbleCentre": "A Clarity membership is needed to set your own bubble centre.",
-    "pay.need.offlineCourse": "Offline course downloads are included with Clarity membership.",
     "pay.need.generic": "A Clarity membership is needed for this.",
 
     /* App Store / Google Play purchases (scripts/clarity-store-billing.js) */
@@ -851,7 +846,7 @@
     "course.tapAgainToRemove": "Tap again to remove",
     "course.mapUpdated": "Map updated",
     "course.noNewerMap": "No newer map published yet",
-    "course.notEnoughSpace": "Not enough space to save the update. Remove a downloaded course and try again.",
+    "course.notEnoughSpace": "Not enough space to save this course for offline play. Remove a downloaded course and try again.",
     "course.couldNotReachServer": "Could not reach the server",
     "course.today": "today",
     "course.sizeBytes": "{n} B",
