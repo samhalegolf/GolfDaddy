@@ -161,16 +161,16 @@
     action.onclick = null;
     if (kind === "guest-signup-required") {
       i18n.set(label, "access.freeAccountCourseMaps");
-      i18n.set(action, "access.freeAccount");
+      i18n.set(action, "auth.modeCreate");
       action.classList.remove("hiddenState");
       action.onclick = function () { window.location.href = "/?login=1"; };
     } else if (kind === "account-verification-unavailable") {
-      i18n.set(label, "access.accountCheckFailed");
-      i18n.set(action, "access.tryAgain");
+      i18n.set(label, "auth.errUnavailable");
+      i18n.set(action, "pay.refresh");
       action.classList.remove("hiddenState");
       action.onclick = function () { window.location.reload(); };
     } else if (kind === "storage") {
-      i18n.set(label, "access.offlineStorageFull");
+      i18n.set(label, "course.notEnoughSpace");
     } else {
       i18n.set(label, "access.mapServerBusy");
     }
