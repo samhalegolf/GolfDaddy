@@ -8,8 +8,9 @@
  *   - a signed-out caller WITH a guest installation id may start a normal automap
  *   - a course that already has geometry at the current mapper version is not remapped
  *   - a build already in flight is not duplicated
- *   - the per-actor rate limit holds, tighter for guests than for signed-in players
- *   - a live job wins over the rate limit, so polling and re-picking cost no quota
+ *   - a guest gets one SUCCESSFUL prepared course before free sign-up is required
+ *   - signed-in players have no ordinary course-preparation quota; only a high protective limit
+ *   - a live job wins over all limits, so polling and re-picking cost no quota
  *   - "nudge" and "remap" stay admin-only; a guest is never an operator
  *
  * Supabase is stubbed at the fetch layer, so the suite is hermetic. */
@@ -72,6 +73,12 @@ function stubFetch(world) {
     if (table === "course_maps") return jsonResponse(200, world.maps || []);
     if (table === "course_visuals") return jsonResponse(200, world.visuals || []);
     if (table === "course_mapper_jobs") {
+      if (rest.includes("requested_by=eq.") && rest.includes("status=eq.done")) {
+        return jsonResponse(200, world.successfulJobs || []);
+      }
+      if (rest.includes("requested_by=eq.") && rest.includes("status=in.(queued,running)")) {
+        return jsonResponse(200, world.actorLiveJobs || []);
+      }
       if (rest.includes("requested_by=eq.")) return jsonResponse(200, world.userJobs || []);
       /* The collection kind dedupes against its OWN live rows, so the harness has to be able
          to answer that query separately from the mapping one - otherwise every world with any
@@ -122,7 +129,9 @@ function unmappedCourse(overrides = {}) {
     sessions: { "player-token": PLAYER, "admin-token": ADMIN },
     maps: [],
     jobs: [],
-    userJobs: []
+    userJobs: [],
+    successfulJobs: [],
+    actorLiveJobs: []
   }, overrides);
 }
 
@@ -171,14 +180,48 @@ test("a guest is never an operator", async () => {
   assert.strictEqual(remapped.status, 403, "so is throwing away a course's geometry");
 });
 
-test("guests hit a tighter new-scan limit than signed-in players", async () => {
-  const { AUTO_RATE_MAX_PER_GUEST, AUTO_RATE_MAX_PER_USER } = (await import(path.join(root, "functions", "course-mapper-jobs.mjs"))).__courseMapperJobsTest;
-  assert.ok(AUTO_RATE_MAX_PER_GUEST < AUTO_RATE_MAX_PER_USER, "an anonymous budget that matched a signed-in one would not be a budget");
+test("one successful guest map requires a free account before a different course can be prepared", async () => {
+  const calls = stubFetch(unmappedCourse({
+    successfulJobs: [{ id: "guest-success", kind: "automap", status: "done" }]
+  }));
+  const result = await call(post({
+    courseId: "second-course", kind: "automap",
+    courseLat: -36.81, courseLng: 174.75, guestId: GUEST
+  }, null));
+  assert.strictEqual(result.status, 403);
+  assert.strictEqual(result.body.code, "guest-signup-required");
+  assert.deepStrictEqual(jobInserts(calls), [], "the second anonymous course must not enter the mapper queue");
+  assert.deepStrictEqual(
+    calls.inserts.filter(insert => insert.table === "course_maps"),
+    [],
+    "the refused course must not leave a location-only stub that looks partly saved"
+  );
+});
+
+test("a failed guest attempt does not consume the one successful-map allowance", async () => {
+  const calls = stubFetch(unmappedCourse({
+    userJobs: [{ id: "guest-failed", kind: "automap", status: "failed" }]
+  }));
+  const result = await call(post({
+    courseId: "retry-course", kind: "automap",
+    courseLat: -36.81, courseLng: 174.75, guestId: GUEST
+  }, null));
+  assert.strictEqual(result.status, 202);
+  assert.strictEqual(jobInserts(calls).length, 1, "only a successful completed map spends the guest allowance");
+});
+
+test("the anonymous protective circuit-breaker reports server busy rather than an account limit", async () => {
+  const { AUTO_RATE_MAX_PER_GUEST } = (await import(path.join(root, "functions", "course-mapper-jobs.mjs"))).__courseMapperJobsTest;
   const recent = Array.from({ length: AUTO_RATE_MAX_PER_GUEST }, (_, i) => ({ id: "g" + i }));
   const calls = stubFetch(unmappedCourse({ userJobs: recent }));
-  const result = await call(post({ courseId: "pupuke", kind: "automap", courseLat: -36.78, courseLng: 174.76, guestId: GUEST }, null));
+  const result = await call(post({
+    courseId: "pupuke", kind: "automap",
+    courseLat: -36.78, courseLng: 174.76, guestId: GUEST
+  }, null));
   assert.strictEqual(result.status, 429);
-  assert.deepStrictEqual(jobInserts(calls), [], "no new scan is started once the budget is spent");
+  assert.strictEqual(result.body.code, "server-busy");
+  assert.match(String(result.body.error || ""), /server is busy/i);
+  assert.deepStrictEqual(jobInserts(calls), []);
 });
 
 /* The rule the whole limit rests on: only STARTING a scan costs anything. A player who
@@ -250,10 +293,27 @@ test("a build already in flight is not duplicated", async () => {
   assert.deepStrictEqual(jobInserts(calls), []);
 });
 
-test("a player who has started several mapping runs recently is rate limited", async () => {
-  const calls = stubFetch(unmappedCourse({ userJobs: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }, { id: "e" }] }));
-  const result = await call(post({ courseId: "pupuke", kind: "automap" }, "player-token"));
+test("a signed-in player is not product-limited after five newly prepared courses", async () => {
+  const calls = stubFetch(unmappedCourse({
+    userJobs: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }, { id: "e" }]
+  }));
+  const result = await call(post({
+    courseId: "pupuke", kind: "automap", courseLat: -36.78, courseLng: 174.76
+  }, "player-token"));
+  assert.strictEqual(result.status, 202);
+  assert.strictEqual(jobInserts(calls).length, 1);
+});
+
+test("the signed-in protective circuit-breaker still prevents runaway mapping loops", async () => {
+  const { AUTO_RATE_MAX_PER_USER } = (await import(path.join(root, "functions", "course-mapper-jobs.mjs"))).__courseMapperJobsTest;
+  const calls = stubFetch(unmappedCourse({
+    userJobs: Array.from({ length: AUTO_RATE_MAX_PER_USER }, (_, i) => ({ id: "u" + i }))
+  }));
+  const result = await call(post({
+    courseId: "pupuke", kind: "automap", courseLat: -36.78, courseLng: 174.76
+  }, "player-token"));
   assert.strictEqual(result.status, 429);
+  assert.strictEqual(result.body.code, "server-busy");
   assert.deepStrictEqual(jobInserts(calls), []);
 });
 
