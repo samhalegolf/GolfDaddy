@@ -64,6 +64,8 @@
     "access.memberLogShots": "Norint žymėti, kur baigiasi tavo smūgiai, reikia Clarity narystės. Atstumai lieka nemokami.",
     "access.memberKeepScore": "Norint skaičiuoti rezultatą, reikia Clarity narystės. Atstumai lieka nemokami.",
     "access.membership": "Narystė",
+    "access.freeAccountCourseMaps": "Susikurkite nemokamą paskyrą, kad galėtumėte paruošti daugiau golfo aikštynų.",
+    "access.mapServerBusy": "Žemėlapių serveris šiuo metu užimtas. Netrukus bandykite dar kartą.",
 
     /* Player badge */
     "badge.preview": "PERŽIŪRA",
@@ -846,6 +848,7 @@
     "course.noneDownloadedYet": "Dar nėra atsisiųstų laukų",
     "course.tryAnotherSearch": "Pabandyk ieškoti kitaip.",
     "course.downloadAutomatically": "Laukai atsisiunčiami automatiškai, kai juose žaidi pirmą kartą.",
+    "course.offlineMembership": "Golfo aikštynų atsisiuntimas naudoti neprisijungus įtrauktas į Clarity narystę. Aikštynus vis tiek galite peržiūrėti internetu.",
     "course.publishedMap": "Paskelbtas žemėlapis",
     "course.courseMap": "Lauko žemėlapis",
     "course.mapType": "Žemėlapio tipas",
