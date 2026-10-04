@@ -16,6 +16,22 @@ function test(name, fn) { tests.push({ name, fn }); }
 let core = null;
 let plan = null;
 
+test("each hole keeps its own OSM green when greens carry ids", () => {
+  /* Greens are given to holes one-to-one by id. The worker used to hand them over without
+     one, so every green shared a key and only the closest hole kept a real polygon - Cebu
+     published 15 of 16 greens as placeholder circles. */
+  const guides = [
+    { hole: 1, points: [{ lat: 0, lng: 0 }, { lat: 0.003, lng: 0 }] },
+    { hole: 2, points: [{ lat: 0.01, lng: 0 }, { lat: 0.013, lng: 0 }] }
+  ];
+  const greens = [
+    { id: "g1", center: { lat: 0.0031, lng: 0 }, shape: [] },
+    { id: "g2", center: { lat: 0.0131, lng: 0 }, shape: [] }
+  ];
+  const matched = core.assignGreensToGuides(guides, greens).map(row => row.match && row.match.green.id);
+  assert.deepStrictEqual(matched, ["g1", "g2"]);
+});
+
 test("osmQueryScope builds an around-radius selector when no bbox is given", () => {
   const scope = core.osmQueryScope({}, { lat: -36.8, lng: 174.7 });
   assert.strictEqual(scope.mode, "around");
