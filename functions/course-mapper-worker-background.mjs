@@ -1796,6 +1796,12 @@ function visualSummary(visual) {
     status: visual.status,
     pagesInspected: visual.pagesInspected || 0,
     holePages: visual.holePages || 0,
+    imageSearch: visual.imageSearch ? {
+      query: visual.imageSearch.query,
+      results: visual.imageSearch.results,
+      error: visual.imageSearch.error,
+      kept: (visual.imageSearch.kept || []).map(image => ({ url: String(image.url || "").slice(0, 160), page: String(image.page || "").slice(0, 160) }))
+    } : null,
     images: (visual.images || []).slice(0, 8).map(image => ({ url: String(image.url || "").slice(0, 160), kind: image.kind, hole: image.hole || null })),
     accepted: (visual.accepted || []).map(card => ({ layout: card.layout, confidence: card.confidence, checks: card.checks, holes: card.holes })),
     rejected: (visual.rejected || []).slice(0, 8).map(entry => ({ url: String(entry.url || "").slice(0, 160), reason: entry.reason, confidence: entry.confidence ?? null })),
