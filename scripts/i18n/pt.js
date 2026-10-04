@@ -64,6 +64,8 @@
     "access.memberLogShots": "É necessária uma subscrição Clarity para registar onde terminam as tuas pancadas. As distâncias continuam grátis.",
     "access.memberKeepScore": "É necessária uma subscrição Clarity para registar o resultado. As distâncias continuam grátis.",
     "access.membership": "Subscrição",
+    "access.freeAccountCourseMaps": "Crie uma conta gratuita para preparar mais campos de golfe.",
+    "access.mapServerBusy": "O servidor de mapas está ocupado neste momento. Tente novamente em breve.",
 
     /* Player badge */
     "badge.preview": "PRÉ-VISTA",
@@ -824,6 +826,7 @@
     "course.noneDownloadedYet": "Ainda não há campos transferidos",
     "course.tryAnotherSearch": "Tenta outra pesquisa.",
     "course.downloadAutomatically": "Os campos são transferidos automaticamente da primeira vez que os jogas.",
+    "course.offlineMembership": "Os downloads de campos de golfe para utilização offline estão incluídos na adesão Clarity. Ainda pode ver campos online.",
     "course.publishedMap": "Mapa publicado",
     "course.courseMap": "Mapa do campo",
     "course.mapType": "Tipo de mapa",
