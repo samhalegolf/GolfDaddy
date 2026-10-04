@@ -133,4 +133,45 @@
       await sleep(Math.min(waitedMs > 30000 ? WAIT_POLL_MS * 2 : WAIT_POLL_MS, remaining));
     }
   };
+
+  /* Anonymous usage counter (functions/course-usage.mjs): which courses get
+     downloaded and played, and from which origin. Sends only the course id,
+     the event and the origin - no account or guest id. Fire-and-forget; a
+     failed count is never worth a visible error. Each event is counted at
+     most once per course per device per day, so a WebView rebuild or a
+     re-open mid-round isn't a second round (and a free player, whose map is
+     fetched fresh on every open, isn't a stream of downloads). */
+  var USAGE_ENDPOINT = "/api/course-usage";
+  var COUNTED_KEY = "gd-course-usage-counted";
+  function usageOrigin() {
+    var native = window.GDNative;
+    return native && native.isNative ? String(native.platform) : "web";
+  }
+  function countedToday(key) {
+    var today = new Date().toISOString().slice(0, 10);
+    try {
+      var seen = JSON.parse(localStorage.getItem(COUNTED_KEY) || "{}");
+      if (seen.day !== today) seen = { day: today, ids: [] };
+      if (seen.ids.indexOf(key) >= 0) return true;
+      seen.ids.push(key);
+      localStorage.setItem(COUNTED_KEY, JSON.stringify(seen));
+    } catch (e) {}
+    return false;
+  }
+  /* event: "download" | "play". origin defaults to this device's platform;
+     the watch delivery passes "watch". */
+  app.reportCourseUsage = function (courseId, event, origin) {
+    var id = app.courseKey(courseId);
+    if (id === "course" || typeof fetch !== "function") return;
+    origin = origin || usageOrigin();
+    if (countedToday(event + ":" + origin + ":" + id)) return;
+    try {
+      fetch(USAGE_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ courseId: id, event: event, origin: origin }),
+        keepalive: true
+      }).catch(function () {});
+    } catch (e) {}
+  };
 })();

@@ -904,6 +904,7 @@
          on a network round-trip for a course already on the device. */
       activeMapType = cached.mapType;
       startRound(course, pkg);
+      app.reportCourseUsage(course.courseId, "play");
       goResumeHole(resumeHole);
       hideLoadingScreen();
       startDemoCourseDataTimerIfNeeded();
@@ -928,6 +929,8 @@
       activeMapType = mapTypeOf(pkg);
       /* null package → live map only. Normal, per the handover. */
       startRound(course, pkg);
+      if (activeMapType) app.reportCourseUsage(course.courseId, "download");
+      app.reportCourseUsage(course.courseId, "play");
       goResumeHole(resumeHole);
       hideLoadingScreen();
       startDemoCourseDataTimerIfNeeded();
