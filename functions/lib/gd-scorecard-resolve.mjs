@@ -62,15 +62,29 @@ export function classifySource(url) {
    A Brave title is "... - South Course in Tomarata, Auckland, New Zealand | GolfPass";
    the og:title is "Te Arai Links Golf Club - South Course". Names end up on
    course_maps rows and in the picker, so the tidy one is worth the regex. */
-export function courseNameFromHtml(html, fallback) {
+export function courseNameFromHtml(html, fallback, pageUrl) {
   const source = String(html || "");
   const og = source.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)
     || source.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
   const h1 = source.match(/<h1[^>]*>([\s\S]{1,200}?)<\/h1>/i);
   const pick = (og && og[1]) || (h1 && h1[1].replace(/<[^>]*>/g, "")) || "";
-  const clean = pick.replace(/\s*[|\u2013\u2014]\s*(GolfPass|18Birdies|Golf Advisor|Golfshot).*$/i, "")
+  const clean = stripSiteSuffix(pick.replace(/\s*[|\u2013\u2014]\s*(GolfPass|18Birdies|Golf Advisor|Golfshot).*$/i, ""), pageUrl)
     .replace(/\s+in\s+[^,]+,.*$/i, "").replace(/\s+/g, " ").trim();
   return clean || fallback || "";
+}
+
+/* "Club Filipino Inc de Cebu, Danao | Golf4Holland" is the course plus the site's own
+   name. Left on, the site name became the stored card's key and the name a loop was
+   published under. Only a trailing segment that IS the page's host comes off, so
+   "Te Arai Links Golf Club - North Course" keeps its course half. */
+function stripSiteSuffix(title, pageUrl) {
+  const letters = text => String(text || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const host = letters(safeHostname(pageUrl).split(".")[0]);
+  if (host.length < 5) return title;
+  return String(title || "").replace(/(?:\s*[|\u2013\u2014]\s*|\s+-\s+)([^|\u2013\u2014]+)$/, (whole, tail) => {
+    const site = letters(tail);
+    return site.length >= 5 && (host.includes(site) || site.includes(host)) ? "" : whole;
+  });
 }
 
 /* Sibling courses at the same facility, from the page we already fetched.
@@ -316,12 +330,27 @@ export function stitchedCardVerdict(card, siblings) {
 }
 
 /* Distinct courses in a pool, by layout rather than by title. */
+/* When two cards are the same course, the fuller one stands for it. A front-nine-only
+   scrape with no distances (Club Filipino on Golf4Holland) matches the full eighteen by
+   par on the holes they share - it must not be the copy that survives. */
 export function distinctCards(cards) {
+  const fullness = card => { const quality = cardQuality(card); return (quality.withPar || 0) + (quality.withDistance || 0); };
   const distinct = [];
   (cards || []).forEach(card => {
-    if (!distinct.some(kept => sameCourseCard(kept, card))) distinct.push(card);
+    const index = distinct.findIndex(kept => sameCourseCard(kept, card));
+    if (index < 0) distinct.push(card);
+    else if (fullness(card) > fullness(distinct[index])) distinct[index] = card;
   });
   return distinct;
+}
+
+/* Good enough to stop looking: a distance on (nearly) every hole with a par. A card
+   with pars alone still identifies a course and is kept, but the next page may carry
+   the lengths the geometry resolver needs to number holes - Club Filipino stopped on
+   a par-only nine while All Square had the full eighteen with distances. */
+export function cardHasDistances(card) {
+  const quality = cardQuality(card);
+  return quality.usable && quality.withDistance >= quality.withPar - 1;
 }
 
 export function distinctCardCount(cards) {
@@ -384,8 +413,9 @@ export async function resolveScorecard(course, deps, options) {
     const candidate = candidates[i];
     /* Stop on DISTINCT courses found, not pages read. A site with two courses keeps
        reading - including the sibling links a page hands us - until it has two, and
-       an extra copy of a course already held does not count towards the target. */
-    if (distinctCardCount(parsed) >= want) break;
+       an extra copy of a course already held does not count towards the target.
+       Only cards with distances count - see cardHasDistances. */
+    if (distinctCardCount(parsed.filter(cardHasDistances)) >= want) break;
     const html = await deps.fetchHtml(candidate.url).catch(error => {
       out.attempts.push({ url: candidate.url, ok: false, reason: String(error && error.message || error).slice(0, 200) });
       return null;
@@ -404,7 +434,7 @@ export async function resolveScorecard(course, deps, options) {
     /* Every card the page holds, not one. A club that puts both its courses on one
        page hands over both here, each named by the heading above its own table -
        which is the cheapest possible route to "one card per course". */
-    const pageName = courseNameFromHtml(html, candidate.name || name);
+    const pageName = courseNameFromHtml(html, candidate.name || name, candidate.url);
     const cards = parseScorecardCardsHtml(html, { name: pageName, unit: source.unit });
     const pageConfidence = scoreScorecardPage(html, cards);
     out.attempts.push({

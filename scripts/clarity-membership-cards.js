@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var PIN_SRC = "assets/brand/cg-gps-pin.png?v=clarity-cg-gps-20260601";
+  var PIN_SRC = "assets/brand/cg-gps-pin.png?v=deb3313b";
   var DEFAULTS = {
     free: {
       title: "Free",
