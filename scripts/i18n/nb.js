@@ -64,6 +64,8 @@
     "access.memberLogShots": "Du trenger et Clarity-medlemskap for å registrere hvor slagene dine lander. Avstander er fortsatt gratis.",
     "access.memberKeepScore": "Du trenger et Clarity-medlemskap for å føre score. Avstander er fortsatt gratis.",
     "access.membership": "Medlemskap",
+    "access.freeAccountCourseMaps": "Opprett en gratis konto for å klargjøre flere golfbaner.",
+    "access.mapServerBusy": "Kartserveren er opptatt akkurat nå. Prøv igjen om litt.",
 
     /* Player badge */
     "badge.preview": "PRØVE",
@@ -824,6 +826,7 @@
     "course.noneDownloadedYet": "Ingen baner lastet ned ennå",
     "course.tryAnotherSearch": "Prøv et annet søk.",
     "course.downloadAutomatically": "Baner lastes ned automatisk første gang du spiller dem.",
+    "course.offlineMembership": "Frakoblet nedlasting av golfbaner er inkludert i Clarity-medlemskapet. Du kan fortsatt se baner på nett.",
     "course.publishedMap": "Publisert kart",
     "course.courseMap": "Banekart",
     "course.mapType": "Karttype",
