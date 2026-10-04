@@ -5548,6 +5548,11 @@
      record of it. One record per course: {courseId, courseName, mapType:
      "object"|"published", objectsVersion, mapVersion, pkg, savedAt, bytes}. */
   const DOWNLOADED_COURSE_LIBRARY_KEY='clarity:course-library:v1';
+  function hasOfflineCourseAccess(){
+    try{
+      return !!(window.ClarityPayments&&typeof window.ClarityPayments.hasActiveAccess==='function'&&window.ClarityPayments.hasActiveAccess());
+    }catch(e){return false;}
+  }
   function downloadedCourseEntries(){
     try{
       const raw=JSON.parse(localStorage.getItem(DOWNLOADED_COURSE_LIBRARY_KEY)||'{}');
@@ -5584,6 +5589,8 @@
      course has actually changed under, so the fix has to be reachable from
      where the problem is stated. */
   async function updateDownloadedCourseEntry(entry){
+    if(!entry||!entry.courseId)return {ok:false,reason:'invalid'};
+    if(!hasOfflineCourseAccess())return {ok:false,reason:'access'};
     var client=window.GDCoursePackageClient;
     if(!client||typeof client.fetchPackage!=='function')return {ok:false,reason:'offline'};
     var pkg=await client.fetchPackage({
@@ -5758,7 +5765,7 @@
       .filter(e=>!filter||normalizeCourseName(e.courseName).includes(filter))
       .sort((a,b)=>String(a.courseName).localeCompare(String(b.courseName)));
     if(!entries.length){
-      list.innerHTML=`<div class="gdCourseCard"><strong>${filter?i18nH('course.noMatching'):i18nH('course.noneDownloadedYet')}</strong><span>${filter?i18nH('course.tryAnotherSearch'):i18nH('course.downloadAutomatically')}</span></div>`;
+      list.innerHTML=`<div class="gdCourseCard"><strong>${filter?i18nH('course.noMatching'):i18nH('course.noneDownloadedYet')}</strong><span>${filter?i18nH('course.tryAnotherSearch'):i18nH(hasOfflineCourseAccess()?'course.downloadAutomatically':'course.offlineMembership')}</span></div>`;
       return;
     }
     if(detailKey){
@@ -5803,6 +5810,11 @@
         }
         updateBtn.disabled=false;
         updateBtn.textContent=i18nT('course.updateMap');
+        if(result.reason==='access'){
+          if(window.ClarityPayments&&typeof window.ClarityPayments.requireAccess==='function')window.ClarityPayments.requireAccess('offlineCourse');
+          else toastSafe(i18nT('course.offlineMembership'));
+          return;
+        }
         toastSafe(result.reason==='not-ready'?i18nT('course.noNewerMap')
           :result.reason==='storage'?i18nT('course.notEnoughSpace')
           :i18nT('course.couldNotReachServer'));
