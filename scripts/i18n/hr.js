@@ -64,6 +64,8 @@
     "access.memberLogShots": "Za bilježenje gdje ti završavaju udarci potrebno je Clarity članstvo. Udaljenosti ostaju besplatne.",
     "access.memberKeepScore": "Za vođenje rezultata potrebno je Clarity članstvo. Udaljenosti ostaju besplatne.",
     "access.membership": "Članstvo",
+    "access.freeAccountCourseMaps": "Izradite besplatan račun kako biste pripremili više golf terena.",
+    "access.mapServerBusy": "Poslužitelj karata trenutačno je zauzet. Pokušajte ponovno uskoro.",
 
     /* Player badge */
     "badge.preview": "PREGLED",
@@ -846,6 +848,7 @@
     "course.noneDownloadedYet": "Još nema preuzetih terena",
     "course.tryAnotherSearch": "Pokušaj s drugom pretragom.",
     "course.downloadAutomatically": "Tereni se automatski preuzimaju kad ih prvi put igraš.",
+    "course.offlineMembership": "Preuzimanje golf terena za izvanmrežnu upotrebu uključeno je u članstvo Clarity. Terene i dalje možete pregledavati na mreži.",
     "course.publishedMap": "Objavljena karta",
     "course.courseMap": "Karta terena",
     "course.mapType": "Vrsta karte",
