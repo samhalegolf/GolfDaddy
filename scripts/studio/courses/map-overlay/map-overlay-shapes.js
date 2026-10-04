@@ -3,7 +3,9 @@
  * The overlay is placed by eye, not traced: a person lays a line down the middle of a fairway
  * and gets a fairway-shaped polygon with evenly spaced corners to drag into shape; a pin on a
  * green becomes a green outline (the wand, server-side) or, when the wand has nothing, the
- * round default made here. Bunker outlines that overlap are merged into one. Everything is in
+ * round default made here. Greens and bunkers are kept as smooth curves through a few handles.
+ * Bunker outlines that overlap are merged into one. A water hazard drawn round by hand is
+ * thinned to the corners that matter. Everything is in
  * plain {lat, lng} and flat-earth metres about the shape's own position, which is exact
  * enough at the size of a golf hole.
  *
@@ -27,12 +29,19 @@
      not the marker's. Same size the overlay core gives a tee pin (PIN_RADIUS_M.tee). */
   var TEE_RADIUS_M = 6;
   var GREEN_RADIUS_M = 14;
-  /* A green is edited by a handful of points, not by every corner the wand found: six handles,
-     and the outline a smooth curve through them with six corners between each pair. */
-  var GREEN_HANDLES = 6;
-  var GREEN_STEPS = 6;
+  /* Greens and bunkers are edited by a handful of points, not by every corner the wand found:
+     the outline is a smooth curve through the handles, `steps` corners between each pair. A
+     bunker gets a couple more than a green - they are less round - but nowhere near the wand's
+     raw corners. The counts are fixed per kind so the handles read straight back off a saved
+     outline (ringHandles). */
+  var SMOOTH = { green: { handles: 6, steps: 6 }, bunker: { handles: 8, steps: 4 } };
   /* The round bunker left when the wand cannot find an edge - a typical greenside bunker. */
   var BUNKER_RADIUS_M = 6;
+  /* The round pond left when the wand cannot find an edge. */
+  var WATER_RADIUS_M = 15;
+  /* A water hazard drawn round by hand keeps at most this many corners - enough for a creek's
+     bends, few enough to drag. */
+  var WATER_MAX_POINTS = 32;
   /* Merging bunkers: the two outlines are painted onto a grid of cells this fine (coarser for
      a very large pair, so the grid stays at most MERGE_MAX_CELLS a side), and the merged
      outline is simplified to at most MERGE_MAX_POINTS corners - room left under MAX_POINTS
@@ -147,7 +156,7 @@
   /* A closed smooth outline through `handles`, `steps` corners from each handle to the next,
      starting on the first handle - so handle k is corner k * steps of the result. */
   function smoothRing(handles, steps) {
-    var n = handles.length, per = steps || GREEN_STEPS;
+    var n = handles.length, per = steps || SMOOTH.green.steps;
     if (n < 3) return handles.slice();
     var f = frame(handles[0]);
     var p = handles.map(f.toXY), out = [];
@@ -161,7 +170,7 @@
   /* The handles a ring is edited by: read straight back off a ring smoothRing made, otherwise
      spaced evenly round its edge from its first corner. */
   function ringHandles(ring, count, steps) {
-    var n = count || GREEN_HANDLES, per = steps || GREEN_STEPS;
+    var n = count || SMOOTH.green.handles, per = steps || SMOOTH.green.steps;
     if (!ring || ring.length < 3) return (ring || []).slice();
     if (ring.length === n * per) return ring.filter(function (p, i) { return i % per === 0; });
     var f = frame(ring[0]);
@@ -172,9 +181,35 @@
     return resample(xy, total / n).slice(0, n).map(f.toLL);
   }
 
-  /* A green as it is kept once outlined: the smooth curve through its six handles. */
-  function smoothGreen(ring) {
-    return smoothRing(ringHandles(ring, GREEN_HANDLES, GREEN_STEPS), GREEN_STEPS);
+  /* A green or bunker as it is kept once outlined: the smooth curve through its handles. Any
+     other kind comes back as it is. */
+  function smoothOutline(ring, kind) {
+    var s = SMOOTH[kind];
+    return s ? smoothRing(ringHandles(ring, s.handles, s.steps), s.steps) : ring;
+  }
+
+  /* The same outline grown or shrunk about its middle - "bigger" and "smaller" on a tee or a
+     hand-drawn water hazard. */
+  function scaleAbout(points, factor) {
+    if (!points || !points.length) return [];
+    var f = frame(centroid(points));
+    return points.map(function (p) { return f.toLL(scale(f.toXY(p), factor)); });
+  }
+
+  /* A freehand line drawn round something, as a closed outline with at most maxPoints corners:
+     the wobble of a hand dragging a mouse goes, the shape stays. */
+  function simplifyOutline(points, maxPoints) {
+    var pts = (points || []).filter(Boolean);
+    if (pts.length < 3) return null;
+    var f = frame(pts[0]);
+    var xy = pts.map(f.toXY);
+    var last = xy[xy.length - 1];
+    if (xy.length > 3 && len(sub(last, xy[0])) < 0.05) xy.pop();
+    if (Math.abs(ringArea(xy)) < 1) return null;
+    var cap = maxPoints || WATER_MAX_POINTS;
+    var tol = 0.5, out = simplifyRing(xy, tol);
+    while (out.length > cap) { tol *= 1.5; out = simplifyRing(xy, tol); }
+    return out.length >= 3 ? out.map(f.toLL) : null;
   }
 
   function insideRing(pt, ring) {
@@ -274,10 +309,11 @@
 
   var api = {
     FAIRWAY_WIDTH_M: FAIRWAY_WIDTH_M, TEE_RADIUS_M: TEE_RADIUS_M, GREEN_RADIUS_M: GREEN_RADIUS_M,
-    GREEN_HANDLES: GREEN_HANDLES, GREEN_STEPS: GREEN_STEPS, BUNKER_RADIUS_M: BUNKER_RADIUS_M, MAX_POINTS: MAX_POINTS,
+    SMOOTH: SMOOTH, BUNKER_RADIUS_M: BUNKER_RADIUS_M, WATER_RADIUS_M: WATER_RADIUS_M, WATER_MAX_POINTS: WATER_MAX_POINTS, MAX_POINTS: MAX_POINTS,
     distanceM: distanceM, lineLengthM: lineLengthM, centroid: centroid,
     fairwayFromLine: fairwayFromLine, teeAt: teeAt, circle: circle, mergeOverlapping: mergeOverlapping,
-    smoothRing: smoothRing, ringHandles: ringHandles, smoothGreen: smoothGreen
+    smoothRing: smoothRing, ringHandles: ringHandles, smoothOutline: smoothOutline,
+    scaleAbout: scaleAbout, simplifyOutline: simplifyOutline
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.GDOverlayShapes = api;

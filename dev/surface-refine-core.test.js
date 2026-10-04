@@ -154,7 +154,32 @@ test("a bunker pin finds that bunker's edge on the bunker profile", async () => 
     /* The wand traces an inset of the surface, as it does on a green. */
     assert.ok(out.area > painted * 0.45 && out.area < painted * 1.05, mx + "x" + my + "m: area " + Math.round(out.area) + " vs painted " + Math.round(painted));
   }
-  assert.strictEqual((await core.wandAtPoint({ image: Buffer.alloc(0), playSurface: null, seed: { lat: 1, lng: 1 }, kind: "water" })).reason, "unknown-kind");
+  assert.strictEqual((await core.wandAtPoint({ image: Buffer.alloc(0), playSurface: null, seed: { lat: 1, lng: 1 }, kind: "lava" })).reason, "unknown-kind");
+});
+
+/* The water pin, and what Studio's left/right keys step through: every edge the sweep found,
+   weakest reach first, with the wand's own pick among them. */
+test("a water pin finds the pond's edge, and every sensitivity step comes back to choose from", async () => {
+  const SIZE = 768;
+  /* Zoom 18, ~0.35m/px - near the resolution Studio captures water at (WAND_TARGET_MPP.water). */
+  const frame = syntheticFrame(54.62, -5.85, SIZE);
+  const proj = core.frameProjector(frame);
+  const mpp = 0.001 * 111320 * Math.cos(54.62 * Math.PI / 180) / Math.abs(proj.toPx({ lat: 54.62, lng: -5.849 }).x - proj.toPx({ lat: 54.62, lng: -5.85 }).x);
+  const rx = Math.round(30 / mpp), ry = Math.round(18 / mpp);
+  const image = await sharp({ create: { width: SIZE, height: SIZE, channels: 3, background: { r: 52, g: 98, b: 44 } } })
+    .composite([{ input: Buffer.from(`<svg width="${SIZE}" height="${SIZE}"><ellipse cx="384" cy="380" rx="${rx}" ry="${ry}" fill="#1d3a4a"/></svg>`), top: 0, left: 0 }])
+    .png().toBuffer();
+  const out = await core.wandAtPoint({ image, playSurface: frame, seed: proj.toLatLng({ x: 384, y: 382 }), kind: "water" });
+  const painted = Math.PI * rx * ry * mpp * mpp;
+  assert.strictEqual(out.ok, true, "expected water, got " + out.reason);
+  assert.ok(out.area > painted * 0.45 && out.area < painted * 1.05, "area " + Math.round(out.area) + " vs painted " + Math.round(painted));
+  assert.ok(Array.isArray(out.candidates) && out.candidates.length >= 1, "no candidates");
+  assert.ok(out.pick >= 0 && out.pick < out.candidates.length, "pick must index a candidate");
+  assert.deepStrictEqual(out.candidates[out.pick].shape, out.shape, "the pick is the shape the wand returned");
+  for (let i = 1; i < out.candidates.length; i++) {
+    assert.ok(out.candidates[i].multiplier > out.candidates[i - 1].multiplier, "candidates run weakest reach first");
+    assert.ok(Math.abs(Math.log(out.candidates[i].area / out.candidates[i - 1].area)) >= core.WAND_SAME_EDGE_LOG, "neighbouring candidates are different edges");
+  }
 });
 
 /* The claim the module header makes about itself, asserted so it cannot quietly stop being

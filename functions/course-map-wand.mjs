@@ -1,5 +1,5 @@
-/* Green and bunker wand for the Mapping Overlay: a pin on a green or a bunker in, a first-draft
- * outline out.
+/* Green, bunker and water wand for the Mapping Overlay: a pin on a green, a bunker or a water
+ * hazard in, a first-draft outline out.
  *
  * POST {image:{data, mediaType}, georef:{playSurface}, seed:{lat, lng}, kind?}  (admin)
  *   image  - a small picture of the ground around the pin, base64, captured by Studio from the
@@ -7,9 +7,11 @@
  *   georef - where that picture is: its playSurface (originPx / captureZoom /
  *            outputDimensions), the same shape a published frame carries.
  *   seed   - the pin.
- *   kind   - "green" (the default) or "bunker": which size profile the wand sweeps.
+ *   kind   - "green" (the default), "bunker" or "water": which size profile the wand sweeps.
  *   scale  - optional, 0.5-2 (default 1): Studio's wand size control, scaling that profile.
- * -> 200 {ok:true, shape:[{lat,lng}...], confidence, area, stable} or {ok:false, reason}.
+ * -> 200 {ok:true, shape:[{lat,lng}...], confidence, area, stable, candidates:[{shape, area}...],
+ *    pick} or {ok:false, reason}. candidates are every sensitivity step that found an edge,
+ *    weakest first, and pick is the one the wand chose - Studio steps through them.
  *
  * Writes nothing. Studio adds the shape to the overlay as that kind and autosaves it the same
  * way as anything drawn by hand, so the wand is a drafting aid and the overlay stays the one
@@ -41,7 +43,7 @@ export default async function courseMapWand(req) {
   const seed = payload.seed;
   if (!playSurface || !seed) return json(400, { error: "georef.playSurface and seed required" });
   const kind = payload.kind == null ? "green" : String(payload.kind);
-  if (!Object.prototype.hasOwnProperty.call(WAND_PROFILES, kind)) return json(400, { error: "kind must be green or bunker" });
+  if (!Object.prototype.hasOwnProperty.call(WAND_PROFILES, kind)) return json(400, { error: "kind must be green, bunker or water" });
 
   try {
     const out = await wandAtPoint({ image: Buffer.from(data, "base64"), playSurface, seed, kind, scale: payload.scale });

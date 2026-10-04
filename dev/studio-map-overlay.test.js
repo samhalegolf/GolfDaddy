@@ -113,7 +113,7 @@ test("shapes come from the shared builders: a fairway line, a clicked green thro
   assert.ok(page.includes("shapes.fairwayFromLine(line, session.fairwayWidth)"), "a finished line must become a fairway polygon");
   assert.ok(!page.includes("teeBeyondLine"), "a fairway no longer drops a tee of its own - tees are placed by hand");
   assert.ok(page.includes('var WAND_API = "/api/course-map-wand"'), "a green pin must go through the wand endpoint");
-  assert.ok(page.includes('shapes.circle(point, kind === "bunker" ? shapes.BUNKER_RADIUS_M : shapes.GREEN_RADIUS_M)'), "a pin the wand cannot read still leaves a green to shape");
+  assert.ok(page.includes("shapes.circle(point, defaultRadius(kind))"), "a pin the wand cannot read still leaves a green to shape");
   assert.ok(!page.includes('data-gd-overlay="tool-hole"'), "no hole-line tool at this stage");
 });
 
@@ -284,10 +284,32 @@ test("the shape just placed can be dragged without switching to Move", () => {
   assert.ok(page.includes("lastPlacedId = f.id;"), "placing a shape must make it the draggable one");
 });
 
-test("a green is shaped by six points once the wand has outlined it", () => {
-  assert.ok(page.includes('if (kind === "green") points = shapes.smoothGreen(points);'), "a wand green must be kept as the smooth six-point outline");
-  assert.ok(page.includes("f.points = shapes.smoothRing(handles);"), "dragging a green's point must re-curve the outline through its handles");
-  assert.ok(page.includes("if (f.pin || isSmooth(f)) return out;"), "a green has no add-a-point dots");
+test("greens and bunkers are shaped by a few smooth points once the wand has outlined them", () => {
+  assert.ok(page.includes("return shapes.smoothOutline(ring, kind);"), "a wand shape must be kept as its smooth outline");
+  assert.ok(page.includes("function isSmooth(f) { return !f.pin && !!shapes.SMOOTH[f.kind]; }"), "every smooth kind is edited by its handles");
+  assert.ok(page.includes("f.points = shapes.smoothRing(handles, smooth.steps);"), "dragging a handle must re-curve the outline through its handles");
+  assert.ok(page.includes("if (f.pin || isSmooth(f)) return out;"), "a smooth shape has no add-a-point dots");
+  assert.ok(page.includes('into.points = shapes.smoothOutline(merged, "bunker");'), "a merged bunker is smooth too");
+});
+
+test("the shape just placed stays live: left/right step sensitivity, up/down size, Enter or Space keeps it", () => {
+  assert.ok(page.includes('document.addEventListener("keydown", onAdjustKey, true);') && page.includes('document.removeEventListener("keydown", onAdjustKey, true);'),
+    "the arrow keys must reach the live shape ahead of the map's own panning, and be let go on the way out");
+  assert.ok(/if \(key === "ArrowLeft"\) stepSensitivity\(-1\);\s*else if \(key === "ArrowRight"\) stepSensitivity\(1\);\s*else if \(key === "ArrowUp"\) stepSize\(1\);\s*else if \(key === "ArrowDown"\) stepSize\(-1\);/.test(page), "arrow keys mapping");
+  assert.ok(page.includes('else if (key === "Enter" || key === " " || key === "Spacebar") commitAdjust(false);'), "Enter or Space keeps it");
+  assert.ok(page.includes("shapes.fairwayFromLine(adjust.line, width)"), "up/down on a fairway changes its width");
+  assert.ok(page.includes("wandOutline(mine.seed, kind, size)"), "up/down on a wand shape runs the wand again at the next size");
+  assert.ok(page.includes("f.points = shapes.smoothOutline(adjust.candidates[next], f.kind);"), "left/right step through the edges the wand found");
+  assert.ok(/handleMapClick[\s\S]*?if \(adjust\) commitAdjust\(true\);/.test(page), "placing the next shape keeps the last one");
+  assert.ok(page.includes('var into = f.kind === "bunker" ? mergeBunker(f.points, f.hole, f) : null;'), "a bunker merges only once it is kept");
+});
+
+test("water: a Water tool that draws round the water or uses the wand", () => {
+  assert.ok(page.includes('railButton("tool-water"'), "no Water tool");
+  assert.ok(page.includes('data-gd-overlay="water-draw"') && page.includes('data-gd-overlay="water-wand"'), "no Draw round / Wand switch");
+  assert.ok(page.includes("shapes.simplifyOutline(") && page.includes('addFeature({ kind: "water", points: ring });'), "a drawn line must become a water outline");
+  assert.ok(page.includes('el.map.addEventListener("pointerdown", beginLasso);'), "drawing round starts on a press on the map");
+  assert.ok(page.includes("water: 0.5") && page.includes("water: 12000"), "the wand capture must be sized for water");
 });
 
 test("one screen: tools float over the map, the rest is in the pull-down", () => {
