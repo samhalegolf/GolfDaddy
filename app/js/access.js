@@ -70,18 +70,24 @@
      itself refreshed on native boot. This mirrors ClarityPayments.hasActiveAccess() without
      loading the whole payments/settings UI into the round surface. */
   function offlineDownloads() {
-    try {
-      var accounts = JSON.parse(localStorage.getItem("gd_accounts_v1") || "null") || {};
-      var rows = Array.isArray(accounts.accounts) ? accounts.accounts : [];
-      var active = rows.find(function (row) { return row && row.accountId === accounts.activeId; }) || null;
-      var role = String(active && active.role || "").trim().toLowerCase();
-      if (role === "admin" || role === "coach") return true;
-    } catch (e) {}
+    var accountSignedIn = signedIn();
+    if (accountSignedIn) {
+      try {
+        var accounts = JSON.parse(localStorage.getItem("gd_accounts_v1") || "null") || {};
+        var rows = Array.isArray(accounts.accounts) ? accounts.accounts : [];
+        var active = rows.find(function (row) { return row && row.accountId === accounts.activeId; }) || null;
+        var role = String(active && active.role || "").trim().toLowerCase();
+        if (role === "admin" || role === "coach") return true;
+      } catch (e) {}
 
-    try {
-      var payment = JSON.parse(localStorage.getItem("clarity:payments:status:v1") || "null");
-      if (payment && payment.active) return true;
-    } catch (e) {}
+      /* The backend payment cache belongs to the signed-in account. Do not trust a stale
+         active:true after sign-out; a native store entitlement below is the one paid state
+         deliberately allowed to survive without an account. */
+      try {
+        var payment = JSON.parse(localStorage.getItem("clarity:payments:status:v1") || "null");
+        if (payment && payment.active) return true;
+      } catch (e) {}
+    }
 
     try {
       var store = JSON.parse(localStorage.getItem("clarity:store-entitlement:v1") || "null");
