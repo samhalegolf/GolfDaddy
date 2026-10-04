@@ -210,7 +210,7 @@
     var sourceTest = null;
 
     containerEl.innerHTML =
-      '<div class="gdStudioLede" style="margin-bottom:12px">' +
+      '<details class="gdStudioLede gdStudioOverlayHelp" data-gd-overlay="help" open><summary>How it works</summary>' +
       "<p>Place what OSM is missing, by eye. Pick a course, then a mode. <strong>Shapes</strong>: <strong>Fairway</strong> - click along the middle of the fairway " +
       "and press Enter to finish; you get a fairway with corners to drag into shape. " +
       "<strong>Green</strong> / <strong>Bunker</strong> - click the middle of one and the wand draws its outline; <strong>Bunker wand</strong> −/+ makes it reach smaller or bigger, " +
@@ -220,7 +220,7 @@
       "In <strong>Move</strong>, drag any shape to move it, drag its corners to reshape it (the faint dots between corners add a new one), and drop a shape " +
       "or a corner on the <strong>bin</strong> to delete it. <strong>Hole</strong> is optional: set it and new shapes carry that number; select a shape to change its number. " +
       "Scroll to zoom, drag or use the arrow keys to pan, <strong>Full screen</strong> for room. Everything saves as you go, as a <strong>draft</strong> the mapper ignores - press <strong>Mark ready</strong> when the course looks right, then run the mapper. " +
-      "The bright outlines are what OSM already has and the dashed amber ones are the course's saved objects - there is no need to place those again.</p></div>" +
+      "The bright outlines are what OSM already has and the dashed amber ones are the course's saved objects - there is no need to place those again.</p></details>" +
       '<div class="gdStudioOverlayRun" data-gd-overlay="last-run"></div>' +
       '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="pick">Pick course</button>' +
@@ -235,7 +235,7 @@
       "</div>" +
       '<div class="gdStudioSourceTest" data-gd-overlay="source-panel" hidden></div>' +
       '<div class="gdStudioOverlayWorkspace" data-gd-overlay="workspace">' +
-      '<div class="gdStudioViewportBar">' +
+      '<div class="gdStudioViewportBar gdStudioOverlayTools">' +
       '<span class="gdStudioOverlayModes">' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="mode-shapes" title="Place outlines - fairway lines and the wand (S)">Shapes</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="mode-pins" title="Place pins only - centres, and a fairway\'s start and end (P)">Pins</button>' +
@@ -257,6 +257,11 @@
       '<div class="gdStudioOverlayStage isTool-move" data-gd-overlay="stage">' +
       '<div class="gdStudioViewportMap gdStudioOverlayMap" data-gd-overlay="map"></div>' +
       '<div class="gdStudioOverlayHint" data-gd-overlay="hint"></div>' +
+      '<div class="gdStudioOverlayDraftBar" data-gd-overlay="draft-bar" hidden>' +
+      '<button type="button" data-gd-overlay="draft-finish" title="Finish the fairway (Enter, or double-click)">Finish</button>' +
+      '<button type="button" data-gd-overlay="draft-undo" title="Take back the last point (Backspace)">Undo point</button>' +
+      '<button type="button" data-gd-overlay="draft-cancel" title="Drop this fairway (Esc)">Cancel</button>' +
+      "</div>" +
       '<div class="gdStudioOverlayNav">' +
       '<button type="button" data-gd-overlay="fit" title="Fit the whole course (H)">Course</button>' +
       '<button type="button" data-gd-overlay="zoom-shape" title="Zoom to the selected shape (Z)">Shape</button>' +
@@ -278,7 +283,7 @@
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "mode-shapes", "mode-pins", "tool-move", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "width", "width-label", "wand-size-label", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "hole", "hole-label", "shape-pins", "workspace", "fit", "zoom-shape", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "saved", "ready", "clear", "run", "status"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "mode-shapes", "mode-pins", "tool-move", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "width", "width-label", "wand-size-label", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "hole", "hole-label", "shape-pins", "workspace", "help", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "fit", "zoom-shape", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "saved", "ready", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -541,7 +546,12 @@
       updateDraftUi();
     }
 
+    /* Finish, Undo point and Cancel on the map as well as on Enter, Backspace and Esc: a phone
+       has no keyboard, and a double-tap to finish also lands a stray point. */
     function updateDraftUi() {
+      el["draft-bar"].hidden = !draft.length;
+      el["draft-finish"].hidden = session.mode === "pins";
+      el["draft-finish"].disabled = draft.length < 2;
       updateActions();
       updateHint();
     }
@@ -775,7 +785,7 @@
           if (Date.now() - dragEndedAt < 300) return;
           select(f.id);
         });
-        shape.on("mousedown", function (e) {
+        onPress(shape, function (e) {
           if (tool !== "move" || !canEdit()) return;
           if (selectedId !== f.id) select(f.id);
           beginDrag(f.id, "body", -1, e);
@@ -789,7 +799,7 @@
         if (selected && canEdit() && f.points.length > 1 && bigEnoughForHandles(f)) {
           f.points.forEach(function (p, i) {
             var v = L.circleMarker([p.lat, p.lng], STYLE.vertex).addTo(mapObj);
-            v.on("mousedown", function (e) { beginDrag(f.id, "vertex", i, e); });
+            onPress(v, function (e) { beginDrag(f.id, "vertex", i, e); });
             v.on("click", function (e) { if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent); });
             v.on("contextmenu", function (e) {
               if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
@@ -800,7 +810,7 @@
           if (f.points.length < MAX_POINTS) {
             midpoints(f).forEach(function (m) {
               var h = L.circleMarker([m.lat, m.lng], STYLE.midpoint).addTo(mapObj);
-              h.on("mousedown", function (e) {
+              onPress(h, function (e) {
                 if (tool !== "move" || !canEdit()) return;
                 f.points.splice(m.after + 1, 0, { lat: m.lat, lng: m.lng });
                 drawFeatures();
@@ -896,6 +906,17 @@
       return event.clientX >= r.left - pad && event.clientX <= r.right + pad && event.clientY >= r.top - pad && event.clientY <= r.bottom + pad;
     }
 
+    /* A press that can start a drag is a pointer press, so a finger drags a shape or a corner
+       the way a mouse does - a touch sends no mousedown until it lifts. Primary button only. */
+    function onPress(layer, fn) {
+      var node = layer.getElement && layer.getElement();
+      if (!node) return;
+      node.addEventListener("pointerdown", function (event) {
+        if (event.button || !mapObj) return;
+        fn({ originalEvent: event, latlng: mapObj.mouseEventToLatLng(event) });
+      });
+    }
+
     function beginDrag(id, mode, index, e, inserted) {
       var f = findFeature(id);
       if (!f || tool !== "move" || !canEdit() || !e || !e.originalEvent) return;
@@ -906,8 +927,9 @@
         start: e.latlng, x: e.originalEvent.clientX, y: e.originalEvent.clientY,
         orig: f.points.map(function (p) { return { lat: p.lat, lng: p.lng }; })
       };
-      document.addEventListener("mousemove", onDragMove);
-      document.addEventListener("mouseup", onDragEnd);
+      document.addEventListener("pointermove", onDragMove);
+      document.addEventListener("pointerup", onDragEnd);
+      document.addEventListener("pointercancel", onDragEnd);
     }
 
     function onDragMove(event) {
@@ -931,8 +953,9 @@
     }
 
     function onDragEnd(event) {
-      document.removeEventListener("mousemove", onDragMove);
-      document.removeEventListener("mouseup", onDragEnd);
+      document.removeEventListener("pointermove", onDragMove);
+      document.removeEventListener("pointerup", onDragEnd);
+      document.removeEventListener("pointercancel", onDragEnd);
       var d = drag;
       drag = null;
       if (destroyed) return;
@@ -948,7 +971,7 @@
         return;
       }
       if (!f) return;
-      if (overBin(event)) {
+      if (event.type !== "pointercancel" && overBin(event)) {
         if (d.mode === "body") { removeFeature(f.id); setStatus(kindLabel(f.kind) + " deleted."); return; }
         f.points = d.orig;
         if (d.inserted) { f.points.splice(d.index, 1); drawFeatures(); return; }
@@ -1215,14 +1238,14 @@
       if (!session.course) text = "Pick a course to start";
       else if (scanning) text = "AI scan running - shapes are locked until it finishes";
       else if (tool === "fairway" && session.mode === "pins") text = draft.length ? "Click where the fairway ends · Esc cancels" : "Click where the fairway starts";
-      else if (tool === "fairway") text = draft.length ? (draft.length >= 2 ? "Keep clicking along the fairway · double-click or Enter to finish · Backspace undoes · Esc cancels" : "Click the next point along the fairway") : "Click at the tee end of the fairway, then along its middle";
+      else if (tool === "fairway") text = draft.length ? (draft.length >= 2 ? "Keep clicking along the fairway · Finish (or Enter / double-click) when done" : "Click the next point along the fairway") : "Click at the tee end of the fairway, then along its middle";
       else if (tool !== "move" && session.mode === "pins") text = "Click the middle of each " + kindLabel(tool).toLowerCase() + " to pin it";
       else if (tool === "green") text = "Click the middle of a green";
       else if (tool === "bunker") text = "Click the middle of a bunker · [ and ] make the wand reach smaller or bigger";
       else if (tool === "tee") text = "Click where the tee is";
       else if (selectedId && (findFeature(selectedId) || {}).pin) text = "Drag to move · Shape this pin turns it into an outline · Delete or the bin removes it";
       else if (selectedId && !bigEnoughForHandles(findFeature(selectedId) || { points: [] })) text = "Drag to move · zoom in to reshape its corners · Delete or the bin removes it";
-      else if (selectedId) text = "Drag to move · drag corners to reshape · faint dots add a corner · right-click a corner to remove it · Delete or the bin removes the shape";
+      else if (selectedId) text = "Drag to move · drag corners to reshape · faint dots add a corner · right-click a corner or drag it to the bin to remove it · Delete or the bin removes the shape";
       else text = "Choose Fairway, Green, Tee or Bunker to place · click a shape in Move to adjust it";
       if (wandsRunning) text = "Finding the edge… · " + text;
       el.hint.textContent = text;
@@ -1973,6 +1996,11 @@
     el.merge.checked = session.mergeBunkers;
     el.merge.addEventListener("change", function () { session.mergeBunkers = el.merge.checked; });
     el["shape-pins"].addEventListener("click", shapePins);
+    el["draft-finish"].addEventListener("click", finishFairway);
+    el["draft-undo"].addEventListener("click", undoDraftPoint);
+    el["draft-cancel"].addEventListener("click", cancelDraft);
+    /* The instructions start folded on a narrow screen, where they would push the map out of view. */
+    if (window.matchMedia && window.matchMedia("(max-width: 860px)").matches) el.help.open = false;
     el.fit.addEventListener("click", fitCourse);
     el["zoom-shape"].addEventListener("click", zoomToSelected);
     el.fullscreen.addEventListener("click", function () { setFullscreen(!fullscreen); });
@@ -2015,8 +2043,9 @@
       if (saveTimer) clearTimeout(saveTimer);
       document.removeEventListener("keydown", onKey);
       document.documentElement.classList.remove("gdStudioOverlayNoScroll");
-      document.removeEventListener("mousemove", onDragMove);
-      document.removeEventListener("mouseup", onDragEnd);
+      document.removeEventListener("pointermove", onDragMove);
+      document.removeEventListener("pointerup", onDragEnd);
+      document.removeEventListener("pointercancel", onDragEnd);
       if (window.GDStudioCoursePick) window.GDStudioCoursePick.cancel();
       if (window.GDStudioShell) window.GDStudioShell.show();
       if (mapObj) { try { mapObj.remove(); } catch (e) {} }
