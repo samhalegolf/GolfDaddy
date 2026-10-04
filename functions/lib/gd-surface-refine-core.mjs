@@ -215,13 +215,25 @@ export async function refineSurfaceShape({ image, playSurface, guideShape, mode 
    Uncalibrated on real imagery like the rest of the wand: a first draft of the outline for a
    person to drag into shape, never a finished surface.
 
+   The water profile is the green one at pond size: a typical pond or lake edge is ~20m across
+   its radius, and open water reads as one flat dark tone, so the green's sweep carries over.
+   Studio captures it coarser (WAND_TARGET_MPP.water) because the surface is bigger. Its area
+   bounds stop short of a whole lake - a big water body is drawn round by hand in Studio.
+
+   Every sweep step that found a believable ring comes back as a candidate, weakest reach
+   first, so Studio can step the sensitivity up and down without asking again; `pick` is the
+   one the wand chose. Neighbouring steps that found the same edge are one candidate.
+
    image: a picture sharp reads; playSurface: where it is (originPx / captureZoom /
-   outputDimensions); seed: the pin, {lat, lng}; kind: "green" | "bunker". Returns
-   {ok, shape, confidence, area, params} or {ok:false, reason}. */
+   outputDimensions); seed: the pin, {lat, lng}; kind: "green" | "bunker" | "water". Returns
+   {ok, shape, confidence, area, stable, candidates, pick, params} or {ok:false, reason}. */
 export const WAND_PROFILES = {
   green: { radiusM: 14, sweep: [0.2, 0.3, 0.4, 0.55, 0.7, 0.85, 1, 1.2], areaM2: { min: 100, max: 2500 } },
-  bunker: { radiusM: 6, sweep: [0.7, 0.9, 1.15, 1.5, 2, 2.5, 3.2], areaM2: { min: 8, max: 1200 } }
+  bunker: { radiusM: 6, sweep: [0.7, 0.9, 1.15, 1.5, 2, 2.5, 3.2], areaM2: { min: 8, max: 1200 } },
+  water: { radiusM: 20, sweep: [0.2, 0.3, 0.4, 0.55, 0.7, 0.85, 1, 1.2], areaM2: { min: 60, max: 12000 } }
 };
+/* Two candidates whose areas differ by less than ~6% are the same edge to the eye. */
+export const WAND_SAME_EDGE_LOG = 0.06;
 /* Neighbouring rings whose areas differ by less than ~28% count as the same edge. */
 export const WAND_STABLE_LOG = 0.25;
 /* How far Studio's wand size control can push a profile: the radius the sweep starts from and
@@ -288,8 +300,20 @@ export async function wandAtPoint({ image, playSurface, seed, kind = "green", sc
     });
   }
   if (!best) return { ok: false, reason: "no-" + kind + "-sized-edge" };
+  const candidates = [];
+  rings.forEach(r => {
+    if (!r) return;
+    const last = candidates[candidates.length - 1];
+    if (last && Math.abs(Math.log(r.area / last.area)) < WAND_SAME_EDGE_LOG) {
+      if (r === best) candidates[candidates.length - 1] = r;
+      return;
+    }
+    candidates.push(r);
+  });
   return {
     ok: true, shape: best.shape, confidence: best.confidence, area: best.area, stable,
+    candidates: candidates.map(r => ({ shape: r.shape, area: r.area, multiplier: r.multiplier })),
+    pick: candidates.indexOf(best),
     params: { kind, scale: size, baseBubbleSize: best.baseBubbleSize, multiplier: best.multiplier, mode, cropSpanPx: span, metresPerPx, spread: Number.isFinite(bestSpread) ? bestSpread : null }
   };
 }

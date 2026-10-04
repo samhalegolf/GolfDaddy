@@ -48,13 +48,15 @@ function publicAiScan(aiScan) {
 }
 
 /* OSM's golf features near the course, as display rings. Greens are what a fairway gets linked
-   to; existing fairways/holes/tees/bunkers show what does NOT need drawing. Water is left out -
-   it is noise at drawing zoom and there is no tool to place it. */
-const OSM_DISPLAY_KINDS = { green: "greens", fairway: "fairways", tee: "tees", hole: "holes", bunker: "bunkers" };
+   to; existing fairways/holes/tees/bunkers/water hazards show what does NOT need drawing. */
+const OSM_DISPLAY_KINDS = {
+  green: "greens", fairway: "fairways", tee: "tees", hole: "holes", bunker: "bunkers",
+  water_hazard: "water", lateral_water_hazard: "water"
+};
 async function loadOsmContext(course) {
   const scope = osmQueryScope({}, { lat: course.lat, lng: course.lng });
   const payload = await fetchOverpass(osmGuideQuery(scope));
-  const out = { greens: [], fairways: [], tees: [], holes: [], bunkers: [], elements: 0 };
+  const out = { greens: [], fairways: [], tees: [], holes: [], bunkers: [], water: [], elements: 0 };
   ((payload && payload.elements) || []).forEach(element => {
     out.elements += 1;
     const golf = String((element && element.tags && element.tags.golf) || "").toLowerCase();

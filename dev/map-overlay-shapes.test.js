@@ -51,15 +51,59 @@ test("a tee is a round marker that faces nowhere", () => {
 
 test("a green is kept as a smooth curve through six handles, and reads them back exactly", () => {
   const wand = shapes.circle(at(0, 0), 14, 40);
-  const green = shapes.smoothGreen(wand);
-  assert.strictEqual(green.length, shapes.GREEN_HANDLES * shapes.GREEN_STEPS);
-  const handles = shapes.ringHandles(green);
-  assert.strictEqual(handles.length, shapes.GREEN_HANDLES);
-  handles.forEach((h, i) => assert.deepStrictEqual(h, green[i * shapes.GREEN_STEPS]));
-  assert.deepStrictEqual(shapes.smoothRing(handles), green, "re-curving through the same handles changes nothing");
+  const { handles: n, steps } = shapes.SMOOTH.green;
+  assert.strictEqual(n, 6);
+  const green = shapes.smoothOutline(wand, "green");
+  assert.strictEqual(green.length, n * steps);
+  const handles = shapes.ringHandles(green, n, steps);
+  assert.strictEqual(handles.length, n);
+  handles.forEach((h, i) => assert.deepStrictEqual(h, green[i * steps]));
+  assert.deepStrictEqual(shapes.smoothRing(handles, steps), green, "re-curving through the same handles changes nothing");
   const moved = handles.slice(); moved[0] = at(25, 0);
-  const pulled = shapes.smoothRing(moved);
+  const pulled = shapes.smoothRing(moved, steps);
   assert.ok(Math.abs((pulled[0].lng - LNG) / mLng - 25) < 1e-6, "the outline passes through a dragged handle");
+});
+
+test("a bunker is kept as a smooth curve through a few handles too, far fewer than the wand's corners", () => {
+  const { handles: n, steps } = shapes.SMOOTH.bunker;
+  assert.ok(n <= 8, "a bunker should be moved by a handful of points, got " + n);
+  const wand = shapes.circle(at(0, 0), 6, 16);
+  const bunker = shapes.smoothOutline(wand, "bunker");
+  assert.strictEqual(bunker.length, n * steps);
+  assert.ok(bunker.length <= shapes.MAX_POINTS);
+  const handles = shapes.ringHandles(bunker, n, steps);
+  handles.forEach((h, i) => assert.deepStrictEqual(h, bunker[i * steps]));
+  assert.ok(Math.abs(area(bunker) - area(wand)) / area(wand) < 0.06, "smoothing keeps the bunker's size");
+});
+
+test("kinds that are not smooth come back untouched", () => {
+  const ring = shapes.circle(at(0, 0), 15, 10);
+  assert.strictEqual(shapes.smoothOutline(ring, "water"), ring);
+  assert.strictEqual(shapes.smoothOutline(ring, "tee"), ring);
+});
+
+test("a water hazard drawn round by hand keeps its shape in a few corners", () => {
+  /* A wobbly hand-drawn loop round a 40x20m pond: 400 points, each a little off the ellipse. */
+  const drawn = [];
+  for (let i = 0; i < 400; i++) {
+    const a = (i / 400) * Math.PI * 2, wobble = 1 + 0.01 * Math.sin(i * 7);
+    drawn.push(at(Math.cos(a) * 20 * wobble, Math.sin(a) * 10 * wobble));
+  }
+  drawn.push(drawn[0]);
+  const ring = shapes.simplifyOutline(drawn, shapes.WATER_MAX_POINTS);
+  assert.ok(ring && ring.length >= 8 && ring.length <= shapes.WATER_MAX_POINTS, "got " + (ring && ring.length));
+  const painted = Math.PI * 20 * 10;
+  assert.ok(Math.abs(area(ring) - painted) / painted < 0.06, "area " + area(ring).toFixed(1) + " vs " + painted.toFixed(1));
+  assert.strictEqual(shapes.simplifyOutline([at(0, 0), at(5, 0)]), null, "two points outline nothing");
+  assert.strictEqual(shapes.simplifyOutline([at(0, 0), at(5, 0), at(10, 0)]), null, "a straight scribble outlines nothing");
+});
+
+test("smaller and bigger scale a shape about its middle", () => {
+  const tee = shapes.teeAt(at(10, 10));
+  const bigger = shapes.scaleAbout(tee, 1.5);
+  assert.ok(Math.abs(area(bigger) / area(tee) - 2.25) < 0.01, "1.5x across is 2.25x the area");
+  const a = shapes.centroid(tee), b = shapes.centroid(bigger);
+  assert.ok(shapes.distanceM(a, b) < 0.01, "it stays where it was");
 });
 
 test("two overlapping bunkers merge into one outline covering both", () => {
