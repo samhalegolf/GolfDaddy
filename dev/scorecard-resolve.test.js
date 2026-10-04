@@ -62,7 +62,10 @@ function scorecardHtml(rows) {
   }, { want: 2 });
   assert.strictEqual(order[0], "club-site",
     "an exact official-domain identity is inspected before a matching listing");
-  assert.strictEqual(result.cards.length, 2, "both readable pages kept when two courses are wanted");
+  /* At least: the official-path guesses (tearai.com/scorecard and the like) are read too
+     while a second distinct course is still wanted, and this fixture serves the same
+     card at every URL. */
+  assert(result.cards.length >= 2, "both readable pages kept when two courses are wanted");
   assert.strictEqual(result.cards[0].holes.length, 18);
   assert.strictEqual(result.cards[0].par, 72);
 
@@ -110,6 +113,45 @@ function scorecardHtml(rows) {
   assert.strictEqual(
     r.courseNameFromHtml("<h1>Te Arai Links Golf Club - South Course in Tomarata, Auckland | GolfPass</h1>"),
     "Te Arai Links Golf Club - South Course", "the location and site suffix are trimmed");
+
+  assert.strictEqual(
+    r.courseNameFromHtml("<h1>Club Filipino Inc de Cebu, Danao | Golf4Holland</h1>", "", "https://golf4holland.nl/en/golf-locations/x.html"),
+    "Club Filipino Inc de Cebu, Danao", "a trailing segment that is the page's own site name comes off");
+  assert.strictEqual(
+    r.courseNameFromHtml('<meta property="og:title" content="Club Filipino De Cebu | All Square Golf">', "", "https://www.allsquaregolf.com/golf-courses/x"),
+    "Club Filipino De Cebu", "multi-word site names too");
+  assert.strictEqual(
+    r.courseNameFromHtml('<meta property="og:title" content="Te Arai Links Golf Club - North Course">', "", "https://tearai.com/golf/north/"),
+    "Te Arai Links Golf Club - North Course", "a course half that is not the site name stays");
+
+  /* ---------- a par-only card does not stop the search ----------------- */
+  /* Club Filipino, 2026-10-04: Golf4Holland's page parsed to the front nine with pars and
+     no distances. The resolver stopped there, so the geometry resolver had no lengths to
+     number 18 drawn greens with - while All Square, the next result, had the full card. */
+  const FRONT_PARS = [["Par", 4, 4, 4, 3, 4, 5, 4, 3, 4]];
+  const nineHeader = ["Hole", 1, 2, 3, 4, 5, 6, 7, 8, 9];
+  const trOf = cells => "<tr>" + cells.map(c => "<td>" + c + "</td>").join("") + "</tr>";
+  const FILIPINO_ROWS = [
+    ["Par", 4, 4, 4, 3, 4, 5, 4, 3, 4, 35, 4, 5, 3, 4, 4, 5, 4, 3, 4],
+    ["White", 280, 321, 280, 122, 299, 399, 326, 159, 339, 2525, 323, 408, 146, 269, 300, 443, 283, 160, 365]
+  ];
+  const filipinoReads = [];
+  const filipino = await r.resolveScorecard({ courseName: "Club Filipino Golf Course" }, {
+    search: async () => [
+      { url: "https://golf4holland.nl/en/golf-locations/club-filipino-inc-de-cebu-abb952f4.html" },
+      { url: "https://www.allsquaregolf.com/golf-courses/philippines/club-filipino-de-cebu" }
+    ],
+    fetchHtml: async url => {
+      filipinoReads.push(url);
+      if (/golf4holland\.nl\/en/.test(url)) return "<html><body><h1>Club Filipino Inc de Cebu, Danao | Golf4Holland</h1><table>" + trOf(nineHeader) + FRONT_PARS.map(trOf).join("") + "</table></body></html>";
+      if (/allsquaregolf\.com\/golf-courses/.test(url)) return scorecardHtml(FILIPINO_ROWS).replace("Te Arai Links Golf Club - South Course Scorecard", "Club Filipino De Cebu | All Square Golf");
+      return "";
+    }
+  });
+  assert(filipinoReads.some(url => /allsquaregolf\.com\/golf-courses/.test(url)), "kept reading past the par-only nine");
+  assert.strictEqual(filipino.cards[0].holes.length, 18, "the full card with distances is the best card");
+  assert.strictEqual(r.distinctCards(filipino.cards)[0].holes.length, 18, "and the copy that stands for the course");
+  assert.strictEqual(r.cardHasDistances({ holes: FRONT_PARS[0].slice(1).map((par, i) => ({ hole: i + 1, par })) }), false);
 
   /* ---------- a card for a DIFFERENT club is rejected ----------------- */
   assert.strictEqual(r.cardNameMatchesCourse("Te Arai Links Golf Club - North Course", "Te Ārai Links"), true,
