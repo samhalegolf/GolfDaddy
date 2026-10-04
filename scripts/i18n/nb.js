@@ -675,6 +675,17 @@
     "picker.alsoNear": "Også i nærheten av {place}",
     "picker.alsoNearby": "Også i nærheten",
     "picker.thisArea": "Dette området",
+    "picker.advanced": "Avansert søk",
+    "picker.country": "Land",
+    "picker.region": "Region",
+    "picker.anyCountry": "Alle land",
+    "picker.optional": "Valgfritt",
+    "picker.whichCountry": "Hvilket land?",
+    "picker.whichRegion": "Hvilken region?",
+    "picker.allCountries": "Alle land",
+    "picker.allRegions": "Alle regioner",
+    "picker.otherCountries": "Andre land",
+    "picker.otherRegions": "Andre regioner",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Hjem",

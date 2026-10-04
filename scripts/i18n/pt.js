@@ -675,6 +675,17 @@
     "picker.alsoNear": "Também perto de {place}",
     "picker.alsoNearby": "Também perto",
     "picker.thisArea": "Esta zona",
+    "picker.advanced": "Pesquisa avançada",
+    "picker.country": "País",
+    "picker.region": "Região",
+    "picker.anyCountry": "Qualquer país",
+    "picker.optional": "Opcional",
+    "picker.whichCountry": "Qual país?",
+    "picker.whichRegion": "Qual região?",
+    "picker.allCountries": "Todos os países",
+    "picker.allRegions": "Todas as regiões",
+    "picker.otherCountries": "Outros países",
+    "picker.otherRegions": "Outras regiões",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Início",

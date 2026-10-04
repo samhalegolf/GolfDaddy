@@ -675,6 +675,17 @@
     "picker.alsoNear": "Ka lähedal: {place}",
     "picker.alsoNearby": "Ka lähedal",
     "picker.thisArea": "See piirkond",
+    "picker.advanced": "Täpsem otsing",
+    "picker.country": "Riik",
+    "picker.region": "Piirkond",
+    "picker.anyCountry": "Kõik riigid",
+    "picker.optional": "Valikuline",
+    "picker.whichCountry": "Milline riik?",
+    "picker.whichRegion": "Milline piirkond?",
+    "picker.allCountries": "Kõik riigid",
+    "picker.allRegions": "Kõik piirkonnad",
+    "picker.otherCountries": "Muud riigid",
+    "picker.otherRegions": "Muud piirkonnad",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Avaleht",

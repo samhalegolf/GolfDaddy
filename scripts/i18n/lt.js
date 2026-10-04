@@ -690,6 +690,17 @@
     "picker.alsoNear": "Taip pat netoli: {place}",
     "picker.alsoNearby": "Taip pat netoliese",
     "picker.thisArea": "Ši vietovė",
+    "picker.advanced": "Išplėstinė paieška",
+    "picker.country": "Šalis",
+    "picker.region": "Regionas",
+    "picker.anyCountry": "Bet kuri šalis",
+    "picker.optional": "Neprivaloma",
+    "picker.whichCountry": "Kuri šalis?",
+    "picker.whichRegion": "Kuris regionas?",
+    "picker.allCountries": "Visos šalys",
+    "picker.allRegions": "Visi regionai",
+    "picker.otherCountries": "Kitos šalys",
+    "picker.otherRegions": "Kiti regionai",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Pradžia",

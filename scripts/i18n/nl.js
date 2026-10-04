@@ -675,6 +675,17 @@
     "picker.alsoNear": "Ook in de buurt van {place}",
     "picker.alsoNearby": "Ook in de buurt",
     "picker.thisArea": "Dit gebied",
+    "picker.advanced": "Geavanceerd zoeken",
+    "picker.country": "Land",
+    "picker.region": "Regio",
+    "picker.anyCountry": "Elk land",
+    "picker.optional": "Optioneel",
+    "picker.whichCountry": "Welk land?",
+    "picker.whichRegion": "Welke regio?",
+    "picker.allCountries": "Alle landen",
+    "picker.allRegions": "Alle regio's",
+    "picker.otherCountries": "Andere landen",
+    "picker.otherRegions": "Andere regio's",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Start",

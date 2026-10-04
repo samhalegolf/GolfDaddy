@@ -72,6 +72,7 @@
     "test:green-contours": "node dev/green-contours-wiring.test.js",
     "test:shadow-lift": "node dev/shadow-lift.test.js",
     "test:courses-near": "node dev/courses-near.test.js",
+    "test:course-search": "node dev/course-search.test.js && node dev/course-search-owner.test.js",
     "test:course-pin-trust": "node dev/course-pin-trust.test.js",
     "test:guest-identity": "node dev/course-guest-identity.test.js",
     "test:guest-practice": "node dev/guest-access.test.js && node dev/guest-practice-preview.test.js",

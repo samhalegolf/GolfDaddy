@@ -675,6 +675,17 @@
     "picker.alsoNear": "Myös lähellä: {place}",
     "picker.alsoNearby": "Myös lähellä",
     "picker.thisArea": "Tämä alue",
+    "picker.advanced": "Tarkennettu haku",
+    "picker.country": "Maa",
+    "picker.region": "Alue",
+    "picker.anyCountry": "Mikä tahansa maa",
+    "picker.optional": "Valinnainen",
+    "picker.whichCountry": "Mikä maa?",
+    "picker.whichRegion": "Mikä alue?",
+    "picker.allCountries": "Kaikki maat",
+    "picker.allRegions": "Kaikki alueet",
+    "picker.otherCountries": "Muut maat",
+    "picker.otherRegions": "Muut alueet",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Koti",

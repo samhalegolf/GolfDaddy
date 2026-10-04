@@ -675,6 +675,17 @@
     "picker.alsoNear": "Också nära {place}",
     "picker.alsoNearby": "Också i närheten",
     "picker.thisArea": "Det här området",
+    "picker.advanced": "Avancerad sökning",
+    "picker.country": "Land",
+    "picker.region": "Region",
+    "picker.anyCountry": "Alla länder",
+    "picker.optional": "Valfritt",
+    "picker.whichCountry": "Vilket land?",
+    "picker.whichRegion": "Vilken region?",
+    "picker.allCountries": "Alla länder",
+    "picker.allRegions": "Alla regioner",
+    "picker.otherCountries": "Andra länder",
+    "picker.otherRegions": "Andra regioner",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Hem",

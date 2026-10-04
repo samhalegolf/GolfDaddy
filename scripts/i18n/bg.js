@@ -675,6 +675,17 @@
     "picker.alsoNear": "Също близо до {place}",
     "picker.alsoNearby": "Също наблизо",
     "picker.thisArea": "Този район",
+    "picker.advanced": "Разширено търсене",
+    "picker.country": "Държава",
+    "picker.region": "Регион",
+    "picker.anyCountry": "Всяка държава",
+    "picker.optional": "По избор",
+    "picker.whichCountry": "Коя държава?",
+    "picker.whichRegion": "Кой регион?",
+    "picker.allCountries": "Всички държави",
+    "picker.allRegions": "Всички региони",
+    "picker.otherCountries": "Други държави",
+    "picker.otherRegions": "Други региони",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Начало",

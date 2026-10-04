@@ -681,6 +681,17 @@
     "picker.alsoNear": "Also near {place}",
     "picker.alsoNearby": "Also nearby",
     "picker.thisArea": "This area",
+    "picker.advanced": "Advanced search",
+    "picker.country": "Country",
+    "picker.region": "Region",
+    "picker.anyCountry": "Any country",
+    "picker.optional": "Optional",
+    "picker.whichCountry": "Which country?",
+    "picker.whichRegion": "Which region?",
+    "picker.allCountries": "All countries",
+    "picker.allRegions": "All regions",
+    "picker.otherCountries": "Other countries",
+    "picker.otherRegions": "Other regions",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Home",

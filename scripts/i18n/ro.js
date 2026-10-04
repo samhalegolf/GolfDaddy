@@ -690,6 +690,17 @@
     "picker.alsoNear": "Tot în apropiere: {place}",
     "picker.alsoNearby": "Tot în apropiere",
     "picker.thisArea": "Zona aceasta",
+    "picker.advanced": "Căutare avansată",
+    "picker.country": "Țară",
+    "picker.region": "Regiune",
+    "picker.anyCountry": "Orice țară",
+    "picker.optional": "Opțional",
+    "picker.whichCountry": "Ce țară?",
+    "picker.whichRegion": "Ce regiune?",
+    "picker.allCountries": "Toate țările",
+    "picker.allRegions": "Toate regiunile",
+    "picker.otherCountries": "Alte țări",
+    "picker.otherRegions": "Alte regiuni",
 
     /* Top bar and route labels (scripts/gd-shell.js) */
     "shell.home": "Acasă",

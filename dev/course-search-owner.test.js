@@ -70,6 +70,7 @@ class Element {
     if (play) { const b = this.ownerDocument.createElement("button"); b.className = "play"; b.textContent = play[1]; this.appendChild(b); }
   }
   get innerHTML() { return this.__innerHTML; }
+  setAttribute(k, v) { this["attr:" + k] = String(v); }
   appendChild(c) { c.parentNode = this; this.children.push(c); return c; }
   removeChild(c) { this.children = this.children.filter((x) => x !== c); c.parentNode = null; return c; }
   focus() {}
@@ -100,8 +101,8 @@ function makeDocument() {
     addEventListener(t, h) { (this.listeners[t] = this.listeners[t] || []).push(h); }
   };
   document.body = document.createElement("body");
-  for (const id of ["courseScreen", "gdCourseAssumedOption", "courseList", "countLine", "searchInput", "shellHome", "courseLine"]) {
-    const el = document.createElement(id === "searchInput" ? "input" : "div"); el.id = id;
+  for (const id of ["courseScreen", "gdCourseAssumedOption", "courseList", "countLine", "searchInput", "shellHome", "courseLine", "gdCourseAdvancedToggle", "gdCourseAdvancedFields", "gdCourseSearchCountry", "gdCourseSearchRegion"]) {
+    const el = document.createElement(id === "searchInput" || id === "gdCourseSearchRegion" ? "input" : id === "gdCourseSearchCountry" ? "select" : "div"); el.id = id;
   }
   return document;
 }
@@ -109,14 +110,26 @@ function makeDocument() {
 /* ---------------------------------------------------------------- world */
 const AK = { lat: -36.9174953, lng: 174.7400425 };
 const MK = { lat: -36.9229754, lng: 174.7254871 };
-function fetchFor(net) {
+/* What /api/course-search answers: one normalised, deduped list plus the
+   server's grouping decision (functions/course-search.mjs). */
+const AKARANA_SEARCH = { results: [
+  { name: "Akarana Golf Club", lat: AK.lat + 0.0012, lng: AK.lng + 0.001, region: "Auckland", country: "New Zealand", countryCode: "NZ", source: "nominatim", providerId: "osm:way:1", confidence: "confirmed_course", hasMap: false }
+], groups: { mode: "list", countries: [] }, ambiguous: [] };
+function fetchFor(net, options = {}) {
   return function (url) {
     url = String(url);
     if (url.includes("nominatim")) {
       net.nominatim++;
-      return Promise.resolve({ ok: true, json: () => Promise.resolve([
-        { name: "Akarana Golf Club", display_name: "Akarana Golf Club, Mount Roskill, Auckland, New Zealand", lat: String(AK.lat + 0.0012), lon: String(AK.lng + 0.001), type: "golf_course", class: "leisure", address: { state: "Auckland", country: "New Zealand", country_code: "nz" } }
-      ]) });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+    }
+    if (url.includes("/api/course-search")) {
+      net.courseSearch++;
+      net.courseSearchUrls.push(url);
+      if (/[?&]confirm=1/.test(url)) {
+        net.confirms++;
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(options.confirm || { confirmed: false }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(options.search ? options.search(url) : AKARANA_SEARCH) });
     }
     if (url.includes("course-maps")) {
       net.courseMaps++;
@@ -140,7 +153,7 @@ function fetchFor(net) {
 
 function createHarness(options = {}) {
   const document = makeDocument();
-  const net = { nominatim: 0, courseMaps: 0, coursesNear: 0, dbChecks: 0, loadingShown: [], loadingHidden: 0 };
+  const net = { nominatim: 0, courseSearch: 0, courseSearchUrls: [], confirms: 0, courseMaps: 0, coursesNear: 0, dbChecks: 0, loadingShown: [], loadingHidden: 0 };
   const storage = new Map();
   const window = {};
   Object.assign(window, {
@@ -175,7 +188,7 @@ function createHarness(options = {}) {
     gdClearMappedStartPromptChrome() {},
     gdOpenChangeCourse() { return false; },
     GDCourseLoading: { show(name, sub) { net.loadingShown.push({ name, sub }); }, update() {}, hide() { net.loadingHidden++; } },
-    fetch: fetchFor(net)
+    fetch: fetchFor(net, options)
   });
   const context = vm.createContext(Object.assign(window, { window, globalThis: window }));
   /* The page loads the translation layer and its English base first. */
@@ -199,14 +212,14 @@ function pressEnter(env) {
 }
 const settle = async (n = 30) => { for (let i = 0; i < n; i++) await Promise.resolve(); };
 const rows = (env) => env.document.getElementById("courseList").children.filter((c) => c.classList.contains("course"));
-const rowNames = (env) => rows(env).map((c) => c.__gdFacilityPayload ? "[facility] " + c.querySelector(".name").textContent : c.__gdAreaPayload ? "[area] " + c.querySelector(".name").textContent : c.__gdCoursePayload.name);
+const rowNames = (env) => rows(env).map((c) => c.__gdFacilityPayload ? "[facility] " + c.querySelector(".name").textContent : c.__gdAreaPayload ? "[area] " + c.querySelector(".name").textContent : c.__gdGroupPayload ? c.querySelector(".name").textContent : c.__gdCoursePayload.name);
 const dividers = (env) => env.document.getElementById("courseList").children.filter((c) => c.classList.contains("courseListDivider"));
 const countText = (env) => env.document.getElementById("countLine").textContent;
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
 
-test("Enter runs one search and one Nominatim request, with the core listener still bound", async () => {
+test("Enter runs one search and one course-search request, with the core listener still bound", async () => {
   const env = createHarness();
   env.window.GDCoursePicker.open({ source: "home-play", returnTarget: "home" });
   await settle();
@@ -214,7 +227,9 @@ test("Enter runs one search and one Nominatim request, with the core listener st
   pressEnter(env);
   await settle();
   assert.strictEqual(env.document.getElementById("searchInput").listeners.keydown.length, 2, "both Enter listeners are really bound in this harness");
-  assert.strictEqual(env.net.nominatim, 1, "one Enter press, one Nominatim request");
+  assert.strictEqual(env.net.courseSearch, 1, "one Enter press, one search request");
+  assert.strictEqual(env.net.nominatim, 0, "the picker no longer calls Nominatim itself - the server does, politely");
+  assert.ok(/q=akarana(&|$)/.test(env.net.courseSearchUrls[0]), "the typed text is sent as typed, with nothing appended");
 });
 
 test("the ranked result stays on top; the neighbourhood is added below it, never in place of it", async () => {
@@ -309,6 +324,132 @@ test("the legacy core handlers stand down when the owner is loaded", () => {
   assert.ok(/if\(window\.GDCoursePicker\)return;/.test(wire), "the capture click handler defers to the owner");
   assert.ok(/e\.key==="Enter"&&!window\.GDCoursePicker/.test(coreEnterLine), "the core Enter listener defers to the owner");
   assert.ok(!/onclick="gdConfirmAssumedCourse/.test(fs.readFileSync(path.join(ROOT, "index.html"), "utf8")), "the static nearby block has no second inline click path");
+});
+
+/* ------------------------------------------------ discovery (2026-10-04) */
+function result(name, lat, lng, cc, country, region, extra) {
+  return Object.assign({ name, lat, lng, countryCode: cc, country, region, source: "mapbox", providerId: "mapbox:" + name + lat, confidence: "likely_course", hasMap: false }, extra || {});
+}
+const ROYAL = [
+  result("Royal Ontario Golf Club", 43.6, -79.4, "CA", "Canada", "Ontario"),
+  result("Royal Alberta Golf Club", 51.0, -114.0, "CA", "Canada", "Alberta"),
+  result("Royal Quebec Golf Club", 45.5, -73.6, "CA", "Canada", "Quebec"),
+  result("Royal England Golf Club", 51.5, -0.1, "GB", "United Kingdom", "England"),
+  result("Royal Scotland Golf Club", 56.0, -3.2, "GB", "United Kingdom", "Scotland"),
+  result("Royal Victoria Golf Club", -37.8, 145.0, "AU", "Australia", "Victoria"),
+  result("Royal Skane Golf Club", 55.6, 13.0, "SE", "Sweden", "Skane")
+];
+const ROYAL_SEARCH = { results: ROYAL, ambiguous: [], groups: { mode: "countries", countries: [
+  { key: "CA", countryCode: "CA", label: "Canada", count: 3, regions: [] },
+  { key: "GB", countryCode: "GB", label: "United Kingdom", count: 2, regions: [] },
+  { key: "AU", countryCode: "AU", label: "Australia", count: 1, regions: [] },
+  { key: "SE", countryCode: "SE", label: "Sweden", count: 1, regions: [] }
+] } };
+
+test("a name found in many countries asks which country first, and a country opens its courses", async () => {
+  const env = createHarness({ search: () => ROYAL_SEARCH });
+  env.window.GDCoursePicker.open({ source: "home-play" });
+  await settle();
+  env.document.getElementById("searchInput").value = "Royal Golf Club";
+  env.window.GDCoursePicker.search();
+  await settle();
+  assert.deepStrictEqual(rowNames(env), ["Canada", "United Kingdom", "Australia", "Sweden"], "one row per country, biggest first - not a flat list of seven");
+  assert.ok(rows(env).every((r) => r.__gdGroupPayload), "country rows are questions, not courses");
+  assert.strictEqual(countText(env), "Which country?");
+  assert.strictEqual(click(env, rows(env)[0]), "owner", "the owner's own listener answers a country row");
+  await settle();
+  const names = rowNames(env);
+  assert.strictEqual(names[0], "All countries", "a way back to the country list leads");
+  assert.deepStrictEqual(names.slice(1).sort(), ["Royal Alberta Golf Club", "Royal Ontario Golf Club", "Royal Quebec Golf Club"]);
+  assert.strictEqual(env.net.dbChecks, 0, "opening a country selected nothing");
+  click(env, rows(env)[0]);
+  await settle();
+  assert.deepStrictEqual(rowNames(env), ["Canada", "United Kingdom", "Australia", "Sweden"], "back returns to the countries");
+});
+
+test("a result with no Clarity map is still selectable and carries name, point, region and country", async () => {
+  const env = createHarness({ search: () => ({ results: [result("Duchess Golf Club", 50.7317, -111.9172, "CA", "Canada", "Alberta")], groups: { mode: "list", countries: [] }, ambiguous: [] }) });
+  env.window.GDCoursePicker.open({ source: "home-play" });
+  await settle();
+  env.document.getElementById("searchInput").value = "Duchess Golf Club";
+  env.window.GDCoursePicker.search();
+  await settle();
+  const row = rows(env).find((r) => r.__gdCoursePayload && r.__gdCoursePayload.name === "Duchess Golf Club");
+  assert.ok(row, "listed");
+  assert.ok(/Alberta, Canada/.test(row.innerHTML), "the subtitle says where it is");
+  assert.ok(!/mapbox|nominatim|clarity/i.test(row.innerHTML), "provider names never reach the player");
+  click(env, row);
+  await settle(2);
+  const picked = env.window.__gdLiveCoursePickerSelection;
+  assert.strictEqual(picked.name, "Duchess Golf Club");
+  assert.strictEqual(picked.lat, 50.7317);
+  assert.strictEqual(picked.lng, -111.9172);
+  assert.strictEqual(picked.region, "Alberta");
+  assert.strictEqual(picked.country, "Canada");
+});
+
+test("Advanced search sends country and region as filters, never glued onto the name", async () => {
+  const env = createHarness({ search: () => ({ results: [], groups: { mode: "list", countries: [] }, ambiguous: [] }) });
+  env.window.GDCoursePicker.open({ source: "home-play" });
+  await settle();
+  const select = env.document.getElementById("gdCourseSearchCountry");
+  assert.ok(select.children.length > 150, "the country list is filled in");
+  select.value = "CA";
+  env.document.getElementById("gdCourseSearchRegion").value = "Alberta";
+  env.document.getElementById("searchInput").value = "Duchess Golf Club";
+  env.window.GDCoursePicker.search();
+  await settle();
+  const url = env.net.courseSearchUrls[0];
+  assert.ok(/[?&]q=Duchess%20Golf%20Club(&|$)/.test(url), url);
+  assert.ok(/[?&]country=CA(&|$)/.test(url) && /[?&]region=Alberta(&|$)/.test(url), url);
+});
+
+test("an ambiguous result confirmed by a scorecard joins below the list without rebuilding it", async () => {
+  const lautoka = result("Lautoka Golf Club", -17.6, 177.45, "FJ", "Fiji", "Western", { confidence: "possible_golf_facility", ambiguous: true });
+  const env = createHarness({
+    search: () => ({ results: [result("Lautoka Sugar Golf Course", -17.61, 177.46, "FJ", "Fiji", "Western")], groups: { mode: "list", countries: [] }, ambiguous: [lautoka] }),
+    confirm: { confirmed: true, holes: 18, confidence: "likely_course" }
+  });
+  env.window.GDCoursePicker.open({ source: "home-play" });
+  await settle();
+  env.document.getElementById("searchInput").value = "Lautoka";
+  env.window.GDCoursePicker.search();
+  await settle(8);
+  const first = rows(env)[0];
+  await settle();
+  assert.strictEqual(env.net.confirms, 1, "only the flagged candidate is checked");
+  assert.ok(rowNames(env).includes("Lautoka Golf Club"), "the confirmed course is offered");
+  assert.strictEqual(first.parentNode, env.document.getElementById("courseList"), "the row already on screen was not torn down");
+});
+
+test("a two-letter name does not match every course that starts with those letters", async () => {
+  const env = createHarness({
+    knownCourses: [
+      { name: "Balgove Course", courseId: "balgove", lat: 56.344, lng: -2.818 },
+      { name: "Ba Golf Club", courseId: "ba-golf-club-fiji", lat: -17.535, lng: 177.676 }
+    ],
+    search: () => ({ results: [], groups: { mode: "list", countries: [] }, ambiguous: [] })
+  });
+  env.window.GDCoursePicker.renderCourses([]);
+  env.document.getElementById("searchInput").value = "Ba Golf Club";
+  env.window.GDCoursePicker.search();
+  await settle(4);
+  assert.deepStrictEqual(rowNames(env), ["Ba Golf Club"]);
+});
+
+test("the same name at two places is two rows, not one row at whichever point is nearer", async () => {
+  const env = createHarness({ search: () => ({ results: [
+    result("Springfield Golf Club", 39.8, -89.6, "US", "United States", "Illinois"),
+    result("Springfield Golf Club", 51.6, -0.5, "GB", "United Kingdom", "England")
+  ], groups: { mode: "list", countries: [] }, ambiguous: [] }) });
+  env.window.GDCoursePicker.open({ source: "home-play" });
+  await settle();
+  env.document.getElementById("searchInput").value = "Springfield Golf Club";
+  env.window.GDCoursePicker.search();
+  await settle();
+  const ids = new Set(env.window.__lastAreaPayloads = rows(env).map((r) => r.__gdAreaPayload ? r.__gdAreaPayload.area.lead.courseId : r.__gdCoursePayload.courseId));
+  assert.strictEqual(rows(env).length, 2, "two places: " + rowNames(env));
+  assert.strictEqual(ids.size, 2, "and two different course identities for the mapping pipeline");
 });
 
 (async () => {

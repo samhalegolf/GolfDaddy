@@ -35,17 +35,20 @@ function loadPickerFns(startSignature, endSignature, names) {
   return new Function(pickerSrc.slice(start, end) + "\nreturn {" + names.join(",") + "};")();
 }
 
+/* The picker no longer reads Nominatim itself - /api/course-search does, through
+   gd-course-place.mjs - so only its label survives on the client. */
 const picker = loadPickerFns(
-  "const PLACE_REGION_KEYS",
+  "function placeLabel(course)",
   "function distance(a,b)",
-  ["PLACE_REGION_KEYS", "placeFromAddress", "placeLabel"]
+  ["placeLabel"]
 );
 
 const tests = [];
 function test(name, fn) { tests.push({ name: name, fn: fn }); }
 
-test("a Nominatim address becomes a region and a country", () => {
-  const place = picker.placeFromAddress({
+test("a Nominatim address becomes a region and a country", async () => {
+  const server = await import("../functions/lib/gd-course-place.mjs");
+  const place = server.placeFromAddress({
     state: "Auckland",
     country: "New Zealand",
     country_code: "nz"
@@ -53,11 +56,12 @@ test("a Nominatim address becomes a region and a country", () => {
   assert.deepStrictEqual(place, { region: "Auckland", country: "New Zealand", countryCode: "NZ" });
 });
 
-test("the state beats the settlement fields", () => {
+test("the state beats the settlement fields", async () => {
+  const server = await import("../functions/lib/gd-course-place.mjs");
   /* The whole reason this is region rather than town. These are the real
      values Nominatim returned for Takapuna Golf Course: the council name is
      accurate and useless, the state is what a player recognises. */
-  const place = picker.placeFromAddress({
+  const place = server.placeFromAddress({
     city: "Kaipatiki",
     state: "Auckland",
     country: "New Zealand",
@@ -67,17 +71,19 @@ test("the state beats the settlement fields", () => {
   assert.strictEqual(picker.placeLabel(place), "Auckland, New Zealand");
 });
 
-test("a place with no state falls back to a settlement", () => {
+test("a place with no state falls back to a settlement", async () => {
+  const server = await import("../functions/lib/gd-course-place.mjs");
   /* City-states have no state field. Something recognisable still beats an
      empty subtitle. */
-  const place = picker.placeFromAddress({ city: "Singapore", country: "Singapore", country_code: "sg" });
+  const place = server.placeFromAddress({ city: "Singapore", country: "Singapore", country_code: "sg" });
   assert.strictEqual(picker.placeLabel(place), "Singapore, Singapore");
 });
 
-test("an address with no country is not a place", () => {
-  assert.strictEqual(picker.placeFromAddress({ city: "Nowhere" }), null);
-  assert.strictEqual(picker.placeFromAddress(null), null);
-  assert.strictEqual(picker.placeFromAddress("Auckland"), null);
+test("an address with no country is not a place", async () => {
+  const server = await import("../functions/lib/gd-course-place.mjs");
+  assert.strictEqual(server.placeFromAddress({ city: "Nowhere" }), null);
+  assert.strictEqual(server.placeFromAddress(null), null);
+  assert.strictEqual(server.placeFromAddress("Auckland"), null);
 });
 
 test("a country with no region labels as the country alone", () => {
@@ -97,20 +103,13 @@ test("the country code carries a course geocoded before names were stored", () =
   assert.strictEqual(picker.placeLabel({ region: "Victoria", countryCode: "au" }), "Victoria, AU");
 });
 
-test("client and server read the geocoder identically", () => {
-  /* Two copies of this list is the whole risk: they would quietly produce two
-     different subtitles for the same course depending on which path filled it
-     in. If one side changes, this fails and the other side changes too. */
-  const serverKeys = serverSrc
-    .slice(serverSrc.indexOf("const REGION_KEYS"), serverSrc.indexOf("];", serverSrc.indexOf("const REGION_KEYS")))
-    .match(/"[a-z_]+"/g)
-    .map(function (s) { return s.replace(/"/g, ""); });
-  assert.deepStrictEqual(
-    picker.PLACE_REGION_KEYS,
-    serverKeys,
-    "gd-course-place.mjs and the picker must agree on region precedence"
-  );
-  assert.strictEqual(serverKeys[0], "state", "state is the intended answer, not a fallback");
+test("course search reads the geocoder through the one shared copy", () => {
+  /* A second copy of the region-key list would quietly produce two different
+     subtitles for the same course depending on which path filled it in. */
+  const core = fs.readFileSync(path.join(ROOT, "functions", "lib", "gd-course-search-core.mjs"), "utf8");
+  assert.ok(/import \{ placeFromAddress \} from "\.\/gd-course-place\.mjs"/.test(core), "course search must use gd-course-place.mjs");
+  assert.ok(!/REGION_KEYS/.test(core) && !/PLACE_REGION_KEYS/.test(pickerSrc), "no second copy of the region keys");
+  assert.strictEqual(serverSrc.slice(serverSrc.indexOf("const REGION_KEYS")).match(/"([a-z_]+)"/)[1], "state", "state is the intended answer, not a fallback");
 });
 
 test("the server labels a place the same way the picker does", async () => {
@@ -156,7 +155,8 @@ test("place columns are written and read on the Supabase row", () => {
   assert.ok(/region: text\(course && course\.region/.test(mapsSrc), "row write must include region");
   assert.ok(/country_code: text\(course && course\.countryCode/.test(mapsSrc), "row write must include country_code");
   assert.ok(/region: text\(row\.region/.test(mapsSrc), "row read must include region");
-  assert.ok(/select=[^"]*country_code/.test(mapsSrc), "the read query must select the place columns");
+  /* The reads select a named column list (FULL_COLUMNS / LIST_COLUMNS), not an inline string. */
+  assert.ok(/const FULL_COLUMNS = [^;]*country_code/.test(mapsSrc) && /select=" \+ FULL_COLUMNS/.test(mapsSrc), "the read query must select the place columns");
 });
 
 test("a publish resolves the place when the client did not send one", () => {
