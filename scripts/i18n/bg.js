@@ -64,6 +64,8 @@
     "access.memberLogShots": "Нужно е членство в Clarity, за да записваш къде спират ударите ти. Разстоянията остават безплатни.",
     "access.memberKeepScore": "Нужно е членство в Clarity, за да водиш резултата. Разстоянията остават безплатни.",
     "access.membership": "Членство",
+    "access.freeAccountCourseMaps": "Създайте безплатен акаунт, за да подготвяте още голф игрища.",
+    "access.mapServerBusy": "Сървърът за картите е зает в момента. Моля, опитайте отново след малко.",
 
     /* Player badge */
     "badge.preview": "ПРЕГЛЕД",
@@ -824,6 +826,7 @@
     "course.noneDownloadedYet": "Още няма изтеглени игрища",
     "course.tryAnotherSearch": "Опитай с друго търсене.",
     "course.downloadAutomatically": "Игрищата се изтеглят автоматично първия път, когато играеш на тях.",
+    "course.offlineMembership": "Изтеглянето на голф игрища за офлайн ползване е включено в членството Clarity. Все още можете да разглеждате игрища онлайн.",
     "course.publishedMap": "Публикувана карта",
     "course.courseMap": "Карта на игрището",
     "course.mapType": "Тип карта",
