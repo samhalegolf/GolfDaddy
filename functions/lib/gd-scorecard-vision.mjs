@@ -120,7 +120,7 @@ async function transcribe(client, images, signal) {
  *
  * fetchHtml(url, signal): the caller's own page fetcher, re-used for hole pages so
  * the same SSRF guards and size caps apply. */
-export function makeScorecardVisualReader({ fetchHtml, budgetMs = SCORECARD_VISUAL_BUDGET_MS } = {}) {
+export function makeScorecardVisualReader({ fetchHtml, budgetMs = SCORECARD_VISUAL_BUDGET_MS, cache = null } = {}) {
   if (!process.env.ANTHROPIC_API_KEY) return null;
   let controller = null, timer = null;
   const signal = () => {
@@ -142,6 +142,13 @@ export function makeScorecardVisualReader({ fetchHtml, budgetMs = SCORECARD_VISU
     /* images: [{url, kind, hole, context}] -> [{image, raw|null, error?}] in the same order. */
     async readImages(images) {
       const list = (images || []).slice(0, MAX_IMAGES_PER_CALL);
+      /* cache (url -> answer) lets one scan read an image once. A multi-course
+         facility asks for cards round after round; reading the same picture again
+         costs a model call and can come back with a digit read differently, which
+         then looks like a second course. */
+      if (cache && list.every(image => cache.has(image.url))) {
+        return list.map(image => Object.assign({ image }, cache.get(image.url)));
+      }
       /* An image search also hands back the search engine's own copy. It is
          smaller, but it is used when the site holding the original refuses us -
          the same sites that refuse a page fetch often refuse an image fetch. */
@@ -157,7 +164,9 @@ export function makeScorecardVisualReader({ fetchHtml, budgetMs = SCORECARD_VISU
         if (!entry.file) return { image: entry.image, raw: null, error: entry.error };
         const index = ready.indexOf(entry) + 1;
         const raw = answer.images.find(read => read && read.imageIndex === index) || null;
-        return { image: entry.image, raw, error: raw ? null : "no transcription returned", model: answer.model };
+        const result = { raw, error: raw ? null : "no transcription returned", model: answer.model };
+        if (cache && raw) cache.set(entry.image.url, result);
+        return Object.assign({ image: entry.image }, result);
       });
     },
     done() { if (timer) clearTimeout(timer); }

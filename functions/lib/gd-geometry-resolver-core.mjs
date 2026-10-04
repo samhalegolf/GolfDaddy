@@ -1022,7 +1022,7 @@ function sourceLoadFailureResult(input, courseId, resolverRunId, error, elements
   const result = {
     courseId, resolverRunId, status: "source-load-failed", sourceLoadError: error, holes: [], unresolvedCandidates: [], unresolvedScorecardHoles: scorecard || [],
     analysisBoundary: boundary || [], confidence: 0, overallConfidence: 0, warnings: [error.message], resolverVersion: RESOLVER_VERSION, resolvedAt: nowIso(), source: SOURCE,
-    debugEvidence: { resolverRunId, analysisBoundary: boundary || [], osmFeatureCount: Array.isArray(elements) ? elements.length : 0, fairwayCount: (elements || []).filter(e => golfTag(e) === "fairway").length, expectedHoleCount: expectedHoleCount(input, scorecard || []), greenCandidates: [], rejectedGreenCandidates: [], holeCandidates: [], totalHoleCandidates: 0, scorecardHoles: scorecard || [], assignmentContext: {}, assignmentScore: 0, assignmentAlternatives: [], sourceLoadError: error }
+    debugEvidence: { resolverRunId, analysisBoundary: boundary || [], osmFeatureCount: Array.isArray(elements) ? elements.length : 0, fairwayCount: (elements || []).filter(e => golfTag(e) === "fairway").length, expectedHoleCount: expectedHoleCount(input, scorecard || []), greenCandidates: [], rejectedGreenCandidates: [], holeCandidates: [], totalHoleGreens: 0, scorecardHoles: scorecard || [], assignmentContext: {}, assignmentScore: 0, assignmentAlternatives: [], sourceLoadError: error }
   };
   result.feedback = failedSourceFeedback(error, elements, scorecard || []);
   return result;
@@ -1125,10 +1125,15 @@ export async function resolveCourseGeometryForAutoMapper(input) {
     debugEvidence: {
       resolverRunId, analysisBoundary, osmFeatureCount: elements.length, fairwayCount: elements.filter(e => golfTag(e) === "fairway").length,
       expectedHoleCount: expected, greenCandidates: greenResult.accepted, rejectedGreenCandidates: greenResult.rejected, holeCandidates: candidates,
-      /* Every candidate the ground offered, before another course's claim was
-         taken out. holeCandidates is what THIS run could choose from; this is
-         how big the site is, which is the number the multi-loop check reads. */
-      totalHoleCandidates: allCandidates.length,
+      /* How many holes the ground holds, before another course's claim was taken
+         out: one per green that some hole line reaches. holeCandidates is what THIS
+         run could choose from; this is how big the site is, which is the number the
+         multi-loop check reads.
+         Counted by green, not by line. A green is offered several readings - one
+         per fairway or route that could lead to it - so the line count is not a
+         hole count. Cebu Country Club, 18 holes on 19 greens, offered 53 lines and
+         was taken for a three-loop facility. */
+      totalHoleGreens: new Set(allCandidates.map(c => c.greenId || c.candidateId)).size,
       scorecardHoles: scorecard, scorecardEvidence: match.scorecardEvidence, scorecardSources, scorecardDistanceCount: distanceEvidenceCount,
       assignmentContext: match.context || {}, assignmentScore: match.score || 0, assignmentAlternatives: match.alternatives || []
     }

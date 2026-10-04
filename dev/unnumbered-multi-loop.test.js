@@ -98,8 +98,35 @@ function test(name, fn) { tests.push({ name, fn }); }
       osmPayload: { elements: [] }, courseId: "claim-test", excludeCandidateIds: ["a", "b"]
     });
     assert.ok(result && result.debugEvidence, "resolver must still answer with an empty payload");
-    assert.strictEqual(typeof result.debugEvidence.totalHoleCandidates, "number",
-      "the full candidate count is what the multi-loop check reads - it must survive exclusion");
+    assert.strictEqual(typeof result.debugEvidence.totalHoleGreens, "number",
+      "the full hole count is what the multi-loop check reads - it must survive exclusion");
+  });
+
+  test("the ground's size is counted in greens, not in hole lines", async () => {
+    /* A green is offered one hole line per fairway or route that could lead to it.
+       Cebu Country Club - 18 holes, 19 greens, 20 fairways - offered 53 lines, and
+       53 against an 18-hole card read as a three-loop facility. Two greens with
+       three fairways each is the same shape in miniature. */
+    const fixture = require("./fixtures/geometry-resolver-two-hole-course.json");
+    const payload = JSON.parse(JSON.stringify(fixture));
+    [[601, 0.0036], [611, 0.0114]].forEach(([id, lat]) => {
+      [0.0012, -0.0012].forEach((off, side) => {
+        const far = off + Math.sign(off) * 0.0025;
+        payload.elements.push({ type: "way", id: id + side, tags: { golf: "fairway" }, geometry: [
+          { lat: lat - 0.0004, lon: off }, { lat: lat - 0.0004, lon: far }, { lat: lat - 0.0001, lon: far }, { lat: lat - 0.0001, lon: off }, { lat: lat - 0.0004, lon: off }
+        ] });
+      });
+    });
+    const result = await resolver.resolveCourseGeometryForAutoMapper({ osmPayload: payload, courseId: "readings-test" });
+    assert.ok(result.debugEvidence.holeCandidates.length > 2, "sanity: each green is offered more than one line");
+    assert.strictEqual(result.debugEvidence.totalHoleGreens, 2, "two greens are two holes, however many lines reach them");
+  });
+
+  test("Cebu is one course, Howeston is still three", () => {
+    assert.strictEqual(detectUnnumberedMultiLoop({ candidateCount: 19, cardHoles: 18 }).multiLoop, false,
+      "19 greens against an 18-hole card is one course and a practice green");
+    assert.strictEqual(detectUnnumberedMultiLoop({ candidateCount: 27, cardHoles: 9 }).loops, 3,
+      "Howeston's three nines still read as three");
   });
 
   let failed = 0;
