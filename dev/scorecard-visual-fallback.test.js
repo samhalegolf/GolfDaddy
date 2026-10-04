@@ -311,5 +311,27 @@ function holeGraphic(h, extra = {}) {
   assert.strictEqual(viaSearch.visual.imageSearch.kept.length, 1);
   assert.strictEqual(cebuVisual.calls.length, 1, "one model call");
 
+  /* ---------- the card offers a tee with a length on every hole ------- */
+  /* The geometry resolver numbers holes only from a card with a length on every
+     hole. Back Combo is the usual pick (second-longest), but here one of its
+     lengths is a misread and gets dropped - so the complete Championship row is
+     offered instead of a row with a gap. */
+  const gapped = read(ALL);
+  gapped.tees[1].printedOut = null;
+  gapped.tees[1].distances[4].value = 950; /* hole 5, a par 3 */
+  const gapCard = v.assembleVisualCards([{ raw: gapped, image: { url: "https://x/card.jpg" } }]).accepted[0].card;
+  assert.strictEqual(gapCard.teeName, "Championship");
+  assert.strictEqual(gapCard.holes.filter(h => Number.isFinite(h.distanceM)).length, 18, "no gap reaches the resolver");
+
+  /* ---------- one read per image per scan ---------------------------- */
+  process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "test-key-not-used";
+  const vision = await import(lib("gd-scorecard-vision.mjs"));
+  const cache = new Map([["https://x/card.jpg", { raw: read(ALL), error: null, model: "cached" }]]);
+  const reader = vision.makeScorecardVisualReader({ fetchHtml: async () => "", cache });
+  const again = await reader.readImages([{ url: "https://x/card.jpg" }]);
+  reader.done();
+  assert.strictEqual(again[0].model, "cached", "an image already read this scan is not sent to the model again");
+  assert.strictEqual(again[0].raw.holes.length, 18);
+
   console.log("scorecard visual fallback tests passed");
 })().catch(error => { console.error(error); process.exit(1); });

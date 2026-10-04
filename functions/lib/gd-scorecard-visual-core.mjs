@@ -535,6 +535,13 @@ function scoreCandidate(parts, allReads, name) {
   const confidence = Math.max(0, Math.min(1, Math.round(score * legibility * 100) / 100));
   if (confidence < VISUAL_ACCEPT_CONFIDENCE) return { ok: false, reason: "low-confidence-" + confidence, problems, checks, confidence };
 
+  /* The card hands ONE tee's lengths downstream, and the geometry resolver will
+     only number holes from a card with a length on every hole. A tee that lost a
+     length to a misread would leave a gap - so when any tee is complete, only
+     complete tees are offered. Cebu's first read kept a gapped tee here and the
+     resolver turned the whole card away as "Scorecard distances unavailable". */
+  const completeTees = merged.tees.filter(tee => holes.every(hole => Number.isFinite(tee.distances[hole])));
+  if (completeTees.length) merged.tees = completeTees;
   const printedName = reads.map(r => r.courseName).find(Boolean) || "";
   const card = toEngineCard(merged, name || printedName);
   if (!card) return { ok: false, reason: "no-card", problems, checks };

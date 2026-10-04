@@ -652,7 +652,10 @@ async function resolveScorecardForCourse(course, origin, want) {
   const facilityKey = course.courseId || null;
   /* The picture fallback, for clubs whose only card is an image. Its own clock,
      started only if the HTML pages all come up empty - see gd-scorecard-vision. */
-  const visual = makeScorecardVisualReader({ fetchHtml: fetchPageHtml });
+  /* One read per image per scan, however many facility rounds ask - the cache
+     lives on the job's course object. */
+  if (!course.visualReads) course.visualReads = new Map();
+  const visual = makeScorecardVisualReader({ fetchHtml: fetchPageHtml, cache: course.visualReads });
   try {
     return await resolveScorecard({
       courseName: course.courseName,
