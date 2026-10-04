@@ -28,19 +28,15 @@ const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
 const ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
 
-/* Mirrors course-visual-jobs.mjs's AUTO_RATE_* - a player tap is cheap for them, and an
-   Overpass query plus green-shape analysis is not free for us or for the shared Overpass
-   endpoint, so the open POST path is rate limited on top of the one-live-job-per-course
-   dedupe. */
+/* These are protective circuit-breakers, not product entitlements. A signed-in player may
+   search/prepare as many courses as they reasonably need; the high ceiling only stops a loop
+   from hammering Overpass or the mapper queue. Guests have a separate product rule below:
+   one SUCCESSFUL prepared map, then a free account is required. Failed attempts do not spend
+   that free success. */
 const AUTO_RATE_WINDOW_MS = 30 * 60 * 1000;
-const AUTO_RATE_MAX_PER_USER = 5;
-/* Anonymous installs get a tighter budget than signed-in players for the same window. A guest
-   id is a string this device minted for itself, so it costs nothing to discard and mint
-   another - the limit is a speed bump against a loop, not an identity check. The expensive
-   thing it protects is the Overpass query behind each NEW map; reading an existing map,
-   polling a running job and re-picking the same course all dedupe above this and spend
-   nothing. */
-const AUTO_RATE_MAX_PER_GUEST = 3;
+const AUTO_RATE_MAX_PER_USER = 60;
+const AUTO_RATE_MAX_PER_GUEST = 4;
+const GUEST_SUCCESS_LIMIT = 1;
 
 /* Who asked for this mapping run, as the one string that goes in requested_by and that the
    rate limit is keyed to:
@@ -60,8 +56,11 @@ export function mapperActorKey({ userId, guestId } = {}) {
   const gid = String(guestId || "").trim().toLowerCase();
   return GUEST_ID_RE.test(gid) ? "guest:" + gid : "";
 }
+function isGuestActor(actorKey) {
+  return String(actorKey || "").startsWith("guest:");
+}
 function actorRateLimit(actorKey) {
-  return String(actorKey || "").startsWith("guest:") ? AUTO_RATE_MAX_PER_GUEST : AUTO_RATE_MAX_PER_USER;
+  return isGuestActor(actorKey) ? AUTO_RATE_MAX_PER_GUEST : AUTO_RATE_MAX_PER_USER;
 }
 
 /* Same reasoning as course-visual-jobs.mjs's STALL_SECONDS: the worker heartbeats between
@@ -400,8 +399,6 @@ export async function enqueueMapperJob({ courseId, courseLat, courseLng, courseN
     }).catch(() => null);
     if (duplicate) return { duplicate: true, courseId: duplicate.courseId };
   }
-  const located = await ensureCourseCenter(courseId, { courseLat, courseLng, courseName });
-
   const state = await mapperBuildState(courseId);
   if (state.hasGeometry && state.geometryVersion === MAPPER_VERSION) {
     return { deduped: true, state: state.state, geometryVersion: state.geometryVersion };
@@ -419,12 +416,42 @@ export async function enqueueMapperJob({ courseId, courseLat, courseLng, courseN
   const existing = await supabaseFetch(TABLE + "?select=id,status&course_id=eq." + encodeURIComponent(courseId) + "&kind=eq.automap&status=in.(queued,running)&updated_at=gt." + encodeURIComponent(freshCutoff) + "&limit=1");
   if (Array.isArray(existing) && existing.length) return { deduped: true, job: existing[0], state: "queued" };
 
+  /* Guest product boundary: one successful prepared map per anonymous installation. This is
+     intentionally based on status=done, not "requests started": a failed first attempt should
+     not consume the free try. Re-opening the successful course and reusing a live job both
+     returned above, so this only gates a NEW map. */
+  if (isGuestActor(actor)) {
+    const successful = await supabaseFetch(TABLE + "?select=id&requested_by=eq." + encodeURIComponent(actor)
+      + "&kind=eq.automap&status=eq.done&order=created_at.desc&limit=" + GUEST_SUCCESS_LIMIT);
+    if (Array.isArray(successful) && successful.length >= GUEST_SUCCESS_LIMIT) {
+      return { signupRequired: true, state: state.state, actorKey: actor };
+    }
+
+    /* Only one anonymous map may be in flight at once. That closes the race where a guest
+       could queue several different courses before the first one reaches done. A failed job
+       is terminal and therefore does not block an immediate retry. */
+    const guestLive = await supabaseFetch(TABLE + "?select=id,course_id,status&requested_by=eq." + encodeURIComponent(actor)
+      + "&kind=eq.automap&status=in.(queued,running)&limit=1");
+    if (Array.isArray(guestLive) && guestLive.length) {
+      return { rateLimited: true, protective: true, state: state.state, actorKey: actor, limit: 1 };
+    }
+  }
+
+  /* Signed-in "unlimited" means there is no ordinary product quota. This high ceiling (and
+     the smaller anonymous one) is only a crash/abuse circuit-breaker. */
   const rateMax = actorRateLimit(actor);
   const since = new Date(Date.now() - AUTO_RATE_WINDOW_MS).toISOString();
-  const recent = await supabaseFetch(TABLE + "?select=id&requested_by=eq." + encodeURIComponent(actor) + "&created_at=gt." + encodeURIComponent(since) + "&limit=" + (rateMax + 1));
-  if (Array.isArray(recent) && recent.length >= rateMax) return { rateLimited: true, state: state.state, actorKey: actor, limit: rateMax };
+  const recent = await supabaseFetch(TABLE + "?select=id&requested_by=eq." + encodeURIComponent(actor)
+    + "&kind=eq.automap&created_at=gt." + encodeURIComponent(since) + "&limit=" + (rateMax + 1));
+  if (Array.isArray(recent) && recent.length >= rateMax) {
+    return { rateLimited: true, protective: true, state: state.state, actorKey: actor, limit: rateMax };
+  }
 
-  /* Last gate, deliberately after the dedupe and rate-limit answers rather than before them.
+  /* Do not create even the location-only course_maps stub until the actor gates have passed.
+     A refused second guest course should leave no server-side footprint that looks half-saved. */
+  const located = await ensureCourseCenter(courseId, { courseLat, courseLng, courseName });
+
+  /* Last gate, deliberately after the dedupe and protective-limit answers rather than before them.
 
      A job for a course with no coordinates cannot succeed - the worker reads the centre from
      course_maps to build the Overpass query and dies on "has no known location", which is how
@@ -645,7 +672,20 @@ export default async function courseMapperJobs(req) {
       detail: "Mapping needs the course's coordinates. Send courseLat and courseLng, or pin the course first."
     });
   }
-  if (result.rateLimited) return json(429, { error: "too many course mapping runs started recently", state: result.state, limit: result.limit || null });
+  if (result.signupRequired) {
+    return json(403, {
+      error: "Create a free account to prepare more courses.",
+      code: "guest-signup-required",
+      state: result.state
+    });
+  }
+  if (result.rateLimited) {
+    return json(429, {
+      error: "The map server is busy right now. Please try again soon.",
+      code: "server-busy",
+      state: result.state
+    });
+  }
   if (result.deduped) return json(200, Object.assign({ deduped: true, remapped: remap }, result));
   return json(202, { job: result.job, state: "queued", remapped: remap });
 }
@@ -679,4 +719,4 @@ function json(status, body) {
   });
 }
 
-export const __courseMapperJobsTest = { mapperBuildState, hasGeometryPayload, mapperActorKey, MAPPER_VERSION, AUTO_RATE_MAX_PER_USER, AUTO_RATE_MAX_PER_GUEST };
+export const __courseMapperJobsTest = { mapperBuildState, hasGeometryPayload, mapperActorKey, MAPPER_VERSION, AUTO_RATE_MAX_PER_USER, AUTO_RATE_MAX_PER_GUEST, GUEST_SUCCESS_LIMIT };
