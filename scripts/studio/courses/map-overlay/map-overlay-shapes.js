@@ -23,9 +23,14 @@
   var MAX_POINTS = 64;
   var MIN_SPACING_M = 30;
   var MAX_STATIONS = 20;
-  var TEE_LENGTH_M = 16;
-  var TEE_WIDTH_M = 10;
+  /* A tee is a round marker on where the tee is - which way it faces is the hole's business,
+     not the marker's. Same size the overlay core gives a tee pin (PIN_RADIUS_M.tee). */
+  var TEE_RADIUS_M = 6;
   var GREEN_RADIUS_M = 14;
+  /* A green is edited by a handful of points, not by every corner the wand found: six handles,
+     and the outline a smooth curve through them with six corners between each pair. */
+  var GREEN_HANDLES = 6;
+  var GREEN_STEPS = 6;
   /* The round bunker left when the wand cannot find an edge - a typical greenside bunker. */
   var BUNKER_RADIUS_M = 6;
   /* Merging bunkers: the two outlines are painted onto a grid of cells this fine (coarser for
@@ -113,19 +118,8 @@
     return { lat: lat / points.length, lng: lng / points.length };
   }
 
-  /* A tee box rectangle centred on `centre`, its long side pointing at `towards`. */
-  function teeAt(centre, towards) {
-    var f = frame(centre);
-    var dir = towards ? unit(f.toXY(towards)) : { x: 0, y: 1 };
-    if (towards && len(f.toXY(towards)) < 1e-6) dir = { x: 0, y: 1 };
-    var n = perp(dir);
-    var hl = TEE_LENGTH_M / 2, hw = TEE_WIDTH_M / 2;
-    return [
-      add(scale(dir, -hl), scale(n, -hw)),
-      add(scale(dir, -hl), scale(n, hw)),
-      add(scale(dir, hl), scale(n, hw)),
-      add(scale(dir, hl), scale(n, -hw))
-    ].map(f.toLL);
+  function teeAt(centre) {
+    return circle(centre, TEE_RADIUS_M, 12);
   }
 
   function circle(centre, radiusM, n) {
@@ -137,6 +131,50 @@
       out.push(f.toLL({ x: Math.cos(a) * r, y: Math.sin(a) * r }));
     }
     return out;
+  }
+
+  /* Centripetal Catmull-Rom between p1 and p2 - it passes through every handle and, unlike the
+     uniform kind, never loops or overshoots where two handles sit close together. */
+  function catmullRom(p0, p1, p2, p3, t) {
+    function knot(ti, a, b) { return ti + Math.sqrt(Math.max(len(sub(b, a)), 1e-6)); }
+    var t0 = 0, t1 = knot(t0, p0, p1), t2 = knot(t1, p1, p2), t3 = knot(t2, p2, p3);
+    var u = t1 + (t2 - t1) * t;
+    function mix(a, b, ta, tb) { var w = (u - ta) / (tb - ta); return add(scale(a, 1 - w), scale(b, w)); }
+    var a1 = mix(p0, p1, t0, t1), a2 = mix(p1, p2, t1, t2), a3 = mix(p2, p3, t2, t3);
+    return mix(mix(a1, a2, t0, t2), mix(a2, a3, t1, t3), t1, t2);
+  }
+
+  /* A closed smooth outline through `handles`, `steps` corners from each handle to the next,
+     starting on the first handle - so handle k is corner k * steps of the result. */
+  function smoothRing(handles, steps) {
+    var n = handles.length, per = steps || GREEN_STEPS;
+    if (n < 3) return handles.slice();
+    var f = frame(handles[0]);
+    var p = handles.map(f.toXY), out = [];
+    for (var i = 0; i < n; i++) {
+      var p0 = p[(i - 1 + n) % n], p1 = p[i], p2 = p[(i + 1) % n], p3 = p[(i + 2) % n];
+      for (var s = 0; s < per; s++) out.push(catmullRom(p0, p1, p2, p3, s / per));
+    }
+    return out.map(f.toLL);
+  }
+
+  /* The handles a ring is edited by: read straight back off a ring smoothRing made, otherwise
+     spaced evenly round its edge from its first corner. */
+  function ringHandles(ring, count, steps) {
+    var n = count || GREEN_HANDLES, per = steps || GREEN_STEPS;
+    if (!ring || ring.length < 3) return (ring || []).slice();
+    if (ring.length === n * per) return ring.filter(function (p, i) { return i % per === 0; });
+    var f = frame(ring[0]);
+    var xy = ring.map(f.toXY).concat([f.toXY(ring[0])]);
+    var total = 0;
+    for (var i = 1; i < xy.length; i++) total += len(sub(xy[i], xy[i - 1]));
+    /* n even steps round the closed edge give n + 1 stations, the last back on the first. */
+    return resample(xy, total / n).slice(0, n).map(f.toLL);
+  }
+
+  /* A green as it is kept once outlined: the smooth curve through its six handles. */
+  function smoothGreen(ring) {
+    return smoothRing(ringHandles(ring, GREEN_HANDLES, GREEN_STEPS), GREEN_STEPS);
   }
 
   function insideRing(pt, ring) {
@@ -235,10 +273,11 @@
   }
 
   var api = {
-    FAIRWAY_WIDTH_M: FAIRWAY_WIDTH_M, TEE_LENGTH_M: TEE_LENGTH_M,
-    TEE_WIDTH_M: TEE_WIDTH_M, GREEN_RADIUS_M: GREEN_RADIUS_M, BUNKER_RADIUS_M: BUNKER_RADIUS_M, MAX_POINTS: MAX_POINTS,
+    FAIRWAY_WIDTH_M: FAIRWAY_WIDTH_M, TEE_RADIUS_M: TEE_RADIUS_M, GREEN_RADIUS_M: GREEN_RADIUS_M,
+    GREEN_HANDLES: GREEN_HANDLES, GREEN_STEPS: GREEN_STEPS, BUNKER_RADIUS_M: BUNKER_RADIUS_M, MAX_POINTS: MAX_POINTS,
     distanceM: distanceM, lineLengthM: lineLengthM, centroid: centroid,
-    fairwayFromLine: fairwayFromLine, teeAt: teeAt, circle: circle, mergeOverlapping: mergeOverlapping
+    fairwayFromLine: fairwayFromLine, teeAt: teeAt, circle: circle, mergeOverlapping: mergeOverlapping,
+    smoothRing: smoothRing, ringHandles: ringHandles, smoothGreen: smoothGreen
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.GDOverlayShapes = api;

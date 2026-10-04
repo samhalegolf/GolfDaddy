@@ -92,8 +92,53 @@
     course: null, features: [], loadedFor: "", osm: null, objects: [], lastRun: null, courseMap: null, view: null, sourceKey: "",
     showOsm: true, showObjects: true, status: "draft", hole: null,
     dirty: false, rev: 0, saving: false, saveError: "", fairwayWidth: 0,
-    mode: "shapes", bunkerWandSize: 1, mergeBunkers: true
+    mode: "shapes", bunkerWandSize: 1, mergeBunkers: true, fullscreen: false, unsaved: null
   };
+
+  /* ---- persistence ----
+     The session also outlives a reload: the course, where the map was, the imagery, the
+     toggles and full screen come back as they were left. Shapes live on the server; the only
+     shapes kept here are ones that had not saved yet when the page went, and they are put back
+     (and saved) the next time that course loads. */
+  var STORE_KEY = "gd_studio_map_overlay_v1";
+  var rememberTimer = null;
+
+  function slimCourse(course) {
+    if (!course) return null;
+    var out = {};
+    ["courseId", "id", "canonicalKey", "name", "courseName", "lat", "lng", "latitude", "longitude"].forEach(function (k) {
+      if (course[k] != null) out[k] = course[k];
+    });
+    return out;
+  }
+
+  function rememberNow() {
+    if (rememberTimer) { clearTimeout(rememberTimer); rememberTimer = null; }
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({
+        course: slimCourse(session.course), view: session.view, sourceKey: session.sourceKey,
+        showOsm: session.showOsm, showObjects: session.showObjects, mode: session.mode, fairwayWidth: session.fairwayWidth,
+        bunkerWandSize: session.bunkerWandSize, mergeBunkers: session.mergeBunkers, fullscreen: !!session.fullscreen,
+        unsaved: session.dirty && session.loadedFor ? { courseId: session.loadedFor, features: session.features } : null
+      }));
+    } catch (e) {}
+  }
+
+  function remember() {
+    if (rememberTimer) clearTimeout(rememberTimer);
+    rememberTimer = setTimeout(rememberNow, 300);
+  }
+
+  (function hydrate() {
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) {}
+    if (!saved || typeof saved !== "object") return;
+    if (saved.course) { session.course = saved.course; session.view = saved.view || null; }
+    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "bunkerWandSize", "mergeBunkers", "fullscreen"].forEach(function (k) {
+      if (saved[k] != null) session[k] = saved[k];
+    });
+    if (saved.unsaved && Array.isArray(saved.unsaved.features)) session.unsaved = saved.unsaved;
+  })();
 
   /* Everything that belongs to one course, dropped when another is picked or opened. */
   function forgetCourse() {
@@ -159,6 +204,9 @@
     bunker: { color: "#f2dfa0", weight: 2, fillColor: "#f2dfa0", fillOpacity: 0.45 },
     bunkerSelected: { color: "#ffffff", weight: 3, fillColor: "#f2dfa0", fillOpacity: 0.55 },
     draft: { color: "#ffb54c", weight: 3, dashArray: "6 6", interactive: false },
+    /* Shapes on the same hole, and the line a Link drag draws. */
+    link: { color: "#ffffff", weight: 2, opacity: 0.7, dashArray: "1 7", lineCap: "round", interactive: false },
+    linkDraft: { color: "#ffffff", weight: 3, dashArray: "6 6", interactive: false },
     draftPreview: { color: "#ffb54c", weight: 1, fillColor: "#3cff8d", fillOpacity: 0.12, interactive: false },
     draftPoint: { radius: 4, color: "#ffb54c", weight: 2, fillColor: "#1a1a1a", fillOpacity: 1, interactive: false },
     vertex: { radius: 6, color: "#ffffff", weight: 2, fillColor: "#ffb54c", fillOpacity: 1, className: "gdStudioOverlayHandle" },
@@ -186,6 +234,31 @@
   var BIN_ICON = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
     '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>';
 
+  function svgIcon(body) {
+    return '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + body + "</svg>";
+  }
+  var ICON = {
+    move: svgIcon('<path d="M5 3l13 7-5.5 1.8L10.7 17z"/><path d="M13 12l5 5"/>'),
+    connect: svgIcon('<circle cx="6" cy="18" r="2.6"/><circle cx="18" cy="6" r="2.6"/><path d="M8 16l8-8" stroke-dasharray="2 3"/>'),
+    fairway: svgIcon('<path d="M7 21c-1-5 2-7 4-10s2-6 1-8"/><path d="M13 21c-1-5 2-7 4-10s2-6 1-8"/>'),
+    green: svgIcon('<path d="M9 18V3l8 3.5L9 10"/><ellipse cx="10" cy="19" rx="7" ry="2.4"/>'),
+    tee: svgIcon('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/>'),
+    bunker: svgIcon('<path d="M3.5 15c0-4 4.2-7 8.5-7s8.5 2.2 8.5 5.3-3.5 4.7-8.5 4.7S3.5 17.4 3.5 15z"/><path d="M9 13h.01M13 12h.01M15 15h.01"/>'),
+    expand: svgIcon('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
+    shrink: svgIcon('<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>'),
+    course: svgIcon('<path d="M3 11l9-7 9 7"/><path d="M5.5 9.5V20h13V9.5"/>'),
+    search: svgIcon('<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>'),
+    plus: svgIcon('<path d="M12 5v14M5 12h14"/>'),
+    minus: svgIcon('<path d="M5 12h14"/>'),
+    chevron: svgIcon('<path d="M6 9l6 6 6-6"/>')
+  };
+  function railButton(name, icon, label, title) {
+    return '<button type="button" class="gdStudioOverlayRailBtn" data-gd-overlay="' + name + '" title="' + esc(title) + '" aria-label="' + esc(label) + '">' + ICON[icon] + "<span>" + esc(label) + "</span></button>";
+  }
+  function viewButton(name, icon, title) {
+    return '<button type="button" class="gdStudioOverlayViewBtn" data-gd-overlay="' + name + '" title="' + esc(title) + '" aria-label="' + esc(title) + '">' + ICON[icon] + "</button>";
+  }
+
   function render(containerEl) {
     var mapObj = null;
     var layer = null;
@@ -206,84 +279,111 @@
     var drag = null;
     var dragEndedAt = 0;
     var wandsRunning = 0;
+    /* The shape placed last can be dragged straight away, whatever tool is in hand, so a pin
+       that landed a little off is nudged into place without switching to Move. */
+    var lastPlacedId = "";
+    /* Link tool: the shape tapped first, waiting for the one to link it to. */
+    var connectFrom = "";
+    var connect = null;
+    var linkLayers = [];
     var sourceTesting = false;
     var sourceTest = null;
 
+    /* One screen, laid out like the booking app's video workspace: the map takes everything,
+       the tools float over it (placing tools down the left, view controls down the right, the
+       options for the tool in hand along the top), and everything used now and then - the
+       course, imagery, AI, publishing - lives in the pull-down under the header. The page itself
+       never scrolls; only the map pans. */
+    containerEl.classList.add("gdStudioOverlayHost");
     containerEl.innerHTML =
-      '<details class="gdStudioLede gdStudioOverlayHelp" data-gd-overlay="help" open><summary>How it works</summary>' +
-      "<p>Place what OSM is missing, by eye. Pick a course, then a mode. <strong>Shapes</strong>: <strong>Fairway</strong> - click along the middle of the fairway " +
-      "and press Enter to finish; you get a fairway with corners to drag into shape. " +
-      "<strong>Green</strong> / <strong>Bunker</strong> - click the middle of one and the wand draws its outline; <strong>Bunker wand</strong> −/+ makes it reach smaller or bigger, " +
-      "and with <strong>merge</strong> on, bunker outlines that overlap join into one bunker. <strong>Tee</strong> - click to drop one. " +
-      "<strong>Pins</strong>: the quick pass - click a green, tee or bunker's centre, or a fairway's start then its end; <strong>Shape pins</strong> turns them into outlines later. " +
-      "The tool you pick stays picked until you choose another. " +
-      "In <strong>Move</strong>, drag any shape to move it, drag its corners to reshape it (the faint dots between corners add a new one), and drop a shape " +
-      "or a corner on the <strong>bin</strong> to delete it. <strong>Hole</strong> is optional: set it and new shapes carry that number; select a shape to change its number. " +
-      "Scroll to zoom, drag or use the arrow keys to pan, <strong>Full screen</strong> for room. Everything saves as you go, as a <strong>draft</strong> the mapper ignores - press <strong>Mark ready</strong> when the course looks right, then run the mapper. " +
-      "The bright outlines are what OSM already has and the dashed amber ones are the course's saved objects - there is no need to place those again.</p></details>" +
+      '<div class="gdStudioOverlayApp" data-gd-overlay="workspace">' +
+      '<div class="gdStudioOverlayTop">' +
+      '<header class="gdStudioOverlayHead">' +
+      '<button type="button" class="gdStudioOverlayMenuToggle" data-gd-overlay="menu-toggle" aria-expanded="false" title="Course, imagery, AI and publishing">' +
+      '<span class="gdStudioOverlayHeadCourse" data-gd-overlay="course">No course picked</span>' + ICON.chevron + "</button>" +
+      '<span class="gdStudioOverlayDraft" data-gd-overlay="draft"></span>' +
+      '<span class="gdStudioOverlayStatus" data-gd-overlay="status"></span>' +
+      '<button type="button" class="gdStudioOverlaySave" data-gd-overlay="save" disabled>Save</button>' +
+      "</header>" +
+      '<div class="gdStudioOverlayMenu" data-gd-overlay="menu" hidden>' +
       '<div class="gdStudioOverlayRun" data-gd-overlay="last-run"></div>' +
       '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="pick">Pick course</button>' +
-      '<span class="gdStudioViewportCourse" data-gd-overlay="course">No course picked</span>' +
-      '<label class="gdStudioViewportField">Provider <select data-gd-overlay="provider"></select></label>' +
+      '<label class="gdStudioViewportField">Imagery <select data-gd-overlay="provider"></select></label>' +
       '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="osm" checked> Show OSM</label>' +
       '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="objects" checked> Show course objects</label>' +
+      "</div>" +
+      '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ai" disabled title="Pins in view: the AI shapes them and fills in the rest. Only shapes in view: it refits them to the ground. Nothing in view: it traces from scratch.">Scan this view with AI</button>' +
       '<label class="gdStudioViewportField gdStudioDiagramBtn">Course map… <input type="file" accept="image/*" data-gd-overlay="course-map" hidden></label>' +
       '<span class="gdStudioViewportField" data-gd-overlay="course-map-state"></span>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="source-test" disabled title="Dev test: fetch this view from Mapbox Satellite and Mapbox Terrain server-side, to judge the imagery. Nothing is stored.">Test Mapbox source</button>' +
       "</div>" +
       '<div class="gdStudioSourceTest" data-gd-overlay="source-panel" hidden></div>' +
-      '<div class="gdStudioOverlayWorkspace" data-gd-overlay="workspace">' +
-      '<div class="gdStudioViewportBar gdStudioOverlayTools">' +
-      '<span class="gdStudioOverlayModes">' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="mode-shapes" title="Place outlines - fairway lines and the wand (S)">Shapes</button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="mode-pins" title="Place pins only - centres, and a fairway\'s start and end (P)">Pins</button>' +
-      "</span>" +
-      '<button type="button" class="gdStudioDiagramBtn isActive" data-gd-overlay="tool-move" title="Select, move and reshape (V)">Move</button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-fairway" title="(F)"></button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-green" title="(G)"></button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-tee" title="(T)"></button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="tool-bunker" title="(B)"></button>' +
-      '<label class="gdStudioViewportField" data-gd-overlay="width-label">Fairway width <input type="number" min="10" max="90" step="1" data-gd-overlay="width" class="gdStudioOverlayWidth"> m</label>' +
-      '<span class="gdStudioViewportField" data-gd-overlay="wand-size-label">Bunker wand ' +
-      '<button type="button" class="gdStudioDiagramBtn gdStudioOverlayStep" data-gd-overlay="wand-smaller" title="The bunker wand reaches for a smaller edge ([)">−</button>' +
-      '<span class="gdStudioOverlayStepValue" data-gd-overlay="wand-size"></span>' +
-      '<button type="button" class="gdStudioDiagramBtn gdStudioOverlayStep" data-gd-overlay="wand-bigger" title="The bunker wand reaches for a bigger edge (])">+</button></span>' +
-      '<label class="gdStudioViewportField" data-gd-overlay="merge-label" title="A bunker outline that overlaps one already placed joins it as one bunker"><input type="checkbox" data-gd-overlay="merge"> merge overlapping bunkers</label>' +
-      '<label class="gdStudioViewportField" data-gd-overlay="hole-label">Hole <input type="number" min="1" max="36" step="1" placeholder="–" data-gd-overlay="hole" class="gdStudioOverlayWidth gdStudioOverlayHole"></label>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="shape-pins" hidden></button>' +
+      '<div class="gdStudioViewportBar">' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ready" disabled>Mark ready</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="run" disabled>Run mapper with overlay</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="clear" disabled>Delete all shapes</button>' +
+      "</div>" +
+      '<div class="gdStudioViewportReadout" data-gd-overlay="readout"></div>' +
+      '<div class="gdStudioViewportCredit" data-gd-overlay="credit"></div>' +
+      '<details class="gdStudioLede gdStudioOverlayHelp"><summary>How it works</summary>' +
+      "<p><strong>Shapes</strong>: <strong>Fairway</strong> - click along its middle and press Finish; <strong>Green</strong> / <strong>Bunker</strong> - click the middle and the wand outlines it " +
+      "(a green is then shaped by six points); <strong>Tee</strong> - click to drop a round tee. " +
+      "<strong>Pins</strong>, the quick pass: a fairway is its start then its end and becomes a fairway straight away; a green pin is outlined by the wand straight away; tees and bunkers stay pins until <strong>Shape pins</strong>. " +
+      "Whatever you just placed can be dragged at once to adjust it. In <strong>Move</strong>, drag shapes and their points, and drop either on the <strong>bin</strong> to delete. " +
+      "<strong>Link</strong>: drag from one shape to another (or tap one, then the other) to put them on the same hole; drag a shape onto empty ground to unlink it. " +
+      "Everything saves as you go, as a <strong>draft</strong> the mapper ignores - <strong>Mark ready</strong> when the course looks right, then run the mapper. " +
+      "Bright outlines are what OSM already has; dashed amber ones are the course's saved objects.</p></details>" +
+      "</div>" +
       "</div>" +
       '<div class="gdStudioOverlayStage isTool-move" data-gd-overlay="stage">' +
       '<div class="gdStudioViewportMap gdStudioOverlayMap" data-gd-overlay="map"></div>' +
-      '<div class="gdStudioOverlayHint" data-gd-overlay="hint"></div>' +
+      '<div class="gdStudioOverlayRail" role="toolbar" aria-label="Tools">' +
+      railButton("tool-move", "move", "Move", "Select, move and reshape (V)") +
+      railButton("tool-connect", "connect", "Link", "Link shapes to the same hole (C)") +
+      '<span class="gdStudioOverlayRailRule"></span>' +
+      railButton("tool-fairway", "fairway", "Fairway", "") +
+      railButton("tool-green", "green", "Green", "") +
+      railButton("tool-tee", "tee", "Tee", "") +
+      railButton("tool-bunker", "bunker", "Bunker", "") +
+      "</div>" +
+      '<div class="gdStudioOverlayOptions">' +
+      '<span class="gdStudioOverlayModes">' +
+      '<button type="button" data-gd-overlay="mode-shapes" title="Place outlines - fairway lines and the wand (S)">Shapes</button>' +
+      '<button type="button" data-gd-overlay="mode-pins" title="Quick pass - fairway start and end, green and tee centres (P)">Pins</button>' +
+      "</span>" +
+      '<label class="gdStudioOverlayOpt" data-gd-overlay="hole-label">Hole <input type="number" min="1" max="36" step="1" placeholder="–" data-gd-overlay="hole" class="gdStudioOverlayWidth gdStudioOverlayHole"></label>' +
+      '<label class="gdStudioOverlayOpt" data-gd-overlay="width-label">Width <input type="number" min="10" max="90" step="1" data-gd-overlay="width" class="gdStudioOverlayWidth"> m</label>' +
+      '<span class="gdStudioOverlayOpt" data-gd-overlay="wand-size-label">Bunker wand ' +
+      '<button type="button" class="gdStudioOverlayStep" data-gd-overlay="wand-smaller" title="The bunker wand reaches for a smaller edge ([)">−</button>' +
+      '<span class="gdStudioOverlayStepValue" data-gd-overlay="wand-size"></span>' +
+      '<button type="button" class="gdStudioOverlayStep" data-gd-overlay="wand-bigger" title="The bunker wand reaches for a bigger edge (])">+</button></span>' +
+      '<label class="gdStudioOverlayOpt" data-gd-overlay="merge-label" title="A bunker outline that overlaps one already placed joins it as one bunker"><input type="checkbox" data-gd-overlay="merge"> Merge bunkers</label>' +
+      '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="shape-pins" hidden></button>' +
+      "</div>" +
+      '<div class="gdStudioOverlayViewRail" role="toolbar" aria-label="View">' +
+      viewButton("fullscreen", "expand", "Full screen") +
+      viewButton("fit", "course", "Fit the whole course (H)") +
+      viewButton("zoom-shape", "search", "Zoom to the selected shape (Z)") +
+      viewButton("zoom-in", "plus", "Zoom in (+)") +
+      viewButton("zoom-out", "minus", "Zoom out (-)") +
+      "</div>" +
+      '<div class="gdStudioOverlayDock">' +
       '<div class="gdStudioOverlayDraftBar" data-gd-overlay="draft-bar" hidden>' +
       '<button type="button" data-gd-overlay="draft-finish" title="Finish the fairway (Enter, or double-click)">Finish</button>' +
       '<button type="button" data-gd-overlay="draft-undo" title="Take back the last point (Backspace)">Undo point</button>' +
       '<button type="button" data-gd-overlay="draft-cancel" title="Drop this fairway (Esc)">Cancel</button>' +
       "</div>" +
-      '<div class="gdStudioOverlayNav">' +
-      '<button type="button" data-gd-overlay="fit" title="Fit the whole course (H)">Course</button>' +
-      '<button type="button" data-gd-overlay="zoom-shape" title="Zoom to the selected shape (Z)">Shape</button>' +
-      '<button type="button" data-gd-overlay="fullscreen" title="Full screen (Esc to leave)">Full screen</button>' +
+      '<div class="gdStudioOverlayHint" data-gd-overlay="hint"></div>' +
       "</div>" +
-      '<button type="button" class="gdStudioOverlayBin" data-gd-overlay="bin" title="Drag a shape or corner here to delete it, or click to delete the selected shape">' +
+      '<button type="button" class="gdStudioOverlayBin" data-gd-overlay="bin" title="Drag a shape or point here to delete it, or click to delete the selected shape">' +
       BIN_ICON + "<span>Bin</span></button>" +
-      "</div>" +
-      '<div class="gdStudioViewportReadout" data-gd-overlay="readout"></div>' +
-      '<div class="gdStudioViewportCredit" data-gd-overlay="credit"></div>' +
-      '<div class="gdStudioViewportBar" style="margin-top:12px">' +
-      '<span class="gdStudioOverlayDraft" data-gd-overlay="draft"></span>' +
-      '<span class="gdStudioViewportField" data-gd-overlay="saved"></span>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ready" disabled>Mark ready</button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="clear" disabled>Delete all shapes</button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="run" disabled>Run mapper with overlay</button>' +
-      '<span class="gdStudioViewportScan" data-gd-overlay="status"></span>' +
       "</div>" +
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "mode-shapes", "mode-pins", "tool-move", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "width", "width-label", "wand-size-label", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "hole", "hole-label", "shape-pins", "workspace", "help", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "fit", "zoom-shape", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "saved", "ready", "clear", "run", "status"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "width", "width-label", "wand-size-label", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "hole", "hole-label", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -345,6 +445,7 @@
       layer.addTo(mapObj);
       try { mapObj.setMaxZoom(DRAW_MAX_ZOOM); } catch (e) {}
       el.credit.innerHTML = esc(source.label) + (source.attribution ? " — " + esc(source.attribution) : "");
+      remember();
     }
 
     /* Zoomed past the deepest level a provider has here, every tile fails and the map goes
@@ -376,15 +477,19 @@
       return !!session.course && session.loadedFor === courseIdOf(session.course) && !scanning && !busy;
     }
 
+    var TOOLS = ["move", "connect", "fairway", "green", "tee", "bunker"];
+
     /* The tool picked stays picked: placing a shape never switches to another tool, so a run
        of greens or bunkers is a run of clicks. */
     function setTool(next) {
-      tool = next === "fairway" || next === "green" || next === "tee" || next === "bunker" ? next : "move";
-      ["move", "fairway", "green", "tee", "bunker"].forEach(function (name) {
+      tool = TOOLS.indexOf(next) >= 0 ? next : "move";
+      TOOLS.forEach(function (name) {
         el["tool-" + name].classList.toggle("isActive", tool === name);
         el.stage.classList.toggle("isTool-" + name, tool === name);
       });
       if (draft.length && tool !== "fairway") cancelDraft();
+      lastPlacedId = "";
+      if (connectFrom) { connectFrom = ""; drawFeatures(); }
       if (tool !== "move" && selectedId) select("");
       /* Double-click zooms, except while laying a fairway line, where it would move the ground
          under the last point. */
@@ -396,16 +501,16 @@
 
     var TOOL_TEXT = {
       shapes: {
-        fairway: ["Fairway line", "Lay a line down the fairway (F)"],
-        green: ["Green wand", "Click a green and the wand outlines it (G)"],
-        tee: ["Tee", "Drop a tee box (T)"],
-        bunker: ["Bunker wand", "Click a bunker and the wand outlines it (B)"]
+        fairway: "Lay a line down the fairway (F)",
+        green: "Click a green and the wand outlines it (G)",
+        tee: "Drop a round tee (T)",
+        bunker: "Click a bunker and the wand outlines it (B)"
       },
       pins: {
-        fairway: ["Fairway start → end", "Click where the fairway starts, then where it ends (F)"],
-        green: ["Green centre", "Pin the middle of a green (G)"],
-        tee: ["Tee", "Pin the middle of a tee (T)"],
-        bunker: ["Bunker", "Pin the middle of a bunker (B)"]
+        fairway: "Click where the fairway starts, then where it ends - it becomes a fairway (F)",
+        green: "Pin the middle of a green - the wand outlines it (G)",
+        tee: "Pin the middle of a tee (T)",
+        bunker: "Pin the middle of a bunker (B)"
       }
     };
 
@@ -415,13 +520,12 @@
       el["mode-shapes"].classList.toggle("isActive", session.mode === "shapes");
       el["mode-pins"].classList.toggle("isActive", session.mode === "pins");
       ["fairway", "green", "tee", "bunker"].forEach(function (name) {
-        var text = TOOL_TEXT[session.mode][name];
-        el["tool-" + name].textContent = text[0];
-        el["tool-" + name].title = text[1];
+        el["tool-" + name].title = TOOL_TEXT[session.mode][name];
       });
       el["width-label"].hidden = session.mode !== "shapes";
       el["wand-size-label"].hidden = session.mode !== "shapes";
       el["merge-label"].hidden = session.mode !== "shapes";
+      remember();
       updateHint();
     }
 
@@ -438,6 +542,7 @@
       if (at < 0) at = BUNKER_WAND_SIZES.indexOf(1);
       session.bunkerWandSize = BUNKER_WAND_SIZES[Math.max(0, Math.min(BUNKER_WAND_SIZES.length - 1, at + by))];
       renderWandSize();
+      remember();
       setStatus("Bunker wand at " + Math.round(session.bunkerWandSize * 100) + "% - the next bunker you click uses it.");
     }
 
@@ -446,10 +551,21 @@
     var fullscreen = false;
     function setFullscreen(on) {
       fullscreen = !!on;
+      session.fullscreen = fullscreen;
       el.workspace.classList.toggle("isFullscreen", fullscreen);
-      el.fullscreen.textContent = fullscreen ? "Exit full screen" : "Full screen";
+      el.fullscreen.innerHTML = fullscreen ? ICON.shrink : ICON.expand;
+      el.fullscreen.title = fullscreen ? "Leave full screen (Esc)" : "Full screen";
+      el.fullscreen.setAttribute("aria-label", el.fullscreen.title);
+      el.fullscreen.classList.toggle("isActive", fullscreen);
       document.documentElement.classList.toggle("gdStudioOverlayNoScroll", fullscreen);
+      remember();
       remeasure();
+    }
+
+    function setMenu(open) {
+      el.menu.hidden = !open;
+      el["menu-toggle"].setAttribute("aria-expanded", open ? "true" : "false");
+      el["menu-toggle"].classList.toggle("isOpen", !!open);
     }
 
     function fitCourse() {
@@ -467,37 +583,24 @@
       try { mapObj.fitBounds(L.latLngBounds(toLatLngs(f.points)).pad(f.kind === "fairway" ? 0.15 : 1.2), { maxZoom: 20 }); } catch (e) {}
     }
 
-    function allGreens() {
-      var list = [];
-      if (session.osm && !session.osm.error) (session.osm.greens || []).forEach(function (g) { if (g.points && g.points.length >= 3) list.push(g.points); });
-      session.features.forEach(function (f) { if (f.kind === "green") list.push(f.points); });
-      return list;
-    }
-
-    function nearestGreen(latlng, withinM) {
-      var best = null, bestD = withinM;
-      allGreens().forEach(function (ring) {
-        var c = shapes.centroid(ring);
-        var d = shapes.distanceM({ lat: latlng.lat, lng: latlng.lng }, c);
-        if (d < bestD) { bestD = d; best = c; }
-      });
-      return best;
-    }
-
     function handleMapClick(latlng) {
       if (Date.now() - dragEndedAt < 300) return;
       if (!session.course) { setStatus("Pick a course first."); return; }
+      if (tool === "connect") { if (connectFrom) { connectFrom = ""; drawFeatures(); updateHint(); } return; }
       if (tool === "move") { if (selectedId) select(""); return; }
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
       var point = { lat: latlng.lat, lng: latlng.lng };
       if (tool === "fairway") addDraftPoint(point);
       else if (session.mode === "pins") {
-        addFeature({ kind: tool, pin: true, points: [point] });
-        setStatus(kindLabel(tool) + " pinned.");
+        var pin = addFeature({ kind: tool, pin: true, points: [point] });
+        /* A green pin is outlined by the wand at once; drag the pin while it works and the
+           wand runs again where it is dropped. */
+        if (tool === "green") { setStatus("Green pinned - finding its edge…"); wandPin(pin.id); }
+        else setStatus(kindLabel(tool) + " pinned.");
       }
       else if (tool === "green" || tool === "bunker") placeWand(point, tool);
-      else if (tool === "tee") addFeature({ kind: "tee", points: shapes.teeAt(point, nearestGreen(point, 600)) });
+      else if (tool === "tee") addFeature({ kind: "tee", points: shapes.teeAt(point) });
     }
 
     /* ---- fairway line ---- */
@@ -560,16 +663,11 @@
       if (draft.length < 2) return;
       var line = draft.slice();
       cancelDraft();
-      if (session.mode === "pins") {
-        if (shapes.distanceM(line[0], line[1]) < 5) { setStatus("The start and end are too close together to be a fairway.", true); return; }
-        addFeature({ kind: "fairway", pin: true, points: line });
-        setStatus("Fairway pinned. Click the next fairway's start, or pick another tool.");
-        return;
-      }
+      if (session.mode === "pins" && shapes.distanceM(line[0], line[1]) < 5) { setStatus("The start and end are too close together to be a fairway.", true); return; }
       var ring = shapes.fairwayFromLine(line, session.fairwayWidth);
       if (!ring) { setStatus("That line is too short to be a fairway.", true); return; }
       addFeature({ kind: "fairway", points: ring });
-      setStatus("Fairway placed. Lay the next one, or press Move (V) to drag its corners to fit.");
+      setStatus(session.mode === "pins" ? "Fairway placed from its start and end. Click the next fairway's start, or drag this one to adjust it." : "Fairway placed. Lay the next one, or press Move (V) to drag its corners to fit.");
     }
 
     /* ---- the wand ---- */
@@ -637,6 +735,7 @@
         if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold.", true); return; }
         var word = kindLabel(kind);
         var points = result.shape || shapes.circle(point, kind === "bunker" ? shapes.BUNKER_RADIUS_M : shapes.GREEN_RADIUS_M);
+        if (kind === "green") points = shapes.smoothGreen(points);
         var merged = kind === "bunker" ? mergeBunker(points, holeNumber(hole), null) : null;
         if (merged) {
           drawFeatures();
@@ -666,7 +765,7 @@
         return Promise.resolve();
       }
       if (f.kind === "tee") {
-        f.points = shapes.teeAt(f.points[0], nearestGreen(f.points[0], 600));
+        f.points = shapes.teeAt(f.points[0]);
         delete f.pin;
         return Promise.resolve();
       }
@@ -683,9 +782,20 @@
           if (selectedId === live.id) selectedId = "";
           return;
         }
-        live.points = points;
+        live.points = live.kind === "green" ? shapes.smoothGreen(points) : points;
         delete live.pin;
         if (result.shape) live.source = "wand"; else delete live.source;
+      });
+    }
+
+    /* One pin through the wand, then saved - the pins-mode green, outlined as soon as it lands. */
+    function wandPin(pinId) {
+      shapePin(pinId).then(function () {
+        if (destroyed) return;
+        var f = findFeature(pinId);
+        drawFeatures();
+        changed();
+        if (f && !f.pin) setStatus(kindLabel(f.kind) + " outlined - drag its points to fit.");
       });
     }
 
@@ -724,7 +834,7 @@
       if (raw.source) f.source = raw.source;
       if (raw.pin) f.pin = true;
       session.features.push(f);
-      if (!quiet) { selectedId = tool === "move" ? f.id : selectedId; drawFeatures(); changed(); }
+      if (!quiet) { lastPlacedId = f.id; selectedId = tool === "move" ? f.id : selectedId; drawFeatures(); changed(); }
       return f;
     }
 
@@ -736,6 +846,7 @@
     }
 
     function removeVertex(f, index) {
+      if (isSmooth(f)) { setStatus("A green keeps its " + shapes.GREEN_HANDLES + " points - bin the whole green instead.", true); return false; }
       if (f.points.length <= minPoints(f)) { setStatus(f.pin ? "A pin keeps its points - bin the whole pin instead." : "A " + kindLabel(f.kind).toLowerCase() + " needs at least " + minPoints(f) + " corners - bin the whole shape instead.", true); return false; }
       f.points.splice(index, 1);
       drawFeatures();
@@ -749,11 +860,12 @@
         [entry.shape].concat(entry.vertices, entry.mids, entry.ends).forEach(function (l) { try { mapObj.removeLayer(l); } catch (e) {} });
       });
       featureLayers = {};
+      clearLinkLayers();
     }
 
     function midpoints(f) {
       var out = [];
-      if (f.pin) return out;
+      if (f.pin || isSmooth(f)) return out;
       var n = f.points.length;
       var last = isPolygon(f.kind) ? n : n - 1;
       for (var i = 0; i < last; i++) {
@@ -763,10 +875,16 @@
       return out;
     }
 
+    /* A green is edited by its six handles; anything else by every corner. */
+    function isSmooth(f) { return f.kind === "green" && !f.pin; }
+    function handlePoints(f) { return isSmooth(f) ? shapes.ringHandles(f.points) : f.points; }
+
+    function canDrag(f) { return !!f && canEdit() && (tool === "move" || f.id === lastPlacedId); }
+
     function drawFeatures() {
       clearFeatureLayers();
       session.features.forEach(function (f) {
-        var selected = f.id === selectedId;
+        var selected = f.id === selectedId || f.id === connectFrom;
         var latlngs = toLatLngs(f.points);
         var shape;
         if (f.pin && f.points.length === 1) {
@@ -778,6 +896,9 @@
           shape = isPolygon(f.kind) ? L.polygon(latlngs, style) : L.polyline(latlngs, style);
         }
         shape.addTo(mapObj);
+        /* So the Link tool can tell which shape a drag was dropped on. */
+        var node = shape.getElement && shape.getElement();
+        if (node) node.setAttribute("data-gd-feature", f.id);
         shape.on("click", function (e) {
           /* Selecting a shape must not also count as a click on the map under it. */
           if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
@@ -786,8 +907,9 @@
           select(f.id);
         });
         onPress(shape, function (e) {
-          if (tool !== "move" || !canEdit()) return;
-          if (selectedId !== f.id) select(f.id);
+          if (tool === "connect") { if (canEdit()) beginConnect(f.id, e); return; }
+          if (!canDrag(f)) return;
+          if (tool === "move" && selectedId !== f.id) select(f.id);
           beginDrag(f.id, "body", -1, e);
         });
         if (f.hole) shape.bindTooltip(String(f.hole), { permanent: true, direction: "center", className: "gdStudioOverlayLabel" });
@@ -796,8 +918,8 @@
         if (f.pin && f.points.length === 2 && !selected) {
           f.points.forEach(function (p) { entry.ends.push(L.circleMarker([p.lat, p.lng], STYLE.pinFairwayEnd).addTo(mapObj)); });
         }
-        if (selected && canEdit() && f.points.length > 1 && bigEnoughForHandles(f)) {
-          f.points.forEach(function (p, i) {
+        if (f.id === selectedId && canEdit() && f.points.length > 1 && bigEnoughForHandles(f)) {
+          handlePoints(f).forEach(function (p, i) {
             var v = L.circleMarker([p.lat, p.lng], STYLE.vertex).addTo(mapObj);
             onPress(v, function (e) { beginDrag(f.id, "vertex", i, e); });
             v.on("click", function (e) { if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent); });
@@ -823,6 +945,7 @@
         }
         featureLayers[f.id] = entry;
       });
+      drawLinks();
       updateBin();
       updateReadout();
       renderHoleField();
@@ -853,7 +976,8 @@
       if (f.pin && f.points.length === 1) entry.shape.setLatLng([f.points[0].lat, f.points[0].lng]);
       else entry.shape.setLatLngs(toLatLngs(f.points));
       entry.ends.forEach(function (m, i) { if (f.points[i]) m.setLatLng([f.points[i].lat, f.points[i].lng]); });
-      entry.vertices.forEach(function (v, i) { if (f.points[i]) v.setLatLng([f.points[i].lat, f.points[i].lng]); });
+      var handles = handlePoints(f);
+      entry.vertices.forEach(function (v, i) { if (handles[i]) v.setLatLng([handles[i].lat, handles[i].lng]); });
       midpoints(f).forEach(function (m, i) { if (entry.mids[i]) entry.mids[i].setLatLng([m.lat, m.lng]); });
     }
 
@@ -919,7 +1043,7 @@
 
     function beginDrag(id, mode, index, e, inserted) {
       var f = findFeature(id);
-      if (!f || tool !== "move" || !canEdit() || !e || !e.originalEvent) return;
+      if (!canDrag(f) || !e || !e.originalEvent) return;
       L.DomEvent.stop(e.originalEvent);
       mapObj.dragging.disable();
       drag = {
@@ -945,6 +1069,10 @@
       if (drag.mode === "body") {
         var dLat = ll.lat - drag.start.lat, dLng = ll.lng - drag.start.lng;
         f.points = drag.orig.map(function (p) { return { lat: p.lat + dLat, lng: p.lng + dLng }; });
+      } else if (isSmooth(f)) {
+        var handles = shapes.ringHandles(drag.orig);
+        handles[drag.index] = { lat: ll.lat, lng: ll.lng };
+        f.points = shapes.smoothRing(handles);
       } else {
         f.points[drag.index] = { lat: ll.lat, lng: ll.lng };
       }
@@ -981,6 +1109,129 @@
       }
       drawFeatures();
       changed();
+      if (f.pin && f.kind === "green") wandPin(f.id);
+    }
+
+    /* ---- linking shapes to a hole ----
+       Drag from one shape to another, or tap one and then the other: the second joins the
+       first's hole (or the first joins the second's, when only that one is numbered; when
+       neither is, both take the lowest number no shape uses yet). Dropped on empty ground, the
+       shape dragged from leaves its hole. */
+
+    function featureAt(x, y) {
+      var node = document.elementFromPoint(x, y);
+      while (node && node !== el.stage) {
+        var id = node.getAttribute && node.getAttribute("data-gd-feature");
+        if (id) return findFeature(id);
+        node = node.parentNode;
+      }
+      return null;
+    }
+
+    function freeHole() {
+      var used = {};
+      session.features.forEach(function (f) { if (f.hole) used[f.hole] = true; });
+      for (var n = 1; n <= 36; n++) if (!used[n]) return n;
+      return null;
+    }
+
+    function linkFeatures(a, b) {
+      var hole = a.hole || b.hole || freeHole();
+      if (!hole) { setStatus("Every hole number is in use.", true); return; }
+      a.hole = hole;
+      b.hole = hole;
+      drawFeatures();
+      changed();
+      setStatus(kindLabel(a.kind) + " and " + kindLabel(b.kind).toLowerCase() + " are on hole " + hole + ".");
+    }
+
+    function beginConnect(id, e) {
+      var f = findFeature(id);
+      if (!f || !e || !e.originalEvent) return;
+      L.DomEvent.stop(e.originalEvent);
+      mapObj.dragging.disable();
+      var from = shapes.centroid(f.points);
+      connect = {
+        id: id, moved: false, x: e.originalEvent.clientX, y: e.originalEvent.clientY,
+        line: L.polyline([[from.lat, from.lng], [from.lat, from.lng]], STYLE.linkDraft).addTo(mapObj), from: from
+      };
+      document.addEventListener("pointermove", onConnectMove);
+      document.addEventListener("pointerup", onConnectEnd);
+      document.addEventListener("pointercancel", onConnectEnd);
+    }
+
+    function onConnectMove(event) {
+      if (!connect || destroyed) return;
+      if (!connect.moved && Math.hypot(event.clientX - connect.x, event.clientY - connect.y) < 6) return;
+      connect.moved = true;
+      var ll = mapObj.mouseEventToLatLng(event);
+      connect.line.setLatLngs([[connect.from.lat, connect.from.lng], ll]);
+    }
+
+    function onConnectEnd(event) {
+      document.removeEventListener("pointermove", onConnectMove);
+      document.removeEventListener("pointerup", onConnectEnd);
+      document.removeEventListener("pointercancel", onConnectEnd);
+      var c = connect;
+      connect = null;
+      if (destroyed || !c) return;
+      try { mapObj.removeLayer(c.line); } catch (e) {}
+      try { mapObj.dragging.enable(); } catch (e) {}
+      dragEndedAt = Date.now();
+      var from = findFeature(c.id);
+      if (!from || event.type === "pointercancel") return;
+      if (!c.moved) {
+        /* A tap: the first picks the shape to link from, the second links it. */
+        var first = connectFrom ? findFeature(connectFrom) : null;
+        if (first && first.id !== from.id) { connectFrom = ""; linkFeatures(first, from); }
+        else { connectFrom = connectFrom === from.id ? "" : from.id; drawFeatures(); }
+        updateHint();
+        return;
+      }
+      connectFrom = "";
+      var to = featureAt(event.clientX, event.clientY);
+      if (to && to.id !== from.id) { linkFeatures(from, to); updateHint(); return; }
+      if (!to && from.hole) {
+        var was = from.hole;
+        from.hole = null;
+        drawFeatures();
+        changed();
+        setStatus(kindLabel(from.kind) + " taken off hole " + was + ".");
+      } else drawFeatures();
+      updateHint();
+    }
+
+    function clearLinkLayers() {
+      linkLayers.forEach(function (l) { try { mapObj.removeLayer(l); } catch (e) {} });
+      linkLayers = [];
+    }
+
+    /* Shapes on one hole are joined by a dotted line - tee to fairway to green, and each bunker
+       to the nearest of those - so what belongs together reads at a glance. */
+    var LINK_ORDER = { tee: 0, hole: 1, fairway: 2, green: 3 };
+    function drawLinks() {
+      clearLinkLayers();
+      var groups = {};
+      session.features.forEach(function (f) { if (f.hole && f.points.length) (groups[f.hole] = groups[f.hole] || []).push(f); });
+      Object.keys(groups).forEach(function (hole) {
+        var list = groups[hole];
+        if (list.length < 2) return;
+        var spine = list.filter(function (f) { return f.kind !== "bunker"; }).sort(function (a, b) { return LINK_ORDER[a.kind] - LINK_ORDER[b.kind]; }).map(function (f) { return shapes.centroid(f.points); });
+        var bunkers = list.filter(function (f) { return f.kind === "bunker"; }).map(function (f) { return shapes.centroid(f.points); });
+        var segments = [];
+        for (var i = 1; i < spine.length; i++) segments.push([spine[i - 1], spine[i]]);
+        bunkers.forEach(function (b, k) {
+          var anchors = spine.length ? spine : bunkers.slice(0, k);
+          if (!anchors.length) return;
+          var near = anchors.slice().sort(function (p, q) { return shapes.distanceM(b, p) - shapes.distanceM(b, q); })[0];
+          segments.push([near, b]);
+        });
+        segments.forEach(function (seg) {
+          var line = L.polyline(toLatLngs(seg), STYLE.link).addTo(mapObj);
+          try { line.bringToBack(); } catch (e) {}
+          linkLayers.push(line);
+        });
+      });
     }
 
     function updateBin() {
@@ -996,6 +1247,7 @@
       scheduleSave(SAVE_DELAY_MS);
       updateActions();
       updateReadout();
+      remember();
     }
 
     function scheduleSave(delay) {
@@ -1005,15 +1257,18 @@
 
     function renderSaveState() {
       if (destroyed) return;
-      var text = !session.course ? ""
-        : session.saving ? "Saving…"
-        : session.saveError ? "Not saved - " + session.saveError + " (retrying)"
-        : session.dirty ? "Unsaved changes…"
-        : session.loadedFor ? "All changes saved" : "";
-      el.saved.innerHTML = session.saveError ? '<span class="gdStudioWarnText">' + esc(text) + "</span>" : esc(text);
+      /* One button says it all: what is waiting, what is going, and what failed. Changes save
+         by themselves after a pause; the button saves now. */
+      var save = el.save;
+      save.textContent = session.saving ? "Saving…" : session.saveError ? "Retry save" : session.dirty ? "Save" : "Saved";
+      save.disabled = !session.loadedFor || session.saving || (!session.dirty && !session.saveError);
+      save.classList.toggle("isDirty", !!session.dirty && !session.saveError);
+      save.classList.toggle("isWarn", !!session.saveError);
+      save.title = session.saveError ? "Not saved - " + session.saveError : session.dirty ? "Save now (changes also save by themselves)" : "Everything is saved";
       var shown = !!session.loadedFor && session.features.length > 0;
       var ready = shown && session.status === "ready" && !session.dirty;
-      el.draft.textContent = !shown ? "" : ready ? "Ready - the mapper uses this" : "Draft - the mapper ignores this until it is marked ready";
+      el.draft.textContent = !shown ? "" : ready ? "Ready" : "Draft";
+      el.draft.title = ready ? "Ready - the mapper uses this" : "Draft - the mapper ignores this until it is marked ready";
       el.draft.classList.toggle("isReady", ready);
     }
 
@@ -1043,6 +1298,7 @@
         if (!destroyed) scheduleSave(SAVE_RETRY_MS);
       }).then(function () {
         session.saving = false;
+        remember();
         var again = session.saveAgain || (session.dirty && session.rev !== sentRev);
         session.saveAgain = false;
         if (!destroyed) { renderSaveState(); updateActions(); }
@@ -1237,16 +1493,20 @@
       var text = "";
       if (!session.course) text = "Pick a course to start";
       else if (scanning) text = "AI scan running - shapes are locked until it finishes";
+      else if (tool === "connect") text = connectFrom ? "Now tap the shape to link it to" : "Drag from one shape to another to put them on the same hole · or tap one, then the other · drag onto empty ground to unlink";
       else if (tool === "fairway" && session.mode === "pins") text = draft.length ? "Click where the fairway ends · Esc cancels" : "Click where the fairway starts";
       else if (tool === "fairway") text = draft.length ? (draft.length >= 2 ? "Keep clicking along the fairway · Finish (or Enter / double-click) when done" : "Click the next point along the fairway") : "Click at the tee end of the fairway, then along its middle";
+      else if (tool === "green" && session.mode === "pins") text = "Click the middle of each green - the wand outlines it";
       else if (tool !== "move" && session.mode === "pins") text = "Click the middle of each " + kindLabel(tool).toLowerCase() + " to pin it";
       else if (tool === "green") text = "Click the middle of a green";
       else if (tool === "bunker") text = "Click the middle of a bunker · [ and ] make the wand reach smaller or bigger";
       else if (tool === "tee") text = "Click where the tee is";
+      if (lastPlacedId && tool !== "move" && tool !== "connect" && !draft.length && findFeature(lastPlacedId)) text += " · drag the one you just placed to adjust it";
+      else if (selectedId && isSmooth(findFeature(selectedId) || {})) text = "Drag to move · drag its " + shapes.GREEN_HANDLES + " points to reshape · Delete or the bin removes it";
       else if (selectedId && (findFeature(selectedId) || {}).pin) text = "Drag to move · Shape this pin turns it into an outline · Delete or the bin removes it";
       else if (selectedId && !bigEnoughForHandles(findFeature(selectedId) || { points: [] })) text = "Drag to move · zoom in to reshape its corners · Delete or the bin removes it";
       else if (selectedId) text = "Drag to move · drag corners to reshape · faint dots add a corner · right-click a corner or drag it to the bin to remove it · Delete or the bin removes the shape";
-      else text = "Choose Fairway, Green, Tee or Bunker to place · click a shape in Move to adjust it";
+      else text = "Choose Fairway, Green, Tee or Bunker to place · click a shape in Move to adjust it · Link puts shapes on one hole";
       if (wandsRunning) text = "Finding the edge… · " + text;
       el.hint.textContent = text;
     }
@@ -1270,6 +1530,7 @@
       else if (osm && osm.error) bits.push("OSM: " + osm.error);
       el.readout.textContent = bits.join(" · ");
       session.view = here ? { lat: here.lat, lng: here.lng, zoom: mapObj.getZoom() } : session.view;
+      remember();
     }
 
     function updateActions() {
@@ -1284,7 +1545,7 @@
       el.run.title = session.dirty ? "Wait for the overlay to save - the mapper reads what is saved" : "";
       el.ready.disabled = !canEdit() || !session.features.length || (session.status === "ready" && !session.dirty);
       el.ready.title = session.status === "ready" && !session.dirty ? "Already ready - change a shape and it goes back to draft" : "Let the mapper use this overlay";
-      ["tool-fairway", "tool-green", "tool-tee", "tool-bunker"].forEach(function (name) { el[name].disabled = !canEdit() || !!shapingPins; });
+      ["tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker"].forEach(function (name) { el[name].disabled = !canEdit() || !!shapingPins; });
       var pins = session.features.filter(function (f) { return f.pin; }).length;
       var selected = selectedId ? findFeature(selectedId) : null;
       el["shape-pins"].hidden = !pins;
@@ -1380,6 +1641,11 @@
         session.loadedFor = id;
         session.dirty = false;
         session.saveError = "";
+        /* Shapes that had not saved when the page was last left go back on, and save. */
+        var unsaved = session.unsaved;
+        session.unsaved = null;
+        var restored = !!(unsaved && unsaved.courseId === id);
+        if (restored) { session.features = unsaved.features; session.dirty = true; session.rev++; }
         selectedId = "";
         busy = false;
         drawOsm();
@@ -1393,7 +1659,8 @@
           if (Date.now() - since < AI_TIMEOUT_MS) { scanning = true; pollScan(id, since); }
         }
         var when = data && data.overlay && data.overlay.updatedAt ? " · saved " + new Date(data.overlay.updatedAt).toLocaleString() : "";
-        setStatus(session.features.length ? session.features.length + " saved shape" + (session.features.length === 1 ? "" : "s") + " (" + session.status + ")" + when : "Nothing placed on this course yet.");
+        if (restored) { scheduleSave(SAVE_DELAY_MS); setStatus("Put back the changes that had not saved last time - saving them now."); }
+        else setStatus(session.features.length ? session.features.length + " saved shape" + (session.features.length === 1 ? "" : "s") + " (" + session.status + ")" + when : "Nothing placed on this course yet.");
       }).catch(function (error) {
         if (destroyed) return;
         setStatus("Could not load: " + (error && error.message || error), true);
@@ -1843,8 +2110,9 @@
       var restoring = !!(opts && opts.restoring);
       session.course = course;
       var point = courseLatLng(course);
-      el.course.textContent = String(course && (course.name || course.courseName) || "Course") +
-        (point ? " · " + point[0].toFixed(5) + ", " + point[1].toFixed(5) : " · no coordinates");
+      el.course.textContent = String(course && (course.name || course.courseName) || "Course");
+      el.course.title = point ? point[0].toFixed(5) + ", " + point[1].toFixed(5) : "No coordinates";
+      remember();
       if (!point) { setStatus("This course has no coordinates - set its location first.", true); return; }
       if (!restoring) {
         mapObj.setView(point, 16);
@@ -1887,7 +2155,7 @@
       var opened = pick && typeof pick.open === "function" && pick.open({
         source: "studio-map-overlay",
         onReturn: remeasure,
-        onPick: function (course) { if (!destroyed) { cancelDraft(); setTool("move"); showCourse(course); } }
+        onPick: function (course) { if (!destroyed) { cancelDraft(); setTool("move"); setMenu(false); showCourse(course); } }
       });
       if (!opened) setStatus("The course picker is not loaded on this surface.", true);
     }
@@ -1895,7 +2163,7 @@
     /* ---- boot ---- */
 
     mapObj = L.map(el.map, {
-      zoomControl: true,
+      zoomControl: false,
       attributionControl: false,
       doubleClickZoom: true,
       scrollWheelZoom: true,
@@ -1942,6 +2210,7 @@
       if (target && /^(input|textarea|select)$/i.test(target.tagName)) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (!containerEl.isConnected) return;
+      if (event.key === "Escape" && !el.menu.hidden) { event.preventDefault(); setMenu(false); return; }
       if (event.key === "Escape" && fullscreen && !draft.length && !selectedId && tool === "move") { event.preventDefault(); setFullscreen(false); return; }
       if (navKey(event)) return;
       if (draft.length) {
@@ -1964,7 +2233,7 @@
       if (key === "z") { zoomToSelected(); return; }
       if (key === "s" || key === "p") { setMode(key === "p" ? "pins" : "shapes"); return; }
       if (key === "[" || key === "]") { stepWandSize(key === "]" ? 1 : -1); return; }
-      var shortcut = { v: "move", f: "fairway", g: "green", t: "tee", b: "bunker" }[key];
+      var shortcut = { v: "move", c: "connect", f: "fairway", g: "green", t: "tee", b: "bunker" }[key];
       if (shortcut && (shortcut === "move" || canEdit())) setTool(shortcut);
     }
     document.addEventListener("keydown", onKey);
@@ -1972,12 +2241,13 @@
     el.pick.addEventListener("click", pickCourse);
     el.provider.addEventListener("change", function () { useSource(el.provider.value); });
     el.osm.checked = session.showOsm;
-    el.osm.addEventListener("change", function () { session.showOsm = el.osm.checked; drawOsm(); });
+    el.osm.addEventListener("change", function () { session.showOsm = el.osm.checked; drawOsm(); remember(); });
     el.objects.checked = session.showObjects;
-    el.objects.addEventListener("change", function () { session.showObjects = el.objects.checked; drawObjects(); });
+    el.objects.addEventListener("change", function () { session.showObjects = el.objects.checked; drawObjects(); remember(); });
     el.ai.addEventListener("click", scanWithAi);
     el["source-test"].addEventListener("click", runSourceTest);
     el["tool-move"].addEventListener("click", function () { setTool("move"); });
+    el["tool-connect"].addEventListener("click", function () { setTool("connect"); });
     el["tool-fairway"].addEventListener("click", function () { setTool("fairway"); });
     el["tool-green"].addEventListener("click", function () { setTool("green"); });
     el["tool-tee"].addEventListener("click", function () { setTool("tee"); });
@@ -1988,22 +2258,35 @@
       session.fairwayWidth = w && w >= 10 && w <= 90 ? w : shapes.FAIRWAY_WIDTH_M;
       el.width.value = session.fairwayWidth;
       drawDraft();
+      remember();
     });
     el["mode-shapes"].addEventListener("click", function () { setMode("shapes"); });
     el["mode-pins"].addEventListener("click", function () { setMode("pins"); });
     el["wand-smaller"].addEventListener("click", function () { stepWandSize(-1); });
     el["wand-bigger"].addEventListener("click", function () { stepWandSize(1); });
     el.merge.checked = session.mergeBunkers;
-    el.merge.addEventListener("change", function () { session.mergeBunkers = el.merge.checked; });
+    el.merge.addEventListener("change", function () { session.mergeBunkers = el.merge.checked; remember(); });
     el["shape-pins"].addEventListener("click", shapePins);
     el["draft-finish"].addEventListener("click", finishFairway);
     el["draft-undo"].addEventListener("click", undoDraftPoint);
     el["draft-cancel"].addEventListener("click", cancelDraft);
-    /* The instructions start folded on a narrow screen, where they would push the map out of view. */
-    if (window.matchMedia && window.matchMedia("(max-width: 860px)").matches) el.help.open = false;
+    el["menu-toggle"].addEventListener("click", function () { setMenu(el.menu.hidden); });
+    /* Back to the map closes the pull-down. */
+    el.stage.addEventListener("pointerdown", function () { if (!el.menu.hidden) setMenu(false); });
+    el.save.addEventListener("click", function () {
+      flushSave().then(function () {
+        if (destroyed) return;
+        setStatus(session.dirty ? "Not saved yet - " + (session.saveError || "try again") : "Saved.", !!session.dirty);
+      });
+    });
+    el["zoom-in"].addEventListener("click", function () { mapObj.zoomIn(1); });
+    el["zoom-out"].addEventListener("click", function () { mapObj.zoomOut(1); });
     el.fit.addEventListener("click", fitCourse);
     el["zoom-shape"].addEventListener("click", zoomToSelected);
     el.fullscreen.addEventListener("click", function () { setFullscreen(!fullscreen); });
+    if (session.fullscreen) setFullscreen(true);
+    /* Nothing to work on yet: open the pull-down, where the course is picked. */
+    setMenu(!session.course);
     el.bin.addEventListener("click", function () {
       if (!selectedId || !canEdit()) { setStatus("Drag a shape or a corner onto the bin to delete it."); return; }
       var f = findFeature(selectedId);
@@ -2043,6 +2326,11 @@
       if (saveTimer) clearTimeout(saveTimer);
       document.removeEventListener("keydown", onKey);
       document.documentElement.classList.remove("gdStudioOverlayNoScroll");
+      containerEl.classList.remove("gdStudioOverlayHost");
+      rememberNow();
+      document.removeEventListener("pointermove", onConnectMove);
+      document.removeEventListener("pointerup", onConnectEnd);
+      document.removeEventListener("pointercancel", onConnectEnd);
       document.removeEventListener("pointermove", onDragMove);
       document.removeEventListener("pointerup", onDragEnd);
       document.removeEventListener("pointercancel", onDragEnd);

@@ -30,6 +30,7 @@ const endpoint = read("functions/course-map-overlay.mjs");
 const store = read("functions/lib/gd-map-overlay-store.mjs");
 const adminDb = read("scripts/studio/gd-admin-course-db.js");
 const source = read("index.html");
+const shell = read("scripts/studio/studio-shell.css");
 const toml = read("netlify.toml");
 
 /* ---------- the page is reachable ---------- */
@@ -84,10 +85,13 @@ test("the page writes only through the overlay API and the mapper job queue", ()
   assert.ok(page.includes('kind: "remap"'), "the mapper run must be a remap - the overlay changes hole geometry, so a stale map must be cleared");
   [
     "GDCourseLocation.confirm", "GDCourseLocation.propose", "GDCourseLocation.remove",
-    "/api/course-maps", "objects_json", "holes_json", "supabase.co", "localStorage"
+    "/api/course-maps", "objects_json", "holes_json", "supabase.co"
   ].forEach((snippet) => {
     assert.ok(!page.includes(snippet), "the overlay page must write nothing but the overlay — found: " + snippet);
   });
+  const keys = page.match(/localStorage\.(?:setItem|getItem)\(([^,)]+)/g) || [];
+  assert.ok(keys.length && keys.every((k) => k.includes("STORE_KEY")), "the only thing kept in the browser is the page's own state");
+  assert.ok(page.includes('var STORE_KEY = "gd_studio_map_overlay_v1"'), "the page keeps its state under its own key");
 });
 
 test("the mapper run is gated on a saved overlay, so what runs is what is on screen", () => {
@@ -98,7 +102,7 @@ test("the mapper run is gated on a saved overlay, so what runs is what is on scr
 
 test("every change autosaves, and leaving the page flushes what is waiting", () => {
   assert.ok(/function changed\(\) \{[\s\S]*?scheduleSave\(SAVE_DELAY_MS\)/.test(page), "changed() must schedule a save");
-  assert.ok(!page.includes('data-gd-overlay="save"'), "there is no Save button - saving is automatic");
+  assert.ok(page.includes('data-gd-overlay="save"') && page.includes("flushSave().then(function () {"), "Save saves now, on top of the autosave");
   assert.ok(/return function cleanup\(\) \{\s*\/\*[^*]*\*\/\s*flushSave\(\);/.test(page), "cleanup must flush a pending save before tearing down");
   assert.ok(page.includes("if (session.rev === sentRev)"), "a save only adopts the server copy when nothing changed while it was in flight");
 });
@@ -114,7 +118,7 @@ test("shapes come from the shared builders: a fairway line, a clicked green thro
 });
 
 test("a bunker is a pin the same wand outlines, on its bunker profile", () => {
-  assert.ok(page.includes('data-gd-overlay="tool-bunker"'), "no Bunker pin tool");
+  assert.ok(page.includes('railButton("tool-bunker"'), "no Bunker tool");
   assert.ok(page.includes("seed: point, kind: kind, scale: size }, WAND_API"), "the click must tell the wand which kind it is outlining, and at what size");
   assert.ok(page.includes("WAND_TARGET_MPP[kind]") && page.includes("WAND_MAX_M2[kind]"), "the capture must be sized for the kind being outlined");
   assert.ok(page.includes("shapes.BUNKER_RADIUS_M"), "a bunker pin the wand cannot read still leaves a bunker to shape");
@@ -179,10 +183,12 @@ test("bunker wand: its reach steps smaller and bigger, and overlapping bunkers m
   assert.ok(page.includes('data-gd-overlay="merge"') && page.includes("shapes.mergeOverlapping(f.points, merged)"), "overlapping bunker outlines must merge through the shared builder");
 });
 
-test("pins mode: centres and fairway ends, stored as pins and shaped later", () => {
+test("pins mode: a fairway's ends become a fairway, a green pin is outlined at once, tees and bunkers stay pins", () => {
   assert.ok(page.includes('data-gd-overlay="mode-pins"'), "no Pins mode");
   assert.ok(page.includes('addFeature({ kind: tool, pin: true, points: [point] })'), "a green, tee or bunker pin is its centre");
-  assert.ok(page.includes('addFeature({ kind: "fairway", pin: true, points: line })'), "a fairway pin is its start and end");
+  assert.ok(!page.includes('addFeature({ kind: "fairway", pin: true'), "a fairway's start and end make the fairway straight away");
+  assert.ok(page.includes('if (tool === "green") { setStatus("Green pinned - finding its edge…"); wandPin(pin.id); }'), "a green pin goes straight through the wand");
+  assert.ok(/if \(f\.pin && f\.kind === "green"\) wandPin\(f\.id\)/.test(page), "a green pin dragged while the wand works is outlined again where it lands");
   assert.ok(page.includes('data-gd-overlay="shape-pins"') && page.includes("function shapePin(pinId)"), "pins must be able to become shapes");
   const core = read("functions/lib/gd-map-overlay-core.mjs");
   assert.ok(core.includes("const points = feature.pin ? pinShape(feature) : feature.points;"), "the mapper must read a pin as its default shape");
@@ -264,6 +270,30 @@ test("the table migration exists and is service-role only", () => {
   assert.ok(sql.includes("course_id text primary key"), "one row per course");
   assert.ok(sql.includes("enable row level security"));
   assert.ok(sql.includes("auth.role() = 'service_role'"), "nothing on a player's device reads or writes this table");
+});
+
+test("Link: drag from one shape to another, or tap both, to put them on one hole", () => {
+  assert.ok(page.includes('railButton("tool-connect"'), "no Link tool");
+  assert.ok(page.includes("function linkFeatures(a, b)") && page.includes("var hole = a.hole || b.hole || freeHole();"), "linking must share a hole number, taking the first numbered one");
+  assert.ok(page.includes('node.setAttribute("data-gd-feature", f.id)') && page.includes("document.elementFromPoint(x, y)"), "a Link drag must find the shape it was dropped on");
+  assert.ok(page.includes("function drawLinks()"), "shapes on one hole must be drawn joined");
+});
+
+test("the shape just placed can be dragged without switching to Move", () => {
+  assert.ok(page.includes('return !!f && canEdit() && (tool === "move" || f.id === lastPlacedId);'), "only Move, or the last placed shape, can be dragged");
+  assert.ok(page.includes("lastPlacedId = f.id;"), "placing a shape must make it the draggable one");
+});
+
+test("a green is shaped by six points once the wand has outlined it", () => {
+  assert.ok(page.includes('if (kind === "green") points = shapes.smoothGreen(points);'), "a wand green must be kept as the smooth six-point outline");
+  assert.ok(page.includes("f.points = shapes.smoothRing(handles);"), "dragging a green's point must re-curve the outline through its handles");
+  assert.ok(page.includes("if (f.pin || isSmooth(f)) return out;"), "a green has no add-a-point dots");
+});
+
+test("one screen: tools float over the map, the rest is in the pull-down", () => {
+  assert.ok(page.includes('containerEl.classList.add("gdStudioOverlayHost")') && page.includes('containerEl.classList.remove("gdStudioOverlayHost")'), "the page must take over the workspace while it is up, and give it back");
+  assert.ok(page.includes('data-gd-overlay="menu"') && page.includes("function setMenu(open)"), "no pull-down for the course, imagery and publishing");
+  assert.ok(shell.includes(".gdStudioWorkspace.gdStudioOverlayHost { padding: 0; overflow: hidden;"), "the workspace must not scroll under the overlay page");
 });
 
 let failed = 0;

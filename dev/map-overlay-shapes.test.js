@@ -42,12 +42,24 @@ test("too short a line, or one point, makes no fairway", () => {
   assert.strictEqual(shapes.fairwayFromLine([at(0, 0), at(0, 2)], 35), null);
 });
 
-test("a tee box is the tee's size, its long side facing the green", () => {
-  const tee = shapes.teeAt(at(0, 0), at(0, 300));
-  assert.strictEqual(tee.length, 4);
-  assert.ok(Math.abs(area(tee) - shapes.TEE_LENGTH_M * shapes.TEE_WIDTH_M) < 1, "tee area " + area(tee));
-  const ys = tee.map(p => (p.lat - LAT) / mLat);
-  assert.ok(Math.abs(Math.max(...ys) - Math.min(...ys) - shapes.TEE_LENGTH_M) < 0.5, "the long side should run towards the green");
+test("a tee is a round marker that faces nowhere", () => {
+  const tee = shapes.teeAt(at(0, 0));
+  assert.strictEqual(tee.length, 12);
+  const r = tee.map(p => Math.hypot((p.lng - LNG) / mLng, (p.lat - LAT) / mLat));
+  assert.ok(r.every(d => Math.abs(d - shapes.TEE_RADIUS_M) < 0.01), "every corner sits on the tee's radius");
+});
+
+test("a green is kept as a smooth curve through six handles, and reads them back exactly", () => {
+  const wand = shapes.circle(at(0, 0), 14, 40);
+  const green = shapes.smoothGreen(wand);
+  assert.strictEqual(green.length, shapes.GREEN_HANDLES * shapes.GREEN_STEPS);
+  const handles = shapes.ringHandles(green);
+  assert.strictEqual(handles.length, shapes.GREEN_HANDLES);
+  handles.forEach((h, i) => assert.deepStrictEqual(h, green[i * shapes.GREEN_STEPS]));
+  assert.deepStrictEqual(shapes.smoothRing(handles), green, "re-curving through the same handles changes nothing");
+  const moved = handles.slice(); moved[0] = at(25, 0);
+  const pulled = shapes.smoothRing(moved);
+  assert.ok(Math.abs((pulled[0].lng - LNG) / mLng - 25) < 1e-6, "the outline passes through a dragged handle");
 });
 
 test("two overlapping bunkers merge into one outline covering both", () => {
