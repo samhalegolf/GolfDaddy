@@ -64,6 +64,35 @@ test("with no tees mapped, a par 3 is read from the green before it, and lengths
   assert.deepStrictEqual(byHole, { 1: "way-1-way-2", 2: "tee-after-way-2-way-3", 3: "way-4-way-5" });
 });
 
+test("a fairway OSM drew in pieces is read as one hole, end to end", async () => {
+  /* Cebu's par 5s are mapped as separate fairway polygons. Pairing gave each green only the
+     piece beside it, so a 486m par 5 was measured as a ~115m line. A piece that starts close
+     behind the far end and carries on the same way is the same hole. */
+  const box = (id, tag, south, north, west, east) => ({ type: "way", id, tags: { golf: tag }, geometry: [
+    { lat: south, lon: west }, { lat: south, lon: east }, { lat: north, lon: east }, { lat: north, lon: west }, { lat: south, lon: west }
+  ] });
+  const payload = { elements: [
+    box(1, "fairway", 0, 0.00205, -0.00015, 0.00015), box(2, "fairway", 0.0025, 0.0040, -0.00015, 0.00015),
+    box(3, "green", 0.0042, 0.0044, -0.0001, 0.0001),
+    box(4, "fairway", 0.0060, 0.0088, -0.00015, 0.00015), box(5, "green", 0.0090, 0.0092, -0.0001, 0.0001)
+  ] };
+  const result = await resolver.resolveCourseGeometryForAutoMapper({
+    osmPayload: payload, courseId: "pieces", expectedHoleCount: 2,
+    scorecardHoles: [{ holeNumber: 1, par: 5, distanceM: 470 }, { holeNumber: 2, par: 4, distanceM: 330 }]
+  });
+  const byHole = {};
+  result.holes.forEach(h => { byHole[h.holeNumber] = h.candidate; });
+  assert.strictEqual(byHole[1].candidateId, "way-2+way-1-way-3", "the par 5 runs through both pieces");
+  assert.ok(byHole[1].pathDistanceM > 440, "measured end to end, got " + Math.round(byHole[1].pathDistanceM) + "m");
+  assert.strictEqual(byHole[2].candidateId, "way-4-way-5");
+
+  /* A piece beside the far end that runs off sideways is another hole, not this one. */
+  const sideways = JSON.parse(JSON.stringify(payload));
+  sideways.elements[0] = box(1, "fairway", 0.0018, 0.0021, 0.0004, 0.0024);
+  const apart = await resolver.resolveCourseGeometryForAutoMapper({ osmPayload: sideways, courseId: "pieces-sideways" });
+  assert.ok(!apart.debugEvidence.holeCandidates.some(c => c.candidateId === "way-2+way-1-way-3"), "a sideways piece is not chained");
+});
+
 test("a course with tees mapped gets no guessed tees", async () => {
   const withTee = JSON.parse(JSON.stringify(fixture));
   withTee.elements.push({ type: "way", id: 900, tags: { golf: "tee" }, geometry: [

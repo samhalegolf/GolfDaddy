@@ -410,18 +410,65 @@ function fairwayAxisForGreen(green, fairway) {
   const aDistance = distanceM(axis.a, green.centre), bDistance = distanceM(axis.b, green.centre);
   return { axis, near: aDistance <= bDistance ? axis.a : axis.b, far: aDistance <= bDistance ? axis.b : axis.a, nearDistanceM: Math.min(aDistance, bDistance) };
 }
-function fairwayCenterlineForGreen(green, fairway, oriented, tee, extraEvidence) {
+function fairwayCenterlineForGreen(green, fairway, oriented, tee, extraEvidence, chain) {
   const { axis, near, far } = oriented;
+  const pieces = chain || [];
   const greenProjection = axis.projectionForPoint(green.centre);
   let projectedGreenSide = Number.isFinite(greenProjection) ? axis.pointAt(clamp(greenProjection, axis.min, axis.max)) : near;
   if (distanceM(projectedGreenSide, green.centre) > distanceM(near, green.centre) + 35) projectedGreenSide = near;
-  const rawPath = [tee && tee.centre, far, axis.center, projectedGreenSide, green.centre].filter(Boolean);
+  /* Played from the back of the last piece, through each piece's middle, to the green. */
+  const behind = [];
+  pieces.slice().reverse().forEach(piece => { behind.push(piece.far, piece.center); });
+  const rawPath = [tee && tee.centre].concat(behind, [far, axis.center, projectedGreenSide, green.centre]).filter(Boolean);
   const fairwayId = elementId(fairway.element, "fairway-" + fairway.index);
   const evidence = ["fairway:" + fairwayId, "green-led", "fairway-distance:" + Math.round(fairway.distance) + "m", "fairway-axis-span:" + Math.round(axis.spanM) + "m"]
-    .concat(tee ? ["tee:" + tee.id] : [], extraEvidence || []);
-  const candidate = buildCandidate(fairwayId + "-" + green.id, rawPath, [green], [fairway.element], "fairway-centreline", evidence, green);
-  if (candidate) candidate.featureKeys = [green.id, fairwayId].concat(tee ? [tee.id] : []);
+    .concat(pieces.length ? ["fairway-pieces:" + (pieces.length + 1)] : [], tee ? ["tee:" + tee.id] : [], extraEvidence || []);
+  const id = fairwayId + pieces.map(piece => "+" + piece.id).join("") + "-" + green.id;
+  const candidate = buildCandidate(id, rawPath, [green], [fairway.element].concat(pieces.map(piece => piece.element)), "fairway-centreline", evidence, green);
+  if (candidate) candidate.featureKeys = [green.id, fairwayId].concat(pieces.map(piece => piece.id), tee ? [tee.id] : []);
   return candidate;
+}
+/* The rest of a hole's fairway, when OSM drew it in pieces.
+ *
+ * A long hole is often mapped as two or three fairway polygons - broken by a road, a creek,
+ * a stretch of rough. Pairing gives a green only the piece nearest it, so a par 5 drawn in
+ * pieces was measured along its last piece alone: at Cebu Country Club a 486m par 5 came out
+ * as a 115m line. Each piece that starts close behind the far end and carries on the same way
+ * is the same hole, so the line is walked back through them to the real start.
+ *
+ * `blocked` are pieces another green already owns; they are not taken. Returns the pieces in
+ * order away from the green, each with its near end, far end, centre and element. */
+const FAIRWAY_CHAIN_GAP_M = 90;
+const FAIRWAY_CHAIN_MAX_PIECES = 3;
+const FAIRWAY_CHAIN_MIN_COS = Math.cos(45 * Math.PI / 180);
+function fairwayPiecesBehind(oriented, fairway, fairways, blocked) {
+  const metres = (a, b) => ({ x: (b.lng - a.lng) * 111320 * Math.cos(a.lat * Math.PI / 180), y: (b.lat - a.lat) * 111320 });
+  const unit = v => { const len = Math.hypot(v.x, v.y); return len ? { x: v.x / len, y: v.y / len } : null; };
+  const chain = [];
+  const used = new Set([fairway.id]);
+  let back = oriented.near, far = oriented.far;
+  for (let step = 0; step < FAIRWAY_CHAIN_MAX_PIECES; step++) {
+    const direction = unit(metres(back, far));
+    if (!direction) break;
+    let best = null;
+    fairways.forEach(other => {
+      if (used.has(other.id) || (blocked && blocked.has(other.id))) return;
+      const axis = fairwayMajorAxis(other.polygon);
+      if (!axis) return;
+      const [pieceNear, pieceFar] = distanceM(axis.a, far) <= distanceM(axis.b, far) ? [axis.a, axis.b] : [axis.b, axis.a];
+      const gap = distanceM(far, pieceNear);
+      if (gap > FAIRWAY_CHAIN_GAP_M) return;
+      const onward = unit(metres(far, pieceFar));
+      if (!onward || onward.x * direction.x + onward.y * direction.y < FAIRWAY_CHAIN_MIN_COS) return;
+      if (!best || gap < best.gap) best = { id: other.id, element: other.element, near: pieceNear, far: pieceFar, center: axis.center, gap };
+    });
+    if (!best) break;
+    chain.push(best);
+    used.add(best.id);
+    back = best.near;
+    far = best.far;
+  }
+  return chain;
 }
 function teeToGreenCandidate(green, tee, elements) {
   const candidate = buildCandidate(tee.id + "-" + green.id, [tee.centre, green.centre], [green], elements, "tee-to-green", ["tee:" + tee.id, "green-led", "tee-distance:" + Math.round(distanceM(tee.centre, green.centre)) + "m"], green);
@@ -497,12 +544,26 @@ function greenLedFairwayCandidates(elements, greens, boundary) {
     fairwayPairs.push({ left: green.id, right: fairway.id, green, fairway: Object.assign({}, fairway, { distance }), cost: axis.nearDistanceM + distance });
   }));
   const fairwayFor = new Map(pairOneToOne(fairwayPairs).map(pair => [pair.left, pair]));
+  /* Pieces of fairway behind each green's own, walked back to where the hole starts - never a
+     piece another green owns. The tee then sits behind the last piece, not the first. */
+  const owned = new Set([...fairwayFor.values()].map(pair => pair.fairway.id));
+  const chainFor = new Map();
+  fairwayFor.forEach(pair => {
+    const chain = fairwayPiecesBehind(oriented.get(pair.green.id + "::" + pair.fairway.id), pair.fairway, fairways, owned);
+    if (chain.length) chain.forEach(piece => owned.add(piece.id));
+    chainFor.set(pair.green.id, chain);
+  });
+  const startOf = pair => {
+    const chain = chainFor.get(pair.green.id) || [];
+    const axis = oriented.get(pair.green.id + "::" + pair.fairway.id);
+    return chain.length ? { near: chain[chain.length - 1].near, far: chain[chain.length - 1].far } : { near: axis.near, far: axis.far };
+  };
 
   const claimedTees = new Set();
   const claimComplex = tee => tees.forEach(other => { if (distanceM(other.centre, tee.centre) <= TEE_COMPLEX_M) claimedTees.add(other.id); });
   const teePairs = [];
   fairwayFor.forEach(pair => {
-    const axis = oriented.get(pair.green.id + "::" + pair.fairway.id);
+    const axis = startOf(pair);
     const direction = { lat: axis.far.lat - axis.near.lat, lng: axis.far.lng - axis.near.lng };
     tees.forEach(tee => {
       const fromFar = distanceM(axis.far, tee.centre);
@@ -518,8 +579,18 @@ function greenLedFairwayCandidates(elements, greens, boundary) {
 
   const candidates = [];
   fairwayFor.forEach(pair => {
-    const candidate = fairwayCenterlineForGreen(pair.green, pair.fairway, oriented.get(pair.green.id + "::" + pair.fairway.id), teeFor.get(pair.green.id) || null);
+    const axis = oriented.get(pair.green.id + "::" + pair.fairway.id);
+    const chain = chainFor.get(pair.green.id) || [];
+    const candidate = fairwayCenterlineForGreen(pair.green, pair.fairway, axis, teeFor.get(pair.green.id) || null, null, chain);
     if (candidate) candidates.push(candidate);
+    /* The same hole through pieces other greens own, for the card to prefer when those
+       pairings are the wrong ones - a par 3's green beside the middle of a par 5 takes a
+       piece of it. Shares no ground with another hole on the same card (featureKeys). */
+    const reaching = fairwayPiecesBehind(axis, pair.fairway, fairways, null);
+    if (reaching.length > chain.length) {
+      const alternative = fairwayCenterlineForGreen(pair.green, pair.fairway, axis, null, ["alternative"], reaching);
+      if (alternative) { alternative.alternative = true; alternative.confidence = clamp(alternative.confidence - 0.06, 0, 1); candidates.push(alternative); }
+    }
   });
 
   const withoutFairway = (greens || []).filter(green => !fairwayFor.has(green.id));
