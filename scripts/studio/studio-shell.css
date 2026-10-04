@@ -207,70 +207,109 @@
 #gdStudioShellRoot .gdStudioWarnText { color: var(--gdStudioWarn); }
 
 /* ---- Mapping Overlay ----
-   Same viewport chrome as Map Viewport, plus the placing affordances: a crosshair while a
-   placing tool is armed, a grab hand over shapes in Move, drag handles, an instruction chip
-   over the map, and the bin a shape is dropped on to delete it. */
-#gdStudioShellRoot .gdStudioOverlayStage { position: relative; }
-/* The overlay map is the work surface, so it takes most of the screen rather than the
-   viewport page's fixed 560px, and full screen gives it all of it (tools and status kept). */
-#gdStudioShellRoot .gdStudioOverlayStage .gdStudioViewportMap { height: clamp(420px, 72vh, 1000px); }
-#gdStudioShellRoot .gdStudioOverlayWorkspace.isFullscreen {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
+   One screen, in the manner of the booking app's video workspace: the page fills the Studio
+   workspace (or the whole screen in full screen) and never scrolls; the map takes all of it
+   and the tools float over the map on blurred dark chrome - placing tools down the left,
+   view controls down the right, the options for the tool in hand along the top, and Finish /
+   hint / bin along the bottom. Everything used now and then sits in the pull-down under the
+   header. */
+#gdStudioShellRoot .gdStudioWorkspace.gdStudioOverlayHost { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+#gdStudioShellRoot .gdStudioOverlayApp {
+  --gdOverlayScrim: rgba(5, 10, 7, 0.72);
+  --gdOverlayInk: #06120b;
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 14px;
   background: var(--gdStudioBg);
 }
-#gdStudioShellRoot .gdStudioOverlayWorkspace.isFullscreen .gdStudioOverlayStage { flex: 1 1 auto; min-height: 0; }
-#gdStudioShellRoot .gdStudioOverlayWorkspace.isFullscreen .gdStudioOverlayStage .gdStudioViewportMap { height: 100%; }
-#gdStudioShellRoot .gdStudioOverlayWorkspace.isFullscreen .gdStudioViewportBar { margin-top: 0 !important; }
+#gdStudioShellRoot .gdStudioOverlayApp.isFullscreen { position: fixed; inset: 0; z-index: 10000; }
 html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidden; }
-#gdStudioShellRoot .gdStudioOverlayNav {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 800;
+#gdStudioShellRoot .gdStudioOverlayApp [hidden] { display: none !important; }
+
+/* Header strip and its pull-down. */
+#gdStudioShellRoot .gdStudioOverlayTop { position: relative; z-index: 1100; flex-shrink: 0; }
+#gdStudioShellRoot .gdStudioOverlayHead {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--gdStudioBorder);
+  background: var(--gdStudioPanel);
 }
-#gdStudioShellRoot .gdStudioOverlayNav button {
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(231, 243, 236, 0.25);
-  background: rgba(5, 10, 7, 0.8);
-  color: var(--gdStudioText);
-  font-family: inherit;
-  font-size: 12px;
-  cursor: pointer;
+#gdStudioShellRoot .gdStudioOverlayApp.isFullscreen .gdStudioOverlayHead {
+  padding-top: max(6px, env(safe-area-inset-top));
+  padding-left: max(12px, env(safe-area-inset-left));
+  padding-right: max(12px, env(safe-area-inset-right));
 }
-#gdStudioShellRoot .gdStudioOverlayNav button:hover { border-color: var(--gdStudioAccent); color: var(--gdStudioAccent); }
-#gdStudioShellRoot .gdStudioOverlayWorkspace [hidden] { display: none; }
-#gdStudioShellRoot .gdStudioOverlayModes { display: inline-flex; gap: 0; margin-right: 6px; }
-#gdStudioShellRoot .gdStudioOverlayModes .gdStudioDiagramBtn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-#gdStudioShellRoot .gdStudioOverlayModes .gdStudioDiagramBtn:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
-#gdStudioShellRoot .gdStudioDiagramBtn.gdStudioOverlayStep { min-width: 28px; padding-left: 0; padding-right: 0; justify-content: center; }
-#gdStudioShellRoot .gdStudioOverlayStepValue { min-width: 38px; text-align: center; color: var(--gdStudioText); font-variant-numeric: tabular-nums; }
-#gdStudioShellRoot .gdStudioOverlayStage .gdStudioOverlayMap { cursor: crosshair; }
-#gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayMap { cursor: default; }
-#gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayShape { cursor: grab; }
-#gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayShape:active { cursor: grabbing; }
-#gdStudioShellRoot .gdStudioOverlayStage .gdStudioOverlayHandle { cursor: move; }
-#gdStudioShellRoot .gdStudioOverlayStage:not(.isTool-move) .gdStudioOverlayShape { cursor: crosshair; }
-#gdStudioShellRoot .gdStudioDiagramBtn.isActive { color: var(--gdStudioAccent); border-color: var(--gdStudioAccent); background: rgba(60, 255, 141, 0.12); }
-#gdStudioShellRoot .gdStudioOverlayWidth {
-  width: 56px;
+#gdStudioShellRoot .gdStudioOverlayMenuToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 46%;
+  min-height: 40px;
+  padding: 6px 10px 6px 12px;
+  border: 1px solid var(--gdStudioBorder);
+  border-radius: 999px;
   background: var(--gdStudioPanelAlt);
   color: var(--gdStudioText);
-  border: 1px solid var(--gdStudioBorder);
-  border-radius: 8px;
-  padding: 5px 6px;
-  font-size: 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
 }
-#gdStudioShellRoot .gdStudioOverlayHole { width: 48px; }
+#gdStudioShellRoot .gdStudioOverlayMenuToggle:hover { border-color: var(--gdStudioAccentDim); }
+#gdStudioShellRoot .gdStudioOverlayMenuToggle svg { flex-shrink: 0; transition: transform 0.15s ease; }
+#gdStudioShellRoot .gdStudioOverlayMenuToggle.isOpen svg { transform: rotate(180deg); }
+#gdStudioShellRoot .gdStudioOverlayHeadCourse { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#gdStudioShellRoot .gdStudioOverlayStatus {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--gdStudioMuted);
+}
+#gdStudioShellRoot .gdStudioOverlaySave {
+  flex-shrink: 0;
+  min-height: 40px;
+  min-width: 84px;
+  padding: 0 16px;
+  border: 1px solid var(--gdStudioBorder);
+  border-radius: 999px;
+  background: none;
+  color: var(--gdStudioMuted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioOverlaySave.isDirty { background: var(--gdStudioAccent); border-color: var(--gdStudioAccent); color: var(--gdOverlayInk); }
+#gdStudioShellRoot .gdStudioOverlaySave.isWarn { border-color: var(--gdStudioWarn); color: var(--gdStudioWarn); }
+#gdStudioShellRoot .gdStudioOverlaySave:disabled { cursor: default; }
+#gdStudioShellRoot .gdStudioOverlayMenu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 16px 14px;
+  border-bottom: 1px solid var(--gdStudioBorder);
+  background: var(--gdStudioPanel);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+#gdStudioShellRoot .gdStudioOverlayMenu .gdStudioViewportReadout { margin-top: 2px; }
+#gdStudioShellRoot .gdStudioOverlayHelp { margin-top: 10px; }
+#gdStudioShellRoot .gdStudioOverlayHelp summary { cursor: pointer; color: var(--gdStudioText); font-size: 12.5px; font-weight: 600; }
+#gdStudioShellRoot .gdStudioOverlayHelp p { margin: 8px 0 0; }
 #gdStudioShellRoot .gdStudioOverlayDraft {
+  flex-shrink: 0;
   padding: 3px 10px;
   border-radius: 999px;
   font-size: 12px;
@@ -289,62 +328,198 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
 }
 #gdStudioShellRoot .gdStudioOverlayRun.isFailed { border-color: var(--gdStudioWarn); }
 #gdStudioShellRoot .gdStudioOverlayRun:empty { display: none; }
+
+/* The map and what floats over it. */
+#gdStudioShellRoot .gdStudioOverlayStage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+#gdStudioShellRoot .gdStudioOverlayStage .gdStudioOverlayMap { position: absolute; inset: 0; height: auto; min-height: 0; border: 0; border-radius: 0; }
+#gdStudioShellRoot .gdStudioOverlayRail,
+#gdStudioShellRoot .gdStudioOverlayViewRail,
+#gdStudioShellRoot .gdStudioOverlayOptions,
+#gdStudioShellRoot .gdStudioOverlayDraftBar,
 #gdStudioShellRoot .gdStudioOverlayHint {
+  background: var(--gdOverlayScrim);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--gdStudioText);
+}
+#gdStudioShellRoot .gdStudioOverlayRail {
   position: absolute;
   top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 800;
-  max-width: calc(100% - 340px);
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: rgba(5, 10, 7, 0.8);
-  color: var(--gdStudioText);
-  font-size: 12px;
-  text-align: center;
-  pointer-events: none;
-}
-#gdStudioShellRoot .gdStudioOverlayHint:empty { display: none; }
-/* Finish / Undo point / Cancel while a fairway line is being laid - a phone has no Enter,
-   Backspace or Esc, and a double-tap to finish also lands a stray point. */
-#gdStudioShellRoot .gdStudioOverlayDraftBar {
-  position: absolute;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
+  left: 10px;
   z-index: 800;
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 2px;
+  max-height: calc(100% - 20px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 5px;
+  border-radius: 18px;
 }
-#gdStudioShellRoot .gdStudioOverlayDraftBar[hidden] { display: none; }
-#gdStudioShellRoot .gdStudioOverlayDraftBar button {
-  padding: 8px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(231, 243, 236, 0.25);
-  background: rgba(5, 10, 7, 0.85);
+#gdStudioShellRoot .gdStudioOverlayRail::-webkit-scrollbar { display: none; }
+#gdStudioShellRoot .gdStudioOverlayRailBtn {
+  flex-shrink: 0;
+  width: 56px;
+  height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
   color: var(--gdStudioText);
-  font-family: inherit;
-  font-size: 12.5px;
+  font: inherit;
+  font-size: 10px;
   font-weight: 600;
   cursor: pointer;
 }
-#gdStudioShellRoot .gdStudioOverlayDraftBar button[data-gd-overlay="draft-finish"] { border-color: var(--gdStudioAccent); color: var(--gdStudioAccent); }
+#gdStudioShellRoot .gdStudioOverlayRailBtn:not(:disabled):hover { background: rgba(231, 243, 236, 0.1); }
+#gdStudioShellRoot .gdStudioOverlayRailBtn.isActive { background: var(--gdStudioAccent); color: var(--gdOverlayInk); }
+#gdStudioShellRoot .gdStudioOverlayRailBtn:disabled { opacity: 0.35; cursor: default; }
+#gdStudioShellRoot .gdStudioOverlayRailRule { width: 30px; height: 1px; margin: 3px 13px; background: rgba(231, 243, 236, 0.2); }
+#gdStudioShellRoot .gdStudioOverlayViewRail {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 800;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  border-radius: 999px;
+}
+#gdStudioShellRoot .gdStudioOverlayViewBtn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--gdStudioText);
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioOverlayViewBtn:hover { background: rgba(231, 243, 236, 0.1); }
+#gdStudioShellRoot .gdStudioOverlayViewBtn.isActive { background: var(--gdStudioText); color: var(--gdOverlayInk); }
+#gdStudioShellRoot .gdStudioOverlayOptions {
+  position: absolute;
+  top: 10px;
+  left: 86px;
+  right: 66px;
+  width: max-content;
+  max-width: calc(100% - 152px);
+  z-index: 800;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 12px 5px 5px;
+  border-radius: 999px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  font-size: 12px;
+}
+#gdStudioShellRoot .gdStudioOverlayOptions::-webkit-scrollbar { display: none; }
+#gdStudioShellRoot .gdStudioOverlayOptions > * { flex: 0 0 auto; white-space: nowrap; }
+#gdStudioShellRoot .gdStudioOverlayModes { display: inline-flex; padding: 2px; border-radius: 999px; background: rgba(231, 243, 236, 0.08); }
+#gdStudioShellRoot .gdStudioOverlayModes button {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--gdStudioMuted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioOverlayModes button.isActive { background: var(--gdStudioText); color: var(--gdOverlayInk); }
+#gdStudioShellRoot .gdStudioOverlayOpt { display: inline-flex; align-items: center; gap: 6px; color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdStudioOverlayStep {
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(231, 243, 236, 0.25);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--gdStudioText);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioOverlayStep:disabled { opacity: 0.35; cursor: default; }
+#gdStudioShellRoot .gdStudioOverlayStepValue { min-width: 38px; text-align: center; color: var(--gdStudioText); font-variant-numeric: tabular-nums; }
+#gdStudioShellRoot .gdStudioOverlayOptBtn {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--gdStudioAccentDim);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--gdStudioAccent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioOverlayOptBtn:disabled { opacity: 0.4; cursor: default; }
+#gdStudioShellRoot .gdStudioOverlayWidth {
+  width: 56px;
+  min-height: 30px;
+  background: rgba(231, 243, 236, 0.08);
+  color: var(--gdStudioText);
+  border: 1px solid rgba(231, 243, 236, 0.2);
+  border-radius: 8px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+#gdStudioShellRoot .gdStudioOverlayHole { width: 48px; }
+#gdStudioShellRoot .gdStudioOverlayDock {
+  position: absolute;
+  left: 86px;
+  right: 96px;
+  bottom: 10px;
+  z-index: 800;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  pointer-events: none;
+}
+#gdStudioShellRoot .gdStudioOverlayDraftBar { display: flex; gap: 4px; padding: 4px; border-radius: 999px; pointer-events: auto; }
+#gdStudioShellRoot .gdStudioOverlayDraftBar button {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--gdStudioText);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioOverlayDraftBar button[data-gd-overlay="draft-finish"] { background: var(--gdStudioAccent); color: var(--gdOverlayInk); }
 #gdStudioShellRoot .gdStudioOverlayDraftBar button:disabled { opacity: 0.4; cursor: default; }
-#gdStudioShellRoot .gdStudioOverlayHelp { margin-bottom: 12px; }
-#gdStudioShellRoot .gdStudioOverlayHelp summary { cursor: pointer; color: var(--gdStudioText); font-size: 12.5px; font-weight: 600; }
-#gdStudioShellRoot .gdStudioOverlayHelp p { margin: 8px 0 0; }
+#gdStudioShellRoot .gdStudioOverlayHint { max-width: 100%; padding: 6px 12px; border-radius: 12px; font-size: 12px; line-height: 1.35; }
+#gdStudioShellRoot .gdStudioOverlayHint:empty { display: none; }
 #gdStudioShellRoot .gdStudioOverlayBin {
   position: absolute;
-  right: 14px;
-  bottom: 14px;
+  right: 10px;
+  bottom: 10px;
   z-index: 800;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 14px;
-  border-radius: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
   border: 1px dashed rgba(231, 243, 236, 0.35);
-  background: rgba(5, 10, 7, 0.78);
+  background: var(--gdOverlayScrim);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   color: var(--gdStudioMuted);
   font-family: inherit;
   font-size: 12px;
@@ -352,10 +527,22 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
   cursor: pointer;
   transition: transform 0.12s ease, background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
-#gdStudioShellRoot .gdStudioOverlayBin[hidden] { display: none; }
 #gdStudioShellRoot .gdStudioOverlayBin.hasSelection { color: var(--gdStudioText); }
 #gdStudioShellRoot .gdStudioOverlayBin.isArmed { color: var(--gdStudioWarn); border-color: var(--gdStudioWarn); transform: scale(1.08); }
 #gdStudioShellRoot .gdStudioOverlayBin.isHot { color: #fff; background: rgba(214, 64, 64, 0.9); border-style: solid; border-color: #ff8a8a; transform: scale(1.2); }
+#gdStudioShellRoot .gdStudioOverlayApp.isFullscreen .gdStudioOverlayBin { bottom: max(10px, env(safe-area-inset-bottom)); right: max(10px, env(safe-area-inset-right)); }
+#gdStudioShellRoot .gdStudioOverlayApp.isFullscreen .gdStudioOverlayDock { bottom: max(10px, env(safe-area-inset-bottom)); }
+
+/* Cursors say what a press will do. */
+#gdStudioShellRoot .gdStudioOverlayStage .gdStudioOverlayMap { cursor: crosshair; }
+#gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayMap,
+#gdStudioShellRoot .gdStudioOverlayStage.isTool-connect .gdStudioOverlayMap { cursor: default; }
+#gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayShape { cursor: grab; }
+#gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayShape:active { cursor: grabbing; }
+#gdStudioShellRoot .gdStudioOverlayStage.isTool-connect .gdStudioOverlayShape { cursor: alias; }
+#gdStudioShellRoot .gdStudioOverlayStage .gdStudioOverlayHandle { cursor: move; }
+#gdStudioShellRoot .gdStudioOverlayStage:not(.isTool-move):not(.isTool-connect) .gdStudioOverlayShape { cursor: crosshair; }
+#gdStudioShellRoot .gdStudioDiagramBtn.isActive { color: var(--gdStudioAccent); border-color: var(--gdStudioAccent); background: rgba(60, 255, 141, 0.12); }
 .leaflet-tooltip.gdStudioOverlayLabel {
   background: rgba(5, 10, 7, 0.75);
   color: #3cff8d;
@@ -376,51 +563,29 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
   #gdStudioShellRoot .gdStudioViewportMap { height: 380px; }
 }
 
-/* Mapping Overlay on a phone: the map is the work surface, so everything around it gets out of
-   its way. The tool rail is one row that scrolls sideways rather than wrapping into a block
-   above the map, its buttons are finger-sized, and the chips on the map are moved so none sit
-   on another - zoom top-left, Course/Shape/Full screen top-right, Finish/Undo/Cancel under
-   them, the hint bottom-left, the bin bottom-right. */
+/* Mapping Overlay on a phone: the same one screen, tightened. The rail's buttons lose their
+   labels' room but keep finger size, the tool options sit just under the header across the
+   full width (scrolling sideways when they do not fit), and the status drops to a line of its
+   own under the course and Save. */
 @media (max-width: 860px) {
-  #gdStudioShellRoot .gdStudioOverlayStage .gdStudioViewportMap { height: clamp(320px, 62vh, 700px); }
-  #gdStudioShellRoot .gdStudioOverlayTools {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    gap: 6px;
-    padding-bottom: 2px;
-  }
-  #gdStudioShellRoot .gdStudioOverlayTools::-webkit-scrollbar { display: none; }
-  #gdStudioShellRoot .gdStudioOverlayTools > * { flex: 0 0 auto; white-space: nowrap; }
-  #gdStudioShellRoot .gdStudioOverlayWorkspace .gdStudioDiagramBtn { min-height: 38px; padding: 8px 14px; font-size: 13px; }
-  #gdStudioShellRoot .gdStudioOverlayWorkspace .gdStudioDiagramBtn.gdStudioOverlayStep { min-width: 38px; }
-  #gdStudioShellRoot .gdStudioOverlayWidth { min-height: 38px; font-size: 16px; }
-  #gdStudioShellRoot .gdStudioOverlayWorkspace input[type="checkbox"] { width: 20px; height: 20px; }
-  #gdStudioShellRoot .gdStudioOverlayNav { top: 8px; right: 8px; }
-  #gdStudioShellRoot .gdStudioOverlayNav button { padding: 9px 11px; font-size: 12.5px; }
-  #gdStudioShellRoot .gdStudioOverlayDraftBar { left: auto; right: 8px; top: 56px; bottom: auto; transform: none; }
-  #gdStudioShellRoot .gdStudioOverlayDraftBar button { padding: 10px 14px; font-size: 13px; }
-  #gdStudioShellRoot .gdStudioOverlayHint {
-    top: auto;
-    bottom: 12px;
-    left: 8px;
-    transform: none;
-    width: max-content;
-    max-width: calc(100% - 112px);
-    border-radius: 12px;
-    text-align: left;
-    font-size: 11.5px;
-  }
-  #gdStudioShellRoot .gdStudioOverlayBin { right: 8px; bottom: 8px; padding: 12px 14px; }
-  #gdStudioShellRoot .gdStudioOverlayWorkspace.isFullscreen {
-    gap: 6px;
-    padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
-  }
-  #gdStudioShellRoot .gdStudioOverlayWorkspace.isFullscreen .gdStudioViewportBar { margin-bottom: 0; }
-  #gdStudioShellRoot .gdStudioOverlayWorkspace.isFullscreen .gdStudioViewportReadout,
-  #gdStudioShellRoot .gdStudioOverlayWorkspace.isFullscreen .gdStudioViewportCredit { display: none; }
+  #gdStudioShellRoot .gdStudioOverlayHead { flex-wrap: wrap; row-gap: 4px; }
+  #gdStudioShellRoot .gdStudioOverlayMenuToggle { max-width: none; flex: 1 1 auto; }
+  #gdStudioShellRoot .gdStudioOverlayStatus { order: 5; flex-basis: 100%; font-size: 12px; }
+  #gdStudioShellRoot .gdStudioOverlayStatus:empty { display: none; }
+  #gdStudioShellRoot .gdStudioOverlayRail { top: 66px; left: 8px; max-height: calc(100% - 74px); }
+  #gdStudioShellRoot .gdStudioOverlayRailBtn { width: 50px; height: 50px; font-size: 9.5px; }
+  #gdStudioShellRoot .gdStudioOverlayRailRule { margin: 3px 10px; }
+  #gdStudioShellRoot .gdStudioOverlayViewRail { top: 66px; right: 8px; }
+  #gdStudioShellRoot .gdStudioOverlayOptions { top: 8px; left: 8px; right: 8px; width: auto; max-width: none; }
+  #gdStudioShellRoot .gdStudioOverlayModes button { min-height: 36px; }
+  #gdStudioShellRoot .gdStudioOverlayStep { width: 36px; height: 36px; }
+  #gdStudioShellRoot .gdStudioOverlayWidth { min-height: 36px; font-size: 16px; }
+  #gdStudioShellRoot .gdStudioOverlayOpt input[type="checkbox"] { width: 20px; height: 20px; }
+  #gdStudioShellRoot .gdStudioOverlayDock { left: 70px; right: 90px; bottom: 8px; }
+  #gdStudioShellRoot .gdStudioOverlayHint { font-size: 11.5px; }
+  #gdStudioShellRoot .gdStudioOverlayBin { right: 8px; bottom: 8px; }
+  #gdStudioShellRoot .gdStudioOverlayMenu { max-height: 75vh; padding: 10px 12px 12px; }
+  #gdStudioShellRoot .gdStudioOverlayMenu .gdStudioDiagramBtn { min-height: 38px; padding: 8px 14px; font-size: 13px; }
 }
 
 /* ---- Communications page ----
