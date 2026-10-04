@@ -35,15 +35,14 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WearableCoord
         CAPPluginMethod(name: "garminState", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "garminDevices", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "selectGarminDevice", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "clearGarminDevice", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "setGarminEnabled", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "clearGarminDevice", returnType: CAPPluginReturnPromise)
     ]
 
     private let coordinator = WearableCoordinator()
     /* Held separately from the coordinator because the Settings > Garmin
-       Watch page talks to this one transport directly — device selection and
-       the paid gate are Garmin-specific and have no Apple Watch counterpart,
-       so they do not belong on WearableTransport. */
+       Watch page talks to this one transport directly — device selection is
+       Garmin-specific and has no Apple Watch counterpart, so it does not
+       belong on WearableTransport. */
     private lazy var garmin = GarminTransport(connectIQAppId: Self.garminConnectIQAppId)
     private let queue = DispatchQueue(label: "com.claritygolf.caddy.native-round-bridge")
     /* The last inventory each side reported. Only a hint: JavaScript uses it
@@ -214,15 +213,6 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WearableCoord
     @objc public func clearGarminDevice(_ call: CAPPluginCall) {
         garmin.clearSelectedDevice()
         call.resolve(garmin.garminStateDictionary())
-    }
-
-    /* The paid gate. JavaScript owns the membership question
-       (ClarityPayments.hasActiveAccess) and pushes the answer down; the
-       transport refuses to send while it is false. Defaults to false, so
-       nothing reaches a Garmin until something affirmatively says it may. */
-    @objc public func setGarminEnabled(_ call: CAPPluginCall) {
-        garmin.setEntitled(call.getBool("enabled") ?? false)
-        call.resolve()
     }
 
     /* This is the only authoritative acknowledgement path. Native transport

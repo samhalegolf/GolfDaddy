@@ -270,40 +270,13 @@ final class GarminTransport: NSObject, WearableTransport {
             supported: initialized,
             /* activated: bound to a device and listening. */
             activated: boundApp != nil,
-            /* paired: the player has chosen a watch. Survives disconnection
-               and a membership lapse. */
+            /* paired: the player has chosen a watch. Survives disconnection. */
             paired: selected != nil,
             /* appInstalled: the real getAppStatus answer, not a proxy — a
                connected watch without Clarity Caddy reports false. */
             appInstalled: appInstalledOnDevice,
             reachable: connected
         )
-    }
-
-    // MARK: - Entitlement
-
-    /* Garmin is a paid feature. This is the gate that actually enforces it:
-       `send()` refuses while it is false, so a membership that lapses stops
-       the watch receiving rather than merely greying out a settings row.
-
-       It defaults to FALSE and is only ever raised by JavaScript
-       (NativeRoundBridge.setGarminEnabled, driven by
-       ClarityPayments.hasActiveAccess). Failing closed is deliberate: if the
-       payments module never loads we would rather a paying player reports a
-       dead Garmin than every non-paying player quietly gets the feature.
-       Apple Watch is untouched by this — it has its own rules. */
-    private var entitled = false
-
-    func setEntitled(_ value: Bool) {
-        queue.async { [weak self] in
-            guard let self else { return }
-            guard self.entitled != value else { return }
-            self.entitled = value
-            /* A lapse does not clear the chosen device. The player keeps their
-               pairing and it starts working again the moment access returns —
-               re-pairing after every billing hiccup would be its own bug. */
-            self.delegate?.wearableTransportStateDidChange(self)
-        }
     }
 
     // MARK: - Device selection (the Settings > Garmin Watch page)
@@ -367,7 +340,6 @@ final class GarminTransport: NSObject, WearableTransport {
        booleans every transport reports through WearableTransportState. */
     func garminStateDictionary() -> [String: Any] {
         var out = state().asDictionary
-        out["entitled"] = queue.sync { entitled }
         out["sdkLinked"] = true
         /* iOS chooses a device by leaving the app for Garmin Connect, so the
            settings page has a waiting state Android does not. */
@@ -387,9 +359,6 @@ final class GarminTransport: NSObject, WearableTransport {
     // MARK: - Sending
 
     private func send(_ message: [String: Any], completion: @escaping (Bool) -> Void) {
-        // The paid gate, enforced where it cannot be talked around from the
-        // web layer: no entitlement, nothing leaves the phone.
-        guard entitled else { completion(false); return }
         guard let app = boundApp else { completion(false); return }
         /* Messages go to an APP, not a device — the IQApp carries its device.
            Reported, never inferred: only the SDK's own Success counts as sent

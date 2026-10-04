@@ -1,5 +1,10 @@
-/* Settings > Garmin Watch: choosing which Garmin the phone talks to, and the
- * paid gate on doing it at all.
+/* Settings > Garmin Watch: choosing which Garmin the phone talks to.
+ *
+ * It is free. Like the Apple Watch, a Garmin only mirrors what the phone is
+ * already doing, so it carries no paywall of its own: distances and the
+ * Bubble reach the wrist for everyone, and anything that writes round history
+ * (scorecard, shot logging) is still decided by app/js/access.js on the phone,
+ * whichever surface the tap came from.
  *
  * WHY THIS PAGE EXISTS. The Garmin transport on both native platforms
  * (ios/App/App/Wearables/Garmin/GarminTransport.swift,
@@ -9,35 +14,12 @@
  * callers, so activate() found no selected device and did nothing, forever.
  * This is the missing half.
  *
- * WHERE THE PAID LINE IS. Two gates, deliberately, because a settings row is
- * not a security boundary:
- *
- *   1. Here, in the UI — "Connect a Watch" asks ClarityPayments.requireAccess,
- *      which toasts and opens the paywall when there is no active access. This
- *      is the polite one, and it is the only one a player ever sees.
- *   2. In the native transport — send() refuses outright while its `entitled`
- *      flag is false, so nothing reaches a Garmin regardless of what the web
- *      layer believes or how it was reached. setEntitlement() below is what
- *      raises it, and it defaults to FALSE on both platforms: the feature
- *      fails closed if this file never loads.
- *
- * The page itself is readable without a membership on purpose. A feature
- * nobody can see is a feature nobody buys, and App Store guideline 5.1.1(v)
- * is about account-gating things that are not account based — this one
- * genuinely is, so showing the locked state and the price is the honest
- * arrangement. What it will not do without access is pair.
- *
- * A LAPSE DOES NOT UNPAIR. The chosen device survives a membership ending and
- * starts working again the moment access returns. Forcing a re-pair after
- * every billing hiccup would be its own bug, so the native side keeps the
- * selection and only stops sending.
- *
  * WHAT DOES NOT WORK YET, and is not pretended otherwise anywhere in this
  * file: the Connect IQ Mobile SDK is not bundled in either native build, so
  * `garminDevices` resolves { devices: [], sdkLinked: false, reason }. The page
  * words that as "cannot look" rather than "found none" — those are different
  * answers and a player deserves the real one. Every other part of the flow —
- * gating, selection, persistence, state, disconnect — is real and runs today.
+ * selection, persistence, state, disconnect — is real and runs today.
  */
 (function () {
   "use strict";
@@ -52,7 +34,6 @@
   var state = null;          /* last garminState() answer, or null before the first */
   var devices = null;        /* last garminDevices() answer, or null if never asked */
   var busy = false;
-  var lastEntitlementSent = null;
 
   function safe(fn, fallback) {
     try { return fn(); } catch (error) { return fallback; }
@@ -73,38 +54,10 @@
     return !!plugin();
   }
 
-  function payments() {
-    return safe(function () { return window.ClarityPayments || null; }, null);
-  }
-
-  function hasAccess() {
-    var pay = payments();
-    if (!pay || typeof pay.hasActiveAccess !== "function") return false;
-    return !!safe(function () { return pay.hasActiveAccess(); }, false);
-  }
-
   function escapeHTML(value) {
     return String(value == null ? "" : value).replace(/[&<>"']/g, function (ch) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
     });
-  }
-
-  /* ------------------------------------------------------ entitlement push
-
-     The native flag is the gate that actually bites, so it has to track the
-     membership answer rather than being set once at boot. There is no
-     payments-status event to subscribe to, so this is re-asserted at every
-     moment the answer can plausibly have changed: boot, a session change, the
-     app coming back to the foreground, and any render of this page. Each push
-     is skipped when the answer has not moved, so the common case costs
-     nothing. */
-  function setEntitlement(force) {
-    var p = plugin();
-    if (!p || typeof p.setGarminEnabled !== "function") return;
-    var enabled = hasAccess();
-    if (!force && lastEntitlementSent === enabled) return;
-    lastEntitlementSent = enabled;
-    safe(function () { return p.setGarminEnabled({ enabled: enabled }); });
   }
 
   /* ------------------------------------------------------------- native IO */
@@ -157,7 +110,6 @@
     var line = document.getElementById(LINE_ID);
     if (!line) return;
     var device = selectedDevice();
-    if (!hasAccess()) { window.GDI18n.set(line, "garmin.membershipRequiredLine"); return; }
     if (!device) { window.GDI18n.set(line, "garmin.noWatchLine"); return; }
     window.GDI18n.set(line, state && state.reachable ? "garmin.deviceConnected" : "garmin.deviceNotConnected",
       { device: device.deviceName || L("garmin.defaultDevice") });
@@ -183,21 +135,6 @@
     window.GDI18n.apply(panel);
     sheet.appendChild(panel);
     return panel;
-  }
-
-  function lockedHTML() {
-    var label = safe(function () {
-      var pay = payments();
-      return pay && pay.accessLabel ? pay.accessLabel() : "";
-    }, "");
-    return [
-      '<div class="clarityReferralHead"><strong>' + H("garmin.lockedTitle") + '</strong>',
-      "<span>" + H("garmin.lockedBody") + "</span></div>",
-      label ? "<p>" + escapeHTML(label) + "</p>" : "",
-      '<div class="clarityPaymentActions">',
-      '<button type="button" onclick="ClarityGarmin.openMembership()">' + H("garmin.seeMembership") + '</button>',
-      "</div>"
-    ].join("");
   }
 
   function connectedHTML(device) {
@@ -285,28 +222,16 @@
   }
 
   function render() {
-    setEntitlement(false);
     syncMenuRow();
     var body = document.getElementById(BODY_ID);
     if (!body) return;
-    if (!hasAccess()) { body.innerHTML = lockedHTML(); return; }
     var device = selectedDevice();
     body.innerHTML = device ? connectedHTML(device) : disconnectedHTML();
   }
 
   /* --------------------------------------------------------------- actions */
 
-  /* The membership question, asked once and in one place. requireAccess
-     toasts and opens the paywall itself when the answer is no, so callers
-     only have to stop. */
-  function requireAccess() {
-    var pay = payments();
-    if (!pay || typeof pay.requireAccess !== "function") return hasAccess();
-    return !!pay.requireAccess("garmin");
-  }
-
   function scan() {
-    if (!requireAccess()) return false;
     var p = plugin();
     if (!p || typeof p.garminDevices !== "function") return false;
     busy = true;
@@ -319,7 +244,6 @@
   }
 
   function choose(deviceId, deviceName, model) {
-    if (!requireAccess()) return false;
     var p = plugin();
     if (!p || typeof p.selectGarminDevice !== "function") return false;
     Promise.resolve(safe(function () {
@@ -328,9 +252,6 @@
       .then(function (next) {
         state = next || state;
         devices = null;
-        /* Raise the native gate immediately rather than waiting for the next
-           sync: the player has just paid for this and pressed the button. */
-        setEntitlement(true);
         render();
         safe(function () { return window.toast && window.toast(L("garmin.watchConnected")); });
       })
@@ -346,12 +267,6 @@
     Promise.resolve(safe(function () { return p.clearGarminDevice(); }, null))
       .then(function (next) { state = next || null; devices = null; render(); })
       .catch(function () {});
-    return false;
-  }
-
-  function openMembership() {
-    var pay = payments();
-    if (pay && typeof pay.openPaywall === "function") pay.openPaywall();
     return false;
   }
 
@@ -405,14 +320,12 @@
     window.gdPlayerSettingsShowSection = show;
   }
 
-  /* The row, and the first entitlement push. Deliberately later than the
-     switcher: this one wants clarity-payments' own menu row to exist so it can
-     sit beneath it, and wants a loaded membership status so the first push is
-     the real answer rather than a default. */
+  /* The row. Deliberately later than the switcher: it wants
+     clarity-payments' own menu row to exist so it can sit beneath it. */
   function install() {
     if (!available()) return;
     installMenuRow();
-    refreshState().then(function () { setEntitlement(true); syncMenuRow(); });
+    refreshState().then(syncMenuRow);
   }
 
   window.ClarityGarmin = {
@@ -422,12 +335,8 @@
     scan: scan,
     choose: choose,
     disconnect: disconnect,
-    openMembership: openMembership,
     render: render,
-    state: function () { return state; },
-    /* Callable by anything that changes the membership answer. Harmless to
-       over-call: it only crosses the bridge when the answer has moved. */
-    syncEntitlement: function () { setEntitlement(false); }
+    state: function () { return state; }
   };
 
   if (document.readyState === "loading") {
@@ -445,13 +354,5 @@
       var panel = document.getElementById(PAGE_ID);
       if (panel && !panel.hidden) render();
     });
-  });
-  window.addEventListener("clarity:session-changed", function () {
-    lastEntitlementSent = null;
-    setEntitlement(true);
-    syncMenuRow();
-  });
-  document.addEventListener("visibilitychange", function () {
-    if (!document.hidden) setEntitlement(false);
   });
 })();

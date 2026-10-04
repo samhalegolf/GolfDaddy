@@ -215,16 +215,6 @@ public class NativeRoundBridge extends Plugin implements GarminTransport.Listene
         call.resolve(JsonBridge.toJSObject(transport.garminState()));
     }
 
-    /* The paid gate. JavaScript owns the membership question
-       (ClarityPayments.hasActiveAccess) and pushes the answer down; the
-       transport refuses to send while it is false. Defaults to false, so
-       nothing reaches a Garmin until something affirmatively says it may. */
-    @PluginMethod
-    public void setGarminEnabled(PluginCall call) {
-        transport.setEntitled(Boolean.TRUE.equals(call.getBoolean("enabled", Boolean.FALSE)));
-        call.resolve();
-    }
-
     /* This is the only authoritative acknowledgement path. Native transport
        does not infer success: JavaScript returns the result after Marshal
        has accepted or rejected the command. */
