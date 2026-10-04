@@ -1598,7 +1598,7 @@
         adoptBubble: "pay.need.adoptBubble",
         practiceToBag: "pay.need.practiceToBag",
         bubbleCentre: "pay.need.bubbleCentre",
-        offlineCourse: "pay.need.offlineCourse"
+        offlineCourse: "course.offlineMembership"
       };
       safe(function () { return window.toast && window.toast(L(NEED[feature] || "pay.need.generic")); });
       openPaywall();
