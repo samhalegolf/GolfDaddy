@@ -19,6 +19,9 @@ struct ShotView: View {
        Cleared by rejection, by the Scene catching up, or by expiry; see
        WatchLockedShot. */
     var lockedShot: WatchLockedShot? = nil
+    /* A demo approach is on. Its banner (ContentView's DemoBanner) is the
+       live indicator then, so the header's live dot stands down. */
+    var demo: Bool = false
 
     /* Which numbers to show. The Watch is its own rangefinder once it is
        driving: front/centre/back come from ITS fix against the green geometry
@@ -63,13 +66,11 @@ struct ShotView: View {
     var body: some View {
         VStack(spacing: 4) {
             HStack(spacing: 4) {
-                if scene.controls?.canPreviousHole == true { control(.previousHole, title: "‹", enabled: true) }
-                Text(holeText).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                if scene.controls?.canNextHole == true { control(.nextHole, title: "›", enabled: true) }
+                holeBlock
                 if stale { Image(systemName: "antenna.radiowaves.left.and.right.slash").font(.caption2).foregroundStyle(.secondary) }
                 /* The wrist is driving: a live dot, not a sentence. Taking the
                    round back is done from the phone's card. */
-                if driving {
+                if driving && !demo {
                     Circle().fill(Color.mint).frame(width: 6, height: 6)
                         .shadow(color: .mint.opacity(0.8), radius: 4)
                         .accessibilityLabel("Watch is driving")
@@ -121,6 +122,51 @@ struct ShotView: View {
     }
 
     private var distanceText: String { effectiveDistance?.target.map { "\(Int($0.rounded())) m" } ?? "—" }
+
+    /* The hole, as one block: tap an arrowed edge or swipe it sideways.
+       The swipe is claimed by the block (highPriorityGesture), so swiping
+       anywhere else still pages to the map. Swiping left reads as "next",
+       the way a card stack moves. */
+    private var holeBlock: some View {
+        let canPrev = scene.controls?.canPreviousHole == true
+        let canNext = scene.controls?.canNextHole == true
+        let busy = pending.contains { $0.command.type == .previousHole || $0.command.type == .nextHole }
+        return HStack(spacing: 0) {
+            edge("chevron.left", enabled: canPrev && !busy) { send(.previousHole) }
+            Text(holeText)
+                .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity)
+            edge("chevron.right", enabled: canNext && !busy) { send(.nextHole) }
+        }
+        .frame(height: 28)
+        .background(Color(white: 0.14), in: Capsule())
+        .contentShape(Capsule())
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 12).onEnded { value in
+                guard !busy, abs(value.translation.width) > abs(value.translation.height) else { return }
+                if value.translation.width < 0, canNext { send(.nextHole) }
+                else if value.translation.width > 0, canPrev { send(.previousHole) }
+            }
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(holeText)
+        .accessibilityAdjustableAction { direction in
+            if direction == .increment, canNext { send(.nextHole) }
+            if direction == .decrement, canPrev { send(.previousHole) }
+        }
+    }
+
+    private func edge(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(enabled ? Color.white : Color.white.opacity(0.2))
+                .frame(width: 26, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
 
     @ViewBuilder
     private func control(_ kind: CaddyWatchCommand.Kind, title: String, enabled: Bool, primary: Bool = false) -> some View {

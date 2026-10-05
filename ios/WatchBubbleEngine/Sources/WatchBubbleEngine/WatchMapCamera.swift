@@ -44,10 +44,17 @@ public struct WatchMapCamera: Equatable {
     public var focus: CGPoint
     /// Image pixels per screen point.
     public var scale: CGFloat
+    /// Whether the view may show past the image's edges. Play and resting
+    /// framings keep to the picture; the Bubble framing does not, because the
+    /// Bubble belongs in the middle of the screen even when it sits at the
+    /// edge of the baked corridor - the views fill the overspill with the
+    /// map's own dark green, so it reads as more rough, not as a hole.
+    public var clampsToImage: Bool
 
-    public init(focus: CGPoint, scale: CGFloat) {
+    public init(focus: CGPoint, scale: CGFloat, clampsToImage: Bool = true) {
         self.focus = focus
         self.scale = scale
+        self.clampsToImage = clampsToImage
     }
 
     // MARK: - Resting framing
@@ -146,9 +153,9 @@ public struct WatchMapCamera: Equatable {
      * longer side takes. 0.42 leaves better than a Bubble's width of ground
      * on every side — the bunker short of it, the rough wide of it — which is
      * the "surroundings". Floored at the width fill (no black bars, the same
-     * rule as `play`) and capped at the mush ceiling; `origin` then refuses to
-     * show background past an edge, so a Bubble near the top of the bake sits
-     * off-centre rather than floating. */
+     * rule as `play`) and capped at the mush ceiling. Unclamped (2026-10-05):
+     * the Bubble is always centred, even at the edge of the bake; it used to
+     * sit off-centre there, which read as the camera ignoring the shot. */
     public static let bubbleFraction: CGFloat = 0.42
 
     public static func bubble(centre: CGPoint, extent: CGSize,
@@ -162,7 +169,7 @@ public struct WatchMapCamera: Equatable {
             ? (min(viewSize.width, viewSize.height) * bubbleFraction) / longest
             : maximumScale
         let scale = min(max(wanted, fillWidth), maximumScale)
-        return WatchMapCamera(focus: centre, scale: scale)
+        return WatchMapCamera(focus: centre, scale: scale, clampsToImage: false)
     }
 
     /* How much of the screen the green-focus band is given. The band is where
@@ -228,7 +235,7 @@ public struct WatchMapCamera: Equatable {
         let moved = CGPoint(
             x: min(max(focus.x + delta.dx / scale, 0), max(imageSize.width, 0)),
             y: min(max(focus.y + delta.dy / scale, 0), max(imageSize.height, 0)))
-        return WatchMapCamera(focus: moved, scale: scale)
+        return WatchMapCamera(focus: moved, scale: scale, clampsToImage: clampsToImage)
     }
 
     /* The Digital Crown, as a zoom.
@@ -239,7 +246,7 @@ public struct WatchMapCamera: Equatable {
     public func zoomed(by factor: CGFloat, imageSize: CGSize, viewSize: CGSize) -> WatchMapCamera {
         guard factor.isFinite, factor > 0, imageSize.width > 0, imageSize.height > 0 else { return self }
         let fitScale = min(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
-        return WatchMapCamera(focus: focus, scale: min(max(scale * factor, fitScale), Self.maximumScale))
+        return WatchMapCamera(focus: focus, scale: min(max(scale * factor, fitScale), Self.maximumScale), clampsToImage: clampsToImage)
     }
 
     // MARK: - Rendering
@@ -251,7 +258,10 @@ public struct WatchMapCamera: Equatable {
      * WatchMapFrame applies, kept identical so the Ready face and the play page
      * do not frame the same hole two different ways. */
     public func origin(imageSize: CGSize, viewSize: CGSize) -> CGPoint {
-        CGPoint(
+        guard clampsToImage else {
+            return CGPoint(x: viewSize.width / 2 - focus.x * scale, y: viewSize.height / 2 - focus.y * scale)
+        }
+        return CGPoint(
             x: Self.axisOrigin(scaledLength: imageSize.width * scale, viewLength: viewSize.width, focus: focus.x * scale),
             y: Self.axisOrigin(scaledLength: imageSize.height * scale, viewLength: viewSize.height, focus: focus.y * scale)
         )

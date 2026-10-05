@@ -71,6 +71,7 @@
     "badge.preview": "ESIKATSELU",
     "badge.logging": "KIRJAUS",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Lopeta demo",
     "badge.guest": "Vieras",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -168,6 +169,8 @@
     "watch.loadingCourse": "Ladataan kenttää",
     "watch.holesLoaded": "{have}/{total} reikää",
     "watch.playOnWatch": "Pelaa kellolla",
+    "watch.demoOnWatch": "Demo kellossa",
+    "watch.demoOn": "Tämän reiän demo laitteessa {watch}",
     "watch.handingOver": "Siirretään",
     "watch.playOnPhone": "Pelaa puhelimella",
     "watch.phoneCanSleep": "Puhelimen voi laittaa lepotilaan. Se pitää kirjaa kierroksesta ja kaikista lyöntisäännöistä; Watch näyttää ne.",

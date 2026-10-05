@@ -88,6 +88,19 @@
     };
   }
 
+  function playLine(rec) {
+    if (!rec) return [];
+    var out = [];
+    [rec.tee].concat(Array.isArray(rec.route) ? rec.route : [], [rec.green]).forEach(function (p) {
+      p = copyPoint(p);
+      if (!p) return;
+      var last = out[out.length - 1];
+      if (last && Math.abs(last.lat - p.lat) < 1e-7 && Math.abs(last.lng - p.lng) < 1e-7) return;
+      out.push({ lat: rounded(p.lat, 6), lng: rounded(p.lng, 6) });
+    });
+    return out.length >= 2 ? out : [];
+  }
+
   function bubbleFor(scene, bubbleModel) {
     if (!scene || !scene.bubble || !scene.bubble.show) return null;
     var model = null;
@@ -129,6 +142,15 @@
     if (!marshal || typeof marshal.scene !== "function" || typeof marshal.signal !== "function") throw new Error("CaddyWatchBridge requires a Marshal");
     var now = options.now || function () { return Date.now(); };
     var bubbleModel = options.bubbleModel || null;
+    /* app.demoApproach, or null. Read live: a demo starts and stops under the
+       bridge, and the Scene is the only place either end learns it did. */
+    var demo = options.demo || null;
+    function demoState() {
+      try { return demo && demo.active() ? demo.state() : null; } catch (e) { return null; }
+    }
+    function demoAvailable() {
+      try { return !!(demo && demo.available()); } catch (e) { return false; }
+    }
     var listeners = [];
     var seenCommands = Object.create(null);
     var revision = 0;
@@ -303,7 +325,13 @@
           /* The hole's own length, for a face that has no player yet: the
              Watch's Ready face and the phone's card both show tee-to-green
              before anyone is standing anywhere. */
-          teeToGreenM: r && point(r.tee) && point(r.green) ? rounded(distance.haversineMeters(point(r.tee), point(r.green)), 0) : null
+          teeToGreenM: r && point(r.tee) && point(r.green) ? rounded(distance.haversineMeters(point(r.tee), point(r.green)), 0) : null,
+          /* The hole's fairway line - tee, mapped route, green - for a wrist
+             to draw the layup context the phone draws (painter.js drawShot:
+             fairwayLine + the "Green Xm" guide). On the Scene rather than in
+             the lite-map manifest because Garmin's manifest is already near
+             Connect IQ's ~10 KB message cap; this is one hole, a few points. */
+          line: playLine(r)
         },
         /* `target` is the distance to the AIM when there is one - the number the
            Garmin numbers face shows above the club when it cannot compute its
@@ -355,8 +383,20 @@
           canComplete: !!(scene && scene.holeCompleteControl && scene.holeCompleteControl.show),
           canScore: !!(scene && scene.holeComplete && scene.holeComplete.show),
           canPlay: !!(scene && scene.playButton && scene.playButton.show),
-          playHole: (scene && scene.playButton && scene.playButton.show) ? scene.playButton.hole : null
+          playHole: (scene && scene.playButton && scene.playButton.show) ? scene.playButton.hole : null,
+          /* Whether the wrist's Ready face should offer the hole-by-hole demo
+             instead of Play here: nothing real is live, and Play cannot start
+             from where the phone is (off the course, or no fix at all). */
+          canDemo: demoAvailable() && !(scene && scene.playButton && scene.playButton.show)
         },
+        /* A demo approach is on (demo-approach.js). `position` is where the
+           player has been put; a wrist uses it in place of its own GPS for
+           everything - distances, its own Bubble, LOCK - and runs none of its
+           walk-away rules, because the couch it is on is not the fairway. */
+        demo: (function () {
+          var d = demoState();
+          return d ? { active: true, hole: d.hole, position: copyPoint(d.point), metres: d.metres } : null;
+        })(),
         surface: surfaceFor(round),
         connection: { status: "live" }
       };
@@ -396,6 +436,20 @@
       else if (type === "ADVANCE_TO_HOLE") signal = "ADVANCE_TO_HOLE";
       else if (type === "PLAY_HOLE") signal = "PLAY_PRESSED";
       else if (type === "REQUEST_LATEST_SCENE") return { accepted: true, scene: latest };
+      else if (type === "DEMO_APPROACH") {
+        /* The wrist's hole-by-hole demo: put the player short of that green
+           and hand the round straight to the wrist that asked - the same
+           confirmed takeover a Play here makes. */
+        if (!demo || !demo.start(payload.hole)) return { accepted: false, reason: "demo-unavailable", revision: latest.revision };
+        setActive("watch", "watch");
+        seenCommands[id] = true;
+        return { accepted: true, reason: null, revision: latest.revision };
+      }
+      else if (type === "DEMO_END") {
+        if (!demo || !demo.stop()) return { accepted: false, reason: "marshal-rejected", revision: latest.revision };
+        seenCommands[id] = true;
+        return { accepted: true, reason: null, revision: latest.revision };
+      }
       else if (type === "TAKE_OVER" || type === "HAND_BACK") {
         /* Surface commands move no golf state, so they never reach Marshal
            and cannot be "marshal-rejected"; the round-ID check above is what
@@ -408,6 +462,11 @@
         if (!applied) return { accepted: false, reason: "play-unavailable", revision: latest.revision };
         seenCommands[id] = true;
         return { accepted: true, reason: null, revision: latest.revision };
+      }
+      else if ((type === "LOCK_AT" || type === "SHOT_END_AT") && demoState()) {
+        /* In a demo the wrist's GPS is the couch. Whatever it measured, the
+           shot is played from where the demo put the player. */
+        signal = type === "LOCK_AT" ? "LOCK" : "SHOT_END";
       }
       else if (type === "LOCK_AT" || type === "SHOT_END_AT") {
         observation = locationObservation(payload.location, now);
@@ -450,6 +509,12 @@
          HAND_BACK commands through receiveCommand, so both go through the
          same setActive and the Scene is the only place the answer lives. */
       handToWatch: function () { return setActive("watch", "phone"); },
+      /* The phone card's demo: the hole on screen, then the same offered
+         handover Play on Watch makes. */
+      demoOnWatch: function (hole) {
+        if (!demo || !demo.start(hole)) return false;
+        return setActive("watch", "phone");
+      },
       takeBack: function () { return setActive("phone", "phone"); },
       setWatchState: setWatchState,
       setWatchMaps: setWatchMaps,

@@ -71,6 +71,7 @@
     "badge.preview": "EELVAADE",
     "badge.logging": "SALVESTAB",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Lõpeta demo",
     "badge.guest": "Külaline",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -168,6 +169,8 @@
     "watch.loadingCourse": "Väljaku laadimine",
     "watch.holesLoaded": "Radu: {have}/{total}",
     "watch.playOnWatch": "Mängi kellas",
+    "watch.demoOnWatch": "Demo kellas",
+    "watch.demoOn": "Selle raja demo seadmes {watch}",
     "watch.handingOver": "Üleandmine",
     "watch.playOnPhone": "Mängi telefonis",
     "watch.phoneCanSleep": "Telefon võib puhata. See hoiab ringi ja kõiki löögireegleid; Watch joonistab selle.",

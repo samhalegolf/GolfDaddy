@@ -754,6 +754,55 @@
         return true;
       },
 
+      /* Demo approach: "put me 100-130m short of hole N's green and start it".
+
+         The ONLY signal that places the player without GPS, and it says so in
+         its name rather than borrowing FIX_RECEIVED + PLAY_PRESSED - those two
+         ask the real-world questions (at the course? arrived at this hole?)
+         and a couch answers both with no. The point is computed outside
+         (app/js/demo-approach.js) from the package's own play line; here it
+         simply becomes the trusted fix and the hole becomes live, in Track,
+         so the next thing is the same LOCK a real approach would take.
+
+         It is offered only while nothing real is live (or the live hole is
+         already a demo one) - demo-approach.js holds that rule - and boot.js
+         keeps every write a real round makes (resume, scorecard, Course Data)
+         away from it. */
+      DEMO_APPROACH: function (p) {
+        var hole = Number(p && p.hole);
+        var point = pt(p && p.point);
+        if (!S.round.open || !point || holesInPlay().indexOf(hole) === -1) return false;
+        S.logging = null;
+        S.atCourse = true;
+        S.fix = { point: point, fresh: true, at: now() };
+        S.motion = { speedMps: 0, moving: false, lastPoint: point, lastAt: now() };
+        startHole(hole);
+        return true;
+      },
+
+      /* Demo over: back to the Preview a couch is actually in. Everything the
+         demo touched goes - live hole, shots, scores, the fix it planted - but
+         the round stays open on the hole being looked at, and roundEnded is
+         NOT fired, because that would stop the real GPS the player is about
+         to need again. */
+      DEMO_ENDED: function () {
+        if (S.live.hole === null && !S.fix.point) return false;
+        S.live = { hole: null, mode: "track", awayFixes: 0 };
+        S.preview = { mode: "setup", placement: null, target: null };
+        S.finish = null;
+        S.logged = null;
+        S.logging = null;
+        S.greenClosed = null;
+        S.viewChosen = false;
+        S.atCourse = false;
+        S.fix = { point: null, fresh: false, at: 0 };
+        S.motion = { speedMps: null, moving: false, lastPoint: null, lastAt: 0 };
+        S.shots = {};
+        S.scores = {};
+        syncEngine();
+        return true;
+      },
+
       /* The picker: "show me hole N". Looking around, not moving on — so it
          never advances the round. Landing anywhere but the live hole is Preview,
          which opens at SETUP with nothing placed. */

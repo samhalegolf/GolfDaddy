@@ -71,6 +71,7 @@
     "badge.preview": "PRIEKŠSKATĪJUMS",
     "badge.logging": "REĢISTRĒ",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Beigt demo",
     "badge.guest": "Viesis",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -169,6 +170,8 @@
     "watch.loadingCourse": "Ielādē laukumu",
     "watch.holesLoaded": "Bedrītes: {have} no {total}",
     "watch.playOnWatch": "Spēlēt pulkstenī",
+    "watch.demoOnWatch": "Demo pulkstenī",
+    "watch.demoOn": "Šīs bedrītes demo ierīcē {watch}",
     "watch.handingOver": "Nodod",
     "watch.playOnPhone": "Spēlēt tālrunī",
     "watch.phoneCanSleep": "Tālrunis var gulēt. Tas glabā raundu un visus sitienu noteikumus; Watch to tikai attēlo.",

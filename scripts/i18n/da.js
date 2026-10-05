@@ -71,6 +71,7 @@
     "badge.preview": "PRØVE",
     "badge.logging": "REGISTRERER",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Afslut demo",
     "badge.guest": "Gæst",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -168,6 +169,8 @@
     "watch.loadingCourse": "Indlæser bane",
     "watch.holesLoaded": "{have} af {total} huller",
     "watch.playOnWatch": "Spil på Watch",
+    "watch.demoOnWatch": "Demo på uret",
+    "watch.demoOn": "Demo af dette hul på {watch}",
     "watch.handingOver": "Overdrager",
     "watch.playOnPhone": "Spil på telefonen",
     "watch.phoneCanSleep": "Telefonen kan gå i dvale. Den holder styr på runden og alle slagregler; Watch viser det hele.",

@@ -45,6 +45,13 @@ class NumbersView extends WatchUi.View {
 
         var holeNumber = scene.holeNumber();
         drawCentered(dc, "HOLE " + (holeNumber != null ? holeNumber.toString() : "-"), y);
+        // A demo says so, and says how to leave it (BACK; see
+        // CaddyInputDelegate). Above the hole, where nothing else draws.
+        if (scene.isDemo()) {
+            dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(width / 2, y - lineHeight * 0.45, Graphics.FONT_XTINY, "DEMO - BACK ends", Graphics.TEXT_JUSTIFY_CENTER);
+            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        }
         y += lineHeight;
 
         var front = scene.distanceFrontM();

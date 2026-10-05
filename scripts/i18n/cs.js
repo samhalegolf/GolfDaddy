@@ -71,6 +71,7 @@
     "badge.preview": "NÁHLED",
     "badge.logging": "ZÁZNAM",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Ukončit demo",
     "badge.guest": "Host",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -169,6 +170,8 @@
     "watch.loadingCourse": "Načítání hřiště",
     "watch.holesLoaded": "{have} z {total} jamek",
     "watch.playOnWatch": "Hrát na hodinkách",
+    "watch.demoOnWatch": "Demo na hodinkách",
+    "watch.demoOn": "Demo této jamky na {watch}",
     "watch.handingOver": "Předávání",
     "watch.playOnPhone": "Hrát na telefonu",
     "watch.phoneCanSleep": "Telefon může spát. Uchovává kolo i všechna pravidla ran; hodinky ho jen zobrazují.",

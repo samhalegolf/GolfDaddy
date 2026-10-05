@@ -71,6 +71,7 @@
     "badge.preview": "APERÇU",
     "badge.logging": "SUIVI",
     "badge.demo": "DÉMO",
+    "badge.endDemo": "Quitter la démo",
     "badge.guest": "Invité",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -168,6 +169,8 @@
     "watch.loadingCourse": "Chargement du parcours",
     "watch.holesLoaded": "{have} trous sur {total}",
     "watch.playOnWatch": "Jouer sur la Watch",
+    "watch.demoOnWatch": "Démo sur la montre",
+    "watch.demoOn": "Démo de ce trou sur {watch}",
     "watch.handingOver": "Transfert",
     "watch.playOnPhone": "Jouer sur le téléphone",
     "watch.phoneCanSleep": "Le téléphone peut se mettre en veille. Il garde la partie et toutes les règles des coups ; la Watch se charge de l’affichage.",

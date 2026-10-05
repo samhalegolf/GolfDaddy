@@ -82,6 +82,7 @@
     "test:progress": "node dev/progress-core.test.js",
     "test:watch-maps": "node dev/watch-map-core.test.js && node dev/course-watch-maps.test.js && node dev/watch-map-delivery.test.js",
     "test:watch-player": "node dev/watch-player-delivery.test.js",
+    "test:watch-demo": "node dev/watch-demo-approach.test.js && node dev/caddy-watch.test.js",
     "test:bubble-parity": "node dev/bubble-engine-parity.test.js",
     "test:bubble-parity:swift": "swift test --package-path ios/WatchBubbleEngine",
     "test:bubble-parity:update": "node dev/bubble-engine-parity.test.js --update",

@@ -527,3 +527,46 @@ Open questions carried from the design: whether the card should offer handover
 at the live hole while the rest of the package keeps filling (today it waits for
 the whole package), and whether the parked phone-shaped card should retire into
 the settings row later in the round (today it stays).
+
+## Demo approach: the handover off the course
+
+Preview has no position, so Play - and with it every handover - is refused
+off the course. A **demo approach** (`app/js/demo-approach.js`) fills that gap:
+it puts the player on the hole's play line 100-130m short of the green and
+makes the hole live through Marshal's own `DEMO_APPROACH` signal (the only
+signal that places the player without GPS). `DEMO_ENDED` puts the round back
+in Preview without firing `roundEnded`. While a demo is on, `boot.js` drops
+real GPS fixes and keeps resume, scorecard and Course Data writes away from it.
+
+```text
+controls.canDemo  nothing real is live AND Play cannot start here
+demo              null | { active, hole, position, metres }
+DEMO_APPROACH     { hole }  -> plant the point, start the hole, wrist takes over (confirmed)
+DEMO_END          {}        -> back to Preview, phone driving
+```
+
+When `canDemo` is set the wrist's Ready face is a hole browser instead of
+Play here: Apple's `DemoBrowserFace` (one vertical page per hole - crown or
+swipe - with the lite map full-screen on the approach and **Demo**), Garmin's `StatusView.drawDemoBrowser` (UP/DOWN, SELECT). The phone's
+card says **Demo on Watch** and demos the hole on screen (an offered handover,
+exactly like Play on Watch). With `demo` set both wrists use `demo.position`
+in place of their own GPS, send LOCK rather than LOCK_AT, and run no walk-away
+rule; the phone also plays any LOCK_AT / SHOT_END_AT from the demo point. The
+demo ends by itself when the real-round criteria are met - the first real fix
+at the course (`endIfAtCourse`, Marshal's `AT_COURSE_M`) ends it, hands a
+driving wrist back, and that fix goes down the real path. It can also be ended
+from the phone badge's **End demo** or BACK on Garmin's numbers face; Apple's
+DEMO banner is a label only.
+
+### Layup context and the Bubble camera (2026-10-05)
+
+`hole.line` on the Scene is the current hole's fairway line (tee, mapped route,
+green). Both wrists draw the phone's layup context from it (painter.js
+`drawShot`): the faint fairway line and a dotted guide from the Bubble to the
+green labelled "Green Xm", under the phone's own test (green beyond the bag's
+longest total + 3m, Bubble more than 4m short of the green and nearer than it).
+It rides the Scene, not the lite-map manifest, because Garmin's manifest is
+already near Connect IQ's ~10 KB message cap. The Bubble camera
+(`WatchMapCamera.bubble` / `GarminMapCamera.bubble`) is not clamped to the
+baked image, so the Bubble is always centred; the overspill is the map's dark
+green (#294A30).

@@ -165,7 +165,13 @@ class GarminMapView extends WatchUi.View {
         lastViewWidth = viewWidth;
         lastViewHeight = viewHeight;
 
+        // Past the bake's edge (the Bubble framing may look there): the
+        // map's own dark green, so it reads as more rough, not a hole.
+        dc.setColor(MAP_EDGE_GREEN, MAP_EDGE_GREEN);
+        dc.clear();
         drawBitmapCropped(dc, bitmap, camera, imageWidth, imageHeight, viewWidth, viewHeight);
+
+        drawLayupGuide(dc, scene, local, playerGeo, targetGeo, greenGeo);
 
         // Dashed aim line, player -> aim point.
         var aimImg = (targetImg != null) ? targetImg : greenImg;
@@ -273,6 +279,82 @@ class GarminMapView extends WatchUi.View {
             // already pinned camera.scale to 1.0 for this case, so x/y and
             // every overlay marker agree with what is drawn.
             dc.drawBitmap(x, y, bitmap);
+        }
+    }
+
+    static var MAP_EDGE_GREEN = 0x294A30;
+
+    // Laying up, as the phone draws it (painter.js drawShot) and Apple's
+    // AimableHoleMap.layupGuide: the hole's fairway line, faint, and a dotted
+    // guide from the Bubble on to the green labelled with what is left. Only
+    // when the green is beyond the bag (raw > max + 3), the Bubble is a real
+    // distance short of it (gap > 4) and nearer than the green (raw >
+    // playable + 4) - the same three tests, so all three surfaces agree.
+    // Reads this pass's reference and sizes from the fields onUpdate caches
+    // (Connect IQ allows at most 9 arguments).
+    function drawLayupGuide(dc, scene, local, playerGeo, targetGeo, greenGeo) {
+        var reference = lastReference;
+        var imageWidth = lastImageWidth;
+        var imageHeight = lastImageHeight;
+        var viewWidth = lastViewWidth;
+        var viewHeight = lastViewHeight;
+        var snapshot = session.playerStore.snapshot;
+        if (playerGeo == null || greenGeo == null || targetGeo == null || snapshot == null) { return; }
+        var maxM = snapshot.bag.maxTotalM();
+        if (maxM == null || maxM <= 0) { return; }
+        var centre = (local != null && local.centre != null) ? local.centre : targetGeo;
+        var raw = GarminGeo.distance(playerGeo, greenGeo);
+        var playable = GarminGeo.distance(playerGeo, centre);
+        var gap = GarminGeo.distance(centre, greenGeo);
+        if (!(raw > maxM + 3 && gap > 4 && raw > playable + 4)) { return; }
+
+        var line = scene.holeLine();
+        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+        var havePrev = false;
+        var px = 0.0;
+        var py = 0.0;
+        for (var i = 0; i < line.size(); i += 1) {
+            var p = reference.imagePoint(line[i].lat, line[i].lng);
+            if (p == null) { continue; }
+            var x = camera.placeX(p["x"], imageWidth, viewWidth);
+            var y = camera.placeY(p["y"], imageHeight, viewHeight);
+            if (havePrev) { drawDottedLine(dc, px, py, x, y, 1, 7); }
+            px = x;
+            py = y;
+            havePrev = true;
+        }
+
+        var fromImg = reference.imagePoint(centre.lat, centre.lng);
+        var toImg = reference.imagePoint(greenGeo.lat, greenGeo.lng);
+        if (fromImg == null || toImg == null) { return; }
+        var fx = camera.placeX(fromImg["x"], imageWidth, viewWidth);
+        var fy = camera.placeY(fromImg["y"], imageHeight, viewHeight);
+        var gx = camera.placeX(toImg["x"], imageWidth, viewWidth);
+        var gy = camera.placeY(toImg["y"], imageHeight, viewHeight);
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        drawDottedLine(dc, fx, fy, gx, gy, 2, 6);
+        // Just past the Bubble along the guide, not halfway to the green:
+        // halfway is usually off a watch face. drawLabel clamps it on.
+        var dx = gx - fx;
+        var dy = gy - fy;
+        var length = Math.sqrt(dx * dx + dy * dy);
+        if (length < 1) { return; }
+        var reach = length * 0.52 < 46 ? length * 0.52 : 46;
+        drawLabel(dc, "Green " + gap.toNumber() + "m", fx + dx / length * reach, fy + dy / length * reach - 8);
+    }
+
+    function drawDottedLine(dc, x1, y1, x2, y2, dash, gap) {
+        dc.setPenWidth(1);
+        var dx = x2 - x1;
+        var dy = y2 - y1;
+        var length = Math.sqrt(dx * dx + dy * dy);
+        if (length < 1) { return; }
+        var ux = dx / length;
+        var uy = dy / length;
+        var step = dash + gap;
+        for (var t = 0.0; t < length; t += step) {
+            var e = t + dash < length ? t + dash : length;
+            dc.drawLine(x1 + ux * t, y1 + uy * t, x1 + ux * e, y1 + uy * e);
         }
     }
 

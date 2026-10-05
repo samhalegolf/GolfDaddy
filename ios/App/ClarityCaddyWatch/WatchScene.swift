@@ -24,6 +24,13 @@ struct WatchScene: Codable, Equatable {
     let controls: Controls?
     let surface: Surface?
     let connection: Connection?
+    let demo: Demo?
+
+    /* A demo approach is on (app/js/demo-approach.js): the phone has put the
+       player `metres` short of hole `hole`'s green, at `position`. While it is
+       on, that point IS the player - for distances, the wrist's own Bubble and
+       LOCK - and this wrist's own GPS (the couch) is not consulted at all. */
+    struct Demo: Codable, Equatable { let active: Bool?; let hole: Int?; let position: GeoPoint?; let metres: Double? }
 
     /* Which surface is driving the round. The phone owns the answer and both
        ends may ask to change it (TAKE_OVER / HAND_BACK); this is presentation
@@ -101,6 +108,9 @@ struct WatchScene: Codable, Equatable {
            being queued that can only ever be rejected. */
         let canBallMove: Bool?; let canLogFinish: Bool?; let canComplete: Bool?
         let canScore: Bool?; let canPlay: Bool?; let playHole: Int?
+        /* Nothing real is live and Play cannot start from where the phone is:
+           the Ready face offers a demo hole by hole instead of Play here. */
+        let canDemo: Bool?
     }
     struct Connection: Codable, Equatable { let status: String? }
 
@@ -108,6 +118,11 @@ struct WatchScene: Codable, Equatable {
     var hasRound: Bool { roundId?.isEmpty == false }
     var isBubble: Bool { mode == "bubble" && bubble != nil }
     var isDriving: Bool { surface?.active == "watch" }
+    var isDemo: Bool { demo?.active == true }
+    var demoPosition: GeoPoint? {
+        guard isDemo, let p = demo?.position, p.lat != nil, p.lng != nil else { return nil }
+        return p
+    }
 }
 
 /* The Watch sends only this existing, platform-neutral command vocabulary.
@@ -121,6 +136,9 @@ struct CaddyWatchCommand: Codable, Equatable {
            is never how the wrist gets permission to draw it. */
         case ballMoved = "BALL_MOVED", logFinish = "LOG_FINISH", holeComplete = "HOLE_COMPLETE"
         case stepScore = "STEP_SCORE", advance = "ADVANCE_TO_HOLE", playHole = "PLAY_HOLE"
+        /* The demo: start hole N from 100-130m short of its green and hand it
+           to this wrist in one go, and end it again. */
+        case demoApproach = "DEMO_APPROACH", demoEnd = "DEMO_END"
     }
     let commandId: String
     let roundId: String

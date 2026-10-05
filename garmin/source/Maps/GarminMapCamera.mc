@@ -23,6 +23,11 @@ class GarminMapCamera {
     var focusX;    // where the camera is looking, in image pixels
     var focusY;
     var scale;      // image pixels per screen point
+    // Whether the view may show past the image's edges. The Bubble framing
+    // may (the Bubble always sits centred, and GarminMapView fills the
+    // overspill with the map's own dark green); play framing may not.
+    // Mirrors WatchMapCamera.swift's clampsToImage.
+    var clampsToImage = true;
 
     function initialize(focusX, focusY, scale) {
         self.focusX = focusX;
@@ -91,7 +96,9 @@ class GarminMapCamera {
         var wanted = (longest > 0) ? (shorterView * BUBBLE_FRACTION) / longest : MAXIMUM_SCALE;
         var scale = wanted > fillWidth ? wanted : fillWidth;
         if (scale > MAXIMUM_SCALE) { scale = MAXIMUM_SCALE; }
-        return new GarminMapCamera(centreX, centreY, scale);
+        var camera = new GarminMapCamera(centreX, centreY, scale);
+        camera.clampsToImage = false;
+        return camera;
     }
 
     // The player sitting low, with the hole running up the screen.
@@ -110,9 +117,11 @@ class GarminMapCamera {
     // focus, then refuses to show background past an edge — an off-centre
     // hole is better than a map that appears to float.
     function originX(imageWidth, viewWidth) {
+        if (!clampsToImage) { return viewWidth / 2.0 - focusX * scale; }
         return axisOrigin(imageWidth * scale, viewWidth, focusX * scale);
     }
     function originY(imageHeight, viewHeight) {
+        if (!clampsToImage) { return viewHeight / 2.0 - focusY * scale; }
         return axisOrigin(imageHeight * scale, viewHeight, focusY * scale);
     }
 

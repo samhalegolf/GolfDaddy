@@ -66,7 +66,14 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
         return true;
     }
 
+    // On the demo browser (Ready face, phone off the course) UP/DOWN step
+    // through the holes locally; nothing is sent until SELECT.
+    function demoBrowsing() {
+        return session.face().equals(GarminSessionManager.FACE_READY) && session.scene != null && session.scene.canDemo();
+    }
+
     function onNextPage() {
+        if (demoBrowsing()) { session.stepDemo(-1); WatchUi.requestUpdate(); return true; }
         if (view.showingMap && view.mapView.aiming) {
             router.dispatch(InputAction.AIM_UP);
         } else {
@@ -76,6 +83,7 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
     }
 
     function onPreviousPage() {
+        if (demoBrowsing()) { session.stepDemo(1); WatchUi.requestUpdate(); return true; }
         if (view.showingMap && view.mapView.aiming) {
             router.dispatch(InputAction.AIM_DOWN);
         } else {
@@ -219,6 +227,11 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
                 view.mapView.cancelAim();
             } else if (view.showingMap) {
                 view.showNumbers();
+            } else if (session.lastRejection == null && session.handoverNotice == null
+                    && session.isDemo() && session.face().equals(GarminSessionManager.FACE_PLAYING)) {
+                // Nothing transient to dismiss: on a demo, BACK ends it and
+                // both ends go back to Preview.
+                session.sendSimple(GarminCommandKind.DEMO_END);
             } else {
                 session.dismissRejection();
                 session.dismissHandoverNotice();
@@ -243,6 +256,8 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
             } else if (session.scene != null && session.scene.canLock()) {
                 session.send(GarminCommandKind.LOCK);
             }
+        } else if (face.equals(GarminSessionManager.FACE_READY) && session.scene != null && session.scene.canDemo()) {
+            session.startDemo();
         } else if (face.equals(GarminSessionManager.FACE_READY)) {
             session.sendSimple(GarminCommandKind.TAKE_OVER);
         }

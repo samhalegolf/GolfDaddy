@@ -82,9 +82,14 @@
     words("watchHandoverMaskTitle", "watch.playingOn", { watch: vendorName });
     if (!phase || !card) return;
     if (card.dataset.phase !== phase) card.dataset.phase = phase;
+    /* Off the course Play cannot start, so the card would be a button that
+       does nothing. It offers the demo instead: this hole, 100-130m out, on
+       the wrist (demo-approach.js). */
+    var demo = phase === "ready" && isDemo(scene);
+    words("watchHandoverReadyAction", demo ? "watch.demoOnWatch" : "watch.playOnWatch");
     i18n.setAttr(card, "aria-label",
       phase === "uploading" ? "watch.loadingOnto"
-        : phase === "ready" ? "watch.playOn"
+        : phase === "ready" ? (demo ? "watch.demoOn" : "watch.playOn")
           : phase === "handing" ? "watch.handingOverTo"
             : "watch.playingOnAria", { watch: vendorName });
 
@@ -110,9 +115,12 @@
     thumbnail(el("watchHandoverThumb2"), scene);
   }
 
+  function isDemo(scene) { return !!(scene && scene.controls && scene.controls.canDemo); }
+
   function onCardTap() {
     var phase = phaseFor(lastScene);
-    if (phase === "ready") api.handToWatch();
+    if (phase === "ready" && isDemo(lastScene)) api.demoOnWatch(lastScene.hole && lastScene.hole.number);
+    else if (phase === "ready") api.handToWatch();
     else if (phase === "playing") api.takeBack();
   }
 
@@ -134,5 +142,6 @@
     return true;
   };
   api.handToWatch = function () { return !!(watch && watch.handToWatch()); };
+  api.demoOnWatch = function (hole) { return !!(watch && watch.demoOnWatch && watch.demoOnWatch(hole)); };
   api.takeBack = function () { return !!(watch && watch.takeBack()); };
 })(window);

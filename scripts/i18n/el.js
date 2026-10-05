@@ -71,6 +71,7 @@
     "badge.preview": "ΠΡΟΕΠΙΣΚΟΠΗΣΗ",
     "badge.logging": "ΚΑΤΑΓΡΑΦΗ",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Τέλος demo",
     "badge.guest": "Επισκέπτης",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -168,6 +169,8 @@
     "watch.loadingCourse": "Φόρτωση γηπέδου",
     "watch.holesLoaded": "{have} από {total} τρύπες",
     "watch.playOnWatch": "Παίξε στο Watch",
+    "watch.demoOnWatch": "Demo στο ρολόι",
+    "watch.demoOn": "Demo αυτής της τρύπας στο {watch}",
     "watch.handingOver": "Μεταφορά",
     "watch.playOnPhone": "Παίξε στο τηλέφωνο",
     "watch.phoneCanSleep": "Το τηλέφωνο μπορεί να κοιμηθεί. Κρατά τον γύρο και κάθε κανόνα χτυπήματος· το Watch τον σχεδιάζει.",

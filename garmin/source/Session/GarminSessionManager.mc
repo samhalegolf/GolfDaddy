@@ -82,7 +82,8 @@ class GarminSessionManager {
         if (scene == null || !scene.hasRound()) { return FACE_NO_ROUND; }
         if (scene.isDriving()) { return FACE_PLAYING; }
         if ((scene.handoverState() != null && scene.handoverState().equals("offered"))
-                || outbox.pendingOfType(GarminCommandKind.TAKE_OVER) != null) {
+                || outbox.pendingOfType(GarminCommandKind.TAKE_OVER) != null
+                || outbox.pendingOfType(GarminCommandKind.DEMO_APPROACH) != null) {
             return FACE_TAKING;
         }
         return FACE_READY;
@@ -126,7 +127,7 @@ class GarminSessionManager {
         var agreement = engineAgreement();
         if (!agreement["mayComputeLocally"]) { noteBubbleReason("engine " + agreement["state"]); return null; }
         if (playerStore.snapshot == null) { noteBubbleReason("no player snapshot"); return null; }
-        var fix = locationManager.lastFix;
+        var fix = effectiveFix();
         if (fix == null) { noteBubbleReason("no usable fix"); return null; }
         if (playState.target != null && playState.bubble != null) {
             noteBubbleReason("local aim bubble");
@@ -144,8 +145,70 @@ class GarminSessionManager {
     // The point the numbers/map faces draw the player at: Garmin's own fix
     // while trustworthy, the phone's otherwise.
     function playerPoint() {
-        if (locationManager.lastFix != null) { return locationManager.lastFix; }
+        var fix = effectiveFix();
+        if (fix != null) { return fix; }
         return (scene != null) ? scene.phoneLocation() : null;
+    }
+
+    // Where this wrist believes the player is: the demo's planted point
+    // while a demo approach is on, the wrist's own GPS otherwise.
+    function isDemo() { return scene != null && scene.isDemo(); }
+    function effectiveFix() {
+        if (isDemo()) { return scene.demoPosition(); }
+        return locationManager.lastFix;
+    }
+
+    // ------------------------------------------------------------ demo
+
+    // The Ready face's hole cursor, when the phone offers the demo. Holes come
+    // off the Scene's pars (sorted), else 1-18; the phone refuses any hole it
+    // does not have, so the fallback can only cost a "Couldn't" notice.
+    var demoIndex = null;
+    function demoHoles() {
+        var out = [];
+        var pars = (scene != null) ? scene.coursePars() : null;
+        if (pars != null) {
+            var keys = pars.keys();
+            for (var i = 0; i < keys.size(); i += 1) {
+                var n = (keys[i] instanceof Lang.String) ? keys[i].toNumber() : null;
+                if (n != null) { out.add(n); }
+            }
+        }
+        if (out.size() == 0) {
+            for (var h = 1; h <= 18; h += 1) { out.add(h); }
+        }
+        // Insertion sort: no Array.sort before API 5.
+        for (var j = 1; j < out.size(); j += 1) {
+            var v = out[j];
+            var k = j - 1;
+            while (k >= 0 && out[k] > v) { out[k + 1] = out[k]; k -= 1; }
+            out[k + 1] = v;
+        }
+        return out;
+    }
+    function demoHole() {
+        var holes = demoHoles();
+        if (demoIndex == null) {
+            // Open on the hole the phone is showing.
+            demoIndex = 0;
+            var current = (scene != null) ? scene.holeNumber() : null;
+            for (var i = 0; i < holes.size(); i += 1) { if (current != null && holes[i] == current) { demoIndex = i; } }
+        }
+        if (demoIndex >= holes.size()) { demoIndex = 0; }
+        return holes[demoIndex];
+    }
+    function stepDemo(delta) {
+        var holes = demoHoles();
+        demoHole();
+        demoIndex = (demoIndex + delta + holes.size()) % holes.size();
+    }
+    function startDemo() {
+        if (scene == null || !scene.hasRound() || outbox.isPending(GarminCommandKind.DEMO_APPROACH)) { return; }
+        lastRejection = null;
+        var command = new GarminCommand(uuid(), scene.roundId(), scene.revision(), nowEpochMillis(), GarminCommandKind.DEMO_APPROACH, null, null);
+        command.payloadHole = demoHole();
+        outbox.enqueue(command);
+        attempt(command.commandId);
     }
 
     // -------------------------------------------------------------- send
@@ -163,7 +226,9 @@ class GarminSessionManager {
         var wireType = type;
         var location = null;
 
-        if (type.equals(GarminCommandKind.LOCK)) {
+        // In a demo there is no wrist GPS to stamp a LOCK with: the phone
+        // plays it from the planted point.
+        if (type.equals(GarminCommandKind.LOCK) && !isDemo()) {
             var fix = locationManager.lastFix;
             var obs = GarminLocationObservation.build(
                 fix, locationManager.lastAccuracy, locationManager.lastFixEpochMillis, nowMs, 30.0);
@@ -183,7 +248,7 @@ class GarminSessionManager {
         // and the button waits, as it always did.
         if (type.equals(GarminCommandKind.LOCK)) {
             var bubble = localBubble();
-            var fix = locationManager.lastFix;
+            var fix = effectiveFix();
             if (bubble != null && fix != null) {
                 lockedShot = new GarminLockedShot(command.commandId, roundId, scene.revision(), scene.holeNumber(), bubble, fix, nowMs);
             }
@@ -291,8 +356,23 @@ class GarminSessionManager {
         if (incomingHole != null && (previousHole == null || previousHole != incomingHole)) {
             playState.enter(incomingHole);
         }
-        locationManager.start();
-        locationManager.poll();
+        // A demo plants the player and the wrist's GPS sits it out (stop()
+        // reports a null fix, which onLocationFix ignores during a demo, so
+        // the planted point is written after). Leaving the demo hands the
+        // job straight back.
+        var planted = incoming.demoPosition();
+        if (planted != null) {
+            if (previous == null || !previous.isDemo()) { locationManager.stop(); }
+            playState.update(planted);
+            if (playState.target != null && playerStore.snapshot != null) {
+                playState.moveTarget(playState.target, playerStore.snapshot.bag, playerStore.snapshot.bubble);
+            }
+        } else {
+            if (previous != null && previous.isDemo()) { playState.update(null); }
+            locationManager.start();
+            locationManager.poll();
+        }
+        if (!incoming.canDemo()) { demoIndex = null; }
         reconcileOutbox(incoming);
         noteSurface(previous, incoming);
     }
@@ -365,7 +445,7 @@ class GarminSessionManager {
     // player, then re-run moveTarget against whatever target is already
     // held, if any, so the ring on screen tracks the walk.
     function onLocationFix(coordinate, accuracy, epochMillis) {
-        if (scene == null) { return; }
+        if (scene == null || scene.isDemo()) { return; }
         playState.update(coordinate);
         if (playState.target != null && playerStore.snapshot != null) {
             playState.moveTarget(playState.target, playerStore.snapshot.bag, playerStore.snapshot.bubble);

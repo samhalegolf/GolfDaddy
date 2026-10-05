@@ -71,6 +71,7 @@
     "badge.preview": "ELŐNÉZET",
     "badge.logging": "NAPLÓZÁS",
     "badge.demo": "DEMÓ",
+    "badge.endDemo": "Demó vége",
     "badge.guest": "Vendég",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -168,6 +169,8 @@
     "watch.loadingCourse": "Pálya betöltése",
     "watch.holesLoaded": "{have}/{total} lyuk",
     "watch.playOnWatch": "Játék az órán",
+    "watch.demoOnWatch": "Demó az órán",
+    "watch.demoOn": "A lyuk demója ezen: {watch}",
     "watch.handingOver": "Átadás",
     "watch.playOnPhone": "Játék a telefonon",
     "watch.phoneCanSleep": "A telefon alhat. Megőrzi a kört és minden ütésszabályt; az óra rajzolja ki.",

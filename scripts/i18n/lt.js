@@ -71,6 +71,7 @@
     "badge.preview": "PERŽIŪRA",
     "badge.logging": "ŽYMIMA",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Baigti demo",
     "badge.guest": "Svečias",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -169,6 +170,8 @@
     "watch.loadingCourse": "Įkeliamas laukas",
     "watch.holesLoaded": "Duobutės: {have} iš {total}",
     "watch.playOnWatch": "Žaisti laikrodyje",
+    "watch.demoOnWatch": "Demo laikrodyje",
+    "watch.demoOn": "Šios duobutės demo per {watch}",
     "watch.handingOver": "Perduodama",
     "watch.playOnPhone": "Žaisti telefone",
     "watch.phoneCanSleep": "Telefonas gali užmigti. Jis saugo raundą ir visas smūgių taisykles; Watch tik jį rodo.",

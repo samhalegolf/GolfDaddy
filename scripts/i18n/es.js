@@ -71,6 +71,7 @@
     "badge.preview": "VISTA PREVIA",
     "badge.logging": "REGISTRANDO",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Salir de la demo",
     "badge.guest": "Invitado",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -168,6 +169,8 @@
     "watch.loadingCourse": "Cargando campo",
     "watch.holesLoaded": "{have} de {total} hoyos",
     "watch.playOnWatch": "Jugar en el Watch",
+    "watch.demoOnWatch": "Demo en el reloj",
+    "watch.demoOn": "Demo de este hoyo en {watch}",
     "watch.handingOver": "Transfiriendo",
     "watch.playOnPhone": "Jugar en el teléfono",
     "watch.phoneCanSleep": "El teléfono puede bloquearse. Mantiene la ronda y las reglas de cada golpe; el Watch la dibuja.",
