@@ -17,9 +17,4 @@
 # `./build.sh package`.
 base.excludeAnnotations = tx_live;parity;sim_demo_off
 
-approachs62.resourcePath = resources;resources-icons/35;resources-sim-demo
-fr55.resourcePath = resources;resources-icons/35;resources-sim-demo
-fenix6.resourcePath = resources;resources-icons/40;resources-sim-demo
-approachs7042mm.resourcePath = resources;resources-icons/60;resources-sim-demo
-approachs7047mm.resourcePath = resources;resources-icons/70;resources-sim-demo
-vivoactive4s.resourcePath = resources;resources-icons/30;resources-sim-demo
+base.resourcePath = resources;resources-sim-demo

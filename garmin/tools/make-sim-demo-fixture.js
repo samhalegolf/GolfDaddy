@@ -17,8 +17,13 @@
  * decimals as Double, and a float32 tx (~8.6e7) is off by several pixels.
  * GarminSimDemo.dbl() parses them back exactly.
  *
- * The demo point is the same rule as app/js/demo-approach.js, but fixed at
- * 115 m short of the green (the middle of 100-130) so the fixture is stable.
+ * SITUATIONS are what the watch's demo browser steps through - each a hole,
+ * a label and a spot on the play line, chosen to exercise a different part of
+ * the watch: a tee shot and a second shot out of the bag's reach (the layup
+ * target and its fairway-line guide), a par 3 tee shot and approaches in
+ * reach (the green as target), a chip (a small Bubble near the green). The
+ * approach is the app's own demo rule (app/js/demo-approach.js), fixed at
+ * 115 m - the middle of 100-130 - so the fixture is stable.
  */
 "use strict";
 const fs = require("fs");
@@ -28,6 +33,15 @@ const distance = require("../../app/js/distance.js");
 
 const container = process.argv[2];
 const holes = (process.argv[3] || "1,2,3").split(",").map(Number);
+/* [hole, id, label, metres short of the green along the line, or "tee"] */
+const SITUATIONS = [
+  [1, "h1-tee", "Tee shot", "tee"],
+  [1, "h1-second", "Second shot", 280],
+  [1, "h1-approach", "Approach", 115],
+  [2, "h2-tee", "Par 3 tee", "tee"],
+  [3, "h3-approach", "Approach", 115],
+  [3, "h3-chip", "Chip", 45]
+];
 if (!container) {
   console.error("usage: make-sim-demo-fixture.js <apple-watch-app-container> [holes]");
   process.exit(1);
@@ -69,6 +83,18 @@ function shortOfGreen(line, back) {
   return line[0];
 }
 
+function spot(pos, ref) {
+  const shape = (ref.greenShape || []).map((p) => distance.haversineMeters(pos, p));
+  const centre = distance.haversineMeters(pos, ref.green);
+  return {
+    pos: pt(pos), metres: Math.round(centre),
+    front: Math.round(shape.length ? Math.min(...shape) : centre),
+    centre: Math.round(centre),
+    back: Math.round(shape.length ? Math.max(...shape) : centre)
+  };
+}
+
+const situations = [];
 const fixtureHoles = [];
 const manifestHoles = [];
 const bitmaps = [];
@@ -77,18 +103,14 @@ for (const n of holes) {
   if (!h) { console.error("hole " + n + " not in package"); process.exit(1); }
   const ref = h.reference || h.golfReference;
   const line = lineOf(ref);
-  const pos = shortOfGreen(line, 115);
-  const shape = (ref.greenShape || []).map((p) => distance.haversineMeters(pos, p));
-  const centre = distance.haversineMeters(pos, ref.green);
   fixtureHoles.push({
     n,
     line: line.map(pt),
-    pos: pt(pos),
-    metres: Math.round(centre),
-    front: Math.round(shape.length ? Math.min(...shape) : centre),
-    centre: Math.round(centre),
-    back: Math.round(shape.length ? Math.max(...shape) : centre),
     len: Math.round(distance.haversineMeters(line[0], line[line.length - 1]))
+  });
+  SITUATIONS.filter((x) => x[0] === n).forEach(([hole, id, label, back]) => {
+    const pos = back === "tee" ? line[0] : shortOfGreen(line, back);
+    situations.push(Object.assign({ id, hole, label }, spot(pos, ref)));
   });
   const sr = h.spatialReference;
   manifestHoles.push({
@@ -108,6 +130,7 @@ for (const n of holes) {
 const fixture = {
   course: { key: "sim-demo-" + courseDir, name: "Millbrook (sim demo)", source: courseDir + "/" + versionDir },
   holes: fixtureHoles,
+  situations,
   manifest: manifestHoles,
   player
 };

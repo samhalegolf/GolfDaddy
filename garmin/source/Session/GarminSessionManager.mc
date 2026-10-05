@@ -135,12 +135,25 @@ class GarminSessionManager {
         }
         var aim = (scene != null) ? scene.aimTarget() : null;
         if (aim == null) { noteBubbleReason("no aim target"); return null; }
+        // Memoised on its inputs. The engine (club choice + a 168-point
+        // ring) is the single most expensive thing the app does, and both
+        // faces ask for this on every redraw - once a second at least. On a
+        // 120k watchdog budget (Forerunner 255) recomputing it inside the
+        // map's draw pass tripped the watchdog (2026-10-05). It is warmed in
+        // receiveScene / onLocationFix, each its own callback and budget, so
+        // a draw normally only reads the cache.
+        var key = fix.lat + "," + fix.lng + "|" + aim.lat + "," + aim.lng + "|" + playerStore.snapshot.fingerprint;
+        if (key.equals(bubbleCacheKey)) { return bubbleCache; }
         noteBubbleReason("computing for scene aim");
-        return GarminBubbleEngine.calculate({
+        bubbleCache = GarminBubbleEngine.calculate({
             "player" => fix, "target" => aim,
             "bag" => playerStore.snapshot.bag, "bubble" => playerStore.snapshot.bubble
         });
+        bubbleCacheKey = key;
+        return bubbleCache;
     }
+    var bubbleCache = null;
+    var bubbleCacheKey = "";
 
     // The point the numbers/map faces draw the player at: Garmin's own fix
     // while trustworthy, the phone's otherwise.
@@ -192,27 +205,40 @@ class GarminSessionManager {
         }
         return out;
     }
-    function demoHole() {
+    // What the browser steps through: the Scene's named situations when it
+    // offers them, otherwise one entry per hole.
+    function demoEntries() {
+        var options = (scene != null) ? scene.demoOptions() : [];
+        if (options.size() > 0) { return options; }
         var holes = demoHoles();
+        var out = [];
+        for (var i = 0; i < holes.size(); i += 1) { out.add({ "hole" => holes[i], "option" => null, "label" => null }); }
+        return out;
+    }
+    function demoEntry() {
+        var entries = demoEntries();
         if (demoIndex == null) {
             // Open on the hole the phone is showing.
             demoIndex = 0;
             var current = (scene != null) ? scene.holeNumber() : null;
-            for (var i = 0; i < holes.size(); i += 1) { if (current != null && holes[i] == current) { demoIndex = i; } }
+            for (var i = entries.size() - 1; i >= 0; i -= 1) { if (current != null && entries[i]["hole"] == current) { demoIndex = i; } }
         }
-        if (demoIndex >= holes.size()) { demoIndex = 0; }
-        return holes[demoIndex];
+        if (demoIndex >= entries.size()) { demoIndex = 0; }
+        return entries[demoIndex];
     }
+    function demoHole() { return demoEntry()["hole"]; }
     function stepDemo(delta) {
-        var holes = demoHoles();
-        demoHole();
-        demoIndex = (demoIndex + delta + holes.size()) % holes.size();
+        var entries = demoEntries();
+        demoEntry();
+        demoIndex = (demoIndex + delta + entries.size()) % entries.size();
     }
     function startDemo() {
         if (scene == null || !scene.hasRound() || outbox.isPending(GarminCommandKind.DEMO_APPROACH)) { return; }
         lastRejection = null;
         var command = new GarminCommand(uuid(), scene.roundId(), scene.revision(), nowEpochMillis(), GarminCommandKind.DEMO_APPROACH, null, null);
-        command.payloadHole = demoHole();
+        var entry = demoEntry();
+        command.payloadHole = entry["hole"];
+        command.payloadOption = entry["option"];
         outbox.enqueue(command);
         attempt(command.commandId);
     }
@@ -379,6 +405,7 @@ class GarminSessionManager {
             locationManager.poll();
         }
         if (!incoming.canDemo()) { demoIndex = null; }
+        localBubble();   // warm the Bubble cache in this callback, not in a draw
         reconcileOutbox(incoming);
         noteSurface(previous, incoming);
     }
@@ -456,6 +483,7 @@ class GarminSessionManager {
         if (playState.target != null && playerStore.snapshot != null) {
             playState.moveTarget(playState.target, playerStore.snapshot.bag, playerStore.snapshot.bubble);
         }
+        localBubble();
     }
 
     // ----------------------------------------------------------- report

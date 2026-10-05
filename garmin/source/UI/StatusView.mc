@@ -51,24 +51,32 @@ class StatusView extends WatchUi.View {
     function drawDemoBrowser(dc) {
         var w = dc.getWidth();
         var h = dc.getHeight();
-        var hole = session.demoHole();
+        var entry = session.demoEntry();
+        var hole = entry["hole"];
         var par = session.scene.parFor(hole);
+        var label = entry["label"];
         dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, h * 0.14, Graphics.FONT_XTINY, "PREVIEW", Graphics.TEXT_JUSTIFY_CENTER);
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, h * 0.27, Graphics.FONT_MEDIUM, "Hole " + hole.toString(), Graphics.TEXT_JUSTIFY_CENTER);
-        if (par != null) {
+        var sub = (label != null) ? label : ((par != null) ? "PAR " + par.toString() : null);
+        if (sub != null) {
             dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(w / 2, h * 0.43, Graphics.FONT_SMALL, "PAR " + par.toString(), Graphics.TEXT_JUSTIFY_CENTER);
+            dc.drawText(w / 2, h * 0.43, Graphics.FONT_SMALL, sub, Graphics.TEXT_JUSTIFY_CENTER);
         }
         var busy = session.outbox.isPending(GarminCommandKind.DEMO_APPROACH);
         // fillRoundedRectangle paints in the FOREGROUND colour.
         dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
-        dc.fillRoundedRectangle(w * 0.2, h * 0.58, w * 0.6, h * 0.13, 6);
+        // Sized and centred on the font's real height: a fixed offset clipped
+        // the word on the Venu Sq 2, whose FONT_SMALL is taller.
+        var fontH = dc.getFontHeight(Graphics.FONT_SMALL);
+        var btnH = fontH + 6 > h * 0.13 ? fontH + 6 : h * 0.13;
+        dc.fillRoundedRectangle(w * 0.2, h * 0.58, w * 0.6, btnH, 6);
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(w / 2, h * 0.595, Graphics.FONT_SMALL, busy ? "..." : "DEMO", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(w / 2, h * 0.58 + btnH / 2, Graphics.FONT_SMALL, busy ? "..." : "DEMO",
+            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        var hint = (session.lastRejection != null) ? "Couldn't start demo" : "UP/DOWN: hole";
-        dc.drawText(w / 2, h * 0.76, Graphics.FONT_XTINY, hint, Graphics.TEXT_JUSTIFY_CENTER);
+        var hint = (session.lastRejection != null) ? "Couldn't start demo" : "UP/DOWN: more";
+        dc.drawText(w / 2, h * 0.58 + btnH + 4, Graphics.FONT_XTINY, hint, Graphics.TEXT_JUSTIFY_CENTER);
     }
 }

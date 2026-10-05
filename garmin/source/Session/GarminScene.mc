@@ -101,6 +101,23 @@ class GarminScene {
     function canNextHole() { var c = controlsDict(); var v = c != null ? GarminWire.boolVal(c, "canNextHole") : null; return v == null ? false : v; }
     // Nothing real is live and Play cannot start from where the phone is:
     // the Ready face is the demo browser instead of "press SELECT".
+    // Named demo situations ({ id, hole, label }), when whoever is playing
+    // the phone's part offers them; the browser steps through these instead
+    // of bare holes. Absent from a Scene that has none.
+    function demoOptions() {
+        var raw2 = GarminWire.arrVal(raw, "demoOptions");
+        var out = [];
+        if (raw2 == null) { return out; }
+        for (var i = 0; i < raw2.size(); i += 1) {
+            var o = raw2[i];
+            if (!(o instanceof Lang.Dictionary)) { continue; }
+            var hole = GarminWire.intVal(o, "hole");
+            if (hole == null) { continue; }
+            out.add({ "hole" => hole, "option" => GarminWire.str(o, "id"), "label" => GarminWire.str(o, "label") });
+        }
+        return out;
+    }
+
     function canDemo() { var c = controlsDict(); var v = c != null ? GarminWire.boolVal(c, "canDemo") : null; return v == null ? false : v; }
 
     // A demo approach is on: `position` IS the player for everything this

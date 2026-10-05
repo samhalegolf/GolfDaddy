@@ -72,24 +72,49 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
         return session.face().equals(GarminSessionManager.FACE_READY) && session.scene != null && session.scene.canDemo();
     }
 
+    // Connect IQ delivers the physical UP button as onPreviousPage and DOWN
+    // as onNextPage - and a touch swipe up ALSO as onNextPage, which is
+    // Garmin's own convention: swipe up = DOWN = "next". These used to be
+    // read as swipe gestures (onNextPage = aim UP), so on every watch with
+    // buttons UP moved the target DOWN the screen and stepped the demo list
+    // backwards (Forerunner 255 / 965 sims, 2026-10-05). They now mean what
+    // the button says. Touch aiming is the drag (and press-and-hold on the
+    // S62), so a swipe is never the way a target is placed.
+
+    // DOWN button / swipe up.
     function onNextPage() {
-        if (demoBrowsing()) { session.stepDemo(-1); WatchUi.requestUpdate(); return true; }
+        if (demoBrowsing()) { session.stepDemo(1); WatchUi.requestUpdate(); return true; }
         if (view.showingMap && view.mapView.aiming) {
-            router.dispatch(InputAction.AIM_UP);
+            router.dispatch(InputAction.AIM_DOWN);
         } else {
             router.dispatch(InputAction.PREVIOUS_HOLE);
         }
         return true;
     }
 
+    // UP button / swipe down.
     function onPreviousPage() {
-        if (demoBrowsing()) { session.stepDemo(1); WatchUi.requestUpdate(); return true; }
+        if (demoBrowsing()) { session.stepDemo(-1); WatchUi.requestUpdate(); return true; }
         if (view.showingMap && view.mapView.aiming) {
-            router.dispatch(InputAction.AIM_DOWN);
+            router.dispatch(InputAction.AIM_UP);
         } else {
             router.dispatch(InputAction.NEXT_HOLE);
         }
         return true;
+    }
+
+    // Swipe left on the numbers face opens the map, the way the Apple Watch
+    // pages to it. Every touch profile leaves swipeLeft unused (swipeRight
+    // is already BACK, which returns to the numbers), and on watches with no
+    // MENU button - the Venu Sq 2's MENU is a long-press of its only action
+    // button - this is the map's obvious door.
+    function onSwipe(swipeEvent) {
+        if (swipeEvent.getDirection() == WatchUi.SWIPE_LEFT
+                && session.face().equals(GarminSessionManager.FACE_PLAYING) && !view.showingMap) {
+            router.dispatch(InputAction.OPEN_MAP);
+            return true;
+        }
+        return false;
     }
 
     // KEY_LAP: the physical LAP/light button most 5-button Garmin devices

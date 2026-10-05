@@ -345,10 +345,38 @@ simulator: Return = SELECT, Up/Down = UP/DOWN, `m` = MENU; BACK is the lower
 right button on the watch image (Escape is not mapped). The first key after
 focusing the window is sometimes eaten - focus by clicking the title bar.
 
-Verified 2026-10-05 on the S62 profile: Preview browser -> DEMO -> numbers
-(F 101 / C 115 / B 128, club PW) -> LOCK -> map centred on the Bubble ->
-BACK, BACK -> Preview. Not covered: the layup guide (a demo approach is
-always in reach) and press-and-hold aiming.
+The browser steps through SITUATIONS rather than bare holes (the fixture's
+`situations`, sent as the Scene's `demoOptions`), each chosen to exercise a
+different part of the watch:
+
+| Situation | From | What it tests |
+|---|---|---|
+| Hole 1 - Tee shot | 506 m | out of reach: fairway-line layup target, layup guide ("Green Xm"), long off-screen lines |
+| Hole 1 - Second shot | 280 m | out of reach again, from the fairway |
+| Hole 1 - Approach | 115 m | the app's own demo rule; green as target |
+| Hole 2 - Par 3 tee | 186 m | in reach from the tee; green as target |
+| Hole 3 - Approach | 115 m | a second map; Bubble framed at the 3x ceiling |
+| Hole 3 - Chip | 45 m | small Bubble near the green, 3x |
+
+LOCK places the target with the engine's own default rule
+(`GarminBubbleEngine.defaultTarget`: the green in reach, else the layup on the
+fairway line), so the stand-in agrees with what the phone would do.
+
+Verified 2026-10-05 across six profiles - Approach S62 (CIQ 3.0, 1:1 maps,
+touch hold/release), fenix 7 (touch + buttons, continuous drag, edge pan),
+Forerunner 255 (512 KB / 120k-watchdog floor, buttons only: nudge aiming),
+Venu Sq 2 (rectangular AMOLED, swipe-left to the map), Forerunner 965 (454 px
+AMOLED, drag), Instinct Crossover AMOLED (hybrid, buttons): centred Bubble
+framing, layup guide, drag / hold / nudge aiming, and BACK out. Running it is
+what found the real-device bugs fixed alongside: drawBitmap2 scaling (it has
+no :destWidth; transform + crop, native-format buffer on AMOLED), watchdog
+budget (Bubble computed per input change, not per draw; clipped dashed lines;
+linearised ring), UP/DOWN inverted on button watches, and the map's lack of
+a door on watches with no MENU button.
+
+The device list itself is generated: `node garmin/tools/sync-devices.js`
+(rules and the measured 512 KB memory floor are in its header; `--list`
+prints every device's verdict, `--check` runs in `npm run test:garmin`).
 
 ## 5. Before you package — the things that are still placeholders
 

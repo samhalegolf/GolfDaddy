@@ -31,6 +31,7 @@ class GarminSimDemo {
     var courseKey;
     var revision = 0;
     var hole = null;        // the live demo hole, or null in Preview
+    var situation = null;   // the fixture situation being played
     var driving = false;
     var locked = false;
     var target = null;      // GarminCoordinate while locked
@@ -92,8 +93,11 @@ class GarminSimDemo {
     function apply(type, payload) {
         if (type.equals(GarminCommandKind.DEMO_APPROACH)) {
             var n = (payload instanceof Lang.Dictionary && payload.hasKey("hole")) ? payload["hole"] : null;
-            if (holeFixture(n) == null) { return false; }
+            var option = (payload instanceof Lang.Dictionary && payload.hasKey("option")) ? payload["option"] : null;
+            var picked = situationFor(n, option);
+            if (picked == null || holeFixture(n) == null) { return false; }
             hole = n;
+            situation = picked;
             driving = true;
             locked = false;
             target = null;
@@ -102,6 +106,7 @@ class GarminSimDemo {
         if (type.equals(GarminCommandKind.DEMO_END)) {
             if (hole == null) { return false; }
             hole = null;
+            situation = null;
             driving = false;
             locked = false;
             target = null;
@@ -119,7 +124,7 @@ class GarminSimDemo {
         if (type.equals(GarminCommandKind.LOCK) || type.equals(GarminCommandKind.LOCK_AT)) {
             if (hole == null || locked) { return false; }
             locked = true;
-            target = green(hole);
+            target = defaultTarget();
             return true;
         }
         if (type.equals(GarminCommandKind.UNLOCK)) {
@@ -143,7 +148,7 @@ class GarminSimDemo {
         revision += 1;
         var n = (hole != null) ? hole : fixture["holes"][0]["n"];
         var f = holeFixture(n);
-        var pos = (hole != null) ? point(f["pos"]) : null;
+        var pos = (situation != null) ? point(situation["pos"]) : null;
         var line = [];
         for (var i = 0; i < f["line"].size(); i += 1) { line.add(geo(point(f["line"][i]))); }
 
@@ -161,6 +166,7 @@ class GarminSimDemo {
                 "canPreviousHole" => false, "canNextHole" => false,
                 "canPlay" => false, "canDemo" => true
             },
+            "demoOptions" => demoOptions(),
             "surface" => {
                 "active" => driving ? "watch" : "phone",
                 "watch" => { "paired" => true, "appInstalled" => true, "reachable" => true, "vendor" => "garmin" }
@@ -170,16 +176,16 @@ class GarminSimDemo {
             out["surface"]["handover"] = { "id" => "sim-demo", "state" => "confirmed", "from" => "watch" };
         }
         if (hole != null) {
-            var targetM = (target != null) ? GarminGeo.distance(pos, target) : f["centre"];
-            out["distance"] = { "target" => targetM, "front" => f["front"], "centre" => f["centre"], "back" => f["back"] };
-            out["demo"] = { "active" => true, "hole" => hole, "position" => geo(pos), "metres" => f["metres"] };
+            var targetM = (target != null) ? GarminGeo.distance(pos, target) : situation["centre"];
+            out["distance"] = { "target" => targetM, "front" => situation["front"], "centre" => situation["centre"], "back" => situation["back"] };
+            out["demo"] = { "active" => true, "hole" => hole, "position" => geo(pos), "metres" => situation["metres"] };
             out["location"] = { "coordinate" => geo(pos), "source" => "phone-web", "fresh" => true };
             // The phone's club for the green, before anything is locked
             // (app.shotSuggestion), from the same engine the watch runs.
             if (!locked) {
                 var snap = session.playerStore.snapshot;
                 if (snap != null) {
-                    var r = GarminBubbleEngine.calculate({ "player" => pos, "target" => green(hole), "bag" => snap.bag, "bubble" => snap.bubble });
+                    var r = GarminBubbleEngine.calculate({ "player" => pos, "target" => defaultTarget(), "bag" => snap.bag, "bubble" => snap.bubble });
                     if (r != null && r.club != null) {
                         out["suggestion"] = { "club" => r.club.club, "carryM" => r.club.carryM, "totalM" => r.club.totalM };
                     }
@@ -239,6 +245,39 @@ class GarminSimDemo {
             if (holes[i]["n"] == n) { return holes[i]; }
         }
         return null;
+    }
+
+    // The phone's own target rule (engine targetForGreenCentre): the green
+    // when the bag reaches it, else the fairway-line layup at the bag's reach.
+    function defaultTarget() {
+        var g = green(hole);
+        var snap = session.playerStore.snapshot;
+        if (snap == null || situation == null) { return g; }
+        var line = holeFixture(hole)["line"];
+        var route = [];
+        for (var i = 0; i < line.size(); i += 1) { route.add(point(line[i])); }
+        var t = GarminBubbleEngine.defaultTarget(point(situation["pos"]), g, route, snap.bag);
+        return t != null ? t : g;
+    }
+
+    function situationFor(n, option) {
+        var list = fixture["situations"];
+        for (var i = 0; i < list.size(); i += 1) {
+            if (option != null && option.equals(list[i]["id"])) { return list[i]; }
+        }
+        for (var i = 0; i < list.size(); i += 1) {
+            if (n != null && list[i]["hole"] == n) { return list[i]; }
+        }
+        return null;
+    }
+
+    function demoOptions() {
+        var out = [];
+        var list = fixture["situations"];
+        for (var i = 0; i < list.size(); i += 1) {
+            out.add({ "id" => list[i]["id"], "hole" => list[i]["hole"], "label" => list[i]["label"] });
+        }
+        return out;
     }
 
     function green(n) {

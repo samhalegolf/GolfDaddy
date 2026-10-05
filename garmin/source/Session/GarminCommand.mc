@@ -37,6 +37,7 @@ class GarminCommand {
     var payloadLocation;   // Dictionary or null: { coordinate, source, horizontalAccuracy, timestamp }
     var payloadPoint;      // GarminCoordinate or null
     var payloadHole = null;  // Number or null: DEMO_APPROACH's hole
+    var payloadOption = null; // String or null: DEMO_APPROACH's situation id
 
     function initialize(commandId, roundId, baseRevision, createdAt, type, payloadLocation, payloadPoint) {
         self.commandId = commandId;
@@ -57,6 +58,7 @@ class GarminCommand {
         if (payloadLocation != null) { payload["location"] = payloadLocation; }
         if (payloadPoint != null) { payload["point"] = { "lat" => payloadPoint.lat, "lng" => payloadPoint.lng }; }
         if (payloadHole != null) { payload["hole"] = payloadHole; }
+        if (payloadOption != null) { payload["option"] = payloadOption; }
         return {
             "commandId" => commandId,
             "roundId" => roundId,
@@ -83,6 +85,7 @@ class GarminCommand {
             point
         );
         cmd.payloadHole = payload != null ? GarminWire.intVal(payload, "hole") : null;
+        cmd.payloadOption = payload != null ? GarminWire.str(payload, "option") : null;
         return cmd;
     }
 }
