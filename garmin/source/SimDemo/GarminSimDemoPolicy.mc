@@ -26,6 +26,16 @@ class GarminSimDemoPolicy {
     (:sim_demo_off)
     static function bitmap(holeNumber) { return null; }
 
+    // Whether the Bluetooth link to a phone counts as the phone listening.
+    // Not in the sim demo: its "phone" is the stand-in below, and the
+    // simulator reports a connected phone regardless, which would hold the
+    // course skeleton back for its full PHONE_CONNECTED_FRESH_MS.
+    (:sim_demo_off)
+    static function phoneLinkCounts() { return true; }
+
+    (:sim_demo)
+    static function phoneLinkCounts() { return false; }
+
     (:sim_demo)
     static function start(session) {
         GarminSimDemo.instance = new GarminSimDemo(session);

@@ -50,6 +50,9 @@ class GarminSimDemo {
         fixture = WatchUi.loadResource(Rez.JsonData.simDemo);
         courseKey = fixture["course"]["key"];
         session.playerStore.receive(fixture["player"]);
+        // The course skeleton first, as the phone sends it: the whole course
+        // in one message, ahead of the package (GarminTransport deliverSkeleton).
+        if (fixture.hasKey("skeleton") && fixture["skeleton"] != null) { session.receiveSkeleton(fixture["skeleton"]); }
         // In growing parts (1 hole, then 2, ...), as the phone's adaptive
         // sender delivers it, so the watch's part-merge runs here too.
         var whole = manifestDict();

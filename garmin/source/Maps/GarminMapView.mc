@@ -112,7 +112,9 @@ class GarminMapView extends WatchUi.View {
             return;
         }
 
-        var holeNumber = scene.holeNumber();
+        // The hole being played - the Scene's, or the one this wrist walked
+        // onto itself while the Scene was quiet (GarminSessionManager.currentHole).
+        var holeNumber = session.currentHole();
         var courseKey = scene.courseKey();
         var manifest = session.mapStore.manifest;
         var hole = (manifest != null && holeNumber != null) ? manifest.hole(holeNumber) : null;
@@ -140,7 +142,7 @@ class GarminMapView extends WatchUi.View {
         var playerGeo = session.playerPoint();
         var greenGeo = (hole.greenLat != null) ? new GarminCoordinate(hole.greenLat, hole.greenLng) : null;
         var local = session.localBubble();
-        var targetGeo = (local != null) ? local.target : scene.aimTarget();
+        var targetGeo = (local != null) ? local.target : session.aimTarget();
 
         var playerImg = imagePoint(playerGeo, reference);
         var greenImg = imagePoint(greenGeo, reference);
@@ -425,7 +427,7 @@ class GarminMapView extends WatchUi.View {
         var gap = GarminGeo.distance(centre, greenGeo);
         if (!(raw > maxM + 3 && gap > 4 && raw > playable + 4)) { return; }
 
-        var line = scene.holeLine();
+        var line = session.holeLine();
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
         var havePrev = false;
         var px = 0.0;
@@ -658,15 +660,16 @@ class GarminMapView extends WatchUi.View {
         var centreX = viewWidth / 2;
         var pad = 2;
 
-        var holeNumber = scene.holeNumber();
+        var holeNumber = session.currentHole();
         var label = "H" + (holeNumber != null ? holeNumber.toString() : "-");
         // Shadowed, like the club label: plain white vanished over the light
         // green of a close-framed green (seen on the fenix 7 sim at 3x).
         shadowedText(dc, centreX - half + pad, top, font, label, Graphics.TEXT_JUSTIFY_LEFT, Graphics.COLOR_WHITE);
 
-        var centreM = scene.distanceCentreM();
+        var green = session.greenDistances();
+        var centreM = (green != null) ? green["centre"] : null;
         if (centreM != null) {
-            var text = centreM.toNumber().toString() + "m";
+            var text = (centreM + 0.5).toNumber().toString() + "m";
             shadowedText(dc, centreX + half - pad, top, font, text, Graphics.TEXT_JUSTIFY_RIGHT, Graphics.COLOR_WHITE);
         }
 
@@ -699,7 +702,7 @@ class GarminMapView extends WatchUi.View {
     function enterAimMode() {
         if (!canAimNow()) { return; }
         if (session.playState.target == null) {
-            var seed = session.scene.aimTarget();
+            var seed = session.aimTarget();
             if (seed == null) { return; }
             session.playState.moveTarget(seed, session.playerStore.snapshot.bag, session.playerStore.snapshot.bubble);
         }

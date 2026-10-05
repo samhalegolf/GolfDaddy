@@ -165,6 +165,42 @@ background; the numbers page is always the rangefinder. The green comes from
 the Scene, the player is the wrist's own fix (or the phone's when the wrist has
 none). A hole with no delivered image shows why, not a blank.
 
+### The course skeleton (Garmin, 2026-10-05)
+
+A few KB of per-hole geometry that lets a Garmin play every hole on its own
+GPS when the phone's Scene goes quiet. Built once in
+`app/js/watch-map-delivery.js` (`courseSkeleton`) from the same references the
+manifest carries, stamped with the manifest's course key and version, and
+attached to the manifest as `skeleton`.
+
+- **Wire.** Per hole: `n`, `len`, `t` (tee), `g` (green centre), `s` (green
+  outline, at most 16 points), `r` (route between tee and green). Points are
+  whole microdegree offsets from an origin `o`, which travels as two strings
+  because Connect IQ may decode a decimal as a 32-bit float. Millbrook's 18
+  holes come to 4.4 KB, against 17 KB for the full references.
+- **Delivery.** `GarminTransport` (iOS and Android) peels `skeleton` off and
+  sends it as `courseSkeleton` *before* the manifest parts. It sends the whole
+  course first and halves on a refused send, the opposite of the parts'
+  start-at-one gate. Split pieces carry `part` and the watch merges them. Five
+  refusals give up on it, and the manifest still goes. Apple's transport drops
+  it, since that watch receives the full references in one transfer.
+- **Trust.** `GarminSessionManager.skeletonFor()` uses it only while its
+  course matches the Scene's and its version matches the map package held for
+  that course. A newer package may have moved a green.
+- **When it is used.** The Scene speaks for the round for 20 s after it
+  arrives, and for up to 5 min while the phone is still connected over
+  Bluetooth (a phone standing still sends no new Scene). After that:
+  - front/centre/back come from the skeleton and the wrist's fix, marked
+    `WATCH GPS`;
+  - hole length and the layup line also come from the skeleton;
+  - reaching the next hole's tee (25 m) moves the wrist on by itself
+    (`localHole`).
+
+  Any fresh Scene takes the hole back.
+- **Watch memory and time.** The skeleton is indexed on arrival and each hole
+  is decoded only on first use. Decoding all 18 at once tripped the
+  Forerunner 255's 120k watchdog.
+
 ## The player snapshot: bag and My Bubble
 
 A third payload, alongside the Scene and the lite-map package, because it fits

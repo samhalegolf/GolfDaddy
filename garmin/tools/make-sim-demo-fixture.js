@@ -143,7 +143,15 @@ for (const n of holes) {
   bitmaps.push(n);
 }
 
+/* The course skeleton the phone would send ahead of the package - the real
+   builder (app/js/watch-map-delivery.js courseSkeleton), over EVERY hole in the
+   package, not just the demo's, because the whole course is its point.
+   Version 1 to match the demo's own manifest. */
+const skeleton = require("../../app/js/watch-map-delivery.js").__test
+  .courseSkeleton("sim-demo-" + courseDir, 1, manifest.holes.map((h) => ({ holeNumber: h.holeNumber, reference: h.reference || h.golfReference })));
+
 const fixture = {
+  skeleton,
   course: { key: "sim-demo-" + courseDir, name: "Millbrook (sim demo)", source: courseDir + "/" + versionDir, download, faults },
   holes: fixtureHoles,
   situations,

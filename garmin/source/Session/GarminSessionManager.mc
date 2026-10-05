@@ -45,6 +45,19 @@ class GarminSessionManager {
     var sender;              // GarminSender: the one door to the phone
     var handoverNotice;      // String or null
     var answeredHandovers;   // Dictionary used as a Set of handover ids
+    var skeleton;            // GarminCourseSkeleton or null
+    var lastSceneAt = null;  // System.getTimer() at the last Scene, or null
+    var localHole = null;    // hole this wrist moved to on its own while the Scene was quiet
+
+    // How long a Scene stays the authority on its own. Past this the wrist
+    // plays from the course skeleton and its own GPS - unless the phone is
+    // still connected over Bluetooth, which buys it PHONE_CONNECTED_FRESH_MS
+    // (a phone standing still sends no new Scene, and that is not silence).
+    static var SCENE_FRESH_MS = 20000;
+    static var PHONE_CONNECTED_FRESH_MS = 300000;
+    // Standing this close to the NEXT hole's tee, with the Scene quiet, is
+    // walking onto it (the phone's own tee-zone idea, wrist-side).
+    static var TEE_ZONE_M = 25.0d;
 
     function initialize() {
         scene = null;
@@ -59,6 +72,7 @@ class GarminSessionManager {
         lockedShot = null;
         handoverNotice = null;
         answeredHandovers = {};
+        skeleton = GarminCourseSkeleton.restore();
 
         locationManager.onFix = method(:onLocationFix);
 
@@ -135,7 +149,7 @@ class GarminSessionManager {
             noteBubbleReason("local aim bubble");
             return playState.bubble;
         }
-        var aim = (scene != null) ? scene.aimTarget() : null;
+        var aim = aimTarget();
         if (aim == null) { noteBubbleReason("no aim target"); return null; }
         // Memoised on its inputs. The engine (club choice + a 168-point
         // ring) is the single most expensive thing the app does, and both
@@ -171,6 +185,130 @@ class GarminSessionManager {
     function effectiveFix() {
         if (isDemo()) { return scene.demoPosition(); }
         return locationManager.lastFix;
+    }
+
+    // -------------------------------------------------------- skeleton
+
+    function receiveSkeleton(raw) {
+        var incoming = GarminCourseSkeleton.fromDict(raw);
+        if (incoming == null) { return; }
+        var isPart = raw.hasKey("part");
+        if (!(isPart && skeleton != null && skeleton.merge(incoming))) { skeleton = incoming; }
+        skeleton.persist();
+        if (GarminTransmitPolicy.muted()) {
+            System.println("skeleton in: " + skeleton.courseKey + " v" + skeleton.version + " holes=" + skeleton.holes.size());
+        }
+    }
+
+    // The skeleton, only while it describes the course being played AND the
+    // same package version as the map under it: a newer package may have
+    // moved a green, and a skeleton from the older one would put the numbers
+    // and the picture in different places.
+    function skeletonFor() {
+        if (skeleton == null || scene == null) { return null; }
+        var key = scene.courseKey();
+        if (key == null || !key.equals(skeleton.courseKey)) { return null; }
+        var manifest = mapStore.manifest;
+        if (manifest != null && manifest.courseKey.equals(key) && manifest.version != skeleton.version) { return null; }
+        return skeleton;
+    }
+
+    // Whether the Scene still speaks for the round (see SCENE_FRESH_MS).
+    function sceneFresh() {
+        if (scene == null || lastSceneAt == null) { return false; }
+        var age = System.getTimer() - lastSceneAt;
+        if (age < SCENE_FRESH_MS) { return true; }
+        if (!GarminSimDemoPolicy.phoneLinkCounts()) { return false; }
+        var settings = System.getDeviceSettings();
+        return (settings has :phoneConnected) && settings.phoneConnected && age < PHONE_CONNECTED_FRESH_MS;
+    }
+
+    // The hole being played: the Scene's, or the one this wrist walked onto
+    // by itself while the Scene was quiet.
+    function currentHole() {
+        if (localHole != null) { return localHole; }
+        return (scene != null) ? scene.holeNumber() : null;
+    }
+
+    // Whether the Scene describes the hole being played right now.
+    function sceneSpeaksForHole() {
+        return scene != null && localHole == null && sceneFresh();
+    }
+
+    // { "front", "centre", "back", "fromWatch" }: the phone's numbers while
+    // the Scene speaks for this hole and carries them, otherwise this wrist's
+    // own - the skeleton measured from its fix - and the phone's last ones
+    // only when there is no skeleton to measure from at all.
+    function greenDistances() {
+        if (sceneSpeaksForHole() && scene.distanceCentreM() != null) {
+            lastSourceWatch = false;
+            return { "front" => scene.distanceFrontM(), "centre" => scene.distanceCentreM(), "back" => scene.distanceBackM(), "fromWatch" => false };
+        }
+        var sk = skeletonFor();
+        var fix = effectiveFix();
+        var mine = (sk != null) ? sk.distances(currentHole(), fix) : null;
+        if (mine != null) {
+            mine["fromWatch"] = true;
+            if (GarminTransmitPolicy.muted() && !lastSourceWatch) {
+                System.println("skeleton: numbers from watch GPS, hole " + currentHole() + " centre " + mine["centre"].toNumber() + "m");
+            }
+            lastSourceWatch = true;
+            return mine;
+        }
+        if (scene != null && localHole == null) {
+            return { "front" => scene.distanceFrontM(), "centre" => scene.distanceCentreM(), "back" => scene.distanceBackM(), "fromWatch" => false };
+        }
+        return null;
+    }
+
+    var lastSourceWatch = false;   // simulator trace only: log the flip once
+
+    function holeLengthM() {
+        if (scene != null && localHole == null && scene.holeTeeToGreenM() != null) { return scene.holeTeeToGreenM(); }
+        var sk = skeletonFor();
+        return (sk != null) ? sk.lengthM(currentHole()) : null;
+    }
+
+    // The fairway line the layup guide is drawn against.
+    function holeLine() {
+        if (scene != null && localHole == null) {
+            var line = scene.holeLine();
+            if (line.size() >= 2) { return line; }
+        }
+        var sk = skeletonFor();
+        return (sk != null) ? sk.line(currentHole()) : [];
+    }
+
+    // What the Bubble aims at by default: the Scene's target for its own
+    // hole, the skeleton's green for a hole the wrist walked onto itself.
+    function aimTarget() {
+        if (scene == null) { return null; }
+        if (localHole == null) { return scene.aimTarget(); }
+        var sk = skeletonFor();
+        return (sk != null) ? sk.green(localHole) : null;
+    }
+
+    function holePar() {
+        var n = currentHole();
+        if (scene == null || n == null) { return null; }
+        if (localHole == null && scene.holePar() != null) { return scene.holePar(); }
+        return scene.parFor(n);
+    }
+
+    // With the Scene quiet, reaching the next hole's tee moves this wrist on
+    // to it - the numbers, the map and the Bubble with it. Never while the
+    // Scene speaks (the phone owns hole changes then), never during a demo,
+    // and never backwards.
+    function noteTeeZone(fix) {
+        if (fix == null || sceneFresh()) { return; }
+        var sk = skeletonFor();
+        var n = currentHole();
+        if (sk == null || n == null) { return; }
+        var nextTee = sk.tee(n + 1);
+        if (nextTee == null || GarminGeo.distance(fix, nextTee) > TEE_ZONE_M) { return; }
+        localHole = n + 1;
+        playState.enter(localHole);
+        if (GarminTransmitPolicy.muted()) { System.println("skeleton: walked onto hole " + localHole + " tee"); }
     }
 
     // ------------------------------------------------------------ demo
@@ -346,6 +484,7 @@ class GarminSessionManager {
         // (see GarminMapDownloader.mc's header comment): the manifest
         // carries a URL per hole, and GarminMapStore.bitmapFor() pulls on
         // demand, so there is no `watchMapAsset` message to handle here.
+        if (data.hasKey("courseSkeleton")) { receiveSkeleton(GarminWire.dictVal(data, "courseSkeleton")); return; }
         if (data.hasKey("watchMapManifest")) { mapStore.receiveManifest(GarminWire.dictVal(data, "watchMapManifest")); reportMapInventory(); return; }
         if (data.hasKey("watchPlayer")) {
             if (playerStore.receive(GarminWire.dictVal(data, "watchPlayer"))) { reportPlayerInventory(); }
@@ -376,10 +515,14 @@ class GarminSessionManager {
                 && scene.roundId().equals(incoming.roundId()) && incoming.revision() < scene.revision()) {
             return;
         }
-        var previousHole = (scene != null) ? scene.holeNumber() : null;
+        var previousHole = currentHole();
         var previous = scene;
         scene = incoming;
         state = "live";
+        // The Scene is the authority again: whatever hole the wrist walked
+        // to on its own while it was quiet gives way to the phone's.
+        lastSceneAt = System.getTimer();
+        localHole = null;
         // A new hole discards the old one's local target/held club/Bubble —
         // GarminPlayState.enter() (Garmin Phase 2+3 plan step 30): "load new
         // map, reset local target state, adopt new authoritative Scene
@@ -481,6 +624,7 @@ class GarminSessionManager {
     // held, if any, so the ring on screen tracks the walk.
     function onLocationFix(coordinate, accuracy, epochMillis) {
         if (scene == null || scene.isDemo()) { return; }
+        noteTeeZone(coordinate);
         playState.update(coordinate);
         if (playState.target != null && playerStore.snapshot != null) {
             playState.moveTarget(playState.target, playerStore.snapshot.bag, playerStore.snapshot.bubble);

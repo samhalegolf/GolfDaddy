@@ -75,6 +75,11 @@ final class AppleWatchTransport: NSObject, WearableTransport, WCSessionDelegate 
     func publishMapManifest(_ manifest: [String: Any], completion: @escaping (Bool) -> Void) {
         queue.async { [weak self] in
             guard let self, let session = self.session else { completion(false); return }
+            /* The course skeleton is for Garmin (GarminTransport sends it ahead
+               of the parts); this Watch gets the full references in this one
+               transfer, so it is dropped rather than carried twice. */
+            var manifest = manifest
+            manifest.removeValue(forKey: "skeleton")
             /* Mirrored live and queued durably, exactly as scene publication
                is and for the same reason: the queued stores do not reach the
                Watch app reliably, and the Watch's adoption of a manifest is

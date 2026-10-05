@@ -43,7 +43,7 @@ class NumbersView extends WatchUi.View {
         var y = dc.getHeight() * 0.12;
         var lineHeight = dc.getHeight() * (LayoutProfile.isCompactHeight() ? 0.15 : 0.13);
 
-        var holeNumber = scene.holeNumber();
+        var holeNumber = session.currentHole();
         drawCentered(dc, "HOLE " + (holeNumber != null ? holeNumber.toString() : "-"), y);
         // A demo says so, and says how to leave it (BACK; see
         // CaddyInputDelegate). Above the hole, where nothing else draws.
@@ -54,9 +54,18 @@ class NumbersView extends WatchUi.View {
         }
         y += lineHeight;
 
-        var front = scene.distanceFrontM();
-        var centre = scene.distanceCentreM();
-        var back = scene.distanceBackM();
+        // The phone's numbers while its Scene speaks for this hole, this
+        // wrist's own (course skeleton + its GPS) once it has gone quiet -
+        // marked, so a player knows the watch is carrying the round alone.
+        var green = session.greenDistances();
+        var front = (green != null) ? green["front"] : null;
+        var centre = (green != null) ? green["centre"] : null;
+        var back = (green != null) ? green["back"] : null;
+        if (green != null && green["fromWatch"] && !scene.isDemo()) {
+            dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(width / 2, y - lineHeight * 0.45, Graphics.FONT_XTINY, "WATCH GPS", Graphics.TEXT_JUSTIFY_CENTER);
+            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        }
         drawRow(dc, "F", front, inset, y, width);
         y += lineHeight * 0.75;
         drawRow(dc, "C", centre, inset, y, width);
@@ -69,8 +78,11 @@ class NumbersView extends WatchUi.View {
         // to the phone-authoritative numbers already on the Scene — never a
         // locally invented approximation (Garmin Phase 1 plan step 10).
         var local = session.localBubble();
-        var targetDistanceM = (local != null) ? local.targetDistanceM : scene.distanceTargetM();
-        var club = (local != null) ? local.club.club : scene.suggestedClub();
+        // On a hole the wrist walked onto by itself the Scene's target and
+        // club belong to the hole before; the green centre stands in.
+        var ownHole = session.localHole != null;
+        var targetDistanceM = (local != null) ? local.targetDistanceM : (ownHole ? centre : scene.distanceTargetM());
+        var club = (local != null) ? local.club.club : (ownHole ? null : scene.suggestedClub());
 
         drawCentered(dc, formatMetres(targetDistanceM), y);
         y += lineHeight;
@@ -101,6 +113,6 @@ class NumbersView extends WatchUi.View {
 
     function formatMetres(value) {
         if (value == null) { return "-"; }
-        return value.toNumber().toString() + " m";
+        return (value + 0.5).toNumber().toString() + " m";
     }
 }

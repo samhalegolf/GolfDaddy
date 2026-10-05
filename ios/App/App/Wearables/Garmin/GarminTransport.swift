@@ -256,14 +256,56 @@ final class GarminTransport: NSObject, WearableTransport {
     func publishMapManifest(_ manifest: [String: Any], completion: @escaping (Bool) -> Void) {
         queue.async { [weak self] in
             guard let self else { return }
+            var manifest = manifest
+            let skeleton = manifest.removeValue(forKey: "skeleton") as? [String: Any]
             let slim = Self.slimForWatch(manifest)
-            guard let holes = slim["holes"] as? [Any], !holes.isEmpty else {
-                self.send(["watchMapManifest": slim], completion: completion)
+            let deliverManifest = {
+                guard let holes = slim["holes"] as? [Any], !holes.isEmpty else {
+                    self.send(["watchMapManifest": slim], completion: completion)
+                    return
+                }
+                var gate = AdaptiveGate(max: holes.count)
+                gate.limit(to: self.watchMaxPart)
+                self.deliverPart(base: slim, holes: holes, from: 0, gate: gate, failures: 0, completion: completion)
+            }
+            guard let skeleton, let skeletonHoles = skeleton["holes"] as? [Any], !skeletonHoles.isEmpty else {
+                deliverManifest()
                 return
             }
-            var gate = AdaptiveGate(max: holes.count)
-            gate.limit(to: self.watchMaxPart)
-            self.deliverPart(base: slim, holes: holes, from: 0, gate: gate, failures: 0, completion: completion)
+            self.deliverSkeleton(base: skeleton, holes: skeletonHoles, from: 0, chunk: skeletonHoles.count, failures: 0) { _ in
+                self.queue.async { deliverManifest() }
+            }
+        }
+    }
+
+    /* The course skeleton (app/js/watch-map-delivery.js courseSkeleton): a few
+       KB of per-hole geometry the watch plays every hole from on its own GPS.
+       AHEAD of the manifest parts and the opposite way round to them - the
+       whole course in one message first, since that is the point of it, and
+       only halved when the link refuses it (to one hole at worst). Parts
+       carry `part` like the manifest's and the watch merges them. An extra,
+       never a gate: five refusals give up on it and the manifest goes anyway. */
+    private func deliverSkeleton(base: [String: Any], holes: [Any], from: Int, chunk: Int,
+                                 failures: Int, completion: @escaping (Bool) -> Void) {
+        guard from < holes.count else { completion(true); return }
+        let to = min(holes.count, from + chunk)
+        var part = base
+        part["holes"] = Array(holes[from..<to])
+        if chunk < holes.count { part["part"] = ["from": from, "count": to - from, "total": holes.count] }
+        send(["courseSkeleton": part]) { [weak self] sent in
+            guard let self else { return }
+            self.queue.async {
+                if sent {
+                    self.deliverSkeleton(base: base, holes: holes, from: to, chunk: chunk, failures: 0, completion: completion)
+                    return
+                }
+                NSLog("Garmin course skeleton refused at %d holes (failure %d)", to - from, failures + 1)
+                if failures + 1 >= 5 { completion(false); return }
+                self.queue.asyncAfter(deadline: .now() + .seconds(failures + 1)) {
+                    self.deliverSkeleton(base: base, holes: holes, from: from, chunk: max(1, chunk / 2),
+                                         failures: failures + 1, completion: completion)
+                }
+            }
         }
     }
 
