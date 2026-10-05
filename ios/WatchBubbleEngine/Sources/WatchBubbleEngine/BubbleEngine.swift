@@ -140,8 +140,8 @@ public enum BubbleEngine {
         let aimBase = max(1, payload.baseCarryM > 0 ? payload.baseCarryM : payload.radiusM * 10)
         let sideLimit = max(2, aimBase * 0.25)
         let sideOffset = JS.clamp(aimOffsetM, -sideLimit, sideLimit)
-        let forwardBias = JS.clamp(payload.visual.visualYBias, -0.18, 0.18) * max(1, payload.depthRadiusM)
-        return Geo.projectOffset(target, shotBearing, forwardBias, sideOffset)
+        // No forward bias: the centre sits on the target along the shot (as the JS).
+        return Geo.projectOffset(target, shotBearing, 0, sideOffset)
     }
 
     // MARK: - The ring

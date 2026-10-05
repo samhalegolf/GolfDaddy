@@ -14,7 +14,7 @@
     "only covers a mid-iron from the middle of the fairway would pass on an engine",
     "that had lost handedness, lost the ghost bag, or fabricated an aim offset."
   ],
-  "bubbleEngineVersion": "bubble-engine-v2",
+  "bubbleEngineVersion": "bubble-engine-v3",
   "tolerances": {
     "$comment": "Per-field, because 0.1 means different things to a metre, a degree and a latitude. 1e-7 degrees is ~11mm.",
     "metres": 0.1,
@@ -208,43 +208,43 @@
         "visualTiltDeg": 6.71,
         "ghostBag": false,
         "bubbleCentre": {
-          "lat": -36.9168751,
-          "lng": 174.7392173
+          "lat": -36.9168728,
+          "lng": 174.7392185
         },
         "ringSampleCount": 8,
         "ringResolution": 168,
         "ringSample": [
           {
-            "lat": -36.9169619,
-            "lng": 174.7391535
+            "lat": -36.9169596,
+            "lng": 174.7391547
           },
           {
-            "lat": -36.9168908,
-            "lng": 174.7390705
+            "lat": -36.9168886,
+            "lng": 174.7390717
           },
           {
-            "lat": -36.9168105,
-            "lng": 174.7390735
+            "lat": -36.9168082,
+            "lng": 174.7390747
           },
           {
-            "lat": -36.9167679,
-            "lng": 174.7391607
+            "lat": -36.9167657,
+            "lng": 174.7391619
           },
           {
-            "lat": -36.9167882,
-            "lng": 174.7392812
+            "lat": -36.9167859,
+            "lng": 174.7392824
           },
           {
-            "lat": -36.9168594,
-            "lng": 174.7393642
+            "lat": -36.9168571,
+            "lng": 174.7393654
           },
           {
-            "lat": -36.9169397,
-            "lng": 174.7393611
+            "lat": -36.9169374,
+            "lng": 174.7393623
           },
           {
-            "lat": -36.9169821,
-            "lng": 174.7392738
+            "lat": -36.9169799,
+            "lng": 174.739275
           }
         ]
       }
@@ -383,43 +383,43 @@
         "visualTiltDeg": 6.71,
         "ghostBag": true,
         "bubbleCentre": {
-          "lat": -36.916875,
-          "lng": 174.7392174
+          "lat": -36.9168728,
+          "lng": 174.7392185
         },
         "ringSampleCount": 8,
         "ringResolution": 168,
         "ringSample": [
           {
-            "lat": -36.916957,
-            "lng": 174.739157
+            "lat": -36.9169549,
+            "lng": 174.7391582
           },
           {
-            "lat": -36.9168899,
-            "lng": 174.7390787
+            "lat": -36.9168878,
+            "lng": 174.7390798
           },
           {
-            "lat": -36.916814,
-            "lng": 174.7390815
+            "lat": -36.9168118,
+            "lng": 174.7390826
           },
           {
-            "lat": -36.9167737,
-            "lng": 174.739164
+            "lat": -36.9167716,
+            "lng": 174.7391651
           },
           {
-            "lat": -36.9167928,
-            "lng": 174.7392778
+            "lat": -36.9167907,
+            "lng": 174.7392789
           },
           {
-            "lat": -36.91686,
-            "lng": 174.7393562
+            "lat": -36.9168579,
+            "lng": 174.7393573
           },
           {
-            "lat": -36.916936,
-            "lng": 174.7393532
+            "lat": -36.9169339,
+            "lng": 174.7393543
           },
           {
-            "lat": -36.9169761,
-            "lng": 174.7392707
+            "lat": -36.916974,
+            "lng": 174.7392718
           }
         ]
       }
@@ -691,43 +691,43 @@
         "visualTiltDeg": -3.99,
         "ghostBag": false,
         "bubbleCentre": {
-          "lat": -36.9168751,
-          "lng": 174.7392173
+          "lat": -36.9168728,
+          "lng": 174.7392185
         },
         "ringSampleCount": 8,
         "ringResolution": 168,
         "ringSample": [
           {
-            "lat": -36.9169701,
-            "lng": 174.7391747
+            "lat": -36.9169678,
+            "lng": 174.7391758
           },
           {
-            "lat": -36.9169124,
-            "lng": 174.7390765
+            "lat": -36.9169101,
+            "lng": 174.7390777
           },
           {
-            "lat": -36.916833,
-            "lng": 174.739061
+            "lat": -36.9168307,
+            "lng": 174.7390622
           },
           {
-            "lat": -36.9167783,
-            "lng": 174.7391369
+            "lat": -36.916776,
+            "lng": 174.7391381
           },
           {
-            "lat": -36.9167803,
-            "lng": 174.7392599
+            "lat": -36.9167781,
+            "lng": 174.739261
           },
           {
-            "lat": -36.9168379,
-            "lng": 174.7393579
+            "lat": -36.9168356,
+            "lng": 174.7393591
           },
           {
-            "lat": -36.9169172,
-            "lng": 174.7393736
+            "lat": -36.916915,
+            "lng": 174.7393748
           },
           {
-            "lat": -36.916972,
-            "lng": 174.7392978
+            "lat": -36.9169698,
+            "lng": 174.739299
           }
         ]
       }
@@ -816,43 +816,43 @@
         "visualTiltDeg": 6.71,
         "ghostBag": false,
         "bubbleCentre": {
-          "lat": -36.9168052,
-          "lng": 174.7390637
+          "lat": -36.9168033,
+          "lng": 174.7390649
         },
         "ringSampleCount": 8,
         "ringResolution": 168,
         "ringSample": [
           {
-            "lat": -36.9168764,
-            "lng": 174.7390012
+            "lat": -36.9168745,
+            "lng": 174.7390024
           },
           {
-            "lat": -36.9168111,
-            "lng": 174.7389369
+            "lat": -36.9168092,
+            "lng": 174.7389381
           },
           {
-            "lat": -36.9167423,
-            "lng": 174.7389468
+            "lat": -36.9167405,
+            "lng": 174.738948
           },
           {
-            "lat": -36.9167103,
-            "lng": 174.7390252
+            "lat": -36.9167084,
+            "lng": 174.7390264
           },
           {
-            "lat": -36.9167339,
-            "lng": 174.7391262
+            "lat": -36.916732,
+            "lng": 174.7391274
           },
           {
-            "lat": -36.9167993,
-            "lng": 174.7391906
+            "lat": -36.9167974,
+            "lng": 174.7391918
           },
           {
-            "lat": -36.9168681,
-            "lng": 174.7391806
+            "lat": -36.9168662,
+            "lng": 174.7391818
           },
           {
-            "lat": -36.9169,
-            "lng": 174.7391021
+            "lat": -36.9168981,
+            "lng": 174.7391033
           }
         ]
       }
@@ -972,43 +972,43 @@
         "visualTiltDeg": 7.31,
         "ghostBag": false,
         "bubbleCentre": {
-          "lat": -36.9152644,
-          "lng": 174.7400397
+          "lat": -36.9152617,
+          "lng": 174.7400415
         },
         "ringSampleCount": 8,
         "ringResolution": 168,
         "ringSample": [
           {
-            "lat": -36.9154197,
-            "lng": 174.7399024
+            "lat": -36.915417,
+            "lng": 174.7399041
           },
           {
-            "lat": -36.9152708,
-            "lng": 174.7397546
+            "lat": -36.9152681,
+            "lng": 174.7397563
           },
           {
-            "lat": -36.915118,
-            "lng": 174.7397736
+            "lat": -36.9151153,
+            "lng": 174.7397753
           },
           {
-            "lat": -36.9150507,
-            "lng": 174.7399487
+            "lat": -36.915048,
+            "lng": 174.7399505
           },
           {
-            "lat": -36.9151086,
-            "lng": 174.7401774
+            "lat": -36.9151059,
+            "lng": 174.7401792
           },
           {
-            "lat": -36.9152579,
-            "lng": 174.7403254
+            "lat": -36.9152552,
+            "lng": 174.7403272
           },
           {
-            "lat": -36.9154107,
-            "lng": 174.7403059
+            "lat": -36.915408,
+            "lng": 174.7403076
           },
           {
-            "lat": -36.9154777,
-            "lng": 174.7401306
+            "lat": -36.9154749,
+            "lng": 174.7401323
           }
         ]
       }
@@ -1111,43 +1111,43 @@
         "visualTiltDeg": 4.62,
         "ghostBag": false,
         "bubbleCentre": {
-          "lat": -36.9168924,
-          "lng": 174.739276
+          "lat": -36.9168919,
+          "lng": 174.7392762
         },
         "ringSampleCount": 8,
         "ringResolution": 168,
         "ringSample": [
           {
-            "lat": -36.9169326,
-            "lng": 174.7392488
+            "lat": -36.9169321,
+            "lng": 174.739249
           },
           {
-            "lat": -36.9169006,
-            "lng": 174.7392088
+            "lat": -36.9169001,
+            "lng": 174.739209
           },
           {
-            "lat": -36.9168637,
-            "lng": 174.7392081
+            "lat": -36.9168632,
+            "lng": 174.7392084
           },
           {
-            "lat": -36.9168436,
-            "lng": 174.7392472
+            "lat": -36.9168431,
+            "lng": 174.7392475
           },
           {
-            "lat": -36.916852,
-            "lng": 174.7393032
+            "lat": -36.9168515,
+            "lng": 174.7393035
           },
           {
-            "lat": -36.9168841,
-            "lng": 174.7393433
+            "lat": -36.9168836,
+            "lng": 174.7393435
           },
           {
-            "lat": -36.916921,
-            "lng": 174.7393439
+            "lat": -36.9169205,
+            "lng": 174.7393441
           },
           {
-            "lat": -36.9169411,
-            "lng": 174.7393047
+            "lat": -36.9169406,
+            "lng": 174.739305
           }
         ]
       }
@@ -1242,43 +1242,43 @@
         "visualTiltDeg": 6.71,
         "ghostBag": false,
         "bubbleCentre": {
-          "lat": -36.9168751,
-          "lng": 174.7392173
+          "lat": -36.9168728,
+          "lng": 174.7392185
         },
         "ringSampleCount": 8,
         "ringResolution": 168,
         "ringSample": [
           {
-            "lat": -36.9169619,
-            "lng": 174.7391535
+            "lat": -36.9169596,
+            "lng": 174.7391547
           },
           {
-            "lat": -36.9168908,
-            "lng": 174.7390705
+            "lat": -36.9168886,
+            "lng": 174.7390717
           },
           {
-            "lat": -36.9168105,
-            "lng": 174.7390735
+            "lat": -36.9168082,
+            "lng": 174.7390747
           },
           {
-            "lat": -36.9167679,
-            "lng": 174.7391607
+            "lat": -36.9167657,
+            "lng": 174.7391619
           },
           {
-            "lat": -36.9167882,
-            "lng": 174.7392812
+            "lat": -36.9167859,
+            "lng": 174.7392824
           },
           {
-            "lat": -36.9168594,
-            "lng": 174.7393642
+            "lat": -36.9168571,
+            "lng": 174.7393654
           },
           {
-            "lat": -36.9169397,
-            "lng": 174.7393611
+            "lat": -36.9169374,
+            "lng": 174.7393623
           },
           {
-            "lat": -36.9169821,
-            "lng": 174.7392738
+            "lat": -36.9169799,
+            "lng": 174.739275
           }
         ]
       }
@@ -1368,43 +1368,43 @@
         "visualTiltDeg": 6.71,
         "ghostBag": false,
         "bubbleCentre": {
-          "lat": -36.9143591,
-          "lng": 174.7403096
+          "lat": -36.9143574,
+          "lng": 174.7403111
         },
         "ringSampleCount": 8,
         "ringResolution": 168,
         "ringSample": [
           {
-            "lat": -36.9144218,
-            "lng": 174.7402342
+            "lat": -36.9144201,
+            "lng": 174.7402358
           },
           {
-            "lat": -36.9143494,
-            "lng": 174.7401832
+            "lat": -36.9143477,
+            "lng": 174.7401847
           },
           {
-            "lat": -36.9142827,
-            "lng": 174.7402061
+            "lat": -36.914281,
+            "lng": 174.7402076
           },
           {
-            "lat": -36.9142606,
-            "lng": 174.7402897
+            "lat": -36.9142589,
+            "lng": 174.7402913
           },
           {
-            "lat": -36.9142963,
-            "lng": 174.7403851
+            "lat": -36.9142946,
+            "lng": 174.7403866
           },
           {
-            "lat": -36.9143688,
-            "lng": 174.7404362
+            "lat": -36.9143671,
+            "lng": 174.7404377
           },
           {
-            "lat": -36.9144356,
-            "lng": 174.7404131
+            "lat": -36.9144339,
+            "lng": 174.7404146
           },
           {
-            "lat": -36.9144575,
-            "lng": 174.7403294
+            "lat": -36.9144558,
+            "lng": 174.740331
           }
         ]
       }
@@ -1498,43 +1498,43 @@
         "visualTiltDeg": 6.71,
         "ghostBag": false,
         "bubbleCentre": {
-          "lat": -36.916865,
-          "lng": 174.7392074
+          "lat": -36.9168626,
+          "lng": 174.739209
         },
         "ringSampleCount": 8,
         "ringResolution": 168,
         "ringSample": [
           {
-            "lat": -36.916958,
-            "lng": 174.7391259
+            "lat": -36.9169555,
+            "lng": 174.7391275
           },
           {
-            "lat": -36.9168723,
-            "lng": 174.7390409
+            "lat": -36.9168698,
+            "lng": 174.7390425
           },
           {
-            "lat": -36.9167823,
-            "lng": 174.7390534
+            "lat": -36.9167798,
+            "lng": 174.7390549
           },
           {
-            "lat": -36.9167407,
-            "lng": 174.7391561
+            "lat": -36.9167382,
+            "lng": 174.7391577
           },
           {
-            "lat": -36.916772,
-            "lng": 174.739289
+            "lat": -36.9167695,
+            "lng": 174.7392906
           },
           {
-            "lat": -36.9168578,
-            "lng": 174.7393741
+            "lat": -36.9168554,
+            "lng": 174.7393756
           },
           {
-            "lat": -36.9169478,
-            "lng": 174.7393614
+            "lat": -36.9169454,
+            "lng": 174.739363
           },
           {
-            "lat": -36.9169893,
-            "lng": 174.7392586
+            "lat": -36.9169868,
+            "lng": 174.7392602
           }
         ]
       }
@@ -1628,43 +1628,43 @@
         "visualTiltDeg": 6.71,
         "ghostBag": false,
         "bubbleCentre": {
-          "lat": -36.9168658,
-          "lng": 174.7392097
+          "lat": -36.9168635,
+          "lng": 174.7392112
         },
         "ringSampleCount": 8,
         "ringResolution": 168,
         "ringSample": [
           {
-            "lat": -36.9169534,
-            "lng": 174.7391328
+            "lat": -36.9169511,
+            "lng": 174.7391343
           },
           {
-            "lat": -36.9168725,
-            "lng": 174.7390525
+            "lat": -36.9168702,
+            "lng": 174.739054
           },
           {
-            "lat": -36.9167876,
-            "lng": 174.7390643
+            "lat": -36.9167853,
+            "lng": 174.7390657
           },
           {
-            "lat": -36.9167484,
-            "lng": 174.7391613
+            "lat": -36.9167461,
+            "lng": 174.7391628
           },
           {
-            "lat": -36.916778,
-            "lng": 174.7392867
+            "lat": -36.9167757,
+            "lng": 174.7392882
           },
           {
-            "lat": -36.9168591,
-            "lng": 174.739367
+            "lat": -36.9168567,
+            "lng": 174.7393685
           },
           {
-            "lat": -36.916944,
-            "lng": 174.7393551
+            "lat": -36.9169417,
+            "lng": 174.7393566
           },
           {
-            "lat": -36.9169831,
-            "lng": 174.739258
+            "lat": -36.9169807,
+            "lng": 174.7392595
           }
         ]
       }
@@ -1678,7 +1678,7 @@
       "snapshot against its own recomputation, so a disagreement here is not cosmetic: it would",
       "make the wrist reject every bag the phone sends."
     ],
-    "engineVersion": "bubble-engine-v2",
+    "engineVersion": "bubble-engine-v3",
     "cases": [
       {
         "name": "account bag with a saved aim",
@@ -1707,7 +1707,7 @@
           "handedness": "right"
         },
         "expect": {
-          "fingerprint": "v1|g0|Driver:205:228|5i:155:167|PW:103:108|b:3.20:right|e:bubble-engine-v2",
+          "fingerprint": "v1|g0|Driver:205:228|5i:155:167|PW:103:108|b:3.20:right|e:bubble-engine-v3",
           "clubs": [
             {
               "club": "Driver",
@@ -1759,7 +1759,7 @@
           "handedness": "right"
         },
         "expect": {
-          "fingerprint": "v1|g0|Driver:205:228|5i:155:167|PW:103:108|b:3.20:right|e:bubble-engine-v2",
+          "fingerprint": "v1|g0|Driver:205:228|5i:155:167|PW:103:108|b:3.20:right|e:bubble-engine-v3",
           "clubs": [
             {
               "club": "Driver",
@@ -1799,7 +1799,7 @@
           "handedness": "right"
         },
         "expect": {
-          "fingerprint": "v1|g0|Driver:205:228|b:-:right|e:bubble-engine-v2",
+          "fingerprint": "v1|g0|Driver:205:228|b:-:right|e:bubble-engine-v3",
           "clubs": [
             {
               "club": "Driver",
@@ -1830,7 +1830,7 @@
           "handedness": "right"
         },
         "expect": {
-          "fingerprint": "v1|g0|Driver:205:228|b:0.00:right|e:bubble-engine-v2",
+          "fingerprint": "v1|g0|Driver:205:228|b:0.00:right|e:bubble-engine-v3",
           "clubs": [
             {
               "club": "Driver",
@@ -1862,7 +1862,7 @@
           "handedness": "left"
         },
         "expect": {
-          "fingerprint": "v1|g0|Driver:205:228|b:3.20:left|e:bubble-engine-v2",
+          "fingerprint": "v1|g0|Driver:205:228|b:3.20:left|e:bubble-engine-v3",
           "clubs": [
             {
               "club": "Driver",
@@ -1895,7 +1895,7 @@
           "handedness": "right"
         },
         "expect": {
-          "fingerprint": "v1|g1|Driver:205:228|b:3.20:right|e:bubble-engine-v2",
+          "fingerprint": "v1|g1|Driver:205:228|b:3.20:right|e:bubble-engine-v3",
           "clubs": [
             {
               "club": "Driver",
@@ -1927,7 +1927,7 @@
           "handedness": "right"
         },
         "expect": {
-          "fingerprint": "v1|g0|7i:138:148|b:1.67:right|e:bubble-engine-v2",
+          "fingerprint": "v1|g0|7i:138:148|b:1.67:right|e:bubble-engine-v3",
           "clubs": [
             {
               "club": "7i",
@@ -1959,7 +1959,7 @@
           "handedness": "right"
         },
         "expect": {
-          "fingerprint": "v1|g0|7i:138:138|b:1.60:right|e:bubble-engine-v2",
+          "fingerprint": "v1|g0|7i:138:138|b:1.60:right|e:bubble-engine-v3",
           "clubs": [
             {
               "club": "7i",
@@ -1979,7 +1979,7 @@
   "playerWire": {
     "accountBag": {
       "version": 1,
-      "fingerprint": "v1|g0|Driver:205:228|7i:138:148|b:3.20:right|e:bubble-engine-v2",
+      "fingerprint": "v1|g0|Driver:205:228|7i:138:148|b:3.20:right|e:bubble-engine-v3",
       "bag": {
         "isGhost": false,
         "clubs": [
@@ -1999,11 +1999,11 @@
         "handedness": "right",
         "offsetDeg": 3.2
       },
-      "engineVersion": "bubble-engine-v2"
+      "engineVersion": "bubble-engine-v3"
     },
     "noMyBubble": {
       "version": 1,
-      "fingerprint": "v1|g0|Driver:205:228|b:-:left|e:bubble-engine-v2",
+      "fingerprint": "v1|g0|Driver:205:228|b:-:left|e:bubble-engine-v3",
       "bag": {
         "isGhost": false,
         "clubs": [
@@ -2017,11 +2017,11 @@
       "bubble": {
         "handedness": "left"
       },
-      "engineVersion": "bubble-engine-v2"
+      "engineVersion": "bubble-engine-v3"
     },
     "ghostBag": {
       "version": 1,
-      "fingerprint": "v1|g1|Driver:230:255|b:0.00:right|e:bubble-engine-v2",
+      "fingerprint": "v1|g1|Driver:230:255|b:0.00:right|e:bubble-engine-v3",
       "bag": {
         "isGhost": true,
         "clubs": [
@@ -2036,7 +2036,7 @@
         "handedness": "right",
         "offsetDeg": 0
       },
-      "engineVersion": "bubble-engine-v2"
+      "engineVersion": "bubble-engine-v3"
     }
   }
 }

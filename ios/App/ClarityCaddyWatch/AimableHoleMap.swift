@@ -341,13 +341,21 @@ struct AimableHoleMap: View {
     // MARK: - Framing
 
     /* BUBBLE framing: the shot being shaped, with its surroundings. The
-       player may fall off the bottom — the aim line still reaches the edge
-       and pivots as the target moves, which is what says the origin is a
-       fixed point. `play` (player low, hole ahead) remains only for a hole
-       with no target at all, where there is no Bubble to frame. */
+       centre is the END OF THE AIM LINE - the geo target - never the middle
+       of the Bubble: the engine may sit the Bubble off to one side of the
+       target by the player's offset, and the target is what the screen is
+       about. The extent is the ring's box measured symmetrically about the
+       target, so an offset Bubble still fits whole. The player may fall off
+       the bottom - the aim line still reaches the edge and pivots as the
+       target moves, which is what says the origin is a fixed point. `play`
+       (player low, hole ahead) remains only for a hole with no target at
+       all, where there is no Bubble to frame. */
     private func restingCamera(viewSize: CGSize) -> WatchMapCamera {
         if let ring = state.bubble?.ring, let box = imageBox(of: ring) {
-            return WatchMapCamera.bubble(centre: CGPoint(x: box.midX, y: box.midY), extent: box.size,
+            let centre = imagePoint(currentTarget) ?? CGPoint(x: box.midX, y: box.midY)
+            let extent = CGSize(width: 2 * max(abs(box.minX - centre.x), abs(box.maxX - centre.x)),
+                                height: 2 * max(abs(box.minY - centre.y), abs(box.maxY - centre.y)))
+            return WatchMapCamera.bubble(centre: centre, extent: extent,
                                          imageSize: imageSize, viewSize: viewSize)
         }
         if let target = imagePoint(currentTarget) {

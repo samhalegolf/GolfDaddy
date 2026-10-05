@@ -209,16 +209,21 @@ class GarminMapView extends WatchUi.View {
     }
 
     // Mirrors AimableHoleMap.restingCamera's priority order exactly: the
-    // local Bubble ring's own bounding box first (with its surroundings),
-    // then a nominal extent around the target, then PLAY framing (player
-    // low, hole ahead) for a hole with no target at all.
+    // local Bubble ring first (with its surroundings), then a nominal extent
+    // around the target, then PLAY framing (player low, hole ahead) for a
+    // hole with no target at all. The centre is always the END OF THE AIM
+    // LINE (the geo target), never the middle of the Bubble - the engine may
+    // sit the Bubble to one side by the player's offset - and the ring's box
+    // is measured symmetrically about it so an offset Bubble still fits.
     function restingCamera(local, playerImg, targetImg, greenImg, reference, imageWidth, imageHeight, viewWidth, viewHeight) {
         if (local != null && local.ring != null && local.ring.size() >= 3) {
             var box = imageBoxOfRing(local.ring, reference);
             if (box != null) {
-                return GarminMapCamera.bubble(
-                    (box["minX"] + box["maxX"]) / 2.0, (box["minY"] + box["maxY"]) / 2.0,
-                    box["maxX"] - box["minX"], box["maxY"] - box["minY"],
+                var cx = targetImg != null ? targetImg["x"] : (box["minX"] + box["maxX"]) / 2.0;
+                var cy = targetImg != null ? targetImg["y"] : (box["minY"] + box["maxY"]) / 2.0;
+                return GarminMapCamera.bubble(cx, cy,
+                    2.0 * maxOf((box["minX"] - cx).abs(), (box["maxX"] - cx).abs()),
+                    2.0 * maxOf((box["minY"] - cy).abs(), (box["maxY"] - cy).abs()),
                     imageWidth, imageHeight, viewWidth, viewHeight);
             }
         }
@@ -530,4 +535,6 @@ class GarminMapView extends WatchUi.View {
         if (session.playState.player == null) { return false; }
         return true;
     }
+
+    function maxOf(a, b) { return a > b ? a : b; }
 }

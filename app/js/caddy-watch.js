@@ -35,7 +35,7 @@
      ios/WatchBubbleEngine EngineVersion.swift and garmin GarminEngineVersion.mc;
      a wrist still on v1 stops computing locally and shows the phone's answer,
      which is exactly the disagreement the check exists to catch. */
-  var BUBBLE_ENGINE_VERSION = "bubble-engine-v2";
+  var BUBBLE_ENGINE_VERSION = "bubble-engine-v3";
   var LOCATION_SOURCES = ["phone-web", "phone-native", "apple-watch", "wear-os", "garmin"];
 
   function finite(n) { return Number.isFinite(Number(n)); }
