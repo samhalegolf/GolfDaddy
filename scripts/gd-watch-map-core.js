@@ -70,8 +70,13 @@
        column 89 of 267, and on a wrist that centres on the image (the S62,
        drawing 1:1) the Bubble sat left of the face. Now the frame is
        symmetric about the axis: one corridor either side, widened only as far
-       as a route bend needs. The play line IS the centre column. */
-    version: 5,
+       as a route bend needs. The play line IS the centre column.
+
+       v6 swapped v3's corner-smoothing for Chaikin corner-cutting on a coarser
+       decimation. v3's neighbour-averaging only moved points, so every shape was
+       still straight edges meeting at softened corners, and more passes just
+       shrank it. Cosmetic like v3: framing and buildHoleReference are untouched. */
+    version: 6,
     canvas: {
       /* Ceiling, not a fixed size - see computeCanvasFit. Most holes land under both ceilings;
          a long narrow par 5 is height-limited, a short wide-corridor hole is width-limited. */
@@ -108,14 +113,17 @@
       /* Vertex decimation distance and minimum kept-polygon area, both in OUTPUT pixels (i.e.
          applied after the fit scale, so the thresholds mean the same thing on every hole
          regardless of how much ground one pixel covers). */
-      minVertexSpacingPx: 2.5,
+      minVertexSpacingPx: 4,
       minPolygonAreaPx2: 24,
-      /* Corner-rounding passes run on every decimated ring (see smoothClosedPolygon), so the
-         jagged, hand-drawn/OSM-derived turns left by simplifyPoints don't bake straight into a
-         watch-scale image. Same technique functions/lib/gd-green-shape-core.mjs's smoothPoints
-         uses for detected green outlines; 2 passes is enough to round a saw-tooth corner without
-         eating a real point (a fairway dogleg, a bunker's own shape). */
-      smoothPasses: 2
+      /* Spacing for the green outline shipped in the hole reference, which the wrist measures
+         front/back distances against. Kept separate from minVertexSpacingPx so how the map is
+         drawn never changes what the wrist measures. */
+      referenceVertexSpacingPx: 2.5,
+      /* Chaikin corner-cutting passes run on every decimated ring (see smoothClosedPolygon).
+         Each pass doubles the points, so 3 passes turns every corner into ~8 short segments -
+         a real curve at watch scale. The 4px decimation above runs first so the curves follow
+         the shape, not the wobble in hand-drawn/OSM outlines. */
+      smoothPasses: 3
     },
     colors: {
       background: "#3c6b45",
@@ -363,7 +371,7 @@
      phone, never to approximate. */
   function buildHoleReference(recipe, spatialRef, geometry, routeLatLng) {
     var hasTee = !!geometry.tee;
-    var spacingM = Number(spatialRef.metresPerPixel) * recipe.simplify.minVertexSpacingPx;
+    var spacingM = Number(spatialRef.metresPerPixel) * recipe.simplify.referenceVertexSpacingPx;
     return {
       version: 1,
       tee: hasTee ? referencePoint(geometry.tee) : null,
@@ -410,26 +418,25 @@
     return out;
   }
 
-  /* Rounds off jagged corners left by decimation - the raw shapes are hand-drawn or cloned from
-     OSM ways and often carry sharp saw-tooth turns that read as noise at Watch scale, where a
-     handful of pixels is the whole width of a bunker. Weighted-neighbour blending against each
-     point's own ring neighbours, the same technique functions/lib/gd-green-shape-core.mjs's
-     smoothPoints uses for detected green outlines - closed here (wraps around, since every
-     polygon this recipe draws is a closed ring) rather than that module's open contour case.
+  /* Rounds the corners left by decimation with Chaikin corner-cutting: every edge is replaced
+     by two points at 1/4 and 3/4 along it, so each pass cuts every corner in two and doubles
+     the point count. Converges on a smooth curve and, unlike averaging each point with its
+     neighbours, barely shrinks the shape. Closed ring - wraps around, since every polygon this
+     recipe draws is one.
 
-     Runs AFTER simplifyPoints, deliberately: smoothing hundreds of near-duplicate points would
-     spend its passes averaging noise instead of rounding real corners, and decimation's own job
-     is to remove exactly those points first. Left alone below 5 points - a triangle or the
-     recipe's own minimum has no "corner" to round, only a shape smoothing would collapse. */
+     Runs AFTER simplifyPoints, deliberately: cutting the corners of hundreds of near-duplicate
+     points would round off noise instead of the real shape. */
   function smoothClosedPolygon(points, passes) {
-    if (points.length < 5 || !(passes > 0)) return points;
-    var out = points.map(function (p) { return { x: p.x, y: p.y }; });
+    if (points.length < 3 || !(passes > 0)) return points;
+    var out = points;
     for (var pass = 0; pass < passes; pass++) {
-      out = out.map(function (p, i) {
-        var prev = out[(i - 1 + out.length) % out.length];
-        var next = out[(i + 1) % out.length];
-        return { x: p.x * 0.5 + prev.x * 0.25 + next.x * 0.25, y: p.y * 0.5 + prev.y * 0.25 + next.y * 0.25 };
-      });
+      var next = [];
+      for (var i = 0; i < out.length; i++) {
+        var a = out[i], b = out[(i + 1) % out.length];
+        next.push({ x: a.x * 0.75 + b.x * 0.25, y: a.y * 0.75 + b.y * 0.25 });
+        next.push({ x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75 });
+      }
+      out = next;
     }
     return out;
   }
