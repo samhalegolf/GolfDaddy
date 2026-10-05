@@ -1989,7 +1989,7 @@ async function runShapeRefineJob(job) {
    that could do those things is not on this one. enrichSurfaceObjects can only ever write the
    three surface types; it has no route to a tee, a green or a route point. */
 function surfaceCounts(objects) {
-  const counts = { fairway_area: 0, bunker: 0, water: 0, trees: 0, hazard: 0 };
+  const counts = { fairway_area: 0, bunker: 0, water: 0, trees: 0, hazard: 0, waste: 0 };
   objects.forEach(object => {
     if (object && SURFACE_TYPES.has(object.type)) counts[object.type] += 1;
   });

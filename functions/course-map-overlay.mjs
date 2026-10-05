@@ -71,7 +71,7 @@ async function loadOsmContext(course) {
 
 /* The course's saved objects, for drawing against. A ring where the object has a shape, a point
    where it only has a position (the mapper stores tees and fairway targets as points). */
-const OBJECT_DISPLAY_TYPES = new Set(["green", "tee", "fairway", "fairway_area", "bunker", "water", "trees", "hazard"]);
+const OBJECT_DISPLAY_TYPES = new Set(["green", "tee", "fairway", "fairway_area", "bunker", "water", "trees", "hazard", "waste"]);
 function cleanRing(shape) {
   return (Array.isArray(shape) ? shape : []).map(p => ({ lat: Number(p && p.lat), lng: Number(p && (p.lng != null ? p.lng : p.lon)) }))
     .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
