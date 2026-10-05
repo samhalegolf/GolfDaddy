@@ -32,6 +32,26 @@ test("each hole keeps its own OSM green when greens carry ids", () => {
   assert.deepStrictEqual(matched, ["g1", "g2"]);
 });
 
+test("shapeCentroid is the area centre, not pulled toward a densely traced edge", () => {
+  /* A 40 x 30 m rectangle whose top edge carries 20 extra points: a vertex average lands
+     well toward that edge (Millbrook hole 3's green was 2.3 m long this way). */
+  const mLat = 1 / 111320, lat0 = -44.95, mLng = mLat / Math.cos(lat0 * Math.PI / 180);
+  const pt = (x, y) => ({ lat: lat0 + y * mLat, lng: 168.8 + x * mLng });
+  const shape = [pt(-20, -15), pt(20, -15), pt(20, 15)];
+  for (let i = 1; i < 20; i++) shape.push(pt(20 - i * 2, 15));
+  shape.push(pt(-20, 15));
+  const c = core.shapeCentroid(shape);
+  const dx = (c.lng - 168.8) / mLng, dy = (c.lat - lat0) / mLat;
+  assert.ok(Math.hypot(dx, dy) < 0.01, "area centre at the middle, got " + dx.toFixed(3) + ", " + dy.toFixed(3));
+  const mean = shape.reduce((a, p) => a + (p.lat - lat0) / mLat, 0) / shape.length;
+  assert.ok(mean > 10, "the vertex average this replaces really is pulled to the dense edge");
+  /* Winding does not matter, and a degenerate outline falls back to the mean. */
+  const r = core.shapeCentroid(shape.slice().reverse());
+  assert.ok(Math.abs(r.lat - c.lat) < 1e-12 && Math.abs(r.lng - c.lng) < 1e-12);
+  const flat = core.shapeCentroid([pt(0, 0), pt(10, 0), pt(20, 0)]);
+  assert.ok(Math.abs((flat.lng - 168.8) / mLng - 10) < 1e-6);
+});
+
 test("osmQueryScope builds an around-radius selector when no bbox is given", () => {
   const scope = core.osmQueryScope({}, { lat: -36.8, lng: 174.7 });
   assert.strictEqual(scope.mode, "around");

@@ -1287,12 +1287,29 @@ export function cleanOsmShape(points) {
   return clean.length >= 3 ? clean : null;
 }
 
+/* The AREA centroid of the outline, not the average of its vertices. A vertex average leans
+   toward whichever edge was traced with more points - a heart-shaped green drawn with a fussy
+   back edge put its "centre" 2.3 m long at Millbrook hole 3 - and every distance to the
+   centre, the Bubble's green target and the watch's framing all hang off this point. Planar
+   shoelace in a local equirectangular frame (exact to well under a centimetre at green size);
+   a degenerate or self-cancelling outline falls back to the vertex average. */
 export function shapeCentroid(shape) {
   const pts = cleanOsmShape(shape);
   if (!pts) return null;
   let lat = 0, lng = 0;
   pts.forEach(p => { lat += Number(p.lat); lng += Number(p.lng); });
-  return { lat: lat / pts.length, lng: lng / pts.length };
+  const mean = { lat: lat / pts.length, lng: lng / pts.length };
+  const k = Math.cos(mean.lat * Math.PI / 180);
+  let area = 0, cx = 0, cy = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    const x1 = (a.lng - mean.lng) * k, y1 = a.lat - mean.lat, x2 = (b.lng - mean.lng) * k, y2 = b.lat - mean.lat;
+    const cross = x1 * y2 - x2 * y1;
+    area += cross; cx += (x1 + x2) * cross; cy += (y1 + y2) * cross;
+  }
+  if (!(Math.abs(area) > 1e-14)) return mean;
+  const centre = { lat: mean.lat + cy / (3 * area), lng: mean.lng + cx / (3 * area) / k };
+  return Number.isFinite(centre.lat) && Number.isFinite(centre.lng) ? centre : mean;
 }
 
 export function greenShapeSpan(shape, center = shapeCentroid(shape)) {

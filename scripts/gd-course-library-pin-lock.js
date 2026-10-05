@@ -1850,12 +1850,24 @@
     if(clean.length>3&&distance(clean[0],clean[clean.length-1])<1)clean.pop();
     return clean.length>=3?clean:null;
   }
+  /* Area centroid, not a vertex average (see shapeCentroid in functions/lib/gd-automapper-core.mjs). */
   function shapeCentroid(shape){
     const pts=cleanOsmShape(shape);
     if(!pts)return null;
     let lat=0,lng=0;
     pts.forEach(p=>{lat+=Number(p.lat);lng+=Number(p.lng);});
-    return {lat:lat/pts.length,lng:lng/pts.length};
+    const mean={lat:lat/pts.length,lng:lng/pts.length};
+    const k=Math.cos(mean.lat*Math.PI/180);
+    let area=0,cx=0,cy=0;
+    for(let i=0;i<pts.length;i++){
+      const a=pts[i],b=pts[(i+1)%pts.length];
+      const x1=(Number(a.lng)-mean.lng)*k,y1=Number(a.lat)-mean.lat,x2=(Number(b.lng)-mean.lng)*k,y2=Number(b.lat)-mean.lat;
+      const cross=x1*y2-x2*y1;
+      area+=cross;cx+=(x1+x2)*cross;cy+=(y1+y2)*cross;
+    }
+    if(!(Math.abs(area)>1e-14))return mean;
+    const centre={lat:mean.lat+cy/(3*area),lng:mean.lng+cx/(3*area)/k};
+    return Number.isFinite(centre.lat)&&Number.isFinite(centre.lng)?centre:mean;
   }
   function greenShapeSpan(shape,center=shapeCentroid(shape)){
     if(!center)return Infinity;
