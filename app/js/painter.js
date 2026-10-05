@@ -1452,7 +1452,11 @@
   function drawBadge(scene) {
     var badge = el("playerBadge");
     if (!badge) return;
-    var demo = !!(window.GDDemoSession && window.GDDemoSession.active);
+    /* A demo approach (demo-approach.js) is the other demo: a hole put live
+       from the couch. It reads DEMO for the same reason, and its way out is
+       the badge's own return button. */
+    var approach = !!(app.demoApproach && app.demoApproach.active());
+    var demo = approach || !!(window.GDDemoSession && window.GDDemoSession.active);
     var state = demo ? "demo" : scene.banner.flow;
     if (BADGE_STATES.indexOf(state) < 0) state = "live";
     BADGE_STATES.forEach(function (name) {
@@ -1478,8 +1482,9 @@
     if (course) course.textContent = scene.banner.course || "";
 
     var back = el("playerBadgeReturn");
-    show(back, scene.banner.returnTo !== null);
-    if (back && scene.banner.returnTo !== null) {
+    show(back, approach || scene.banner.returnTo !== null);
+    if (back && approach) i18n.set(back, "badge.endDemo");
+    else if (back && scene.banner.returnTo !== null) {
       if (scene.banner.flow === "logging") i18n.set(back, "common.cancel");
       else i18n.set(back, "common.hole", { n: scene.banner.returnTo });
     }
@@ -2844,6 +2849,7 @@
 
     var back = el("playerBadgeReturn");
     if (back) back.addEventListener("click", function () {
+      if (app.demoApproach && app.demoApproach.active()) { app.demoApproach.stop(); return; }
       if (!currentScene || currentScene.banner.returnTo === null) return;
       /* Abandoning a catch-up is BACK, not a hole change: the Marshal has to
          throw away the ball you placed and put you back itself, because only it

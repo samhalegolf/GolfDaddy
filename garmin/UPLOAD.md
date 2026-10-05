@@ -317,6 +317,75 @@ gives focus/scale/origin/player per framing):
 
 ---
 
+### A demo round with no phone at all: the standalone sim demo
+
+The muted build and the relay both still need the Android emulator, the adb
+tether and, for hole maps, Garmin's image service plus a Connect sign-in. A
+demo round needs none of it - it uses only what the watch already holds - so
+this build plays one entirely on the simulated watch:
+
+    CIQ_SIM_DEMO=1 ./build.sh build        # -> build/ClarityCaddy-<device>-simdemo.prg
+    "$SDK/bin/connectiq" &
+    "$SDK/bin/monkeydo" build/ClarityCaddy-approachs62-simdemo.prg approachs62
+
+`source/SimDemo/GarminSimDemo.mc` stands in for the phone: at start it hands
+the watch a fixture course's lite-map package and the player's bag (exactly
+as the phone would), and it answers the watch's own commands - DEMO_APPROACH,
+LOCK, AIM_AT, UNLOCK, DEMO_END - with a real acknowledgement and a real Scene,
+through the same `receiveAcknowledgement` / `receiveScene` a phone message
+reaches. The fixture (`resources-sim-demo/`: Millbrook holes 1-3, their hole
+images and a bag) is generated from a package an Apple Watch simulator has
+already been delivered:
+
+    node garmin/tools/make-sim-demo-fixture.js <apple-watch-app-container> [1,2,3]
+
+Coordinates and the map transform are stored as strings and parsed back
+exactly (resource JSON may decode decimals as 32-bit floats). In the
+simulator: Return = SELECT, Up/Down = UP/DOWN, `m` = MENU; BACK is the lower
+right button on the watch image (Escape is not mapped). The first key after
+focusing the window is sometimes eaten - focus by clicking the title bar.
+
+The browser steps through SITUATIONS rather than bare holes (the fixture's
+`situations`, sent as the Scene's `demoOptions`), each chosen to exercise a
+different part of the watch:
+
+| Situation | From | What it tests |
+|---|---|---|
+| Hole 1 - Tee shot | 506 m | out of reach: fairway-line layup target, layup guide ("Green Xm"), long off-screen lines |
+| Hole 1 - Second shot | 280 m | out of reach again, from the fairway |
+| Hole 1 - Approach | 115 m | the app's own demo rule; green as target |
+| Hole 2 - Par 3 tee | 186 m | in reach from the tee; green as target |
+| Hole 3 - Approach | 115 m | a second map; Bubble framed at the 3x ceiling |
+| Hole 3 - Chip | 45 m | small Bubble near the green, 3x |
+
+LOCK places the target with the engine's own default rule
+(`GarminBubbleEngine.defaultTarget`: the green in reach, else the layup on the
+fairway line), so the stand-in agrees with what the phone would do.
+
+Verified 2026-10-05 across six profiles - Approach S62 (CIQ 3.0, 1:1 maps,
+touch hold/release), fenix 7 (touch + buttons, continuous drag, edge pan),
+Forerunner 255 (512 KB / 120k-watchdog floor, buttons only: nudge aiming),
+Venu Sq 2 (rectangular AMOLED, swipe-left to the map), Forerunner 965 (454 px
+AMOLED, drag), Instinct Crossover AMOLED (hybrid, buttons): centred Bubble
+framing, layup guide, drag / hold / nudge aiming, and BACK out. Running it is
+what found the real-device bugs fixed alongside: drawBitmap2 scaling (it has
+no :destWidth; transform + crop, native-format buffer on AMOLED), watchdog
+budget (Bubble computed per input change, not per draw; clipped dashed lines;
+linearised ring), UP/DOWN inverted on button watches, and the map's lack of
+a door on watches with no MENU button.
+
+`--download` on the fixture generator makes the demo fetch each hole the real
+way (makeImageRequest -> Garmin's image service -> the live
+/api/course-watch-map-assets JPEG) instead of using the bundled images.
+Verified 2026-10-05 on the Forerunner 255 (the 512 KB floor): hole 1
+(267x1536) and hole 3 (448x1185, framed at 3x) downloaded with code 200 and
+drew; app memory peaked at 138 of 508 KB - on Connect IQ 5 the image lives in
+the graphics pool, not the app heap. No Connect sign-in prompt appeared.
+
+The device list itself is generated: `node garmin/tools/sync-devices.js`
+(rules and the measured 512 KB memory floor are in its header; `--list`
+prints every device's verdict, `--check` runs in `npm run test:garmin`).
+
 ## 5. Before you package — the things that are still placeholders
 
 - [x] ~~**Launcher icon.**~~ Done 2026-09-19. The 105-byte solid-colour

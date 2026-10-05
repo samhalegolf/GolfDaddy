@@ -105,6 +105,12 @@
     return !app.access || app.access.roundFeatures();
   }
 
+  /* A demo approach (demo-approach.js) is a hole played from the couch: it
+     must look exactly like a round and write nothing a round writes. */
+  function inDemo() {
+    return !!(app.demoApproach && app.demoApproach.active());
+  }
+
   function ensureMarshal() {
     if (app.marshal) return app.marshal;
     app.marshal = app.createMarshal({
@@ -195,6 +201,7 @@
            backs out to the picker had no way back in but the nearby course
            block. */
         liveHoleChanged: function (hole) {
+          if (inDemo()) return;
           if (app.resume) app.resume.setLiveHole(hole);
         },
         shotChanged: function (start, target) {
@@ -212,11 +219,11 @@
         /* GPS Play's only analytical output. Wrapped because nothing about
            Course Data may interrupt a round. */
         shotCompleted: function (shot, meta) {
-          if (!roundFeatures()) return;
+          if (!roundFeatures() || inDemo()) return;
           try { if (app.courseData) app.courseData.submit(shot, meta); } catch (e) {}
         },
         scoreSet: function (hole, strokes) {
-          if (!roundFeatures()) return;
+          if (!roundFeatures() || inDemo()) return;
           if (app.scorecard && app.scorecard.setScore) app.scorecard.setScore(hole, strokes);
         }
       }
@@ -261,7 +268,8 @@
         bubbleModel: function () {
           return window.GDBubbleEngine && window.GDBubbleEngine.renderModel
             ? window.GDBubbleEngine.renderModel() : null;
-        }
+        },
+        demo: app.demoApproach || null
       });
       if (window.GDNativeRoundBridge && window.GDNativeRoundBridge.attach) {
         window.GDNativeRoundBridge.attach(app.caddyWatch);
@@ -276,7 +284,16 @@
        is not trusted is refused inside the Marshal, not here — this file does
        not get to decide what counts. */
     if (app.gps) {
-      app.gps.onFix(function (fix) { app.marshal.signal("FIX_RECEIVED", { point: fix, speed: fix.speed }); });
+      app.gps.onFix(function (fix) {
+        /* A demo approach holds the player where it put them - until a real
+           fix says the player is actually at the course. Then the demo has
+           done its job: it ends itself (handing a driving wrist back, see
+           demo-approach.js stop) and this fix goes down the real path. */
+        if (inDemo()) {
+          if (!app.demoApproach.endIfAtCourse(fix)) return;
+        }
+        app.marshal.signal("FIX_RECEIVED", { point: fix, speed: fix.speed });
+      });
       app.gps.onStatus(function (status) {
         renderGpsNotice(status);
         if (status === "denied" || status === "unsupported") app.marshal.signal("FIX_LOST");
@@ -328,6 +345,7 @@
 
   function startRound(course, pkg) {
     if (mapReadiness) mapReadiness.observePackage(pkg);
+    if (app.demoApproach) app.demoApproach.reset();
     ensureMarshal().signal("ROUND_OPENED", {
       courseKey: app.courseKey(course.courseId),
       courseName: course.courseName || "",

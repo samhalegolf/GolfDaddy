@@ -34,6 +34,39 @@ final class WatchSessionManager: NSObject, ObservableObject {
     private var answeredHandovers = Set<String>()
 
     var isDriving: Bool { scene?.isDriving == true }
+    var isDemo: Bool { scene?.isDemo == true }
+
+    /* Where the phone's LOCK first put the Bubble, for the map's Reset.
+     *
+     * Taken from the first locked Scene for a round and hole, and SAVED, because
+     * every aim the wrist sends (AIM_AT) moves the Scene's target - so after a
+     * relaunch the Scene can only say where the Bubble is now, not where it
+     * started. Cleared when the shot is let go: any unlocked Scene, or this
+     * wrist's own unlock(). */
+    @Published private(set) var aimOrigin: Coordinate?
+    private struct StoredAimOrigin: Codable { let roundId: String; let hole: Int; let lat: Double; let lng: Double }
+    private let aimOriginKey = "CaddyWatchAimOriginV1"
+
+    private func noteAimOrigin(_ incoming: WatchScene) {
+        guard incoming.shot?.locked == true, let round = incoming.roundId, let hole = incoming.hole?.number else {
+            clearAimOrigin(); return
+        }
+        if let data = UserDefaults.standard.data(forKey: aimOriginKey),
+           let stored = try? JSONDecoder().decode(StoredAimOrigin.self, from: data),
+           stored.roundId == round, stored.hole == hole {
+            if aimOrigin?.lat != stored.lat || aimOrigin?.lng != stored.lng { aimOrigin = Coordinate(lat: stored.lat, lng: stored.lng) }
+            return
+        }
+        guard let target = incoming.target ?? incoming.bubble?.centre, let lat = target.lat, let lng = target.lng else { return }
+        if let data = try? JSONEncoder().encode(StoredAimOrigin(roundId: round, hole: hole, lat: lat, lng: lng)) {
+            UserDefaults.standard.set(data, forKey: aimOriginKey)
+        }
+        aimOrigin = Coordinate(lat: lat, lng: lng)
+    }
+    private func clearAimOrigin() {
+        if aimOrigin != nil { aimOrigin = nil }
+        UserDefaults.standard.removeObject(forKey: aimOriginKey)
+    }
 
     /* What the phone says the package holds, and what this wrist can prove it
        holds. The phone's count decides whether there is anything to wait for;
@@ -47,7 +80,7 @@ final class WatchSessionManager: NSObject, ObservableObject {
     var face: Face {
         guard let scene, scene.hasRound else { return .noRound }
         if scene.isDriving { return .playing }
-        if scene.surface?.handover?.state == "offered" || pendingCommands.contains(where: { $0.command.type == .takeOver }) { return .taking }
+        if scene.surface?.handover?.state == "offered" || pendingCommands.contains(where: { $0.command.type == .takeOver || $0.command.type == .demoApproach }) { return .taking }
         if mapsExpected > 0 && mapsHeld < mapsExpected { return .receiving }
         return .ready
     }
@@ -199,7 +232,9 @@ final class WatchSessionManager: NSObject, ObservableObject {
      * the locked Bubble on its face, so it is the surface that gets to say the
      * player has left. */
     private func advanceAimRelease() {
-        guard scene?.isDriving == true else { aimRelease.reset(); return }
+        /* A demo player is planted, and the wrist's GPS is a couch: there is
+           no walk to measure. */
+        guard scene?.isDriving == true, !isDemo else { aimRelease.reset(); return }
         let fix = locationManager.lastFix
         let released = aimRelease.update(
             locked: shotIsLocked,
@@ -229,6 +264,7 @@ final class WatchSessionManager: NSObject, ObservableObject {
            intent has just been withdrawn — leaving it would keep the numbers
            face saying SENDING for a shot nobody is holding any more. */
         lockedShot = nil
+        clearAimOrigin()
         send(.unlock)
         if announce { WKInterfaceDevice.current().play(.click) }
     }
@@ -318,6 +354,8 @@ final class WatchSessionManager: NSObject, ObservableObject {
         restoreOutbox()
         locationManager.onFix = { [weak self] fix in
             guard let self else { return }
+            /* The demo's point stands in for this wrist's GPS until it ends. */
+            guard !self.isDemo else { return }
             self.wristFix = fix.map { WatchScene.GeoPoint(lat: $0.coordinate.latitude, lng: $0.coordinate.longitude) }
             /* Every fix, not every Scene. The whole reason the between-holes
                screens live here is that they must keep working while the phone
@@ -361,7 +399,7 @@ final class WatchSessionManager: NSObject, ObservableObject {
         lastRejection = nil
         var wireType = type
         var payload = initialPayload
-        if type == .lock, let fix = locationManager.lastFix, let observation = WatchLocationObservation(fix) {
+        if type == .lock, !isDemo, let fix = locationManager.lastFix, let observation = WatchLocationObservation(fix) {
             wireType = .lockAt
             payload = CommandPayload(location: observation)
         }
@@ -415,6 +453,42 @@ final class WatchSessionManager: NSObject, ObservableObject {
 
     func dismissRejection() { lastRejection = nil }
 
+    /* The Ready face's demo: hole N, 100-130m out, driven from here. The phone
+       plants the point and hands the round over in one command. */
+    func startDemo(hole: Int) {
+        send(.demoApproach, payload: CommandPayload(hole: hole))
+        WKInterfaceDevice.current().play(.start)
+    }
+
+    /* The holes the demo browser steps through: the course's pars when the
+       Scene carries them, the delivered map package otherwise, and 1-18 as the
+       last resort - the phone refuses a hole it does not have. */
+    var demoHoles: [Int] {
+        let fromPars = (scene?.course?.pars ?? [:]).keys.compactMap { Int($0) }.sorted()
+        if !fromPars.isEmpty { return fromPars }
+        if let installed = maps.installed, installed.manifest.courseKey == scene?.course?.key {
+            let held = installed.manifest.holes.map { $0.holeNumber }.sorted()
+            if !held.isEmpty { return held }
+        }
+        return Array(1...18)
+    }
+    /* What the browser frames: a point the middle of the demo's 100-130m
+       short of the green on the tee->green line, and the green. The phone
+       plants the real point on the mapped route; this is only the picture. */
+    func demoApproach(_ number: Int) -> (player: WatchScene.GeoPoint?, green: WatchScene.GeoPoint?) {
+        guard let hole = flowHole(number), let green = hole.green else { return (nil, nil) }
+        let greenPoint = WatchScene.GeoPoint(lat: green.lat, lng: green.lng)
+        guard let tee = hole.tee else { return (nil, greenPoint) }
+        guard let length = WatchHoleFlow.metres(tee, green), length > 0 else { return (nil, greenPoint) }
+        let t = min(1, 115 / length)
+        let at = WatchScene.GeoPoint(lat: green.lat + (tee.lat - green.lat) * t, lng: green.lng + (tee.lng - green.lng) * t)
+        return (at, greenPoint)
+    }
+    func demoHoleLength(_ number: Int) -> Double? {
+        guard let hole = flowHole(number), let tee = hole.tee, let green = hole.green else { return nil }
+        return WatchHoleFlow.metres(tee, green)
+    }
+
     /* A wire command's true type may be LOCK_AT rather than LOCK once wrist GPS
        is available; the LOCK button still needs to read "busy" either way. */
     func isPending(_ type: CaddyWatchCommand.Kind) -> Bool {
@@ -437,8 +511,18 @@ final class WatchSessionManager: NSObject, ObservableObject {
         let previous = scene
         scene = incoming
         state = .live
-        locationManager.start()
+        /* A demo plants the player; the wrist's own GPS sits it out. Stopping
+           the manager clears wristFix through onFix(nil), so the planted point
+           is written after. Leaving the demo hands the job straight back. */
+        if let planted = incoming.demoPosition {
+            if previous?.isDemo != true { locationManager.stop() }
+            wristFix = planted
+        } else {
+            if previous?.isDemo == true { wristFix = nil }
+            locationManager.start()
+        }
         reconcileOutbox(with: incoming)
+        noteAimOrigin(incoming)
         noteSurface(previous: previous, incoming: incoming)
         /* The round moved: the phone started a different hole, or somebody used
            the picker. The wrist owns its screens and never which hole is being

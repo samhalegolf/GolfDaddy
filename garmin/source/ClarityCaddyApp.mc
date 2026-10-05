@@ -27,10 +27,14 @@ class ClarityCaddyApp extends Application.AppBase {
         // an empty body unless this is a `CIQ_PARITY=1` build, which runs the
         // Bubble Engine parity fixtures here and prints the verdict.
         GarminParityPolicy.run();
+        // Likewise empty unless this is a `CIQ_SIM_DEMO=1` build, which plays
+        // a standalone demo round with a local stand-in for the phone.
+        GarminSimDemoPolicy.start(session);
     }
 
     // Typed because Timer.start resolves method(:onTick) against Method() as Void.
     function onTick() as Void {
+        session.tick();
         WatchUi.requestUpdate();
     }
 

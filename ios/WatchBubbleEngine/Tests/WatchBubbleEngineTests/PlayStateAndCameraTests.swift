@@ -343,4 +343,21 @@ final class PlayStateAndCameraTests: XCTestCase {
                                          imageSize: holeImage, viewSize: viewSize)
         XCTAssertEqual(tiny.scale, WatchMapCamera.maximumScale)
     }
+
+    /* The Bubble framing centres the Bubble even at the very edge of the bake,
+       showing past the image (the views fill that with the map's green). The
+       play framing still keeps to the picture. */
+    func testTheBubbleIsCentredEvenAtTheEdgeOfTheImage() {
+        let image = CGSize(width: 300, height: 2000)
+        let view = CGSize(width: 187, height: 223)
+        let edge = CGPoint(x: 290, y: 30)
+        let camera = WatchMapCamera.bubble(centre: edge, extent: CGSize(width: 60, height: 80), imageSize: image, viewSize: view)
+        let onScreen = camera.place(edge, imageSize: image, viewSize: view)
+        XCTAssertEqual(onScreen.x, view.width / 2, accuracy: 0.5)
+        XCTAssertEqual(onScreen.y, view.height / 2, accuracy: 0.5)
+        let panned = camera.panned(byScreen: CGVector(dx: 5, dy: 0), imageSize: image)
+        XCTAssertFalse(panned.clampsToImage, "a pan keeps the Bubble framing's freedom")
+        let play = WatchMapCamera.play(player: CGPoint(x: 150, y: 1900), target: CGPoint(x: 150, y: 1500), imageSize: image, viewSize: view)
+        XCTAssertTrue(play.clampsToImage)
+    }
 }

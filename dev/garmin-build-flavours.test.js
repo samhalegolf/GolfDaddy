@@ -32,7 +32,8 @@ const GARMIN = path.join(ROOT, "garmin");
 function annotationPairs() {
   const files = [
     path.join(GARMIN, "source", "Session", "GarminTransmitPolicy.mc"),
-    path.join(GARMIN, "source", "Test", "GarminParityPolicy.mc")
+    path.join(GARMIN, "source", "Test", "GarminParityPolicy.mc"),
+    path.join(GARMIN, "source", "SimDemo", "GarminSimDemoPolicy.mc")
   ];
   return files.map(file => {
     const source = fs.readFileSync(file, "utf8");
@@ -53,7 +54,7 @@ function excluded(jungle) {
   return line[1].split(";").map(s => s.trim()).filter(Boolean);
 }
 
-const JUNGLES = ["monkey.jungle", "monkey-sim-mute.jungle", "monkey-parity.jungle"];
+const JUNGLES = ["monkey.jungle", "monkey-sim-mute.jungle", "monkey-parity.jungle", "monkey-sim-demo.jungle"];
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
@@ -87,6 +88,14 @@ test("the default build excludes the parity harness, and the parity build does n
   );
 });
 
+test("the default build excludes the sim demo, the sim demo build is muted", function () {
+  assert.ok(excluded("monkey.jungle").indexOf("sim_demo") >= 0,
+    "monkey.jungle must exclude `sim_demo`, or the fixture course and its stand-in phone ship in the store package");
+  const demo = excluded("monkey-sim-demo.jungle");
+  assert.ok(demo.indexOf("sim_demo_off") >= 0 && demo.indexOf("tx_live") >= 0,
+    "the sim demo build must compile the stand-in and never the live transmit");
+});
+
 test("a parity build is also muted", function () {
   /* The harness has no business transmitting to a phone, and the simulator
      segfaults on transmit while tethered (UPLOAD.md, "Known simulator bug"). */
@@ -102,8 +111,9 @@ test("build.sh knows both overlays, and package knows neither", function () {
   const cmdPackage = build.slice(build.indexOf("cmd_package()"));
   assert.ok(/monkey-sim-mute\.jungle/.test(cmdBuild), "cmd_build lost the muted overlay");
   assert.ok(/monkey-parity\.jungle/.test(cmdBuild), "cmd_build lost the parity overlay");
+  assert.ok(/monkey-sim-demo\.jungle/.test(cmdBuild), "cmd_build lost the sim demo overlay");
   assert.ok(
-    !/monkey-(sim-mute|parity)\.jungle/.test(cmdPackage),
+    !/monkey-(sim-mute|parity|sim-demo)\.jungle/.test(cmdPackage),
     "cmd_package must never chain an overlay — the store binary is the plain build"
   );
 });

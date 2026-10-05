@@ -71,6 +71,7 @@
     "badge.preview": "PODGLĄD",
     "badge.logging": "ZAPIS",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Zakończ demo",
     "badge.guest": "Gość",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -170,6 +171,8 @@
     "watch.loadingCourse": "Wczytywanie pola",
     "watch.holesLoaded": "{have} z {total} dołków",
     "watch.playOnWatch": "Graj na zegarku",
+    "watch.demoOnWatch": "Demo na zegarku",
+    "watch.demoOn": "Demo tego dołka na {watch}",
     "watch.handingOver": "Przekazywanie",
     "watch.playOnPhone": "Graj na telefonie",
     "watch.phoneCanSleep": "Telefon może się uśpić. Przechowuje rundę i wszystkie zasady uderzeń; zegarek tylko je wyświetla.",

@@ -1,0 +1,5 @@
+<drawables>
+    <!-- 56x56 launcher icon, scaled from the 70 px one by
+         garmin/tools/sync-devices.js. See monkey.jungle for which devices take it. -->
+    <bitmap id="LauncherIcon" filename="launcher_icon.png"/>
+</drawables>

@@ -82,6 +82,7 @@
     "test:progress": "node dev/progress-core.test.js",
     "test:watch-maps": "node dev/watch-map-core.test.js && node dev/course-watch-maps.test.js && node dev/watch-map-delivery.test.js",
     "test:watch-player": "node dev/watch-player-delivery.test.js",
+    "test:watch-demo": "node dev/watch-demo-approach.test.js && node dev/caddy-watch.test.js",
     "test:bubble-parity": "node dev/bubble-engine-parity.test.js",
     "test:bubble-parity:swift": "swift test --package-path ios/WatchBubbleEngine",
     "test:bubble-parity:update": "node dev/bubble-engine-parity.test.js --update",
@@ -106,7 +107,7 @@
     "test:account-email": "node dev/account-email-change.test.js",
     "test:effective-player-play": "node dev/effective-player-play-context.test.js",
     "test:demo": "node dev/demo-session-practice-isolation.test.js && node dev/demo-session-gps-course-data-isolation.test.js && node dev/demo-session-flow-shape.test.js",
-    "test:garmin": "node dev/garmin-settings-surface.test.js && node dev/garmin-launcher-icons.test.js && node dev/garmin-build-flavours.test.js && node dev/generate-garmin-parity-fixture.js --check",
+    "test:garmin": "node dev/garmin-settings-surface.test.js && node dev/garmin-launcher-icons.test.js && node dev/garmin-build-flavours.test.js && node dev/generate-garmin-parity-fixture.js --check && node garmin/tools/sync-devices.js --check",
     "test:garmin:parity": "node garmin/tools/run-parity.js"
   },
   "codex": {

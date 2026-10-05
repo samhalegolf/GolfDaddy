@@ -25,6 +25,10 @@ struct HoleMapView: View {
     /// The phone's club for this target, drawn at the target so the read-only
     /// page reads the same way the aimable one does.
     var club: String? = nil
+    /// Frame this point with this much ground around it (metres), instead of
+    /// the play or Bubble framing. The demo browser uses it to show the whole
+    /// approach - player to green - with nothing locked.
+    var fit: (centre: WatchScene.GeoPoint, extentM: CGSize)? = nil
 
     var body: some View {
         GeometryReader { proxy in
@@ -38,9 +42,15 @@ struct HoleMapView: View {
                a hole nobody has locked). Neither is a contain-fit: a par 5
                bakes to about 1:7.7 and this screen is 1:1.2, so containing the
                whole image drew the hole 28pt wide with 84% as black bars. */
-            let camera = Self.camera(player: playerPoint, target: targetPoint, green: greenPoint,
-                                     bubbleExtentM: bubbleExtentM, reference: reference,
-                                     imageSize: imageSize, viewSize: proxy.size)
+            let fitPoint = fit.flatMap { imagePoint($0.centre, reference) }
+            let camera = fitPoint.map { centre -> WatchMapCamera in
+                let mpp = reference.metresPerPixel ?? 0.5
+                let extent = fit?.extentM ?? .zero
+                return WatchMapCamera.bubble(centre: centre, extent: CGSize(width: extent.width / mpp, height: extent.height / mpp),
+                                             imageSize: imageSize, viewSize: proxy.size)
+            } ?? Self.camera(player: playerPoint, target: targetPoint, green: greenPoint,
+                             bubbleExtentM: bubbleExtentM, reference: reference,
+                             imageSize: imageSize, viewSize: proxy.size)
             let origin = camera.origin(imageSize: imageSize, viewSize: proxy.size)
             ZStack(alignment: .topLeading) {
                 Image(uiImage: map.image)
@@ -79,6 +89,9 @@ struct HoleMapView: View {
                space past the end of the image. The offset above is computed from
                the top-left, so the frame has to anchor there too. */
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            /* Past the bake's edge (the Bubble framing may look there):
+               the map's own dark green, so it reads as more rough. */
+            .background(Color(red: 0.16, green: 0.29, blue: 0.19))
             .clipped()
         }
     }
@@ -140,16 +153,22 @@ struct HoleMapPage: View {
        and this page is the one a locked shot lands you on. */
     var locked: Bool = false
     var onUnlock: () -> Void = {}
+    /* This wrist's own LOCK, before the phone has confirmed it (WatchLockedShot).
+       LOCK flips to this page at once; without this the first frames had no
+       target, drew the play framing from the player, and then jumped to the
+       Bubble when the phone's Scene landed. */
+    var pendingTarget: WatchScene.GeoPoint? = nil
+    var pendingExtentM: CGSize? = nil
+    var pendingClub: String? = nil
+    var aimOrigin: Coordinate? = nil
+
+    /* Edge to edge: the map is the page, and the hole and distance float over
+       its top-left corner in the clock's row rather than taking a row of their
+       own above an inset, rounded picture. */
+    private var aimable: Bool { map != nil && canAim && bag != nil && profile != nil }
 
     var body: some View {
-        VStack(spacing: 2) {
-            HStack(spacing: 5) {
-                Text(scene.hole?.number.map { "HOLE \($0)" } ?? "HOLE")
-                    .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                if let centre = scene.distance?.centre {
-                    Text("\(Int(centre.rounded())) m").font(.caption2.monospacedDigit()).foregroundStyle(.mint)
-                }
-            }
+        ZStack(alignment: .topLeading) {
             if let map {
                 /* Aimable when the wrist has everything it needs to answer for
                    itself, a plain picture otherwise. Two views rather than one
@@ -160,24 +179,36 @@ struct HoleMapPage: View {
                         map: map,
                         player: player,
                         green: scene.geometry?.origin,
-                        sceneTarget: scene.target ?? scene.bubble?.centre,
+                        sceneTarget: scene.target ?? scene.bubble?.centre ?? pendingTarget,
                         bag: bag,
                         profile: profile,
                         canAim: true,
                         onAim: onAim,
-                        onSwipeBack: onSwipeBack
+                        onSwipeBack: onSwipeBack,
+                        bottomEdgeUnlock: locked ? onUnlock : nil,
+                        holeNumber: scene.hole?.number,
+                        distanceM: scene.distance?.centre,
+                        origin: aimOrigin
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 } else {
                     HoleMapView(
                         map: map,
                         player: player,
                         green: scene.geometry?.origin,
-                        target: scene.target ?? scene.bubble?.centre,
-                        bubbleExtentM: scene.bubble.map { CGSize(width: $0.widthM ?? 45, height: $0.depthM ?? 55) },
-                        club: scene.bubble?.club ?? scene.suggestion?.club
+                        target: scene.target ?? scene.bubble?.centre ?? pendingTarget,
+                        bubbleExtentM: scene.bubble.map { CGSize(width: $0.widthM ?? 45, height: $0.depthM ?? 55) } ?? pendingExtentM,
+                        club: scene.bubble?.club ?? pendingClub ?? scene.suggestion?.club
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    /* The same bottom-edge UNLOCK as the aimable map; this
+                       picture has no gestures of its own to compete with. */
+                    .overlay(alignment: .bottom) {
+                        if locked {
+                            Color.clear.frame(height: AimableHoleMap.bottomEdgeM).frame(maxWidth: .infinity)
+                                .contentShape(Rectangle())
+                                .onTapGesture(perform: onUnlock)
+                                .gesture(DragGesture(minimumDistance: 4).onEnded { _ in onUnlock() })
+                        }
+                    }
                 }
             } else {
                 VStack(spacing: 6) {
@@ -188,13 +219,31 @@ struct HoleMapPage: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .padding(.horizontal, 3)
+        .ignoresSafeArea()
         /* Over the map rather than beside it: the map wants every pixel it can
            have, and a row that only exists while a shot is locked would push
            the picture around each time one was. Bottom centre is where the
-           thumb already is on a wrist. */
+           thumb already is on a wrist; the hole and distance sit under it,
+           clear of the page dots. */
         .overlay(alignment: .bottom) {
-            if locked { UnlockControl(action: onUnlock).padding(.bottom, 4) }
+            /* The aimable map draws its own band (Unlock | Reset) and
+               readout; this is the plain picture's, and the unlocked page's. */
+            if !(aimable && locked) {
+            VStack(spacing: 4) {
+                if locked { UnlockControl(action: onUnlock) }
+                HStack(spacing: 5) {
+                    Text(scene.hole?.number.map { "HOLE \($0)" } ?? "HOLE")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.white.opacity(0.85))
+                    if let centre = scene.distance?.centre {
+                        Text("\(Int(centre.rounded())) m").font(.caption2.monospacedDigit().weight(.bold)).foregroundStyle(.mint)
+                    }
+                }
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(.black.opacity(0.55), in: Capsule())
+                .allowsHitTesting(false)
+            }
+            .padding(.bottom, 2)
+            }
         }
     }
 }

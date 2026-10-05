@@ -77,6 +77,7 @@
     "badge.preview": "PREVIEW",
     "badge.logging": "LOGGING",
     "badge.demo": "DEMO",
+    "badge.endDemo": "End demo",
     "badge.guest": "Guest",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -174,6 +175,8 @@
     "watch.loadingCourse": "Loading course",
     "watch.holesLoaded": "{have} of {total} holes",
     "watch.playOnWatch": "Play on Watch",
+    "watch.demoOnWatch": "Demo on Watch",
+    "watch.demoOn": "Demo this hole on {watch}",
     "watch.handingOver": "Handing over",
     "watch.playOnPhone": "Play on phone",
     "watch.phoneCanSleep": "Phone can sleep. It keeps the round and every shot rule; the Watch draws it.",

@@ -71,6 +71,7 @@
     "badge.preview": "PRÉ-VISTA",
     "badge.logging": "A REGISTAR",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Terminar demo",
     "badge.guest": "Convidado",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -168,6 +169,8 @@
     "watch.loadingCourse": "A carregar o campo",
     "watch.holesLoaded": "{have} de {total} buracos",
     "watch.playOnWatch": "Jogar no Watch",
+    "watch.demoOnWatch": "Demo no relógio",
+    "watch.demoOn": "Demo deste buraco no {watch}",
     "watch.handingOver": "A transferir",
     "watch.playOnPhone": "Jogar no telemóvel",
     "watch.phoneCanSleep": "O telemóvel pode ficar em repouso. Guarda a volta e as regras de cada pancada; o Watch desenha-a.",

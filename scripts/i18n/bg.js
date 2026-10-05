@@ -71,6 +71,7 @@
     "badge.preview": "ПРЕГЛЕД",
     "badge.logging": "ЗАПИС",
     "badge.demo": "ДЕМО",
+    "badge.endDemo": "Край на демото",
     "badge.guest": "Гост",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -168,6 +169,8 @@
     "watch.loadingCourse": "Зареждане на игрището",
     "watch.holesLoaded": "{have} от {total} дупки",
     "watch.playOnWatch": "Играй на часовника",
+    "watch.demoOnWatch": "Демо на часовника",
+    "watch.demoOn": "Демо на тази дупка на {watch}",
     "watch.handingOver": "Прехвърляне",
     "watch.playOnPhone": "Играй на телефона",
     "watch.phoneCanSleep": "Телефонът може да заспи. Той пази кръга и всички правила за ударите, а часовникът го показва.",

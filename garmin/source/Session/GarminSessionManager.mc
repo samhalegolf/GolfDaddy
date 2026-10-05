@@ -42,13 +42,28 @@ class GarminSessionManager {
     var playState;
     var lastRejection;       // GarminAcknowledgement or null
     var lockedShot;          // GarminLockedShot or null
+    var sender;              // GarminSender: the one door to the phone
     var handoverNotice;      // String or null
     var answeredHandovers;   // Dictionary used as a Set of handover ids
+    var skeleton;            // GarminCourseSkeleton or null
+    var lastSceneAt = null;  // System.getTimer() at the last Scene, or null
+    var localHole = null;    // hole this wrist moved to on its own while the Scene was quiet
+
+    // How long a Scene stays the authority on its own. Past this the wrist
+    // plays from the course skeleton and its own GPS - unless the phone is
+    // still connected over Bluetooth, which buys it PHONE_CONNECTED_FRESH_MS
+    // (a phone standing still sends no new Scene, and that is not silence).
+    static var SCENE_FRESH_MS = 20000;
+    static var PHONE_CONNECTED_FRESH_MS = 300000;
+    // Standing this close to the NEXT hole's tee, with the Scene quiet, is
+    // walking onto it (the phone's own tee-zone idea, wrist-side).
+    static var TEE_ZONE_M = 25.0d;
 
     function initialize() {
         scene = null;
         state = "noRound";
         outbox = new GarminOutbox();
+        sender = new GarminSender(self);
         locationManager = new GarminLocationManager();
         playerStore = new GarminPlayerStore();
         mapStore = new GarminMapStore();
@@ -57,6 +72,7 @@ class GarminSessionManager {
         lockedShot = null;
         handoverNotice = null;
         answeredHandovers = {};
+        skeleton = GarminCourseSkeleton.restore();
 
         locationManager.onFix = method(:onLocationFix);
 
@@ -82,7 +98,8 @@ class GarminSessionManager {
         if (scene == null || !scene.hasRound()) { return FACE_NO_ROUND; }
         if (scene.isDriving()) { return FACE_PLAYING; }
         if ((scene.handoverState() != null && scene.handoverState().equals("offered"))
-                || outbox.pendingOfType(GarminCommandKind.TAKE_OVER) != null) {
+                || outbox.pendingOfType(GarminCommandKind.TAKE_OVER) != null
+                || outbox.pendingOfType(GarminCommandKind.DEMO_APPROACH) != null) {
             return FACE_TAKING;
         }
         return FACE_READY;
@@ -126,26 +143,244 @@ class GarminSessionManager {
         var agreement = engineAgreement();
         if (!agreement["mayComputeLocally"]) { noteBubbleReason("engine " + agreement["state"]); return null; }
         if (playerStore.snapshot == null) { noteBubbleReason("no player snapshot"); return null; }
-        var fix = locationManager.lastFix;
+        var fix = effectiveFix();
         if (fix == null) { noteBubbleReason("no usable fix"); return null; }
         if (playState.target != null && playState.bubble != null) {
             noteBubbleReason("local aim bubble");
             return playState.bubble;
         }
-        var aim = (scene != null) ? scene.aimTarget() : null;
+        var aim = aimTarget();
         if (aim == null) { noteBubbleReason("no aim target"); return null; }
+        // Memoised on its inputs. The engine (club choice + a 168-point
+        // ring) is the single most expensive thing the app does, and both
+        // faces ask for this on every redraw - once a second at least. On a
+        // 120k watchdog budget (Forerunner 255) recomputing it inside the
+        // map's draw pass tripped the watchdog (2026-10-05). It is warmed in
+        // receiveScene / onLocationFix, each its own callback and budget, so
+        // a draw normally only reads the cache.
+        var key = fix.lat + "," + fix.lng + "|" + aim.lat + "," + aim.lng + "|" + playerStore.snapshot.fingerprint;
+        if (key.equals(bubbleCacheKey)) { return bubbleCache; }
         noteBubbleReason("computing for scene aim");
-        return GarminBubbleEngine.calculate({
+        bubbleCache = GarminBubbleEngine.calculate({
             "player" => fix, "target" => aim,
             "bag" => playerStore.snapshot.bag, "bubble" => playerStore.snapshot.bubble
         });
+        bubbleCacheKey = key;
+        return bubbleCache;
     }
+    var bubbleCache = null;
+    var bubbleCacheKey = "";
 
     // The point the numbers/map faces draw the player at: Garmin's own fix
     // while trustworthy, the phone's otherwise.
     function playerPoint() {
-        if (locationManager.lastFix != null) { return locationManager.lastFix; }
+        var fix = effectiveFix();
+        if (fix != null) { return fix; }
         return (scene != null) ? scene.phoneLocation() : null;
+    }
+
+    // Where this wrist believes the player is: the demo's planted point
+    // while a demo approach is on, the wrist's own GPS otherwise.
+    function isDemo() { return scene != null && scene.isDemo(); }
+    function effectiveFix() {
+        if (isDemo()) { return scene.demoPosition(); }
+        return locationManager.lastFix;
+    }
+
+    // -------------------------------------------------------- skeleton
+
+    function receiveSkeleton(raw) {
+        var incoming = GarminCourseSkeleton.fromDict(raw);
+        if (incoming == null) { return; }
+        var isPart = raw.hasKey("part");
+        if (!(isPart && skeleton != null && skeleton.merge(incoming))) { skeleton = incoming; }
+        skeleton.persist();
+        if (GarminTransmitPolicy.muted()) {
+            System.println("skeleton in: " + skeleton.courseKey + " v" + skeleton.version + " holes=" + skeleton.holes.size());
+        }
+    }
+
+    // The skeleton, only while it describes the course being played AND the
+    // same package version as the map under it: a newer package may have
+    // moved a green, and a skeleton from the older one would put the numbers
+    // and the picture in different places.
+    function skeletonFor() {
+        if (skeleton == null || scene == null) { return null; }
+        var key = scene.courseKey();
+        if (key == null || !key.equals(skeleton.courseKey)) { return null; }
+        var manifest = mapStore.manifest;
+        if (manifest != null && manifest.courseKey.equals(key) && manifest.version != skeleton.version) { return null; }
+        return skeleton;
+    }
+
+    // Whether the Scene still speaks for the round (see SCENE_FRESH_MS).
+    function sceneFresh() {
+        if (scene == null || lastSceneAt == null) { return false; }
+        var age = System.getTimer() - lastSceneAt;
+        if (age < SCENE_FRESH_MS) { return true; }
+        if (!GarminSimDemoPolicy.phoneLinkCounts()) { return false; }
+        var settings = System.getDeviceSettings();
+        return (settings has :phoneConnected) && settings.phoneConnected && age < PHONE_CONNECTED_FRESH_MS;
+    }
+
+    // The hole being played: the Scene's, or the one this wrist walked onto
+    // by itself while the Scene was quiet.
+    function currentHole() {
+        if (localHole != null) { return localHole; }
+        return (scene != null) ? scene.holeNumber() : null;
+    }
+
+    // Whether the Scene describes the hole being played right now.
+    function sceneSpeaksForHole() {
+        return scene != null && localHole == null && sceneFresh();
+    }
+
+    // { "front", "centre", "back", "fromWatch" }: the phone's numbers while
+    // the Scene speaks for this hole and carries them, otherwise this wrist's
+    // own - the skeleton measured from its fix - and the phone's last ones
+    // only when there is no skeleton to measure from at all.
+    function greenDistances() {
+        if (sceneSpeaksForHole() && scene.distanceCentreM() != null) {
+            lastSourceWatch = false;
+            return { "front" => scene.distanceFrontM(), "centre" => scene.distanceCentreM(), "back" => scene.distanceBackM(), "fromWatch" => false };
+        }
+        var sk = skeletonFor();
+        var fix = effectiveFix();
+        var mine = (sk != null) ? sk.distances(currentHole(), fix) : null;
+        if (mine != null) {
+            mine["fromWatch"] = true;
+            if (GarminTransmitPolicy.muted() && !lastSourceWatch) {
+                System.println("skeleton: numbers from watch GPS, hole " + currentHole() + " centre " + mine["centre"].toNumber() + "m");
+            }
+            lastSourceWatch = true;
+            return mine;
+        }
+        if (scene != null && localHole == null) {
+            return { "front" => scene.distanceFrontM(), "centre" => scene.distanceCentreM(), "back" => scene.distanceBackM(), "fromWatch" => false };
+        }
+        return null;
+    }
+
+    var lastSourceWatch = false;   // simulator trace only: log the flip once
+
+    function holeLengthM() {
+        if (scene != null && localHole == null && scene.holeTeeToGreenM() != null) { return scene.holeTeeToGreenM(); }
+        var sk = skeletonFor();
+        return (sk != null) ? sk.lengthM(currentHole()) : null;
+    }
+
+    // The fairway line the layup guide is drawn against.
+    function holeLine() {
+        if (scene != null && localHole == null) {
+            var line = scene.holeLine();
+            if (line.size() >= 2) { return line; }
+        }
+        var sk = skeletonFor();
+        return (sk != null) ? sk.line(currentHole()) : [];
+    }
+
+    // What the Bubble aims at by default: the Scene's target for its own
+    // hole, the skeleton's green for a hole the wrist walked onto itself.
+    function aimTarget() {
+        if (scene == null) { return null; }
+        if (localHole == null) { return scene.aimTarget(); }
+        var sk = skeletonFor();
+        return (sk != null) ? sk.green(localHole) : null;
+    }
+
+    function holePar() {
+        var n = currentHole();
+        if (scene == null || n == null) { return null; }
+        if (localHole == null && scene.holePar() != null) { return scene.holePar(); }
+        return scene.parFor(n);
+    }
+
+    // With the Scene quiet, reaching the next hole's tee moves this wrist on
+    // to it - the numbers, the map and the Bubble with it. Never while the
+    // Scene speaks (the phone owns hole changes then), never during a demo,
+    // and never backwards.
+    function noteTeeZone(fix) {
+        if (fix == null || sceneFresh()) { return; }
+        var sk = skeletonFor();
+        var n = currentHole();
+        if (sk == null || n == null) { return; }
+        var nextTee = sk.tee(n + 1);
+        if (nextTee == null || GarminGeo.distance(fix, nextTee) > TEE_ZONE_M) { return; }
+        localHole = n + 1;
+        playState.enter(localHole);
+        if (GarminTransmitPolicy.muted()) { System.println("skeleton: walked onto hole " + localHole + " tee"); }
+    }
+
+    // ------------------------------------------------------------ demo
+
+    // The Ready face's hole cursor, when the phone offers the demo. Holes come
+    // off the Scene's pars (sorted), else 1-18; the phone refuses any hole it
+    // does not have, so the fallback can only cost a "Couldn't" notice.
+    var demoIndex = null;
+    function demoHoles() {
+        var out = [];
+        var pars = (scene != null) ? scene.coursePars() : null;
+        if (pars != null) {
+            var keys = pars.keys();
+            for (var i = 0; i < keys.size(); i += 1) {
+                var n = (keys[i] instanceof Lang.String) ? keys[i].toNumber() : null;
+                if (n != null) { out.add(n); }
+            }
+        }
+        // No pars: the delivered package's holes, as Apple's demoHoles does,
+        // then 1-18 as the last resort.
+        if (out.size() == 0 && mapStore.manifest != null && scene != null
+                && scene.courseKey() != null && mapStore.manifest.courseKey.equals(scene.courseKey())) {
+            for (var m = 0; m < mapStore.manifest.holes.size(); m += 1) { out.add(mapStore.manifest.holes[m].holeNumber); }
+        }
+        if (out.size() == 0) {
+            for (var h = 1; h <= 18; h += 1) { out.add(h); }
+        }
+        // Insertion sort: no Array.sort before API 5.
+        for (var j = 1; j < out.size(); j += 1) {
+            var v = out[j];
+            var k = j - 1;
+            while (k >= 0 && out[k] > v) { out[k + 1] = out[k]; k -= 1; }
+            out[k + 1] = v;
+        }
+        return out;
+    }
+    // What the browser steps through: the Scene's named situations when it
+    // offers them, otherwise one entry per hole.
+    function demoEntries() {
+        var options = (scene != null) ? scene.demoOptions() : [];
+        if (options.size() > 0) { return options; }
+        var holes = demoHoles();
+        var out = [];
+        for (var i = 0; i < holes.size(); i += 1) { out.add({ "hole" => holes[i], "option" => null, "label" => null }); }
+        return out;
+    }
+    function demoEntry() {
+        var entries = demoEntries();
+        if (demoIndex == null) {
+            // Open on the hole the phone is showing.
+            demoIndex = 0;
+            var current = (scene != null) ? scene.holeNumber() : null;
+            for (var i = entries.size() - 1; i >= 0; i -= 1) { if (current != null && entries[i]["hole"] == current) { demoIndex = i; } }
+        }
+        if (demoIndex >= entries.size()) { demoIndex = 0; }
+        return entries[demoIndex];
+    }
+    function demoHole() { return demoEntry()["hole"]; }
+    function stepDemo(delta) {
+        var entries = demoEntries();
+        demoEntry();
+        demoIndex = (demoIndex + delta + entries.size()) % entries.size();
+    }
+    function startDemo() {
+        if (scene == null || !scene.hasRound() || outbox.isPending(GarminCommandKind.DEMO_APPROACH)) { return; }
+        lastRejection = null;
+        var command = new GarminCommand(uuid(), scene.roundId(), scene.revision(), nowEpochMillis(), GarminCommandKind.DEMO_APPROACH, null, null);
+        var entry = demoEntry();
+        command.payloadHole = entry["hole"];
+        command.payloadOption = entry["option"];
+        outbox.enqueue(command);
+        attempt(command.commandId);
     }
 
     // -------------------------------------------------------------- send
@@ -163,7 +398,9 @@ class GarminSessionManager {
         var wireType = type;
         var location = null;
 
-        if (type.equals(GarminCommandKind.LOCK)) {
+        // In a demo there is no wrist GPS to stamp a LOCK with: the phone
+        // plays it from the planted point.
+        if (type.equals(GarminCommandKind.LOCK) && !isDemo()) {
             var fix = locationManager.lastFix;
             var obs = GarminLocationObservation.build(
                 fix, locationManager.lastAccuracy, locationManager.lastFixEpochMillis, nowMs, 30.0);
@@ -183,7 +420,7 @@ class GarminSessionManager {
         // and the button waits, as it always did.
         if (type.equals(GarminCommandKind.LOCK)) {
             var bubble = localBubble();
-            var fix = locationManager.lastFix;
+            var fix = effectiveFix();
             if (bubble != null && fix != null) {
                 lockedShot = new GarminLockedShot(command.commandId, roundId, scene.revision(), scene.holeNumber(), bubble, fix, nowMs);
             }
@@ -214,16 +451,14 @@ class GarminSessionManager {
         attempt(command.commandId);
     }
 
-    function attempt(commandId) {
-        var wire = outbox.beginAttempt(commandId, nowEpochMillis());
-        if (wire == null) { return; }
-        transmit({ "command" => wire });
-    }
+    // Commands no longer go out one by one the moment they are made: the
+    // sender batches what is due, through its gate (GarminSender.mc).
+    function attempt(commandId) { sender.pump(); }
+    function retryPending() { sender.pump(); }
 
-    function retryPending() {
-        var ids = outbox.allCommandIds();
-        for (var i = 0; i < ids.size(); i += 1) { attempt(ids[i]); }
-    }
+    // Called every second by the app's refresh timer: timeouts, spacing and
+    // resends all move on the clock, not only on events.
+    function tick() { sender.pump(); }
 
     function dismissRejection() { lastRejection = null; }
     function dismissHandoverNotice() { handoverNotice = null; }
@@ -234,6 +469,7 @@ class GarminSessionManager {
     function onPhoneAppMessage(msg as Communications.PhoneAppMessage) as Void {
         var data = msg.data;
         if (!(data instanceof Lang.Dictionary)) { return; }
+        sender.noteLinkProven();
         // Simulator-only build: the console is the only window into what
         // the tether delivered. Compiled out of every live build.
         if (GarminTransmitPolicy.muted()) {
@@ -248,6 +484,7 @@ class GarminSessionManager {
         // (see GarminMapDownloader.mc's header comment): the manifest
         // carries a URL per hole, and GarminMapStore.bitmapFor() pulls on
         // demand, so there is no `watchMapAsset` message to handle here.
+        if (data.hasKey("courseSkeleton")) { receiveSkeleton(GarminWire.dictVal(data, "courseSkeleton")); return; }
         if (data.hasKey("watchMapManifest")) { mapStore.receiveManifest(GarminWire.dictVal(data, "watchMapManifest")); reportMapInventory(); return; }
         if (data.hasKey("watchPlayer")) {
             if (playerStore.receive(GarminWire.dictVal(data, "watchPlayer"))) { reportPlayerInventory(); }
@@ -260,6 +497,7 @@ class GarminSessionManager {
         if (raw == null) { return; }
         var incoming = new GarminScene(raw);
         if (!incoming.isSupported()) { return; }
+        sender.noteLinkProven();
         if (!incoming.hasRound()) {
             scene = null;
             state = "noRound";
@@ -277,10 +515,14 @@ class GarminSessionManager {
                 && scene.roundId().equals(incoming.roundId()) && incoming.revision() < scene.revision()) {
             return;
         }
-        var previousHole = (scene != null) ? scene.holeNumber() : null;
+        var previousHole = currentHole();
         var previous = scene;
         scene = incoming;
         state = "live";
+        // The Scene is the authority again: whatever hole the wrist walked
+        // to on its own while it was quiet gives way to the phone's.
+        lastSceneAt = System.getTimer();
+        localHole = null;
         // A new hole discards the old one's local target/held club/Bubble —
         // GarminPlayState.enter() (Garmin Phase 2+3 plan step 30): "load new
         // map, reset local target state, adopt new authoritative Scene
@@ -291,8 +533,24 @@ class GarminSessionManager {
         if (incomingHole != null && (previousHole == null || previousHole != incomingHole)) {
             playState.enter(incomingHole);
         }
-        locationManager.start();
-        locationManager.poll();
+        // A demo plants the player and the wrist's GPS sits it out (stop()
+        // reports a null fix, which onLocationFix ignores during a demo, so
+        // the planted point is written after). Leaving the demo hands the
+        // job straight back.
+        var planted = incoming.demoPosition();
+        if (planted != null) {
+            if (previous == null || !previous.isDemo()) { locationManager.stop(); }
+            playState.update(planted);
+            if (playState.target != null && playerStore.snapshot != null) {
+                playState.moveTarget(playState.target, playerStore.snapshot.bag, playerStore.snapshot.bubble);
+            }
+        } else {
+            if (previous != null && previous.isDemo()) { playState.update(null); }
+            locationManager.start();
+            locationManager.poll();
+        }
+        if (!incoming.canDemo()) { demoIndex = null; }
+        localBubble();   // warm the Bubble cache in this callback, not in a draw
         reconcileOutbox(incoming);
         noteSurface(previous, incoming);
     }
@@ -365,11 +623,13 @@ class GarminSessionManager {
     // player, then re-run moveTarget against whatever target is already
     // held, if any, so the ring on screen tracks the walk.
     function onLocationFix(coordinate, accuracy, epochMillis) {
-        if (scene == null) { return; }
+        if (scene == null || scene.isDemo()) { return; }
+        noteTeeZone(coordinate);
         playState.update(coordinate);
         if (playState.target != null && playerStore.snapshot != null) {
             playState.moveTarget(playState.target, playerStore.snapshot.bag, playerStore.snapshot.bubble);
         }
+        localBubble();
     }
 
     // ----------------------------------------------------------- report
@@ -377,7 +637,13 @@ class GarminSessionManager {
     // Tells the phone which hole maps this device already holds, so the
     // phone re-sends only what is missing.
     function reportMapInventory() {
-        transmit({ "watchMapHave" => mapStore.inventory() });
+        var inventory = mapStore.inventory();
+        // Hole by hole when the watch needs it: a small watch-app memory
+        // budget, or a link that has been failing. The phone's adaptive
+        // sender never goes above this (AdaptiveGate.limitTo / limitTo).
+        var stats = System.getSystemStats();
+        if (sender.struggling() || stats.totalMemory < 600 * 1024) { inventory["maxPart"] = 1; }
+        sender.queueReport("watchMapHave", inventory);
     }
 
     // Which bag this device holds, plus the engine it implements, so the
@@ -386,12 +652,18 @@ class GarminSessionManager {
         var held = playerStore.inventory();
         var engine = GarminEngineVersion.report();
         held["engineVersion"] = engine["engineVersion"];
-        transmit({ "watchPlayerHave" => held });
+        sender.queueReport("watchPlayerHave", held);
     }
 
     // -------------------------------------------------------- transport
 
-    function transmit(dict) {
+    // The wire itself, used only by GarminSender, which is told the outcome
+    // (sender.onSent) by whichever path carried it.
+    function rawTransmit(dict) {
+        // The standalone simulator demo answers for the phone (compiled to
+        // `false` everywhere else - GarminSimDemoPolicy.mc); it reports the
+        // send's outcome to the sender itself.
+        if (GarminSimDemoPolicy.handle(dict)) { return; }
         // Simulator-only muted build (GarminTransmitPolicy.mc): the reply
         // is logged and dropped, because sending it would kill the
         // simulator. A normal build compiles this branch to `false`.
@@ -399,6 +671,7 @@ class GarminSessionManager {
             var relay = GarminTransmitPolicy.relayUrl();
             if (relay == null) {
                 System.println("transmit muted: " + dict.keys());
+                sender.onSent(true);
                 return;
             }
             // Simulator relay (GarminTransmitPolicy.relayUrl): the message
@@ -413,15 +686,16 @@ class GarminSessionManager {
                 }, method(:onRelayResponse));
             } catch (e) {
                 System.println("relay threw: " + e.getErrorMessage());
+                sender.onSent(false);
             }
             return;
         }
         try {
-            Communications.transmit(dict, null, new GarminTransmitListener());
+            Communications.transmit(dict, null, new GarminTransmitListener(sender));
         } catch (e) {
-            // Best-effort: a Scene/ack/inventory report is presentation
-            // data, never a command-style outbox item, so a dropped send
-            // simply waits for the next opportunity.
+            // Refused before it left: a failure like any other, so the gate
+            // narrows and the command stays queued for its resend.
+            sender.onSent(false);
         }
     }
 
@@ -432,6 +706,7 @@ class GarminSessionManager {
     // build simply never calls it.
     function onRelayResponse(responseCode as Lang.Number, data as Lang.Dictionary or Lang.String or Null) as Void {
         if (responseCode != 200) { System.println("relay answered " + responseCode + " " + data); }
+        sender.onSent(responseCode == 200);
     }
 
     // Communications.transmit takes a ConnectionListener object (onComplete /
@@ -456,12 +731,14 @@ class GarminSessionManager {
     }
 }
 
+// The transmit's two outcomes, finally heard: they drive the sender's gate.
+// (Commands are still settled only by the phone's acknowledgement.)
 class GarminTransmitListener extends Communications.ConnectionListener {
-    function initialize() {
+    var sender;
+    function initialize(sender) {
         ConnectionListener.initialize();
+        self.sender = sender;
     }
-    function onComplete() as Void {
-    }
-    function onError() as Void {
-    }
+    function onComplete() as Void { sender.onSent(true); }
+    function onError() as Void { sender.onSent(false); }
 }

@@ -368,6 +368,32 @@ function fakeEnvironment(report, options) {
     });
   })();
 
+  check("the course skeleton is compact, exact to a decimetre, and decodes back to the reference", () => {
+    const at = (lat, lng) => ({ lat, lng });
+    const shape = [];
+    for (let i = 0; i < 24; i++) shape.push(at(-44.95 + 0.0001 * Math.sin(i / 24 * 2 * Math.PI), 168.816 + 0.00014 * Math.cos(i / 24 * 2 * Math.PI)));
+    const tee = at(-44.9483291, 168.8198083), green = at(-44.9502386059316, 168.816130899074);
+    const holes = [
+      { holeNumber: 3, reference: { version: 1, tee, green, greenShape: shape, route: [tee, at(-44.949146, 168.818605), at(-44.949645, 168.817527), green], bearingDeg: 230, lengthM: 361.4 } },
+      { holeNumber: 4, reference: { version: 1, green: at(-44.951, 168.814) } },
+      { holeNumber: 5, reference: null }
+    ];
+    const sk = delivery.__test.courseSkeleton("millbrook-remarkables-18", 1789957346767, holes);
+    assert.strictEqual(sk.courseKey, "millbrook-remarkables-18");
+    assert.strictEqual(sk.version, 1789957346767, "stamped with the package version it was cut from");
+    assert.ok(typeof sk.o[0] === "string" && typeof sk.o[1] === "string", "the origin travels as strings (a watch may decode decimals as 32-bit floats)");
+    assert.deepStrictEqual(sk.holes.map(h => h.n), [3, 4], "a hole with no reference is left out");
+    const decode = (m) => ({ lat: Number(sk.o[0]) + m[0] / 1e6, lng: Number(sk.o[1]) + m[1] / 1e6 });
+    const h3 = sk.holes[0];
+    assert.ok(h3.g.concat(h3.t, h3.s, h3.r).every(Number.isInteger), "every point is whole microdegrees");
+    assert.ok(Math.abs(decode(h3.g).lat - green.lat) < 1e-6 && Math.abs(decode(h3.g).lng - green.lng) < 1e-6);
+    assert.strictEqual(h3.s.length, 32, "the outline is capped at 16 points");
+    assert.strictEqual(h3.r.length, 4, "only the route points between tee and green travel");
+    assert.strictEqual(h3.len, 361);
+    assert.ok(!("t" in sk.holes[1]) && !("r" in sk.holes[1]), "a hole with no play line keeps its green alone");
+    assert.ok(JSON.stringify(sk).length < 1200);
+  });
+
   report();
 })();
 

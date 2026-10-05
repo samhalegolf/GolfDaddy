@@ -71,6 +71,7 @@
     "badge.preview": "PREGLED",
     "badge.logging": "BILJEŽENJE",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Završi demo",
     "badge.guest": "Gost",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -169,6 +170,8 @@
     "watch.loadingCourse": "Učitavanje terena",
     "watch.holesLoaded": "{have} od {total} rupa",
     "watch.playOnWatch": "Igraj na satu",
+    "watch.demoOnWatch": "Demo na satu",
+    "watch.demoOn": "Demo ove rupe na {watch}",
     "watch.handingOver": "Prebacivanje",
     "watch.playOnPhone": "Igraj na mobitelu",
     "watch.phoneCanSleep": "Mobitel može mirovati. On čuva rundu i sva pravila udaraca, a sat je prikazuje.",

@@ -71,6 +71,7 @@
     "badge.preview": "VOORBEELD",
     "badge.logging": "LOGGEN",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Demo stoppen",
     "badge.guest": "Gast",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -168,6 +169,8 @@
     "watch.loadingCourse": "Baan laden",
     "watch.holesLoaded": "{have} van {total} holes",
     "watch.playOnWatch": "Speel op Watch",
+    "watch.demoOnWatch": "Demo op horloge",
+    "watch.demoOn": "Demo van deze hole op {watch}",
     "watch.handingOver": "Overdragen",
     "watch.playOnPhone": "Speel op telefoon",
     "watch.phoneCanSleep": "Je telefoon mag in slaap. Hij bewaart de ronde en alle slagregels; de Watch toont alles.",

@@ -71,6 +71,7 @@
     "badge.preview": "PREDOGLED",
     "badge.logging": "BELEŽENJE",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Končaj demo",
     "badge.guest": "Gost",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -170,6 +171,8 @@
     "watch.loadingCourse": "Nalaganje igrišča",
     "watch.holesLoaded": "{have} od {total} lukenj",
     "watch.playOnWatch": "Igraj na uri",
+    "watch.demoOnWatch": "Demo na uri",
+    "watch.demoOn": "Demo te luknje na {watch}",
     "watch.handingOver": "Predajanje",
     "watch.playOnPhone": "Igraj na telefonu",
     "watch.phoneCanSleep": "Telefon lahko miruje. Hrani krog in vsa pravila udarcev, ura pa ga prikazuje.",

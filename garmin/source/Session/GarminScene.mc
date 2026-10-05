@@ -27,11 +27,32 @@ class GarminScene {
 
     function courseDict() { return GarminWire.dictVal(raw, "course"); }
     function courseKey() { var c = courseDict(); return c != null ? GarminWire.str(c, "key") : null; }
+    // Par for every hole in play, keyed by hole number as a String. The demo
+    // browser steps through its keys; holes without a par are absent.
+    function coursePars() { var c = courseDict(); return c != null ? GarminWire.dictVal(c, "pars") : null; }
+    function parFor(hole) {
+        var pars = coursePars();
+        if (pars == null || hole == null) { return null; }
+        return GarminWire.intVal(pars, hole.toString());
+    }
 
     function holeDict() { return GarminWire.dictVal(raw, "hole"); }
     function holeNumber() { var h = holeDict(); return h != null ? GarminWire.intVal(h, "number") : null; }
     function holePar() { var h = holeDict(); return h != null ? GarminWire.intVal(h, "par") : null; }
     function holeTeeToGreenM() { var h = holeDict(); return h != null ? GarminWire.num(h, "teeToGreenM") : null; }
+    // The hole's fairway line (tee, route, green) as GarminCoordinates - the
+    // layup context the phone draws. Empty when the phone sends none.
+    function holeLine() {
+        var h = holeDict();
+        var raw = h != null ? GarminWire.arrVal(h, "line") : null;
+        var out = [];
+        if (raw == null) { return out; }
+        for (var i = 0; i < raw.size(); i += 1) {
+            var c = (raw[i] instanceof Lang.Dictionary) ? GarminWire.coordinate(raw[i]) : null;
+            if (c != null) { out.add(c); }
+        }
+        return out;
+    }
 
     function distanceDict() { return GarminWire.dictVal(raw, "distance"); }
     function distanceTargetM() { var d = distanceDict(); return d != null ? GarminWire.num(d, "target") : null; }
@@ -43,6 +64,13 @@ class GarminScene {
     function suggestedClub() { var s = suggestionDict(); return s != null ? GarminWire.str(s, "club") : null; }
     function suggestedCarryM() { var s = suggestionDict(); return s != null ? GarminWire.num(s, "carryM") : null; }
     function suggestedTotalM() { var s = suggestionDict(); return s != null ? GarminWire.num(s, "totalM") : null; }
+
+    // Whether the phone has a shot locked (Scene `shot.locked`).
+    function shotLocked() {
+        var s = GarminWire.dictVal(raw, "shot");
+        var v = s != null ? GarminWire.boolVal(s, "locked") : null;
+        return v == null ? false : v;
+    }
 
     function target() { return GarminWire.coordinate(GarminWire.dictVal(raw, "target")); }
 
@@ -71,6 +99,32 @@ class GarminScene {
     function canAim() { var c = controlsDict(); var v = c != null ? GarminWire.boolVal(c, "canAim") : null; return v == null ? false : v; }
     function canPreviousHole() { var c = controlsDict(); var v = c != null ? GarminWire.boolVal(c, "canPreviousHole") : null; return v == null ? false : v; }
     function canNextHole() { var c = controlsDict(); var v = c != null ? GarminWire.boolVal(c, "canNextHole") : null; return v == null ? false : v; }
+    // Nothing real is live and Play cannot start from where the phone is:
+    // the Ready face is the demo browser instead of "press SELECT".
+    // Named demo situations ({ id, hole, label }), when whoever is playing
+    // the phone's part offers them; the browser steps through these instead
+    // of bare holes. Absent from a Scene that has none.
+    function demoOptions() {
+        var raw2 = GarminWire.arrVal(raw, "demoOptions");
+        var out = [];
+        if (raw2 == null) { return out; }
+        for (var i = 0; i < raw2.size(); i += 1) {
+            var o = raw2[i];
+            if (!(o instanceof Lang.Dictionary)) { continue; }
+            var hole = GarminWire.intVal(o, "hole");
+            if (hole == null) { continue; }
+            out.add({ "hole" => hole, "option" => GarminWire.str(o, "id"), "label" => GarminWire.str(o, "label") });
+        }
+        return out;
+    }
+
+    function canDemo() { var c = controlsDict(); var v = c != null ? GarminWire.boolVal(c, "canDemo") : null; return v == null ? false : v; }
+
+    // A demo approach is on: `position` IS the player for everything this
+    // wrist measures, and its own GPS (the couch) is not consulted.
+    function demoDict() { return GarminWire.dictVal(raw, "demo"); }
+    function isDemo() { var d = demoDict(); var v = d != null ? GarminWire.boolVal(d, "active") : null; return v == null ? false : v; }
+    function demoPosition() { var d = demoDict(); return (d != null && isDemo()) ? GarminWire.coordinate(GarminWire.dictVal(d, "position")) : null; }
 
     function surfaceDict() { return GarminWire.dictVal(raw, "surface"); }
     function surfaceActive() { var s = surfaceDict(); return s != null ? GarminWire.str(s, "active") : null; }

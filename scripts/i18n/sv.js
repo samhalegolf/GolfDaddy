@@ -71,6 +71,7 @@
     "badge.preview": "FÖRHANDSVY",
     "badge.logging": "REGISTRERAR",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Avsluta demo",
     "badge.guest": "Gäst",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -168,6 +169,8 @@
     "watch.loadingCourse": "Laddar banan",
     "watch.holesLoaded": "{have} av {total} hål",
     "watch.playOnWatch": "Spela på Watch",
+    "watch.demoOnWatch": "Demo på klockan",
+    "watch.demoOn": "Demo av det här hålet på {watch}",
     "watch.handingOver": "Lämnar över",
     "watch.playOnPhone": "Spela på telefonen",
     "watch.phoneCanSleep": "Telefonen kan vila. Den håller koll på rundan och alla slagregler; Watch visar det.",

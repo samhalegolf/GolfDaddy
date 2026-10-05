@@ -23,6 +23,11 @@ class StatusView extends WatchUi.View {
         var line1 = "Clarity Caddy";
         var line2 = "";
 
+        if (face.equals(GarminSessionManager.FACE_READY) && session.scene != null && session.scene.canDemo()) {
+            drawDemoBrowser(dc);
+            return;
+        }
+
         if (face.equals(GarminSessionManager.FACE_NO_ROUND)) {
             line2 = "Waiting for round";
         } else if (face.equals(GarminSessionManager.FACE_READY)) {
@@ -37,5 +42,41 @@ class StatusView extends WatchUi.View {
         if (session.handoverNotice != null) {
             dc.drawText(dc.getWidth() / 2, dc.getHeight() * 0.75, Graphics.FONT_XTINY, session.handoverNotice, Graphics.TEXT_JUSTIFY_CENTER);
         }
+    }
+
+    // Preview on the wrist: the phone is off the course, so every hole can
+    // be stepped through (UP/DOWN) and demoed (SELECT) - the phone puts the
+    // player 100-130m short of that green and hands the round here, onto the
+    // same Playing face a real round reaches. Mirrors Apple's DemoBrowserFace.
+    function drawDemoBrowser(dc) {
+        var w = dc.getWidth();
+        var h = dc.getHeight();
+        var entry = session.demoEntry();
+        var hole = entry["hole"];
+        var par = session.scene.parFor(hole);
+        var label = entry["label"];
+        dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, h * 0.14, Graphics.FONT_XTINY, "PREVIEW", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, h * 0.27, Graphics.FONT_MEDIUM, "Hole " + hole.toString(), Graphics.TEXT_JUSTIFY_CENTER);
+        var sub = (label != null) ? label : ((par != null) ? "PAR " + par.toString() : null);
+        if (sub != null) {
+            dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(w / 2, h * 0.43, Graphics.FONT_SMALL, sub, Graphics.TEXT_JUSTIFY_CENTER);
+        }
+        var busy = session.outbox.isPending(GarminCommandKind.DEMO_APPROACH);
+        // fillRoundedRectangle paints in the FOREGROUND colour.
+        dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
+        // Sized and centred on the font's real height: a fixed offset clipped
+        // the word on the Venu Sq 2, whose FONT_SMALL is taller.
+        var fontH = dc.getFontHeight(Graphics.FONT_SMALL);
+        var btnH = fontH + 6 > h * 0.13 ? fontH + 6 : h * 0.13;
+        dc.fillRoundedRectangle(w * 0.2, h * 0.58, w * 0.6, btnH, 6);
+        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(w / 2, h * 0.58 + btnH / 2, Graphics.FONT_SMALL, busy ? "..." : "DEMO",
+            Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+        var hint = (session.lastRejection != null) ? "Couldn't start demo" : "UP/DOWN: more";
+        dc.drawText(w / 2, h * 0.58 + btnH + 4, Graphics.FONT_XTINY, hint, Graphics.TEXT_JUSTIFY_CENTER);
     }
 }

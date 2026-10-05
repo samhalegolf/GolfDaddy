@@ -428,8 +428,136 @@ public final class GarminTransport {
      *  (garmin/source/Maps/GarminMapManifest.mc). So that is all that is
      *  sent. If the watch ever needs more of the reference, extend the
      *  copy below AND revisit the size, because the ceiling has not moved. */
+    @SuppressWarnings("unchecked")
     public void publishMapManifest(Map<String, Object> manifest, Callback<Boolean> completion) {
-        send(mapOf("watchMapManifest", slimManifestForWatch(manifest)), completion);
+        Object skeleton = null;
+        if (manifest != null && manifest.containsKey("skeleton")) {
+            HashMap<String, Object> copy = new HashMap<>(manifest);
+            skeleton = copy.remove("skeleton");
+            manifest = copy;
+        }
+        final Map<String, Object> slim = slimManifestForWatch(manifest);
+        final Runnable deliverManifest = () -> {
+            Object holes = slim == null ? null : slim.get("holes");
+            if (!(holes instanceof List) || ((List<Object>) holes).isEmpty()) {
+                send(mapOf("watchMapManifest", slim), completion);
+                return;
+            }
+            new ManifestDelivery(slim, (List<Object>) holes, completion).next();
+        };
+        Object skeletonHoles = skeleton instanceof Map ? ((Map<String, Object>) skeleton).get("holes") : null;
+        if (!(skeletonHoles instanceof List) || ((List<Object>) skeletonHoles).isEmpty()) {
+            deliverManifest.run();
+            return;
+        }
+        new SkeletonDelivery((Map<String, Object>) skeleton, (List<Object>) skeletonHoles, deliverManifest).next();
+    }
+
+    /** The course skeleton (app/js/watch-map-delivery.js courseSkeleton): a
+     *  few KB of per-hole geometry the watch plays every hole from on its own
+     *  GPS. Sent AHEAD of the manifest parts and the opposite way round to
+     *  them - the whole course in one message first, halved only when the
+     *  link refuses it (to one hole at worst); split parts carry
+     *  {@code part} and the watch merges them. An extra, never a gate: five
+     *  refusals give up on it and the manifest goes anyway. Mirrors
+     *  GarminTransport.swift deliverSkeleton. */
+    private final class SkeletonDelivery {
+        private final Map<String, Object> base;
+        private final List<Object> holes;
+        private final Runnable then;
+        private int from = 0;
+        private int chunk;
+        private int failures = 0;
+
+        SkeletonDelivery(Map<String, Object> base, List<Object> holes, Runnable then) {
+            this.base = base;
+            this.holes = holes;
+            this.then = then;
+            this.chunk = holes.size();
+        }
+
+        void next() {
+            if (from >= holes.size()) { then.run(); return; }
+            final int to = Math.min(holes.size(), from + chunk);
+            HashMap<String, Object> part = new HashMap<>(base);
+            part.put("holes", new ArrayList<>(holes.subList(from, to)));
+            if (chunk < holes.size()) {
+                HashMap<String, Object> marker = new HashMap<>();
+                marker.put("from", from);
+                marker.put("count", to - from);
+                marker.put("total", holes.size());
+                part.put("part", marker);
+            }
+            send(mapOf("courseSkeleton", part), sent -> {
+                if (sent) {
+                    from = to;
+                    failures = 0;
+                    next();
+                    return;
+                }
+                failures += 1;
+                Log.w(TAG, "Garmin course skeleton refused at " + (to - from) + " holes (failure " + failures + ")");
+                if (failures >= 5) { then.run(); return; }
+                chunk = Math.max(1, chunk / 2);
+                sceneHandler.postDelayed(this::next, 1000L * failures);
+            });
+        }
+    }
+
+    /** One course package, delivered in growing parts through an
+     *  {@link AdaptiveGate}: hole 1 alone, then 2, 4, 8 ..., halving and
+     *  resending smaller after a refused send. Each part carries
+     *  {@code part: {from, count, total}}; the watch merges parts of the same
+     *  course and version (GarminMapStore.receiveManifest). Five failures in
+     *  a row end the attempt - the delivery module's own cooldown
+     *  (watch-map-delivery.js) decides when to try the course again, and the
+     *  watch reports what it already holds so nothing is resent. */
+    /** The largest package part the watch says it wants (0 = no preference). */
+    private volatile int watchMaxPart = 0;
+
+    private final class ManifestDelivery {
+        private final Map<String, Object> base;
+        private final List<Object> holes;
+        private final Callback<Boolean> completion;
+        private final AdaptiveGate gate;
+        private int from = 0;
+        private int failures = 0;
+
+        ManifestDelivery(Map<String, Object> base, List<Object> holes, Callback<Boolean> completion) {
+            this.base = base;
+            this.holes = holes;
+            this.completion = completion;
+            this.gate = new AdaptiveGate(holes.size());
+            // The watch may ask for smaller parts - 1 is hole by hole - in
+            // its map inventory report (GarminSessionManager.reportMapInventory).
+            this.gate.limitTo(watchMaxPart);
+        }
+
+        void next() {
+            if (from >= holes.size()) { completion.onResult(true); return; }
+            final int to = Math.min(holes.size(), from + gate.size());
+            HashMap<String, Object> part = new HashMap<>(base);
+            part.put("holes", new ArrayList<>(holes.subList(from, to)));
+            HashMap<String, Object> marker = new HashMap<>();
+            marker.put("from", from);
+            marker.put("count", to - from);
+            marker.put("total", holes.size());
+            part.put("part", marker);
+            send(mapOf("watchMapManifest", part), sent -> {
+                if (sent) {
+                    from = to;
+                    failures = 0;
+                    gate.succeeded();
+                    next();
+                    return;
+                }
+                gate.failed();
+                failures += 1;
+                Log.w(TAG, "Garmin manifest part refused; gate now " + gate.size() + " (failure " + failures + ")");
+                if (failures >= 5) { completion.onResult(false); return; }
+                sceneHandler.postDelayed(this::next, 1000L * failures);
+            });
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -603,7 +731,20 @@ public final class GarminTransport {
         if (listener == null) { return; }
         Object command = message.get("command");
         if (command instanceof Map) { listener.onCommandReceived((Map<String, Object>) command); }
+        /* The watch's sender batches up to its gate's worth of commands into
+           one message (garmin/source/Session/GarminSender.mc); each is then
+           handled - and acknowledged - exactly as a single one would be. */
+        Object commands = message.get("commands");
+        if (commands instanceof List) {
+            for (Object each : (List<Object>) commands) {
+                if (each instanceof Map) { listener.onCommandReceived((Map<String, Object>) each); }
+            }
+        }
         Object mapInventory = message.get("watchMapHave");
+        if (mapInventory instanceof Map) {
+            Object maxPart = ((Map<String, Object>) mapInventory).get("maxPart");
+            watchMaxPart = (maxPart instanceof Number) ? ((Number) maxPart).intValue() : 0;
+        }
         if (mapInventory instanceof Map) { listener.onMapInventoryReceived((Map<String, Object>) mapInventory); }
         Object playerInventory = message.get("watchPlayerHave");
         if (playerInventory instanceof Map) { listener.onPlayerInventoryReceived((Map<String, Object>) playerInventory); }

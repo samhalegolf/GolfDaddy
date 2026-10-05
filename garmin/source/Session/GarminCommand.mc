@@ -16,6 +16,10 @@ module GarminCommandKind {
     var AIM_AT = "AIM_AT";
     var TAKE_OVER = "TAKE_OVER";
     var HAND_BACK = "HAND_BACK";
+    // The demo (app/js/demo-approach.js): start hole N 100-130m short of its
+    // green and hand it to this wrist in one command; and end it again.
+    var DEMO_APPROACH = "DEMO_APPROACH";
+    var DEMO_END = "DEMO_END";
 }
 
 // One command, ready to serialise to a Dictionary for Communications.transmit.
@@ -32,6 +36,8 @@ class GarminCommand {
     // matching CommandPayload's two optional fields.
     var payloadLocation;   // Dictionary or null: { coordinate, source, horizontalAccuracy, timestamp }
     var payloadPoint;      // GarminCoordinate or null
+    var payloadHole = null;  // Number or null: DEMO_APPROACH's hole
+    var payloadOption = null; // String or null: DEMO_APPROACH's situation id
 
     function initialize(commandId, roundId, baseRevision, createdAt, type, payloadLocation, payloadPoint) {
         self.commandId = commandId;
@@ -51,6 +57,8 @@ class GarminCommand {
         var payload = {};
         if (payloadLocation != null) { payload["location"] = payloadLocation; }
         if (payloadPoint != null) { payload["point"] = { "lat" => payloadPoint.lat, "lng" => payloadPoint.lng }; }
+        if (payloadHole != null) { payload["hole"] = payloadHole; }
+        if (payloadOption != null) { payload["option"] = payloadOption; }
         return {
             "commandId" => commandId,
             "roundId" => roundId,
@@ -76,6 +84,8 @@ class GarminCommand {
             location,
             point
         );
+        cmd.payloadHole = payload != null ? GarminWire.intVal(payload, "hole") : null;
+        cmd.payloadOption = payload != null ? GarminWire.str(payload, "option") : null;
         return cmd;
     }
 }

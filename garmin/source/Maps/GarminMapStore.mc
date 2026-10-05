@@ -46,6 +46,10 @@ class GarminMapStore {
     // — the caller (NumbersView/MapView) shows the numbers-only state and
     // GarminMapStore keeps fetching in the background via requestHole().
     function bitmapFor(holeNumber, courseKey) {
+        // The standalone simulator demo bundles its hole images (null in
+        // every other build - GarminSimDemoPolicy.mc).
+        var bundled = GarminSimDemoPolicy.bitmap(holeNumber);
+        if (bundled != null) { return bundled; }
         if (manifest == null || courseKey == null || !manifest.courseKey.equals(courseKey)) { return null; }
         if (residentBitmaps.hasKey(holeNumber)) { return residentBitmaps[holeNumber]; }
         requestHole(holeNumber);
@@ -89,6 +93,24 @@ class GarminMapStore {
         }
         if (incoming == null || !incoming.isUsable()) { return; }
         if (manifest != null && manifest.courseKey.equals(incoming.courseKey) && manifest.version > incoming.version) { return; }
+        // A PART of a package (the phone's adaptive sender delivers it in
+        // growing batches of holes - 1, 2, 4, ... - halving on a refused
+        // send): merged into the package already held for the same course
+        // and version, hole by hole. The first part of a new package starts
+        // it, exactly as a whole one would.
+        var isPart = raw instanceof Lang.Dictionary && raw.hasKey("part");
+        if (isPart && manifest != null && manifest.courseKey.equals(incoming.courseKey) && manifest.version == incoming.version) {
+            for (var i = 0; i < incoming.holes.size(); i += 1) {
+                var h = incoming.holes[i];
+                var replaced = false;
+                for (var j = 0; j < manifest.holes.size(); j += 1) {
+                    if (manifest.holes[j].holeNumber == h.holeNumber) { manifest.holes[j] = h; replaced = true; }
+                }
+                if (!replaced) { manifest.holes.add(h); }
+            }
+            persistManifest();
+            return;
+        }
         if (manifest == null || !manifest.courseKey.equals(incoming.courseKey) || manifest.version != incoming.version) {
             // A genuinely new package: nothing is ready yet, and stale
             // resident bitmaps from the old course/version must go.

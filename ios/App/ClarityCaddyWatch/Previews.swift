@@ -59,11 +59,12 @@ enum WatchPreviewFixtures {
             controls: .init(canLock: canLock, canUnlock: !canLock, canAim: false, canShotEnd: false,
                             canPreviousHole: false, canNextHole: true,
                             canBallMove: false, canLogFinish: false, canComplete: false,
-                            canScore: false, canPlay: false, playHole: nil),
+                            canScore: false, canPlay: false, playHole: nil, canDemo: false),
             surface: .init(active: driving ? "watch" : "phone",
                            handover: driving ? .init(id: "preview-handover", state: "confirmed", from: "phone") : nil,
                            watch: .init(paired: true, appInstalled: true, reachable: true, maps: .init(total: 18, have: 18))),
-            connection: .init(status: "live")
+            connection: .init(status: "live"),
+            demo: nil
         )
     }
 

@@ -71,6 +71,7 @@
     "badge.preview": "PREVIZUALIZARE",
     "badge.logging": "ÎNREGISTRARE",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Încheie demo",
     "badge.guest": "Invitat",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -169,6 +170,8 @@
     "watch.loadingCourse": "Se încarcă terenul",
     "watch.holesLoaded": "{have} din {total} găuri",
     "watch.playOnWatch": "Joacă pe Watch",
+    "watch.demoOnWatch": "Demo pe ceas",
+    "watch.demoOn": "Demo pentru această gaură pe {watch}",
     "watch.handingOver": "Se transferă",
     "watch.playOnPhone": "Joacă pe telefon",
     "watch.phoneCanSleep": "Telefonul poate intra în repaus. Păstrează runda și regulile fiecărei lovituri; Watch-ul o afișează.",

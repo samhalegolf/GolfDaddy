@@ -71,6 +71,7 @@
     "badge.preview": "VORSCHAU",
     "badge.logging": "ERFASSUNG",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Demo beenden",
     "badge.guest": "Gast",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -168,6 +169,8 @@
     "watch.loadingCourse": "Platz wird geladen",
     "watch.holesLoaded": "{have} von {total} Löchern",
     "watch.playOnWatch": "Auf der Watch spielen",
+    "watch.demoOnWatch": "Demo auf der Uhr",
+    "watch.demoOn": "Dieses Loch als Demo auf {watch}",
     "watch.handingOver": "Wird übergeben",
     "watch.playOnPhone": "Auf dem Handy spielen",
     "watch.phoneCanSleep": "Das Handy darf ruhen. Es behält die Runde und alle Schlagregeln; die Watch zeigt sie an.",

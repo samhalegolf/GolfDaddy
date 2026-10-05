@@ -71,6 +71,7 @@
     "badge.preview": "ANTEPRIMA",
     "badge.logging": "REGISTRAZIONE",
     "badge.demo": "DEMO",
+    "badge.endDemo": "Termina demo",
     "badge.guest": "Ospite",
 
     /* Course map not available / manual GPS (boot.js) */
@@ -168,6 +169,8 @@
     "watch.loadingCourse": "Caricamento percorso",
     "watch.holesLoaded": "{have} di {total} buche",
     "watch.playOnWatch": "Gioca su Watch",
+    "watch.demoOnWatch": "Demo sull'orologio",
+    "watch.demoOn": "Demo di questa buca su {watch}",
     "watch.handingOver": "Passaggio in corso",
     "watch.playOnPhone": "Gioca sul telefono",
     "watch.phoneCanSleep": "Il telefono può andare in standby. Conserva il giro e le regole di ogni colpo; il Watch lo disegna.",

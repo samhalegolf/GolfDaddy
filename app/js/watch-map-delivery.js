@@ -94,6 +94,67 @@
     return out;
   }
 
+  /* The COURSE SKELETON: the least geometry a watch needs to play every hole
+     on its own GPS - front/centre/back, hole length, the layup line and the
+     tee zone - cut from the same references the manifest carries, so it can
+     never describe a different green than the picture under it. It rides on
+     the manifest as `skeleton` and the Garmin transports send it AHEAD of the
+     manifest's parts as one small message (split only if the link refuses
+     it); Apple Watch receives the whole manifest in one transfer and is
+     handed none.
+
+     Compact on purpose - Connect IQ refuses large messages outright. Points
+     are whole MICRODEGREE offsets from one origin (0.11 m; integers survive
+     every bridge exactly), and the origin travels as two STRINGS because a
+     Connect IQ dictionary may decode a decimal as a 32-bit float, which is
+     ~0.5 m out at these latitudes. Per hole: n, len (m), t (tee), g (green
+     centre), s (green outline, at most SKELETON_SHAPE_POINTS), r (route
+     between tee and green). A hole with no green is left out; a hole with no
+     play line keeps its green alone. */
+  var SKELETON_SHAPE_POINTS = 16;
+  function courseSkeleton(courseKey, version, holes) {
+    var origin = null;
+    var out = [];
+    (holes || []).forEach(function (hole) {
+      var ref = manifestReference(hole && hole.reference);
+      var n = Number(hole && hole.holeNumber);
+      if (!ref || !Number.isInteger(n) || n <= 0) return;
+      if (!origin) origin = ref.tee || ref.green;
+      var micro = function (p) {
+        return [Math.round((p.lat - origin.lat) * 1e6), Math.round((p.lng - origin.lng) * 1e6)];
+      };
+      var flat = function (points) {
+        var list = [];
+        points.forEach(function (p) { var m = micro(p); list.push(m[0], m[1]); });
+        return list;
+      };
+      var entry = { n: n, g: micro(ref.green) };
+      if (ref.greenShape) {
+        var shape = ref.greenShape;
+        if (shape.length > SKELETON_SHAPE_POINTS) {
+          var step = shape.length / SKELETON_SHAPE_POINTS, picked = [];
+          for (var i = 0; i < SKELETON_SHAPE_POINTS; i++) picked.push(shape[Math.floor(i * step)]);
+          shape = picked;
+        }
+        entry.s = flat(shape);
+      }
+      if (ref.tee) {
+        entry.t = micro(ref.tee);
+        entry.len = Math.round(ref.lengthM);
+        /* The route as stored runs tee -> ... -> green; only the points
+           between travel, the ends are t and g already. */
+        var inner = ref.route.filter(function (p) {
+          return !(Math.abs(p.lat - ref.tee.lat) < 1e-7 && Math.abs(p.lng - ref.tee.lng) < 1e-7)
+            && !(Math.abs(p.lat - ref.green.lat) < 1e-7 && Math.abs(p.lng - ref.green.lng) < 1e-7);
+        });
+        if (inner.length) entry.r = flat(inner);
+      }
+      out.push(entry);
+    });
+    if (!out.length) return null;
+    return { courseKey: courseKey, version: Number(version), o: [String(origin.lat), String(origin.lng)], holes: out };
+  }
+
   /* A package path is "<courseKey>/v<version>/h<n>.webp". Only the file name
      crosses to the Watch; the course key and version travel as their own
      fields, so a mismatched path cannot quietly file a hole under the wrong
@@ -312,8 +373,7 @@
       /* Manifest first: it is what makes an image that lands mean something,
          and it lets the Watch show honest "3 of 18" progress while the rest
          arrive. */
-      await plugin.publishWatchMap({
-        manifest: {
+      var manifest = {
           courseKey: courseKey,
           version: Number(version),
           holes: holes.map(function (hole) {
@@ -340,8 +400,12 @@
             if (url) out.url = url;
             return out;
           })
-        }
-      });
+      };
+      /* Omitted rather than nulled (NSNull). The Garmin transports peel it
+         off and send it first; Apple's drops it. */
+      var skeleton = courseSkeleton(courseKey, version, holes);
+      if (skeleton) manifest.skeleton = skeleton;
+      await plugin.publishWatchMap({ manifest: manifest });
 
       var sent = 0;
       var failed = 0;
@@ -513,6 +577,6 @@
       var instance = ensureShared();
       return instance ? instance.holeImage(courseKey, holeNumber) : null;
     },
-    __test: { manifestHole: manifestHole, assetName: assetName, alreadyDelivered: alreadyDelivered, usableSpatialReference: usableSpatialReference }
+    __test: { courseSkeleton: courseSkeleton, manifestHole: manifestHole, assetName: assetName, alreadyDelivered: alreadyDelivered, usableSpatialReference: usableSpatialReference }
   };
 });

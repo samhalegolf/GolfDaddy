@@ -63,6 +63,9 @@ final class GarminTransport: NSObject, WearableTransport {
     private let connectIQAppId: String
 
     private var latestScene: [String: Any]?
+    /// The largest package part the watch says it wants (0 = no preference);
+    /// 1 is hole by hole. From its map inventory report.
+    private var watchMaxPart = 0
 
     /* The URL scheme Garmin Connect uses to hand control back after device
        selection. Must match an entry in Info.plist's CFBundleURLTypes. */
@@ -237,15 +240,113 @@ final class GarminTransport: NSObject, WearableTransport {
         }
     }
 
+    /* The course package, slimmed and delivered in growing parts.
+
+       SLIMMED as Android's GarminTransport.slimManifestForWatch is: the watch
+       reads one thing out of each hole's `reference` - the green - and the
+       full reference made Millbrook's package ~27 KB, which the Connect IQ
+       link refuses outright (FAILURE_MESSAGE_TOO_LARGE). This path used to
+       send it whole and unslimmed.
+
+       IN PARTS through an AdaptiveGate: hole 1 alone, then 2, 4, 8 ...,
+       stepping back on a refused send; never larger than the watch's own
+       `maxPart`. Each part carries `part: {from, count, total}` and the watch
+       merges them (GarminMapStore.receiveManifest). Five refusals in a row
+       end the attempt; watch-map-delivery.js's cooldown retries the course. */
     func publishMapManifest(_ manifest: [String: Any], completion: @escaping (Bool) -> Void) {
-        // See this file's header: `manifest` must carry a Garmin-specific
-        // `url` per hole (garmin/GarminMapManifest.mc's `url` field) for
-        // GarminMapDownloader to have anything to fetch. That attachment is
-        // not implemented here — this method forwards whatever it is given.
         queue.async { [weak self] in
             guard let self else { return }
-            self.send(["watchMapManifest": manifest], completion: completion)
+            var manifest = manifest
+            let skeleton = manifest.removeValue(forKey: "skeleton") as? [String: Any]
+            let slim = Self.slimForWatch(manifest)
+            let deliverManifest = {
+                guard let holes = slim["holes"] as? [Any], !holes.isEmpty else {
+                    self.send(["watchMapManifest": slim], completion: completion)
+                    return
+                }
+                var gate = AdaptiveGate(max: holes.count)
+                gate.limit(to: self.watchMaxPart)
+                self.deliverPart(base: slim, holes: holes, from: 0, gate: gate, failures: 0, completion: completion)
+            }
+            guard let skeleton, let skeletonHoles = skeleton["holes"] as? [Any], !skeletonHoles.isEmpty else {
+                deliverManifest()
+                return
+            }
+            self.deliverSkeleton(base: skeleton, holes: skeletonHoles, from: 0, chunk: skeletonHoles.count, failures: 0) { _ in
+                self.queue.async { deliverManifest() }
+            }
         }
+    }
+
+    /* The course skeleton (app/js/watch-map-delivery.js courseSkeleton): a few
+       KB of per-hole geometry the watch plays every hole from on its own GPS.
+       AHEAD of the manifest parts and the opposite way round to them - the
+       whole course in one message first, since that is the point of it, and
+       only halved when the link refuses it (to one hole at worst). Parts
+       carry `part` like the manifest's and the watch merges them. An extra,
+       never a gate: five refusals give up on it and the manifest goes anyway. */
+    private func deliverSkeleton(base: [String: Any], holes: [Any], from: Int, chunk: Int,
+                                 failures: Int, completion: @escaping (Bool) -> Void) {
+        guard from < holes.count else { completion(true); return }
+        let to = min(holes.count, from + chunk)
+        var part = base
+        part["holes"] = Array(holes[from..<to])
+        if chunk < holes.count { part["part"] = ["from": from, "count": to - from, "total": holes.count] }
+        send(["courseSkeleton": part]) { [weak self] sent in
+            guard let self else { return }
+            self.queue.async {
+                if sent {
+                    self.deliverSkeleton(base: base, holes: holes, from: to, chunk: chunk, failures: 0, completion: completion)
+                    return
+                }
+                NSLog("Garmin course skeleton refused at %d holes (failure %d)", to - from, failures + 1)
+                if failures + 1 >= 5 { completion(false); return }
+                self.queue.asyncAfter(deadline: .now() + .seconds(failures + 1)) {
+                    self.deliverSkeleton(base: base, holes: holes, from: from, chunk: max(1, chunk / 2),
+                                         failures: failures + 1, completion: completion)
+                }
+            }
+        }
+    }
+
+    private func deliverPart(base: [String: Any], holes: [Any], from: Int, gate: AdaptiveGate,
+                             failures: Int, completion: @escaping (Bool) -> Void) {
+        guard from < holes.count else { completion(true); return }
+        let to = min(holes.count, from + gate.size)
+        var part = base
+        part["holes"] = Array(holes[from..<to])
+        part["part"] = ["from": from, "count": to - from, "total": holes.count]
+        send(["watchMapManifest": part]) { [weak self] sent in
+            guard let self else { return }
+            self.queue.async {
+                var gate = gate
+                if sent {
+                    gate.succeeded()
+                    self.deliverPart(base: base, holes: holes, from: to, gate: gate, failures: 0, completion: completion)
+                    return
+                }
+                gate.failed()
+                NSLog("Garmin manifest part refused; gate now %d (failure %d)", gate.size, failures + 1)
+                if failures + 1 >= 5 { completion(false); return }
+                self.queue.asyncAfter(deadline: .now() + .seconds(failures + 1)) {
+                    self.deliverPart(base: base, holes: holes, from: from, gate: gate, failures: failures + 1, completion: completion)
+                }
+            }
+        }
+    }
+
+    private static func slimForWatch(_ manifest: [String: Any]) -> [String: Any] {
+        guard let holes = manifest["holes"] as? [[String: Any]] else { return manifest }
+        var out = manifest
+        out["holes"] = holes.map { hole -> [String: Any] in
+            var slim = hole
+            slim.removeValue(forKey: "reference")
+            if let reference = hole["reference"] as? [String: Any], let green = reference["green"] {
+                slim["reference"] = ["green": green]
+            }
+            return slim
+        }
+        return out
     }
 
     func publishPlayer(_ player: [String: Any], completion: @escaping (Bool) -> Void) {
@@ -328,7 +429,15 @@ final class GarminTransport: NSObject, WearableTransport {
         if let command = message["command"] as? [String: Any] {
             delegate?.wearableTransport(self, didReceiveCommand: command)
         }
+        /* The watch's sender batches up to its gate's worth of commands into
+           one message (garmin/source/Session/GarminSender.mc); each is handled
+           and acknowledged exactly as a single one would be. */
+        if let commands = message["commands"] as? [[String: Any]] {
+            for command in commands { delegate?.wearableTransport(self, didReceiveCommand: command) }
+        }
         if let inventory = message["watchMapHave"] as? [String: Any] {
+            let wanted = (inventory["maxPart"] as? NSNumber)?.intValue ?? 0
+            queue.async { [weak self] in self?.watchMaxPart = wanted }
             delegate?.wearableTransport(self, didReceiveMapInventory: inventory)
         }
         if let held = message["watchPlayerHave"] as? [String: Any] {
@@ -404,5 +513,48 @@ extension GarminTransport: IQUIOverrideDelegate {
            via the `reason` availableDevices() returns. */
         NSLog("Garmin Connect is not installed; device selection is unavailable")
         delegate?.wearableTransportStateDidChange(self)
+    }
+}
+
+/* How many items to put in the next message - start small, work up, back
+   off. The same rule as Android's AdaptiveGate.java (unit-tested there) and
+   the watch's GarminGate.mc: double until the first refusal; after one, grow
+   a step at a time below the size that was refused; PROBE_AFTER clean sends
+   at the edge probe one step past it; a refused probe returns to what last
+   worked, any other refusal halves. `limit(to:)` is the far end asking for
+   less (the watch's maxPart; 1 is hole by hole). */
+struct AdaptiveGate {
+    static let probeAfter = 8
+    private(set) var size = 1
+    private var max: Int
+    private var ceiling = Int.max
+    private var cleanAtEdge = 0
+    private var lastGood = 0
+
+    init(max: Int) { self.max = Swift.max(1, max) }
+
+    mutating func limit(to requested: Int) {
+        if requested >= 1 && requested < max { max = requested }
+        if size > max { size = max }
+    }
+
+    mutating func succeeded() {
+        lastGood = size
+        if ceiling == Int.max { size = Swift.min(max, size * 2); return }
+        if size + 1 < ceiling { size = Swift.min(max, size + 1); cleanAtEdge = 0; return }
+        cleanAtEdge += 1
+        if cleanAtEdge >= Self.probeAfter {
+            ceiling += 1
+            cleanAtEdge = 0
+            size = Swift.min(max, size + 1)
+        }
+    }
+
+    mutating func failed() {
+        let probe = lastGood > 0 && size == lastGood + 1
+        ceiling = Swift.max(1, size)
+        cleanAtEdge = 0
+        size = probe ? lastGood : Swift.max(1, size / 2)
+        lastGood = 0
     }
 }

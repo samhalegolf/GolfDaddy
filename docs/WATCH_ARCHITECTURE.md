@@ -165,6 +165,42 @@ background; the numbers page is always the rangefinder. The green comes from
 the Scene, the player is the wrist's own fix (or the phone's when the wrist has
 none). A hole with no delivered image shows why, not a blank.
 
+### The course skeleton (Garmin, 2026-10-05)
+
+A few KB of per-hole geometry that lets a Garmin play every hole on its own
+GPS when the phone's Scene goes quiet. Built once in
+`app/js/watch-map-delivery.js` (`courseSkeleton`) from the same references the
+manifest carries, stamped with the manifest's course key and version, and
+attached to the manifest as `skeleton`.
+
+- **Wire.** Per hole: `n`, `len`, `t` (tee), `g` (green centre), `s` (green
+  outline, at most 16 points), `r` (route between tee and green). Points are
+  whole microdegree offsets from an origin `o`, which travels as two strings
+  because Connect IQ may decode a decimal as a 32-bit float. Millbrook's 18
+  holes come to 4.4 KB, against 17 KB for the full references.
+- **Delivery.** `GarminTransport` (iOS and Android) peels `skeleton` off and
+  sends it as `courseSkeleton` *before* the manifest parts. It sends the whole
+  course first and halves on a refused send, the opposite of the parts'
+  start-at-one gate. Split pieces carry `part` and the watch merges them. Five
+  refusals give up on it, and the manifest still goes. Apple's transport drops
+  it, since that watch receives the full references in one transfer.
+- **Trust.** `GarminSessionManager.skeletonFor()` uses it only while its
+  course matches the Scene's and its version matches the map package held for
+  that course. A newer package may have moved a green.
+- **When it is used.** The Scene speaks for the round for 20 s after it
+  arrives, and for up to 5 min while the phone is still connected over
+  Bluetooth (a phone standing still sends no new Scene). After that:
+  - front/centre/back come from the skeleton and the wrist's fix, marked
+    `WATCH GPS`;
+  - hole length and the layup line also come from the skeleton;
+  - reaching the next hole's tee (25 m) moves the wrist on by itself
+    (`localHole`).
+
+  Any fresh Scene takes the hole back.
+- **Watch memory and time.** The skeleton is indexed on arrival and each hole
+  is decoded only on first use. Decoding all 18 at once tripped the
+  Forerunner 255's 120k watchdog.
+
 ## The player snapshot: bag and My Bubble
 
 A third payload, alongside the Scene and the lite-map package, because it fits
@@ -527,3 +563,46 @@ Open questions carried from the design: whether the card should offer handover
 at the live hole while the rest of the package keeps filling (today it waits for
 the whole package), and whether the parked phone-shaped card should retire into
 the settings row later in the round (today it stays).
+
+## Demo approach: the handover off the course
+
+Preview has no position, so Play - and with it every handover - is refused
+off the course. A **demo approach** (`app/js/demo-approach.js`) fills that gap:
+it puts the player on the hole's play line 100-130m short of the green and
+makes the hole live through Marshal's own `DEMO_APPROACH` signal (the only
+signal that places the player without GPS). `DEMO_ENDED` puts the round back
+in Preview without firing `roundEnded`. While a demo is on, `boot.js` drops
+real GPS fixes and keeps resume, scorecard and Course Data writes away from it.
+
+```text
+controls.canDemo  nothing real is live AND Play cannot start here
+demo              null | { active, hole, position, metres }
+DEMO_APPROACH     { hole }  -> plant the point, start the hole, wrist takes over (confirmed)
+DEMO_END          {}        -> back to Preview, phone driving
+```
+
+When `canDemo` is set the wrist's Ready face is a hole browser instead of
+Play here: Apple's `DemoBrowserFace` (one vertical page per hole - crown or
+swipe - with the lite map full-screen on the approach and **Demo**), Garmin's `StatusView.drawDemoBrowser` (UP/DOWN, SELECT). The phone's
+card says **Demo on Watch** and demos the hole on screen (an offered handover,
+exactly like Play on Watch). With `demo` set both wrists use `demo.position`
+in place of their own GPS, send LOCK rather than LOCK_AT, and run no walk-away
+rule; the phone also plays any LOCK_AT / SHOT_END_AT from the demo point. The
+demo ends by itself when the real-round criteria are met - the first real fix
+at the course (`endIfAtCourse`, Marshal's `AT_COURSE_M`) ends it, hands a
+driving wrist back, and that fix goes down the real path. It can also be ended
+from the phone badge's **End demo** or BACK on Garmin's numbers face; Apple's
+DEMO banner is a label only.
+
+### Layup context and the Bubble camera (2026-10-05)
+
+`hole.line` on the Scene is the current hole's fairway line (tee, mapped route,
+green). Both wrists draw the phone's layup context from it (painter.js
+`drawShot`): the faint fairway line and a dotted guide from the Bubble to the
+green labelled "Green Xm", under the phone's own test (green beyond the bag's
+longest total + 3m, Bubble more than 4m short of the green and nearer than it).
+It rides the Scene, not the lite-map manifest, because Garmin's manifest is
+already near Connect IQ's ~10 KB message cap. The Bubble camera
+(`WatchMapCamera.bubble` / `GarminMapCamera.bubble`) is not clamped to the
+baked image, so the Bubble is always centred; the overspill is the map's dark
+green (#294A30).
