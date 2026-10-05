@@ -111,8 +111,8 @@ module GarminBubbleEngine {
         var sideLimit = aimBase * 0.25d;
         if (sideLimit < 2.0d) { sideLimit = 2.0d; }
         var sideOffset = GarminJS.clamp(aimOffsetM, -sideLimit, sideLimit);
-        var forwardBias = GarminJS.clamp(payload.visual.visualYBias, -0.18d, 0.18d) * (payload.depthRadiusM > 1.0d ? payload.depthRadiusM : 1.0d);
-        return GarminGeo.projectOffset(target, shotBearing, forwardBias, sideOffset);
+        // No forward bias: the centre sits on the target along the shot (as the JS).
+        return GarminGeo.projectOffset(target, shotBearing, 0.0d, sideOffset);
     }
 
     // bubbleRadiusFactor — the distance tendency, breathing the ring in and
