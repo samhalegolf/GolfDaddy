@@ -5877,10 +5877,15 @@
        honoured at this level too or the staged bubble is never committed and
        GDDemoSession.adopt() silently reports failure. See
        gdPracticeDemoAdoptActive. */
-    if(!gdPracticeDemoAdoptActive()&&window.ClarityPayments?.requireAccess&&!window.ClarityPayments.requireAccess("bubbleCentre"))return false;
     const {p}=gdBubbleDataContext();
     const previewPending=gdMyBubbleLanePreviewPendingSource();
     const pending=previewPending||p.practiceBubblePendingSource||{};
+    // Asked about what is actually being committed: a Manual Set from the Bag
+    // is the Starter Bubble (open to Garmin Founders as well as members);
+    // everything else - Practice adoption, the Bubble centre lane, a typed
+    // offset - is the full Bubble centre setting.
+    const feature=pending.active&&pending.source==="user_manual_set"?"starterBubble":"bubbleCentre";
+    if(!gdPracticeDemoAdoptActive()&&window.ClarityPayments?.requireAccess&&!window.ClarityPayments.requireAccess(feature))return false;
     if(pending.active&&Number.isFinite(Number(pending.offsetDeg))){
       const offset=Number(pending.offsetDeg);
       const analysis=gdPracticeProjectionReadyAnalysis();

@@ -202,7 +202,7 @@ assert.strictEqual(boot({ languages: [], extra: { es: SPANISH } }).GDI18n.locale
       'clarity-store-billing.js', 'clarity-account-delete.js', 'clarity-account-clear-data.js', 'clarity-legal-links.js',
       'gd-shell.js', 'gd-course-library-pin-lock.js', 'clarity-player-settings.js', 'clarity-email.js',
       'clarity-support.js', 'clarity-backup.js', 'gd-route-audit.js',
-      'gd-manual-bubble-set.js', 'clarity-garmin.js', 'gd-course-map-notify.js', 'gd-app-permissions.js',
+      'gd-manual-bubble-set.js', 'clarity-garmin.js', 'clarity-garmin-founder.js', 'gd-course-map-notify.js', 'gd-app-permissions.js',
       'gd-practice-projected-clubs.js', 'gd-flag-pin.js', 'gd-app-download-prompt.js', 'gd-app-core.js'
     ].map((f) => path.join('scripts', f)))
     .concat(['gd-auth-account-shell.js', 'gd-course-picker-search-v2.js',

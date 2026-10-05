@@ -150,9 +150,40 @@
     overlay.querySelector("form").addEventListener("submit", submit);
   }
 
-  function open(){
+  /* The same form carries Garmin feedback: open({topic:"garmin"}) swaps the
+     wording and tags the ticket so it can be found apart from bug reports. */
+  var topic = null;
+  var TOPIC_WORDS = {
+    general: {title: "support.title", intro: "support.intro", happened: "support.happened", expected: "support.expected", send: "support.send"},
+    garmin: {title: "garminFeedback.title", intro: "garminFeedback.intro", happened: "garminFeedback.happened", expected: "garminFeedback.expected", send: "garminFeedback.send"}
+  };
+
+  function applyTopic(overlay){
+    var words = TOPIC_WORDS[topic ? topic.name : "general"];
+    [["#claritySupportTitle", words.title], [".claritySupportHead span", words.intro],
+     ["#claritySupportHappened", words.happened, true], ["#claritySupportExpected", words.expected, true],
+     ["button[type=submit]", words.send]].forEach(function(row){
+      var node = overlay.querySelector(row[0]);
+      if(row[2]) node = node && node.parentNode.querySelector("span");
+      if(node){node.setAttribute("data-i18n", row[1]); window.GDI18n.set(node, row[1]);}
+    });
+  }
+
+  function accountEmail(){
+    return safe(function(){
+      var current = window.GolfDaddyAccounts && window.GolfDaddyAccounts.current();
+      return current && current.email || "";
+    }, "");
+  }
+
+  function open(options){
+    options = options || {};
     var overlay = document.getElementById("claritySupportOverlay");
     var meta = document.getElementById("claritySupportMeta");
+    topic = options.topic === "garmin" ? {name: "garmin", deviceModel: String(options.deviceModel || "")} : null;
+    applyTopic(overlay);
+    var contact = document.getElementById("claritySupportContact");
+    if(topic && contact && !contact.value) contact.value = accountEmail();
     var context = buildContext();
     meta.textContent = L("support.meta", {
       build: context.build.buildId || L("support.unknown"),
@@ -178,6 +209,10 @@
       contact: document.getElementById("claritySupportContact").value.trim(),
       context: buildContext()
     };
+    if(topic){
+      payload.topic = topic.name;
+      payload.context.garmin = {deviceModel: topic.deviceModel, founder: safe(function(){return !!window.ClarityPayments.garminFounderActive();}, false)};
+    }
     if(!payload.happened){
       status.className = "claritySupportStatus warn";
       window.GDI18n.set(status, "support.addHappened");

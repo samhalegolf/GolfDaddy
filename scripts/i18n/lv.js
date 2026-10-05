@@ -366,6 +366,7 @@
     "pay.status.paidActive": "Maksas piekļuve aktīva",
     "pay.status.notConfigured": "Maksājumi vēl nav iestatīti",
     "pay.status.free": "Bezmaksas piekļuve",
+    "pay.status.garminFounder": "Garmin dibinātājbiedrs",
     "pay.detail.connectionIssue": "Mēs nevarējām apstiprināt tavu maksas piekļuvi. Maksas funkcijas paliek bloķētas, līdz tā tiek apstiprināta.",
     "pay.detail.checking": "Pārbaudām maksājuma statusu...",
     "pay.detail.renewsOn": "Atjaunošana: {date}.",
@@ -382,6 +383,7 @@
     "pay.detail.chooseContinue": "Izvēlies, kā vēlies turpināt.",
     "pay.detail.boughtOnDevice": "Iegādāts šajā ierīcē. Izveido bezmaksas kontu, lai skaitītu rezultātu un izmantotu savu dalību visur.",
     "pay.detail.choose": "Izvēlies caurlaidi vai dalību, lai atbloķētu pilnu Clarity Caddy piekļuvi.",
+    "pay.detail.garminFounder": "„Manuāla iestatīšana“ ir tava uz visiem laikiem. Dalība pievieno treniņu datus un pilnu Bubble centra iestatījumu.",
     "pay.detail.chooseNoAccount": "Izvēlies caurlaidi vai dalību. Pirkšanai konts nav vajadzīgs.",
     "pay.badge.monthPass": "Mēneša caurlaide",
     "pay.badge.member": "Dalībnieks",
@@ -442,6 +444,7 @@
     "pay.cancelled": "Apmaksa atcelta",
     "pay.portalUpdated": "Dalības iestatījumi atjaunināti",
     "pay.need.saveBubble": "Lai saglabātu savu Bubble, vajadzīga Clarity dalība.",
+    "pay.need.starterBubble": "Lai paturētu ar funkciju „Manuāla iestatīšana“ izveidotu Bubble, vajadzīga Clarity dalība vai pievienots Garmin pulkstenis.",
     "pay.need.adoptBubble": "Lai pārņemtu Bubble no saviem datiem, vajadzīga Clarity dalība.",
     "pay.need.practiceToBag": "Lai piemērotu treniņu attālumus savai somai, vajadzīga Clarity dalība.",
     "pay.need.bubbleCentre": "Lai iestatītu savu Bubble centru, vajadzīga Clarity dalība.",
@@ -1316,6 +1319,25 @@
     "garmin.couldNotLook": "Neizdevās meklēt pulksteņus.",
     "garmin.watchConnected": "Pulkstenis savienots.",
     "garmin.couldNotConnect": "Šo pulksteni neizdevās savienot.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Garmin dibinātājbiedrs",
+    "garminFounder.perks": "„Manuāla iestatīšana“ ir atbloķēta uz visiem laikiem: novieto savu Bubble pēc savas somas, un tas pielāgojas katram attālumam.",
+    "garminFounder.pending": "Tiklīdz Clarity Caddy darbosies tavā Garmin, tu kļūsi par Garmin dibinātājbiedru un „Manuāla iestatīšana“ tiks atbloķēta uz visiem laikiem.",
+    "garminFounder.signIn": "Pieraksties un pievieno savu Garmin, lai kļūtu par Garmin dibinātājbiedru un uz visiem laikiem atbloķētu funkciju „Manuāla iestatīšana“.",
+    "garminFounder.feedback": "Sūtīt atsauksmi par Garmin",
+    "garminFounder.welcome": "Tu esi Garmin dibinātājbiedrs. „Manuāla iestatīšana“ ir atbloķēta uz visiem laikiem.",
+    "garminFounder.askTitle": "Kā veicās ar tavu Garmin?",
+    "garminFounder.askBody": "Tu esi viens no pirmajiem, kas spēlē Clarity Caddy ar Garmin. Pastāsti, kas strādāja un kas ne. Tas nonāk tieši pie komandas.",
+    "garminFounder.askLater": "Ne tagad",
+    "garminFounder.askSend": "Sūtīt atsauksmi",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Atsauksme par Garmin",
+    "garminFeedback.intro": "Pastāsti, kā Clarity Caddy darbojās tavā pulkstenī. Pievienojam drošu atkļūdošanas informāciju, lai varētu to izpētīt.",
+    "garminFeedback.happened": "Kā veicās?",
+    "garminFeedback.expected": "Kas to uzlabotu?",
+    "garminFeedback.send": "Sūtīt atsauksmi",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "Vēl nav treniņu datu. Importē sesiju, un tas pats modelis tiks parādīts, projicēts caur visu somu.",

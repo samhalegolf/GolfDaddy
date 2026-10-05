@@ -1,3 +1,5 @@
+var GARMIN_FEEDBACK_SOURCE = "clarity-caddy-garmin-feedback";
+
 exports.handler = async function(event){
   if(event.httpMethod !== "POST"){
     return json(405, {error: "Method not allowed"});
@@ -21,7 +23,9 @@ exports.handler = async function(event){
     contact: text(payload.contact, 240),
     context: sanitizeContext(payload.context || {}),
     status: "new",
-    source: "clarity-caddie-beta-report",
+    /* Garmin feedback uses the same form and table, tagged so it can be read
+       on its own. Any other topic value is ignored. */
+    source: payload.topic === "garmin" ? GARMIN_FEEDBACK_SOURCE : "clarity-caddie-beta-report",
     created_at: new Date().toISOString()
   };
 
@@ -155,7 +159,11 @@ function sanitizeContext(context){
     lastAction: sanitizeLastAction(context.lastAction),
     localStorageSummary: sanitizeArray(context.localStorageSummary, 80, sanitizeStorageRow),
     sessionStorageSummary: sanitizeArray(context.sessionStorageSummary, 80, sanitizeStorageRow),
-    recentErrors: sanitizeArray(context.recentErrors, 12, sanitizeErrorRow)
+    recentErrors: sanitizeArray(context.recentErrors, 12, sanitizeErrorRow),
+    garmin: context.garmin && typeof context.garmin === "object" ? {
+      deviceModel: text(context.garmin.deviceModel, 80),
+      founder: context.garmin.founder === true
+    } : null
   };
 }
 
@@ -203,9 +211,11 @@ function sanitizeErrorRow(row){
 function renderDebugEmail(ticket, ticketId){
   var context = ticket.context || {};
   var build = context.build || {};
-  var subject = "Clarity Caddy beta report" + (context.route ? " · " + context.route : "") + (ticketId ? " · " + ticketId : "");
+  var garmin = ticket.source === GARMIN_FEEDBACK_SOURCE;
+  var subject = (garmin ? "Clarity Caddy Garmin feedback" : "Clarity Caddy beta report") + (context.route ? " · " + context.route : "") + (ticketId ? " · " + ticketId : "");
   var details = [
     ["Ticket", ticketId || "email-only"],
+    ["Type", garmin ? "Garmin feedback" + (context.garmin && context.garmin.deviceModel ? " · " + context.garmin.deviceModel : "") : "Beta report"],
     ["Created", ticket.created_at],
     ["Contact", ticket.contact || "not provided"],
     ["Route", context.route || "unknown"],

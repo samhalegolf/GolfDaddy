@@ -362,6 +362,7 @@
     "pay.status.paidActive": "Acceso de pago activo",
     "pay.status.notConfigured": "Pagos aún no configurados",
     "pay.status.free": "Acceso gratuito",
+    "pay.status.garminFounder": "Miembro fundador Garmin",
     "pay.detail.connectionIssue": "No hemos podido confirmar tu acceso de pago. Las funciones de pago siguen bloqueadas hasta que se confirme.",
     "pay.detail.checking": "Comprobando el estado del pago...",
     "pay.detail.renewsOn": "Se renueva: {date}.",
@@ -378,6 +379,7 @@
     "pay.detail.chooseContinue": "Elige cómo quieres continuar.",
     "pay.detail.boughtOnDevice": "Comprado en este dispositivo. Crea una cuenta gratuita para apuntar tu resultado y usar tu membresía en todas partes.",
     "pay.detail.choose": "Elige un pase o una membresía para desbloquear el acceso completo a Clarity Caddy.",
+    "pay.detail.garminFounder": "«Ajuste manual» es tuyo para siempre. Una membresía añade datos de práctica y el ajuste completo del centro del Bubble.",
     "pay.detail.chooseNoAccount": "Elige un pase o una membresía. No necesitas cuenta para comprar.",
     "pay.badge.monthPass": "Pase mensual",
     "pay.badge.member": "Miembro",
@@ -434,6 +436,7 @@
     "pay.cancelled": "Pago cancelado",
     "pay.portalUpdated": "Ajustes de la membresía actualizados",
     "pay.need.saveBubble": "Necesitas una membresía de Clarity para guardar tu propio Bubble.",
+    "pay.need.starterBubble": "Necesitas una membresía de Clarity, o conectar un reloj Garmin, para conservar un Bubble de «Ajuste manual».",
     "pay.need.adoptBubble": "Necesitas una membresía de Clarity para adoptar un Bubble a partir de tus propios datos.",
     "pay.need.practiceToBag": "Necesitas una membresía de Clarity para aplicar las distancias de práctica a tu bolsa.",
     "pay.need.bubbleCentre": "Necesitas una membresía de Clarity para fijar tu propio centro del Bubble.",
@@ -1283,6 +1286,25 @@
     "garmin.couldNotLook": "No se pudieron buscar relojes.",
     "garmin.watchConnected": "Reloj conectado.",
     "garmin.couldNotConnect": "No se pudo conectar ese reloj.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Miembro fundador Garmin",
+    "garminFounder.perks": "«Ajuste manual» queda desbloqueado para siempre: coloca tu Bubble a partir de tu propia bolsa y se adapta a cada distancia.",
+    "garminFounder.pending": "En cuanto Clarity Caddy funcione en tu Garmin, te conviertes en Miembro fundador Garmin y «Ajuste manual» se desbloquea para siempre.",
+    "garminFounder.signIn": "Inicia sesión y conecta tu Garmin para convertirte en Miembro fundador Garmin y desbloquear «Ajuste manual» para siempre.",
+    "garminFounder.feedback": "Enviar comentarios sobre Garmin",
+    "garminFounder.welcome": "Eres Miembro fundador Garmin. «Ajuste manual» está desbloqueado para siempre.",
+    "garminFounder.askTitle": "¿Qué tal te fue con tu Garmin?",
+    "garminFounder.askBody": "Eres de los primeros en jugar con Clarity Caddy en un Garmin. Cuéntanos qué funcionó y qué no. Llega directamente al equipo.",
+    "garminFounder.askLater": "Ahora no",
+    "garminFounder.askSend": "Enviar comentarios",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Comentarios sobre Garmin",
+    "garminFeedback.intro": "Cuéntanos cómo fue Clarity Caddy en tu reloj. Se adjuntan datos de depuración seguros para que podamos hacer un seguimiento.",
+    "garminFeedback.happened": "¿Cómo fue?",
+    "garminFeedback.expected": "¿Qué lo mejoraría?",
+    "garminFeedback.send": "Enviar comentarios",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "Aún no hay datos de práctica. Importa una sesión y verás el mismo modelo proyectado a través de la bolsa.",

@@ -366,6 +366,7 @@
     "pay.status.paidActive": "Placený přístup aktivní",
     "pay.status.notConfigured": "Platby zatím nejsou nastavené",
     "pay.status.free": "Bezplatný přístup",
+    "pay.status.garminFounder": "Zakládající člen Garmin",
     "pay.detail.connectionIssue": "Nepodařilo se ověřit tvůj placený přístup. Placené funkce zůstanou zamčené, dokud nebude ověřen.",
     "pay.detail.checking": "Kontrola stavu platby...",
     "pay.detail.renewsOn": "Obnovení: {date}.",
@@ -382,6 +383,7 @@
     "pay.detail.chooseContinue": "Vyber si, jak chceš pokračovat.",
     "pay.detail.boughtOnDevice": "Zakoupeno na tomto zařízení. Vytvoř si bezplatný účet a zapisuj skóre a používej členství všude.",
     "pay.detail.choose": "Vyber si permanentku nebo členství a odemkni plný přístup ke Clarity Caddy.",
+    "pay.detail.garminFounder": "„Ruční nastavení“ ti zůstane natrvalo. Členství přidá tréninková data a plné nastavení středu Bubble.",
     "pay.detail.chooseNoAccount": "Vyber si permanentku nebo členství. K nákupu nepotřebuješ účet.",
     "pay.badge.monthPass": "Měsíční permanentka",
     "pay.badge.member": "Člen",
@@ -442,6 +444,7 @@
     "pay.cancelled": "Platba zrušena",
     "pay.portalUpdated": "Nastavení členství aktualizováno",
     "pay.need.saveBubble": "K uložení vlastního Bubble potřebuješ členství Clarity.",
+    "pay.need.starterBubble": "K ponechání Bubble z funkce „Ruční nastavení“ potřebuješ členství Clarity nebo připojené hodinky Garmin.",
     "pay.need.adoptBubble": "K převzetí Bubble z vlastních dat potřebuješ členství Clarity.",
     "pay.need.practiceToBag": "K použití tréninkových vzdáleností v bagu potřebuješ členství Clarity.",
     "pay.need.bubbleCentre": "K nastavení vlastního středu Bubble potřebuješ členství Clarity.",
@@ -1316,6 +1319,25 @@
     "garmin.couldNotLook": "Hodinky se nepodařilo vyhledat.",
     "garmin.watchConnected": "Hodinky připojeny.",
     "garmin.couldNotConnect": "Tyto hodinky se nepodařilo připojit.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Zakládající člen Garmin",
+    "garminFounder.perks": "„Ruční nastavení“ je natrvalo odemčené: umísti svůj Bubble podle vlastního bagu a přizpůsobí se každé vzdálenosti.",
+    "garminFounder.pending": "Jakmile Clarity Caddy poběží na tvých hodinkách Garmin, staneš se zakládajícím členem Garmin a „Ruční nastavení“ se natrvalo odemkne.",
+    "garminFounder.signIn": "Přihlas se a připoj hodinky Garmin, staň se zakládajícím členem Garmin a natrvalo odemkni „Ruční nastavení“.",
+    "garminFounder.feedback": "Poslat zpětnou vazbu ke Garminu",
+    "garminFounder.welcome": "Jsi zakládající člen Garmin. „Ruční nastavení“ je natrvalo odemčené.",
+    "garminFounder.askTitle": "Jak se ti hrálo s Garminem?",
+    "garminFounder.askBody": "Patříš mezi první, kdo hrají s Clarity Caddy na Garminu. Řekni nám, co fungovalo a co ne. Jde to přímo k týmu.",
+    "garminFounder.askLater": "Teď ne",
+    "garminFounder.askSend": "Poslat zpětnou vazbu",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Zpětná vazba ke Garminu",
+    "garminFeedback.intro": "Řekni nám, jak Clarity Caddy fungovala na tvých hodinkách. Přikládáme bezpečné ladicí údaje, abychom se ti mohli ozvat.",
+    "garminFeedback.happened": "Jak to šlo?",
+    "garminFeedback.expected": "Co by to vylepšilo?",
+    "garminFeedback.send": "Poslat zpětnou vazbu",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "Zatím žádná tréninková data. Importuj trénink a stejný model se zobrazí promítnutý přes celý bag.",

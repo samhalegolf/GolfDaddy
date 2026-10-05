@@ -225,6 +225,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/garmin-founder"
+  to = "/.netlify/functions/garmin-founder"
+  status = 200
+
+[[redirects]]
   from = "/api/referrals"
   to = "/.netlify/functions/referrals"
   status = 200

@@ -362,6 +362,7 @@
     "pay.status.paidActive": "Betald tillgång aktiv",
     "pay.status.notConfigured": "Betalningar är inte konfigurerade än",
     "pay.status.free": "Gratis tillgång",
+    "pay.status.garminFounder": "Garmin Founder",
     "pay.detail.connectionIssue": "Vi kunde inte bekräfta din betalda tillgång. Betalfunktioner förblir låsta tills den har bekräftats.",
     "pay.detail.checking": "Kontrollerar betalningsstatus...",
     "pay.detail.renewsOn": "Förnyas {date}.",
@@ -378,6 +379,7 @@
     "pay.detail.chooseContinue": "Välj hur du vill fortsätta.",
     "pay.detail.boughtOnDevice": "Köpt på den här enheten. Skapa ett gratiskonto för att föra score och använda ditt medlemskap överallt.",
     "pay.detail.choose": "Välj ett kort eller ett medlemskap för att låsa upp full tillgång till Clarity Caddy.",
+    "pay.detail.garminFounder": "Ange manuellt är ditt för gott. Ett medlemskap ger träningsdata och den fullständiga inställningen för bubble-mittpunkten.",
     "pay.detail.chooseNoAccount": "Välj ett kort eller ett medlemskap. Du behöver inget konto för att köpa.",
     "pay.badge.monthPass": "Månadskort",
     "pay.badge.member": "Medlem",
@@ -434,6 +436,7 @@
     "pay.cancelled": "Betalningen avbröts",
     "pay.portalUpdated": "Inställningarna för medlemskapet har uppdaterats",
     "pay.need.saveBubble": "Du behöver ett Clarity-medlemskap för att spara din egen bubble.",
+    "pay.need.starterBubble": "Du behöver ett Clarity-medlemskap eller en ansluten Garmin-klocka för att behålla en Bubble från Ange manuellt.",
     "pay.need.adoptBubble": "Du behöver ett Clarity-medlemskap för att ta i bruk en bubble från dina egna data.",
     "pay.need.practiceToBag": "Du behöver ett Clarity-medlemskap för att använda träningsavstånd i din bag.",
     "pay.need.bubbleCentre": "Du behöver ett Clarity-medlemskap för att ställa in din egen bubble-mittpunkt.",
@@ -1283,6 +1286,25 @@
     "garmin.couldNotLook": "Det gick inte att söka efter klockor.",
     "garmin.watchConnected": "Klockan är ansluten.",
     "garmin.couldNotConnect": "Det gick inte att ansluta den klockan.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Garmin Founder",
+    "garminFounder.perks": "Ange manuellt är upplåst för gott: placera din Bubble utifrån din egen bag så skalas den till alla avstånd.",
+    "garminFounder.pending": "Så snart Clarity Caddy körs på din Garmin-klocka blir du Garmin Founder och Ange manuellt låses upp för gott.",
+    "garminFounder.signIn": "Logga in och anslut din Garmin-klocka för att bli Garmin Founder och låsa upp Ange manuellt för gott.",
+    "garminFounder.feedback": "Skicka Garmin-feedback",
+    "garminFounder.welcome": "Du är Garmin Founder. Ange manuellt är upplåst för gott.",
+    "garminFounder.askTitle": "Hur gick det med din Garmin-klocka?",
+    "garminFounder.askBody": "Du är en av de första som spelar Clarity Caddy på en Garmin. Berätta vad som fungerade och vad som inte gjorde det. Det går direkt till teamet.",
+    "garminFounder.askLater": "Inte nu",
+    "garminFounder.askSend": "Skicka feedback",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Garmin-feedback",
+    "garminFeedback.intro": "Berätta hur Clarity Caddy fungerade på din klocka. Säkra felsökningsuppgifter bifogas så att vi kan följa upp.",
+    "garminFeedback.happened": "Hur gick det?",
+    "garminFeedback.expected": "Vad skulle göra det bättre?",
+    "garminFeedback.send": "Skicka feedback",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "Inga träningsdata än. Importera ett pass så visas samma modell projicerad genom bagen.",

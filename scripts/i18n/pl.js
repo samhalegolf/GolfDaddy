@@ -370,6 +370,7 @@
     "pay.status.paidActive": "Płatny dostęp aktywny",
     "pay.status.notConfigured": "Płatności nie są jeszcze skonfigurowane",
     "pay.status.free": "Dostęp bezpłatny",
+    "pay.status.garminFounder": "Członek założyciel Garmin",
     "pay.detail.connectionIssue": "Nie udało się potwierdzić twojego płatnego dostępu. Płatne funkcje pozostaną zablokowane, dopóki nie zostanie potwierdzony.",
     "pay.detail.checking": "Sprawdzanie statusu płatności...",
     "pay.detail.renewsOn": "Odnowienie: {date}.",
@@ -386,6 +387,7 @@
     "pay.detail.chooseContinue": "Wybierz, jak chcesz kontynuować.",
     "pay.detail.boughtOnDevice": "Kupiono na tym urządzeniu. Załóż darmowe konto, aby zapisywać wyniki i korzystać z członkostwa wszędzie.",
     "pay.detail.choose": "Wybierz karnet lub członkostwo, aby odblokować pełny dostęp do Clarity Caddy.",
+    "pay.detail.garminFounder": "Funkcja „Ustaw ręcznie” jest twoja na stałe. Członkostwo dodaje dane treningowe i pełne ustawienie środka Bubble.",
     "pay.detail.chooseNoAccount": "Wybierz karnet lub członkostwo. Do zakupu nie potrzebujesz konta.",
     "pay.badge.monthPass": "Karnet miesięczny",
     "pay.badge.member": "Członek",
@@ -450,6 +452,7 @@
     "pay.cancelled": "Płatność anulowana",
     "pay.portalUpdated": "Ustawienia członkostwa zaktualizowane",
     "pay.need.saveBubble": "Do zapisania własnego Bubble potrzebne jest członkostwo Clarity.",
+    "pay.need.starterBubble": "Do zachowania Bubble z funkcji „Ustaw ręcznie” potrzebne jest członkostwo Clarity lub połączony zegarek Garmin.",
     "pay.need.adoptBubble": "Do przyjęcia Bubble opartego na własnych danych potrzebne jest członkostwo Clarity.",
     "pay.need.practiceToBag": "Do zastosowania odległości treningowych w torbie potrzebne jest członkostwo Clarity.",
     "pay.need.bubbleCentre": "Do ustawienia własnego środka Bubble potrzebne jest członkostwo Clarity.",
@@ -1349,6 +1352,25 @@
     "garmin.couldNotLook": "Nie udało się wyszukać zegarków.",
     "garmin.watchConnected": "Zegarek połączony.",
     "garmin.couldNotConnect": "Nie udało się połączyć tego zegarka.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Członek założyciel Garmin",
+    "garminFounder.perks": "Funkcja „Ustaw ręcznie” jest odblokowana na stałe: umieść swój Bubble na podstawie własnej torby, a dopasuje się do każdego dystansu.",
+    "garminFounder.pending": "Gdy Clarity Caddy zacznie działać na twoim Garminie, zostaniesz członkiem założycielem Garmin, a funkcja „Ustaw ręcznie” odblokuje się na stałe.",
+    "garminFounder.signIn": "Zaloguj się i połącz swojego Garmina, aby zostać członkiem założycielem Garmin i na stałe odblokować funkcję „Ustaw ręcznie”.",
+    "garminFounder.feedback": "Wyślij opinię o Garminie",
+    "garminFounder.welcome": "Jesteś członkiem założycielem Garmin. Funkcja „Ustaw ręcznie” jest odblokowana na stałe.",
+    "garminFounder.askTitle": "Jak poszło z twoim Garminem?",
+    "garminFounder.askBody": "Jesteś jednym z pierwszych, którzy grają z Clarity Caddy na Garminie. Powiedz nam, co działało, a co nie. Trafia to prosto do zespołu.",
+    "garminFounder.askLater": "Nie teraz",
+    "garminFounder.askSend": "Wyślij opinię",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Opinia o Garminie",
+    "garminFeedback.intro": "Powiedz nam, jak Clarity Caddy działał na twoim zegarku. Dołączamy bezpieczne dane diagnostyczne, abyśmy mogli to sprawdzić.",
+    "garminFeedback.happened": "Jak poszło?",
+    "garminFeedback.expected": "Co by to poprawiło?",
+    "garminFeedback.send": "Wyślij opinię",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "Brak jeszcze danych treningowych. Zaimportuj sesję, a ten sam model zostanie pokazany w projekcji na całą torbę.",

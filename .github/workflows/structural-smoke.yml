@@ -82,6 +82,7 @@ jobs:
           node dev/referral-invite-target.test.js
           node dev/payment-checkout-client.test.js
           node dev/payment-entitlement-auth.test.js
+          node dev/garmin-founder.test.js
           node dev/store-referral-reversal.test.js
           node dev/email-public-url.test.js
           node dev/auth-refresh-resilience.test.js

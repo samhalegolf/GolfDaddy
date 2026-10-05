@@ -362,6 +362,7 @@
     "pay.status.paidActive": "Maksettu käyttöoikeus voimassa",
     "pay.status.notConfigured": "Maksuja ei ole vielä määritetty",
     "pay.status.free": "Ilmainen käyttö",
+    "pay.status.garminFounder": "Garmin-perustajajäsen",
     "pay.detail.connectionIssue": "Emme voineet vahvistaa maksettua käyttöoikeuttasi. Maksulliset ominaisuudet pysyvät lukittuina, kunnes se on vahvistettu.",
     "pay.detail.checking": "Tarkistetaan maksun tilaa...",
     "pay.detail.renewsOn": "Uusiutuu {date}.",
@@ -378,6 +379,7 @@
     "pay.detail.chooseContinue": "Valitse, miten haluat jatkaa.",
     "pay.detail.boughtOnDevice": "Ostettu tällä laitteella. Luo ilmainen tili, niin voit kirjata tuloksia ja käyttää jäsenyyttäsi kaikkialla.",
     "pay.detail.choose": "Valitse passi tai jäsenyys saadaksesi Clarity Caddyn täyden käyttöoikeuden.",
+    "pay.detail.garminFounder": "Manuaalinen asetus on sinun pysyvästi. Jäsenyys tuo lisäksi harjoitustiedot ja täyden Bubblen keskipisteen asetuksen.",
     "pay.detail.chooseNoAccount": "Valitse passi tai jäsenyys. Ostaminen ei vaadi tiliä.",
     "pay.badge.monthPass": "Kuukausipassi",
     "pay.badge.member": "Jäsen",
@@ -434,6 +436,7 @@
     "pay.cancelled": "Maksu peruttu",
     "pay.portalUpdated": "Jäsenyyden asetukset päivitetty",
     "pay.need.saveBubble": "Oman bubblen tallentaminen vaatii Clarity-jäsenyyden.",
+    "pay.need.starterBubble": "Toiminnolla Manuaalinen asetus tehdyn Bubblen säilyttäminen vaatii Clarity-jäsenyyden tai yhdistetyn Garmin-kellon.",
     "pay.need.adoptBubble": "Bubblen ottaminen käyttöön omista tiedoistasi vaatii Clarity-jäsenyyden.",
     "pay.need.practiceToBag": "Harjoitusmatkojen käyttäminen bägissäsi vaatii Clarity-jäsenyyden.",
     "pay.need.bubbleCentre": "Oman bubble-keskipisteen asettaminen vaatii Clarity-jäsenyyden.",
@@ -1283,6 +1286,25 @@
     "garmin.couldNotLook": "Kelloja ei voitu etsiä.",
     "garmin.watchConnected": "Kello yhdistetty.",
     "garmin.couldNotConnect": "Kelloa ei voitu yhdistää.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Garmin-perustajajäsen",
+    "garminFounder.perks": "Manuaalinen asetus on avattu pysyvästi: sijoita Bubble oman bägisi perusteella, ja se skaalautuu jokaiselle etäisyydelle.",
+    "garminFounder.pending": "Kun Clarity Caddy toimii Garminissasi, sinusta tulee Garmin-perustajajäsen ja Manuaalinen asetus avautuu pysyvästi.",
+    "garminFounder.signIn": "Kirjaudu sisään ja yhdistä Garminisi, niin sinusta tulee Garmin-perustajajäsen ja Manuaalinen asetus avautuu pysyvästi.",
+    "garminFounder.feedback": "Lähetä Garmin-palautetta",
+    "garminFounder.welcome": "Olet Garmin-perustajajäsen. Manuaalinen asetus on avattu pysyvästi.",
+    "garminFounder.askTitle": "Miten Garminisi kanssa meni?",
+    "garminFounder.askBody": "Olet ensimmäisten joukossa pelaamassa Clarity Caddya Garminilla. Kerro, mikä toimi ja mikä ei. Viesti menee suoraan tiimille.",
+    "garminFounder.askLater": "Ei nyt",
+    "garminFounder.askSend": "Lähetä palautetta",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Garmin-palaute",
+    "garminFeedback.intro": "Kerro, miten Clarity Caddy toimi kellossasi. Mukaan liitetään turvalliset vianetsintätiedot, jotta voimme selvittää asiaa.",
+    "garminFeedback.happened": "Miten meni?",
+    "garminFeedback.expected": "Mikä tekisi siitä paremman?",
+    "garminFeedback.send": "Lähetä palautetta",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "Harjoitustietoja ei vielä ole. Tuo harjoituskerta, niin sama malli näytetään bägin läpi projisoituna.",
