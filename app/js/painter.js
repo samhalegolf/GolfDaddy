@@ -922,6 +922,8 @@
     return {
       water: state.water.map(cut).filter(Boolean),
       bunkers: state.bunkers.map(cut).filter(Boolean),
+      trees: (state.trees || []).map(cut).filter(Boolean),
+      hazards: (state.hazards || []).map(cut).filter(Boolean),
       offFairway: !!state.offFairway
     };
   }

@@ -19,7 +19,7 @@
 
    The worker itself is functions/course-mapper-worker-background.mjs. */
 
-import { MAPPER_VERSION, SURFACE_TYPES } from "./lib/gd-automapper-core.mjs";
+import { MAPPER_VERSION, SURFACE_TYPES, HAND_DRAWN_SURFACE_TYPES } from "./lib/gd-automapper-core.mjs";
 import { findDuplicateCourseWithGeometry } from "./lib/gd-duplicate-course-guard.mjs";
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
@@ -513,7 +513,7 @@ async function enqueueShapeRefineJob({ courseId, actor, origin }) {
   const map = Array.isArray(mapRows) ? mapRows[0] : null;
   if (!map) return { missing: true };
   const surfaces = Object.values(map.objects_json || {})
-    .filter(o => o && SURFACE_TYPES.has(o.type) && Array.isArray(o.shape) && o.shape.length >= 3);
+    .filter(o => o && SURFACE_TYPES.has(o.type) && !HAND_DRAWN_SURFACE_TYPES.has(o.type) && Array.isArray(o.shape) && o.shape.length >= 3);
   if (!surfaces.length) return { noSurfaces: true };
   const assets = (Array.isArray(visualRows) ? visualRows[0] : null);
   const frames = ((assets && assets.uploaded_assets) || [])

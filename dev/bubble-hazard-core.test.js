@@ -146,9 +146,27 @@ test("bubbleSurfaceState: a course with no fairway surfaces never warns", () => 
   assert.strictEqual(state.offFairway, false);
 });
 
+test("trees and hazard: collected into their own buckets, revealed when the bubble is over them", () => {
+  const surfaces = core.collectSurfaces([
+    { type: "trees", shape: circle(0, 0, 20) },
+    { type: "hazard", shape: circle(0, 200, 10) }
+  ]);
+  assert.strictEqual(surfaces.trees.length, 1);
+  assert.strictEqual(surfaces.hazards.length, 1);
+  assert.ok(core.hasAnySurface({ trees: surfaces.trees }), "trees alone are something to reveal");
+  const inTrees = core.bubbleSurfaceState(circle(0, 10, 5), surfaces);
+  assert.strictEqual(inTrees.trees.length, 1);
+  assert.strictEqual(inTrees.hazards.length, 0);
+  const inHazard = core.bubbleSurfaceState(circle(0, 200, 5), surfaces);
+  assert.strictEqual(inHazard.hazards.length, 1);
+  const pkg = core.collectPackageSurfaces({ status: "lite", holes: [{ holeNumber: 1, surfaces: { trees: [{ shape: circle(0, 0, 20) }], hazards: [{ shape: circle(0, 200, 10) }] } }] });
+  assert.strictEqual(pkg.trees.length, 1, "the /app/ shell reads trees off the package");
+  assert.strictEqual(pkg.hazards.length, 1);
+});
+
 test("bubbleSurfaceState: garbage in, empty state out", () => {
   const state = core.bubbleSurfaceState(null, HOLE);
-  assert.deepStrictEqual(state, { bunkers: [], water: [], hasFairways: false, onFairway: false, onGreen: false, offFairway: false });
+  assert.deepStrictEqual(state, { bunkers: [], water: [], trees: [], hazards: [], hasFairways: false, onFairway: false, onGreen: false, offFairway: false });
   assert.strictEqual(core.bubbleSurfaceState(circle(0, 0, 5), null).offFairway, false);
 });
 

@@ -272,13 +272,26 @@
       }
     }
     if (!overlap) return null;
+    var best = traceLargestLoop(filled, w, h);
+    if (!best) return null;
+    best = best.map(function (g) { return { x: x0 + g.x * cell, y: y0 + g.y * cell }; });
+    if (!best) return null;
+    var tol = cell * 0.75;
+    var out = simplifyRing(best, tol);
+    while (out.length > MERGE_MAX_POINTS) { tol *= 1.5; out = simplifyRing(best, tol); }
+    return out.length >= 3 ? out.map(f.toLL) : null;
+  }
+
+  /* The outer edge of the biggest filled region on a w x h grid of 0/1 cells, as grid corners
+     ({x, y} in cell units, corner (0,0) at the grid's top-left). Every cell side between filled
+     and empty is an edge, walked with the filled cell on its left, so edges chain head to tail
+     into closed loops; the loop of largest area is the outer edge. */
+  function traceLargestLoop(filled, w, h) {
     function on(gx, gy) { return gx >= 0 && gy >= 0 && gx < w && gy < h && filled[gy * w + gx] === 1; }
-    /* Every cell side between filled and empty is an edge, walked with the filled cell on its
-       left, so edges chain head to tail into closed loops. Corners are grid points (gx, gy). */
     var next = {};
     function edge(ax, ay, bx, by) { var k = ax + "," + ay; (next[k] = next[k] || []).push([bx, by]); }
-    for (gy = 0; gy < h; gy++) {
-      for (gx = 0; gx < w; gx++) {
+    for (var gy = 0; gy < h; gy++) {
+      for (var gx = 0; gx < w; gx++) {
         if (!on(gx, gy)) continue;
         if (!on(gx, gy - 1)) edge(gx, gy, gx + 1, gy);
         if (!on(gx + 1, gy)) edge(gx + 1, gy, gx + 1, gy + 1);
@@ -293,18 +306,245 @@
         while (next[key] && next[key].length) {
           var to = next[key].pop();
           var xy = key.split(",");
-          loop.push({ x: x0 + Number(xy[0]) * cell, y: y0 + Number(xy[1]) * cell });
+          loop.push({ x: Number(xy[0]), y: Number(xy[1]) });
           key = to[0] + "," + to[1];
         }
         var area = Math.abs(ringArea(loop));
         if (loop.length >= 3 && area > bestArea) { bestArea = area; best = loop; }
       }
     });
-    if (!best) return null;
-    var tol = cell * 0.75;
-    var out = simplifyRing(best, tol);
-    while (out.length > MERGE_MAX_POINTS) { tol *= 1.5; out = simplifyRing(best, tol); }
-    return out.length >= 3 ? out.map(f.toLL) : null;
+    return best;
+  }
+
+  /* ---- the line wand ----
+     A line laid down the middle of a fairway, a creek or a long bunker, grown outward to the
+     surface's edge. The point wand (server-side) is a bubble round one centre, so it can only
+     find a roughly round shape; this grows from every pixel under the line instead, so it
+     follows whatever the line runs through.
+
+     It reads the colour UNDER the line as the surface (median, with its spread), and takes in
+     every connected pixel close enough to that colour, out to `reachPx` from the line. Each
+     tolerance in LINE_WAND_LEVELS is one candidate edge, weakest reach first - what left and
+     right step through, exactly like the point wand's candidates. The picture is blurred first
+     so mowing stripes, a sprinkler head or a pitch mark do not read as edges; a thin leak (a
+     path, a run-off) is pinched off by an opening; holes inside (a tree shadow) are filled.
+
+     Like the point wand, this is a first draft for a person to drag into shape: it trusts the
+     line to be on the surface, and a fairway running into rough of the same colour will run
+     out to the reach. */
+  var LINE_WAND_LEVELS = [1.6, 2.2, 2.9, 3.7, 4.6, 5.8];
+  var LINE_WAND_MAX_POINTS = 48;
+  /* Share of a region's edge lying on the reach limit past which it counts as leaked. */
+  var LINE_WAND_LEAK_SHARE = 0.12;
+
+  function boxBlur(src, w, h, r) {
+    if (r < 1) return src;
+    var tmp = new Float32Array(w * h), out = new Float32Array(w * h);
+    var x, y, acc, n;
+    for (y = 0; y < h; y++) {
+      var row = y * w; acc = 0; n = 0;
+      for (x = -r; x <= r; x++) if (x >= 0 && x < w) { acc += src[row + x]; n++; }
+      for (x = 0; x < w; x++) {
+        tmp[row + x] = acc / n;
+        var add = x + r + 1, drop = x - r;
+        if (add < w) { acc += src[row + add]; n++; }
+        if (drop >= 0) { acc -= src[row + drop]; n--; }
+      }
+    }
+    for (x = 0; x < w; x++) {
+      acc = 0; n = 0;
+      for (y = -r; y <= r; y++) if (y >= 0 && y < h) { acc += tmp[y * w + x]; n++; }
+      for (y = 0; y < h; y++) {
+        out[y * w + x] = acc / n;
+        var addY = y + r + 1, dropY = y - r;
+        if (addY < h) { acc += tmp[addY * w + x]; n++; }
+        if (dropY >= 0) { acc -= tmp[dropY * w + x]; n--; }
+      }
+    }
+    return out;
+  }
+
+  /* A binary mask grown (dilate) or shrunk (erode) by a square of radius r, via a running count. */
+  function morph(mask, w, h, r, dilate) {
+    if (r < 1) return mask;
+    var src = new Float32Array(w * h);
+    for (var i = 0; i < mask.length; i++) src[i] = mask[i];
+    var avg = boxBlur(src, w, h, r);
+    var out = new Uint8Array(w * h);
+    for (i = 0; i < out.length; i++) out[i] = dilate ? (avg[i] > 1e-6 ? 1 : 0) : (avg[i] > 1 - 1e-6 ? 1 : 0);
+    return out;
+  }
+
+  /* Pixels connected to any seed, through cells `ok` allows. */
+  function connected(ok, w, h, seeds) {
+    var out = new Uint8Array(w * h), queue = new Int32Array(w * h), head = 0, tail = 0;
+    seeds.forEach(function (i) { if (ok[i] && !out[i]) { out[i] = 1; queue[tail++] = i; } });
+    while (head < tail) {
+      var i = queue[head++], x = i % w, y = (i - x) / w;
+      if (x > 0 && ok[i - 1] && !out[i - 1]) { out[i - 1] = 1; queue[tail++] = i - 1; }
+      if (x < w - 1 && ok[i + 1] && !out[i + 1]) { out[i + 1] = 1; queue[tail++] = i + 1; }
+      if (y > 0 && ok[i - w] && !out[i - w]) { out[i - w] = 1; queue[tail++] = i - w; }
+      if (y < h - 1 && ok[i + w] && !out[i + w]) { out[i + w] = 1; queue[tail++] = i + w; }
+    }
+    return out;
+  }
+
+  function fillHoles(mask, w, h) {
+    var empty = new Uint8Array(w * h), border = [];
+    for (var i = 0; i < mask.length; i++) empty[i] = mask[i] ? 0 : 1;
+    for (var x = 0; x < w; x++) { border.push(x, (h - 1) * w + x); }
+    for (var y = 0; y < h; y++) { border.push(y * w, y * w + w - 1); }
+    var outside = connected(empty, w, h, border);
+    var out = new Uint8Array(w * h);
+    for (i = 0; i < out.length; i++) out[i] = outside[i] ? 0 : 1;
+    return out;
+  }
+
+  function median(values) {
+    var v = values.slice().sort(function (a, b) { return a - b; });
+    return v.length ? v[v.length >> 1] : 0;
+  }
+
+  function segDistSq(px, py, a, b) {
+    var dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+    var t = l2 > 1e-9 ? Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / l2)) : 0;
+    var ex = a.x + t * dx - px, ey = a.y + t * dy - py;
+    return ex * ex + ey * ey;
+  }
+
+  /* image: {width, height, data} RGBA (an ImageData, or anything shaped like one). line: 2+
+     points in that image's pixels. opts: reachPx (how far from the line an edge may be),
+     blurPx (smoothing radius), openPx (the narrowest neck kept), minAreaPx. Returns
+     {candidates: [ring in pixels], areas, pick} or {candidates: [], reason}. */
+  function growFromLine(image, line, opts) {
+    var o = opts || {};
+    var w = image && image.width, h = image && image.height, data = image && image.data;
+    if (!w || !h || !data || !Array.isArray(line) || line.length < 2) return { candidates: [], reason: "no-line" };
+    var reach = Math.max(4, Number(o.reachPx) || 60), reachSq = reach * reach;
+    var n = w * h;
+    /* Brightness counts for less than colour: mowing stripes and cloud shadow move brightness,
+       and the edge of a fairway, a bunker or water is mostly a change of colour. */
+    var L = new Float32Array(n), A = new Float32Array(n), B = new Float32Array(n);
+    for (var i = 0; i < n; i++) {
+      var r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
+      L[i] = (0.299 * r + 0.587 * g + 0.114 * b) * 0.6;
+      A[i] = r - g;
+      B[i] = (r + g) / 2 - b;
+    }
+    var blur = Math.max(0, Math.round(Number(o.blurPx) || 0));
+    L = boxBlur(L, w, h, blur); A = boxBlur(A, w, h, blur); B = boxBlur(B, w, h, blur);
+
+    /* The line, rasterised a pixel at a time, is both the seed and the colour sample. */
+    var seeds = [], seen = {};
+    for (var k = 1; k < line.length; k++) {
+      var a0 = line[k - 1], a1 = line[k];
+      var steps = Math.max(1, Math.ceil(Math.hypot(a1.x - a0.x, a1.y - a0.y)));
+      for (var st = 0; st <= steps; st++) {
+        var sx = Math.round(a0.x + (a1.x - a0.x) * st / steps), sy = Math.round(a0.y + (a1.y - a0.y) * st / steps);
+        if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
+        var si = sy * w + sx;
+        if (!seen[si]) { seen[si] = 1; seeds.push(si); }
+      }
+    }
+    if (seeds.length < 2) return { candidates: [], reason: "line-off-picture" };
+    var ls = [], as = [], bs = [];
+    seeds.forEach(function (si) { ls.push(L[si]); as.push(A[si]); bs.push(B[si]); });
+    var mL = median(ls), mA = median(as), mB = median(bs);
+    /* Spread: median absolute deviation, floored so a perfectly flat sample (open water) still
+       has a tolerance to scale. */
+    var dL = Math.max(3, 1.4826 * median(ls.map(function (v) { return Math.abs(v - mL); })));
+    var dA = Math.max(3, 1.4826 * median(as.map(function (v) { return Math.abs(v - mA); })));
+    var dB = Math.max(3, 1.4826 * median(bs.map(function (v) { return Math.abs(v - mB); })));
+
+    /* Colour distance from the line's colour, in spreads, and whether a pixel is within reach. */
+    var dist = new Float32Array(n);
+    /* Distance to the line, kept so a region that ran all the way out to the reach can be told
+       apart from one that stopped at a real edge. */
+    var lineD = new Float32Array(n);
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    line.forEach(function (p) { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
+    var bx0 = Math.max(0, Math.floor(minX - reach)), by0 = Math.max(0, Math.floor(minY - reach));
+    var bx1 = Math.min(w - 1, Math.ceil(maxX + reach)), by1 = Math.min(h - 1, Math.ceil(maxY + reach));
+    dist.fill(Infinity);
+    for (var y = by0; y <= by1; y++) {
+      for (var x = bx0; x <= bx1; x++) {
+        var nearest = Infinity;
+        for (k = 1; k < line.length; k++) nearest = Math.min(nearest, segDistSq(x, y, line[k - 1], line[k]));
+        if (nearest > reachSq) continue;
+        i = y * w + x;
+        lineD[i] = Math.sqrt(nearest);
+        var eL = (L[i] - mL) / dL, eA = (A[i] - mA) / dA, eB = (B[i] - mB) / dB;
+        dist[i] = Math.sqrt((eL * eL + eA * eA + eB * eB) / 3);
+      }
+    }
+
+    var open = Math.max(0, Math.round(Number(o.openPx) || 0));
+    var minArea = Math.max(16, Number(o.minAreaPx) || 0);
+    var levels = Array.isArray(o.levels) && o.levels.length ? o.levels : LINE_WAND_LEVELS;
+    var leakShare = Number.isFinite(Number(o.leakShare)) && o.leakShare != null ? Number(o.leakShare) : LINE_WAND_LEAK_SHARE;
+    var rings = [];
+    levels.forEach(function (level) {
+      var ok = new Uint8Array(n);
+      for (var j = 0; j < n; j++) ok[j] = dist[j] <= level ? 1 : 0;
+      var mask = connected(ok, w, h, seeds);
+      if (open) {
+        var opened = morph(morph(mask, w, h, open, false), w, h, open, true);
+        for (j = 0; j < n; j++) opened[j] = opened[j] && mask[j] ? 1 : 0;
+        var kept = connected(opened, w, h, seeds);
+        var any = false;
+        for (j = 0; j < n && !any; j++) if (kept[j]) any = true;
+        if (any) mask = kept;
+      }
+      mask = fillHoles(mask, w, h);
+      var area = 0, edge = 0, atReach = 0;
+      for (j = 0; j < n; j++) {
+        if (!mask[j]) continue;
+        area++;
+        var ex = j % w;
+        if ((ex > 0 && !mask[j - 1]) || (ex < w - 1 && !mask[j + 1]) || (j >= w && !mask[j - w]) || (j < n - w && !mask[j + w])) {
+          edge++;
+          if (lineD[j] >= reach - 2) atReach++;
+        }
+      }
+      if (area < minArea) { rings.push(null); return; }
+      var loop = traceLargestLoop(mask, w, h);
+      if (!loop) { rings.push(null); return; }
+      var tol = 0.75, ring = simplifyRing(loop, tol);
+      var cap = Number(o.maxPoints) || LINE_WAND_MAX_POINTS;
+      while (ring.length > cap) { tol *= 1.5; ring = simplifyRing(loop, tol); }
+      /* Leaked: a good share of its edge is the reach limit, not anything in the picture. */
+      rings.push(ring.length >= 3 ? { ring: ring, area: area, leaked: edge > 0 && atReach / edge > leakShare } : null);
+    });
+
+    /* Same choice the point wand makes: the step whose edge moved least from the one before
+       is the edge the picture actually has. Neighbouring steps on the same edge are one. */
+    /* A leaked level is never the pick - its area stops changing because the reach stopped it,
+       which would otherwise read as the most stable edge of all. It stays a candidate, last in
+       line, for a person who wants it. */
+    var best = null, bestSpread = Infinity;
+    for (k = 1; k < rings.length; k++) {
+      if (!rings[k - 1] || !rings[k] || rings[k].leaked) continue;
+      var spread = Math.abs(Math.log(rings[k].area / rings[k - 1].area));
+      if (spread < bestSpread - 1e-9) { bestSpread = spread; best = rings[k]; }
+    }
+    var candidates = [];
+    rings.forEach(function (r) {
+      if (!r) return;
+      var last = candidates[candidates.length - 1];
+      if (last && Math.abs(Math.log(r.area / last.area)) < 0.06) { if (r === best) candidates[candidates.length - 1] = r; return; }
+      candidates.push(r);
+    });
+    if (!candidates.length) return { candidates: [], reason: "no-edge" };
+    if (!best || candidates.indexOf(best) < 0) {
+      var tight = candidates.filter(function (r) { return !r.leaked; });
+      best = tight.length ? tight[tight.length - 1] : candidates[0];
+    }
+    return {
+      candidates: candidates.map(function (r) { return r.ring; }),
+      areas: candidates.map(function (r) { return r.area; }),
+      pick: candidates.indexOf(best),
+      stable: bestSpread <= 0.25
+    };
   }
 
   var api = {
@@ -313,7 +553,8 @@
     distanceM: distanceM, lineLengthM: lineLengthM, centroid: centroid,
     fairwayFromLine: fairwayFromLine, teeAt: teeAt, circle: circle, mergeOverlapping: mergeOverlapping,
     smoothRing: smoothRing, ringHandles: ringHandles, smoothOutline: smoothOutline,
-    scaleAbout: scaleAbout, simplifyOutline: simplifyOutline
+    scaleAbout: scaleAbout, simplifyOutline: simplifyOutline,
+    growFromLine: growFromLine, traceLargestLoop: traceLargestLoop, LINE_WAND_LEVELS: LINE_WAND_LEVELS
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.GDOverlayShapes = api;

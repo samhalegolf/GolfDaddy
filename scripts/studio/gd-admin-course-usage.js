@@ -11,6 +11,8 @@
   var API = "/api/course-usage";
   var ORIGINS = [["ios", "iOS"], ["android", "Android"], ["web", "Web"], ["watch", "Watch"]];
   var state = { status: "idle", rows: [], error: "", range: "30d", checkedAt: "" };
+  /* Bodies besides the Admin Settings card's own: the Studio Course Usage page mounts one. */
+  var extraRoots = [];
 
   function esc(v) { return typeof gdEscapeHTML === "function" ? gdEscapeHTML(v) : String(v == null ? "" : v).replace(/[&<>"']/g, function (c) { return "&#" + c.charCodeAt(0) + ";"; }); }
   function token() { return typeof gdAdminCourseDbAccessToken === "function" ? gdAdminCourseDbAccessToken() : Promise.resolve(""); }
@@ -73,8 +75,12 @@
   }
 
   function render() {
-    var root = document.getElementById("gdAdminCourseUsageBody");
-    if (!root) return;
+    extraRoots = extraRoots.filter(function (el) { return el.isConnected; });
+    var roots = [document.getElementById("gdAdminCourseUsageBody")].concat(extraRoots).filter(Boolean);
+    roots.forEach(renderInto);
+  }
+
+  function renderInto(root) {
     var rangeBtns = '<div class="gdAdminUsageRange">' + [["30d", "Last 30 days"], ["all", "All time"]].map(function (r) {
       return '<button type="button" aria-pressed="' + (state.range === r[0]) + '" onclick="return gdAdminCourseUsageRange(\'' + r[0] + '\')">' + r[1] + "</button>";
     }).join("") + "</div>";
@@ -117,6 +123,11 @@
     return false;
   };
   window.gdRefreshAdminCourseUsage = function () { load(); return false; };
+  /* Render into another body too (the Studio Course Usage page), fetching on first use. */
+  window.gdMountAdminCourseUsage = function (el) {
+    if (el && extraRoots.indexOf(el) < 0) extraRoots.push(el);
+    if (state.status === "idle") load(); else render();
+  };
   /* Called when Admin Settings opens: fetch once, then only on Refresh. */
   window.gdRenderAdminCourseUsage = function () {
     if (state.status === "idle") load(); else render();

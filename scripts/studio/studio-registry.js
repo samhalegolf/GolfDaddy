@@ -425,6 +425,29 @@
       ]
     },
 
+    {
+      id: "course-usage", label: "Course Usage", parent: "courses",
+      function: "Which course maps actually get used, and from where: rounds played and maps downloaded per course, split by origin (iOS, Android, web, watch) and country, last 30 days or all time. Anonymous daily tallies - no account, guest id, IP or user agent is stored, so this answers \"which courses\" and never \"who\". The same card also sits in Admin Settings; this page renders it into its own body rather than moving that one.",
+      owner: "scripts/studio/gd-admin-course-usage.js",
+      runtime: { app: false, studio: true, server: true },
+      code: [
+        { role: "Studio page wrapper", path: "scripts/studio/courses/course-usage/course-usage-page.js" },
+        { role: "Usage card - fetch, fold rows per course, render (owner)", path: "scripts/studio/gd-admin-course-usage.js" },
+        { role: "Usage API - anonymous POST +1, admin-verified GET of the summary", path: "functions/course-usage.mjs" },
+        { role: "Table, +1 function and summary view", path: "supabase/migrations/20261004_create_course_map_usage.sql" }
+      ],
+      inputs: ["course_map_usage_summary (via GET /api/course-usage)"],
+      outputs: ["Display only - nothing is written"],
+      owns: ["The usage display"],
+      doesNotOwn: ["The counting itself (app/js/course-package.js and app/js/watch-map-delivery.js POST the +1s)"],
+      connections: [{ target: "courses", direction: "child-of", label: "" }, { target: "course-database", direction: "see-also", label: "The courses being counted" }],
+      keyFunctions: [
+        { name: "gdMountAdminCourseUsage", purpose: "Renders the usage card into a given element as well as the Admin Settings one.", codePath: "scripts/studio/gd-admin-course-usage.js" },
+        { name: "GET /api/course-usage", purpose: "Admin-only read of course_map_usage_summary, one row per course per origin.", codePath: "functions/course-usage.mjs" }
+      ],
+      status: "implemented", needsVerification: false
+    },
+
     // ---- Shot System ----
     { id: "photo-scan", label: "Photo Scan", parent: "shot-system",
       function: "Not yet moved into Studio. OCR/table-scan pipeline that turns a photo of a launch-monitor screen into structured practice shots.",
@@ -769,7 +792,7 @@
 
   var NAV_TREE = [
     { id: "overview" },
-    { id: "courses", children: ["course-database", "course-mapping", "map-viewport", "map-overlay", "course-visuals", "publishing"] },
+    { id: "courses", children: ["course-database", "course-mapping", "map-viewport", "map-overlay", "course-usage", "course-visuals", "publishing"] },
     { id: "shot-system", children: ["photo-scan", "practice-data", "practice-email", "bubble-geometry", "pattern-finder", "my-bubble", "shot-system-course-data", "conditions", "recommendations"] },
     { id: "gps-play", children: ["gps-course-selection", "gps-round-setup", "gps-hole-lifecycle", "gps-map-camera", "gps-shot-planning", "gps-shot-capture", "gps-scorecard", "gps-course-data-capture", "gps-sync-recovery", "gps-demo-mode"] },
     { id: "players-coaches" },
