@@ -10,7 +10,12 @@
  * paired Apple Watch simulator has been delivered (CaddyWatchMaps/<course>/v*
  * and CaddyWatchPlayer/player.json in its app container).
  *
- *   node garmin/tools/make-sim-demo-fixture.js <apple-watch-app-container> [holes=1,2,3]
+ *   node garmin/tools/make-sim-demo-fixture.js <apple-watch-app-container> [holes=1,2,3] [--download]
+ *
+ * --download: the watch is NOT handed the bundled images; it fetches each hole
+ * through its real downloader (makeImageRequest -> Garmin's image service ->
+ * /api/course-watch-map-assets), exactly as in a round. The fixture always
+ * carries the real URLs; the flag only decides which path the demo uses.
  *
  * Numbers that need double precision (coordinates, the map transform) are
  * written as STRINGS: Connect IQ's resource JSON is not guaranteed to decode
@@ -32,7 +37,10 @@ const { execFileSync } = require("child_process");
 const distance = require("../../app/js/distance.js");
 
 const container = process.argv[2];
-const holes = (process.argv[3] || "1,2,3").split(",").map(Number);
+const args = process.argv.slice(3);
+const download = args.indexOf("--download") >= 0;
+const holes = (args.filter((a) => !a.startsWith("--"))[0] || "1,2,3").split(",").map(Number);
+const API_ORIGIN = "https://caddy.claritygolf.app";
 /* [hole, id, label, metres short of the green along the line, or "tee"] */
 const SITUATIONS = [
   [1, "h1-tee", "Tee shot", "tee"],
@@ -114,7 +122,10 @@ for (const n of holes) {
   });
   const sr = h.spatialReference;
   manifestHoles.push({
-    holeNumber: n, asset: "h" + n + ".png", url: "sim-demo://h" + n,
+    holeNumber: n, asset: "h" + n + ".png",
+    // The phone's own URL rule (app/js/watch-map-delivery.js assetUrl):
+    // slashes literal, JPEG re-encode.
+    url: API_ORIGIN + "/api/course-watch-map-assets?path=" + courseDir + "/" + versionDir + "/h" + n + ".webp&format=jpeg",
     width: h.width, height: h.height,
     green: pt(ref.green),
     sr: {
@@ -128,7 +139,7 @@ for (const n of holes) {
 }
 
 const fixture = {
-  course: { key: "sim-demo-" + courseDir, name: "Millbrook (sim demo)", source: courseDir + "/" + versionDir },
+  course: { key: "sim-demo-" + courseDir, name: "Millbrook (sim demo)", source: courseDir + "/" + versionDir, download },
   holes: fixtureHoles,
   situations,
   manifest: manifestHoles,

@@ -374,6 +374,14 @@ budget (Bubble computed per input change, not per draw; clipped dashed lines;
 linearised ring), UP/DOWN inverted on button watches, and the map's lack of
 a door on watches with no MENU button.
 
+`--download` on the fixture generator makes the demo fetch each hole the real
+way (makeImageRequest -> Garmin's image service -> the live
+/api/course-watch-map-assets JPEG) instead of using the bundled images.
+Verified 2026-10-05 on the Forerunner 255 (the 512 KB floor): hole 1
+(267x1536) and hole 3 (448x1185, framed at 3x) downloaded with code 200 and
+drew; app memory peaked at 138 of 508 KB - on Connect IQ 5 the image lives in
+the graphics pool, not the app heap. No Connect sign-in prompt appeared.
+
 The device list itself is generated: `node garmin/tools/sync-devices.js`
 (rules and the measured 512 KB memory floor are in its header; `--list`
 prints every device's verdict, `--check` runs in `npm run test:garmin`).

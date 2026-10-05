@@ -202,6 +202,9 @@ class GarminSimDemo {
     // ----------------------------------------------------------------- maps
 
     function bitmap(holeNumber) {
+        // A --download fixture exercises the real path: no bundled image, so
+        // GarminMapStore falls through to its downloader.
+        if (fixture["course"].hasKey("download") && fixture["course"]["download"] == true) { return null; }
         if (holeNumber == bitmapHole && bitmapCache != null) { return bitmapCache; }
         var id = null;
         if (holeNumber == 1) { id = Rez.Drawables.simHole1; }
