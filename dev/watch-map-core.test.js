@@ -383,7 +383,18 @@ function sawtoothSquare() {
   }
   const smoothPts = bunkerPoints(smoothed.svg);
   const flatPts = bunkerPoints(flat.svg);
-  assert.strictEqual(smoothPts.length, flatPts.length, "smoothing must move points, not add or remove them");
+  assert.strictEqual(smoothPts.length, flatPts.length * 8, "3 Chaikin passes double the points three times");
+
+  function area(points) {
+    let sum = 0;
+    for (let i = 0; i < points.length; i++) {
+      const a = points[i], b = points[(i + 1) % points.length];
+      sum += a.x * b.y - b.x * a.y;
+    }
+    return Math.abs(sum) / 2;
+  }
+  assert.ok(area(smoothPts) > area(flatPts) * 0.8,
+    "rounding the corners must not visibly shrink the shape");
 
   function perimeter(points) {
     let sum = 0;
@@ -489,7 +500,7 @@ function sawtoothSquare() {
 
 (function testFrameIsCentredOnThePlayLine() {
   const recipe = core.WATCH_MAP_RECIPE_V1;
-  assert.strictEqual(recipe.version, 5);
+  assert.ok(recipe.version >= 5, "the centred frame arrived in v5");
   /* A hole with a bunker field well to the right and nothing to the left. */
   const lopsided = longHole();
   const dLat = lopsided.green.lat - lopsided.tee.lat, dLng = lopsided.green.lng - lopsided.tee.lng;
