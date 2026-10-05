@@ -359,6 +359,7 @@
     search: svgIcon('<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>'),
     plus: svgIcon('<path d="M12 5v14M5 12h14"/>'),
     minus: svgIcon('<path d="M5 12h14"/>'),
+    undo: svgIcon('<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
     chevron: svgIcon('<path d="M6 9l6 6 6-6"/>')
   };
   function railButton(name, icon, label, title) {
@@ -458,6 +459,7 @@
       "Whatever you just placed can be dragged at once to adjust it. In <strong>Move</strong>, drag shapes and their points, and drop either on the <strong>bin</strong> to delete. A detailed outline shows only its key points - grab its edge anywhere and it bends there, the key points either side staying put. " +
       "<strong>Seams</strong> (on by default): a fairway, water, hazard, waste area or trees kept within a few metres of another - or just overlapping it - meets it in the middle, and that line is shared; drag it and both shapes follow, so it only changes which ground is which. " +
       "<strong>Link</strong>: drag from one shape to another (or tap one, then the other) to put them on the same hole; drag a shape onto empty ground to unlink it. " +
+      "<strong>Undo</strong> (the arrow at the top of the right-hand buttons, or Ctrl+Z / ⌘Z) takes back the last change, one at a time. " +
       "Everything saves as you go, as a <strong>draft</strong> the mapper ignores - <strong>Mark ready</strong> when the course looks right, then run the mapper. " +
       "Bright outlines are what OSM already has; dashed amber ones are the course's saved objects.</p></details>" +
       "</div>" +
@@ -505,6 +507,7 @@
       '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="shape-pins" hidden></button>' +
       "</div>" +
       '<div class="gdStudioOverlayViewRail" role="toolbar" aria-label="View">' +
+      viewButton("undo", "undo", "Undo the last change (Ctrl+Z / ⌘Z)") +
       viewButton("fullscreen", "expand", "Full screen") +
       viewButton("fit", "course", "Fit the whole course (H)") +
       viewButton("zoom-shape", "search", "Zoom to the selected shape (Z)") +
@@ -525,7 +528,7 @@
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "clear", "run", "status"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -2410,9 +2413,73 @@
       el.bin.hidden = !session.course;
     }
 
+    /* ---- undo ----
+       Every change to the shapes comes through changed(), so the shapes as they were before it
+       are kept: Undo (the button, Ctrl+Z / ⌘Z) puts them back and saves. The changes one
+       action makes in one go (a shape placed and joined to its neighbours) are one step. The
+       history is this course's, from when it was opened. */
+    var UNDO_MAX = 50;
+    var undoStack = [], undoBase = shapesNow(), undoPending = false, undoing = false;
+
+    function shapesNow() { return JSON.stringify(session.features); }
+
+    function resetUndo() {
+      undoStack = [];
+      undoBase = shapesNow();
+      undoPending = false;
+      renderUndo();
+    }
+
+    function noteUndo() {
+      if (undoPending) return;
+      undoPending = true;
+      setTimeout(commitUndo, 0);
+    }
+
+    function commitUndo() {
+      if (!undoPending) return;
+      undoPending = false;
+      var now = shapesNow();
+      if (undoBase == null || now === undoBase) { undoBase = now; return; }
+      undoStack.push(undoBase);
+      if (undoStack.length > UNDO_MAX) undoStack.shift();
+      undoBase = now;
+      if (!destroyed) renderUndo();
+    }
+
+    function renderUndo() {
+      if (destroyed || !el.undo) return;
+      el.undo.disabled = !draft.length && (!undoStack.length && !undoPending || !canEdit());
+    }
+
+    function undo() {
+      /* A line being laid takes back its last point first. */
+      if (draft.length) { undoDraftPoint(); return; }
+      if (drag) return;
+      if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Nothing to undo yet."); return; }
+      if (colourSel) clearColourSel();
+      commitUndo();
+      if (!undoStack.length) { setStatus("Nothing to undo."); renderUndo(); return; }
+      /* Whatever was live goes as it is - the undo puts back the shapes from before it. */
+      adjust = null;
+      finder = null;
+      lastPlacedId = "";
+      session.features = JSON.parse(undoStack.pop());
+      undoBase = shapesNow();
+      if (selectedId && !findFeature(selectedId)) selectedId = "";
+      undoing = true;
+      changed();
+      undoing = false;
+      drawFeatures();
+      updateHint();
+      renderUndo();
+      setStatus("Undone." + (undoStack.length ? "" : " That was the last change to undo."));
+    }
+
     /* ---- autosave ---- */
 
     function changed() {
+      if (!undoing) noteUndo();
       session.dirty = true;
       session.rev++;
       scheduleSave(SAVE_DELAY_MS);
@@ -2738,6 +2805,7 @@
     }
 
     function updateActions() {
+      renderUndo();
       var has = !!session.course && !busy;
       el.ai.disabled = !has || scanning || !!draft.length;
       el.ai.title = draft.length ? "Finish or cancel the fairway you are placing first" : scanning ? "A scan is running" : "";
@@ -2850,6 +2918,7 @@
         session.unsaved = null;
         var restored = !!(unsaved && unsaved.courseId === id);
         if (restored) { session.features = unsaved.features; session.dirty = true; session.rev++; }
+        resetUndo();
         selectedId = "";
         busy = false;
         drawOsm();
@@ -3161,6 +3230,7 @@
             session.features = (data.overlay && data.overlay.features) || [];
             session.status = (data.overlay && data.overlay.status) || "draft";
             session.dirty = false;
+            resetUndo();
             selectedId = "";
             adjust = null;
             stopScanPoll();
@@ -3419,8 +3489,14 @@
     function onKey(event) {
       var target = event.target;
       if (target && /^(input|textarea|select)$/i.test(target.tagName)) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (!containerEl.isConnected) return;
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && String(event.key || "").toLowerCase() === "z") {
+        if (!session.course) return;
+        event.preventDefault();
+        undo();
+        return;
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.key === "Escape" && !el.menu.hidden) { event.preventDefault(); setMenu(false); return; }
       if (event.key === "Escape" && fullscreen && !draft.length && !selectedId && tool === "move") { event.preventDefault(); setFullscreen(false); return; }
       if (navKey(event)) return;
@@ -3507,6 +3583,7 @@
     el["zoom-in"].addEventListener("click", function () { mapObj.zoomIn(1); });
     el["zoom-out"].addEventListener("click", function () { mapObj.zoomOut(1); });
     el.fit.addEventListener("click", fitCourse);
+    el.undo.addEventListener("click", undo);
     el["zoom-shape"].addEventListener("click", zoomToSelected);
     el.fullscreen.addEventListener("click", function () { setFullscreen(!fullscreen); });
     if (session.fullscreen) setFullscreen(true);
