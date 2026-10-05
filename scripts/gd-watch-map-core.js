@@ -141,6 +141,24 @@
       tee: "#f4f4f2",
       outline: "rgba(8,18,8,0.35)"
     },
+    /* The OUTLINES shipped beside the picture (buildHoleOutlines) - what a watch draws for
+       itself when it cannot fetch the image. Separate from `simplify` for the same reason as
+       referenceVertexSpacingPx: how the picture is drawn must never change what is sent. */
+    outlines: {
+      /* ROUNDED first - Chaikin corner cutting, as the picture's own outlines are - then
+         Douglas-Peucker at this tolerance in GROUND metres. Raw OSM outlines simplified at 1.5 m
+         drew as jagged straight-sided shapes on the watch (Sam, 2026-10-06); smoothing then
+         simplifying finely keeps the curves and still lands well under the point cap. */
+      smoothPasses: 3,
+      toleranceM: 0.4,
+      /* Connect IQ's fillPolygon is not promised beyond 64 vertices on every device; a ring
+         still above this after simplifying is simplified harder until it fits. */
+      maxPoints: 64,
+      /* Clip window beyond the canvas edge, in px: a shape running off the image is cut just
+         past it, so the cut never shows on screen and a cross-course ribbon of fairway does
+         not ship its far end. */
+      clipMarginPx: 8
+    },
     strokeWidthPx: 1.25,
     teeMarkerRadiusPx: 5,
     fallbackGreenRadiusPx: 10
@@ -463,6 +481,100 @@
       out.push(smoothed);
     });
     return out;
+  }
+
+  /* The hole's surfaces as the WATCH draws them when it has no picture: fairways, bunkers,
+     water and the green as closed rings of whole IMAGE pixels in this package's own spatial
+     reference, so a watch places them with the camera it already has and no projection.
+     Each ring is clipped to the canvas (plus clipMarginPx), Douglas-Peucker simplified to
+     outlines.toleranceM of ground, and held to outlines.maxPoints. Raw shapes, not the
+     picture's smoothed ones: smoothing multiplies points, and a watch at this size cannot see
+     the difference. {version, f, b, w, g} - f/b/w lists of flat [x0,y0,x1,y1,...] rings, g one
+     ring or null. */
+  function buildHoleOutlines(recipe, spatialRef, geometry) {
+    var cfg = recipe.outlines;
+    var mpp = Number(spatialRef.metresPerPixel) || 0.5;
+    var margin = cfg.clipMarginPx;
+    var box = { minX: -margin, minY: -margin, maxX: spatialRef.imageWidth + margin, maxY: spatialRef.imageHeight + margin };
+    function ring(shape) {
+      var projected = shape.map(function (p) { return projectLatLngToImage(spatialRef, p.lat, p.lng); });
+      var clipped = clipRingToBox(projected, box);
+      if (clipped.length < 3) return null;
+      var rounded = smoothClosedPolygon(clipped, cfg.smoothPasses);
+      var tolerance = cfg.toleranceM / mpp;
+      var simple = douglasPeuckerRing(rounded, tolerance);
+      while (simple.length > cfg.maxPoints) { tolerance *= 1.3; simple = douglasPeuckerRing(rounded, tolerance); }
+      if (simple.length < 3 || polygonAreaPx2(simple) < recipe.simplify.minPolygonAreaPx2) return null;
+      var flat = [];
+      simple.forEach(function (p) { flat.push(Math.round(p.x), Math.round(p.y)); });
+      return flat;
+    }
+    function rings(list) { return (list || []).map(ring).filter(Boolean); }
+    return {
+      version: 1,
+      f: rings(geometry.fairways),
+      b: rings(geometry.bunkers),
+      w: rings(geometry.water),
+      g: geometry.greenShape ? ring(geometry.greenShape) : null
+    };
+  }
+
+  /* Sutherland-Hodgman against an axis-aligned box. */
+  function clipRingToBox(points, box) {
+    var edges = [
+      function (p) { return p.x >= box.minX; }, function (p) { return p.x <= box.maxX; },
+      function (p) { return p.y >= box.minY; }, function (p) { return p.y <= box.maxY; }
+    ];
+    var cuts = [
+      function (a, b) { var t = (box.minX - a.x) / (b.x - a.x); return { x: box.minX, y: a.y + t * (b.y - a.y) }; },
+      function (a, b) { var t = (box.maxX - a.x) / (b.x - a.x); return { x: box.maxX, y: a.y + t * (b.y - a.y) }; },
+      function (a, b) { var t = (box.minY - a.y) / (b.y - a.y); return { x: a.x + t * (b.x - a.x), y: box.minY }; },
+      function (a, b) { var t = (box.maxY - a.y) / (b.y - a.y); return { x: a.x + t * (b.x - a.x), y: box.maxY }; }
+    ];
+    var out = points.slice();
+    for (var e = 0; e < 4 && out.length; e++) {
+      var input = out; out = [];
+      for (var i = 0; i < input.length; i++) {
+        var cur = input[i], prev = input[(i + input.length - 1) % input.length];
+        var curIn = edges[e](cur), prevIn = edges[e](prev);
+        if (curIn) { if (!prevIn) out.push(cuts[e](prev, cur)); out.push(cur); }
+        else if (prevIn) out.push(cuts[e](prev, cur));
+      }
+    }
+    return out;
+  }
+
+  /* Douglas-Peucker on a CLOSED ring: split at the vertex farthest from the first, simplify
+     both halves as open lines, rejoin. */
+  function douglasPeuckerRing(points, tolerance) {
+    if (points.length <= 4) return points.slice();
+    var far = 0, farD = -1;
+    for (var i = 1; i < points.length; i++) {
+      var d = Math.hypot(points[i].x - points[0].x, points[i].y - points[0].y);
+      if (d > farD) { farD = d; far = i; }
+    }
+    var a = douglasPeuckerLine(points.slice(0, far + 1), tolerance);
+    var b = douglasPeuckerLine(points.slice(far).concat([points[0]]), tolerance);
+    return a.slice(0, -1).concat(b.slice(0, -1));
+  }
+
+  function douglasPeuckerLine(points, tolerance) {
+    if (points.length < 3) return points.slice();
+    var keep = new Array(points.length);
+    keep[0] = keep[points.length - 1] = true;
+    var stack = [[0, points.length - 1]];
+    while (stack.length) {
+      var span = stack.pop(), i0 = span[0], i1 = span[1];
+      var a = points[i0], b = points[i1], dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy;
+      var worst = -1, worstD = tolerance;
+      for (var i = i0 + 1; i < i1; i++) {
+        var p = points[i], t = len2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2)) : 0;
+        var d = Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+        if (d > worstD) { worstD = d; worst = i; }
+      }
+      if (worst > 0) { keep[worst] = true; stack.push([i0, worst], [worst, i1]); }
+    }
+    return points.filter(function (_, i) { return keep[i]; });
   }
 
   /* Anything wholly outside the canvas is bytes nobody can see, so it is dropped
@@ -849,6 +961,7 @@
       height: fit.imageHeight,
       spatialReference: spatialRef,
       reference: buildHoleReference(recipe, spatialRef, geometry, routeLatLng),
+      outlines: buildHoleOutlines(recipe, spatialRef, geometry),
       checkpoints: checkpoints,
       validation: validation,
       layers: {
@@ -901,6 +1014,7 @@
     projectLatLngToImage: projectLatLngToImage,
     projectImageToLatLng: projectImageToLatLng,
     validateSpatialReference: validateSpatialReference,
+    buildHoleOutlines: buildHoleOutlines,
     buildWatchHoleFrame: buildWatchHoleFrame
   };
 });

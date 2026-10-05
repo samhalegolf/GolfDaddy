@@ -57,6 +57,7 @@ class GarminMapView extends WatchUi.View {
     // who had just put the target where they wanted it."
     var framedHoleNumber;
     var framedLocked = false;   // the shot's lock state the camera was fitted to
+    var framedPicture = true;   // whether the camera was fitted to the picture (false: the drawn outlines)
     var framedPackageVersion;   // manifest.version the camera was fitted to
     var camera;         // GarminMapCamera or null
 
@@ -127,11 +128,16 @@ class GarminMapView extends WatchUi.View {
             return;
         }
 
+        // The picture when it has arrived; until then (or with no internet
+        // behind the phone at all) the hole's outlines, drawn here in the
+        // package palette - they came over the same link as the manifest.
         var bitmap = session.mapStore.bitmapFor(holeNumber, courseKey);
-        if (bitmap == null) {
+        var shapes = (bitmap == null) ? session.outlinesFor(holeNumber) : null;
+        if (bitmap == null && shapes == null) {
             drawUnavailable(dc, "Loading map...");
             return;
         }
+        var drawn = (bitmap != null);
 
         var reference = hole.spatialReference;
         var imageWidth = reference.imageWidth;
@@ -158,8 +164,10 @@ class GarminMapView extends WatchUi.View {
         // the top of the screen (seen in the simulator 2026-10-05) - the
         // Garmin twin of the Apple "origin, then jump" bug.
         var lockedNow = scene.shotLocked();
-        if (framedHoleNumber != holeNumber || camera == null || framedPackageVersion != packageVersion || framedLocked != lockedNow) {
+        if (framedHoleNumber != holeNumber || camera == null || framedPackageVersion != packageVersion || framedLocked != lockedNow
+                || framedPicture != drawn) {
             framedLocked = lockedNow;
+            framedPicture = drawn;
             framedPackageVersion = packageVersion;
             camera = restingCamera(local, playerImg, targetImg, greenImg, reference, imageWidth, imageHeight, viewWidth, viewHeight);
             // A device with no scaled bitmap draw (Connect IQ 3.0/3.1, the
@@ -167,12 +175,12 @@ class GarminMapView extends WatchUi.View {
             // and no drawBitmap2) can only show the image at 1:1. The camera
             // has to know, or every overlay marker is placed for a scale the
             // bitmap was never drawn at and the picture lands off-screen.
-            if (!(dc has :drawBitmap2) && !(dc has :drawScaledBitmap)) { camera.scale = 1.0; }
+            if (drawn && !(dc has :drawBitmap2) && !(dc has :drawScaledBitmap)) { camera.scale = 1.0; }
             // Within 10% of 1x is 1x: a fill-width framing of a 267 px bake on
             // a 260 px face is 0.97, and drawing it 1:1 costs a few edge
             // pixels where a scaled draw costs a large share of the
             // watchdog's budget.
-            if (camera.scale > 0.9 && camera.scale < 1.1) { camera.scale = 1.0; }
+            if (drawn && camera.scale > 0.9 && camera.scale < 1.1) { camera.scale = 1.0; }
             framedHoleNumber = holeNumber;
             // Simulator-only build trace, once per framing; compiled out of
             // every live build.
@@ -196,9 +204,13 @@ class GarminMapView extends WatchUi.View {
 
         // Past the bake's edge (the Bubble framing may look there): the
         // map's own dark green, so it reads as more rough, not a hole.
-        dc.setColor(MAP_EDGE_GREEN, MAP_EDGE_GREEN);
-        dc.clear();
-        drawBitmapCropped(dc, bitmap, camera, imageWidth, imageHeight, viewWidth, viewHeight);
+        if (drawn) {
+            dc.setColor(MAP_EDGE_GREEN, MAP_EDGE_GREEN);
+            dc.clear();
+            drawBitmapCropped(dc, bitmap, camera, imageWidth, imageHeight, viewWidth, viewHeight);
+        } else {
+            drawOutlines(dc, shapes, session.mapPalette(), imageWidth, imageHeight, viewWidth, viewHeight);
+        }
 
         drawLayupGuide(dc, scene, local, playerGeo, targetGeo, greenGeo);
 
@@ -887,4 +899,97 @@ class GarminMapView extends WatchUi.View {
     }
 
     function maxOf(a, b) { return a > b ? a : b; }
+
+    // The hole drawn from its outlines and terrain, back to front: the rough,
+    // its pieces of light and shadow, the fairways and theirs, the green and
+    // its, then water and bunkers crisp on top (never shaded). Every ring is
+    // already in image pixels, so placing it is a scale and an offset per
+    // point - no projection - and a ring whose box is off screen is skipped
+    // without touching its points, which matters inside the Forerunner 255's
+    // watchdog budget. Anti-aliased where the watch can.
+    static var SURFACE_KEYS = ["r", "f", "g"];
+    function drawOutlines(dc, shapes, palette, imageWidth, imageHeight, viewWidth, viewHeight) {
+        if (dc has :setAntiAlias) { dc.setAntiAlias(true); }
+        dc.setColor(palette["r"], palette["r"]);
+        dc.clear();
+        var ox = camera.originX(imageWidth, viewWidth);
+        var oy = camera.originY(imageHeight, viewHeight);
+        var sc = camera.scale;
+        var view = [viewWidth, viewHeight];
+        drawPieces(dc, shapes["t"], 0, palette, ox, oy, sc, view);
+        fillRings(dc, shapes["f"], palette["f"], ox, oy, sc, view);
+        drawPieces(dc, shapes["t"], 1, palette, ox, oy, sc, view);
+        if (shapes["g"] != null) { fillRings(dc, [shapes["g"]], palette["g"], ox, oy, sc, view); }
+        drawPieces(dc, shapes["t"], 2, palette, ox, oy, sc, view);
+        fillRings(dc, shapes["w"], palette["w"], ox, oy, sc, view);
+        fillRings(dc, shapes["b"], palette["b"], ox, oy, sc, view);
+        if (dc has :setAntiAlias) { dc.setAntiAlias(false); }
+    }
+
+    // One surface's pieces, in the order the server sent them (largest first,
+    // so a hole painted after its piece is exact). Label = surface * 3 + shade:
+    // shade 0 the surface's dark variant, 1 its own colour, 2 its light one.
+    function drawPieces(dc, pieces, surface, palette, ox, oy, sc, view) {
+        var key = SURFACE_KEYS[surface];
+        // A surface left unshaded on this screen (its variants are its own
+        // colour) costs no drawing at all.
+        if (palette[key + "d"] == palette[key] && palette[key + "l"] == palette[key]) { return; }
+        for (var i = 0; i < pieces.size(); i += 1) {
+            var label = pieces[i]["label"];
+            if (label / 3 != surface) { continue; }
+            var shade = label % 3;
+            var colour = palette[shade == 0 ? key + "d" : (shade == 2 ? key + "l" : key)];
+            fillRings(dc, [pieces[i]], colour, ox, oy, sc, view);
+        }
+    }
+
+    // `colour` is 0xRRGGBB, or a pattern [base, mix, n, fallback] (see
+    // GarminSessionManager.MIP_PALETTE) drawn as a texture where the watch
+    // has Dc.setFill, as its fallback colour where it does not, or not at all
+    // when there is no fallback.
+    function fillRings(dc, rings, colour, ox, oy, sc, view) {
+        if (colour instanceof Lang.Array && !(dc has :setFill)) {
+            if (colour[3] == null) { return; }
+            colour = colour[3];
+        }
+        if (colour instanceof Lang.Array) {
+            dc.setFill(patternTexture(colour));
+        } else {
+            dc.setColor(colour, Graphics.COLOR_TRANSPARENT);
+            // setFill outranks setColor once used, so solid fills set it too.
+            if (dc has :setFill) { dc.setFill(0xFF000000 | colour); }
+        }
+        for (var i = 0; i < rings.size(); i += 1) {
+            var box = rings[i]["box"];
+            if (ox + box[2] * sc < 0 || oy + box[3] * sc < 0 || ox + box[0] * sc > view[0] || oy + box[1] * sc > view[1]) { continue; }
+            var ring = rings[i]["p"];
+            var n = ring.size() / 2;
+            var points = new [n];
+            for (var k = 0; k < n; k += 1) {
+                points[k] = [(ox + ring[2 * k] * sc).toNumber(), (oy + ring[2 * k + 1] * sc).toNumber()];
+            }
+            dc.fillPolygon(points);
+        }
+    }
+
+    // A 2x2 tile with `n` of its pixels in the dark colour, made once per
+    // pattern. Diagonal for 2, so the mix reads as a tone, not stripes.
+    var textures = {};
+    function patternTexture(spec) {
+        var key = spec[0] + "/" + spec[1] + "/" + spec[2];
+        if (textures.hasKey(key)) { return textures[key]; }
+        var ref = Graphics.createBufferedBitmap({ :width => 2, :height => 2 });
+        var bmp = (ref has :get) ? ref.get() : ref;
+        var tile = bmp.getDc();
+        tile.setColor(spec[0], spec[0]);
+        tile.clear();
+        tile.setColor(spec[1], Graphics.COLOR_TRANSPARENT);
+        var n = spec[2];
+        if (n >= 1) { tile.drawPoint(0, 0); }
+        if (n >= 2) { tile.drawPoint(1, 1); }
+        if (n >= 3) { tile.drawPoint(1, 0); }
+        var texture = new Graphics.BitmapTexture({ :bitmap => ref });
+        textures[key] = texture;
+        return texture;
+    }
 }

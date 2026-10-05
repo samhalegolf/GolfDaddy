@@ -258,15 +258,23 @@ final class GarminTransport: NSObject, WearableTransport {
             guard let self else { return }
             var manifest = manifest
             let skeleton = manifest.removeValue(forKey: "skeleton") as? [String: Any]
+            let outlines = (manifest.removeValue(forKey: "outlines") as? [[String: Any]]) ?? []
             let slim = Self.slimForWatch(manifest)
+            /* The outlines follow the manifest, hole by hole, and never hold up
+               its completion: the package is delivered once its parts are. */
+            let afterManifest: (Bool) -> Void = { delivered in
+                completion(delivered)
+                guard delivered, !outlines.isEmpty else { return }
+                self.queue.async { self.deliverOutlines(outlines, index: 0, failures: 0) }
+            }
             let deliverManifest = {
                 guard let holes = slim["holes"] as? [Any], !holes.isEmpty else {
-                    self.send(["watchMapManifest": slim], completion: completion)
+                    self.send(["watchMapManifest": slim], completion: afterManifest)
                     return
                 }
                 var gate = AdaptiveGate(max: holes.count)
                 gate.limit(to: self.watchMaxPart)
-                self.deliverPart(base: slim, holes: holes, from: 0, gate: gate, failures: 0, completion: completion)
+                self.deliverPart(base: slim, holes: holes, from: 0, gate: gate, failures: 0, completion: afterManifest)
             }
             guard let skeleton, let skeletonHoles = skeleton["holes"] as? [Any], !skeletonHoles.isEmpty else {
                 deliverManifest()
@@ -276,6 +284,48 @@ final class GarminTransport: NSObject, WearableTransport {
                 self.queue.async { deliverManifest() }
             }
         }
+    }
+
+    /* The hole OUTLINES (app/js/watch-map-delivery.js courseOutlines): one
+       message per hole, ~0.3-1 KB each, the surfaces a watch draws when it
+       cannot fetch the picture. A refused hole is split in two - each surface
+       list halved, the second half marked `part` so the watch appends it -
+       and five refusals in a row stop the run; what has landed stays. */
+    private func deliverOutlines(_ messages: [[String: Any]], index: Int, failures: Int) {
+        guard index < messages.count else { return }
+        send(["courseOutlines": messages[index]]) { [weak self] sent in
+            guard let self else { return }
+            self.queue.async {
+                if sent {
+                    self.deliverOutlines(messages, index: index + 1, failures: 0)
+                    return
+                }
+                NSLog("Garmin outlines for hole %@ refused (failure %d)", "\(messages[index]["n"] ?? "?")", failures + 1)
+                if failures + 1 >= 5 { return }
+                var next = messages
+                if let halves = Self.splitOutline(messages[index]) {
+                    next.replaceSubrange(index...index, with: [halves.0, halves.1])
+                }
+                self.queue.asyncAfter(deadline: .now() + .seconds(failures + 1)) {
+                    self.deliverOutlines(next, index: index, failures: failures + 1)
+                }
+            }
+        }
+    }
+
+    private static func splitOutline(_ message: [String: Any]) -> ([String: Any], [String: Any])? {
+        var first = message, second = message
+        second.removeValue(forKey: "g")
+        second["part"] = true
+        var moved = false
+        for key in ["f", "b", "w", "t"] {
+            let rings = (message[key] as? [Any]) ?? []
+            let half = rings.count / 2
+            first[key] = Array(rings[half...])
+            second[key] = Array(rings[..<half])
+            if half > 0 { moved = true }
+        }
+        return moved ? (first, second) : nil
     }
 
     /* The course skeleton (app/js/watch-map-delivery.js courseSkeleton): a few

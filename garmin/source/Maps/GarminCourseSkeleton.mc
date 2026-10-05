@@ -100,6 +100,9 @@ class GarminCourseSkeleton {
     }
     function green(n) { var h = hole(n); return h != null ? h["g"] : null; }
     function tee(n) { var h = hole(n); return h != null ? h["t"] : null; }
+    // The package palette ({ r, f, g, b, w } as 0xRRGGBB), or null.
+    function palette() { return GarminWire.dictVal(raw, "pal"); }
+
     function lengthM(n) { var h = hole(n); return h != null ? h["len"] : null; }
 
     // Tee, route, green: the hole's fairway line, as the Scene's hole.line.

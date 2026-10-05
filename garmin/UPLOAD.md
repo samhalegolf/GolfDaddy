@@ -339,6 +339,14 @@ already been delivered:
 
     node garmin/tools/make-sim-demo-fixture.js <apple-watch-app-container> [1,2,3]
 
+The committed fixture is the DRAWN map (2026-10-06): built with
+`--objects=<course_maps.objects_json file>` the demo holes come from the real
+generator with their outlines and no image, so the watch draws them
+(GarminMapView.drawOutlines); `--terrain=<file>` adds the terrain pieces,
+`{hole: buildHoleTerrain result}`, made from the course's public elevation
+crops (`course-visuals/<course>/frames/index.json`) with
+scripts/gd-watch-terrain-core.js. Leave both off for the picture version.
+
 Coordinates and the map transform are stored as strings and parsed back
 exactly (resource JSON may decode decimals as 32-bit floats). In the
 simulator: Return = SELECT, Up/Down = UP/DOWN, `m` = MENU; BACK is the lower

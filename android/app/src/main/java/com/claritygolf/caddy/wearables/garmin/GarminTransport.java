@@ -431,19 +431,30 @@ public final class GarminTransport {
     @SuppressWarnings("unchecked")
     public void publishMapManifest(Map<String, Object> manifest, Callback<Boolean> completion) {
         Object skeleton = null;
-        if (manifest != null && manifest.containsKey("skeleton")) {
+        Object outlines = null;
+        if (manifest != null && (manifest.containsKey("skeleton") || manifest.containsKey("outlines"))) {
             HashMap<String, Object> copy = new HashMap<>(manifest);
             skeleton = copy.remove("skeleton");
+            outlines = copy.remove("outlines");
             manifest = copy;
         }
         final Map<String, Object> slim = slimManifestForWatch(manifest);
+        final List<Object> outlineMessages = outlines instanceof List ? (List<Object>) outlines : new ArrayList<>();
+        /* The outlines follow the manifest, hole by hole, and never hold up its
+           completion: the package is delivered once its parts are. */
+        final Callback<Boolean> afterManifest = delivered -> {
+            completion.onResult(delivered);
+            if (Boolean.TRUE.equals(delivered) && !outlineMessages.isEmpty()) {
+                new OutlineDelivery(outlineMessages).next();
+            }
+        };
         final Runnable deliverManifest = () -> {
             Object holes = slim == null ? null : slim.get("holes");
             if (!(holes instanceof List) || ((List<Object>) holes).isEmpty()) {
-                send(mapOf("watchMapManifest", slim), completion);
+                send(mapOf("watchMapManifest", slim), afterManifest);
                 return;
             }
-            new ManifestDelivery(slim, (List<Object>) holes, completion).next();
+            new ManifestDelivery(slim, (List<Object>) holes, afterManifest).next();
         };
         Object skeletonHoles = skeleton instanceof Map ? ((Map<String, Object>) skeleton).get("holes") : null;
         if (!(skeletonHoles instanceof List) || ((List<Object>) skeletonHoles).isEmpty()) {
@@ -451,6 +462,67 @@ public final class GarminTransport {
             return;
         }
         new SkeletonDelivery((Map<String, Object>) skeleton, (List<Object>) skeletonHoles, deliverManifest).next();
+    }
+
+    /** The hole OUTLINES (app/js/watch-map-delivery.js courseOutlines): one
+     *  message per hole, ~0.3-1 KB each. A refused hole is split in two -
+     *  each surface list halved, the second half marked {@code part} so the
+     *  watch appends it - and five refusals in a row stop the run. Mirrors
+     *  GarminTransport.swift deliverOutlines. */
+    private final class OutlineDelivery {
+        private final ArrayList<Object> messages;
+        private int index = 0;
+        private int failures = 0;
+
+        OutlineDelivery(List<Object> messages) { this.messages = new ArrayList<>(messages); }
+
+        @SuppressWarnings("unchecked")
+        void next() {
+            if (index >= messages.size()) { return; }
+            Object message = messages.get(index);
+            send(mapOf("courseOutlines", message), sent -> {
+                if (sent) {
+                    index += 1;
+                    failures = 0;
+                    next();
+                    return;
+                }
+                failures += 1;
+                Log.w(TAG, "Garmin outlines refused (failure " + failures + ")");
+                if (failures >= 5) { return; }
+                if (message instanceof Map) {
+                    List<Map<String, Object>> halves = splitOutline((Map<String, Object>) message);
+                    if (halves != null) {
+                        messages.remove(index);
+                        messages.add(index, halves.get(1));
+                        messages.add(index, halves.get(0));
+                    }
+                }
+                sceneHandler.postDelayed(this::next, 1000L * failures);
+            });
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> splitOutline(Map<String, Object> message) {
+        HashMap<String, Object> first = new HashMap<>(message);
+        HashMap<String, Object> second = new HashMap<>(message);
+        second.remove("g");
+        second.put("part", true);
+        boolean moved = false;
+        for (String key : new String[] { "f", "b", "w", "t" }) {
+            Object value = message.get(key);
+            List<Object> rings = value instanceof List ? (List<Object>) value : new ArrayList<>();
+            int half = rings.size() / 2;
+            first.put(key, new ArrayList<>(rings.subList(half, rings.size())));
+            second.put(key, new ArrayList<>(rings.subList(0, half)));
+            if (half > 0) { moved = true; }
+        }
+        if (!moved) { return null; }
+        ArrayList<Map<String, Object>> out = new ArrayList<>();
+        out.add(first);
+        out.add(second);
+        return out;
     }
 
     /** The course skeleton (app/js/watch-map-delivery.js courseSkeleton): a

@@ -80,6 +80,7 @@ final class AppleWatchTransport: NSObject, WearableTransport, WCSessionDelegate 
                transfer, so it is dropped rather than carried twice. */
             var manifest = manifest
             manifest.removeValue(forKey: "skeleton")
+            manifest.removeValue(forKey: "outlines")
             /* Mirrored live and queued durably, exactly as scene publication
                is and for the same reason: the queued stores do not reach the
                Watch app reliably, and the Watch's adoption of a manifest is

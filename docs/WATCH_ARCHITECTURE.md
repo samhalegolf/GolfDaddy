@@ -201,6 +201,38 @@ attached to the manifest as `skeleton`.
   is decoded only on first use. Decoding all 18 at once tripped the
   Forerunner 255's 120k watchdog.
 
+### The drawn map: outlines and terrain pieces (Garmin, 2026-10-06)
+
+When a Garmin has no picture for a hole (the image needs Garmin's image service and the
+phone's internet), it draws the hole itself from data that came over the same link as the
+manifest.
+
+- **Outlines.** `gd-watch-map-core.js` `buildHoleOutlines` gives fairways, bunkers, water and the
+  green as closed rings of whole image pixels in the package's own spatial reference. Each is
+  clipped to the canvas, rounded (Chaikin, 3 passes), simplified to 0.4 m, and kept under
+  Connect IQ's 64-point `fillPolygon` limit.
+- **Terrain pieces.** `gd-watch-terrain-core.js` `buildHoleTerrain` works from the same
+  elevation crop the relief uses. It lights it, blurs it into blobs, and classes each spot
+  dark, mid or lit and rough, fairway or green. It then traces each class into rounded rings:
+  abstract pieces that slot together. A piece's label is `surface * 3 + shade`. A hole in a
+  piece ships as the surface's own colour (shade 1), ordered so painting in order is exact.
+  Bunkers and water are never shaded.
+- **Stored and sent.** Both are stored on `course_watch_maps.holes[]` (`outlines`, `terrain`,
+  and `palette`, the package's colours) when the package is generated.
+  `watch-map-delivery.js` `courseOutlines` turns them into one `courseOutlines` message per
+  hole, plus terrain messages of at most about 1.8 KB marked `part`. All are delta-encoded.
+  The Garmin transports send them after the manifest parts and split a refused message in
+  two. Millbrook: about 11 KB of outlines and 27 KB of terrain.
+- **On the watch.** `GarminCourseOutlines` stores each hole under its own key and decodes only
+  the hole being drawn, boxing every ring so off-screen ones are skipped. It uses a hole only
+  while course and version match the manifest held. `GarminMapView.drawOutlines` paints
+  rough, rough pieces, fairways, their pieces, green, its pieces, then water and bunkers, with
+  anti-aliasing where the watch has it.
+- **Colours.** AMOLED watches use the package palette, with dark and light variants of each
+  turf surface derived on the phone (×0.8 and ×1.22, sent with the skeleton). The 64-colour
+  screens use a fixed set (`GarminSessionManager.MIP_PALETTE`). That set shows shadow only,
+  because any lighter green reads as a different surface there.
+
 ## The player snapshot: bag and My Bubble
 
 A third payload, alongside the Scene and the lite-map package, because it fits

@@ -39,6 +39,7 @@ import courseVersionLabel from "../scripts/gd-course-version-label.js";
 import { decodeElevation, hillshade, ambientOcclusion, RELIEF_DEFAULTS } from "./lib/gd-relief-core.mjs";
 import { applyRelief, greenContourSvg } from "./lib/gd-visual-export-core.mjs";
 import greenCore from "../scripts/gd-green-contours-core.js";
+import terrainCore from "../scripts/gd-watch-terrain-core.js";
 import paletteCore from "../scripts/gd-watch-palette-core.js";
 import { courseSurfaces, sampleAerial } from "./lib/gd-watch-course-colours.mjs";
 import { sampleCourseSeasons, seasonsAreFresh } from "./lib/gd-sentinel-seasons.mjs";
@@ -201,6 +202,14 @@ async function rasterizeFrame(frame, geometry, terrainIndex, holeNumber) {
     const crop = await loadElevationCrop(elevationMeta);
     const sample = heightSampler(crop);
     const mask = reliefMaskForFrame(frame.spatialReference, sample);
+    /* The same heights as pieces of light and shadow, for a watch that draws
+       the hole itself (scripts/gd-watch-terrain-core.js), lit as this relief
+       is. Rides back on the frame; a hole without them simply draws flat. */
+    try {
+      frame.terrain = terrainCore.buildHoleTerrain(frame.spatialReference, sample,
+        (px) => watchMapCore.projectImageToLatLng(frame.spatialReference, px), frame.outlines,
+        { azimuth: RELIEF_DEFAULTS.azimuth, altitude: RELIEF_DEFAULTS.altitude });
+    } catch (error) { frame.terrain = null; }
 
     const ground = await sharp(Buffer.from(frame.groundSvg, "utf8")).raw().toBuffer({ resolveWithObject: true });
     applyRelief(ground.data, mask, TERRAIN_RELIEF_OPACITY, ground.info.channels);
@@ -597,6 +606,12 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
         delivery,
         spatialReference: frame.spatialReference,
         reference: frame.reference,
+        /* The surfaces a watch draws for itself when it cannot fetch the image
+           (watch-map-core buildHoleOutlines), and the colours to draw them in -
+           this package's own palette, so the drawn map and the picture match. */
+        outlines: frame.outlines,
+        terrain: frame.terrain || null,
+        palette: colours.palette.colors,
         checkpoints: frame.checkpoints,
         validation: frame.validation,
         layers: frame.layers

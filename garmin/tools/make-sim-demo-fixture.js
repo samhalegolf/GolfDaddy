@@ -44,6 +44,19 @@ const container = process.argv[2];
 const args = process.argv.slice(3);
 const download = args.indexOf("--download") >= 0;
 const faults = args.indexOf("--faults") >= 0;
+/* --objects=<objects_json file>: build the demo holes from course_maps.objects_json with the
+   real generator (scripts/gd-watch-map-core.js) instead of the Apple Watch's package - every
+   hole then carries the generator's OUTLINES and no image at all, so the watch draws its own
+   map (GarminMapView.drawOutlines). The spatial references are the fresh frames', so the
+   outlines and the projection always agree. */
+const objectsArg = args.find((a) => a.startsWith("--objects="));
+const objectsJson = objectsArg ? JSON.parse(fs.readFileSync(objectsArg.slice("--objects=".length), "utf8")) : null;
+const watchMapCore = require("../../scripts/gd-watch-map-core.js");
+/* --terrain=<file>: {holeNumber: buildHoleTerrain result} for the --objects holes, made from
+   the course's elevation crops by scripts/gd-watch-terrain-core.js (the generator does this
+   itself; elevation decoding needs sharp, which this synchronous tool does not load). */
+const terrainArg = args.find((a) => a.startsWith("--terrain="));
+const terrainByHole = terrainArg ? JSON.parse(fs.readFileSync(terrainArg.slice("--terrain=".length), "utf8")) : {};
 const holes = (args.filter((a) => !a.startsWith("--"))[0] || "1,2,3").split(",").map(Number);
 const API_ORIGIN = "https://caddy.claritygolf.app";
 /* [hole, id, label, metres short of the green along the line, or "tee"] */
@@ -65,6 +78,19 @@ const courseDir = fs.readdirSync(mapsRoot).find((d) => !d.startsWith("."));
 const versionDir = fs.readdirSync(path.join(mapsRoot, courseDir)).filter((d) => d.startsWith("v")).sort().pop();
 const pkgDir = path.join(mapsRoot, courseDir, versionDir);
 const manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, "manifest.json"), "utf8"));
+if (objectsJson) {
+  manifest.holes = manifest.holes.map((h) => {
+    const frame = watchMapCore.buildWatchHoleFrame(watchMapCore.WATCH_MAP_RECIPE_V1, watchMapCore.objectsForHole(objectsJson, h.holeNumber));
+    if (!frame.ok) return h;
+    const sr = frame.spatialReference;
+    const t = terrainByHole[h.holeNumber];
+    return { holeNumber: h.holeNumber, width: sr.imageWidth, height: sr.imageHeight, reference: frame.reference, outlines: frame.outlines,
+      terrain: t && Array.isArray(t.p) ? t.p : null,
+      palette: watchMapCore.WATCH_MAP_RECIPE_V1.colors,
+      spatialReference: { version: sr.version, refZoom: sr.refZoom, imageWidth: sr.imageWidth, imageHeight: sr.imageHeight,
+        rotationDegrees: sr.rotationDegrees, metresPerPixel: sr.metresPerPixel, transform: sr.transform } };
+  });
+}
 const player = JSON.parse(fs.readFileSync(path.join(support, "CaddyWatchPlayer", "player.json"), "utf8"));
 
 const OUT = path.join(__dirname, "..", "resources-sim-demo");
@@ -139,6 +165,12 @@ for (const n of holes) {
       a: s(sr.transform.a), b: s(sr.transform.b), tx: s(sr.transform.tx), ty: s(sr.transform.ty)
     }
   });
+  if (objectsJson) {
+    /* No URL (nothing to download) and, via course.vector, no bundled image either:
+       the watch draws this hole from its outlines. */
+    const entry = manifestHoles[manifestHoles.length - 1];
+    delete entry.url;
+  }
   execFileSync("sips", ["-s", "format", "png", path.join(pkgDir, "h" + n + ".webp"), "--out", path.join(OUT, "h" + n + ".png")], { stdio: "ignore" });
   bitmaps.push(n);
 }
@@ -147,12 +179,19 @@ for (const n of holes) {
    builder (app/js/watch-map-delivery.js courseSkeleton), over EVERY hole in the
    package, not just the demo's, because the whole course is its point.
    Version 1 to match the demo's own manifest. */
-const skeleton = require("../../app/js/watch-map-delivery.js").__test
-  .courseSkeleton("sim-demo-" + courseDir, 1, manifest.holes.map((h) => ({ holeNumber: h.holeNumber, reference: h.reference || h.golfReference })));
+const deliveryCore = require("../../app/js/watch-map-delivery.js").__test;
+const skeleton = deliveryCore.courseSkeleton("sim-demo-" + courseDir, 1, manifest.holes.map((h) => ({
+  holeNumber: h.holeNumber, reference: h.reference || h.golfReference, palette: deliveryCore.cleanPalette(h.palette) })));
+/* The per-hole outline messages the phone would send after the package
+   (watch-map-delivery.js courseOutlines), for the demo's holes. */
+const outlineMessages = objectsJson
+  ? deliveryCore.courseOutlines("sim-demo-" + courseDir, 1, manifest.holes.filter((h) => holes.indexOf(h.holeNumber) >= 0 && h.outlines))
+  : [];
 
 const fixture = {
   skeleton,
-  course: { key: "sim-demo-" + courseDir, name: "Millbrook (sim demo)", source: courseDir + "/" + versionDir, download, faults },
+  outlines: outlineMessages,
+  course: { key: "sim-demo-" + courseDir, name: "Millbrook (sim demo)", source: courseDir + "/" + versionDir, download, faults, vector: !!objectsJson },
   holes: fixtureHoles,
   situations,
   manifest: manifestHoles,

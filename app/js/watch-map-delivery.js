@@ -152,7 +152,13 @@
       out.push(entry);
     });
     if (!out.length) return null;
-    return { courseKey: courseKey, version: Number(version), o: [String(origin.lat), String(origin.lng)], holes: out };
+    var skeleton = { courseKey: courseKey, version: Number(version), o: [String(origin.lat), String(origin.lng)], holes: out };
+    /* The package's own palette (every hole carries the same one), so a
+       watch drawing its own map draws it in the picture's colours. */
+    var palette = null;
+    (holes || []).some(function (hole) { palette = hole && hole.palette; return !!palette; });
+    if (palette) skeleton.pal = palette;
+    return skeleton;
   }
 
   /* A package path is "<courseKey>/v<version>/h<n>.webp". Only the file name
@@ -198,6 +204,105 @@
        as nil, so omitting it is lossless. */
     var golf = manifestReference(hole && hole.reference);
     if (golf) out.reference = golf;
+    /* Garmin-only extras, carried on this internal hole and never copied into
+       the manifest itself (publishWatchMap picks its fields one by one): the
+       surfaces a watch draws when it has no picture, and the package palette. */
+    var outlines = cleanOutlines(hole && hole.outlines);
+    if (outlines) out.outlines = outlines;
+    /* Terrain pieces (scripts/gd-watch-terrain-core.js): [label, x0, y0, ...]
+       closed rings, label = surface * 3 + shade. */
+    var terrain = hole && hole.terrain && Number(hole.terrain.version) === 1 && Array.isArray(hole.terrain.p)
+      ? hole.terrain.p.filter(function (piece) {
+          return Array.isArray(piece) && piece.length >= 7 && (piece.length - 1) % 2 === 0
+            && piece.every(Number.isInteger) && piece[0] >= 0 && piece[0] < 9;
+        })
+      : [];
+    if (terrain.length) out.terrain = terrain;
+    var palette = cleanPalette(hole && hole.palette);
+    if (palette) out.palette = palette;
+    return out;
+  }
+
+  function cleanRing(ring) {
+    if (!Array.isArray(ring) || ring.length < 6 || ring.length % 2) return null;
+    for (var i = 0; i < ring.length; i++) if (!Number.isInteger(ring[i])) return null;
+    return ring.slice();
+  }
+
+  function cleanOutlines(outlines) {
+    if (!outlines || Number(outlines.version) !== 1) return null;
+    var list = function (rings) { return (Array.isArray(rings) ? rings : []).map(cleanRing).filter(Boolean); };
+    var out = { f: list(outlines.f), b: list(outlines.b), w: list(outlines.w), g: cleanRing(outlines.g) };
+    return out.f.length || out.b.length || out.w.length || out.g ? out : null;
+  }
+
+  /* Hex colours to the 0xRRGGBB integers Connect IQ draws with, plus a darker
+     and a lighter variant of each turf surface for the terrain pieces (rd/rl,
+     fd/fl, gd/gl): the same hue, so light and shadow read as the ground
+     turning, not as a different surface. */
+  var PALETTE_ROLES = { background: "r", fairway: "f", green: "g", bunker: "b", water: "w" };
+  var SHADE_DARK = 0.8, SHADE_LIT = 1.22;
+  function scaleColour(rgb, k) {
+    var channel = function (shift) { return Math.max(0, Math.min(255, Math.round(((rgb >> shift) & 255) * k))); };
+    return (channel(16) << 16) | (channel(8) << 8) | channel(0);
+  }
+  function cleanPalette(colors) {
+    if (!colors) return null;
+    var out = {}, any = false;
+    Object.keys(PALETTE_ROLES).forEach(function (role) {
+      var m = /^#([0-9a-f]{6})$/i.exec(String(colors[role] || ""));
+      if (m) { out[PALETTE_ROLES[role]] = parseInt(m[1], 16); any = true; }
+    });
+    ["r", "f", "g"].forEach(function (key) {
+      if (out[key] == null) return;
+      out[key + "d"] = scaleColour(out[key], SHADE_DARK);
+      out[key + "l"] = scaleColour(out[key], SHADE_LIT);
+    });
+    return any ? out : null;
+  }
+
+  /* One OUTLINES message per hole, for the Garmin transports to send after the
+     manifest parts, hole by hole: {courseKey, version, n, f, b, w, g}. Rings
+     are whole image pixels in the hole's spatial reference, DELTA-encoded (the
+     first point absolute, every later one a step from the last), which keeps
+     the numbers small - Millbrook's biggest hole is ~1 KB. */
+  var TERRAIN_MESSAGE_CHARS = 1800;
+  function courseOutlines(courseKey, version, holes) {
+    var delta = function (ring) {
+      return ring.map(function (v, i) { return i < 2 ? v : v - ring[i - 2]; });
+    };
+    var out = [];
+    (holes || []).forEach(function (hole) {
+      var o = hole && hole.outlines;
+      var n = Number(hole && hole.holeNumber);
+      if (o) {
+        var entry = { courseKey: courseKey, version: Number(version), n: n,
+          f: o.f.map(delta), b: o.b.map(delta), w: o.w.map(delta) };
+        if (o.g) entry.g = delta(o.g);
+        out.push(entry);
+      }
+      /* The hole's terrain pieces (scripts/gd-watch-terrain-core.js) follow
+         in messages of about TERRAIN_MESSAGE_CHARS, each `part` so the watch
+         appends it - up to ~5 KB a hole on hilly ground, and a link that
+         refuses a big message must not take the surfaces down with it. The
+         label stays first and absolute; the ring after it is delta-encoded. */
+      if (hole && hole.terrain && hole.terrain.length) {
+        var batch = [], size = 0;
+        var flush = function () {
+          if (!batch.length) return;
+          out.push({ courseKey: courseKey, version: Number(version), n: n, part: true, f: [], b: [], w: [], t: batch });
+          batch = []; size = 0;
+        };
+        hole.terrain.forEach(function (piece) {
+          var packed = [piece[0]].concat(delta(piece.slice(1)));
+          var chars = JSON.stringify(packed).length + 1;
+          if (size + chars > TERRAIN_MESSAGE_CHARS) flush();
+          batch.push(packed);
+          size += chars;
+        });
+        flush();
+      }
+    });
     return out;
   }
 
@@ -405,6 +510,8 @@
          off and send it first; Apple's drops it. */
       var skeleton = courseSkeleton(courseKey, version, holes);
       if (skeleton) manifest.skeleton = skeleton;
+      var outlines = courseOutlines(courseKey, version, holes);
+      if (outlines.length) manifest.outlines = outlines;
       await plugin.publishWatchMap({ manifest: manifest });
 
       var sent = 0;
@@ -577,6 +684,6 @@
       var instance = ensureShared();
       return instance ? instance.holeImage(courseKey, holeNumber) : null;
     },
-    __test: { courseSkeleton: courseSkeleton, manifestHole: manifestHole, assetName: assetName, alreadyDelivered: alreadyDelivered, usableSpatialReference: usableSpatialReference }
+    __test: { courseSkeleton: courseSkeleton, courseOutlines: courseOutlines, cleanPalette: cleanPalette, manifestHole: manifestHole, assetName: assetName, alreadyDelivered: alreadyDelivered, usableSpatialReference: usableSpatialReference }
   };
 });

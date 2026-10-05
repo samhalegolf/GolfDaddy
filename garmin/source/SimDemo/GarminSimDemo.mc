@@ -67,6 +67,11 @@ class GarminSimDemo {
             from = to;
             size = size * 2;
         }
+        // Then the outlines, hole by hole, as the phone sends them after the
+        // package (GarminTransport deliverOutlines).
+        if (fixture.hasKey("outlines") && fixture["outlines"] != null) {
+            for (var o = 0; o < fixture["outlines"].size(); o += 1) { session.outlines.receive(fixture["outlines"][o]); }
+        }
         System.println("sim demo: package delivered in parts, watch holds "
             + (session.mapStore.manifest != null ? session.mapStore.manifest.holes.size() : 0) + " holes");
         System.println("sim demo: " + fixture["course"]["name"] + " holes=" + fixture["holes"].size()
@@ -253,6 +258,8 @@ class GarminSimDemo {
         // A --download fixture exercises the real path: no bundled image, so
         // GarminMapStore falls through to its downloader.
         if (fixture["course"].hasKey("download") && fixture["course"]["download"] == true) { return null; }
+        // A --objects fixture has no images by design: the map is drawn.
+        if (fixture["course"].hasKey("vector") && fixture["course"]["vector"] == true) { return null; }
         if (holeNumber == bitmapHole && bitmapCache != null) { return bitmapCache; }
         var id = null;
         if (holeNumber == 1) { id = Rez.Drawables.simHole1; }

@@ -538,4 +538,54 @@ function sawtoothSquare() {
     "the route's band is centred on a dogleg, got " + bandMid.toFixed(1) + " of " + bent.spatialReference.imageWidth);
 })();
 
+/* OUTLINES: the surfaces a watch draws itself - whole image pixels, clipped to the canvas,
+   simplified, held under the fillPolygon cap. */
+(() => {
+  const recipe = core.WATCH_MAP_RECIPE_V1;
+  const hole = longHole();
+  /* A fairway ribbon running far past the canvas, with a densely traced edge. */
+  const ribbon = [];
+  for (let i = 0; i <= 200; i++) ribbon.push({ lat: -45.0090 - i * 0.00003, lng: 169.0995 + i * 0.00004 });
+  for (let i = 200; i >= 0; i--) ribbon.push({ lat: -45.0090 - i * 0.00003 + 0.0002, lng: 169.0995 + i * 0.00004 + 0.0002 });
+  hole.fairways.push(ribbon);
+  const frame = core.buildWatchHoleFrame(recipe, hole, {});
+  const o = frame.outlines, sr = frame.spatialReference, m = recipe.outlines.clipMarginPx;
+  assert.strictEqual(o.version, 1);
+  assert.ok(o.g && o.f.length >= 1 && o.b.length === 1, "green, fairways and the bunker all ship");
+  const all = o.f.concat(o.b, [o.g]);
+  assert.ok(all.every(r => r.every(Number.isInteger)), "whole pixels only");
+  assert.ok(all.every(r => r.length / 2 <= recipe.outlines.maxPoints), "no ring over the fillPolygon cap");
+  assert.ok(all.every(r => r.every((v, i) => i % 2 ? v >= -m - 1 && v <= sr.imageHeight + m + 1 : v >= -m - 1 && v <= sr.imageWidth + m + 1)),
+    "every point inside the canvas plus its clip margin");
+  const ribbonOut = o.f[o.f.length - 1];
+  assert.ok(ribbonOut.length / 2 < 60, "a 400-point ribbon ships simplified, got " + ribbonOut.length / 2);
+  assert.strictEqual(o.w.length, 0);
+})();
+
+/* TERRAIN PIECES: rounded shapes of light and shadow, labelled by the surface they lie on. */
+(() => {
+  const terrain = require(path.join(__dirname, "..", "scripts", "gd-watch-terrain-core.js"));
+  const frame = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, longHole(), {});
+  const sr = frame.spatialReference;
+  const toLatLng = px => core.projectImageToLatLng(sr, px);
+  /* A round hill in the middle of the hole: one flank faces the light, the other away. */
+  const top = { lat: -45.0115, lng: 169.102 };
+  const sample = (lat, lng) => {
+    const dy = (lat - top.lat) * 111320, dx = (lng - top.lng) * 111320 * Math.cos(45 * Math.PI / 180);
+    return 15 * Math.exp(-(dx * dx + dy * dy) / (2 * 60 * 60));
+  };
+  const t = terrain.buildHoleTerrain(sr, sample, toLatLng, frame.outlines);
+  assert.ok(t && t.version === 1 && t.p.length >= 2, "a hill gives at least a lit and a dark piece");
+  const labels = t.p.map(piece => piece[0]);
+  assert.ok(labels.some(l => l % 3 === 0) && labels.some(l => l % 3 === 2), "both shadow and light");
+  assert.ok(labels.every(l => l >= 0 && l < 9), "labels are surface * 3 + shade");
+  assert.ok(t.p.every(piece => (piece.length - 1) % 2 === 0 && (piece.length - 1) / 2 >= 3 && (piece.length - 1) / 2 <= 64),
+    "every piece a closed ring under the 64-point fillPolygon cap");
+  assert.ok(t.p.every(piece => piece.every(Number.isInteger)), "whole pixels");
+  const surfaces = labels.map(l => Math.floor(l / 3));
+  assert.deepStrictEqual(surfaces, surfaces.slice().sort((x, y) => x - y), "ordered surface by surface");
+  const flat = terrain.buildHoleTerrain(sr, () => 12.3, toLatLng, frame.outlines);
+  assert.strictEqual(flat.p.length, 0, "flat ground has no pieces");
+})();
+
 console.log("watch-map-core passed");

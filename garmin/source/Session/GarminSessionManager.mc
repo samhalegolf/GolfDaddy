@@ -46,6 +46,7 @@ class GarminSessionManager {
     var handoverNotice;      // String or null
     var answeredHandovers;   // Dictionary used as a Set of handover ids
     var skeleton;            // GarminCourseSkeleton or null
+    var outlines;            // GarminCourseOutlines: what the map draws with no picture
     var lastSceneAt = null;  // System.getTimer() at the last Scene, or null
     var localHole = null;    // hole this wrist moved to on its own while the Scene was quiet
 
@@ -73,6 +74,7 @@ class GarminSessionManager {
         handoverNotice = null;
         answeredHandovers = {};
         skeleton = GarminCourseSkeleton.restore();
+        outlines = new GarminCourseOutlines();
 
         locationManager.onFix = method(:onLocationFix);
 
@@ -211,6 +213,73 @@ class GarminSessionManager {
         var manifest = mapStore.manifest;
         if (manifest != null && manifest.courseKey.equals(key) && manifest.version != skeleton.version) { return null; }
         return skeleton;
+    }
+
+    // A hole's outlines (image pixels), only while they were cut from the
+    // very package the map holds - the same course and version - since
+    // pixels mean nothing against another package's spatial reference.
+    function outlinesFor(holeNumber) {
+        var manifest = mapStore.manifest;
+        if (manifest == null || outlines.courseKey == null || scene == null) { return null; }
+        var key = scene.courseKey();
+        if (key == null || !key.equals(manifest.courseKey) || !manifest.courseKey.equals(outlines.courseKey)) { return null; }
+        if (manifest.version != outlines.version) { return null; }
+        return outlines.hole(holeNumber);
+    }
+
+    // The colours a drawn map uses: the package palette the phone sent with
+    // the skeleton, else the base palette every package started from
+    // (scripts/gd-watch-map-core.js WATCH_MAP_RECIPE_V1.colors).
+    //
+    // Only on a full-colour (AMOLED) screen. The memory-in-pixel screens show
+    // 64 colours - each channel 00/55/AA/FF - and snap the package's soft
+    // greens to the nearest, which is GREY (0x315833 -> 0x555555, seen on the
+    // fenix 7 sim 2026-10-06). They get the closest honest picks instead:
+    // rough darkest, fairway, green lightest, sand, water.
+    // Each turf surface has a dark and a light variant for the terrain
+    // pieces (rd/rl, fd/fl, gd/gl). The 64-colour screens show shadow only -
+    // a lighter green than the surface reads as a different surface there
+    // (seen in the 2026-10-06 previews) - so their light variant IS the
+    // surface's own colour - as a solid colour. With pattern fills
+    // (Connect IQ 4.0, Dc.setFill) each turf surface instead mixes in its
+    // neighbours (Sam, 2026-10-06): its shadow a sprinkle of the next DARKER
+    // surface, its light a sprinkle of the next LIGHTER one - rough with
+    // black and fairway green, fairway with rough and green, green with
+    // fairway. A pattern is [base, mix, n, fallback]: a 2x2 tile with n of
+    // its 4 pixels in `mix`, an in-between shade this screen cannot show any
+    // other way (the only solid colour darker than the rough is black, which
+    // was far too dark). `fallback` is the solid colour for a watch without
+    // pattern fills, or null to leave that surface flat there.
+    static var MIP_PALETTE = {
+        "r" => 0x005500, "rd" => [0x005500, 0x000000, 2, null], "rl" => [0x005500, 0x55AA55, 2, null],
+        "f" => 0x55AA55, "fd" => [0x55AA55, 0x005500, 1, 0x00AA55], "fl" => [0x55AA55, 0xAAFFAA, 2, null],
+        "g" => 0xAAFFAA, "gd" => [0xAAFFAA, 0x55AA55, 1, 0x55FF55], "gl" => 0xAAFFAA,
+        "b" => 0xFFFFAA, "w" => 0x0055AA
+    };
+    // The base palette every package started from, with its variants worked
+    // out as the phone does (watch-map-delivery.js cleanPalette: x0.8, x1.22).
+    static var BASE_PALETTE = {
+        "r" => 0x315833, "rd" => 0x274629, "rl" => 0x3C6B3E,
+        "f" => 0x4E9A52, "fd" => 0x3E7B42, "fl" => 0x5FBC64,
+        "g" => 0x8BD28D, "gd" => 0x6FA871, "gl" => 0xAAFFAC,
+        "b" => 0xE9DAAE, "w" => 0x2D69A2
+    };
+    function mapPalette() {
+        var settings = System.getDeviceSettings();
+        var amoled = (settings has :requiresBurnInProtection) && settings.requiresBurnInProtection;
+        if (!amoled) { return MIP_PALETTE; }
+        var out = {};
+        var keys = BASE_PALETTE.keys();
+        for (var i = 0; i < keys.size(); i += 1) { out[keys[i]] = BASE_PALETTE[keys[i]]; }
+        var pal = (skeleton != null) ? skeleton.palette() : null;
+        if (pal != null) {
+            var pk = pal.keys();
+            for (var j = 0; j < pk.size(); j += 1) {
+                var v = pal[pk[j]];
+                if (v instanceof Lang.Number && out.hasKey(pk[j])) { out[pk[j]] = v; }
+            }
+        }
+        return out;
     }
 
     // Whether the Scene still speaks for the round (see SCENE_FRESH_MS).
@@ -485,6 +554,7 @@ class GarminSessionManager {
         // carries a URL per hole, and GarminMapStore.bitmapFor() pulls on
         // demand, so there is no `watchMapAsset` message to handle here.
         if (data.hasKey("courseSkeleton")) { receiveSkeleton(GarminWire.dictVal(data, "courseSkeleton")); return; }
+        if (data.hasKey("courseOutlines")) { outlines.receive(GarminWire.dictVal(data, "courseOutlines")); return; }
         if (data.hasKey("watchMapManifest")) { mapStore.receiveManifest(GarminWire.dictVal(data, "watchMapManifest")); reportMapInventory(); return; }
         if (data.hasKey("watchPlayer")) {
             if (playerStore.receive(GarminWire.dictVal(data, "watchPlayer"))) { reportPlayerInventory(); }

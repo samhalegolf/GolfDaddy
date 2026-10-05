@@ -394,6 +394,43 @@ function fakeEnvironment(report, options) {
     assert.ok(JSON.stringify(sk).length < 1200);
   });
 
+  check("terrain is cut into messages under the size cap", () => {
+    const d = delivery.__test;
+    const piece = (k) => [k % 9].concat(Array.from({ length: 40 }, (_, i) => (i * 137 + k * 53) % 400));
+    const hole = { holeNumber: 5, outlines: { f: [], b: [], w: [], g: null }, terrain: Array.from({ length: 30 }, (_, i) => piece(i)) };
+    const msgs = d.courseOutlines("c", 1, [hole]).filter(m => m.t);
+    assert.ok(msgs.length >= 3, "30 pieces of ~120 chars split, got " + msgs.length);
+    assert.ok(msgs.every(m => JSON.stringify(m.t).length <= 1800 + 200), "each terrain message near the cap");
+    assert.strictEqual(msgs.reduce((n, m) => n + m.t.length, 0), 30, "no piece lost");
+  });
+
+  check("outlines and terrain become one message per hole, delta-encoded, and the palette rides the skeleton", () => {
+    const d = delivery.__test;
+    const report = {
+      holeNumber: 3, path: "c/v1/h3.webp",
+      spatialReference: { version: 1, refZoom: 20, imageWidth: 100, imageHeight: 200, transform: { a: 1, b: 0, tx: 0, ty: 0 } },
+      reference: { version: 1, green: { lat: -44.95, lng: 168.81 } },
+      outlines: { version: 1, f: [[10, 10, 20, 10, 20, 30]], b: [[1, 2, 3, 4, 5, 6, 7.5, 8]], w: [], g: [50, 50, 60, 50, 60, 60] },
+      terrain: { version: 1, p: [[2, 0, 0, 10, 0, 10, 10], [9, 0, 0, 1, 1, 2, 2], [4, 1, 1]] },
+      palette: { background: "#315833", fairway: "#4e9a52", green: "#8bd28d", bunker: "#e9daae", water: "#2d69a2", tee: "#f4f4f2" }
+    };
+    const hole = d.manifestHole(report);
+    assert.deepStrictEqual(hole.outlines.f, [[10, 10, 20, 10, 20, 30]]);
+    assert.strictEqual(hole.outlines.b.length, 0, "a ring with a fractional point is dropped");
+    assert.deepStrictEqual(hole.terrain, [[2, 0, 0, 10, 0, 10, 10]], "a bad label or a short ring is dropped");
+    assert.strictEqual(hole.palette.r, 0x315833);
+    assert.ok(hole.palette.rd < hole.palette.r && hole.palette.rl > hole.palette.r, "darker and lighter rough derived");
+    const msgs = d.courseOutlines("c", 1, [hole]);
+    assert.strictEqual(msgs.length, 2);
+    assert.deepStrictEqual(msgs[0].f, [[10, 10, 10, 0, 0, 20]], "first point absolute, then steps");
+    assert.deepStrictEqual(msgs[0].g, [50, 50, 10, 0, 0, 10]);
+    assert.ok(!("part" in msgs[0]), "the surfaces replace");
+    assert.strictEqual(msgs[1].part, true, "the terrain appends");
+    assert.deepStrictEqual(msgs[1].t, [[2, 0, 0, 10, 0, 0, 10]], "label absolute, then the ring delta-encoded");
+    const sk = d.courseSkeleton("c", 1, [hole]);
+    assert.strictEqual(sk.pal.f, 0x4e9a52, "the package palette travels as 0xRRGGBB integers");
+  });
+
   report();
 })();
 
