@@ -362,6 +362,7 @@
     "pay.status.paidActive": "Fizetős hozzáférés aktív",
     "pay.status.notConfigured": "A fizetés még nincs beállítva",
     "pay.status.free": "Ingyenes hozzáférés",
+    "pay.status.garminFounder": "Garmin alapító tag",
     "pay.detail.connectionIssue": "Nem tudtuk megerősíteni a fizetős hozzáférésedet. A fizetős funkciók zárolva maradnak, amíg meg nem erősítjük.",
     "pay.detail.checking": "Fizetési állapot ellenőrzése...",
     "pay.detail.renewsOn": "Megújulás: {date}.",
@@ -378,6 +379,7 @@
     "pay.detail.chooseContinue": "Válaszd ki, hogyan szeretnéd folytatni.",
     "pay.detail.boughtOnDevice": "Ezen az eszközön vásárolva. Hozz létre ingyenes fiókot, hogy vezethesd az eredményt, és mindenhol használhasd a tagságodat.",
     "pay.detail.choose": "Válassz bérletet vagy tagságot a Clarity Caddy teljes hozzáférésének feloldásához.",
+    "pay.detail.garminFounder": "A Kézi beállítás végleg a tiéd. A tagság gyakorlási adatokat és a teljes Bubble-középpont beállítást ad hozzá.",
     "pay.detail.chooseNoAccount": "Válassz bérletet vagy tagságot. A vásárláshoz nem kell fiók.",
     "pay.badge.monthPass": "Havi bérlet",
     "pay.badge.member": "Tag",
@@ -434,6 +436,7 @@
     "pay.cancelled": "Fizetés megszakítva",
     "pay.portalUpdated": "Tagsági beállítások frissítve",
     "pay.need.saveBubble": "A saját Bubble mentéséhez Clarity-tagság kell.",
+    "pay.need.starterBubble": "A „Kézi beállítás” funkcióval készült Bubble megtartásához Clarity-tagság vagy csatlakoztatott Garmin óra kell.",
     "pay.need.adoptBubble": "Ahhoz, hogy a saját adataidból Bubble-t vegyél át, Clarity-tagság kell.",
     "pay.need.practiceToBag": "A gyakorlási távolságok golftáskára alkalmazásához Clarity-tagság kell.",
     "pay.need.bubbleCentre": "A saját Bubble-középpont beállításához Clarity-tagság kell.",
@@ -1283,6 +1286,25 @@
     "garmin.couldNotLook": "Nem sikerült órákat keresni.",
     "garmin.watchConnected": "Óra csatlakoztatva.",
     "garmin.couldNotConnect": "Nem sikerült csatlakoztatni az órát.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Garmin alapító tag",
+    "garminFounder.perks": "A Kézi beállítás végleg fel van oldva: helyezd el a Bubble-t a saját táskád alapján, és minden távolságra skálázódik.",
+    "garminFounder.pending": "Amint a Clarity Caddy fut a Garmin órádon, Garmin alapító tag leszel, és a Kézi beállítás végleg feloldódik.",
+    "garminFounder.signIn": "Jelentkezz be, és csatlakoztasd a Garmin órádat, hogy Garmin alapító tag legyél, és végleg feloldd a „Kézi beállítás” funkciót.",
+    "garminFounder.feedback": "Garmin-visszajelzés küldése",
+    "garminFounder.welcome": "Garmin alapító tag vagy. A Kézi beállítás végleg fel van oldva.",
+    "garminFounder.askTitle": "Hogy ment a Garmin órán?",
+    "garminFounder.askBody": "Az elsők között játszol a Clarity Caddyvel Garmin órán. Mondd el, mi működött és mi nem. Egyenesen a csapathoz kerül.",
+    "garminFounder.askLater": "Most nem",
+    "garminFounder.askSend": "Visszajelzés küldése",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Garmin-visszajelzés",
+    "garminFeedback.intro": "Mondd el, hogyan működött a Clarity Caddy az órádon. Biztonságos hibakeresési adatokat csatolunk, hogy utána tudjunk járni.",
+    "garminFeedback.happened": "Hogy ment?",
+    "garminFeedback.expected": "Mitől lenne jobb?",
+    "garminFeedback.send": "Visszajelzés küldése",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "Még nincsenek gyakorlási adatok. Importálj egy gyakorlást, és ugyanezt a modellt a táskára vetítve mutatjuk.",

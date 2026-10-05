@@ -362,6 +362,7 @@
     "pay.status.paidActive": "Платеният достъп е активен",
     "pay.status.notConfigured": "Плащанията още не са настроени",
     "pay.status.free": "Безплатен достъп",
+    "pay.status.garminFounder": "Член-основател Garmin",
     "pay.detail.connectionIssue": "Не успяхме да потвърдим платения ти достъп. Платените функции остават заключени, докато не бъде потвърден.",
     "pay.detail.checking": "Проверяваме статуса на плащането...",
     "pay.detail.renewsOn": "Подновява се на: {date}.",
@@ -378,6 +379,7 @@
     "pay.detail.chooseContinue": "Избери как искаш да продължиш.",
     "pay.detail.boughtOnDevice": "Закупено на това устройство. Създай безплатен профил, за да водиш резултата и да използваш членството си навсякъде.",
     "pay.detail.choose": "Избери карта или членство, за да отключиш пълния достъп до Clarity Caddy.",
+    "pay.detail.garminFounder": "„Ръчно задаване“ остава твое завинаги. Членството добавя тренировъчни данни и пълната настройка на центъра на Bubble.",
     "pay.detail.chooseNoAccount": "Избери карта или членство. За покупката не е нужен профил.",
     "pay.badge.monthPass": "Месечна карта",
     "pay.badge.member": "Член",
@@ -434,6 +436,7 @@
     "pay.cancelled": "Плащането е отказано",
     "pay.portalUpdated": "Настройките на членството са обновени",
     "pay.need.saveBubble": "Нужно е членство в Clarity, за да запазиш собствен Bubble.",
+    "pay.need.starterBubble": "Нужно е членство в Clarity или свързан часовник Garmin, за да запазиш Bubble от „Ръчно задаване“.",
     "pay.need.adoptBubble": "Нужно е членство в Clarity, за да приемеш Bubble от собствените си данни.",
     "pay.need.practiceToBag": "Нужно е членство в Clarity, за да приложиш тренировъчните разстояния към чантата си.",
     "pay.need.bubbleCentre": "Нужно е членство в Clarity, за да зададеш собствен център на Bubble.",
@@ -1283,6 +1286,25 @@
     "garmin.couldNotLook": "Не успяхме да потърсим часовници.",
     "garmin.watchConnected": "Часовникът е свързан.",
     "garmin.couldNotConnect": "Не успяхме да свържем този часовник.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Член-основател Garmin",
+    "garminFounder.perks": "„Ръчно задаване“ е отключено завинаги: постави своя Bubble според собствената си чанта и той се мащабира за всяко разстояние.",
+    "garminFounder.pending": "Щом Clarity Caddy заработи на твоя Garmin, ставаш член-основател Garmin и „Ръчно задаване“ се отключва завинаги.",
+    "garminFounder.signIn": "Влез и свържи своя Garmin, за да станеш член-основател Garmin и да отключиш „Ръчно задаване“ завинаги.",
+    "garminFounder.feedback": "Изпрати отзив за Garmin",
+    "garminFounder.welcome": "Ти си член-основател Garmin. „Ръчно задаване“ е отключено завинаги.",
+    "garminFounder.askTitle": "Как мина с твоя Garmin?",
+    "garminFounder.askBody": "Ти си сред първите, които играят с Clarity Caddy на Garmin. Кажи ни какво проработи и какво не. Отива директно при екипа.",
+    "garminFounder.askLater": "Не сега",
+    "garminFounder.askSend": "Изпрати отзив",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Отзив за Garmin",
+    "garminFeedback.intro": "Разкажи ни как се справи Clarity Caddy на часовника ти. Прилагаме безопасни данни за отстраняване на грешки, за да можем да се свържем с теб.",
+    "garminFeedback.happened": "Как мина?",
+    "garminFeedback.expected": "Какво би го направило по-добро?",
+    "garminFeedback.send": "Изпрати отзив",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "Още няма тренировъчни данни. Импортирай сесия и същият модел ще бъде показан, проектиран през чантата.",

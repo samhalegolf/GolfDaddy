@@ -362,6 +362,7 @@
     "pay.status.paidActive": "Πληρωμένη πρόσβαση ενεργή",
     "pay.status.notConfigured": "Οι πληρωμές δεν έχουν ρυθμιστεί ακόμη",
     "pay.status.free": "Δωρεάν πρόσβαση",
+    "pay.status.garminFounder": "Ιδρυτικό μέλος Garmin",
     "pay.detail.connectionIssue": "Δεν μπορέσαμε να επιβεβαιώσουμε την πληρωμένη πρόσβασή σου. Οι λειτουργίες επί πληρωμή μένουν κλειδωμένες μέχρι να επιβεβαιωθεί.",
     "pay.detail.checking": "Έλεγχος κατάστασης πληρωμής...",
     "pay.detail.renewsOn": "Ανανεώνεται στις {date}.",
@@ -378,6 +379,7 @@
     "pay.detail.chooseContinue": "Διάλεξε πώς θέλεις να συνεχίσεις.",
     "pay.detail.boughtOnDevice": "Αγοράστηκε σε αυτή τη συσκευή. Δημιούργησε δωρεάν λογαριασμό για να κρατάς σκορ και να χρησιμοποιείς τη συνδρομή σου παντού.",
     "pay.detail.choose": "Διάλεξε πάσο ή συνδρομή για να ξεκλειδώσεις την πλήρη πρόσβαση στο Clarity Caddy.",
+    "pay.detail.garminFounder": "Η λειτουργία «Χειροκίνητος ορισμός» είναι δική σου για πάντα. Η συνδρομή προσθέτει δεδομένα εξάσκησης και την πλήρη ρύθμιση του κέντρου Bubble.",
     "pay.detail.chooseNoAccount": "Διάλεξε πάσο ή συνδρομή. Δεν χρειάζεται λογαριασμός για την αγορά.",
     "pay.badge.monthPass": "Πάσο μήνα",
     "pay.badge.member": "Μέλος",
@@ -434,6 +436,7 @@
     "pay.cancelled": "Η πληρωμή ακυρώθηκε",
     "pay.portalUpdated": "Οι ρυθμίσεις συνδρομής ενημερώθηκαν",
     "pay.need.saveBubble": "Χρειάζεσαι συνδρομή Clarity για να αποθηκεύσεις το δικό σου Bubble.",
+    "pay.need.starterBubble": "Χρειάζεσαι συνδρομή Clarity ή συνδεδεμένο ρολόι Garmin για να κρατήσεις ένα Bubble από τη λειτουργία «Χειροκίνητος ορισμός».",
     "pay.need.adoptBubble": "Χρειάζεσαι συνδρομή Clarity για να υιοθετήσεις ένα Bubble από τα δικά σου δεδομένα.",
     "pay.need.practiceToBag": "Χρειάζεσαι συνδρομή Clarity για να εφαρμόσεις τις αποστάσεις εξάσκησης στον σάκο σου.",
     "pay.need.bubbleCentre": "Χρειάζεσαι συνδρομή Clarity για να ορίσεις το δικό σου κέντρο Bubble.",
@@ -1283,6 +1286,25 @@
     "garmin.couldNotLook": "Δεν ήταν δυνατή η αναζήτηση ρολογιών.",
     "garmin.watchConnected": "Το ρολόι συνδέθηκε.",
     "garmin.couldNotConnect": "Δεν ήταν δυνατή η σύνδεση αυτού του ρολογιού.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Ιδρυτικό μέλος Garmin",
+    "garminFounder.perks": "Η λειτουργία «Χειροκίνητος ορισμός» ξεκλειδώθηκε για πάντα: τοποθέτησε το Bubble σου με βάση τον δικό σου σάκο και προσαρμόζεται σε κάθε απόσταση.",
+    "garminFounder.pending": "Μόλις το Clarity Caddy τρέξει στο Garmin σου, γίνεσαι Ιδρυτικό μέλος Garmin και η λειτουργία «Χειροκίνητος ορισμός» ξεκλειδώνεται για πάντα.",
+    "garminFounder.signIn": "Συνδέσου και σύνδεσε το Garmin σου για να γίνεις Ιδρυτικό μέλος Garmin και να ξεκλειδώσεις για πάντα τη λειτουργία «Χειροκίνητος ορισμός».",
+    "garminFounder.feedback": "Αποστολή σχολίων για το Garmin",
+    "garminFounder.welcome": "Είσαι Ιδρυτικό μέλος Garmin. Η λειτουργία «Χειροκίνητος ορισμός» ξεκλειδώθηκε για πάντα.",
+    "garminFounder.askTitle": "Πώς πήγε με το Garmin σου;",
+    "garminFounder.askBody": "Είσαι από τους πρώτους που παίζουν Clarity Caddy σε Garmin. Πες μας τι λειτούργησε και τι όχι. Πηγαίνει κατευθείαν στην ομάδα.",
+    "garminFounder.askLater": "Όχι τώρα",
+    "garminFounder.askSend": "Αποστολή σχολίων",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Σχόλια για το Garmin",
+    "garminFeedback.intro": "Πες μας πώς τα πήγε το Clarity Caddy στο ρολόι σου. Επισυνάπτονται ασφαλή στοιχεία αποσφαλμάτωσης ώστε να μπορούμε να επικοινωνήσουμε μαζί σου.",
+    "garminFeedback.happened": "Πώς πήγε;",
+    "garminFeedback.expected": "Τι θα το έκανε καλύτερο;",
+    "garminFeedback.send": "Αποστολή σχολίων",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "Δεν υπάρχουν ακόμα δεδομένα εξάσκησης. Κάνε εισαγωγή μιας συνεδρίας και το ίδιο μοντέλο θα εμφανιστεί προβεβλημένο σε όλο τον σάκο.",

@@ -362,6 +362,7 @@
     "pay.status.paidActive": "Betaalde toegang actief",
     "pay.status.notConfigured": "Betalingen nog niet ingesteld",
     "pay.status.free": "Gratis toegang",
+    "pay.status.garminFounder": "Garmin Founder",
     "pay.detail.connectionIssue": "We konden je betaalde toegang niet bevestigen. Betaalde functies blijven vergrendeld tot die is bevestigd.",
     "pay.detail.checking": "Betaalstatus controleren...",
     "pay.detail.renewsOn": "Wordt verlengd op {date}.",
@@ -378,6 +379,7 @@
     "pay.detail.chooseContinue": "Kies hoe je verder wilt gaan.",
     "pay.detail.boughtOnDevice": "Gekocht op dit apparaat. Maak een gratis account aan om je score bij te houden en je lidmaatschap overal te gebruiken.",
     "pay.detail.choose": "Kies een pas of lidmaatschap om volledige toegang tot Clarity Caddy te krijgen.",
+    "pay.detail.garminFounder": "Handmatig instellen is voorgoed van jou. Een lidmaatschap voegt oefengegevens en de volledige instelling van het Bubble-middelpunt toe.",
     "pay.detail.chooseNoAccount": "Kies een pas of lidmaatschap. Je hebt geen account nodig om te kopen.",
     "pay.badge.monthPass": "Maandpas",
     "pay.badge.member": "Lid",
@@ -434,6 +436,7 @@
     "pay.cancelled": "Afrekenen geannuleerd",
     "pay.portalUpdated": "Lidmaatschapsinstellingen bijgewerkt",
     "pay.need.saveBubble": "Je hebt een Clarity-lidmaatschap nodig om je eigen Bubble op te slaan.",
+    "pay.need.starterBubble": "Je hebt een Clarity-lidmaatschap of een gekoppeld Garmin-horloge nodig om een Bubble uit Handmatig instellen te bewaren.",
     "pay.need.adoptBubble": "Je hebt een Clarity-lidmaatschap nodig om een Bubble uit je eigen gegevens over te nemen.",
     "pay.need.practiceToBag": "Je hebt een Clarity-lidmaatschap nodig om oefenafstanden op je tas toe te passen.",
     "pay.need.bubbleCentre": "Je hebt een Clarity-lidmaatschap nodig om je eigen Bubble-middelpunt in te stellen.",
@@ -1283,6 +1286,25 @@
     "garmin.couldNotLook": "Kon niet naar horloges zoeken.",
     "garmin.watchConnected": "Horloge gekoppeld.",
     "garmin.couldNotConnect": "Kon dat horloge niet koppelen.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Garmin Founder",
+    "garminFounder.perks": "Handmatig instellen is voorgoed ontgrendeld: plaats je Bubble op basis van je eigen tas en hij schaalt mee naar elke afstand.",
+    "garminFounder.pending": "Zodra Clarity Caddy op je Garmin draait, word je Garmin Founder en wordt Handmatig instellen voorgoed ontgrendeld.",
+    "garminFounder.signIn": "Log in en koppel je Garmin om Garmin Founder te worden en Handmatig instellen voorgoed te ontgrendelen.",
+    "garminFounder.feedback": "Garmin-feedback sturen",
+    "garminFounder.welcome": "Je bent Garmin Founder. Handmatig instellen is voorgoed ontgrendeld.",
+    "garminFounder.askTitle": "Hoe ging het met je Garmin?",
+    "garminFounder.askBody": "Je bent een van de eersten die Clarity Caddy op een Garmin speelt. Vertel ons wat werkte en wat niet. Het gaat rechtstreeks naar het team.",
+    "garminFounder.askLater": "Niet nu",
+    "garminFounder.askSend": "Feedback sturen",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Garmin-feedback",
+    "garminFeedback.intro": "Vertel ons hoe Clarity Caddy op je horloge ging. Veilige debuggegevens worden meegestuurd zodat we het kunnen opvolgen.",
+    "garminFeedback.happened": "Hoe ging het?",
+    "garminFeedback.expected": "Wat zou het beter maken?",
+    "garminFeedback.send": "Feedback sturen",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "Nog geen oefengegevens. Importeer een sessie en hetzelfde model wordt geprojecteerd door de tas getoond.",

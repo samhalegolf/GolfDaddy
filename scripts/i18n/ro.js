@@ -366,6 +366,7 @@
     "pay.status.paidActive": "Acces plătit activ",
     "pay.status.notConfigured": "Plățile nu sunt încă configurate",
     "pay.status.free": "Acces gratuit",
+    "pay.status.garminFounder": "Membru fondator Garmin",
     "pay.detail.connectionIssue": "Nu am putut confirma accesul tău plătit. Funcțiile plătite rămân blocate până când este confirmat.",
     "pay.detail.checking": "Se verifică starea plății...",
     "pay.detail.renewsOn": "Se reînnoiește: {date}.",
@@ -382,6 +383,7 @@
     "pay.detail.chooseContinue": "Alege cum vrei să continui.",
     "pay.detail.boughtOnDevice": "Cumpărat pe acest dispozitiv. Creează un cont gratuit ca să ții scorul și să folosești abonamentul oriunde.",
     "pay.detail.choose": "Alege un pass sau un abonament ca să deblochezi accesul complet la Clarity Caddy.",
+    "pay.detail.garminFounder": "„Setare manuală” rămâne a ta pentru totdeauna. Un abonament adaugă date de antrenament și setarea completă a centrului Bubble-ului.",
     "pay.detail.chooseNoAccount": "Alege un pass sau un abonament. Nu ai nevoie de cont ca să cumperi.",
     "pay.badge.monthPass": "Month Pass",
     "pay.badge.member": "Abonat",
@@ -442,6 +444,7 @@
     "pay.cancelled": "Plată anulată",
     "pay.portalUpdated": "Setările abonamentului au fost actualizate",
     "pay.need.saveBubble": "Ai nevoie de un abonament Clarity ca să-ți salvezi propriul Bubble.",
+    "pay.need.starterBubble": "Ai nevoie de un abonament Clarity sau de un ceas Garmin conectat ca să păstrezi un Bubble creat cu „Setare manuală”.",
     "pay.need.adoptBubble": "Ai nevoie de un abonament Clarity ca să adopți un Bubble din propriile date.",
     "pay.need.practiceToBag": "Ai nevoie de un abonament Clarity ca să aplici distanțele de la antrenament în sacul tău.",
     "pay.need.bubbleCentre": "Ai nevoie de un abonament Clarity ca să-ți setezi propriul centru al Bubble-ului.",
@@ -1316,6 +1319,25 @@
     "garmin.couldNotLook": "Nu am putut căuta ceasuri.",
     "garmin.watchConnected": "Ceas conectat.",
     "garmin.couldNotConnect": "Nu am putut conecta acel ceas.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Membru fondator Garmin",
+    "garminFounder.perks": "„Setare manuală” este deblocată pentru totdeauna: plasează-ți Bubble-ul pe baza propriului sac și se adaptează la fiecare distanță.",
+    "garminFounder.pending": "Imediat ce Clarity Caddy rulează pe Garminul tău, devii Membru fondator Garmin și „Setare manuală” se deblochează pentru totdeauna.",
+    "garminFounder.signIn": "Conectează-te și asociază-ți Garminul ca să devii Membru fondator Garmin și să deblochezi „Setare manuală” pentru totdeauna.",
+    "garminFounder.feedback": "Trimite feedback despre Garmin",
+    "garminFounder.welcome": "Ești Membru fondator Garmin. „Setare manuală” este deblocată pentru totdeauna.",
+    "garminFounder.askTitle": "Cum a mers cu Garminul tău?",
+    "garminFounder.askBody": "Ești printre primii care joacă Clarity Caddy pe un Garmin. Spune-ne ce a funcționat și ce nu. Ajunge direct la echipă.",
+    "garminFounder.askLater": "Nu acum",
+    "garminFounder.askSend": "Trimite feedback",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Feedback despre Garmin",
+    "garminFeedback.intro": "Spune-ne cum a mers Clarity Caddy pe ceasul tău. Atașăm detalii de depanare sigure ca să putem reveni.",
+    "garminFeedback.happened": "Cum a mers?",
+    "garminFeedback.expected": "Ce l-ar face mai bun?",
+    "garminFeedback.send": "Trimite feedback",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "Încă nu ai date de antrenament. Importă o sesiune și același model va fi afișat proiectat pe tot sacul.",

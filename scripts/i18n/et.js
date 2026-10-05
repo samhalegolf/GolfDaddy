@@ -362,6 +362,7 @@
     "pay.status.paidActive": "Tasuline juurdepääs aktiivne",
     "pay.status.notConfigured": "Makseid pole veel seadistatud",
     "pay.status.free": "Tasuta juurdepääs",
+    "pay.status.garminFounder": "Garmini asutajaliige",
     "pay.detail.connectionIssue": "Me ei saanud su tasulist juurdepääsu kinnitada. Tasulised funktsioonid jäävad lukku, kuni see on kinnitatud.",
     "pay.detail.checking": "Kontrollime makse olekut...",
     "pay.detail.renewsOn": "Pikeneb {date}.",
@@ -378,6 +379,7 @@
     "pay.detail.chooseContinue": "Vali, kuidas soovid jätkata.",
     "pay.detail.boughtOnDevice": "Ostetud selles seadmes. Loo tasuta konto, et skoori pidada ja oma liikmesust kõikjal kasutada.",
     "pay.detail.choose": "Vali pass või liikmesus, et avada täielik juurdepääs Clarity Caddyle.",
+    "pay.detail.garminFounder": "„Käsitsi määramine“ jääb sulle jäädavalt. Liikmesus lisab harjutusandmed ja täieliku Bubble'i keskpunkti seadistuse.",
     "pay.detail.chooseNoAccount": "Vali pass või liikmesus. Ostmiseks pole kontot vaja.",
     "pay.badge.monthPass": "Kuupass",
     "pay.badge.member": "Liige",
@@ -434,6 +436,7 @@
     "pay.cancelled": "Maksmine tühistatud",
     "pay.portalUpdated": "Liikmesuse seaded uuendatud",
     "pay.need.saveBubble": "Oma Bubble'i salvestamiseks on vaja Clarity liikmesust.",
+    "pay.need.starterBubble": "Funktsiooniga „Käsitsi määramine“ loodud Bubble'i säilitamiseks on vaja Clarity liikmesust või ühendatud Garmini kella.",
     "pay.need.adoptBubble": "Oma andmetest Bubble'i võtmiseks on vaja Clarity liikmesust.",
     "pay.need.practiceToBag": "Harjutuskauguste kotti kandmiseks on vaja Clarity liikmesust.",
     "pay.need.bubbleCentre": "Oma Bubble'i keskpunkti määramiseks on vaja Clarity liikmesust.",
@@ -1283,6 +1286,25 @@
     "garmin.couldNotLook": "Kellasid ei saanud otsida.",
     "garmin.watchConnected": "Kell ühendatud.",
     "garmin.couldNotConnect": "Seda kella ei saanud ühendada.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Garmini asutajaliige",
+    "garminFounder.perks": "„Käsitsi määramine“ on jäädavalt avatud: aseta oma Bubble oma koti põhjal ja see skaleeritakse igale kaugusele.",
+    "garminFounder.pending": "Kui Clarity Caddy sinu Garminis töötab, saad Garmini asutajaliikmeks ja „Käsitsi määramine“ avatakse jäädavalt.",
+    "garminFounder.signIn": "Logi sisse ja ühenda oma Garmin, et saada Garmini asutajaliikmeks ja avada funktsioon „Käsitsi määramine“ jäädavalt.",
+    "garminFounder.feedback": "Saada Garmini tagasiside",
+    "garminFounder.welcome": "Oled Garmini asutajaliige. „Käsitsi määramine“ on jäädavalt avatud.",
+    "garminFounder.askTitle": "Kuidas sul Garminiga läks?",
+    "garminFounder.askBody": "Oled üks esimesi, kes mängib Clarity Caddyt Garminis. Räägi meile, mis toimis ja mis mitte. See läheb otse meeskonnale.",
+    "garminFounder.askLater": "Mitte praegu",
+    "garminFounder.askSend": "Saada tagasiside",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Garmini tagasiside",
+    "garminFeedback.intro": "Räägi meile, kuidas Clarity Caddy sinu kellas töötas. Lisame turvalised silumisandmed, et saaksime asja uurida.",
+    "garminFeedback.happened": "Kuidas läks?",
+    "garminFeedback.expected": "Mis teeks selle paremaks?",
+    "garminFeedback.send": "Saada tagasiside",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "Harjutusandmeid veel pole. Impordi sessioon ja sama mudelit näidatakse kogu kotile projitseerituna.",

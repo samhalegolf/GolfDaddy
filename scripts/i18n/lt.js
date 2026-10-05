@@ -366,6 +366,7 @@
     "pay.status.paidActive": "Mokama prieiga aktyvi",
     "pay.status.notConfigured": "Mokėjimai dar nenustatyti",
     "pay.status.free": "Nemokama prieiga",
+    "pay.status.garminFounder": "Garmin narys steigėjas",
     "pay.detail.connectionIssue": "Nepavyko patvirtinti tavo mokamos prieigos. Mokamos funkcijos lieka užrakintos, kol ji bus patvirtinta.",
     "pay.detail.checking": "Tikriname mokėjimo būseną...",
     "pay.detail.renewsOn": "Atnaujinama {date}.",
@@ -382,6 +383,7 @@
     "pay.detail.chooseContinue": "Pasirink, kaip nori tęsti.",
     "pay.detail.boughtOnDevice": "Įsigyta šiame įrenginyje. Susikurk nemokamą paskyrą, kad galėtum skaičiuoti rezultatą ir naudotis naryste visur.",
     "pay.detail.choose": "Pasirink bilietą arba narystę, kad atrakintum pilną Clarity Caddy prieigą.",
+    "pay.detail.garminFounder": "„Rankinis nustatymas“ lieka tavo visam laikui. Narystė prideda treniruočių duomenis ir visą Bubble centro nustatymą.",
     "pay.detail.chooseNoAccount": "Pasirink bilietą arba narystę. Pirkimui paskyros nereikia.",
     "pay.badge.monthPass": "Mėnesio bilietas",
     "pay.badge.member": "Narys",
@@ -442,6 +444,7 @@
     "pay.cancelled": "Apmokėjimas atšauktas",
     "pay.portalUpdated": "Narystės nustatymai atnaujinti",
     "pay.need.saveBubble": "Norint išsaugoti savo Bubble, reikia Clarity narystės.",
+    "pay.need.starterBubble": "Norint išlaikyti Bubble, sukurtą funkcija „Rankinis nustatymas“, reikia Clarity narystės arba prijungto Garmin laikrodžio.",
     "pay.need.adoptBubble": "Norint perimti Bubble iš savo duomenų, reikia Clarity narystės.",
     "pay.need.practiceToBag": "Norint pritaikyti treniruočių atstumus savo krepšiui, reikia Clarity narystės.",
     "pay.need.bubbleCentre": "Norint nustatyti savo Bubble centrą, reikia Clarity narystės.",
@@ -1316,6 +1319,25 @@
     "garmin.couldNotLook": "Nepavyko ieškoti laikrodžių.",
     "garmin.watchConnected": "Laikrodis prijungtas.",
     "garmin.couldNotConnect": "Nepavyko prijungti šio laikrodžio.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Garmin narys steigėjas",
+    "garminFounder.perks": "„Rankinis nustatymas“ atrakintas visam laikui: padėk savo Bubble pagal savo krepšį ir jis prisitaikys prie kiekvieno atstumo.",
+    "garminFounder.pending": "Kai Clarity Caddy veiks tavo Garmin laikrodyje, tapsi Garmin nariu steigėju, o „Rankinis nustatymas“ bus atrakintas visam laikui.",
+    "garminFounder.signIn": "Prisijunk ir prijunk savo Garmin, kad taptum Garmin nariu steigėju ir visam laikui atrakintum funkciją „Rankinis nustatymas“.",
+    "garminFounder.feedback": "Siųsti Garmin atsiliepimą",
+    "garminFounder.welcome": "Tu esi Garmin narys steigėjas. „Rankinis nustatymas“ atrakintas visam laikui.",
+    "garminFounder.askTitle": "Kaip sekėsi su Garmin?",
+    "garminFounder.askBody": "Esi vienas pirmųjų, žaidžiančių Clarity Caddy su Garmin. Papasakok, kas veikė, o kas ne. Tai keliauja tiesiai komandai.",
+    "garminFounder.askLater": "Ne dabar",
+    "garminFounder.askSend": "Siųsti atsiliepimą",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Garmin atsiliepimas",
+    "garminFeedback.intro": "Papasakok, kaip Clarity Caddy veikė tavo laikrodyje. Pridedame saugią derinimo informaciją, kad galėtume tai ištirti.",
+    "garminFeedback.happened": "Kaip sekėsi?",
+    "garminFeedback.expected": "Kas tai pagerintų?",
+    "garminFeedback.send": "Siųsti atsiliepimą",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "Treniruočių duomenų dar nėra. Importuok sesiją ir tas pats modelis bus parodytas projektuotas per visą krepšį.",

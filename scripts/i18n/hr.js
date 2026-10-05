@@ -366,6 +366,7 @@
     "pay.status.paidActive": "Plaćeni pristup aktivan",
     "pay.status.notConfigured": "Plaćanja još nisu postavljena",
     "pay.status.free": "Besplatni pristup",
+    "pay.status.garminFounder": "Osnivački član Garmin",
     "pay.detail.connectionIssue": "Nismo mogli potvrditi tvoj plaćeni pristup. Plaćene značajke ostaju zaključane dok se ne potvrdi.",
     "pay.detail.checking": "Provjeravamo status plaćanja...",
     "pay.detail.renewsOn": "Obnavlja se: {date}.",
@@ -382,6 +383,7 @@
     "pay.detail.chooseContinue": "Odaberi kako želiš nastaviti.",
     "pay.detail.boughtOnDevice": "Kupljeno na ovom uređaju. Izradi besplatan račun da vodiš rezultat i koristiš članstvo svugdje.",
     "pay.detail.choose": "Odaberi kartu ili članstvo za otključavanje punog pristupa Clarity Caddyju.",
+    "pay.detail.garminFounder": "Ručno postavljanje ostaje tvoje zauvijek. Članstvo dodaje podatke s vježbanja i potpunu postavku središta Bubblea.",
     "pay.detail.chooseNoAccount": "Odaberi kartu ili članstvo. Za kupnju nije potreban račun.",
     "pay.badge.monthPass": "Mjesečna karta",
     "pay.badge.member": "Član",
@@ -442,6 +444,7 @@
     "pay.cancelled": "Naplata je otkazana",
     "pay.portalUpdated": "Postavke članstva ažurirane",
     "pay.need.saveBubble": "Za spremanje vlastitog Bubblea potrebno je Clarity članstvo.",
+    "pay.need.starterBubble": "Za zadržavanje Bubblea iz značajke „Ručno postavljanje“ potrebno je Clarity članstvo ili povezan Garmin sat.",
     "pay.need.adoptBubble": "Za preuzimanje Bubblea iz vlastitih podataka potrebno je Clarity članstvo.",
     "pay.need.practiceToBag": "Za primjenu udaljenosti s vježbanja na golf torbu potrebno je Clarity članstvo.",
     "pay.need.bubbleCentre": "Za postavljanje vlastitog središta Bubblea potrebno je Clarity članstvo.",
@@ -1316,6 +1319,25 @@
     "garmin.couldNotLook": "Traženje satova nije uspjelo.",
     "garmin.watchConnected": "Sat povezan.",
     "garmin.couldNotConnect": "Povezivanje s tim satom nije uspjelo.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Osnivački član Garmin",
+    "garminFounder.perks": "Ručno postavljanje trajno je otključano: postavi svoj Bubble prema vlastitoj torbi i on se prilagođava svakoj udaljenosti.",
+    "garminFounder.pending": "Čim Clarity Caddy proradi na tvom Garminu, postaješ osnivački član Garmin i Ručno postavljanje trajno se otključava.",
+    "garminFounder.signIn": "Prijavi se i poveži svoj Garmin da postaneš osnivački član Garmin i trajno otključaš značajku „Ručno postavljanje“.",
+    "garminFounder.feedback": "Pošalji povratne informacije o Garminu",
+    "garminFounder.welcome": "Ti si osnivački član Garmin. Ručno postavljanje trajno je otključano.",
+    "garminFounder.askTitle": "Kako je prošlo s tvojim Garminom?",
+    "garminFounder.askBody": "Među prvima si koji igraju Clarity Caddy na Garminu. Reci nam što je radilo, a što nije. Ide izravno timu.",
+    "garminFounder.askLater": "Ne sada",
+    "garminFounder.askSend": "Pošalji povratne informacije",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Povratne informacije o Garminu",
+    "garminFeedback.intro": "Reci nam kako je Clarity Caddy radio na tvom satu. Prilažu se sigurni podaci za otklanjanje pogrešaka kako bismo ti se mogli javiti.",
+    "garminFeedback.happened": "Kako je prošlo?",
+    "garminFeedback.expected": "Što bi ga poboljšalo?",
+    "garminFeedback.send": "Pošalji povratne informacije",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "Još nema podataka s vježbanja. Uvezi sesiju i isti će se model prikazati projiciran kroz torbu.",
