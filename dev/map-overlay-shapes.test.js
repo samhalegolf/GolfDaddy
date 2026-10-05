@@ -168,6 +168,91 @@ test("the line wand stops at its reach when the colour runs on", () => {
   assert.ok(area < (100 + 40) * 40 * 1.1, "grew past its reach: " + area);
 });
 
+test("a single tree is a small ring of its radius, and reads its radius back", () => {
+  const tree = shapes.treeAt(at(0, 0));
+  assert.ok(tree.length <= 12, "a tree must stay light - a course holds hundreds");
+  assert.ok(Math.abs(shapes.ringRadiusM(tree) - shapes.TREE_RADIUS_M) < 0.01);
+  assert.ok(Math.abs(shapes.ringRadiusM(shapes.treeAt(at(0, 0), 7)) - 7) < 0.01);
+});
+
+test("a cluster oval fills the box it was stretched across", () => {
+  const oval = shapes.ellipseInBox(at(0, 0), at(60, 20));
+  const xs = oval.map(p => (p.lng - LNG) / mLng), ys = oval.map(p => (p.lat - LAT) / mLat);
+  assert.ok(Math.abs(Math.min(...xs)) < 0.2 && Math.abs(Math.max(...xs) - 60) < 0.2, "spans the box east to west");
+  assert.ok(Math.abs(Math.min(...ys)) < 0.5 && Math.abs(Math.max(...ys) - 20) < 0.5, "spans the box north to south");
+  const round = shapes.ellipseInBox(at(0, 0), at(60, 20), true);
+  assert.ok(Math.abs(shapes.ringRadiusM(round) - 30) < 0.5, "round: as wide as the longer side");
+});
+
+/* Grass with round dark-green crowns on it, a few px of noise. */
+function treesImage(w, h, crowns) {
+  const data = new Uint8ClampedArray(w * h * 4);
+  let seed = 11;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4, n = (rnd() - 0.5) * 16;
+    const tree = crowns.some(c => Math.hypot(x - c.x, y - c.y) <= c.r);
+    if (tree) { data[i] = 35 + n; data[i + 1] = 70 + n; data[i + 2] = 30 + n; }
+    else { data[i] = 120 + n; data[i + 1] = 165 + n; data[i + 2] = 80 + n; }
+    data[i + 3] = 255;
+  }
+  return { width: w, height: h, data };
+}
+
+test("the tree finder finds trees that look like the sampled one, and leaves placed ones alone", () => {
+  const crowns = [{ x: 40, y: 40, r: 10 }, { x: 120, y: 60, r: 9 }, { x: 70, y: 140, r: 11 }, { x: 160, y: 150, r: 10 }];
+  const image = treesImage(200, 200, crowns);
+  const model = shapes.colourModel(shapes.circleSamples(image, crowns[0], 7, 1));
+  const finder = shapes.treeFinder(image, model, { radiusPx: 10, avoid: [crowns[0]] });
+  const found = finder.find(shapes.TREE_FINDER_LEVELS[2]);
+  assert.strictEqual(found.length, 3, "found " + JSON.stringify(found));
+  crowns.slice(1).forEach(c => {
+    assert.ok(found.some(t => Math.hypot(t.x - c.x, t.y - c.y) < 4 && Math.abs(t.r - c.r) < 4), "missed the tree at " + c.x + "," + c.y);
+  });
+});
+
+test("the tree finder only looks inside its box, and spaces a row of trees out", () => {
+  const row = [];
+  for (let x = 30; x <= 170; x += 14) row.push({ x, y: 100, r: 9 });
+  const image = treesImage(200, 200, row.concat([{ x: 100, y: 30, r: 10 }]));
+  const model = shapes.colourModel(shapes.circleSamples(image, row[0], 6, 1));
+  const found = shapes.treeFinder(image, model, { radiusPx: 9, box: { x0: 0, y0: 70, x1: 200, y1: 130 } }).find(shapes.TREE_FINDER_LEVELS[2]);
+  assert.ok(found.every(t => t.y > 70 && t.y < 130), "a tree outside the box was found");
+  assert.ok(found.length >= 6 && found.length <= 12, "a row of 11 crowns: found " + found.length);
+});
+
+test("the area wand pushes a rough drawn shape out to the patch it sits in", () => {
+  /* A sandy patch 100 x 60 on grass; the hand drew a smaller blob inside it. */
+  const w = 200, h = 160, data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4, sand = x >= 50 && x < 150 && y >= 50 && y < 110;
+    data[i] = sand ? 205 : 90; data[i + 1] = sand ? 185 : 150; data[i + 2] = sand ? 140 : 70; data[i + 3] = 255;
+  }
+  const drawn = [{ x: 70, y: 65 }, { x: 120, y: 62 }, { x: 128, y: 95 }, { x: 75, y: 98 }];
+  const out = shapes.growFromArea({ width: w, height: h, data }, drawn, { reachPx: 40, blurPx: 1 });
+  assert.ok(out.candidates.length >= 1, "no edge: " + out.reason);
+  const area = out.areas[out.pick];
+  assert.ok(area > 100 * 60 * 0.9 && area < 100 * 60 * 1.15, "area " + area);
+});
+
+test("the colour wand selects the connected patch of the colour pressed on, more with more tolerance", () => {
+  const w = 120, h = 80, data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4;
+    const patch = x >= 20 && x < 60 && y >= 20 && y < 60;
+    const near = x >= 60 && x < 80 && y >= 20 && y < 60;
+    data[i] = patch ? 200 : near ? 185 : 80; data[i + 1] = patch ? 180 : near ? 168 : 140; data[i + 2] = patch ? 130 : near ? 120 : 60; data[i + 3] = 255;
+  }
+  const field = shapes.colourField({ width: w, height: h, data }, 0);
+  const count = m => m.reduce((a, v) => a + v, 0);
+  const tight = shapes.floodSelect(field, 30, 30, 5);
+  assert.strictEqual(count(tight), 40 * 40, "just the patch");
+  const loose = shapes.floodSelect(field, 30, 30, 30);
+  assert.strictEqual(count(loose), 60 * 40, "the patch and the similar ground next to it");
+  const ring = shapes.maskOutline(tight, w, h, 48);
+  assert.ok(ring && ring.length >= 4 && ring.length <= 48);
+});
+
 test("the line wand refuses a line off the picture", () => {
   const out = shapes.growFromLine(bandImage(50, 50, 10), [{ x: -100, y: -100 }, { x: -90, y: -100 }], { reachPx: 10 });
   assert.strictEqual(out.candidates.length, 0);

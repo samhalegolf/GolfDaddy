@@ -100,7 +100,7 @@ test("merging adds to the payload and never replaces it", () => {
   assert.strictEqual(overlay.mergeOverlayIntoPayload(GREENS_ONLY, []), GREENS_ONLY, "an empty overlay returns the very same payload");
   assert.strictEqual(overlay.mergeOverlayIntoPayload(GREENS_ONLY, null), GREENS_ONLY);
   assert.deepStrictEqual(overlay.overlaySummary([fairwayFeature("a", 0, 100, 0, 3), fairwayFeature("b", 0, 100, 60), { kind: "hole", hole: 1, points: [at(0, 0), at(1, 100)] }]),
-    { features: 3, fairways: 2, holeLines: 1, greens: 0, tees: 0, bunkers: 0, water: 0, trees: 0, hazards: 0, pins: 0, numbered: 2 });
+    { features: 3, fairways: 2, holeLines: 1, greens: 0, tees: 0, bunkers: 0, water: 0, trees: 0, singleTrees: 0, hazards: 0, waste: 0, pins: 0, numbered: 2 });
   const tee = overlay.overlayToOsmElements([{ kind: "tee", points: [at(0, 0), at(8, 0), at(8, 6), at(0, 6)] }]);
   assert.strictEqual(tee[0].tags.golf, "tee", "a tee polygon becomes a golf=tee way");
   assert.strictEqual(tee[0].geometry.length, 5, "closed like every polygon kind");
@@ -260,6 +260,19 @@ test("trees and hazard: overlay shapes reach the surface pass as their own kinds
   /* A real OSM wood is never read: its course-shaped inner ring would be dropped. */
   const real = core.parseOsmSurfaces({ elements: [{ type: "way", id: 5, tags: { natural: "wood" }, geometry: elements[0].geometry }] });
   assert.strictEqual(real.length, 0);
+});
+
+test("single trees and waste areas are kept and tagged, but are not surfaces yet", () => {
+  const square = (dx) => [at(dx, 0), at(dx + 8, 0), at(dx + 8, 8), at(dx, 8)];
+  const features = [{ kind: "tree", points: square(0) }, { kind: "waste", points: square(50) }];
+  assert.deepStrictEqual(overlay.normalizeOverlayFeatures(features).map(f => f.kind), ["tree", "waste"]);
+  const elements = overlay.overlayToOsmElements(features);
+  assert.strictEqual(elements[0].tags.natural, "tree");
+  assert.strictEqual(elements[1].tags.golf, "waste_area");
+  assert.strictEqual(core.parseOsmSurfaces({ elements }).length, 0, "nothing downstream reads them until they are rendered");
+  const summary = overlay.overlaySummary(features);
+  assert.strictEqual(summary.singleTrees, 1);
+  assert.strictEqual(summary.waste, 1);
 });
 
 (async () => {
