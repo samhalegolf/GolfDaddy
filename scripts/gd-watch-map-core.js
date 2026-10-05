@@ -75,8 +75,13 @@
        v6 swapped v3's corner-smoothing for Chaikin corner-cutting on a coarser
        decimation. v3's neighbour-averaging only moved points, so every shape was
        still straight edges meeting at softened corners, and more passes just
-       shrank it. Cosmetic like v3: framing and buildHoleReference are untouched. */
-    version: 6,
+       shrank it. Cosmetic like v3: framing and buildHoleReference are untouched.
+
+       v7 drew each course in its own palette. `colors` below is now the BASE palette with
+       even lightness steps; the bake swaps in the course's tinted copy from
+       scripts/gd-watch-palette-core.js (hue and chroma move towards the course's measured
+       turf, sand and water; lightness never does). Cosmetic again. */
+    version: 7,
     canvas: {
       /* Ceiling, not a fixed size - see computeCanvasFit. Most holes land under both ceilings;
          a long narrow par 5 is height-limited, a short wide-corridor hole is width-limited. */
@@ -125,12 +130,14 @@
          the shape, not the wobble in hand-drawn/OSM outlines. */
       smoothPasses: 3
     },
+    /* The base palette - must match gd-watch-palette-core.js's basePalette() (a test holds
+       them together). Kept literal here so this file stays dependency-free. */
     colors: {
-      background: "#3c6b45",
-      fairway: "#6fbf5e",
-      green: "#a3e08f",
-      bunker: "#e9d9a8",
-      water: "#4f8fd1",
+      background: "#315833",
+      fairway: "#4e9a52",
+      green: "#8bd28d",
+      bunker: "#e9daae",
+      water: "#2d69a2",
       tee: "#f4f4f2",
       outline: "rgba(8,18,8,0.35)"
     },

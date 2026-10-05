@@ -77,8 +77,13 @@
        mapper kinds these are ours to choose, so they are already shaped as one long counted
        phase with thin bands either side - which is what the work actually looks like. */
     watch_map: [
-      { stage: "reading-course", from: 0, to: 3, label: "Reading course geometry" },
-      { stage: "reading-terrain", from: 3, to: 6, label: "Reading terrain index" },
+      /* Written by the request handler before the background worker has started. */
+      { stage: "queued", from: 0, to: 1, label: "Starting" },
+      { stage: "reading-course", from: 1, to: 2, label: "Reading course geometry" },
+      { stage: "reading-terrain", from: 2, to: 3, label: "Reading terrain index" },
+      /* Measuring the course's colours: its aerial photos, and up to a minute of Sentinel-2
+         when the seasonal record is due. Usually a cache hit and gone in a blink. */
+      { stage: "reading-colours", from: 3, to: 6, label: "Measuring course colours" },
       { stage: "baking-hole", from: 6, to: 96, label: "Baking hole images" },
       { stage: "saving-package", from: 96, to: 100, label: "Saving package" }
     ]

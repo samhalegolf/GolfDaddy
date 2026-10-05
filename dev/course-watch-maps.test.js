@@ -127,6 +127,8 @@ const root = path.join(__dirname, "..");
     { folder: "backup", assets: ["h1.webp"] },
     { folder: "v1", assets: ["notes.txt", "h1.webp", "../../escape.webp"] }
   ]), ["c/v1/h1.webp"], "only vN folders and only baked hole assets are pruned");
+  assert.deepStrictEqual(supersededPaths("c", LIVE, [{ folder: "v1", assets: ["h1.webp", "palette.json"] }]),
+    ["c/v1/h1.webp", "c/v1/palette.json"], "a superseded package's palette record goes with its images");
 
   /* Two bakes that overlap must never delete each other. On 2026-10-05 a
      double-started Waitemata bake finished twice within a second and each run
