@@ -93,6 +93,8 @@
   async function generate(courseId) {
     courseId = String(courseId || "");
     if (!courseId) return false;
+    /* A second click while a bake runs would start a second bake of the same course. */
+    if (generatingByCourse[courseId]) { toast("Watch maps are already generating"); return false; }
     var existing = reports[courseId];
     if (existing && existing.status === "ready" && !window.confirm("Regenerate Watch maps for " + courseId + "?\n\nBakes fresh hole images from the course's current geometry with the Watch Map recipe and replaces the existing Watch package. Native visuals, geometry and GPS Play imagery are not touched.")) return false;
     /* Set BEFORE the first await, so the button disables and the progress bar appears the
@@ -129,6 +131,14 @@
         return true;
       }
       if (res.status === 403) { toast("Admin only"); return false; }
+      if (res.status === 409) {
+        /* Already baking (another tab, or a click this page did not see): follow that bake. */
+        awaitingWorker[courseId] = true;
+        handedToWorker = true;
+        if (data && data.progress) { progressByCourse[courseId] = data.progress; rerender(); }
+        toast("Watch maps are already generating");
+        return true;
+      }
       if (res.status === 404) { toast((data && data.error) || "Course has no geometry to generate from"); return false; }
       if (!res.ok) {
         if (data && data.holes) reports[courseId] = data;
