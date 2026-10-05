@@ -5,7 +5,9 @@
  * green becomes a green outline (the wand, server-side) or, when the wand has nothing, the
  * round default made here. Greens and bunkers are kept as smooth curves through a few handles.
  * Bunker outlines that overlap are merged into one. A water hazard drawn round by hand is
- * thinned to the corners that matter. Everything is in
+ * thinned to the corners that matter. A single tree is a small ring, a cluster an oval
+ * stretched over it; the tree finder looks for more trees like the ones placed by hand, and the
+ * area wand and colour wand outline a waste area. Everything is in
  * plain {lat, lng} and flat-earth metres about the shape's own position, which is exact
  * enough at the size of a golf hole.
  *
@@ -28,6 +30,12 @@
   /* A tee is a round marker on where the tee is - which way it faces is the hole's business,
      not the marker's. Same size the overlay core gives a tee pin (PIN_RADIUS_M.tee). */
   var TEE_RADIUS_M = 6;
+  /* A single tree is a small ring round its crown - a typical parkland tree's crown is 6-10m
+     across. Few corners: a course can hold hundreds of them. */
+  var TREE_RADIUS_M = 4;
+  var TREE_POINTS = 10;
+  /* A cluster of trees stretched out as an oval. */
+  var OVAL_POINTS = 24;
   var GREEN_RADIUS_M = 14;
   /* Greens and bunkers are edited by a handful of points, not by every corner the wand found:
      the outline is a smooth curve through the handles, `steps` corners between each pair. A
@@ -129,6 +137,33 @@
 
   function teeAt(centre) {
     return circle(centre, TEE_RADIUS_M, 12);
+  }
+
+  function treeAt(centre, radiusM) {
+    return circle(centre, Number(radiusM) > 0 ? Number(radiusM) : TREE_RADIUS_M, TREE_POINTS);
+  }
+
+  /* The oval that fills the box between two corners, as dragged from one to the other - or a
+     circle as wide as the box's longer side, when `round`. */
+  function ellipseInBox(a, b, round) {
+    var mid = { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
+    var f = frame(mid);
+    var p = f.toXY(a), q = f.toXY(b);
+    var rx = Math.abs(q.x - p.x) / 2, ry = Math.abs(q.y - p.y) / 2;
+    if (round) rx = ry = Math.max(rx, ry);
+    var out = [];
+    for (var i = 0; i < OVAL_POINTS; i++) {
+      var t = (i / OVAL_POINTS) * Math.PI * 2;
+      out.push(f.toLL({ x: Math.cos(t) * rx, y: Math.sin(t) * ry }));
+    }
+    return out;
+  }
+
+  /* How far a ring's corners sit from its middle, on average - a tree's crown radius. */
+  function ringRadiusM(points) {
+    if (!points || !points.length) return 0;
+    var c = centroid(points);
+    return points.reduce(function (sum, p) { return sum + distanceM(c, p); }, 0) / points.length;
   }
 
   function circle(centre, radiusM, n) {
@@ -412,18 +447,11 @@
     return ex * ex + ey * ey;
   }
 
-  /* image: {width, height, data} RGBA (an ImageData, or anything shaped like one). line: 2+
-     points in that image's pixels. opts: reachPx (how far from the line an edge may be),
-     blurPx (smoothing radius), openPx (the narrowest neck kept), minAreaPx. Returns
-     {candidates: [ring in pixels], areas, pick} or {candidates: [], reason}. */
-  function growFromLine(image, line, opts) {
-    var o = opts || {};
-    var w = image && image.width, h = image && image.height, data = image && image.data;
-    if (!w || !h || !data || !Array.isArray(line) || line.length < 2) return { candidates: [], reason: "no-line" };
-    var reach = Math.max(4, Number(o.reachPx) || 60), reachSq = reach * reach;
-    var n = w * h;
-    /* Brightness counts for less than colour: mowing stripes and cloud shadow move brightness,
-       and the edge of a fairway, a bunker or water is mostly a change of colour. */
+  /* The picture as the wands read it, blurred by blurPx. Brightness counts for less than
+     colour: mowing stripes and cloud shadow move brightness, and the edge of a fairway, a
+     bunker, water or a tree's crown is mostly a change of colour. */
+  function colourField(image, blurPx) {
+    var w = image.width, h = image.height, data = image.data, n = w * h;
     var L = new Float32Array(n), A = new Float32Array(n), B = new Float32Array(n);
     for (var i = 0; i < n; i++) {
       var r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
@@ -431,53 +459,95 @@
       A[i] = r - g;
       B[i] = (r + g) / 2 - b;
     }
-    var blur = Math.max(0, Math.round(Number(o.blurPx) || 0));
-    L = boxBlur(L, w, h, blur); A = boxBlur(A, w, h, blur); B = boxBlur(B, w, h, blur);
+    var blur = Math.max(0, Math.round(Number(blurPx) || 0));
+    return { w: w, h: h, L: boxBlur(L, w, h, blur), A: boxBlur(A, w, h, blur), B: boxBlur(B, w, h, blur) };
+  }
 
-    /* The line, rasterised a pixel at a time, is both the seed and the colour sample. */
-    var seeds = [], seen = {};
-    for (var k = 1; k < line.length; k++) {
-      var a0 = line[k - 1], a1 = line[k];
-      var steps = Math.max(1, Math.ceil(Math.hypot(a1.x - a0.x, a1.y - a0.y)));
-      for (var st = 0; st <= steps; st++) {
-        var sx = Math.round(a0.x + (a1.x - a0.x) * st / steps), sy = Math.round(a0.y + (a1.y - a0.y) * st / steps);
-        if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
-        var si = sy * w + sx;
-        if (!seen[si]) { seen[si] = 1; seeds.push(si); }
-      }
-    }
-    if (seeds.length < 2) return { candidates: [], reason: "line-off-picture" };
-    var ls = [], as = [], bs = [];
-    seeds.forEach(function (si) { ls.push(L[si]); as.push(A[si]); bs.push(B[si]); });
+  /* A colour as a middle and a spread per channel: median, and median absolute deviation
+     floored so a perfectly flat sample (open water) still has a tolerance to scale. samples:
+     {L: [], A: [], B: []}. */
+  function colourModel(samples) {
+    var ls = samples.L, as = samples.A, bs = samples.B;
+    if (!ls || !ls.length) return null;
     var mL = median(ls), mA = median(as), mB = median(bs);
-    /* Spread: median absolute deviation, floored so a perfectly flat sample (open water) still
-       has a tolerance to scale. */
-    var dL = Math.max(3, 1.4826 * median(ls.map(function (v) { return Math.abs(v - mL); })));
-    var dA = Math.max(3, 1.4826 * median(as.map(function (v) { return Math.abs(v - mA); })));
-    var dB = Math.max(3, 1.4826 * median(bs.map(function (v) { return Math.abs(v - mB); })));
+    return {
+      mL: mL, mA: mA, mB: mB,
+      dL: Math.max(3, 1.4826 * median(ls.map(function (v) { return Math.abs(v - mL); }))),
+      dA: Math.max(3, 1.4826 * median(as.map(function (v) { return Math.abs(v - mA); }))),
+      dB: Math.max(3, 1.4826 * median(bs.map(function (v) { return Math.abs(v - mB); })))
+    };
+  }
 
-    /* Colour distance from the line's colour, in spreads, and whether a pixel is within reach. */
-    var dist = new Float32Array(n);
-    /* Distance to the line, kept so a region that ran all the way out to the reach can be told
-       apart from one that stopped at a real edge. */
-    var lineD = new Float32Array(n);
-    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    line.forEach(function (p) { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
-    var bx0 = Math.max(0, Math.floor(minX - reach)), by0 = Math.max(0, Math.floor(minY - reach));
-    var bx1 = Math.min(w - 1, Math.ceil(maxX + reach)), by1 = Math.min(h - 1, Math.ceil(maxY + reach));
-    dist.fill(Infinity);
-    for (var y = by0; y <= by1; y++) {
-      for (var x = bx0; x <= bx1; x++) {
-        var nearest = Infinity;
-        for (k = 1; k < line.length; k++) nearest = Math.min(nearest, segDistSq(x, y, line[k - 1], line[k]));
-        if (nearest > reachSq) continue;
-        i = y * w + x;
-        lineD[i] = Math.sqrt(nearest);
-        var eL = (L[i] - mL) / dL, eA = (A[i] - mA) / dA, eB = (B[i] - mB) / dB;
-        dist[i] = Math.sqrt((eL * eL + eA * eA + eB * eB) / 3);
+  function fieldSamples(field, indices) {
+    var out = { L: [], A: [], B: [] };
+    indices.forEach(function (i) { out.L.push(field.L[i]); out.A.push(field.A[i]); out.B.push(field.B[i]); });
+    return out;
+  }
+
+  /* The colour inside a circle on a picture (pixels), as samples colourModel reads - what a tree
+     placed by hand looks like, for the tree finder. */
+  function circleSamples(image, centre, radiusPx, blurPx) {
+    var field = colourField(image, blurPx);
+    var r = Math.max(1, radiusPx), out = [];
+    for (var y = Math.max(0, Math.floor(centre.y - r)); y <= Math.min(field.h - 1, Math.ceil(centre.y + r)); y++) {
+      for (var x = Math.max(0, Math.floor(centre.x - r)); x <= Math.min(field.w - 1, Math.ceil(centre.x + r)); x++) {
+        if (Math.hypot(x - centre.x, y - centre.y) <= r) out.push(y * field.w + x);
       }
     }
+    return fieldSamples(field, out);
+  }
 
+  function spreadDistance(field, i, m) {
+    var eL = (field.L[i] - m.mL) / m.dL, eA = (field.A[i] - m.mA) / m.dA, eB = (field.B[i] - m.mB) / m.dB;
+    return Math.sqrt((eL * eL + eA * eA + eB * eB) / 3);
+  }
+
+  /* Distance from every cell to the nearest cell set in `mask` (0 on it), in cells: a two-pass
+     chamfer, within a few percent of the true distance, which is all a reach limit or a crown
+     radius needs. */
+  function distanceTo(mask, w, h) {
+    var n = w * h, d = new Float32Array(n), BIG = 1e9, D = Math.SQRT2, x, y, i;
+    for (i = 0; i < n; i++) d[i] = mask[i] ? 0 : BIG;
+    for (y = 0; y < h; y++) {
+      for (x = 0; x < w; x++) {
+        i = y * w + x;
+        if (!d[i]) continue;
+        var v = d[i];
+        if (x > 0) v = Math.min(v, d[i - 1] + 1);
+        if (y > 0) {
+          v = Math.min(v, d[i - w] + 1);
+          if (x > 0) v = Math.min(v, d[i - w - 1] + D);
+          if (x < w - 1) v = Math.min(v, d[i - w + 1] + D);
+        }
+        d[i] = v;
+      }
+    }
+    for (y = h - 1; y >= 0; y--) {
+      for (x = w - 1; x >= 0; x--) {
+        i = y * w + x;
+        if (!d[i]) continue;
+        var u = d[i];
+        if (x < w - 1) u = Math.min(u, d[i + 1] + 1);
+        if (y < h - 1) {
+          u = Math.min(u, d[i + w] + 1);
+          if (x < w - 1) u = Math.min(u, d[i + w + 1] + D);
+          if (x > 0) u = Math.min(u, d[i + w - 1] + D);
+        }
+        d[i] = u;
+      }
+    }
+    return d;
+  }
+
+  /* The grow both wands share: every pixel connected to the seeds whose colour is close enough
+     to the model, no further than `reach` from the seed shape (near[i]: distance to it,
+     Infinity past the reach). Each level is one candidate edge, weakest reach first. `force`
+     (optional) is a mask always kept - the drawn shape of a waste area. */
+  function growRegion(field, seeds, model, near, reach, force, o) {
+    var w = field.w, h = field.h, n = w * h, i, j;
+    var dist = new Float32Array(n);
+    dist.fill(Infinity);
+    for (i = 0; i < n; i++) if (near[i] <= reach) dist[i] = spreadDistance(field, i, model);
     var open = Math.max(0, Math.round(Number(o.openPx) || 0));
     var minArea = Math.max(16, Number(o.minAreaPx) || 0);
     var levels = Array.isArray(o.levels) && o.levels.length ? o.levels : LINE_WAND_LEVELS;
@@ -485,11 +555,12 @@
     var rings = [];
     levels.forEach(function (level) {
       var ok = new Uint8Array(n);
-      for (var j = 0; j < n; j++) ok[j] = dist[j] <= level ? 1 : 0;
+      for (j = 0; j < n; j++) ok[j] = dist[j] <= level || (force && force[j]) ? 1 : 0;
       var mask = connected(ok, w, h, seeds);
       if (open) {
         var opened = morph(morph(mask, w, h, open, false), w, h, open, true);
         for (j = 0; j < n; j++) opened[j] = opened[j] && mask[j] ? 1 : 0;
+        if (force) for (j = 0; j < n; j++) if (force[j]) opened[j] = 1;
         var kept = connected(opened, w, h, seeds);
         var any = false;
         for (j = 0; j < n && !any; j++) if (kept[j]) any = true;
@@ -503,7 +574,7 @@
         var ex = j % w;
         if ((ex > 0 && !mask[j - 1]) || (ex < w - 1 && !mask[j + 1]) || (j >= w && !mask[j - w]) || (j < n - w && !mask[j + w])) {
           edge++;
-          if (lineD[j] >= reach - 2) atReach++;
+          if (near[j] >= reach - 2) atReach++;
         }
       }
       if (area < minArea) { rings.push(null); return; }
@@ -521,7 +592,7 @@
     /* A leaked level is never the pick - its area stops changing because the reach stopped it,
        which would otherwise read as the most stable edge of all. It stays a candidate, last in
        line, for a person who wants it. */
-    var best = null, bestSpread = Infinity;
+    var best = null, bestSpread = Infinity, k;
     for (k = 1; k < rings.length; k++) {
       if (!rings[k - 1] || !rings[k] || rings[k].leaked) continue;
       var spread = Math.abs(Math.log(rings[k].area / rings[k - 1].area));
@@ -547,6 +618,178 @@
     };
   }
 
+  /* image: {width, height, data} RGBA (an ImageData, or anything shaped like one). line: 2+
+     points in that image's pixels. opts: reachPx (how far from the line an edge may be),
+     blurPx (smoothing radius), openPx (the narrowest neck kept), minAreaPx. Returns
+     {candidates: [ring in pixels], areas, pick} or {candidates: [], reason}. */
+  function growFromLine(image, line, opts) {
+    var o = opts || {};
+    var w = image && image.width, h = image && image.height, data = image && image.data;
+    if (!w || !h || !data || !Array.isArray(line) || line.length < 2) return { candidates: [], reason: "no-line" };
+    var reach = Math.max(4, Number(o.reachPx) || 60), reachSq = reach * reach;
+    var field = colourField(image, o.blurPx);
+
+    /* The line, rasterised a pixel at a time, is both the seed and the colour sample. */
+    var seeds = [], seen = {};
+    for (var k = 1; k < line.length; k++) {
+      var a0 = line[k - 1], a1 = line[k];
+      var steps = Math.max(1, Math.ceil(Math.hypot(a1.x - a0.x, a1.y - a0.y)));
+      for (var st = 0; st <= steps; st++) {
+        var sx = Math.round(a0.x + (a1.x - a0.x) * st / steps), sy = Math.round(a0.y + (a1.y - a0.y) * st / steps);
+        if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
+        var si = sy * w + sx;
+        if (!seen[si]) { seen[si] = 1; seeds.push(si); }
+      }
+    }
+    if (seeds.length < 2) return { candidates: [], reason: "line-off-picture" };
+
+    /* Distance to the line, so a region that ran all the way out to the reach can be told
+       apart from one that stopped at a real edge. */
+    var near = new Float32Array(w * h);
+    near.fill(Infinity);
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    line.forEach(function (p) { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
+    var bx0 = Math.max(0, Math.floor(minX - reach)), by0 = Math.max(0, Math.floor(minY - reach));
+    var bx1 = Math.min(w - 1, Math.ceil(maxX + reach)), by1 = Math.min(h - 1, Math.ceil(maxY + reach));
+    for (var y = by0; y <= by1; y++) {
+      for (var x = bx0; x <= bx1; x++) {
+        var nearest = Infinity;
+        for (k = 1; k < line.length; k++) nearest = Math.min(nearest, segDistSq(x, y, line[k - 1], line[k]));
+        if (nearest <= reachSq) near[y * w + x] = Math.sqrt(nearest);
+      }
+    }
+    return growRegion(field, seeds, colourModel(fieldSamples(field, seeds)), near, reach, null, o);
+  }
+
+  /* ---- the area wand ----
+     A rough shape drawn round a waste area, pushed outward to fill the gaps the hand left: the
+     colour INSIDE the drawn shape is the surface, and every connected pixel close enough to it,
+     out to `reachPx` beyond the drawn edge, joins. The drawn shape itself is always kept, so
+     the answer only ever grows from what was drawn. Same options and answer as growFromLine. */
+  function growFromArea(image, ring, opts) {
+    var o = opts || {};
+    var w = image && image.width, h = image && image.height, data = image && image.data;
+    if (!w || !h || !data || !Array.isArray(ring) || ring.length < 3) return { candidates: [], reason: "no-area" };
+    var reach = Math.max(4, Number(o.reachPx) || 40);
+    var field = colourField(image, o.blurPx);
+    var inside = new Uint8Array(w * h), seeds = [];
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    ring.forEach(function (p) { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
+    for (var y = Math.max(0, Math.floor(minY)); y <= Math.min(h - 1, Math.ceil(maxY)); y++) {
+      for (var x = Math.max(0, Math.floor(minX)); x <= Math.min(w - 1, Math.ceil(maxX)); x++) {
+        if (insideRing({ x: x + 0.5, y: y + 0.5 }, ring)) { inside[y * w + x] = 1; seeds.push(y * w + x); }
+      }
+    }
+    if (seeds.length < 4) return { candidates: [], reason: "area-off-picture" };
+    var near = distanceTo(inside, w, h);
+    for (var i = 0; i < near.length; i++) if (near[i] > reach) near[i] = Infinity;
+    return growRegion(field, seeds, colourModel(fieldSamples(field, seeds)), near, reach, inside, o);
+  }
+
+  /* ---- the tree finder ----
+     Trees placed by hand this session say what a tree looks like here: their crowns' colour
+     (colourModel over circleSamples) and their size (radiusPx). Inside a box, every pixel that
+     colour is a "crown" pixel; the crown pixels furthest from anything else are the middles of
+     trees. A lone tree is one round blob with its middle at its centre; a row of trees is a
+     ridge, and the middles are spaced along it a crown apart. Already-placed trees (`avoid`,
+     {x, y, r}) are left alone. Returns {find(level) -> [{x, y, r}]}: the picture is read once
+     and each sensitivity level is cheap, so left and right answer at once. */
+  var TREE_FINDER_LEVELS = [1.3, 1.7, 2.1, 2.6, 3.2, 4];
+  var TREE_FINDER_MAX = 150;
+
+  function treeFinder(image, model, opts) {
+    var o = opts || {};
+    var radius = Math.max(2, Number(o.radiusPx) || 10);
+    var box = o.box || { x0: 0, y0: 0, x1: image.width, y1: image.height };
+    var x0 = Math.max(0, Math.floor(Math.min(box.x0, box.x1))), y0 = Math.max(0, Math.floor(Math.min(box.y0, box.y1)));
+    var x1 = Math.min(image.width, Math.ceil(Math.max(box.x0, box.x1))), y1 = Math.min(image.height, Math.ceil(Math.max(box.y0, box.y1)));
+    var w = x1 - x0, h = y1 - y0;
+    if (!model || w < 3 || h < 3) return { find: function () { return []; } };
+    /* Just the box, so a big picture costs no more than the box drawn on it. */
+    var crop = new Uint8ClampedArray(w * h * 4);
+    for (var y = 0; y < h; y++) crop.set(image.data.subarray(((y + y0) * image.width + x0) * 4, ((y + y0) * image.width + x1) * 4), y * w * 4);
+    var field = colourField({ width: w, height: h, data: crop }, Math.max(1, Math.round(radius * 0.15)));
+    var n = w * h, dist = new Float32Array(n);
+    for (var i = 0; i < n; i++) dist[i] = spreadDistance(field, i, model);
+    var open = Math.max(1, Math.round(radius * 0.25));
+    var minR = radius * 0.4;
+    var avoid = (o.avoid || []).map(function (a) { return { x: a.x - x0, y: a.y - y0, r: a.r }; });
+    var max = Math.max(1, Number(o.max) || TREE_FINDER_MAX);
+
+    function find(level) {
+      var crown = new Uint8Array(n), j;
+      for (j = 0; j < n; j++) crown[j] = dist[j] <= level ? 1 : 0;
+      crown = morph(morph(crown, w, h, open, false), w, h, open, true);
+      var empty = new Uint8Array(n);
+      for (j = 0; j < n; j++) empty[j] = crown[j] ? 0 : 1;
+      var depth = distanceTo(empty, w, h);
+      /* Candidate middles: deep enough to be a crown, and the deepest of their neighbours. */
+      var peaks = [];
+      for (var yy = 1; yy < h - 1; yy++) {
+        for (var xx = 1; xx < w - 1; xx++) {
+          j = yy * w + xx;
+          var d = depth[j];
+          if (d < minR) continue;
+          if (d < depth[j - 1] || d < depth[j + 1] || d < depth[j - w] || d < depth[j + w] ||
+              d < depth[j - w - 1] || d < depth[j - w + 1] || d < depth[j + w - 1] || d < depth[j + w + 1]) continue;
+          peaks.push({ x: xx, y: yy, d: d });
+        }
+      }
+      peaks.sort(function (a, b) { return b.d - a.d; });
+      var kept = [];
+      for (var p = 0; p < peaks.length && kept.length < max; p++) {
+        var c = peaks[p];
+        var r = Math.max(radius * 0.5, Math.min(radius * 2.2, c.d));
+        var clash = kept.some(function (k) { return Math.hypot(k.x - c.x, k.y - c.y) < (k.r + r) * 0.75; }) ||
+          avoid.some(function (a) { return Math.hypot(a.x - c.x, a.y - c.y) < a.r + r * 0.5; });
+        if (!clash) kept.push({ x: c.x, y: c.y, r: r });
+      }
+      return kept.map(function (k) { return { x: k.x + x0 + 0.5, y: k.y + y0 + 0.5, r: k.r }; });
+    }
+    return { find: find };
+  }
+
+  /* ---- the colour wand ----
+     Like Instant Alpha in Preview: a press on the picture takes the colour under it, and every
+     pixel connected to it within `tolerance` of that colour is selected - dragging further
+     raises the tolerance. field: a colourField. Returns a 0/1 mask the size of the field. */
+  function floodSelect(field, x, y, tolerance) {
+    var w = field.w, h = field.h, sx = Math.round(x), sy = Math.round(y);
+    var mask = new Uint8Array(w * h);
+    if (sx < 0 || sy < 0 || sx >= w || sy >= h) return mask;
+    var s = sy * w + sx, cL = field.L[s], cA = field.A[s], cB = field.B[s];
+    var tol2 = Math.max(0, Number(tolerance) || 0);
+    tol2 *= tol2;
+    var queue = new Int32Array(w * h), head = 0, tail = 0;
+    mask[s] = 1; queue[tail++] = s;
+    function visit(i) {
+      if (mask[i]) return;
+      var dL = field.L[i] - cL, dA = field.A[i] - cA, dB = field.B[i] - cB;
+      if (dL * dL + dA * dA + dB * dB > tol2) return;
+      mask[i] = 1; queue[tail++] = i;
+    }
+    while (head < tail) {
+      var i = queue[head++], ix = i % w;
+      if (ix > 0) visit(i - 1);
+      if (ix < w - 1) visit(i + 1);
+      if (i >= w) visit(i - w);
+      if (i < w * h - w) visit(i + w);
+    }
+    return mask;
+  }
+
+  /* The outer edge of the biggest region in a 0/1 mask, holes filled, as a ring of at most
+     maxPoints corners in the mask's pixels - or null when there is nothing to outline. */
+  function maskOutline(mask, w, h, maxPoints) {
+    var filled = fillHoles(mask, w, h);
+    var loop = traceLargestLoop(filled, w, h);
+    if (!loop || Math.abs(ringArea(loop)) < 4) return null;
+    var cap = maxPoints || LINE_WAND_MAX_POINTS;
+    var tol = 0.75, ring = simplifyRing(loop, tol);
+    while (ring.length > cap) { tol *= 1.5; ring = simplifyRing(loop, tol); }
+    return ring.length >= 3 ? ring : null;
+  }
+
   var api = {
     FAIRWAY_WIDTH_M: FAIRWAY_WIDTH_M, TEE_RADIUS_M: TEE_RADIUS_M, GREEN_RADIUS_M: GREEN_RADIUS_M,
     SMOOTH: SMOOTH, BUNKER_RADIUS_M: BUNKER_RADIUS_M, WATER_RADIUS_M: WATER_RADIUS_M, WATER_MAX_POINTS: WATER_MAX_POINTS, MAX_POINTS: MAX_POINTS,
@@ -554,7 +797,11 @@
     fairwayFromLine: fairwayFromLine, teeAt: teeAt, circle: circle, mergeOverlapping: mergeOverlapping,
     smoothRing: smoothRing, ringHandles: ringHandles, smoothOutline: smoothOutline,
     scaleAbout: scaleAbout, simplifyOutline: simplifyOutline,
-    growFromLine: growFromLine, traceLargestLoop: traceLargestLoop, LINE_WAND_LEVELS: LINE_WAND_LEVELS
+    growFromLine: growFromLine, traceLargestLoop: traceLargestLoop, LINE_WAND_LEVELS: LINE_WAND_LEVELS,
+    TREE_RADIUS_M: TREE_RADIUS_M, treeAt: treeAt, ellipseInBox: ellipseInBox, ringRadiusM: ringRadiusM,
+    growFromArea: growFromArea, colourField: colourField, colourModel: colourModel, circleSamples: circleSamples,
+    treeFinder: treeFinder, TREE_FINDER_LEVELS: TREE_FINDER_LEVELS, TREE_FINDER_MAX: TREE_FINDER_MAX,
+    floodSelect: floodSelect, maskOutline: maskOutline
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.GDOverlayShapes = api;

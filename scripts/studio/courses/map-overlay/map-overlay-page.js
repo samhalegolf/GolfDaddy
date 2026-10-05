@@ -88,12 +88,20 @@
      and drag all the way round it. Line + wand: click a line down its middle, Finish, and the
      line wand (GDOverlayShapes.growFromLine) grows it out to the edge. Width: the fairway line
      made into a fairway of the set width. */
-  var METHODS = { fairway: ["width", "line"], bunker: ["wand", "draw", "line"], water: ["wand", "draw", "line"] };
-  var METHOD_LABEL = { width: "Width", wand: "Wand", draw: "Draw round", line: "Line + wand" };
+  var METHODS = {
+    fairway: ["width", "line"], bunker: ["wand", "draw", "line"], water: ["wand", "draw", "line"],
+    /* Trees: one tree a click, a cluster stretched as an oval, a wood drawn round, or the tree
+       finder - a box dragged over ground with trees like the ones placed by hand. */
+    trees: ["single", "oval", "draw", "find"],
+    /* Waste area: drawn round roughly and grown out to its edge, or the colour wand. */
+    waste: ["grow", "colour"]
+  };
+  var METHOD_LABEL = { width: "Width", wand: "Wand", draw: "Draw round", line: "Line + wand", single: "Tree", oval: "Cluster", find: "Find trees", grow: "Draw + grow", colour: "Colour wand" };
+  var METHOD_NAMES = ["width", "wand", "draw", "line", "single", "oval", "find", "grow", "colour"];
   /* The line wand: how far from the line an edge may be at size 1 (metres), the picture's
      metres a pixel, and the size steps up / down take it through. */
-  var LINE_WAND_REACH_M = { fairway: 35, bunker: 12, water: 50 };
-  var LINE_WAND_MPP = { fairway: 0.4, bunker: 0.2, water: 0.5 };
+  var LINE_WAND_REACH_M = { fairway: 35, bunker: 12, water: 50, waste: 25 };
+  var LINE_WAND_MPP = { fairway: 0.4, bunker: 0.2, water: 0.5, waste: 0.4 };
   var LINE_WAND_SIZES = [0.4, 0.55, 0.7, 0.85, 1, 1.25, 1.6, 2, 2.5, 3.2, 4];
   var LINE_WAND_MAX_SIDE_PX = 2400;
   /* Up and down on the shape just placed: a fairway this many metres narrower or wider, a tee
@@ -110,7 +118,22 @@
   var SAVE_DELAY_MS = 700;
   var SAVE_RETRY_MS = 6000;
   var MAX_POINTS = 64;
-  var MAX_FEATURES = 200;
+  var MAX_FEATURES = 600;
+  /* The tree finder reads the box at about this many metres a pixel (a crown ~25px across), up
+     to this many pixels a side, and learns what a tree looks like from at most this many of the
+     trees placed by hand this session - the latest ones. */
+  var TREE_FINDER_MPP = 0.3;
+  var TREE_FINDER_MAX_SIDE_PX = 1400;
+  var TREE_SAMPLE_MAX = 12;
+  /* The colour wand reads the view on screen, at most this many pixels a side; dragging this
+     many screen pixels from the press adds one unit of colour tolerance. */
+  var COLOUR_WAND_MAX_SIDE_PX = 1400;
+  var COLOUR_WAND_TOL_START = 10;
+  var COLOUR_WAND_TOL_PER_PX = 0.3;
+  var COLOUR_WAND_TOL_MAX = 140;
+  /* A waste area outlined by a wand keeps at most this many corners - room left under
+     MAX_POINTS for corners added by hand. */
+  var WASTE_MAX_POINTS = 48;
 
   /* Survives leaving and re-entering the page - the shell tears the DOM down on every route
      change. The save state lives here too, so a save still in flight when the page is left
@@ -119,7 +142,12 @@
     course: null, features: [], loadedFor: "", osm: null, objects: [], lastRun: null, courseMap: null, view: null, sourceKey: "",
     showOsm: true, showObjects: true, status: "draft", hole: null,
     dirty: false, rev: 0, saving: false, saveError: "", fairwayWidth: 0,
-    mode: "shapes", wandSize: { green: 1, bunker: 1, water: 1 }, method: { fairway: "width", bunker: "wand", water: "wand" }, lineWandSize: { fairway: 1, bunker: 1, water: 1 }, mergeBunkers: true, fullscreen: false, unsaved: null
+    mode: "shapes", wandSize: { green: 1, bunker: 1, water: 1 }, method: { fairway: "width", bunker: "wand", water: "wand", trees: "single", waste: "grow" }, lineWandSize: { fairway: 1, bunker: 1, water: 1, waste: 1 }, mergeBunkers: true, fullscreen: false, unsaved: null,
+    /* The size the next single tree is dropped at, and the tree finder's sensitivity. */
+    treeRadius: 0, treeFinderLevel: 2,
+    /* Trees placed by hand on this course this session: what the tree finder learns from. Not
+       remembered past a reload - the imagery and the light it was taken in can change. */
+    treeSamples: []
   };
 
   /* ---- persistence ----
@@ -146,6 +174,7 @@
         course: slimCourse(session.course), view: session.view, sourceKey: session.sourceKey,
         showOsm: session.showOsm, showObjects: session.showObjects, mode: session.mode, fairwayWidth: session.fairwayWidth,
         wandSize: session.wandSize, method: session.method, lineWandSize: session.lineWandSize, mergeBunkers: session.mergeBunkers, fullscreen: !!session.fullscreen,
+        treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel,
         unsaved: session.dirty && session.loadedFor ? { courseId: session.loadedFor, features: session.features } : null
       }));
     } catch (e) {}
@@ -161,7 +190,7 @@
     try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) {}
     if (!saved || typeof saved !== "object") return;
     if (saved.course) { session.course = saved.course; session.view = saved.view || null; }
-    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "fullscreen"].forEach(function (k) {
+    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "fullscreen", "treeRadius", "treeFinderLevel"].forEach(function (k) {
       if (saved[k] != null) session[k] = saved[k];
     });
     if (saved.wandSize && typeof saved.wandSize === "object") {
@@ -173,7 +202,7 @@
       Object.keys(METHODS).forEach(function (kind) { if (METHODS[kind].indexOf(saved.method[kind]) >= 0) session.method[kind] = saved.method[kind]; });
     }
     if (saved.lineWandSize && typeof saved.lineWandSize === "object") {
-      Object.keys(METHODS).forEach(function (kind) { if (LINE_WAND_SIZES.indexOf(saved.lineWandSize[kind]) >= 0) session.lineWandSize[kind] = saved.lineWandSize[kind]; });
+      Object.keys(session.lineWandSize).forEach(function (kind) { if (LINE_WAND_SIZES.indexOf(saved.lineWandSize[kind]) >= 0) session.lineWandSize[kind] = saved.lineWandSize[kind]; });
     }
     if (saved.unsaved && Array.isArray(saved.unsaved.features)) session.unsaved = saved.unsaved;
   })();
@@ -189,6 +218,7 @@
     session.dirty = false;
     session.status = "draft";
     session.hole = null;
+    session.treeSamples = [];
   }
 
   function esc(s) {
@@ -221,11 +251,13 @@
     features.forEach(function (f) { var m = /^f-(\d+)$/.exec(f.id || ""); if (m) n = Math.max(n, Number(m[1])); });
     return "f-" + (n + 1);
   }
-  function kindLabel(kind) { return kind === "hole" ? "Hole line" : kind === "green" ? "Green" : kind === "tee" ? "Tee" : kind === "bunker" ? "Bunker" : kind === "water" ? "Water hazard" : kind === "trees" ? "Trees" : kind === "hazard" ? "Hazard" : "Fairway"; }
-  function isPolygon(kind) { return kind === "fairway" || kind === "green" || kind === "tee" || kind === "bunker" || kind === "water" || kind === "trees" || kind === "hazard"; }
-  /* Kinds that are only ever drawn round by hand: no wand, no pin. Dense trees, and any other
-     non-water hazard (gorse, scrub, a ravine). Both reach the bubble via the surface pass. */
-  var DRAW_ONLY_KINDS = ["trees", "hazard"];
+  function kindLabel(kind) { return kind === "hole" ? "Hole line" : kind === "green" ? "Green" : kind === "tee" ? "Tee" : kind === "bunker" ? "Bunker" : kind === "water" ? "Water hazard" : kind === "trees" ? "Trees" : kind === "tree" ? "Tree" : kind === "hazard" ? "Hazard" : kind === "waste" ? "Waste area" : "Fairway"; }
+  function isPolygon(kind) { return kind === "fairway" || kind === "green" || kind === "tee" || kind === "bunker" || kind === "water" || kind === "trees" || kind === "tree" || kind === "hazard" || kind === "waste"; }
+  /* Kinds that are only ever drawn round by hand: any non-water hazard (gorse, scrub, a
+     ravine). Reaches the bubble via the surface pass. */
+  var DRAW_ONLY_KINDS = ["hazard"];
+  /* Tools with no pin form: their methods work the same in Pins as in Shapes. */
+  var NO_PIN_KINDS = ["trees", "hazard", "waste"];
   function pct(size) { return Math.round(size * 100) + "%"; }
   function holeNumber(value) { var n = num(value); return n != null && Number.isInteger(n) && n >= 1 && n <= 36 ? n : null; }
   function minPoints(f) { return f.pin ? f.points.length : isPolygon(f.kind) ? 3 : 2; }
@@ -251,10 +283,18 @@
     treesSelected: { color: "#ffffff", weight: 3, fillColor: "#1f8a3c", fillOpacity: 0.5 },
     hazard: { color: "#ffa04d", weight: 2, fillColor: "#ff8a1f", fillOpacity: 0.35 },
     hazardSelected: { color: "#ffffff", weight: 3, fillColor: "#ff8a1f", fillOpacity: 0.45 },
+    tree: { color: "#0d2a14", weight: 1.5, fillColor: "#2e9e4f", fillOpacity: 0.6 },
+    treeSelected: { color: "#ffffff", weight: 2.5, fillColor: "#2e9e4f", fillOpacity: 0.7 },
+    waste: { color: "#e0b97a", weight: 2, dashArray: "5 4", fillColor: "#c99a5b", fillOpacity: 0.35 },
+    wasteSelected: { color: "#ffffff", weight: 3, dashArray: "5 4", fillColor: "#c99a5b", fillOpacity: 0.45 },
     /* The line a water hazard, trees or a hazard is drawn round with. */
     lasso: { color: "#4fb3ff", weight: 3, dashArray: "6 6", interactive: false },
     lassoTrees: { color: "#2fbf5a", weight: 3, dashArray: "6 6", interactive: false },
     lassoHazard: { color: "#ffa04d", weight: 3, dashArray: "6 6", interactive: false },
+    lassoWaste: { color: "#e0b97a", weight: 3, dashArray: "6 6", interactive: false },
+    /* A cluster oval while it is stretched, and the box the tree finder looks in. */
+    stretchOval: { color: "#2fbf5a", weight: 2, dashArray: "6 6", fillColor: "#1f8a3c", fillOpacity: 0.2, interactive: false },
+    stretchBox: { color: "#ffffff", weight: 2, dashArray: "6 6", fill: false, interactive: false },
     draft: { color: "#ffb54c", weight: 3, dashArray: "6 6", interactive: false },
     /* Shapes on the same hole, and the line a Link drag draws. */
     link: { color: "#ffffff", weight: 2, opacity: 0.7, dashArray: "1 7", lineCap: "round", interactive: false },
@@ -302,6 +342,7 @@
     water: svgIcon('<path d="M12 3c-2.2 3-3.5 4.8-3.5 6.5a3.5 3.5 0 0 0 7 0C15.5 7.8 14.2 6 12 3z"/><path d="M3 17c2 0 2-1.5 4.5-1.5S9.5 17 12 17s2.5-1.5 4.5-1.5S19 17 21 17"/><path d="M3 21c2 0 2-1.5 4.5-1.5S9.5 21 12 21s2.5-1.5 4.5-1.5S19 21 21 21"/>'),
     trees: svgIcon('<path d="M12 3l-5 7h3l-4 6h12l-4-6h3z"/><path d="M12 16v5"/>'),
     hazard: svgIcon('<path d="M12 4L2.5 20h19z"/><path d="M12 10v4.5M12 17.5h.01"/>'),
+    waste: svgIcon('<path d="M3.5 15.5c.5-4 4-7.5 8.5-7.5s8 2.5 8.5 5.5-2.5 5.5-8.5 5.5-9-.5-8.5-3.5z" stroke-dasharray="3 2.4"/><path d="M8 14h.01M12 12h.01M15.5 14.5h.01M11 16h.01"/>'),
     expand: svgIcon('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
     shrink: svgIcon('<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>'),
     course: svgIcon('<path d="M3 11l9-7 9 7"/><path d="M5.5 9.5V20h13V9.5"/>'),
@@ -348,6 +389,15 @@
     var linkLayers = [];
     var sourceTesting = false;
     var sourceTest = null;
+    /* The press-and-drag gestures: a cluster oval or a tree-finder box being stretched, and the
+       colour wand's press. */
+    var stretch = null;
+    var colourPress = null;
+    /* Trees the finder just dropped, live for left / right / Enter / Esc like a placed shape. */
+    var finder = null;
+    /* The colour wand's selection, waiting for Enter. */
+    var colourSel = null;
+    var colourCap = null;
 
     /* One screen, laid out like the booking app's video workspace: the map takes everything,
        the tools float over it (placing tools down the left, view controls down the right, the
@@ -389,7 +439,9 @@
       '<div class="gdStudioViewportCredit" data-gd-overlay="credit"></div>' +
       '<details class="gdStudioLede gdStudioOverlayHelp"><summary>How it works</summary>' +
       "<p><strong>Shapes</strong>: <strong>Fairway</strong> - click along its middle and press Finish; <strong>Green</strong> / <strong>Bunker</strong> - click the middle and the wand outlines it " +
-      "(then shaped by a few smooth points); <strong>Water</strong> / <strong>Bunker</strong> - <em>Wand</em>: click the middle, <em>Draw round</em>: press and drag all the way round it, or <em>Line + wand</em>: click a line down its middle and Finish, and the line wand grows it out to the edge (the tool's key again switches method); <strong>Fairway</strong> has <em>Line + wand</em> too, instead of a set width; <strong>Tee</strong> - click to drop a round tee; <strong>Trees</strong> / <strong>Hazard</strong> (gorse, scrub - anything that is not water) - press and drag all the way round it. " +
+      "(then shaped by a few smooth points); <strong>Water</strong> / <strong>Bunker</strong> - <em>Wand</em>: click the middle, <em>Draw round</em>: press and drag all the way round it, or <em>Line + wand</em>: click a line down its middle and Finish, and the line wand grows it out to the edge (the tool's key again switches method); <strong>Fairway</strong> has <em>Line + wand</em> too, instead of a set width; <strong>Tee</strong> - click to drop a round tee; <strong>Hazard</strong> (gorse, scrub - anything that is not water) - press and drag all the way round it. " +
+      "<strong>Trees</strong> - <em>Tree</em>: click to drop one tree, ↑ ↓ to size it; <em>Cluster</em>: press and drag to stretch an oval over a group (Shift for a circle); <em>Draw round</em>: press and drag round a wood; <em>Find trees</em>: drag a box and the trees in it that look like the ones you placed by hand this session are dropped for you (← → fewer / more, Enter keeps them, Esc takes them away). " +
+      "<strong>Waste</strong> - <em>Draw + grow</em>: draw roughly round it and it is pushed out to the edge of the ground it sits on; <em>Colour wand</em>: press on it and drag - the further you drag, the more of that colour it takes (Shift-drag adds more, ← → tighter / looser), Enter makes it a waste area. " +
       "Whatever you just placed stays live: <strong>← →</strong> step the wand's sensitivity, <strong>↑ ↓</strong> make it smaller or bigger (a fairway narrower or wider), <strong>Enter</strong> or <strong>Space</strong> keeps it, <strong>Esc</strong> removes it - placing the next one keeps it too. " +
       "<strong>Pins</strong>, the quick pass: a fairway is its start then its end and becomes a fairway straight away; a green pin is outlined by the wand straight away; tees, bunkers and water stay pins until <strong>Shape pins</strong>. " +
       "Whatever you just placed can be dragged at once to adjust it. In <strong>Move</strong>, drag shapes and their points, and drop either on the <strong>bin</strong> to delete. " +
@@ -411,6 +463,7 @@
       railButton("tool-water", "water", "Water", "") +
       railButton("tool-trees", "trees", "Trees", "") +
       railButton("tool-hazard", "hazard", "Hazard", "") +
+      railButton("tool-waste", "waste", "Waste", "") +
       "</div>" +
       '<div class="gdStudioOverlayOptions">' +
       '<span class="gdStudioOverlayModes">' +
@@ -424,6 +477,11 @@
       '<button type="button" data-gd-overlay="method-wand" title="Click the middle and the wand outlines it (press the tool key again to switch)">Wand</button>' +
       '<button type="button" data-gd-overlay="method-draw" title="Press and drag all the way round it (press the tool key again to switch)">Draw round</button>' +
       '<button type="button" data-gd-overlay="method-line" title="Click a line down its middle, Finish, and the line wand grows it out to the edge (press the tool key again to switch)">Line + wand</button>' +
+      '<button type="button" data-gd-overlay="method-single" title="Click to drop one tree; up and down make it smaller or bigger (E again switches)">Tree</button>' +
+      '<button type="button" data-gd-overlay="method-oval" title="Press and drag across a cluster of trees to stretch an oval over it - hold Shift for a circle (E again switches)">Cluster</button>' +
+      '<button type="button" data-gd-overlay="method-find" title="Drag a box: trees in it that look like the ones you placed by hand this session are dropped as trees (E again switches)">Find trees</button>' +
+      '<button type="button" data-gd-overlay="method-grow" title="Draw roughly round the waste area; it is pushed out to the edge of the ground it sits on (A again switches)">Draw + grow</button>' +
+      '<button type="button" data-gd-overlay="method-colour" title="Press on the waste area and drag - further selects more of the same colour. Shift-drag adds. Enter makes it a waste area (A again switches)">Colour wand</button>' +
       "</span>" +
       '<span class="gdStudioOverlayOpt" data-gd-overlay="wand-size-label"><span data-gd-overlay="wand-size-name">Wand</span> ' +
       '<button type="button" class="gdStudioOverlayStep" data-gd-overlay="wand-smaller" title="The wand reaches for a smaller edge (↓ on the shape just placed, [ for the next one)">−</button>' +
@@ -453,7 +511,7 @@
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "method", "method-width", "method-wand", "method-draw", "method-line", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "hole", "hole-label", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "clear", "run", "status"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "hole", "hole-label", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -547,12 +605,20 @@
       return !!session.course && session.loadedFor === courseIdOf(session.course) && !scanning && !busy;
     }
 
-    var TOOLS = ["move", "connect", "fairway", "green", "tee", "bunker", "water", "trees", "hazard"];
+    var TOOLS = ["move", "connect", "fairway", "green", "tee", "bunker", "water", "trees", "hazard", "waste"];
+
+    /* Whatever was just placed is kept: the live shape, and the trees the finder dropped. The
+       colour wand's selection is not a shape yet - it goes, unless `keepColour`. */
+    function settle(keepColour) {
+      if (adjust) commitAdjust(true);
+      if (finder) keepFinder(true);
+      if (colourSel && !keepColour) clearColourSel();
+    }
 
     /* The tool picked stays picked: placing a shape never switches to another tool, so a run
        of greens or bunkers is a run of clicks. */
     function setTool(next) {
-      if (adjust) commitAdjust(true);
+      settle();
       tool = TOOLS.indexOf(next) >= 0 ? next : "move";
       TOOLS.forEach(function (name) {
         el["tool-" + name].classList.toggle("isActive", tool === name);
@@ -579,8 +645,9 @@
         tee: "Drop a round tee (T)",
         bunker: "Click a bunker for the wand, draw round it, or lay a line and wand it out (B)",
         water: "Click water for the wand, draw round it, or lay a line and wand it out (W)",
-        trees: "Draw round an area of dense trees (E)",
-        hazard: "Draw round a non-water hazard - gorse, scrub, a ravine (X)"
+        trees: "A tree a click, a cluster as an oval, a wood drawn round, or find trees in a box (E)",
+        hazard: "Draw round a non-water hazard - gorse, scrub, a ravine (X)",
+        waste: "Draw round a waste area and grow it out, or pick it with the colour wand (A)"
       },
       pins: {
         fairway: "Click where the fairway starts, then where it ends - it becomes a fairway (F)",
@@ -588,18 +655,19 @@
         tee: "Pin the middle of a tee (T)",
         bunker: "Pin the middle of a bunker (B)",
         water: "Pin the middle of a water hazard (W)",
-        trees: "Draw round an area of dense trees - trees have no pin (E)",
-        hazard: "Draw round a non-water hazard - hazards have no pin (X)"
+        trees: "A tree a click, a cluster as an oval, a wood drawn round, or find trees in a box - trees have no pin (E)",
+        hazard: "Draw round a non-water hazard - hazards have no pin (X)",
+        waste: "Draw round a waste area and grow it out, or pick it with the colour wand - waste has no pin (A)"
       }
     };
 
     function setMode(next) {
-      if (adjust) commitAdjust(true);
+      settle();
       session.mode = next === "pins" ? "pins" : "shapes";
       if (draft.length) cancelDraft();
       el["mode-shapes"].classList.toggle("isActive", session.mode === "shapes");
       el["mode-pins"].classList.toggle("isActive", session.mode === "pins");
-      ["fairway", "green", "tee", "bunker", "water", "trees", "hazard"].forEach(function (name) {
+      ["fairway", "green", "tee", "bunker", "water", "trees", "hazard", "waste"].forEach(function (name) {
         el["tool-" + name].title = TOOL_TEXT[session.mode][name];
       });
       renderOptions();
@@ -613,34 +681,42 @@
        is outlined at once). */
     function renderOptions() {
       var shapesMode = session.mode === "shapes";
-      el["width-label"].hidden = !shapesMode;
       el["merge-label"].hidden = !shapesMode;
-      var methods = shapesMode ? METHODS[tool] : null;
+      var methods = methodOf(tool) ? METHODS[tool] : null;
       el.method.hidden = !methods;
-      ["width", "wand", "draw", "line"].forEach(function (m) {
+      METHOD_NAMES.forEach(function (m) {
         var b = el["method-" + m];
         b.hidden = !methods || methods.indexOf(m) < 0;
         b.classList.toggle("isActive", !!methods && session.method[tool] === m);
       });
       el["width-label"].hidden = !shapesMode || (tool === "fairway" && session.method.fairway === "line");
-      el["wand-size-label"].hidden = !(lineWanding() || (WAND_KINDS.indexOf(tool) >= 0 && (!METHODS[tool] || methodOf(tool) === "wand" || !shapesMode) && (shapesMode || tool === "green")));
+      el["wand-size-label"].hidden = !(growWanding() || (WAND_KINDS.indexOf(tool) >= 0 && (!METHODS[tool] || methodOf(tool) === "wand" || !shapesMode) && (shapesMode || tool === "green")));
       renderWandSize();
     }
 
     /* ---- methods: wand, draw round, line + wand, width ---- */
 
-    /* How the tool in hand places a shape. Pins mode has no methods: a pin is a pin. */
-    function methodOf(kind) { return session.mode === "shapes" && METHODS[kind] ? session.method[kind] : null; }
-    /* The kind a press-and-drag draws round right now, or null when the tool clicks instead. */
-    function drawRoundKind() { return DRAW_ONLY_KINDS.indexOf(tool) >= 0 ? tool : methodOf(tool) === "draw" ? tool : null; }
+    /* How the tool in hand places a shape. Pins mode has no methods - a pin is a pin - except
+       on the tools that have no pin. */
+    function methodOf(kind) { return METHODS[kind] && (session.mode === "shapes" || NO_PIN_KINDS.indexOf(kind) >= 0) ? session.method[kind] : null; }
+    /* The kind a press-and-drag draws round right now, or null when the tool clicks instead. A
+       waste area on Draw + grow is drawn round first, then grown. */
+    function drawRoundKind() { return DRAW_ONLY_KINDS.indexOf(tool) >= 0 || methodOf(tool) === "draw" || methodOf(tool) === "grow" ? tool : null; }
+    /* What a press-and-drag on the map does with the tool in hand, or null when it pans. */
+    function pressGesture() {
+      if (drawRoundKind()) return "lasso";
+      var m = methodOf(tool);
+      return m === "oval" ? "oval" : m === "find" ? "box" : m === "colour" ? "colour" : null;
+    }
     /* Whether clicks lay a line: always for a fairway, for bunkers and water on Line + wand. */
     function lineTool() { return tool === "fairway" || methodOf(tool) === "line"; }
-    /* Whether the line, once finished, goes through the line wand. */
-    function lineWanding() { return methodOf(tool) === "line"; }
+    /* Whether the shape is grown out by a wand with a reach: a finished line on Line + wand,
+       or a waste area drawn round on Draw + grow. */
+    function growWanding() { return methodOf(tool) === "line" || methodOf(tool) === "grow"; }
 
     function setMethod(kind, m) {
       if (!METHODS[kind] || METHODS[kind].indexOf(m) < 0) return;
-      if (adjust) commitAdjust(true);
+      settle();
       if (draft.length) cancelDraft();
       session.method[kind] = m;
       renderOptions();
@@ -663,23 +739,31 @@
       try { if (lineTool()) mapObj.doubleClickZoom.disable(); else mapObj.doubleClickZoom.enable(); } catch (e) {}
     }
 
-    /* Drawing round water, trees or a hazard is a press-and-drag, so the map does not pan under
-       it; any other tool pans as usual. */
+    /* Drawing round, stretching an oval or a box, and the colour wand are a press-and-drag, so
+       the map does not pan under them; any other tool pans as usual. */
     function syncMapDragging() {
-      if (!mapObj || drag || connect || lasso) return;
-      try { if (drawRoundKind()) mapObj.dragging.disable(); else mapObj.dragging.enable(); } catch (e) {}
+      if (!mapObj || drag || connect || lasso || stretch || colourPress) return;
+      try { if (pressGesture()) mapObj.dragging.disable(); else mapObj.dragging.enable(); } catch (e) {}
     }
 
     var lasso = null;
 
-    function beginLasso(event) {
-      var kind = drawRoundKind();
-      if (!kind || event.button || drag || connect || lasso || !mapObj) return;
+    /* A press on the map starts the tool's gesture, if it has one. */
+    function onMapPress(event) {
+      var gesture = pressGesture();
+      if (!gesture || event.button || drag || connect || lasso || stretch || colourPress || !mapObj) return;
       if (Date.now() - dragEndedAt < 300) return;
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
-      if (adjust) commitAdjust(true);
       event.preventDefault();
+      if (gesture === "colour") { settle(true); beginColourWand(event); return; }
+      settle();
+      if (gesture === "lasso") beginLasso(event);
+      else beginStretch(event, gesture);
+    }
+
+    function beginLasso(event) {
+      var kind = drawRoundKind();
       var lassoStyle = STYLE["lasso" + kind.charAt(0).toUpperCase() + kind.slice(1)] || STYLE.lasso;
       lasso = { kind: kind, points: [mapObj.mouseEventToLatLng(event)], x: event.clientX, y: event.clientY, line: L.polyline([], lassoStyle).addTo(mapObj) };
       document.addEventListener("pointermove", onLassoMove);
@@ -709,13 +793,325 @@
       syncMapDragging();
       if (event.type === "pointercancel") return;
       var ring = shapes.simplifyOutline(drawn.points.map(function (p) { return { lat: p.lat, lng: p.lng }; }), shapes.WATER_MAX_POINTS);
-      var noun = drawn.kind === "water" ? "the water" : drawn.kind === "bunker" ? "the bunker" : drawn.kind === "trees" ? "the trees" : "the hazard";
+      var noun = drawn.kind === "water" ? "the water" : drawn.kind === "bunker" ? "the bunker" : drawn.kind === "trees" ? "the trees" : drawn.kind === "waste" ? "the waste area" : "the hazard";
       if (!ring) { setStatus("Press and drag all the way round " + noun + " to outline it.", true); return; }
+      /* A waste area drawn round roughly is pushed out to the edge of the ground it sits on. */
+      if (drawn.kind === "waste") { growPlace({ ring: ring }, "waste"); return; }
       /* A bunker is edited by its smooth handles like every other bunker. */
       if (drawn.kind === "bunker") ring = shapes.smoothOutline(ring, "bunker");
       var f = addFeature({ kind: drawn.kind, points: ring });
       startAdjust(f, { base: ring });
       setStatus(kindLabel(drawn.kind) + " placed.");
+    }
+
+    /* ---- stretching: a cluster of trees as an oval, the tree finder's box ----
+       Press at one corner and drag to the other. The oval fills the box (Shift: a circle);
+       the box is where the finder looks. */
+
+    function beginStretch(event, mode) {
+      var start = mapObj.mouseEventToLatLng(event);
+      var preview = mode === "oval" ? L.polygon([], STYLE.stretchOval) : L.rectangle(L.latLngBounds(start, start), STYLE.stretchBox);
+      stretch = { mode: mode, start: { lat: start.lat, lng: start.lng }, end: null, round: false, layer: preview.addTo(mapObj) };
+      document.addEventListener("pointermove", onStretchMove);
+      document.addEventListener("pointerup", onStretchEnd);
+      document.addEventListener("pointercancel", onStretchEnd);
+    }
+
+    function onStretchMove(event) {
+      if (!stretch || destroyed) return;
+      var ll = mapObj.mouseEventToLatLng(event);
+      stretch.end = { lat: ll.lat, lng: ll.lng };
+      stretch.round = !!event.shiftKey;
+      if (stretch.mode === "oval") stretch.layer.setLatLngs(toLatLngs(shapes.ellipseInBox(stretch.start, stretch.end, stretch.round)));
+      else stretch.layer.setBounds(L.latLngBounds([stretch.start.lat, stretch.start.lng], [ll.lat, ll.lng]));
+    }
+
+    function onStretchEnd(event) {
+      document.removeEventListener("pointermove", onStretchMove);
+      document.removeEventListener("pointerup", onStretchEnd);
+      document.removeEventListener("pointercancel", onStretchEnd);
+      var done = stretch;
+      stretch = null;
+      if (destroyed || !done) return;
+      try { mapObj.removeLayer(done.layer); } catch (e) {}
+      dragEndedAt = Date.now();
+      syncMapDragging();
+      if (event.type === "pointercancel") return;
+      var a = done.start, b = done.end;
+      var wide = !!b && shapes.distanceM(a, { lat: a.lat, lng: b.lng }) >= 2, tall = !!b && shapes.distanceM(a, { lat: b.lat, lng: a.lng }) >= 2;
+      if (done.mode === "oval") {
+        if (done.round ? !(wide || tall) : !(wide && tall)) { setStatus("Press and drag across the cluster of trees to stretch an oval over it.", true); return; }
+        var ring = shapes.ellipseInBox(a, b, done.round);
+        var f = addFeature({ kind: "trees", points: ring });
+        startAdjust(f, { base: ring });
+        setStatus("Cluster of trees placed. ↑ ↓ smaller / bigger, or drag its corners in Move.");
+        return;
+      }
+      if (!(wide && tall)) { setStatus("Drag a box over the ground to look for trees in.", true); return; }
+      runTreeFinder(a, b);
+    }
+
+    /* ---- single trees ----
+       A click drops a tree at the size the last one was left at; up and down size it. Trees
+       placed by hand are what the tree finder learns from. */
+
+    function placeTree(point) {
+      var f = addFeature({ kind: "tree", points: shapes.treeAt(point, session.treeRadius || shapes.TREE_RADIUS_M) });
+      session.treeSamples.push(f.id);
+      startAdjust(f, { base: f.points.slice() });
+      setStatus("Tree placed. ↑ ↓ smaller / bigger - the next one starts at this size.");
+    }
+
+    /* The hand-placed trees still on the map, latest last. */
+    function sampleTrees() {
+      return session.treeSamples.map(findFeature).filter(function (f) { return f && f.kind === "tree"; });
+    }
+
+    /* ---- the tree finder ----
+       A box dragged over the ground: the trees placed by hand this session say what a tree
+       looks like here (their colour and size), and the finder (GDOverlayShapes.treeFinder)
+       drops a tree on every crown in the box that looks like them. The trees it drops stay
+       live: left and right drop fewer or more (its sensitivity), Enter keeps them, Esc takes
+       them all away; placing anything else keeps them. */
+
+    function runTreeFinder(a, b) {
+      var samples = sampleTrees().slice(-TREE_SAMPLE_MAX);
+      if (!samples.length) { setStatus("Place a tree or two by hand first (Tree), on trees like the ones you want found - the finder looks for more like them.", true); return; }
+      var room = Math.min(shapes.TREE_FINDER_MAX, MAX_FEATURES - session.features.length);
+      if (room <= 0) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
+      var id = session.loadedFor;
+      var hole = session.hole;
+      var marker = L.rectangle(L.latLngBounds([a.lat, a.lng], [b.lat, b.lng]), STYLE.stretchBox).addTo(mapObj);
+      marker.bindTooltip("Looking for trees…", { permanent: true, direction: "center", className: "gdStudioOverlayLabel" });
+      wandsRunning++;
+      updateHint();
+      var corners = [a, b, { lat: a.lat, lng: b.lng }, { lat: b.lat, lng: a.lng }];
+      captureBox(corners, { mpp: TREE_FINDER_MPP, maxSidePx: TREE_FINDER_MAX_SIDE_PX, marginPx: 8 }).then(function (cap) {
+        /* Each sample tree read at the box's own zoom, so its crown is the same size in pixels. */
+        return Promise.all(samples.map(function (t) {
+          return captureBox(t.points, { z: cap.z, maxSidePx: 512, marginPx: 4 }).then(function (patch) {
+            var c = shapes.centroid(t.points), rM = shapes.ringRadiusM(t.points);
+            return { samples: shapes.circleSamples(patch.image, patch.toPx(c), rM * 0.75 / patch.mpp, 1), radiusM: rM };
+          }, function () { return null; });
+        })).then(function (read) {
+          read = read.filter(Boolean);
+          if (!read.length) throw new Error("the trees placed by hand could not be read off the imagery");
+          var pool = { L: [], A: [], B: [] };
+          read.forEach(function (r) { pool.L = pool.L.concat(r.samples.L); pool.A = pool.A.concat(r.samples.A); pool.B = pool.B.concat(r.samples.B); });
+          var radii = read.map(function (r) { return r.radiusM; }).sort(function (x, y) { return x - y; });
+          var radiusPx = radii[radii.length >> 1] / cap.mpp;
+          var pa = cap.toPx(a), pb = cap.toPx(b);
+          var avoid = session.features.filter(function (f) { return f.kind === "tree"; }).map(function (f) {
+            var c = cap.toPx(shapes.centroid(f.points));
+            return { x: c.x, y: c.y, r: shapes.ringRadiusM(f.points) / cap.mpp };
+          });
+          return { cap: cap, run: shapes.treeFinder(cap.image, shapes.colourModel(pool), { radiusPx: radiusPx, box: { x0: pa.x, y0: pa.y, x1: pb.x, y1: pb.y }, avoid: avoid, max: room }) };
+        });
+      }).then(function (found) {
+        if (destroyed || session.loadedFor !== id) return;
+        settle(true);
+        finder = { ids: [], cap: found.cap, run: found.run, hole: hole };
+        dropFinderTrees(session.treeFinderLevel);
+        if (!finder.ids.length) setStatus("No trees like the ones you placed were found in that box. → looks harder.");
+      }, function (error) {
+        if (!destroyed) setStatus("The tree finder could not run: " + (error && error.message || error) + ".", true);
+      }).then(function () {
+        try { mapObj && mapObj.removeLayer(marker); } catch (e) {}
+        wandsRunning--;
+        if (!destroyed) updateHint();
+      });
+    }
+
+    /* The finder's trees at one sensitivity, in place of the ones it dropped before. */
+    function dropFinderTrees(level) {
+      var levels = shapes.TREE_FINDER_LEVELS;
+      level = Math.max(0, Math.min(levels.length - 1, Math.round(Number(level)) || 0));
+      var gone = {};
+      finder.ids.forEach(function (fid) { gone[fid] = true; });
+      session.features = session.features.filter(function (f) { return !gone[f.id]; });
+      if (gone[selectedId]) selectedId = "";
+      finder.level = level;
+      session.treeFinderLevel = level;
+      var cap = finder.cap;
+      finder.ids = finder.run.find(levels[level]).slice(0, Math.max(0, MAX_FEATURES - session.features.length)).map(function (t) {
+        return addFeature({ kind: "tree", points: shapes.treeAt(cap.toLL(t), t.r * cap.mpp), source: "finder", hole: finder.hole }, true).id;
+      });
+      drawFeatures();
+      changed();
+      updateHint();
+      setStatus("Found " + finder.ids.length + " tree" + (finder.ids.length === 1 ? "" : "s") + " (sensitivity " + (level + 1) + " of " + levels.length + "). ← → fewer / more · Enter keeps them · Esc takes them away.");
+    }
+
+    function stepFinder(by) {
+      var next = Math.max(0, Math.min(shapes.TREE_FINDER_LEVELS.length - 1, finder.level + by));
+      if (next === finder.level) { setStatus(by < 0 ? "That is as strict as the finder goes." : "That is as loose as the finder goes."); return; }
+      dropFinderTrees(next);
+    }
+
+    function keepFinder(quiet) {
+      var n = finder.ids.filter(findFeature).length;
+      finder = null;
+      if (!quiet) setStatus(n + " tree" + (n === 1 ? "" : "s") + " kept.");
+      updateHint();
+    }
+
+    function discardFinder() {
+      var gone = {};
+      finder.ids.forEach(function (fid) { gone[fid] = true; });
+      finder = null;
+      session.features = session.features.filter(function (f) { return !gone[f.id]; });
+      if (gone[selectedId]) selectedId = "";
+      drawFeatures();
+      changed();
+      updateHint();
+      setStatus("The trees the finder dropped are gone.");
+    }
+
+    /* ---- the colour wand ----
+       Like Instant Alpha in Preview: press on the waste area and drag - the further from the
+       press, the more of that colour it takes in (connected to where you pressed). Shift-drag
+       adds to what is already picked. The pick is shown over the map until Enter makes it a
+       waste area; left and right tighten or loosen the last drag; Esc drops it. The picture is
+       the view on screen, read once and reused until the map moves. */
+
+    function colourCapture() {
+      var b = mapObj.getBounds(), z = Math.round(mapObj.getZoom());
+      var key = b.toBBoxString() + "|" + z + "|" + session.sourceKey;
+      if (colourCap && colourCap.key === key) return colourCap.promise;
+      var nw = b.getNorthWest(), se = b.getSouthEast();
+      var promise = captureBox([{ lat: nw.lat, lng: nw.lng }, { lat: se.lat, lng: se.lng }], { z: z, maxSidePx: COLOUR_WAND_MAX_SIDE_PX, marginPx: 0 }).then(function (cap) {
+        cap.field = shapes.colourField(cap.image, 1);
+        return cap;
+      });
+      colourCap = { key: key, promise: promise };
+      promise.catch(function () { if (colourCap && colourCap.promise === promise) colourCap = null; });
+      return promise;
+    }
+
+    function beginColourWand(event) {
+      var ll = mapObj.mouseEventToLatLng(event);
+      colourPress = { latlng: { lat: ll.lat, lng: ll.lng }, x: event.clientX, y: event.clientY, tol: COLOUR_WAND_TOL_START, add: !!event.shiftKey, cap: null, frame: 0, done: false };
+      var press = colourPress;
+      document.addEventListener("pointermove", onColourMove);
+      document.addEventListener("pointerup", onColourEnd);
+      document.addEventListener("pointercancel", onColourEnd);
+      wandsRunning++;
+      updateHint();
+      colourCapture().then(function (cap) {
+        if (destroyed || press.cancelled) return;
+        press.cap = cap;
+        press.seed = cap.toPx(press.latlng);
+        /* Shift-drag adds within one picture; once the map has moved it starts afresh. */
+        press.base = press.add && colourSel && colourSel.cap === cap ? colourSel.mask : null;
+        showColourPress(press);
+        if (press.done) finishColourPress(press);
+      }, function (error) {
+        if (!destroyed) setStatus("The colour wand could not read the imagery: " + (error && error.message || error) + ".", true);
+      }).then(function () {
+        wandsRunning--;
+        if (!destroyed) updateHint();
+      });
+    }
+
+    function onColourMove(event) {
+      var press = colourPress;
+      if (!press || destroyed) return;
+      press.tol = Math.min(COLOUR_WAND_TOL_MAX, COLOUR_WAND_TOL_START + Math.hypot(event.clientX - press.x, event.clientY - press.y) * COLOUR_WAND_TOL_PER_PX);
+      if (press.frame || !press.cap) return;
+      press.frame = requestAnimationFrame(function () { press.frame = 0; if (!destroyed && colourPress === press) showColourPress(press); });
+    }
+
+    function onColourEnd(event) {
+      document.removeEventListener("pointermove", onColourMove);
+      document.removeEventListener("pointerup", onColourEnd);
+      document.removeEventListener("pointercancel", onColourEnd);
+      var press = colourPress;
+      colourPress = null;
+      if (destroyed || !press) return;
+      if (press.frame) { cancelAnimationFrame(press.frame); press.frame = 0; }
+      dragEndedAt = Date.now();
+      syncMapDragging();
+      if (event.type === "pointercancel") {
+        press.cancelled = true;
+        if (!colourSel) clearColourOverlay(); else drawColourOverlay(colourSel.cap, colourSel.mask);
+        return;
+      }
+      press.done = true;
+      if (press.cap) finishColourPress(press);
+    }
+
+    function colourMask(press) {
+      var mask = shapes.floodSelect(press.cap.field, press.seed.x, press.seed.y, press.tol);
+      if (press.base) for (var i = 0; i < mask.length; i++) if (press.base[i]) mask[i] = 1;
+      return mask;
+    }
+
+    function showColourPress(press) {
+      drawColourOverlay(press.cap, colourMask(press));
+    }
+
+    function finishColourPress(press) {
+      var mask = colourMask(press);
+      colourSel = { cap: press.cap, seed: press.seed, tol: press.tol, base: press.base, mask: mask };
+      drawColourOverlay(press.cap, mask);
+      updateHint();
+      setStatus("Enter makes it a waste area · ← → tighter / looser · Shift-drag adds more · Esc drops it.");
+    }
+
+    function stepColourTolerance(by) {
+      var sel = colourSel;
+      sel.tol = Math.max(1, Math.min(COLOUR_WAND_TOL_MAX, sel.tol * (by > 0 ? 1.18 : 1 / 1.18)));
+      sel.mask = colourMask({ cap: sel.cap, seed: sel.seed, tol: sel.tol, base: sel.base });
+      drawColourOverlay(sel.cap, sel.mask);
+      setStatus("Colour tolerance " + Math.round(sel.tol) + ". Enter makes it a waste area.");
+    }
+
+    /* The pick drawn over the map as a tinted picture on the capture's own footprint, coarser
+       than the capture so redrawing it while dragging stays quick. */
+    var colourOverlay = null;
+    function drawColourOverlay(cap, mask) {
+      var w = cap.image.width, h = cap.image.height;
+      var step = Math.max(1, Math.ceil(Math.max(w, h) / 700));
+      var cw = Math.ceil(w / step), ch = Math.ceil(h / step);
+      var canvas = document.createElement("canvas");
+      canvas.width = cw; canvas.height = ch;
+      var ctx = canvas.getContext("2d"), img = ctx.createImageData(cw, ch), px = img.data;
+      for (var y = 0; y < ch; y++) {
+        for (var x = 0; x < cw; x++) {
+          if (!mask[Math.min(h - 1, y * step) * w + Math.min(w - 1, x * step)]) continue;
+          var i = (y * cw + x) * 4;
+          px[i] = 255; px[i + 1] = 150; px[i + 2] = 40; px[i + 3] = 120;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      var url = canvas.toDataURL("image/png");
+      var a = cap.toLL({ x: 0, y: 0 }), b = cap.toLL({ x: w, y: h });
+      var bounds = L.latLngBounds([a.lat, a.lng], [b.lat, b.lng]);
+      if (colourOverlay && colourOverlay.cap === cap) { colourOverlay.layer.setUrl(url); return; }
+      clearColourOverlay();
+      colourOverlay = { cap: cap, layer: L.imageOverlay(url, bounds, { interactive: false }).addTo(mapObj) };
+    }
+
+    function clearColourOverlay() {
+      if (colourOverlay) { try { mapObj.removeLayer(colourOverlay.layer); } catch (e) {} }
+      colourOverlay = null;
+    }
+
+    function clearColourSel() {
+      colourSel = null;
+      clearColourOverlay();
+      updateHint();
+    }
+
+    function keepColourSel() {
+      var sel = colourSel, cap = sel.cap;
+      var ring = shapes.maskOutline(sel.mask, cap.image.width, cap.image.height, WASTE_MAX_POINTS);
+      clearColourSel();
+      if (!ring) { setStatus("Nothing picked yet - press on the waste area and drag.", true); return; }
+      var points = ring.map(cap.toLL);
+      if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
+      addFeature({ kind: "waste", points: points, source: "wand" });
+      setStatus("Waste area placed. Drag its corners in Move to tidy it.");
     }
 
     /* ---- the wand's size ----
@@ -726,9 +1122,9 @@
 
     function renderWandSize() {
       var kind = wandKind(), size = session.wandSize[kind];
-      if (lineWanding()) {
+      if (growWanding()) {
         var reachSize = session.lineWandSize[tool];
-        el["wand-size-name"].textContent = (tool === "water" ? "Water" : kindLabel(tool)) + " line wand reach";
+        el["wand-size-name"].textContent = tool === "waste" ? "Grow reach" : (tool === "water" ? "Water" : kindLabel(tool)) + " line wand reach";
         el["wand-size"].textContent = Math.round(LINE_WAND_REACH_M[tool] * reachSize) + "m";
         el["wand-smaller"].disabled = reachSize <= LINE_WAND_SIZES[0];
         el["wand-bigger"].disabled = reachSize >= LINE_WAND_SIZES[LINE_WAND_SIZES.length - 1];
@@ -749,12 +1145,12 @@
     function nextWandSize(size, by, kind) { return stepIn(wandSizes(kind), size, by); }
 
     function stepWandSize(by) {
-      if (lineWanding()) {
-        if (adjusted() && adjust.lineWand && adjust.kind === tool) { stepSize(by); return; }
+      if (growWanding()) {
+        if (adjusted() && adjust.grow && adjust.kind === tool) { stepSize(by); return; }
         session.lineWandSize[tool] = stepIn(LINE_WAND_SIZES, session.lineWandSize[tool], by);
         renderWandSize();
         remember();
-        setStatus(kindLabel(tool) + " line wand reaches " + Math.round(LINE_WAND_REACH_M[tool] * session.lineWandSize[tool]) + "m from the line - the next line uses it.");
+        setStatus(kindLabel(tool) + (tool === "waste" ? " grows up to " : " line wand reaches ") + Math.round(LINE_WAND_REACH_M[tool] * session.lineWandSize[tool]) + (tool === "waste" ? "m past what you draw - the next one uses it." : "m from the line - the next line uses it."));
         return;
       }
       var kind = wandKind();
@@ -782,13 +1178,15 @@
     }
 
     /* opts: seed and wand (a wand shape: its click and the wand's answer), size (the wand size
-       it ran at), line (a fairway's centre line), base (anything else: the outline to scale). */
+       it ran at), line (a fairway's centre line), grow (a shape grown from a line or a drawn
+       area: what it grew from, the reach and the picture), base (anything else: the outline to
+       scale). */
     function startAdjust(f, opts) {
-      if (adjust) commitAdjust(true);
+      settle();
       if (!f || f.pin) return;
       adjust = {
         id: f.id, kind: f.kind, seed: opts.seed || null, size: opts.size || 1, line: opts.line || null,
-        base: opts.base || null, lineWand: opts.lineWand || null, steps: 0, candidates: [], index: 0, running: false
+        base: opts.base || null, grow: opts.grow || null, steps: 0, candidates: [], index: 0, running: false
       };
       if (opts.wand) takeWand(opts.wand);
       drawFeatures();
@@ -858,12 +1256,18 @@
         return;
       }
       if (adjust.seed) { rerunWand(f, by); return; }
-      if (adjust.lineWand) { regrowLine(f, by); return; }
+      if (adjust.grow) { regrow(f, by); return; }
       if (!adjust.base) adjust.base = f.points.slice();
       var steps = Math.max(-6, Math.min(6, adjust.steps + by));
       if (steps === adjust.steps) { setStatus(by < 0 ? "That is as small as it goes - drag its corners for more." : "That is as big as it goes - drag its corners for more."); return; }
       adjust.steps = steps;
       f.points = shapes.scaleAbout(adjust.base, Math.pow(SCALE_STEP, steps));
+      /* The next tree is dropped at the size this one was left at. */
+      if (f.kind === "tree") {
+        session.treeRadius = Math.round(shapes.ringRadiusM(f.points) * 10) / 10;
+        remember();
+        setStatus("Tree " + Math.round(session.treeRadius * 2) + "m across - the next one starts at this size.");
+      }
       drawFeatures();
       changed();
       updateHint();
@@ -904,19 +1308,36 @@
       function move(p) { return { lat: p.lat + dLat, lng: p.lng + dLng }; }
       if (adjust.seed) adjust.seed = move(adjust.seed);
       if (adjust.line) adjust.line = adjust.line.map(move);
-      if (adjust.lineWand) adjust.lineWand.line = adjust.lineWand.line.map(move);
+      if (adjust.grow) {
+        if (adjust.grow.line) adjust.grow.line = adjust.grow.line.map(move);
+        if (adjust.grow.ring) adjust.grow.ring = adjust.grow.ring.map(move);
+      }
       if (adjust.base) adjust.base = adjust.base.map(move);
       adjust.candidates = adjust.candidates.map(function (ring) { return ring.map(move); });
     }
 
-    /* Arrow keys, Enter, Space and Esc belong to the live shape while there is one - ahead of
-       the map's own arrow-key panning, hence the capture phase. */
+    /* Arrow keys, Enter, Space and Esc belong to the live shape while there is one - or the
+       trees the finder just dropped, or the colour wand's pick - ahead of the map's own
+       arrow-key panning, hence the capture phase. */
     function onAdjustKey(event) {
-      if (!adjust || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (!(adjust || finder || colourSel) || event.metaKey || event.ctrlKey || event.altKey) return;
       var target = event.target;
       if (target && /^(input|textarea|select)$/i.test(target.tagName)) return;
-      if (!containerEl.isConnected || !adjusted() || !canEdit() || drag) return;
+      if (!containerEl.isConnected || !canEdit() || drag) return;
       var key = event.key;
+      if (finder || colourSel) {
+        var live = finder ? { step: stepFinder, keep: function () { keepFinder(false); }, drop: discardFinder }
+          : { step: stepColourTolerance, keep: keepColourSel, drop: function () { clearColourSel(); setStatus("Colour pick dropped."); } };
+        if (key === "ArrowLeft") live.step(-1);
+        else if (key === "ArrowRight") live.step(1);
+        else if (key === "Enter" || key === " " || key === "Spacebar") live.keep();
+        else if (key === "Escape") live.drop();
+        else return;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (!adjusted()) return;
       if (key === "ArrowLeft") stepSensitivity(-1);
       else if (key === "ArrowRight") stepSensitivity(1);
       else if (key === "ArrowUp") stepSize(1);
@@ -972,12 +1393,13 @@
       if (tool === "move") { if (selectedId) select(""); return; }
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
-      /* Moving on to the next shape keeps the one just placed. */
-      if (adjust) commitAdjust(true);
+      /* Moving on to the next shape keeps the one just placed. A click with the colour wand
+         is a press too short to drag - its pick stays. */
+      settle(pressGesture() === "colour");
       var point = { lat: latlng.lat, lng: latlng.lng };
       if (lineTool()) addDraftPoint(point);
-      else if (drawRoundKind()) setStatus("Press and drag all the way round the " + kindLabel(tool).toLowerCase() + " to outline it.");
-      else if (DRAW_ONLY_KINDS.indexOf(tool) >= 0) setStatus("Press and drag all the way round the " + (tool === "trees" ? "trees" : "hazard") + " to outline it.");
+      else if (methodOf(tool) === "single") placeTree(point);
+      else if (pressGesture()) setStatus(pressHint());
       else if (session.mode === "pins") {
         var pin = addFeature({ kind: tool, pin: true, points: [point] });
         /* A green pin is outlined by the wand at once; drag the pin while it works and the
@@ -990,6 +1412,16 @@
         var tee = addFeature({ kind: "tee", points: shapes.teeAt(point) });
         startAdjust(tee, { base: tee.points.slice() });
       }
+    }
+
+    /* What a press-and-drag tool wants, said when it is only clicked. */
+    function pressHint() {
+      var m = methodOf(tool);
+      if (m === "oval") return "Press and drag across the cluster of trees to stretch an oval over it.";
+      if (m === "find") return "Drag a box over the ground to look for trees in.";
+      if (m === "colour") return colourSel ? "Enter makes the pick a waste area · drag again to change it · Shift-drag adds." : "Press on the waste area and drag - the further you drag, the more it takes.";
+      var noun = tool === "trees" ? "trees" : tool === "waste" ? "waste area" : kindLabel(tool).toLowerCase();
+      return "Press and drag all the way round the " + noun + " to outline it.";
     }
 
     /* ---- fairway line ---- */
@@ -1055,7 +1487,7 @@
       var line = draft.slice();
       var kind = draftKind || "fairway";
       cancelDraft();
-      if (session.mode === "shapes" && session.method[kind] === "line") { lineWandPlace(line, kind); return; }
+      if (session.mode === "shapes" && session.method[kind] === "line") { growPlace({ line: line }, kind); return; }
       if (session.mode === "pins" && shapes.distanceM(line[0], line[1]) < 5) { setStatus("The start and end are too close together to be a fairway.", true); return; }
       var ring = shapes.fairwayFromLine(line, session.fairwayWidth);
       if (!ring) { setStatus("That line is too short to be a fairway.", true); return; }
@@ -1153,29 +1585,33 @@
       });
     }
 
-    /* ---- the line wand ----
-       A line laid down the middle of a fairway, a bunker or water, grown out to the surface's
-       edge in the browser (GDOverlayShapes.growFromLine) from the imagery on screen - no server
-       round trip, so up / down (reach) and left / right (sensitivity) answer at once. The
+    /* ---- growing: the line wand and the area wand ----
+       A line laid down the middle of a fairway, a bunker or water (GDOverlayShapes.growFromLine),
+       or a rough shape drawn round a waste area (growFromArea), grown out to the surface's edge
+       in the browser from the imagery - no server round trip, so up / down (reach) and left /
+       right (sensitivity) answer at once. `grow` is {line} or {ring}: what it grows from. The
        picture is kept on the live shape so up / down only grows again; it is captured afresh
        only when the reach outgrows it. */
 
-    function lineWandCapture(line, kind, reachM) {
+    /* The picture over some points: tiles at one zoom, stitched, unscaled, with the points'
+       pixel <-> lat/lng conversions. opts: z (that zoom; otherwise the zoom nearest `mpp` metres
+       a pixel the provider has), padM (metres of room round the points), marginPx (extra pixels
+       of room, 24 unless given), maxSidePx (one zoom coarser until the picture fits). */
+    function captureBox(points, opts) {
       return new Promise(function (resolve, reject) {
         if (!mapObj || !layer || typeof layer.getTileUrl !== "function") return reject(new Error("this provider cannot be captured - switch provider"));
         var native = num(layer.options && layer.options.maxNativeZoom) || num(layer.options && layer.options.maxZoom) || 19;
-        var mid = line[Math.floor(line.length / 2)];
+        var mid = points[Math.floor(points.length / 2)];
         var mppZ0 = 156543.03392 * Math.cos(mid.lat * Math.PI / 180);
-        var z = Math.max(14, Math.min(native, Math.round(Math.log2(mppZ0 / LINE_WAND_MPP[kind]))));
-        /* Room for the reach plus a margin all round the line, at a zoom that keeps the
-           picture under LINE_WAND_MAX_SIDE_PX a side. */
+        var z = opts.z != null ? Math.max(14, Math.min(native, opts.z)) : Math.max(14, Math.min(native, Math.round(Math.log2(mppZ0 / opts.mpp))));
+        var margin = opts.marginPx != null ? opts.marginPx : 24;
         var box;
         for (;;) {
-          var mpp = mppZ0 / Math.pow(2, z), pad = reachM / mpp + 24;
-          var pts = line.map(function (p) { return mapObj.project(L.latLng(p.lat, p.lng), z); });
+          var mpp = mppZ0 / Math.pow(2, z), pad = (opts.padM || 0) / mpp + margin;
+          var pts = points.map(function (p) { return mapObj.project(L.latLng(p.lat, p.lng), z); });
           box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, z: z, mpp: mpp };
           pts.forEach(function (q) { box.x0 = Math.min(box.x0, q.x - pad); box.y0 = Math.min(box.y0, q.y - pad); box.x1 = Math.max(box.x1, q.x + pad); box.y1 = Math.max(box.y1, q.y + pad); });
-          if ((box.x1 - box.x0 <= LINE_WAND_MAX_SIDE_PX && box.y1 - box.y0 <= LINE_WAND_MAX_SIDE_PX) || z <= 14) break;
+          if ((box.x1 - box.x0 <= opts.maxSidePx && box.y1 - box.y0 <= opts.maxSidePx) || z <= 14) break;
           z--;
         }
         var tx0 = Math.floor(box.x0 / 256), ty0 = Math.floor(box.y0 / 256), tx1 = Math.floor(box.x1 / 256), ty1 = Math.floor(box.y1 / 256);
@@ -1186,7 +1622,7 @@
           catch (e) { return reject(new Error("this provider's tiles cannot be read back (no CORS) - switch provider")); }
           var ox = tx0 * 256, oy = ty0 * 256;
           resolve({
-            image: image, z: z, mpp: box.mpp, line: line, reachM: reachM,
+            image: image, z: z, mpp: box.mpp,
             toPx: function (p) { var q = mapObj.project(L.latLng(p.lat, p.lng), z); return { x: q.x - ox, y: q.y - oy }; },
             toLL: function (q) { var ll = mapObj.unproject(L.point(q.x + ox, q.y + oy), z); return { lat: ll.lat, lng: ll.lng }; }
           });
@@ -1194,29 +1630,39 @@
       });
     }
 
-    /* Grow from the line at a reach, on a capture that covers it. Resolves {capture, result}
-       where result is shaped like the point wand's: {shape, candidates (lat/lng), pick, note}. */
-    function lineWandRun(line, kind, size, capture) {
+    function growFrom(grow) { return grow.line || grow.ring; }
+
+    /* Grow at a reach, on a capture that covers it. Resolves {capture, result} where result is
+       shaped like the point wand's: {shape, candidates (lat/lng), pick, note}. A drawn waste area
+       keeps the shape as drawn as its first candidate, so left goes all the way back to it. */
+    function growRun(grow, kind, size, capture) {
       var reachM = LINE_WAND_REACH_M[kind] * size;
-      var fresh = capture && capture.reachM >= reachM && capture.line === line ? Promise.resolve(capture) : lineWandCapture(line, kind, reachM);
+      var from = growFrom(grow);
+      var noun = grow.line ? "line wand" : "grow";
+      var fresh = capture && capture.reachM >= reachM && capture.from === from ? Promise.resolve(capture)
+        : captureBox(from, { padM: reachM, mpp: LINE_WAND_MPP[kind], maxSidePx: LINE_WAND_MAX_SIDE_PX }).then(function (cap) { cap.from = from; cap.reachM = reachM; return cap; });
       wandsRunning++;
       updateHint();
       return fresh.then(function (cap) {
-        var grown = shapes.growFromLine(cap.image, line.map(cap.toPx), {
+        var opts = {
           reachPx: reachM / cap.mpp,
           blurPx: Math.max(1, Math.round(0.6 / cap.mpp)),
           openPx: Math.max(1, Math.round((kind === "bunker" ? 0.6 : 1.5) / cap.mpp)),
-          minAreaPx: Math.round((kind === "bunker" ? 6 : 60) / (cap.mpp * cap.mpp))
-        });
+          minAreaPx: Math.round((kind === "bunker" ? 6 : kind === "waste" ? 20 : 60) / (cap.mpp * cap.mpp))
+        };
+        var grown = grow.line ? shapes.growFromLine(cap.image, from.map(cap.toPx), opts) : shapes.growFromArea(cap.image, from.map(cap.toPx), opts);
         var candidates = grown.candidates.map(function (ring) { return ring.map(cap.toLL); });
+        var pick = grown.pick;
+        if (grow.ring) { candidates.unshift(grow.ring); pick = candidates.length > 1 ? pick + 1 : 0; }
+        var found = grown.candidates.length > 0;
         return {
           capture: cap,
           result: candidates.length
-            ? { shape: candidates[grown.pick], candidates: candidates, pick: grown.pick, note: grown.stable ? "" : "The line wand was unsure of this edge - check it." }
+            ? { shape: candidates[pick], candidates: candidates, pick: pick, note: !found ? "Found no edge to grow to - kept it as drawn." : grown.stable ? "" : "The " + noun + " was unsure of this edge - check it." }
             : { shape: null, note: "The line wand found no edge along this line (" + (grown.reason || "no answer") + ")." }
         };
       }, function (error) {
-        return { capture: null, result: { shape: null, note: "The line wand could not run: " + (error && error.message || error) + "." } };
+        return { capture: null, result: grow.ring ? { shape: grow.ring, candidates: [grow.ring], pick: 0, note: "Could not grow it (" + (error && error.message || error) + ") - kept it as drawn." } : { shape: null, note: "The line wand could not run: " + (error && error.message || error) + "." } };
       }).then(function (out) {
         wandsRunning--;
         if (!destroyed) updateHint();
@@ -1224,32 +1670,36 @@
       });
     }
 
-    function lineWandShape(kind, ring) { return kind === "bunker" ? shapes.smoothOutline(ring, "bunker") : ring.slice(0, MAX_POINTS); }
+    function grownShape(kind, ring) { return kind === "bunker" ? shapes.smoothOutline(ring, "bunker") : ring.slice(0, MAX_POINTS); }
 
-    function lineWandPlace(line, kind) {
+    function growPlace(grow, kind) {
       var id = session.loadedFor;
       var hole = session.hole;
       var size = session.lineWandSize[kind];
-      var marker = L.polyline(toLatLngs(line), STYLE.draft).addTo(mapObj);
-      marker.bindTooltip("Growing the " + kindLabel(kind).toLowerCase() + " out from the line…", { permanent: true, direction: "top", className: "gdStudioOverlayLabel" });
-      lineWandRun(line, kind, size, null).then(function (out) {
+      var from = growFrom(grow);
+      var marker = (grow.line ? L.polyline(toLatLngs(from), STYLE.draft) : L.polygon(toLatLngs(from), STYLE.lassoWaste)).addTo(mapObj);
+      marker.bindTooltip(grow.line ? "Growing the " + kindLabel(kind).toLowerCase() + " out from the line…" : "Growing it out to the edge…", { permanent: true, direction: "top", className: "gdStudioOverlayLabel" });
+      growRun(grow, kind, size, null).then(function (out) {
         try { mapObj && mapObj.removeLayer(marker); } catch (e) {}
         if (destroyed || session.loadedFor !== id) return;
         if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold.", true); return; }
         var result = out.result, word = kindLabel(kind);
-        var points = result.shape ? lineWandShape(kind, result.shape) : kind === "fairway" ? shapes.fairwayFromLine(line, session.fairwayWidth) : null;
+        var points = result.shape ? grownShape(kind, result.shape) : kind === "fairway" ? shapes.fairwayFromLine(from, session.fairwayWidth) : null;
         if (!points) { setStatus(result.note, true); return; }
-        var f = addFeature({ kind: kind, points: points, source: result.shape ? "wand" : "", hole: hole });
-        startAdjust(f, { wand: result.shape ? result : null, lineWand: { line: line, size: size, capture: out.capture }, line: kind === "fairway" && !result.shape ? line : null });
-        setStatus(result.shape ? word + " grown from the line. ← → sensitivity, ↑ ↓ reach. " + result.note : result.note + (kind === "fairway" ? " Placed a fairway of the set width instead." : ""), !result.shape);
+        var wanded = result.shape && result.shape !== grow.ring;
+        var f = addFeature({ kind: kind, points: points, source: wanded ? "wand" : "", hole: hole });
+        startAdjust(f, { wand: result.shape ? result : null, grow: { line: grow.line || null, ring: grow.ring || null, size: size, capture: out.capture }, line: kind === "fairway" && !result.shape ? from : null });
+        var how = grow.line ? " grown from the line." : " grown out to its edge.";
+        setStatus(result.shape ? word + how + " ← → sensitivity, ↑ ↓ reach. " + result.note : result.note + (kind === "fairway" ? " Placed a fairway of the set width instead." : ""), !result.shape);
       });
     }
 
-    /* Up or down on a line-wand shape: grow again from the same line with more or less reach. */
-    function regrowLine(f, by) {
-      var mine = adjust, lw = mine.lineWand, kind = f.kind;
-      var size = stepIn(LINE_WAND_SIZES, lw.size, by);
-      if (size === lw.size) { setStatus(by < 0 ? "That is the shortest the line wand reaches." : "That is the furthest the line wand reaches."); return; }
+    /* Up or down on a grown shape: grow again from the same line or drawn shape with more or
+       less reach. */
+    function regrow(f, by) {
+      var mine = adjust, g = mine.grow, kind = f.kind;
+      var size = stepIn(LINE_WAND_SIZES, g.size, by);
+      if (size === g.size) { setStatus(by < 0 ? "That is the shortest it reaches." : "That is the furthest it reaches."); return; }
       session.lineWandSize[kind] = size;
       renderWandSize();
       remember();
@@ -1257,22 +1707,22 @@
       updateHint();
       var id = session.loadedFor;
       /* A shape dragged since it was grown has moved off its picture: capture again. */
-      var capture = lw.capture && lw.capture.line === lw.line ? lw.capture : null;
-      lineWandRun(lw.line, kind, size, capture).then(function (out) {
+      var capture = g.capture && g.capture.from === growFrom(g) ? g.capture : null;
+      growRun(g, kind, size, capture).then(function (out) {
         mine.running = false;
         if (destroyed || adjust !== mine || session.loadedFor !== id) return;
         var live = findFeature(mine.id);
         if (!live) { adjust = null; updateHint(); return; }
         if (!out.result.shape) { setStatus(out.result.note + " Kept the outline you had.", true); updateHint(); return; }
-        lw.size = size;
-        if (out.capture) lw.capture = out.capture;
+        g.size = size;
+        if (out.capture) g.capture = out.capture;
         takeWand(out.result);
-        live.points = lineWandShape(kind, out.result.candidates[out.result.pick]);
+        live.points = grownShape(kind, out.result.candidates[out.result.pick]);
         live.source = "wand";
         drawFeatures();
         changed();
         updateHint();
-        setStatus(kindLabel(kind) + " line wand reaching " + Math.round(LINE_WAND_REACH_M[kind] * size) + "m. " + out.result.note);
+        setStatus(kindLabel(kind) + (g.line ? " line wand reaching " : " growing up to ") + Math.round(LINE_WAND_REACH_M[kind] * size) + "m. " + out.result.note);
       });
     }
 
@@ -1401,7 +1851,7 @@
 
     function midpoints(f) {
       var out = [];
-      if (f.pin || isSmooth(f)) return out;
+      if (f.pin || isSmooth(f) || f.kind === "tree") return out;
       var n = f.points.length;
       var last = isPolygon(f.kind) ? n : n - 1;
       for (var i = 0; i < last; i++) {
@@ -1451,13 +1901,15 @@
           if (tool === "move" && selectedId !== f.id) select(f.id);
           beginDrag(f.id, "body", -1, e);
         });
-        if (f.hole) shape.bindTooltip(String(f.hole), { permanent: true, direction: "center", className: "gdStudioOverlayLabel" });
+        /* Not on a single tree: a stand of them would be a wall of numbers. */
+        if (f.hole && f.kind !== "tree") shape.bindTooltip(String(f.hole), { permanent: true, direction: "center", className: "gdStudioOverlayLabel" });
         var entry = { shape: shape, vertices: [], mids: [], ends: [] };
         /* A fairway pin's start and end, always shown, so it reads as two pins and a line. */
         if (f.pin && f.points.length === 2 && !selected) {
           f.points.forEach(function (p) { entry.ends.push(L.circleMarker([p.lat, p.lng], STYLE.pinFairwayEnd).addTo(mapObj)); });
         }
-        if (f.id === selectedId && canEdit() && f.points.length > 1 && bigEnoughForHandles(f)) {
+        /* A single tree is moved whole and sized with up / down - it has no corners to drag. */
+        if (f.id === selectedId && canEdit() && f.points.length > 1 && f.kind !== "tree" && bigEnoughForHandles(f)) {
           handlePoints(f).forEach(function (p, i) {
             var v = L.circleMarker([p.lat, p.lng], STYLE.vertex).addTo(mapObj);
             onPress(v, function (e) { beginDrag(f.id, "vertex", i, e); });
@@ -1522,6 +1974,7 @@
 
     function select(id) {
       if (adjust && adjust.id !== id) commitAdjust(true);
+      if (finder) keepFinder(true);
       selectedId = id || "";
       drawFeatures();
       updateHint();
@@ -1753,18 +2206,20 @@
       linkLayers = [];
     }
 
-    /* Shapes on one hole are joined by a dotted line - tee to fairway to green, and each bunker
-       to the nearest of those - so what belongs together reads at a glance. */
+    /* Shapes on one hole are joined by a dotted line - tee to fairway to green, and each bunker,
+       water hazard, tree or waste area to the nearest of those - so what belongs together reads
+       at a glance. */
     var LINK_ORDER = { tee: 0, hole: 1, fairway: 2, green: 3 };
     function drawLinks() {
       clearLinkLayers();
       var groups = {};
-      session.features.forEach(function (f) { if (f.hole && f.points.length) (groups[f.hole] = groups[f.hole] || []).push(f); });
+      session.features.forEach(function (f) { if (f.hole && f.points.length && f.kind !== "tree") (groups[f.hole] = groups[f.hole] || []).push(f); });
       Object.keys(groups).forEach(function (hole) {
         var list = groups[hole];
         if (list.length < 2) return;
-        var spine = list.filter(function (f) { return f.kind !== "bunker"; }).sort(function (a, b) { return LINK_ORDER[a.kind] - LINK_ORDER[b.kind]; }).map(function (f) { return shapes.centroid(f.points); });
-        var bunkers = list.filter(function (f) { return f.kind === "bunker"; }).map(function (f) { return shapes.centroid(f.points); });
+        var onSpine = function (f) { return Object.prototype.hasOwnProperty.call(LINK_ORDER, f.kind); };
+        var spine = list.filter(onSpine).sort(function (a, b) { return LINK_ORDER[a.kind] - LINK_ORDER[b.kind]; }).map(function (f) { return shapes.centroid(f.points); });
+        var bunkers = list.filter(function (f) { return !onSpine(f); }).map(function (f) { return shapes.centroid(f.points); });
         var segments = [];
         for (var i = 1; i < spine.length; i++) segments.push([spine[i - 1], spine[i]]);
         bunkers.forEach(function (b, k) {
@@ -1892,6 +2347,8 @@
       session.features = [];
       selectedId = "";
       adjust = null;
+      finder = null;
+      if (colourSel) clearColourSel();
       cancelDraft();
       drawFeatures();
       changed();
@@ -2046,10 +2503,15 @@
       else if (tool === "fairway" && session.mode === "pins") text = draft.length ? "Click where the fairway ends · Esc cancels" : "Click where the fairway starts";
       else if (lineTool() && session.mode === "shapes") {
         var thing = tool === "fairway" ? "fairway" : kindLabel(tool).toLowerCase();
-        var then = lineWanding() ? " - the line wand grows it out to the edge" : "";
+        var then = growWanding() ? " - the line wand grows it out to the edge" : "";
         text = draft.length ? (draft.length >= 2 ? "Keep clicking along the " + thing + " · Finish (or Enter / double-click) when done" + then : "Click the next point along the " + thing) : (tool === "fairway" ? "Click at the tee end of the fairway, then along its middle" : "Click a line down the middle of the " + thing) + then;
       }
-      else if (tool === "trees") text = "Press and drag all the way round an area of dense trees";
+      else if (tool === "trees" && methodOf("trees") === "single") text = "Click a tree to drop one · ↑ ↓ size it · E switches method";
+      else if (tool === "trees" && methodOf("trees") === "oval") text = "Press and drag across a cluster of trees - Shift for a circle · E switches method";
+      else if (tool === "trees" && methodOf("trees") === "find") text = sampleTrees().length ? "Drag a box - trees in it like the " + sampleTrees().length + " you placed by hand are found · E switches method" : "Place a tree or two by hand first (Tree), then drag a box to find more like them";
+      else if (tool === "trees") text = "Press and drag all the way round an area of dense trees · E switches method";
+      else if (tool === "waste" && methodOf("waste") === "colour") text = colourSel ? "Enter makes it a waste area · ← → tighter / looser · Shift-drag adds · Esc drops it" : "Press on the waste area and drag - further takes more of its colour · A switches method";
+      else if (tool === "waste") text = "Draw roughly round the waste area - it grows out to the edge · A switches method";
       else if (tool === "hazard") text = "Press and drag all the way round a non-water hazard - gorse, scrub, a ravine";
       else if (tool === "green" && session.mode === "pins") text = "Click the middle of each green - the wand outlines it";
       else if (tool !== "move" && session.mode === "pins") text = "Click the middle of each " + kindLabel(tool).toLowerCase() + " to pin it";
@@ -2059,13 +2521,15 @@
       else if (tool === "bunker") text = "Click the middle of a bunker - the wand outlines it · B switches method";
       else if (tool === "tee") text = "Click where the tee is";
       if (lastPlacedId && tool !== "move" && tool !== "connect" && !draft.length && findFeature(lastPlacedId)) text += " · drag the one you just placed to adjust it";
+      else if (selectedId && (findFeature(selectedId) || {}).kind === "tree") text = "Drag to move · Delete or the bin removes it";
       else if (selectedId && isSmooth(findFeature(selectedId) || {})) text = "Drag to move · drag its " + shapes.SMOOTH[findFeature(selectedId).kind].handles + " points to reshape · Delete or the bin removes it";
       else if (selectedId && (findFeature(selectedId) || {}).pin) text = "Drag to move · Shape this pin turns it into an outline · Delete or the bin removes it";
       else if (selectedId && !bigEnoughForHandles(findFeature(selectedId) || { points: [] })) text = "Drag to move · zoom in to reshape its corners · Delete or the bin removes it";
       else if (selectedId) text = "Drag to move · drag corners to reshape · faint dots add a corner · right-click a corner or drag it to the bin to remove it · Delete or the bin removes the shape";
       else text = "Choose Fairway, Green, Tee or Bunker to place · click a shape in Move to adjust it · Link puts shapes on one hole";
       if (adjusted()) text = adjustHint();
-      if (wandsRunning) text = "Finding the edge… · " + text;
+      if (finder) text = "← → fewer / more trees · Enter keeps them · Esc takes them away";
+      if (wandsRunning) text = "Working… · " + text;
       el.hint.textContent = text;
     }
 
@@ -2074,6 +2538,7 @@
       if (adjust.candidates.length > 1) bits.push("← → sensitivity " + (adjust.index + 1) + " of " + adjust.candidates.length);
       if (adjust.kind === "fairway" && adjust.line) bits.push("↑ ↓ narrower / wider (" + session.fairwayWidth + "m)");
       else if (adjust.seed) bits.push("↑ ↓ wand size (" + pct(adjust.size) + ")");
+      else if (adjust.grow) bits.push("↑ ↓ reach (" + Math.round(LINE_WAND_REACH_M[adjust.kind] * adjust.grow.size) + "m)");
       else bits.push("↑ ↓ smaller / bigger");
       bits.push("Enter or Space keeps it · Esc removes it");
       return bits.join(" · ");
@@ -2090,8 +2555,8 @@
       if (session.course) {
         var count = function (kind) { return session.features.filter(function (f) { return f.kind === kind; }).length; };
         var holes = count("hole");
-        var water = count("water"), trees = count("trees"), hazards = count("hazard");
-        bits.push("placed: " + count("fairway") + " fairways, " + count("green") + " greens, " + count("tee") + " tees, " + count("bunker") + " bunkers" + (water ? ", " + water + " water" : "") + (trees ? ", " + trees + " trees" : "") + (hazards ? ", " + hazards + " hazards" : "") + (holes ? ", " + holes + " hole lines" : ""));
+        var water = count("water"), trees = count("trees"), single = count("tree"), hazards = count("hazard"), waste = count("waste");
+        bits.push("placed: " + count("fairway") + " fairways, " + count("green") + " greens, " + count("tee") + " tees, " + count("bunker") + " bunkers" + (water ? ", " + water + " water" : "") + (single ? ", " + single + " trees" : "") + (trees ? ", " + trees + " tree clusters" : "") + (hazards ? ", " + hazards + " hazards" : "") + (waste ? ", " + waste + " waste areas" : "") + (holes ? ", " + holes + " hole lines" : ""));
       }
       var osm = session.osm;
       if (osm && !osm.error) bits.push("OSM here: " + (osm.greens || []).length + " greens, " + (osm.fairways || []).length + " fairways, " + (osm.bunkers || []).length + " bunkers, " + (osm.water || []).length + " water, " + (osm.holes || []).length + " hole lines");
@@ -2114,7 +2579,7 @@
       el.run.title = session.dirty ? "Wait for the overlay to save - the mapper reads what is saved" : "";
       el.ready.disabled = !canEdit() || !session.features.length || (session.status === "ready" && !session.dirty);
       el.ready.title = session.status === "ready" && !session.dirty ? "Already ready - change a shape and it goes back to draft" : "Let the mapper use this overlay";
-      ["tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard"].forEach(function (name) { el[name].disabled = !canEdit() || !!shapingPins; });
+      ["tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste"].forEach(function (name) { el[name].disabled = !canEdit() || !!shapingPins; });
       var pins = session.features.filter(function (f) { return f.pin; }).length;
       var selected = selectedId ? findFeature(selectedId) : null;
       el["shape-pins"].hidden = !pins;
@@ -2765,6 +3230,8 @@
     });
     mapObj.on("mouseout", function () { if (cursorLatLng) { cursorLatLng = null; drawDraft(); } });
     mapObj.on("moveend zoomend", function () { buildProviderOptions(); updateReadout(); });
+    /* The colour wand reads the view on screen: a moved map is a new picture. */
+    mapObj.on("movestart zoomstart", function () { colourCap = null; });
     mapObj.on("zoomend", function () { if (selectedId && !drag) { drawFeatures(); updateHint(); } });
 
     /* Arrow keys pan and +/- zoom from anywhere on the page, not only once the map has focus
@@ -2808,9 +3275,9 @@
       if (key === "s" || key === "p") { setMode(key === "p" ? "pins" : "shapes"); return; }
       if (key === "[" || key === "]") { stepWandSize(key === "]" ? 1 : -1); return; }
       /* The tool's own key again steps through its methods: wand, draw round, line + wand. */
-      var own = { f: "fairway", b: "bunker", w: "water" }[key];
-      if (own && own === tool && session.mode === "shapes" && canEdit()) { cycleMethod(own); return; }
-      var shortcut = { v: "move", c: "connect", f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard" }[key];
+      var own = { f: "fairway", b: "bunker", w: "water", e: "trees", a: "waste" }[key];
+      if (own && own === tool && methodOf(own) && canEdit()) { cycleMethod(own); return; }
+      var shortcut = { v: "move", c: "connect", f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard", a: "waste" }[key];
       if (shortcut && (shortcut === "move" || canEdit())) setTool(shortcut);
     }
     document.addEventListener("keydown", onKey);
@@ -2833,10 +3300,11 @@
     el["tool-water"].addEventListener("click", function () { setTool("water"); });
     el["tool-trees"].addEventListener("click", function () { setTool("trees"); });
     el["tool-hazard"].addEventListener("click", function () { setTool("hazard"); });
-    ["width", "wand", "draw", "line"].forEach(function (m) {
+    el["tool-waste"].addEventListener("click", function () { setTool("waste"); });
+    METHOD_NAMES.forEach(function (m) {
       el["method-" + m].addEventListener("click", function () { setMethod(tool, m); });
     });
-    el.map.addEventListener("pointerdown", beginLasso);
+    el.map.addEventListener("pointerdown", onMapPress);
     el.hole.addEventListener("change", holeFieldChanged);
     el.width.addEventListener("change", function () {
       var w = num(el.width.value);
@@ -2914,6 +3382,13 @@
       document.removeEventListener("pointermove", onLassoMove);
       document.removeEventListener("pointerup", onLassoEnd);
       document.removeEventListener("pointercancel", onLassoEnd);
+      document.removeEventListener("pointermove", onStretchMove);
+      document.removeEventListener("pointerup", onStretchEnd);
+      document.removeEventListener("pointercancel", onStretchEnd);
+      document.removeEventListener("pointermove", onColourMove);
+      document.removeEventListener("pointerup", onColourEnd);
+      document.removeEventListener("pointercancel", onColourEnd);
+      if (colourPress && colourPress.frame) cancelAnimationFrame(colourPress.frame);
       document.documentElement.classList.remove("gdStudioOverlayNoScroll");
       containerEl.classList.remove("gdStudioOverlayHost");
       rememberNow();

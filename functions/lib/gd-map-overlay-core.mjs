@@ -17,7 +17,7 @@
  * with, or be mistaken for, a real OSM way.
  *
  * Feature shape (what course_map_overlays.features stores, and what Studio draws):
- *   { id: "f-1", kind: "fairway" | "hole" | "green" | "tee" | "bunker" | "water" | "trees" | "hazard", hole: 7 | null, points: [{lat, lng}, ...],
+ *   { id: "f-1", kind: "fairway" | "hole" | "green" | "tee" | "bunker" | "water" | "trees" | "tree" | "hazard" | "waste", hole: 7 | null, points: [{lat, lng}, ...],
  *     source?: "ai", pin?: true }
  *   source says who produced the shape (gd-overlay-georef-core.mjs stamps "ai"; Studio stamps
  *   "wand" on a green the wand outlined from a pin; a hand-placed one has none). Display only - the mapper treats every feature the same.
@@ -41,10 +41,18 @@
  *             already reads as water. Drawn round by hand in Studio, or placed with the wand.
  *   trees   - a closed polygon (3+ points). Becomes natural=wood. Dense trees: the surface pass
  *             writes it onto every hole whose frame it falls in as a "trees" object, and the
- *             bubble reveals it like a bunker. Drawn round by hand only - no wand, no pin.
+ *             bubble reveals it like a bunker. Drawn round by hand, or stretched over a cluster as an
+ *             oval - no wand, no pin.
  *   hazard  - a closed polygon (3+ points). Becomes golf=hazard (our tag, not OSM's - OSM has no
  *             generic non-water hazard). Gorse, scrub, a ravine: anything that punishes a ball
  *             and is not water. Same path as trees. Drawn round by hand only.
+ *   tree    - a closed polygon (3+ points): one tree, a small ring round its crown. Becomes
+ *             natural=tree. Placed with a click in Studio, or dropped in numbers by the tree
+ *             finder. Nothing downstream reads single trees yet - they are kept so the course
+ *             has them when tree rendering lands.
+ *   waste   - a closed polygon (3+ points). Becomes golf=waste_area (our tag - OSM has none).
+ *             Sandy, scrubby ground that is played as it lies. Drawn round and grown out to its
+ *             edge, or picked with the colour wand. Not a surface the mapper writes yet.
  *
  *   hole numbers are optional on every kind. A numbered green or fairway is matched to that
  *   hole's guide (ref), a numbered hole line is the resolver's strongest evidence.
@@ -56,14 +64,14 @@
  *             still gives the resolver greens to hang fairways off.
  */
 
-export const OVERLAY_KINDS = new Set(["fairway", "hole", "green", "tee", "bunker", "water", "trees", "hazard"]);
-const POLYGON_KINDS = new Set(["fairway", "green", "tee", "bunker", "water", "trees", "hazard"]);
+export const OVERLAY_KINDS = new Set(["fairway", "hole", "green", "tee", "bunker", "water", "trees", "tree", "hazard", "waste"]);
+const POLYGON_KINDS = new Set(["fairway", "green", "tee", "bunker", "water", "trees", "tree", "hazard", "waste"]);
 /* The tag each kind is written as: golf=<kind> unless listed here. */
-const OSM_TAG = { water: ["golf", "water_hazard"], trees: ["natural", "wood"], hazard: ["golf", "hazard"] };
+const OSM_TAG = { water: ["golf", "water_hazard"], trees: ["natural", "wood"], tree: ["natural", "tree"], hazard: ["golf", "hazard"], waste: ["golf", "waste_area"] };
 export function overlayKindIsPolygon(kind) { return POLYGON_KINDS.has(String(kind || "").toLowerCase()); }
-/* Room for a whole course placed as pins - 18 greens, fairways and tees plus the bunkers - with
-   space to spare. */
-export const OVERLAY_MAX_FEATURES = 200;
+/* Room for a whole course placed as pins - 18 greens, fairways and tees plus the bunkers - and
+   the single trees the tree finder drops, a few hundred of them, with space to spare. */
+export const OVERLAY_MAX_FEATURES = 600;
 export const OVERLAY_MAX_POINTS = 64;
 export const OVERLAY_TAG = "clarity:overlay";
 
@@ -213,7 +221,9 @@ export function overlaySummary(features) {
     bunkers: list.filter(f => f.kind === "bunker").length,
     water: list.filter(f => f.kind === "water").length,
     trees: list.filter(f => f.kind === "trees").length,
+    singleTrees: list.filter(f => f.kind === "tree").length,
     hazards: list.filter(f => f.kind === "hazard").length,
+    waste: list.filter(f => f.kind === "waste").length,
     pins: list.filter(f => f.pin).length,
     numbered: list.filter(f => f.hole).length
   };

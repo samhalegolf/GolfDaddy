@@ -288,7 +288,7 @@ test("greens and bunkers are shaped by a few smooth points once the wand has out
   assert.ok(page.includes("return shapes.smoothOutline(ring, kind);"), "a wand shape must be kept as its smooth outline");
   assert.ok(page.includes("function isSmooth(f) { return !f.pin && !!shapes.SMOOTH[f.kind]; }"), "every smooth kind is edited by its handles");
   assert.ok(page.includes("f.points = shapes.smoothRing(handles, smooth.steps);"), "dragging a handle must re-curve the outline through its handles");
-  assert.ok(page.includes("if (f.pin || isSmooth(f)) return out;"), "a smooth shape has no add-a-point dots");
+  assert.ok(page.includes("if (f.pin || isSmooth(f) || f.kind === \"tree\") return out;"), "a smooth shape has no add-a-point dots");
   assert.ok(page.includes('into.points = shapes.smoothOutline(merged, "bunker");'), "a merged bunker is smooth too");
 });
 
@@ -300,7 +300,7 @@ test("the shape just placed stays live: left/right step sensitivity, up/down siz
   assert.ok(page.includes("shapes.fairwayFromLine(adjust.line, width)"), "up/down on a fairway changes its width");
   assert.ok(page.includes("wandOutline(mine.seed, kind, size)"), "up/down on a wand shape runs the wand again at the next size");
   assert.ok(page.includes("f.points = shapes.smoothOutline(adjust.candidates[next], f.kind);"), "left/right step through the edges the wand found");
-  assert.ok(/handleMapClick[\s\S]*?if \(adjust\) commitAdjust\(true\);/.test(page), "placing the next shape keeps the last one");
+  assert.ok(/function handleMapClick[\s\S]*?settle\(/.test(page) && /function settle[\s\S]*?if \(adjust\) commitAdjust\(true\);/.test(page), "placing the next shape keeps the last one");
   assert.ok(page.includes('var into = f.kind === "bunker" ? mergeBunker(f.points, f.hole, f) : null;'), "a bunker merges only once it is kept");
 });
 
@@ -309,19 +309,47 @@ test("water: a Water tool that draws round the water or uses the wand", () => {
   assert.ok(page.includes('data-gd-overlay="method-draw"') && page.includes('data-gd-overlay="method-wand"') && page.includes('data-gd-overlay="method-line"'), "no Wand / Draw round / Line + wand switch");
   assert.ok(page.includes('water: ["wand", "draw", "line"]') && page.includes('bunker: ["wand", "draw", "line"]') && page.includes('fairway: ["width", "line"]'), "water and bunkers draw round or line-wand; fairways line-wand");
   assert.ok(page.includes("shapes.simplifyOutline(") && page.includes("addFeature({ kind: drawn.kind, points: ring });"), "a drawn line must become an outline of the tool's kind");
-  assert.ok(page.includes('el.map.addEventListener("pointerdown", beginLasso);'), "drawing round starts on a press on the map");
+  assert.ok(page.includes('el.map.addEventListener("pointerdown", onMapPress);') && page.includes('if (gesture === "lasso") beginLasso(event);'), "drawing round starts on a press on the map");
   assert.ok(page.includes("water: 0.5") && page.includes("water: 12000"), "the wand capture must be sized for water");
 });
 
-test("trees and hazard: draw-round tools that save as their own kinds", () => {
+test("trees and hazard: tools that save as their own kinds", () => {
   assert.ok(page.includes('railButton("tool-trees"') && page.includes('railButton("tool-hazard"'), "no Trees / Hazard tools");
-  assert.ok(page.includes('var DRAW_ONLY_KINDS = ["trees", "hazard"];'), "trees and hazard are drawn round only");
+  assert.ok(page.includes('var DRAW_ONLY_KINDS = ["hazard"];'), "a hazard is drawn round only");
+  assert.ok(page.includes('trees: ["single", "oval", "draw", "find"]'), "trees: a single tree, a cluster oval, drawn round, or found");
+});
+
+test("single trees: a click drops one, up / down size it, and the next starts at that size", () => {
+  assert.ok(page.includes('else if (methodOf(tool) === "single") placeTree(point);'), "a click with Tree drops a tree");
+  assert.ok(page.includes('addFeature({ kind: "tree", points: shapes.treeAt(point, session.treeRadius || shapes.TREE_RADIUS_M) })'), "a tree is a small ring at the remembered size");
+  assert.ok(page.includes("session.treeRadius = Math.round(shapes.ringRadiusM(f.points) * 10) / 10;"), "sizing a tree sets the next one's size");
+  assert.ok(page.includes("session.treeSamples.push(f.id);"), "a tree placed by hand is a sample for the finder");
+});
+
+test("cluster oval: a press and drag stretches an oval of trees", () => {
+  assert.ok(page.includes('addFeature({ kind: "trees", points: ring });') && page.includes("shapes.ellipseInBox(a, b, done.round)"), "the oval becomes a trees area");
+});
+
+test("tree finder: learns from the trees placed by hand, drops trees in the box, live for left / right / Enter / Esc", () => {
+  assert.ok(page.includes("var samples = sampleTrees().slice(-TREE_SAMPLE_MAX);"), "the finder reads the session's hand-placed trees");
+  assert.ok(page.includes("shapes.treeFinder(cap.image, shapes.colourModel(pool)"), "the finder runs on the box's picture with the samples' colour");
+  assert.ok(page.includes("var live = finder ? { step: stepFinder"), "left / right / Enter / Esc work on the dropped trees");
+  assert.ok(page.includes('source: "finder"'), "found trees are marked as the finder's");
+});
+
+test("waste area: drawn round and grown, or picked with the colour wand", () => {
+  assert.ok(page.includes('railButton("tool-waste"'), "no Waste tool");
+  assert.ok(page.includes('waste: ["grow", "colour"]'), "waste: Draw + grow, Colour wand");
+  assert.ok(page.includes('if (drawn.kind === "waste") { growPlace({ ring: ring }, "waste"); return; }'), "a drawn waste area is grown out");
+  assert.ok(page.includes("shapes.growFromArea(cap.image, from.map(cap.toPx), opts)"), "the grow runs growFromArea on the captured picture");
+  assert.ok(page.includes("shapes.floodSelect(press.cap.field, press.seed.x, press.seed.y, press.tol)"), "the colour wand floods from the press");
+  assert.ok(page.includes('addFeature({ kind: "waste", points: points, source: "wand" });'), "Enter makes the pick a waste area");
 });
 
 test("line wand: a finished line on Line + wand is grown out in the browser", () => {
-  assert.ok(page.includes('if (session.mode === "shapes" && session.method[kind] === "line") { lineWandPlace(line, kind); return; }'), "finishing a line-wand line must grow it");
-  assert.ok(page.includes("shapes.growFromLine(cap.image, line.map(cap.toPx)"), "the line wand runs growFromLine on the captured picture");
-  assert.ok(page.includes("if (adjust.lineWand) { regrowLine(f, by); return; }"), "up/down on a line-wand shape changes its reach");
+  assert.ok(page.includes('if (session.mode === "shapes" && session.method[kind] === "line") { growPlace({ line: line }, kind); return; }'), "finishing a line-wand line must grow it");
+  assert.ok(page.includes("shapes.growFromLine(cap.image, from.map(cap.toPx), opts)"), "the line wand runs growFromLine on the captured picture");
+  assert.ok(page.includes("if (adjust.grow) { regrow(f, by); return; }"), "up/down on a line-wand shape changes its reach");
 });
 
 test("bigger wand: bunkers and water step past 2x", () => {
