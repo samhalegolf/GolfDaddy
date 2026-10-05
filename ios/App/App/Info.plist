@@ -32,6 +32,8 @@
 	<string>Clarity Caddy uses the camera so you can add a profile photo and capture launch monitor readouts.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Clarity Caddy uses your photo library so you can add a profile photo and import launch monitor readouts.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Clarity Caddy uses Bluetooth to connect to your Garmin watch so you can see distances and your round on your wrist.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
