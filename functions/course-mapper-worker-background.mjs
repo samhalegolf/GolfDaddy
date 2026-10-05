@@ -25,6 +25,7 @@
    counter, which made "wrong centre coordinates" indistinguishable from "course not in OSM". */
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
+import { wakeGarminBuild } from "./lib/gd-garmin-build-wake.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete, scorecardIdentityMismatch } from "./lib/gd-course-fit-core.mjs";
 import { reverseGeocodePlace } from "./lib/gd-course-place.mjs";
 import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, intersectOsmFrames, SIBLING_SWEEP_M, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, HAND_DRAWN_SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
@@ -3153,6 +3154,15 @@ export default async function courseMapperWorker(req) {
           .catch(error => ({ chained: false, reason: String(error && error.message || error).slice(0, 300) }));
       }
       await finishJob(job.id, { status: "done", result, error: null });
+      /* The normal package is saved and the job is done; only now is the Garmin package
+         (the drawn map, no images) brought up to date, so it is ready before anyone asks.
+         After finishJob on purpose: nothing about it can hold up or fail the scan. Every
+         course this run published gets one; the builder skips any that are already current,
+         and rebuilds again with terrain once the visual export has run. */
+      const garminCourses = result && result.multiCourse && Array.isArray(result.coursesPublished)
+        ? result.coursesPublished.map(entry => entry && entry.courseId).filter(Boolean)
+        : [job.course_id];
+      for (const courseId of new Set(garminCourses)) await wakeGarminBuild(origin, courseId);
     } catch (error) {
       console.error("course-mapper-worker job failed", job.id, error);
       const attempts = (job.result && Number(job.result.attempts) || 0) + 1;

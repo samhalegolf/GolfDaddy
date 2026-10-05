@@ -233,6 +233,50 @@ manifest.
   screens use a fixed set (`GarminSessionManager.MIP_PALETTE`). That set shows shadow only,
   because any lighter green reads as a different surface there.
 
+### The Garmin package: built after every scan (2026-10-06)
+
+A Garmin draws every hole itself, so it does not need the baked images the Apple Watch
+uses. Its package is the data half of the image bake and nothing else. Per hole it holds:
+
+- the spatial reference
+- the golf reference
+- the outlines
+- the terrain pieces
+- the palette
+
+It lives in its own table, `course_garmin_maps`, with its own version. Building it never
+touches the Apple Watch package (`course_watch_maps`).
+
+- **Built automatically.** Nobody has to press anything.
+  `functions/course-garmin-maps-background.mjs` is woken by
+  `lib/gd-garmin-build-wake.mjs`:
+  - after a mapper job finishes, for every course it published;
+  - after a published visual export finishes, which brings the elevation crops the terrain
+    pieces need;
+  - by the phone's `GET /api/course-watch-maps?courseId=…&watch=garmin` when the package is
+    missing or behind.
+
+  Each wake comes after that work is recorded as done, so the scan is never held up or
+  failed by it.
+- **Rebuilt only when needed.** `buildGarminPackageIfStale` (in `course-watch-maps.mjs`,
+  beside the image bake it shares code with) rebuilds when any of these change:
+  - `course_maps.objects_revision`
+  - the terrain index's `generatedAt`
+  - `GARMIN_BUILDER_VERSION`
+
+  A `building_since` lock stops two builds overlapping. A scan therefore gives a flat
+  package straight away and one with terrain after the export.
+- **Delivered.** `watch-map-delivery.js` asks for it when a Garmin is the chosen watch
+  (`garminState().selectedDevice`). Each hole goes out under its conventional asset name with
+  no `url`, so the watch fetches nothing and draws the hole. There are no image sends. The
+  watch reports its inventory on every manifest it takes. Because a Garmin lists only holes
+  it holds an image for, the reported version is what confirms a drawn package is held.
+- **Fallbacks.**
+  - **Package not built yet:** the image package is used, as before; the GET has already
+    started the build.
+  - **Package behind:** the older one is still served.
+  - **Apple Watch:** keeps the image package and its Studio "Generate Watch Maps" bake.
+
 ## The player snapshot: bag and My Bubble
 
 A third payload, alongside the Scene and the lite-map package, because it fits

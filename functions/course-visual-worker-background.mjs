@@ -11,6 +11,7 @@
    Phase 2 and reads these captures back down. */
 
 import fs from "fs";
+import { wakeGarminBuild } from "./lib/gd-garmin-build-wake.mjs";
 import path from "path";
 import { fileURLToPath } from "url";
 import sharp from "sharp";
@@ -1381,6 +1382,14 @@ export default async function courseVisualWorker(req) {
         break;
       }
       await finishJob(job.id, { status: "done", result, error: null });
+      /* A published export brings the elevation crops the Garmin package's terrain pieces
+         are cut from, so the Garmin package is brought up to date after it - once the
+         export is finished and recorded, never as part of it. Test bakes publish nothing. */
+      if (job.kind === "export" && !(result && result.test)) {
+        let origin = "";
+        try { origin = new URL(req.url).origin; } catch (e) { origin = ""; }
+        await wakeGarminBuild(origin, job.course_id);
+      }
       /* Hybrid: fresh captures always get re-exported with the live recipe (or natural). */
       if (job.kind === "snapshot") await enqueueFollowUpExport(job.course_id).catch(() => {});
       if (job.kind === TEST_SNAPSHOT_KIND) await enqueueTestExport(job).catch(() => {});

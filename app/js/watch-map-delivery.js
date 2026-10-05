@@ -171,9 +171,12 @@
     return ASSET_NAME.test(name) ? name : null;
   }
 
-  function manifestHole(hole) {
+  /* `drawn` is a Garmin package (course_garmin_maps): no image behind any hole, so each takes
+     the conventional name the watch expects (it refuses a manifest hole without one) and no
+     path - with no path there is no url, and a Garmin with no url draws the hole itself. */
+  function manifestHole(hole, drawn) {
     var number = Number(hole && hole.holeNumber);
-    var name = assetName(hole && hole.path);
+    var name = drawn ? (Number.isInteger(number) && number > 0 && number < 100 ? "h" + number + ".webp" : null) : assetName(hole && hole.path);
     var reference = hole && hole.spatialReference;
     if (!Number.isInteger(number) || number <= 0 || !name || !usableSpatialReference(reference)) return null;
     var out = {
@@ -181,7 +184,7 @@
       asset: name,
       width: Number(reference.imageWidth),
       height: Number(reference.imageHeight),
-      path: String(hole.path),
+      path: drawn ? "" : String(hole.path),
       /* Copied field by field rather than passed through: whatever else the
          report grows, only the projection basis and the hole reference reach
          the wrist. */
@@ -330,6 +333,12 @@
     return seen;
   }
 
+  /* Whether the watch's inventory is talking about exactly this course and package version. */
+  function inventoryMatches(inventory, courseKey, version) {
+    var have = inventory && inventory.inventory ? inventory.inventory : inventory;
+    return !!(have && String(have.courseKey || "") === courseKey && String(have.version || "") === version);
+  }
+
   function createDelivery(options) {
     options = options || {};
     var plugin = options.plugin || null;
@@ -447,15 +456,42 @@
       images[courseKey][holeNumber] = "data:" + mimeFor(name) + ";base64," + toBase64(bytes);
     }
 
+    /* True when the watch on the other end is a Garmin: one has been chosen in Settings >
+       Garmin Watch. Android only ever talks to a Garmin; on iOS an Apple Watch is the
+       default and keeps the image package. */
+    async function garminConnected() {
+      if (!plugin || typeof plugin.garminState !== "function") return false;
+      try {
+        var state = await plugin.garminState();
+        return !!(state && state.selectedDevice);
+      } catch (e) { return false; }
+    }
+
+    /* The Garmin package (the drawn map, no images), built on the server after every scan.
+       Null while a course has none yet - the server starts building it on this very request -
+       and the image package is used meanwhile, exactly as before this existed. */
+    async function garminPackage(courseKey) {
+      try {
+        var response = await fetchImpl(apiUrl(REPORT_ENDPOINT + "?courseId=" + encodeURIComponent(courseKey) + "&watch=garmin"));
+        if (!response || !response.ok) return null;
+        var report = await response.json();
+        var version = String((report && report.watchPackageVersion) || "");
+        var holes = (report && Array.isArray(report.holes) ? report.holes : []).map(function (hole) { return manifestHole(hole, true); }).filter(Boolean);
+        return version && version !== "0" && holes.length ? { version: version, holes: holes } : null;
+      } catch (e) { return null; }
+    }
+
     async function run(courseKey) {
       if (!plugin || typeof plugin.publishWatchMap !== "function" || typeof plugin.publishWatchMapAsset !== "function") {
         return { delivered: false, reason: "no-native-bridge" };
       }
+      var drawn = (await garminConnected()) ? await garminPackage(courseKey) : null;
+      if (drawn) return runDrawn(courseKey, drawn.version, drawn.holes);
       var response = await fetchImpl(apiUrl(REPORT_ENDPOINT + "?courseId=" + encodeURIComponent(courseKey)));
       if (!response || !response.ok) return { delivered: false, reason: "report-unavailable" };
       var report = await response.json();
       var version = String((report && report.watchPackageVersion) || "");
-      var holes = (report && Array.isArray(report.holes) ? report.holes : []).map(manifestHole).filter(Boolean);
+      var holes = (report && Array.isArray(report.holes) ? report.holes : []).map(function (hole) { return manifestHole(hole, false); }).filter(Boolean);
       if (!version || version === "0" || !holes.length) {
         /* Known to have nothing is its own answer: the handover need not wait
            for maps that will never come. */
@@ -546,6 +582,39 @@
       return { delivered: sent > 0, sent: sent, failed: failed, skipped: holes.length - missing.length, version: version };
     }
 
+    /* A Garmin package: the manifest, the skeleton and the outlines are the whole delivery -
+       there are no images to send. The watch reports its inventory on every manifest it
+       takes, and while that names this course and version every hole is on the wrist: a
+       Garmin lists only holes it holds an IMAGE for, so the version is the evidence here. */
+    async function runDrawn(courseKey, version, holes) {
+      paths[courseKey] = Object.create(null);
+      var held = false;
+      if (typeof plugin.watchMapInventory === "function") {
+        try { held = inventoryMatches(await plugin.watchMapInventory(), courseKey, version); } catch (e) { held = false; }
+      }
+      var numbers = holes.map(function (hole) { return hole.holeNumber; });
+      progress[courseKey] = { none: false, drawn: true, numbers: numbers, total: holes.length, have: 0, holes: Object.create(null), version: version };
+      if (held) {
+        setHave(courseKey, numbers);
+        return { delivered: true, sent: 0, skipped: holes.length, version: version, drawn: true };
+      }
+      var manifest = {
+        courseKey: courseKey,
+        version: Number(version),
+        holes: holes.map(function (hole) {
+          var out = { holeNumber: hole.holeNumber, asset: hole.asset, width: hole.width, height: hole.height, spatialReference: hole.spatialReference };
+          if (hole.reference) out.reference = hole.reference;
+          return out;
+        })
+      };
+      var skeleton = courseSkeleton(courseKey, version, holes);
+      if (skeleton) manifest.skeleton = skeleton;
+      var outlines = courseOutlines(courseKey, version, holes);
+      if (outlines.length) manifest.outlines = outlines;
+      await plugin.publishWatchMap({ manifest: manifest });
+      return { delivered: true, sent: 1, skipped: 0, version: version, drawn: true };
+    }
+
     /* Anonymous usage count (app/js/course-package.js): this course's maps
        went to a wrist. Absent off the app page, so the Studio surfaces and
        tests never count anything. */
@@ -595,7 +664,9 @@
       var p = courseKey && progress[courseKey];
       if (!p || p.none) return false;
       if (String(have.version || "") !== String(p.version)) return false;
-      setHave(courseKey, Array.isArray(have.holes) ? have.holes : []);
+      /* A drawn package is held whole once the watch names its version (see runDrawn). */
+      if (p.drawn) setHave(courseKey, p.numbers);
+      else setHave(courseKey, Array.isArray(have.holes) ? have.holes : []);
       /* A report that comes back SHORT is the repair signal. The phone had
          nothing else to learn this from - it had already watched every hole
          leave - so without this a wrist that quietly lost eight of them stayed
@@ -684,6 +755,6 @@
       var instance = ensureShared();
       return instance ? instance.holeImage(courseKey, holeNumber) : null;
     },
-    __test: { courseSkeleton: courseSkeleton, courseOutlines: courseOutlines, cleanPalette: cleanPalette, manifestHole: manifestHole, assetName: assetName, alreadyDelivered: alreadyDelivered, usableSpatialReference: usableSpatialReference }
+    __test: { inventoryMatches: inventoryMatches, courseSkeleton: courseSkeleton, courseOutlines: courseOutlines, cleanPalette: cleanPalette, manifestHole: manifestHole, assetName: assetName, alreadyDelivered: alreadyDelivered, usableSpatialReference: usableSpatialReference }
   };
 });
