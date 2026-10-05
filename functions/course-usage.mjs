@@ -1,7 +1,9 @@
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
-/* Course map usage intake: one anonymous +1 per call.
+import { verifiedAdminEmail } from "./lib/gd-map-overlay-store.mjs";
+/* Course map usage: one anonymous +1 per POST, and an admin-only GET that reads the totals
+ * back for the Admin Settings "Course usage" card (scripts/studio/gd-admin-course-usage.js).
  *
- * Body: {courseId, event: "download"|"play", origin: "web"|"ios"|"android"|"watch"}.
+ * POST body: {courseId, event: "download"|"play", origin: "web"|"ios"|"android"|"watch"}.
  * The country comes from Netlify's own geo lookup on the request - the client
  * never sends it, and the IP it was derived from is never stored. No account,
  * guest id or user agent is read: this answers "which courses get used, and
@@ -34,8 +36,8 @@ function json(status, body) {
       "Content-Type": "application/json",
       "Cache-Control": "no-store",
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST,OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type,Accept"
+      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Accept,Authorization"
     }
   });
 }
@@ -47,8 +49,22 @@ function countryOf(context) {
   return /^[A-Z]{2}$/.test(code) ? code : "";
 }
 
+/* GET (admin): course_map_usage_summary as-is - one row per course per origin. The card
+   does the grouping; at a row per course-origin pair this stays small. */
+async function readSummary(req) {
+  if (!hasSupabase()) return json(503, { error: "Supabase is not configured" });
+  if (!(await verifiedAdminEmail(req))) return json(403, { error: "Admin verification failed" });
+  try {
+    const rows = await supabaseFetch("course_map_usage_summary?select=*&limit=5000");
+    return json(200, { rows: Array.isArray(rows) ? rows : [], checkedAt: new Date().toISOString() });
+  } catch (error) {
+    return json(502, { error: "Could not read course usage", detail: String(error && error.message || error) });
+  }
+}
+
 export default async function courseUsage(req, context) {
   if (req.method === "OPTIONS") return json(200, { ok: true });
+  if (req.method === "GET") return readSummary(req);
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
   /* Counting is never important enough to fail loudly. */
   if (!hasSupabase()) return json(202, { recorded: false, configured: false });

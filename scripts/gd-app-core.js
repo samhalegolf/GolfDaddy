@@ -441,7 +441,7 @@ function renderDevPanel(){
    only. Bail before touching them rather than throwing a ReferenceError, so a
    stray route="admin" (a deep link, an old bookmark) is a no-op on a phone
    instead of an uncaught error mid-round. */
-function openDeveloperPanel(){if(!document.getElementById("developerPanel"))return false;gdRenderPermissionsAdmin();renderDevPanel();gdRenderAdminCourseDatabase();gdRenderCoursePlayPipelineDebug();try{window.GDCourseMappingDebug?.renderAdminPanel?.();}catch(e){}openPanel("developerPanel");}
+function openDeveloperPanel(){if(!document.getElementById("developerPanel"))return false;gdRenderPermissionsAdmin();renderDevPanel();gdRenderAdminCourseDatabase();gdRenderCoursePlayPipelineDebug();try{window.GDCourseMappingDebug?.renderAdminPanel?.();}catch(e){}try{if(document.body.dataset.gdPermission==="admin")window.gdRenderAdminCourseUsage?.();}catch(e){}openPanel("developerPanel");}
 window.GolfDaddyDev={defaults:DEV_DEFAULTS,settings:devSettings,get:dev,set:setDev,reset:resetDevSettings,render:renderDevPanel};
 window.gdPreLockBlackoutFrameEnabled=gdPreLockBlackoutFrameEnabled;
 window.gdTogglePreLockBlackoutFrame=gdTogglePreLockBlackoutFrame;
