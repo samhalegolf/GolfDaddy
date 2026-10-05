@@ -154,9 +154,9 @@ const root = path.join(__dirname, "..");
       { lat: -45.0120, lng: 169.1035 }, { lat: -45.0100, lng: 169.1010 }
     ] }
   };
-  function bakedHole(objects, holeNumber) {
+  function bakedHole(objects, holeNumber, recipe) {
     const frame = watchMapCore.buildWatchHoleFrame(
-      watchMapCore.WATCH_MAP_RECIPE_V1, watchMapCore.objectsForHole(objects, holeNumber));
+      recipe || watchMapCore.WATCH_MAP_RECIPE_V1, watchMapCore.objectsForHole(objects, holeNumber));
     return {
       holeNumber,
       path: "c/v1/h" + holeNumber + ".webp",
@@ -180,22 +180,25 @@ const root = path.join(__dirname, "..");
     "a backfill writes the reference and touches nothing else");
   assert.strictEqual(unchanged.holes[0].path, baked.path);
 
-  /* THE CASE THAT MATTERS. The surfaces are gone from objects_json - they are
-     capture-time input, collected to be drawn, and the lean tee/green/route set
-     is all GPS Play needs. The canvas therefore reframes, because it is fitted
-     to the corridor plus whichever surface vertices fall inside it. None of
-     that is in the reference: the tee, green, green outline and play line are
-     untouched, and the reference is delivered beside the STORED spatial
-     reference, which still projects it onto the stored image exactly as before.
-     A guard that compared projection bases would refuse this, and refusing it
-     is refusing every honest backfill - all 18 Millbrook holes reframed this
-     way while their geometry stayed byte-identical. */
-  const reframed = helpers.backfillHoleReferences({ objects_json: withoutSurfaces }, { holes: [baked] });
+  /* THE CASE THAT MATTERS. The stored image was framed differently from how
+     today's recipe would frame it - an older recipe (here, a wider corridor),
+     and the surfaces since dropped from objects_json, since they are capture-time
+     input collected to be drawn and the lean tee/green/route set is all GPS Play
+     needs. None of that is in the reference: the tee, green, green outline and
+     play line are untouched, and the reference is delivered beside the STORED
+     spatial reference, which still projects it onto the stored image exactly as
+     before. A guard that compared projection bases would refuse this, and
+     refusing it is refusing every honest backfill - all 18 Millbrook holes
+     reframed this way while their geometry stayed byte-identical. */
+  const olderRecipe = JSON.parse(JSON.stringify(watchMapCore.WATCH_MAP_RECIPE_V1));
+  olderRecipe.corridor.halfWidthM = 90;
+  const bakedOlder = bakedHole(BACKFILL_OBJECTS, 1, olderRecipe);
+  const reframed = helpers.backfillHoleReferences({ objects_json: withoutSurfaces }, { holes: [bakedOlder] });
   assert.notStrictEqual(
     watchMapCore.buildWatchHoleFrame(watchMapCore.WATCH_MAP_RECIPE_V1, watchMapCore.objectsForHole(withoutSurfaces, 1)).spatialReference.imageWidth,
-    baked.spatialReference.imageWidth,
+    bakedOlder.spatialReference.imageWidth,
     "the fixture must actually reframe, or this case is not testing anything");
-  assert.strictEqual(reframed.updated, 1, "dropped surfaces reframe the canvas and must NOT block the backfill");
+  assert.strictEqual(reframed.updated, 1, "a differently-framed stored image must NOT block the backfill");
   assert.strictEqual(reframed.skipped.length, 0);
   assert.deepStrictEqual(reframed.holes[0].reference, unchanged.holes[0].reference,
     "and the reference written is identical either way - surfaces are not in it");

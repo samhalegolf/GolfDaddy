@@ -153,12 +153,14 @@ check("a phone upgrading its engine re-sends the bag", () => {
      wrist has to be told before it trusts them. */
   const { instance, calls, state } = environment();
   instance.deliver();
-  state.engine = "bubble-engine-v2";
+  /* Derived from the current version, never a literal: a hard-coded "next" engine
+     stops being an upgrade the day the real engine reaches it. */
+  const nextEngine = ENGINE_VERSION + "-next";
   const upgraded = delivery.createDelivery({
     plugin: () => ({ publishWatchPlayer: snapshot => calls.push(snapshot.player) }),
     bag: () => state.bag,
     bubble: () => ({ saved: state.saved, handedness: state.handedness }),
-    engineVersion: () => "bubble-engine-v2"
+    engineVersion: () => nextEngine
   });
   upgraded.noteInventory({ fingerprint: calls[0].fingerprint });
   assert.strictEqual(upgraded.deliver().delivered, true,
