@@ -127,6 +127,11 @@
   /* A grab on a detailed outline's edge bends it this far round the edge each way, in screen
      pixels - so zoomed in, the bend is finer. */
   var EDGE_BEND_PX = 45;
+  /* Areas that meet along a seam (GDOverlayShapes.seamPair): a gap narrower than
+     shapes.SEAM_GAP_M between two of them, or a thin overlap, closes in the middle and the line
+     there is held by both. Greens, bunkers and tees sit on top of a fairway, not beside it,
+     so they never seam. */
+  var SEAM_KINDS = ["fairway", "water", "hazard", "waste", "trees"];
   var MAX_FEATURES = 600;
   /* The tree finder reads the box at about this many metres a pixel (a crown ~25px across), up
      to this many pixels a side, and learns what a tree looks like from at most this many of the
@@ -148,7 +153,7 @@
     course: null, features: [], loadedFor: "", osm: null, objects: [], lastRun: null, courseMap: null, view: null, sourceKey: "",
     showOsm: true, showObjects: true, status: "draft", hole: null,
     dirty: false, rev: 0, saving: false, saveError: "", fairwayWidth: 0,
-    mode: "shapes", wandSize: { green: 1, bunker: 1, water: 1 }, method: { fairway: "width", green: "wand", tee: "round", bunker: "wand", water: "wand", trees: "single", hazard: "draw", waste: "grow" }, lineWandSize: { fairway: 1, bunker: 1, water: 1, waste: 1 }, mergeBunkers: true, fullscreen: false, unsaved: null,
+    mode: "shapes", wandSize: { green: 1, bunker: 1, water: 1 }, method: { fairway: "width", green: "wand", tee: "round", bunker: "wand", water: "wand", trees: "single", hazard: "draw", waste: "grow" }, lineWandSize: { fairway: 1, bunker: 1, water: 1, waste: 1 }, mergeBunkers: true, seams: true, fullscreen: false, unsaved: null,
     /* The size the next single tree is dropped at, and the tree finder's sensitivity. */
     treeRadius: 0, treeFinderLevel: 2,
     /* Trees placed by hand on this course this session: what the tree finder learns from. Not
@@ -179,7 +184,7 @@
       localStorage.setItem(STORE_KEY, JSON.stringify({
         course: slimCourse(session.course), view: session.view, sourceKey: session.sourceKey,
         showOsm: session.showOsm, showObjects: session.showObjects, mode: session.mode, fairwayWidth: session.fairwayWidth,
-        wandSize: session.wandSize, method: session.method, lineWandSize: session.lineWandSize, mergeBunkers: session.mergeBunkers, fullscreen: !!session.fullscreen,
+        wandSize: session.wandSize, method: session.method, lineWandSize: session.lineWandSize, mergeBunkers: session.mergeBunkers, seams: session.seams, fullscreen: !!session.fullscreen,
         treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel,
         unsaved: session.dirty && session.loadedFor ? { courseId: session.loadedFor, features: session.features } : null
       }));
@@ -196,7 +201,7 @@
     try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) {}
     if (!saved || typeof saved !== "object") return;
     if (saved.course) { session.course = saved.course; session.view = saved.view || null; }
-    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "fullscreen", "treeRadius", "treeFinderLevel"].forEach(function (k) {
+    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "treeRadius", "treeFinderLevel"].forEach(function (k) {
       if (saved[k] != null) session[k] = saved[k];
     });
     if (saved.wandSize && typeof saved.wandSize === "object") {
@@ -451,6 +456,7 @@
       "Whatever you just placed stays live: <strong>← →</strong> step the wand's sensitivity, <strong>↑ ↓</strong> make it smaller or bigger (a fairway narrower or wider), <strong>Enter</strong> or <strong>Space</strong> keeps it, <strong>Esc</strong> removes it - placing the next one keeps it too. " +
       "<strong>Pins</strong>, the quick pass: a fairway is its start then its end and becomes a fairway straight away; a green pin is outlined by the wand straight away; tees, bunkers and water stay pins until <strong>Shape pins</strong>. " +
       "Whatever you just placed can be dragged at once to adjust it. In <strong>Move</strong>, drag shapes and their points, and drop either on the <strong>bin</strong> to delete. A detailed outline shows only its key points - grab its edge anywhere and it bends there, the key points either side staying put. " +
+      "<strong>Seams</strong> (on by default): a fairway, water, hazard, waste area or trees kept within a few metres of another - or just overlapping it - meets it in the middle, and that line is shared; drag it and both shapes follow, so it only changes which ground is which. " +
       "<strong>Link</strong>: drag from one shape to another (or tap one, then the other) to put them on the same hole; drag a shape onto empty ground to unlink it. " +
       "Everything saves as you go, as a <strong>draft</strong> the mapper ignores - <strong>Mark ready</strong> when the course looks right, then run the mapper. " +
       "Bright outlines are what OSM already has; dashed amber ones are the course's saved objects.</p></details>" +
@@ -495,6 +501,7 @@
       '<span class="gdStudioOverlayStepValue" data-gd-overlay="wand-size"></span>' +
       '<button type="button" class="gdStudioOverlayStep" data-gd-overlay="wand-bigger" title="The wand reaches for a bigger edge (↑ on the shape just placed, ] for the next one)">+</button></span>' +
       '<label class="gdStudioOverlayOpt" data-gd-overlay="merge-label" title="A bunker outline that overlaps one already placed joins it as one bunker"><input type="checkbox" data-gd-overlay="merge"> Merge bunkers</label>' +
+      '<label class="gdStudioOverlayOpt" data-gd-overlay="seams-label" title="A fairway, water, hazard, waste area or trees kept within a few metres of another meets it in the middle, and the line between them is shared - drag it and both follow"><input type="checkbox" data-gd-overlay="seams"> Seams</label>' +
       '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="shape-pins" hidden></button>' +
       "</div>" +
       '<div class="gdStudioOverlayViewRail" role="toolbar" aria-label="View">' +
@@ -518,7 +525,7 @@
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "hole", "hole-label", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "clear", "run", "status"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -689,6 +696,7 @@
     function renderOptions() {
       var shapesMode = session.mode === "shapes";
       el["merge-label"].hidden = !shapesMode;
+      el["seams-label"].hidden = !shapesMode;
       var methods = methodOf(tool) ? METHODS[tool] : null;
       el.method.hidden = !methods;
       METHOD_NAMES.forEach(function (m) {
@@ -1129,8 +1137,10 @@
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
       var merged = kind === "bunker" ? mergeBunker(points, session.hole, null, true) : null;
       if (merged) { lastPlacedId = merged.id; drawFeatures(); changed(); setStatus("Bunker joined the one it overlaps. Grab its edge in Move to tidy it."); return; }
-      addFeature({ kind: kind, points: points, source: "colour" });
-      setStatus(kindLabel(kind) + " placed. Grab its edge in Move to tidy it.");
+      var f = addFeature({ kind: kind, points: points, source: "colour" });
+      var joined = sealSeams(f);
+      if (joined) { drawFeatures(); changed(); }
+      setStatus(kindLabel(kind) + " placed" + seamWords(joined) + ". Grab its edge in Move to tidy it.");
     }
 
     /* ---- the wand's size ----
@@ -1228,7 +1238,12 @@
         if (lastPlacedId === f.id) lastPlacedId = into.id;
         changed();
         setStatus("Bunker merged with the one it overlaps.");
-      } else if (!quiet) setStatus(kindLabel(f.kind) + " kept.");
+      } else {
+        var joined = sealSeams(f);
+        if (joined) changed();
+        if (joined) setStatus(kindLabel(f.kind) + " kept" + seamWords(joined) + ".");
+        else if (!quiet) setStatus(kindLabel(f.kind) + " kept.");
+      }
       drawFeatures();
       updateHint();
     }
@@ -1558,6 +1573,53 @@
         return result;
       });
     }
+
+    /* ---- seams ----
+       A shape kept beside another (SEAM_KINDS) meets it in the middle of any small gap or thin
+       overlap, and the line there becomes the same corners in both (shapes.seamPair). Corners
+       a shape already shares with a third one are locked, so one seam never breaks another. */
+
+    function canSeam(f) { return !!f && !f.pin && SEAM_KINDS.indexOf(f.kind) >= 0 && f.points.length >= 3; }
+
+    /* Every corner on the map, by its exact coordinates: the ids of the shapes that have it. */
+    function cornerOwners() {
+      var owners = {};
+      session.features.forEach(function (f) {
+        f.points.forEach(function (p) { var k = shapes.pointKey(p); (owners[k] = owners[k] || []).push(f.id); });
+      });
+      return owners;
+    }
+
+    /* Which of f's corners are shared with a shape other than `other`. */
+    function lockedCorners(f, other, owners) {
+      return f.points.map(function (p) {
+        return (owners[shapes.pointKey(p)] || []).some(function (id) { return id !== f.id && id !== other.id; });
+      });
+    }
+
+    function nearBox(f, g, metres) {
+      var a = L.latLngBounds(toLatLngs(f.points)), b = L.latLngBounds(toLatLngs(g.points));
+      var dLat = metres / 111320, dLng = dLat / Math.max(0.2, Math.cos(a.getCenter().lat * Math.PI / 180));
+      return a.getSouth() - dLat <= b.getNorth() && b.getSouth() <= a.getNorth() + dLat && a.getWest() - dLng <= b.getEast() && b.getWest() <= a.getEast() + dLng;
+    }
+
+    /* Join f to every seamable shape it meets. Returns how many it joined. */
+    function sealSeams(f) {
+      if (!session.seams || !canSeam(f)) return 0;
+      var joined = 0;
+      session.features.forEach(function (g) {
+        if (g === f || !canSeam(g) || !nearBox(f, g, shapes.SEAM_GAP_M * 1.5)) return;
+        var owners = cornerOwners();
+        var res = shapes.seamPair(f.points, g.points, { lockedA: lockedCorners(f, g, owners), lockedB: lockedCorners(g, f, owners), maxPoints: MAX_POINTS });
+        if (!res) return;
+        f.points = res.a;
+        g.points = res.b;
+        joined++;
+      });
+      return joined;
+    }
+
+    function seamWords(joined) { return !joined ? "" : joined === 1 ? " - joined to the shape beside it" : " - joined to the " + joined + " shapes beside it"; }
 
     /* A bunker outline joins every placed bunker it overlaps, when merging is on: the first
        one it touches takes the merged outline and the rest go. Returns that bunker, or null
@@ -2108,16 +2170,40 @@
       var start = mapObj.latLngToContainerPoint(e.latlng);
       var at = drag.mode === "edge" ? shapes.nearestOnRing(xy, { x: start.x, y: start.y }) : { index: drag.index };
       var bend = shapes.bendRing(xy, at, { keys: keys, maxReachPx: drag.mode === "edge" ? EDGE_BEND_PX : 0, maxPoints: MAX_POINTS });
-      drag.bend = { ring: bend.ring, weights: bend.weights, added: bend.added, start: start, last: bend.ring };
+      drag.bend = { ring: bend.ring, weights: bend.weights, added: bend.added, from: bend.from, start: start, last: null, welds: [] };
       /* The handles follow the corners they sit on. */
       if (entry && entry.keys) entry.keys = entry.keys.map(function (k) { return bend.from.indexOf(k); });
+      /* A seam moves for both: every shape sharing corners with f follows them. */
+      session.features.forEach(function (g) {
+        if (g === f) return;
+        var runs = shapes.weldRuns(g.points, f.points);
+        if (runs.length) drag.bend.welds.push({ id: g.id, orig: g.points.slice(), runs: runs });
+      });
     }
 
+    /* The bent outline at this drag: each corner the drag did not move keeps its exact
+       coordinates, so a seam with a shape not being dragged stays whole. */
     function bendTo(f, ll) {
       var b = drag.bend, now = mapObj.latLngToContainerPoint(ll);
       var dx = now.x - b.start.x, dy = now.y - b.start.y;
-      b.last = b.ring.map(function (p, i) { return { x: p.x + dx * b.weights[i], y: p.y + dy * b.weights[i] }; });
-      f.points = fromScreen(b.last);
+      b.last = b.ring.map(function (p, i) {
+        var w = b.weights[i], j = b.from[i], q = { x: p.x + dx * w, y: p.y + dy * w, from: j };
+        q.ll = !w && j >= 0 ? drag.orig[j] : fromScreen([q])[0];
+        return q;
+      });
+      setBent(f, b.last, b);
+    }
+
+    /* f and every shape welded to it, to the bent corners `pts` (with .ll and .from). */
+    function setBent(f, pts, bend) {
+      f.points = pts.map(function (p) { return { lat: p.ll.lat, lng: p.ll.lng }; });
+      var from = pts.map(function (p) { return p.from; });
+      bend.welds.forEach(function (w) {
+        var g = findFeature(w.id);
+        if (!g) return;
+        g.points = shapes.applyWeld(w.orig, w.runs, f.points, from);
+        refreshFeature(g);
+      });
     }
 
     function onDragMove(event) {
@@ -2170,14 +2256,20 @@
       if (event.type !== "pointercancel" && overBin(event)) {
         if (d.mode === "body") { removeFeature(f.id); setStatus(kindLabel(f.kind) + " deleted."); return; }
         f.points = d.orig;
+        /* Shapes welded to it go back too. */
+        if (d.bend) d.bend.welds.forEach(function (w) { var g = findFeature(w.id); if (g) g.points = w.orig; });
         if (d.mode === "edge") { drawFeatures(); return; }
         if (d.inserted) { f.points.splice(d.index, 1); drawFeatures(); return; }
         if (removeVertex(f, d.index)) setStatus("Corner deleted.");
         else drawFeatures();
         return;
       }
-      /* A bend keeps only the corners it needs. */
-      if (d.bend) f.points = fromScreen(shapes.tidyBend(d.bend.last, d.bend.added));
+      /* A bend keeps only the corners it needs, and closes any small gap it now leaves to a
+         shape beside it. */
+      if (d.bend && d.bend.last) {
+        setBent(f, shapes.tidyBend(d.bend.last, d.bend.added), d.bend);
+        sealSeams(f);
+      }
       /* The live shape dragged whole keeps its arrow keys; reshaped by a corner, it is kept as
          the hand left it. */
       if (adjust && adjust.id === f.id) {
@@ -3397,6 +3489,8 @@
     el["wand-bigger"].addEventListener("click", function () { stepWandSize(1); });
     el.merge.checked = session.mergeBunkers;
     el.merge.addEventListener("change", function () { session.mergeBunkers = el.merge.checked; remember(); });
+    el.seams.checked = session.seams;
+    el.seams.addEventListener("change", function () { session.seams = el.seams.checked; remember(); });
     el["shape-pins"].addEventListener("click", shapePins);
     el["draft-finish"].addEventListener("click", finishFairway);
     el["draft-undo"].addEventListener("click", undoDraftPoint);

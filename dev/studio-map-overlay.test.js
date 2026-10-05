@@ -354,11 +354,19 @@ test("every shape tool has the colour wand", () => {
   assert.ok(page.includes('var merged = kind === "bunker" ? mergeBunker(points, session.hole, null, true) : null;'), "a colour-wand bunker merges, keeping its detail");
 });
 
+test("areas kept beside each other meet along a shared seam that moves for both", () => {
+  assert.ok(page.includes('var SEAM_KINDS = ["fairway", "water", "hazard", "waste", "trees"];'), "fairway, water, hazard, waste and trees seam");
+  assert.ok(page.includes("var joined = sealSeams(f);"), "a shape must seam when it is kept");
+  assert.ok(page.includes("lockedB: lockedCorners(g, f, owners)"), "a seam with a third shape must be locked");
+  assert.ok(page.includes("g.points = shapes.applyWeld(w.orig, w.runs, f.points, from);"), "a dragged seam must move the shape on the other side");
+  assert.ok(page.includes('data-gd-overlay="seams"'), "seams can be turned off");
+});
+
 test("a detailed outline shows its key corners and bends where its edge is grabbed", () => {
   assert.ok(page.includes("if (isDetailed(f)) return shapes.keyCorners(screenRing(f.points));"), "a detailed outline must show only its key corners");
   assert.ok(page.includes('onPress(entry.edge, function (e) { beginDrag(f.id, "edge", -1, e); });'), "a press on the edge must bend it");
   assert.ok(page.includes("if (isDetailed(f) && mode !== \"body\") beginBend(f, e);"), "a corner or edge drag on a detailed outline must bend it");
-  assert.ok(page.includes("if (d.bend) f.points = fromScreen(shapes.tidyBend(d.bend.last, d.bend.added));"), "a bend keeps only the corners it needs");
+  assert.ok(page.includes("setBent(f, shapes.tidyBend(d.bend.last, d.bend.added), d.bend);"), "a bend keeps only the corners it needs");
 });
 
 test("line wand: a finished line on Line + wand is grown out in the browser", () => {
