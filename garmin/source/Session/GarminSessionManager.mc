@@ -42,6 +42,7 @@ class GarminSessionManager {
     var playState;
     var lastRejection;       // GarminAcknowledgement or null
     var lockedShot;          // GarminLockedShot or null
+    var sender;              // GarminSender: the one door to the phone
     var handoverNotice;      // String or null
     var answeredHandovers;   // Dictionary used as a Set of handover ids
 
@@ -49,6 +50,7 @@ class GarminSessionManager {
         scene = null;
         state = "noRound";
         outbox = new GarminOutbox();
+        sender = new GarminSender(self);
         locationManager = new GarminLocationManager();
         playerStore = new GarminPlayerStore();
         mapStore = new GarminMapStore();
@@ -311,16 +313,14 @@ class GarminSessionManager {
         attempt(command.commandId);
     }
 
-    function attempt(commandId) {
-        var wire = outbox.beginAttempt(commandId, nowEpochMillis());
-        if (wire == null) { return; }
-        transmit({ "command" => wire });
-    }
+    // Commands no longer go out one by one the moment they are made: the
+    // sender batches what is due, through its gate (GarminSender.mc).
+    function attempt(commandId) { sender.pump(); }
+    function retryPending() { sender.pump(); }
 
-    function retryPending() {
-        var ids = outbox.allCommandIds();
-        for (var i = 0; i < ids.size(); i += 1) { attempt(ids[i]); }
-    }
+    // Called every second by the app's refresh timer: timeouts, spacing and
+    // resends all move on the clock, not only on events.
+    function tick() { sender.pump(); }
 
     function dismissRejection() { lastRejection = null; }
     function dismissHandoverNotice() { handoverNotice = null; }
@@ -331,6 +331,7 @@ class GarminSessionManager {
     function onPhoneAppMessage(msg as Communications.PhoneAppMessage) as Void {
         var data = msg.data;
         if (!(data instanceof Lang.Dictionary)) { return; }
+        sender.noteLinkProven();
         // Simulator-only build: the console is the only window into what
         // the tether delivered. Compiled out of every live build.
         if (GarminTransmitPolicy.muted()) {
@@ -357,6 +358,7 @@ class GarminSessionManager {
         if (raw == null) { return; }
         var incoming = new GarminScene(raw);
         if (!incoming.isSupported()) { return; }
+        sender.noteLinkProven();
         if (!incoming.hasRound()) {
             scene = null;
             state = "noRound";
@@ -491,7 +493,13 @@ class GarminSessionManager {
     // Tells the phone which hole maps this device already holds, so the
     // phone re-sends only what is missing.
     function reportMapInventory() {
-        transmit({ "watchMapHave" => mapStore.inventory() });
+        var inventory = mapStore.inventory();
+        // Hole by hole when the watch needs it: a small watch-app memory
+        // budget, or a link that has been failing. The phone's adaptive
+        // sender never goes above this (AdaptiveGate.limitTo / limitTo).
+        var stats = System.getSystemStats();
+        if (sender.struggling() || stats.totalMemory < 600 * 1024) { inventory["maxPart"] = 1; }
+        sender.queueReport("watchMapHave", inventory);
     }
 
     // Which bag this device holds, plus the engine it implements, so the
@@ -500,14 +508,17 @@ class GarminSessionManager {
         var held = playerStore.inventory();
         var engine = GarminEngineVersion.report();
         held["engineVersion"] = engine["engineVersion"];
-        transmit({ "watchPlayerHave" => held });
+        sender.queueReport("watchPlayerHave", held);
     }
 
     // -------------------------------------------------------- transport
 
-    function transmit(dict) {
+    // The wire itself, used only by GarminSender, which is told the outcome
+    // (sender.onSent) by whichever path carried it.
+    function rawTransmit(dict) {
         // The standalone simulator demo answers for the phone (compiled to
-        // `false` everywhere else - GarminSimDemoPolicy.mc).
+        // `false` everywhere else - GarminSimDemoPolicy.mc); it reports the
+        // send's outcome to the sender itself.
         if (GarminSimDemoPolicy.handle(dict)) { return; }
         // Simulator-only muted build (GarminTransmitPolicy.mc): the reply
         // is logged and dropped, because sending it would kill the
@@ -516,6 +527,7 @@ class GarminSessionManager {
             var relay = GarminTransmitPolicy.relayUrl();
             if (relay == null) {
                 System.println("transmit muted: " + dict.keys());
+                sender.onSent(true);
                 return;
             }
             // Simulator relay (GarminTransmitPolicy.relayUrl): the message
@@ -530,15 +542,16 @@ class GarminSessionManager {
                 }, method(:onRelayResponse));
             } catch (e) {
                 System.println("relay threw: " + e.getErrorMessage());
+                sender.onSent(false);
             }
             return;
         }
         try {
-            Communications.transmit(dict, null, new GarminTransmitListener());
+            Communications.transmit(dict, null, new GarminTransmitListener(sender));
         } catch (e) {
-            // Best-effort: a Scene/ack/inventory report is presentation
-            // data, never a command-style outbox item, so a dropped send
-            // simply waits for the next opportunity.
+            // Refused before it left: a failure like any other, so the gate
+            // narrows and the command stays queued for its resend.
+            sender.onSent(false);
         }
     }
 
@@ -549,6 +562,7 @@ class GarminSessionManager {
     // build simply never calls it.
     function onRelayResponse(responseCode as Lang.Number, data as Lang.Dictionary or Lang.String or Null) as Void {
         if (responseCode != 200) { System.println("relay answered " + responseCode + " " + data); }
+        sender.onSent(responseCode == 200);
     }
 
     // Communications.transmit takes a ConnectionListener object (onComplete /
@@ -573,12 +587,14 @@ class GarminSessionManager {
     }
 }
 
+// The transmit's two outcomes, finally heard: they drive the sender's gate.
+// (Commands are still settled only by the phone's acknowledgement.)
 class GarminTransmitListener extends Communications.ConnectionListener {
-    function initialize() {
+    var sender;
+    function initialize(sender) {
         ConnectionListener.initialize();
+        self.sender = sender;
     }
-    function onComplete() as Void {
-    }
-    function onError() as Void {
-    }
+    function onComplete() as Void { sender.onSent(true); }
+    function onError() as Void { sender.onSent(false); }
 }

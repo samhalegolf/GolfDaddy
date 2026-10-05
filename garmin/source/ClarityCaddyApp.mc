@@ -34,6 +34,7 @@ class ClarityCaddyApp extends Application.AppBase {
 
     // Typed because Timer.start resolves method(:onTick) against Method() as Void.
     function onTick() as Void {
+        session.tick();
         WatchUi.requestUpdate();
     }
 

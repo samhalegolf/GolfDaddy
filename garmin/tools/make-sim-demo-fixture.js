@@ -17,6 +17,10 @@
  * /api/course-watch-map-assets), exactly as in a round. The fixture always
  * carries the real URLs; the flag only decides which path the demo uses.
  *
+ * --faults: the stand-in phone makes the link misbehave - every 4th send
+ * fails and any batch of more than two commands is refused as too large - so
+ * GarminSender's gate can be watched narrowing and widening in the console.
+ *
  * Numbers that need double precision (coordinates, the map transform) are
  * written as STRINGS: Connect IQ's resource JSON is not guaranteed to decode
  * decimals as Double, and a float32 tx (~8.6e7) is off by several pixels.
@@ -39,6 +43,7 @@ const distance = require("../../app/js/distance.js");
 const container = process.argv[2];
 const args = process.argv.slice(3);
 const download = args.indexOf("--download") >= 0;
+const faults = args.indexOf("--faults") >= 0;
 const holes = (args.filter((a) => !a.startsWith("--"))[0] || "1,2,3").split(",").map(Number);
 const API_ORIGIN = "https://caddy.claritygolf.app";
 /* [hole, id, label, metres short of the green along the line, or "tee"] */
@@ -139,7 +144,7 @@ for (const n of holes) {
 }
 
 const fixture = {
-  course: { key: "sim-demo-" + courseDir, name: "Millbrook (sim demo)", source: courseDir + "/" + versionDir, download },
+  course: { key: "sim-demo-" + courseDir, name: "Millbrook (sim demo)", source: courseDir + "/" + versionDir, download, faults },
   holes: fixtureHoles,
   situations,
   manifest: manifestHoles,

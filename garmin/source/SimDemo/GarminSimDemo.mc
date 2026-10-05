@@ -36,6 +36,8 @@ class GarminSimDemo {
     var locked = false;
     var target = null;      // GarminCoordinate while locked
     var queue = [];         // answers waiting for the timer: [ack, scene]
+    var outcome = null;     // the in-flight send's result, reported on flush
+    var sends = 0;          // for fault injection (fixture `faults`)
     var timer = null;
     var bitmapHole = null;
     var bitmapCache = null;
@@ -48,7 +50,22 @@ class GarminSimDemo {
         fixture = WatchUi.loadResource(Rez.JsonData.simDemo);
         courseKey = fixture["course"]["key"];
         session.playerStore.receive(fixture["player"]);
-        session.mapStore.receiveManifest(manifestDict());
+        // In growing parts (1 hole, then 2, ...), as the phone's adaptive
+        // sender delivers it, so the watch's part-merge runs here too.
+        var whole = manifestDict();
+        var holes = whole["holes"];
+        var from = 0;
+        var size = 1;
+        while (from < holes.size()) {
+            var to = from + size > holes.size() ? holes.size() : from + size;
+            var part = { "courseKey" => whole["courseKey"], "version" => whole["version"],
+                "holes" => holes.slice(from, to), "part" => { "from" => from, "count" => to - from, "total" => holes.size() } };
+            session.mapStore.receiveManifest(part);
+            from = to;
+            size = size * 2;
+        }
+        System.println("sim demo: package delivered in parts, watch holds "
+            + (session.mapStore.manifest != null ? session.mapStore.manifest.holes.size() : 0) + " holes");
         System.println("sim demo: " + fixture["course"]["name"] + " holes=" + fixture["holes"].size()
             + " bag=" + (session.playerStore.snapshot != null));
         session.receiveScene(scene());
@@ -58,29 +75,57 @@ class GarminSimDemo {
 
     function handle(dict) {
         if (!(dict instanceof Lang.Dictionary)) { return true; }
-        var command = dict.hasKey("command") ? dict["command"] : null;
+        sends += 1;
+        var commands = [];
+        if (dict.hasKey("command") && dict["command"] instanceof Lang.Dictionary) { commands.add(dict["command"]); }
+        if (dict.hasKey("commands") && dict["commands"] instanceof Lang.Array) { commands = dict["commands"]; }
+
+        // Fault injection (fixture `faults`, generator --faults): every 4th
+        // send fails, and a batch of more than two is refused as too large -
+        // the shapes a real link fails in, so the sender's gate can be seen
+        // closing and reopening in the console.
+        var faults = fixture["course"].hasKey("faults") && fixture["course"]["faults"] == true;
+        if (faults && (sends % 4 == 0 || commands.size() > 2)) {
+            System.println("sim demo: link FAULT on send " + sends + " (" + commands.size() + " command(s))");
+            outcome = false;
+            later();
+            return true;
+        }
+        outcome = true;
         // Inventory reports and anything else the watch tells a phone: there
-        // is nobody to tell. Swallowed, never transmitted.
-        if (!(command instanceof Lang.Dictionary)) { return true; }
-        var type = command["type"];
-        var payload = command.hasKey("payload") ? command["payload"] : {};
-        var accepted = apply(type, payload);
-        System.println("sim demo: " + type + (accepted ? " accepted" : " rejected"));
-        queue.add([{
-            "commandId" => command["commandId"],
-            "accepted" => accepted,
-            "reason" => accepted ? null : "marshal-rejected",
-            "revision" => revision
-        }, accepted ? scene() : null]);
-        // A phone answers later, never inside the send that asked. Answering
-        // re-entrantly would settle the outbox before send() has finished
-        // recording what it sent.
-        if (timer == null) { timer = new Timer.Timer(); }
-        timer.start(method(:flush), 150, false);
+        // is nobody to tell beyond accepting the send.
+        for (var c = 0; c < commands.size(); c += 1) {
+            var command = commands[c];
+            var type = command["type"];
+            var payload = command.hasKey("payload") ? command["payload"] : {};
+            var accepted = apply(type, payload);
+            System.println("sim demo: " + type + (accepted ? " accepted" : " rejected")
+                + (commands.size() > 1 ? " (batch of " + commands.size() + ")" : ""));
+            queue.add([{
+                "commandId" => command["commandId"],
+                "accepted" => accepted,
+                "reason" => accepted ? null : "marshal-rejected",
+                "revision" => revision
+            }, accepted ? scene() : null]);
+        }
+        later();
         return true;
     }
 
+    // A phone answers later, never inside the send that asked. Answering
+    // re-entrantly would settle the outbox before the sender has finished
+    // recording what it sent.
+    function later() {
+        if (timer == null) { timer = new Timer.Timer(); }
+        timer.start(method(:flush), 150, false);
+    }
+
     function flush() as Void {
+        if (outcome != null) {
+            var ok = outcome;
+            outcome = null;
+            session.sender.onSent(ok);
+        }
         var pending = queue;
         queue = [];
         for (var i = 0; i < pending.size(); i += 1) {
