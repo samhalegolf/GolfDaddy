@@ -45,8 +45,30 @@ function post(body, headers) {
   }
   assert.strictEqual(calls.length, 2, "rejected requests never reach the database");
 
-  res = await courseUsage(new Request("https://example.test/api/course-usage"), {});
+  res = await courseUsage(new Request("https://example.test/api/course-usage", { method: "PUT" }), {});
   assert.strictEqual(res.status, 405);
+
+  /* The admin read: no session is refused; a verified admin gets the summary rows. */
+  res = await courseUsage(new Request("https://example.test/api/course-usage"), {});
+  assert.strictEqual(res.status, 403, "no session token, no stats");
+
+  global.fetch = async (url) => {
+    url = String(url);
+    if (url.endsWith("/auth/v1/user")) return new Response(JSON.stringify({ id: "u1", email: "player@example.com" }), { status: 200 });
+    throw new Error("summary must not be read for a non-admin: " + url);
+  };
+  res = await courseUsage(new Request("https://example.test/api/course-usage", { headers: { Authorization: "Bearer t" } }), {});
+  assert.strictEqual(res.status, 403, "a signed-in non-admin is refused");
+
+  global.fetch = async (url) => {
+    url = String(url);
+    if (url.endsWith("/auth/v1/user")) return new Response(JSON.stringify({ id: "u1", email: "samhalegolf@gmail.com" }), { status: 200 });
+    assert.ok(url.includes("/rest/v1/course_map_usage_summary"), url);
+    return { ok: true, status: 200, text: async () => JSON.stringify([{ course_id: "royal-test-gc", origin: "ios", plays: 3 }]) };
+  };
+  res = await courseUsage(new Request("https://example.test/api/course-usage", { headers: { Authorization: "Bearer t" } }), {});
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual((await res.json()).rows, [{ course_id: "royal-test-gc", origin: "ios", plays: 3 }]);
 
   global.fetch = realFetch;
   console.log("course-usage: all checks passed");

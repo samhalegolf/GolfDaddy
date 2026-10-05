@@ -343,6 +343,17 @@
     .gdAdminDatabaseFilters input,.gdAdminDatabaseFilters select{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.10);border-radius:14px;background:rgba(0,0,0,.22);color:#fff;padding:10px 11px;font-size:12px;font-weight:850}
     .gdAdminDatabaseSummary{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:7px;margin:8px 0 10px}
     .gdAdminDatabaseSummary:empty{display:none}
+    .gdAdminUsageRange{display:flex;gap:6px;margin-bottom:8px}
+    .gdAdminUsageRange button{border-radius:999px;padding:7px 12px;background:rgba(255,255,255,.06);color:rgba(255,255,255,.7);font-size:11px;font-weight:950;border:1px solid rgba(255,255,255,.10)}
+    .gdAdminUsageRange button[aria-pressed="true"]{background:rgba(215,176,107,.22);color:#fff;border-color:rgba(215,176,107,.45)}
+    .gdAdminUsageList{display:grid;gap:6px}
+    .gdAdminUsageRow{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:center;padding:9px 10px;border-radius:14px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.08)}
+    .gdAdminUsageName,.gdAdminUsageNums{min-width:0;display:grid;gap:2px}
+    .gdAdminUsageName strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .gdAdminUsageNums b{font-size:12px}
+    .gdAdminUsageName span,.gdAdminUsageNums span,.gdAdminUsageNote{color:rgba(255,255,255,.55);font-size:10px;font-weight:800}
+    .gdAdminUsageNote{margin:6px 0}
+    @media(max-width:620px){.gdAdminUsageRow{grid-template-columns:1fr}}
     .gdAdminDatabaseMetric{min-width:0;padding:8px;border-radius:12px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.07)}
     .gdAdminDatabaseMetric span{display:block;color:rgba(255,255,255,.52);font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.06em}
     .gdAdminDatabaseMetric strong{display:block;margin-top:3px;color:#fff;font-size:13px;font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
