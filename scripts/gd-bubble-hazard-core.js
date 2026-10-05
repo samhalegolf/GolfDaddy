@@ -6,7 +6,9 @@
    What it answers, for one bubble ring over one course's mapped objects:
      1. Which bunker / water / trees / hazard surfaces does the bubble touch at all? (bbox +
         overlap test). Trees and hazard (gorse, scrub - anything non-water) are only ever
-        hand-drawn in the Studio mapping overlay; they ride the same path as bunkers.
+        hand-drawn in the Studio mapping overlay; they ride the same path as bunkers. A waste
+        area (also overlay-only) is its own surface type but goes in the bunkers bucket here,
+        so every shell reveals it exactly as it reveals a bunker.
         GPS Play then draws those surfaces clipped to the bubble - the surface is "hidden
         under the map" and the bubble reveals the part it is over.
      2. Is the bubble entirely off the fairway? True only when the course HAS fairway
@@ -30,7 +32,7 @@
 })(typeof window !== "undefined" ? window : globalThis, function () {
   "use strict";
 
-  var SURFACE_BUCKETS = { fairway_area: "fairways", bunker: "bunkers", water: "water", trees: "trees", hazard: "hazards", green: "greens" };
+  var SURFACE_BUCKETS = { fairway_area: "fairways", bunker: "bunkers", waste: "bunkers", water: "water", trees: "trees", hazard: "hazards", green: "greens" };
 
   function finitePoint(value) {
     if (!value) return null;
@@ -160,6 +162,7 @@
       (Array.isArray(s.water) ? s.water : []).forEach(function (w) { objects.push({ type: "water", shape: w && w.shape, hazardClass: w && w.hazardClass, holeNumber: h }); });
       (Array.isArray(s.trees) ? s.trees : []).forEach(function (t) { objects.push({ type: "trees", shape: t && t.shape, holeNumber: h }); });
       (Array.isArray(s.hazards) ? s.hazards : []).forEach(function (z) { objects.push({ type: "hazard", shape: z && z.shape, holeNumber: h }); });
+      (Array.isArray(s.waste) ? s.waste : []).forEach(function (z) { objects.push({ type: "waste", shape: z && z.shape, holeNumber: h }); });
       if (Array.isArray(g.greenShape) && g.greenShape.length >= 3) objects.push({ type: "green", greenShape: g.greenShape, holeNumber: h });
     }
     return collectSurfaces(objects);

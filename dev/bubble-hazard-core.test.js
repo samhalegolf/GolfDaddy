@@ -164,6 +164,16 @@ test("trees and hazard: collected into their own buckets, revealed when the bubb
   assert.strictEqual(pkg.hazards.length, 1);
 });
 
+test("waste areas: revealed exactly like bunkers, from stored objects and from the package", () => {
+  const surfaces = core.collectSurfaces([{ type: "waste", shape: circle(0, 0, 25) }, { type: "bunker", shape: circle(0, 200, 6) }]);
+  assert.strictEqual(surfaces.bunkers.length, 2, "waste goes in the bunkers bucket");
+  assert.strictEqual(surfaces.bunkers[0].type, "waste", "but keeps its own type");
+  const state = core.bubbleSurfaceState(circle(10, 0, 15), surfaces);
+  assert.strictEqual(state.bunkers.length, 1, "the bubble over a waste area reveals it as a bunker");
+  const pkg = core.collectPackageSurfaces({ status: "lite", holes: [{ holeNumber: 1, surfaces: { waste: [{ shape: circle(0, 0, 25) }] } }] });
+  assert.strictEqual(pkg.bunkers.length, 1, "the /app/ shell reads waste off the package");
+});
+
 test("bubbleSurfaceState: garbage in, empty state out", () => {
   const state = core.bubbleSurfaceState(null, HOLE);
   assert.deepStrictEqual(state, { bunkers: [], water: [], trees: [], hazards: [], hasFairways: false, onFairway: false, onGreen: false, offFairway: false });

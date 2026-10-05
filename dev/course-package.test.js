@@ -253,6 +253,16 @@ test("the package's surface type list matches the mapper's", async () => {
   );
 });
 
+test("waste areas ride the package as their own surface list", async () => {
+  const shape = await import(path.join(root, "functions", "lib", "gd-course-package-shape.mjs"));
+  const ring = [{ lat: 36.01, lng: 174.01 }, { lat: 36.0102, lng: 174.01 }, { lat: 36.0102, lng: 174.0102 }];
+  const objects = Object.assign(surfaceObjects(), { "waste-1": { id: "waste-1", type: "waste", holeNumber: 1, position: ring[0], shape: ring } });
+  const pkg = shape.shapeLitePackage({ course_id: "surf", objects_json: objects, updated_at: "2026-09-01T00:00:00Z" }, "none");
+  const hole = pkg.holes.find(h => h.holeNumber === 1);
+  assert.strictEqual(hole.surfaces.waste.length, 1);
+  assert.strictEqual(hole.surfaces.bunkers.length, 1, "a waste area is not counted as a bunker in the data");
+});
+
 test("a lite package carries each hole's surfaces alongside its geometry", async () => {
   const shape = await import(path.join(root, "functions", "lib", "gd-course-package-shape.mjs"));
   const pkg = shape.shapeLitePackage({ course_id: "surf", objects_json: surfaceObjects(), updated_at: "2026-09-01T00:00:00Z" }, "none");

@@ -52,7 +52,8 @@
  *             has them when tree rendering lands.
  *   waste   - a closed polygon (3+ points). Becomes golf=waste_area (our tag - OSM has none).
  *             Sandy, scrubby ground that is played as it lies. Drawn round and grown out to its
- *             edge, or picked with the colour wand. Not a surface the mapper writes yet.
+ *             edge, or picked with the colour wand. The surface pass writes it onto the
+ *             nearest hole as a "waste" object, and the bubble reveals it like a bunker.
  *
  *   hole numbers are optional on every kind. A numbered green or fairway is matched to that
  *   hole's guide (ref), a numbered hole line is the resolver's strongest evidence.

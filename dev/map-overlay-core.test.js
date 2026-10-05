@@ -262,14 +262,17 @@ test("trees and hazard: overlay shapes reach the surface pass as their own kinds
   assert.strictEqual(real.length, 0);
 });
 
-test("single trees and waste areas are kept and tagged, but are not surfaces yet", () => {
+test("single trees and waste areas are kept and tagged; waste is a surface, a single tree not yet", () => {
   const square = (dx) => [at(dx, 0), at(dx + 8, 0), at(dx + 8, 8), at(dx, 8)];
   const features = [{ kind: "tree", points: square(0) }, { kind: "waste", points: square(50) }];
   assert.deepStrictEqual(overlay.normalizeOverlayFeatures(features).map(f => f.kind), ["tree", "waste"]);
   const elements = overlay.overlayToOsmElements(features);
   assert.strictEqual(elements[0].tags.natural, "tree");
   assert.strictEqual(elements[1].tags.golf, "waste_area");
-  assert.strictEqual(core.parseOsmSurfaces({ elements }).length, 0, "nothing downstream reads them until they are rendered");
+  assert.deepStrictEqual(core.parseOsmSurfaces({ elements }).map(s => s.type), ["waste"], "waste reaches the surface pass; single trees wait for tree rendering");
+  /* golf=waste_area is our own tag: only the overlay's is read. */
+  const real = core.parseOsmSurfaces({ elements: [{ type: "way", id: 7, tags: { golf: "waste_area" }, geometry: elements[1].geometry }] });
+  assert.strictEqual(real.length, 0);
   const summary = overlay.overlaySummary(features);
   assert.strictEqual(summary.singleTrees, 1);
   assert.strictEqual(summary.waste, 1);

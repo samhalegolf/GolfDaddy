@@ -4799,11 +4799,11 @@
 	     Kept for the last few courses played, not forever: each course is ~100-280 KB of rings in
 	     the same localStorage bucket the library lives in. */
 	  const PACKAGE_SURFACE_SOURCE='server-course-package-surface';
-	  const PACKAGE_SURFACE_BUCKETS={fairways:'fairway_area',bunkers:'bunker',water:'water',trees:'trees',hazards:'hazard'};
+	  const PACKAGE_SURFACE_BUCKETS={fairways:'fairway_area',bunkers:'bunker',water:'water',trees:'trees',hazards:'hazard',waste:'waste'};
 	  const PACKAGE_SURFACE_COURSE_LIMIT=4;
 	  function isSurfaceObject(object){
 	    if(!object)return false;
-	    if(object.type==='fairway_area'||object.type==='water'||object.type==='trees'||object.type==='hazard')return true;
+	    if(object.type==='fairway_area'||object.type==='water'||object.type==='trees'||object.type==='hazard'||object.type==='waste')return true;
 	    return object.type==='bunker'&&Array.isArray(object.shape)&&object.shape.length>=3;
 	  }
 	  function surfaceShapeKey(shape){
