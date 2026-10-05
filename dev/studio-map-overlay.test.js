@@ -362,6 +362,15 @@ test("areas kept beside each other meet along a shared seam that moves for both"
   assert.ok(page.includes('data-gd-overlay="seams"'), "seams can be turned off");
 });
 
+test("undo: Ctrl+Z / Cmd+Z and a button take back the last change", () => {
+  assert.ok(page.includes('viewButton("undo", "undo",'), "no Undo button");
+  assert.ok(page.includes("if (!undoing) noteUndo();"), "every change must be recorded for undo");
+  assert.ok(page.includes('(event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && String(event.key || "").toLowerCase() === "z"'), "Ctrl+Z / Cmd+Z must undo");
+  assert.ok(page.includes("session.features = JSON.parse(undoStack.pop());"), "undo must put the shapes back");
+  assert.ok(page.includes("if (draft.length) { undoDraftPoint(); return; }"), "while laying a line, undo takes back its last point");
+  assert.ok((page.match(/resetUndo\(\);/g) || []).length >= 2, "the history starts again when a course loads or a scan replaces the shapes");
+});
+
 test("a detailed outline shows its key corners and bends where its edge is grabbed", () => {
   assert.ok(page.includes("if (isDetailed(f)) return shapes.keyCorners(screenRing(f.points));"), "a detailed outline must show only its key corners");
   assert.ok(page.includes('onPress(entry.edge, function (e) { beginDrag(f.id, "edge", -1, e); });'), "a press on the edge must bend it");
