@@ -212,6 +212,29 @@
     return storeEntitlementActive();
   }
 
+  /* Garmin Founder: every signed-in player whose phone has talked to Clarity
+     Caddy on a Garmin watch (functions/garmin-founder.js). It is permanent and
+     it is not a membership: it unlocks exactly the features listed here and
+     nothing else, and it outlasts any membership bought on top of it.
+
+     What it includes: the Starter Bubble - Manual Set, which places a Bubble
+     from your own Bag and scales it with distance across every club. What it
+     leaves on membership: anything fed by practice data (adopting or saving a
+     Practice Bubble, practice distances into the Bag) and the full Bubble
+     centre setting. Add a feature key here to extend the offer. */
+  var GARMIN_FOUNDER_FEATURES = { starterBubble: true };
+
+  function garminFounderActive() {
+    return !!(account() && status && status.garminFounder && status.garminFounder.active);
+  }
+
+  /* The one question for a single feature: membership opens everything, and a
+     Garmin Founder opens their own short list. */
+  function canUse(feature) {
+    if (hasActiveAccess()) return true;
+    return !!(GARMIN_FOUNDER_FEATURES[feature] && garminFounderActive());
+  }
+
   function accessLabel() {
     var activeAccount = account();
     if (isStaff(activeAccount)) return L("pay.status.staff");
@@ -231,6 +254,7 @@
       if (entitlement) return L("pay.status.paidActive");
     }
     if (status && status.configured === false) return L("pay.status.notConfigured");
+    if (garminFounderActive()) return L("pay.status.garminFounder");
     return L("pay.status.free");
   }
 
@@ -252,6 +276,7 @@
     if (status && status.paymentState === "legacy_access_active") return L("pay.detail.legacy");
     if (status && status.paymentState === "paid_access_expired") return L("pay.detail.chooseContinue");
     if (!account() && storeEntitlementActive()) return L("pay.detail.boughtOnDevice");
+    if (garminFounderActive()) return L("pay.detail.garminFounder");
     return L(account() ? "pay.detail.choose" : "pay.detail.chooseNoAccount");
   }
 
@@ -1557,6 +1582,8 @@
       });
     },
     hasActiveAccess: hasActiveAccess,
+    canUse: canUse,
+    garminFounderActive: garminFounderActive,
     accessLabel: accessLabel,
     accessBadgeHTML: accessBadgeHTML,
     showSettings: openPaywall,
@@ -1591,8 +1618,9 @@
        ways to do that, so they are the two things that ask. */
     /* `feature` names what was reached for, and picks the whole sentence. */
     requireAccess: function (feature) {
-      if (hasActiveAccess()) return true;
+      if (canUse(feature)) return true;
       var NEED = {
+        starterBubble: "pay.need.starterBubble",
         saveBubble: "pay.need.saveBubble",
         adoptBubble: "pay.need.adoptBubble",
         practiceToBag: "pay.need.practiceToBag",

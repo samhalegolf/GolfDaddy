@@ -368,6 +368,7 @@
     "pay.status.paidActive": "Paid access active",
     "pay.status.notConfigured": "Payments not configured yet",
     "pay.status.free": "Free access",
+    "pay.status.garminFounder": "Garmin Founder",
     "pay.detail.connectionIssue": "We could not confirm your payment access. Paid features stay locked until it is confirmed.",
     "pay.detail.checking": "Checking payment status...",
     "pay.detail.renewsOn": "Renews on {date}.",
@@ -384,6 +385,7 @@
     "pay.detail.chooseContinue": "Choose how you would like to continue.",
     "pay.detail.boughtOnDevice": "Bought on this device. Create a free account to keep score and use your membership everywhere.",
     "pay.detail.choose": "Choose a pass or membership to unlock full Clarity Caddy access.",
+    "pay.detail.garminFounder": "Manual Set is yours for good. A membership adds practice data and the full Bubble centre setting.",
     "pay.detail.chooseNoAccount": "Choose a pass or membership. No account is needed to buy.",
     "pay.badge.monthPass": "Month Pass",
     "pay.badge.member": "Member",
@@ -440,6 +442,7 @@
     "pay.cancelled": "Checkout cancelled",
     "pay.portalUpdated": "Membership settings updated",
     "pay.need.saveBubble": "A Clarity membership is needed to save your own bubble.",
+    "pay.need.starterBubble": "A Clarity membership, or connecting a Garmin watch, is needed to keep a Manual Set Bubble.",
     "pay.need.adoptBubble": "A Clarity membership is needed to adopt a bubble from your own data.",
     "pay.need.practiceToBag": "A Clarity membership is needed to apply practice distances to your bag.",
     "pay.need.bubbleCentre": "A Clarity membership is needed to set your own bubble centre.",
@@ -1289,6 +1292,25 @@
     "garmin.couldNotLook": "Could not look for watches.",
     "garmin.watchConnected": "Watch connected.",
     "garmin.couldNotConnect": "Could not connect that watch.",
+
+    /* clarity-garmin-founder.js */
+    "garminFounder.title": "Garmin Founder",
+    "garminFounder.perks": "Manual Set is unlocked for good: place your Bubble from your own Bag and it scales to every distance.",
+    "garminFounder.pending": "Once Clarity Caddy is running on your Garmin, you become a Garmin Founder and Manual Set unlocks for good.",
+    "garminFounder.signIn": "Sign in and connect your Garmin to become a Garmin Founder and unlock Manual Set for good.",
+    "garminFounder.feedback": "Send Garmin feedback",
+    "garminFounder.welcome": "You're a Garmin Founder. Manual Set is unlocked for good.",
+    "garminFounder.askTitle": "How did your Garmin go?",
+    "garminFounder.askBody": "You're one of the first to play Clarity Caddy on a Garmin. Tell us what worked and what didn't. It goes straight to the team.",
+    "garminFounder.askLater": "Not now",
+    "garminFounder.askSend": "Send feedback",
+
+    /* clarity-support.js, Garmin topic */
+    "garminFeedback.title": "Garmin feedback",
+    "garminFeedback.intro": "Tell us how Clarity Caddy went on your watch. Safe debug details are attached so we can follow up.",
+    "garminFeedback.happened": "How did it go?",
+    "garminFeedback.expected": "What would make it better?",
+    "garminFeedback.send": "Send feedback",
 
     /* gd-practice-projected-clubs.js */
     "projectedClubs.noData": "No practice data yet. Import a session and the same model will be shown projected through the bag.",

@@ -84,9 +84,11 @@
   }
 
   function previewApi() { return window.GolfDaddyPracticeBubblePreview || null; }
-  function hasPaidAccess() {
+  /* Members and Garmin Founders keep a Manual Set as their Bubble; everyone
+     else gets the session-only preview. */
+  function canKeepBubble() {
     return safe(function () {
-      return !!(window.ClarityPayments && typeof window.ClarityPayments.hasActiveAccess === 'function' && window.ClarityPayments.hasActiveAccess());
+      return !!(window.ClarityPayments && typeof window.ClarityPayments.canUse === 'function' && window.ClarityPayments.canUse('starterBubble'));
     }, false);
   }
   function isGuest() { return safe(function () { return !!window.GDGuestAccess?.isGuest?.(); }, true); }
@@ -421,7 +423,7 @@
       + (distanceNote ? '<span>' + distanceNote + '</span>' : '') + '</div>'
       + '<p class="gdManualBubbleSetLead gdManualBubbleSetScale">' + H('manualBubble.scaleLead') + '</p>'
       + '<div class="gdManualBubbleSetActions">'
-      + '<button type="button" class="gdManualBubbleSetPrimary" data-gd-manual-bubble-action="save"' + (state.club ? '' : ' disabled') + '>' + H(hasPaidAccess() ? 'manualBubble.useThis' : 'manualBubble.useInPreview') + '</button>'
+      + '<button type="button" class="gdManualBubbleSetPrimary" data-gd-manual-bubble-action="save"' + (state.club ? '' : ' disabled') + '>' + H(canKeepBubble() ? 'manualBubble.useThis' : 'manualBubble.useInPreview') + '</button>'
       + '<button type="button" data-gd-manual-bubble-action="close">' + H('common.cancel') + '</button>'
       + '</div>'
       + '</div>';
@@ -541,7 +543,7 @@
     /* Free and guest players can build and view this Bubble, but the placement
        remains a session-only Practice preview. It never touches the profile
        fields the GPS/Watch/cloud paths understand as My Bubble. */
-    if (!hasPaidAccess()) {
+    if (!canKeepBubble()) {
       var preview = previewApi();
       if (!preview || typeof preview.stage !== 'function') { toast(L('manualBubble.previewNotReady')); return false; }
       preview.stage({

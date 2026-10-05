@@ -6,6 +6,10 @@
  * (scorecard, shot logging) is still decided by app/js/access.js on the phone,
  * whichever surface the tap came from.
  *
+ * Connecting one also makes a signed-in player a Garmin Founder
+ * (clarity-garmin-founder.js), and this page is the permanent home of the
+ * Garmin feedback button.
+ *
  * WHY THIS PAGE EXISTS. The Garmin transport on both native platforms
  * (ios/App/App/Wearables/Garmin/GarminTransport.swift,
  * android/.../wearables/garmin/GarminTransport.java) acts on whatever device
@@ -151,10 +155,30 @@
       (state && state.reachable && state.appInstalled === false)
         ? "<p><strong>" + H("garmin.notInstalled") + "</strong> " + H("garmin.installHint") + "</p>"
         : "<p>" + H("garmin.startRound") + "</p>",
+      founderHTML(),
       '<div class="clarityPaymentActions">',
+      feedbackButtonHTML(),
       '<button type="button" onclick="ClarityGarmin.disconnect()">' + H("garmin.disconnect") + '</button>',
       "</div>"
     ].join("");
+  }
+
+  function signedIn() {
+    return safe(function () { return !!(window.ClaritySupabaseAuth && window.ClaritySupabaseAuth.session()); }, false);
+  }
+
+  /* Where the player stands with the Garmin Founder offer. */
+  function founderHTML() {
+    var founder = safe(function () { return window.ClarityPayments.garminFounderActive(); }, false);
+    if (founder) return "<p><strong>" + H("garminFounder.title") + "</strong> " + H("garminFounder.perks") + "</p>";
+    return "<p>" + H(signedIn() ? "garminFounder.pending" : "garminFounder.signIn") + "</p>";
+  }
+
+  /* Always on this page, connected or not: a watch that would not connect is
+     exactly what we want to hear about. */
+  function feedbackButtonHTML() {
+    if (!window.ClarityGarminFounder) return "";
+    return '<button type="button" onclick="return ClarityGarminFounder.openFeedback()">' + H("garminFounder.feedback") + "</button>";
   }
 
   function deviceListHTML() {
@@ -216,7 +240,9 @@
       '<div class="clarityPaymentActions">',
       '<button type="button" onclick="ClarityGarmin.scan()"' + (busy ? " disabled" : "") + ">" +
         (busy ? H("garmin.looking") : connectLabel()) + "</button>",
+      feedbackButtonHTML(),
       "</div>",
+      founderHTML(),
       deviceListHTML()
     ].join("");
   }
@@ -253,6 +279,7 @@
         state = next || state;
         devices = null;
         render();
+        safe(function () { return window.ClarityGarminFounder && window.ClarityGarminFounder.check(); });
         safe(function () { return window.toast && window.toast(L("garmin.watchConnected")); });
       })
       .catch(function () {
@@ -285,6 +312,7 @@
       if (menu) menu.hidden = true;
       devices = null;
       refreshState().then(render);
+      safe(function () { return window.ClarityGarminFounder && window.ClarityGarminFounder.check(); });
     }
     return false;
   }

@@ -13,6 +13,14 @@ const STORE_MONTH_PASS_KEY = "store_month_pass";
 /* The INVITER's earned reward month. Distinct from REFERRAL_ACCESS_KEY, which is
    the INVITEE's gifted free month. */
 const REFERRAL_REWARD_KEY = "referral_reward_membership";
+/* Garmin Founder: the account type given to every signed-in player whose
+   phone has talked to the Clarity Caddy app on a Garmin watch. It is NOT paid
+   access - it is deliberately absent from PAID_ACCESS_KEYS - it is a fixed,
+   permanent set of extra features (see GARMIN_FOUNDER_FEATURES in
+   scripts/clarity-payments.js). No expiry, never revoked by any billing flow,
+   and kept alongside any membership the player later buys, so it is still
+   there if that membership ends. */
+const GARMIN_FOUNDER_KEY = "garmin_founder";
 const MONTH_PASS_HOURS = 24 * 30;
 const PAID_ACCESS_KEYS = {
   month_pass: true,
@@ -520,8 +528,10 @@ async function readPaidAccess(identity) {
   const filter = subjectOrFilter(accountId, accountEmail, profileId);
   let entitlements = [];
   let paidRows = [];
+  let garminFounder = null;
   if (filter) {
     const rows = await supabaseFetch("user_entitlements?select=*&" + filter + "&order=expires_at.desc.nullsfirst,created_at.desc&limit=100", { method: "GET" });
+    garminFounder = garminFounderRow(rows);
     paidRows = (Array.isArray(rows) ? rows : []).filter(isPaidEntitlement);
     entitlements = paidRows.filter(function (row) {
       return isPaidEntitlement(row) && entitlementIsLive(row, nowMs);
@@ -560,8 +570,19 @@ async function readPaidAccess(identity) {
     entitlements,
     membership,
     memberships,
+    garminFounder: garminFounder
+      ? { active: true, since: garminFounder.starts_at || garminFounder.created_at || null }
+      : { active: false, since: null },
     checkedAt: checkedAt.toISOString()
   };
+}
+
+/* The player's Garmin Founder row, if they have one. Only status is checked:
+   the row never expires, so starts_at/expires_at do not apply. */
+function garminFounderRow(rows) {
+  return (Array.isArray(rows) ? rows : []).filter(function (row) {
+    return rowProductKey(row) === GARMIN_FOUNDER_KEY && String(row && row.status || "").toLowerCase() === "active";
+  })[0] || null;
 }
 
 /* Writing a comped entitlement, in one place.
@@ -639,6 +660,7 @@ module.exports = {
   MONTH_PASS_HOURS,
   MONTH_PASS_KEY,
   ADMIN_COMPED_MEMBERSHIP_KEY,
+  GARMIN_FOUNDER_KEY,
   PAID_PERMISSION_KEYS,
   PASS_CONFIG,
   REFERRAL_ACCESS_KEY,
@@ -653,6 +675,7 @@ module.exports = {
   bearerToken,
   email,
   encodeFilter,
+  garminFounderRow,
   ensureStripeCustomer,
   entitlementWindow,
   env,
