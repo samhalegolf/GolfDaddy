@@ -1,0 +1,121 @@
+#!/usr/bin/env node
+/* Builds the Garmin simulator demo fixture (garmin/resources-sim-demo/).
+ *
+ * The standalone sim demo (CIQ_SIM_DEMO=1 ./build.sh build) runs a round with
+ * no phone at all: the Connect IQ simulator segfaults on any watch -> phone
+ * transmit while tethered on this Mac, and its map images need Garmin's
+ * image service plus a Connect sign-in. So everything the watch would have
+ * been sent - a lite-map package, the hole images, the player's bag - is
+ * baked into the .prg from a package that already exists on disk: the one a
+ * paired Apple Watch simulator has been delivered (CaddyWatchMaps/<course>/v*
+ * and CaddyWatchPlayer/player.json in its app container).
+ *
+ *   node garmin/tools/make-sim-demo-fixture.js <apple-watch-app-container> [holes=1,2,3]
+ *
+ * Numbers that need double precision (coordinates, the map transform) are
+ * written as STRINGS: Connect IQ's resource JSON is not guaranteed to decode
+ * decimals as Double, and a float32 tx (~8.6e7) is off by several pixels.
+ * GarminSimDemo.dbl() parses them back exactly.
+ *
+ * The demo point is the same rule as app/js/demo-approach.js, but fixed at
+ * 115 m short of the green (the middle of 100-130) so the fixture is stable.
+ */
+"use strict";
+const fs = require("fs");
+const path = require("path");
+const { execFileSync } = require("child_process");
+const distance = require("../../app/js/distance.js");
+
+const container = process.argv[2];
+const holes = (process.argv[3] || "1,2,3").split(",").map(Number);
+if (!container) {
+  console.error("usage: make-sim-demo-fixture.js <apple-watch-app-container> [holes]");
+  process.exit(1);
+}
+const support = path.join(container, "Library", "Application Support");
+const mapsRoot = path.join(support, "CaddyWatchMaps");
+const courseDir = fs.readdirSync(mapsRoot).find((d) => !d.startsWith("."));
+const versionDir = fs.readdirSync(path.join(mapsRoot, courseDir)).filter((d) => d.startsWith("v")).sort().pop();
+const pkgDir = path.join(mapsRoot, courseDir, versionDir);
+const manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, "manifest.json"), "utf8"));
+const player = JSON.parse(fs.readFileSync(path.join(support, "CaddyWatchPlayer", "player.json"), "utf8"));
+
+const OUT = path.join(__dirname, "..", "resources-sim-demo");
+fs.mkdirSync(OUT, { recursive: true });
+
+const s = (n) => String(n);
+const pt = (p) => [s(p.lat), s(p.lng)];
+
+function lineOf(ref) {
+  const out = [];
+  [ref.tee].concat(ref.route || [], [ref.green]).forEach((p) => {
+    if (!p) return;
+    const last = out[out.length - 1];
+    if (last && distance.haversineMeters(last, p) < 1) return;
+    out.push(p);
+  });
+  return out;
+}
+
+function shortOfGreen(line, back) {
+  let left = back;
+  for (let i = line.length - 1; i > 0; i--) {
+    const a = line[i], b = line[i - 1];
+    const seg = distance.haversineMeters(a, b);
+    if (!(seg > 0)) continue;
+    if (seg >= left) { const t = left / seg; return { lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t }; }
+    left -= seg;
+  }
+  return line[0];
+}
+
+const fixtureHoles = [];
+const manifestHoles = [];
+const bitmaps = [];
+for (const n of holes) {
+  const h = manifest.holes.find((x) => x.holeNumber === n);
+  if (!h) { console.error("hole " + n + " not in package"); process.exit(1); }
+  const ref = h.reference || h.golfReference;
+  const line = lineOf(ref);
+  const pos = shortOfGreen(line, 115);
+  const shape = (ref.greenShape || []).map((p) => distance.haversineMeters(pos, p));
+  const centre = distance.haversineMeters(pos, ref.green);
+  fixtureHoles.push({
+    n,
+    line: line.map(pt),
+    pos: pt(pos),
+    metres: Math.round(centre),
+    front: Math.round(shape.length ? Math.min(...shape) : centre),
+    centre: Math.round(centre),
+    back: Math.round(shape.length ? Math.max(...shape) : centre),
+    len: Math.round(distance.haversineMeters(line[0], line[line.length - 1]))
+  });
+  const sr = h.spatialReference;
+  manifestHoles.push({
+    holeNumber: n, asset: "h" + n + ".png", url: "sim-demo://h" + n,
+    width: h.width, height: h.height,
+    green: pt(ref.green),
+    sr: {
+      version: sr.version, refZoom: sr.refZoom, imageWidth: sr.imageWidth, imageHeight: sr.imageHeight,
+      rotationDegrees: s(sr.rotationDegrees), metresPerPixel: s(sr.metresPerPixel),
+      a: s(sr.transform.a), b: s(sr.transform.b), tx: s(sr.transform.tx), ty: s(sr.transform.ty)
+    }
+  });
+  execFileSync("sips", ["-s", "format", "png", path.join(pkgDir, "h" + n + ".webp"), "--out", path.join(OUT, "h" + n + ".png")], { stdio: "ignore" });
+  bitmaps.push(n);
+}
+
+const fixture = {
+  course: { key: "sim-demo-" + courseDir, name: "Millbrook (sim demo)", source: courseDir + "/" + versionDir },
+  holes: fixtureHoles,
+  manifest: manifestHoles,
+  player
+};
+fs.writeFileSync(path.join(OUT, "sim-demo.json"), JSON.stringify(fixture));
+fs.writeFileSync(path.join(OUT, "resources.xml"),
+  "<resources>\n" +
+  "    <!-- Generated by garmin/tools/make-sim-demo-fixture.js. Simulator demo build only. -->\n" +
+  '    <jsonData id="simDemo" filename="sim-demo.json"/>\n' +
+  bitmaps.map((n) => '    <bitmap id="simHole' + n + '" filename="h' + n + '.png"/>').join("\n") + "\n" +
+  "</resources>\n");
+console.log("wrote " + OUT + " (" + holes.join(",") + ") from " + courseDir + "/" + versionDir);

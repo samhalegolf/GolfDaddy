@@ -102,7 +102,14 @@ cmd_build() {
   # fixtures at startup and prints the verdict (tools/run-parity.js reads it).
   # Implies muted, since a harness has no business talking to a phone.
   local jungles="monkey.jungle" suffix="" label="debug"
-  if [[ "${CIQ_PARITY:-0}" == "1" ]]; then
+  # CIQ_SIM_DEMO=1: a simulator-only build that plays a demo round with no
+  # phone at all - fixture course, bundled hole images, and a local stand-in
+  # answering the watch's own commands (source/SimDemo/). Implies muted.
+  if [[ "${CIQ_SIM_DEMO:-0}" == "1" ]]; then
+    jungles="monkey.jungle;monkey-sim-demo.jungle"
+    suffix="-simdemo"
+    label="debug, STANDALONE SIM DEMO - simulator only"
+  elif [[ "${CIQ_PARITY:-0}" == "1" ]]; then
     jungles="monkey.jungle;monkey-parity.jungle"
     suffix="-parity"
     label="debug, PARITY HARNESS - simulator only"

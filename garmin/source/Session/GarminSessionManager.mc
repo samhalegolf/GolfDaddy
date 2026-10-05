@@ -174,6 +174,12 @@ class GarminSessionManager {
                 if (n != null) { out.add(n); }
             }
         }
+        // No pars: the delivered package's holes, as Apple's demoHoles does,
+        // then 1-18 as the last resort.
+        if (out.size() == 0 && mapStore.manifest != null && scene != null
+                && scene.courseKey() != null && mapStore.manifest.courseKey.equals(scene.courseKey())) {
+            for (var m = 0; m < mapStore.manifest.holes.size(); m += 1) { out.add(mapStore.manifest.holes[m].holeNumber); }
+        }
         if (out.size() == 0) {
             for (var h = 1; h <= 18; h += 1) { out.add(h); }
         }
@@ -472,6 +478,9 @@ class GarminSessionManager {
     // -------------------------------------------------------- transport
 
     function transmit(dict) {
+        // The standalone simulator demo answers for the phone (compiled to
+        // `false` everywhere else - GarminSimDemoPolicy.mc).
+        if (GarminSimDemoPolicy.handle(dict)) { return; }
         // Simulator-only muted build (GarminTransmitPolicy.mc): the reply
         // is logged and dropped, because sending it would kill the
         // simulator. A normal build compiles this branch to `false`.

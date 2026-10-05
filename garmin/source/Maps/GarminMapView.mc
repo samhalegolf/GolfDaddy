@@ -55,6 +55,7 @@ class GarminMapView extends WatchUi.View {
     // rule: "the framing STAYS. A re-fit here slid the map under a player
     // who had just put the target where they wanted it."
     var framedHoleNumber;
+    var framedLocked = false;   // the shot's lock state the camera was fitted to
     var framedPackageVersion;   // manifest.version the camera was fitted to
     var camera;         // GarminMapCamera or null
 
@@ -135,7 +136,14 @@ class GarminMapView extends WatchUi.View {
         // projection, so it reframes like a hole change would - the old
         // camera's focus is in pixels of an image that no longer exists.
         var packageVersion = (manifest != null) ? manifest.version : null;
-        if (framedHoleNumber != holeNumber || camera == null || framedPackageVersion != packageVersion) {
+        // A lock (or unlock) changes what the page is OF - a hole to look
+        // down, or a shot - so it reframes too. Without this a map opened
+        // before LOCK kept the player-low framing and the new Bubble sat off
+        // the top of the screen (seen in the simulator 2026-10-05) - the
+        // Garmin twin of the Apple "origin, then jump" bug.
+        var lockedNow = scene.shotLocked();
+        if (framedHoleNumber != holeNumber || camera == null || framedPackageVersion != packageVersion || framedLocked != lockedNow) {
+            framedLocked = lockedNow;
             framedPackageVersion = packageVersion;
             camera = restingCamera(local, playerImg, targetImg, greenImg, reference, imageWidth, imageHeight, viewWidth, viewHeight);
             // A device with no scaled bitmap draw (Connect IQ 3.0/3.1, the
@@ -283,6 +291,7 @@ class GarminMapView extends WatchUi.View {
     }
 
     static var MAP_EDGE_GREEN = 0x294A30;
+    static var BUBBLE_MINT = 0x3EE6C4;
 
     // Laying up, as the phone draws it (painter.js drawShot) and Apple's
     // AimableHoleMap.layupGuide: the hole's fairway line, faint, and a dotted
@@ -392,7 +401,10 @@ class GarminMapView extends WatchUi.View {
             points.add([camera.placeX(p["x"], imageWidth, viewWidth), camera.placeY(p["y"], imageHeight, viewHeight)]);
         }
         if (points.size() < 3) { return; }
-        dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
+        // Mint at 2px, as the Apple Watch draws it: pale green on a green
+        // hole map was all but invisible in the simulator.
+        dc.setColor(BUBBLE_MINT, Graphics.COLOR_TRANSPARENT);
+        dc.setPenWidth(2);
         for (var i = 0; i < points.size(); i += 1) {
             var a = points[i];
             var b = points[(i + 1) % points.size()];

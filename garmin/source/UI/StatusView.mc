@@ -62,12 +62,13 @@ class StatusView extends WatchUi.View {
             dc.drawText(w / 2, h * 0.43, Graphics.FONT_SMALL, "PAR " + par.toString(), Graphics.TEXT_JUSTIFY_CENTER);
         }
         var busy = session.outbox.isPending(GarminCommandKind.DEMO_APPROACH);
-        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_GREEN);
+        // fillRoundedRectangle paints in the FOREGROUND colour.
+        dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
         dc.fillRoundedRectangle(w * 0.2, h * 0.58, w * 0.6, h * 0.13, 6);
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
         dc.drawText(w / 2, h * 0.595, Graphics.FONT_SMALL, busy ? "..." : "DEMO", Graphics.TEXT_JUSTIFY_CENTER);
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        var hint = (session.lastRejection != null) ? "Couldn't start demo" : "UP/DOWN hole  SELECT demo";
+        var hint = (session.lastRejection != null) ? "Couldn't start demo" : "UP/DOWN: hole";
         dc.drawText(w / 2, h * 0.76, Graphics.FONT_XTINY, hint, Graphics.TEXT_JUSTIFY_CENTER);
     }
 }

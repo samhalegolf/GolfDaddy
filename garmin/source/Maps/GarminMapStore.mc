@@ -46,6 +46,10 @@ class GarminMapStore {
     // — the caller (NumbersView/MapView) shows the numbers-only state and
     // GarminMapStore keeps fetching in the background via requestHole().
     function bitmapFor(holeNumber, courseKey) {
+        // The standalone simulator demo bundles its hole images (null in
+        // every other build - GarminSimDemoPolicy.mc).
+        var bundled = GarminSimDemoPolicy.bitmap(holeNumber);
+        if (bundled != null) { return bundled; }
         if (manifest == null || courseKey == null || !manifest.courseKey.equals(courseKey)) { return null; }
         if (residentBitmaps.hasKey(holeNumber)) { return residentBitmaps[holeNumber]; }
         requestHole(holeNumber);

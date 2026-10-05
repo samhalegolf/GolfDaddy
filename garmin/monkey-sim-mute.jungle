@@ -10,4 +10,4 @@
 # definitions of GarminParityPolicy.run() would compile — "Redefinition of
 # 'run'". Every overlay must therefore repeat one annotation out of EACH pair.
 # dev/garmin-build-flavours.test.js holds that in place.
-base.excludeAnnotations = tx_live;parity
+base.excludeAnnotations = tx_live;parity;sim_demo

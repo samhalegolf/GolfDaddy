@@ -14,7 +14,9 @@ base.sourcePath = source
 # `parity` excludes the Bubble Engine parity harness and its generated
 # fixture table (garmin/source/Test/) from every ordinary build — see
 # source/Test/GarminParityPolicy.mc and monkey-parity.jungle.
-base.excludeAnnotations = tx_muted;parity
+# `sim_demo` excludes the standalone simulator demo (source/SimDemo/,
+# monkey-sim-demo.jungle) the same way.
+base.excludeAnnotations = tx_muted;parity;sim_demo
 
 # `resources` holds everything that is the same on every device (strings).
 # The launcher icon is NOT: Connect IQ asks a different pixel size per device

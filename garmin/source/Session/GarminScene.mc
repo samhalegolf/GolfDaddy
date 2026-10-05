@@ -65,6 +65,13 @@ class GarminScene {
     function suggestedCarryM() { var s = suggestionDict(); return s != null ? GarminWire.num(s, "carryM") : null; }
     function suggestedTotalM() { var s = suggestionDict(); return s != null ? GarminWire.num(s, "totalM") : null; }
 
+    // Whether the phone has a shot locked (Scene `shot.locked`).
+    function shotLocked() {
+        var s = GarminWire.dictVal(raw, "shot");
+        var v = s != null ? GarminWire.boolVal(s, "locked") : null;
+        return v == null ? false : v;
+    }
+
     function target() { return GarminWire.coordinate(GarminWire.dictVal(raw, "target")); }
 
     function locationDict() { return GarminWire.dictVal(raw, "location"); }

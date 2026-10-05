@@ -317,6 +317,39 @@ gives focus/scale/origin/player per framing):
 
 ---
 
+### A demo round with no phone at all: the standalone sim demo
+
+The muted build and the relay both still need the Android emulator, the adb
+tether and, for hole maps, Garmin's image service plus a Connect sign-in. A
+demo round needs none of it - it uses only what the watch already holds - so
+this build plays one entirely on the simulated watch:
+
+    CIQ_SIM_DEMO=1 ./build.sh build        # -> build/ClarityCaddy-<device>-simdemo.prg
+    "$SDK/bin/connectiq" &
+    "$SDK/bin/monkeydo" build/ClarityCaddy-approachs62-simdemo.prg approachs62
+
+`source/SimDemo/GarminSimDemo.mc` stands in for the phone: at start it hands
+the watch a fixture course's lite-map package and the player's bag (exactly
+as the phone would), and it answers the watch's own commands - DEMO_APPROACH,
+LOCK, AIM_AT, UNLOCK, DEMO_END - with a real acknowledgement and a real Scene,
+through the same `receiveAcknowledgement` / `receiveScene` a phone message
+reaches. The fixture (`resources-sim-demo/`: Millbrook holes 1-3, their hole
+images and a bag) is generated from a package an Apple Watch simulator has
+already been delivered:
+
+    node garmin/tools/make-sim-demo-fixture.js <apple-watch-app-container> [1,2,3]
+
+Coordinates and the map transform are stored as strings and parsed back
+exactly (resource JSON may decode decimals as 32-bit floats). In the
+simulator: Return = SELECT, Up/Down = UP/DOWN, `m` = MENU; BACK is the lower
+right button on the watch image (Escape is not mapped). The first key after
+focusing the window is sometimes eaten - focus by clicking the title bar.
+
+Verified 2026-10-05 on the S62 profile: Preview browser -> DEMO -> numbers
+(F 101 / C 115 / B 128, club PW) -> LOCK -> map centred on the Bubble ->
+BACK, BACK -> Preview. Not covered: the layup guide (a demo approach is
+always in reach) and press-and-hold aiming.
+
 ## 5. Before you package — the things that are still placeholders
 
 - [x] ~~**Launcher icon.**~~ Done 2026-09-19. The 105-byte solid-colour

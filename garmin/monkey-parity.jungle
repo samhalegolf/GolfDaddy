@@ -12,4 +12,4 @@
 #
 # Never used by `./build.sh package`: the store binary carries neither the
 # harness nor the ~600-line fixture table.
-base.excludeAnnotations = tx_live;parity_off
+base.excludeAnnotations = tx_live;parity_off;sim_demo

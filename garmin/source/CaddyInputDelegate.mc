@@ -227,10 +227,13 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
                 view.mapView.cancelAim();
             } else if (view.showingMap) {
                 view.showNumbers();
-            } else if (session.lastRejection == null && session.handoverNotice == null
-                    && session.isDemo() && session.face().equals(GarminSessionManager.FACE_PLAYING)) {
-                // Nothing transient to dismiss: on a demo, BACK ends it and
-                // both ends go back to Preview.
+            } else if (session.isDemo() && session.face().equals(GarminSessionManager.FACE_PLAYING)) {
+                // On a demo's numbers face BACK ends it, as the face says.
+                // Any notice goes with it: the numbers face never draws one,
+                // so letting an invisible notice swallow the press (as it
+                // first did in the simulator) reads as BACK doing nothing.
+                session.dismissRejection();
+                session.dismissHandoverNotice();
                 session.sendSimple(GarminCommandKind.DEMO_END);
             } else {
                 session.dismissRejection();
