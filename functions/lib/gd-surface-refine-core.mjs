@@ -237,8 +237,10 @@ export const WAND_SAME_EDGE_LOG = 0.06;
 /* Neighbouring rings whose areas differ by less than ~28% count as the same edge. */
 export const WAND_STABLE_LOG = 0.25;
 /* How far Studio's wand size control can push a profile: the radius the sweep starts from and
-   the believable area band both scale with it, so "bigger" reaches for a wider edge. */
-export const WAND_SCALE = { min: 0.5, max: 2 };
+   the believable area band both scale with it, so "bigger" reaches for a wider edge. Studio
+   offers greens up to 2x and bunkers / water up to 6x (a waste bunker, a lake); it coarsens the
+   capture past 2x so the picture stays readable. */
+export const WAND_SCALE = { min: 0.5, max: 6 };
 export const WAND_MAX_POINTS = 16;
 
 export async function wandAtPoint({ image, playSurface, seed, kind = "green", scale = 1, mode = "robustTonal", maxPoints = WAND_MAX_POINTS }) {

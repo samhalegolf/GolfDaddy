@@ -4,6 +4,11 @@ const createWatchBridge = require("../app/js/caddy-watch.js");
 
 const TEE = { lat: -36.9174, lng: 174.74 };
 const GREEN = { lat: -36.9201, lng: 174.74 };
+/* Where ready() and twoHoles() stand the player when they press Play: ~44m down the
+   fairway, just outside Marshal's tee zone. Play pressed IN the tee zone locks the tee
+   shot on the spot (see marshal.js PLAY_PRESSED), and these checks start from an
+   unlocked hole. */
+const START = { lat: -36.9178, lng: 174.74 };
 const PKG = { holes: [{ holeNumber: 1, par: 4, tee: TEE, green: GREEN, greenShape: [
   { lat: -36.9200, lng: 174.7399 }, { lat: -36.9202, lng: 174.7398 }, { lat: -36.9202, lng: 174.7402 }
 ] }] };
@@ -12,7 +17,7 @@ function check(name, fn) { try { fn(); console.log("  PASS  " + name); passed++;
 function ready() {
   const m = createMarshal({ now: () => 1000 });
   m.signal("ROUND_OPENED", { courseKey: "watch-test", roundId: "round-1", pkg: PKG, hole: 1 });
-  m.signal("FIX_RECEIVED", { point: TEE });
+  m.signal("FIX_RECEIVED", { point: START });
   m.signal("PLAY_PRESSED");
   return { m, w: createWatchBridge({ marshal: m, now: () => 1000, bubbleModel: () => ({ payload: { club: "8i", baseCarry: 135, totalM: 146, clusterWidthM: 18, clusterDepthM: 24, clusterTiltDeg: 4 } }) }) };
 }
@@ -23,8 +28,8 @@ check("distance.target is the distance to the aim, not the green centre", () => 
   const s = w.scene();
   assert.ok(s.bubble && s.target, "a locked shot carries a Bubble and its target");
   const toRad = d => d * Math.PI / 180, R = 6371000;
-  const dLat = toRad(s.target.lat - TEE.lat), dLng = toRad(s.target.lng - TEE.lng);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(TEE.lat)) * Math.cos(toRad(s.target.lat)) * Math.sin(dLng / 2) ** 2;
+  const dLat = toRad(s.target.lat - START.lat), dLng = toRad(s.target.lng - START.lng);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(START.lat)) * Math.cos(toRad(s.target.lat)) * Math.sin(dLng / 2) ** 2;
   const toAim = 2 * R * Math.asin(Math.sqrt(a));
   assert.ok(Math.abs(s.distance.target - toAim) <= 1, "target distance must be the metres to the aim, got " + s.distance.target + " vs " + toAim.toFixed(1));
   assert.notStrictEqual(s.distance.target, s.distance.centre, "the aim is not the green centre on this hole");
@@ -79,7 +84,7 @@ check("malformed or stale Watch location cannot mutate the round", () => {
 check("a fresh Apple Watch observation keeps its provenance without replacing phone GPS", () => {
   const { m, w } = ready();
   const r = w.receiveCommand({ commandId: "watch-lock", roundId: "round-1", type: "LOCK_AT", payload: { location: { coordinate: GREEN, source: "apple-watch", horizontalAccuracy: 5, timestamp: 1000 } } });
-  assert.equal(r.accepted, true); assert.deepEqual(m.lastFix(), TEE);
+  assert.equal(r.accepted, true); assert.deepEqual(m.lastFix(), START);
   assert.equal(m.shots(1)[0].location.source, "apple-watch");
 });
 check("browsing a hole stays a view-only action", () => {
@@ -202,7 +207,7 @@ const PKG2 = { holes: [PKG.holes[0], { holeNumber: 2, par: 4, tee: TEE, green: G
 function twoHoles() {
   const m = createMarshal({ now: () => 1000 });
   m.signal("ROUND_OPENED", { courseKey: "watch-test", roundId: "round-1", pkg: PKG2, hole: 1 });
-  m.signal("FIX_RECEIVED", { point: TEE });
+  m.signal("FIX_RECEIVED", { point: START });
   m.signal("PLAY_PRESSED");
   return { m, w: createWatchBridge({ marshal: m, now: () => 1000 }) };
 }
@@ -219,6 +224,8 @@ check("browsing a hole does not disarm the wrist that is driving", () => {
 check("the phone's own hole rail cannot disarm the wrist either", () => {
   const { m, w } = twoHoles();
   w.receiveCommand({ commandId: "take-rail", roundId: "round-1", type: "TAKE_OVER", payload: {} });
+  /* A shot in play, so there is a ball to place on the green. */
+  assert.equal(w.receiveCommand({ commandId: "lock-rail", roundId: "round-1", type: "LOCK", payload: {} }).accepted, true);
   assert.equal(m.signal("NEXT_HOLE"), true, "the rail comes through the mask - browsable, not playable");
   assert.equal(m.round().hole, 2);
   const ball = w.receiveCommand({ commandId: "ball-after-rail", roundId: "round-1", type: "BALL_MOVED", payload: { point: GREEN } });

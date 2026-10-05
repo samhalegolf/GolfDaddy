@@ -47,6 +47,7 @@ const STUDIO_SCRIPTS = [
   "scripts/studio/courses/course-visuals/course-visuals-page.js",
   "scripts/studio/courses/publishing/course-publishing-page.js",
   "scripts/studio/courses/mapping-diagnostics/mapping-diagnostics-page.js",
+  "scripts/studio/courses/course-usage/course-usage-page.js",
   "scripts/studio/shot-system/practice-data/practice-data-page.js",
   "scripts/studio/shot-system/course-data/course-data-page.js",
   "scripts/studio/commerce/commerce-page.js",

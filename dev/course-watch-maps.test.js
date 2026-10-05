@@ -128,6 +128,30 @@ const root = path.join(__dirname, "..");
     { folder: "v1", assets: ["notes.txt", "h1.webp", "../../escape.webp"] }
   ]), ["c/v1/h1.webp"], "only vN folders and only baked hole assets are pruned");
 
+  /* Two bakes that overlap must never delete each other. On 2026-10-05 a
+     double-started Waitemata bake finished twice within a second and each run
+     pruned the other's folder, leaving a ready row with no images. Only a
+     package older than the kept one by more than the worker's budget goes. */
+  const MIN = 60 * 1000;
+  assert.deepStrictEqual(supersededPaths("c", LIVE, [
+    { folder: "v" + (LIVE + 800), assets: ["h1.webp"] },
+    { folder: "v" + (LIVE - 800), assets: ["h1.webp"] },
+    { folder: "v" + (LIVE - 14 * MIN), assets: ["h1.webp"] },
+    { folder: "v" + (LIVE - 16 * MIN), assets: ["h1.webp"] }
+  ]), ["c/v" + (LIVE - 16 * MIN) + "/h1.webp"],
+    "a newer package, or one young enough to still be baking, is never pruned");
+
+  // --- one bake per course at a time ---------------------------------------------------------
+
+  const { bakeInProgress } = helpers;
+  const NOW = Date.parse("2026-10-05T05:00:00Z");
+  assert.strictEqual(bakeInProgress(null, NOW), false, "no progress: free to bake");
+  assert.strictEqual(bakeInProgress({ stage: "baking-hole-3-of-18", updatedAt: "2026-10-05T04:59:30Z" }, NOW), true,
+    "a bake that reported moments ago is still running, so a second start is refused");
+  assert.strictEqual(bakeInProgress({ stage: "baking-hole-3-of-18", updatedAt: "2026-10-05T04:30:00Z" }, NOW), false,
+    "progress older than the worker's budget is a dead bake and must not block a fresh one");
+  assert.strictEqual(bakeInProgress({ stage: "queued" }, NOW), false, "unreadable progress never blocks");
+
   // --- backfillHoleReferences ---------------------------------------------------------------
 
   /* `reference` is derived from course_maps.objects_json alone, never from the
@@ -154,9 +178,9 @@ const root = path.join(__dirname, "..");
       { lat: -45.0120, lng: 169.1035 }, { lat: -45.0100, lng: 169.1010 }
     ] }
   };
-  function bakedHole(objects, holeNumber) {
+  function bakedHole(objects, holeNumber, recipe) {
     const frame = watchMapCore.buildWatchHoleFrame(
-      watchMapCore.WATCH_MAP_RECIPE_V1, watchMapCore.objectsForHole(objects, holeNumber));
+      recipe || watchMapCore.WATCH_MAP_RECIPE_V1, watchMapCore.objectsForHole(objects, holeNumber));
     return {
       holeNumber,
       path: "c/v1/h" + holeNumber + ".webp",
@@ -180,22 +204,25 @@ const root = path.join(__dirname, "..");
     "a backfill writes the reference and touches nothing else");
   assert.strictEqual(unchanged.holes[0].path, baked.path);
 
-  /* THE CASE THAT MATTERS. The surfaces are gone from objects_json - they are
-     capture-time input, collected to be drawn, and the lean tee/green/route set
-     is all GPS Play needs. The canvas therefore reframes, because it is fitted
-     to the corridor plus whichever surface vertices fall inside it. None of
-     that is in the reference: the tee, green, green outline and play line are
-     untouched, and the reference is delivered beside the STORED spatial
-     reference, which still projects it onto the stored image exactly as before.
-     A guard that compared projection bases would refuse this, and refusing it
-     is refusing every honest backfill - all 18 Millbrook holes reframed this
-     way while their geometry stayed byte-identical. */
-  const reframed = helpers.backfillHoleReferences({ objects_json: withoutSurfaces }, { holes: [baked] });
+  /* THE CASE THAT MATTERS. The stored image was framed differently from how
+     today's recipe would frame it - an older recipe (here, a wider corridor),
+     and the surfaces since dropped from objects_json, since they are capture-time
+     input collected to be drawn and the lean tee/green/route set is all GPS Play
+     needs. None of that is in the reference: the tee, green, green outline and
+     play line are untouched, and the reference is delivered beside the STORED
+     spatial reference, which still projects it onto the stored image exactly as
+     before. A guard that compared projection bases would refuse this, and
+     refusing it is refusing every honest backfill - all 18 Millbrook holes
+     reframed this way while their geometry stayed byte-identical. */
+  const olderRecipe = JSON.parse(JSON.stringify(watchMapCore.WATCH_MAP_RECIPE_V1));
+  olderRecipe.corridor.halfWidthM = 90;
+  const bakedOlder = bakedHole(BACKFILL_OBJECTS, 1, olderRecipe);
+  const reframed = helpers.backfillHoleReferences({ objects_json: withoutSurfaces }, { holes: [bakedOlder] });
   assert.notStrictEqual(
     watchMapCore.buildWatchHoleFrame(watchMapCore.WATCH_MAP_RECIPE_V1, watchMapCore.objectsForHole(withoutSurfaces, 1)).spatialReference.imageWidth,
-    baked.spatialReference.imageWidth,
+    bakedOlder.spatialReference.imageWidth,
     "the fixture must actually reframe, or this case is not testing anything");
-  assert.strictEqual(reframed.updated, 1, "dropped surfaces reframe the canvas and must NOT block the backfill");
+  assert.strictEqual(reframed.updated, 1, "a differently-framed stored image must NOT block the backfill");
   assert.strictEqual(reframed.skipped.length, 0);
   assert.deepStrictEqual(reframed.holes[0].reference, unchanged.holes[0].reference,
     "and the reference written is identical either way - surfaces are not in it");

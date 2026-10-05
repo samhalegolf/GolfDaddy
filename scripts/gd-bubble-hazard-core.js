@@ -4,7 +4,9 @@
      - node, via require() from dev/bubble-hazard-core.test.js
 
    What it answers, for one bubble ring over one course's mapped objects:
-     1. Which bunker / water surfaces does the bubble touch at all? (bbox + overlap test)
+     1. Which bunker / water / trees / hazard surfaces does the bubble touch at all? (bbox +
+        overlap test). Trees and hazard (gorse, scrub - anything non-water) are only ever
+        hand-drawn in the Studio mapping overlay; they ride the same path as bunkers.
         GPS Play then draws those surfaces clipped to the bubble - the surface is "hidden
         under the map" and the bubble reveals the part it is over.
      2. Is the bubble entirely off the fairway? True only when the course HAS fairway
@@ -14,7 +16,7 @@
 
    Surface records come from course_maps.objects_json as the client stores them
    (scripts/gd-course-library-pin-lock.js loadUserCourseData): type "fairway_area" /
-   "bunker" / "water" with a `shape` ring, type "green" with `greenShape` (or `shape`).
+   "bunker" / "water" / "trees" / "hazard" with a `shape` ring, type "green" with `greenShape` (or `shape`).
    The /app/ shell has no such record - it plays straight off the course package - so
    collectPackageSurfaces() turns a package's per-hole surfaces into the same buckets.
    Bunker PINS (type "bunker", no shape) are not surfaces and are ignored here. Hole numbers
@@ -28,7 +30,7 @@
 })(typeof window !== "undefined" ? window : globalThis, function () {
   "use strict";
 
-  var SURFACE_BUCKETS = { fairway_area: "fairways", bunker: "bunkers", water: "water", green: "greens" };
+  var SURFACE_BUCKETS = { fairway_area: "fairways", bunker: "bunkers", water: "water", trees: "trees", hazard: "hazards", green: "greens" };
 
   function finitePoint(value) {
     if (!value) return null;
@@ -122,10 +124,10 @@
   }
 
   /* objects: an array or an id->object map, as stored on a course record.
-     Returns {fairways, greens, bunkers, water}, each a list of surface records. */
+     Returns {fairways, greens, bunkers, water, trees, hazards}, each a list of surface records. */
   function collectSurfaces(objects) {
     var list = Array.isArray(objects) ? objects : Object.keys(objects || {}).map(function (k) { return objects[k]; });
-    var out = { fairways: [], greens: [], bunkers: [], water: [] };
+    var out = { fairways: [], greens: [], bunkers: [], water: [], trees: [], hazards: [] };
     for (var i = 0; i < list.length; i++) {
       var object = list[i];
       if (!object || !object.type) continue;
@@ -156,6 +158,8 @@
       (Array.isArray(s.fairways) ? s.fairways : []).forEach(function (f) { objects.push({ type: "fairway_area", shape: f && f.shape, holeNumber: h }); });
       (Array.isArray(s.bunkers) ? s.bunkers : []).forEach(function (b) { objects.push({ type: "bunker", shape: b && b.shape, holeNumber: h }); });
       (Array.isArray(s.water) ? s.water : []).forEach(function (w) { objects.push({ type: "water", shape: w && w.shape, hazardClass: w && w.hazardClass, holeNumber: h }); });
+      (Array.isArray(s.trees) ? s.trees : []).forEach(function (t) { objects.push({ type: "trees", shape: t && t.shape, holeNumber: h }); });
+      (Array.isArray(s.hazards) ? s.hazards : []).forEach(function (z) { objects.push({ type: "hazard", shape: z && z.shape, holeNumber: h }); });
       if (Array.isArray(g.greenShape) && g.greenShape.length >= 3) objects.push({ type: "green", greenShape: g.greenShape, holeNumber: h });
     }
     return collectSurfaces(objects);
@@ -197,7 +201,8 @@
 
   function hasAnySurface(surfaces) {
     return !!(surfaces && ((surfaces.fairways && surfaces.fairways.length) || (surfaces.greens && surfaces.greens.length) ||
-      (surfaces.bunkers && surfaces.bunkers.length) || (surfaces.water && surfaces.water.length)));
+      (surfaces.bunkers && surfaces.bunkers.length) || (surfaces.water && surfaces.water.length) ||
+      (surfaces.trees && surfaces.trees.length) || (surfaces.hazards && surfaces.hazards.length)));
   }
 
   function touching(ring, bounds, surfaces) {
@@ -213,14 +218,14 @@
      extraSafe: optional additional "safe" rings (e.g. the live green polygon GPS Play has
      for the hole in play, which can be fresher than the stored one).
      Returns:
-       bunkers / water : the surfaces the bubble is over, for the caller to draw clipped
+       bunkers / water / trees / hazards : the surfaces the bubble is over, for the caller to draw clipped
        hasFairways     : whether the course has any fairway surface at all
        onFairway       : bubble overlaps at least one fairway surface
        onGreen         : bubble overlaps a green (stored or extraSafe)
        offFairway      : the warning - fairways exist and the bubble overlaps none, nor a green */
   function bubbleSurfaceState(ring, surfaces, extraSafe) {
     var clean = cleanRing(ring);
-    var empty = { bunkers: [], water: [], hasFairways: false, onFairway: false, onGreen: false, offFairway: false };
+    var empty = { bunkers: [], water: [], trees: [], hazards: [], hasFairways: false, onFairway: false, onGreen: false, offFairway: false };
     if (!clean || !surfaces) return empty;
     var bounds = ringBounds(clean);
     var fairwayHits = touching(clean, bounds, surfaces.fairways);
@@ -236,6 +241,8 @@
     return {
       bunkers: touching(clean, bounds, surfaces.bunkers),
       water: touching(clean, bounds, surfaces.water),
+      trees: touching(clean, bounds, surfaces.trees),
+      hazards: touching(clean, bounds, surfaces.hazards),
       hasFairways: hasFairways,
       onFairway: fairwayHits.length > 0,
       onGreen: onGreen,

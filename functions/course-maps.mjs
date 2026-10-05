@@ -273,7 +273,7 @@ export const config = {
    to play from - and in practice such a course has no surfaces yet anyway, since collection
    needs the saved holes as its spatial framework. `surfacesOmitted` carries the counts so a
    client can tell "stripped" from "never collected". */
-const PLAY_SURFACE_TYPES = new Set(["fairway_area", "bunker", "water"]);
+const PLAY_SURFACE_TYPES = new Set(["fairway_area", "bunker", "water", "trees", "hazard"]);
 function isPlaySurface(object) {
   return !!(object && PLAY_SURFACE_TYPES.has(String(object.type || "")) && Array.isArray(object.shape) && object.shape.length >= 3);
 }
@@ -286,13 +286,13 @@ export function stripSurfacesForPlay(maps) {
     const ready = Object.keys(course.holes || {}).length > 0;
     if (!ready) { out.courses[key] = course; return; }
     const objects = {};
-    const counts = { fairway_area: 0, bunker: 0, water: 0 };
+    const counts = { fairway_area: 0, bunker: 0, water: 0, trees: 0, hazard: 0 };
     Object.keys(course.objects || {}).forEach((id) => {
       const object = course.objects[id];
       if (isPlaySurface(object)) { counts[object.type] += 1; return; }
       objects[id] = object;
     });
-    const stripped = counts.fairway_area + counts.bunker + counts.water;
+    const stripped = counts.fairway_area + counts.bunker + counts.water + counts.trees + counts.hazard;
     out.courses[key] = stripped ? Object.assign({}, course, { objects, surfacesOmitted: counts }) : course;
   });
   return out;

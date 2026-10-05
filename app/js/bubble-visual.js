@@ -93,7 +93,7 @@
        aimLine                                    draw the aim ray (the player's setting)
        aimClearPx                                 override for AIM_CLEAR_PX
        idPrefix                                   unique per render pass
-     hazards      {water:[ring], bunkers:[ring], offFairway}  optional - lat/lng rings
+     hazards      {water:[ring], bunkers:[ring], trees:[ring], hazards:[ring], offFairway}  optional - lat/lng rings
                   the bubble is over (scripts/gd-bubble-hazard-core.js), drawn clipped
                   to the outline so the bubble reveals what is under it; offFairway
                   tints the whole bubble light red.
@@ -178,6 +178,8 @@
       var reveal = [];
       (hazards.water || []).forEach(function (r) { reveal.push({ ring: r, cls: "bubbleHazardWater", fill: "#ff2f2f", opacity: ".46" }); });
       (hazards.bunkers || []).forEach(function (r) { reveal.push({ ring: r, cls: "bubbleHazardBunker", fill: "#f7d64a", opacity: ".5" }); });
+      (hazards.trees || []).forEach(function (r) { reveal.push({ ring: r, cls: "bubbleHazardTrees", fill: "#1f8a3c", opacity: ".5" }); });
+      (hazards.hazards || []).forEach(function (r) { reveal.push({ ring: r, cls: "bubbleHazardOther", fill: "#ff8a1f", opacity: ".45" }); });
       var revealParts = [];
       reveal.forEach(function (h) {
         var pts = (h.ring || []).map(project).filter(Boolean);

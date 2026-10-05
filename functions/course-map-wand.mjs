@@ -8,7 +8,7 @@
  *            outputDimensions), the same shape a published frame carries.
  *   seed   - the pin.
  *   kind   - "green" (the default), "bunker" or "water": which size profile the wand sweeps.
- *   scale  - optional, 0.5-2 (default 1): Studio's wand size control, scaling that profile.
+ *   scale  - optional, 0.5-6 (default 1): Studio's wand size control, scaling that profile.
  * -> 200 {ok:true, shape:[{lat,lng}...], confidence, area, stable, candidates:[{shape, area}...],
  *    pick} or {ok:false, reason}. candidates are every sensitivity step that found an edge,
  *    weakest first, and pick is the one the wand chose - Studio steps through them.

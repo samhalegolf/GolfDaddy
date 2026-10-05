@@ -189,7 +189,7 @@ const { pathToFileURL } = require("url");
   assert.equal(playMaps.updatedAt, "2026-09-09T00:00:00.000Z");
   assert.deepEqual(Object.keys(playMaps.courses["published::ready"].objects).sort(), ["g1", "pin", "t1"],
     "a ready course keeps green, tee and the bunker PIN; the three surfaces go");
-  assert.deepEqual(playMaps.courses["published::ready"].surfacesOmitted, { fairway_area: 1, bunker: 1, water: 1 });
+  assert.deepEqual(playMaps.courses["published::ready"].surfacesOmitted, { fairway_area: 1, bunker: 1, water: 1, trees: 0, hazard: 0 });
   assert.deepEqual(Object.keys(playMaps.courses["published::ready"].holes), ["1"]);
   assert.deepEqual(Object.keys(playMaps.courses["published::fresh"].objects), ["w9"],
     "a course with no saved holes ships its full record until its map is ready");

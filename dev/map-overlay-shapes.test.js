@@ -132,6 +132,47 @@ test("a default green is a round ring of the requested size", () => {
   assert.ok(a > Math.PI * 14 * 14 * 0.95 && a < Math.PI * 14 * 14, "area " + a);
 });
 
+/* A striped fairway band on darker rough, with noise: what the line wand is for. */
+function bandImage(w, h, halfWidth) {
+  const data = new Uint8ClampedArray(w * h * 4);
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4, centre = 150 + 0.2 * (x - 200), n = (rnd() - 0.5) * 30;
+    const stripe = Math.floor(x / 12) % 2 ? 14 : 0;
+    if (Math.abs(y - centre) < halfWidth) { data[i] = 95 + stripe + n; data[i + 1] = 165 + stripe + n; data[i + 2] = 70 + n; }
+    else { data[i] = 60 + n; data[i + 1] = 95 + n; data[i + 2] = 45 + n; }
+    data[i + 3] = 255;
+  }
+  return { width: w, height: h, data };
+}
+
+test("the line wand grows a line out to the band it runs down, not past it", () => {
+  const image = bandImage(400, 300, 30);
+  const line = [{ x: 40, y: 118 }, { x: 360, y: 182 }];
+  const out = shapes.growFromLine(image, line, { reachPx: 80, blurPx: 2, openPx: 2 });
+  assert.ok(out.candidates.length >= 1, "no edge found: " + out.reason);
+  const area = out.areas[out.pick];
+  /* The band is 60px across and runs the width of the picture (~408px along its slope). */
+  assert.ok(area > 60 * 408 * 0.8 && area < 60 * 408 * 1.2, "area " + area);
+  /* Every corner sits on the band's edge (30px either side of its centre line), give or take
+     the blur and the simplification. */
+  const off = out.candidates[out.pick].map(p => Math.abs(p.y - (150 + 0.2 * (p.x - 200))));
+  assert.ok(Math.max(...off) < 36, "a corner strayed off the band: " + Math.max(...off).toFixed(1) + "px from its middle");
+});
+
+test("the line wand stops at its reach when the colour runs on", () => {
+  const image = bandImage(400, 300, 400);
+  const out = shapes.growFromLine(image, [{ x: 150, y: 150 }, { x: 250, y: 150 }], { reachPx: 20, blurPx: 1 });
+  const area = out.areas[out.pick];
+  assert.ok(area < (100 + 40) * 40 * 1.1, "grew past its reach: " + area);
+});
+
+test("the line wand refuses a line off the picture", () => {
+  const out = shapes.growFromLine(bandImage(50, 50, 10), [{ x: -100, y: -100 }, { x: -90, y: -100 }], { reachPx: 10 });
+  assert.strictEqual(out.candidates.length, 0);
+});
+
 let failed = 0;
 tests.forEach(t => {
   try { t.fn(); console.log("  ok  " + t.name); }

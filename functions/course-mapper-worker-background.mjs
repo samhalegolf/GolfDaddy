@@ -27,7 +27,7 @@
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete, scorecardIdentityMismatch } from "./lib/gd-course-fit-core.mjs";
 import { reverseGeocodePlace } from "./lib/gd-course-place.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, intersectOsmFrames, SIBLING_SWEEP_M, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, intersectOsmFrames, SIBLING_SWEEP_M, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, HAND_DRAWN_SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole, resolverHoleCandidates } from "./lib/gd-geometry-resolver-core.mjs";
 import { partitionLoops, walkCost } from "./lib/gd-ground-loops-core.mjs";
 import { courseNameFromCard } from "./lib/gd-facility-organise-core.mjs";
@@ -1903,8 +1903,8 @@ async function runShapeRefineJob(job) {
   const course = await loadCourseCenter(job.course_id);
   if (!course) throw new Error("course " + job.course_id + " has no known location in " + MAPS_TABLE);
   const objects = Object.values(course.objects || {}).filter(Boolean).map(o => Object.assign({}, o));
-  const candidates = objects.filter(o => SURFACE_TYPES.has(o.type) && Array.isArray(o.shape) && o.shape.length >= 3
-    && o.shapeSource !== REFINED_SHAPE_SOURCE);
+  const candidates = objects.filter(o => SURFACE_TYPES.has(o.type) && !HAND_DRAWN_SURFACE_TYPES.has(o.type)
+    && Array.isArray(o.shape) && o.shape.length >= 3 && o.shapeSource !== REFINED_SHAPE_SOURCE);
   if (!candidates.length) throw new Error("course " + job.course_id + " has no unrefined surfaces - run Collect Extra Objects first");
 
   await heartbeatJob(job, { stage: "reading-published-frames" });
@@ -1989,7 +1989,7 @@ async function runShapeRefineJob(job) {
    that could do those things is not on this one. enrichSurfaceObjects can only ever write the
    three surface types; it has no route to a tee, a green or a route point. */
 function surfaceCounts(objects) {
-  const counts = { fairway_area: 0, bunker: 0, water: 0 };
+  const counts = { fairway_area: 0, bunker: 0, water: 0, trees: 0, hazard: 0 };
   objects.forEach(object => {
     if (object && SURFACE_TYPES.has(object.type)) counts[object.type] += 1;
   });

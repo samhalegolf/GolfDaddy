@@ -241,18 +241,32 @@ async function storageList(prefix) {
   return Array.isArray(body) ? body : [];
 }
 
+/* How long a package must have been superseded before it may be pruned. Matches the
+   background worker's own 15-minute budget, so no bake that could still be running is
+   ever old enough to delete. */
+const PRUNE_GRACE_MS = 15 * 60 * 1000;
+
 /* Exact object paths for every superseded package of this course.
 
    Pure, and separated from the fetching so the one thing that must never be
    wrong - that the live package is not in the delete list - is testable without
    a network or a bucket. The keep-version is excluded twice: once by folder
-   name, and once again on the assembled path. */
+   name, and once again on the assembled path.
+
+   Only packages OLDER than the keep-version by more than PRUNE_GRACE_MS are
+   superseded. Versions are bake start times, so this is what makes two bakes
+   that overlap safe: on 2026-10-05 a double-started Waitemata bake finished
+   twice within a second, each run pruned the other's folder as "superseded",
+   and the course was left with a ready row and no images at all. Leftovers from
+   such a run are cleared by the next bake instead. */
 function supersededPaths(courseId, keepVersion, listing) {
   const keep = "v" + keepVersion;
+  const cutoff = Number(keepVersion) - PRUNE_GRACE_MS;
   const paths = [];
   (listing || []).forEach(entry => {
     const folder = String(entry && entry.folder || "");
     if (!/^v\d+$/.test(folder) || folder === keep) return;
+    if (!(Number(folder.slice(1)) < cutoff)) return;
     (entry.assets || []).forEach(name => {
       if (!/^h\d{1,2}\.(png|webp)$/.test(String(name))) return;
       paths.push(courseId + "/" + folder + "/" + name);
@@ -762,6 +776,11 @@ async function loadCourseObjectsRevision(courseId) {
   } catch (error) { return null; }
 }
 
+function bakeInProgress(progress, now) {
+  const updatedAt = Date.parse(progress && progress.updatedAt);
+  return Number.isFinite(updatedAt) && now - updatedAt < PRUNE_GRACE_MS;
+}
+
 async function loadWatchRow(courseId) {
   const rows = await supabaseFetch(WATCH_TABLE + "?select=*&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []);
   return Array.isArray(rows) ? rows[0] || null : null;
@@ -851,6 +870,15 @@ export default async function courseWatchMaps(req) {
      response - a test, or a course small enough to fit - and returns exactly what it used to. */
   if (payload && payload.sync === true) return generateInline(courseId, map, user.email);
 
+  /* One bake per course at a time. A second one started while the first runs (a
+     double-click, two tabs) used to bake the whole course again in parallel; see
+     supersededPaths for what that cost. Progress older than the worker's budget is a
+     bake that died without clearing it, and must not block a fresh start. */
+  const existing = await loadWatchRow(courseId);
+  if (bakeInProgress(existing && existing.progress, Date.now())) {
+    return json(409, { courseId, status: "generating", error: "Watch maps are already generating for this course", progress: existing.progress });
+  }
+
   const holeTotal = holeNumbersFromObjects(map.objects_json).length;
   const startedAt = new Date().toISOString();
   await writeProgress(courseId, "queued", holeTotal, startedAt);
@@ -913,7 +941,7 @@ export const config = {
 };
 
 export const __test = {
-  holeNumbersFromObjects, reportShape, recoveryReport, supersededPaths, sameReferenceGeometry, backfillHoleReferences,
+  holeNumbersFromObjects, reportShape, recoveryReport, supersededPaths, bakeInProgress, sameReferenceGeometry, backfillHoleReferences,
   mercY, heightSampler, elevationMetaForHole, measureDelivery, deliverySummary
 };
 

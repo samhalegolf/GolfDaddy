@@ -31,6 +31,8 @@ const DEV_DEFAULTS={
     hazardRevealEnabled:1,
     hazardWaterOpacity:.46,
     hazardBunkerOpacity:.5,
+    hazardTreesOpacity:.5,
+    hazardOtherOpacity:.45,
     offFairwayOpacity:.14
   },
   previewAccess:{
@@ -196,6 +198,8 @@ const DEV_FIELDS={
   "bubbleVisuals.hazardRevealEnabled":{label:"Hazard reveal",step:1,min:0,max:1,help:"1 = the bubble reveals mapped water (red) and bunkers (yellow) under it, and tints light red when wholly off the fairway."},
   "bubbleVisuals.hazardWaterOpacity":{label:"Water reveal opacity",step:.01,min:0,max:1,help:"Red fill strength for water inside the bubble."},
   "bubbleVisuals.hazardBunkerOpacity":{label:"Bunker reveal opacity",step:.01,min:0,max:1,help:"Yellow fill strength for bunkers inside the bubble."},
+  "bubbleVisuals.hazardTreesOpacity":{label:"Trees reveal opacity",step:.01,min:0,max:1,help:"Dark green fill strength for hand-mapped trees inside the bubble."},
+  "bubbleVisuals.hazardOtherOpacity":{label:"Other hazard reveal opacity",step:.01,min:0,max:1,help:"Orange fill strength for hand-mapped non-water hazards (gorse, scrub) inside the bubble."},
   "bubbleVisuals.offFairwayOpacity":{label:"Off-fairway tint opacity",step:.01,min:0,max:.6,help:"Light red bubble fill once no part of it is on a fairway or green."},
   "previewAccess.freePreviewShotsPerSession":{label:"Free live preview shots",step:1,min:0,max:10,help:"Reserved: live GPS preview limit."},
   "previewAccess.guidedTrialPreviewShots":{label:"Guided trial preview shots",step:1,min:0,max:30,help:"Reserved: longer manual trial preview limit."},
@@ -20519,7 +20523,9 @@ function gdRenderBubbleHazardReveal(gdb,bubbleCenter){
   }
   const hazards=[]
     .concat(state.water.map(s=>({ring:s.ring,color:"#ff2f2f",opacity:gdFiniteNumber(dev("bubbleVisuals.hazardWaterOpacity"),.46),className:"gdBubbleReveal gdBubbleHazardWater"})))
-    .concat(state.bunkers.map(s=>({ring:s.ring,color:"#f7d64a",opacity:gdFiniteNumber(dev("bubbleVisuals.hazardBunkerOpacity"),.5),className:"gdBubbleReveal gdBubbleHazardBunker"})));
+    .concat(state.bunkers.map(s=>({ring:s.ring,color:"#f7d64a",opacity:gdFiniteNumber(dev("bubbleVisuals.hazardBunkerOpacity"),.5),className:"gdBubbleReveal gdBubbleHazardBunker"})))
+    .concat((state.trees||[]).map(s=>({ring:s.ring,color:"#1f8a3c",opacity:gdFiniteNumber(dev("bubbleVisuals.hazardTreesOpacity"),.5),className:"gdBubbleReveal gdBubbleHazardTrees"})))
+    .concat((state.hazards||[]).map(s=>({ring:s.ring,color:"#ff8a1f",opacity:gdFiniteNumber(dev("bubbleVisuals.hazardOtherOpacity"),.45),className:"gdBubbleReveal gdBubbleHazardOther"})));
   if(hazards.length){
     /* Invisible outline whose <path> becomes the clip. Added first so it shares the renderer
        (and therefore the <svg>) with the fills that reference it. */

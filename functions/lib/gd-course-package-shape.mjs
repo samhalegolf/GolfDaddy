@@ -55,7 +55,7 @@ function finitePoint(value) {
    its imagery registry (~2800 lines) into a cold start for three strings. Kept honest by a
    parity assertion in dev/course-package.test.js, the same "two implementations, tested for
    agreement" convention gd-automapper-core.mjs's own header describes. */
-const SURFACE_TYPES = ["fairway_area", "bunker", "water"];
+const SURFACE_TYPES = ["fairway_area", "bunker", "water", "trees", "hazard"];
 
 /* A surface is stored once per hole whose capture corridor it falls in, so the same physical
    bunker can appear several times. Grouped by osmId only for the caller's benefit; nothing
@@ -67,8 +67,10 @@ function surfacesFor(objects) {
   const water = objects.filter(o => o.type === "water" && Array.isArray(o.shape) && o.shape.length >= 3)
     .map(o => ({ shape: o.shape, center: finitePoint(o.position), osmId: o.osmId || null, hazardClass: o.hazardClass || "water" }));
   const bunkers = pick("bunker");
-  if (!fairways.length && !water.length && !bunkers.length) return null;
-  return { fairway: fairways[0] || null, fairways, bunkers, water };
+  const trees = pick("trees");
+  const hazards = pick("hazard");
+  if (!fairways.length && !water.length && !bunkers.length && !trees.length && !hazards.length) return null;
+  return { fairway: fairways[0] || null, fairways, bunkers, water, trees, hazards };
 }
 
 function objectsByHole(objectsJson) {

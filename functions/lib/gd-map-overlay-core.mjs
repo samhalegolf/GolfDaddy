@@ -17,7 +17,7 @@
  * with, or be mistaken for, a real OSM way.
  *
  * Feature shape (what course_map_overlays.features stores, and what Studio draws):
- *   { id: "f-1", kind: "fairway" | "hole" | "green" | "tee" | "bunker" | "water", hole: 7 | null, points: [{lat, lng}, ...],
+ *   { id: "f-1", kind: "fairway" | "hole" | "green" | "tee" | "bunker" | "water" | "trees" | "hazard", hole: 7 | null, points: [{lat, lng}, ...],
  *     source?: "ai", pin?: true }
  *   source says who produced the shape (gd-overlay-georef-core.mjs stamps "ai"; Studio stamps
  *   "wand" on a green the wand outlined from a pin; a hand-placed one has none). Display only - the mapper treats every feature the same.
@@ -39,6 +39,12 @@
  *   water   - a closed polygon (3+ points). Becomes golf=water_hazard, which the surface pass
  *             writes onto the nearest hole as a water object (penalty area) and the resolver
  *             already reads as water. Drawn round by hand in Studio, or placed with the wand.
+ *   trees   - a closed polygon (3+ points). Becomes natural=wood. Dense trees: the surface pass
+ *             writes it onto every hole whose frame it falls in as a "trees" object, and the
+ *             bubble reveals it like a bunker. Drawn round by hand only - no wand, no pin.
+ *   hazard  - a closed polygon (3+ points). Becomes golf=hazard (our tag, not OSM's - OSM has no
+ *             generic non-water hazard). Gorse, scrub, a ravine: anything that punishes a ball
+ *             and is not water. Same path as trees. Drawn round by hand only.
  *
  *   hole numbers are optional on every kind. A numbered green or fairway is matched to that
  *   hole's guide (ref), a numbered hole line is the resolver's strongest evidence.
@@ -50,10 +56,10 @@
  *             still gives the resolver greens to hang fairways off.
  */
 
-export const OVERLAY_KINDS = new Set(["fairway", "hole", "green", "tee", "bunker", "water"]);
-const POLYGON_KINDS = new Set(["fairway", "green", "tee", "bunker", "water"]);
-/* The golf=* tag each kind is written as. Water is the one whose OSM tag is not its name. */
-const OSM_GOLF_TAG = { water: "water_hazard" };
+export const OVERLAY_KINDS = new Set(["fairway", "hole", "green", "tee", "bunker", "water", "trees", "hazard"]);
+const POLYGON_KINDS = new Set(["fairway", "green", "tee", "bunker", "water", "trees", "hazard"]);
+/* The tag each kind is written as: golf=<kind> unless listed here. */
+const OSM_TAG = { water: ["golf", "water_hazard"], trees: ["natural", "wood"], hazard: ["golf", "hazard"] };
 export function overlayKindIsPolygon(kind) { return POLYGON_KINDS.has(String(kind || "").toLowerCase()); }
 /* Room for a whole course placed as pins - 18 greens, fairways and tees plus the bunkers - with
    space to spare. */
@@ -163,7 +169,8 @@ export function pinShape(feature) {
    on (golf=fairway / golf=hole / golf=green / golf=water_hazard + ref) plus the overlay marker. */
 export function overlayToOsmElements(features) {
   return normalizeOverlayFeatures(features).map((feature, index) => {
-    const tags = { [OVERLAY_TAG]: feature.id, golf: OSM_GOLF_TAG[feature.kind] || feature.kind };
+    const [key, value] = OSM_TAG[feature.kind] || ["golf", feature.kind];
+    const tags = { [OVERLAY_TAG]: feature.id, [key]: value };
     if (feature.hole) tags.ref = String(feature.hole);
     const points = feature.pin ? pinShape(feature) : feature.points;
     const geometry = points.map(p => ({ lat: p.lat, lon: p.lng }));
@@ -205,6 +212,8 @@ export function overlaySummary(features) {
     tees: list.filter(f => f.kind === "tee").length,
     bunkers: list.filter(f => f.kind === "bunker").length,
     water: list.filter(f => f.kind === "water").length,
+    trees: list.filter(f => f.kind === "trees").length,
+    hazards: list.filter(f => f.kind === "hazard").length,
     pins: list.filter(f => f.pin).length,
     numbered: list.filter(f => f.hole).length
   };

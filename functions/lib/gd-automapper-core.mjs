@@ -40,7 +40,11 @@ export const OBJECT_DEDUPE_RADIUS_M = { green: 26, bunker: 14, tee: 9, fairway: 
    1-2 centreline sample points fairwaySamplesForGuide writes, which packageHoleData reads into
    a hole's route and planCourseCaptures turns into corridorBounds. Reusing the name would push
    every fairway polygon's centroid into the route and shift every hole's capture frame. */
-export const SURFACE_TYPES = new Set(["fairway_area", "bunker", "water"]);
+export const SURFACE_TYPES = new Set(["fairway_area", "bunker", "water", "trees", "hazard"]);
+/* Surfaces only ever drawn by hand in the mapping overlay. Never wand-refined: the refine traces
+   an edge it already believes in (a sand or water boundary), and a tree line or a gorse patch
+   has no such edge in the frame. */
+export const HAND_DRAWN_SURFACE_TYPES = new Set(["trees", "hazard"]);
 export const SURFACE_SOURCE = "osm_auto_surface";
 
 /* A surface whose geometry has been re-traced from our own published frame
@@ -80,7 +84,9 @@ export const GREEN_SHAPE_MAX_POINTS = 64;
 export const SURFACE_SPAN_LIMITS_M = {
   bunker: { min: 2, max: 140 },
   fairway_area: { min: 25, max: 900 },
-  water: { min: 3, max: 1200 }
+  water: { min: 3, max: 1200 },
+  trees: { min: 3, max: 1200 },
+  hazard: { min: 3, max: 1200 }
 };
 
 /* ---------- plain geometry (no Leaflet) --------------------------------------------------- */
@@ -1784,7 +1790,14 @@ function surfaceKindForElement(element) {
   if (golf === "fairway") return { type: "fairway_area", hazardClass: null };
   if (golf === "bunker") return { type: "bunker", hazardClass: null };
   if (golf === "water_hazard" || golf === "lateral_water_hazard") return { type: "water", hazardClass: "penalty_area" };
-  if (golf) return null; /* green / tee / hole / course / rough - not a V1 surface */
+  /* Trees and generic hazards come from the mapping overlay only (gd-map-overlay-core.mjs).
+     natural=wood is gated on the overlay tag because real OSM woods are huge multipolygons with
+     the course cut out as inner rings, which surfaceRingsFromElement drops - read one and the
+     whole course would be trees. golf=hazard is our own tag; nothing in OSM carries it. */
+  const overlay = !!tags["clarity:overlay"];
+  if (overlay && golf === "hazard") return { type: "hazard", hazardClass: null };
+  if (golf) return null;
+  if (overlay && String(tags.natural || "").toLowerCase() === "wood") return { type: "trees", hazardClass: null }; /* green / tee / hole / course / rough - not a V1 surface */
   if (String(tags.natural || "").toLowerCase() === "water" || tags.water) return { type: "water", hazardClass: "water" };
   return null;
 }

@@ -306,10 +306,27 @@ test("the shape just placed stays live: left/right step sensitivity, up/down siz
 
 test("water: a Water tool that draws round the water or uses the wand", () => {
   assert.ok(page.includes('railButton("tool-water"'), "no Water tool");
-  assert.ok(page.includes('data-gd-overlay="water-draw"') && page.includes('data-gd-overlay="water-wand"'), "no Draw round / Wand switch");
-  assert.ok(page.includes("shapes.simplifyOutline(") && page.includes('addFeature({ kind: "water", points: ring });'), "a drawn line must become a water outline");
+  assert.ok(page.includes('data-gd-overlay="method-draw"') && page.includes('data-gd-overlay="method-wand"') && page.includes('data-gd-overlay="method-line"'), "no Wand / Draw round / Line + wand switch");
+  assert.ok(page.includes('water: ["wand", "draw", "line"]') && page.includes('bunker: ["wand", "draw", "line"]') && page.includes('fairway: ["width", "line"]'), "water and bunkers draw round or line-wand; fairways line-wand");
+  assert.ok(page.includes("shapes.simplifyOutline(") && page.includes("addFeature({ kind: drawn.kind, points: ring });"), "a drawn line must become an outline of the tool's kind");
   assert.ok(page.includes('el.map.addEventListener("pointerdown", beginLasso);'), "drawing round starts on a press on the map");
   assert.ok(page.includes("water: 0.5") && page.includes("water: 12000"), "the wand capture must be sized for water");
+});
+
+test("trees and hazard: draw-round tools that save as their own kinds", () => {
+  assert.ok(page.includes('railButton("tool-trees"') && page.includes('railButton("tool-hazard"'), "no Trees / Hazard tools");
+  assert.ok(page.includes('var DRAW_ONLY_KINDS = ["trees", "hazard"];'), "trees and hazard are drawn round only");
+});
+
+test("line wand: a finished line on Line + wand is grown out in the browser", () => {
+  assert.ok(page.includes('if (session.mode === "shapes" && session.method[kind] === "line") { lineWandPlace(line, kind); return; }'), "finishing a line-wand line must grow it");
+  assert.ok(page.includes("shapes.growFromLine(cap.image, line.map(cap.toPx)"), "the line wand runs growFromLine on the captured picture");
+  assert.ok(page.includes("if (adjust.lineWand) { regrowLine(f, by); return; }"), "up/down on a line-wand shape changes its reach");
+});
+
+test("bigger wand: bunkers and water step past 2x", () => {
+  assert.ok(page.includes("var WAND_SIZES_BIG = WAND_SIZES.concat([2.5, 3.2, 4, 5, 6]);"), "bunker / water sizes go to 6x");
+  assert.ok(page.includes("while (half > WAND_CAPTURE_MAX_HALF_PX && z > 14)"), "a big wand capture coarsens rather than growing without bound");
 });
 
 test("one screen: tools float over the map, the rest is in the pull-down", () => {
