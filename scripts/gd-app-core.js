@@ -18798,9 +18798,10 @@ function gdBubbleRenderCenter(payloadInput){
   const aimBase=Math.max(1,gdFiniteNumber(aimDistance,gdFiniteNumber(payload.baseCarry,gdFiniteNumber(payload.radius,1)*10)));
   const sideLimit=Math.max(2,aimBase*.25);
   const sideOffset=gdClamp(gdGpsAimOffsetM(payload,aimDistance),-sideLimit,sideLimit);
-  const forwardBias=gdClamp(gdFiniteNumber(payload.visual&&payload.visual.visualYBias,0),-.18,.18)*Math.max(1,gdFiniteNumber(payload.depthRadiusM,payload.radius));
-  const rawCenter=projectOffset(renderTarget,shotBrg,forwardBias,sideOffset);
-  return rawCenter;
+  // No forward bias: the Bubble's centre sits ON the target along the shot.
+  // A face-offset-driven nudge (visualYBias x depth) used to push it a few
+  // metres long or short, which read as the engine missing the green centre.
+  return projectOffset(renderTarget,shotBrg,0,sideOffset);
 }
 function gdBubbleAxes(payloadInput,scale=1){
   const payload=gdBubblePayloadForRender(payloadInput);
