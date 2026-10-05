@@ -132,6 +132,7 @@
     "@capacitor/status-bar": "8.0.3",
     "@netlify/blobs": "^10.7.9",
     "@revenuecat/purchases-capacitor": "^13.2.3",
+    "geotiff": "^3.0.5",
     "sharp": "^0.33.5"
   },
   "devDependencies": {

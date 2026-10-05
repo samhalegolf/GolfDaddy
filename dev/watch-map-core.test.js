@@ -149,7 +149,7 @@ function longHole() {
   const geometry = Object.assign({}, longHole(), { bunkers: [dense] });
   const frame = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, geometry);
   assert.strictEqual(frame.ok, true);
-  const bunkerPointCount = (frame.svg.match(/fill="#e9d9a8"/g) || []).length;
+  const bunkerPointCount = (frame.svg.split('fill="' + core.WATCH_MAP_RECIPE_V1.colors.bunker + '"').length - 1);
   assert.strictEqual(bunkerPointCount, 1, "the dense bunker must still render as exactly one polygon");
   assert.ok(frame.svg.length < 4000, "simplification should keep a 400-point bunker from bloating the SVG");
 })();
@@ -218,7 +218,7 @@ function neighbouringRibbon() {
     Object.assign({}, own, { fairways: own.fairways.concat([neighbouringRibbon()]) }));
   assert.strictEqual(frame.layers.fairwaysMapped, 2);
   assert.strictEqual(frame.layers.fairways, 1, "a ribbon entirely off the canvas is bytes nobody can see");
-  assert.ok(frame.svg.indexOf("#6fbf5e") > 0, "the hole's own fairway is still drawn");
+  assert.ok(frame.svg.indexOf(core.WATCH_MAP_RECIPE_V1.colors.fairway) > 0, "the hole's own fairway is still drawn");
 })();
 
 (function testRouteBendsOrderTheCorridorByGeometryNotKeyOrder() {
@@ -377,7 +377,7 @@ function sawtoothSquare() {
   assert.strictEqual(smoothed.layers.bunkers, 1, "the sawtooth bunker must still survive as one polygon");
 
   function bunkerPoints(svg) {
-    const match = svg.match(/<polygon points="([^"]+)" fill="#e9d9a8"/);
+    const match = svg.match(new RegExp('<polygon points="([^"]+)" fill="' + core.WATCH_MAP_RECIPE_V1.colors.bunker + '"'));
     assert.ok(match, "bunker polygon must be present in the SVG");
     return match[1].split(" ").map(pair => { const [x, y] = pair.split(",").map(Number); return { x, y }; });
   }

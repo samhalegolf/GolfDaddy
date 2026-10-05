@@ -535,6 +535,20 @@
     .gdAdminWatchMapDebugPanel div{display:flex;justify-content:space-between;gap:8px;padding:2px 0;font:700 10px/1.4 Inter,system-ui,sans-serif;color:rgba(255,255,255,.5)}
     .gdAdminWatchMapDebugPanel div b{color:rgba(255,255,255,.8);font-weight:850;text-transform:uppercase;letter-spacing:.03em;font-size:9px}
     .gdAdminWatchMapDebugPanel div span{color:#fff;text-align:right;word-break:break-word}
+    .gdAdminWatchMapPalette{display:grid;gap:5px;margin:0 0 10px;padding:9px 11px;border-radius:10px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.07);font:700 10px/1.4 Inter,system-ui,sans-serif;color:rgba(255,255,255,.6)}
+    .gdAdminWatchMapPaletteHead{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+    .gdAdminWatchMapPaletteHead b{color:#fff;font-weight:850}
+    .gdAdminWatchMapPaletteRow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+    .gdAdminWatchMapPaletteRow b{width:52px;color:rgba(255,255,255,.85);font-weight:850;text-transform:uppercase;font-size:9px;letter-spacing:.03em}
+    .gdAdminWatchMapPaletteRow em{margin-left:8px;font-style:normal;color:rgba(255,255,255,.45)}
+    .gdAdminWatchMapPaletteRow small{color:rgba(255,255,255,.45)}
+    .gdAdminWatchMapPalette i{display:inline-block;width:20px;height:20px;border-radius:5px;border:1px solid rgba(255,255,255,.18)}
+    .gdAdminWatchMapPalette i.empty{background:repeating-linear-gradient(45deg,transparent 0 3px,rgba(255,255,255,.12) 3px 5px)}
+    .gdAdminWatchMapSeasons{display:flex;gap:3px;overflow-x:auto;padding-top:4px}
+    .gdAdminWatchMapSeasons span{display:grid;justify-items:center;gap:2px}
+    .gdAdminWatchMapSeasons i{width:14px;height:14px;border-radius:3px}
+    .gdAdminWatchMapSeasons small{font-size:8px;color:rgba(255,255,255,.45)}
+    .gdAdminWatchMapPaletteNote{margin:2px 0 0;color:rgba(255,255,255,.45)}
     .gdAdminWatchMapErrorList{margin:6px 0 0;padding-left:16px;font:700 10px/1.5 Inter,system-ui,sans-serif;color:#ffd287}
     .gdAdminWatchMapStatusLine{margin-bottom:2px}
     /* Indeterminate - the bake is one blocking request with no midpoint to report (see

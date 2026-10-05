@@ -39,6 +39,9 @@ import courseVersionLabel from "../scripts/gd-course-version-label.js";
 import { decodeElevation, hillshade, ambientOcclusion, RELIEF_DEFAULTS } from "./lib/gd-relief-core.mjs";
 import { applyRelief, greenContourSvg } from "./lib/gd-visual-export-core.mjs";
 import greenCore from "../scripts/gd-green-contours-core.js";
+import paletteCore from "../scripts/gd-watch-palette-core.js";
+import { courseSurfaces, sampleAerial } from "./lib/gd-watch-course-colours.mjs";
+import { sampleCourseSeasons, seasonsAreFresh } from "./lib/gd-sentinel-seasons.mjs";
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const MAPS_TABLE = "course_maps";
@@ -268,7 +271,7 @@ function supersededPaths(courseId, keepVersion, listing) {
     if (!/^v\d+$/.test(folder) || folder === keep) return;
     if (!(Number(folder.slice(1)) < cutoff)) return;
     (entry.assets || []).forEach(name => {
-      if (!/^h\d{1,2}\.(png|webp)$/.test(String(name))) return;
+      if (!/^(h\d{1,2}\.(png|webp)|palette\.json)$/.test(String(name))) return;
       paths.push(courseId + "/" + folder + "/" + name);
     });
   });
@@ -454,6 +457,102 @@ async function clearProgress(courseId) {
   } catch (error) { /* see writeProgress */ }
 }
 
+/* The course's own colours, for its palette (scripts/gd-watch-palette-core.js).
+
+   Two measurements, cached together in <courseId>/colours.json in this bucket so a re-bake
+   does not re-measure what has not changed:
+     aerial   - from the satellite bake's published hole photos. Re-measured only when that
+                bake or the course's geometry has changed since (the cache key).
+     seasonal - Sentinel-2, about one scene a month over two years. Fetched at most once every
+                60 days, and capped at SEASONS_BUDGET_MS per bake: a run cut short keeps what
+                it measured and the next bake finishes it.
+   Best-effort throughout. A course with neither - or a measurement that fails - gets the base
+   palette, which is what every course looked like before this existed. */
+const SEASONS_BUDGET_MS = 60000;
+
+async function loadCourseColoursCache(courseId) {
+  try { return JSON.parse((await bucketDownload(BUCKET, courseId + "/colours.json")).toString("utf8")); }
+  catch (error) { return null; }
+}
+
+async function measureAerial(terrainIndex, surfaces) {
+  const frames = [];
+  for (const hole of terrainIndex.holes || []) {
+    const ps = hole && hole.playSurface;
+    if (!hole.path || !ps || !ps.originPx || !Number.isInteger(Number(ps.captureZoom))) continue;
+    try {
+      frames.push({ buffer: await bucketDownload(TERRAIN_BUCKET, hole.path), captureZoom: Number(ps.captureZoom), originPx: ps.originPx });
+    } catch (error) { /* one missing photo is one fewer sample, not a failed palette */ }
+  }
+  return frames.length ? sampleAerial(frames, surfaces) : null;
+}
+
+async function courseColours(courseId, map, holeNumbers, terrainIndex) {
+  const base = paletteCore.basePalette();
+  const surfaces = courseSurfaces(map.objects_json, holeNumbers);
+  if (!surfaces.bounds) return { palette: base, measured: null, aerial: null, seasonal: null };
+  const cache = await loadCourseColoursCache(courseId) || {};
+
+  const aerialKey = terrainIndex ? String(terrainIndex.generatedAt || "") + "|" + objectsVersion(map) : null;
+  let aerial = cache.aerial && aerialKey && cache.aerial.key === aerialKey ? cache.aerial : null;
+  if (!aerial && terrainIndex) {
+    try { aerial = { key: aerialKey, measuredAt: new Date().toISOString(), measured: await measureAerial(terrainIndex, surfaces) }; }
+    catch (error) { aerial = null; }
+  }
+
+  let seasonal = cache.seasonal || null;
+  if (!seasonsAreFresh(seasonal, surfaces.bounds)) {
+    try {
+      const { fromUrl } = await import("geotiff");
+      seasonal = await sampleCourseSeasons(surfaces, {
+        previous: seasonal,
+        deadlineMs: SEASONS_BUDGET_MS,
+        openTiff: href => fromUrl(href, { allowFullFile: false })
+      });
+    } catch (error) {
+      console.log("[watch-maps] " + courseId + " seasonal colours unavailable: " + String(error && error.message || error));
+    }
+  }
+
+  try {
+    await storageUpload(courseId + "/colours.json", Buffer.from(JSON.stringify({ version: 1, aerial, seasonal })), "application/json");
+  } catch (error) { /* the cache is a saving, not a requirement */ }
+
+  const measured = paletteCore.combineMeasurements(aerial && aerial.measured, seasonal);
+  return { palette: paletteCore.buildCoursePalette(measured), measured, aerial, seasonal };
+}
+
+/* What Studio shows beside the maps: the palette this package was drawn with, how it was
+   arrived at, and the credit Sentinel-2's data asks for. Small; stored beside the images. */
+function paletteRecord(colours) {
+  const months = colours.seasonal && colours.seasonal.months ? Object.keys(colours.seasonal.months).sort() : [];
+  return {
+    version: 1,
+    colors: colours.palette.colors,
+    roles: colours.palette.roles,
+    base: paletteCore.basePalette().colors,
+    gaps: paletteCore.lightnessGaps(colours.palette.colors),
+    aerial: colours.aerial && colours.aerial.measured || null,
+    /* Ready-to-show swatches of what was measured, so Studio needs no colour maths. */
+    measuredHex: Object.fromEntries(["rough", "fairway", "green", "bunker", "water"].map(role => [role, {
+      aerial: paletteCore.labToHex(colours.aerial && colours.aerial.measured && colours.aerial.measured[role]),
+      year: ["rough", "fairway"].includes(role) ? paletteCore.labToHex(paletteCore.seasonalYear(colours.seasonal && colours.seasonal.months, role)) : null
+    }])),
+    seasonal: colours.seasonal ? {
+      strip: months.map(month => ({
+        month,
+        fairway: paletteCore.labToHex(colours.seasonal.months[month].fairway),
+        rough: paletteCore.labToHex(colours.seasonal.months[month].rough)
+      })),
+      months: colours.seasonal.months || {},
+      monthCount: months.length,
+      complete: !!colours.seasonal.complete,
+      updatedAt: colours.seasonal.updatedAt || null,
+      attribution: months.length ? colours.seasonal.attribution : null
+    } : null
+  };
+}
+
 async function generateWatchPackage({ courseId, map, actorEmail }) {
   const holeNumbers = holeNumbersFromObjects(map.objects_json);
   const version = Date.now();
@@ -465,6 +564,11 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
   await writeProgress(courseId, "reading-course", holeTotal, startedAt);
   await writeProgress(courseId, "reading-terrain", holeTotal, startedAt);
   const terrainIndex = await loadTerrainIndex(courseId);
+  await writeProgress(courseId, "reading-colours", holeTotal, startedAt);
+  let colours;
+  try { colours = await courseColours(courseId, map, holeNumbers, terrainIndex); }
+  catch (error) { colours = { palette: paletteCore.basePalette(), measured: null, aerial: null, seasonal: null }; }
+  const recipe = Object.assign({}, watchMapCore.WATCH_MAP_RECIPE_V1, { colors: colours.palette.colors });
 
   let holeIndex = 0;
   for (const holeNumber of holeNumbers) {
@@ -474,7 +578,7 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
        ones an admin is watching to see whether anything is still moving. */
     await writeProgress(courseId, "baking-hole-" + holeIndex + "-of-" + holeTotal, holeTotal, startedAt);
     const geometry = watchMapCore.objectsForHole(map.objects_json, holeNumber);
-    const frame = watchMapCore.buildWatchHoleFrame(watchMapCore.WATCH_MAP_RECIPE_V1, geometry);
+    const frame = watchMapCore.buildWatchHoleFrame(recipe, geometry);
     if (!frame.ok) { errors.push({ holeNumber, reason: frame.reason }); continue; }
     try {
       const rasterized = await rasterizeFrame(frame, geometry, terrainIndex, holeNumber);
@@ -516,6 +620,11 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
   }
 
   const status = holes.length === 0 ? "failed" : errors.length === 0 && holes.length === holeNumbers.length ? "ready" : "partial";
+  if (holes.length) {
+    try {
+      await storageUpload(courseId + "/v" + version + "/palette.json", Buffer.from(JSON.stringify(paletteRecord(colours))), "application/json");
+    } catch (error) { /* the maps are drawn; the record of their palette is a nicety */ }
+  }
 
   /* The Watch package's own publish counter, and the geometry revision it was drawn
      from. Its own, deliberately: the Watch pipeline is separate from the native bake
@@ -781,6 +890,13 @@ function bakeInProgress(progress, now) {
   return Number.isFinite(updatedAt) && now - updatedAt < PRUNE_GRACE_MS;
 }
 
+/* Packages baked before palettes existed have none; null tells Studio "base palette". */
+async function loadPaletteRecord(courseId, version) {
+  if (!version) return null;
+  try { return JSON.parse((await bucketDownload(BUCKET, courseId + "/v" + version + "/palette.json")).toString("utf8")); }
+  catch (error) { return null; }
+}
+
 async function loadWatchRow(courseId) {
   const rows = await supabaseFetch(WATCH_TABLE + "?select=*&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []);
   return Array.isArray(rows) ? rows[0] || null : null;
@@ -800,7 +916,10 @@ export default async function courseWatchMaps(req) {
        showing geometry the phone has already left behind. Fails soft to "no drift known". */
     const currentObjectsRevision = await loadCourseObjectsRevision(courseId);
     const report = reportShape(row, currentObjectsRevision);
-    if (row && Array.isArray(report.holes) && report.holes.length) return json(200, Object.assign({ courseId }, report));
+    if (row && Array.isArray(report.holes) && report.holes.length) {
+      report.palette = await loadPaletteRecord(courseId, row.watch_package_version);
+      return json(200, Object.assign({ courseId }, report));
+    }
     try {
       const stored = await findStoredPackage(courseId);
       if (stored) return json(200, recoveryReport(courseId, stored));

@@ -365,6 +365,33 @@
     return '<div class="gdAdminWatchMapDebugPanel">' + rows.map(function (r) { return '<div><b>' + esc(r[0]) + '</b><span>' + esc(r[1]) + '</span></div>'; }).join("") + '</div>';
   }
 
+  /* The palette this package was drawn with: base -> this course, per surface, with what was
+     measured from the aerial photos and from a year of Sentinel-2, and the monthly strip that
+     shows how the course's turf moves through the seasons. */
+  function paletteMarkup(report) {
+    var p = report.palette;
+    if (!p || !p.colors) return '<div class="gdAdminWatchMapPalette"><p class="gdAdminWatchMapPaletteNote">Base palette - this package was baked before course palettes. Regenerate to tint it to the course.</p></div>';
+    var chip = function (hex, title) {
+      return hex ? '<i style="background:' + esc(hex) + '" title="' + esc(title + " " + hex) + '"></i>' : '<i class="empty" title="' + esc(title + ": not measured") + '"></i>';
+    };
+    var rows = [["rough", "Rough", "background"], ["fairway", "Fairway", "fairway"], ["green", "Green", "green"], ["bunker", "Sand", "bunker"], ["water", "Water", "water"]].map(function (r) {
+      var m = p.measuredHex && p.measuredHex[r[0]] || {};
+      var role = p.roles && p.roles[r[0]] || {};
+      return '<div class="gdAdminWatchMapPaletteRow"><b>' + esc(r[1]) + '</b>' +
+        chip(p.base && p.base[r[2]], "base") + '<span>→</span>' + chip(p.colors[r[2]], "this course") +
+        '<em>measured</em>' + chip(m.aerial, "aerial photos") + chip(m.year, "Sentinel-2 year") +
+        '<small>' + esc((role.sources || []).join(" + ") || "base") + '</small></div>';
+    }).join("");
+    var s = p.seasonal;
+    var strip = s && s.strip && s.strip.length ? '<div class="gdAdminWatchMapSeasons" title="Fairway (top) and rough (bottom) by month, Sentinel-2">' +
+      s.strip.map(function (m) {
+        return '<span title="' + esc(m.month) + '">' + chip(m.fairway, m.month + " fairway") + chip(m.rough, m.month + " rough") + '<small>' + esc(m.month.slice(2)) + '</small></span>';
+      }).join("") + '</div>' : "";
+    var note = s ? (s.monthCount + " month" + (s.monthCount === 1 ? "" : "s") + " of Sentinel-2" + (s.complete ? "" : " so far - the next bake adds the rest")) : "No Sentinel-2 record yet";
+    return '<div class="gdAdminWatchMapPalette"><div class="gdAdminWatchMapPaletteHead"><b>Course palette</b><span>' + esc(note) + '</span></div>' +
+      rows + strip + (s && s.attribution ? '<p class="gdAdminWatchMapPaletteNote">' + esc(s.attribution) + '</p>' : "") + '</div>';
+  }
+
   function galleryMarkup(courseId, report, current) {
     return '<div class="gdAdminWatchMapGallery" aria-label="Generated Watch Map gallery">' + report.holes.map(function (hole) {
       var src = "/api/course-watch-map-assets?path=" + encodeURIComponent(hole.path);
@@ -420,7 +447,7 @@
     if (report === "error") return '<div class="gdAdminCourseWorkspace">' + head + '<div class="gdCoursePlayDebugEmpty">Could not load Watch Map status.</div></div>';
     if (!report.holes || !report.holes.length) return '<div class="gdAdminCourseWorkspace">' + head + errorsMarkup(report) + '<div class="gdCoursePlayDebugEmpty">No Watch maps generated yet for this course.</div></div>';
     var current = holeByCourse[courseId] || report.holes[0].holeNumber;
-    return '<div class="gdAdminCourseWorkspace">' + head + errorsMarkup(report) + galleryMarkup(courseId, report, current) + viewerMarkup(courseId, report, current) + '</div>';
+    return '<div class="gdAdminCourseWorkspace">' + head + errorsMarkup(report) + paletteMarkup(report) + galleryMarkup(courseId, report, current) + viewerMarkup(courseId, report, current) + '</div>';
   }
 
   function afterRender(selected) {
