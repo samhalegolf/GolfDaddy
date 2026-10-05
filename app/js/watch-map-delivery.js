@@ -375,6 +375,16 @@
       return { delivered: sent > 0, sent: sent, failed: failed, skipped: holes.length - missing.length, version: version };
     }
 
+    /* Anonymous usage count (app/js/course-package.js): this course's maps
+       went to a wrist. Absent off the app page, so the Studio surfaces and
+       tests never count anything. */
+    function reportWatchDownload(courseKey) {
+      try {
+        var app = typeof window !== "undefined" && window.ClarityApp;
+        if (app && typeof app.reportCourseUsage === "function") app.reportCourseUsage(courseKey, "download", "watch");
+      } catch (e) {}
+    }
+
     function deliver(courseKey) {
       courseKey = String(courseKey || "").trim();
       if (!courseKey) return Promise.resolve({ delivered: false, reason: "no-course" });
@@ -383,6 +393,7 @@
       if (retryAfter[courseKey] > now()) return Promise.resolve({ delivered: false, reason: "cooling-down" });
       var promise = run(courseKey).then(function (result) {
         delete inFlight[courseKey];
+        if (result && result.sent > 0) reportWatchDownload(courseKey);
         /* Only a package the WRIST says it holds is remembered for good.
            Deliberately not `result.delivered && !result.failed`: that counted
            holes as they left the phone, and a hole handed to the radio is not
