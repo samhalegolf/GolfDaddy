@@ -45,6 +45,7 @@ import { courseSurfaces, sampleAerial } from "./lib/gd-watch-course-colours.mjs"
 import { sampleCourseSeasons, seasonsAreFresh } from "./lib/gd-sentinel-seasons.mjs";
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
+import { wakeGarminBuild } from "./lib/gd-garmin-build-wake.mjs";
 const MAPS_TABLE = "course_maps";
 const WATCH_TABLE = "course_watch_maps";
 const BUCKET = "course-watch-maps";
@@ -189,6 +190,17 @@ function reliefMaskForFrame(spatialRef, sample) {
   return mask;
 }
 
+/* The same heights as pieces of light and shadow, for a watch that draws the hole itself
+   (scripts/gd-watch-terrain-core.js), lit as the image relief is. Shared by the image bake and
+   the Garmin package, so both draw the same shapes. Null means "draw this hole flat". */
+function terrainPieces(frame, sample) {
+  try {
+    return terrainCore.buildHoleTerrain(frame.spatialReference, sample,
+      (px) => watchMapCore.projectImageToLatLng(frame.spatialReference, px), frame.outlines,
+      { azimuth: RELIEF_DEFAULTS.azimuth, altitude: RELIEF_DEFAULTS.altitude });
+  } catch (error) { return null; }
+}
+
 /* Ground -> terrain relief -> thin green slope contours -> markers, composited in that order so
    relief lands on real ground pixels and never on the crisp UI markers drawn last. Ships the
    RESULT as a raster - the composited picture - never the elevation crop or the fitted surface
@@ -202,14 +214,7 @@ async function rasterizeFrame(frame, geometry, terrainIndex, holeNumber) {
     const crop = await loadElevationCrop(elevationMeta);
     const sample = heightSampler(crop);
     const mask = reliefMaskForFrame(frame.spatialReference, sample);
-    /* The same heights as pieces of light and shadow, for a watch that draws
-       the hole itself (scripts/gd-watch-terrain-core.js), lit as this relief
-       is. Rides back on the frame; a hole without them simply draws flat. */
-    try {
-      frame.terrain = terrainCore.buildHoleTerrain(frame.spatialReference, sample,
-        (px) => watchMapCore.projectImageToLatLng(frame.spatialReference, px), frame.outlines,
-        { azimuth: RELIEF_DEFAULTS.azimuth, altitude: RELIEF_DEFAULTS.altitude });
-    } catch (error) { frame.terrain = null; }
+    frame.terrain = terrainPieces(frame, sample);
 
     const ground = await sharp(Buffer.from(frame.groundSvg, "utf8")).raw().toBuffer({ resolveWithObject: true });
     applyRelief(ground.data, mask, TERRAIN_RELIEF_OPACITY, ground.info.channels);
@@ -716,6 +721,173 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
   return row;
 }
 
+/* ------------------------------------------------------------------ Garmin package
+
+   A Garmin draws every hole itself (docs/WATCH_ARCHITECTURE.md, "The drawn map"), so its
+   package is the data half of the bake above and none of the images: per hole the spatial
+   reference, the golf reference, the outlines, the terrain pieces and the palette. No sharp
+   rasterising, no encoding, no uploads - the slow parts of a bake are all image work.
+
+   It has its own table, course_garmin_maps, and its own version, so building it never touches
+   the Apple Watch package and the Apple Watch package never has to be rebuilt for it.
+
+   Built automatically after the normal course package is made, by
+   course-garmin-maps-background.mjs: woken at the end of a mapper run and again at the end of
+   the visual export (when the elevation the terrain pieces need first exists), and by the
+   phone's own GET when it finds the package missing or behind. Every wake is the same cheap
+   question - is the stored package still current? - so a spare wake costs one read. */
+const GARMIN_TABLE = "course_garmin_maps";
+/* Bump to rebuild every course's Garmin package on its next wake (a new outline or terrain
+   recipe, say). */
+const GARMIN_BUILDER_VERSION = 1;
+/* A build that started this long ago and never finished died; a new one may start. */
+const GARMIN_BUILD_LOCK_MS = 10 * 60 * 1000;
+const PUBLISHED_MAP_COLUMNS = "course_id,objects_json,holes_json,objects_revision,published_at,updated_at";
+
+/* Is the stored package still a true copy of the course? Pass terrainGeneratedAt as
+   undefined to skip the terrain check - the phone's GET does, to avoid a storage read per
+   request; the builder always checks it. */
+function garminPackageCurrent(row, map, terrainGeneratedAt) {
+  if (!row || !map || !(Number(row.garmin_package_version) > 0)) return false;
+  if (Number(row.builder_version) !== GARMIN_BUILDER_VERSION) return false;
+  const revision = map.objects_revision == null ? null : Number(map.objects_revision);
+  if (Number.isFinite(revision)) {
+    if (Number(row.source_objects_revision) !== revision) return false;
+  } else if (String(row.source_objects_version || "") !== String(objectsVersion(map) || "")) {
+    return false;
+  }
+  if (terrainGeneratedAt !== undefined && String(row.terrain_generated_at || "") !== String(terrainGeneratedAt || "")) return false;
+  return true;
+}
+
+async function generateGarminPackage({ courseId, map, terrainIndex }) {
+  const holeNumbers = holeNumbersFromObjects(map.objects_json);
+  let colours;
+  try { colours = await courseColours(courseId, map, holeNumbers, terrainIndex); }
+  catch (error) { colours = { palette: paletteCore.basePalette() }; }
+  const recipe = Object.assign({}, watchMapCore.WATCH_MAP_RECIPE_V1, { colors: colours.palette.colors });
+
+  const holes = [];
+  const errors = [];
+  for (const holeNumber of holeNumbers) {
+    const geometry = watchMapCore.objectsForHole(map.objects_json, holeNumber);
+    const frame = watchMapCore.buildWatchHoleFrame(recipe, geometry);
+    if (!frame.ok) { errors.push({ holeNumber, reason: frame.reason }); continue; }
+    let terrain = null;
+    const elevationMeta = elevationMetaForHole(terrainIndex, holeNumber);
+    if (elevationMeta) {
+      try { terrain = terrainPieces(frame, heightSampler(await loadElevationCrop(elevationMeta))); }
+      catch (error) { terrain = null; /* drawn flat, as a hole with no elevation is */ }
+    }
+    holes.push({
+      holeNumber,
+      spatialReference: frame.spatialReference,
+      reference: frame.reference,
+      outlines: frame.outlines,
+      terrain,
+      palette: colours.palette.colors
+    });
+    if (!frame.validation.ok) errors.push({ holeNumber, reason: "spatial reference validation failed: " + frame.validation.issues.join("; ") });
+  }
+
+  const now = new Date().toISOString();
+  const revision = Number(map.objects_revision);
+  return {
+    id: courseId,
+    course_id: courseId,
+    status: holes.length === 0 ? "failed" : errors.length === 0 && holes.length === holeNumbers.length ? "ready" : "partial",
+    garmin_package_version: Date.now(),
+    builder_version: GARMIN_BUILDER_VERSION,
+    source_objects_revision: Number.isFinite(revision) ? revision : null,
+    source_objects_version: objectsVersion(map),
+    terrain_generated_at: terrainIndex && terrainIndex.generatedAt ? String(terrainIndex.generatedAt) : null,
+    hole_count: holeNumbers.length,
+    ready_hole_count: holes.length,
+    holes,
+    errors,
+    building_since: null,
+    generated_at: now,
+    updated_at: now
+  };
+}
+
+async function loadGarminRow(courseId) {
+  const rows = await supabaseFetch(GARMIN_TABLE + "?select=*&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []);
+  return Array.isArray(rows) ? rows[0] || null : null;
+}
+
+async function loadPublishedMap(courseId, columns) {
+  const rows = await supabaseFetch(MAPS_TABLE + "?select=" + (columns || PUBLISHED_MAP_COLUMNS) + "&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1");
+  return Array.isArray(rows) ? rows[0] || null : null;
+}
+
+async function saveGarminRow(row) {
+  await supabaseFetch(GARMIN_TABLE + "?on_conflict=course_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify([row])
+  });
+}
+
+/* The background worker's whole job: build the course's Garmin package if, and only if, the
+   stored one is missing or behind. Returns what it did, for the log. */
+async function buildGarminPackageIfStale(courseId, nowMs) {
+  const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+  const map = await loadPublishedMap(courseId);
+  if (!map || !map.objects_json || !Object.keys(map.objects_json).length) return { built: false, reason: "no-geometry" };
+  const row = await loadGarminRow(courseId);
+  const since = Date.parse(row && row.building_since);
+  if (Number.isFinite(since) && now - since < GARMIN_BUILD_LOCK_MS) return { built: false, reason: "already-building" };
+  const terrainIndex = await loadTerrainIndex(courseId);
+  if (garminPackageCurrent(row, map, terrainIndex ? terrainIndex.generatedAt || null : null)) return { built: false, reason: "current" };
+
+  await saveGarminRow({ id: courseId, course_id: courseId, building_since: new Date(now).toISOString() });
+  try {
+    const built = await generateGarminPackage({ courseId, map, terrainIndex });
+    await saveGarminRow(built);
+    return { built: true, status: built.status, holes: built.holes.length, version: built.garmin_package_version };
+  } catch (error) {
+    await saveGarminRow({ id: courseId, course_id: courseId, building_since: null }).catch(() => {});
+    throw error;
+  }
+}
+
+/* GET ?courseId=...&watch=garmin. Shaped like the image report where the phone reads it
+   (watchPackageVersion, holes), so watch-map-delivery.js builds a manifest from either.
+   A missing or behind package wakes the builder and, if there is an older one, still serves
+   it - an older map beats no map, and the next delivery attempt picks up the new one. */
+async function garminReport(req, courseId) {
+  const [row, map] = await Promise.all([
+    loadGarminRow(courseId),
+    loadPublishedMap(courseId, "course_id,objects_revision,published_at,updated_at").catch(() => null)
+  ]);
+  const current = garminPackageCurrent(row, map, undefined);
+  if (map && !current) {
+    let origin = "";
+    try { origin = new URL(req.url).origin; } catch (error) { origin = ""; }
+    await wakeGarminBuild(origin, courseId);
+  }
+  const usable = row && Number(row.garmin_package_version) > 0 && Array.isArray(row.holes) && row.holes.length;
+  if (!usable) {
+    return json(200, { courseId, watch: "garmin", status: map ? "building" : "none", watchPackageVersion: 0, holeCount: 0, holes: [], errors: [] });
+  }
+  return json(200, {
+    courseId,
+    watch: "garmin",
+    status: row.status,
+    current,
+    watchPackageVersion: row.garmin_package_version,
+    builderVersion: row.builder_version,
+    sourceObjectsRevision: row.source_objects_revision == null ? null : Number(row.source_objects_revision),
+    terrainGeneratedAt: row.terrain_generated_at || null,
+    holeCount: row.hole_count,
+    readyHoleCount: row.ready_hole_count,
+    generatedAt: row.generated_at,
+    holes: row.holes,
+    errors: row.errors || []
+  });
+}
+
 function sameCoordinate(a, b) {
   if (!a || !b) return false;
   return Math.abs(Number(a.lat) - Number(b.lat)) < 1e-9 && Math.abs(Number(a.lng) - Number(b.lng)) < 1e-9;
@@ -925,6 +1097,7 @@ export default async function courseWatchMaps(req) {
     const url = new URL(req.url);
     const courseId = slug(url.searchParams.get("courseId") || url.searchParams.get("course_id"));
     if (!courseId) return json(400, { error: "courseId required" });
+    if (url.searchParams.get("watch") === "garmin") return garminReport(req, courseId);
     const row = await loadWatchRow(courseId);
     /* Read alongside the package so the report can say how far the course has moved since
        the wrist copy was made - a W-v1.3 on a package generated at W-v1.0 is a Watch
@@ -1068,7 +1241,7 @@ async function wakeWorker(req, courseId) {
   }
 }
 
-export { generateWatchPackage, verifiedUser, slug, supabaseFetch, hasSupabase, clearProgress, MAPS_TABLE };
+export { generateWatchPackage, buildGarminPackageIfStale, verifiedUser, slug, supabaseFetch, hasSupabase, clearProgress, MAPS_TABLE };
 
 export const config = {
   path: "/api/course-watch-maps",
@@ -1076,7 +1249,8 @@ export const config = {
 
 export const __test = {
   holeNumbersFromObjects, reportShape, recoveryReport, supersededPaths, bakeInProgress, sameReferenceGeometry, backfillHoleReferences,
-  mercY, heightSampler, elevationMetaForHole, measureDelivery, deliverySummary
+  mercY, heightSampler, elevationMetaForHole, measureDelivery, deliverySummary,
+  garminPackageCurrent, generateGarminPackage, GARMIN_BUILDER_VERSION
 };
 
 function json(status, body) {
