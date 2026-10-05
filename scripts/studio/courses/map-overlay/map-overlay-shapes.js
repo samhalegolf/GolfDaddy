@@ -6,8 +6,10 @@
  * round default made here. Greens and bunkers are kept as smooth curves through a few handles.
  * Bunker outlines that overlap are merged into one. A water hazard drawn round by hand is
  * thinned to the corners that matter. A single tree is a small ring, a cluster an oval
- * stretched over it; the tree finder looks for more trees like the ones placed by hand, and the
- * area wand and colour wand outline a waste area. Everything is in
+ * stretched over it; the tree finder looks for more trees like the ones placed by hand, the
+ * area wand outlines a waste area, and the colour wand outlines anything picked by its colour.
+ * A wand outline keeps many corners so it follows the ground, and is reshaped by a few key
+ * corners and by bending its edge where it is grabbed (keyCorners, bendRing). Everything is in
  * plain {lat, lng} and flat-earth metres about the shape's own position, which is exact
  * enough at the size of a golf hole.
  *
@@ -20,11 +22,14 @@
   /* A fairway is usually 30-45m across; 35m is a middle that reads as a fairway at a glance
      and is quick to pull in or out. */
   var FAIRWAY_WIDTH_M = 35;
-  /* The overlay stores at most 64 points a shape (gd-map-overlay-core OVERLAY_MAX_POINTS).
-     A corner every ~30m is enough to bend a fairway to what is on the ground without a wall of
-     handles, and capping the stations at 20 a side keeps room under the 64 for the corners a
-     person adds by hand. */
-  var MAX_POINTS = 64;
+  /* The overlay stores at most 256 points a shape (gd-map-overlay-core OVERLAY_MAX_POINTS) -
+     room for a wand outline that follows the ground closely. A corner every ~30m is enough to
+     bend a fairway to what is on the ground, so a fairway's stations stay capped at 20 a side. */
+  var MAX_POINTS = 256;
+  /* A wand outline (colour wand, Draw + grow, line wand) keeps at most this many corners: close
+     to the edge it found, with room left under MAX_POINTS for reshaping. Only a few of them
+     are shown as handles (keyCorners); the rest bend with the edge when it is dragged. */
+  var DETAIL_MAX_POINTS = 220;
   var MIN_SPACING_M = 30;
   var MAX_STATIONS = 20;
   /* A tee is a round marker on where the tee is - which way it faces is the hole's business,
@@ -256,23 +261,30 @@
     return inside;
   }
 
-  /* Douglas-Peucker on a closed ring: corners closer than tol to the line they sit on go. */
-  function simplifyRing(ring, tol) {
+  /* Douglas-Peucker on an open line: its two ends stay, corners closer than tol to the line
+     they sit on go. The corners kept are the very objects passed in. */
+  function simplifyLine(pts, tol) {
     function dist(p, a, b) {
       var d = sub(b, a), l = len(d);
       if (l < 1e-9) return len(sub(p, a));
       return Math.abs(d.x * (a.y - p.y) - d.y * (a.x - p.x)) / l;
     }
     function run(pts) {
+      if (pts.length < 3) return pts.slice();
       var best = 0, idx = 0;
       for (var i = 1; i < pts.length - 1; i++) { var d = dist(pts[i], pts[0], pts[pts.length - 1]); if (d > best) { best = d; idx = i; } }
       if (best <= tol) return [pts[0], pts[pts.length - 1]];
       return run(pts.slice(0, idx + 1)).slice(0, -1).concat(run(pts.slice(idx)));
     }
+    return run(pts);
+  }
+
+  /* Douglas-Peucker on a closed ring: corners closer than tol to the line they sit on go. */
+  function simplifyRing(ring, tol) {
     /* Split at the corner furthest from the first, so both halves are open lines. */
     var far = 0, fd = 0;
     ring.forEach(function (p, i) { var d = len(sub(p, ring[0])); if (d > fd) { fd = d; far = i; } });
-    var a = run(ring.slice(0, far + 1)), b = run(ring.slice(far).concat([ring[0]]));
+    var a = simplifyLine(ring.slice(0, far + 1), tol), b = simplifyLine(ring.slice(far).concat([ring[0]]), tol);
     return a.slice(0, -1).concat(b.slice(0, -1));
   }
 
@@ -282,10 +294,11 @@
     return a / 2;
   }
 
-  /* Two outlines that overlap, as one: the outer edge of everything either covers. Null when
+  /* Two outlines that overlap, as one: the outer edge of everything either covers, at most
+     maxPoints corners (MERGE_MAX_POINTS by default). Null when
      they do not overlap, so a caller can try the next one. Done on a fine grid rather than by
      clipping polygons - a wand outline can cross itself, and a grid does not care. */
-  function mergeOverlapping(ringA, ringB) {
+  function mergeOverlapping(ringA, ringB, maxPoints) {
     if (!ringA || !ringB || ringA.length < 3 || ringB.length < 3) return null;
     var f = frame(ringA[0]);
     var a = ringA.map(f.toXY), b = ringB.map(f.toXY);
@@ -313,7 +326,8 @@
     if (!best) return null;
     var tol = cell * 0.75;
     var out = simplifyRing(best, tol);
-    while (out.length > MERGE_MAX_POINTS) { tol *= 1.5; out = simplifyRing(best, tol); }
+    var cap = maxPoints || MERGE_MAX_POINTS;
+    while (out.length > cap) { tol *= 1.5; out = simplifyRing(best, tol); }
     return out.length >= 3 ? out.map(f.toLL) : null;
   }
 
@@ -368,7 +382,6 @@
      line to be on the surface, and a fairway running into rough of the same colour will run
      out to the reach. */
   var LINE_WAND_LEVELS = [1.6, 2.2, 2.9, 3.7, 4.6, 5.8];
-  var LINE_WAND_MAX_POINTS = 48;
   /* Share of a region's edge lying on the reach limit past which it counts as leaked. */
   var LINE_WAND_LEAK_SHARE = 0.12;
 
@@ -581,7 +594,7 @@
       var loop = traceLargestLoop(mask, w, h);
       if (!loop) { rings.push(null); return; }
       var tol = 0.75, ring = simplifyRing(loop, tol);
-      var cap = Number(o.maxPoints) || LINE_WAND_MAX_POINTS;
+      var cap = Number(o.maxPoints) || DETAIL_MAX_POINTS;
       while (ring.length > cap) { tol *= 1.5; ring = simplifyRing(loop, tol); }
       /* Leaked: a good share of its edge is the reach limit, not anything in the picture. */
       rings.push(ring.length >= 3 ? { ring: ring, area: area, leaked: edge > 0 && atReach / edge > leakShare } : null);
@@ -784,10 +797,376 @@
     var filled = fillHoles(mask, w, h);
     var loop = traceLargestLoop(filled, w, h);
     if (!loop || Math.abs(ringArea(loop)) < 4) return null;
-    var cap = maxPoints || LINE_WAND_MAX_POINTS;
+    var cap = maxPoints || DETAIL_MAX_POINTS;
     var tol = 0.75, ring = simplifyRing(loop, tol);
     while (ring.length > cap) { tol *= 1.5; ring = simplifyRing(loop, tol); }
     return ring.length >= 3 ? ring : null;
+  }
+
+  /* ---- reshaping a detailed outline ----
+     A wand outline has far more corners than anyone wants to drag one by one. It is edited by
+     a few key corners - its sharpest turns, spaced out - and by grabbing the edge anywhere:
+     the edge bends smoothly round the grab, as if there were corners close by, and the key
+     corners either side stay put. All of this works in screen pixels ({x, y}), so how fine the
+     bend is follows the zoom. */
+
+  /* Distance round a closed ring to each corner from the first. */
+  function ringArc(xy) {
+    var cum = [0], total = 0;
+    for (var i = 1; i <= xy.length; i++) { total += len(sub(xy[i % xy.length], xy[i - 1])); if (i < xy.length) cum.push(total); }
+    return { cum: cum, total: total };
+  }
+
+  /* The corners of a ring that get a handle, as indices in order: the corners Douglas-Peucker
+     keeps at `tolPx` (the turns that shape it), none closer than `minGapPx` round the edge to
+     the one before, and an extra one wherever two are more than `maxGapPx` apart. */
+  function keyCorners(xy, opts) {
+    var o = opts || {}, n = xy ? xy.length : 0;
+    if (n < 3) return [];
+    var minGap = o.minGapPx || 64, maxGap = o.maxGapPx || 240;
+    var arc = ringArc(xy), total = arc.total;
+    var tagged = xy.map(function (p, i) { return { x: p.x, y: p.y, i: i }; });
+    var turns = simplifyRing(tagged, o.tolPx || 4).map(function (p) { return p.i; }).sort(function (a, b) { return a - b; });
+    var kept = [];
+    turns.forEach(function (i) { if (!kept.length || arc.cum[i] - arc.cum[kept[kept.length - 1]] >= minGap) kept.push(i); });
+    while (kept.length > 1 && total - arc.cum[kept[kept.length - 1]] + arc.cum[kept[0]] < minGap) kept.pop();
+    if (kept.length < 3) {
+      kept = [];
+      for (var q = 0; q < 4; q++) kept.push(nearestAt(arc, total * q / 4));
+    }
+    var out = [];
+    kept.forEach(function (i, k) {
+      out.push(i);
+      var a = arc.cum[i], b = k + 1 < kept.length ? arc.cum[kept[k + 1]] : total + arc.cum[kept[0]];
+      var extra = Math.ceil((b - a) / maxGap) - 1;
+      for (var e = 1; e <= extra; e++) out.push(nearestAt(arc, (a + (b - a) * e / (extra + 1)) % total));
+    });
+    return out.filter(function (i, k) { return out.indexOf(i) === k; }).sort(function (a, b) { return a - b; });
+  }
+  function nearestAt(arc, s) {
+    var best = 0, bd = Infinity;
+    arc.cum.forEach(function (c, i) { var d = Math.min(Math.abs(c - s), arc.total - Math.abs(c - s)); if (d < bd) { bd = d; best = i; } });
+    return best;
+  }
+
+  /* Where on a ring's edge a point is nearest: the corner it follows and the point itself. */
+  function nearestOnRing(xy, pt) {
+    var best = null;
+    for (var i = 0; i < xy.length; i++) {
+      var a = xy[i], b = xy[(i + 1) % xy.length], d = sub(b, a), l2 = d.x * d.x + d.y * d.y;
+      var t = l2 > 1e-12 ? Math.max(0, Math.min(1, ((pt.x - a.x) * d.x + (pt.y - a.y) * d.y) / l2)) : 0;
+      var q = add(a, scale(d, t)), dist = len(sub(pt, q));
+      if (!best || dist < best.dist) best = { segment: i, t: t, point: q, dist: dist };
+    }
+    return best;
+  }
+
+  function falloff(u) { return u < 1 ? 0.5 * (1 + Math.cos(Math.PI * u)) : 0; }
+  function linearFalloff(u) { return u < 1 ? 1 - u : 0; }
+
+  /* Ready a ring to be bent at one place. at: {index} - a corner - or {segment, point} - a
+     point on the edge after corner `segment`, put in as a corner of its own. The bend reaches
+     round the edge each way as far as the next of `keys` (the key corners, which stay put),
+     and no further than `maxReachPx` when given. A corner (at.index) moves like a corner: the
+     edge either side follows it in proportion, so a straight edge stays straight. A grab on
+     the edge bends it as a smooth curve: the stretch it reaches is cut into corners no
+     further apart than `spacingPx` (fewer if that would pass `maxPoints`) so it is a curve
+     rather than a tent. Returns {ring, weights, added, from}: move corner i by the
+     drag times weights[i]; added[i] marks a corner put in here, for tidyBend; from[i] is the
+     corner of `xy` it was, or -1. The ring keeps its first corner first. */
+  function bendRing(xy, at, opts) {
+    var o = opts || {}, n = xy.length, smooth = at.segment != null;
+    var fall = smooth ? falloff : linearFalloff;
+    var ring = xy.map(function (p, i) { return { x: p.x, y: p.y, from: i }; }), anchor;
+    if (at.segment != null) { ring.splice(at.segment + 1, 0, { x: at.point.x, y: at.point.y, from: -1 }); anchor = at.segment + 1; }
+    else anchor = at.index;
+    n = ring.length;
+    var rot = ring.slice(anchor).concat(ring.slice(0, anchor));
+    var arc = ringArc(rot), total = arc.total;
+    var back = total / 2, ahead = total / 2;
+    rot.forEach(function (p, i) {
+      if (i === 0 || p.from < 0 || !o.keys || o.keys.indexOf(p.from) < 0) return;
+      ahead = Math.min(ahead, arc.cum[i]);
+      back = Math.min(back, total - arc.cum[i]);
+    });
+    if (o.maxReachPx) { ahead = Math.min(ahead, o.maxReachPx); back = Math.min(back, o.maxReachPx); }
+    function reach(s) { return s <= ahead || total - s <= back; }
+    var inRange = 0;
+    for (var i = 0; i < n; i++) {
+      var s0 = arc.cum[i], s1 = i + 1 < n ? arc.cum[i + 1] : total;
+      if (reach(s0) || reach(s1)) inRange += s1 - s0;
+    }
+    var room = Math.max(0, (o.maxPoints || MAX_POINTS) - n);
+    var gap = Math.max(o.spacingPx || 6, room ? inRange / room : Infinity);
+    var out = [], sAt = [];
+    for (i = 0; i < n; i++) {
+      var a = rot[i], b = rot[(i + 1) % n], sa = arc.cum[i], sb = i + 1 < n ? arc.cum[i + 1] : total;
+      out.push(a); sAt.push(sa);
+      if (!smooth || !(reach(sa) || reach(sb)) || !isFinite(gap)) continue;
+      var pieces = Math.floor((sb - sa) / gap);
+      for (var k = 1; k < pieces; k++) {
+        var t = k / pieces;
+        out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, from: -1 });
+        sAt.push(sa + (sb - sa) * t);
+      }
+    }
+    var weights = sAt.map(function (s) { return Math.max(ahead > 0 ? fall(s / ahead) : 0, back > 0 ? fall((total - s) / back) : 0, s === 0 ? 1 : 0); });
+    var first = 0;
+    out.forEach(function (p, i) { if (p.from === 0) first = i; });
+    var order = out.slice(first).concat(out.slice(0, first));
+    weights = weights.slice(first).concat(weights.slice(0, first));
+    return {
+      ring: order.map(function (p) { return { x: p.x, y: p.y }; }),
+      weights: weights,
+      added: order.map(function (p) { return p.from < 0; }),
+      from: order.map(function (p) { return p.from; })
+    };
+  }
+
+  /* After a bend: a corner bendRing put in that ended up on a straight line between its
+     neighbours (within tolPx) is taken back out, so a bend leaves only the corners it needs. */
+  function tidyBend(xy, added, tolPx) {
+    var out = xy.slice(), flags = added.slice(), tol = tolPx || 0.4;
+    for (var i = 0; i < out.length && out.length > 3; i++) {
+      if (!flags[i]) continue;
+      var a = out[(i - 1 + out.length) % out.length], b = out[(i + 1) % out.length], d = sub(b, a), l = len(d);
+      var off = l < 1e-9 ? len(sub(out[i], a)) : Math.abs(d.x * (a.y - out[i].y) - d.y * (a.x - out[i].x)) / l;
+      if (off <= tol) { out.splice(i, 1); flags.splice(i, 1); i--; }
+    }
+    return out;
+  }
+
+  /* ---- seams ----
+     Where two areas meet - a fairway and the waste beside it, a wood and a water hazard - the
+     line between them is one line, held by both. A small gap between them, or a thin overlap,
+     closes in the middle: each edge meets the other halfway, and that line becomes a seam -
+     the very same corners in both outlines. Dragging a seam moves it for both (weldRuns /
+     applyWeld), so it only changes which ground belongs to which.
+
+     seamPair works in flat metres. Close to the other shape, an edge is cut into corners
+     SEAM_SPACING_M apart; a corner within 0.7 x gapM of the other edge (or inside it) moves
+     to halfway between itself and the nearest point of that edge, and those corners are the
+     seam; out to 1.3 x gapM it moves part of the way, so the seam runs out into the gap
+     smoothly. The other shape's corners along the seam are replaced by the seam itself.
+     Corners in lockedA / lockedB (a seam with a third shape) are never moved or removed, and
+     corners the seam never reached keep their exact coordinates. */
+  var SEAM_GAP_M = 5;
+  var SEAM_SPACING_M = 1;
+  var SEAM_TOL_M = 0.15;
+
+  /* A ring with every edge that passes within `reach` of `other` cut into corners no more than
+     `spacing` apart - except an edge between two locked corners. Each corner says whether it
+     was one of the ring's own (index) or put in here (-1). */
+  function densifyNear(ring, locked, other, reach, spacing) {
+    var out = [], n = ring.length;
+    for (var i = 0; i < n; i++) {
+      var a = ring[i], b = ring[(i + 1) % n], l = len(sub(b, a));
+      out.push({ x: a.x, y: a.y, own: i, locked: !!locked[i] });
+      if (locked[i] && locked[(i + 1) % n]) continue;
+      var samples = Math.max(1, Math.ceil(l / Math.max(1, reach))), near = false;
+      for (var k = 0; k <= samples && !near; k++) near = nearestOnRing(other, add(a, scale(sub(b, a), k / samples))).dist <= reach;
+      if (!near) continue;
+      var pieces = Math.floor(l / spacing);
+      for (var q = 1; q < pieces; q++) { var t = q / pieces; out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, own: -1, locked: false }); }
+    }
+    return out;
+  }
+
+  /* How far each corner moves toward the other shape: w 1 on the seam, 0 out of reach. A
+     corner outside the other shape whose way to it runs along its own edge (the side of a
+     fairway running past the end of a waste area) is not facing it, and does not move. */
+  function seamPull(pts, other, gap, reach) {
+    var full = gap * 0.7, n = pts.length;
+    pts.forEach(function (p, i) {
+      if (p.locked) { p.w = 0; return; }
+      var near = nearestOnRing(other, p), within = insideRing(p, other), d = within ? 0 : near.dist;
+      p.w = d <= full ? 1 : d >= reach ? 0 : (reach - d) / (reach - full);
+      if (!within && p.w > 0 && near.dist > 1e-6) {
+        var along = unit(sub(pts[(i + 1) % n], pts[(i - 1 + n) % n])), toward = unit(sub(near.point, p));
+        if (Math.abs(along.x * toward.x + along.y * toward.y) > 0.75) p.w = 0;
+      }
+      p.mid = { x: (p.x + near.point.x) / 2, y: (p.y + near.point.y) / 2 };
+    });
+  }
+
+  /* The runs of seam corners (w 1) round a ring, as [start, end] index pairs that may wrap.
+     A short break between two runs where the edge never leaves reach (a wiggle in a wand edge
+     that steps a little further away) is bridged, so a facing edge is one seam. */
+  function seamRuns(pts, bridge) {
+    var n = pts.length, start = -1, i, runs = [];
+    for (i = 0; i < n; i++) if (pts[i].w >= 1) { start = i; break; }
+    if (start >= 0) {
+      var gapRun = [], arc = 0;
+      for (var s = 1; s <= n; s++) {
+        i = (start + s) % n;
+        var prev = pts[(i - 1 + n) % n];
+        if (pts[i].w >= 1) {
+          if (gapRun.length && arc + len(sub(pts[i], prev)) <= bridge && gapRun.every(function (j) { return pts[j].w > 0; })) gapRun.forEach(function (j) { pts[j].w = 1; });
+          gapRun = []; arc = 0;
+        } else { gapRun.push(i); arc += len(sub(pts[i], prev)); }
+      }
+    }
+    start = -1;
+    for (i = 0; i < n; i++) if (pts[i].w < 1) { start = i; break; }
+    if (start < 0) return null;
+    var cur = null;
+    for (var k = 1; k <= n; k++) {
+      i = (start + k) % n;
+      if (pts[i].w >= 1) { if (!cur) cur = [i, i]; else cur[1] = i; }
+      else if (cur) { runs.push(cur); cur = null; }
+    }
+    return runs.filter(function (r) { return r[0] !== r[1]; });
+  }
+  function runIndices(r, n) { var out = [], i = r[0]; for (;;) { out.push(i); if (i === r[1]) break; i = (i + 1) % n; } return out; }
+
+  /* Distance from a point to an open line. */
+  function distToLine(line, p) {
+    var best = Infinity;
+    for (var i = 1; i < line.length; i++) {
+      var a = line[i - 1], d = sub(line[i], a), l2 = d.x * d.x + d.y * d.y;
+      var t = l2 > 1e-12 ? Math.max(0, Math.min(1, ((p.x - a.x) * d.x + (p.y - a.y) * d.y) / l2)) : 0;
+      best = Math.min(best, len(sub(p, add(a, scale(d, t)))));
+    }
+    return best;
+  }
+
+  /* ringA and ringB ({lat, lng}) joined along a seam wherever they are within gapM of each
+     other or overlap at an edge: {a, b, seams} with the new outlines, or null when they do not
+     meet, when one sits mostly inside the other (a pond in a waste area is not a seam), or
+     when the result would pass maxPoints. */
+  function seamPair(ringA, ringB, opts) {
+    var o = opts || {};
+    if (!ringA || !ringB || ringA.length < 3 || ringB.length < 3) return null;
+    var gap = o.gapM || SEAM_GAP_M, reach = gap * 1.3, spacing = o.spacingM || SEAM_SPACING_M, cap = o.maxPoints || MAX_POINTS;
+    var f = frame(ringA[0]);
+    var A = ringA.map(f.toXY), B = ringB.map(f.toXY);
+    var inside = function (P, Q) { return P.filter(function (p) { return insideRing(p, Q); }).length / P.length; };
+    if (inside(A, B) > 0.5 || inside(B, A) > 0.5) return null;
+    var dA = densifyNear(A, o.lockedA || [], B, reach, spacing);
+    var dB = densifyNear(B, o.lockedB || [], A, reach, spacing);
+    seamPull(dA, B, gap, reach);
+    seamPull(dB, A, gap, reach);
+    var runsA = seamRuns(dA, gap * 6), runsB = seamRuns(dB, gap * 6);
+    if (!runsA || !runsB || !runsA.length || !runsB.length) return null;
+
+    var tol = o.tolM || SEAM_TOL_M;
+    for (var attempt = 0; attempt < 8; attempt++, tol *= 1.6) {
+      /* The seams, from A's side: its seam corners moved to the middle, thinned once, as
+         lat/lng once - so both outlines get exactly the same numbers. */
+      var seams = runsA.map(function (r) {
+        var line = simplifyLine(runIndices(r, dA.length).map(function (i) { return dA[i].mid; }), tol);
+        return { line: line, ll: line.map(f.toLL), used: false };
+      });
+      /* Each of B's seam runs takes the seam nearest it, at most one run a seam. */
+      var takeB = runsB.map(function (r) {
+        var idx = runIndices(r, dB.length), probe = dB[idx[Math.floor(idx.length / 2)]];
+        var best = null, bd = Infinity;
+        seams.forEach(function (sm) { if (sm.used) return; var d = distToLine(sm.line, probe); if (d < bd) { bd = d; best = sm; } });
+        if (!best || bd > gap) return null;
+        best.used = true;
+        var before = dB[(r[0] - 1 + dB.length) % dB.length];
+        var fwd = len(sub(before, best.line[0])) <= len(sub(before, best.line[best.line.length - 1]));
+        return { run: r, ll: fwd ? best.ll : best.ll.slice().reverse() };
+      });
+      var a = assemble(dA, ringA, runsA.map(function (r, k) { return seams[k].used ? { run: r, ll: seams[k].ll } : null; }), tol, f);
+      var b = assemble(dB, ringB, takeB, tol, f);
+      if (!seams.some(function (sm) { return sm.used; })) return null;
+      if (a.length <= cap && b.length <= cap) return { a: a, b: b, seams: seams.filter(function (sm) { return sm.used; }).length };
+    }
+    return null;
+  }
+
+  /* One outline put back together: its seam runs replaced by the seam, the corners near the
+     other shape pulled part of the way, the corners put in along the way thinned out again,
+     and every corner the seam never reached exactly as it was. */
+  function assemble(pts, orig, takes, tol, f) {
+    var n = pts.length, seamAt = {};
+    takes.forEach(function (t) { if (!t) return; runIndices(t.run, n).forEach(function (i, k) { seamAt[i] = k === 0 ? t : "skip"; }); });
+    var items = [];
+    for (var i = 0; i < n; i++) {
+      var p = pts[i], t = seamAt[i];
+      if (t === "skip") continue;
+      if (t) { t.ll.forEach(function (ll) { items.push({ ll: { lat: ll.lat, lng: ll.lng }, fixed: true }); }); continue; }
+      if (p.own >= 0 && !(p.w > 0)) { items.push({ ll: { lat: orig[p.own].lat, lng: orig[p.own].lng }, fixed: true }); continue; }
+      var at = p.w > 0 ? add(p, scale(sub(p.mid, p), p.w)) : { x: p.x, y: p.y };
+      items.push({ xy: at, fixed: false });
+    }
+    /* Thin each stretch of loose corners between two fixed ones. */
+    items.forEach(function (it) { if (!it.xy) it.xy = f.toXY(it.ll); });
+    var first = -1;
+    for (i = 0; i < items.length; i++) if (items[i].fixed) { first = i; break; }
+    var out = [];
+    if (first < 0) {
+      out = simplifyRing(items.map(function (it) { return it.xy; }), tol).map(f.toLL);
+      return out;
+    }
+    var rot = items.slice(first).concat(items.slice(0, first)).concat([items[first]]);
+    var from = 0;
+    for (i = 1; i < rot.length; i++) {
+      if (!rot[i].fixed) continue;
+      var stretch = rot.slice(from, i + 1);
+      var kept = stretch.length > 2 ? simplifyLine(stretch.map(function (it) { return it.xy; }), tol) : stretch.map(function (it) { return it.xy; });
+      kept.slice(0, -1).forEach(function (xy, k) {
+        var it = k === 0 ? stretch[0] : stretch.filter(function (s) { return s.xy === xy; })[0];
+        out.push(it.ll ? { lat: it.ll.lat, lng: it.ll.lng } : f.toLL(xy));
+      });
+      from = i;
+    }
+    return out;
+  }
+
+  /* Where outline g shares corners with outline f (the very same coordinates): the runs of
+     them round g, each with the corners of f it matches, in order. For applyWeld. */
+  function pointKey(p) { return p.lat.toFixed(9) + "," + p.lng.toFixed(9); }
+  function weldRuns(g, f) {
+    var at = {}, nf = f.length, ng = g.length;
+    f.forEach(function (p, j) { at[pointKey(p)] = j; });
+    var m = g.map(function (p) { var j = at[pointKey(p)]; return j == null ? -1 : j; });
+    var start = -1, i;
+    for (i = 0; i < ng; i++) if (m[i] < 0) { start = i; break; }
+    if (start < 0) return [];
+    var runs = [], cur = null;
+    for (var k = 1; k <= ng; k++) {
+      i = (start + k) % ng;
+      var j = m[i];
+      if (j < 0) { if (cur) runs.push(cur); cur = null; continue; }
+      if (cur) {
+        var last = cur.f[cur.f.length - 1], step = (j - last + nf) % nf;
+        var dir = step === 1 ? 1 : step === nf - 1 ? -1 : 0;
+        if (dir && (cur.dir === 0 || cur.dir === dir)) { cur.g.push(i); cur.f.push(j); cur.dir = dir; continue; }
+        runs.push(cur);
+      }
+      cur = { g: [i], f: [j], dir: 0 };
+    }
+    if (cur) runs.push(cur);
+    return runs;
+  }
+
+  /* g again, with its shared runs following f to where f now is: fNew is f's new outline and
+     from[i] the old corner of f that fNew[i] was (-1 for a corner put in since). A run takes
+     every corner f now has along it, so the two stay the very same line. */
+  function applyWeld(g, runs, fNew, from) {
+    if (!runs.length) return g.slice();
+    var now = {}, nn = fNew.length;
+    from.forEach(function (j, i) { if (j >= 0) now[j] = i; });
+    var take = {};
+    runs.forEach(function (r) {
+      var a = now[r.f[0]], b = now[r.f[r.f.length - 1]];
+      var line = [];
+      if (a == null || b == null) line = null;
+      else if (r.f.length === 1) line = [fNew[a]];
+      else for (var i = a, guard = 0; guard <= nn; guard++, i = (i + r.dir + nn) % nn) { line.push(fNew[i]); if (i === b) break; }
+      r.g.forEach(function (gi, k) { take[gi] = k === 0 ? (line || null) : "skip"; });
+      if (!line) r.g.forEach(function (gi) { take[gi] = undefined; });
+    });
+    var out = [];
+    g.forEach(function (p, i) {
+      var t = take[i];
+      if (t === "skip") return;
+      if (t) t.forEach(function (q) { out.push({ lat: q.lat, lng: q.lng }); });
+      else out.push(p);
+    });
+    return out;
   }
 
   var api = {
@@ -801,7 +1180,9 @@
     TREE_RADIUS_M: TREE_RADIUS_M, treeAt: treeAt, ellipseInBox: ellipseInBox, ringRadiusM: ringRadiusM,
     growFromArea: growFromArea, colourField: colourField, colourModel: colourModel, circleSamples: circleSamples,
     treeFinder: treeFinder, TREE_FINDER_LEVELS: TREE_FINDER_LEVELS, TREE_FINDER_MAX: TREE_FINDER_MAX,
-    floodSelect: floodSelect, maskOutline: maskOutline
+    floodSelect: floodSelect, maskOutline: maskOutline,
+    DETAIL_MAX_POINTS: DETAIL_MAX_POINTS, keyCorners: keyCorners, nearestOnRing: nearestOnRing, bendRing: bendRing, tidyBend: tidyBend,
+    SEAM_GAP_M: SEAM_GAP_M, seamPair: seamPair, pointKey: pointKey, weldRuns: weldRuns, applyWeld: applyWeld
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.GDOverlayShapes = api;

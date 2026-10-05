@@ -258,6 +258,101 @@ test("the line wand refuses a line off the picture", () => {
   assert.strictEqual(out.candidates.length, 0);
 });
 
+function wigglyRing(n, r, bumps) {
+  const out = [];
+  for (let i = 0; i < n; i++) { const a = i / n * 2 * Math.PI, rr = r + r * 0.08 * Math.sin(a * bumps); out.push({ x: 500 + rr * Math.cos(a), y: 500 + rr * Math.sin(a) }); }
+  return out;
+}
+
+test("a detailed outline shows a few key corners, not every corner", () => {
+  const ring = wigglyRing(200, 200, 9);
+  const keys = shapes.keyCorners(ring);
+  assert.ok(keys.length >= 8 && keys.length <= 24, "got " + keys.length);
+  keys.forEach((k, i) => assert.ok(i === 0 || k > keys[i - 1], "key corners come in order"));
+  assert.deepStrictEqual(shapes.keyCorners([{ x: 0, y: 0 }, { x: 300, y: 0 }, { x: 300, y: 300 }, { x: 0, y: 300 }]), [0, 1, 2, 3], "a square keeps its four corners");
+});
+
+test("a grab on the edge bends it smoothly there, and only there", () => {
+  const sq = [{ x: 0, y: 0 }, { x: 300, y: 0 }, { x: 300, y: 300 }, { x: 0, y: 300 }];
+  const at = shapes.nearestOnRing(sq, { x: 150, y: 4 });
+  assert.strictEqual(at.segment, 0);
+  const bend = shapes.bendRing(sq, at, { keys: [0, 1, 2, 3], maxReachPx: 40 });
+  const moved = bend.ring.map((p, i) => ({ x: p.x, y: p.y + 20 * bend.weights[i] }));
+  const grabbed = moved.find(p => Math.abs(p.x - 150) < 1e-6);
+  assert.ok(grabbed && Math.abs(grabbed.y - 20) < 1e-6, "the grabbed point follows the pointer");
+  moved.forEach(p => { if (Math.abs(p.x - 150) > 40) assert.ok(Math.abs(p.y) < 1e-6 || p.y === 300, "beyond the reach nothing moves"); });
+  assert.ok(moved.filter(p => p.y > 0.5 && p.y < 19.5).length >= 4, "it bends as a curve, not a tent");
+  assert.deepStrictEqual(moved[0], { x: 0, y: 0 }, "the first corner stays first");
+  const tidy = shapes.tidyBend(moved, bend.added);
+  assert.ok(tidy.length < moved.length && tidy.length > 4, "the flat corners the bend put in go again");
+});
+
+test("a key corner dragged keeps the edges either side straight", () => {
+  const sq = [{ x: 0, y: 0 }, { x: 300, y: 0 }, { x: 300, y: 300 }, { x: 0, y: 300 }];
+  const bend = shapes.bendRing(sq, { index: 1 }, { keys: [0, 1, 2, 3] });
+  assert.deepStrictEqual(bend.weights, [0, 1, 0, 0]);
+  const dense = [];
+  for (let i = 0; i < 30; i++) dense.push({ x: i * 10, y: 0 });
+  dense.push({ x: 300, y: 150 }, { x: 0, y: 150 });
+  const b2 = shapes.bendRing(dense, { index: 15 }, { keys: [0, 29, 30, 31] });
+  const w = b2.weights;
+  assert.ok(Math.abs(w[15] - 1) < 1e-9 && w[0] === 0 && w[29] === 0, "the key corners either side stay put");
+  assert.ok(Math.abs(w[8] - (8 / 15)) < 1e-9, "the stretch between follows in proportion");
+});
+
+const SEAM_LAT = -35, SEAM_K = Math.cos(SEAM_LAT * Math.PI / 180);
+const seamLL = (x, y) => ({ lat: SEAM_LAT + y / 111320, lng: 170 + x / (111320 * SEAM_K) });
+const seamXY = p => ({ x: (p.lng - 170) * 111320 * SEAM_K, y: (p.lat - SEAM_LAT) * 111320 });
+const seamRect = (x0, y0, x1, y1) => [seamLL(x0, y0), seamLL(x1, y0), seamLL(x1, y1), seamLL(x0, y1)];
+const sharedCorners = (a, b) => { const keys = new Set(b.map(shapes.pointKey)); return a.filter(p => keys.has(shapes.pointKey(p))); };
+
+test("a small gap between two areas closes in the middle, as one shared seam", () => {
+  const out = shapes.seamPair(seamRect(0, 0, 100, 60), seamRect(103, -20, 200, 80));
+  assert.ok(out && out.seams === 1, "they must seam");
+  const shared = sharedCorners(out.a, out.b);
+  assert.ok(shared.length >= 2, "the seam is the very same corners in both");
+  shared.forEach(p => assert.ok(Math.abs(seamXY(p).x - 101.5) < 0.05, "the seam runs down the middle of the gap"));
+  assert.deepStrictEqual(out.a[0], seamRect(0, 0, 100, 60)[0], "a corner the seam never reached keeps its exact coordinates");
+});
+
+test("a thin overlap splits down its middle; a wide gap or a shape inside another is left alone", () => {
+  const out = shapes.seamPair(seamRect(0, 0, 100, 60), seamRect(98, -20, 200, 80));
+  assert.ok(out, "a thin overlap must seam");
+  const xs = out.a.map(p => seamXY(p).x);
+  assert.ok(Math.max(...xs) < 99.05, "the first shape stops at the middle of the overlap");
+  assert.ok(Math.min(...out.b.map(p => seamXY(p).x)) > 97.95, "the second keeps no more than it had");
+  assert.strictEqual(shapes.seamPair(seamRect(0, 0, 100, 60), seamRect(108, -20, 200, 80)), null, "8m apart is not a seam");
+  assert.strictEqual(shapes.seamPair(seamRect(0, 0, 100, 60), seamRect(10, 10, 30, 30)), null, "a pond in a waste area is not a seam");
+});
+
+test("a wiggly edge seams as one line, and corners shared with a third shape stay put", () => {
+  const wiggle = [];
+  for (let i = 0; i <= 40; i++) wiggle.push(seamLL(103 + 2 * Math.sin(i / 3), 60 - i * 2));
+  const b = wiggle.concat([seamLL(200, -20), seamLL(200, 60)]);
+  const a = seamRect(0, 0, 100, 60);
+  const out = shapes.seamPair(a, b);
+  assert.ok(out && out.seams === 1, "got " + (out && out.seams));
+  const locked = shapes.seamPair(a, b, { lockedA: [false, true, true, false] });
+  assert.ok(!locked || (locked.a.some(p => shapes.pointKey(p) === shapes.pointKey(a[1])) && locked.a.some(p => shapes.pointKey(p) === shapes.pointKey(a[2]))), "locked corners must survive");
+});
+
+test("a seam dragged on one side moves the other side with it", () => {
+  const out = shapes.seamPair(seamRect(0, 0, 100, 60), seamRect(103, -20, 200, 80));
+  const runs = shapes.weldRuns(out.b, out.a);
+  assert.ok(runs.length === 1 && runs[0].g.length >= 2);
+  const at = out.a.findIndex(p => sharedCorners([p], out.b).length);
+  const moved = out.a.map(p => ({ lat: p.lat, lng: p.lng }));
+  const from = moved.map((p, i) => i);
+  moved[at] = seamLL(110, seamXY(moved[at]).y);
+  /* A corner put in along the seam is taken by the other side too. */
+  const mid = seamLL(105, 30);
+  moved.splice(at + 1, 0, mid);
+  from.splice(at + 1, 0, -1);
+  const b = shapes.applyWeld(out.b, runs, moved, from);
+  assert.strictEqual(sharedCorners(moved, b).length, sharedCorners(out.a, out.b).length + 1);
+  assert.ok(b.some(p => shapes.pointKey(p) === shapes.pointKey(mid)));
+});
+
 let failed = 0;
 tests.forEach(t => {
   try { t.fn(); console.log("  ok  " + t.name); }
