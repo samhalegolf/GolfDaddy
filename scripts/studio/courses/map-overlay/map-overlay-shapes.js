@@ -6,8 +6,10 @@
  * round default made here. Greens and bunkers are kept as smooth curves through a few handles.
  * Bunker outlines that overlap are merged into one. A water hazard drawn round by hand is
  * thinned to the corners that matter. A single tree is a small ring, a cluster an oval
- * stretched over it; the tree finder looks for more trees like the ones placed by hand, and the
- * area wand and colour wand outline a waste area. Everything is in
+ * stretched over it; the tree finder looks for more trees like the ones placed by hand, the
+ * area wand outlines a waste area, and the colour wand outlines anything picked by its colour.
+ * A wand outline keeps many corners so it follows the ground, and is reshaped by a few key
+ * corners and by bending its edge where it is grabbed (keyCorners, bendRing). Everything is in
  * plain {lat, lng} and flat-earth metres about the shape's own position, which is exact
  * enough at the size of a golf hole.
  *
@@ -20,11 +22,14 @@
   /* A fairway is usually 30-45m across; 35m is a middle that reads as a fairway at a glance
      and is quick to pull in or out. */
   var FAIRWAY_WIDTH_M = 35;
-  /* The overlay stores at most 64 points a shape (gd-map-overlay-core OVERLAY_MAX_POINTS).
-     A corner every ~30m is enough to bend a fairway to what is on the ground without a wall of
-     handles, and capping the stations at 20 a side keeps room under the 64 for the corners a
-     person adds by hand. */
-  var MAX_POINTS = 64;
+  /* The overlay stores at most 256 points a shape (gd-map-overlay-core OVERLAY_MAX_POINTS) -
+     room for a wand outline that follows the ground closely. A corner every ~30m is enough to
+     bend a fairway to what is on the ground, so a fairway's stations stay capped at 20 a side. */
+  var MAX_POINTS = 256;
+  /* A wand outline (colour wand, Draw + grow, line wand) keeps at most this many corners: close
+     to the edge it found, with room left under MAX_POINTS for reshaping. Only a few of them
+     are shown as handles (keyCorners); the rest bend with the edge when it is dragged. */
+  var DETAIL_MAX_POINTS = 220;
   var MIN_SPACING_M = 30;
   var MAX_STATIONS = 20;
   /* A tee is a round marker on where the tee is - which way it faces is the hole's business,
@@ -282,10 +287,11 @@
     return a / 2;
   }
 
-  /* Two outlines that overlap, as one: the outer edge of everything either covers. Null when
+  /* Two outlines that overlap, as one: the outer edge of everything either covers, at most
+     maxPoints corners (MERGE_MAX_POINTS by default). Null when
      they do not overlap, so a caller can try the next one. Done on a fine grid rather than by
      clipping polygons - a wand outline can cross itself, and a grid does not care. */
-  function mergeOverlapping(ringA, ringB) {
+  function mergeOverlapping(ringA, ringB, maxPoints) {
     if (!ringA || !ringB || ringA.length < 3 || ringB.length < 3) return null;
     var f = frame(ringA[0]);
     var a = ringA.map(f.toXY), b = ringB.map(f.toXY);
@@ -313,7 +319,8 @@
     if (!best) return null;
     var tol = cell * 0.75;
     var out = simplifyRing(best, tol);
-    while (out.length > MERGE_MAX_POINTS) { tol *= 1.5; out = simplifyRing(best, tol); }
+    var cap = maxPoints || MERGE_MAX_POINTS;
+    while (out.length > cap) { tol *= 1.5; out = simplifyRing(best, tol); }
     return out.length >= 3 ? out.map(f.toLL) : null;
   }
 
@@ -368,7 +375,6 @@
      line to be on the surface, and a fairway running into rough of the same colour will run
      out to the reach. */
   var LINE_WAND_LEVELS = [1.6, 2.2, 2.9, 3.7, 4.6, 5.8];
-  var LINE_WAND_MAX_POINTS = 48;
   /* Share of a region's edge lying on the reach limit past which it counts as leaked. */
   var LINE_WAND_LEAK_SHARE = 0.12;
 
@@ -581,7 +587,7 @@
       var loop = traceLargestLoop(mask, w, h);
       if (!loop) { rings.push(null); return; }
       var tol = 0.75, ring = simplifyRing(loop, tol);
-      var cap = Number(o.maxPoints) || LINE_WAND_MAX_POINTS;
+      var cap = Number(o.maxPoints) || DETAIL_MAX_POINTS;
       while (ring.length > cap) { tol *= 1.5; ring = simplifyRing(loop, tol); }
       /* Leaked: a good share of its edge is the reach limit, not anything in the picture. */
       rings.push(ring.length >= 3 ? { ring: ring, area: area, leaked: edge > 0 && atReach / edge > leakShare } : null);
@@ -784,10 +790,143 @@
     var filled = fillHoles(mask, w, h);
     var loop = traceLargestLoop(filled, w, h);
     if (!loop || Math.abs(ringArea(loop)) < 4) return null;
-    var cap = maxPoints || LINE_WAND_MAX_POINTS;
+    var cap = maxPoints || DETAIL_MAX_POINTS;
     var tol = 0.75, ring = simplifyRing(loop, tol);
     while (ring.length > cap) { tol *= 1.5; ring = simplifyRing(loop, tol); }
     return ring.length >= 3 ? ring : null;
+  }
+
+  /* ---- reshaping a detailed outline ----
+     A wand outline has far more corners than anyone wants to drag one by one. It is edited by
+     a few key corners - its sharpest turns, spaced out - and by grabbing the edge anywhere:
+     the edge bends smoothly round the grab, as if there were corners close by, and the key
+     corners either side stay put. All of this works in screen pixels ({x, y}), so how fine the
+     bend is follows the zoom. */
+
+  /* Distance round a closed ring to each corner from the first. */
+  function ringArc(xy) {
+    var cum = [0], total = 0;
+    for (var i = 1; i <= xy.length; i++) { total += len(sub(xy[i % xy.length], xy[i - 1])); if (i < xy.length) cum.push(total); }
+    return { cum: cum, total: total };
+  }
+
+  /* The corners of a ring that get a handle, as indices in order: the corners Douglas-Peucker
+     keeps at `tolPx` (the turns that shape it), none closer than `minGapPx` round the edge to
+     the one before, and an extra one wherever two are more than `maxGapPx` apart. */
+  function keyCorners(xy, opts) {
+    var o = opts || {}, n = xy ? xy.length : 0;
+    if (n < 3) return [];
+    var minGap = o.minGapPx || 64, maxGap = o.maxGapPx || 240;
+    var arc = ringArc(xy), total = arc.total;
+    var tagged = xy.map(function (p, i) { return { x: p.x, y: p.y, i: i }; });
+    var turns = simplifyRing(tagged, o.tolPx || 4).map(function (p) { return p.i; }).sort(function (a, b) { return a - b; });
+    var kept = [];
+    turns.forEach(function (i) { if (!kept.length || arc.cum[i] - arc.cum[kept[kept.length - 1]] >= minGap) kept.push(i); });
+    while (kept.length > 1 && total - arc.cum[kept[kept.length - 1]] + arc.cum[kept[0]] < minGap) kept.pop();
+    if (kept.length < 3) {
+      kept = [];
+      for (var q = 0; q < 4; q++) kept.push(nearestAt(arc, total * q / 4));
+    }
+    var out = [];
+    kept.forEach(function (i, k) {
+      out.push(i);
+      var a = arc.cum[i], b = k + 1 < kept.length ? arc.cum[kept[k + 1]] : total + arc.cum[kept[0]];
+      var extra = Math.ceil((b - a) / maxGap) - 1;
+      for (var e = 1; e <= extra; e++) out.push(nearestAt(arc, (a + (b - a) * e / (extra + 1)) % total));
+    });
+    return out.filter(function (i, k) { return out.indexOf(i) === k; }).sort(function (a, b) { return a - b; });
+  }
+  function nearestAt(arc, s) {
+    var best = 0, bd = Infinity;
+    arc.cum.forEach(function (c, i) { var d = Math.min(Math.abs(c - s), arc.total - Math.abs(c - s)); if (d < bd) { bd = d; best = i; } });
+    return best;
+  }
+
+  /* Where on a ring's edge a point is nearest: the corner it follows and the point itself. */
+  function nearestOnRing(xy, pt) {
+    var best = null;
+    for (var i = 0; i < xy.length; i++) {
+      var a = xy[i], b = xy[(i + 1) % xy.length], d = sub(b, a), l2 = d.x * d.x + d.y * d.y;
+      var t = l2 > 1e-12 ? Math.max(0, Math.min(1, ((pt.x - a.x) * d.x + (pt.y - a.y) * d.y) / l2)) : 0;
+      var q = add(a, scale(d, t)), dist = len(sub(pt, q));
+      if (!best || dist < best.dist) best = { segment: i, t: t, point: q, dist: dist };
+    }
+    return best;
+  }
+
+  function falloff(u) { return u < 1 ? 0.5 * (1 + Math.cos(Math.PI * u)) : 0; }
+  function linearFalloff(u) { return u < 1 ? 1 - u : 0; }
+
+  /* Ready a ring to be bent at one place. at: {index} - a corner - or {segment, point} - a
+     point on the edge after corner `segment`, put in as a corner of its own. The bend reaches
+     round the edge each way as far as the next of `keys` (the key corners, which stay put),
+     and no further than `maxReachPx` when given. A corner (at.index) moves like a corner: the
+     edge either side follows it in proportion, so a straight edge stays straight. A grab on
+     the edge bends it as a smooth curve: the stretch it reaches is cut into corners no
+     further apart than `spacingPx` (fewer if that would pass `maxPoints`) so it is a curve
+     rather than a tent. Returns {ring, weights, added, from}: move corner i by the
+     drag times weights[i]; added[i] marks a corner put in here, for tidyBend; from[i] is the
+     corner of `xy` it was, or -1. The ring keeps its first corner first. */
+  function bendRing(xy, at, opts) {
+    var o = opts || {}, n = xy.length, smooth = at.segment != null;
+    var fall = smooth ? falloff : linearFalloff;
+    var ring = xy.map(function (p, i) { return { x: p.x, y: p.y, from: i }; }), anchor;
+    if (at.segment != null) { ring.splice(at.segment + 1, 0, { x: at.point.x, y: at.point.y, from: -1 }); anchor = at.segment + 1; }
+    else anchor = at.index;
+    n = ring.length;
+    var rot = ring.slice(anchor).concat(ring.slice(0, anchor));
+    var arc = ringArc(rot), total = arc.total;
+    var back = total / 2, ahead = total / 2;
+    rot.forEach(function (p, i) {
+      if (i === 0 || p.from < 0 || !o.keys || o.keys.indexOf(p.from) < 0) return;
+      ahead = Math.min(ahead, arc.cum[i]);
+      back = Math.min(back, total - arc.cum[i]);
+    });
+    if (o.maxReachPx) { ahead = Math.min(ahead, o.maxReachPx); back = Math.min(back, o.maxReachPx); }
+    function reach(s) { return s <= ahead || total - s <= back; }
+    var inRange = 0;
+    for (var i = 0; i < n; i++) {
+      var s0 = arc.cum[i], s1 = i + 1 < n ? arc.cum[i + 1] : total;
+      if (reach(s0) || reach(s1)) inRange += s1 - s0;
+    }
+    var room = Math.max(0, (o.maxPoints || MAX_POINTS) - n);
+    var gap = Math.max(o.spacingPx || 6, room ? inRange / room : Infinity);
+    var out = [], sAt = [];
+    for (i = 0; i < n; i++) {
+      var a = rot[i], b = rot[(i + 1) % n], sa = arc.cum[i], sb = i + 1 < n ? arc.cum[i + 1] : total;
+      out.push(a); sAt.push(sa);
+      if (!smooth || !(reach(sa) || reach(sb)) || !isFinite(gap)) continue;
+      var pieces = Math.floor((sb - sa) / gap);
+      for (var k = 1; k < pieces; k++) {
+        var t = k / pieces;
+        out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, from: -1 });
+        sAt.push(sa + (sb - sa) * t);
+      }
+    }
+    var weights = sAt.map(function (s) { return Math.max(ahead > 0 ? fall(s / ahead) : 0, back > 0 ? fall((total - s) / back) : 0, s === 0 ? 1 : 0); });
+    var first = 0;
+    out.forEach(function (p, i) { if (p.from === 0) first = i; });
+    var order = out.slice(first).concat(out.slice(0, first));
+    weights = weights.slice(first).concat(weights.slice(0, first));
+    return {
+      ring: order.map(function (p) { return { x: p.x, y: p.y }; }),
+      weights: weights,
+      added: order.map(function (p) { return p.from < 0; }),
+      from: order.map(function (p) { return p.from; })
+    };
+  }
+
+  /* After a bend: a corner bendRing put in that ended up on a straight line between its
+     neighbours (within tolPx) is taken back out, so a bend leaves only the corners it needs. */
+  function tidyBend(xy, added, tolPx) {
+    var out = xy.slice(), flags = added.slice(), tol = tolPx || 0.4;
+    for (var i = 0; i < out.length && out.length > 3; i++) {
+      if (!flags[i]) continue;
+      var a = out[(i - 1 + out.length) % out.length], b = out[(i + 1) % out.length], d = sub(b, a), l = len(d);
+      var off = l < 1e-9 ? len(sub(out[i], a)) : Math.abs(d.x * (a.y - out[i].y) - d.y * (a.x - out[i].x)) / l;
+      if (off <= tol) { out.splice(i, 1); flags.splice(i, 1); i--; }
+    }
+    return out;
   }
 
   var api = {
@@ -801,7 +940,8 @@
     TREE_RADIUS_M: TREE_RADIUS_M, treeAt: treeAt, ellipseInBox: ellipseInBox, ringRadiusM: ringRadiusM,
     growFromArea: growFromArea, colourField: colourField, colourModel: colourModel, circleSamples: circleSamples,
     treeFinder: treeFinder, TREE_FINDER_LEVELS: TREE_FINDER_LEVELS, TREE_FINDER_MAX: TREE_FINDER_MAX,
-    floodSelect: floodSelect, maskOutline: maskOutline
+    floodSelect: floodSelect, maskOutline: maskOutline,
+    DETAIL_MAX_POINTS: DETAIL_MAX_POINTS, keyCorners: keyCorners, nearestOnRing: nearestOnRing, bendRing: bendRing, tidyBend: tidyBend
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.GDOverlayShapes = api;

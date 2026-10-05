@@ -73,7 +73,10 @@ export function overlayKindIsPolygon(kind) { return POLYGON_KINDS.has(String(kin
 /* Room for a whole course placed as pins - 18 greens, fairways and tees plus the bunkers - and
    the single trees the tree finder drops, a few hundred of them, with space to spare. */
 export const OVERLAY_MAX_FEATURES = 600;
-export const OVERLAY_MAX_POINTS = 64;
+/* A wand outline keeps enough corners to follow the ground (Studio's DETAIL_MAX_POINTS is 220),
+   with room to reshape. The mapper still thins surfaces to SURFACE_SHAPE_MAX_POINTS for the
+   course package; this is what the overlay itself holds. */
+export const OVERLAY_MAX_POINTS = 256;
 export const OVERLAY_TAG = "clarity:overlay";
 
 /* How many points a pin of each kind holds. A hole line has no pin form. */

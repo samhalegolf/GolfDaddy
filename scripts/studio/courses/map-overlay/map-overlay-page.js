@@ -87,17 +87,22 @@
   /* How each tool that has a choice places a shape. Wand: click the middle. Draw round: press
      and drag all the way round it. Line + wand: click a line down its middle, Finish, and the
      line wand (GDOverlayShapes.growFromLine) grows it out to the edge. Width: the fairway line
-     made into a fairway of the set width. */
+     made into a fairway of the set width. Round: a tee dropped as a round marker.
+     Every tool has the colour wand too: press on it and drag, and everything connected of
+     that colour is picked (see "the colour wand" below). */
   var METHODS = {
-    fairway: ["width", "line"], bunker: ["wand", "draw", "line"], water: ["wand", "draw", "line"],
+    fairway: ["width", "line", "colour"], green: ["wand", "colour"], tee: ["round", "colour"],
+    bunker: ["wand", "draw", "line", "colour"], water: ["wand", "draw", "line", "colour"],
     /* Trees: one tree a click, a cluster stretched as an oval, a wood drawn round, or the tree
        finder - a box dragged over ground with trees like the ones placed by hand. */
-    trees: ["single", "oval", "draw", "find"],
-    /* Waste area: drawn round roughly and grown out to its edge, or the colour wand. */
+    trees: ["single", "oval", "draw", "find", "colour"],
+    /* Hazard (gorse, scrub, a ravine): drawn round by hand. */
+    hazard: ["draw", "colour"],
+    /* Waste area: drawn round roughly and grown out to its edge. */
     waste: ["grow", "colour"]
   };
-  var METHOD_LABEL = { width: "Width", wand: "Wand", draw: "Draw round", line: "Line + wand", single: "Tree", oval: "Cluster", find: "Find trees", grow: "Draw + grow", colour: "Colour wand" };
-  var METHOD_NAMES = ["width", "wand", "draw", "line", "single", "oval", "find", "grow", "colour"];
+  var METHOD_LABEL = { width: "Width", wand: "Wand", round: "Round", draw: "Draw round", line: "Line + wand", single: "Tree", oval: "Cluster", find: "Find trees", grow: "Draw + grow", colour: "Colour wand" };
+  var METHOD_NAMES = ["width", "wand", "round", "draw", "line", "single", "oval", "find", "grow", "colour"];
   /* The line wand: how far from the line an edge may be at size 1 (metres), the picture's
      metres a pixel, and the size steps up / down take it through. */
   var LINE_WAND_REACH_M = { fairway: 35, bunker: 12, water: 50, waste: 25 };
@@ -117,7 +122,11 @@
   /* Autosave waits for a pause, so a burst of drags is one save. */
   var SAVE_DELAY_MS = 700;
   var SAVE_RETRY_MS = 6000;
-  var MAX_POINTS = 64;
+  /* gd-map-overlay-core OVERLAY_MAX_POINTS - room for a wand outline that follows the ground. */
+  var MAX_POINTS = 256;
+  /* A grab on a detailed outline's edge bends it this far round the edge each way, in screen
+     pixels - so zoomed in, the bend is finer. */
+  var EDGE_BEND_PX = 45;
   var MAX_FEATURES = 600;
   /* The tree finder reads the box at about this many metres a pixel (a crown ~25px across), up
      to this many pixels a side, and learns what a tree looks like from at most this many of the
@@ -131,9 +140,6 @@
   var COLOUR_WAND_TOL_START = 10;
   var COLOUR_WAND_TOL_PER_PX = 0.3;
   var COLOUR_WAND_TOL_MAX = 140;
-  /* A waste area outlined by a wand keeps at most this many corners - room left under
-     MAX_POINTS for corners added by hand. */
-  var WASTE_MAX_POINTS = 48;
 
   /* Survives leaving and re-entering the page - the shell tears the DOM down on every route
      change. The save state lives here too, so a save still in flight when the page is left
@@ -142,7 +148,7 @@
     course: null, features: [], loadedFor: "", osm: null, objects: [], lastRun: null, courseMap: null, view: null, sourceKey: "",
     showOsm: true, showObjects: true, status: "draft", hole: null,
     dirty: false, rev: 0, saving: false, saveError: "", fairwayWidth: 0,
-    mode: "shapes", wandSize: { green: 1, bunker: 1, water: 1 }, method: { fairway: "width", bunker: "wand", water: "wand", trees: "single", waste: "grow" }, lineWandSize: { fairway: 1, bunker: 1, water: 1, waste: 1 }, mergeBunkers: true, fullscreen: false, unsaved: null,
+    mode: "shapes", wandSize: { green: 1, bunker: 1, water: 1 }, method: { fairway: "width", green: "wand", tee: "round", bunker: "wand", water: "wand", trees: "single", hazard: "draw", waste: "grow" }, lineWandSize: { fairway: 1, bunker: 1, water: 1, waste: 1 }, mergeBunkers: true, fullscreen: false, unsaved: null,
     /* The size the next single tree is dropped at, and the tree finder's sensitivity. */
     treeRadius: 0, treeFinderLevel: 2,
     /* Trees placed by hand on this course this session: what the tree finder learns from. Not
@@ -253,9 +259,6 @@
   }
   function kindLabel(kind) { return kind === "hole" ? "Hole line" : kind === "green" ? "Green" : kind === "tee" ? "Tee" : kind === "bunker" ? "Bunker" : kind === "water" ? "Water hazard" : kind === "trees" ? "Trees" : kind === "tree" ? "Tree" : kind === "hazard" ? "Hazard" : kind === "waste" ? "Waste area" : "Fairway"; }
   function isPolygon(kind) { return kind === "fairway" || kind === "green" || kind === "tee" || kind === "bunker" || kind === "water" || kind === "trees" || kind === "tree" || kind === "hazard" || kind === "waste"; }
-  /* Kinds that are only ever drawn round by hand: any non-water hazard (gorse, scrub, a
-     ravine). Reaches the bubble via the surface pass. */
-  var DRAW_ONLY_KINDS = ["hazard"];
   /* Tools with no pin form: their methods work the same in Pins as in Shapes. */
   var NO_PIN_KINDS = ["trees", "hazard", "waste"];
   function pct(size) { return Math.round(size * 100) + "%"; }
@@ -303,6 +306,8 @@
     draftPoint: { radius: 4, color: "#ffb54c", weight: 2, fillColor: "#1a1a1a", fillOpacity: 1, interactive: false },
     vertex: { radius: 6, color: "#ffffff", weight: 2, fillColor: "#ffb54c", fillOpacity: 1, className: "gdStudioOverlayHandle" },
     midpoint: { radius: 4, color: "#ffffff", weight: 1, opacity: 0.8, fillColor: "#ffffff", fillOpacity: 0.35, className: "gdStudioOverlayHandle" },
+    /* An invisible band along a detailed outline's edge: a press on it bends the edge there. */
+    edge: { weight: 16, opacity: 0, fill: false, className: "gdStudioOverlayEdge" },
     /* The marker on a wand click while the wand works. */
     wandGreen: { radius: 7, color: "#ffffff", weight: 2, fillColor: "#b7ff5c", fillOpacity: 1, interactive: false },
     wandBunker: { radius: 6, color: "#ffffff", weight: 2, fillColor: "#f2dfa0", fillOpacity: 1, interactive: false },
@@ -440,11 +445,12 @@
       '<details class="gdStudioLede gdStudioOverlayHelp"><summary>How it works</summary>' +
       "<p><strong>Shapes</strong>: <strong>Fairway</strong> - click along its middle and press Finish; <strong>Green</strong> / <strong>Bunker</strong> - click the middle and the wand outlines it " +
       "(then shaped by a few smooth points); <strong>Water</strong> / <strong>Bunker</strong> - <em>Wand</em>: click the middle, <em>Draw round</em>: press and drag all the way round it, or <em>Line + wand</em>: click a line down its middle and Finish, and the line wand grows it out to the edge (the tool's key again switches method); <strong>Fairway</strong> has <em>Line + wand</em> too, instead of a set width; <strong>Tee</strong> - click to drop a round tee; <strong>Hazard</strong> (gorse, scrub - anything that is not water) - press and drag all the way round it. " +
+      "Every tool also has the <em>Colour wand</em>: press on the thing and drag - the further you drag, the more of that colour it takes (Shift-drag adds more, ← → tighter / looser), Enter keeps it. " +
       "<strong>Trees</strong> - <em>Tree</em>: click to drop one tree, ↑ ↓ to size it; <em>Cluster</em>: press and drag to stretch an oval over a group (Shift for a circle); <em>Draw round</em>: press and drag round a wood; <em>Find trees</em>: drag a box and the trees in it that look like the ones you placed by hand this session are dropped for you (← → fewer / more, Enter keeps them, Esc takes them away). " +
-      "<strong>Waste</strong> - <em>Draw + grow</em>: draw roughly round it and it is pushed out to the edge of the ground it sits on; <em>Colour wand</em>: press on it and drag - the further you drag, the more of that colour it takes (Shift-drag adds more, ← → tighter / looser), Enter makes it a waste area. " +
+      "<strong>Waste</strong> - <em>Draw + grow</em>: draw roughly round it and it is pushed out to the edge of the ground it sits on. " +
       "Whatever you just placed stays live: <strong>← →</strong> step the wand's sensitivity, <strong>↑ ↓</strong> make it smaller or bigger (a fairway narrower or wider), <strong>Enter</strong> or <strong>Space</strong> keeps it, <strong>Esc</strong> removes it - placing the next one keeps it too. " +
       "<strong>Pins</strong>, the quick pass: a fairway is its start then its end and becomes a fairway straight away; a green pin is outlined by the wand straight away; tees, bunkers and water stay pins until <strong>Shape pins</strong>. " +
-      "Whatever you just placed can be dragged at once to adjust it. In <strong>Move</strong>, drag shapes and their points, and drop either on the <strong>bin</strong> to delete. " +
+      "Whatever you just placed can be dragged at once to adjust it. In <strong>Move</strong>, drag shapes and their points, and drop either on the <strong>bin</strong> to delete. A detailed outline shows only its key points - grab its edge anywhere and it bends there, the key points either side staying put. " +
       "<strong>Link</strong>: drag from one shape to another (or tap one, then the other) to put them on the same hole; drag a shape onto empty ground to unlink it. " +
       "Everything saves as you go, as a <strong>draft</strong> the mapper ignores - <strong>Mark ready</strong> when the course looks right, then run the mapper. " +
       "Bright outlines are what OSM already has; dashed amber ones are the course's saved objects.</p></details>" +
@@ -475,13 +481,14 @@
       '<span class="gdStudioOverlayModes" data-gd-overlay="method" hidden>' +
       '<button type="button" data-gd-overlay="method-width" title="Click a line down the fairway; it becomes a fairway of the set width (F again switches)">Width</button>' +
       '<button type="button" data-gd-overlay="method-wand" title="Click the middle and the wand outlines it (press the tool key again to switch)">Wand</button>' +
+      '<button type="button" data-gd-overlay="method-round" title="Click to drop a round tee (T again switches)">Round</button>' +
       '<button type="button" data-gd-overlay="method-draw" title="Press and drag all the way round it (press the tool key again to switch)">Draw round</button>' +
       '<button type="button" data-gd-overlay="method-line" title="Click a line down its middle, Finish, and the line wand grows it out to the edge (press the tool key again to switch)">Line + wand</button>' +
       '<button type="button" data-gd-overlay="method-single" title="Click to drop one tree; up and down make it smaller or bigger (E again switches)">Tree</button>' +
       '<button type="button" data-gd-overlay="method-oval" title="Press and drag across a cluster of trees to stretch an oval over it - hold Shift for a circle (E again switches)">Cluster</button>' +
       '<button type="button" data-gd-overlay="method-find" title="Drag a box: trees in it that look like the ones you placed by hand this session are dropped as trees (E again switches)">Find trees</button>' +
       '<button type="button" data-gd-overlay="method-grow" title="Draw roughly round the waste area; it is pushed out to the edge of the ground it sits on (A again switches)">Draw + grow</button>' +
-      '<button type="button" data-gd-overlay="method-colour" title="Press on the waste area and drag - further selects more of the same colour. Shift-drag adds. Enter makes it a waste area (A again switches)">Colour wand</button>' +
+      '<button type="button" data-gd-overlay="method-colour" title="Press on it and drag - further selects more of the same colour. Shift-drag adds. Enter keeps it (press the tool key again to switch)">Colour wand</button>' +
       "</span>" +
       '<span class="gdStudioOverlayOpt" data-gd-overlay="wand-size-label"><span data-gd-overlay="wand-size-name">Wand</span> ' +
       '<button type="button" class="gdStudioOverlayStep" data-gd-overlay="wand-smaller" title="The wand reaches for a smaller edge (↓ on the shape just placed, [ for the next one)">−</button>' +
@@ -511,7 +518,7 @@
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "hole", "hole-label", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "clear", "run", "status"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "hole", "hole-label", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -640,13 +647,13 @@
 
     var TOOL_TEXT = {
       shapes: {
-        fairway: "Lay a line down the fairway - at the set width, or wanded out to its edge (F)",
-        green: "Click a green and the wand outlines it (G)",
-        tee: "Drop a round tee (T)",
-        bunker: "Click a bunker for the wand, draw round it, or lay a line and wand it out (B)",
-        water: "Click water for the wand, draw round it, or lay a line and wand it out (W)",
-        trees: "A tree a click, a cluster as an oval, a wood drawn round, or find trees in a box (E)",
-        hazard: "Draw round a non-water hazard - gorse, scrub, a ravine (X)",
+        fairway: "Lay a line down the fairway - at the set width, or wanded out to its edge - or pick it with the colour wand (F)",
+        green: "Click a green and the wand outlines it, or pick it with the colour wand (G)",
+        tee: "Drop a round tee, or pick it with the colour wand (T)",
+        bunker: "Click a bunker for the wand, draw round it, lay a line and wand it out, or the colour wand (B)",
+        water: "Click water for the wand, draw round it, lay a line and wand it out, or the colour wand (W)",
+        trees: "A tree a click, a cluster as an oval, a wood drawn round, find trees in a box, or the colour wand (E)",
+        hazard: "Draw round a non-water hazard - gorse, scrub, a ravine - or pick it with the colour wand (X)",
         waste: "Draw round a waste area and grow it out, or pick it with the colour wand (A)"
       },
       pins: {
@@ -655,8 +662,8 @@
         tee: "Pin the middle of a tee (T)",
         bunker: "Pin the middle of a bunker (B)",
         water: "Pin the middle of a water hazard (W)",
-        trees: "A tree a click, a cluster as an oval, a wood drawn round, or find trees in a box - trees have no pin (E)",
-        hazard: "Draw round a non-water hazard - hazards have no pin (X)",
+        trees: "A tree a click, a cluster as an oval, a wood drawn round, find trees in a box, or the colour wand - trees have no pin (E)",
+        hazard: "Draw round a non-water hazard, or pick it with the colour wand - hazards have no pin (X)",
         waste: "Draw round a waste area and grow it out, or pick it with the colour wand - waste has no pin (A)"
       }
     };
@@ -689,7 +696,7 @@
         b.hidden = !methods || methods.indexOf(m) < 0;
         b.classList.toggle("isActive", !!methods && session.method[tool] === m);
       });
-      el["width-label"].hidden = !shapesMode || (tool === "fairway" && session.method.fairway === "line");
+      el["width-label"].hidden = !shapesMode || (tool === "fairway" && session.method.fairway !== "width");
       el["wand-size-label"].hidden = !(growWanding() || (WAND_KINDS.indexOf(tool) >= 0 && (!METHODS[tool] || methodOf(tool) === "wand" || !shapesMode) && (shapesMode || tool === "green")));
       renderWandSize();
     }
@@ -701,15 +708,16 @@
     function methodOf(kind) { return METHODS[kind] && (session.mode === "shapes" || NO_PIN_KINDS.indexOf(kind) >= 0) ? session.method[kind] : null; }
     /* The kind a press-and-drag draws round right now, or null when the tool clicks instead. A
        waste area on Draw + grow is drawn round first, then grown. */
-    function drawRoundKind() { return DRAW_ONLY_KINDS.indexOf(tool) >= 0 || methodOf(tool) === "draw" || methodOf(tool) === "grow" ? tool : null; }
+    function drawRoundKind() { return methodOf(tool) === "draw" || methodOf(tool) === "grow" ? tool : null; }
     /* What a press-and-drag on the map does with the tool in hand, or null when it pans. */
     function pressGesture() {
       if (drawRoundKind()) return "lasso";
       var m = methodOf(tool);
       return m === "oval" ? "oval" : m === "find" ? "box" : m === "colour" ? "colour" : null;
     }
-    /* Whether clicks lay a line: always for a fairway, for bunkers and water on Line + wand. */
-    function lineTool() { return tool === "fairway" || methodOf(tool) === "line"; }
+    /* Whether clicks lay a line: for a fairway unless it is on the colour wand, for bunkers and
+       water on Line + wand. */
+    function lineTool() { return tool === "fairway" ? methodOf("fairway") !== "colour" : methodOf(tool) === "line"; }
     /* Whether the shape is grown out by a wand with a reach: a finished line on Line + wand,
        or a waste area drawn round on Draw + grow. */
     function growWanding() { return methodOf(tool) === "line" || methodOf(tool) === "grow"; }
@@ -968,11 +976,20 @@
     }
 
     /* ---- the colour wand ----
-       Like Instant Alpha in Preview: press on the waste area and drag - the further from the
-       press, the more of that colour it takes in (connected to where you pressed). Shift-drag
-       adds to what is already picked. The pick is shown over the map until Enter makes it a
-       waste area; left and right tighten or loosen the last drag; Esc drops it. The picture is
-       the view on screen, read once and reused until the map moves. */
+       Like Instant Alpha in Preview: press on the thing and drag - the further from the press,
+       the more of that colour it takes in (connected to where you pressed). Shift-drag adds to
+       what is already picked. The pick is shown over the map until Enter makes it a shape of
+       the tool in hand; left and right tighten or loosen the last drag; Esc drops it. The
+       picture is the view on screen, read once and reused until the map moves. The outline
+       keeps its detail (shapes.DETAIL_MAX_POINTS) - it is reshaped by its key corners and by
+       bending its edge, not corner by corner. */
+
+    /* What the colour wand's pick becomes, in a sentence: "a green", "a wood". */
+    function colourNoun(kind) { return kind === "trees" ? "a wood" : "a " + kindLabel(kind).toLowerCase(); }
+    /* What to press on: "the green", "the trees". */
+    function colourThing(kind) { return kind === "trees" ? "trees" : kindLabel(kind).toLowerCase(); }
+    /* The key that steps the tool in hand through its methods. */
+    function methodKey(kind) { return { hazard: "X", waste: "A", trees: "E" }[kind] || kind.charAt(0).toUpperCase(); }
 
     function colourCapture() {
       var b = mapObj.getBounds(), z = Math.round(mapObj.getZoom());
@@ -1055,7 +1072,7 @@
       colourSel = { cap: press.cap, seed: press.seed, tol: press.tol, base: press.base, mask: mask };
       drawColourOverlay(press.cap, mask);
       updateHint();
-      setStatus("Enter makes it a waste area · ← → tighter / looser · Shift-drag adds more · Esc drops it.");
+      setStatus("Enter makes it " + colourNoun(tool) + " · ← → tighter / looser · Shift-drag adds more · Esc drops it.");
     }
 
     function stepColourTolerance(by) {
@@ -1063,7 +1080,7 @@
       sel.tol = Math.max(1, Math.min(COLOUR_WAND_TOL_MAX, sel.tol * (by > 0 ? 1.18 : 1 / 1.18)));
       sel.mask = colourMask({ cap: sel.cap, seed: sel.seed, tol: sel.tol, base: sel.base });
       drawColourOverlay(sel.cap, sel.mask);
-      setStatus("Colour tolerance " + Math.round(sel.tol) + ". Enter makes it a waste area.");
+      setStatus("Colour tolerance " + Math.round(sel.tol) + ". Enter makes it " + colourNoun(tool) + ".");
     }
 
     /* The pick drawn over the map as a tinted picture on the capture's own footprint, coarser
@@ -1104,14 +1121,16 @@
     }
 
     function keepColourSel() {
-      var sel = colourSel, cap = sel.cap;
-      var ring = shapes.maskOutline(sel.mask, cap.image.width, cap.image.height, WASTE_MAX_POINTS);
+      var sel = colourSel, cap = sel.cap, kind = tool;
+      var ring = shapes.maskOutline(sel.mask, cap.image.width, cap.image.height, shapes.DETAIL_MAX_POINTS);
       clearColourSel();
-      if (!ring) { setStatus("Nothing picked yet - press on the waste area and drag.", true); return; }
+      if (!ring) { setStatus("Nothing picked yet - press on it and drag.", true); return; }
       var points = ring.map(cap.toLL);
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
-      addFeature({ kind: "waste", points: points, source: "wand" });
-      setStatus("Waste area placed. Drag its corners in Move to tidy it.");
+      var merged = kind === "bunker" ? mergeBunker(points, session.hole, null, true) : null;
+      if (merged) { lastPlacedId = merged.id; drawFeatures(); changed(); setStatus("Bunker joined the one it overlaps. Grab its edge in Move to tidy it."); return; }
+      addFeature({ kind: kind, points: points, source: "colour" });
+      setStatus(kindLabel(kind) + " placed. Grab its edge in Move to tidy it.");
     }
 
     /* ---- the wand's size ----
@@ -1419,7 +1438,7 @@
       var m = methodOf(tool);
       if (m === "oval") return "Press and drag across the cluster of trees to stretch an oval over it.";
       if (m === "find") return "Drag a box over the ground to look for trees in.";
-      if (m === "colour") return colourSel ? "Enter makes the pick a waste area · drag again to change it · Shift-drag adds." : "Press on the waste area and drag - the further you drag, the more it takes.";
+      if (m === "colour") return colourSel ? "Enter makes the pick " + colourNoun(tool) + " · drag again to change it · Shift-drag adds." : "Press on the " + colourThing(tool) + " and drag - the further you drag, the more it takes.";
       var noun = tool === "trees" ? "trees" : tool === "waste" ? "waste area" : kindLabel(tool).toLowerCase();
       return "Press and drag all the way round the " + noun + " to outline it.";
     }
@@ -1543,23 +1562,25 @@
     /* A bunker outline joins every placed bunker it overlaps, when merging is on: the first
        one it touches takes the merged outline and the rest go. Returns that bunker, or null
        when it overlapped none. `except` is a feature the outline must not merge with (the pin
-       it came from). */
-    function mergeBunker(points, hole, except) {
+       it came from). `detailed`: the outline is the colour wand's, and the merged bunker keeps
+       its detail rather than becoming a smooth one - as it does when any bunker it joins is. */
+    function mergeBunker(points, hole, except, detailed) {
       if (!session.mergeBunkers) return null;
       var into = null, merged = points;
       session.features.slice().forEach(function (f) {
         if (f.kind !== "bunker" || f.pin || f === except) return;
-        var ring = shapes.mergeOverlapping(f.points, merged);
+        var ring = shapes.mergeOverlapping(f.points, merged, shapes.DETAIL_MAX_POINTS);
         if (!ring) return;
         merged = ring;
+        if (f.source === "colour") detailed = true;
         if (!into) { into = f; return; }
         if (!into.hole && f.hole) into.hole = f.hole;
         session.features = session.features.filter(function (g) { return g !== f; });
         if (selectedId === f.id) selectedId = "";
       });
       if (!into) return null;
-      into.points = shapes.smoothOutline(merged, "bunker");
-      into.source = "wand";
+      into.points = detailed ? merged : shapes.smoothOutline(merged, "bunker");
+      into.source = detailed ? "colour" : "wand";
       if (!into.hole && hole) into.hole = hole;
       return into;
     }
@@ -1843,7 +1864,7 @@
     function clearFeatureLayers() {
       Object.keys(featureLayers).forEach(function (id) {
         var entry = featureLayers[id];
-        [entry.shape].concat(entry.vertices, entry.mids, entry.ends).forEach(function (l) { try { mapObj.removeLayer(l); } catch (e) {} });
+        [entry.shape].concat(entry.edge ? [entry.edge] : [], entry.vertices, entry.mids, entry.ends).forEach(function (l) { try { mapObj.removeLayer(l); } catch (e) {} });
       });
       featureLayers = {};
       clearLinkLayers();
@@ -1851,7 +1872,7 @@
 
     function midpoints(f) {
       var out = [];
-      if (f.pin || isSmooth(f) || f.kind === "tree") return out;
+      if (f.pin || isSmooth(f) || isDetailed(f) || f.kind === "tree") return out;
       var n = f.points.length;
       var last = isPolygon(f.kind) ? n : n - 1;
       for (var i = 0; i < last; i++) {
@@ -1861,11 +1882,30 @@
       return out;
     }
 
-    /* A green or bunker is edited by its few handles; anything else by every corner. */
-    function isSmooth(f) { return !f.pin && !!shapes.SMOOTH[f.kind]; }
-    function handlePoints(f) {
+    /* A green or bunker is edited by its few smooth handles - unless the colour wand outlined
+       it, when it keeps the detail it found and is edited like any detailed outline. */
+    function isSmooth(f) { return !f.pin && !!shapes.SMOOTH[f.kind] && f.source !== "colour"; }
+    /* Any other area is a detailed outline - a wand's can have a couple of hundred corners. It
+       shows only its key corners (shapes.keyCorners, worked out on screen, so zooming in shows
+       more), and its edge can be grabbed anywhere and bent there (shapes.bendRing). A hole line
+       keeps a handle on every corner. */
+    function isDetailed(f) { return !!f && !f.pin && !isSmooth(f) && f.kind !== "tree" && isPolygon(f.kind); }
+    function screenRing(points) {
+      return points.map(function (p) { var c = mapObj.latLngToContainerPoint([p.lat, p.lng]); return { x: c.x, y: c.y }; });
+    }
+    function fromScreen(xy) {
+      return xy.map(function (c) { var ll = mapObj.containerPointToLatLng([c.x, c.y]); return { lat: ll.lat, lng: ll.lng }; });
+    }
+    /* The corners of f that carry a handle, as indices into f.points. */
+    function handleIndices(f) {
+      if (isSmooth(f)) return null;
+      if (isDetailed(f)) return shapes.keyCorners(screenRing(f.points));
+      return f.points.map(function (p, i) { return i; });
+    }
+    function handlePoints(f, keys) {
       var smooth = shapes.SMOOTH[f.kind];
-      return isSmooth(f) ? shapes.ringHandles(f.points, smooth.handles, smooth.steps) : f.points;
+      if (isSmooth(f)) return shapes.ringHandles(f.points, smooth.handles, smooth.steps);
+      return (keys || handleIndices(f)).map(function (i) { return f.points[i]; });
     }
 
     function canDrag(f) { return !!f && canEdit() && (tool === "move" || f.id === lastPlacedId); }
@@ -1903,14 +1943,21 @@
         });
         /* Not on a single tree: a stand of them would be a wall of numbers. */
         if (f.hole && f.kind !== "tree") shape.bindTooltip(String(f.hole), { permanent: true, direction: "center", className: "gdStudioOverlayLabel" });
-        var entry = { shape: shape, vertices: [], mids: [], ends: [] };
+        var entry = { shape: shape, edge: null, keys: null, vertices: [], mids: [], ends: [] };
         /* A fairway pin's start and end, always shown, so it reads as two pins and a line. */
         if (f.pin && f.points.length === 2 && !selected) {
           f.points.forEach(function (p) { entry.ends.push(L.circleMarker([p.lat, p.lng], STYLE.pinFairwayEnd).addTo(mapObj)); });
         }
         /* A single tree is moved whole and sized with up / down - it has no corners to drag. */
         if (f.id === selectedId && canEdit() && f.points.length > 1 && f.kind !== "tree" && bigEnoughForHandles(f)) {
-          handlePoints(f).forEach(function (p, i) {
+          var keys = entry.keys = handleIndices(f);
+          if (isDetailed(f)) {
+            entry.edge = L.polygon(latlngs, STYLE.edge).addTo(mapObj);
+            onPress(entry.edge, function (e) { beginDrag(f.id, "edge", -1, e); });
+            entry.edge.on("click", function (e) { if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent); });
+          }
+          handlePoints(f, keys).forEach(function (p, k) {
+            var i = keys ? keys[k] : k;
             var v = L.circleMarker([p.lat, p.lng], STYLE.vertex).addTo(mapObj);
             onPress(v, function (e) { beginDrag(f.id, "vertex", i, e); });
             v.on("click", function (e) { if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent); });
@@ -1966,8 +2013,9 @@
       if (!entry) return;
       if (f.pin && f.points.length === 1) entry.shape.setLatLng([f.points[0].lat, f.points[0].lng]);
       else entry.shape.setLatLngs(toLatLngs(f.points));
+      if (entry.edge) entry.edge.setLatLngs(toLatLngs(f.points));
       entry.ends.forEach(function (m, i) { if (f.points[i]) m.setLatLng([f.points[i].lat, f.points[i].lng]); });
-      var handles = handlePoints(f);
+      var handles = entry.vertices.length ? handlePoints(f, entry.keys) : [];
       entry.vertices.forEach(function (v, i) { if (handles[i]) v.setLatLng([handles[i].lat, handles[i].lng]); });
       midpoints(f).forEach(function (m, i) { if (entry.mids[i]) entry.mids[i].setLatLng([m.lat, m.lng]); });
     }
@@ -2044,9 +2092,32 @@
         start: e.latlng, x: e.originalEvent.clientX, y: e.originalEvent.clientY,
         orig: f.points.map(function (p) { return { lat: p.lat, lng: p.lng }; })
       };
+      if (isDetailed(f) && mode !== "body") beginBend(f, e);
       document.addEventListener("pointermove", onDragMove);
       document.addEventListener("pointerup", onDragEnd);
       document.addEventListener("pointercancel", onDragEnd);
+    }
+
+    /* A detailed outline is bent rather than moved corner by corner: from a key corner, the
+       edge either side follows in proportion as far as the next key corners; from a grab on
+       the edge, it bends as a smooth curve round the grab. */
+    function beginBend(f, e) {
+      var entry = featureLayers[f.id];
+      var xy = screenRing(f.points);
+      var keys = (entry && entry.keys) || shapes.keyCorners(xy);
+      var start = mapObj.latLngToContainerPoint(e.latlng);
+      var at = drag.mode === "edge" ? shapes.nearestOnRing(xy, { x: start.x, y: start.y }) : { index: drag.index };
+      var bend = shapes.bendRing(xy, at, { keys: keys, maxReachPx: drag.mode === "edge" ? EDGE_BEND_PX : 0, maxPoints: MAX_POINTS });
+      drag.bend = { ring: bend.ring, weights: bend.weights, added: bend.added, start: start, last: bend.ring };
+      /* The handles follow the corners they sit on. */
+      if (entry && entry.keys) entry.keys = entry.keys.map(function (k) { return bend.from.indexOf(k); });
+    }
+
+    function bendTo(f, ll) {
+      var b = drag.bend, now = mapObj.latLngToContainerPoint(ll);
+      var dx = now.x - b.start.x, dy = now.y - b.start.y;
+      b.last = b.ring.map(function (p, i) { return { x: p.x + dx * b.weights[i], y: p.y + dy * b.weights[i] }; });
+      f.points = fromScreen(b.last);
     }
 
     function onDragMove(event) {
@@ -2062,6 +2133,8 @@
       if (drag.mode === "body") {
         var dLat = ll.lat - drag.start.lat, dLng = ll.lng - drag.start.lng;
         f.points = drag.orig.map(function (p) { return { lat: p.lat + dLat, lng: p.lng + dLng }; });
+      } else if (drag.bend) {
+        bendTo(f, ll);
       } else if (isSmooth(f)) {
         var smooth = shapes.SMOOTH[f.kind];
         var handles = shapes.ringHandles(drag.orig, smooth.handles, smooth.steps);
@@ -2089,6 +2162,7 @@
          the click that follows would land on the map and undo the selection it just made. */
       dragEndedAt = Date.now();
       if (!d.moved) {
+        if (d.bend) drawFeatures();
         if (d.inserted) changed();
         return;
       }
@@ -2096,11 +2170,14 @@
       if (event.type !== "pointercancel" && overBin(event)) {
         if (d.mode === "body") { removeFeature(f.id); setStatus(kindLabel(f.kind) + " deleted."); return; }
         f.points = d.orig;
+        if (d.mode === "edge") { drawFeatures(); return; }
         if (d.inserted) { f.points.splice(d.index, 1); drawFeatures(); return; }
         if (removeVertex(f, d.index)) setStatus("Corner deleted.");
         else drawFeatures();
         return;
       }
+      /* A bend keeps only the corners it needs. */
+      if (d.bend) f.points = fromScreen(shapes.tidyBend(d.bend.last, d.bend.added));
       /* The live shape dragged whole keeps its arrow keys; reshaped by a corner, it is kept as
          the hand left it. */
       if (adjust && adjust.id === f.id) {
@@ -2506,13 +2583,13 @@
         var then = growWanding() ? " - the line wand grows it out to the edge" : "";
         text = draft.length ? (draft.length >= 2 ? "Keep clicking along the " + thing + " · Finish (or Enter / double-click) when done" + then : "Click the next point along the " + thing) : (tool === "fairway" ? "Click at the tee end of the fairway, then along its middle" : "Click a line down the middle of the " + thing) + then;
       }
+      else if (methodOf(tool) === "colour") text = colourSel ? "Enter makes it " + colourNoun(tool) + " · ← → tighter / looser · Shift-drag adds · Esc drops it" : "Press on the " + colourThing(tool) + " and drag - further takes more of its colour · " + methodKey(tool) + " switches method";
       else if (tool === "trees" && methodOf("trees") === "single") text = "Click a tree to drop one · ↑ ↓ size it · E switches method";
       else if (tool === "trees" && methodOf("trees") === "oval") text = "Press and drag across a cluster of trees - Shift for a circle · E switches method";
       else if (tool === "trees" && methodOf("trees") === "find") text = sampleTrees().length ? "Drag a box - trees in it like the " + sampleTrees().length + " you placed by hand are found · E switches method" : "Place a tree or two by hand first (Tree), then drag a box to find more like them";
       else if (tool === "trees") text = "Press and drag all the way round an area of dense trees · E switches method";
-      else if (tool === "waste" && methodOf("waste") === "colour") text = colourSel ? "Enter makes it a waste area · ← → tighter / looser · Shift-drag adds · Esc drops it" : "Press on the waste area and drag - further takes more of its colour · A switches method";
       else if (tool === "waste") text = "Draw roughly round the waste area - it grows out to the edge · A switches method";
-      else if (tool === "hazard") text = "Press and drag all the way round a non-water hazard - gorse, scrub, a ravine";
+      else if (tool === "hazard") text = "Press and drag all the way round a non-water hazard - gorse, scrub, a ravine · X switches method";
       else if (tool === "green" && session.mode === "pins") text = "Click the middle of each green - the wand outlines it";
       else if (tool !== "move" && session.mode === "pins") text = "Click the middle of each " + kindLabel(tool).toLowerCase() + " to pin it";
       else if (drawRoundKind() && METHODS[tool]) text = "Press and drag all the way round the " + kindLabel(tool).toLowerCase() + " · " + tool.charAt(0).toUpperCase() + " switches method";
@@ -2525,6 +2602,7 @@
       else if (selectedId && isSmooth(findFeature(selectedId) || {})) text = "Drag to move · drag its " + shapes.SMOOTH[findFeature(selectedId).kind].handles + " points to reshape · Delete or the bin removes it";
       else if (selectedId && (findFeature(selectedId) || {}).pin) text = "Drag to move · Shape this pin turns it into an outline · Delete or the bin removes it";
       else if (selectedId && !bigEnoughForHandles(findFeature(selectedId) || { points: [] })) text = "Drag to move · zoom in to reshape its corners · Delete or the bin removes it";
+      else if (selectedId && isDetailed(findFeature(selectedId))) text = "Drag to move · grab the edge anywhere to bend it · drag a point to pull that stretch · zoom in for finer control · Delete or the bin removes it";
       else if (selectedId) text = "Drag to move · drag corners to reshape · faint dots add a corner · right-click a corner or drag it to the bin to remove it · Delete or the bin removes the shape";
       else text = "Choose Fairway, Green, Tee or Bunker to place · click a shape in Move to adjust it · Link puts shapes on one hole";
       if (adjusted()) text = adjustHint();
@@ -3275,7 +3353,7 @@
       if (key === "s" || key === "p") { setMode(key === "p" ? "pins" : "shapes"); return; }
       if (key === "[" || key === "]") { stepWandSize(key === "]" ? 1 : -1); return; }
       /* The tool's own key again steps through its methods: wand, draw round, line + wand. */
-      var own = { f: "fairway", b: "bunker", w: "water", e: "trees", a: "waste" }[key];
+      var own = { f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard", a: "waste" }[key];
       if (own && own === tool && methodOf(own) && canEdit()) { cycleMethod(own); return; }
       var shortcut = { v: "move", c: "connect", f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard", a: "waste" }[key];
       if (shortcut && (shortcut === "move" || canEdit())) setTool(shortcut);

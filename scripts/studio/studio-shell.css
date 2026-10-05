@@ -541,6 +541,7 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
 #gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayShape:active { cursor: grabbing; }
 #gdStudioShellRoot .gdStudioOverlayStage.isTool-connect .gdStudioOverlayShape { cursor: alias; }
 #gdStudioShellRoot .gdStudioOverlayStage .gdStudioOverlayHandle { cursor: move; }
+#gdStudioShellRoot .gdStudioOverlayStage .gdStudioOverlayEdge { cursor: crosshair; }
 #gdStudioShellRoot .gdStudioOverlayStage:not(.isTool-move):not(.isTool-connect) .gdStudioOverlayShape { cursor: crosshair; }
 #gdStudioShellRoot .gdStudioDiagramBtn.isActive { color: var(--gdStudioAccent); border-color: var(--gdStudioAccent); background: rgba(60, 255, 141, 0.12); }
 .leaflet-tooltip.gdStudioOverlayLabel {

@@ -180,7 +180,7 @@ test("bunker wand: its reach steps smaller and bigger, and overlapping bunkers m
   assert.ok(page.includes('data-gd-overlay="wand-smaller"') && page.includes('data-gd-overlay="wand-bigger"'), "no bunker wand size control");
   assert.ok(wand.includes("scale: payload.scale"), "the endpoint must pass the size to the wand");
   assert.ok(core.includes("const radiusM = profile.radiusM * size;"), "the wand's sweep must scale with the size");
-  assert.ok(page.includes('data-gd-overlay="merge"') && page.includes("shapes.mergeOverlapping(f.points, merged)"), "overlapping bunker outlines must merge through the shared builder");
+  assert.ok(page.includes('data-gd-overlay="merge"') && page.includes("shapes.mergeOverlapping(f.points, merged, shapes.DETAIL_MAX_POINTS)"), "overlapping bunker outlines must merge through the shared builder");
 });
 
 test("pins mode: a fairway's ends become a fairway, a green pin is outlined at once, tees and bunkers stay pins", () => {
@@ -286,10 +286,10 @@ test("the shape just placed can be dragged without switching to Move", () => {
 
 test("greens and bunkers are shaped by a few smooth points once the wand has outlined them", () => {
   assert.ok(page.includes("return shapes.smoothOutline(ring, kind);"), "a wand shape must be kept as its smooth outline");
-  assert.ok(page.includes("function isSmooth(f) { return !f.pin && !!shapes.SMOOTH[f.kind]; }"), "every smooth kind is edited by its handles");
+  assert.ok(page.includes('function isSmooth(f) { return !f.pin && !!shapes.SMOOTH[f.kind] && f.source !== "colour"; }'), "every smooth kind is edited by its handles, unless the colour wand outlined it");
   assert.ok(page.includes("f.points = shapes.smoothRing(handles, smooth.steps);"), "dragging a handle must re-curve the outline through its handles");
-  assert.ok(page.includes("if (f.pin || isSmooth(f) || f.kind === \"tree\") return out;"), "a smooth shape has no add-a-point dots");
-  assert.ok(page.includes('into.points = shapes.smoothOutline(merged, "bunker");'), "a merged bunker is smooth too");
+  assert.ok(page.includes("if (f.pin || isSmooth(f) || isDetailed(f) || f.kind === \"tree\") return out;"), "a smooth or detailed shape has no add-a-point dots");
+  assert.ok(page.includes('into.points = detailed ? merged : shapes.smoothOutline(merged, "bunker");'), "a merged bunker is smooth too, unless a colour-wand bunker is in it");
 });
 
 test("the shape just placed stays live: left/right step sensitivity, up/down size, Enter or Space keeps it", () => {
@@ -307,7 +307,7 @@ test("the shape just placed stays live: left/right step sensitivity, up/down siz
 test("water: a Water tool that draws round the water or uses the wand", () => {
   assert.ok(page.includes('railButton("tool-water"'), "no Water tool");
   assert.ok(page.includes('data-gd-overlay="method-draw"') && page.includes('data-gd-overlay="method-wand"') && page.includes('data-gd-overlay="method-line"'), "no Wand / Draw round / Line + wand switch");
-  assert.ok(page.includes('water: ["wand", "draw", "line"]') && page.includes('bunker: ["wand", "draw", "line"]') && page.includes('fairway: ["width", "line"]'), "water and bunkers draw round or line-wand; fairways line-wand");
+  assert.ok(page.includes('water: ["wand", "draw", "line", "colour"]') && page.includes('bunker: ["wand", "draw", "line", "colour"]') && page.includes('fairway: ["width", "line", "colour"]'), "water and bunkers draw round or line-wand; fairways line-wand");
   assert.ok(page.includes("shapes.simplifyOutline(") && page.includes("addFeature({ kind: drawn.kind, points: ring });"), "a drawn line must become an outline of the tool's kind");
   assert.ok(page.includes('el.map.addEventListener("pointerdown", onMapPress);') && page.includes('if (gesture === "lasso") beginLasso(event);'), "drawing round starts on a press on the map");
   assert.ok(page.includes("water: 0.5") && page.includes("water: 12000"), "the wand capture must be sized for water");
@@ -315,8 +315,8 @@ test("water: a Water tool that draws round the water or uses the wand", () => {
 
 test("trees and hazard: tools that save as their own kinds", () => {
   assert.ok(page.includes('railButton("tool-trees"') && page.includes('railButton("tool-hazard"'), "no Trees / Hazard tools");
-  assert.ok(page.includes('var DRAW_ONLY_KINDS = ["hazard"];'), "a hazard is drawn round only");
-  assert.ok(page.includes('trees: ["single", "oval", "draw", "find"]'), "trees: a single tree, a cluster oval, drawn round, or found");
+  assert.ok(page.includes('hazard: ["draw", "colour"]'), "a hazard is drawn round, or picked with the colour wand");
+  assert.ok(page.includes('trees: ["single", "oval", "draw", "find", "colour"]'), "trees: a single tree, a cluster oval, drawn round, or found");
 });
 
 test("single trees: a click drops one, up / down size it, and the next starts at that size", () => {
@@ -343,7 +343,22 @@ test("waste area: drawn round and grown, or picked with the colour wand", () => 
   assert.ok(page.includes('if (drawn.kind === "waste") { growPlace({ ring: ring }, "waste"); return; }'), "a drawn waste area is grown out");
   assert.ok(page.includes("shapes.growFromArea(cap.image, from.map(cap.toPx), opts)"), "the grow runs growFromArea on the captured picture");
   assert.ok(page.includes("shapes.floodSelect(press.cap.field, press.seed.x, press.seed.y, press.tol)"), "the colour wand floods from the press");
-  assert.ok(page.includes('addFeature({ kind: "waste", points: points, source: "wand" });'), "Enter makes the pick a waste area");
+  assert.ok(page.includes('addFeature({ kind: kind, points: points, source: "colour" });'), "Enter makes the pick a shape of the tool in hand");
+});
+
+test("every shape tool has the colour wand", () => {
+  ["fairway", "green", "tee", "bunker", "water", "trees", "hazard", "waste"].forEach(kind => {
+    assert.ok(new RegExp(kind + ': \\[[^\\]]*"colour"\\]').test(page), kind + " has no colour wand");
+  });
+  assert.ok(page.includes("shapes.maskOutline(sel.mask, cap.image.width, cap.image.height, shapes.DETAIL_MAX_POINTS)"), "the pick keeps its detail");
+  assert.ok(page.includes('var merged = kind === "bunker" ? mergeBunker(points, session.hole, null, true) : null;'), "a colour-wand bunker merges, keeping its detail");
+});
+
+test("a detailed outline shows its key corners and bends where its edge is grabbed", () => {
+  assert.ok(page.includes("if (isDetailed(f)) return shapes.keyCorners(screenRing(f.points));"), "a detailed outline must show only its key corners");
+  assert.ok(page.includes('onPress(entry.edge, function (e) { beginDrag(f.id, "edge", -1, e); });'), "a press on the edge must bend it");
+  assert.ok(page.includes("if (isDetailed(f) && mode !== \"body\") beginBend(f, e);"), "a corner or edge drag on a detailed outline must bend it");
+  assert.ok(page.includes("if (d.bend) f.points = fromScreen(shapes.tidyBend(d.bend.last, d.bend.added));"), "a bend keeps only the corners it needs");
 });
 
 test("line wand: a finished line on Line + wand is grown out in the browser", () => {
