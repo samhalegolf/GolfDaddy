@@ -272,6 +272,13 @@ test("the table migration exists and is service-role only", () => {
   assert.ok(sql.includes("auth.role() = 'service_role'"), "nothing on a player's device reads or writes this table");
 });
 
+test("Clear hole numbers takes every number off and keeps the shapes and links", () => {
+  assert.ok(page.includes('data-gd-overlay="unnumber"') && page.includes('el.unnumber.addEventListener("click", clearHoleNumbers);'), "the button is there and wired");
+  const fn = page.slice(page.indexOf("function clearHoleNumbers()"), page.indexOf("function deleteOverlay()"));
+  assert.ok(/f\.hole = null;/.test(fn) && !/\.link|session\.features = /.test(fn), "only numbers are cleared - shapes and links stay");
+  assert.ok(/changed\(\);\s*flushSave\(\);/.test(fn), "it saves at once, as a draft, like any edit");
+});
+
 test("Link: click the shapes on one hole, Enter or Space links them, and never numbers them", () => {
   assert.ok(page.includes('railButton("tool-connect"'), "no Link tool");
   assert.ok(page.includes("function toggleLinkPick(id)") && page.includes("function commitLink()"), "clicks pick shapes, Enter links them");

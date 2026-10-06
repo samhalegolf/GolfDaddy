@@ -442,6 +442,7 @@
       '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ready" disabled>Mark ready</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="run" disabled>Run mapper with overlay</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="unnumber" disabled title="Take every hole number off the overlay - shapes and links stay - so the mapper numbers them fresh from the scorecard">Clear hole numbers</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="clear" disabled>Delete all shapes</button>' +
       "</div>" +
       '<div class="gdStudioViewportReadout" data-gd-overlay="readout"></div>' +
@@ -526,7 +527,7 @@
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "clear", "run", "status"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "unnumber", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -2565,6 +2566,21 @@
       });
     }
 
+    /* A fresh start on numbering without losing any drawing: every shape and link stays, only
+       the numbers go, and the next mapper run numbers the holes from the scorecard. */
+    function clearHoleNumbers() {
+      if (!canEdit()) return;
+      var numbered = session.features.filter(function (f) { return f.hole; });
+      if (!numbered.length) return;
+      if (!window.confirm("Take the hole number off all " + numbered.length + " numbered shapes? Shapes and links stay; the mapper numbers them from the scorecard.")) return;
+      numbered.forEach(function (f) { f.hole = null; });
+      setHole(null);
+      drawFeatures();
+      changed();
+      flushSave();
+      setStatus("Hole numbers cleared from " + numbered.length + " shapes. Mark ready and run the mapper to number them fresh.");
+    }
+
     function deleteOverlay() {
       if (!canEdit()) return;
       if (!window.confirm("Delete every overlay shape for this course? The mapper will go back to reading OSM alone.")) return;
@@ -2801,6 +2817,7 @@
       var sourceScan = el["source-panel"].querySelector('[data-gd-source-test="scan"]');
       if (sourceScan) sourceScan.disabled = scanning;
       el.clear.disabled = !canEdit() || !session.features.length;
+      el.unnumber.disabled = !canEdit() || !session.features.some(function (f) { return f.hole; });
       el.run.disabled = !has || session.dirty;
       el.run.title = session.dirty ? "Wait for the overlay to save - the mapper reads what is saved" : "";
       el.ready.disabled = !canEdit() || !session.features.length || (session.status === "ready" && !session.dirty);
@@ -3593,6 +3610,7 @@
       if (file) uploadCourseMap(file);
     });
     el.clear.addEventListener("click", deleteOverlay);
+    el.unnumber.addEventListener("click", clearHoleNumbers);
     el.ready.addEventListener("click", markReady);
     el.run.addEventListener("click", runMapper);
 
