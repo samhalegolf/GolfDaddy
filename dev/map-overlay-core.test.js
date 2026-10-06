@@ -126,6 +126,37 @@ test("a link groups shapes as one hole without numbering them", () => {
   assert.strictEqual(overlay.overlaySummary(kept).linked, 1);
 });
 
+test("the resolver keeps an unnumbered link together, against what distance alone would pair", async () => {
+  /* The fairway's green end sits 8m from green "near", which distance pairs it with. A person
+     linked it - and a tee 260m back, past where a tee is normally looked for - to green "far". */
+  const { resolverHoleCandidates } = await import(path.join(root, "functions", "lib", "gd-geometry-resolver-core.mjs"));
+  const square = (x, y, r) => [at(x - r, y - r), at(x + r, y - r), at(x + r, y + r), at(x - r, y + r)];
+  const shapes = link => [
+    { id: "near", kind: "green", points: square(0, 0, 12) },
+    Object.assign({ id: "far", kind: "green", points: square(60, 262, 12) }, link ? { link: "l-a" } : {}),
+    Object.assign({ id: "fw", kind: "fairway", points: [at(-20, 20), at(20, 20), at(20, 230), at(-20, 230)] }, link ? { link: "l-a" } : {}),
+    Object.assign({ id: "t", kind: "tee", points: square(0, -230, 4) }, link ? { link: "l-a" } : {})
+  ];
+  const owner = (result, fairwayId) => result.primary.find(c => c.evidence.some(e => e.indexOf("fairway:") === 0 && e.indexOf(fairwayId) >= 0));
+  const wayId = (features, id) => String(overlay.overlayToOsmElements(features).find(w => w.tags["clarity:overlay"] === id).id);
+
+  const plain = shapes(false);
+  const unlinked = resolverHoleCandidates({ osmPayload: overlay.mergeOverlayIntoPayload({ elements: [] }, plain) });
+  const nearGreen = owner(unlinked, wayId(plain, "fw"));
+  assert.ok(nearGreen && nearGreen.greenId.indexOf(wayId(plain, "near")) >= 0, "without a link, distance gives the fairway to the near green");
+
+  const linked = shapes(true);
+  const ways = overlay.overlayToOsmElements(linked);
+  assert.strictEqual(ways.find(w => w.tags["clarity:overlay"] === "fw").tags["clarity:link"], "l-a", "the link reaches the payload");
+  const result = resolverHoleCandidates({ osmPayload: overlay.mergeOverlayIntoPayload({ elements: [] }, linked) });
+  const hole = owner(result, wayId(linked, "fw"));
+  assert.ok(hole && hole.greenId.indexOf(wayId(linked, "far")) >= 0, "the link gives the fairway to its own green: " + JSON.stringify(hole && hole.evidence));
+  assert.ok(hole.evidence.indexOf("linked:l-a") >= 0, "and says so");
+  assert.ok(hole.evidence.some(e => e === "tee:way-" + wayId(linked, "t")), "the linked tee starts the hole even past the usual tee search: " + JSON.stringify(hole.evidence));
+  assert.ok(!result.all.some(c => c.greenId.indexOf(wayId(linked, "near")) >= 0 && c.evidence.some(e => e.indexOf("fairway:way-" + wayId(linked, "fw")) === 0)),
+    "no reading, not even an alternative, gives a linked fairway to another green");
+});
+
 test("the automapper's surface pass sees an overlay fairway as a fairway_area", () => {
   const merged = overlay.mergeOverlayIntoPayload(GREENS_ONLY, [fairwayFeature("f1", 0, 380, 0)]);
   const surfaces = core.parseOsmSurfaces(merged);

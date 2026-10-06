@@ -190,6 +190,8 @@ export function overlayToOsmElements(features) {
     const tags = { [OVERLAY_TAG]: feature.id, [key]: value };
     const hole = feature.hole || (feature.link && linkHole[feature.link]) || null;
     if (hole) tags.ref = String(hole);
+    /* The resolver pairs a link's green, fairway and tee as one hole whether numbered or not. */
+    if (feature.link) tags["clarity:link"] = feature.link;
     const points = feature.pin ? pinShape(feature) : feature.points;
     const geometry = points.map(p => ({ lat: p.lat, lon: p.lng }));
     if (overlayKindIsPolygon(feature.kind)) geometry.push({ lat: points[0].lat, lon: points[0].lng });
@@ -197,7 +199,8 @@ export function overlayToOsmElements(features) {
   });
 }
 
-/* A link says "these shapes are one hole" - it never says which. Only when a group carries
+/* A link says "these shapes are one hole" - it never says which. The resolver keeps a link's
+   shapes together (gd-geometry-resolver-core.mjs, LINK_TAG). Only when a group carries
    exactly one hole number that a person typed does the rest of the group take it; a group
    with no number, or with two different ones, is left for the scorecard to number. */
 export function linkedHoleNumbers(features) {
