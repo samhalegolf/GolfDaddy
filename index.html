@@ -17,6 +17,9 @@
 <script src="scripts/gd-app-download-prompt.js?v=store-badges-004"></script>
 <script src="scripts/inline/gd-landing-redirect-v1.js?v=20260811a"></script>
 <script src="scripts/inline/gd-durable-storage.js?v=durable-20260720"></script>
+<!-- Course maps live in IndexedDB (localStorage was full on phones). Before every script that
+     reads the course libraries, which it answers from memory. -->
+<script src="scripts/inline/gd-course-storage.js?v=course-storage-001"></script>
 <!-- After durable storage, before anything that talks to /api/course-package: the guest id is
      written through the patched localStorage setter that script installs, so loading it first
      is what makes the id survive a WebView storage eviction. -->

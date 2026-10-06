@@ -68,6 +68,7 @@ jobs:
           node dev/course-picker-meta-label.test.js
           node dev/error-reporting.test.js
           node dev/durable-storage.test.js
+          node dev/course-storage-browser.test.js
           node dev/deep-links.test.js
           node dev/account-restore.test.js
           node dev/auth-update-account.test.js

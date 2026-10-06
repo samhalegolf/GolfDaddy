@@ -27,6 +27,9 @@
      also defines the real gdSafeLocalSet, which js/platform.js then leaves
      alone (its shim is typeof-guarded). -->
 <script src="../scripts/inline/gd-durable-storage.js"></script>
+<!-- Straight after durable storage: course maps live in IndexedDB, answered from memory, and
+     js/course-store.js must find that in place when it loads. -->
+<script src="../scripts/inline/gd-course-storage.js"></script>
 <!-- Third, so it is installed before the modules that can throw. Without it a
      crash on the 9th tee produced nothing anywhere: this page had no reporter
      and no onerror handler of its own. Posts to /api/client-errors, which

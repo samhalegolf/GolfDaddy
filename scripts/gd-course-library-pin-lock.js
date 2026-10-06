@@ -994,6 +994,7 @@
         storePersistFailures++;
         lastStorePersistFailure={at:Date.now(),key,label:label||'',error:String(retryError&&retryError.message||retryError),name:retryError&&retryError.name||'',quota:true,evicted:evicted.length};
         try{console.warn(`[Clarity Caddy] device storage full - ${label||key} could not be saved even after evicting ${evicted.length} cache entries`,retryError);}catch(e){}
+        try{window.ClarityErrorReporter?.report?.(retryError,{source:'storageSetEvicting',key,label:label||'',quotaExceeded:true,evicted:evicted.length});}catch(e){}
         toastSafe(i18nT('course.storageFull'));
         return false;
       }
@@ -5042,6 +5043,9 @@
 	    return null;
 	  }
 	  async function runCourseMappingAttempt(input={}){
+	    /* The course libraries live in IndexedDB (gd-course-storage.js). Deciding whether a
+	       course is already mapped before they have loaded would read a saved course as missing. */
+	    if(window.GDCourseStorage)await window.GDCourseStorage.ready;
 	    const opts=Object.assign({},input||{});
 	    const selectedAt=opts.selectedAt||nowIso();
 	    const c=mappingCourseSnapshot(sessionCourse(opts.course||courseObj()),Object.assign({},opts,{selectedAt}));
@@ -5158,6 +5162,8 @@
         let autoMapResult=null;
         let serverWait=null;
         let serverWaitError=null;
+        /* Counted so a save that failed can be told apart from a map that does not exist. */
+        const persistFailuresBefore=storePersistFailures;
         try{
           serverWait=await awaitServerCoursePackage(c,{
             budgetMs:opts.serverWaitBudgetMs,
@@ -5231,6 +5237,18 @@
 	          const shown=await showResolvedCoursePlayHole(c,h,'automapper',opts);
 	          return Object.assign(shown,{partial:autoAccepted&&!autoReady,readiness:autoState,persisted:autoMapResult,holes:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0,fit:autoMapResult&&autoMapResult.fit||null});
 	        }
+        /* The server HAD the map and the phone could not save it. Saying "no playable map" here
+           is what sent Derllys Court (6 Oct 2026) round in circles: the map was fine, the
+           phone's storage was full, and the player was offered a "notify me when it's mapped"
+           for a course that already was. Say what actually happened instead. */
+        if(storePersistFailures>persistFailuresBefore&&(autoMapResult&&(autoMapResult.serverPackageStatus==='full-map-ready'||autoMapResult.serverPackageStatus==='lite-geo-ready'))){
+          recordMappingDebug(debugRunId,{source:'course-loader',phase:'failed',event:'course-save-storage-full',summary:'Server had the map but the phone could not save it',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:autoMapResult.serverPackageStatus,failure:lastStorePersistFailure}});
+          recordCoursePlayDebug('course-mapping-storage-full',c,h,{resolutionKey:key,attemptToken,serverPackageStatus:autoMapResult.serverPackageStatus});
+          returnToCoursePicker('storage-full');
+          /* A quota failure already said so in storageSetEvicting. */
+          if(!(lastStorePersistFailure&&lastStorePersistFailure.quota))toastSafe(i18nT('course.storageFull'));
+          return {playable:false,failed:true,reason:'device-storage-full'};
+        }
         /* The server worker tries both OSM-numbered geometry AND the Native Geometry
            Resolver fallback before giving up (functions/course-mapper-worker-background.mjs) -
            so a miss here means the server has nothing playable yet, not that the client has a
@@ -5466,6 +5484,12 @@
     btn.onclick=function(ev){ev.preventDefault();openCourseLibraryPanel();return false;};
     grid.appendChild(btn);
   }
+  /* Anything drawn before the course libraries finished loading from IndexedDB drew an
+     empty library; draw it again now that they are here. */
+  window.addEventListener('clarity:course-storage-ready',()=>{
+    try{gdCLRefreshProfileCard();}catch(e){}
+    try{renderCourseLibraryPanel(courseLibraryDetailKey);}catch(e){}
+  });
   function gdCLRefreshProfileCard(){
     const card=document.getElementById('gdProfileCoursesCard');
     if(isCoachProfileCardView()){
@@ -5969,6 +5993,7 @@
       return shared.store;
     }
     const run=(async function(){
+      if(window.GDCourseStorage)await window.GDCourseStorage.ready;
       try{return {store:await runPublishedCourseMapSync(opts),error:null};}
       catch(error){return {store:loadPublishedStore(),error:error};}
     })();

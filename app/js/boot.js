@@ -915,6 +915,10 @@
        the course name, so the title here must not flip to "Loading course" for
        the frames between this page painting and the round starting. */
     setLoadingTitle(course.courseName);
+    /* The downloaded courses live in IndexedDB (scripts/inline/gd-course-storage.js),
+       which loads in milliseconds but not synchronously. A hand-off arrives on page
+       load, so wait for it, or a course already on the phone reads as missing. */
+    if (window.GDCourseStorage) await window.GDCourseStorage.ready;
     var cached = app.courseStore.load(course.courseId);
     var pkg = cached && cached.pkg;
     if (pkg) {

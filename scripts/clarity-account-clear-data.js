@@ -95,8 +95,11 @@
     return doomed.length;
   }
 
+  /* The course libraries live in IndexedDB (gd-course-storage.js), so walking
+     localStorage's keys never reaches them. */
   function clearLocal() {
-    return clearStorage(window.localStorage) + clearStorage(window.sessionStorage);
+    var courses = window.GDCourseStorage ? (safe(function () { return window.GDCourseStorage.clear(); }) || 0) : 0;
+    return clearStorage(window.localStorage) + clearStorage(window.sessionStorage) + courses;
   }
 
   function close() {
