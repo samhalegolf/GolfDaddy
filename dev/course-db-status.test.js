@@ -138,6 +138,35 @@ test("the bulk and single forms use one vocabulary", () => {
   });
 });
 
+test("a reload drops a kept course whose row has changed since it was opened", () => {
+  /* Derllys Court: opened as an empty stub, then mapped. The fresh list said 18
+     holes, but the kept empty copy was merged over it and the row read 0. */
+  const src =
+    'const gdAdminCourseDbDetail={};\n' +
+    'let gdAdminCourseDatabaseSelected="open";\n' +
+    'const refetched=[];\n' +
+    'function gdAdminCourseDbLoadCourse(id){ refetched.push(id); }\n' +
+    adminSrc.slice(
+      adminSrc.indexOf("function gdAdminCourseDbDropStaleDetail(store){"),
+      adminSrc.indexOf("function gdAdminCourseDbWithDetail(course){")
+    );
+  // eslint-disable-next-line no-new-func
+  const h = new Function(src + "\nreturn {gdAdminCourseDbDetail,gdAdminCourseDbDropStaleDetail,refetched};")();
+  h.gdAdminCourseDbDetail.same = { updatedAt: "2026-10-06T20:00:00Z", holes: { 1: {} } };
+  h.gdAdminCourseDbDetail.open = { updatedAt: "2026-10-06T19:46:00Z", holes: {}, objects: {} };
+  h.gdAdminCourseDbDetail.gone = { updatedAt: "2026-10-06T19:00:00Z", holes: {} };
+  h.gdAdminCourseDbDropStaleDetail({ courses: {
+    same: { updatedAt: "2026-10-06T20:00:00Z" },
+    open: { updatedAt: "2026-10-06T20:34:56Z" }
+  } });
+  assert.deepStrictEqual(Object.keys(h.gdAdminCourseDbDetail), ["same"], "unchanged rows keep their geometry; changed and deleted ones drop it");
+  assert.deepStrictEqual(h.refetched, ["open"], "the open course is fetched again so its hole table updates");
+  assert.ok(
+    /gdAdminCourseDbCloud=gdMapCloudMapsToAdminStore\(maps\);\s*gdAdminCourseDbDropStaleDetail\(gdAdminCourseDbCloud\);/.test(adminSrc),
+    "every list load must check the kept copies"
+  );
+});
+
 test("a course with no holes is never offered to a player", () => {
   /* The stub is published:true, so published alone can never be the test. */
   assert.ok(

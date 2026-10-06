@@ -189,6 +189,7 @@ function gdLoadAdminCourseDbCloud(opts){
         return null;
       }
       gdAdminCourseDbCloud=gdMapCloudMapsToAdminStore(maps);
+      gdAdminCourseDbDropStaleDetail(gdAdminCourseDbCloud);
       gdAdminCourseDbCloudAt=Date.now();
       gdAdminCourseDbCloudUpdatedAt=(maps&&maps.updatedAt)||"";
       gdAdminCourseDbCloudState="ready";
@@ -271,6 +272,21 @@ function gdAdminCourseDbLoadCourse(courseId,opts){
     .catch(()=>null)
     .finally(()=>{delete gdAdminCourseDbDetailInflight[id];gdRenderAdminCourseDatabase();});
   return gdAdminCourseDbDetailInflight[id];
+}
+/* A fetched course is only good while its row has not changed. Derllys Court was
+   opened as an empty stub, then mapped; the fresh list said 18 holes, but the
+   kept copy (no holes) was merged over it and the screen kept saying 0. Any
+   course whose list row is newer than the copy we hold is dropped, and the open
+   one is re-fetched so the hole table updates without a second click. */
+function gdAdminCourseDbDropStaleDetail(store){
+  const courses=store&&store.courses||{};
+  Object.keys(gdAdminCourseDbDetail).forEach(id=>{
+    const row=courses[id];
+    const kept=gdAdminCourseDbDetail[id];
+    if(row&&kept&&String(row.updatedAt||"")===String(kept.updatedAt||""))return;
+    delete gdAdminCourseDbDetail[id];
+    if(id===gdAdminCourseDatabaseSelected)gdAdminCourseDbLoadCourse(id);
+  });
 }
 /* The course as the screen should see it: the list row, with geometry merged in
    once it has been fetched. */
