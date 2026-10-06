@@ -18,7 +18,8 @@
  *
  * Feature shape (what course_map_overlays.features stores, and what Studio draws):
  *   { id: "f-1", kind: "fairway" | "hole" | "green" | "tee" | "bunker" | "water" | "trees" | "tree" | "hazard" | "waste", hole: 7 | null, points: [{lat, lng}, ...],
- *     source?: "ai", pin?: true }
+ *     link?: "l-abc", source?: "ai", pin?: true }
+ *   link groups shapes that belong to one hole (Studio's Link tool) without numbering them.
  *   source says who produced the shape (gd-overlay-georef-core.mjs stamps "ai"; Studio stamps
  *   "wand" on a green the wand outlined from a pin; a hand-placed one has none). Display only - the mapper treats every feature the same.
  *
@@ -129,7 +130,9 @@ export function normalizeOverlayFeature(raw, index) {
   }
   const id = String(raw.id || "").replace(/[^a-z0-9_-]/gi, "").slice(0, 40) || ("f-" + (index + 1));
   const source = String(raw.source || "").replace(/[^a-z0-9_-]/gi, "").slice(0, 24);
+  const link = String(raw.link || "").replace(/[^a-z0-9_-]/gi, "").slice(0, 40);
   const feature = { id, kind, hole: validHoleNumber(raw.hole), points };
+  if (link) feature.link = link;
   if (source) feature.source = source;
   if (pin) feature.pin = true;
   return feature;
@@ -180,15 +183,35 @@ export function pinShape(feature) {
    a polygon ring closed the way OSM closes areas. The tag set is exactly what the parsers key
    on (golf=fairway / golf=hole / golf=green / golf=water_hazard + ref) plus the overlay marker. */
 export function overlayToOsmElements(features) {
-  return normalizeOverlayFeatures(features).map((feature, index) => {
+  const list = normalizeOverlayFeatures(features);
+  const linkHole = linkedHoleNumbers(list);
+  return list.map((feature, index) => {
     const [key, value] = OSM_TAG[feature.kind] || ["golf", feature.kind];
     const tags = { [OVERLAY_TAG]: feature.id, [key]: value };
-    if (feature.hole) tags.ref = String(feature.hole);
+    const hole = feature.hole || (feature.link && linkHole[feature.link]) || null;
+    if (hole) tags.ref = String(hole);
+    /* The resolver pairs a link's green, fairway and tee as one hole whether numbered or not. */
+    if (feature.link) tags["clarity:link"] = feature.link;
     const points = feature.pin ? pinShape(feature) : feature.points;
     const geometry = points.map(p => ({ lat: p.lat, lon: p.lng }));
     if (overlayKindIsPolygon(feature.kind)) geometry.push({ lat: points[0].lat, lon: points[0].lng });
     return { type: "way", id: OVERLAY_ID_BASE - index, tags, geometry };
   });
+}
+
+/* A link says "these shapes are one hole" - it never says which. The resolver keeps a link's
+   shapes together (gd-geometry-resolver-core.mjs, LINK_TAG). Only when a group carries
+   exactly one hole number that a person typed does the rest of the group take it; a group
+   with no number, or with two different ones, is left for the scorecard to number. */
+export function linkedHoleNumbers(features) {
+  const seen = {};
+  (features || []).forEach(f => {
+    if (!f.link || !f.hole) return;
+    (seen[f.link] = seen[f.link] || new Set()).add(f.hole);
+  });
+  const out = {};
+  Object.keys(seen).forEach(link => { if (seen[link].size === 1) out[link] = [...seen[link]][0]; });
+  return out;
 }
 
 export function isOverlayElement(element) {
@@ -229,6 +252,7 @@ export function overlaySummary(features) {
     hazards: list.filter(f => f.kind === "hazard").length,
     waste: list.filter(f => f.kind === "waste").length,
     pins: list.filter(f => f.pin).length,
-    numbered: list.filter(f => f.hole).length
+    numbered: list.filter(f => f.hole).length,
+    linked: list.filter(f => f.link).length
   };
 }

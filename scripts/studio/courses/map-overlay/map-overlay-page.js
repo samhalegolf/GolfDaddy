@@ -306,7 +306,6 @@
     draft: { color: "#ffb54c", weight: 3, dashArray: "6 6", interactive: false },
     /* Shapes on the same hole, and the line a Link drag draws. */
     link: { color: "#ffffff", weight: 2, opacity: 0.7, dashArray: "1 7", lineCap: "round", interactive: false },
-    linkDraft: { color: "#ffffff", weight: 3, dashArray: "6 6", interactive: false },
     draftPreview: { color: "#ffb54c", weight: 1, fillColor: "#3cff8d", fillOpacity: 0.12, interactive: false },
     draftPoint: { radius: 4, color: "#ffb54c", weight: 2, fillColor: "#1a1a1a", fillOpacity: 1, interactive: false },
     vertex: { radius: 6, color: "#ffffff", weight: 2, fillColor: "#ffb54c", fillOpacity: 1, className: "gdStudioOverlayHandle" },
@@ -394,9 +393,8 @@
     /* The shape placed last can be dragged straight away, whatever tool is in hand, so a pin
        that landed a little off is nudged into place without switching to Move. */
     var lastPlacedId = "";
-    /* Link tool: the shape tapped first, waiting for the one to link it to. */
-    var connectFrom = "";
-    var connect = null;
+    /* Link tool: the shapes clicked so far, waiting for Enter or Space to link them. */
+    var linkPick = [];
     var linkLayers = [];
     var sourceTesting = false;
     var sourceTest = null;
@@ -458,7 +456,7 @@
       "<strong>Pins</strong>, the quick pass: a fairway is its start then its end and becomes a fairway straight away; a green pin is outlined by the wand straight away; tees, bunkers and water stay pins until <strong>Shape pins</strong>. " +
       "Whatever you just placed can be dragged at once to adjust it. In <strong>Move</strong>, drag shapes and their points, and drop either on the <strong>bin</strong> to delete. A detailed outline shows only its key points - grab its edge anywhere and it bends there, the key points either side staying put. " +
       "<strong>Seams</strong> (on by default): a fairway, water, hazard, waste area or trees kept within a few metres of another - or just overlapping it - meets it in the middle, and that line is shared; drag it and both shapes follow, so it only changes which ground is which. " +
-      "<strong>Link</strong>: drag from one shape to another (or tap one, then the other) to put them on the same hole; drag a shape onto empty ground to unlink it. " +
+      "<strong>Link</strong>: click the shapes that belong to one hole (click again to drop one), then <strong>Enter</strong> or <strong>Space</strong> links them and the next click starts a new link. A link only says they are one hole - it never numbers them. One shape and Enter takes it out of its link; <strong>Esc</strong> clears the pick. " +
       "<strong>Undo</strong> (the arrow at the top of the right-hand buttons, or Ctrl+Z / ⌘Z) takes back the last change, one at a time. " +
       "Everything saves as you go, as a <strong>draft</strong> the mapper ignores - <strong>Mark ready</strong> when the course looks right, then run the mapper. " +
       "Bright outlines are what OSM already has; dashed amber ones are the course's saved objects.</p></details>" +
@@ -643,7 +641,7 @@
       });
       if (draft.length && draftKind && draftKind !== tool) cancelDraft();
       lastPlacedId = "";
-      if (connectFrom) { connectFrom = ""; drawFeatures(); }
+      if (linkPick.length) { linkPick = []; drawFeatures(); }
       if (tool !== "move" && selectedId) select("");
       /* Double-click zooms, except while laying a fairway line, where it would move the ground
          under the last point. */
@@ -761,7 +759,7 @@
     /* Drawing round, stretching an oval or a box, and the colour wand are a press-and-drag, so
        the map does not pan under them; any other tool pans as usual. */
     function syncMapDragging() {
-      if (!mapObj || drag || connect || lasso || stretch || colourPress) return;
+      if (!mapObj || drag || lasso || stretch || colourPress) return;
       try { if (pressGesture()) mapObj.dragging.disable(); else mapObj.dragging.enable(); } catch (e) {}
     }
 
@@ -770,7 +768,7 @@
     /* A press on the map starts the tool's gesture, if it has one. */
     function onMapPress(event) {
       var gesture = pressGesture();
-      if (!gesture || event.button || drag || connect || lasso || stretch || colourPress || !mapObj) return;
+      if (!gesture || event.button || drag || lasso || stretch || colourPress || !mapObj) return;
       if (Date.now() - dragEndedAt < 300) return;
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
@@ -1426,7 +1424,8 @@
     function handleMapClick(latlng) {
       if (Date.now() - dragEndedAt < 300) return;
       if (!session.course) { setStatus("Pick a course first."); return; }
-      if (tool === "connect") { if (connectFrom) { connectFrom = ""; drawFeatures(); updateHint(); } return; }
+      /* Empty ground under the Link tool does nothing: the pick waits for Enter or Esc. */
+      if (tool === "connect") return;
       if (tool === "move") { if (selectedId) select(""); return; }
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
@@ -1640,7 +1639,8 @@
         if (f.source === "colour") detailed = true;
         if (!into) { into = f; return; }
         if (!into.hole && f.hole) into.hole = f.hole;
-        session.features = session.features.filter(function (g) { return g !== f; });
+        if (!into.link && f.link) into.link = f.link;
+        session.features =session.features.filter(function (g) { return g !== f; });
         if (selectedId === f.id) selectedId = "";
       });
       if (!into) return null;
@@ -1978,7 +1978,7 @@
     function drawFeatures() {
       clearFeatureLayers();
       session.features.forEach(function (f) {
-        var selected = f.id === selectedId || f.id === connectFrom || (!!adjust && f.id === adjust.id);
+        var selected = f.id === selectedId || linkPick.indexOf(f.id) >= 0 || (!!adjust && f.id === adjust.id);
         var latlngs = toLatLngs(f.points);
         var shape;
         if (f.pin && f.points.length === 1) {
@@ -1990,18 +1990,18 @@
           shape = isPolygon(f.kind) ? L.polygon(latlngs, style) : L.polyline(latlngs, style);
         }
         shape.addTo(mapObj);
-        /* So the Link tool can tell which shape a drag was dropped on. */
+        /* So the linked flash can find the shapes it plays on. */
         var node = shape.getElement && shape.getElement();
         if (node) node.setAttribute("data-gd-feature", f.id);
         shape.on("click", function (e) {
           /* Selecting a shape must not also count as a click on the map under it. */
           if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
+          if (tool === "connect") { if (canEdit() && Date.now() - dragEndedAt >= 300) toggleLinkPick(f.id); return; }
           if (tool !== "move") { handleMapClick(e.latlng); return; }
           if (Date.now() - dragEndedAt < 300) return;
           select(f.id);
         });
         onPress(shape, function (e) {
-          if (tool === "connect") { if (canEdit()) beginConnect(f.id, e); return; }
           if (!canDrag(f)) return;
           if (tool === "move" && selectedId !== f.id) select(f.id);
           beginDrag(f.id, "body", -1, e);
@@ -2285,92 +2285,80 @@
     }
 
     /* ---- linking shapes to a hole ----
-       Drag from one shape to another, or tap one and then the other: the second joins the
-       first's hole (or the first joins the second's, when only that one is numbered; when
-       neither is, both take the lowest number no shape uses yet). Dropped on empty ground, the
-       shape dragged from leaves its hole. */
+       Click the shapes that belong to one hole, then Enter or Space: they share a link id and
+       are drawn joined. A link says "one hole", never which - hole numbers are left exactly as
+       they were, for a person to set or the mapper to take from the scorecard. Picking a shape
+       already in a link brings its whole link along, so two links merge into one. One shape
+       and Enter takes it out of its link. */
 
-    function featureAt(x, y) {
-      var node = document.elementFromPoint(x, y);
-      while (node && node !== el.stage) {
-        var id = node.getAttribute && node.getAttribute("data-gd-feature");
-        if (id) return findFeature(id);
-        node = node.parentNode;
-      }
-      return null;
+    function linkKey(f) {
+      return f.link ? "l:" + f.link : f.hole ? "h:" + f.hole : "";
     }
 
-    function freeHole() {
-      var used = {};
-      session.features.forEach(function (f) { if (f.hole) used[f.hole] = true; });
-      for (var n = 1; n <= 36; n++) if (!used[n]) return n;
-      return null;
+    function newLinkId() {
+      return "l-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6);
     }
 
-    function linkFeatures(a, b) {
-      var hole = a.hole || b.hole || freeHole();
-      if (!hole) { setStatus("Every hole number is in use.", true); return; }
-      a.hole = hole;
-      b.hole = hole;
+    function toggleLinkPick(id) {
+      var at = linkPick.indexOf(id);
+      if (at >= 0) linkPick.splice(at, 1);
+      else linkPick.push(id);
       drawFeatures();
-      changed();
-      setStatus(kindLabel(a.kind) + " and " + kindLabel(b.kind).toLowerCase() + " are on hole " + hole + ".");
+      updateHint();
     }
 
-    function beginConnect(id, e) {
-      var f = findFeature(id);
-      if (!f || !e || !e.originalEvent) return;
-      L.DomEvent.stop(e.originalEvent);
-      mapObj.dragging.disable();
-      var from = shapes.centroid(f.points);
-      connect = {
-        id: id, moved: false, x: e.originalEvent.clientX, y: e.originalEvent.clientY,
-        line: L.polyline([[from.lat, from.lng], [from.lat, from.lng]], STYLE.linkDraft).addTo(mapObj), from: from
-      };
-      document.addEventListener("pointermove", onConnectMove);
-      document.addEventListener("pointerup", onConnectEnd);
-      document.addEventListener("pointercancel", onConnectEnd);
+    function clearLinkPick() {
+      if (!linkPick.length) return;
+      linkPick = [];
+      drawFeatures();
+      updateHint();
     }
 
-    function onConnectMove(event) {
-      if (!connect || destroyed) return;
-      if (!connect.moved && Math.hypot(event.clientX - connect.x, event.clientY - connect.y) < 6) return;
-      connect.moved = true;
-      var ll = mapObj.mouseEventToLatLng(event);
-      connect.line.setLatLngs([[connect.from.lat, connect.from.lng], ll]);
-    }
-
-    function onConnectEnd(event) {
-      document.removeEventListener("pointermove", onConnectMove);
-      document.removeEventListener("pointerup", onConnectEnd);
-      document.removeEventListener("pointercancel", onConnectEnd);
-      var c = connect;
-      connect = null;
-      if (destroyed || !c) return;
-      try { mapObj.removeLayer(c.line); } catch (e) {}
-      syncMapDragging();
-      dragEndedAt = Date.now();
-      var from = findFeature(c.id);
-      if (!from || event.type === "pointercancel") return;
-      if (!c.moved) {
-        /* A tap: the first picks the shape to link from, the second links it. */
-        var first = connectFrom ? findFeature(connectFrom) : null;
-        if (first && first.id !== from.id) { connectFrom = ""; linkFeatures(first, from); }
-        else { connectFrom = connectFrom === from.id ? "" : from.id; drawFeatures(); }
-        updateHint();
-        return;
-      }
-      connectFrom = "";
-      var to = featureAt(event.clientX, event.clientY);
-      if (to && to.id !== from.id) { linkFeatures(from, to); updateHint(); return; }
-      if (!to && from.hole) {
-        var was = from.hole;
-        from.hole = null;
+    function commitLink() {
+      var picked = linkPick.map(findFeature).filter(Boolean);
+      linkPick = [];
+      if (picked.length === 1) {
+        var only = picked[0];
+        if (!only.link) { drawFeatures(); updateHint(); setStatus("Pick at least two shapes to link them."); return; }
+        delete only.link;
         drawFeatures();
         changed();
-        setStatus(kindLabel(from.kind) + " taken off hole " + was + ".");
-      } else drawFeatures();
+        updateHint();
+        setStatus(kindLabel(only.kind) + " taken out of its link." + (only.hole ? " It still carries hole " + only.hole + "." : ""));
+        return;
+      }
+      if (!picked.length) { updateHint(); return; }
+      var keys = {};
+      picked.forEach(function (f) { var k = linkKey(f); if (k) keys[k] = true; });
+      var id = (picked.filter(function (f) { return f.link; })[0] || {}).link || newLinkId();
+      var members = session.features.filter(function (f) { return picked.indexOf(f) >= 0 || (linkKey(f) && keys[linkKey(f)]); });
+      members.forEach(function (f) { f.link = id; });
+      drawFeatures();
+      changed();
       updateHint();
+      flashLinked(members);
+      var numbers = [];
+      members.forEach(function (f) { if (f.hole && numbers.indexOf(f.hole) < 0) numbers.push(f.hole); });
+      setStatus("Linked " + members.length + " shapes as one hole." +
+        (numbers.length > 1 ? " They carry different hole numbers (" + numbers.sort(function (a, b) { return a - b; }).join(", ") + ") - fix the wrong one, or the mapper numbers them from the scorecard." : ""), numbers.length > 1);
+    }
+
+    /* The quick "linked" confirmation: the shapes pulse and a tick shows over them, so it is
+       plain the link was made and the next click starts a new one. */
+    function flashLinked(members) {
+      members.forEach(function (f) {
+        var node = el.stage.querySelector('[data-gd-feature="' + f.id + '"]');
+        if (!node) return;
+        node.classList.remove("gdStudioOverlayLinkedFlash");
+        void node.getBoundingClientRect();
+        node.classList.add("gdStudioOverlayLinkedFlash");
+      });
+      var pts = [];
+      members.forEach(function (f) { pts = pts.concat(toLatLngs(f.points)); });
+      if (!pts.length) return;
+      var centre = L.latLngBounds(pts).getCenter();
+      var badge = L.marker(centre, { interactive: false, keyboard: false, icon: L.divIcon({ className: "gdStudioOverlayLinkedBadge", html: "<span>✓ Linked</span>", iconSize: null }) }).addTo(mapObj);
+      setTimeout(function () { try { mapObj.removeLayer(badge); } catch (e) {} }, 900);
     }
 
     function clearLinkLayers() {
@@ -2385,7 +2373,7 @@
     function drawLinks() {
       clearLinkLayers();
       var groups = {};
-      session.features.forEach(function (f) { if (f.hole && f.points.length && f.kind !== "tree") (groups[f.hole] = groups[f.hole] || []).push(f); });
+      session.features.forEach(function (f) { var k = linkKey(f); if (k && f.points.length && f.kind !== "tree") (groups[k] = groups[k] || []).push(f); });
       Object.keys(groups).forEach(function (hole) {
         var list = groups[hole];
         if (list.length < 2) return;
@@ -2735,7 +2723,7 @@
       var text = "";
       if (!session.course) text = "Pick a course to start";
       else if (scanning) text = "AI scan running - shapes are locked until it finishes";
-      else if (tool === "connect") text = connectFrom ? "Now tap the shape to link it to" : "Drag from one shape to another to put them on the same hole · or tap one, then the other · drag onto empty ground to unlink";
+      else if (tool === "connect") text = linkPick.length > 1 ? linkPick.length + " picked · Enter or Space links them · Esc clears" : linkPick.length ? "Click the other shapes on this hole · Enter alone takes this one out of its link · Esc clears" : "Click the shapes that belong to one hole, then Enter or Space";
       else if (tool === "fairway" && session.mode === "pins") text = draft.length ? "Click where the fairway ends · Esc cancels" : "Click where the fairway starts";
       else if (lineTool() && session.mode === "shapes") {
         var thing = tool === "fairway" ? "fairway" : kindLabel(tool).toLowerCase();
@@ -3499,6 +3487,10 @@
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.key === "Escape" && !el.menu.hidden) { event.preventDefault(); setMenu(false); return; }
       if (event.key === "Escape" && fullscreen && !draft.length && !selectedId && tool === "move") { event.preventDefault(); setFullscreen(false); return; }
+      if (tool === "connect" && linkPick.length && session.course && canEdit()) {
+        if (event.key === "Enter" || event.key === " " || event.key === "Spacebar") { event.preventDefault(); commitLink(); return; }
+        if (event.key === "Escape") { event.preventDefault(); clearLinkPick(); return; }
+      }
       if (navKey(event)) return;
       if (draft.length) {
         if (event.key === "Enter") { event.preventDefault(); finishFairway(); }
@@ -3641,9 +3633,6 @@
       document.documentElement.classList.remove("gdStudioOverlayNoScroll");
       containerEl.classList.remove("gdStudioOverlayHost");
       rememberNow();
-      document.removeEventListener("pointermove", onConnectMove);
-      document.removeEventListener("pointerup", onConnectEnd);
-      document.removeEventListener("pointercancel", onConnectEnd);
       document.removeEventListener("pointermove", onDragMove);
       document.removeEventListener("pointerup", onDragEnd);
       document.removeEventListener("pointercancel", onDragEnd);

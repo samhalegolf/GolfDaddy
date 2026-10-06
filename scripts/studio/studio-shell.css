@@ -539,7 +539,33 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
 #gdStudioShellRoot .gdStudioOverlayStage.isTool-connect .gdStudioOverlayMap { cursor: default; }
 #gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayShape { cursor: grab; }
 #gdStudioShellRoot .gdStudioOverlayStage.isTool-move .gdStudioOverlayShape:active { cursor: grabbing; }
-#gdStudioShellRoot .gdStudioOverlayStage.isTool-connect .gdStudioOverlayShape { cursor: alias; }
+#gdStudioShellRoot .gdStudioOverlayStage.isTool-connect .gdStudioOverlayShape { cursor: pointer; }
+/* Link tool: the shapes just linked pulse once and a tick shows over them. */
+#gdStudioShellRoot .gdStudioOverlayShape.gdStudioOverlayLinkedFlash { animation: gdStudioOverlayLinkedPulse 0.7s ease-out; }
+@keyframes gdStudioOverlayLinkedPulse {
+  0% { stroke: #3cff8d; stroke-width: 9px; filter: drop-shadow(0 0 6px #3cff8d); }
+  100% { filter: none; }
+}
+.gdStudioOverlayLinkedBadge { pointer-events: none; }
+.gdStudioOverlayLinkedBadge span {
+  display: inline-block;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  background: rgba(5, 10, 7, 0.85);
+  color: #3cff8d;
+  border: 1px solid #3cff8d;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  animation: gdStudioOverlayLinkedBadge 0.9s ease-out forwards;
+}
+@keyframes gdStudioOverlayLinkedBadge {
+  0% { opacity: 0; transform: translate(-50%, -30%) scale(0.85); }
+  20% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -80%); }
+}
 #gdStudioShellRoot .gdStudioOverlayStage .gdStudioOverlayHandle { cursor: move; }
 #gdStudioShellRoot .gdStudioOverlayStage .gdStudioOverlayEdge { cursor: crosshair; }
 #gdStudioShellRoot .gdStudioOverlayStage:not(.isTool-move):not(.isTool-connect) .gdStudioOverlayShape { cursor: crosshair; }

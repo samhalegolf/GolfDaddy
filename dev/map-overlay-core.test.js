@@ -100,10 +100,61 @@ test("merging adds to the payload and never replaces it", () => {
   assert.strictEqual(overlay.mergeOverlayIntoPayload(GREENS_ONLY, []), GREENS_ONLY, "an empty overlay returns the very same payload");
   assert.strictEqual(overlay.mergeOverlayIntoPayload(GREENS_ONLY, null), GREENS_ONLY);
   assert.deepStrictEqual(overlay.overlaySummary([fairwayFeature("a", 0, 100, 0, 3), fairwayFeature("b", 0, 100, 60), { kind: "hole", hole: 1, points: [at(0, 0), at(1, 100)] }]),
-    { features: 3, fairways: 2, holeLines: 1, greens: 0, tees: 0, bunkers: 0, water: 0, trees: 0, singleTrees: 0, hazards: 0, waste: 0, pins: 0, numbered: 2 });
+    { features: 3, fairways: 2, holeLines: 1, greens: 0, tees: 0, bunkers: 0, water: 0, trees: 0, singleTrees: 0, hazards: 0, waste: 0, pins: 0, numbered: 2, linked: 0 });
   const tee = overlay.overlayToOsmElements([{ kind: "tee", points: [at(0, 0), at(8, 0), at(8, 6), at(0, 6)] }]);
   assert.strictEqual(tee[0].tags.golf, "tee", "a tee polygon becomes a golf=tee way");
   assert.strictEqual(tee[0].geometry.length, 5, "closed like every polygon kind");
+});
+
+test("a link groups shapes as one hole without numbering them", () => {
+  /* Linking says "same hole", never which. An unlinked or unnumbered group stays unnumbered
+     for the scorecard; a group with one typed number shares it; two numbers share neither. */
+  const ways = overlay.overlayToOsmElements([
+    fairwayFeature("a", 0, 100, 0), Object.assign(fairwayFeature("b", 0, 100, 60), { link: "l-1" }),
+    Object.assign(fairwayFeature("c", 0, 100, 120, 4), { link: "l-2" }), Object.assign(fairwayFeature("d", 0, 100, 180), { link: "l-2" }),
+    Object.assign(fairwayFeature("e", 0, 100, 240, 5), { link: "l-3" }), Object.assign(fairwayFeature("f", 0, 100, 300, 6), { link: "l-3" }),
+    Object.assign(fairwayFeature("g", 0, 100, 360), { link: "l-3" })
+  ]);
+  const ref = id => ways.find(w => w.tags["clarity:overlay"] === id).tags.ref;
+  assert.strictEqual(ref("a"), undefined, "no link, no number");
+  assert.strictEqual(ref("b"), undefined, "a link alone never invents a number");
+  assert.strictEqual(ref("d"), "4", "one typed number in a link is shared");
+  assert.strictEqual(ref("g"), undefined, "two numbers in one link - neither is guessed onto the rest");
+  assert.strictEqual(ref("e"), "5", "a typed number is never overwritten");
+  const kept = overlay.normalizeOverlayFeatures([Object.assign(fairwayFeature("x", 0, 100, 0), { link: "l-9 <b>" })]);
+  assert.strictEqual(kept[0].link, "l-9b", "the link survives a save, cleaned");
+  assert.strictEqual(overlay.overlaySummary(kept).linked, 1);
+});
+
+test("the resolver keeps an unnumbered link together, against what distance alone would pair", async () => {
+  /* The fairway's green end sits 8m from green "near", which distance pairs it with. A person
+     linked it - and a tee 260m back, past where a tee is normally looked for - to green "far". */
+  const { resolverHoleCandidates } = await import(path.join(root, "functions", "lib", "gd-geometry-resolver-core.mjs"));
+  const square = (x, y, r) => [at(x - r, y - r), at(x + r, y - r), at(x + r, y + r), at(x - r, y + r)];
+  const shapes = link => [
+    { id: "near", kind: "green", points: square(0, 0, 12) },
+    Object.assign({ id: "far", kind: "green", points: square(60, 262, 12) }, link ? { link: "l-a" } : {}),
+    Object.assign({ id: "fw", kind: "fairway", points: [at(-20, 20), at(20, 20), at(20, 230), at(-20, 230)] }, link ? { link: "l-a" } : {}),
+    Object.assign({ id: "t", kind: "tee", points: square(0, -230, 4) }, link ? { link: "l-a" } : {})
+  ];
+  const owner = (result, fairwayId) => result.primary.find(c => c.evidence.some(e => e.indexOf("fairway:") === 0 && e.indexOf(fairwayId) >= 0));
+  const wayId = (features, id) => String(overlay.overlayToOsmElements(features).find(w => w.tags["clarity:overlay"] === id).id);
+
+  const plain = shapes(false);
+  const unlinked = resolverHoleCandidates({ osmPayload: overlay.mergeOverlayIntoPayload({ elements: [] }, plain) });
+  const nearGreen = owner(unlinked, wayId(plain, "fw"));
+  assert.ok(nearGreen && nearGreen.greenId.indexOf(wayId(plain, "near")) >= 0, "without a link, distance gives the fairway to the near green");
+
+  const linked = shapes(true);
+  const ways = overlay.overlayToOsmElements(linked);
+  assert.strictEqual(ways.find(w => w.tags["clarity:overlay"] === "fw").tags["clarity:link"], "l-a", "the link reaches the payload");
+  const result = resolverHoleCandidates({ osmPayload: overlay.mergeOverlayIntoPayload({ elements: [] }, linked) });
+  const hole = owner(result, wayId(linked, "fw"));
+  assert.ok(hole && hole.greenId.indexOf(wayId(linked, "far")) >= 0, "the link gives the fairway to its own green: " + JSON.stringify(hole && hole.evidence));
+  assert.ok(hole.evidence.indexOf("linked:l-a") >= 0, "and says so");
+  assert.ok(hole.evidence.some(e => e === "tee:way-" + wayId(linked, "t")), "the linked tee starts the hole even past the usual tee search: " + JSON.stringify(hole.evidence));
+  assert.ok(!result.all.some(c => c.greenId.indexOf(wayId(linked, "near")) >= 0 && c.evidence.some(e => e.indexOf("fairway:way-" + wayId(linked, "fw")) === 0)),
+    "no reading, not even an alternative, gives a linked fairway to another green");
 });
 
 test("the automapper's surface pass sees an overlay fairway as a fairway_area", () => {
