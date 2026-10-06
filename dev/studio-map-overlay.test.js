@@ -272,10 +272,14 @@ test("the table migration exists and is service-role only", () => {
   assert.ok(sql.includes("auth.role() = 'service_role'"), "nothing on a player's device reads or writes this table");
 });
 
-test("Link: drag from one shape to another, or tap both, to put them on one hole", () => {
+test("Link: click the shapes on one hole, Enter or Space links them, and never numbers them", () => {
   assert.ok(page.includes('railButton("tool-connect"'), "no Link tool");
-  assert.ok(page.includes("function linkFeatures(a, b)") && page.includes("var hole = a.hole || b.hole || freeHole();"), "linking must share a hole number, taking the first numbered one");
-  assert.ok(page.includes('node.setAttribute("data-gd-feature", f.id)') && page.includes("document.elementFromPoint(x, y)"), "a Link drag must find the shape it was dropped on");
+  assert.ok(page.includes("function toggleLinkPick(id)") && page.includes("function commitLink()"), "clicks pick shapes, Enter links them");
+  assert.ok(/event\.key === "Enter" \|\| event\.key === " " \|\| event\.key === "Spacebar"\) \{ event\.preventDefault\(\); commitLink\(\);/.test(page), "Enter or Space commits the link");
+  assert.ok(!/freeHole|linkFeatures|beginConnect/.test(page), "linking must never make up a hole number, and the old drag-to-link is gone");
+  const commit = page.slice(page.indexOf("function commitLink()"), page.indexOf("function flashLinked("));
+  assert.ok(!/\.hole\s*=[^=]/.test(commit), "commitLink must not write a hole number");
+  assert.ok(page.includes("function flashLinked(members)") && shell.includes("gdStudioOverlayLinkedFlash"), "a link shows a quick linked confirmation");
   assert.ok(page.includes("function drawLinks()"), "shapes on one hole must be drawn joined");
 });
 
