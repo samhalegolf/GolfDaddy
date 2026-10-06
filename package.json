@@ -17,6 +17,7 @@
     "test:referrals": "node dev/referral-surfaces.test.js && node dev/referral-invite-target.test.js && node dev/referrals-auth.test.js && node dev/referral-reward-entitlements.test.js && node dev/store-referral-reversal.test.js",
     "test:scorecard-resolve": "node dev/scorecard-resolve.test.js",
     "test:polite-fetch": "node dev/polite-fetch.test.js",
+    "test:scorecard-upload": "node dev/scorecard-upload-core.test.js && node dev/course-scorecard-upload.test.js",
     "test:scorecard-international": "node dev/international-scorecard-resolver.test.js",
     "test:scorecard-visual": "node dev/scorecard-visual-fallback.test.js",
     "test:forward-tee": "node dev/forward-tee.test.js",

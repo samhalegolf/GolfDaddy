@@ -4679,7 +4679,273 @@ function gdAdminCourseDbExpandedRow(item){
   ].join("");
   /* colspan tracks the header above - 8 since the Version column joined it. A stale number
      here silently narrows the expanded panel rather than erroring. */
-  return `<tr class="gdAdminCourseDiagRowHost"><td colspan="8"><div class="gdAdminCourseDiag">${banner}${progressBar}<div class="gdAdminCourseDiagGrid">${diag}</div>${gdAdminCourseDbActionRail(item)}</div></td></tr>`;
+  return `<tr class="gdAdminCourseDiagRowHost"><td colspan="8"><div class="gdAdminCourseDiag">${banner}${progressBar}<div class="gdAdminCourseDiagGrid">${diag}</div>${gdAdminCourseScorecardDropMarkup(item)}${gdAdminCourseDbActionRail(item)}</div></td></tr>`;
+}
+
+/* ---------- Scorecard drop zone ----------
+ *
+ * The resolver finds most cards on the web. When it cannot, the admin has the card
+ * in hand, and this is where it goes: drop a file on the course's row, or open the
+ * row and paste the card. Text (CSV, tab-separated, HTML, JSON) goes straight to
+ * /api/course-scorecard-upload. A picture is read by the native OCR here in the
+ * browser first and its text dropped into the paste box, so a poor read can be
+ * corrected by hand before it is sent - nothing is stored from a picture
+ * unseen. No model is called anywhere on this path.
+ *
+ * The panel re-renders every couple of seconds by swapping innerHTML, so nothing
+ * that changes while the admin works - the pasted draft, the status line - may
+ * live in the markup. Both are kept here and written back into the DOM after each
+ * render (gdAdminCourseScorecardRestore), and the markup stays byte-identical so
+ * the render guard leaves the panel alone while someone is typing. */
+const gdAdminScorecardDrafts={};
+const gdAdminScorecardStatus={};
+function gdAdminCourseScorecardDropMarkup(item){
+  const id=gdEscapeHTML(item.id);
+  return `<div class="gdAdminCourseScorecardDrop" data-course-id="${id}" onclick="event.stopPropagation()">`
+    +`<div class="gdAdminCourseScorecardDropHead"><strong>Scorecard</strong><span>Drop a file anywhere on this course's row, or paste the card here. Image (read by OCR), HTML, CSV, tab-separated text or JSON.</span></div>`
+    +`<textarea class="gdAdminCourseScorecardPaste" data-course-id="${id}" spellcheck="false" placeholder="Hole&#9;1&#9;2&#9;3 …&#10;Par&#9;4&#9;3&#9;4 …&#10;SI&#9;11&#9;15&#9;9 …&#10;Yards&#9;300&#9;119&#9;333 …"></textarea>`
+    +`<div class="gdAdminCourseScorecardDropRail">`
+    +`<label class="gdAdminCourseScorecardFile">Choose file…<input type="file" accept=".csv,.tsv,.txt,.html,.htm,.json,image/*,text/*" data-course-id="${id}" hidden></label>`
+    +`<button type="button" class="primary" data-gd-scorecard-import="${id}">Import pasted card</button>`
+    +`<span class="gdAdminCourseScorecardStatus" data-course-id="${id}"></span>`
+    +`</div></div>`;
+}
+/* Called after every list render: the draft and status back into fresh DOM. */
+function gdAdminCourseScorecardRestore(root){
+  if(!root||!root.querySelectorAll)return;
+  root.querySelectorAll(".gdAdminCourseScorecardPaste[data-course-id]").forEach(area=>{
+    const draft=gdAdminScorecardDrafts[area.dataset.courseId]||"";
+    if(area.value!==draft)area.value=draft;
+  });
+  root.querySelectorAll(".gdAdminCourseScorecardStatus[data-course-id]").forEach(span=>{
+    span.textContent=gdAdminScorecardStatus[span.dataset.courseId]||"";
+  });
+}
+function gdAdminCourseScorecardSetStatus(courseId,text){
+  gdAdminScorecardStatus[courseId]=text||"";
+  document.querySelectorAll(`.gdAdminCourseScorecardStatus[data-course-id="${CSS.escape(String(courseId))}"]`).forEach(span=>{span.textContent=text||"";});
+}
+function gdAdminCourseScorecardSetDraft(courseId,text){
+  gdAdminScorecardDrafts[courseId]=text||"";
+  document.querySelectorAll(`.gdAdminCourseScorecardPaste[data-course-id="${CSS.escape(String(courseId))}"]`).forEach(area=>{if(area.value!==(text||""))area.value=text||"";});
+}
+/* The row or drop block a drag is over, if any. */
+function gdAdminCourseScorecardDropHost(target){
+  return target&&target.closest?target.closest("tr[data-course-id],.gdAdminCourseScorecardDrop[data-course-id]"):null;
+}
+function gdAdminCourseScorecardDragHasPayload(event){
+  const types=event&&event.dataTransfer?Array.from(event.dataTransfer.types||[]):[];
+  return types.includes("Files")||types.includes("text/plain");
+}
+function gdAdminCourseScorecardDragOver(event){
+  const host=gdAdminCourseScorecardDropHost(event.target);
+  if(!host||!gdAdminCourseScorecardDragHasPayload(event))return;
+  event.preventDefault();
+  if(event.dataTransfer)event.dataTransfer.dropEffect="copy";
+  document.querySelectorAll(".gdAdminCourseDropTarget").forEach(el=>{if(el!==host)el.classList.remove("gdAdminCourseDropTarget");});
+  host.classList.add("gdAdminCourseDropTarget");
+}
+function gdAdminCourseScorecardDragLeave(event){
+  const host=gdAdminCourseScorecardDropHost(event.target);
+  if(host&&!(event.relatedTarget&&host.contains(event.relatedTarget)))host.classList.remove("gdAdminCourseDropTarget");
+}
+function gdAdminCourseScorecardDrop(event){
+  const host=gdAdminCourseScorecardDropHost(event.target);
+  if(!host||!gdAdminCourseScorecardDragHasPayload(event))return;
+  event.preventDefault();
+  event.stopPropagation();
+  host.classList.remove("gdAdminCourseDropTarget");
+  const files=Array.from((event.dataTransfer&&event.dataTransfer.files)||[]);
+  const text=files.length?"":String(event.dataTransfer.getData("text/plain")||"");
+  gdAdminCourseScorecardReceive(host.dataset.courseId,files,text);
+}
+function gdAdminCourseScorecardChange(event){
+  const input=event.target;
+  if(!input||input.type!=="file"||!input.dataset||!input.dataset.courseId||!input.closest(".gdAdminCourseScorecardDrop"))return;
+  const files=Array.from(input.files||[]);
+  input.value="";
+  gdAdminCourseScorecardReceive(input.dataset.courseId,files,"");
+}
+function gdAdminCourseScorecardClick(event){
+  const button=event.target&&event.target.closest?event.target.closest("button[data-gd-scorecard-import]"):null;
+  if(!button)return;
+  event.preventDefault();
+  event.stopPropagation();
+  const courseId=button.dataset.gdScorecardImport;
+  gdAdminCourseScorecardReceive(courseId,[],gdAdminScorecardDrafts[courseId]||"");
+}
+function gdAdminCourseScorecardInput(event){
+  const area=event.target;
+  if(!area||!area.classList||!area.classList.contains("gdAdminCourseScorecardPaste"))return;
+  gdAdminScorecardDrafts[area.dataset.courseId]=area.value;
+}
+if(!window.__gdAdminCourseScorecardDropBound){
+  window.__gdAdminCourseScorecardDropBound=true;
+  document.addEventListener("dragover",gdAdminCourseScorecardDragOver,true);
+  document.addEventListener("dragleave",gdAdminCourseScorecardDragLeave,true);
+  document.addEventListener("drop",gdAdminCourseScorecardDrop,true);
+  document.addEventListener("change",gdAdminCourseScorecardChange,true);
+  document.addEventListener("click",gdAdminCourseScorecardClick,true);
+  document.addEventListener("input",gdAdminCourseScorecardInput,true);
+}
+
+/* Files and pasted text -> text files for the server. Pictures go through the OCR
+   here first; PDFs are turned away with the quicker route spelled out. */
+async function gdAdminCourseScorecardReceive(courseId,files,pastedText){
+  courseId=String(courseId||"");
+  if(!courseId)return false;
+  const payload=[];
+  for(const file of files||[]){
+    const isImage=/^image\//i.test(file.type)||/\.(jpe?g|png|webp|gif)$/i.test(file.name);
+    const isPdf=file.type==="application/pdf"||/\.pdf$/i.test(file.name);
+    if(isPdf){
+      gdAdminCourseVisualToast("PDFs are not read here - export the card as text or CSV, or paste the table");
+      continue;
+    }
+    if(isImage){
+      const read=await gdAdminCourseScorecardOcr(courseId,file);
+      if(!read){continue;}
+      /* The read lands in the paste box too, so a wrong digit can be fixed and
+         re-imported without another scan. */
+      gdAdminCourseScorecardSetDraft(courseId,read.text);
+      payload.push({name:file.name+".tsv",mediaType:"text/tab-separated-values",text:read.text,unit:read.unit||""});
+      continue;
+    }
+    if(file.size>2*1024*1024){gdAdminCourseVisualToast(file.name+" is too large to be a scorecard table");continue;}
+    payload.push({name:file.name,mediaType:file.type||"",text:await file.text()});
+  }
+  if(pastedText&&pastedText.trim())payload.push({name:"",mediaType:"text/plain",text:pastedText});
+  if(!payload.length)return false;
+  return gdAdminCourseScorecardSend(courseId,payload);
+}
+async function gdAdminCourseScorecardSend(courseId,files){
+  try{
+    const token=await gdAdminCourseDbAccessToken();
+    if(!token){gdAdminCourseVisualToast("Sign in again to import a scorecard");return false;}
+    gdAdminCourseScorecardSetStatus(courseId,"Reading card…");
+    const res=await fetch("/api/course-scorecard-upload",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+      body:JSON.stringify({courseId:courseId,files:files})
+    });
+    const data=await res.json().catch(()=>null);
+    if(res.status===403){gdAdminCourseScorecardSetStatus(courseId,"Admin only");return false;}
+    if(res.status===404){gdAdminCourseScorecardSetStatus(courseId,(data&&data.error)||"No published course found");return false;}
+    if(res.status===422){
+      const why=(data&&data.rejected||[]).map(r=>(r.name||"pasted text")+": "+gdAdminCourseScorecardReason(r.reason)).join("; ");
+      gdAdminCourseScorecardSetStatus(courseId,"No card found. "+why);
+      return false;
+    }
+    if(!res.ok){gdAdminCourseScorecardSetStatus(courseId,"Import failed ("+res.status+")");return false;}
+    gdAdminCourseScorecardSetStatus(courseId,(data&&data.message)||"Imported");
+    gdAdminCourseVisualToast((data&&data.message)||"Scorecard imported");
+    /* The card is stored; the paste box has done its job. */
+    gdAdminCourseScorecardSetDraft(courseId,"");
+    if(data&&Array.isArray(data.renamed)&&data.renamed.length){
+      await gdLoadAdminCourseDbCloud({force:true});
+      gdRenderAdminCourseDatabase();
+    }
+    return true;
+  }catch(error){
+    gdAdminCourseScorecardSetStatus(courseId,"Import failed to send");
+    return false;
+  }
+}
+function gdAdminCourseScorecardReason(code){
+  return code==="no-card-found"?"no hole/par table in it"
+    :code==="unsupported-format"?"not a format that can be read - export it as CSV or paste the table"
+    :code==="pdf-export-as-text"?"PDFs are not read - export as text or paste the table"
+    :code==="image-not-read"?"picture was not read"
+    :String(code||"not read");
+}
+
+/* ---------- native OCR for a dropped picture ----------
+ *
+ * ClarityScorecardScan (scripts/clarity-scorecard-scan.js) with Tesseract, the same
+ * pair the dev harness runs. Loaded on first use: this is an admin-only path and
+ * the OCR scripts are not worth every player's download. The grids it reads are
+ * handed back as tab-separated text, which is what the paste box and the server
+ * both understand. A failed read reports the stage it stopped at and sends nothing. */
+const GD_ADMIN_SCORECARD_OCR_SCRIPTS=["scripts/clarity-scorecard-ocr.js","scripts/clarity-scorecard-ocr-pixels.js","scripts/clarity-scorecard-scan.js"];
+function gdAdminCourseScorecardLoadScript(src){
+  return new Promise((resolve,reject)=>{
+    const script=document.createElement("script");
+    script.src=src;
+    script.async=true;
+    script.onload=()=>resolve();
+    script.onerror=()=>reject(new Error("could not load "+src));
+    document.head.appendChild(script);
+  });
+}
+function gdAdminCourseScorecardLoadOcr(){
+  if(window.ClarityScorecardScan&&window.Tesseract)return Promise.resolve();
+  if(window.__gdAdminScorecardOcrPromise)return window.__gdAdminScorecardOcrPromise;
+  window.__gdAdminScorecardOcrPromise=(async()=>{
+    for(const src of GD_ADMIN_SCORECARD_OCR_SCRIPTS){if(!window.ClarityScorecardScan)await gdAdminCourseScorecardLoadScript(src);}
+    await gdLoadTesseract();
+  })().catch(error=>{window.__gdAdminScorecardOcrPromise=null;throw error;});
+  return window.__gdAdminScorecardOcrPromise;
+}
+/* A dropped picture as pixels, downscaled: the per-box crops carry the detail and
+   a 4000px source only makes the component pass slow. */
+function gdAdminCourseScorecardImageData(file){
+  return new Promise((resolve,reject)=>{
+    const url=URL.createObjectURL(file);
+    const img=new Image();
+    img.onload=()=>{
+      try{
+        const scale=Math.min(1,2400/img.width);
+        const canvas=document.createElement("canvas");
+        canvas.width=Math.round(img.width*scale);
+        canvas.height=Math.round(img.height*scale);
+        const ctx=canvas.getContext("2d",{willReadFrequently:true});
+        ctx.drawImage(img,0,0,canvas.width,canvas.height);
+        resolve(ctx.getImageData(0,0,canvas.width,canvas.height));
+      }catch(error){reject(error);}
+      finally{URL.revokeObjectURL(url);}
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error("not an image the browser can open"));};
+    img.src=url;
+  });
+}
+function gdAdminCourseScorecardGridsToText(grids){
+  return (grids||[]).map(grid=>grid.map(row=>row.map(cell=>String(cell==null?"":cell).replace(/\t/g," ")).join("\t")).join("\n")).join("\n\n");
+}
+async function gdAdminCourseScorecardOcr(courseId,file){
+  let worker=null;
+  try{
+    gdAdminCourseScorecardSetStatus(courseId,"Loading OCR…");
+    await gdAdminCourseScorecardLoadOcr();
+    const image=await gdAdminCourseScorecardImageData(file);
+    gdAdminCourseScorecardSetStatus(courseId,"Starting OCR…");
+    worker=await window.Tesseract.createWorker("eng");
+    const recognize=async(source,opts)=>{
+      const parameters={tessedit_pageseg_mode:(opts&&opts.psm)||"7"};
+      if(opts&&opts.whitelist)parameters.tessedit_char_whitelist=opts.whitelist;
+      await worker.setParameters(parameters);
+      const result=await worker.recognize(source);
+      return String(result&&result.data&&result.data.text||"").trim();
+    };
+    const result=await window.ClarityScorecardScan.scanScorecard(image,{
+      recognize,
+      onStage(name,info){
+        gdAdminCourseScorecardSetStatus(courseId,name==="read"?"Reading boxes "+info.done+"/"+info.total:"OCR: "+name+"…");
+      }
+    });
+    if(!result||!result.ok){
+      gdAdminCourseScorecardSetStatus(courseId,"OCR could not read "+file.name+(result&&result.error?" - "+result.error:""));
+      return null;
+    }
+    const text=gdAdminCourseScorecardGridsToText(result.grids);
+    if(!text.trim()){gdAdminCourseScorecardSetStatus(courseId,"OCR found no table in "+file.name);return null;}
+    gdAdminCourseScorecardSetStatus(courseId,"OCR read "+file.name+" - check the text, then import");
+    return {text:text,unit:result.unit||""};
+  }catch(error){
+    gdAdminCourseScorecardSetStatus(courseId,"OCR failed: "+((error&&error.message)||error));
+    return null;
+  }finally{
+    if(worker&&typeof worker.terminate==="function")Promise.resolve(worker.terminate()).catch(()=>{});
+  }
 }
 
 /* A full panel rebuild reconstructs the whole detail pane, tuning dock included,
@@ -4741,9 +5007,10 @@ function gdRenderAdminCourseDatabaseNow(){
     const active=item.id===gdAdminCourseDatabaseSelected?" active":"";
     const open=item.id===gdAdminCourseDbExpanded;
     const caret=open?"▾":"▸";
-    const row=`<tr class="${active}${open?" expanded":""}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${caret}</span> ${gdEscapeHTML(item.name)}</td><td>${version?`<span class="gdAdminCourseVersion">${gdEscapeHTML(version)}</span>`:`<span class="gdAdminCourseMuted" title="No countable version yet - this course has not been rebuilt since versions existed">\u2014</span>`}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(status)}</span>${gdAdminCourseDbDrawButton(item,status)}</td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${item.playReadyCount==null?"<span class=\"gdAdminCourseMuted\" title=\"Open the row to load this course's geometry\">\u2014</span>":gdEscapeHTML(item.playReadyCount)+"/"+gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
+    const row=`<tr class="${active}${open?" expanded":""}" data-course-id="${gdEscapeHTML(item.id)}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${caret}</span> ${gdEscapeHTML(item.name)}</td><td>${version?`<span class="gdAdminCourseVersion">${gdEscapeHTML(version)}</span>`:`<span class="gdAdminCourseMuted" title="No countable version yet - this course has not been rebuilt since versions existed">\u2014</span>`}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(status)}</span>${gdAdminCourseDbDrawButton(item,status)}</td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${item.playReadyCount==null?"<span class=\"gdAdminCourseMuted\" title=\"Open the row to load this course's geometry\">\u2014</span>":gdEscapeHTML(item.playReadyCount)+"/"+gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
     return open?row+gdAdminCourseDbExpandedRow(item):row;
   }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current search.</div>');
+  gdAdminCourseScorecardRestore(list);
   const selected=filtered.find(item=>item.id===gdAdminCourseDatabaseSelected);
   if(!selected){
     /* Back (or deselecting a row) lands HERE - a doorway, not the lab itself. The lab

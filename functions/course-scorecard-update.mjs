@@ -10,24 +10,21 @@
  *
  * This does the other half on its own: search more broadly for the facility's
  * scorecards (the shared engine in gd-scorecard-resolve.mjs, same one the mapper
- * worker uses), match what it finds against the geometry already published for
- * each sibling course, and rename only when that match is confident. It never
- * queries Overpass, never writes objects_json/holes_json, never enqueues a
+ * worker uses), then hand what it finds to lib/gd-facility-scorecards, which
+ * matches the cards against the geometry already published for each sibling
+ * course and renames only when that match is confident. It never queries
+ * Overpass, never writes objects_json/holes_json, never enqueues a
  * course_mapper_jobs row - see course-mapper-jobs.mjs for that path instead.
  *
  * POST /api/course-scorecard-update  { courseId }   - admin-auth gated
  */
 
-import { resolveScorecard, distinctCards, distinctCardCount, facilityScorecardRow } from "./lib/gd-scorecard-resolve.mjs";
-import { matchLoopsToCards, courseLengthsFromPublishedGeometry } from "./lib/gd-scorecard-match-core.mjs";
-import { renamePatch } from "./lib/gd-course-rename-core.mjs";
-import { splitCourseName } from "./lib/gd-automapper-core.mjs";
+import { resolveScorecard, distinctCards, distinctCardCount, shouldReplaceFacilityCard } from "./lib/gd-scorecard-resolve.mjs";
+import { loadFacilityChildren, facilityNameOf, fetchFacilityRows, cardsFromRows, storeFacilityCards, relabelFacility } from "./lib/gd-facility-scorecards.mjs";
 import politeFetch from "./lib/gd-polite-fetch.js";
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const { createPoliteHtmlFetcher } = politeFetch;
 
-const MAPS_TABLE = "course_maps";
-const SCORECARDS_TABLE = "course_scorecards";
 const ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
 const RESOLVE_BUDGET_MS = 12000;
 
@@ -92,37 +89,6 @@ async function searchScorecardPages(name, region, origin, signal) {
   return ((payload && payload.results) || []).map(result => ({ url: result.url, name: result.title || "" }));
 }
 
-/* Every distinct card stored under a facility - same shape and query as the
-   worker's fetchFacilityScorecardEvidence, kept separate because this function
-   does not share an HTTP client with the worker (deliberate, see course-package.
-   mjs's header comment: every function here owns its own request plumbing). */
-async function fetchFacilityCards(facilityKey) {
-  if (!facilityKey) return [];
-  const rows = await supabaseFetch(SCORECARDS_TABLE + "?select=course_key,course_name,holes_json,source,source_url,sources_json&facility_key=eq." + encodeURIComponent(facilityKey)).catch(() => []);
-  return (Array.isArray(rows) ? rows : [])
-    .filter(row => Array.isArray(row.holes_json) && row.holes_json.length)
-    .map(row => ({ name: row.course_name, holes: row.holes_json, source: row.source, sourceUrl: row.source_url }));
-}
-
-async function loadFacilityChildren(courseId) {
-  const rows = await supabaseFetch(
-    MAPS_TABLE + "?select=course_id,course_name,course_lat,course_lng,facility_key,course_aliases,objects_json,holes_json,region,country,published&course_id=eq." + encodeURIComponent(courseId) + "&limit=1"
-  );
-  const pinned = Array.isArray(rows) ? rows[0] : null;
-  if (!pinned) return null;
-  const facilityKey = pinned.facility_key || pinned.course_id;
-  if (!pinned.facility_key) return { facilityKey, children: [pinned] };
-  const siblings = await supabaseFetch(
-    MAPS_TABLE + "?select=course_id,course_name,course_lat,course_lng,facility_key,course_aliases,objects_json,holes_json,region,country,published&facility_key=eq." + encodeURIComponent(facilityKey) + "&published=eq.true"
-  );
-  const children = (Array.isArray(siblings) ? siblings : []).filter(row => row && row.course_id);
-  /* The pinned row's own facility_key already equals facilityKey (the worker
-     stamps it on every sibling including itself), so it is normally already in
-     `children` - this only guards a row that predates that write. */
-  if (!children.some(row => row.course_id === pinned.course_id)) children.push(pinned);
-  return { facilityKey, children };
-}
-
 export default async function courseScorecardUpdate(req) {
   if (req.method === "OPTIONS") return json(200, { ok: true });
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
@@ -137,15 +103,15 @@ export default async function courseScorecardUpdate(req) {
   const courseId = String((payload && payload.courseId) || "").trim();
   if (!courseId) return json(400, { error: "courseId required" });
 
-  const facility = await loadFacilityChildren(courseId).catch(() => null);
+  const facility = await loadFacilityChildren(supabaseFetch, courseId).catch(() => null);
   if (!facility) return json(404, { error: "No published course found for " + courseId });
   const { facilityKey, children } = facility;
   const want = children.length;
 
   const pinned = children.find(row => row.course_id === courseId) || children[0];
-  const facilityName = splitCourseName(pinned.course_name || "").facility || pinned.course_name || courseId;
+  const facilityName = facilityNameOf(pinned, courseId);
 
-  let cards = await fetchFacilityCards(facilityKey);
+  let cards = cardsFromRows(await fetchFacilityRows(supabaseFetch, facilityKey));
   let acquireReason = null;
   if (distinctCardCount(cards) < want) {
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -157,14 +123,10 @@ export default async function courseScorecardUpdate(req) {
         {
           fetchHtml: url => fetchPageHtml(url, controller ? controller.signal : undefined),
           search: (name, region) => searchScorecardPages(name, region, origin, controller ? controller.signal : undefined),
-          writeStore: async (key, name, foundCards) => {
-            const existing = await fetchFacilityRows(facilityKey);
-            const rows = distinctCards(foundCards).map(card => facilityScorecardRow(card, name, facilityKey, existing)).filter(Boolean);
-            if (!rows.length) return;
-            await supabaseFetch(SCORECARDS_TABLE + "?on_conflict=course_key", {
-              method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify(rows)
-            });
-          }
+          /* A scrape never overwrites a confirmed or high-confidence row. */
+          writeStore: (key, name, foundCards) => storeFacilityCards(supabaseFetch, {
+            cards: foundCards, name, facilityKey, filter: shouldReplaceFacilityCard
+          })
         },
         { want }
       );
@@ -178,52 +140,8 @@ export default async function courseScorecardUpdate(req) {
     }
   }
 
-  const distinct = distinctCardCount(cards);
-  const loops = children.map(row => ({ id: row.course_id, lengths: courseLengthsFromPublishedGeometry(row.objects_json) }));
-  /* matchLoopsToCards can confidently name ONE course from a single card even
-     when the facility has two - "shorter side governs" is right for a resolver
-     naming whatever it can, but wrong for a facility-level rename: a player
-     seeing one sibling renamed to "North Course" while the other still reads
-     "Course 2" is a worse, more confusing state than leaving both provisional.
-     So evidence for every expected course is required before matching is even
-     attempted, not only before the message is chosen. */
-  const match = distinct >= want
-    ? matchLoopsToCards(loops, distinctCards(cards))
-    : { resolved: false, reason: "insufficient-evidence", assignment: [] };
-
-  const renamed = [];
-  if (match.resolved) {
-    for (const pair of match.assignment) {
-      const row = children.find(child => child.course_id === pair.loopId);
-      if (!row || !pair.cardName) continue;
-      const patch = renamePatch(row, pair.cardName);
-      if (!patch) continue;
-      await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(row.course_id), {
-        method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(patch)
-      });
-      renamed.push({ courseId: row.course_id, from: row.course_name, to: patch.course_name });
-    }
-  }
-
-  const message = distinct < want
-    ? "Found " + distinct + " of " + want + " required course card" + (want === 1 ? "" : "s") + ". Labels unchanged."
-    : !match.resolved
-      ? distinct + " card" + (distinct === 1 ? "" : "s") + " found but match was not confident enough. Labels unchanged."
-      : renamed.length
-        ? "Found " + distinct + " distinct course card" + (distinct === 1 ? "" : "s") + ". Course labels updated."
-        : "Found " + distinct + " distinct course card" + (distinct === 1 ? "" : "s") + ". Labels already up to date.";
-
-  return json(200, {
-    facilityKey, want, distinct, resolved: !!match.resolved,
-    reason: acquireReason || match.reason || null,
-    renamed, message
-  });
-}
-
-async function fetchFacilityRows(facilityKey) {
-  if (!facilityKey) return [];
-  const rows = await supabaseFetch(SCORECARDS_TABLE + "?select=course_key,course_name,holes_json&facility_key=eq." + encodeURIComponent(facilityKey)).catch(() => []);
-  return Array.isArray(rows) ? rows : [];
+  const relabel = await relabelFacility(supabaseFetch, { children, cards });
+  return json(200, Object.assign({ facilityKey }, relabel, { reason: acquireReason || relabel.reason || null }));
 }
 
 export const config = {

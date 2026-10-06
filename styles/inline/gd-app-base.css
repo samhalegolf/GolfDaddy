@@ -477,6 +477,21 @@
     .gdAdminCourseTable tr.gdAdminCourseDiagRowHost{cursor:default;background:rgba(0,0,0,.22)}
     .gdAdminCourseTable tr.gdAdminCourseDiagRowHost:hover{background:rgba(0,0,0,.22)}
     .gdAdminCourseTable tr.gdAdminCourseDiagRowHost>td{padding:0}
+    /* Scorecard drop zone: the whole row lights up while a file is dragged over it, and
+       the expanded panel carries the paste box. */
+    .gdAdminCourseTable tr.gdAdminCourseDropTarget td{background:rgba(31,211,109,.16);box-shadow:inset 0 0 0 1px rgba(124,255,179,.45)}
+    .gdAdminCourseScorecardDrop{display:grid;gap:7px;padding:10px 11px;border:1px dashed rgba(255,255,255,.22);border-radius:12px;background:rgba(0,0,0,.16);cursor:default}
+    .gdAdminCourseScorecardDrop.gdAdminCourseDropTarget{border-color:#7cffb3;background:rgba(31,211,109,.12)}
+    .gdAdminCourseScorecardDropHead{display:grid;gap:3px}
+    .gdAdminCourseScorecardDropHead strong{color:#fff;font:950 11px/1.25 Inter,system-ui,sans-serif}
+    .gdAdminCourseScorecardDropHead span{color:rgba(255,255,255,.56);font:850 10px/1.35 Inter,system-ui,sans-serif;white-space:normal}
+    .gdAdminCourseScorecardPaste{width:100%;min-height:96px;box-sizing:border-box;resize:vertical;border:1px solid rgba(255,255,255,.10);border-radius:10px;background:rgba(0,0,0,.26);color:#fff;padding:8px;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;overflow:auto}
+    .gdAdminCourseScorecardPaste::placeholder{color:rgba(255,255,255,.28)}
+    .gdAdminCourseScorecardDropRail{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .gdAdminCourseScorecardDropRail button,.gdAdminCourseScorecardFile{border-radius:999px;padding:7px 11px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.09);color:#fff;font:950 11px/1.2 Inter,system-ui,sans-serif;cursor:pointer}
+    .gdAdminCourseScorecardDropRail button.primary{background:#1fd36d;border-color:#1fd36d;color:#07100a}
+    .gdAdminCourseScorecardStatus{color:rgba(255,255,255,.62);font:850 10px/1.35 Inter,system-ui,sans-serif;white-space:normal}
+    .gdAdminCourseScorecardStatus:empty{display:none}
     .gdAdminCourseDiag{display:grid;gap:9px;padding:11px 13px 13px;border-top:1px solid rgba(255,255,255,.07)}
     .gdAdminCourseDiagWhy{border-radius:10px;padding:9px 11px;font:800 11.5px/1.45 Inter,system-ui,sans-serif;border:1px solid rgba(255,210,135,.22);background:rgba(255,210,135,.08);color:#ffd287}
     .gdAdminCourseDiagWhy.bad{border-color:rgba(255,125,125,.26);background:rgba(255,125,125,.09);color:#ff9d9d}

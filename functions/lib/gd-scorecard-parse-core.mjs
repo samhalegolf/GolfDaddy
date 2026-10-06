@@ -64,7 +64,11 @@ const TOTAL_HEADINGS = /^(out|in|tot|total|front|back|f9|b9|sub|subtotal)$/i;
    by a list nobody can finish. */
 const PAR_LABEL = /^(par|par m|par w|mens? par|womens? par)$/i;
 const HANDICAP_LABEL = /^(h(an)?di?(cap)?\.*|index|s\.?i\.?|stroke( index)?|hcp)\.*$/i;
-const SKIP_LABEL = /^(hole|holes|#|tee|yards?|met(er|re)s?|rating|slope|score|putts)$/i;
+const SKIP_LABEL = /^(hole|holes|#|tee|rating|slope|score|putts)$/i;
+/* A row labelled by its unit - "Yards 300 119 333 ..." - is the card's one distance
+   row, and the label is the unit declaration. Common on cards pasted from a web
+   table and on clubs that print a single tee. */
+const UNIT_LABEL = /^(yards?|yds?|met(er|re)s?|m)$/i;
 
 const YARD_TO_M = 0.9144;
 
@@ -116,13 +120,11 @@ export function parseScorecardGrid(grid, options = {}) {
   const { headerRow, columns } = found;
 
   const par = {}, handicap = {}, tees = [];
+  let unit = options.unit || null;
   for (let r = headerRow + 1; r < grid.length; r++) {
     const row = grid[r] || [];
     const label = cleanCell(row[0]);
     if (!label) continue;
-    /* A second header row - the 10-18 block of a card split into two stacked
-       tables - ends this block rather than being read as a tee called "Hole". */
-    if (findHoleColumns([row])) break;
 
     const values = {};
     columns.forEach((hole, column) => {
@@ -133,6 +135,11 @@ export function parseScorecardGrid(grid, options = {}) {
 
     if (PAR_LABEL.test(label)) { Object.assign(par, values); continue; }
     if (HANDICAP_LABEL.test(label)) { Object.assign(handicap, values); continue; }
+    if (UNIT_LABEL.test(label)) {
+      if (!unit) unit = /^y/i.test(label) ? "yards" : "metres";
+      tees.push({ name: label, distances: values });
+      continue;
+    }
     if (SKIP_LABEL.test(label)) continue;
     /* Par is 3-6 and a stroke index is 1-18; a distance row is none of those, so
        a mislabelled or unlabelled tee row is still recognisable by its values. */
@@ -142,7 +149,7 @@ export function parseScorecardGrid(grid, options = {}) {
   }
 
   if (!tees.length && !Object.keys(par).length) return null;
-  return { holes: [...columns.values()], par, handicap, tees, unit: options.unit || null };
+  return { holes: [...columns.values()], par, handicap, tees, unit };
 }
 
 /* Cards split across stacked blocks - 18Birdies puts holes 1-9 in one table and
@@ -257,9 +264,25 @@ export function cleanCardLabel(label) {
   return /^(scorecard|score card|hole by hole)$/i.test(cleanCell(label)) ? "" : text;
 }
 
+/* One grid per hole-header row. A card printed as two stacked nines often sits in
+   ONE table (or one pasted block): Hole 1-9 and its rows, then Hole 10-18 and its
+   rows. Each block is its own part, and the parts merge below by hole number, so
+   the back nine is read rather than taken for a tee called "Hole". */
+export function splitGridAtHeaderRows(grid) {
+  const blocks = [];
+  let current = null;
+  (grid || []).forEach(row => {
+    if (findHoleColumns([row])) { current = []; blocks.push(current); }
+    if (current) current.push(row);
+  });
+  if (!blocks.length) return [];
+  blocks.forEach(block => { block.label = grid.label; });
+  return blocks;
+}
+
 export function parseScorecardCards(grids, options = {}) {
   const groups = [];
-  (grids || []).forEach(grid => {
+  (grids || []).flatMap(splitGridAtHeaderRows).forEach(grid => {
     const parsed = parseScorecardGrid(grid, options);
     if (!parsed) return;
     const label = cleanCardLabel(grid && grid.label);
