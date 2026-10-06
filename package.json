@@ -35,6 +35,7 @@
     "test:stitched-cards": "node dev/scorecard-stitched-cards.test.js",
     "test:loop-labels": "node dev/loop-labels.test.js",
     "test:units": "node dev/units-setting.test.js",
+    "test:course-storage": "node dev/course-storage-browser.test.js",
     "test:i18n": "node dev/i18n.test.js",
     "test:terrain-relief": "node dev/terrain-relief-setting.test.js",
     "test:terrain": "node dev/terrain-system.test.mjs && node dev/elevation-gaps.test.js && node dev/live-terrain-frame.test.mjs",
