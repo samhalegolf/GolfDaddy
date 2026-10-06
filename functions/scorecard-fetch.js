@@ -10,6 +10,7 @@
    hard cap on how much of the response is buffered. */
 
 const { safeRemoteUrl, resolvesToPublicAddress } = require("./lib/safe-remote-url");
+const { isBlockedHost } = require("./lib/gd-polite-fetch");
 
 const MAX_RESPONSE_CHARS = 650000;
 const MAX_REDIRECTS = 3;
@@ -32,6 +33,7 @@ exports.handler = async function scorecardFetch(event) {
 
   const target = safeRemoteUrl(payload && payload.url);
   if (!target) return json(400, { error: "Unsupported scorecard source" });
+  if (isBlockedHost(target)) return json(400, { error: "Scorecard source has asked not to be read", url: target.href });
 
   let hop;
   try {

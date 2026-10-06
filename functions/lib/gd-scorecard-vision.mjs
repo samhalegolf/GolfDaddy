@@ -13,9 +13,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import safeRemote from "./safe-remote-url.js";
 import webSearch from "./gd-web-search.js";
+import politeFetch from "./gd-polite-fetch.js";
 import { VISUAL_SCORECARD_SCHEMA, buildVisualPrompt } from "./gd-scorecard-visual-core.mjs";
 
 const { safeRemoteUrl, resolvesToPublicAddress } = safeRemote;
+const { isBlockedHost } = politeFetch;
 
 /* Opus 5.5: telling an 8 from a 3 in a photographed card is the whole job, and this
    only runs when every HTML route has already failed, so it is rare. */
@@ -69,6 +71,7 @@ export function sniffImage(bytes) {
 async function fetchImage(url, signal) {
   const target = safeRemoteUrl(url, { maxUrlChars: 1000 });
   if (!target) throw new Error("unsafe or unsupported url");
+  if (isBlockedHost(target)) throw new Error("host is on the do-not-fetch list");
   if (!(await resolvesToPublicAddress(target))) throw new Error("url does not resolve to a public address");
   const response = await fetch(target.href, {
     signal, redirect: "follow",

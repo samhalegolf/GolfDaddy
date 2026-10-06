@@ -22,9 +22,9 @@ import { resolveScorecard, distinctCards, distinctCardCount, facilityScorecardRo
 import { matchLoopsToCards, courseLengthsFromPublishedGeometry } from "./lib/gd-scorecard-match-core.mjs";
 import { renamePatch } from "./lib/gd-course-rename-core.mjs";
 import { splitCourseName } from "./lib/gd-automapper-core.mjs";
-import pkg from "./lib/safe-remote-url.js";
+import politeFetch from "./lib/gd-polite-fetch.js";
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
-const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
+const { createPoliteHtmlFetcher } = politeFetch;
 
 const MAPS_TABLE = "course_maps";
 const SCORECARDS_TABLE = "course_scorecards";
@@ -79,17 +79,8 @@ function json(status, body) {
   });
 }
 
-async function fetchPageHtml(url, signal) {
-  const target = safeRemoteUrl(url);
-  if (!target) throw new Error("unsafe or unsupported url");
-  if (!(await resolvesToPublicAddress(target))) throw new Error("url does not resolve to a public address");
-  const response = await fetch(target.href, {
-    signal, redirect: "follow",
-    headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "ClarityCaddie/1.0 (+https://caddy.claritygolf.app)" }
-  });
-  if (!response.ok) throw new Error("HTTP " + response.status);
-  return (await response.text()).slice(0, 650000);
-}
+/* Same well-mannered page reader the mapper worker uses - see lib/gd-polite-fetch. */
+const fetchPageHtml = createPoliteHtmlFetcher();
 
 async function searchScorecardPages(name, region, origin, signal) {
   if (!origin) return [];

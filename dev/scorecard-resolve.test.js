@@ -164,11 +164,27 @@ function scorecardHtml(rows) {
   assert.strictEqual(r.cardNameMatchesCourse("Front 9", "Golf course"), false,
     "nor can OSM's placeholder name - it took a university course on another continent");
   const wrongClub = await r.resolveScorecard({ courseName: "Te Arai Links" }, {
-    search: async () => [{ url: "https://course.bluegolf.com/x/ayrenlinksgc/detailedscorecard.htm" }],
+    search: async () => [{ url: GP + "ayren-links-golf-club/scorecard-and-layout" }],
     fetchHtml: async () => scorecardHtml(SOUTH_ROWS).replace("Te Arai Links Golf Club - South Course", "Ayren Links Golf Club")
   });
   assert.strictEqual(wrongClub.cards.length, 0, "a wrong-club card must never reach the pool the matcher chooses from");
   assert(String(wrongClub.attempts[0].rejected || "").startsWith("name-mismatch"), "and the job row must say why");
+
+  /* ---------- sites that asked not to be read ------------------------ */
+  /* BlueGolf wrote in October 2026 asking for the automated reads to stop. A hit
+     on their pages - from search, as a club's listed website, or as a sibling link
+     off a page we did read - is dropped before it is ever fetched. */
+  const blockedFetches = [];
+  const blocked = await r.resolveScorecard({ courseName: "Te Arai Links", website: "https://www.bluegolf.com/bluegolf/course/course/tearai/" }, {
+    search: async () => [
+      { url: "https://course.bluegolf.com/x/tearailinks/detailedscorecard.htm" },
+      { url: GP + "43275-te-arai-links-golf-club-south-course/scorecard-and-layout" }
+    ],
+    fetchHtml: async url => { blockedFetches.push(url); return scorecardHtml(SOUTH_ROWS); }
+  });
+  assert(blocked.cards.length >= 1, "the other source still yields the card");
+  assert(blockedFetches.every(url => !/bluegolf\.com/.test(url)), "nothing on bluegolf.com was fetched: " + blockedFetches.join(", "));
+  assert(blocked.searchTrace.candidates.every(c => !/bluegolf\.com/.test(c.url)), "and it never appears in the candidate trace");
 
   /* ---------- both courses on ONE page ------------------------------- */
   /* The cheapest route to one-card-per-course: a club that lists both courses on a

@@ -43,14 +43,14 @@ import { planListingResolution, courseLabelOf, looksLikeCourseLabel, RESOLUTION_
 import { eliminateInferredCourses } from "./lib/gd-inferred-course-claims-core.mjs";
 import { OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND } from "./course-mapper-jobs.mjs";
 import { refineSurfaceShape, applyRefinedShape, REFINED_SHAPE_SOURCE } from "./lib/gd-surface-refine-core.mjs";
-import pkg from "./lib/safe-remote-url.js";
+import politeFetch from "./lib/gd-polite-fetch.js";
 import courseSearchIdentity from "./lib/gd-course-search-identity.js";
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
 import { classifyMapperFailure, failureKind, buildMapperDebugText } from "./lib/gd-mapper-failure-kinds.mjs";
 import { captureMapperDebugImagery } from "./lib/gd-mapper-debug-captures.mjs";
 import { mergeOverlayIntoPayload, overlaySummary } from "./lib/gd-map-overlay-core.mjs";
-const { safeRemoteUrl, resolvesToPublicAddress } = pkg;
+const { createPoliteHtmlFetcher } = politeFetch;
 const { loopDisplayName, stripParSuffix } = courseSearchIdentity;
 
 const JOBS_TABLE = "course_mapper_jobs";
@@ -606,21 +606,10 @@ async function requeryHoleGaps(job, course, payload, loops) {
  * none. */
 const SCORECARD_RESOLVE_BUDGET_MS = 12000;
 
-async function fetchPageHtml(url, signal) {
-  const target = safeRemoteUrl(url);
-  if (!target) throw new Error("unsafe or unsupported url");
-  if (!(await resolvesToPublicAddress(target))) throw new Error("url does not resolve to a public address");
-  const response = await fetch(target.href, {
-    signal,
-    redirect: "follow",
-    headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "ClarityCaddie/1.0 (+https://caddy.claritygolf.app)" }
-  });
-  if (!response.ok) throw new Error("HTTP " + response.status);
-  const text = await response.text();
-  /* Same cap scorecard-fetch uses - a scorecard table is never megabytes, and an
-     unbounded read is how one bad URL becomes a function timeout. */
-  return text.slice(0, 650000);
-}
+/* Every page read for a scorecard goes through lib/gd-polite-fetch: do-not-fetch
+   hosts, robots.txt, hosts that refused us, one request a second per site. Module
+   level so a warm function instance remembers refusals across jobs. */
+const fetchPageHtml = createPoliteHtmlFetcher();
 
 async function searchScorecardPages(name, region, identity, origin, signal) {
   if (!origin) return [];

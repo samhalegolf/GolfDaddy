@@ -17,6 +17,7 @@
    GOOGLE_CSE_KEY + GOOGLE_CSE_ID. */
 
 const { safeRemoteUrl } = require("./lib/safe-remote-url");
+const { isBlockedHost } = require("./lib/gd-polite-fetch");
 const { pickProvider } = require("./lib/gd-web-search");
 const {
   buildCourseSearchIdentity, buildSearchQueries, domainQueries, scoreSearchCandidate
@@ -146,7 +147,7 @@ function rankResults(results, identity) {
 
   (results || []).forEach((result, index) => {
     const parsed = safeRemoteUrl(result && result.url);
-    if (!parsed) return;
+    if (!parsed || isBlockedHost(parsed)) return;
     const key = parsed.href.replace(/\/+$/, "");
     if (seen.has(key)) return;
     seen.add(key);

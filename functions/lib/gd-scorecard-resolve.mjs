@@ -32,6 +32,9 @@ import {
   scorecardImageCandidates, holePageLinks, assembleVisualCards, imageKindHint,
   MAX_CARD_IMAGES, VISUAL_STORED_CONFIDENCE_CAP
 } from "./gd-scorecard-visual-core.mjs";
+import politeFetch from "./gd-polite-fetch.js";
+
+const { isBlockedHost } = politeFetch;
 
 const {
   buildCourseSearchIdentity, scoreSearchCandidate, scoreScorecardPage,
@@ -563,9 +566,14 @@ async function resolveVisualScorecard(pages, context, visual, out, parsed) {
        sites are not one course's card. */
     const links = holePageLinks(page.html, page.candidate.url);
     if (links.length < 9 || links.length <= holeImages.length) continue;
-    const fetched = await Promise.all(links.map(link => visual.fetchHtml(link.url)
-      .then(html => ({ link, html }))
-      .catch(error => ({ link, error: String(error && error.message || error).slice(0, 120) }))));
+    /* One at a time, in hole order: eighteen requests to one club site should
+       arrive as a sequence it can serve, not a burst it has to absorb. */
+    const fetched = [];
+    for (const link of links) {
+      fetched.push(await visual.fetchHtml(link.url)
+        .then(html => ({ link, html }))
+        .catch(error => ({ link, error: String(error && error.message || error).slice(0, 120) })));
+    }
     report.holePages += fetched.filter(entry => entry.html).length;
     const perHole = fetched.map(entry => {
       if (!entry.html) return null;
@@ -670,6 +678,7 @@ export function imageSearchCandidates(results, identity, courseName) {
     const title = String((result && result.title) || "").trim();
     if (!/^https:\/\//i.test(url) || /\.svg(\?|#|$)/i.test(url) || seen.has(url)) return null;
     seen.add(url);
+    if (isBlockedHost(url) || isBlockedHost(pageUrl)) return null;
     if (Number.isFinite(result.width) && result.width > 0 && result.width < 400) return null;
     const text = title + " " + pageUrl + " " + url;
     if (!/score[\s_-]?card|yardage|course[\s_-]?card/i.test(text)) return null;
@@ -701,6 +710,9 @@ async function gatherCandidates(course, identity, deps) {
   const add = (url, label, why, metadata) => {
     const clean = String(url || "").replace(/\/+$/, "");
     if (!clean || seen.has(clean)) return;
+    /* Sites that asked not to be read never become candidates, whichever route
+       (search hit, club website, guessed path) offered them. */
+    if (isBlockedHost(clean)) return;
     seen.add(clean);
     const scored = scoreSearchCandidate(Object.assign({ url: clean, title: label || "" }, metadata || {}), identity);
     list.push(Object.assign({
