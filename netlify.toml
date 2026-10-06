@@ -209,6 +209,12 @@
   to = "/.netlify/functions/course-scorecard-update"
   status = 200
 
+# Admin drop zone on a course row: a scorecard as pasted text, CSV/TSV, HTML or JSON.
+[[redirects]]
+  from = "/api/course-scorecard-upload"
+  to = "/.netlify/functions/course-scorecard-upload"
+  status = 200
+
 [[redirects]]
   from = "/api/create-checkout-session"
   to = "/.netlify/functions/create-checkout-session"
