@@ -609,11 +609,11 @@ function sawtoothSquare() {
   const plain = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, longHole());
   const frame = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, hole);
   const colors = core.WATCH_MAP_RECIPE_V1.colors;
-  assert.ok(frame.svg.indexOf('fill="' + colors.trees + '"') > 0, "trees are drawn");
+  assert.ok(frame.svg.indexOf('fill="' + colors.trees + '"') < 0, "trees are not painted into the picture (v9: the watch stamps them)");
+  assert.ok(frame.trees.c.length > 0, "trees ship as a tree list instead");
   assert.ok(frame.svg.indexOf('fill="' + colors.waste + '"') > 0, "waste is drawn");
   assert.ok(frame.svg.indexOf('fill="' + colors.hazard + '"') > 0, "hazards are drawn");
   assert.ok(frame.svg.indexOf('fill="' + colors.hazard + '"') < frame.svg.indexOf('fill="' + colors.fairway + '"'), "hazards sit under the fairway");
-  assert.ok(frame.svg.indexOf('fill="' + colors.trees + '"') < frame.svg.indexOf('fill="' + colors.fairway + '"'), "trees sit under the fairway");
   assert.ok(frame.svg.indexOf('fill="' + colors.waste + '"') < frame.svg.indexOf('fill="' + colors.bunker + '"'), "waste sits under the bunkers");
   assert.strictEqual(frame.outlines.k.length, 1, "trees ship in the outlines as k");
   assert.strictEqual(frame.outlines.z.length, 1, "waste ships in the outlines as z");
@@ -621,6 +621,57 @@ function sawtoothSquare() {
   assert.strictEqual(frame.layers.treesMapped, 1);
   assert.strictEqual(frame.layers.wasteMapped, 1);
   assert.deepStrictEqual(frame.spatialReference, plain.spatialReference, "trees and waste never move the frame");
+})();
+
+// --- trees: individual trees for the watch to stamp ------------------------------------------
+
+(function testTreeList() {
+  [[0, 0, 1, 0], [447, 1535, 127, 3], [212, 840, 14, 2]].forEach(([x, y, r, type]) => {
+    const v = core.packTree(x, y, r, type);
+    assert.ok(Number.isInteger(v) && v >= 0 && v < 2147483648, "a tree is one positive 31-bit integer");
+    assert.deepStrictEqual(core.unpackTree(v), { x, y, r, type }, "and unpacks to itself");
+  });
+
+  const recipe = core.WATCH_MAP_RECIPE_V1;
+  const hole = longHole();
+  // A wood beside the fairway, and a lone tree.
+  hole.trees = [
+    [{ lat: -45.0106, lng: 169.1009 }, { lat: -45.0124, lng: 169.1013 }, { lat: -45.0124, lng: 169.1024 }, { lat: -45.0106, lng: 169.1020 }],
+    [{ lat: -45.01150, lng: 169.10300 }, { lat: -45.01152, lng: 169.10303 }, { lat: -45.01149, lng: 169.10304 }]
+  ];
+  const frame = core.buildWatchHoleFrame(recipe, hole);
+  const again = core.buildWatchHoleFrame(recipe, hole);
+  assert.deepStrictEqual(frame.trees, again.trees, "the same course places the same trees");
+  assert.strictEqual(frame.trees.version, 1);
+  const sr = frame.spatialReference;
+  const trees = frame.trees.c.map(core.unpackTree);
+  assert.ok(trees.length > 20, "a wood is many trees, got " + trees.length);
+  trees.forEach(t => {
+    assert.ok(t.x < sr.imageWidth && t.y < sr.imageHeight, "every tree centre is on the canvas");
+    assert.ok(t.type >= 0 && t.type < core.TREE_TYPES.length);
+  });
+  for (let i = 1; i < trees.length; i++) assert.ok(trees[i].y >= trees[i - 1].y, "back to front");
+  assert.ok(new Set(trees.map(t => t.type)).size >= 3, "a mix of types");
+
+  // No tree centre on the fairway.
+  const fairway = hole.fairways[0].map(p => core.projectLatLngToImage(sr, p.lat, p.lng));
+  const inside = (ring, x, y) => { let c = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) if ((ring[i].y > y) !== (ring[j].y > y) && x < (ring[j].x - ring[i].x) * (y - ring[i].y) / (ring[j].y - ring[i].y) + ring[i].x) c = !c; return c; };
+  assert.ok(trees.every(t => !inside(fairway, t.x, t.y)), "no tree stands on the fairway");
+
+  // The edge is ragged: some trees stand outside the drawn wood.
+  const wood = hole.trees[0].map(p => core.projectLatLngToImage(sr, p.lat, p.lng));
+  const outside = trees.filter(t => !inside(wood, t.x, t.y)).length;
+  assert.ok(outside >= 3, "trees step out past the drawn edge, got " + outside);
+
+  // The lone tree's area is a specimen: exactly one tree in it.
+  const lone = hole.trees[1].map(p => core.projectLatLngToImage(sr, p.lat, p.lng));
+  const lx = lone.reduce((s, p) => s + p.x, 0) / 3, ly = lone.reduce((s, p) => s + p.y, 0) / 3;
+  assert.strictEqual(trees.filter(t => Math.hypot(t.x - lx, t.y - ly) < 2).length, 1, "a small area is one tree");
+
+  // A hole of solid forest is capped.
+  const capped = core.buildHoleTrees(Object.assign({}, recipe, { trees: Object.assign({}, recipe.trees, { maxTrees: 10 }) }), sr, hole);
+  assert.strictEqual(capped.c.length, 10, "the cap holds");
+  assert.deepStrictEqual(core.buildWatchHoleFrame(recipe, longHole()).trees, { version: 1, c: [] }, "no trees, empty list");
 })();
 
 console.log("watch-map-core passed");

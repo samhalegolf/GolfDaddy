@@ -615,6 +615,9 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
            (watch-map-core buildHoleOutlines), and the colours to draw them in -
            this package's own palette, so the drawn map and the picture match. */
         outlines: frame.outlines,
+        /* Individual trees (watch-map-core buildHoleTrees) the watch stamps as sprites over
+           the picture - recipe v9 no longer paints trees into it. */
+        trees: frame.trees,
         terrain: frame.terrain || null,
         palette: colours.palette.colors,
         checkpoints: frame.checkpoints,
@@ -738,8 +741,8 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
    question - is the stored package still current? - so a spare wake costs one read. */
 const GARMIN_TABLE = "course_garmin_maps";
 /* Bump to rebuild every course's Garmin package on its next wake (a new outline or terrain
-   recipe, say). 2: trees (k), hazard (h) and waste (z) outlines. */
-const GARMIN_BUILDER_VERSION = 2;
+   recipe, say). 2: trees (k), hazard (h) and waste (z) outlines. 3: individual trees. */
+const GARMIN_BUILDER_VERSION = 3;
 /* A build that started this long ago and never finished died; a new one may start. */
 const GARMIN_BUILD_LOCK_MS = 10 * 60 * 1000;
 const PUBLISHED_MAP_COLUMNS = "course_id,objects_json,holes_json,objects_revision,published_at,updated_at";
@@ -784,6 +787,7 @@ async function generateGarminPackage({ courseId, map, terrainIndex }) {
       spatialReference: frame.spatialReference,
       reference: frame.reference,
       outlines: frame.outlines,
+      trees: frame.trees,
       terrain,
       palette: colours.palette.colors
     });

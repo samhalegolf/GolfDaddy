@@ -86,8 +86,15 @@
        scrub - brown-olive) under the fairways, and waste areas (dull sand) under bunkers and
        water. Water was already drawn. They are drawn only - like every surface since v4 they
        never decide the frame - and they ship in the outlines too (k trees, h hazard, z waste),
-       so a Garmin draws them as well. */
-    version: 8,
+       so a Garmin draws them as well.
+
+       v9 stopped painting trees into the picture. The bake places individual trees instead
+       (buildHoleTrees - specimens, copses and woods, with a ragged edge) and ships them as a
+       list; each watch stamps its own tree sprites from it. Textured trees in the JPEG cost
+       25-60 KB a hole against a 60 KB wrist budget most tree-heavy holes already squeeze to
+       fit, where a tree costs one number in the list. The outlines still carry `k`, so a watch
+       without tree sprites draws the flat wood as before. */
+    version: 9,
     canvas: {
       /* Ceiling, not a fixed size - see computeCanvasFit. Most holes land under both ceilings;
          a long narrow par 5 is height-limited, a short wide-corridor hole is width-limited. */
@@ -167,6 +174,33 @@
          past it, so the cut never shows on screen and a cross-course ribbon of fairway does
          not ship its far end. */
       clipMarginPx: 8
+    },
+    /* Individual trees placed in every hand-drawn `trees` area (buildHoleTrees). Sizes are
+       crown RADII in ground metres. An area under specimenMaxM2 is one tree sized to it; any
+       larger area gets a ragged edge of trees plus a packed interior. The edge steps each tree
+       between edgeInFraction (in) and edgeOutFraction (out) of its radius across the drawn
+       line, skips gapChance of its spots and turns strayChance of them into a smaller tree
+       standing out on its own, so a large area never ends in a straight line. */
+    trees: {
+      specimenMaxM2: 250,
+      specimenRadiusM: [3, 8],
+      radiusM: [3.5, 6.5],
+      edgeSpacingM: [4.5, 8.5],
+      edgeInFraction: 0.3,
+      edgeOutFraction: 0.8,
+      gapChance: 0.1,
+      strayChance: 0.15,
+      /* Fraction of trees of each type: pine and broadleaf, the rest round; yellowGreen is
+         applied on top, to any type. */
+      pineFraction: 0.12,
+      broadleafFraction: 0.43,
+      yellowGreenFraction: 0.1,
+      /* Clearance from fairways, greens, bunkers and water, as a fraction of a tree's radius:
+         a crown may overhang played ground slightly, never sit on it. */
+      playedClearance: 0.55,
+      /* A hole holding more than this keeps the trees nearest the play line. Every tree is one
+         number on the wire; this caps a hole of solid forest at a few KB. */
+      maxTrees: 1500
     },
     strokeWidthPx: 1.25,
     teeMarkerRadiusPx: 5,
@@ -532,6 +566,161 @@
     };
   }
 
+  // ---------------------------------------------------------------- trees
+
+  /* Tree types, as the watches' sprite sets name them. */
+  var TREE_TYPES = ["round", "broadleaf", "pine", "yellow_green"];
+
+  /* One tree as one non-negative integer below 2^31, so a hole of forest stays a short list of
+     numbers on the wire and on a watch: x (11 bits) + y (11 bits) + crown radius in image px
+     (7 bits, 1..127) + type (2 bits, TREE_TYPES). Arithmetic, not bit shifts - the top field
+     reaches bit 30 and JavaScript shifts are signed. */
+  function packTree(x, y, r, type) {
+    return Math.round(x) + Math.round(y) * 2048 + Math.max(1, Math.min(127, Math.round(r))) * 4194304 + type * 536870912;
+  }
+  function unpackTree(v) {
+    return { x: v % 2048, y: Math.floor(v / 2048) % 2048, r: Math.floor(v / 4194304) % 128, type: Math.floor(v / 536870912) % 4 };
+  }
+
+  function treeRandom(seed) {
+    var x = seed >>> 0 || 1;
+    return function () { x ^= x << 13; x >>>= 0; x ^= x >> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; };
+  }
+  function pointInRing(ring, x, y) {
+    var inside = false;
+    for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      var a = ring[i], b = ring[j];
+      if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+    }
+    return inside;
+  }
+  function distanceToRing(ring, x, y) {
+    var best = Infinity;
+    for (var i = 0; i < ring.length; i++) {
+      var a = ring[i], b = ring[(i + 1) % ring.length], dx = b.x - a.x, dy = b.y - a.y;
+      var t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+      best = Math.min(best, Math.hypot(a.x + t * dx - x, a.y + t * dy - y));
+    }
+    return best;
+  }
+  function ringBox(ring) {
+    var box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    ring.forEach(function (p) {
+      if (p.x < box.minX) box.minX = p.x; if (p.y < box.minY) box.minY = p.y;
+      if (p.x > box.maxX) box.maxX = p.x; if (p.y > box.maxY) box.maxY = p.y;
+    });
+    return box;
+  }
+
+  /* The hole's trees: every hand-drawn `trees` area turned into individual trees the watch
+     stamps as sprites. {version: 1, c: [packTree...]} sorted back to front (by y), every
+     centre inside the canvas. Deterministic: an area's trees are seeded from its own outline,
+     so a rebake of an unchanged course places the same trees.
+
+     - Under cfg.specimenMaxM2: one tree, sized to the area.
+     - Larger (a copse, a tree line, a wood): a ragged edge - uneven spacing, each tree stepping
+       in or out of the drawn line, the odd gap, the odd straggler - then the inside packed with
+       trees of mixed size that do not quite touch, so grass shows between them.
+     No tree sits on a fairway, green, bunker or water (cfg.playedClearance). */
+  function buildHoleTrees(recipe, spatialRef, geometry) {
+    var cfg = recipe.trees;
+    var mpp = Number(spatialRef.metresPerPixel) || 0.5;
+    var W = spatialRef.imageWidth, H = spatialRef.imageHeight;
+    var px = function (m) { return m / mpp; };
+    var project = function (shape) { return shape.map(function (p) { return projectLatLngToImage(spatialRef, p.lat, p.lng); }); };
+    var played = [].concat(geometry.fairways || [], geometry.bunkers || [], geometry.water || [], geometry.greenShape ? [geometry.greenShape] : [])
+      .map(project).map(function (ring) { return { ring: ring, box: ringBox(ring) }; });
+    var trees = [];
+    /* Placed trees, bucketed on a grid for the spacing check. */
+    var cell = Math.max(8, px(cfg.radiusM[1] * 2)), grid = Object.create(null);
+    function crowded(x, y, r, fraction) {
+      var gx = Math.floor(x / cell), gy = Math.floor(y / cell);
+      for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
+        var list = grid[(gx + dx) + "," + (gy + dy)];
+        if (!list) continue;
+        for (var i = 0; i < list.length; i++) if (Math.hypot(list[i].x - x, list[i].y - y) < (list[i].r + r) * fraction) return true;
+      }
+      return false;
+    }
+    function onPlayed(x, y, r) {
+      var clear = r * cfg.playedClearance;
+      return played.some(function (p) {
+        if (x < p.box.minX - clear || x > p.box.maxX + clear || y < p.box.minY - clear || y > p.box.maxY + clear) return false;
+        return pointInRing(p.ring, x, y) || distanceToRing(p.ring, x, y) < clear;
+      });
+    }
+    function add(x, y, r, rand, spacing) {
+      if (x < 0 || y < 0 || x >= W || y >= H) return false;
+      if (onPlayed(x, y, r) || crowded(x, y, r, spacing)) return false;
+      var u = rand(), type = u < cfg.pineFraction ? 2 : u < cfg.pineFraction + cfg.broadleafFraction ? 1 : 0;
+      if (rand() < cfg.yellowGreenFraction) type = 3;
+      var tree = { x: x, y: y, r: r, type: type };
+      trees.push(tree);
+      var key = Math.floor(x / cell) + "," + Math.floor(y / cell);
+      (grid[key] = grid[key] || []).push(tree);
+      return true;
+    }
+    var between = function (rand, range) { return range[0] + (range[1] - range[0]) * rand(); };
+
+    (geometry.trees || []).forEach(function (shape) {
+      var ring = project(shape);
+      if (ring.length < 3) return;
+      var box = ringBox(ring);
+      if (box.maxX < 0 || box.maxY < 0 || box.minX >= W || box.minY >= H) return;
+      var seed = 2166136261;
+      shape.slice(0, 4).forEach(function (p) {
+        seed = Math.imul(seed ^ Math.round(p.lat * 1e6), 16777619);
+        seed = Math.imul(seed ^ Math.round(p.lng * 1e6), 16777619);
+      });
+      var rand = treeRandom(seed);
+      var areaM2 = polygonAreaPx2(ring) * mpp * mpp;
+
+      if (areaM2 < cfg.specimenMaxM2) {
+        var c = ring.reduce(function (s, p) { return { x: s.x + p.x / ring.length, y: s.y + p.y / ring.length }; }, { x: 0, y: 0 });
+        var r = Math.max(px(cfg.specimenRadiusM[0]), Math.min(px(cfg.specimenRadiusM[1]), Math.sqrt(areaM2 / Math.PI) / mpp));
+        add(c.x, c.y, r, rand, 0.7);
+        return;
+      }
+      /* The edge first, so the silhouette is never crowded out by the interior. */
+      for (var i = 0; i < ring.length; i++) {
+        var a = ring[i], b = ring[(i + 1) % ring.length], len = Math.hypot(b.x - a.x, b.y - a.y);
+        if (!(len > 0)) continue;
+        var nx = -(b.y - a.y) / len, ny = (b.x - a.x) / len;
+        var inward = pointInRing(ring, (a.x + b.x) / 2 + nx * 2, (a.y + b.y) / 2 + ny * 2) ? 1 : -1;
+        for (var d = rand() * px(cfg.edgeSpacingM[0]); d < len; d += px(between(rand, cfg.edgeSpacingM))) {
+          if (rand() < cfg.gapChance) continue;
+          var er = px(between(rand, cfg.radiusM));
+          var out = er * (rand() * (cfg.edgeInFraction + cfg.edgeOutFraction) - cfg.edgeInFraction);
+          if (rand() < cfg.strayChance) { out = er * (1.1 + rand()); er *= 0.75; }
+          var t = d / len;
+          add(a.x + (b.x - a.x) * t - nx * inward * out, a.y + (b.y - a.y) * t - ny * inward * out, er, rand, 0.6);
+        }
+      }
+      /* Then the inside: dart-throwing over the part of the area on the canvas, enough tries
+         to fill it. */
+      var minX = Math.max(0, box.minX), minY = Math.max(0, box.minY), maxX = Math.min(W, box.maxX), maxY = Math.min(H, box.maxY);
+      if (maxX <= minX || maxY <= minY) return;
+      var meanR = px((cfg.radiusM[0] + cfg.radiusM[1]) / 2);
+      var tries = Math.min(40000, Math.ceil(((maxX - minX) * (maxY - minY)) / (meanR * meanR) * 6));
+      for (var k = 0; k < tries; k++) {
+        var ir = px(between(rand, cfg.radiusM)), x = minX + (maxX - minX) * rand(), y = minY + (maxY - minY) * rand();
+        if (!pointInRing(ring, x, y) || distanceToRing(ring, x, y) < ir * 0.8) continue;
+        add(x, y, ir, rand, 0.8);
+      }
+    });
+
+    if (trees.length > cfg.maxTrees) {
+      var axis = W / 2;
+      trees.sort(function (p, q) { return Math.abs(p.x - axis) - Math.abs(q.x - axis); });
+      trees.length = cfg.maxTrees;
+    }
+    trees.sort(function (p, q) { return p.y - q.y || p.x - q.x; });
+    return {
+      version: 1,
+      c: trees.map(function (tree) { return packTree(Math.min(W - 1, tree.x), Math.min(H - 1, tree.y), tree.r, tree.type); })
+    };
+  }
+
   /* Sutherland-Hodgman against an axis-aligned box. */
   function clipRingToBox(points, box) {
     var edges = [
@@ -792,9 +981,9 @@
         parts.push('<polygon points="' + polygonPointsAttr(points) + '" fill="' + fill + '" stroke="' + recipe.colors.outline + '" stroke-width="' + recipe.strokeWidthPx + '"/>');
       });
     }
-    /* Trees and hazards under everything played on, so a fairway cut through a wood or the
-       gorse stays clean; waste under the bunkers and water it usually holds. */
-    layer(projected.trees || [], recipe.colors.trees);
+    /* Hazards under everything played on, so a fairway cut through the gorse stays clean;
+       waste under the bunkers and water it usually holds. */
+    /* Trees are not painted: the watch stamps them from buildHoleTrees (recipe v9). */
     layer(projected.hazards || [], recipe.colors.hazard);
     layer(projected.fairways, recipe.colors.fairway);
     layer(projected.waste || [], recipe.colors.waste);
@@ -983,6 +1172,7 @@
       spatialReference: spatialRef,
       reference: buildHoleReference(recipe, spatialRef, geometry, routeLatLng),
       outlines: buildHoleOutlines(recipe, spatialRef, geometry),
+      trees: buildHoleTrees(recipe, spatialRef, geometry),
       checkpoints: checkpoints,
       validation: validation,
       layers: {
@@ -1042,6 +1232,10 @@
     projectImageToLatLng: projectImageToLatLng,
     validateSpatialReference: validateSpatialReference,
     buildHoleOutlines: buildHoleOutlines,
+    buildHoleTrees: buildHoleTrees,
+    TREE_TYPES: TREE_TYPES,
+    packTree: packTree,
+    unpackTree: unpackTree,
     buildWatchHoleFrame: buildWatchHoleFrame
   };
 });

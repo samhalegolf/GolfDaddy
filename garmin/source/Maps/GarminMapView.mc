@@ -211,6 +211,7 @@ class GarminMapView extends WatchUi.View {
         } else {
             drawOutlines(dc, shapes, session.mapPalette(), imageWidth, imageHeight, viewWidth, viewHeight);
         }
+        drawTrees(dc, (shapes != null) ? shapes : session.outlinesFor(holeNumber), imageWidth, imageHeight, viewWidth, viewHeight);
 
         drawLayupGuide(dc, scene, local, playerGeo, targetGeo, greenGeo);
 
@@ -901,7 +902,8 @@ class GarminMapView extends WatchUi.View {
     function maxOf(a, b) { return a > b ? a : b; }
 
     // The hole drawn from its outlines and terrain, back to front: the rough,
-    // its pieces of light and shadow, trees and hazards (flat, under the fairways), the
+    // its pieces of light and shadow, trees (flat, only for a package with no tree
+    // list - see drawTrees) and hazards under the fairways, the
     // fairways and theirs, waste areas (flat), the green and its, then water
     // and bunkers crisp on top (never shaded). Same order as the picture
     // (gd-watch-map-core.js drawGroundLayers) and the terrain labelling. Every ring is
@@ -919,7 +921,9 @@ class GarminMapView extends WatchUi.View {
         var sc = camera.scale;
         var view = [viewWidth, viewHeight];
         drawPieces(dc, shapes["t"], 0, palette, ox, oy, sc, view);
-        fillRings(dc, shapes["k"], palette["k"], ox, oy, sc, view);
+        // A hole with a tree list gets its trees stamped on top (drawTrees);
+        // the flat wood is only for a package from before trees were placed.
+        if (!hasTrees(shapes)) { fillRings(dc, shapes["k"], palette["k"], ox, oy, sc, view); }
         fillRings(dc, shapes["h"], palette["h"], ox, oy, sc, view);
         fillRings(dc, shapes["f"], palette["f"], ox, oy, sc, view);
         drawPieces(dc, shapes["t"], 1, palette, ox, oy, sc, view);
@@ -929,6 +933,21 @@ class GarminMapView extends WatchUi.View {
         fillRings(dc, shapes["w"], palette["w"], ox, oy, sc, view);
         fillRings(dc, shapes["b"], palette["b"], ox, oy, sc, view);
         if (dc has :setAntiAlias) { dc.setAntiAlias(false); }
+    }
+
+    function hasTrees(shapes) {
+        return shapes != null && shapes["c"] != null && shapes["c"].size() > 0;
+    }
+
+    // The hole's trees, stamped over the ground (picture or outlines) and under
+    // every marker. A crown may overhang a fairway edge slightly, as a real one
+    // does; the bake keeps every trunk off played ground.
+    var treeSprites = null;
+    function drawTrees(dc, shapes, imageWidth, imageHeight, viewWidth, viewHeight) {
+        if (!hasTrees(shapes)) { return; }
+        if (treeSprites == null) { treeSprites = new GarminTreeSprites(); }
+        treeSprites.draw(dc, shapes["c"], camera.originX(imageWidth, viewWidth), camera.originY(imageHeight, viewHeight),
+            camera.scale, viewWidth, viewHeight);
     }
 
     // One surface's pieces, in the order the server sent them (largest first,

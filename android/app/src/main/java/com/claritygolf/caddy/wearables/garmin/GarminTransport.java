@@ -510,7 +510,7 @@ public final class GarminTransport {
         second.remove("g");
         second.put("part", true);
         boolean moved = false;
-        for (String key : new String[] { "f", "b", "w", "k", "h", "z", "t" }) {
+        for (String key : new String[] { "f", "b", "w", "k", "h", "z", "t", "c" }) {
             Object value = message.get(key);
             List<Object> rings = value instanceof List ? (List<Object>) value : new ArrayList<>();
             int half = rings.size() / 2;
@@ -641,6 +641,8 @@ public final class GarminTransport {
         for (Object entry : (List<Object>) holes) {
             if (!(entry instanceof Map)) { slimHoles.add(entry); continue; }
             HashMap<String, Object> hole = new HashMap<>((Map<String, Object>) entry);
+            // Trees reach a Garmin with the outlines (courseOutlines), not on the manifest.
+            hole.remove("trees");
             Object reference = hole.remove("reference");
             if (reference instanceof Map) {
                 Object green = ((Map<String, Object>) reference).get("green");

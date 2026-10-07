@@ -72,7 +72,8 @@ class GarminCourseOutlines {
             "h" => rings(GarminWire.arrVal(raw, "h"), 6),
             "z" => rings(GarminWire.arrVal(raw, "z"), 6),
             "g" => GarminWire.arrVal(raw, "g"),
-            "t" => rings(GarminWire.arrVal(raw, "t"), 7)
+            "t" => rings(GarminWire.arrVal(raw, "t"), 7),
+            "c" => trees(GarminWire.arrVal(raw, "c"))
         };
         var isPart = GarminWire.boolVal(raw, "part");
         var current = (isPart != null && isPart) ? stored(n) : null;
@@ -84,6 +85,7 @@ class GarminCourseOutlines {
             current["h"].addAll(incoming["h"]);
             current["z"].addAll(incoming["z"]);
             current["t"].addAll(incoming["t"]);
+            current["c"].addAll(incoming["c"]);
             if (current["g"] == null && incoming["g"] != null) { current["g"] = incoming["g"]; }
         } else {
             current = incoming;
@@ -100,7 +102,7 @@ class GarminCourseOutlines {
         try { value = Storage.getValue(HOLE_KEY + n); } catch (e) { value = null; }
         if (!(value instanceof Lang.Dictionary)) { return null; }
         // Holes stored before a layer existed simply have none of it.
-        var layers = ["t", "k", "h", "z"];
+        var layers = ["t", "k", "h", "z", "c"];
         for (var i = 0; i < layers.size(); i += 1) {
             if (!value.hasKey(layers[i]) || value[layers[i]] == null) { value[layers[i]] = []; }
         }
@@ -108,7 +110,8 @@ class GarminCourseOutlines {
     }
 
     // The hole decoded and ready to place, or null:
-    // { "f"/"b"/"w"/"k"/"h"/"z" => [ring...], "g" => ring or null, "t" => [piece...] }
+    // { "f"/"b"/"w"/"k"/"h"/"z" => [ring...], "g" => ring or null, "t" => [piece...],
+    //   "c" => [packed tree...] }
     // where a ring is { "p" => [x0, y0, ...] absolute image px, "box" => [minX, minY, maxX, maxY] }
     // and a piece is a ring with "label". Only the hole being drawn is kept.
     function hole(n) {
@@ -120,11 +123,24 @@ class GarminCourseOutlines {
                 "f" => decodeAll(raw["f"], false), "b" => decodeAll(raw["b"], false), "w" => decodeAll(raw["w"], false),
                 "k" => decodeAll(raw["k"], false), "h" => decodeAll(raw["h"], false), "z" => decodeAll(raw["z"], false),
                 "g" => (raw["g"] != null) ? decodeRing(raw["g"], 0) : null,
-                "t" => decodeAll(raw["t"], true)
+                "t" => decodeAll(raw["t"], true),
+                // Trees stay packed (scripts/gd-watch-map-core.js packTree): one
+                // Number each, unpacked as they are drawn (GarminTreeSprites).
+                "c" => raw["c"]
             };
             decodedHole = n;
         }
         return decoded;
+    }
+
+    // The hole's trees, packed one per Number (x + y*2048 + r*2^22 + type*2^29).
+    function trees(list) {
+        var out = [];
+        if (list == null) { return out; }
+        for (var i = 0; i < list.size(); i += 1) {
+            if (list[i] instanceof Lang.Number && list[i] >= 0) { out.add(list[i]); }
+        }
+        return out;
     }
 
     function rings(list, minimum) {

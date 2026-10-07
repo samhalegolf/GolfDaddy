@@ -318,7 +318,7 @@ final class GarminTransport: NSObject, WearableTransport {
         second.removeValue(forKey: "g")
         second["part"] = true
         var moved = false
-        for key in ["f", "b", "w", "k", "h", "z", "t"] {
+        for key in ["f", "b", "w", "k", "h", "z", "t", "c"] {
             let rings = (message[key] as? [Any]) ?? []
             let half = rings.count / 2
             first[key] = Array(rings[half...])
@@ -390,6 +390,8 @@ final class GarminTransport: NSObject, WearableTransport {
         var out = manifest
         out["holes"] = holes.map { hole -> [String: Any] in
             var slim = hole
+            /* Trees reach a Garmin with the outlines (courseOutlines), not on the manifest. */
+            slim.removeValue(forKey: "trees")
             slim.removeValue(forKey: "reference")
             if let reference = hole["reference"] as? [String: Any], let green = reference["green"] {
                 slim["reference"] = ["green": green]
