@@ -24,6 +24,7 @@ class CaddyAppView extends WatchUi.View {
         statusView = new StatusView(session);
         numbersView = new NumbersView(session);
         mapView = new GarminMapView(session);
+        numbersView.aimable = mapView.method(:canEnterAimMode);
         showingMap = false;
     }
 

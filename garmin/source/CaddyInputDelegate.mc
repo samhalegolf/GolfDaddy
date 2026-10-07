@@ -156,7 +156,7 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
     // confirms it (AIM_AT once); a drag moves it under the finger and
     // confirms on release. Either enters Aim Mode by itself. Off the map,
     // or when the wrist cannot aim, the tap falls through to the base
-    // delegate and stays a SELECT, so the Numbers face's LOCK still works.
+    // delegate and stays a SELECT, so the Numbers face's AIM/LOCK still works.
     function mapAimable() {
         return view.showingMap && session.face().equals(GarminSessionManager.FACE_PLAYING) && view.mapView.canAimNow();
     }
@@ -268,7 +268,8 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
         WatchUi.requestUpdate();
     }
 
-    // SELECT is context-sensitive: LOCK on the Numbers face (plan step 25),
+    // SELECT is context-sensitive: AIM on the Numbers face (the map opens in
+    // Aim Mode; LOCK instead while the wrist cannot aim locally),
     // TAKE_OVER on the taking/ready face when a round is waiting, and on
     // the Map face — enter Aim Mode, or confirm one already in progress
     // (send AIM_AT once, per plan step 20).
@@ -281,6 +282,11 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
                 } else {
                     view.mapView.enterAimMode();
                 }
+            } else if (view.mapView.canEnterAimMode()) {
+                // The numbers face's AIM pill: straight onto the map,
+                // already aiming, so the next SELECT confirms.
+                view.showMap();
+                view.mapView.enterAimMode();
             } else if (session.scene != null && session.scene.canLock()) {
                 session.send(GarminCommandKind.LOCK);
             }

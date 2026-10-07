@@ -472,7 +472,7 @@ class GarminMapView extends WatchUi.View {
         var length = Math.sqrt(dx * dx + dy * dy);
         if (length < 1) { return; }
         var reach = length * 0.52 < 46 ? length * 0.52 : 46;
-        drawLabel(dc, "Green " + gap.toNumber() + "m", fx + dx / length * reach, fy + dy / length * reach - 8);
+        drawLabel(dc, "Green " + DistanceFormat.withUnit(gap), fx + dx / length * reach, fy + dy / length * reach - 8);
     }
 
     // The part of a line segment inside the view, or null when none of it
@@ -682,7 +682,7 @@ class GarminMapView extends WatchUi.View {
         var green = session.greenDistances();
         var centreM = (green != null) ? green["centre"] : null;
         if (centreM != null) {
-            var text = (centreM + 0.5).toNumber().toString() + "m";
+            var text = DistanceFormat.withUnit(centreM);
             shadowedText(dc, centreX + half - pad, top, font, text, Graphics.TEXT_JUSTIFY_RIGHT, Graphics.COLOR_WHITE);
         }
 
@@ -897,6 +897,13 @@ class GarminMapView extends WatchUi.View {
         if (session.playerStore.snapshot == null) { return false; }
         if (session.playState.player == null) { return false; }
         return true;
+    }
+
+    // canAimNow, and enterAimMode would actually start: there is a target
+    // to hold or one to seed. The numbers face's AIM pill asks this, so it
+    // never offers an aim that would open the map and do nothing.
+    function canEnterAimMode() {
+        return canAimNow() && (session.playState.target != null || session.aimTarget() != null);
     }
 
     function maxOf(a, b) { return a > b ? a : b; }

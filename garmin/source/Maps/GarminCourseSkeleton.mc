@@ -170,8 +170,35 @@ class GarminCourseSkeleton {
         return new GarminCoordinate(originLat + a.toDouble() / 1000000.0d, originLng + b.toDouble() / 1000000.0d);
     }
 
+    // String.toDouble is CIQ 3.1; the Approach S62 is 3.0 and crashed on
+    // start restoring a saved skeleton. toFloat would cost the origin about
+    // a metre, so the decimal is read by hand: whole part, then the
+    // fraction's digits over their power of ten.
+    function parseDecimal(text) {
+        var t = text;
+        var negative = t.length() > 0 && t.substring(0, 1).equals("-");
+        if (negative) { t = t.substring(1, t.length()); }
+        var dot = t.find(".");
+        var whole = (dot == null) ? t : t.substring(0, dot);
+        var wholeN = (whole.length() > 0) ? whole.toNumber() : 0;
+        if (wholeN == null) { return null; }
+        var value = wholeN * 1.0d;
+        if (dot != null) {
+            var frac = t.substring(dot + 1, t.length());
+            if (frac.length() > 9) { frac = frac.substring(0, 9); }
+            if (frac.length() > 0) {
+                var fracN = frac.toNumber();
+                if (fracN == null) { return null; }
+                var scale = 1.0d;
+                for (var i = 0; i < frac.length(); i += 1) { scale *= 10.0d; }
+                value += fracN / scale;
+            }
+        }
+        return negative ? -value : value;
+    }
+
     function toDouble(v) {
-        if (v instanceof Lang.String) { return v.toDouble(); }
+        if (v instanceof Lang.String) { return (v has :toDouble) ? v.toDouble() : parseDecimal(v); }
         if (v instanceof Lang.Number or v instanceof Lang.Long or v instanceof Lang.Float or v instanceof Lang.Double) { return v.toDouble(); }
         return null;
     }
