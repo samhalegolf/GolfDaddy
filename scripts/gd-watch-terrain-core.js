@@ -64,7 +64,14 @@
 
     var surface = new Uint8Array(gw * gh);   // 0 rough everywhere to start
     var ring = function (flat, value) { rasterRing(surface, gw, gh, cell, flat, value); };
+    /* In the order a watch paints them, so each cell is labelled as the surface left on top:
+       trees and hazards under the fairways, waste under the green, water and sand last. Trees,
+       hazards and waste are drawn flat, like water and sand, so shading under them would be pieces nothing
+       ever shows. */
+    (outlines && outlines.k || []).forEach(function (r) { ring(r, UNSHADED); });
+    (outlines && outlines.h || []).forEach(function (r) { ring(r, UNSHADED); });
     (outlines && outlines.f || []).forEach(function (r) { ring(r, SURFACE_FAIRWAY); });
+    (outlines && outlines.z || []).forEach(function (r) { ring(r, UNSHADED); });
     if (outlines && outlines.g) ring(outlines.g, SURFACE_GREEN);
     (outlines && outlines.w || []).forEach(function (r) { ring(r, UNSHADED); });
     (outlines && outlines.b || []).forEach(function (r) { ring(r, UNSHADED); });

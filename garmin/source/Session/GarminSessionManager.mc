@@ -235,7 +235,10 @@ class GarminSessionManager {
     // 64 colours - each channel 00/55/AA/FF - and snap the package's soft
     // greens to the nearest, which is GREY (0x315833 -> 0x555555, seen on the
     // fenix 7 sim 2026-10-06). They get the closest honest picks instead:
-    // rough darkest, fairway, green lightest, sand, water.
+    // rough darkest, fairway, green lightest, sand, water. Trees are the
+    // rough with black mixed in (black alone where there is no pattern
+    // fill), hazards (gorse, scrub) dark olive, waste the 64-colour palette's
+    // olive sand.
     // Each turf surface has a dark and a light variant for the terrain
     // pieces (rd/rl, fd/fl, gd/gl). The 64-colour screens show shadow only -
     // a lighter green than the surface reads as a different surface there
@@ -254,7 +257,8 @@ class GarminSessionManager {
         "r" => 0x005500, "rd" => [0x005500, 0x000000, 2, null], "rl" => [0x005500, 0x55AA55, 2, null],
         "f" => 0x55AA55, "fd" => [0x55AA55, 0x005500, 1, 0x00AA55], "fl" => [0x55AA55, 0xAAFFAA, 2, null],
         "g" => 0xAAFFAA, "gd" => [0xAAFFAA, 0x55AA55, 1, 0x55FF55], "gl" => 0xAAFFAA,
-        "b" => 0xFFFFAA, "w" => 0x0055AA
+        "b" => 0xFFFFAA, "w" => 0x0055AA,
+        "k" => [0x005500, 0x000000, 3, 0x000000], "h" => 0x555500, "z" => 0xAAAA55
     };
     // The base palette every package started from, with its variants worked
     // out as the phone does (watch-map-delivery.js cleanPalette: x0.8, x1.22).
@@ -262,7 +266,8 @@ class GarminSessionManager {
         "r" => 0x315833, "rd" => 0x274629, "rl" => 0x3C6B3E,
         "f" => 0x4E9A52, "fd" => 0x3E7B42, "fl" => 0x5FBC64,
         "g" => 0x8BD28D, "gd" => 0x6FA871, "gl" => 0xAAFFAC,
-        "b" => 0xE9DAAE, "w" => 0x2D69A2
+        "b" => 0xE9DAAE, "w" => 0x2D69A2,
+        "k" => 0x18361A, "h" => 0x756533, "z" => 0xB1A47E
     };
     function mapPalette() {
         var settings = System.getDeviceSettings();

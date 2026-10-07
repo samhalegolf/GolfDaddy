@@ -35,6 +35,16 @@
     bunker:  { L: 0.89, C: 0.06,  h: 92,  hueMin: 78,  hueMax: 105, chromaMin: 0.02,  chromaMax: 0.08,  pull: 0.6 },
     water:   { L: 0.51, C: 0.11,  h: 250, hueMin: 220, hueMax: 265, chromaMin: 0.06,  chromaMax: 0.13,  pull: 0.5 }
   };
+  /* Surfaces drawn by hand in the Studio overlay, with no measurement of their own: each takes
+     its hue and chroma from the surface it is made of - trees from the course's rough (a wood
+     is the rough's own green, much darker), a waste area from its sand (sand, darker and
+     duller than a raked bunker), a hazard (gorse, scrub) from its sand too but far darker, a
+     brown-olive between rough and fairway - at a fixed lightness, so each reads apart. */
+  var DERIVED = {
+    trees: { from: "rough", L: 0.30, chromaScale: 0.8 },
+    waste: { from: "bunker", L: 0.72, chromaScale: 0.9 },
+    hazard: { from: "bunker", L: 0.51, chromaScale: 1.2 }
+  };
   /* Never tinted: markers have to read the same everywhere. */
   var FIXED = { tee: "#f4f4f2", outline: "rgba(8,18,8,0.35)" };
   /* The smallest lightness step allowed between surfaces that sit next to each other. */
@@ -220,11 +230,19 @@
         green: roles.green.hex,
         bunker: roles.bunker.hex,
         water: roles.water.hex,
+        trees: derivedHex("trees", roles),
+        waste: derivedHex("waste", roles),
+        hazard: derivedHex("hazard", roles),
         tee: FIXED.tee,
         outline: FIXED.outline
       },
       roles: roles
     };
+  }
+
+  function derivedHex(name, roles) {
+    var d = DERIVED[name], src = roles[d.from];
+    return lchToHex(d.L, src.C * d.chromaScale, src.h);
   }
 
   /* The promise, checkable: neighbouring turf surfaces stay at least MIN_LIGHTNESS_GAP apart,
@@ -235,7 +253,12 @@
       roughToFairway: round(L(colors.fairway) - L(colors.background)),
       fairwayToGreen: round(L(colors.green) - L(colors.fairway)),
       fairwayToWater: round(L(colors.fairway) - L(colors.water)),
-      greenToBunker: round(L(colors.bunker) - L(colors.green))
+      greenToBunker: round(L(colors.bunker) - L(colors.green)),
+      treesToRough: round(L(colors.background) - L(colors.trees)),
+      fairwayToWaste: round(L(colors.waste) - L(colors.fairway)),
+      wasteToBunker: round(L(colors.bunker) - L(colors.waste)),
+      roughToHazard: round(L(colors.hazard) - L(colors.background)),
+      hazardToFairway: round(L(colors.fairway) - L(colors.hazard))
     };
   }
 
@@ -250,6 +273,7 @@
 
   return {
     ROLES: ROLES,
+    DERIVED: DERIVED,
     MIN_LIGHTNESS_GAP: MIN_LIGHTNESS_GAP,
     MIN_SAMPLES: MIN_SAMPLES,
     rgbToOklab: rgbToOklab,

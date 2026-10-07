@@ -510,7 +510,7 @@ public final class GarminTransport {
         second.remove("g");
         second.put("part", true);
         boolean moved = false;
-        for (String key : new String[] { "f", "b", "w", "t" }) {
+        for (String key : new String[] { "f", "b", "w", "k", "h", "z", "t" }) {
             Object value = message.get(key);
             List<Object> rings = value instanceof List ? (List<Object>) value : new ArrayList<>();
             int half = rings.size() / 2;

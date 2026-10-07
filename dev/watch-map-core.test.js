@@ -588,4 +588,39 @@ function sawtoothSquare() {
   assert.strictEqual(flat.p.length, 0, "flat ground has no pieces");
 })();
 
+// --- trees and waste (Studio overlay surfaces) reach the picture and the outlines ------------
+
+(function testTreesAndWaste() {
+  const objectsJson = {
+    t: { type: "trees", holeNumber: 3, shape: [{ lat: 1, lng: 1 }, { lat: 1.1, lng: 1 }, { lat: 1, lng: 1.1 }] },
+    w: { type: "waste", holeNumber: 3, shape: [{ lat: 2, lng: 2 }, { lat: 2.1, lng: 2 }, { lat: 2, lng: 2.1 }] },
+    h: { type: "hazard", holeNumber: 3, shape: [{ lat: 3, lng: 3 }, { lat: 3.1, lng: 3 }, { lat: 3, lng: 3.1 }] }
+  };
+  const grouped = core.objectsForHole(objectsJson, 3);
+  assert.strictEqual(grouped.trees.length, 1, "a trees object is a trees surface");
+  assert.strictEqual(grouped.waste.length, 1, "a waste object is a waste surface");
+  assert.strictEqual(grouped.hazards.length, 1, "a hazard object is a hazard surface");
+  assert.strictEqual(grouped.bunkers.length + grouped.water.length + grouped.fairways.length, 0, "none of them lands in another layer");
+
+  const hole = longHole();
+  hole.trees = [[{ lat: -45.0108, lng: 169.1018 }, { lat: -45.0118, lng: 169.1030 }, { lat: -45.0112, lng: 169.1034 }, { lat: -45.0104, lng: 169.1024 }]];
+  hole.hazards = [[{ lat: -45.0102, lng: 169.1012 }, { lat: -45.0106, lng: 169.1016 }, { lat: -45.0101, lng: 169.1018 }]];
+  hole.waste = [[{ lat: -45.0116, lng: 169.1022 }, { lat: -45.0119, lng: 169.1026 }, { lat: -45.0115, lng: 169.1028 }]];
+  const plain = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, longHole());
+  const frame = core.buildWatchHoleFrame(core.WATCH_MAP_RECIPE_V1, hole);
+  const colors = core.WATCH_MAP_RECIPE_V1.colors;
+  assert.ok(frame.svg.indexOf('fill="' + colors.trees + '"') > 0, "trees are drawn");
+  assert.ok(frame.svg.indexOf('fill="' + colors.waste + '"') > 0, "waste is drawn");
+  assert.ok(frame.svg.indexOf('fill="' + colors.hazard + '"') > 0, "hazards are drawn");
+  assert.ok(frame.svg.indexOf('fill="' + colors.hazard + '"') < frame.svg.indexOf('fill="' + colors.fairway + '"'), "hazards sit under the fairway");
+  assert.ok(frame.svg.indexOf('fill="' + colors.trees + '"') < frame.svg.indexOf('fill="' + colors.fairway + '"'), "trees sit under the fairway");
+  assert.ok(frame.svg.indexOf('fill="' + colors.waste + '"') < frame.svg.indexOf('fill="' + colors.bunker + '"'), "waste sits under the bunkers");
+  assert.strictEqual(frame.outlines.k.length, 1, "trees ship in the outlines as k");
+  assert.strictEqual(frame.outlines.z.length, 1, "waste ships in the outlines as z");
+  assert.strictEqual(frame.outlines.h.length, 1, "hazards ship in the outlines as h");
+  assert.strictEqual(frame.layers.treesMapped, 1);
+  assert.strictEqual(frame.layers.wasteMapped, 1);
+  assert.deepStrictEqual(frame.spatialReference, plain.spatialReference, "trees and waste never move the frame");
+})();
+
 console.log("watch-map-core passed");

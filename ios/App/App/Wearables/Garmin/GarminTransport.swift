@@ -318,7 +318,7 @@ final class GarminTransport: NSObject, WearableTransport {
         second.removeValue(forKey: "g")
         second["part"] = true
         var moved = false
-        for key in ["f", "b", "w", "t"] {
+        for key in ["f", "b", "w", "k", "h", "z", "t"] {
             let rings = (message[key] as? [Any]) ?? []
             let half = rings.count / 2
             first[key] = Array(rings[half...])
