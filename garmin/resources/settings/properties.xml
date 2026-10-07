@@ -1,0 +1,6 @@
+<properties>
+    <!-- Off: wind shows as an arrow and a +/- estimate, and a ghost Bubble on
+         the map, but the plays number is slope only. On: the plays number
+         includes the wind too. See source/Conditions/GarminConditions.mc. -->
+    <property id="windInPlaysLike" type="boolean">false</property>
+</properties>

@@ -1,6 +1,7 @@
 using Toybox.System;
 using Toybox.WatchUi;
 using Toybox.Lang;
+using Toybox.Timer;
 
 // Translates physical input into InputRouter's semantic actions and applies
 // them to GarminSessionManager / GarminMapView. Extends
@@ -39,11 +40,15 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
 
     function onSelect() {
         if (GarminTransmitPolicy.muted()) { System.println("onSelect (map=" + view.showingMap + ")"); }
+        // The big compass closes on any press, rather than the press
+        // reaching AIM behind it.
+        if (numbersShowing() && view.numbersView.windZoom) { closeWindZoom(); return true; }
         router.dispatch(InputAction.SELECT);
         return true;
     }
 
     function onBack() {
+        if (numbersShowing() && view.numbersView.windZoom) { closeWindZoom(); return true; }
         router.dispatch(InputAction.BACK);
         return true;
     }
@@ -166,7 +171,11 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
             System.println("onTap type=" + clickEvent.getType() + " at " + clickEvent.getCoordinates()
                 + " map=" + view.showingMap + " aimable=" + mapAimable());
         }
-        if (!mapAimable()) { return false; }
+        if (mapPlaysHit(clickEvent)) {
+            if (clickEvent.getType() == WatchUi.CLICK_TYPE_TAP) { view.mapView.togglePlays(); WatchUi.requestUpdate(); }
+            return true;
+        }
+        if (!mapAimable()) { return numbersTap(clickEvent); }
         var coords = clickEvent.getCoordinates();
         if (coords == null || coords.size() < 2) { return false; }
         if (clickEvent.getType() != WatchUi.CLICK_TYPE_TAP) { return true; }
@@ -185,12 +194,105 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
     // without a watch in hand.
     function onHold(clickEvent) {
         if (GarminTransmitPolicy.muted()) { System.println("onHold at " + clickEvent.getCoordinates() + " aimable=" + mapAimable()); }
-        if (!mapAimable()) { return false; }
+        // The map's plays button answers a hold too - the one positional
+        // touch the simulator delivers - rather than it starting an aim.
+        if (mapPlaysHit(clickEvent)) { view.mapView.togglePlays(); WatchUi.requestUpdate(); return true; }
+        if (!mapAimable()) {
+            // On the numbers face a long press on the compass or the big
+            // number switches the wind into the big number, or back out.
+            var region = numbersRegion(clickEvent);
+            if (region == null) { return false; }
+            cancelPendingTap();
+            toggleWindApplied();
+            return true;
+        }
         var coords = clickEvent.getCoordinates();
         if (coords == null || coords.size() < 2) { return false; }
         view.mapView.dragStart(coords[0], coords[1]);
         WatchUi.requestUpdate();
         return true;
+    }
+
+    // ---- Touch on the numbers face: the wind compass and the big number ----
+    //
+    //   tap the compass         opens it big in the middle; tap again closes
+    //   double-tap / long-press  the compass or the big number: the big
+    //                           number takes the wind (and turns blue), or
+    //                           gives it back
+    //   tap the big number      AIM, as a tap anywhere else is
+    // A single tap on either waits DOUBLE_TAP_MS for a second one, so a
+    // double-tap is never read as a tap first. A tap anywhere else is not
+    // handled here and stays a SELECT. Real watches only: the simulator turns
+    // a plain tap into a bare onSelect with no coordinates (long-press does
+    // reach onHold there).
+    static const DOUBLE_TAP_MS = 320;
+    var pendingRegion = null;
+    var tapTimer = null;
+
+    // A touch on the map's plays button (GarminMapView.drawPlaysLike).
+    function mapPlaysHit(clickEvent) {
+        if (!view.showingMap || !session.face().equals(GarminSessionManager.FACE_PLAYING)) { return false; }
+        var coords = clickEvent.getCoordinates();
+        return coords != null && coords.size() >= 2 && view.mapView.hitPlays(coords[0], coords[1]);
+    }
+
+    function numbersShowing() {
+        return !view.showingMap && session.face().equals(GarminSessionManager.FACE_PLAYING);
+    }
+
+    function numbersRegion(clickEvent) {
+        if (!numbersShowing()) { return null; }
+        var coords = clickEvent.getCoordinates();
+        if (coords == null || coords.size() < 2) { return null; }
+        return view.numbersView.hit(coords[0], coords[1]);
+    }
+
+    function numbersTap(clickEvent) {
+        if (clickEvent.getType() != WatchUi.CLICK_TYPE_TAP) { return false; }
+        var region = numbersRegion(clickEvent);
+        if (region == null) { return false; }
+        if (pendingRegion != null && pendingRegion.equals(region)) {
+            cancelPendingTap();
+            toggleWindApplied();
+            return true;
+        }
+        cancelPendingTap();
+        pendingRegion = region;
+        tapTimer = new Timer.Timer();
+        tapTimer.start(method(:onSingleTap), DOUBLE_TAP_MS, false);
+        return true;
+    }
+
+    function onSingleTap() as Void {
+        var region = pendingRegion;
+        pendingRegion = null;
+        tapTimer = null;
+        if (region == null) { return; }
+        if (region.equals("wind")) {
+            view.numbersView.windZoom = true;
+        } else if (region.equals("zoom")) {
+            view.numbersView.windZoom = false;
+        } else if (region.equals("number")) {
+            router.dispatch(InputAction.SELECT);
+        }
+        WatchUi.requestUpdate();
+    }
+
+    function cancelPendingTap() {
+        if (tapTimer != null) { tapTimer.stop(); }
+        tapTimer = null;
+        pendingRegion = null;
+    }
+
+    function toggleWindApplied() {
+        view.numbersView.windApplied = !view.numbersView.windApplied;
+        WatchUi.requestUpdate();
+    }
+
+    function closeWindZoom() {
+        cancelPendingTap();
+        view.numbersView.windZoom = false;
+        WatchUi.requestUpdate();
     }
 
     function onRelease(clickEvent) {

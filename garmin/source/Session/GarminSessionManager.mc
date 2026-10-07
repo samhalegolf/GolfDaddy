@@ -47,6 +47,7 @@ class GarminSessionManager {
     var answeredHandovers;   // Dictionary used as a Set of handover ids
     var skeleton;            // GarminCourseSkeleton or null
     var outlines;            // GarminCourseOutlines: what the map draws with no picture
+    var conditions;          // GarminConditions: the wrist's own wind and slope
     var lastSceneAt = null;  // System.getTimer() at the last Scene, or null
     var localHole = null;    // hole this wrist moved to on its own while the Scene was quiet
 
@@ -75,6 +76,7 @@ class GarminSessionManager {
         answeredHandovers = {};
         skeleton = GarminCourseSkeleton.restore();
         outlines = new GarminCourseOutlines();
+        conditions = new GarminConditions();
 
         locationManager.onFix = method(:onLocationFix);
 
@@ -172,6 +174,34 @@ class GarminSessionManager {
     }
     var bubbleCache = null;
     var bubbleCacheKey = "";
+
+    // The map's plays mode (GarminMapView.playsMode): the Bubble worked out
+    // for the plays distance instead of the flat one - that distance's club
+    // and shape - computed for a target that far along the same line, then
+    // drawn back at the real aim, where the plays club actually lands.
+    // { "bubble" => GarminBubbleResult, "shiftLat", "shiftLng" } or null.
+    // Memoised like localBubble, and warmed from the tap that turns plays
+    // mode on, so a draw normally only reads it.
+    var playsCache = null;
+    var playsCacheKey = "";
+    function playsBubble(local, playsM) {
+        var fix = effectiveFix();
+        if (local == null || playsM == null || fix == null || playerStore.snapshot == null) { return null; }
+        var key = fix.lat + "," + fix.lng + "|" + local.target.lat + "," + local.target.lng + "|" + playsM.toNumber() + "|" + playerStore.snapshot.fingerprint;
+        if (key.equals(playsCacheKey)) { return playsCache; }
+        var along = GarminGeo.project(fix, conditions.trueBearing(fix, local.target), playsM);
+        var result = GarminBubbleEngine.calculate({
+            "player" => fix, "target" => along,
+            "bag" => playerStore.snapshot.bag, "bubble" => playerStore.snapshot.bubble
+        });
+        playsCache = (result == null) ? null : {
+            "bubble" => result,
+            "shiftLat" => local.target.lat - along.lat,
+            "shiftLng" => local.target.lng - along.lng
+        };
+        playsCacheKey = key;
+        return playsCache;
+    }
 
     // The point the numbers/map faces draw the player at: Garmin's own fix
     // while trustworthy, the phone's otherwise.
@@ -351,6 +381,18 @@ class GarminSessionManager {
         }
         var sk = skeletonFor();
         return (sk != null) ? sk.line(currentHole()) : [];
+    }
+
+    // The current hole's green centre: the map package's, else the
+    // skeleton's. What wind and slope measure to before there is an aim.
+    function greenPoint() {
+        var n = currentHole();
+        if (n == null) { return null; }
+        var manifest = mapStore.manifest;
+        var hole = (manifest != null) ? manifest.hole(n) : null;
+        if (hole != null && hole.greenLat != null) { return new GarminCoordinate(hole.greenLat, hole.greenLng); }
+        var sk = skeletonFor();
+        return (sk != null) ? sk.green(n) : null;
     }
 
     // What the Bubble aims at by default: the Scene's target for its own

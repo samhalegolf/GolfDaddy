@@ -229,7 +229,38 @@ class GarminMapView extends WatchUi.View {
         // dot + club label when no local Bubble is available, matching
         // HoleMapView.swift's read-only behaviour exactly.
         if (local != null && local.ring != null && local.ring.size() >= 3) {
-            drawRing(dc, local.ring, camera, reference, imageWidth, imageHeight, viewWidth, viewHeight);
+            // The wind ghost: the same Bubble where the wind alone carries
+            // the ball (GarminConditions.windEffect), a thin blue edge under
+            // the real one, with streaks blowing in from the upwind side. It
+            // moves with the aim; how far to lean on it is the player's call.
+            // Slope has no ghost: the plays button below turns the Bubble
+            // itself into the plays-distance one.
+            var target = local.target;
+            var effect = session.conditions.windEffect(playerGeo, target, local.targetDistanceM);
+            var windGhost = (effect != null) ? effect["ghost"] : null;
+            if (windGhost != null) {
+                drawRing(dc, local.ring, camera, reference, imageWidth, imageHeight, viewWidth,
+                    [viewHeight, windGhost.lat - target.lat, windGhost.lng - target.lng, WIND_BLUE]);
+                var fromImg = imagePoint(target, reference);
+                var toImg = imagePoint(windGhost, reference);
+                if (fromImg != null && toImg != null) {
+                    drawWindStreaks(dc, toImg["x"] - fromImg["x"], toImg["y"] - fromImg["y"],
+                        camera.placeX(fromImg["x"], imageWidth, viewWidth), camera.placeY(fromImg["y"], imageHeight, viewHeight), viewWidth);
+                }
+            }
+            // The Bubble itself: mint, or in plays mode the plays-distance
+            // Bubble, orange, drawn back at the real aim.
+            var plays = playsMode ? playsNumber(playerGeo, local) : null;
+            var playsShot = (plays != null) ? session.playsBubble(local, plays) : null;
+            if (playsShot != null && playsShot["bubble"].ring != null && playsShot["bubble"].ring.size() >= 3) {
+                drawRing(dc, playsShot["bubble"].ring, camera, reference, imageWidth, imageHeight, viewWidth,
+                    [viewHeight, playsShot["shiftLat"], playsShot["shiftLng"], PLAYS_MAIN]);
+                playsClub = playsShot["bubble"].club.club;
+            } else {
+                drawRing(dc, local.ring, camera, reference, imageWidth, imageHeight, viewWidth, viewHeight);
+                playsClub = null;
+            }
+            drawPlaysLike(dc, playerGeo, local, viewWidth, viewHeight);
         }
 
         if (greenImg != null) {
@@ -245,7 +276,7 @@ class GarminMapView extends WatchUi.View {
             // finger should be visible beside the finger (AimableHoleMap's
             // own dragging ? 6 : 4).
             drawDot(dc, tx, ty, dragActive ? 6 : 4, Graphics.COLOR_GREEN);
-            var club = (local != null) ? local.club.club : scene.suggestedClub();
+            var club = (playsClub != null) ? playsClub : ((local != null) ? local.club.club : scene.suggestedClub());
             if (club != null) { drawLabel(dc, club, tx, ty - 14); }
         }
 
@@ -546,7 +577,16 @@ class GarminMapView extends WatchUi.View {
         }
     }
 
-    function drawRing(dc, ring, camera, reference, imageWidth, imageHeight, viewWidth, viewHeight) {
+    // `view` is the view height, or for a ghost [viewHeight, shiftLat,
+    // shiftLng, style]: every point moved by the shift and drawn in the
+    // style - WIND_BLUE, a thin ghost edge, or PLAYS_MAIN, the Bubble in
+    // orange. (Monkey C allows nine arguments.)
+    function drawRing(dc, ring, camera, reference, imageWidth, imageHeight, viewWidth, view) {
+        var ghost = view instanceof Lang.Array;
+        var viewHeight = ghost ? view[0] : view;
+        var shiftLat = ghost ? view[1] : 0.0d;
+        var shiftLng = ghost ? view[2] : 0.0d;
+        var ghostColour = (ghost && view.size() > 3) ? view[3] : WIND_BLUE;
         var points = [];
         // Every third of the engine's 168 points (still smooth at watch
         // scale), each placed by a LOCAL LINEAR map rather than the full
@@ -555,8 +595,8 @@ class GarminMapView extends WatchUi.View {
         // whole map draw has to fit the watchdog's budget, which on the
         // Forerunner 255 is half the fenix 7's (120k vs 240k) - the full
         // projection per point tripped it there (2026-10-05).
-        var lat0 = ring[0].lat;
-        var lng0 = ring[0].lng;
+        var lat0 = ring[0].lat + shiftLat;
+        var lng0 = ring[0].lng + shiftLng;
         var step = 0.0005d;
         var p0 = reference.imagePoint(lat0, lng0);
         var pLat = reference.imagePoint(lat0 + step, lng0);
@@ -570,13 +610,25 @@ class GarminMapView extends WatchUi.View {
         var oy = camera.originY(imageHeight, viewHeight);
         var sc = camera.scale;
         for (var i = 0; i < ring.size(); i += 3) {
-            var dLat = ring[i].lat - lat0;
-            var dLng = ring[i].lng - lng0;
+            var dLat = ring[i].lat + shiftLat - lat0;
+            var dLng = ring[i].lng + shiftLng - lng0;
             var ix = p0["x"] + ax * dLat + bx * dLng;
             var iy = p0["y"] + ay * dLat + by * dLng;
             points.add([ox + ix * sc, oy + iy * sc]);
         }
         if (points.size() < 3) { return; }
+        if (ghost && ghostColour != PLAYS_MAIN) {
+            // Wind blue: a thin solid edge.
+            dc.setColor(ghostColour, Graphics.COLOR_TRANSPARENT);
+            dc.setPenWidth(1);
+            for (var o = 0; o < points.size(); o += 1) {
+                var oa = points[o];
+                var ob = points[(o + 1) % points.size()];
+                dc.drawLine(oa[0], oa[1], ob[0], ob[1]);
+            }
+            return;
+        }
+        var ringColour = (ghost && ghostColour == PLAYS_MAIN) ? SLOPE_ORANGE : BUBBLE_MINT;
         // Mint at 2px, as the Apple Watch draws it: pale green on a green
         // hole map was all but invisible in the simulator.
         // A dark keyline under it: mint alone vanishes on a light green.
@@ -587,13 +639,136 @@ class GarminMapView extends WatchUi.View {
             var b0 = points[(k + 1) % points.size()];
             dc.drawLine(a0[0], a0[1], b0[0], b0[1]);
         }
-        dc.setColor(BUBBLE_MINT, Graphics.COLOR_TRANSPARENT);
+        dc.setColor(ringColour, Graphics.COLOR_TRANSPARENT);
         dc.setPenWidth(2);
         for (var i = 0; i < points.size(); i += 1) {
             var a = points[i];
             var b = points[(i + 1) % points.size()];
             dc.drawLine(a[0], a[1], b[0], b[1]);
         }
+    }
+
+    // Wind streaks: short arrows on the upwind side of the main Bubble (at
+    // cx, cy on screen), all pointing the way the wind blows on screen (dx,
+    // dy: the main Bubble to its ghost in image pixels - the camera only
+    // scales, so the direction holds), so the air reads as blowing the ghost
+    // off the Bubble. Staggered so they look like moving air, not a grid.
+    // Garmin palette colours, so a MIP panel shows them exactly.
+    static const WIND_BLUE = 0x55AAFF;
+    static const SLOPE_ORANGE = 0xFFAA00;
+    static const PLAYS_MAIN = -2;   // drawRing style key, not a colour
+
+    // Plays mode: the plays button at the foot of the map (tapped, or held)
+    // swaps the Bubble for the plays-distance one, in orange.
+    var playsMode = false;
+    var playsClub = null;      // the plays Bubble's club while it is shown
+    var playsBox = null;       // [x0, y0, x1, y1] of the plays button
+
+    function playsNumber(playerGeo, local) {
+        var effect = session.conditions.windEffect(playerGeo, local.target, local.targetDistanceM);
+        return session.conditions.playsLikeM(playerGeo, local.target, local.targetDistanceM, effect);
+    }
+
+    function hitPlays(x, y) {
+        return playsBox != null && x >= playsBox[0] && x <= playsBox[2] && y >= playsBox[1] && y <= playsBox[3];
+    }
+
+    // Plays mode on or off. Turning it on warms the plays Bubble here, in
+    // the tap's own callback, so the next draw only reads it.
+    function togglePlays() {
+        playsMode = !playsMode;
+        if (playsMode) {
+            var local = session.localBubble();
+            var player = session.playerPoint();
+            if (local != null && player != null) { session.playsBubble(local, playsNumber(player, local)); }
+        }
+    }
+
+    // The plays number at the foot of the glass, in the slope ghost's orange,
+    // the watch's own unit. Only when there is something to add to the flat
+    // distance (GarminConditions.playsLikeM answers null otherwise).
+    function drawPlaysLike(dc, playerGeo, local, viewWidth, viewHeight) {
+        var plays = playsNumber(playerGeo, local);
+        if (plays == null) { playsBox = null; return; }
+        var font = Graphics.FONT_XTINY;
+        var text = "plays " + DistanceFormat.withUnit(plays);
+        var th = dc.getFontHeight(font);
+        var tw = dc.getTextDimensions(text, font)[0];
+        var cx = viewWidth / 2;
+        var y = viewHeight - LayoutProfile.chromeTopY(viewHeight) - th;
+        var padX = th * 0.6;
+        var x0 = cx - tw / 2 - padX;
+        var x1 = cx + tw / 2 + padX;
+        // A button: an orange outline, filled orange with dark text while
+        // plays mode is on. The hit box is a little bigger than it looks.
+        dc.setColor(playsMode ? SLOPE_ORANGE : 0x1A1A1A, Graphics.COLOR_TRANSPARENT);
+        dc.fillRoundedRectangle(x0, y - 1, x1 - x0, th + 2, (th + 2) / 2);
+        dc.setColor(SLOPE_ORANGE, Graphics.COLOR_TRANSPARENT);
+        dc.setPenWidth(1);
+        dc.drawRoundedRectangle(x0, y - 1, x1 - x0, th + 2, (th + 2) / 2);
+        dc.setColor(playsMode ? Graphics.COLOR_BLACK : SLOPE_ORANGE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(cx, y, font, text, Graphics.TEXT_JUSTIFY_CENTER);
+        playsBox = [x0 - 8, y - 10, x1 + 8, y + th + 10];
+    }
+    function drawWindStreaks(dc, dx, dy, cx, cy, viewWidth) {
+        var len = Math.sqrt(dx * dx + dy * dy);
+        if (len < 0.5) { return; }
+        var ux = dx / len;
+        var uy = dy / len;
+        var px = -uy;
+        var py = ux;
+        // Drawn to Sam's reference (2026-10-08): four staggered strokes,
+        // each one smooth S that thickens towards a filled dart head with a
+        // notched back. Every stroke is a filled polygon - its centre line
+        // offset both ways by a width that grows along it - so it tapers
+        // the way a pen line can't.
+        var reach = viewWidth * 0.22;
+        var length = viewWidth * 0.17;
+        var gap = viewWidth * 0.06;
+        var amp = length * 0.09;
+        var thin = viewWidth * 0.003;
+        var thick = viewWidth * (viewWidth >= 300 ? 0.0075 : 0.01);
+        var headLen = length * 0.26;
+        var headHalf = headLen * 0.42;
+        var steps = 10;
+        dc.setColor(WIND_BLUE, WIND_BLUE);
+        for (var i = 0; i < 4; i += 1) {
+            var side = (i - 1.5) * gap;
+            // Alternate strokes sit further back, as in the reference.
+            var back = reach + ((i % 2 == 0) ? 0.0 : length * 0.35);
+            var tx = cx - ux * back + px * side;       // the dart's tip
+            var ty = cy - uy * back + py * side;
+            // The stroke runs past the dart's notch into its solid middle:
+            // stopping at the barbs left a sliver of map between the two.
+            var bodyEnd = length - headLen * 0.55;
+            var left = new [steps + 1];
+            var right = new [steps + 1];
+            for (var k = 0; k <= steps; k += 1) {
+                var f = k.toFloat() / steps;
+                var along = -length + bodyEnd * f;      // tail .. inside the head
+                // One period of a sine: rises, falls, and comes back to the
+                // line where it meets the head.
+                var wave = amp * Math.sin(f * Math.PI * 2.0);
+                var half = thin + (thick - thin) * f;
+                var x = tx + ux * along + px * wave;
+                var y = ty + uy * along + py * wave;
+                left[k] = [x + px * half, y + py * half];
+                right[steps - k] = [x - px * half, y - py * half];
+            }
+            dc.fillPolygon(left.addAll(right));
+            // The dart: tip, the two barbs, and a notch tucked in between.
+            var hbx = tx - ux * headLen;
+            var hby = ty - uy * headLen;
+            var nx = tx - ux * headLen * 0.72;
+            var ny = ty - uy * headLen * 0.72;
+            dc.fillPolygon([
+                [tx, ty],
+                [hbx + px * headHalf, hby + py * headHalf],
+                [nx, ny],
+                [hbx - px * headHalf, hby - py * headHalf]
+            ]);
+        }
+        dc.setPenWidth(1);
     }
 
     function drawRingMarker(dc, x, y, radius, color) {
