@@ -235,15 +235,15 @@
   function cleanOutlines(outlines) {
     if (!outlines || Number(outlines.version) !== 1) return null;
     var list = function (rings) { return (Array.isArray(rings) ? rings : []).map(cleanRing).filter(Boolean); };
-    var out = { f: list(outlines.f), b: list(outlines.b), w: list(outlines.w), g: cleanRing(outlines.g) };
-    return out.f.length || out.b.length || out.w.length || out.g ? out : null;
+    var out = { f: list(outlines.f), b: list(outlines.b), w: list(outlines.w), k: list(outlines.k), h: list(outlines.h), z: list(outlines.z), g: cleanRing(outlines.g) };
+    return out.f.length || out.b.length || out.w.length || out.k.length || out.h.length || out.z.length || out.g ? out : null;
   }
 
   /* Hex colours to the 0xRRGGBB integers Connect IQ draws with, plus a darker
      and a lighter variant of each turf surface for the terrain pieces (rd/rl,
      fd/fl, gd/gl): the same hue, so light and shadow read as the ground
      turning, not as a different surface. */
-  var PALETTE_ROLES = { background: "r", fairway: "f", green: "g", bunker: "b", water: "w" };
+  var PALETTE_ROLES = { background: "r", fairway: "f", green: "g", bunker: "b", water: "w", trees: "k", hazard: "h", waste: "z" };
   var SHADE_DARK = 0.8, SHADE_LIT = 1.22;
   function scaleColour(rgb, k) {
     var channel = function (shift) { return Math.max(0, Math.min(255, Math.round(((rgb >> shift) & 255) * k))); };
@@ -265,7 +265,7 @@
   }
 
   /* One OUTLINES message per hole, for the Garmin transports to send after the
-     manifest parts, hole by hole: {courseKey, version, n, f, b, w, g}. Rings
+     manifest parts, hole by hole: {courseKey, version, n, f, b, w, k, h, z, g} (k trees, h hazard, z waste). Rings
      are whole image pixels in the hole's spatial reference, DELTA-encoded (the
      first point absolute, every later one a step from the last), which keeps
      the numbers small - Millbrook's biggest hole is ~1 KB. */
@@ -280,7 +280,7 @@
       var n = Number(hole && hole.holeNumber);
       if (o) {
         var entry = { courseKey: courseKey, version: Number(version), n: n,
-          f: o.f.map(delta), b: o.b.map(delta), w: o.w.map(delta) };
+          f: o.f.map(delta), b: o.b.map(delta), w: o.w.map(delta), k: (o.k || []).map(delta), h: (o.h || []).map(delta), z: (o.z || []).map(delta) };
         if (o.g) entry.g = delta(o.g);
         out.push(entry);
       }

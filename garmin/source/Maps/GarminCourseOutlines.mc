@@ -1,7 +1,8 @@
 using Toybox.Lang;
 using Toybox.Application.Storage;
 
-// The hole OUTLINES and TERRAIN: fairways, bunkers, water and the green as
+// The hole OUTLINES and TERRAIN: fairways, bunkers, water, trees (k), hazards
+// (h, gorse/scrub), waste areas (z) and the green as
 // rounded closed rings (scripts/gd-watch-map-core.js buildHoleOutlines), and
 // the ground's light and shadow as rounded pieces that slot together
 // (scripts/gd-watch-terrain-core.js) - all in whole IMAGE pixels of the map
@@ -67,6 +68,9 @@ class GarminCourseOutlines {
             "f" => rings(GarminWire.arrVal(raw, "f"), 6),
             "b" => rings(GarminWire.arrVal(raw, "b"), 6),
             "w" => rings(GarminWire.arrVal(raw, "w"), 6),
+            "k" => rings(GarminWire.arrVal(raw, "k"), 6),
+            "h" => rings(GarminWire.arrVal(raw, "h"), 6),
+            "z" => rings(GarminWire.arrVal(raw, "z"), 6),
             "g" => GarminWire.arrVal(raw, "g"),
             "t" => rings(GarminWire.arrVal(raw, "t"), 7)
         };
@@ -76,6 +80,9 @@ class GarminCourseOutlines {
             current["f"].addAll(incoming["f"]);
             current["b"].addAll(incoming["b"]);
             current["w"].addAll(incoming["w"]);
+            current["k"].addAll(incoming["k"]);
+            current["h"].addAll(incoming["h"]);
+            current["z"].addAll(incoming["z"]);
             current["t"].addAll(incoming["t"]);
             if (current["g"] == null && incoming["g"] != null) { current["g"] = incoming["g"]; }
         } else {
@@ -92,12 +99,16 @@ class GarminCourseOutlines {
         var value = null;
         try { value = Storage.getValue(HOLE_KEY + n); } catch (e) { value = null; }
         if (!(value instanceof Lang.Dictionary)) { return null; }
-        if (!value.hasKey("t") || value["t"] == null) { value["t"] = []; }
+        // Holes stored before a layer existed simply have none of it.
+        var layers = ["t", "k", "h", "z"];
+        for (var i = 0; i < layers.size(); i += 1) {
+            if (!value.hasKey(layers[i]) || value[layers[i]] == null) { value[layers[i]] = []; }
+        }
         return value;
     }
 
     // The hole decoded and ready to place, or null:
-    // { "f"/"b"/"w" => [ring...], "g" => ring or null, "t" => [piece...] }
+    // { "f"/"b"/"w"/"k"/"h"/"z" => [ring...], "g" => ring or null, "t" => [piece...] }
     // where a ring is { "p" => [x0, y0, ...] absolute image px, "box" => [minX, minY, maxX, maxY] }
     // and a piece is a ring with "label". Only the hole being drawn is kept.
     function hole(n) {
@@ -107,6 +118,7 @@ class GarminCourseOutlines {
             if (raw == null) { return null; }
             decoded = {
                 "f" => decodeAll(raw["f"], false), "b" => decodeAll(raw["b"], false), "w" => decodeAll(raw["w"], false),
+                "k" => decodeAll(raw["k"], false), "h" => decodeAll(raw["h"], false), "z" => decodeAll(raw["z"], false),
                 "g" => (raw["g"] != null) ? decodeRing(raw["g"], 0) : null,
                 "t" => decodeAll(raw["t"], true)
             };

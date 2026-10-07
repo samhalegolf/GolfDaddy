@@ -80,8 +80,14 @@
        v7 drew each course in its own palette. `colors` below is now the BASE palette with
        even lightness steps; the bake swaps in the course's tinted copy from
        scripts/gd-watch-palette-core.js (hue and chroma move towards the course's measured
-       turf, sand and water; lightness never does). Cosmetic again. */
-    version: 7,
+       turf, sand and water; lightness never does). Cosmetic again.
+
+       v8 drew the hand-drawn Studio overlay surfaces: trees (a dark wood) and hazards (gorse,
+       scrub - brown-olive) under the fairways, and waste areas (dull sand) under bunkers and
+       water. Water was already drawn. They are drawn only - like every surface since v4 they
+       never decide the frame - and they ship in the outlines too (k trees, h hazard, z waste),
+       so a Garmin draws them as well. */
+    version: 8,
     canvas: {
       /* Ceiling, not a fixed size - see computeCanvasFit. Most holes land under both ceilings;
          a long narrow par 5 is height-limited, a short wide-corridor hole is width-limited. */
@@ -138,6 +144,9 @@
       green: "#8bd28d",
       bunker: "#e9daae",
       water: "#2d69a2",
+      trees: "#18361a",
+      waste: "#b1a47e",
+      hazard: "#756533",
       tee: "#f4f4f2",
       outline: "rgba(8,18,8,0.35)"
     },
@@ -230,7 +239,9 @@
 
   // ---------------------------------------------------------------- geometry extraction
 
-  var POLYGON_TYPES = { fairway_area: "fairways", bunker: "bunkers", water: "water" };
+  /* trees and waste only ever come from the Studio overlay (functions/lib/gd-automapper-core.mjs
+     HAND_DRAWN_SURFACE_TYPES) - a real OSM wood is never read. */
+  var POLYGON_TYPES = { fairway_area: "fairways", bunker: "bunkers", water: "water", trees: "trees", hazard: "hazards", waste: "waste" };
 
   function finitePoint(value) {
     var lat = Number(value && value.lat), lng = Number(value && value.lng);
@@ -257,7 +268,8 @@
   function objectsForHole(objectsJson, holeNumber) {
     var hole = Number(holeNumber);
     var tee = null, green = null, greenShape = null;
-    var fairways = [], bunkers = [], water = [], route = [];
+    var fairways = [], bunkers = [], water = [], trees = [], hazards = [], waste = [], route = [];
+    var buckets = { fairways: fairways, bunkers: bunkers, water: water, trees: trees, hazards: hazards, waste: waste };
     Object.keys(objectsJson || {}).forEach(function (key) {
       var object = objectsJson[key];
       if (!object || Number(object.holeNumber) !== hole) return;
@@ -275,13 +287,10 @@
         if (shape && !greenShape) greenShape = shape;
       } else if (POLYGON_TYPES[object.type]) {
         var poly = finiteShape(object.shape);
-        if (poly) {
-          var bucket = POLYGON_TYPES[object.type] === "fairways" ? fairways : POLYGON_TYPES[object.type] === "bunkers" ? bunkers : water;
-          bucket.push(poly);
-        }
+        if (poly) buckets[POLYGON_TYPES[object.type]].push(poly);
       }
     });
-    return { tee: tee, green: green, greenShape: greenShape, route: route, fairways: fairways, bunkers: bunkers, water: water };
+    return { tee: tee, green: green, greenShape: greenShape, route: route, fairways: fairways, bunkers: bunkers, water: water, trees: trees, hazards: hazards, waste: waste };
   }
 
   /* tee -> bends -> green, with the bends ordered by how far down the hole they
@@ -489,8 +498,9 @@
      Each ring is clipped to the canvas (plus clipMarginPx), Douglas-Peucker simplified to
      outlines.toleranceM of ground, and held to outlines.maxPoints. Raw shapes, not the
      picture's smoothed ones: smoothing multiplies points, and a watch at this size cannot see
-     the difference. {version, f, b, w, g} - f/b/w lists of flat [x0,y0,x1,y1,...] rings, g one
-     ring or null. */
+     the difference. {version, f, b, w, k, h, z, g} - f/b/w/k/h/z (fairways, bunkers, water,
+     trees, hazards, waste) lists of flat [x0,y0,x1,y1,...] rings, g one ring or null. k, h and
+     z were added inside version 1: a reader that does not know them simply never draws them. */
   function buildHoleOutlines(recipe, spatialRef, geometry) {
     var cfg = recipe.outlines;
     var mpp = Number(spatialRef.metresPerPixel) || 0.5;
@@ -515,6 +525,9 @@
       f: rings(geometry.fairways),
       b: rings(geometry.bunkers),
       w: rings(geometry.water),
+      k: rings(geometry.trees),
+      h: rings(geometry.hazards),
+      z: rings(geometry.waste),
       g: geometry.greenShape ? ring(geometry.greenShape) : null
     };
   }
@@ -779,7 +792,12 @@
         parts.push('<polygon points="' + polygonPointsAttr(points) + '" fill="' + fill + '" stroke="' + recipe.colors.outline + '" stroke-width="' + recipe.strokeWidthPx + '"/>');
       });
     }
+    /* Trees and hazards under everything played on, so a fairway cut through a wood or the
+       gorse stays clean; waste under the bunkers and water it usually holds. */
+    layer(projected.trees || [], recipe.colors.trees);
+    layer(projected.hazards || [], recipe.colors.hazard);
     layer(projected.fairways, recipe.colors.fairway);
+    layer(projected.waste || [], recipe.colors.waste);
     layer(projected.bunkers, recipe.colors.bunker);
     layer(projected.water, recipe.colors.water);
     if (projected.greenPolygon) layer([projected.greenPolygon], recipe.colors.green);
@@ -933,6 +951,9 @@
       fairways: projectAndSimplifyPolygons(geometry.fairways, spatialRef, recipe),
       bunkers: projectAndSimplifyPolygons(geometry.bunkers, spatialRef, recipe),
       water: projectAndSimplifyPolygons(geometry.water, spatialRef, recipe),
+      trees: projectAndSimplifyPolygons(geometry.trees, spatialRef, recipe),
+      hazards: projectAndSimplifyPolygons(geometry.hazards, spatialRef, recipe),
+      waste: projectAndSimplifyPolygons(geometry.waste, spatialRef, recipe),
       greenPolygon: null,
       greenPx: projectLatLngToImage(spatialRef, green.lat, green.lng),
       teePx: geometry.tee ? projectLatLngToImage(spatialRef, tee.lat, tee.lng) : null
@@ -974,6 +995,12 @@
         bunkersMapped: (geometry.bunkers || []).length,
         water: projected.water.length,
         waterMapped: (geometry.water || []).length,
+        trees: projected.trees.length,
+        treesMapped: (geometry.trees || []).length,
+        hazards: projected.hazards.length,
+        hazardsMapped: (geometry.hazards || []).length,
+        waste: projected.waste.length,
+        wasteMapped: (geometry.waste || []).length,
         /* `*Mapped` is what the mapper cloned onto this hole; the plain counts
            are what survived simplification and the off-canvas cull. A large gap
            is normal and expected under cloning, not a fault to chase. */

@@ -738,8 +738,8 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
    question - is the stored package still current? - so a spare wake costs one read. */
 const GARMIN_TABLE = "course_garmin_maps";
 /* Bump to rebuild every course's Garmin package on its next wake (a new outline or terrain
-   recipe, say). */
-const GARMIN_BUILDER_VERSION = 1;
+   recipe, say). 2: trees (k), hazard (h) and waste (z) outlines. */
+const GARMIN_BUILDER_VERSION = 2;
 /* A build that started this long ago and never finished died; a new one may start. */
 const GARMIN_BUILD_LOCK_MS = 10 * 60 * 1000;
 const PUBLISHED_MAP_COLUMNS = "course_id,objects_json,holes_json,objects_revision,published_at,updated_at";

@@ -901,8 +901,10 @@ class GarminMapView extends WatchUi.View {
     function maxOf(a, b) { return a > b ? a : b; }
 
     // The hole drawn from its outlines and terrain, back to front: the rough,
-    // its pieces of light and shadow, the fairways and theirs, the green and
-    // its, then water and bunkers crisp on top (never shaded). Every ring is
+    // its pieces of light and shadow, trees and hazards (flat, under the fairways), the
+    // fairways and theirs, waste areas (flat), the green and its, then water
+    // and bunkers crisp on top (never shaded). Same order as the picture
+    // (gd-watch-map-core.js drawGroundLayers) and the terrain labelling. Every ring is
     // already in image pixels, so placing it is a scale and an offset per
     // point - no projection - and a ring whose box is off screen is skipped
     // without touching its points, which matters inside the Forerunner 255's
@@ -917,8 +919,11 @@ class GarminMapView extends WatchUi.View {
         var sc = camera.scale;
         var view = [viewWidth, viewHeight];
         drawPieces(dc, shapes["t"], 0, palette, ox, oy, sc, view);
+        fillRings(dc, shapes["k"], palette["k"], ox, oy, sc, view);
+        fillRings(dc, shapes["h"], palette["h"], ox, oy, sc, view);
         fillRings(dc, shapes["f"], palette["f"], ox, oy, sc, view);
         drawPieces(dc, shapes["t"], 1, palette, ox, oy, sc, view);
+        fillRings(dc, shapes["z"], palette["z"], ox, oy, sc, view);
         if (shapes["g"] != null) { fillRings(dc, [shapes["g"]], palette["g"], ox, oy, sc, view); }
         drawPieces(dc, shapes["t"], 2, palette, ox, oy, sc, view);
         fillRings(dc, shapes["w"], palette["w"], ox, oy, sc, view);
