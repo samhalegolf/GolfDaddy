@@ -12,7 +12,6 @@ const { pathToFileURL } = require("url");
     courseToSupabaseRow,
     deleteCourseId,
     findCourseMapKey,
-    isGeneratedCourseUpload,
     mergeGeneratedCourse,
     mapsFromSupabaseRows,
     sanitizeCourse,
@@ -101,9 +100,6 @@ const { pathToFileURL } = require("url");
   assert.equal(deleteCourseId({ id: "published::akarana-golf-club" }), "akarana-golf-club");
   assert.equal(deleteCourseId({ course: { courseName: "Akarana Golf Club" } }), "akarana-golf-club");
 
-  assert.equal(isGeneratedCourseUpload({ generated: true, mode: "generated-create-or-append" }), true);
-  assert.equal(isGeneratedCourseUpload({ generated: true, source: "native-resolver" }), true);
-  assert.equal(isGeneratedCourseUpload({ generated: false, mode: "generated-create-or-append" }), false);
 
   const playerActor = { name: "Player", email: "player@example.com", role: "player", accountId: "acct-player" };
   const playerScan = sanitizeCourse({

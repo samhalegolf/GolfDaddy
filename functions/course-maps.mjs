@@ -118,7 +118,6 @@ export default async function courseMaps(req) {
   const adminActor = !!adminEmail;
   const actor = adminActor ? Object.assign({}, claimedActor, { email: adminEmail, role: "admin" }) : claimedActor;
   const action = text(payload && payload.action, 40).toLowerCase() || "upsert";
-  const generatedUpload = isGeneratedCourseUpload(payload);
 
   if (action === "delete" || action === "reset") {
     if (!adminActor) {
@@ -130,9 +129,13 @@ export default async function courseMaps(req) {
     return deleteCourseMap(payload);
   }
 
-  if (!adminActor && !generatedUpload) return json(403, { error: "Admin publish only" });
+  /* Admin only. Players' phones used to post "Community scan" uploads here without signing
+     in - in practice the server's own course package echoed straight back on every course
+     open, rewriting the row each time. The app stopped sending them (2026-10-07), and an
+     unauthenticated write that appends to any course is not something to keep open. */
+  if (!adminActor) return json(403, { error: "Admin publish only" });
 
-  const course = sanitizeCourse(payload && payload.course, adminActor ? actor : communityScanActor(actor));
+  const course = sanitizeCourse(payload && payload.course, actor);
   if (!course) return json(400, { error: "Course map is required" });
   await ensureCoursePlace(course);
 
@@ -667,23 +670,6 @@ function courseFromSupabaseRow(row) {
    request body, so anyone could claim admin and delete any course map. Admin is
    now established by verifiedAdminEmail() against Supabase Auth. */
 
-function isGeneratedCourseUpload(payload) {
-  if (!payload || payload.generated !== true) return false;
-  const mode = text(payload.mode, 80).toLowerCase();
-  const source = text(payload.source, 120).toLowerCase();
-  if (mode === "generated-create-or-append") return true;
-  return /automapper|native-resolver|course-picker-pin|generated-map/.test(source);
-}
-
-function communityScanActor(actor) {
-  return {
-    name: "Community scan",
-    email: "",
-    accountId: text(actor && actor.accountId, 120),
-    role: "player"
-  };
-}
-
 function deleteCourseId(payload) {
   const course = payload && payload.course || {};
   const raw = text(
@@ -1019,7 +1005,6 @@ export const __courseMapsTest = {
   courseToSupabaseRow,
   deleteCourseId,
   findCourseMapKey,
-  isGeneratedCourseUpload,
   mergeGeneratedCourse,
   mapsFromSupabaseRows,
   sanitizeCourse,

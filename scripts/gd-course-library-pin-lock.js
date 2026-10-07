@@ -9,7 +9,6 @@
   /* Last freshness result, so UI can say "new map update available" without
      re-asking, and so the check is observable for diagnostics. */
   let lastCourseLibraryFreshness={checked:false,stale:[],missing:[],current:[],serverTime:''};
-  const PUBLISHED_ADMIN_EMAILS=['samhalegolf@gmail.com','admin@clarity.local'];
   let applyingSavedGreen=false;
   let pinLockRegion={x:0,y:0};
   let profileObserver=null;
@@ -926,11 +925,67 @@
     const identity=courseIdentity(probe);
     return Object.entries(store.courses||{}).find(([,c])=>c.userId===uid&&courseIdentity(c)===identity)?.[0]||exact;
   }
+  /* What the server's course package put into a course record - its greens, tees, route
+     bends and surfaces - is held for the session and never written to disk.
+
+     It is a copy of server data the player can always fetch again, and /app/ (where the
+     round is actually played) fetches and keeps its own copy of the same package. Saving it
+     here as well put the same course on the phone twice, surfaces included. This shell only
+     needs it long enough to decide the course is playable and hand it over. What the
+     player made themselves (taps, scans, edits, pins) is not package data and saves as
+     before. */
+  const sessionPackageData={};
+  function isPackageObject(object){
+    return !!object&&typeof object.source==='string'&&object.source.indexOf('server-course-package')===0;
+  }
+  function attachSessionPackageData(store){
+    Object.keys(sessionPackageData).forEach(key=>{
+      const held=sessionPackageData[key];
+      /* A record the disk never took (it was full) still plays from memory this session. */
+      if(!store.courses[key])store.courses[key]=cloneData(held.record);
+      const course=store.courses[key];
+      course.objects=Object.assign({},course.objects||{},held.objects);
+      if(held.surfacesVersion!==undefined)course.surfacesVersion=held.surfacesVersion;
+      if(held.surfacesSavedAt!==undefined)course.surfacesSavedAt=held.surfacesSavedAt;
+    });
+    return store;
+  }
+  /* The copy that goes to disk, with package data lifted into the session. */
+  function detachSessionPackageData(store){
+    const disk=Object.assign({},store,{courses:{}});
+    Object.keys(sessionPackageData).forEach(key=>{if(!store.courses[key])delete sessionPackageData[key];});
+    Object.keys(store.courses||{}).forEach(key=>{
+      const course=store.courses[key];
+      if(!course){disk.courses[key]=course;return;}
+      const own={};
+      const pkg={};
+      Object.keys(course.objects||{}).forEach(id=>{(isPackageObject(course.objects[id])?pkg:own)[id]=course.objects[id];});
+      const held={objects:pkg,record:Object.assign({},course,{objects:{}})};
+      if('surfacesVersion' in course)held.surfacesVersion=course.surfacesVersion;
+      if('surfacesSavedAt' in course)held.surfacesSavedAt=course.surfacesSavedAt;
+      if(Object.keys(pkg).length||held.surfacesSavedAt)sessionPackageData[key]=held;
+      else delete sessionPackageData[key];
+      const kept=Object.assign({},course,{objects:own});
+      delete kept.surfacesVersion;
+      delete kept.surfacesSavedAt;
+      disk.courses[key]=kept;
+    });
+    return disk;
+  }
   function loadStore(){
     try{
       const parsed=JSON.parse(localStorage.getItem(STORE_KEY)||'{}');
       if(!parsed.courses)parsed.courses={};
-      if(dedupeStore(parsed))saveStore(parsed);
+      /* Earlier versions saved package data to disk. The next save drops it. */
+      const hadPackageOnDisk=Object.values(parsed.courses).some(c=>c&&(c.surfacesSavedAt||Object.values(c.objects||{}).some(isPackageObject)));
+      if(hadPackageOnDisk)Object.values(parsed.courses).forEach(c=>{
+        if(!c)return;
+        Object.keys(c.objects||{}).forEach(id=>{if(isPackageObject(c.objects[id]))delete c.objects[id];});
+        delete c.surfacesVersion;
+        delete c.surfacesSavedAt;
+      });
+      attachSessionPackageData(parsed);
+      if(dedupeStore(parsed)||hadPackageOnDisk)saveStore(parsed);
       return parsed;
     }catch(e){return {courses:{}};}
   }
@@ -939,10 +994,8 @@
      so the automapper would map a course, silently persist nothing, read back
      nothing and report "automapper failed" (that is exactly what broke the
      Pupuke scan). Quota errors are handled, never swallowed: evict
-     re-derivable caches, retry once, and if the write still fails, count it
-     so the mapping flow reports a persist failure instead of a mapping one. */
-  let storePersistFailures=0;
-  let lastStorePersistFailure=null;
+     re-derivable caches, retry once, and if the write still fails, report it
+     and tell the player. */
   function isStorageQuotaError(error){
     return !!(error&&(error.name==='QuotaExceededError'||error.name==='NS_ERROR_DOM_QUOTA_REACHED'||error.code===22||error.code===1014));
   }
@@ -979,8 +1032,6 @@
     try{localStorage.setItem(key,value);return true;}
     catch(error){
       if(!isStorageQuotaError(error)){
-        storePersistFailures++;
-        lastStorePersistFailure={at:Date.now(),key,label:label||'',error:String(error&&error.message||error),name:error&&error.name||''};
         try{console.warn('[Clarity Caddy] storage write failed',key,error);}catch(e){}
         return false;
       }
@@ -991,8 +1042,6 @@
         try{console.warn(`[Clarity Caddy] storage quota hit saving ${label||key} - evicted ${evicted.length} cloud-backed cache entries and retried OK`);}catch(e){}
         return true;
       }catch(retryError){
-        storePersistFailures++;
-        lastStorePersistFailure={at:Date.now(),key,label:label||'',error:String(retryError&&retryError.message||retryError),name:retryError&&retryError.name||'',quota:true,evicted:evicted.length};
         try{console.warn(`[Clarity Caddy] device storage full - ${label||key} could not be saved even after evicting ${evicted.length} cache entries`,retryError);}catch(e){}
         try{window.ClarityErrorReporter?.report?.(retryError,{source:'storageSetEvicting',key,label:label||'',quotaExceeded:true,evicted:evicted.length});}catch(e){}
         toastSafe(i18nT('course.storageFull'));
@@ -1000,7 +1049,7 @@
       }
     }
   }
-  function saveStore(store){return storageSetEvicting(STORE_KEY,JSON.stringify(store),'course-library');}
+  function saveStore(store){return storageSetEvicting(STORE_KEY,JSON.stringify(detachSessionPackageData(store)),'course-library');}
   function cloneData(value){try{return JSON.parse(JSON.stringify(value));}catch(e){return value;}}
   function loadPublishedStore(){
     try{
@@ -1031,14 +1080,6 @@
       role:String(account?.role||role||'player').trim().toLowerCase(),
       accountId:account?.accountId||profile?.accountId||''
     };
-  }
-  function isPublishedAdminEmail(email){
-    return PUBLISHED_ADMIN_EMAILS.includes(String(email||'').trim().toLowerCase());
-  }
-  function isAdminUser(){
-    const actor=currentAdminActor();
-    const roleOk=actor.role==='admin'||(()=>{try{return gdGetAccountPermission&&gdGetAccountPermission()==='admin';}catch(e){return false;}})();
-    return roleOk&&isPublishedAdminEmail(actor.email);
   }
   function publishedCourseId(course){
     return `published::${slug(course?.courseId||course?.id||course?.courseName||course?.name||'course')}`;
@@ -1113,23 +1154,6 @@
     const out={};
     Object.keys(objects||{}).forEach(id=>{if(!isSurfaceObject(objects[id]))out[id]=objects[id];});
     return out;
-  }
-  function libraryCourses(uid=userId()){
-    const privateCourses=Object.values(loadStore().courses||{}).filter(c=>c.userId===uid);
-    const byId=new Map();
-    publishedCourses().forEach(course=>byId.set(course.id,course));
-    privateCourses.forEach(course=>{
-      const published=findPublishedCourse(course.courseId,course.courseName,course);
-      if(published)byId.delete(published.id);
-      byId.set(course.id,mergeCourseData(course,published,uid));
-    });
-    return Array.from(byId.values());
-  }
-  function findLibraryCourse(courseStoreId,uid=userId()){
-    const store=loadStore();
-    const privateCourse=store.courses?.[courseStoreId];
-    if(privateCourse)return mergeCourseData(privateCourse,findPublishedCourse(privateCourse.courseId,privateCourse.courseName,privateCourse),uid);
-    return publishedCourses().find(course=>course.id===courseStoreId)||null;
   }
   function mergePublishedStore(incoming){
     const next=loadPublishedStore();
@@ -2773,22 +2797,6 @@
       }
     }catch(e){}
   }
-  function nearbySavedCourses(center=mapSessionCenter(),maxDistance=1400){
-    if(!center)return [];
-    return libraryCourses()
-      .filter(course=>isUsefulCourseName(course.courseName))
-      .map(course=>{
-        const lat=Number(course.courseLat), lng=Number(course.courseLng);
-        if(!Number.isFinite(lat)||!Number.isFinite(lng))return null;
-        return {...course,distanceM:distance(center,{lat,lng})};
-      })
-      .filter(Boolean)
-      .filter(course=>course.distanceM<=maxDistance)
-      .sort((a,b)=>a.distanceM-b.distanceM);
-  }
-  function courseCandidateCount(){
-    try{return nearbySavedCourses().length;}catch(e){return 0;}
-  }
   function ensureAssumedCourseBadge(){
     const label=currentCourseStorageLabel();
     applyVisibleCourseLabel(label);
@@ -2796,77 +2804,6 @@
     if(chip)chip.remove();
     try{if(typeof gdHydrateGpsBadge==='function')gdHydrateGpsBadge(true);}catch(e){}
   }
-  function ensureCourseConfirmationOverlay(){
-    let el=document.getElementById('gdCourseConfirmOverlay');
-    if(el)return el;
-    el=document.createElement('div');
-    el.id='gdCourseConfirmOverlay';
-    el.className='gdCourseConfirmOverlay hidden';
-    el.innerHTML=`<div class="gdCourseConfirmSheet"><div class="gdCourseConfirmHead"><div><h2 data-i18n="course.playingAt">${i18nH('course.playingAt')}</h2><p data-i18n="course.confirmWhich">${i18nH('course.confirmWhich')}</p></div><button class="gdSheetClose" type="button" onclick="gdCloseCourseConfirmation()">×</button></div><div id="gdCourseConfirmBody"></div></div>`;
-    el.addEventListener('click',ev=>{if(ev.target===el)gdCloseCourseConfirmation();});
-    document.body.appendChild(el);
-    return el;
-  }
-  function renderCourseConfirmation(){
-    const body=document.getElementById('gdCourseConfirmBody');
-    if(!body)return;
-    const label=currentCourseStorageLabel();
-    const center=mapSessionCenter();
-    const candidates=nearbySavedCourses(center);
-    const currentNorm=normalizeCourseName(label);
-    const rows=candidates
-      .filter(course=>normalizeCourseName(course.courseName)!==currentNorm)
-      .slice(0,5)
-      .map(course=>`<button class="gdCourseCandidate" type="button" data-course-name="${esc(course.courseName)}"><strong>${esc(course.courseName)}</strong><span>${esc(distanceLabel(course.distanceM))} · ${esc(savedDataLabel(course))}</span></button>`)
-      .join('');
-    body.innerHTML=`<div class="gdCourseCurrent"><span>${i18nH('course.playingNow')}</span><strong>${esc(label)}</strong><small>${isUsefulCourseName(label)?i18nH('course.youChoseThis'):i18nH('course.guessedFromLocation')}</small></div>${rows?`<div class="gdCourseCandidateList"><p>${i18nH('course.savedNearby')}</p>${rows}</div>`:`<div class="gdCourseCandidateEmpty">${i18nH('course.noSavedNearby')}</div>`}<div class="gdCourseConfirmActions"><button type="button" id="gdKeepCourseGuessBtn">${i18nH('course.keepThis')}</button><button type="button" id="gdSearchCourseGuessBtn">${i18nH('course.changeCourse')}</button></div>`;
-    body.querySelectorAll('[data-course-name]').forEach(btn=>{
-      btn.onclick=function(ev){
-        ev.preventDefault();
-        setAssumedCourseName(btn.getAttribute('data-course-name')||'');
-        gdCloseCourseConfirmation();
-        toastSafe(i18nT('course.labelUpdated'));
-      };
-    });
-    const keep=body.querySelector('#gdKeepCourseGuessBtn');
-    if(keep)keep.onclick=function(ev){ev.preventDefault();gdCloseCourseConfirmation();};
-    const search=body.querySelector('#gdSearchCourseGuessBtn');
-    if(search)search.onclick=function(ev){ev.preventDefault();window.gdSearchCourseForCurrentSession&&window.gdSearchCourseForCurrentSession();};
-  }
-  window.gdOpenCourseConfirmation=function(){
-    try{if(window.GDI18n&&!window.__gdCourseConfirmI18n){window.__gdCourseConfirmI18n=true;window.GDI18n.onChange(()=>{const o=document.getElementById('gdCourseConfirmOverlay');if(o&&!o.classList.contains('hidden'))renderCourseConfirmation();});}}catch(e){}
-    ensureCourseConfirmationOverlay().classList.remove('hidden');
-    renderCourseConfirmation();
-    ensureAssumedCourseBadge();
-  };
-  window.gdCloseCourseConfirmation=function(){
-    document.getElementById('gdCourseConfirmOverlay')?.classList.add('hidden');
-  };
-  window.gdUseCourseForCurrentSession=function(name){
-    setAssumedCourseName(name);
-    gdCloseCourseConfirmation();
-    toastSafe(i18nT('course.labelUpdated'));
-  };
-  window.gdSearchCourseForCurrentSession=function(){
-    gdCloseCourseConfirmation();
-    window.gdCourseChangeMode='assumed-label';
-    try{closeCourseLibraryPanel();}catch(e){}
-    try{gdCloseMapperTools();}catch(e){}
-    try{if(typeof enterGpsModule==='function')enterGpsModule({preserveState:true});}catch(e){}
-    setTimeout(()=>{
-      try{
-        const screen=document.getElementById('courseScreen');
-        const input=document.getElementById('searchInput');
-        if(screen)screen.classList.remove('hidden');
-        if(input){input.value=isUsefulCourseName(currentCourseStorageLabel())?currentCourseStorageLabel():'';input.focus();}
-        syncCoursePickerAssumption();
-        toastSafe(i18nT('course.searchOrChooseLabel'));
-      }catch(e){}
-    },80);
-  };
-  window.gdChangeAssumedCourse=function(){
-    window.gdOpenCourseConfirmation&&window.gdOpenCourseConfirmation();
-  };
   function clearNativeGreenReferenceLayers(){
     try{
       [greenOutline,greenSoft,greenLabel,frontLabel,backLabel].forEach(layer=>layer&&map.removeLayer(layer));
@@ -3031,7 +2968,6 @@
 	    lockMappedGreenFromStart:forceLockMappedGreenFromStart,
 	    mappedHolePlayData,
 	    mappedFairwayAxisForShot,
-	    publishCourseMap,
 	    syncPublishedCourseMaps,
 	    publishedCourseMapAvailability,
 	    loadPublishedStore,
@@ -4115,7 +4051,7 @@
 	    recordCoursePlayDebug('course-map-cloud-lookup-started',request.course,request.hole,{resolutionKey:request.resolutionKey,attemptToken:request.attemptToken,keys});
 	    updateCourseLoading(i18nT('course.mapLoading'),32);
 	    try{
-	      const maps=await syncPublishedCourseMaps({quiet:true,throwOnError:true});
+	      const maps=await syncPublishedCourseMaps({quiet:true,throwOnError:true,courseIds:keys});
 	      const published=publishedCourses().find(course=>keys.some(key=>courseMatchesIdentity(course,key,request.courseName,request.course)))||null;
 	      const readiness=published?courseDataMapReadiness(published,request.hole,request.wholeCourse):null;
 	      if(published){
@@ -4142,7 +4078,7 @@
 	    const keys=cloudCourseMapKeys(c);
 	    if(!keys.length)return {attempted:false,available:false,reason:'no-course-keys',course:c,keys};
 	    try{
-	      const maps=await syncPublishedCourseMaps({quiet:true,throwOnError:true});
+	      const maps=await syncPublishedCourseMaps({quiet:true,throwOnError:true,courseIds:keys});
 	      const published=publishedCourses().find(row=>keys.some(key=>courseMatchesIdentity(row,key,courseName(c),c)))||null;
 	      const readiness=published?courseDataMapReadiness(published,h,wholeCourse):null;
 	      return {
@@ -4157,52 +4093,6 @@
 	      };
 	    }catch(error){
 	      return {attempted:true,available:false,failed:true,error,course:c,keys,reason:error&&error.message||String(error)};
-	    }
-	  }
-	  function shouldSyncGeneratedCourseMapToCloud(request,opts={}){
-	    if(opts.generatedCourseMapSync===false||opts.cloudCourseMapSync===false)return false;
-	    if(opts.fromResume||opts.preserveState||opts.keepGps)return false;
-	    if(opts.__resumeRoundAvailableBeforeOpen||resumeRoundAvailableForCloudMap())return false;
-	    return typeof fetch==='function';
-	  }
-	  async function syncGeneratedCourseMapToCloud(request,source,opts={}){
-	    if(!shouldSyncGeneratedCourseMapToCloud(request,opts))return {attempted:false,reason:'cloud-sync-disabled'};
-	    const actor=currentAdminActor();
-	    const actorAllowed=String(actor.role||'').toLowerCase()==='admin'&&isPublishedAdminEmail(actor.email);
-	    const course=loadUserCourseData(userId(),request.courseId)||request.course;
-	    const readiness=savedMapCanSatisfyRequest(course,request.hole,true);
-	    const hasGeneratedObjects=!!(readiness.coverage&&readiness.coverage.count>0);
-	    if(!readiness.ready&&!hasGeneratedObjects){
-	      recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'skipped',event:'course-map-cloud-sync-skipped',summary:'Course map cloud sync skipped',details:{reason:'incomplete-map',source:source||'generated-map',courseId:request.courseId,courseName:request.courseName,hole:request.hole,playableHoleCount:readiness.coverage.count,expectedHoleCount:readiness.coverage.expected,missingHoles:readiness.coverage.missing,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
-	      return {attempted:false,reason:'incomplete-map',readiness};
-	    }
-	    const syncMode=actorAllowed?'admin-publish':'generated-create-or-append';
-	    const syncActor=actorAllowed?actor:{name:'Community scan',email:'',accountId:actor.accountId||'',role:'player'};
-	    const clean=normalizePublishedCourse(course,syncActor);
-	    if(!clean)return {attempted:false,reason:'empty-map',readiness};
-	    recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'started',event:'course-map-cloud-sync-started',summary:'Course map cloud sync started',details:{source:source||'generated-map',mode:syncMode,courseId:clean.courseId,courseName:clean.courseName,publishedCourseId:clean.id,playableHoleCount:readiness.coverage.count,expectedHoleCount:readiness.coverage.expected,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
-	    recordCoursePlayDebug('course-map-cloud-sync-started',request.course,request.hole,{source:source||'generated-map',mode:syncMode,courseId:clean.courseId,publishedCourseId:clean.id,holes:readiness.coverage.count,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
-	    try{
-	      const res=await fetch(PUBLISHED_COURSE_API,{
-	        method:'POST',
-	        headers:{'Content-Type':'application/json','Accept':'application/json'},
-	        body:JSON.stringify({course:clean,actor:syncActor,source:source||'generated-map',mode:syncMode,generated:true})
-	      });
-	      const data=await res.json().catch(()=>null);
-	      if(!res.ok){
-	        const error=new Error(data&&data.error||`Course map sync failed (${res.status})`);
-	        error.status=res.status;
-	        error.body=data;
-	        throw error;
-	      }
-	      if(data)mergePublishedStore(data);
-	      recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'completed',event:'course-map-cloud-synced',summary:'Course map synced to cloud',details:{source:source||'generated-map',mode:data&&data.mode||syncMode,courseId:clean.courseId,courseName:clean.courseName,publishedCourseId:clean.id,playableHoleCount:readiness.coverage.count,expectedHoleCount:readiness.coverage.expected,newObjects:data&&data.accepted&&data.accepted.objects||0,newHoles:data&&data.accepted&&data.accepted.holes||0,storage:data&&data.storage||'course-maps',resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
-	      recordCoursePlayDebug('course-map-cloud-synced',request.course,request.hole,{source:source||'generated-map',mode:data&&data.mode||syncMode,courseId:clean.courseId,publishedCourseId:clean.id,holes:readiness.coverage.count,newObjects:data&&data.accepted&&data.accepted.objects||0,newHoles:data&&data.accepted&&data.accepted.holes||0,storage:data&&data.storage||'course-maps',resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
-	      return {attempted:true,synced:true,course:clean,result:data,readiness};
-	    }catch(error){
-	      recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'failed',event:'course-map-cloud-sync-failed',summary:'Course map cloud sync failed',details:{source:source||'generated-map',courseId:clean.courseId,courseName:clean.courseName,publishedCourseId:clean.id,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken},error:{message:error&&error.message||String(error),status:error&&error.status||null}});
-	      recordCoursePlayDebug('course-map-cloud-sync-failed',request.course,request.hole,{source:source||'generated-map',courseId:clean.courseId,publishedCourseId:clean.id,reason:error&&error.message||String(error),status:error&&error.status||null,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
-	      return {attempted:true,synced:false,failed:true,error,course:clean,readiness};
 	    }
 	  }
 	  function ingestRequestedHoleToPipeline(course,hole,source){
@@ -4809,11 +4699,10 @@
 	     kept once. Replaced wholesale per package objectsVersion, never merged: the package is
 	     the authority for surfaces and a stale bunker must not outlive its collection.
 
-	     Kept for the last few courses played, not forever: each course is ~100-280 KB of rings in
-	     the same localStorage bucket the library lives in. */
+	     Held for the session only, like the rest of the package (see sessionPackageData): each
+	     course is ~100-280 KB of rings, and /app/ keeps its own copy of the package. */
 	  const PACKAGE_SURFACE_SOURCE='server-course-package-surface';
 	  const PACKAGE_SURFACE_BUCKETS={fairways:'fairway_area',bunkers:'bunker',water:'water',trees:'trees',hazards:'hazard',waste:'waste'};
-	  const PACKAGE_SURFACE_COURSE_LIMIT=4;
 	  function isSurfaceObject(object){
 	    if(!object)return false;
 	    if(object.type==='fairway_area'||object.type==='water'||object.type==='trees'||object.type==='hazard'||object.type==='waste')return true;
@@ -4887,21 +4776,8 @@
 	    target.surfacesVersion=version||null;
 	    target.surfacesSavedAt=records.length?now:null;
 	    target.updatedAt=now;
-	    evictStalePackageSurfaces(store,target.id);
-	    if(!saveStore(store))return {surfaces:records.length,written:0,persistFailed:true};
+		    if(!saveStore(store))return {surfaces:records.length,written:0,persistFailed:true};
 	    return {surfaces:records.length,written:records.length};
-	  }
-	  /* Surfaces stay on the most recent PACKAGE_SURFACE_COURSE_LIMIT courses; older ones drop
-	     theirs and get them back from the package the next time they are opened. */
-	  function evictStalePackageSurfaces(store,keepKey){
-	    const carrying=Object.values(store.courses||{})
-	      .filter(c=>c&&c.id!==keepKey&&c.surfacesSavedAt)
-	      .sort((a,b)=>String(b.surfacesSavedAt).localeCompare(String(a.surfacesSavedAt)));
-	    carrying.slice(Math.max(0,PACKAGE_SURFACE_COURSE_LIMIT-1)).forEach(c=>{
-	      Object.keys(c.objects||{}).forEach(id=>{if(c.objects[id]&&c.objects[id].source===PACKAGE_SURFACE_SOURCE)delete c.objects[id];});
-	      c.surfacesSavedAt=null;
-	      c.surfacesVersion=null;
-	    });
 	  }
 	  async function resolveGeometryFromServerPackage(course){
 	    const pkg=await fetchServerCoursePackage(course);
@@ -5162,8 +5038,6 @@
         let autoMapResult=null;
         let serverWait=null;
         let serverWaitError=null;
-        /* Counted so a save that failed can be told apart from a map that does not exist. */
-        const persistFailuresBefore=storePersistFailures;
         try{
           serverWait=await awaitServerCoursePackage(c,{
             budgetMs:opts.serverWaitBudgetMs,
@@ -5232,23 +5106,10 @@
 	        if(autoAccepted){
 	          recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'automapper-succeeded',summary:'AutoMapper succeeded',details:{hole:h,resolutionKey:key,attemptToken,guideCount:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0}});
 	          recordMappingDebug(debugRunId,{source:'course-loader',phase:'completed',event:'mapping-attempt-completed',summary:'Course mapping completed',details:{hole:h,source:'automapper',resolutionKey:key,attemptToken}});
-	          await syncGeneratedCourseMapToCloud(request,'automapper',opts);
 	          finishMappingDebug(debugRunId,{status:'completed',outcome:'automapper map ready'});
 	          const shown=await showResolvedCoursePlayHole(c,h,'automapper',opts);
 	          return Object.assign(shown,{partial:autoAccepted&&!autoReady,readiness:autoState,persisted:autoMapResult,holes:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0,fit:autoMapResult&&autoMapResult.fit||null});
 	        }
-        /* The server HAD the map and the phone could not save it. Saying "no playable map" here
-           is what sent Derllys Court (6 Oct 2026) round in circles: the map was fine, the
-           phone's storage was full, and the player was offered a "notify me when it's mapped"
-           for a course that already was. Say what actually happened instead. */
-        if(storePersistFailures>persistFailuresBefore&&(autoMapResult&&(autoMapResult.serverPackageStatus==='full-map-ready'||autoMapResult.serverPackageStatus==='lite-geo-ready'))){
-          recordMappingDebug(debugRunId,{source:'course-loader',phase:'failed',event:'course-save-storage-full',summary:'Server had the map but the phone could not save it',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:autoMapResult.serverPackageStatus,failure:lastStorePersistFailure}});
-          recordCoursePlayDebug('course-mapping-storage-full',c,h,{resolutionKey:key,attemptToken,serverPackageStatus:autoMapResult.serverPackageStatus});
-          returnToCoursePicker('storage-full');
-          /* A quota failure already said so in storageSetEvicting. */
-          if(!(lastStorePersistFailure&&lastStorePersistFailure.quota))toastSafe(i18nT('course.storageFull'));
-          return {playable:false,failed:true,reason:'device-storage-full'};
-        }
         /* The server worker tries both OSM-numbered geometry AND the Native Geometry
            Resolver fallback before giving up (functions/course-mapper-worker-background.mjs) -
            so a miss here means the server has nothing playable yet, not that the client has a
@@ -5383,16 +5244,6 @@
             const res=oldOpen.call(this,manual);
             setTimeout(()=>{setAssumedCourseName(c.name||assumedCourseLabel());ensureAssumedCourseBadge();},60);
             return res;
-          }
-          if(window.gdCourseChangeMode==='assumed-label'&&isManualGpsCourse(courseObj())&&c&&!isManualGpsCourse(c)){
-            window.gdCourseChangeMode='';
-            setAssumedCourseName(c.name||'');
-            try{document.getElementById('courseScreen')?.classList.add('hidden');}catch(e){}
-            toastSafe(i18nT('course.labelUpdated'));
-            return c;
-          }
-          if(window.gdCourseChangeMode==='assumed-label'&&c&&isManualGpsCourse(c)){
-            window.gdCourseChangeMode='';
           }
           if(!isManualGpsCourse(c))showCourseLoadingIfNeeded(c,1);
           const res=oldOpen.apply(this,arguments);
@@ -5725,24 +5576,6 @@
     const stamps=objectValues(course).map(o=>o&&o.updatedAt).filter(Boolean).sort();
     return {holes:mappedHoleNumbers(course,s).length,points:s.totalObjects,bytes,updated:stamps[stamps.length-1]||course.updatedAt||''};
   }
-  /* The confirmation sheet asks "which course is this?", so the useful signal about
-     each candidate is how much is already stored under it. A breakdown by object
-     type ("3 green targets · 2 bunkers") answered a question nobody is asking at
-     that moment, and named internals the reader cannot act on from there. */
-  function savedDataLabel(course){
-    const holes=mappedHoleNumbers(course,courseSummary(course)).length;
-    return holes?i18nN('course.holesSaved',holes):i18nT('course.nothingSavedYet');
-  }
-  /* Candidates come from a 1.4km radius, so the tail of that range reads better in
-     kilometres than as a four-digit metre count. */
-  function distanceLabel(metres){
-    const m=Number(metres);
-    if(!Number.isFinite(m))return i18nT('course.nearby');
-    /* Switch at a full kilometre, not before it: rounding 950m to one decimal
-       prints "0.9km away", which reads as nearer than the "949m away" a metre
-       earlier. */
-    return m<1000?i18nT('course.metresAway',{n:Math.round(m)}):i18nT('course.kmAway',{n:(m/1000).toFixed(1)});
-  }
   function sizeLabel(bytes){
     if(!(bytes>0))return i18nT('course.sizeKb',{n:0});
     if(bytes<1024)return i18nT('course.sizeBytes',{n:bytes});
@@ -5951,25 +5784,21 @@
     return result;
   }
   /* Concurrent callers share one round trip. The resolver and the startup timer
-     can both ask within the same window, and without this both see an empty
-     local store, both decide it is stale, and both pull the full payload -
-     hundreds of kilobytes fetched twice for one result. The shared promise
+     can both ask within the same window, and without this both would fetch the
+     same courses twice for one result. The shared promise
      resolves to {store,error} so each caller still applies its own
      throwOnError rather than inheriting another caller's error handling. */
-  /* Mirrors PLAY_SUBSET_MAX in functions/course-maps.mjs. Above this the full
-     read is the cheaper request anyway. */
+  /* Mirrors PLAY_SUBSET_MAX in functions/course-maps.mjs: longer lists go in
+     batches of this size. */
   const PUBLISHED_SUBSET_SYNC_MAX=24;
   /* The named courses in play scope, or null when the server did not answer a
      subset - an older server answers the whole library to this URL, and that
-     must not be merged as if it were the subset, so the caller then takes the
-     full path it always took.
+     must not be merged as if it were the subset, so nothing merges.
 
      A request that FAILS is thrown, exactly as the full pull throws, and is
-     never followed by a second pull. Falling back to the whole library on a
-     failed subset would turn one failed request into two during an outage,
-     which is the amplification that kept the database down on 18 Sep 2026.
-     An answer that says the database was unavailable is handled the way the
-     full path handles it: nothing merges, the store stands. */
+     never followed by a second pull: one failed request must not become two
+     during an outage, the amplification that kept the database down on 18 Sep
+     2026. Nothing merges and the store stands. */
   async function fetchPublishedCourseSubset(courseIds){
     const res=await fetch(PUBLISHED_COURSE_API+'?scope=play&courseIds='+encodeURIComponent(courseIds.join(',')),{headers:{Accept:'application/json'},cache:'no-store'});
     if(!res.ok){
@@ -5989,8 +5818,12 @@
   async function syncPublishedCourseMaps(opts={}){
     if(opts.force!==true&&publishedSyncInFlight){
       const shared=await publishedSyncInFlight;
-      if(shared.error&&opts.throwOnError)throw shared.error;
-      return shared.store;
+      /* A run already going only answers a caller with no course of its own -
+         the startup refresh never fetches the course being opened. */
+      if(!uniqueSlugs(opts.courseIds).length){
+        if(shared.error&&opts.throwOnError)throw shared.error;
+        return shared.store;
+      }
     }
     const run=(async function(){
       if(window.GDCourseStorage)await window.GDCourseStorage.ready;
@@ -6009,90 +5842,82 @@
   /* Always throws on failure. Error policy belongs to the caller, not to
      whoever happened to start the shared run first - if this swallowed errors
      according to the owner's throwOnError, a sharer that asked for errors would
-     silently receive a stale store instead. */
+     silently receive a stale store instead.
+
+     The device holds the courses the player has OPENED, not the whole published
+     library. It used to treat every course in the database as "missing" and pull
+     them all (~12 MB, and growing with every course mapped), which is most of what
+     filled a phone's storage on 6 Oct 2026 - a golfer in New Zealand carrying every
+     course in Wales. Now a sync refreshes only:
+       - courses already held whose server version moved on (stale), and
+       - the courses this caller is opening (opts.courseIds), when not held yet
+         or when opts.force asks to re-read them anyway.
+     Never the whole library. The picker's own search reads the server directly,
+     so nothing here needs every course on the device. */
   async function runPublishedCourseMapSync(opts={}){
-    {
-      if(typeof fetch!=='function')return loadPublishedStore();
-      /* Ask the cheap question first. Only pull full course payloads when the
-         manifest says something actually changed, or when a caller explicitly
-         forces it (a publish has to re-read what the server now holds). */
-      if(opts.force!==true){
-        const manifest=await fetchCourseLibraryManifest();
-        const freshness=courseLibraryFreshness(manifest);
-        lastCourseLibraryFreshness=freshness;
-        if(freshness.checked&&!freshness.stale.length&&!freshness.missing.length){
-          try{renderCourseLibraryPanel();}catch(e){}
-          return loadPublishedStore();
-        }
-        /* The manifest named what changed, so ask for that and nothing else. The
-           whole library is ~12 MB of geometry; two republished courses are a few
-           hundred kilobytes. Every phone whose manifest went stale in the same
-           minute used to pull the whole library at once, and that burst is what
-           stalled the database on 18 Sep 2026. A fresh install (everything
-           missing) or a failed subset read still takes the full path below. */
-        if(freshness.checked){
-          const wanted=freshness.stale.concat(freshness.missing).filter(Boolean);
-          if(wanted.length&&wanted.length<=PUBLISHED_SUBSET_SYNC_MAX){
-            const subset=await fetchPublishedCourseSubset(wanted);
-            if(subset){
-              const merged=mergePublishedStore(subset);
-              try{renderCourseLibraryPanel();}catch(e){}
-              return merged;
-            }
-          }
-        }
-      }
-      const res=await fetch(PUBLISHED_COURSE_API+'?scope=play',{headers:{Accept:'application/json'},cache:'no-store'});
-      if(!res.ok){
-        const error=new Error(`Course map lookup failed (${res.status})`);
-        error.status=res.status;
-        throw error;
-      }
-      const data=await res.json();
-      const merged=mergePublishedStore(data);
-      try{renderCourseLibraryPanel();}catch(e){}
-      return merged;
+    if(typeof fetch!=='function')return loadPublishedStore();
+    pruneUnopenedPublishedCourses(opts.courseIds);
+    const requested=uniqueSlugs(opts.courseIds);
+    const manifest=await fetchCourseLibraryManifest();
+    const freshness=courseLibraryFreshness(manifest);
+    lastCourseLibraryFreshness=freshness;
+    let wanted;
+    if(freshness.checked){
+      /* Only ids the server actually publishes - a name-derived key that is not a
+         course id would otherwise be asked for on every open. */
+      wanted=freshness.stale.concat(requested.filter(id=>
+        freshness.missing.includes(id)||(opts.force===true&&freshness.current.includes(id))));
+    }else{
+      /* Manifest unreachable: no conclusion about what is stale, but the course
+         being opened is still worth asking for by name. */
+      wanted=requested;
     }
+    wanted=uniqueSlugs(wanted);
+    let store=loadPublishedStore();
+    for(let i=0;i<wanted.length;i+=PUBLISHED_SUBSET_SYNC_MAX){
+      const subset=await fetchPublishedCourseSubset(wanted.slice(i,i+PUBLISHED_SUBSET_SYNC_MAX));
+      if(subset)store=mergePublishedStore(subset);
+    }
+    try{renderCourseLibraryPanel();}catch(e){}
+    return store;
   }
-  async function publishCourseMap(courseStoreId){
-    if(!isAdminUser()){toastSafe('Admin only');return false;}
-    const store=loadStore();
-    const privateCourse=store.courses?.[courseStoreId];
-    if(!privateCourse||isPublishedCourse(privateCourse)){toastSafe('Open your own saved course before publishing');return false;}
-    const actor=currentAdminActor();
-    const clean=normalizePublishedCourse(privateCourse,actor);
-    if(!clean){toastSafe('Nothing to publish');return false;}
-    const local=loadPublishedStore();
-    local.version=1;
-    local.courses=local.courses||{};
-    local.courses[clean.id]=clean;
-    local.updatedAt=nowIso();
-    savePublishedStore(local);
-    renderCourseLibraryPanel(courseStoreId);
-    try{
-      if(typeof fetch==='function'){
-        const res=await fetch(PUBLISHED_COURSE_API,{
-          method:'POST',
-          headers:{'Content-Type':'application/json','Accept':'application/json'},
-          body:JSON.stringify({course:clean,actor})
-        });
-        const data=await res.json().catch(()=>null);
-        if(res.ok&&data){
-          mergePublishedStore(data);
-          renderCourseLibraryPanel(courseStoreId);
-          toastSafe('Course map published');
-          return true;
-        }
-      }
-      toastSafe('Published locally. Global sync will work on Netlify.');
-      return true;
-    }catch(e){
-      toastSafe('Published locally. Global sync will retry later.');
-      return true;
-    }
+  function uniqueSlugs(values){
+    const out=[];
+    (Array.isArray(values)?values:[]).forEach(value=>{
+      const key=slug(value||'');
+      if(key&&!out.includes(key))out.push(key);
+    });
+    return out;
+  }
+  /* One-off for devices that already pulled the whole library: keep only courses
+     the player has a record of opening (their own library, or a course downloaded
+     for offline play) plus whatever is being opened right now. Anything dropped
+     comes back by id the next time it is opened. Marked so it runs once. */
+  function pruneUnopenedPublishedCourses(keepIds){
+    const store=loadPublishedStore();
+    if(store.scope==='opened')return;
+    const keep=new Set(uniqueSlugs(keepIds));
+    Object.values(loadStore().courses||{}).forEach(course=>{
+      const key=slug(course&&course.courseId||'');
+      if(key)keep.add(key);
+    });
+    downloadedCourseEntries().forEach(entry=>{
+      const key=slug(entry&&entry.courseId||'');
+      if(key)keep.add(key);
+    });
+    const courses={};
+    Object.keys(store.courses||{}).forEach(id=>{
+      const course=store.courses[id];
+      if(keep.has(slug(course&&(course.courseId||course.id)||'')))courses[id]=course;
+    });
+    store.courses=courses;
+    store.scope='opened';
+    savePublishedStore(store);
   }
   window.gdCLSyncPublishedCourseMaps=syncPublishedCourseMaps;
-  window.gdCLPublishCourse=publishCourseMap;
+  /* The course as this shell sees it right now - disk, session package data and the
+     published copy merged - for tests and on-device diagnosis. */
+  window.gdCLSessionCourse=function(cid){return loadUserCourseData(userId(),cid);};
 	  window.gdCLOpenCourseSearch=function(){
     closeCourseLibraryPanel();
     try{document.getElementById('gdProfileV67')?.classList.add('hidden');}catch(e){}
@@ -6500,8 +6325,10 @@
       lastCourseLibraryFreshness=courseLibraryFreshness(manifest);
       return window.GDCourseLibrary.freshness();
     },
+    /* Stale only: "missing" is every published course this device has never
+       opened, which is not an update to anything it holds. */
     updateAvailable:function(){
-      return !!(lastCourseLibraryFreshness.checked&&(lastCourseLibraryFreshness.stale.length||lastCourseLibraryFreshness.missing.length));
+      return !!(lastCourseLibraryFreshness.checked&&lastCourseLibraryFreshness.stale.length);
     },
     refresh:function(opts){return syncPublishedCourseMaps(Object.assign({quiet:true},opts||{}));},
     /* The nines that share a facility with this course, or null for an ordinary

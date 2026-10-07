@@ -110,7 +110,7 @@ assert(library.includes("const hasTrustedPlayData=requestedHolePlayable(course,e
 assert(library.includes("async function publishedCourseMapAvailability(course,opts={})"), "course library exposes a DB-map-only availability check for the picker");
 assert(library.includes("function courseDataMapReadiness(course,hole,wholeCourse)"), "database map availability checks the published course data directly");
 assert(library.includes("saved-map-ignored-without-database-map"), "course scanner ignores local saved maps when the picker did not confirm a database map");
-assert(library.includes("mode:syncMode"), "generated course scans post to the database as a create-or-append upload");
+assert(!library.includes("generated-create-or-append"), "a map the server sent is not posted back to it as a community scan");
 assert(pickerSearch.includes('const COURSE_MAPS_API="/api/course-maps";'), "course picker searches the shared course-map database");
 assert(pickerSearch.includes("function loadDatabaseCourses(opts={})"), "course picker hydrates database courses behind the search UI");
 assert(pickerSearch.includes('source:"database-course"'), "database courses are tagged when merged into picker results");
@@ -121,6 +121,6 @@ assert(index.includes("gd-app-core.js?v="), "app core cache-bust ships the picke
 assert(index.includes("gd-flag-pin.js?v="), "flag/pin owner still ships the flagTool boot-crash fix");
 assert(index.includes("gd-brand-icon-render.js?v="), "brand rail cache-bust ships dynamic rail ownership + flag handler rebind");
 assert(index.includes("gd-course-picker-search-v2.js?v="), "course picker owner cache-bust ships database course hydration and selection ownership");
-assert(index.includes("gd-course-library-pin-lock.js?v="), "course library cache-bust ships generated scan upload");
+assert(index.includes("gd-course-library-pin-lock.js?v="), "course library cache-bust ships");
 
 console.log("course-picker-location tests passed");

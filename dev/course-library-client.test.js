@@ -1,6 +1,7 @@
 /* Client side of the course library cache.
  *
- * The local library mirrors the published courses so play starts fast. Checking
+ * The local library holds the published courses this device has opened, so play
+ * starts fast. Checking
  * whether it is stale must not cost what re-downloading costs, or the cache
  * earns nothing: /api/course-maps returns every course's full objects and holes
  * - hundreds of kilobytes - and it was being fetched on every course entry just
@@ -104,23 +105,102 @@ test("no manifest means no conclusion - never assume current", () => {
   assert.strictEqual(f.checked, false, "an unreachable manifest must not read as 'everything is fresh'");
 });
 
-test("the expensive full pull is skipped only when nothing changed", () => {
-  /* syncPublishedCourseMaps is now a thin in-flight dedupe wrapper; the
-     manifest check, the skip and the full pull live in runPublishedCourseMapSync. */
-  const idx = src.indexOf("async function runPublishedCourseMapSync(");
-  assert.notStrictEqual(idx, -1);
-  const fn = src.slice(idx, idx + 1800);
-  assert.ok(/fetchCourseLibraryManifest\(\)/.test(fn), "the manifest must be consulted first");
-  assert.ok(
-    /freshness\.checked&&!freshness\.stale\.length&&!freshness\.missing\.length/.test(fn),
-    "the skip must require a successful check AND nothing stale AND nothing missing"
-  );
-  const skipAt = fn.indexOf("return loadPublishedStore();");
-  const pullAt = fn.indexOf("await fetch(PUBLISHED_COURSE_API");
-  assert.ok(skipAt !== -1 && pullAt !== -1 && skipAt < pullAt, "the skip must short-circuit before the full pull");
+/* Runs the real sync against a stubbed manifest and records which courses it
+   asks the server for. */
+async function syncAsks(held, manifestEntries, opts) {
+  function extract(signature) {
+    const idx = src.indexOf(signature);
+    assert.notStrictEqual(idx, -1, "could not find " + signature);
+    const end = src.indexOf("\n  }", idx);
+    return src.slice(idx, end + 4);
+  }
+  const code = ["function localObjectsVersion(course)", "function courseLibraryFreshness(manifest)",
+    "function uniqueSlugs(values)", "async function runPublishedCourseMapSync(opts={})"].map(extract).join("\n");
+  const asked = [];
+  const scope = {
+    fetch: function () {},
+    PUBLISHED_SUBSET_SYNC_MAX: 24,
+    lastCourseLibraryFreshness: null,
+    publishedCourses: function () { return held; },
+    slug: function (v) { return String(v || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); },
+    pruneUnopenedPublishedCourses: function () {},
+    fetchCourseLibraryManifest: async function () { return manifestEntries ? manifestOf(manifestEntries) : null; },
+    fetchPublishedCourseSubset: async function (ids) { asked.push.apply(asked, ids); return null; },
+    loadPublishedStore: function () { return { courses: {} }; },
+    mergePublishedStore: function (x) { return x; },
+    renderCourseLibraryPanel: function () {}
+  };
+  const names = Object.keys(scope);
+  // eslint-disable-next-line no-new-func
+  const run = new Function(names.join(","), code + "\nreturn runPublishedCourseMapSync;").apply(null, names.map(function (n) { return scope[n]; }));
+  await run(opts || {});
+  return asked.sort();
+}
+
+const HELD = [{ courseId: "takapuna", publishedAt: "2026-07-20T01:00:00.000Z" }];
+const LISTED = [
+  { course_id: "takapuna", objects_version: "2026-07-20T01:00:00.000Z" },
+  { course_id: "pupuke", objects_version: "2026-07-20T01:00:00.000Z" },
+  { course_id: "derllys-court", objects_version: "2026-07-20T01:00:00.000Z" }
+];
+
+test("a sync never pulls courses nobody opened", async () => {
+  /* Every published course the device has never seen used to count as missing,
+     and the device pulled them all - the whole library, on every phone. */
+  assert.deepStrictEqual(await syncAsks(HELD, LISTED), []);
+  assert.ok(!/fetch\(PUBLISHED_COURSE_API\+'\?scope=play'[,)]/.test(src), "no whole-library request is left");
 });
 
-test("a caller can force a full pull", () => {
+test("the course being opened is fetched by id when not held", async () => {
+  assert.deepStrictEqual(await syncAsks(HELD, LISTED, { courseIds: ["derllys-court", "derllys-court-golf-club"] }), ["derllys-court"],
+    "only ids the server publishes - a name-derived key is not asked for");
+});
+
+test("held courses that moved on are refreshed", async () => {
+  const moved = LISTED.map(e => e.course_id === "takapuna" ? Object.assign({}, e, { objects_version: "2026-07-21T00:00:00.000Z" }) : e);
+  assert.deepStrictEqual(await syncAsks(HELD, moved), ["takapuna"]);
+});
+
+test("a held, current course is only re-read when forced", async () => {
+  assert.deepStrictEqual(await syncAsks(HELD, LISTED, { courseIds: ["takapuna"] }), []);
+  assert.deepStrictEqual(await syncAsks(HELD, LISTED, { courseIds: ["takapuna"], force: true }), ["takapuna"]);
+});
+
+test("with no manifest, only the course being opened is asked for", async () => {
+  assert.deepStrictEqual(await syncAsks(HELD, null, { courseIds: ["pupuke"] }), ["pupuke"]);
+  assert.deepStrictEqual(await syncAsks(HELD, null), []);
+});
+
+test("a phone that holds the whole library keeps only what it opened, once", () => {
+  const idx = src.indexOf("function pruneUnopenedPublishedCourses(keepIds)");
+  const code = src.slice(idx, src.indexOf("\n  }", idx) + 4)
+    + "\n" + src.slice(src.indexOf("function uniqueSlugs(values)"), src.indexOf("\n  }", src.indexOf("function uniqueSlugs(values)")) + 4);
+  let store = { courses: {
+    "published::takapuna": { courseId: "takapuna" },
+    "published::pupuke": { courseId: "pupuke" },
+    "published::derllys-court": { courseId: "derllys-court" },
+    "published::cromwell": { courseId: "cromwell" }
+  } };
+  let saves = 0;
+  const scope = {
+    slug: function (v) { return String(v || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); },
+    loadPublishedStore: function () { return JSON.parse(JSON.stringify(store)); },
+    savePublishedStore: function (next) { saves += 1; store = next; },
+    loadStore: function () { return { courses: { "u::takapuna": { courseId: "takapuna" } } }; },
+    downloadedCourseEntries: function () { return [{ courseId: "pupuke" }]; }
+  };
+  const names = Object.keys(scope);
+  // eslint-disable-next-line no-new-func
+  const prune = new Function(names.join(","), code + "\nreturn pruneUnopenedPublishedCourses;").apply(null, names.map(function (n) { return scope[n]; }));
+  prune(["derllys-court"]);
+  assert.deepStrictEqual(Object.keys(store.courses).sort(),
+    ["published::derllys-court", "published::pupuke", "published::takapuna"],
+    "own library, offline downloads and the course being opened stay; the rest goes");
+  prune([]);
+  assert.strictEqual(saves, 1, "it runs once - after that the store only ever holds opened courses");
+});
+
+test("a caller can force a re-read", () => {
   const idx = src.indexOf("async function syncPublishedCourseMaps(");
   const fn = src.slice(idx, idx + 1800);
   assert.ok(

@@ -15748,7 +15748,7 @@ function gdRefreshCourseAssumedOption(course){
   const button=document.getElementById("gdCourseAssumedPlayBtn");
   const option=document.getElementById("gdCourseAssumedOption");
   if(name)name.textContent=payload.name==="Manual GPS"?gdT("roundPlay.manualGps"):payload.name;
-  if(button)button.textContent=window.gdCourseChangeMode==="assumed-label"?gdT("roundPlay.confirm"):gdT("picker.play");
+  if(button)button.textContent=gdT("picker.play");
   if(option){
     option.__gdCoursePayload=payload;
     option.dataset.gdCourseName=payload.name;
@@ -17048,7 +17048,7 @@ function gdCoursePickerBack(event){
     window.gdCourseChangeMode="";
     return gdCoursePickerHome(event);
   }
-  if(window.gdCourseChangeMode==="assumed-label"||window.gdCourseChangeMode==="change-course"){
+  if(window.gdCourseChangeMode==="change-course"){
     window.gdCourseChangeMode="";
     if(typeof enterGpsModule==="function")return enterGpsModule({preserveState:true,fromBack:true});
     return false;
@@ -20964,7 +20964,6 @@ function openBag(){openPanel("bagPanel");if(typeof renderBagPanel==="function")r
 function gdCloseStatsBlockingOverlays(){
   [
     "gdCourseLibraryOverlay",
-    "gdCourseConfirmOverlay",
     "gdMapperToolsDrawer",
     "gdMapperToolFlyout",
     "gdPinLockOverlay",

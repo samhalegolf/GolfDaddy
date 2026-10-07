@@ -39,7 +39,7 @@
   "use strict";
 
   var KEYS = [
-    "gd_published_course_library_v1",   /* every published course the shell has pulled */
+    "gd_published_course_library_v1",   /* the published courses this device has opened */
     "gd_user_course_library_v1",        /* the player's own course library */
     "clarity:course-library:v1",        /* /app/'s downloaded courses (app/js/course-store.js) */
     "gd_course_play_pipeline_v1"        /* per-course play pipeline state */

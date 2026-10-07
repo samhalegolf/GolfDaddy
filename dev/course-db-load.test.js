@@ -186,14 +186,19 @@ const STUB = {
   asked = [];
   let world = { maps: [MAPPED, STUB] };
   stubTables(world, asked);
-  const scan = await post(courseMaps, {
+  const scanBody = {
     generated: true, mode: "generated-create-or-append",
     course: {
       courseId: "cromwell", courseName: "Cromwell Golf Course", courseLat: -45.038, courseLng: 169.204, countryCode: "NZ", country: "New Zealand",
       objects: { g2: { id: "g2", type: "green", holeNumber: 2, position: { lat: -45.04, lng: 169.21 } } },
       holes: { 2: { holeNumber: 2, greenCenter: { lat: -45.04, lng: 169.21 } } }
     }
-  });
+  };
+  /* The old unsigned "Community scan" upload is refused, and refused before anything is read. */
+  const unsigned = await post(courseMaps, scanBody);
+  assert.strictEqual(unsigned.status, 403, "an unsigned upload is refused: " + JSON.stringify(unsigned.body));
+  assert.deepStrictEqual(asked, [], "a refused upload reads nothing");
+  const scan = await post(courseMaps, scanBody, "admin-token");
   assert.strictEqual(scan.status, 200, JSON.stringify(scan.body));
   assert.ok(!asked.some((u) => u.includes("objects_json") && !u.includes("id=eq.")), "a publish must not read the whole library: " + asked.join("\n"));
   assert.ok(asked.some((u) => u.includes("course_maps_list") && !u.includes("object_count")), "the course is matched against the identity view");
@@ -232,8 +237,9 @@ const STUB = {
   assert.ok(/PUBLISHED_COURSE_API\+'\?scope=play&courseIds='\+encodeURIComponent\(courseIds\.join\(','\)\)/.test(phone),
     "the phone must ask for the stale and missing courses by id");
   assert.ok(/data\.partial!==true[^\n]*return null;/.test(phone), "and must not merge a full answer as if it were the subset");
-  assert.ok(/const wanted=freshness\.stale\.concat\(freshness\.missing\)/.test(phone), "the manifest's stale and missing lists are what it asks for");
-  ok("the phone syncs the courses that changed, and only falls back to the whole library");
+  assert.ok(/wanted=freshness\.stale\.concat\(requested\.filter/.test(phone), "it asks for what changed and the course being opened");
+  assert.ok(!/fetch\(PUBLISHED_COURSE_API\+'\?scope=play'[,)]/.test(phone), "and never for the whole library (dev/course-library-client.test.js runs it)");
+  ok("the phone syncs the courses that changed and the one being opened, never the whole library");
 
   console.log("course-db-load passed: " + checks + " checks");
 })().catch((error) => {

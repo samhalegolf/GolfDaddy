@@ -263,15 +263,11 @@ test("the play stamp is admin-only and reads the asset, not the course", () => {
   assert.ok(painter.includes("hideVersionStamp();"), "and it must be cleared whenever the published surface goes away");
 });
 
-test("both shells agree on who the operator is", () => {
-  const appAccount = fs.readFileSync(path.join(root, "app", "js", "account.js"), "utf8");
+/* The old shell kept its own admin list only for an unreachable "publish" path, deleted
+   2026-10-07. Admin is decided by the server (verifiedAdminEmail) and, in /app/, by account.js. */
+test("the old shell keeps no admin list of its own to drift", () => {
   const oldShell = fs.readFileSync(path.join(root, "scripts", "gd-course-library-pin-lock.js"), "utf8");
-  const emails = src => {
-    const line = src.split("\n").find(l => /ADMIN_EMAILS\s*=|PUBLISHED_ADMIN_EMAILS\s*=/.test(l));
-    return (line.match(/[\w.+-]+@[\w.-]+/g) || []).sort();
-  };
-  assert.deepStrictEqual(emails(appAccount), emails(oldShell),
-    "the two shells share the account store but no code - their admin lists must not drift");
+  assert.ok(!/ADMIN_EMAILS\s*=/.test(oldShell), "a second copy of the admin list is how two answers to 'who is admin' start");
 });
 
 (async () => {

@@ -1,4 +1,4 @@
-.gdCourseLibraryOverlay,.gdPinLockOverlay,.gdMapperToolsDrawer,.gdCourseConfirmOverlay{
+.gdCourseLibraryOverlay,.gdPinLockOverlay,.gdMapperToolsDrawer{
   position:fixed;
   inset:0;
   z-index:100060;
@@ -9,8 +9,8 @@
   padding:18px;
   box-sizing:border-box;
 }
-.gdCourseLibraryOverlay.hidden,.gdPinLockOverlay.hidden,.gdMapperToolsDrawer.hidden,.gdCourseConfirmOverlay.hidden{display:none!important}
-.gdCourseLibrarySheet,.gdPinLockSheet,.gdMapperToolsSheet,.gdCourseConfirmSheet{
+.gdCourseLibraryOverlay.hidden,.gdPinLockOverlay.hidden,.gdMapperToolsDrawer.hidden{display:none!important}
+.gdCourseLibrarySheet,.gdPinLockSheet,.gdMapperToolsSheet{
   width:min(560px,100%);
   max-height:88vh;
   overflow:auto;
@@ -21,15 +21,15 @@
   color:#fff;
   padding:18px;
 }
-.gdCourseLibraryHead,.gdPinLockHead,.gdMapperToolsHead,.gdCourseConfirmHead{
+.gdCourseLibraryHead,.gdPinLockHead,.gdMapperToolsHead{
   display:flex;
   justify-content:space-between;
   gap:12px;
   align-items:flex-start;
   margin-bottom:14px;
 }
-.gdCourseLibraryHead h2,.gdPinLockHead h2,.gdMapperToolsHead h2,.gdCourseConfirmHead h2{margin:0;font-size:24px;line-height:1;font-weight:950}
-.gdCourseLibraryHead p,.gdPinLockHead p,.gdMapperToolsHead p,.gdCourseConfirmHead p{margin:7px 0 0;color:rgba(255,255,255,.68);font-size:13px;font-weight:800;line-height:1.25}
+.gdCourseLibraryHead h2,.gdPinLockHead h2,.gdMapperToolsHead h2{margin:0;font-size:24px;line-height:1;font-weight:950}
+.gdCourseLibraryHead p,.gdPinLockHead p,.gdMapperToolsHead p{margin:7px 0 0;color:rgba(255,255,255,.68);font-size:13px;font-weight:800;line-height:1.25}
 .gdSheetClose{
   width:46px;
   height:46px;
@@ -997,87 +997,6 @@ body.gdFullMappingMode .hint{
   font-weight:850;
 }
 .gdMapperCourseLine strong{color:#fff;font-weight:950}
-.gdCourseCurrent{
-  border:1px solid rgba(31,211,109,.24);
-  border-radius:18px;
-  background:rgba(31,211,109,.10);
-  padding:14px;
-  margin-bottom:12px;
-}
-.gdCourseCurrent span,.gdCourseCandidateList p{
-  display:block;
-  margin:0 0 6px;
-  color:rgba(255,255,255,.58);
-  font-size:11px;
-  font-weight:950;
-  text-transform:uppercase;
-  letter-spacing:.10em;
-}
-.gdCourseCurrent strong{
-  display:block;
-  color:#fff;
-  font-size:19px;
-  line-height:1.1;
-  font-weight:950;
-}
-.gdCourseCurrent small{
-  display:block;
-  margin-top:6px;
-  color:rgba(255,255,255,.66);
-  font-size:12px;
-  font-weight:800;
-}
-.gdCourseCandidateList{display:grid;gap:8px;margin:12px 0}
-.gdCourseCandidate{
-  width:100%;
-  border:1px solid rgba(255,255,255,.12);
-  border-radius:16px;
-  background:rgba(255,255,255,.06);
-  color:#fff;
-  padding:12px;
-  text-align:left;
-}
-.gdCourseCandidate strong{
-  display:block;
-  font-size:15px;
-  font-weight:950;
-}
-.gdCourseCandidate span{
-  display:block;
-  margin-top:4px;
-  color:rgba(255,255,255,.62);
-  font-size:11px;
-  font-weight:850;
-}
-.gdCourseCandidateEmpty{
-  border:1px dashed rgba(255,255,255,.16);
-  border-radius:16px;
-  padding:12px;
-  color:rgba(255,255,255,.62);
-  font-size:12px;
-  font-weight:850;
-  line-height:1.35;
-}
-.gdCourseConfirmActions{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:10px;
-  margin-top:14px;
-}
-.gdCourseConfirmActions button{
-  min-height:46px;
-  border-radius:16px;
-  border:1px solid rgba(255,255,255,.13);
-  background:rgba(255,255,255,.08);
-  color:#fff;
-  font-size:14px;
-  font-weight:950;
-}
-.gdCourseConfirmActions button:last-child{
-  border-color:rgba(31,211,109,.32);
-  background:rgba(31,211,109,.17);
-  color:#d8ffe8;
-}
 .gdMapperToolChoice:disabled{
   opacity:.43;
 }
