@@ -164,9 +164,17 @@
       /* ROUNDED first - Chaikin corner cutting, as the picture's own outlines are - then
          Douglas-Peucker at this tolerance in GROUND metres. Raw OSM outlines simplified at 1.5 m
          drew as jagged straight-sided shapes on the watch (Sam, 2026-10-06); smoothing then
-         simplifying finely keeps the curves and still lands well under the point cap. */
+         simplifying finely keeps the curves and still lands well under the point cap.
+         0.4 m was still too coarse once the Garmin map zooms ~3x round the Bubble: a green
+         shipped as 17 points and a bunker as a pentagon, each side 50-130 screen px of
+         straight line (Sam, 2026-10-08). The small curved surfaces - greens, bunkers, water -
+         now keep their curve (curveToleranceM: ~48 points a green, ~30 a bunker); everything
+         else is long and nearly straight and stays at toleranceM. The smoothing is done here
+         and not on the watch: interpolating at draw time tripped the Forerunner 255's
+         watchdog. */
       smoothPasses: 3,
-      toleranceM: 0.4,
+      toleranceM: 0.2,
+      curveToleranceM: 0.05,
       /* Connect IQ's fillPolygon is not promised beyond 64 vertices on every device; a ring
          still above this after simplifying is simplified harder until it fits. */
       maxPoints: 64,
@@ -540,12 +548,12 @@
     var mpp = Number(spatialRef.metresPerPixel) || 0.5;
     var margin = cfg.clipMarginPx;
     var box = { minX: -margin, minY: -margin, maxX: spatialRef.imageWidth + margin, maxY: spatialRef.imageHeight + margin };
-    function ring(shape) {
+    function ring(shape, curved) {
       var projected = shape.map(function (p) { return projectLatLngToImage(spatialRef, p.lat, p.lng); });
       var clipped = clipRingToBox(projected, box);
       if (clipped.length < 3) return null;
       var rounded = smoothClosedPolygon(clipped, cfg.smoothPasses);
-      var tolerance = cfg.toleranceM / mpp;
+      var tolerance = ((curved && cfg.curveToleranceM) || cfg.toleranceM) / mpp;
       var simple = douglasPeuckerRing(rounded, tolerance);
       while (simple.length > cfg.maxPoints) { tolerance *= 1.3; simple = douglasPeuckerRing(rounded, tolerance); }
       if (simple.length < 3 || polygonAreaPx2(simple) < recipe.simplify.minPolygonAreaPx2) return null;
@@ -553,16 +561,16 @@
       simple.forEach(function (p) { flat.push(Math.round(p.x), Math.round(p.y)); });
       return flat;
     }
-    function rings(list) { return (list || []).map(ring).filter(Boolean); }
+    function rings(list, curved) { return (list || []).map(function (shape) { return ring(shape, curved); }).filter(Boolean); }
     return {
       version: 1,
       f: rings(geometry.fairways),
-      b: rings(geometry.bunkers),
-      w: rings(geometry.water),
+      b: rings(geometry.bunkers, true),
+      w: rings(geometry.water, true),
       k: rings(geometry.trees),
       h: rings(geometry.hazards),
       z: rings(geometry.waste),
-      g: geometry.greenShape ? ring(geometry.greenShape) : null
+      g: geometry.greenShape ? ring(geometry.greenShape, true) : null
     };
   }
 

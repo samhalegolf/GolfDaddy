@@ -58,13 +58,18 @@ const watchMapCore = require("../../scripts/gd-watch-map-core.js");
 const terrainArg = args.find((a) => a.startsWith("--terrain="));
 const terrainByHole = terrainArg ? JSON.parse(fs.readFileSync(terrainArg.slice("--terrain=".length), "utf8")) : {};
 const holes = (args.filter((a) => !a.startsWith("--"))[0] || "1,2,3").split(",").map(Number);
+/* --name=<course name> / --key=<course key>: what the demo calls the course (default Millbrook,
+   the Apple Watch package's own). Used with --objects to demo another course. */
+const nameArg = args.find((a) => a.startsWith("--name="));
+const keyArg = args.find((a) => a.startsWith("--key="));
 const API_ORIGIN = "https://caddy.claritygolf.app";
-/* [hole, id, label, metres short of the green along the line, or "tee"] */
+/* [slot, id, label, metres short of the green along the line, or "tee"] - slot 1/2/3 is the
+   first/second/third hole asked for (1,2,3 by default). */
 const SITUATIONS = [
   [1, "h1-tee", "Tee shot", "tee"],
   [1, "h1-second", "Second shot", 280],
   [1, "h1-approach", "Approach", 115],
-  [2, "h2-tee", "Par 3 tee", "tee"],
+  [2, "h2-tee", "Tee shot", "tee"],
   [3, "h3-approach", "Approach", 115],
   [3, "h3-chip", "Chip", 45]
 ];
@@ -85,6 +90,7 @@ if (objectsJson) {
     const sr = frame.spatialReference;
     const t = terrainByHole[h.holeNumber];
     return { holeNumber: h.holeNumber, width: sr.imageWidth, height: sr.imageHeight, reference: frame.reference, outlines: frame.outlines,
+      trees: frame.trees.c,
       terrain: t && Array.isArray(t.p) ? t.p : null,
       palette: watchMapCore.WATCH_MAP_RECIPE_V1.colors,
       spatialReference: { version: sr.version, refZoom: sr.refZoom, imageWidth: sr.imageWidth, imageHeight: sr.imageHeight,
@@ -92,6 +98,15 @@ if (objectsJson) {
   });
 }
 const player = JSON.parse(fs.readFileSync(path.join(support, "CaddyWatchPlayer", "player.json"), "utf8"));
+/* The bag snapshot is whatever an Apple Watch simulator was last sent, and may predate the
+   current Bubble Engine - the watch then refuses to compute the Bubble ("engine mismatch").
+   Restamp it with the engine this build runs, fingerprint and all, exactly as the phone
+   (app/js/watch-player-delivery.js snapshotFrom) would build it today. */
+const ENGINE = /BUBBLE_ENGINE_VERSION = "([^"]+)"/.exec(fs.readFileSync(path.join(__dirname, "../../app/js/caddy-watch.js"), "utf8"))[1];
+if (player.engineVersion !== ENGINE) {
+  player.engineVersion = ENGINE;
+  player.fingerprint = require("../../app/js/watch-player-delivery.js").__test.fingerprint(player.bag, player.bubble, ENGINE);
+}
 
 const OUT = path.join(__dirname, "..", "resources-sim-demo");
 fs.mkdirSync(OUT, { recursive: true });
@@ -147,9 +162,9 @@ for (const n of holes) {
     line: line.map(pt),
     len: Math.round(distance.haversineMeters(line[0], line[line.length - 1]))
   });
-  SITUATIONS.filter((x) => x[0] === n).forEach(([hole, id, label, back]) => {
+  SITUATIONS.filter((x) => x[0] === holes.indexOf(n) + 1).forEach(([, id, label, back]) => {
     const pos = back === "tee" ? line[0] : shortOfGreen(line, back);
-    situations.push(Object.assign({ id, hole, label }, spot(pos, ref)));
+    situations.push(Object.assign({ id: "h" + n + id.slice(id.indexOf("-")), hole: n, label }, spot(pos, ref)));
   });
   const sr = h.spatialReference;
   manifestHoles.push({
@@ -180,18 +195,19 @@ for (const n of holes) {
    package, not just the demo's, because the whole course is its point.
    Version 1 to match the demo's own manifest. */
 const deliveryCore = require("../../app/js/watch-map-delivery.js").__test;
-const skeleton = deliveryCore.courseSkeleton("sim-demo-" + courseDir, 1, manifest.holes.map((h) => ({
+const courseKey = "sim-demo-" + (keyArg ? keyArg.slice("--key=".length) : courseDir);
+const skeleton = deliveryCore.courseSkeleton(courseKey, 1, manifest.holes.map((h) => ({
   holeNumber: h.holeNumber, reference: h.reference || h.golfReference, palette: deliveryCore.cleanPalette(h.palette) })));
 /* The per-hole outline messages the phone would send after the package
    (watch-map-delivery.js courseOutlines), for the demo's holes. */
 const outlineMessages = objectsJson
-  ? deliveryCore.courseOutlines("sim-demo-" + courseDir, 1, manifest.holes.filter((h) => holes.indexOf(h.holeNumber) >= 0 && h.outlines))
+  ? deliveryCore.courseOutlines(courseKey, 1, manifest.holes.filter((h) => holes.indexOf(h.holeNumber) >= 0 && h.outlines))
   : [];
 
 const fixture = {
   skeleton,
   outlines: outlineMessages,
-  course: { key: "sim-demo-" + courseDir, name: "Millbrook (sim demo)", source: courseDir + "/" + versionDir, download, faults, vector: !!objectsJson },
+  course: { key: courseKey, name: nameArg ? nameArg.slice("--name=".length) : "Millbrook (sim demo)", source: courseDir + "/" + versionDir, download, faults, vector: !!objectsJson },
   holes: fixtureHoles,
   situations,
   manifest: manifestHoles,
@@ -202,6 +218,8 @@ fs.writeFileSync(path.join(OUT, "resources.xml"),
   "<resources>\n" +
   "    <!-- Generated by garmin/tools/make-sim-demo-fixture.js. Simulator demo build only. -->\n" +
   '    <jsonData id="simDemo" filename="sim-demo.json"/>\n' +
-  bitmaps.map((n) => '    <bitmap id="simHole' + n + '" filename="h' + n + '.png"/>').join("\n") + "\n" +
+  /* GarminSimDemo.bitmap() names simHole1..3. A drawn (--objects) demo never shows them, but
+     the ids must still exist, so any holes stand in by slot. */
+  bitmaps.map((n, i) => '    <bitmap id="simHole' + (objectsJson ? i + 1 : n) + '" filename="h' + n + '.png"/>').join("\n") + "\n" +
   "</resources>\n");
 console.log("wrote " + OUT + " (" + holes.join(",") + ") from " + courseDir + "/" + versionDir);

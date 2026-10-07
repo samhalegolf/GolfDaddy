@@ -626,6 +626,10 @@ class GarminSessionManager {
         }
         if (!incoming.canDemo()) { demoIndex = null; }
         localBubble();   // warm the Bubble cache in this callback, not in a draw
+        // And unpack the hole's outlines here too: a curved green or bunker
+        // is ~50 points, and decoding a hole inside the first map draw on top
+        // of everything else tripped the Forerunner 255's watchdog.
+        outlinesFor(currentHole());
         reconcileOutbox(incoming);
         noteSurface(previous, incoming);
     }
