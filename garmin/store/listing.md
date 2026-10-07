@@ -60,9 +60,10 @@ More at https://claritygolf.app
 ## What's New (4000 max, optional)
 
 ```
-1.1.2: A new numbers screen. Front and back of the green, your distance and
+1.1.3: A new numbers screen. Front and back of the green, your distance and
 club in big type, and an AIM button that takes you straight to aiming on the
-hole map. Distances follow your watch's yards/metres setting.
+hole map. Distances follow your watch's yards/metres setting. Smoother greens
+and bunkers on the map, and the map now always opens on your current shot.
 ```
 
 Earlier (1.1.0):
