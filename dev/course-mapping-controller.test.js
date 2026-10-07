@@ -151,7 +151,7 @@ function loadController(options = {}) {
   const calls = { fetch: 0, courseMapsGet: 0, courseLibraryGet: 0, courseMapsPost: 0, courseMapsBodies: [], courseVisualsGet: 0, courseVisualsPost: 0, fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [], manual: 0, packageFetches: 0, notifyOffers: [], manualOffers: [], pickerOpens: [] };
   const testConsole = Object.assign({}, console, { warn() {}, info() {} });
   const localStorage = storage({
-    gd_user_course_library_v1: JSON.stringify(options.savedMap ? playableStore() : { courses: {} })
+    gd_user_course_library_v1: options.seedLibrary ? JSON.stringify(options.seedLibrary) : JSON.stringify(options.savedMap ? playableStore() : { courses: {} })
   });
   /* Storage-quota scenarios: the browser's localStorage bucket is full, so
      setItem on the course library throws QuotaExceededError. "recoverable"
@@ -422,6 +422,14 @@ function loadController(options = {}) {
   return { win, events, calls, course: course(), localStorage };
 }
 
+/* Anything the server's course package put into the player's library, as written to disk. */
+function packageOnDisk(env) {
+  const raw = env.localStorage.data.gd_user_course_library_v1;
+  const store = raw ? JSON.parse(raw) : { courses: {} };
+  return Object.values(store.courses || {}).some((course) =>
+    Object.values(course && course.objects || {}).some((object) => String(object && object.source || "").indexOf("server-course-package") === 0));
+}
+
 async function runScenario(options) {
   const env = loadController(options);
   Object.assign(env.calls, {
@@ -586,10 +594,10 @@ async function main() {
   /* The job finishes while the player is still on the waiting screen. */
   for (let i = 0; i < 400; i += 1) await Promise.resolve();
   assert.strictEqual(env.calls.manual, 0, "a course that finished mapping never opens the manual fallback");
-  const waitedStore = JSON.parse(env.localStorage.data.gd_user_course_library_v1);
-  const waitedCourse = waitedStore.courses["user-local-player::controller-test"];
-  assert.ok(waitedCourse && Object.values(waitedCourse.objects || {}).some((object) => Number(object.holeNumber) === 1 && object.type === "green"),
-    "the arriving package is persisted by the background watch - the player does not press Play again");
+  const waitedSession = env.win.gdCLSessionCourse && env.win.gdCLSessionCourse("controller-test");
+  assert.ok(waitedSession && Object.values(waitedSession.objects || {}).some((object) => Number(object.holeNumber) === 1 && object.type === "green"),
+    "the arriving package is taken up by the background watch - the player does not press Play again");
+  assert.ok(!packageOnDisk(env), "and it is held for the session, never written to the phone's storage");
 
   /* And the guard that made the old behaviour permanent is gone: a course whose map is now
      available is let back in rather than turned away by a decision made minutes ago. */
@@ -657,11 +665,11 @@ async function main() {
   assert.strictEqual(env.calls.courseVisualsPost, 0, "object map sync does not call the native visual publishing endpoint");
   assert.strictEqual(env.calls.courseMapsBodies[0].course.courseId, "controller-test", "generated object map sync uses the canonical course id");
   assert(Object.keys(env.calls.courseMapsBodies[0].course.objects || {}).length >= 54, "generated object map sync sends tee, green, and route objects");
-  const resolvedStore = JSON.parse(env.localStorage.data.gd_user_course_library_v1);
-  const resolvedCourse = resolvedStore.courses["user-local-player::controller-test"];
+  const resolvedCourse = env.win.gdCLSessionCourse("controller-test");
   const resolvedHole3 = Object.values(resolvedCourse.objects || {}).filter((object) => Number(object.holeNumber) === 3);
-  assert(resolvedHole3.length >= 3, "resolved server-package run persists hole 3 play objects");
+  assert(resolvedHole3.length >= 3, "resolved server-package run holds hole 3 play objects for the session");
   assert(resolvedHole3.every((object) => object.confirmed), "resolved server-package run marks hole 3 objects confirmed");
+  assert(!packageOnDisk(env), "the server's package is not copied into the phone's course library");
 
   /* Full localStorage, but eviction can free enough: persisting the resolved geometry hits
      QuotaExceededError, evicts the cloud-backed tile, retries, and succeeds. The
@@ -675,11 +683,23 @@ async function main() {
   assert(!Object.prototype.hasOwnProperty.call(env.localStorage.data, "gd_captured_hole_frame_v19_other-course:h1"), "cloud-backed tile is evicted to make room");
   assert(Object.prototype.hasOwnProperty.call(env.localStorage.data, "gd_captured_hole_frame_v19_other-course:h2"), "locally-captured tile is never evicted");
 
-  /* Full localStorage and eviction cannot free enough: geometry was resolved, but storage
-     rejected the save outright, so play cannot be resolved from it. */
+  /* Full storage and eviction cannot free enough. The server's package never needed the
+     disk - it is held for the session - so the course still opens. */
   env = await runScenario({ serverCoursePackage: serverPackage(1), storageQuota: "hard" });
-  assert.strictEqual(env.result.playable, false, "a hard quota failure leaves nothing playable to resolve");
+  assert.strictEqual(env.result.playable, true, "a full disk does not stop a course the server has mapped from opening");
   assert(Object.prototype.hasOwnProperty.call(env.localStorage.data, "gd_captured_hole_frame_v19_other-course:h2"), "hard quota failure still never evicts a local-only tile");
+
+  /* A phone from before this change has the server's package saved in its library. It
+     goes on the next load; the player's own objects stay. */
+  const legacy = playableStore();
+  const legacyCourse = legacy.courses["user-local-player::controller-test"];
+  legacyCourse.objects.pkgGreen = { id: "pkgGreen", type: "green", holeNumber: 2, confirmed: true, position: { lat: -36.898, lng: 174.75 }, source: "server-course-package" };
+  legacyCourse.objects.pkgBunker = { id: "pkgBunker", type: "bunker", holeNumber: 2, shape: [{ lat: 1, lng: 1 }, { lat: 1, lng: 2 }, { lat: 2, lng: 2 }], source: "server-course-package-surface" };
+  legacyCourse.surfacesSavedAt = "2026-10-01T00:00:00.000Z";
+  env = await runScenario({ seedLibrary: legacy, serverCoursePackage: serverPackage(1) });
+  const cleaned = JSON.parse(env.localStorage.data.gd_user_course_library_v1).courses["user-local-player::controller-test"];
+  assert.deepStrictEqual(Object.keys(cleaned.objects).sort(), ["fairway1", "green1", "tee1"], "package copies leave the disk; the player's own objects stay");
+  assert.strictEqual(cleaned.surfacesSavedAt, undefined, "and so does the marker that said surfaces were saved");
 
   const noisyEvents = env.events.map((event) => event.event).filter(Boolean);
   assert(!noisyEvents.includes("automapper-invocation-requested"), "client AutoMapper request noise is absent");

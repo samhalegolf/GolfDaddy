@@ -926,11 +926,67 @@
     const identity=courseIdentity(probe);
     return Object.entries(store.courses||{}).find(([,c])=>c.userId===uid&&courseIdentity(c)===identity)?.[0]||exact;
   }
+  /* What the server's course package put into a course record - its greens, tees, route
+     bends and surfaces - is held for the session and never written to disk.
+
+     It is a copy of server data the player can always fetch again, and /app/ (where the
+     round is actually played) fetches and keeps its own copy of the same package. Saving it
+     here as well put the same course on the phone twice, surfaces included. This shell only
+     needs it long enough to decide the course is playable and hand it over. What the
+     player made themselves (taps, scans, edits, pins) is not package data and saves as
+     before. */
+  const sessionPackageData={};
+  function isPackageObject(object){
+    return !!object&&typeof object.source==='string'&&object.source.indexOf('server-course-package')===0;
+  }
+  function attachSessionPackageData(store){
+    Object.keys(sessionPackageData).forEach(key=>{
+      const held=sessionPackageData[key];
+      /* A record the disk never took (it was full) still plays from memory this session. */
+      if(!store.courses[key])store.courses[key]=cloneData(held.record);
+      const course=store.courses[key];
+      course.objects=Object.assign({},course.objects||{},held.objects);
+      if(held.surfacesVersion!==undefined)course.surfacesVersion=held.surfacesVersion;
+      if(held.surfacesSavedAt!==undefined)course.surfacesSavedAt=held.surfacesSavedAt;
+    });
+    return store;
+  }
+  /* The copy that goes to disk, with package data lifted into the session. */
+  function detachSessionPackageData(store){
+    const disk=Object.assign({},store,{courses:{}});
+    Object.keys(sessionPackageData).forEach(key=>{if(!store.courses[key])delete sessionPackageData[key];});
+    Object.keys(store.courses||{}).forEach(key=>{
+      const course=store.courses[key];
+      if(!course){disk.courses[key]=course;return;}
+      const own={};
+      const pkg={};
+      Object.keys(course.objects||{}).forEach(id=>{(isPackageObject(course.objects[id])?pkg:own)[id]=course.objects[id];});
+      const held={objects:pkg,record:Object.assign({},course,{objects:{}})};
+      if('surfacesVersion' in course)held.surfacesVersion=course.surfacesVersion;
+      if('surfacesSavedAt' in course)held.surfacesSavedAt=course.surfacesSavedAt;
+      if(Object.keys(pkg).length||held.surfacesSavedAt)sessionPackageData[key]=held;
+      else delete sessionPackageData[key];
+      const kept=Object.assign({},course,{objects:own});
+      delete kept.surfacesVersion;
+      delete kept.surfacesSavedAt;
+      disk.courses[key]=kept;
+    });
+    return disk;
+  }
   function loadStore(){
     try{
       const parsed=JSON.parse(localStorage.getItem(STORE_KEY)||'{}');
       if(!parsed.courses)parsed.courses={};
-      if(dedupeStore(parsed))saveStore(parsed);
+      /* Earlier versions saved package data to disk. The next save drops it. */
+      const hadPackageOnDisk=Object.values(parsed.courses).some(c=>c&&(c.surfacesSavedAt||Object.values(c.objects||{}).some(isPackageObject)));
+      if(hadPackageOnDisk)Object.values(parsed.courses).forEach(c=>{
+        if(!c)return;
+        Object.keys(c.objects||{}).forEach(id=>{if(isPackageObject(c.objects[id]))delete c.objects[id];});
+        delete c.surfacesVersion;
+        delete c.surfacesSavedAt;
+      });
+      attachSessionPackageData(parsed);
+      if(dedupeStore(parsed)||hadPackageOnDisk)saveStore(parsed);
       return parsed;
     }catch(e){return {courses:{}};}
   }
@@ -939,10 +995,8 @@
      so the automapper would map a course, silently persist nothing, read back
      nothing and report "automapper failed" (that is exactly what broke the
      Pupuke scan). Quota errors are handled, never swallowed: evict
-     re-derivable caches, retry once, and if the write still fails, count it
-     so the mapping flow reports a persist failure instead of a mapping one. */
-  let storePersistFailures=0;
-  let lastStorePersistFailure=null;
+     re-derivable caches, retry once, and if the write still fails, report it
+     and tell the player. */
   function isStorageQuotaError(error){
     return !!(error&&(error.name==='QuotaExceededError'||error.name==='NS_ERROR_DOM_QUOTA_REACHED'||error.code===22||error.code===1014));
   }
@@ -979,8 +1033,6 @@
     try{localStorage.setItem(key,value);return true;}
     catch(error){
       if(!isStorageQuotaError(error)){
-        storePersistFailures++;
-        lastStorePersistFailure={at:Date.now(),key,label:label||'',error:String(error&&error.message||error),name:error&&error.name||''};
         try{console.warn('[Clarity Caddy] storage write failed',key,error);}catch(e){}
         return false;
       }
@@ -991,8 +1043,6 @@
         try{console.warn(`[Clarity Caddy] storage quota hit saving ${label||key} - evicted ${evicted.length} cloud-backed cache entries and retried OK`);}catch(e){}
         return true;
       }catch(retryError){
-        storePersistFailures++;
-        lastStorePersistFailure={at:Date.now(),key,label:label||'',error:String(retryError&&retryError.message||retryError),name:retryError&&retryError.name||'',quota:true,evicted:evicted.length};
         try{console.warn(`[Clarity Caddy] device storage full - ${label||key} could not be saved even after evicting ${evicted.length} cache entries`,retryError);}catch(e){}
         try{window.ClarityErrorReporter?.report?.(retryError,{source:'storageSetEvicting',key,label:label||'',quotaExceeded:true,evicted:evicted.length});}catch(e){}
         toastSafe(i18nT('course.storageFull'));
@@ -1000,7 +1050,7 @@
       }
     }
   }
-  function saveStore(store){return storageSetEvicting(STORE_KEY,JSON.stringify(store),'course-library');}
+  function saveStore(store){return storageSetEvicting(STORE_KEY,JSON.stringify(detachSessionPackageData(store)),'course-library');}
   function cloneData(value){try{return JSON.parse(JSON.stringify(value));}catch(e){return value;}}
   function loadPublishedStore(){
     try{
@@ -4705,11 +4755,10 @@
 	     kept once. Replaced wholesale per package objectsVersion, never merged: the package is
 	     the authority for surfaces and a stale bunker must not outlive its collection.
 
-	     Kept for the last few courses played, not forever: each course is ~100-280 KB of rings in
-	     the same localStorage bucket the library lives in. */
+	     Held for the session only, like the rest of the package (see sessionPackageData): each
+	     course is ~100-280 KB of rings, and /app/ keeps its own copy of the package. */
 	  const PACKAGE_SURFACE_SOURCE='server-course-package-surface';
 	  const PACKAGE_SURFACE_BUCKETS={fairways:'fairway_area',bunkers:'bunker',water:'water',trees:'trees',hazards:'hazard',waste:'waste'};
-	  const PACKAGE_SURFACE_COURSE_LIMIT=4;
 	  function isSurfaceObject(object){
 	    if(!object)return false;
 	    if(object.type==='fairway_area'||object.type==='water'||object.type==='trees'||object.type==='hazard'||object.type==='waste')return true;
@@ -4783,21 +4832,8 @@
 	    target.surfacesVersion=version||null;
 	    target.surfacesSavedAt=records.length?now:null;
 	    target.updatedAt=now;
-	    evictStalePackageSurfaces(store,target.id);
-	    if(!saveStore(store))return {surfaces:records.length,written:0,persistFailed:true};
+		    if(!saveStore(store))return {surfaces:records.length,written:0,persistFailed:true};
 	    return {surfaces:records.length,written:records.length};
-	  }
-	  /* Surfaces stay on the most recent PACKAGE_SURFACE_COURSE_LIMIT courses; older ones drop
-	     theirs and get them back from the package the next time they are opened. */
-	  function evictStalePackageSurfaces(store,keepKey){
-	    const carrying=Object.values(store.courses||{})
-	      .filter(c=>c&&c.id!==keepKey&&c.surfacesSavedAt)
-	      .sort((a,b)=>String(b.surfacesSavedAt).localeCompare(String(a.surfacesSavedAt)));
-	    carrying.slice(Math.max(0,PACKAGE_SURFACE_COURSE_LIMIT-1)).forEach(c=>{
-	      Object.keys(c.objects||{}).forEach(id=>{if(c.objects[id]&&c.objects[id].source===PACKAGE_SURFACE_SOURCE)delete c.objects[id];});
-	      c.surfacesSavedAt=null;
-	      c.surfacesVersion=null;
-	    });
 	  }
 	  async function resolveGeometryFromServerPackage(course){
 	    const pkg=await fetchServerCoursePackage(course);
@@ -5058,8 +5094,6 @@
         let autoMapResult=null;
         let serverWait=null;
         let serverWaitError=null;
-        /* Counted so a save that failed can be told apart from a map that does not exist. */
-        const persistFailuresBefore=storePersistFailures;
         try{
           serverWait=await awaitServerCoursePackage(c,{
             budgetMs:opts.serverWaitBudgetMs,
@@ -5133,18 +5167,6 @@
 	          const shown=await showResolvedCoursePlayHole(c,h,'automapper',opts);
 	          return Object.assign(shown,{partial:autoAccepted&&!autoReady,readiness:autoState,persisted:autoMapResult,holes:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0,fit:autoMapResult&&autoMapResult.fit||null});
 	        }
-        /* The server HAD the map and the phone could not save it. Saying "no playable map" here
-           is what sent Derllys Court (6 Oct 2026) round in circles: the map was fine, the
-           phone's storage was full, and the player was offered a "notify me when it's mapped"
-           for a course that already was. Say what actually happened instead. */
-        if(storePersistFailures>persistFailuresBefore&&(autoMapResult&&(autoMapResult.serverPackageStatus==='full-map-ready'||autoMapResult.serverPackageStatus==='lite-geo-ready'))){
-          recordMappingDebug(debugRunId,{source:'course-loader',phase:'failed',event:'course-save-storage-full',summary:'Server had the map but the phone could not save it',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:autoMapResult.serverPackageStatus,failure:lastStorePersistFailure}});
-          recordCoursePlayDebug('course-mapping-storage-full',c,h,{resolutionKey:key,attemptToken,serverPackageStatus:autoMapResult.serverPackageStatus});
-          returnToCoursePicker('storage-full');
-          /* A quota failure already said so in storageSetEvicting. */
-          if(!(lastStorePersistFailure&&lastStorePersistFailure.quota))toastSafe(i18nT('course.storageFull'));
-          return {playable:false,failed:true,reason:'device-storage-full'};
-        }
         /* The server worker tries both OSM-numbered geometry AND the Native Geometry
            Resolver fallback before giving up (functions/course-mapper-worker-background.mjs) -
            so a miss here means the server has nothing playable yet, not that the client has a
@@ -5987,6 +6009,9 @@
     }
   }
   window.gdCLSyncPublishedCourseMaps=syncPublishedCourseMaps;
+  /* The course as this shell sees it right now - disk, session package data and the
+     published copy merged - for tests and on-device diagnosis. */
+  window.gdCLSessionCourse=function(cid){return loadUserCourseData(userId(),cid);};
   window.gdCLPublishCourse=publishCourseMap;
 	  window.gdCLOpenCourseSearch=function(){
     closeCourseLibraryPanel();
