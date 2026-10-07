@@ -25,11 +25,11 @@
         entry="ClarityCaddyApp"
         launcherIcon="@Drawables.LauncherIcon"
         minSdkVersion="3.0.0"
-        version="1.2.0">
+        version="1.1.2">
         <!-- version: the app's own release number, bumped for every store
              upload (the portal will not take one that is not higher). Unset
              through the first release (1.0.0); 1.1.0 = trees, hazards and
-             waste areas on the drawn map, 2026-10-07; 1.2.0 = the redrawn
+             waste areas on the drawn map, 2026-10-07; 1.1.2 = the redrawn
              numbers face (AIM pill, Back/Front crescents), 2026-10-08. -->
         <!-- Connect IQ 3.0 baseline per plan step 29. The 3.2.0 minimum this
              carried until 2026-09-19 was a guess, and it locked out the
