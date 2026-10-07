@@ -2757,7 +2757,6 @@
           : o.point ? L.circleMarker([o.point.lat, o.point.lng], Object.assign({ interactive: false }, STYLE.objectPoint)) : null;
         if (!shape) return;
         shape.addTo(mapObj);
-        if (o.hole && (o.type === "green" || o.type === "tee")) shape.bindTooltip(String(o.hole), { permanent: true, direction: "center", className: "gdStudioOverlayLabel isObject" });
         objectLayers.push(shape);
       });
       objectLayers.forEach(function (l) { try { l.bringToBack(); } catch (e) {} });

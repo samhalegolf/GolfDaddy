@@ -581,7 +581,6 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
   box-shadow: none;
 }
 .leaflet-tooltip.gdStudioOverlayLabel.isOsm { color: #b7ff5c; border-color: #b7ff5c; opacity: 0.85; }
-.leaflet-tooltip.gdStudioOverlayLabel.isObject { color: #ffd98a; border-color: #ffd98a; opacity: 0.8; font-size: 11px; }
 .leaflet-tooltip.gdStudioOverlayLabel::before { display: none; }
 .gdStudioOverlayHoleTag { background: none; border: none; }
 .gdStudioOverlayHoleTag span,
