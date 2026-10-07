@@ -9,7 +9,6 @@
   /* Last freshness result, so UI can say "new map update available" without
      re-asking, and so the check is observable for diagnostics. */
   let lastCourseLibraryFreshness={checked:false,stale:[],missing:[],current:[],serverTime:''};
-  const PUBLISHED_ADMIN_EMAILS=['samhalegolf@gmail.com','admin@clarity.local'];
   let applyingSavedGreen=false;
   let pinLockRegion={x:0,y:0};
   let profileObserver=null;
@@ -1081,14 +1080,6 @@
       role:String(account?.role||role||'player').trim().toLowerCase(),
       accountId:account?.accountId||profile?.accountId||''
     };
-  }
-  function isPublishedAdminEmail(email){
-    return PUBLISHED_ADMIN_EMAILS.includes(String(email||'').trim().toLowerCase());
-  }
-  function isAdminUser(){
-    const actor=currentAdminActor();
-    const roleOk=actor.role==='admin'||(()=>{try{return gdGetAccountPermission&&gdGetAccountPermission()==='admin';}catch(e){return false;}})();
-    return roleOk&&isPublishedAdminEmail(actor.email);
   }
   function publishedCourseId(course){
     return `published::${slug(course?.courseId||course?.id||course?.courseName||course?.name||'course')}`;
@@ -2977,7 +2968,6 @@
 	    lockMappedGreenFromStart:forceLockMappedGreenFromStart,
 	    mappedHolePlayData,
 	    mappedFairwayAxisForShot,
-	    publishCourseMap,
 	    syncPublishedCourseMaps,
 	    publishedCourseMapAvailability,
 	    loadPublishedStore,
@@ -5924,48 +5914,10 @@
     store.scope='opened';
     savePublishedStore(store);
   }
-  async function publishCourseMap(courseStoreId){
-    if(!isAdminUser()){toastSafe('Admin only');return false;}
-    const store=loadStore();
-    const privateCourse=store.courses?.[courseStoreId];
-    if(!privateCourse||isPublishedCourse(privateCourse)){toastSafe('Open your own saved course before publishing');return false;}
-    const actor=currentAdminActor();
-    const clean=normalizePublishedCourse(privateCourse,actor);
-    if(!clean){toastSafe('Nothing to publish');return false;}
-    const local=loadPublishedStore();
-    local.version=1;
-    local.courses=local.courses||{};
-    local.courses[clean.id]=clean;
-    local.updatedAt=nowIso();
-    savePublishedStore(local);
-    renderCourseLibraryPanel(courseStoreId);
-    try{
-      if(typeof fetch==='function'){
-        const res=await fetch(PUBLISHED_COURSE_API,{
-          method:'POST',
-          headers:{'Content-Type':'application/json','Accept':'application/json'},
-          body:JSON.stringify({course:clean,actor})
-        });
-        const data=await res.json().catch(()=>null);
-        if(res.ok&&data){
-          mergePublishedStore(data);
-          renderCourseLibraryPanel(courseStoreId);
-          toastSafe('Course map published');
-          return true;
-        }
-      }
-      toastSafe('Published locally. Global sync will work on Netlify.');
-      return true;
-    }catch(e){
-      toastSafe('Published locally. Global sync will retry later.');
-      return true;
-    }
-  }
   window.gdCLSyncPublishedCourseMaps=syncPublishedCourseMaps;
   /* The course as this shell sees it right now - disk, session package data and the
      published copy merged - for tests and on-device diagnosis. */
   window.gdCLSessionCourse=function(cid){return loadUserCourseData(userId(),cid);};
-  window.gdCLPublishCourse=publishCourseMap;
 	  window.gdCLOpenCourseSearch=function(){
     closeCourseLibraryPanel();
     try{document.getElementById('gdProfileV67')?.classList.add('hidden');}catch(e){}
