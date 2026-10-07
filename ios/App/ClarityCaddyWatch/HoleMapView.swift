@@ -60,6 +60,7 @@ struct HoleMapView: View {
                     .offset(x: origin.x, y: origin.y)
                 Canvas { context, _ in
                     let place = { (p: CGPoint) in camera.place(p, imageSize: imageSize, viewSize: proxy.size) }
+                    TreeSprites.draw(map.trees, in: context, scale: camera.scale, viewSize: proxy.size, place: place)
                     let playerAt = playerPoint.map(place)
                     let greenAt = greenPoint.map(place)
                     let targetAt = targetPoint.map(place)

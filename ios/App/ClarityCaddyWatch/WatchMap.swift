@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import SwiftUI
 
 /* The Watch half of the "lite map" contract baked by scripts/gd-watch-map-core.js.
 
@@ -174,6 +175,13 @@ struct WatchMapManifest: Codable, Equatable {
            baked before the generator emitted one is still a perfectly good
            picture of a hole and must keep delivering. */
         let reference: WatchHoleReference?
+        /* The hole's trees, packed one per Int (gd-watch-map-core.js
+           buildHoleTrees), stamped as sprites over the picture. Optional for
+           the same reason as `reference`: a package from before trees were
+           placed draws without them. */
+        let trees: [Int]?
+
+        var treeList: [WatchTree] { (trees ?? []).compactMap(WatchTree.init(packed:)) }
 
         /* What callers should read: a reference that arrived from a newer
            recipe, or malformed, is nothing rather than something to guess
@@ -184,15 +192,16 @@ struct WatchMapManifest: Codable, Equatable {
             return reference
         }
 
-        enum CodingKeys: String, CodingKey { case holeNumber, asset, width, height, spatialReference, reference }
+        enum CodingKeys: String, CodingKey { case holeNumber, asset, width, height, spatialReference, reference, trees }
 
-        init(holeNumber: Int, asset: String, width: Double, height: Double, spatialReference: WatchMapSpatialReference, reference: WatchHoleReference?) {
+        init(holeNumber: Int, asset: String, width: Double, height: Double, spatialReference: WatchMapSpatialReference, reference: WatchHoleReference?, trees: [Int]? = nil) {
             self.holeNumber = holeNumber
             self.asset = asset
             self.width = width
             self.height = height
             self.spatialReference = spatialReference
             self.reference = reference
+            self.trees = trees
         }
 
         /* Written out only because of the last line. The synthesized decoder
@@ -211,6 +220,7 @@ struct WatchMapManifest: Codable, Equatable {
             height = try values.decode(Double.self, forKey: .height)
             spatialReference = try values.decode(WatchMapSpatialReference.self, forKey: .spatialReference)
             reference = try? values.decode(WatchHoleReference.self, forKey: .reference)
+            trees = try? values.decode([Int].self, forKey: .trees)
         }
     }
 
@@ -282,3 +292,46 @@ struct WatchMapManifest: Codable, Equatable {
  and no gesture — so it can be tested without a wrist. Deleted rather than left
  unused: an unreferenced framing helper beside a live one is exactly how the
  wrong one gets picked up again. */
+
+/* One tree from a hole's tree list: scripts/gd-watch-map-core.js packTree,
+   x + y*2048 + r*2^22 + type*2^29, everything in image pixels. `type` indexes
+   the sprite names, which follow the generator's TREE_TYPES. */
+struct WatchTree: Equatable {
+    let x: Double
+    let y: Double
+    let radius: Double
+    let type: Int
+
+    init?(packed: Int) {
+        guard packed >= 0, packed < 2_147_483_648 else { return nil }
+        x = Double(packed % 2048)
+        y = Double((packed / 2048) % 2048)
+        radius = Double((packed / 4_194_304) % 128)
+        type = (packed / 536_870_912) % 4
+    }
+}
+
+/* The tree sprites (garmin/tools/tree-sprites.js writes the tree_* image sets),
+   stamped over the hole picture at the camera's scale - the picture itself no
+   longer carries trees (watch recipe v9). Each image is the crown plus a
+   shadow pad to the right and below: 96 px of crown in a 109 px square, so it
+   is drawn from the crown's top-left at 109/96 of the crown's diameter. */
+enum TreeSprites {
+    static let names = ["tree_round", "tree_broadleaf", "tree_pine", "tree_yellow_green"]
+    static let canvasPerCrown: CGFloat = 109.0 / 96.0
+
+    static func draw(_ trees: [WatchTree], in context: GraphicsContext, scale: CGFloat, viewSize: CGSize,
+                     place: (CGPoint) -> CGPoint) {
+        guard !trees.isEmpty else { return }
+        let images = names.map { context.resolve(Image($0)) }
+        for tree in trees {
+            let diameter = 2 * tree.radius * scale
+            guard diameter >= 1.5 else { continue }
+            let centre = place(CGPoint(x: tree.x, y: tree.y))
+            let side = diameter * canvasPerCrown
+            let origin = CGPoint(x: centre.x - diameter / 2, y: centre.y - diameter / 2)
+            guard origin.x < viewSize.width, origin.y < viewSize.height, origin.x + side > 0, origin.y + side > 0 else { continue }
+            context.draw(images[tree.type], in: CGRect(origin: origin, size: CGSize(width: side, height: side)))
+        }
+    }
+}

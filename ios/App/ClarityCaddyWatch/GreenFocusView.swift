@@ -120,6 +120,7 @@ private struct GreenBandMap: View {
                         let project = { (c: Coordinate) -> CGPoint? in
                             reference.imagePoint(lat: c.lat, lng: c.lng).map(place)
                         }
+                        TreeSprites.draw(map.trees, in: context, scale: camera.scale, viewSize: proxy.size, place: place)
                         /* The band drawn as a ring, so "inside this is the
                            green" is a thing you can see rather than a rule you
                            have to have been told. */

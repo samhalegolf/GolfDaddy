@@ -108,6 +108,7 @@ struct AimableHoleMap: View {
 
                 Canvas { context, _ in
                     let place = { (p: CGPoint) in camera.place(p, imageSize: imageSize, viewSize: viewSize) }
+                    TreeSprites.draw(map.trees, in: context, scale: camera.scale, viewSize: viewSize, place: place)
                     let playerAt = imagePoint(player).map(place)
                     let targetAt = imagePoint(currentTarget).map(place)
 

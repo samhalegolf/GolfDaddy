@@ -17,4 +17,4 @@
 # `./build.sh package`.
 base.excludeAnnotations = tx_live;parity;sim_demo_off
 
-base.resourcePath = resources;resources-sim-demo
+base.resourcePath = resources;resources-trees;resources-sim-demo

@@ -221,6 +221,11 @@
         })
       : [];
     if (terrain.length) out.terrain = terrain;
+    /* The hole's trees (gd-watch-map-core.js buildHoleTrees): one packed integer per tree,
+       which both watches stamp as sprites. Apple's manifest carries them on the hole; Garmin's
+       follow the outlines in their own messages (courseOutlines). */
+    var trees = cleanTrees(hole && hole.trees);
+    if (trees) out.trees = trees;
     var palette = cleanPalette(hole && hole.palette);
     if (palette) out.palette = palette;
     return out;
@@ -230,6 +235,13 @@
     if (!Array.isArray(ring) || ring.length < 6 || ring.length % 2) return null;
     for (var i = 0; i < ring.length; i++) if (!Number.isInteger(ring[i])) return null;
     return ring.slice();
+  }
+
+  var TREE_LIMIT = 2147483648;
+  function cleanTrees(trees) {
+    if (!trees || Number(trees.version) !== 1 || !Array.isArray(trees.c)) return null;
+    var list = trees.c.filter(function (v) { return Number.isInteger(v) && v >= 0 && v < TREE_LIMIT; });
+    return list.length ? list : null;
   }
 
   function cleanOutlines(outlines) {
@@ -304,6 +316,14 @@
           size += chars;
         });
         flush();
+      }
+      /* Then its trees, the same way: packed integers in messages of about
+         TERRAIN_MESSAGE_CHARS, each `part` (key `c`) so the watch appends them. */
+      if (hole && hole.trees && hole.trees.length) {
+        var per = Math.max(1, Math.floor(TERRAIN_MESSAGE_CHARS / 11));
+        for (var i = 0; i < hole.trees.length; i += per) {
+          out.push({ courseKey: courseKey, version: Number(version), n: n, part: true, f: [], b: [], w: [], c: hole.trees.slice(i, i + per) });
+        }
       }
     });
     return out;
@@ -523,6 +543,9 @@
                and means nothing on the wrist. `reference` is omitted rather
                than nulled for the NSNull reason in manifestHole. */
             if (hole.reference) out.reference = hole.reference;
+            /* The trees, for Apple Watch to stamp over the picture. Garmin's
+               transports drop this copy (they get theirs with the outlines). */
+            if (hole.trees) out.trees = hole.trees;
             /* `url` is what makes the map work on Garmin at all. Connect IQ
                has no public API for turning an arbitrary byte buffer into a
                bitmap, so the watch fetches its own imagery

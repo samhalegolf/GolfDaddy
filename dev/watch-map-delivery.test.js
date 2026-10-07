@@ -431,6 +431,28 @@ function fakeEnvironment(report, options) {
     assert.strictEqual(sk.pal.f, 0x4e9a52, "the package palette travels as 0xRRGGBB integers");
   });
 
+  check("trees ride the manifest hole for Apple and follow the outlines in parts for Garmin", () => {
+    const d = delivery.__test;
+    const trees = Array.from({ length: 400 }, (_, i) => 1 + i * 2048);
+    const report = {
+      holeNumber: 5, path: "c/v1/h5.webp",
+      spatialReference: { version: 1, refZoom: 20, imageWidth: 100, imageHeight: 200, transform: { a: 1, b: 0, tx: 0, ty: 0 } },
+      outlines: { version: 1, f: [[10, 10, 20, 10, 20, 30]], b: [], w: [], g: null },
+      trees: { version: 1, c: trees.concat([-1, 1.5, 2147483648, "7"]) }
+    };
+    const hole = d.manifestHole(report);
+    assert.deepStrictEqual(hole.trees, trees, "only whole 31-bit trees survive");
+    const msgs = d.courseOutlines("c", 1, [hole]);
+    const parts = msgs.filter(m => m.c);
+    assert.ok(parts.length >= 2, "a big hole's trees split across messages");
+    parts.forEach(m => {
+      assert.strictEqual(m.part, true, "trees append");
+      assert.ok(JSON.stringify(m).length < 2400, "each message stays small");
+    });
+    assert.deepStrictEqual([].concat(...parts.map(m => m.c)), trees, "every tree arrives, in order");
+    assert.strictEqual(d.manifestHole(Object.assign({}, report, { trees: { version: 2, c: trees } })).trees, undefined, "a newer tree format is ignored");
+  });
+
   report();
 })();
 
