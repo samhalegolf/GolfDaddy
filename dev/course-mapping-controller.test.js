@@ -351,7 +351,6 @@ function loadController(options = {}) {
           let body = {};
           try { body = JSON.parse(init.body || "{}"); } catch (_error) {}
           calls.courseMapsBodies.push(body);
-          if (options.courseMapsPostFails) return { ok: false, status: 503, json: async () => ({ error: "course map write failed" }) };
           const id = body && body.course && body.course.id || "published::controller-test";
           return { ok: true, status: 200, json: async () => ({ version: 1, storage: "supabase", updatedAt: "2026-07-14T23:00:00.000Z", courses: { [id]: body.course } }) };
         }
@@ -661,10 +660,10 @@ async function main() {
   assert.strictEqual(env.calls.manual, 0, "full resolved server-package run does not fall through to manual fallback");
   assert.deepStrictEqual(env.calls.frameWarmHoles, Array.from({ length: 18 }, (_, index) => index + 1), "complete first-load server-package success warms every newly mapped play frame");
   assert.strictEqual(env.calls.ingestMappedCourse, 1, "complete first-load server-package success ingests the mapped course into the play pipeline");
-  assert.strictEqual(env.calls.courseMapsPost, 1, "complete generated object map syncs to the shared course-map library");
-  assert.strictEqual(env.calls.courseVisualsPost, 0, "object map sync does not call the native visual publishing endpoint");
-  assert.strictEqual(env.calls.courseMapsBodies[0].course.courseId, "controller-test", "generated object map sync uses the canonical course id");
-  assert(Object.keys(env.calls.courseMapsBodies[0].course.objects || {}).length >= 54, "generated object map sync sends tee, green, and route objects");
+  /* The map came from the server; posting it back as a "Community scan" rewrote the course
+     row on every open for nothing (seen on 6 Oct 2026, one upsert per open). */
+  assert.strictEqual(env.calls.courseMapsPost, 0, "a map the server sent is never posted back to it");
+  assert.strictEqual(env.calls.courseVisualsPost, 0, "opening a course does not call the visual publishing endpoint");
   const resolvedCourse = env.win.gdCLSessionCourse("controller-test");
   const resolvedHole3 = Object.values(resolvedCourse.objects || {}).filter((object) => Number(object.holeNumber) === 3);
   assert(resolvedHole3.length >= 3, "resolved server-package run holds hole 3 play objects for the session");

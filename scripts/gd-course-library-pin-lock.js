@@ -4105,52 +4105,6 @@
 	      return {attempted:true,available:false,failed:true,error,course:c,keys,reason:error&&error.message||String(error)};
 	    }
 	  }
-	  function shouldSyncGeneratedCourseMapToCloud(request,opts={}){
-	    if(opts.generatedCourseMapSync===false||opts.cloudCourseMapSync===false)return false;
-	    if(opts.fromResume||opts.preserveState||opts.keepGps)return false;
-	    if(opts.__resumeRoundAvailableBeforeOpen||resumeRoundAvailableForCloudMap())return false;
-	    return typeof fetch==='function';
-	  }
-	  async function syncGeneratedCourseMapToCloud(request,source,opts={}){
-	    if(!shouldSyncGeneratedCourseMapToCloud(request,opts))return {attempted:false,reason:'cloud-sync-disabled'};
-	    const actor=currentAdminActor();
-	    const actorAllowed=String(actor.role||'').toLowerCase()==='admin'&&isPublishedAdminEmail(actor.email);
-	    const course=loadUserCourseData(userId(),request.courseId)||request.course;
-	    const readiness=savedMapCanSatisfyRequest(course,request.hole,true);
-	    const hasGeneratedObjects=!!(readiness.coverage&&readiness.coverage.count>0);
-	    if(!readiness.ready&&!hasGeneratedObjects){
-	      recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'skipped',event:'course-map-cloud-sync-skipped',summary:'Course map cloud sync skipped',details:{reason:'incomplete-map',source:source||'generated-map',courseId:request.courseId,courseName:request.courseName,hole:request.hole,playableHoleCount:readiness.coverage.count,expectedHoleCount:readiness.coverage.expected,missingHoles:readiness.coverage.missing,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
-	      return {attempted:false,reason:'incomplete-map',readiness};
-	    }
-	    const syncMode=actorAllowed?'admin-publish':'generated-create-or-append';
-	    const syncActor=actorAllowed?actor:{name:'Community scan',email:'',accountId:actor.accountId||'',role:'player'};
-	    const clean=normalizePublishedCourse(course,syncActor);
-	    if(!clean)return {attempted:false,reason:'empty-map',readiness};
-	    recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'started',event:'course-map-cloud-sync-started',summary:'Course map cloud sync started',details:{source:source||'generated-map',mode:syncMode,courseId:clean.courseId,courseName:clean.courseName,publishedCourseId:clean.id,playableHoleCount:readiness.coverage.count,expectedHoleCount:readiness.coverage.expected,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
-	    recordCoursePlayDebug('course-map-cloud-sync-started',request.course,request.hole,{source:source||'generated-map',mode:syncMode,courseId:clean.courseId,publishedCourseId:clean.id,holes:readiness.coverage.count,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
-	    try{
-	      const res=await fetch(PUBLISHED_COURSE_API,{
-	        method:'POST',
-	        headers:{'Content-Type':'application/json','Accept':'application/json'},
-	        body:JSON.stringify({course:clean,actor:syncActor,source:source||'generated-map',mode:syncMode,generated:true})
-	      });
-	      const data=await res.json().catch(()=>null);
-	      if(!res.ok){
-	        const error=new Error(data&&data.error||`Course map sync failed (${res.status})`);
-	        error.status=res.status;
-	        error.body=data;
-	        throw error;
-	      }
-	      if(data)mergePublishedStore(data);
-	      recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'completed',event:'course-map-cloud-synced',summary:'Course map synced to cloud',details:{source:source||'generated-map',mode:data&&data.mode||syncMode,courseId:clean.courseId,courseName:clean.courseName,publishedCourseId:clean.id,playableHoleCount:readiness.coverage.count,expectedHoleCount:readiness.coverage.expected,newObjects:data&&data.accepted&&data.accepted.objects||0,newHoles:data&&data.accepted&&data.accepted.holes||0,storage:data&&data.storage||'course-maps',resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
-	      recordCoursePlayDebug('course-map-cloud-synced',request.course,request.hole,{source:source||'generated-map',mode:data&&data.mode||syncMode,courseId:clean.courseId,publishedCourseId:clean.id,holes:readiness.coverage.count,newObjects:data&&data.accepted&&data.accepted.objects||0,newHoles:data&&data.accepted&&data.accepted.holes||0,storage:data&&data.storage||'course-maps',resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
-	      return {attempted:true,synced:true,course:clean,result:data,readiness};
-	    }catch(error){
-	      recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'failed',event:'course-map-cloud-sync-failed',summary:'Course map cloud sync failed',details:{source:source||'generated-map',courseId:clean.courseId,courseName:clean.courseName,publishedCourseId:clean.id,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken},error:{message:error&&error.message||String(error),status:error&&error.status||null}});
-	      recordCoursePlayDebug('course-map-cloud-sync-failed',request.course,request.hole,{source:source||'generated-map',courseId:clean.courseId,publishedCourseId:clean.id,reason:error&&error.message||String(error),status:error&&error.status||null,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
-	      return {attempted:true,synced:false,failed:true,error,course:clean,readiness};
-	    }
-	  }
 	  function ingestRequestedHoleToPipeline(course,hole,source){
     try{
       const resolved=requestedMappedPlayData(course,hole);
@@ -5162,7 +5116,6 @@
 	        if(autoAccepted){
 	          recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'automapper-succeeded',summary:'AutoMapper succeeded',details:{hole:h,resolutionKey:key,attemptToken,guideCount:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0}});
 	          recordMappingDebug(debugRunId,{source:'course-loader',phase:'completed',event:'mapping-attempt-completed',summary:'Course mapping completed',details:{hole:h,source:'automapper',resolutionKey:key,attemptToken}});
-	          await syncGeneratedCourseMapToCloud(request,'automapper',opts);
 	          finishMappingDebug(debugRunId,{status:'completed',outcome:'automapper map ready'});
 	          const shown=await showResolvedCoursePlayHole(c,h,'automapper',opts);
 	          return Object.assign(shown,{partial:autoAccepted&&!autoReady,readiness:autoState,persisted:autoMapResult,holes:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0,fit:autoMapResult&&autoMapResult.fit||null});
