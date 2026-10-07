@@ -60,6 +60,16 @@ More at https://claritygolf.app
 ## What's New (4000 max, optional)
 
 ```
+1.1.4: Wind and slope. A "plays" number for uphill and downhill shots, a wind
+marker on the edge of the numbers screen showing where the wind comes from and
+how many yards it's worth, a ghost Bubble on the map showing where the wind
+takes the ball, and a plays button that turns your Bubble into the plays-distance
+one. Uses your watch's weather and its yards/metres setting.
+```
+
+Earlier (1.1.3):
+
+```
 1.1.3: A new numbers screen. Front and back of the green, your distance and
 club in big type, and an AIM button that takes you straight to aiming on the
 hole map. Distances follow your watch's yards/metres setting. Smoother greens
