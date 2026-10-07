@@ -122,15 +122,30 @@
     if(!store.sync||typeof store.sync!=="object")store.sync={status:"local",pendingCount:0,lastQueuedAt:null};
     return store;
   }
+  /* The store is a per-hole copy of course geometry that only Studio's debug
+     screens read. Play never does - the player plays in /app/ from its own
+     package - so on a player's phone it was a megabyte of storage spent on a
+     view the player cannot open. The app build strips every
+     data-gd-surface="studio" script (scripts/clarity-deploy-build.js), so their
+     presence is what says this is Studio. Elsewhere the store lives in memory
+     for the session, which is all the shell itself ever needs from it. */
+  var memoryStore=null;
+  function persistsStore(){
+    return !!safe(function(){return document.querySelector('script[data-gd-surface="studio"]');},null);
+  }
   function loadStore(){
+    if(!persistsStore())return normalizeStore(clone(memoryStore));
     return normalizeStore(safe(function(){return JSON.parse(localStorage.getItem(STORE_KEY)||"null");},null));
   }
   function saveStore(store){
     store=normalizeStore(store);
     store.updatedAt=now();
-    safe(function(){localStorage.setItem(STORE_KEY,JSON.stringify(store));});
+    if(persistsStore())safe(function(){localStorage.setItem(STORE_KEY,JSON.stringify(store));});
+    else memoryStore=clone(store);
     return clone(store);
   }
+  /* What earlier versions left on players' phones. */
+  if(!persistsStore())safe(function(){localStorage.removeItem(STORE_KEY);});
   function emptyFrameIndex(){
     return {schema:"gd.course_play_pipeline.frame_index",version:VERSION,schemaVersion:SCHEMA_VERSION,updatedAt:null,frames:{}};
   }

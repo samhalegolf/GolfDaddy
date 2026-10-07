@@ -67,7 +67,7 @@
 
   function activeCourseLabel(){
     return safe(function(){
-      var visible = document.querySelector(".badgeCourse,.courseAssumedName,.gdCourseCurrent strong");
+      var visible = document.querySelector(".badgeCourse,.courseAssumedName");
       if(visible && visible.textContent.trim()) return visible.textContent.trim();
       var active = JSON.parse(localStorage.getItem("gd_active_course_v1") || "null");
       return active && (active.name || active.courseName) || "";

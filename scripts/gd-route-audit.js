@@ -19,7 +19,7 @@
   function closeModules(){document.querySelectorAll(".modulePanel.open").forEach(panel=>panel.classList.remove("open"));}
   function hideOverlays(){
     [
-      "gdCourseLibraryOverlay","gdCourseConfirmOverlay","gdMapperToolsDrawer","gdMapperToolFlyout",
+      "gdCourseLibraryOverlay","gdMapperToolsDrawer","gdMapperToolFlyout",
       "gdMapperHoleStrip","gdPinLockOverlay","gdPinToolFlyout","gdPinChoiceSheet","gdAssumedCourseBadge"
 	    ].forEach(id=>byId(id)?.classList.add("hidden"));
 	    document.body.classList.remove("gdFullMappingMode");

@@ -1114,23 +1114,6 @@
     Object.keys(objects||{}).forEach(id=>{if(!isSurfaceObject(objects[id]))out[id]=objects[id];});
     return out;
   }
-  function libraryCourses(uid=userId()){
-    const privateCourses=Object.values(loadStore().courses||{}).filter(c=>c.userId===uid);
-    const byId=new Map();
-    publishedCourses().forEach(course=>byId.set(course.id,course));
-    privateCourses.forEach(course=>{
-      const published=findPublishedCourse(course.courseId,course.courseName,course);
-      if(published)byId.delete(published.id);
-      byId.set(course.id,mergeCourseData(course,published,uid));
-    });
-    return Array.from(byId.values());
-  }
-  function findLibraryCourse(courseStoreId,uid=userId()){
-    const store=loadStore();
-    const privateCourse=store.courses?.[courseStoreId];
-    if(privateCourse)return mergeCourseData(privateCourse,findPublishedCourse(privateCourse.courseId,privateCourse.courseName,privateCourse),uid);
-    return publishedCourses().find(course=>course.id===courseStoreId)||null;
-  }
   function mergePublishedStore(incoming){
     const next=loadPublishedStore();
     next.version=1;
@@ -2773,22 +2756,6 @@
       }
     }catch(e){}
   }
-  function nearbySavedCourses(center=mapSessionCenter(),maxDistance=1400){
-    if(!center)return [];
-    return libraryCourses()
-      .filter(course=>isUsefulCourseName(course.courseName))
-      .map(course=>{
-        const lat=Number(course.courseLat), lng=Number(course.courseLng);
-        if(!Number.isFinite(lat)||!Number.isFinite(lng))return null;
-        return {...course,distanceM:distance(center,{lat,lng})};
-      })
-      .filter(Boolean)
-      .filter(course=>course.distanceM<=maxDistance)
-      .sort((a,b)=>a.distanceM-b.distanceM);
-  }
-  function courseCandidateCount(){
-    try{return nearbySavedCourses().length;}catch(e){return 0;}
-  }
   function ensureAssumedCourseBadge(){
     const label=currentCourseStorageLabel();
     applyVisibleCourseLabel(label);
@@ -2796,77 +2763,6 @@
     if(chip)chip.remove();
     try{if(typeof gdHydrateGpsBadge==='function')gdHydrateGpsBadge(true);}catch(e){}
   }
-  function ensureCourseConfirmationOverlay(){
-    let el=document.getElementById('gdCourseConfirmOverlay');
-    if(el)return el;
-    el=document.createElement('div');
-    el.id='gdCourseConfirmOverlay';
-    el.className='gdCourseConfirmOverlay hidden';
-    el.innerHTML=`<div class="gdCourseConfirmSheet"><div class="gdCourseConfirmHead"><div><h2 data-i18n="course.playingAt">${i18nH('course.playingAt')}</h2><p data-i18n="course.confirmWhich">${i18nH('course.confirmWhich')}</p></div><button class="gdSheetClose" type="button" onclick="gdCloseCourseConfirmation()">×</button></div><div id="gdCourseConfirmBody"></div></div>`;
-    el.addEventListener('click',ev=>{if(ev.target===el)gdCloseCourseConfirmation();});
-    document.body.appendChild(el);
-    return el;
-  }
-  function renderCourseConfirmation(){
-    const body=document.getElementById('gdCourseConfirmBody');
-    if(!body)return;
-    const label=currentCourseStorageLabel();
-    const center=mapSessionCenter();
-    const candidates=nearbySavedCourses(center);
-    const currentNorm=normalizeCourseName(label);
-    const rows=candidates
-      .filter(course=>normalizeCourseName(course.courseName)!==currentNorm)
-      .slice(0,5)
-      .map(course=>`<button class="gdCourseCandidate" type="button" data-course-name="${esc(course.courseName)}"><strong>${esc(course.courseName)}</strong><span>${esc(distanceLabel(course.distanceM))} · ${esc(savedDataLabel(course))}</span></button>`)
-      .join('');
-    body.innerHTML=`<div class="gdCourseCurrent"><span>${i18nH('course.playingNow')}</span><strong>${esc(label)}</strong><small>${isUsefulCourseName(label)?i18nH('course.youChoseThis'):i18nH('course.guessedFromLocation')}</small></div>${rows?`<div class="gdCourseCandidateList"><p>${i18nH('course.savedNearby')}</p>${rows}</div>`:`<div class="gdCourseCandidateEmpty">${i18nH('course.noSavedNearby')}</div>`}<div class="gdCourseConfirmActions"><button type="button" id="gdKeepCourseGuessBtn">${i18nH('course.keepThis')}</button><button type="button" id="gdSearchCourseGuessBtn">${i18nH('course.changeCourse')}</button></div>`;
-    body.querySelectorAll('[data-course-name]').forEach(btn=>{
-      btn.onclick=function(ev){
-        ev.preventDefault();
-        setAssumedCourseName(btn.getAttribute('data-course-name')||'');
-        gdCloseCourseConfirmation();
-        toastSafe(i18nT('course.labelUpdated'));
-      };
-    });
-    const keep=body.querySelector('#gdKeepCourseGuessBtn');
-    if(keep)keep.onclick=function(ev){ev.preventDefault();gdCloseCourseConfirmation();};
-    const search=body.querySelector('#gdSearchCourseGuessBtn');
-    if(search)search.onclick=function(ev){ev.preventDefault();window.gdSearchCourseForCurrentSession&&window.gdSearchCourseForCurrentSession();};
-  }
-  window.gdOpenCourseConfirmation=function(){
-    try{if(window.GDI18n&&!window.__gdCourseConfirmI18n){window.__gdCourseConfirmI18n=true;window.GDI18n.onChange(()=>{const o=document.getElementById('gdCourseConfirmOverlay');if(o&&!o.classList.contains('hidden'))renderCourseConfirmation();});}}catch(e){}
-    ensureCourseConfirmationOverlay().classList.remove('hidden');
-    renderCourseConfirmation();
-    ensureAssumedCourseBadge();
-  };
-  window.gdCloseCourseConfirmation=function(){
-    document.getElementById('gdCourseConfirmOverlay')?.classList.add('hidden');
-  };
-  window.gdUseCourseForCurrentSession=function(name){
-    setAssumedCourseName(name);
-    gdCloseCourseConfirmation();
-    toastSafe(i18nT('course.labelUpdated'));
-  };
-  window.gdSearchCourseForCurrentSession=function(){
-    gdCloseCourseConfirmation();
-    window.gdCourseChangeMode='assumed-label';
-    try{closeCourseLibraryPanel();}catch(e){}
-    try{gdCloseMapperTools();}catch(e){}
-    try{if(typeof enterGpsModule==='function')enterGpsModule({preserveState:true});}catch(e){}
-    setTimeout(()=>{
-      try{
-        const screen=document.getElementById('courseScreen');
-        const input=document.getElementById('searchInput');
-        if(screen)screen.classList.remove('hidden');
-        if(input){input.value=isUsefulCourseName(currentCourseStorageLabel())?currentCourseStorageLabel():'';input.focus();}
-        syncCoursePickerAssumption();
-        toastSafe(i18nT('course.searchOrChooseLabel'));
-      }catch(e){}
-    },80);
-  };
-  window.gdChangeAssumedCourse=function(){
-    window.gdOpenCourseConfirmation&&window.gdOpenCourseConfirmation();
-  };
   function clearNativeGreenReferenceLayers(){
     try{
       [greenOutline,greenSoft,greenLabel,frontLabel,backLabel].forEach(layer=>layer&&map.removeLayer(layer));
@@ -4115,7 +4011,7 @@
 	    recordCoursePlayDebug('course-map-cloud-lookup-started',request.course,request.hole,{resolutionKey:request.resolutionKey,attemptToken:request.attemptToken,keys});
 	    updateCourseLoading(i18nT('course.mapLoading'),32);
 	    try{
-	      const maps=await syncPublishedCourseMaps({quiet:true,throwOnError:true});
+	      const maps=await syncPublishedCourseMaps({quiet:true,throwOnError:true,courseIds:keys});
 	      const published=publishedCourses().find(course=>keys.some(key=>courseMatchesIdentity(course,key,request.courseName,request.course)))||null;
 	      const readiness=published?courseDataMapReadiness(published,request.hole,request.wholeCourse):null;
 	      if(published){
@@ -4142,7 +4038,7 @@
 	    const keys=cloudCourseMapKeys(c);
 	    if(!keys.length)return {attempted:false,available:false,reason:'no-course-keys',course:c,keys};
 	    try{
-	      const maps=await syncPublishedCourseMaps({quiet:true,throwOnError:true});
+	      const maps=await syncPublishedCourseMaps({quiet:true,throwOnError:true,courseIds:keys});
 	      const published=publishedCourses().find(row=>keys.some(key=>courseMatchesIdentity(row,key,courseName(c),c)))||null;
 	      const readiness=published?courseDataMapReadiness(published,h,wholeCourse):null;
 	      return {
@@ -5384,16 +5280,6 @@
             setTimeout(()=>{setAssumedCourseName(c.name||assumedCourseLabel());ensureAssumedCourseBadge();},60);
             return res;
           }
-          if(window.gdCourseChangeMode==='assumed-label'&&isManualGpsCourse(courseObj())&&c&&!isManualGpsCourse(c)){
-            window.gdCourseChangeMode='';
-            setAssumedCourseName(c.name||'');
-            try{document.getElementById('courseScreen')?.classList.add('hidden');}catch(e){}
-            toastSafe(i18nT('course.labelUpdated'));
-            return c;
-          }
-          if(window.gdCourseChangeMode==='assumed-label'&&c&&isManualGpsCourse(c)){
-            window.gdCourseChangeMode='';
-          }
           if(!isManualGpsCourse(c))showCourseLoadingIfNeeded(c,1);
           const res=oldOpen.apply(this,arguments);
           try{
@@ -5725,24 +5611,6 @@
     const stamps=objectValues(course).map(o=>o&&o.updatedAt).filter(Boolean).sort();
     return {holes:mappedHoleNumbers(course,s).length,points:s.totalObjects,bytes,updated:stamps[stamps.length-1]||course.updatedAt||''};
   }
-  /* The confirmation sheet asks "which course is this?", so the useful signal about
-     each candidate is how much is already stored under it. A breakdown by object
-     type ("3 green targets · 2 bunkers") answered a question nobody is asking at
-     that moment, and named internals the reader cannot act on from there. */
-  function savedDataLabel(course){
-    const holes=mappedHoleNumbers(course,courseSummary(course)).length;
-    return holes?i18nN('course.holesSaved',holes):i18nT('course.nothingSavedYet');
-  }
-  /* Candidates come from a 1.4km radius, so the tail of that range reads better in
-     kilometres than as a four-digit metre count. */
-  function distanceLabel(metres){
-    const m=Number(metres);
-    if(!Number.isFinite(m))return i18nT('course.nearby');
-    /* Switch at a full kilometre, not before it: rounding 950m to one decimal
-       prints "0.9km away", which reads as nearer than the "949m away" a metre
-       earlier. */
-    return m<1000?i18nT('course.metresAway',{n:Math.round(m)}):i18nT('course.kmAway',{n:(m/1000).toFixed(1)});
-  }
   function sizeLabel(bytes){
     if(!(bytes>0))return i18nT('course.sizeKb',{n:0});
     if(bytes<1024)return i18nT('course.sizeBytes',{n:bytes});
@@ -5951,25 +5819,21 @@
     return result;
   }
   /* Concurrent callers share one round trip. The resolver and the startup timer
-     can both ask within the same window, and without this both see an empty
-     local store, both decide it is stale, and both pull the full payload -
-     hundreds of kilobytes fetched twice for one result. The shared promise
+     can both ask within the same window, and without this both would fetch the
+     same courses twice for one result. The shared promise
      resolves to {store,error} so each caller still applies its own
      throwOnError rather than inheriting another caller's error handling. */
-  /* Mirrors PLAY_SUBSET_MAX in functions/course-maps.mjs. Above this the full
-     read is the cheaper request anyway. */
+  /* Mirrors PLAY_SUBSET_MAX in functions/course-maps.mjs: longer lists go in
+     batches of this size. */
   const PUBLISHED_SUBSET_SYNC_MAX=24;
   /* The named courses in play scope, or null when the server did not answer a
      subset - an older server answers the whole library to this URL, and that
-     must not be merged as if it were the subset, so the caller then takes the
-     full path it always took.
+     must not be merged as if it were the subset, so nothing merges.
 
      A request that FAILS is thrown, exactly as the full pull throws, and is
-     never followed by a second pull. Falling back to the whole library on a
-     failed subset would turn one failed request into two during an outage,
-     which is the amplification that kept the database down on 18 Sep 2026.
-     An answer that says the database was unavailable is handled the way the
-     full path handles it: nothing merges, the store stands. */
+     never followed by a second pull: one failed request must not become two
+     during an outage, the amplification that kept the database down on 18 Sep
+     2026. Nothing merges and the store stands. */
   async function fetchPublishedCourseSubset(courseIds){
     const res=await fetch(PUBLISHED_COURSE_API+'?scope=play&courseIds='+encodeURIComponent(courseIds.join(',')),{headers:{Accept:'application/json'},cache:'no-store'});
     if(!res.ok){
@@ -5989,8 +5853,12 @@
   async function syncPublishedCourseMaps(opts={}){
     if(opts.force!==true&&publishedSyncInFlight){
       const shared=await publishedSyncInFlight;
-      if(shared.error&&opts.throwOnError)throw shared.error;
-      return shared.store;
+      /* A run already going only answers a caller with no course of its own -
+         the startup refresh never fetches the course being opened. */
+      if(!uniqueSlugs(opts.courseIds).length){
+        if(shared.error&&opts.throwOnError)throw shared.error;
+        return shared.store;
+      }
     }
     const run=(async function(){
       if(window.GDCourseStorage)await window.GDCourseStorage.ready;
@@ -6009,50 +5877,77 @@
   /* Always throws on failure. Error policy belongs to the caller, not to
      whoever happened to start the shared run first - if this swallowed errors
      according to the owner's throwOnError, a sharer that asked for errors would
-     silently receive a stale store instead. */
+     silently receive a stale store instead.
+
+     The device holds the courses the player has OPENED, not the whole published
+     library. It used to treat every course in the database as "missing" and pull
+     them all (~12 MB, and growing with every course mapped), which is most of what
+     filled a phone's storage on 6 Oct 2026 - a golfer in New Zealand carrying every
+     course in Wales. Now a sync refreshes only:
+       - courses already held whose server version moved on (stale), and
+       - the courses this caller is opening (opts.courseIds), when not held yet
+         or when opts.force asks to re-read them anyway.
+     Never the whole library. The picker's own search reads the server directly,
+     so nothing here needs every course on the device. */
   async function runPublishedCourseMapSync(opts={}){
-    {
-      if(typeof fetch!=='function')return loadPublishedStore();
-      /* Ask the cheap question first. Only pull full course payloads when the
-         manifest says something actually changed, or when a caller explicitly
-         forces it (a publish has to re-read what the server now holds). */
-      if(opts.force!==true){
-        const manifest=await fetchCourseLibraryManifest();
-        const freshness=courseLibraryFreshness(manifest);
-        lastCourseLibraryFreshness=freshness;
-        if(freshness.checked&&!freshness.stale.length&&!freshness.missing.length){
-          try{renderCourseLibraryPanel();}catch(e){}
-          return loadPublishedStore();
-        }
-        /* The manifest named what changed, so ask for that and nothing else. The
-           whole library is ~12 MB of geometry; two republished courses are a few
-           hundred kilobytes. Every phone whose manifest went stale in the same
-           minute used to pull the whole library at once, and that burst is what
-           stalled the database on 18 Sep 2026. A fresh install (everything
-           missing) or a failed subset read still takes the full path below. */
-        if(freshness.checked){
-          const wanted=freshness.stale.concat(freshness.missing).filter(Boolean);
-          if(wanted.length&&wanted.length<=PUBLISHED_SUBSET_SYNC_MAX){
-            const subset=await fetchPublishedCourseSubset(wanted);
-            if(subset){
-              const merged=mergePublishedStore(subset);
-              try{renderCourseLibraryPanel();}catch(e){}
-              return merged;
-            }
-          }
-        }
-      }
-      const res=await fetch(PUBLISHED_COURSE_API+'?scope=play',{headers:{Accept:'application/json'},cache:'no-store'});
-      if(!res.ok){
-        const error=new Error(`Course map lookup failed (${res.status})`);
-        error.status=res.status;
-        throw error;
-      }
-      const data=await res.json();
-      const merged=mergePublishedStore(data);
-      try{renderCourseLibraryPanel();}catch(e){}
-      return merged;
+    if(typeof fetch!=='function')return loadPublishedStore();
+    pruneUnopenedPublishedCourses(opts.courseIds);
+    const requested=uniqueSlugs(opts.courseIds);
+    const manifest=await fetchCourseLibraryManifest();
+    const freshness=courseLibraryFreshness(manifest);
+    lastCourseLibraryFreshness=freshness;
+    let wanted;
+    if(freshness.checked){
+      /* Only ids the server actually publishes - a name-derived key that is not a
+         course id would otherwise be asked for on every open. */
+      wanted=freshness.stale.concat(requested.filter(id=>
+        freshness.missing.includes(id)||(opts.force===true&&freshness.current.includes(id))));
+    }else{
+      /* Manifest unreachable: no conclusion about what is stale, but the course
+         being opened is still worth asking for by name. */
+      wanted=requested;
     }
+    wanted=uniqueSlugs(wanted);
+    let store=loadPublishedStore();
+    for(let i=0;i<wanted.length;i+=PUBLISHED_SUBSET_SYNC_MAX){
+      const subset=await fetchPublishedCourseSubset(wanted.slice(i,i+PUBLISHED_SUBSET_SYNC_MAX));
+      if(subset)store=mergePublishedStore(subset);
+    }
+    try{renderCourseLibraryPanel();}catch(e){}
+    return store;
+  }
+  function uniqueSlugs(values){
+    const out=[];
+    (Array.isArray(values)?values:[]).forEach(value=>{
+      const key=slug(value||'');
+      if(key&&!out.includes(key))out.push(key);
+    });
+    return out;
+  }
+  /* One-off for devices that already pulled the whole library: keep only courses
+     the player has a record of opening (their own library, or a course downloaded
+     for offline play) plus whatever is being opened right now. Anything dropped
+     comes back by id the next time it is opened. Marked so it runs once. */
+  function pruneUnopenedPublishedCourses(keepIds){
+    const store=loadPublishedStore();
+    if(store.scope==='opened')return;
+    const keep=new Set(uniqueSlugs(keepIds));
+    Object.values(loadStore().courses||{}).forEach(course=>{
+      const key=slug(course&&course.courseId||'');
+      if(key)keep.add(key);
+    });
+    downloadedCourseEntries().forEach(entry=>{
+      const key=slug(entry&&entry.courseId||'');
+      if(key)keep.add(key);
+    });
+    const courses={};
+    Object.keys(store.courses||{}).forEach(id=>{
+      const course=store.courses[id];
+      if(keep.has(slug(course&&(course.courseId||course.id)||'')))courses[id]=course;
+    });
+    store.courses=courses;
+    store.scope='opened';
+    savePublishedStore(store);
   }
   async function publishCourseMap(courseStoreId){
     if(!isAdminUser()){toastSafe('Admin only');return false;}
@@ -6500,8 +6395,10 @@
       lastCourseLibraryFreshness=courseLibraryFreshness(manifest);
       return window.GDCourseLibrary.freshness();
     },
+    /* Stale only: "missing" is every published course this device has never
+       opened, which is not an update to anything it holds. */
     updateAvailable:function(){
-      return !!(lastCourseLibraryFreshness.checked&&(lastCourseLibraryFreshness.stale.length||lastCourseLibraryFreshness.missing.length));
+      return !!(lastCourseLibraryFreshness.checked&&lastCourseLibraryFreshness.stale.length);
     },
     refresh:function(opts){return syncPublishedCourseMaps(Object.assign({quiet:true},opts||{}));},
     /* The nines that share a facility with this course, or null for an ordinary

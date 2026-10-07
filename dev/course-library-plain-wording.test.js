@@ -1,17 +1,14 @@
-/* The course library and the confirmation sheet speak plainly.
+/* The course library speaks plainly.
  *
- * Both surfaces were built as front-ends for the mapper and kept its vocabulary
- * after the mapper stopped being the point: "Objects are grouped by saved GPS
- * course", "3 green targets · 2 bunkers · 1 tee", "Mapping Mode", "Unassigned".
- * The library is now a window onto what is stored on the device, and the
- * confirmation sheet answers "which course is this?" - neither needs a breakdown
- * of internal object types.
+ * It was built as a front-end for the mapper and kept its vocabulary after the
+ * mapper stopped being the point: "Objects are grouped by saved GPS course",
+ * "3 green targets · 2 bunkers · 1 tee", "Mapping Mode", "Unassigned". The
+ * library is now a window onto what is stored on the device and needs no
+ * breakdown of internal object types.
  *
  * The wording is asserted against source: the surrounding file is 6,000 lines of
  * browser globals, and these strings are the whole point of the change, so a
- * revert should fail here rather than be noticed on a phone. distanceLabel is
- * executed instead - it is pure, and its boundary is the kind of thing that
- * silently drifts. */
+ * revert should fail here rather than be noticed on a phone. */
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
@@ -58,47 +55,16 @@ test("the library describes itself as device storage", () => {
   assert.ok(/"course\.libraryTitle": "Course Library"/.test(english), "library heading must be the plain one");
 });
 
-test("the confirmation sheet asks a plain question", () => {
-  assert.ok(/Confirm which course this round is saved under\./.test(words), "confirmation subtitle must be plain");
-  assert.ok(/Guessed from your location/.test(words), "the assumed-course line must not read as GPS/map internals");
+/* The "Playing at..." confirmation sheet had no way to open it - nothing called
+   gdChangeAssumedCourse - and it was the only reader of the whole published
+   library on the device, which the device no longer holds. */
+test("the unreachable confirmation sheet is gone", () => {
+  assert.ok(!/gdCourseConfirmOverlay|renderCourseConfirmation|nearbySavedCourses/.test(src),
+    "it listed every published course within 1.4km, which needs the whole library on the phone");
 });
 
 test("the mapper has no entry point left in the library", () => {
   assert.ok(!/gdCLOpenCourseFromLibrary/.test(src), "the mapping-mode door must be gone, not merely hidden");
-});
-
-test("candidates are described by what is stored, not by object type", () => {
-  const m = src.match(/function savedDataLabel\(course\)\{([\s\S]*?)\n  \}/);
-  assert.ok(m, "savedDataLabel must exist");
-  assert.ok(/hole/.test(m[1]), "candidates should be summarised by holes held");
-  assert.ok(!/bunker|fairway|green/.test(m[1]), "object types are internals, not a course summary");
-});
-
-/* Executed, not pattern-matched: the m/km boundary is easy to break by a digit. */
-function distanceLabelFrom(src) {
-  const m = src.match(/function distanceLabel\(metres\)\{([\s\S]*?)\n  \}/);
-  assert.ok(m, "distanceLabel must be a single extractable function");
-  /* It speaks through the translation layer, English here. */
-  const i18n = require(path.join(ROOT, "scripts", "gd-i18n.js"));
-  require(path.join(ROOT, "scripts", "i18n", "en.js"));
-  const i18nT = (key, vars) => i18n.t(key, vars);
-  return new Function("i18nT", "return function (metres) {" + m[1] + "};")(i18nT);
-}
-
-test("distance reads in metres up close and kilometres further out", () => {
-  const d = distanceLabelFrom(src);
-  assert.strictEqual(d(0), "0m away");
-  assert.strictEqual(d(840), "840m away");
-  assert.strictEqual(d(949), "949m away");
-  assert.strictEqual(d(999), "999m away", "switching before 1km prints '0.9km away', which reads as nearer than 949m");
-  assert.strictEqual(d(1000), "1.0km away");
-  assert.strictEqual(d(1200), "1.2km away");
-});
-
-test("a candidate with no usable distance still reads as a sentence", () => {
-  const d = distanceLabelFrom(src);
-  assert.strictEqual(d(undefined), "nearby", "an empty string here would render a stray separator");
-  assert.strictEqual(d(NaN), "nearby");
 });
 
 (async () => {
