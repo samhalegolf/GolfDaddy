@@ -152,6 +152,8 @@
   var session = {
     course: null, features: [], loadedFor: "", osm: null, objects: [], lastRun: null, courseMap: null, view: null, sourceKey: "",
     showOsm: true, showObjects: true, status: "draft", hole: null,
+    /* The Number tool: the number the next hole clicked gets, and whether it then steps on. */
+    numberNext: 1, numberAuto: true,
     dirty: false, rev: 0, saving: false, saveError: "", fairwayWidth: 0,
     mode: "shapes", wandSize: { green: 1, bunker: 1, water: 1 }, method: { fairway: "width", green: "wand", tee: "round", bunker: "wand", water: "wand", trees: "single", hazard: "draw", waste: "grow" }, lineWandSize: { fairway: 1, bunker: 1, water: 1, waste: 1 }, mergeBunkers: true, seams: true, fullscreen: false, unsaved: null,
     /* The size the next single tree is dropped at, and the tree finder's sensitivity. */
@@ -185,7 +187,7 @@
         course: slimCourse(session.course), view: session.view, sourceKey: session.sourceKey,
         showOsm: session.showOsm, showObjects: session.showObjects, mode: session.mode, fairwayWidth: session.fairwayWidth,
         wandSize: session.wandSize, method: session.method, lineWandSize: session.lineWandSize, mergeBunkers: session.mergeBunkers, seams: session.seams, fullscreen: !!session.fullscreen,
-        treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel,
+        treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel, numberAuto: session.numberAuto,
         unsaved: session.dirty && session.loadedFor ? { courseId: session.loadedFor, features: session.features } : null
       }));
     } catch (e) {}
@@ -201,7 +203,7 @@
     try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) {}
     if (!saved || typeof saved !== "object") return;
     if (saved.course) { session.course = saved.course; session.view = saved.view || null; }
-    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "treeRadius", "treeFinderLevel"].forEach(function (k) {
+    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "treeRadius", "treeFinderLevel", "numberAuto"].forEach(function (k) {
       if (saved[k] != null) session[k] = saved[k];
     });
     if (saved.wandSize && typeof saved.wandSize === "object") {
@@ -229,6 +231,7 @@
     session.dirty = false;
     session.status = "draft";
     session.hole = null;
+    session.numberNext = 1;
     session.treeSamples = [];
   }
 
@@ -343,6 +346,7 @@
   }
   var ICON = {
     move: svgIcon('<path d="M5 3l13 7-5.5 1.8L10.7 17z"/><path d="M13 12l5 5"/>'),
+    number: svgIcon('<path d="M9 4L7 20M17 4l-2 16M4.5 9h15M3.5 15h15"/>'),
     connect: svgIcon('<circle cx="6" cy="18" r="2.6"/><circle cx="18" cy="6" r="2.6"/><path d="M8 16l8-8" stroke-dasharray="2 3"/>'),
     fairway: svgIcon('<path d="M7 21c-1-5 2-7 4-10s2-6 1-8"/><path d="M13 21c-1-5 2-7 4-10s2-6 1-8"/>'),
     green: svgIcon('<path d="M9 18V3l8 3.5L9 10"/><ellipse cx="10" cy="19" rx="7" ry="2.4"/>'),
@@ -463,6 +467,7 @@
       "Whatever you just placed can be dragged at once to adjust it. In <strong>Move</strong>, drag shapes and their points, and drop either on the <strong>bin</strong> to delete. A detailed outline shows only its key points - grab its edge anywhere and it bends there, the key points either side staying put. " +
       "<strong>Seams</strong> (on by default): a fairway, water, hazard, waste area or trees kept within a few metres of another - or just overlapping it - meets it in the middle, and that line is shared; drag it and both shapes follow, so it only changes which ground is which. " +
       "<strong>Link</strong>: click the shapes that belong to one hole (click again to drop one), then <strong>Enter</strong> or <strong>Space</strong> links them and the next click starts a new link. A link only says they are one hole - it never numbers them. One shape and Enter takes it out of its link; <strong>Esc</strong> clears the pick. " +
+      "<strong>Number</strong>: click each hole's fairway (or any shape on it) and the whole hole takes the <em>Next hole</em> number; with <em>Auto</em> on, the number then moves on, so 1 to 18 is eighteen clicks. Each hole shows one number on its fairway - click it with any tool to type a different one. A number on two holes shows red. " +
       "<strong>Undo</strong> (the arrow at the top of the right-hand buttons, or Ctrl+Z / ⌘Z) takes back the last change, one at a time. " +
       "Everything saves as you go, as a <strong>draft</strong> the mapper ignores - <strong>Mark ready</strong> when the course looks right, then run the mapper. " +
       "Bright outlines are what OSM already has; dashed amber ones are the course's saved objects.</p></details>" +
@@ -473,6 +478,7 @@
       '<div class="gdStudioOverlayRail" role="toolbar" aria-label="Tools">' +
       railButton("tool-move", "move", "Move", "Select, move and reshape (V)") +
       railButton("tool-connect", "connect", "Link", "Link shapes to the same hole (C)") +
+      railButton("tool-number", "number", "Number", "Click each hole to number it - Auto steps 1, 2, 3... (N)") +
       '<span class="gdStudioOverlayRailRule"></span>' +
       railButton("tool-fairway", "fairway", "Fairway", "") +
       railButton("tool-green", "green", "Green", "") +
@@ -488,6 +494,8 @@
       '<button type="button" data-gd-overlay="mode-shapes" title="Place outlines - fairway lines and the wand (S)">Shapes</button>' +
       '<button type="button" data-gd-overlay="mode-pins" title="Quick pass - fairway start and end, green and tee centres (P)">Pins</button>' +
       "</span>" +
+      '<span class="gdStudioOverlayOpt" data-gd-overlay="number-label" hidden>Next hole <input type="number" min="1" max="36" step="1" data-gd-overlay="number-next" class="gdStudioOverlayWidth gdStudioOverlayHole">' +
+      '<label title="Each click numbers a hole and moves on to the next number"><input type="checkbox" data-gd-overlay="number-auto"> Auto</label></span>' +
       '<label class="gdStudioOverlayOpt" data-gd-overlay="hole-label">Hole <input type="number" min="1" max="36" step="1" placeholder="–" data-gd-overlay="hole" class="gdStudioOverlayWidth gdStudioOverlayHole"></label>' +
       '<label class="gdStudioOverlayOpt" data-gd-overlay="width-label">Width <input type="number" min="10" max="90" step="1" data-gd-overlay="width" class="gdStudioOverlayWidth"> m</label>' +
       '<span class="gdStudioOverlayModes" data-gd-overlay="method" hidden>' +
@@ -532,7 +540,7 @@
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "unnumber", "clear", "run", "status"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "unnumber", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -626,7 +634,7 @@
       return !!session.course && session.loadedFor === courseIdOf(session.course) && !scanning && !busy;
     }
 
-    var TOOLS = ["move", "connect", "fairway", "green", "tee", "bunker", "water", "trees", "hazard", "waste"];
+    var TOOLS = ["move", "connect", "number", "fairway", "green", "tee", "bunker", "water", "trees", "hazard", "waste"];
 
     /* Whatever was just placed is kept: the live shape, and the trees the finder dropped. The
        colour wand's selection is not a shape yet - it goes, unless `keepColour`. */
@@ -712,6 +720,9 @@
         b.classList.toggle("isActive", !!methods && session.method[tool] === m);
       });
       el["width-label"].hidden = !shapesMode || (tool === "fairway" && session.method.fairway !== "width");
+      el["number-label"].hidden = tool !== "number";
+      el["hole-label"].hidden = tool === "number";
+      if (tool === "number") renderNumberField();
       el["wand-size-label"].hidden = !(growWanding() || (WAND_KINDS.indexOf(tool) >= 0 && (!METHODS[tool] || methodOf(tool) === "wand" || !shapesMode) && (shapesMode || tool === "green")));
       renderWandSize();
     }
@@ -1431,7 +1442,7 @@
       if (Date.now() - dragEndedAt < 300) return;
       if (!session.course) { setStatus("Pick a course first."); return; }
       /* Empty ground under the Link tool does nothing: the pick waits for Enter or Esc. */
-      if (tool === "connect") return;
+      if (tool === "connect" || tool === "number") return;
       if (tool === "move") { if (selectedId) select(""); return; }
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
@@ -2004,6 +2015,7 @@
           /* Selecting a shape must not also count as a click on the map under it. */
           if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
           if (tool === "connect") { if (canEdit() && Date.now() - dragEndedAt >= 300) toggleLinkPick(f.id); return; }
+          if (tool === "number") { numberHole(f); return; }
           if (tool !== "move") { handleMapClick(e.latlng); return; }
           if (Date.now() - dragEndedAt < 300) return;
           select(f.id);
@@ -2189,21 +2201,23 @@
         var html = editing
           ? '<input type="number" min="1" max="36" step="1" value="' + esc(editingValue != null ? editingValue : g.numbers.length === 1 ? g.numbers[0] : "") + '" aria-label="Hole number">'
           : "<span>" + esc(text) + "</span>";
-        var marker = L.marker(at, {
-          keyboard: false, zIndexOffset: 1000,
-          icon: L.divIcon({ className: "gdStudioOverlayHoleTag" + (clash ? " isClash" : "") + (g.numbers.length ? "" : " isEmpty") + (editing ? " isEditing" : ""), html: html, iconSize: null })
-        }).addTo(mapObj);
-        holeTagLayers.push(marker);
-        var node = marker.getElement();
+        /* A tooltip, not a marker: the app's own stylesheet hides every Leaflet marker icon on
+           the screens Studio runs over. */
+        var tag = L.tooltip({ permanent: true, interactive: true, direction: "center", className: "gdStudioOverlayHoleTag" + (clash ? " isClash" : "") + (g.numbers.length ? "" : " isEmpty") + (editing ? " isEditing" : "") })
+          .setLatLng(at).setContent(html);
+        mapObj.addLayer(tag);
+        holeTagLayers.push(tag);
+        var node = tag.getElement();
         if (!node) return;
         node.title = clash ? (g.numbers.length > 1 ? "These shapes carry different numbers - click to give the hole one" : "Another hole has this number too") : "Click to change this hole's number";
         /* A press on a tag is never a press on the map under it. */
         L.DomEvent.disableClickPropagation(node);
         node.addEventListener("pointerdown", function (event) { event.stopPropagation(); });
         if (!editing) {
-          marker.on("click", function (e) {
-            if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
+          node.addEventListener("click", function (event) {
+            L.DomEvent.stop(event);
             if (!canEdit()) return;
+            if (tool === "number") { numberHole(g.members[0]); return; }
             editingTag = g.key;
             editingValue = null;
             drawHoleTags();
@@ -2227,6 +2241,29 @@
         input.addEventListener("blur", function () { done(true); });
         setTimeout(function () { try { input.focus(); input.select(); } catch (e) {} }, 0);
       });
+    }
+
+    /* The Number tool: a click on any shape of a hole gives the whole hole the next number,
+       and on Auto the number moves on, so a course is numbered 1 to 18 in eighteen clicks. A
+       shape on no hole yet (unlinked and unnumbered) is numbered on its own. */
+    function numberHole(f) {
+      if (!f || !canEdit() || Date.now() - dragEndedAt < 300) return;
+      var n = holeNumber(session.numberNext) || 1;
+      var key = linkKey(f);
+      var members = key ? session.features.filter(function (x) { return linkKey(x) === key; }) : [f];
+      members.forEach(function (x) { x.hole = n; });
+      if (session.numberAuto && n < 36) session.numberNext = n + 1;
+      drawFeatures();
+      changed();
+      renderNumberField();
+      updateHint();
+      var taken = holeGroups().filter(function (g) { return g.numbers.indexOf(n) >= 0; }).length > 1;
+      setStatus("Hole " + n + " numbered." + (taken ? " Another hole has " + n + " too - it shows red." : "") + (session.numberAuto ? " Next: " + session.numberNext + "." : ""), taken);
+    }
+
+    function renderNumberField() {
+      if (destroyed || !el["number-next"]) return;
+      if (document.activeElement !== el["number-next"]) el["number-next"].value = String(session.numberNext);
     }
 
     /* Every shape on the hole takes the number - or loses it, when the box is left empty. */
@@ -2471,7 +2508,9 @@
       members.forEach(function (f) { pts = pts.concat(toLatLngs(f.points)); });
       if (!pts.length) return;
       var centre = L.latLngBounds(pts).getCenter();
-      var badge = L.marker(centre, { interactive: false, keyboard: false, icon: L.divIcon({ className: "gdStudioOverlayLinkedBadge", html: "<span>✓ Linked</span>", iconSize: null }) }).addTo(mapObj);
+      /* A tooltip, not a marker - see drawHoleTags. */
+      var badge = L.tooltip({ permanent: true, direction: "center", className: "gdStudioOverlayLinkedBadge" }).setLatLng(centre).setContent("<span>✓ Linked</span>");
+      mapObj.addLayer(badge);
       setTimeout(function () { try { mapObj.removeLayer(badge); } catch (e) {} }, 900);
     }
 
@@ -2852,6 +2891,7 @@
       if (!session.course) text = "Pick a course to start";
       else if (scanning) text = "AI scan running - shapes are locked until it finishes";
       else if (tool === "connect") text = linkPick.length > 1 ? linkPick.length + " picked · Enter or Space links them · Esc clears" : linkPick.length ? "Click the other shapes on this hole · Enter alone takes this one out of its link · Esc clears" : "Click the shapes that belong to one hole, then Enter or Space";
+      else if (tool === "number") text = "Click each hole's fairway (or any shape on it) to give it hole " + session.numberNext + (session.numberAuto ? " · Auto moves on to the next number" : "") + " · click a number to type it";
       else if (tool === "fairway" && session.mode === "pins") text = draft.length ? "Click where the fairway ends · Esc cancels" : "Click where the fairway starts";
       else if (lineTool() && session.mode === "shapes") {
         var thing = tool === "fairway" ? "fairway" : kindLabel(tool).toLowerCase();
@@ -2872,7 +2912,7 @@
       else if (tool === "green") text = "Click the middle of a green";
       else if (tool === "bunker") text = "Click the middle of a bunker - the wand outlines it · B switches method";
       else if (tool === "tee") text = "Click where the tee is";
-      if (lastPlacedId && tool !== "move" && tool !== "connect" && !draft.length && findFeature(lastPlacedId)) text += " · drag the one you just placed to adjust it";
+      if (lastPlacedId && tool !== "move" && tool !== "connect" && tool !== "number" && !draft.length && findFeature(lastPlacedId)) text += " · drag the one you just placed to adjust it";
       else if (selectedId && (findFeature(selectedId) || {}).kind === "tree") text = "Drag to move · Delete or the bin removes it";
       else if (selectedId && isSmooth(findFeature(selectedId) || {})) text = "Drag to move · drag its " + shapes.SMOOTH[findFeature(selectedId).kind].handles + " points to reshape · Delete or the bin removes it";
       else if (selectedId && (findFeature(selectedId) || {}).pin) text = "Drag to move · Shape this pin turns it into an outline · Delete or the bin removes it";
@@ -2934,7 +2974,7 @@
       el.run.title = session.dirty ? "Wait for the overlay to save - the mapper reads what is saved" : "";
       el.ready.disabled = !canEdit() || !session.features.length || (session.status === "ready" && !session.dirty);
       el.ready.title = session.status === "ready" && !session.dirty ? "Already ready - change a shape and it goes back to draft" : "Let the mapper use this overlay";
-      ["tool-connect", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste"].forEach(function (name) { el[name].disabled = !canEdit() || !!shapingPins; });
+      ["tool-connect", "tool-number", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste"].forEach(function (name) { el[name].disabled = !canEdit() || !!shapingPins; });
       var pins = session.features.filter(function (f) { return f.pin; }).length;
       var selected = selectedId ? findFeature(selectedId) : null;
       el["shape-pins"].hidden = !pins;
@@ -3644,7 +3684,7 @@
       /* The tool's own key again steps through its methods: wand, draw round, line + wand. */
       var own = { f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard", a: "waste" }[key];
       if (own && own === tool && methodOf(own) && canEdit()) { cycleMethod(own); return; }
-      var shortcut = { v: "move", c: "connect", f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard", a: "waste" }[key];
+      var shortcut = { v: "move", c: "connect", n: "number", f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard", a: "waste" }[key];
       if (shortcut && (shortcut === "move" || canEdit())) setTool(shortcut);
     }
     document.addEventListener("keydown", onKey);
@@ -3660,6 +3700,15 @@
     el["source-test"].addEventListener("click", runSourceTest);
     el["tool-move"].addEventListener("click", function () { setTool("move"); });
     el["tool-connect"].addEventListener("click", function () { setTool("connect"); });
+    el["tool-number"].addEventListener("click", function () { setTool("number"); });
+    el["number-auto"].checked = !!session.numberAuto;
+    el["number-auto"].addEventListener("change", function () { session.numberAuto = el["number-auto"].checked; remember(); updateHint(); });
+    el["number-next"].addEventListener("change", function () {
+      var n = holeNumber(el["number-next"].value);
+      if (n) session.numberNext = n;
+      renderNumberField();
+      updateHint();
+    });
     el["tool-fairway"].addEventListener("click", function () { setTool("fairway"); });
     el["tool-green"].addEventListener("click", function () { setTool("green"); });
     el["tool-tee"].addEventListener("click", function () { setTool("tee"); });

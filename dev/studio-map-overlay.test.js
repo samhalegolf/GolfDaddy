@@ -282,6 +282,15 @@ test("one clickable number per hole: typing it numbers every shape on the hole, 
   assert.ok(shell.includes(".gdStudioOverlayHoleTag.isClash"), "clash styling");
 });
 
+test("Number tool: a click numbers the whole hole, Auto steps on; tags are tooltips the app CSS can't hide", () => {
+  assert.ok(page.includes('railButton("tool-number"'), "the Number tool is on the toolbar");
+  const fn = page.slice(page.indexOf("function numberHole("), page.indexOf("function renderNumberField("));
+  assert.ok(/x\.hole = n;/.test(fn) && /session\.numberAuto && n < 36\) session\.numberNext = n \+ 1/.test(fn) && /changed\(\);/.test(fn), "numbering sets the hole, steps on under Auto, and saves");
+  assert.ok(/if \(tool === "number"\) \{ numberHole\(f\); return; \}/.test(page), "a shape clicked under the Number tool is numbered");
+  const tags = page.slice(page.indexOf("function drawHoleTags("), page.indexOf("function numberHole("));
+  assert.ok(/L\.tooltip\(/.test(tags) && !/L\.marker\(/.test(tags), "the app stylesheet hides .leaflet-marker-icon on Studio's screens - tags must not be markers");
+});
+
 test("Clear hole numbers takes every number off and keeps the shapes and links", () => {
   assert.ok(page.includes('data-gd-overlay="unnumber"') && page.includes('el.unnumber.addEventListener("click", clearHoleNumbers);'), "the button is there and wired");
   const fn = page.slice(page.indexOf("function clearHoleNumbers()"), page.indexOf("function deleteOverlay()"));
