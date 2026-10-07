@@ -46,7 +46,15 @@ class CaddyAppView extends WatchUi.View {
         }
     }
 
-    function showMap() { showingMap = true; }
+    // Opening the map refits its camera, as AimableHoleMap.swift's settle()
+    // does on appear. Without this the second shot of a hole, locked while
+    // on Numbers, kept the first shot's framing: the hole, the package and
+    // the lock state all looked unchanged, so nothing reframed and the new
+    // Bubble sat off the top of the screen (simulator, 2026-10-08).
+    function showMap() {
+        if (!showingMap) { mapView.camera = null; }
+        showingMap = true;
+    }
     function showNumbers() { showingMap = false; }
-    function toggleMapNumbers() { showingMap = !showingMap; }
+    function toggleMapNumbers() { if (showingMap) { showNumbers(); } else { showMap(); } }
 }

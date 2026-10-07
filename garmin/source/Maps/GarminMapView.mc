@@ -46,8 +46,8 @@ using Toybox.Timer;
 class GarminMapView extends WatchUi.View {
     var session;   // GarminSessionManager
 
-    // The resting camera is recomputed only on a hole change (or the first
-    // draw), never on every GPS tick or Scene revision — this IS the
+    // The resting camera is recomputed only on a hole change, on opening
+    // the map (CaddyAppView.showMap) or the first draw, never on every GPS tick or Scene revision — this IS the
     // "camera should not continuously jump on small GPS movements"
     // stability rule (plan step 6), ported as the same mechanism
     // AimableHoleMap.swift uses: settle() runs on appear/hole-change/first-fix
