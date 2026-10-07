@@ -60,6 +60,13 @@ More at https://claritygolf.app
 ## What's New (4000 max, optional)
 
 ```
+1.1.0: Hole maps now show trees, hazards and waste areas, so you can see
+what's off the fairway before you aim.
+```
+
+Earlier (1.0.0):
+
+```
 First release. Numbers, hole maps and wrist aiming for rounds played in the
 Clarity Caddy phone app.
 ```
