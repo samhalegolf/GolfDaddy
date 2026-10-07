@@ -396,6 +396,11 @@
     /* Link tool: the shapes clicked so far, waiting for Enter or Space to link them. */
     var linkPick = [];
     var linkLayers = [];
+    /* One hole number tag per hole, and the one open for typing into (its group key). */
+    var holeTagLayers = [];
+    var editingTag = "";
+    var editingValue = null;
+    var clearingTags = false;
     var sourceTesting = false;
     var sourceTest = null;
     /* The press-and-drag gestures: a cluster oval or a tree-finder box being stretched, and the
@@ -1934,6 +1939,7 @@
       });
       featureLayers = {};
       clearLinkLayers();
+      clearHoleTags();
     }
 
     function midpoints(f) {
@@ -2007,8 +2013,6 @@
           if (tool === "move" && selectedId !== f.id) select(f.id);
           beginDrag(f.id, "body", -1, e);
         });
-        /* Not on a single tree: a stand of them would be a wall of numbers. */
-        if (f.hole && f.kind !== "tree") shape.bindTooltip(String(f.hole), { permanent: true, direction: "center", className: "gdStudioOverlayLabel" });
         var entry = { shape: shape, edge: null, keys: null, vertices: [], mids: [], ends: [] };
         /* A fairway pin's start and end, always shown, so it reads as two pins and a line. */
         if (f.pin && f.points.length === 2 && !selected) {
@@ -2050,6 +2054,7 @@
         featureLayers[f.id] = entry;
       });
       drawLinks();
+      drawHoleTags();
       updateBin();
       updateReadout();
       renderHoleField();
@@ -2127,6 +2132,114 @@
         setHole(n);
         setStatus(n ? "New shapes will be numbered hole " + n + "." : "New shapes will be left unnumbered.");
       }
+    }
+
+    /* ---- hole number tags ----
+       One number per hole, sat on its fairway the way OSM shows a hole's ref (on the green or
+       tee, or whatever it has, when there is no fairway yet). A hole is a link group, or the
+       unlinked shapes sharing a number. Click a tag to type its number: every shape on that
+       hole takes it, which is what the mapper reads. A linked hole with no number shows "?" so
+       it can be numbered the same way. A number used by two holes, or a hole whose shapes
+       disagree, shows red until it is fixed. */
+
+    var TAG_ANCHOR = { fairway: 0, hole: 1, green: 2, tee: 3 };
+
+    function clearHoleTags() {
+      /* Taking an open box off the map can blur it; that is a redraw, not the person leaving it. */
+      clearingTags = true;
+      holeTagLayers.forEach(function (l) { try { mapObj.removeLayer(l); } catch (e) {} });
+      clearingTags = false;
+      holeTagLayers = [];
+    }
+
+    function holeGroups() {
+      var byKey = {}, out = [];
+      session.features.forEach(function (f) {
+        var k = linkKey(f);
+        if (!k || !f.points.length) return;
+        if (!byKey[k]) { byKey[k] = { key: k, members: [], numbers: [] }; out.push(byKey[k]); }
+        byKey[k].members.push(f);
+        if (f.hole && byKey[k].numbers.indexOf(f.hole) < 0) byKey[k].numbers.push(f.hole);
+      });
+      out.forEach(function (g) { g.numbers.sort(function (a, b) { return a - b; }); });
+      return out;
+    }
+
+    function tagAnchor(members) {
+      /* Not on a single tree: a stand of them is no place for a hole's number. */
+      var list = members.filter(function (f) { return f.kind !== "tree"; });
+      if (!list.length) return null;
+      var rank = function (f) { return Object.prototype.hasOwnProperty.call(TAG_ANCHOR, f.kind) ? TAG_ANCHOR[f.kind] : 9; };
+      var best = list.slice().sort(function (a, b) { return rank(a) - rank(b); })[0];
+      var c = shapes.centroid(best.points);
+      return [c.lat, c.lng];
+    }
+
+    function drawHoleTags() {
+      clearHoleTags();
+      var groups = holeGroups();
+      var uses = {};
+      groups.forEach(function (g) { g.numbers.forEach(function (n) { uses[n] = (uses[n] || 0) + 1; }); });
+      groups.forEach(function (g) {
+        var at = tagAnchor(g.members);
+        if (!at) return;
+        var clash = g.numbers.length > 1 || g.numbers.some(function (n) { return uses[n] > 1; });
+        var editing = editingTag === g.key && canEdit();
+        var text = g.numbers.length ? g.numbers.join("/") : "?";
+        var html = editing
+          ? '<input type="number" min="1" max="36" step="1" value="' + esc(editingValue != null ? editingValue : g.numbers.length === 1 ? g.numbers[0] : "") + '" aria-label="Hole number">'
+          : "<span>" + esc(text) + "</span>";
+        var marker = L.marker(at, {
+          keyboard: false, zIndexOffset: 1000,
+          icon: L.divIcon({ className: "gdStudioOverlayHoleTag" + (clash ? " isClash" : "") + (g.numbers.length ? "" : " isEmpty") + (editing ? " isEditing" : ""), html: html, iconSize: null })
+        }).addTo(mapObj);
+        holeTagLayers.push(marker);
+        var node = marker.getElement();
+        if (!node) return;
+        node.title = clash ? (g.numbers.length > 1 ? "These shapes carry different numbers - click to give the hole one" : "Another hole has this number too") : "Click to change this hole's number";
+        /* A press on a tag is never a press on the map under it. */
+        L.DomEvent.disableClickPropagation(node);
+        node.addEventListener("pointerdown", function (event) { event.stopPropagation(); });
+        if (!editing) {
+          marker.on("click", function (e) {
+            if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
+            if (!canEdit()) return;
+            editingTag = g.key;
+            editingValue = null;
+            drawHoleTags();
+          });
+          return;
+        }
+        var input = node.querySelector("input");
+        var done = function (keep) {
+          if (editingTag !== g.key || clearingTags) return;
+          editingTag = "";
+          editingValue = null;
+          if (keep) setGroupHole(g, input.value);
+          else drawHoleTags();
+        };
+        input.addEventListener("keydown", function (event) {
+          event.stopPropagation();
+          if (event.key === "Enter") { event.preventDefault(); done(true); }
+          else if (event.key === "Escape") { event.preventDefault(); done(false); }
+        });
+        input.addEventListener("input", function () { editingValue = input.value; });
+        input.addEventListener("blur", function () { done(true); });
+        setTimeout(function () { try { input.focus(); input.select(); } catch (e) {} }, 0);
+      });
+    }
+
+    /* Every shape on the hole takes the number - or loses it, when the box is left empty. */
+    function setGroupHole(g, value) {
+      var n = holeNumber(value);
+      if (String(value).trim() && !n) { drawHoleTags(); setStatus("A hole number is 1 to 36.", true); return; }
+      var members = session.features.filter(function (f) { return linkKey(f) === g.key; });
+      if (!members.length || members.every(function (f) { return f.hole === n; })) { drawHoleTags(); return; }
+      members.forEach(function (f) { f.hole = n; });
+      drawFeatures();
+      changed();
+      var taken = n && holeGroups().filter(function (other) { return other.numbers.indexOf(n) >= 0; }).length > 1;
+      setStatus(n ? "Hole numbered " + n + "." + (taken ? " Another hole has " + n + " too - it shows red until one is changed." : "") : "Hole number taken off.", !!taken);
     }
 
     /* ---- dragging and the bin ---- */

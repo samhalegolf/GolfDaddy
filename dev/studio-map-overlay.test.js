@@ -272,6 +272,16 @@ test("the table migration exists and is service-role only", () => {
   assert.ok(sql.includes("auth.role() = 'service_role'"), "nothing on a player's device reads or writes this table");
 });
 
+test("one clickable number per hole: typing it numbers every shape on the hole, clashes show red", () => {
+  assert.ok(page.includes("function drawHoleTags()"), "each hole needs its own number tag");
+  assert.ok(/var TAG_ANCHOR = \{ fairway: 0/.test(page), "the tag sits on the fairway first, like OSM");
+  const setter = page.slice(page.indexOf("function setGroupHole("), page.indexOf("/* ---- dragging and the bin ---- */"));
+  assert.ok(/linkKey\(f\) === g\.key/.test(setter) && /f\.hole = n;/.test(setter) && /changed\(\);/.test(setter), "a tag's number goes on every shape of that hole and saves");
+  assert.ok(page.includes("isClash"), "a number used twice must be marked");
+  assert.ok(!/shape\.bindTooltip\(String\(f\.hole\)/.test(page), "shapes no longer carry a number each - the hole's tag does");
+  assert.ok(shell.includes(".gdStudioOverlayHoleTag.isClash"), "clash styling");
+});
+
 test("Clear hole numbers takes every number off and keeps the shapes and links", () => {
   assert.ok(page.includes('data-gd-overlay="unnumber"') && page.includes('el.unnumber.addEventListener("click", clearHoleNumbers);'), "the button is there and wired");
   const fn = page.slice(page.indexOf("function clearHoleNumbers()"), page.indexOf("function deleteOverlay()"));
