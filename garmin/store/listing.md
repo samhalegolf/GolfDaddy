@@ -60,6 +60,12 @@ More at https://claritygolf.app
 ## What's New (4000 max, optional)
 
 ```
+1.1.5: Folding the wind into your distance now updates the plays number too.
+```
+
+Earlier (1.1.4):
+
+```
 1.1.4: Wind and slope. A "plays" number for uphill and downhill shots, a wind
 marker on the edge of the numbers screen showing where the wind comes from and
 how many yards it's worth, a ghost Bubble on the map showing where the wind
