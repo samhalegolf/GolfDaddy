@@ -30,9 +30,9 @@ class NumbersView extends WatchUi.View {
 
     // Touch state (CaddyInputDelegate.onTap / onHold drive it):
     //   windZoom     the compass drawn big in the middle, to read it
-    //   windApplied  the big number includes the wind, and turns blue
+    //   (wind folded in: session.conditions.windApplied - the big number
+    //   includes it and turns blue, and so does every plays number)
     var windZoom = false;
-    var windApplied = false;
     // Where the last draw put the things a finger can hit.
     var numberBox = null;    // [x0, y0, x1, y1]
     var windHit = null;      // [x, y, radius]
@@ -143,7 +143,7 @@ class NumbersView extends WatchUi.View {
 
         // Wind applied (double-tap / long-press): the big number is the
         // distance plus the wind's +/-, in the wind blue.
-        var windOn = windApplied && effect != null && effect["level"] > 0 && targetDistanceM != null;
+        var windOn = session.conditions.windApplied && effect != null && effect["level"] > 0 && targetDistanceM != null;
         drawDistanceAndClub(dc, windOn ? targetDistanceM + effect["alongM"] : targetDistanceM, club, w, h, windOn);
 
         var plays = session.conditions.playsLikeM(player, aimAt, targetDistanceM, effect);
@@ -293,7 +293,7 @@ class NumbersView extends WatchUi.View {
     // where the wind blows, turned to the line of play (up is at the target);
     // the hub says how far it moves the shot along the line, in the watch's
     // own unit. Always shown when the watch has weather; whether it joins
-    // the big number is windApplied, the plays number the windInPlaysLike
+    // the numbers is conditions.windApplied, or always the windInPlaysLike
     // setting.
     function drawWind(dc, effect, x, ay, dial, w) {
         // Sized as one piece that fits its corner: the hub, the shaft just

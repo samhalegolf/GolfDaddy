@@ -42,6 +42,11 @@ class GarminConditions {
     static const MAX_POINTS = 48;
 
     var logged = null;           // simulator trace: the last wind logged
+    // The player folded the wind into the numbers (a double-tap / long-press
+    // on the numbers face, CaddyInputDelegate): the big number turns blue and
+    // every plays number - numbers face and map, and the map's plays Bubble -
+    // includes the wind, as the windInPlaysLike setting makes it always do.
+    var windApplied = false;
     var windCache = null;        // { "fromDeg", "kmh" } or null
     var windReadAt = null;
 
@@ -200,12 +205,12 @@ class GarminConditions {
     // ------------------------------------------------------------ plays
 
     // What the shot plays to: flat + slope, + wind when the player asked for
-    // it. Null when there is nothing to add (no slope known and wind off),
+    // it (windApplied, or the setting). Null when there is nothing to add (no slope known and wind off),
     // so the face shows no second number rather than a copy of the first.
     function playsLikeM(player, target, flatM, effect) {
         if (flatM == null) { return null; }
         var slope = slopeM(player, target);
-        var withWind = windInPlaysLike() && effect != null && effect["level"] > 0;
+        var withWind = (windApplied || windInPlaysLike()) && effect != null && effect["level"] > 0;
         if (slope == null && !withWind) { return null; }
         var out = flatM;
         if (slope != null) { out += slope; }

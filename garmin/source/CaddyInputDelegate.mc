@@ -285,7 +285,7 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
     }
 
     function toggleWindApplied() {
-        view.numbersView.windApplied = !view.numbersView.windApplied;
+        session.conditions.windApplied = !session.conditions.windApplied;
         WatchUi.requestUpdate();
     }
 
