@@ -48,6 +48,9 @@ struct AimableHoleMap: View {
     /// The readout drawn just above the unlock band.
     var holeNumber: Int? = nil
     var distanceM: Double? = nil
+    /// Wind, slope and units (WatchConditions): the wind ghost and streaks,
+    /// and the plays button that swaps the Bubble for the plays-distance one.
+    @ObservedObject var conditions: WatchConditions
 
     /* The three bands of a locked map, top to bottom:
          flag    the demo banner / clock row. Nothing aims from here.
@@ -137,7 +140,7 @@ struct AimableHoleMap: View {
                             guide.addLine(to: CGPoint(x: to.x - dx / length * trim, y: to.y - dy / length * trim))
                             context.stroke(guide, with: .color(.white.opacity(0.52)),
                                            style: StrokeStyle(lineWidth: 1.8, lineCap: .round, dash: [2, 8]))
-                            let label = Text("Green \(Int(layup.gapM.rounded())) m")
+                            let label = Text("Green \(WatchConditions.withUnit(layup.gapM))")
                                 .font(.system(size: 10, weight: .bold, design: .rounded))
                             /* The phone puts this halfway to the green; on a
                                wrist that is usually off the glass. So: just
@@ -158,18 +161,46 @@ struct AimableHoleMap: View {
                                        style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
                     }
 
+                    /* The wind ghost: the same Bubble where the wind alone
+                       carries the ball (WatchConditions.windEffect), a thin
+                       blue edge under the real one, with streaks blowing in
+                       from the upwind side. It moves with the aim; how far to
+                       lean on it is the player's call. */
+                    if let bubble = state.bubble, ring.count >= 3,
+                       let ghost = windNow?.ghost {
+                        let dLat = ghost.lat - bubble.target.lat, dLng = ghost.lng - bubble.target.lng
+                        let shifted = ring.compactMap { imagePoint(lat: $0.lat + dLat, lng: $0.lng + dLng) }.map(place)
+                        if shifted.count >= 3 {
+                            var path = Path()
+                            path.move(to: shifted[0])
+                            shifted.dropFirst().forEach { path.addLine(to: $0) }
+                            path.closeSubpath()
+                            context.stroke(path, with: .color(Self.windBlue), lineWidth: 1)
+                        }
+                        if let from = imagePoint(lat: bubble.target.lat, lng: bubble.target.lng).map(place),
+                           let to = imagePoint(lat: ghost.lat, lng: ghost.lng).map(place) {
+                            Self.drawWindStreaks(context, direction: CGVector(dx: to.x - from.x, dy: to.y - from.y),
+                                                 at: from, width: viewSize.width)
+                        }
+                    }
+
                     /* The Bubble the WRIST computed, drawn as its real shape
                        rather than an ellipse approximating it — every one of
-                       the 168 points is a coordinate the engine produced. */
-                    if ring.count >= 3 {
+                       the 168 points is a coordinate the engine produced. In
+                       plays mode it is the plays-distance Bubble instead (its
+                       own club and shape), drawn back at the aim and orange. */
+                    let plays = playsShot
+                    let mainRing = plays.map { p in p.result.ring.map { Coordinate(lat: $0.lat + p.shiftLat, lng: $0.lng + p.shiftLng) } } ?? ring
+                    let tint: Color = plays == nil ? .mint : Self.playsOrange
+                    if mainRing.count >= 3 {
                         var path = Path()
-                        let points = ring.compactMap { imagePoint(lat: $0.lat, lng: $0.lng) }.map(place)
+                        let points = mainRing.compactMap { imagePoint(lat: $0.lat, lng: $0.lng) }.map(place)
                         if points.count >= 3 {
                             path.move(to: points[0])
                             points.dropFirst().forEach { path.addLine(to: $0) }
                             path.closeSubpath()
-                            context.fill(path, with: .color(.mint.opacity(0.22)))
-                            context.stroke(path, with: .color(.mint), lineWidth: 1.5)
+                            context.fill(path, with: .color(tint.opacity(0.22)))
+                            context.stroke(path, with: .color(tint), lineWidth: 1.5)
                         }
                     }
 
@@ -179,7 +210,7 @@ struct AimableHoleMap: View {
                        the target, over a dark ghost so it reads on any
                        ground. */
                     if let bubble = state.bubble, let at = imagePoint(lat: bubble.centre.lat, lng: bubble.centre.lng).map(place) {
-                        drawLabel(context, club: bubble.club.club, metres: bubble.targetDistanceM, at: at)
+                        drawLabel(context, club: plays?.result.club.club ?? bubble.club.club, metres: bubble.targetDistanceM, at: at)
                     }
 
                     if let greenAt = imagePoint(green).map(place) {
@@ -215,6 +246,20 @@ struct AimableHoleMap: View {
             .simultaneousGesture(swipeGesture(viewSize: viewSize), including: canAim ? .all : .subviews)
             .overlay(alignment: .bottom) {
                 if bottomEdgeUnlock != nil { band(viewSize: viewSize) }
+            }
+            .overlay(alignment: .topLeading) {
+                if let playsText = playsLabel {
+                    let rect = playsRect(viewSize: viewSize)
+                    Text(playsText)
+                        .font(.system(size: 12, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(conditions.playsMode ? Color.black : Self.playsOrange)
+                        .padding(.horizontal, 8)
+                        .frame(height: rect.height)
+                        .background(conditions.playsMode ? Self.playsOrange : Color.black.opacity(0.7), in: Capsule())
+                        .overlay(Capsule().stroke(Self.playsOrange, lineWidth: 1))
+                        .position(x: rect.midX, y: rect.midY)
+                        .allowsHitTesting(false)
+                }
             }
             .focusable(canAim)
             .focused($crownFocused)
@@ -273,6 +318,12 @@ struct AimableHoleMap: View {
     private func tapGesture(viewSize: CGSize) -> some Gesture {
         SpatialTapGesture()
             .onEnded { value in
+                /* The plays button, hit a little wider than it is drawn. */
+                if playsLabel != nil, playsRect(viewSize: viewSize).insetBy(dx: -10, dy: -8).contains(value.location) {
+                    conditions.playsMode.toggle()
+                    WKInterfaceDevice.current().play(.click)
+                    return
+                }
                 if inBottomEdge(value.location, viewSize) { bandAction(atX: value.location.x, viewSize: viewSize); return }
                 if inTopBand(value.location) { return }
                 guard canAim, let bag, let profile,
@@ -304,7 +355,7 @@ struct AimableHoleMap: View {
                 Text(holeNumber.map { "HOLE \($0)" } ?? "HOLE")
                     .font(.caption2.weight(.semibold)).foregroundStyle(.white.opacity(0.85))
                 if let distanceM {
-                    Text("\(Int(distanceM.rounded())) m").font(.caption2.monospacedDigit().weight(.bold)).foregroundStyle(.mint)
+                    Text(WatchConditions.withUnit(distanceM)).font(.caption2.monospacedDigit().weight(.bold)).foregroundStyle(.mint)
                 }
             }
             .padding(.horizontal, 7).padding(.vertical, 2)
@@ -633,7 +684,7 @@ struct AimableHoleMap: View {
 
     private func drawLabel(_ context: GraphicsContext, club: String, metres: Double, at point: CGPoint) {
         let name = Text(club).font(.system(size: 12, weight: .heavy, design: .rounded))
-        let distance = Text("\(Int(metres.rounded())) m").font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
+        let distance = Text(WatchConditions.withUnit(metres)).font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
         let nameAt = CGPoint(x: point.x, y: point.y - 12)
         let distanceAt = CGPoint(x: point.x, y: point.y + 11)
         for offset in [CGPoint(x: 0.8, y: 0.8), CGPoint(x: -0.8, y: 0.8), CGPoint(x: 0.8, y: -0.8), CGPoint(x: -0.8, y: -0.8)] {
@@ -642,6 +693,90 @@ struct AimableHoleMap: View {
         }
         context.draw(name.foregroundStyle(.white), at: nameAt)
         context.draw(distance.foregroundStyle(.white.opacity(0.92)), at: distanceAt)
+    }
+
+    // MARK: - Wind and plays
+
+    static let windBlue = Color(red: 0x55 / 255, green: 0xAA / 255, blue: 1)
+    static let playsOrange = Color(red: 1, green: 0xAA / 255, blue: 0)
+
+    private var playerCoordinate: Coordinate? {
+        guard let p = player, let lat = p.lat, let lng = p.lng else { return nil }
+        return Coordinate(lat: lat, lng: lng)
+    }
+
+    private var windNow: WatchConditions.Effect? {
+        guard let bubble = state.bubble else { return nil }
+        return conditions.windEffect(player: playerCoordinate, target: bubble.target, flatM: bubble.targetDistanceM)
+    }
+
+    private var playsM: Double? {
+        guard let bubble = state.bubble else { return nil }
+        return conditions.playsLikeM(player: playerCoordinate, target: bubble.target, flatM: bubble.targetDistanceM, effect: windNow)
+    }
+
+    private var playsLabel: String? { playsM.map { "plays \(WatchConditions.withUnit($0))" } }
+
+    /* The plays Bubble: the engine run for a target the plays distance down
+       the same line, then drawn back at the real aim - where the plays club
+       actually lands. Cheap enough per frame, like a drag. */
+    private var playsShot: (result: BubbleEngine.Result, shiftLat: Double, shiftLng: Double)? {
+        guard conditions.playsMode, let plays = playsM, let bubble = state.bubble,
+              let fix = playerCoordinate, let bag, let profile else { return nil }
+        let along = WatchConditions.project(fix, bearing: WatchConditions.trueBearing(fix, bubble.target), metres: plays)
+        guard let result = BubbleEngine.calculate(.init(player: fix, target: along, bag: bag, bubble: profile)) else { return nil }
+        return (result, bubble.target.lat - along.lat, bubble.target.lng - along.lng)
+    }
+
+    /* The plays button: low and centred, above the readout and band while a
+       shot is locked. */
+    private func playsRect(viewSize: CGSize) -> CGRect {
+        let height: CGFloat = 20
+        let width: CGFloat = 92
+        let bottom = bottomEdgeUnlock != nil ? viewSize.height - Self.bottomEdgeM - Self.readoutM : viewSize.height - 10
+        return CGRect(x: (viewSize.width - width) / 2, y: bottom - height - 2, width: width, height: height)
+    }
+
+    /* Wind streaks, drawn to Sam's reference (2026-10-08): four staggered
+       strokes on the upwind side of the Bubble, each one smooth S that
+       thickens into a filled dart head with a notched back, the stroke running
+       into the head's solid middle so there is no gap. Same as the Garmin's. */
+    static func drawWindStreaks(_ context: GraphicsContext, direction: CGVector, at centre: CGPoint, width: CGFloat) {
+        let len = hypot(direction.dx, direction.dy)
+        guard len > 0.5 else { return }
+        let ux = direction.dx / len, uy = direction.dy / len
+        let px = -uy, py = ux
+        let reach = width * 0.22, length = width * 0.17, gap = width * 0.06
+        let amp = length * 0.09, thin = width * 0.003, thick = width * 0.0085
+        let headLen = length * 0.26, headHalf = headLen * 0.42
+        let steps = 10
+        for i in 0..<4 {
+            let side = (CGFloat(i) - 1.5) * gap
+            let back = reach + (i % 2 == 0 ? 0 : length * 0.35)
+            let tip = CGPoint(x: centre.x - ux * back + px * side, y: centre.y - uy * back + py * side)
+            let bodyEnd = length - headLen * 0.55
+            var left: [CGPoint] = [], right: [CGPoint] = []
+            for k in 0...steps {
+                let f = CGFloat(k) / CGFloat(steps)
+                let along = -length + bodyEnd * f
+                let wave = amp * sin(f * .pi * 2)
+                let half = thin + (thick - thin) * f
+                let x = tip.x + ux * along + px * wave, y = tip.y + uy * along + py * wave
+                left.append(CGPoint(x: x + px * half, y: y + py * half))
+                right.insert(CGPoint(x: x - px * half, y: y - py * half), at: 0)
+            }
+            var body = Path()
+            body.addLines(left + right)
+            body.closeSubpath()
+            context.fill(body, with: .color(windBlue))
+            let hb = CGPoint(x: tip.x - ux * headLen, y: tip.y - uy * headLen)
+            let notch = CGPoint(x: tip.x - ux * headLen * 0.72, y: tip.y - uy * headLen * 0.72)
+            var head = Path()
+            head.addLines([tip, CGPoint(x: hb.x + px * headHalf, y: hb.y + py * headHalf), notch,
+                           CGPoint(x: hb.x - px * headHalf, y: hb.y - py * headHalf)])
+            head.closeSubpath()
+            context.fill(head, with: .color(windBlue))
+        }
     }
 
     private func imageBox(of ring: [Coordinate]) -> CGRect? {

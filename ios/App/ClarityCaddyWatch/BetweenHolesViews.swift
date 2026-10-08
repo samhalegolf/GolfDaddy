@@ -88,8 +88,8 @@ struct QueuedHoleView: View {
 
     private var detail: String {
         [par.map { "Par \($0)" },
-         lengthM.map { "\(Int($0.rounded())) m" },
-         atTee ? "at the tee" : toTeeM.map { "\(Int($0.rounded())) m to the tee" }]
+         lengthM.map { WatchConditions.withUnit($0) },
+         atTee ? "at the tee" : toTeeM.map { "\(WatchConditions.withUnit($0)) to the tee" }]
             .compactMap { $0 }.joined(separator: " · ")
     }
 

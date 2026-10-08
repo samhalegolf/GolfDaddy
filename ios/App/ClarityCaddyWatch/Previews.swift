@@ -1,5 +1,6 @@
 #if DEBUG
 import SwiftUI
+import WatchBubbleEngine
 
 /* Xcode canvas fixtures for the three states this app can be in.
 
@@ -107,6 +108,56 @@ enum WatchPreviewFixtures {
 
         let image = context.makeImage().map { UIImage(cgImage: $0) } ?? UIImage()
         return WatchMapStore.LoadedHoleMap(holeNumber: 1, image: image, spatialReference: reference)
+    }
+}
+
+/* `-fixture` on the launch line (Debug builds only) opens this instead of the
+   real app: the numbers face and the aimable map on the fixtures above, with a
+   stand-in bag, so the faces can be looked at in the simulator without a
+   phone, a round or a delivered package. Wind and slope are the wrist's own
+   live readings for the fixture spot (WatchConditions). */
+struct FixtureHarness: View {
+    @StateObject private var conditions = WatchConditions()
+    @State private var page = CommandLine.arguments.contains("-fixtureMap") ? 1 : 0
+
+    static let bag = WatchBagSnapshot(clubs: [
+        .init(club: "Driver", carryM: 215, totalM: 235), .init(club: "3W", carryM: 195, totalM: 210),
+        .init(club: "4H", carryM: 180, totalM: 192), .init(club: "5i", carryM: 168, totalM: 178),
+        .init(club: "6i", carryM: 158, totalM: 167), .init(club: "7i", carryM: 148, totalM: 156),
+        .init(club: "8i", carryM: 137, totalM: 144), .init(club: "9i", carryM: 126, totalM: 132),
+        .init(club: "PW", carryM: 114, totalM: 119), .init(club: "GW", carryM: 100, totalM: 104),
+        .init(club: "SW", carryM: 85, totalM: 88), .init(club: "LW", carryM: 70, totalM: 72)
+    ], isGhost: false)
+
+    var body: some View {
+        TabView(selection: $page) {
+            ShotView(scene: WatchPreviewFixtures.scene(driving: true), stale: false, pending: [], rejection: nil,
+                     send: { kind in if kind == .lock { page = 1 } }, dismissRejection: {},
+                     driving: true, conditions: conditions)
+                .tag(0)
+            HoleMapPage(
+                scene: WatchPreviewFixtures.scene(canLock: false, driving: true),
+                map: WatchPreviewFixtures.standInMap(),
+                player: WatchPreviewFixtures.player,
+                deliveryHint: nil,
+                bag: Self.bag,
+                profile: WatchBubbleProfile(offsetDeg: nil, handedness: .right),
+                canAim: true,
+                onSwipeBack: { page = 0 },
+                locked: true,
+                onUnlock: { page = 0 },
+                conditions: conditions
+            )
+            .tag(1)
+        }
+        .tabViewStyle(.page)
+        .onAppear {
+            let args = CommandLine.arguments
+            /* The states a tap or a long-press reaches, for a simulator
+               nobody can touch. */
+            if args.contains("-fixturePlays") { conditions.playsMode = true }
+            if args.contains("-fixtureWind") { conditions.windApplied = true }
+        }
     }
 }
 

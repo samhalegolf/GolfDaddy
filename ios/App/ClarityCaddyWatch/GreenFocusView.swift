@@ -54,9 +54,9 @@ struct GreenFocusView: View {
                    the room it needs to stay reachable. */
                 if let toGreenM {
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
-                        Text("\(Int(toGreenM.rounded()))")
+                        Text(WatchConditions.number(toGreenM))
                             .font(.system(size: 19, weight: .black, design: .rounded)).monospacedDigit()
-                        Text("m").font(.caption2.weight(.heavy)).foregroundStyle(.secondary)
+                        Text(WatchConditions.suffix).font(.caption2.weight(.heavy)).foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 7, style: .continuous))

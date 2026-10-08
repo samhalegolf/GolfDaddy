@@ -23,6 +23,7 @@
 		CA77D9000000000000000013 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000023 /* ContentView.swift */; };
 		CA77D9000000000000000014 /* ShotView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000024 /* ShotView.swift */; };
 		CA77D9000000000000000016 /* WatchMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000028 /* WatchMap.swift */; };
+		CA77D9000000000000000F01 /* WatchConditions.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000F02 /* WatchConditions.swift */; };
 		CA77D9000000000000000017 /* WatchMapStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D9000000000000000029 /* WatchMapStore.swift */; };
 		CA77D9000000000000000018 /* HoleMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D900000000000000002a /* HoleMapView.swift */; };
 		CA77D9000000000000000019 /* Previews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA77D900000000000000002b /* Previews.swift */; };
@@ -87,6 +88,7 @@
 		CA77D9000000000000000026 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		CA77D9000000000000000027 /* WatchExtension-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "WatchExtension-Info.plist"; sourceTree = "<group>"; };
 		CA77D9000000000000000028 /* WatchMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMap.swift; sourceTree = "<group>"; };
+		CA77D9000000000000000F02 /* WatchConditions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchConditions.swift; sourceTree = "<group>"; };
 		CA77D9000000000000000029 /* WatchMapStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMapStore.swift; sourceTree = "<group>"; };
 		CA77D900000000000000002a /* HoleMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoleMapView.swift; sourceTree = "<group>"; };
 		CA77D900000000000000002b /* Previews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Previews.swift; sourceTree = "<group>"; };
@@ -171,6 +173,7 @@
 				CA77D9000000000000000023 /* ContentView.swift */,
 				CA77D9000000000000000024 /* ShotView.swift */,
 				CA77D9000000000000000028 /* WatchMap.swift */,
+				CA77D9000000000000000F02 /* WatchConditions.swift */,
 				CA77D9000000000000000029 /* WatchMapStore.swift */,
 				CA77D9000000000000000B05 /* WatchPlayerStore.swift */,
 				CA77D9000000000000000B07 /* AimableHoleMap.swift */,
@@ -399,6 +402,7 @@
 				CA77D9000000000000000B06 /* AimableHoleMap.swift in Sources */,
 				CA77D9000000000000000013 /* ContentView.swift in Sources */,
 				CA77D9000000000000000016 /* WatchMap.swift in Sources */,
+				CA77D9000000000000000F01 /* WatchConditions.swift in Sources */,
 				CA77D9000000000000000010 /* ClarityCaddyWatchApp.swift in Sources */,
 				CA77D9000000000000000018 /* HoleMapView.swift in Sources */,
 			);

@@ -157,7 +157,8 @@ struct ContentView: View {
                          dismissRejection: session.dismissRejection,
                          driving: true, handoverNotice: session.handoverNotice, dismissHandoverNotice: session.dismissHandoverNotice,
                          wristFix: session.wristFix, lockedShot: session.lockedShot,
-                         demo: session.isDemo)
+                         demo: session.isDemo,
+                         conditions: session.conditions)
                     .tag(Page.numbers)
                 if let holeNumber = scene.hole?.number {
                     HoleMapPage(
@@ -189,7 +190,8 @@ struct ContentView: View {
                         pendingTarget: session.lockedShot.map { WatchScene.GeoPoint(lat: $0.target.lat, lng: $0.target.lng) },
                         pendingExtentM: session.lockedShot.map { CGSize(width: $0.widthM, height: $0.depthM) },
                         pendingClub: session.lockedShot?.club,
-                        aimOrigin: session.aimOrigin
+                        aimOrigin: session.aimOrigin,
+                        conditions: session.conditions
                     )
                     .tag(Page.map)
                 }
@@ -309,8 +311,8 @@ struct ReadyFace: View {
                 }
                 if let distanceLabel {
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
-                        Text("\(Int(distanceLabel.metres.rounded()))").font(.system(size: 17, weight: .black, design: .rounded)).monospacedDigit()
-                        Text("m").font(.caption2.weight(.heavy)).foregroundStyle(.secondary)
+                        Text(WatchConditions.number(distanceLabel.metres)).font(.system(size: 17, weight: .black, design: .rounded)).monospacedDigit()
+                        Text(WatchConditions.suffix).font(.caption2.weight(.heavy)).foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 6).padding(.vertical, 3)
                     .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
@@ -415,7 +417,7 @@ struct DemoBrowserFace: View {
 
     private func subtitle(_ hole: Int) -> String {
         let parText = par(hole).map { "PAR \($0)" }
-        let lengthText = length(hole).map { "\(Int($0.rounded()))m" }
+        let lengthText = length(hole).map { WatchConditions.withUnit($0) }
         return [parText, lengthText].compactMap { $0 }.joined(separator: " · ")
     }
 }

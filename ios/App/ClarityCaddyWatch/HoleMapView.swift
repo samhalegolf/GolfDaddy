@@ -162,6 +162,8 @@ struct HoleMapPage: View {
     var pendingExtentM: CGSize? = nil
     var pendingClub: String? = nil
     var aimOrigin: Coordinate? = nil
+    /// Wind, slope and units for the shot (WatchSessionManager.conditions).
+    var conditions: WatchConditions? = nil
 
     /* Edge to edge: the map is the page, and the hole and distance float over
        its top-left corner in the clock's row rather than taking a row of their
@@ -189,6 +191,7 @@ struct HoleMapPage: View {
                         bottomEdgeUnlock: locked ? onUnlock : nil,
                         holeNumber: scene.hole?.number,
                         distanceM: scene.distance?.centre,
+                        conditions: conditions ?? WatchConditions(),
                         origin: aimOrigin
                     )
                 } else {
@@ -236,7 +239,7 @@ struct HoleMapPage: View {
                     Text(scene.hole?.number.map { "HOLE \($0)" } ?? "HOLE")
                         .font(.caption2.weight(.semibold)).foregroundStyle(.white.opacity(0.85))
                     if let centre = scene.distance?.centre {
-                        Text("\(Int(centre.rounded())) m").font(.caption2.monospacedDigit().weight(.bold)).foregroundStyle(.mint)
+                        Text(WatchConditions.withUnit(centre)).font(.caption2.monospacedDigit().weight(.bold)).foregroundStyle(.mint)
                     }
                 }
                 .padding(.horizontal, 7).padding(.vertical, 2)

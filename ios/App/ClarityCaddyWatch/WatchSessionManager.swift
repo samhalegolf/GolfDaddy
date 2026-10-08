@@ -93,6 +93,9 @@ final class WatchSessionManager: NSObject, ObservableObject {
        transport: a snapshot belongs to the PLAYER and changes when they edit
        their bag, while a map package belongs to the course. */
     nonisolated let player = WatchPlayerStore()
+    /* Wind, slope and units for the shot in hand - the wrist's own readings
+       (WatchConditions), shared by the numbers face and the map. */
+    let conditions = WatchConditions()
 
     /* Whether this wrist may run its own Bubble engine, or must render the
        phone's. Derived rather than stored: it is a pure function of what the
