@@ -106,10 +106,31 @@ async function claimNextJob({ allowNearby }) {
    comes round every three minutes to carry on. */
 const NEARBY_CLAIM_BUDGET_MS = 8 * 60 * 1000;
 
-/* After a player's scan settles, line up the courses around it. Not for background jobs
-   themselves - one scan must not ripple outward course by course. */
+/* After a player's scan settles, line up the courses around it. Only a PLAYER's scan: a guest
+   install, or a signed-in account that is not an admin. Not for background jobs themselves -
+   one scan must not ripple outward course by course - and not for an admin's runs (Studio
+   remaps, overlay runs, an admin opening courses in the app): reworking one course should not
+   queue ten more each time. */
+const NEIGHBOUR_ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
+async function requestedByPlayer(job) {
+  const actor = String(job.requested_by || "");
+  if (actor.startsWith("guest:")) return true;
+  if (!actor.startsWith("user:")) return false;
+  try {
+    const response = await fetch(supabaseBase() + "/auth/v1/admin/users/" + encodeURIComponent(actor.slice(5)), {
+      headers: { apikey: supabaseKey(), Authorization: "Bearer " + supabaseKey() }
+    });
+    /* Unknown is not a player: when in doubt, queue nothing. */
+    if (!response.ok) return false;
+    const user = await response.json();
+    return !NEIGHBOUR_ADMIN_EMAILS.has(String(user && user.email || "").trim().toLowerCase());
+  } catch (error) {
+    return false;
+  }
+}
 async function queueNeighboursAfter(job) {
   if (String(job.kind || "automap") !== "automap") return;
+  if (!(await requestedByPlayer(job))) return;
   const outcome = await enqueueNearbyMapperJobs({ sourceCourseId: job.course_id })
     .catch(error => ({ queued: [], reason: String(error && error.message || error).slice(0, 200) }));
   console.log("course-mapper-worker: neighbours of", job.course_id, JSON.stringify(outcome));
