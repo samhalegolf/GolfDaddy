@@ -132,6 +132,43 @@ test("an outline run by a different website is another club, whatever it is call
   assert.strictEqual(loops.excluded[0].reason, "course-outline-run-by-another-owner");
 });
 
+/* A tight box around some of a course's hole ways, as an outline drawn round just those holes. */
+function outlineAround(holes, tags, id) {
+  const pts = holes.flatMap(hole => hole.geometry);
+  const lats = pts.map(p => p.lat), lngs = pts.map(p => p.lng);
+  const s = Math.min(...lats) - 0.0001, n = Math.max(...lats) + 0.0001;
+  const w = Math.min(...lngs) - 0.0001, e = Math.max(...lngs) + 0.0001;
+  return { type: "way", id, tags, geometry: [{ lat: s, lng: w }, { lat: n, lng: w }, { lat: n, lng: e }, { lat: s, lng: e }, { lat: s, lng: w }] };
+}
+
+test("one course whose OSM outline is drawn in pieces is one course - The Club at Mapledurham", async () => {
+  const core = await import("file://" + path.join(root, "functions", "lib", "gd-automapper-core.mjs"));
+  const own = course(1000, WEST);
+  const tags = { leisure: "golf_course", name: "The Club at Mapledurham" };
+  const payload = { elements: own.concat(course(2000, GEORGE), [
+    outlineAround(own.slice(0, 10), tags, 51065707),
+    outlineAround(own.slice(10, 17), tags, 499952512),
+    outlineAround(own.slice(17), tags, 499952509),
+    ring(GEORGE, 0.008, 0.016, { leisure: "golf_course", name: "Reading Golf Club" }, 28905123)
+  ]) };
+  const loops = core.separateLoops(payload, WEST, { facilityName: "The Club at Mapledurham" });
+  assert.strictEqual(loops.length, 1, "10 + 7 + 1 pieces with no repeated number are one 18: " + JSON.stringify(loops.map(l => l.holeNumbers)));
+  assert.deepStrictEqual(loops[0].holeNumbers, Array.from({ length: 18 }, (_, i) => i + 1));
+  assert.strictEqual(loops[0].name, "The Club at Mapledurham");
+  assert.deepStrictEqual(loops.excluded.map(entry => entry.name), ["Reading Golf Club"], "the club down the road is still set aside");
+});
+
+test("two outlined courses that repeat hole numbers are never joined", async () => {
+  const core = await import("file://" + path.join(root, "functions", "lib", "gd-automapper-core.mjs"));
+  const west = course(1000, WEST), east = course(2000, EAST);
+  const payload = { elements: west.concat(east, [
+    outlineAround(west, { golf: "course", name: "North" }, 9001),
+    outlineAround(east, { golf: "course", name: "South" }, 9002)
+  ]) };
+  const loops = core.separateLoops(payload, WEST, { facilityName: "Millbrook Golf Resort" });
+  assert.strictEqual(loops.length, 2);
+});
+
 test("every course out of one scan carries the facility's name as its parent", async () => {
   const { maps } = await replaySophiaGreen();
   assert.strictEqual(maps.size, 3);
