@@ -10,6 +10,7 @@
 
 import { createSupabaseFetch } from "./gd-supabase-fetch.mjs";
 import { normalizeOverlayFeatures, overlaySummary, OVERLAY_MAX_FEATURES } from "./gd-map-overlay-core.mjs";
+import { normalizePlayOrders } from "./gd-play-order-core.mjs";
 
 export const OVERLAYS_TABLE = "course_map_overlays";
 const MAPS_TABLE = "course_maps";
@@ -89,10 +90,11 @@ export async function loadScorecard(courseName, scorecardCourseKey) {
 }
 
 export async function loadOverlay(courseId) {
-  const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features,status,updated_at,updated_by,ai_scan,course_map&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
+  const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features,play_orders,status,updated_at,updated_by,ai_scan,course_map&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
   const row = Array.isArray(rows) ? rows[0] : null;
   return {
     features: normalizeOverlayFeatures(row ? row.features : []),
+    playOrders: normalizePlayOrders(row ? row.play_orders : [], courseId),
     status: overlayStatus(row && row.status),
     updatedAt: row ? row.updated_at : null,
     updatedBy: row ? row.updated_by : null,
@@ -107,11 +109,11 @@ export async function loadOverlay(courseId) {
 export function overlayStatus(value) { return value === "ready" ? "ready" : "draft"; }
 
 /* Marks the saved overlay ready (or back to draft) without touching its shapes. Refused when
-   there is nothing saved: an empty overlay is no row, and "ready" with no shapes means
-   nothing. */
+   there is nothing saved: an empty overlay is no row, and "ready" with no shapes and no play
+   orders means nothing. */
 export async function writeOverlayStatus(courseId, status) {
   const saved = await loadOverlay(courseId);
-  if (!saved.features.length) return { error: "nothing to mark", detail: "Place some shapes first - there is no saved overlay for this course." };
+  if (!saved.features.length && !saved.playOrders.length) return { error: "nothing to mark", detail: "Place some shapes or make a play order first - there is no saved overlay for this course." };
   const now = new Date().toISOString();
   await supabaseFetch(OVERLAYS_TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
     method: "PATCH",
@@ -156,11 +158,13 @@ export function publicCourseMap(courseMap) {
 
 /* Saves a feature list as the course's overlay. append:true keeps what is saved and adds
    these, incoming ids winning over saved ones (a re-run over the same picture replaces its
-   own earlier shapes rather than stacking a second copy). An empty result deletes the row:
-   "no overlay" is the absence of a row, not a row holding []. Every save puts the overlay
-   back to draft: a shape changed after sign-off has not been signed off. Returns the API's
-   response shape so both endpoints answer identically. */
-export async function saveOverlay({ courseId, features: raw, savedBy, append }) {
+   own earlier shapes rather than stacking a second copy). playOrders, when given, replaces the
+   saved play orders; left out (the AI scan) they are kept as they are. An overlay with no
+   shapes and no play orders deletes the row: "no overlay" is the absence of a row, not a row
+   holding []. Every save puts the overlay back to draft: a shape or play order changed after
+   sign-off has not been signed off. Returns the API's response shape so both endpoints answer
+   identically. */
+export async function saveOverlay({ courseId, features: raw, playOrders: rawOrders, savedBy, append }) {
   let list = Array.isArray(raw) ? raw : [];
   if (append) {
     const saved = await loadOverlay(courseId);
@@ -172,18 +176,19 @@ export async function saveOverlay({ courseId, features: raw, savedBy, append }) 
   /* Features the caller sent but that did not survive normalisation are reported, not
      silently dropped: a two-point "fairway" is a drawing slip the operator wants to hear about. */
   const dropped = list.length - features.length;
-  if (!features.length) {
+  const playOrders = Array.isArray(rawOrders) ? normalizePlayOrders(rawOrders, courseId) : (await loadOverlay(courseId)).playOrders;
+  if (!features.length && !playOrders.length) {
     await supabaseFetch(OVERLAYS_TABLE + "?course_id=eq." + encodeURIComponent(courseId), { method: "DELETE" });
-    return { courseId, overlay: { features: [], status: "draft", updatedAt: null, updatedBy: null }, summary: overlaySummary([]), dropped, deleted: true };
+    return { courseId, overlay: { features: [], playOrders: [], status: "draft", updatedAt: null, updatedBy: null }, summary: overlaySummary([]), dropped, deleted: true };
   }
   const now = new Date().toISOString();
   const written = await supabaseFetch(OVERLAYS_TABLE + "?on_conflict=course_id", {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates,return=representation" },
-    body: JSON.stringify({ course_id: courseId, features, status: "draft", updated_by: savedBy, updated_at: now })
+    body: JSON.stringify({ course_id: courseId, features, play_orders: playOrders, status: "draft", updated_by: savedBy, updated_at: now })
   });
   const row = Array.isArray(written) ? written[0] : null;
-  return { courseId, overlay: { features, status: "draft", updatedAt: row ? row.updated_at : now, updatedBy: savedBy }, summary: overlaySummary(features), dropped };
+  return { courseId, overlay: { features, playOrders, status: "draft", updatedAt: row ? row.updated_at : now, updatedBy: savedBy }, summary: overlaySummary(features), dropped };
 }
 
 /* The AI scan's state, on the same row, touching nothing else on it. The row is created if

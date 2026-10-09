@@ -20,6 +20,12 @@
  * and new shapes carry it, or select a shape and change its number. Unnumbered shapes are
  * numbered by the mapper from the scorecard.
  *
+ * Play orders: where the mapper splits a site into courses wrongly or names them badly, the
+ * courses are said by hand. "+ New play order", name it, and click its holes in the order they
+ * are played - an OSM hole line, or a hole linked from overlay shapes. A hole can be in several
+ * play orders. With play orders on a ready overlay the mapper publishes exactly those, one
+ * course each, under the names given (functions/lib/gd-play-order-core.mjs).
+ *
  * Drafts: a session is a draft until "Mark ready" is pressed, and the mapper ignores a draft
  * overlay. Any shape change puts it back to draft, so what the mapper reads is always
  * something a person signed off (supabase/migrations/20260929_add_course_map_overlay_status.sql).
@@ -152,6 +158,9 @@
   var session = {
     course: null, features: [], loadedFor: "", osm: null, objects: [], lastRun: null, courseMap: null, view: null, sourceKey: "",
     showOsm: true, showObjects: true, status: "draft", hole: null,
+    /* Hand-built courses: [{id, name, courseId, holes: ["osm:way/N" | "link:ID"]}], and the one
+       being edited. Saved with the shapes. */
+    playOrders: [], activeOrder: "",
     /* The Number tool: the number the next hole clicked gets, and whether it then steps on. */
     numberNext: 1, numberAuto: true,
     dirty: false, rev: 0, saving: false, saveError: "", fairwayWidth: 0,
@@ -188,7 +197,7 @@
         showOsm: session.showOsm, showObjects: session.showObjects, mode: session.mode, fairwayWidth: session.fairwayWidth,
         wandSize: session.wandSize, method: session.method, lineWandSize: session.lineWandSize, mergeBunkers: session.mergeBunkers, seams: session.seams, fullscreen: !!session.fullscreen,
         treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel, numberAuto: session.numberAuto,
-        unsaved: session.dirty && session.loadedFor ? { courseId: session.loadedFor, features: session.features } : null
+        unsaved: session.dirty && session.loadedFor ? { courseId: session.loadedFor, features: session.features, playOrders: session.playOrders } : null
       }));
     } catch (e) {}
   }
@@ -223,6 +232,8 @@
   /* Everything that belongs to one course, dropped when another is picked or opened. */
   function forgetCourse() {
     session.features = [];
+    session.playOrders = [];
+    session.activeOrder = "";
     session.osm = null;
     session.objects = [];
     session.lastRun = null;
@@ -330,6 +341,10 @@
     osmFairway: { color: "#8fa79c", weight: 1, dashArray: "3 5", fillOpacity: 0 },
     osmTee: { color: "#6cc7ff", weight: 2, fillColor: "#6cc7ff", fillOpacity: 0.3 },
     osmHole: { color: "#ffffff", weight: 1, dashArray: "2 6", opacity: 0.7 },
+    /* An OSM hole line in the play order being built, and the wide band that makes any of them
+       easy to click. */
+    orderHole: { color: "#3cff8d", weight: 4, opacity: 0.95 },
+    orderHit: { weight: 18, opacity: 0, className: "gdStudioOverlayOrderHit" },
     osmBunker: { color: "#f2dfa0", weight: 1, fillColor: "#f2dfa0", fillOpacity: 0.25 },
     osmWater: { color: "#4fb3ff", weight: 1, fillColor: "#2f8fff", fillOpacity: 0.22 },
     /* The course's saved objects: thin amber outlines, so they read as "already there" and
@@ -347,6 +362,7 @@
   var ICON = {
     move: svgIcon('<path d="M5 3l13 7-5.5 1.8L10.7 17z"/><path d="M13 12l5 5"/>'),
     number: svgIcon('<path d="M9 4L7 20M17 4l-2 16M4.5 9h15M3.5 15h15"/>'),
+    order: svgIcon('<path d="M10 6h10M10 12h10M10 18h10"/><path d="M4 4.5l1.5-.8V8M4 11h2.5L4 14.5h2.5M4 16.5h2.5v3.5H4M4 18.2h2"/>'),
     connect: svgIcon('<circle cx="6" cy="18" r="2.6"/><circle cx="18" cy="6" r="2.6"/><path d="M8 16l8-8" stroke-dasharray="2 3"/>'),
     fairway: svgIcon('<path d="M7 21c-1-5 2-7 4-10s2-6 1-8"/><path d="M13 21c-1-5 2-7 4-10s2-6 1-8"/>'),
     green: svgIcon('<path d="M9 18V3l8 3.5L9 10"/><ellipse cx="10" cy="19" rx="7" ry="2.4"/>'),
@@ -400,6 +416,8 @@
     var lastPlacedId = "";
     /* Link tool: the shapes clicked so far, waiting for Enter or Space to link them. */
     var linkPick = [];
+    /* Whether the map was last drawn for the Play order tool (clickable OSM hole lines). */
+    var wasOrdering = false;
     var linkLayers = [];
     /* One hole number tag per hole, and the one open for typing into (its group key). */
     var holeTagLayers = [];
@@ -469,6 +487,7 @@
       "<strong>Seams</strong> (on by default): a fairway, water, hazard, waste area or trees kept within a few metres of another - or just overlapping it - meets it in the middle, and that line is shared; drag it and both shapes follow, so it only changes which ground is which. " +
       "<strong>Link</strong>: click the shapes that belong to one hole (click again to drop one), then <strong>Enter</strong> or <strong>Space</strong> links them and the next click starts a new link. A link only says they are one hole - it never numbers them. One shape and Enter takes it out of its link; <strong>Esc</strong> clears the pick. " +
       "<strong>Number</strong>: click each hole's fairway (or any shape on it) and the whole hole takes the <em>Next hole</em> number; with <em>Auto</em> on, the number then moves on, so 1 to 18 is eighteen clicks. Each hole shows one number on its fairway - click it with any tool to type a different one. A number on two holes shows red. " +
+      "<strong>Play order</strong>: where the mapper gets a site's courses wrong, say them by hand. <strong>+ New play order</strong>, name it, then click its holes in the order they are played - an OSM hole line, or any shape of a hole you have linked (link a hole's tee and green first). Click a hole again to take it out. A hole can be in several play orders, so the same nines played in a different order are just another play order. With play orders on a ready overlay, the mapper publishes exactly those courses under those names. " +
       "<strong>Undo</strong> (the arrow at the top of the right-hand buttons, or Ctrl+Z / ⌘Z) takes back the last change, one at a time. " +
       "Everything saves as you go, as a <strong>draft</strong> the mapper ignores - <strong>Mark ready</strong> when the course looks right, then run the mapper. " +
       "Bright outlines are what OSM already has; dashed amber ones are the course's saved objects.</p></details>" +
@@ -481,6 +500,7 @@
       railButton("tool-move", "move", "Move", "Select, move and reshape (V)") +
       railButton("tool-connect", "connect", "Link", "Link shapes to the same hole (C)") +
       railButton("tool-number", "number", "Number", "Click each hole to number it - Auto steps 1, 2, 3... (N)") +
+      railButton("tool-order", "order", "Play order", "Build a course by hand: name it, then click its holes in the order they are played (O)") +
       '<span class="gdStudioOverlayRailRule"></span>' +
       railButton("tool-fairway", "fairway", "Fairway", "") +
       railButton("tool-green", "green", "Green", "") +
@@ -520,6 +540,7 @@
       '<label class="gdStudioOverlayOpt" data-gd-overlay="seams-label" title="A fairway, water, hazard, waste area or trees kept within a few metres of another meets it in the middle, and the line between them is shared - drag it and both follow"><input type="checkbox" data-gd-overlay="seams"> Seams</label>' +
       '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="shape-pins" hidden></button>' +
       "</div>" +
+      '<div class="gdStudioOverlayOrders" data-gd-overlay="orders" hidden></div>' +
       '<div class="gdStudioOverlayViewRail" role="toolbar" aria-label="View">' +
       viewButton("undo", "undo", "Undo the last change (Ctrl+Z / ⌘Z)") +
       viewButton("fullscreen", "expand", "Full screen") +
@@ -548,7 +569,7 @@
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "unnumber", "clear", "run", "status"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "unnumber", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -650,7 +671,7 @@
       return !!session.course && session.loadedFor === courseIdOf(session.course) && !scanning && !busy;
     }
 
-    var TOOLS = ["move", "connect", "number", "fairway", "green", "tee", "bunker", "water", "trees", "hazard", "waste"];
+    var TOOLS = ["move", "connect", "number", "order", "fairway", "green", "tee", "bunker", "water", "trees", "hazard", "waste"];
 
     /* Whatever was just placed is kept: the live shape, and the trees the finder dropped. The
        colour wand's selection is not a shape yet - it goes, unless `keepColour`. */
@@ -673,6 +694,11 @@
       lastPlacedId = "";
       if (linkPick.length) { linkPick = []; drawFeatures(); }
       if (tool !== "move" && selectedId) select("");
+      /* OSM hole lines are clickable only while a play order is being built, and the hole tags
+         show its order instead of the hole numbers. */
+      var ordering = tool === "order";
+      if (ordering !== wasOrdering) { wasOrdering = ordering; drawOsm(); drawHoleTags(); }
+      renderOrders();
       /* Double-click zooms, except while laying a fairway line, where it would move the ground
          under the last point. */
       syncDoubleClick();
@@ -1458,7 +1484,7 @@
       if (Date.now() - dragEndedAt < 300) return;
       if (!session.course) { setStatus("Pick a course first."); return; }
       /* Empty ground under the Link tool does nothing: the pick waits for Enter or Esc. */
-      if (tool === "connect" || tool === "number") return;
+      if (tool === "connect" || tool === "number" || tool === "order") return;
       if (tool === "move") { if (selectedId) select(""); return; }
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
@@ -2033,6 +2059,7 @@
           if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
           if (tool === "connect") { if (canEdit() && Date.now() - dragEndedAt >= 300) toggleLinkPick(f.id); return; }
           if (tool === "number") { numberHole(f); return; }
+          if (tool === "order") { allocateShape(f); return; }
           if (tool !== "move") { handleMapClick(e.latlng); return; }
           if (Date.now() - dragEndedAt < 300) return;
           select(f.id);
@@ -2206,6 +2233,7 @@
 
     function drawHoleTags() {
       clearHoleTags();
+      if (tool === "order") { drawOrderTags(); return; }
       var groups = holeGroups();
       var uses = {};
       groups.forEach(function (g) { g.numbers.forEach(function (n) { uses[n] = (uses[n] || 0) + 1; }); });
@@ -2294,6 +2322,216 @@
       changed();
       var taken = n && holeGroups().filter(function (other) { return other.numbers.indexOf(n) >= 0; }).length > 1;
       setStatus(n ? "Hole numbered " + n + "." + (taken ? " Another hole has " + n + " too - it shows red until one is changed." : "") : "Hole number taken off.", !!taken);
+    }
+
+    /* ---- play orders ----
+       A play order is a course said by hand: a name, and its holes in the order they are played.
+       A hole is an OSM hole line ("osm:way/N") or the overlay shapes linked as one hole
+       ("link:ID"), and it can be in any number of play orders. While the Play order tool is in
+       hand, OSM hole lines are clickable, the hole tags show the order being built, and a click
+       on a hole adds it next - or takes it out if it is already in. */
+
+    var PLAY_ORDER_MAX = 12;
+    var PLAY_ORDER_MAX_HOLES = 36;
+
+    function hasOverlay() { return session.features.length > 0 || session.playOrders.length > 0; }
+    function activeOrder() { return session.playOrders.filter(function (o) { return o.id === session.activeOrder; })[0] || null; }
+    function osmHoleById(id) { return ((session.osm && session.osm.holes) || []).filter(function (h) { return h.id === id; })[0] || null; }
+
+    /* Where a hole's tag goes and what the list calls it. `problem` is anything that will stop the
+       mapper building it - the same checks the server makes. */
+    function describeRef(ref) {
+      var osm = /^osm:(.+)$/.exec(ref);
+      if (osm) {
+        var hole = osmHoleById(osm[1]);
+        if (!hole) return { label: "OSM hole", problem: "not found in OSM here", at: null };
+        var a = hole.points[0], b = hole.points[hole.points.length - 1];
+        return { label: "OSM hole " + (hole.ref || "(unnumbered)"), problem: "", at: [(a.lat + b.lat) / 2, (a.lng + b.lng) / 2] };
+      }
+      var link = /^link:(.+)$/.exec(ref);
+      var members = link ? session.features.filter(function (f) { return f.link === link[1]; }) : [];
+      if (!members.length) return { label: "Linked hole", problem: "its shapes are gone", at: null };
+      var count = function (kind) { return members.filter(function (f) { return f.kind === kind; }).length; };
+      var drawn = count("hole") > 0;
+      var problem = drawn ? "" : count("green") !== 1 ? (count("green") ? "two greens" : "no green") : !count("tee") ? "no tee" : "";
+      return { label: "Linked hole (" + members.map(function (f) { return kindLabel(f.kind).toLowerCase(); }).join(", ") + ")", problem: problem, at: tagAnchor(members) };
+    }
+
+    /* OSM hole lines while a play order is built: the line, brighter when it is in the order,
+       and a wide invisible band over it so it is easy to click. */
+    function drawOrderOsmHoles(holes) {
+      var order = activeOrder();
+      (holes || []).forEach(function (item) {
+        var latlngs = (item.points || []).map(function (p) { return [p.lat, p.lng]; });
+        if (latlngs.length < 2) return;
+        var ref = "osm:" + item.id;
+        var inOrder = !!order && order.holes.indexOf(ref) >= 0;
+        var line = L.polyline(latlngs, Object.assign({ interactive: false }, inOrder ? STYLE.orderHole : STYLE.osmHole)).addTo(mapObj);
+        osmLayers.push(line);
+        if (!inOrder && item.ref) {
+          line.bindTooltip(String(item.ref), { permanent: true, direction: "center", className: "gdStudioOverlayLabel isOsm" });
+        }
+        var hit = L.polyline(latlngs, STYLE.orderHit).addTo(mapObj);
+        hit.on("click", function (e) {
+          if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
+          toggleOrderHole(ref);
+        });
+        osmLayers.push(hit);
+      });
+    }
+
+    /* The active play order's positions, one tag per hole. Clicking a tag takes the hole out. */
+    function drawOrderTags() {
+      var order = activeOrder();
+      if (!order) return;
+      order.holes.forEach(function (ref, index) {
+        var d = describeRef(ref);
+        if (!d.at) return;
+        var tag = L.tooltip({ permanent: true, interactive: true, direction: "center", className: "gdStudioOverlayHoleTag isOrder" + (d.problem ? " isClash" : "") })
+          .setLatLng(d.at).setContent("<span>" + (index + 1) + "</span>");
+        mapObj.addLayer(tag);
+        holeTagLayers.push(tag);
+        var node = tag.getElement();
+        if (!node) return;
+        node.title = d.problem ? "Hole " + (index + 1) + ": " + d.problem + " - click to take it out" : "Hole " + (index + 1) + " - click to take it out of " + order.name;
+        L.DomEvent.disableClickPropagation(node);
+        node.addEventListener("pointerdown", function (event) { event.stopPropagation(); });
+        node.addEventListener("click", function (event) { L.DomEvent.stop(event); toggleOrderHole(ref); });
+      });
+    }
+
+    function orderChanged() {
+      changed();
+      drawOsm();
+      drawHoleTags();
+      renderOrders();
+      updateHint();
+    }
+
+    function toggleOrderHole(ref) {
+      if (!canEdit()) return;
+      var order = activeOrder();
+      if (!order) { setStatus("Make a play order first: + New play order.", true); return; }
+      var at = order.holes.indexOf(ref);
+      if (at >= 0) {
+        order.holes.splice(at, 1);
+        orderChanged();
+        setStatus("Hole " + (at + 1) + " taken out of " + order.name + (at < order.holes.length ? " - the holes after it move up one." : "."));
+        return;
+      }
+      if (order.holes.length >= PLAY_ORDER_MAX_HOLES) { setStatus("A play order holds at most " + PLAY_ORDER_MAX_HOLES + " holes.", true); return; }
+      order.holes.push(ref);
+      orderChanged();
+      var d = describeRef(ref);
+      setStatus(order.name + ": hole " + order.holes.length + " is " + d.label + "." + (d.problem ? " It has " + d.problem + ", so the mapper cannot build it yet." : ""), !!d.problem);
+    }
+
+    /* A shape counts as a hole once it is linked: the link is what says which tee, fairway and
+       green belong together. Linking two nines' "hole 3" shapes for it would guess. */
+    function allocateShape(f) {
+      if (!f || !canEdit() || Date.now() - dragEndedAt < 300) return;
+      if (!f.link) { setStatus("This " + kindLabel(f.kind).toLowerCase() + " is not on a linked hole. Link the hole's tee and green first (Link, C), then click it here.", true); return; }
+      toggleOrderHole("link:" + f.link);
+    }
+
+    function orderHint() {
+      var order = activeOrder();
+      if (!session.playOrders.length) return "+ New play order, name it, then click its holes in the order they are played";
+      if (!order) return "Pick a play order to edit";
+      return order.name + ": click hole " + (order.holes.length + 1) + " - an OSM hole line, or a linked hole · click a hole again to take it out";
+    }
+
+    function renderOrders() {
+      if (destroyed || !el.orders) return;
+      el.orders.hidden = tool !== "order" || !session.loadedFor;
+      if (el.orders.hidden) return;
+      /* Never rebuilt under someone typing a name - an autosave landing would take the box away. */
+      if (el.orders.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;
+      var editable = canEdit();
+      var off = editable ? "" : " disabled";
+      var html = '<div class="gdStudioOverlayOrdersHead"><strong>Play orders</strong>' +
+        '<button type="button" class="gdStudioOverlayOptBtn" data-order-act="new"' + (editable && session.playOrders.length < PLAY_ORDER_MAX ? "" : " disabled") + '>+ New play order</button></div>';
+      if (!session.playOrders.length) {
+        html += '<p class="gdStudioOverlayOrdersNote">None yet - the mapper works out this site\'s courses by itself. Make a play order to say them by hand.</p>';
+      }
+      session.playOrders.forEach(function (order) {
+        var active = order.id === session.activeOrder;
+        var problems = order.holes.filter(function (ref) { return describeRef(ref).problem; }).length;
+        html += '<div class="gdStudioOverlayOrder' + (active ? " isActive" : "") + '">' +
+          '<button type="button" class="gdStudioOverlayOrderPick" data-order-act="pick" data-order-id="' + esc(order.id) + '">' +
+          "<span>" + esc(order.name) + "</span><em>" + order.holes.length + " hole" + (order.holes.length === 1 ? "" : "s") + (problems ? " · " + problems + " to fix" : "") + "</em></button>";
+        if (active) {
+          html += '<label class="gdStudioOverlayOrderName">Name <input type="text" maxlength="80" data-order-field="name" value="' + esc(order.name) + '"' + off + "></label>";
+          if (order.courseId) html += '<p class="gdStudioOverlayOrdersNote">Publishes as <code>' + esc(order.courseId) + "</code>" + (order.courseId === session.loadedFor ? " (this course)" : "") + "</p>";
+          if (!order.holes.length) html += '<p class="gdStudioOverlayOrdersNote">Click holes on the map in the order they are played.</p>';
+          else {
+            html += "<ol>";
+            order.holes.forEach(function (ref, i) {
+              var d = describeRef(ref);
+              html += '<li class="' + (d.problem ? "isProblem" : "") + '"><span>' + (i + 1) + ". " + esc(d.label) + (d.problem ? " - " + esc(d.problem) : "") + "</span>" +
+                '<button type="button" data-order-act="up" data-order-i="' + i + '" title="Play it earlier"' + (i && editable ? "" : " disabled") + ">↑</button>" +
+                '<button type="button" data-order-act="down" data-order-i="' + i + '" title="Play it later"' + (i < order.holes.length - 1 && editable ? "" : " disabled") + ">↓</button>" +
+                '<button type="button" data-order-act="remove" data-order-i="' + i + '" title="Take it out"' + off + ">×</button></li>";
+            });
+            html += "</ol>";
+          }
+          html += '<button type="button" class="gdStudioOverlayOrderDelete" data-order-act="delete"' + off + ">Delete play order</button>";
+        }
+        html += "</div>";
+      });
+      el.orders.innerHTML = html;
+    }
+
+    function onOrdersClick(event) {
+      var button = event.target.closest && event.target.closest("[data-order-act]");
+      if (!button || button.disabled) return;
+      var act = button.getAttribute("data-order-act");
+      if (act === "pick") {
+        session.activeOrder = button.getAttribute("data-order-id");
+        drawOsm();
+        drawHoleTags();
+        renderOrders();
+        updateHint();
+        return;
+      }
+      if (!canEdit()) return;
+      if (act === "new") {
+        if (session.playOrders.length >= PLAY_ORDER_MAX) return;
+        var order = { id: "po-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6), name: "Play order " + (session.playOrders.length + 1), courseId: "", holes: [] };
+        session.playOrders.push(order);
+        session.activeOrder = order.id;
+        orderChanged();
+        var input = el.orders.querySelector('[data-order-field="name"]');
+        if (input) { input.focus(); input.select(); }
+        setStatus("New play order - name it, then click its holes in the order they are played.");
+        return;
+      }
+      var active = activeOrder();
+      if (!active) return;
+      var i = Number(button.getAttribute("data-order-i"));
+      if (act === "up" && i > 0) active.holes.splice(i - 1, 0, active.holes.splice(i, 1)[0]);
+      else if (act === "down" && i < active.holes.length - 1) active.holes.splice(i + 1, 0, active.holes.splice(i, 1)[0]);
+      else if (act === "remove") active.holes.splice(i, 1);
+      else if (act === "delete") {
+        if (!window.confirm("Delete the play order \"" + active.name + "\"?" + (active.courseId ? "\n\nThe next mapper run unpublishes its course (" + active.courseId + ")." : ""))) return;
+        session.playOrders = session.playOrders.filter(function (o) { return o !== active; });
+        session.activeOrder = session.playOrders.length ? session.playOrders[0].id : "";
+      }
+      else return;
+      orderChanged();
+    }
+
+    function onOrdersChange(event) {
+      var field = event.target && event.target.getAttribute && event.target.getAttribute("data-order-field");
+      var active = activeOrder();
+      if (field !== "name" || !active || !canEdit()) return;
+      var name = String(event.target.value || "").replace(/\s+/g, " ").trim().slice(0, 80);
+      if (!name || name === active.name) { event.target.value = active.name; return; }
+      active.name = name;
+      changed();
+      renderOrders();
+      updateHint();
+      setStatus("Renamed to " + name + (active.courseId ? " - it keeps its course id, so its rounds and visuals stay with it." : "."));
     }
 
     /* ---- dragging and the bin ---- */
@@ -2579,7 +2817,8 @@
     var UNDO_MAX = 50;
     var undoStack = [], undoBase = shapesNow(), undoPending = false, undoing = false;
 
-    function shapesNow() { return JSON.stringify(session.features); }
+    /* Play orders ride in the same undo history as the shapes. */
+    function shapesNow() { return JSON.stringify({ features: session.features, playOrders: session.playOrders }); }
 
     function resetUndo() {
       undoStack = [];
@@ -2622,7 +2861,10 @@
       adjust = null;
       finder = null;
       lastPlacedId = "";
-      session.features = JSON.parse(undoStack.pop());
+      var back = JSON.parse(undoStack.pop());
+      session.features = back.features;
+      session.playOrders = back.playOrders;
+      renderOrders();
       undoBase = shapesNow();
       if (selectedId && !findFeature(selectedId)) selectedId = "";
       undoing = true;
@@ -2661,7 +2903,7 @@
       save.classList.toggle("isDirty", !!session.dirty && !session.saveError);
       save.classList.toggle("isWarn", !!session.saveError);
       save.title = session.saveError ? "Not saved - " + session.saveError : session.dirty ? "Save now (changes also save by themselves)" : "Everything is saved";
-      var shown = !!session.loadedFor && session.features.length > 0;
+      var shown = !!session.loadedFor && hasOverlay();
       var ready = shown && session.status === "ready" && !session.dirty;
       el.draft.textContent = !shown ? "" : ready ? "Ready" : "Draft";
       el.draft.title = ready ? "Ready - the mapper uses this" : "Draft - the mapper ignores this until it is marked ready";
@@ -2678,7 +2920,7 @@
       var sentRev = session.rev;
       session.saving = true;
       renderSaveState();
-      session.savePromise = api("POST", "", { courseId: id, features: session.features }).then(function (data) {
+      session.savePromise = api("POST", "", { courseId: id, features: session.features, playOrders: session.playOrders }).then(function (data) {
         session.saveError = "";
         if (session.loadedFor !== id) return;
         /* Every save is a draft again: a changed shape has not been signed off. */
@@ -2686,6 +2928,9 @@
         if (session.rev === sentRev) {
           session.dirty = false;
           if (!drag) session.features = (data && data.overlay && data.overlay.features) || [];
+          /* The server gives each new play order its course id; adopt it. */
+          session.playOrders = (data && data.overlay && data.overlay.playOrders) || session.playOrders;
+          if (!destroyed) renderOrders();
           if (!destroyed && !drag) { if (selectedId && !findFeature(selectedId)) selectedId = ""; drawFeatures(); }
         }
         if (!destroyed && data && data.dropped) setStatus(data.dropped + " shape" + (data.dropped === 1 ? " was" : "s were") + " too small to keep and dropped.", true);
@@ -2714,7 +2959,7 @@
        is marked is what is on screen. */
     function markReady() {
       var id = session.loadedFor;
-      if (!canEdit() || !session.features.length) return Promise.resolve(false);
+      if (!canEdit() || !hasOverlay()) return Promise.resolve(false);
       busy = true; updateActions();
       setStatus("Saving, then marking ready…");
       return flushSave().then(function () {
@@ -2723,7 +2968,8 @@
       }).then(function (data) {
         if (session.loadedFor !== id) return false;
         session.status = (data && data.status) || "ready";
-        if (!destroyed) setStatus("Marked ready. The next mapper run will use these " + session.features.length + " shapes.");
+        if (!destroyed) setStatus("Marked ready. The next mapper run will use these " + session.features.length + " shapes" +
+          (session.playOrders.length ? " and publish " + session.playOrders.length + " play order" + (session.playOrders.length === 1 ? "" : "s") + " as courses" : "") + ".");
         return true;
       }).catch(function (error) {
         if (!destroyed) setStatus("Not marked ready: " + (error && error.message || error), true);
@@ -2790,7 +3036,8 @@
       add(osm.tees, STYLE.osmTee, true);
       add(osm.bunkers, STYLE.osmBunker, true);
       add(osm.water, STYLE.osmWater, true);
-      add(osm.holes, STYLE.osmHole, false);
+      if (tool === "order") drawOrderOsmHoles(osm.holes);
+      else add(osm.holes, STYLE.osmHole, false);
       /* OSM sits under the overlay, so a placed shape is never hidden behind what OSM has. */
       osmLayers.forEach(function (l) { try { l.bringToBack(); } catch (e) {} });
     }
@@ -2908,6 +3155,7 @@
       if (!session.course) text = "Pick a course to start";
       else if (scanning) text = "AI scan running - shapes are locked until it finishes";
       else if (tool === "connect") text = linkPick.length > 1 ? linkPick.length + " picked · Enter or Space links them · Esc clears" : linkPick.length ? "Click the other shapes on this hole · Enter alone takes this one out of its link · Esc clears" : "Click the shapes that belong to one hole, then Enter or Space";
+      else if (tool === "order") text = orderHint();
       else if (tool === "number") text = "Click each hole's fairway (or any shape on it) to give it hole " + session.numberNext + (session.numberAuto ? " · Auto moves on to the next number" : "") + " · click a number to type it";
       else if (tool === "fairway" && session.mode === "pins") text = draft.length ? "Click where the fairway ends · Esc cancels" : "Click where the fairway starts";
       else if (lineTool() && session.mode === "shapes") {
@@ -2929,7 +3177,7 @@
       else if (tool === "green") text = "Click the middle of a green";
       else if (tool === "bunker") text = "Click the middle of a bunker - the wand outlines it · B switches method";
       else if (tool === "tee") text = "Click where the tee is";
-      if (lastPlacedId && tool !== "move" && tool !== "connect" && tool !== "number" && !draft.length && findFeature(lastPlacedId)) text += " · drag the one you just placed to adjust it";
+      if (lastPlacedId && tool !== "move" && tool !== "connect" && tool !== "number" && tool !== "order" && !draft.length && findFeature(lastPlacedId)) text += " · drag the one you just placed to adjust it";
       else if (selectedId && (findFeature(selectedId) || {}).kind === "tree") text = "Drag to move · Delete or the bin removes it";
       else if (selectedId && isSmooth(findFeature(selectedId) || {})) text = "Drag to move · drag its " + shapes.SMOOTH[findFeature(selectedId).kind].handles + " points to reshape · Delete or the bin removes it";
       else if (selectedId && (findFeature(selectedId) || {}).pin) text = "Drag to move · Shape this pin turns it into an outline · Delete or the bin removes it";
@@ -2989,9 +3237,9 @@
       el.unnumber.disabled = !canEdit() || !session.features.some(function (f) { return f.hole; });
       el.run.disabled = !has || session.dirty;
       el.run.title = session.dirty ? "Wait for the overlay to save - the mapper reads what is saved" : "";
-      el.ready.disabled = !canEdit() || !session.features.length || (session.status === "ready" && !session.dirty);
+      el.ready.disabled = !canEdit() || !hasOverlay() || (session.status === "ready" && !session.dirty);
       el.ready.title = session.status === "ready" && !session.dirty ? "Already ready - change a shape and it goes back to draft" : "Let the mapper use this overlay";
-      ["tool-connect", "tool-number", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste"].forEach(function (name) { el[name].disabled = !canEdit() || !!shapingPins; });
+      ["tool-connect", "tool-number", "tool-order", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste"].forEach(function (name) { el[name].disabled = !canEdit() || !!shapingPins; });
       var pins = session.features.filter(function (f) { return f.pin; }).length;
       var selected = selectedId ? findFeature(selectedId) : null;
       el["shape-pins"].hidden = !pins;
@@ -3077,6 +3325,7 @@
       api("GET", "?courseId=" + encodeURIComponent(id) + "&osm=1").then(function (data) {
         if (destroyed || courseIdOf(session.course) !== id) return;
         session.features = (data && data.overlay && data.overlay.features) || [];
+        session.playOrders = (data && data.overlay && data.overlay.playOrders) || [];
         session.status = (data && data.overlay && data.overlay.status) || "draft";
         session.osm = (data && data.osm) || null;
         session.objects = (data && data.objects) || [];
@@ -3091,7 +3340,13 @@
         var unsaved = session.unsaved;
         session.unsaved = null;
         var restored = !!(unsaved && unsaved.courseId === id);
-        if (restored) { session.features = unsaved.features; session.dirty = true; session.rev++; }
+        if (restored) {
+          session.features = unsaved.features;
+          if (Array.isArray(unsaved.playOrders)) session.playOrders = unsaved.playOrders;
+          session.dirty = true;
+          session.rev++;
+        }
+        if (!session.playOrders.some(function (o) { return o.id === session.activeOrder; })) session.activeOrder = session.playOrders.length ? session.playOrders[0].id : "";
         resetUndo();
         selectedId = "";
         busy = false;
@@ -3099,6 +3354,7 @@
         drawObjects();
         drawFeatures();
         renderHoleField();
+        renderOrders();
         /* A scan started before the page was left (or from another tab) is picked back up. */
         var scan = data && data.aiScan;
         if (scan && (scan.status === "queued" || scan.status === "running") && !scanning) {
@@ -3123,12 +3379,13 @@
       var name = session.course.name || session.course.courseName || id;
       /* A draft is not read by the mapper, so running "with this overlay" means marking it
          ready first - asked, never assumed. */
-      if (session.features.length && session.status !== "ready") {
+      if (hasOverlay() && session.status !== "ready") {
         if (!window.confirm("This overlay is still a draft, and the mapper ignores drafts.\n\nMark it ready and run the mapper on " + name + "?\n\nThis clears the course's existing geometry and resolves it again from OSM plus the overlay. Visuals are not touched.")) return;
         markReady().then(function (ok) { if (ok && !destroyed) queueMapper(id); });
         return;
       }
-      if (!window.confirm("Run the mapper on " + name + (session.features.length ? " with this overlay" : "") + "?\n\nThis clears the course's existing geometry and resolves it again from OSM" + (session.features.length ? " plus the overlay" : "") + ". Visuals are not touched.")) return;
+      if (!window.confirm("Run the mapper on " + name + (hasOverlay() ? " with this overlay" : "") + "?\n\nThis clears the course's existing geometry and resolves it again from OSM" + (hasOverlay() ? " plus the overlay" : "") + "." +
+        (session.playOrders.length ? " It publishes the " + session.playOrders.length + " play order" + (session.playOrders.length === 1 ? "" : "s") + " as this facility's courses, and unpublishes any other course listed under it." : "") + " Visuals are not touched.")) return;
       queueMapper(id);
     }
 
@@ -3748,7 +4005,7 @@
       /* The tool's own key again steps through its methods: wand, draw round, line + wand. */
       var own = { f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard", a: "waste" }[key];
       if (own && own === tool && methodOf(own) && canEdit()) { cycleMethod(own); return; }
-      var shortcut = { v: "move", c: "connect", n: "number", f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard", a: "waste" }[key];
+      var shortcut = { v: "move", c: "connect", n: "number", o: "order", f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard", a: "waste" }[key];
       if (shortcut && (shortcut === "move" || canEdit())) setTool(shortcut);
     }
     document.addEventListener("keydown", onKey);
@@ -3765,6 +4022,9 @@
     el["tool-move"].addEventListener("click", function () { setTool("move"); });
     el["tool-connect"].addEventListener("click", function () { setTool("connect"); });
     el["tool-number"].addEventListener("click", function () { setTool("number"); });
+    el["tool-order"].addEventListener("click", function () { setTool("order"); });
+    el.orders.addEventListener("click", onOrdersClick);
+    el.orders.addEventListener("change", onOrdersChange);
     el["number-auto"].checked = !!session.numberAuto;
     el["number-auto"].addEventListener("change", function () { session.numberAuto = el["number-auto"].checked; remember(); updateHint(); });
     el["number-next"].addEventListener("change", function () {

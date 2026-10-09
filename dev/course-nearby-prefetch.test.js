@@ -43,6 +43,10 @@ function stubFetch(world) {
     url = String(url);
     const method = String(options.method || "GET").toUpperCase();
     if (url.includes("overpass")) return jsonResponse(200, { elements: world.osm || [] });
+    if (url.includes("/auth/v1/admin/users/")) {
+      const id = decodeURIComponent(url.split("/auth/v1/admin/users/")[1]);
+      return (world.users || {})[id] ? jsonResponse(200, world.users[id]) : jsonResponse(404, {});
+    }
     if (url.includes("course-mapper-worker-background")) {
       calls.pings.push(JSON.parse(options.body || "{}"));
       return jsonResponse(202, {});
@@ -162,11 +166,25 @@ test("an idle worker takes a background job, unless its time budget is spent", a
 
 test("a background job never queues neighbours of its own", async () => {
   const calls = stubFetch({ maps: [SOURCE], osm: [osmCourse(1)] });
-  await worker.queueNeighboursAfter({ id: "bg", course_id: SOURCE.course_id, kind: "nearby_automap" });
+  await worker.queueNeighboursAfter({ id: "bg", course_id: SOURCE.course_id, kind: "nearby_automap", requested_by: "nearby:x" });
   assert.strictEqual(jobInserts(calls).length, 0);
   assert.ok(!calls.reads.length, "nothing was even read");
-  await worker.queueNeighboursAfter({ id: "p", course_id: SOURCE.course_id, kind: "automap" });
+  await worker.queueNeighboursAfter({ id: "p", course_id: SOURCE.course_id, kind: "automap", requested_by: "guest:install-12345678" });
   assert.strictEqual(jobInserts(calls).length, 1, "a player's scan does");
+});
+
+test("only a player's scan queues neighbours - never an admin's", async () => {
+  const users = { "u-player": { email: "golfer@example.com" }, "u-admin": { email: "SamHaleGolf@gmail.com" } };
+  const run = async requestedBy => {
+    const calls = stubFetch({ maps: [SOURCE], osm: [osmCourse(1)], users });
+    await worker.queueNeighboursAfter({ id: "j", course_id: SOURCE.course_id, kind: "automap", requested_by: requestedBy });
+    return jobInserts(calls).length;
+  };
+  assert.strictEqual(await run("user:u-player"), 1, "a signed-in player");
+  assert.strictEqual(await run("guest:install-12345678"), 1, "a guest install");
+  assert.strictEqual(await run("user:u-admin"), 0, "an admin's run - a Studio remap, an overlay run - queues nothing");
+  assert.strictEqual(await run("user:u-unknown"), 0, "an account that cannot be looked up queues nothing");
+  assert.strictEqual(await run(""), 0, "no requester queues nothing");
 });
 
 test("a player opening a course waiting in the background queue moves it to the front", async () => {

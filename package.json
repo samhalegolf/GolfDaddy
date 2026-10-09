@@ -24,6 +24,7 @@
     "test:scorecard-parse": "node dev/scorecard-parse-core.test.js",
     "test:course-rename": "node dev/course-rename-core.test.js",
     "test:multi-course": "node dev/multi-course-separation.test.js",
+    "test:play-orders": "node dev/play-order-core.test.js",
     "test:multi-nine": "node dev/multi-nine-ground-first.test.js",
     "test:facility-parent": "node dev/facility-parent-and-neighbours.test.js",
     "test:poppy-neighbours": "node dev/poppy-hills-neighbours.test.js",

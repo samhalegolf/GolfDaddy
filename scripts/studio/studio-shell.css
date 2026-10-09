@@ -624,6 +624,85 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
 .gdStudioOverlayHoleTag.isEmpty span { color: #c8d3cc; border-color: #c8d3cc; border-style: dashed; }
 .gdStudioOverlayHoleTag.isClash span,
 .gdStudioOverlayHoleTag.isClash input { color: #ff5a5a; border-color: #ff5a5a; background: rgba(40, 5, 5, 0.85); }
+.gdStudioOverlayHoleTag.isOrder span { color: #06120b; background: #3cff8d; }
+.gdStudioOverlayHoleTag.isOrder.isClash span { color: #fff; background: #c43c3c; border-color: #ff5a5a; }
+
+/* Play orders: the panel the Play order tool opens, under the view buttons. */
+#gdStudioShellRoot .gdStudioOverlayOrders {
+  position: absolute;
+  top: 62px;
+  right: 66px;
+  z-index: 800;
+  width: 300px;
+  max-width: calc(100% - 160px);
+  max-height: calc(100% - 140px);
+  overflow-y: auto;
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--gdOverlayScrim);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--gdStudioText);
+  font-size: 12px;
+}
+#gdStudioShellRoot .gdStudioOverlayOrdersHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+#gdStudioShellRoot .gdStudioOverlayOrdersNote { margin: 6px 0; color: var(--gdStudioMuted); line-height: 1.4; }
+#gdStudioShellRoot .gdStudioOverlayOrder { border-top: 1px solid rgba(231, 243, 236, 0.15); padding: 6px 0; }
+#gdStudioShellRoot .gdStudioOverlayOrderPick {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gdStudioText);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioOverlayOrderPick em { font-style: normal; font-weight: 400; color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdStudioOverlayOrder.isActive .gdStudioOverlayOrderPick { background: rgba(60, 255, 141, 0.15); }
+#gdStudioShellRoot .gdStudioOverlayOrderName { display: flex; align-items: center; gap: 6px; margin: 8px 0 4px; color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdStudioOverlayOrderName input {
+  flex: 1;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid rgba(231, 243, 236, 0.25);
+  border-radius: 8px;
+  background: rgba(231, 243, 236, 0.08);
+  color: var(--gdStudioText);
+  font: inherit;
+}
+#gdStudioShellRoot .gdStudioOverlayOrder ol { list-style: none; margin: 6px 0; padding: 0; }
+#gdStudioShellRoot .gdStudioOverlayOrder li { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
+#gdStudioShellRoot .gdStudioOverlayOrder li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#gdStudioShellRoot .gdStudioOverlayOrder li.isProblem span { color: #ff8a8a; }
+#gdStudioShellRoot .gdStudioOverlayOrder li button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(231, 243, 236, 0.25);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--gdStudioText);
+  font: inherit;
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioOverlayOrder li button:disabled { opacity: 0.3; cursor: default; }
+#gdStudioShellRoot .gdStudioOverlayOrderDelete {
+  margin-top: 4px;
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 90, 90, 0.5);
+  border-radius: 999px;
+  background: transparent;
+  color: #ff8a8a;
+  font: inherit;
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioOverlayOrderDelete:disabled { opacity: 0.4; cursor: default; }
 
 @media (max-width: 860px) {
   #gdStudioShellRoot .gdStudioShell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
