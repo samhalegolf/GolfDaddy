@@ -1018,6 +1018,36 @@ export function markNeighbouringClubs(groups, polygons, centre, facilityName, se
   return groups;
 }
 
+/* ---------- one course, outlined in pieces (The Club at Mapledurham) -----------------------
+ *
+ * OSM sometimes draws a single course's boundary as several golf_course polygons - a field
+ * added later, a strip across a lane. Containment then hands back each piece as a course:
+ * Mapledurham's 18 came out as 10 + 7 + 1, each too small to publish, and the run failed
+ * with the whole course in hand. Two real courses always repeat hole numbers (both start
+ * at 1), so the site's own pieces whose numbers never repeat are one course. Capped at 18
+ * so a facility numbered 1-27 across three outlines keeps its nines. Joined in place. */
+function joinOutlinePieces(groups) {
+  const own = groups.filter(group => !group.foreign);
+  if (own.length < 2) return groups;
+  const numbers = new Set();
+  for (const group of own) {
+    for (const feature of group.features) {
+      if (numbers.has(feature.number)) return groups;
+      numbers.add(feature.number);
+    }
+  }
+  if (numbers.size > 18) return groups;
+  const largest = own.slice().sort((a, b) => b.features.length - a.features.length)[0];
+  const joined = Object.assign({}, largest, {
+    name: largest.name || (own.find(group => group.name) || {}).name || "",
+    features: own.flatMap(group => group.features)
+  });
+  const firstAt = groups.indexOf(own[0]);
+  for (let i = groups.length - 1; i >= 0; i--) if (!groups[i].foreign) groups.splice(i, 1);
+  groups.splice(firstAt, 0, joined);
+  return groups;
+}
+
 function assignByContainment(features, polygons) {
   const { courses, facilities } = classifyCoursePolygons(polygons, features);
   if (!courses.length) return null;
@@ -1206,6 +1236,7 @@ export function separateLoops(payload, centre, options) {
   const groups = assignByContainment(features, polygons) || assignByRouting(features, collision.loops);
   if (!groups || groups.length < 2) return null;
   markNeighbouringClubs(groups, polygons, centre, (options && options.facilityName) || "", options && options.selectedName);
+  joinOutlinePieces(groups);
 
   const { buckets, shared } = partitionSupportingElements(payload, groups);
 
