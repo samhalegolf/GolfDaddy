@@ -214,6 +214,8 @@
     var live = state.state === "running" || state.state === "queued";
     if (!live) return model({ live: false });
     var jobKind = String(state.activeKind || state.kind || "automap");
+    /* A background neighbour run is the same mapping job, just queued by nobody. */
+    if (jobKind === "nearby_automap") jobKind = "automap";
     var stage = (state.progress && state.progress.stage) || "";
     var pct = state.state === "queued" ? 0 : stagePercent(jobKind, stage);
     if (opts.key && pct != null) pct = applyFloor(opts.key, pct);

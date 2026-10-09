@@ -29,7 +29,7 @@
 
 import { deriveCoursePackageState, shapeLitePackage, shapeFullPackage } from "./lib/gd-course-package-shape.mjs";
 import { findDuplicateCourseWithGeometry as findDuplicateCourse } from "./lib/gd-duplicate-course-guard.mjs";
-import { enqueueMapperJob, mapperActorKey } from "./course-mapper-jobs.mjs";
+import { enqueueMapperJob, mapperActorKey, promoteNearbyJob, NEARBY_AUTOMAP_KIND } from "./course-mapper-jobs.mjs";
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const MAPS_TABLE = "course_maps";
@@ -170,6 +170,11 @@ export async function buildCoursePackage(courseId) {
    read path without needing to stub identity/enqueue plumbing. */
 export async function buildCoursePackageWithTrigger(courseId, { center, courseName, userId, guestId, origin } = {}) {
   const result = await buildCoursePackage(courseId);
+  /* Opened while only waiting in the background queue: a player wants it now. */
+  if (result.status === "processing" && result.stage === NEARBY_AUTOMAP_KIND) {
+    await promoteNearbyJob(courseId, origin);
+    return Object.assign({}, result, { stage: "automap" });
+  }
   if (result.status !== "none") return result;
   if (center) {
     const duplicate = await findDuplicateCourse(supabaseFetch, { courseId, courseName, center, radiusM: ASSUMED_COURSE_MATCH_RADIUS_M });
