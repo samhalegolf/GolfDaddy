@@ -602,7 +602,18 @@
       layer.addTo(mapObj);
       try { mapObj.setMaxZoom(DRAW_MAX_ZOOM); } catch (e) {}
       el.credit.innerHTML = esc(source.label) + (source.attribution ? " — " + esc(source.attribution) : "");
+      /* Google's credit depends on the ground in view; its layer says what it is after each move. */
+      var mounted = layer;
+      layer.on("gdcredit", function (e) { if (layer === mounted) el.credit.innerHTML = esc(source.label) + " — " + esc(e.text); });
       remember();
+    }
+    /* Mapbox and Google are licensed for looking at, not for reading back: no wand, colour
+       wand, tree finder or AI scan reads their pixels. Shapes are still placed by hand over them. */
+    function captureRefusal() {
+      if (!mapObj || !layer || typeof layer.getTileUrl !== "function") return "this provider cannot be captured - switch provider";
+      var source = sourceByKey(session.sourceKey);
+      if (source && source.viewOnly) return source.name + " is view-only - switch provider to use the wand, colour wand, tree finder or AI scan";
+      return "";
     }
 
     /* Zoomed past the deepest level a provider has here, every tile fails and the map goes
@@ -1702,7 +1713,8 @@
        of room, 24 unless given), maxSidePx (one zoom coarser until the picture fits). */
     function captureBox(points, opts) {
       return new Promise(function (resolve, reject) {
-        if (!mapObj || !layer || typeof layer.getTileUrl !== "function") return reject(new Error("this provider cannot be captured - switch provider"));
+        var refused = captureRefusal();
+        if (refused) return reject(new Error(refused));
         var native = num(layer.options && layer.options.maxNativeZoom) || num(layer.options && layer.options.maxZoom) || 19;
         var mid = points[Math.floor(points.length / 2)];
         var mppZ0 = 156543.03392 * Math.cos(mid.lat * Math.PI / 180);
@@ -3179,7 +3191,8 @@
        WAND_TARGET_MPP the provider really has, unscaled. */
     function captureAround(point, coarser, kind, size) {
       return new Promise(function (resolve, reject) {
-        if (!mapObj || !layer || typeof layer.getTileUrl !== "function") return reject(new Error("this provider cannot be captured - switch provider"));
+        var refused = captureRefusal();
+        if (refused) return reject(new Error(refused));
         var native = num(layer.options && layer.options.maxNativeZoom) || num(layer.options && layer.options.maxZoom) || 19;
         var mppZ0 = 156543.03392 * Math.cos(point.lat * Math.PI / 180);
         var z = Math.max(14, Math.min(native, Math.round(Math.log2(mppZ0 / WAND_TARGET_MPP[kind]))) - (coarser || 0));
@@ -3213,7 +3226,8 @@
        actually sent. */
     function captureView() {
       return new Promise(function (resolve, reject) {
-        if (!mapObj || !layer || typeof layer.getTileUrl !== "function") return reject(new Error("no tile layer to capture"));
+        var refused = captureRefusal();
+        if (refused) return reject(new Error(refused));
         var native = num(layer.options && layer.options.maxNativeZoom);
         var z = num(layer._tileZoom);
         if (z == null) z = Math.round(mapObj.getZoom());
