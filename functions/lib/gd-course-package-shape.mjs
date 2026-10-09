@@ -335,7 +335,10 @@ export function deriveCoursePackageState({ map, visual, visualJobs, mapperJobs }
      courses scanned right after it of any mapper job at all. A failed run against unchanged
      OSM data will fail identically; retrying it is a deliberate act (the mapping flyout's
      Auto tool, or an admin remap), never an automatic side effect of reading state. */
-  const lastFailed = !!(lastMapperJob && lastMapperJob.status === "failed");
+  /* Except a background neighbour run (course-mapper-jobs.mjs NEARBY_AUTOMAP_KIND). Nobody
+     asked for that one, so the first player to open the course still gets their own attempt,
+     with the failure handling a player's scan comes with. */
+  const lastFailed = !!(lastMapperJob && lastMapperJob.status === "failed" && lastMapperJob.kind !== "nearby_automap");
   if (fullReady) return "full-map-ready";
   if (hasGeometry) return "lite-geo-ready";
   if (liveMapperJob || liveVisualJob) return "processing";

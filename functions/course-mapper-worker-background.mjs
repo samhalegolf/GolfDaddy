@@ -41,7 +41,7 @@ import { assessFacilityStructure, contestedClaims, describeClaimGround, isIndepe
 import { loopLengthsFromOsm, lineLengthM, matchLoopsToCards, scorePairing, courseLengthsFromPublishedGeometry, cardLengths } from "./lib/gd-scorecard-match-core.mjs";
 import { planListingResolution, courseLabelOf, looksLikeCourseLabel, RESOLUTION_MODE } from "./lib/gd-course-listing-core.mjs";
 import { eliminateInferredCourses } from "./lib/gd-inferred-course-claims-core.mjs";
-import { OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND } from "./course-mapper-jobs.mjs";
+import { OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND, NEARBY_AUTOMAP_KIND, enqueueNearbyMapperJobs } from "./course-mapper-jobs.mjs";
 import { refineSurfaceShape, applyRefinedShape, REFINED_SHAPE_SOURCE } from "./lib/gd-surface-refine-core.mjs";
 import politeFetch from "./lib/gd-polite-fetch.js";
 import courseSearchIdentity from "./lib/gd-course-search-identity.js";
@@ -72,8 +72,8 @@ const supabaseFetch = createSupabaseFetch({
 /* status=eq.queued in the filter makes the claim atomic - two workers racing the same row
    can't both flip it to running. Identical pattern to course-visual-worker-background.mjs's
    claimJob(). */
-async function claimJob(jobId) {
-  const filter = jobId ? "id=eq." + encodeURIComponent(jobId) + "&" : "";
+async function claimJob(jobId, kindFilter = "") {
+  const filter = (jobId ? "id=eq." + encodeURIComponent(jobId) + "&" : "") + kindFilter;
   const rows = await supabaseFetch(JOBS_TABLE + "?" + filter + "status=eq.queued&order=created_at.asc&limit=1", { method: "GET" });
   const job = Array.isArray(rows) ? rows[0] : null;
   if (!job) return null;
@@ -83,6 +83,35 @@ async function claimJob(jobId) {
     body: JSON.stringify({ status: "running", updated_at: new Date().toISOString() })
   });
   return Array.isArray(claimed) && claimed.length ? claimed[0] : null;
+}
+
+/* The next job when nobody named one. Player work always comes first; a background
+   neighbour job (NEARBY_AUTOMAP_KIND) is only taken when no player job is waiting AND nothing
+   else is running - so the background queue runs one at a time, and only in idle moments.
+   A player job that arrives while one is running is woken by its own id in its own
+   invocation, so it never waits for it. allowNearby is the caller's time budget. */
+async function claimNextJob({ allowNearby }) {
+  const player = await claimJob(null, "kind=neq." + NEARBY_AUTOMAP_KIND + "&");
+  if (player || !allowNearby) return player;
+  const busy = await supabaseFetch(JOBS_TABLE + "?select=id&status=in.(queued,running)&kind=neq." + NEARBY_AUTOMAP_KIND + "&limit=1").catch(() => null);
+  if (!Array.isArray(busy) || busy.length) return null;
+  const running = await supabaseFetch(JOBS_TABLE + "?select=id&status=eq.running&kind=eq." + NEARBY_AUTOMAP_KIND + "&limit=1").catch(() => null);
+  if (!Array.isArray(running) || running.length) return null;
+  return claimJob(null, "kind=eq." + NEARBY_AUTOMAP_KIND + "&");
+}
+
+/* A background run takes the remainder of an invocation, never a fresh one's worth: started
+   late, it could outlive the background-function limit and be reaped half done. The sweeper
+   comes round every three minutes to carry on. */
+const NEARBY_CLAIM_BUDGET_MS = 8 * 60 * 1000;
+
+/* After a player's scan settles, line up the courses around it. Not for background jobs
+   themselves - one scan must not ripple outward course by course. */
+async function queueNeighboursAfter(job) {
+  if (String(job.kind || "automap") !== "automap") return;
+  const outcome = await enqueueNearbyMapperJobs({ sourceCourseId: job.course_id })
+    .catch(error => ({ queued: [], reason: String(error && error.message || error).slice(0, 200) }));
+  console.log("course-mapper-worker: neighbours of", job.course_id, JSON.stringify(outcome));
 }
 
 async function finishJob(id, patch) {
@@ -258,8 +287,9 @@ async function reapStaleJobs() {
     for (const row of Array.isArray(stale) ? stale : []) {
       const attempts = (row.result && Number(row.result.attempts) || 0) + 1;
       const reapedError = "stale-running-reaped: worker died mid-job " + attempts + " times";
+      /* A background job failing is not news to anyone - see NEARBY_AUTOMAP_KIND. */
       const patch = attempts >= 8
-        ? { status: "failed", error: reapedError, result: Object.assign({}, row.result || {}, { attempts }, await requestMapperDebug(row, { message: reapedError, attempts, diagnostics: row.result && row.result.diagnostics })), updated_at: new Date().toISOString() }
+        ? { status: "failed", error: reapedError, result: Object.assign({}, row.result || {}, { attempts }, row.kind === NEARBY_AUTOMAP_KIND ? {} : await requestMapperDebug(row, { message: reapedError, attempts, diagnostics: row.result && row.result.diagnostics })), updated_at: new Date().toISOString() }
         : { status: "queued", error: null, result: Object.assign({}, row.result || {}, { attempts }), updated_at: new Date().toISOString() };
       await supabaseFetch(JOBS_TABLE + "?id=eq." + row.id, { method: "PATCH", body: JSON.stringify(patch) });
     }
@@ -3116,11 +3146,14 @@ export default async function courseMapperWorker(req) {
   let origin = "";
   try { origin = new URL(req.url).origin; } catch (e) { origin = ""; }
   await reapStaleJobs();
-  let job = await claimJob(payload && payload.jobId || null);
+  const startedAt = Date.now();
+  const next = () => claimNextJob({ allowNearby: Date.now() - startedAt < NEARBY_CLAIM_BUDGET_MS });
+  let job = payload && payload.jobId ? await claimJob(payload.jobId) : await next();
   while (job) {
     try {
       const kind = String(job.kind || "");
       const maintenance = kind === OBJECT_COLLECTION_KIND || kind === SHAPE_REFINE_KIND;
+      const background = kind === NEARBY_AUTOMAP_KIND;
       const result = kind === OBJECT_COLLECTION_KIND ? await runObjectCollectionJob(job)
         : kind === SHAPE_REFINE_KIND ? await runShapeRefineJob(job)
         : await runMapperJob(job, origin);
@@ -3134,7 +3167,10 @@ export default async function courseMapperWorker(req) {
       /* The structural guarantee behind "Collect Extra Objects must not change existing
          visuals": the chain is not skipped by a flag the collection path sets, it is
          unreachable from that path at all. */
-      if (!maintenance && !result.multiCourse) {
+      /* A background course gets its geometry only. Its frames are rendered when a player
+         actually opens it (the app's own kind:"auto" visual request), so a scan does not put
+         ten courses' worth of image renders ahead of real players in the visual queue. */
+      if (!maintenance && !background && !result.multiCourse) {
         result.visualChain = await chainVisualSnapshot(job.course_id, result.courseBounds, origin,
           courseCoverageComplete({
             holeNumbers: (result.fit && result.fit.detail && result.fit.detail.holeNumbers) || result.holeNumbers || [],
@@ -3152,6 +3188,7 @@ export default async function courseMapperWorker(req) {
         ? result.coursesPublished.map(entry => entry && entry.courseId).filter(Boolean)
         : [job.course_id];
       for (const courseId of new Set(garminCourses)) await wakeGarminBuild(origin, courseId);
+      await queueNeighboursAfter(job);
     } catch (error) {
       console.error("course-mapper-worker job failed", job.id, error);
       const attempts = (job.result && Number(job.result.attempts) || 0) + 1;
@@ -3168,12 +3205,14 @@ export default async function courseMapperWorker(req) {
       const patch = retryable
         ? { status: "queued", error: null, result: Object.assign({}, job.result || {}, { attempts, lastTransientError: message }, diagnostics ? { diagnostics } : {}) }
         : { status: "failed", error: attempts > 1 ? message + " (after " + attempts + " attempts)" : message, result: Object.assign({}, job.result || {}, { attempts }, diagnostics ? { diagnostics } : {}) };
-      if (!retryable) Object.assign(patch.result, await requestMapperDebug(job, { message, attempts, diagnostics }));
+      if (!retryable && job.kind !== NEARBY_AUTOMAP_KIND) Object.assign(patch.result, await requestMapperDebug(job, { message, attempts, diagnostics }));
       await finishJob(job.id, patch).catch(() => {});
+      /* A failed scan still says a player is golfing around here. */
+      if (!retryable) await queueNeighboursAfter(job);
     }
-    job = await claimJob(null);
+    job = await next();
   }
   return new Response("ok", { status: 200 });
 }
 
-export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, loadCourseCenter, ensureCoursePlace, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, requestMapperDebug, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, loopCourseId, MAX_TRANSIENT_ATTEMPTS };
+export const __courseMapperWorkerTest = { claimJob, claimNextJob, queueNeighboursAfter, finishJob, heartbeatJob, reapStaleJobs, loadCourseCenter, ensureCoursePlace, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, requestMapperDebug, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, loopCourseId, MAX_TRANSIENT_ATTEMPTS };

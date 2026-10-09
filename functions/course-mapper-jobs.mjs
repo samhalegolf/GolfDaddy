@@ -21,6 +21,8 @@
 
 import { MAPPER_VERSION, SURFACE_TYPES, HAND_DRAWN_SURFACE_TYPES } from "./lib/gd-automapper-core.mjs";
 import { findDuplicateCourseWithGeometry } from "./lib/gd-duplicate-course-guard.mjs";
+import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
+import { boundingBox, coursesFromOverpass, mergeWithLibrary, nearbyCoursesQuery } from "./lib/gd-courses-near-core.mjs";
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 const TABLE = "course_mapper_jobs";
@@ -180,6 +182,27 @@ export const OBJECT_COLLECTION_KIND = "collect_extra_objects";
    own. Its own kind for the same reasons - separate dedupe, separate history, and no chance of
    a mapping run claiming it. */
 export const SHAPE_REFINE_KIND = "refine_surface_shapes";
+
+/* Background growth of the course database. When a player's scan settles, the courses
+   nearest to it that we hold nothing for are queued under this kind - a player who scans one
+   course is likely to play one nearby soon, so it is ready when they do.
+
+   Its own kind so it can never get in a player's way:
+     - the worker only claims one when no player job is queued or running (claimNextJob in
+       course-mapper-worker-background.mjs), and only one at a time;
+     - it is never counted against anyone's rate limit or guest allowance (those count
+       kind=automap only);
+     - a player opening one of these courses while its job is still queued promotes it to an
+       ordinary automap job (promoteNearbyJob), so they never wait behind the background queue;
+     - it never queues further neighbours itself, so one scan cannot ripple across a region;
+     - a failure is quiet: no debug session, no "a course needs mapping" alert, because no
+       player was promised anything.
+   It is still a MAPPING job (not a maintenance kind): a course with one queued reads as
+   "processing" like any other build. */
+export const NEARBY_AUTOMAP_KIND = "nearby_automap";
+export const NEARBY_PREFETCH_COUNT = 10;
+const NEARBY_PREFETCH_RADIUS_M = 25000;
+const NEARBY_ACTOR_PREFIX = "nearby:";
 
 const MAINTENANCE_KINDS = new Set([OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND]);
 const isMappingJob = job => !MAINTENANCE_KINDS.has(String(job && job.kind || "automap"));
@@ -403,6 +426,9 @@ export async function enqueueMapperJob({ courseId, courseLat, courseLng, courseN
   if (state.hasGeometry && state.geometryVersion === MAPPER_VERSION) {
     return { deduped: true, state: state.state, geometryVersion: state.geometryVersion };
   }
+  /* A player asked for a course that is only waiting in the background queue: move it to the
+     front rather than leaving them behind every other prefetch. */
+  if (state.building && state.activeKind === NEARBY_AUTOMAP_KIND) await promoteNearbyJob(courseId, origin);
   if (state.building) return { deduped: true, state: state.state };
 
   /* Dedupe BEFORE the rate limit, not after. Both answers can be true at once - a guest at
@@ -470,6 +496,77 @@ export async function enqueueMapperJob({ courseId, courseLat, courseLng, courseN
   const job = Array.isArray(inserted) ? inserted[0] : inserted;
   await pingWorkerAt(origin, job && job.id || null);
   return { queued: true, job, state: "queued", actorKey: actor };
+}
+
+/* A player wants this course now. A queued background job becomes an ordinary automap job -
+   claimed ahead of the background queue, and woken by its id so it starts straight away. A
+   job already running is left alone; it is already doing the work. The status and kind filters
+   make this a no-op when the worker claims it first or another request promoted it already. */
+export async function promoteNearbyJob(courseId, origin) {
+  const promoted = await supabaseFetch(TABLE + "?course_id=eq." + encodeURIComponent(courseId)
+    + "&kind=eq." + NEARBY_AUTOMAP_KIND + "&status=eq.queued", {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ kind: "automap", updated_at: new Date().toISOString() })
+  }).catch(() => []);
+  const job = Array.isArray(promoted) ? promoted[0] : null;
+  if (job && origin) await pingWorkerAt(origin, job.id);
+  return !!job;
+}
+
+/* Queue the courses nearest to a scanned one that we hold nothing for. Called by the worker
+   after a player's scan has settled, so the one Overpass query here never competes with it.
+
+   "Hold nothing for" means no course_maps row near it: a mapped course, a course mid-build and
+   a course that already failed all have one (ensureCourseCenter writes it before any job), so
+   none of them is queued again. Same OSM list and same library merge as /api/courses-near, and
+   the same id the picker gives an unmapped OSM course (a slug of its name), so the job lands
+   on the row the player will later open.
+
+   Best-effort throughout: a busy Overpass simply means no neighbours this time. */
+export async function enqueueNearbyMapperJobs({ sourceCourseId, limit = NEARBY_PREFETCH_COUNT } = {}) {
+  const rows = await supabaseFetch(MAPS_TABLE + "?select=course_lat,course_lng&course_id=eq." + encodeURIComponent(sourceCourseId) + "&limit=1").catch(() => []);
+  const source = Array.isArray(rows) ? rows[0] : null;
+  const lat = Number(source && source.course_lat), lng = Number(source && source.course_lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { queued: [], reason: "source-has-no-centre" };
+
+  const box = boundingBox(lat, lng, NEARBY_PREFETCH_RADIUS_M);
+  const [library, overpass] = await Promise.all([
+    supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,course_lat,course_lng"
+      + "&course_lat=gte." + box.minLat + "&course_lat=lte." + box.maxLat
+      + "&course_lng=gte." + box.minLng + "&course_lng=lte." + box.maxLng + "&limit=500").catch(() => []),
+    fetchOverpass(nearbyCoursesQuery(lat, lng, NEARBY_PREFETCH_RADIUS_M)).catch(error => ({ __error: error }))
+  ]);
+  if (overpass && overpass.__error) return { queued: [], reason: "overpass-unavailable" };
+
+  const candidates = mergeWithLibrary(coursesFromOverpass(overpass, { lat, lng }), library, { lat, lng })
+    .filter(course => !course.hasMap && slug(course.name))
+    .slice(0, limit);
+
+  const queued = [];
+  for (const course of candidates) {
+    const courseId = slug(course.name);
+    const center = { lat: course.lat, lng: course.lng };
+    const duplicate = await findDuplicateCourseWithGeometry(supabaseFetch, {
+      courseId, courseName: course.name, center, radiusM: ASSUMED_COURSE_MATCH_RADIUS_M
+    }).catch(() => null);
+    if (duplicate) continue;
+    /* The id is a name slug, so a same-named course anywhere in the world already owns it.
+       Writing this centre over that row would move the other course here. Likewise any live
+       job for the id, of any kind - a player may have opened it in the meantime. */
+    const [owned, live] = await Promise.all([
+      supabaseFetch(MAPS_TABLE + "?select=course_id&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => null),
+      supabaseFetch(TABLE + "?select=id&course_id=eq." + encodeURIComponent(courseId) + "&status=in.(queued,running)&limit=1").catch(() => null)
+    ]);
+    if (!Array.isArray(owned) || owned.length || !Array.isArray(live) || live.length) continue;
+    if (!await ensureCourseCenter(courseId, { courseLat: center.lat, courseLng: center.lng, courseName: course.name })) continue;
+    await supabaseFetch(TABLE, {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify([{ course_id: courseId, kind: NEARBY_AUTOMAP_KIND, status: "queued", mapper_version: MAPPER_VERSION, requested_by: NEARBY_ACTOR_PREFIX + sourceCourseId }])
+    }).then(() => queued.push(courseId)).catch(() => {});
+  }
+  return { queued, candidates: candidates.length };
 }
 
 /* Enrichment has its own enqueue rather than reusing enqueueMapperJob, because every gate in
