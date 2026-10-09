@@ -50,6 +50,7 @@ import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
 import { classifyMapperFailure, failureKind, buildMapperDebugText } from "./lib/gd-mapper-failure-kinds.mjs";
 import { captureMapperDebugImagery } from "./lib/gd-mapper-debug-captures.mjs";
 import { mergeOverlayIntoPayload, overlaySummary } from "./lib/gd-map-overlay-core.mjs";
+import { playOrderLoops } from "./lib/gd-play-order-core.mjs";
 const { createPoliteHtmlFetcher } = politeFetch;
 const { loopDisplayName, stripParSuffix } = courseSearchIdentity;
 
@@ -320,16 +321,20 @@ async function loadCourseCenter(courseId) {
    is a different finding from "there was no overlay". */
 async function attachCourseOverlay(course) {
   course.overlay = [];
+  course.playOrders = [];
   course.overlayError = null;
   course.overlayDraft = 0;
+  course.overlayDraftPlayOrders = 0;
   try {
-    const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features,status&course_id=eq." + encodeURIComponent(course.courseId) + "&limit=1");
+    const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features,play_orders,status&course_id=eq." + encodeURIComponent(course.courseId) + "&limit=1");
     const row = Array.isArray(rows) ? rows[0] : null;
     const features = row && Array.isArray(row.features) ? row.features : [];
+    const playOrders = row && Array.isArray(row.play_orders) ? row.play_orders : [];
     /* A draft is still being drawn (20260929_add_course_map_overlay_status.sql): it is left
-       out, and the count rides on the diagnostics so "the overlay was ignored" is visible. */
-    if (row && row.status === "ready") course.overlay = features;
-    else course.overlayDraft = features.length;
+       out, and the count rides on the diagnostics so "the overlay was ignored" is visible.
+       Play orders are signed off with the shapes, so a draft's play orders are left out too. */
+    if (row && row.status === "ready") { course.overlay = features; course.playOrders = playOrders; }
+    else { course.overlayDraft = features.length; course.overlayDraftPlayOrders = playOrders.length; }
   } catch (error) {
     course.overlayError = String(error && error.message || error).slice(0, 200);
   }
@@ -340,8 +345,8 @@ async function attachCourseOverlay(course) {
    the counts of what it merged. */
 function overlayDiagnostics(course) {
   if (course.overlayError) return { error: course.overlayError };
-  if (course.overlayDraft) return { draft: true, ignoredFeatures: course.overlayDraft };
-  return overlaySummary(course.overlay);
+  if (course.overlayDraft || course.overlayDraftPlayOrders) return { draft: true, ignoredFeatures: course.overlayDraft, ignoredPlayOrders: course.overlayDraftPlayOrders || 0 };
+  return Object.assign(overlaySummary(course.overlay), { playOrders: course.playOrders.length });
 }
 
 /* Every Overpass payload a job works from goes through here, so the overlay is in ALL of
@@ -932,8 +937,11 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
    * PINNED course: that is the row the player selected and the run exists to
    * fill, and reporting success without it would be a lie. */
   const failures = [];
-  /* Mutates loops[].name in place, so this must run before ids are derived. */
-  const naming = nameLoopsFromCards(loops, course.scorecardCards, facilityNameOf(course));
+  /* Mutates loops[].name in place, so this must run before ids are derived. Play orders were
+     named by hand, and a card never overrules that. */
+  const naming = loops.every(loop => loop.nameSource === "play-order")
+    ? { resolved: false, reason: "named-by-play-order" }
+    : nameLoopsFromCards(loops, course.scorecardCards, facilityNameOf(course));
   const taken = new Set([course.courseId]);
   const onGround = await siblingRowsOnSameGround(loops, course);
   for (let index = 0; index < loops.length; index++) {
@@ -941,14 +949,20 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
     await heartbeatJob(job, { stage: "publishing-course-" + (index + 1) + "-of-" + loops.length });
     /* index 0 is the pinned loop - separateLoops sorts by distance from the pin. */
     const isPinned = index === 0;
-    const derivedId = loopCourseId(loop, course, index, taken);
+    /* A play order carries the id it was given when it was first saved, and keeps it - two
+       play orders over the same holes share their ground, so "the row on the same ground"
+       cannot tell them apart. */
+    const fixedId = !isPinned && loop.nameSource === "play-order" && loop.courseId ? loop.courseId : "";
+    const derivedId = fixedId || loopCourseId(loop, course, index, taken);
     try {
+      if (fixedId && taken.has(fixedId)) throw new Error("play order course id " + fixedId + " is used twice");
       /* Which row this course already is: the one on the same ground first, so a rescan that
          lists the courses in a different order cannot move a course onto another's id. */
-      const sameGround = isPinned ? null : onGround.get(index) || null;
+      const sameGround = isPinned || fixedId ? null : onGround.get(index) || null;
+      /* For a play order this is only the guard against adopting another facility's row. */
       const existing = isPinned || (sameGround && !taken.has(sameGround)) ? null : await findExistingLoopRow(loop, derivedId, course.courseId);
       const courseId = isPinned ? course.courseId
-        : (sameGround && !taken.has(sameGround) ? sameGround : (existing && !taken.has(existing) ? existing : derivedId));
+        : fixedId || (sameGround && !taken.has(sameGround) ? sameGround : (existing && !taken.has(existing) ? existing : derivedId));
       taken.add(courseId);
       /* NO sibling centres, deliberately.
        *
@@ -1087,6 +1101,64 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
      facility will offer this course again. */
   if (failures.length) published.failures = failures;
   return published;
+}
+
+/* The courses an admin built by hand in the Mapping Overlay (lib/gd-play-order-core.mjs), one
+ * row each, in place of separating the site automatically.
+ *
+ * The pinned course is the play order holding this job's course id. Every other play order
+ * publishes under the id it was given when it was first saved. Any other course still listed
+ * under this facility - what an earlier automatic split left - is unpublished, not deleted:
+ * the play orders now say what the courses here are, and a row nothing points at would show
+ * in the picker as a course that is not there. Its rounds, visuals and watch maps stay. */
+async function publishPlayOrders(job, course, payload, origin, diagnostics, queryStages) {
+  const fail = message => Object.assign(new Error(message), { diagnostics });
+  const loops = playOrderLoops(payload, course.overlay, course.playOrders, { pinnedCourseId: course.courseId, facilityName: facilityNameOf(course) });
+  diagnostics.playOrders = loops.map(loop => ({
+    courseId: loop.courseId, name: loop.name, holes: loop.expectedHoles,
+    missing: loop.holes.filter(hole => !hole.found)
+  }));
+  if (!loops.length) throw fail("every play order is empty - give one its holes, or delete them all to let the mapper separate the site itself");
+  if (loops[0].courseId !== course.courseId) {
+    throw fail("the play order for " + course.courseId + " has no holes - give it its holes, or delete it, before running the mapper");
+  }
+  const published = await publishSeparatedLoops(job, course, loops, null, null, origin);
+  const warnings = [];
+  const missing = diagnostics.playOrders.filter(order => order.missing.length);
+  if (missing.length) {
+    warnings.push(missing.map(order => order.name + ": hole " + order.missing.map(hole => hole.position + " (" + hole.reason + ")").join(", ")).join("; ")
+      + " - not found, so those holes are missing from the published course");
+  }
+  if (published.failures) {
+    diagnostics.failedChildren = published.failures;
+    warnings.push(published.failures.length + " of " + loops.length + " play orders could not be written ("
+      + published.failures.map(entry => entry.courseId + ": " + entry.reason).join("; ") + ")");
+  }
+  const keep = new Set(loops.map((loop, index) => index === 0 ? course.courseId : loop.courseId));
+  const listed = await supabaseFetch(MAPS_TABLE + "?select=course_id&published=eq.true&facility_key=eq." + encodeURIComponent(course.courseId)).catch(() => []);
+  const retired = (Array.isArray(listed) ? listed : []).map(row => row && row.course_id).filter(id => id && !keep.has(id));
+  for (const courseId of retired) {
+    await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
+      method: "PATCH", body: JSON.stringify({ published: false, updated_at: new Date().toISOString() })
+    }).catch(error => warnings.push("could not unpublish " + courseId + ": " + String(error && error.message || error).slice(0, 120)));
+  }
+  if (retired.length) diagnostics.unpublished = retired;
+  diagnostics.published = published.map(entry => ({ courseId: entry.courseId, holes: entry.holesResolved, contiguous: entry.contiguous, nameSource: entry.nameSource }));
+  return {
+    courseId: course.courseId,
+    mapperVersion: MAPPER_VERSION,
+    /* Always: the visual chain ran per course inside publishSeparatedLoops, and the Garmin
+       wake reads coursesPublished. True for a single play order too. */
+    multiCourse: true,
+    resolutionMode: "play-orders",
+    resolutionReason: "set-by-hand-in-the-mapping-overlay",
+    coursesPublished: published,
+    mappingMethod: "play-order",
+    queryStages,
+    expectedHoles: loops[0].expectedHoles,
+    warnings: warnings.length ? warnings : undefined,
+    diagnostics
+  };
 }
 
 /* A neighbouring course the sweep caught whole, published as its OWN course.
@@ -2209,6 +2281,12 @@ async function runMapperJob(job, origin) {
    *                                    1-18; Royal Auckland is three loops. N rows.
    *
    * Same function, same output, no longer a failure. */
+  /* Play orders say what the courses here are, so nothing below is asked to work it out. */
+  if (course.playOrders.length) {
+    await heartbeatJob(job, { stage: "publishing-play-orders" });
+    return publishPlayOrders(job, course, payload, origin, diagnostics, queryStages);
+  }
+
   let collision = detectHoleNumberCollision(payload);
   let resolverStatus = null;
   let loops = null;

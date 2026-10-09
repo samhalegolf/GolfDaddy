@@ -119,6 +119,7 @@ jobs:
           node dev/automapper-core.test.js
           node dev/geometry-resolver-core.test.js
           node dev/map-overlay-core.test.js
+          node dev/play-order-core.test.js
           node dev/overlay-georef-core.test.js
           node dev/ai-scan-core.test.js
           node dev/course-map-ai-scan.test.js

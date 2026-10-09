@@ -13,8 +13,10 @@
  *        lastRun  - the latest mapper job: its status, error and the counts it recorded, so a
  *                   drawer opened on a failed course says why it failed.
  *      All three are for display. None of it is copied into the overlay.
- * POST {courseId, features:[...]}  (admin) -> saves the overlay, normalised. An empty list
- *      deletes the row: "no overlay" is the absence of a row, not a row holding [].
+ * POST {courseId, features:[...], playOrders?:[...]}  (admin) -> saves the overlay, normalised.
+ *      playOrders are the hand-built courses (lib/gd-play-order-core.mjs); left out, the saved
+ *      ones are kept. No shapes and no play orders deletes the row: "no overlay" is the absence
+ *      of a row, not a row holding [].
  * POST {courseId, status: "draft" | "ready"}  (admin) -> marks the saved overlay. The mapper
  *      reads only a ready overlay; any shape save puts it back to draft.
  * POST {courseId, courseMap: {mediaType, data, name, width, height} | null}  (admin) -> stores
@@ -124,7 +126,7 @@ export default async function courseMapOverlay(req) {
     const overlay = await loadOverlay(courseId);
     const body = {
       courseId, course,
-      overlay: { features: overlay.features, status: overlay.status, updatedAt: overlay.updatedAt, updatedBy: overlay.updatedBy },
+      overlay: { features: overlay.features, playOrders: overlay.playOrders, status: overlay.status, updatedAt: overlay.updatedAt, updatedBy: overlay.updatedBy },
       aiScan: publicAiScan(overlay.aiScan),
       courseMap: publicCourseMap(overlay.courseMap),
       summary: overlaySummary(overlay.features)
@@ -167,7 +169,9 @@ export default async function courseMapOverlay(req) {
     if (converted.error) return json(400, { error: "bad georef", detail: converted.error });
     raw = converted.features;
   }
-  const saved = await saveOverlay({ courseId, features: raw, savedBy: admin, append: !!(converted && payload.append) });
+  /* Play orders ride on a hand save; an AI save leaves them as they are. */
+  const playOrders = !converted && Array.isArray(payload.playOrders) ? payload.playOrders : undefined;
+  const saved = await saveOverlay({ courseId, features: raw, playOrders, savedBy: admin, append: !!(converted && payload.append) });
   if (saved.error) return json(400, saved);
   return json(200, Object.assign(saved, {
     dropped: saved.dropped + (converted ? converted.dropped.length : 0),
