@@ -203,7 +203,7 @@
     try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) {}
     if (!saved || typeof saved !== "object") return;
     if (saved.course) { session.course = saved.course; session.view = saved.view || null; }
-    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "treeRadius", "treeFinderLevel", "numberAuto"].forEach(function (k) {
+    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "googleSplit", "treeRadius", "treeFinderLevel", "numberAuto"].forEach(function (k) {
       if (saved[k] != null) session[k] = saved[k];
     });
     if (saved.wandSize && typeof saved.wandSize === "object") {
@@ -363,7 +363,8 @@
     plus: svgIcon('<path d="M12 5v14M5 12h14"/>'),
     minus: svgIcon('<path d="M5 12h14"/>'),
     undo: svgIcon('<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
-    chevron: svgIcon('<path d="M6 9l6 6 6-6"/>')
+    chevron: svgIcon('<path d="M6 9l6 6 6-6"/>'),
+    split: svgIcon('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>')
   };
   function railButton(name, icon, label, title) {
     return '<button type="button" class="gdStudioOverlayRailBtn" data-gd-overlay="' + name + '" title="' + esc(title) + '" aria-label="' + esc(label) + '">' + ICON[icon] + "<span>" + esc(label) + "</span></button>";
@@ -473,6 +474,7 @@
       "Bright outlines are what OSM already has; dashed amber ones are the course's saved objects.</p></details>" +
       "</div>" +
       "</div>" +
+      '<div class="gdStudioOverlaySplit">' +
       '<div class="gdStudioOverlayStage isTool-move" data-gd-overlay="stage">' +
       '<div class="gdStudioViewportMap gdStudioOverlayMap" data-gd-overlay="map"></div>' +
       '<div class="gdStudioOverlayRail" role="toolbar" aria-label="Tools">' +
@@ -521,6 +523,7 @@
       '<div class="gdStudioOverlayViewRail" role="toolbar" aria-label="View">' +
       viewButton("undo", "undo", "Undo the last change (Ctrl+Z / ⌘Z)") +
       viewButton("fullscreen", "expand", "Full screen") +
+      viewButton("google", "split", "Google satellite alongside, following this map") +
       viewButton("fit", "course", "Fit the whole course (H)") +
       viewButton("zoom-shape", "search", "Zoom to the selected shape (Z)") +
       viewButton("zoom-in", "plus", "Zoom in (+)") +
@@ -537,10 +540,15 @@
       '<button type="button" class="gdStudioOverlayBin" data-gd-overlay="bin" title="Drag a shape or point here to delete it, or click to delete the selected shape">' +
       BIN_ICON + "<span>Bin</span></button>" +
       "</div>" +
+      '<div class="gdStudioOverlayGoogle" data-gd-overlay="google-pane" hidden>' +
+      '<div class="gdStudioOverlayGoogleMap" data-gd-overlay="google-map"></div>' +
+      '<div class="gdStudioOverlayGoogleCredit" data-gd-overlay="google-credit">Google</div>' +
+      "</div>" +
+      "</div>" +
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "unnumber", "clear", "run", "status"].forEach(function (name) {
+    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "unnumber", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -602,17 +610,14 @@
       layer.addTo(mapObj);
       try { mapObj.setMaxZoom(DRAW_MAX_ZOOM); } catch (e) {}
       el.credit.innerHTML = esc(source.label) + (source.attribution ? " — " + esc(source.attribution) : "");
-      /* Google's credit depends on the ground in view; its layer says what it is after each move. */
-      var mounted = layer;
-      layer.on("gdcredit", function (e) { if (layer === mounted) el.credit.innerHTML = esc(source.label) + " — " + esc(e.text); });
       remember();
     }
-    /* Mapbox and Google are licensed for looking at, not for reading back: no wand, colour
-       wand, tree finder or AI scan reads their pixels. Shapes are still placed by hand over them. */
-    function captureRefusal() {
+    /* Why the mounted provider's pixels cannot be read, or "". `scan` is the AI scan, whose
+       shapes are stored - a provider marked noAiScan (Mapbox) is wand-only. */
+    function captureRefusal(scan) {
       if (!mapObj || !layer || typeof layer.getTileUrl !== "function") return "this provider cannot be captured - switch provider";
       var source = sourceByKey(session.sourceKey);
-      if (source && source.viewOnly) return source.name + " is view-only - switch provider to use the wand, colour wand, tree finder or AI scan";
+      if (scan && source && source.noAiScan) return "the AI scan does not run over " + source.name + " - switch provider to scan";
       return "";
     }
 
@@ -3226,7 +3231,7 @@
        actually sent. */
     function captureView() {
       return new Promise(function (resolve, reject) {
-        var refused = captureRefusal();
+        var refused = captureRefusal(true);
         if (refused) return reject(new Error(refused));
         var native = num(layer.options && layer.options.maxNativeZoom);
         var z = num(layer._tileZoom);
@@ -3595,7 +3600,52 @@
     }
 
     function remeasure() {
-      setTimeout(function () { if (!destroyed && mapObj) { try { mapObj.invalidateSize(); } catch (e) {} } }, 60);
+      setTimeout(function () {
+        if (destroyed) return;
+        if (mapObj) { try { mapObj.invalidateSize(); } catch (e) {} }
+        if (google) { try { google.map.invalidateSize(); syncGoogle(); } catch (e) {} }
+      }, 60);
+    }
+
+    /* ---- Google alongside ----
+       Google satellite in a pane beside the drawing map, to compare the ground against - never
+       drawn on, never read by a wand (Google's terms license it for display). The two maps
+       follow each other: pan or zoom either and the other goes to the same place. `following`
+       stops the echo, since setView fires the other map's move events straight away. */
+    var google = null;
+    var following = false;
+    function follow(from, to) {
+      if (!google || following) return;
+      following = true;
+      try { to.setView(from.getCenter(), from.getZoom(), { animate: false }); } catch (e) {}
+      following = false;
+    }
+    function syncGoogle() { if (google) follow(mapObj, google.map); }
+    function syncMain() { if (google) follow(google.map, mapObj); }
+    function setGoogle(on) {
+      var api = sourcesApi();
+      if (on && !(api.googleReady && api.googleReady())) {
+        setStatus("Google satellite needs GOOGLE_MAP_TILES_KEY on the site.", true);
+        on = false;
+      }
+      session.googleSplit = !!on;
+      el.google.classList.toggle("isActive", !!on);
+      el["google-pane"].hidden = !on;
+      if (on && !google) {
+        var map = L.map(el["google-map"], {
+          zoomControl: false, attributionControl: false, doubleClickZoom: true, scrollWheelZoom: true,
+          zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 90, wheelDebounceTime: 20, maxZoom: 22
+        }).setView(mapObj.getCenter(), mapObj.getZoom());
+        var tiles = api.googleLayer().addTo(map);
+        tiles.on("gdcredit", function (e) { el["google-credit"].textContent = e.text; });
+        google = { map: map };
+        map.on("move", syncMain);
+      } else if (!on && google) {
+        try { google.map.remove(); } catch (e) {}
+        google = null;
+      }
+      remember();
+      remeasure();
     }
 
     function pickCourse() {
@@ -3770,6 +3820,8 @@
     el.undo.addEventListener("click", undo);
     el["zoom-shape"].addEventListener("click", zoomToSelected);
     el.fullscreen.addEventListener("click", function () { setFullscreen(!fullscreen); });
+    el.google.addEventListener("click", function () { setGoogle(!google); });
+    mapObj.on("move", syncGoogle);
     if (session.fullscreen) setFullscreen(true);
     /* Nothing to work on yet: open the pull-down, where the course is picked. */
     setMenu(!session.course);
@@ -3803,6 +3855,7 @@
     updateHint();
     updateBin();
     renderHoleField();
+    if (session.googleSplit && sourcesApi().googleReady && sourcesApi().googleReady()) setGoogle(true);
     remeasure();
 
     return function cleanup() {
@@ -3831,6 +3884,8 @@
       document.removeEventListener("pointercancel", onDragEnd);
       if (window.GDStudioCoursePick) window.GDStudioCoursePick.cancel();
       if (window.GDStudioShell) window.GDStudioShell.show();
+      if (google) { try { google.map.remove(); } catch (e) {} }
+      google = null;
       if (mapObj) { try { mapObj.remove(); } catch (e) {} }
       mapObj = null;
       layer = null;

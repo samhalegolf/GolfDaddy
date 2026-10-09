@@ -14406,39 +14406,22 @@ const mapSources=[
     attribution:"Powered by Esri — Maxar, Earthstar Geographics, and the GIS User Community",
     options:{maxZoom:21,maxNativeZoom:19,crossOrigin:true}
   },
-  /* Studio-only views. Neither is ever picked for a player: mapSourceReady refuses
-     studioOnly entries, so the app's auto pick, cycle and coverage fallback all step past
-     them, and Studio offers them as manual picks only. viewOnly is the licence: Mapbox
-     (Product Terms) and Google (Map Tiles API) license these pixels for display, so Studio
-     never reads them back into a canvas - no wand, no AI scan, no tree finder over them. */
+  /* Studio-only. Never picked for a player: mapSourceReady refuses studioOnly, so the app's
+     auto pick, cycle and coverage fallback all step past it, and Studio offers it as a manual
+     pick. The wands read it; the AI scan does not (noAiScan), because a scan's shapes are stored
+     and Mapbox's Product Terms keep its scans to dry runs (functions/course-map-ai-scan.mjs). */
   {
     key:"mapbox",
     name:"Mapbox Satellite",
-    label:"Mapbox Satellite (view only)",
+    label:"Mapbox Satellite (Studio only)",
     /* Same tiles as the app's flat-map override (app/js/basemap.js): @2x is a 512px tile of
        the same ground drawn into Leaflet's 256px cell. */
     tileUrl:"https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token={mapboxToken}",
     requiresKey:"mapboxToken",
     studioOnly:true,
-    viewOnly:true,
+    noAiScan:true,
     attribution:"© Mapbox © OpenStreetMap — © Maxar",
     options:{maxZoom:21,maxNativeZoom:19,crossOrigin:true}
-  },
-  {
-    key:"google",
-    name:"Google Satellite",
-    label:"Google satellite, Map Tiles API (view only)",
-    /* Map Tiles API 2D tiles. Every tile URL carries a session token as well as the key, so
-       this has no plain template: gdGoogleTilesSession() creates the session once and
-       GdGoogleTileLayer holds each tile until it exists. The credit is not static either -
-       Google's copyright line depends on the ground in view, so the layer asks the viewport
-       endpoint after every move and fires "gdcredit" with the answer. */
-    googleTiles:true,
-    requiresKey:"googleKey",
-    studioOnly:true,
-    viewOnly:true,
-    attribution:"Google",
-    options:{maxZoom:22,maxNativeZoom:21,crossOrigin:true}
   },
   {
     key:"osm",
@@ -14542,8 +14525,13 @@ const GdBboxTileLayer=L.TileLayer.extend({
   }
 });
 /* ---- Google Map Tiles API ----
-   A session is created once per page (they last about two weeks) and shared by every Google
-   layer. A failed create is forgotten so the next layer asks again rather than inheriting it. */
+   Not a provider in the list: Studio's overlay shows Google only in its side-by-side pane
+   (GDMapSources.googleLayer), to look at, never to draw on or read pixels from. Every tile URL
+   carries a session token as well as the key, so there is no plain template: the session is
+   created once per page (they last about two weeks) and GdGoogleTileLayer holds each tile until
+   it exists. A failed create is forgotten so the next layer asks again. Google's copyright line
+   depends on the ground in view, so the layer asks the viewport endpoint after every move and
+   fires "gdcredit" with it - the terms require it on screen. */
 const GD_GOOGLE_TILES_API="https://tile.googleapis.com";
 let gdGoogleSession=null;
 function gdGoogleTilesSession(){
@@ -14621,7 +14609,6 @@ function gdBuildBaseLayer(source){
     options.gdSource=source;
     return new GdBboxTileLayer("",options);
   }
-  if(source&&source.googleTiles)return new GdGoogleTileLayer("",options);
   return L.tileLayer(mapSourceTileUrl(source),options);
 }
 
@@ -14639,7 +14626,9 @@ window.GDMapSources={
   buildLayer:gdBuildBaseLayer,
   keyValue:mapSourceKeyValue,
   covers:mapSourceCovers,
-  ready:mapSourceReady
+  ready:mapSourceReady,
+  googleReady:()=>!!mapSourceKeyValue("googleKey"),
+  googleLayer:()=>new GdGoogleTileLayer("",{maxZoom:22,maxNativeZoom:21,crossOrigin:true,attribution:"Google"})
 };
 
 /* ---- blank-layer demotion ----
@@ -14753,8 +14742,8 @@ fetch("/api/auth-public-config",{cache:"no-store"})
     let keyArrived=false;
     if(config.linzBasemapsKey){window.gdLinzBasemapsKey=String(config.linzBasemapsKey);keyArrived=true;}
     if(config.esriApiKey){window.gdEsriApiKey=String(config.esriApiKey);keyArrived=true;}
-    /* Studio-only views (Mapbox, Google): published for Studio's provider list, never picked
-       by the app, so they do not count as a key arriving for the re-pick below. */
+    /* Studio-only (Mapbox in the provider list, Google in the overlay's side pane): never
+       picked by the app, so they do not count as a key arriving for the re-pick below. */
     if(config.mapboxPublicToken)window.gdMapboxToken=String(config.mapboxPublicToken);
     if(config.googleMapTilesKey)window.gdGoogleMapTilesKey=String(config.googleMapTilesKey);
     if(!keyArrived)return;

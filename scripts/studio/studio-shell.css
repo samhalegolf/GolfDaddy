@@ -330,7 +330,25 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
 #gdStudioShellRoot .gdStudioOverlayRun:empty { display: none; }
 
 /* The map and what floats over it. */
-#gdStudioShellRoot .gdStudioOverlayStage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+/* The stage and, when it is open, Google alongside it: side by side, stacked on a phone. */
+#gdStudioShellRoot .gdStudioOverlaySplit { position: relative; flex: 1 1 auto; min-height: 0; display: flex; }
+#gdStudioShellRoot .gdStudioOverlayStage { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
+#gdStudioShellRoot .gdStudioOverlayGoogle { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; border-left: 2px solid var(--gdStudioBorder); }
+#gdStudioShellRoot .gdStudioOverlayGoogle[hidden] { display: none; }
+#gdStudioShellRoot .gdStudioOverlayGoogleMap { position: absolute; inset: 0; background: #000; }
+#gdStudioShellRoot .gdStudioOverlayGoogleCredit {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 800;
+  max-width: calc(100% - 16px);
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--gdOverlayScrim);
+  color: var(--gdStudioText);
+  font-size: 11px;
+  pointer-events: none;
+}
 #gdStudioShellRoot .gdStudioOverlayStage .gdStudioOverlayMap { position: absolute; inset: 0; height: auto; min-height: 0; border: 0; border-radius: 0; }
 #gdStudioShellRoot .gdStudioOverlayRail,
 #gdStudioShellRoot .gdStudioOverlayViewRail,
@@ -634,6 +652,8 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
   #gdStudioShellRoot .gdStudioOverlayDock { left: 70px; right: 90px; bottom: 8px; }
   #gdStudioShellRoot .gdStudioOverlayHint { font-size: 11.5px; }
   #gdStudioShellRoot .gdStudioOverlayBin { right: 8px; bottom: 8px; }
+  #gdStudioShellRoot .gdStudioOverlaySplit { flex-direction: column; }
+  #gdStudioShellRoot .gdStudioOverlayGoogle { border-left: 0; border-top: 2px solid var(--gdStudioBorder); }
   #gdStudioShellRoot .gdStudioOverlayMenu { max-height: 75vh; padding: 10px 12px 12px; }
   #gdStudioShellRoot .gdStudioOverlayMenu .gdStudioDiagramBtn { min-height: 38px; padding: 8px 14px; font-size: 13px; }
 }

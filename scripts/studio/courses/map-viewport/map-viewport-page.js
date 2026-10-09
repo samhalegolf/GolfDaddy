@@ -140,9 +140,6 @@
       var maxZoom = num(source.options && source.options.maxZoom) || 21;
       try { mapObj.setMaxZoom(maxZoom); } catch (e) {}
       el.credit.innerHTML = esc(source.label) + (source.attribution ? " — " + esc(source.attribution) : "");
-      /* Google's credit depends on the ground in view; its layer says what it is after each move. */
-      var mounted = layer;
-      layer.on("gdcredit", function (e) { if (layer === mounted) el.credit.innerHTML = esc(source.label) + " — " + esc(e.text); });
       updateReadout(reason);
     }
 

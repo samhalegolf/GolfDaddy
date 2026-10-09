@@ -165,23 +165,24 @@ test("the paid global aerial is global, keyed, and sits between the open program
     "Esri World Imagery in the SCAN registry would store pixels the licence only lets us display");
 });
 
-/* Mapbox and Google are Studio views: keyed, licensed for display only, and never something a
-   player is put on. The app side of that is mapSourceReady refusing studioOnly; Studio's side is
-   viewOnly, which the overlay's captureRefusal reads before any pixel is read back. */
-test("Mapbox and Google are Studio-only, view-only, keyed, and never auto-picked", () => {
+/* Mapbox is a Studio pick: keyed, never something a player is put on (mapSourceReady refuses
+   studioOnly), and wand-only - the overlay's AI scan refuses noAiScan. Google is not in the list
+   at all: Studio shows it only in the overlay's side pane, through GDMapSources.googleLayer. */
+test("Mapbox is Studio-only and wand-only; Google is not a provider", () => {
   const core = fs.readFileSync(path.join(root, "scripts", "gd-app-core.js"), "utf8");
-  [["mapbox", "mapboxToken"], ["google", "googleKey"]].forEach(([key, keyName]) => {
-    const s = source(key);
-    assert.ok(s.studioOnly && s.viewOnly, key + " must be studioOnly and viewOnly");
-    assert.strictEqual(s.requiresKey, keyName, key + " without its key paints 401s");
-  });
+  const mapbox = source("mapbox");
+  assert.ok(mapbox.studioOnly && mapbox.noAiScan, "Mapbox must be studioOnly and noAiScan");
+  assert.strictEqual(mapbox.requiresKey, "mapboxToken", "Mapbox without its token paints 401s");
+  assert.ok(!mapSources.some(s => s.key === "google"), "Google is the side pane, never a provider to draw on");
   assert.ok(/function mapSourceReady\(source,centre\)\{\s*if\(!source\|\|source\.studioOnly\)return false;/.test(core),
     "mapSourceReady must refuse studioOnly sources, or the app's auto pick could land a player on them");
+  assert.ok(/googleLayer:\(\)=>new GdGoogleTileLayer/.test(core), "the overlay's side pane builds Google through GDMapSources");
   assert.strictEqual(mapSources[mapSources.length - 1].key, "osm", "the line guide stays last");
   const overlay = fs.readFileSync(path.join(root, "scripts", "studio", "courses", "map-overlay", "map-overlay-page.js"), "utf8");
-  assert.ok(/source && source\.viewOnly/.test(overlay), "the overlay must refuse to read a view-only source's pixels");
-  assert.strictEqual((overlay.match(/var refused = captureRefusal\(\);/g) || []).length, 3,
-    "all three captures (box, wand, AI view) go through captureRefusal");
+  assert.ok(/scan && source && source\.noAiScan/.test(overlay), "the AI scan must refuse a noAiScan source");
+  assert.ok(/function captureView\(\) \{\s*return new Promise\(function \(resolve, reject\) \{\s*var refused = captureRefusal\(true\);/.test(overlay),
+    "the AI scan's capture asks as a scan");
+  assert.strictEqual((overlay.match(/var refused = captureRefusal\(\);/g) || []).length, 2, "the wands' captures ask as wands");
 });
 
 /* NAIP is the one source here that is not a URL template. Its ImageServer has no tile cache at
