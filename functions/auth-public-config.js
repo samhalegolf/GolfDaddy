@@ -35,7 +35,11 @@ exports.handler = async function(event) {
          (app/js/basemap.js). Public by design like the two
          above - restrict it to this domain in the Mapbox dashboard. Only a pk. token is ever
          published: a secret sk. token in this variable would otherwise leak into tile URLs. */
-      mapboxPublicToken: mapboxPublicToken()
+      mapboxPublicToken: mapboxPublicToken(),
+      /* Google Map Tiles API key, for Studio's Google satellite view only (scripts/gd-app-core.js,
+         GdGoogleTileLayer). Public by design, it rides in every tile URL: restrict it in the
+         Google Cloud console to this domain's referrers and to the Map Tiles API alone. */
+      googleMapTilesKey: String(process.env.GOOGLE_MAP_TILES_KEY || "").trim()
     })
   };
 };

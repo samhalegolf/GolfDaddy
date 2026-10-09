@@ -334,6 +334,8 @@
   function publishAuthConfigExtras(body) {
     safe(function () { if (body && body.linzBasemapsKey) window.gdLinzBasemapsKey = String(body.linzBasemapsKey); });
     safe(function () { if (body && body.esriApiKey) window.gdEsriApiKey = String(body.esriApiKey); });
+    safe(function () { if (body && body.mapboxPublicToken) window.gdMapboxToken = String(body.mapboxPublicToken); });
+    safe(function () { if (body && body.googleMapTilesKey) window.gdGoogleMapTilesKey = String(body.googleMapTilesKey); });
   }
 
   async function fetchAuthConfig() {

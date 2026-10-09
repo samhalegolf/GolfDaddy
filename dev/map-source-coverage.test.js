@@ -154,7 +154,8 @@ test("the paid global aerial is global, keyed, and sits between the open program
   assert.ok(/ibasemaps-api\.arcgis\.com/.test(esri.tileUrl),
     "the anonymous services.arcgisonline.com endpoint grants no commercial licence - never again");
   assert.ok(/\{ *esriKey *\}/.test(esri.tileUrl), "the template must carry the key placeholder");
-  assert.strictEqual(mapSources.findIndex(s => s.key === "esri"), mapSources.length - 2,
+  const playable = mapSources.filter(s => !s.studioOnly);
+  assert.strictEqual(playable.findIndex(s => s.key === "esri"), playable.length - 2,
     "preference order: every open regional aerial first, paid Esri next, the line guide last");
   /* Display-only, like Queensland: the licence the key buys is display, so the scan registry
      must never grow an Esri imagery entry. Asserted against the registry source because that
@@ -162,6 +163,26 @@ test("the paid global aerial is global, keyed, and sits between the open program
   const registry = fs.readFileSync(path.join(root, "functions", "lib", "gd-imagery-sources.mjs"), "utf8");
   assert.ok(!/ibasemaps-api|World_Imagery/.test(registry),
     "Esri World Imagery in the SCAN registry would store pixels the licence only lets us display");
+});
+
+/* Mapbox is a Studio pick: keyed, never something a player is put on (mapSourceReady refuses
+   studioOnly), and wand-only - the overlay's AI scan refuses noAiScan. Google is not in the list
+   at all: Studio shows it only in the overlay's side pane, through GDMapSources.googleLayer. */
+test("Mapbox is Studio-only and wand-only; Google is not a provider", () => {
+  const core = fs.readFileSync(path.join(root, "scripts", "gd-app-core.js"), "utf8");
+  const mapbox = source("mapbox");
+  assert.ok(mapbox.studioOnly && mapbox.noAiScan, "Mapbox must be studioOnly and noAiScan");
+  assert.strictEqual(mapbox.requiresKey, "mapboxToken", "Mapbox without its token paints 401s");
+  assert.ok(!mapSources.some(s => s.key === "google"), "Google is the side pane, never a provider to draw on");
+  assert.ok(/function mapSourceReady\(source,centre\)\{\s*if\(!source\|\|source\.studioOnly\)return false;/.test(core),
+    "mapSourceReady must refuse studioOnly sources, or the app's auto pick could land a player on them");
+  assert.ok(/googleLayer:\(\)=>new GdGoogleTileLayer/.test(core), "the overlay's side pane builds Google through GDMapSources");
+  assert.strictEqual(mapSources[mapSources.length - 1].key, "osm", "the line guide stays last");
+  const overlay = fs.readFileSync(path.join(root, "scripts", "studio", "courses", "map-overlay", "map-overlay-page.js"), "utf8");
+  assert.ok(/scan && source && source\.noAiScan/.test(overlay), "the AI scan must refuse a noAiScan source");
+  assert.ok(/function captureView\(\) \{\s*return new Promise\(function \(resolve, reject\) \{\s*var refused = captureRefusal\(true\);/.test(overlay),
+    "the AI scan's capture asks as a scan");
+  assert.strictEqual((overlay.match(/var refused = captureRefusal\(\);/g) || []).length, 2, "the wands' captures ask as wands");
 });
 
 /* NAIP is the one source here that is not a URL template. Its ImageServer has no tile cache at

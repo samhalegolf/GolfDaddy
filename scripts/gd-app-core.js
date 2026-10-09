@@ -14406,6 +14406,23 @@ const mapSources=[
     attribution:"Powered by Esri — Maxar, Earthstar Geographics, and the GIS User Community",
     options:{maxZoom:21,maxNativeZoom:19,crossOrigin:true}
   },
+  /* Studio-only. Never picked for a player: mapSourceReady refuses studioOnly, so the app's
+     auto pick, cycle and coverage fallback all step past it, and Studio offers it as a manual
+     pick. The wands read it; the AI scan does not (noAiScan), because a scan's shapes are stored
+     and Mapbox's Product Terms keep its scans to dry runs (functions/course-map-ai-scan.mjs). */
+  {
+    key:"mapbox",
+    name:"Mapbox Satellite",
+    label:"Mapbox Satellite (Studio only)",
+    /* Same tiles as the app's flat-map override (app/js/basemap.js): @2x is a 512px tile of
+       the same ground drawn into Leaflet's 256px cell. */
+    tileUrl:"https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token={mapboxToken}",
+    requiresKey:"mapboxToken",
+    studioOnly:true,
+    noAiScan:true,
+    attribution:"© Mapbox © OpenStreetMap — © Maxar",
+    options:{maxZoom:21,maxNativeZoom:19,crossOrigin:true}
+  },
   {
     key:"osm",
     name:"OSM Guide",
@@ -14465,17 +14482,22 @@ function mapSourceCovers(source,centre){
 function mapSourceKeyValue(name){
   if(name==="linzKey")return String(window.gdLinzBasemapsKey||"");
   if(name==="esriKey")return String(window.gdEsriApiKey||"");
+  if(name==="mapboxToken")return String(window.gdMapboxToken||"");
+  if(name==="googleKey")return String(window.gdGoogleMapTilesKey||"");
   return "";
 }
+/* Ready means "may be mounted without anyone asking for it". A studioOnly source never is -
+   it is only ever a manual pick in Studio, which checks key and coverage itself. */
 function mapSourceReady(source,centre){
-  if(!source)return false;
+  if(!source||source.studioOnly)return false;
   if(source.requiresKey&&!mapSourceKeyValue(source.requiresKey))return false;
   return mapSourceCovers(source,centre===undefined?mapViewCentre():centre);
 }
 function mapSourceTileUrl(source){
   return String(source&&source.tileUrl||"")
     .replace(/\{ *linzKey *\}/g,mapSourceKeyValue("linzKey"))
-    .replace(/\{ *esriKey *\}/g,mapSourceKeyValue("esriKey"));
+    .replace(/\{ *esriKey *\}/g,mapSourceKeyValue("esriKey"))
+    .replace(/\{ *mapboxToken *\}/g,mapSourceKeyValue("mapboxToken"));
 }
 
 /* ---- bbox-addressed imagery as slippy tiles ----
@@ -14502,6 +14524,79 @@ const GdBboxTileLayer=L.TileLayer.extend({
     return String(spec.bboxEndpoint)+"?"+params.toString();
   }
 });
+/* ---- Google Map Tiles API ----
+   Not a provider in the list: Studio's overlay shows Google only in its side-by-side pane
+   (GDMapSources.googleLayer), to look at, never to draw on or read pixels from. Every tile URL
+   carries a session token as well as the key, so there is no plain template: the session is
+   created once per page (they last about two weeks) and GdGoogleTileLayer holds each tile until
+   it exists. A failed create is forgotten so the next layer asks again. Google's copyright line
+   depends on the ground in view, so the layer asks the viewport endpoint after every move and
+   fires "gdcredit" with it - the terms require it on screen. */
+const GD_GOOGLE_TILES_API="https://tile.googleapis.com";
+let gdGoogleSession=null;
+function gdGoogleTilesSession(){
+  const key=mapSourceKeyValue("googleKey");
+  if(!key)return Promise.reject(new Error("no Google Map Tiles key"));
+  if(gdGoogleSession&&gdGoogleSession.key===key&&(!gdGoogleSession.expiry||gdGoogleSession.expiry>Date.now()+60000))return gdGoogleSession.promise;
+  const entry={key:key,expiry:0,token:""};
+  entry.promise=fetch(GD_GOOGLE_TILES_API+"/v1/createSession?key="+encodeURIComponent(key),{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({mapType:"satellite",language:"en-GB",region:"GB"})
+  }).then(res=>res.ok?res.json():res.text().then(text=>{throw new Error("Google Map Tiles session refused ("+res.status+"): "+text.slice(0,200))}))
+    .then(body=>{
+      if(!body||!body.session)throw new Error("Google Map Tiles session missing from the reply");
+      entry.token=String(body.session);
+      entry.expiry=Number(body.expiry)*1000||0;
+      return entry;
+    });
+  entry.promise.catch(()=>{if(gdGoogleSession===entry)gdGoogleSession=null;});
+  gdGoogleSession=entry;
+  return entry.promise;
+}
+const GdGoogleTileLayer=L.TileLayer.extend({
+  /* Synchronous, so it answers only once the session exists - which it does by the time any
+     tile has drawn. Before that it is "" and the tile is held in createTile instead. */
+  getTileUrl:function(coords){
+    const s=gdGoogleSession&&gdGoogleSession.token?gdGoogleSession:null;
+    if(!s)return "";
+    return GD_GOOGLE_TILES_API+"/v1/2dtiles/"+coords.z+"/"+coords.x+"/"+coords.y+"?session="+encodeURIComponent(s.token)+"&key="+encodeURIComponent(s.key);
+  },
+  createTile:function(coords,done){
+    const tile=document.createElement("img");
+    L.DomEvent.on(tile,"load",L.Util.bind(this._tileOnLoad,this,done,tile));
+    L.DomEvent.on(tile,"error",L.Util.bind(this._tileOnError,this,done,tile));
+    if(this.options.crossOrigin)tile.crossOrigin="anonymous";
+    tile.alt="";
+    tile.setAttribute("role","presentation");
+    gdGoogleTilesSession().then(()=>{tile.src=this.getTileUrl(coords);},error=>{done(error,tile);});
+    return tile;
+  },
+  onAdd:function(map){
+    L.TileLayer.prototype.onAdd.call(this,map);
+    map.on("moveend",this._gdCredit,this);
+    this._gdCredit();
+  },
+  onRemove:function(map){
+    map.off("moveend",this._gdCredit,this);
+    L.TileLayer.prototype.onRemove.call(this,map);
+  },
+  /* Google's copyright line for the ground in view. Its terms require it on screen. */
+  _gdCredit:function(){
+    const map=this._map;
+    if(!map)return;
+    const asked=this._gdCreditAsk=(this._gdCreditAsk||0)+1;
+    gdGoogleTilesSession().then(s=>{
+      const b=map.getBounds();
+      const params=new URLSearchParams({session:s.token,key:s.key,zoom:String(Math.round(map.getZoom())),
+        north:String(b.getNorth()),south:String(b.getSouth()),east:String(b.getEast()),west:String(b.getWest())});
+      return fetch(GD_GOOGLE_TILES_API+"/tile/v1/viewport?"+params.toString()).then(res=>res.ok?res.json():null);
+    }).then(body=>{
+      if(asked!==this._gdCreditAsk||!this._map)return;
+      this.fire("gdcredit",{text:"Google"+(body&&body.copyright?" — "+String(body.copyright):"")});
+    }).catch(()=>{});
+  }
+});
+
 /* One place that turns a source into a layer, because there are now two kinds: a URL template,
    and a bbox endpoint with no tile cache behind it.
 
@@ -14531,7 +14626,9 @@ window.GDMapSources={
   buildLayer:gdBuildBaseLayer,
   keyValue:mapSourceKeyValue,
   covers:mapSourceCovers,
-  ready:mapSourceReady
+  ready:mapSourceReady,
+  googleReady:()=>!!mapSourceKeyValue("googleKey"),
+  googleLayer:()=>new GdGoogleTileLayer("",{maxZoom:22,maxNativeZoom:21,crossOrigin:true,attribution:"Google"})
 };
 
 /* ---- blank-layer demotion ----
@@ -14645,6 +14742,10 @@ fetch("/api/auth-public-config",{cache:"no-store"})
     let keyArrived=false;
     if(config.linzBasemapsKey){window.gdLinzBasemapsKey=String(config.linzBasemapsKey);keyArrived=true;}
     if(config.esriApiKey){window.gdEsriApiKey=String(config.esriApiKey);keyArrived=true;}
+    /* Studio-only (Mapbox in the provider list, Google in the overlay's side pane): never
+       picked by the app, so they do not count as a key arriving for the re-pick below. */
+    if(config.mapboxPublicToken)window.gdMapboxToken=String(config.mapboxPublicToken);
+    if(config.googleMapTilesKey)window.gdGoogleMapTilesKey=String(config.googleMapTilesKey);
     if(!keyArrived)return;
     /* Re-pick rather than forcing index 0: a key arriving makes its source selectable, but only
        where that source has pixels. Forcing 0 is what mounted an empty New Zealand layer over
