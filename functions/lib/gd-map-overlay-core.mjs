@@ -196,7 +196,58 @@ export function overlayToOsmElements(features) {
     const geometry = points.map(p => ({ lat: p.lat, lon: p.lng }));
     if (overlayKindIsPolygon(feature.kind)) geometry.push({ lat: points[0].lat, lon: points[0].lng });
     return { type: "way", id: OVERLAY_ID_BASE - index, tags, geometry };
+  }).concat(derivedHoleLines(list, linkHole));
+}
+
+/* A numbered hole drawn as shapes, turned into the line the mapper numbers holes by.
+ *
+ * The automapper's first pass only reads hole numbers off golf=hole lines (parseOsmHoleGuides).
+ * A person who outlined a tee and a green and typed "7" on them has said exactly what a
+ * numbered hole line says - but with no line, the first pass found nothing, the run fell to
+ * the resolver, and the resolver numbered the holes by scorecard length and lost the ones it
+ * could not place (Royal Belfast, 49 numbered shapes, 16 of 18 holes). So each hole number
+ * that has one green and at least one tee, and no hole line drawn for it, gets a line from the
+ * tee through its fairway(s) to the green, tagged ref=<hole>. The back tee is used when there
+ * are several, since that is the hole's full length. Two greens on one number is a mistake we
+ * cannot pick between, so that hole gets no line and is left to the resolver. */
+export const DERIVED_TAG = "clarity:derived";
+
+function centreOf(feature) {
+  const points = feature.pin ? pinShape(feature) : feature.points;
+  const sum = points.reduce((acc, p) => ({ lat: acc.lat + p.lat, lng: acc.lng + p.lng }), { lat: 0, lng: 0 });
+  return { lat: sum.lat / points.length, lng: sum.lng / points.length };
+}
+
+function flatDistance(a, b) {
+  const k = Math.cos(a.lat * Math.PI / 180);
+  return Math.hypot((a.lng - b.lng) * M_PER_DEG * k, (a.lat - b.lat) * M_PER_DEG);
+}
+
+export function derivedHoleLines(features, linkHole) {
+  const byHole = {};
+  features.forEach(feature => {
+    const hole = feature.hole || (feature.link && linkHole[feature.link]) || null;
+    if (!hole) return;
+    const entry = byHole[hole] = byHole[hole] || { greens: [], tees: [], fairways: [], line: false };
+    if (feature.kind === "hole") entry.line = true;
+    else if (feature.kind === "green") entry.greens.push(feature);
+    else if (feature.kind === "tee") entry.tees.push(feature);
+    else if (feature.kind === "fairway") entry.fairways.push(feature);
   });
+  return Object.keys(byHole).map(Number).sort((a, b) => a - b).map(hole => {
+    const entry = byHole[hole];
+    if (entry.line || entry.greens.length !== 1 || !entry.tees.length) return null;
+    const green = centreOf(entry.greens[0]);
+    const tee = entry.tees.map(centreOf).sort((a, b) => flatDistance(b, green) - flatDistance(a, green))[0];
+    const fairways = entry.fairways.map(centreOf).sort((a, b) => flatDistance(a, tee) - flatDistance(b, tee));
+    const geometry = [tee].concat(fairways, [green]).map(p => ({ lat: p.lat, lon: p.lng }));
+    return {
+      type: "way",
+      id: OVERLAY_ID_BASE - OVERLAY_MAX_FEATURES - hole,
+      tags: { [OVERLAY_TAG]: "hole-line-" + hole, [DERIVED_TAG]: "hole-line", golf: "hole", ref: String(hole) },
+      geometry
+    };
+  }).filter(Boolean);
 }
 
 /* A link says "these shapes are one hole" - it never says which. The resolver keeps a link's
@@ -222,9 +273,15 @@ export function isOverlayElement(element) {
    duplicate key, and an empty overlay leaves the payload untouched - including the object
    identity, so callers comparing payloads before and after see no phantom change. */
 export function mergeOverlayIntoPayload(payload, features) {
-  const extra = overlayToOsmElements(features);
-  if (!extra.length) return payload;
   const elements = ((payload && payload.elements) || []).slice();
+  /* A hole OSM already numbers keeps OSM's line; a derived one is only for the holes it lacks. */
+  const osmNumbered = new Set(elements
+    .filter(e => e && e.tags && String(e.tags.golf || "").toLowerCase() === "hole" && !isOverlayElement(e))
+    .map(e => validHoleNumber((String(e.tags.ref || e.tags.name || "").match(/\d+/) || [])[0]))
+    .filter(Boolean));
+  const extra = overlayToOsmElements(features)
+    .filter(e => !(e.tags[DERIVED_TAG] && osmNumbered.has(Number(e.tags.ref))));
+  if (!extra.length) return payload;
   const seen = new Set(elements.map(e => (e && e.id != null) ? String(e.type || "way") + "/" + e.id : null).filter(Boolean));
   extra.forEach(element => {
     const key = "way/" + element.id;

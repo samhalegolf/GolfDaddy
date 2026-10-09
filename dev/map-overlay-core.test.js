@@ -231,6 +231,57 @@ test("a numbered overlay hole line is the resolver's strongest evidence", async 
   assert.ok(byHole[1].candidate.evidence.some(e => e === "existing-ref:1"), "the drawn number is carried as an existing ref: " + JSON.stringify(byHole[1].candidate.evidence));
 });
 
+test("numbered tees and greens give the automapper's first pass its numbered hole lines", () => {
+  /* Royal Belfast's case: every hole outlined and numbered, no hole line drawn. The numbers
+     here run against the lengths (hole 1 is the short one) so a length-ranked guess would
+     swap them - the first pass has to take the typed numbers as they are. */
+  const sq = (x, y, r) => [at(x - r, y - r), at(x + r, y - r), at(x + r, y + r), at(x - r, y + r)];
+  const features = [
+    { id: "g1", kind: "green", hole: 1, points: sq(0, 300, 10) },
+    { id: "t1", kind: "tee", link: "l-1", points: sq(0, 150, 4) },
+    { id: "g1-link", kind: "fairway", hole: 1, link: "l-1", points: sq(0, 230, 15) },
+    { id: "g2", kind: "green", hole: 2, points: sq(420, 0, 12) },
+    { id: "t2-front", kind: "tee", hole: 2, points: sq(60, 0, 4) },
+    { id: "t2-back", kind: "tee", hole: 2, points: sq(10, 0, 4) }
+  ];
+  const merged = overlay.mergeOverlayIntoPayload({ elements: [] }, features);
+  const lines = merged.elements.filter(e => e.tags[overlay.DERIVED_TAG]);
+  assert.deepStrictEqual(lines.map(l => l.tags.ref), ["1", "2"], "one line per numbered hole, the link's number included");
+  assert.strictEqual(lines[0].tags.golf, "hole");
+  assert.strictEqual(lines[0].geometry.length, 3, "tee, through the fairway, to the green");
+  assert.ok(Math.abs(lines[1].geometry[0].lon - at(10, 0).lng) < 1e-6, "the back tee starts the line");
+  assert.strictEqual(overlay.overlaySummary(features).holeLines, 0, "a derived line is not counted as one a person drew");
+
+  const geometry = core.resolveCourseGeometry(merged, "numbered", at(200, 100), [], []);
+  assert.strictEqual(geometry.holesResolved, 2, "the first pass resolves both holes without the resolver");
+  const greens = Object.values(geometry.objects).filter(o => o.type === "green");
+  const green1 = greens.find(o => o.holeNumber === 1);
+  assert.ok(green1 && Math.abs(green1.position.lat - at(0, 300).lat) < 1e-4, "hole 1 is the green typed 1: " + JSON.stringify(green1 && green1.position));
+});
+
+test("no derived line where it would guess or overrule", () => {
+  const sq = (x, y, r) => [at(x - r, y - r), at(x + r, y - r), at(x + r, y + r), at(x - r, y + r)];
+  const derived = payload => payload.elements.filter(e => e.tags && e.tags[overlay.DERIVED_TAG]).map(e => e.tags.ref);
+  const twoGreens = [
+    { kind: "green", hole: 3, points: sq(0, 300, 10) }, { kind: "green", hole: 3, points: sq(200, 300, 10) },
+    { kind: "tee", hole: 3, points: sq(0, 0, 4) }
+  ];
+  assert.deepStrictEqual(derived(overlay.mergeOverlayIntoPayload({ elements: [] }, twoGreens)), [], "two greens on one number is not picked between");
+  const drawn = [
+    { kind: "green", hole: 4, points: sq(0, 300, 10) }, { kind: "tee", hole: 4, points: sq(0, 0, 4) },
+    { kind: "hole", hole: 4, points: [at(0, 0), at(0, 300)] }
+  ];
+  assert.deepStrictEqual(derived(overlay.mergeOverlayIntoPayload({ elements: [] }, drawn)), [], "a hole line a person drew is kept as the only one");
+  const noTee = [{ kind: "green", hole: 5, points: sq(0, 300, 10) }];
+  assert.deepStrictEqual(derived(overlay.mergeOverlayIntoPayload({ elements: [] }, noTee)), [], "a green alone has no line");
+  const osm = { elements: [{ type: "way", id: 77, tags: { golf: "hole", ref: "6" }, geometry: ring([at(0, 0), at(0, 310)]) }] };
+  const both = [
+    { kind: "green", hole: 6, points: sq(0, 300, 10) }, { kind: "tee", hole: 6, points: sq(0, 0, 4) },
+    { kind: "green", hole: 7, points: sq(300, 300, 10) }, { kind: "tee", hole: 7, points: sq(300, 0, 4) }
+  ];
+  assert.deepStrictEqual(derived(overlay.mergeOverlayIntoPayload(osm, both)), ["7"], "OSM's own numbered line wins for its hole");
+});
+
 test("a drawn bunker reaches the mapper as a golf=bunker way and lands as a bunker object", () => {
   const merged = overlay.mergeOverlayIntoPayload(GREENS_ONLY, [
     { id: "h1", kind: "hole", hole: 1, points: [at(0, 0), at(410, 0)] },
