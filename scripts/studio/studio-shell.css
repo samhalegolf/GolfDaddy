@@ -328,6 +328,42 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
 }
 #gdStudioShellRoot .gdStudioOverlayRun.isFailed { border-color: var(--gdStudioWarn); }
 #gdStudioShellRoot .gdStudioOverlayRun:empty { display: none; }
+/* The inbox: courses players asked to map, each with Open and Dismiss. */
+#gdStudioShellRoot .gdStudioOverlayInbox {
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--gdStudioBorder);
+  font-size: 12px;
+  max-height: 32vh;
+  overflow-y: auto;
+}
+#gdStudioShellRoot .gdStudioOverlayInboxHead { margin-bottom: 6px; }
+#gdStudioShellRoot .gdStudioOverlayInboxItem { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid var(--gdStudioBorder); }
+#gdStudioShellRoot .gdStudioOverlayInboxItem.isCurrent .gdStudioOverlayInboxName strong { color: var(--gdStudioAccent); }
+#gdStudioShellRoot .gdStudioOverlayInboxName { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+#gdStudioShellRoot .gdStudioOverlayInboxTag {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+  border: 1px solid var(--gdStudioAccent);
+  color: var(--gdStudioAccent);
+}
+#gdStudioShellRoot .gdStudioOverlayInboxTag.isFix { border-color: var(--gdStudioWarn); color: var(--gdStudioWarn); }
+#gdStudioShellRoot .gdStudioOverlayInboxCount {
+  margin-left: 6px;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--gdStudioWarn);
+  color: #1a1a1a;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+#gdStudioShellRoot .gdStudioOverlayInboxCount[hidden] { display: none; }
 
 /* The map and what floats over it. */
 /* The stage and, when it is open, Google alongside it: side by side, stacked on a phone. */

@@ -1,5 +1,9 @@
 /* Mapping overlay API: the hand-drawn fairways and hole lines the mapper reads for a course.
  *
+ * GET  ?inbox=1  (admin) -> { since, items } - courses players asked the app to map, for fixing
+ *      or upgrading by hand (lib/gd-overlay-inbox.mjs). The caller's own requests are left out.
+ * POST {courseId, inboxDismiss: true}  (admin) -> takes the course out of the inbox until a
+ *      player asks for it again.
  * GET  ?courseId=...[&osm=1]  (admin) -> { course, overlay, aiScan, osm?, objects?, lastRun? }
  *      overlay is the saved feature list (empty when none) and its status, draft or ready.
  *      With osm=1 the response also carries everything Studio needs to draw against:
@@ -38,7 +42,8 @@ import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { osmQueryScope, osmGuideQuery, osmGuidePointsFromElement } from "./lib/gd-automapper-core.mjs";
 import { overlaySummary } from "./lib/gd-map-overlay-core.mjs";
 import { aiShapesToOverlay } from "./lib/gd-overlay-georef-core.mjs";
-import { hasSupabase, slug, verifiedAdminEmail, loadCourse, loadOverlay, saveOverlay, writeOverlayStatus, normalizeCourseMap, writeCourseMap, publicCourseMap, supabaseFetch, json } from "./lib/gd-map-overlay-store.mjs";
+import { INBOX_SINCE, loadInbox, dismissInboxCourse } from "./lib/gd-overlay-inbox.mjs";
+import { hasSupabase, slug, verifiedAdminEmail, verifiedUserId, loadCourse, loadOverlay, saveOverlay, writeOverlayStatus, normalizeCourseMap, writeCourseMap, publicCourseMap, supabaseFetch, json } from "./lib/gd-map-overlay-store.mjs";
 
 /* The AI scan's state, for a poller: everything on it but the picture, which is a megabyte
    of base64 no caller needs back. */
@@ -119,6 +124,11 @@ export default async function courseMapOverlay(req) {
 
   if (req.method === "GET") {
     const url = new URL(req.url);
+    if (url.searchParams.get("inbox") === "1") {
+      const me = await verifiedUserId(req);
+      const items = await loadInbox(supabaseFetch, { adminUserIds: me ? [me] : [] });
+      return json(200, { since: INBOX_SINCE, items });
+    }
     const courseId = slug(url.searchParams.get("courseId"));
     if (!courseId) return json(400, { error: "courseId required" });
     const course = await loadCourse(courseId);
@@ -147,6 +157,7 @@ export default async function courseMapOverlay(req) {
   if (!courseId) return json(400, { error: "courseId required" });
   const course = await loadCourse(courseId);
   if (!course) return json(404, { error: "no course_maps row for " + courseId, detail: "An overlay belongs to a course the picker already knows. Add the course first." });
+  if (payload && payload.inboxDismiss === true) return json(200, await dismissInboxCourse(supabaseFetch, courseId, admin));
   /* Draft or ready is its own request too, and never touches the shapes. */
   if (payload && Object.prototype.hasOwnProperty.call(payload, "status") && !Array.isArray(payload.features)) {
     if (payload.status !== "draft" && payload.status !== "ready") return json(400, { error: "status must be draft or ready" });
