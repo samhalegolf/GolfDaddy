@@ -183,12 +183,11 @@ test("bunker wand: its reach steps smaller and bigger, and overlapping bunkers m
   assert.ok(page.includes('data-gd-overlay="merge"') && page.includes("shapes.mergeOverlapping(f.points, merged, shapes.DETAIL_MAX_POINTS)"), "overlapping bunker outlines must merge through the shared builder");
 });
 
-test("pins mode: a fairway's ends become a fairway, a green pin is outlined at once, tees and bunkers stay pins", () => {
+test("pins mode: a fairway's ends become a fairway, greens, tees and bunkers stay pins", () => {
   assert.ok(page.includes('data-gd-overlay="mode-pins"'), "no Pins mode");
   assert.ok(page.includes('addFeature({ kind: tool, pin: true, points: [point] })'), "a green, tee or bunker pin is its centre");
   assert.ok(!page.includes('addFeature({ kind: "fairway", pin: true'), "a fairway's start and end make the fairway straight away");
-  assert.ok(page.includes('if (tool === "green") { setStatus("Green pinned - finding its edge…"); wandPin(pin.id); }'), "a green pin goes straight through the wand");
-  assert.ok(/if \(f\.pin && f\.kind === "green"\) wandPin\(f\.id\)/.test(page), "a green pin dragged while the wand works is outlined again where it lands");
+  assert.ok(!page.includes("wandPin("), "a green pin waits for Shape pins like any other pin - no wand on placing it");
   assert.ok(page.includes('data-gd-overlay="shape-pins"') && page.includes("function shapePin(pinId)"), "pins must be able to become shapes");
   const core = read("functions/lib/gd-map-overlay-core.mjs");
   assert.ok(core.includes("const points = feature.pin ? pinShape(feature) : feature.points;"), "the mapper must read a pin as its default shape");

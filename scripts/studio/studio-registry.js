@@ -310,6 +310,7 @@
         { role: "AI scan run — Claude reads the picture, answer → georef core → overlay (background function)", path: "functions/course-map-ai-scan-background.mjs" },
         { role: "AI scan prompt, output schema and answer parsing (pure)", path: "functions/lib/gd-ai-scan-core.mjs" },
         { role: "Overlay row store shared by the overlay and AI scan endpoints (save semantics, admin proof)", path: "functions/lib/gd-map-overlay-store.mjs" },
+        { role: "Inbox - courses players asked the app to map, to fix or upgrade by hand; dismissals", path: "functions/lib/gd-overlay-inbox.mjs" },
         { role: "Merges the overlay into every payload a mapper job fetches (fetchCoursePayload)", path: "functions/course-mapper-worker-background.mjs" },
         { role: "Table", path: "supabase/migrations/20260928_create_course_map_overlays.sql" },
         { role: "Draft / ready status", path: "supabase/migrations/20260929_add_course_map_overlay_status.sql" },
@@ -338,7 +339,7 @@
         { target: "course-mapping", direction: "see-also", label: "Where the mapper run is watched" }
       ],
       keyFunctions: [
-        { name: "GET/POST /api/course-map-overlay", purpose: "Read or save a course's overlay, or mark it draft/ready; ?osm=1 also returns OSM's golf features for the ground, the course's saved objects and the last mapper run, so shapes are drawn against what is already there.", codePath: "functions/course-map-overlay.mjs" },
+        { name: "GET/POST /api/course-map-overlay", purpose: "Read or save a course's overlay, or mark it draft/ready; ?osm=1 also returns OSM's golf features for the ground, the course's saved objects and the last mapper run, so shapes are drawn against what is already there. ?inbox=1 lists the courses players asked to map since 8 Oct (Map fix / Upgrade objects); POST {courseId, inboxDismiss: true} takes one out.", codePath: "functions/course-map-overlay.mjs" },
         { name: "POST /api/course-map-wand", purpose: "A pin on a green or bunker plus a small picture around it -> a first-draft outline from the Green Wand on that kind's size profile. The page adds it (source: wand) and autosaves; a pin the wand cannot read gets a round default.", codePath: "functions/course-map-wand.mjs" },
         { name: "mergeOverlayIntoPayload", purpose: "Overlay features -> golf=fairway / golf=hole / golf=green / golf=tee / golf=bunker ways with negative ids, appended to the payload. Empty overlay returns the payload untouched.", codePath: "functions/lib/gd-map-overlay-core.mjs" },
         { name: "POST /api/course-map-ai-scan", purpose: "Queue an AI scan of a captured view: the picture and its georef go on the overlay row, the background function runs Claude Opus 5.5 with the scorecard as context, and the answer is saved as overlay shapes (source: ai). The job follows what is in view: pins - shape every pin and fill in the rest; shapes only - refit them to the ground; nothing - trace from scratch. A refitted shape or shaped pin is saved over the one it replaces. Studio polls GET /api/course-map-overlay's aiScan for the outcome.", codePath: "functions/course-map-ai-scan.mjs" },

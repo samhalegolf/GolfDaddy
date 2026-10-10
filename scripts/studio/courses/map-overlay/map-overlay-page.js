@@ -447,12 +447,14 @@
       '<div class="gdStudioOverlayTop">' +
       '<header class="gdStudioOverlayHead">' +
       '<button type="button" class="gdStudioOverlayMenuToggle" data-gd-overlay="menu-toggle" aria-expanded="false" title="Course, imagery, AI and publishing">' +
-      '<span class="gdStudioOverlayHeadCourse" data-gd-overlay="course">No course picked</span>' + ICON.chevron + "</button>" +
+      '<span class="gdStudioOverlayHeadCourse" data-gd-overlay="course">No course picked</span>' +
+      '<span class="gdStudioOverlayInboxCount" data-gd-overlay="inbox-count" title="Courses players asked to map - open the pull-down" hidden></span>' + ICON.chevron + "</button>" +
       '<span class="gdStudioOverlayDraft" data-gd-overlay="draft"></span>' +
       '<span class="gdStudioOverlayStatus" data-gd-overlay="status"></span>' +
       '<button type="button" class="gdStudioOverlaySave" data-gd-overlay="save" disabled>Save</button>' +
       "</header>" +
       '<div class="gdStudioOverlayMenu" data-gd-overlay="menu" hidden>' +
+      '<div class="gdStudioOverlayInbox" data-gd-overlay="inbox"></div>' +
       '<div class="gdStudioOverlayRun" data-gd-overlay="last-run"></div>' +
       '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="pick">Pick course</button>' +
@@ -482,7 +484,7 @@
       "<strong>Trees</strong> - <em>Tree</em>: click to drop one tree, ↑ ↓ to size it; <em>Cluster</em>: press and drag to stretch an oval over a group (Shift for a circle); <em>Draw round</em>: press and drag round a wood; <em>Find trees</em>: drag a box and the trees in it that look like the ones you placed by hand this session are dropped for you (← → fewer / more, Enter keeps them, Esc takes them away). " +
       "<strong>Waste</strong> - <em>Draw + grow</em>: draw roughly round it and it is pushed out to the edge of the ground it sits on. " +
       "Whatever you just placed stays live: <strong>← →</strong> step the wand's sensitivity, <strong>↑ ↓</strong> make it smaller or bigger (a fairway narrower or wider), <strong>Enter</strong> or <strong>Space</strong> keeps it, <strong>Esc</strong> removes it - placing the next one keeps it too. " +
-      "<strong>Pins</strong>, the quick pass: a fairway is its start then its end and becomes a fairway straight away; a green pin is outlined by the wand straight away; tees, bunkers and water stay pins until <strong>Shape pins</strong>. " +
+      "<strong>Pins</strong>, the quick pass: a fairway is its start then its end and becomes a fairway straight away; greens, tees, bunkers and water stay pins until <strong>Shape pins</strong>. " +
       "Whatever you just placed can be dragged at once to adjust it. In <strong>Move</strong>, drag shapes and their points, and drop either on the <strong>bin</strong> to delete. A detailed outline shows only its key points - grab its edge anywhere and it bends there, the key points either side staying put. " +
       "<strong>Seams</strong> (on by default): a fairway, water, hazard, waste area or trees kept within a few metres of another - or just overlapping it - meets it in the middle, and that line is shared; drag it and both shapes follow, so it only changes which ground is which. " +
       "<strong>Link</strong>: click the shapes that belong to one hole (click again to drop one), then <strong>Enter</strong> or <strong>Space</strong> links them and the next click starts a new link. A link only says they are one hole - it never numbers them. One shape and Enter takes it out of its link; <strong>Esc</strong> clears the pick. " +
@@ -569,7 +571,7 @@
       "</div>";
 
     var el = {};
-    ["pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "unnumber", "clear", "run", "status"].forEach(function (name) {
+    ["inbox", "inbox-count", "pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "unnumber", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -722,7 +724,7 @@
       },
       pins: {
         fairway: "Click where the fairway starts, then where it ends - it becomes a fairway (F)",
-        green: "Pin the middle of a green - the wand outlines it (G)",
+        green: "Pin the middle of a green (G)",
         tee: "Pin the middle of a tee (T)",
         bunker: "Pin the middle of a bunker (B)",
         water: "Pin the middle of a water hazard (W)",
@@ -748,8 +750,7 @@
     }
 
     /* The options along the top that belong to the tool and mode in hand. The wand size shows
-       for a tool that uses the wand: any of them in Shapes, the green in Pins too (a green pin
-       is outlined at once). */
+       for a tool on the wand, in Shapes. */
     function renderOptions() {
       var shapesMode = session.mode === "shapes";
       el["merge-label"].hidden = !shapesMode;
@@ -765,7 +766,7 @@
       el["number-label"].hidden = tool !== "number";
       el["hole-label"].hidden = tool === "number";
       if (tool === "number") renderNumberField();
-      el["wand-size-label"].hidden = !(growWanding() || (WAND_KINDS.indexOf(tool) >= 0 && (!METHODS[tool] || methodOf(tool) === "wand" || !shapesMode) && (shapesMode || tool === "green")));
+      el["wand-size-label"].hidden = !(growWanding() || (shapesMode && WAND_KINDS.indexOf(tool) >= 0 && (!METHODS[tool] || methodOf(tool) === "wand")));
       renderWandSize();
     }
 
@@ -1460,6 +1461,7 @@
     }
 
     function setMenu(open) {
+      if (open && el.menu.hidden) loadInbox();
       el.menu.hidden = !open;
       el["menu-toggle"].setAttribute("aria-expanded", open ? "true" : "false");
       el["menu-toggle"].classList.toggle("isOpen", !!open);
@@ -1496,11 +1498,8 @@
       else if (methodOf(tool) === "single") placeTree(point);
       else if (pressGesture()) setStatus(pressHint());
       else if (session.mode === "pins") {
-        var pin = addFeature({ kind: tool, pin: true, points: [point] });
-        /* A green pin is outlined by the wand at once; drag the pin while it works and the
-           wand runs again where it is dropped. */
-        if (tool === "green") { setStatus("Green pinned - finding its edge…"); wandPin(pin.id); }
-        else setStatus(kindLabel(tool) + " pinned.");
+        addFeature({ kind: tool, pin: true, points: [point] });
+        setStatus(kindLabel(tool) + " pinned.");
       }
       else if (WAND_KINDS.indexOf(tool) >= 0) placeWand(point, tool);
       else if (tool === "tee") {
@@ -1816,8 +1815,6 @@
       });
     }
 
-    function grownShape(kind, ring) { return kind === "bunker" ? shapes.smoothOutline(ring, "bunker") : ring.slice(0, MAX_POINTS); }
-
     function growPlace(grow, kind) {
       var id = session.loadedFor;
       var hole = session.hole;
@@ -1830,7 +1827,7 @@
         if (destroyed || session.loadedFor !== id) return;
         if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold.", true); return; }
         var result = out.result, word = kindLabel(kind);
-        var points = result.shape ? grownShape(kind, result.shape) : kind === "fairway" ? shapes.fairwayFromLine(from, session.fairwayWidth) : null;
+        var points = result.shape ? shapes.smoothOutline(result.shape, kind) : kind === "fairway" ? shapes.fairwayFromLine(from, session.fairwayWidth) : null;
         if (!points) { setStatus(result.note, true); return; }
         var wanded = result.shape && result.shape !== grow.ring;
         var f = addFeature({ kind: kind, points: points, source: wanded ? "wand" : "", hole: hole });
@@ -1863,7 +1860,7 @@
         g.size = size;
         if (out.capture) g.capture = out.capture;
         takeWand(out.result);
-        live.points = grownShape(kind, out.result.candidates[out.result.pick]);
+        live.points = shapes.smoothOutline(out.result.candidates[out.result.pick], kind);
         live.source = "wand";
         drawFeatures();
         changed();
@@ -1912,21 +1909,6 @@
         delete live.pin;
         if (result.shape) live.source = "wand"; else delete live.source;
         return { seed: point, wand: result, size: size };
-      });
-    }
-
-    /* One pin through the wand, then saved - the pins-mode green, outlined as soon as it lands,
-       and live for the arrow keys like any wand shape. */
-    function wandPin(pinId) {
-      shapePin(pinId).then(function (wanded) {
-        if (destroyed) return;
-        var f = findFeature(pinId);
-        drawFeatures();
-        changed();
-        if (f && !f.pin) {
-          if (wanded) startAdjust(f, wanded);
-          setStatus(kindLabel(f.kind) + " outlined - drag its points to fit.");
-        }
       });
     }
 
@@ -2687,7 +2669,6 @@
       }
       drawFeatures();
       changed();
-      if (f.pin && f.kind === "green") wandPin(f.id);
     }
 
     /* ---- linking shapes to a hole ----
@@ -3170,7 +3151,6 @@
       else if (tool === "trees") text = "Press and drag all the way round an area of dense trees · E switches method";
       else if (tool === "waste") text = "Draw roughly round the waste area - it grows out to the edge · A switches method";
       else if (tool === "hazard") text = "Press and drag all the way round a non-water hazard - gorse, scrub, a ravine · X switches method";
-      else if (tool === "green" && session.mode === "pins") text = "Click the middle of each green - the wand outlines it";
       else if (tool !== "move" && session.mode === "pins") text = "Click the middle of each " + kindLabel(tool).toLowerCase() + " to pin it";
       else if (drawRoundKind() && METHODS[tool]) text = "Press and drag all the way round the " + kindLabel(tool).toLowerCase() + " · " + tool.charAt(0).toUpperCase() + " switches method";
       else if (tool === "water") text = "Click the middle of the water - the wand outlines it · W switches method";
@@ -3905,9 +3885,15 @@
       remeasure();
     }
 
-    function pickCourse() {
-      if (session.saveError && session.dirty && !window.confirm("The last change has not saved (" + session.saveError + "). Pick another course and lose it?")) return;
+    /* Leaving the course: a change that has not saved is asked about first. */
+    function canLeaveCourse() {
+      if (session.saveError && session.dirty && !window.confirm("The last change has not saved (" + session.saveError + "). Pick another course and lose it?")) return false;
       flushSave();
+      return true;
+    }
+
+    function pickCourse() {
+      if (!canLeaveCourse()) return;
       var pick = window.GDStudioCoursePick;
       var opened = pick && typeof pick.open === "function" && pick.open({
         source: "studio-map-overlay",
@@ -3915,6 +3901,83 @@
         onPick: function (course) { if (!destroyed) { cancelDraft(); setTool("move"); setMenu(false); showCourse(course); } }
       });
       if (!opened) setStatus("The course picker is not loaded on this surface.", true);
+    }
+
+    /* ---- the inbox ----
+       Courses players asked the app to map (functions/lib/gd-overlay-inbox.mjs): Map fix when
+       the latest run failed, Upgrade objects when it mapped. Open picks the course; Dismiss
+       takes it out until a player asks for it again; marking its overlay ready takes it out
+       too. Read when the page opens and each time the pull-down opens. */
+
+    var inbox = { items: [], loading: false, error: "" };
+
+    function loadInbox() {
+      if (inbox.loading) return;
+      inbox.loading = true;
+      api("GET", "?inbox=1").then(function (data) {
+        inbox.items = (data && data.items) || [];
+        inbox.error = "";
+      }, function (error) {
+        inbox.error = String(error && error.message || error);
+      }).then(function () {
+        inbox.loading = false;
+        if (!destroyed) renderInbox();
+      });
+    }
+
+    function ago(iso) {
+      var mins = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+      if (mins < 60) return mins + "m ago";
+      if (mins < 48 * 60) return Math.round(mins / 60) + "h ago";
+      return Math.round(mins / 1440) + "d ago";
+    }
+
+    function renderInbox() {
+      var items = inbox.items;
+      el["inbox-count"].hidden = !items.length;
+      el["inbox-count"].textContent = items.length;
+      var current = courseIdOf(session.course);
+      var html = '<div class="gdStudioOverlayInboxHead"><strong>Inbox</strong> · courses players asked to map' +
+        (inbox.error ? ' · <span class="gdStudioWarnText">' + esc(inbox.error) + "</span>" : "") + "</div>";
+      if (!items.length) html += inbox.error ? "" : '<div class="gdStudioMuted">Nothing waiting.</div>';
+      items.forEach(function (item) {
+        var fix = item.need === "fix";
+        var bits = ["asked " + ago(item.requestedAt)];
+        if (item.players > 1) bits.push(item.players + " players");
+        if (item.overlay) bits.push("overlay " + item.overlay);
+        html += '<div class="gdStudioOverlayInboxItem' + (item.courseId === current ? " isCurrent" : "") + '">' +
+          '<span class="gdStudioOverlayInboxTag' + (fix ? " isFix" : "") + '">' + (fix ? "Map fix" : "Upgrade objects") + "</span>" +
+          '<span class="gdStudioOverlayInboxName"><strong>' + esc(item.name) + "</strong> " + '<span class="gdStudioMuted">' + esc(bits.join(" · ")) + "</span>" +
+          (fix && item.lastError ? '<br><span class="gdStudioWarnText">' + esc(item.lastError) + "</span>" : "") + "</span>" +
+          '<button type="button" class="gdStudioDiagramBtn" data-inbox-act="open" data-inbox-id="' + esc(item.courseId) + '">Open</button>' +
+          '<button type="button" class="gdStudioDiagramBtn" data-inbox-act="dismiss" data-inbox-id="' + esc(item.courseId) + '" title="Take it out of the inbox - it comes back if a player asks for it again">Dismiss</button>' +
+          "</div>";
+      });
+      el.inbox.innerHTML = html;
+    }
+
+    function onInboxClick(event) {
+      var button = event.target.closest && event.target.closest("[data-inbox-act]");
+      if (!button) return;
+      var id = button.getAttribute("data-inbox-id");
+      var item = inbox.items.filter(function (i) { return i.courseId === id; })[0];
+      if (!item) return;
+      if (button.getAttribute("data-inbox-act") === "open") {
+        if (!canLeaveCourse()) return;
+        cancelDraft();
+        setTool("move");
+        setMenu(false);
+        showCourse({ courseId: item.courseId, name: item.name, lat: item.lat, lng: item.lng });
+        return;
+      }
+      button.disabled = true;
+      api("POST", "", { courseId: id, inboxDismiss: true }).then(function () {
+        inbox.items = inbox.items.filter(function (i) { return i.courseId !== id; });
+        if (!destroyed) renderInbox();
+      }, function (error) {
+        button.disabled = false;
+        setStatus("Could not dismiss it: " + (error && error.message || error), true);
+      });
     }
 
     /* ---- boot ---- */
@@ -4012,6 +4075,8 @@
     document.addEventListener("keydown", onAdjustKey, true);
 
     el.pick.addEventListener("click", pickCourse);
+    el.inbox.addEventListener("click", onInboxClick);
+    loadInbox();
     el.provider.addEventListener("change", function () { useSource(el.provider.value); });
     el.osm.checked = session.showOsm;
     el.osm.addEventListener("change", function () { session.showOsm = el.osm.checked; drawOsm(); remember(); });
