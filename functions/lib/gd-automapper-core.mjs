@@ -410,6 +410,19 @@ export function holeFeatureFrame(payload, padM = 0) {
   return padM > 0 ? expandOsmFrame(frame, padM) : normalizedOsmFrame(frame);
 }
 
+/* The wider retry may only finish a course the first search found, never supply one.
+ *
+ * It exists for the course whose far holes sit outside the 1400m circle (Omaha Beach) -
+ * some of its holes are always inside. When NONE are, every hole the wider box brings
+ * back is somebody else's: East Berkshire's own holes were hand-drawn but not yet
+ * numbered, the retry found seven numbered holes of a neighbour 2.7km away, published
+ * them as East Berkshire, and their mismatch with East Berkshire's card then stopped the
+ * resolver from numbering the real ones. With nothing to extend, the resolver gets the
+ * course as it is. */
+export function widerRetryAdopts(holesBefore, holesAfter) {
+  return holesBefore > 0 && holesAfter > holesBefore;
+}
+
 /* Two Overpass payloads into one, deduped on type/id so a targeted follow-up query
    can be folded into the main sweep without double-counting the overlap. */
 export function mergeOsmPayloads(base, extra) {

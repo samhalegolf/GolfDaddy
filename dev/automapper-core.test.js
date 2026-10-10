@@ -156,6 +156,12 @@ test("courseFootprintFrame ignores a neighbour's polygon the course pin is not i
   assert.deepStrictEqual(core.ownCourseFootprints({ elements: [austinLodge, own] }, darenth).map(e => e.id), [3]);
 });
 
+test("the wider retry extends a course the circle found, never supplies one (East Berkshire)", () => {
+  assert.strictEqual(core.widerRetryAdopts(15, 18), true, "Omaha Beach: far holes join the ones already found");
+  assert.strictEqual(core.widerRetryAdopts(0, 7), false, "nothing inside the circle: the holes further out are a neighbour's");
+  assert.strictEqual(core.widerRetryAdopts(9, 9), false);
+});
+
 test("scopeContainsFrame: a long thin course footprint escapes the default 1400m circle", () => {
   const scope = core.osmQueryScope({}, { lat: -36.33609, lng: 174.77174 });
   const omahaLike = { south: -36.3545, west: 174.7690, north: -36.3320, east: 174.7850 };
