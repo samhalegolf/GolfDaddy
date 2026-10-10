@@ -28,7 +28,7 @@ import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { wakeGarminBuild } from "./lib/gd-garmin-build-wake.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete, scorecardIdentityMismatch } from "./lib/gd-course-fit-core.mjs";
 import { reverseGeocodePlace } from "./lib/gd-course-place.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, intersectOsmFrames, SIBLING_SWEEP_M, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, HAND_DRAWN_SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, ownCourseFootprints, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, intersectOsmFrames, SIBLING_SWEEP_M, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, HAND_DRAWN_SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole, resolverHoleCandidates } from "./lib/gd-geometry-resolver-core.mjs";
 import { partitionLoops, walkCost } from "./lib/gd-ground-loops-core.mjs";
 import { courseNameFromCard } from "./lib/gd-facility-organise-core.mjs";
@@ -535,11 +535,7 @@ function golfFeatureCounts(payload) {
    row only has one spelling. Hole ways also expose the local loop names. */
 function enrichCourseSearchMetadata(course, payload) {
   const elements = (payload && payload.elements) || [];
-  const namedFacilities = elements.filter(element => {
-    const tags = (element && element.tags) || {};
-    return String(tags.leisure || "").toLowerCase() === "golf_course"
-      || String(tags.golf || "").toLowerCase() === "course";
-  });
+  const namedFacilities = ownCourseFootprints(payload, course.center);
   const nearest = namedFacilities[0] || null;
   const tags = (nearest && nearest.tags) || {};
   const names = [tags.name, tags["name:en"], tags.alt_name, tags.official_name, tags.short_name]
@@ -2211,9 +2207,11 @@ async function runMapperJob(job, origin) {
   let scope = osmQueryScope({}, course.center);
   let payload = await fetchCoursePayload(course, osmGuideQuery(scope));
   const queryStages = ["around:" + scope.radiusM];
-  const footprint = courseFootprintFrame(payload);
+  const footprint = courseFootprintFrame(payload, 160, course.center);
   if (footprint && !scopeContainsFrame(scope, footprint)) {
-    scope = osmQueryScope({ osmFrame: footprint }, course.center);
+    /* Grow the search, never move it: the requery replaces the payload, so it must still
+       cover everything the circle already found. */
+    scope = osmQueryScope({ osmFrame: unionOsmFrames(osmScopeFrame(scope, course.center), footprint) }, course.center);
     payload = await fetchCoursePayload(course, osmGuideQuery(scope));
     queryStages.push("footprint-bbox");
   }

@@ -357,9 +357,24 @@ export function intersectOsmFrames(a, b) {
   return { south, west, north, east };
 }
 
-export function courseFootprintFrame(payload, padM = 160) {
+/* The footprints that are THIS course's: ones whose padded box holds the course pin.
+   Any course polygon touching the 1400m circle used to count, so at Darenth Valley a
+   neighbour - Austin Lodge, closed 2014, no holes - became "the course": the requery
+   searched only its box, Darenth's own holes were thrown away, and its name was used as
+   Darenth's first scorecard search. High Elms failed the same way. */
+export function ownCourseFootprints(payload, center, padM = 400) {
+  const footprints = ((payload && payload.elements) || []).filter(isCourseFootprintElement);
+  const origin = toPlain(center);
+  if (!origin) return footprints;
+  return footprints.filter(element => {
+    const box = expandOsmFrame(frameOfPoints(osmGuidePointsFromElement(element)), padM);
+    return !!box && origin.lat >= box.south && origin.lat <= box.north && origin.lng >= box.west && origin.lng <= box.east;
+  });
+}
+
+export function courseFootprintFrame(payload, padM = 160, center = null) {
   const pts = [];
-  ((payload && payload.elements) || []).filter(isCourseFootprintElement).forEach(element => {
+  ownCourseFootprints(payload, center).forEach(element => {
     osmGuidePointsFromElement(element).forEach(p => pts.push(p));
   });
   if (!pts.length) return null;

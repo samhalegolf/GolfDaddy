@@ -142,6 +142,20 @@ test("courseFootprintFrame derives a padded bbox from the course polygon, null w
   assert.strictEqual(core.courseFootprintFrame({ elements: [] }), null);
 });
 
+test("courseFootprintFrame ignores a neighbour's polygon the course pin is not in (Darenth Valley)", () => {
+  const darenth = { lat: 51.33164, lng: 0.18747 };
+  const austinLodge = { type: "way", id: 2, tags: { leisure: "golf_course", name: "Austin Lodge Golf Club (closed 2014)" }, geometry: [
+    { lat: 51.343, lon: 0.190 }, { lat: 51.352, lon: 0.190 }, { lat: 51.352, lon: 0.205 }, { lat: 51.343, lon: 0.205 }
+  ] };
+  const payload = { elements: [austinLodge] };
+  assert.strictEqual(core.courseFootprintFrame(payload, 160, darenth), null, "a neighbour's box must not become this course's search area");
+  assert.deepStrictEqual(core.ownCourseFootprints(payload, darenth), []);
+  const own = { type: "way", id: 3, tags: { leisure: "golf_course", name: "Darenth Valley Golf Course" }, geometry: [
+    { lat: 51.325, lon: 0.180 }, { lat: 51.338, lon: 0.180 }, { lat: 51.338, lon: 0.192 }, { lat: 51.325, lon: 0.192 }
+  ] };
+  assert.deepStrictEqual(core.ownCourseFootprints({ elements: [austinLodge, own] }, darenth).map(e => e.id), [3]);
+});
+
 test("scopeContainsFrame: a long thin course footprint escapes the default 1400m circle", () => {
   const scope = core.osmQueryScope({}, { lat: -36.33609, lng: 174.77174 });
   const omahaLike = { south: -36.3545, west: 174.7690, north: -36.3320, east: 174.7850 };
