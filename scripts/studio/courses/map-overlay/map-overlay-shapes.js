@@ -48,6 +48,14 @@
      raw corners. The counts are fixed per kind so the handles read straight back off a saved
      outline (ringHandles). */
   var SMOOTH = { green: { handles: 6, steps: 6 }, bunker: { handles: 8, steps: 4 } };
+  /* Fairways, water and waste follow the edge the wand traced, softened (softenOutline): walked
+     every SOFT_STEP_M metres (at most SOFT_MAX_STATIONS stations), eased over SOFT_REACH_M
+     either way, and thinned to corners SOFT_TOLERANCE_M off the curve. */
+  var SOFT_KINDS = ["fairway", "water", "waste"];
+  var SOFT_STEP_M = 1;
+  var SOFT_MAX_STATIONS = 800;
+  var SOFT_REACH_M = 3;
+  var SOFT_TOLERANCE_M = 0.2;
   /* The round bunker left when the wand cannot find an edge - a typical greenside bunker. */
   var BUNKER_RADIUS_M = 6;
   /* The round pond left when the wand cannot find an edge. */
@@ -221,11 +229,45 @@
     return resample(xy, total / n).slice(0, n).map(f.toLL);
   }
 
-  /* A green or bunker as it is kept once outlined: the smooth curve through its handles. Any
-     other kind comes back as it is. */
+  /* A wand outline as it is kept: a green or bunker is the smooth curve through its handles,
+     a fairway, water or waste area its traced edge softened (softenOutline). Any other kind
+     comes back as it is. */
   function smoothOutline(ring, kind) {
     var s = SMOOTH[kind];
-    return s ? smoothRing(ringHandles(ring, s.handles, s.steps), s.steps) : ring;
+    if (s) return smoothRing(ringHandles(ring, s.handles, s.steps), s.steps);
+    return SOFT_KINDS.indexOf(kind) >= 0 ? softenOutline(ring) : ring;
+  }
+
+  /* A wand's edge is traced a pixel at a time, so it comes out in stair-steps and little
+     spurs. Softened: the edge is walked at even steps, each point eased towards its
+     neighbours a few metres either way (a gentle bell, so a real bend stays a bend), then
+     thinned back to the corners that still carry the curve. A small shape is eased less. */
+  function softenOutline(ring, maxPoints) {
+    if (!ring || ring.length < 4) return ring;
+    var f = frame(ring[0]);
+    var xy = ring.map(f.toXY);
+    xy.push(xy[0]);
+    var total = 0;
+    for (var i = 1; i < xy.length; i++) total += len(sub(xy[i], xy[i - 1]));
+    if (total < 8) return ring;
+    var step = Math.max(SOFT_STEP_M, total / SOFT_MAX_STATIONS);
+    var pts = resample(xy, step);
+    pts.pop();
+    var n = pts.length;
+    var reach = Math.min(SOFT_REACH_M, total / 30);
+    var k = Math.min(Math.floor((n - 1) / 6), Math.round(reach / step));
+    if (k < 1) return ring;
+    var sigma = k / 2, weights = [], sum = 0;
+    for (var d = -k; d <= k; d++) { var wgt = Math.exp(-(d * d) / (2 * sigma * sigma)); weights.push(wgt); sum += wgt; }
+    var eased = pts.map(function (p, idx) {
+      var x = 0, y = 0;
+      for (var d2 = -k; d2 <= k; d2++) { var q = pts[(idx + d2 + n) % n], wq = weights[d2 + k]; x += q.x * wq; y += q.y * wq; }
+      return { x: x / sum, y: y / sum };
+    });
+    var cap = maxPoints || DETAIL_MAX_POINTS;
+    var tol = SOFT_TOLERANCE_M, out = simplifyRing(eased, tol);
+    while (out.length > cap) { tol *= 1.5; out = simplifyRing(eased, tol); }
+    return out.length >= 3 ? out.map(f.toLL) : ring;
   }
 
   /* The same outline grown or shrunk about its middle - "bigger" and "smaller" on a tee or a
@@ -1171,7 +1213,7 @@
 
   var api = {
     FAIRWAY_WIDTH_M: FAIRWAY_WIDTH_M, TEE_RADIUS_M: TEE_RADIUS_M, GREEN_RADIUS_M: GREEN_RADIUS_M,
-    SMOOTH: SMOOTH, BUNKER_RADIUS_M: BUNKER_RADIUS_M, WATER_RADIUS_M: WATER_RADIUS_M, WATER_MAX_POINTS: WATER_MAX_POINTS, MAX_POINTS: MAX_POINTS,
+    SMOOTH: SMOOTH, softenOutline: softenOutline, BUNKER_RADIUS_M: BUNKER_RADIUS_M, WATER_RADIUS_M: WATER_RADIUS_M, WATER_MAX_POINTS: WATER_MAX_POINTS, MAX_POINTS: MAX_POINTS,
     distanceM: distanceM, lineLengthM: lineLengthM, centroid: centroid,
     fairwayFromLine: fairwayFromLine, teeAt: teeAt, circle: circle, mergeOverlapping: mergeOverlapping,
     smoothRing: smoothRing, ringHandles: ringHandles, smoothOutline: smoothOutline,

@@ -76,10 +76,40 @@ test("a bunker is kept as a smooth curve through a few handles too, far fewer th
   assert.ok(Math.abs(area(bunker) - area(wand)) / area(wand) < 0.06, "smoothing keeps the bunker's size");
 });
 
-test("kinds that are not smooth come back untouched", () => {
+test("kinds that are not smooth or softened come back untouched", () => {
   const ring = shapes.circle(at(0, 0), 15, 10);
-  assert.strictEqual(shapes.smoothOutline(ring, "water"), ring);
   assert.strictEqual(shapes.smoothOutline(ring, "tee"), ring);
+  assert.strictEqual(shapes.smoothOutline(ring, "hazard"), ring);
+});
+
+test("a fairway, water or waste wand edge is softened: the stair-steps go, the shape stays", () => {
+  /* A 40m x 200m fairway traced a 0.4m pixel at a time: every corner a stair-step, with a
+     one-pixel spur sticking out every few metres. */
+  const px = 0.4, traced = [];
+  const edge = (t) => 20 + 2 * Math.sin(t / 15);
+  for (let y = -100; y < 100; y += px) traced.push(at(Math.round(edge(y) / px) * px + (Math.round(y / px) % 9 === 0 ? px : 0), y));
+  for (let y = 100; y > -100; y -= px) traced.push(at(-Math.round(edge(y) / px) * px, y));
+  ["fairway", "water", "waste"].forEach(kind => {
+    const soft = shapes.smoothOutline(traced, kind);
+    assert.notStrictEqual(soft, traced, kind + " should be softened");
+    assert.ok(soft.length < traced.length / 4, kind + ": far fewer corners than the trace, got " + soft.length);
+    assert.ok(soft.length <= shapes.DETAIL_MAX_POINTS);
+    assert.ok(Math.abs(area(soft) - area(traced)) / area(traced) < 0.02, kind + ": softening keeps its size");
+    /* No corner turns sharply along the long sides: the steps and spurs are gone. */
+    const xy = soft.map(p => ({ x: (p.lng - LNG) / mLng, y: (p.lat - LAT) / mLat }));
+    xy.forEach((p, i) => {
+      if (Math.abs(p.y) > 80) return;
+      const a = xy[(i - 1 + xy.length) % xy.length], b = xy[(i + 1) % xy.length];
+      const u = { x: p.x - a.x, y: p.y - a.y }, v = { x: b.x - p.x, y: b.y - p.y };
+      const turn = Math.acos(Math.max(-1, Math.min(1, (u.x * v.x + u.y * v.y) / (Math.hypot(u.x, u.y) * Math.hypot(v.x, v.y)))));
+      assert.ok(turn < 0.35, kind + ": a jagged corner survived at y=" + p.y.toFixed(1) + " (" + (turn * 180 / Math.PI).toFixed(0) + " degrees)");
+    });
+  });
+});
+
+test("a tiny wand edge is left as it is rather than eased away", () => {
+  const ring = shapes.circle(at(0, 0), 1, 8);
+  assert.strictEqual(shapes.softenOutline(ring), ring);
 });
 
 test("a water hazard drawn round by hand keeps its shape in a few corners", () => {
