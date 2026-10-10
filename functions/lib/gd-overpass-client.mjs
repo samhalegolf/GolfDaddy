@@ -25,6 +25,8 @@ let queue = Promise.resolve();
 
 const RETRY_STATUSES = new Set([429, 504]);
 const MAX_RETRIES = 4;
+/* A cut-short answer means the server is busy; half a second is not long enough to matter. */
+const RETRY_BASE_MS = 2000;
 
 /* Cache survives for the lifetime of a warm container; there is no cross-invocation
    persistence and none is needed - a course is mapped once and the geometry is then read
@@ -59,7 +61,19 @@ async function requestOnce(query) {
     error.status = response.status;
     throw error;
   }
-  return response.json();
+  const data = await response.json();
+  /* A busy Overpass answers 200 with whatever it had gathered when it ran out of time or
+     memory, and says so only in `remark`. Darenth Valley and High Elms both came back as
+     2-3 elements and failed as "no hole geometry" on courses OSM has fully mapped; Sonning
+     did the same at 5 elements and mapped fine six minutes later. A cut-short answer is a
+     failure to retry, never a result - and never one to cache. */
+  const remark = String((data && data.remark) || "");
+  if (/runtime error|timed out|out of memory/i.test(remark)) {
+    const error = new Error("Overpass incomplete answer: " + remark.slice(0, 160));
+    error.status = 504;
+    throw error;
+  }
+  return data;
 }
 
 /* Serialised through `queue` so overlapping calls within one process still respect
@@ -77,7 +91,7 @@ export async function fetchOverpass(query) {
       } catch (error) {
         lastError = error;
         if (!RETRY_STATUSES.has(error && error.status)) throw error;
-        if (attempt < MAX_RETRIES - 1) await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt)));
+        if (attempt < MAX_RETRIES - 1) await new Promise(resolve => setTimeout(resolve, RETRY_BASE_MS * Math.pow(2, attempt)));
       }
     }
     throw lastError || new Error("Overpass request failed");
