@@ -68,6 +68,13 @@ test("course ids: the pinned course keeps its id, the rest are minted once and s
   assert.deepStrictEqual(same.map(o => o.courseId), ["billingbear-park", "billingbear-park-old-course", "billingbear-park-old-course-2"], "two names that slug alike still get two ids");
 });
 
+test("a play order made for a sibling course keeps it - the pinned id never moves onto it", () => {
+  const sibling = po.normalizePlayOrders([{ id: "a", name: "Eighteen", courseId: "foyle-golf-club-course-2", holes: [] }], "foyle-golf-club");
+  assert.strictEqual(sibling[0].courseId, "foyle-golf-club-course-2", "the 18 does not take the par 3's id");
+  const both = po.normalizePlayOrders([{ id: "a", name: "Eighteen", courseId: "foyle-golf-club-course-2", holes: [] }, { id: "b", name: "Par 3", holes: [] }], "foyle-golf-club");
+  assert.deepStrictEqual(both.map(o => o.courseId), ["foyle-golf-club-course-2", "foyle-golf-club"], "the pinned id goes to the first play order with no course");
+});
+
 test("hole references are cleaned: bad ones dropped, the same hole allowed in several play orders", () => {
   const out = po.normalizePlayOrders([{ name: "  A  ", holes: ["osm:way/1", "nonsense", "link:l-abc", "osm:node/4", "osm:way/1"] }, { holes: ["osm:way/1"] }], "x");
   assert.deepStrictEqual(out[0].holes, ["osm:way/1", "link:l-abc", "osm:way/1"], "a hole may even be played twice in one order (a nine played as 18)");

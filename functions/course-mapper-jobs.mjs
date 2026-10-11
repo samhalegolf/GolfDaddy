@@ -25,6 +25,8 @@ import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { boundingBox, coursesFromOverpass, mergeWithLibrary, nearbyCoursesQuery } from "./lib/gd-courses-near-core.mjs";
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
+import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
+
 const TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
@@ -667,8 +669,14 @@ export default async function courseMapperJobs(req) {
      anonymous caller falls through to the same 403 a signed-in non-admin gets. */
   if ((nudge || remap || collect || refine) && !(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
 
-  const courseId = slug(payload && (payload.courseId || payload.course_id));
-  if (!courseId) return json(400, { error: "courseId required" });
+  const askedFor = slug(payload && (payload.courseId || payload.course_id));
+  if (!askedFor) return json(400, { error: "courseId required" });
+  /* A facility is remapped as one: its courses share one overlay and its play orders publish
+     them all together (lib/gd-overlay-owner.mjs), so a remap asked for any of its courses runs
+     on the facility's pinned course, which republishes the rest. Only a remap: a player's
+     automap for a sibling with no geometry yet must map that sibling, not dedupe against the
+     owner's map, and enrichment and nudges work on the course's own saved map. */
+  const courseId = remap ? await overlayOwnerId(supabaseFetch, askedFor) : askedFor;
 
   if (nudge) {
     const state = await mapperBuildState(courseId);
@@ -783,8 +791,9 @@ export default async function courseMapperJobs(req) {
       state: result.state
     });
   }
-  if (result.deduped) return json(200, Object.assign({ deduped: true, remapped: remap }, result));
-  return json(202, { job: result.job, state: "queued", remapped: remap });
+  const ranOn = courseId !== askedFor ? { ranOn: courseId } : {};
+  if (result.deduped) return json(200, Object.assign({ deduped: true, remapped: remap }, result, ranOn));
+  return json(202, Object.assign({ job: result.job, state: "queued", remapped: remap }, ranOn));
 }
 
 /* AWAITED, not fire-and-forget - see course-visual-jobs.mjs's pingWorker for why: serverless

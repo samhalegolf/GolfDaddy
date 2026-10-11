@@ -139,8 +139,8 @@ test("a session is a draft the mapper ignores until it is marked ready", () => {
   assert.ok(sql.includes("alter column status set default 'draft'"), "new overlays must start as drafts");
   assert.ok(sql.includes("add column if not exists status text not null default 'ready'"), "overlays already in use must stay readable");
   assert.ok(store.includes('status: "draft", updated_by: savedBy'), "every shape save must put the overlay back to draft");
-  assert.ok(endpoint.includes("writeOverlayStatus(courseId, payload.status)"), "marking ready must be its own request that leaves the shapes alone");
-  assert.ok(worker.includes('if (row && row.status === "ready") { course.overlay = features; course.playOrders = playOrders; }'), "the worker must merge only a ready overlay");
+  assert.ok(endpoint.includes("writeOverlayStatus(ownerId, payload.status)"), "marking ready must be its own request that leaves the shapes alone");
+  assert.ok(worker.includes('if (row && row.status === "ready") { course.overlay = features; course.playOrders = ownerId === course.courseId ? playOrders : []; }'), "the worker must merge only a ready overlay, and follow its play orders only on the owner's own run");
   assert.ok(worker.includes("ignoredFeatures: course.overlayDraft"), "a skipped draft must show on the job's diagnostics");
   assert.ok(page.includes('data-gd-overlay="ready"') && page.includes('api("POST", "", { courseId: id, status: "ready" })'), "no Mark ready in the page");
   assert.ok(page.includes("This overlay is still a draft, and the mapper ignores drafts."), "running the mapper on a draft must ask before marking it ready");
@@ -151,7 +151,7 @@ test("a session is a draft the mapper ignores until it is marked ready", () => {
 test("Course Database rows open the drawer, and it arrives with what the last run saw", () => {
   assert.ok(adminDb.includes('onclick="event.stopPropagation();return gdAdminCourseLocationOverlay('), "no Draw button on the course rows");
   assert.ok(adminDb.includes("${gdAdminCourseDbDrawButton(item,status)}"), "the Draw button is not in the row markup");
-  assert.ok(endpoint.includes("body.objects = displayObjects(saved)") && endpoint.includes("body.lastRun = await loadLastRun(courseId)"), "the drawer's load must carry the saved objects and the last run");
+  assert.ok(endpoint.includes("body.objects = displayObjects(saved)") && endpoint.includes("body.lastRun = await loadLastRun(ownerId)"), "the drawer's load must carry the saved objects and the last run");
   assert.ok(endpoint.includes('bunker: "bunkers"'), "OSM bunkers must be drawn so they are not placed twice");
   assert.ok(page.includes("function drawObjects()") && page.includes("function renderLastRun()"), "the page must show the saved objects and the last run");
   assert.ok(/function drawObjects\(\) \{[\s\S]*?interactive: false[\s\S]*?\n    \}/.test(page), "saved objects are reference only - never clickable");
@@ -242,7 +242,10 @@ test("the overlay endpoint is registered, admin-only, and reads OSM through the 
      never re-derived here, and a georef the core cannot use is a 400 with its reason. */
   assert.ok(endpoint.includes('from "./lib/gd-overlay-georef-core.mjs"'), "the endpoint does not use the georef core for pixel-space posts");
   assert.ok(endpoint.includes("aiShapesToOverlay(raw, payload.georef"), "pixel-space features are not converted through aiShapesToOverlay");
-  assert.ok(endpoint.includes("saveOverlay({ courseId, features: raw, playOrders, savedBy: admin, append:"), "saving must go through the store's saveOverlay so both endpoints mean the same thing by a save");
+  assert.ok(endpoint.includes("saveOverlay({ courseId: ownerId, features: raw, playOrders, savedBy: admin, append:"), "saving must go through the store's saveOverlay so both endpoints mean the same thing by a save");
+  /* One overlay per facility: every read and write goes to the owner's row. */
+  assert.ok(endpoint.includes("const ownerId = await overlayOwnerId(supabaseFetch, courseId)"), "the overlay API must resolve the facility's shared overlay before reading or writing");
+  assert.ok(endpoint.includes("const overlay = await loadOverlay(ownerId)"), "GET must read the shared overlay");
   assert.ok(endpoint.includes('error: "bad georef"'), "a georef the core rejects must be refused with its reason");
 });
 

@@ -41,7 +41,10 @@ function slugPart(value) {
 /* Cleans what Studio sends and gives every play order a course id that then never changes.
  *
  * The pinned course - the row the overlay belongs to - is one of the play orders: the one
- * already holding its id, else the first. Every other play order gets an id under the pinned
+ * already holding its id, else the first that holds no course yet. A play order made for a
+ * sibling course keeps that course: handing it the pinned id instead would give it the pinned
+ * course's rounds and visuals - at Foyle, the par 3's - and leave the sibling unpublished.
+ * Every other play order gets an id under the pinned
  * one ("billingbear-park-new-course"), minted from its name the first time it is saved. A
  * rename keeps the id, so a course's rounds, visuals and watch maps stay with it. An id from
  * outside this facility is never accepted: it could overwrite another club's course. */
@@ -67,8 +70,8 @@ export function normalizePlayOrders(raw, pinnedCourseId) {
   });
   if (!pinned) return out;
   const taken = new Set();
-  /* The pinned id goes to the play order that has it, else the first. */
-  const holder = out.find(order => order.courseId === pinned) || out[0];
+  /* The pinned id goes to the play order that has it, else the first with no course yet. */
+  const holder = out.find(order => order.courseId === pinned) || out.find(order => !order.courseId);
   out.forEach(order => {
     if (order !== holder && order.courseId === pinned) order.courseId = "";
   });

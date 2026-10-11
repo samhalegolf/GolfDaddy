@@ -27,7 +27,8 @@
  * names a non-storable source (Mapbox): that imagery may be judged, never kept. */
 
 import { imageGeoreference } from "./lib/gd-overlay-georef-core.mjs";
-import { hasSupabase, slug, verifiedAdminEmail, loadCourse, loadOverlay, writeAiScan, json } from "./lib/gd-map-overlay-store.mjs";
+import { hasSupabase, slug, verifiedAdminEmail, loadCourse, loadOverlay, writeAiScan, supabaseFetch, json } from "./lib/gd-map-overlay-store.mjs";
+import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
 import { MAPBOX_PROVIDER_ID } from "./lib/gd-mapbox-source.mjs";
 
 /* Providers whose pictures may be looked at but never turned into stored course data - see
@@ -100,7 +101,9 @@ export default async function courseMapAiScan(req) {
   const course = await loadCourse(courseId);
   if (!course) return json(404, { error: "no course_maps row for " + courseId, detail: "An overlay belongs to a course the picker already knows. Add the course first." });
 
-  const current = (await loadOverlay(courseId)).aiScan;
+  /* The scan lands on the facility's shared overlay (lib/gd-overlay-owner.mjs). */
+  const overlayId = await overlayOwnerId(supabaseFetch, courseId);
+  const current = (await loadOverlay(overlayId)).aiScan;
   const startedAt = current && Date.parse(current.requestedAt || "") || 0;
   if (current && (current.status === "queued" || current.status === "running") && Date.now() - startedAt < STALE_SCAN_MS) {
     return json(409, { error: "a scan is already running for " + courseId, detail: "Wait for it to finish - its outcome lands on the overlay." });
@@ -127,8 +130,8 @@ export default async function courseMapAiScan(req) {
     })).filter(a => Number.isFinite(a.x) && Number.isFinite(a.y)),
     grid: Number.isFinite(Number(payload.grid)) && Number(payload.grid) > 0 ? Math.round(Number(payload.grid)) : 0
   };
-  await writeAiScan(courseId, requested);
-  await pingBackground(new URL(req.url).origin, courseId);
+  await writeAiScan(overlayId, requested);
+  await pingBackground(new URL(req.url).origin, overlayId);
   return json(202, { courseId, status: "queued", dryRun, requestedAt: requested.requestedAt, georef: { width: georef.width, height: georef.height, metresPerPixel: georef.metresPerPixel } });
 }
 

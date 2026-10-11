@@ -51,6 +51,7 @@ import { classifyMapperFailure, failureKind, buildMapperDebugText } from "./lib/
 import { captureMapperDebugImagery } from "./lib/gd-mapper-debug-captures.mjs";
 import { mergeOverlayIntoPayload, overlaySummary } from "./lib/gd-map-overlay-core.mjs";
 import { playOrderLoops } from "./lib/gd-play-order-core.mjs";
+import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
 const { createPoliteHtmlFetcher } = politeFetch;
 const { loopDisplayName, stripParSuffix } = courseSearchIdentity;
 
@@ -347,14 +348,19 @@ async function attachCourseOverlay(course) {
   course.overlayDraft = 0;
   course.overlayDraftPlayOrders = 0;
   try {
-    const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features,play_orders,status&course_id=eq." + encodeURIComponent(course.courseId) + "&limit=1");
+    /* The facility's shared overlay (lib/gd-overlay-owner.mjs). The job queue sends a sibling's
+       run to the owner, so this is normally the course's own row; read through the owner
+       anyway, so a run on a sibling still sees the shapes on its ground. */
+    const ownerId = await overlayOwnerId(supabaseFetch, course.courseId);
+    const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features,play_orders,status&course_id=eq." + encodeURIComponent(ownerId) + "&limit=1");
     const row = Array.isArray(rows) ? rows[0] : null;
     const features = row && Array.isArray(row.features) ? row.features : [];
     const playOrders = row && Array.isArray(row.play_orders) ? row.play_orders : [];
     /* A draft is still being drawn (20260929_add_course_map_overlay_status.sql): it is left
        out, and the count rides on the diagnostics so "the overlay was ignored" is visible.
        Play orders are signed off with the shapes, so a draft's play orders are left out too. */
-    if (row && row.status === "ready") { course.overlay = features; course.playOrders = playOrders; }
+    /* Play orders publish relative to the owner, so only the owner's own run follows them. */
+    if (row && row.status === "ready") { course.overlay = features; course.playOrders = ownerId === course.courseId ? playOrders : []; }
     else { course.overlayDraft = features.length; course.overlayDraftPlayOrders = playOrders.length; }
   } catch (error) {
     course.overlayError = String(error && error.message || error).slice(0, 200);
@@ -1137,7 +1143,7 @@ async function publishPlayOrders(job, course, payload, origin, diagnostics, quer
   }));
   if (!loops.length) throw fail("every play order is empty - give one its holes, or delete them all to let the mapper separate the site itself");
   if (loops[0].courseId !== course.courseId) {
-    throw fail("the play order for " + course.courseId + " has no holes - give it its holes, or delete it, before running the mapper");
+    throw fail(course.courseId + " holds this facility's overlay but has no play order with holes - every course on the overlay needs its own, this one included (Mapping Overlay: pick it in the course strip, then + Play order)");
   }
   const published = await publishSeparatedLoops(job, course, loops, null, null, origin);
   const warnings = [];
