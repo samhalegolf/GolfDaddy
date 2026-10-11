@@ -1964,24 +1964,37 @@ export function pointInShape(point, shape) {
   return inside;
 }
 
-export function parseOsmSurfaces(payload) {
+/* rejected, when given, collects every OSM surface left out and why - so a course whose OSM
+   plainly has fairways but gets none says which check stopped them. */
+export function parseOsmSurfaces(payload, rejected = null) {
   const out = [];
   let playPoints = null;
   ((payload && payload.elements) || []).forEach(element => {
     const kind = surfaceKindForElement(element);
     if (!kind) return;
-    osmAreaRings(element).outers.forEach((ring, index) => {
+    const key = (element.type || "osm") + "/" + (element.id != null ? element.id : "x");
+    const reject = (reason, extra) => { if (rejected) rejected.push(Object.assign({ osmId: key, type: kind.type, reason }, extra || {})); };
+    const rings = osmAreaRings(element).outers;
+    if (!rings.length) {
+      const points = osmGuidePointsFromElement(element).length;
+      reject("no-outline", { points, members: ((element && element.members) || []).length });
+      return;
+    }
+    rings.forEach((ring, index) => {
       const centre = shapeCentroid(ring);
-      if (!centre) return;
+      if (!centre) { reject("no-centre", { points: ring.length }); return; }
       const span = greenShapeSpan(ring, centre);
       const limits = SURFACE_SPAN_LIMITS_M[kind.type];
-      if (limits && (!Number.isFinite(span) || span < limits.min || span > limits.max)) return;
+      if (limits && (!Number.isFinite(span) || span < limits.min || span > limits.max)) {
+        reject(span > (limits && limits.max) ? "too-big" : "too-small", { span: Math.round(span), points: ring.length });
+        return;
+      }
       if (kind.type === "trees") {
         playPoints = playPoints || coursePlayPoints(payload);
-        if (playPoints.some(point => pointInShape(point, ring))) return;
+        if (playPoints.some(point => pointInShape(point, ring))) { reject("holds-course", { span: Math.round(span) }); return; }
       }
       const shape = simplifyShape(ring, SURFACE_SHAPE_MAX_POINTS_BY_TYPE[kind.type] || SURFACE_SHAPE_MAX_POINTS);
-      if (!shape) return;
+      if (!shape) { reject("no-shape", { points: ring.length }); return; }
       out.push({
         type: kind.type,
         hazardClass: kind.hazardClass,
@@ -2233,13 +2246,15 @@ function fairwayFillSurfaces(holeData, surfaces, objects) {
    Holes with no fairway get a default one (defaultFairwayShapes above). Default fairways from
    an earlier run that are not produced again - the hole has a real fairway now - are removed. */
 export function enrichSurfaceObjects(objects, courseId, payload, holes) {
-  const surfaces = parseOsmSurfaces(payload);
+  const rejected = [];
+  const surfaces = parseOsmSurfaces(payload, rejected);
   const objectsMap = {};
   objects.forEach(object => { if (object && object.id) objectsMap[object.id] = object; });
   const holeData = packageHoleData({ objects: objectsMap, holes: holes || {} });
   const fills = fairwayFillSurfaces(holeData, surfaces, objects);
   const all = surfaces.concat(fills);
   const written = new Set();
+  const held = {};
   let cloned = 0;
   Object.keys(holeData).map(Number).sort((a, b) => a - b).forEach(holeNumber => {
     const bounds = holeCaptureBounds(holeData[holeNumber]);
@@ -2256,12 +2271,27 @@ export function enrichSurfaceObjects(objects, courseId, payload, holes) {
         }
       });
       if (saved) { cloned++; written.add(saved.id); }
+      /* A null upsert is a hand-placed object of the same kind standing on this one. */
+      else held[surface.type] = (held[surface.type] || 0) + 1;
     });
   });
   for (let i = objects.length - 1; i >= 0; i--) {
     if (objects[i] && objects[i].source === FAIRWAY_FILL_SOURCE && !written.has(objects[i].id)) objects.splice(i, 1);
   }
-  return { surfaces: surfaces.length, cloned, filled: fills.length };
+  return { surfaces: surfaces.length, cloned, filled: fills.length, left: surfaceRejectSummary(rejected, held) };
+}
+
+/* What enrichSurfaceObjects left out, small enough to sit on a job row: counts by type and
+   reason, a few examples of each, and how many clones a hand-placed object held back. */
+export function surfaceRejectSummary(rejected, held = {}) {
+  const counts = {};
+  const examples = {};
+  (rejected || []).forEach(row => {
+    const key = row.type + ":" + row.reason;
+    counts[key] = (counts[key] || 0) + 1;
+    if ((examples[key] = examples[key] || []).length < 3) examples[key].push(row);
+  });
+  return { counts, examples, heldByHandPlaced: held };
 }
 
 export function resolveGuidesIntoObjects(guides, courseId, greens, existingObjects = [], payload = null) {
