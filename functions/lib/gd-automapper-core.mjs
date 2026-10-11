@@ -89,7 +89,7 @@ export const SURFACE_SPAN_LIMITS_M = {
   bunker: { min: 2, max: 140 },
   fairway_area: { min: 25, max: 900 },
   water: { min: 3, max: 1200 },
-  trees: { min: 3, max: 1200 },
+  trees: { min: 3, max: 3000 }, /* a wood beside a course is often over a kilometre; one round the course is caught by holds-course */
   hazard: { min: 3, max: 1200 },
   waste: { min: 3, max: 1200 }
 };
@@ -525,7 +525,11 @@ export function osmGuideQuery(scope) {
   const woods = [["natural", "wood"], ["landuse", "forest"]].map(([key, value]) =>
     "way" + selector + '["' + key + '"="' + value + '"](if:length()<' + OSM_WOOD_MAX_OUTLINE_M + ");"
     + "relation" + selector + '["' + key + '"="' + value + '"](if:length()<' + OSM_WOOD_MAX_OUTLINE_M * 2 + ");").join("");
-  return "[out:json][timeout:18];(" + selectors.map(([type, key, value]) => type + selector + '["' + key + '"="' + value + '"];').join("") + woods + ");out geom tags;";
+  /* `out geom`, never `out geom tags`: the tags verbosity leaves out a relation's members, and
+     with them every piece of its outline - so every fairway, green, bunker or lake mapped as a
+     multipolygon arrived with no geometry at all (Augusta: all 25 fairways; Monterey Shore: 26
+     fairways and 23 bunkers). Ways were unaffected, which is why it went unnoticed. */
+  return "[out:json][timeout:18];(" + selectors.map(([type, key, value]) => type + selector + '["' + key + '"="' + value + '"];').join("") + woods + ");out geom;";
 }
 
 /* ---------- OSM payload parsing (gd-course-library-pin-lock.js:1966-2039) ------------------ */

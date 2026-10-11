@@ -69,7 +69,9 @@ test("osmGuideQuery includes every golf feature selector", () => {
   assert.ok(query.includes('"golf"="hole"'));
   assert.ok(query.includes('"golf"="green"'));
   assert.ok(query.includes('"golf"="fairway"'));
-  assert.ok(query.includes("out geom tags;"));
+  /* `out geom tags` drops a relation's members - its whole outline. */
+  assert.ok(query.endsWith(");out geom;"));
+  assert.ok(!query.includes("out geom tags"));
 });
 
 test("parseOsmGuideBundle extracts hole guides and green shapes from a fixture payload", () => {
