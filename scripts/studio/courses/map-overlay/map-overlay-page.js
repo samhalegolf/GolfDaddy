@@ -119,6 +119,17 @@
      or a hand-drawn water hazard this much smaller or bigger, a press. */
   var FAIRWAY_WIDTH_STEP_M = 5;
   var SCALE_STEP = 1.12;
+  /* ↑ ↓ on a green or a fairway: the outline grows or shrinks evenly, stepM a press, up to max
+     presses either way (GDOverlayShapes.reshapeOutline). A fairway's presses first bridge the
+     cut-ins along its edge (closeM) - an overhanging tree, a shadow, the wand stopping short -
+     so its first ↑ only smooths, and each one after adds a metre. */
+  var RESHAPE = { green: { stepM: 0.5, max: 16, closeM: 0 }, fairway: { stepM: 1, max: 12, closeM: 5 } };
+  /* + Collar: the fringe round a finished green, found by growing out from COLLAR_M past its edge
+     up to COLLAR_REACH_M further, then necked out to the hole's fairway at COLLAR_NECK_M wide. */
+  var COLLAR_M = 2;
+  var COLLAR_REACH_M = 3;
+  var COLLAR_NECK_M = 8;
+  var COLLAR_FAIRWAY_MAX_M = 120;
   /* The deepest zoom the map goes to. Past the provider's own imagery the last real tiles are
      blown up rather than requested (see watchImageryCeiling). */
   var DRAW_MAX_ZOOM = 22;
@@ -548,6 +559,7 @@
       '<label class="gdStudioOverlayOpt" data-gd-overlay="merge-label" title="A bunker outline that overlaps one already placed joins it as one bunker"><input type="checkbox" data-gd-overlay="merge"> Merge bunkers</label>' +
       '<label class="gdStudioOverlayOpt" data-gd-overlay="seams-label" title="A fairway, water, hazard, waste area or trees kept within a few metres of another meets it in the middle, and the line between them is shared - drag it and both follow"><input type="checkbox" data-gd-overlay="seams"> Seams</label>' +
       '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="shape-pins" hidden></button>' +
+      '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="collar" title="A collar round this green - the fringe found with the wand, necked out to its fairway (K)" hidden>+ Collar</button>' +
       "</div>" +
       '<div class="gdStudioOverlayOrders" data-gd-overlay="orders" hidden></div>' +
       '<div class="gdStudioOverlayViewRail" role="toolbar" aria-label="View">' +
@@ -578,7 +590,7 @@
       "</div>";
 
     var el = {};
-    ["courses", "inbox", "inbox-count", "pick", "convert", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "unnumber", "clear", "run", "status"].forEach(function (name) {
+    ["courses", "inbox", "inbox-count", "pick", "convert", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "unnumber", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -1283,7 +1295,9 @@
       if (!f || f.pin) return;
       adjust = {
         id: f.id, kind: f.kind, seed: opts.seed || null, size: opts.size || 1, line: opts.line || null,
-        base: opts.base || null, grow: opts.grow || null, steps: 0, candidates: [], index: 0, running: false
+        base: opts.base || null, grow: opts.grow || null, steps: 0, candidates: [], index: 0, running: false,
+        /* ↑ ↓ on a green or fairway: the outline they grow from, and how many presses out. */
+        reshape: null
       };
       if (opts.wand) takeWand(opts.wand);
       drawFeatures();
@@ -1334,6 +1348,8 @@
       adjust.index = next;
       f.points = shapes.smoothOutline(adjust.candidates[next], f.kind);
       f.source = "wand";
+      /* The new edge is what bigger / smaller now grow from, by the presses already made. */
+      if (adjust.reshape) { adjust.reshape.base = f.points.slice(); if (adjust.reshape.steps) applyReshape(f, adjust.reshape.steps); }
       drawFeatures();
       changed();
       updateHint();
@@ -1357,6 +1373,7 @@
         setStatus("Fairway " + width + "m wide - the next one starts at this width too.");
         return;
       }
+      if (RESHAPE[f.kind]) { reshapeStep(f, by); return; }
       if (adjust.seed) { rerunWand(f, by); return; }
       if (adjust.grow) { regrow(f, by); return; }
       if (!adjust.base) adjust.base = f.points.slice();
@@ -1373,6 +1390,45 @@
       drawFeatures();
       changed();
       updateHint();
+    }
+
+    /* Up or down on a green or a fairway: the shape as it is, grown or shrunk evenly - never the
+       wand run again, which drifts a green rounder. Counted from the outline it had when the
+       first press came, so up then down is exactly where it started. */
+    function reshapeGrowM(kind, steps) {
+      var spec = RESHAPE[kind];
+      return spec.closeM && steps > 0 ? (steps - 1) * spec.stepM : steps * spec.stepM;
+    }
+    function applyReshape(f, steps) {
+      var spec = RESHAPE[f.kind], r = adjust.reshape;
+      if (!steps) { f.points = r.base.slice(); return true; }
+      var ring = shapes.reshapeOutline([r.base], { growM: reshapeGrowM(f.kind, steps), closeM: spec.closeM });
+      if (!ring) return false;
+      f.points = shapes.smoothOutline(ring, f.kind);
+      return true;
+    }
+    function reshapeStep(f, by) {
+      var spec = RESHAPE[f.kind];
+      if (!adjust.reshape) adjust.reshape = { base: f.points.slice(), steps: 0 };
+      var r = adjust.reshape;
+      var steps = Math.max(-spec.max, Math.min(spec.max, r.steps + by));
+      if (steps === r.steps || !applyReshape(f, steps)) {
+        setStatus(by < 0 ? "That is as small as it goes - drag its edge for more." : "That is as big as it goes - drag its edge for more.");
+        return;
+      }
+      r.steps = steps;
+      f.source = f.source || "wand";
+      drawFeatures();
+      changed();
+      updateHint();
+      setStatus(kindLabel(f.kind) + " " + reshapeWords(f.kind, steps) + ".");
+    }
+    function reshapeWords(kind, steps) {
+      if (!steps) return "back to the edge the wand found";
+      var grow = reshapeGrowM(kind, steps);
+      var smooth = RESHAPE[kind].closeM ? "cut-ins smoothed" : "";
+      var size = grow ? (grow > 0 ? grow + "m bigger" : -grow + "m smaller") + " all round" : "";
+      return [smooth, size].filter(Boolean).join(", ");
     }
 
     /* Up or down on a wand shape: the wand again on the same click, a size step smaller or
@@ -1415,6 +1471,7 @@
         if (adjust.grow.ring) adjust.grow.ring = adjust.grow.ring.map(move);
       }
       if (adjust.base) adjust.base = adjust.base.map(move);
+      if (adjust.reshape) adjust.reshape.base = adjust.reshape.base.map(move);
       adjust.candidates = adjust.candidates.map(function (ring) { return ring.map(move); });
     }
 
@@ -1840,7 +1897,7 @@
         var f = addFeature({ kind: kind, points: points, source: wanded ? "wand" : "", hole: hole });
         startAdjust(f, { wand: result.shape ? result : null, grow: { line: grow.line || null, ring: grow.ring || null, size: size, capture: out.capture }, line: kind === "fairway" && !result.shape ? from : null });
         var how = grow.line ? " grown from the line." : " grown out to its edge.";
-        setStatus(result.shape ? word + how + " ← → sensitivity, ↑ ↓ reach. " + result.note : result.note + (kind === "fairway" ? " Placed a fairway of the set width instead." : ""), !result.shape);
+        setStatus(result.shape ? word + how + " ← → sensitivity, ↑ ↓ " + (RESHAPE[kind] ? "smooth and size" : "reach") + ". " + result.note : result.note + (kind === "fairway" ? " Placed a fairway of the set width instead." : ""), !result.shape);
       });
     }
 
@@ -1874,6 +1931,65 @@
         updateHint();
         setStatus(kindLabel(kind) + (g.line ? " line wand reaching " : " growing up to ") + Math.round(LINE_WAND_REACH_M[kind] * size) + "m. " + out.result.note);
       });
+    }
+
+    /* ---- the collar ----
+       The fringe round a finished green, as a fairway shape on the green's hole: the green's
+       outline grown COLLAR_M, then grown on the imagery up to COLLAR_REACH_M further to the edge
+       of the short grass (the area wand), and necked out to the hole's fairway so the two
+       meet. It lies under the green (drawOrder), so the green stays clickable. */
+    function collarGreen() {
+      var f = adjusted() || (selectedId ? findFeature(selectedId) : null);
+      return f && f.kind === "green" && !f.pin && f.points.length >= 3 ? f : null;
+    }
+    /* The fairway the neck runs to: one linked to the green's hole, else one numbered for it,
+       else the nearest - and only one close enough to be its own. A fairway already round the
+       green is a collar, never the target. */
+    function collarFairway(green) {
+      var centre = shapes.centroid(green.points);
+      var fairways = session.features.filter(function (f) { return f.kind === "fairway" && !f.pin && f.points.length >= 3 && !shapes.insideLatLngRing(centre, f.points); });
+      var same = fairways.filter(function (f) { return green.link && f.link === green.link; });
+      if (!same.length) same = fairways.filter(function (f) { return green.hole && f.hole === green.hole; });
+      var pool = same.length ? same : fairways;
+      var best = null;
+      pool.forEach(function (f) {
+        f.points.forEach(function (p) {
+          var d = shapes.distanceM(centre, p);
+          if (d <= COLLAR_FAIRWAY_MAX_M && (!best || d < best.d)) best = { d: d, f: f, at: p };
+        });
+      });
+      return best;
+    }
+    function addCollar() {
+      var green = collarGreen();
+      if (!green || !canEdit()) return;
+      if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold.", true); return; }
+      if (adjust) commitAdjust(true);
+      var start = shapes.reshapeOutline([green.points], { growM: COLLAR_M });
+      if (!start) { setStatus("This green is too small to put a collar round.", true); return; }
+      var fairway = collarFairway(green);
+      var id = session.loadedFor;
+      setStatus("Finding the collar round the green…");
+      growRun({ ring: start }, "fairway", COLLAR_REACH_M / LINE_WAND_REACH_M.fairway, null).then(function (out) {
+        if (destroyed || session.loadedFor !== id) return;
+        var live = findFeature(green.id);
+        if (!live) return;
+        var found = out.result.shape || start;
+        var ring = shapes.collarOutline(live.points, found, fairway ? fairway.at : null, { neckM: COLLAR_NECK_M });
+        if (!ring) { setStatus("Could not make a collar here.", true); return; }
+        var collar = addFeature({ kind: "fairway", points: shapes.smoothOutline(ring, "fairway"), source: "wand", hole: live.hole });
+        if (live.link) collar.link = live.link;
+        startAdjust(collar, { base: collar.points.slice() });
+        drawFeatures();
+        changed();
+        setStatus("Collar added" + (fairway ? ", necked out to the fairway" : " - no fairway near enough to neck out to") + (out.result.shape && out.result.shape !== start ? "" : " (the wand found no edge, so it is " + COLLAR_M + "m all round)") + ". ↑ ↓ smooth and size it, Enter keeps it.");
+      });
+    }
+    function renderCollar() {
+      if (!el.collar) return;
+      var green = canEdit() ? collarGreen() : null;
+      el.collar.hidden = !green;
+      el.collar.disabled = !green || !!wandsRunning;
     }
 
     /* ---- pins into shapes ----
@@ -2028,9 +2144,20 @@
 
     function canDrag(f) { return !!f && canEdit() && (tool === "move" || f.id === lastPlacedId); }
 
+    /* Painted bottom to top: the big surfaces first, a green last, so a green sitting on its
+       fairway or collar is the shape a click finds - linking, numbering and play orders all
+       need to reach it. The shape in hand goes on top of everything, handles and all. */
+    var DRAW_ORDER = { waste: 0, hazard: 1, trees: 2, water: 3, fairway: 4, bunker: 5, tee: 6, tree: 7, green: 8 };
+    function drawOrder() {
+      var held = function (f) { return f.id === selectedId || (!!adjust && f.id === adjust.id) ? 1 : 0; };
+      return session.features.map(function (f, i) { return { f: f, i: i }; }).sort(function (a, b) {
+        return held(a.f) - held(b.f) || (a.f.pin ? 1 : 0) - (b.f.pin ? 1 : 0)
+          || (DRAW_ORDER[a.f.kind] != null ? DRAW_ORDER[a.f.kind] : 4) - (DRAW_ORDER[b.f.kind] != null ? DRAW_ORDER[b.f.kind] : 4) || a.i - b.i;
+      }).map(function (x) { return x.f; });
+    }
     function drawFeatures() {
       clearFeatureLayers();
-      session.features.forEach(function (f) {
+      drawOrder().forEach(function (f) {
         var selected = f.id === selectedId || linkPick.indexOf(f.id) >= 0 || (!!adjust && f.id === adjust.id);
         var latlngs = toLatLngs(f.points);
         var shape;
@@ -3267,12 +3394,14 @@
       if (finder) text = "← → fewer / more trees · Enter keeps them · Esc takes them away";
       if (wandsRunning) text = "Working… · " + text;
       el.hint.textContent = text;
+      renderCollar();
     }
 
     function adjustHint() {
       var bits = [];
       if (adjust.candidates.length > 1) bits.push("← → sensitivity " + (adjust.index + 1) + " of " + adjust.candidates.length);
       if (adjust.kind === "fairway" && adjust.line) bits.push("↑ ↓ narrower / wider (" + session.fairwayWidth + "m)");
+      else if (RESHAPE[adjust.kind]) bits.push("↑ ↓ " + (adjust.kind === "fairway" ? "smooth the edge, then " : "") + "smaller / bigger" + (adjust.reshape && adjust.reshape.steps ? " (" + reshapeWords(adjust.kind, adjust.reshape.steps) + ")" : ""));
       else if (adjust.seed) bits.push("↑ ↓ wand size (" + pct(adjust.size) + ")");
       else if (adjust.grow) bits.push("↑ ↓ reach (" + Math.round(LINE_WAND_REACH_M[adjust.kind] * adjust.grow.size) + "m)");
       else bits.push("↑ ↓ smaller / bigger");
@@ -4175,6 +4304,7 @@
       if (key === "z") { zoomToSelected(); return; }
       if (key === "s" || key === "p") { setMode(key === "p" ? "pins" : "shapes"); return; }
       if (key === "[" || key === "]") { stepWandSize(key === "]" ? 1 : -1); return; }
+      if (key === "k" && collarGreen()) { addCollar(); return; }
       /* The tool's own key again steps through its methods: wand, draw round, line + wand. */
       var own = { f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard", a: "waste" }[key];
       if (own && own === tool && methodOf(own) && canEdit()) { cycleMethod(own); return; }
@@ -4238,6 +4368,7 @@
     el.seams.checked = session.seams;
     el.seams.addEventListener("change", function () { session.seams = el.seams.checked; remember(); });
     el["shape-pins"].addEventListener("click", shapePins);
+    el.collar.addEventListener("click", addCollar);
     el["draft-finish"].addEventListener("click", finishFairway);
     el["draft-undo"].addEventListener("click", undoDraftPoint);
     el["draft-cancel"].addEventListener("click", cancelDraft);
