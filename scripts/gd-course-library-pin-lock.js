@@ -2049,7 +2049,7 @@
       ['way','golf','lateral_water_hazard'],['relation','golf','lateral_water_hazard'],
       ['way','natural','water'],['relation','natural','water']
     ];
-    return `[out:json][timeout:18];(${selectors.map(([type,key,value])=>`${type}${selector}["${key}"="${value}"];`).join('')});out geom tags;`;
+    return `[out:json][timeout:18];(${selectors.map(([type,key,value])=>`${type}${selector}["${key}"="${value}"];`).join('')});out geom;`; /* not `out geom tags`: that leaves out a relation's members, and so its outline */
   }
   function automapperDebugDetails(payload,bundle){
     const elements=Array.isArray(payload?.elements)?payload.elements:[];
