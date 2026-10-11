@@ -258,7 +258,7 @@ test("collect_extra_objects writes objects_json and nothing else", async () => {
   const patches = stubCollectionWorld(row);
   const result = await worker.runObjectCollectionJob({ id: "job-c", course_id: "saved", kind: "collect_extra_objects" });
 
-  assert.deepStrictEqual(result.added, { fairways: 1, bunkers: 1, water: 1 });
+  assert.deepStrictEqual(result.added, { fairways: 1, bunkers: 1, water: 1, trees: 0 });
   assert.strictEqual(result.holeGeometryTouched, false);
   assert.strictEqual(result.visualsTouched, false);
 
@@ -295,7 +295,7 @@ test("collect_extra_objects is idempotent", async () => {
   row.objects_json = first;
   const secondPatches = stubCollectionWorld(row);
   const second = await worker.runObjectCollectionJob({ id: "job-c2", course_id: "saved", kind: "collect_extra_objects" });
-  assert.deepStrictEqual(second.added, { fairways: 0, bunkers: 0, water: 0 });
+  assert.deepStrictEqual(second.added, { fairways: 0, bunkers: 0, water: 0, trees: 0 });
   const saved = secondPatches.find(p => p.body.objects_json).body.objects_json;
   assert.strictEqual(Object.keys(saved).length, Object.keys(first).length, "no duplicate surfaces on a second run");
 });
@@ -339,7 +339,7 @@ test("collect_extra_objects still succeeds when the object_collection column is 
   const result = await worker.runObjectCollectionJob({ id: "job-c", course_id: "saved", kind: "collect_extra_objects" });
   assert.strictEqual(result.metadataSaved, false);
   assert.strictEqual(result.objectCollection, null);
-  assert.deepStrictEqual(result.added, { fairways: 1, bunkers: 1, water: 1 }, "the objects still landed");
+  assert.deepStrictEqual(result.added, { fairways: 1, bunkers: 1, water: 1, trees: 0 }, "the objects still landed");
 });
 
 /* ---------- refine_surface_shapes -------------------------------------------------------- */
