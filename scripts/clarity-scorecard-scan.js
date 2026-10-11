@@ -22,6 +22,16 @@
  *   5  identify  each strip classified BY ITS VALUES: holes / par / index / tee
  *   6  grids     strips -> grids of strings for gd-scorecard-parse-core
  *
+ * EITHER WAY ROUND
+ *   Most cards print holes ACROSS (Hole 1..18 as a row, Par / SI / tees as rows
+ *   under it). Plenty print them DOWN (one row per hole, Hole / Par / SI / Yards
+ *   as columns), and a phone photo of a card held sideways is the same thing.
+ *   Stages 3-6 do not care which: they are run on the boxes as read, and if
+ *   that finds no hole row they are run again on the boxes with x and y
+ *   swapped. Nothing else changes, because nothing downstream reads a word -
+ *   a strip is "holes" because it counts 1, 2, 3..., "par" because it is all
+ *   3s, 4s and 5s, and a tee because its numbers are distances.
+ *
  * Stage 6 is the handover. `parseScorecardCards(grids)` turns those into
  * [{name, holes:[{hole, par, distanceM}]}] — the same function, and the same
  * card shape, that the club-website path produces. The photo lane does not get
@@ -74,7 +84,8 @@
     return text;
   }
 
-  /* The label strip: everything LEFT of the first hole column.
+  /* The label strip: everything LEFT of the first hole column (ABOVE the first
+   * hole row when the card runs down the page).
    *
    * Read as one image per row band rather than one pass down the whole margin.
    * The practice reader learned this the hard way in the other direction — its
@@ -83,13 +94,15 @@
    * DIFFERENT label, and which band a word sits in is the entire meaning. So the
    * cut is per band, and a band that reads as nothing simply has no label, which
    * costs a tee its name and nothing else. */
-  async function readStripLabels(image, bands, marginRight, recognize) {
+  async function readStripLabels(image, bands, marginRight, recognize, down) {
     var width = Math.floor(Number(marginRight) || 0);
     if (width < 12) return bands.map(function () { return ""; });
     var out = [];
     for (var i = 0; i < bands.length; i += 1) {
       var band = bands[i];
-      var crop = PIX.cropImage(image, 0, band.top, width, band.bottom, 0);
+      var crop = down
+        ? PIX.cropImage(image, band.top, 0, band.bottom, width, 0)
+        : PIX.cropImage(image, 0, band.top, width, band.bottom, 0);
       var prepared = PIX.padImage(PIX.upscaleImage(crop, 2), 10);
       var text = "";
       try {
@@ -98,6 +111,154 @@
       out.push(text);
     }
     return out;
+  }
+
+  /* A box with its axes swapped, so a card printed down the page goes through
+   * the same column split and strip banding as one printed across it. */
+  function swapAxes(box) {
+    return Object.assign({}, box, {
+      x0: box.y0, y0: box.x0, x1: box.y1, y1: box.x1,
+      cx: box.cy, cy: box.cx, w: box.h, h: box.w,
+      page: box
+    });
+  }
+
+  /* Pieces of one number that the box grouping cut apart. A "1" is narrow, so
+   * the gap inside an "11" can look like the gap between two values — most of
+   * all on a card printed down the page, where a row holds only a handful of
+   * values to calibrate against. Two reads side by side on the same printed
+   * line, less than a character height apart, are one number. Measured on the
+   * page, so it holds whichever way round the card is being read. */
+  function joinFragments(hits) {
+    var page = function (b) { return b.page || b; };
+    var list = hits.slice().sort(function (a, b) { return page(a).x0 - page(b).x0; });
+    var out = [list[0]];
+    for (var i = 1; i < list.length; i += 1) {
+      var prev = out[out.length - 1], next = list[i];
+      var p = page(prev), q = page(next);
+      var height = Math.max(p.y1 - p.y0, q.y1 - q.y0);
+      var sameLine = Math.abs((p.y0 + p.y1) / 2 - (q.y0 + q.y1) / 2) < height * 0.5;
+      var text = String(prev.text || "") + String(next.text || "");
+      var n = OCR.readInteger(text);
+      if (sameLine && q.x0 - p.x1 < height && n !== null) {
+        var merged = { x0: p.x0, y0: Math.min(p.y0, q.y0), x1: q.x1, y1: Math.max(p.y1, q.y1) };
+        merged.cx = (merged.x0 + merged.x1) / 2; merged.cy = (merged.y0 + merged.y1) / 2;
+        merged.w = merged.x1 - merged.x0; merged.h = merged.y1 - merged.y0;
+        var joined = Object.assign({}, prev.page ? swapAxes(merged) : merged, { text: text, n: n });
+        if (prev.page) joined.page = merged;
+        out[out.length - 1] = joined;
+      } else {
+        out.push(next);
+      }
+    }
+    return out;
+  }
+
+  /* Stages 3-6 for one orientation. `down` means the boxes have been swapped:
+   * page rows are treated as columns and page columns as strips. */
+  async function readLayout(image, numberBoxes, recognize, onStage, opts) {
+    var down = !!opts.down;
+    var minHoles = opts.minHoles;
+    var boxes = down ? numberBoxes.map(swapAxes) : numberBoxes;
+    var across = down ? image.height : image.width;
+    var along = down ? image.width : image.height;
+    var orientation = down ? "holes down" : "holes across";
+
+    // ---- Stage 3: columns -------------------------------------------------
+    // Number-like only, so a tee name or an OUT heading can never bend the
+    // column geometry.
+    var columns = OCR.splitColumns(boxes, { sourceWidth: across, debug: !!opts.debug });
+    onStage("columns", { columns: columns.length, orientation: orientation });
+    if (columns.length < minHoles) {
+      return fail("columns", "Reading " + orientation + ": found " + columns.length + " hole " + (down ? "rows" : "columns") + ", need at least " + minHoles + ".", columns.length);
+    }
+
+    // ---- Stage 4: strips --------------------------------------------------
+    var rows = OCR.clusterValueRows(boxes);
+    var bands = OCR.bandBoundaries(rows, along);
+    // The label margin is everything before the first column. `trimOuterMargins`
+    // has already pulled that boundary in off the edge to the first column's own
+    // values, so what is left really is the margin and nothing else.
+    var marginRight = Math.max(0, Number(columns[0].left));
+    var labels = await readStripLabels(image, bands, marginRight, recognize, down);
+    onStage("strips", { strips: bands.length, marginWidth: Math.round(marginRight), orientation: orientation });
+
+    // ---- Stage 5: identify ------------------------------------------------
+    // Assign each read number to (strip, column) by geometry, then let the
+    // strip's own values say what it is. Nothing depends on `labels` being right.
+    var strips = bands.map(function (band, index) {
+      var values = [];
+      columns.forEach(function (column, ci) {
+        var hits = boxes.filter(function (b) {
+          return Number(b.cy) >= band.top && Number(b.cy) <= band.bottom &&
+                 Number(b.cx) > Number(column.left) && Number(b.cx) <= Number(column.right);
+        });
+        if (!hits.length) return;
+        hits = joinFragments(hits);
+        // More than one read in a cell means the split put two values in one
+        // column. Keep the one nearest the column centre and record the clash.
+        hits.sort(function (a, b) { return Math.abs(a.cx - column.cx) - Math.abs(b.cx - column.cx); });
+        values.push({ column: ci, n: hits[0].n, text: hits[0].text, box: hits[0], collisions: hits.length - 1 });
+      });
+      var classified = OCR.classifyStrip(values, { minRun: minHoles });
+      return {
+        index: index, top: band.top, bottom: band.bottom, cy: band.cy,
+        label: labels[index] || "", values: values,
+        kind: classified.kind, reason: classified.reason
+      };
+    });
+    // Second pass, scoped to the hole columns. Out / In / Total are columns like
+    // any other at this point, and a 3433 sitting in one of them is enough to
+    // push a tee row out of every plausible distance range and leave it
+    // unidentified. Which columns are holes is only known once a hole strip has
+    // been found, so the rescope has to happen after the first pass, not during
+    // it. The hole strip itself needs no rescoping: a totals heading is a word,
+    // so it never produced a number up there in the first place.
+    var holeColumns = null;
+    strips.forEach(function (strip) {
+      if (strip.kind === "holes") {
+        holeColumns = strip.values.map(function (v) { return v.column; });
+        strip.scoped = strip.values.length;
+        return;
+      }
+      if (!holeColumns) return;
+      var scoped = strip.values.filter(function (v) { return holeColumns.indexOf(v.column) >= 0; });
+      var rescoped = OCR.classifyStrip(scoped, { minRun: minHoles });
+      strip.kind = rescoped.kind;
+      strip.reason = rescoped.reason + " (over " + scoped.length + " hole columns)";
+      strip.scoped = scoped.length;
+    });
+    var holeStrips = strips.filter(function (s) { return s.kind === "holes"; });
+    onStage("identify", {
+      orientation: orientation,
+      strips: strips.map(function (s) { return (s.kind || "?") + "[" + s.values.length + "]" + (s.label ? " " + s.label : ""); }),
+      holes: holeStrips.length,
+      par: strips.filter(function (s) { return s.kind === "par"; }).length,
+      distance: strips.filter(function (s) { return s.kind === "distance"; }).length
+    });
+    if (!holeStrips.length) {
+      return fail("identify",
+        "Reading " + orientation + ": no " + (down ? "column" : "row") + " counts 1, 2, 3... as hole numbers.",
+        strips.map(function (s) { return (s.label || "strip " + s.index) + ": " + (s.kind || "unidentified") + " — " + s.reason; }));
+    }
+
+    // ---- Stage 6: grids for the resolver ----------------------------------
+    var unit = null;
+    strips.forEach(function (s) { unit = unit || OCR.unitFromText(s.label); });
+    var grids = OCR.buildGrids(strips, { name: opts.name || "" });
+    onStage("grids", { grids: grids.length, unit: unit, orientation: orientation });
+
+    return {
+      ok: true, stage: "grids", error: "", orientation: down ? "down" : "across",
+      grids: grids, unit: unit,
+      strips: strips, columns: columns, bands: bands,
+      diagnostics: {
+        columns: columns.length, strips: strips.length,
+        kinds: strips.map(function (s) { return s.kind || ""; }),
+        labels: strips.map(function (s) { return s.label || ""; }),
+        marginWidth: Math.round(marginRight)
+      }
+    };
   }
 
   /**
@@ -142,101 +303,23 @@
       return fail("read", "Only " + numberBoxes.length + " of " + read.length + " boxes read as numbers.", numberBoxes.length);
     }
 
-    // ---- Stage 3: columns -------------------------------------------------
-    // Number-like only, so a tee name or an OUT heading can never bend the
-    // column geometry.
-    var columns = OCR.splitColumns(numberBoxes, { sourceWidth: image.width, debug: !!opts.debug });
-    onStage("columns", { columns: columns.length });
-    if (columns.length < minHoles) {
-      return fail("columns", "Column split found " + columns.length + " columns; a card needs at least " + minHoles + ".", columns.length);
+    // ---- Stages 3-6: holes across first, then holes down ---------------
+    var layoutOpts = { minHoles: minHoles, name: opts.name, debug: opts.debug };
+    var attempts = [];
+    var result = null;
+    for (var pass = 0; pass < 2 && !(result && result.ok); pass += 1) {
+      layoutOpts.down = pass === 1;
+      result = await readLayout(image, numberBoxes, recognize, onStage, layoutOpts);
+      attempts.push(result);
     }
-
-    // ---- Stage 4: strips --------------------------------------------------
-    var rows = OCR.clusterValueRows(numberBoxes);
-    var bands = OCR.bandBoundaries(rows, image.height);
-    // The label margin is everything left of the first column. `trimOuterMargins`
-    // has already pulled that boundary in off x=0 to the first column's own
-    // values, so what is left really is the margin and nothing else.
-    var marginRight = Math.max(0, Number(columns[0].left));
-    var labels = await readStripLabels(image, bands, marginRight, recognize);
-    onStage("strips", { strips: bands.length, marginWidth: Math.round(marginRight) });
-
-    // ---- Stage 5: identify ------------------------------------------------
-    // Assign each read number to (strip, column) by geometry, then let the
-    // strip's own values say what it is. Nothing depends on `labels` being right.
-    var strips = bands.map(function (band, index) {
-      var values = [];
-      columns.forEach(function (column, ci) {
-        var hits = numberBoxes.filter(function (b) {
-          return Number(b.cy) >= band.top && Number(b.cy) <= band.bottom &&
-                 Number(b.cx) > Number(column.left) && Number(b.cx) <= Number(column.right);
-        });
-        if (!hits.length) return;
-        // More than one read in a cell means the split put two values in one
-        // column. Keep the one nearest the column centre and record the clash.
-        hits.sort(function (a, b) { return Math.abs(a.cx - column.cx) - Math.abs(b.cx - column.cx); });
-        values.push({ column: ci, n: hits[0].n, text: hits[0].text, box: hits[0], collisions: hits.length - 1 });
-      });
-      var classified = OCR.classifyStrip(values, { minRun: minHoles });
-      return {
-        index: index, top: band.top, bottom: band.bottom, cy: band.cy,
-        label: labels[index] || "", values: values,
-        kind: classified.kind, reason: classified.reason
-      };
-    });
-    // Second pass, scoped to the hole columns. Out / In / Total are columns like
-    // any other at this point, and a 3433 sitting in one of them is enough to
-    // push a tee row out of every plausible distance range and leave it
-    // unidentified. Which columns are holes is only known once a hole strip has
-    // been found, so the rescope has to happen after the first pass, not during
-    // it. The hole strip itself needs no rescoping: a totals heading is a word,
-    // so it never produced a number up there in the first place.
-    var holeColumns = null;
-    strips.forEach(function (strip) {
-      if (strip.kind === "holes") {
-        holeColumns = strip.values.map(function (v) { return v.column; });
-        strip.scoped = strip.values.length;
-        return;
-      }
-      if (!holeColumns) return;
-      var scoped = strip.values.filter(function (v) { return holeColumns.indexOf(v.column) >= 0; });
-      var rescoped = OCR.classifyStrip(scoped, { minRun: minHoles });
-      strip.kind = rescoped.kind;
-      strip.reason = rescoped.reason + " (over " + scoped.length + " hole columns)";
-      strip.scoped = scoped.length;
-    });
-    var holeStrips = strips.filter(function (s) { return s.kind === "holes"; });
-    onStage("identify", {
-      strips: strips.map(function (s) { return (s.kind || "?") + "[" + s.values.length + "]" + (s.label ? " " + s.label : ""); }),
-      holes: holeStrips.length,
-      par: strips.filter(function (s) { return s.kind === "par"; }).length,
-      distance: strips.filter(function (s) { return s.kind === "distance"; }).length
-    });
-    if (!holeStrips.length) {
-      return fail("identify",
-        "No strip reads as a row of hole numbers, so there is nothing to hang par and distances on.",
-        strips.map(function (s) { return (s.label || "row " + s.index) + ": " + (s.kind || "unidentified") + " — " + s.reason; }));
+    if (!result.ok) {
+      return fail(result.stage,
+        "Could not find the hole numbers either way round. " + attempts.map(function (x) { return x.error; }).join(" "),
+        attempts.map(function (x) { return x.detail; }));
     }
-
-    // ---- Stage 6: grids for the resolver ----------------------------------
-    var unit = null;
-    strips.forEach(function (s) { unit = unit || OCR.unitFromText(s.label); });
-    var grids = OCR.buildGrids(strips, { name: opts.name || "" });
-    onStage("grids", { grids: grids.length, unit: unit });
-
-    return {
-      ok: true, stage: "grids", error: "",
-      grids: grids, unit: unit,
-      strips: strips, columns: columns, bands: bands,
-      boxes: read,
-      diagnostics: {
-        boxes: read.length, numbers: numberBoxes.length, words: textBoxes.length,
-        columns: columns.length, strips: strips.length,
-        kinds: strips.map(function (s) { return s.kind || ""; }),
-        labels: strips.map(function (s) { return s.label || ""; }),
-        marginWidth: Math.round(marginRight)
-      }
-    };
+    result.boxes = read;
+    result.diagnostics = Object.assign({ boxes: read.length, numbers: numberBoxes.length, words: textBoxes.length }, result.diagnostics);
+    return result;
   }
 
   var api = { scanScorecard: scanScorecard, CELL_WHITELIST: CELL_WHITELIST, LABEL_WHITELIST: LABEL_WHITELIST };

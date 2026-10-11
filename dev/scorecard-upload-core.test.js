@@ -64,6 +64,34 @@ const PASTED = [
   assert.strictEqual(fromCsv[0].holes.length, 18);
   assert.strictEqual(fromCsv[0].holes[8].distanceM, card.holes[8].distanceM);
 
+  /* ---------- the same card printed down the page ---------- */
+  const across = core.textToGrid(PASTED);
+  const front = across.slice(0, 4), back = across.slice(4);
+  const downLines = ["Hole\tPar\tSI\tYards"];
+  for (let c = 1; c < front[0].length; c++) if (front[0][c]) downLines.push(front.map(row => row[c]).join("\t"));
+  for (let c = 1; c < back[0].length; c++) if (back[0][c]) downLines.push(back.map(row => row[c]).join("\t"));
+  const down = core.cardsFromText(downLines.join("\n"), { name: "Pasted Links" });
+  assert.strictEqual(down.length, 1, "a holes-down card reads as one card");
+  assert.strictEqual(down[0].holes.length, 18, "Out / In / Total rows are not holes");
+  assert.deepStrictEqual(down[0].holes.map(h => h.par), card.holes.map(h => h.par));
+  assert.deepStrictEqual(down[0].holes.map(h => h.strokeIndex), card.holes.map(h => h.strokeIndex));
+  assert.deepStrictEqual(down[0].holes.map(h => h.distanceM), card.holes.map(h => h.distanceM));
+
+  /* ---------- no labels at all: rows known by their numbers ---------- */
+  const bare = [
+    "1 2 3 4 5 6 7 8 9",
+    "4 3 4 4 3 4 4 5 4",
+    "11 15 9 5 17 3 13 7 1",
+    "300 119 333 381 141 405 360 492 455"
+  ].join("\n");
+  const bareCards = core.cardsFromText(bare, { name: "Bare" });
+  assert.strictEqual(bareCards.length, 1);
+  assert.deepStrictEqual(bareCards[0].holes.map(h => h.par), [4, 3, 4, 4, 3, 4, 4, 5, 4], "the all-3s-4s-5s row is par");
+  assert.strictEqual(bareCards[0].holes[0].strokeIndex, 11, "distinct 1-18 is the index");
+  assert.ok(bareCards[0].holes[0].distanceM > 0, "the 100+ row is a tee");
+  const bareDown = core.cardsFromText(bare.split("\n").map(l => l.split(" ")).reduce((cols, row) => row.map((v, i) => (cols[i] || []).concat(v)), []).map(r => r.join(" ")).join("\n"), { name: "Bare" });
+  assert.deepStrictEqual(bareDown[0].holes.map(h => h.par), bareCards[0].holes.map(h => h.par), "and the same numbers turned round");
+
   /* ---------- HTML and JSON routes ---------- */
   const html = "<html><body><h1>Pasted Links Golf Club</h1><table>" + PASTED.split("\n").map(line => "<tr>" + line.split("\t").map(c => "<td>" + c + "</td>").join("") + "</tr>").join("") + "</table></body></html>";
   const fromHtml = core.cardsFromHtml(html, { name: "Pasted Links" });

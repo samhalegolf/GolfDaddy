@@ -54,6 +54,16 @@ Championship 530  444  355  ... 3433  433  ... 3345  6778
 So the **strips are rows**, and identifying a strip means answering "is this the
 hole row, par, the stroke index, or a tee?".
 
+### Cards printed down the page
+
+Plenty of cards print one row per hole instead (Hole / Par / SI / Yards as
+columns). `scanScorecard` reads the boxes as printed first; if no strip counts
+the holes, it swaps x and y on every box and runs stages 3-6 again
+(`readLayout` with `down: true`). The result carries `orientation: "across" |
+"down"`. The pasted-text parser does the same with `transposeGrid`, and reads
+unlabelled rows by their values: all 3-6 is par, distinct 1-18 is the index,
+anything else is a tee.
+
 ## Files
 
 - `scripts/clarity-scorecard-ocr.js` — pure, DOM-agnostic. Ported geometry

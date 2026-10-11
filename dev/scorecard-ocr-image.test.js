@@ -220,6 +220,40 @@ async function scan(spec, options = {}) {
     }
   }
 
+  // ---------------------------------------------------------------- case 6
+  // The same card printed DOWN the page: one row per hole, Hole / Par / SI /
+  // tees as columns, an OUT row after the ninth. The holes-across pass finds
+  // only five columns and the scan has to turn the card round to read it.
+  {
+    const base = standardCardSpec();
+    const t = base.truth;
+    const sum = (list, from, to) => list.slice(from, to).reduce((s, v) => s + v, 0);
+    const holeRow = i => ({ label: "", cells: [t.holes[i], t.par[i], t.index[i], t.champ[i], t.members[i]].map(String) });
+    const spec = {
+      columns: ["HOLE", "PAR", "SI", "CHAMP", "MEMB"],
+      rows: [
+        { label: "", cells: ["HOLE", "PAR", "SI", "CHAMP", "MEMB"] },
+        ...Array.from({ length: 9 }, (_, i) => holeRow(i)),
+        { label: "", cells: ["OUT", String(sum(t.par, 0, 9)), "", String(sum(t.champ, 0, 9)), String(sum(t.members, 0, 9))] },
+        ...Array.from({ length: 9 }, (_, i) => holeRow(i + 9))
+      ]
+    };
+    const { result } = await scan(spec, { render: { colPitch: 40 * 3, labelW: 8 * 3 } });
+    console.log("\n[holes-down card]", result.ok ? `${result.orientation}, ${result.strips.filter(s => s.kind).length} strips identified` : `${result.stage}: ${result.error}`);
+    if (result.ok) console.log("  strips:", result.strips.map(s => `${s.kind || "?"}(${s.label || "-"})[${s.values.length}] ${s.reason}`).join(" | "));
+    check("holes-down card scans", () => assert.ok(result.ok, `stage ${result.stage}: ${result.error}`));
+    if (result.ok) {
+      check("it was read turned round", () => assert.strictEqual(result.orientation, "down"));
+      const cards = parseScorecardCards(result.grids);
+      check("holes-down card gives 18 holes with the right par", () => {
+        assert.strictEqual(cards.length, 1);
+        assert.deepStrictEqual(cards[0].holes.map(h => h.par), t.par);
+      });
+      check("holes-down card keeps the stroke index", () =>
+        assert.deepStrictEqual(cards[0].holes.map(h => h.strokeIndex), t.index));
+    }
+  }
+
   console.log(failures ? `\n${failures} CHECK(S) FAILED` : "\nALL TESTS PASSED");
   process.exit(failures ? 1 : 0);
 })().catch(error => { console.error(error); process.exit(1); });

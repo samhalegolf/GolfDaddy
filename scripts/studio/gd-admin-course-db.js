@@ -4718,7 +4718,7 @@ const gdAdminScorecardStatus={};
 function gdAdminCourseScorecardDropMarkup(item){
   const id=gdEscapeHTML(item.id);
   return `<div class="gdAdminCourseScorecardDrop" data-course-id="${id}" onclick="event.stopPropagation()">`
-    +`<div class="gdAdminCourseScorecardDropHead"><strong>Scorecard</strong><span>Drop a file anywhere on this course's row, or paste the card here. Image (read by OCR), HTML, CSV, tab-separated text or JSON.</span></div>`
+    +`<div class="gdAdminCourseScorecardDropHead"><strong>Scorecard</strong><span>Drop a file anywhere on this course's row, or paste the card here. Image (read by OCR), HTML, CSV, tab-separated text or JSON. Holes can run across or down the page, and labels are optional: the 1, 2, 3… line is the holes, the line of 3s, 4s and 5s is par, and lines of 100+ are tee distances.</span></div>`
     +`<textarea class="gdAdminCourseScorecardPaste" data-course-id="${id}" spellcheck="false" placeholder="Hole&#9;1&#9;2&#9;3 …&#10;Par&#9;4&#9;3&#9;4 …&#10;SI&#9;11&#9;15&#9;9 …&#10;Yards&#9;300&#9;119&#9;333 …"></textarea>`
     +`<div class="gdAdminCourseScorecardDropRail">`
     +`<label class="gdAdminCourseScorecardFile">Choose file…<input type="file" accept=".csv,.tsv,.txt,.html,.htm,.json,image/*,text/*" data-course-id="${id}" hidden></label>`
