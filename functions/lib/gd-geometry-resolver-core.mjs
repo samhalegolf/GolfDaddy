@@ -23,6 +23,8 @@
    since the worker passes them explicitly (see resolveGeometryWithFallback in
    gd-course-package-shape adjacent worker code). */
 
+import { osmAreaRings } from "./gd-automapper-core.mjs";
+
 const HIGH_CONFIDENCE = 0.76;
 const MEDIUM_CONFIDENCE = 0.58;
 const EARTH_RADIUS_M = 6371008.8;
@@ -74,11 +76,19 @@ function validHoleNumber(value) {
   const n = match ? Number(match[0]) : Number(value);
   return Number.isFinite(n) && n >= 1 && n <= 36 ? n : null;
 }
+/* A multipolygon's outline is its member ways joined end to end (osmAreaRings), with the holes
+   cut out of it left out. Laid down in download order, as they used to be, the pieces of one
+   fairway zig-zag across it and the polygon they make is nonsense. */
 function elementPoints(element) {
   const pts = [];
   const add = raw => { const p = toPoint(raw); if (p) pts.push(p); };
   if (Array.isArray(element && element.geometry)) element.geometry.forEach(add);
-  if (Array.isArray(element && element.members)) element.members.forEach(member => { if (Array.isArray(member && member.geometry)) member.geometry.forEach(add); });
+  const members = Array.isArray(element && element.members) ? element.members : [];
+  if (members.some(member => member && (member.role === "outer" || member.role === "inner"))) {
+    osmAreaRings(element).outers.forEach(ring => ring.forEach(add));
+  } else {
+    members.forEach(member => { if (Array.isArray(member && member.geometry)) member.geometry.forEach(add); });
+  }
   return dedupeNearbyPoints(pts, 0.4);
 }
 function dedupeNearbyPoints(points, metres) {

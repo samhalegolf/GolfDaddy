@@ -2095,8 +2095,8 @@ async function runShapeRefineJob(job) {
 
    That is the whole point. Adding bunkers to a course that a golfer is already playing must not
    be able to move a green, renumber a hole or invalidate a published frame - so the code path
-   that could do those things is not on this one. enrichSurfaceObjects can only ever write the
-   three surface types; it has no route to a tee, a green or a route point. */
+   that could do those things is not on this one. enrichSurfaceObjects can only ever write
+   surfaces; it has no route to a tee, a green or a route point. */
 function surfaceCounts(objects) {
   const counts = { fairway_area: 0, bunker: 0, water: 0, trees: 0, hazard: 0, waste: 0 };
   objects.forEach(object => {
@@ -2131,7 +2131,8 @@ async function runObjectCollectionJob(job) {
   const added = {
     fairways: after.fairway_area - before.fairway_area,
     bunkers: after.bunker - before.bunker,
-    water: after.water - before.water
+    water: after.water - before.water,
+    trees: after.trees - before.trees
   };
 
   const objectsMap = {};
@@ -2173,6 +2174,7 @@ async function runObjectCollectionJob(job) {
     overlay: overlayDiagnostics(course),
     surfacesFound: enrichment.surfaces,
     surfacesWritten: enrichment.cloned,
+    defaultFairways: enrichment.filled,
     added,
     totals: after,
     objectCollection: metadataSaved ? collection : null,

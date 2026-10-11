@@ -151,7 +151,7 @@ test("a session is a draft the mapper ignores until it is marked ready", () => {
 test("Course Database rows open the drawer, and it arrives with what the last run saw", () => {
   assert.ok(adminDb.includes('onclick="event.stopPropagation();return gdAdminCourseLocationOverlay('), "no Draw button on the course rows");
   assert.ok(adminDb.includes("${gdAdminCourseDbDrawButton(item,status)}"), "the Draw button is not in the row markup");
-  assert.ok(endpoint.includes("body.objects = await loadCourseObjects(courseId)") && endpoint.includes("body.lastRun = await loadLastRun(courseId)"), "the drawer's load must carry the saved objects and the last run");
+  assert.ok(endpoint.includes("body.objects = displayObjects(saved)") && endpoint.includes("body.lastRun = await loadLastRun(courseId)"), "the drawer's load must carry the saved objects and the last run");
   assert.ok(endpoint.includes('bunker: "bunkers"'), "OSM bunkers must be drawn so they are not placed twice");
   assert.ok(page.includes("function drawObjects()") && page.includes("function renderLastRun()"), "the page must show the saved objects and the last run");
   assert.ok(/function drawObjects\(\) \{[\s\S]*?interactive: false[\s\S]*?\n    \}/.test(page), "saved objects are reference only - never clickable");
@@ -308,6 +308,14 @@ test("Link: click the shapes on one hole, Enter or Space links them, and never n
   assert.ok(page.includes("function drawLinks()"), "shapes on one hole must be drawn joined");
 });
 
+test("OSM's shapes can be made editable, and a course with no overlay starts from them", () => {
+  assert.ok(endpoint.includes("out.convertible = osmToOverlayFeatures(payload, overlayFeatures, savedObjects);"), "the drawer's load must offer OSM's shapes as overlay shapes");
+  assert.ok(page.includes('data-gd-overlay="convert"') && page.includes('convertOsm(false)'), "no Make OSM editable button");
+  assert.ok(page.includes("if (session.loadedFor === id && !hasOverlay()) convertOsm(true);"), "an empty overlay must start from what OSM has");
+  assert.ok(page.includes("if (raw.osm) f.osm = raw.osm;"), "a shape keeps the OSM element it came from");
+  assert.ok(page.includes("return !converted[item.id];"), "a converted OSM shape must not be drawn twice");
+});
+
 test("the shape just placed can be dragged without switching to Move", () => {
   assert.ok(page.includes('return !!f && canEdit() && (tool === "move" || f.id === lastPlacedId);'), "only Move, or the last placed shape, can be dragged");
   assert.ok(page.includes("lastPlacedId = f.id;"), "placing a shape must make it the draggable one");
@@ -315,7 +323,7 @@ test("the shape just placed can be dragged without switching to Move", () => {
 
 test("greens and bunkers are shaped by a few smooth points once the wand has outlined them", () => {
   assert.ok(page.includes("return shapes.smoothOutline(ring, kind);"), "a wand shape must be kept as its smooth outline");
-  assert.ok(page.includes('function isSmooth(f) { return !f.pin && !!shapes.SMOOTH[f.kind] && f.source !== "colour"; }'), "every smooth kind is edited by its handles, unless the colour wand outlined it");
+  assert.ok(page.includes('function isSmooth(f) { return !f.pin && !!shapes.SMOOTH[f.kind] && f.source !== "colour" && f.source !== "osm"; }'), "every smooth kind is edited by its handles, unless the colour wand outlined it or it came from OSM");
   assert.ok(page.includes("f.points = shapes.smoothRing(handles, smooth.steps);"), "dragging a handle must re-curve the outline through its handles");
   assert.ok(page.includes("if (f.pin || isSmooth(f) || isDetailed(f) || f.kind === \"tree\") return out;"), "a smooth or detailed shape has no add-a-point dots");
   assert.ok(page.includes('into.points = detailed ? merged : shapes.smoothOutline(merged, "bunker");'), "a merged bunker is smooth too, unless a colour-wand bunker is in it");

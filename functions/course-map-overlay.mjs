@@ -16,7 +16,10 @@
  *                   earlier run or Collect Extra Objects left.
  *        lastRun  - the latest mapper job: its status, error and the counts it recorded, so a
  *                   drawer opened on a failed course says why it failed.
- *      All three are for display. None of it is copied into the overlay.
+ *        osm.convertible - what OSM has here (and the mapper's default fairways) as overlay
+ *                   shapes not yet in the overlay (osmToOverlayFeatures). Studio adds them to
+ *                   the overlay so they can be reshaped; nothing is copied until it saves.
+ *      The rest is for display.
  * POST {courseId, features:[...], playOrders?:[...]}  (admin) -> saves the overlay, normalised.
  *      playOrders are the hand-built courses (lib/gd-play-order-core.mjs); left out, the saved
  *      ones are kept. No shapes and no play orders deletes the row: "no overlay" is the absence
@@ -40,7 +43,7 @@
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { osmQueryScope, osmGuideQuery, osmGuidePointsFromElement } from "./lib/gd-automapper-core.mjs";
-import { overlaySummary } from "./lib/gd-map-overlay-core.mjs";
+import { overlaySummary, osmToOverlayFeatures } from "./lib/gd-map-overlay-core.mjs";
 import { aiShapesToOverlay } from "./lib/gd-overlay-georef-core.mjs";
 import { INBOX_SINCE, loadInbox, dismissInboxCourse } from "./lib/gd-overlay-inbox.mjs";
 import { hasSupabase, slug, verifiedAdminEmail, verifiedUserId, loadCourse, loadOverlay, saveOverlay, writeOverlayStatus, normalizeCourseMap, writeCourseMap, publicCourseMap, supabaseFetch, json } from "./lib/gd-map-overlay-store.mjs";
@@ -60,10 +63,11 @@ const OSM_DISPLAY_KINDS = {
   green: "greens", fairway: "fairways", tee: "tees", hole: "holes", bunker: "bunkers",
   water_hazard: "water", lateral_water_hazard: "water"
 };
-async function loadOsmContext(course) {
+async function loadOsmContext(course, overlayFeatures, savedObjects) {
   const scope = osmQueryScope({}, { lat: course.lat, lng: course.lng });
   const payload = await fetchOverpass(osmGuideQuery(scope));
   const out = { greens: [], fairways: [], tees: [], holes: [], bunkers: [], water: [], elements: 0 };
+  out.convertible = osmToOverlayFeatures(payload, overlayFeatures, savedObjects);
   ((payload && payload.elements) || []).forEach(element => {
     out.elements += 1;
     const golf = String((element && element.tags && element.tags.golf) || "").toLowerCase();
@@ -83,9 +87,11 @@ function cleanRing(shape) {
   return (Array.isArray(shape) ? shape : []).map(p => ({ lat: Number(p && p.lat), lng: Number(p && (p.lng != null ? p.lng : p.lon)) }))
     .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
 }
-async function loadCourseObjects(courseId) {
+async function loadSavedObjects(courseId) {
   const rows = await supabaseFetch("course_maps?select=objects_json&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
-  const objects = Object.values((Array.isArray(rows) && rows[0] && rows[0].objects_json) || {});
+  return Object.values((Array.isArray(rows) && rows[0] && rows[0].objects_json) || {});
+}
+function displayObjects(objects) {
   const out = [];
   objects.forEach(object => {
     const type = String(object && object.type || "");
@@ -142,9 +148,10 @@ export default async function courseMapOverlay(req) {
       summary: overlaySummary(overlay.features)
     };
     if (url.searchParams.get("osm") === "1") {
+      const saved = await loadSavedObjects(courseId).catch(() => []);
       if (course.lat == null || course.lng == null) body.osm = { error: "course has no centre" };
-      else body.osm = await loadOsmContext(course).catch(error => ({ error: String(error && error.message || error).slice(0, 200) }));
-      body.objects = await loadCourseObjects(courseId).catch(() => []);
+      else body.osm = await loadOsmContext(course, overlay.features, saved).catch(error => ({ error: String(error && error.message || error).slice(0, 200) }));
+      body.objects = displayObjects(saved);
       body.lastRun = await loadLastRun(courseId).catch(() => null);
     }
     return json(200, body);

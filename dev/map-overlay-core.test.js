@@ -359,9 +359,12 @@ test("trees and hazard: overlay shapes reach the surface pass as their own kinds
   assert.strictEqual(elements[1].tags.golf, "hazard");
   const surfaces = core.parseOsmSurfaces({ elements });
   assert.deepStrictEqual(surfaces.map(s => s.type).sort(), ["hazard", "trees"]);
-  /* A real OSM wood is never read: its course-shaped inner ring would be dropped. */
+  /* A real OSM wood is read too - unless it holds the course (a green inside it), which is a
+     wood drawn round the course with the course cut out. */
   const real = core.parseOsmSurfaces({ elements: [{ type: "way", id: 5, tags: { natural: "wood" }, geometry: elements[0].geometry }] });
-  assert.strictEqual(real.length, 0);
+  assert.deepStrictEqual(real.map(s => s.type), ["trees"]);
+  const green = { type: "way", id: 6, tags: { golf: "green" }, geometry: [at(18, 18), at(22, 18), at(22, 22), at(18, 22), at(18, 18)].map(p => ({ lat: p.lat, lon: p.lng })) };
+  assert.strictEqual(core.parseOsmSurfaces({ elements: [{ type: "way", id: 5, tags: { natural: "wood" }, geometry: elements[0].geometry }, green] }).length, 0);
 });
 
 test("single trees and waste areas are kept and tagged; waste is a surface, a single tree not yet", () => {
@@ -378,6 +381,64 @@ test("single trees and waste areas are kept and tagged; waste is a surface, a si
   const summary = overlay.overlaySummary(features);
   assert.strictEqual(summary.singleTrees, 1);
   assert.strictEqual(summary.waste, 1);
+});
+
+/* ---------- OSM -> overlay ---------- */
+
+const osmRing = (east, north, r) => [at(east - r, north - r), at(east + r, north - r), at(east + r, north + r), at(east - r, north + r), at(east - r, north - r)].map(p => ({ lat: p.lat, lon: p.lng }));
+
+test("OSM's shapes come over as editable overlay shapes, each naming the element it replaces", () => {
+  const payload = { elements: [
+    { type: "way", id: 1, tags: { golf: "hole", ref: "1" }, geometry: [at(0, 0), at(300, 0)].map(p => ({ lat: p.lat, lon: p.lng })) },
+    { type: "way", id: 2, tags: { golf: "green", ref: "1" }, geometry: osmRing(300, 0, 12) },
+    { type: "way", id: 3, tags: { golf: "tee", ref: "1" }, geometry: osmRing(0, 0, 4) },
+    { type: "relation", id: 4, tags: { golf: "fairway" }, members: [
+      { role: "outer", geometry: osmRing(170, 0, 60).slice(0, 3) }, { role: "outer", geometry: osmRing(170, 0, 60).slice(2) }] },
+    { type: "way", id: 5, tags: { golf: "bunker" }, geometry: osmRing(250, 20, 5) },
+    { type: "way", id: 6, tags: { natural: "wood" }, geometry: osmRing(150, 120, 40) },
+    { type: "way", id: 7, tags: { natural: "wood" }, geometry: osmRing(150, 0, 400) }
+  ] };
+  const features = overlay.osmToOverlayFeatures(payload, []);
+  const byOsm = {};
+  features.forEach(f => { byOsm[f.osm] = f; });
+  assert.deepStrictEqual(Object.keys(byOsm).sort(), ["relation/4", "way/2", "way/3", "way/5", "way/6"], "hole lines stay in OSM; the wood round the course is left out");
+  assert.strictEqual(byOsm["way/2"].kind, "green");
+  assert.strictEqual(byOsm["way/2"].hole, 1);
+  assert.strictEqual(byOsm["relation/4"].kind, "fairway");
+  assert.strictEqual(byOsm["relation/4"].points.length, 4, "the split relation is one outline");
+  assert.strictEqual(byOsm["way/6"].kind, "trees");
+  assert.ok(features.every(f => f.source === "osm"));
+  /* They survive the save. */
+  assert.deepStrictEqual(overlay.normalizeOverlayFeatures(features).map(f => f.osm).sort(), Object.keys(byOsm).sort());
+  /* Not offered twice: by id, or when someone has already drawn that green. */
+  assert.strictEqual(overlay.osmToOverlayFeatures(payload, features).length, 0);
+  const drawn = [{ id: "f-1", kind: "green", points: [at(285, -15), at(315, -15), at(315, 15), at(285, 15)] }];
+  assert.ok(!overlay.osmToOverlayFeatures(payload, drawn).some(f => f.osm === "way/2"));
+});
+
+test("a converted shape replaces its OSM element in the mapper's payload", () => {
+  const payload = { elements: [
+    { type: "way", id: 5, tags: { golf: "bunker" }, geometry: osmRing(250, 20, 5) },
+    { type: "way", id: 8, tags: { golf: "bunker" }, geometry: osmRing(100, 20, 5) }
+  ] };
+  const [bunker] = overlay.osmToOverlayFeatures(payload, []).filter(f => f.osm === "way/5");
+  bunker.points = bunker.points.map(p => ({ lat: p.lat + 0.00002, lng: p.lng }));
+  const merged = overlay.mergeOverlayIntoPayload(payload, [bunker]);
+  const bunkers = merged.elements.filter(e => e.tags.golf === "bunker");
+  assert.strictEqual(bunkers.length, 2, "the tweaked bunker stands in for the OSM one, not beside it");
+  assert.ok(!merged.elements.some(e => e.id === 5));
+  assert.ok(merged.elements.some(e => e.id === 8));
+});
+
+test("the mapper's default fairways come over numbered to their hole", () => {
+  const shape = [at(100, -15), at(200, -15), at(200, 15), at(100, 15)];
+  const saved = [
+    { type: "fairway_area", source: core.FAIRWAY_FILL_SOURCE, osmId: "fill/3", holeNumber: 3, shape },
+    { type: "fairway_area", source: core.FAIRWAY_FILL_SOURCE, osmId: "fill/3", holeNumber: 4, shape },
+    { type: "fairway_area", source: "osm_auto_surface", osmId: "way/9", holeNumber: 3, shape }
+  ];
+  const features = overlay.osmToOverlayFeatures({ elements: [] }, [], saved);
+  assert.deepStrictEqual(features.map(f => [f.kind, f.hole, f.source]), [["fairway", 3, "auto"]], "one per fill, from the hole it was laid for");
 });
 
 (async () => {
