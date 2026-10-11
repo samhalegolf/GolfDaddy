@@ -817,12 +817,64 @@ export function forwardTeeHoles(holes) {
  * - North Course" the next - and without this check that mints a second row for
  * the same North card instead of updating the first. Structural sameness
  * (sameCourseCard), not the title, decides whether it is the same row. */
-export function resolveFacilityCardKey(existingRows, card, facilityKey) {
-  const match = (existingRows || []).find(row => sameCourseCard(
+function sameCardRow(existingRows, card) {
+  return (existingRows || []).find(row => sameCourseCard(
     { name: row.course_name, holes: Array.isArray(row.holes_json) ? row.holes_json : [] },
     card
   ));
+}
+export function resolveFacilityCardKey(existingRows, card, facilityKey) {
+  const match = sameCardRow(existingRows, card);
   return match ? match.course_key : scorecardCourseKey(card.name || "");
+}
+
+/* A card's own label under its facility: "Old Course" from "Billingbear Park - Old
+   Course". The card stored under the facility's bare name is the facility's first
+   card, so it reads "Course 1" until someone names it. */
+export function facilityCardLabel(cardName, facilityName) {
+  const name = String(cardName || "").trim();
+  const facility = String(facilityName || "").trim();
+  if (!facility) return name || "Course 1";
+  if (scorecardCourseKey(name) === scorecardCourseKey(facility)) return "Course 1";
+  const prefix = facility.toLowerCase() + " - ";
+  return name.toLowerCase().startsWith(prefix) ? name.slice(prefix.length).trim() : name;
+}
+
+/* The stored name for a label: the facility in front, unless the label already says it. */
+export function facilityCardFullName(label, facilityName) {
+  const own = String(label || "").trim();
+  const facility = String(facilityName || "").trim();
+  if (!facility) return own;
+  if (!own) return facility;
+  return own.toLowerCase().includes(facility.toLowerCase()) ? own : facility + " - " + own;
+}
+
+/* The name an admin's NEW card is stored under, when another of their cards has it.
+ *
+ * The key is the name, so two different cards with one name are one row and the
+ * later one wins. Foyle lost its 18-hole card that way: an admin pasted the 18 and
+ * then the par-3 nine, neither card carried a title, both took the facility's name,
+ * and the nine replaced the eighteen - the mapper then saw only the nine. A card
+ * that is structurally the same as a stored one keeps its name (it updates that
+ * row); a different card whose name another manual card holds becomes the next
+ * free "Course N" under the facility, for the admin to rename on the card row.
+ *
+ * Only manual cards are kept apart. An admin's card still replaces a scrape of the
+ * same name (the scrape is what was wrong), and a scrape never gets a row beside an
+ * admin's card: a misread copy of the same course would count as a second course. */
+const isManualCard = row => /manual/i.test(String((row && row.source) || ""));
+export function facilityCardName(existingRows, card, ownName, facilityName) {
+  const own = String(ownName || "").trim();
+  if (!own || !isManualCard(card) || sameCardRow(existingRows, Object.assign({}, card, { name: own }))) return own;
+  const rows = existingRows || [];
+  if (!rows.filter(isManualCard).some(row => row.course_key === scorecardCourseKey(own))) return own;
+  const facility = String(facilityName || "").trim() || own;
+  const keys = new Set(rows.map(row => row.course_key));
+  const labels = new Set(rows.map(row => facilityCardLabel(row.course_name, facility).toLowerCase()));
+  for (let n = 1; ; n++) {
+    const name = facilityCardFullName("Course " + n, facility);
+    if (!keys.has(scorecardCourseKey(name)) && !labels.has("course " + n)) return name;
+  }
 }
 
 /* Engine card -> the shape scorecard-store's quality gate accepts: holes numbered
@@ -855,10 +907,11 @@ export function toStorePayload(card, courseName) {
    Returns null on a gappy card - same completeness contract as toStorePayload,
    since this is the row callers pass straight to the upsert. */
 export function facilityScorecardRow(card, courseName, facilityKey, existingRows) {
-  const payload = toStorePayload(card, card.name || courseName);
+  const named = Object.assign({}, card, { name: facilityCardName(existingRows, card, card.name || courseName, courseName) });
+  const payload = toStorePayload(named, named.name);
   if (!payload) return null;
   return {
-    course_key: resolveFacilityCardKey(existingRows, card, facilityKey),
+    course_key: resolveFacilityCardKey(existingRows, named, facilityKey),
     course_name: payload.courseName,
     facility_key: facilityKey || null,
     source: payload.source,
@@ -872,6 +925,17 @@ export function facilityScorecardRow(card, courseName, facilityKey, existingRows
     }],
     updated_at: new Date().toISOString()
   };
+}
+
+/* Every distinct card as rows, each one seeing the rows before it - so two new
+   cards in one batch cannot take the same name either. */
+export function facilityScorecardRows(cards, courseName, facilityKey, existingRows) {
+  const rows = [];
+  distinctCards(cards || []).forEach(card => {
+    const row = facilityScorecardRow(card, courseName, facilityKey, (existingRows || []).concat(rows));
+    if (row) rows.push(row);
+  });
+  return rows;
 }
 
 /* A high-confidence or manually confirmed cached identity is sticky. Refreshes

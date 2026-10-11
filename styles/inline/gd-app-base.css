@@ -492,6 +492,13 @@
     .gdAdminCourseScorecardDropRail button.primary{background:#1fd36d;border-color:#1fd36d;color:#07100a}
     .gdAdminCourseScorecardStatus{color:rgba(255,255,255,.62);font:850 10px/1.35 Inter,system-ui,sans-serif;white-space:normal}
     .gdAdminCourseScorecardStatus:empty{display:none}
+    .gdAdminCourseScorecardCards{display:grid;gap:6px}
+    .gdAdminCourseScorecardCard{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid rgba(255,255,255,.10);border-radius:10px;background:rgba(0,0,0,.22)}
+    .gdAdminCourseScorecardName{flex:1 1 160px;min-width:0;border:1px solid rgba(255,255,255,.14);border-radius:8px;background:rgba(0,0,0,.26);color:#fff;padding:6px 8px;font:900 12px/1.25 Inter,system-ui,sans-serif}
+    .gdAdminCourseScorecardMeta{color:rgba(255,255,255,.62);font:850 10px/1.35 Inter,system-ui,sans-serif}
+    .gdAdminCourseScorecardCard button{border-radius:999px;padding:6px 10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.09);color:#fff;font:950 11px/1.2 Inter,system-ui,sans-serif;cursor:pointer}
+    .gdAdminCourseScorecardEmpty,.gdAdminCourseScorecardHint{color:rgba(255,255,255,.56);font:850 10px/1.35 Inter,system-ui,sans-serif;white-space:normal}
+    .gdAdminCourseScorecardAdd{display:grid;gap:7px}
     .gdAdminCourseDiag{display:grid;gap:9px;padding:11px 13px 13px;border-top:1px solid rgba(255,255,255,.07)}
     .gdAdminCourseDiagWhy{border-radius:10px;padding:9px 11px;font:800 11.5px/1.45 Inter,system-ui,sans-serif;border:1px solid rgba(255,210,135,.22);background:rgba(255,210,135,.08);color:#ffd287}
     .gdAdminCourseDiagWhy.bad{border-color:rgba(255,125,125,.26);background:rgba(255,125,125,.09);color:#ff9d9d}

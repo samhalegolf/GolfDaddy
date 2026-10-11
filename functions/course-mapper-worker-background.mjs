@@ -34,7 +34,7 @@ import { partitionLoops, walkCost } from "./lib/gd-ground-loops-core.mjs";
 import { courseNameFromCard } from "./lib/gd-facility-organise-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
-import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRow, stitchedCardVerdict, shouldReplaceFacilityCard, forwardTeeHoles } from "./lib/gd-scorecard-resolve.mjs";
+import { resolveScorecard, distinctCardCount, distinctCards, facilityScorecardRows, stitchedCardVerdict, shouldReplaceFacilityCard, forwardTeeHoles } from "./lib/gd-scorecard-resolve.mjs";
 import { makeScorecardVisualReader } from "./lib/gd-scorecard-vision.mjs";
 import { reconcileFacilityClaims, atomicLoopCount, HOLES_PER_LOOP } from "./lib/gd-facility-loops-core.mjs";
 import { assessFacilityStructure, contestedClaims, describeClaimGround, isIndependentClaim, mappingMethodFor, organiseFacility, planNextRound, summariseMappingMethod, FACILITY_STRUCTURE, MAPPING_METHOD } from "./lib/gd-facility-structure-core.mjs";
@@ -723,11 +723,11 @@ async function resolveScorecardForCourse(course, origin, want) {
       writeStore: async (key, name, cards) => {
         /* Every distinct card, not just the best one - a two-course facility's
            second card used to be found and then thrown away here. Each keyed via
-           resolveFacilityCardKey (inside facilityScorecardRow) against whatever
+           resolveFacilityCardKey (inside facilityScorecardRows) against whatever
            is already stored for this facility, so a card re-resolved under a
            different title updates its existing row instead of duplicating it. */
         const existing = await fetchFacilityScorecardEvidence(facilityKey);
-        const rows = distinctCards(cards).map(card => facilityScorecardRow(card, name, facilityKey, existing)).filter(Boolean)
+        const rows = facilityScorecardRows(cards, name, facilityKey, existing)
           .filter(row => shouldReplaceFacilityCard(existing.find(old => old.course_key === row.course_key), row));
         if (!rows.length) return;
         await supabaseFetch(SCORECARDS_TABLE + "?on_conflict=course_key", {

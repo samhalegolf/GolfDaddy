@@ -9,7 +9,7 @@
  * Every function takes the caller's own supabaseFetch - each Netlify function owns
  * its request plumbing (see course-package.mjs), so none is created here. */
 
-import { distinctCards, distinctCardCount, facilityScorecardRow } from "./gd-scorecard-resolve.mjs";
+import { distinctCards, distinctCardCount, facilityScorecardRows } from "./gd-scorecard-resolve.mjs";
 import { matchLoopsToCards, courseLengthsFromPublishedGeometry } from "./gd-scorecard-match-core.mjs";
 import { renamePatch } from "./gd-course-rename-core.mjs";
 import { splitCourseName } from "./gd-automapper-core.mjs";
@@ -61,7 +61,7 @@ export function cardsFromRows(rows) {
    an admin's own card outranks whatever a scrape stored. Returns the rows written. */
 export async function storeFacilityCards(supabaseFetch, { cards, name, facilityKey, filter }) {
   const existing = await fetchFacilityRows(supabaseFetch, facilityKey);
-  const rows = distinctCards(cards || []).map(card => facilityScorecardRow(card, name, facilityKey, existing)).filter(Boolean)
+  const rows = facilityScorecardRows(cards, name, facilityKey, existing)
     .filter(row => !filter || filter(existing.find(old => old.course_key === row.course_key), row));
   if (!rows.length) return [];
   await supabaseFetch(SCORECARDS_TABLE + "?on_conflict=course_key", {

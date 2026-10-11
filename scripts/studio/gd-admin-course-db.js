@@ -4715,16 +4715,89 @@ function gdAdminCourseDbExpandedRow(item){
  * the render guard leaves the panel alone while someone is typing. */
 const gdAdminScorecardDrafts={};
 const gdAdminScorecardStatus={};
+/* The card row: the facility's stored cards, by course id, as /api/course-scorecards
+   returned them - undefined until asked, "loading" while asked. A name being typed
+   lives in gdAdminScorecardNameDrafts (courseId -> card key -> text) for the same
+   reason the paste draft does, and "+ Add scorecard" being open in gdAdminScorecardAddOpen. */
+const gdAdminScorecardCards={};
+const gdAdminScorecardNameDrafts={};
+const gdAdminScorecardAddOpen={};
+function gdAdminCourseScorecardCardsMarkup(courseId){
+  const cards=gdAdminScorecardCards[courseId];
+  if(cards===undefined||cards==="loading")return `<div class="gdAdminCourseScorecardEmpty">Loading cards…</div>`;
+  if(cards==="failed")return `<div class="gdAdminCourseScorecardEmpty">Could not load this course's cards.</div>`;
+  if(!cards.length)return `<div class="gdAdminCourseScorecardEmpty">No scorecard yet - the resolver has nothing to name or number these holes from.</div>`;
+  const id=gdEscapeHTML(courseId);
+  const sourceLabel=source=>/manual/i.test(source)?"added by hand":source?"found online ("+source+")":"stored";
+  return cards.map(card=>{
+    const key=gdEscapeHTML(card.key);
+    return `<div class="gdAdminCourseScorecardCard">`
+      +`<input type="text" class="gdAdminCourseScorecardName" data-course-id="${id}" data-card-key="${key}" value="${gdEscapeHTML(card.label)}" spellcheck="false" aria-label="Card name">`
+      +`<span class="gdAdminCourseScorecardMeta">${gdEscapeHTML(card.holes)} holes · par ${gdEscapeHTML(card.par)} · ${gdEscapeHTML(sourceLabel(card.source))}</span>`
+      +`<button type="button" data-gd-scorecard-rename="${id}" data-card-key="${key}">Save name</button>`
+      +`</div>`;
+  }).join("");
+}
 function gdAdminCourseScorecardDropMarkup(item){
   const id=gdEscapeHTML(item.id);
+  if(gdAdminScorecardCards[item.id]===undefined)gdAdminCourseScorecardLoadCards(item.id);
+  const open=!!gdAdminScorecardAddOpen[item.id];
   return `<div class="gdAdminCourseScorecardDrop" data-course-id="${id}" onclick="event.stopPropagation()">`
-    +`<div class="gdAdminCourseScorecardDropHead"><strong>Scorecard</strong><span>Drop a file anywhere on this course's row, or paste the card here. Image (read by OCR), HTML, CSV, tab-separated text or JSON. Holes can run across or down the page, and labels are optional: the 1, 2, 3… line is the holes, the line of 3s, 4s and 5s is par, and lines of 100+ are tee distances.</span></div>`
-    +`<textarea class="gdAdminCourseScorecardPaste" data-course-id="${id}" spellcheck="false" placeholder="Hole&#9;1&#9;2&#9;3 …&#10;Par&#9;4&#9;3&#9;4 …&#10;SI&#9;11&#9;15&#9;9 …&#10;Yards&#9;300&#9;119&#9;333 …"></textarea>`
-    +`<div class="gdAdminCourseScorecardDropRail">`
-    +`<label class="gdAdminCourseScorecardFile">Choose file…<input type="file" accept=".csv,.tsv,.txt,.html,.htm,.json,image/*,text/*" data-course-id="${id}" hidden></label>`
-    +`<button type="button" class="primary" data-gd-scorecard-import="${id}">Import pasted card</button>`
-    +`<span class="gdAdminCourseScorecardStatus" data-course-id="${id}"></span>`
-    +`</div></div>`;
+    +`<div class="gdAdminCourseScorecardDropHead"><strong>Scorecards</strong><span>The cards the resolver uses for this course and the others under it. A card's name is the course's name - rename it here to rename the course.</span></div>`
+    +`<div class="gdAdminCourseScorecardCards">${gdAdminCourseScorecardCardsMarkup(item.id)}</div>`
+    +`<div class="gdAdminCourseScorecardDropRail"><button type="button" data-gd-scorecard-add="${id}">${open?"Close":"+ Add scorecard"}</button><span class="gdAdminCourseScorecardStatus" data-course-id="${id}"></span></div>`
+    +(open?`<div class="gdAdminCourseScorecardAdd">`
+      +`<span class="gdAdminCourseScorecardHint">Drop a file anywhere on this course's row, or paste the card here. Image (read by OCR), HTML, CSV, tab-separated text or JSON. Holes can run across or down the page, and labels are optional: the 1, 2, 3… line is the holes, the line of 3s, 4s and 5s is par, and lines of 100+ are tee distances. A card with no name is added as the next Course 1, 2, 3…</span>`
+      +`<textarea class="gdAdminCourseScorecardPaste" data-course-id="${id}" spellcheck="false" placeholder="Hole&#9;1&#9;2&#9;3 …&#10;Par&#9;4&#9;3&#9;4 …&#10;SI&#9;11&#9;15&#9;9 …&#10;Yards&#9;300&#9;119&#9;333 …"></textarea>`
+      +`<div class="gdAdminCourseScorecardDropRail">`
+      +`<label class="gdAdminCourseScorecardFile">Choose file…<input type="file" accept=".csv,.tsv,.txt,.html,.htm,.json,image/*,text/*" data-course-id="${id}" hidden></label>`
+      +`<button type="button" class="primary" data-gd-scorecard-import="${id}">Import pasted card</button>`
+      +`</div></div>`:"")
+    +`</div>`;
+}
+async function gdAdminCourseScorecardLoadCards(courseId){
+  if(gdAdminScorecardCards[courseId]==="loading")return;
+  gdAdminScorecardCards[courseId]="loading";
+  try{
+    const token=await gdAdminCourseDbAccessToken();
+    const res=await fetch("/api/course-scorecards?courseId="+encodeURIComponent(courseId),{headers:{Accept:"application/json",Authorization:"Bearer "+(token||"")}});
+    const data=await res.json().catch(()=>null);
+    gdAdminScorecardCards[courseId]=res.ok&&data&&Array.isArray(data.cards)?data.cards:"failed";
+  }catch(error){
+    gdAdminScorecardCards[courseId]="failed";
+  }
+  gdRenderAdminCourseDatabase();
+}
+/* Every course row under the facility shows the same cards, so a change reloads them all. */
+function gdAdminCourseScorecardForgetCards(){
+  Object.keys(gdAdminScorecardCards).forEach(id=>{if(gdAdminScorecardCards[id]!=="loading")delete gdAdminScorecardCards[id];});
+}
+async function gdAdminCourseScorecardRename(courseId,key){
+  const label=String((gdAdminScorecardNameDrafts[courseId]||{})[key]??"").replace(/\s+/g," ").trim();
+  const card=(Array.isArray(gdAdminScorecardCards[courseId])?gdAdminScorecardCards[courseId]:[]).find(item=>item.key===key);
+  if(!card||!label||label===card.label){gdAdminCourseScorecardSetStatus(courseId,label?"Name unchanged":"Give the card a name");return false;}
+  try{
+    const token=await gdAdminCourseDbAccessToken();
+    if(!token){gdAdminCourseVisualToast("Sign in again to rename a card");return false;}
+    gdAdminCourseScorecardSetStatus(courseId,"Renaming…");
+    const res=await fetch("/api/course-scorecards",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+      body:JSON.stringify({courseId:courseId,key:key,label:label})
+    });
+    const data=await res.json().catch(()=>null);
+    if(!res.ok){gdAdminCourseScorecardFail(courseId,(data&&data.error)||"Rename failed ("+res.status+")");return false;}
+    delete (gdAdminScorecardNameDrafts[courseId]||{})[key];
+    gdAdminCourseScorecardSetStatus(courseId,(data&&data.message)||"Renamed");
+    gdAdminCourseVisualToast((data&&data.message)||"Card renamed");
+    gdAdminCourseScorecardForgetCards();
+    if(data&&Array.isArray(data.renamed)&&data.renamed.length)await gdLoadAdminCourseDbCloud({force:true});
+    gdRenderAdminCourseDatabase();
+    return true;
+  }catch(error){
+    gdAdminCourseScorecardFail(courseId,"Rename failed to send");
+    return false;
+  }
 }
 /* Called after every list render: the draft and status back into fresh DOM. */
 function gdAdminCourseScorecardRestore(root){
@@ -4732,6 +4805,10 @@ function gdAdminCourseScorecardRestore(root){
   root.querySelectorAll(".gdAdminCourseScorecardPaste[data-course-id]").forEach(area=>{
     const draft=gdAdminScorecardDrafts[area.dataset.courseId]||"";
     if(area.value!==draft)area.value=draft;
+  });
+  root.querySelectorAll(".gdAdminCourseScorecardName[data-course-id]").forEach(input=>{
+    const draft=(gdAdminScorecardNameDrafts[input.dataset.courseId]||{})[input.dataset.cardKey];
+    if(draft!=null&&input.value!==draft)input.value=draft;
   });
   root.querySelectorAll(".gdAdminCourseScorecardStatus[data-course-id]").forEach(span=>{
     span.textContent=gdAdminScorecardStatus[span.dataset.courseId]||"";
@@ -4783,6 +4860,22 @@ function gdAdminCourseScorecardChange(event){
   gdAdminCourseScorecardReceive(input.dataset.courseId,files,"");
 }
 function gdAdminCourseScorecardClick(event){
+  const add=event.target&&event.target.closest?event.target.closest("button[data-gd-scorecard-add]"):null;
+  if(add){
+    event.preventDefault();
+    event.stopPropagation();
+    const courseId=add.dataset.gdScorecardAdd;
+    gdAdminScorecardAddOpen[courseId]=!gdAdminScorecardAddOpen[courseId];
+    gdRenderAdminCourseDatabase();
+    return;
+  }
+  const rename=event.target&&event.target.closest?event.target.closest("button[data-gd-scorecard-rename]"):null;
+  if(rename){
+    event.preventDefault();
+    event.stopPropagation();
+    gdAdminCourseScorecardRename(rename.dataset.gdScorecardRename,rename.dataset.cardKey);
+    return;
+  }
   const button=event.target&&event.target.closest?event.target.closest("button[data-gd-scorecard-import]"):null;
   if(!button)return;
   event.preventDefault();
@@ -4791,6 +4884,11 @@ function gdAdminCourseScorecardClick(event){
   gdAdminCourseScorecardReceive(courseId,[],gdAdminScorecardDrafts[courseId]||"");
 }
 function gdAdminCourseScorecardInput(event){
+  const name=event.target;
+  if(name&&name.classList&&name.classList.contains("gdAdminCourseScorecardName")){
+    (gdAdminScorecardNameDrafts[name.dataset.courseId]=gdAdminScorecardNameDrafts[name.dataset.courseId]||{})[name.dataset.cardKey]=name.value;
+    return;
+  }
   const area=event.target;
   if(!area||!area.classList||!area.classList.contains("gdAdminCourseScorecardPaste"))return;
   gdAdminScorecardDrafts[area.dataset.courseId]=area.value;
@@ -4803,6 +4901,12 @@ if(!window.__gdAdminCourseScorecardDropBound){
   document.addEventListener("change",gdAdminCourseScorecardChange,true);
   document.addEventListener("click",gdAdminCourseScorecardClick,true);
   document.addEventListener("input",gdAdminCourseScorecardInput,true);
+  document.addEventListener("keydown",event=>{
+    const name=event.target;
+    if(event.key!=="Enter"||!name||!name.classList||!name.classList.contains("gdAdminCourseScorecardName"))return;
+    event.preventDefault();
+    gdAdminCourseScorecardRename(name.dataset.courseId,name.dataset.cardKey);
+  },true);
 }
 
 /* Files and pasted text -> text files for the server. Pictures go through the OCR
@@ -4845,27 +4949,36 @@ async function gdAdminCourseScorecardSend(courseId,files){
       body:JSON.stringify({courseId:courseId,files:files})
     });
     const data=await res.json().catch(()=>null);
-    if(res.status===403){gdAdminCourseScorecardSetStatus(courseId,"Admin only");return false;}
-    if(res.status===404){gdAdminCourseScorecardSetStatus(courseId,(data&&data.error)||"No published course found");return false;}
+    if(res.status===403){gdAdminCourseScorecardFail(courseId,"Admin only");return false;}
+    if(res.status===404){gdAdminCourseScorecardFail(courseId,(data&&data.error)||"No published course found");return false;}
     if(res.status===422){
       const why=(data&&data.rejected||[]).map(r=>(r.name||"pasted text")+": "+gdAdminCourseScorecardReason(r.reason)).join("; ");
-      gdAdminCourseScorecardSetStatus(courseId,"No card found. "+why);
+      gdAdminCourseScorecardFail(courseId,"No card found. "+why);
       return false;
     }
-    if(!res.ok){gdAdminCourseScorecardSetStatus(courseId,"Import failed ("+res.status+")");return false;}
+    if(!res.ok){gdAdminCourseScorecardFail(courseId,"Import failed ("+res.status+")");return false;}
     gdAdminCourseScorecardSetStatus(courseId,(data&&data.message)||"Imported");
     gdAdminCourseVisualToast((data&&data.message)||"Scorecard imported");
-    /* The card is stored; the paste box has done its job. */
+    /* The card is stored; the paste box has done its job, and the card row shows it. */
     gdAdminCourseScorecardSetDraft(courseId,"");
+    gdAdminScorecardAddOpen[courseId]=false;
+    gdAdminCourseScorecardForgetCards();
+    gdRenderAdminCourseDatabase();
     if(data&&Array.isArray(data.renamed)&&data.renamed.length){
       await gdLoadAdminCourseDbCloud({force:true});
       gdRenderAdminCourseDatabase();
     }
     return true;
   }catch(error){
-    gdAdminCourseScorecardSetStatus(courseId,"Import failed to send");
+    gdAdminCourseScorecardFail(courseId,"Import failed to send");
     return false;
   }
+}
+/* A failure is toasted as well: a card dropped on a closed row has no status line on
+   screen, and the admin would otherwise hear nothing at all. */
+function gdAdminCourseScorecardFail(courseId,text){
+  gdAdminCourseScorecardSetStatus(courseId,text);
+  gdAdminCourseVisualToast("Scorecard: "+text);
 }
 function gdAdminCourseScorecardReason(code){
   return code==="no-card-found"?"no hole/par table in it"
@@ -4949,15 +5062,15 @@ async function gdAdminCourseScorecardOcr(courseId,file){
       }
     });
     if(!result||!result.ok){
-      gdAdminCourseScorecardSetStatus(courseId,"OCR could not read "+file.name+(result&&result.error?" - "+result.error:""));
+      gdAdminCourseScorecardFail(courseId,"OCR could not read "+file.name+(result&&result.error?" - "+result.error:""));
       return null;
     }
     const text=gdAdminCourseScorecardGridsToText(result.grids);
-    if(!text.trim()){gdAdminCourseScorecardSetStatus(courseId,"OCR found no table in "+file.name);return null;}
+    if(!text.trim()){gdAdminCourseScorecardFail(courseId,"OCR found no table in "+file.name);return null;}
     gdAdminCourseScorecardSetStatus(courseId,"OCR read "+file.name+" - check the text, then import");
     return {text:text,unit:result.unit||""};
   }catch(error){
-    gdAdminCourseScorecardSetStatus(courseId,"OCR failed: "+((error&&error.message)||error));
+    gdAdminCourseScorecardFail(courseId,"OCR failed: "+((error&&error.message)||error));
     return null;
   }finally{
     if(worker&&typeof worker.terminate==="function")Promise.resolve(worker.terminate()).catch(()=>{});
