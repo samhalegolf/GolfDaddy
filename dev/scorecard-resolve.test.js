@@ -362,14 +362,17 @@ function scorecardHtml(rows) {
   const first = r.facilityScorecardRows([eighteen], "Foyle Golf Club", "foyle", []);
   const second = r.facilityScorecardRows([parThree], "Foyle Golf Club", "foyle", first);
   assert.strictEqual(first[0].course_key, "foyle golf club");
-  assert.strictEqual(second[0].course_key, "foyle golf club (9 holes)", "a different card with a taken name gets its own row");
-  assert.strictEqual(second[0].course_name, "Foyle Golf Club (9 holes)");
+  assert.strictEqual(second[0].course_key, "foyle golf club - course 2", "a different card with a taken name gets its own row");
+  assert.strictEqual(second[0].course_name, "Foyle Golf Club - Course 2");
   const together = r.facilityScorecardRows([eighteen, parThree], "Foyle Golf Club", "foyle", []);
-  assert.deepStrictEqual(together.map(row => row.course_key), ["foyle golf club", "foyle golf club (9 holes)"], "two new cards in one upload stay two rows");
+  assert.deepStrictEqual(together.map(row => row.course_key), ["foyle golf club", "foyle golf club - course 2"], "two new cards in one upload stay two rows");
   const again = r.facilityScorecardRows([eighteen], "Foyle Golf Club", "foyle", first.concat(second));
   assert.strictEqual(again[0].course_key, "foyle golf club", "re-uploading the same card updates its row, it does not mint another");
   const anotherNine = { name: "Foyle Golf Club", source: "manual-upload", holes: Array.from({ length: 9 }, (_, i) => ({ hole: i + 1, par: i === 4 ? 4 : 3 })) };
-  assert.strictEqual(r.facilityScorecardRows([anotherNine], "Foyle Golf Club", "foyle", first.concat(second))[0].course_key, "foyle golf club (9 holes, 2)");
+  assert.strictEqual(r.facilityScorecardRows([anotherNine], "Foyle Golf Club", "foyle", first.concat(second))[0].course_key, "foyle golf club - course 3");
+  assert.strictEqual(r.facilityCardLabel("Foyle Golf Club", "Foyle Golf Club"), "Course 1", "the card under the bare facility name is its first course");
+  assert.strictEqual(r.facilityCardLabel("Foyle Golf Club - Par 3", "Foyle Golf Club"), "Par 3");
+  assert.strictEqual(r.facilityCardFullName("Par 3", "Foyle Golf Club"), "Foyle Golf Club - Par 3");
 
   const scrapedNine = Object.assign({}, parThree, { source: "club-site" });
   assert.strictEqual(r.facilityScorecardRows([scrapedNine], "Foyle Golf Club", "foyle", first)[0].course_key, "foyle golf club",
