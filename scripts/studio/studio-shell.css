@@ -663,6 +663,16 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
 .gdStudioOverlayHoleTag.isOrder span { color: #06120b; background: #3cff8d; }
 .gdStudioOverlayHoleTag.isOrder.isClash span { color: #fff; background: #c43c3c; border-color: #ff5a5a; }
 
+/* The facility's courses: one overlay, a chip per course drawing on it. */
+#gdStudioShellRoot .gdStudioOverlayCourses { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; background: var(--gdOverlayScrim); }
+#gdStudioShellRoot .gdStudioOverlayCourses[hidden] { display: none; }
+#gdStudioShellRoot .gdStudioOverlayCoursesLabel { color: #c8d3cc; font-size: 11px; font-weight: 800; margin-right: 4px; }
+#gdStudioShellRoot .gdStudioOverlayCourseChip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 5px 10px; border: 1px solid rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.08); color: #fff; font-size: 12px; font-weight: 800; cursor: pointer; }
+#gdStudioShellRoot .gdStudioOverlayCourseChip em { font-style: normal; font-size: 10px; color: #c8d3cc; }
+#gdStudioShellRoot .gdStudioOverlayCourseChip.isEmpty { border-style: dashed; }
+#gdStudioShellRoot .gdStudioOverlayCourseChip.isActive { background: #3cff8d; border-color: #3cff8d; color: #06120b; }
+#gdStudioShellRoot .gdStudioOverlayCourseChip.isActive em { color: #06120b; }
+
 /* Play orders: the panel the Play order tool opens, under the view buttons. */
 #gdStudioShellRoot .gdStudioOverlayOrders {
   position: absolute;

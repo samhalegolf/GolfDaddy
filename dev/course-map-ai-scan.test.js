@@ -100,7 +100,7 @@ test("the course map is stored per course and sent to the model as image 2, neve
   const overlay = read("functions/course-map-overlay.mjs");
   assert.ok(store.includes("export function normalizeCourseMap") && store.includes("export async function writeCourseMap"), "the store owns the course map");
   assert.ok(store.includes("ai_scan,course_map&course_id=eq."), "loadOverlay must read the course map with the rest of the row");
-  assert.ok(overlay.includes('Object.prototype.hasOwnProperty.call(payload, "courseMap")') && overlay.includes("writeCourseMap(courseId, courseMap)"), "a course map save is its own request on the overlay API");
+  assert.ok(overlay.includes('Object.prototype.hasOwnProperty.call(payload, "courseMap")') && overlay.includes("writeCourseMap(ownerId, courseMap)"), "a course map save is its own request on the overlay API");
   assert.ok(overlay.includes("courseMap: publicCourseMap(overlay.courseMap)"), "GET exposes that a map exists without handing the picture back");
   assert.ok(background.includes('{ type: "text", text: "Image 2 (course map, schematic):" }'), "the map goes to the model labelled as image 2");
   assert.ok(background.includes("courseMap: !!courseMap"), "the prompt is told whether image 2 exists, never handed the picture");

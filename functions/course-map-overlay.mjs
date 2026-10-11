@@ -37,6 +37,10 @@
  *      picture at a time; the default replaces, like a hand-drawn save. The response carries
  *      what was dropped and why, so a bad answer is visible rather than silently thinner.
  *
+ * A facility shares one overlay (lib/gd-overlay-owner.mjs): whichever of its courses is asked
+ * for, the row read and written is the pinned course's, and GET says so - overlayOwner, and
+ * facility.courses, the courses that draw on it, for Studio's course switcher.
+ *
  * The overlay is read by functions/course-mapper-worker-background.mjs and merged into the
  * Overpass payload (functions/lib/gd-map-overlay-core.mjs). Saving here changes nothing on
  * the course until a mapper run is requested through /api/course-mapper-jobs. */
@@ -47,6 +51,7 @@ import { overlaySummary, osmToOverlayFeatures } from "./lib/gd-map-overlay-core.
 import { aiShapesToOverlay } from "./lib/gd-overlay-georef-core.mjs";
 import { INBOX_SINCE, loadInbox, dismissInboxCourse } from "./lib/gd-overlay-inbox.mjs";
 import { hasSupabase, slug, verifiedAdminEmail, verifiedUserId, loadCourse, loadOverlay, saveOverlay, writeOverlayStatus, normalizeCourseMap, writeCourseMap, publicCourseMap, supabaseFetch, json } from "./lib/gd-map-overlay-store.mjs";
+import { overlayOwnerId, overlayCourses } from "./lib/gd-overlay-owner.mjs";
 
 /* The AI scan's state, for a poller: everything on it but the picture, which is a megabyte
    of base64 no caller needs back. */
@@ -139,20 +144,25 @@ export default async function courseMapOverlay(req) {
     if (!courseId) return json(400, { error: "courseId required" });
     const course = await loadCourse(courseId);
     if (!course) return json(404, { error: "no course_maps row for " + courseId });
-    const overlay = await loadOverlay(courseId);
+    const ownerId = await overlayOwnerId(supabaseFetch, courseId);
+    const overlay = await loadOverlay(ownerId);
+    const courses = await overlayCourses(supabaseFetch, ownerId);
     const body = {
-      courseId, course,
+      courseId, course, overlayOwner: ownerId,
+      facility: { ownerId, courses },
       overlay: { features: overlay.features, playOrders: overlay.playOrders, status: overlay.status, updatedAt: overlay.updatedAt, updatedBy: overlay.updatedBy },
       aiScan: publicAiScan(overlay.aiScan),
       courseMap: publicCourseMap(overlay.courseMap),
       summary: overlaySummary(overlay.features)
     };
     if (url.searchParams.get("osm") === "1") {
-      const saved = await loadSavedObjects(courseId).catch(() => []);
+      /* Every course on the shared overlay, so what is already mapped on the whole ground shows. */
+      const saved = (await Promise.all((courses.length ? courses.map(c => c.courseId) : [courseId])
+        .map(id => loadSavedObjects(id).catch(() => [])))).flat();
       if (course.lat == null || course.lng == null) body.osm = { error: "course has no centre" };
       else body.osm = await loadOsmContext(course, overlay.features, saved).catch(error => ({ error: String(error && error.message || error).slice(0, 200) }));
       body.objects = displayObjects(saved);
-      body.lastRun = await loadLastRun(courseId).catch(() => null);
+      body.lastRun = await loadLastRun(ownerId).catch(() => null);
     }
     return json(200, body);
   }
@@ -165,10 +175,12 @@ export default async function courseMapOverlay(req) {
   const course = await loadCourse(courseId);
   if (!course) return json(404, { error: "no course_maps row for " + courseId, detail: "An overlay belongs to a course the picker already knows. Add the course first." });
   if (payload && payload.inboxDismiss === true) return json(200, await dismissInboxCourse(supabaseFetch, courseId, admin));
+  /* Everything below writes the shared row. */
+  const ownerId = await overlayOwnerId(supabaseFetch, courseId);
   /* Draft or ready is its own request too, and never touches the shapes. */
   if (payload && Object.prototype.hasOwnProperty.call(payload, "status") && !Array.isArray(payload.features)) {
     if (payload.status !== "draft" && payload.status !== "ready") return json(400, { error: "status must be draft or ready" });
-    const marked = await writeOverlayStatus(courseId, payload.status);
+    const marked = await writeOverlayStatus(ownerId, payload.status);
     if (marked.error) return json(400, marked);
     return json(200, marked);
   }
@@ -177,7 +189,7 @@ export default async function courseMapOverlay(req) {
   if (payload && Object.prototype.hasOwnProperty.call(payload, "courseMap")) {
     const courseMap = normalizeCourseMap(payload.courseMap);
     if (payload.courseMap && !courseMap) return json(400, { error: "bad course map", detail: "image/jpeg, image/png or image/webp, base64, under ~1MB" });
-    await writeCourseMap(courseId, courseMap);
+    await writeCourseMap(ownerId, courseMap);
     return json(200, { courseId, courseMap: publicCourseMap(courseMap) });
   }
   let raw = payload && Array.isArray(payload.features) ? payload.features : [];
@@ -189,7 +201,7 @@ export default async function courseMapOverlay(req) {
   }
   /* Play orders ride on a hand save; an AI save leaves them as they are. */
   const playOrders = !converted && Array.isArray(payload.playOrders) ? payload.playOrders : undefined;
-  const saved = await saveOverlay({ courseId, features: raw, playOrders, savedBy: admin, append: !!(converted && payload.append) });
+  const saved = await saveOverlay({ courseId: ownerId, features: raw, playOrders, savedBy: admin, append: !!(converted && payload.append) });
   if (saved.error) return json(400, saved);
   return json(200, Object.assign(saved, {
     dropped: saved.dropped + (converted ? converted.dropped.length : 0),
