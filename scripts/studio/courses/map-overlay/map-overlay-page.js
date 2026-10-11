@@ -1349,7 +1349,7 @@
       f.points = shapes.smoothOutline(adjust.candidates[next], f.kind);
       f.source = "wand";
       /* The new edge is what bigger / smaller now grow from, by the presses already made. */
-      if (adjust.reshape) { adjust.reshape.base = f.points.slice(); if (adjust.reshape.steps) applyReshape(f, adjust.reshape.steps); }
+      if (adjust.reshape) { adjust.reshape.base = f.points.slice(); if (adjust.reshape.steps) applyReshape(f, adjust.reshape, adjust.reshape.steps); }
       drawFeatures();
       changed();
       updateHint();
@@ -1373,7 +1373,7 @@
         setStatus("Fairway " + width + "m wide - the next one starts at this width too.");
         return;
       }
-      if (RESHAPE[f.kind]) { reshapeStep(f, by); return; }
+      if (RESHAPE[f.kind]) { reshapeStep(f, by, adjust.reshape || (adjust.reshape = { base: f.points.slice(), steps: 0 })); return; }
       if (adjust.seed) { rerunWand(f, by); return; }
       if (adjust.grow) { regrow(f, by); return; }
       if (!adjust.base) adjust.base = f.points.slice();
@@ -1394,25 +1394,24 @@
 
     /* Up or down on a green or a fairway: the shape as it is, grown or shrunk evenly - never the
        wand run again, which drifts a green rounder. Counted from the outline it had when the
-       first press came, so up then down is exactly where it started. */
+       first press came, so up then down is exactly where it started. r is {base, steps}: the
+       live shape's (adjust.reshape), or a selected saved one's (selReshape). */
     function reshapeGrowM(kind, steps) {
       var spec = RESHAPE[kind];
       return spec.closeM && steps > 0 ? (steps - 1) * spec.stepM : steps * spec.stepM;
     }
-    function applyReshape(f, steps) {
-      var spec = RESHAPE[f.kind], r = adjust.reshape;
+    function applyReshape(f, r, steps) {
+      var spec = RESHAPE[f.kind];
       if (!steps) { f.points = r.base.slice(); return true; }
       var ring = shapes.reshapeOutline([r.base], { growM: reshapeGrowM(f.kind, steps), closeM: spec.closeM });
       if (!ring) return false;
       f.points = shapes.smoothOutline(ring, f.kind);
       return true;
     }
-    function reshapeStep(f, by) {
+    function reshapeStep(f, by, r) {
       var spec = RESHAPE[f.kind];
-      if (!adjust.reshape) adjust.reshape = { base: f.points.slice(), steps: 0 };
-      var r = adjust.reshape;
       var steps = Math.max(-spec.max, Math.min(spec.max, r.steps + by));
-      if (steps === r.steps || !applyReshape(f, steps)) {
+      if (steps === r.steps || !applyReshape(f, r, steps)) {
         setStatus(by < 0 ? "That is as small as it goes - drag its edge for more." : "That is as big as it goes - drag its edge for more.");
         return;
       }
@@ -1423,6 +1422,19 @@
       updateHint();
       setStatus(kindLabel(f.kind) + " " + reshapeWords(f.kind, steps) + ".");
     }
+    /* The same on a saved green or fairway, selected in Move: ↑ ↓ size it instead of panning.
+       Its starting outline is kept while the presses run; once anything else changes the shape
+       - a drag, an undo, a save swapping in the server's copy - the next press starts afresh. */
+    var selReshape = null;
+    function stepSelectedSize(by) {
+      var f = selectedId && tool === "move" && canEdit() ? findFeature(selectedId) : null;
+      if (!f || f.pin || !RESHAPE[f.kind] || f.points.length < 3) return false;
+      if (!selReshape || selReshape.id !== f.id || selReshape.last !== f.points) selReshape = { id: f.id, base: f.points.slice(), steps: 0, last: null };
+      reshapeStep(f, by, selReshape);
+      selReshape.last = f.points;
+      return true;
+    }
+
     function reshapeWords(kind, steps) {
       if (!steps) return "back to the edge the wand found";
       var grow = reshapeGrowM(kind, steps);
@@ -1479,7 +1491,7 @@
        trees the finder just dropped, or the colour wand's pick - ahead of the map's own
        arrow-key panning, hence the capture phase. */
     function onAdjustKey(event) {
-      if (!(adjust || finder || colourSel) || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (!(adjust || finder || colourSel || selectedId) || event.metaKey || event.ctrlKey || event.altKey) return;
       var target = event.target;
       if (target && /^(input|textarea|select)$/i.test(target.tagName)) return;
       if (!containerEl.isConnected || !canEdit() || drag) return;
@@ -1496,7 +1508,13 @@
         event.stopPropagation();
         return;
       }
-      if (!adjusted()) return;
+      if (!adjusted()) {
+        if ((key === "ArrowUp" || key === "ArrowDown") && stepSelectedSize(key === "ArrowUp" ? 1 : -1)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
       if (key === "ArrowLeft") stepSensitivity(-1);
       else if (key === "ArrowRight") stepSensitivity(1);
       else if (key === "ArrowUp") stepSize(1);
@@ -3390,6 +3408,8 @@
       else if (selectedId && isDetailed(findFeature(selectedId))) text = "Drag to move · grab the edge anywhere to bend it · drag a point to pull that stretch · zoom in for finer control · Delete or the bin removes it";
       else if (selectedId) text = "Drag to move · drag corners to reshape · faint dots add a corner · right-click a corner or drag it to the bin to remove it · Delete or the bin removes the shape";
       else text = "Choose Fairway, Green, Tee or Bunker to place · click a shape in Move to adjust it · Link puts shapes on one hole";
+      var held = selectedId && tool === "move" && canEdit() ? findFeature(selectedId) : null;
+      if (held && !held.pin && RESHAPE[held.kind] && !adjusted()) text = "↑ ↓ " + (held.kind === "fairway" ? "smooth the edge, then " : "") + "smaller / bigger · " + text;
       if (adjusted()) text = adjustHint();
       if (finder) text = "← → fewer / more trees · Enter keeps them · Esc takes them away";
       if (wandsRunning) text = "Working… · " + text;
