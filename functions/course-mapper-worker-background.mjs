@@ -2175,6 +2175,7 @@ async function runObjectCollectionJob(job) {
     surfacesFound: enrichment.surfaces,
     surfacesWritten: enrichment.cloned,
     defaultFairways: enrichment.filled,
+    surfacesLeftOut: enrichment.left,
     added,
     totals: after,
     objectCollection: metadataSaved ? collection : null,

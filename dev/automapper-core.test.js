@@ -397,6 +397,19 @@ test("a hole with no fairway gets a default one that narrows past a bunker and b
   assert.ok(Math.min(...ys) > 100 && Math.max(...ys) < 375);
 });
 
+test("surfaces left out are reported with the check that stopped them", () => {
+  const huge = { type: "way", id: 40, tags: { golf: "fairway" }, geometry: fwEllipse(0, 200, 30, 600) };
+  const line = { type: "way", id: 41, tags: { golf: "fairway" }, geometry: [fwAt(0, 100), fwAt(0, 300)] };
+  const tiny = { type: "way", id: 42, tags: { golf: "fairway" }, geometry: fwEllipse(0, 200, 5, 5) };
+  const result = fwResolve([huge, line, tiny]);
+  const left = result.surfaces.left;
+  assert.strictEqual(left.counts["fairway_area:too-big"], 1);
+  assert.strictEqual(left.counts["fairway_area:no-outline"], 1);
+  assert.strictEqual(left.counts["fairway_area:too-small"], 1);
+  assert.strictEqual(left.examples["fairway_area:too-big"][0].osmId, "way/40");
+  assert.ok(left.examples["fairway_area:too-big"][0].span > 900);
+});
+
 test("a default fairway gives way to a real one, and a par 3 gets none", () => {
   const first = fwResolve([]);
   assert.strictEqual(Object.values(first.objects).filter(o => o.source === core.FAIRWAY_FILL_SOURCE).length, 1);
