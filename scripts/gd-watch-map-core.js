@@ -281,8 +281,8 @@
 
   // ---------------------------------------------------------------- geometry extraction
 
-  /* trees and waste only ever come from the Studio overlay (functions/lib/gd-automapper-core.mjs
-     HAND_DRAWN_SURFACE_TYPES) - a real OSM wood is never read. */
+  /* trees come from OSM woods and the Studio overlay; hazards and waste from the overlay only
+     (functions/lib/gd-automapper-core.mjs parseOsmSurfaces). */
   var POLYGON_TYPES = { fairway_area: "fairways", bunker: "bunkers", water: "water", trees: "trees", hazard: "hazards", waste: "waste" };
 
   function finitePoint(value) {

@@ -41,9 +41,8 @@ export const OBJECT_DEDUPE_RADIUS_M = { green: 26, bunker: 14, tee: 9, fairway: 
    a hole's route and planCourseCaptures turns into corridorBounds. Reusing the name would push
    every fairway polygon's centroid into the route and shift every hole's capture frame. */
 export const SURFACE_TYPES = new Set(["fairway_area", "bunker", "water", "trees", "hazard", "waste"]);
-/* Surfaces only ever drawn by hand in the mapping overlay. Never wand-refined: the refine traces
-   an edge it already believes in (a sand or water boundary), and a tree line or a gorse patch
-   has no such edge in the frame. */
+/* Surfaces that are never wand-refined: the refine traces an edge it already believes in (a sand
+   or water boundary), and a tree line or a gorse patch has no such edge in the frame. */
 export const HAND_DRAWN_SURFACE_TYPES = new Set(["trees", "hazard", "waste"]);
 export const SURFACE_SOURCE = "osm_auto_surface";
 
@@ -54,8 +53,10 @@ export const SURFACE_SOURCE = "osm_auto_surface";
 export const REFINED_SHAPE_SOURCE = "wand_refined";
 
 /* Bumped independently of MAPPER_VERSION so an improved surface pass can be re-run over a
-   course whose hole geometry did not change. */
-export const SURFACE_MAPPER_VERSION = "s1";
+   course whose hole geometry did not change.
+   s2: relation outlines joined (relation-mapped fairways and lakes were being lost), OSM woods
+   read as trees, and default fairways laid on holes OSM has none for. */
+export const SURFACE_MAPPER_VERSION = "s2";
 
 /* Stored polygons are simplified to this many points. Lower than the client's 64-point cap for
    greens (gd-course-library-pin-lock.js:1364) because surfaces are not greens: a surface is
@@ -68,6 +69,9 @@ export const SURFACE_MAPPER_VERSION = "s1";
    zoom by then - the detail this gives up is on very large lake rings, which are drawn at a
    scale where it does not read. */
 export const SURFACE_SHAPE_MAX_POINTS = 16;
+/* Fairways get twice that. There are only one or two per hole, and at 16 a long dogleg
+   fairway lost its bend and the bites its bunkers take out of it - the shape a player reads. */
+export const SURFACE_SHAPE_MAX_POINTS_BY_TYPE = { fairway_area: 32 };
 
 /* Greens get a cap too, but a far higher one, and for the opposite reason to surfaces. Nothing
    bounded them server-side at all before this - cleanOsmShape returns whatever OSM drew, and
@@ -497,6 +501,8 @@ export function osmScopeReachM(scope, center) {
   return Math.round(Math.min(width, height) / 2);
 }
 
+export const OSM_WOOD_MAX_OUTLINE_M = 6000;
+
 export function osmGuideQuery(scope) {
   const selector = (scope && scope.selector) || "";
   const selectors = [
@@ -513,7 +519,13 @@ export function osmGuideQuery(scope) {
        courseFootprintFrame so the worker can requery long thin courses by their real extent. */
     ["way", "leisure", "golf_course"], ["relation", "leisure", "golf_course"]
   ];
-  return "[out:json][timeout:18];(" + selectors.map(([type, key, value]) => type + selector + '["' + key + '"="' + value + '"];').join("") + ");out geom tags;";
+  /* Tree areas. Capped by outline length so a national forest the course sits inside is not
+     downloaded whole - a wood that size is never one a hole plays past, and parseOsmSurfaces
+     would throw it away anyway (too big, or holding the course). */
+  const woods = [["natural", "wood"], ["landuse", "forest"]].map(([key, value]) =>
+    "way" + selector + '["' + key + '"="' + value + '"](if:length()<' + OSM_WOOD_MAX_OUTLINE_M + ");"
+    + "relation" + selector + '["' + key + '"="' + value + '"](if:length()<' + OSM_WOOD_MAX_OUTLINE_M * 2 + ");").join("");
+  return "[out:json][timeout:18];(" + selectors.map(([type, key, value]) => type + selector + '["' + key + '"="' + value + '"];').join("") + woods + ");out geom tags;";
 }
 
 /* ---------- OSM payload parsing (gd-course-library-pin-lock.js:1966-2039) ------------------ */
@@ -1340,6 +1352,67 @@ export function osmGuidePointsFromElement(element) {
   return pts;
 }
 
+/* An OSM area's real outlines. A plain way is one closed ring. A multipolygon relation is not:
+   its outline is usually split across several member ways that join end to end (a fairway
+   traced in three pieces, a lake in thirty), with holes cut out as "inner" members. Reading
+   each member way as its own shape - which is what every parser here used to do - turns one
+   fairway into a handful of open slivers that fail every size check, so relation-mapped
+   fairways never reached a course at all (Hammock Dunes and Colts Neck: 18 OSM fairways
+   each, none saved) and one water relation came back as 31 fragments.
+
+   Pieces are joined on shared end points, flipping a piece when it runs the other way, until
+   the ring closes. A ring that never closes (a piece missing from the download) is kept as
+   drawn - an almost-closed outline is still the right area. */
+const RING_JOIN_TOLERANCE_DEG = 1e-7;
+
+function samePoint(a, b) {
+  return Math.abs(a.lat - b.lat) < RING_JOIN_TOLERANCE_DEG && Math.abs(a.lng - b.lng) < RING_JOIN_TOLERANCE_DEG;
+}
+
+function joinRingPieces(pieces) {
+  const left = pieces.filter(piece => piece.length >= 2).map(piece => piece.slice());
+  const rings = [];
+  while (left.length) {
+    const ring = left.shift();
+    let grew = true;
+    while (grew && !(ring.length > 3 && samePoint(ring[0], ring[ring.length - 1]))) {
+      grew = false;
+      const end = ring[ring.length - 1];
+      for (let i = 0; i < left.length; i++) {
+        const piece = left[i];
+        if (samePoint(piece[0], end)) ring.push(...piece.slice(1));
+        else if (samePoint(piece[piece.length - 1], end)) ring.push(...piece.slice(0, -1).reverse());
+        else continue;
+        left.splice(i, 1);
+        grew = true;
+        break;
+      }
+    }
+    const clean = cleanOsmShape(ring);
+    if (clean) rings.push(clean);
+  }
+  return rings;
+}
+
+export function osmAreaRings(element) {
+  const members = (element && element.members) || [];
+  if (!members.length) {
+    const single = cleanOsmShape(osmGuidePointsFromElement(element));
+    return { outers: single ? [single] : [], inners: [] };
+  }
+  const piecesFor = inner => members
+    .filter(member => member && Array.isArray(member.geometry) && (String(member.role || "") === "inner") === inner)
+    .map(member => member.geometry.map(p => ({ lat: Number(p && p.lat), lng: Number(p && (p.lng ?? p.lon)) }))
+      .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng)));
+  return { outers: joinRingPieces(piecesFor(false)), inners: joinRingPieces(piecesFor(true)) };
+}
+
+/* The single outline that stands for an area: its largest outer ring. */
+export function osmMainOutline(element) {
+  const { outers } = osmAreaRings(element);
+  return outers.map(ring => ({ ring, span: greenShapeSpan(ring) })).sort((a, b) => b.span - a.span)[0]?.ring || null;
+}
+
 export function cleanOsmShape(points) {
   const clean = (points || []).map(toPlain).filter(p => Number.isFinite(p && p.lat) && Number.isFinite(p && p.lng));
   if (clean.length > 3 && distance(clean[0], clean[clean.length - 1]) < 1) clean.pop();
@@ -1378,7 +1451,7 @@ export function greenShapeSpan(shape, center = shapeCentroid(shape)) {
 
 export function osmGreenShapeFromElement(element) {
   if (String((element && element.tags && element.tags.golf) || "").toLowerCase() !== "green") return null;
-  const direct = cleanOsmShape(osmGuidePointsFromElement(element));
+  const direct = osmMainOutline(element);
   if (!direct) return null;
   const center = shapeCentroid(direct);
   if (!center) return null;
@@ -1839,23 +1912,7 @@ export function assignGreensToGuides(guides, greens) {
   });
 }
 
-/* ---------- OSM course surfaces (fairway / bunker / water) -------------------------------- */
-
-/* One OSM element -> the surface rings it contributes. A relation carries its rings as members
-   and osmGuidePointsFromElement flattens all of them into a single point list, which is fine
-   for a centroid but produces a nonsense polygon - so members are split back out here and each
-   outer ring becomes its own surface. Inner rings (a mapped island inside a lake) are dropped
-   in V1: the ring itself is not drawn, so the worst case is a pond rendered without its island. */
-function surfaceRingsFromElement(element) {
-  const members = (element && element.members) || [];
-  const rings = members
-    .filter(member => member && Array.isArray(member.geometry) && String(member.role || "") !== "inner")
-    .map(member => cleanOsmShape(member.geometry.map(p => ({ lat: Number(p.lat), lng: Number(p.lng ?? p.lon) }))))
-    .filter(Boolean);
-  if (rings.length) return rings;
-  const single = cleanOsmShape(osmGuidePointsFromElement(element));
-  return single ? [single] : [];
-}
+/* ---------- OSM course surfaces (fairway / bunker / water / trees) ----------------------- */
 
 /* golf=* is authoritative about what a thing IS. natural=water is not - a lake beside a course
    is still a lake, and calling every one of them a penalty area would have Caddy asserting a
@@ -1867,33 +1924,63 @@ function surfaceKindForElement(element) {
   if (golf === "fairway") return { type: "fairway_area", hazardClass: null };
   if (golf === "bunker") return { type: "bunker", hazardClass: null };
   if (golf === "water_hazard" || golf === "lateral_water_hazard") return { type: "water", hazardClass: "penalty_area" };
-  /* Trees and generic hazards come from the mapping overlay only (gd-map-overlay-core.mjs).
-     natural=wood is gated on the overlay tag because real OSM woods are huge multipolygons with
-     the course cut out as inner rings, which surfaceRingsFromElement drops - read one and the
-     whole course would be trees. golf=hazard is our own tag; nothing in OSM carries it. */
+  /* golf=hazard and golf=waste_area are our own tags (the mapping overlay's): nothing in OSM
+     carries them. A waste area is sandy, scrubby ground played as it lies - its own type so
+     nothing treats it as a bunker under the Rules; the bubble draws it like one. */
   const overlay = !!tags["clarity:overlay"];
   if (overlay && golf === "hazard") return { type: "hazard", hazardClass: null };
-  /* A waste area (golf=waste_area, also our own tag): sandy, scrubby ground played as it lies.
-     Its own type so nothing treats it as a bunker under the Rules; the bubble draws it like one. */
   if (overlay && golf === "waste_area") return { type: "waste", hazardClass: null };
-  if (golf) return null;
-  if (overlay && String(tags.natural || "").toLowerCase() === "wood") return { type: "trees", hazardClass: null }; /* green / tee / hole / course / rough - not a V1 surface */
-  if (String(tags.natural || "").toLowerCase() === "water" || tags.water) return { type: "water", hazardClass: "water" };
+  if (golf) return null; /* green / tee / hole / course / rough - not a surface */
+  const natural = String(tags.natural || "").toLowerCase();
+  if (natural === "wood" || String(tags.landuse || "").toLowerCase() === "forest") return { type: "trees", hazardClass: null };
+  if (natural === "water" || tags.water) return { type: "water", hazardClass: "water" };
   return null;
+}
+
+/* Where the course itself is: the middle of every green, tee and fairway. A tree area that
+   holds one of these is not trees - it is a wood drawn round the course with the course cut out
+   of it, and only the outline survived (surfaces are stored as single rings). Read as trees it
+   would paint every hole as forest. */
+export function coursePlayPoints(payload) {
+  const out = [];
+  ((payload && payload.elements) || []).forEach(element => {
+    const golf = String((element && element.tags && element.tags.golf) || "").toLowerCase();
+    if (golf !== "green" && golf !== "tee" && golf !== "fairway") return;
+    const outline = osmMainOutline(element);
+    const centre = outline && shapeCentroid(outline);
+    if (centre) out.push(centre);
+  });
+  return out;
+}
+
+export function pointInShape(point, shape) {
+  if (!point || !Array.isArray(shape) || shape.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = shape.length - 1; i < shape.length; j = i++) {
+    const a = shape[i], b = shape[j];
+    if ((a.lat > point.lat) !== (b.lat > point.lat)
+      && point.lng < (b.lng - a.lng) * (point.lat - a.lat) / (b.lat - a.lat) + a.lng) inside = !inside;
+  }
+  return inside;
 }
 
 export function parseOsmSurfaces(payload) {
   const out = [];
+  let playPoints = null;
   ((payload && payload.elements) || []).forEach(element => {
     const kind = surfaceKindForElement(element);
     if (!kind) return;
-    surfaceRingsFromElement(element).forEach((ring, index) => {
+    osmAreaRings(element).outers.forEach((ring, index) => {
       const centre = shapeCentroid(ring);
       if (!centre) return;
       const span = greenShapeSpan(ring, centre);
       const limits = SURFACE_SPAN_LIMITS_M[kind.type];
       if (limits && (!Number.isFinite(span) || span < limits.min || span > limits.max)) return;
-      const shape = simplifyShape(ring);
+      if (kind.type === "trees") {
+        playPoints = playPoints || coursePlayPoints(payload);
+        if (playPoints.some(point => pointInShape(point, ring))) return;
+      }
+      const shape = simplifyShape(ring, SURFACE_SHAPE_MAX_POINTS_BY_TYPE[kind.type] || SURFACE_SHAPE_MAX_POINTS);
       if (!shape) return;
       out.push({
         type: kind.type,
@@ -1962,6 +2049,179 @@ export function savedCourseQueryFrame(objects, holes) {
   }, SURFACE_QUERY_PAD_M);
 }
 
+/* ---------- default fairways ---------------------------------------------------------------
+
+   A hole with a tee, a green and its hazards mapped but no fairway polygon still has a
+   fairway: it is the mown strip between the hazards, from the drive zone to the green. Without
+   one the watch map and the bubble draw the hole as bare rough. So when OSM has no fairway on a
+   hole, one is laid along the hole's route and pulled in wherever a bunker, water, trees or a
+   hazard gets in the way - narrowing past a bunker, stopping short of a crossing burn and
+   starting again beyond it.
+
+   Stored like any other surface (type fairway_area, cloned onto every hole whose frame it
+   falls in) under its own source, so a re-run can tell it from a real one: it is regenerated
+   every time, and disappears the moment the hole gets a real fairway - from OSM or drawn in
+   Studio. A short hole (a par 3) gets none. */
+export const FAIRWAY_FILL_SOURCE = "osm_auto_fairway_fill";
+export const FAIRWAY_FILL = {
+  minHoleM: 215,      /* shorter than this is a par 3: tee to green, no fairway */
+  halfWidthM: 16,     /* a 32 m fairway when nothing is in the way */
+  minHalfWidthM: 6,   /* narrower than 12 m is not a fairway - the strip is broken there */
+  hazardGapM: 3,      /* rough left between the fairway edge and a hazard */
+  startFraction: 0.3, /* where the fairway starts, as a share of the hole... */
+  startMinM: 70, startMaxM: 190, /* ...kept to a sensible drive zone */
+  greenGapM: 4,       /* stops this far short of the green's edge */
+  minPieceM: 30,      /* a piece shorter than this between two hazards is dropped */
+  stepM: 4            /* sampled this often; only the samples where the width changes are kept */
+};
+const OBSTACLE_TYPES = new Set(["bunker", "water", "trees", "hazard", "waste"]);
+
+function localFrame(origin) {
+  const k = Math.cos(origin.lat * Math.PI / 180);
+  return {
+    xy: p => ({ x: (p.lng - origin.lng) * 111320 * k, y: (p.lat - origin.lat) * 111320 }),
+    ll: v => ({ lat: origin.lat + v.y / 111320, lng: origin.lng + v.x / (111320 * k) })
+  };
+}
+
+function insideXY(p, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i], b = ring[j];
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+/* Distance from p along the unit direction d to the first edge of any ring, or Infinity. */
+function rayHitXY(p, d, rings) {
+  let best = Infinity;
+  rings.forEach(ring => {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const a = ring[j], b = ring[i];
+      const ex = b.x - a.x, ey = b.y - a.y;
+      const den = d.x * ey - d.y * ex;
+      if (Math.abs(den) < 1e-9) continue;
+      const t = ((a.x - p.x) * ey - (a.y - p.y) * ex) / den;
+      const u = ((a.x - p.x) * d.y - (a.y - p.y) * d.x) / den;
+      if (t > 0 && u >= 0 && u <= 1 && t < best) best = t;
+    }
+  });
+  return best;
+}
+
+/* The point and heading at distance s along a polyline (in metres, local frame). */
+function alongXY(route, s) {
+  let walked = 0;
+  for (let i = 1; i < route.length; i++) {
+    const a = route[i - 1], b = route[i];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (!len) continue;
+    if (walked + len >= s || i === route.length - 1) {
+      const t = Math.max(0, Math.min(1, (s - walked) / len));
+      return { p: { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, d: { x: (b.x - a.x) / len, y: (b.y - a.y) / len } };
+    }
+    walked += len;
+  }
+  return null;
+}
+
+/* The fairway outline(s) for one hole: zero (a par 3, or hazards everywhere), one, or several
+   when a hazard crosses the line of play. holeData is a packageHoleData entry; obstacles and
+   fairways are {lat,lng} rings. Returns [] when the hole already has a fairway on its line. */
+export function defaultFairwayShapes(holeData, obstacles = [], fairways = []) {
+  const route = Array.isArray(holeData && holeData.route) ? holeData.route.filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng)) : [];
+  if (route.length < 2) return [];
+  const frame = localFrame(route[0]);
+  const line = route.map(frame.xy);
+  let length = 0;
+  for (let i = 1; i < line.length; i++) length += Math.hypot(line[i].x - line[i - 1].x, line[i].y - line[i - 1].y);
+  if (length < FAIRWAY_FILL.minHoleM) return [];
+  const greenShape = Array.isArray(holeData.greenShape) && holeData.greenShape.length >= 3 ? holeData.greenShape : null;
+  const greenRadius = greenShape ? Math.min(25, greenShapeSpan(greenShape) / 2) : 14;
+  const start = Math.max(FAIRWAY_FILL.startMinM, Math.min(FAIRWAY_FILL.startMaxM, length * FAIRWAY_FILL.startFraction));
+  const end = length - greenRadius - FAIRWAY_FILL.greenGapM;
+  if (end - start < FAIRWAY_FILL.minPieceM) return [];
+
+  const toRings = list => list.filter(ring => Array.isArray(ring) && ring.length >= 3).map(ring => ring.map(frame.xy));
+  const blockers = toRings(obstacles);
+  const existing = toRings(fairways);
+  const count = Math.max(2, Math.ceil((end - start) / FAIRWAY_FILL.stepM) + 1);
+  const step = (end - start) / (count - 1);
+  const stations = [];
+  for (let i = 0; i < count; i++) {
+    const at = alongXY(line, start + step * i);
+    if (at) stations.push(at);
+  }
+  /* A real fairway already on the line of play: nothing to fill. */
+  if (stations.some(st => existing.some(ring => insideXY(st.p, ring)))) return [];
+
+  const last = stations.length - 1;
+  const rows = stations.map((st, i) => {
+    if (blockers.some(ring => insideXY(st.p, ring))) return null;
+    /* Rounded ends: narrow at the drive-zone start, and no wider than the green at the far end. */
+    const fromStart = i * step, toEnd = (last - i) * step;
+    const greenHalf = Math.max(FAIRWAY_FILL.minHalfWidthM + 2, Math.min(FAIRWAY_FILL.halfWidthM, greenRadius * 0.9));
+    let half = FAIRWAY_FILL.halfWidthM;
+    if (fromStart < 25) half = Math.min(half, 9 + (FAIRWAY_FILL.halfWidthM - 9) * fromStart / 25);
+    if (toEnd < 30) half = Math.min(half, greenHalf + (FAIRWAY_FILL.halfWidthM - greenHalf) * toEnd / 30);
+    const n = { x: -st.d.y, y: st.d.x };
+    const left = Math.min(half, rayHitXY(st.p, n, blockers) - FAIRWAY_FILL.hazardGapM);
+    const right = Math.min(half, rayHitXY(st.p, { x: -n.x, y: -n.y }, blockers) - FAIRWAY_FILL.hazardGapM);
+    if (left < 0 || right < 0 || left + right < FAIRWAY_FILL.minHalfWidthM * 2) return null;
+    return { p: st.p, n, left, right };
+  });
+
+  const pieces = [];
+  let run = [];
+  rows.concat([null]).forEach(row => {
+    if (row) { run.push(row); return; }
+    if (run.length >= 2 && (run.length - 1) * step >= FAIRWAY_FILL.minPieceM) pieces.push(run);
+    run = [];
+  });
+  /* A sample is only worth a corner where the outline bends: an edge pulled in by a hazard, the
+     start and end of a taper, a bend in the route. A straight run between them is two points. */
+  const bends = (prev, row, next) => Math.abs(2 * row.left - prev.left - next.left) > 0.15
+    || Math.abs(2 * row.right - prev.right - next.right) > 0.15
+    || Math.abs(prev.n.x - next.n.x) + Math.abs(prev.n.y - next.n.y) > 0.01;
+  return pieces.map(all => {
+    const piece = all.filter((row, i) => i === 0 || i === all.length - 1 || bends(all[i - 1], row, all[i + 1]));
+    const leftEdge = piece.map(r => ({ x: r.p.x + r.n.x * r.left, y: r.p.y + r.n.y * r.left }));
+    const rightEdge = piece.map(r => ({ x: r.p.x - r.n.x * r.right, y: r.p.y - r.n.y * r.right })).reverse();
+    return leftEdge.concat(rightEdge).map(frame.ll);
+  });
+}
+
+/* Default fairways for every hole that has none, as surfaces ready to clone. */
+function fairwayFillSurfaces(holeData, surfaces, objects) {
+  const out = [];
+  const realFairways = surfaces.filter(s => s.type === "fairway_area").map(s => s.shape)
+    .concat(objects.filter(o => o && o.type === "fairway_area" && o.source !== FAIRWAY_FILL_SOURCE && Array.isArray(o.shape)).map(o => o.shape));
+  Object.keys(holeData).map(Number).sort((a, b) => a - b).forEach(holeNumber => {
+    const bounds = holeCaptureBounds(holeData[holeNumber]);
+    if (!bounds) return;
+    /* Hazards, plus the ground that belongs to other holes - their greens and their fairways - so
+       a default fairway never runs onto a neighbour. */
+    const obstacles = surfaces.filter(s => OBSTACLE_TYPES.has(s.type) && boundsIntersect(s.bounds, bounds)).map(s => s.shape)
+      .concat(objects.filter(o => o && OBSTACLE_TYPES.has(o.type) && Array.isArray(o.shape) && o.shape.length >= 3
+        && (o.holeNumber == null || validHoleNumber(o.holeNumber) === holeNumber)).map(o => o.shape))
+      .concat(Object.keys(holeData).map(Number).filter(other => other !== holeNumber).map(other => holeData[other].greenShape))
+      .concat(realFairways);
+    defaultFairwayShapes(holeData[holeNumber], obstacles, realFairways).forEach((outline, index) => {
+      /* Normally a couple of dozen corners; the cap is for a hole that winds past a long run of
+         bunkers. */
+      const shape = simplifyShape(outline, 64);
+      const centre = shape && shapeCentroid(shape);
+      if (!centre) return;
+      out.push({
+        type: "fairway_area", hazardClass: null, centre, shape, span: greenShapeSpan(shape, centre),
+        bounds: boundsFromPoints(shape), osmId: "fill/" + holeNumber + (index ? "#" + index : ""), source: FAIRWAY_FILL_SOURCE
+      });
+    });
+  });
+  return out;
+}
+
 /* Every surface inside a hole's capture extent is written onto that hole. There is no
    assignment step and nothing owns anything: GPS Play is one hole at a time with no free
    panning, so a bunker that falls in three corridors is simply stored three times, and the
@@ -1970,33 +2230,38 @@ export function savedCourseQueryFrame(objects, holes) {
    under cloning that is the correct behaviour rather than a defect: anything inside the box is
    inside the frame the player is looking at, so drawing it beats hiding it.
 
-   Absence is not failure. A course with no fairway polygons in OSM enriches nothing and stays
-   exactly as playable as it was. */
+   Holes with no fairway get a default one (defaultFairwayShapes above). Default fairways from
+   an earlier run that are not produced again - the hole has a real fairway now - are removed. */
 export function enrichSurfaceObjects(objects, courseId, payload, holes) {
   const surfaces = parseOsmSurfaces(payload);
-  if (!surfaces.length) return { surfaces: 0, cloned: 0 };
   const objectsMap = {};
   objects.forEach(object => { if (object && object.id) objectsMap[object.id] = object; });
   const holeData = packageHoleData({ objects: objectsMap, holes: holes || {} });
+  const fills = fairwayFillSurfaces(holeData, surfaces, objects);
+  const all = surfaces.concat(fills);
+  const written = new Set();
   let cloned = 0;
   Object.keys(holeData).map(Number).sort((a, b) => a - b).forEach(holeNumber => {
     const bounds = holeCaptureBounds(holeData[holeNumber]);
     if (!bounds) return;
-    surfaces.forEach(surface => {
+    all.forEach(surface => {
       if (!boundsIntersect(surface.bounds, bounds)) return;
       const saved = upsertResolvedObject(objects, {
         courseId, type: surface.type, position: surface.centre, shape: surface.shape,
-        source: SURFACE_SOURCE, holeNumber, confirmed: true,
+        source: surface.source || SURFACE_SOURCE, holeNumber, confirmed: true,
         extra: {
           hazardClass: surface.hazardClass || undefined,
           osmId: surface.osmId,
           surfaceMapperVersion: SURFACE_MAPPER_VERSION
         }
       });
-      if (saved) cloned++;
+      if (saved) { cloned++; written.add(saved.id); }
     });
   });
-  return { surfaces: surfaces.length, cloned };
+  for (let i = objects.length - 1; i >= 0; i--) {
+    if (objects[i] && objects[i].source === FAIRWAY_FILL_SOURCE && !written.has(objects[i].id)) objects.splice(i, 1);
+  }
+  return { surfaces: surfaces.length, cloned, filled: fills.length };
 }
 
 export function resolveGuidesIntoObjects(guides, courseId, greens, existingObjects = [], payload = null) {

@@ -310,9 +310,104 @@ test("a course with no surface tags in OSM still resolves every hole", () => {
   const bare = resolveFixture();
   assert.strictEqual(bare.holesResolved, 2);
   assert.deepStrictEqual(Object.keys(bare.holes).sort(), ["1", "2"]);
-  assert.deepStrictEqual(bare.surfaces, { surfaces: 0, cloned: 0 });
-  /* Enrichment is enrichment: absence must never make a valid course unusable. */
-  assert.strictEqual(Object.values(bare.objects).some(o => core.SURFACE_TYPES.has(o.type)), false);
+  /* Enrichment is enrichment: absence must never make a valid course unusable. The only
+     surfaces are the default fairways laid down the two 270m holes. */
+  assert.strictEqual(bare.surfaces.surfaces, 0);
+  assert.strictEqual(bare.surfaces.filled, 2);
+  const surfaces = Object.values(bare.objects).filter(o => core.SURFACE_TYPES.has(o.type));
+  assert.ok(surfaces.length >= 2);
+  assert.ok(surfaces.every(o => o.type === "fairway_area" && o.source === core.FAIRWAY_FILL_SOURCE));
+});
+
+/* ---- relation outlines, OSM trees, default fairways ---- */
+
+const FW_LAT = 29.57, FW_LNG = -81.17, FW_K = Math.cos(FW_LAT * Math.PI / 180);
+const fwAt = (x, y) => ({ lat: FW_LAT + y / 111320, lon: FW_LNG + x / (111320 * FW_K) });
+const fwEllipse = (cx, cy, rx, ry, n = 40) => {
+  const out = [];
+  for (let i = 0; i < n; i++) { const t = i / n * 2 * Math.PI; out.push(fwAt(cx + rx * Math.cos(t), cy + ry * Math.sin(t))); }
+  out.push(out[0]);
+  return out;
+};
+const fwXY = p => ({ x: (p.lng - FW_LNG) * 111320 * FW_K, y: (p.lat - FW_LAT) * 111320 });
+/* One 380m par 4 playing north: tee at 0, green at 390. */
+const fwHole = () => [
+  { type: "way", id: 1, tags: { golf: "hole", ref: "1", par: "4" }, geometry: [fwAt(0, 0), fwAt(0, 380)] },
+  { type: "way", id: 2, tags: { golf: "green", ref: "1" }, geometry: fwEllipse(0, 390, 15, 15) },
+  { type: "way", id: 3, tags: { golf: "tee" }, geometry: fwEllipse(0, 0, 5, 8) }
+];
+const fwResolve = (extra, existing = []) =>
+  core.resolveCourseGeometry({ elements: fwHole().concat(extra) }, "fw", { lat: FW_LAT, lng: FW_LNG }, existing, []);
+/* A fairway mapped as a multipolygon whose outline is split across three member ways, the
+   middle one drawn the other way round - how Hammock Dunes and Colts Neck have theirs. */
+const splitFairway = () => {
+  const ring = fwEllipse(0, 220, 20, 130, 60);
+  const pieces = [ring.slice(0, 21), ring.slice(20, 41).reverse(), ring.slice(40)];
+  return { type: "relation", id: 9, tags: { golf: "fairway", type: "multipolygon" },
+    members: pieces.map((geometry, i) => ({ type: "way", ref: 100 + i, role: "outer", geometry })) };
+};
+
+test("a relation fairway split across several ways is joined into one outline and saved", () => {
+  const rings = core.osmAreaRings(splitFairway());
+  assert.strictEqual(rings.outers.length, 1, "three pieces, one ring");
+  assert.ok(rings.outers[0].length >= 58);
+  const result = fwResolve([splitFairway()]);
+  const fairways = Object.values(result.objects).filter(o => o.type === "fairway_area");
+  assert.strictEqual(fairways.length, 1);
+  assert.strictEqual(fairways[0].osmId, "relation/9");
+  assert.strictEqual(fairways[0].source, core.SURFACE_SOURCE, "a real fairway, so no default one");
+  const ys = fairways[0].shape.map(p => fwXY(p).y);
+  assert.ok(Math.min(...ys) < 100 && Math.max(...ys) > 340, "the whole fairway, not a sliver of it");
+});
+
+test("a green mapped as a split relation keeps its whole outline", () => {
+  const ring = fwEllipse(0, 390, 15, 15, 30);
+  const green = { type: "relation", id: 7, tags: { golf: "green", ref: "1" },
+    members: [{ role: "outer", geometry: ring.slice(0, 16) }, { role: "outer", geometry: ring.slice(15) }] };
+  const parsed = core.osmGreenShapeFromElement(green);
+  assert.ok(parsed && parsed.shape.length >= 29);
+  assert.ok(Math.abs(parsed.span - 30) < 2, "span " + (parsed && parsed.span));
+});
+
+test("OSM woods become tree areas, but a wood drawn round the whole course does not", () => {
+  const sideWood = { type: "way", id: 21, tags: { landuse: "forest" }, geometry: fwEllipse(70, 200, 30, 80) };
+  const roundCourse = { type: "way", id: 20, tags: { natural: "wood" },
+    geometry: [fwAt(-300, -100), fwAt(300, -100), fwAt(300, 600), fwAt(-300, 600), fwAt(-300, -100)] };
+  const surfaces = core.parseOsmSurfaces({ elements: fwHole().concat([sideWood, roundCourse]) });
+  assert.deepStrictEqual(surfaces.filter(s => s.type === "trees").map(s => s.osmId), ["way/21"]);
+  assert.ok(/natural"="wood"/.test(core.osmGuideQuery(core.osmQueryScope({}, { lat: 1, lng: 2 }))));
+  assert.ok(/landuse"="forest"/.test(core.osmGuideQuery(core.osmQueryScope({}, { lat: 1, lng: 2 }))));
+});
+
+test("a hole with no fairway gets a default one that narrows past a bunker and breaks at a creek", () => {
+  const creek = { type: "way", id: 30, tags: { golf: "water_hazard" }, geometry: [fwAt(-200, 240), fwAt(200, 240), fwAt(200, 262), fwAt(-200, 262), fwAt(-200, 240)] };
+  const bunker = { type: "way", id: 31, tags: { golf: "bunker" }, geometry: fwEllipse(14, 180, 8, 10) };
+  const result = fwResolve([creek, bunker]);
+  const fills = Object.values(result.objects).filter(o => o.source === core.FAIRWAY_FILL_SOURCE);
+  assert.deepStrictEqual(fills.map(o => o.osmId).sort(), ["fill/1", "fill/1#1"], "one piece each side of the creek");
+  assert.ok(fills.every(o => o.type === "fairway_area" && o.holeNumber === 1));
+  const shapes = fills.map(o => o.shape.map(fwXY));
+  /* Nothing on the water. */
+  assert.ok(shapes.every(shape => shape.every(p => p.y < 240 || p.y > 262)));
+  /* Pulled in on the bunker side: the bunker's left edge is at x=6. */
+  const beside = shapes[0].concat(shapes[1]).filter(p => p.y > 172 && p.y < 188 && p.x > 0);
+  assert.ok(beside.length && beside.every(p => p.x <= 6), JSON.stringify(beside));
+  /* Starts in the drive zone, stops short of the green. */
+  const ys = shapes[0].concat(shapes[1]).map(p => p.y);
+  assert.ok(Math.min(...ys) > 100 && Math.max(...ys) < 375);
+});
+
+test("a default fairway gives way to a real one, and a par 3 gets none", () => {
+  const first = fwResolve([]);
+  assert.strictEqual(Object.values(first.objects).filter(o => o.source === core.FAIRWAY_FILL_SOURCE).length, 1);
+  const again = fwResolve([splitFairway()], Object.values(first.objects));
+  const fairways = Object.values(again.objects).filter(o => o.type === "fairway_area");
+  assert.deepStrictEqual(fairways.map(o => o.osmId), ["relation/9"], "the default one is removed on the next run");
+  const par3 = core.resolveCourseGeometry({ elements: [
+    { type: "way", id: 1, tags: { golf: "hole", ref: "1", par: "3" }, geometry: [fwAt(0, 0), fwAt(0, 160)] },
+    { type: "way", id: 2, tags: { golf: "green", ref: "1" }, geometry: fwEllipse(0, 170, 15, 15) }
+  ] }, "p3", { lat: FW_LAT, lng: FW_LNG }, [], []);
+  assert.strictEqual(par3.surfaces.filled, 0);
 });
 
 test("surfaces outside a hole's capture corridor are not written onto it", () => {

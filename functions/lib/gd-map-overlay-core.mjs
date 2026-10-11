@@ -18,7 +18,10 @@
  *
  * Feature shape (what course_map_overlays.features stores, and what Studio draws):
  *   { id: "f-1", kind: "fairway" | "hole" | "green" | "tee" | "bunker" | "water" | "trees" | "tree" | "hazard" | "waste", hole: 7 | null, points: [{lat, lng}, ...],
- *     link?: "l-abc", source?: "ai", pin?: true }
+ *     link?: "l-abc", source?: "ai", pin?: true, osm?: "way/123" }
+ *   osm says the shape was converted from that OSM element (osmToOverlayFeatures) so it can be
+ *   tweaked. The converted shape REPLACES the element: mergeOverlayIntoPayload drops every OSM
+ *   element an overlay shape was made from, so the mapper reads the tweaked shape, not both.
  *   link groups shapes that belong to one hole (Studio's Link tool) without numbering them.
  *   source says who produced the shape (gd-overlay-georef-core.mjs stamps "ai"; Studio stamps
  *   "wand" on a green the wand outlined from a pin; a hand-placed one has none). Display only - the mapper treats every feature the same.
@@ -66,14 +69,17 @@
  *             still gives the resolver greens to hang fairways off.
  */
 
+import { osmAreaRings, coursePlayPoints, pointInShape, greenShapeSpan, osmGuideHoleRef, SURFACE_SPAN_LIMITS_M, OSM_AUTO_GREEN_MAX_SPAN_M, FAIRWAY_FILL_SOURCE } from "./gd-automapper-core.mjs";
+
 export const OVERLAY_KINDS = new Set(["fairway", "hole", "green", "tee", "bunker", "water", "trees", "tree", "hazard", "waste"]);
 const POLYGON_KINDS = new Set(["fairway", "green", "tee", "bunker", "water", "trees", "tree", "hazard", "waste"]);
 /* The tag each kind is written as: golf=<kind> unless listed here. */
 const OSM_TAG = { water: ["golf", "water_hazard"], trees: ["natural", "wood"], tree: ["natural", "tree"], hazard: ["golf", "hazard"], waste: ["golf", "waste_area"] };
 export function overlayKindIsPolygon(kind) { return POLYGON_KINDS.has(String(kind || "").toLowerCase()); }
 /* Room for a whole course placed as pins - 18 greens, fairways and tees plus the bunkers - and
-   the single trees the tree finder drops, a few hundred of them, with space to spare. */
-export const OVERLAY_MAX_FEATURES = 600;
+   the single trees the tree finder drops, a few hundred of them. Or a well-mapped course
+   converted from OSM: a 36-hole site carries 200 bunkers and 200 tee boxes on its own. */
+export const OVERLAY_MAX_FEATURES = 1200;
 /* A wand outline keeps enough corners to follow the ground (Studio's DETAIL_MAX_POINTS is 220),
    with room to reshape. The mapper still thins surfaces to SURFACE_SHAPE_MAX_POINTS for the
    course package; this is what the overlay itself holds. */
@@ -135,6 +141,8 @@ export function normalizeOverlayFeature(raw, index) {
   if (link) feature.link = link;
   if (source) feature.source = source;
   if (pin) feature.pin = true;
+  const osm = String(raw.osm || "");
+  if (/^(way|relation)\/\d+$/.test(osm)) feature.osm = osm;
   return feature;
 }
 
@@ -273,7 +281,10 @@ export function isOverlayElement(element) {
    duplicate key, and an empty overlay leaves the payload untouched - including the object
    identity, so callers comparing payloads before and after see no phantom change. */
 export function mergeOverlayIntoPayload(payload, features) {
-  const elements = ((payload && payload.elements) || []).slice();
+  /* OSM elements an overlay shape was converted from are replaced by it. */
+  const replaced = new Set(normalizeOverlayFeatures(features).map(f => f.osm).filter(Boolean));
+  const elements = ((payload && payload.elements) || [])
+    .filter(e => !(e && replaced.has(String(e.type || "way") + "/" + e.id)));
   /* A hole OSM already numbers keeps OSM's line; a derived one is only for the holes it lacks. */
   const osmNumbered = new Set(elements
     .filter(e => e && e.tags && String(e.tags.golf || "").toLowerCase() === "hole" && !isOverlayElement(e))
@@ -312,4 +323,87 @@ export function overlaySummary(features) {
     numbered: list.filter(f => f.hole).length,
     linked: list.filter(f => f.link).length
   };
+}
+
+/* ---------- OSM -> overlay: making what OSM has editable --------------------------------
+
+   OSM's greens, tees, fairways, bunkers, water and woods, as overlay shapes - so Studio can
+   reshape them like anything drawn by hand. Each keeps the OSM element it came from (osm), and
+   once saved it stands in for that element (mergeOverlayIntoPayload). Hole lines are left in
+   OSM: play orders refer to them by their OSM id.
+
+   The same size checks the mapper applies are applied here, so nothing is offered that the
+   mapper would have thrown away - including a wood drawn round the whole course.
+
+   Default fairways (the mapper's FAIRWAY_FILL_SOURCE objects, for holes OSM has no fairway on)
+   come too, numbered to their hole: drawn in, they become the hole's real fairway.
+
+   Shapes already in the overlay are not offered again - matched on id, or on lying inside a
+   shape of the same kind someone has already drawn. */
+const OSM_TO_OVERLAY_KIND = { green: "green", tee: "tee", fairway: "fairway", bunker: "bunker", water_hazard: "water", lateral_water_hazard: "water" };
+const KIND_SPAN_TYPE = { green: null, tee: null, fairway: "fairway_area", bunker: "bunker", water: "water", trees: "trees" };
+
+function overlayKindForOsm(element) {
+  const tags = (element && element.tags) || {};
+  if (tags[OVERLAY_TAG]) return null;
+  const golf = String(tags.golf || "").toLowerCase();
+  if (golf) return OSM_TO_OVERLAY_KIND[golf] || null;
+  const natural = String(tags.natural || "").toLowerCase();
+  if (natural === "wood" || String(tags.landuse || "").toLowerCase() === "forest") return "trees";
+  if (natural === "water" || tags.water) return "water";
+  return null;
+}
+
+function thinRing(ring) {
+  if (ring.length <= OVERLAY_MAX_POINTS) return ring;
+  const step = ring.length / OVERLAY_MAX_POINTS;
+  return Array.from({ length: OVERLAY_MAX_POINTS }, (_, i) => ring[Math.floor(i * step)]);
+}
+
+function centreOfRing(points) {
+  const sum = points.reduce((acc, p) => ({ lat: acc.lat + p.lat, lng: acc.lng + p.lng }), { lat: 0, lng: 0 });
+  return { lat: sum.lat / points.length, lng: sum.lng / points.length };
+}
+
+export function osmToOverlayFeatures(payload, existing = [], savedObjects = []) {
+  const have = normalizeOverlayFeatures(existing);
+  const ids = new Set(have.map(f => f.id));
+  const covered = (kind, centre) => have.some(f => f.kind === kind && !f.pin && overlayKindIsPolygon(kind) && pointInShape(centre, f.points));
+  const out = [];
+  const offer = feature => {
+    if (ids.has(feature.id) || covered(feature.kind, centreOfRing(feature.points))) return;
+    ids.add(feature.id);
+    out.push(feature);
+  };
+  let playPoints = null;
+  ((payload && payload.elements) || []).forEach(element => {
+    const kind = overlayKindForOsm(element);
+    if (!kind || element.id == null) return;
+    const key = String(element.type || "way") + "/" + element.id;
+    const hole = kind === "trees" || kind === "water" ? null : validHoleNumber(osmGuideHoleRef(element.tags.ref || element.tags.name));
+    osmAreaRings(element).outers.forEach((ring, index) => {
+      const span = greenShapeSpan(ring);
+      if (kind === "green" && (span < 5 || span > OSM_AUTO_GREEN_MAX_SPAN_M)) return;
+      const limits = SURFACE_SPAN_LIMITS_M[KIND_SPAN_TYPE[kind]];
+      if (limits && (!Number.isFinite(span) || span < limits.min || span > limits.max)) return;
+      if (kind === "trees") {
+        playPoints = playPoints || coursePlayPoints(payload);
+        if (playPoints.some(point => pointInShape(point, ring))) return;
+      }
+      const id = ("osm-" + key.replace("/", "-") + (index ? "-" + index : "")).slice(0, 40);
+      offer({ id, kind, hole, points: thinRing(ring.map(p => ({ lat: p.lat, lng: p.lng }))), source: "osm", osm: key });
+    });
+  });
+  /* Default fairways: one per piece, numbered to the hole it was laid for ("fill/7#1"). */
+  const seen = new Set();
+  (savedObjects || []).forEach(object => {
+    if (!object || object.source !== FAIRWAY_FILL_SOURCE || !Array.isArray(object.shape)) return;
+    const match = /^fill\/(\d+)(?:#(\d+))?$/.exec(String(object.osmId || ""));
+    if (!match || Number(match[1]) !== validHoleNumber(object.holeNumber) || seen.has(object.osmId)) return;
+    seen.add(object.osmId);
+    const points = object.shape.map(cleanPoint).filter(Boolean);
+    if (points.length < 3) return;
+    offer({ id: "auto-fairway-" + match[1] + (match[2] ? "-" + match[2] : ""), kind: "fairway", hole: Number(match[1]), points, source: "auto" });
+  });
+  return out;
 }

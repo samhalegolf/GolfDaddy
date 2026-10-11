@@ -138,7 +138,7 @@
      there is held by both. Greens, bunkers and tees sit on top of a fairway, not beside it,
      so they never seam. */
   var SEAM_KINDS = ["fairway", "water", "hazard", "waste", "trees"];
-  var MAX_FEATURES = 600;
+  var MAX_FEATURES = 1200;
   /* The tree finder reads the box at about this many metres a pixel (a crown ~25px across), up
      to this many pixels a side, and learns what a tree looks like from at most this many of the
      trees placed by hand this session - the latest ones. */
@@ -470,6 +470,7 @@
       "</div>" +
       '<div class="gdStudioSourceTest" data-gd-overlay="source-panel" hidden></div>' +
       '<div class="gdStudioViewportBar">' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="convert" disabled title="Add what OSM has here - greens, tees, fairways, bunkers, water, trees - and the mapper\'s default fairways to the overlay as shapes you can reshape. Once saved and ready, each replaces the OSM shape it came from.">Make OSM editable</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ready" disabled>Mark ready</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="run" disabled>Run mapper with overlay</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="unnumber" disabled title="Take every hole number off the overlay - shapes and links stay - so the mapper numbers them fresh from the scorecard">Clear hole numbers</button>' +
@@ -571,7 +572,7 @@
       "</div>";
 
     var el = {};
-    ["inbox", "inbox-count", "pick", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "unnumber", "clear", "run", "status"].forEach(function (name) {
+    ["inbox", "inbox-count", "pick", "convert", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "unnumber", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -1694,7 +1695,7 @@
         var ring = shapes.mergeOverlapping(f.points, merged, shapes.DETAIL_MAX_POINTS);
         if (!ring) return;
         merged = ring;
-        if (f.source === "colour") detailed = true;
+        if (f.source === "colour" || f.source === "osm") detailed = true;
         if (!into) { into = f; return; }
         if (!into.hole && f.hole) into.hole = f.hole;
         if (!into.link && f.link) into.link = f.link;
@@ -1946,6 +1947,7 @@
       var f = { id: nextFeatureId(session.features), kind: raw.kind, hole: holeNumber(hole), points: raw.points.slice(0, MAX_POINTS) };
       if (raw.source) f.source = raw.source;
       if (raw.pin) f.pin = true;
+      if (raw.osm) f.osm = raw.osm;
       session.features.push(f);
       if (!quiet) { lastPlacedId = f.id; selectedId = tool === "move" ? f.id : selectedId; drawFeatures(); changed(); }
       return f;
@@ -1992,7 +1994,9 @@
 
     /* A green or bunker is edited by its few smooth handles - unless the colour wand outlined
        it, when it keeps the detail it found and is edited like any detailed outline. */
-    function isSmooth(f) { return !f.pin && !!shapes.SMOOTH[f.kind] && f.source !== "colour"; }
+    /* A colour-wand or OSM outline keeps the corners it was traced with: rebuilt as a smooth curve
+       through a handful of handles, the first drag would throw that detail away. */
+    function isSmooth(f) { return !f.pin && !!shapes.SMOOTH[f.kind] && f.source !== "colour" && f.source !== "osm"; }
     /* Any other area is a detailed outline - a wand's can have a couple of hundred corners. It
        shows only its key corners (shapes.keyCorners, worked out on screen, so zooming in shows
        more), and its edge can be grabbed anywhere and bent there (shapes.bendRing). A hole line
@@ -2977,6 +2981,34 @@
       setStatus("Hole numbers cleared from " + numbered.length + " shapes. Mark ready and run the mapper to number them fresh.");
     }
 
+    /* OSM's shapes made editable: what OSM has here that the overlay does not (the server's
+       osmToOverlayFeatures, in gd-map-overlay-core), added as overlay shapes under the ids the
+       server gave them, so the same shape is never offered twice. Saved and marked ready, each
+       replaces the OSM shape it came from when the mapper runs. */
+    function convertibleOsm() {
+      var list = (session.osm && !session.osm.error && session.osm.convertible) || [];
+      var have = {};
+      session.features.forEach(function (f) { have[f.id] = true; });
+      return list.filter(function (f) { return !have[f.id]; });
+    }
+
+    function convertOsm(auto) {
+      if (!canEdit()) return;
+      var list = convertibleOsm();
+      if (!list.length) { if (!auto) setStatus("Everything OSM has here is already in the overlay."); return; }
+      var added = list.slice(0, Math.max(0, MAX_FEATURES - session.features.length));
+      added.forEach(function (f) { session.features.push(JSON.parse(JSON.stringify(f))); });
+      drawOsm();
+      drawFeatures();
+      changed();
+      var counts = {};
+      added.forEach(function (f) { var k = f.source === "auto" ? "default fairway" : f.kind === "trees" ? "tree area" : kindLabel(f.kind).toLowerCase(); counts[k] = (counts[k] || 0) + 1; });
+      var said = Object.keys(counts).map(function (k) { return counts[k] + " " + k + (counts[k] === 1 ? "" : "s"); }).join(", ");
+      setStatus((auto ? "OSM's shapes are in the overlay, ready to reshape: " : "Added from OSM: ") + said + "." +
+        (added.length < list.length ? " " + (list.length - added.length) + " more did not fit (" + MAX_FEATURES + " shapes a course)." : "") +
+        " Mark ready when they look right.");
+    }
+
     function deleteOverlay() {
       if (!canEdit()) return;
       if (!window.confirm("Delete every overlay shape for this course? The mapper will go back to reading OSM alone.")) return;
@@ -3012,11 +3044,15 @@
           osmLayers.push(shape);
         });
       }
-      add(osm.fairways, STYLE.osmFairway, true);
-      add(osm.greens, STYLE.osmGreen, true);
-      add(osm.tees, STYLE.osmTee, true);
-      add(osm.bunkers, STYLE.osmBunker, true);
-      add(osm.water, STYLE.osmWater, true);
+      /* An OSM shape already made editable is drawn as the overlay shape, not twice. */
+      var converted = {};
+      session.features.forEach(function (f) { if (f.osm) converted[f.osm] = true; });
+      function own(list) { return (list || []).filter(function (item) { return !converted[item.id]; }); }
+      add(own(osm.fairways), STYLE.osmFairway, true);
+      add(own(osm.greens), STYLE.osmGreen, true);
+      add(own(osm.tees), STYLE.osmTee, true);
+      add(own(osm.bunkers), STYLE.osmBunker, true);
+      add(own(osm.water), STYLE.osmWater, true);
       if (tool === "order") drawOrderOsmHoles(osm.holes);
       else add(osm.holes, STYLE.osmHole, false);
       /* OSM sits under the overlay, so a placed shape is never hidden behind what OSM has. */
@@ -3214,6 +3250,9 @@
       var sourceScan = el["source-panel"].querySelector('[data-gd-source-test="scan"]');
       if (sourceScan) sourceScan.disabled = scanning;
       el.clear.disabled = !canEdit() || !session.features.length;
+      var convertible = session.course ? convertibleOsm().length : 0;
+      el.convert.disabled = !canEdit() || !convertible;
+      el.convert.textContent = convertible ? "Make OSM editable (" + convertible + ")" : "Make OSM editable";
       el.unnumber.disabled = !canEdit() || !session.features.some(function (f) { return f.hole; });
       el.run.disabled = !has || session.dirty;
       el.run.title = session.dirty ? "Wait for the overlay to save - the mapper reads what is saved" : "";
@@ -3349,7 +3388,11 @@
         setStatus("Could not load: " + (error && error.message || error), true);
       }).then(function () {
         busy = false;
-        if (!destroyed) { updateActions(); updateReadout(); updateHint(); updateBin(); }
+        if (destroyed) return;
+        /* A course with nothing in its overlay yet starts from what OSM has, ready to reshape. It
+           saves as a draft, which the mapper ignores until it is marked ready. */
+        if (session.loadedFor === id && !hasOverlay()) convertOsm(true);
+        updateActions(); updateReadout(); updateHint(); updateBin();
       });
     }
 
@@ -4162,6 +4205,7 @@
       if (file) uploadCourseMap(file);
     });
     el.clear.addEventListener("click", deleteOverlay);
+    el.convert.addEventListener("click", function () { convertOsm(false); });
     el.unnumber.addEventListener("click", clearHoleNumbers);
     el.ready.addEventListener("click", markReady);
     el.run.addEventListener("click", runMapper);
