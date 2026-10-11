@@ -817,12 +817,40 @@ export function forwardTeeHoles(holes) {
  * - North Course" the next - and without this check that mints a second row for
  * the same North card instead of updating the first. Structural sameness
  * (sameCourseCard), not the title, decides whether it is the same row. */
-export function resolveFacilityCardKey(existingRows, card, facilityKey) {
-  const match = (existingRows || []).find(row => sameCourseCard(
+function sameCardRow(existingRows, card) {
+  return (existingRows || []).find(row => sameCourseCard(
     { name: row.course_name, holes: Array.isArray(row.holes_json) ? row.holes_json : [] },
     card
   ));
+}
+export function resolveFacilityCardKey(existingRows, card, facilityKey) {
+  const match = sameCardRow(existingRows, card);
   return match ? match.course_key : scorecardCourseKey(card.name || "");
+}
+
+/* The name an admin's NEW card is stored under, when another of their cards has it.
+ *
+ * The key is the name, so two different cards with one name are one row and the
+ * later one wins. Foyle lost its 18-hole card that way: an admin pasted the 18 and
+ * then the par-3 nine, neither card carried a title, both took the facility's name,
+ * and the nine replaced the eighteen - the mapper then saw only the nine. A card
+ * that is structurally the same as a stored one keeps its name (it updates that
+ * row); a different card whose name another manual card holds gets its hole count
+ * added, and a number after that if even that is taken.
+ *
+ * Only manual cards are kept apart. An admin's card still replaces a scrape of the
+ * same name (the scrape is what was wrong), and a scrape never gets a row beside an
+ * admin's card: a misread copy of the same course would count as a second course. */
+const isManualCard = row => /manual/i.test(String((row && row.source) || ""));
+export function facilityCardName(existingRows, card, ownName) {
+  const own = String(ownName || "").trim();
+  if (!own || !isManualCard(card) || sameCardRow(existingRows, Object.assign({}, card, { name: own }))) return own;
+  const taken = new Set((existingRows || []).filter(isManualCard).map(row => row.course_key));
+  if (!taken.has(scorecardCourseKey(own))) return own;
+  const base = own + " (" + ((card && card.holes) || []).length + " holes)";
+  let name = base;
+  for (let n = 2; taken.has(scorecardCourseKey(name)); n++) name = base.replace(/\)$/, ", " + n + ")");
+  return name;
 }
 
 /* Engine card -> the shape scorecard-store's quality gate accepts: holes numbered
@@ -855,10 +883,11 @@ export function toStorePayload(card, courseName) {
    Returns null on a gappy card - same completeness contract as toStorePayload,
    since this is the row callers pass straight to the upsert. */
 export function facilityScorecardRow(card, courseName, facilityKey, existingRows) {
-  const payload = toStorePayload(card, card.name || courseName);
+  const named = Object.assign({}, card, { name: facilityCardName(existingRows, card, card.name || courseName) });
+  const payload = toStorePayload(named, named.name);
   if (!payload) return null;
   return {
-    course_key: resolveFacilityCardKey(existingRows, card, facilityKey),
+    course_key: resolveFacilityCardKey(existingRows, named, facilityKey),
     course_name: payload.courseName,
     facility_key: facilityKey || null,
     source: payload.source,
@@ -872,6 +901,17 @@ export function facilityScorecardRow(card, courseName, facilityKey, existingRows
     }],
     updated_at: new Date().toISOString()
   };
+}
+
+/* Every distinct card as rows, each one seeing the rows before it - so two new
+   cards in one batch cannot take the same name either. */
+export function facilityScorecardRows(cards, courseName, facilityKey, existingRows) {
+  const rows = [];
+  distinctCards(cards || []).forEach(card => {
+    const row = facilityScorecardRow(card, courseName, facilityKey, (existingRows || []).concat(rows));
+    if (row) rows.push(row);
+  });
+  return rows;
 }
 
 /* A high-confidence or manually confirmed cached identity is sticky. Refreshes

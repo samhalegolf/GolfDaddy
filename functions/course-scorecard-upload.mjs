@@ -124,7 +124,7 @@ export default async function courseScorecardUpload(req) {
 
   const plural = n => n === 1 ? "" : "s";
   const message = "Read " + cards.length + " card" + plural(cards.length) + " (" + cards.map(card => card.holes.length + " holes").join(", ") + "). "
-    + (stored.length ? "Stored. " : "Not stored - a card must run 1..n with par on every hole. ")
+    + (stored.length ? "Stored as " + stored.map(row => row.course_name).join(", ") + ". " : "Not stored - a card must run 1..n with par on every hole. ")
     + relabel.message;
 
   return json(200, Object.assign({ facilityKey, cards: cards.map(summariseCard), stored: stored.length, rejected }, relabel, { message }));

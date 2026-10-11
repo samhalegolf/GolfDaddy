@@ -355,5 +355,25 @@ function scorecardHtml(rows) {
     "a gappy card is not shareable, same contract as toStorePayload"
   );
 
+  /* Foyle: an 18 and a par-3 nine pasted with no titles both take the facility's
+     name. The nine must not replace the eighteen, in two uploads or in one. */
+  const eighteen = { name: "Foyle Golf Club", source: "manual-upload", holes: Array.from({ length: 18 }, (_, i) => ({ hole: i + 1, par: [4, 4, 3, 5, 4, 4, 3, 4, 5][i % 9] })) };
+  const parThree = { name: "Foyle Golf Club", source: "manual-upload", holes: Array.from({ length: 9 }, (_, i) => ({ hole: i + 1, par: 3 })) };
+  const first = r.facilityScorecardRows([eighteen], "Foyle Golf Club", "foyle", []);
+  const second = r.facilityScorecardRows([parThree], "Foyle Golf Club", "foyle", first);
+  assert.strictEqual(first[0].course_key, "foyle golf club");
+  assert.strictEqual(second[0].course_key, "foyle golf club (9 holes)", "a different card with a taken name gets its own row");
+  assert.strictEqual(second[0].course_name, "Foyle Golf Club (9 holes)");
+  const together = r.facilityScorecardRows([eighteen, parThree], "Foyle Golf Club", "foyle", []);
+  assert.deepStrictEqual(together.map(row => row.course_key), ["foyle golf club", "foyle golf club (9 holes)"], "two new cards in one upload stay two rows");
+  const again = r.facilityScorecardRows([eighteen], "Foyle Golf Club", "foyle", first.concat(second));
+  assert.strictEqual(again[0].course_key, "foyle golf club", "re-uploading the same card updates its row, it does not mint another");
+  const anotherNine = { name: "Foyle Golf Club", source: "manual-upload", holes: Array.from({ length: 9 }, (_, i) => ({ hole: i + 1, par: i === 4 ? 4 : 3 })) };
+  assert.strictEqual(r.facilityScorecardRows([anotherNine], "Foyle Golf Club", "foyle", first.concat(second))[0].course_key, "foyle golf club (9 holes, 2)");
+
+  const scrapedNine = Object.assign({}, parThree, { source: "club-site" });
+  assert.strictEqual(r.facilityScorecardRows([scrapedNine], "Foyle Golf Club", "foyle", first)[0].course_key, "foyle golf club",
+    "a scrape is never given a row beside an admin's card - the caller's replace rule decides");
+
   console.log("scorecard resolve tests passed");
 })().catch(error => { console.error(error); process.exit(1); });

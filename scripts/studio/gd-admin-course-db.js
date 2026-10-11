@@ -4845,14 +4845,14 @@ async function gdAdminCourseScorecardSend(courseId,files){
       body:JSON.stringify({courseId:courseId,files:files})
     });
     const data=await res.json().catch(()=>null);
-    if(res.status===403){gdAdminCourseScorecardSetStatus(courseId,"Admin only");return false;}
-    if(res.status===404){gdAdminCourseScorecardSetStatus(courseId,(data&&data.error)||"No published course found");return false;}
+    if(res.status===403){gdAdminCourseScorecardFail(courseId,"Admin only");return false;}
+    if(res.status===404){gdAdminCourseScorecardFail(courseId,(data&&data.error)||"No published course found");return false;}
     if(res.status===422){
       const why=(data&&data.rejected||[]).map(r=>(r.name||"pasted text")+": "+gdAdminCourseScorecardReason(r.reason)).join("; ");
-      gdAdminCourseScorecardSetStatus(courseId,"No card found. "+why);
+      gdAdminCourseScorecardFail(courseId,"No card found. "+why);
       return false;
     }
-    if(!res.ok){gdAdminCourseScorecardSetStatus(courseId,"Import failed ("+res.status+")");return false;}
+    if(!res.ok){gdAdminCourseScorecardFail(courseId,"Import failed ("+res.status+")");return false;}
     gdAdminCourseScorecardSetStatus(courseId,(data&&data.message)||"Imported");
     gdAdminCourseVisualToast((data&&data.message)||"Scorecard imported");
     /* The card is stored; the paste box has done its job. */
@@ -4863,9 +4863,15 @@ async function gdAdminCourseScorecardSend(courseId,files){
     }
     return true;
   }catch(error){
-    gdAdminCourseScorecardSetStatus(courseId,"Import failed to send");
+    gdAdminCourseScorecardFail(courseId,"Import failed to send");
     return false;
   }
+}
+/* A failure is toasted as well: a card dropped on a closed row has no status line on
+   screen, and the admin would otherwise hear nothing at all. */
+function gdAdminCourseScorecardFail(courseId,text){
+  gdAdminCourseScorecardSetStatus(courseId,text);
+  gdAdminCourseVisualToast("Scorecard: "+text);
 }
 function gdAdminCourseScorecardReason(code){
   return code==="no-card-found"?"no hole/par table in it"
@@ -4949,15 +4955,15 @@ async function gdAdminCourseScorecardOcr(courseId,file){
       }
     });
     if(!result||!result.ok){
-      gdAdminCourseScorecardSetStatus(courseId,"OCR could not read "+file.name+(result&&result.error?" - "+result.error:""));
+      gdAdminCourseScorecardFail(courseId,"OCR could not read "+file.name+(result&&result.error?" - "+result.error:""));
       return null;
     }
     const text=gdAdminCourseScorecardGridsToText(result.grids);
-    if(!text.trim()){gdAdminCourseScorecardSetStatus(courseId,"OCR found no table in "+file.name);return null;}
+    if(!text.trim()){gdAdminCourseScorecardFail(courseId,"OCR found no table in "+file.name);return null;}
     gdAdminCourseScorecardSetStatus(courseId,"OCR read "+file.name+" - check the text, then import");
     return {text:text,unit:result.unit||""};
   }catch(error){
-    gdAdminCourseScorecardSetStatus(courseId,"OCR failed: "+((error&&error.message)||error));
+    gdAdminCourseScorecardFail(courseId,"OCR failed: "+((error&&error.message)||error));
     return null;
   }finally{
     if(worker&&typeof worker.terminate==="function")Promise.resolve(worker.terminate()).catch(()=>{});

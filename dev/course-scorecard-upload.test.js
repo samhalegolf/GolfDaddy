@@ -148,7 +148,7 @@ test("a pasted tab-separated card is read, stored as manual and named for the fa
   assert.strictEqual(row.sources_json[0].resolution.confirmed, true);
   assert.strictEqual(res.body.want, 1);
   assert.strictEqual(res.body.distinct, 1);
-  assert.match(res.body.message, /^Read 1 card \(18 holes\)\. Stored\./);
+  assert.match(res.body.message, /^Read 1 card \(18 holes\)\. Stored as Pasted Links\./);
 });
 
 test("an upload replaces a scraped card for the same course", async () => {
