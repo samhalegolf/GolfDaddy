@@ -121,10 +121,12 @@ export function parseScorecardGrid(grid, options = {}) {
 
   const par = {}, handicap = {}, tees = [];
   let unit = options.unit || null;
+  /* A card with no label column - just numbers - has its first hole in column 0.
+     Every row is then unlabelled and is read by its values alone. */
+  const labelled = !columns.has(0);
   for (let r = headerRow + 1; r < grid.length; r++) {
     const row = grid[r] || [];
-    const label = cleanCell(row[0]);
-    if (!label) continue;
+    const label = labelled ? cleanCell(row[0]) : "";
 
     const values = {};
     columns.forEach((hole, column) => {
@@ -140,12 +142,22 @@ export function parseScorecardGrid(grid, options = {}) {
       tees.push({ name: label, distances: values });
       continue;
     }
-    if (SKIP_LABEL.test(label)) continue;
+    if (label && SKIP_LABEL.test(label)) continue;
     /* Par is 3-6 and a stroke index is 1-18; a distance row is none of those, so
-       a mislabelled or unlabelled tee row is still recognisable by its values. */
+       a mislabelled or unlabelled row is still recognisable by its values: all 3s,
+       4s and 5s is par, distinct small numbers are the index, anything else is a
+       tee. Only the first such par or index row is kept - a second one is a
+       ladies' par or index, which the label rules above would have named. */
     const numbers = Object.values(values);
-    if (numbers.every(n => n >= 1 && n <= 18) && numbers.length > 3) continue;
-    tees.push({ name: label, distances: values });
+    if (numbers.length > 3 && numbers.every(n => n >= 3 && n <= 6)) {
+      if (!Object.keys(par).length) Object.assign(par, values);
+      continue;
+    }
+    if (numbers.length > 3 && numbers.every(n => n >= 1 && n <= 18)) {
+      if (!Object.keys(handicap).length && new Set(numbers).size === numbers.length) Object.assign(handicap, values);
+      continue;
+    }
+    tees.push({ name: label || "Tee " + (tees.length + 1), distances: values });
   }
 
   if (!tees.length && !Object.keys(par).length) return null;
@@ -280,9 +292,33 @@ export function splitGridAtHeaderRows(grid) {
   return blocks;
 }
 
+/* Rows <-> columns. A card printed down the page - one row per hole, with Hole,
+   Par, SI and the tees as columns - is the same table turned round:
+
+       Hole  Par  SI  Yards            Hole   1    2    3  ...
+        1     4   11   300      ->     Par    4    3    4  ...
+        2     3   15   119             SI    11   15    9  ...
+        ...                            Yards 300  119  333  ...
+
+   Short rows are padded so no value slides into a neighbour's column. */
+export function transposeGrid(grid) {
+  const rows = grid || [];
+  const width = rows.reduce((max, row) => Math.max(max, (row || []).length), 0);
+  const out = Array.from({ length: width }, (_, c) => rows.map(row => (row || [])[c] ?? ""));
+  out.label = grid && grid.label;
+  return out;
+}
+
+/* A grid's blocks as printed, or turned round when no row of it counts the holes
+   but a column does. */
+function gridBlocks(grid) {
+  const blocks = splitGridAtHeaderRows(grid);
+  return blocks.length ? blocks : splitGridAtHeaderRows(transposeGrid(grid));
+}
+
 export function parseScorecardCards(grids, options = {}) {
   const groups = [];
-  (grids || []).flatMap(splitGridAtHeaderRows).forEach(grid => {
+  (grids || []).flatMap(gridBlocks).forEach(grid => {
     const parsed = parseScorecardGrid(grid, options);
     if (!parsed) return;
     const label = cleanCardLabel(grid && grid.label);
