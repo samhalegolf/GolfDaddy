@@ -373,6 +373,109 @@
     return out.length >= 3 ? out.map(f.toLL) : null;
   }
 
+  /* ---- reshaping by distance ----
+     "Bigger" and "smaller" on a green or a fairway grow or shrink the outline evenly - every
+     part of its edge moves the same distance, so a long thin green stays long and thin rather
+     than swelling about its middle or being re-wanded rounder. Done on a fine grid, like
+     merging: the outlines are painted on, the paint is grown or eaten back by a true distance,
+     and the edge is traced again.
+
+     closeM bridges cut-ins first: the paint is grown by closeM and eaten back by the same, so
+     a notch narrower than about twice closeM - an overhanging tree, a shadow - fills in, while
+     the general shape and its outward bends stay as they were. The fairway's ↑ ↓ use it; a
+     straight edge is never forced on it. */
+  var RESHAPE_MIN_CELL_M = 0.2;
+  var RESHAPE_MAX_CELLS = 500;
+
+  function paintRing(mask, w, h, xy, x0, y0, cell) {
+    for (var gy = 0; gy < h; gy++) {
+      var y = y0 + (gy + 0.5) * cell, xs = [];
+      for (var i = 0, j = xy.length - 1; i < xy.length; j = i++) {
+        var a = xy[i], b = xy[j];
+        if ((a.y > y) !== (b.y > y)) xs.push(a.x + (y - a.y) * (b.x - a.x) / (b.y - a.y));
+      }
+      xs.sort(function (p, q) { return p - q; });
+      for (var k = 0; k + 1 < xs.length; k += 2) {
+        var c0 = Math.max(0, Math.ceil((xs[k] - x0) / cell - 0.5)), c1 = Math.min(w - 1, Math.floor((xs[k + 1] - x0) / cell - 0.5));
+        for (var gx = c0; gx <= c1; gx++) mask[gy * w + gx] = 1;
+      }
+    }
+  }
+
+  /* rings (lat/lng outlines, painted together - so two rings come back as one) grown by growM
+     metres (negative shrinks), after cut-ins up to about 2 x closeM wide are bridged. Null when
+     nothing is left. */
+  function reshapeOutline(rings, opts) {
+    var o = opts || {};
+    var list = (rings || []).filter(function (r) { return r && r.length >= 3; });
+    if (!list.length) return null;
+    var grow = Number(o.growM) || 0, close = Math.max(0, Number(o.closeM) || 0);
+    var f = frame(centroid(list[0]));
+    var xys = list.map(function (r) { return r.map(f.toXY); });
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    xys.forEach(function (xy) { xy.forEach(function (p) { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); }); });
+    var pad = Math.max(0, grow) + close + 2;
+    var cell = Math.max(RESHAPE_MIN_CELL_M, (Math.max(maxX - minX, maxY - minY) + 2 * pad) / RESHAPE_MAX_CELLS);
+    var x0 = minX - pad, y0 = minY - pad;
+    var w = Math.ceil((maxX - minX + 2 * pad) / cell), h = Math.ceil((maxY - minY + 2 * pad) / cell);
+    var mask = new Uint8Array(w * h), i;
+    xys.forEach(function (xy) { paintRing(mask, w, h, xy, x0, y0, cell); });
+    function grown(m, r) { var d = distanceTo(m, w, h), out = new Uint8Array(w * h); for (var k = 0; k < out.length; k++) out[k] = d[k] <= r ? 1 : 0; return out; }
+    function eaten(m, r) {
+      var outside = new Uint8Array(w * h);
+      for (var k = 0; k < outside.length; k++) outside[k] = m[k] ? 0 : 1;
+      var d = distanceTo(outside, w, h), out = new Uint8Array(w * h);
+      for (k = 0; k < out.length; k++) out[k] = d[k] > r ? 1 : 0;
+      return out;
+    }
+    if (close > 0) mask = eaten(grown(mask, close / cell), close / cell);
+    if (grow > 0) mask = grown(mask, grow / cell);
+    else if (grow < 0) mask = eaten(mask, -grow / cell);
+    for (i = 0; i < mask.length && !mask[i]; i++);
+    if (i === mask.length) return null;
+    var loop = maskOutline(mask, w, h, o.maxPoints || DETAIL_MAX_POINTS);
+    if (!loop) return null;
+    return loop.map(function (g) { return f.toLL({ x: x0 + g.x * cell, y: y0 + g.y * cell }); });
+  }
+
+  /* Is a lat/lng point inside a lat/lng outline. */
+  function insideLatLngRing(pt, ring) {
+    if (!pt || !ring || ring.length < 3) return false;
+    var f = frame(pt);
+    return insideRing({ x: 0, y: 0 }, ring.map(f.toXY));
+  }
+
+  /* A green's collar: the fringe round it, and a neck out to its fairway.
+
+     ring is the collar already found round the green (its outline grown by a few metres, or
+     the wand's answer from there). With a fairway point `to`, a neck runs from the collar to
+     it: as wide as most of the green where it leaves, pinched to neckM where it meets the
+     fairway, and a couple of metres into the fairway so the two touch. Painted together and
+     lightly bridged, so the neck flows out of the collar rather than standing on it. */
+  function collarOutline(green, ring, to, opts) {
+    var o = opts || {};
+    var rings = [ring];
+    if (to) {
+      var f = frame(centroid(green));
+      var gxy = green.map(f.toXY), t = f.toXY(to);
+      var dir = unit(t), across = perp(dir);
+      /* Where the green ends towards the fairway, and how wide it is across that way. */
+      var reach = 0, lo = Infinity, hi = -Infinity;
+      gxy.forEach(function (p) {
+        reach = Math.max(reach, p.x * dir.x + p.y * dir.y);
+        var s = p.x * across.x + p.y * across.y; lo = Math.min(lo, s); hi = Math.max(hi, s);
+      });
+      var span = len(t);
+      if (span > reach + 1) {
+        var half = Math.max((o.neckM || 8) / 2, ((hi - lo) * 0.6) / 2), pinch = (o.neckM || 8) / 2;
+        var from = scale(dir, reach * 0.5), end = scale(dir, span + 2);
+        var neck = [add(from, scale(across, half)), add(end, scale(across, pinch)), add(end, scale(across, -pinch)), add(from, scale(across, -half))];
+        rings.push(neck.map(f.toLL));
+      }
+    }
+    return reshapeOutline(rings, { closeM: o.closeM != null ? o.closeM : 3 });
+  }
+
   /* The outer edge of the biggest filled region on a w x h grid of 0/1 cells, as grid corners
      ({x, y} in cell units, corner (0,0) at the grid's top-left). Every cell side between filled
      and empty is an edge, walked with the filled cell on its left, so edges chain head to tail
@@ -1223,6 +1326,7 @@
     growFromArea: growFromArea, colourField: colourField, colourModel: colourModel, circleSamples: circleSamples,
     treeFinder: treeFinder, TREE_FINDER_LEVELS: TREE_FINDER_LEVELS, TREE_FINDER_MAX: TREE_FINDER_MAX,
     floodSelect: floodSelect, maskOutline: maskOutline,
+    reshapeOutline: reshapeOutline, collarOutline: collarOutline, insideLatLngRing: insideLatLngRing,
     DETAIL_MAX_POINTS: DETAIL_MAX_POINTS, keyCorners: keyCorners, nearestOnRing: nearestOnRing, bendRing: bendRing, tidyBend: tidyBend,
     SEAM_GAP_M: SEAM_GAP_M, seamPair: seamPair, pointKey: pointKey, weldRuns: weldRuns, applyWeld: applyWeld
   };

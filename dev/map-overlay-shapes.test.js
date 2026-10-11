@@ -383,6 +383,50 @@ test("a seam dragged on one side moves the other side with it", () => {
   assert.ok(b.some(p => shapes.pointKey(p) === shapes.pointKey(mid)));
 });
 
+/* ---- ↑ ↓ on a green or fairway, and the collar ---- */
+const RC = { lat: 55.04, lng: -7.29 };
+const RK = Math.cos(RC.lat * Math.PI / 180);
+function rLL(x, y) { return { lat: RC.lat + y / 111320, lng: RC.lng + x / (111320 * RK) }; }
+function rXY(p) { return { x: (p.lng - RC.lng) * 111320 * RK, y: (p.lat - RC.lat) * 111320 }; }
+function rSpan(ring) {
+  const xy = ring.map(rXY);
+  return { w: Math.max(...xy.map(p => p.x)) - Math.min(...xy.map(p => p.x)), h: Math.max(...xy.map(p => p.y)) - Math.min(...xy.map(p => p.y)) };
+}
+function rArea(ring) {
+  const xy = ring.map(rXY);
+  let a = 0;
+  for (let i = 0; i < xy.length; i++) { const p = xy[i], q = xy[(i + 1) % xy.length]; a += p.x * q.y - q.x * p.y; }
+  return Math.abs(a / 2);
+}
+const LONG_GREEN = Array.from({ length: 48 }, (_, i) => { const a = i / 48 * 2 * Math.PI; return rLL(Math.cos(a) * 15, Math.sin(a) * 6); });
+
+test("bigger and smaller move a green's whole edge the same distance - a long green stays long", () => {
+  const big = rSpan(shapes.reshapeOutline([LONG_GREEN], { growM: 2 }));
+  const small = rSpan(shapes.reshapeOutline([LONG_GREEN], { growM: -2 }));
+  assert.ok(Math.abs(big.w - 34) < 0.8 && Math.abs(big.h - 16) < 0.8, "2m bigger all round: " + JSON.stringify(big));
+  assert.ok(Math.abs(small.w - 26) < 0.8 && Math.abs(small.h - 8) < 0.8, "2m smaller all round: " + JSON.stringify(small));
+  assert.strictEqual(shapes.reshapeOutline([LONG_GREEN], { growM: -7 }), null, "shrunk past nothing is nothing");
+});
+
+test("smoothing a fairway bridges a tree's cut-in and leaves the rest of the edge where it was", () => {
+  const notched = [rLL(-50, -15), rLL(50, -15), rLL(50, 15), rLL(3, 15), rLL(3, 5), rLL(-3, 5), rLL(-3, 15), rLL(-50, 15)];
+  const smoothed = shapes.reshapeOutline([notched], { closeM: 5 });
+  assert.ok(rArea(smoothed) > 2970, "the 6m cut-in fills: " + rArea(smoothed).toFixed(0));
+  const span = rSpan(smoothed);
+  assert.ok(Math.abs(span.w - 100) < 1 && Math.abs(span.h - 30) < 1, "no wider or longer than it was: " + JSON.stringify(span));
+});
+
+test("a collar rings the green and necks out to its fairway", () => {
+  const ring = shapes.reshapeOutline([LONG_GREEN], { growM: 2 });
+  const collar = shapes.collarOutline(LONG_GREEN, ring, rLL(60, 0), { neckM: 8 });
+  const xy = collar.map(rXY);
+  assert.ok(Math.max(...xy.map(p => p.x)) >= 60, "the neck reaches the fairway");
+  assert.ok(Math.min(...xy.map(p => p.x)) <= -16.5, "the collar runs right round the green");
+  assert.ok(shapes.insideLatLngRing(RC, collar), "the green sits inside its collar");
+  const lonely = shapes.collarOutline(LONG_GREEN, ring, null, {});
+  assert.ok(Math.abs(rSpan(lonely).w - 34) < 1, "with no fairway it is just the ring");
+});
+
 let failed = 0;
 tests.forEach(t => {
   try { t.fn(); console.log("  ok  " + t.name); }
