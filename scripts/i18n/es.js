@@ -265,6 +265,9 @@
     "scorecard.parForHole": "Par del hoyo {n}",
     "scorecard.decrease": "Restar un golpe en el hoyo {n}",
     "scorecard.increase": "Sumar un golpe en el hoyo {n}",
+    "scorecard.indexShort": "Hcp",
+    "scorecard.out": "Ida",
+    "scorecard.in": "Vuelta",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Crear cuenta",

@@ -269,6 +269,9 @@
     "scorecard.parForHole": "Par jamky {n}",
     "scorecard.decrease": "Snížit skóre jamky {n}",
     "scorecard.increase": "Zvýšit skóre jamky {n}",
+    "scorecard.indexShort": "HCP",
+    "scorecard.out": "Ven",
+    "scorecard.in": "Dom",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Vytvořit účet",

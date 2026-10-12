@@ -15,14 +15,19 @@
  * cannot quietly replace it) and, when the facility's cards now cover every
  * sibling course, name the courses from them (lib/gd-facility-scorecards).
  *
- * POST /api/course-scorecard-upload  { courseId, files:[{ name, mediaType, text }] }
+ * With target: "course" the card goes straight to the course asked for instead: stored under
+ * that course's own name, which is the card GPS Play's scorecard shows for it, and nothing is
+ * renamed. That is for a course that mapped fine and only wants its card - no resolver, no
+ * relabelling. One card at a time.
+ *
+ * POST /api/course-scorecard-upload  { courseId, files:[{ name, mediaType, text }], target? }
  *   admin-auth gated. Returns the cards read, what was rejected and why, and the
  *   relabel outcome. 422 when nothing in the upload held a card.
  */
 
 import { cardsFromUpload } from "./lib/gd-scorecard-upload-core.mjs";
-import { loadFacilityChildren, facilityNameOf, fetchFacilityRows, cardsFromRows, storeFacilityCards, relabelFacility } from "./lib/gd-facility-scorecards.mjs";
-import { distinctCards } from "./lib/gd-scorecard-resolve.mjs";
+import { loadFacilityChildren, facilityNameOf, fetchFacilityRows, cardsFromRows, storeFacilityCards, relabelFacility, SCORECARDS_TABLE } from "./lib/gd-facility-scorecards.mjs";
+import { distinctCards, facilityScorecardRow } from "./lib/gd-scorecard-resolve.mjs";
 import { verifiedAdminEmail } from "./lib/gd-map-overlay-store.mjs";
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 
@@ -80,6 +85,27 @@ export function summariseCard(card) {
   };
 }
 
+/* The card as this course's own: keyed by the course's name, so GPS Play finds it, replacing
+   whatever card held that name. */
+async function storeCourseCard(cards, course, facilityKey, rejected) {
+  const distinct = distinctCards(cards);
+  if (distinct.length !== 1) {
+    return json(422, { error: "Read " + distinct.length + " different cards - paste just this course's card", rejected, cards: cards.map(summariseCard) });
+  }
+  const name = course.course_name || course.course_id;
+  const row = facilityScorecardRow(Object.assign({}, distinct[0], { name }), name, facilityKey, []);
+  if (!row) {
+    return json(422, { error: "The card must run 1..n with par on every hole", rejected, cards: cards.map(summariseCard) });
+  }
+  await supabaseFetch(SCORECARDS_TABLE + "?on_conflict=course_key", {
+    method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify([row])
+  });
+  return json(200, {
+    facilityKey, cards: [summariseCard(distinct[0])], stored: 1, rejected, target: "course",
+    message: "Read 1 card (" + distinct[0].holes.length + " holes). Stored as " + name + "'s scorecard - GPS Play shows it for this course."
+  });
+}
+
 export default async function courseScorecardUpload(req) {
   if (req.method === "OPTIONS") return json(200, { ok: true });
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
@@ -116,6 +142,8 @@ export default async function courseScorecardUpload(req) {
     sourceUrl: "upload:" + (card.from || "pasted") + " by " + adminEmail,
     resolution: { confirmed: true, confidence: 1, by: adminEmail, at: new Date().toISOString() }
   }));
+  if (payload.target === "course") return storeCourseCard(cards, pinned, facilityKey, rejected);
+
   const stored = await storeFacilityCards(supabaseFetch, { cards, name: facilityName, facilityKey });
 
   /* The facility's full evidence now, this upload included, decides the names. */

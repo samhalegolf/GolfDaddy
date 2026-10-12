@@ -1,18 +1,22 @@
-/* Scorecard: score entry + running total. Par comes from the existing
-   read-only cache (GET /api/scorecard-store) the legacy scraper already built
-   and keeps warm — the fresh app only reads it, exactly like
-   course-package.js already does for other data, never
-   reviving the scraper itself (the app authors nothing). Fail-open: no cached
-   card for this course is a normal state, holes just render with blank/
-   editable par, same as an unmapped hole falls back to the live map. */
+/* Scorecard: the course's card, score entry and a running total. The card comes from the
+   shared store (GET /api/scorecard-store) - the one stored under the course's name, which
+   is the card an admin edits or attaches in Studio. The app only reads it (the app authors
+   nothing). It shows what the card has: par always, the stroke index when the card printed
+   one, and a distance for the tee picked when it has distances - with a tee picker only when
+   there is more than one tee. Fail-open: no card is a normal state, holes render with a
+   blank, editable par, same as an unmapped hole falls back to the live map. */
 (function () {
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
   var ENDPOINT = "/api/scorecard-store";
   var TIMEOUT_MS = 4000;
   var STORE_KEY = "clarity:scorecard:v1";
+  var TEE_KEY = "clarity:scorecard:tee:v1";
 
   var parByHole = {};   // {1: 4, 2: 3, ...} — from the cache, or blank/editable
+  /* The rest of the card: {holes: {n: {index, metres, tees: {name: metres}}}, tees: [name]}. */
+  var card = { holes: {}, tees: [] };
+  var teeName = "";
   var courseKey = null;
   var loadToken = 0;
 
@@ -52,21 +56,52 @@
     parByHole[hole] = par > 0 ? par : null;
   }
 
-  async function fetchPar(key) {
-    if (typeof fetch !== "function") return {};
+  /* The stored holes as {par: {n: par}, card: {holes, tees}}: tees in the order the card
+     lists them, each hole's distance by tee, its plain distance (metres) and its index. */
+  function readCard(holes) {
+    var par = {}, out = { holes: {}, tees: [] };
+    (holes || []).forEach(function (h) {
+      var n = Number(h && h.hole);
+      if (!(n > 0)) return;
+      if (Number(h.par) > 0) par[n] = Number(h.par);
+      var tees = {};
+      if (h.tees && typeof h.tees === "object") {
+        Object.keys(h.tees).forEach(function (name) {
+          var m = Number(h.tees[name] && h.tees[name].metres);
+          if (m > 0) { tees[name] = m; if (out.tees.indexOf(name) < 0) out.tees.push(name); }
+        });
+      }
+      out.holes[n] = { index: Number(h.index) > 0 ? Number(h.index) : null, metres: Number(h.metres) > 0 ? Number(h.metres) : null, tees: tees };
+    });
+    return { par: par, card: out };
+  }
+
+  function savedTee() { try { return localStorage.getItem(TEE_KEY) || ""; } catch (e) { return ""; } }
+  function chooseTee(name) {
+    teeName = name || "";
+    try { localStorage.setItem(TEE_KEY, teeName); } catch (e) {}
+    render();
+  }
+  /* A hole's distance for the tee picked, else its plain distance. */
+  function distanceFor(hole) {
+    var h = card.holes[hole];
+    if (!h) return null;
+    if (teeName && h.tees[teeName] > 0) return h.tees[teeName];
+    return h.metres;
+  }
+
+  async function fetchCard(key) {
+    if (typeof fetch !== "function") return readCard([]);
     var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     var timer = controller ? setTimeout(function () { controller.abort(); }, TIMEOUT_MS) : null;
     try {
       var res = await fetch(ENDPOINT + "?courseKey=" + encodeURIComponent(key),
         { headers: { Accept: "application/json" }, signal: controller ? controller.signal : undefined });
-      if (!res.ok) return {};
+      if (!res.ok) return readCard([]);
       var body = await res.json();
-      var holes = body && body.found && body.scorecard && Array.isArray(body.scorecard.holes) ? body.scorecard.holes : [];
-      var out = {};
-      holes.forEach(function (h) { if (h && Number(h.hole) > 0 && Number(h.par) > 0) out[h.hole] = Number(h.par); });
-      return out;
+      return readCard(body && body.found && body.scorecard && Array.isArray(body.scorecard.holes) ? body.scorecard.holes : []);
     } catch (e) {
-      return {};
+      return readCard([]);
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -111,13 +146,102 @@
     }
     var strokes = courseScores();
     var currentHole = (app.marshal && app.marshal.round().hole) || 0;
+    var holes = holesToRender();
+    var cols = columns(holes);
+    renderTeePicker(list);
     list.textContent = "";
-    holesToRender().forEach(function (hole) {
-      list.appendChild(renderRow(hole, strokes[hole] || 0, hole === currentHole));
+    list.appendChild(renderHeader(cols));
+    holes.forEach(function (hole) {
+      list.appendChild(renderRow(hole, strokes[hole] || 0, hole === currentHole, cols));
+    });
+    renderSums(list, holes, strokes, cols);
+  }
+
+  /* Only what the card has: SI when it printed a stroke index, a distance when it has one. */
+  function columns(holes) {
+    return {
+      index: holes.some(function (h) { return card.holes[h] && card.holes[h].index; }),
+      distance: holes.some(function (h) { return distanceFor(h) > 0; })
+    };
+  }
+
+  function unitLabel() { return app.gpsSettings && app.gpsSettings.unitLabel ? app.gpsSettings.unitLabel() : "m"; }
+  function showDistance(metres) {
+    if (!(metres > 0)) return "";
+    var v = app.gpsSettings && app.gpsSettings.toDisplay ? app.gpsSettings.toDisplay(metres) : Math.round(metres);
+    return v == null ? "" : String(v);
+  }
+
+  function cellText(className, text, key) {
+    var el = document.createElement("span");
+    el.className = className;
+    if (key) window.GDI18n.set(el, key); else el.textContent = text;
+    return el;
+  }
+
+  function renderHeader(cols) {
+    var row = document.createElement("div");
+    row.className = "scoreRow scoreHead";
+    row.appendChild(cellText("scoreHole", "#"));
+    row.appendChild(cellText("scorePar", "", "common.parWord"));
+    if (cols.index) row.appendChild(cellText("scoreIndex", "", "scorecard.indexShort"));
+    if (cols.distance) row.appendChild(cellText("scoreDistance", unitLabel()));
+    row.appendChild(cellText("scoreStrokes", "", "logged.score"));
+    return row;
+  }
+
+  /* A tee picker above the card, only when the card has more than one tee. */
+  function renderTeePicker(list) {
+    var picker = document.getElementById("scoreTee");
+    if (card.tees.length < 2) { if (picker) picker.parentNode.removeChild(picker); return; }
+    if (!picker) {
+      picker = document.createElement("label");
+      picker.id = "scoreTee";
+      picker.className = "scoreTee";
+      var label = document.createElement("span");
+      window.GDI18n.set(label, "scorePage.teeMarker");
+      picker.appendChild(label);
+      var select = document.createElement("select");
+      select.addEventListener("change", function () { chooseTee(select.value); });
+      picker.appendChild(select);
+      list.parentNode.insertBefore(picker, list);
+    }
+    var sel = picker.querySelector("select");
+    sel.textContent = "";
+    card.tees.forEach(function (name) {
+      var option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      sel.appendChild(option);
+    });
+    sel.value = teeName;
+  }
+
+  /* Out, In and Total for an 18 (just Total otherwise): par, the distance from the tee
+     picked and the strokes so far. */
+  function renderSums(list, holes, strokes, cols) {
+    var groups = holes.length === 18
+      ? [["scorecard.out", holes.slice(0, 9)], ["scorecard.in", holes.slice(9)], ["bagPage.total", holes]]
+      : [["bagPage.total", holes]];
+    groups.forEach(function (group) {
+      var par = 0, metres = 0, played = 0;
+      group[1].forEach(function (h) {
+        par += Number(parByHole[h]) || 0;
+        metres += Number(distanceFor(h)) || 0;
+        played += Number(strokes[h]) || 0;
+      });
+      var row = document.createElement("div");
+      row.className = "scoreRow scoreSum";
+      row.appendChild(cellText("scoreHole", "", group[0]));
+      row.appendChild(cellText("scorePar", par ? String(par) : ""));
+      if (cols.index) row.appendChild(cellText("scoreIndex", ""));
+      if (cols.distance) row.appendChild(cellText("scoreDistance", showDistance(metres)));
+      row.appendChild(cellText("scoreStrokes", played ? String(played) : "–"));
+      list.appendChild(row);
     });
   }
 
-  function renderRow(hole, strokes, isCurrent) {
+  function renderRow(hole, strokes, isCurrent, cols) {
     var row = document.createElement("div");
     row.className = "scoreRow" + (isCurrent ? " currentHole" : "");
 
@@ -168,6 +292,8 @@
 
     row.appendChild(holeEl);
     row.appendChild(parEl);
+    if (cols.index) row.appendChild(cellText("scoreIndex", card.holes[hole] && card.holes[hole].index ? String(card.holes[hole].index) : ""));
+    if (cols.distance) row.appendChild(cellText("scoreDistance", showDistance(distanceFor(hole))));
     row.appendChild(strokesEl);
     return row;
   }
@@ -180,9 +306,13 @@
       var token = ++loadToken;
       courseKey = app.courseKey(key);
       parByHole = {};
-      var found = await fetchPar(scorecardCourseKey(name || key));
+      card = { holes: {}, tees: [] };
+      var found = await fetchCard(scorecardCourseKey(name || key));
       if (token !== loadToken) return;   // superseded: drop silently
-      parByHole = found;
+      parByHole = found.par;
+      card = found.card;
+      var saved = savedTee();
+      teeName = card.tees.indexOf(saved) >= 0 ? saved : (card.tees[0] || "");
       render();
     },
     open: function () {

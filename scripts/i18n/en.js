@@ -271,6 +271,9 @@
     "scorecard.parForHole": "Par for hole {n}",
     "scorecard.decrease": "Decrease score for hole {n}",
     "scorecard.increase": "Increase score for hole {n}",
+    "scorecard.indexShort": "SI",
+    "scorecard.out": "Out",
+    "scorecard.in": "In",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Create account",

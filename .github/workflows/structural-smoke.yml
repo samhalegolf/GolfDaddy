@@ -121,6 +121,9 @@ jobs:
           node dev/map-overlay-core.test.js
           node dev/play-order-core.test.js
           node dev/overlay-owner.test.js
+          node dev/course-scorecards.test.js
+          node dev/scorecard-edit-core.test.js
+          node dev/app-scorecard.test.js
           node dev/overlay-georef-core.test.js
           node dev/ai-scan-core.test.js
           node dev/course-map-ai-scan.test.js

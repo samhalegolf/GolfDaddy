@@ -269,6 +269,9 @@
     "scorecard.parForHole": "Par za rupu {n}",
     "scorecard.decrease": "Smanji rezultat za rupu {n}",
     "scorecard.increase": "Povećaj rezultat za rupu {n}",
+    "scorecard.indexShort": "HCP",
+    "scorecard.out": "Van",
+    "scorecard.in": "Unutra",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Izradi račun",

@@ -265,6 +265,9 @@
     "scorecard.parForHole": "Par voor hole {n}",
     "scorecard.decrease": "Score voor hole {n} verlagen",
     "scorecard.increase": "Score voor hole {n} verhogen",
+    "scorecard.indexShort": "Hcp",
+    "scorecard.out": "Uit",
+    "scorecard.in": "In",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Account aanmaken",

@@ -269,6 +269,9 @@
     "scorecard.parForHole": "Par pentru gaura {n}",
     "scorecard.decrease": "Scade scorul pentru gaura {n}",
     "scorecard.increase": "Crește scorul pentru gaura {n}",
+    "scorecard.indexShort": "HCP",
+    "scorecard.out": "Dus",
+    "scorecard.in": "Întors",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Creează cont",

@@ -130,6 +130,31 @@ test("a card from another facility cannot be renamed through this course", async
   assert.strictEqual((await handler(request("POST", { courseId: "foyle-golf-club", key: "elsewhere", label: "X" }, "admin-token"))).status, 404);
 });
 
+test("the card stored under this course's own name is marked as GPS Play's, and opens as rows", async () => {
+  stubWorld(foyle());
+  const res = await parse(await handler(request("GET", null, "admin-token", "?courseId=foyle-golf-club")));
+  assert.deepStrictEqual(res.body.cards.map(c => c.gps), [true, false]);
+  assert.strictEqual(res.body.cards[0].card.holes.length, 18);
+  assert.deepStrictEqual(res.body.cards[0].card.tees, [], "par only - no distance rows");
+});
+
+test("a card edited by hand is saved over the stored one, checked, and marked manual and confirmed", async () => {
+  const world = foyle();
+  const calls = stubWorld(world);
+  const card = { tees: ["White", "Red"], holes: Array.from({ length: 9 }, (_, i) => ({ hole: i + 1, par: 3, index: i + 1, distances: [120 + i, 100 + i] })) };
+  const res = await parse(await handler(request("POST", { courseId: "foyle-golf-club", key: "foyle golf club - course 2", action: "save", card }, "admin-token")));
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  const patch = calls.cardPatches[0].body;
+  assert.strictEqual(patch.holes_json[0].metres, 120);
+  assert.deepStrictEqual(patch.holes_json[0].tees, { White: { metres: 120 }, Red: { metres: 100 } });
+  assert.strictEqual(patch.source, "manual-upload", "a manual card stays manual");
+  assert.strictEqual(patch.sources_json[0].resolution.edited, true);
+  const bad = Object.assign({}, card, { holes: card.holes.map((h, i) => i === 3 ? Object.assign({}, h, { par: 9 }) : h) });
+  const refused = await parse(await handler(request("POST", { courseId: "foyle-golf-club", key: "foyle golf club - course 2", action: "save", card: bad }, "admin-token")));
+  assert.strictEqual(refused.status, 400);
+  assert.match(refused.body.error, /Hole 4 needs a par/);
+});
+
 (async function run() {
   process.env.SUPABASE_URL = "https://stub.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-stub";

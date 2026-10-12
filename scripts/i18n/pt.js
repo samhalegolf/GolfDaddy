@@ -265,6 +265,9 @@
     "scorecard.parForHole": "Par do buraco {n}",
     "scorecard.decrease": "Diminuir resultado do buraco {n}",
     "scorecard.increase": "Aumentar resultado do buraco {n}",
+    "scorecard.indexShort": "Hcp",
+    "scorecard.out": "Ida",
+    "scorecard.in": "Volta",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Criar conta",

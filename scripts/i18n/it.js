@@ -265,6 +265,9 @@
     "scorecard.parForHole": "Par della buca {n}",
     "scorecard.decrease": "Diminuisci il punteggio della buca {n}",
     "scorecard.increase": "Aumenta il punteggio della buca {n}",
+    "scorecard.indexShort": "Hcp",
+    "scorecard.out": "Andata",
+    "scorecard.in": "Ritorno",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Crea account",
