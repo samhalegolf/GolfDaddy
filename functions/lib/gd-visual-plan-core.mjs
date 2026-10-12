@@ -426,12 +426,25 @@ export function unprojectPoint(x, y, zoom) {
   return { lat, lng };
 }
 
-/* What the phone's hole stage shows, in hole lengths (play-surface.js FRAME_GUIDE: the tee
-   sits at 0.90 of the screen height and the green at 0.28, so tee->green is 0.62 of it, and a
-   9:19.5 phone is 0.46 as wide as it is tall). Ground outside this is never on screen in the
-   hole stage, and the lock and zoom stages sit inside it. halfCross carries a margin over the
-   0.375 a 9:19.5 phone needs, for wider phones and the edge-pan reveal. */
-const HOLE_VIEW = { behindTee: 0.16, beyondGreen: 0.46, halfCross: 0.42 };
+/* What the phone shows of a hole, in hole lengths (play-surface.js FRAME_GUIDE: the tee sits
+   at 0.90 of the screen height and the green at 0.28, so tee->green is 0.62 of it, and a
+   9:19.5 phone is 0.46 as wide as it is tall).
+
+   behindTee and halfCross are the HOLE stage, which is flat: 0.16 of the hole behind the tee
+   and 0.375 of it to each side is exactly the phone's screen, and halfCross is that with a
+   little over for the bleed's rounding. It used to carry 0.42 for wider phones and the
+   edge-pan reveal; that was 12% of every frame's bytes for ground a 9:19.5 phone never shows,
+   and course maps now live in the phone's storage.
+
+   beyondGreen is the LOCK stage, which is tilted (styles.css --tiltDeg): the top of the screen
+   looks about 1.3 shot lengths past the target at medium tightness, so an approach from 140m
+   sees 180m beyond the green and a tee shot on a par 3 sees further than the hole is long.
+   Half the hole's length covers tee shots on par 4s and 5s, whose lock target is the landing
+   area, not the green; the 180m floor covers approaches and par 3s. The far corners of a
+   tilted screen spread wider than any rectangle around the hole, so they stay as they are:
+   this reaches the picture to the top of the screen down the middle, which is where the shot
+   is. */
+const HOLE_VIEW = { behindTee: 0.16, beyondGreen: 0.5, beyondGreenMinM: 180, halfCross: 0.38 };
 
 /* Play-axis lens for a corridor capture. Measured from the GROUND POINTS (this segment's
    route and, on the last segment, the green shape) along the HOLE's tee->green axis - not
@@ -440,7 +453,7 @@ const HOLE_VIEW = { behindTee: 0.16, beyondGreen: 0.46, halfCross: 0.42 };
    behind the tee and the last beyond the green; bleed is added on every side. The north-up
    box of that is what gets captured, and the union over a hole's segments is the phone's
    viewport. */
-function applyHoleView(item, zoom, bleedPx) {
+function applyHoleView(item, zoom, bleedPx, metresPerPx) {
   const hole = item.anchorPins || {};
   const holeRoute = points(hole.route);
   const start = holeRoute[0] || point(hole.tee);
@@ -461,7 +474,10 @@ function applyHoleView(item, zoom, bleedPx) {
   const index = Number(item.segmentIndex) || 1, count = Number(item.segmentCount) || 1;
   let alongMin = Math.min(...along) - bleedPx, alongMax = Math.max(...along) + bleedPx;
   if (index <= 1) alongMin = Math.min(alongMin, -HOLE_VIEW.behindTee * len);
-  if (index >= count) alongMax = Math.max(alongMax, len * (1 + HOLE_VIEW.beyondGreen));
+  if (index >= count) {
+    const beyond = Math.max(len * HOLE_VIEW.beyondGreen, metresPerPx > 0 ? HOLE_VIEW.beyondGreenMinM / metresPerPx : 0);
+    alongMax = Math.max(alongMax, len + beyond);
+  }
   const half = Math.max(Math.max(...cross) + bleedPx, HOLE_VIEW.halfCross * len);
   const box = [
     { x: a.x + ux * alongMin - px * half, y: a.y + uy * alongMin - py * half },
@@ -497,7 +513,7 @@ function pixelRect(item, zoom) {
        item.bounds, a box this lens does not use) in pixels at this zoom and latitude. */
     const lat = (Number(item.bounds.north) + Number(item.bounds.south)) / 2;
     const metresPerPx = 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom);
-    const viewed = applyHoleView(item, zoom, bleed + (Number(item.bleedMeters) || 0) / metresPerPx);
+    const viewed = applyHoleView(item, zoom, bleed + (Number(item.bleedMeters) || 0) / metresPerPx, metresPerPx);
     if (viewed) return viewed;
   }
   const projected = surface.map(p => projectPoint(p.lat, p.lng, zoom));
