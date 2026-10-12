@@ -176,6 +176,10 @@
   var session = {
     course: null, features: [], loadedFor: "", osm: null, objects: [], lastRun: null, courseMap: null, view: null, sourceKey: "",
     showOsm: true, showObjects: true, status: "draft", hole: null,
+    /* What the mapper reads with this overlay: "include" - OSM and the overlay, as always - or
+       "exclude" - the overlay alone (functions/course-map-overlay.mjs). Drawing a course
+       entirely by hand, OSM is hidden here and kept out of the run. */
+    osmMode: "include",
     /* Hand-built courses: [{id, name, courseId, holes: ["osm:way/N" | "link:ID"]}], and the one
        being edited. Saved with the shapes. */
     playOrders: [], activeOrder: "",
@@ -257,6 +261,7 @@
     session.activeOrder = "";
     session.facility = null;
     session.variant = "";
+    session.osmMode = "include";
     session.osm = null;
     session.objects = [];
     session.lastRun = null;
@@ -484,6 +489,7 @@
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="pick">Pick course</button>' +
       '<label class="gdStudioViewportField">Imagery <select data-gd-overlay="provider"></select></label>' +
       '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="osm" checked> Show OSM</label>' +
+      '<label class="gdStudioViewportField" title="My shapes only: the mapper does not read OpenStreetMap at all - just the shapes drawn here and the scorecard. OSM is hidden while you draw.">Mapper reads <select data-gd-overlay="osm-mode"><option value="include">OSM + my shapes</option><option value="exclude">My shapes only</option></select></label>' +
       '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="objects" checked> Show course objects</label>' +
       "</div>" +
       '<div class="gdStudioViewportBar">' +
@@ -496,6 +502,10 @@
       '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="convert" disabled title="Add what OSM has here - greens, tees, fairways, bunkers, water, trees - and the mapper\'s default fairways to the overlay as shapes you can reshape. Once saved and ready, each replaces the OSM shape it came from.">Make OSM editable</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ready" disabled>Mark ready</button>' +
+      '<span class="gdStudioOverlayReadyChoice" data-gd-overlay="ready-choice" hidden>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-ready-osm="include" title="The mapper reads OpenStreetMap and your shapes, yours winning where they overlap">With OSM</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-ready-osm="exclude" title="The mapper reads only your shapes and the scorecard - no OpenStreetMap">My shapes only</button>' +
+      "</span>" +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="run" disabled>Run mapper with overlay</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="unnumber" disabled title="Take every hole number off the overlay - shapes and links stay - so the mapper numbers them fresh from the scorecard">Clear hole numbers</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="clear" disabled>Delete all shapes</button>' +
@@ -597,7 +607,7 @@
       "</div>";
 
     var el = {};
-    ["courses", "inbox", "inbox-count", "pick", "convert", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "unnumber", "clear", "run", "status"].forEach(function (name) {
+    ["courses", "inbox", "inbox-count", "pick", "convert", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -3206,19 +3216,27 @@
 
     /* Draft -> ready: the one step that lets the mapper read this overlay. Saves first, so what
        is marked is what is on screen. */
-    function markReady() {
+    /* osm: "include" or "exclude" - what the mapper reads with it; the choice already made
+       when not given (Run mapper marks a draft ready this way). */
+    function markReady(osm) {
       var id = session.loadedFor;
       if (!canEdit() || !hasOverlay()) return Promise.resolve(false);
+      var choice = osm === "exclude" || osm === "include" ? osm : session.osmMode;
+      el["ready-choice"].hidden = true;
       busy = true; updateActions();
       setStatus("Saving, then marking ready…");
       return flushSave().then(function () {
         if (session.dirty) throw new Error("the overlay did not save (" + (session.saveError || "unknown") + ")");
-        return api("POST", "", { courseId: id, status: "ready" });
+        return api("POST", "", { courseId: id, status: "ready", osm: choice });
       }).then(function (data) {
         if (session.loadedFor !== id) return false;
         session.status = (data && data.status) || "ready";
+        session.osmMode = (data && data.osm) === "exclude" ? "exclude" : "include";
+        el["osm-mode"].value = session.osmMode;
+        drawOsm();
         if (!destroyed) setStatus("Marked ready. The next mapper run will use these " + session.features.length + " shapes" +
-          (session.playOrders.length ? " and publish " + session.playOrders.length + " play order" + (session.playOrders.length === 1 ? "" : "s") + " as courses" : "") + ".");
+          (session.osmMode === "exclude" ? " and the scorecard only - no OSM" : " with what OSM has here") +
+          (session.playOrders.length ? ", and publish " + session.playOrders.length + " play order" + (session.playOrders.length === 1 ? "" : "s") + " as courses" : "") + ".");
         return true;
       }).catch(function (error) {
         if (!destroyed) setStatus("Not marked ready: " + (error && error.message || error), true);
@@ -3287,6 +3305,41 @@
       flushSave();
     }
 
+    /* "My shapes only" from the menu: OSM is hidden and kept out of the run. Shapes copied in
+       from OSM can go too - asked, since some may have been reshaped by hand. The overlay goes
+       back to draft: what the mapper reads has changed. */
+    function setOsmMode(mode) {
+      var id = session.loadedFor;
+      if (!canEdit() || !id) { el["osm-mode"].value = session.osmMode; return; }
+      mode = mode === "exclude" ? "exclude" : "include";
+      if (mode === session.osmMode) return;
+      session.osmMode = mode;
+      if (mode === "exclude") {
+        var fromOsm = session.features.filter(function (f) { return f.osm || f.source === "osm"; });
+        if (fromOsm.length && window.confirm("Take out the " + fromOsm.length + " shape" + (fromOsm.length === 1 ? "" : "s") + " that came from OSM too?\n\nOK removes them. Cancel keeps them as your own shapes.")) {
+          session.features = session.features.filter(function (f) { return fromOsm.indexOf(f) < 0; });
+          selectedId = "";
+          drawFeatures();
+          changed();
+        }
+      }
+      drawOsm();
+      updateActions();
+      api("POST", "", { courseId: id, osm: mode }).then(function (data) {
+        if (session.loadedFor !== id) return;
+        session.status = (data && data.status) || "draft";
+        renderSaveState();
+        setStatus(mode === "exclude" ? "My shapes only: OSM is hidden and the mapper will not read it. Mark ready when the drawing is done." : "The mapper reads OSM with your shapes again.");
+      }).catch(function (error) {
+        setStatus("Could not save the OSM choice: " + (error && error.message || error), true);
+      });
+    }
+    function toggleReadyChoice() {
+      if (!canEdit() || !hasOverlay()) return;
+      el["ready-choice"].hidden = !el["ready-choice"].hidden;
+      el["ready-choice"].querySelectorAll("[data-ready-osm]").forEach(function (b) { b.classList.toggle("isActive", b.getAttribute("data-ready-osm") === session.osmMode); });
+    }
+
     /* ---- what OSM has here ---- */
 
     function clearOsmLayers() {
@@ -3297,7 +3350,7 @@
     function drawOsm() {
       clearOsmLayers();
       var osm = session.osm;
-      if (!osm || !session.showOsm) return;
+      if (!osm || !session.showOsm || session.osmMode === "exclude") return;
       function add(list, style, closed) {
         (list || []).forEach(function (item) {
           var latlngs = (item.points || []).map(function (p) { return [p.lat, p.lng]; });
@@ -3519,7 +3572,8 @@
       if (sourceScan) sourceScan.disabled = scanning;
       el.clear.disabled = !canEdit() || !session.features.length;
       var convertible = session.course ? convertibleOsm().length : 0;
-      el.convert.disabled = !canEdit() || !convertible;
+      el.convert.disabled = !canEdit() || !convertible || session.osmMode === "exclude";
+      el["osm-mode"].disabled = !canEdit();
       el.convert.textContent = convertible ? "Make OSM editable (" + convertible + ")" : "Make OSM editable";
       el.unnumber.disabled = !canEdit() || !session.features.some(function (f) { return f.hole; });
       el.run.disabled = !has || session.dirty;
@@ -3616,6 +3670,8 @@
         session.facility = (data && data.facility) || null;
         session.variant = id;
         session.status = (data && data.overlay && data.overlay.status) || "draft";
+        session.osmMode = (data && data.overlay && data.overlay.osm) === "exclude" ? "exclude" : "include";
+        el["osm-mode"].value = session.osmMode;
         session.osm = (data && data.osm) || null;
         session.objects = (data && data.objects) || [];
         session.lastRun = (data && data.lastRun) || null;
@@ -3664,7 +3720,7 @@
         if (destroyed) return;
         /* A course with nothing in its overlay yet starts from what OSM has, ready to reshape. It
            saves as a draft, which the mapper ignores until it is marked ready. */
-        if (session.loadedFor === id && !hasOverlay()) convertOsm(true);
+        if (session.loadedFor === id && !hasOverlay() && session.osmMode !== "exclude") convertOsm(true);
         updateActions(); updateReadout(); updateHint(); updateBin();
       });
     }
@@ -3676,11 +3732,11 @@
       /* A draft is not read by the mapper, so running "with this overlay" means marking it
          ready first - asked, never assumed. */
       if (hasOverlay() && session.status !== "ready") {
-        if (!window.confirm("This overlay is still a draft, and the mapper ignores drafts.\n\nMark it ready and run the mapper on " + name + "?\n\nThis clears the course's existing geometry and resolves it again from OSM plus the overlay. Visuals are not touched.")) return;
+        if (!window.confirm("This overlay is still a draft, and the mapper ignores drafts.\n\nMark it ready and run the mapper on " + name + "?\n\nThis clears the course's existing geometry and resolves it again from " + (session.osmMode === "exclude" ? "your shapes and the scorecard only - no OSM" : "OSM plus the overlay") + ". Visuals are not touched.")) return;
         markReady().then(function (ok) { if (ok && !destroyed) queueMapper(id); });
         return;
       }
-      if (!window.confirm("Run the mapper on " + name + (hasOverlay() ? " with this overlay" : "") + "?\n\nThis clears the course's existing geometry and resolves it again from OSM" + (hasOverlay() ? " plus the overlay" : "") + "." +
+      if (!window.confirm("Run the mapper on " + name + (hasOverlay() ? " with this overlay" : "") + "?\n\nThis clears the course's existing geometry and resolves it again from " + (hasOverlay() && session.osmMode === "exclude" && session.status === "ready" ? "your shapes and the scorecard only - no OSM" : "OSM" + (hasOverlay() ? " plus the overlay" : "")) + "." +
         (session.playOrders.length ? " It publishes the " + session.playOrders.length + " play order" + (session.playOrders.length === 1 ? "" : "s") + " as this facility's courses, and unpublishes any other course listed under it." : "") + " Visuals are not touched.")) return;
       queueMapper(id);
     }
@@ -4524,7 +4580,12 @@
     el.clear.addEventListener("click", deleteOverlay);
     el.convert.addEventListener("click", function () { convertOsm(false); });
     el.unnumber.addEventListener("click", clearHoleNumbers);
-    el.ready.addEventListener("click", markReady);
+    el.ready.addEventListener("click", toggleReadyChoice);
+    el["ready-choice"].addEventListener("click", function (event) {
+      var b = event.target.closest && event.target.closest("[data-ready-osm]");
+      if (b) markReady(b.getAttribute("data-ready-osm"));
+    });
+    el["osm-mode"].addEventListener("change", function () { setOsmMode(el["osm-mode"].value); });
     el.run.addEventListener("click", runMapper);
 
     setMode(session.mode);

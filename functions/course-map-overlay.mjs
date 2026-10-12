@@ -24,8 +24,13 @@
  *      playOrders are the hand-built courses (lib/gd-play-order-core.mjs); left out, the saved
  *      ones are kept. No shapes and no play orders deletes the row: "no overlay" is the absence
  *      of a row, not a row holding [].
- * POST {courseId, status: "draft" | "ready"}  (admin) -> marks the saved overlay. The mapper
- *      reads only a ready overlay; any shape save puts it back to draft.
+ * POST {courseId, status: "draft" | "ready", osm?: "include" | "exclude"}  (admin) -> marks
+ *      the saved overlay. The mapper reads only a ready overlay; any shape save puts it back to
+ *      draft. osm says whether the mapper reads OpenStreetMap alongside it ("include", as it
+ *      always has) or the overlay alone ("exclude": no Overpass query, only the drawn shapes
+ *      and the native resolver).
+ * POST {courseId, osm: "include" | "exclude"}  (admin) -> the OSM choice on its own, from the
+ *      drawing page; the overlay goes back to draft.
  * POST {courseId, courseMap: {mediaType, data, name, width, height} | null}  (admin) -> stores
  *      or removes the club's course map for the course; the AI scan sends it as a second
  *      image. Touches nothing else on the row.
@@ -50,7 +55,7 @@ import { osmQueryScope, osmGuideQuery, osmGuidePointsFromElement } from "./lib/g
 import { overlaySummary, osmToOverlayFeatures } from "./lib/gd-map-overlay-core.mjs";
 import { aiShapesToOverlay } from "./lib/gd-overlay-georef-core.mjs";
 import { INBOX_SINCE, loadInbox, dismissInboxCourse } from "./lib/gd-overlay-inbox.mjs";
-import { hasSupabase, slug, verifiedAdminEmail, verifiedUserId, loadCourse, loadOverlay, saveOverlay, writeOverlayStatus, normalizeCourseMap, writeCourseMap, publicCourseMap, supabaseFetch, json } from "./lib/gd-map-overlay-store.mjs";
+import { hasSupabase, slug, verifiedAdminEmail, verifiedUserId, loadCourse, loadOverlay, saveOverlay, writeOverlayStatus, writeOverlayOsmChoice, normalizeCourseMap, writeCourseMap, publicCourseMap, supabaseFetch, json } from "./lib/gd-map-overlay-store.mjs";
 import { overlayOwnerId, overlayCourses } from "./lib/gd-overlay-owner.mjs";
 
 /* The AI scan's state, for a poller: everything on it but the picture, which is a megabyte
@@ -150,7 +155,7 @@ export default async function courseMapOverlay(req) {
     const body = {
       courseId, course, overlayOwner: ownerId,
       facility: { ownerId, courses },
-      overlay: { features: overlay.features, playOrders: overlay.playOrders, status: overlay.status, updatedAt: overlay.updatedAt, updatedBy: overlay.updatedBy },
+      overlay: { features: overlay.features, playOrders: overlay.playOrders, status: overlay.status, osm: overlay.osm, updatedAt: overlay.updatedAt, updatedBy: overlay.updatedBy },
       aiScan: publicAiScan(overlay.aiScan),
       courseMap: publicCourseMap(overlay.courseMap),
       summary: overlaySummary(overlay.features)
@@ -180,9 +185,15 @@ export default async function courseMapOverlay(req) {
   /* Draft or ready is its own request too, and never touches the shapes. */
   if (payload && Object.prototype.hasOwnProperty.call(payload, "status") && !Array.isArray(payload.features)) {
     if (payload.status !== "draft" && payload.status !== "ready") return json(400, { error: "status must be draft or ready" });
-    const marked = await writeOverlayStatus(ownerId, payload.status);
+    if (payload.osm !== undefined && payload.osm !== "include" && payload.osm !== "exclude") return json(400, { error: "osm must be include or exclude" });
+    const marked = await writeOverlayStatus(ownerId, payload.status, payload.osm);
     if (marked.error) return json(400, marked);
     return json(200, marked);
+  }
+  /* The OSM choice on its own: {osm: "include" | "exclude"}. */
+  if (payload && Object.prototype.hasOwnProperty.call(payload, "osm") && !Object.prototype.hasOwnProperty.call(payload, "status") && !Array.isArray(payload.features)) {
+    if (payload.osm !== "include" && payload.osm !== "exclude") return json(400, { error: "osm must be include or exclude" });
+    return json(200, await writeOverlayOsmChoice(ownerId, payload.osm));
   }
   /* A course map save is its own request and touches nothing else on the row: {courseMap}
      stores it, {courseMap: null} removes it. */

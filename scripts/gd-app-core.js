@@ -21120,7 +21120,7 @@ function gdPanelBack(id){
   if(typeof showShellHome==="function")return showShellHome();
   return false;
 }
-function toggleUnits(){units=units==="m"?"yd":"m";try{localStorage.setItem(GD_UNITS_KEY,units)}catch(e){}gdSyncUnitsButtons();renderShot();if(greenPolygon)drawGreenDistances(greenPolygon);renderScorecard()}
+function toggleUnits(){units=units==="m"?"yd":"m";try{localStorage.setItem(GD_UNITS_KEY,units)}catch(e){}gdSyncUnitsButtons();renderShot();if(greenPolygon)drawGreenDistances(greenPolygon)}
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",gdSyncUnitsButtons);
 else gdSyncUnitsButtons();
 function toggleTracking(){shotTracking=!shotTracking;const b=document.getElementById("trackToggle");b.textContent=shotTracking?"On":"Off";b.classList.toggle("active",shotTracking)}
@@ -23610,7 +23610,6 @@ function renderStats(){
   trackedShots.slice().reverse().forEach(s=>{const v=fmt(s.distanceM);const row=document.createElement("div");row.className="bagRow";row.innerHTML=`<span>${gdH("bubble.trackedShotRow",{id:s.id,reason:s.reason})}</span><strong>${v.value}${v.unit}</strong>`;list.appendChild(row)})
   gdRenderCourseDataAdminPanel();
 }
-/* GPS scorecard ownership moved to scripts/inline/gd-gps-scorecard-owner-v1.js. */
 function checkLeavingGreen(){if(!currentPlayingHole||!greenCentre||!start)return;const d=map.distance(start,greenCentre);if(d<25)hadNearGreen=true;if(hadNearGreen&&d>35){pendingScoreHole=currentPlayingHole;hadNearGreen=false}}
 
 /* ---------------- Undo/helpers ---------------- */
@@ -24130,7 +24129,7 @@ const __gdClosePanel=closePanel;
 closePanel=function(id){
   __gdClosePanel(id);
   if(window.__gdCanonicalRouteAuditV1||window.__gdBackTarget)return;
-  if(id==='bagPanel'||id==='developerPanel'||id==='settingsPanel'||id==='statsPanel'||id==='scorePanel'){
+  if(id==='bagPanel'||id==='developerPanel'||id==='settingsPanel'||id==='statsPanel'){
     // Closing an old slide-up panel returns to the previous shell route when possible.
     const previous=shellRouteStack[shellRouteStack.length-2]||'home';
     shellRouteStack.pop();

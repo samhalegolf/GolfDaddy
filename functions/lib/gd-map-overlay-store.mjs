@@ -90,12 +90,13 @@ export async function loadScorecard(courseName, scorecardCourseKey) {
 }
 
 export async function loadOverlay(courseId) {
-  const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features,play_orders,status,updated_at,updated_by,ai_scan,course_map&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
+  const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features,play_orders,status,osm,updated_at,updated_by,ai_scan,course_map&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
   const row = Array.isArray(rows) ? rows[0] : null;
   return {
     features: normalizeOverlayFeatures(row ? row.features : []),
     playOrders: normalizePlayOrders(row ? row.play_orders : [], courseId),
     status: overlayStatus(row && row.status),
+    osm: overlayOsm(row && row.osm),
     updatedAt: row ? row.updated_at : null,
     updatedBy: row ? row.updated_by : null,
     aiScan: row && row.ai_scan && typeof row.ai_scan === "object" ? row.ai_scan : null,
@@ -111,15 +112,36 @@ export function overlayStatus(value) { return value === "ready" ? "ready" : "dra
 /* Marks the saved overlay ready (or back to draft) without touching its shapes. Refused when
    there is nothing saved: an empty overlay is no row, and "ready" with no shapes and no play
    orders means nothing. */
-export async function writeOverlayStatus(courseId, status) {
+/* Whether the mapper reads OSM alongside the overlay (20261012_add_course_map_overlay_osm.sql):
+   "exclude" only when said so - the overlay is then the whole picture. */
+export function overlayOsm(value) { return value === "exclude" ? "exclude" : "include"; }
+
+/* Marks the saved overlay ready (or back to draft) without touching its shapes, and with
+   `osm` given, says whether the mapper reads OSM alongside it - chosen as it is signed off. */
+export async function writeOverlayStatus(courseId, status, osm) {
   const saved = await loadOverlay(courseId);
   if (!saved.features.length && !saved.playOrders.length) return { error: "nothing to mark", detail: "Place some shapes or make a play order first - there is no saved overlay for this course." };
   const now = new Date().toISOString();
+  const patch = { status: overlayStatus(status), updated_at: now };
+  if (osm !== undefined) patch.osm = overlayOsm(osm);
   await supabaseFetch(OVERLAYS_TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
     method: "PATCH",
-    body: JSON.stringify({ status: overlayStatus(status), updated_at: now })
+    body: JSON.stringify(patch)
   });
-  return { courseId, status: overlayStatus(status), updatedAt: now };
+  return { courseId, status: patch.status, osm: patch.osm || saved.osm, updatedAt: now };
+}
+
+/* The OSM choice on its own, from the drawing page: it changes what the mapper reads, so the
+   overlay goes back to draft until it is marked ready again. Creates the row if the course
+   has no overlay yet - the choice is made before the drawing starts. */
+export async function writeOverlayOsmChoice(courseId, osm) {
+  const now = new Date().toISOString();
+  await supabaseFetch(OVERLAYS_TABLE + "?on_conflict=course_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify({ course_id: courseId, osm: overlayOsm(osm), status: "draft", updated_at: now })
+  });
+  return { courseId, osm: overlayOsm(osm), status: "draft", updatedAt: now };
 }
 
 /* The club's course map for this course, or null to remove it. {mediaType, data (base64),

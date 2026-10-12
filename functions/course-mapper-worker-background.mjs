@@ -347,12 +347,13 @@ async function attachCourseOverlay(course) {
   course.overlayError = null;
   course.overlayDraft = 0;
   course.overlayDraftPlayOrders = 0;
+  course.overlayOnly = false;
   try {
     /* The facility's shared overlay (lib/gd-overlay-owner.mjs). The job queue sends a sibling's
        run to the owner, so this is normally the course's own row; read through the owner
        anyway, so a run on a sibling still sees the shapes on its ground. */
     const ownerId = await overlayOwnerId(supabaseFetch, course.courseId);
-    const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features,play_orders,status&course_id=eq." + encodeURIComponent(ownerId) + "&limit=1");
+    const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features,play_orders,status,osm&course_id=eq." + encodeURIComponent(ownerId) + "&limit=1");
     const row = Array.isArray(rows) ? rows[0] : null;
     const features = row && Array.isArray(row.features) ? row.features : [];
     const playOrders = row && Array.isArray(row.play_orders) ? row.play_orders : [];
@@ -360,7 +361,12 @@ async function attachCourseOverlay(course) {
        out, and the count rides on the diagnostics so "the overlay was ignored" is visible.
        Play orders are signed off with the shapes, so a draft's play orders are left out too. */
     /* Play orders publish relative to the owner, so only the owner's own run follows them. */
-    if (row && row.status === "ready") { course.overlay = features; course.playOrders = ownerId === course.courseId ? playOrders : []; }
+    if (row && row.status === "ready") {
+      course.overlay = features;
+      course.playOrders = ownerId === course.courseId ? playOrders : [];
+      /* Signed off as the whole picture (20261012_add_course_map_overlay_osm.sql): no OSM. */
+      course.overlayOnly = row.osm === "exclude";
+    }
     else { course.overlayDraft = features.length; course.overlayDraftPlayOrders = playOrders.length; }
   } catch (error) {
     course.overlayError = String(error && error.message || error).slice(0, 200);
@@ -373,13 +379,17 @@ async function attachCourseOverlay(course) {
 function overlayDiagnostics(course) {
   if (course.overlayError) return { error: course.overlayError };
   if (course.overlayDraft || course.overlayDraftPlayOrders) return { draft: true, ignoredFeatures: course.overlayDraft, ignoredPlayOrders: course.overlayDraftPlayOrders || 0 };
-  return Object.assign(overlaySummary(course.overlay), { playOrders: course.playOrders.length });
+  return Object.assign(overlaySummary(course.overlay), { playOrders: course.playOrders.length }, course.overlayOnly ? { osm: "excluded" } : {});
 }
 
 /* Every Overpass payload a job works from goes through here, so the overlay is in ALL of
    them - the first query, the footprint requery, the widened frames, the hole-gap boxes.
-   A merge at one call site would leave the overlay out of whichever requery got adopted. */
+   A merge at one call site would leave the overlay out of whichever requery got adopted.
+   An overlay marked ready with OSM excluded is the whole picture: Overpass is not asked at
+   all, and every payload is the drawn shapes alone - the native resolver and the scorecard
+   do the rest, with nothing of OSM's to disagree with them. */
 function fetchCoursePayload(course, query) {
+  if (course.overlayOnly) return Promise.resolve(mergeOverlayIntoPayload({ elements: [] }, course.overlay));
   return fetchOverpass(query).then(payload => mergeOverlayIntoPayload(payload, course.overlay));
 }
 
@@ -465,7 +475,7 @@ async function saveResolvedGeometry(courseId, geometry) {
 
 /* course_scorecards.course_key is the course's DISPLAY NAME, lowercased and whitespace-
    collapsed - NOT the dash-slugged course_id every other table uses. This has to match
-   gdScorecardCourseKey() (scripts/inline/gd-gps-scorecard-owner-v1.js:49) exactly or every
+   scorecardCourseKey() in app/js/scorecard.js (GPS Play's scorecard) exactly or every
    lookup here misses a scorecard that is sitting right there under a different-looking key. */
 function scorecardCourseKey(courseName) {
   return String(courseName || "").trim().replace(/\s+/g, " ").toLowerCase();

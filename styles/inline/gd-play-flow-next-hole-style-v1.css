@@ -154,9 +154,6 @@ body:not(.shell-gps):not(.gdGpsActive):not(.gps-active) .gdHoleSelectTray{
 .gdHoleSelectStrip button.playing{
   box-shadow:0 0 0 2px rgba(31,211,109,.42),0 10px 24px rgba(0,0,0,.24);
 }
-.gdScoreSave.gdScoreSaveQueued{
-  background:linear-gradient(180deg,#28dc72,#16a85b)!important;
-}
 .gdHoleStepper{
   position:absolute;
   left:calc(10px + env(safe-area-inset-left));
