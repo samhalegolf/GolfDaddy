@@ -303,7 +303,7 @@ struct WatchTree: Equatable {
     let type: Int
 
     init?(packed: Int) {
-        guard packed >= 0, packed < 2_147_483_648 else { return nil }
+        guard packed >= 0, packed <= Int(Int32.max) else { return nil }
         x = Double(packed % 2048)
         y = Double((packed / 2048) % 2048)
         radius = Double((packed / 4_194_304) % 128)

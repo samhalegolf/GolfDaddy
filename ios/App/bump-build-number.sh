@@ -40,7 +40,11 @@ fi
 
 # Every occurrence, whatever its old value: a target that drifted behind the
 # others is brought back into line rather than left one step behind forever.
-sed -i '' "s/^\([[:space:]]*CURRENT_PROJECT_VERSION = \)[0-9][0-9]*;/\1${NEXT};/" "$PBXPROJ"
+# Written via a temp file rather than sed -i, whose flag differs between
+# macOS and Linux sed, so this runs the same on both.
+TMP="$PBXPROJ.tmp"
+sed "s/^\([[:space:]]*CURRENT_PROJECT_VERSION = \)[0-9][0-9]*;/\1${NEXT};/" "$PBXPROJ" > "$TMP"
+mv "$TMP" "$PBXPROJ"
 
 WRITTEN="$(grep -c "CURRENT_PROJECT_VERSION = ${NEXT};" "$PBXPROJ")"
 echo "Clarity Caddy iOS: build number $CURRENT -> $NEXT ($WRITTEN build configurations)"
