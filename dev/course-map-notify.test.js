@@ -12,10 +12,19 @@ function jsonResponse(status, body) {
   return { ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body) };
 }
 
-const READY_MAP = { course_id: "pupuke", published: true, geometry_version: "v1", objects_json: {
-  "green-1": { type: "green", holeNumber: 1, position: { lat: -36.8, lng: 174.7 }, greenShape: [{ lat: -36.8001, lng: 174.7001 }] },
-  "tee-1": { type: "tee", holeNumber: 1, position: { lat: -36.799, lng: 174.699 } }
-}, holes_json: {} };
+/* A published map with the given holes. Nine contiguous holes is a complete course by shape
+   (gd-course-fit-core.mjs courseCoverageComplete); leaving one out makes it partial. */
+function publishedMap(holeNumbers) {
+  const objects = {};
+  const holes = {};
+  holeNumbers.forEach(h => {
+    objects["green-" + h] = { type: "green", holeNumber: h, position: { lat: -36.8 + h * 0.001, lng: 174.7 }, greenShape: [{ lat: -36.8001 + h * 0.001, lng: 174.7001 }] };
+    objects["tee-" + h] = { type: "tee", holeNumber: h, position: { lat: -36.799 + h * 0.001, lng: 174.699 } };
+    holes[h] = { green: objects["green-" + h].position, tee: objects["tee-" + h].position };
+  });
+  return { course_id: "pupuke", published: true, geometry_version: "v1", objects_json: objects, holes_json: holes };
+}
+const READY_MAP = publishedMap([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
 function stubFetch(world) {
   world.writes = [];
@@ -57,6 +66,21 @@ test("emails everyone waiting on a course that now has a map, and stamps them", 
   const stamps = world.writes.filter(w => w.method === "PATCH");
   assert.deepStrictEqual(stamps.map(w => w.query.split("id=eq.")[1]), ["r1", "r2"]);
   assert.ok(stamps.every(w => w.body.notified_at));
+});
+
+test("a published but incomplete map sends nothing: the player asked while looking at that map", async () => {
+  /* Sugar Ridge, 2026-10-12: the scan resolved 17 of 18 holes and published them. The
+     package is lite-geo-ready but its readiness is "partial", and "ready to play" would be a
+     lie to the player who asked precisely because hole 17 was missing. */
+  const seventeen = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18];
+  const world = { maps: [publishedMap(seventeen)], mapperJobs: [{ id: "j1", kind: "automap", status: "done", result: { expectedHoles: 18, holesResolved: 17 } }], requests: [
+    { id: "r1", course_id: "pupuke", course_name: "Sugar Ridge", email: "a@example.com" }
+  ] };
+  stubFetch(world);
+  const result = await mod.sendReadyCourseMapNotifications();
+  assert.deepStrictEqual(result, { checked: 1, sent: 0, failed: 0 });
+  assert.strictEqual(world.emails.length, 0);
+  assert.strictEqual(world.writes.length, 0, "the row stays pending for the sweep that finds hole 17");
 });
 
 test("a course that is still failed sends nothing and stays pending", async () => {

@@ -1073,6 +1073,11 @@
     "mapNotify.noThanks": "Ne, ačiū",
     "mapNotify.toastWillEmail": "Parašysime tau, kai laukas {course} bus paruoštas",
     "mapNotify.toastWillEmailYours": "Parašysime tau, kai tavo laukas bus paruoštas",
+    "mapNotify.incomplete": "{course} žemėlapis neišsamus",
+    "mapNotify.incompleteThis": "Šios aikštelės žemėlapis neišsamus",
+    "mapNotify.incompleteDetail": "Sužymėta {mapped} iš {expected} duobučių. Trūksta: {missing}. Užbaigsime likusias.",
+    "mapNotify.incompleteDetailNoList": "Sužymėta {mapped} iš {expected} duobučių. Užbaigsime likusias.",
+    "mapNotify.incompleteOnList": "Esate sąraše - parašysime el. paštu, kai visas žemėlapis bus paruoštas.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Žaidėjo profilis",

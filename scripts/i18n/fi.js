@@ -1048,6 +1048,11 @@
     "mapNotify.noThanks": "Ei kiitos",
     "mapNotify.toastWillEmail": "Lähetämme sinulle sähköpostia, kun kenttä {course} on valmis",
     "mapNotify.toastWillEmailYours": "Lähetämme sinulle sähköpostia, kun kenttäsi on valmis",
+    "mapNotify.incomplete": "Kentän {course} kartta on puutteellinen",
+    "mapNotify.incompleteThis": "Tämän kentän kartta on puutteellinen",
+    "mapNotify.incompleteDetail": "{mapped}/{expected} reikää on kartoitettu. Puuttuu: {missing}. Teemme loput valmiiksi.",
+    "mapNotify.incompleteDetailNoList": "{mapped}/{expected} reikää on kartoitettu. Teemme loput valmiiksi.",
+    "mapNotify.incompleteOnList": "Olet listalla - lähetämme sähköpostia, kun koko kartta on valmis.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Pelaajaprofiili",

@@ -1048,6 +1048,11 @@
     "mapNotify.noThanks": "Nej tak",
     "mapNotify.toastWillEmail": "Vi sender dig en e-mail, når {course} er klar",
     "mapNotify.toastWillEmailYours": "Vi sender dig en e-mail, når din bane er klar",
+    "mapNotify.incomplete": "Kortet over {course} er ufuldstændigt",
+    "mapNotify.incompleteThis": "Dette banekort er ufuldstændigt",
+    "mapNotify.incompleteDetail": "{mapped} af {expected} huller er kortlagt. Mangler: {missing}. Vi gør resten færdigt.",
+    "mapNotify.incompleteDetailNoList": "{mapped} af {expected} huller er kortlagt. Vi gør resten færdigt.",
+    "mapNotify.incompleteOnList": "Du er på listen - vi mailer dig, når hele kortet er klart.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Spillerprofil",

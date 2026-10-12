@@ -1,17 +1,19 @@
 /* "Email me when this course is ready."
 
-   When a player's course scan fails, the app offers to tell them when the map is done
-   (scripts/gd-course-map-notify.js). A signed-in player's tap lands here as
-   POST {courseId, courseName} with their Supabase bearer token; the request is stored against
-   their verified user id and email - never an address the browser supplies - in
+   When a player's course scan fails, or comes back with holes missing, the app offers to tell
+   them when the map is done (scripts/gd-course-map-notify.js). A signed-in player's tap lands
+   here as POST {courseId, courseName} with their Supabase bearer token; the request is stored
+   against their verified user id and email - never an address the browser supplies - in
    course_map_notify_requests, one row per player per course.
 
    Sending is not done here. sendReadyCourseMapNotifications() is run by
    course-mapper-sweeper.mjs every 3 minutes: it asks buildCoursePackage() - the same readiness
-   answer the app itself plays from - whether each waiting course now has a playable map, and
-   emails everyone waiting on one that does. Checking readiness rather than hooking the mapper
-   worker means a course fixed by hand in Studio notifies people exactly like one a later scan
-   fixed. */
+   answer the app itself plays from - whether each waiting course now has a COMPLETE playable
+   map, and emails everyone waiting on one that does. Complete, not merely published: a scan
+   that resolved 17 of 18 holes publishes what it found (Sugar Ridge, 2026-10-12), and the
+   player who asked to hear when the course is ready was looking at exactly that map when they
+   asked. Checking readiness rather than hooking the mapper worker means a course fixed by hand
+   in Studio notifies people exactly like one a later scan fixed. */
 
 import { buildCoursePackage } from "./course-package.mjs";
 import emailNotification from "./email-notification.js";
@@ -117,7 +119,7 @@ export async function sendReadyCourseMapNotifications() {
   for (const [courseId, waiting] of byCourse) {
     let pkg = null;
     try { pkg = await buildCoursePackage(courseId); } catch (error) { pkg = null; }
-    if (!pkg || !READY_STATUSES.has(pkg.status)) continue;
+    if (!pkg || !READY_STATUSES.has(pkg.status) || pkg.readiness !== "complete") continue;
     const courseName = (waiting.find(row => row.course_name) || {}).course_name || "";
     for (const row of waiting) {
       let result;

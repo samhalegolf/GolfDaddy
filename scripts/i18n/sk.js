@@ -1073,6 +1073,11 @@
     "mapNotify.noThanks": "Nie, ďakujem",
     "mapNotify.toastWillEmail": "Keď bude ihrisko {course} pripravené, pošleme ti e-mail",
     "mapNotify.toastWillEmailYours": "Keď bude tvoje ihrisko pripravené, pošleme ti e-mail",
+    "mapNotify.incomplete": "Mapa ihriska {course} je neúplná",
+    "mapNotify.incompleteThis": "Mapa tohto ihriska je neúplná",
+    "mapNotify.incompleteDetail": "Zmapovaných {mapped} z {expected} jamiek. Chýbajú: {missing}. Zvyšok dokončíme.",
+    "mapNotify.incompleteDetailNoList": "Zmapovaných {mapped} z {expected} jamiek. Zvyšok dokončíme.",
+    "mapNotify.incompleteOnList": "Ste na zozname - napíšeme vám, keď bude celá mapa hotová.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Profil hráča",

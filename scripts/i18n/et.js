@@ -1048,6 +1048,11 @@
     "mapNotify.noThanks": "Tänan, ei",
     "mapNotify.toastWillEmail": "Saadame sulle kirja, kui väljak {course} on valmis",
     "mapNotify.toastWillEmailYours": "Saadame sulle kirja, kui su väljak on valmis",
+    "mapNotify.incomplete": "{course} kaart on puudulik",
+    "mapNotify.incompleteThis": "Selle väljaku kaart on puudulik",
+    "mapNotify.incompleteDetail": "{mapped} rada {expected}-st on kaardistatud. Puudu: {missing}. Teeme ülejäänud valmis.",
+    "mapNotify.incompleteDetailNoList": "{mapped} rada {expected}-st on kaardistatud. Teeme ülejäänud valmis.",
+    "mapNotify.incompleteOnList": "Oled nimekirjas - saadame e-kirja, kui täielik kaart on valmis.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Mängija profiil",

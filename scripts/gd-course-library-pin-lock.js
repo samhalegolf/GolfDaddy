@@ -4500,6 +4500,26 @@
     }).catch(()=>{});
     return {playable:false,failed:true,reason:reason||'scan-failed'};
   }
+  /* A scan that published fewer holes than the course has. The course opens and plays - what
+     was found is real - but the player is looking at a map with holes missing, and until now
+     nothing told them. The server's verdict on it ("Found 17 holes numbered up to 18 - this
+     course is not complete", Sugar Ridge 2026-10-12) only reaches a package with nothing to
+     play, so the readiness fields are the signal here: readiness "partial" plus the missing
+     hole numbers. The same card a failed scan shows, in its incomplete wording, with the same
+     "email me when it's ready" offer; the server emails only once the map is complete. */
+  function offerNotifyForIncompleteScan(course,hole,autoMapResult,opts={}){
+    if(!autoMapResult||autoMapResult.readiness!=='partial')return false;
+    const notify=window.GDCourseMapNotify;
+    if(!notify||typeof notify.offer!=='function')return false;
+    const c=sessionCourse(course||courseObj());
+    const h=validHoleNumber(hole)||1;
+    const missing=(Array.isArray(autoMapResult.missingHoles)?autoMapResult.missingHoles:[]).map(Number).filter(Number.isFinite);
+    const incomplete={mapped:Number(autoMapResult.mappedHoleCount)||Number(autoMapResult.holes)||0,expected:Number(autoMapResult.expectedHoleCount)||0,missing};
+    recordCoursePlayDebug('course-scan-incomplete-notify-offered',c,h,{resolutionKey:opts.resolutionKey||'',attemptToken:opts.attemptToken||'',mapped:incomplete.mapped,expected:incomplete.expected,missingHoles:missing});
+    if(opts.debugRunId)recordMappingDebug(opts.debugRunId,{source:'course-loader',phase:'completed',event:'scan-incomplete-notify-offered',summary:'Scan published an incomplete map - email-me-when-ready offered',details:{hole:h,mapped:incomplete.mapped,expected:incomplete.expected,missingHoles:missing,resolutionKey:opts.resolutionKey||'',attemptToken:opts.attemptToken||''}});
+    try{Promise.resolve(notify.offer({courseId:courseId(c),courseName:courseName(c)},{incomplete})).catch(()=>{});}catch(e){}
+    return true;
+  }
   function beginInteractiveGreenFallback(course,hole,reason,opts={}){
     const h=validHoleNumber(hole||opts.hole)||1;
     const selectedAt=opts.selectedAt||nowIso();
@@ -4677,10 +4697,15 @@
 	    });
 	    /* fit is the server's verdict on the coordinate this run was given. It rides
 	       all the way to the picker, which is the only thing that may put a pin
-	       screen in front of a player. Absent means the pin held up. */
+	       screen in front of a player. Absent means the pin held up.
+	       readiness is the server's word on whether this map covers the whole course
+	       (gd-course-package-shape.mjs addReadinessMetadata): "partial" with the missing
+	       hole numbers when a scan published fewer holes than the card says. The course
+	       still opens; the caller uses it to offer the "email me when it's ready" card. */
 	    let surfaces=null;
 	    try{surfaces=persistServerSurfaces(course,pkg);}catch(e){surfaces=null;}
-	    return {saved,holes:holes.length,polygons,fallbacks,surfaces,automapperStatus:'success',serverPackageStatus:pkg.status,fit:pkg&&pkg.fit||null};
+	    return {saved,holes:holes.length,polygons,fallbacks,surfaces,automapperStatus:'success',serverPackageStatus:pkg.status,fit:pkg&&pkg.fit||null,
+	      readiness:pkg.readiness||null,mappedHoleCount:Number(pkg.mappedHoleCount)||holes.length,expectedHoleCount:Number(pkg.expectedHoleCount)||null,missingHoles:Array.isArray(pkg.missingHoles)?pkg.missingHoles.slice():[]};
 	  }
 	  /* ---- Surfaces from the course package ----------------------------------------------
 
@@ -5107,6 +5132,7 @@
 	          recordMappingDebug(debugRunId,{source:'course-loader',phase:'completed',event:'mapping-attempt-completed',summary:'Course mapping completed',details:{hole:h,source:'automapper',resolutionKey:key,attemptToken}});
 	          finishMappingDebug(debugRunId,{status:'completed',outcome:'automapper map ready'});
 	          const shown=await showResolvedCoursePlayHole(c,h,'automapper',opts);
+	          offerNotifyForIncompleteScan(c,h,autoMapResult,{resolutionKey:key,attemptToken,debugRunId});
 	          return Object.assign(shown,{partial:autoAccepted&&!autoReady,readiness:autoState,persisted:autoMapResult,holes:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0,fit:autoMapResult&&autoMapResult.fit||null});
 	        }
         /* The server worker tries both OSM-numbered geometry AND the Native Geometry

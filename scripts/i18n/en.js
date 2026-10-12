@@ -1054,6 +1054,11 @@
     "mapNotify.noThanks": "No thanks",
     "mapNotify.toastWillEmail": "We'll email you when {course} is ready",
     "mapNotify.toastWillEmailYours": "We'll email you when your course is ready",
+    "mapNotify.incomplete": "The map for {course} is incomplete",
+    "mapNotify.incompleteThis": "This course map is incomplete",
+    "mapNotify.incompleteDetail": "{mapped} of {expected} holes are mapped. Missing: {missing}. We'll finish the rest.",
+    "mapNotify.incompleteDetailNoList": "{mapped} of {expected} holes are mapped. We'll finish the rest.",
+    "mapNotify.incompleteOnList": "You're on the list - we'll email you when the full map is ready.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Player Profile",

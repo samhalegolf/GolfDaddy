@@ -258,7 +258,7 @@ function loadController(options = {}) {
     MutationObserver: class { observe() {} disconnect() {} },
     /* The failure banner and the picker it sends the player back to. */
     GDCourseMapNotify: {
-      offer(ref) { calls.notifyOffers.push(ref); return calls.notifyOffers.length; },
+      offer(ref, opts) { calls.notifyOffers.push(Object.assign({}, ref, { incomplete: opts && opts.incomplete || null })); return calls.notifyOffers.length; },
       offerManualGps(offerId, onUse) { calls.manualOffers.push({ offerId, onUse }); return true; },
       hide() {}
     },
@@ -699,6 +699,23 @@ async function main() {
   const cleaned = JSON.parse(env.localStorage.data.gd_user_course_library_v1).courses["user-local-player::controller-test"];
   assert.deepStrictEqual(Object.keys(cleaned.objects).sort(), ["fairway1", "green1", "tee1"], "package copies leave the disk; the player's own objects stay");
   assert.strictEqual(cleaned.surfacesSavedAt, undefined, "and so does the marker that said surfaces were saved");
+
+  /* Sugar Ridge, 2026-10-12: the scan resolved 17 of 18 holes and published them. The course
+     opens and plays - but the player is told the map is incomplete and offered the email,
+     the same card a failed scan shows. A complete package offers nothing. */
+  const seventeen = Object.assign(serverPackage(18), { readiness: "partial", mappedHoleCount: 17, expectedHoleCount: 18, missingHoles: [17] });
+  seventeen.holes = seventeen.holes.filter((hole) => hole.holeNumber !== 17);
+  env = await runScenario({ serverCoursePackage: seventeen, wholeCourse: true });
+  assert.strictEqual(env.result.playable, true, "a partial package still opens the course");
+  assert.strictEqual(env.calls.pickerOpens.length, 0, "the player is not sent back to the picker for a partial map");
+  assert.strictEqual(env.calls.notifyOffers.length, 1, "the email-me-when-ready card is offered once for an incomplete scan");
+  assert.strictEqual(env.calls.notifyOffers[0].courseId, "controller-test", "the card is for the course that was scanned");
+  assert.strictEqual(JSON.stringify(env.calls.notifyOffers[0].incomplete), JSON.stringify({ mapped: 17, expected: 18, missing: [17] }), "the card knows which holes are missing");
+  assert(env.events.some((event) => event.event === "scan-incomplete-notify-offered"), "the mapping debug run records the offer");
+
+  env = await runScenario({ serverCoursePackage: Object.assign(serverPackage(18), { readiness: "complete", mappedHoleCount: 18, expectedHoleCount: 18, missingHoles: [] }), wholeCourse: true });
+  assert.strictEqual(env.result.playable, true, "a complete package opens the course");
+  assert.strictEqual(env.calls.notifyOffers.length, 0, "a complete map offers no email card");
 
   const noisyEvents = env.events.map((event) => event.event).filter(Boolean);
   assert(!noisyEvents.includes("automapper-invocation-requested"), "client AutoMapper request noise is absent");

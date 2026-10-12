@@ -1098,6 +1098,11 @@
     "mapNotify.noThanks": "Nie, dziękuję",
     "mapNotify.toastWillEmail": "Wyślemy ci e-mail, gdy pole {course} będzie gotowe",
     "mapNotify.toastWillEmailYours": "Wyślemy ci e-mail, gdy twoje pole będzie gotowe",
+    "mapNotify.incomplete": "Mapa pola {course} jest niekompletna",
+    "mapNotify.incompleteThis": "Mapa tego pola jest niekompletna",
+    "mapNotify.incompleteDetail": "Zmapowano {mapped} z {expected} dołków. Brakuje: {missing}. Dokończymy resztę.",
+    "mapNotify.incompleteDetailNoList": "Zmapowano {mapped} z {expected} dołków. Dokończymy resztę.",
+    "mapNotify.incompleteOnList": "Jesteś na liście - napiszemy, gdy pełna mapa będzie gotowa.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Profil gracza",
