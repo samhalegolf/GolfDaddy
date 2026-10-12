@@ -98,7 +98,9 @@ const GREEN_FRAME_STAMP = "greenframe5";
    the old geometry against the new grid's metadata. This stamps the geometry rules into the
    planKey. Bump it whenever pixelRect / applyHoleView / applyLens / capturePolicy change what
    a capture covers. */
-const CAPTURE_GEOMETRY_STAMP = "geom-holeview1";
+/* holeview2: the corridor reaches half the hole's length (180m at least) past the green for
+   the tilted lock view, and is trimmed to the phone's own width across. */
+const CAPTURE_GEOMETRY_STAMP = "geom-holeview2";
 /* paint2: tiers moved out of the compositor into buildGreenDrawing's display list, and the
    palette is now sampled off the green's own box rather than a fixed 520px downscale of the
    whole frame. Both change published pixels, so already-exported frames must not resume. */
