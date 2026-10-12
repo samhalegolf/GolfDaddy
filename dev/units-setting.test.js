@@ -51,7 +51,6 @@ function launch(store) {
     document: { getElementById: (id) => row[id] || null },
     greenPolygon: null,
     renderShot() {},
-    renderScorecard() {},
     drawGreenDistances() {}
   };
   context.window = context;

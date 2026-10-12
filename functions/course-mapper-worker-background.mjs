@@ -465,7 +465,7 @@ async function saveResolvedGeometry(courseId, geometry) {
 
 /* course_scorecards.course_key is the course's DISPLAY NAME, lowercased and whitespace-
    collapsed - NOT the dash-slugged course_id every other table uses. This has to match
-   gdScorecardCourseKey() (scripts/inline/gd-gps-scorecard-owner-v1.js:49) exactly or every
+   scorecardCourseKey() in app/js/scorecard.js (GPS Play's scorecard) exactly or every
    lookup here misses a scorecard that is sitting right there under a different-looking key. */
 function scorecardCourseKey(courseName) {
   return String(courseName || "").trim().replace(/\s+/g, " ").toLowerCase();

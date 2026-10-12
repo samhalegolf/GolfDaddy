@@ -3532,7 +3532,6 @@
   }
   function returnToGpsFromScorecard(){
     try{sessionStorage.removeItem('gd_return_from_scorecard');}catch(e){}
-    try{document.getElementById('scorePanel')?.classList.remove('open');}catch(e){}
     try{document.querySelectorAll('.panel.open,.modulePanel.open').forEach(p=>p.classList.remove('open'));}catch(e){}
     try{if(typeof enterGpsModule==='function')enterGpsModule({fromBack:true,preserve:true,replace:true});}catch(e){}
     try{if(typeof gdV62Refresh==='function')setTimeout(gdV62Refresh,80);}catch(e){}
