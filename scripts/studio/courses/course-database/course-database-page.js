@@ -19,9 +19,12 @@
  * sidesteps the whole class of problem: there is still only ever one of each id in the document.
  *
  * Course Database, Course Mapping, Course Visuals, and Mapping Diagnostics all host this same
- * node (with different default tabs) via window.GDStudioCourseDbHost.mount — only one page can
- * hold it at a time, which is an accurate reflection of the legacy code: it is one panel with
- * one detail tab, not four independently-owned surfaces yet. See course-mapping-page.js. */
+ * node via window.GDStudioCourseDbHost.mount — only one page can hold it at a time, which is an
+ * accurate reflection of the legacy code: it is one panel with one detail tab, not four
+ * independently-owned surfaces yet. A page may pass `scope` to narrow the list to its own
+ * courses (gdAdminCourseDbSetScope); Course Mapping does, to show only the courses players
+ * asked the app to map. The scope is cleared on unmount so the next host sees the whole
+ * database. See course-mapping-page.js. */
 (function () {
   "use strict";
 
@@ -42,6 +45,7 @@
       if (typeof window.gdRenderAdminCourseDatabase === "function") window.gdRenderAdminCourseDatabase();
     }
 
+    if (typeof window.gdAdminCourseDbSetScope === "function") window.gdAdminCourseDbSetScope(opts.scope || null);
     if (opts.tab && typeof window.gdAdminCourseDbSetTab === "function") window.gdAdminCourseDbSetTab(opts.tab);
     else refresh();
 
@@ -49,6 +53,7 @@
 
     return function cleanup() {
       clearInterval(interval);
+      if (typeof window.gdAdminCourseDbSetScope === "function") window.gdAdminCourseDbSetScope(null);
       if (originalParent) originalParent.insertBefore(host, originalNextSibling);
     };
   }
