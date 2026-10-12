@@ -263,6 +263,11 @@ const adapter = `
        renders what it is given, and setMicroGeometry(null) puts the bubble
        back to exactly the shape it had before this layer existed. */
     setMicroGeometry: function (geometry) { return gdSetBubbleMicroGeometry(geometry); },
+    /* The phone's forward bias (gdBubbleRenderCenter). On is the shipped value
+       and nothing in the app turns it off; dev/bubble-engine-parity.test.js
+       turns it off to record the maths the watch engines share, which have no
+       such bias. */
+    setForwardBias: function (on) { DEV_DEFAULTS.bubbleGeometry.forwardBias = on === false ? 0 : 1; },
     microGeometry: gdBubbleMicroGeometry,
     defaultBagRows: gdDefaultStandInBag,
     setWind: function (originAngleRad, level) {
