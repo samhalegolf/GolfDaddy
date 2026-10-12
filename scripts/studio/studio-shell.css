@@ -372,6 +372,9 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
 #gdStudioShellRoot .gdStudioOverlayGoogle { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; border-left: 2px solid var(--gdStudioBorder); }
 #gdStudioShellRoot .gdStudioOverlayGoogle[hidden] { display: none; }
 #gdStudioShellRoot .gdStudioOverlayGoogleMap { position: absolute; inset: 0; background: #000; }
+/* The same spot on both maps (Google alongside): a box under the pointer, mirrored. */
+#gdStudioShellRoot .gdStudioOverlaySpot { box-sizing: border-box; border: 2px solid #ffe14d; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), inset 0 0 0 1px rgba(0, 0, 0, 0.7); background: transparent; pointer-events: none; }
+#gdStudioShellRoot .gdStudioOverlaySpot.isParked { border-color: #ff4dd2; }
 #gdStudioShellRoot .gdStudioOverlayGoogleCredit {
   position: absolute;
   left: 8px;

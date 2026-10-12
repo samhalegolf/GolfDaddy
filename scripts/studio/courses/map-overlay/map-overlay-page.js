@@ -4117,6 +4117,37 @@
       following = false;
     }
     function syncGoogle() { if (google) follow(mapObj, google.map); }
+
+    /* The same spot on both maps: a box under the pointer on either, mirrored on the other,
+       so a green seen on Google can be found on the drawing map. A click on Google parks it
+       there on both until the next click or Google is closed. Only a marker - nothing is
+       placed or traced from Google, which is licensed for display. */
+    var spot = { hover: null, parked: null, markers: [] };
+    function spotIcon(parked) {
+      return L.divIcon({ className: "gdStudioOverlaySpot" + (parked ? " isParked" : ""), iconSize: [22, 22], iconAnchor: [11, 11] });
+    }
+    function drawSpot() {
+      var at = google && (spot.hover || spot.parked);
+      if (!at) {
+        spot.markers.forEach(function (m) { try { m.remove(); } catch (e) {} });
+        spot.markers = [];
+        return;
+      }
+      var parked = !spot.hover;
+      if (!spot.markers.length) {
+        spot.markers = [mapObj, google.map].map(function (map) {
+          return L.marker([at.lat, at.lng], { icon: spotIcon(parked), interactive: false, keyboard: false }).addTo(map);
+        });
+        spot.parkedIcon = parked;
+        return;
+      }
+      spot.markers.forEach(function (m) {
+        m.setLatLng([at.lat, at.lng]);
+        if (spot.parkedIcon !== parked) m.setIcon(spotIcon(parked));
+      });
+      spot.parkedIcon = parked;
+    }
+    function spotHover(e) { spot.hover = e && e.latlng ? { lat: e.latlng.lat, lng: e.latlng.lng } : null; drawSpot(); }
     function syncMain() { if (google) follow(google.map, mapObj); }
     function setGoogle(on) {
       var api = sourcesApi();
@@ -4136,7 +4167,12 @@
         tiles.on("gdcredit", function (e) { el["google-credit"].textContent = e.text; });
         google = { map: map };
         map.on("move", syncMain);
+        map.on("mousemove", spotHover);
+        map.on("mouseout", function () { spotHover(null); });
+        map.on("click", function (e) { spot.parked = { lat: e.latlng.lat, lng: e.latlng.lng }; drawSpot(); });
       } else if (!on && google) {
+        spot.hover = spot.parked = null;
+        drawSpot();
         try { google.map.remove(); } catch (e) {}
         google = null;
       }
@@ -4263,6 +4299,8 @@
       if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
       if (lineTool()) finishFairway();
     });
+    mapObj.on("mousemove", function (e) { if (google) spotHover(e); });
+    mapObj.on("mouseout", function () { if (google) spotHover(null); });
     mapObj.on("mousemove", function (e) {
       if (!lineTool() || !draft.length) return;
       cursorLatLng = { lat: e.latlng.lat, lng: e.latlng.lng };
