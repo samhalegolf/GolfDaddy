@@ -635,6 +635,25 @@
     var k = Math.pow(2, Number(meta.captureZoom) - Number(gf.captureZoom));
     var dx = Number(gf.originPx.x) * k - Number(meta.originPx.x);
     var dy = Number(gf.originPx.y) * k - Number(meta.originPx.y);
+    /* In lock the mesh stands the ground up: every pixel of the hole frame moves by its
+       height (gd-terrain-mesh.js), and the overlays move with it through the projector's
+       lift. This picture of the green has to move too, or it stays on the plane the green
+       rose from while the pin, the bubble and the mesh's own green sit on the ground as
+       drawn - on a raised green with relief at 2.5x that is tens of screen pixels, and it
+       reads as the shot landing past the green it was aimed at. One translation, the lift at
+       the green frame's centre (the green sits in the middle of its square): a green pad is
+       near enough flat that its picture moves as one piece, and the slope in the margin is
+       under the radial mask's fade. Zero outside lock, or with no mesh, exactly as the
+       overlays' own lift is. */
+    var relief = mesh && document.body.classList.contains("surface-mesh") ? mesh : null;
+    if (relief && relief.offsetAt) {
+      var lift = relief.offsetAt({
+        x: dx + (Number(gf.outputDimensions.width) * k) / 2,
+        y: dy + (Number(gf.outputDimensions.height) * k) / 2
+      });
+      dx += Number(lift.x) || 0;
+      dy += Number(lift.y) || 0;
+    }
     var a = activeFrame.a, b = activeFrame.b;
     green.style.width = Number(gf.outputDimensions.width) + "px";
     green.style.height = Number(gf.outputDimensions.height) + "px";
@@ -2158,6 +2177,9 @@
         mesh.state.exaggeration = reliefExaggeration();
         applyMeshFrame();
         document.body.classList.add("surface-mesh");
+        /* The green frame was placed on the flat frame before the mesh was up; now the ground
+           has relief it goes where the mesh put the green (applyGreenFrame's lift). */
+        applyGreenFrame(meta);
         if (meta.liveTerrain && liveTerrain) liveTerrain.debug.meshMs = Date.now() - meshStarted;
         /* The overlays already on screen were placed on the flat frame. Now that the
            ground has relief, place them again on it (the projector lifts from here on). */
