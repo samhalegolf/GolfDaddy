@@ -125,6 +125,21 @@ test("a linked overlay hole becomes a numbered hole line; an incomplete one is r
   assert.strictEqual(line.tags.ref, "1");
 });
 
+test("an OSM hole line made editable, and its tee dragged, still answers to its OSM id in a play order", async () => {
+  const overlay = await import(path.join(root, "functions", "lib", "gd-map-overlay-core.mjs"));
+  const [line] = overlay.osmToOverlayFeatures(payload(), []).filter(f => f.osm === "way/100");
+  assert.strictEqual(line.kind, "hole");
+  /* The tee end moved 20m east, as Studio does when the tee it starts at is dragged. */
+  line.points[0] = at(20, 0);
+  const merged = overlay.mergeOverlayIntoPayload(payload(), [line]);
+  assert.ok(!merged.elements.some(e => e.id === 100), "the OSM line is replaced");
+  const built = po.playOrderPayload(merged, [line], OLD);
+  assert.deepStrictEqual(built.holes.map(h => h.found), [true, true, true]);
+  const first = built.payload.elements.find(e => e.tags.golf === "hole" && e.tags.ref === "1");
+  assert.ok(Math.abs(first.geometry[0].lon - at(20, 0).lng) < 1e-7, "hole 1 is the moved line, not OSM's");
+  assert.strictEqual(built.payload.elements.filter(e => e.tags.golf === "hole").length, 3, "the converted line is in once");
+});
+
 test("the payload's overlay shapes on a linked hole take that hole's number", async () => {
   const overlay = await import(path.join(root, "functions", "lib", "gd-map-overlay-core.mjs"));
   const features = [

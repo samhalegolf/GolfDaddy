@@ -141,6 +141,10 @@ export function playOrderPayload(payload, overlayFeatures, playOrder) {
   const features = normalizeOverlayFeatures(overlayFeatures);
   const source = (payload && payload.elements) || [];
   const byOsmKey = new Map(source.filter(e => e && !isOverlayElement(e)).map(e => [String(e.type || "way") + "/" + e.id, e]));
+  /* An OSM hole line made editable stands in for its element (mergeOverlayIntoPayload drops the
+     original), so "osm:way/N" resolves to the converted line - wherever its tee was dragged to. */
+  const byOverlayId = new Map(source.filter(e => e && isOverlayElement(e)).map(e => [e.tags[OVERLAY_TAG], e]));
+  const converted = new Map(features.filter(f => f.kind === "hole" && f.osm).map(f => [f.osm, byOverlayId.get(f.id)]));
   const linkMembers = new Map();
   features.forEach(f => { if (f.link) (linkMembers.get(f.link) || linkMembers.set(f.link, []).get(f.link)).push(f); });
 
@@ -151,7 +155,7 @@ export function playOrderPayload(payload, overlayFeatures, playOrder) {
     const position = index + 1;
     const osm = OSM_REF.exec(ref);
     if (osm) {
-      const element = byOsmKey.get(osm[1] + "/" + osm[2]);
+      const element = byOsmKey.get(osm[1] + "/" + osm[2]) || converted.get(osm[1] + "/" + osm[2]);
       if (!element || !isHoleWay(element)) { holes.push({ position, ref, found: false, reason: "osm-hole-not-in-payload" }); return; }
       lines.push(Object.assign({}, element, { tags: Object.assign({}, element.tags, { ref: String(position) }) }));
       holes.push({ position, ref, found: true });

@@ -58,6 +58,8 @@
      functions/course-map-source-test.mjs. Mapbox may be looked at, never stored, so a scan of
      its picture is always a dry run. */
   var SOURCE_TEST_API = "/api/course-map-source-test";
+  /* When the imagery in view was taken (functions/course-map-capture-date.mjs). */
+  var CAPTURE_API = "/api/course-map-capture-date";
   /* The model reads an image at ~1568px on its long side and answers in the pixels it saw,
      so the capture is scaled to that here and georeferenced AFTER scaling - the picture we
      describe is the picture it gets, to the pixel. */
@@ -345,6 +347,8 @@
     /* A cluster oval while it is stretched, and the box the tree finder looks in. */
     stretchOval: { color: "#2fbf5a", weight: 2, dashArray: "6 6", fillColor: "#1f8a3c", fillOpacity: 0.2, interactive: false },
     stretchBox: { color: "#ffffff", weight: 2, dashArray: "6 6", fill: false, interactive: false },
+    /* The box everything inside goes to the bin from (Shift-drag in Move). */
+    stretchBin: { color: "#ff6a5c", weight: 2, dashArray: "6 6", fillColor: "#ff6a5c", fillOpacity: 0.12, interactive: false },
     draft: { color: "#ffb54c", weight: 3, dashArray: "6 6", interactive: false },
     /* Shapes on the same hole, and the line a Link drag draws. */
     link: { color: "#ffffff", weight: 2, opacity: 0.7, dashArray: "1 7", lineCap: "round", interactive: false },
@@ -500,7 +504,8 @@
       "</div>" +
       '<div class="gdStudioSourceTest" data-gd-overlay="source-panel" hidden></div>' +
       '<div class="gdStudioViewportBar">' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="convert" disabled title="Add what OSM has here - greens, tees, fairways, bunkers, water, trees - and the mapper\'s default fairways to the overlay as shapes you can reshape. Once saved and ready, each replaces the OSM shape it came from.">Make OSM editable</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="convert" disabled title="Add what OSM has here - greens, tees, fairways, bunkers, water, trees, hole lines - and the mapper\'s default fairways to the overlay as shapes you can reshape. Once saved and ready, each replaces the OSM shape it came from.">Make OSM editable</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="fresh" disabled title="Copy everything OSM has here into the overlay as your own shapes, then stop reading OSM for this course: from here on the mapper reads only the shapes drawn here, starting from OSM\'s.">Start fresh from OSM</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ready" disabled>Mark ready</button>' +
       '<span class="gdStudioOverlayReadyChoice" data-gd-overlay="ready-choice" hidden>' +
       '<button type="button" class="gdStudioDiagramBtn" data-ready-osm="include" title="The mapper reads OpenStreetMap and your shapes, yours winning where they overlap">With OSM</button>' +
@@ -607,7 +612,7 @@
       "</div>";
 
     var el = {};
-    ["courses", "inbox", "inbox-count", "pick", "convert", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "run", "status"].forEach(function (name) {
+    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -668,8 +673,57 @@
       watchImageryCeiling(layer);
       layer.addTo(mapObj);
       try { mapObj.setMaxZoom(DRAW_MAX_ZOOM); } catch (e) {}
-      el.credit.innerHTML = esc(source.label) + (source.attribution ? " — " + esc(source.attribution) : "");
+      renderCredit();
+      refreshCaptureDate();
       remember();
+    }
+
+    /* ---- when the imagery was taken ----
+       Shapes are placed by eye off the ground, so the credit line says how old the picture is:
+       the server asks the mounted provider about the view's centre (CAPTURE_API) and the answer
+       is kept per provider, zoom and ~100m cell, so panning around one course asks once. */
+    var captureCache = {};
+    var captureAsk = 0;
+    var captureTimer = null;
+    function captureKey() {
+      var here = centre();
+      if (!here || !mapObj) return "";
+      return session.sourceKey + "|" + Math.floor(mapObj.getZoom()) + "|" + here.lat.toFixed(3) + "," + here.lng.toFixed(3);
+    }
+    function renderCredit() {
+      var source = sourceByKey(session.sourceKey);
+      if (!source) { el.credit.innerHTML = ""; return; }
+      var got = captureCache[captureKey()];
+      var when = !got ? "asking when this was taken…"
+        : got.status === "ok" ? "taken " + got.text + (got.detail ? " (" + got.detail + ")" : "")
+        : got.status === "none" ? "capture date: " + got.text
+        : got.status === "unsupported" ? got.text
+        : "capture date unavailable: " + got.text;
+      el.credit.innerHTML = esc(source.label) + (source.attribution ? " — " + esc(source.attribution) : "") +
+        ' · <span class="gdStudioOverlayCaptured' + (got && got.status === "ok" ? "" : " isMuted") + '">' + esc(when) + "</span>";
+    }
+    function refreshCaptureDate() {
+      if (captureTimer) clearTimeout(captureTimer);
+      captureTimer = setTimeout(askCaptureDate, 400);
+    }
+    function askCaptureDate() {
+      captureTimer = null;
+      if (destroyed || !mapObj) return;
+      var key = captureKey();
+      if (!key || captureCache[key]) { renderCredit(); return; }
+      var here = centre();
+      var b = mapObj.getBounds();
+      var asked = ++captureAsk;
+      var query = "?source=" + encodeURIComponent(session.sourceKey) + "&lat=" + here.lat.toFixed(6) + "&lng=" + here.lng.toFixed(6) + "&zoom=" + mapObj.getZoom() +
+        "&north=" + b.getNorth().toFixed(6) + "&south=" + b.getSouth().toFixed(6) + "&east=" + b.getEast().toFixed(6) + "&west=" + b.getWest().toFixed(6);
+      api("GET", query, null, CAPTURE_API).then(function (data) {
+        captureCache[key] = data && data.status ? data : { status: "error", text: "no answer" };
+      }).catch(function (error) {
+        captureCache[key] = { status: "error", text: String(error && error.message || error) };
+      }).then(function () {
+        if (destroyed || asked !== captureAsk) return;
+        renderCredit();
+      });
     }
     /* Why the mounted provider's pixels cannot be read, or "". `scan` is the AI scan, whose
        shapes are stored - a provider marked noAiScan (Mapbox) is wand-only. */
@@ -898,11 +952,12 @@
 
     /* A press on the map starts the tool's gesture, if it has one. */
     function onMapPress(event) {
-      var gesture = pressGesture();
+      /* In Move, Shift and a press on open map stretches the bin box. */
+      var gesture = pressGesture() || (tool === "move" && event.shiftKey ? "bin" : null);
       if (!gesture || event.button || drag || lasso || stretch || colourPress || !mapObj) return;
       if (Date.now() - dragEndedAt < 300) return;
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
-      if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
+      if (gesture !== "bin" && session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
       event.preventDefault();
       settle();
       if (gesture === "lasso") beginLasso(event);
@@ -957,8 +1012,10 @@
 
     function beginStretch(event, mode) {
       var start = mapObj.mouseEventToLatLng(event);
-      var preview = mode === "oval" ? L.polygon([], STYLE.stretchOval) : L.rectangle(L.latLngBounds(start, start), STYLE.stretchBox);
+      var preview = mode === "oval" ? L.polygon([], STYLE.stretchOval) : L.rectangle(L.latLngBounds(start, start), mode === "bin" ? STYLE.stretchBin : STYLE.stretchBox);
       stretch = { mode: mode, start: { lat: start.lat, lng: start.lng }, end: null, round: false, layer: preview.addTo(mapObj) };
+      /* Move leaves the map draggable; the box must not pan it. syncMapDragging puts it back. */
+      try { mapObj.dragging.disable(); } catch (e) {}
       document.addEventListener("pointermove", onStretchMove);
       document.addEventListener("pointerup", onStretchEnd);
       document.addEventListener("pointercancel", onStretchEnd);
@@ -986,6 +1043,11 @@
       if (event.type === "pointercancel") return;
       var a = done.start, b = done.end;
       var wide = !!b && shapes.distanceM(a, { lat: a.lat, lng: b.lng }) >= 2, tall = !!b && shapes.distanceM(a, { lat: b.lat, lng: a.lng }) >= 2;
+      if (done.mode === "bin") {
+        if (!(wide && tall)) { setStatus("Shift-drag a box round the shapes to delete - everything wholly inside it goes.", true); return; }
+        binBox(a, b);
+        return;
+      }
       if (done.mode === "oval") {
         if (done.round ? !(wide || tall) : !(wide && tall)) { setStatus("Press and drag across the cluster of trees to stretch an oval over it.", true); return; }
         var ring = shapes.ellipseInBox(a, b, done.round);
@@ -996,6 +1058,25 @@
       }
       if (!(wide && tall)) { setStatus("Drag a box over the ground to look for trees in.", true); return; }
       runTreeFinder(a, b);
+    }
+
+    /* ---- the bin box ----
+       Every shape wholly inside the box goes - wholly, so a fairway the box only clips stays.
+       Undo puts them back, which is why there is no "are you sure". */
+    function binBox(a, b) {
+      var bounds = L.latLngBounds([a.lat, a.lng], [b.lat, b.lng]);
+      var gone = session.features.filter(function (f) { return f.points.every(function (p) { return bounds.contains([p.lat, p.lng]); }); });
+      if (!gone.length) { setStatus("Nothing lies wholly inside that box."); return; }
+      var ids = {};
+      gone.forEach(function (f) { ids[f.id] = true; });
+      session.features = session.features.filter(function (f) { return !ids[f.id]; });
+      if (selectedId && ids[selectedId]) selectedId = "";
+      if (adjust && ids[adjust.id]) adjust = null;
+      if (finder) finder = null;
+      drawFeatures();
+      changed();
+      updateHint();
+      setStatus("Deleted " + gone.length + " shape" + (gone.length === 1 ? "" : "s") + " in the box. Undo puts them back.");
     }
 
     /* ---- single trees ----
@@ -2548,8 +2629,12 @@
       var osm = /^osm:(.+)$/.exec(ref);
       if (osm) {
         var hole = osmHoleById(osm[1]);
-        if (!hole) return { label: "OSM hole", problem: "not found in OSM here", at: null };
-        var a = hole.points[0], b = hole.points[hole.points.length - 1];
+        /* Made editable, the line in the overlay is where the hole is now. */
+        var own = session.features.filter(function (f) { return f.kind === "hole" && f.osm === osm[1]; })[0];
+        if (!hole && !own) return { label: "OSM hole", problem: "not found in OSM here", at: null };
+        var pts = own ? own.points : hole.points;
+        var a = pts[0], b = pts[pts.length - 1];
+        if (!hole) hole = { ref: own.hole || "" };
         return { label: "OSM hole " + (hole.ref || "(unnumbered)"), problem: "", at: [(a.lat + b.lat) / 2, (a.lng + b.lng) / 2] };
       }
       var link = /^link:(.+)$/.exec(ref);
@@ -2635,6 +2720,8 @@
        green belong together. Linking two nines' "hole 3" shapes for it would guess. */
     function allocateShape(f) {
       if (!f || !canEdit() || Date.now() - dragEndedAt < 300) return;
+      /* An OSM hole line made editable is still that OSM hole to a play order. */
+      if (f.kind === "hole" && f.osm) { toggleOrderHole("osm:" + f.osm); return; }
       if (!f.link) { setStatus("This " + kindLabel(f.kind).toLowerCase() + " is not on a linked hole. Link the hole's tee and green first (Link, C), then click it here.", true); return; }
       toggleOrderHole("link:" + f.link);
     }
@@ -2944,8 +3031,55 @@
         if (d.mode === "body") shiftAdjust(f.points[0].lat - d.orig[0].lat, f.points[0].lng - d.orig[0].lng);
         else commitAdjust(true);
       }
+      var followed = d.mode === "body" && f.kind === "tee" ? followTee(f, d.orig) : 0;
       drawFeatures();
       changed();
+      if (followed) setStatus("Tee moved - its hole line moved with it.");
+    }
+
+    /* ---- a tee's hole line follows it ----
+       A hole line runs tee to green, so its first point is the tee end - OSM's convention and
+       the one this page draws by. Drag a tee that end sits at and the end goes with it, by the
+       same distance: the overlay's own hole lines, and OSM's, which is first made editable so
+       the moved line is what the mapper reads instead of OSM's. Only ever the tee end, so the
+       green end of the hole before, which often sits as close, is never touched; and never a
+       line numbered or linked to a different hole. A line whose tee end is not at this tee (a
+       forward tee on a line from the back tee) is left alone. */
+    var TEE_LINE_REACH_M = 30;
+
+    function centreOf(points) {
+      var sum = points.reduce(function (acc, p) { return { lat: acc.lat + p.lat, lng: acc.lng + p.lng }; }, { lat: 0, lng: 0 });
+      return { lat: sum.lat / points.length, lng: sum.lng / points.length };
+    }
+
+    function osmHoleNumber(h) { var m = /\d+/.exec(String(h && h.ref || "")); return m ? holeNumber(m[0]) : null; }
+
+    /* Whether a line's tee end sits at this tee, and the line is not another hole's. */
+    function startsAtTee(points, number, link, tee, from) {
+      if (tee.hole && number && number !== tee.hole) return false;
+      if (tee.link && link && link !== tee.link) return false;
+      return points.length >= 2 && shapes.distanceM(points[0], from) <= TEE_LINE_REACH_M;
+    }
+
+    function followTee(tee, orig) {
+      var from = centreOf(orig);
+      var dLat = tee.points[0].lat - orig[0].lat, dLng = tee.points[0].lng - orig[0].lng;
+      var lines = session.features.filter(function (g) { return g.kind === "hole" && !g.pin && startsAtTee(g.points, g.hole, g.link, tee, from); });
+      /* OSM's line from this tee, not yet editable: made so, under the id the server would give it. */
+      if (session.osm && !session.osm.error && session.osmMode !== "exclude") {
+        var converted = {};
+        session.features.forEach(function (f) { if (f.osm) converted[f.osm] = true; });
+        (session.osm.holes || []).forEach(function (h) {
+          if (converted[h.id] || !h.points || !startsAtTee(h.points, osmHoleNumber(h), null, tee, from)) return;
+          if (session.features.length >= MAX_FEATURES) return;
+          var f = { id: ("osm-" + String(h.id).replace("/", "-")).slice(0, 40), kind: "hole", hole: osmHoleNumber(h), points: h.points.map(function (p) { return { lat: p.lat, lng: p.lng }; }), source: "osm", osm: h.id };
+          session.features.push(f);
+          lines.push(f);
+        });
+      }
+      lines.forEach(function (line) { line.points[0] = { lat: line.points[0].lat + dLat, lng: line.points[0].lng + dLng }; });
+      if (lines.length) drawOsm();
+      return lines.length;
     }
 
     /* ---- linking shapes to a hole ----
@@ -3274,21 +3408,58 @@
       return list.filter(function (f) { return !have[f.id]; });
     }
 
-    function convertOsm(auto) {
-      if (!canEdit()) return;
+    /* Copies what OSM has here into the overlay. Returns what was said about it, or "" when
+       there was nothing to add. */
+    function addOsmShapes() {
       var list = convertibleOsm();
-      if (!list.length) { if (!auto) setStatus("Everything OSM has here is already in the overlay."); return; }
+      if (!list.length) return "";
       var added = list.slice(0, Math.max(0, MAX_FEATURES - session.features.length));
       added.forEach(function (f) { session.features.push(JSON.parse(JSON.stringify(f))); });
-      drawOsm();
-      drawFeatures();
-      changed();
       var counts = {};
       added.forEach(function (f) { var k = f.source === "auto" ? "default fairway" : f.kind === "trees" ? "tree area" : kindLabel(f.kind).toLowerCase(); counts[k] = (counts[k] || 0) + 1; });
       var said = Object.keys(counts).map(function (k) { return counts[k] + " " + k + (counts[k] === 1 ? "" : "s"); }).join(", ");
-      setStatus((auto ? "OSM's shapes are in the overlay, ready to reshape: " : "Added from OSM: ") + said + "." +
-        (added.length < list.length ? " " + (list.length - added.length) + " more did not fit (" + MAX_FEATURES + " shapes a course)." : "") +
-        " Mark ready when they look right.");
+      return said + "." + (added.length < list.length ? " " + (list.length - added.length) + " more did not fit (" + MAX_FEATURES + " shapes a course)." : "");
+    }
+
+    function convertOsm(auto) {
+      if (!canEdit()) return;
+      var said = addOsmShapes();
+      if (!said) { if (!auto) setStatus("Everything OSM has here is already in the overlay."); return; }
+      drawOsm();
+      drawFeatures();
+      changed();
+      setStatus((auto ? "OSM's shapes are in the overlay, ready to reshape: " : "Added from OSM: ") + said + " Mark ready when they look right.");
+    }
+
+    /* Start fresh from OSM: everything OSM has here becomes the overlay's own shapes, and from
+       then on the mapper reads only those - OSM is hidden and never read again for this course.
+       The opposite of "My shapes only" from the menu, which offers to throw OSM's shapes away:
+       here they are the starting point. */
+    function startFresh() {
+      var id = session.loadedFor;
+      if (!canEdit() || !id) return;
+      var list = convertibleOsm();
+      if (!window.confirm("Start fresh from OSM?\n\n" + (list.length ? list.length + " shape" + (list.length === 1 ? "" : "s") + " OSM has here " + (list.length === 1 ? "is" : "are") + " copied into the overlay as your own" : "Everything OSM has here is already in the overlay") +
+        ", and from now on the mapper reads only the shapes drawn here. OSM is hidden and not read again for this course (you can turn it back on under Mapper reads).")) return;
+      var said = addOsmShapes();
+      session.osmMode = "exclude";
+      el["osm-mode"].value = "exclude";
+      drawOsm();
+      drawFeatures();
+      changed();
+      updateActions();
+      saveOsmMode(id, "exclude", "Started fresh from OSM" + (said ? ": " + said : ".") + " The mapper now reads only your shapes. Mark ready when they look right.");
+    }
+
+    function saveOsmMode(id, mode, said) {
+      api("POST", "", { courseId: id, osm: mode }).then(function (data) {
+        if (session.loadedFor !== id) return;
+        session.status = (data && data.status) || "draft";
+        renderSaveState();
+        setStatus(said);
+      }).catch(function (error) {
+        setStatus("Could not save the OSM choice: " + (error && error.message || error), true);
+      });
     }
 
     function deleteOverlay() {
@@ -3325,14 +3496,7 @@
       }
       drawOsm();
       updateActions();
-      api("POST", "", { courseId: id, osm: mode }).then(function (data) {
-        if (session.loadedFor !== id) return;
-        session.status = (data && data.status) || "draft";
-        renderSaveState();
-        setStatus(mode === "exclude" ? "My shapes only: OSM is hidden and the mapper will not read it. Mark ready when the drawing is done." : "The mapper reads OSM with your shapes again.");
-      }).catch(function (error) {
-        setStatus("Could not save the OSM choice: " + (error && error.message || error), true);
-      });
+      saveOsmMode(id, mode, mode === "exclude" ? "My shapes only: OSM is hidden and the mapper will not read it. Mark ready when the drawing is done." : "The mapper reads OSM with your shapes again.");
     }
     function toggleReadyChoice() {
       if (!canEdit() || !hasOverlay()) return;
@@ -3370,8 +3534,8 @@
       add(own(osm.tees), STYLE.osmTee, true);
       add(own(osm.bunkers), STYLE.osmBunker, true);
       add(own(osm.water), STYLE.osmWater, true);
-      if (tool === "order") drawOrderOsmHoles(osm.holes);
-      else add(osm.holes, STYLE.osmHole, false);
+      if (tool === "order") drawOrderOsmHoles(own(osm.holes));
+      else add(own(osm.holes), STYLE.osmHole, false);
       /* OSM sits under the overlay, so a placed shape is never hidden behind what OSM has. */
       osmLayers.forEach(function (l) { try { l.bringToBack(); } catch (e) {} });
     }
@@ -3517,7 +3681,7 @@
       else if (selectedId && !bigEnoughForHandles(findFeature(selectedId) || { points: [] })) text = "Drag to move · zoom in to reshape its corners · Delete or the bin removes it";
       else if (selectedId && isDetailed(findFeature(selectedId))) text = "Drag to move · grab the edge anywhere to bend it · drag a point to pull that stretch · zoom in for finer control · Delete or the bin removes it";
       else if (selectedId) text = "Drag to move · drag corners to reshape · faint dots add a corner · right-click a corner or drag it to the bin to remove it · Delete or the bin removes the shape";
-      else text = "Choose Fairway, Green, Tee or Bunker to place · click a shape in Move to adjust it · Link puts shapes on one hole";
+      else text = "Choose Fairway, Green, Tee or Bunker to place · click a shape in Move to adjust it · Shift-drag a box to delete everything inside it · Link puts shapes on one hole";
       var held = selectedId && tool === "move" && canEdit() ? findFeature(selectedId) : null;
       if (held && !held.pin && RESHAPE[held.kind] && !adjusted()) text = "↑ ↓ " + (held.kind === "fairway" ? "smooth the edge, then " : "") + "smaller / bigger · " + text;
       if (adjusted()) text = adjustHint();
@@ -3575,6 +3739,9 @@
       el.convert.disabled = !canEdit() || !convertible || session.osmMode === "exclude";
       el["osm-mode"].disabled = !canEdit();
       el.convert.textContent = convertible ? "Make OSM editable (" + convertible + ")" : "Make OSM editable";
+      el.fresh.disabled = !canEdit() || !session.loadedFor || session.osmMode === "exclude";
+      el.fresh.title = session.osmMode === "exclude" ? "Already reading your shapes only - switch Mapper reads back to OSM + my shapes to start again from OSM"
+        : "Copy everything OSM has here into the overlay as your own shapes, then stop reading OSM for this course: from here on the mapper reads only the shapes drawn here, starting from OSM's.";
       el.unnumber.disabled = !canEdit() || !session.features.some(function (f) { return f.hole; });
       el.run.disabled = !has || session.dirty;
       el.run.title = session.dirty ? "Wait for the overlay to save - the mapper reads what is saved" : "";
@@ -4277,7 +4444,9 @@
           zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 90, wheelDebounceTime: 20, maxZoom: 22
         }).setView(mapObj.getCenter(), mapObj.getZoom());
         var tiles = api.googleLayer().addTo(map);
-        tiles.on("gdcredit", function (e) { el["google-credit"].textContent = e.text; });
+        /* Google publishes no capture date through the Map Tiles API, so the pane says so
+           rather than looking like the one source nobody asked. */
+        tiles.on("gdcredit", function (e) { el["google-credit"].textContent = e.text + " · capture date not published"; });
         google = { map: map };
         map.on("move", syncMain);
         map.on("mousemove", spotHover);
@@ -4393,6 +4562,8 @@
     mapObj = L.map(el.map, {
       zoomControl: false,
       attributionControl: false,
+      /* Shift-drag is the bin box in Move, not Leaflet's box zoom. */
+      boxZoom: false,
       doubleClickZoom: true,
       scrollWheelZoom: true,
       /* Quarter-step zoom so the wheel eases in rather than jumping a whole level, and a
@@ -4421,7 +4592,7 @@
       drawDraft();
     });
     mapObj.on("mouseout", function () { if (cursorLatLng) { cursorLatLng = null; drawDraft(); } });
-    mapObj.on("moveend zoomend", function () { buildProviderOptions(); updateReadout(); });
+    mapObj.on("moveend zoomend", function () { buildProviderOptions(); updateReadout(); refreshCaptureDate(); });
     /* The colour wand reads the view on screen: a moved map is a new picture. */
     mapObj.on("movestart zoomstart", function () { colourCap = null; });
     mapObj.on("zoomend", function () { if (selectedId && !drag) { drawFeatures(); updateHint(); } });
@@ -4579,6 +4750,7 @@
     });
     el.clear.addEventListener("click", deleteOverlay);
     el.convert.addEventListener("click", function () { convertOsm(false); });
+    el.fresh.addEventListener("click", startFresh);
     el.unnumber.addEventListener("click", clearHoleNumbers);
     el.ready.addEventListener("click", toggleReadyChoice);
     el["ready-choice"].addEventListener("click", function (event) {

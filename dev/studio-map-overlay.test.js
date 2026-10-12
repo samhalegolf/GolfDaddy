@@ -249,6 +249,39 @@ test("the overlay endpoint is registered, admin-only, and reads OSM through the 
   assert.ok(endpoint.includes('error: "bad georef"'), "a georef the core rejects must be refused with its reason");
 });
 
+test("the credit line says when the imagery was taken, asked of every provider through one endpoint", () => {
+  const capture = read("functions/course-map-capture-date.mjs");
+  const dates = read("functions/lib/gd-imagery-dates.mjs");
+  assert.ok(capture.includes('path: "/api/course-map-capture-date"'), "the capture-date function does not declare its /api path");
+  assert.ok(toml.includes("/api/course-map-capture-date"), "no /api/course-map-capture-date redirect in netlify.toml");
+  assert.ok(capture.includes("if (!admin) return json(403"), "a non-admin must be refused");
+  assert.ok(page.includes('var CAPTURE_API = "/api/course-map-capture-date"') && page.includes("api(\"GET\", query, null, CAPTURE_API)"), "the page must ask the capture-date endpoint");
+  assert.ok(page.includes('mapObj.on("moveend zoomend", function () { buildProviderOptions(); updateReadout(); refreshCaptureDate(); });'), "a moved map is new ground - ask again");
+  assert.ok(page.includes("renderCredit();\n      refreshCaptureDate();"), "a switched provider must be asked afresh");
+  /* Every live source the overlay can mount has an answer: a lookup, or a plain "not published". */
+  const core = read("scripts/gd-app-core.js");
+  const list = core.slice(core.indexOf("const mapSources=["), core.indexOf("window.mapSources=mapSources;"));
+  const keys = [...list.matchAll(/^\s+key:"([a-z]+)",$/gm)].map(m => m[1]);
+  assert.ok(keys.length >= 8, "expected the live source list in gd-app-core.js, found " + keys.join(","));
+  keys.forEach(key => {
+    assert.ok(dates.includes('source === "' + key + '"') || dates.includes("  " + key + ":"), "no capture-date answer for live source " + key);
+  });
+  assert.ok(page.includes('" · capture date not published"'), "the Google pane must say it publishes no date");
+});
+
+test("Start fresh from OSM copies OSM's shapes in and then reads only the overlay; a tee drags its hole line; Shift-drag bins a box", () => {
+  assert.ok(page.includes('data-gd-overlay="fresh"') && page.includes("el.fresh.addEventListener(\"click\", startFresh)"), "no Start fresh from OSM button");
+  assert.ok(page.includes('session.osmMode = "exclude";\n      el["osm-mode"].value = "exclude";'), "starting fresh must switch the mapper to the overlay alone");
+  assert.ok(page.includes('saveOsmMode(id, "exclude"'), "the choice must be saved like the menu's");
+  const overlayCore = read("functions/lib/gd-map-overlay-core.mjs");
+  assert.ok(overlayCore.includes('hole: "hole"'), "OSM hole lines must come over with the rest, or a fresh start loses OSM's numbered lines");
+  assert.ok(page.includes('d.mode === "body" && f.kind === "tee" ? followTee(f, d.orig)'), "a dragged tee must take its hole line's tee end with it");
+  assert.ok(page.includes("add(own(osm.holes), STYLE.osmHole, false)"), "a hole line made editable must not be drawn twice");
+  assert.ok(page.includes('toggleOrderHole("osm:" + f.osm)'), "an editable OSM hole line must still be clickable into a play order");
+  assert.ok(page.includes("boxZoom: false") && page.includes('event.shiftKey ? "bin" : null'), "Shift-drag in Move must be the bin box, not Leaflet's box zoom");
+  assert.ok(page.includes("f.points.every(function (p) { return bounds.contains([p.lat, p.lng]); })"), "the bin box must take only shapes wholly inside it");
+});
+
 /* ---------- the worker ---------- */
 
 test("every Overpass fetch in the worker carries the overlay", () => {
