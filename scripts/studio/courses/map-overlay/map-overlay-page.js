@@ -163,14 +163,12 @@
   var TREE_FINDER_MPP = 0.3;
   var TREE_FINDER_MAX_SIDE_PX = 1400;
   var TREE_SAMPLE_MAX = 12;
-  /* The colour wand reads the view on screen, at most this many pixels a side. A click picks
-     at COLOUR_WAND_TOL_START; ← → loosen or tighten it from there. */
+  /* The colour wand reads the view on screen, at most this many pixels a side; dragging this
+     many screen pixels from the press adds one unit of colour tolerance. */
   var COLOUR_WAND_MAX_SIDE_PX = 1400;
-  var COLOUR_WAND_TOL_START = 16;
+  var COLOUR_WAND_TOL_START = 10;
+  var COLOUR_WAND_TOL_PER_PX = 0.3;
   var COLOUR_WAND_TOL_MAX = 140;
-  /* A click with a wand waits this long for a second click: a double-click keeps the shape in
-     hand and places nothing, so its two clicks must not each place one. */
-  var DOUBLE_CLICK_MS = 260;
 
   /* Survives leaving and re-entering the page - the shell tears the DOM down on every route
      change. The save state lives here too, so a save still in flight when the page is left
@@ -835,7 +833,6 @@
       });
       renderOptions();
       syncMapDragging();
-      syncDoubleClick();
       remember();
       updateHint();
     }
@@ -873,7 +870,7 @@
     function pressGesture() {
       if (drawRoundKind()) return "lasso";
       var m = methodOf(tool);
-      return m === "oval" ? "oval" : m === "find" ? "box" : null;
+      return m === "oval" ? "oval" : m === "find" ? "box" : m === "colour" ? "colour" : null;
     }
     /* Whether clicks lay a line: for a fairway unless it is on the colour wand, for bunkers and
        water on Line + wand. */
@@ -904,7 +901,7 @@
        last point (and finishes the line instead). */
     function syncDoubleClick() {
       if (!mapObj) return;
-      try { if (lineTool() || clickPlaces()) mapObj.doubleClickZoom.disable(); else mapObj.doubleClickZoom.enable(); } catch (e) {}
+      try { if (lineTool()) mapObj.doubleClickZoom.disable(); else mapObj.doubleClickZoom.enable(); } catch (e) {}
     }
 
     /* Drawing round, stretching an oval or a box, and the colour wand are a press-and-drag, so
@@ -912,40 +909,6 @@
     function syncMapDragging() {
       if (!mapObj || drag || lasso || stretch || colourPress) return;
       try { if (pressGesture()) mapObj.dragging.disable(); else mapObj.dragging.enable(); } catch (e) {}
-    }
-
-    /* Right-click and drag pans the map, whatever tool is in hand: left-press is the tool's
-       (a wand click, drawing round, the colour wand's reach), so panning gets a button of its
-       own. A right-click that does not move is still a right-click - taking a corner off a
-       shape - and only one that moved has its menu swallowed. */
-    var rightPan = null, rightPanEndedAt = 0;
-    function onRightPress(event) {
-      if (event.button !== 2 || !mapObj || drag) return;
-      rightPan = { x: event.clientX, y: event.clientY, moved: false };
-      document.addEventListener("pointermove", onRightMove);
-      document.addEventListener("pointerup", onRightEnd);
-      document.addEventListener("pointercancel", onRightEnd);
-    }
-    function onRightMove(event) {
-      if (!rightPan || !mapObj || destroyed) return;
-      var dx = event.clientX - rightPan.x, dy = event.clientY - rightPan.y;
-      if (!rightPan.moved && Math.hypot(dx, dy) < 4) return;
-      rightPan.moved = true;
-      mapObj.panBy([-dx, -dy], { animate: false });
-      rightPan.x = event.clientX;
-      rightPan.y = event.clientY;
-    }
-    function onRightEnd() {
-      document.removeEventListener("pointermove", onRightMove);
-      document.removeEventListener("pointerup", onRightEnd);
-      document.removeEventListener("pointercancel", onRightEnd);
-      if (rightPan && rightPan.moved) rightPanEndedAt = Date.now();
-      rightPan = null;
-    }
-    function onRightMenu(event) {
-      if (Date.now() - rightPanEndedAt > 400) return;
-      event.preventDefault();
-      event.stopPropagation();
     }
 
     var lasso = null;
@@ -959,6 +922,7 @@
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (gesture !== "bin" && session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
       event.preventDefault();
+      if (gesture === "colour") { settle(true); beginColourWand(event); return; }
       settle();
       if (gesture === "lasso") beginLasso(event);
       else beginStretch(event, gesture);
@@ -1225,29 +1189,56 @@
       return promise;
     }
 
-    /* A click with the colour wand: everything joined to the clicked pixel that is close enough
-       in colour, at the starting tolerance. ← → loosen or tighten it, Shift-click adds more,
-       Enter or a double-click keeps it. A click - not a press-and-drag - so a left drag pans
-       the map with this tool like any other. */
-    function colourClick(latlng, add) {
-      if (colourPress) return;
-      var press = colourPress = { latlng: { lat: latlng.lat, lng: latlng.lng }, tol: add && colourSel ? colourSel.tol : COLOUR_WAND_TOL_START, add: !!add, cap: null };
+    function beginColourWand(event) {
+      var ll = mapObj.mouseEventToLatLng(event);
+      colourPress = { latlng: { lat: ll.lat, lng: ll.lng }, x: event.clientX, y: event.clientY, tol: COLOUR_WAND_TOL_START, add: !!event.shiftKey, cap: null, frame: 0, done: false };
+      var press = colourPress;
+      document.addEventListener("pointermove", onColourMove);
+      document.addEventListener("pointerup", onColourEnd);
+      document.addEventListener("pointercancel", onColourEnd);
       wandsRunning++;
       updateHint();
       colourCapture().then(function (cap) {
-        if (destroyed || colourPress !== press) return;
+        if (destroyed || press.cancelled) return;
         press.cap = cap;
         press.seed = cap.toPx(press.latlng);
-        /* Shift-click adds within one picture; once the map has moved it starts afresh. */
+        /* Shift-drag adds within one picture; once the map has moved it starts afresh. */
         press.base = press.add && colourSel && colourSel.cap === cap ? colourSel.mask : null;
-        finishColourPress(press);
+        showColourPress(press);
+        if (press.done) finishColourPress(press);
       }, function (error) {
         if (!destroyed) setStatus("The colour wand could not read the imagery: " + (error && error.message || error) + ".", true);
       }).then(function () {
-        if (colourPress === press) colourPress = null;
         wandsRunning--;
         if (!destroyed) updateHint();
       });
+    }
+
+    function onColourMove(event) {
+      var press = colourPress;
+      if (!press || destroyed) return;
+      press.tol = Math.min(COLOUR_WAND_TOL_MAX, COLOUR_WAND_TOL_START + Math.hypot(event.clientX - press.x, event.clientY - press.y) * COLOUR_WAND_TOL_PER_PX);
+      if (press.frame || !press.cap) return;
+      press.frame = requestAnimationFrame(function () { press.frame = 0; if (!destroyed && colourPress === press) showColourPress(press); });
+    }
+
+    function onColourEnd(event) {
+      document.removeEventListener("pointermove", onColourMove);
+      document.removeEventListener("pointerup", onColourEnd);
+      document.removeEventListener("pointercancel", onColourEnd);
+      var press = colourPress;
+      colourPress = null;
+      if (destroyed || !press) return;
+      if (press.frame) { cancelAnimationFrame(press.frame); press.frame = 0; }
+      dragEndedAt = Date.now();
+      syncMapDragging();
+      if (event.type === "pointercancel") {
+        press.cancelled = true;
+        if (!colourSel) clearColourOverlay(); else drawColourOverlay(colourSel.cap, colourSel.mask);
+        return;
+      }
+      press.done = true;
+      if (press.cap) finishColourPress(press);
     }
 
     function colourMask(press) {
@@ -1256,12 +1247,16 @@
       return mask;
     }
 
+    function showColourPress(press) {
+      drawColourOverlay(press.cap, colourMask(press));
+    }
+
     function finishColourPress(press) {
       var mask = colourMask(press);
       colourSel = { cap: press.cap, seed: press.seed, tol: press.tol, base: press.base, mask: mask };
       drawColourOverlay(press.cap, mask);
       updateHint();
-      setStatus("Enter or double-click makes it " + colourNoun(tool) + " · ← → tighter / looser · Shift-click adds more · Esc drops it.");
+      setStatus("Enter makes it " + colourNoun(tool) + " · ← → tighter / looser · Shift-drag adds more · Esc drops it.");
     }
 
     function stepColourTolerance(by) {
@@ -1313,7 +1308,7 @@
       var sel = colourSel, cap = sel.cap, kind = tool;
       var ring = shapes.maskOutline(sel.mask, cap.image.width, cap.image.height, shapes.DETAIL_MAX_POINTS);
       clearColourSel();
-      if (!ring) { setStatus("Nothing picked yet - click on it.", true); return; }
+      if (!ring) { setStatus("Nothing picked yet - press on it and drag.", true); return; }
       var points = ring.map(cap.toLL);
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
       var merged = kind === "bunker" ? mergeBunker(points, session.hole, null, true) : null;
@@ -1665,48 +1660,19 @@
       try { mapObj.fitBounds(L.latLngBounds(toLatLngs(f.points)).pad(f.kind === "fairway" ? 0.15 : 1.2), { maxZoom: 20 }); } catch (e) {}
     }
 
-    /* Whether a click with the tool in hand places a wand shape - a green, bunker or water on the
-       wand, or any colour wand pick. Those clicks wait DOUBLE_CLICK_MS for a second one, which
-       makes it a double-click (done) instead; a left drag with them pans the map. */
-    function clickPlaces() {
-      if (lineTool()) return false;
-      var m = methodOf(tool);
-      return m === "colour" || (m === "wand" && WAND_KINDS.indexOf(tool) >= 0) || (!METHODS[tool] && WAND_KINDS.indexOf(tool) >= 0 && session.mode === "shapes");
-    }
-    var pendingClick = null;
-    function handleMapClick(latlng, event) {
+    function handleMapClick(latlng) {
       if (Date.now() - dragEndedAt < 300) return;
-      if (clickPlaces()) {
-        if (pendingClick) clearTimeout(pendingClick);
-        var shift = !!(event && event.shiftKey);
-        pendingClick = setTimeout(function () { pendingClick = null; if (!destroyed) placeAtClick(latlng, shift); }, DOUBLE_CLICK_MS);
-        return;
-      }
-      placeAtClick(latlng, false);
-    }
-    /* A double-click with a wand: keep what is in hand - the shape just placed, or the colour
-       pick - and place nothing. The next click starts a new one. */
-    function doneAtDoubleClick() {
-      if (pendingClick) { clearTimeout(pendingClick); pendingClick = null; }
-      if (adjust) { commitAdjust(true); setStatus("Kept - click for the next one."); }
-      else if (colourSel) keepColourSel();
-      updateHint();
-    }
-    function placeAtClick(latlng, shift) {
       if (!session.course) { setStatus("Pick a course first."); return; }
       /* Empty ground under the Link tool does nothing: the pick waits for Enter or Esc. */
       if (tool === "connect" || tool === "number" || tool === "order") return;
       if (tool === "move") { if (selectedId) select(""); return; }
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
-      /* Moving on to the next shape keeps the one just placed - a colour pick too, unless
-         Shift-click is adding to it. */
-      var colour = methodOf(tool) === "colour";
-      if (colour && colourSel && !shift) keepColourSel();
-      settle(colour);
+      /* Moving on to the next shape keeps the one just placed. A click with the colour wand
+         is a press too short to drag - its pick stays. */
+      settle(pressGesture() === "colour");
       var point = { lat: latlng.lat, lng: latlng.lng };
-      if (colour) colourClick(point, shift);
-      else if (lineTool()) addDraftPoint(point);
+      if (lineTool()) addDraftPoint(point);
       else if (methodOf(tool) === "single") placeTree(point);
       else if (pressGesture()) setStatus(pressHint());
       else if (session.mode === "pins") {
@@ -1725,6 +1691,7 @@
       var m = methodOf(tool);
       if (m === "oval") return "Press and drag across the cluster of trees to stretch an oval over it.";
       if (m === "find") return "Drag a box over the ground to look for trees in.";
+      if (m === "colour") return colourSel ? "Enter makes the pick " + colourNoun(tool) + " · drag again to change it · Shift-drag adds." : "Press on the " + colourThing(tool) + " and drag - the further you drag, the more it takes.";
       var noun = tool === "trees" ? "trees" : tool === "waste" ? "waste area" : kindLabel(tool).toLowerCase();
       return "Press and drag all the way round the " + noun + " to outline it.";
     }
@@ -2306,9 +2273,7 @@
       return (keys || handleIndices(f)).map(function (i) { return f.points[i]; });
     }
 
-    /* The shape just placed can be dragged straight away - except with a wand, where a left drag
-       pans the map wherever it starts. */
-    function canDrag(f) { return !!f && canEdit() && (tool === "move" || (f.id === lastPlacedId && !clickPlaces())); }
+    function canDrag(f) { return !!f && canEdit() && (tool === "move" || f.id === lastPlacedId); }
 
     /* Painted bottom to top: the big surfaces first, a green last, so a green sitting on its
        fairway or collar is the shape a click finds - linking, numbering and play orders all
@@ -2345,7 +2310,7 @@
           if (tool === "connect") { if (canEdit() && Date.now() - dragEndedAt >= 300) toggleLinkPick(f.id); return; }
           if (tool === "number") { numberHole(f); return; }
           if (tool === "order") { allocateShape(f); return; }
-          if (tool !== "move") { handleMapClick(e.latlng, e && e.originalEvent); return; }
+          if (tool !== "move") { handleMapClick(e.latlng); return; }
           if (Date.now() - dragEndedAt < 300) return;
           select(f.id);
         });
@@ -3661,7 +3626,7 @@
         var then = growWanding() ? " - the line wand grows it out to the edge" : "";
         text = draft.length ? (draft.length >= 2 ? "Keep clicking along the " + thing + " · Finish (or Enter / double-click) when done" + then : "Click the next point along the " + thing) : (tool === "fairway" ? "Click at the tee end of the fairway, then along its middle" : "Click a line down the middle of the " + thing) + then;
       }
-      else if (methodOf(tool) === "colour") text = colourSel ? "Enter or double-click makes it " + colourNoun(tool) + " · ← → tighter / looser · Shift-click adds · Esc drops it" : "Click on the " + colourThing(tool) + " - ← → then take more or less of its colour · drag pans · " + methodKey(tool) + " switches method";
+      else if (methodOf(tool) === "colour") text = colourSel ? "Enter makes it " + colourNoun(tool) + " · ← → tighter / looser · Shift-drag adds · Esc drops it" : "Press on the " + colourThing(tool) + " and drag - further takes more of its colour · " + methodKey(tool) + " switches method";
       else if (tool === "trees" && methodOf("trees") === "single") text = "Click a tree to drop one · ↑ ↓ size it · E switches method";
       else if (tool === "trees" && methodOf("trees") === "oval") text = "Press and drag across a cluster of trees - Shift for a circle · E switches method";
       else if (tool === "trees" && methodOf("trees") === "find") text = sampleTrees().length ? "Drag a box - trees in it like the " + sampleTrees().length + " you placed by hand are found · E switches method" : "Place a tree or two by hand first (Tree), then drag a box to find more like them";
@@ -3699,7 +3664,7 @@
       else if (adjust.seed) bits.push("↑ ↓ wand size (" + pct(adjust.size) + ")");
       else if (adjust.grow) bits.push("↑ ↓ reach (" + Math.round(LINE_WAND_REACH_M[adjust.kind] * adjust.grow.size) + "m)");
       else bits.push("↑ ↓ smaller / bigger");
-      bits.push("Enter, Space or double-click keeps it · Esc removes it");
+      bits.push("Enter or Space keeps it · Esc removes it");
       return bits.join(" · ");
     }
 
@@ -4578,11 +4543,10 @@
     buildProviderOptions();
     useSource(session.sourceKey || bestSourceKey());
 
-    mapObj.on("click", function (e) { handleMapClick(e.latlng, e.originalEvent); });
+    mapObj.on("click", function (e) { handleMapClick(e.latlng); });
     mapObj.on("dblclick", function (e) {
       if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
       if (lineTool()) finishFairway();
-      else if (clickPlaces()) doneAtDoubleClick();
     });
     mapObj.on("mousemove", function (e) { if (google) spotHover(e); });
     mapObj.on("mouseout", function () { if (google) spotHover(null); });
@@ -4694,8 +4658,6 @@
       el["method-" + m].addEventListener("click", function () { setMethod(tool, m); });
     });
     el.map.addEventListener("pointerdown", onMapPress);
-    el.map.addEventListener("pointerdown", onRightPress, true);
-    el.map.addEventListener("contextmenu", onRightMenu, true);
     el.hole.addEventListener("change", holeFieldChanged);
     el.width.addEventListener("change", function () {
       var w = num(el.width.value);
@@ -4791,6 +4753,10 @@
       document.removeEventListener("pointermove", onStretchMove);
       document.removeEventListener("pointerup", onStretchEnd);
       document.removeEventListener("pointercancel", onStretchEnd);
+      document.removeEventListener("pointermove", onColourMove);
+      document.removeEventListener("pointerup", onColourEnd);
+      document.removeEventListener("pointercancel", onColourEnd);
+      if (colourPress && colourPress.frame) cancelAnimationFrame(colourPress.frame);
       document.documentElement.classList.remove("gdStudioOverlayNoScroll");
       containerEl.classList.remove("gdStudioOverlayHost");
       rememberNow();

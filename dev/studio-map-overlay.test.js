@@ -353,9 +353,8 @@ test("OSM's shapes can be made editable, and a course with no overlay starts fro
   assert.ok(page.includes("return !converted[item.id];"), "a converted OSM shape must not be drawn twice");
 });
 
-test("the shape just placed can be dragged without switching to Move - except with a wand, where a drag pans", () => {
-  assert.ok(page.includes('return !!f && canEdit() && (tool === "move" || (f.id === lastPlacedId && !clickPlaces()));'), "only Move, or the last placed shape off a wand, can be dragged");
-  assert.ok(page.includes("else if (clickPlaces()) doneAtDoubleClick();"), "a double-click with a wand keeps the shape in hand");
+test("the shape just placed can be dragged without switching to Move", () => {
+  assert.ok(page.includes('return !!f && canEdit() && (tool === "move" || f.id === lastPlacedId);'), "only Move, or the last placed shape, can be dragged");
   assert.ok(page.includes("lastPlacedId = f.id;"), "placing a shape must make it the draggable one");
 });
 
