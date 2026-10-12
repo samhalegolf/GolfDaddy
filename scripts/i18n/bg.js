@@ -265,6 +265,9 @@
     "scorecard.parForHole": "Пар за дупка {n}",
     "scorecard.decrease": "Намали резултата за дупка {n}",
     "scorecard.increase": "Увеличи резултата за дупка {n}",
+    "scorecard.indexShort": "Хендикап",
+    "scorecard.out": "Първи 9",
+    "scorecard.in": "Втори 9",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Създай профил",

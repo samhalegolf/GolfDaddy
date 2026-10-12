@@ -265,6 +265,9 @@
     "scorecard.parForHole": "Par du trou {n}",
     "scorecard.decrease": "Diminuer le score du trou {n}",
     "scorecard.increase": "Augmenter le score du trou {n}",
+    "scorecard.indexShort": "Hcp",
+    "scorecard.out": "Aller",
+    "scorecard.in": "Retour",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Créer un compte",

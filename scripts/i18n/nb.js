@@ -265,6 +265,9 @@
     "scorecard.parForHole": "Par for hull {n}",
     "scorecard.decrease": "Senk scoren for hull {n}",
     "scorecard.increase": "Øk scoren for hull {n}",
+    "scorecard.indexShort": "Hcp",
+    "scorecard.out": "Ut",
+    "scorecard.in": "Inn",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Opprett konto",

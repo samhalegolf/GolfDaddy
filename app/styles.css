@@ -645,6 +645,14 @@ body.map-update-in-progress #surfaceStage { opacity: .72; transition: opacity 12
 .scoreRow .scoreStrokes { flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; }
 .scoreRow .scoreStrokes button { width: 28px; height: 28px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .14); color: #f2f7f2; font-size: 16px; line-height: 1; }
 .scoreRow .scoreStrokesValue { min-width: 22px; text-align: center; font-weight: 700; }
+.scoreRow .scoreIndex, .scoreRow .scoreDistance { width: 44px; text-align: center; font-size: 12px; opacity: .75; }
+.scoreRow.scoreHead { background: transparent; padding-top: 0; padding-bottom: 0; font-size: 11px; font-weight: 800; opacity: .7; }
+.scoreRow.scoreHead .scorePar, .scoreRow.scoreHead .scoreStrokes { opacity: 1; font-size: 11px; }
+.scoreRow.scoreSum { background: rgba(255, 255, 255, .03); font-weight: 800; }
+.scoreRow.scoreSum .scoreHole { width: auto; min-width: 26px; }
+.scoreRow.scoreSum .scoreStrokes { font-weight: 800; }
+.scoreTee { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; font-size: 13px; font-weight: 700; }
+.scoreTee select { padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .18); background: #07100b; color: #f2f7f2; }
 
 /* Pin marker + distance label, drawn alongside the aim bubble overlay. */
 /* touch-action:none + a real pointer-events target so #pinMarker can be

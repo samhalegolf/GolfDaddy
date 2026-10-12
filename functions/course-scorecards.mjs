@@ -7,13 +7,19 @@
  * stored under its name (course_key), and a player's scorecard is looked up by the
  * course's name, so the two are renamed together or the lookup would miss.
  *
- * GET  /api/course-scorecards?courseId=      the facility's cards, oldest first
+ * GET  /api/course-scorecards?courseId=      the facility's cards, oldest first, each with its
+ *      holes as the editor shows them (lib/gd-scorecard-edit-core) and gps: true on the card
+ *      GPS Play uses for this course - the one stored under the course's own name.
  * POST /api/course-scorecards { courseId, key, label }   rename one card
+ * POST /api/course-scorecards { courseId, key, action: "save", card: {tees, holes} }
+ *      the card edited by hand: par, stroke index and each tee's distances. Marked manual and
+ *      confirmed, so a later scrape cannot replace it.
  *   admin-auth gated, like the upload beside it. */
 
 import { loadFacilityChildren, facilityNameOf, fetchFacilityRows, cardsFromRows, relabelFacility, SCORECARDS_TABLE, MAPS_TABLE } from "./lib/gd-facility-scorecards.mjs";
 import { distinctCards, scorecardCourseKey, facilityCardLabel, facilityCardFullName } from "./lib/gd-scorecard-resolve.mjs";
 import { verifiedAdminEmail } from "./lib/gd-map-overlay-store.mjs";
+import { editorCard, storedHoles } from "./lib/gd-scorecard-edit-core.mjs";
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 
 function env(name) { return process.env[name] || ""; }
@@ -41,9 +47,11 @@ function json(status, body) {
 }
 
 /* One card as the row shows it. */
-export function describeCard(row, facilityName) {
+export function describeCard(row, facilityName, courseName) {
   const holes = Array.isArray(row.holes_json) ? row.holes_json : [];
   return {
+    gps: !!courseName && row.course_key === scorecardCourseKey(courseName),
+    card: editorCard(holes),
     key: row.course_key,
     name: row.course_name || "",
     label: facilityCardLabel(row.course_name, facilityName),
@@ -54,12 +62,12 @@ export function describeCard(row, facilityName) {
   };
 }
 
-async function listCards(facilityKey, facilityName) {
+async function listCards(facilityKey, facilityName, courseName) {
   const rows = await supabaseFetch(SCORECARDS_TABLE + "?select=course_key,course_name,holes_json,source,updated_at,created_at&facility_key=eq."
     + encodeURIComponent(facilityKey) + "&order=created_at.asc");
   return (Array.isArray(rows) ? rows : [])
     .filter(row => Array.isArray(row.holes_json) && row.holes_json.length)
-    .map(row => describeCard(row, facilityName));
+    .map(row => describeCard(row, facilityName, courseName));
 }
 
 /* The course a card belongs to by name - the one the player's lookup would find it
@@ -127,6 +135,36 @@ async function renameCard({ facilityKey, facilityName, children, key, label, adm
   });
 }
 
+/* A card edited by hand, written over the stored one. Its name and key stay; its holes are
+   what the editor sent, checked (storedHoles). */
+async function saveCard({ facilityKey, facilityName, courseName, key, card, adminEmail }) {
+  const rows = await fetchFacilityRows(supabaseFetch, facilityKey);
+  const row = rows.find(item => item.course_key === key);
+  if (!row) return json(404, { error: "That card is not stored under this course" });
+  const stored = storedHoles(card);
+  if (stored.error) return json(400, { error: stored.error });
+  const at = new Date().toISOString();
+  const sources = Array.isArray(row.sources_json) ? row.sources_json.slice() : [];
+  sources[0] = Object.assign({}, sources[0] || {}, {
+    resolution: Object.assign({}, (sources[0] && sources[0].resolution) || {}, { confirmed: true, confidence: 1, by: adminEmail, at, edited: true })
+  });
+  const patch = {
+    holes_json: stored.holes,
+    hole_count: stored.holes.length,
+    distance_count: stored.holes.filter(hole => Number.isFinite(hole.metres)).length,
+    source: /manual/i.test(String(row.source || "")) ? row.source : "manual-edit",
+    sources_json: sources,
+    updated_at: at
+  };
+  await supabaseFetch(SCORECARDS_TABLE + "?course_key=eq." + encodeURIComponent(key), {
+    method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(patch)
+  });
+  return json(200, {
+    card: describeCard(Object.assign({}, row, patch), facilityName, courseName),
+    message: "Saved " + (row.course_name || "the card") + " (" + stored.holes.length + " holes)."
+  });
+}
+
 export default async function courseScorecards(req) {
   if (req.method === "OPTIONS") return json(200, { ok: true });
   if (req.method !== "GET" && req.method !== "POST") return json(405, { error: "Method not allowed" });
@@ -148,7 +186,10 @@ export default async function courseScorecards(req) {
   const facilityName = facilityNameOf(pinned, courseId);
 
   if (req.method === "GET") {
-    return json(200, { facilityKey, facilityName, cards: await listCards(facilityKey, facilityName) });
+    return json(200, { facilityKey, facilityName, courseName: pinned.course_name || "", cards: await listCards(facilityKey, facilityName, pinned.course_name) });
+  }
+  if (payload.action === "save") {
+    return saveCard({ facilityKey, facilityName, courseName: pinned.course_name, key: String(payload.key || "").trim(), card: payload.card, adminEmail });
   }
   return renameCard({
     facilityKey, facilityName, children,

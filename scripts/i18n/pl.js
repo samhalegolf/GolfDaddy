@@ -273,6 +273,9 @@
     "scorecard.parForHole": "Par dołka {n}",
     "scorecard.decrease": "Zmniejsz wynik dołka {n}",
     "scorecard.increase": "Zwiększ wynik dołka {n}",
+    "scorecard.indexShort": "HCP",
+    "scorecard.out": "Pierwsze 9",
+    "scorecard.in": "Drugie 9",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Załóż konto",

@@ -265,6 +265,9 @@
     "scorecard.parForHole": "Raja {n} par",
     "scorecard.decrease": "Vähenda raja {n} skoori",
     "scorecard.increase": "Suurenda raja {n} skoori",
+    "scorecard.indexShort": "HCP",
+    "scorecard.out": "Esimene 9",
+    "scorecard.in": "Teine 9",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Loo konto",

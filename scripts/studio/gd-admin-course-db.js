@@ -4731,12 +4731,176 @@ function gdAdminCourseScorecardCardsMarkup(courseId){
   const sourceLabel=source=>/manual/i.test(source)?"added by hand":source?"found online ("+source+")":"stored";
   return cards.map(card=>{
     const key=gdEscapeHTML(card.key);
+    const edit=gdAdminScorecardEdit[courseId];
+    const editing=!!edit&&edit.key===card.key;
     return `<div class="gdAdminCourseScorecardCard">`
       +`<input type="text" class="gdAdminCourseScorecardName" data-course-id="${id}" data-card-key="${key}" value="${gdEscapeHTML(card.label)}" spellcheck="false" aria-label="Card name">`
       +`<span class="gdAdminCourseScorecardMeta">${gdEscapeHTML(card.holes)} holes · par ${gdEscapeHTML(card.par)} · ${gdEscapeHTML(sourceLabel(card.source))}</span>`
+      +(card.gps?`<span class="gdAdminCourseScorecardGps" title="GPS Play's scorecard shows this card for this course">GPS Play</span>`:"")
       +`<button type="button" data-gd-scorecard-rename="${id}" data-card-key="${key}">Save name</button>`
-      +`</div>`;
+      +`<button type="button" data-gd-sc-act="${editing?"cancel":"open"}" data-course-id="${id}" data-card-key="${key}">${editing?"Close card":"Open card"}</button>`
+      +`</div>`
+      +(editing?gdAdminScorecardEditorMarkup(courseId):"");
   }).join("");
+}
+/* ---------- the card itself ----------
+ *
+ * "Open card" lays a stored card out like the printed one - Hole, Par, SI, then a row a
+ * tee, with Out / In / Total - every cell editable. Only what the card has is shown: a card
+ * of par and distances has no SI to fill and one distance row. Distances are kept in metres;
+ * the yd switch converts as you type. Save writes it back (POST /api/course-scorecards,
+ * action "save"), checked server-side (lib/gd-scorecard-edit-core).
+ *
+ * The open card lives in gdAdminScorecardEdit (courseId -> {key, card, unit, view}). The
+ * markup is drawn from `view`, which only moves on a structural change (a tee or hole added
+ * or taken away, the unit switched); typing writes `card` and is put back after each render,
+ * so the panel's render guard leaves the grid alone while someone is typing in it. */
+const gdAdminScorecardEdit={};
+const GD_YARDS_PER_METRE=1.0936133;
+function gdAdminScorecardClone(card){return JSON.parse(JSON.stringify(card||{tees:[],holes:[]}));}
+function gdAdminScorecardShowDistance(metres,unit){
+  if(metres==null||metres==="")return "";
+  return String(Math.round(unit==="yd"?Number(metres)*GD_YARDS_PER_METRE:Number(metres)));
+}
+function gdAdminScorecardTotals(card){
+  const holes=card.holes||[], n=holes.length;
+  const sum=(from,to,pick)=>holes.slice(from,to).reduce((t,h)=>t+(Number(pick(h))||0),0);
+  const groups=n===18?[["Out",0,9],["In",9,18],["Total",0,18]]:[["Total",0,n]];
+  return groups.map(([label,a,b])=>({label,par:sum(a,b,h=>h.par),distances:(card.tees||[]).map((t,i)=>sum(a,b,h=>(h.distances||[])[i]))}));
+}
+function gdAdminScorecardEditorMarkup(courseId){
+  const edit=gdAdminScorecardEdit[courseId];
+  if(!edit)return "";
+  const id=gdEscapeHTML(courseId), card=edit.view, unit=edit.unit;
+  const holes=card.holes||[], tees=card.tees||[];
+  const totals=gdAdminScorecardTotals(card);
+  const cell=(field,i,t,value)=>`<td><input class="gdAdminScEditCell" inputmode="numeric" data-course-id="${id}" data-field="${field}" data-i="${i}"${t!=null?` data-t="${t}"`:""} value="${gdEscapeHTML(value==null?"":value)}"></td>`;
+  const totalCells=(key)=>totals.map(g=>`<td class="gdAdminScEditTotal" data-course-id="${id}" data-total="${key}" data-group="${gdEscapeHTML(g.label)}"></td>`).join("");
+  let html=`<div class="gdAdminScEdit" data-course-id="${id}"><div class="gdAdminScEditScroll"><table class="gdAdminScEditTable">`;
+  html+=`<tr><th>Hole</th>${holes.map(h=>`<th>${gdEscapeHTML(h.hole)}</th>`).join("")}${totals.map(g=>`<th>${gdEscapeHTML(g.label)}</th>`).join("")}</tr>`;
+  html+=`<tr><th>Par</th>${holes.map((h,i)=>cell("par",i,null,h.par)).join("")}${totalCells("par")}</tr>`;
+  html+=`<tr><th>SI</th>${holes.map((h,i)=>cell("index",i,null,h.index)).join("")}${totals.map(()=>"<td></td>").join("")}</tr>`;
+  tees.forEach((tee,t)=>{
+    html+=`<tr><th class="gdAdminScEditTee"><input class="gdAdminScEditTeeName" data-course-id="${id}" data-t="${t}" value="${gdEscapeHTML(tee)}" placeholder="${tees.length>1?"Tee name":"Distance"}" spellcheck="false"><button type="button" data-gd-sc-act="remove-tee" data-course-id="${id}" data-t="${t}" title="Take this tee off the card">×</button></th>`
+      +holes.map((h,i)=>cell("dist",i,t,gdAdminScorecardShowDistance((h.distances||[])[t],unit))).join("")
+      +totalCells("t"+t)+`</tr>`;
+  });
+  html+=`</table></div><div class="gdAdminCourseScorecardDropRail">`
+    +`<button type="button" data-gd-sc-act="add-tee" data-course-id="${id}">+ Tee</button>`
+    +`<button type="button" data-gd-sc-act="add-hole" data-course-id="${id}">+ Hole</button>`
+    +`<button type="button" data-gd-sc-act="remove-hole" data-course-id="${id}"${holes.length>1?"":" disabled"}>− Hole</button>`
+    +`<button type="button" data-gd-sc-act="unit" data-course-id="${id}" title="Show and type distances in ${unit==="yd"?"metres":"yards"}">${unit==="yd"?"Yards":"Metres"}</button>`
+    +`<button type="button" class="primary" data-gd-sc-act="save" data-course-id="${id}">Save card</button>`
+    +`</div></div>`;
+  return html;
+}
+/* Typed values back into a freshly drawn grid, and the totals worked out from them. */
+function gdAdminScorecardEditRestore(root){
+  Object.keys(gdAdminScorecardEdit).forEach(courseId=>{
+    const edit=gdAdminScorecardEdit[courseId];
+    const sel=`[data-course-id="${CSS.escape(courseId)}"]`;
+    root.querySelectorAll(`.gdAdminScEditCell${sel}`).forEach(input=>{
+      const h=edit.card.holes[Number(input.dataset.i)];
+      if(!h)return;
+      const f=input.dataset.field;
+      const v=f==="dist"?gdAdminScorecardShowDistance((h.distances||[])[Number(input.dataset.t)],edit.unit):(h[f]==null?"":String(h[f]));
+      if(input!==document.activeElement&&input.value!==v)input.value=v;
+    });
+    root.querySelectorAll(`.gdAdminScEditTeeName${sel}`).forEach(input=>{
+      const v=edit.card.tees[Number(input.dataset.t)]||"";
+      if(input!==document.activeElement&&input.value!==v)input.value=v;
+    });
+    gdAdminScorecardEditTotals(courseId,root);
+  });
+}
+function gdAdminScorecardEditTotals(courseId,root){
+  const edit=gdAdminScorecardEdit[courseId];
+  if(!edit)return;
+  const totals=gdAdminScorecardTotals(edit.card);
+  (root||document).querySelectorAll(`.gdAdminScEditTotal[data-course-id="${CSS.escape(courseId)}"]`).forEach(td=>{
+    const g=totals.find(x=>x.label===td.dataset.group);
+    if(!g)return;
+    const key=td.dataset.total;
+    const v=key==="par"?g.par:gdAdminScorecardShowDistance(g.distances[Number(key.slice(1))],edit.unit);
+    td.textContent=v?String(v):"";
+  });
+}
+function gdAdminScorecardEditOpen(courseId,key){
+  const card=(Array.isArray(gdAdminScorecardCards[courseId])?gdAdminScorecardCards[courseId]:[]).find(c=>c.key===key);
+  if(!card)return;
+  const clone=gdAdminScorecardClone(card.card);
+  gdAdminScorecardEdit[courseId]={key,card:clone,view:gdAdminScorecardClone(clone),unit:"m"};
+  gdRenderAdminCourseDatabase();
+}
+/* A structural change: the grid is redrawn from what has been typed. */
+function gdAdminScorecardEditReshape(courseId,fn){
+  const edit=gdAdminScorecardEdit[courseId];
+  if(!edit)return;
+  fn(edit.card);
+  edit.view=gdAdminScorecardClone(edit.card);
+  gdRenderAdminCourseDatabase();
+}
+function gdAdminScorecardEditAct(courseId,act,el){
+  const edit=gdAdminScorecardEdit[courseId];
+  if(act==="open"){gdAdminScorecardEditOpen(courseId,el.dataset.cardKey);return;}
+  if(!edit)return;
+  if(act==="cancel"){delete gdAdminScorecardEdit[courseId];gdRenderAdminCourseDatabase();return;}
+  if(act==="add-tee")return gdAdminScorecardEditReshape(courseId,card=>{
+    if(card.tees.length>=8)return;
+    if(card.tees.length===1&&!card.tees[0])card.tees[0]="Tee 1";
+    card.tees.push(card.tees.length?"Tee "+(card.tees.length+1):"");
+    card.holes.forEach(h=>{h.distances=(h.distances||[]);h.distances.length=card.tees.length;});
+  });
+  if(act==="remove-tee")return gdAdminScorecardEditReshape(courseId,card=>{
+    const t=Number(el.dataset.t);
+    card.tees.splice(t,1);
+    card.holes.forEach(h=>{(h.distances||[]).splice(t,1);});
+  });
+  if(act==="add-hole")return gdAdminScorecardEditReshape(courseId,card=>{
+    if(card.holes.length>=36)return;
+    card.holes.push({hole:card.holes.length+1,par:null,index:null,distances:card.tees.map(()=>null)});
+  });
+  if(act==="remove-hole")return gdAdminScorecardEditReshape(courseId,card=>{if(card.holes.length>1)card.holes.pop();});
+  if(act==="unit"){edit.unit=edit.unit==="yd"?"m":"yd";edit.view=gdAdminScorecardClone(edit.card);gdRenderAdminCourseDatabase();return;}
+  if(act==="save")gdAdminScorecardEditSave(courseId);
+}
+function gdAdminScorecardEditInput(input){
+  const courseId=input.dataset.courseId, edit=gdAdminScorecardEdit[courseId];
+  if(!edit)return;
+  if(input.classList.contains("gdAdminScEditTeeName")){edit.card.tees[Number(input.dataset.t)]=input.value;return;}
+  const h=edit.card.holes[Number(input.dataset.i)];
+  if(!h)return;
+  const raw=String(input.value||"").trim();
+  const n=raw===""?null:Number(raw);
+  const value=n==null||!Number.isFinite(n)?null:n;
+  if(input.dataset.field==="dist"){
+    h.distances=h.distances||[];
+    h.distances[Number(input.dataset.t)]=value==null?null:Math.round(edit.unit==="yd"?value/GD_YARDS_PER_METRE:value);
+  }else h[input.dataset.field]=value;
+  gdAdminScorecardEditTotals(courseId);
+}
+async function gdAdminScorecardEditSave(courseId){
+  const edit=gdAdminScorecardEdit[courseId];
+  if(!edit)return;
+  try{
+    const token=await gdAdminCourseDbAccessToken();
+    if(!token){gdAdminCourseVisualToast("Sign in again to save the card");return;}
+    gdAdminCourseScorecardSetStatus(courseId,"Saving card…");
+    const res=await fetch("/api/course-scorecards",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+      body:JSON.stringify({courseId:courseId,key:edit.key,action:"save",card:edit.card})
+    });
+    const data=await res.json().catch(()=>null);
+    if(!res.ok){gdAdminCourseScorecardFail(courseId,(data&&data.error)||"Save failed ("+res.status+")");return;}
+    delete gdAdminScorecardEdit[courseId];
+    gdAdminCourseScorecardSetStatus(courseId,(data&&data.message)||"Saved");
+    gdAdminCourseVisualToast((data&&data.message)||"Card saved");
+    gdAdminCourseScorecardForgetCards();
+    gdRenderAdminCourseDatabase();
+  }catch(error){
+    gdAdminCourseScorecardFail(courseId,"Save failed to send");
+  }
 }
 function gdAdminCourseScorecardDropMarkup(item){
   const id=gdEscapeHTML(item.id);
@@ -4752,6 +4916,7 @@ function gdAdminCourseScorecardDropMarkup(item){
       +`<div class="gdAdminCourseScorecardDropRail">`
       +`<label class="gdAdminCourseScorecardFile">Choose file…<input type="file" accept=".csv,.tsv,.txt,.html,.htm,.json,image/*,text/*" data-course-id="${id}" hidden></label>`
       +`<button type="button" class="primary" data-gd-scorecard-import="${id}">Import pasted card</button>`
+      +`<button type="button" data-gd-scorecard-import-course="${id}" title="For a course that mapped fine and only needs its card: stored as this course's own scorecard, the one GPS Play shows. Nothing is renamed or re-matched.">Use as this course's GPS card</button>`
       +`</div></div>`:"")
     +`</div>`;
 }
@@ -4802,6 +4967,7 @@ async function gdAdminCourseScorecardRename(courseId,key){
 /* Called after every list render: the draft and status back into fresh DOM. */
 function gdAdminCourseScorecardRestore(root){
   if(!root||!root.querySelectorAll)return;
+  gdAdminScorecardEditRestore(root);
   root.querySelectorAll(".gdAdminCourseScorecardPaste[data-course-id]").forEach(area=>{
     const draft=gdAdminScorecardDrafts[area.dataset.courseId]||"";
     if(area.value!==draft)area.value=draft;
@@ -4876,6 +5042,21 @@ function gdAdminCourseScorecardClick(event){
     gdAdminCourseScorecardRename(rename.dataset.gdScorecardRename,rename.dataset.cardKey);
     return;
   }
+  const act=event.target&&event.target.closest?event.target.closest("button[data-gd-sc-act]"):null;
+  if(act){
+    event.preventDefault();
+    event.stopPropagation();
+    gdAdminScorecardEditAct(act.dataset.courseId,act.dataset.gdScAct,act);
+    return;
+  }
+  const toCourse=event.target&&event.target.closest?event.target.closest("button[data-gd-scorecard-import-course]"):null;
+  if(toCourse){
+    event.preventDefault();
+    event.stopPropagation();
+    const courseId=toCourse.dataset.gdScorecardImportCourse;
+    gdAdminCourseScorecardReceive(courseId,[],gdAdminScorecardDrafts[courseId]||"","course");
+    return;
+  }
   const button=event.target&&event.target.closest?event.target.closest("button[data-gd-scorecard-import]"):null;
   if(!button)return;
   event.preventDefault();
@@ -4884,6 +5065,8 @@ function gdAdminCourseScorecardClick(event){
   gdAdminCourseScorecardReceive(courseId,[],gdAdminScorecardDrafts[courseId]||"");
 }
 function gdAdminCourseScorecardInput(event){
+  const cell=event.target;
+  if(cell&&cell.classList&&(cell.classList.contains("gdAdminScEditCell")||cell.classList.contains("gdAdminScEditTeeName"))){gdAdminScorecardEditInput(cell);return;}
   const name=event.target;
   if(name&&name.classList&&name.classList.contains("gdAdminCourseScorecardName")){
     (gdAdminScorecardNameDrafts[name.dataset.courseId]=gdAdminScorecardNameDrafts[name.dataset.courseId]||{})[name.dataset.cardKey]=name.value;
@@ -4911,7 +5094,8 @@ if(!window.__gdAdminCourseScorecardDropBound){
 
 /* Files and pasted text -> text files for the server. Pictures go through the OCR
    here first; PDFs are turned away with the quicker route spelled out. */
-async function gdAdminCourseScorecardReceive(courseId,files,pastedText){
+/* target "course": the card goes straight to this course as its GPS card (see the upload). */
+async function gdAdminCourseScorecardReceive(courseId,files,pastedText,target){
   courseId=String(courseId||"");
   if(!courseId)return false;
   const payload=[];
@@ -4936,9 +5120,9 @@ async function gdAdminCourseScorecardReceive(courseId,files,pastedText){
   }
   if(pastedText&&pastedText.trim())payload.push({name:"",mediaType:"text/plain",text:pastedText});
   if(!payload.length)return false;
-  return gdAdminCourseScorecardSend(courseId,payload);
+  return gdAdminCourseScorecardSend(courseId,payload,target);
 }
-async function gdAdminCourseScorecardSend(courseId,files){
+async function gdAdminCourseScorecardSend(courseId,files,target){
   try{
     const token=await gdAdminCourseDbAccessToken();
     if(!token){gdAdminCourseVisualToast("Sign in again to import a scorecard");return false;}
@@ -4946,14 +5130,14 @@ async function gdAdminCourseScorecardSend(courseId,files){
     const res=await fetch("/api/course-scorecard-upload",{
       method:"POST",
       headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
-      body:JSON.stringify({courseId:courseId,files:files})
+      body:JSON.stringify(target?{courseId:courseId,files:files,target:target}:{courseId:courseId,files:files})
     });
     const data=await res.json().catch(()=>null);
     if(res.status===403){gdAdminCourseScorecardFail(courseId,"Admin only");return false;}
     if(res.status===404){gdAdminCourseScorecardFail(courseId,(data&&data.error)||"No published course found");return false;}
     if(res.status===422){
       const why=(data&&data.rejected||[]).map(r=>(r.name||"pasted text")+": "+gdAdminCourseScorecardReason(r.reason)).join("; ");
-      gdAdminCourseScorecardFail(courseId,"No card found. "+why);
+      gdAdminCourseScorecardFail(courseId,((data&&data.error)||"No card found")+(why?". "+why:""));
       return false;
     }
     if(!res.ok){gdAdminCourseScorecardFail(courseId,"Import failed ("+res.status+")");return false;}

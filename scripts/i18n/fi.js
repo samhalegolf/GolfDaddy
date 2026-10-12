@@ -265,6 +265,9 @@
     "scorecard.parForHole": "Reiän {n} par",
     "scorecard.decrease": "Pienennä reiän {n} tulosta",
     "scorecard.increase": "Suurenna reiän {n} tulosta",
+    "scorecard.indexShort": "Hcp",
+    "scorecard.out": "Ulos",
+    "scorecard.in": "Sisään",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Luo tili",

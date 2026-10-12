@@ -265,6 +265,9 @@
     "scorecard.parForHole": "Par för hål {n}",
     "scorecard.decrease": "Minska scoren för hål {n}",
     "scorecard.increase": "Öka scoren för hål {n}",
+    "scorecard.indexShort": "Hcp",
+    "scorecard.out": "Ut",
+    "scorecard.in": "In",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Skapa konto",

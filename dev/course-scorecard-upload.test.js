@@ -166,6 +166,17 @@ test("an upload replaces a scraped card for the same course", async () => {
   assert.strictEqual(scorecards[0].holes_json[1].par, 3, "the admin's pars, not the scrape's");
 });
 
+test("target course: the card goes straight to this course's own name, nothing renamed", async () => {
+  const scorecards = [];
+  const calls = stubWorld({ maps: [singleCourseMap("Pasted Links - Old Course")], scorecards, sessions: { "admin-token": ADMIN } });
+  const res = await parse(await handler(post({ courseId: "pasted-links", files: [{ text: PASTED }], target: "course" }, "admin-token")));
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  assert.strictEqual(calls.scorecardWrites[0][0].course_key, "pasted links - old course", "keyed so GPS Play finds it by the course's name");
+  assert.strictEqual(calls.scorecardWrites[0][0].course_name, "Pasted Links - Old Course");
+  assert.strictEqual(calls.mapPatches.length, 0, "no course is renamed");
+  assert.match(res.body.message, /GPS Play shows it/);
+});
+
 test("a file with no table in it is a 422 that says so", async () => {
   stubWorld({ maps: [singleCourseMap("Pasted Links")], scorecards: [], sessions: { "admin-token": ADMIN } });
   const res = await parse(await handler(post({ courseId: "pasted-links", files: [

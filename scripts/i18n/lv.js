@@ -269,6 +269,9 @@
     "scorecard.parForHole": "{n}. bedrītes par",
     "scorecard.decrease": "Samazināt {n}. bedrītes rezultātu",
     "scorecard.increase": "Palielināt {n}. bedrītes rezultātu",
+    "scorecard.indexShort": "HCP",
+    "scorecard.out": "Pirmie 9",
+    "scorecard.in": "Otrie 9",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Izveidot kontu",

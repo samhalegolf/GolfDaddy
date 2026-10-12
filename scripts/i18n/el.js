@@ -265,6 +265,9 @@
     "scorecard.parForHole": "Par τρύπας {n}",
     "scorecard.decrease": "Μείωση σκορ για την τρύπα {n}",
     "scorecard.increase": "Αύξηση σκορ για την τρύπα {n}",
+    "scorecard.indexShort": "Δείκτης",
+    "scorecard.out": "Έξοδος",
+    "scorecard.in": "Επιστροφή",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Δημιουργία λογαριασμού",

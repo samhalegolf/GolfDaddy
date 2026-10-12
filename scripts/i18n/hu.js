@@ -265,6 +265,9 @@
     "scorecard.parForHole": "{n}. lyuk parja",
     "scorecard.decrease": "{n}. lyuk eredményének csökkentése",
     "scorecard.increase": "{n}. lyuk eredményének növelése",
+    "scorecard.indexShort": "HCP",
+    "scorecard.out": "Ki",
+    "scorecard.in": "Be",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Fiók létrehozása",

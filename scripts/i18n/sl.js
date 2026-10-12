@@ -273,6 +273,9 @@
     "scorecard.parForHole": "Par za luknjo {n}",
     "scorecard.decrease": "Zmanjšaj rezultat za luknjo {n}",
     "scorecard.increase": "Povečaj rezultat za luknjo {n}",
+    "scorecard.indexShort": "HCP",
+    "scorecard.out": "Prvih 9",
+    "scorecard.in": "Drugih 9",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Ustvari račun",

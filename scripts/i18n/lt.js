@@ -269,6 +269,9 @@
     "scorecard.parForHole": "{n} duobutės par",
     "scorecard.decrease": "Sumažinti {n} duobutės rezultatą",
     "scorecard.increase": "Padidinti {n} duobutės rezultatą",
+    "scorecard.indexShort": "HCP",
+    "scorecard.out": "Pirmi 9",
+    "scorecard.in": "Antri 9",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Sukurti paskyrą",

@@ -130,6 +130,11 @@
   var COLLAR_REACH_M = 3;
   var COLLAR_NECK_M = 8;
   var COLLAR_FAIRWAY_MAX_M = 120;
+  /* With a linked tee, the neck heads for it: the fairway counts only within this cone either
+     side of the line to the tee (cos 40°), and with no fairway there it runs this far past the
+     green's edge towards the tee. */
+  var COLLAR_TOWARD_TEE_COS = 0.766;
+  var COLLAR_TOWARD_TEE_M = 12;
   /* The deepest zoom the map goes to. Past the provider's own imagery the last real tiles are
      blown up rather than requested (see watchImageryCeiling). */
   var DRAW_MAX_ZOOM = 22;
@@ -156,12 +161,14 @@
   var TREE_FINDER_MPP = 0.3;
   var TREE_FINDER_MAX_SIDE_PX = 1400;
   var TREE_SAMPLE_MAX = 12;
-  /* The colour wand reads the view on screen, at most this many pixels a side; dragging this
-     many screen pixels from the press adds one unit of colour tolerance. */
+  /* The colour wand reads the view on screen, at most this many pixels a side. A click picks
+     at COLOUR_WAND_TOL_START; ← → loosen or tighten it from there. */
   var COLOUR_WAND_MAX_SIDE_PX = 1400;
-  var COLOUR_WAND_TOL_START = 10;
-  var COLOUR_WAND_TOL_PER_PX = 0.3;
+  var COLOUR_WAND_TOL_START = 16;
   var COLOUR_WAND_TOL_MAX = 140;
+  /* A click with a wand waits this long for a second click: a double-click keeps the shape in
+     hand and places nothing, so its two clicks must not each place one. */
+  var DOUBLE_CLICK_MS = 260;
 
   /* Survives leaving and re-entering the page - the shell tears the DOM down on every route
      change. The save state lives here too, so a save still in flight when the page is left
@@ -764,6 +771,7 @@
       });
       renderOptions();
       syncMapDragging();
+      syncDoubleClick();
       remember();
       updateHint();
     }
@@ -801,7 +809,7 @@
     function pressGesture() {
       if (drawRoundKind()) return "lasso";
       var m = methodOf(tool);
-      return m === "oval" ? "oval" : m === "find" ? "box" : m === "colour" ? "colour" : null;
+      return m === "oval" ? "oval" : m === "find" ? "box" : null;
     }
     /* Whether clicks lay a line: for a fairway unless it is on the colour wand, for bunkers and
        water on Line + wand. */
@@ -832,7 +840,7 @@
        last point (and finishes the line instead). */
     function syncDoubleClick() {
       if (!mapObj) return;
-      try { if (lineTool()) mapObj.doubleClickZoom.disable(); else mapObj.doubleClickZoom.enable(); } catch (e) {}
+      try { if (lineTool() || clickPlaces()) mapObj.doubleClickZoom.disable(); else mapObj.doubleClickZoom.enable(); } catch (e) {}
     }
 
     /* Drawing round, stretching an oval or a box, and the colour wand are a press-and-drag, so
@@ -886,7 +894,6 @@
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
       event.preventDefault();
-      if (gesture === "colour") { settle(true); beginColourWand(event); return; }
       settle();
       if (gesture === "lasso") beginLasso(event);
       else beginStretch(event, gesture);
@@ -1127,56 +1134,29 @@
       return promise;
     }
 
-    function beginColourWand(event) {
-      var ll = mapObj.mouseEventToLatLng(event);
-      colourPress = { latlng: { lat: ll.lat, lng: ll.lng }, x: event.clientX, y: event.clientY, tol: COLOUR_WAND_TOL_START, add: !!event.shiftKey, cap: null, frame: 0, done: false };
-      var press = colourPress;
-      document.addEventListener("pointermove", onColourMove);
-      document.addEventListener("pointerup", onColourEnd);
-      document.addEventListener("pointercancel", onColourEnd);
+    /* A click with the colour wand: everything joined to the clicked pixel that is close enough
+       in colour, at the starting tolerance. ← → loosen or tighten it, Shift-click adds more,
+       Enter or a double-click keeps it. A click - not a press-and-drag - so a left drag pans
+       the map with this tool like any other. */
+    function colourClick(latlng, add) {
+      if (colourPress) return;
+      var press = colourPress = { latlng: { lat: latlng.lat, lng: latlng.lng }, tol: add && colourSel ? colourSel.tol : COLOUR_WAND_TOL_START, add: !!add, cap: null };
       wandsRunning++;
       updateHint();
       colourCapture().then(function (cap) {
-        if (destroyed || press.cancelled) return;
+        if (destroyed || colourPress !== press) return;
         press.cap = cap;
         press.seed = cap.toPx(press.latlng);
-        /* Shift-drag adds within one picture; once the map has moved it starts afresh. */
+        /* Shift-click adds within one picture; once the map has moved it starts afresh. */
         press.base = press.add && colourSel && colourSel.cap === cap ? colourSel.mask : null;
-        showColourPress(press);
-        if (press.done) finishColourPress(press);
+        finishColourPress(press);
       }, function (error) {
         if (!destroyed) setStatus("The colour wand could not read the imagery: " + (error && error.message || error) + ".", true);
       }).then(function () {
+        if (colourPress === press) colourPress = null;
         wandsRunning--;
         if (!destroyed) updateHint();
       });
-    }
-
-    function onColourMove(event) {
-      var press = colourPress;
-      if (!press || destroyed) return;
-      press.tol = Math.min(COLOUR_WAND_TOL_MAX, COLOUR_WAND_TOL_START + Math.hypot(event.clientX - press.x, event.clientY - press.y) * COLOUR_WAND_TOL_PER_PX);
-      if (press.frame || !press.cap) return;
-      press.frame = requestAnimationFrame(function () { press.frame = 0; if (!destroyed && colourPress === press) showColourPress(press); });
-    }
-
-    function onColourEnd(event) {
-      document.removeEventListener("pointermove", onColourMove);
-      document.removeEventListener("pointerup", onColourEnd);
-      document.removeEventListener("pointercancel", onColourEnd);
-      var press = colourPress;
-      colourPress = null;
-      if (destroyed || !press) return;
-      if (press.frame) { cancelAnimationFrame(press.frame); press.frame = 0; }
-      dragEndedAt = Date.now();
-      syncMapDragging();
-      if (event.type === "pointercancel") {
-        press.cancelled = true;
-        if (!colourSel) clearColourOverlay(); else drawColourOverlay(colourSel.cap, colourSel.mask);
-        return;
-      }
-      press.done = true;
-      if (press.cap) finishColourPress(press);
     }
 
     function colourMask(press) {
@@ -1185,16 +1165,12 @@
       return mask;
     }
 
-    function showColourPress(press) {
-      drawColourOverlay(press.cap, colourMask(press));
-    }
-
     function finishColourPress(press) {
       var mask = colourMask(press);
       colourSel = { cap: press.cap, seed: press.seed, tol: press.tol, base: press.base, mask: mask };
       drawColourOverlay(press.cap, mask);
       updateHint();
-      setStatus("Enter makes it " + colourNoun(tool) + " · ← → tighter / looser · Shift-drag adds more · Esc drops it.");
+      setStatus("Enter or double-click makes it " + colourNoun(tool) + " · ← → tighter / looser · Shift-click adds more · Esc drops it.");
     }
 
     function stepColourTolerance(by) {
@@ -1246,7 +1222,7 @@
       var sel = colourSel, cap = sel.cap, kind = tool;
       var ring = shapes.maskOutline(sel.mask, cap.image.width, cap.image.height, shapes.DETAIL_MAX_POINTS);
       clearColourSel();
-      if (!ring) { setStatus("Nothing picked yet - press on it and drag.", true); return; }
+      if (!ring) { setStatus("Nothing picked yet - click on it.", true); return; }
       var points = ring.map(cap.toLL);
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
       var merged = kind === "bunker" ? mergeBunker(points, session.hole, null, true) : null;
@@ -1598,19 +1574,48 @@
       try { mapObj.fitBounds(L.latLngBounds(toLatLngs(f.points)).pad(f.kind === "fairway" ? 0.15 : 1.2), { maxZoom: 20 }); } catch (e) {}
     }
 
-    function handleMapClick(latlng) {
+    /* Whether a click with the tool in hand places a wand shape - a green, bunker or water on the
+       wand, or any colour wand pick. Those clicks wait DOUBLE_CLICK_MS for a second one, which
+       makes it a double-click (done) instead; a left drag with them pans the map. */
+    function clickPlaces() {
+      if (lineTool()) return false;
+      var m = methodOf(tool);
+      return m === "colour" || (m === "wand" && WAND_KINDS.indexOf(tool) >= 0) || (!METHODS[tool] && WAND_KINDS.indexOf(tool) >= 0 && session.mode === "shapes");
+    }
+    var pendingClick = null;
+    function handleMapClick(latlng, event) {
       if (Date.now() - dragEndedAt < 300) return;
+      if (clickPlaces()) {
+        if (pendingClick) clearTimeout(pendingClick);
+        var shift = !!(event && event.shiftKey);
+        pendingClick = setTimeout(function () { pendingClick = null; if (!destroyed) placeAtClick(latlng, shift); }, DOUBLE_CLICK_MS);
+        return;
+      }
+      placeAtClick(latlng, false);
+    }
+    /* A double-click with a wand: keep what is in hand - the shape just placed, or the colour
+       pick - and place nothing. The next click starts a new one. */
+    function doneAtDoubleClick() {
+      if (pendingClick) { clearTimeout(pendingClick); pendingClick = null; }
+      if (adjust) { commitAdjust(true); setStatus("Kept - click for the next one."); }
+      else if (colourSel) keepColourSel();
+      updateHint();
+    }
+    function placeAtClick(latlng, shift) {
       if (!session.course) { setStatus("Pick a course first."); return; }
       /* Empty ground under the Link tool does nothing: the pick waits for Enter or Esc. */
       if (tool === "connect" || tool === "number" || tool === "order") return;
       if (tool === "move") { if (selectedId) select(""); return; }
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
-      /* Moving on to the next shape keeps the one just placed. A click with the colour wand
-         is a press too short to drag - its pick stays. */
-      settle(pressGesture() === "colour");
+      /* Moving on to the next shape keeps the one just placed - a colour pick too, unless
+         Shift-click is adding to it. */
+      var colour = methodOf(tool) === "colour";
+      if (colour && colourSel && !shift) keepColourSel();
+      settle(colour);
       var point = { lat: latlng.lat, lng: latlng.lng };
-      if (lineTool()) addDraftPoint(point);
+      if (colour) colourClick(point, shift);
+      else if (lineTool()) addDraftPoint(point);
       else if (methodOf(tool) === "single") placeTree(point);
       else if (pressGesture()) setStatus(pressHint());
       else if (session.mode === "pins") {
@@ -1629,7 +1634,6 @@
       var m = methodOf(tool);
       if (m === "oval") return "Press and drag across the cluster of trees to stretch an oval over it.";
       if (m === "find") return "Drag a box over the ground to look for trees in.";
-      if (m === "colour") return colourSel ? "Enter makes the pick " + colourNoun(tool) + " · drag again to change it · Shift-drag adds." : "Press on the " + colourThing(tool) + " and drag - the further you drag, the more it takes.";
       var noun = tool === "trees" ? "trees" : tool === "waste" ? "waste area" : kindLabel(tool).toLowerCase();
       return "Press and drag all the way round the " + noun + " to outline it.";
     }
@@ -1994,23 +1998,40 @@
       var f = adjusted() || (selectedId ? findFeature(selectedId) : null);
       return f && f.kind === "green" && !f.pin && f.points.length >= 3 ? f : null;
     }
-    /* The fairway the neck runs to: one linked to the green's hole, else one numbered for it,
-       else the nearest - and only one close enough to be its own. A fairway already round the
-       green is a collar, never the target. */
-    function collarFairway(green) {
+    /* Where the neck runs to. With a tee linked to the green, the neck points at the tee: it
+       meets the hole's fairway where the fairway lies that way, or runs COLLAR_TOWARD_TEE_M past
+       the green towards the tee when no fairway does. Without one, the nearest point of the
+       hole's fairway: one linked to the green, else one numbered for its hole, else the nearest
+       - and only one close enough to be its own. A fairway already round the green is a
+       collar, never the target. Null when there is nowhere to neck to. */
+    function collarTarget(green) {
       var centre = shapes.centroid(green.points);
       var fairways = session.features.filter(function (f) { return f.kind === "fairway" && !f.pin && f.points.length >= 3 && !shapes.insideLatLngRing(centre, f.points); });
       var same = fairways.filter(function (f) { return green.link && f.link === green.link; });
       if (!same.length) same = fairways.filter(function (f) { return green.hole && f.hole === green.hole; });
       var pool = same.length ? same : fairways;
+      var tee = green.link ? session.features.filter(function (f) { return f.kind === "tee" && f.link === green.link && f.points.length; })[0] : null;
+      var teeAt = tee ? shapes.centroid(tee.points) : null;
+      var k = Math.cos(centre.lat * Math.PI / 180);
+      function along(p) { return { x: (p.lng - centre.lng) * 111320 * k, y: (p.lat - centre.lat) * 111320 }; }
+      var dir = null;
+      if (teeAt) { var t = along(teeAt), tl = Math.hypot(t.x, t.y); if (tl > 1) dir = { x: t.x / tl, y: t.y / tl, len: tl }; }
       var best = null;
       pool.forEach(function (f) {
         f.points.forEach(function (p) {
           var d = shapes.distanceM(centre, p);
-          if (d <= COLLAR_FAIRWAY_MAX_M && (!best || d < best.d)) best = { d: d, f: f, at: p };
+          if (d > COLLAR_FAIRWAY_MAX_M) return;
+          if (dir) {
+            var v = along(p), cos = (v.x * dir.x + v.y * dir.y) / Math.max(d, 1e-6);
+            if (cos < COLLAR_TOWARD_TEE_COS) return;
+          }
+          if (!best || d < best.d) best = { d: d, at: p, by: dir ? "tee" : "fairway" };
         });
       });
-      return best;
+      if (best || !dir) return best;
+      var reach = shapes.ringRadiusM(green.points) + COLLAR_TOWARD_TEE_M;
+      var u = Math.min(0.9, reach / dir.len);
+      return { at: { lat: centre.lat + (teeAt.lat - centre.lat) * u, lng: centre.lng + (teeAt.lng - centre.lng) * u }, by: "tee" };
     }
     function addCollar() {
       var green = collarGreen();
@@ -2019,7 +2040,7 @@
       if (adjust) commitAdjust(true);
       var start = shapes.reshapeOutline([green.points], { growM: COLLAR_M });
       if (!start) { setStatus("This green is too small to put a collar round.", true); return; }
-      var fairway = collarFairway(green);
+      var target = collarTarget(green);
       var id = session.loadedFor;
       setStatus("Finding the collar round the green…");
       growRun({ ring: start }, "fairway", COLLAR_REACH_M / LINE_WAND_REACH_M.fairway, null).then(function (out) {
@@ -2027,14 +2048,14 @@
         var live = findFeature(green.id);
         if (!live) return;
         var found = out.result.shape || start;
-        var ring = shapes.collarOutline(live.points, found, fairway ? fairway.at : null, { neckM: COLLAR_NECK_M });
+        var ring = shapes.collarOutline(live.points, found, target ? target.at : null, { neckM: COLLAR_NECK_M });
         if (!ring) { setStatus("Could not make a collar here.", true); return; }
         var collar = addFeature({ kind: "fairway", points: shapes.smoothOutline(ring, "fairway"), source: "wand", hole: live.hole });
         if (live.link) collar.link = live.link;
         startAdjust(collar, { base: collar.points.slice() });
         drawFeatures();
         changed();
-        setStatus("Collar added" + (fairway ? ", necked out to the fairway" : " - no fairway near enough to neck out to") + (out.result.shape && out.result.shape !== start ? "" : " (the wand found no edge, so it is " + COLLAR_M + "m all round)") + ". ↑ ↓ smooth and size it, Enter keeps it.");
+        setStatus("Collar added" + (target ? (target.by === "tee" ? ", necked out towards the tee" : ", necked out to the fairway") : " - no fairway near enough to neck out to") + (out.result.shape && out.result.shape !== start ? "" : " (the wand found no edge, so it is " + COLLAR_M + "m all round)") + ". ↑ ↓ smooth and size it, Enter keeps it.");
       });
     }
     function renderCollar() {
@@ -2194,7 +2215,9 @@
       return (keys || handleIndices(f)).map(function (i) { return f.points[i]; });
     }
 
-    function canDrag(f) { return !!f && canEdit() && (tool === "move" || f.id === lastPlacedId); }
+    /* The shape just placed can be dragged straight away - except with a wand, where a left drag
+       pans the map wherever it starts. */
+    function canDrag(f) { return !!f && canEdit() && (tool === "move" || (f.id === lastPlacedId && !clickPlaces())); }
 
     /* Painted bottom to top: the big surfaces first, a green last, so a green sitting on its
        fairway or collar is the shape a click finds - linking, numbering and play orders all
@@ -2231,7 +2254,7 @@
           if (tool === "connect") { if (canEdit() && Date.now() - dragEndedAt >= 300) toggleLinkPick(f.id); return; }
           if (tool === "number") { numberHole(f); return; }
           if (tool === "order") { allocateShape(f); return; }
-          if (tool !== "move") { handleMapClick(e.latlng); return; }
+          if (tool !== "move") { handleMapClick(e.latlng, e && e.originalEvent); return; }
           if (Date.now() - dragEndedAt < 300) return;
           select(f.id);
         });
@@ -3421,7 +3444,7 @@
         var then = growWanding() ? " - the line wand grows it out to the edge" : "";
         text = draft.length ? (draft.length >= 2 ? "Keep clicking along the " + thing + " · Finish (or Enter / double-click) when done" + then : "Click the next point along the " + thing) : (tool === "fairway" ? "Click at the tee end of the fairway, then along its middle" : "Click a line down the middle of the " + thing) + then;
       }
-      else if (methodOf(tool) === "colour") text = colourSel ? "Enter makes it " + colourNoun(tool) + " · ← → tighter / looser · Shift-drag adds · Esc drops it" : "Press on the " + colourThing(tool) + " and drag - further takes more of its colour · " + methodKey(tool) + " switches method";
+      else if (methodOf(tool) === "colour") text = colourSel ? "Enter or double-click makes it " + colourNoun(tool) + " · ← → tighter / looser · Shift-click adds · Esc drops it" : "Click on the " + colourThing(tool) + " - ← → then take more or less of its colour · drag pans · " + methodKey(tool) + " switches method";
       else if (tool === "trees" && methodOf("trees") === "single") text = "Click a tree to drop one · ↑ ↓ size it · E switches method";
       else if (tool === "trees" && methodOf("trees") === "oval") text = "Press and drag across a cluster of trees - Shift for a circle · E switches method";
       else if (tool === "trees" && methodOf("trees") === "find") text = sampleTrees().length ? "Drag a box - trees in it like the " + sampleTrees().length + " you placed by hand are found · E switches method" : "Place a tree or two by hand first (Tree), then drag a box to find more like them";
@@ -3459,7 +3482,7 @@
       else if (adjust.seed) bits.push("↑ ↓ wand size (" + pct(adjust.size) + ")");
       else if (adjust.grow) bits.push("↑ ↓ reach (" + Math.round(LINE_WAND_REACH_M[adjust.kind] * adjust.grow.size) + "m)");
       else bits.push("↑ ↓ smaller / bigger");
-      bits.push("Enter or Space keeps it · Esc removes it");
+      bits.push("Enter, Space or double-click keeps it · Esc removes it");
       return bits.join(" · ");
     }
 
@@ -4328,10 +4351,11 @@
     buildProviderOptions();
     useSource(session.sourceKey || bestSourceKey());
 
-    mapObj.on("click", function (e) { handleMapClick(e.latlng); });
+    mapObj.on("click", function (e) { handleMapClick(e.latlng, e.originalEvent); });
     mapObj.on("dblclick", function (e) {
       if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
       if (lineTool()) finishFairway();
+      else if (clickPlaces()) doneAtDoubleClick();
     });
     mapObj.on("mousemove", function (e) { if (google) spotHover(e); });
     mapObj.on("mouseout", function () { if (google) spotHover(null); });
@@ -4534,10 +4558,6 @@
       document.removeEventListener("pointermove", onStretchMove);
       document.removeEventListener("pointerup", onStretchEnd);
       document.removeEventListener("pointercancel", onStretchEnd);
-      document.removeEventListener("pointermove", onColourMove);
-      document.removeEventListener("pointerup", onColourEnd);
-      document.removeEventListener("pointercancel", onColourEnd);
-      if (colourPress && colourPress.frame) cancelAnimationFrame(colourPress.frame);
       document.documentElement.classList.remove("gdStudioOverlayNoScroll");
       containerEl.classList.remove("gdStudioOverlayHost");
       rememberNow();

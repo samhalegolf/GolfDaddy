@@ -265,6 +265,9 @@
     "scorecard.parForHole": "Par für Loch {n}",
     "scorecard.decrease": "Score für Loch {n} verringern",
     "scorecard.increase": "Score für Loch {n} erhöhen",
+    "scorecard.indexShort": "Hcp",
+    "scorecard.out": "Aus",
+    "scorecard.in": "Ein",
 
     /* Sign in, create account and password reset (scripts/inline/gd-auth-account-shell.js) */
     "auth.modeCreate": "Konto erstellen",
