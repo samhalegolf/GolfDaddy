@@ -401,7 +401,11 @@ test("OSM's shapes come over as editable overlay shapes, each naming the element
   const features = overlay.osmToOverlayFeatures(payload, []);
   const byOsm = {};
   features.forEach(f => { byOsm[f.osm] = f; });
-  assert.deepStrictEqual(Object.keys(byOsm).sort(), ["relation/4", "way/2", "way/3", "way/5", "way/6"], "hole lines stay in OSM; the wood round the course is left out");
+  assert.deepStrictEqual(Object.keys(byOsm).sort(), ["relation/4", "way/1", "way/2", "way/3", "way/5", "way/6"], "hole lines come too; the wood round the course is left out");
+  assert.strictEqual(byOsm["way/1"].kind, "hole");
+  assert.strictEqual(byOsm["way/1"].hole, 1, "numbered from its ref");
+  assert.strictEqual(byOsm["way/1"].points.length, 2, "a line, not a ring");
+  assert.strictEqual(byOsm["way/1"].id, "osm-way-1");
   assert.strictEqual(byOsm["way/2"].kind, "green");
   assert.strictEqual(byOsm["way/2"].hole, 1);
   assert.strictEqual(byOsm["relation/4"].kind, "fairway");

@@ -123,6 +123,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/course-map-capture-date"
+  to = "/.netlify/functions/course-map-capture-date"
+  status = 200
+
+[[redirects]]
   from = "/api/course-test-bakes"
   to = "/.netlify/functions/course-test-bakes"
   status = 200

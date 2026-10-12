@@ -69,7 +69,7 @@
  *             still gives the resolver greens to hang fairways off.
  */
 
-import { osmAreaRings, coursePlayPoints, pointInShape, greenShapeSpan, osmGuideHoleRef, SURFACE_SPAN_LIMITS_M, OSM_AUTO_GREEN_MAX_SPAN_M, FAIRWAY_FILL_SOURCE } from "./gd-automapper-core.mjs";
+import { osmAreaRings, coursePlayPoints, pointInShape, greenShapeSpan, osmGuideHoleRef, osmGuidePointsFromElement, SURFACE_SPAN_LIMITS_M, OSM_AUTO_GREEN_MAX_SPAN_M, FAIRWAY_FILL_SOURCE } from "./gd-automapper-core.mjs";
 
 export const OVERLAY_KINDS = new Set(["fairway", "hole", "green", "tee", "bunker", "water", "trees", "tree", "hazard", "waste"]);
 const POLYGON_KINDS = new Set(["fairway", "green", "tee", "bunker", "water", "trees", "tree", "hazard", "waste"]);
@@ -327,10 +327,13 @@ export function overlaySummary(features) {
 
 /* ---------- OSM -> overlay: making what OSM has editable --------------------------------
 
-   OSM's greens, tees, fairways, bunkers, water and woods, as overlay shapes - so Studio can
-   reshape them like anything drawn by hand. Each keeps the OSM element it came from (osm), and
-   once saved it stands in for that element (mergeOverlayIntoPayload). Hole lines are left in
-   OSM: play orders refer to them by their OSM id.
+   OSM's greens, tees, fairways, bunkers, water, woods and hole lines, as overlay shapes - so
+   Studio can reshape them like anything drawn by hand. Each keeps the OSM element it came from
+   (osm), and once saved it stands in for that element (mergeOverlayIntoPayload). A hole line
+   comes over as a "hole" feature numbered from its ref, so moving its tee in Studio can move
+   the line with it, and so an overlay that reads OSM no more ("Start fresh from OSM") still
+   has OSM's numbered lines. A play order keeps referring to it by its OSM id
+   (gd-play-order-core.mjs resolves "osm:way/N" to the converted line).
 
    The same size checks the mapper applies are applied here, so nothing is offered that the
    mapper would have thrown away - including a wood drawn round the whole course.
@@ -340,7 +343,7 @@ export function overlaySummary(features) {
 
    Shapes already in the overlay are not offered again - matched on id, or on lying inside a
    shape of the same kind someone has already drawn. */
-const OSM_TO_OVERLAY_KIND = { green: "green", tee: "tee", fairway: "fairway", bunker: "bunker", water_hazard: "water", lateral_water_hazard: "water" };
+const OSM_TO_OVERLAY_KIND = { green: "green", tee: "tee", fairway: "fairway", bunker: "bunker", water_hazard: "water", lateral_water_hazard: "water", hole: "hole" };
 const KIND_SPAN_TYPE = { green: null, tee: null, fairway: "fairway_area", bunker: "bunker", water: "water", trees: "trees" };
 
 function overlayKindForOsm(element) {
@@ -381,6 +384,11 @@ export function osmToOverlayFeatures(payload, existing = [], savedObjects = []) 
     if (!kind || element.id == null) return;
     const key = String(element.type || "way") + "/" + element.id;
     const hole = kind === "trees" || kind === "water" ? null : validHoleNumber(osmGuideHoleRef(element.tags.ref || element.tags.name));
+    if (kind === "hole") {
+      const line = osmGuidePointsFromElement(element).map(p => ({ lat: p.lat, lng: p.lng }));
+      if (line.length >= 2) offer({ id: ("osm-" + key.replace("/", "-")).slice(0, 40), kind, hole, points: thinRing(line), source: "osm", osm: key });
+      return;
+    }
     osmAreaRings(element).outers.forEach((ring, index) => {
       const span = greenShapeSpan(ring);
       if (kind === "green" && (span < 5 || span > OSM_AUTO_GREEN_MAX_SPAN_M)) return;
