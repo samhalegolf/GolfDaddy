@@ -717,6 +717,30 @@ async function main() {
   assert.strictEqual(env.result.playable, true, "a complete package opens the course");
   assert.strictEqual(env.calls.notifyOffers.length, 0, "a complete map offers no email card");
 
+  /* The same card when the course opens from the device's copy of a published map (hydrated
+     from the cloud, no scan). The device cannot tell a 17-hole map from a 17-hole course on its
+     own, so the controller asks the course package after the course is open and offers the
+     card if the server says partial. */
+  env = await runScenario({ courseMapsHoles: 18, serverCoursePackage: seventeen, wholeCourse: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.strictEqual(env.result.playable, true, "a published map still opens the course from the device copy");
+  assert.strictEqual(env.calls.packageFetches, 1, "the course package is asked once for the saved map's completeness");
+  assert.strictEqual(env.calls.notifyOffers.length, 1, "a saved map the server calls partial offers the email card");
+  assert.strictEqual(JSON.stringify(env.calls.notifyOffers[0].incomplete), JSON.stringify({ mapped: 17, expected: 18, missing: [17] }), "with the server's missing holes, not the device's guess");
+
+  env = await runScenario({ courseMapsHoles: 18, serverCoursePackage: Object.assign(serverPackage(18), { readiness: "complete", mappedHoleCount: 18, expectedHoleCount: 18, missingHoles: [] }), wholeCourse: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.strictEqual(env.result.playable, true, "a complete published map opens the course");
+  assert.strictEqual(env.calls.notifyOffers.length, 0, "a complete saved map offers no email card");
+
+  /* A course the player drew on this device and never published is not the server's to judge:
+     asking the package endpoint about it would start a mapping run nobody asked for. */
+  env = await runScenario({ savedMap: true, serverCoursePackage: seventeen, wholeCourse: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.strictEqual(env.result.playable, true, "a private saved map opens the course");
+  assert.strictEqual(env.calls.packageFetches, 0, "a private saved map never asks the server, so no scan is triggered");
+  assert.strictEqual(env.calls.notifyOffers.length, 0, "and no card");
+
   const noisyEvents = env.events.map((event) => event.event).filter(Boolean);
   assert(!noisyEvents.includes("automapper-invocation-requested"), "client AutoMapper request noise is absent");
   assert(!noisyEvents.includes("automapper-entered"), "client AutoMapper entered noise is absent");

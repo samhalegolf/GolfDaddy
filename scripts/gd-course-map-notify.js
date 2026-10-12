@@ -4,10 +4,11 @@
  * gd-course-library-pin-lock.js (endFailedScan) sends the player back to a fresh course
  * picker and calls GDCourseMapNotify.offer(course). A small card says the map is not
  * available yet and, when we know which course it was, offers to email them once it is done.
- * The same controller calls offer(course, {incomplete}) when a scan published a partial map
- * (Sugar Ridge, 2026-10-12: 17 of 18 holes, hole 17 missing): the course opens and plays, the
- * card over it says which holes are missing, and the same email offer is made. The server only
- * sends that email once the map is complete (course-map-notify.mjs). Either way:
+ * The same controller calls offer(course, {incomplete}) when the map a course opened with is
+ * partial (Sugar Ridge, 2026-10-12: 17 of 18 holes, hole 17 missing) - whether a scan just
+ * published it or the course opened from the device's saved copy: the course opens and plays,
+ * the card over it says which holes are missing, and the same email offer is made. The server
+ * only sends that email once the map is complete (course-map-notify.mjs). Either way:
  *
  *   signed in -> one tap posts to /api/course-map-notify, which stores the request against
  *                their verified account email.

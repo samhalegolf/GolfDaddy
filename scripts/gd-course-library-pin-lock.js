@@ -4513,12 +4513,41 @@
     if(!notify||typeof notify.offer!=='function')return false;
     const c=sessionCourse(course||courseObj());
     const h=validHoleNumber(hole)||1;
+    const source=opts.source||'scan';
     const missing=(Array.isArray(autoMapResult.missingHoles)?autoMapResult.missingHoles:[]).map(Number).filter(Number.isFinite);
     const incomplete={mapped:Number(autoMapResult.mappedHoleCount)||Number(autoMapResult.holes)||0,expected:Number(autoMapResult.expectedHoleCount)||0,missing};
-    recordCoursePlayDebug('course-scan-incomplete-notify-offered',c,h,{resolutionKey:opts.resolutionKey||'',attemptToken:opts.attemptToken||'',mapped:incomplete.mapped,expected:incomplete.expected,missingHoles:missing});
-    if(opts.debugRunId)recordMappingDebug(opts.debugRunId,{source:'course-loader',phase:'completed',event:'scan-incomplete-notify-offered',summary:'Scan published an incomplete map - email-me-when-ready offered',details:{hole:h,mapped:incomplete.mapped,expected:incomplete.expected,missingHoles:missing,resolutionKey:opts.resolutionKey||'',attemptToken:opts.attemptToken||''}});
+    recordCoursePlayDebug('course-scan-incomplete-notify-offered',c,h,{source,resolutionKey:opts.resolutionKey||'',attemptToken:opts.attemptToken||'',mapped:incomplete.mapped,expected:incomplete.expected,missingHoles:missing});
+    if(opts.debugRunId)recordMappingDebug(opts.debugRunId,{source:'course-loader',phase:'completed',event:'scan-incomplete-notify-offered',summary:'Map is incomplete - email-me-when-ready offered',details:{hole:h,source,mapped:incomplete.mapped,expected:incomplete.expected,missingHoles:missing,resolutionKey:opts.resolutionKey||'',attemptToken:opts.attemptToken||''}});
     try{Promise.resolve(notify.offer({courseId:courseId(c),courseName:courseName(c)},{incomplete})).catch(()=>{});}catch(e){}
     return true;
+  }
+  /* The same offer for a course that opened from the device's own copy of the map - hydrated
+     from the cloud a moment ago, or kept from an earlier round - where no server package was
+     read and so nothing said whether the map is complete. The device cannot judge that itself:
+     its expected hole count comes from the published row's hole_count, which is the number of
+     holes MAPPED, so a 17-hole map reads as a 17-hole course. The course package knows
+     (readiness is judged against the mapper's card count), so ask it once, after the course is
+     already open, and offer the card if it says partial. Nothing waits on this: a slow or
+     missing answer just means no card. */
+  async function offerNotifyIfServerMapIncomplete(course,hole,opts={}){
+    const c=sessionCourse(course||courseObj());
+    if(!c||isManualGpsCourse(c))return false;
+    /* Only for a course the server publishes. Asking the package endpoint about a course it has
+       never heard of makes it START a mapping run (buildCoursePackageWithTrigger), and a player
+       opening the course they drew themselves on this device has asked for no such thing. */
+    if(!findPublishedCourse(courseId(c),courseName(c),c))return false;
+    let pkg=null;
+    try{pkg=await fetchServerCoursePackage(c);}catch(e){pkg=null;}
+    if(!serverPackageIsReady(pkg)||pkg.readiness!=='partial')return false;
+    /* The player may have moved to another course while the package was in flight. */
+    try{if(mappedModeCourseIdentity(sessionCourse(courseObj()))!==mappedModeCourseIdentity(c))return false;}catch(e){return false;}
+    return offerNotifyForIncompleteScan(c,hole,{
+      readiness:pkg.readiness,
+      holes:Array.isArray(pkg.holes)?pkg.holes.length:0,
+      mappedHoleCount:pkg.mappedHoleCount,
+      expectedHoleCount:pkg.expectedHoleCount,
+      missingHoles:pkg.missingHoles
+    },opts);
   }
   function beginInteractiveGreenFallback(course,hole,reason,opts={}){
     const h=validHoleNumber(hole||opts.hole)||1;
@@ -5046,7 +5075,9 @@
         recordMappingDebug(debugRunId,{source:'saved-map',phase:savedReady&&localSavedMapAllowed?'completed':'skipped',event:savedReady&&!localSavedMapAllowed?'saved-map-ignored-without-database-map':savedReady?'saved-map-found':savedIncomplete?'saved-map-incomplete':'saved-map-not-found',summary:savedReady&&!localSavedMapAllowed?'Saved map ignored without database map':savedReady?'Saved map found':savedIncomplete?'Saved map incomplete':'Saved map not found',details:{hole:h,existingTrustedMap:savedPlayable,localSavedMapAllowed,resolutionKey:key,attemptToken,wholeCourse:request.wholeCourse,playableHoleCount:savedState.coverage.count,expectedHoleCount:savedState.coverage.expected,playableHoles:savedState.coverage.holes,missingHoles:savedState.coverage.missing}});
         if(savedReady&&localSavedMapAllowed){
           finishMappingDebug(debugRunId,{status:'completed',outcome:'trusted saved map ready'});
-          return showResolvedCoursePlayHole(c,h,'saved-map',opts);
+          const shownFromSaved=await showResolvedCoursePlayHole(c,h,'saved-map',opts);
+          offerNotifyIfServerMapIncomplete(c,h,{resolutionKey:key,attemptToken,debugRunId,source:'saved-map'}).catch(()=>{});
+          return shownFromSaved;
         }
         if(!mappingAttemptStillCurrent(request,attempt,'saved-map'))return {playable:false,stale:true,reason:'superseded-before-automapper'};
         updateCourseLoading(i18nT('course.checkingServerMap'),42);
