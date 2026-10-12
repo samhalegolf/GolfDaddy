@@ -51,6 +51,7 @@
     "test:supabase-retry": "node dev/supabase-retry.test.js",
     "test:course-maps-scope": "node dev/course-maps-list-scope.test.js",
     "test:course-db-load": "node dev/course-db-load.test.js",
+    "test:player-requests": "node dev/player-requests.test.mjs && node dev/overlay-inbox.test.mjs",
     "test:course-versions": "node dev/course-versions.test.js",
     "test:course-map-notify": "node dev/course-map-notify.test.js",
     "test:course-usage": "node dev/course-usage.test.js",

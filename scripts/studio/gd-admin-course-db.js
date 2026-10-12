@@ -13,6 +13,14 @@
    ever served admin controls). */
 let gdAdminCourseDatabaseSelected="";
 let gdAdminCourseDatabaseTab="overview";
+/* A Studio page may narrow the list to the courses it is about (the Course Mapping page
+   shows only courses players asked the app to map). {courses:{[courseId]:{requestedAt,
+   requests,players}}, emptyText}. Null is the whole database. */
+let gdAdminCourseDbScope=null;
+function gdAdminCourseDbSetScope(scope){
+  gdAdminCourseDbScope=scope&&scope.courses?scope:null;
+  gdRenderAdminCourseDatabase();
+}
 const gdAdminCoursePreviewHoleByCourse={};
 function gdAdminCourseDbMetric(label,value){
   return `<div class="gdAdminDatabaseMetric"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value ?? "")}</strong></div>`;
@@ -438,6 +446,16 @@ function gdAdminCourseDbSummaries(){
       rows:rows
     };
   }).sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
+}
+/* "3d ago · 2 players · 4 asks" for a scoped row (see gdAdminCourseDbScope). */
+function gdAdminCourseDbRequestedCell(request){
+  const at=Date.parse(request.requestedAt||"");
+  const mins=Number.isFinite(at)?Math.max(0,Math.round((Date.now()-at)/60000)):NaN;
+  const ago=!Number.isFinite(mins)?"unknown":mins<60?mins+"m ago":mins<48*60?Math.round(mins/60)+"h ago":Math.round(mins/1440)+"d ago";
+  const bits=[ago];
+  if(request.players>1)bits.push(request.players+" players");
+  if(request.requests>1)bits.push(request.requests+" asks");
+  return gdEscapeHTML(bits.join(" · "));
 }
 function gdAdminCourseDbOpen(courseId){
   /* Navigating to a course is leaving the lab - stash first so nothing is lost. */
@@ -4693,9 +4711,10 @@ function gdAdminCourseDbExpandedRow(item){
     gdAdminCourseDbDiagRow("Map version",gdAdminCourseVersionLabel(item)||"not versioned yet"),
     gdAdminCourseDbDiagRow("Updated",gdCoursePlayDebugTime(item.updatedAt)||"unknown")
   ].join("");
-  /* colspan tracks the header above - 8 since the Version column joined it. A stale number
-     here silently narrows the expanded panel rather than erroring. */
-  return `<tr class="gdAdminCourseDiagRowHost"><td colspan="8"><div class="gdAdminCourseDiag">${banner}${progressBar}<div class="gdAdminCourseDiagGrid">${diag}</div>${gdAdminCourseScorecardDropMarkup(item)}${gdAdminCourseDbActionRail(item)}</div></td></tr>`;
+  /* colspan tracks the header above - 8 since the Version column joined it, one more when a
+     scope adds the Requested column. A stale number here silently narrows the expanded panel
+     rather than erroring. */
+  return `<tr class="gdAdminCourseDiagRowHost"><td colspan="${gdAdminCourseDbScope?9:8}"><div class="gdAdminCourseDiag">${banner}${progressBar}<div class="gdAdminCourseDiagGrid">${diag}</div>${gdAdminCourseScorecardDropMarkup(item)}${gdAdminCourseDbActionRail(item)}</div></td></tr>`;
 }
 
 /* ---------- Scorecard drop zone ----------
@@ -5295,7 +5314,8 @@ function gdRenderAdminCourseDatabaseNow(){
   if(!gdAdminCourseDbJobsAt&&!gdAdminCourseDbJobsInflight)gdLoadAdminCourseDbJobs().then(()=>gdRenderAdminCourseDatabase());
   if(!gdAdminCourseVersions&&!gdAdminCourseVersionsInflight)gdLoadAdminCourseVersions();
   gdAdminCourseDbSetHTML(summary,gdAdminCourseDbCloudStatusMarkup());
-  const all=gdAdminCourseDbSummaries();
+  const scope=gdAdminCourseDbScope;
+  const all=scope?gdAdminCourseDbSummaries().filter(item=>scope.courses[item.id]).sort((a,b)=>String(scope.courses[b.id].requestedAt||"").localeCompare(String(scope.courses[a.id].requestedAt||""))):gdAdminCourseDbSummaries();
   const search=String(document.getElementById("gdAdminCourseDbSearch")?.value||"").trim().toLowerCase();
   const filtered=all.filter(item=>{
     const hay=[item.name,item.key,item.status,item.syncStatus,item.source].join(" ").toLowerCase();
@@ -5306,11 +5326,11 @@ function gdRenderAdminCourseDatabaseNow(){
     gdAdminCourseDatabaseTab="overview";
   }
   if(!all.length){
-    gdAdminCourseDbSetHTML(list,gdAdminCourseDbCloudState==="loading"?'<div class="gdCoursePlayDebugEmpty">Loading courses from Supabase…</div>':gdAdminCourseDbCloudState==="ready"?'<div class="gdCoursePlayDebugEmpty">No courses published to the database yet.</div>':'<div class="gdCoursePlayDebugEmpty">No course records available. Supabase is unreachable and no local cache exists.</div>');
+    gdAdminCourseDbSetHTML(list,gdAdminCourseDbCloudState==="loading"?'<div class="gdCoursePlayDebugEmpty">Loading courses from Supabase…</div>':gdAdminCourseDbCloudState==="ready"?`<div class="gdCoursePlayDebugEmpty">${gdEscapeHTML(scope&&scope.emptyText||"No courses published to the database yet.")}</div>`:'<div class="gdCoursePlayDebugEmpty">No course records available. Supabase is unreachable and no local cache exists.</div>');
     gdAdminCourseDbSetHTML(detail,"");
     return;
   }
-  gdAdminCourseDbSetHTML(list,filtered.length?`<div class="gdAdminCourseTableWrap"><table class="gdAdminCourseTable"><thead><tr><th>Course</th><th>Version</th><th>Status</th><th>Sync</th><th>Holes</th><th>Play</th><th>Visual Engine</th><th>Updated</th></tr></thead><tbody>${filtered.map(item=>{
+  gdAdminCourseDbSetHTML(list,filtered.length?`<div class="gdAdminCourseTableWrap"><table class="gdAdminCourseTable"><thead><tr><th>Course</th>${scope?"<th>Requested</th>":""}<th>Version</th><th>Status</th><th>Sync</th><th>Holes</th><th>Play</th><th>Visual Engine</th><th>Updated</th></tr></thead><tbody>${filtered.map(item=>{
     const visual=gdAdminCourseDbVisualState(item.id);
     /* The displayed status, not the stored one - see gdAdminCourseDbStatusFor. */
     const status=gdAdminCourseDbStatusFor(item);
@@ -5320,7 +5340,7 @@ function gdRenderAdminCourseDatabaseNow(){
     const active=item.id===gdAdminCourseDatabaseSelected?" active":"";
     const open=item.id===gdAdminCourseDbExpanded;
     const caret=open?"▾":"▸";
-    const row=`<tr class="${active}${open?" expanded":""}" data-course-id="${gdEscapeHTML(item.id)}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${caret}</span> ${gdEscapeHTML(item.name)}</td><td>${version?`<span class="gdAdminCourseVersion">${gdEscapeHTML(version)}</span>`:`<span class="gdAdminCourseMuted" title="No countable version yet - this course has not been rebuilt since versions existed">\u2014</span>`}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(status)}</span>${gdAdminCourseDbDrawButton(item,status)}</td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${item.playReadyCount==null?"<span class=\"gdAdminCourseMuted\" title=\"Open the row to load this course's geometry\">\u2014</span>":gdEscapeHTML(item.playReadyCount)+"/"+gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
+    const row=`<tr class="${active}${open?" expanded":""}" data-course-id="${gdEscapeHTML(item.id)}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${caret}</span> ${gdEscapeHTML(item.name)}</td>${scope?`<td>${gdAdminCourseDbRequestedCell(scope.courses[item.id])}</td>`:""}<td>${version?`<span class="gdAdminCourseVersion">${gdEscapeHTML(version)}</span>`:`<span class="gdAdminCourseMuted" title="No countable version yet - this course has not been rebuilt since versions existed">\u2014</span>`}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(status)}</span>${gdAdminCourseDbDrawButton(item,status)}</td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${item.playReadyCount==null?"<span class=\"gdAdminCourseMuted\" title=\"Open the row to load this course's geometry\">\u2014</span>":gdEscapeHTML(item.playReadyCount)+"/"+gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
     return open?row+gdAdminCourseDbExpandedRow(item):row;
   }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current search.</div>');
   gdAdminCourseScorecardRestore(list);
@@ -5405,6 +5425,7 @@ function gdRenderAdminCourseDatabaseNow(){
 }
 
 window.gdRenderAdminCourseDatabase=gdRenderAdminCourseDatabase;
+window.gdAdminCourseDbSetScope=gdAdminCourseDbSetScope;
 window.gdAdminCourseDbToggleRow=gdAdminCourseDbToggleRow;
 window.gdAdminCourseDbOpen=gdAdminCourseDbOpen;
 window.gdAdminCourseDbShowGeometry=gdAdminCourseDbShowGeometry;

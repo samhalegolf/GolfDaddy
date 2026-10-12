@@ -1,29 +1,20 @@
 /* The Mapping Overlay inbox: courses players asked the app to map, for an admin to fix by hand.
  *
- * A player opening a course with no map starts an automap job (course_mapper_jobs, kind
- * "automap", requested_by "user:<id>" or "guest:<id>"). Each course they asked for since
- * INBOX_SINCE is one inbox item:
+ * Which jobs are player requests, and the per-course grouping, live in gd-player-requests.mjs
+ * (the Course Mapping page shows that whole list). Each course asked for since INBOX_SINCE is
+ * one inbox item:
  *   fix     - the latest run on the course failed: the player got no map.
  *   upgrade - it mapped, but a mapper-only map is the one worth checking and upgrading.
- * Jobs the admin's own account asked for, admin runs (user:admin-...) and the nearby sweep
- * (nearby_automap) are not player requests and never show.
  *
  * An item leaves the inbox when the course's overlay is marked ready after the latest request
  * (the fix is done), or when it is dismissed (course_overlay_inbox_dismissals). A newer
  * request brings it back. */
 
+import { groupPlayerRequests } from "./gd-player-requests.mjs";
+
 export const INBOX_SINCE = "2026-10-08T00:00:00Z";
 export const DISMISSALS_TABLE = "course_overlay_inbox_dismissals";
 const JOB_LIMIT = 1000;
-
-function isPlayerRequest(requestedBy, adminUserIds) {
-  const by = String(requestedBy || "");
-  if (by.startsWith("guest:")) return true;
-  if (!by.startsWith("user:") || by.startsWith("user:admin-")) return false;
-  return !adminUserIds.has(by.slice(5));
-}
-
-function later(a, b) { return !b || (a && Date.parse(a) > Date.parse(b)) ? a : b; }
 
 /* Pure: the inbox from the rows already read.
  *   requests   - automap jobs since INBOX_SINCE: {course_id, requested_by, status, error, created_at}
@@ -33,23 +24,13 @@ function later(a, b) { return !b || (a && Date.parse(a) > Date.parse(b)) ? a : b
  *   dismissals - {course_id, dismissed_at}
  * Newest request first. */
 export function buildInbox({ requests = [], latestRuns = [], courses = [], overlays = [], dismissals = [], adminUserIds = [] } = {}) {
-  const admins = new Set(adminUserIds.map(String));
-  const byCourse = new Map();
-  requests.forEach(job => {
-    if (!job || !job.course_id || !isPlayerRequest(job.requested_by, admins)) return;
-    const item = byCourse.get(job.course_id) || { courseId: job.course_id, requests: 0, players: new Set(), requestedAt: null, firstRequestedAt: null };
-    item.requests += 1;
-    item.players.add(String(job.requested_by));
-    item.requestedAt = later(job.created_at, item.requestedAt);
-    item.firstRequestedAt = !item.firstRequestedAt || Date.parse(job.created_at) < Date.parse(item.firstRequestedAt) ? job.created_at : item.firstRequestedAt;
-    byCourse.set(job.course_id, item);
-  });
+  const items = groupPlayerRequests(requests, adminUserIds);
   const run = new Map(latestRuns.map(r => [r.course_id, r]));
   const course = new Map(courses.map(c => [c.course_id, c]));
   const overlay = new Map(overlays.map(o => [o.course_id, o]));
   const dismissed = new Map(dismissals.map(d => [d.course_id, d.dismissed_at]));
   const out = [];
-  byCourse.forEach(item => {
+  items.forEach(item => {
     const o = overlay.get(item.courseId);
     if (o && o.status === "ready" && Date.parse(o.updated_at) > Date.parse(item.requestedAt)) return;
     const gone = dismissed.get(item.courseId);
@@ -66,13 +47,13 @@ export function buildInbox({ requests = [], latestRuns = [], courses = [], overl
       lastStatus: last ? last.status : null,
       lastError: last && last.error ? String(last.error).slice(0, 200) : null,
       requests: item.requests,
-      players: item.players.size,
+      players: item.players,
       requestedAt: item.requestedAt,
       firstRequestedAt: item.firstRequestedAt,
       overlay: o ? o.status : null
     });
   });
-  return out.sort((a, b) => Date.parse(b.requestedAt) - Date.parse(a.requestedAt));
+  return out;
 }
 
 function inList(ids) { return "(" + ids.map(id => '"' + String(id).replace(/"/g, "") + '"').join(",") + ")"; }

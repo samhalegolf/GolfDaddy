@@ -160,11 +160,12 @@
     },
     {
       id: "course-mapping", label: "Course Mapping", parent: "courses",
-      function: "Discovers, labels, validates and repairs course data before it is accepted into the Course Database. v1 groups its subsections into one Mapping Workspace (see nested records below); the workspace embeds the existing Mapping Diagnostics panel and re-uses the Course Database's location-edit tooling, since that code physically lives in gd-admin-course-db.js and is pinned there by dev/course-location-behavior.test.js.",
+      function: "Discovers, labels, validates and repairs course data before it is accepted into the Course Database. Its Studio page is the player-requested course list: only courses players (not admins) asked the app to map, newest request first, read from GET /api/course-mapper-jobs?playerRequests=1 (functions/lib/gd-player-requests.mjs) and shown through the same course table as the Course Database, narrowed to those courses. v1 groups its subsections into one Mapping Workspace (see nested records below); the workspace embeds the existing Mapping Diagnostics panel and re-uses the Course Database's location-edit tooling, since that code physically lives in gd-admin-course-db.js and is pinned there by dev/course-location-behavior.test.js.",
       owner: "Course Mapping (composed from gd-course-mapping-debug.js + gd-course-library-pin-lock.js + gd-course-location.js)",
       runtime: { app: true, studio: true, server: false },
       code: [
-        { role: "Studio Mapping Workspace (new, composition-only)", path: "scripts/studio/courses/course-mapping/course-mapping-page.js" },
+        { role: "Studio Mapping Workspace: the player-requested course list (composition-only)", path: "scripts/studio/courses/course-mapping/course-mapping-page.js" },
+        { role: "Which mapper jobs are player requests, grouped per course", path: "functions/lib/gd-player-requests.mjs" },
         { role: "Mapping diagnostics (observational)", path: "scripts/gd-course-mapping-debug.js" },
         { role: "AutoMapper / on-device mapper (app-facing, do not move)", path: "scripts/gd-course-library-pin-lock.js" },
         { role: "Course-centre resolution owner", path: "scripts/gd-course-location.js" },

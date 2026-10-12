@@ -16,6 +16,9 @@
    GET with no courseId -> the same derived state for EVERY course, one row each, for the
    admin list. Same vocabulary as the single-course form so a row and its detail cannot
    disagree.
+   GET ?playerRequests=1 (admin only) -> {items} - every course players (not admins) asked the
+   app to map, one item per course with request and player counts, newest first
+   (lib/gd-player-requests.mjs). Studio's Course Mapping page is that list.
 
    The worker itself is functions/course-mapper-worker-background.mjs. */
 
@@ -26,6 +29,7 @@ import { boundingBox, coursesFromOverpass, mergeWithLibrary, nearbyCoursesQuery 
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
+import { loadPlayerRequests } from "./lib/gd-player-requests.mjs";
 
 const TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
@@ -640,6 +644,12 @@ export default async function courseMapperJobs(req) {
 
   if (req.method === "GET") {
     const url = new URL(req.url);
+    if (url.searchParams.get("playerRequests") === "1") {
+      const user = await verifiedUser(req);
+      if (!(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
+      /* The caller's own scans in the app are not player requests. */
+      return json(200, { items: await loadPlayerRequests(supabaseFetch, { adminUserIds: [user.id] }) });
+    }
     const courseId = slug(url.searchParams.get("courseId") || url.searchParams.get("course_id"));
     /* No courseId now means "all of them" rather than an error. The admin list
        needs every course's state at once; asking per row is what stopped it
