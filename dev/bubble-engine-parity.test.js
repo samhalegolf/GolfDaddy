@@ -38,8 +38,10 @@
  * WHAT IS PINNED. Only the subset that is meant to cross to the wrist — club
  * selection, pattern derivation, orientation and the resulting geometry.
  * Deliberately absent: wind (needs live conditions the wrist has no source
- * for), micro-geometry (built but ships off), and the display pixel clamp
- * (that is framing, and framing is the Framing Engine's). No projection is
+ * for), micro-geometry (built but ships off), the display pixel clamp
+ * (that is framing, and framing is the Framing Engine's), and the phone's
+ * forward bias (a nudge along the shot the wrist engines do not carry — see
+ * run() below and dev/bubble-forward-bias.test.js). No projection is
  * installed on the engine here, which is exactly the un-clamped path.
  *
  * NOT the bag roof. gdClampBubbleCenterToBagRoof, gdBubbleRoofMaxDistanceM,
@@ -130,6 +132,11 @@ function run(input) {
   engine.setBubble(input.bubble || null);
   engine.clearWind();
   engine.setMicroGeometry(null);
+  /* The forward bias is the phone's alone: a face-offset nudge along the shot
+     that the wrist engines never had and are not meant to gain. Off here so the
+     fixture pins the maths all three engines share; dev/bubble-forward-bias.test.js
+     pins that the phone ships with it on. */
+  engine.setForwardBias(false);
   engine.setHoleContext({
     hole: input.hole.number,
     tee: input.hole.tee,

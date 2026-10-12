@@ -18485,7 +18485,8 @@ function gdBubbleGeometryTuning(){
     gpsMaxDepthPct:gdClamp(num(get("bubbleGeometry.gpsMaxDepthPct"),.18),.04,.6),
     gpsMaxLateralM:gdClamp(num(get("bubbleGeometry.gpsMaxLateralM"),28),8,120),
     gpsMaxDepthM:gdClamp(num(get("bubbleGeometry.gpsMaxDepthM"),38),10,150),
-    gpsPixelCapScale:gdClamp(num(get("bubbleGeometry.gpsPixelCapScale"),1),.3,3)
+    gpsPixelCapScale:gdClamp(num(get("bubbleGeometry.gpsPixelCapScale"),1),.3,3),
+    forwardBias:gdClamp(num(get("bubbleGeometry.forwardBias"),1),0,1)
   };
 }
 function gdResolveFaceAlignmentOffsetDeg(input={}){return Number(input.faceAlignmentOffsetDeg??input.faceOffsetDeg??0)}
@@ -18899,10 +18900,15 @@ function gdBubbleRenderCenter(payloadInput){
   const aimBase=Math.max(1,gdFiniteNumber(aimDistance,gdFiniteNumber(payload.baseCarry,gdFiniteNumber(payload.radius,1)*10)));
   const sideLimit=Math.max(2,aimBase*.25);
   const sideOffset=gdClamp(gdGpsAimOffsetM(payload,aimDistance),-sideLimit,sideLimit);
-  // No forward bias: the Bubble's centre sits ON the target along the shot.
-  // A face-offset-driven nudge (visualYBias x depth) used to push it a few
-  // metres long or short, which read as the engine missing the green centre.
-  return projectOffset(renderTarget,shotBrg,0,sideOffset);
+  // The forward bias is the PHONE's: a face-offset-driven nudge along the shot
+  // (visualYBias x depth, under two metres for most clubs) that the phone's
+  // bubble has always carried. The watch engines (Swift, Monkey C) sit the
+  // centre ON the target and stay there - the wrist is a different piece of
+  // software, and a watch camera change on 5 Oct 2026 took this off the phone
+  // by mistake. bubbleGeometry.forwardBias (1 on, 0 off) is how the parity
+  // fixtures record the shared maths without it; nothing shipped turns it off.
+  const forwardBias=gdBubbleGeometryTuning().forwardBias*gdClamp(gdFiniteNumber(payload.visual&&payload.visual.visualYBias,0),-.18,.18)*Math.max(1,gdFiniteNumber(payload.depthRadiusM,payload.radius));
+  return projectOffset(renderTarget,shotBrg,forwardBias,sideOffset);
 }
 function gdBubbleAxes(payloadInput,scale=1){
   const payload=gdBubblePayloadForRender(payloadInput);
