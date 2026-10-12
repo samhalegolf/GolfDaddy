@@ -842,6 +842,40 @@
       try { if (pressGesture()) mapObj.dragging.disable(); else mapObj.dragging.enable(); } catch (e) {}
     }
 
+    /* Right-click and drag pans the map, whatever tool is in hand: left-press is the tool's
+       (a wand click, drawing round, the colour wand's reach), so panning gets a button of its
+       own. A right-click that does not move is still a right-click - taking a corner off a
+       shape - and only one that moved has its menu swallowed. */
+    var rightPan = null, rightPanEndedAt = 0;
+    function onRightPress(event) {
+      if (event.button !== 2 || !mapObj || drag) return;
+      rightPan = { x: event.clientX, y: event.clientY, moved: false };
+      document.addEventListener("pointermove", onRightMove);
+      document.addEventListener("pointerup", onRightEnd);
+      document.addEventListener("pointercancel", onRightEnd);
+    }
+    function onRightMove(event) {
+      if (!rightPan || !mapObj || destroyed) return;
+      var dx = event.clientX - rightPan.x, dy = event.clientY - rightPan.y;
+      if (!rightPan.moved && Math.hypot(dx, dy) < 4) return;
+      rightPan.moved = true;
+      mapObj.panBy([-dx, -dy], { animate: false });
+      rightPan.x = event.clientX;
+      rightPan.y = event.clientY;
+    }
+    function onRightEnd() {
+      document.removeEventListener("pointermove", onRightMove);
+      document.removeEventListener("pointerup", onRightEnd);
+      document.removeEventListener("pointercancel", onRightEnd);
+      if (rightPan && rightPan.moved) rightPanEndedAt = Date.now();
+      rightPan = null;
+    }
+    function onRightMenu(event) {
+      if (Date.now() - rightPanEndedAt > 400) return;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
     var lasso = null;
 
     /* A press on the map starts the tool's gesture, if it has one. */
@@ -4409,6 +4443,8 @@
       el["method-" + m].addEventListener("click", function () { setMethod(tool, m); });
     });
     el.map.addEventListener("pointerdown", onMapPress);
+    el.map.addEventListener("pointerdown", onRightPress, true);
+    el.map.addEventListener("contextmenu", onRightMenu, true);
     el.hole.addEventListener("change", holeFieldChanged);
     el.width.addEventListener("change", function () {
       var w = num(el.width.value);
