@@ -139,10 +139,10 @@ test("a session is a draft the mapper ignores until it is marked ready", () => {
   assert.ok(sql.includes("alter column status set default 'draft'"), "new overlays must start as drafts");
   assert.ok(sql.includes("add column if not exists status text not null default 'ready'"), "overlays already in use must stay readable");
   assert.ok(store.includes('status: "draft", updated_by: savedBy'), "every shape save must put the overlay back to draft");
-  assert.ok(endpoint.includes("writeOverlayStatus(ownerId, payload.status)"), "marking ready must be its own request that leaves the shapes alone");
-  assert.ok(worker.includes('if (row && row.status === "ready") { course.overlay = features; course.playOrders = ownerId === course.courseId ? playOrders : []; }'), "the worker must merge only a ready overlay, and follow its play orders only on the owner's own run");
+  assert.ok(endpoint.includes("writeOverlayStatus(ownerId, payload.status, payload.osm)"), "marking ready must be its own request that leaves the shapes alone");
+  assert.ok(worker.includes('if (row && row.status === "ready") {') && worker.includes('course.playOrders = ownerId === course.courseId ? playOrders : [];'), "the worker must merge only a ready overlay, and follow its play orders only on the owner's own run");
   assert.ok(worker.includes("ignoredFeatures: course.overlayDraft"), "a skipped draft must show on the job's diagnostics");
-  assert.ok(page.includes('data-gd-overlay="ready"') && page.includes('api("POST", "", { courseId: id, status: "ready" })'), "no Mark ready in the page");
+  assert.ok(page.includes('data-gd-overlay="ready"') && page.includes('api("POST", "", { courseId: id, status: "ready", osm: choice })'), "no Mark ready in the page - or it does not say whether the mapper reads OSM");
   assert.ok(page.includes("This overlay is still a draft, and the mapper ignores drafts."), "running the mapper on a draft must ask before marking it ready");
 });
 
@@ -314,7 +314,8 @@ test("Link: click the shapes on one hole, Enter or Space links them, and never n
 test("OSM's shapes can be made editable, and a course with no overlay starts from them", () => {
   assert.ok(endpoint.includes("out.convertible = osmToOverlayFeatures(payload, overlayFeatures, savedObjects);"), "the drawer's load must offer OSM's shapes as overlay shapes");
   assert.ok(page.includes('data-gd-overlay="convert"') && page.includes('convertOsm(false)'), "no Make OSM editable button");
-  assert.ok(page.includes("if (session.loadedFor === id && !hasOverlay()) convertOsm(true);"), "an empty overlay must start from what OSM has");
+  assert.ok(page.includes('if (session.loadedFor === id && !hasOverlay() && session.osmMode !== "exclude") convertOsm(true);'), "an empty overlay must start from what OSM has - unless the mapper is to read the drawn shapes alone");
+  assert.ok(worker.includes("if (course.overlayOnly) return Promise.resolve(mergeOverlayIntoPayload({ elements: [] }, course.overlay));"), "an overlay marked ready with OSM excluded is never merged into an Overpass answer");
   assert.ok(page.includes("if (raw.osm) f.osm = raw.osm;"), "a shape keeps the OSM element it came from");
   assert.ok(page.includes("return !converted[item.id];"), "a converted OSM shape must not be drawn twice");
 });
