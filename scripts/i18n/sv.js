@@ -1048,6 +1048,11 @@
     "mapNotify.noThanks": "Nej tack",
     "mapNotify.toastWillEmail": "Vi mejlar dig när {course} är klar",
     "mapNotify.toastWillEmailYours": "Vi mejlar dig när din bana är klar",
+    "mapNotify.incomplete": "Kartan för {course} är ofullständig",
+    "mapNotify.incompleteThis": "Den här bankartan är ofullständig",
+    "mapNotify.incompleteDetail": "{mapped} av {expected} hål är kartlagda. Saknas: {missing}. Vi gör klart resten.",
+    "mapNotify.incompleteDetailNoList": "{mapped} av {expected} hål är kartlagda. Vi gör klart resten.",
+    "mapNotify.incompleteOnList": "Du står på listan - vi mejlar dig när hela kartan är klar.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Spelarprofil",

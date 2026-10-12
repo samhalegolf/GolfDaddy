@@ -1048,6 +1048,11 @@
     "mapNotify.noThanks": "Nein danke",
     "mapNotify.toastWillEmail": "Wir schicken dir eine E-Mail, sobald {course} bereit ist",
     "mapNotify.toastWillEmailYours": "Wir schicken dir eine E-Mail, sobald dein Platz bereit ist",
+    "mapNotify.incomplete": "Die Karte für {course} ist unvollständig",
+    "mapNotify.incompleteThis": "Diese Platzkarte ist unvollständig",
+    "mapNotify.incompleteDetail": "{mapped} von {expected} Löchern sind kartiert. Es fehlen: {missing}. Wir ergänzen den Rest.",
+    "mapNotify.incompleteDetailNoList": "{mapped} von {expected} Löchern sind kartiert. Wir ergänzen den Rest.",
+    "mapNotify.incompleteOnList": "Du stehst auf der Liste - wir mailen dir, sobald die vollständige Karte fertig ist.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Spielerprofil",

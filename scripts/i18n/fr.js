@@ -1048,6 +1048,11 @@
     "mapNotify.noThanks": "Non merci",
     "mapNotify.toastWillEmail": "Nous vous enverrons un e-mail quand {course} sera prêt",
     "mapNotify.toastWillEmailYours": "Nous vous enverrons un e-mail quand votre parcours sera prêt",
+    "mapNotify.incomplete": "La carte de {course} est incomplète",
+    "mapNotify.incompleteThis": "La carte de ce parcours est incomplète",
+    "mapNotify.incompleteDetail": "{mapped} trous sur {expected} sont cartographiés. Manquants : {missing}. Nous terminerons le reste.",
+    "mapNotify.incompleteDetailNoList": "{mapped} trous sur {expected} sont cartographiés. Nous terminerons le reste.",
+    "mapNotify.incompleteOnList": "Vous êtes sur la liste - nous vous enverrons un e-mail quand la carte complète sera prête.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Profil du joueur",

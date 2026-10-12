@@ -1048,6 +1048,11 @@
     "mapNotify.noThanks": "Köszönöm, nem",
     "mapNotify.toastWillEmail": "E-mailt küldünk, amint elkészül: {course}",
     "mapNotify.toastWillEmailYours": "E-mailt küldünk, amint a pályád elkészül",
+    "mapNotify.incomplete": "A {course} térképe hiányos",
+    "mapNotify.incompleteThis": "Ennek a pályának a térképe hiányos",
+    "mapNotify.incompleteDetail": "{expected} lyukból {mapped} van feltérképezve. Hiányzik: {missing}. A többit befejezzük.",
+    "mapNotify.incompleteDetailNoList": "{expected} lyukból {mapped} van feltérképezve. A többit befejezzük.",
+    "mapNotify.incompleteOnList": "Rajta vagy a listán - e-mailt küldünk, amint a teljes térkép elkészül.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Játékosprofil",

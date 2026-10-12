@@ -1048,6 +1048,11 @@
     "mapNotify.noThanks": "Όχι, ευχαριστώ",
     "mapNotify.toastWillEmail": "Θα σου στείλουμε email όταν το γήπεδο {course} είναι έτοιμο",
     "mapNotify.toastWillEmailYours": "Θα σου στείλουμε email όταν το γήπεδό σου είναι έτοιμο",
+    "mapNotify.incomplete": "Ο χάρτης για το {course} είναι ελλιπής",
+    "mapNotify.incompleteThis": "Ο χάρτης αυτού του γηπέδου είναι ελλιπής",
+    "mapNotify.incompleteDetail": "{mapped} από {expected} τρύπες έχουν χαρτογραφηθεί. Λείπουν: {missing}. Θα ολοκληρώσουμε τις υπόλοιπες.",
+    "mapNotify.incompleteDetailNoList": "{mapped} από {expected} τρύπες έχουν χαρτογραφηθεί. Θα ολοκληρώσουμε τις υπόλοιπες.",
+    "mapNotify.incompleteOnList": "Είστε στη λίστα - θα σας στείλουμε email όταν ο πλήρης χάρτης είναι έτοιμος.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Προφίλ παίκτη",

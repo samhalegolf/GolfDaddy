@@ -1073,6 +1073,11 @@
     "mapNotify.noThanks": "Nē, paldies",
     "mapNotify.toastWillEmail": "Kad laukums {course} būs gatavs, nosūtīsim tev e-pastu",
     "mapNotify.toastWillEmailYours": "Kad tavs laukums būs gatavs, nosūtīsim tev e-pastu",
+    "mapNotify.incomplete": "{course} karte ir nepilnīga",
+    "mapNotify.incompleteThis": "Šī laukuma karte ir nepilnīga",
+    "mapNotify.incompleteDetail": "Kartēti {mapped} no {expected} bedrītēm. Trūkst: {missing}. Pārējo pabeigsim.",
+    "mapNotify.incompleteDetailNoList": "Kartēti {mapped} no {expected} bedrītēm. Pārējo pabeigsim.",
+    "mapNotify.incompleteOnList": "Jūs esat sarakstā - nosūtīsim e-pastu, kad pilnā karte būs gatava.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Spēlētāja profils",

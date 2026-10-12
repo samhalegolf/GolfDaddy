@@ -1073,6 +1073,11 @@
     "mapNotify.noThanks": "Nu, mulțumesc",
     "mapNotify.toastWillEmail": "Îți trimitem un email când {course} este gata",
     "mapNotify.toastWillEmailYours": "Îți trimitem un email când terenul tău este gata",
+    "mapNotify.incomplete": "Harta pentru {course} este incompletă",
+    "mapNotify.incompleteThis": "Harta acestui teren este incompletă",
+    "mapNotify.incompleteDetail": "{mapped} din {expected} gropi sunt cartografiate. Lipsesc: {missing}. Vom termina restul.",
+    "mapNotify.incompleteDetailNoList": "{mapped} din {expected} gropi sunt cartografiate. Vom termina restul.",
+    "mapNotify.incompleteOnList": "Ești pe listă - îți trimitem un e-mail când harta completă este gata.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Profil jucător",

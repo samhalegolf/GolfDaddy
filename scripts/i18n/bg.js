@@ -1048,6 +1048,11 @@
     "mapNotify.noThanks": "Не, благодаря",
     "mapNotify.toastWillEmail": "Ще ти пишем, когато игрището {course} е готово",
     "mapNotify.toastWillEmailYours": "Ще ти пишем, когато игрището ти е готово",
+    "mapNotify.incomplete": "Картата за {course} е непълна",
+    "mapNotify.incompleteThis": "Картата на това игрище е непълна",
+    "mapNotify.incompleteDetail": "{mapped} от {expected} дупки са картографирани. Липсват: {missing}. Ще довършим останалото.",
+    "mapNotify.incompleteDetailNoList": "{mapped} от {expected} дупки са картографирани. Ще довършим останалото.",
+    "mapNotify.incompleteOnList": "В списъка сте - ще ви пишем, когато пълната карта е готова.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Профил на играча",

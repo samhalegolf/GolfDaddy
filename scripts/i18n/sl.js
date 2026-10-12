@@ -1098,6 +1098,11 @@
     "mapNotify.noThanks": "Ne, hvala",
     "mapNotify.toastWillEmail": "Ko bo igrišče {course} pripravljeno, ti bomo poslali e-pošto",
     "mapNotify.toastWillEmailYours": "Ko bo tvoje igrišče pripravljeno, ti bomo poslali e-pošto",
+    "mapNotify.incomplete": "Zemljevid igrišča {course} je nepopoln",
+    "mapNotify.incompleteThis": "Zemljevid tega igrišča je nepopoln",
+    "mapNotify.incompleteDetail": "Kartiranih je {mapped} od {expected} lukenj. Manjkajo: {missing}. Preostalo bomo dokončali.",
+    "mapNotify.incompleteDetailNoList": "Kartiranih je {mapped} od {expected} lukenj. Preostalo bomo dokončali.",
+    "mapNotify.incompleteOnList": "Ste na seznamu - pisali vam bomo, ko bo celoten zemljevid pripravljen.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Profil igralca",

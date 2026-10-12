@@ -1,8 +1,13 @@
-/* The map-not-available banner - shown when a course scan fails.
+/* The map-not-available banner - shown when a course scan fails, and when it comes back with
+ * holes missing.
  *
  * gd-course-library-pin-lock.js (endFailedScan) sends the player back to a fresh course
  * picker and calls GDCourseMapNotify.offer(course). A small card says the map is not
- * available yet and, when we know which course it was, offers to email them once it is done:
+ * available yet and, when we know which course it was, offers to email them once it is done.
+ * The same controller calls offer(course, {incomplete}) when a scan published a partial map
+ * (Sugar Ridge, 2026-10-12: 17 of 18 holes, hole 17 missing): the course opens and plays, the
+ * card over it says which holes are missing, and the same email offer is made. The server only
+ * sends that email once the map is complete (course-map-notify.mjs). Either way:
  *
  *   signed in -> one tap posts to /api/course-map-notify, which stores the request against
  *                their verified account email.
@@ -117,20 +122,46 @@
     setTimeout(hide, 4000);
   }
 
-  async function offer(course) {
+  /* The card's wording. A failed scan says the map is not available; a partial one says what
+     is missing. `incomplete` is {mapped, expected, missing:[holeNumbers]} from the server
+     package's readiness fields. */
+  function wording(ref, incomplete) {
+    var name = ref.courseName;
+    if (incomplete) {
+      var missing = Array.isArray(incomplete.missing) ? incomplete.missing.filter(function (n) { return Number.isFinite(Number(n)); }) : [];
+      return {
+        title: H(name ? "mapNotify.incomplete" : "mapNotify.incompleteThis", { course: name }),
+        detail: H(missing.length ? "mapNotify.incompleteDetail" : "mapNotify.incompleteDetailNoList", {
+          mapped: Number(incomplete.mapped) || 0,
+          expected: Number(incomplete.expected) || 0,
+          missing: missing.join(", ")
+        }),
+        onList: H("mapNotify.incompleteOnList")
+      };
+    }
+    return {
+      title: H(name ? "mapNotify.couldNotMap" : "mapNotify.couldNotMapThis", { course: name }),
+      detail: H("mapNotify.requestSent"),
+      onList: H("mapNotify.onList")
+    };
+  }
+
+  async function offer(course, opts) {
     var ref = courseRef(course);
     var offerId = ++currentOffer;
     var name = ref.courseName;
-    var couldNotMap = H(name ? "mapNotify.couldNotMap" : "mapNotify.couldNotMapThis", { course: name });
+    var incomplete = opts && opts.incomplete ? opts.incomplete : null;
+    var words = wording(ref, incomplete);
     var card = ensureCard();
     card.dataset.gdNotifyOffer = String(offerId);
+    card.dataset.gdNotifyKind = incomplete ? "incomplete" : "failed";
     if (!ref.courseId || alreadyRequested(ref.courseId)) {
-      card.innerHTML = "<strong>" + couldNotMap + "</strong><span>" + H(ref.courseId ? "mapNotify.onList" : "mapNotify.requestSent") + "</span>"
+      card.innerHTML = "<strong>" + words.title + "</strong><span>" + (ref.courseId ? words.onList : words.detail) + "</span>"
         + '<div class="gdCourseMapNotifyActions"><button type="button" data-gd-notify-close>' + H("mapNotify.ok") + '</button></div>';
     } else {
       var signedIn = !!(await accessToken());
       if (offerId !== currentOffer) return false;
-      card.innerHTML = "<strong>" + couldNotMap + "</strong><span>" + H("mapNotify.requestSent") + "</span>"
+      card.innerHTML = "<strong>" + words.title + "</strong><span>" + words.detail + "</span>"
         + '<div class="gdCourseMapNotifyActions">'
         + '<button type="button" data-gd-notify-go>' + H(signedIn ? "mapNotify.emailMe" : "mapNotify.signUp") + "</button>"
         + '<button type="button" data-gd-notify-close>' + H("mapNotify.noThanks") + '</button></div>';

@@ -1048,6 +1048,11 @@
     "mapNotify.noThanks": "Nei takk",
     "mapNotify.toastWillEmail": "Vi sender deg en e-post når {course} er klar",
     "mapNotify.toastWillEmailYours": "Vi sender deg en e-post når banen din er klar",
+    "mapNotify.incomplete": "Kartet for {course} er ufullstendig",
+    "mapNotify.incompleteThis": "Dette banekartet er ufullstendig",
+    "mapNotify.incompleteDetail": "{mapped} av {expected} hull er kartlagt. Mangler: {missing}. Vi fullfører resten.",
+    "mapNotify.incompleteDetailNoList": "{mapped} av {expected} hull er kartlagt. Vi fullfører resten.",
+    "mapNotify.incompleteOnList": "Du står på listen - vi sender deg en e-post når hele kartet er klart.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Spillerprofil",

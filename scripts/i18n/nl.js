@@ -1048,6 +1048,11 @@
     "mapNotify.noThanks": "Nee, bedankt",
     "mapNotify.toastWillEmail": "We mailen je zodra {course} klaar is",
     "mapNotify.toastWillEmailYours": "We mailen je zodra je baan klaar is",
+    "mapNotify.incomplete": "De kaart van {course} is onvolledig",
+    "mapNotify.incompleteThis": "De kaart van deze baan is onvolledig",
+    "mapNotify.incompleteDetail": "{mapped} van {expected} holes zijn in kaart gebracht. Ontbreekt: {missing}. We maken de rest af.",
+    "mapNotify.incompleteDetailNoList": "{mapped} van {expected} holes zijn in kaart gebracht. We maken de rest af.",
+    "mapNotify.incompleteOnList": "Je staat op de lijst - we mailen je zodra de volledige kaart klaar is.",
 
     /* Main app panels (index.html) */
     "profilePage.title": "Spelersprofiel",
