@@ -34,7 +34,7 @@
   var elevationPending = false, elevationFailedKey = null, elevationFailedAt = 0;
 
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
-  function num(v) { var n = Number(v); return Number.isFinite(n) ? n : null; }
+  function num(v) { if (v === "" || v == null) return null; var n = Number(v); return Number.isFinite(n) ? n : null; }
   function slug(course) {
     return String(course && (course.courseId || course.id || course.canonicalKey || course.courseKey) || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
   }
@@ -375,8 +375,12 @@
           lines.push("player " + session.player.lat.toFixed(6) + ", " + session.player.lng.toFixed(6) + (green ? " · green F/C/B " + Math.round(green.front) + "/" + Math.round(green.centre) + "/" + Math.round(green.back) + " m" : ""));
           if (local) lines.push("bubble: " + local.club.club + " · " + Math.round(local.targetDistanceM) + " m to aim · carry " + Math.round(local.club.carryM) + " total " + Math.round(local.club.totalM) + (playState.target ? " · local aim" : " · phone's default aim"));
           else lines.push("no local Bubble (engine still loading, or the hole has no green)");
+          /* Always said, so "nothing happened" is never a mystery: the watch's own rule is calm
+             under 5 km/h (no ghost, no streaks), and a direction with no speed is no wind. */
           var effect = local ? garminSession.windEffect(session.player, local.target, local.targetDistanceM) : null;
-          if (effect) lines.push("wind: level " + effect.level + " · " + (effect.alongM >= 0 ? "+" : "") + effect.alongM.toFixed(1) + " m along the shot");
+          if (!session.wind) lines.push("wind: none set (enter a direction AND a speed; the watch reads both from Garmin weather)");
+          else if (!effect || effect.level === 0) lines.push("wind: " + session.wind.kmh + " km/h is calm on the watch's rule (under 5 km/h): no ghost, no streaks");
+          else lines.push("wind: from " + session.wind.fromDeg + "° at " + session.wind.kmh + " km/h · level " + effect.level + " · " + (effect.alongM >= 0 ? "+" : "") + effect.alongM.toFixed(1) + " m along the shot · ghost ring " + Math.round(R.Geo.distance(local.target, effect.ghost)) + " m downwind" + (session.windApplied ? " · in the plays number" : ""));
         }
         lines.push("aiming " + (face && face.aiming ? "ON" : "off") + (face && face.playsMode ? " · plays mode ON" : ""));
         if (aimLog) lines.push(aimLog);
