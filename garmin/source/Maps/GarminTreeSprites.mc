@@ -25,14 +25,18 @@ class GarminTreeSprites {
         ids = amoled ? GarminTreeSpriteIds.amoled() : GarminTreeSpriteIds.mip();
     }
 
-    // trees: packed Numbers; ox/oy/sc the camera's image->screen placement.
-    function draw(dc, trees, ox, oy, sc, viewWidth, viewHeight) {
+    // trees: packed Numbers; f the camera's image->screen affine
+    // (GarminMapCamera.frame), sc its scale. A sprite is stamped upright at
+    // the crown's turned position - a crown has no way up.
+    function draw(dc, trees, f, sc, viewWidth, viewHeight) {
         var sizes = GarminTreeSpriteIds.SIZES;
         var margin = sizes[sizes.size() - 1];
         for (var i = 0; i < trees.size(); i += 1) {
             var v = trees[i];
-            var cx = ox + (v % 2048) * sc;
-            var cy = oy + ((v / 2048) % 2048) * sc;
+            var x = v % 2048;
+            var y = (v / 2048) % 2048;
+            var cx = f[0] + x * f[2] - y * f[3];
+            var cy = f[1] + x * f[3] + y * f[2];
             if (cx < -margin || cy < -margin || cx > viewWidth + margin || cy > viewHeight + margin) { continue; }
             var s = sizeIndex(2.0 * ((v / 4194304) % 128) * sc);
             var half = sizes[s] / 2;

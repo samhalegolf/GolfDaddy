@@ -68,7 +68,7 @@
   var MAP_EDGE_GREEN = 0x294A30, BUBBLE_MINT = 0x3EE6C4, RING_KEYLINE = 0x0E2A1E;
   var WIND_BLUE = 0x55AAFF, SLOPE_ORANGE = 0xFFAA00, PLAYS_MAIN = -2;
   var TEXT_LEFT = "left", TEXT_CENTER = "center", TEXT_RIGHT = "right";
-  var MAXIMUM_SCALE = 3.0, BUBBLE_FRACTION = 0.42;
+  var MAXIMUM_SCALE = 3.0, PLAYER_HEIGHT_FRACTION = 0.82;
   var EDGE_INSET_FRACTION = 0.09, EDGE_DWELL_MS = 400, PAN_TICK_MS = 100, PAN_PX_PER_TICK = 5;
   var NUDGE_STEP_IMAGE_PX = 10.0;
   var TREE_SIZES = [8, 12, 16, 22, 28];
@@ -193,7 +193,21 @@
 
   // ------------------------------------------------------------------ GarminMapCamera
 
-  function Camera(focusX, focusY, scale) { this.focusX = focusX; this.focusY = focusY; this.scale = scale; this.clampsToImage = true; }
+  /* Two framings, as the watch's. SHOT: the target in the middle of the glass, the player at
+     about six o'clock, the map turned so the shot runs straight up - the aim line never runs
+     across the watch. PLAY, for a hole with no target yet: the player low, the bake's own way
+     up. Every point is placed through one affine, frame(): [tx, ty, a, b] with
+     sx = tx + x*a - y*b, sy = ty + x*b + y*a. */
+  function Camera(focusX, focusY, scale) { this.focusX = focusX; this.focusY = focusY; this.scale = scale; this.rotation = 0.0; this.clampsToImage = true; }
+  Camera.shot = function (player, target, imageWidth, imageHeight, viewWidth, viewHeight) {
+    var dx = target.x - player.x, dy = target.y - player.y, distance = Math.sqrt(dx * dx + dy * dy);
+    var camera = new Camera(target.x, target.y, MAXIMUM_SCALE);
+    camera.clampsToImage = false;
+    if (distance < 1.0 || viewHeight <= 0) return camera;
+    camera.scale = Math.min(MAXIMUM_SCALE, ((PLAYER_HEIGHT_FRACTION - 0.5) * viewHeight) / distance);
+    camera.rotation = -Math.PI / 2.0 - Math.atan2(dy, dx);
+    return camera;
+  };
   Camera.play = function (player, target, imageWidth, imageHeight, viewWidth, viewHeight) {
     if (imageWidth <= 0 || imageHeight <= 0 || viewWidth <= 0 || viewHeight <= 0) return new Camera(imageWidth / 2.0, imageHeight / 2.0, 1.0);
     var fillWidth = viewWidth / imageWidth, centreX = imageWidth / 2.0, centreY = imageHeight / 2.0;
@@ -207,14 +221,6 @@
     var scale = Math.min(MAXIMUM_SCALE, Math.max(spanScale, fillWidth));
     if (span * scale <= viewHeight * spanFraction) return new Camera(centreX, (player.y + target.y) / 2.0, scale);
     return Camera.low(player, centreX, scale, viewHeight);
-  };
-  Camera.bubble = function (centreX, centreY, extentWidth, extentHeight, imageWidth, imageHeight, viewWidth, viewHeight) {
-    if (imageWidth <= 0 || imageHeight <= 0 || viewWidth <= 0 || viewHeight <= 0) return new Camera(imageWidth / 2.0, imageHeight / 2.0, 1.0);
-    var fillWidth = viewWidth / imageWidth, longest = Math.max(extentWidth, extentHeight), shorterView = Math.min(viewWidth, viewHeight);
-    var wanted = longest > 0 ? (shorterView * BUBBLE_FRACTION) / longest : MAXIMUM_SCALE;
-    var camera = new Camera(centreX, centreY, Math.min(MAXIMUM_SCALE, Math.max(wanted, fillWidth)));
-    camera.clampsToImage = false;
-    return camera;
   };
   Camera.low = function (player, centreX, scale, viewHeight) {
     var playerHeightFraction = 0.78, visibleImageHeight = viewHeight / scale;
@@ -234,11 +240,24 @@
     if (!this.clampsToImage) return viewHeight / 2.0 - this.focusY * this.scale;
     return Camera.axisOrigin(imageHeight * this.scale, viewHeight, this.focusY * this.scale);
   };
-  Camera.prototype.placeX = function (imageX, imageWidth, viewWidth) { return this.originX(imageWidth, viewWidth) + imageX * this.scale; };
-  Camera.prototype.placeY = function (imageY, imageHeight, viewHeight) { return this.originY(imageHeight, viewHeight) + imageY * this.scale; };
+  Camera.prototype.frame = function (imageWidth, imageHeight, viewWidth, viewHeight) {
+    if (this.rotation === 0.0) return [this.originX(imageWidth, viewWidth), this.originY(imageHeight, viewHeight), this.scale, 0.0];
+    var a = Math.cos(this.rotation) * this.scale, b = Math.sin(this.rotation) * this.scale;
+    return [viewWidth / 2.0 - (this.focusX * a - this.focusY * b), viewHeight / 2.0 - (this.focusX * b + this.focusY * a), a, b];
+  };
+  Camera.prototype.place = function (imageX, imageY, imageWidth, imageHeight, viewWidth, viewHeight) {
+    var f = this.frame(imageWidth, imageHeight, viewWidth, viewHeight);
+    return [f[0] + imageX * f[2] - imageY * f[3], f[1] + imageX * f[3] + imageY * f[2]];
+  };
   Camera.prototype.imagePointFromView = function (viewX, viewY, imageWidth, imageHeight, viewWidth, viewHeight) {
     if (this.scale <= 0) return null;
-    return { x: (viewX - this.originX(imageWidth, viewWidth)) / this.scale, y: (viewY - this.originY(imageHeight, viewHeight)) / this.scale };
+    var f = this.frame(imageWidth, imageHeight, viewWidth, viewHeight);
+    var sx = viewX - f[0], sy = viewY - f[1], det = f[2] * f[2] + f[3] * f[3];
+    return { x: (f[2] * sx + f[3] * sy) / det, y: (f[2] * sy - f[3] * sx) / det };
+  };
+  Camera.prototype.imageDirection = function (screenDx, screenDy) {
+    var c = Math.cos(this.rotation), s = Math.sin(this.rotation);
+    return [screenDx * c + screenDy * s, screenDy * c - screenDx * s];
   };
 
   // ------------------------------------------------------------------ LayoutProfile
@@ -443,10 +462,15 @@
     c.fillText(String(text), x, y + font.px / 2);
   };
   Dc.prototype.drawBitmap = function (x, y, image) { if (image) this.ctx.drawImage(image, x, y); };
-  /* drawBitmap2 with a crop and a scale transform, as GarminMapView.drawBitmapCropped uses it. */
-  Dc.prototype.drawBitmapScaled = function (x, y, image, sx, sy, sw, sh, scale) {
-    this.ctx.imageSmoothingEnabled = true; this.ctx.imageSmoothingQuality = "medium";
-    this.ctx.drawImage(image, sx, sy, sw, sh, x + sx * scale, y + sy * scale, sw * scale, sh * scale);
+  /* drawBitmap2 with a crop and a transform, as GarminMapView.drawBitmapCropped uses it: the
+     crop's origin lands at (x, y), turned by `rotation` and scaled by `scale`. */
+  Dc.prototype.drawBitmapTransformed = function (image, sx, sy, sw, sh, x, y, scale, rotation) {
+    var c = this.ctx;
+    c.save();
+    c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "medium";
+    c.translate(x, y); c.rotate(rotation); c.scale(scale, scale);
+    c.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+    c.restore();
   };
 
   // ------------------------------------------------------------------ GarminTreeSprites
@@ -456,12 +480,13 @@
      or null while it is still loading - the watch never has that case; here a tree is simply
      drawn on the next frame. */
   function TreeSprites(bitmap) { this.bitmap = bitmap; }
-  TreeSprites.prototype.draw = function (dc, trees, ox, oy, sc, viewWidth, viewHeight, amoled) {
+  TreeSprites.prototype.draw = function (dc, trees, f, sc, viewWidth, viewHeight, amoled) {
     var sizes = TREE_SIZES, margin = sizes[sizes.length - 1];
     for (var i = 0; i < trees.length; i++) {
       var v = trees[i];
-      var cx = ox + (v % 2048) * sc;
-      var cy = oy + (Math.floor(v / 2048) % 2048) * sc;
+      var x = v % 2048, y = Math.floor(v / 2048) % 2048;
+      var cx = f[0] + x * f[2] - y * f[3];
+      var cy = f[1] + x * f[3] + y * f[2];
       if (cx < -margin || cy < -margin || cx > viewWidth + margin || cy > viewHeight + margin) continue;
       var s = this.sizeIndex(2.0 * (Math.floor(v / 4194304) % 128) * sc);
       var half = idiv(sizes[s], 2);
@@ -546,15 +571,16 @@
     var lockedNow = scene.shotLocked();
     if (this.framedHoleNumber !== holeNumber || this.camera == null || this.framedPackageVersion !== packageVersion || this.framedLocked !== lockedNow || this.framedPicture !== drawn) {
       this.framedLocked = lockedNow; this.framedPicture = drawn; this.framedPackageVersion = packageVersion;
-      this.camera = this.restingCamera(local, playerImg, targetImg, greenImg, reference, imageWidth, imageHeight, viewWidth, viewHeight);
-      if (drawn && !device.scaledBitmap) this.camera.scale = 1.0;
-      if (drawn && this.camera.scale > 0.9 && this.camera.scale < 1.1) this.camera.scale = 1.0;
+      this.camera = this.restingCamera(playerImg, targetImg, greenImg, imageWidth, imageHeight, viewWidth, viewHeight);
+      /* The S62 can neither scale nor turn a picture; a drawn map turns everywhere. */
+      if (drawn && !device.scaledBitmap) { this.camera.scale = 1.0; this.camera.rotation = 0.0; }
+      if (drawn && this.camera.rotation === 0.0 && this.camera.scale > 0.9 && this.camera.scale < 1.1) this.camera.scale = 1.0;
       this.framedHoleNumber = holeNumber;
     }
     var camera = this.camera;
     this.trace = "map frame: hole " + holeNumber + " image " + imageWidth + "x" + imageHeight + " view " + viewWidth + "x" + viewHeight
       + " focus " + camera.focusX.toFixed(1) + "," + camera.focusY.toFixed(1) + " scale " + camera.scale.toFixed(3)
-      + " origin " + camera.originX(imageWidth, viewWidth).toFixed(1) + "," + camera.originY(imageHeight, viewHeight).toFixed(1)
+      + " rotation " + (camera.rotation * 180 / Math.PI).toFixed(1) + "deg"
       + (drawn ? " picture" : " drawn outlines");
 
     this.lastReference = reference; this.lastImageWidth = imageWidth; this.lastImageHeight = imageHeight; this.lastViewWidth = viewWidth; this.lastViewHeight = viewHeight;
@@ -572,8 +598,9 @@
 
     var aimImg = targetImg != null ? targetImg : greenImg;
     if (playerImg != null && aimImg != null) {
-      this.drawDashedLine(dc, camera.placeX(playerImg.x, imageWidth, viewWidth), camera.placeY(playerImg.y, imageHeight, viewHeight),
-        camera.placeX(aimImg.x, imageWidth, viewWidth), camera.placeY(aimImg.y, imageHeight, viewHeight));
+      var pOn = camera.place(playerImg.x, playerImg.y, imageWidth, imageHeight, viewWidth, viewHeight);
+      var aOn = camera.place(aimImg.x, aimImg.y, imageWidth, imageHeight, viewWidth, viewHeight);
+      this.drawDashedLine(dc, pOn[0], pOn[1], aOn[0], aOn[1]);
     }
 
     if (local != null && local.ring != null && local.ring.length >= 3) {
@@ -584,7 +611,9 @@
         this.drawRing(dc, local.ring, camera, reference, imageWidth, imageHeight, viewWidth, [viewHeight, windGhost.lat - target.lat, windGhost.lng - target.lng, WIND_BLUE]);
         var fromImg = this.imagePoint(target, reference), toImg = this.imagePoint(windGhost, reference);
         if (fromImg != null && toImg != null) {
-          this.drawWindStreaks(dc, toImg.x - fromImg.x, toImg.y - fromImg.y, camera.placeX(fromImg.x, imageWidth, viewWidth), camera.placeY(fromImg.y, imageHeight, viewHeight), viewWidth);
+          var fromOn = camera.place(fromImg.x, fromImg.y, imageWidth, imageHeight, viewWidth, viewHeight);
+          var toOn = camera.place(toImg.x, toImg.y, imageWidth, imageHeight, viewWidth, viewHeight);
+          this.drawWindStreaks(dc, toOn[0] - fromOn[0], toOn[1] - fromOn[1], fromOn[0], fromOn[1], viewWidth);
         }
       }
       var plays = this.playsMode ? this.playsNumber(playerGeo, local) : null;
@@ -601,62 +630,48 @@
       this.playsBox = null;
     }
 
-    if (greenImg != null) this.drawRingMarker(dc, camera.placeX(greenImg.x, imageWidth, viewWidth), camera.placeY(greenImg.y, imageHeight, viewHeight), 6, COLOR_GREEN);
+    if (greenImg != null) { var gOn = camera.place(greenImg.x, greenImg.y, imageWidth, imageHeight, viewWidth, viewHeight); this.drawRingMarker(dc, gOn[0], gOn[1], 6, COLOR_GREEN); }
 
     if (targetImg != null) {
-      var tx = camera.placeX(targetImg.x, imageWidth, viewWidth), ty = camera.placeY(targetImg.y, imageHeight, viewHeight);
+      var tOn = camera.place(targetImg.x, targetImg.y, imageWidth, imageHeight, viewWidth, viewHeight);
+      var tx = tOn[0], ty = tOn[1];
       this.drawDot(dc, tx, ty, this.dragActive ? 6 : 4, COLOR_GREEN);
       var club = this.playsClub != null ? this.playsClub : (local != null ? local.club.club : scene.suggestedClub());
       if (club != null) this.drawLabel(dc, club, tx, ty - 14);
     }
 
-    if (playerImg != null) this.drawDot(dc, camera.placeX(playerImg.x, imageWidth, viewWidth), camera.placeY(playerImg.y, imageHeight, viewHeight), 4, COLOR_WHITE);
+    if (playerImg != null) { var plOn = camera.place(playerImg.x, playerImg.y, imageWidth, imageHeight, viewWidth, viewHeight); this.drawDot(dc, plOn[0], plOn[1], 4, COLOR_WHITE); }
 
     this.drawChrome(dc, viewWidth, viewHeight);
   };
 
-  MapFace.prototype.restingCamera = function (local, playerImg, targetImg, greenImg, reference, imageWidth, imageHeight, viewWidth, viewHeight) {
-    if (local != null && local.ring != null && local.ring.length >= 3) {
-      var box = this.imageBoxOfRing(local.ring, reference);
-      if (box != null) {
-        var cx = targetImg != null ? targetImg.x : (box.minX + box.maxX) / 2.0;
-        var cy = targetImg != null ? targetImg.y : (box.minY + box.maxY) / 2.0;
-        return Camera.bubble(cx, cy, 2.0 * Math.max(Math.abs(box.minX - cx), Math.abs(box.maxX - cx)), 2.0 * Math.max(Math.abs(box.minY - cy), Math.abs(box.maxY - cy)),
-          imageWidth, imageHeight, viewWidth, viewHeight);
-      }
-    }
-    if (targetImg != null) {
-      var mpp = reference.metresPerPixel != null ? reference.metresPerPixel : 0.5;
-      return Camera.bubble(targetImg.x, targetImg.y, 45.0 / mpp, 55.0 / mpp, imageWidth, imageHeight, viewWidth, viewHeight);
-    }
-    return Camera.play(playerImg, greenImg, imageWidth, imageHeight, viewWidth, viewHeight);
-  };
-
-  MapFace.prototype.imageBoxOfRing = function (ring, reference) {
-    var box = null;
-    for (var i = 0; i < ring.length; i++) {
-      var p = reference.imagePoint(ring[i].lat, ring[i].lng);
-      if (p == null) continue;
-      if (!box) box = { minX: p.x, maxX: p.x, minY: p.y, maxY: p.y };
-      else { box.minX = Math.min(box.minX, p.x); box.maxX = Math.max(box.maxX, p.x); box.minY = Math.min(box.minY, p.y); box.maxY = Math.max(box.maxY, p.y); }
-    }
-    return box;
+  /* The shot in hand framed target-centred, player at six o'clock, shot straight up; a hole
+     with no shot to frame yet is shown PLAY-wise in the bake's own orientation. */
+  MapFace.prototype.restingCamera = function (playerImg, targetImg, greenImg, imageWidth, imageHeight, viewWidth, viewHeight) {
+    if (playerImg != null && targetImg != null) return Camera.shot(playerImg, targetImg, imageWidth, imageHeight, viewWidth, viewHeight);
+    return Camera.play(playerImg, targetImg != null ? targetImg : greenImg, imageWidth, imageHeight, viewWidth, viewHeight);
   };
 
   MapFace.prototype.imagePoint = function (geo, reference) { return geo == null ? null : reference.imagePoint(geo.lat, geo.lng); };
 
   // ------------------------------------------------------------------ draw
 
+  /* The picture, as drawBitmap2 draws it on the watch: the view's corners taken back into the
+     bake give the crop, which lands at its own screen point turned and scaled. The S62 (no
+     transform) has had its camera pinned to 1:1 unturned in onUpdate. */
   MapFace.prototype.drawBitmapCropped = function (dc, bitmap, camera, imageWidth, imageHeight, viewWidth, viewHeight) {
-    var x = camera.originX(imageWidth, viewWidth), y = camera.originY(imageHeight, viewHeight);
-    if (!this.device.scaledBitmap) { dc.drawBitmap(x, y, bitmap); return; }
-    var s = camera.scale, bw = bitmap.naturalWidth || bitmap.width, bh = bitmap.naturalHeight || bitmap.height;
-    var sx = Math.max(0, toNumber(-x / s)), sy = Math.max(0, toNumber(-y / s));
-    var sw = toNumber(viewWidth / s) + 2, sh = toNumber(viewHeight / s) + 2;
-    if (sx + sw > bw) sw = bw - sx;
-    if (sy + sh > bh) sh = bh - sy;
+    if (!this.device.scaledBitmap) { dc.drawBitmap(camera.originX(imageWidth, viewWidth), camera.originY(imageHeight, viewHeight), bitmap); return; }
+    var bw = bitmap.naturalWidth || bitmap.width, bh = bitmap.naturalHeight || bitmap.height;
+    var minX = bw, minY = bh, maxX = 0, maxY = 0;
+    [[0, 0], [viewWidth, 0], [0, viewHeight], [viewWidth, viewHeight]].forEach(function (corner) {
+      var c = camera.imagePointFromView(corner[0], corner[1], imageWidth, imageHeight, viewWidth, viewHeight);
+      minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x); minY = Math.min(minY, c.y); maxY = Math.max(maxY, c.y);
+    });
+    var sx = Math.max(0, toNumber(minX) - 1), sy = Math.max(0, toNumber(minY) - 1);
+    var sw = Math.min(bw - sx, toNumber(maxX) + 2 - sx), sh = Math.min(bh - sy, toNumber(maxY) + 2 - sy);
     if (sw <= 0 || sh <= 0) return;
-    dc.drawBitmapScaled(x, y, bitmap, sx, sy, sw, sh, s);
+    var at = camera.place(sx, sy, imageWidth, imageHeight, viewWidth, viewHeight);
+    dc.drawBitmapTransformed(bitmap, sx, sy, sw, sh, at[0], at[1], camera.scale, camera.rotation);
   };
 
   MapFace.prototype.drawLayupGuide = function (dc, local, playerGeo, targetGeo, greenGeo) {
@@ -675,20 +690,20 @@
     for (var i = 0; i < line.length; i++) {
       var p = reference.imagePoint(line[i].lat, line[i].lng);
       if (p == null) continue;
-      var x = camera.placeX(p.x, imageWidth, viewWidth), y = camera.placeY(p.y, imageHeight, viewHeight);
+      var on = camera.place(p.x, p.y, imageWidth, imageHeight, viewWidth, viewHeight), x = on[0], y = on[1];
       if (havePrev) this.drawDottedLine(dc, px, py, x, y, 1, 9);
       px = x; py = y; havePrev = true;
     }
 
     var fromImg = reference.imagePoint(centre.lat, centre.lng), toImg = reference.imagePoint(greenGeo.lat, greenGeo.lng);
     if (fromImg == null || toImg == null) return;
-    var fx = camera.placeX(fromImg.x, imageWidth, viewWidth), fy = camera.placeY(fromImg.y, imageHeight, viewHeight);
-    var gx = camera.placeX(toImg.x, imageWidth, viewWidth), gy = camera.placeY(toImg.y, imageHeight, viewHeight);
+    var fromOn = camera.place(fromImg.x, fromImg.y, imageWidth, imageHeight, viewWidth, viewHeight), fx = fromOn[0], fy = fromOn[1];
+    var toOn = camera.place(toImg.x, toImg.y, imageWidth, imageHeight, viewWidth, viewHeight), gx = toOn[0], gy = toOn[1];
     dc.setColor(COLOR_WHITE, -1);
     this.drawDottedLine(dc, fx, fy, gx, gy, 2, 8);
     var dx = gx - fx, dy = gy - fy, length = Math.sqrt(dx * dx + dy * dy);
     if (length < 1) return;
-    var reach = Math.min(length * 0.52, 46);
+    var reach = Math.max(Math.min(length * 0.52, 46), this.fonts.xtiny.px + 18);
     this.drawLabel(dc, "Green " + formatDistance(gap, session.yards()), fx + dx / length * reach, fy + dy / length * reach - 8);
   };
 
@@ -748,10 +763,11 @@
     var p0 = reference.imagePoint(lat0, lng0), pLat = reference.imagePoint(lat0 + step, lng0), pLng = reference.imagePoint(lat0, lng0 + step);
     if (p0 == null || pLat == null || pLng == null) return;
     var ax = (pLat.x - p0.x) / step, ay = (pLat.y - p0.y) / step, bx = (pLng.x - p0.x) / step, by = (pLng.y - p0.y) / step;
-    var ox = camera.originX(imageWidth, viewWidth), oy = camera.originY(imageHeight, viewHeight), sc = camera.scale;
+    var f = camera.frame(imageWidth, imageHeight, viewWidth, viewHeight);
     for (var i = 0; i < ring.length; i += 3) {
       var dLat = ring[i].lat + shiftLat - lat0, dLng = ring[i].lng + shiftLng - lng0;
-      points.push([ox + (p0.x + ax * dLat + bx * dLng) * sc, oy + (p0.y + ay * dLat + by * dLng) * sc]);
+      var ix = p0.x + ax * dLat + bx * dLng, iy = p0.y + ay * dLat + by * dLng;
+      points.push([f[0] + ix * f[2] - iy * f[3], f[1] + ix * f[3] + iy * f[2]]);
     }
     if (points.length < 3) return;
     var k;
@@ -890,13 +906,15 @@
     this.session.playState.clear();
     this.aiming = false; this.dragActive = false;
   };
-  MapFace.prototype.nudge = function (dxImagePx, dyImagePx) {
-    if (!this.aiming || !this.canAimNow() || this.lastReference == null) return;
+  /* Screen-space: up the glass is up the glass whichever way the framing has turned the bake. */
+  MapFace.prototype.nudge = function (dxScreen, dyScreen) {
+    if (!this.aiming || !this.canAimNow() || this.lastReference == null || this.camera == null) return;
     var current = this.session.playState.target;
     if (current == null) return;
     var img = this.lastReference.imagePoint(current.lat, current.lng);
     if (img == null) return;
-    this.applyImagePoint(img.x + dxImagePx, img.y + dyImagePx);
+    var d = this.camera.imageDirection(dxScreen, dyScreen);
+    this.applyImagePoint(img.x + d[0], img.y + d[1]);
   };
   MapFace.prototype.dragStart = function (viewX, viewY) {
     if (!this.canAimNow()) return;
@@ -952,7 +970,8 @@
     if (this.edgeSince == null) { this.edgeSince = now; return false; }
     if (now - this.edgeSince < EDGE_DWELL_MS) return false;
     var camera = this.camera;
-    var fx = camera.focusX + dir[0] * PAN_PX_PER_TICK / camera.scale, fy = camera.focusY + dir[1] * PAN_PX_PER_TICK / camera.scale;
+    var d = camera.imageDirection(dir[0], dir[1]);
+    var fx = camera.focusX + d[0] * PAN_PX_PER_TICK / camera.scale, fy = camera.focusY + d[1] * PAN_PX_PER_TICK / camera.scale;
     camera.focusX = fx < 0 ? 0.0 : (fx > this.lastImageWidth ? this.lastImageWidth : fx);
     camera.focusY = fy < 0 ? 0.0 : (fy > this.lastImageHeight ? this.lastImageHeight : fy);
     var held = this.insideEdge(this.fingerX, this.fingerY);
@@ -973,48 +992,51 @@
   MapFace.prototype.drawOutlines = function (dc, shapes, palette, imageWidth, imageHeight, viewWidth, viewHeight) {
     dc.setColor(palette.r, palette.r);
     dc.clear();
-    var ox = this.camera.originX(imageWidth, viewWidth), oy = this.camera.originY(imageHeight, viewHeight), sc = this.camera.scale, view = [viewWidth, viewHeight];
-    this.drawPieces(dc, shapes.t, 0, palette, ox, oy, sc, view);
-    if (!hasTrees(shapes)) this.fillRings(dc, shapes.k, palette.k, ox, oy, sc, view);
-    this.fillRings(dc, shapes.h, palette.h, ox, oy, sc, view);
-    this.fillRings(dc, shapes.f, palette.f, ox, oy, sc, view);
-    this.drawPieces(dc, shapes.t, 1, palette, ox, oy, sc, view);
-    this.fillRings(dc, shapes.z, palette.z, ox, oy, sc, view);
-    if (shapes.g != null) this.fillRings(dc, [shapes.g], palette.g, ox, oy, sc, view);
-    this.drawPieces(dc, shapes.t, 2, palette, ox, oy, sc, view);
-    this.fillRings(dc, shapes.w, palette.w, ox, oy, sc, view);
-    this.fillRings(dc, shapes.b, palette.b, ox, oy, sc, view);
+    var f = this.camera.frame(imageWidth, imageHeight, viewWidth, viewHeight), view = [viewWidth, viewHeight];
+    this.drawPieces(dc, shapes.t, 0, palette, f, view);
+    if (!hasTrees(shapes)) this.fillRings(dc, shapes.k, palette.k, f, view);
+    this.fillRings(dc, shapes.h, palette.h, f, view);
+    this.fillRings(dc, shapes.f, palette.f, f, view);
+    this.drawPieces(dc, shapes.t, 1, palette, f, view);
+    this.fillRings(dc, shapes.z, palette.z, f, view);
+    if (shapes.g != null) this.fillRings(dc, [shapes.g], palette.g, f, view);
+    this.drawPieces(dc, shapes.t, 2, palette, f, view);
+    this.fillRings(dc, shapes.w, palette.w, f, view);
+    this.fillRings(dc, shapes.b, palette.b, f, view);
   };
   function hasTrees(shapes) { return shapes != null && shapes.c != null && shapes.c.length > 0; }
 
   MapFace.prototype.drawTrees = function (dc, shapes, imageWidth, imageHeight, viewWidth, viewHeight) {
     if (!hasTrees(shapes)) return;
-    this.treeSprites.draw(dc, shapes.c, this.camera.originX(imageWidth, viewWidth), this.camera.originY(imageHeight, viewHeight), this.camera.scale, viewWidth, viewHeight, this.device.amoled);
+    this.treeSprites.draw(dc, shapes.c, this.camera.frame(imageWidth, imageHeight, viewWidth, viewHeight), this.camera.scale, viewWidth, viewHeight, this.device.amoled);
   };
 
-  MapFace.prototype.drawPieces = function (dc, pieces, surface, palette, ox, oy, sc, view) {
+  MapFace.prototype.drawPieces = function (dc, pieces, surface, palette, f, view) {
     var key = SURFACE_KEYS[surface];
     if (palette[key + "d"] === palette[key] && palette[key + "l"] === palette[key]) return;
     for (var i = 0; i < pieces.length; i++) {
       var label = pieces[i].label;
       if (idiv(label, 3) !== surface) continue;
       var shade = label % 3;
-      this.fillRings(dc, [pieces[i]], palette[shade === 0 ? key + "d" : (shade === 2 ? key + "l" : key)], ox, oy, sc, view);
+      this.fillRings(dc, [pieces[i]], palette[shade === 0 ? key + "d" : (shade === 2 ? key + "l" : key)], f, view);
     }
   };
 
-  MapFace.prototype.fillRings = function (dc, rings, colour, ox, oy, sc, view) {
+  MapFace.prototype.fillRings = function (dc, rings, colour, f, view) {
     if (Array.isArray(colour) && !dc.hasSetFill) {
       if (colour[3] == null) return;
       colour = colour[3];
     }
     if (Array.isArray(colour)) dc.setFill(this.patternTexture(dc, colour));
     else { dc.setColor(colour, -1); if (dc.hasSetFill) dc.setFill(colour); }
+    var sc = Math.sqrt(f[2] * f[2] + f[3] * f[3]);
     for (var i = 0; i < rings.length; i++) {
-      var box = rings[i].box;
-      if (ox + box[2] * sc < 0 || oy + box[3] * sc < 0 || ox + box[0] * sc > view[0] || oy + box[1] * sc > view[1]) continue;
+      var box = rings[i].box, mx = (box[0] + box[2]) / 2.0, my = (box[1] + box[3]) / 2.0;
+      var r = Math.sqrt((box[2] - box[0]) * (box[2] - box[0]) + (box[3] - box[1]) * (box[3] - box[1])) * sc / 2.0;
+      var cx = f[0] + mx * f[2] - my * f[3], cy = f[1] + mx * f[3] + my * f[2];
+      if (cx + r < 0 || cy + r < 0 || cx - r > view[0] || cy - r > view[1]) continue;
       var ring = rings[i].p, n = idiv(ring.length, 2), points = new Array(n);
-      for (var k = 0; k < n; k++) points[k] = [toNumber(ox + ring[2 * k] * sc), toNumber(oy + ring[2 * k + 1] * sc)];
+      for (var k = 0; k < n; k++) { var x = ring[2 * k], y = ring[2 * k + 1]; points[k] = [toNumber(f[0] + x * f[2] - y * f[3]), toNumber(f[1] + x * f[3] + y * f[2])]; }
       dc.fillPolygon(points);
     }
   };

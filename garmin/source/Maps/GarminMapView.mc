@@ -169,25 +169,29 @@ class GarminMapView extends WatchUi.View {
             framedLocked = lockedNow;
             framedPicture = drawn;
             framedPackageVersion = packageVersion;
-            camera = restingCamera(local, playerImg, targetImg, greenImg, reference, imageWidth, imageHeight, viewWidth, viewHeight);
+            camera = restingCamera(playerImg, targetImg, greenImg, imageWidth, imageHeight, viewWidth, viewHeight);
             // A device with no scaled bitmap draw (Connect IQ 3.0/3.1, the
             // Approach S62 among them: drawBitmap only, no drawScaledBitmap
-            // and no drawBitmap2) can only show the image at 1:1. The camera
-            // has to know, or every overlay marker is placed for a scale the
-            // bitmap was never drawn at and the picture lands off-screen.
-            if (drawn && !(dc has :drawBitmap2) && !(dc has :drawScaledBitmap)) { camera.scale = 1.0; }
+            // and no drawBitmap2) can only show the image at 1:1 and cannot
+            // turn it. The camera has to know, or every overlay marker is
+            // placed for a framing the bitmap was never drawn at and the
+            // picture lands off-screen. (A drawn map - every Garmin package
+            // - turns on every device: it is polygons.)
+            if (drawn && !(dc has :drawBitmap2) && !(dc has :drawScaledBitmap)) { camera.scale = 1.0; camera.rotation = 0.0; }
+            else if (drawn && !(dc has :drawBitmap2)) { camera.rotation = 0.0; }
             // Within 10% of 1x is 1x: a fill-width framing of a 267 px bake on
             // a 260 px face is 0.97, and drawing it 1:1 costs a few edge
             // pixels where a scaled draw costs a large share of the
-            // watchdog's budget.
-            if (drawn && camera.scale > 0.9 && camera.scale < 1.1) { camera.scale = 1.0; }
+            // watchdog's budget. Only unturned: a turned picture needs the
+            // transform anyway.
+            if (drawn && camera.rotation == 0.0 && camera.scale > 0.9 && camera.scale < 1.1) { camera.scale = 1.0; }
             framedHoleNumber = holeNumber;
             // Simulator-only build trace, once per framing; compiled out of
             // every live build.
             if (GarminTransmitPolicy.muted()) {
                 System.println("map frame: hole " + holeNumber + " image " + imageWidth + "x" + imageHeight
                     + " view " + viewWidth + "x" + viewHeight
-                    + " focus " + camera.focusX + "," + camera.focusY + " scale " + camera.scale
+                    + " focus " + camera.focusX + "," + camera.focusY + " scale " + camera.scale + " rotation " + camera.rotation
                     + " origin " + camera.originX(imageWidth, viewWidth) + "," + camera.originY(imageHeight, viewHeight)
                     + " player " + playerImg + " green " + greenImg + " target " + targetImg
                     + " drawBitmap2=" + (dc has :drawBitmap2));
@@ -218,9 +222,9 @@ class GarminMapView extends WatchUi.View {
         // Dashed aim line, player -> aim point.
         var aimImg = (targetImg != null) ? targetImg : greenImg;
         if (playerImg != null && aimImg != null) {
-            drawDashedLine(dc,
-                camera.placeX(playerImg["x"], imageWidth, viewWidth), camera.placeY(playerImg["y"], imageHeight, viewHeight),
-                camera.placeX(aimImg["x"], imageWidth, viewWidth), camera.placeY(aimImg["y"], imageHeight, viewHeight));
+            var pOn = camera.place(playerImg["x"], playerImg["y"], imageWidth, imageHeight, viewWidth, viewHeight);
+            var aOn = camera.place(aimImg["x"], aimImg["y"], imageWidth, imageHeight, viewWidth, viewHeight);
+            drawDashedLine(dc, pOn[0], pOn[1], aOn[0], aOn[1]);
         }
 
         // The Bubble Garmin computed, drawn as its real shape — every one
@@ -244,8 +248,9 @@ class GarminMapView extends WatchUi.View {
                 var fromImg = imagePoint(target, reference);
                 var toImg = imagePoint(windGhost, reference);
                 if (fromImg != null && toImg != null) {
-                    drawWindStreaks(dc, toImg["x"] - fromImg["x"], toImg["y"] - fromImg["y"],
-                        camera.placeX(fromImg["x"], imageWidth, viewWidth), camera.placeY(fromImg["y"], imageHeight, viewHeight), viewWidth);
+                    var fromOn = camera.place(fromImg["x"], fromImg["y"], imageWidth, imageHeight, viewWidth, viewHeight);
+                    var toOn = camera.place(toImg["x"], toImg["y"], imageWidth, imageHeight, viewWidth, viewHeight);
+                    drawWindStreaks(dc, toOn[0] - fromOn[0], toOn[1] - fromOn[1], fromOn[0], fromOn[1], viewWidth);
                 }
             }
             // The Bubble itself: mint, or in plays mode the plays-distance
@@ -264,14 +269,14 @@ class GarminMapView extends WatchUi.View {
         }
 
         if (greenImg != null) {
-            drawRingMarker(dc,
-                camera.placeX(greenImg["x"], imageWidth, viewWidth), camera.placeY(greenImg["y"], imageHeight, viewHeight),
-                6, Graphics.COLOR_GREEN);
+            var gOn = camera.place(greenImg["x"], greenImg["y"], imageWidth, imageHeight, viewWidth, viewHeight);
+            drawRingMarker(dc, gOn[0], gOn[1], 6, Graphics.COLOR_GREEN);
         }
 
         if (targetImg != null) {
-            var tx = camera.placeX(targetImg["x"], imageWidth, viewWidth);
-            var ty = camera.placeY(targetImg["y"], imageHeight, viewHeight);
+            var tOn = camera.place(targetImg["x"], targetImg["y"], imageWidth, imageHeight, viewWidth, viewHeight);
+            var tx = tOn[0];
+            var ty = tOn[1];
             // Bigger while actively being dragged — the thing under the
             // finger should be visible beside the finger (AimableHoleMap's
             // own dragging ? 6 : 4).
@@ -281,52 +286,25 @@ class GarminMapView extends WatchUi.View {
         }
 
         if (playerImg != null) {
-            drawDot(dc, camera.placeX(playerImg["x"], imageWidth, viewWidth), camera.placeY(playerImg["y"], imageHeight, viewHeight), 4, Graphics.COLOR_WHITE);
+            var plOn = camera.place(playerImg["x"], playerImg["y"], imageWidth, imageHeight, viewWidth, viewHeight);
+            drawDot(dc, plOn[0], plOn[1], 4, Graphics.COLOR_WHITE);
         }
 
         drawChrome(dc, scene, viewWidth, viewHeight);
     }
 
-    // Mirrors AimableHoleMap.restingCamera's priority order exactly: the
-    // local Bubble ring first (with its surroundings), then a nominal extent
-    // around the target, then PLAY framing (player low, hole ahead) for a
-    // hole with no target at all. The centre is always the END OF THE AIM
-    // LINE (the geo target), never the middle of the Bubble - the engine may
-    // sit the Bubble to one side by the player's offset - and the ring's box
-    // is measured symmetrically about it so an offset Bubble still fits.
-    function restingCamera(local, playerImg, targetImg, greenImg, reference, imageWidth, imageHeight, viewWidth, viewHeight) {
-        if (local != null && local.ring != null && local.ring.size() >= 3) {
-            var box = imageBoxOfRing(local.ring, reference);
-            if (box != null) {
-                var cx = targetImg != null ? targetImg["x"] : (box["minX"] + box["maxX"]) / 2.0;
-                var cy = targetImg != null ? targetImg["y"] : (box["minY"] + box["maxY"]) / 2.0;
-                return GarminMapCamera.bubble(cx, cy,
-                    2.0 * maxOf((box["minX"] - cx).abs(), (box["maxX"] - cx).abs()),
-                    2.0 * maxOf((box["minY"] - cy).abs(), (box["maxY"] - cy).abs()),
-                    imageWidth, imageHeight, viewWidth, viewHeight);
-            }
+    // The shot in hand: the target in the middle of the glass, the player at
+    // six o'clock, the map turned so the shot runs straight up (Sam,
+    // 2026-10-13: the aim line never runs across the watch). Without a
+    // player or a target there is no shot to frame, so the hole is shown
+    // PLAY-wise, in the bake's own orientation. A confirmed or cancelled aim
+    // does not re-fit - the framing stays - and neither does a GPS tick; a
+    // hole change, opening the map and a lock do (onUpdate).
+    function restingCamera(playerImg, targetImg, greenImg, imageWidth, imageHeight, viewWidth, viewHeight) {
+        if (playerImg != null && targetImg != null) {
+            return GarminMapCamera.shot(playerImg, targetImg, imageWidth, imageHeight, viewWidth, viewHeight);
         }
-        if (targetImg != null) {
-            var metresPerPixel = (reference has :metresPerPixel && reference.metresPerPixel != null) ? reference.metresPerPixel : 0.5;
-            var extentW = 45.0 / metresPerPixel;
-            var extentH = 55.0 / metresPerPixel;
-            return GarminMapCamera.bubble(targetImg["x"], targetImg["y"], extentW, extentH, imageWidth, imageHeight, viewWidth, viewHeight);
-        }
-        return GarminMapCamera.play(playerImg, greenImg, imageWidth, imageHeight, viewWidth, viewHeight);
-    }
-
-    function imageBoxOfRing(ring, reference) {
-        var minX = null; var maxX = null; var minY = null; var maxY = null;
-        for (var i = 0; i < ring.size(); i += 1) {
-            var p = reference.imagePoint(ring[i].lat, ring[i].lng);
-            if (p == null) { continue; }
-            if (minX == null || p["x"] < minX) { minX = p["x"]; }
-            if (maxX == null || p["x"] > maxX) { maxX = p["x"]; }
-            if (minY == null || p["y"] < minY) { minY = p["y"]; }
-            if (maxY == null || p["y"] > maxY) { maxY = p["y"]; }
-        }
-        if (minX == null) { return null; }
-        return { "minX" => minX, "maxX" => maxX, "minY" => minY, "maxY" => maxY };
+        return GarminMapCamera.play(playerImg, (targetImg != null) ? targetImg : greenImg, imageWidth, imageHeight, viewWidth, viewHeight);
     }
 
     function imagePoint(geo, reference) {
@@ -341,42 +319,48 @@ class GarminMapView extends WatchUi.View {
         var y = camera.originY(imageHeight, viewHeight);
         var destW = (imageWidth * camera.scale).toNumber();
         var destH = (imageHeight * camera.scale).toNumber();
-        // UNVERIFIED: drawBitmap2 (scaled bitmap draw) availability/options
-        // shape needs confirming against the installed SDK — see
-        // garmin/README.md. Falls back to an unscaled 1:1 draw, which will
-        // misalign the overlay markers computed via camera.place() whenever
-        // scale != 1; acceptable only as a last resort on devices/SDK
-        // versions that truly lack scaled bitmap drawing.
         if (dc has :drawBitmap2) {
             // drawBitmap2 has no :destWidth/:destHeight (SDK 9.2.0 Dc docs:
             // :bitmapX/Y/Width/Height, :tintColor, :filterMode, :transform).
             // Until 2026-10-05 it was passed those, silently ignored them and
             // drew 1:1 - right only when the framing happened to be ~1x, and
             // a blank green screen when a chip framed at 3x (the image landed
-            // wholly off the glass). Scale with a transform, and draw only the
-            // part of the bake that is on screen: the source rectangle is
-            // cropped to the view, so a 3x draw never scales the whole image.
+            // wholly off the glass). Scale (and since 2026-10-13 turn) with a
+            // transform, and draw only the part of the bake that is on
+            // screen: the source rectangle is the view's four corners taken
+            // back into the bake and boxed, so a 3x draw never scales the
+            // whole image.
             var s = camera.scale;
             var bw = bitmap.getWidth();
             var bh = bitmap.getHeight();
-            var sx = (-x / s).toNumber();
-            var sy = (-y / s).toNumber();
+            var minX = bw; var minY = bh; var maxX = 0.0; var maxY = 0.0;
+            var corners = [[0, 0], [viewWidth, 0], [0, viewHeight], [viewWidth, viewHeight]];
+            for (var i = 0; i < 4; i += 1) {
+                var c = camera.imagePointFromView(corners[i][0], corners[i][1], imageWidth, imageHeight, viewWidth, viewHeight);
+                if (c == null) { return; }
+                if (c["x"] < minX) { minX = c["x"]; }
+                if (c["x"] > maxX) { maxX = c["x"]; }
+                if (c["y"] < minY) { minY = c["y"]; }
+                if (c["y"] > maxY) { maxY = c["y"]; }
+            }
+            var sx = minX.toNumber() - 1;
+            var sy = minY.toNumber() - 1;
             if (sx < 0) { sx = 0; }
             if (sy < 0) { sy = 0; }
-            var sw = (viewWidth / s).toNumber() + 2;
-            var sh = (viewHeight / s).toNumber() + 2;
+            var sw = maxX.toNumber() + 2 - sx;
+            var sh = maxY.toNumber() + 2 - sy;
             if (sx + sw > bw) { sw = bw - sx; }
             if (sy + sh > bh) { sh = bh - sy; }
             if (GarminTransmitPolicy.muted() && lastDrawTrace != (bw + "x" + bh + " " + sx + "," + sy + " " + sw + "x" + sh)) {
                 lastDrawTrace = bw + "x" + bh + " " + sx + "," + sy + " " + sw + "x" + sh;
-                System.println("map draw: bitmap " + lastDrawTrace + " at scale " + s);
+                System.println("map draw: bitmap " + lastDrawTrace + " at scale " + s + " rotation " + camera.rotation);
             }
             if (sw <= 0 || sh <= 0) { return; }
-            if (s == 1.0) {
-                // 1:1 needs no transform: crop only. Transformed draws are
-                // expensive against the watchdog on the smaller-budget
-                // watches (Forerunner 255: 120k), so near-1x framings are
-                // snapped to exactly 1x in onUpdate to land here.
+            if (s == 1.0 && camera.rotation == 0.0) {
+                // 1:1 unturned needs no transform: crop only. Transformed
+                // draws are expensive against the watchdog on the
+                // smaller-budget watches (Forerunner 255: 120k), so near-1x
+                // framings are snapped to exactly 1x in onUpdate to land here.
                 // (x, y) is where the WHOLE bitmap's origin goes, crop or not.
                 try {
                     dc.drawBitmap2(x, y, bitmap, { :bitmapX => sx, :bitmapY => sy, :bitmapWidth => sw, :bitmapHeight => sh });
@@ -386,31 +370,39 @@ class GarminMapView extends WatchUi.View {
                 }
                 return;
             }
+            // Turn, then scale: a crop pixel (u, v) lands at the crop's own
+            // screen point plus R(rotation) * (s*u, s*v), the same affine
+            // GarminMapCamera.frame places every polygon point with, so the
+            // picture and the markers agree. UNVERIFIED against the SDK:
+            // Toybox.Graphics.AffineTransform is assumed to compose like
+            // java.awt's (rotate() then scale() applies the scale first).
             var t = new Graphics.AffineTransform();
+            if (camera.rotation != 0.0) { t.rotate(camera.rotation); }
             t.scale(s, s);
-            // NOTE (x, y), not (x + sx*s, y + sy*s): the transform is applied
-            // to the crop's own offset as well, so the cropped area already
-            // lands where it belongs. Offsetting here too put the picture a
-            // second crop-width off the glass (verified on the fenix 7 sim).
+            var at = camera.place(sx, sy, imageWidth, imageHeight, viewWidth, viewHeight);
             // A transformed draw needs the source in the display's NATIVE
             // colour format; a hole map arrives palette-encoded, and the AMOLED
             // Venu Sq 2 threw "Source must be native color format" (sim,
             // 2026-10-05). So the visible crop is copied 1:1 into a native
             // buffer - rebuilt only when the crop changes, and a crop rather
             // than the whole bake (267x1536 at 16-bit would be 820 KB) - and
-            // that buffer is what gets scaled. Its origin is source pixel
+            // that buffer is what gets transformed. Its origin is source pixel
             // (sx, sy), so it is drawn at the screen point that pixel maps to.
             var crop = nativeCrop(bitmap, sx, sy, sw, sh);
             if (crop != null) {
-                dc.drawBitmap2(x + sx * s, y + sy * s, crop, { :transform => t, :filterMode => Graphics.FILTER_MODE_BILINEAR });
+                dc.drawBitmap2(at[0], at[1], crop, { :transform => t, :filterMode => Graphics.FILTER_MODE_BILINEAR });
             } else {
-                dc.drawBitmap2(x, y, bitmap, {
+                // No buffered bitmaps: the crop offset rides the transform
+                // too, so the whole bitmap's origin is the anchor.
+                var o = camera.place(0, 0, imageWidth, imageHeight, viewWidth, viewHeight);
+                dc.drawBitmap2(o[0], o[1], bitmap, {
                     :bitmapX => sx, :bitmapY => sy, :bitmapWidth => sw, :bitmapHeight => sh,
                     :transform => t, :filterMode => Graphics.FILTER_MODE_BILINEAR
                 });
             }
         } else if (dc has :drawScaledBitmap) {
-            // Connect IQ 3.2+ without drawBitmap2 (Approach S70 and kin).
+            // Connect IQ 3.2+ without drawBitmap2 (Approach S70 and kin):
+            // scaled, never turned. onUpdate has pinned the rotation to 0.
             dc.drawScaledBitmap(x, y, destW, destH, bitmap);
         } else {
             // Connect IQ 3.0/3.1 (Approach S62): 1:1 only. onUpdate has
@@ -479,8 +471,9 @@ class GarminMapView extends WatchUi.View {
         for (var i = 0; i < line.size(); i += 1) {
             var p = reference.imagePoint(line[i].lat, line[i].lng);
             if (p == null) { continue; }
-            var x = camera.placeX(p["x"], imageWidth, viewWidth);
-            var y = camera.placeY(p["y"], imageHeight, viewHeight);
+            var on = camera.place(p["x"], p["y"], imageWidth, imageHeight, viewWidth, viewHeight);
+            var x = on[0];
+            var y = on[1];
             if (havePrev) { drawDottedLine(dc, px, py, x, y, 1, 9); }
             px = x;
             py = y;
@@ -490,10 +483,12 @@ class GarminMapView extends WatchUi.View {
         var fromImg = reference.imagePoint(centre.lat, centre.lng);
         var toImg = reference.imagePoint(greenGeo.lat, greenGeo.lng);
         if (fromImg == null || toImg == null) { return; }
-        var fx = camera.placeX(fromImg["x"], imageWidth, viewWidth);
-        var fy = camera.placeY(fromImg["y"], imageHeight, viewHeight);
-        var gx = camera.placeX(toImg["x"], imageWidth, viewWidth);
-        var gy = camera.placeY(toImg["y"], imageHeight, viewHeight);
+        var fromOn = camera.place(fromImg["x"], fromImg["y"], imageWidth, imageHeight, viewWidth, viewHeight);
+        var toOn = camera.place(toImg["x"], toImg["y"], imageWidth, imageHeight, viewWidth, viewHeight);
+        var fx = fromOn[0];
+        var fy = fromOn[1];
+        var gx = toOn[0];
+        var gy = toOn[1];
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         drawDottedLine(dc, fx, fy, gx, gy, 2, 8);
         // Just past the Bubble along the guide, not halfway to the green:
@@ -606,15 +601,13 @@ class GarminMapView extends WatchUi.View {
         var ay = (pLat["y"] - p0["y"]) / step;
         var bx = (pLng["x"] - p0["x"]) / step;
         var by = (pLng["y"] - p0["y"]) / step;
-        var ox = camera.originX(imageWidth, viewWidth);
-        var oy = camera.originY(imageHeight, viewHeight);
-        var sc = camera.scale;
+        var f = camera.frame(imageWidth, imageHeight, viewWidth, viewHeight);
         for (var i = 0; i < ring.size(); i += 3) {
             var dLat = ring[i].lat + shiftLat - lat0;
             var dLng = ring[i].lng + shiftLng - lng0;
             var ix = p0["x"] + ax * dLat + bx * dLng;
             var iy = p0["y"] + ay * dLat + by * dLng;
-            points.add([ox + ix * sc, oy + iy * sc]);
+            points.add([f[0] + ix * f[2] - iy * f[3], f[1] + ix * f[3] + iy * f[2]]);
         }
         if (points.size() < 3) { return; }
         if (ghost && ghostColour != PLAYS_MAIN) {
@@ -650,9 +643,9 @@ class GarminMapView extends WatchUi.View {
 
     // Wind streaks: short arrows on the upwind side of the main Bubble (at
     // cx, cy on screen), all pointing the way the wind blows on screen (dx,
-    // dy: the main Bubble to its ghost in image pixels - the camera only
-    // scales, so the direction holds), so the air reads as blowing the ghost
-    // off the Bubble. Staggered so they look like moving air, not a grid.
+    // dy: the main Bubble to its ghost, both already placed on screen, so a
+    // turned framing turns the air with it), so the air reads as blowing the
+    // ghost off the Bubble. Staggered so they look like moving air, not a grid.
     // Garmin palette colours, so a MIP panel shows them exactly.
     static const WIND_BLUE = 0x55AAFF;
     static const SLOPE_ORANGE = 0xFFAA00;
@@ -920,16 +913,18 @@ class GarminMapView extends WatchUi.View {
     }
 
     // UP/DOWN/LEFT/RIGHT nudge, for button devices (plan step 14). Moves
-    // the current target by NUDGE_STEP_IMAGE_PX in image space — screen/map
-    // space, not a raw compass direction, so the nudge always matches what
-    // is actually displayed regardless of the bake's own orientation.
-    function nudge(dxImagePx, dyImagePx) {
-        if (!aiming || !canAimNow() || lastReference == null) { return; }
+    // the current target NUDGE_STEP_IMAGE_PX of bake along the SCREEN
+    // direction asked for - up the glass is up the glass whichever way the
+    // framing has turned the bake - so the nudge always matches what is
+    // actually displayed.
+    function nudge(dxScreen, dyScreen) {
+        if (!aiming || !canAimNow() || lastReference == null || camera == null) { return; }
         var current = session.playState.target;
         if (current == null) { return; }
         var img = lastReference.imagePoint(current.lat, current.lng);
         if (img == null) { return; }
-        applyImagePoint(img["x"] + dxImagePx, img["y"] + dyImagePx);
+        var d = camera.imageDirection(dxScreen, dyScreen);
+        applyImagePoint(img["x"] + d[0], img["y"] + d[1]);
     }
 
     // ---- Touch drag (plan step 13) ----
@@ -1032,8 +1027,9 @@ class GarminMapView extends WatchUi.View {
         if (now - edgeSince < EDGE_DWELL_MS) { return; }
         // Move the focus - and only the focus; the scale is untouched, as in
         // WatchMapCamera.panned - and keep it inside the bake.
-        var fx = camera.focusX + dir[0] * PAN_PX_PER_TICK / camera.scale;
-        var fy = camera.focusY + dir[1] * PAN_PX_PER_TICK / camera.scale;
+        var d = camera.imageDirection(dir[0], dir[1]);
+        var fx = camera.focusX + d[0] * PAN_PX_PER_TICK / camera.scale;
+        var fy = camera.focusY + d[1] * PAN_PX_PER_TICK / camera.scale;
         camera.focusX = fx < 0 ? 0.0 : (fx > lastImageWidth ? lastImageWidth : fx);
         camera.focusY = fy < 0 ? 0.0 : (fy > lastImageHeight ? lastImageHeight : fy);
         var held = insideEdge(fingerX, fingerY);
@@ -1089,31 +1085,30 @@ class GarminMapView extends WatchUi.View {
     // fairways and theirs, waste areas (flat), the green and its, then water
     // and bunkers crisp on top (never shaded). Same order as the picture
     // (gd-watch-map-core.js drawGroundLayers) and the terrain labelling. Every ring is
-    // already in image pixels, so placing it is a scale and an offset per
-    // point - no projection - and a ring whose box is off screen is skipped
-    // without touching its points, which matters inside the Forerunner 255's
-    // watchdog budget. Anti-aliased where the watch can.
+    // already in image pixels, so placing it is the camera's affine per
+    // point (GarminMapCamera.frame: a turn and a scale, no projection) - and
+    // a ring whose box is off screen is skipped without touching its points,
+    // which matters inside the Forerunner 255's watchdog budget.
+    // Anti-aliased where the watch can.
     static var SURFACE_KEYS = ["r", "f", "g"];
     function drawOutlines(dc, shapes, palette, imageWidth, imageHeight, viewWidth, viewHeight) {
         if (dc has :setAntiAlias) { dc.setAntiAlias(true); }
         dc.setColor(palette["r"], palette["r"]);
         dc.clear();
-        var ox = camera.originX(imageWidth, viewWidth);
-        var oy = camera.originY(imageHeight, viewHeight);
-        var sc = camera.scale;
+        var f = camera.frame(imageWidth, imageHeight, viewWidth, viewHeight);
         var view = [viewWidth, viewHeight];
-        drawPieces(dc, shapes["t"], 0, palette, ox, oy, sc, view);
+        drawPieces(dc, shapes["t"], 0, palette, f, view);
         // A hole with a tree list gets its trees stamped on top (drawTrees);
         // the flat wood is only for a package from before trees were placed.
-        if (!hasTrees(shapes)) { fillRings(dc, shapes["k"], palette["k"], ox, oy, sc, view); }
-        fillRings(dc, shapes["h"], palette["h"], ox, oy, sc, view);
-        fillRings(dc, shapes["f"], palette["f"], ox, oy, sc, view);
-        drawPieces(dc, shapes["t"], 1, palette, ox, oy, sc, view);
-        fillRings(dc, shapes["z"], palette["z"], ox, oy, sc, view);
-        if (shapes["g"] != null) { fillRings(dc, [shapes["g"]], palette["g"], ox, oy, sc, view); }
-        drawPieces(dc, shapes["t"], 2, palette, ox, oy, sc, view);
-        fillRings(dc, shapes["w"], palette["w"], ox, oy, sc, view);
-        fillRings(dc, shapes["b"], palette["b"], ox, oy, sc, view);
+        if (!hasTrees(shapes)) { fillRings(dc, shapes["k"], palette["k"], f, view); }
+        fillRings(dc, shapes["h"], palette["h"], f, view);
+        fillRings(dc, shapes["f"], palette["f"], f, view);
+        drawPieces(dc, shapes["t"], 1, palette, f, view);
+        fillRings(dc, shapes["z"], palette["z"], f, view);
+        if (shapes["g"] != null) { fillRings(dc, [shapes["g"]], palette["g"], f, view); }
+        drawPieces(dc, shapes["t"], 2, palette, f, view);
+        fillRings(dc, shapes["w"], palette["w"], f, view);
+        fillRings(dc, shapes["b"], palette["b"], f, view);
         if (dc has :setAntiAlias) { dc.setAntiAlias(false); }
     }
 
@@ -1128,14 +1123,13 @@ class GarminMapView extends WatchUi.View {
     function drawTrees(dc, shapes, imageWidth, imageHeight, viewWidth, viewHeight) {
         if (!hasTrees(shapes)) { return; }
         if (treeSprites == null) { treeSprites = new GarminTreeSprites(); }
-        treeSprites.draw(dc, shapes["c"], camera.originX(imageWidth, viewWidth), camera.originY(imageHeight, viewHeight),
-            camera.scale, viewWidth, viewHeight);
+        treeSprites.draw(dc, shapes["c"], camera.frame(imageWidth, imageHeight, viewWidth, viewHeight), camera.scale, viewWidth, viewHeight);
     }
 
     // One surface's pieces, in the order the server sent them (largest first,
     // so a hole painted after its piece is exact). Label = surface * 3 + shade:
     // shade 0 the surface's dark variant, 1 its own colour, 2 its light one.
-    function drawPieces(dc, pieces, surface, palette, ox, oy, sc, view) {
+    function drawPieces(dc, pieces, surface, palette, f, view) {
         var key = SURFACE_KEYS[surface];
         // A surface left unshaded on this screen (its variants are its own
         // colour) costs no drawing at all.
@@ -1145,7 +1139,7 @@ class GarminMapView extends WatchUi.View {
             if (label / 3 != surface) { continue; }
             var shade = label % 3;
             var colour = palette[shade == 0 ? key + "d" : (shade == 2 ? key + "l" : key)];
-            fillRings(dc, [pieces[i]], colour, ox, oy, sc, view);
+            fillRings(dc, [pieces[i]], colour, f, view);
         }
     }
 
@@ -1153,7 +1147,8 @@ class GarminMapView extends WatchUi.View {
     // GarminSessionManager.MIP_PALETTE) drawn as a texture where the watch
     // has Dc.setFill, as its fallback colour where it does not, or not at all
     // when there is no fallback.
-    function fillRings(dc, rings, colour, ox, oy, sc, view) {
+    // `f` is the camera's affine (GarminMapCamera.frame).
+    function fillRings(dc, rings, colour, f, view) {
         if (colour instanceof Lang.Array && !(dc has :setFill)) {
             if (colour[3] == null) { return; }
             colour = colour[3];
@@ -1165,14 +1160,25 @@ class GarminMapView extends WatchUi.View {
             // setFill outranks setColor once used, so solid fills set it too.
             if (dc has :setFill) { dc.setFill(0xFF000000 | colour); }
         }
+        // The scale the affine carries (its two columns have the same length).
+        var sc = Math.sqrt(f[2] * f[2] + f[3] * f[3]);
         for (var i = 0; i < rings.size(); i += 1) {
+            // Off screen when the circle round the ring's box, placed, misses
+            // the view - a turned box is a circle's worth of screen at most.
             var box = rings[i]["box"];
-            if (ox + box[2] * sc < 0 || oy + box[3] * sc < 0 || ox + box[0] * sc > view[0] || oy + box[1] * sc > view[1]) { continue; }
+            var mx = (box[0] + box[2]) / 2.0;
+            var my = (box[1] + box[3]) / 2.0;
+            var r = Math.sqrt((box[2] - box[0]) * (box[2] - box[0]) + (box[3] - box[1]) * (box[3] - box[1])) * sc / 2.0;
+            var cx = f[0] + mx * f[2] - my * f[3];
+            var cy = f[1] + mx * f[3] + my * f[2];
+            if (cx + r < 0 || cy + r < 0 || cx - r > view[0] || cy - r > view[1]) { continue; }
             var ring = rings[i]["p"];
             var n = ring.size() / 2;
             var points = new [n];
             for (var k = 0; k < n; k += 1) {
-                points[k] = [(ox + ring[2 * k] * sc).toNumber(), (oy + ring[2 * k + 1] * sc).toNumber()];
+                var x = ring[2 * k];
+                var y = ring[2 * k + 1];
+                points[k] = [(f[0] + x * f[2] - y * f[3]).toNumber(), (f[1] + x * f[3] + y * f[2]).toNumber()];
             }
             dc.fillPolygon(points);
         }

@@ -98,13 +98,44 @@ test("the camera never shows background past an edge and centres the focus when 
   const player = { x: W / 2, y: H - 40 }, green = { x: W / 2, y: 60 };
   const play = R.Camera.play(player, green, W, H, 454, 454);
   assert.ok(play.scale <= 3.0 && play.scale >= 454 / W - 1e-9, "play framing fills the width and never passes 3x");
-  const py = play.placeY(player.y, H, 454);
+  assert.strictEqual(play.rotation, 0);
+  const py = play.place(player.x, player.y, W, H, 454, 454)[1];
   assert.ok(py > 227 && py <= 454, "the player sits low on the screen, on the glass");
-  const bubble = R.Camera.bubble(W / 2, 200, 40, 50, W, H, 454, 454);
-  assert.strictEqual(bubble.clampsToImage, false);
-  assert.ok(Math.abs(bubble.placeY(200, H, 454) - 227) < 1e-9, "the Bubble framing centres its target");
-  const back = bubble.imagePointFromView(227, 227, W, H, 454, 454);
-  assert.ok(Math.abs(back.x - W / 2) < 1e-9 && Math.abs(back.y - 200) < 1e-9, "imagePointFromView inverts place()");
+  const back = play.imagePointFromView(100, 300, W, H, 454, 454);
+  const again = play.place(back.x, back.y, W, H, 454, 454);
+  assert.ok(Math.abs(again[0] - 100) < 1e-9 && Math.abs(again[1] - 300) < 1e-9, "imagePointFromView inverts place() unturned");
+});
+
+test("the shot framing puts the target in the middle, the player at six o'clock and the shot straight up", () => {
+  const { frame } = sampleFrame();
+  const sr = new R.SpatialReference(frame.spatialReference);
+  const W = sr.imageWidth, H = sr.imageHeight;
+  /* A second shot from the left rough, aiming up and to the right: on the bake the line is
+     diagonal; on the glass it must be vertical. */
+  const player = { x: 60, y: 900 }, target = { x: 260, y: 500 };
+  const cam = R.Camera.shot(player, target, W, H, 454, 454);
+  const t = cam.place(target.x, target.y, W, H, 454, 454), p = cam.place(player.x, player.y, W, H, 454, 454);
+  assert.ok(Math.abs(t[0] - 227) < 1e-9 && Math.abs(t[1] - 227) < 1e-9, "target at the centre: " + t);
+  assert.ok(Math.abs(p[0] - 227) < 1e-6, "the player is straight below the target: " + p);
+  assert.ok(Math.abs(p[1] - 0.82 * 454) < 1e-6, "at six o'clock: " + p[1]);
+  assert.ok(cam.scale > 0 && cam.scale <= 3.0);
+  assert.strictEqual(cam.clampsToImage, false);
+  /* Round trip through the turned affine, and a screen-up nudge goes up the shot on the bake. */
+  const back = cam.imagePointFromView(300, 100, W, H, 454, 454);
+  const again = cam.place(back.x, back.y, W, H, 454, 454);
+  assert.ok(Math.abs(again[0] - 300) < 1e-9 && Math.abs(again[1] - 100) < 1e-9, "imagePointFromView inverts place() turned");
+  const up = cam.imageDirection(0, -10);
+  const along = { x: target.x - player.x, y: target.y - player.y }, len = Math.hypot(along.x, along.y);
+  assert.ok(Math.abs(up[0] - along.x / len * 10) < 1e-9 && Math.abs(up[1] - along.y / len * 10) < 1e-9, "screen up is along the shot: " + up);
+  /* A chip caps at 3x and the player comes up the glass; a drive is small but the player is still on it. */
+  const chip = R.Camera.shot({ x: 200, y: 520 }, { x: 200, y: 500 }, W, H, 454, 454);
+  assert.strictEqual(chip.scale, 3.0);
+  assert.ok(chip.place(200, 520, W, H, 454, 454)[1] < 0.82 * 454);
+  const drive = R.Camera.shot({ x: 200, y: 1400 }, { x: 200, y: 700 }, W, H, 260, 260);
+  assert.ok(Math.abs(drive.place(200, 1400, W, H, 260, 260)[1] - 0.82 * 260) < 1e-6, "a drive still has the player at six o'clock");
+  /* The same point in both halves of the affine. */
+  const f = cam.frame(W, H, 454, 454);
+  assert.ok(Math.abs(Math.hypot(f[2], f[3]) - cam.scale) < 1e-9, "the affine carries the scale");
 });
 
 test("the chord of a round face narrows towards the top and a rectangle does not", () => {
@@ -221,6 +252,10 @@ test("a whole frame draws, in the watch's order, and a drag moves the target thr
   face.onUpdate(ctx);
   assert.ok(face.trace && /^map frame: hole 7 /.test(face.trace), face.trace);
   assert.ok(face.camera && face.camera.scale > 0);
+  /* The shot framing: the player's dot at six o'clock, the target in the middle. */
+  const sr = record.spatialReference;
+  const playerOn = face.camera.place(sr.imagePoint(player.lat, player.lng).x, sr.imagePoint(player.lat, player.lng).y, sr.imageWidth, sr.imageHeight, device.width, device.height);
+  assert.ok(Math.abs(playerOn[0] - 227) < 1e-6 && Math.abs(playerOn[1] - 0.82 * 454) < 1e-6, "player at six o'clock: " + playerOn);
   const fills = calls.filter((c) => c.name === "fillRect");
   assert.strictEqual(fills[0].fill, "#000000", "cleared black first, as onUpdate does");
   assert.strictEqual(fills[1].fill, "#315833", "then the rough, for a drawn map");
@@ -237,9 +272,8 @@ test("a whole frame draws, in the watch's order, and a drag moves the target thr
   assert.ok(moves.length >= 2, "the seed move, then the finger's");
   const last = moves[moves.length - 1];
   const img = record.spatialReference.imagePoint(last.lat, last.lng);
-  const viewX = face.camera.placeX(img.x, record.spatialReference.imageWidth, device.width);
-  const viewY = face.camera.placeY(img.y, record.spatialReference.imageHeight, device.height);
-  assert.ok(Math.abs(viewX - 227) < 0.5 && Math.abs(viewY - 150) < 0.5, "the target is under the finger: " + viewX + "," + viewY);
+  const on = face.camera.place(img.x, img.y, record.spatialReference.imageWidth, record.spatialReference.imageHeight, device.width, device.height);
+  assert.ok(Math.abs(on[0] - 227) < 0.5 && Math.abs(on[1] - 150) < 0.5, "the target is under the finger: " + on);
   face.dragEnd();
   assert.strictEqual(face.aiming, false);
   assert.strictEqual(session.sent, last, "AIM_AT once, on release, with the final target");
