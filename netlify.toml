@@ -128,6 +128,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/course-map-canopy-height"
+  to = "/.netlify/functions/course-map-canopy-height"
+  status = 200
+
+[[redirects]]
   from = "/api/course-test-bakes"
   to = "/.netlify/functions/course-test-bakes"
   status = 200

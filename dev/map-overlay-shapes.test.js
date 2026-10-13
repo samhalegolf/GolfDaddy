@@ -251,6 +251,96 @@ test("the tree finder only looks inside its box, and spaces a row of trees out",
   assert.ok(found.length >= 6 && found.length <= 12, "a row of 11 crowns: found " + found.length);
 });
 
+/* A fairway along the bottom of the picture, rough above it, and on the rough: a row of
+   textured dark-green crowns, a dark grey-blue shadow, and a dark but smooth patch of rough. */
+const NEAR_PLAY = {
+  w: 300, h: 200, fairway: [{ x: -5, y: 120 }, { x: 305, y: 120 }, { x: 305, y: 205 }, { x: -5, y: 205 }],
+  crowns: [{ x: 40, y: 80, r: 12 }, { x: 90, y: 75, r: 12 }, { x: 140, y: 82, r: 12 }],
+  shadow: { x: 200, y: 80, r: 14 }, smooth: { x: 255, y: 70, r: 16 }
+};
+function nearPlayImage() {
+  const { w, h, crowns, shadow, smooth } = NEAR_PLAY;
+  const data = new Uint8ClampedArray(w * h * 4);
+  let seed = 23;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const inDisc = (x, y, c) => Math.hypot(x - c.x, y - c.y) <= c.r;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4;
+    let rgb, n;
+    if (crowns.some(c => inDisc(x, y, c))) { rgb = [40, 75, 35]; n = (rnd() - 0.5) * 50; }
+    else if (inDisc(x, y, shadow)) { rgb = [45, 50, 62]; n = (rnd() - 0.5) * 40; }
+    else if (inDisc(x, y, smooth)) { rgb = [45, 75, 35]; n = (rnd() - 0.5) * 4; }
+    else if (y >= 120) { rgb = [110, 160, 75]; n = (rnd() - 0.5) * 12; }
+    else { rgb = [85, 125, 60]; n = (rnd() - 0.5) * 12; }
+    data[i] = rgb[0] + n; data[i + 1] = rgb[1] + n; data[i + 2] = rgb[2] + n; data[i + 3] = 255;
+  }
+  return { width: w, height: h, data };
+}
+
+test("the band near play runs along the fairway, clear of it and of the other surfaces", () => {
+  const { w, h, fairway } = NEAR_PLAY;
+  const bunker = [{ x: 150, y: 60 }, { x: 170, y: 60 }, { x: 170, y: 80 }, { x: 150, y: 80 }];
+  const wood = [{ x: 250, y: 0 }, { x: 300, y: 0 }, { x: 300, y: 50 }, { x: 250, y: 50 }];
+  const band = shapes.playBand(w, h, { play: [fairway], surfaces: [bunker], woods: [wood], bandPx: 100, clearPx: 10 });
+  const at = (x, y) => band[y * w + x];
+  assert.strictEqual(at(100, 150), 0, "nothing on the fairway itself");
+  assert.strictEqual(at(100, 115), 0, "nothing within the clearance of its edge");
+  assert.strictEqual(at(100, 100), 1, "the rough beside it is looked at");
+  assert.strictEqual(at(100, 10), 0, "nothing past the band");
+  assert.strictEqual(at(160, 70), 0, "nothing on a bunker");
+  assert.strictEqual(at(160, 55), 0, "nor within the clearance of one");
+  assert.strictEqual(at(270, 40), 0, "nor inside a wood already drawn");
+});
+
+test("trees near play: crowns beside the fairway are found with no samples - not the shadow, not the smooth rough, nothing on the turf", () => {
+  const { w, h, fairway, crowns } = NEAR_PLAY;
+  const image = nearPlayImage();
+  const turf = shapes.ringsMask(w, h, [fairway]);
+  const band = shapes.playBand(w, h, { play: [fairway], bandPx: 100, clearPx: 10 });
+  const auto = shapes.autoTreeModel(image, turf, band, { radiusPx: 12 });
+  assert.ok(auto.model, "no crown colour learnt: " + auto.reason);
+  const found = shapes.treeFinder(image, auto.model, { radiusPx: 12, inside: auto.allow }).find(shapes.TREE_FINDER_LEVELS[2]);
+  crowns.forEach(c => assert.ok(found.some(t => Math.hypot(t.x - c.x, t.y - c.y) < 5), "missed the crown at " + c.x + "," + c.y + ": " + JSON.stringify(found)));
+  assert.strictEqual(found.length, crowns.length, "found " + JSON.stringify(found));
+  assert.ok(found.every(t => t.y < 120), "a tree on the turf");
+});
+
+test("trees near play: no turf to learn from, or nothing tree-like in the band, finds nothing", () => {
+  const { w, h, fairway } = NEAR_PLAY;
+  const image = nearPlayImage();
+  const band = shapes.playBand(w, h, { play: [fairway], bandPx: 100, clearPx: 10 });
+  assert.strictEqual(shapes.autoTreeModel(image, new Uint8Array(w * h), band, { radiusPx: 12 }).reason, "no-turf");
+  const bare = shapes.autoTreeModel(image, shapes.ringsMask(w, h, [fairway]), shapes.playBand(w, h, { play: [fairway], bandPx: 20, clearPx: 10 }), { radiusPx: 12 });
+  assert.strictEqual(bare.model, null, "the strip next to the fairway is plain rough");
+});
+
+test("tree heights: a canopy grid lines up with the picture, and gates the crowns", () => {
+  /* A picture at zoom 18 whose top-left is world pixel (1000, 2000); a Web Mercator grid of
+     4 x 4 one-metre cells starting exactly there, tall only in its top-left cell. */
+  const z = 18, world = 256 * Math.pow(2, z), C = 2 * Math.PI * 6378137, mpp = C / world;
+  const cap = { width: 8, height: 8, z, ox: 1000, oy: 2000 };
+  const x0 = (1000 / world - 0.5) * C, y0 = (0.5 - 2000 / world) * C;
+  const heights = new Uint8Array(16);
+  heights[0] = 9;
+  const grid = { crs: "EPSG:3857", x0, y0, dx: 1, dy: -1, width: 4, height: 4, heights };
+  const mask = shapes.heightMask(cap, [grid], 3);
+  const cell = Math.floor(1 / mpp);
+  assert.strictEqual(mask[0], 1, "the tall cell's corner pixel is tall");
+  assert.strictEqual(mask[(cell - 1) * 8 + cell - 1], 1, "and so is the rest of that metre");
+  assert.strictEqual(mask[(cell + 1) * 8 + cell + 1], 0, "the next metre is not");
+  assert.strictEqual(shapes.heightMask(cap, [Object.assign({}, grid, { heights: new Uint8Array(16) })], 3), null, "all zero is no data, not no trees");
+
+  const { w, h, fairway, crowns } = NEAR_PLAY;
+  const image = nearPlayImage();
+  const tall = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (Math.hypot(x - crowns[0].x, y - crowns[0].y) <= 16) tall[y * w + x] = 1;
+  const auto = shapes.autoTreeModel(image, shapes.ringsMask(w, h, [fairway]), shapes.playBand(w, h, { play: [fairway], bandPx: 100, clearPx: 10 }), { radiusPx: 12, tall });
+  const found = shapes.treeFinder(image, auto.model, { radiusPx: 12, inside: auto.allow }).find(shapes.TREE_FINDER_LEVELS[2]);
+  assert.strictEqual(found.length, 1, "only the crown that stands tall: " + JSON.stringify(found));
+  const byHeight = shapes.treesInMask(tall, w, h, { radiusPx: 12 });
+  assert.ok(byHeight.length === 1 && Math.hypot(byHeight[0].x - crowns[0].x, byHeight[0].y - crowns[0].y) < 3, "a tree from its height alone");
+});
+
 test("the area wand pushes a rough drawn shape out to the patch it sits in", () => {
   /* A sandy patch 100 x 60 on grass; the hand drew a smaller blob inside it. */
   const w = 200, h = 160, data = new Uint8ClampedArray(w * h * 4);
