@@ -161,8 +161,6 @@ export default async function courseLibrary(req) {
         facilityName: row.facility_name || null,
         lat: row.course_lat == null ? null : Number(row.course_lat),
         lng: row.course_lng == null ? null : Number(row.course_lng),
-        /* Null means the course was published before hole_count existed and has
-           not been republished. Deliberately not guessed at. */
         hole_count: integer(row.hole_count),
         objects_version: objectsVersion(row),
         clarity_map_version: visual ? integer(visual.published_version) : null,

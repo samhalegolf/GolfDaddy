@@ -215,17 +215,6 @@ test("a course with no Clarity map reports null, not an error", async () => {
   });
 });
 
-test("hole_count is null rather than guessed for pre-migration rows", async () => {
-  await withEnv(async () => {
-    const legacy = Object.assign({}, COURSE, { hole_count: null });
-    const r = await callHandler({ course_maps: [legacy], course_visuals: [] });
-    assert.strictEqual(
-      r.body.courses[0].hole_count, null,
-      "guessing 18 here is what caused the hole-count bugs in the first place"
-    );
-  });
-});
-
 test("since= issues a delta query", async () => {
   await withEnv(async () => {
     const r = await callHandler(

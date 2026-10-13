@@ -449,7 +449,6 @@ async function loadSiblingCentres(course) {
 }
 
 async function saveResolvedGeometry(courseId, geometry) {
-  const holeCount = Object.keys(geometry.holes || {}).length || null;
   const written = await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
     method: "PATCH",
     headers: { Prefer: "return=representation" },
@@ -457,11 +456,6 @@ async function saveResolvedGeometry(courseId, geometry) {
       objects_json: geometry.objects,
       holes_json: geometry.holes,
       geometry_version: MAPPER_VERSION,
-      /* Denormalised for /api/course-library, which reports hole counts from this column
-         rather than reading holes_json. course-maps.mjs writes it on every Studio publish;
-         the mapper did not, so a course that had only ever been auto-mapped reported zero
-         holes there while Studio - which derives from holes_json - showed eighteen. */
-      hole_count: holeCount,
       updated_at: new Date().toISOString()
     })
   });
@@ -470,7 +464,6 @@ async function saveResolvedGeometry(courseId, geometry) {
   if (!Array.isArray(written) || !written.length) {
     throw new Error("course " + courseId + " has no course_maps row to save geometry into");
   }
-  return holeCount;
 }
 
 /* course_scorecards.course_key is the course's DISPLAY NAME, lowercased and whitespace-
@@ -1058,7 +1051,6 @@ async function publishSeparatedLoops(job, course, loops, expectedHoles, scorecar
         objects_json: geometry.objects,
         holes_json: geometry.holes,
         geometry_version: MAPPER_VERSION,
-        hole_count: Object.keys(geometry.holes || {}).length || null,
         published: true,
         updated_at: new Date().toISOString()
       };
@@ -1267,7 +1259,6 @@ async function publishNeighbourCourses(job, course, neighbours, origin) {
         objects_json: geometry.objects,
         holes_json: geometry.holes,
         geometry_version: MAPPER_VERSION,
-        hole_count: holeNumbers.length,
         published: true,
         updated_at: new Date().toISOString()
       };
