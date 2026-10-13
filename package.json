@@ -117,6 +117,7 @@
     "test:demo": "node dev/demo-session-practice-isolation.test.js && node dev/demo-session-gps-course-data-isolation.test.js && node dev/demo-session-flow-shape.test.js",
     "test:garmin": "node dev/garmin-settings-surface.test.js && node dev/garmin-launcher-icons.test.js && node dev/garmin-build-flavours.test.js && node dev/generate-garmin-parity-fixture.js --check && node garmin/tools/sync-devices.js --check",
     "test:garmin-preview": "node dev/garmin-watch-preview.test.js",
+    "test:apple-preview": "node dev/apple-watch-preview.test.js",
     "test:garmin:parity": "node garmin/tools/run-parity.js"
   },
   "codex": {

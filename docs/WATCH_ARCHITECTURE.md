@@ -404,14 +404,22 @@ wrist's default rule off the green and route the manifest carries for the hole
 (`LoadedHoleMap.reference` → `WatchPlayState.reset`). A long hole therefore
 opens on a Driver Bubble on the fairway line before anyone has locked.
 
-**The camera frames the Bubble, not the player** (`WatchMapCamera.bubble`): the
-ring — or a 45x55m nominal extent around a bare target — at 42% of the view,
-floored at the width fill so there are no side bars. The player is allowed off
-the bottom; the aim line still reaches the edge and pivots as the target moves,
-which is the cue that the origin is a fixed point. `play` (player low, hole
-ahead) remains for a hole with no target at all. The camera is set on appear, a
-new hole, the first fix and the first Scene target — and by the crown and the
-edge pan — never on a Scene revision and never on drag end.
+**The camera frames the shot** (`WatchMapCamera.shot`, 2026-10-13, the same
+on the Garmin): the target in the middle of the glass, the player at about six
+o'clock (`playerHeightFraction`, 0.82), and the map turned so the shot runs
+straight up — the aim line is always vertical, never across the face, whichever
+way the bake was cut. The scale is whatever puts the player there, capped at
+3x; a drive is small, a chip is close. The picture is drawn through the
+camera's affine (`frame`) and every marker through `place`, so the two cannot
+disagree. `play` (player low, hole ahead) remains for a hole with no target at
+all. The camera is set on appear, a new hole, the first fix and the first Scene
+target — and by the crown and the edge pan — never on a Scene revision and
+never on drag end.
+
+Studio > GPS Play > Apple Watch Preview draws this page in a browser from a
+line-for-line port of it (`scripts/studio/gps-play/apple-preview/apple-watch-render.js`),
+beside the aerial, so the framing can be looked at on every watch size before
+a build; the Swift stays the source of truth.
 
 **A tap places the target and moves nothing else.** A drag — press, hold 0.2s
 (a click says the target is picked up), then move — keeps the target under the
@@ -678,7 +686,7 @@ green). Both wrists draw the phone's layup context from it (painter.js
 green labelled "Green Xm", under the phone's own test (green beyond the bag's
 longest total + 3m, Bubble more than 4m short of the green and nearer than it).
 It rides the Scene, not the lite-map manifest, because Garmin's manifest is
-already near Connect IQ's ~10 KB message cap. The Bubble camera
-(`WatchMapCamera.bubble` / `GarminMapCamera.bubble`) is not clamped to the
-baked image, so the Bubble is always centred; the overspill is the map's dark
-green (#294A30).
+already near Connect IQ's ~10 KB message cap. The shot camera
+(`WatchMapCamera.shot` / `GarminMapCamera.shot`) is not clamped to the baked
+image, so the target is always centred; the overspill is the map's dark green
+(#294A30).

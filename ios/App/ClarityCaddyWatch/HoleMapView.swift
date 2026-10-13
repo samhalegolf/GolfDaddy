@@ -19,9 +19,6 @@ struct HoleMapView: View {
     let player: WatchScene.GeoPoint?
     let green: WatchScene.GeoPoint?
     let target: WatchScene.GeoPoint?
-    /// The phone's Bubble size in metres, when the Scene carries one. This
-    /// page draws the PHONE's shot, so its extent comes off the Scene.
-    var bubbleExtentM: CGSize? = nil
     /// The phone's club for this target, drawn at the target so the read-only
     /// page reads the same way the aimable one does.
     var club: String? = nil
@@ -37,28 +34,29 @@ struct HoleMapView: View {
             let greenPoint = imagePoint(green, reference)
             let targetPoint = imagePoint(target, reference)
             let imageSize = CGSize(width: reference.imageWidth, height: reference.imageHeight)
-            /* The Bubble framed with its surroundings when there is a target,
-               the player-low play framing when there is not (the Ready face,
-               a hole nobody has locked). Neither is a contain-fit: a par 5
-               bakes to about 1:7.7 and this screen is 1:1.2, so containing the
-               whole image drew the hole 28pt wide with 84% as black bars. */
+            /* The shot framed target-centred, player at six o'clock and turned
+               to run straight up when there is a target; the player-low play
+               framing when there is not (the Ready face, a hole nobody has
+               locked). Neither is a contain-fit: a par 5 bakes to about 1:7.7
+               and this screen is 1:1.2, so containing the whole image drew the
+               hole 28pt wide with 84% as black bars. */
             let fitPoint = fit.flatMap { imagePoint($0.centre, reference) }
             let camera = fitPoint.map { centre -> WatchMapCamera in
                 let mpp = reference.metresPerPixel ?? 0.5
                 let extent = fit?.extentM ?? .zero
-                return WatchMapCamera.bubble(centre: centre, extent: CGSize(width: extent.width / mpp, height: extent.height / mpp),
-                                             imageSize: imageSize, viewSize: proxy.size)
+                let half = CGSize(width: extent.width / mpp / 2, height: extent.height / mpp / 2)
+                return WatchMapCamera.resting(interest: [CGPoint(x: centre.x - half.width, y: centre.y - half.height),
+                                                         CGPoint(x: centre.x + half.width, y: centre.y + half.height)],
+                                              imageSize: imageSize, viewSize: proxy.size)
             } ?? Self.camera(player: playerPoint, target: targetPoint, green: greenPoint,
-                             bubbleExtentM: bubbleExtentM, reference: reference,
                              imageSize: imageSize, viewSize: proxy.size)
-            let origin = camera.origin(imageSize: imageSize, viewSize: proxy.size)
-            ZStack(alignment: .topLeading) {
-                Image(uiImage: map.image)
-                    .resizable()
-                    .interpolation(.medium)
-                    .frame(width: reference.imageWidth * camera.scale, height: reference.imageHeight * camera.scale)
-                    .offset(x: origin.x, y: origin.y)
-                Canvas { context, _ in
+            Canvas { context, _ in
+                    /* The picture through the camera's affine and the markers
+                       through the same place(): turned together, scaled
+                       together, never apart. */
+                    var picture = context
+                    picture.transform = camera.frame(imageSize: imageSize, viewSize: proxy.size)
+                    picture.draw(Image(uiImage: map.image).interpolation(.medium), in: CGRect(origin: .zero, size: imageSize))
                     let place = { (p: CGPoint) in camera.place(p, imageSize: imageSize, viewSize: proxy.size) }
                     TreeSprites.draw(map.trees, in: context, scale: camera.scale, viewSize: proxy.size, place: place)
                     let playerAt = playerPoint.map(place)
@@ -81,16 +79,9 @@ struct HoleMapView: View {
                         context.draw(text.foregroundStyle(.white), at: at)
                     }
                     if let playerAt { dot(context, at: playerAt, radius: 4.5, fill: .white, edge: .black.opacity(0.8)) }
-                }
             }
-            /* topLeading, and it is load-bearing. The Image is now far TALLER
-               than the view (a hole is 1352pt at play scale in a ~190pt space),
-               so the ZStack sizes to it — and `.frame` centres oversized content
-               by default, which shifted the picture ~580pt and drew the empty
-               space past the end of the image. The offset above is computed from
-               the top-left, so the frame has to anchor there too. */
-            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
-            /* Past the bake's edge (the Bubble framing may look there):
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            /* Past the bake's edge (the shot framing may look there):
                the map's own dark green, so it reads as more rough. */
             .background(Color(red: 0.16, green: 0.29, blue: 0.19))
             .clipped()
@@ -98,19 +89,11 @@ struct HoleMapView: View {
     }
 
     private static func camera(player: CGPoint?, target: CGPoint?, green: CGPoint?,
-                               bubbleExtentM: CGSize?, reference: WatchMapSpatialReference,
                                imageSize: CGSize, viewSize: CGSize) -> WatchMapCamera {
-        guard let target else {
-            return WatchMapCamera.play(player: player, target: green, imageSize: imageSize, viewSize: viewSize)
+        if let player, let target {
+            return WatchMapCamera.shot(player: player, target: target, imageSize: imageSize, viewSize: viewSize)
         }
-        let metresPerPixel = reference.metresPerPixel ?? 0.5
-        /* A Driver's cluster when the Scene has no size — the phone always
-           sends one with a target, so this is a stand-in, not a guess at play. */
-        let extentM = bubbleExtentM ?? CGSize(width: 45, height: 55)
-        return WatchMapCamera.bubble(
-            centre: target,
-            extent: CGSize(width: extentM.width / metresPerPixel, height: extentM.height / metresPerPixel),
-            imageSize: imageSize, viewSize: viewSize)
+        return WatchMapCamera.play(player: player, target: target ?? green, imageSize: imageSize, viewSize: viewSize)
     }
 
     private func imagePoint(_ point: WatchScene.GeoPoint?, _ reference: WatchMapSpatialReference) -> CGPoint? {
@@ -159,7 +142,6 @@ struct HoleMapPage: View {
        target, drew the play framing from the player, and then jumped to the
        Bubble when the phone's Scene landed. */
     var pendingTarget: WatchScene.GeoPoint? = nil
-    var pendingExtentM: CGSize? = nil
     var pendingClub: String? = nil
     var aimOrigin: Coordinate? = nil
     /// Wind, slope and units for the shot (WatchSessionManager.conditions).
@@ -200,7 +182,6 @@ struct HoleMapPage: View {
                         player: player,
                         green: scene.geometry?.origin,
                         target: scene.target ?? scene.bubble?.centre ?? pendingTarget,
-                        bubbleExtentM: scene.bubble.map { CGSize(width: $0.widthM ?? 45, height: $0.depthM ?? 55) } ?? pendingExtentM,
                         club: scene.bubble?.club ?? pendingClub ?? scene.suggestion?.club
                     )
                     /* The same bottom-edge UNLOCK as the aimable map; this

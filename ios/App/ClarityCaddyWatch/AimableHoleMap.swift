@@ -101,15 +101,13 @@ struct AimableHoleMap: View {
             let camera = camera ?? restingCamera(viewSize: viewSize)
             let ring = state.bubble?.ring ?? []
 
-            ZStack(alignment: .topLeading) {
-                Image(uiImage: map.image)
-                    .resizable()
-                    .interpolation(.medium)
-                    .frame(width: imageSize.width * camera.scale, height: imageSize.height * camera.scale)
-                    .offset(x: camera.origin(imageSize: imageSize, viewSize: viewSize).x,
-                            y: camera.origin(imageSize: imageSize, viewSize: viewSize).y)
-
-                Canvas { context, _ in
+            Canvas { context, _ in
+                    /* The picture through the camera's affine and the markers
+                       through the same place(): turned together, scaled
+                       together, never apart. */
+                    var picture = context
+                    picture.transform = camera.frame(imageSize: imageSize, viewSize: viewSize)
+                    picture.draw(Image(uiImage: map.image).interpolation(.medium), in: CGRect(origin: .zero, size: imageSize))
                     let place = { (p: CGPoint) in camera.place(p, imageSize: imageSize, viewSize: viewSize) }
                     TreeSprites.draw(map.trees, in: context, scale: camera.scale, viewSize: viewSize, place: place)
                     let playerAt = imagePoint(player).map(place)
@@ -230,13 +228,9 @@ struct AimableHoleMap: View {
                         context.fill(Path(ellipseIn: rect), with: .color(.white))
                         context.stroke(Path(ellipseIn: rect), with: .color(.black.opacity(0.8)), lineWidth: 1)
                     }
-                }
             }
-            /* topLeading for the same reason as HoleMapView: the image is
-               taller than the view at play scale, and a centring frame would
-               slide it off the drawn content. */
-            .frame(width: viewSize.width, height: viewSize.height, alignment: .topLeading)
-            /* Past the bake's edge (the Bubble framing may look there):
+            .frame(width: viewSize.width, height: viewSize.height)
+            /* Past the bake's edge (the shot framing may look there):
                the map's own dark green, so it reads as more rough. */
             .background(Color(red: 0.16, green: 0.29, blue: 0.19))
             .clipped()
@@ -649,37 +643,30 @@ struct AimableHoleMap: View {
 
     // MARK: - Framing
 
-    /* BUBBLE framing: the shot being shaped, with its surroundings. The
-       centre is the END OF THE AIM LINE - the geo target - never the middle
-       of the Bubble: the engine may sit the Bubble off to one side of the
-       target by the player's offset, and the target is what the screen is
-       about. The extent is the ring's box measured symmetrically about the
-       target, so an offset Bubble still fits whole. The player may fall off
-       the bottom - the aim line still reaches the edge and pivots as the
-       target moves, which is what says the origin is a fixed point. `play`
+    /* SHOT framing (Sam, 2026-10-13): the target in the middle of the glass,
+       the player at six o'clock, the map turned so the shot runs straight up
+       - the aim line never runs across the watch. The centre is the END OF
+       THE AIM LINE - the geo target - never the middle of the Bubble: the
+       engine may sit the Bubble off to one side of the target by the
+       player's offset, and the target is what the screen is about. `play`
        (player low, hole ahead) remains only for a hole with no target at
-       all, where there is no Bubble to frame. */
+       all, where there is no shot to frame. */
     private func restingCamera(viewSize: CGSize) -> WatchMapCamera {
-        if let ring = state.bubble?.ring, let box = imageBox(of: ring) {
-            let centre = imagePoint(currentTarget) ?? CGPoint(x: box.midX, y: box.midY)
-            let extent = CGSize(width: 2 * max(abs(box.minX - centre.x), abs(box.maxX - centre.x)),
-                                height: 2 * max(abs(box.minY - centre.y), abs(box.maxY - centre.y)))
-            return WatchMapCamera.bubble(centre: centre, extent: extent,
-                                         imageSize: imageSize, viewSize: viewSize)
+        if let player = imagePoint(player), let target = imagePoint(currentTarget) {
+            /* Framed in the AIM AREA, not the glass: while the band is up the
+               bottom of the screen is UNLOCK and the readout, and a player put
+               at six o'clock of the glass sat under them (seen in Studio's
+               preview, 2026-10-13). The shot is sized to the area and its
+               centre lifted to the area's middle; unlocked, the area is the
+               glass and nothing moves. */
+            let area = aimArea(viewSize)
+            var camera = WatchMapCamera.shot(player: player, target: target, imageSize: imageSize, viewSize: area.size)
+            let lift = camera.imageDirection(screenDx: 0, screenDy: viewSize.height / 2 - area.midY)
+            camera.focus = CGPoint(x: target.x + lift.dx / camera.scale, y: target.y + lift.dy / camera.scale)
+            return camera
         }
-        if let target = imagePoint(currentTarget) {
-            return WatchMapCamera.bubble(centre: target, extent: nominalBubbleExtent,
-                                         imageSize: imageSize, viewSize: viewSize)
-        }
-        return WatchMapCamera.play(player: imagePoint(player), target: imagePoint(green),
+        return WatchMapCamera.play(player: imagePoint(player), target: imagePoint(currentTarget) ?? imagePoint(green),
                                    imageSize: imageSize, viewSize: viewSize)
-    }
-
-    /// A Bubble's worth of image for a target with no computed ring yet:
-    /// about a Driver's cluster, 45m by 55m.
-    private var nominalBubbleExtent: CGSize {
-        let metresPerPixel = map.spatialReference.metresPerPixel ?? 0.5
-        return CGSize(width: 45 / metresPerPixel, height: 55 / metresPerPixel)
     }
 
     private func drawLabel(_ context: GraphicsContext, club: String, metres: Double, at point: CGPoint) {
@@ -729,11 +716,12 @@ struct AimableHoleMap: View {
     }
 
     /* The plays button: low and centred, above the readout and band while a
-       shot is locked. */
+       shot is locked, and above HoleMapPage's own hole-and-distance capsule
+       (the bottom 24pt) while it is not - it used to sit over it. */
     private func playsRect(viewSize: CGSize) -> CGRect {
         let height: CGFloat = 20
         let width: CGFloat = 92
-        let bottom = bottomEdgeUnlock != nil ? viewSize.height - Self.bottomEdgeM - Self.readoutM : viewSize.height - 10
+        let bottom = bottomEdgeUnlock != nil ? viewSize.height - Self.bottomEdgeM - Self.readoutM : viewSize.height - 24
         return CGRect(x: (viewSize.width - width) / 2, y: bottom - height - 2, width: width, height: height)
     }
 
@@ -777,14 +765,6 @@ struct AimableHoleMap: View {
             head.closeSubpath()
             context.fill(head, with: .color(windBlue))
         }
-    }
-
-    private func imageBox(of ring: [Coordinate]) -> CGRect? {
-        let points = ring.compactMap { imagePoint(lat: $0.lat, lng: $0.lng) }
-        guard let first = points.first else { return nil }
-        var box = CGRect(origin: first, size: .zero)
-        points.dropFirst().forEach { box = box.union(CGRect(origin: $0, size: .zero)) }
-        return box
     }
 
     // MARK: - Layup guide
