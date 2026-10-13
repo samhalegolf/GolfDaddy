@@ -8,17 +8,14 @@
  * partial (Sugar Ridge, 2026-10-12: 17 of 18 holes, hole 17 missing) - whether a scan just
  * published it or the course opened from the device's saved copy: the course opens and plays,
  * the card over it says which holes are missing, and the same email offer is made. The server
- * only sends that email once the map is complete (course-map-notify.mjs). Either way:
+ * only sends that email once the map is complete (course-map-notify.mjs).
  *
- *   signed in -> one tap posts to /api/course-map-notify, which stores the request against
- *                their verified account email.
- *   guest     -> "Sign up to get notified" opens Create account. The course is remembered
- *                here and the request is sent as soon as a session appears
- *                (clarity:session-changed), so signing up IS the request - they are not asked
- *                twice.
- *
- * The email itself goes out from the server (course-mapper-sweeper.mjs) once the course has a
- * playable map, however it got one.
+ * The card carries its own email box, so nobody has to have an account to ask: a signed-in
+ * player sees their account address filled in, anyone else types one. The tap posts to
+ * /api/course-map-notify with that address (and the session token when there is one, so the
+ * row is linked to the account). The email itself goes out from the server
+ * (course-mapper-sweeper.mjs) once the course has a playable map, however it got one, and asks
+ * an address with no account to sign up.
  *
  * If the player's GPS is on and they are near that course, endFailedScan then calls
  * offerManualGps, which adds a small "Use Manual GPS" button. That button is the only way
@@ -27,8 +24,9 @@
 (function () {
   "use strict";
 
-  var PENDING_KEY = "gd_course_map_notify_pending_v1";
   var REQUESTED_KEY = "gd_course_map_notify_requested_v1";
+  /* The address last typed into the card, so the next failed course does not ask for it again. */
+  var EMAIL_KEY = "gd_course_map_notify_email_v1";
   var CARD_ID = "gdCourseMapNotifyCard";
   /* Which failed scan the card is showing, so a slow GPS answer for an earlier course
      cannot add its manual button to a later card. */
@@ -72,11 +70,27 @@
     } catch (e) { return ""; }
   }
 
-  async function sendRequest(ref, token) {
+  /* The address to start the box with: the signed-in account's, else the one typed last time. */
+  function knownEmail() {
+    try {
+      var accounts = window.GolfDaddyAccounts;
+      var account = accounts && typeof accounts.current === "function" ? accounts.current() : null;
+      if (account && account.email) return String(account.email).trim();
+    } catch (e) {}
+    var saved = readJson(EMAIL_KEY, "");
+    return typeof saved === "string" ? saved : "";
+  }
+
+  function validEmail(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value); }
+
+  async function sendRequest(ref, email) {
+    var headers = { "Content-Type": "application/json" };
+    var token = await accessToken();
+    if (token) headers.Authorization = "Bearer " + token;
     var res = await fetch("/api/course-map-notify", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
-      body: JSON.stringify({ courseId: ref.courseId, courseName: ref.courseName })
+      headers: headers,
+      body: JSON.stringify({ courseId: ref.courseId, courseName: ref.courseName, email: email })
     });
     var body = await res.json().catch(function () { return null; });
     if (!res.ok) {
@@ -85,6 +99,7 @@
       throw error;
     }
     rememberRequested(ref.courseId);
+    writeJson(EMAIL_KEY, email);
     return body || {};
   }
 
@@ -101,6 +116,8 @@
       style.id = CARD_ID + "Style";
       style.textContent = ".gdCourseMapNotifyCard{position:fixed;left:50%;bottom:calc(max(12px,env(safe-area-inset-bottom)) + 148px);transform:translateX(-50%);z-index:7700;display:flex;flex-direction:column;gap:6px;align-items:center;width:min(92vw,360px);box-sizing:border-box;border:1px solid rgba(255,159,47,.34);border-radius:18px;background:rgba(3,18,9,.92);color:#f6fff7;padding:13px 16px;text-align:center;box-shadow:0 12px 28px rgba(0,0,0,.34);backdrop-filter:blur(14px)}"
         + ".gdCourseMapNotifyCard strong{font-size:14px;font-weight:950}.gdCourseMapNotifyCard span{font-size:12px;opacity:.78}"
+        + ".gdCourseMapNotifyCard input[type=email]{width:100%;box-sizing:border-box;margin-top:6px;border:1px solid rgba(246,255,247,.22);border-radius:12px;background:rgba(246,255,247,.08);color:#f6fff7;padding:9px 12px;font-size:14px;text-align:center}"
+        + ".gdCourseMapNotifyCard input[type=email]::placeholder{color:rgba(246,255,247,.5)}"
         + ".gdCourseMapNotifyActions{display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;justify-content:center}"
         + ".gdCourseMapNotifyActions button{border:1px solid rgba(246,255,247,.22);border-radius:999px;background:rgba(246,255,247,.08);color:#f6fff7;padding:7px 13px;font-size:12px;font-weight:900}"
         + ".gdCourseMapNotifyActions button[data-gd-notify-go]{border-color:rgba(255,159,47,.55);background:rgba(255,159,47,.2)}"
@@ -118,8 +135,7 @@
 
   function showDone(card, name, email) {
     card.innerHTML = "<strong>" + H("mapNotify.letYouKnow") + "</strong><span>"
-      + (email ? H(name ? "mapNotify.willEmailAddress" : "mapNotify.willEmailAddressThis", { email: email, course: name })
-        : H(name ? "mapNotify.willEmailYou" : "mapNotify.willEmailYouThis", { course: name })) + "</span>";
+      + H(name ? "mapNotify.willEmailAddress" : "mapNotify.willEmailAddressThis", { email: email, course: name }) + "</span>";
     setTimeout(hide, 4000);
   }
 
@@ -147,7 +163,7 @@
     };
   }
 
-  async function offer(course, opts) {
+  function offer(course, opts) {
     var ref = courseRef(course);
     var offerId = ++currentOffer;
     var name = ref.courseName;
@@ -160,31 +176,27 @@
       card.innerHTML = "<strong>" + words.title + "</strong><span>" + (ref.courseId ? words.onList : words.detail) + "</span>"
         + '<div class="gdCourseMapNotifyActions"><button type="button" data-gd-notify-close>' + H("mapNotify.ok") + '</button></div>';
     } else {
-      var signedIn = !!(await accessToken());
-      if (offerId !== currentOffer) return false;
       card.innerHTML = "<strong>" + words.title + "</strong><span>" + words.detail + "</span>"
+        + '<input type="email" autocomplete="email" inputmode="email" data-gd-notify-email placeholder="' + esc(L("mapNotify.emailPlaceholder")) + '" value="' + esc(knownEmail()) + '">'
         + '<div class="gdCourseMapNotifyActions">'
-        + '<button type="button" data-gd-notify-go>' + H(signedIn ? "mapNotify.emailMe" : "mapNotify.signUp") + "</button>"
+        + '<button type="button" data-gd-notify-go>' + H("mapNotify.emailMe") + "</button>"
         + '<button type="button" data-gd-notify-close>' + H("mapNotify.noThanks") + '</button></div>';
+      var input = card.querySelector("[data-gd-notify-email]");
       var go = card.querySelector("[data-gd-notify-go]");
-      if (go) go.onclick = async function () {
-        var token = await accessToken();
-        if (!token) {
-          /* Remembered first, so the request survives the trip through Create account. */
-          writeJson(PENDING_KEY, ref);
-          hide();
-          if (typeof window.gd67OpenAuth === "function") window.gd67OpenAuth("signup");
-          return;
-        }
+      var submit = async function () {
+        var email = String(input.value || "").trim().toLowerCase();
+        if (!validEmail(email)) { toastSafe(L("auth.errValidEmail")); input.focus(); return; }
         go.disabled = true;
         try {
-          var result = await sendRequest(ref, token);
-          showDone(card, name, result.email);
+          var result = await sendRequest(ref, email);
+          showDone(card, name, result.email || email);
         } catch (e) {
           go.disabled = false;
           toastSafe(e && e.message || L("mapNotify.couldNotSave"));
         }
       };
+      go.onclick = submit;
+      input.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); submit(); } };
     }
     var close = card.querySelector("[data-gd-notify-close]");
     if (close) close.onclick = hide;
@@ -208,24 +220,5 @@
     return true;
   }
 
-  /* A guest who tapped "Sign up to get notified" and has now signed up (or signed in). */
-  async function flushPending() {
-    var ref = readJson(PENDING_KEY, null);
-    if (!ref || !ref.courseId) return;
-    var token = await accessToken();
-    if (!token) return;
-    writeJson(PENDING_KEY, null);
-    try {
-      await sendRequest(ref, token);
-      toastSafe(ref.courseName ? L("mapNotify.toastWillEmail", { course: ref.courseName }) : L("mapNotify.toastWillEmailYours"));
-    } catch (e) {
-      toastSafe(e && e.message || L("mapNotify.couldNotSave"));
-    }
-  }
-
-  window.addEventListener("clarity:session-changed", function () { setTimeout(flushPending, 600); });
-  /* And once at startup, for a sign-up that finished with a reload in between. */
-  setTimeout(flushPending, 4000);
-
-  window.GDCourseMapNotify = { offer: offer, offerManualGps: offerManualGps, hide: hide, flushPending: flushPending };
+  window.GDCourseMapNotify = { offer: offer, offerManualGps: offerManualGps, hide: hide };
 })();

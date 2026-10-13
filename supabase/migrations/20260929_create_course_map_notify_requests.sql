@@ -1,9 +1,12 @@
 -- "Email me when this course is ready." A player whose course scan failed asks to be told when
--- the map exists; one row per player per course. Written by /api/course-map-notify
--- (functions/course-map-notify.mjs) for a verified signed-in user only, and read by the
--- course-mapper sweeper, which emails every pending row whose course now has a playable map
--- and stamps notified_at. A player asking again after being notified re-arms their row.
+-- the map exists. Written by /api/course-map-notify (functions/course-map-notify.mjs) and read
+-- by the course-mapper sweeper, which emails every pending row whose course now has a playable
+-- map and stamps notified_at. A player asking again after being notified re-arms their row.
 -- Service role is the only reader or writer.
+--
+-- 20261013_course_map_notify_requests_by_email.sql changed the row from one per player per
+-- course to one per email address per course: user_id is nullable, the unique key is
+-- (course_id, email).
 
 create table if not exists public.course_map_notify_requests (
   id uuid primary key default gen_random_uuid(),
