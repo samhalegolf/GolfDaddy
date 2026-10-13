@@ -134,8 +134,8 @@ function fetchFor(net, options = {}) {
     if (url.includes("course-maps")) {
       net.courseMaps++;
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ courses: {
-        akarana: { id: "akarana-golf-club", courseName: "Akarana Golf Club", courseLat: AK.lat, courseLng: AK.lng, region: "Auckland", country: "New Zealand", holes: { 1: {} } },
-        maunga: { id: "maungakiekie-golf-club", courseName: "Maungakiekie Golf Club", courseLat: MK.lat, courseLng: MK.lng, holes: { 1: {} } }
+        akarana: { id: "akarana-golf-club", courseName: "Akarana Golf Club", courseLat: AK.lat, courseLng: AK.lng, region: "Auckland", country: "New Zealand", holeCount: 1 },
+        maunga: { id: "maungakiekie-golf-club", courseName: "Maungakiekie Golf Club", courseLat: MK.lat, courseLng: MK.lng, holeCount: 1 }
       } }) });
     }
     if (url.includes("courses-near")) {
