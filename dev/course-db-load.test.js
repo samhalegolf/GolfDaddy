@@ -171,9 +171,12 @@ const STUB = {
   ok("scope=play&courseIds returns only those courses, marked partial");
 
   asked = [];
+  stubTables({ maps: [MAPPED, STUB] }, asked);
   const whole = await get(courseMaps, "https://clarity.example/api/course-maps?scope=play");
-  assert.strictEqual(whole.status, 400, "no courseIds is refused, not answered with the whole library");
+  assert.strictEqual(whole.status, 200, "no courseIds is the old picker: it gets the list, not a refusal");
   assert.ok(!asked.some((u) => u.includes("objects_json")), "and nothing with geometry is read for it");
+  assert.ok(asked.some((u) => u.includes("course_maps_list")), "the list view answers it");
+  assert.ok(Object.keys(whole.body.courses["published::cromwell"].holes).length > 0, "a mapped course passes the old picker's holes check");
   ok("scope=play without courseIds never reads the whole library");
 
   // --- 4. a publish touches one course ---------------------------------------

@@ -96,13 +96,13 @@ export default async function courseMaps(req) {
        course picker was still asking for that on every open; by October 2026
        the library was 63 MB and Postgres cancelled the read on its statement
        timeout, so the picker got nothing and players could not find their
-       course (beta ticket dfc7bd74, 13 Oct). Nothing needs the whole library
-       with geometry on the play path, so it is no longer offered here - a
-       caller that truly wants it says scope=full. */
+       course (beta ticket dfc7bd74, 13 Oct). The picker asks for the list
+       now; a bare scope=play only ever comes from a phone still running the
+       old picker, and it gets the list shaped so that picker works. */
     if (scope === "play") {
       const wanted = requestedCourseIds(params);
-      if (!wanted.length) return json(400, { error: "scope=play needs courseIds", scope: "play" });
-      return json(200, stripSurfacesForPlay(await readSomeCourses(wanted)));
+      if (wanted.length) return json(200, stripSurfacesForPlay(await readSomeCourses(wanted)));
+      return json(200, legacyPickerList(await readList()));
     }
 
     return json(200, await readList());
@@ -421,11 +421,29 @@ async function deleteCourseMap(payload) {
 
 const LIST_VIEW = "course_maps_list";
 /* Identity, freshness and counts. No geometry - that is the entire point. The
-   counts come from the course_maps_list view so they are computed from the
-   geometry itself and cannot drift. */
+   counts are stored on the row by the course_maps_sync_counts trigger whenever
+   the geometry is written (supabase/migrations/20261014_course_maps_stored_counts.sql),
+   so they cannot drift and the list never unpacks objects_json. */
 const LIST_COLUMNS = "id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng," +
   "region,country,country_code,facility_key,facility_name,course_aliases,published,published_at," +
   "created_at,updated_at,hole_count,object_count,tee_count,green_count,fairway_count";
+
+/* Phones built before 14 Oct 2026 (the Android APK from commit 9f31f4a and
+   earlier) open the course picker with a bare ?scope=play and keep a course
+   only if Object.keys(course.holes).length > 0. Answering them with every
+   course's geometry is what timed out (beta ticket dfc7bd74); answering 400
+   leaves every phone that has not updated unable to find a course at all. So
+   they get the list, with holes stood in by one empty entry per hole number -
+   enough to pass that one check, which is all those pickers read of it. The
+   current picker asks for the list itself and never comes through here. */
+function legacyPickerList(maps) {
+  Object.values(maps.courses || {}).forEach((course) => {
+    if (!(course.holeCount > 0)) return;
+    course.holes = {};
+    for (let n = 1; n <= course.holeCount; n += 1) course.holes[String(n)] = {};
+  });
+  return maps;
+}
 
 function listRowToCourse(row) {
   if (!row || typeof row !== "object") return null;
@@ -623,9 +641,6 @@ function courseToSupabaseRow(course) {
     published_by_json: jsonObject(course && course.publishedBy),
     objects_json: jsonObject(course && course.objects),
     holes_json: jsonObject(course && course.holes),
-    /* Denormalised so /api/course-library can report hole counts without
-       reading holes_json, which runs to tens of kilobytes per course. */
-    hole_count: Object.keys(jsonObject(course && course.holes)).length || null,
     assets_json: jsonObject(course && course.assets),
     /* objects, holes and assets have their own columns above. course_json used
        to carry a second copy of all three, so every read fetched both - 894 kB

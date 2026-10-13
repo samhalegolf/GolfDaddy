@@ -141,9 +141,9 @@ function hasGeometryPayload(map) {
  * Studio list itself) then queued behind it until it timed out, and the
  * Studio fell back to its local cache (18 Sep 2026, 08:13-08:27 UTC).
  *
- * course_maps_list computes object_count and hole_count in the database from
- * the same two columns, so the answer is identical and the read is a few
- * hundred bytes. */
+ * course_maps_list carries object_count and hole_count, stored on the row by
+ * a trigger whenever those two columns are written, so the answer is identical
+ * and the read is a few hundred bytes. */
 const LIST_VIEW = "course_maps_list";
 
 /* Derived from what EXISTS over what the job queue last said, same reasoning as
@@ -759,7 +759,7 @@ export default async function courseMapperJobs(req) {
       headers: { Prefer: "return=representation" },
       body: JSON.stringify({
         objects_json: {}, holes_json: {}, geometry_version: null,
-        hole_count: null, updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString()
       })
     });
     if (!Array.isArray(cleared) || !cleared.length) {

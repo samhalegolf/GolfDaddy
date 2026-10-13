@@ -127,12 +127,28 @@ const FULL_ROW = {
   assert.ok(asked.some((u) => u.includes("objects_json")), "the phone still needs geometry");
   ok("scope=play&courseIds still carries geometry for the phone's library sync");
 
+  /* A bare scope=play is the picker in phones built before 14 Oct 2026. It keeps
+     a course only when Object.keys(course.holes).length > 0, so the list it now
+     gets carries a placeholder entry per hole - and nothing for a course with
+     no holes, which that picker must still drop. */
   asked.length = 0;
-  const playAll = await mod.default(new Request("https://clarity-caddie.test/api/course-maps?scope=play"));
-  assert.equal(playAll.status, 400);
-  assert.equal((await playAll.json()).error, "scope=play needs courseIds");
+  global.fetch = async function (url) {
+    const target = String(url);
+    asked.push(target);
+    const rows = target.includes("course_maps_list")
+      ? [LIST_ROW, Object.assign({}, LIST_ROW, { id: "published::empty", course_id: "empty", course_name: "Empty", hole_count: 0, object_count: 0 })]
+      : [FULL_ROW];
+    return { ok: true, status: 200, text: async () => JSON.stringify(rows) };
+  };
+  const playAll = await get("?scope=play");
+  assert.ok(asked.some((u) => u.includes("course_maps_list")), "a bare scope=play reads the list");
   assert.ok(!asked.some((u) => u.includes("objects_json")), "no courseIds must not read every course's geometry");
-  ok("scope=play without courseIds is refused - the picker asks for the list instead");
+  const legacyCourse = playAll.courses["published::cromwell"];
+  assert.equal(Object.keys(legacyCourse.holes).length, 18, "the old picker's holes check must pass for a mapped course");
+  assert.equal(legacyCourse.objects, undefined, "and still no geometry");
+  assert.equal(legacyCourse.courseName, "Cromwell Golf Course");
+  assert.equal(playAll.courses["published::empty"].holes, undefined, "a course with no holes gets no placeholder");
+  ok("scope=play without courseIds answers the list in the shape the old picker expects");
 
   // --- a Supabase failure must not look like an empty database --------------
   global.fetch = async function () {
