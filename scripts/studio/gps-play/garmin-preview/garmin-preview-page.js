@@ -546,6 +546,12 @@
 
     function setPlayer(latlng) {
       session.player = { lat: latlng.lat, lng: latlng.lng };
+      /* A tap is a fresh fix handed to a freshly opened map: CaddyAppView.showMap drops the
+         camera so the first draw frames on where the player now is (the layup Bubble from
+         the tee, the green from an approach). Without this the camera chosen before the fix
+         arrived - the play framing on the green - stayed, and from the tee the Bubble sat
+         off the bottom of the glass. A drag never reframes, as on the watch. */
+      if (face) face.camera = null;
       if (session.autoHole) {
         var n = nearestHole(session.player);
         if (n != null && n !== session.holeNumber) { setHole(n); return; }
@@ -647,7 +653,15 @@
     el.fit.addEventListener("click", fitCourse);
 
     newFace();
-    loadEngine().then(function () { if (destroyed) return; configurePlayer(); bubbleCacheKey = ""; requestUpdate(); })
+    loadEngine().then(function () {
+      if (destroyed) return;
+      configurePlayer();
+      bubbleCacheKey = "";
+      /* The first frame may have been drawn before the engine answered; frame again now
+         that there is a Bubble to centre on. */
+      if (face) face.camera = null;
+      requestUpdate();
+    })
       .catch(function (error) { if (!destroyed) el.readout.textContent = "Bubble Engine failed to load - " + (error && error.message || error); });
 
     if (session.holes.length) {
