@@ -172,9 +172,9 @@ const STUB = {
 
   asked = [];
   const whole = await get(courseMaps, "https://clarity.example/api/course-maps?scope=play");
-  assert.ok(!whole.body.partial, "no courseIds is still the whole library");
-  assert.strictEqual(Object.keys(whole.body.courses).length, 2);
-  ok("scope=play without courseIds is unchanged");
+  assert.strictEqual(whole.status, 400, "no courseIds is refused, not answered with the whole library");
+  assert.ok(!asked.some((u) => u.includes("objects_json")), "and nothing with geometry is read for it");
+  ok("scope=play without courseIds never reads the whole library");
 
   // --- 4. a publish touches one course ---------------------------------------
   const post = (fn, body, token) => fn(new Request("https://clarity.example/api/course-maps", {

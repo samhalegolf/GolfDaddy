@@ -168,10 +168,16 @@ test("a reload drops a kept course whose row has changed since it was opened", (
 });
 
 test("a course with no holes is never offered to a player", () => {
-  /* The stub is published:true, so published alone can never be the test. */
+  /* The stub is published:true, so published alone can never be the test.
+     The picker reads the list scope (no geometry), so the evidence is the
+     view's hole_count, not a holes object. */
   assert.ok(
-    /function databaseCourseHasMap\(raw\)\{\s*return Object\.keys\(raw&&raw\.holes\|\|\{\}\)\.length>0;/.test(pickerSrc),
+    /function databaseCourseHasMap\(raw\)\{\s*return Number\(raw&&raw\.holeCount\)>0;/.test(pickerSrc),
     "holes are the only evidence a database course is playable"
+  );
+  assert.ok(
+    /databaseCoursePromise=fetch\(COURSE_MAPS_API,\{/.test(pickerSrc) && !/COURSE_MAPS_API\+"\?scope=play"/.test(pickerSrc),
+    "the picker must ask for the list, never every course's geometry"
   );
   assert.ok(
     /\.filter\(databaseCourseHasMap\)\.map\(databaseCoursePayload\)/.test(pickerSrc),

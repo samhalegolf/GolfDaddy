@@ -425,7 +425,7 @@
 	     search results, so a player could pick a course that has no geometry and
 	     cannot be played. Holes are the only evidence that matters. */
 	  function databaseCourseHasMap(raw){
-	    return Object.keys(raw&&raw.holes||{}).length>0;
+	    return Number(raw&&raw.holeCount)>0;
 	  }
 	  function databaseCoursesFromMaps(maps){
 	    return Object.values(maps?.courses||{}).filter(databaseCourseHasMap).map(databaseCoursePayload).filter(Boolean);
@@ -435,9 +435,14 @@
 	    const now=Date.now();
 	    if(!opts.force&&databaseCourseCache.length&&now-databaseCourseLoadAt<120000)return Promise.resolve(databaseCourseCache.slice());
 	    if(databaseCoursePromise)return databaseCoursePromise;
-	    /* scope=play: names, locations and holes are all the picker reads; the collected
-	       surfaces stay behind (see functions/course-maps.mjs stripSurfacesForPlay). */
-	    databaseCoursePromise=fetch(COURSE_MAPS_API+"?scope=play",{headers:{Accept:"application/json"},cache:"no-store"})
+	    /* The list scope: identity, location and hole_count, no geometry. This used to
+	       ask scope=play, which is every published course's full record - 63 MB by
+	       October 2026 - and Postgres cancelled it on the statement timeout, so the
+	       picker never got a database course at all (beta ticket dfc7bd74, 13 Oct).
+	       The picker only ever read names, locations and whether holes exist, and
+	       the list carries all of that. Geometry comes from /api/course-package when
+	       a course is actually opened. */
+	    databaseCoursePromise=fetch(COURSE_MAPS_API,{headers:{Accept:"application/json"},cache:"no-store"})
 	      .then(res=>res.ok?res.json():null)
 	      .then(data=>{
 	        databaseCourseCache=databaseCoursesFromMaps(data);
