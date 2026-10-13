@@ -32,12 +32,15 @@ test("the device table is Apple Watch screens in points on a 2x panel", () => {
   assert.strictEqual(new Set(A.DEVICES.map((d) => d.id)).size, A.DEVICES.length);
 });
 
-test("the shot framing puts the target in the middle, the player at six o'clock, the shot straight up", () => {
+test("the shot framing fits the Bubble with the target in the middle, the shot straight up", () => {
   const player = { x: 60, y: 900 }, target = { x: 260, y: 500 };
-  const cam = A.Camera.shot(player, target, imageW, imageH, viewW, viewH);
+  const cam = A.Camera.shot(player, target, 120, imageW, imageH, viewW, viewH);
   const t = cam.place(target, imageW, imageH, viewW, viewH), p = cam.place(player, imageW, imageH, viewW, viewH);
   assert.ok(Math.abs(t.x - viewW / 2) < 1e-9 && Math.abs(t.y - viewH / 2) < 1e-9, "target centred: " + JSON.stringify(t));
-  assert.ok(Math.abs(p.x - viewW / 2) < 1e-6 && Math.abs(p.y - viewH * A.PLAYER_HEIGHT_FRACTION) < 1e-6, "player at six o'clock: " + JSON.stringify(p));
+  assert.ok(Math.abs(p.x - viewW / 2) < 1e-6 && p.y > viewH, "the player is straight below the target, off the bottom on a drive: " + JSON.stringify(p));
+  assert.ok(Math.abs(cam.scale - (A.BUBBLE_FRACTION * viewW) / 120) < 1e-9, "the Bubble takes its share of the shorter side");
+  const reach = cam.place({ x: target.x, y: target.y + 60 }, imageW, imageH, viewW, viewH);
+  assert.ok(Math.abs(Math.hypot(reach.x - viewW / 2, reach.y - viewH / 2) - A.BUBBLE_FRACTION * viewW / 2) < 1e-6, "the ring's edge, turned with the map");
   assert.strictEqual(cam.clampsToImage, false);
   const back = cam.imagePointFromView(120, 40, imageW, imageH, viewW, viewH), again = cam.place(back, imageW, imageH, viewW, viewH);
   assert.ok(Math.abs(again.x - 120) < 1e-9 && Math.abs(again.y - 40) < 1e-9, "the turned affine round-trips");
@@ -45,8 +48,14 @@ test("the shot framing puts the target in the middle, the player at six o'clock,
   const panned = cam.panned(0, -10, imageW, imageH), len = Math.hypot(200, -400);
   assert.ok(Math.abs((panned.focusX - cam.focusX) - 200 / len * 10 / cam.scale) < 1e-9 && Math.abs((panned.focusY - cam.focusY) - (-400) / len * 10 / cam.scale) < 1e-9);
   assert.strictEqual(panned.rotation, cam.rotation);
-  const chip = A.Camera.shot({ x: 200, y: 520 }, { x: 200, y: 500 }, imageW, imageH, viewW, viewH);
-  assert.strictEqual(chip.scale, 3);
+  const chip = A.Camera.shot({ x: 200, y: 520 }, { x: 200, y: 500 }, 10, imageW, imageH, viewW, viewH);
+  assert.strictEqual(chip.scale, 3, "a tiny Bubble caps at the ceiling");
+  assert.strictEqual(A.Camera.shot(target, target, 120, imageW, imageH, viewW, viewH).rotation, 0, "a player on the target has no direction to turn to");
+  const ring = [{ x: 250, y: 470 }, { x: 290, y: 500 }, { x: 260, y: 540 }, { x: 230, y: 500 }];
+  assert.ok(Math.abs(A.Camera.bubbleExtent(ring, target) - 2 * 40) < 1e-9, "twice the farthest ring point from the target");
+  assert.strictEqual(A.Camera.bubbleExtent([], target), null);
+  assert.strictEqual(A.Camera.nominalBubbleExtent(0.25), 220, "a Driver's 55 m of ground with no ring");
+  assert.strictEqual(A.Camera.nominalBubbleExtent(null), 110);
 });
 
 test("resting fits the span with padding, play fills the width, the crown's bounds hold", () => {
@@ -127,8 +136,14 @@ test("a whole page draws in the Swift's order, a tap aims and sends, a held drag
   assert.ok(texts.includes("HOLE 3"), "the readout capsule");
   assert.ok(texts.some((t) => /^Green \d+m$/.test(t)), "the layup guide label");
   assert.ok(texts.some((t) => /^plays \d+m$/.test(t)), "the plays capsule");
-  const playerOn = face.camera.place(record.spatialReference.imagePoint(player.lat, player.lng), record.spatialReference.imageWidth, record.spatialReference.imageHeight, device.width, device.height);
-  assert.ok(Math.abs(playerOn.x - device.width / 2) < 1e-6 && Math.abs(playerOn.y - device.height * A.PLAYER_HEIGHT_FRACTION) < 1e-6, "player at six o'clock");
+  const sr = record.spatialReference, place = (geo) => face.camera.place(sr.imagePoint(geo.lat, geo.lng), sr.imageWidth, sr.imageHeight, device.width, device.height);
+  const targetOn = place(face.state.target), playerOn = place(player), area = face.aimArea();
+  assert.ok(Math.abs(targetOn.x - device.width / 2) < 1e-6 && Math.abs(targetOn.y - device.height / 2) < 1e-6, "target in the middle of the glass, unlocked");
+  assert.ok(Math.abs(playerOn.x - device.width / 2) < 1e-6 && playerOn.y > targetOn.y, "player straight below the target");
+  const targetImg = sr.imagePoint(face.state.target.lat, face.state.target.lng);
+  const farthestPx = A.Camera.bubbleExtent(face.state.bubble.ring.map((g) => sr.imagePoint(g.lat, g.lng)), targetImg) / 2;
+  const reachOn = Math.max.apply(null, face.state.bubble.ring.map((g) => { const on = place(g); return Math.hypot(on.x - targetOn.x, on.y - targetOn.y); }));
+  assert.ok(Math.abs(reachOn - Math.min(A.BUBBLE_FRACTION / 2 * Math.min(area.w, area.h), 3 * farthestPx)) < 1e-6, "the ring fills its share of the aim area, or the 3x ceiling: " + reachOn);
 
   /* A tap: the target goes under the finger and is sent at once. (Inside the bag's reach - a
      tap past the longest club is pulled back to its roof, as WatchPlayState.moveTarget does.) */

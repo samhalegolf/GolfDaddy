@@ -13,14 +13,14 @@ import Foundation
  * pure and testable — no view, no gesture, no SwiftUI.
  *
  * Two framings for a shot (Sam, 2026-10-13; the Garmin's GarminMapCamera has
- * the same two). SHOT: the target in the middle of the glass, the player at
- * about six o'clock, and the map TURNED so the shot runs straight up the
- * screen — the aim line is always vertical, never across the face, whichever
- * way the bake was cut. PLAY, for a hole with no target yet: the player low
- * with the ground ahead above them, in the bake's own orientation. The old
- * BUBBLE framing (the ring at a fixed share of the view, the player falling
- * off the bottom, the line pivoting across the glass) is gone: it is what put
- * the aim line across the watch.
+ * the same two). SHOT: the Bubble fitted to the glass with the target in the
+ * middle, and the map TURNED so the shot runs straight up the screen — the
+ * aim line comes up from the bottom edge and says where the shot comes from,
+ * always vertical, never across the face, whichever way the bake was cut.
+ * The player is on the glass for a chip and off the bottom for a drive: the
+ * Bubble is what the shot is about, so the Bubble is what fits. PLAY, for a
+ * hole with no target yet: the player low with the ground ahead above them,
+ * in the bake's own orientation.
  *
  * Everything downstream places a point through `frame`: one affine, so a
  * turned framing costs the same per point as an unturned one.
@@ -31,10 +31,13 @@ public struct WatchMapCamera: Equatable {
     /// to mush and the map reads as broken rather than close-up.
     public static let maximumScale: CGFloat = 3
 
-    /// Where the player sits on the SHOT framing: this far down the glass.
-    /// 0.82 is "about six o'clock" and still clear of the bottom bezel. The
-    /// target is always at 0.5.
-    public static let playerHeightFraction: CGFloat = 0.82
+    /// How much of the view's shorter side the Bubble's longest reach takes
+    /// on the SHOT framing: the ring whole on the glass, the chrome still
+    /// clear of it. The target is always at 0.5.
+    public static let bubbleFraction: CGFloat = 0.6
+    /// A Bubble's worth of ground for a target with no ring computed yet:
+    /// about a Driver's cluster at its longest, in metres.
+    public static let nominalBubbleExtentM: CGFloat = 55
 
     /* Edge panning. A tap or a drag moves the TARGET and nothing else — the
        map under it stays put, so what the finger is placing stays where the
@@ -74,22 +77,41 @@ public struct WatchMapCamera: Equatable {
 
     // MARK: - Shot framing
 
-    /* SHOT framing: the target centred, the player `playerHeightFraction` down
-       the glass, the shot straight up. The scale is whatever puts the player
-       there — a drive is small, a chip is close — capped at `maximumScale`,
-       where the player comes up the screen instead. No floor: "about six
-       o'clock" was the ask, and the phone frames a drive the same way. */
-    public static func shot(player: CGPoint, target: CGPoint, imageSize: CGSize, viewSize: CGSize) -> WatchMapCamera {
+    /* SHOT framing (Sam, 2026-10-13): the target centred, the map turned so
+       the shot runs straight up, and the scale whatever fits the Bubble -
+       `bubbleExtent`, its longest reach across the target in image pixels -
+       at `bubbleFraction` of the glass, capped at `maximumScale`. The aim
+       line comes up from the bottom edge and says where the shot comes from;
+       the player lands wherever that puts them, on the glass for a chip and
+       off the bottom for a drive. The Bubble is what the shot is about, so
+       the Bubble is what fits: sizing the shot to put the player's dot at
+       six o'clock instead shrank a drive's Bubble to a speck. */
+    public static func shot(player: CGPoint, target: CGPoint, bubbleExtent: CGFloat, imageSize: CGSize, viewSize: CGSize) -> WatchMapCamera {
+        let shorterView = min(viewSize.width, viewSize.height)
+        let scale = bubbleExtent > 0 && bubbleExtent.isFinite && shorterView > 0
+            ? min((shorterView * bubbleFraction) / bubbleExtent, maximumScale)
+            : maximumScale
         let dx = target.x - player.x, dy = target.y - player.y
-        let distance = hypot(dx, dy)
-        guard distance >= 1, viewSize.height > 0 else {
-            return WatchMapCamera(focus: target, scale: maximumScale, clampsToImage: false)
-        }
-        let scale = min(((playerHeightFraction - 0.5) * viewSize.height) / distance, maximumScale)
         /* The angle that turns the player->target vector to straight up
-           (0, -1): up is -pi/2 in y-down screen space. */
-        let rotation = -CGFloat.pi / 2 - atan2(dy, dx)
+           (0, -1): up is -pi/2 in y-down screen space. A player standing on
+           the target has no direction to turn to. */
+        let rotation: CGFloat = hypot(dx, dy) >= 1 ? -CGFloat.pi / 2 - atan2(dy, dx) : 0
         return WatchMapCamera(focus: target, scale: scale, rotation: rotation, clampsToImage: false)
+    }
+
+    /* The Bubble's longest reach across the target, in image pixels: twice
+       the farthest ring point from the target, so a ring the engine sits off
+       to one side of the target is still whole whichever way the map is
+       turned. nil for no ring. */
+    public static func bubbleExtent(ring: [CGPoint], target: CGPoint) -> CGFloat? {
+        let farthest = ring.map { hypot($0.x - target.x, $0.y - target.y) }.max() ?? 0
+        return farthest > 0 ? farthest * 2 : nil
+    }
+
+    /// `nominalBubbleExtentM` of ground in image pixels, for a target with no
+    /// ring yet; a bake with no metresPerPixel is taken as 0.5 m/px.
+    public static func nominalBubbleExtent(metresPerPixel: Double?) -> CGFloat {
+        nominalBubbleExtentM / CGFloat(metresPerPixel ?? 0.5)
     }
 
     // MARK: - Resting framing

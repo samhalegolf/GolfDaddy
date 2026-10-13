@@ -34,12 +34,13 @@ struct HoleMapView: View {
             let greenPoint = imagePoint(green, reference)
             let targetPoint = imagePoint(target, reference)
             let imageSize = CGSize(width: reference.imageWidth, height: reference.imageHeight)
-            /* The shot framed target-centred, player at six o'clock and turned
-               to run straight up when there is a target; the player-low play
-               framing when there is not (the Ready face, a hole nobody has
-               locked). Neither is a contain-fit: a par 5 bakes to about 1:7.7
-               and this screen is 1:1.2, so containing the whole image drew the
-               hole 28pt wide with 84% as black bars. */
+            /* The shot framed Bubble-to-the-glass, target-centred and turned
+               to run straight up when there is a target (this read-only page
+               has no ring, so a Driver's worth of ground stands in for one);
+               the player-low play framing when there is not (the Ready face,
+               a hole nobody has locked). Neither is a contain-fit: a par 5
+               bakes to about 1:7.7 and this screen is 1:1.2, so containing
+               the whole image drew the hole 28pt wide with 84% as black bars. */
             let fitPoint = fit.flatMap { imagePoint($0.centre, reference) }
             let camera = fitPoint.map { centre -> WatchMapCamera in
                 let mpp = reference.metresPerPixel ?? 0.5
@@ -49,7 +50,7 @@ struct HoleMapView: View {
                                                          CGPoint(x: centre.x + half.width, y: centre.y + half.height)],
                                               imageSize: imageSize, viewSize: proxy.size)
             } ?? Self.camera(player: playerPoint, target: targetPoint, green: greenPoint,
-                             imageSize: imageSize, viewSize: proxy.size)
+                             metresPerPixel: reference.metresPerPixel, imageSize: imageSize, viewSize: proxy.size)
             Canvas { context, _ in
                     /* The picture through the camera's affine and the markers
                        through the same place(): turned together, scaled
@@ -88,10 +89,12 @@ struct HoleMapView: View {
         }
     }
 
-    private static func camera(player: CGPoint?, target: CGPoint?, green: CGPoint?,
+    private static func camera(player: CGPoint?, target: CGPoint?, green: CGPoint?, metresPerPixel: Double?,
                                imageSize: CGSize, viewSize: CGSize) -> WatchMapCamera {
         if let player, let target {
-            return WatchMapCamera.shot(player: player, target: target, imageSize: imageSize, viewSize: viewSize)
+            return WatchMapCamera.shot(player: player, target: target,
+                                       bubbleExtent: WatchMapCamera.nominalBubbleExtent(metresPerPixel: metresPerPixel),
+                                       imageSize: imageSize, viewSize: viewSize)
         }
         return WatchMapCamera.play(player: player, target: target ?? green, imageSize: imageSize, viewSize: viewSize)
     }
