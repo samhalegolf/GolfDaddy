@@ -93,10 +93,14 @@ exports.handler = async function (event) {
   const filters = [];
   if (permissionKey) filters.push("entitlement_type=eq." + encodeFilter(permissionKey));
   if (accountId || accountEmail || profileId) {
+    /* Inside or=(...) PostgREST wants column.op.value, not column=op.value.
+       This was "user_id=eq.x", which PostgREST rejects with 400 - so every
+       gps_round_start check failed closed, for everyone, and the picker would
+       not let a player start a round (beta ticket dfc7bd74, 13 Oct 2026). */
     const subjectFilters = [];
-    if (accountId) subjectFilters.push("user_id=eq." + encodeFilter(accountId));
-    if (accountEmail) subjectFilters.push("account_email=eq." + encodeFilter(accountEmail));
-    if (profileId) subjectFilters.push("profile_id=eq." + encodeFilter(profileId));
+    if (accountId) subjectFilters.push("user_id.eq." + encodeFilter(accountId));
+    if (accountEmail) subjectFilters.push("account_email.eq." + encodeFilter(accountEmail));
+    if (profileId) subjectFilters.push("profile_id.eq." + encodeFilter(profileId));
     filters.push("or=(" + subjectFilters.join(",") + ")");
   }
 

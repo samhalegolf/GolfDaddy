@@ -87,18 +87,22 @@ export default async function courseMaps(req) {
      * every course's geometry has to say so. */
     if (scope === "full") return json(200, await readMaps());
 
-    /* ?scope=play is what the phone's library sync and the course picker ask
-       for - the full record minus collected surfaces for a ready course.
+    /* ?scope=play&courseIds=a,b,c is what the phone's library sync asks for -
+       the full record of the named courses, minus collected surfaces for a
+       ready course. The phone already asks /api/course-library which of its
+       courses are stale or missing before it syncs, so it never needs more.
 
-       With courseIds=a,b,c it answers only those courses. The phone already
-       asks /api/course-library which of its courses are stale or missing
-       before it syncs; until now the answer to "two courses changed" was
-       still every course's geometry, 12 MB, and every phone asked for it at
-       once whenever anything was republished. */
+       Without courseIds this used to answer every course's geometry. The
+       course picker was still asking for that on every open; by October 2026
+       the library was 63 MB and Postgres cancelled the read on its statement
+       timeout, so the picker got nothing and players could not find their
+       course (beta ticket dfc7bd74, 13 Oct). Nothing needs the whole library
+       with geometry on the play path, so it is no longer offered here - a
+       caller that truly wants it says scope=full. */
     if (scope === "play") {
       const wanted = requestedCourseIds(params);
-      if (wanted.length) return json(200, stripSurfacesForPlay(await readSomeCourses(wanted)));
-      return json(200, stripSurfacesForPlay(await readMaps()));
+      if (!wanted.length) return json(400, { error: "scope=play needs courseIds", scope: "play" });
+      return json(200, stripSurfacesForPlay(await readSomeCourses(wanted)));
     }
 
     return json(200, await readList());

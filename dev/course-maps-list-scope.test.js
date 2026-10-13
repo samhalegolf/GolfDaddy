@@ -120,12 +120,19 @@ const FULL_ROW = {
   assert.ok(full.courses["published::cromwell"].objects, "scope=full still carries geometry");
   ok("scope=full still answers the whole record for anything that needs it");
 
-  // --- scope=play: unchanged for the phone ----------------------------------
+  // --- scope=play: only ever a named subset --------------------------------
   asked.length = 0;
-  const play = await get("?scope=play");
+  const play = await get("?scope=play&courseIds=cromwell");
   assert.equal(play.scope, "play");
   assert.ok(asked.some((u) => u.includes("objects_json")), "the phone still needs geometry");
-  ok("scope=play is untouched - the phone's library sync still works");
+  ok("scope=play&courseIds still carries geometry for the phone's library sync");
+
+  asked.length = 0;
+  const playAll = await mod.default(new Request("https://clarity-caddie.test/api/course-maps?scope=play"));
+  assert.equal(playAll.status, 400);
+  assert.equal((await playAll.json()).error, "scope=play needs courseIds");
+  assert.ok(!asked.some((u) => u.includes("objects_json")), "no courseIds must not read every course's geometry");
+  ok("scope=play without courseIds is refused - the picker asks for the list instead");
 
   // --- a Supabase failure must not look like an empty database --------------
   global.fetch = async function () {
