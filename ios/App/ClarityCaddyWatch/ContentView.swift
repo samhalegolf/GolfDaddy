@@ -188,7 +188,6 @@ struct ContentView: View {
                         locked: locked,
                         onUnlock: { page = .numbers },
                         pendingTarget: session.lockedShot.map { WatchScene.GeoPoint(lat: $0.target.lat, lng: $0.target.lng) },
-                        pendingExtentM: session.lockedShot.map { CGSize(width: $0.widthM, height: $0.depthM) },
                         pendingClub: session.lockedShot?.club,
                         aimOrigin: session.aimOrigin,
                         conditions: session.conditions

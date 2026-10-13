@@ -54,6 +54,9 @@ const publicPaths = [
   // map, so they are served from where they live rather than copied. Web-only
   // - see NON_APP_DIRS.
   "garmin/resources-trees",
+  // The Apple Watch's tree sprites, the same way, for the Apple Watch Preview.
+  // The folder also holds the watch app icon, a few small PNGs.
+  "ios/App/ClarityCaddyWatch/Assets.xcassets",
   // Legal pages, served at the site root. These are the URLs given to Apple and
   // Google in the store listings, and Play fetches the privacy policy during
   // review - a 404 there fails the submission. They shipped only under /assets
@@ -238,7 +241,7 @@ if (APP_ONLY) {
      capture harness - a dev tool, and one that has no business being in a
      shipped app even at 20KB. On Netlify these stay, since the CDN serves them
      and `npm run demo:capture` drives them. */
-  const NON_APP_DIRS = ["demo", "assets/landing", "garmin"];
+  const NON_APP_DIRS = ["demo", "assets/landing", "garmin", "ios"];
   /* welcome.html and its assets/landing images are the web landing page for
      signed-out visitors. The native apps never navigate there - the redirect
      script bails when GDNative reports native - so inside a store binary the

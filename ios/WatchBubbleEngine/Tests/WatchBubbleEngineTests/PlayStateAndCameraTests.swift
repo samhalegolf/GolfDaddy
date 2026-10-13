@@ -313,51 +313,60 @@ final class PlayStateAndCameraTests: XCTestCase {
             .imagePoint(fromView: .zero, imageSize: imageSize, viewSize: viewSize))
     }
 
-    // MARK: - Bubble framing
+    // MARK: - Shot framing
 
-    /* The aimable page frames the BUBBLE, not the player. A Driver's cluster
-       (about 83x101px on Millbrook's bake) sits centred, and the player 440px
-       behind it is allowed off the bottom: the aim line pivots from a fixed
-       origin instead of the map sliding under it on every re-fit. */
-    func testBubbleFramingCentresTheBubbleAndLetsThePlayerGo() {
-        let centre = CGPoint(x: 100, y: 700)
-        let camera = WatchMapCamera.bubble(centre: centre, extent: CGSize(width: 40, height: 50),
-                                           imageSize: holeImage, viewSize: viewSize)
-        let at = camera.place(centre, imageSize: holeImage, viewSize: viewSize)
-        XCTAssertEqual(at.x, viewSize.width / 2, accuracy: 0.5)
-        XCTAssertEqual(at.y, viewSize.height / 2, accuracy: 0.5)
-        XCTAssertEqual(50 * camera.scale, min(viewSize.width, viewSize.height) * WatchMapCamera.bubbleFraction,
-                       accuracy: 0.5, "the Bubble's longer side takes its fixed share of the view")
-        let player = camera.place(CGPoint(x: 100, y: 1140), imageSize: holeImage, viewSize: viewSize)
-        XCTAssertGreaterThan(player.y, viewSize.height, "a Driver's length behind the Bubble is off the bottom")
+    /* The aimable page frames the SHOT: the target in the middle, the player
+       at six o'clock, and the map turned so the shot runs straight up - the
+       aim line never crosses the glass. A second shot from the left rough,
+       aiming up and to the right, is diagonal on the bake and vertical on
+       screen. */
+    func testShotFramingPutsTheTargetInTheMiddleAndThePlayerAtSixOClock() {
+        let player = CGPoint(x: 60, y: 900), target = CGPoint(x: 260, y: 500)
+        let camera = WatchMapCamera.shot(player: player, target: target, imageSize: imageSize, viewSize: viewSize)
+        let t = camera.place(target, imageSize: imageSize, viewSize: viewSize)
+        XCTAssertEqual(t.x, viewSize.width / 2, accuracy: 1e-6)
+        XCTAssertEqual(t.y, viewSize.height / 2, accuracy: 1e-6)
+        let p = camera.place(player, imageSize: imageSize, viewSize: viewSize)
+        XCTAssertEqual(p.x, viewSize.width / 2, accuracy: 1e-6, "the player is straight below the target")
+        XCTAssertEqual(p.y, viewSize.height * WatchMapCamera.playerHeightFraction, accuracy: 1e-6, "at six o'clock")
+        XCTAssertFalse(camera.clampsToImage, "the target is centred even at the edge of the bake")
+        XCTAssertLessThanOrEqual(camera.scale, WatchMapCamera.maximumScale)
     }
 
-    /* A big Bubble cannot zoom out past the width fill: side bars are still
-       not an option, and the ceiling still holds for a tiny one. */
-    func testBubbleFramingKeepsTheNoBarsFloorAndTheMushCeiling() {
-        let wide = WatchMapCamera.bubble(centre: CGPoint(x: 100, y: 700), extent: CGSize(width: 180, height: 220),
-                                         imageSize: holeImage, viewSize: viewSize)
-        XCTAssertEqual(wide.scale, viewSize.width / holeImage.width, accuracy: 1e-9)
-        XCTAssertGreaterThanOrEqual(holeImage.width * wide.scale, viewSize.width - 0.001)
-        let tiny = WatchMapCamera.bubble(centre: CGPoint(x: 100, y: 700), extent: CGSize(width: 4, height: 5),
-                                         imageSize: holeImage, viewSize: viewSize)
-        XCTAssertEqual(tiny.scale, WatchMapCamera.maximumScale)
+    /* A chip caps at the ceiling and the player comes up the glass; a drive
+       is small but the player is still on it. */
+    func testAChipCapsAtTheCeilingAndADriveKeepsThePlayerOnTheGlass() {
+        let chip = WatchMapCamera.shot(player: CGPoint(x: 200, y: 520), target: CGPoint(x: 200, y: 500),
+                                       imageSize: imageSize, viewSize: viewSize)
+        XCTAssertEqual(chip.scale, WatchMapCamera.maximumScale)
+        XCTAssertLessThan(chip.place(CGPoint(x: 200, y: 520), imageSize: imageSize, viewSize: viewSize).y,
+                          viewSize.height * WatchMapCamera.playerHeightFraction)
+        let drive = WatchMapCamera.shot(player: CGPoint(x: 200, y: 1400), target: CGPoint(x: 200, y: 700),
+                                        imageSize: imageSize, viewSize: viewSize)
+        XCTAssertEqual(drive.place(CGPoint(x: 200, y: 1400), imageSize: imageSize, viewSize: viewSize).y,
+                       viewSize.height * WatchMapCamera.playerHeightFraction, accuracy: 1e-6)
     }
 
-    /* The Bubble framing centres the Bubble even at the very edge of the bake,
-       showing past the image (the views fill that with the map's green). The
-       play framing still keeps to the picture. */
-    func testTheBubbleIsCentredEvenAtTheEdgeOfTheImage() {
-        let image = CGSize(width: 300, height: 2000)
-        let view = CGSize(width: 187, height: 223)
-        let edge = CGPoint(x: 290, y: 30)
-        let camera = WatchMapCamera.bubble(centre: edge, extent: CGSize(width: 60, height: 80), imageSize: image, viewSize: view)
-        let onScreen = camera.place(edge, imageSize: image, viewSize: view)
-        XCTAssertEqual(onScreen.x, view.width / 2, accuracy: 0.5)
-        XCTAssertEqual(onScreen.y, view.height / 2, accuracy: 0.5)
-        let panned = camera.panned(byScreen: CGVector(dx: 5, dy: 0), imageSize: image)
-        XCTAssertFalse(panned.clampsToImage, "a pan keeps the Bubble framing's freedom")
-        let play = WatchMapCamera.play(player: CGPoint(x: 150, y: 1900), target: CGPoint(x: 150, y: 1500), imageSize: image, viewSize: view)
+    /* The turned affine round-trips, and an edge pan in screen terms moves
+       the focus along the shot on the bake: up the glass is up the shot. */
+    func testATurnedFramingRoundTripsAndPansUpTheGlass() throws {
+        let player = CGPoint(x: 60, y: 900), target = CGPoint(x: 260, y: 500)
+        let camera = WatchMapCamera.shot(player: player, target: target, imageSize: imageSize, viewSize: viewSize)
+        let original = CGPoint(x: 120, y: 40)
+        let back = try XCTUnwrap(camera.imagePoint(fromView: original, imageSize: imageSize, viewSize: viewSize))
+        let again = camera.place(back, imageSize: imageSize, viewSize: viewSize)
+        XCTAssertEqual(again.x, original.x, accuracy: 1e-9)
+        XCTAssertEqual(again.y, original.y, accuracy: 1e-9)
+        let panned = camera.panned(byScreen: CGVector(dx: 0, dy: -10), imageSize: imageSize)
+        let along = CGVector(dx: target.x - player.x, dy: target.y - player.y)
+        let length = hypot(along.dx, along.dy)
+        XCTAssertEqual(panned.focus.x - camera.focus.x, along.dx / length * 10 / camera.scale, accuracy: 1e-9)
+        XCTAssertEqual(panned.focus.y - camera.focus.y, along.dy / length * 10 / camera.scale, accuracy: 1e-9)
+        XCTAssertEqual(panned.rotation, camera.rotation, "a pan keeps the turn")
+        XCTAssertFalse(panned.clampsToImage, "a pan keeps the shot framing's freedom")
+        let play = WatchMapCamera.play(player: CGPoint(x: 150, y: 1900), target: CGPoint(x: 150, y: 1500),
+                                       imageSize: CGSize(width: 300, height: 2000), viewSize: viewSize)
         XCTAssertTrue(play.clampsToImage)
+        XCTAssertEqual(play.rotation, 0)
     }
 }

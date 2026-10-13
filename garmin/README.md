@@ -197,10 +197,12 @@ communications/**image request** APIs."
 
 `scripts/studio/gps-play/garmin-preview/garmin-watch-render.js` is a line-for-line
 JavaScript port of `GarminMapView.mc` and the pieces it leans on (`GarminMapCamera`,
-`GarminMapSpatialReference`, `GarminTreeSprites`, `LayoutProfile`, the session's
-`mapPalette`, `GarminConditions.windEffect`, `GarminPlayState.clampedToBag`,
-`GarminBubbleEngine.defaultTarget`), drawn over a canvas `Dc` with the same call
-names and the same integer habits. The Studio page beside it loads a course's
+`GarminTreeSprites`, `LayoutProfile`, the session's `mapPalette`), drawn over a
+canvas `Dc` with the same call names and the same integer habits; the maths both
+wrists share with the phone (the projection, `GarminGeo`, the wind rule, the
+layup rule, the skeleton) lives once in
+`scripts/studio/gps-play/watch-preview/watch-common.js`, and the page itself
+(`watch-preview-page.js`) is the same one the Apple Watch Preview uses. The Studio page beside it loads a course's
 Garmin package (`/api/course-watch-maps?watch=garmin`, the image package when there
 is none yet), puts the live aerial next to the face, and takes a tap on the aerial
 as the watch's GPS fix; a drag on the face aims as a finger does on the glass. The

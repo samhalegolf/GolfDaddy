@@ -1,0 +1,46 @@
+/* Clarity Studio - Apple Watch Preview: the shared watch preview page (watch-preview-page.js)
+ * with the Apple Watch's face (apple-watch-render.js, the port of
+ * ios/App/ClarityCaddyWatch/AimableHoleMap.swift).
+ *
+ * What is the Apple Watch's here: the image package (the phone pushes it the picture, never a
+ * drawn map), the one 96 px tree sprite per type scaled at draw time, points on a 2x panel,
+ * and its gestures - a tap places the target and sends it, a press held 0.2 s then dragged
+ * carries it, the Digital Crown (the mouse wheel here) zooms, and a locked shot brings up the
+ * UNLOCK band, split Unlock | Reset once the Bubble has moved. LOCK stands in for the phone
+ * locking the shot. */
+(function () {
+  "use strict";
+
+  function render(containerEl) {
+    var R = window.GDAppleWatchRender;
+    if (!R) { containerEl.innerHTML = '<p class="gdStudioMuted" style="padding:16px">The Apple Watch renderer did not load on this surface.</p>'; return null; }
+    return window.GDWatchPreviewPage.render(containerEl, {
+      key: "apple",
+      render: R,
+      deviceId: "s10-46",
+      lede: "The hole as the Apple Watch app draws it, beside the aerial it plays over. <strong>Tap the aerial</strong> to put the player there - the face takes it as its GPS fix. " +
+        "<strong>Tap the face</strong> to aim there, or <strong>press, hold and drag</strong> to carry the aim; the <strong>wheel</strong> is the Digital Crown. LOCK stands in for the phone locking the shot. " +
+        "Nothing here writes anything: the AIM_AT the watch would send is only reported below the face.",
+      packages: "image",
+      pictureFormat: "",
+      modes: null,
+      deviceLine: function () { return "points on a 2x panel"; },
+      fontsNote: "SF Rounded approximated by the browser's rounded sans; the band is drawn where SwiftUI lays it out.",
+      /* The one sprite per type the watch ships (ios/App/ClarityCaddyWatch/Assets.xcassets). */
+      spriteBitmap: function (onLoad) {
+        return function (type) {
+          var name = R.TREE_NAMES[type];
+          return window.GDWatchPreviewPage.spriteImage("ios/App/ClarityCaddyWatch/Assets.xcassets/" + name + ".imageset/" + name + ".png", onLoad);
+        };
+      },
+      buttons: [
+        { id: "lock", label: function (face, session) { return session.locked ? "UNLOCK" : "LOCK"; }, title: "The phone locks the shot (the band comes up) / the watch's UNLOCK",
+          act: function (face, session, watchSession) { if (session.locked) watchSession.unlock(); else { session.locked = true; face.lock(); } } },
+        { id: "plays", label: "PLAYS", title: "The plays button low on the map (tap it on the face too)", act: function (face) { face.togglePlays(); } }
+      ]
+    });
+  }
+
+  window.GDStudioPages = window.GDStudioPages || {};
+  window.GDStudioPages["gps-apple-preview"] = render;
+})();
