@@ -2611,10 +2611,32 @@
 	     work removed the equivalent gate in gd-auth-gate-v1.js but never found
 	     this one. The password-reset route still opens itself, because there the
 	     player followed a link specifically to set a password. */
+	  /* ?claritySignup=1&email=... is the button in the "your course is ready" email sent to an
+	     address with no account (functions/email-notification.js): open Create account with the
+	     address filled in. Someone already signed in just lands in the app. */
+	  function openSignupRoute() {
+	    let params;
+	    try { params = new URLSearchParams(location.search || ''); } catch(e) { return false; }
+	    if (!params.has('claritySignup')) return false;
+	    const email = String(params.get('email') || '').trim();
+	    try {
+	      const url = new URL(location.href);
+	      url.searchParams.delete('claritySignup');
+	      url.searchParams.delete('email');
+	      history.replaceState({}, document.title, url.pathname + (url.search || '') + (url.hash || ''));
+	    } catch(e) {}
+	    if (currentAccount()) return false;
+	    openAuth('signup');
+	    const field = document.getElementById('gd67AuthEmail');
+	    if (field && email) field.value = email;
+	    return true;
+	  }
+
 	  document.addEventListener('DOMContentLoaded', () => {
 	    setTimeout(() => {
 	      profile();
 	      if (openPasswordResetRoute()) return;
+	      if (openSignupRoute()) return;
 	      render();
 	    }, 120);
   });

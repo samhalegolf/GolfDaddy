@@ -256,15 +256,16 @@
       eventType: "course_map_ready",
       label: "Your course is ready to play",
       category: "requested",
-      recipient: "A signed-in player who asked to be told when a course they tried to open was mapped",
-      trigger: "Their course scan failed and they tapped \"Email me when it's ready\" (or signed up from that prompt). Sent by the course-mapper sweeper once that course has a playable map, however the map got there - a later scan or a Studio fix.",
+      recipient: "Anyone who typed their email address to be told when a course they tried to open was mapped - an account is not needed to ask",
+      trigger: "Their course scan failed and they tapped \"Email me when it's ready\". Sent by the course-mapper sweeper once that course has a playable map, however the map got there - a later scan or a Studio fix.",
       gating: "Once per request - the row is stamped when sent. Asked for by the player, so it is not held back by EMAIL_NOTIFICATIONS_ENABLED.",
       sender: "functions/course-mapper-sweeper.mjs → functions/course-map-notify.mjs → functions/email-notification.js",
-      cta: "Open Clarity.",
+      cta: "Open Clarity for an address with an account; Create your free account, linking to the sign-up form, for one without.",
       sample: {
         recipientName: "Alex Fenwick",
         actorName: "Clarity Golf",
-        courseName: "Fancourt Golf Estate"
+        courseName: "Fancourt Golf Estate",
+        hasAccount: true
       }
     },
     {
@@ -571,9 +572,20 @@
     }
     if (eventType === "course_map_ready") {
       var course = text(input.courseName, 160);
+      var courseTitle = course ? t("email.courseReady.subject", { course: course }) : t("email.courseReady.unnamedSubject");
+      /* No account yet: the same news, and the next step is signing up rather than opening
+         the app. The sender links the button to the sign-up form. */
+      if (!input.hasAccount) {
+        return {
+          subject: courseTitle,
+          title: courseTitle,
+          detail: course ? t("email.courseReady.signupDetail", { course: course }) : t("email.courseReady.unnamedSignupDetail"),
+          ctaLabel: t("email.courseReady.signupCta")
+        };
+      }
       return {
-        subject: course ? t("email.courseReady.subject", { course: course }) : t("email.courseReady.unnamedSubject"),
-        title: course ? t("email.courseReady.subject", { course: course }) : t("email.courseReady.unnamedSubject"),
+        subject: courseTitle,
+        title: courseTitle,
         detail: course ? t("email.courseReady.detail", { course: course }) : t("email.courseReady.unnamedDetail"),
         ctaLabel: t("email.openClarity")
       };

@@ -303,18 +303,29 @@ async function sendAccountSetupEmail(options){
 /* "Your course is ready", sent by the course-mapper sweeper to a player who asked for it when
  * their course scan failed (functions/course-map-notify.mjs). Requested by the player, so
  * EMAIL_NOTIFICATIONS_ENABLED does not hold it back. */
+/* "Your course is ready to play". An address with no account is sent to the sign-up form
+   with the address filled in (scripts/inline/gd-auth-account-shell.js reads claritySignup):
+   the course is ready, and an account is how they play it. */
 async function sendCourseMapReadyEmail(options){
   options = options || {};
   var to = email(options.to);
   if(!to)return {sent: false, reason: "invalid_email"};
   var siteUrl = env("CLARITY_SITE_URL") || templates.DEFAULT_SITE;
+  var ctaUrl = siteUrl;
+  if(!options.hasAccount){
+    var signup = new URL(siteUrl);
+    signup.searchParams.set("claritySignup", "1");
+    signup.searchParams.set("email", to);
+    ctaUrl = signup.toString();
+  }
   return deliver("course_map_ready", {
     to: to,
     siteUrl: siteUrl,
     recipientName: options.recipientName,
     actorName: "Clarity Golf",
     courseName: options.courseName,
-    ctaUrl: siteUrl
+    hasAccount: !!options.hasAccount,
+    ctaUrl: ctaUrl
   }, "Email provider rejected the course-ready message");
 }
 

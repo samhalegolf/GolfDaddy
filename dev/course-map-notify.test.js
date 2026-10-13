@@ -1,5 +1,6 @@
 /* course-map-notify.mjs: "email me when this course is ready".
- * Supabase, Supabase Auth and Resend are stubbed at the fetch layer, so this is hermetic. */
+ * Supabase (requests and app_accounts), Supabase Auth and Resend are stubbed at the fetch layer,
+ * so this is hermetic. */
 
 const assert = require("assert");
 const path = require("path");
@@ -44,6 +45,7 @@ function stubFetch(world) {
     const method = String(options.method || "GET").toUpperCase();
     if (method !== "GET") { world.writes.push({ table, method, query: rest, body: options.body ? JSON.parse(options.body) : null }); return jsonResponse(201, null); }
     if (table === "course_map_notify_requests") return jsonResponse(200, world.requests || []);
+    if (table === "app_accounts") return jsonResponse(200, (world.accounts || []).filter(a => rest.includes("email=eq." + encodeURIComponent(a.email))));
     if (table === "course_maps") return jsonResponse(200, rest.includes("course_id=eq.pupuke") ? (world.maps || []) : []);
     if (table === "course_mapper_jobs") return jsonResponse(200, world.mapperJobs || []);
     return jsonResponse(200, []);
@@ -53,7 +55,7 @@ function stubFetch(world) {
 let mod = null;
 
 test("emails everyone waiting on a course that now has a map, and stamps them", async () => {
-  const world = { maps: [READY_MAP], requests: [
+  const world = { maps: [READY_MAP], accounts: [{ email: "a@example.com" }], requests: [
     { id: "r1", course_id: "pupuke", course_name: "Pupuke Golf Club", email: "a@example.com", recipient_name: "Alex" },
     { id: "r2", course_id: "pupuke", course_name: null, email: "b@example.com", recipient_name: null }
   ] };
@@ -66,6 +68,21 @@ test("emails everyone waiting on a course that now has a map, and stamps them", 
   const stamps = world.writes.filter(w => w.method === "PATCH");
   assert.deepStrictEqual(stamps.map(w => w.query.split("id=eq.")[1]), ["r1", "r2"]);
   assert.ok(stamps.every(w => w.body.notified_at));
+});
+
+test("an address with an account is told to open Clarity; one without is asked to sign up", async () => {
+  const world = { maps: [READY_MAP], accounts: [{ email: "a@example.com" }], requests: [
+    { id: "r1", course_id: "pupuke", course_name: "Pupuke Golf Club", email: "a@example.com" },
+    { id: "r2", course_id: "pupuke", course_name: "Pupuke Golf Club", email: "b@example.com" }
+  ] };
+  stubFetch(world);
+  await mod.sendReadyCourseMapNotifications();
+  const [player, guest] = world.emails;
+  assert.ok(player.html.includes(">Open Clarity<"), "a player gets the open-the-app button");
+  assert.ok(!player.html.includes("claritySignup"), "a player is not sent to sign up");
+  assert.ok(guest.html.includes(">Create your free account<"), "a guest is asked to sign up");
+  assert.ok(guest.html.includes("claritySignup=1") && guest.html.includes("email=b%40example.com"), "the sign-up link carries the address");
+  assert.ok(guest.text.includes("create your free Clarity Caddy account"));
 });
 
 test("a published but incomplete map sends nothing: the player asked while looking at that map", async () => {
@@ -115,23 +132,49 @@ test("a bad address is stamped so it is not retried forever; a rate limit is ret
   assert.strictEqual(world.writes.length, 0);
 });
 
-test("POST stores the request against the verified account email, not anything the browser sends", async () => {
-  const world = { user: { id: "u1", email: "Real@Example.com", user_metadata: { name: "Alex" } }, requests: [] };
+test("POST stores the typed address with no account needed", async () => {
+  const world = { user: null, requests: [] };
   stubFetch(world);
-  const req = new Request("https://x.test/api/course-map-notify", { method: "POST", headers: { Authorization: "Bearer t" }, body: JSON.stringify({ courseId: "Pupuke Golf", courseName: "Pupuke", email: "attacker@example.com" }) });
+  const req = new Request("https://x.test/api/course-map-notify", { method: "POST", body: JSON.stringify({ courseId: "Pupuke Golf", courseName: "Pupuke", email: " Someone@Example.com " }) });
   const res = await mod.default(req);
   assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(await res.json(), { requested: true, courseId: "pupuke-golf", email: "someone@example.com" });
   const write = world.writes.find(w => w.method === "POST");
-  assert.strictEqual(write.body.email, "real@example.com");
+  assert.strictEqual(write.body.email, "someone@example.com");
+  assert.strictEqual(write.body.user_id, null);
   assert.strictEqual(write.body.course_id, "pupuke-golf");
   assert.strictEqual(write.body.notified_at, null);
-  assert.ok(write.query.includes("on_conflict=course_id,user_id"));
+  assert.ok(write.query.includes("on_conflict=course_id,email"));
 });
 
-test("POST without a session is refused", async () => {
-  stubFetch({ user: null });
-  const req = new Request("https://x.test/api/course-map-notify", { method: "POST", body: JSON.stringify({ courseId: "pupuke" }) });
-  assert.strictEqual((await mod.default(req)).status, 401);
+test("POST with a session links the row to the account but keeps the typed address", async () => {
+  const world = { user: { id: "u1", email: "account@example.com", user_metadata: { name: "Alex" } }, requests: [] };
+  stubFetch(world);
+  const req = new Request("https://x.test/api/course-map-notify", { method: "POST", headers: { Authorization: "Bearer t" }, body: JSON.stringify({ courseId: "pupuke", email: "other@example.com" }) });
+  assert.strictEqual((await mod.default(req)).status, 200);
+  const write = world.writes.find(w => w.method === "POST");
+  assert.strictEqual(write.body.user_id, "u1");
+  assert.strictEqual(write.body.recipient_name, "Alex");
+  assert.strictEqual(write.body.email, "other@example.com");
+});
+
+test("POST without a usable address is refused", async () => {
+  const world = { user: null, requests: [] };
+  stubFetch(world);
+  for (const email of [undefined, "", "not-an-email", "a@b"]) {
+    const req = new Request("https://x.test/api/course-map-notify", { method: "POST", body: JSON.stringify({ courseId: "pupuke", email }) });
+    assert.strictEqual((await mod.default(req)).status, 400, JSON.stringify(email));
+  }
+  assert.strictEqual(world.writes.length, 0);
+});
+
+test("one address cannot queue the whole directory", async () => {
+  const world = { user: null, requests: Array.from({ length: 20 }, (_, i) => ({ course_id: "course-" + i })) };
+  stubFetch(world);
+  const req = new Request("https://x.test/api/course-map-notify", { method: "POST", body: JSON.stringify({ courseId: "course-99", email: "a@example.com" }) });
+  assert.strictEqual((await mod.default(req)).status, 429);
+  const again = new Request("https://x.test/api/course-map-notify", { method: "POST", body: JSON.stringify({ courseId: "course-3", email: "a@example.com" }) });
+  assert.strictEqual((await mod.default(again)).status, 200, "re-asking for a course already on the list is fine");
 });
 
 (async () => {
