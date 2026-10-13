@@ -193,6 +193,27 @@ communications/**image request** APIs."
    (Phase 3), not hole navigation, so there is room to disagree about which
    physical input should mean "next hole" once real devices are in hand.
 
+## Looking at the map face without a build: Studio > GPS Play > Garmin Preview
+
+`scripts/studio/gps-play/garmin-preview/garmin-watch-render.js` is a line-for-line
+JavaScript port of `GarminMapView.mc` and the pieces it leans on (`GarminMapCamera`,
+`GarminMapSpatialReference`, `GarminTreeSprites`, `LayoutProfile`, the session's
+`mapPalette`, `GarminConditions.windEffect`, `GarminPlayState.clampedToBag`,
+`GarminBubbleEngine.defaultTarget`), drawn over a canvas `Dc` with the same call
+names and the same integer habits. The Studio page beside it loads a course's
+Garmin package (`/api/course-watch-maps?watch=garmin`, the image package when there
+is none yet), puts the live aerial next to the face, and takes a tap on the aerial
+as the watch's GPS fix; a drag on the face aims as a finger does on the glass. The
+Bubble comes from `app/js/bubble-engine.js` with the forward bias off - the maths
+the parity fixtures pin this port's `GarminBubbleEngine` to.
+
+The Monkey C stays the source of truth: change the watch first, then bring the port
+into step. What the browser cannot copy is said so on the page - the Garmin bitmap
+fonts are approximated from the screen size, and a canvas anti-aliases where a MIP
+panel does not. `npm run test:garmin-preview` pins the projection against the
+generator's maths, the palette constants, the camera clamp, the wind and layup
+rules, and one whole frame drawn through a recording canvas.
+
 ## Phase 2: map rendering (read-only)
 
 `GarminMapView` draws the delivered hole raster with the camera crop applied,

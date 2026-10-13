@@ -49,6 +49,11 @@ const publicPaths = [
   // it is built out alongside the current app. It reuses /assets and /scripts
   // at the site root, so copying the directory verbatim is enough.
   "app",
+  // The tree sprites the Garmin app ships (garmin/tools/tree-sprites.js writes
+  // them). Studio's Garmin Preview stamps the very same PNGs over its drawn
+  // map, so they are served from where they live rather than copied. Web-only
+  // - see NON_APP_DIRS.
+  "garmin/resources-trees",
   // Legal pages, served at the site root. These are the URLs given to Apple and
   // Google in the store listings, and Play fetches the privacy policy during
   // review - a 404 there fails the submission. They shipped only under /assets
@@ -233,7 +238,7 @@ if (APP_ONLY) {
      capture harness - a dev tool, and one that has no business being in a
      shipped app even at 20KB. On Netlify these stay, since the CDN serves them
      and `npm run demo:capture` drives them. */
-  const NON_APP_DIRS = ["demo", "assets/landing"];
+  const NON_APP_DIRS = ["demo", "assets/landing", "garmin"];
   /* welcome.html and its assets/landing images are the web landing page for
      signed-out visitors. The native apps never navigate there - the redirect
      script bails when GDNative reports native - so inside a store binary the
