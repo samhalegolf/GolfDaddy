@@ -210,6 +210,22 @@
 #gdStudioShellRoot .gdStudioViewportScan { margin-top: 10px; font-size: 12.5px; color: var(--gdStudioText); }
 #gdStudioShellRoot .gdStudioWarnText { color: var(--gdStudioWarn); }
 
+/* Garmin Preview: the watch face on the left at its real pixel size, the aerial on the right.
+   The bezel is the dark ring a round face sits in; the canvas inside it is clipped to the
+   glass by the page, so the corners show the bezel, as on the watch. */
+#gdStudioShellRoot .gdStudioGarmin { display: grid; grid-template-columns: minmax(420px, 560px) minmax(320px, 1fr); gap: 18px; align-items: start; }
+#gdStudioShellRoot .gdStudioGarminWatchPane, #gdStudioShellRoot .gdStudioGarminMapPane { min-width: 0; }
+#gdStudioShellRoot .gdStudioGarminBezel { display: inline-block; padding: 14px; border-radius: 28px; background: #1b1f1d; box-shadow: inset 0 0 0 2px #2a302d, 0 8px 24px rgba(0, 0, 0, 0.45); margin: 6px 0 10px; }
+#gdStudioShellRoot .gdStudioGarminBezel.isRound { border-radius: 50%; }
+#gdStudioShellRoot .gdStudioGarminBezel.isMip { background: #101311; }
+#gdStudioShellRoot .gdStudioGarminBezel canvas { display: block; background: #000; border-radius: 10px; touch-action: none; cursor: crosshair; }
+#gdStudioShellRoot .gdStudioGarminBezel.isRound canvas { border-radius: 50%; }
+#gdStudioShellRoot .gdStudioGarminButtons .gdStudioDiagramBtn { min-width: 64px; }
+#gdStudioShellRoot .gdStudioGarminReadout { margin: 10px 0 0; padding: 10px 12px; border: 1px solid var(--gdStudioBorder); border-radius: 10px; background: var(--gdStudioPanel); color: var(--gdStudioMuted); font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+#gdStudioShellRoot .gdStudioGarminMap { cursor: crosshair; }
+#gdStudioShellRoot .gdStudioGarminHoleLabel { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: rgba(0, 0, 0, 0.7); color: #fff; font: 700 11px/1 -apple-system, system-ui, sans-serif; border: 1px solid rgba(255, 255, 255, 0.5); cursor: pointer; }
+#gdStudioShellRoot .gdStudioGarminHoleLabel.isCurrent { background: var(--gdStudioAccent); color: #000; border-color: #000; }
+
 /* ---- Mapping Overlay ----
    One screen, in the manner of the booking app's video workspace: the page fills the Studio
    workspace (or the whole screen in full screen) and never scrolls; the map takes all of it
@@ -765,6 +781,7 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
   #gdStudioShellRoot .gdStudioShell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   #gdStudioShellRoot .gdStudioNavRail { border-right: none; border-bottom: 1px solid var(--gdStudioBorder); max-height: 40vh; }
   #gdStudioShellRoot .gdStudioViewportMap { height: 380px; }
+  #gdStudioShellRoot .gdStudioGarmin { grid-template-columns: 1fr; }
 }
 
 /* Mapping Overlay on a phone: the same one screen, tightened. The rail's buttons lose their

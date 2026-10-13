@@ -630,6 +630,33 @@
       code: [{ role: "Owner (do not move)", path: "scripts/gd-app-core.js" }],
       inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "gps-play", direction: "child-of", label: "" }],
       keyFunctions: [], status: "placeholder", needsVerification: false },
+    { id: "gps-garmin-preview", label: "Garmin Preview", parent: "gps-play",
+      function: "A hole drawn exactly as the Garmin Connect IQ app draws it, on a wrist-sized round face, beside the live aerial the course plays over. Tap the aerial to place the player (the face takes it as its GPS fix), drag on the face to aim as a finger does on the glass; the Bubble Engine answers for the fix with the forward bias off, as the wrist engines have none. Reads the course's Garmin package (GET /api/course-watch-maps?watch=garmin), the image package when there is none yet. Writes nothing - the AIM_AT the watch would send is only reported.",
+      owner: "scripts/studio/gps-play/garmin-preview/garmin-preview-page.js",
+      runtime: { app: false, studio: true, server: true },
+      code: [
+        { role: "Page (owner): package loading, the side map, the inputs", path: "scripts/studio/gps-play/garmin-preview/garmin-preview-page.js" },
+        { role: "The face: a port of the watch's own draw code, kept in step with it", path: "scripts/studio/gps-play/garmin-preview/garmin-watch-render.js" },
+        { role: "Source of truth being mirrored (Monkey C)", path: "garmin/source/Maps/GarminMapView.mc" },
+        { role: "Camera framings mirrored", path: "garmin/source/Maps/GarminMapCamera.mc" },
+        { role: "Tree sprites stamped (the same PNGs the watch ships)", path: "garmin/resources-trees/drawables/trees.xml" },
+        { role: "Bubble Engine (run in its own window, forward bias off)", path: "app/js/bubble-engine.js" },
+        { role: "Provider list + layer building (window.GDMapSources, do not copy)", path: "scripts/gd-app-core.js" },
+        { role: "Garmin package report", path: "functions/course-watch-maps.mjs" }
+      ],
+      inputs: ["Course selection from the real picker, or a typed course key", "A tap on the aerial (the GPS fix)", "Watch model, units, wind"],
+      outputs: ["Display only - nothing is written"],
+      owns: ["The preview UI, its device table and its font approximation"],
+      doesNotOwn: ["What the watch draws (owned by garmin/source/Maps/GarminMapView.mc - change it there first)", "The Bubble Engine", "The provider list", "The course picker"],
+      connections: [
+        { target: "gps-play", direction: "child-of", label: "" },
+        { target: "map-viewport", direction: "see-also", label: "Same provider list and picker hand-off" }
+      ],
+      keyFunctions: [
+        { name: "MapFace.onUpdate", purpose: "GarminMapView.onUpdate, line for line, over a canvas Dc.", codePath: "scripts/studio/gps-play/garmin-preview/garmin-watch-render.js" },
+        { name: "loadPackage", purpose: "The Garmin package first, the image package when a course has none yet.", codePath: "scripts/studio/gps-play/garmin-preview/garmin-preview-page.js" }
+      ],
+      status: "implemented", needsVerification: false },
     { id: "gps-positioning", label: "Positioning", parent: "gps-map-camera", function: "Not yet documented — placeholder nav entry.", owner: "Needs verification", runtime: { app: true, studio: false, server: false }, code: [], inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "gps-map-camera", direction: "child-of", label: "" }], keyFunctions: [], status: "placeholder", needsVerification: true },
     { id: "gps-shot-planning", label: "Shot Planning", parent: "gps-play",
       function: "On-course flag/pin placement (its file name mentions neither GPS nor shot planning, flagged here so it isn't missed) plus a jump into Bubble Projection's tuning group — see the nested gps-bubble-projection record for the bubble engine itself.",
@@ -796,7 +823,7 @@
     { id: "overview" },
     { id: "courses", children: ["course-database", "course-mapping", "map-viewport", "map-overlay", "course-usage", "course-visuals", "publishing"] },
     { id: "shot-system", children: ["photo-scan", "practice-data", "practice-email", "bubble-geometry", "pattern-finder", "my-bubble", "shot-system-course-data", "conditions", "recommendations"] },
-    { id: "gps-play", children: ["gps-course-selection", "gps-round-setup", "gps-hole-lifecycle", "gps-map-camera", "gps-shot-planning", "gps-shot-capture", "gps-scorecard", "gps-course-data-capture", "gps-sync-recovery", "gps-demo-mode"] },
+    { id: "gps-play", children: ["gps-course-selection", "gps-round-setup", "gps-hole-lifecycle", "gps-map-camera", "gps-garmin-preview", "gps-shot-planning", "gps-shot-capture", "gps-scorecard", "gps-course-data-capture", "gps-sync-recovery", "gps-demo-mode"] },
     { id: "players-coaches" },
     { id: "commerce" },
     { id: "communications" },
