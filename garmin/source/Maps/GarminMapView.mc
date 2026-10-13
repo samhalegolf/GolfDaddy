@@ -169,7 +169,7 @@ class GarminMapView extends WatchUi.View {
             framedLocked = lockedNow;
             framedPicture = drawn;
             framedPackageVersion = packageVersion;
-            camera = restingCamera(playerImg, targetImg, greenImg, imageWidth, imageHeight, viewWidth, viewHeight);
+            camera = restingCamera(local, playerImg, targetImg, greenImg, reference, imageWidth, imageHeight, viewWidth, viewHeight);
             // A device with no scaled bitmap draw (Connect IQ 3.0/3.1, the
             // Approach S62 among them: drawBitmap only, no drawScaledBitmap
             // and no drawBitmap2) can only show the image at 1:1 and cannot
@@ -293,16 +293,18 @@ class GarminMapView extends WatchUi.View {
         drawChrome(dc, scene, viewWidth, viewHeight);
     }
 
-    // The shot in hand: the target in the middle of the glass, the player at
-    // six o'clock, the map turned so the shot runs straight up (Sam,
-    // 2026-10-13: the aim line never runs across the watch). Without a
+    // The shot in hand: the Bubble fitted to the glass with the target in
+    // the middle, the map turned so the shot runs straight up (Sam,
+    // 2026-10-13: the aim line comes up from the bottom and never runs
+    // across the watch; the player is off the bottom on a drive). Without a
     // player or a target there is no shot to frame, so the hole is shown
     // PLAY-wise, in the bake's own orientation. A confirmed or cancelled aim
     // does not re-fit - the framing stays - and neither does a GPS tick; a
     // hole change, opening the map and a lock do (onUpdate).
-    function restingCamera(playerImg, targetImg, greenImg, imageWidth, imageHeight, viewWidth, viewHeight) {
+    function restingCamera(local, playerImg, targetImg, greenImg, reference, imageWidth, imageHeight, viewWidth, viewHeight) {
         if (playerImg != null && targetImg != null) {
-            return GarminMapCamera.shot(playerImg, targetImg, imageWidth, imageHeight, viewWidth, viewHeight);
+            var extent = GarminMapCamera.bubbleExtent((local != null) ? local.ring : null, targetImg, reference);
+            return GarminMapCamera.shot(playerImg, targetImg, extent, imageWidth, imageHeight, viewWidth, viewHeight);
         }
         return GarminMapCamera.play(playerImg, (targetImg != null) ? targetImg : greenImg, imageWidth, imageHeight, viewWidth, viewHeight);
     }

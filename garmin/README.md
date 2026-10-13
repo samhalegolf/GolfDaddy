@@ -228,15 +228,17 @@ view falls back to a plain target dot + club label, exactly matching
 `HoleMapView.swift`'s (the phone-authoritative, read-only) behaviour.
 
 - `GarminMapCamera` frames the shot in hand the way the phone does (Sam,
-  2026-10-13): the target in the middle of the glass, the player at about
-  six o'clock, the map turned so the shot runs straight up - the aim line
-  never runs across the watch. `WatchMapCamera.swift`'s `play` framing is
-  kept for a hole with no target yet; its `bubble` framing (the ring at a
-  fixed share of the view, the player falling off the bottom, the line
-  pivoting across the glass) is gone. Every point is placed through one
-  affine (`frame()`), so a turned framing costs no more than an unturned
-  one. The Approach S62 cannot turn a picture (no transform) and shows the
-  bake unturned; a drawn map turns on every device.
+  2026-10-13): the Bubble fitted to the glass (its longest reach across the
+  target at `BUBBLE_FRACTION` of the shorter side) with the target in the
+  middle, the map turned so the shot runs straight up - the aim line comes
+  up from the bottom edge and never runs across the watch, and the player
+  is off the bottom on a drive. Sizing the shot to put the player's dot at
+  six o'clock instead shrank a drive's Bubble to a speck: the direction
+  was the thing to keep, not the dot. `WatchMapCamera.swift`'s `play`
+  framing is kept for a hole with no target yet. Every point is placed
+  through one affine (`frame()`), so a turned framing costs no more than
+  an unturned one. The Approach S62 cannot turn a picture (no transform)
+  and shows the bake unturned; a drawn map turns on every device.
 - The camera is recomputed only on a hole change, never on every GPS tick or
   Scene revision — the same "camera should not continuously jump" stability
   rule `AimableHoleMap.swift` gets from only calling `settle()` on
@@ -255,8 +257,8 @@ view falls back to a plain target dot + club label, exactly matching
   camera transform) against the unscaled image — confirm this against real
   hardware/simulator before trusting the fallback path in practice.
 - The manifest's `metresPerPixel` field is parsed in `GarminMapProjection.mc`'s
-  `fromDict`/persisted round-trip; nothing on the watch reads it since the
-  shot framing replaced the nominal-Bubble-extent fallback.
+  `fromDict`/persisted round-trip and read by `GarminMapCamera.bubbleExtent`
+  for a target with no ring computed yet (a Driver's 55 m of ground).
 
 ## Phase 3: interactive aiming
 

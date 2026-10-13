@@ -28,8 +28,8 @@ class GarminMapSpatialReference {
     var imageWidth;
     var imageHeight;
     // Both optional on the wire, matching WatchMapSpatialReference.swift.
-    // metresPerPixel feeds GarminMapCamera's nominal-Bubble-extent fallback
-    // (GarminMapView.restingCamera) when no ring has been computed yet.
+    // metresPerPixel feeds GarminMapCamera.bubbleExtent's nominal fallback
+    // (a Driver's worth of ground) when no ring has been computed yet.
     var rotationDegrees;
     var metresPerPixel;
 

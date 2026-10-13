@@ -106,19 +106,22 @@ test("the camera never shows background past an edge and centres the focus when 
   assert.ok(Math.abs(again[0] - 100) < 1e-9 && Math.abs(again[1] - 300) < 1e-9, "imagePointFromView inverts place() unturned");
 });
 
-test("the shot framing puts the target in the middle, the player at six o'clock and the shot straight up", () => {
+test("the shot framing fits the Bubble with the target in the middle and the shot straight up", () => {
   const { frame } = sampleFrame();
   const sr = new R.SpatialReference(frame.spatialReference);
   const W = sr.imageWidth, H = sr.imageHeight;
   /* A second shot from the left rough, aiming up and to the right: on the bake the line is
-     diagonal; on the glass it must be vertical. */
+     diagonal; on the glass it must be vertical. The Bubble reaches 60 px either side of the
+     target on the bake. */
   const player = { x: 60, y: 900 }, target = { x: 260, y: 500 };
-  const cam = R.Camera.shot(player, target, W, H, 454, 454);
+  const cam = R.Camera.shot(player, target, 120, W, H, 454, 454);
   const t = cam.place(target.x, target.y, W, H, 454, 454), p = cam.place(player.x, player.y, W, H, 454, 454);
   assert.ok(Math.abs(t[0] - 227) < 1e-9 && Math.abs(t[1] - 227) < 1e-9, "target at the centre: " + t);
-  assert.ok(Math.abs(p[0] - 227) < 1e-6, "the player is straight below the target: " + p);
-  assert.ok(Math.abs(p[1] - 0.82 * 454) < 1e-6, "at six o'clock: " + p[1]);
-  assert.ok(cam.scale > 0 && cam.scale <= 3.0);
+  assert.ok(Math.abs(p[0] - 227) < 1e-6 && p[1] > 227, "the player is straight below the target: " + p);
+  assert.ok(Math.abs(cam.scale - (0.6 * 454) / 120) < 1e-9, "the Bubble takes 60% of the glass: " + cam.scale);
+  const reach = cam.place(target.x + 60, target.y, W, H, 454, 454);
+  assert.ok(Math.abs(Math.hypot(reach[0] - 227, reach[1] - 227) - 0.3 * 454) < 1e-6, "the ring's edge lands 30% of the glass from the middle, turned or not");
+  assert.ok(p[1] > 454, "a drive's player is off the bottom of the glass: " + p[1]);
   assert.strictEqual(cam.clampsToImage, false);
   /* Round trip through the turned affine, and a screen-up nudge goes up the shot on the bake. */
   const back = cam.imagePointFromView(300, 100, W, H, 454, 454);
@@ -127,15 +130,22 @@ test("the shot framing puts the target in the middle, the player at six o'clock 
   const up = cam.imageDirection(0, -10);
   const along = { x: target.x - player.x, y: target.y - player.y }, len = Math.hypot(along.x, along.y);
   assert.ok(Math.abs(up[0] - along.x / len * 10) < 1e-9 && Math.abs(up[1] - along.y / len * 10) < 1e-9, "screen up is along the shot: " + up);
-  /* A chip caps at 3x and the player comes up the glass; a drive is small but the player is still on it. */
-  const chip = R.Camera.shot({ x: 200, y: 520 }, { x: 200, y: 500 }, W, H, 454, 454);
+  /* A tiny Bubble caps at 3x, where a chip's player is on the glass. */
+  const chip = R.Camera.shot({ x: 200, y: 520 }, { x: 200, y: 500 }, 10, W, H, 454, 454);
   assert.strictEqual(chip.scale, 3.0);
-  assert.ok(chip.place(200, 520, W, H, 454, 454)[1] < 0.82 * 454);
-  const drive = R.Camera.shot({ x: 200, y: 1400 }, { x: 200, y: 700 }, W, H, 260, 260);
-  assert.ok(Math.abs(drive.place(200, 1400, W, H, 260, 260)[1] - 0.82 * 260) < 1e-6, "a drive still has the player at six o'clock");
+  assert.ok(chip.place(200, 520, W, H, 454, 454)[1] < 454 && chip.place(200, 520, W, H, 454, 454)[1] > 227, "a chip's player is on the glass, below the target");
+  assert.strictEqual(R.Camera.shot(player, target, null, W, H, 454, 454).scale, 3.0, "no extent at all: the ceiling");
+  assert.strictEqual(R.Camera.shot(target, target, 120, W, H, 454, 454).rotation, 0.0, "a player on the target has no direction to turn to");
   /* The same point in both halves of the affine. */
   const f = cam.frame(W, H, 454, 454);
   assert.ok(Math.abs(Math.hypot(f[2], f[3]) - cam.scale) < 1e-9, "the affine carries the scale");
+  /* The Bubble's reach: twice the farthest ring point from the target, so a ring sat off to one
+     side is still whole; a Driver's worth of ground when there is no ring yet. */
+  const geoTarget = sr.coordinate(target.x, target.y);
+  const ring = Array.from({ length: 24 }, (_, i) => R.Geo.project(R.Geo.project(geoTarget, Math.PI / 2, 5), (i / 24) * Math.PI * 2, 20));
+  const farthest = Math.max.apply(null, ring.map((g) => { const q = sr.imagePoint(g.lat, g.lng); return Math.hypot(q.x - target.x, q.y - target.y); }));
+  assert.ok(Math.abs(R.Camera.bubbleExtent(ring, target, sr) - 2 * farthest) < 1e-9, "twice the farthest ring point");
+  assert.ok(Math.abs(R.Camera.bubbleExtent(null, target, sr) - 55 / (sr.metresPerPixel != null ? sr.metresPerPixel : 0.5)) < 1e-9, "55 m with no ring");
 });
 
 test("the chord of a round face narrows towards the top and a rectangle does not", () => {
@@ -252,10 +262,17 @@ test("a whole frame draws, in the watch's order, and a drag moves the target thr
   face.onUpdate(ctx);
   assert.ok(face.trace && /^map frame: hole 7 /.test(face.trace), face.trace);
   assert.ok(face.camera && face.camera.scale > 0);
-  /* The shot framing: the player's dot at six o'clock, the target in the middle. */
+  /* The shot framing: the Bubble fitted to the glass, the target in the middle, the player
+     straight below it. */
   const sr = record.spatialReference;
+  const local = session.localBubble(), targetImg = sr.imagePoint(local.target.lat, local.target.lng);
+  const targetOn = face.camera.place(targetImg.x, targetImg.y, sr.imageWidth, sr.imageHeight, device.width, device.height);
+  assert.ok(Math.abs(targetOn[0] - 227) < 1e-6 && Math.abs(targetOn[1] - 227) < 1e-6, "target in the middle: " + targetOn);
   const playerOn = face.camera.place(sr.imagePoint(player.lat, player.lng).x, sr.imagePoint(player.lat, player.lng).y, sr.imageWidth, sr.imageHeight, device.width, device.height);
-  assert.ok(Math.abs(playerOn[0] - 227) < 1e-6 && Math.abs(playerOn[1] - 0.82 * 454) < 1e-6, "player at six o'clock: " + playerOn);
+  assert.ok(Math.abs(playerOn[0] - 227) < 1e-6 && playerOn[1] > 227, "player straight below the target: " + playerOn);
+  const farthestPx = R.Camera.bubbleExtent(local.ring, targetImg, sr) / 2;
+  const reachOn = Math.max.apply(null, local.ring.map((g) => { const q = sr.imagePoint(g.lat, g.lng), on = face.camera.place(q.x, q.y, sr.imageWidth, sr.imageHeight, device.width, device.height); return Math.hypot(on[0] - 227, on[1] - 227); }));
+  assert.ok(Math.abs(reachOn - Math.min(0.3 * 454, 3 * farthestPx)) < 1e-6, "the ring fills 60% of the glass, or the 3x ceiling: " + reachOn);
   const fills = calls.filter((c) => c.name === "fillRect");
   assert.strictEqual(fills[0].fill, "#000000", "cleared black first, as onUpdate does");
   assert.strictEqual(fills[1].fill, "#315833", "then the rough, for a drawn map");

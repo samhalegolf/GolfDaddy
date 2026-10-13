@@ -73,7 +73,7 @@
   var MAP_EDGE_GREEN = 0x294A30, BUBBLE_MINT = 0x3EE6C4, RING_KEYLINE = 0x0E2A1E;
   var WIND_BLUE = 0x55AAFF, SLOPE_ORANGE = 0xFFAA00, PLAYS_MAIN = -2;
   var TEXT_LEFT = "left", TEXT_CENTER = "center", TEXT_RIGHT = "right";
-  var MAXIMUM_SCALE = 3.0, PLAYER_HEIGHT_FRACTION = 0.82;
+  var MAXIMUM_SCALE = 3.0, BUBBLE_FRACTION = 0.6, NOMINAL_BUBBLE_M = 55.0;
   var EDGE_INSET_FRACTION = 0.09, EDGE_DWELL_MS = 400, PAN_TICK_MS = 100, PAN_PX_PER_TICK = 5;
   var NUDGE_STEP_IMAGE_PX = 10.0;
   var TREE_SIZES = [8, 12, 16, 22, 28];
@@ -136,20 +136,34 @@
 
   // ------------------------------------------------------------------ GarminMapCamera
 
-  /* Two framings, as the watch's. SHOT: the target in the middle of the glass, the player at
-     about six o'clock, the map turned so the shot runs straight up - the aim line never runs
-     across the watch. PLAY, for a hole with no target yet: the player low, the bake's own way
+  /* Two framings, as the watch's. SHOT: the Bubble fitted to the glass with the target in the
+     middle, the map turned so the shot runs straight up - the aim line comes up from the bottom
+     edge and never runs across the watch; the player is on the glass for a chip and off the
+     bottom for a drive. PLAY, for a hole with no target yet: the player low, the bake's own way
      up. Every point is placed through one affine, frame(): [tx, ty, a, b] with
      sx = tx + x*a - y*b, sy = ty + x*b + y*a. */
   function Camera(focusX, focusY, scale) { this.focusX = focusX; this.focusY = focusY; this.scale = scale; this.rotation = 0.0; this.clampsToImage = true; }
-  Camera.shot = function (player, target, imageWidth, imageHeight, viewWidth, viewHeight) {
-    var dx = target.x - player.x, dy = target.y - player.y, distance = Math.sqrt(dx * dx + dy * dy);
+  /* bubbleExtent: the Bubble's longest reach across the target, image px (Camera.bubbleExtent). */
+  Camera.shot = function (player, target, bubbleExtent, imageWidth, imageHeight, viewWidth, viewHeight) {
     var camera = new Camera(target.x, target.y, MAXIMUM_SCALE);
     camera.clampsToImage = false;
-    if (distance < 1.0 || viewHeight <= 0) return camera;
-    camera.scale = Math.min(MAXIMUM_SCALE, ((PLAYER_HEIGHT_FRACTION - 0.5) * viewHeight) / distance);
-    camera.rotation = -Math.PI / 2.0 - Math.atan2(dy, dx);
+    var shorterView = Math.min(viewWidth, viewHeight);
+    if (bubbleExtent != null && bubbleExtent > 0 && shorterView > 0) camera.scale = Math.min(MAXIMUM_SCALE, (shorterView * BUBBLE_FRACTION) / bubbleExtent);
+    var dx = target.x - player.x, dy = target.y - player.y;
+    if (dx * dx + dy * dy >= 1.0) camera.rotation = -Math.PI / 2.0 - Math.atan2(dy, dx);
     return camera;
+  };
+  /* Twice the farthest ring point from the target, so a ring sat off to one side of the target
+     is still whole whichever way the map is turned; a target with no ring yet gets a Driver's
+     worth of ground through the map's metresPerPixel. */
+  Camera.bubbleExtent = function (ring, target, reference) {
+    var farthest = 0.0;
+    (ring || []).forEach(function (geo) {
+      var p = reference.imagePoint(geo.lat, geo.lng);
+      if (p != null) farthest = Math.max(farthest, Math.hypot(p.x - target.x, p.y - target.y));
+    });
+    if (farthest > 0.0) return 2.0 * farthest;
+    return NOMINAL_BUBBLE_M / (reference.metresPerPixel != null ? reference.metresPerPixel : 0.5);
   };
   Camera.play = function (player, target, imageWidth, imageHeight, viewWidth, viewHeight) {
     if (imageWidth <= 0 || imageHeight <= 0 || viewWidth <= 0 || viewHeight <= 0) return new Camera(imageWidth / 2.0, imageHeight / 2.0, 1.0);
@@ -365,7 +379,7 @@
     var lockedNow = scene.shotLocked();
     if (this.framedHoleNumber !== holeNumber || this.camera == null || this.framedPackageVersion !== packageVersion || this.framedLocked !== lockedNow || this.framedPicture !== drawn) {
       this.framedLocked = lockedNow; this.framedPicture = drawn; this.framedPackageVersion = packageVersion;
-      this.camera = this.restingCamera(playerImg, targetImg, greenImg, imageWidth, imageHeight, viewWidth, viewHeight);
+      this.camera = this.restingCamera(local, playerImg, targetImg, greenImg, reference, imageWidth, imageHeight, viewWidth, viewHeight);
       /* The S62 can neither scale nor turn a picture; a drawn map turns everywhere. */
       if (drawn && !device.scaledBitmap) { this.camera.scale = 1.0; this.camera.rotation = 0.0; }
       if (drawn && this.camera.rotation === 0.0 && this.camera.scale > 0.9 && this.camera.scale < 1.1) this.camera.scale = 1.0;
@@ -439,10 +453,12 @@
     this.drawChrome(dc, viewWidth, viewHeight);
   };
 
-  /* The shot in hand framed target-centred, player at six o'clock, shot straight up; a hole
+  /* The shot in hand framed Bubble-to-the-glass, target in the middle, shot straight up; a hole
      with no shot to frame yet is shown PLAY-wise in the bake's own orientation. */
-  MapFace.prototype.restingCamera = function (playerImg, targetImg, greenImg, imageWidth, imageHeight, viewWidth, viewHeight) {
-    if (playerImg != null && targetImg != null) return Camera.shot(playerImg, targetImg, imageWidth, imageHeight, viewWidth, viewHeight);
+  MapFace.prototype.restingCamera = function (local, playerImg, targetImg, greenImg, reference, imageWidth, imageHeight, viewWidth, viewHeight) {
+    if (playerImg != null && targetImg != null) {
+      return Camera.shot(playerImg, targetImg, Camera.bubbleExtent(local != null ? local.ring : null, targetImg, reference), imageWidth, imageHeight, viewWidth, viewHeight);
+    }
     return Camera.play(playerImg, targetImg != null ? targetImg : greenImg, imageWidth, imageHeight, viewWidth, viewHeight);
   };
 

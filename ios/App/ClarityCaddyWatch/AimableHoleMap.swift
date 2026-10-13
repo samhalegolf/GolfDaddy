@@ -643,24 +643,29 @@ struct AimableHoleMap: View {
 
     // MARK: - Framing
 
-    /* SHOT framing (Sam, 2026-10-13): the target in the middle of the glass,
-       the player at six o'clock, the map turned so the shot runs straight up
-       - the aim line never runs across the watch. The centre is the END OF
-       THE AIM LINE - the geo target - never the middle of the Bubble: the
+    /* SHOT framing (Sam, 2026-10-13): the Bubble fitted to the glass with
+       the target in the middle, the map turned so the shot runs straight up
+       - the aim line comes up from the bottom and never runs across the
+       watch; the player is off the bottom on a drive. The centre is the END
+       OF THE AIM LINE - the geo target - never the middle of the Bubble: the
        engine may sit the Bubble off to one side of the target by the
-       player's offset, and the target is what the screen is about. `play`
-       (player low, hole ahead) remains only for a hole with no target at
-       all, where there is no shot to frame. */
+       player's offset, and the target is what the screen is about (the
+       extent is measured from the target, so the ring is still whole).
+       `play` (player low, hole ahead) remains only for a hole with no target
+       at all, where there is no shot to frame. */
     private func restingCamera(viewSize: CGSize) -> WatchMapCamera {
         if let player = imagePoint(player), let target = imagePoint(currentTarget) {
             /* Framed in the AIM AREA, not the glass: while the band is up the
-               bottom of the screen is UNLOCK and the readout, and a player put
-               at six o'clock of the glass sat under them (seen in Studio's
-               preview, 2026-10-13). The shot is sized to the area and its
-               centre lifted to the area's middle; unlocked, the area is the
-               glass and nothing moves. */
+               bottom of the screen is UNLOCK and the readout, and a Bubble
+               sized to the glass sat under them (seen in Studio's preview,
+               2026-10-13). The shot is sized to the area and its centre
+               lifted to the area's middle; unlocked, the area is the glass
+               and nothing moves. */
             let area = aimArea(viewSize)
-            var camera = WatchMapCamera.shot(player: player, target: target, imageSize: imageSize, viewSize: area.size)
+            let ring = (state.bubble?.ring ?? []).compactMap { imagePoint(lat: $0.lat, lng: $0.lng) }
+            let extent = WatchMapCamera.bubbleExtent(ring: ring, target: target)
+                ?? WatchMapCamera.nominalBubbleExtent(metresPerPixel: map.spatialReference.metresPerPixel)
+            var camera = WatchMapCamera.shot(player: player, target: target, bubbleExtent: extent, imageSize: imageSize, viewSize: area.size)
             let lift = camera.imageDirection(screenDx: 0, screenDy: viewSize.height / 2 - area.midY)
             camera.focus = CGPoint(x: target.x + lift.dx / camera.scale, y: target.y + lift.dy / camera.scale)
             return camera

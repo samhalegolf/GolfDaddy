@@ -39,7 +39,7 @@
 
   // ------------------------------------------------------------------ constants (AimableHoleMap / WatchMapCamera)
 
-  var MAXIMUM_SCALE = 3, PLAYER_HEIGHT_FRACTION = 0.82;
+  var MAXIMUM_SCALE = 3, BUBBLE_FRACTION = 0.6, NOMINAL_BUBBLE_M = 55;
   var EDGE_INSET = 16, EDGE_DWELL_MS = 400, EDGE_PAN_SPEED = 45, PAN_TICK_MS = 1000 / 30;
   var TOP_BAND = 30, BOTTOM_EDGE = 40, READOUT = 38;
   var HOLD_MS = 200;             // LongPressGesture(minimumDuration: 0.2, maximumDistance: 12)
@@ -56,12 +56,21 @@
     this.focusX = focusX; this.focusY = focusY; this.scale = scale;
     this.rotation = rotation || 0; this.clampsToImage = clampsToImage !== false;
   }
-  Camera.shot = function (player, target, imageWidth, imageHeight, viewWidth, viewHeight) {
-    var dx = target.x - player.x, dy = target.y - player.y, distance = Math.hypot(dx, dy);
-    if (distance < 1 || viewHeight <= 0) return new Camera(target.x, target.y, MAXIMUM_SCALE, 0, false);
-    var scale = Math.min(((PLAYER_HEIGHT_FRACTION - 0.5) * viewHeight) / distance, MAXIMUM_SCALE);
-    return new Camera(target.x, target.y, scale, -Math.PI / 2 - Math.atan2(dy, dx), false);
+  /* The shot: the Bubble (bubbleExtent, its longest reach across the target in image px) at
+     BUBBLE_FRACTION of the glass, the target in the middle, the map turned so the shot runs
+     straight up. The player lands wherever that puts them - off the bottom on a drive. */
+  Camera.shot = function (player, target, bubbleExtent, imageWidth, imageHeight, viewWidth, viewHeight) {
+    var shorterView = Math.min(viewWidth, viewHeight);
+    var scale = bubbleExtent > 0 && shorterView > 0 ? Math.min((shorterView * BUBBLE_FRACTION) / bubbleExtent, MAXIMUM_SCALE) : MAXIMUM_SCALE;
+    var dx = target.x - player.x, dy = target.y - player.y;
+    return new Camera(target.x, target.y, scale, Math.hypot(dx, dy) >= 1 ? -Math.PI / 2 - Math.atan2(dy, dx) : 0, false);
   };
+  Camera.bubbleExtent = function (ring, target) {
+    var farthest = 0;
+    ring.forEach(function (p) { farthest = Math.max(farthest, Math.hypot(p.x - target.x, p.y - target.y)); });
+    return farthest > 0 ? farthest * 2 : null;
+  };
+  Camera.nominalBubbleExtent = function (metresPerPixel) { return NOMINAL_BUBBLE_M / (metresPerPixel != null ? metresPerPixel : 0.5); };
   Camera.resting = function (interest, imageWidth, imageHeight, viewWidth, viewHeight) {
     if (!(imageWidth > 0 && imageHeight > 0 && viewWidth > 0 && viewHeight > 0)) return new Camera(imageWidth / 2, imageHeight / 2, 1);
     var fitScale = Math.min(viewWidth / imageWidth, viewHeight / imageHeight);
@@ -250,19 +259,21 @@
   MapFace.prototype.onEngineReady = function () { this.settle(); };
 
   MapFace.prototype.restingCamera = function () {
-    var size = this.imageSize(), d = this.device;
+    var size = this.imageSize(), d = this.device, self = this;
     if (!size) return null;
+    var hole = this.session.manifestHole(this.session.currentHole());
     var player = this.imagePoint(this.state.player), target = this.imagePoint(this.currentTarget());
     if (player && target) {
       /* Framed in the aim area, not the glass: with the band up the shot is sized to the area
          and lifted to its middle; unlocked, the area is the glass and nothing moves. */
       var area = this.aimArea();
-      var camera = Camera.shot(player, target, size.w, size.h, area.w, area.h);
+      var ring = (this.state.bubble ? this.state.bubble.ring : []).map(function (p) { return self.imagePoint(p); }).filter(Boolean);
+      var extent = Camera.bubbleExtent(ring, target) || Camera.nominalBubbleExtent(hole.spatialReference.metresPerPixel);
+      var camera = Camera.shot(player, target, extent, size.w, size.h, area.w, area.h);
       var lift = camera.imageDirection(0, d.height / 2 - (area.y + area.h / 2));
       camera.focusX = target.x + lift[0] / camera.scale; camera.focusY = target.y + lift[1] / camera.scale;
       return camera;
     }
-    var hole = this.session.manifestHole(this.session.currentHole());
     var green = hole && hole.greenLat != null ? this.imagePoint({ lat: hole.greenLat, lng: hole.greenLng }) : null;
     return Camera.play(player, target || green, size.w, size.h, d.width, d.height);
   };
@@ -577,7 +588,7 @@
     PAN_TICK_MS: PAN_TICK_MS,
     TREE_NAMES: TREE_NAMES,
     TOP_BAND: TOP_BAND, BOTTOM_EDGE: BOTTOM_EDGE, READOUT: READOUT,
-    PLAYER_HEIGHT_FRACTION: PLAYER_HEIGHT_FRACTION,
+    BUBBLE_FRACTION: BUBBLE_FRACTION,
     Camera: Camera,
     unpackTree: unpackTree,
     MapFace: MapFace
