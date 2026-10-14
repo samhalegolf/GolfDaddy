@@ -164,14 +164,29 @@ test("a tree run waits behind background mapping, and the backfill takes a cours
     patchedRows: rest => rest.includes("new-0") ? [{ id: "new-0", kind: "find_trees", course_id: "c", requested_by: "tree-backfill" }] : []
   };
   const calls = stubFetch(world);
-  global.fetch = (inner => async (url, options) => String(url).includes("/rest/v1/course_trees") ? jsonResponse(200, [{ course_id: "a" }]) : inner(url, options))(global.fetch);
+  global.fetch = (inner => async (url, options) => String(url).includes("/rest/v1/course_trees") ? jsonResponse(200, [{ course_id: "a", status: "auto", version: 2 }]) : inner(url, options))(global.fetch);
   const job = await worker.claimNextJob({ allowNearby: true, allowBackfill: true });
+  assert.ok(calls.reads.some(rest => rest.startsWith("course_maps?") && rest.includes("published=eq.true") && rest.includes("hole_count=gt.0")), "a published course with no holes has nothing to look along");
   const order = calls.reads.filter(rest => /kind=eq\.(nearby_automap|find_trees)&status=eq\.queued/.test(rest)).map(rest => rest.match(/kind=eq\.([a-z_]+)/)[1]);
   assert.deepStrictEqual(order, ["nearby_automap", "find_trees"], "background mapping is asked for before a queued tree run");
   assert.deepStrictEqual(jobInserts(calls).map(row => [row.course_id, row.kind, row.requested_by]), [["c", "find_trees", "tree-backfill"]], "a has trees, b was tried today: c is next");
   assert.strictEqual(job && job.course_id, "c");
   stubFetch(world);
   assert.strictEqual(await worker.claimNextJob({ allowNearby: true, allowBackfill: false }), null, "one backfill an invocation");
+});
+
+test("the backfill redoes an automatic tree layer an older finder made, never an edited one", async () => {
+  const world = {
+    maps: [{ course_id: "edited-old" }, { course_id: "auto-old" }],
+    jobs: rest => rest.includes("id=eq.new-0") && rest.includes("status=eq.queued") ? [{ id: "new-0", kind: "find_trees", course_id: "auto-old" }] : [],
+    patchedRows: rest => rest.includes("new-0") ? [{ id: "new-0", kind: "find_trees", course_id: "auto-old" }] : []
+  };
+  const calls = stubFetch(world);
+  global.fetch = (inner => async (url, options) => String(url).includes("/rest/v1/course_trees")
+    ? jsonResponse(200, [{ course_id: "edited-old", status: "edited", version: 1 }, { course_id: "auto-old", status: "auto", version: 1 }])
+    : inner(url, options))(global.fetch);
+  await worker.claimNextJob({ allowNearby: true, allowBackfill: true });
+  assert.deepStrictEqual(jobInserts(calls).map(row => row.course_id), ["auto-old"]);
 });
 
 test("an idle worker takes a background job, unless its time budget is spent", async () => {
