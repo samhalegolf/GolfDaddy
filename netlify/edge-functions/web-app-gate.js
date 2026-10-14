@@ -10,7 +10,7 @@
  * an auth-email link on a phone with the app installed opens the app before
  * any request is made. A link opened anywhere else lands on the welcome page.
  *
- * Unlocking: visit /web-access, enter CLARITY_WEB_ACCESS_KEY (falls back to
+ * Unlocking: open /studio (it shows the sign-in in place) or /web-access, enter CLARITY_WEB_ACCESS_KEY (falls back to
  * CLARITY_ADMIN_AUTH_TOKEN). That sets an HttpOnly cookie holding an HMAC of
  * the key, never the key itself, so rotating the key locks every browser out.
  * /web-access?lock=1 clears it. With no key configured the gate fails closed.
@@ -83,9 +83,22 @@ function noStore(headers) {
 }
 
 function accessPage(next, failed) {
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Web access</title>
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#07110b;color:#fff;font:16px/1.4 -apple-system,system-ui,sans-serif}form{display:grid;gap:12px;width:min(320px,calc(100vw - 32px))}input,button{font:inherit;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.06);color:#fff}button{background:#20d96b;color:#04140a;font-weight:800;border:0}p{margin:0;color:#ff8f8f}</style></head>
-<body><form method="post" action="${ACCESS_PATH}"><input type="hidden" name="next" value="${next.replace(/[&<>"]/g, "")}"><input type="password" name="key" placeholder="Access key" autocomplete="current-password" autofocus required>${failed ? "<p>That key is not right.</p>" : ""}<button type="submit">Open web app</button></form></body></html>`;
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Clarity Studio</title><link rel="icon" href="/assets/brand/clarity-app-icon.png">
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;background:radial-gradient(circle at 50% 0%,#12301d 0%,#07110b 60%);color:#fff;font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+.card{width:min(360px,100%);padding:32px 28px;border-radius:22px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12);box-shadow:0 24px 60px rgba(0,0,0,.45)}
+.brand{display:flex;align-items:center;gap:12px;margin-bottom:22px}.brand img{width:44px;height:44px;border-radius:11px}
+h1{margin:0;font-size:22px;font-weight:800;letter-spacing:-.01em}.sub{margin:2px 0 0;color:rgba(255,255,255,.6);font-size:14px}
+form{display:grid;gap:12px}label{font-size:13px;font-weight:700;color:rgba(255,255,255,.7)}
+input,button{font:inherit;width:100%;padding:13px 14px;border-radius:12px}
+input{border:1px solid rgba(255,255,255,.22);background:rgba(0,0,0,.25);color:#fff;outline:none}input:focus{border-color:#20d96b}
+button{border:0;background:#20d96b;color:#04140a;font-weight:800;cursor:pointer;margin-top:4px}button:hover{filter:brightness(1.07)}
+.err{margin:0;color:#ff8f8f;font-size:14px}
+</style></head>
+<body><main class="card"><div class="brand"><img src="/assets/brand/clarity-app-icon.png" alt=""><div><h1>Clarity Studio</h1><p class="sub">Private - sign in to continue</p></div></div>
+<form method="post" action="${ACCESS_PATH}"><input type="hidden" name="next" value="${next.replace(/[&<>"]/g, "")}">
+<label for="key">Access key</label><input id="key" type="password" name="key" autocomplete="current-password" autofocus required>
+${failed ? '<p class="err">That key is not right.</p>' : ""}<button type="submit">Sign in</button></form></main></body></html>`;
   return new Response(html, { status: failed ? 401 : 200, headers: noStore(new Headers({ "Content-Type": "text/html; charset=utf-8", "X-Robots-Tag": "noindex" })) });
 }
 
@@ -121,6 +134,9 @@ export default async (request, context) => {
   if (!isGated(pathname)) return context.next();
   if (expected && sameString(readCookie(request, COOKIE), expected)) return context.next();
 
+  /* /studio is Sam's door: it asks for the key in place and comes back to the
+     page he asked for. Everything else goes to the landing. */
+  if (/^\/studio(\/|$)/.test(pathname)) return accessPage(safeNext(pathname + url.search), false);
   return redirect("/welcome.html");
 };
 
