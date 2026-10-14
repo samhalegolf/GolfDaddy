@@ -39,8 +39,16 @@
  * as ordinary golf=fairway / golf=green / golf=tee / golf=bunker ways
  * (functions/lib/gd-map-overlay-core.mjs), so nothing downstream knows the difference. It does
  * NOT write objects, holes, a pin or a package - the overlay changes nothing on the course
- * until a mapper run is requested, which the button at the bottom does through the same
- * /api/course-mapper-jobs path Course Database uses.
+ * until a job is requested through the same /api/course-mapper-jobs path Course Database
+ * uses, and the two buttons at the bottom ask for the two jobs there are:
+ *   Apply shapes - collect_extra_objects. Bunkers, water, hazards, waste, woods and fairway
+ *     polygons go onto the holes the course already has, and ones binned here come off. No
+ *     rescan: holes, greens, tees and visuals are untouched, draft or ready makes no
+ *     difference, and the app has them on its next load. This is the button for most edits
+ *     after a course is mapped.
+ *   Run mapper - remap. Clears the geometry and resolves it again with the overlay merged in.
+ *     The only way a green, a tee, a hole line, a hole number, a link or a play order reaches
+ *     the course, and the overlay must be marked ready for it.
  *
  * Borrowed, not owned: the course list (the real picker, through gd-studio-course-pick.js),
  * the provider list (window.GDMapSources from gd-app-core.js), the shape builders
@@ -547,7 +555,8 @@
       '<button type="button" class="gdStudioDiagramBtn" data-ready-osm="include" title="The mapper reads OpenStreetMap and your shapes, yours winning where they overlap">With OSM</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-ready-osm="exclude" title="The mapper reads only your shapes and the scorecard - no OpenStreetMap">My shapes only</button>' +
       "</span>" +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="run" disabled>Run mapper with overlay</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="apply" disabled title="Put this overlay\'s bunkers, water, hazards, waste, woods and fairways on the course\'s holes, and take off any binned here. No rescan - greens, tees, hole lines, numbers and visuals are untouched. Draft or ready, it reads what is saved.">Apply shapes</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="run" disabled title="Clear the course\'s geometry and resolve it again with this overlay - the only way a green, tee, hole line, hole number or play order reaches the course">Run mapper with overlay</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="unnumber" disabled title="Take every hole number off the overlay - shapes and links stay - so the mapper numbers them fresh from the scorecard">Clear hole numbers</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="clear" disabled>Delete all shapes</button>' +
       "</div>" +
@@ -568,7 +577,8 @@
       "<strong>Play order</strong>: where the mapper gets a site's courses wrong, say them by hand. <strong>+ New play order</strong>, name it, then click its holes in the order they are played - an OSM hole line, or any shape of a hole you have linked (link a hole's tee and green first). Click a hole again to take it out. A hole can be in several play orders, so the same nines played in a different order are just another play order. With play orders on a ready overlay, the mapper publishes exactly those courses under those names. " +
       "<strong>Undo</strong> (the arrow at the top of the right-hand buttons, or Ctrl+Z / ⌘Z) takes back the last change, one at a time. " +
       "<strong>AI help</strong>: the AI is shown a screenshot of exactly this view, with your pins, shapes and OSM's greens drawn on it, and whatever it finds is put back on the map in the same place. <em>Find greens, tees and fairways</em> drops pins for you to shape with the wands; it works on an empty view, better with a green and a tee already pinned as samples, best when a sample carries its hole number. The other tasks trace, shape your pins or refit outlines. Every task's words can be edited and saved, and the panel shows what is sent around them. " +
-      "Everything saves as you go, as a <strong>draft</strong> the mapper ignores - <strong>Mark ready</strong> when the course looks right, then run the mapper. " +
+      "Everything saves as you go. <strong>Apply shapes</strong> puts the bunkers, water, hazards, waste, woods and fairways drawn here on the course's holes straight away, no rescan, and takes off any you binned - draft or ready. " +
+      "Greens, tees, hole lines, hole numbers and play orders change the holes themselves, so they need the mapper: <strong>Mark ready</strong> when the course looks right, then <strong>Run mapper</strong>. " +
       "Bright outlines are what OSM already has; dashed amber ones are the course's saved objects.</p></details>" +
       "</div>" +
       "</div>" +
@@ -667,7 +677,7 @@
       "</div>";
 
     var el = {};
-    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "ai-panel", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-along", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "hazard-auto-label", "hazard-corridor", "hazard-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "run", "status"].forEach(function (name) {
+    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "ai-panel", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-along", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "hazard-auto-label", "hazard-corridor", "hazard-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "apply", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -1644,7 +1654,7 @@
         } else if (sealSeams(f)) joined++;
       });
       if (merged || joined) { drawFeatures(); changed(); }
-      if (!quiet) setStatus(kept.length + " shape" + (kept.length === 1 ? "" : "s") + " kept" + (merged ? ", " + merged + " joined a bunker already there" : "") + (joined ? seamWords(joined) : "") + ".");
+      if (!quiet) setStatus(kept.length + " shape" + (kept.length === 1 ? "" : "s") + " kept" + (merged ? ", " + merged + " joined a bunker already there" : "") + (joined ? seamWords(joined) : "") + ". Apply shapes puts them on the course - no rescan.");
       updateHint();
     }
 
@@ -4407,8 +4417,13 @@
       el.fresh.title = session.osmMode === "exclude" ? "Already reading your shapes only - switch Mapper reads back to OSM + my shapes to start again from OSM"
         : "Copy everything OSM has here into the overlay as your own shapes, then stop reading OSM for this course: from here on the mapper reads only the shapes drawn here, starting from OSM's.";
       el.unnumber.disabled = !canEdit() || !session.features.some(function (f) { return f.hole; });
+      el.apply.disabled = !has || session.dirty;
       el.run.disabled = !has || session.dirty;
-      el.run.title = session.dirty ? "Wait for the overlay to save - the mapper reads what is saved" : "";
+      if (session.dirty) { el.apply.title = el.run.title = "Wait for the overlay to save - the jobs read what is saved"; }
+      else {
+        el.apply.title = "Put this overlay's bunkers, water, hazards, waste, woods and fairways on the course's holes, and take off any binned here. No rescan - greens, tees, hole lines, numbers and visuals are untouched. Draft or ready, it reads what is saved.";
+        el.run.title = "Clear the course's geometry and resolve it again with this overlay - the only way a green, tee, hole line, hole number or play order reaches the course";
+      }
       el.ready.disabled = !canEdit() || !hasOverlay() || (session.status === "ready" && !session.dirty);
       el.ready.title = session.status === "ready" && !session.dirty ? "Already ready - change a shape and it goes back to draft" : "Let the mapper use this overlay";
       ["tool-connect", "tool-number", "tool-order", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste"].forEach(function (name) { el[name].disabled = !canEdit() || !!shapingPins; });
@@ -4564,33 +4579,66 @@
       /* A draft is not read by the mapper, so running "with this overlay" means marking it
          ready first - asked, never assumed. */
       if (hasOverlay() && session.status !== "ready") {
-        if (!window.confirm("This overlay is still a draft, and the mapper ignores drafts.\n\nMark it ready and run the mapper on " + name + "?\n\nThis clears the course's existing geometry and resolves it again from " + (session.osmMode === "exclude" ? "your shapes and the scorecard only - no OSM" : "OSM plus the overlay") + ". Visuals are not touched.")) return;
+        if (!window.confirm("This overlay is still a draft, and the mapper ignores drafts.\n\nMark it ready and run the mapper on " + name + "?\n\nThis clears the course's existing geometry and resolves it again from " + (session.osmMode === "exclude" ? "your shapes and the scorecard only - no OSM" : "OSM plus the overlay") + RUN_FOOTNOTE)) return;
         markReady().then(function (ok) { if (ok && !destroyed) queueMapper(id); });
         return;
       }
       if (!window.confirm("Run the mapper on " + name + (hasOverlay() ? " with this overlay" : "") + "?\n\nThis clears the course's existing geometry and resolves it again from " + (hasOverlay() && session.osmMode === "exclude" && session.status === "ready" ? "your shapes and the scorecard only - no OSM" : "OSM" + (hasOverlay() ? " plus the overlay" : "")) + "." +
-        (session.playOrders.length ? " It publishes the " + session.playOrders.length + " play order" + (session.playOrders.length === 1 ? "" : "s") + " as this facility's courses, and unpublishes any other course listed under it." : "") + " Visuals are not touched.")) return;
+        (session.playOrders.length ? " It publishes the " + session.playOrders.length + " play order" + (session.playOrders.length === 1 ? "" : "s") + " as this facility's courses, and unpublishes any other course listed under it." : "") + RUN_FOOTNOTE)) return;
       queueMapper(id);
     }
 
+    /* What a remap costs beyond the geometry, said plainly: it ends with a fresh capture and
+       bake of the frames (the worker chains a visual snapshot after every mapping run), and
+       every refined or wand-traced surface on the course goes with the cleared geometry. */
+    var RUN_FOOTNOTE = " Afterwards the frames are captured and baked again. For bunkers, water, hazards and woods alone, Apply shapes does it without any of this.";
+
     function queueMapper(id) {
+      queueJob(id, "remap", "mapper run", function (data) {
+        return data && data.deduped ? "A mapper run is already in progress - it will pick up the saved overlay." : "Mapper run queued. Watch it in Course Database → this course → Debug (Mapping Diagnostics).";
+      });
+    }
+
+    /* Apply shapes: the surface pass alone (collect_extra_objects), on the holes the course
+       already has. Nothing is cleared, nothing is resolved, no frame is re-shot. The job reads
+       the overlay draft or ready, so there is no sign-off step; it reads what is SAVED, which is
+       why the button waits for the autosave like Run mapper does. At a facility the overlay is
+       shared, but each course takes only what falls on its own holes - apply on each. */
+    function applyShapes() {
+      var id = courseIdOf(session.course);
+      if (!id || busy || session.dirty) return;
+      var name = session.course.name || session.course.courseName || id;
+      var kinds = { bunker: 0, water: 0, hazard: 0, waste: 0, trees: 0, fairway: 0 }, others = 0;
+      session.features.forEach(function (f) { if (Object.prototype.hasOwnProperty.call(kinds, f.kind)) kinds[f.kind]++; else if (f.kind !== "tree") others++; });
+      var parts = [];
+      Object.keys(kinds).forEach(function (k) { if (kinds[k]) parts.push(kinds[k] + " " + (k === "trees" ? "wood" : k === "fairway" ? "fairway" : k === "waste" ? "waste area" : k) + (kinds[k] === 1 ? "" : "s")); });
+      if (!window.confirm("Put this overlay's shapes on " + name + "'s holes?" +
+        "\n\n" + (parts.length ? parts.join(", ") : "No bunkers, water, hazards, waste, woods or fairways are drawn") + ". Shapes binned here since the last run come off the course." +
+        "\n\nNo rescan: holes, greens, tees and visuals stay as they are. The app has the shapes on its next load; the Garmin map rebuilds itself; Apple Watch maps take them on their next Generate." +
+        (others ? "\n\n" + others + " green, tee or hole-line shape" + (others === 1 ? "" : "s") + " here need Run mapper to reach the course." : ""))) return;
+      queueJob(id, "collect_extra_objects", "Apply shapes", function (data) {
+        return data && data.deduped ? "Shapes are already being applied - this run picks up what is saved." : "Shapes queued. The course has them in a minute or two - see Course Database → this course → Debug for the run.";
+      });
+    }
+
+    function queueJob(id, kind, label, done) {
       busy = true; updateActions();
-      setStatus("Queueing mapper run…");
+      setStatus("Queueing " + label + "…");
       accessToken().then(function (token) {
         return fetch(JOBS_API, {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + token },
-          body: JSON.stringify({ courseId: id, kind: "remap" })
+          body: JSON.stringify({ courseId: id, kind: kind })
         });
       }).then(function (res) {
         return res.json().catch(function () { return null; }).then(function (data) {
           if (res.status === 403) throw new Error("Admin only");
           if (!res.ok) throw new Error((data && (data.detail || data.error)) || ("HTTP " + res.status));
-          setStatus(data && data.deduped ? "A mapper run is already in progress - it will pick up the saved overlay." : "Mapper run queued. Watch it in Course Database → this course → Debug (Mapping Diagnostics).");
+          setStatus(done(data));
         });
       }).catch(function (error) {
         if (destroyed) return;
-        setStatus("Could not queue the mapper: " + (error && error.message || error), true);
+        setStatus("Could not queue " + label + ": " + (error && error.message || error), true);
       }).then(function () { busy = false; if (!destroyed) { updateActions(); drawFeatures(); } });
     }
 
@@ -5607,6 +5655,7 @@
       if (b) markReady(b.getAttribute("data-ready-osm"));
     });
     el["osm-mode"].addEventListener("change", function () { setOsmMode(el["osm-mode"].value); });
+    el.apply.addEventListener("click", applyShapes);
     el.run.addEventListener("click", runMapper);
 
     setMode(session.mode);

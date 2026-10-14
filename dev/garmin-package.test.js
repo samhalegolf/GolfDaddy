@@ -65,6 +65,7 @@ function stubNetwork(state) {
     const reply = (status, data) => new Response(data === undefined ? "" : JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
     if (url.includes("/.netlify/functions/course-garmin-maps-background")) return new Response("", { status: 202 });
     if (url.includes("/rest/v1/course_maps")) return reply(200, state.map ? [state.map] : []);
+    if (url.includes("/rest/v1/course_map_overlays")) return reply(200, state.overlay ? [state.overlay] : []);
     if (url.includes("/rest/v1/course_garmin_maps")) {
       if (method === "POST") { state.saves.push(JSON.parse(body)[0]); return reply(201, []); }
       return reply(200, state.garminRow ? [state.garminRow] : []);
@@ -175,6 +176,17 @@ test("the phone's GET serves the package and wakes the builder when it is missin
   const noCourse = await garminGet({ map: null, garminRow: null, saves: [] });
   assert.strictEqual(noCourse.body.status, "none");
   assert.strictEqual(noCourse.wakes.length, 0);
+});
+
+test("a tree placed in the overlay after the build makes the package behind, on the phone's GET too", async () => {
+  const { GARMIN_BUILDER_VERSION } = (await load()).__test;
+  const row = { status: "ready", garmin_package_version: 99, builder_version: GARMIN_BUILDER_VERSION, source_objects_revision: 7, generated_at: "2026-10-05T00:00:00Z", hole_count: 1, ready_hole_count: 1, holes: [{ holeNumber: 1 }] };
+  const before = await garminGet({ map: MAP, garminRow: row, saves: [], overlay: { updated_at: "2026-10-04T00:00:00Z" } });
+  assert.strictEqual(before.body.current, true, "an overlay saved before the build changes nothing");
+  assert.strictEqual(before.wakes.length, 0);
+  const after = await garminGet({ map: MAP, garminRow: row, saves: [], overlay: { updated_at: "2026-10-06T00:00:00Z" } });
+  assert.strictEqual(after.body.current, false, "an overlay saved after it is a tree the package has not got");
+  assert.strictEqual(after.wakes.length, 1, "so the phone wakes the builder");
 });
 
 test("the scan and the export wake the builder only after their own job is done", () => {

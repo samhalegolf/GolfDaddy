@@ -358,7 +358,7 @@ async function reapStaleJobs() {
   } catch (e) { /* reaping is best-effort */ }
 }
 
-async function loadCourseCenter(courseId) {
+async function loadCourseCenter(courseId, opts = {}) {
   const rows = await supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,facility_name,course_lat,course_lng,region,country,country_code,objects_json,holes_json&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return null;
@@ -370,7 +370,7 @@ async function loadCourseCenter(courseId) {
     objects: row.objects_json || {}, holes: row.holes_json || {}
   };
   await ensureCoursePlace(course);
-  await attachCourseOverlay(course);
+  await attachCourseOverlay(course, opts);
   return course;
 }
 
@@ -379,13 +379,20 @@ async function loadCourseCenter(courseId) {
    job and merged into every payload the job fetches - see fetchCoursePayload. Best-effort:
    a read failure must not fail the run, but it is not silent either. The failure rides on
    the course so the job's diagnostics can say the overlay was asked for and not read, which
-   is a different finding from "there was no overlay". */
-async function attachCourseOverlay(course) {
+   is a different finding from "there was no overlay".
+
+   opts.drafts: read a draft too. Sign-off (Mark ready) guards hole geometry and play orders -
+   the things a mapper run can get wrong in a way that moves a green. The surface pass alone
+   (collect_extra_objects) can do neither, and a bunker drawn five minutes ago is wanted on the
+   course as it is, so that job reads the shapes whatever the status. Play orders stay behind
+   sign-off either way. */
+async function attachCourseOverlay(course, opts = {}) {
   course.overlay = [];
   course.playOrders = [];
   course.overlayError = null;
   course.overlayDraft = 0;
   course.overlayDraftPlayOrders = 0;
+  course.overlayFromDraft = false;
   course.overlayOnly = false;
   try {
     /* The facility's shared overlay (lib/gd-overlay-owner.mjs). The job queue sends a sibling's
@@ -406,6 +413,12 @@ async function attachCourseOverlay(course) {
       /* Signed off as the whole picture (20261012_add_course_map_overlay_osm.sql): no OSM. */
       course.overlayOnly = row.osm === "exclude";
     }
+    else if (row && opts.drafts) {
+      course.overlay = features;
+      course.overlayFromDraft = true;
+      course.overlayOnly = row.osm === "exclude";
+      course.overlayDraftPlayOrders = playOrders.length;
+    }
     else { course.overlayDraft = features.length; course.overlayDraftPlayOrders = playOrders.length; }
   } catch (error) {
     course.overlayError = String(error && error.message || error).slice(0, 200);
@@ -417,6 +430,7 @@ async function attachCourseOverlay(course) {
    the counts of what it merged. */
 function overlayDiagnostics(course) {
   if (course.overlayError) return { error: course.overlayError };
+  if (course.overlayFromDraft) return Object.assign(overlaySummary(course.overlay), { draft: true, usedDraft: true, ignoredPlayOrders: course.overlayDraftPlayOrders || 0 }, course.overlayOnly ? { osm: "excluded" } : {});
   if (course.overlayDraft || course.overlayDraftPlayOrders) return { draft: true, ignoredFeatures: course.overlayDraft, ignoredPlayOrders: course.overlayDraftPlayOrders || 0 };
   return Object.assign(overlaySummary(course.overlay), { playOrders: course.playOrders.length }, course.overlayOnly ? { osm: "excluded" } : {});
 }
@@ -2211,7 +2225,13 @@ async function runTreeJob(job) {
    That is the whole point. Adding bunkers to a course that a golfer is already playing must not
    be able to move a green, renumber a hole or invalidate a published frame - so the code path
    that could do those things is not on this one. enrichSurfaceObjects can only ever write
-   surfaces; it has no route to a tee, a green or a route point. */
+   surfaces; it has no route to a tee, a green or a route point.
+
+   It is also how the mapping overlay's surfaces reach the course without a remap ("Apply
+   shapes" in Studio): the overlay is read draft or ready, its bunkers, water, hazards, waste,
+   woods and fairway polygons are cloned onto the holes they fall in, and the ones binned since
+   the last run come off (enrichSurfaceObjects). The package reads objects_json live, and the
+   revision bump wakes the Garmin build, so nothing else needs to run. */
 function surfaceCounts(objects) {
   const counts = { fairway_area: 0, bunker: 0, water: 0, trees: 0, hazard: 0, waste: 0 };
   objects.forEach(object => {
@@ -2221,7 +2241,7 @@ function surfaceCounts(objects) {
 }
 
 async function runObjectCollectionJob(job) {
-  const course = await loadCourseCenter(job.course_id);
+  const course = await loadCourseCenter(job.course_id, { drafts: true });
   if (!course) throw new Error("course " + job.course_id + " has no known location in " + MAPS_TABLE + " - cannot query Overpass");
   const holeNumbers = Object.keys(course.holes || {}).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
   /* The saved map IS the spatial framework. With no holes there is nowhere to put anything,
@@ -2241,13 +2261,15 @@ async function runObjectCollectionJob(job) {
 
   await heartbeatJob(job, { stage: "collecting-objects" });
   const before = surfaceCounts(objects);
-  const enrichment = enrichSurfaceObjects(objects, course.courseId, payload, course.holes);
+  const enrichment = enrichSurfaceObjects(objects, course.courseId, payload, course.holes, { overlayOnly: course.overlayOnly });
   const after = surfaceCounts(objects);
   const added = {
     fairways: after.fairway_area - before.fairway_area,
     bunkers: after.bunker - before.bunker,
     water: after.water - before.water,
-    trees: after.trees - before.trees
+    trees: after.trees - before.trees,
+    hazards: after.hazard - before.hazard,
+    waste: after.waste - before.waste
   };
 
   const objectsMap = {};
@@ -2289,6 +2311,7 @@ async function runObjectCollectionJob(job) {
     overlay: overlayDiagnostics(course),
     surfacesFound: enrichment.surfaces,
     surfacesWritten: enrichment.cloned,
+    surfacesRemoved: enrichment.removed,
     defaultFairways: enrichment.filled,
     surfacesLeftOut: enrichment.left,
     added,

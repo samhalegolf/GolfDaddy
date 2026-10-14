@@ -459,6 +459,98 @@ test("single trees count against their own cap, so a tree-lined course still has
   assert.strictEqual(new Set(ids).size, ids.length, "a derived hole line never takes a feature's id");
 });
 
+/* ---------- Apply shapes: the surface pass without a remap ---------- */
+
+/* One hole, tee to green, with a bunker ring of the given radius at (east, north). */
+function bunkerFeature(id, eastM, northM, radiusM, extra) {
+  const pts = [];
+  for (let i = 0; i < 10; i++) {
+    const a = i / 10 * Math.PI * 2;
+    pts.push(at(eastM + radiusM * Math.cos(a), northM + radiusM * Math.sin(a)));
+  }
+  return Object.assign({ id, kind: "bunker", points: pts }, extra || {});
+}
+function bunkerWay(id, eastM, northM, radiusM) {
+  const f = bunkerFeature("x", eastM, northM, radiusM);
+  return { type: "way", id, tags: { golf: "bunker" }, geometry: ring(f.points.concat([f.points[0]])) };
+}
+function oneHoleObjects() {
+  const green = at(0, 380);
+  const greenShape = [at(-12, 368), at(12, 368), at(12, 392), at(-12, 392)];
+  return [
+    { id: "t1", type: "tee", holeNumber: 1, position: at(0, 0), source: "osm_auto" },
+    { id: "f1", type: "fairway", holeNumber: 1, position: at(0, 190), source: "osm_auto" },
+    { id: "g1", type: "green", holeNumber: 1, position: green, greenCenter: green, shape: greenShape, greenShape, source: "osm_auto" }
+  ];
+}
+const bunkersOn = objects => objects.filter(o => o.type === "bunker").map(o => o.osmId).sort();
+
+test("an overlay element's id follows its feature, not its place in the list", () => {
+  const three = [bunkerFeature("b1", 30, 150, 6), bunkerFeature("b2", -30, 250, 6), bunkerFeature("b3", 25, 320, 6)];
+  const idOf = (features, id) => overlay.overlayToOsmElements(features).find(w => w.tags["clarity:overlay"] === id).id;
+  const before = idOf(three, "b3");
+  assert.strictEqual(idOf(three.slice(1), "b3"), before, "binning the first shape leaves the third's id alone");
+  assert.strictEqual(idOf([three[2]], "b3"), before, "alone in the list it is still the same element");
+  assert.notStrictEqual(idOf(three, "b2"), before, "two features never share an id");
+  assert.ok(before < overlay.OVERLAY_ID_BASE, "it sits in the overlay's own range, below every OSM id");
+  assert.ok(overlay.isOverlayOsmId("way/" + before) && overlay.isOverlayOsmId("way/" + before + "#1"), "and is recognised as an overlay id, ring index or not");
+  assert.ok(!overlay.isOverlayOsmId("way/123") && !overlay.isOverlayOsmId("fill/3"), "an OSM id or a fill is not");
+  const converted = overlay.overlayToOsmElements([bunkerFeature("c", 30, 150, 6, { osm: "way/77" })])[0];
+  assert.strictEqual(converted.tags["clarity:replaces"], "way/77", "a converted shape says which OSM element it stands in for");
+});
+
+test("Apply shapes: a bunker binned in Studio comes off the course; OSM's and a hand-placed one stay", () => {
+  const objects = oneHoleObjects();
+  const holes = { 1: { holeNumber: 1 } };
+  const osm = { elements: [bunkerWay(77, -28, 120, 6)] };
+  const drawn = [bunkerFeature("b1", 30, 150, 6), bunkerFeature("b2", -30, 250, 6)];
+  objects.push({ id: "hand", type: "bunker", holeNumber: 1, position: at(28, 330), shape: bunkerFeature("h", 28, 330, 5).points, source: "manual", osmId: null });
+
+  const first = core.enrichSurfaceObjects(objects, "c", overlay.mergeOverlayIntoPayload(osm, drawn), holes);
+  assert.strictEqual(first.removed, 0);
+  assert.strictEqual(objects.filter(o => o.type === "bunker").length, 4, "two drawn, one OSM, one hand-placed: " + JSON.stringify(bunkersOn(objects)));
+  const b1 = overlay.overlayToOsmElements(drawn).find(w => w.tags["clarity:overlay"] === "b1").id;
+  assert.ok(objects.some(o => o.osmId === "way/" + b1), "the drawn bunker is keyed on its own element id");
+
+  /* b1 is binned in Studio and Apply shapes runs again. */
+  const second = core.enrichSurfaceObjects(objects, "c", overlay.mergeOverlayIntoPayload(osm, drawn.slice(1)), holes);
+  assert.strictEqual(second.removed, 1, "the binned bunker is taken off");
+  assert.ok(!objects.some(o => o.osmId === "way/" + b1), "and it is gone");
+  assert.strictEqual(objects.filter(o => o.type === "bunker").length, 3);
+  assert.ok(objects.some(o => o.osmId === "way/77"), "OSM's bunker stays - a shape missing from the overlay says nothing about OSM");
+  assert.ok(objects.some(o => o.id === "hand"), "the hand-placed one is never touched");
+
+  /* Run again with nothing changed: nothing moves. */
+  const third = core.enrichSurfaceObjects(objects, "c", overlay.mergeOverlayIntoPayload(osm, drawn.slice(1)), holes);
+  assert.strictEqual(third.removed, 0);
+  assert.strictEqual(objects.filter(o => o.type === "bunker").length, 3, "idempotent");
+});
+
+test("Apply shapes: a shape converted from OSM replaces the object that element wrote, and 'my shapes only' drops OSM's surfaces", () => {
+  const objects = oneHoleObjects();
+  const holes = { 1: { holeNumber: 1 } };
+  const osm = { elements: [bunkerWay(77, -28, 120, 6), bunkerWay(78, 30, 300, 6)] };
+  core.enrichSurfaceObjects(objects, "c", overlay.mergeOverlayIntoPayload(osm, []), holes);
+  assert.deepStrictEqual(bunkersOn(objects), ["way/77", "way/78"]);
+
+  /* Make OSM editable: way/77 becomes an overlay shape (reshaped a little). */
+  const edited = [bunkerFeature("e", -26, 122, 7, { osm: "way/77" })];
+  const result = core.enrichSurfaceObjects(objects, "c", overlay.mergeOverlayIntoPayload(osm, edited), holes);
+  assert.strictEqual(result.removed, 1, "the object OSM's element wrote comes off");
+  assert.ok(!objects.some(o => o.osmId === "way/77"), "way/77 is no longer on the hole twice");
+  assert.ok(objects.some(o => o.osmId === "way/78"), "the untouched OSM bunker stays");
+  assert.strictEqual(objects.filter(o => o.type === "bunker").length, 2, "the edited shape stands in for it");
+
+  /* My shapes only: the overlay is the whole picture, so OSM's leftovers go as a remap would drop them. */
+  const only = core.enrichSurfaceObjects(objects, "c", overlay.mergeOverlayIntoPayload({ elements: [] }, edited), holes, { overlayOnly: true });
+  assert.strictEqual(only.removed, 1);
+  assert.deepStrictEqual(objects.filter(o => o.type === "bunker").map(o => o.osmId).every(id => overlay.isOverlayOsmId(id)), true, "only overlay surfaces remain");
+  /* Without the flag, an empty Overpass answer removes nothing of OSM's. */
+  const empty = core.enrichSurfaceObjects(oneHoleObjects().concat([{ id: "k", type: "bunker", holeNumber: 1, position: at(30, 300), shape: bunkerFeature("k", 30, 300, 6).points, source: "osm_auto_surface", osmId: "way/78" }]),
+    "c", overlay.mergeOverlayIntoPayload({ elements: [] }, []), holes);
+  assert.strictEqual(empty.removed, 0, "a thin Overpass answer is not evidence the ground changed");
+});
+
 (async () => {
   overlay = await import(path.join(root, "functions", "lib", "gd-map-overlay-core.mjs"));
   core = await import(path.join(root, "functions", "lib", "gd-automapper-core.mjs"));

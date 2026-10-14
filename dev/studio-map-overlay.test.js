@@ -82,7 +82,9 @@ test("the page picks courses through the shared hand-off and providers through G
 test("the page writes only through the overlay API and the mapper job queue", () => {
   assert.ok(page.includes('"/api/course-map-overlay"'), "the page does not talk to /api/course-map-overlay");
   assert.ok(page.includes('"/api/course-mapper-jobs"'), "the page cannot request the mapper run that makes the overlay matter");
-  assert.ok(page.includes('kind: "remap"'), "the mapper run must be a remap - the overlay changes hole geometry, so a stale map must be cleared");
+  assert.ok(page.includes('queueJob(id, "remap"'), "the mapper run must be a remap - the overlay changes hole geometry, so a stale map must be cleared");
+  assert.ok(page.includes('queueJob(id, "collect_extra_objects"') && page.includes('data-gd-overlay="apply"'),
+    "Apply shapes must put surfaces on the course through the collect job - no remap for a bunker");
   [
     "GDCourseLocation.confirm", "GDCourseLocation.propose", "GDCourseLocation.remove",
     "/api/course-maps", "objects_json", "holes_json", "supabase.co"
@@ -293,7 +295,12 @@ test("every Overpass fetch in the worker carries the overlay", () => {
      one the resolver reads. */
   const bare = worker.split("fetchOverpass(").length - 1;
   assert.strictEqual(bare, 1, "expected exactly one fetchOverpass( call (inside fetchCoursePayload), found " + bare);
-  assert.ok(worker.includes("await attachCourseOverlay(course)"), "loadCourseCenter does not attach the overlay, so no job would see it");
+  assert.ok(worker.includes("await attachCourseOverlay(course, opts)"), "loadCourseCenter does not attach the overlay, so no job would see it");
+  const collect = worker.slice(worker.indexOf("async function runObjectCollectionJob"), worker.indexOf("async function runMapperJob"));
+  assert.ok(collect.includes("loadCourseCenter(job.course_id, { drafts: true })"), "Apply shapes reads the overlay draft or ready - sign-off guards hole geometry, which this job cannot touch");
+  assert.ok(collect.includes("{ overlayOnly: course.overlayOnly }"), "and tells the surface pass when the overlay is the whole picture");
+  const mapping = worker.slice(worker.indexOf("async function runMapperJob"));
+  assert.ok(mapping.includes("loadCourseCenter(job.course_id)") && !mapping.includes("drafts: true"), "a mapping run still ignores a draft");
   assert.ok(worker.includes('OVERLAYS_TABLE = "course_map_overlays"'), "the worker reads a different table than the migration creates");
   assert.ok(worker.includes("overlay: overlayDiagnostics(course)") && worker.includes("if (course.overlayError) return { error: course.overlayError };"),
     "job diagnostics must say what the overlay contributed, that it was a draft, or that it could not be read");

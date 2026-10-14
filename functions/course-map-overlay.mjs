@@ -48,7 +48,10 @@
  *
  * The overlay is read by functions/course-mapper-worker-background.mjs and merged into the
  * Overpass payload (functions/lib/gd-map-overlay-core.mjs). Saving here changes nothing on
- * the course until a mapper run is requested through /api/course-mapper-jobs. */
+ * the course until a job is requested through /api/course-mapper-jobs: collect_extra_objects
+ * (Studio's Apply shapes) takes the surfaces - bunkers, water, hazards, waste, woods, fairway
+ * polygons - onto the holes the course has, draft or ready, with no rescan; remap resolves the
+ * holes again from a ready overlay, which is what greens, tees, hole lines and numbers need. */
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { osmQueryScope, osmGuideQuery, osmGuidePointsFromElement } from "./lib/gd-automapper-core.mjs";

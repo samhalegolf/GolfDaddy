@@ -606,6 +606,25 @@ async function treesPublishedAt(courseId) {
   return Array.isArray(rows) && rows[0] ? rows[0].published_at || null : null;
 }
 
+/* When the overlay the single trees are read from was last saved, or null. Through the
+   facility owner, as courseSingleTrees reads it. */
+async function overlaySavedAt(courseId) {
+  try {
+    const ownerId = await overlayOwnerId(supabaseFetch, courseId);
+    const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=updated_at&course_id=eq." + encodeURIComponent(ownerId) + "&limit=1");
+    return Array.isArray(rows) && rows[0] ? rows[0].updated_at || null : null;
+  } catch (error) { return null; }
+}
+
+/* The later of the two times the trees a package carries can change: the tree layer's
+   publish and the overlay's save. Either one after the build means it is behind. */
+async function treesChangedAt(courseId) {
+  const [published, saved] = await Promise.all([treesPublishedAt(courseId), overlaySavedAt(courseId)]);
+  if (!published) return saved;
+  if (!saved) return published;
+  return Date.parse(saved) > Date.parse(published) ? saved : published;
+}
+
 async function generateWatchPackage({ courseId, map, actorEmail }) {
   const holeNumbers = holeNumbersFromObjects(map.objects_json);
   const version = Date.now();
@@ -802,7 +821,10 @@ function garminPackageCurrent(row, map, terrainGeneratedAt, treesAt) {
     return false;
   }
   if (terrainGeneratedAt !== undefined && String(row.terrain_generated_at || "") !== String(terrainGeneratedAt || "")) return false;
-  /* Trees published after it was built: the builder asks (treesAt), the phone's GET does not. */
+  /* Trees changed after it was built - the tree layer published, or the overlay (whose single
+     trees it stamps) saved. Both the builder and the phone's GET ask (treesChangedAt): two
+     row reads, no storage. Before the overlay counted, a tree placed in Studio never reached
+     the Garmin map until something else moved the geometry. */
   if (treesAt && !(Date.parse(row.generated_at) >= Date.parse(treesAt))) return false;
   return true;
 }
@@ -890,7 +912,7 @@ async function buildGarminPackageIfStale(courseId, nowMs) {
   const since = Date.parse(row && row.building_since);
   if (Number.isFinite(since) && now - since < GARMIN_BUILD_LOCK_MS) return { built: false, reason: "already-building" };
   const terrainIndex = await loadTerrainIndex(courseId);
-  if (garminPackageCurrent(row, map, terrainIndex ? terrainIndex.generatedAt || null : null, await treesPublishedAt(courseId))) return { built: false, reason: "current" };
+  if (garminPackageCurrent(row, map, terrainIndex ? terrainIndex.generatedAt || null : null, await treesChangedAt(courseId))) return { built: false, reason: "current" };
 
   await saveGarminRow({ id: courseId, course_id: courseId, building_since: new Date(now).toISOString() });
   try {
@@ -908,11 +930,12 @@ async function buildGarminPackageIfStale(courseId, nowMs) {
    A missing or behind package wakes the builder and, if there is an older one, still serves
    it - an older map beats no map, and the next delivery attempt picks up the new one. */
 async function garminReport(req, courseId) {
-  const [row, map] = await Promise.all([
+  const [row, map, treesAt] = await Promise.all([
     loadGarminRow(courseId),
-    loadPublishedMap(courseId, "course_id,objects_revision,published_at,updated_at").catch(() => null)
+    loadPublishedMap(courseId, "course_id,objects_revision,published_at,updated_at").catch(() => null),
+    treesChangedAt(courseId)
   ]);
-  const current = garminPackageCurrent(row, map, undefined);
+  const current = garminPackageCurrent(row, map, undefined, treesAt);
   if (map && !current) {
     let origin = "";
     try { origin = new URL(req.url).origin; } catch (error) { origin = ""; }
