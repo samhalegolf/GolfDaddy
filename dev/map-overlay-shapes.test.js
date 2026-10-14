@@ -314,6 +314,44 @@ test("trees near play: no turf to learn from, or nothing tree-like in the band, 
   assert.strictEqual(bare.model, null, "the strip next to the fairway is plain rough");
 });
 
+test("a run's trees at every sensitivity: each level holds the stricter ones and adds to them", () => {
+  const crowns = [{ x: 40, y: 40, r: 10 }, { x: 120, y: 60, r: 9 }, { x: 70, y: 140, r: 11 }, { x: 160, y: 150, r: 10 }];
+  const image = treesImage(200, 200, crowns);
+  const finder = shapes.treeFinder(image, shapes.colourModel(shapes.circleSamples(image, crowns[0], 7, 1)), { radiusPx: 10 });
+  const nested = shapes.nestedTrees(finder);
+  assert.ok(nested.every(t => t.l >= 0 && t.l < shapes.TREE_FINDER_LEVELS.length), "every tree knows the strictest level that finds it");
+  const at = level => nested.filter(t => t.l <= level).length;
+  for (let l = 1; l < shapes.TREE_FINDER_LEVELS.length; l++) assert.ok(at(l) >= at(l - 1), "looser never finds fewer");
+  assert.ok(Math.abs(at(2) - finder.find(shapes.TREE_FINDER_LEVELS[2]).length) <= 1, "a level holds what the finder finds at it");
+  crowns.forEach(c => assert.ok(nested.some(t => Math.hypot(t.x - c.x, t.y - c.y) < 4), "the crown at " + c.x + "," + c.y));
+});
+
+test("trees near play: each sensitivity asks its own darkness and texture, so More finds more and Less fewer", () => {
+  /* Crowns from plainly a tree (dark, busy) to barely one (a little darker than the rough,
+     a little busy), on rough beside a fairway. */
+  const w = 400, h = 200, data = new Uint8ClampedArray(w * h * 4);
+  let seed = 31;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const crowns = [
+    { x: 40, y: 70, rgb: [40, 75, 35], amp: 50 }, { x: 110, y: 70, rgb: [50, 85, 40], amp: 40 },
+    { x: 180, y: 70, rgb: [60, 95, 45], amp: 30 }, { x: 250, y: 70, rgb: [66, 102, 48], amp: 24 },
+    { x: 320, y: 70, rgb: [70, 106, 50], amp: 20 }
+  ];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4, c = crowns.find(k => Math.hypot(x - k.x, y - k.y) <= 12);
+    const rgb = c ? c.rgb : y >= 120 ? [110, 160, 75] : [85, 125, 60], n = (rnd() - 0.5) * (c ? c.amp : 12);
+    data[i] = rgb[0] + n; data[i + 1] = rgb[1] + n; data[i + 2] = rgb[2] + n; data[i + 3] = 255;
+  }
+  const image = { width: w, height: h, data };
+  const fairway = [{ x: -5, y: 120 }, { x: 405, y: 120 }, { x: 405, y: 205 }, { x: -5, y: 205 }];
+  const auto = shapes.autoTreeModel(image, shapes.ringsMask(w, h, [fairway]), shapes.playBand(w, h, { play: [fairway], bandPx: 100, clearPx: 10 }), { radiusPx: 12 });
+  const nested = shapes.nestedTrees(shapes.treeFinder(image, auto.model, { radiusPx: 12, insideAt: auto.allowAt }));
+  const at = l => nested.filter(t => t.l <= l).length;
+  assert.ok(at(0) < at(2) && at(2) < at(5), "strict " + at(0) + ", default " + at(2) + ", loose " + at(5));
+  assert.ok(nested.filter(t => t.l === 0).every(t => crowns.slice(3).every(c => Math.hypot(t.x - c.x, t.y - c.y) >= 12)), "the strictest never keeps the faintest crowns");
+  assert.ok(nested.every(t => crowns.some(c => Math.hypot(t.x - c.x, t.y - c.y) < 12)), "even the loosest finds crowns, not rough");
+});
+
 test("tree heights: a canopy grid lines up with the picture, and gates the crowns", () => {
   /* A picture at zoom 18 whose top-left is world pixel (1000, 2000); a Web Mercator grid of
      4 x 4 one-metre cells starting exactly there, tall only in its top-left cell. */

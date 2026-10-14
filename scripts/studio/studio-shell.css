@@ -486,6 +486,12 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
 }
 #gdStudioShellRoot .gdStudioOverlayViewBtn:hover { background: rgba(231, 243, 236, 0.1); }
 #gdStudioShellRoot .gdStudioOverlayViewBtn.isActive { background: var(--gdStudioText); color: var(--gdOverlayInk); }
+/* The Trees button: none yet (as any other), being found (pulsing), done (green). */
+#gdStudioShellRoot .gdStudioOverlayViewBtn.isTreesDone { color: #6fe08a; }
+#gdStudioShellRoot .gdStudioOverlayViewBtn.isTreesBusy { color: #f2d36b; animation: gdOverlayTreesBusy 1.4s ease-in-out infinite; }
+#gdStudioShellRoot .gdStudioOverlayViewBtn.isTreesDone.isActive { background: #6fe08a; color: var(--gdOverlayInk); }
+@keyframes gdOverlayTreesBusy { 50% { opacity: 0.45; } }
+#gdStudioShellRoot .gdStudioOverlayTreeText { align-self: center; padding: 0 6px; font-size: 12px; white-space: nowrap; }
 #gdStudioShellRoot .gdStudioOverlayOptions {
   position: absolute;
   top: 10px;

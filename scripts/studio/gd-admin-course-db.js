@@ -644,6 +644,7 @@ function gdAdminCourseMaintenanceMenu(selected){
     ${item("full_remap","Full Remap","Geometry, objects and visuals, from source","danger")}
     ${item("collect_extra_objects","Collect Extra Objects","Adds bunkers, fairways and hazards. Holes, greens and visuals unchanged")}
     ${item("refine_surface_shapes","Refine Shapes","Re-traces those shapes from this course's own frames. Lighter, and ours")}
+    ${item("find_trees","Find Trees","Pins the trees along the fairways and greens - from this course's own frames, or Esri where it has none - and puts them live on the watch. Geometry and visuals unchanged; replaces trees edited in Studio")}
     ${item("recapture_visuals","Re-Capture Visuals","Fresh source imagery for the existing map, then a bake")}
     ${item("rebake_visuals","Re-Bake Visuals","Existing captures, current recipe. No re-scan")}
     ${item("test_bake_mapbox","Test bake with Mapbox","Normal capture + bake from Mapbox, current geometry. Studio only - never published, deleted after 7 days")}
@@ -662,6 +663,7 @@ function gdAdminCourseMaintenance(mode,courseId){
   if(mode==="full_remap")return gdAdminCourseRemap(id);
   if(mode==="collect_extra_objects")return gdAdminCourseCollectExtraObjects(id);
   if(mode==="refine_surface_shapes")return gdAdminCourseRefineShapes(id);
+  if(mode==="find_trees")return gdAdminCourseFindTrees(id);
   if(mode==="rebuild_local")return gdAdminCourseDbUpdate(id);
   if(mode==="test_bake_mapbox"){
     if(typeof window.gdAdminCourseTestBakeStart!=="function"){gdAdminCourseVisualToast("Test bakes not loaded");return false;}
@@ -3426,7 +3428,7 @@ function gdAdminCourseProgressSettle(courseId){
   const core=gdProgressCore();
   if(!core)return;
   courseId=String(courseId||"");
-  ["mapper","visual","collect_extra_objects","refine_surface_shapes"].forEach(suffix=>core.clearFloor(courseId+":"+suffix));
+  ["mapper","visual","collect_extra_objects","refine_surface_shapes","find_trees"].forEach(suffix=>core.clearFloor(courseId+":"+suffix));
 }
 
 /* The build bar. One line that answers: is this course built, is it building, how far, and has
@@ -4194,7 +4196,7 @@ function gdAdminCourseVisualEnsurePipelineCourse(courseId){
    the bar was meant to answer. Bounded: it gives up after six minutes and says so. */
 let gdAdminCourseMaintenanceFollows={};
 function gdAdminCourseMaintenanceLabel(kind){
-  return kind==="refine_surface_shapes"?"Refine Shapes":"Collect Extra Objects";
+  return kind==="refine_surface_shapes"?"Refine Shapes":kind==="find_trees"?"Find Trees":"Collect Extra Objects";
 }
 function gdAdminCourseMaintenanceStart(courseId,kind,data){
   courseId=String(courseId||"");
@@ -4268,6 +4270,11 @@ function gdAdminCourseMaintenanceOutcome(courseId,kind,job){
     const added=n(a.bunkers)+n(a.fairways)+n(a.water);
     return label+" done for "+courseId+": "+n(t.bunker)+" bunkers, "+n(t.fairway_area)+" fairways, "+n(t.water)+" water on the map ("+(added?added+" new":"nothing new found")+")";
   }
+  if(kind==="find_trees"){
+    if(r.written===false)return label+" left "+courseId+" as it was: "+String(r.reason||"nothing written");
+    const source=r.imagery==="esri"?"Esri":r.imagery==="frames"?"its frames":"its frames and Esri";
+    return label+" done for "+courseId+": "+n(r.trees)+" trees live on the watch, read off "+source+(r.heights?" with tree heights":"");
+  }
   const c=r.counts||{};
   return label+" done for "+courseId+": "+n(c.refined)+" shapes re-traced"+(n(c.skipped)?", "+n(c.skipped)+" kept as they were":"")+(n(c.noFrame)?", "+n(c.noFrame)+" with no frame to trace against":"");
 }
@@ -4315,6 +4322,34 @@ async function gdAdminCourseRefineShapes(courseId){
     return false;
   }catch(error){
     gdAdminCourseVisualToast("Refine failed to send");
+    return false;
+  }
+}
+/* Find Trees - the course's second pass, by hand. The worker does the same thing on its own
+   after a course's frames are published, and works through the courses mapped before tree
+   runs existed in its idle moments; this is for one course now, or one whose trees were
+   edited in Studio and should start over (an automatic run never writes over those). */
+async function gdAdminCourseFindTrees(courseId){
+  courseId=String(courseId||"");
+  if(!courseId)return false;
+  if(!window.confirm("Find the trees along "+courseId+"'s fairways and greens?\n\nThey go live on the watch straight away, and replace any trees edited in Studio. Geometry and visuals are not touched."))return false;
+  try{
+    const token=await gdAdminCourseDbAccessToken();
+    if(!token){gdAdminCourseVisualToast("Sign in again to find trees");return false;}
+    const res=await fetch("/api/course-mapper-jobs",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+      body:JSON.stringify({courseId:courseId,kind:"find_trees"})
+    });
+    const data=await res.json().catch(()=>null);
+    if(res.status===403){gdAdminCourseVisualToast("Admin only");return false;}
+    if(res.status===404){gdAdminCourseVisualToast("No saved map for "+courseId);return false;}
+    if(!res.ok){gdAdminCourseVisualToast("Find Trees failed ("+res.status+")");return false;}
+    gdAdminCourseVisualToast(data&&data.deduped?"A tree run is already in progress":"Finding trees along "+courseId+"'s fairways and greens");
+    gdAdminCourseMaintenanceStart(courseId,"find_trees",data);
+    return false;
+  }catch(error){
+    gdAdminCourseVisualToast("Find Trees failed to send");
     return false;
   }
 }

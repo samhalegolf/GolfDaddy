@@ -52,6 +52,9 @@ import { captureMapperDebugImagery } from "./lib/gd-mapper-debug-captures.mjs";
 import { mergeOverlayIntoPayload, overlaySummary } from "./lib/gd-map-overlay-core.mjs";
 import { playOrderLoops } from "./lib/gd-play-order-core.mjs";
 import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
+import { TREE_KIND, queueTreeRun } from "./lib/gd-tree-queue.mjs";
+import { findCourseTrees, packTrees, TREES_TABLE, TREE_DEFAULT_LEVEL, TREE_RUN_VERSION } from "./lib/gd-course-trees-core.mjs";
+import { readCanopy } from "./lib/gd-canopy-height.mjs";
 const { createPoliteHtmlFetcher } = politeFetch;
 const { loopDisplayName, stripParSuffix } = courseSearchIdentity;
 
@@ -92,14 +95,50 @@ async function claimJob(jobId, kindFilter = "") {
    else is running - so the background queue runs one at a time, and only in idle moments.
    A player job that arrives while one is running is woken by its own id in its own
    invocation, so it never waits for it. allowNearby is the caller's time budget. */
-async function claimNextJob({ allowNearby }) {
-  const player = await claimJob(null, "kind=neq." + NEARBY_AUTOMAP_KIND + "&");
+/* Tree runs (TREE_KIND) wait in the same idle moments as background neighbours, after them:
+   trees are a second pass over a course that already plays. With neither waiting, one
+   published course that has never had a tree run is taken (claimTreeBackfill) - allowBackfill
+   is the caller's once-an-invocation budget for that. */
+const IDLE_KINDS = "(" + NEARBY_AUTOMAP_KIND + "," + TREE_KIND + ")";
+async function claimNextJob({ allowNearby, allowBackfill }) {
+  const player = await claimJob(null, "kind=not.in." + IDLE_KINDS + "&");
   if (player || !allowNearby) return player;
-  const busy = await supabaseFetch(JOBS_TABLE + "?select=id&status=in.(queued,running)&kind=neq." + NEARBY_AUTOMAP_KIND + "&limit=1").catch(() => null);
+  const busy = await supabaseFetch(JOBS_TABLE + "?select=id&status=in.(queued,running)&kind=not.in." + IDLE_KINDS + "&limit=1").catch(() => null);
   if (!Array.isArray(busy) || busy.length) return null;
-  const running = await supabaseFetch(JOBS_TABLE + "?select=id&status=eq.running&kind=eq." + NEARBY_AUTOMAP_KIND + "&limit=1").catch(() => null);
+  const running = await supabaseFetch(JOBS_TABLE + "?select=id&status=eq.running&kind=in." + IDLE_KINDS + "&limit=1").catch(() => null);
   if (!Array.isArray(running) || running.length) return null;
-  return claimJob(null, "kind=eq." + NEARBY_AUTOMAP_KIND + "&");
+  return (await claimJob(null, "kind=eq." + NEARBY_AUTOMAP_KIND + "&"))
+    || (await claimJob(null, "kind=eq." + TREE_KIND + "&"))
+    || (allowBackfill ? await claimTreeBackfill() : null);
+}
+
+/* The tree backfill: courses mapped before tree runs existed get theirs a course at a time,
+   in the worker's idle moments - a published course with holes and no course_trees row, or
+   one whose automatic row an older finder made (TREE_RUN_VERSION; a row edited in Studio is
+   never redone), and no tree run in the last day (so one that keeps failing is tried once a
+   day, not every three minutes). TREE_BACKFILL=off stops it; tree runs queued any other way
+   still run. */
+const TREE_BACKFILL_RETRY_MS = 24 * 60 * 60 * 1000;
+async function claimTreeBackfill() {
+  if (String(env("TREE_BACKFILL")).toLowerCase() === "off") return null;
+  const cutoff = new Date(Date.now() - TREE_BACKFILL_RETRY_MS).toISOString();
+  const [published, done, recent] = await Promise.all([
+    supabaseFetch(MAPS_TABLE + "?select=course_id&published=eq.true&hole_count=gt.0&order=course_id.asc&limit=5000").catch(() => null),
+    supabaseFetch(TREES_TABLE + "?select=course_id,status,version:run->version&limit=5000").catch(() => null),
+    supabaseFetch(JOBS_TABLE + "?select=course_id&kind=eq." + TREE_KIND + "&created_at=gt." + encodeURIComponent(cutoff) + "&limit=5000").catch(() => null)
+  ]);
+  if (!Array.isArray(published) || !Array.isArray(done) || !Array.isArray(recent)) return null;
+  const current = done.filter(r => r.status !== "auto" || Number(r.version) >= TREE_RUN_VERSION);
+  const skip = new Set(current.concat(recent).map(r => r.course_id));
+  const next = published.find(r => r && r.course_id && !skip.has(r.course_id));
+  if (!next) return null;
+  const inserted = await supabaseFetch(JOBS_TABLE, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify([{ course_id: next.course_id, kind: TREE_KIND, status: "queued", requested_by: "tree-backfill" }])
+  }).catch(() => null);
+  const job = Array.isArray(inserted) ? inserted[0] : null;
+  return job ? claimJob(job.id) : null;
 }
 
 /* A background run takes the remainder of an invocation, never a fresh one's worth: started
@@ -312,7 +351,7 @@ async function reapStaleJobs() {
       const reapedError = "stale-running-reaped: worker died mid-job " + attempts + " times";
       /* A background job failing is not news to anyone - see NEARBY_AUTOMAP_KIND. */
       const patch = attempts >= 8
-        ? { status: "failed", error: reapedError, result: Object.assign({}, row.result || {}, { attempts }, row.kind === NEARBY_AUTOMAP_KIND ? {} : await requestMapperDebug(row, { message: reapedError, attempts, diagnostics: row.result && row.result.diagnostics })), updated_at: new Date().toISOString() }
+        ? { status: "failed", error: reapedError, result: Object.assign({}, row.result || {}, { attempts }, row.kind === NEARBY_AUTOMAP_KIND || row.kind === TREE_KIND ? {} : await requestMapperDebug(row, { message: reapedError, attempts, diagnostics: row.result && row.result.diagnostics })), updated_at: new Date().toISOString() }
         : { status: "queued", error: null, result: Object.assign({}, row.result || {}, { attempts }), updated_at: new Date().toISOString() };
       await supabaseFetch(JOBS_TABLE + "?id=eq." + row.id, { method: "PATCH", body: JSON.stringify(patch) });
     }
@@ -2094,6 +2133,75 @@ async function runShapeRefineJob(job) {
   };
 }
 
+/* ---------- find_trees ---------------------------------------------------------------------
+
+   The trees along a course's fairways and greens (gd-course-trees-core.mjs), written to its
+   course_trees row and live on the watch from there. Each hole is read off its published
+   frame - the pixels are already ours, nothing is fetched again - or, where the course has no
+   frames (no free imagery there), off Esri World Imagery fetched for the run and dropped once
+   read: only the tree positions are kept. Tree heights gate what is found where the canopy
+   height map has any.
+
+   Writes the course_trees row alone. A row someone has edited and published in Studio is
+   never written over by an automatic run - only by one Studio itself asked for (force). */
+const ESRI_REFERER = "https://caddy.claritygolf.app/";
+const canopyTiles = new Map();
+async function openCanopyTile(url) {
+  if (!canopyTiles.has(url)) {
+    const { fromUrl } = await import("geotiff");
+    const opening = fromUrl(url, { allowFullFile: false });
+    canopyTiles.set(url, opening);
+    opening.catch(() => canopyTiles.delete(url));
+  }
+  return canopyTiles.get(url);
+}
+
+async function runTreeJob(job) {
+  /* Read before the first heartbeat, which rewrites the job's result. */
+  const force = !!(job.result && job.result.force);
+  const rows = await supabaseFetch(MAPS_TABLE + "?select=course_id,objects_json&course_id=eq." + encodeURIComponent(job.course_id) + "&limit=1");
+  const map = Array.isArray(rows) ? rows[0] : null;
+  if (!map) throw new Error("course " + job.course_id + " has no course_maps row");
+  const current = await supabaseFetch(TREES_TABLE + "?select=status,level&course_id=eq." + encodeURIComponent(job.course_id) + "&limit=1").catch(() => null);
+  const existing = Array.isArray(current) ? current[0] || null : null;
+  if (existing && existing.status === "edited" && !force) {
+    return { kind: TREE_KIND, courseId: job.course_id, written: false, reason: "trees edited in Studio - left as they are" };
+  }
+  await heartbeatJob(job, { stage: "reading-published-frames" });
+  const frames = await publishedFramesByHole(job.course_id);
+  const sharp = (await import("sharp")).default;
+  const esriKey = env("ARCGIS_API_KEY") || env("ESRI_API_KEY");
+  const found = await findCourseTrees(map.objects_json || {}, {
+    frames,
+    downloadFrame,
+    esriKey,
+    sharp,
+    /* The Location Platform key may be held to the site's own pages. */
+    fetchImpl: (url, init) => fetch(url, Object.assign({}, init, { headers: { Referer: ESRI_REFERER } })),
+    readCanopyFor: bounds => readCanopy(bounds, { openTiff: openCanopyTile }).then(r => (r.grids.length ? r.grids : null)),
+    heartbeat: stage => heartbeatJob(job, { stage })
+  });
+  const holes = Object.keys(found.holes);
+  if (!holes.length) throw new Error("course " + job.course_id + " has no fairways or greens to look along");
+  if (holes.every(h => found.holes[h].error)) throw new Error("no hole could be read: " + found.holes[holes[0]].error);
+  const level = existing && Number.isFinite(Number(existing.level)) ? Number(existing.level) : TREE_DEFAULT_LEVEL;
+  const now = new Date().toISOString();
+  await supabaseFetch(TREES_TABLE + "?on_conflict=course_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify([{
+      course_id: job.course_id, trees: packTrees(found.trees), level, status: "auto", imagery: found.imagery,
+      run: { version: TREE_RUN_VERSION, holes: found.holes, heights: found.heights, ranAt: now },
+      published_at: now, published_by: job.requested_by || null, updated_at: now
+    }])
+  });
+  return {
+    kind: TREE_KIND, courseId: job.course_id, written: true, imagery: found.imagery, heights: found.heights,
+    trees: found.trees.filter(t => t.l <= level).length, candidates: found.trees.length, holes: found.holes,
+    visualsTouched: false, holeGeometryTouched: false
+  };
+}
+
 /* ---------- collect_extra_objects ---------------------------------------------------------
 
    Enrichment, and ONLY enrichment. It shares the Overpass sweep with runMapperJob and nothing
@@ -3254,15 +3362,21 @@ export default async function courseMapperWorker(req) {
   try { origin = new URL(req.url).origin; } catch (e) { origin = ""; }
   await reapStaleJobs();
   const startedAt = Date.now();
-  const next = () => claimNextJob({ allowNearby: Date.now() - startedAt < NEARBY_CLAIM_BUDGET_MS });
+  let backfilled = false;
+  const next = async () => {
+    const job = await claimNextJob({ allowNearby: Date.now() - startedAt < NEARBY_CLAIM_BUDGET_MS, allowBackfill: !backfilled });
+    if (job && job.requested_by === "tree-backfill") backfilled = true;
+    return job;
+  };
   let job = payload && payload.jobId ? await claimJob(payload.jobId) : await next();
   while (job) {
     try {
       const kind = String(job.kind || "");
-      const maintenance = kind === OBJECT_COLLECTION_KIND || kind === SHAPE_REFINE_KIND;
+      const maintenance = kind === OBJECT_COLLECTION_KIND || kind === SHAPE_REFINE_KIND || kind === TREE_KIND;
       const background = kind === NEARBY_AUTOMAP_KIND;
       const result = kind === OBJECT_COLLECTION_KIND ? await runObjectCollectionJob(job)
         : kind === SHAPE_REFINE_KIND ? await runShapeRefineJob(job)
+        : kind === TREE_KIND ? await runTreeJob(job)
         : await runMapperJob(job, origin);
       /* Chained BEFORE finishJob so the outcome rides on the job's own result row - a course
          whose frames never appeared should say why in the same place everything else about
@@ -3284,6 +3398,14 @@ export default async function courseMapperWorker(req) {
             expectedHoles: result.expectedHoles
           }))
           .catch(error => ({ chained: false, reason: String(error && error.message || error).slice(0, 300) }));
+        /* The course's second pass: its trees. Queued here only when no frames are coming
+           (no free imagery there), so the run reads Esri; a course whose frames are on their
+           way is queued by the visual worker once they are published. */
+        if (!result.visualChain.chained) {
+          result.treeRun = await queueTreeRun(supabaseFetch, { courseId: job.course_id, requestedBy: "auto-after-automap", origin })
+            .then(r => (r.queued ? "queued" : r.deduped ? "already-queued" : "not-queued"))
+            .catch(error => "not-queued: " + String(error && error.message || error).slice(0, 200));
+        }
       }
       await finishJob(job.id, { status: "done", result, error: null });
       /* The normal package is saved and the job is done; only now is the Garmin package
@@ -3312,7 +3434,8 @@ export default async function courseMapperWorker(req) {
       const patch = retryable
         ? { status: "queued", error: null, result: Object.assign({}, job.result || {}, { attempts, lastTransientError: message }, diagnostics ? { diagnostics } : {}) }
         : { status: "failed", error: attempts > 1 ? message + " (after " + attempts + " attempts)" : message, result: Object.assign({}, job.result || {}, { attempts }, diagnostics ? { diagnostics } : {}) };
-      if (!retryable && job.kind !== NEARBY_AUTOMAP_KIND) Object.assign(patch.result, await requestMapperDebug(job, { message, attempts, diagnostics }));
+      /* Neither a background neighbour nor a tree run was promised to anyone: no debug session. */
+      if (!retryable && job.kind !== NEARBY_AUTOMAP_KIND && job.kind !== TREE_KIND) Object.assign(patch.result, await requestMapperDebug(job, { message, attempts, diagnostics }));
       await finishJob(job.id, patch).catch(() => {});
       /* A failed scan still says a player is golfing around here. */
       if (!retryable) await queueNeighboursAfter(job);
@@ -3322,4 +3445,4 @@ export default async function courseMapperWorker(req) {
   return new Response("ok", { status: 200 });
 }
 
-export const __courseMapperWorkerTest = { claimJob, claimNextJob, queueNeighboursAfter, finishJob, heartbeatJob, reapStaleJobs, loadCourseCenter, ensureCoursePlace, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, requestMapperDebug, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, loopCourseId, MAX_TRANSIENT_ATTEMPTS };
+export const __courseMapperWorkerTest = { claimJob, claimNextJob, claimTreeBackfill, runTreeJob, queueNeighboursAfter, finishJob, heartbeatJob, reapStaleJobs, loadCourseCenter, ensureCoursePlace, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, requestMapperDebug, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, loopCourseId, MAX_TRANSIENT_ATTEMPTS };

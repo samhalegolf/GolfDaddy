@@ -162,7 +162,7 @@ test("captured tiles are fetched at the capture zoom, not whatever zoom the map 
   /* Leaflet's template layers take {z} from the map's own tile zoom; the green wand read the
      wrong ground at every map zoom but its capture zoom until this was pinned. */
   assert.ok(/function tileUrlAt\(cx, cy, z\) \{[\s\S]*?layer\._tileZoom = z;[\s\S]*?finally \{ layer\._tileZoom = saved; \}/.test(page), "tileUrlAt must point the layer's tile zoom at z for the call and restore it");
-  assert.ok(page.includes("img.src = tileUrlAt(cx, cy, z)"), "stitched tiles must be addressed through tileUrlAt");
+  assert.ok(page.includes("try { url = tileUrlAt(cx, cy, z); }"), "stitched tiles must be addressed through tileUrlAt");
   assert.ok(page.includes("attempt(1)"), "the wand retries one zoom coarser before falling back to a circle");
 });
 
@@ -404,16 +404,28 @@ test("cluster oval: a press and drag stretches an oval of trees", () => {
   assert.ok(page.includes('addFeature({ kind: "trees", points: ring });') && page.includes("shapes.ellipseInBox(a, b, done.round)"), "the oval becomes a trees area");
 });
 
-test("trees near play: looks along each fairway and green with nothing placed, gated by tree heights, live like the box finder", () => {
+test("trees near play: looks along each fairway and green with nothing placed, gated by tree heights, into the tree layer", () => {
   assert.ok(page.includes('data-gd-overlay="method-auto"') && page.includes('data-gd-overlay="tree-auto"'), "no Near play method or its button");
   assert.ok(page.includes("shapes.playBand(w, h, { play: [played], surfaces: surfaces, woods: woods,"), "the band is built round the shape looked along, clear of every surface");
   assert.ok(page.includes("shapes.autoTreeModel(cap.image, shapes.ringsMask(w, h, turf), band,"), "what a tree looks like comes from the turf");
-  assert.ok(page.includes("finder = { ids: [], runs: runs, nearPlay: true, note: note };"), "the trees it drops are live for left / right / Enter / Esc");
+  assert.ok(page.includes("openTreeEdit(kept.concat(found), session.treeFinderLevel, true,"), "what it finds opens in the course's tree layer, replacing only the ground it looked at");
+  assert.ok(page.includes("keepTiles(got[0]);\n            fetchItem(k + 1);"), "the next shape loads while this one is read, sharing the tiles they overlap on");
+  assert.ok(page.includes("captureBox(ring, { mpp: NEAR_PLAY_MPP,") && page.includes("canopyFor(ring, bandM)"), "pictures at one zoom, heights asked for alongside them");
   assert.ok(page.includes('var CANOPY_API = "/api/course-map-canopy-height";'), "tree heights come from the canopy endpoint");
   assert.ok(page.includes("(canopyCredit ? \" · \" + esc(canopyCredit) : \"\")"), "the tree heights are credited (CC BY)");
   assert.ok(page.includes("var MAX_TREES = 3000;") && page.includes("function roomFor(kind)"), "single trees have a cap of their own");
   const fn = read("functions/course-map-canopy-height.mjs");
   assert.ok(fn.includes('path: "/api/course-map-canopy-height"') && fn.includes("verifiedAdminEmail(req)"), "the canopy endpoint is admin only, at its path");
+});
+
+test("the tree layer: a button that says none / finding / done, More and Less, a click drops a tree, Publish tree changes", () => {
+  assert.ok(page.includes('viewButton("trees", "trees", "Trees")') && page.includes('data-gd-overlay="tree-bar"'), "no Trees button or tree bar");
+  assert.ok(page.includes('b.classList.toggle("isTreesDone", !!row && !running);') && page.includes('b.classList.toggle("isTreesBusy", running);'), "the button shows where the trees stand");
+  assert.ok(page.includes("body: JSON.stringify({ courseId: id, kind: \"find_trees\" })"), "a tree run is asked of the mapper queue");
+  assert.ok(page.includes('api("POST", "", { courseId: id, action: "publish", trees: packTrees(keep), level: level }, TREES_API)'), "publishing sends the trees kept and the level they are shown at");
+  assert.ok(page.includes("t.gone = !t.gone;"), "a click drops a tree, and a second keeps it");
+  const css = read("scripts/studio/studio-shell.css");
+  assert.ok(css.includes(".gdStudioOverlayViewBtn.isTreesDone"), "the done state is styled");
 });
 
 test("tree finder: learns from the trees placed by hand, drops trees in the box, live for left / right / Enter / Esc", () => {
