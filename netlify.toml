@@ -118,6 +118,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/course-map-ai-prompts"
+  to = "/.netlify/functions/course-map-ai-prompts"
+  status = 200
+
+[[redirects]]
+  from = "/api/course-scorecard-ask"
+  to = "/.netlify/functions/course-scorecard-ask"
+  status = 200
+
+[[redirects]]
   from = "/api/course-map-source-test"
   to = "/.netlify/functions/course-map-source-test"
   status = 200

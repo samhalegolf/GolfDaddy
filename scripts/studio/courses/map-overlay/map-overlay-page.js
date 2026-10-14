@@ -52,6 +52,8 @@
 
   var API = "/api/course-map-overlay";
   var AI_API = "/api/course-map-ai-scan";
+  /* The AI help tasks and the operator's words for each (functions/course-map-ai-prompts.mjs). */
+  var AI_PROMPTS_API = "/api/course-map-ai-prompts";
   var WAND_API = "/api/course-map-wand";
   var JOBS_API = "/api/course-mapper-jobs";
   /* DEV/TEST: fetch this view from a forced map source (Mapbox) server-side - see
@@ -210,6 +212,8 @@
     facility: null, variant: "",
     /* The Number tool: the number the next hole clicked gets, and whether it then steps on. */
     numberNext: 1, numberAuto: true,
+    /* AI help: the task picked last. Its words live on the server (saved) or in the panel (edited). */
+    aiTask: "find-greens",
     dirty: false, rev: 0, saving: false, saveError: "", fairwayWidth: 0,
     mode: "shapes", wandSize: { green: 1, bunker: 1, water: 1 }, method: { fairway: "width", green: "wand", tee: "round", bunker: "wand", water: "wand", trees: "single", hazard: "draw", waste: "grow" }, lineWandSize: { fairway: 1, bunker: 1, water: 1, waste: 1 }, mergeBunkers: true, seams: true, fullscreen: false, unsaved: null,
     /* The size the next single tree is dropped at, and the tree finder's sensitivity. Near
@@ -248,7 +252,7 @@
         course: slimCourse(session.course), view: session.view, sourceKey: session.sourceKey,
         showOsm: session.showOsm, showObjects: session.showObjects, mode: session.mode, fairwayWidth: session.fairwayWidth,
         wandSize: session.wandSize, method: session.method, lineWandSize: session.lineWandSize, mergeBunkers: session.mergeBunkers, seams: session.seams, fullscreen: !!session.fullscreen,
-        treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel, treeBandM: session.treeBandM, treeHeights: session.treeHeights, hazardCorridorM: session.hazardCorridorM, hazardFinderLevel: session.hazardFinderLevel, numberAuto: session.numberAuto,
+        treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel, treeBandM: session.treeBandM, treeHeights: session.treeHeights, hazardCorridorM: session.hazardCorridorM, hazardFinderLevel: session.hazardFinderLevel, numberAuto: session.numberAuto, aiTask: session.aiTask,
         unsaved: session.dirty && session.loadedFor ? { courseId: session.loadedFor, features: session.features, playOrders: session.playOrders } : null
       }));
     } catch (e) {}
@@ -264,7 +268,7 @@
     try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) {}
     if (!saved || typeof saved !== "object") return;
     if (saved.course) { session.course = saved.course; session.view = saved.view || null; }
-    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "googleSplit", "treeRadius", "treeFinderLevel", "treeBandM", "treeHeights", "hazardCorridorM", "hazardFinderLevel", "numberAuto"].forEach(function (k) {
+    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "googleSplit", "treeRadius", "treeFinderLevel", "treeBandM", "treeHeights", "hazardCorridorM", "hazardFinderLevel", "numberAuto", "aiTask"].forEach(function (k) {
       if (saved[k] != null) session[k] = saved[k];
     });
     if (saved.wandSize && typeof saved.wandSize === "object") {
@@ -483,6 +487,12 @@
     var clearingTags = false;
     var sourceTesting = false;
     var sourceTest = null;
+    /* AI help: the tasks from the server (null until opened), words typed and not yet saved
+       per task, and whether the panel is open. */
+    var aiTasks = null;
+    var aiLoading = null;
+    var aiEdits = {};
+    var aiOpen = false;
     /* The press-and-drag gestures: a cluster oval or a tree-finder box being stretched, and the
        colour wand's press. */
     var stretch = null;
@@ -522,11 +532,12 @@
       '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="objects" checked> Show course objects</label>' +
       "</div>" +
       '<div class="gdStudioViewportBar">' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ai" disabled title="Pins in view: the AI shapes them and fills in the rest. Only shapes in view: it refits them to the ground. Nothing in view: it traces from scratch.">Scan this view with AI</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ai" disabled aria-expanded="false" title="Ask the AI to find or draw things in this view. Pick what you want it to do, read or change the words it is given, then run it on the view.">AI help…</button>' +
       '<label class="gdStudioViewportField gdStudioDiagramBtn">Course map… <input type="file" accept="image/*" data-gd-overlay="course-map" hidden></label>' +
       '<span class="gdStudioViewportField" data-gd-overlay="course-map-state"></span>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="source-test" disabled title="Dev test: fetch this view from Mapbox Satellite and Mapbox Terrain server-side, to judge the imagery. Nothing is stored.">Test Mapbox source</button>' +
       "</div>" +
+      '<div class="gdStudioOverlayAi" data-gd-overlay="ai-panel" hidden></div>' +
       '<div class="gdStudioSourceTest" data-gd-overlay="source-panel" hidden></div>' +
       '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="convert" disabled title="Add what OSM has here - greens, tees, fairways, bunkers, water, trees, hole lines - and the mapper\'s default fairways to the overlay as shapes you can reshape. Once saved and ready, each replaces the OSM shape it came from.">Make OSM editable</button>' +
@@ -556,6 +567,7 @@
       "<strong>Number</strong>: click each hole's fairway (or any shape on it) and the whole hole takes the <em>Next hole</em> number; with <em>Auto</em> on, the number then moves on, so 1 to 18 is eighteen clicks. Each hole shows one number on its fairway - click it with any tool to type a different one. A number on two holes shows red. " +
       "<strong>Play order</strong>: where the mapper gets a site's courses wrong, say them by hand. <strong>+ New play order</strong>, name it, then click its holes in the order they are played - an OSM hole line, or any shape of a hole you have linked (link a hole's tee and green first). Click a hole again to take it out. A hole can be in several play orders, so the same nines played in a different order are just another play order. With play orders on a ready overlay, the mapper publishes exactly those courses under those names. " +
       "<strong>Undo</strong> (the arrow at the top of the right-hand buttons, or Ctrl+Z / ⌘Z) takes back the last change, one at a time. " +
+      "<strong>AI help</strong>: the AI is shown a screenshot of exactly this view, with your pins, shapes and OSM's greens drawn on it, and whatever it finds is put back on the map in the same place. <em>Find greens, tees and fairways</em> drops pins for you to shape with the wands; it works on an empty view, better with a green and a tee already pinned as samples, best when a sample carries its hole number. The other tasks trace, shape your pins or refit outlines. Every task's words can be edited and saved, and the panel shows what is sent around them. " +
       "Everything saves as you go, as a <strong>draft</strong> the mapper ignores - <strong>Mark ready</strong> when the course looks right, then run the mapper. " +
       "Bright outlines are what OSM already has; dashed amber ones are the course's saved objects.</p></details>" +
       "</div>" +
@@ -655,7 +667,7 @@
       "</div>";
 
     var el = {};
-    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-along", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "hazard-auto-label", "hazard-corridor", "hazard-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "run", "status"].forEach(function (name) {
+    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "ai-panel", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-along", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "hazard-auto-label", "hazard-corridor", "hazard-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -4376,8 +4388,13 @@
     function updateActions() {
       renderUndo();
       var has = !!session.course && !busy;
-      el.ai.disabled = !has || scanning || !!draft.length;
-      el.ai.title = draft.length ? "Finish or cancel the fairway you are placing first" : scanning ? "A scan is running" : "";
+      el.ai.disabled = !session.course;
+      el.ai.setAttribute("aria-expanded", aiOpen ? "true" : "false");
+      var aiRun = el["ai-panel"].querySelector('[data-gd-ai="run"]');
+      if (aiRun) {
+        aiRun.disabled = !has || scanning || !!draft.length;
+        aiRun.title = draft.length ? "Finish or cancel the fairway you are placing first" : scanning ? "A scan is running" : "Capture this view and send it with the words above";
+      }
       el["source-test"].disabled = !has || scanning || sourceTesting;
       var sourceScan = el["source-panel"].querySelector('[data-gd-source-test="scan"]');
       if (sourceScan) sourceScan.disabled = scanning;
@@ -4826,8 +4843,16 @@
         return "AI dry run" + from + " - nothing saved: found " + (scan.found || 0) + " (" + (s.fairways || 0) + " fairways, " + (s.greens || 0) + " greens, " + (s.tees || 0) + " tees, " + (s.bunkers || 0) + " bunkers)" +
           (scan.dropped && scan.dropped.length ? " · " + scan.dropped.length + " dropped" : "") + (scan.notes ? " · model notes: " + scan.notes : "");
       }
-      var job = scan.job === "refine" ? "AI refine pass: " : scan.job === "complete" ? "AI complete pass: " : "AI trace: ";
-      var bits = [job + (scan.replaced || 0) + " shape" + (scan.replaced === 1 ? "" : "s") + " refitted or pins shaped, " + (scan.added || 0) + " added" +
+      var task = scan.task && scan.task.label ? "AI " + scan.task.label.toLowerCase() + ": " : scan.job === "refine" ? "AI refine pass: " : scan.job === "complete" ? "AI complete pass: " : "AI trace: ";
+      if (scan.task && scan.task.output === "pins") {
+        var pinBits = [task + (scan.added || 0) + " pin" + (scan.added === 1 ? "" : "s") + " dropped - shape them with the wands, or drag any that landed off" +
+          " · overlay now " + (scan.overlayTotal || 0) + " (" + (s.pins || 0) + " pins)"];
+        if (scan.dropped && scan.dropped.length) pinBits.push(scan.dropped.length + " dropped: " + scan.dropped.map(function (d) { return d.reason; }).join("; "));
+        if (scan.usage) pinBits.push((scan.usage.inputTokens || 0) + " in / " + (scan.usage.outputTokens || 0) + " out tokens");
+        if (scan.notes) pinBits.push("model notes: " + scan.notes);
+        return pinBits.join(" · ");
+      }
+      var bits = [task + (scan.replaced || 0) + " shape" + (scan.replaced === 1 ? "" : "s") + " refitted or pins shaped, " + (scan.added || 0) + " added" +
         " · overlay now " + (scan.overlayTotal || 0) + " (" + (s.fairways || 0) + " fairways, " + (s.greens || 0) + " greens, " + (s.tees || 0) + " tees, " + (s.bunkers || 0) + " bunkers" + (s.pins ? ", " + s.pins + " pins left" : "") + ")"];
       if (scan.dropped && scan.dropped.length) bits.push(scan.dropped.length + " dropped: " + scan.dropped.map(function (d) { return d.reason; }).join("; "));
       if (scan.usage) bits.push((scan.usage.inputTokens || 0) + " in / " + (scan.usage.outputTokens || 0) + " out tokens");
@@ -4866,9 +4891,131 @@
       }, AI_POLL_MS);
     }
 
+    /* ---- AI help panel ----
+       Everything used now and then about the AI in one place: which task, the words it is
+       given (editable, saved per task on the server), how it answers, a note for this scan
+       only, and what surrounds the words. The tasks come from the server, never a copy here. */
+    function toggleAiPanel() {
+      aiOpen = !aiOpen;
+      el["ai-panel"].hidden = !aiOpen;
+      updateActions();
+      if (aiOpen && !aiTasks) loadAiTasks();
+      else if (aiOpen) renderAiPanel();
+    }
+
+    function loadAiTasks() {
+      if (aiLoading) return aiLoading;
+      el["ai-panel"].innerHTML = '<p class="gdStudioMuted">Loading the AI tasks…</p>';
+      aiLoading = api("GET", "", null, AI_PROMPTS_API).then(function (data) {
+        if (destroyed) return;
+        aiTasks = data && Array.isArray(data.tasks) ? data.tasks : [];
+        aiTasks.promptMax = (data && data.promptMax) || 8000;
+        aiLoading = null;
+        if (!aiTasks.some(function (t) { return t.id === session.aiTask; })) session.aiTask = aiTasks.length ? aiTasks[0].id : "";
+        renderAiPanel();
+      }).catch(function (error) {
+        if (destroyed) return;
+        aiLoading = null;
+        el["ai-panel"].innerHTML = '<p class="gdStudioMuted">Could not load the AI tasks: ' + esc(error && error.message || error) + '. <button type="button" class="gdStudioDiagramBtn" data-gd-ai="retry">Try again</button></p>';
+        var retry = el["ai-panel"].querySelector('[data-gd-ai="retry"]');
+        if (retry) retry.addEventListener("click", loadAiTasks);
+      });
+      return aiLoading;
+    }
+
+    function aiTaskEntry() {
+      return (aiTasks || []).filter(function (t) { return t.id === session.aiTask; })[0] || (aiTasks && aiTasks[0]) || null;
+    }
+
+    /* The task as the panel has it now: the saved words unless the operator has typed, and the
+       output picked. This is what a scan is sent, so what runs is what is on screen. */
+    function aiTaskNow() {
+      var entry = aiTaskEntry();
+      if (!entry) return null;
+      var edit = aiEdits[entry.id];
+      return { id: entry.id, label: entry.label, output: edit && edit.output ? edit.output : entry.output, prompt: edit && typeof edit.prompt === "string" ? edit.prompt : entry.prompt, stored: entry.stored };
+    }
+
+    function renderAiPanel() {
+      if (destroyed || !aiOpen) return;
+      var panel = el["ai-panel"];
+      var entry = aiTaskEntry();
+      if (!entry) { panel.innerHTML = '<p class="gdStudioMuted">No AI tasks.</p>'; return; }
+      var now = aiTaskNow();
+      var edited = !!aiEdits[entry.id] && (aiEdits[entry.id].prompt !== entry.prompt || (aiEdits[entry.id].output && aiEdits[entry.id].output !== entry.output));
+      panel.innerHTML =
+        '<div class="gdStudioOverlayAiRow">' +
+          '<label class="gdStudioViewportField">Task <select data-gd-ai="task">' + aiTasks.map(function (t) {
+            return '<option value="' + esc(t.id) + '"' + (t.id === entry.id ? " selected" : "") + ">" + esc(t.label) + (t.stored ? " (custom words)" : "") + "</option>";
+          }).join("") + "</select></label>" +
+          '<label class="gdStudioViewportField" title="Pins: one point per green, tee or bunker and two per fairway, dropped as pins for you to shape. Outlines: full polygons.">Answers with <select data-gd-ai="output"><option value="pins"' + (now.output === "pins" ? " selected" : "") + '>pins</option><option value="outlines"' + (now.output === "outlines" ? " selected" : "") + ">outlines</option></select></label>" +
+          '<span class="gdAdminCourseStatusDot ' + (entry.stored ? "good" : "muted") + '">' + (edited ? "edited, not saved" : entry.stored ? "your words" : "default words") + "</span>" +
+        "</div>" +
+        '<div class="gdStudioCardHint">' + esc(entry.when) + "</div>" +
+        '<textarea data-gd-ai="prompt" rows="7" maxlength="' + (aiTasks.promptMax || 8000) + '" spellcheck="false" placeholder="What should the AI do with this view? Leave blank and it does its best."></textarea>' +
+        '<div class="gdStudioOverlayAiRow">' +
+          '<input type="text" data-gd-ai="notes" maxlength="600" placeholder="Anything extra for this scan only, e.g. the 9th green is by the clubhouse">' +
+        "</div>" +
+        '<div class="gdStudioOverlayAiRow">' +
+          '<button type="button" class="gdStudioDiagramBtn gdStudioOverlayAiRun" data-gd-ai="run">Run on this view</button>' +
+          '<button type="button" class="gdStudioDiagramBtn" data-gd-ai="save" title="Keep these words as this task\'s own, for every scan from now on">Save words</button>' +
+          '<button type="button" class="gdStudioDiagramBtn" data-gd-ai="reset" title="Back to the built-in words"' + (entry.stored || edited ? "" : " disabled") + ">Reset</button>" +
+          '<span class="gdStudioMuted" data-gd-ai="status">' + (entry.stored && entry.updatedAt ? "Saved " + new Date(entry.updatedAt).toLocaleString() : "") + "</span>" +
+        "</div>" +
+        '<details class="gdStudioOverlayAiOutline"><summary class="gdStudioMuted">What the AI receives around your words</summary>' +
+          '<pre data-gd-ai="outline"></pre>' +
+        "</details>";
+      panel.querySelector('[data-gd-ai="prompt"]').value = now.prompt || "";
+      panel.querySelector('[data-gd-ai="outline"]').textContent = entry.outline || "";
+      panel.querySelector('[data-gd-ai="task"]').addEventListener("change", function (event) {
+        session.aiTask = event.target.value;
+        remember();
+        renderAiPanel();
+      });
+      panel.querySelector('[data-gd-ai="output"]').addEventListener("change", function (event) {
+        aiEdits[entry.id] = Object.assign({}, aiEdits[entry.id], { prompt: panel.querySelector('[data-gd-ai="prompt"]').value, output: event.target.value });
+        renderAiPanel();
+      });
+      panel.querySelector('[data-gd-ai="prompt"]').addEventListener("input", function (event) {
+        aiEdits[entry.id] = Object.assign({}, aiEdits[entry.id], { prompt: event.target.value });
+        var dot = panel.querySelector(".gdAdminCourseStatusDot");
+        if (dot) dot.textContent = event.target.value !== entry.prompt ? "edited, not saved" : entry.stored ? "your words" : "default words";
+        panel.querySelector('[data-gd-ai="reset"]').disabled = false;
+      });
+      panel.querySelector('[data-gd-ai="run"]').addEventListener("click", scanWithAi);
+      panel.querySelector('[data-gd-ai="save"]').addEventListener("click", function () { saveAiTask(false); });
+      panel.querySelector('[data-gd-ai="reset"]').addEventListener("click", function () { saveAiTask(true); });
+      updateActions();
+    }
+
+    function aiStatus(text) {
+      var span = el["ai-panel"].querySelector('[data-gd-ai="status"]');
+      if (span) span.textContent = text || "";
+    }
+
+    function saveAiTask(reset) {
+      var now = aiTaskNow();
+      if (!now) return;
+      aiStatus(reset ? "Resetting…" : "Saving…");
+      var body = reset ? { taskId: now.id, reset: true } : { taskId: now.id, prompt: now.prompt, output: now.output };
+      api("POST", "", body, AI_PROMPTS_API).then(function (data) {
+        if (destroyed || !data || !data.saved) return;
+        aiTasks = aiTasks.map(function (t) { return t.id === data.saved.id ? data.saved : t; });
+        delete aiEdits[data.saved.id];
+        renderAiPanel();
+        aiStatus(reset ? "Back to the default words" : "Saved - every scan of this task uses these words now");
+      }).catch(function (error) {
+        if (destroyed) return;
+        aiStatus((reset ? "Not reset: " : "Not saved: ") + (error && error.message || error));
+      });
+    }
+
     function scanWithAi() {
       var id = courseIdOf(session.course);
       if (!id || scanning || draft.length) return;
+      var task = aiTaskNow();
+      var notesEl = el["ai-panel"].querySelector('[data-gd-ai="notes"]');
+      var notes = notesEl ? String(notesEl.value || "").trim() : "";
       scanning = true;
       selectedId = "";
       setTool("move");
@@ -4882,12 +5029,16 @@
       }).then(function (capture) {
         var recorded = capture.anchors.filter(function (a) { return a.saved; });
         var pins = recorded.filter(function (a) { return /^P/.test(a.label); }).length;
-        var job = pins ? "complete pass - shaping " + pins + " pin" + (pins === 1 ? "" : "s") + " and filling in the rest"
+        var job = task ? task.label.toLowerCase() + (task.output === "pins" ? " (pins)" : "") + (recorded.length ? " with " + recorded.length + " sample" + (recorded.length === 1 ? "" : "s") + " in view" : " on an empty view")
+          : pins ? "complete pass - shaping " + pins + " pin" + (pins === 1 ? "" : "s") + " and filling in the rest"
           : recorded.length ? "refine pass - fitting the " + recorded.length + " shape" + (recorded.length === 1 ? "" : "s") + " in view"
           : "full trace";
         setStatus("Sending " + capture.width + "×" + capture.height + " px (" + capture.tiles + " tiles" + (capture.failed ? ", " + capture.failed + " missing" : "") + "), " + job + "…");
         scanFrame = L.rectangle(capture.bounds, { color: "#ffb54c", weight: 1, dashArray: "6 6", fill: false, interactive: false }).addTo(mapObj);
-        return api("POST", "", { courseId: id, image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, anchors: capture.anchors, grid: capture.grid }, AI_API);
+        var body = { courseId: id, image: { data: capture.data, mediaType: capture.mediaType }, georef: capture.georef, anchors: capture.anchors, grid: capture.grid };
+        if (task) body.task = { id: task.id, output: task.output, prompt: task.prompt };
+        if (notes) body.notes = notes;
+        return api("POST", "", body, AI_API);
       }).then(function (data) {
         if (destroyed) return;
         setStatus("AI scan queued (" + Math.round(((data && data.georef && data.georef.metresPerPixel) || 0) * 100) / 100 + " m/px). Waiting for the model…");
@@ -4994,6 +5145,11 @@
       if (!svg) return;
       var colour = { fairway: "#7CFC00", green: "#00e5ff", tee: "#ffffff", bunker: "#ffe14d", hole: "#ff6ad5" };
       svg.innerHTML = (scan.pixels || []).map(function (f) {
+        if (f.pin) {
+          return (f.pixels || []).map(function (p) {
+            return '<circle cx="' + Math.round(p.x) + '" cy="' + Math.round(p.y) + '" r="7" fill="' + (colour[f.kind] || "#fff") + '" stroke="#000" stroke-width="2" vector-effect="non-scaling-stroke"></circle>';
+          }).join("") + ((f.pixels || []).length > 1 ? '<polyline points="' + f.pixels.map(function (p) { return Math.round(p.x) + "," + Math.round(p.y); }).join(" ") + '" fill="none" stroke="' + (colour[f.kind] || "#fff") + '" stroke-width="3" stroke-dasharray="8 6" vector-effect="non-scaling-stroke"></polyline>' : "");
+        }
         var pts = (f.pixels || []).map(function (p) { return Math.round(p.x) + "," + Math.round(p.y); }).join(" ");
         var tag = f.kind === "hole" ? "polyline" : "polygon";
         return "<" + tag + ' points="' + pts + '" fill="none" stroke="' + (colour[f.kind] || "#fff") + '" stroke-width="3" vector-effect="non-scaling-stroke"></' + tag + ">";
@@ -5331,7 +5487,7 @@
     el.osm.addEventListener("change", function () { session.showOsm = el.osm.checked; drawOsm(); remember(); });
     el.objects.checked = session.showObjects;
     el.objects.addEventListener("change", function () { session.showObjects = el.objects.checked; drawObjects(); remember(); });
-    el.ai.addEventListener("click", scanWithAi);
+    el.ai.addEventListener("click", toggleAiPanel);
     el["source-test"].addEventListener("click", runSourceTest);
     el["tool-move"].addEventListener("click", function () { setTool("move"); });
     el["tool-connect"].addEventListener("click", function () { setTool("connect"); });

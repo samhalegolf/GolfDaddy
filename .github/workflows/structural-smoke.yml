@@ -127,6 +127,7 @@ jobs:
           node dev/overlay-georef-core.test.js
           node dev/ai-scan-core.test.js
           node dev/course-map-ai-scan.test.js
+          node dev/course-scorecard-ask.test.js
           node dev/studio-map-overlay.test.js
           node dev/map-overlay-shapes.test.js
           node dev/canopy-height.test.mjs
