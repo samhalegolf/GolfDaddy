@@ -17,6 +17,14 @@
    surface's MID label (surface * 3 + 1), meaning "this surface's own colour", and because
    pieces are ordered surface by surface and largest first, painting them in order is exact.
 
+   MOW LINES. Given the hole's play line (options.mowLine, image px, tee to green), the
+   fairway is not shaded by the relief but striped: bands stripeM wide running parallel to
+   the line and bending with it, every other band the fairway's LIT variant and the rest its
+   own colour. They are ordinary pieces (label 5, fairway lit), so a watch that draws
+   pieces draws mow lines with no new code. Without a play line the fairway is shaded by the
+   relief as before. A hole with no heights at all (sample null) still gets its mow lines:
+   the relief is simply flat.
+
    Why pieces and not contours or a shade grid: contours read as lines, not texture; a shade
    grid fine enough to read cost 90-142 KB for Millbrook and thousands of drawn dots a frame.
    Pieces came to ~48 KB for the course, at most ~5 KB a hole, a few dozen fills.
@@ -40,27 +48,38 @@
     smoothPasses: 3,    // Chaikin corner cutting
     azimuth: 315,       // light, degrees clockwise from image-up
     altitude: 45,
-    exaggeration: 2
+    exaggeration: 2,
+    stripeM: 6,         // one mow stripe, across the fairway
+    mowSmoothPasses: 3  // Chaikin passes on the play line before the stripes follow it
   };
 
   var SURFACE_ROUGH = 0, SURFACE_FAIRWAY = 1, SURFACE_GREEN = 2, UNSHADED = 3;
 
-  /* sample(lat, lng) -> metres; toLatLng({x, y}) -> {lat, lng}; outlines: buildHoleOutlines'
-     result. Returns {version, p: [[label, x0, y0, x1, y1, ...], ...]} or null. */
+  /* sample(lat, lng) -> metres, or null for a hole with no heights; toLatLng({x, y}) ->
+     {lat, lng}; outlines: buildHoleOutlines' result; options.mowLine: the play line as
+     [{x, y}, ...] image px, or null. Returns {version, p: [[label, x0, y0, x1, y1, ...], ...]}
+     or null when there is nothing to cut (no heights and no play line, or a height missing). */
   function buildHoleTerrain(spatialRef, sample, toLatLng, outlines, options) {
     var o = Object.assign({}, DEFAULTS, options || {});
     var cell = o.cellPx, mpp = Number(spatialRef.metresPerPixel) || 0.5;
     var gw = Math.ceil(spatialRef.imageWidth / cell), gh = Math.ceil(spatialRef.imageHeight / cell);
-    var heights = new Float32Array(gw * gh);
-    for (var y = 0; y < gh; y++) {
-      for (var x = 0; x < gw; x++) {
-        var ll = toLatLng({ x: (x + 0.5) * cell, y: (y + 0.5) * cell });
-        var v = ll ? Number(sample(ll.lat, ll.lng)) : NaN;
-        if (!isFinite(v)) return null;
-        heights[y * gw + x] = v;
+    var mow = mowLine(o.mowLine, o.mowSmoothPasses);
+    if (!sample && !mow) return null;
+    var shade;
+    if (sample) {
+      var heights = new Float32Array(gw * gh);
+      for (var y = 0; y < gh; y++) {
+        for (var x = 0; x < gw; x++) {
+          var ll = toLatLng({ x: (x + 0.5) * cell, y: (y + 0.5) * cell });
+          var v = ll ? Number(sample(ll.lat, ll.lng)) : NaN;
+          if (!isFinite(v)) return null;
+          heights[y * gw + x] = v;
+        }
       }
+      shade = blur(hillshade(heights, gw, gh, mpp * cell, o), gw, gh, Math.max(1, Math.round(o.blurM / (mpp * cell))));
+    } else {
+      shade = new Float32Array(gw * gh).fill(0.5);
     }
-    var shade = blur(hillshade(heights, gw, gh, mpp * cell, o), gw, gh, Math.max(1, Math.round(o.blurM / (mpp * cell))));
 
     var surface = new Uint8Array(gw * gh);   // 0 rough everywhere to start
     var ring = function (flat, value) { rasterRing(surface, gw, gh, cell, flat, value); };
@@ -77,8 +96,14 @@
     (outlines && outlines.b || []).forEach(function (r) { ring(r, UNSHADED); });
 
     var label = new Int16Array(gw * gh);
+    var stripePx = o.stripeM / mpp;
     for (var i = 0; i < label.length; i++) {
       var s = shade[i] < o.darkBelow ? 0 : shade[i] > o.litAbove ? 2 : 1;
+      if (mow && surface[i] === SURFACE_FAIRWAY) {
+        /* Which stripe this cell is in, counted across the play line: even ones are lit. */
+        var d = signedDistanceToPolyline(((i % gw) + 0.5) * cell, (Math.floor(i / gw) + 0.5) * cell, mow);
+        s = Math.floor(d / stripePx) % 2 === 0 ? 2 : 1;
+      }
       label[i] = surface[i] !== UNSHADED && s !== 1 ? surface[i] * 3 + s : -1;
     }
     dropSpecks(label, gw, gh, o.minAreaM2 / ((mpp * cell) * (mpp * cell)));
@@ -101,6 +126,38 @@
        largest first within it, so a hole painted after its piece is exactly right. */
     pieces.sort(function (a, b) { return a.surface - b.surface || b.area - a.area; });
     return { version: 1, p: pieces.map(function (piece) { return piece.flat; }) };
+  }
+
+  /* The play line the stripes follow: rounded so a bend is a curve, not a kink the stripes
+     would crease at. Null unless it has two distinct points. */
+  function mowLine(points, passes) {
+    var pts = (points || []).filter(function (p) { return p && isFinite(p.x) && isFinite(p.y); })
+      .map(function (p) { return { x: Number(p.x), y: Number(p.y) }; });
+    if (pts.length < 2) return null;
+    for (var pass = 0; pass < passes; pass++) {
+      var out = [pts[0]];
+      for (var i = 0; i + 1 < pts.length; i++) {
+        var a = pts[i], b = pts[i + 1];
+        out.push({ x: 0.75 * a.x + 0.25 * b.x, y: 0.75 * a.y + 0.25 * b.y }, { x: 0.25 * a.x + 0.75 * b.x, y: 0.25 * a.y + 0.75 * b.y });
+      }
+      out.push(pts[pts.length - 1]);
+      pts = out;
+    }
+    return pts.length >= 2 && (pts[0].x !== pts[pts.length - 1].x || pts[0].y !== pts[pts.length - 1].y) ? pts : null;
+  }
+
+  /* Distance from (x, y) to the open polyline, negative on its left. Measured to the
+     nearest segment, so it is continuous round a bend: the outside of a turn is the same
+     side of both segments that meet there. */
+  function signedDistanceToPolyline(x, y, pts) {
+    var best = Infinity, sign = 1;
+    for (var i = 0; i + 1 < pts.length; i++) {
+      var a = pts[i], b = pts[i + 1], dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy;
+      var t = len2 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / len2)) : 0;
+      var ex = x - a.x - t * dx, ey = y - a.y - t * dy, d2 = ex * ex + ey * ey;
+      if (d2 < best) { best = d2; sign = dx * (y - a.y) - dy * (x - a.x) < 0 ? -1 : 1; }
+    }
+    return sign * Math.sqrt(best);
   }
 
   /* Horn's method, one light; 0.5 is flat, lower faces away, higher faces the light. */
@@ -289,5 +346,6 @@
     return Math.abs(a / 2);
   }
 
-  return { DEFAULTS: DEFAULTS, buildHoleTerrain: buildHoleTerrain, chaikin: chaikin, douglasPeuckerRing: douglasPeuckerRing };
+  return { DEFAULTS: DEFAULTS, buildHoleTerrain: buildHoleTerrain, chaikin: chaikin, douglasPeuckerRing: douglasPeuckerRing,
+    signedDistanceToPolyline: signedDistanceToPolyline };
 });

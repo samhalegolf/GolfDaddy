@@ -1095,8 +1095,16 @@ class GarminMapView extends WatchUi.View {
     static var SURFACE_KEYS = ["r", "f", "g"];
     function drawOutlines(dc, shapes, palette, imageWidth, imageHeight, viewWidth, viewHeight) {
         if (dc has :setAntiAlias) { dc.setAntiAlias(true); }
-        dc.setColor(palette["r"], palette["r"]);
+        // The rough is the whole screen: its base colour cleared, then its
+        // grain over the lot where the watch can draw patterns.
+        var rough = palette["r"];
+        var roughBase = (rough instanceof Lang.Array) ? rough[0] : rough;
+        dc.setColor(roughBase, roughBase);
         dc.clear();
+        if (rough instanceof Lang.Array && (dc has :setFill)) {
+            dc.setFill(patternTexture(rough));
+            dc.fillRectangle(0, 0, viewWidth, viewHeight);
+        }
         var f = camera.frame(imageWidth, imageHeight, viewWidth, viewHeight);
         var view = [viewWidth, viewHeight];
         drawPieces(dc, shapes["t"], 0, palette, f, view);
@@ -1186,24 +1194,55 @@ class GarminMapView extends WatchUi.View {
         }
     }
 
-    // A 2x2 tile with `n` of its pixels in the dark colour, made once per
-    // pattern. Diagonal for 2, so the mix reads as a tone, not stripes.
+    // A tile made once per pattern. n of 1 to 3: a 2x2 tile with that many of
+    // its pixels in the mix colour (diagonal for 2, so the mix reads as a
+    // tone, not stripes). n of 4: GRAIN, a 16x16 tile half and half by a
+    // checker, with short diagonal dashes of each colour over it - the look of
+    // mown-round rough or raked sand, at the size of a few pixels.
     var textures = {};
+    static var GRAIN_MIX_DASHES = [1, 2, 9, 5, 3, 12, 13, 9];
+    static var GRAIN_BASE_DASHES = [5, 0, 12, 13, 0, 8, 8, 10];
+    static var GRAIN_SIZE = 16;
     function patternTexture(spec) {
         var key = spec[0] + "/" + spec[1] + "/" + spec[2];
         if (textures.hasKey(key)) { return textures[key]; }
-        var ref = Graphics.createBufferedBitmap({ :width => 2, :height => 2 });
+        var n = spec[2];
+        var size = (n >= 4) ? GRAIN_SIZE : 2;
+        var ref = Graphics.createBufferedBitmap({ :width => size, :height => size });
         var bmp = (ref has :get) ? ref.get() : ref;
         var tile = bmp.getDc();
         tile.setColor(spec[0], spec[0]);
         tile.clear();
         tile.setColor(spec[1], Graphics.COLOR_TRANSPARENT);
-        var n = spec[2];
-        if (n >= 1) { tile.drawPoint(0, 0); }
-        if (n >= 2) { tile.drawPoint(1, 1); }
-        if (n >= 3) { tile.drawPoint(1, 0); }
+        if (n >= 4) {
+            drawGrain(tile, spec[0], spec[1]);
+        } else {
+            if (n >= 1) { tile.drawPoint(0, 0); }
+            if (n >= 2) { tile.drawPoint(1, 1); }
+            if (n >= 3) { tile.drawPoint(1, 0); }
+        }
         var texture = new Graphics.BitmapTexture({ :bitmap => ref });
         textures[key] = texture;
         return texture;
+    }
+
+    function drawGrain(tile, base, mix) {
+        tile.setColor(mix, Graphics.COLOR_TRANSPARENT);
+        for (var y = 0; y < GRAIN_SIZE; y += 1) {
+            for (var x = (y % 2); x < GRAIN_SIZE; x += 2) { tile.drawPoint(x, y); }
+        }
+        drawDashes(tile, GRAIN_MIX_DASHES);
+        tile.setColor(base, Graphics.COLOR_TRANSPARENT);
+        drawDashes(tile, GRAIN_BASE_DASHES);
+    }
+
+    // Four-pixel dashes running down-right from each start, wrapping round
+    // the tile so the grain tiles without a seam.
+    function drawDashes(tile, starts) {
+        for (var i = 0; i + 1 < starts.size(); i += 2) {
+            for (var k = 0; k < 4; k += 1) {
+                tile.drawPoint((starts[i] + k) % GRAIN_SIZE, (starts[i + 1] + k) % GRAIN_SIZE);
+            }
+        }
     }
 }
