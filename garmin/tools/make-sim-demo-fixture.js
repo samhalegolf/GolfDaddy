@@ -21,6 +21,12 @@
  * fails and any batch of more than two commands is refused as too large - so
  * GarminSender's gate can be watched narrowing and widening in the console.
  *
+ * --wind=<fromDeg>,<kmh> (default 250,20): a wind the demo build reads in
+ * place of Garmin's weather (GarminSimDemoPolicy.wind), so the wind marker,
+ * ghost Bubble and plays number show on the simulated watch, which has no
+ * weather of its own on most devices. --wind=off leaves it out, and the demo
+ * then reads Toybox.Weather like a live build.
+ *
  * Numbers that need double precision (coordinates, the map transform) are
  * written as STRINGS: Connect IQ's resource JSON is not guaranteed to decode
  * decimals as Double, and a float32 tx (~8.6e7) is off by several pixels.
@@ -44,6 +50,13 @@ const container = process.argv[2];
 const args = process.argv.slice(3);
 const download = args.indexOf("--download") >= 0;
 const faults = args.indexOf("--faults") >= 0;
+const windArg = args.find((a) => a.startsWith("--wind="));
+const windSpec = windArg ? windArg.slice("--wind=".length) : "250,20";
+const wind = windSpec === "off" ? null : (() => {
+  const parts = windSpec.split(",").map(Number);
+  if (parts.length !== 2 || !parts.every(Number.isFinite)) throw new Error("--wind wants <fromDeg>,<kmh> or off, got " + windSpec);
+  return { fromDeg: ((parts[0] % 360) + 360) % 360, kmh: Math.max(0, parts[1]) };
+})();
 /* --objects=<objects_json file>: build the demo holes from course_maps.objects_json with the
    real generator (scripts/gd-watch-map-core.js) instead of the Apple Watch's package - every
    hole then carries the generator's OUTLINES and no image at all, so the watch draws its own
@@ -211,7 +224,8 @@ const fixture = {
   holes: fixtureHoles,
   situations,
   manifest: manifestHoles,
-  player
+  player,
+  wind
 };
 fs.writeFileSync(path.join(OUT, "sim-demo.json"), JSON.stringify(fixture));
 fs.writeFileSync(path.join(OUT, "resources.xml"),

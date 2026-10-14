@@ -26,6 +26,17 @@ class GarminSimDemoPolicy {
     (:sim_demo_off)
     static function bitmap(holeNumber) { return null; }
 
+    // The fixture's wind ({ "fromDeg", "kmh" }) in place of Garmin's weather,
+    // which the simulator rarely has (GarminConditions.readWeather). Null
+    // outside the demo, and in a demo whose fixture carries none.
+    (:sim_demo_off)
+    static function wind() { return null; }
+
+    (:sim_demo)
+    static function wind() {
+        return GarminSimDemo.instance != null ? GarminSimDemo.instance.wind() : null;
+    }
+
     // Whether the Bluetooth link to a phone counts as the phone listening.
     // Not in the sim demo: its "phone" is the stand-in below, and the
     // simulator reports a connected phone regardless, which would hold the

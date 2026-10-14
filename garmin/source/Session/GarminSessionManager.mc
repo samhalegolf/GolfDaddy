@@ -411,13 +411,35 @@ class GarminSessionManager {
     }
 
     // What the Bubble aims at by default: the Scene's target for its own
-    // hole, the skeleton's green for a hole the wrist walked onto itself.
+    // hole (already inside the bag: Marshal's clampAim), and for a hole the
+    // wrist walked onto itself the phone's own default-target rule
+    // (GarminBubbleEngine.defaultTarget): the green when the bag reaches
+    // it, else a layup down the hole's route at the edge of the bag. A hole
+    // with no route, or no fix to measure from, still never aims past the
+    // bag: the green is pulled back along the line to it, as a drag past
+    // the bag is (GarminPlayState.clampedToBag), so the Bubble never sits
+    // where no club goes.
     function aimTarget() {
         if (scene == null) { return null; }
         if (localHole == null) { return scene.aimTarget(); }
         var sk = skeletonFor();
-        return (sk != null) ? sk.green(localHole) : null;
+        var green = (sk != null) ? sk.green(localHole) : null;
+        if (green == null) { return null; }
+        var fix = effectiveFix();
+        if (fix == null || playerStore.snapshot == null) { return green; }
+        // Memoised on its inputs: walking the route is dozens of distance
+        // calls, and both faces ask for the aim on every redraw.
+        var key = fix.lat + "," + fix.lng + "|" + localHole + "|" + playerStore.snapshot.fingerprint;
+        if (key.equals(ownAimKey)) { return ownAim; }
+        var bag = playerStore.snapshot.bag;
+        var route = sk.line(localHole);
+        var layup = (route.size() >= 2) ? GarminBubbleEngine.defaultTarget(fix, green, route, bag) : null;
+        ownAim = (layup != null) ? layup : GarminPlayState.clampedToBag(green, fix, bag);
+        ownAimKey = key;
+        return ownAim;
     }
+    var ownAimKey = null;
+    var ownAim = null;
 
     function holePar() {
         var n = currentHole();

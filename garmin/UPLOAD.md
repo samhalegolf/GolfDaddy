@@ -390,6 +390,18 @@ Verified 2026-10-05 on the Forerunner 255 (the 512 KB floor): hole 1
 drew; app memory peaked at 138 of 508 KB - on Connect IQ 5 the image lives in
 the graphics pool, not the app heap. No Connect sign-in prompt appeared.
 
+**Wind on the simulated watch.** The wrist reads its wind from Garmin's
+own weather (`Toybox.Weather`, `GarminConditions.readWeather`), and the
+simulator almost never has any: the module needs Connect IQ 3.2+, so the
+default build device, the Approach S62 (3.0), has no weather at all, and a
+3.2+ device only has what the simulator's own weather settings supply. The
+demo fixture therefore carries a wind of its own (`--wind=<fromDeg>,<kmh>`,
+default `250,20`; `--wind=off` to leave it out), and a `CIQ_SIM_DEMO=1`
+build reads that in place of the weather - so the wind marker, the ghost
+Bubble and the plays number show on every device. Any muted build prints
+`wind: ...` to the console the first time the wind is missing, naming why
+(no module on this device, no current conditions, no wind in them).
+
 The device list itself is generated: `node garmin/tools/sync-devices.js`
 (rules and the measured 512 KB memory floor are in its header; `--list`
 prints every device's verdict, `--check` runs in `npm run test:garmin`).
