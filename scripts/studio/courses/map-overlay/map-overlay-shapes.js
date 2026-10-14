@@ -1016,12 +1016,15 @@
   }
 
   /* Where to look for trees near a played shape, as a 0/1 mask the size of the picture: within
-     bandPx of `play` (pixel rings - the fairway or green looked along), further than clearPx
+     bandPx of `play` (pixel rings - the fairway or green looked along) or of `lines` (pixel
+     polylines - a play line, for the hazard finder), further than clearPx
      from every surface on the course (`surfaces`, pixel rings; the played shape counts as one),
      and not inside a wood already drawn (`woods`). */
   function playBand(w, h, opts) {
     var o = opts || {}, n = w * h;
     var play = ringsMask(w, h, o.play), surf = ringsMask(w, h, (o.surfaces || []).concat(o.play || [])), wood = ringsMask(w, h, o.woods);
+    /* A play line looked along (the hazard finder) is where to look, not a surface. */
+    (o.lines || []).forEach(function (line) { if (line && line.length >= 2) paintLine(play, w, h, line); });
     var dPlay = distanceTo(play, w, h), dSurf = distanceTo(surf, w, h);
     var bandPx = Number(o.bandPx) || 0, clearPx = Number(o.clearPx) || 0;
     var band = new Uint8Array(n);
@@ -1093,6 +1096,329 @@
     [TREE_DEFAULT_STEP, TREE_STEP_DARK.length - 1].some(function (k) { crownAt = maskIndices(allowAt(k), TREE_SAMPLE_PIXELS); return crownAt.length >= enough; });
     if (crownAt.length < enough) return { model: null, reason: "no-crowns", allow: allowAt(TREE_DEFAULT_STEP) };
     return { model: colourModel(fieldSamples(field, crownAt)), allow: allowAt(TREE_DEFAULT_STEP), allowAt: allowAt };
+  }
+
+  /* ---- bunkers, water and crossings along play ----
+     The hazard finder: walks a hole's play line (tee to green) with nothing placed first, and
+     finds inside a corridor along it
+       - bunkers: ground much brighter than the turf, not green, warm (yellow over blue - what
+         tells sand from a grey path), smooth, a bunker's size;
+       - water: ground well darker than the turf, not green or bluer than it is yellow, the
+         smoothest thing on the picture, and not under anything tall when heights are to hand;
+       - crossings: a stretch of the line that is not turf, grown sideways with the line wand's
+         engine, read against the hole's fairway shapes (crossingCase): right through one it is
+         a hazard unless it looks like a path; in a split between two it is a hazard when its
+         ground is rougher than the course's own rough; partial, it is a hazard only with a hint
+         of water in it. A path is nothing.
+     Turf is the reference: the fairways and greens on the picture, or failing those the strip
+     under the line itself. Returns {find(level) -> {bunkers, water, hazards}} (pixel rings),
+     the picture read once; find is cheap enough to run for every level up front. */
+  var HAZARD_CORRIDOR_M = 45;
+  var HAZARD_CLEAR_M = 3;
+  /* How much brighter than turf sand is, at least, and how far into the warm half its colour
+     must sit; how much darker than turf water is, at least (the field's brightness units). */
+  var SAND_BRIGHT_MARGIN = 15;
+  var SAND_WARM_MIN = 4;
+  var WATER_DARK_MARGIN = 12;
+  /* A bunker's believable size (the wand's own band) and the thinnest a bunker is anywhere;
+     the smallest water worth a shape. */
+  var BUNKER_AREA_M2 = { min: 8, max: 1200 };
+  var BUNKER_MIN_DEPTH_M = 1.5;
+  var WATER_MIN_AREA_M2 = 60;
+  /* A crossing: a run along the line this long, read this far either side of it, grown out
+     this far; and the line's first and last metres, which are tee and green, not crossings. */
+  var CROSSING_MIN_M = 3;
+  var CROSSING_MAX_M = 80;
+  var CROSSING_HALF_M = 4;
+  var CROSSING_REACH_M = 60;
+  var CROSSING_SKIP_TEE_M = 15;
+  var CROSSING_SKIP_GREEN_M = 20;
+  /* A split between two fairways is a hazard when it is this many times rougher than the
+     rough; a partial crossing when this share of it reads as water; a path is no deeper than
+     this anywhere and at least this many times longer than it is wide. */
+  var GAP_TEXTURE_OVER_ROUGH = 1.8;
+  var PARTIAL_WATER_SHARE = 0.15;
+  var PATH_MAX_DEPTH_M = 2.5;
+  var PATH_MIN_ELONGATION = 6;
+  /* Sensitivity, strictest first: what each level multiplies the margins by (a stricter level
+     asks sand to be brighter and water darker) and the turf tolerance a crossing must exceed.
+     HAZARD_FINDER_LEVELS indexes them; the middle is the default. */
+  var HAZARD_STEP_MARGIN = [1.6, 1.3, 1, 0.8, 0.6, 0.45];
+  var HAZARD_STEP_TURF = [3.4, 2.9, 2.5, 2.1, 1.8, 1.5];
+  var HAZARD_FINDER_LEVELS = [0, 1, 2, 3, 4, 5];
+  var HAZARD_DEFAULT_STEP = 2;
+  var HAZARD_FINDER_MAX = 60;
+  var HAZARD_SAMPLE_PIXELS = 20000;
+
+  /* Paint a polyline (pixel {x, y}) into a 0/1 mask, one pixel wide. */
+  function paintLine(mask, w, h, line) {
+    for (var k = 1; k < line.length; k++) {
+      var a = line[k - 1], b = line[k], steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y)));
+      for (var s = 0; s <= steps; s++) {
+        var x = Math.round(a.x + (b.x - a.x) * s / steps), y = Math.round(a.y + (b.y - a.y) * s / steps);
+        if (x >= 0 && y >= 0 && x < w && y < h) mask[y * w + x] = 1;
+      }
+    }
+  }
+
+  /* A polyline as a 0/1 mask the size of a picture, widthPx wide. */
+  function lineMask(w, h, line, widthPx) {
+    var mask = new Uint8Array(w * h);
+    if (Array.isArray(line) && line.length >= 2) paintLine(mask, w, h, line);
+    var r = Math.round((Number(widthPx) || 1) / 2);
+    return r >= 1 ? morph(mask, w, h, r, true) : mask;
+  }
+
+  /* The polyline walked a pixel at a time: its points, each with how far along (px) it is. */
+  function walkLine(line, w, h) {
+    var out = [], along = 0;
+    for (var k = 1; k < line.length; k++) {
+      var a = line[k - 1], b = line[k], d = Math.hypot(b.x - a.x, b.y - a.y), steps = Math.max(1, Math.ceil(d));
+      for (var s = k === 1 ? 0 : 1; s <= steps; s++) {
+        var t = s / steps;
+        out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, s: along + d * t, ux: d > 1e-9 ? (b.x - a.x) / d : 0, uy: d > 1e-9 ? (b.y - a.y) / d : 1 });
+      }
+      along += d;
+    }
+    return out;
+  }
+
+  /* How busy the ground is round each pixel: a pixel's brightness against its close
+     neighbours', averaged over a window winPx either way. Flat turf, sand and water score
+     low; rocks, scrub and a creek bed high. */
+  function textureField(image, winPx) {
+    var w = image.width, h = image.height, n = w * h;
+    var L = colourField(image, 0).L, near = boxBlur(L, w, h, 1), detail = new Float32Array(n);
+    for (var i = 0; i < n; i++) detail[i] = Math.abs(L[i] - near[i]);
+    return boxBlur(detail, w, h, Math.max(1, Math.round(winPx)));
+  }
+
+  /* The connected blobs of a 0/1 mask: [{at: [indices], area, depth, box}], biggest first.
+     depth: the deepest the blob goes from its edge (px), read off one distance transform of
+     the whole mask. Blobs under minAreaPx are dropped. */
+  function blobs(mask, w, h, opts) {
+    var o = opts || {}, n = w * h, label = new Int32Array(n), queue = new Int32Array(n), out = [];
+    var empty = new Uint8Array(n);
+    for (var i = 0; i < n; i++) empty[i] = mask[i] ? 0 : 1;
+    var depth = distanceTo(empty, w, h), minArea = Number(o.minAreaPx) || 1, id = 0;
+    for (i = 0; i < n; i++) {
+      if (!mask[i] || label[i]) continue;
+      id++;
+      var head = 0, tail = 0, at = [], deep = 0, x0 = w, y0 = h, x1 = 0, y1 = 0;
+      label[i] = id; queue[tail++] = i;
+      while (head < tail) {
+        var j = queue[head++], x = j % w, y = (j - x) / w;
+        at.push(j);
+        if (depth[j] > deep) deep = depth[j];
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        if (x > 0 && mask[j - 1] && !label[j - 1]) { label[j - 1] = id; queue[tail++] = j - 1; }
+        if (x < w - 1 && mask[j + 1] && !label[j + 1]) { label[j + 1] = id; queue[tail++] = j + 1; }
+        if (y > 0 && mask[j - w] && !label[j - w]) { label[j - w] = id; queue[tail++] = j - w; }
+        if (y < h - 1 && mask[j + w] && !label[j + w]) { label[j + w] = id; queue[tail++] = j + w; }
+      }
+      if (at.length >= minArea) out.push({ at: at, area: at.length, depth: deep, box: { x0: x0, y0: y0, x1: x1 + 1, y1: y1 + 1 } });
+    }
+    out.sort(function (a, b) { return b.area - a.area; });
+    return out;
+  }
+
+  function blobMask(blob, n) {
+    var m = new Uint8Array(n);
+    blob.at.forEach(function (i) { m[i] = 1; });
+    return m;
+  }
+
+  /* How many separate pieces a 0/1 mask is in, counting only pieces of at least minPx. */
+  function pieces(mask, w, h, minPx) {
+    return blobs(mask, w, h, { minAreaPx: minPx }).length;
+  }
+
+  /* How a crossing sits against a hole's fairway shapes. run: the walked points of the line
+     along it; grown: the crossing's 0/1 mask; fairways: [0/1 mask] one per fairway shape;
+     fairwayOnLine(s): whether the line is on a fairway shape at distance s along it.
+       through - the run is on a fairway shape and the crossing cuts that shape in two;
+       gap     - the run is off every fairway shape, with fairway on the line before and after
+                 it within CROSSING_MAX;
+       partial - anything else. */
+  function crossingCase(run, grown, fairways, fairwayOnLine, w, h, maxPx) {
+    var n = w * h, inside = 0, which = {};
+    run.forEach(function (p) {
+      var i = Math.round(p.y) * w + Math.round(p.x);
+      fairways.forEach(function (f, k) { if (f[i]) { inside++; which[k] = (which[k] || 0) + 1; } });
+    });
+    if (inside > run.length * 0.5) {
+      var best = Object.keys(which).sort(function (a, b) { return which[b] - which[a]; })[0], f = fairways[best];
+      var cut = new Uint8Array(n), area = 0;
+      for (var i = 0; i < n; i++) { if (f[i]) area++; cut[i] = f[i] && !grown[i] ? 1 : 0; }
+      return pieces(cut, w, h, Math.max(50, area * 0.03)) >= 2 ? "through" : "partial";
+    }
+    var s0 = run[0].s, s1 = run[run.length - 1].s, before = false, after = false;
+    for (var d = 1; d <= maxPx && !(before && after); d++) {
+      if (!before && fairwayOnLine(s0 - d)) before = true;
+      if (!after && fairwayOnLine(s1 + d)) after = true;
+    }
+    return before && after ? "gap" : "partial";
+  }
+
+  /* Whether a grown crossing looks like a path: brighter than turf, grey, of one colour,
+     thin everywhere and long. */
+  function pathLike(field, blob, turf, mpp) {
+    var model = colourModel(fieldSamples(field, maskIndices(blobMask(blob, field.w * field.h), HAZARD_SAMPLE_PIXELS)));
+    if (!model) return false;
+    var width = Math.max(1, blob.depth * 2), length = blob.area / width;
+    return model.mL > turf.mL + 5 && Math.abs(model.mA) < 6 && model.mB < SAND_WARM_MIN + 2 && model.dL < 8 &&
+      blob.depth * mpp < PATH_MAX_DEPTH_M && length / width >= PATH_MIN_ELONGATION;
+  }
+
+  /* opts: corridor (0/1 mask: where to look - playBand along the line, clear of the bunkers,
+     water, hazards, waste and woods already drawn, but NOT of the fairways: a crossing drawn
+     over is still a crossing, and sand inside a fairway shape is still sand), turf (0/1 mask of
+     the fairways and greens on the picture; may be empty), line ([{x, y}] the play line in pixels),
+     fairways ([pixel ring] this hole's fairway shapes), rough (0/1 mask of ground to read the
+     course's rough from - the corridor clear of every surface and wood), tall (0/1 mask of
+     pixels under something ≥ TREE_MIN_HEIGHT_M, or null), mpp (metres a pixel), max (shapes
+     of a kind a run may return). */
+  function hazardFinder(image, opts) {
+    var o = opts || {}, w = image.width, h = image.height, n = w * h, i;
+    var mpp = Number(o.mpp) || 0.4, line = o.line || [], corridor = o.corridor, tall = o.tall || null;
+    function none(reason) { return { reason: reason, find: function () { return { bunkers: [], water: [], hazards: [] }; } }; }
+    if (!corridor || line.length < 2) return none("no-line");
+    var field = colourField(image, 1);
+    /* Texture read tight (a pixel against its 3x3), so a shape's own edge is busy only a pixel
+       or two in and the close below bridges it; a blob's roughness is the median over it. */
+    var tex = textureField(image, 1);
+    var walked = walkLine(line, w, h), total = walked.length ? walked[walked.length - 1].s : 0;
+
+    /* Turf: the fairways and greens, their edge trimmed; or, with none here, the strip under
+       the line between tee and green. */
+    var turfAt = [], turfFrom = "shapes";
+    if (o.turf) turfAt = maskIndices(morph(o.turf, w, h, Math.max(1, Math.round(1 / mpp)), false), HAZARD_SAMPLE_PIXELS);
+    if (turfAt.length < 200) {
+      turfFrom = "line";
+      var strip = lineMask(w, h, line, 12 / mpp), ends = new Uint8Array(n);
+      var endA = CROSSING_SKIP_TEE_M / mpp, endB = total - CROSSING_SKIP_GREEN_M / mpp;
+      walked.forEach(function (p) { if ((p.s < endA || p.s > endB) && p.x >= 0 && p.y >= 0 && p.x < w && p.y < h) ends[Math.round(p.y) * w + Math.round(p.x)] = 1; });
+      var farFromEnds = distanceTo(ends, w, h);
+      for (i = 0; i < n; i++) if (strip[i] && farFromEnds[i] <= 8 / mpp) strip[i] = 0;
+      turfAt = maskIndices(strip, HAZARD_SAMPLE_PIXELS);
+    }
+    if (turfAt.length < 200) return none("no-turf");
+    var turf = colourModel(fieldSamples(field, turfAt));
+    var turfTex = median(turfAt.map(function (k) { return tex[k]; }));
+    /* The course's rough, for the split-fairway test: its texture. With none to read, the
+       turf's own, which only makes the test stricter. */
+    var roughAt = o.rough ? maskIndices(o.rough, HAZARD_SAMPLE_PIXELS) : [];
+    var roughTex = roughAt.length >= 200 ? median(roughAt.map(function (k) { return tex[k]; })) : turfTex;
+    var smoothTop = Math.max(1, turfTex * 2);
+
+    /* Per pixel, once: how far above and below turf's brightness, and whether it is warm /
+       not green / smooth - so each level is a threshold pass. */
+    var over = new Float32Array(n), under = new Float32Array(n), sandy = new Uint8Array(n), wet = new Uint8Array(n), watery = new Uint8Array(n);
+    for (i = 0; i < n; i++) {
+      over[i] = field.L[i] - turf.mL;
+      under[i] = turf.mL - field.L[i];
+      var a = field.A[i], b = field.B[i], smooth = tex[i] <= smoothTop;
+      sandy[i] = corridor[i] && smooth && a >= -2 && b > SAND_WARM_MIN ? 1 : 0;
+      /* Water's colour - blue over yellow, or grey: not green, not the brown of bare ground -
+         (wet - the hint a partial crossing is read for) and water proper: that colour, flat,
+         and not under a tree. */
+      wet[i] = corridor[i] && (b < 0 || (Math.abs(a) < 6 && b < 8)) ? 1 : 0;
+      watery[i] = wet[i] && smooth && (!tall || !tall[i]) ? 1 : 0;
+    }
+    var fairways = (o.fairways || []).map(function (r) { return ringsMask(w, h, [r]); });
+    var onFairway = new Uint8Array(walked.length);
+    walked.forEach(function (p, k) {
+      var j = Math.round(p.y) * w + Math.round(p.x);
+      onFairway[k] = p.x >= 0 && p.y >= 0 && p.x < w && p.y < h && fairways.some(function (f) { return f[j]; }) ? 1 : 0;
+    });
+    function fairwayOnLine(s) { var k = Math.round(s); return k >= 0 && k < walked.length && onFairway[k] === 1; }
+    /* The turf score across the line at each step: the median over a strip ±CROSSING_HALF_M. */
+    var halfPx = CROSSING_HALF_M / mpp, offTurf = new Float32Array(walked.length);
+    walked.forEach(function (p, k) {
+      var vals = [];
+      for (var t = -halfPx; t <= halfPx; t += Math.max(1, halfPx / 3)) {
+        var x = Math.round(p.x - p.uy * t), y = Math.round(p.y + p.ux * t);
+        if (x >= 0 && y >= 0 && x < w && y < h) vals.push(spreadDistance(field, y * w + x, turf));
+      }
+      offTurf[k] = vals.length ? median(vals) : 0;
+    });
+    var max = Math.max(1, Number(o.max) || HAZARD_FINDER_MAX);
+    var minBunkerPx = BUNKER_AREA_M2.min / (mpp * mpp), maxBunkerPx = BUNKER_AREA_M2.max / (mpp * mpp), minBunkerDepth = BUNKER_MIN_DEPTH_M / mpp;
+    var minWaterPx = WATER_MIN_AREA_M2 / (mpp * mpp), openPx = Math.max(1, Math.round(0.5 / mpp));
+
+    function outline(mask) { return maskOutline(mask, w, h, DETAIL_MAX_POINTS); }
+
+    function find(level) {
+      var k = Math.max(0, Math.min(HAZARD_STEP_MARGIN.length - 1, Math.round(Number(level)) || 0));
+      var m = HAZARD_STEP_MARGIN[k], tol = HAZARD_STEP_TURF[k];
+      var sandOver = Math.max(SAND_BRIGHT_MARGIN, turf.dL) * m, waterUnder = Math.max(WATER_DARK_MARGIN, turf.dL) * m;
+      var sand = new Uint8Array(n), water = new Uint8Array(n), j;
+      for (j = 0; j < n; j++) {
+        sand[j] = sandy[j] && over[j] > sandOver ? 1 : 0;
+        water[j] = watery[j] && under[j] > waterUnder ? 1 : 0;
+      }
+      sand = morph(morph(sand, w, h, openPx, false), w, h, openPx, true);
+      water = morph(morph(morph(morph(water, w, h, openPx, true), w, h, openPx, false), w, h, openPx, false), w, h, openPx, true);
+      var out = { bunkers: [], water: [], hazards: [] }, taken = new Uint8Array(n);
+      blobs(sand, w, h, { minAreaPx: minBunkerPx }).forEach(function (b) {
+        if (out.bunkers.length >= max || b.area > maxBunkerPx || b.depth < minBunkerDepth) return;
+        var ring = outline(blobMask(b, n));
+        if (ring) { out.bunkers.push(ring); b.at.forEach(function (q) { taken[q] = 1; }); }
+      });
+      blobs(water, w, h, { minAreaPx: minWaterPx }).forEach(function (b) {
+        if (out.water.length >= max) return;
+        var ring = outline(blobMask(b, n));
+        if (ring) { out.water.push(ring); b.at.forEach(function (q) { taken[q] = 1; }); }
+      });
+
+      /* Crossings: runs of the line that are not turf, clear of the tee and green ends and of
+         what was just found, grown sideways and read against the fairway shapes. */
+      var skip0 = CROSSING_SKIP_TEE_M / mpp, skip1 = total - CROSSING_SKIP_GREEN_M / mpp;
+      var minRun = CROSSING_MIN_M / mpp, maxRun = CROSSING_MAX_M / mpp, reach = CROSSING_REACH_M / mpp;
+      var runs = [], cur = null;
+      walked.forEach(function (p, q) {
+        var j = Math.round(p.y) * w + Math.round(p.x), on = p.x >= 0 && p.y >= 0 && p.x < w && p.y < h;
+        var off = on && p.s >= skip0 && p.s <= skip1 && offTurf[q] > tol && corridor[j] && !taken[j];
+        if (off) { if (!cur) cur = []; cur.push({ x: p.x, y: p.y, s: p.s, off: offTurf[q] }); }
+        else if (cur) { runs.push(cur); cur = null; }
+      });
+      if (cur) runs.push(cur);
+      runs.forEach(function (run) {
+        if (out.hazards.length >= max) return;
+        var length = run[run.length - 1].s - run[0].s;
+        if (length < minRun || length > maxRun) return;
+        /* The run's own pixels are the seed and the colour sample - one pixel wide, and only
+           its solid middle: the few blended pixels at either end, half turf, would widen the
+           colour's spread until turf itself fitted it. */
+        var solid = median(run.map(function (p) { return p.off; })) * 0.6, seedMask = new Uint8Array(n), seeds = [];
+        paintLine(seedMask, w, h, run.filter(function (p) { return p.off >= solid; }));
+        for (var q = 0; q < n; q++) if (seedMask[q] && corridor[q]) seeds.push(q);
+        if (seeds.length < 3) return;
+        var near = distanceTo(seedMask, w, h);
+        for (q = 0; q < n; q++) if (near[q] > reach) near[q] = Infinity;
+        var grown = growRegion(field, seeds, colourModel(fieldSamples(field, seeds)), near, reach, null, { levels: [2.2], openPx: openPx, minAreaPx: seeds.length });
+        if (!grown.candidates.length) return;
+        var mask = ringsMask(w, h, [grown.candidates[grown.pick]]);
+        for (q = 0; q < n; q++) if (mask[q] && taken[q]) mask[q] = 0;
+        var blob = blobs(mask, w, h, { minAreaPx: 1 })[0];
+        if (!blob) return;
+        var sits = crossingCase(run, mask, fairways, fairwayOnLine, w, h, maxRun), hazard = false;
+        if (sits === "through") hazard = !pathLike(field, blob, turf, mpp);
+        else if (sits === "gap") hazard = median(maskIndices(mask, HAZARD_SAMPLE_PIXELS).map(function (q) { return tex[q]; })) >= GAP_TEXTURE_OVER_ROUGH * Math.max(roughTex, 0.5);
+        else {
+          /* A hint of water: in the crossing or along it (a creek the grow left out, being
+             another colour), a couple of metres either way. */
+          var zone = morph(mask, w, h, Math.max(1, Math.round(2 / mpp)), true), wetPx = 0;
+          for (q = 0; q < n; q++) if (zone[q] && wet[q] && under[q] > waterUnder * 0.6) wetPx++;
+          hazard = wetPx >= blob.area * PARTIAL_WATER_SHARE;
+        }
+        if (!hazard) return;
+        var ring = outline(mask);
+        if (ring) { out.hazards.push(ring); blob.at.forEach(function (q) { taken[q] = 1; }); }
+      });
+      return out;
+    }
+    return { find: find, turfFrom: turfFrom };
   }
 
   /* Which pixels of a picture stand at least minM tall, from canopy-height grids. cap: the
@@ -1546,6 +1872,8 @@
     treeFinder: treeFinder, TREE_FINDER_LEVELS: TREE_FINDER_LEVELS, TREE_FINDER_MAX: TREE_FINDER_MAX, treesInMask: treesInMask, nestedTrees: nestedTrees,
     TREE_BAND_M: TREE_BAND_M, TREE_CLEAR_M: TREE_CLEAR_M, TREE_AUTO_RADIUS_M: TREE_AUTO_RADIUS_M, TREE_MIN_HEIGHT_M: TREE_MIN_HEIGHT_M, TREE_DEFAULT_STEP: TREE_DEFAULT_STEP,
     ringsMask: ringsMask, playBand: playBand, autoTreeModel: autoTreeModel, heightMask: heightMask,
+    hazardFinder: hazardFinder, HAZARD_FINDER_LEVELS: HAZARD_FINDER_LEVELS, HAZARD_DEFAULT_STEP: HAZARD_DEFAULT_STEP, HAZARD_CORRIDOR_M: HAZARD_CORRIDOR_M, HAZARD_CLEAR_M: HAZARD_CLEAR_M,
+    lineMask: lineMask, blobs: blobs, textureField: textureField,
     floodSelect: floodSelect, maskOutline: maskOutline,
     reshapeOutline: reshapeOutline, collarOutline: collarOutline, insideLatLngRing: insideLatLngRing,
     DETAIL_MAX_POINTS: DETAIL_MAX_POINTS, keyCorners: keyCorners, nearestOnRing: nearestOnRing, bendRing: bendRing, tidyBend: tidyBend,

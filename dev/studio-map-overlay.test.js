@@ -381,7 +381,7 @@ test("the shape just placed stays live: left/right step sensitivity, up/down siz
 test("water: a Water tool that draws round the water or uses the wand", () => {
   assert.ok(page.includes('railButton("tool-water"'), "no Water tool");
   assert.ok(page.includes('data-gd-overlay="method-draw"') && page.includes('data-gd-overlay="method-wand"') && page.includes('data-gd-overlay="method-line"'), "no Wand / Draw round / Line + wand switch");
-  assert.ok(page.includes('water: ["wand", "draw", "line", "colour"]') && page.includes('bunker: ["wand", "draw", "line", "colour"]') && page.includes('fairway: ["width", "line", "colour"]'), "water and bunkers draw round or line-wand; fairways line-wand");
+  assert.ok(page.includes('water: ["wand", "draw", "line", "along", "colour"]') && page.includes('bunker: ["wand", "draw", "line", "along", "colour"]') && page.includes('fairway: ["width", "line", "colour"]'), "water and bunkers draw round or line-wand; fairways line-wand");
   assert.ok(page.includes("shapes.simplifyOutline(") && page.includes("addFeature({ kind: drawn.kind, points: ring });"), "a drawn line must become an outline of the tool's kind");
   assert.ok(page.includes('el.map.addEventListener("pointerdown", onMapPress);') && page.includes('if (gesture === "lasso") beginLasso(event);'), "drawing round starts on a press on the map");
   assert.ok(page.includes("water: 0.5") && page.includes("water: 12000"), "the wand capture must be sized for water");
@@ -389,7 +389,7 @@ test("water: a Water tool that draws round the water or uses the wand", () => {
 
 test("trees and hazard: tools that save as their own kinds", () => {
   assert.ok(page.includes('railButton("tool-trees"') && page.includes('railButton("tool-hazard"'), "no Trees / Hazard tools");
-  assert.ok(page.includes('hazard: ["draw", "colour"]'), "a hazard is drawn round, or picked with the colour wand");
+  assert.ok(page.includes('hazard: ["draw", "along", "colour"]'), "a hazard is drawn round, or picked with the colour wand");
   assert.ok(page.includes('trees: ["single", "oval", "draw", "find", "auto", "colour"]'), "trees: a single tree, a cluster oval, drawn round, found in a box, or found near play");
 });
 
@@ -416,6 +416,20 @@ test("trees near play: looks along each fairway and green with nothing placed, g
   assert.ok(page.includes("var MAX_TREES = 3000;") && page.includes("function roomFor(kind)"), "single trees have a cap of their own");
   const fn = read("functions/course-map-canopy-height.mjs");
   assert.ok(fn.includes('path: "/api/course-map-canopy-height"') && fn.includes("verifiedAdminEmail(req)"), "the canopy endpoint is admin only, at its path");
+});
+
+test("hazards along play: walks each hole line, finds bunkers, water and crossing hazards, and drops them live", () => {
+  assert.ok(page.includes('data-gd-overlay="method-along"') && page.includes('data-gd-overlay="hazard-auto"') && page.includes('data-gd-overlay="hazard-corridor"'), "no Along play method, button or corridor");
+  assert.ok(page.includes('bunker: ["wand", "draw", "line", "along", "colour"], water: ["wand", "draw", "line", "along", "colour"]') && page.includes('hazard: ["draw", "along", "colour"]'), "Along play sits under Bunker, Water and Hazard");
+  assert.ok(page.includes("shapes.playBand(w, h, { lines: [linePx], surfaces: avoid, woods: woods,"), "the corridor runs along the play line, clear only of what is already drawn");
+  assert.ok(page.includes("shapes.hazardFinder(cap.image, { corridor: corridor, turf: shapes.ringsMask(w, h, turf), line: linePx, fairways: fairways, rough: rough, tall: heights.mask, mpp: mpp })"), "the finder reads turf, the hole's fairways, the rough and the tree heights");
+  assert.ok(page.includes("shapes.HAZARD_FINDER_LEVELS.map(function (level) {") && page.includes("got[0].image = null;"), "every sensitivity is worked out up front and the picture let go");
+  assert.ok(page.includes("finder = { hazards: true, ids: [], runs: runs, note: note };") && page.includes("if (finder.hazards) dropFinderShapes(next); else dropFinderTrees(next);"), "what it finds is live like the tree finder's: left / right, Enter, Esc");
+  assert.ok(page.includes('var points = kind === "bunker" ? shapes.smoothOutline(ring, "bunker") : ring;') && page.includes('source: "finder"'), "a bunker is kept smooth like the wand's, water and a hazard keep their edge");
+  assert.ok(page.includes("var into = mergeBunker(f.points, f.hole, f, false);") && page.includes("} else if (sealSeams(f)) joined++;"), "kept bunkers join the ones they overlap, water and hazards seam");
+  assert.ok(page.includes("points: [shapes.centroid(outlineOf(tees[h])), shapes.centroid(outlineOf(greens[h]))], straight: true"), "a hole with a tee and green but no line gets a straight one, flagged");
+  const shapesSrc = read("scripts/studio/courses/map-overlay/map-overlay-shapes.js");
+  assert.ok(shapesSrc.includes("function hazardFinder(image, opts)") && shapesSrc.includes("function crossingCase(") && shapesSrc.includes("function pathLike("), "the engine lives in the shapes module");
 });
 
 test("the tree layer: a button that says none / finding / done, More and Less, a click drops a tree, Publish tree changes", () => {

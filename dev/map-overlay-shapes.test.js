@@ -555,6 +555,109 @@ test("a collar rings the green and necks out to its fairway", () => {
   assert.ok(Math.abs(rSpan(lonely).w - 34) < 1, "with no fairway it is just the ring");
 });
 
+/* ---- the hazard finder along play ----
+   A hole 160m long at 0.4m/px: a play line down the middle (x = 100), a fairway 50m wide,
+   mildly textured rough either side. What is painted on it changes per test. */
+const HZ = { w: 200, h: 400, mpp: 0.4 };
+function hazardScene(paint) {
+  const { w, h } = HZ, data = new Uint8ClampedArray(w * h * 4);
+  let seed = 41;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const fairway = [{ x: 40, y: 20 }, { x: 160, y: 20 }, { x: 160, y: 380 }, { x: 40, y: 380 }];
+  const inFairway = (x, y) => x >= 40 && x < 160 && y >= 20 && y < 380;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4;
+    let p = paint && paint(x, y, rnd);
+    if (!p) p = inFairway(x, y) ? { rgb: [110, 160, 75], amp: 10 } : { rgb: [85, 125, 60], amp: 22 };
+    const n = (rnd() - 0.5) * p.amp;
+    data[i] = p.rgb[0] + n; data[i + 1] = p.rgb[1] + n; data[i + 2] = p.rgb[2] + n; data[i + 3] = 255;
+  }
+  return { image: { width: w, height: h, data }, fairway, line: [{ x: 100, y: 5 }, { x: 100, y: 395 }] };
+}
+function hazardRun(scene, extra) {
+  const { w, h, mpp } = HZ, o = extra || {};
+  const fairways = o.fairways || [scene.fairway];
+  const corridor = shapes.playBand(w, h, { lines: [scene.line], surfaces: o.surfaces || [], bandPx: 45 / mpp, clearPx: 3 / mpp });
+  const turf = shapes.ringsMask(w, h, fairways);
+  const rough = new Uint8Array(w * h);
+  for (let i = 0; i < rough.length; i++) rough[i] = corridor[i] && !turf[i] ? 1 : 0;
+  const finder = shapes.hazardFinder(scene.image, { corridor, turf, line: scene.line, fairways, rough, mpp, tall: o.tall || null });
+  return { finder, found: finder.find(shapes.HAZARD_DEFAULT_STEP) };
+}
+const inDisc = (x, y, cx, cy, r) => Math.hypot(x - cx, y - cy) <= r;
+const SAND = { rgb: [222, 205, 165], amp: 8 }, WATER = { rgb: [55, 85, 110], amp: 4 }, PATH = { rgb: [178, 178, 176], amp: 5 };
+const SCRUB = { rgb: [95, 80, 55], amp: 70 }, ROUGHISH = { rgb: [85, 125, 60], amp: 22 }, SHADOW = { rgb: [45, 50, 62], amp: 6 }, CROWN = { rgb: [40, 75, 35], amp: 50 };
+
+test("hazard finder: a warm bright blob beside the line is a bunker, and nothing else", () => {
+  const scene = hazardScene((x, y) => inDisc(x, y, 60, 200, 14) ? SAND : null);
+  const { found } = hazardRun(scene);
+  assert.strictEqual(found.bunkers.length, 1, "one bunker, got " + found.bunkers.length);
+  assert.strictEqual(found.water.length + found.hazards.length, 0, "no water or hazard");
+  const c = shapes.centroid(found.bunkers[0].map(p => ({ lat: p.y, lng: p.x })));
+  assert.ok(Math.hypot(c.lng - 60, c.lat - 200) < 3, "the bunker sits where the sand is");
+});
+
+test("hazard finder: a dark blue smooth blob off the line is water", () => {
+  const scene = hazardScene((x, y) => inDisc(x, y, 30, 120, 16) ? WATER : null);
+  const { found } = hazardRun(scene);
+  assert.strictEqual(found.water.length, 1, "one water, got " + found.water.length);
+  assert.strictEqual(found.bunkers.length + found.hazards.length, 0);
+});
+
+test("hazard finder: a tree's shadow is water only when no heights say it stands under a tree", () => {
+  const paint = (x, y) => inDisc(x, y, 28, 300, 12) ? CROWN : inDisc(x, y, 30, 325, 13) ? SHADOW : null;
+  const scene = hazardScene(paint);
+  const { w, h } = HZ, tall = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (inDisc(x, y, 28, 300, 12) || inDisc(x, y, 30, 325, 13)) tall[y * w + x] = 1;
+  assert.strictEqual(hazardRun(scene, { tall }).found.water.length, 0, "under the canopy it is not water");
+  assert.strictEqual(hazardRun(scene).found.water.length, 1, "without heights the shadow reads as water - the known limit");
+});
+
+test("hazard finder: a grey uniform strip right through the fairway is a path - nothing; a dark broken one is a hazard", () => {
+  const path = hazardScene((x, y) => y >= 196 && y < 204 ? PATH : null);
+  const p = hazardRun(path).found;
+  assert.strictEqual(p.hazards.length + p.bunkers.length + p.water.length, 0, "a path places nothing, got " + JSON.stringify([p.bunkers.length, p.water.length, p.hazards.length]));
+  const creek = hazardScene((x, y) => y >= 190 && y < 212 ? SCRUB : null);
+  const c = hazardRun(creek).found;
+  assert.strictEqual(c.hazards.length, 1, "a scrub band through the fairway is one hazard, got " + c.hazards.length);
+  const ys = c.hazards[0].map(q => q.y), xs = c.hazards[0].map(q => q.x);
+  assert.ok(Math.min(...ys) > 180 && Math.max(...ys) < 222, "the hazard is the band");
+  assert.ok(Math.max(...xs) - Math.min(...xs) > 110, "and it runs across the fairway");
+});
+
+test("hazard finder: a split between two fairways is a hazard only when it is rougher than the rough", () => {
+  const two = [[{ x: 40, y: 20 }, { x: 160, y: 20 }, { x: 160, y: 180 }, { x: 40, y: 180 }], [{ x: 40, y: 230 }, { x: 160, y: 230 }, { x: 160, y: 380 }, { x: 40, y: 380 }]];
+  const calm = hazardScene((x, y) => y >= 180 && y < 230 && x >= 40 && x < 160 ? ROUGHISH : null);
+  assert.strictEqual(hazardRun(calm, { fairways: two }).found.hazards.length, 0, "a gap of plain rough is nothing");
+  const broken = hazardScene((x, y) => y >= 180 && y < 230 && x >= 40 && x < 160 ? SCRUB : null);
+  const b = hazardRun(broken, { fairways: two }).found;
+  assert.strictEqual(b.hazards.length, 1, "a gap of broken ground is one hazard, got " + b.hazards.length);
+});
+
+test("hazard finder: a partial crossing is a hazard only with a hint of water in it", () => {
+  const dry = hazardScene((x, y) => y >= 190 && y < 212 && x < 115 ? SCRUB : null);
+  assert.strictEqual(hazardRun(dry).found.hazards.length, 0, "dry scrub that stops halfway is nothing");
+  const wet = hazardScene((x, y) => y >= 190 && y < 212 && x < 115 ? (y >= 199 && y < 202 ? WATER : SCRUB) : null);
+  const f = hazardRun(wet).found;
+  assert.strictEqual(f.hazards.length, 1, "with a wet core it is one hazard, got " + f.hazards.length + " (water " + f.water.length + ")");
+});
+
+test("hazard finder: looser finds no fewer, stricter no more, and ground already drawn is left alone", () => {
+  const scene = hazardScene((x, y) => inDisc(x, y, 60, 200, 14) ? SAND : inDisc(x, y, 30, 120, 16) ? WATER : null);
+  const { finder } = hazardRun(scene);
+  const count = l => { const f = finder.find(l); return f.bunkers.length + f.water.length + f.hazards.length; };
+  for (let l = 1; l < shapes.HAZARD_FINDER_LEVELS.length; l++) assert.ok(count(l) >= count(l - 1), "level " + l);
+  const drawn = [shapes.circle({ lat: 0, lng: 0 }, 1, 8).map((p, k) => ({ x: 60 + 18 * Math.cos(k / 8 * 2 * Math.PI), y: 200 + 18 * Math.sin(k / 8 * 2 * Math.PI) }))];
+  assert.strictEqual(hazardRun(scene, { surfaces: drawn }).found.bunkers.length, 0, "a bunker already drawn is not found again");
+});
+
+test("hazard finder: with no fairway drawn, turf is read from under the line and a bunker is still found", () => {
+  const scene = hazardScene((x, y) => inDisc(x, y, 60, 200, 14) ? SAND : null);
+  const { finder, found } = hazardRun(scene, { fairways: [] });
+  assert.strictEqual(finder.turfFrom, "line");
+  assert.strictEqual(found.bunkers.length, 1);
+});
+
 let failed = 0;
 tests.forEach(t => {
   try { t.fn(); console.log("  ok  " + t.name); }

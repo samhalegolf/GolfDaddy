@@ -105,18 +105,20 @@
      that colour is picked (see "the colour wand" below). */
   var METHODS = {
     fairway: ["width", "line", "colour"], green: ["wand", "colour"], tee: ["round", "colour"],
-    bunker: ["wand", "draw", "line", "colour"], water: ["wand", "draw", "line", "colour"],
+    /* Bunkers, water and hazards have Along play too: the hazard finder, run along a hole's
+       play line with nothing placed first (see "hazards along play" below). */
+    bunker: ["wand", "draw", "line", "along", "colour"], water: ["wand", "draw", "line", "along", "colour"],
     /* Trees: one tree a click, a cluster stretched as an oval, a wood drawn round, the tree
        finder - a box dragged over ground with trees like the ones placed by hand - or the
        finder run along the edges of the fairways and greens with nothing placed first. */
     trees: ["single", "oval", "draw", "find", "auto", "colour"],
     /* Hazard (gorse, scrub, a ravine): drawn round by hand. */
-    hazard: ["draw", "colour"],
+    hazard: ["draw", "along", "colour"],
     /* Waste area: drawn round roughly and grown out to its edge. */
     waste: ["grow", "colour"]
   };
-  var METHOD_LABEL = { width: "Width", wand: "Wand", round: "Round", draw: "Draw round", line: "Line + wand", single: "Tree", oval: "Cluster", find: "Find trees", auto: "Near play", grow: "Draw + grow", colour: "Colour wand" };
-  var METHOD_NAMES = ["width", "wand", "round", "draw", "line", "single", "oval", "find", "auto", "grow", "colour"];
+  var METHOD_LABEL = { width: "Width", wand: "Wand", round: "Round", draw: "Draw round", line: "Line + wand", single: "Tree", oval: "Cluster", find: "Find trees", auto: "Near play", along: "Along play", grow: "Draw + grow", colour: "Colour wand" };
+  var METHOD_NAMES = ["width", "wand", "round", "draw", "line", "single", "oval", "find", "auto", "along", "grow", "colour"];
   /* The line wand: how far from the line an edge may be at size 1 (metres), the picture's
      metres a pixel, and the size steps up / down take it through. */
   var LINE_WAND_REACH_M = { fairway: 35, bunker: 12, water: 50, waste: 25 };
@@ -173,6 +175,11 @@
   /* Near play reads every picture at about this, so one fairway's tiles serve the next shape's
      too, and a crown is still ~20px across. */
   var NEAR_PLAY_MPP = 0.45;
+  /* The hazard finder reads a hole's corridor at about this many metres a pixel (a bunker is
+     15-75px across), and the corridor can be set this wide either side of the play line. */
+  var ALONG_PLAY_MPP = 0.4;
+  var CORRIDOR_MIN_M = 20;
+  var CORRIDOR_MAX_M = 80;
   var TREE_FINDER_MAX_SIDE_PX = 1400;
   var TREE_SAMPLE_MAX = 12;
   /* Near play, the band looked along each fairway and green can be set this wide, in metres. */
@@ -209,6 +216,9 @@
        play: how far out from the fairways and greens it looks, and whether tree heights gate
        what it finds. */
     treeRadius: 0, treeFinderLevel: 2, treeBandM: 0, treeHeights: true,
+    /* The hazard finder along play: how far either side of the play line it looks, and its
+       sensitivity. */
+    hazardCorridorM: 0, hazardFinderLevel: 2,
     /* Trees placed by hand on this course this session: what the tree finder learns from. Not
        remembered past a reload - the imagery and the light it was taken in can change. */
     treeSamples: []
@@ -238,7 +248,7 @@
         course: slimCourse(session.course), view: session.view, sourceKey: session.sourceKey,
         showOsm: session.showOsm, showObjects: session.showObjects, mode: session.mode, fairwayWidth: session.fairwayWidth,
         wandSize: session.wandSize, method: session.method, lineWandSize: session.lineWandSize, mergeBunkers: session.mergeBunkers, seams: session.seams, fullscreen: !!session.fullscreen,
-        treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel, treeBandM: session.treeBandM, treeHeights: session.treeHeights, numberAuto: session.numberAuto,
+        treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel, treeBandM: session.treeBandM, treeHeights: session.treeHeights, hazardCorridorM: session.hazardCorridorM, hazardFinderLevel: session.hazardFinderLevel, numberAuto: session.numberAuto,
         unsaved: session.dirty && session.loadedFor ? { courseId: session.loadedFor, features: session.features, playOrders: session.playOrders } : null
       }));
     } catch (e) {}
@@ -254,7 +264,7 @@
     try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) {}
     if (!saved || typeof saved !== "object") return;
     if (saved.course) { session.course = saved.course; session.view = saved.view || null; }
-    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "googleSplit", "treeRadius", "treeFinderLevel", "treeBandM", "treeHeights", "numberAuto"].forEach(function (k) {
+    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "googleSplit", "treeRadius", "treeFinderLevel", "treeBandM", "treeHeights", "hazardCorridorM", "hazardFinderLevel", "numberAuto"].forEach(function (k) {
       if (saved[k] != null) session[k] = saved[k];
     });
     if (saved.wandSize && typeof saved.wandSize === "object") {
@@ -534,7 +544,7 @@
       '<div class="gdStudioViewportCredit" data-gd-overlay="credit"></div>' +
       '<details class="gdStudioLede gdStudioOverlayHelp"><summary>How it works</summary>' +
       "<p><strong>Shapes</strong>: <strong>Fairway</strong> - click along its middle and press Finish; <strong>Green</strong> / <strong>Bunker</strong> - click the middle and the wand outlines it " +
-      "(then shaped by a few smooth points); <strong>Water</strong> / <strong>Bunker</strong> - <em>Wand</em>: click the middle, <em>Draw round</em>: press and drag all the way round it, or <em>Line + wand</em>: click a line down its middle and Finish, and the line wand grows it out to the edge (the tool's key again switches method); <strong>Fairway</strong> has <em>Line + wand</em> too, instead of a set width; <strong>Tee</strong> - click to drop a round tee; <strong>Hazard</strong> (gorse, scrub - anything that is not water) - press and drag all the way round it. " +
+      "(then shaped by a few smooth points); <strong>Water</strong> / <strong>Bunker</strong> - <em>Wand</em>: click the middle, <em>Draw round</em>: press and drag all the way round it, or <em>Line + wand</em>: click a line down its middle and Finish, and the line wand grows it out to the edge (the tool's key again switches method); <strong>Fairway</strong> has <em>Line + wand</em> too, instead of a set width; <strong>Tee</strong> - click to drop a round tee; <strong>Hazard</strong> (gorse, scrub - anything that is not water) - press and drag all the way round it. <strong>Along play</strong> (under Bunker, Water and Hazard): walks a hole's play line - its hole line - and finds the bunkers, water and crossing hazards along it with nothing placed first; a creek or scrub right through a fairway is a hazard, a path is nothing, a split between two fairways is a hazard when it is rougher than the rough, and a partial crossing only when there is a hint of water in it. ← → fewer / more, Enter keeps them, Esc takes them away. " +
       "Every tool also has the <em>Colour wand</em>: press on the thing and drag - the further you drag, the more of that colour it takes (Shift-drag adds more, ← → tighter / looser), Enter keeps it. " +
       "<strong>Trees</strong> - <em>Tree</em>: click to drop one tree, ↑ ↓ to size it; <em>Cluster</em>: press and drag to stretch an oval over a group (Shift for a circle); <em>Draw round</em>: press and drag round a wood; <em>Find trees</em>: drag a box and the trees in it that look like the ones you placed by hand this session are dropped for you (← → fewer / more, Enter keeps them, Esc takes them away). " +
       "<strong>Waste</strong> - <em>Draw + grow</em>: draw roughly round it and it is pushed out to the edge of the ground it sits on. " +
@@ -587,6 +597,7 @@
       '<button type="button" data-gd-overlay="method-oval" title="Press and drag across a cluster of trees to stretch an oval over it - hold Shift for a circle (E again switches)">Cluster</button>' +
       '<button type="button" data-gd-overlay="method-find" title="Drag a box: trees in it that look like the ones you placed by hand this session are dropped as trees (E again switches)">Find trees</button>' +
       '<button type="button" data-gd-overlay="method-auto" title="Trees along the edges of the fairways and greens already placed, found with nothing placed by hand first - into the course tree layer, to publish from there (E again switches)">Near play</button>' +
+      '<button type="button" data-gd-overlay="method-along" title="Bunkers, water and crossing hazards along a hole\'s play line, found with nothing placed first - as shapes to keep or throw away (the tool key again switches)">Along play</button>' +
       '<button type="button" data-gd-overlay="method-grow" title="Draw roughly round the waste area; it is pushed out to the edge of the ground it sits on (A again switches)">Draw + grow</button>' +
       '<button type="button" data-gd-overlay="method-colour" title="Press on it and drag - further selects more of the same colour. Shift-drag adds. Enter keeps it (press the tool key again to switch)">Colour wand</button>' +
       "</span>" +
@@ -598,6 +609,9 @@
       '<label title="How far out from each fairway and green to look for trees">Band <input type="number" min="' + TREE_BAND_MIN_M + '" max="' + TREE_BAND_MAX_M + '" step="5" data-gd-overlay="tree-band" class="gdStudioOverlayWidth"> m</label>' +
       '<label title="Keep only what the canopy height map says stands 3m or more, and add trees it finds from their height alone"><input type="checkbox" data-gd-overlay="tree-heights"> Heights</label>' +
       '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="tree-auto"></button></span>' +
+      '<span class="gdStudioOverlayOpt" data-gd-overlay="hazard-auto-label" hidden>' +
+      '<label title="How far either side of the play line to look">Corridor <input type="number" min="' + CORRIDOR_MIN_M + '" max="' + CORRIDOR_MAX_M + '" step="5" data-gd-overlay="hazard-corridor" class="gdStudioOverlayWidth"> m</label>' +
+      '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="hazard-auto"></button></span>' +
       '<label class="gdStudioOverlayOpt" data-gd-overlay="merge-label" title="A bunker outline that overlaps one already placed joins it as one bunker"><input type="checkbox" data-gd-overlay="merge"> Merge bunkers</label>' +
       '<label class="gdStudioOverlayOpt" data-gd-overlay="seams-label" title="A fairway, water, hazard, waste area or trees kept within a few metres of another meets it in the middle, and the line between them is shared - drag it and both follow"><input type="checkbox" data-gd-overlay="seams"> Seams</label>' +
       '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="shape-pins" hidden></button>' +
@@ -641,7 +655,7 @@
       "</div>";
 
     var el = {};
-    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "run", "status"].forEach(function (name) {
+    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-along", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "hazard-auto-label", "hazard-corridor", "hazard-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -655,6 +669,8 @@
     if (!session.treeBandM) session.treeBandM = shapes.TREE_BAND_M;
     el["tree-band"].value = session.treeBandM;
     el["tree-heights"].checked = session.treeHeights !== false;
+    if (!session.hazardCorridorM) session.hazardCorridorM = shapes.HAZARD_CORRIDOR_M;
+    el["hazard-corridor"].value = session.hazardCorridorM;
 
     /* ---- providers (borrowed from gd-app-core, same list the app plays over) ---- */
 
@@ -891,6 +907,8 @@
       if (tool === "number") renderNumberField();
       el["tree-auto-label"].hidden = methodOf(tool) !== "auto";
       renderTreeAuto();
+      el["hazard-auto-label"].hidden = methodOf(tool) !== "along";
+      renderHazardAuto();
       el["wand-size-label"].hidden = !(growWanding() || (shapesMode && WAND_KINDS.indexOf(tool) >= 0 && (!METHODS[tool] || methodOf(tool) === "wand")));
       renderWandSize();
     }
@@ -1182,13 +1200,17 @@
       setStatus("Found " + kept.length + " tree" + (kept.length === 1 ? "" : "s") + " (sensitivity " + (level + 1) + " of " + levels.length + "). ← → fewer / more · Enter keeps them · Esc takes them away.");
     }
 
+    /* Left and right, Enter and Esc on whatever a finder dropped: trees from a box, or the
+       hazard finder's shapes (finder.hazards). */
     function stepFinder(by) {
-      var next = Math.max(0, Math.min(shapes.TREE_FINDER_LEVELS.length - 1, finder.level + by));
+      var levels = finder.hazards ? shapes.HAZARD_FINDER_LEVELS : shapes.TREE_FINDER_LEVELS;
+      var next = Math.max(0, Math.min(levels.length - 1, finder.level + by));
       if (next === finder.level) { setStatus(by < 0 ? "That is as strict as the finder goes." : "That is as loose as the finder goes."); return; }
-      dropFinderTrees(next);
+      if (finder.hazards) dropFinderShapes(next); else dropFinderTrees(next);
     }
 
     function keepFinder(quiet) {
+      if (finder.hazards) { keepFinderShapes(quiet); return; }
       var n = finder.ids.filter(findFeature).length;
       finder = null;
       if (!quiet) setStatus(n + " tree" + (n === 1 ? "" : "s") + " kept.");
@@ -1196,7 +1218,7 @@
     }
 
     function discardFinder() {
-      var gone = {};
+      var gone = {}, hazards = !!finder.hazards;
       finder.ids.forEach(function (fid) { gone[fid] = true; });
       finder = null;
       session.features = session.features.filter(function (f) { return !gone[f.id]; });
@@ -1204,7 +1226,7 @@
       drawFeatures();
       changed();
       updateHint();
-      setStatus("The trees the finder dropped are gone.");
+      setStatus(hazards ? "The shapes the finder dropped are gone." : "The trees the finder dropped are gone.");
     }
 
     /* ---- trees near play ----
@@ -1404,6 +1426,214 @@
         openTreeEdit(kept.concat(found), session.treeFinderLevel, true,
           "Found " + live + " tree" + (live === 1 ? "" : "s") + " near play" + (note ? " " + note : "") + ". More / Less (← →), click a tree to drop it, then Publish tree changes to put them on the watch.");
       });
+    }
+
+    /* ---- hazards along play ----
+       The hazard finder (GDOverlayShapes.hazardFinder): walks a hole's play line - its hole line,
+       tee end to green - with nothing placed first, and finds in a corridor either side of it
+       the bunkers (bright, warm, smooth), the water (dark, blue or grey, flat, not under a tree
+       when heights are to hand) and the crossings: a stretch of the line that is not turf, read
+       against the hole's fairway shapes - right through one it is a hazard unless it looks like
+       a path, in a split between two it is a hazard when rougher than the course's rough, and
+       partial it is a hazard only with a hint of water in it. Turf is the fairways and greens on
+       the picture, or the ground under the line itself. One picture a hole, every sensitivity
+       worked out up front, and what it finds dropped as shapes that stay live: left and right
+       fewer or more, Enter keeps them, Esc takes them away. */
+
+    /* What the corridor keeps clear of: what is already found or drawn. Fairways, greens and
+       tees are not in it - sand inside a fairway shape is still sand, and a crossing drawn over
+       is still a crossing. */
+    var ALONG_AVOID_KINDS = ["bunker", "water", "hazard", "waste", "trees"];
+    var PLAYED_KINDS = ["fairway", "green", "tee"];
+
+    function renderHazardAuto() {
+      if (destroyed || !el["hazard-auto"]) return;
+      el["hazard-auto"].textContent = session.hole ? "Find hazards along hole " + session.hole : "Find hazards along every hole";
+      el["hazard-auto"].disabled = !!wandsRunning;
+    }
+
+    /* The play lines to walk: the hole lines on the overlay - the hole in hand, or all of them -
+       and, for a numbered hole with a tee and a green but no line, a straight line between
+       them (flagged: it cuts a dogleg's corner). */
+    function playLines() {
+      var mine = function (f) { return !session.hole || f.hole === session.hole; };
+      var lines = session.features.filter(function (f) { return f.kind === "hole" && !f.pin && f.points.length >= 2 && mine(f); })
+        .map(function (f) { return { hole: f.hole, points: f.points }; });
+      var lined = {}, tees = {}, greens = {};
+      lines.forEach(function (l) { if (l.hole) lined[l.hole] = true; });
+      session.features.forEach(function (f) {
+        if (!f.hole || !mine(f) || !outlineOf(f)) return;
+        if (f.kind === "tee" && !tees[f.hole]) tees[f.hole] = f;
+        if (f.kind === "green" && !greens[f.hole]) greens[f.hole] = f;
+      });
+      Object.keys(tees).forEach(function (h) {
+        if (lined[h] || !greens[h]) return;
+        lines.push({ hole: Number(h), points: [shapes.centroid(outlineOf(tees[h])), shapes.centroid(outlineOf(greens[h]))], straight: true });
+      });
+      return lines.sort(function (a, b) { return (a.hole || 99) - (b.hole || 99); });
+    }
+
+    function alongPlayFetch(line, corridorM, reuse) {
+      return Promise.all([
+        captureBox(line.points, { mpp: ALONG_PLAY_MPP, padM: corridorM + 5, maxSidePx: TREE_FINDER_MAX_SIDE_PX, marginPx: 8, reuse: reuse }),
+        canopyFor(line.points, corridorM)
+      ]);
+    }
+
+    /* One hole, its picture and heights in hand: the corridor, the turf and rough to read, and
+       the finder over it - every sensitivity at once, as lat/lng, so the picture can go. */
+    function alongPlayRun(line, corridorM, cap, canopy) {
+      var w = cap.image.width, h = cap.image.height, mpp = cap.mpp;
+      function px(points) { return points.map(cap.toPx); }
+      function onPicture(xy) {
+        var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        xy.forEach(function (p) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+        return x1 >= 0 && y1 >= 0 && x0 < w && y0 < h;
+      }
+      var avoid = [], woods = [], played = [], turf = [], fairways = [];
+      session.features.forEach(function (f) {
+        if (f.kind === "tree" || f.kind === "hole") return;
+        var outline = outlineOf(f), xy = outline && px(outline);
+        if (!xy || !onPicture(xy)) return;
+        if (f.kind === "trees") woods.push(xy);
+        else if (ALONG_AVOID_KINDS.indexOf(f.kind) >= 0) avoid.push(xy);
+        if (PLAYED_KINDS.indexOf(f.kind) >= 0) played.push(xy);
+        if (NEAR_PLAY_KINDS.indexOf(f.kind) >= 0) turf.push(xy);
+        if (f.kind === "fairway" && (!line.hole || !f.hole || f.hole === line.hole)) fairways.push(xy);
+      });
+      var linePx = px(line.points);
+      var corridor = shapes.playBand(w, h, { lines: [linePx], surfaces: avoid, woods: woods, bandPx: corridorM / mpp, clearPx: shapes.HAZARD_CLEAR_M / mpp });
+      /* The course's rough: the corridor well clear of anything played or drawn. */
+      var rough = shapes.playBand(w, h, { lines: [linePx], surfaces: avoid.concat(played), woods: woods, bandPx: corridorM / mpp, clearPx: 5 / mpp });
+      var heights = canopyMask(cap, canopy);
+      var finder = shapes.hazardFinder(cap.image, { corridor: corridor, turf: shapes.ringsMask(w, h, turf), line: linePx, fairways: fairways, rough: rough, tall: heights.mask, mpp: mpp });
+      var atLevel = shapes.HAZARD_FINDER_LEVELS.map(function (level) {
+        var found = finder.find(level);
+        function ll(rings) { return rings.map(function (ring) { return ring.map(cap.toLL); }); }
+        return { bunkers: ll(found.bunkers), water: ll(found.water), hazards: ll(found.hazards) };
+      });
+      var notes = [];
+      if (finder.reason === "no-turf") notes.push("no turf to read");
+      else if (finder.turfFrom === "line") notes.push("turf read from under the line - place the fairway for a better read");
+      if (line.straight) notes.push("no hole line on hole " + line.hole + " - a straight tee-to-green line was used");
+      if (heights.why) notes.push(heights.why);
+      return { hole: line.hole, atLevel: atLevel, notes: notes };
+    }
+
+    function countAt(run, level) { var f = run.atLevel[level]; return f.bunkers.length + f.water.length + f.hazards.length; }
+
+    function runAlongPlay() {
+      if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
+      if (wandsRunning) return;
+      var items = playLines();
+      if (!items.length) { setStatus("No play line " + (session.hole ? "on hole " + session.hole + " " : "") + "to walk yet - add the hole lines (Make OSM editable brings OSM's in), or place a tee and a green on the hole.", true); return; }
+      settle(true);
+      var id = session.loadedFor, corridorM = session.hazardCorridorM || shapes.HAZARD_CORRIDOR_M;
+      var runs = [], failed = 0, notes = {}, level = hazardLevel(session.hazardFinderLevel);
+      wandsRunning++;
+      updateHint();
+      renderHazardAuto();
+      var reuse = new Map(), recent = [], fetched = [];
+      function fetchItem(k) {
+        if (k < items.length && !fetched[k]) {
+          fetched[k] = alongPlayFetch(items[k], corridorM, reuse);
+          fetched[k].catch(function () {});
+        }
+        return fetched[k];
+      }
+      function keepTiles(cap) {
+        recent = recent.concat([cap.urls]).slice(-2);
+        var keep = new Set([].concat.apply([], recent));
+        Array.from(reuse.keys()).forEach(function (url) { if (!keep.has(url)) reuse.delete(url); });
+      }
+      var walk = items.reduce(function (prev, item, k) {
+        return prev.then(function () {
+          if (destroyed || session.loadedFor !== id) return;
+          var where = item.hole ? "hole " + item.hole : "an unnumbered hole";
+          setStatus("Looking for hazards along " + where + " (" + (k + 1) + " of " + items.length + ")…");
+          return fetchItem(k).then(function (got) {
+            keepTiles(got[0]);
+            fetchItem(k + 1);
+            var run = alongPlayRun(item, corridorM, got[0], got[1]);
+            got[0].image = null;
+            return run;
+          }).then(function (run) {
+            runs.push(run);
+            run.notes.forEach(function (note) { notes[note] = true; });
+            var f = run.atLevel[level];
+            setStatus((item.hole ? "Hole " + item.hole : "Unnumbered") + ": " + f.bunkers.length + " bunker" + (f.bunkers.length === 1 ? "" : "s") + ", " + f.water.length + " water, " + f.hazards.length + " crossing hazard" + (f.hazards.length === 1 ? "" : "s") + (k + 1 < items.length ? " · looking at the next…" : "."));
+          }, function (error) {
+            failed++;
+            notes[String(error && error.message || error)] = true;
+          });
+        });
+      }, Promise.resolve());
+      walk.then(function () {
+        wandsRunning--;
+        if (destroyed || session.loadedFor !== id) return;
+        updateHint();
+        renderHazardAuto();
+        renderCredit();
+        var said = Object.keys(notes);
+        var note = (failed ? failed + " of " + items.length + " could not be read" + (said.length ? " (" + said.join("; ") + ")" : "") + "." : said.length ? "(" + said.join("; ") + ")" : "");
+        if (!runs.length) { setStatus("The hazard finder could not run" + (said.length ? ": " + said.join("; ") : "") + ".", true); return; }
+        settle(true);
+        finder = { hazards: true, ids: [], runs: runs, note: note };
+        dropFinderShapes(session.hazardFinderLevel);
+        if (!finder.ids.length) setStatus("Nothing found along play. → looks harder" + (note ? " · " + note : "") + ".");
+      });
+    }
+
+    function hazardLevel(level) { return Math.max(0, Math.min(shapes.HAZARD_FINDER_LEVELS.length - 1, Math.round(Number(level)) || 0)); }
+
+    /* The finder's shapes at one sensitivity, in place of the ones it dropped before. A bunker
+       is kept as the smooth outline the wand keeps; water and a hazard keep the edge found. */
+    function dropFinderShapes(level) {
+      level = hazardLevel(level);
+      var gone = {};
+      finder.ids.forEach(function (fid) { gone[fid] = true; });
+      session.features = session.features.filter(function (f) { return !gone[f.id]; });
+      if (gone[selectedId]) selectedId = "";
+      finder.level = level;
+      session.hazardFinderLevel = level;
+      var ids = [], counts = { bunker: 0, water: 0, hazard: 0 }, room = roomFor("bunker");
+      function drop(kind, ring, hole) {
+        if (ids.length >= room) return;
+        var points = kind === "bunker" ? shapes.smoothOutline(ring, "bunker") : ring;
+        if (!points || points.length < 3) return;
+        ids.push(addFeature({ kind: kind, points: points, source: "finder", hole: hole }, true).id);
+        counts[kind]++;
+      }
+      finder.runs.forEach(function (run) {
+        var f = run.atLevel[level];
+        f.bunkers.forEach(function (ring) { drop("bunker", ring, run.hole); });
+        f.water.forEach(function (ring) { drop("water", ring, run.hole); });
+        f.hazards.forEach(function (ring) { drop("hazard", ring, run.hole); });
+      });
+      finder.ids = ids;
+      drawFeatures();
+      changed();
+      updateHint();
+      remember();
+      var levels = shapes.HAZARD_FINDER_LEVELS.length;
+      setStatus("Found " + counts.bunker + " bunker" + (counts.bunker === 1 ? "" : "s") + ", " + counts.water + " water, " + counts.hazard + " crossing hazard" + (counts.hazard === 1 ? "" : "s") +
+        " (sensitivity " + (level + 1) + " of " + levels + ")" + (ids.length >= room ? " - the overlay is full" : "") + ". ← → fewer / more · Enter keeps them · Esc takes them away" + (finder.note ? " · " + finder.note : "") + ".");
+    }
+
+    /* Enter: the shapes stay. A bunker joins one it overlaps, as a placed bunker does; water
+       and a hazard seam to the shapes beside them. */
+    function keepFinderShapes(quiet) {
+      var kept = finder.ids.map(findFeature).filter(Boolean), joined = 0, merged = 0;
+      finder = null;
+      kept.forEach(function (f) {
+        if (f.kind === "bunker") {
+          var into = mergeBunker(f.points, f.hole, f, false);
+          if (into) { session.features = session.features.filter(function (g) { return g !== f; }); merged++; }
+        } else if (sealSeams(f)) joined++;
+      });
+      if (merged || joined) { drawFeatures(); changed(); }
+      if (!quiet) setStatus(kept.length + " shape" + (kept.length === 1 ? "" : "s") + " kept" + (merged ? ", " + merged + " joined a bunker already there" : "") + (joined ? seamWords(joined) : "") + ".");
+      updateHint();
     }
 
     /* ---- the course's trees ----
@@ -2097,6 +2327,7 @@
       if (tool === "move") { if (selectedId) select(""); return; }
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (methodOf(tool) === "auto") { setStatus("Find trees near play looks along every fairway and green on its own - press the button up top.", false); return; }
+      if (methodOf(tool) === "along") { setStatus("Along play walks the hole lines on its own - press the button up top.", false); return; }
       if (full(methodOf(tool) === "single" ? "tree" : tool)) return;
       /* Moving on to the next shape keeps the one just placed. A click with the colour wand
          is a press too short to drag - its pick stays. */
@@ -4078,6 +4309,7 @@
       else if (tool === "trees" && methodOf("trees") === "single") text = "Click a tree to drop one · ↑ ↓ size it · E switches method";
       else if (tool === "trees" && methodOf("trees") === "oval") text = "Press and drag across a cluster of trees - Shift for a circle · E switches method";
       else if (tool === "trees" && methodOf("trees") === "auto") text = (session.hole ? "Finds trees along hole " + session.hole + "'s fairway and green" : "Finds trees along every fairway and green - set a hole number for just one") + ", out to " + (session.treeBandM || shapes.TREE_BAND_M) + "m · E switches method";
+      else if (methodOf(tool) === "along") text = (session.hole ? "Finds bunkers, water and crossing hazards along hole " + session.hole + "'s play line" : "Finds bunkers, water and crossing hazards along every hole's play line - set a hole number for just one") + ", " + (session.hazardCorridorM || shapes.HAZARD_CORRIDOR_M) + "m either side · " + methodKey(tool) + " switches method";
       else if (tool === "trees" && methodOf("trees") === "find") text = sampleTrees().length ? "Drag a box - trees in it like the " + sampleTrees().length + " you placed by hand are found · E switches method" : "Place a tree or two by hand first (Tree), then drag a box to find more like them";
       else if (tool === "trees") text = "Press and drag all the way round an area of dense trees · E switches method";
       else if (tool === "waste") text = "Draw roughly round the waste area - it grows out to the edge · A switches method";
@@ -4099,7 +4331,7 @@
       var held = selectedId && tool === "move" && canEdit() ? findFeature(selectedId) : null;
       if (held && !held.pin && RESHAPE[held.kind] && !adjusted()) text = "↑ ↓ " + (held.kind === "fairway" ? "smooth the edge, then " : "") + "smaller / bigger · " + text;
       if (adjusted()) text = adjustHint();
-      if (finder) text = "← → fewer / more trees · Enter keeps them · Esc takes them away";
+      if (finder) text = finder.hazards ? "← → fewer / more shapes · Enter keeps them · Esc takes them away" : "← → fewer / more trees · Enter keeps them · Esc takes them away";
       else if (treeEdit && !adjusted()) text = "Trees: click one to drop it (again to keep it) · ← → fewer / more · Publish tree changes puts them on the watch · Esc closes";
       if (wandsRunning) text = "Working… · " + text;
       el.hint.textContent = text;
@@ -5130,6 +5362,14 @@
     el.map.addEventListener("pointerdown", onMapPress);
     el.hole.addEventListener("change", holeFieldChanged);
     el["tree-auto"].addEventListener("click", runNearPlay);
+    el["hazard-auto"].addEventListener("click", runAlongPlay);
+    el["hazard-corridor"].addEventListener("change", function () {
+      var c = num(el["hazard-corridor"].value);
+      session.hazardCorridorM = c && c >= CORRIDOR_MIN_M && c <= CORRIDOR_MAX_M ? Math.round(c) : shapes.HAZARD_CORRIDOR_M;
+      el["hazard-corridor"].value = session.hazardCorridorM;
+      updateHint();
+      remember();
+    });
     el.trees.addEventListener("click", onTreesButton);
     el["tree-less"].addEventListener("click", function () { if (treeEdit) stepTreeLevel(-1); });
     el["tree-more"].addEventListener("click", function () { if (treeEdit) stepTreeLevel(1); });
