@@ -390,7 +390,7 @@ test("water: a Water tool that draws round the water or uses the wand", () => {
 test("trees and hazard: tools that save as their own kinds", () => {
   assert.ok(page.includes('railButton("tool-trees"') && page.includes('railButton("tool-hazard"'), "no Trees / Hazard tools");
   assert.ok(page.includes('hazard: ["draw", "colour"]'), "a hazard is drawn round, or picked with the colour wand");
-  assert.ok(page.includes('trees: ["single", "oval", "draw", "find", "colour"]'), "trees: a single tree, a cluster oval, drawn round, or found");
+  assert.ok(page.includes('trees: ["single", "oval", "draw", "find", "auto", "colour"]'), "trees: a single tree, a cluster oval, drawn round, found in a box, or found near play");
 });
 
 test("single trees: a click drops one, up / down size it, and the next starts at that size", () => {
@@ -402,6 +402,18 @@ test("single trees: a click drops one, up / down size it, and the next starts at
 
 test("cluster oval: a press and drag stretches an oval of trees", () => {
   assert.ok(page.includes('addFeature({ kind: "trees", points: ring });') && page.includes("shapes.ellipseInBox(a, b, done.round)"), "the oval becomes a trees area");
+});
+
+test("trees near play: looks along each fairway and green with nothing placed, gated by tree heights, live like the box finder", () => {
+  assert.ok(page.includes('data-gd-overlay="method-auto"') && page.includes('data-gd-overlay="tree-auto"'), "no Near play method or its button");
+  assert.ok(page.includes("shapes.playBand(w, h, { play: [played], surfaces: surfaces, woods: woods,"), "the band is built round the shape looked along, clear of every surface");
+  assert.ok(page.includes("shapes.autoTreeModel(cap.image, shapes.ringsMask(w, h, turf), band,"), "what a tree looks like comes from the turf");
+  assert.ok(page.includes("finder = { ids: [], runs: runs, nearPlay: true, note: note };"), "the trees it drops are live for left / right / Enter / Esc");
+  assert.ok(page.includes('var CANOPY_API = "/api/course-map-canopy-height";'), "tree heights come from the canopy endpoint");
+  assert.ok(page.includes("(canopyCredit ? \" · \" + esc(canopyCredit) : \"\")"), "the tree heights are credited (CC BY)");
+  assert.ok(page.includes("var MAX_TREES = 3000;") && page.includes("function roomFor(kind)"), "single trees have a cap of their own");
+  const fn = read("functions/course-map-canopy-height.mjs");
+  assert.ok(fn.includes('path: "/api/course-map-canopy-height"') && fn.includes("verifiedAdminEmail(req)"), "the canopy endpoint is admin only, at its path");
 });
 
 test("tree finder: learns from the trees placed by hand, drops trees in the box, live for left / right / Enter / Esc", () => {

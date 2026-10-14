@@ -674,4 +674,41 @@ function sawtoothSquare() {
   assert.deepStrictEqual(core.buildWatchHoleFrame(recipe, longHole()).trees, { version: 1, c: [] }, "no trees, empty list");
 })();
 
+// --- trees placed one by one in Studio stand where they really are ---------------------------
+
+(function testSingleTrees() {
+  const recipe = core.WATCH_MAP_RECIPE_V1;
+  const ring = (lat, lng, rM) => Array.from({ length: 10 }, (_, i) => {
+    const a = i / 10 * 2 * Math.PI;
+    return { lat: lat + Math.sin(a) * rM / 111320, lng: lng + Math.cos(a) * rM / (111320 * Math.cos(lat * Math.PI / 180)) };
+  });
+  const singles = core.singleTreesFromOverlay([
+    { kind: "tree", points: ring(-45.0112, 169.1018, 5) },
+    { kind: "tree", points: ring(-45.0108, 169.1003, 4) },
+    { kind: "trees", points: ring(-45.0110, 169.1010, 30) },
+    { kind: "tree", pin: true, points: [{ lat: -45.011, lng: 169.101 }] }
+  ]);
+  assert.strictEqual(singles.length, 2, "only single trees, and no pins");
+  assert.ok(Math.abs(singles[0].r - 5) < 0.3 && Math.abs(singles[0].lat + 45.0112) < 1e-7, "a tree's middle and radius in metres");
+
+  // A wood with a placed tree in it is drawn as that tree; a wood without is still made up.
+  const hole = longHole();
+  hole.trees = [
+    [{ lat: -45.0106, lng: 169.1009 }, { lat: -45.0124, lng: 169.1013 }, { lat: -45.0124, lng: 169.1024 }, { lat: -45.0106, lng: 169.1020 }]
+  ];
+  const madeUp = core.buildWatchHoleFrame(recipe, hole).trees.c.length;
+  hole.singleTrees = singles;
+  const frame = core.buildWatchHoleFrame(recipe, hole);
+  const sr = frame.spatialReference;
+  const trees = frame.trees.c.map(core.unpackTree);
+  assert.strictEqual(trees.length, 2, "the wood holding a placed tree is not made up: " + trees.length + " (was " + madeUp + ")");
+  singles.forEach(t => {
+    const at = core.projectLatLngToImage(sr, t.lat, t.lng);
+    assert.ok(trees.some(s => Math.abs(s.x - Math.round(at.x)) <= 1 && Math.abs(s.y - Math.round(at.y)) <= 1 && Math.abs(s.r - Math.round(t.r / sr.metresPerPixel)) <= 1), "a placed tree stands where it is, at its size");
+  });
+  assert.deepStrictEqual(core.buildWatchHoleFrame(recipe, hole).trees, frame.trees, "and the same ones every bake");
+  hole.singleTrees = [{ lat: -45.0090, lng: 169.0980, r: 5 }];
+  assert.strictEqual(core.buildWatchHoleFrame(recipe, hole).trees.c.length, madeUp, "a placed tree off this hole's picture leaves the wood as it was");
+})();
+
 console.log("watch-map-core passed");

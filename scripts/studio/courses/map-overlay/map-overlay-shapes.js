@@ -6,7 +6,8 @@
  * round default made here. Greens and bunkers are kept as smooth curves through a few handles.
  * Bunker outlines that overlap are merged into one. A water hazard drawn round by hand is
  * thinned to the corners that matter. A single tree is a small ring, a cluster an oval
- * stretched over it; the tree finder looks for more trees like the ones placed by hand, the
+ * stretched over it; the tree finder looks for more trees like the ones placed by hand (or,
+ * along the fairways and greens, for ground darker, greener and rougher than their turf), the
  * area wand outlines a waste area, and the colour wand outlines anything picked by its colour.
  * A wand outline keeps many corners so it follows the ground, and is reshaped by a few key
  * corners and by bending its edge where it is grabbed (keyCorners, bendRing). Everything is in
@@ -845,66 +846,229 @@
   }
 
   /* ---- the tree finder ----
-     Trees placed by hand this session say what a tree looks like here: their crowns' colour
-     (colourModel over circleSamples) and their size (radiusPx). Inside a box, every pixel that
-     colour is a "crown" pixel; the crown pixels furthest from anything else are the middles of
-     trees. A lone tree is one round blob with its middle at its centre; a row of trees is a
-     ridge, and the middles are spaced along it a crown apart. Already-placed trees (`avoid`,
-     {x, y, r}) are left alone. Returns {find(level) -> [{x, y, r}]}: the picture is read once
-     and each sensitivity level is cheap, so left and right answer at once. */
+     Something says what a tree looks like here - trees placed by hand this session (their
+     crowns' colour, colourModel over circleSamples, and their size, radiusPx), or the ground
+     round the fairways (autoTreeModel, below). Every pixel that colour is a "crown" pixel; the
+     crown pixels furthest from anything else are the middles of trees. A lone tree is one round
+     blob with its middle at its centre; a row of trees is a ridge, and the middles are spaced
+     along it a crown apart. It looks inside a box, or only at the pixels `inside` (a 0/1 mask
+     the size of the picture) allows. Already-placed trees (`avoid`, {x, y, r}) are left alone.
+     Returns {find(level) -> [{x, y, r}]}: the picture is read once and each sensitivity level
+     is cheap, so left and right answer at once. */
   var TREE_FINDER_LEVELS = [1.3, 1.7, 2.1, 2.6, 3.2, 4];
   var TREE_FINDER_MAX = 150;
+
+  /* The smallest box holding every pixel set in a 0/1 mask, or null when none is. */
+  function maskBox(mask, w, h) {
+    var x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        if (!mask[y * w + x]) continue;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+    return x1 < 0 ? null : { x0: x0, y0: y0, x1: x1 + 1, y1: y1 + 1 };
+  }
+
+  /* The middles of the crowns in a 0/1 crown mask: opened so specks and thin lines go, then
+     the deepest points, deepest first, kept where they do not overlap one already kept or a
+     tree in `avoid`. radius: a crown's usual radius in pixels; each tree's own radius is its
+     depth, held to 0.5-2.2 x that. */
+  function crownCentres(crown, w, h, radius, avoid, max) {
+    var n = w * h, j, open = Math.max(1, Math.round(radius * 0.25)), minR = radius * 0.4;
+    crown = morph(morph(crown, w, h, open, false), w, h, open, true);
+    var empty = new Uint8Array(n);
+    for (j = 0; j < n; j++) empty[j] = crown[j] ? 0 : 1;
+    var depth = distanceTo(empty, w, h);
+    /* Candidate middles: deep enough to be a crown, and the deepest of their neighbours. */
+    var peaks = [];
+    for (var yy = 1; yy < h - 1; yy++) {
+      for (var xx = 1; xx < w - 1; xx++) {
+        j = yy * w + xx;
+        var d = depth[j];
+        if (d < minR) continue;
+        if (d < depth[j - 1] || d < depth[j + 1] || d < depth[j - w] || d < depth[j + w] ||
+            d < depth[j - w - 1] || d < depth[j - w + 1] || d < depth[j + w - 1] || d < depth[j + w + 1]) continue;
+        peaks.push({ x: xx, y: yy, d: d });
+      }
+    }
+    peaks.sort(function (a, b) { return b.d - a.d; });
+    var kept = [];
+    for (var p = 0; p < peaks.length && kept.length < max; p++) {
+      var c = peaks[p];
+      var r = Math.max(radius * 0.5, Math.min(radius * 2.2, c.d));
+      var clash = kept.some(function (k) { return Math.hypot(k.x - c.x, k.y - c.y) < (k.r + r) * 0.75; }) ||
+        (avoid || []).some(function (a) { return Math.hypot(a.x - c.x, a.y - c.y) < a.r + r * 0.5; });
+      if (!clash) kept.push({ x: c.x + 0.5, y: c.y + 0.5, r: r });
+    }
+    return kept;
+  }
 
   function treeFinder(image, model, opts) {
     var o = opts || {};
     var radius = Math.max(2, Number(o.radiusPx) || 10);
-    var box = o.box || { x0: 0, y0: 0, x1: image.width, y1: image.height };
+    var W = image.width, inside = o.inside || null;
+    var box = o.box || (inside ? maskBox(inside, W, image.height) : { x0: 0, y0: 0, x1: W, y1: image.height });
+    if (!box) return { find: function () { return []; } };
     var x0 = Math.max(0, Math.floor(Math.min(box.x0, box.x1))), y0 = Math.max(0, Math.floor(Math.min(box.y0, box.y1)));
-    var x1 = Math.min(image.width, Math.ceil(Math.max(box.x0, box.x1))), y1 = Math.min(image.height, Math.ceil(Math.max(box.y0, box.y1)));
+    var x1 = Math.min(W, Math.ceil(Math.max(box.x0, box.x1))), y1 = Math.min(image.height, Math.ceil(Math.max(box.y0, box.y1)));
     var w = x1 - x0, h = y1 - y0;
     if (!model || w < 3 || h < 3) return { find: function () { return []; } };
     /* Just the box, so a big picture costs no more than the box drawn on it. */
     var crop = new Uint8ClampedArray(w * h * 4);
-    for (var y = 0; y < h; y++) crop.set(image.data.subarray(((y + y0) * image.width + x0) * 4, ((y + y0) * image.width + x1) * 4), y * w * 4);
+    for (var y = 0; y < h; y++) crop.set(image.data.subarray(((y + y0) * W + x0) * 4, ((y + y0) * W + x1) * 4), y * w * 4);
     var field = colourField({ width: w, height: h, data: crop }, Math.max(1, Math.round(radius * 0.15)));
     var n = w * h, dist = new Float32Array(n);
-    for (var i = 0; i < n; i++) dist[i] = spreadDistance(field, i, model);
-    var open = Math.max(1, Math.round(radius * 0.25));
-    var minR = radius * 0.4;
+    for (var i = 0; i < n; i++) {
+      dist[i] = inside && !inside[(Math.floor(i / w) + y0) * W + (i % w) + x0] ? Infinity : spreadDistance(field, i, model);
+    }
     var avoid = (o.avoid || []).map(function (a) { return { x: a.x - x0, y: a.y - y0, r: a.r }; });
     var max = Math.max(1, Number(o.max) || TREE_FINDER_MAX);
 
     function find(level) {
-      var crown = new Uint8Array(n), j;
-      for (j = 0; j < n; j++) crown[j] = dist[j] <= level ? 1 : 0;
-      crown = morph(morph(crown, w, h, open, false), w, h, open, true);
-      var empty = new Uint8Array(n);
-      for (j = 0; j < n; j++) empty[j] = crown[j] ? 0 : 1;
-      var depth = distanceTo(empty, w, h);
-      /* Candidate middles: deep enough to be a crown, and the deepest of their neighbours. */
-      var peaks = [];
-      for (var yy = 1; yy < h - 1; yy++) {
-        for (var xx = 1; xx < w - 1; xx++) {
-          j = yy * w + xx;
-          var d = depth[j];
-          if (d < minR) continue;
-          if (d < depth[j - 1] || d < depth[j + 1] || d < depth[j - w] || d < depth[j + w] ||
-              d < depth[j - w - 1] || d < depth[j - w + 1] || d < depth[j + w - 1] || d < depth[j + w + 1]) continue;
-          peaks.push({ x: xx, y: yy, d: d });
-        }
-      }
-      peaks.sort(function (a, b) { return b.d - a.d; });
-      var kept = [];
-      for (var p = 0; p < peaks.length && kept.length < max; p++) {
-        var c = peaks[p];
-        var r = Math.max(radius * 0.5, Math.min(radius * 2.2, c.d));
-        var clash = kept.some(function (k) { return Math.hypot(k.x - c.x, k.y - c.y) < (k.r + r) * 0.75; }) ||
-          avoid.some(function (a) { return Math.hypot(a.x - c.x, a.y - c.y) < a.r + r * 0.5; });
-        if (!clash) kept.push({ x: c.x, y: c.y, r: r });
-      }
-      return kept.map(function (k) { return { x: k.x + x0 + 0.5, y: k.y + y0 + 0.5, r: k.r }; });
+      var crown = new Uint8Array(n);
+      for (var j = 0; j < n; j++) crown[j] = dist[j] <= level ? 1 : 0;
+      return crownCentres(crown, w, h, radius, avoid, max).map(function (k) { return { x: k.x + x0, y: k.y + y0, r: k.r }; });
     }
     return { find: find };
+  }
+
+  /* The middles of the crowns in a 0/1 mask the size of a picture - trees found from their
+     height alone, with no colour to go on. Same answer as one find of the tree finder. */
+  function treesInMask(mask, w, h, opts) {
+    var o = opts || {};
+    return crownCentres(mask, w, h, Math.max(2, Number(o.radiusPx) || 10), o.avoid || [], Math.max(1, Number(o.max) || TREE_FINDER_MAX));
+  }
+
+  /* ---- trees near play ----
+     The tree finder with nobody placing sample trees or dragging a box. Where to look is the
+     ground along the edge of what is played (playBand): out to TREE_BAND_M from a fairway or
+     green, and no closer than TREE_CLEAR_M to anything on the course. What a tree looks like is
+     worked out from the one thing we do know - the turf inside the fairways and greens
+     (autoTreeModel). Inside the band a pixel is a crown when it is
+       - darker than the turf by a margin (crowns are well darker than mown grass),
+       - still green: green over red and yellow over blue, which is what drops tree shadows
+         (dark, but grey or blue) and bare ground,
+       - textured: the brightness varies more across a few metres than it does on turf, which
+         is what drops dark smooth rough and mown lines,
+     and, when tree heights are to hand, stands TREE_MIN_HEIGHT_M or more (heightMask). The
+     crown pixels that pass become the colour model, and from there it is the tree finder as it
+     is for a box. */
+  var TREE_BAND_M = 40;
+  var TREE_CLEAR_M = 3;
+  var TREE_AUTO_RADIUS_M = 4.5;
+  var TREE_MIN_HEIGHT_M = 3;
+  /* How much darker than turf a crown is, at least (the field's brightness units, 0-153), and
+     how far into the green half a pixel's colour must be to count as green. */
+  var TREE_DARK_MARGIN = 10;
+  var TREE_GREEN_MIN = 3;
+  /* A crown's texture (autoTreeModel), at least this, and at least this many times the turf's. */
+  var TREE_TEXTURE_FLOOR = 2;
+  var TREE_TEXTURE_OVER_TURF = 2;
+  /* The colour model reads at most this many pixels of turf and of crown, evenly spread. */
+  var TREE_SAMPLE_PIXELS = 20000;
+
+  /* 0/1 mask, the size of a picture, of the pixels inside any of `rings` (pixel {x, y}). */
+  function ringsMask(w, h, rings) {
+    var mask = new Uint8Array(w * h);
+    (rings || []).forEach(function (r) { if (r && r.length >= 3) paintRing(mask, w, h, r, 0, 0, 1); });
+    return mask;
+  }
+
+  /* Where to look for trees near a played shape, as a 0/1 mask the size of the picture: within
+     bandPx of `play` (pixel rings - the fairway or green looked along), further than clearPx
+     from every surface on the course (`surfaces`, pixel rings; the played shape counts as one),
+     and not inside a wood already drawn (`woods`). */
+  function playBand(w, h, opts) {
+    var o = opts || {}, n = w * h;
+    var play = ringsMask(w, h, o.play), surf = ringsMask(w, h, (o.surfaces || []).concat(o.play || [])), wood = ringsMask(w, h, o.woods);
+    var dPlay = distanceTo(play, w, h), dSurf = distanceTo(surf, w, h);
+    var bandPx = Number(o.bandPx) || 0, clearPx = Number(o.clearPx) || 0;
+    var band = new Uint8Array(n);
+    for (var i = 0; i < n; i++) band[i] = dPlay[i] <= bandPx && dSurf[i] > clearPx && !wood[i] ? 1 : 0;
+    return band;
+  }
+
+  function maskIndices(mask, cap) {
+    var all = [];
+    for (var i = 0; i < mask.length; i++) if (mask[i]) all.push(i);
+    if (all.length <= cap) return all;
+    var step = all.length / cap, out = [];
+    for (var k = 0; k < cap; k++) out.push(all[Math.floor(k * step)]);
+    return out;
+  }
+
+  /* What a tree looks like in this picture, learnt from its turf. turf: 0/1 mask of the
+     fairways' and greens' pixels; band: where to look (playBand). opts.radiusPx: a crown's
+     radius in pixels; opts.tall: 0/1 mask of pixels at least TREE_MIN_HEIGHT_M tall, or none.
+     Returns {model, allow} for treeFinder (model: the crowns' colour; allow: the pixels that
+     pass, its `inside`), or {model: null, reason} when there is no turf to read or no crown
+     in the band. */
+  function autoTreeModel(image, turf, band, opts) {
+    var o = opts || {}, w = image.width, h = image.height, n = w * h, i;
+    var radius = Math.max(2, Number(o.radiusPx) || 10);
+    /* The turf's own edge is half rough, half shadow: only its inside is read. */
+    var core = morph(turf, w, h, Math.max(1, Math.round(radius * 0.3)), false);
+    var turfAt = maskIndices(core, TREE_SAMPLE_PIXELS);
+    if (turfAt.length < 20) return { model: null, reason: "no-turf" };
+    var field = colourField(image, Math.max(1, Math.round(radius * 0.15)));
+    var turfModel = colourModel(fieldSamples(field, turfAt));
+    /* Texture: how far each pixel's brightness is from its close neighbours', averaged over
+       about half a crown. Leaves and the shade between them do that everywhere across a crown;
+       the edge between a dark patch and the rough does it along one line only, so a smooth
+       dark patch does not read as textured just for having an edge. */
+    var L = colourField(image, 0).L, near = boxBlur(L, w, h, 1), detail = new Float32Array(n);
+    for (i = 0; i < n; i++) detail[i] = Math.abs(L[i] - near[i]);
+    var tex = boxBlur(detail, w, h, Math.max(2, Math.round(radius * 0.4)));
+    var texMin = Math.max(TREE_TEXTURE_FLOOR, TREE_TEXTURE_OVER_TURF * median(turfAt.map(function (k) { return tex[k]; })));
+    var darkBelow = turfModel.mL - Math.max(TREE_DARK_MARGIN, turfModel.dL);
+    var allow = new Uint8Array(n);
+    for (i = 0; i < n; i++) {
+      if (!band[i] || (o.tall && !o.tall[i])) continue;
+      var a = field.A[i], b = field.B[i];
+      allow[i] = field.L[i] < darkBelow && a < -TREE_GREEN_MIN && b > -a * 0.25 && tex[i] >= texMin ? 1 : 0;
+    }
+    /* Close the pinholes a crown's own bright leaves leave, without reaching out past the band. */
+    var shut = Math.max(1, Math.round(radius * 0.15));
+    allow = morph(morph(allow, w, h, shut, true), w, h, shut, false);
+    for (i = 0; i < n; i++) if (!band[i] || (o.tall && !o.tall[i])) allow[i] = 0;
+    var crownAt = maskIndices(allow, TREE_SAMPLE_PIXELS);
+    if (crownAt.length < Math.PI * radius * radius * 0.25) return { model: null, reason: "no-crowns", allow: allow };
+    return { model: colourModel(fieldSamples(field, crownAt)), allow: allow };
+  }
+
+  /* Which pixels of a picture stand at least minM tall, from canopy-height grids. cap: the
+     picture's {width, height, z, ox, oy} - its top-left corner in world pixels at Web Mercator
+     zoom z. grids: [{crs: "EPSG:3857" | "EPSG:4326", x0, y0 (top-left corner in that crs),
+     dx, dy (a cell's size, dy negative going down), width, height, heights (metres, a cell
+     each)}]. Null when the grids hold nothing above zero: 0 is both "no tree" and "no data",
+     and a picture of nothing but 0 is read as no data, not as no trees. */
+  function heightMask(cap, grids, minM) {
+    var W = cap.width, H = cap.height, out = new Uint8Array(W * H);
+    var list = (grids || []).filter(function (g) {
+      for (var k = 0; k < g.heights.length; k++) if (g.heights[k] > 0) return true;
+      return false;
+    });
+    if (!list.length) return null;
+    var R = 6378137, C = 2 * Math.PI * R, world = 256 * Math.pow(2, cap.z), min = Number(minM) || TREE_MIN_HEIGHT_M;
+    for (var y = 0; y < H; y++) {
+      var my = (0.5 - (cap.oy + y + 0.5) / world) * C;
+      var lat = (2 * Math.atan(Math.exp(my / R)) - Math.PI / 2) * 180 / Math.PI;
+      for (var x = 0; x < W; x++) {
+        var mx = ((cap.ox + x + 0.5) / world - 0.5) * C, lng = mx / R * 180 / Math.PI;
+        for (var g = 0; g < list.length; g++) {
+          var grid = list[g], geo = grid.crs === "EPSG:4326";
+          var col = Math.floor(((geo ? lng : mx) - grid.x0) / grid.dx), row = Math.floor(((geo ? lat : my) - grid.y0) / grid.dy);
+          if (col < 0 || row < 0 || col >= grid.width || row >= grid.height) continue;
+          if (grid.heights[row * grid.width + col] >= min) out[y * W + x] = 1;
+          break;
+        }
+      }
+    }
+    return out;
   }
 
   /* ---- the colour wand ----
@@ -1324,7 +1488,9 @@
     growFromLine: growFromLine, traceLargestLoop: traceLargestLoop, LINE_WAND_LEVELS: LINE_WAND_LEVELS,
     TREE_RADIUS_M: TREE_RADIUS_M, treeAt: treeAt, ellipseInBox: ellipseInBox, ringRadiusM: ringRadiusM,
     growFromArea: growFromArea, colourField: colourField, colourModel: colourModel, circleSamples: circleSamples,
-    treeFinder: treeFinder, TREE_FINDER_LEVELS: TREE_FINDER_LEVELS, TREE_FINDER_MAX: TREE_FINDER_MAX,
+    treeFinder: treeFinder, TREE_FINDER_LEVELS: TREE_FINDER_LEVELS, TREE_FINDER_MAX: TREE_FINDER_MAX, treesInMask: treesInMask,
+    TREE_BAND_M: TREE_BAND_M, TREE_CLEAR_M: TREE_CLEAR_M, TREE_AUTO_RADIUS_M: TREE_AUTO_RADIUS_M, TREE_MIN_HEIGHT_M: TREE_MIN_HEIGHT_M,
+    ringsMask: ringsMask, playBand: playBand, autoTreeModel: autoTreeModel, heightMask: heightMask,
     floodSelect: floodSelect, maskOutline: maskOutline,
     reshapeOutline: reshapeOutline, collarOutline: collarOutline, insideLatLngRing: insideLatLngRing,
     DETAIL_MAX_POINTS: DETAIL_MAX_POINTS, keyCorners: keyCorners, nearestOnRing: nearestOnRing, bendRing: bendRing, tidyBend: tidyBend,

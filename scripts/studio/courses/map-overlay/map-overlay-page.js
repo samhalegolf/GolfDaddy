@@ -60,6 +60,8 @@
   var SOURCE_TEST_API = "/api/course-map-source-test";
   /* When the imagery in view was taken (functions/course-map-capture-date.mjs). */
   var CAPTURE_API = "/api/course-map-capture-date";
+  /* Tree heights under a capture, for the tree finder near play (functions/course-map-canopy-height.mjs). */
+  var CANOPY_API = "/api/course-map-canopy-height";
   /* The model reads an image at ~1568px on its long side and answers in the pixels it saw,
      so the capture is scaled to that here and georeferenced AFTER scaling - the picture we
      describe is the picture it gets, to the pixel. */
@@ -101,16 +103,17 @@
   var METHODS = {
     fairway: ["width", "line", "colour"], green: ["wand", "colour"], tee: ["round", "colour"],
     bunker: ["wand", "draw", "line", "colour"], water: ["wand", "draw", "line", "colour"],
-    /* Trees: one tree a click, a cluster stretched as an oval, a wood drawn round, or the tree
-       finder - a box dragged over ground with trees like the ones placed by hand. */
-    trees: ["single", "oval", "draw", "find", "colour"],
+    /* Trees: one tree a click, a cluster stretched as an oval, a wood drawn round, the tree
+       finder - a box dragged over ground with trees like the ones placed by hand - or the
+       finder run along the edges of the fairways and greens with nothing placed first. */
+    trees: ["single", "oval", "draw", "find", "auto", "colour"],
     /* Hazard (gorse, scrub, a ravine): drawn round by hand. */
     hazard: ["draw", "colour"],
     /* Waste area: drawn round roughly and grown out to its edge. */
     waste: ["grow", "colour"]
   };
-  var METHOD_LABEL = { width: "Width", wand: "Wand", round: "Round", draw: "Draw round", line: "Line + wand", single: "Tree", oval: "Cluster", find: "Find trees", grow: "Draw + grow", colour: "Colour wand" };
-  var METHOD_NAMES = ["width", "wand", "round", "draw", "line", "single", "oval", "find", "grow", "colour"];
+  var METHOD_LABEL = { width: "Width", wand: "Wand", round: "Round", draw: "Draw round", line: "Line + wand", single: "Tree", oval: "Cluster", find: "Find trees", auto: "Near play", grow: "Draw + grow", colour: "Colour wand" };
+  var METHOD_NAMES = ["width", "wand", "round", "draw", "line", "single", "oval", "find", "auto", "grow", "colour"];
   /* The line wand: how far from the line an edge may be at size 1 (metres), the picture's
      metres a pixel, and the size steps up / down take it through. */
   var LINE_WAND_REACH_M = { fairway: 35, bunker: 12, water: 50, waste: 25 };
@@ -156,13 +159,19 @@
      there is held by both. Greens, bunkers and tees sit on top of a fairway, not beside it,
      so they never seam. */
   var SEAM_KINDS = ["fairway", "water", "hazard", "waste", "trees"];
+  /* gd-map-overlay-core OVERLAY_MAX_FEATURES and OVERLAY_MAX_TREES: single trees are counted
+     apart from every other shape, against a cap of their own. */
   var MAX_FEATURES = 1200;
+  var MAX_TREES = 3000;
   /* The tree finder reads the box at about this many metres a pixel (a crown ~25px across), up
      to this many pixels a side, and learns what a tree looks like from at most this many of the
      trees placed by hand this session - the latest ones. */
   var TREE_FINDER_MPP = 0.3;
   var TREE_FINDER_MAX_SIDE_PX = 1400;
   var TREE_SAMPLE_MAX = 12;
+  /* Near play, the band looked along each fairway and green can be set this wide, in metres. */
+  var TREE_BAND_MIN_M = 10;
+  var TREE_BAND_MAX_M = 120;
   /* The colour wand reads the view on screen, at most this many pixels a side; dragging this
      many screen pixels from the press adds one unit of colour tolerance. */
   var COLOUR_WAND_MAX_SIDE_PX = 1400;
@@ -190,8 +199,10 @@
     numberNext: 1, numberAuto: true,
     dirty: false, rev: 0, saving: false, saveError: "", fairwayWidth: 0,
     mode: "shapes", wandSize: { green: 1, bunker: 1, water: 1 }, method: { fairway: "width", green: "wand", tee: "round", bunker: "wand", water: "wand", trees: "single", hazard: "draw", waste: "grow" }, lineWandSize: { fairway: 1, bunker: 1, water: 1, waste: 1 }, mergeBunkers: true, seams: true, fullscreen: false, unsaved: null,
-    /* The size the next single tree is dropped at, and the tree finder's sensitivity. */
-    treeRadius: 0, treeFinderLevel: 2,
+    /* The size the next single tree is dropped at, and the tree finder's sensitivity. Near
+       play: how far out from the fairways and greens it looks, and whether tree heights gate
+       what it finds. */
+    treeRadius: 0, treeFinderLevel: 2, treeBandM: 0, treeHeights: true,
     /* Trees placed by hand on this course this session: what the tree finder learns from. Not
        remembered past a reload - the imagery and the light it was taken in can change. */
     treeSamples: []
@@ -221,7 +232,7 @@
         course: slimCourse(session.course), view: session.view, sourceKey: session.sourceKey,
         showOsm: session.showOsm, showObjects: session.showObjects, mode: session.mode, fairwayWidth: session.fairwayWidth,
         wandSize: session.wandSize, method: session.method, lineWandSize: session.lineWandSize, mergeBunkers: session.mergeBunkers, seams: session.seams, fullscreen: !!session.fullscreen,
-        treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel, numberAuto: session.numberAuto,
+        treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel, treeBandM: session.treeBandM, treeHeights: session.treeHeights, numberAuto: session.numberAuto,
         unsaved: session.dirty && session.loadedFor ? { courseId: session.loadedFor, features: session.features, playOrders: session.playOrders } : null
       }));
     } catch (e) {}
@@ -237,7 +248,7 @@
     try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) {}
     if (!saved || typeof saved !== "object") return;
     if (saved.course) { session.course = saved.course; session.view = saved.view || null; }
-    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "googleSplit", "treeRadius", "treeFinderLevel", "numberAuto"].forEach(function (k) {
+    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "googleSplit", "treeRadius", "treeFinderLevel", "treeBandM", "treeHeights", "numberAuto"].forEach(function (k) {
       if (saved[k] != null) session[k] = saved[k];
     });
     if (saved.wandSize && typeof saved.wandSize === "object") {
@@ -569,6 +580,7 @@
       '<button type="button" data-gd-overlay="method-single" title="Click to drop one tree; up and down make it smaller or bigger (E again switches)">Tree</button>' +
       '<button type="button" data-gd-overlay="method-oval" title="Press and drag across a cluster of trees to stretch an oval over it - hold Shift for a circle (E again switches)">Cluster</button>' +
       '<button type="button" data-gd-overlay="method-find" title="Drag a box: trees in it that look like the ones you placed by hand this session are dropped as trees (E again switches)">Find trees</button>' +
+      '<button type="button" data-gd-overlay="method-auto" title="Trees along the edges of the fairways and greens already placed, found with nothing placed by hand first (E again switches)">Near play</button>' +
       '<button type="button" data-gd-overlay="method-grow" title="Draw roughly round the waste area; it is pushed out to the edge of the ground it sits on (A again switches)">Draw + grow</button>' +
       '<button type="button" data-gd-overlay="method-colour" title="Press on it and drag - further selects more of the same colour. Shift-drag adds. Enter keeps it (press the tool key again to switch)">Colour wand</button>' +
       "</span>" +
@@ -576,6 +588,10 @@
       '<button type="button" class="gdStudioOverlayStep" data-gd-overlay="wand-smaller" title="The wand reaches for a smaller edge (↓ on the shape just placed, [ for the next one)">−</button>' +
       '<span class="gdStudioOverlayStepValue" data-gd-overlay="wand-size"></span>' +
       '<button type="button" class="gdStudioOverlayStep" data-gd-overlay="wand-bigger" title="The wand reaches for a bigger edge (↑ on the shape just placed, ] for the next one)">+</button></span>' +
+      '<span class="gdStudioOverlayOpt" data-gd-overlay="tree-auto-label" hidden>' +
+      '<label title="How far out from each fairway and green to look for trees">Band <input type="number" min="' + TREE_BAND_MIN_M + '" max="' + TREE_BAND_MAX_M + '" step="5" data-gd-overlay="tree-band" class="gdStudioOverlayWidth"> m</label>' +
+      '<label title="Keep only what the canopy height map says stands 3m or more, and add trees it finds from their height alone"><input type="checkbox" data-gd-overlay="tree-heights"> Heights</label>' +
+      '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="tree-auto"></button></span>' +
       '<label class="gdStudioOverlayOpt" data-gd-overlay="merge-label" title="A bunker outline that overlaps one already placed joins it as one bunker"><input type="checkbox" data-gd-overlay="merge"> Merge bunkers</label>' +
       '<label class="gdStudioOverlayOpt" data-gd-overlay="seams-label" title="A fairway, water, hazard, waste area or trees kept within a few metres of another meets it in the middle, and the line between them is shared - drag it and both follow"><input type="checkbox" data-gd-overlay="seams"> Seams</label>' +
       '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="shape-pins" hidden></button>' +
@@ -610,7 +626,7 @@
       "</div>";
 
     var el = {};
-    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-grow", "method-colour", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "run", "status"].forEach(function (name) {
+    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -621,6 +637,9 @@
     var shapes = shapesApi();
     if (!session.fairwayWidth) session.fairwayWidth = shapes.FAIRWAY_WIDTH_M;
     el.width.value = session.fairwayWidth;
+    if (!session.treeBandM) session.treeBandM = shapes.TREE_BAND_M;
+    el["tree-band"].value = session.treeBandM;
+    el["tree-heights"].checked = session.treeHeights !== false;
 
     /* ---- providers (borrowed from gd-app-core, same list the app plays over) ---- */
 
@@ -698,7 +717,8 @@
         : got.status === "unsupported" ? got.text
         : "capture date unavailable: " + got.text;
       el.credit.innerHTML = esc(source.label) + (source.attribution ? " — " + esc(source.attribution) : "") +
-        ' · <span class="gdStudioOverlayCaptured' + (got && got.status === "ok" ? "" : " isMuted") + '">' + esc(when) + "</span>";
+        ' · <span class="gdStudioOverlayCaptured' + (got && got.status === "ok" ? "" : " isMuted") + '">' + esc(when) + "</span>" +
+        (canopyCredit ? " · " + esc(canopyCredit) : "");
     }
     function refreshCaptureDate() {
       if (captureTimer) clearTimeout(captureTimer);
@@ -854,6 +874,8 @@
       el["number-label"].hidden = tool !== "number";
       el["hole-label"].hidden = tool === "number";
       if (tool === "number") renderNumberField();
+      el["tree-auto-label"].hidden = methodOf(tool) !== "auto";
+      renderTreeAuto();
       el["wand-size-label"].hidden = !(growWanding() || (shapesMode && WAND_KINDS.indexOf(tool) >= 0 && (!METHODS[tool] || methodOf(tool) === "wand")));
       renderWandSize();
     }
@@ -920,7 +942,7 @@
       if (!gesture || event.button || drag || lasso || stretch || colourPress || !mapObj) return;
       if (Date.now() - dragEndedAt < 300) return;
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
-      if (gesture !== "bin" && session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
+      if (gesture !== "bin" && full(gesture === "box" ? "tree" : tool)) return;
       event.preventDefault();
       if (gesture === "colour") { settle(true); beginColourWand(event); return; }
       settle();
@@ -1069,8 +1091,8 @@
     function runTreeFinder(a, b) {
       var samples = sampleTrees().slice(-TREE_SAMPLE_MAX);
       if (!samples.length) { setStatus("Place a tree or two by hand first (Tree), on trees like the ones you want found - the finder looks for more like them.", true); return; }
-      var room = Math.min(shapes.TREE_FINDER_MAX, MAX_FEATURES - session.features.length);
-      if (room <= 0) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
+      if (full("tree")) return;
+      var room = Math.min(shapes.TREE_FINDER_MAX, roomFor("tree"));
       var id = session.loadedFor;
       var hole = session.hole;
       var marker = L.rectangle(L.latLngBounds([a.lat, a.lng], [b.lat, b.lng]), STYLE.stretchBox).addTo(mapObj);
@@ -1102,7 +1124,7 @@
       }).then(function (found) {
         if (destroyed || session.loadedFor !== id) return;
         settle(true);
-        finder = { ids: [], cap: found.cap, run: found.run, hole: hole };
+        finder = { ids: [], runs: [{ cap: found.cap, run: found.run, hole: hole }] };
         dropFinderTrees(session.treeFinderLevel);
         if (!finder.ids.length) setStatus("No trees like the ones you placed were found in that box. → looks harder.");
       }, function (error) {
@@ -1114,7 +1136,10 @@
       });
     }
 
-    /* The finder's trees at one sensitivity, in place of the ones it dropped before. */
+    /* The finder's trees at one sensitivity, in place of the ones it dropped before. Each run
+       is one picture read (one box, or one fairway or green near play); where two runs' pictures
+       overlap, a tree is dropped once. Trees found by colour come first, then the ones found
+       from their height alone, where nothing by colour already stands. */
     function dropFinderTrees(level) {
       var levels = shapes.TREE_FINDER_LEVELS;
       level = Math.max(0, Math.min(levels.length - 1, Math.round(Number(level)) || 0));
@@ -1124,14 +1149,34 @@
       if (gone[selectedId]) selectedId = "";
       finder.level = level;
       session.treeFinderLevel = level;
-      var cap = finder.cap;
-      finder.ids = finder.run.find(levels[level]).slice(0, Math.max(0, MAX_FEATURES - session.features.length)).map(function (t) {
-        return addFeature({ kind: "tree", points: shapes.treeAt(cap.toLL(t), t.r * cap.mpp), source: "finder", hole: finder.hole }, true).id;
+      var kept = [], room = roomFor("tree");
+      function take(t, run, byHeight) {
+        if (kept.length >= room) return;
+        var ll = run.cap.toLL(t), rM = t.r * run.cap.mpp;
+        if (kept.some(function (k) { return shapes.distanceM(k.ll, ll) < (k.rM + rM) * 0.75; })) return;
+        kept.push({ ll: ll, rM: rM, hole: run.hole, byHeight: byHeight });
+      }
+      finder.runs.forEach(function (run) { if (run.run) run.run.find(levels[level]).forEach(function (t) { take(t, run, false); }); });
+      finder.runs.forEach(function (run) { (run.byHeight || []).forEach(function (t) { take(t, run, true); }); });
+      finder.ids = kept.map(function (k) {
+        return addFeature({ kind: "tree", points: shapes.treeAt(k.ll, k.rM), source: "finder", hole: k.hole }, true).id;
       });
       drawFeatures();
       changed();
       updateHint();
-      setStatus("Found " + finder.ids.length + " tree" + (finder.ids.length === 1 ? "" : "s") + " (sensitivity " + (level + 1) + " of " + levels.length + "). ← → fewer / more · Enter keeps them · Esc takes them away.");
+      var said = "Found " + kept.length + " tree" + (kept.length === 1 ? "" : "s") + (finder.nearPlay ? " near play" : "") + " (sensitivity " + (level + 1) + " of " + levels.length + ")";
+      if (finder.nearPlay && kept.length) {
+        var byHole = {}, order = [], fromHeight = 0;
+        kept.forEach(function (k) {
+          var key = k.hole ? "hole " + k.hole : "unnumbered";
+          if (!byHole[key]) { byHole[key] = 0; order.push(key); }
+          byHole[key]++;
+          if (k.byHeight) fromHeight++;
+        });
+        said += " - " + order.map(function (key) { return key + ": " + byHole[key]; }).join(" · ");
+        if (fromHeight) said += " · " + fromHeight + " from height only";
+      }
+      setStatus(said + "." + (finder.note ? " " + finder.note : "") + " ← → fewer / more · Enter keeps them · Esc takes them away.");
     }
 
     function stepFinder(by) {
@@ -1157,6 +1202,153 @@
       changed();
       updateHint();
       setStatus("The trees the finder dropped are gone.");
+    }
+
+    /* ---- trees near play ----
+       The finder with nothing placed by hand and no box: it looks along the edge of each
+       fairway and green already on the overlay - the hole being numbered, or every hole when
+       none is - and learns what a tree looks like from the turf inside them
+       (GDOverlayShapes.playBand, autoTreeModel). One picture is read per fairway and per green,
+       since a whole hole at the finder's detail would not fit in one. Where tree heights are to
+       hand (CANOPY_API) and Heights is on, only what stands TREE_MIN_HEIGHT_M or more is kept,
+       and trees the height map has that the colour missed (a bare winter crown) are added. What
+       it drops is live like the box finder's: left and right, Enter, Esc. */
+
+    var NEAR_PLAY_KINDS = ["fairway", "green"];
+    /* Everything a tree near play keeps clear of. */
+    var SURFACE_KINDS = ["fairway", "green", "tee", "bunker", "water", "waste"];
+    /* Credit for the tree heights, once they have been used here (CC BY - see renderCredit). */
+    var canopyCredit = "";
+
+    /* A shape as an outline - a pin as the default shape it stands for. */
+    function outlineOf(f) {
+      if (!f.pin) return f.points.length >= 3 ? f.points : null;
+      if (f.kind === "fairway") return f.points.length >= 2 ? shapes.fairwayFromLine(f.points, shapes.FAIRWAY_WIDTH_M) : null;
+      return f.kind === "tee" ? shapes.teeAt(f.points[0]) : shapes.circle(f.points[0], defaultRadius(f.kind), 16);
+    }
+
+    /* The fairways and greens near play looks along: the hole in hand, or all of them. */
+    function nearPlayShapes() {
+      return session.features.filter(function (f) {
+        return NEAR_PLAY_KINDS.indexOf(f.kind) >= 0 && (!session.hole || f.hole === session.hole) && outlineOf(f);
+      }).sort(function (a, b) { return (a.hole || 99) - (b.hole || 99) || NEAR_PLAY_KINDS.indexOf(a.kind) - NEAR_PLAY_KINDS.indexOf(b.kind); });
+    }
+
+    function renderTreeAuto() {
+      if (destroyed || !el["tree-auto"]) return;
+      el["tree-auto"].textContent = session.hole ? "Find trees near hole " + session.hole : "Find trees near every hole";
+      el["tree-auto"].disabled = !!wandsRunning;
+    }
+
+    /* Tree heights under a capture, as a 0/1 mask the size of its picture, or null with why. */
+    function canopyMask(cap) {
+      if (session.treeHeights === false) return Promise.resolve({ mask: null, why: "" });
+      var w = cap.image.width, h = cap.image.height;
+      var nw = cap.toLL({ x: 0, y: 0 }), se = cap.toLL({ x: w, y: h });
+      var query = "?north=" + nw.lat.toFixed(6) + "&south=" + se.lat.toFixed(6) + "&east=" + se.lng.toFixed(6) + "&west=" + nw.lng.toFixed(6);
+      return api("GET", query, null, CANOPY_API).then(function (data) {
+        var grids = (data && data.grids || []).map(function (g) {
+          var raw = atob(g.heights), heights = new Uint8Array(raw.length);
+          for (var i = 0; i < raw.length; i++) heights[i] = raw.charCodeAt(i);
+          return { crs: g.crs, x0: g.x0, y0: g.y0, dx: g.dx, dy: g.dy, width: g.width, height: g.height, heights: heights };
+        });
+        var mask = shapes.heightMask({ width: w, height: h, z: cap.z, ox: cap.ox, oy: cap.oy }, grids, shapes.TREE_MIN_HEIGHT_M);
+        if (mask && data.credit) canopyCredit = data.credit;
+        return { mask: mask, why: mask ? "" : "no tree heights here" };
+      }, function (error) {
+        return { mask: null, why: "tree heights unavailable (" + (error && error.message || error) + ")" };
+      });
+    }
+
+    /* One fairway or green: its picture, where to look round it, and the finder over that. */
+    function nearPlayRun(item, bandM) {
+      var ring = outlineOf(item);
+      return captureBox(ring, { mpp: TREE_FINDER_MPP, padM: bandM, maxSidePx: TREE_FINDER_MAX_SIDE_PX, marginPx: 8 }).then(function (cap) {
+        var w = cap.image.width, h = cap.image.height;
+        function px(points) { return points.map(cap.toPx); }
+        /* Only the shapes on this picture are painted - a course holds hundreds. */
+        function onPicture(xy) {
+          var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+          xy.forEach(function (p) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+          return x1 >= 0 && y1 >= 0 && x0 < w && y0 < h;
+        }
+        var surfaces = [], woods = [], turf = [], avoid = [];
+        session.features.forEach(function (f) {
+          if (f.id === item.id) return;
+          if (f.kind === "tree") {
+            var c = cap.toPx(shapes.centroid(f.points));
+            if (c.x > -50 && c.y > -50 && c.x < w + 50 && c.y < h + 50) avoid.push({ x: c.x, y: c.y, r: shapes.ringRadiusM(f.points) / cap.mpp });
+            return;
+          }
+          var outline = SURFACE_KINDS.indexOf(f.kind) >= 0 || f.kind === "trees" ? outlineOf(f) : null;
+          var xy = outline && px(outline);
+          if (!xy || !onPicture(xy)) return;
+          if (f.kind === "trees") woods.push(xy);
+          else surfaces.push(xy);
+          if (NEAR_PLAY_KINDS.indexOf(f.kind) >= 0) turf.push(xy);
+        });
+        var played = px(ring);
+        turf.push(played);
+        var radiusPx = shapes.TREE_AUTO_RADIUS_M / cap.mpp;
+        var band = shapes.playBand(w, h, { play: [played], surfaces: surfaces, woods: woods, bandPx: bandM / cap.mpp, clearPx: shapes.TREE_CLEAR_M / cap.mpp });
+        return canopyMask(cap).then(function (heights) {
+          var auto = shapes.autoTreeModel(cap.image, shapes.ringsMask(w, h, turf), band, { radiusPx: radiusPx, tall: heights.mask });
+          var byHeight = [];
+          if (heights.mask) {
+            var tall = new Uint8Array(w * h);
+            for (var i = 0; i < tall.length; i++) tall[i] = heights.mask[i] && band[i] ? 1 : 0;
+            byHeight = shapes.treesInMask(tall, w, h, { radiusPx: radiusPx, avoid: avoid });
+          }
+          return {
+            cap: cap, hole: item.hole, byHeight: byHeight, why: heights.why,
+            run: auto.model ? shapes.treeFinder(cap.image, auto.model, { radiusPx: radiusPx, inside: auto.allow, avoid: avoid }) : null
+          };
+        });
+      });
+    }
+
+    function runNearPlay() {
+      if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
+      if (wandsRunning) return;
+      var items = nearPlayShapes();
+      if (!items.length) { setStatus("No fairways or greens " + (session.hole ? "on hole " + session.hole + " " : "") + "to look along yet - place them first.", true); return; }
+      if (full("tree")) return;
+      settle(true);
+      var id = session.loadedFor, bandM = session.treeBandM || shapes.TREE_BAND_M;
+      var runs = [], failed = 0, notes = {}, level = shapes.TREE_FINDER_LEVELS[session.treeFinderLevel] || shapes.TREE_FINDER_LEVELS[2];
+      wandsRunning++;
+      updateHint();
+      renderTreeAuto();
+      var walk = items.reduce(function (prev, item, k) {
+        return prev.then(function () {
+          if (destroyed || session.loadedFor !== id) return;
+          var where = (item.hole ? "hole " + item.hole + "'s " : "an unnumbered ") + item.kind;
+          setStatus("Looking for trees along " + where + " (" + (k + 1) + " of " + items.length + ")…");
+          return nearPlayRun(item, bandM).then(function (run) {
+            runs.push(run);
+            if (run.why) notes[run.why] = true;
+            var n = (run.run ? run.run.find(level).length : 0) + run.byHeight.length;
+            setStatus((item.hole ? "Hole " + item.hole : "Unnumbered") + " " + item.kind + ": " + n + " tree" + (n === 1 ? "" : "s") + (k + 1 < items.length ? " · looking at the next…" : "."));
+          }, function (error) {
+            failed++;
+            notes[String(error && error.message || error)] = true;
+          });
+        });
+      }, Promise.resolve());
+      walk.then(function () {
+        wandsRunning--;
+        if (destroyed || session.loadedFor !== id) return;
+        updateHint();
+        renderTreeAuto();
+        renderCredit();
+        var said = Object.keys(notes);
+        var note = (failed ? failed + " of " + items.length + " could not be read" + (said.length ? " (" + said.join("; ") + ")" : "") + "." : said.length ? "(" + said.join("; ") + ")" : "");
+        if (!runs.length) { setStatus("The tree finder could not run" + (said.length ? ": " + said.join("; ") : "") + ".", true); return; }
+        settle(true);
+        finder = { ids: [], runs: runs, nearPlay: true, note: note };
+        dropFinderTrees(session.treeFinderLevel);
+        if (!finder.ids.length) setStatus("No trees found near play. → looks harder" + (note ? " · " + note : "") + ".");
+      });
     }
 
     /* ---- the colour wand ----
@@ -1310,7 +1502,7 @@
       clearColourSel();
       if (!ring) { setStatus("Nothing picked yet - press on it and drag.", true); return; }
       var points = ring.map(cap.toLL);
-      if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
+      if (full(kind)) return;
       var merged = kind === "bunker" ? mergeBunker(points, session.hole, null, true) : null;
       if (merged) { lastPlacedId = merged.id; drawFeatures(); changed(); setStatus("Bunker joined the one it overlaps. Grab its edge in Move to tidy it."); return; }
       var f = addFeature({ kind: kind, points: points, source: "colour" });
@@ -1667,7 +1859,8 @@
       if (tool === "connect" || tool === "number" || tool === "order") return;
       if (tool === "move") { if (selectedId) select(""); return; }
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
-      if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold (" + MAX_FEATURES + "). Bin some first.", true); return; }
+      if (methodOf(tool) === "auto") { setStatus("Find trees near play looks along every fairway and green on its own - press the button up top.", false); return; }
+      if (full(methodOf(tool) === "single" ? "tree" : tool)) return;
       /* Moving on to the next shape keeps the one just placed. A click with the colour wand
          is a press too short to drag - its pick stays. */
       settle(pressGesture() === "colour");
@@ -1899,7 +2092,7 @@
       var size = session.wandSize[kind];
       wandOutline(point, kind, size).then(function (result) {
         if (destroyed || session.loadedFor !== id) return;
-        if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold.", true); return; }
+        if (full(kind)) return;
         var word = kindLabel(kind);
         var f = addFeature({ kind: kind, points: wandShape(kind, point, result), source: result.shape ? "wand" : "", hole: hole });
         startAdjust(f, { seed: point, wand: result, size: size });
@@ -1945,7 +2138,7 @@
           catch (e) { return reject(new Error("this provider's tiles cannot be read back (no CORS) - switch provider")); }
           var ox = tx0 * 256, oy = ty0 * 256;
           resolve({
-            image: image, z: z, mpp: box.mpp,
+            image: image, z: z, mpp: box.mpp, ox: ox, oy: oy,
             toPx: function (p) { var q = mapObj.project(L.latLng(p.lat, p.lng), z); return { x: q.x - ox, y: q.y - oy }; },
             toLL: function (q) { var ll = mapObj.unproject(L.point(q.x + ox, q.y + oy), z); return { lat: ll.lat, lng: ll.lng }; }
           });
@@ -2003,7 +2196,7 @@
       growRun(grow, kind, size, null).then(function (out) {
         try { mapObj && mapObj.removeLayer(marker); } catch (e) {}
         if (destroyed || session.loadedFor !== id) return;
-        if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold.", true); return; }
+        if (full(kind)) return;
         var result = out.result, word = kindLabel(kind);
         var points = result.shape ? shapes.smoothOutline(result.shape, kind) : kind === "fairway" ? shapes.fairwayFromLine(from, session.fairwayWidth) : null;
         if (!points) { setStatus(result.note, true); return; }
@@ -2094,7 +2287,7 @@
     function addCollar() {
       var green = collarGreen();
       if (!green || !canEdit()) return;
-      if (session.features.length >= MAX_FEATURES) { setStatus("That is the most shapes one course can hold.", true); return; }
+      if (full("green")) return;
       if (adjust) commitAdjust(true);
       var start = shapes.reshapeOutline([green.points], { growM: COLLAR_M });
       if (!start) { setStatus("This green is too small to put a collar round.", true); return; }
@@ -2204,6 +2397,20 @@
       session.features.push(f);
       if (!quiet) { lastPlacedId = f.id; selectedId = tool === "move" ? f.id : selectedId; drawFeatures(); changed(); }
       return f;
+    }
+
+    /* Room left for another shape of a kind: single trees have a cap of their own. full() says
+       so when there is none. */
+    function roomFor(kind) {
+      var tree = kind === "tree";
+      var held = session.features.filter(function (f) { return (f.kind === "tree") === tree; }).length;
+      return (tree ? MAX_TREES : MAX_FEATURES) - held;
+    }
+
+    function full(kind) {
+      if (roomFor(kind) > 0) return false;
+      setStatus(kind === "tree" ? "That is the most single trees one course can hold (" + MAX_TREES + "). Bin some first." : "That is the most shapes one course can hold (" + MAX_FEATURES + ", besides single trees). Bin some first.", true);
+      return true;
     }
 
     function removeFeature(id) {
@@ -2422,6 +2629,7 @@
       var value = f ? f.hole : session.hole;
       if (document.activeElement !== el.hole) el.hole.value = value ? String(value) : "";
       el["hole-label"].firstChild.nodeValue = f ? kindLabel(f.kind) + " hole " : "Hole ";
+      renderTreeAuto();
       el.hole.title = f ? "This shape's hole number - empty leaves it for the mapper to number" : "Number new shapes with this hole - empty leaves them unnumbered";
     }
 
@@ -3036,7 +3244,7 @@
         session.features.forEach(function (f) { if (f.osm) converted[f.osm] = true; });
         (session.osm.holes || []).forEach(function (h) {
           if (converted[h.id] || !h.points || !startsAtTee(h.points, osmHoleNumber(h), null, tee, from)) return;
-          if (session.features.length >= MAX_FEATURES) return;
+          if (roomFor("hole") <= 0) return;
           var f = { id: ("osm-" + String(h.id).replace("/", "-")).slice(0, 40), kind: "hole", hole: osmHoleNumber(h), points: h.points.map(function (p) { return { lat: p.lat, lng: p.lng }; }), source: "osm", osm: h.id };
           session.features.push(f);
           lines.push(f);
@@ -3378,12 +3586,13 @@
     function addOsmShapes() {
       var list = convertibleOsm();
       if (!list.length) return "";
-      var added = list.slice(0, Math.max(0, MAX_FEATURES - session.features.length));
+      var room = { tree: roomFor("tree"), other: roomFor("") };
+      var added = list.filter(function (f) { return room[f.kind === "tree" ? "tree" : "other"]-- > 0; });
       added.forEach(function (f) { session.features.push(JSON.parse(JSON.stringify(f))); });
       var counts = {};
       added.forEach(function (f) { var k = f.source === "auto" ? "default fairway" : f.kind === "trees" ? "tree area" : kindLabel(f.kind).toLowerCase(); counts[k] = (counts[k] || 0) + 1; });
       var said = Object.keys(counts).map(function (k) { return counts[k] + " " + k + (counts[k] === 1 ? "" : "s"); }).join(", ");
-      return said + "." + (added.length < list.length ? " " + (list.length - added.length) + " more did not fit (" + MAX_FEATURES + " shapes a course)." : "");
+      return said + "." + (added.length < list.length ? " " + (list.length - added.length) + " more did not fit (" + MAX_FEATURES + " shapes and " + MAX_TREES + " single trees a course)." : "");
     }
 
     function convertOsm(auto) {
@@ -3629,6 +3838,7 @@
       else if (methodOf(tool) === "colour") text = colourSel ? "Enter makes it " + colourNoun(tool) + " · ← → tighter / looser · Shift-drag adds · Esc drops it" : "Press on the " + colourThing(tool) + " and drag - further takes more of its colour · " + methodKey(tool) + " switches method";
       else if (tool === "trees" && methodOf("trees") === "single") text = "Click a tree to drop one · ↑ ↓ size it · E switches method";
       else if (tool === "trees" && methodOf("trees") === "oval") text = "Press and drag across a cluster of trees - Shift for a circle · E switches method";
+      else if (tool === "trees" && methodOf("trees") === "auto") text = (session.hole ? "Finds trees along hole " + session.hole + "'s fairway and green" : "Finds trees along every fairway and green - set a hole number for just one") + ", out to " + (session.treeBandM || shapes.TREE_BAND_M) + "m · E switches method";
       else if (tool === "trees" && methodOf("trees") === "find") text = sampleTrees().length ? "Drag a box - trees in it like the " + sampleTrees().length + " you placed by hand are found · E switches method" : "Place a tree or two by hand first (Tree), then drag a box to find more like them";
       else if (tool === "trees") text = "Press and drag all the way round an area of dense trees · E switches method";
       else if (tool === "waste") text = "Draw roughly round the waste area - it grows out to the edge · A switches method";
@@ -4659,6 +4869,18 @@
     });
     el.map.addEventListener("pointerdown", onMapPress);
     el.hole.addEventListener("change", holeFieldChanged);
+    el["tree-auto"].addEventListener("click", runNearPlay);
+    el["tree-band"].addEventListener("change", function () {
+      var b = num(el["tree-band"].value);
+      session.treeBandM = b && b >= TREE_BAND_MIN_M && b <= TREE_BAND_MAX_M ? Math.round(b) : shapes.TREE_BAND_M;
+      el["tree-band"].value = session.treeBandM;
+      updateHint();
+      remember();
+    });
+    el["tree-heights"].addEventListener("change", function () {
+      session.treeHeights = !!el["tree-heights"].checked;
+      remember();
+    });
     el.width.addEventListener("change", function () {
       var w = num(el.width.value);
       session.fairwayWidth = w && w >= 10 && w <= 90 ? w : shapes.FAIRWAY_WIDTH_M;

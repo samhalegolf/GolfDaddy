@@ -9,7 +9,7 @@
  * Service role only: nothing in the browser reads this table. */
 
 import { createSupabaseFetch } from "./gd-supabase-fetch.mjs";
-import { normalizeOverlayFeatures, overlaySummary, OVERLAY_MAX_FEATURES } from "./gd-map-overlay-core.mjs";
+import { normalizeOverlayFeatures, overlaySummary, overlayOverCap } from "./gd-map-overlay-core.mjs";
 import { normalizePlayOrders } from "./gd-play-order-core.mjs";
 
 export const OVERLAYS_TABLE = "course_map_overlays";
@@ -193,7 +193,8 @@ export async function saveOverlay({ courseId, features: raw, playOrders: rawOrde
     const incoming = new Set(list.map(f => f && f.id));
     list = saved.features.filter(f => !incoming.has(f.id)).concat(list);
   }
-  if (list.length > OVERLAY_MAX_FEATURES) return { error: "too many features", detail: "At most " + OVERLAY_MAX_FEATURES + " features per course." };
+  const overCap = overlayOverCap(list);
+  if (overCap) return { error: "too many features", detail: overCap };
   const features = normalizeOverlayFeatures(list);
   /* Features the caller sent but that did not survive normalisation are reported, not
      silently dropped: a two-point "fairway" is a drawing slip the operator wants to hear about. */

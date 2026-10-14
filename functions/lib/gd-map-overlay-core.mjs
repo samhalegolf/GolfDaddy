@@ -52,8 +52,9 @@
  *             and is not water. Same path as trees. Drawn round by hand only.
  *   tree    - a closed polygon (3+ points): one tree, a small ring round its crown. Becomes
  *             natural=tree. Placed with a click in Studio, or dropped in numbers by the tree
- *             finder. Nothing downstream reads single trees yet - they are kept so the course
- *             has them when tree rendering lands.
+ *             finder. The watch bake reads them straight from here and stamps each where
+ *             it stands (course-watch-maps.mjs overlaySingleTrees); the mapper and the
+ *             course objects never carry them.
  *   waste   - a closed polygon (3+ points). Becomes golf=waste_area (our tag - OSM has none).
  *             Sandy, scrubby ground that is played as it lies. Drawn round and grown out to its
  *             edge, or picked with the colour wand. The surface pass writes it onto the
@@ -76,10 +77,21 @@ const POLYGON_KINDS = new Set(["fairway", "green", "tee", "bunker", "water", "tr
 /* The tag each kind is written as: golf=<kind> unless listed here. */
 const OSM_TAG = { water: ["golf", "water_hazard"], trees: ["natural", "wood"], tree: ["natural", "tree"], hazard: ["golf", "hazard"], waste: ["golf", "waste_area"] };
 export function overlayKindIsPolygon(kind) { return POLYGON_KINDS.has(String(kind || "").toLowerCase()); }
-/* Room for a whole course placed as pins - 18 greens, fairways and tees plus the bunkers - and
-   the single trees the tree finder drops, a few hundred of them. Or a well-mapped course
-   converted from OSM: a 36-hole site carries 200 bunkers and 200 tee boxes on its own. */
+/* Room for a whole course placed as pins - 18 greens, fairways and tees plus the bunkers - or a
+   well-mapped course converted from OSM: a 36-hole site carries 200 bunkers and 200 tee boxes
+   on its own. Single trees are counted apart, against their own cap: the tree finder pins
+   them along every fairway, and a tree-lined 18 holds well over a thousand. */
 export const OVERLAY_MAX_FEATURES = 1200;
+export const OVERLAY_MAX_TREES = 3000;
+/* Whether a feature counts against the single-tree cap rather than the shapes cap. */
+export function overlayIsSingleTree(feature) { return String(feature && feature.kind || "").toLowerCase() === "tree"; }
+/* What a list holds over its caps, as the error a save answers with, or "". */
+export function overlayOverCap(list) {
+  const trees = (list || []).filter(overlayIsSingleTree).length;
+  if (trees > OVERLAY_MAX_TREES) return "At most " + OVERLAY_MAX_TREES + " single trees per course.";
+  if ((list || []).length - trees > OVERLAY_MAX_FEATURES) return "At most " + OVERLAY_MAX_FEATURES + " shapes per course, besides single trees.";
+  return "";
+}
 /* A wand outline keeps enough corners to follow the ground (Studio's DETAIL_MAX_POINTS is 220),
    with room to reshape. The mapper still thins surfaces to SURFACE_SHAPE_MAX_POINTS for the
    course package; this is what the overlay itself holds. */
@@ -150,9 +162,11 @@ export function normalizeOverlayFeatures(raw) {
   const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.features) ? raw.features : []);
   const seen = new Set();
   const out = [];
-  list.slice(0, OVERLAY_MAX_FEATURES).forEach((item, index) => {
+  let shapes = 0, trees = 0;
+  list.slice(0, OVERLAY_MAX_FEATURES + OVERLAY_MAX_TREES).forEach((item, index) => {
     const feature = normalizeOverlayFeature(item, index);
     if (!feature) return;
+    if (overlayIsSingleTree(feature) ? ++trees > OVERLAY_MAX_TREES : ++shapes > OVERLAY_MAX_FEATURES) return;
     /* Two features with one id would dedupe to one OSM element and silently lose a hole. */
     while (seen.has(feature.id)) feature.id = feature.id + "-" + (index + 1);
     seen.add(feature.id);
@@ -251,7 +265,7 @@ export function derivedHoleLines(features, linkHole) {
     const geometry = [tee].concat(fairways, [green]).map(p => ({ lat: p.lat, lon: p.lng }));
     return {
       type: "way",
-      id: OVERLAY_ID_BASE - OVERLAY_MAX_FEATURES - hole,
+      id: OVERLAY_ID_BASE - OVERLAY_MAX_FEATURES - OVERLAY_MAX_TREES - hole,
       tags: { [OVERLAY_TAG]: "hole-line-" + hole, [DERIVED_TAG]: "hole-line", golf: "hole", ref: String(hole) },
       geometry
     };

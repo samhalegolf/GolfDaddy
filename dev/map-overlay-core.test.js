@@ -445,6 +445,20 @@ test("the mapper's default fairways come over numbered to their hole", () => {
   assert.deepStrictEqual(features.map(f => [f.kind, f.hole, f.source]), [["fairway", 3, "auto"]], "one per fill, from the hole it was laid for");
 });
 
+test("single trees count against their own cap, so a tree-lined course still has room for its shapes", () => {
+  const ring = (lat, lng) => [{ lat, lng }, { lat: lat + 0.00003, lng }, { lat, lng: lng + 0.00003 }];
+  const trees = Array.from({ length: overlay.OVERLAY_MAX_TREES + 5 }, (_, i) => ({ id: "t" + i, kind: "tree", points: ring(54 + i * 1e-5, -5.8) }));
+  const bunkers = Array.from({ length: overlay.OVERLAY_MAX_FEATURES }, (_, i) => ({ id: "b" + i, kind: "bunker", points: ring(54.1 + i * 1e-5, -5.8) }));
+  const kept = overlay.normalizeOverlayFeatures(bunkers.concat(trees));
+  assert.strictEqual(kept.filter(f => f.kind === "bunker").length, overlay.OVERLAY_MAX_FEATURES, "every shape is kept");
+  assert.strictEqual(kept.filter(f => f.kind === "tree").length, overlay.OVERLAY_MAX_TREES, "trees stop at their own cap");
+  assert.strictEqual(overlay.overlayOverCap(bunkers.concat(trees.slice(0, overlay.OVERLAY_MAX_TREES))), "", "a full course with its trees saves");
+  assert.ok(/single trees/.test(overlay.overlayOverCap(trees)), "too many trees is refused for what it is");
+  assert.ok(/besides single trees/.test(overlay.overlayOverCap(bunkers.concat(bunkers.slice(0, 1)))), "too many shapes is refused for what it is");
+  const ids = overlay.overlayToOsmElements(kept.concat([{ id: "g", kind: "green", hole: 1, points: ring(54.2, -5.8) }, { id: "te", kind: "tee", hole: 1, points: ring(54.21, -5.8) }])).map(e => e.id);
+  assert.strictEqual(new Set(ids).size, ids.length, "a derived hole line never takes a feature's id");
+});
+
 (async () => {
   overlay = await import(path.join(root, "functions", "lib", "gd-map-overlay-core.mjs"));
   core = await import(path.join(root, "functions", "lib", "gd-automapper-core.mjs"));
