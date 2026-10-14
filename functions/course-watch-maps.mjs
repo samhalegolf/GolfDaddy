@@ -2,8 +2,9 @@
 
    GET  ?courseId=...            -> current package status/report (public, same shape either way)
    POST {courseId}               -> admin-only. Bakes a fresh Watch package for every hole this
-                                     course has geometry for, from course_maps.objects_json, and
-                                     replaces the course's course_watch_maps row.
+                                     course has geometry for, from course_maps.objects_json (and
+                                     the overlay's single trees), and replaces the course's
+                                     course_watch_maps row.
    POST {courseId, action:       -> admin-only, metadata only. Writes the hole reference into an
          "backfill-reference"}      already-baked package without re-baking imagery or bumping
                                      its version, and only for holes whose own geometry has
@@ -30,7 +31,10 @@
    run - to find each hole's already-cropped elevation image and shade a Watch-scale relief from
    it. No row is read, no job state is consulted, and a course that has never run a satellite
    bake (or a hole whose relief there failed) simply ships its Watch map flat, exactly as every
-   hole did before this existed. See generateWatchPackage's terrain step. */
+   hole did before this existed. See generateWatchPackage's terrain step.
+
+   And one more: the course's Studio overlay (course_map_overlays, the facility's when the
+   course shares one), for its single trees only - see overlaySingleTrees. Read, never written. */
 
 import sharp from "sharp";
 import watchMapCore from "../scripts/gd-watch-map-core.js";
@@ -45,8 +49,10 @@ import { courseSurfaces, sampleAerial } from "./lib/gd-watch-course-colours.mjs"
 import { sampleCourseSeasons, seasonsAreFresh } from "./lib/gd-sentinel-seasons.mjs";
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
+import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
 import { wakeGarminBuild } from "./lib/gd-garmin-build-wake.mjs";
 const MAPS_TABLE = "course_maps";
+const OVERLAYS_TABLE = "course_map_overlays";
 const WATCH_TABLE = "course_watch_maps";
 const BUCKET = "course-watch-maps";
 const TERRAIN_BUCKET = "course-visuals";
@@ -567,6 +573,22 @@ function paletteRecord(colours) {
   };
 }
 
+/* The single trees placed in the course's Studio overlay - by hand, or by the tree finder -
+   which the bake stamps where they really stand (watch-map-core buildHoleTrees). They are not
+   in course_maps: a tree-lined course holds thousands, nothing but the watch reads them, and
+   the course objects are synced whole to every phone and Studio. All of them go to every hole;
+   each hole keeps the ones on its own picture. Best-effort: with none, or no overlay to read,
+   the woods are made up as before. */
+async function overlaySingleTrees(courseId) {
+  try {
+    const ownerId = await overlayOwnerId(supabaseFetch, courseId);
+    const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features&course_id=eq." + encodeURIComponent(ownerId) + "&limit=1");
+    return watchMapCore.singleTreesFromOverlay(Array.isArray(rows) && rows[0] ? rows[0].features : []);
+  } catch (error) {
+    return [];
+  }
+}
+
 async function generateWatchPackage({ courseId, map, actorEmail }) {
   const holeNumbers = holeNumbersFromObjects(map.objects_json);
   const version = Date.now();
@@ -583,6 +605,7 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
   try { colours = await courseColours(courseId, map, holeNumbers, terrainIndex); }
   catch (error) { colours = { palette: paletteCore.basePalette(), measured: null, aerial: null, seasonal: null }; }
   const recipe = Object.assign({}, watchMapCore.WATCH_MAP_RECIPE_V1, { colors: colours.palette.colors });
+  const singleTrees = await overlaySingleTrees(courseId);
 
   let holeIndex = 0;
   for (const holeNumber of holeNumbers) {
@@ -591,7 +614,7 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
        the last one finished - the difference matters on the long holes, which are exactly the
        ones an admin is watching to see whether anything is still moving. */
     await writeProgress(courseId, "baking-hole-" + holeIndex + "-of-" + holeTotal, holeTotal, startedAt);
-    const geometry = watchMapCore.objectsForHole(map.objects_json, holeNumber);
+    const geometry = Object.assign(watchMapCore.objectsForHole(map.objects_json, holeNumber), { singleTrees });
     const frame = watchMapCore.buildWatchHoleFrame(recipe, geometry);
     if (!frame.ok) { errors.push({ holeNumber, reason: frame.reason }); continue; }
     try {
@@ -742,8 +765,9 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
 const GARMIN_TABLE = "course_garmin_maps";
 /* Bump to rebuild every course's Garmin package on its next wake (a new outline or terrain
    recipe, say). 2: trees (k), hazard (h) and waste (z) outlines. 3: individual trees.
-   4: smoother outlines (greens, bunkers, water to 0.05 m; the rest 0.2 m, was 0.4 m). */
-const GARMIN_BUILDER_VERSION = 4;
+   4: smoother outlines (greens, bunkers, water to 0.05 m; the rest 0.2 m, was 0.4 m).
+   5: the overlay's single trees, where they really stand. */
+const GARMIN_BUILDER_VERSION = 5;
 /* A build that started this long ago and never finished died; a new one may start. */
 const GARMIN_BUILD_LOCK_MS = 10 * 60 * 1000;
 const PUBLISHED_MAP_COLUMNS = "course_id,objects_json,holes_json,objects_revision,published_at,updated_at";
@@ -770,11 +794,12 @@ async function generateGarminPackage({ courseId, map, terrainIndex }) {
   try { colours = await courseColours(courseId, map, holeNumbers, terrainIndex); }
   catch (error) { colours = { palette: paletteCore.basePalette() }; }
   const recipe = Object.assign({}, watchMapCore.WATCH_MAP_RECIPE_V1, { colors: colours.palette.colors });
+  const singleTrees = await overlaySingleTrees(courseId);
 
   const holes = [];
   const errors = [];
   for (const holeNumber of holeNumbers) {
-    const geometry = watchMapCore.objectsForHole(map.objects_json, holeNumber);
+    const geometry = Object.assign(watchMapCore.objectsForHole(map.objects_json, holeNumber), { singleTrees });
     const frame = watchMapCore.buildWatchHoleFrame(recipe, geometry);
     if (!frame.ok) { errors.push({ holeNumber, reason: frame.reason }); continue; }
     let terrain = null;

@@ -52,8 +52,9 @@
  *             and is not water. Same path as trees. Drawn round by hand only.
  *   tree    - a closed polygon (3+ points): one tree, a small ring round its crown. Becomes
  *             natural=tree. Placed with a click in Studio, or dropped in numbers by the tree
- *             finder. Nothing downstream reads single trees yet - they are kept so the course
- *             has them when tree rendering lands.
+ *             finder. The watch bake reads them straight from here and stamps each where
+ *             it stands (course-watch-maps.mjs overlaySingleTrees); the mapper and the
+ *             course objects never carry them.
  *   waste   - a closed polygon (3+ points). Becomes golf=waste_area (our tag - OSM has none).
  *             Sandy, scrubby ground that is played as it lies. Drawn round and grown out to its
  *             edge, or picked with the colour wand. The surface pass writes it onto the

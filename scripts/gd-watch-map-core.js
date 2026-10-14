@@ -93,8 +93,12 @@
        list; each watch stamps its own tree sprites from it. Textured trees in the JPEG cost
        25-60 KB a hole against a 60 KB wrist budget most tree-heavy holes already squeeze to
        fit, where a tree costs one number in the list. The outlines still carry `k`, so a watch
-       without tree sprites draws the flat wood as before. */
-    version: 9,
+       without tree sprites draws the flat wood as before.
+
+       v10 stamps the trees placed one by one in the Studio overlay (singleTreesFromOverlay) at
+       their own position and size, and only makes trees up inside a wood with none of them in
+       it. A wood the tree finder has pinned is drawn as the trees that are really there. */
+    version: 10,
     canvas: {
       /* Ceiling, not a fixed size - see computeCanvasFit. Most holes land under both ceilings;
          a long narrow par 5 is height-limited, a short wide-corridor hole is width-limited. */
@@ -620,16 +624,38 @@
     return box;
   }
 
-  /* The hole's trees: every hand-drawn `trees` area turned into individual trees the watch
-     stamps as sprites. {version: 1, c: [packTree...]} sorted back to front (by y), every
-     centre inside the canvas. Deterministic: an area's trees are seeded from its own outline,
-     so a rebake of an unchanged course places the same trees.
+  /* The single trees of a Studio overlay (its features, functions/lib/gd-map-overlay-core.mjs:
+     a `tree` is a small ring round one crown) as {lat, lng, r} - the crown's middle and its
+     radius in metres - for geometry.singleTrees. */
+  function singleTreesFromOverlay(features) {
+    var out = [];
+    (Array.isArray(features) ? features : []).forEach(function (f) {
+      if (!f || f.kind !== "tree" || f.pin) return;
+      var ring = finiteShape(f.points);
+      if (!ring) return;
+      var lat = 0, lng = 0;
+      ring.forEach(function (p) { lat += p.lat / ring.length; lng += p.lng / ring.length; });
+      var k = Math.cos(lat * Math.PI / 180), r = 0;
+      ring.forEach(function (p) { r += Math.hypot((p.lng - lng) * 111320 * k, (p.lat - lat) * 111320) / ring.length; });
+      if (r > 0) out.push({ lat: lat, lng: lng, r: r });
+    });
+    return out;
+  }
 
+  /* The hole's trees, as the watch stamps them: {version: 1, c: [packTree...]} sorted back to
+     front (by y), every centre inside the canvas. Deterministic: an area's trees are seeded
+     from its own outline and a placed tree's look from its position, so a rebake of an
+     unchanged course places the same trees.
+
+     First the trees placed one by one in Studio (geometry.singleTrees, {lat, lng, r} with r
+     in metres), where they really stand and at their own size - a crown may overhang played
+     ground, since it really does. Then every hand-drawn `trees` area with none of those in it
+     is made into trees:
      - Under cfg.specimenMaxM2: one tree, sized to the area.
      - Larger (a copse, a tree line, a wood): a ragged edge - uneven spacing, each tree stepping
        in or out of the drawn line, the odd gap, the odd straggler - then the inside packed with
        trees of mixed size that do not quite touch, so grass shows between them.
-     No tree sits on a fairway, green, bunker or water (cfg.playedClearance). */
+     No made-up tree sits on a fairway, green, bunker or water (cfg.playedClearance). */
   function buildHoleTrees(recipe, spatialRef, geometry) {
     var cfg = recipe.trees;
     var mpp = Number(spatialRef.metresPerPixel) || 0.5;
@@ -657,9 +683,9 @@
         return pointInRing(p.ring, x, y) || distanceToRing(p.ring, x, y) < clear;
       });
     }
-    function add(x, y, r, rand, spacing) {
+    function add(x, y, r, rand, spacing, real) {
       if (x < 0 || y < 0 || x >= W || y >= H) return false;
-      if (onPlayed(x, y, r) || crowded(x, y, r, spacing)) return false;
+      if ((!real && onPlayed(x, y, r)) || crowded(x, y, r, spacing)) return false;
       var u = rand(), type = u < cfg.pineFraction ? 2 : u < cfg.pineFraction + cfg.broadleafFraction ? 1 : 0;
       if (rand() < cfg.yellowGreenFraction) type = 3;
       var tree = { x: x, y: y, r: r, type: type };
@@ -670,11 +696,23 @@
     }
     var between = function (rand, range) { return range[0] + (range[1] - range[0]) * rand(); };
 
+    var placed = [];
+    (geometry.singleTrees || []).forEach(function (tree) {
+      var at = projectLatLngToImage(spatialRef, tree.lat, tree.lng);
+      var r = Number(tree.r);
+      if (!at || !(r > 0)) return;
+      placed.push(at);
+      var rand = treeRandom(Math.imul(Math.round(tree.lat * 1e6) ^ 0x9e3779b9, 16777619) ^ Math.round(tree.lng * 1e6));
+      add(at.x, at.y, px(r), rand, 0.3, true);
+    });
+
     (geometry.trees || []).forEach(function (shape) {
       var ring = project(shape);
       if (ring.length < 3) return;
       var box = ringBox(ring);
       if (box.maxX < 0 || box.maxY < 0 || box.minX >= W || box.minY >= H) return;
+      /* A wood with real trees placed in it is drawn as those trees, not made up. */
+      if (placed.some(function (p) { return p.x >= box.minX && p.x <= box.maxX && p.y >= box.minY && p.y <= box.maxY && pointInRing(ring, p.x, p.y); })) return;
       var seed = 2166136261;
       shape.slice(0, 4).forEach(function (p) {
         seed = Math.imul(seed ^ Math.round(p.lat * 1e6), 16777619);
@@ -1241,6 +1279,7 @@
     validateSpatialReference: validateSpatialReference,
     buildHoleOutlines: buildHoleOutlines,
     buildHoleTrees: buildHoleTrees,
+    singleTreesFromOverlay: singleTreesFromOverlay,
     TREE_TYPES: TREE_TYPES,
     packTree: packTree,
     unpackTree: unpackTree,
