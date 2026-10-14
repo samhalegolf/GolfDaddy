@@ -122,7 +122,7 @@ test("a busy Overpass means no neighbours this time, not an error", async () => 
 
 test("the worker takes a player job before any background job", async () => {
   const calls = stubFetch({
-    jobs: rest => rest.includes("kind=neq.nearby_automap") && rest.includes("status=eq.queued") ? [{ id: "player-job", kind: "automap" }] : [],
+    jobs: rest => rest.includes("kind=not.in.(nearby_automap,find_trees)") && rest.includes("status=eq.queued") ? [{ id: "player-job", kind: "automap" }] : [],
     patchedRows: rest => rest.includes("player-job") ? [{ id: "player-job", kind: "automap" }] : []
   });
   const job = await worker.claimNextJob({ allowNearby: true });
@@ -134,7 +134,7 @@ test("no background job is taken while a player job is running", async () => {
   const calls = stubFetch({
     jobs: rest => {
       if (rest.includes("status=eq.queued")) return rest.includes("kind=eq.nearby_automap") ? [{ id: "bg" }] : [];
-      if (rest.includes("status=in.(queued,running)") && rest.includes("kind=neq.nearby_automap")) return [{ id: "player-running" }];
+      if (rest.includes("status=in.(queued,running)") && rest.includes("kind=not.in.(nearby_automap,find_trees)")) return [{ id: "player-running" }];
       return [];
     }
   });
@@ -146,11 +146,32 @@ test("only one background job runs at a time", async () => {
   stubFetch({
     jobs: rest => {
       if (rest.includes("status=eq.queued")) return rest.includes("kind=eq.nearby_automap") ? [{ id: "bg" }] : [];
-      if (rest.includes("status=eq.running") && rest.includes("kind=eq.nearby_automap")) return [{ id: "bg-running" }];
+      if (rest.includes("status=eq.running") && rest.includes("kind=in.(nearby_automap,find_trees)")) return [{ id: "bg-running" }];
       return [];
     }
   });
   assert.strictEqual(await worker.claimNextJob({ allowNearby: true }), null);
+});
+
+test("a tree run waits behind background mapping, and the backfill takes a course with no trees and no recent run", async () => {
+  const world = {
+    maps: [{ course_id: "a" }, { course_id: "b" }, { course_id: "c" }],
+    jobs: rest => {
+      if (rest.includes("kind=eq.find_trees") && rest.includes("created_at=gt.")) return [{ course_id: "b" }];
+      if (rest.includes("id=eq.new-0") && rest.includes("status=eq.queued")) return [{ id: "new-0", kind: "find_trees", course_id: "c" }];
+      return [];
+    },
+    patchedRows: rest => rest.includes("new-0") ? [{ id: "new-0", kind: "find_trees", course_id: "c", requested_by: "tree-backfill" }] : []
+  };
+  const calls = stubFetch(world);
+  global.fetch = (inner => async (url, options) => String(url).includes("/rest/v1/course_trees") ? jsonResponse(200, [{ course_id: "a" }]) : inner(url, options))(global.fetch);
+  const job = await worker.claimNextJob({ allowNearby: true, allowBackfill: true });
+  const order = calls.reads.filter(rest => /kind=eq\.(nearby_automap|find_trees)&status=eq\.queued/.test(rest)).map(rest => rest.match(/kind=eq\.([a-z_]+)/)[1]);
+  assert.deepStrictEqual(order, ["nearby_automap", "find_trees"], "background mapping is asked for before a queued tree run");
+  assert.deepStrictEqual(jobInserts(calls).map(row => [row.course_id, row.kind, row.requested_by]), [["c", "find_trees", "tree-backfill"]], "a has trees, b was tried today: c is next");
+  assert.strictEqual(job && job.course_id, "c");
+  stubFetch(world);
+  assert.strictEqual(await worker.claimNextJob({ allowNearby: true, allowBackfill: false }), null, "one backfill an invocation");
 });
 
 test("an idle worker takes a background job, unless its time budget is spent", async () => {

@@ -30,6 +30,7 @@ import { boundingBox, coursesFromOverpass, mergeWithLibrary, nearbyCoursesQuery 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
 import { loadPlayerRequests } from "./lib/gd-player-requests.mjs";
+import { TREE_KIND, queueTreeRun } from "./lib/gd-tree-queue.mjs";
 
 const TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
@@ -210,7 +211,8 @@ export const NEARBY_PREFETCH_COUNT = 10;
 const NEARBY_PREFETCH_RADIUS_M = 25000;
 const NEARBY_ACTOR_PREFIX = "nearby:";
 
-const MAINTENANCE_KINDS = new Set([OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND]);
+/* Tree runs (lib/gd-tree-queue.mjs) are maintenance too: the course already plays. */
+const MAINTENANCE_KINDS = new Set([OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND, TREE_KIND]);
 const isMappingJob = job => !MAINTENANCE_KINDS.has(String(job && job.kind || "automap"));
 
 async function mapperBuildStateAll() {
@@ -667,6 +669,7 @@ export default async function courseMapperJobs(req) {
   const remap = requestedKind === "remap";
   const collect = requestedKind === OBJECT_COLLECTION_KIND;
   const refine = requestedKind === SHAPE_REFINE_KIND;
+  const trees = requestedKind === TREE_KIND;
   const user = await verifiedUser(req, payload);
   /* An anonymous caller may map, but only as itself: a guest install id is accepted here and
      nowhere else. Without a verified user AND without a usable guest id there is no actor to
@@ -677,7 +680,7 @@ export default async function courseMapperJobs(req) {
      actions - one on a stuck run, one on a bad map - same split as course-visual-jobs.mjs's
      export/nudge paths. A guest is never an operator: these ask for user.isAdmin, so an
      anonymous caller falls through to the same 403 a signed-in non-admin gets. */
-  if ((nudge || remap || collect || refine) && !(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
+  if ((nudge || remap || collect || refine || trees) && !(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
 
   const askedFor = slug(payload && (payload.courseId || payload.course_id));
   if (!askedFor) return json(400, { error: "courseId required" });
@@ -739,6 +742,16 @@ export default async function courseMapperJobs(req) {
     }
     if (result.deduped) return json(200, { deduped: true, kind: SHAPE_REFINE_KIND, job: result.job });
     return json(202, { job: result.job, kind: SHAPE_REFINE_KIND, state: "queued", surfaces: result.surfaces, frames: result.frames });
+  }
+
+  /* A tree run asked for by hand: straight away, and over trees edited in Studio too - asking
+     again is the way to start them over. Writes nothing but the course's trees. */
+  if (trees) {
+    const map = await supabaseFetch(MAPS_TABLE + "?select=course_id&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []);
+    if (!Array.isArray(map) || !map.length) return json(404, { error: "no course_maps row for " + courseId, detail: "Trees are found along a map's fairways and greens. Map the course first." });
+    const result = await queueTreeRun(supabaseFetch, { courseId, requestedBy: actorKey, origin: new URL(req.url).origin, force: true, now: true });
+    if (result.deduped) return json(200, { deduped: true, kind: TREE_KIND, job: result.job });
+    return json(202, { job: result.job, kind: TREE_KIND, state: "queued" });
   }
 
   /* Remap: forget the geometry, keep the course.

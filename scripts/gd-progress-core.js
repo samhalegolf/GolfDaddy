@@ -73,6 +73,11 @@
       { stage: "reading-published-frames", from: 0, to: 12, label: "Reading published frames" },
       { stage: "refining-hole", from: 12, to: 100, label: "Re-tracing shapes" }
     ],
+    /* A tree run (functions/lib/gd-course-trees-core.mjs): one counted pass over the holes. */
+    find_trees: [
+      { stage: "reading-published-frames", from: 0, to: 5, label: "Reading published frames" },
+      { stage: "trees-hole", from: 5, to: 100, label: "Finding trees" }
+    ],
     /* The Watch bake's own stages, written by functions/course-watch-maps.mjs. Unlike the
        mapper kinds these are ours to choose, so they are already shaped as one long counted
        phase with thin bands either side - which is what the work actually looks like. */
@@ -253,6 +258,7 @@
   function jobLabel(jobKind) {
     if (jobKind === "collect_extra_objects") return "Collecting extra objects";
     if (jobKind === "refine_surface_shapes") return "Refining shapes";
+    if (jobKind === "find_trees") return "Finding trees";
     if (jobKind === "automap") return "Mapping";
     return "Working";
   }

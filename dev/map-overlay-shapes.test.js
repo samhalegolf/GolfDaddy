@@ -314,6 +314,18 @@ test("trees near play: no turf to learn from, or nothing tree-like in the band, 
   assert.strictEqual(bare.model, null, "the strip next to the fairway is plain rough");
 });
 
+test("a run's trees at every sensitivity: each level holds the stricter ones and adds to them", () => {
+  const crowns = [{ x: 40, y: 40, r: 10 }, { x: 120, y: 60, r: 9 }, { x: 70, y: 140, r: 11 }, { x: 160, y: 150, r: 10 }];
+  const image = treesImage(200, 200, crowns);
+  const finder = shapes.treeFinder(image, shapes.colourModel(shapes.circleSamples(image, crowns[0], 7, 1)), { radiusPx: 10 });
+  const nested = shapes.nestedTrees(finder);
+  assert.ok(nested.every(t => t.l >= 0 && t.l < shapes.TREE_FINDER_LEVELS.length), "every tree knows the strictest level that finds it");
+  const at = level => nested.filter(t => t.l <= level).length;
+  for (let l = 1; l < shapes.TREE_FINDER_LEVELS.length; l++) assert.ok(at(l) >= at(l - 1), "looser never finds fewer");
+  assert.ok(Math.abs(at(2) - finder.find(shapes.TREE_FINDER_LEVELS[2]).length) <= 1, "a level holds what the finder finds at it");
+  crowns.forEach(c => assert.ok(nested.some(t => Math.hypot(t.x - c.x, t.y - c.y) < 4), "the crown at " + c.x + "," + c.y));
+});
+
 test("tree heights: a canopy grid lines up with the picture, and gates the crowns", () => {
   /* A picture at zoom 18 whose top-left is world pixel (1000, 2000); a Web Mercator grid of
      4 x 4 one-metre cells starting exactly there, tall only in its top-left cell. */
