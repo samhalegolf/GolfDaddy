@@ -921,16 +921,20 @@
     var crop = new Uint8ClampedArray(w * h * 4);
     for (var y = 0; y < h; y++) crop.set(image.data.subarray(((y + y0) * W + x0) * 4, ((y + y0) * W + x1) * 4), y * w * 4);
     var field = colourField({ width: w, height: h, data: crop }, Math.max(1, Math.round(radius * 0.15)));
-    var n = w * h, dist = new Float32Array(n);
+    /* How far each pixel is from the crown colour, held to a twentieth of a spread in one
+       byte (255: too far for any level) - a course's worth of runs stays live for left and
+       right, and four bytes a pixel each would not. */
+    var n = w * h, dist = new Uint8Array(n);
     for (var i = 0; i < n; i++) {
-      dist[i] = inside && !inside[(Math.floor(i / w) + y0) * W + (i % w) + x0] ? Infinity : spreadDistance(field, i, model);
+      dist[i] = inside && !inside[(Math.floor(i / w) + y0) * W + (i % w) + x0] ? 255 : Math.min(255, Math.round(spreadDistance(field, i, model) * 20));
     }
     var avoid = (o.avoid || []).map(function (a) { return { x: a.x - x0, y: a.y - y0, r: a.r }; });
     var max = Math.max(1, Number(o.max) || TREE_FINDER_MAX);
 
     function find(level) {
       var crown = new Uint8Array(n);
-      for (var j = 0; j < n; j++) crown[j] = dist[j] <= level ? 1 : 0;
+      var cut = Math.min(254, Math.round(level * 20));
+      for (var j = 0; j < n; j++) crown[j] = dist[j] <= cut ? 1 : 0;
       return crownCentres(crown, w, h, radius, avoid, max).map(function (k) { return { x: k.x + x0, y: k.y + y0, r: k.r }; });
     }
     return { find: find };
