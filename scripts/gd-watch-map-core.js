@@ -156,7 +156,7 @@
       bunker: "#e9daae",
       water: "#2d69a2",
       trees: "#18361a",
-      waste: "#b1a47e",
+      waste: "#b8b09d",
       hazard: "#756533",
       tee: "#f4f4f2",
       outline: "rgba(8,18,8,0.35)"

@@ -37,14 +37,16 @@
   };
   /* Surfaces drawn by hand in the Studio overlay, with no measurement of their own: each takes
      its hue and chroma from the surface it is made of - trees from the course's rough (a wood
-     is the rough's own green, much darker), a waste area from its sand (sand, darker and
-     duller than a raked bunker), a hazard (gorse, scrub) from its sand too but far darker, a
-     brown-olive between rough and fairway - at a fixed lightness, so each reads apart. */
+     is the rough's own green, much darker), a hazard (gorse, scrub) from its sand but far
+     darker, a brown-olive between rough and fairway - at a fixed lightness, so each reads apart. */
   var DERIVED = {
     trees: { from: "rough", L: 0.30, chromaScale: 0.8 },
-    waste: { from: "bunker", L: 0.72, chromaScale: 0.9 },
     hazard: { from: "bunker", L: 0.51, chromaScale: 1.2 }
   };
+  /* A waste area has its own colour, not the bunker's: pale grey-beige, as unraked sand,
+     grit and dust look from the air (measured off aerial photos of waste areas), so it never
+     reads as one big bunker. Not tinted per course. */
+  var WASTE = { L: 0.76, C: 0.028, h: 88 };
   /* Never tinted: markers have to read the same everywhere. */
   var FIXED = { tee: "#f4f4f2", outline: "rgba(8,18,8,0.35)" };
   /* The smallest lightness step allowed between surfaces that sit next to each other. */
@@ -231,7 +233,7 @@
         bunker: roles.bunker.hex,
         water: roles.water.hex,
         trees: derivedHex("trees", roles),
-        waste: derivedHex("waste", roles),
+        waste: lchToHex(WASTE.L, WASTE.C, WASTE.h),
         hazard: derivedHex("hazard", roles),
         tee: FIXED.tee,
         outline: FIXED.outline
@@ -274,6 +276,7 @@
   return {
     ROLES: ROLES,
     DERIVED: DERIVED,
+    WASTE: WASTE,
     MIN_LIGHTNESS_GAP: MIN_LIGHTNESS_GAP,
     MIN_SAMPLES: MIN_SAMPLES,
     rgbToOklab: rgbToOklab,
