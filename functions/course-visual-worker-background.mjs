@@ -12,6 +12,7 @@
 
 import fs from "fs";
 import { wakeGarminBuild } from "./lib/gd-garmin-build-wake.mjs";
+import { queueTreeRun } from "./lib/gd-tree-queue.mjs";
 import path from "path";
 import { fileURLToPath } from "url";
 import sharp from "sharp";
@@ -1391,6 +1392,10 @@ export default async function courseVisualWorker(req) {
         let origin = "";
         try { origin = new URL(req.url).origin; } catch (e) { origin = ""; }
         await wakeGarminBuild(origin, job.course_id);
+        /* The course's second pass, now its frames are published: its trees, read off those
+           same frames (lib/gd-tree-queue.mjs). An automatic run leaves trees someone has
+           edited in Studio as they are. */
+        await queueTreeRun(supabaseFetch, { courseId: job.course_id, requestedBy: "auto-after-frames", origin }).catch(() => {});
       }
       /* Hybrid: fresh captures always get re-exported with the live recipe (or natural). */
       if (job.kind === "snapshot") await enqueueFollowUpExport(job.course_id).catch(() => {});

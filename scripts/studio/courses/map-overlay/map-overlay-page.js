@@ -62,6 +62,9 @@
   var CAPTURE_API = "/api/course-map-capture-date";
   /* Tree heights under a capture, for the tree finder near play (functions/course-map-canopy-height.mjs). */
   var CANOPY_API = "/api/course-map-canopy-height";
+  /* The course's tree layer (functions/course-trees.mjs): what a tree run found, edited here and
+     published to the watch. */
+  var TREES_API = "/api/course-trees";
   /* The model reads an image at ~1568px on its long side and answers in the pixels it saw,
      so the capture is scaled to that here and georeferenced AFTER scaling - the picture we
      describe is the picture it gets, to the pixel. */
@@ -583,7 +586,7 @@
       '<button type="button" data-gd-overlay="method-single" title="Click to drop one tree; up and down make it smaller or bigger (E again switches)">Tree</button>' +
       '<button type="button" data-gd-overlay="method-oval" title="Press and drag across a cluster of trees to stretch an oval over it - hold Shift for a circle (E again switches)">Cluster</button>' +
       '<button type="button" data-gd-overlay="method-find" title="Drag a box: trees in it that look like the ones you placed by hand this session are dropped as trees (E again switches)">Find trees</button>' +
-      '<button type="button" data-gd-overlay="method-auto" title="Trees along the edges of the fairways and greens already placed, found with nothing placed by hand first (E again switches)">Near play</button>' +
+      '<button type="button" data-gd-overlay="method-auto" title="Trees along the edges of the fairways and greens already placed, found with nothing placed by hand first - into the course tree layer, to publish from there (E again switches)">Near play</button>' +
       '<button type="button" data-gd-overlay="method-grow" title="Draw roughly round the waste area; it is pushed out to the edge of the ground it sits on (A again switches)">Draw + grow</button>' +
       '<button type="button" data-gd-overlay="method-colour" title="Press on it and drag - further selects more of the same colour. Shift-drag adds. Enter keeps it (press the tool key again to switch)">Colour wand</button>' +
       "</span>" +
@@ -605,6 +608,7 @@
       viewButton("undo", "undo", "Undo the last change (Ctrl+Z / ⌘Z)") +
       viewButton("fullscreen", "expand", "Full screen") +
       viewButton("google", "split", "Google satellite alongside, following this map") +
+      viewButton("trees", "trees", "Trees") +
       viewButton("fit", "course", "Fit the whole course (H)") +
       viewButton("zoom-shape", "search", "Zoom to the selected shape (Z)") +
       viewButton("zoom-in", "plus", "Zoom in (+)") +
@@ -615,6 +619,14 @@
       '<button type="button" data-gd-overlay="draft-finish" title="Finish the line (Enter, or double-click)">Finish</button>' +
       '<button type="button" data-gd-overlay="draft-undo" title="Take back the last point (Backspace)">Undo point</button>' +
       '<button type="button" data-gd-overlay="draft-cancel" title="Drop this line (Esc)">Cancel</button>' +
+      "</div>" +
+      '<div class="gdStudioOverlayDraftBar gdStudioOverlayTreeBar" data-gd-overlay="tree-bar" hidden>' +
+      '<span class="gdStudioOverlayTreeText" data-gd-overlay="tree-text"></span>' +
+      '<button type="button" data-gd-overlay="tree-less" title="Fewer trees - a stricter look (←)">Less</button>' +
+      '<button type="button" data-gd-overlay="tree-more" title="More trees - a looser look (→)">More</button>' +
+      '<button type="button" data-gd-overlay="tree-publish" title="Put these trees live on the watch">Publish tree changes</button>' +
+      '<button type="button" data-gd-overlay="tree-rerun" title="Find this course\'s trees again from its imagery">Run again</button>' +
+      '<button type="button" data-gd-overlay="tree-close" title="Stop editing trees (Esc)">Done</button>' +
       "</div>" +
       '<div class="gdStudioOverlayHint" data-gd-overlay="hint"></div>' +
       "</div>" +
@@ -629,7 +641,7 @@
       "</div>";
 
     var el = {};
-    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "undo", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "run", "status"].forEach(function (name) {
+    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -1153,33 +1165,21 @@
       finder.level = level;
       session.treeFinderLevel = level;
       var kept = [], room = roomFor("tree");
-      function take(t, run, byHeight) {
-        if (kept.length >= room) return;
-        var ll = run.cap.toLL(t), rM = t.r * run.cap.mpp;
-        if (kept.some(function (k) { return shapes.distanceM(k.ll, ll) < (k.rM + rM) * 0.75; })) return;
-        kept.push({ ll: ll, rM: rM, hole: run.hole, byHeight: byHeight });
-      }
-      finder.runs.forEach(function (run) { if (run.run) run.run.find(levels[level]).forEach(function (t) { take(t, run, false); }); });
-      finder.runs.forEach(function (run) { (run.byHeight || []).forEach(function (t) { take(t, run, true); }); });
+      finder.runs.forEach(function (run) {
+        run.run.find(levels[level]).forEach(function (t) {
+          if (kept.length >= room) return;
+          var ll = run.cap.toLL(t), rM = t.r * run.cap.mpp;
+          if (kept.some(function (k) { return shapes.distanceM(k.ll, ll) < (k.rM + rM) * 0.75; })) return;
+          kept.push({ ll: ll, rM: rM, hole: run.hole });
+        });
+      });
       finder.ids = kept.map(function (k) {
         return addFeature({ kind: "tree", points: shapes.treeAt(k.ll, k.rM), source: "finder", hole: k.hole }, true).id;
       });
       drawFeatures();
       changed();
       updateHint();
-      var said = "Found " + kept.length + " tree" + (kept.length === 1 ? "" : "s") + (finder.nearPlay ? " near play" : "") + " (sensitivity " + (level + 1) + " of " + levels.length + ")";
-      if (finder.nearPlay && kept.length) {
-        var byHole = {}, order = [], fromHeight = 0;
-        kept.forEach(function (k) {
-          var key = k.hole ? "hole " + k.hole : "unnumbered";
-          if (!byHole[key]) { byHole[key] = 0; order.push(key); }
-          byHole[key]++;
-          if (k.byHeight) fromHeight++;
-        });
-        said += " - " + order.map(function (key) { return key + ": " + byHole[key]; }).join(" · ");
-        if (fromHeight) said += " · " + fromHeight + " from height only";
-      }
-      setStatus(said + "." + (finder.note ? " " + finder.note : "") + " ← → fewer / more · Enter keeps them · Esc takes them away.");
+      setStatus("Found " + kept.length + " tree" + (kept.length === 1 ? "" : "s") + " (sensitivity " + (level + 1) + " of " + levels.length + "). ← → fewer / more · Enter keeps them · Esc takes them away.");
     }
 
     function stepFinder(by) {
@@ -1215,7 +1215,8 @@
        since a whole hole at the finder's detail would not fit in one. Where tree heights are to
        hand (CANOPY_API) and Heights is on, only what stands TREE_MIN_HEIGHT_M or more is kept,
        and trees the height map has that the colour missed (a bare winter crown) are added. What
-       it drops is live like the box finder's: left and right, Enter, Esc. */
+       it finds goes into the course's tree layer (below), for More / Less and Publish tree
+       changes - the same layer the server's tree run fills on its own. */
 
     var NEAR_PLAY_KINDS = ["fairway", "green"];
     /* Everything a tree near play keeps clear of. */
@@ -1321,10 +1322,13 @@
         for (var i = 0; i < tall.length; i++) tall[i] = heights.mask[i] && band[i] ? 1 : 0;
         byHeight = shapes.treesInMask(tall, w, h, { radiusPx: radiusPx, avoid: avoid });
       }
-      return {
-        cap: cap, hole: item.hole, byHeight: byHeight, why: heights.why,
-        run: auto.model ? shapes.treeFinder(cap.image, auto.model, { radiusPx: radiusPx, inside: auto.allow, avoid: avoid }) : null
-      };
+      var finder = auto.model ? shapes.treeFinder(cap.image, auto.model, { radiusPx: radiusPx, inside: auto.allow, avoid: avoid }) : null;
+      /* Every sensitivity at once (shapes.nestedTrees), so More / Less in the tree layer need
+         nothing read again, as lat/lng: the picture can go. */
+      function toTree(t, l, fromHeight) { var ll = cap.toLL(t); return { lat: ll.lat, lng: ll.lng, r: t.r * cap.mpp, l: l, h: fromHeight ? 1 : 0 }; }
+      var found = (finder ? shapes.nestedTrees(finder) : []).map(function (t) { return toTree(t, t.l, false); })
+        .concat(byHeight.map(function (t) { return toTree(t, 0, true); }));
+      return { cap: cap, w: w, h: h, band: band, hole: item.hole, trees: found, why: heights.why };
     }
 
     function runNearPlay() {
@@ -1332,10 +1336,9 @@
       if (wandsRunning) return;
       var items = nearPlayShapes();
       if (!items.length) { setStatus("No fairways or greens " + (session.hole ? "on hole " + session.hole + " " : "") + "to look along yet - place them first.", true); return; }
-      if (full("tree")) return;
       settle(true);
       var id = session.loadedFor, bandM = session.treeBandM || shapes.TREE_BAND_M;
-      var runs = [], failed = 0, notes = {}, level = shapes.TREE_FINDER_LEVELS[session.treeFinderLevel] || shapes.TREE_FINDER_LEVELS[2];
+      var runs = [], failed = 0, notes = {}, level = treeLevel(session.treeFinderLevel);
       wandsRunning++;
       updateHint();
       renderTreeAuto();
@@ -1369,7 +1372,7 @@
           }).then(function (run) {
             runs.push(run);
             if (run.why) notes[run.why] = true;
-            var n = (run.run ? run.run.find(level).length : 0) + run.byHeight.length;
+            var n = run.trees.filter(function (t) { return t.h || t.l <= level; }).length;
             setStatus((item.hole ? "Hole " + item.hole : "Unnumbered") + " " + item.kind + ": " + n + " tree" + (n === 1 ? "" : "s") + (k + 1 < items.length ? " · looking at the next…" : "."));
           }, function (error) {
             failed++;
@@ -1386,10 +1389,192 @@
         var said = Object.keys(notes);
         var note = (failed ? failed + " of " + items.length + " could not be read" + (said.length ? " (" + said.join("; ") + ")" : "") + "." : said.length ? "(" + said.join("; ") + ")" : "");
         if (!runs.length) { setStatus("The tree finder could not run" + (said.length ? ": " + said.join("; ") : "") + ".", true); return; }
-        settle(true);
-        finder = { ids: [], runs: runs, nearPlay: true, note: note };
-        dropFinderTrees(session.treeFinderLevel);
-        if (!finder.ids.length) setStatus("No trees found near play. → looks harder" + (note ? " · " + note : "") + ".");
+        /* Into the course's tree layer: what was found here replaces whatever the layer had on
+           the ground just looked at, and the rest of the course keeps its trees. */
+        function looked(t) {
+          return runs.some(function (run) {
+            var p = run.cap.toPx(t), x = Math.floor(p.x), y = Math.floor(p.y);
+            return x >= 0 && y >= 0 && x < run.w && y < run.h && run.band[y * run.w + x];
+          });
+        }
+        var base = treeEdit ? treeEdit.all.filter(function (t) { return !t.gone; }) : trees.row ? unpackTrees(trees.row.trees) : [];
+        var found = mergeTrees([].concat.apply([], runs.map(function (run) { return run.trees; })));
+        var kept = base.filter(function (t) { return !looked(t); });
+        var live = found.filter(function (t) { return t.h || t.l <= level; }).length;
+        openTreeEdit(kept.concat(found), session.treeFinderLevel, true,
+          "Found " + live + " tree" + (live === 1 ? "" : "s") + " near play" + (note ? " " + note : "") + ". More / Less (← →), click a tree to drop it, then Publish tree changes to put them on the watch.");
+      });
+    }
+
+    /* ---- the course's trees ----
+       A course's trees are their own layer (functions/lib/gd-course-trees-core.mjs), not
+       shapes in the overlay: found by a tree run on the server after the course's first
+       publish (or by Near play here), stored with every sensitivity at once, live on the watch
+       at the layer's level. The Trees button says where that stands - none yet, being found,
+       or done - and opens the layer for editing: More / Less move the level, a click drops a
+       tree (and a second click keeps it), and Publish tree changes puts it live. */
+    var trees = { id: "", row: null, job: null, timer: null };
+    var treeEdit = null;
+    var treeRenderer = null;
+    var TREE_LEVELS = shapes.TREE_FINDER_LEVELS.length;
+
+    function treeLevel(level) { return Math.max(0, Math.min(TREE_LEVELS - 1, Math.round(Number(level)) || 0)); }
+    function unpackTrees(packed) {
+      return (Array.isArray(packed) ? packed : []).filter(function (a) { return Array.isArray(a) && a.length >= 4 && Number(a[2]) > 0; })
+        .map(function (a) { return { lat: Number(a[0]), lng: Number(a[1]), r: Number(a[2]), l: Number(a[3]) | 0, h: a[4] ? 1 : 0 }; });
+    }
+    function packTrees(list) { return list.map(function (t) { return [t.lat, t.lng, Math.round(t.r * 10) / 10, t.l, t.h ? 1 : 0]; }); }
+    function liveTree(t, level) { return !t.gone && (t.h || t.l <= level); }
+    /* Trees found on overlapping pictures as one each - the one found at the stricter level. */
+    function mergeTrees(list) {
+      var out = [];
+      list.slice().sort(function (a, b) { return a.l - b.l; }).forEach(function (t) {
+        if (!out.some(function (k) { return shapes.distanceM(k, t) < (k.r + t.r) * 0.75; })) out.push(t);
+      });
+      return out;
+    }
+    function treesRunning() { return !!(trees.job && (trees.job.status === "queued" || trees.job.status === "running")); }
+
+    function loadTrees(id) {
+      if (trees.timer) { clearTimeout(trees.timer); trees.timer = null; }
+      if (trees.id !== id) { closeTreeEdit(true); trees = { id: id, row: null, job: null, timer: null }; renderTreesButton(); }
+      if (!id) return;
+      api("GET", "?courseId=" + encodeURIComponent(id), null, TREES_API).then(function (data) {
+        if (destroyed || trees.id !== id) return;
+        var wasRunning = treesRunning();
+        trees.row = (data && data.row) || null;
+        trees.job = (data && data.job) || null;
+        renderTreesButton();
+        if (treesRunning()) trees.timer = setTimeout(function () { loadTrees(id); }, 5000);
+        else if (wasRunning) {
+          if (trees.job && trees.job.status === "failed") setStatus("The tree run failed: " + (trees.job.error || "no reason given") + ".", true);
+          else if (trees.row) setStatus("Trees found: " + unpackTrees(trees.row.trees).filter(function (t) { return liveTree(t, trees.row.level); }).length + " live on the watch. Click the tree button to make more or fewer.");
+        }
+      }).catch(function () { if (!destroyed && trees.id === id) renderTreesButton(); });
+    }
+
+    function renderTreesButton() {
+      var b = el.trees;
+      if (destroyed || !b) return;
+      var running = treesRunning(), row = trees.row;
+      b.classList.toggle("isTreesDone", !!row && !running);
+      b.classList.toggle("isTreesBusy", running);
+      b.classList.toggle("isActive", !!treeEdit);
+      var stage = running && trees.job.stage ? /trees-hole-(\d+)-of-(\d+)/.exec(trees.job.stage) : null;
+      var live = row ? unpackTrees(row.trees).filter(function (t) { return liveTree(t, row.level); }).length : 0;
+      var title = !trees.id ? "Trees" : running ? "Finding this course's trees" + (stage ? " - hole " + stage[1] + " of " + stage[2] : "") + "…"
+        : row ? live + " trees live on the watch (" + (row.status === "edited" ? "published from here" : "found automatically") + ")" + (row.publishedAt ? ", " + new Date(row.publishedAt).toLocaleString() : "") + " - click to make more or fewer, drop any, and publish"
+        : "No trees yet - click to find them along the fairways and greens";
+      b.title = title;
+      b.setAttribute("aria-label", title);
+    }
+
+    function onTreesButton() {
+      if (!session.loadedFor || !canEdit()) return;
+      if (treeEdit) { closeTreeEdit(false); return; }
+      if (treesRunning()) { setStatus(el.trees.title); return; }
+      if (trees.row) { openTreeEdit(unpackTrees(trees.row.trees), trees.row.level, false, ""); return; }
+      runTrees("Find the trees along this course's fairways and greens now?\n\nThey are read off its own frames, or Esri where it has none, and go live on the watch when found.");
+    }
+
+    function runTrees(question) {
+      var id = trees.id;
+      if (!id || !window.confirm(question)) return;
+      accessToken().then(function (token) {
+        return fetch(JOBS_API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + token },
+          body: JSON.stringify({ courseId: id, kind: "find_trees" })
+        });
+      }).then(function (res) {
+        return res.json().catch(function () { return null; }).then(function (data) {
+          if (!res.ok) throw new Error((data && (data.detail || data.error)) || ("HTTP " + res.status));
+          if (destroyed || trees.id !== id) return;
+          closeTreeEdit(true);
+          trees.job = { status: "queued" };
+          renderTreesButton();
+          setStatus(data && data.deduped ? "A tree run is already going for this course." : "Finding this course's trees - the tree button shows when they are done.");
+          trees.timer = setTimeout(function () { loadTrees(id); }, 4000);
+        });
+      }).catch(function (error) {
+        if (!destroyed) setStatus("Could not start the tree run: " + (error && error.message || error), true);
+      });
+    }
+
+    function openTreeEdit(list, level, dirty, said) {
+      settle(true);
+      if (treeEdit) treeEdit.layer.remove();
+      if (!treeRenderer) treeRenderer = L.canvas({ padding: 0.5 });
+      treeEdit = { all: list.map(function (t) { return { lat: t.lat, lng: t.lng, r: t.r, l: t.l, h: t.h, gone: false }; }), level: treeLevel(level), dirty: !!dirty, layer: L.layerGroup().addTo(mapObj) };
+      drawTreeEdit();
+      renderTreesButton();
+      updateHint();
+      setStatus(said || treeEditText() + ". More / Less (← →), click a tree to drop it, then Publish tree changes.");
+    }
+
+    function closeTreeEdit(silent) {
+      if (!treeEdit) return true;
+      if (!silent && treeEdit.dirty && !window.confirm("Drop the tree changes you have not published?")) return false;
+      treeEdit.layer.remove();
+      treeEdit = null;
+      if (!destroyed) { el["tree-bar"].hidden = true; renderTreesButton(); updateHint(); }
+      return true;
+    }
+
+    function treeEditText() {
+      var live = treeEdit.all.filter(function (t) { return liveTree(t, treeEdit.level); }).length;
+      var dropped = treeEdit.all.filter(function (t) { return t.gone; }).length;
+      return live + " tree" + (live === 1 ? "" : "s") + (dropped ? " (" + dropped + " dropped)" : "") + " · sensitivity " + (treeEdit.level + 1) + " of " + TREE_LEVELS + (treeEdit.dirty ? " · not published" : "");
+    }
+
+    function drawTreeEdit() {
+      treeEdit.layer.clearLayers();
+      treeEdit.all.forEach(function (t) {
+        if (!t.gone && !liveTree(t, treeEdit.level)) return;
+        var circle = L.circle([t.lat, t.lng], t.gone
+          ? { renderer: treeRenderer, radius: t.r, color: "#ff6a6a", weight: 1, dashArray: "3 3", fillOpacity: 0, interactive: true }
+          : { renderer: treeRenderer, radius: t.r, color: "#7dff9a", weight: 1.5, fillColor: "#1f8a3c", fillOpacity: 0.45, interactive: true });
+        circle.on("click", function (e) {
+          if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
+          t.gone = !t.gone;
+          treeEdit.dirty = true;
+          drawTreeEdit();
+        });
+        treeEdit.layer.addLayer(circle);
+      });
+      el["tree-bar"].hidden = false;
+      el["tree-text"].textContent = treeEditText();
+      el["tree-less"].disabled = treeEdit.level <= 0;
+      el["tree-more"].disabled = treeEdit.level >= TREE_LEVELS - 1;
+      el["tree-publish"].disabled = !treeEdit.dirty;
+    }
+
+    function stepTreeLevel(by) {
+      var next = treeLevel(treeEdit.level + by);
+      if (next === treeEdit.level) { setStatus(by < 0 ? "That is as strict as the finder goes." : "That is as loose as the finder goes."); return; }
+      treeEdit.level = next;
+      session.treeFinderLevel = next;
+      treeEdit.dirty = true;
+      drawTreeEdit();
+      remember();
+    }
+
+    function publishTrees() {
+      if (!treeEdit || !treeEdit.dirty) return;
+      var id = trees.id, keep = treeEdit.all.filter(function (t) { return !t.gone; }), level = treeEdit.level;
+      el["tree-publish"].disabled = true;
+      setStatus("Publishing the trees…");
+      api("POST", "", { courseId: id, action: "publish", trees: packTrees(keep), level: level }, TREES_API).then(function (data) {
+        if (destroyed || trees.id !== id) return;
+        trees.row = (data && data.row) || trees.row;
+        if (treeEdit) { treeEdit.all = keep; treeEdit.dirty = false; drawTreeEdit(); }
+        renderTreesButton();
+        var live = keep.filter(function (t) { return t.h || t.l <= level; }).length;
+        setStatus("Published " + live + " tree" + (live === 1 ? "" : "s") + ". The Garmin map rebuilds with them by itself; Apple Watch maps take them on their next Generate.");
+      }).catch(function (error) {
+        if (destroyed) return;
+        if (treeEdit) el["tree-publish"].disabled = false;
+        setStatus("The trees did not publish: " + (error && error.message || error), true);
       });
     }
 
@@ -1821,11 +2006,21 @@
        trees the finder just dropped, or the colour wand's pick - ahead of the map's own
        arrow-key panning, hence the capture phase. */
     function onAdjustKey(event) {
-      if (!(adjust || finder || colourSel || selectedId) || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (!(adjust || finder || colourSel || selectedId || treeEdit) || event.metaKey || event.ctrlKey || event.altKey) return;
       var target = event.target;
       if (target && /^(input|textarea|select)$/i.test(target.tagName)) return;
       if (!containerEl.isConnected || !canEdit() || drag) return;
       var key = event.key;
+      /* The tree layer, open for editing, has the arrows to itself. */
+      if (treeEdit && !adjust && !finder && !colourSel) {
+        if (key === "ArrowLeft") stepTreeLevel(-1);
+        else if (key === "ArrowRight") stepTreeLevel(1);
+        else if (key === "Escape") closeTreeEdit(false);
+        else return;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (finder || colourSel) {
         var live = finder ? { step: stepFinder, keep: function () { keepFinder(false); }, drop: discardFinder }
           : { step: stepColourTolerance, keep: keepColourSel, drop: function () { clearColourSel(); setStatus("Colour pick dropped."); } };
@@ -3905,6 +4100,7 @@
       if (held && !held.pin && RESHAPE[held.kind] && !adjusted()) text = "↑ ↓ " + (held.kind === "fairway" ? "smooth the edge, then " : "") + "smaller / bigger · " + text;
       if (adjusted()) text = adjustHint();
       if (finder) text = "← → fewer / more trees · Enter keeps them · Esc takes them away";
+      else if (treeEdit && !adjusted()) text = "Trees: click one to drop it (again to keep it) · ← → fewer / more · Publish tree changes puts them on the watch · Esc closes";
       if (wandsRunning) text = "Working… · " + text;
       el.hint.textContent = text;
       renderCollar();
@@ -4047,6 +4243,7 @@
     function loadOverlay(course) {
       var id = courseIdOf(course);
       if (!id) { setStatus("This course has no id to store an overlay under.", true); return; }
+      loadTrees(id);
       busy = true; updateActions();
       setStatus("Loading overlay and OSM features…");
       api("GET", "?courseId=" + encodeURIComponent(id) + "&osm=1").then(function (data) {
@@ -4594,6 +4791,7 @@
         drawFeatures();
         updateActions();
         updateHint();
+        loadTrees(id);
         if (session.dirty && !session.saving) scheduleSave(SAVE_DELAY_MS);
         return;
       }
@@ -4932,6 +5130,15 @@
     el.map.addEventListener("pointerdown", onMapPress);
     el.hole.addEventListener("change", holeFieldChanged);
     el["tree-auto"].addEventListener("click", runNearPlay);
+    el.trees.addEventListener("click", onTreesButton);
+    el["tree-less"].addEventListener("click", function () { if (treeEdit) stepTreeLevel(-1); });
+    el["tree-more"].addEventListener("click", function () { if (treeEdit) stepTreeLevel(1); });
+    el["tree-publish"].addEventListener("click", publishTrees);
+    el["tree-close"].addEventListener("click", function () { closeTreeEdit(false); });
+    el["tree-rerun"].addEventListener("click", function () {
+      runTrees("Find this course's trees again from its imagery?\n\nThe new run replaces these trees, edits included, and goes live on the watch when it finishes.");
+    });
+    renderTreesButton();
     el["tree-band"].addEventListener("change", function () {
       var b = num(el["tree-band"].value);
       session.treeBandM = b && b >= TREE_BAND_MIN_M && b <= TREE_BAND_MAX_M ? Math.round(b) : shapes.TREE_BAND_M;
@@ -5028,6 +5235,7 @@
       flushSave();
       destroyed = true;
       if (scanTimer) clearTimeout(scanTimer);
+      if (trees.timer) clearTimeout(trees.timer);
       if (saveTimer) clearTimeout(saveTimer);
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("keydown", onAdjustKey, true);

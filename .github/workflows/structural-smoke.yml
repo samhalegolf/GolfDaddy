@@ -130,6 +130,8 @@ jobs:
           node dev/studio-map-overlay.test.js
           node dev/map-overlay-shapes.test.js
           node dev/canopy-height.test.mjs
+          node dev/course-trees-core.test.mjs
+          node dev/course-trees-job.test.js
           node dev/green-shape-core-smoke.test.js
           node dev/course-package.test.js
           node dev/course-package-trigger.test.js

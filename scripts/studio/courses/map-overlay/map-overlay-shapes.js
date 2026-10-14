@@ -940,6 +940,22 @@
     return { find: find };
   }
 
+  /* A finder's trees at every sensitivity at once, each tagged with the strictest level that
+     finds it (l, an index into levels): strictest first, and a looser level only adds the trees
+     that do not overlap one already found. So the trees at a level are exactly those with
+     l <= level - a nested set More and Less step through with nothing read again, which is
+     what lets a run be stored and still be made more or less of later. */
+  function nestedTrees(finder, levels) {
+    var out = [];
+    (levels || TREE_FINDER_LEVELS).forEach(function (level, l) {
+      finder.find(level).forEach(function (t) {
+        var clash = out.some(function (k) { return Math.hypot(k.x - t.x, k.y - t.y) < (k.r + t.r) * 0.75; });
+        if (!clash) out.push({ x: t.x, y: t.y, r: t.r, l: l });
+      });
+    });
+    return out;
+  }
+
   /* The middles of the crowns in a 0/1 mask the size of a picture - trees found from their
      height alone, with no colour to go on. Same answer as one find of the tree finder. */
   function treesInMask(mask, w, h, opts) {
@@ -969,9 +985,11 @@
      how far into the green half a pixel's colour must be to count as green. */
   var TREE_DARK_MARGIN = 10;
   var TREE_GREEN_MIN = 3;
-  /* A crown's texture (autoTreeModel), at least this, and at least this many times the turf's. */
-  var TREE_TEXTURE_FLOOR = 2;
-  var TREE_TEXTURE_OVER_TURF = 2;
+  /* A crown's texture (autoTreeModel): a pixel is busy past this many times turf's own detail
+     (and never under the floor), and a crown is busy over at least this share of it. */
+  var TREE_DETAIL_FLOOR = 1.5;
+  var TREE_DETAIL_OVER_TURF = 2;
+  var TREE_BUSY_SHARE = 0.45;
   /* The colour model reads at most this many pixels of turf and of crown, evenly spread. */
   var TREE_SAMPLE_PIXELS = 20000;
 
@@ -1020,14 +1038,19 @@
     if (turfAt.length < 20) return { model: null, reason: "no-turf" };
     var field = colourField(image, Math.max(1, Math.round(radius * 0.15)));
     var turfModel = colourModel(fieldSamples(field, turfAt));
-    /* Texture: how far each pixel's brightness is from its close neighbours', averaged over
-       about half a crown. Leaves and the shade between them do that everywhere across a crown;
-       the edge between a dark patch and the rough does it along one line only, so a smooth
-       dark patch does not read as textured just for having an edge. */
+    /* Texture: how much of the ground round a pixel - about half a crown - is busy, a busy
+       pixel being one whose brightness stands off its close neighbours' by more than turf's
+       ever does. Leaves and the shade between them make a crown busy all over; the edge of a
+       dark patch against the rough is busy along one line, a thin share of any window, so a
+       smooth dark patch does not read as textured for having an edge - even once a resized
+       frame has smeared that edge over a few pixels. */
     var L = colourField(image, 0).L, near = boxBlur(L, w, h, 1), detail = new Float32Array(n);
     for (i = 0; i < n; i++) detail[i] = Math.abs(L[i] - near[i]);
-    var tex = boxBlur(detail, w, h, Math.max(2, Math.round(radius * 0.4)));
-    var texMin = Math.max(TREE_TEXTURE_FLOOR, TREE_TEXTURE_OVER_TURF * median(turfAt.map(function (k) { return tex[k]; })));
+    var busyOver = Math.max(TREE_DETAIL_FLOOR, TREE_DETAIL_OVER_TURF * median(turfAt.map(function (k) { return detail[k]; })));
+    var busy = new Float32Array(n);
+    for (i = 0; i < n; i++) busy[i] = detail[i] > busyOver ? 1 : 0;
+    var tex = boxBlur(busy, w, h, Math.max(2, Math.round(radius * 0.4)));
+    var texMin = TREE_BUSY_SHARE;
     var darkBelow = turfModel.mL - Math.max(TREE_DARK_MARGIN, turfModel.dL);
     var allow = new Uint8Array(n);
     for (i = 0; i < n; i++) {
@@ -1492,7 +1515,7 @@
     growFromLine: growFromLine, traceLargestLoop: traceLargestLoop, LINE_WAND_LEVELS: LINE_WAND_LEVELS,
     TREE_RADIUS_M: TREE_RADIUS_M, treeAt: treeAt, ellipseInBox: ellipseInBox, ringRadiusM: ringRadiusM,
     growFromArea: growFromArea, colourField: colourField, colourModel: colourModel, circleSamples: circleSamples,
-    treeFinder: treeFinder, TREE_FINDER_LEVELS: TREE_FINDER_LEVELS, TREE_FINDER_MAX: TREE_FINDER_MAX, treesInMask: treesInMask,
+    treeFinder: treeFinder, TREE_FINDER_LEVELS: TREE_FINDER_LEVELS, TREE_FINDER_MAX: TREE_FINDER_MAX, treesInMask: treesInMask, nestedTrees: nestedTrees,
     TREE_BAND_M: TREE_BAND_M, TREE_CLEAR_M: TREE_CLEAR_M, TREE_AUTO_RADIUS_M: TREE_AUTO_RADIUS_M, TREE_MIN_HEIGHT_M: TREE_MIN_HEIGHT_M,
     ringsMask: ringsMask, playBand: playBand, autoTreeModel: autoTreeModel, heightMask: heightMask,
     floodSelect: floodSelect, maskOutline: maskOutline,

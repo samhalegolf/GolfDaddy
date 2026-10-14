@@ -33,8 +33,10 @@
    bake (or a hole whose relief there failed) simply ships its Watch map flat, exactly as every
    hole did before this existed. See generateWatchPackage's terrain step.
 
-   And one more: the course's Studio overlay (course_map_overlays, the facility's when the
-   course shares one), for its single trees only - see overlaySingleTrees. Read, never written. */
+   And two more, both for trees only and both read, never written: the course's Studio overlay
+   (course_map_overlays, the facility's when the course shares one) for the trees placed by
+   hand, and its tree layer (course_trees) for the ones a tree run found - see
+   courseSingleTrees. */
 
 import sharp from "sharp";
 import watchMapCore from "../scripts/gd-watch-map-core.js";
@@ -50,6 +52,7 @@ import { sampleCourseSeasons, seasonsAreFresh } from "./lib/gd-sentinel-seasons.
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
+import { liveTrees, TREES_TABLE } from "./lib/gd-course-trees-core.mjs";
 import { wakeGarminBuild } from "./lib/gd-garmin-build-wake.mjs";
 const MAPS_TABLE = "course_maps";
 const OVERLAYS_TABLE = "course_map_overlays";
@@ -573,20 +576,31 @@ function paletteRecord(colours) {
   };
 }
 
-/* The single trees placed in the course's Studio overlay - by hand, or by the tree finder -
-   which the bake stamps where they really stand (watch-map-core buildHoleTrees). They are not
-   in course_maps: a tree-lined course holds thousands, nothing but the watch reads them, and
-   the course objects are synced whole to every phone and Studio. All of them go to every hole;
-   each hole keeps the ones on its own picture. Best-effort: with none, or no overlay to read,
-   the woods are made up as before. */
-async function overlaySingleTrees(courseId) {
-  try {
-    const ownerId = await overlayOwnerId(supabaseFetch, courseId);
-    const rows = await supabaseFetch(OVERLAYS_TABLE + "?select=features&course_id=eq." + encodeURIComponent(ownerId) + "&limit=1");
-    return watchMapCore.singleTreesFromOverlay(Array.isArray(rows) && rows[0] ? rows[0].features : []);
-  } catch (error) {
-    return [];
-  }
+/* The trees the bake stamps where they really stand (watch-map-core buildHoleTrees): the ones
+   placed by hand in the course's Studio overlay, and the ones its tree run found that are live
+   at its tree layer's level (lib/gd-course-trees-core.mjs). Neither is in course_maps: a
+   tree-lined course holds thousands, nothing but the watch reads them, and the course objects
+   are synced whole to every phone and Studio. All of them go to every hole; each hole keeps
+   the ones on its own picture, and one standing on another is stamped once. Best-effort: with
+   none, or nothing to read, the woods are made up as before. */
+async function courseSingleTrees(courseId) {
+  const [placed, found] = await Promise.all([
+    overlayOwnerId(supabaseFetch, courseId)
+      .then(ownerId => supabaseFetch(OVERLAYS_TABLE + "?select=features&course_id=eq." + encodeURIComponent(ownerId) + "&limit=1"))
+      .then(rows => watchMapCore.singleTreesFromOverlay(Array.isArray(rows) && rows[0] ? rows[0].features : []))
+      .catch(() => []),
+    supabaseFetch(TREES_TABLE + "?select=trees,level&course_id=eq." + encodeURIComponent(courseId) + "&limit=1")
+      .then(rows => liveTrees(Array.isArray(rows) ? rows[0] : null).map(t => ({ lat: t.lat, lng: t.lng, r: t.r })))
+      .catch(() => [])
+  ]);
+  return placed.concat(found);
+}
+
+/* When the course's tree layer was last published, or null - a Garmin package built before
+   it is behind. */
+async function treesPublishedAt(courseId) {
+  const rows = await supabaseFetch(TREES_TABLE + "?select=published_at&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => null);
+  return Array.isArray(rows) && rows[0] ? rows[0].published_at || null : null;
 }
 
 async function generateWatchPackage({ courseId, map, actorEmail }) {
@@ -605,7 +619,7 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
   try { colours = await courseColours(courseId, map, holeNumbers, terrainIndex); }
   catch (error) { colours = { palette: paletteCore.basePalette(), measured: null, aerial: null, seasonal: null }; }
   const recipe = Object.assign({}, watchMapCore.WATCH_MAP_RECIPE_V1, { colors: colours.palette.colors });
-  const singleTrees = await overlaySingleTrees(courseId);
+  const singleTrees = await courseSingleTrees(courseId);
 
   let holeIndex = 0;
   for (const holeNumber of holeNumbers) {
@@ -775,7 +789,7 @@ const PUBLISHED_MAP_COLUMNS = "course_id,objects_json,holes_json,objects_revisio
 /* Is the stored package still a true copy of the course? Pass terrainGeneratedAt as
    undefined to skip the terrain check - the phone's GET does, to avoid a storage read per
    request; the builder always checks it. */
-function garminPackageCurrent(row, map, terrainGeneratedAt) {
+function garminPackageCurrent(row, map, terrainGeneratedAt, treesAt) {
   if (!row || !map || !(Number(row.garmin_package_version) > 0)) return false;
   if (Number(row.builder_version) !== GARMIN_BUILDER_VERSION) return false;
   const revision = map.objects_revision == null ? null : Number(map.objects_revision);
@@ -785,6 +799,8 @@ function garminPackageCurrent(row, map, terrainGeneratedAt) {
     return false;
   }
   if (terrainGeneratedAt !== undefined && String(row.terrain_generated_at || "") !== String(terrainGeneratedAt || "")) return false;
+  /* Trees published after it was built: the builder asks (treesAt), the phone's GET does not. */
+  if (treesAt && !(Date.parse(row.generated_at) >= Date.parse(treesAt))) return false;
   return true;
 }
 
@@ -794,7 +810,7 @@ async function generateGarminPackage({ courseId, map, terrainIndex }) {
   try { colours = await courseColours(courseId, map, holeNumbers, terrainIndex); }
   catch (error) { colours = { palette: paletteCore.basePalette() }; }
   const recipe = Object.assign({}, watchMapCore.WATCH_MAP_RECIPE_V1, { colors: colours.palette.colors });
-  const singleTrees = await overlaySingleTrees(courseId);
+  const singleTrees = await courseSingleTrees(courseId);
 
   const holes = [];
   const errors = [];
@@ -869,7 +885,7 @@ async function buildGarminPackageIfStale(courseId, nowMs) {
   const since = Date.parse(row && row.building_since);
   if (Number.isFinite(since) && now - since < GARMIN_BUILD_LOCK_MS) return { built: false, reason: "already-building" };
   const terrainIndex = await loadTerrainIndex(courseId);
-  if (garminPackageCurrent(row, map, terrainIndex ? terrainIndex.generatedAt || null : null)) return { built: false, reason: "current" };
+  if (garminPackageCurrent(row, map, terrainIndex ? terrainIndex.generatedAt || null : null, await treesPublishedAt(courseId))) return { built: false, reason: "current" };
 
   await saveGarminRow({ id: courseId, course_id: courseId, building_since: new Date(now).toISOString() });
   try {
