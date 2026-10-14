@@ -14,7 +14,8 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { imageGeoreference, aiShapesToOverlay } from "./lib/gd-overlay-georef-core.mjs";
-import { buildScanPrompt, parseScanAnswer, scanJob, AI_SCAN_OUTPUT_SCHEMA } from "./lib/gd-ai-scan-core.mjs";
+import { buildScanPrompt, parseScanAnswer, scanJob, resolveTask, AI_SCAN_OUTPUT_SCHEMA } from "./lib/gd-ai-scan-core.mjs";
+import { storedTask } from "./lib/gd-ai-scan-prompts-store.mjs";
 import { scorecardCourseKey } from "./lib/gd-scorecard-resolve.mjs";
 import { hasSupabase, slug, loadCourse, loadOverlay, loadScorecard, saveOverlay, writeAiScan, json } from "./lib/gd-map-overlay-store.mjs";
 
@@ -83,7 +84,8 @@ async function runScan(courseId) {
   const base = {
     dryRun: request.dryRun === true, provenance: request.provenance || null,
     requestedAt: request.requestedAt, requestedBy: request.requestedBy, georef: request.georef,
-    grid: request.grid || 0, anchors: Array.isArray(request.anchors) ? request.anchors : [], notes: request.notes || ""
+    grid: request.grid || 0, anchors: Array.isArray(request.anchors) ? request.anchors : [], notes: request.notes || "",
+    task: request.task || null
   };
   await writeAiScan(courseId, Object.assign({}, base, { status: "running", startedAt: new Date().toISOString(), image: request.image }));
 
@@ -103,8 +105,13 @@ async function runScan(courseId) {
     const scorecard = await loadScorecard(course.name, scorecardCourseKey);
     const shapes = recordedShapes(request.anchors, saved.features, georef);
     const job = scanJob(shapes);
+    /* The task: what the request carried (Studio's panel as it was), else the operator's saved
+       words for the task that fits the view, else the defaults. What ran goes on the row. */
+    const requested = request.task && request.task.id ? request.task : null;
+    const task = resolveTask(requested, shapes, requested && requested.prompt != null ? null : await storedTask(requested ? requested.id : null, shapes));
+    base.task = { id: task.id, label: task.label, output: task.output, prompt: task.prompt };
     const courseMap = saved.courseMap && saved.courseMap.data ? saved.courseMap : null;
-    const prompt = buildScanPrompt({ course, scorecard, georef, notes: request.notes, anchors: request.anchors, grid: request.grid, courseMap: !!courseMap, shapes });
+    const prompt = buildScanPrompt({ course, scorecard, georef, notes: request.notes, anchors: request.anchors, grid: request.grid, courseMap: !!courseMap, shapes, task });
 
     const answer = await callModel({ image: request.image, prompt, courseMap });
     if (answer.stopReason === "refusal") {
@@ -113,7 +120,7 @@ async function runScan(courseId) {
     if (answer.stopReason === "max_tokens") {
       return await finish({ status: "failed", error: "the answer was cut off at max_tokens - capture a smaller view", model: answer.model, usage: answer.usage });
     }
-    const parsed = parseScanAnswer(answer.text, shapes);
+    const parsed = parseScanAnswer(answer.text, shapes, task);
     if (parsed.error) return await finish({ status: "failed", job, error: parsed.error, model: answer.model, usage: answer.usage, raw: answer.text.slice(0, 2000) });
 
     const converted = aiShapesToOverlay(parsed.features, georef);
@@ -124,10 +131,11 @@ async function runScan(courseId) {
     /* A dry run stops here: the shapes go on the outcome for Studio to draw over the picture
        they came from, and the overlay is not touched. */
     if (base.dryRun) {
-      const counts = { features: converted.features.length, fairways: 0, greens: 0, tees: 0, bunkers: 0, holeLines: 0 };
+      const counts = { features: converted.features.length, fairways: 0, greens: 0, tees: 0, bunkers: 0, holeLines: 0, pins: 0 };
       converted.features.forEach(f => {
         const key = f.kind === "hole" ? "holeLines" : f.kind + "s";
         if (key in counts) counts[key] += 1;
+        if (f.pin) counts.pins += 1;
       });
       return await finish({
         status: "done", job, replaced: 0, added: 0,

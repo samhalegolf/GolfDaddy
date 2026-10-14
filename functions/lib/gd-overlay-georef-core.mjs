@@ -29,7 +29,7 @@
  */
 
 import { projectPoint, unprojectPoint } from "./gd-visual-plan-core.mjs";
-import { normalizeOverlayFeatures, OVERLAY_KINDS, overlayKindIsPolygon } from "./gd-map-overlay-core.mjs";
+import { normalizeOverlayFeatures, OVERLAY_KINDS, OVERLAY_PIN_POINTS, overlayKindIsPolygon } from "./gd-map-overlay-core.mjs";
 
 export const AI_OVERLAY_SOURCE = "ai";
 /* How far outside the image a returned point may sit and still be kept. An AI tracing a
@@ -177,8 +177,12 @@ export function aiShapesToOverlay(answer, georefInput, options = {}) {
     const rawPoints = raw.points || raw.polygon || raw.pixels || raw.coordinates || raw.ring || raw.line || [];
     const pixels = (Array.isArray(rawPoints) ? rawPoints : []).map(pixelPoint).filter(Boolean).map(p => toPixels(p, unit, georef));
     const outside = pixels.filter(p => !insideImage(p, georef)).length;
-    const kept = pixels.filter(p => insideImage(p, georef));
-    const minPoints = overlayKindIsPolygon(kind) ? 3 : 2;
+    /* A pin (the AI's "find" answers) is one point for a green, tee or bunker and two for a
+       fairway, and is stored as a pin for the operator to shape - never grown into a polygon
+       here. */
+    const pin = raw.pin === true && Object.prototype.hasOwnProperty.call(OVERLAY_PIN_POINTS, kind);
+    const kept = pixels.filter(p => insideImage(p, georef)).slice(0, pin ? OVERLAY_PIN_POINTS[kind] : pixels.length);
+    const minPoints = pin ? OVERLAY_PIN_POINTS[kind] : overlayKindIsPolygon(kind) ? 3 : 2;
     if (kept.length < minPoints) {
       dropped.push({ index, reason: (pixels.length ? (outside ? outside + " of " + pixels.length + " points outside the image" : "too few points") : "no points") });
       return;
@@ -190,6 +194,7 @@ export function aiShapesToOverlay(answer, georefInput, options = {}) {
       hole: hole && Number.isInteger(hole) && hole >= 1 && hole <= 36 ? hole : null,
       points: kept.map(p => georef.toLatLng(p)),
       source: AI_OVERLAY_SOURCE,
+      pin: pin || undefined,
       /* Kept so the feature can be drawn back over the SAME image for a person to check; the
          overlay store does not keep it. */
       pixels: kept,
@@ -203,7 +208,7 @@ export function aiShapesToOverlay(answer, georefInput, options = {}) {
   features.forEach((f, i) => { if (!kept.has(f.id)) dropped.push({ index: i, reason: "refused by the overlay normaliser" }); });
   return {
     features: normalized,
-    pixels: features.filter(f => kept.has(f.id)).map(f => ({ id: f.id, kind: f.kind, pixels: f.pixels, partial: !!f.partial })),
+    pixels: features.filter(f => kept.has(f.id)).map(f => ({ id: f.id, kind: f.kind, pin: !!f.pin, pixels: f.pixels, partial: !!f.partial })),
     dropped,
     georef: georefSummary(georef)
   };

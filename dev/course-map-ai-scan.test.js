@@ -55,7 +55,7 @@ test("the background half trusts only the course id and clears the picture whate
   assert.ok(background.includes('DEFAULT_MODEL = "claude-opus-5-5"'), "the default model is Claude Opus 5.5");
   assert.ok(background.includes("aiShapesToOverlay(parsed.features, georef)"), "pixels go through the georef core, never a local conversion");
   assert.ok(background.includes("saveOverlay({ courseId, features: converted.features, savedBy: request.requestedBy, append: true })"), "the result is saved onto what is there, through the store, as the person who asked");
-  assert.ok(background.includes("parseScanAnswer(answer.text, shapes)"), "the answer is read against the recorded shapes, so a correction lands on the one it replaces");
+  assert.ok(background.includes("parseScanAnswer(answer.text, shapes, task)"), "the answer is read against the recorded shapes and the task, so a correction lands on the one it replaces and a pin task yields pins");
   /* finish() writes base + outcome; base carries no image, and the outcome never does. */
   const finish = background.slice(background.indexOf("const finish = async outcome =>"), background.indexOf("try {"));
   assert.ok(finish.includes("Object.assign({}, base, outcome, { finishedAt"), "the outcome row is built from base + outcome");
@@ -118,6 +118,46 @@ test("a picture from a non-storable source (Mapbox) is always a dry run that sav
   assert.ok(dry > 0 && dry < save, "a dry run must return before the overlay is saved");
   assert.ok(background.slice(dry, save).includes("return await finish("), "the dry run must finish without falling through to the save");
   assert.ok(page.includes("dryRun: true, provenance: sourceTest.provenance"), "Studio sends Mapbox scans as dry runs with their provenance");
+});
+
+test("the task rides on the request: the sync half parks it, the background half resolves it and reports it", () => {
+  assert.ok(sync.includes("task: cleanTask(payload.task)"), "the sync half must park the task with the request");
+  assert.ok(sync.includes("prompt: typeof raw.prompt === \"string\" ? raw.prompt.slice(0, AI_SCAN_PROMPT_MAX) : null"), "the operator's words are capped, never trusted whole");
+  assert.ok(sync.includes("AI_SCAN_OUTPUTS.includes(raw.output) ? raw.output : task.output"), "the output is one the parser knows");
+  assert.ok(background.includes("resolveTask(requested, shapes,"), "the background half resolves the task against what is in view");
+  assert.ok(background.includes("await storedTask(requested ? requested.id : null, shapes)"), "a request without words runs the operator's saved words for the task");
+  assert.ok(background.includes("base.task = { id: task.id, label: task.label, output: task.output, prompt: task.prompt }"), "what ran - words included - goes on the row");
+  assert.ok(background.includes("parseScanAnswer(answer.text, shapes, task)"), "the answer is read as the task says - pins or outlines");
+  assert.ok(background.includes("if (f.pin) counts.pins += 1;"), "a dry run counts pins");
+});
+
+test("the operator's words are edited through /api/course-map-ai-prompts, admin only, stored per task", () => {
+  const prompts = read("functions/course-map-ai-prompts.mjs");
+  const store = read("functions/lib/gd-ai-scan-prompts-store.mjs");
+  assert.ok(prompts.includes('path: "/api/course-map-ai-prompts"'), "the function does not declare its /api path");
+  assert.ok(toml.includes("/api/course-map-ai-prompts"), "no /api/course-map-ai-prompts redirect in netlify.toml");
+  assert.ok(prompts.includes("verifiedAdminEmail(req)") && prompts.includes("if (!admin) return json(403"), "a non-admin must be refused");
+  assert.ok(prompts.includes("scanPromptOutline(") && prompts.includes("outline:"), "Studio is shown what surrounds the words");
+  assert.ok(prompts.includes("if (payload.reset)") && prompts.includes("deleteStoredTask(task.id)"), "reset goes back to the default by deleting the row");
+  assert.ok(prompts.includes("prompt.length > AI_SCAN_PROMPT_MAX"), "words over the cap are refused with a sentence");
+  assert.ok(store.includes('AI_SCAN_PROMPTS_TABLE = "ai_scan_prompts"'), "the store names the table");
+  assert.ok(store.includes(".catch(() => [])"), "a missing table reads as nothing stored, never a failed scan");
+  assert.ok(fs.existsSync(path.join(ROOT, "supabase/migrations/20261014_create_ai_scan_prompts.sql")), "no migration creates ai_scan_prompts");
+});
+
+test("Studio's AI help panel: tasks from the server, words editable and saved, the run carries what is on screen", () => {
+  assert.ok(page.includes('var AI_PROMPTS_API = "/api/course-map-ai-prompts"'), "the page does not talk to the prompts endpoint");
+  assert.ok(page.includes('data-gd-overlay="ai-panel"') && page.includes("function renderAiPanel(") && page.includes("function toggleAiPanel("), "no AI help panel");
+  assert.ok(page.includes(">AI help…</button>"), "the button opens the panel rather than scanning blind");
+  assert.ok(page.includes('el.ai.addEventListener("click", toggleAiPanel)'), "the AI button must toggle the panel");
+  assert.ok(page.includes('data-gd-ai="task"') && page.includes('data-gd-ai="prompt"') && page.includes('data-gd-ai="output"') && page.includes('data-gd-ai="notes"'), "task, words, output and a per-scan note are all on the panel");
+  assert.ok(page.includes('data-gd-ai="save"') && page.includes('data-gd-ai="reset"') && page.includes("function saveAiTask("), "words save and reset");
+  assert.ok(page.includes('data-gd-ai="outline"') && page.includes("entry.outline"), "what Claude receives around the words is shown");
+  assert.ok(page.includes("if (task) body.task = { id: task.id, output: task.output, prompt: task.prompt };"), "the scan is sent the task as the panel has it - what runs is what is on screen");
+  assert.ok(page.includes("aiTask: session.aiTask"), "the task picked last is remembered");
+  assert.ok(page.includes('scan.task.output === "pins"') && page.includes("shape them with the wands"), "a pin answer is described as pins to shape");
+  assert.ok(page.includes("if (f.pin) {") && page.includes("<circle cx="), "a dry run draws pins as dots");
+  assert.ok(!page.includes("Scan this view with AI"), "the old blind-scan button is gone, not left beside the panel");
 });
 
 test("the new tests run in CI", () => {

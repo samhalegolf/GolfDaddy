@@ -4969,6 +4969,7 @@ function gdAdminCourseScorecardDropMarkup(item){
       +`<textarea class="gdAdminCourseScorecardPaste" data-course-id="${id}" spellcheck="false" placeholder="Hole&#9;1&#9;2&#9;3 …&#10;Par&#9;4&#9;3&#9;4 …&#10;SI&#9;11&#9;15&#9;9 …&#10;Yards&#9;300&#9;119&#9;333 …"></textarea>`
       +`<div class="gdAdminCourseScorecardDropRail">`
       +`<label class="gdAdminCourseScorecardFile">Choose file…<input type="file" accept=".csv,.tsv,.txt,.html,.htm,.json,image/*,text/*" data-course-id="${id}" hidden></label>`
+      +`<button type="button" data-gd-scorecard-ask="${id}" title="Ask the AI what this course's pars and lengths are. It searches the web for the club's card and its answer lands in this box, laid out like a pasted card, for you to check and Import - nothing is stored until you do.">Ask AI for this card</button>`
       +`<button type="button" class="primary" data-gd-scorecard-import="${id}">Import pasted card</button>`
       +`<button type="button" data-gd-scorecard-import-course="${id}" title="For a course that mapped fine and only needs its card: stored as this course's own scorecard, the one GPS Play shows. Nothing is renamed or re-matched.">Use as this course's GPS card</button>`
       +`</div></div>`:"")
@@ -5038,8 +5039,12 @@ function gdAdminCourseScorecardSetStatus(courseId,text){
   gdAdminScorecardStatus[courseId]=text||"";
   document.querySelectorAll(`.gdAdminCourseScorecardStatus[data-course-id="${CSS.escape(String(courseId))}"]`).forEach(span=>{span.textContent=text||"";});
 }
-function gdAdminCourseScorecardSetDraft(courseId,text){
+/* The unit the AI said its card is in, per course, so Import can pass it on. Cleared with the draft. */
+const gdAdminScorecardDraftUnits={};
+function gdAdminCourseScorecardSetDraft(courseId,text,unit){
   gdAdminScorecardDrafts[courseId]=text||"";
+  if(text&&unit)gdAdminScorecardDraftUnits[courseId]=unit;
+  else delete gdAdminScorecardDraftUnits[courseId];
   document.querySelectorAll(`.gdAdminCourseScorecardPaste[data-course-id="${CSS.escape(String(courseId))}"]`).forEach(area=>{if(area.value!==(text||""))area.value=text||"";});
 }
 /* The row or drop block a drag is over, if any. */
@@ -5101,6 +5106,13 @@ function gdAdminCourseScorecardClick(event){
     event.preventDefault();
     event.stopPropagation();
     gdAdminScorecardEditAct(act.dataset.courseId,act.dataset.gdScAct,act);
+    return;
+  }
+  const ask=event.target&&event.target.closest?event.target.closest("button[data-gd-scorecard-ask]"):null;
+  if(ask){
+    event.preventDefault();
+    event.stopPropagation();
+    gdAdminCourseScorecardAsk(ask.dataset.gdScorecardAsk);
     return;
   }
   const toCourse=event.target&&event.target.closest?event.target.closest("button[data-gd-scorecard-import-course]"):null;
@@ -5172,7 +5184,12 @@ async function gdAdminCourseScorecardReceive(courseId,files,pastedText,target){
     if(file.size>2*1024*1024){gdAdminCourseVisualToast(file.name+" is too large to be a scorecard table");continue;}
     payload.push({name:file.name,mediaType:file.type||"",text:await file.text()});
   }
-  if(pastedText&&pastedText.trim())payload.push({name:"",mediaType:"text/plain",text:pastedText});
+  if(pastedText&&pastedText.trim()){
+    const pasted={name:"",mediaType:"text/plain",text:pastedText};
+    /* A card the AI wrote said which unit it is in; the parser is told rather than left to guess. */
+    if(gdAdminScorecardDraftUnits[courseId])pasted.unit=gdAdminScorecardDraftUnits[courseId];
+    payload.push(pasted);
+  }
   if(!payload.length)return false;
   return gdAdminCourseScorecardSend(courseId,payload,target);
 }
@@ -5210,6 +5227,60 @@ async function gdAdminCourseScorecardSend(courseId,files,target){
   }catch(error){
     gdAdminCourseScorecardFail(courseId,"Import failed to send");
     return false;
+  }
+}
+/* "Ask AI for this card": queue the ask, poll for the answer, drop it in the paste box. The
+   answer is laid out like a pasted card (functions/lib/gd-scorecard-ask-core.mjs) and goes
+   through Import like one - the AI never stores a scorecard. */
+const gdAdminScorecardAsking={};
+const GD_SCORECARD_ASK_POLL_MS=4000;
+const GD_SCORECARD_ASK_TIMEOUT_MS=5*60*1000;
+async function gdAdminCourseScorecardAskCall(method,courseId,body){
+  const token=await gdAdminCourseDbAccessToken();
+  if(!token)throw new Error("Sign in again to ask the AI");
+  const res=await fetch("/api/course-scorecard-ask"+(method==="GET"?"?courseId="+encodeURIComponent(courseId):""),{
+    method:method,
+    headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+    cache:"no-store",
+    body:body?JSON.stringify(body):undefined
+  });
+  const data=await res.json().catch(()=>null);
+  if(!res.ok)throw new Error((data&&(data.detail||data.error))||("HTTP "+res.status));
+  return data;
+}
+async function gdAdminCourseScorecardAsk(courseId){
+  courseId=String(courseId||"");
+  if(!courseId||gdAdminScorecardAsking[courseId])return;
+  gdAdminScorecardAsking[courseId]=true;
+  gdAdminScorecardAddOpen[courseId]=true;
+  try{
+    gdAdminCourseScorecardSetStatus(courseId,"Asking the AI for the card…");
+    await gdAdminCourseScorecardAskCall("POST",courseId,{courseId:courseId});
+    const started=Date.now();
+    while(Date.now()-started<GD_SCORECARD_ASK_TIMEOUT_MS){
+      await new Promise(r=>setTimeout(r,GD_SCORECARD_ASK_POLL_MS));
+      const data=await gdAdminCourseScorecardAskCall("GET",courseId);
+      const ask=data&&data.ask;
+      if(!ask)break;
+      if(ask.status==="failed"){gdAdminCourseScorecardFail(courseId,"AI could not get the card: "+(ask.error||"unknown"));return;}
+      if(ask.status==="done"){
+        gdAdminCourseScorecardSetDraft(courseId,ask.cardText||"",ask.unit||"");
+        const bits=["AI card ready - check it, then Import"];
+        if(ask.unit)bits.push(ask.unit);
+        if(ask.confidence)bits.push(ask.confidence+" confidence");
+        if(ask.source)bits.push("from "+ask.source);
+        if(ask.notes)bits.push(ask.notes);
+        gdAdminCourseScorecardSetStatus(courseId,bits.join(" · "));
+        gdAdminCourseVisualToast("The AI's card is in the paste box - check it, then Import");
+        return;
+      }
+      gdAdminCourseScorecardSetStatus(courseId,"AI "+(ask.status||"working")+"… "+Math.round((Date.now()-started)/1000)+"s - searching the web for the card");
+    }
+    gdAdminCourseScorecardFail(courseId,"The AI is taking too long - press Ask again in a minute to check");
+  }catch(error){
+    gdAdminCourseScorecardFail(courseId,"AI ask failed: "+(error&&error.message||error));
+  }finally{
+    delete gdAdminScorecardAsking[courseId];
   }
 }
 /* A failure is toasted as well: a card dropped on a closed row has no status line on

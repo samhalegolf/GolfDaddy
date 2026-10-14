@@ -89,7 +89,9 @@
       "hands it to the Claude mapper-debug Routine with the prompt below for that kind, then the " +
       "job facts, two georeferenced captures of the course (satellite and OpenStreetMap) and the " +
       "shape the drawn geometry must come back in. Edit the prompt for each kind here. " +
-      "Placeholders are filled from the job.</p>";
+      "Placeholders are filled from the job.</p>" +
+      "<p>Looking for the words the <strong>AI scan</strong> on the Mapping Overlay page is given? They are not here: open " +
+      "<strong>Mapping Overlay</strong>, pick a course and press <strong>AI help…</strong> - each task's words are edited and saved there, next to the view they run on.</p>";
     var legend = document.createElement("p");
     legend.className = "gdStudioMuted";
     var list = document.createElement("div");

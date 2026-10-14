@@ -1,6 +1,6 @@
 /* AI scan: ask a model to trace fairways and greens off a satellite picture of a course.
  *
- * POST {courseId, image:{data, mediaType}, georef, anchors?, grid?, notes?}  (admin)
+ * POST {courseId, image:{data, mediaType}, georef, anchors?, grid?, notes?, task?}  (admin)
  *   image  - the picture, base64, JPEG/PNG/WebP, as the model will see it (Studio captures
  *            the current map view and scales it to the size the model reads at, so the
  *            pixels it answers in are the pixels we georeference).
@@ -12,6 +12,10 @@
  *            job (gd-ai-scan-core scanJob): pins - finish them; shapes only - refine them;
  *            nothing - trace from scratch. The answer is always saved onto what is there. grid - the pixel
  *            spacing of the coordinate grid drawn on the picture, so the prompt can say so.
+ *   task   - {id, output, prompt}: which AI help task this is (gd-ai-scan-core AI_SCAN_TASKS), how
+ *            it answers (pins or outlines) and the operator's words for it, as Studio's AI help
+ *            panel had them when Run was pressed - so the row shows exactly what was asked. Left
+ *            out, the background half picks the outline task that fits what is in view.
  * -> 202 {status:"queued"}. The scan itself runs in course-map-ai-scan-background.mjs: a
  *    vision call with thinking takes longer than a synchronous function is allowed, so this
  *    endpoint only proves the caller, checks the request, parks it on the course's overlay
@@ -27,6 +31,7 @@
  * names a non-storable source (Mapbox): that imagery may be judged, never kept. */
 
 import { imageGeoreference } from "./lib/gd-overlay-georef-core.mjs";
+import { AI_SCAN_OUTPUTS, AI_SCAN_PROMPT_MAX, scanTask } from "./lib/gd-ai-scan-core.mjs";
 import { hasSupabase, slug, verifiedAdminEmail, loadCourse, loadOverlay, writeAiScan, supabaseFetch, json } from "./lib/gd-map-overlay-store.mjs";
 import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
 import { MAPBOX_PROVIDER_ID } from "./lib/gd-mapbox-source.mjs";
@@ -63,6 +68,19 @@ const MAX_IMAGE_CHARS = 5500000;
 const STALE_SCAN_MS = 12 * 60 * 1000;
 
 function aiConfigured() { return !!process.env.ANTHROPIC_API_KEY; }
+
+/* The task as the request carries it, or null for "whatever fits the view". Only a known id,
+   a known output and a capped prompt ride on the row. */
+function cleanTask(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const task = scanTask(raw.id);
+  if (!task) return null;
+  return {
+    id: task.id,
+    output: AI_SCAN_OUTPUTS.includes(raw.output) ? raw.output : task.output,
+    prompt: typeof raw.prompt === "string" ? raw.prompt.slice(0, AI_SCAN_PROMPT_MAX) : null
+  };
+}
 
 async function pingBackground(origin, courseId) {
   try {
@@ -121,6 +139,7 @@ export default async function courseMapAiScan(req) {
     georef: payload.georef,
     image: { mediaType, data },
     notes: String(payload.notes || "").slice(0, 600),
+    task: cleanTask(payload.task),
     anchors: (Array.isArray(payload.anchors) ? payload.anchors : []).slice(0, 240).map(a => ({
       kind: String(a && a.kind || "").slice(0, 12),
       label: String(a && a.label || "").slice(0, 12),
@@ -132,7 +151,7 @@ export default async function courseMapAiScan(req) {
   };
   await writeAiScan(overlayId, requested);
   await pingBackground(new URL(req.url).origin, overlayId);
-  return json(202, { courseId, status: "queued", dryRun, requestedAt: requested.requestedAt, georef: { width: georef.width, height: georef.height, metresPerPixel: georef.metresPerPixel } });
+  return json(202, { courseId, status: "queued", dryRun, task: requested.task, requestedAt: requested.requestedAt, georef: { width: georef.width, height: georef.height, metresPerPixel: georef.metresPerPixel } });
 }
 
 export const config = {
