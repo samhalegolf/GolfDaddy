@@ -189,7 +189,10 @@ class GarminSimDemo {
         if (type.equals(GarminCommandKind.AIM_AT)) {
             var p = (payload instanceof Lang.Dictionary) ? GarminWire.coordinate(GarminWire.dictVal(payload, "point")) : null;
             if (!locked || p == null) { return false; }
-            target = p;
+            // Marshal's clampAim: an aim past the bag lands at its edge, so
+            // the Scene never hands back a target no club reaches.
+            var snap = session.playerStore.snapshot;
+            target = (snap != null && situation != null) ? GarminPlayState.clampedToBag(p, point(situation["pos"]), snap.bag) : p;
             return true;
         }
         return false;
@@ -250,6 +253,16 @@ class GarminSimDemo {
             out["bubble"] = { "engineVersion" => GarminEngineVersion.CURRENT, "centre" => geo(target) };
         }
         return out;
+    }
+
+    // The fixture's wind (make-sim-demo-fixture.js --wind), or null.
+    function wind() {
+        if (fixture == null || !fixture.hasKey("wind") || !(fixture["wind"] instanceof Lang.Dictionary)) { return null; }
+        var w = fixture["wind"];
+        var from = w.hasKey("fromDeg") ? w["fromDeg"] : null;
+        var kmh = w.hasKey("kmh") ? w["kmh"] : null;
+        if (from == null || kmh == null) { return null; }
+        return { "fromDeg" => from.toFloat(), "kmh" => kmh.toFloat() };
     }
 
     // ----------------------------------------------------------------- maps

@@ -68,15 +68,35 @@ class GarminConditions {
         return windCache;
     }
 
+    // The simulator demo's fixture wind stands in for Garmin's weather in a
+    // CIQ_SIM_DEMO=1 build (null everywhere else, GarminSimDemoPolicy), so
+    // the wind can be seen on the simulated watch at all: the simulator
+    // only has weather on a device with Toybox.Weather (Connect IQ 3.2+,
+    // which the default build device, the Approach S62 at 3.0, is not) and
+    // then only once its own weather is set. A muted build says in the
+    // console which of those it is, once per reason, so a face with no wind
+    // marker is never a mystery.
     function readWeather() {
-        if (!(Toybox has :Weather)) { return null; }
+        var demo = GarminSimDemoPolicy.wind();
+        if (demo != null) { noteMissing("sim demo fixture wind, from " + demo["fromDeg"] + " at " + demo["kmh"] + " km/h"); return demo; }
+        if (!(Toybox has :Weather)) {
+            noteMissing("no Toybox.Weather on this device (Connect IQ 3.2+ only; the Approach S62 is 3.0)");
+            return null;
+        }
         var current = null;
-        try { current = Toybox.Weather.getCurrentConditions(); } catch (e) { return null; }
-        if (current == null) { return null; }
+        try { current = Toybox.Weather.getCurrentConditions(); } catch (e) { noteMissing("getCurrentConditions threw"); return null; }
+        if (current == null) { noteMissing("no current conditions (simulator weather not set, or no Garmin Connect weather yet)"); return null; }
         var speed = current.windSpeed;      // metres per second
         var bearing = current.windBearing;  // degrees, where it blows from
-        if (speed == null || bearing == null) { return null; }
+        if (speed == null || bearing == null) { noteMissing("conditions carry no wind speed or bearing"); return null; }
         return { "fromDeg" => bearing.toFloat(), "kmh" => speed.toFloat() * 3.6 };
+    }
+
+    var noted = null;
+    function noteMissing(reason) {
+        if (!GarminTransmitPolicy.muted() || reason.equals(noted)) { return; }
+        noted = reason;
+        System.println("wind: " + reason);
     }
 
     function level(kmh) {

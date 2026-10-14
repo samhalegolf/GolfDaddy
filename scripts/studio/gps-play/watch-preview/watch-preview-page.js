@@ -27,7 +27,7 @@
     if (!stores[key]) stores[key] = Object.assign({
       courseKey: "", courseName: "", holes: [], packageVersion: null, packageKind: "",
       holeNumber: null, player: null, deviceId: "", mode: "", units: "m",
-      wind: null, windApplied: false, autoHole: true, view: null, sourceKey: "", zoom: 1, locked: false
+      wind: null, windApplied: false, view: null, sourceKey: "", zoom: 1, locked: false
     }, defaults);
     return stores[key];
   }
@@ -249,7 +249,6 @@
       '<div class="gdStudioViewportBar">' +
       '<label class="gdStudioViewportField">Provider <select data-gd-watch="provider"></select></label>' +
       '<label class="gdStudioViewportField">Hole <select data-gd-watch="hole"></select></label>' +
-      '<label class="gdStudioViewportField"><input type="checkbox" data-gd-watch="autoHole"' + (session.autoHole ? " checked" : "") + "> nearest hole to the tap</label>" +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-watch="fit">Whole course</button>' +
       "</div>" +
       '<div class="gdStudioViewportMap gdStudioWatchMap" data-gd-watch="map"></div>' +
@@ -569,36 +568,15 @@
       }
     }
 
-    function nearestHole(point) {
-      var best = null, bestD = Infinity;
-      session.holes.forEach(function (hole) {
-        var sk = hole.skeleton;
-        if (!sk) return;
-        var line = C.skeletonLine(sk);
-        if (line.length < 2) line = [sk.g];
-        var d = Infinity;
-        for (var i = 0; i < line.length; i++) {
-          if (i + 1 < line.length) d = Math.min(d, segmentDistance(point, line[i], line[i + 1]));
-          else d = Math.min(d, C.Geo.distance(point, line[i]));
-        }
-        if (d < bestD) { bestD = d; best = hole.holeNumber; }
-      });
-      return best;
-    }
-    function segmentDistance(p, a, b) {
-      var k = Math.cos(a.lat * Math.PI / 180);
-      var ax = a.lng * k, ay = a.lat, bx = b.lng * k, by = b.lat, px = p.lng * k, py = p.lat;
-      var dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
-      var t = len2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0;
-      return C.Geo.distance(p, { lat: ay + dy * t, lng: (ax + dx * t) / k });
-    }
-
+    /* A tap on the aerial is the watch's next GPS fix, on the hole that is selected - the hole
+       never follows the tap, as it never follows a fix on the wrist (the phone's Scene names the
+       hole; alone, the wrist only moves on when it reaches the next tee). A held aim stays where
+       it was and is re-measured from the new spot, as onLocationFix re-runs moveTarget, and the
+       face reframes the shot from there (onFix). */
     function setPlayer(latlng) {
       session.player = { lat: latlng.lat, lng: latlng.lng };
-      if (session.autoHole) {
-        var n = nearestHole(session.player);
-        if (n != null && n !== session.holeNumber) { setHole(n); return; }
-      }
+      bubbleCacheKey = "";
+      if (playState.target) playState.moveTarget(playState.target);
       if (face) face.onFix();
       requestUpdate();
       updateMapReadout();
@@ -697,7 +675,6 @@
     el.key.addEventListener("keydown", function (e) { if (e.key === "Enter") loadCourse(el.key.value); });
     el.provider.addEventListener("change", function () { useSource(el.provider.value); });
     el.hole.addEventListener("change", function () { setHole(Number(el.hole.value)); });
-    el.autoHole.addEventListener("change", function () { session.autoHole = el.autoHole.checked; });
     el.fit.addEventListener("click", fitCourse);
 
     newFace();
