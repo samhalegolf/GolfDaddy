@@ -21,8 +21,11 @@ import { stitchPlan, stitch, georefFor, latLngToPixel, pixelToLatLng } from "./g
 import { fetchTileBytes } from "./gd-tile-fetch.mjs";
 
 export const TREES_TABLE = "course_trees";
-/* Bumped when the finder changes enough that an automatic run is worth doing again. */
-export const TREE_RUN_VERSION = 1;
+/* Bumped when the finder changes enough that an automatic run is worth doing again: the
+   backfill re-runs every automatic layer from an older version (never an edited one).
+   2: every sensitivity asks its own darkness and texture of a crown, and a tree seen only by
+   its height stands from the middle sensitivity up - so More and Less really change things. */
+export const TREE_RUN_VERSION = 2;
 /* The sensitivity a fresh run goes live at - Studio's default (shapes.TREE_FINDER_LEVELS[2]). */
 export const TREE_DEFAULT_LEVEL = 2;
 /* Every picture is read at about Studio's near-play resolution, so a run here and a run in
@@ -137,7 +140,7 @@ export async function esriPicture(bounds, { key, sharp, fetchImpl = fetch }) {
    picture: {width, height, data (RGBA), playSurface}. play: the hole's fairway and green
    rings. inputs: courseTreeInputs. canopy: canopy-height grids (gd-canopy-height readCanopy),
    or none. Returns {trees: [{lat, lng, r (metres), l, h}], reason} - l the strictest level that
-   finds the tree (h: 1 when it was found from its height alone, and stands at every level). */
+   finds the tree (h: 1 when it was found from its height alone). */
 export function findTreesOnPicture({ picture, play, inputs, canopy, bandM = shapes.TREE_BAND_M }) {
   const w = picture.width, h = picture.height, georef = { playSurface: picture.playSurface };
   const ground = pictureGround(picture);
@@ -152,7 +155,7 @@ export function findTreesOnPicture({ picture, play, inputs, canopy, bandM = shap
     ? shapes.heightMask({ width: w, height: h, z: picture.playSurface.captureZoom, ox: picture.playSurface.originPx.x, oy: picture.playSurface.originPx.y }, canopy, shapes.TREE_MIN_HEIGHT_M)
     : null;
   const auto = shapes.autoTreeModel(picture, shapes.ringsMask(w, h, near(inputs.turf)), band, { radiusPx, tall });
-  const found = auto.model ? shapes.nestedTrees(shapes.treeFinder(picture, auto.model, { radiusPx, inside: auto.allow, max: TREE_HOLE_MAX })) : [];
+  const found = auto.model ? shapes.nestedTrees(shapes.treeFinder(picture, auto.model, { radiusPx, insideAt: auto.allowAt, max: TREE_HOLE_MAX })) : [];
   let byHeight = [];
   if (tall) {
     const mask = new Uint8Array(w * h);
@@ -164,7 +167,9 @@ export function findTreesOnPicture({ picture, play, inputs, canopy, bandM = shap
     return { lat: ll.lat, lng: ll.lng, r: t.r * ground.mpp, l, h: fromHeight ? 1 : 0 };
   };
   return {
-    trees: found.map(t => toTree(t, t.l, false)).concat(byHeight.map(t => toTree(t, 0, true))),
+    /* A tree only the height map saw is weaker evidence (the map is years older than the
+       picture): it stands from the middle sensitivity up, so Less takes it away. */
+    trees: found.map(t => toTree(t, t.l, false)).concat(byHeight.map(t => toTree(t, TREE_DEFAULT_LEVEL, true))),
     reason: auto.model ? "" : auto.reason,
     heights: !!tall
   };
@@ -203,7 +208,7 @@ export function unpackTrees(packed) {
 export function liveTrees(row) {
   if (!row) return [];
   const level = Number.isFinite(Number(row.level)) ? Number(row.level) : TREE_DEFAULT_LEVEL;
-  return unpackTrees(row.trees).filter(t => t.h || t.l <= level);
+  return unpackTrees(row.trees).filter(t => t.l <= level);
 }
 
 /* A whole course: every hole with fairways or a green, on its published frame when it has
@@ -229,7 +234,7 @@ export async function findCourseTrees(objectsJson, deps) {
       if (found.heights) heights = true;
       sources.add(frame ? "frames" : "esri");
       lists.push(found.trees);
-      holes[hole] = { count: found.trees.filter(t => t.h || t.l <= TREE_DEFAULT_LEVEL).length, source: frame ? "frame" : "esri", reason: found.reason || undefined };
+      holes[hole] = { count: found.trees.filter(t => t.l <= TREE_DEFAULT_LEVEL).length, source: frame ? "frame" : "esri", reason: found.reason || undefined };
     } catch (error) {
       holes[hole] = { count: 0, error: String(error && error.message || error).slice(0, 200) };
     }

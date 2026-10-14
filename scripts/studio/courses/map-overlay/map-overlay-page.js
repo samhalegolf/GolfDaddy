@@ -1322,12 +1322,12 @@
         for (var i = 0; i < tall.length; i++) tall[i] = heights.mask[i] && band[i] ? 1 : 0;
         byHeight = shapes.treesInMask(tall, w, h, { radiusPx: radiusPx, avoid: avoid });
       }
-      var finder = auto.model ? shapes.treeFinder(cap.image, auto.model, { radiusPx: radiusPx, inside: auto.allow, avoid: avoid }) : null;
+      var finder = auto.model ? shapes.treeFinder(cap.image, auto.model, { radiusPx: radiusPx, insideAt: auto.allowAt, avoid: avoid }) : null;
       /* Every sensitivity at once (shapes.nestedTrees), so More / Less in the tree layer need
          nothing read again, as lat/lng: the picture can go. */
       function toTree(t, l, fromHeight) { var ll = cap.toLL(t); return { lat: ll.lat, lng: ll.lng, r: t.r * cap.mpp, l: l, h: fromHeight ? 1 : 0 }; }
       var found = (finder ? shapes.nestedTrees(finder) : []).map(function (t) { return toTree(t, t.l, false); })
-        .concat(byHeight.map(function (t) { return toTree(t, 0, true); }));
+        .concat(byHeight.map(function (t) { return toTree(t, shapes.TREE_DEFAULT_STEP, true); }));
       return { cap: cap, w: w, h: h, band: band, hole: item.hole, trees: found, why: heights.why };
     }
 
@@ -1372,7 +1372,7 @@
           }).then(function (run) {
             runs.push(run);
             if (run.why) notes[run.why] = true;
-            var n = run.trees.filter(function (t) { return t.h || t.l <= level; }).length;
+            var n = run.trees.filter(function (t) { return t.l <= level; }).length;
             setStatus((item.hole ? "Hole " + item.hole : "Unnumbered") + " " + item.kind + ": " + n + " tree" + (n === 1 ? "" : "s") + (k + 1 < items.length ? " · looking at the next…" : "."));
           }, function (error) {
             failed++;
@@ -1400,7 +1400,7 @@
         var base = treeEdit ? treeEdit.all.filter(function (t) { return !t.gone; }) : trees.row ? unpackTrees(trees.row.trees) : [];
         var found = mergeTrees([].concat.apply([], runs.map(function (run) { return run.trees; })));
         var kept = base.filter(function (t) { return !looked(t); });
-        var live = found.filter(function (t) { return t.h || t.l <= level; }).length;
+        var live = found.filter(function (t) { return t.l <= level; }).length;
         openTreeEdit(kept.concat(found), session.treeFinderLevel, true,
           "Found " + live + " tree" + (live === 1 ? "" : "s") + " near play" + (note ? " " + note : "") + ". More / Less (← →), click a tree to drop it, then Publish tree changes to put them on the watch.");
       });
@@ -1424,7 +1424,7 @@
         .map(function (a) { return { lat: Number(a[0]), lng: Number(a[1]), r: Number(a[2]), l: Number(a[3]) | 0, h: a[4] ? 1 : 0 }; });
     }
     function packTrees(list) { return list.map(function (t) { return [t.lat, t.lng, Math.round(t.r * 10) / 10, t.l, t.h ? 1 : 0]; }); }
-    function liveTree(t, level) { return !t.gone && (t.h || t.l <= level); }
+    function liveTree(t, level) { return !t.gone && t.l <= level; }
     /* Trees found on overlapping pictures as one each - the one found at the stricter level. */
     function mergeTrees(list) {
       var out = [];
@@ -1569,7 +1569,7 @@
         trees.row = (data && data.row) || trees.row;
         if (treeEdit) { treeEdit.all = keep; treeEdit.dirty = false; drawTreeEdit(); }
         renderTreesButton();
-        var live = keep.filter(function (t) { return t.h || t.l <= level; }).length;
+        var live = keep.filter(function (t) { return t.l <= level; }).length;
         setStatus("Published " + live + " tree" + (live === 1 ? "" : "s") + ". The Garmin map rebuilds with them by itself; Apple Watch maps take them on their next Generate.");
       }).catch(function (error) {
         if (destroyed) return;

@@ -910,7 +910,9 @@
   function treeFinder(image, model, opts) {
     var o = opts || {};
     var radius = Math.max(2, Number(o.radiusPx) || 10);
-    var W = image.width, inside = o.inside || null;
+    /* insideAt(level index): a mask a sensitivity at a time (autoTreeModel's allowAt) - the
+       loosest holds every other, so it sets the box. */
+    var W = image.width, insideAt = o.insideAt || null, inside = insideAt ? insideAt(TREE_FINDER_LEVELS.length - 1) : o.inside || null;
     var box = o.box || (inside ? maskBox(inside, W, image.height) : { x0: 0, y0: 0, x1: W, y1: image.height });
     if (!box) return { find: function () { return []; } };
     var x0 = Math.max(0, Math.floor(Math.min(box.x0, box.x1))), y0 = Math.max(0, Math.floor(Math.min(box.y0, box.y1)));
@@ -934,7 +936,8 @@
     function find(level) {
       var crown = new Uint8Array(n);
       var cut = Math.min(254, Math.round(level * 20));
-      for (var j = 0; j < n; j++) crown[j] = dist[j] <= cut ? 1 : 0;
+      var at = insideAt ? insideAt(nearestLevel(level)) : null;
+      for (var j = 0; j < n; j++) crown[j] = dist[j] <= cut && (!at || at[(Math.floor(j / w) + y0) * W + (j % w) + x0]) ? 1 : 0;
       return crownCentres(crown, w, h, radius, avoid, max).map(function (k) { return { x: k.x + x0, y: k.y + y0, r: k.r }; });
     }
     return { find: find };
@@ -954,6 +957,13 @@
       });
     });
     return out;
+  }
+
+  /* The index in TREE_FINDER_LEVELS nearest a level. */
+  function nearestLevel(level) {
+    var best = 0;
+    TREE_FINDER_LEVELS.forEach(function (v, k) { if (Math.abs(v - level) < Math.abs(TREE_FINDER_LEVELS[best] - level)) best = k; });
+    return best;
   }
 
   /* The middles of the crowns in a 0/1 mask the size of a picture - trees found from their
@@ -989,7 +999,12 @@
      (and never under the floor), and a crown is busy over at least this share of it. */
   var TREE_DETAIL_FLOOR = 1.5;
   var TREE_DETAIL_OVER_TURF = 2;
-  var TREE_BUSY_SHARE = 0.45;
+  /* What each sensitivity (TREE_FINDER_LEVELS, strictest first) asks of a crown found with no
+     samples: darker than turf by this many times the margin, and busy over this share of it.
+     The middle one (TREE_DEFAULT_STEP) is what the finder asks by default. */
+  var TREE_STEP_DARK = [1.6, 1.3, 1, 0.8, 0.6, 0.45];
+  var TREE_STEP_BUSY = [0.62, 0.53, 0.45, 0.38, 0.31, 0.25];
+  var TREE_DEFAULT_STEP = 2;
   /* The colour model reads at most this many pixels of turf and of crown, evenly spread. */
   var TREE_SAMPLE_PIXELS = 20000;
 
@@ -1050,21 +1065,34 @@
     var busy = new Float32Array(n);
     for (i = 0; i < n; i++) busy[i] = detail[i] > busyOver ? 1 : 0;
     var tex = boxBlur(busy, w, h, Math.max(2, Math.round(radius * 0.4)));
-    var texMin = TREE_BUSY_SHARE;
-    var darkBelow = turfModel.mL - Math.max(TREE_DARK_MARGIN, turfModel.dL);
-    var allow = new Uint8Array(n);
+    /* How much darker than turf each pixel is, and whether it is green at all: the darkness
+       and texture asked of a crown move with the sensitivity (TREE_STEP_DARK, TREE_STEP_BUSY),
+       greenness does not - a shadow is never a tree. */
+    var margin = Math.max(TREE_DARK_MARGIN, turfModel.dL), gap = new Float32Array(n), green = new Uint8Array(n);
     for (i = 0; i < n; i++) {
-      if (!band[i] || (o.tall && !o.tall[i])) continue;
+      gap[i] = turfModel.mL - field.L[i];
       var a = field.A[i], b = field.B[i];
-      allow[i] = field.L[i] < darkBelow && a < -TREE_GREEN_MIN && b > -a * 0.25 && tex[i] >= texMin ? 1 : 0;
+      green[i] = band[i] && (!o.tall || o.tall[i]) && a < -TREE_GREEN_MIN && b > -a * 0.25 ? 1 : 0;
     }
-    /* Close the pinholes a crown's own bright leaves leave, without reaching out past the band. */
-    var shut = Math.max(1, Math.round(radius * 0.15));
-    allow = morph(morph(allow, w, h, shut, true), w, h, shut, false);
-    for (i = 0; i < n; i++) if (!band[i] || (o.tall && !o.tall[i])) allow[i] = 0;
-    var crownAt = maskIndices(allow, TREE_SAMPLE_PIXELS);
-    if (crownAt.length < Math.PI * radius * radius * 0.25) return { model: null, reason: "no-crowns", allow: allow };
-    return { model: colourModel(fieldSamples(field, crownAt)), allow: allow };
+    var shut = Math.max(1, Math.round(radius * 0.15)), masks = [];
+    /* The crown pixels at a sensitivity (an index into TREE_FINDER_LEVELS): stricter asks for
+       darker and busier ground, looser for less. Each is closed over the pinholes a crown's
+       own bright leaves leave, without reaching out past the band. */
+    function allowAt(level) {
+      var k = Math.max(0, Math.min(TREE_STEP_DARK.length - 1, level | 0));
+      if (masks[k]) return masks[k];
+      var dark = margin * TREE_STEP_DARK[k], share = TREE_STEP_BUSY[k], m = new Uint8Array(n);
+      for (var j = 0; j < n; j++) m[j] = green[j] && gap[j] > dark && tex[j] >= share ? 1 : 0;
+      m = morph(morph(m, w, h, shut, true), w, h, shut, false);
+      for (j = 0; j < n; j++) if (!band[j] || (o.tall && !o.tall[j])) m[j] = 0;
+      return (masks[k] = m);
+    }
+    /* What a crown looks like here, from the crowns at the middle sensitivity - or, on ground
+       where those are too few to say, from the loosest. */
+    var enough = Math.PI * radius * radius * 0.25, crownAt = null;
+    [TREE_DEFAULT_STEP, TREE_STEP_DARK.length - 1].some(function (k) { crownAt = maskIndices(allowAt(k), TREE_SAMPLE_PIXELS); return crownAt.length >= enough; });
+    if (crownAt.length < enough) return { model: null, reason: "no-crowns", allow: allowAt(TREE_DEFAULT_STEP) };
+    return { model: colourModel(fieldSamples(field, crownAt)), allow: allowAt(TREE_DEFAULT_STEP), allowAt: allowAt };
   }
 
   /* Which pixels of a picture stand at least minM tall, from canopy-height grids. cap: the
@@ -1516,7 +1544,7 @@
     TREE_RADIUS_M: TREE_RADIUS_M, treeAt: treeAt, ellipseInBox: ellipseInBox, ringRadiusM: ringRadiusM,
     growFromArea: growFromArea, colourField: colourField, colourModel: colourModel, circleSamples: circleSamples,
     treeFinder: treeFinder, TREE_FINDER_LEVELS: TREE_FINDER_LEVELS, TREE_FINDER_MAX: TREE_FINDER_MAX, treesInMask: treesInMask, nestedTrees: nestedTrees,
-    TREE_BAND_M: TREE_BAND_M, TREE_CLEAR_M: TREE_CLEAR_M, TREE_AUTO_RADIUS_M: TREE_AUTO_RADIUS_M, TREE_MIN_HEIGHT_M: TREE_MIN_HEIGHT_M,
+    TREE_BAND_M: TREE_BAND_M, TREE_CLEAR_M: TREE_CLEAR_M, TREE_AUTO_RADIUS_M: TREE_AUTO_RADIUS_M, TREE_MIN_HEIGHT_M: TREE_MIN_HEIGHT_M, TREE_DEFAULT_STEP: TREE_DEFAULT_STEP,
     ringsMask: ringsMask, playBand: playBand, autoTreeModel: autoTreeModel, heightMask: heightMask,
     floodSelect: floodSelect, maskOutline: maskOutline,
     reshapeOutline: reshapeOutline, collarOutline: collarOutline, insideLatLngRing: insideLatLngRing,

@@ -113,20 +113,23 @@ async function claimNextJob({ allowNearby, allowBackfill }) {
 }
 
 /* The tree backfill: courses mapped before tree runs existed get theirs a course at a time,
-   in the worker's idle moments - a published course with no course_trees row and no tree run
-   in the last day (so one that keeps failing is tried once a day, not every three minutes).
-   TREE_BACKFILL=off stops it; tree runs queued any other way still run. */
+   in the worker's idle moments - a published course with holes and no course_trees row, or
+   one whose automatic row an older finder made (TREE_RUN_VERSION; a row edited in Studio is
+   never redone), and no tree run in the last day (so one that keeps failing is tried once a
+   day, not every three minutes). TREE_BACKFILL=off stops it; tree runs queued any other way
+   still run. */
 const TREE_BACKFILL_RETRY_MS = 24 * 60 * 60 * 1000;
 async function claimTreeBackfill() {
   if (String(env("TREE_BACKFILL")).toLowerCase() === "off") return null;
   const cutoff = new Date(Date.now() - TREE_BACKFILL_RETRY_MS).toISOString();
   const [published, done, recent] = await Promise.all([
-    supabaseFetch(MAPS_TABLE + "?select=course_id&published=eq.true&order=course_id.asc&limit=5000").catch(() => null),
-    supabaseFetch(TREES_TABLE + "?select=course_id&limit=5000").catch(() => null),
+    supabaseFetch(MAPS_TABLE + "?select=course_id&published=eq.true&hole_count=gt.0&order=course_id.asc&limit=5000").catch(() => null),
+    supabaseFetch(TREES_TABLE + "?select=course_id,status,version:run->version&limit=5000").catch(() => null),
     supabaseFetch(JOBS_TABLE + "?select=course_id&kind=eq." + TREE_KIND + "&created_at=gt." + encodeURIComponent(cutoff) + "&limit=5000").catch(() => null)
   ]);
   if (!Array.isArray(published) || !Array.isArray(done) || !Array.isArray(recent)) return null;
-  const skip = new Set(done.concat(recent).map(r => r.course_id));
+  const current = done.filter(r => r.status !== "auto" || Number(r.version) >= TREE_RUN_VERSION);
+  const skip = new Set(current.concat(recent).map(r => r.course_id));
   const next = published.find(r => r && r.course_id && !skip.has(r.course_id));
   if (!next) return null;
   const inserted = await supabaseFetch(JOBS_TABLE, {
@@ -2194,7 +2197,7 @@ async function runTreeJob(job) {
   });
   return {
     kind: TREE_KIND, courseId: job.course_id, written: true, imagery: found.imagery, heights: found.heights,
-    trees: found.trees.filter(t => t.h || t.l <= level).length, candidates: found.trees.length, holes: found.holes,
+    trees: found.trees.filter(t => t.l <= level).length, candidates: found.trees.length, holes: found.holes,
     visualsTouched: false, holeGeometryTouched: false
   };
 }

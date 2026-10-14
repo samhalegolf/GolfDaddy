@@ -81,8 +81,8 @@ test("the stored layer is compact, reads back, and the watch takes the trees at 
   const packed = lib.packTrees(trees);
   assert.ok(JSON.stringify(packed).length < 120, "a few dozen bytes a tree");
   assert.deepStrictEqual(lib.unpackTrees(packed)[0], { lat: -37.1234568, lng: 175.9876543, r: 4.4, l: 0, h: 0 });
-  assert.strictEqual(lib.liveTrees({ trees: packed, level: 2 }).length, 2, "the one found from height stands at every level");
-  assert.strictEqual(lib.liveTrees({ trees: packed, level: 5 }).length, 3);
+  assert.strictEqual(lib.liveTrees({ trees: packed, level: 2 }).length, 1, "only the trees at or under the level");
+  assert.strictEqual(lib.liveTrees({ trees: packed, level: 5 }).length, 3, "a tree found from its height has a level like any other");
   assert.deepStrictEqual(lib.liveTrees(null), []);
 });
 
