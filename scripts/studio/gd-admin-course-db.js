@@ -398,22 +398,49 @@ function gdAdminCourseDbSourceLabel(sources){
   return stems.filter((stem,index)=>stems.indexOf(stem)===index).join(" / ");
 }
 function gdAdminCourseDbObjectTotals(course){
+  /* Tree pins live in course_trees, not the geometry, so they always come from the list
+     row's stored count - an opened course carries no trees of its own to count. */
+  const trees=Number(course&&course.treeCount)||0;
   /* A list row already has these counted server-side, by course_maps_list. */
   if(!gdAdminCourseDbHasGeometry(course)){
     return {
       tees:Number(course&&course.teeCount)||0,
       greens:Number(course&&course.greenCount)||0,
-      fairways:Number(course&&course.fairwayCount)||0
+      fairways:Number(course&&course.fairwayCount)||0,
+      fairwayAreas:Number(course&&course.fairwayAreaCount)||0,
+      bunkers:Number(course&&course.bunkerCount)||0,
+      water:Number(course&&course.waterCount)||0,
+      hazards:Number(course&&course.hazardCount)||0,
+      trees:trees
     };
   }
-  const totals={tees:0,greens:0,fairways:0};
-  Object.keys(course.objects||{}).forEach(key=>{
-    const type=course.objects[key]&&course.objects[key].type;
-    if(type==="tee")totals.tees+=1;
-    else if(type==="green")totals.greens+=1;
-    else if(type==="fairway")totals.fairways+=1;
+  const totals={tees:0,greens:0,fairways:0,fairwayAreas:0,bunkers:0,water:0,hazards:0,trees:trees};
+  const key={tee:"tees",green:"greens",fairway:"fairways",fairway_area:"fairwayAreas",bunker:"bunkers",water:"water",hazard:"hazards",waste:"hazards"};
+  Object.keys(course.objects||{}).forEach(id=>{
+    const slot=key[course.objects[id]&&course.objects[id].type];
+    if(slot)totals[slot]+=1;
   });
   return totals;
+}
+/* One symbol per kind of map object, in the order a hole is played, so a column of rows
+   reads as how complete each course's mapping is: a dimmed symbol is a layer the course
+   does not have. Fairway is the drawn SHAPE (fairway_area) - every course with a tee and
+   a green has a centreline, so counting those would never show a gap. */
+const GD_ADMIN_COURSE_LAYER_SYMBOLS=[
+  {slot:"tees",label:"tees",svg:'<rect x="3" y="5" width="10" height="6" rx="1.5" fill="#cfd8d3"/>'},
+  {slot:"greens",label:"greens",svg:'<ellipse cx="8" cy="12" rx="6" ry="2.6" fill="#3fcf6e"/><path d="M8 12V2.5" stroke="#e8f0eb" stroke-width="1.2"/><path d="M8.6 2.5l4.4 1.8-4.4 1.8z" fill="#ff6b6b"/>'},
+  {slot:"fairwayAreas",label:"fairway shapes",svg:'<path d="M5 14.5C3 10 7.5 8 6.5 4.5 6 2.8 7.5 1.5 9.5 1.8 11.8 2.2 12 5 10.8 8 9.6 11 12 12.5 11 14.5z" fill="#7fd68f"/>'},
+  {slot:"bunkers",label:"bunkers",svg:'<path d="M2.5 10c0-3 3-5.2 6.2-4.8 3.2.4 5 2.6 4.6 5-.4 2.3-3 3.3-6 3.1-3-.2-4.8-1.3-4.8-3.3z" fill="#e8cf8e"/>'},
+  {slot:"water",label:"water",svg:'<path d="M8 1.8C10.6 5.3 12.5 7.7 12.5 10a4.5 4.5 0 0 1-9 0C3.5 7.7 5.4 5.3 8 1.8z" fill="#4fa3ff"/>'},
+  {slot:"trees",label:"tree pins",svg:'<path d="M8 1.5l4.5 6.2H10l3 4.3H3l3-4.3H3.5z" fill="#2f9e55"/><rect x="7.2" y="12" width="1.6" height="2.8" fill="#8b6a46"/>'},
+  {slot:"hazards",label:"hazard / waste areas",svg:'<path d="M8 2l6.3 11H1.7z" fill="none" stroke="#ff7d7d" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6.3v3.4" stroke="#ff7d7d" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.4" r=".8" fill="#ff7d7d"/>'}
+];
+function gdAdminCourseDbLayerSymbols(totals){
+  totals=totals||{};
+  return `<span class="gdAdminCourseLayers">${GD_ADMIN_COURSE_LAYER_SYMBOLS.map(layer=>{
+    const n=Number(totals[layer.slot])||0;
+    return `<span class="gdAdminCourseLayer${n?"":" isEmpty"}" title="${gdEscapeHTML(n+" "+layer.label)}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">${layer.svg}</svg><b>${n}</b></span>`;
+  }).join("")}</span>`;
 }
 function gdAdminCourseDbSummaries(){
   const store=gdAdminCourseDbStore();
@@ -4735,7 +4762,7 @@ function gdAdminCourseDbExpandedRow(item){
     gdAdminCourseDbDiagRow("Course key",item.key),
     gdAdminCourseDbDiagRow("Holes built",item.holeCount),
     gdAdminCourseDbDiagRow("Play ready",item.playReadyCount==null?"loading geometry…":item.playReadyCount+"/"+(item.holeCount||0)),
-    gdAdminCourseDbDiagRow("Geometry objects",(totals.tees||0)+" tees, "+(totals.greens||0)+" greens, "+(totals.fairways||0)+" fairways"),
+    gdAdminCourseDbDiagRow("Geometry objects",(totals.tees||0)+" tees, "+(totals.greens||0)+" greens, "+(totals.fairways||0)+" fairways, "+(totals.fairwayAreas||0)+" fairway shapes, "+(totals.bunkers||0)+" bunkers, "+(totals.water||0)+" water, "+(totals.hazards||0)+" hazards, "+(totals.trees||0)+" tree pins"),
     gdAdminCourseDbDiagRow("Location",Number.isFinite(Number(lat))&&Number.isFinite(Number(lng))?Number(lat).toFixed(5)+", "+Number(lng).toFixed(5)+(place?"  ("+place+")":""):"not set"),
     gdAdminCourseDbDiagRow("Last mapping run",job?(job.lastJobStatus||job.state)+(job.lastJobKind?" ("+job.lastJobKind+")":""):"none recorded"),
     gdAdminCourseDbDiagRow("Run finished",job&&job.lastJobAt?gdCoursePlayDebugTime(job.lastJobAt):"—"),
@@ -4746,10 +4773,10 @@ function gdAdminCourseDbExpandedRow(item){
     gdAdminCourseDbDiagRow("Map version",gdAdminCourseVersionLabel(item)||"not versioned yet"),
     gdAdminCourseDbDiagRow("Updated",gdCoursePlayDebugTime(item.updatedAt)||"unknown")
   ].join("");
-  /* colspan tracks the header above - 8 since the Version column joined it, one more when a
-     scope adds the Requested column. A stale number here silently narrows the expanded panel
-     rather than erroring. */
-  return `<tr class="gdAdminCourseDiagRowHost"><td colspan="${gdAdminCourseDbScope?9:8}"><div class="gdAdminCourseDiag">${banner}${progressBar}<div class="gdAdminCourseDiagGrid">${diag}</div>${gdAdminCourseScorecardDropMarkup(item)}${gdAdminCourseDbActionRail(item)}</div></td></tr>`;
+  /* colspan tracks the header above - 9 since the Map objects column joined it, one more
+     when a scope adds the Requested column. A stale number here silently narrows the
+     expanded panel rather than erroring. */
+  return `<tr class="gdAdminCourseDiagRowHost"><td colspan="${gdAdminCourseDbScope?10:9}"><div class="gdAdminCourseDiag">${banner}${progressBar}<div class="gdAdminCourseDiagGrid">${diag}</div>${gdAdminCourseScorecardDropMarkup(item)}${gdAdminCourseDbActionRail(item)}</div></td></tr>`;
 }
 
 /* ---------- Scorecard drop zone ----------
@@ -5473,7 +5500,7 @@ function gdRenderAdminCourseDatabaseNow(){
     gdAdminCourseDbSetHTML(detail,"");
     return;
   }
-  gdAdminCourseDbSetHTML(list,filtered.length?`<div class="gdAdminCourseTableWrap"><table class="gdAdminCourseTable"><thead><tr><th>Course</th>${scope?"<th>Requested</th>":""}<th>Version</th><th>Status</th><th>Sync</th><th>Holes</th><th>Play</th><th>Visual Engine</th><th>Updated</th></tr></thead><tbody>${filtered.map(item=>{
+  gdAdminCourseDbSetHTML(list,filtered.length?`<div class="gdAdminCourseTableWrap"><table class="gdAdminCourseTable"><thead><tr><th>Course</th>${scope?"<th>Requested</th>":""}<th>Version</th><th>Status</th><th>Sync</th><th>Holes</th><th>Play</th><th>Map objects</th><th>Visual Engine</th><th>Updated</th></tr></thead><tbody>${filtered.map(item=>{
     const visual=gdAdminCourseDbVisualState(item.id);
     /* The displayed status, not the stored one - see gdAdminCourseDbStatusFor. */
     const status=gdAdminCourseDbStatusFor(item);
@@ -5483,7 +5510,7 @@ function gdRenderAdminCourseDatabaseNow(){
     const active=item.id===gdAdminCourseDatabaseSelected?" active":"";
     const open=item.id===gdAdminCourseDbExpanded;
     const caret=open?"▾":"▸";
-    const row=`<tr class="${active}${open?" expanded":""}" data-course-id="${gdEscapeHTML(item.id)}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${caret}</span> ${gdEscapeHTML(item.name)}</td>${scope?`<td>${gdAdminCourseDbRequestedCell(scope.courses[item.id])}</td>`:""}<td>${version?`<span class="gdAdminCourseVersion">${gdEscapeHTML(version)}</span>`:`<span class="gdAdminCourseMuted" title="No countable version yet - this course has not been rebuilt since versions existed">\u2014</span>`}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(status)}</span>${gdAdminCourseDbDrawButton(item,status)}</td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${item.playReadyCount==null?"<span class=\"gdAdminCourseMuted\" title=\"Open the row to load this course's geometry\">\u2014</span>":gdEscapeHTML(item.playReadyCount)+"/"+gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
+    const row=`<tr class="${active}${open?" expanded":""}" data-course-id="${gdEscapeHTML(item.id)}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${caret}</span> ${gdEscapeHTML(item.name)}</td>${scope?`<td>${gdAdminCourseDbRequestedCell(scope.courses[item.id])}</td>`:""}<td>${version?`<span class="gdAdminCourseVersion">${gdEscapeHTML(version)}</span>`:`<span class="gdAdminCourseMuted" title="No countable version yet - this course has not been rebuilt since versions existed">\u2014</span>`}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(status)}</span>${gdAdminCourseDbDrawButton(item,status)}</td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${item.playReadyCount==null?"<span class=\"gdAdminCourseMuted\" title=\"Open the row to load this course's geometry\">\u2014</span>":gdEscapeHTML(item.playReadyCount)+"/"+gdEscapeHTML(item.holeCount||0)}</td><td>${gdAdminCourseDbLayerSymbols(item.objectTotals)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
     return open?row+gdAdminCourseDbExpandedRow(item):row;
   }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current search.</div>');
   gdAdminCourseScorecardRestore(list);

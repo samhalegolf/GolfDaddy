@@ -449,6 +449,12 @@
     /* The published version of a course map - "v2.0", "v0.1", and W-v1.0 for a Watch
        package. Monospace and tabular so a column of them lines up digit under digit. */
 .gdAdminCourseVersion{font:11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;color:rgba(226,240,230,.82);white-space:nowrap}
+    /* Map objects column - one symbol + count per layer, fixed width so the symbols line up
+       down the table and a missing layer (dimmed) stands out in its column. */
+.gdAdminCourseLayers{display:inline-flex;gap:6px;white-space:nowrap}
+.gdAdminCourseLayer{display:inline-flex;align-items:center;gap:2px;min-width:38px;cursor:help}
+.gdAdminCourseLayer b{font:600 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;color:rgba(226,240,230,.86)}
+.gdAdminCourseLayer.isEmpty{opacity:.22;filter:grayscale(1)}
     /* Snapshots panel - the course's imagery, shown to be looked at. Tiles are deliberately
        generous: the point is spotting a mis-framed hole or a blown-out capture, which a
        postage-stamp thumbnail cannot show. */

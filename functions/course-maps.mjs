@@ -426,7 +426,8 @@ const LIST_VIEW = "course_maps_list";
    so they cannot drift and the list never unpacks objects_json. */
 const LIST_COLUMNS = "id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng," +
   "region,country,country_code,facility_key,facility_name,course_aliases,published,published_at," +
-  "created_at,updated_at,hole_count,object_count,tee_count,green_count,fairway_count";
+  "created_at,updated_at,hole_count,object_count,tee_count,green_count,fairway_count," +
+  "fairway_area_count,bunker_count,water_count,hazard_count,tree_count";
 
 /* Phones built before 14 Oct 2026 (the Android APK from commit 9f31f4a and
    earlier) open the course picker with a bare ?scope=play and keep a course
@@ -476,6 +477,12 @@ function listRowToCourse(row) {
     teeCount: integerOrZero(row.tee_count),
     greenCount: integerOrZero(row.green_count),
     fairwayCount: integerOrZero(row.fairway_count),
+    /* Per-layer counts for Studio's at-a-glance symbols (20261015_course_maps_layer_counts). */
+    fairwayAreaCount: integerOrZero(row.fairway_area_count),
+    bunkerCount: integerOrZero(row.bunker_count),
+    waterCount: integerOrZero(row.water_count),
+    hazardCount: integerOrZero(row.hazard_count),
+    treeCount: integerOrZero(row.tree_count),
     scope: "list"
   };
   return course.id && course.courseId && course.courseName ? course : null;
