@@ -2248,10 +2248,22 @@ function fairwayFillSurfaces(holeData, surfaces, objects) {
    inside the frame the player is looking at, so drawing it beats hiding it.
 
    Holes with no fairway get a default one (defaultFairwayShapes above). Default fairways from
-   an earlier run that are not produced again - the hole has a real fairway now - are removed. */
-export function enrichSurfaceObjects(objects, courseId, payload, holes) {
+   an earlier run that are not produced again - the hole has a real fairway now - are removed.
+
+   So are the auto surfaces this payload no longer stands behind, in three cases - and only
+   these three, because a surface merely missing from an Overpass answer is not evidence that
+   the ground changed:
+   - an overlay surface (negative osmId) whose shape is not in the overlay any more - it was
+     binned in Studio, and until now it stayed on the course until a full remap;
+   - a real OSM surface an overlay shape was converted from (the element's clarity:replaces
+     tag): the shape stands in for it, and keeping both put the same bunker on a hole twice;
+   - with opts.overlayOnly, every real OSM surface: the overlay was signed off as the whole
+     picture, so a remap would have dropped them, and Apply shapes should agree with a remap.
+   Hand-placed surfaces are never touched - their source is not osm_auto. */
+export function enrichSurfaceObjects(objects, courseId, payload, holes, opts = {}) {
   const rejected = [];
   const surfaces = parseOsmSurfaces(payload, rejected);
+  const removed = removeWithdrawnSurfaces(objects, payload, surfaces, opts);
   const objectsMap = {};
   objects.forEach(object => { if (object && object.id) objectsMap[object.id] = object; });
   const holeData = packageHoleData({ objects: objectsMap, holes: holes || {} });
@@ -2282,7 +2294,37 @@ export function enrichSurfaceObjects(objects, courseId, payload, holes) {
   for (let i = objects.length - 1; i >= 0; i--) {
     if (objects[i] && objects[i].source === FAIRWAY_FILL_SOURCE && !written.has(objects[i].id)) objects.splice(i, 1);
   }
-  return { surfaces: surfaces.length, cloned, filled: fills.length, left: surfaceRejectSummary(rejected, held) };
+  return { surfaces: surfaces.length, cloned, filled: fills.length, removed, left: surfaceRejectSummary(rejected, held) };
+}
+
+/* An overlay element's osmId is negative; OSM's are positive (gd-map-overlay-core.mjs
+   isOverlayOsmId - repeated here rather than imported because that module imports this one). */
+function isOverlayOsmId(osmId) {
+  return /^[a-z]+\/-\d/.test(String(osmId || ""));
+}
+
+/* The element an object's osmId names, without the ring index a multi-ring area adds. */
+function osmIdBase(osmId) {
+  return String(osmId || "").split("#")[0];
+}
+
+function removeWithdrawnSurfaces(objects, payload, surfaces, opts) {
+  const present = new Set(surfaces.map(surface => surface.osmId));
+  const replaced = new Set(((payload && payload.elements) || [])
+    .map(element => element && element.tags && element.tags["clarity:replaces"])
+    .filter(Boolean));
+  let removed = 0;
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const object = objects[i];
+    if (!object || !SURFACE_TYPES.has(object.type) || !isOsmAutoSource(object.source) || !object.osmId) continue;
+    if (object.source === FAIRWAY_FILL_SOURCE || present.has(object.osmId)) continue;
+    const base = osmIdBase(object.osmId);
+    const withdrawn = isOverlayOsmId(base) || replaced.has(base) || (opts && opts.overlayOnly && !isOverlayOsmId(base));
+    if (!withdrawn) continue;
+    objects.splice(i, 1);
+    removed++;
+  }
+  return removed;
 }
 
 /* What enrichSurfaceObjects left out, small enough to sit on a job row: counts by type and

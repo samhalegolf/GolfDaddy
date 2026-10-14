@@ -642,7 +642,7 @@ function gdAdminCourseMaintenanceMenu(selected){
   const item=(mode,label,note,cls)=>`<button type="button"${cls?` class="${cls}"`:""} onclick="return gdAdminCourseMaintenance('${mode}',${id})">${gdEscapeHTML(label)}<small>${gdEscapeHTML(note)}</small></button>`;
   return `<details class="gdAdminRebuildMenu"><summary>Rebuild</summary><div class="gdAdminRebuildMenuList">
     ${item("full_remap","Full Remap","Geometry, objects and visuals, from source","danger")}
-    ${item("collect_extra_objects","Collect Extra Objects","Adds bunkers, fairways and hazards. Holes, greens and visuals unchanged")}
+    ${item("collect_extra_objects","Collect Extra Objects","Adds bunkers, fairways and hazards from OSM and the mapping overlay (draft or ready), and takes off overlay shapes binned since. Holes, greens and visuals unchanged")}
     ${item("refine_surface_shapes","Refine Shapes","Re-traces those shapes from this course's own frames. Lighter, and ours")}
     ${item("find_trees","Find Trees","Pins the trees along the fairways and greens - from this course's own frames, or Esri where it has none - and puts them live on the watch. Geometry and visuals unchanged; replaces trees edited in Studio")}
     ${item("recapture_visuals","Re-Capture Visuals","Fresh source imagery for the existing map, then a bake")}

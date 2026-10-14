@@ -38,11 +38,12 @@
  *   tee     - a closed polygon (3+ points). Becomes golf=tee. The resolver reads a tee near a
  *             green or fairway as course context, and the mapper writes tee objects from it.
  *   bunker  - a closed polygon (3+ points). Becomes golf=bunker, which the surface pass
- *             (enrichSurfaceObjects) writes onto the nearest hole as a bunker object. Placed
- *             with the bunker wand the same way a green is.
+ *             (enrichSurfaceObjects) writes onto every hole whose frame it falls in as a
+ *             bunker object. Placed with the bunker wand the same way a green is.
  *   water   - a closed polygon (3+ points). Becomes golf=water_hazard, which the surface pass
- *             writes onto the nearest hole as a water object (penalty area) and the resolver
- *             already reads as water. Drawn round by hand in Studio, or placed with the wand.
+ *             writes onto every hole whose frame it falls in as a water object (penalty area)
+ *             and the resolver already reads as water. Drawn round by hand in Studio, or
+ *             placed with the wand.
  *   trees   - a closed polygon (3+ points). Becomes natural=wood. Dense trees: the surface pass
  *             writes it onto every hole whose frame it falls in as a "trees" object, and the
  *             bubble reveals it like a bunker. Drawn round by hand, or stretched over a cluster as an
@@ -107,9 +108,39 @@ const PIN_RADIUS_M = { green: 14, tee: 6, bunker: 6, water: 15 };
 const PIN_FAIRWAY_WIDTH_M = 35;
 const M_PER_DEG = 111320;
 
-/* Ids start well below anything Overpass hands out (its ids are positive) and stay stable per
-   feature index so a merge into two payloads in one job dedupes on the same key. */
-const OVERLAY_ID_BASE = -900000000;
+/* Ids start well below anything Overpass hands out (its ids are positive). A feature's id is
+   a hash of its own id string, so it is the same in every payload of a job (a merge into two
+   payloads dedupes on the same key) and the same from one job to the next. It used to be the
+   feature's position in the list, which moved every time a shape before it was binned: the
+   surface pass keys its objects on this id (upsertResolvedObject), so a bin in Studio made the
+   next Collect Extra Objects match every later bunker to the wrong clone. Derived hole lines
+   sit just below the base; hashed ids sit below OVERLAY_HASH_BASE, clear of them. */
+export const OVERLAY_ID_BASE = -900000000;
+const OVERLAY_HASH_BASE = OVERLAY_ID_BASE - 10000;
+export const REPLACES_TAG = "clarity:replaces";
+
+/* Two 32-bit mixes of the id string, joined into one number under 2^53. */
+function hashText(text) {
+  let a = 5381, b = 0;
+  const s = String(text || "");
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    a = (Math.imul(a, 33) ^ c) >>> 0;
+    b = (b + Math.imul(c, (i + 1) * 2654435761 | 0)) >>> 0;
+  }
+  return a * 1048576 + (b % 1048576);
+}
+
+export function overlayElementId(featureId) {
+  return OVERLAY_HASH_BASE - hashText(featureId);
+}
+
+/* Whether an object's osmId ("way/-900012345", "way/-900012345#1") names an overlay element
+   rather than a real OSM one. OSM ids are positive; only the overlay writes negative ones. */
+export function isOverlayOsmId(osmId) {
+  const match = /^[a-z]+\/(-\d+)/.exec(String(osmId || ""));
+  return !!match && Number(match[1]) <= OVERLAY_ID_BASE;
+}
 
 function num(value) { const n = Number(value); return Number.isFinite(n) ? n : null; }
 
@@ -207,17 +238,25 @@ export function pinShape(feature) {
 export function overlayToOsmElements(features) {
   const list = normalizeOverlayFeatures(features);
   const linkHole = linkedHoleNumbers(list);
-  return list.map((feature, index) => {
+  const used = new Set();
+  return list.map(feature => {
     const [key, value] = OSM_TAG[feature.kind] || ["golf", feature.kind];
     const tags = { [OVERLAY_TAG]: feature.id, [key]: value };
     const hole = feature.hole || (feature.link && linkHole[feature.link]) || null;
     if (hole) tags.ref = String(hole);
     /* The resolver pairs a link's green, fairway and tee as one hole whether numbered or not. */
     if (feature.link) tags["clarity:link"] = feature.link;
+    /* The OSM element this shape stands in for, so the surface pass can drop the object that
+       element wrote on an earlier run (mergeOverlayIntoPayload drops the element itself). */
+    if (feature.osm) tags[REPLACES_TAG] = feature.osm;
     const points = feature.pin ? pinShape(feature) : feature.points;
     const geometry = points.map(p => ({ lat: p.lat, lon: p.lng }));
     if (overlayKindIsPolygon(feature.kind)) geometry.push({ lat: points[0].lat, lon: points[0].lng });
-    return { type: "way", id: OVERLAY_ID_BASE - index, tags, geometry };
+    /* Two ids hashing alike is a one-in-billions event; the second steps down until free. */
+    let id = overlayElementId(feature.id);
+    while (used.has(id)) id -= 1;
+    used.add(id);
+    return { type: "way", id, tags, geometry };
   }).concat(derivedHoleLines(list, linkHole));
 }
 
