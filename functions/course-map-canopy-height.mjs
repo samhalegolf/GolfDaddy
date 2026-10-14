@@ -15,6 +15,21 @@ const MAX_SPAN_M = 2500;
 
 function num(value) { const n = Number(value); return Number.isFinite(n) ? n : null; }
 
+/* Tiles already opened by this instance. Opening one reads its header - several round trips -
+   and the tree finder asks for one fairway after another on the same tile, so a warm
+   instance keeps the few it has opened (and the blocks geotiff.js has cached on them). */
+const OPEN_TILES_MAX = 8;
+const openTiles = new Map();
+async function openTile(url) {
+  if (openTiles.has(url)) return openTiles.get(url);
+  const { fromUrl } = await import("geotiff");
+  const opening = fromUrl(url, { allowFullFile: false });
+  openTiles.set(url, opening);
+  opening.catch(() => openTiles.delete(url));
+  while (openTiles.size > OPEN_TILES_MAX) openTiles.delete(openTiles.keys().next().value);
+  return opening;
+}
+
 export default async function courseMapCanopyHeight(req) {
   if (req.method === "OPTIONS") return json(204, null);
   if (req.method !== "GET") return json(405, { error: "Method not allowed" });
@@ -28,8 +43,7 @@ export default async function courseMapCanopyHeight(req) {
   }
   const metresPerDeg = 111320, across = (east - west) * metresPerDeg * Math.cos((north + south) / 2 * Math.PI / 180);
   if ((north - south) * metresPerDeg > MAX_SPAN_M || across > MAX_SPAN_M) return json(400, { error: "area too large" });
-  const { fromUrl } = await import("geotiff");
-  const { grids, missing } = await readCanopy({ north, south, east, west }, { openTiff: url => fromUrl(url, { allowFullFile: false }) });
+  const { grids, missing } = await readCanopy({ north, south, east, west }, { openTiff: openTile });
   if (!grids.length && missing.length) return json(502, { error: "tree heights unavailable", detail: missing.map(m => m.quadkey + ": " + m.reason).join("; "), missing });
   return json(200, {
     grids: grids.map(g => Object.assign({}, g, { heights: Buffer.from(g.heights.buffer, g.heights.byteOffset, g.heights.byteLength).toString("base64") })),

@@ -167,6 +167,9 @@
      to this many pixels a side, and learns what a tree looks like from at most this many of the
      trees placed by hand this session - the latest ones. */
   var TREE_FINDER_MPP = 0.3;
+  /* Near play reads every picture at about this, so one fairway's tiles serve the next shape's
+     too, and a crown is still ~20px across. */
+  var NEAR_PLAY_MPP = 0.45;
   var TREE_FINDER_MAX_SIDE_PX = 1400;
   var TREE_SAMPLE_MAX = 12;
   /* Near play, the band looked along each fairway and green can be set this wide, in metres. */
@@ -1240,71 +1243,88 @@
       el["tree-auto"].disabled = !!wandsRunning;
     }
 
-    /* Tree heights under a capture, as a 0/1 mask the size of its picture, or null with why. */
-    function canopyMask(cap) {
-      if (session.treeHeights === false) return Promise.resolve({ mask: null, why: "" });
-      var w = cap.image.width, h = cap.image.height;
-      var nw = cap.toLL({ x: 0, y: 0 }), se = cap.toLL({ x: w, y: h });
-      var query = "?north=" + nw.lat.toFixed(6) + "&south=" + se.lat.toFixed(6) + "&east=" + se.lng.toFixed(6) + "&west=" + nw.lng.toFixed(6);
+    /* Tree heights round an outline, out to padM: {grids, credit}, or {why} when there are
+       none. Asked for alongside the picture, not after it - the box is the outline's, padded
+       a little past the picture's own room so it covers the picture whatever its tile edges. */
+    function canopyFor(ring, padM) {
+      if (session.treeHeights === false) return Promise.resolve({ grids: null, why: "" });
+      var b = L.latLngBounds(toLatLngs(ring)), lat = b.getCenter().lat;
+      var dLat = (padM + 60) / 111320, dLng = (padM + 60) / (111320 * Math.cos(lat * Math.PI / 180));
+      var query = "?north=" + (b.getNorth() + dLat).toFixed(6) + "&south=" + (b.getSouth() - dLat).toFixed(6) +
+        "&east=" + (b.getEast() + dLng).toFixed(6) + "&west=" + (b.getWest() - dLng).toFixed(6);
       return api("GET", query, null, CANOPY_API).then(function (data) {
         var grids = (data && data.grids || []).map(function (g) {
           var raw = atob(g.heights), heights = new Uint8Array(raw.length);
           for (var i = 0; i < raw.length; i++) heights[i] = raw.charCodeAt(i);
           return { crs: g.crs, x0: g.x0, y0: g.y0, dx: g.dx, dy: g.dy, width: g.width, height: g.height, heights: heights };
         });
-        var mask = shapes.heightMask({ width: w, height: h, z: cap.z, ox: cap.ox, oy: cap.oy }, grids, shapes.TREE_MIN_HEIGHT_M);
-        if (mask && data.credit) canopyCredit = data.credit;
-        return { mask: mask, why: mask ? "" : "no tree heights here" };
+        return { grids: grids, credit: data && data.credit };
       }, function (error) {
-        return { mask: null, why: "tree heights unavailable (" + (error && error.message || error) + ")" };
+        return { grids: null, why: "tree heights unavailable (" + (error && error.message || error) + ")" };
       });
     }
 
-    /* One fairway or green: its picture, where to look round it, and the finder over that. */
-    function nearPlayRun(item, bandM) {
+    /* Those heights on a picture: a 0/1 mask the size of it, or null with why. */
+    function canopyMask(cap, canopy) {
+      if (!canopy.grids) return { mask: null, why: canopy.why };
+      var mask = shapes.heightMask({ width: cap.image.width, height: cap.image.height, z: cap.z, ox: cap.ox, oy: cap.oy }, canopy.grids, shapes.TREE_MIN_HEIGHT_M);
+      if (mask && canopy.credit) canopyCredit = canopy.credit;
+      return { mask: mask, why: mask ? "" : "no tree heights here" };
+    }
+
+    /* What one fairway or green needs off the network - its picture and its tree heights,
+       both at once. */
+    function nearPlayFetch(item, bandM, reuse) {
       var ring = outlineOf(item);
-      return captureBox(ring, { mpp: TREE_FINDER_MPP, padM: bandM, maxSidePx: TREE_FINDER_MAX_SIDE_PX, marginPx: 8 }).then(function (cap) {
-        var w = cap.image.width, h = cap.image.height;
-        function px(points) { return points.map(cap.toPx); }
-        /* Only the shapes on this picture are painted - a course holds hundreds. */
-        function onPicture(xy) {
-          var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-          xy.forEach(function (p) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
-          return x1 >= 0 && y1 >= 0 && x0 < w && y0 < h;
+      return Promise.all([
+        captureBox(ring, { mpp: NEAR_PLAY_MPP, padM: bandM, maxSidePx: TREE_FINDER_MAX_SIDE_PX, marginPx: 8, reuse: reuse }),
+        canopyFor(ring, bandM)
+      ]);
+    }
+
+    /* One fairway or green, its picture and heights in hand: where to look round it, and the
+       finder over that. */
+    function nearPlayRun(item, bandM, cap, canopy) {
+      var ring = outlineOf(item);
+      var w = cap.image.width, h = cap.image.height;
+      function px(points) { return points.map(cap.toPx); }
+      /* Only the shapes on this picture are painted - a course holds hundreds. */
+      function onPicture(xy) {
+        var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        xy.forEach(function (p) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+        return x1 >= 0 && y1 >= 0 && x0 < w && y0 < h;
+      }
+      var surfaces = [], woods = [], turf = [], avoid = [];
+      session.features.forEach(function (f) {
+        if (f.id === item.id) return;
+        if (f.kind === "tree") {
+          var c = cap.toPx(shapes.centroid(f.points));
+          if (c.x > -50 && c.y > -50 && c.x < w + 50 && c.y < h + 50) avoid.push({ x: c.x, y: c.y, r: shapes.ringRadiusM(f.points) / cap.mpp });
+          return;
         }
-        var surfaces = [], woods = [], turf = [], avoid = [];
-        session.features.forEach(function (f) {
-          if (f.id === item.id) return;
-          if (f.kind === "tree") {
-            var c = cap.toPx(shapes.centroid(f.points));
-            if (c.x > -50 && c.y > -50 && c.x < w + 50 && c.y < h + 50) avoid.push({ x: c.x, y: c.y, r: shapes.ringRadiusM(f.points) / cap.mpp });
-            return;
-          }
-          var outline = SURFACE_KINDS.indexOf(f.kind) >= 0 || f.kind === "trees" ? outlineOf(f) : null;
-          var xy = outline && px(outline);
-          if (!xy || !onPicture(xy)) return;
-          if (f.kind === "trees") woods.push(xy);
-          else surfaces.push(xy);
-          if (NEAR_PLAY_KINDS.indexOf(f.kind) >= 0) turf.push(xy);
-        });
-        var played = px(ring);
-        turf.push(played);
-        var radiusPx = shapes.TREE_AUTO_RADIUS_M / cap.mpp;
-        var band = shapes.playBand(w, h, { play: [played], surfaces: surfaces, woods: woods, bandPx: bandM / cap.mpp, clearPx: shapes.TREE_CLEAR_M / cap.mpp });
-        return canopyMask(cap).then(function (heights) {
-          var auto = shapes.autoTreeModel(cap.image, shapes.ringsMask(w, h, turf), band, { radiusPx: radiusPx, tall: heights.mask });
-          var byHeight = [];
-          if (heights.mask) {
-            var tall = new Uint8Array(w * h);
-            for (var i = 0; i < tall.length; i++) tall[i] = heights.mask[i] && band[i] ? 1 : 0;
-            byHeight = shapes.treesInMask(tall, w, h, { radiusPx: radiusPx, avoid: avoid });
-          }
-          return {
-            cap: cap, hole: item.hole, byHeight: byHeight, why: heights.why,
-            run: auto.model ? shapes.treeFinder(cap.image, auto.model, { radiusPx: radiusPx, inside: auto.allow, avoid: avoid }) : null
-          };
-        });
+        var outline = SURFACE_KINDS.indexOf(f.kind) >= 0 || f.kind === "trees" ? outlineOf(f) : null;
+        var xy = outline && px(outline);
+        if (!xy || !onPicture(xy)) return;
+        if (f.kind === "trees") woods.push(xy);
+        else surfaces.push(xy);
+        if (NEAR_PLAY_KINDS.indexOf(f.kind) >= 0) turf.push(xy);
       });
+      var played = px(ring);
+      turf.push(played);
+      var radiusPx = shapes.TREE_AUTO_RADIUS_M / cap.mpp;
+      var band = shapes.playBand(w, h, { play: [played], surfaces: surfaces, woods: woods, bandPx: bandM / cap.mpp, clearPx: shapes.TREE_CLEAR_M / cap.mpp });
+      var heights = canopyMask(cap, canopy);
+      var auto = shapes.autoTreeModel(cap.image, shapes.ringsMask(w, h, turf), band, { radiusPx: radiusPx, tall: heights.mask });
+      var byHeight = [];
+      if (heights.mask) {
+        var tall = new Uint8Array(w * h);
+        for (var i = 0; i < tall.length; i++) tall[i] = heights.mask[i] && band[i] ? 1 : 0;
+        byHeight = shapes.treesInMask(tall, w, h, { radiusPx: radiusPx, avoid: avoid });
+      }
+      return {
+        cap: cap, hole: item.hole, byHeight: byHeight, why: heights.why,
+        run: auto.model ? shapes.treeFinder(cap.image, auto.model, { radiusPx: radiusPx, inside: auto.allow, avoid: avoid }) : null
+      };
     }
 
     function runNearPlay() {
@@ -1319,12 +1339,34 @@
       wandsRunning++;
       updateHint();
       renderTreeAuto();
+      /* The next shape's picture and heights load while this one is worked out, and tiles the
+         last two pictures used are kept for the next to share. */
+      var reuse = new Map(), recent = [], fetched = [];
+      function fetchItem(k) {
+        if (k < items.length && !fetched[k]) {
+          fetched[k] = nearPlayFetch(items[k], bandM, reuse);
+          fetched[k].catch(function () {});
+        }
+        return fetched[k];
+      }
+      function keepTiles(cap) {
+        recent = recent.concat([cap.urls]).slice(-2);
+        var keep = new Set([].concat.apply([], recent));
+        Array.from(reuse.keys()).forEach(function (url) { if (!keep.has(url)) reuse.delete(url); });
+      }
       var walk = items.reduce(function (prev, item, k) {
         return prev.then(function () {
           if (destroyed || session.loadedFor !== id) return;
           var where = (item.hole ? "hole " + item.hole + "'s " : "an unnumbered ") + item.kind;
           setStatus("Looking for trees along " + where + " (" + (k + 1) + " of " + items.length + ")…");
-          return nearPlayRun(item, bandM).then(function (run) {
+          return fetchItem(k).then(function (got) {
+            keepTiles(got[0]);
+            fetchItem(k + 1);
+            var run = nearPlayRun(item, bandM, got[0], got[1]);
+            /* Read: from here on the run needs where its pixels are, not the pixels. */
+            got[0].image = null;
+            return run;
+          }).then(function (run) {
             runs.push(run);
             if (run.why) notes[run.why] = true;
             var n = (run.run ? run.run.find(level).length : 0) + run.byHeight.length;
@@ -2111,7 +2153,9 @@
     /* The picture over some points: tiles at one zoom, stitched, unscaled, with the points'
        pixel <-> lat/lng conversions. opts: z (that zoom; otherwise the zoom nearest `mpp` metres
        a pixel the provider has), padM (metres of room round the points), marginPx (extra pixels
-       of room, 24 unless given), maxSidePx (one zoom coarser until the picture fits). */
+       of room, 24 unless given), maxSidePx (one zoom coarser until the picture fits), reuse
+       (tiles shared with other pictures - see stitchTiles; the picture's own come back as
+       its `urls`). */
     function captureBox(points, opts) {
       return new Promise(function (resolve, reject) {
         var refused = captureRefusal();
@@ -2131,14 +2175,14 @@
           z--;
         }
         var tx0 = Math.floor(box.x0 / 256), ty0 = Math.floor(box.y0 / 256), tx1 = Math.floor(box.x1 / 256), ty1 = Math.floor(box.y1 / 256);
-        stitchTiles(z, tx0, ty0, tx1, ty1).then(function (out) {
+        stitchTiles(z, tx0, ty0, tx1, ty1, opts.reuse).then(function (out) {
           if (out.failed) return reject(new Error(out.failed === out.tiles ? "no imagery loaded here" : out.failed + " of " + out.tiles + " tiles did not load"));
           var image;
           try { image = out.canvas.getContext("2d").getImageData(0, 0, out.canvas.width, out.canvas.height); }
           catch (e) { return reject(new Error("this provider's tiles cannot be read back (no CORS) - switch provider")); }
           var ox = tx0 * 256, oy = ty0 * 256;
           resolve({
-            image: image, z: z, mpp: box.mpp, ox: ox, oy: oy,
+            image: image, z: z, mpp: box.mpp, ox: ox, oy: oy, urls: out.urls,
             toPx: function (p) { var q = mapObj.project(L.latLng(p.lat, p.lng), z); return { x: q.x - ox, y: q.y - oy }; },
             toLL: function (q) { var ll = mapObj.unproject(L.point(q.x + ox, q.y + oy), z); return { lat: ll.lat, lng: ll.lng }; }
           });
@@ -4121,26 +4165,44 @@
       finally { layer._tileZoom = saved; }
     }
 
-    function stitchTiles(z, x0, y0, x1, y1) {
+    /* One tile, loaded: the image, or null when it would not load. */
+    function loadTile(url) {
+      return new Promise(function (done) {
+        var img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = function () { done(img); };
+        img.onerror = function () { done(null); };
+        img.src = url;
+      });
+    }
+
+    /* `reuse` (a Map of tile url -> loadTile promise, optional) lets pictures taken one after
+       another share the tiles they overlap on - the tree finder near play reads a fairway and
+       then its green, most of the same ground. The urls this picture used come back as
+       `urls`, so the caller can let go of the rest. */
+    function stitchTiles(z, x0, y0, x1, y1, reuse) {
       var full = document.createElement("canvas");
       full.width = (x1 - x0 + 1) * 256; full.height = (y1 - y0 + 1) * 256;
       var ctx = full.getContext("2d");
       ctx.fillStyle = "#000"; ctx.fillRect(0, 0, full.width, full.height);
-      var loads = [];
+      var loads = [], urls = [];
       var failed = 0;
       for (var ty = y0; ty <= y1; ty++) {
         for (var tx = x0; tx <= x1; tx++) {
-          loads.push(new Promise(function (done) {
-            var img = new Image();
-            var cx = tx, cy = ty;
-            img.crossOrigin = "anonymous";
-            img.onload = function () { try { ctx.drawImage(img, (cx - x0) * 256, (cy - y0) * 256, 256, 256); } catch (e) { failed++; } done(); };
-            img.onerror = function () { failed++; done(); };
-            try { img.src = tileUrlAt(cx, cy, z); } catch (e) { failed++; done(); }
-          }));
+          (function (cx, cy) {
+            var url;
+            try { url = tileUrlAt(cx, cy, z); } catch (e) { failed++; return; }
+            var tile = reuse && reuse.get(url);
+            if (!tile) { tile = loadTile(url); if (reuse) reuse.set(url, tile); }
+            urls.push(url);
+            loads.push(tile.then(function (img) {
+              if (!img) { failed++; if (reuse) reuse.delete(url); return; }
+              try { ctx.drawImage(img, (cx - x0) * 256, (cy - y0) * 256, 256, 256); } catch (e) { failed++; }
+            }));
+          })(tx, ty);
         }
       }
-      return Promise.all(loads).then(function () { return { canvas: full, tiles: loads.length, failed: failed }; });
+      return Promise.all(loads).then(function () { return { canvas: full, tiles: (x1 - x0 + 1) * (y1 - y0 + 1), failed: failed, urls: urls }; });
     }
 
     /* The picture the wand reads: a few tiles around a pin at the zoom nearest the kind's

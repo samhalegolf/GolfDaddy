@@ -162,7 +162,7 @@ test("captured tiles are fetched at the capture zoom, not whatever zoom the map 
   /* Leaflet's template layers take {z} from the map's own tile zoom; the green wand read the
      wrong ground at every map zoom but its capture zoom until this was pinned. */
   assert.ok(/function tileUrlAt\(cx, cy, z\) \{[\s\S]*?layer\._tileZoom = z;[\s\S]*?finally \{ layer\._tileZoom = saved; \}/.test(page), "tileUrlAt must point the layer's tile zoom at z for the call and restore it");
-  assert.ok(page.includes("img.src = tileUrlAt(cx, cy, z)"), "stitched tiles must be addressed through tileUrlAt");
+  assert.ok(page.includes("try { url = tileUrlAt(cx, cy, z); }"), "stitched tiles must be addressed through tileUrlAt");
   assert.ok(page.includes("attempt(1)"), "the wand retries one zoom coarser before falling back to a circle");
 });
 
@@ -409,6 +409,8 @@ test("trees near play: looks along each fairway and green with nothing placed, g
   assert.ok(page.includes("shapes.playBand(w, h, { play: [played], surfaces: surfaces, woods: woods,"), "the band is built round the shape looked along, clear of every surface");
   assert.ok(page.includes("shapes.autoTreeModel(cap.image, shapes.ringsMask(w, h, turf), band,"), "what a tree looks like comes from the turf");
   assert.ok(page.includes("finder = { ids: [], runs: runs, nearPlay: true, note: note };"), "the trees it drops are live for left / right / Enter / Esc");
+  assert.ok(page.includes("keepTiles(got[0]);\n            fetchItem(k + 1);"), "the next shape loads while this one is read, sharing the tiles they overlap on");
+  assert.ok(page.includes("captureBox(ring, { mpp: NEAR_PLAY_MPP,") && page.includes("canopyFor(ring, bandM)"), "pictures at one zoom, heights asked for alongside them");
   assert.ok(page.includes('var CANOPY_API = "/api/course-map-canopy-height";'), "tree heights come from the canopy endpoint");
   assert.ok(page.includes("(canopyCredit ? \" · \" + esc(canopyCredit) : \"\")"), "the tree heights are credited (CC BY)");
   assert.ok(page.includes("var MAX_TREES = 3000;") && page.includes("function roomFor(kind)"), "single trees have a cap of their own");
