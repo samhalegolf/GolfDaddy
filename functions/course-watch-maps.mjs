@@ -201,9 +201,12 @@ function reliefMaskForFrame(spatialRef, sample) {
    the Garmin package, so both draw the same shapes. Null means "draw this hole flat". */
 function terrainPieces(frame, sample) {
   try {
+    /* The play line, in the package's own pixels: the fairway's mow lines follow it. */
+    const route = frame.reference && Array.isArray(frame.reference.route) ? frame.reference.route : null;
+    const mowLine = route ? route.map((p) => watchMapCore.projectLatLngToImage(frame.spatialReference, p.lat, p.lng)) : null;
     return terrainCore.buildHoleTerrain(frame.spatialReference, sample,
       (px) => watchMapCore.projectImageToLatLng(frame.spatialReference, px), frame.outlines,
-      { azimuth: RELIEF_DEFAULTS.azimuth, altitude: RELIEF_DEFAULTS.altitude });
+      { azimuth: RELIEF_DEFAULTS.azimuth, altitude: RELIEF_DEFAULTS.altitude, mowLine });
   } catch (error) { return null; }
 }
 
@@ -767,7 +770,7 @@ const GARMIN_TABLE = "course_garmin_maps";
    recipe, say). 2: trees (k), hazard (h) and waste (z) outlines. 3: individual trees.
    4: smoother outlines (greens, bunkers, water to 0.05 m; the rest 0.2 m, was 0.4 m).
    5: the overlay's single trees, where they really stand. */
-const GARMIN_BUILDER_VERSION = 5;
+const GARMIN_BUILDER_VERSION = 6;
 /* A build that started this long ago and never finished died; a new one may start. */
 const GARMIN_BUILD_LOCK_MS = 10 * 60 * 1000;
 const PUBLISHED_MAP_COLUMNS = "course_id,objects_json,holes_json,objects_revision,published_at,updated_at";
@@ -802,12 +805,14 @@ async function generateGarminPackage({ courseId, map, terrainIndex }) {
     const geometry = Object.assign(watchMapCore.objectsForHole(map.objects_json, holeNumber), { singleTrees });
     const frame = watchMapCore.buildWatchHoleFrame(recipe, geometry);
     if (!frame.ok) { errors.push({ holeNumber, reason: frame.reason }); continue; }
-    let terrain = null;
+    /* With heights the ground is shaded; without, the fairway still gets its mow lines. */
+    let sample = null;
     const elevationMeta = elevationMetaForHole(terrainIndex, holeNumber);
     if (elevationMeta) {
-      try { terrain = terrainPieces(frame, heightSampler(await loadElevationCrop(elevationMeta))); }
-      catch (error) { terrain = null; /* drawn flat, as a hole with no elevation is */ }
+      try { sample = heightSampler(await loadElevationCrop(elevationMeta)); }
+      catch (error) { sample = null; /* shaded flat, as a hole with no elevation is */ }
     }
+    const terrain = terrainPieces(frame, sample);
     holes.push({
       holeNumber,
       spatialReference: frame.spatialReference,

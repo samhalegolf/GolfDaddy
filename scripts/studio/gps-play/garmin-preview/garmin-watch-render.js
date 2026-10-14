@@ -82,11 +82,11 @@
   /* GarminSessionManager.MIP_PALETTE / BASE_PALETTE, verbatim. A pattern is
      [base, mix, n, fallback]: a 2x2 tile with n of its pixels in `mix`. */
   var MIP_PALETTE = {
-    r: 0x005500, rd: [0x005500, 0x000000, 2, null], rl: [0x005500, 0x55AA55, 2, null],
-    f: 0x55AA55, fd: [0x55AA55, 0x005500, 1, 0x00AA55], fl: [0x55AA55, 0xAAFFAA, 2, null],
+    r: [0x005500, 0x55AA55, 4, 0x005500], rd: 0x005500, rl: 0x55AA55,
+    f: [0x55AA55, 0xAAFFAA, 1, 0x55AA55], fd: [0x55AA55, 0x005500, 1, 0x00AA55], fl: [0x55AA55, 0xAAFFAA, 2, 0x55FF55],
     g: 0xAAFFAA, gd: [0xAAFFAA, 0x55AA55, 1, 0x55FF55], gl: 0xAAFFAA,
     b: 0xFFFFAA, w: 0x0055AA,
-    k: [0x005500, 0x000000, 3, 0x000000], h: 0x555500, z: [0xAAAA55, 0xAAAAAA, 2, 0xAAAA55]
+    k: [0x005500, 0x000000, 3, 0x000000], h: 0x555500, z: [0xAAAA55, 0xAAAAAA, 4, 0xAAAA55]
   };
   var BASE_PALETTE = {
     r: 0x315833, rd: 0x274629, rl: 0x3C6B3E,
@@ -125,7 +125,15 @@
     var out = {};
     Object.keys(BASE_PALETTE).forEach(function (k) { out[k] = BASE_PALETTE[k]; });
     if (skeletonPal) Object.keys(skeletonPal).forEach(function (k) { if (typeof skeletonPal[k] === "number" && out.hasOwnProperty(k)) out[k] = skeletonPal[k]; });
+    out.r = grainOf(out.r);
+    out.z = grainOf(out.z);
     return out;
+  }
+  /* GarminSessionManager.grainOf: the course's own colour with an 8% darker mix, as grain.
+     Integer arithmetic per channel, as the watch does it. */
+  function grainOf(colour) {
+    var ch = function (shift) { return Math.trunc(((colour >> shift) & 0xFF) * 92 / 100); };
+    return [colour, (ch(16) << 16) | (ch(8) << 8) | ch(0), 4, colour];
   }
 
   // ------------------------------------------------------------------ Monkey C habits
@@ -244,6 +252,7 @@
   Dc.prototype.setAntiAlias = function () {};
   Dc.prototype.fillStyle = function () { return this.fill != null ? (typeof this.fill === "number" ? hex(this.fill) : this.fill) : hex(this.fg); };
   Dc.prototype.clear = function () { this.ctx.fillStyle = hex(this.bg); this.ctx.fillRect(0, 0, this.width, this.height); };
+  Dc.prototype.fillRectangle = function (x, y, w, h) { this.ctx.fillStyle = this.fillStyle(); this.ctx.fillRect(x, y, w, h); };
   Dc.prototype.fillPolygon = function (points) {
     if (points.length < 3) return;
     var c = this.ctx; c.beginPath(); c.moveTo(points[0][0], points[0][1]);
@@ -817,8 +826,10 @@
 
   var SURFACE_KEYS = ["r", "f", "g"];
   MapFace.prototype.drawOutlines = function (dc, shapes, palette, imageWidth, imageHeight, viewWidth, viewHeight) {
-    dc.setColor(palette.r, palette.r);
+    var rough = palette.r, roughBase = Array.isArray(rough) ? rough[0] : rough;
+    dc.setColor(roughBase, roughBase);
     dc.clear();
+    if (Array.isArray(rough) && dc.hasSetFill) { dc.setFill(this.patternTexture(dc, rough)); dc.fillRectangle(0, 0, viewWidth, viewHeight); }
     var f = this.camera.frame(imageWidth, imageHeight, viewWidth, viewHeight), view = [viewWidth, viewHeight];
     this.drawPieces(dc, shapes.t, 0, palette, f, view);
     if (!hasTrees(shapes)) this.fillRings(dc, shapes.k, palette.k, f, view);
@@ -868,24 +879,38 @@
     }
   };
 
-  /* The 2x2 tile GarminMapView.patternTexture makes, as a canvas pattern. */
+  /* The tile GarminMapView.patternTexture makes, as a canvas pattern: 2x2 with n of 1-3
+     pixels in the mix colour, or (n = 4) the 16x16 grain tile. */
+  var GRAIN_SIZE = 16, GRAIN_MIX_DASHES = [1, 2, 9, 5, 3, 12, 13, 9], GRAIN_BASE_DASHES = [5, 0, 12, 13, 0, 8, 8, 10];
   MapFace.prototype.patternTexture = function (dc, spec) {
     var key = spec[0] + "/" + spec[1] + "/" + spec[2];
     if (this.textures[key]) return this.textures[key];
     var tile = (typeof document !== "undefined") ? document.createElement("canvas") : null;
     if (!tile) return hex(spec[0]);
-    tile.width = 2; tile.height = 2;
+    var n = spec[2], size = n >= 4 ? GRAIN_SIZE : 2;
+    tile.width = size; tile.height = size;
     var t = tile.getContext("2d");
-    t.fillStyle = hex(spec[0]); t.fillRect(0, 0, 2, 2);
+    t.fillStyle = hex(spec[0]); t.fillRect(0, 0, size, size);
     t.fillStyle = hex(spec[1]);
-    var n = spec[2];
-    if (n >= 1) t.fillRect(0, 0, 1, 1);
-    if (n >= 2) t.fillRect(1, 1, 1, 1);
-    if (n >= 3) t.fillRect(1, 0, 1, 1);
+    if (n >= 4) {
+      for (var y = 0; y < size; y++) for (var x = y % 2; x < size; x += 2) t.fillRect(x, y, 1, 1);
+      drawDashes(t, GRAIN_MIX_DASHES);
+      t.fillStyle = hex(spec[0]);
+      drawDashes(t, GRAIN_BASE_DASHES);
+    } else {
+      if (n >= 1) t.fillRect(0, 0, 1, 1);
+      if (n >= 2) t.fillRect(1, 1, 1, 1);
+      if (n >= 3) t.fillRect(1, 0, 1, 1);
+    }
     var texture = dc.ctx.createPattern(tile, "repeat");
     this.textures[key] = texture;
     return texture;
   };
+  function drawDashes(t, starts) {
+    for (var i = 0; i + 1 < starts.length; i += 2) {
+      for (var k = 0; k < 4; k++) t.fillRect((starts[i] + k) % GRAIN_SIZE, (starts[i + 1] + k) % GRAIN_SIZE, 1, 1);
+    }
+  }
 
   return {
     DEVICES: DEVICES,

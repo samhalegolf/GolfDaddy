@@ -281,15 +281,28 @@ class GarminSessionManager {
     // fairway. A pattern is [base, mix, n, fallback]: a 2x2 tile with n of
     // its 4 pixels in `mix`, an in-between shade this screen cannot show any
     // other way (the only solid colour darker than the rough is black, which
-    // was far too dark). `fallback` is the solid colour for a watch without
-    // pattern fills, or null to leave that surface flat there.
+    // was far too dark). n of 4 is GRAIN instead: a 16x16 tile half and half
+    // with short diagonal dashes (GarminMapView.patternTexture), the rough's
+    // and the waste's texture. `fallback` is the solid colour for a watch
+    // without pattern fills, or null to leave that surface flat there.
+    // The fairway's mow lines are terrain pieces, label 5 (fairway lit), cut
+    // by the server along the hole's play line: "fl" is the stripe.
     static var MIP_PALETTE = {
-        "r" => 0x005500, "rd" => [0x005500, 0x000000, 2, null], "rl" => [0x005500, 0x55AA55, 2, null],
-        "f" => 0x55AA55, "fd" => [0x55AA55, 0x005500, 1, 0x00AA55], "fl" => [0x55AA55, 0xAAFFAA, 2, null],
+        "r" => [0x005500, 0x55AA55, 4, 0x005500], "rd" => 0x005500, "rl" => 0x55AA55,
+        "f" => [0x55AA55, 0xAAFFAA, 1, 0x55AA55], "fd" => [0x55AA55, 0x005500, 1, 0x00AA55], "fl" => [0x55AA55, 0xAAFFAA, 2, 0x55FF55],
         "g" => 0xAAFFAA, "gd" => [0xAAFFAA, 0x55AA55, 1, 0x55FF55], "gl" => 0xAAFFAA,
         "b" => 0xFFFFAA, "w" => 0x0055AA,
-        "k" => [0x005500, 0x000000, 3, 0x000000], "h" => 0x555500, "z" => [0xAAAA55, 0xAAAAAA, 2, 0xAAAA55]
+        "k" => [0x005500, 0x000000, 3, 0x000000], "h" => 0x555500, "z" => [0xAAAA55, 0xAAAAAA, 4, 0xAAAA55]
     };
+    // A surface with grain (n = 4, GarminMapView.patternTexture): the mix colour
+    // for a course's own rough or waste is that colour, 8% darker - a faint
+    // diagonal grain in the course's own green or sand, never a different hue.
+    function grainOf(colour) {
+        var r = ((colour >> 16) & 0xFF) * 92 / 100;
+        var g = ((colour >> 8) & 0xFF) * 92 / 100;
+        var b = (colour & 0xFF) * 92 / 100;
+        return [colour, (r << 16) | (g << 8) | b, 4, colour];
+    }
     // The base palette every package started from, with its variants worked
     // out as the phone does (watch-map-delivery.js cleanPalette: x0.8, x1.22).
     static var BASE_PALETTE = {
@@ -314,6 +327,8 @@ class GarminSessionManager {
                 if (v instanceof Lang.Number && out.hasKey(pk[j])) { out[pk[j]] = v; }
             }
         }
+        out["r"] = grainOf(out["r"]);
+        out["z"] = grainOf(out["z"]);
         return out;
     }
 
