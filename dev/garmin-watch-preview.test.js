@@ -78,7 +78,10 @@ test("the package palette becomes the watch's base palette by the phone's own ru
   assert.deepStrictEqual(R.cleanPalette(core.WATCH_MAP_RECIPE_V1.colors), R.BASE_PALETTE);
   assert.strictEqual(R.mapPalette(false, { r: 0x123456 }), R.MIP_PALETTE, "a MIP screen ignores the package palette");
   const tinted = R.mapPalette(true, { r: 0x123456, nonsense: 1 });
-  assert.strictEqual(tinted.r, 0x123456);
+  /* The course's rough, as grain: itself and an 8% darker mix (integer per channel, as the
+     watch does it), with the solid colour as the fallback. */
+  assert.deepStrictEqual(tinted.r, [0x123456, 0x102F4F, 4, 0x123456]);
+  assert.deepStrictEqual(tinted.z, [R.BASE_PALETTE.z, 0xA9A190, 4, R.BASE_PALETTE.z], "waste has its grain too");
   assert.strictEqual(tinted.f, R.BASE_PALETTE.f);
   assert.ok(!("nonsense" in tinted));
   assert.strictEqual(R.cleanPalette(null), null);
