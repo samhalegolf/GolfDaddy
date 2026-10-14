@@ -1937,8 +1937,6 @@
     "welcome.heroLineOne": "Vidd ki a gyakorlás",
     "welcome.heroLineTwo": "legjavát a",
     "welcome.heroLineThree": "golfpályára",
-    "welcome.openApp": "Clarity Caddy megnyitása",
-    "welcome.createAccount": "Fiók létrehozása",
     "welcome.appStoreBadge": "Töltsd le a Clarity Caddyt az App Store-ból",
     "welcome.playStoreBadge": "Szerezd be a Clarity Caddyt a Google Playen",
     "welcome.loopEyebrow": "A Clarity-kör",

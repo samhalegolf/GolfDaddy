@@ -239,5 +239,15 @@ export function courseFitMessage(verdict) {
   if (verdict.reason === "scorecard-identity-mismatch") {
     return "This doesn't look like the course you searched for. Pin the one you are playing.";
   }
+  if (verdict.reason === "ground-is-another-club") {
+    /* Named, because "pin the one you are playing" cannot help when the course
+       the player asked for has no numbered holes in OSM at all - the honest
+       prompt says whose ground was found and what the asked-for outline holds. */
+    const own = d.pinOutlineName || "the course you searched for";
+    const held = d.ownNumberedHoles > 0
+      ? own + " has only " + d.ownNumberedHoles + " numbered hole" + (d.ownNumberedHoles === 1 ? "" : "s") + " in OpenStreetMap"
+      : own + " has no numbered holes in OpenStreetMap";
+    return "This ground is tagged " + (d.outlineName || "another club") + " in OpenStreetMap, and " + held + ". Pin the one you are playing.";
+  }
   return "Pin the course you are playing.";
 }

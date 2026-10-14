@@ -2016,8 +2016,6 @@
     "welcome.heroLineOne": "Du ce ai mai bun",
     "welcome.heroLineTwo": "de la antrenament",
     "welcome.heroLineThree": "pe terenul de golf",
-    "welcome.openApp": "Deschide Clarity Caddy",
-    "welcome.createAccount": "Creează cont",
     "welcome.appStoreBadge": "Descarcă Clarity Caddy din App Store",
     "welcome.playStoreBadge": "Descarcă Clarity Caddy din Google Play",
     "welcome.loopEyebrow": "Ciclul Clarity",

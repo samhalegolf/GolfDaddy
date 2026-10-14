@@ -1937,8 +1937,6 @@
     "welcome.heroLineOne": "Пренеси най-доброто",
     "welcome.heroLineTwo": "от тренировките си",
     "welcome.heroLineThree": "на голф игрището",
-    "welcome.openApp": "Отвори Clarity Caddy",
-    "welcome.createAccount": "Създай профил",
     "welcome.appStoreBadge": "Изтегли Clarity Caddy от App Store",
     "welcome.playStoreBadge": "Изтегли Clarity Caddy от Google Play",
     "welcome.loopEyebrow": "Цикълът Clarity",

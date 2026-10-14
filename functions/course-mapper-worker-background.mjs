@@ -28,7 +28,7 @@ import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { wakeGarminBuild } from "./lib/gd-garmin-build-wake.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete, scorecardIdentityMismatch } from "./lib/gd-course-fit-core.mjs";
 import { reverseGeocodePlace } from "./lib/gd-course-place.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, ownCourseFootprints, widerRetryAdopts, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, intersectOsmFrames, SIBLING_SWEEP_M, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, HAND_DRAWN_SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, ownCourseFootprints, widerRetryAdopts, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, foreignGroundClaim, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, intersectOsmFrames, SIBLING_SWEEP_M, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, HAND_DRAWN_SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole, resolverHoleCandidates } from "./lib/gd-geometry-resolver-core.mjs";
 import { partitionLoops, walkCost } from "./lib/gd-ground-loops-core.mjs";
 import { courseNameFromCard } from "./lib/gd-facility-organise-core.mjs";
@@ -2960,6 +2960,69 @@ async function runMapperJob(job, origin) {
         queryStages.push("wider-retry");
         diagnostics.osmFeatures = golfFeatureCounts(payload);
       }
+    }
+  }
+
+  /* THE GROUND IS TAGGED AS SOMEONE ELSE'S.
+   *
+   * Everything above found holes; nothing above asked whose. Seminole Lakes
+   * Country Club (2026-10-14) scanned, found five numbered holes at 1400m - the
+   * nearest five of Twin Isles Country Club, 1.3km north-west - widened, found
+   * all eighteen, and published Twin Isles under Seminole's name with
+   * `no-multi-course-signal-on-this-ground`. There was no signal because
+   * Seminole's own three hole ways in OSM carry no numbers: one course numbered
+   * and one not is never a collision, so the outline check that would have named
+   * Twin Isles (markNeighbouringClubs) was never reached. The scorecard identity
+   * check did fire, scored 0.29, and the row published anyway.
+   *
+   * So the outline names are asked here, on the single-loop path, before any of
+   * the fixes below spend effort completing a course that is not this one. When
+   * OSM has drawn the pin inside one named club and every hole inside another,
+   * the holes go up as that other club's course - under its own name, its own
+   * row, no facility - and this run refuses, saying which ground it found and
+   * that the asked-for outline holds nothing numbered. See foreignGroundClaim for
+   * exactly how little this is allowed to decide. */
+  if (!collision.multiLoop && geometry.holesResolved > 0) {
+    const claim = foreignGroundClaim(payload, course.center, { facilityName: facilityNameOf(course), selectedName: course.courseName || "" });
+    if (claim) {
+      diagnostics.foreignGround = {
+        reason: claim.reason,
+        holesOutline: claim.holesOutline,
+        pinOutline: claim.pinOutline,
+        holes: claim.holes,
+        insideHolesOutline: claim.insideHolesOutline,
+        insidePinOutline: claim.insidePinOutline,
+        awayFromPinM: claim.awayFromPinM
+      };
+      diagnostics.neighbouringClubs = [{
+        name: claim.loop.name || null, osmRef: claim.loop.osmRef, holes: claim.loop.holeNumbers.length,
+        contiguous: claim.loop.contiguous, awayFromPinM: claim.loop.awayFromPinM, reason: claim.reason
+      }];
+      await heartbeatJob(job, { stage: "publishing-neighbouring-courses" });
+      diagnostics.neighbourCourses = await publishNeighbourCourses(job, course, [claim.loop], origin)
+        .catch(error => [{ skipped: "publish-failed", error: String((error && error.message) || error).slice(0, 200) }]);
+      const neighbour = diagnostics.neighbourCourses[0] || {};
+      diagnostics.fit = {
+        trusted: false,
+        reason: "ground-is-another-club",
+        scope: "ground",
+        detail: { outlineName: claim.holesOutline.name, pinOutlineName: claim.pinOutline.name, ownNumberedHoles: claim.insidePinOutline, holes: claim.holes }
+      };
+      diagnostics.fit.message = courseFitMessage(diagnostics.fit);
+      throw fail(
+        "the " + claim.holes + " numbered holes found here sit inside the OSM outline \"" + claim.holesOutline.name + "\""
+        + (claim.holesOutline.owner ? " (" + claim.holesOutline.owner + ")" : "")
+        + ", " + (claim.awayFromPinM != null ? claim.awayFromPinM + "m from the pin, " : "")
+        + "while the pin sits inside \"" + claim.pinOutline.name + "\""
+        + (claim.insidePinOutline ? ", which holds only " + claim.insidePinOutline + " of them" : ", which holds no numbered holes")
+        + " (" + claim.reason + "). Not published as " + (course.courseName || course.courseId) + "."
+        + (neighbour.courseId
+          ? " Published as its own course, " + neighbour.courseId + " (" + neighbour.holesResolved + " holes)."
+          : neighbour.skipped === "already-mapped" && neighbour.existing
+            ? " It is already mapped as " + neighbour.existing.courseId + "."
+            : neighbour.skipped ? " Not published on its own either (" + neighbour.skipped + ")." : "")
+        + " To map " + (course.courseName || course.courseId) + ", number its holes in OpenStreetMap or draw them on the Mapping Overlay, then remap."
+      );
     }
   }
 

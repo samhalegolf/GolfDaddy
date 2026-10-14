@@ -2016,8 +2016,6 @@
     "welcome.heroLineOne": "Prenes to najlepšie",
     "welcome.heroLineTwo": "z tréningu",
     "welcome.heroLineThree": "na ihrisko",
-    "welcome.openApp": "Otvoriť Clarity Caddy",
-    "welcome.createAccount": "Vytvoriť účet",
     "welcome.appStoreBadge": "Stiahni si Clarity Caddy v App Store",
     "welcome.playStoreBadge": "Získaj Clarity Caddy na Google Play",
     "welcome.loopEyebrow": "Slučka Clarity",

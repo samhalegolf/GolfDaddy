@@ -14,6 +14,11 @@
  * POST /api/course-scorecards { courseId, key, action: "save", card: {tees, holes} }
  *      the card edited by hand: par, stroke index and each tee's distances. Marked manual and
  *      confirmed, so a later scrape cannot replace it.
+ * POST /api/course-scorecards { courseId, key, action: "delete" }
+ *      the card removed from the store. A card pasted under the wrong facility (Seminole
+ *      Lakes carried a Twin Lakes card) has no other way out: rename keeps it, save keeps it,
+ *      and a scrape never replaces a confirmed card. Only the row goes - the course it named
+ *      keeps its name, and the next Update Scorecards can find a replacement.
  *   admin-auth gated, like the upload beside it. */
 
 import { loadFacilityChildren, facilityNameOf, fetchFacilityRows, cardsFromRows, relabelFacility, SCORECARDS_TABLE, MAPS_TABLE } from "./lib/gd-facility-scorecards.mjs";
@@ -165,6 +170,23 @@ async function saveCard({ facilityKey, facilityName, courseName, key, card, admi
   });
 }
 
+/* A card taken out of the store. Scoped to the facility as well as the key, so a key
+   guessed from another facility deletes nothing here (the 404 above it already says so). */
+async function deleteCard({ facilityKey, facilityName, courseName, key }) {
+  const rows = await fetchFacilityRows(supabaseFetch, facilityKey);
+  const row = rows.find(item => item.course_key === key);
+  if (!row) return json(404, { error: "That card is not stored under this course" });
+  await supabaseFetch(SCORECARDS_TABLE + "?course_key=eq." + encodeURIComponent(key) + "&facility_key=eq." + encodeURIComponent(facilityKey), {
+    method: "DELETE", headers: { Prefer: "return=minimal" }
+  });
+  const wasGps = !!courseName && key === scorecardCourseKey(courseName);
+  return json(200, {
+    deleted: { key, name: row.course_name || "" },
+    message: "Deleted " + (row.course_name || "the card") + "."
+      + (wasGps ? " That was GPS Play's card for " + facilityName + " - add or import another." : "")
+  });
+}
+
 export default async function courseScorecards(req) {
   if (req.method === "OPTIONS") return json(200, { ok: true });
   if (req.method !== "GET" && req.method !== "POST") return json(405, { error: "Method not allowed" });
@@ -190,6 +212,9 @@ export default async function courseScorecards(req) {
   }
   if (payload.action === "save") {
     return saveCard({ facilityKey, facilityName, courseName: pinned.course_name, key: String(payload.key || "").trim(), card: payload.card, adminEmail });
+  }
+  if (payload.action === "delete") {
+    return deleteCard({ facilityKey, facilityName, courseName: pinned.course_name, key: String(payload.key || "").trim() });
   }
   return renameCard({
     facilityKey, facilityName, children,

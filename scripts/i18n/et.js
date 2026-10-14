@@ -1937,8 +1937,6 @@
     "welcome.heroLineOne": "Vii oma harjutuste",
     "welcome.heroLineTwo": "parim osa",
     "welcome.heroLineThree": "golfiväljakule",
-    "welcome.openApp": "Ava Clarity Caddy",
-    "welcome.createAccount": "Loo konto",
     "welcome.appStoreBadge": "Laadi Clarity Caddy alla App Store'ist",
     "welcome.playStoreBadge": "Hangi Clarity Caddy Google Playst",
     "welcome.loopEyebrow": "Clarity-tsükkel",

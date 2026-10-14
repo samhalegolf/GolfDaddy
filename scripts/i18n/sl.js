@@ -2095,8 +2095,6 @@
     "welcome.heroLineOne": "Prenesi najboljše",
     "welcome.heroLineTwo": "z vadbe",
     "welcome.heroLineThree": "na igrišče",
-    "welcome.openApp": "Odpri Clarity Caddy",
-    "welcome.createAccount": "Ustvari račun",
     "welcome.appStoreBadge": "Prenesi Clarity Caddy iz App Store",
     "welcome.playStoreBadge": "Prenesi Clarity Caddy iz Google Play",
     "welcome.loopEyebrow": "Krog Clarity",

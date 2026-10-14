@@ -2016,8 +2016,6 @@
     "welcome.heroLineOne": "Prenesi ono najbolje",
     "welcome.heroLineTwo": "s vježbanja na",
     "welcome.heroLineThree": "golf teren",
-    "welcome.openApp": "Otvori Clarity Caddy",
-    "welcome.createAccount": "Izradi račun",
     "welcome.appStoreBadge": "Preuzmi Clarity Caddy na App Storeu",
     "welcome.playStoreBadge": "Nabavi Clarity Caddy na Google Playu",
     "welcome.loopEyebrow": "Clarity ciklus",

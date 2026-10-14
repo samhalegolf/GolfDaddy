@@ -38,7 +38,7 @@ function foyle() {
 }
 
 function stubWorld({ maps, scorecards }) {
-  const calls = { mapPatches: [], cardPatches: [] };
+  const calls = { mapPatches: [], cardPatches: [], cardDeletes: [] };
   global.fetch = async (url, options = {}) => {
     url = String(url);
     const method = String(options.method || "GET").toUpperCase();
@@ -70,6 +70,13 @@ function stubWorld({ maps, scorecards }) {
         const body = JSON.parse(options.body);
         calls.cardPatches.push({ key: eq("course_key"), body });
         Object.assign(scorecards.find(r => r.course_key === eq("course_key")), body);
+        return jsonResponse(204, null);
+      }
+      if (method === "DELETE") {
+        calls.cardDeletes.push({ key: eq("course_key"), facilityKey: eq("facility_key") });
+        for (let i = scorecards.length - 1; i >= 0; i--) {
+          if (scorecards[i].course_key === eq("course_key") && (!eq("facility_key") || scorecards[i].facility_key === eq("facility_key"))) scorecards.splice(i, 1);
+        }
         return jsonResponse(204, null);
       }
     }
@@ -153,6 +160,35 @@ test("a card edited by hand is saved over the stored one, checked, and marked ma
   const refused = await parse(await handler(request("POST", { courseId: "foyle-golf-club", key: "foyle golf club - course 2", action: "save", card: bad }, "admin-token")));
   assert.strictEqual(refused.status, 400);
   assert.match(refused.body.error, /Hole 4 needs a par/);
+});
+
+test("a card is deleted from the store, scoped to its facility, and the list no longer shows it", async () => {
+  const world = foyle();
+  const calls = stubWorld(world);
+  const res = await parse(await handler(request("POST", { courseId: "foyle-golf-club", key: "foyle golf club - course 2", action: "delete" }, "admin-token")));
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  assert.deepStrictEqual(res.body.deleted, { key: "foyle golf club - course 2", name: "Foyle Golf Club - Course 2" });
+  assert.match(res.body.message, /Deleted Foyle Golf Club - Course 2\./);
+  assert.doesNotMatch(res.body.message, /GPS Play/, "the second card is not GPS Play's");
+  assert.deepStrictEqual(calls.cardDeletes, [{ key: "foyle golf club - course 2", facilityKey: "foyle-golf-club" }]);
+  assert.strictEqual(calls.cardPatches.length, 0, "nothing is patched on a delete");
+  assert.strictEqual(calls.mapPatches.length, 0, "the course keeps its name");
+  const list = await parse(await handler(request("GET", null, "admin-token", "?courseId=foyle-golf-club")));
+  assert.deepStrictEqual(list.body.cards.map(card => card.key), ["foyle golf club"]);
+});
+
+test("deleting GPS Play's own card says so; a player, a missing key and another facility's key delete nothing", async () => {
+  const world = foyle();
+  const calls = stubWorld(world);
+  assert.strictEqual((await handler(request("POST", { courseId: "foyle-golf-club", key: "foyle golf club", action: "delete" }, "player-token"))).status, 403);
+  assert.strictEqual((await handler(request("POST", { courseId: "foyle-golf-club", key: "", action: "delete" }, "admin-token"))).status, 404);
+  world.scorecards.push({ course_key: "elsewhere", course_name: "Elsewhere", facility_key: "elsewhere", source: "manual-upload", holes_json: PAR_THREE, sources_json: [{}] });
+  assert.strictEqual((await handler(request("POST", { courseId: "foyle-golf-club", key: "elsewhere", action: "delete" }, "admin-token"))).status, 404);
+  assert.strictEqual(calls.cardDeletes.length, 0);
+  const gps = await parse(await handler(request("POST", { courseId: "foyle-golf-club", key: "foyle golf club", action: "delete" }, "admin-token")));
+  assert.strictEqual(gps.status, 200);
+  assert.match(gps.body.message, /GPS Play's card for Foyle Golf Club/);
+  assert.strictEqual(world.scorecards.some(row => row.course_key === "elsewhere"), true, "the other facility's card is untouched");
 });
 
 (async function run() {

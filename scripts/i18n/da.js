@@ -1937,8 +1937,6 @@
     "welcome.heroLineOne": "Tag det bedste fra",
     "welcome.heroLineTwo": "din træning med",
     "welcome.heroLineThree": "ud på banen",
-    "welcome.openApp": "Åbn Clarity Caddy",
-    "welcome.createAccount": "Opret konto",
     "welcome.appStoreBadge": "Hent Clarity Caddy i App Store",
     "welcome.playStoreBadge": "Hent Clarity Caddy på Google Play",
     "welcome.loopEyebrow": "Clarity-kredsløbet",

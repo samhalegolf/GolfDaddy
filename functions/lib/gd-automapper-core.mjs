@@ -1271,6 +1271,91 @@ export function holeGapFrames(payload, opts = {}) {
     .slice(0, maxFrames);
 }
 
+/* ---------- one loop, on ground OSM says is someone else's (Seminole Lakes, 2026-10-14) ---
+ *
+ * markNeighbouringClubs reads the outline names, but only inside separateLoops, which
+ * only runs when hole numbers collide. One neighbour with numbered holes beside a course
+ * with none is never a collision: Seminole Lakes Country Club (Punta Gorda) has three
+ * unnumbered hole ways in OSM, Twin Isles Country Club 1.3km away has all eighteen, and
+ * the wider retry found them, numbered 1..18 with nothing repeating, and published Twin
+ * Isles as Seminole Lakes. The outline that held every one of those holes was named
+ * "Twin Isles Country Club" and carried twinislescc.org; the outline holding the pin was
+ * named "Seminole Lakes Golf Course". The data to refuse was in the payload all along.
+ *
+ * So the same two outline tests - another owner, another club's name - are asked of a
+ * single loop too, against the outline the PIN sits in. Deliberately no further: a course
+ * with no outline of its own in OSM, or whose outline shares a word with the holes'
+ * ("The Links at Fancourt" inside "Fancourt Golf Estate"), or whose holes spill outside
+ * an outline that still contains the pin, is left exactly as it was. Only when OSM has
+ * drawn two differently named clubs and put the pin in one and every hole in the other
+ * does this speak, and then it returns the holes as a neighbour loop the worker can
+ * publish under their own name (publishNeighbourCourses) rather than as the selection's.
+ *
+ * Returns null when the ground is the selection's own as far as OSM can tell. */
+export function foreignGroundClaim(payload, centre, options) {
+  if (!centre || !Number.isFinite(centre.lat) || !Number.isFinite(centre.lng)) return null;
+  const polygons = coursePolygonsFrom(payload).filter(polygon => polygon.name || polygon.owner);
+  const features = holeFeatures(payload);
+  if (polygons.length < 2 || !features.length) return null;
+  const holesOutline = outlineHolding({ features }, polygons);
+  if (!holesOutline) return null;
+  if (pointInRing(centre, holesOutline.ring)) return null;
+  const pinOutline = polygons
+    .filter(polygon => polygon !== holesOutline && pointInRing(centre, polygon.ring))
+    .sort((a, b) => spanOfRing(a.ring) - spanOfRing(b.ring))[0] || null;
+  if (!pinOutline) return null;
+  /* The pin's outline is the facility and the holes' outline is a course drawn inside it:
+     the facility's own course, whatever it is called. */
+  if (polygonContainsPolygon(pinOutline, holesOutline)) return null;
+
+  const facilityWords = distinctiveWords([options && options.facilityName, options && options.selectedName, pinOutline.name].filter(Boolean).join(" "));
+  const words = distinctiveWords(holesOutline.name);
+  let reason = null;
+  if (holesOutline.owner && pinOutline.owner && holesOutline.owner !== pinOutline.owner) {
+    reason = "course-outline-run-by-another-owner";
+  } else if (![...words].some(word => facilityWords.has(word))
+    && CLUB_DESIGNATOR.test(holesOutline.name) && facilityWords.size > 0 && words.size > 0) {
+    reason = "course-outline-names-another-club";
+  }
+  if (!reason) return null;
+
+  const numbers = features.map(feature => feature.number);
+  const loopCentre = centroidOfPoints(features.map(feature => feature.centre));
+  const describe = polygon => ({ ref: polygon.ref, name: polygon.name || "", owner: polygon.owner || "" });
+  return {
+    reason,
+    holesOutline: describe(holesOutline),
+    pinOutline: describe(pinOutline),
+    holes: features.length,
+    insideHolesOutline: features.filter(feature => pointInRing(feature.centre, holesOutline.ring)).length,
+    /* How much of the selection's own ground OSM has numbered - usually none, which is
+       the sentence the admin needs: there is nothing here to map until OSM has it. */
+    insidePinOutline: features.filter(feature => pointInRing(feature.centre, pinOutline.ring)).length,
+    awayFromPinM: loopCentre ? Math.round(distance(centre, loopCentre)) : null,
+    /* The holes as the loop they are, shaped like separateLoops' neighbours so the worker
+       publishes them the same way. The whole payload travels with it: on a single-loop
+       run every numbered hole in it is this course's, and the supporting elements pair
+       by distance, so a neighbour's stray greens a kilometre off cannot be chosen. */
+    loop: {
+      name: holesOutline.name || "",
+      osmRef: holesOutline.ref,
+      holesTag: holesOutline.holesTag || null,
+      method: "containment",
+      foreign: true,
+      foreignReason: reason,
+      centre: loopCentre,
+      holeNumbers: [...new Set(numbers)].sort((a, b) => a - b),
+      holeFeatures: features.map(feature => ({
+        number: feature.number,
+        id: String(feature.element && feature.element.type || "way") + "/" + String(feature.element && feature.element.id)
+      })),
+      contiguous: loopIsContiguous(numbers),
+      awayFromPinM: loopCentre ? Math.round(distance(centre, loopCentre)) : null,
+      payload
+    }
+  };
+}
+
 export function separateLoops(payload, centre, options) {
   const features = holeFeatures(payload);
   if (!features.length) return null;

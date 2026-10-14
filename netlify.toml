@@ -415,12 +415,12 @@
   to = "/welcome.html"
   status = 301
 
-# The landing's original "Create account" target. The app has no separate
-# signup page - the auth panel handles both - so this lands on the app shell
-# with the landing redirect suppressed. 302 in case a real page appears later.
+# The landing's original "Create account" target. Accounts are made in the
+# store apps only now (the web app is gated - netlify/edge-functions/
+# web-app-gate.js), so this goes to the landing and its store badges.
 [[redirects]]
   from = "/signup"
-  to = "/?login=1"
+  to = "/welcome.html"
   status = 302
 
 [[headers]]

@@ -2095,8 +2095,6 @@
     "welcome.heroLineOne": "Przenieś to, co najlepsze",
     "welcome.heroLineTwo": "z treningu",
     "welcome.heroLineThree": "na pole golfowe",
-    "welcome.openApp": "Otwórz Clarity Caddy",
-    "welcome.createAccount": "Załóż konto",
     "welcome.appStoreBadge": "Pobierz Clarity Caddy z App Store",
     "welcome.playStoreBadge": "Pobierz Clarity Caddy z Google Play",
     "welcome.loopEyebrow": "Pętla Clarity",

@@ -547,6 +547,61 @@ test("the resolver may only fill numbers OSM lacks, on ground no numbered hole h
   assert.deepStrictEqual(fill.rejected.map(r => r.reason).sort(), ["already-numbered", "ground-claimed-by-hole-1"]);
 });
 
+/* Seminole Lakes, 2026-10-14, in miniature: the pin inside one named outline with no
+   numbered holes, every numbered hole inside a differently named club 1.3km away, and no
+   hole number repeating anywhere - so no collision, and until now no question asked. */
+test("a single loop whose holes all sit inside another club's outline is refused as foreign ground", () => {
+  const PIN = { lat: 26.8770, lng: -82.0198 };
+  const OTHER = { lat: 26.8890, lng: -82.0316 };
+  const ring = (at, half) => [
+    { lat: at.lat - half, lng: at.lng - half }, { lat: at.lat + half, lng: at.lng - half },
+    { lat: at.lat + half, lng: at.lng + half }, { lat: at.lat - half, lng: at.lng + half },
+    { lat: at.lat - half, lng: at.lng - half }
+  ];
+  const hole = (id, number, origin) => {
+    const start = { lat: origin.lat - 0.003 + number * 0.0003, lng: origin.lng - 0.003 + (number % 6) * 0.001 };
+    return { type: "way", id, tags: { golf: "hole", ref: String(number) }, geometry: [start, { lat: start.lat + 0.0008, lng: start.lng + 0.0006 }] };
+  };
+  const outline = (id, at, half, tags) => ({ type: "relation", id, tags: Object.assign({ leisure: "golf_course" }, tags), geometry: ring(at, half) });
+  const holes = Array.from({ length: 18 }, (_, i) => hole(100 + i, i + 1, OTHER));
+  const seminole = outline(1, PIN, 0.004, { name: "Seminole Lakes Golf Course" });
+  const twinIsles = outline(2, OTHER, 0.006, { name: "Twin Isles Country Club", website: "https://www.twinislescc.org/" });
+  const options = { facilityName: "Seminole Lakes Country Club", selectedName: "Seminole Lakes Country Club" };
+
+  const claim = core.foreignGroundClaim({ elements: [seminole, twinIsles, ...holes] }, PIN, options);
+  assert.ok(claim, "the holes' outline names another club");
+  assert.strictEqual(claim.reason, "course-outline-names-another-club");
+  assert.strictEqual(claim.holesOutline.name, "Twin Isles Country Club");
+  assert.strictEqual(claim.holesOutline.owner, "twinislescc.org");
+  assert.strictEqual(claim.pinOutline.name, "Seminole Lakes Golf Course");
+  assert.strictEqual(claim.insidePinOutline, 0, "Seminole's own outline holds nothing numbered");
+  assert.strictEqual(claim.insideHolesOutline, 18);
+  assert.ok(claim.awayFromPinM > 1000 && claim.awayFromPinM < 2500, "about 1.3km away, got " + claim.awayFromPinM);
+  assert.strictEqual(claim.loop.name, "Twin Isles Country Club");
+  assert.strictEqual(claim.loop.osmRef, "relation/2");
+  assert.strictEqual(claim.loop.contiguous, true);
+  assert.deepStrictEqual(claim.loop.holeNumbers, Array.from({ length: 18 }, (_, i) => i + 1));
+  assert.strictEqual(claim.loop.foreignReason, "course-outline-names-another-club");
+  assert.ok(claim.loop.payload.elements.length === 20, "the loop carries the whole single-loop payload");
+
+  /* Two outlines run by different owners are two clubs even when their names share a word. */
+  const owned = core.foreignGroundClaim({
+    elements: [outline(1, PIN, 0.004, { name: "Twin Lakes Golf Course", website: "https://twinlakesgolf.example/" }), twinIsles, ...holes]
+  }, PIN, { facilityName: "Twin Lakes Golf Course", selectedName: "Twin Lakes Golf Course" });
+  assert.ok(owned && owned.reason === "course-outline-run-by-another-owner", JSON.stringify(owned));
+
+  /* Everything that must stay silent. */
+  const silent = (elements, centre, why) => assert.strictEqual(core.foreignGroundClaim({ elements }, centre, options), null, why);
+  silent([seminole, twinIsles, ...holes], OTHER, "the pin inside the holes' outline is that course");
+  silent([twinIsles, ...holes], PIN, "no outline holds the pin: nothing to compare against");
+  silent([outline(1, OTHER, 0.02, { name: "Fancourt Golf Estate" }), outline(2, OTHER, 0.006, { name: "The Links at Fancourt" }), ...holes],
+    { lat: OTHER.lat + 0.012, lng: OTHER.lng }, "a course outline inside the pin's facility outline is the facility's own");
+  silent([outline(1, PIN, 0.004, { name: "Isles Golf Estate" }), twinIsles, ...holes], PIN, "a shared distinctive word keeps the holes");
+  silent([outline(1, PIN, 0.004, { name: "Seminole Lakes Golf Course" }), outline(2, OTHER, 0.006, { name: "North Course" }), ...holes], PIN,
+    "an outline named only as a course label never rules holes out");
+  silent([seminole, outline(2, OTHER, 0.006, {}), ...holes], PIN, "an unnamed, unowned outline says nothing");
+});
+
 (async function run() {
   core = await import(path.join(root, "functions", "lib", "gd-automapper-core.mjs"));
   plan = await import(path.join(root, "functions", "lib", "gd-visual-plan-core.mjs"));

@@ -4793,6 +4793,7 @@ function gdAdminCourseScorecardCardsMarkup(courseId){
       +(card.gps?`<span class="gdAdminCourseScorecardGps" title="GPS Play's scorecard shows this card for this course">GPS Play</span>`:"")
       +`<button type="button" data-gd-scorecard-rename="${id}" data-card-key="${key}">Save name</button>`
       +`<button type="button" data-gd-sc-act="${editing?"cancel":"open"}" data-course-id="${id}" data-card-key="${key}">${editing?"Close card":"Open card"}</button>`
+      +`<button type="button" class="gdAdminCourseScorecardDelete" data-gd-scorecard-delete="${id}" data-card-key="${key}" data-card-name="${gdEscapeHTML(card.name||card.label)}" title="Remove this card from the store. The course keeps its name; GPS Play loses the card until another is added.">Delete</button>`
       +`</div>`
       +(editing?gdAdminScorecardEditorMarkup(courseId):"");
   }).join("");
@@ -4956,6 +4957,35 @@ async function gdAdminScorecardEditSave(courseId){
     gdAdminCourseScorecardFail(courseId,"Save failed to send");
   }
 }
+/* A card out of the store (POST /api/course-scorecards, action "delete"). Asked first:
+   there is no undo, and a card pasted under the wrong facility looks exactly like a right
+   one until you read its par. The row's open editor, if it is this card, closes with it. */
+async function gdAdminCourseScorecardDelete(courseId,key,name){
+  if(!courseId||!key)return;
+  const label=name||key;
+  if(typeof window.confirm==="function"&&!window.confirm("Delete the scorecard \""+label+"\"?\n\nThe course keeps its name. GPS Play loses this card until another is added. This cannot be undone."))return;
+  try{
+    const token=await gdAdminCourseDbAccessToken();
+    if(!token){gdAdminCourseVisualToast("Sign in again to delete the card");return;}
+    gdAdminCourseScorecardSetStatus(courseId,"Deleting card…");
+    const res=await fetch("/api/course-scorecards",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+      body:JSON.stringify({courseId:courseId,key:key,action:"delete"})
+    });
+    const data=await res.json().catch(()=>null);
+    if(!res.ok){gdAdminCourseScorecardFail(courseId,(data&&data.error)||"Delete failed ("+res.status+")");return;}
+    const edit=gdAdminScorecardEdit[courseId];
+    if(edit&&edit.key===key)delete gdAdminScorecardEdit[courseId];
+    if(gdAdminScorecardNameDrafts[courseId])delete gdAdminScorecardNameDrafts[courseId][key];
+    gdAdminCourseScorecardSetStatus(courseId,(data&&data.message)||"Deleted");
+    gdAdminCourseVisualToast((data&&data.message)||"Card deleted");
+    gdAdminCourseScorecardForgetCards();
+    gdRenderAdminCourseDatabase();
+  }catch(error){
+    gdAdminCourseScorecardFail(courseId,"Delete failed to send");
+  }
+}
 function gdAdminCourseScorecardDropMarkup(item){
   const id=gdEscapeHTML(item.id);
   if(gdAdminScorecardCards[item.id]===undefined)gdAdminCourseScorecardLoadCards(item.id);
@@ -5106,6 +5136,13 @@ function gdAdminCourseScorecardClick(event){
     event.preventDefault();
     event.stopPropagation();
     gdAdminScorecardEditAct(act.dataset.courseId,act.dataset.gdScAct,act);
+    return;
+  }
+  const del=event.target&&event.target.closest?event.target.closest("button[data-gd-scorecard-delete]"):null;
+  if(del){
+    event.preventDefault();
+    event.stopPropagation();
+    gdAdminCourseScorecardDelete(del.dataset.gdScorecardDelete,del.dataset.cardKey,del.dataset.cardName||"");
     return;
   }
   const ask=event.target&&event.target.closest?event.target.closest("button[data-gd-scorecard-ask]"):null;

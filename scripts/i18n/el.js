@@ -1937,8 +1937,6 @@
     "welcome.heroLineOne": "Φέρε το καλύτερο",
     "welcome.heroLineTwo": "της προπόνησής σου",
     "welcome.heroLineThree": "στο γήπεδο γκολφ",
-    "welcome.openApp": "Άνοιξε το Clarity Caddy",
-    "welcome.createAccount": "Δημιουργία λογαριασμού",
     "welcome.appStoreBadge": "Κατέβασε το Clarity Caddy από το App Store",
     "welcome.playStoreBadge": "Απόκτησε το Clarity Caddy στο Google Play",
     "welcome.loopEyebrow": "Ο κύκλος Clarity",

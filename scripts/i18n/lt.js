@@ -2016,8 +2016,6 @@
     "welcome.heroLineOne": "Perkelk geriausia",
     "welcome.heroLineTwo": "iš treniruočių",
     "welcome.heroLineThree": "į golfo lauką",
-    "welcome.openApp": "Atidaryti Clarity Caddy",
-    "welcome.createAccount": "Sukurti paskyrą",
     "welcome.appStoreBadge": "Atsisiųsk Clarity Caddy iš App Store",
     "welcome.playStoreBadge": "Gauk Clarity Caddy Google Play",
     "welcome.loopEyebrow": "Clarity ciklas",

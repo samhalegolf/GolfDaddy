@@ -488,6 +488,8 @@
     .gdAdminCourseScorecardName{flex:1 1 160px;min-width:0;border:1px solid rgba(255,255,255,.14);border-radius:8px;background:rgba(0,0,0,.26);color:#fff;padding:6px 8px;font:900 12px/1.25 Inter,system-ui,sans-serif}
     .gdAdminCourseScorecardMeta{color:rgba(255,255,255,.62);font:850 10px/1.35 Inter,system-ui,sans-serif}
     .gdAdminCourseScorecardCard button{border-radius:999px;padding:6px 10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.09);color:#fff;font:950 11px/1.2 Inter,system-ui,sans-serif;cursor:pointer}
+    .gdAdminCourseScorecardCard button.gdAdminCourseScorecardDelete{margin-left:auto;border-color:rgba(255,120,120,.38);background:rgba(255,80,80,.12);color:#ffb4b4}
+    .gdAdminCourseScorecardCard button.gdAdminCourseScorecardDelete:hover{background:rgba(255,80,80,.24);color:#fff}
     .gdAdminCourseScorecardEmpty,.gdAdminCourseScorecardHint{color:rgba(255,255,255,.56);font:850 10px/1.35 Inter,system-ui,sans-serif;white-space:normal}
     .gdAdminCourseScorecardAdd{display:grid;gap:7px}
     .gdAdminCourseScorecardGps{border-radius:999px;padding:3px 8px;background:#1fd36d;color:#07100a;font:950 10px/1.2 Inter,system-ui,sans-serif}
