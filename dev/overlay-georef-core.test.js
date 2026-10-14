@@ -125,6 +125,22 @@ test("a vertex a pixel off the edge is kept, and a partially-outside shape is ma
   assert.strictEqual(out.pixels[0].partial, true);
 });
 
+test("a pin answer stays a pin: one point for a green, two for a fairway, saved as pin: true, never grown into a polygon here", () => {
+  const g = georef.imageGeoreference(CAPTURE);
+  const out = georef.aiShapesToOverlay([
+    { kind: "green", points: [[300, 400]], pin: true, hole: 3 },
+    { kind: "fairway", points: [[100, 700], [280, 420]], pin: true },
+    { kind: "tee", points: [[50, 750]], pin: true },
+    { kind: "fairway", points: [[100, 700]], pin: true },
+    { kind: "green", points: [[300, 400]] }
+  ], g);
+  assert.deepStrictEqual(out.features.map(f => [f.kind, f.points.length, f.pin === true, f.hole]), [["green", 1, true, 3], ["fairway", 2, true, null], ["tee", 1, true, null]]);
+  assert.strictEqual(out.dropped.length, 2, JSON.stringify(out.dropped));
+  assert.ok(out.dropped.some(d => d.index === 3 && /too few points/.test(d.reason)), "a one-point fairway pin is too few");
+  assert.ok(out.dropped.some(d => d.index === 4), "a one-point green that is not a pin is a polygon with too few points");
+  assert.ok(out.pixels.every(p => p.pin === true));
+});
+
 test("pixel shapes off a satellite frame resolve holes through the real resolver", async () => {
   /* Two greens 400m and 290m from a shared tee, as pixels on a z16 capture (a z17 one is
      only ~700m across here and the long hole would run off it). */
