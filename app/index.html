@@ -95,17 +95,16 @@
     <div id="globalNav">
       <button id="globalBackBtn" type="button" aria-label="Back" data-i18n-aria-label="common.back" data-i18n="common.back">Back</button>
       <button id="globalHomeBtn" type="button" class="homeTextBtn" aria-label="Home" data-i18n-aria-label="common.home" data-i18n="common.home">Home</button>
-    </div>
-    <!-- The wind tell. Wind is easy to leave on and invisible when the bubble
-         is down, so while wind is set this says so out loud: the level, LIVE
-         when the reading was measured rather than dialled in, and an arrow
-         rotated to the direction the wind is BLOWING on screen — the same
-         direction the bubble was pushed. Hidden when calm. The painter draws
-         it from the engine's wind state (drawWind); wind.js owns that state. -->
-    <div id="windBanner" class="hiddenState" role="status">
-      <span id="windBannerArrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h15M13.5 6.5 19 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-      <span id="windBannerLabel">WIND</span>
-      <span id="windBannerLive" class="hiddenState" data-i18n="common.live">LIVE</span>
+      <!-- The wind chip: always up while playing. Live wind shows its speed,
+           LIVE, and an arrow turned to where the wind is BLOWING on screen;
+           manual wind (only when live cannot answer) shows its level. The
+           painter draws it (drawWind); wind.js owns the wind and the taps. -->
+      <button id="windChip" type="button" class="hiddenState" aria-label="Wind" data-i18n-aria-label="rail.wind">
+        <span id="windChipArrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h15M13.5 6.5 19 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span id="windChipIcon" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M9 17h20c4.4 0 6.6-5.4 3.5-8.5-2.4-2.4-6.5-1.5-7.6 1.7" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M8 25h28c5.2 0 7.8 6.3 4.1 10-2.9 2.9-7.8 1.7-9.1-2.1" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M13 33h11" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></span>
+        <span id="windChipLabel">WIND</span>
+        <span id="windChipLive" class="hiddenState" data-i18n="common.live">LIVE</span>
+      </button>
     </div>
     <!-- A published map arriving mid-round is a prompt, not an auto-switch -
          the loading screen already covered the "available from the start"
@@ -367,7 +366,6 @@
   </button>
   <div id="toolRail" class="hiddenState">
     <button id="railBag" type="button" class="railBtn" aria-label="Bag" data-i18n-aria-label="rail.bag"><img src="../assets/icons/bag.png" alt=""></button>
-    <button id="railWind" type="button" class="railBtn" aria-label="Wind"><span id="railWindIcon" class="railIcon"></span></button>
     <!-- draggable="false" on the flag images: the flag is a pointer-drag
          source, and an <img> that starts a native drag cancels the pointer
          stream (pointercancel) before it can ever drop. -->
@@ -509,6 +507,14 @@
       <div class="setRow">
         <div><strong data-i18n="gpsSettings.shotUp">Shot-up frame</strong><span data-i18n="gpsSettings.shotUpHint">Rotate the view so the shot runs up the screen.</span></div>
         <button id="setShotUp" type="button" class="toggle">On</button>
+      </div>
+      <div class="setRow">
+        <div><strong data-i18n="gpsSettings.windGhost">Wind ghost</strong><span data-i18n="gpsSettings.windGhostHint">A second bubble where the wind carries the shot.</span></div>
+        <button id="setWindGhost" type="button" class="toggle">On</button>
+      </div>
+      <div class="setRow">
+        <div><strong data-i18n="gpsSettings.slopeBubble">Slope bubble</strong><span data-i18n="gpsSettings.slopeBubbleHint">Size the bubble and club for the plays-like distance. Tap PLAYS on the card to switch.</span></div>
+        <button id="setSlopeBubble" type="button" class="toggle">Off</button>
       </div>
       <div class="setRow">
         <div><strong data-i18n="gpsSettings.tightness">Lock frame tightness</strong><span id="setFrameTightSub">Balanced shot view</span></div>

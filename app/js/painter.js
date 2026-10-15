@@ -947,6 +947,44 @@
     };
   }
 
+  /* The bubble the player is looking at. With the slope bubble on and a
+     plays-like answer in, it is morphed to the plays distance - the club and
+     shape for the shot as it PLAYS, drawn back on the real aim, as the watch
+     does in plays mode. Otherwise (or until elevation answers) the flat one.
+     The card, the chip and the bubble all read this, so they never disagree. */
+  function slopeAnswer(scene) {
+    var b = scene.bubble;
+    if (!b || !b.start || !b.target || !app.playsLike) return null;
+    var flat = app.distance.haversineMeters(b.start, b.target);
+    var data = app.playsLike.forShot(b.start, b.target, flat);
+    return data ? { flatM: flat, data: data } : null;
+  }
+  function shotModel(scene) {
+    var engine = window.GDBubbleEngine;
+    if (!engine || !scene.bubble || !scene.bubble.show) return null;
+    var slope = settings() && settings().slopeBubble() ? slopeAnswer(scene) : null;
+    var morph = slope && slope.data.plays !== "level" ? { playsM: slope.data.adjustedM } : undefined;
+    return engine.renderModel(morph);
+  }
+
+  /* The wind ghost: the main ring carried to where the wind lands the ball,
+     a thin blue edge with a dashed drift line from the bubble to it - the
+     Garmin map's ghost. Behind the real bubble, so the shape being aimed
+     stays the one on top. */
+  function ghostParts(model, project) {
+    if (!model || !model.ghost || (settings() && !settings().windGhost())) return [];
+    var pts = model.ghost.rings.main.map(project).filter(Boolean);
+    var from = project(model.center), to = project(model.ghost.center);
+    if (pts.length < model.ghost.rings.main.length * 0.6 || !from || !to) return [];
+    return [
+      '<path class="windLine" d="M' + from.left.toFixed(1) + "," + from.top.toFixed(1)
+        + "L" + to.left.toFixed(1) + "," + to.top.toFixed(1) + '"/>',
+      '<path class="windGhost" d="M' + pts.map(function (p) {
+        return p.left.toFixed(1) + "," + p.top.toFixed(1);
+      }).join("L") + 'Z"/>'
+    ];
+  }
+
   function drawShot(scene, proj) {
     var svg = el("bubbleSvg");
     var bubble = el("aimBubble");
@@ -961,17 +999,9 @@
       return;
     }
     function project(pt) { return pt ? proj.toScreen(pt) : null; }
-    var model = window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
-    var parts = [];
+    var model = shotModel(scene);
     var engine = window.GDBubbleEngine;
-    var windLanding = engine && typeof engine.windLanding === "function" ? engine.windLanding() : null;
-    if (windLanding && scene.bubble.target) {
-      var wt = project(scene.bubble.target), wl = project(windLanding);
-      if (wt && wl) {
-        parts.push('<path class="windLine" d="M' + wt.left.toFixed(1) + "," + wt.top.toFixed(1)
-          + "L" + wl.left.toFixed(1) + "," + wl.top.toFixed(1) + '"/>');
-      }
-    }
+    var parts = ghostParts(model, project);
     var centerScreen = model ? project(model.center) : null;
     var payload = model ? model.payload : null;
     var r = scene.hole.rec || {};
@@ -1020,7 +1050,11 @@
         }
         if (vis) {
           parts.push("<defs>" + vis.defs + "</defs>");
+          /* The slope bubble wears the watch's plays orange, so a morphed
+             bubble is never mistaken for the flat one. */
+          parts.push(model.plays ? '<g class="playsBubble">' : "<g>");
           vis.parts.forEach(function (p) { parts.push(p); });
+          parts.push("</g>");
         }
       }
     }
@@ -1033,6 +1067,7 @@
        Marshal releases the aim. */
     var chipOn = !!(vis && clubLabel) && !(scene.motion && scene.motion.moving);
     show(chipEl, chipOn);
+    if (chipEl) chipEl.classList.toggle("playsChip", !!(model && model.plays));
     if (chipEl && chipOn) {
       chipEl.textContent = clubLabel;
       chipEl.style.left = vis.chip.left + "px";
@@ -1074,44 +1109,61 @@
     }
   }
 
-  /* The wind banner: the one unmissable "wind is ON" readout. Level (or an
-     ellipsis while a live check is in flight), LIVE when the reading was
-     measured, and the arrow rotated to the direction the wind is blowing ON
-     SCREEN — solved by projecting a short step along the blow bearing, so it
-     stays true whatever the camera rotation is doing. Reads the engine's
-     wind state the same way drawShot reads the render model: wind.js owns
-     the state, this only says it out loud. */
+  /* The wind chip in the top bar, up for the whole round. Live: the measured
+     speed in the player's units, LIVE, and the arrow turned to the direction
+     the wind is blowing ON SCREEN - solved by projecting a short step along
+     the blow bearing, so it stays true whatever the camera is doing. Manual
+     (only when live cannot answer): the level. Neither yet: the wind glyph,
+     with an ellipsis while a check is in flight. Reads the engine's wind the
+     same way drawShot reads the render model; wind.js owns it. */
   function drawWind(scene, proj) {
-    var banner = el("windBanner");
-    if (!banner) return;
+    var chip = el("windChip");
+    if (!chip) return;
+    var wind = app.wind;
+    show(chip, !!(proj && wind && scene.hole && scene.hole.rec));
+    if (!proj || !wind) return;
     var engine = window.GDBubbleEngine;
     var state = engine && engine.windState ? engine.windState() : null;
-    var checking = !!(app.wind && app.wind.checking && app.wind.checking());
-    show(banner, !!state || checking);
-    if (!state && !checking) return;
-    banner.classList.toggle("checkingWind", !state && checking);
-    var label = el("windBannerLabel");
-    if (label) i18n.set(label, state ? "wind.banner" : "wind.bannerChecking", state ? { n: state.level } : undefined);
-    show(el("windBannerLive"), !!state && !!(app.wind && app.wind.isLive && app.wind.isLive()));
-    var arrow = el("windBannerArrow");
-    if (!arrow) return;
-    var angle = state ? windScreenAngleDeg(scene, proj, state) : null;
+    var reading = wind.isLive() ? wind.liveReading() : null;
+    var checking = wind.checking();
+    chip.classList.toggle("live", !!reading);
+    chip.classList.toggle("checkingWind", checking && !reading && !state);
+    chip.classList.toggle("windUnset", !reading && !state);
+    var label = el("windChipLabel");
+    if (label) {
+      if (reading) {
+        var mph = settings() && settings().units() === "yd";
+        i18n.set(label, null);   // a number and a unit, nothing to translate
+        label.textContent = Math.round(mph ? reading.speedKmh * 0.621371 : reading.speedKmh) + (mph ? " mph" : " km/h");
+      } else if (state) {
+        i18n.set(label, "wind.banner", { n: Math.round(state.level) });
+      } else {
+        i18n.set(label, checking ? "wind.bannerChecking" : "rail.wind");
+      }
+    }
+    show(el("windChipLive"), !!reading);
+    /* The arrow follows the measured direction even when it is too calm for
+       a ghost - the player still wants to know which way it is coming. */
+    var origin = reading ? reading.directionDeg * Math.PI / 180 : (state ? state.originAngle : null);
+    var angle = origin !== null ? windScreenAngleDeg(scene, proj, origin) : null;
+    var arrow = el("windChipArrow");
     show(arrow, angle !== null);
-    if (angle !== null) arrow.style.transform = "rotate(" + angle.toFixed(1) + "deg)";
+    show(el("windChipIcon"), angle === null);
+    if (arrow && angle !== null) arrow.style.transform = "rotate(" + angle.toFixed(1) + "deg)";
   }
 
   /* Screen angle (deg, 0 = pointing right) of the wind's BLOW direction —
      originAngle is where the wind comes FROM, so the blow bearing is half a
      turn on. Anchored at the aim when a shot is up, the green otherwise, so
      the arrow is solved where the wind is actually being judged. Null when
-     nothing projects — the banner then just shows the level. */
-  function windScreenAngleDeg(scene, proj, state) {
+     nothing projects — the chip then shows its glyph. */
+  function windScreenAngleDeg(scene, proj, originAngle) {
     if (!proj || !window.GDBubbleVisual) return null;
     var anchor = (scene.bubble.show && scene.bubble.target)
       || (scene.hole.rec && scene.hole.rec.green)
       || scene.player || null;
     if (!anchor) return null;
-    var blowDeg = (((state.originAngle + Math.PI) * 180) / Math.PI) % 360;
+    var blowDeg = (((originAngle + Math.PI) * 180) / Math.PI) % 360;
     var from = proj.toScreen(anchor);
     var to = proj.toScreen(window.GDBubbleVisual.destination(anchor, blowDeg, 30));
     if (!from || !to) return null;
@@ -1387,13 +1439,13 @@
       el("shotDist").textContent = units(Number.isFinite(toPin) ? toPin : scene.distances.centre);
       var focusUnit = el("cardUnit");
       if (focusUnit) focusUnit.textContent = settings() ? settings().unitLabel() : "m";
-      drawPlaysLike(null, null, null);
+      drawPlaysLike(null, false);
     } else if (scene.distances.show) {
       el("distFront").textContent = units(scene.distances.front);
       el("distBack").textContent = units(scene.distances.back);
       var unit = el("cardUnit");
       if (unit) unit.textContent = settings() ? settings().unitLabel() : "m";
-      var model = scene.bubble.show && window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
+      var model = shotModel(scene);
       var payload = model && model.payload;
       /* Walking: the club band empties (CSS), whichever club it would name.
          The number stays - it is measured from where you are now. */
@@ -1418,20 +1470,20 @@
         el("shotDist").textContent = units(toTarget);
         el("shotCarry").textContent = Number.isFinite(Number(payload.baseCarry)) ? units(Number(payload.baseCarry)) : "–";
         setClubArt(payload.club);
-        drawPlaysLike(scene.bubble.start, landing, toTarget);
+        drawPlaysLike(slopeAnswer(scene), !!model.plays);
       } else if (suggested) {
         el("shotClub").textContent = clubName(suggested.club);
         el("shotDist").textContent = units(scene.distances.centre);
         el("shotCarry").textContent = Number.isFinite(suggested.carryM) ? units(suggested.carryM) : "–";
         setClubArt(suggested.club);
-        drawPlaysLike(null, null, null);
+        drawPlaysLike(null, false);
       } else {
         el("shotDist").textContent = units(scene.distances.centre);
-        drawPlaysLike(null, null, null);
+        drawPlaysLike(null, false);
       }
     } else {
       bar.classList.remove("moving", "suggested");
-      drawPlaysLike(null, null, null);
+      drawPlaysLike(null, false);
     }
 
     show(el("startPill"), scene.startPill.show);
@@ -1574,11 +1626,13 @@
 
   /* Plays-like, on the card's face beside the number it adjusts rather than in
      a pop-out beside the card. Present only when the elevation lookup has an
-     answer worth showing — a level shot says nothing new. */
-  function drawPlaysLike(fix, landing, flatM) {
+     answer worth showing — a level shot says nothing new. Lit when the bubble
+     on the map is the slope bubble (morphed); tapping it switches that, the
+     watch's plays button. */
+  function drawPlaysLike(answer, morphed) {
     var row = el("playsRow");
     if (!row) return;
-    var data = (fix && landing && app.playsLike) ? app.playsLike.forShot(fix, landing, flatM) : null;
+    var data = answer && answer.data;
     var on = !!data && data.plays !== "level";
     show(row, on);
     if (!on) return;
@@ -1586,6 +1640,7 @@
     if (value) value.textContent = units(data.adjustedM);
     row.classList.toggle("playsOver", data.plays === "uphill");
     row.classList.toggle("playsUnder", data.plays === "downhill");
+    row.classList.toggle("playsActive", !!morphed);
   }
 
   /* The club band's silhouette. gd-bag-core.js owns which artwork a club gets
@@ -2961,6 +3016,15 @@
     if (prev) prev.addEventListener("click", function () { send("PREV_HOLE"); });
     if (nextHole) nextHole.addEventListener("click", function () { send("NEXT_HOLE"); });
 
+    /* PLAYS on the card is the watch's plays button: switch the slope bubble.
+       Not while the card is being laid out - there a tap is a grab. */
+    var playsRow = el("playsRow");
+    if (playsRow) playsRow.addEventListener("click", function () {
+      var bar = el("distanceBar");
+      if ((bar && bar.classList.contains("layout-editing")) || !settings()) return;
+      settings().set("slopeBubble", !settings().slopeBubble());
+    });
+
     window.addEventListener("resize", function () {
       lastCameraKey = null;
       if (marshal) repaint("VIEWPORT_CHANGED", function () { render(marshal.scene()); });
@@ -2981,10 +3045,10 @@
     if (app.playsLike) app.playsLike.onChange(function () {
       if (marshal) repaint("ELEVATION_READY", function () { render(marshal.scene()); });
     });
-    /* Wind moving is a paint like a pin moving: the bubble slides to the new
-       landing, the drift line redraws and the banner updates the moment the
-       level, direction or live check changes — not on the next unrelated
-       scene publish. */
+    /* Wind moving is a paint like a pin moving: the ghost slides to the new
+       landing, the drift line redraws and the chip updates the moment the
+       reading, level, direction or live check changes — not on the next
+       unrelated scene publish. */
     if (app.wind && app.wind.onChange) app.wind.onChange(function () {
       if (marshal) repaint("WIND_CHANGED", function () { render(marshal.scene()); });
     });

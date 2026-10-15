@@ -149,11 +149,6 @@ function gdWindLandingFromAim(aimPoint){
   if(!aimPoint||!gdHasWindVector())return aimPoint||null;
   return project(aimPoint,gdNormAngle(gdWindOriginAngle+Math.PI),gdWindEffectMeters(aimPoint));
 }
-function gdSyncWindLandingFromAim(){
-  if(!gdHasWindVector()||!target){gdWindLandingTarget=null;return null;}
-  gdWindLandingTarget=gdWindLandingFromAim(target);
-  return gdWindLandingTarget;
-}
 function gdGetClubGroup(club="7i"){if(GD_CLUB_GROUPS.driver.test(club))return"driver";if(GD_CLUB_GROUPS.woodHybrid.test(club))return"woodHybrid";if(GD_CLUB_GROUPS.wedge.test(club))return"wedge";return"iron"}
 function gdDefaultCarryForClub(club="7i"){return GD_DEFAULT_CLUB_CARRY_M[club]??155}
 function gdGetClubPatternDefaults(club="7i"){return GD_CLUB_PATTERN_RATIOS[gdGetClubGroup(club)]}
@@ -484,10 +479,6 @@ function gdClampBubbleCenterToBagRoof(center,payloadInput){
     return projectOffset(center,shotBrg,-Math.min(overshoot,capBack),0);
   }catch(e){return center}
 }
-function gdShotDisplayTarget(){
-  if(gdHasWindVector()&&gdWindLandingTarget)return gdWindLandingTarget;
-  return target;
-}
 function gdGpsAimDistanceM(){
   /* The AIM distance: start to the target the player is aiming at, never the
      wind-blown landing. My Bubble is a face-alignment angle, so the metres it
@@ -744,11 +735,24 @@ function localPointToLatLng(center, shotBrg, x, y){
   };
 
   /* Real wind state (wind.js drives it through setWind/clearWind below). The
-     verbatim gdShotDisplayTarget/gdWindLandingFromAim/gdSyncWindLandingFromAim
-     copies above already read exactly these three bindings by name. */
+     verbatim gdWindEffectMeters/gdWindLandingFromAim copies above read these
+     bindings by name. gdWindLevel is a STRENGTH from 1 to 3, not a bucket: a
+     manual wind sets a whole level, a live reading sets it straight from the
+     measured speed (wind.js strengthForSpeed), and the core maths already
+     multiplies by whatever number it is given. */
   var gdWindActive = false, gdWindOriginAngle = null, gdWindLevel = 1;
-  var gdWindLandingTarget = null;
   function gdHasWindVector() { return !!gdWindActive && Number.isFinite(gdWindOriginAngle); }
+  /* The bubble sits on the AIM, always - the Garmin engine's rule. Core moved
+     it to the wind-blown landing; here the wind is a separate ghost bubble
+     (renderModel below), so the shape the player drags is the shot they are
+     choosing and the ghost is where the wind would take it. */
+  function gdShotDisplayTarget() { return target; }
+  /* A lat/lng ring moved by a fixed lat/lng shift - how the ghost and the
+     morphed bubble are carried onto their spot, exactly as GarminMapView
+     draws its ghost: over a bubble's few dozen metres the shift is uniform. */
+  function shiftRing(ring, dLat, dLng) {
+    return ring.map(function (p) { return { lat: p.lat + dLat, lng: p.lng + dLng }; });
+  }
   function gdMappedStartHoleNumber() { return currentHoleNumber; }
   function toLatLng(value) {
     var lat = Number(value && value.lat), lng = Number(value && value.lng);
@@ -786,7 +790,6 @@ function localPointToLatLng(center, shotBrg, x, y){
     setShot: function (startLL, targetLL) {
       start = toLatLng(startLL);
       target = toLatLng(targetLL);
-      gdSyncWindLandingFromAim();
     },
     setDragging: function (on) { targetDragging = !!on; },
     setBag: function (rows) { appBagRows = Array.isArray(rows) ? rows : []; },
@@ -817,50 +820,65 @@ function localPointToLatLng(center, shotBrg, x, y){
     setForwardBias: function (on) { DEV_DEFAULTS.bubbleGeometry.forwardBias = on === false ? 0 : 1; },
     microGeometry: gdBubbleMicroGeometry,
     defaultBagRows: gdDefaultStandInBag,
-    setWind: function (originAngleRad, level) {
+    /* strength: 1..3, fractional allowed (a live reading is not bucketed). */
+    setWind: function (originAngleRad, strength) {
       gdWindActive = true;
       gdWindOriginAngle = gdNormAngle(Number(originAngleRad));
-      gdWindLevel = Math.max(1, Math.min(3, Number(level) || 1));
-      gdSyncWindLandingFromAim();
+      gdWindLevel = Math.max(1, Math.min(3, Number(strength) || 1));
     },
-    clearWind: function () {
-      gdWindActive = false;
-      gdWindLandingTarget = null;
-    },
+    clearWind: function () { gdWindActive = false; },
     windState: function () {
       return gdHasWindVector() ? { originAngle: gdWindOriginAngle, level: gdWindLevel } : null;
     },
-    windLanding: function () { return gdWindLandingTarget; },
+    /* Where the wind carries a ball aimed at the target - worked out from the
+       wind as it is NOW, on every ask, so a refreshed reading moves the ghost
+       without anything having to re-sync it. */
+    windLanding: function () { return target && gdHasWindVector() ? gdWindLandingFromAim(target) : null; },
     maxPlayableCarryM: gdMaxPlayableCarryM,
     playableBag: gdPlayableShotBagRows,
     targetForGreenCentre: function (green, opts) { return gdTargetForGreenCentre(toLatLng(green), opts || {}); },
     /* The old renderShot pipeline, minus the Leaflet layers: distance →
        payload → render centre → display payload → the three shell rings as
-       lat/lng arrays for the surface to project.
+       lat/lng arrays for the surface to project. Garmin-style:
 
-       The AIM distance (start → target) sizes the payload, NOT the distance
-       to the blown landing. With wind on, the bubble sits at the landing but
-       the club has to fly the aim distance — that is the whole counteract
-       gesture: wind blows the bubble off the target, the player drags it
-       back on, the aim walks upwind, and the club follows the aim. Sized
-       from the landing it never moved: drag the bubble onto a 150m flag into
-       any headwind and it still said the calm-air 150m club. Without wind
-       the two points are the same and nothing on the calm path changes. */
-    renderModel: function () {
-      var displayTarget = gdShotDisplayTarget();
-      if (!start || !displayTarget) return null;
-      var d = target ? map.distance(start, target) : map.distance(start, displayTarget);
+       - The bubble sits on the aim and is sized from the AIM distance. Wind
+         never moves it; it adds the ghost - the same main ring carried downwind
+         to where the wind would land it (null when calm). The player moves
+         the aim until the ghost sits where they want to finish.
+       - opts.playsM morphs it into the plays-like bubble: club and shape
+         chosen for the distance the shot PLAYS (slope), drawn back on the
+         real aim - GarminSessionManager.playsBubble. plays then carries the
+         plays distance; distanceM stays the flat one. */
+    renderModel: function (opts) {
+      if (!start || !target) return null;
+      var d = map.distance(start, target);
       if (!Number.isFinite(d) || d <= 0) return null;
-      var raw = getGpsBubblePayload(d);
-      var center = gdBubbleRenderCenter(raw) || displayTarget || target;
-      var gdb = gdGpsBubbleDisplayPayload(raw, d, center);
+      var playsM = Number(opts && opts.playsM);
+      var morph = Number.isFinite(playsM) && playsM > 0 && Math.abs(playsM - d) >= 0.5;
+      var sizeFor = morph ? playsM : d;
+      var raw = getGpsBubblePayload(sizeFor);
+      var center = gdBubbleRenderCenter(raw) || target;
+      var gdb = gdGpsBubbleDisplayPayload(raw, sizeFor, center);
+      var main = buildBubbleShape(center, gdb, dev("bubbleVisuals.mainScale"));
+      var ghost = null;
+      var landing = gdHasWindVector() ? gdWindLandingFromAim(target) : null;
+      if (landing) {
+        var dLat = landing.lat - target.lat, dLng = landing.lng - target.lng;
+        ghost = {
+          center: { lat: center.lat + dLat, lng: center.lng + dLng },
+          landing: landing,
+          rings: { main: shiftRing(main, dLat, dLng) }
+        };
+      }
       return {
         distanceM: d,
         payload: gdb,
         center: center,
+        plays: morph ? { distanceM: playsM } : null,
+        ghost: ghost,
         rings: {
           outer: buildBubbleShape(center, gdb, dev("bubbleVisuals.outerScale")),
-          main: buildBubbleShape(center, gdb, dev("bubbleVisuals.mainScale")),
+          main: main,
           inner: buildBubbleShape(center, gdb, dev("bubbleVisuals.innerScale"))
         }
       };

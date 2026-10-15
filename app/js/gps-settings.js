@@ -5,7 +5,7 @@
    map source is chosen by imagery licence and region (basemap.js), mapped vs
    manual play is decided by whether the package has geometry, and the bubble
    render/bias/texture toggles were dev tuning for comparing renderers that
-   bubble-engine.js now bakes in. What is left is the five things that are
+   bubble-engine.js now bakes in. What is left is the things that are
    genuinely the player's call, none of which app/ could express before:
 
      units          - metres or yards, everywhere a distance is shown
@@ -13,6 +13,8 @@
      shotUp         - rotate the view so the shot runs up the screen
      frameTightness - how much of the shot the lock stage fills
      relief         - how far the terrain mesh lifts the ground (off to 5x)
+     windGhost      - draw the wind ghost bubble beside the real one
+     slopeBubble    - morph the bubble to the plays-like (slope) distance
 
    Owns its own storage, same as bag.js and scorecard.js do. Nothing here
    talks to a server or to any course/surface table. */
@@ -43,7 +45,7 @@
      corridor from the v2 bubble design, off until it has been played with.
      Stored like the rest so turning it on survives a reload. */
   var DEFAULTS = { units: "m", aimLine: true, shotUp: true, frameTightness: "medium", relief: "enhanced", corridor: false,
-    hybridView: "composite", greenLinesCoarse: false };
+    windGhost: true, slopeBubble: false, hybridView: "composite", greenLinesCoarse: false };
 
   /* Operator-only debug views of the Clarity 3D Mesh picture (live-hybrid.js VIEWS - keep the
      two lists in step; dev/live-hybrid.test.js checks they are). */
@@ -67,7 +69,9 @@
         relief: RELIEF[raw.relief] ? raw.relief : DEFAULTS.relief,
         hybridView: HYBRID_VIEWS.indexOf(raw.hybridView) !== -1 ? raw.hybridView : DEFAULTS.hybridView,
         greenLinesCoarse: raw.greenLinesCoarse === true,
-        corridor: raw.corridor === true
+        corridor: raw.corridor === true,
+        windGhost: raw.windGhost !== false,
+        slopeBubble: raw.slopeBubble === true
       };
     } catch (e) { return Object.assign({}, DEFAULTS); }
   }
@@ -88,6 +92,8 @@
     aimLine: function () { return state.aimLine; },
     shotUp: function () { return state.shotUp; },
     corridor: function () { return state.corridor; },
+    windGhost: function () { return state.windGhost; },
+    slopeBubble: function () { return state.slopeBubble; },
     /* The lock stage's anchor spread. >1 pushes the aim target further from
        the player anchor, so the same real distance spans more pixels — a
        tighter, more zoomed shot view. */
@@ -163,6 +169,12 @@
       shotUpBtn.textContent = t(state.shotUp ? "common.on" : "common.off");
       shotUpBtn.setAttribute("aria-pressed", state.shotUp ? "true" : "false");
     }
+    [["setWindGhost", "windGhost"], ["setSlopeBubble", "slopeBubble"]].forEach(function (row) {
+      var btn = document.getElementById(row[0]);
+      if (!btn) return;
+      btn.textContent = t(state[row[1]] ? "common.on" : "common.off");
+      btn.setAttribute("aria-pressed", state[row[1]] ? "true" : "false");
+    });
     var tightBtn = document.getElementById("setFrameTight");
     var tightSub = document.getElementById("setFrameTightSub");
     if (tightBtn) {
@@ -225,6 +237,10 @@
     var shotUpBtn = document.getElementById("setShotUp");
     if (shotUpBtn) shotUpBtn.addEventListener("click", function () {
       app.gpsSettings.set("shotUp", !state.shotUp);
+    });
+    [["setWindGhost", "windGhost"], ["setSlopeBubble", "slopeBubble"]].forEach(function (row) {
+      var btn = document.getElementById(row[0]);
+      if (btn) btn.addEventListener("click", function () { app.gpsSettings.set(row[1], !state[row[1]]); });
     });
     var tightBtn = document.getElementById("setFrameTight");
     if (tightBtn) tightBtn.addEventListener("click", function () {
