@@ -190,6 +190,8 @@
   /* options:
        key            "garmin" | "apple" - the page state's own store
        render         the watch's renderer module (DEVICES, PAN_TICK_MS, MapFace)
+       Face           the face to draw, when it is more than the map (the Garmin's CaddyAppView:
+                      its numbers screen with the map behind it); R.MapFace otherwise
        lede           the opening paragraph, HTML
        packages       "garmin-first" | "image"
        pictureFormat  the asset proxy format the watch fetches ("jpeg"), or "" for the stored bytes
@@ -197,7 +199,8 @@
        buttons        [{ id, label(face) | label, title, act(face, session) }]
        spriteBitmap   function (onLoad) -> the bitmap function the MapFace takes
        deviceId       the default watch
-       mapPalette     function (hole, device) -> palette, for a watch that draws (null otherwise) */
+       mapPalette     function (hole, device) -> palette, for a watch that draws (null otherwise)
+       onMount        function (redraw), once the page is up - for a face waiting on a web font */
   function render(containerEl, options) {
     var R = options.render, C = common();
     var session = store(options.key, { deviceId: options.deviceId, mode: options.modes ? options.modes[0].value : "" });
@@ -304,7 +307,12 @@
         hasRound: function () { return !!currentHole(); },
         shotLocked: function () { return session.locked; },
         suggestedClub: function () { return null; },
-        courseKey: function () { return session.courseKey; }
+        courseKey: function () { return session.courseKey; },
+        /* No phone here: no demo, no Scene distance of its own, and a LOCK is allowed once
+           the player stands somewhere. */
+        isDemo: function () { return false; },
+        distanceTargetM: function () { return null; },
+        canLock: function () { return !!(session.player && currentHole()) && !session.locked; }
       },
       currentHole: function () { return session.holeNumber; },
       manifestHole: function (n) { return session.holes.filter(function (h) { return h.holeNumber === n; })[0] || null; },
@@ -342,6 +350,7 @@
         return t ? { lat: t.lat, lng: t.lng } : null;
       },
       greenDistances: function () { var hole = currentHole(); return hole ? C.skeletonDistances(hole.skeleton, session.player) : null; },
+      greenPoint: function () { var hole = currentHole(); return hole && hole.greenLat != null ? { lat: hole.greenLat, lng: hole.greenLng } : null; },
       holeLine: function () { var hole = currentHole(); return hole ? C.skeletonLine(hole.skeleton) : []; },
       bagMaxTotalM: bagMaxTotalM,
       windEffect: function (player, target, flatM) { return C.windEffect(session.wind, player, target, flatM); },
@@ -357,11 +366,24 @@
       sendAim: function (target) { aimLog = "AIM_AT sent to the phone: " + target.lat.toFixed(6) + ", " + target.lng.toFixed(6); },
       yards: function () { return session.units === "y"; },
       locked: function () { return session.locked; },
+      lockedShot: function () { return session.locked; },
+      lockPending: function () { return false; },
+      lock: function () { session.locked = true; aimLog = "LOCK sent to the phone"; },
+      windApplied: function () { return session.windApplied; },
+      toggleWindApplied: function () { session.windApplied = !session.windApplied; el.windApplied.checked = session.windApplied; aimLog = "wind " + (session.windApplied ? "folded into" : "taken out of") + " the numbers"; },
+      /* NEXT_HOLE / PREVIOUS_HOLE: the phone would move the round on; here the hole picker does. */
+      stepHole: function (delta) {
+        var i = session.holes.findIndex(function (h) { return h.holeNumber === session.holeNumber; }), next = session.holes[i + delta];
+        if (i < 0 || !next) return;
+        aimLog = (delta > 0 ? "NEXT_HOLE" : "PREVIOUS_HOLE") + " sent to the phone";
+        setHole(next.holeNumber);
+      },
+      requestUpdate: function () { requestUpdate(); },
       unlock: function () { session.locked = false; if (face && face.unlock) face.unlock(); aimLog = "UNLOCK sent to the phone"; renderButtons(); }
     };
 
     function newFace() {
-      face = new R.MapFace(watchSession, device(), options.spriteBitmap(requestUpdate));
+      face = new (options.Face || R.MapFace)(watchSession, device(), options.spriteBitmap(requestUpdate));
       var d = device(), ps = d.pixelScale || 1;
       el.canvas.width = d.width * ps; el.canvas.height = d.height * ps;
       el.canvas.style.width = d.width * ps * session.zoom + "px"; el.canvas.style.height = d.height * ps * session.zoom + "px";
@@ -415,7 +437,7 @@
           else if (!effect || effect.level === 0) lines.push("wind: " + session.wind.kmh + " km/h is calm on the watch's rule (under 5 km/h): no ghost, no streaks");
           else lines.push("wind: from " + session.wind.fromDeg + "° at " + session.wind.kmh + " km/h · level " + effect.level + " · " + (effect.alongM >= 0 ? "+" : "") + effect.alongM.toFixed(1) + " m along the shot · ghost ring " + Math.round(C.Geo.distance(local.target, effect.ghost)) + " m downwind" + (session.windApplied ? " · in the plays number" : ""));
         }
-        lines.push((face.aiming ? "aiming ON" : "aiming off") + (face.playsMode ? " · plays mode ON" : "") + (session.locked ? " · shot LOCKED" : ""));
+        lines.push((typeof face.showingMap === "boolean" ? "screen: " + (face.showingMap ? "map" : "numbers") + " · " : "") + (face.aiming ? "aiming ON" : "aiming off") + (face.playsMode ? " · plays mode ON" : "") + (session.locked ? " · shot LOCKED" : ""));
         if (aimLog) lines.push(aimLog);
         if (options.fontsNote) lines.push(options.fontsNote);
       }
@@ -678,6 +700,7 @@
     el.fit.addEventListener("click", fitCourse);
 
     newFace();
+    if (options.onMount) options.onMount(requestUpdate);
     loadEngine().then(function () {
       if (destroyed) return;
       configurePlayer();
