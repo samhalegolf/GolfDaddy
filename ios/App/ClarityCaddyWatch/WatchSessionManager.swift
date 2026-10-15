@@ -514,6 +514,7 @@ final class WatchSessionManager: NSObject, ObservableObject {
         let previous = scene
         scene = incoming
         state = .live
+        conditions.apply(settings: incoming.settings)
         /* A demo plants the player; the wrist's own GPS sits it out. Stopping
            the manager clears wristFix through onFix(nil), so the planted point
            is written after. Leaving the demo hands the job straight back. */

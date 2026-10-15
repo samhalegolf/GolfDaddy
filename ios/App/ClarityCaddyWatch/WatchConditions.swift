@@ -23,11 +23,19 @@ import WatchBubbleEngine
 
    windApplied (a double-tap or long-press on the numbers face) folds the wind
    into the big number and every plays number. playsMode (the map's plays
-   button) turns the map's Bubble into the plays-distance one. */
+   button) turns the map's Bubble into the plays-distance one.
+
+   SETTINGS follow the phone's GPS Settings, sent with the Scene (apply):
+   windGhost draws the map's ghost or not, and the phone's Slope bubble sets
+   playsMode. The plays button still flips playsMode on the wrist, and the
+   wrist remembers it - until the phone's switch itself changes, which wins. */
 @MainActor
 final class WatchConditions: ObservableObject {
     @Published var windApplied = false
-    @Published var playsMode = false
+    @Published var playsMode: Bool = UserDefaults.standard.bool(forKey: WatchConditions.playsModeKey) {
+        didSet { UserDefaults.standard.set(playsMode, forKey: Self.playsModeKey) }
+    }
+    @Published private(set) var windGhost = true
     @Published private(set) var wind: Wind?
     @Published private var elevations: [String: Double] = [:]
 
@@ -44,6 +52,22 @@ final class WatchConditions: ObservableObject {
         let relRad: Double
         /// Where the wind carries a ball aimed at the target.
         let ghost: Coordinate?
+    }
+
+    nonisolated static let playsModeKey = "cc.conditions.playsMode"
+    nonisolated static let phoneSlopeKey = "cc.conditions.phoneSlopeBubble"
+
+    /// The phone's GPS Settings, from each Scene. Nil fields are an older
+    /// phone: the ghost stays on and plays mode stays the wrist's own.
+    func apply(settings: WatchScene.Settings?) {
+        let ghost = settings?.windGhost ?? true
+        if ghost != windGhost { windGhost = ghost }
+        guard let phoneSlope = settings?.slopeBubble else { return }
+        let defaults = UserDefaults.standard
+        let seen = defaults.object(forKey: Self.phoneSlopeKey) as? Bool
+        guard seen != phoneSlope else { return }
+        defaults.set(phoneSlope, forKey: Self.phoneSlopeKey)
+        playsMode = phoneSlope
     }
 
     private var windFetchedAt: Date?

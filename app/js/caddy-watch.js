@@ -145,6 +145,15 @@
     /* app.demoApproach, or null. Read live: a demo starts and stops under the
        bridge, and the Scene is the only place either end learns it did. */
     var demo = options.demo || null;
+    /* app.gpsSettings, or null. The wrist follows the phone's Wind ghost and
+       Slope bubble switches rather than keeping its own. */
+    var gpsSettings = options.settings || null;
+    function settingsFor() {
+      try {
+        if (!gpsSettings) return null;
+        return { windGhost: gpsSettings.windGhost() !== false, slopeBubble: gpsSettings.slopeBubble() === true };
+      } catch (e) { return null; }
+    }
     function demoState() {
       try { return demo && demo.active() ? demo.state() : null; } catch (e) { return null; }
     }
@@ -398,6 +407,7 @@
           return d ? { active: true, hole: d.hole, position: copyPoint(d.point), metres: d.metres } : null;
         })(),
         surface: surfaceFor(round),
+        settings: settingsFor(),
         connection: { status: "live" }
       };
     }
