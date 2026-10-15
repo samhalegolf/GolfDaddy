@@ -83,7 +83,7 @@ function noStore(headers) {
 }
 
 function accessPage(next, failed) {
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Clarity Studio</title><link rel="icon" href="/assets/brand/clarity-app-icon.png">
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Clarity Studio</title><link rel="icon" href="/assets/brand/clarity-app-icon.png?v=7516d3a5">
 <style>
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;background:radial-gradient(circle at 50% 0%,#12301d 0%,#07110b 60%);color:#fff;font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
 .card{width:min(360px,100%);padding:32px 28px;border-radius:22px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12);box-shadow:0 24px 60px rgba(0,0,0,.45)}
@@ -95,7 +95,7 @@ input{border:1px solid rgba(255,255,255,.22);background:rgba(0,0,0,.25);color:#f
 button{border:0;background:#20d96b;color:#04140a;font-weight:800;cursor:pointer;margin-top:4px}button:hover{filter:brightness(1.07)}
 .err{margin:0;color:#ff8f8f;font-size:14px}
 </style></head>
-<body><main class="card"><div class="brand"><img src="/assets/brand/clarity-app-icon.png" alt=""><div><h1>Clarity Studio</h1><p class="sub">Private - sign in to continue</p></div></div>
+<body><main class="card"><div class="brand"><img src="/assets/brand/clarity-app-icon.png?v=7516d3a5" alt=""><div><h1>Clarity Studio</h1><p class="sub">Private - sign in to continue</p></div></div>
 <form method="post" action="${ACCESS_PATH}"><input type="hidden" name="next" value="${next.replace(/[&<>"]/g, "")}">
 <label for="key">Access key</label><input id="key" type="password" name="key" autocomplete="current-password" autofocus required>
 ${failed ? '<p class="err">That key is not right.</p>' : ""}<button type="submit">Sign in</button></form></main></body></html>`;
