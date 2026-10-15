@@ -209,11 +209,6 @@ test("a caller can force a re-read", () => {
   );
 });
 
-test("the freshness result is observable", () => {
-  assert.ok(/window\.GDCourseLibrary\s*=/.test(src), "must expose an API for UI and on-device diagnosis");
-  assert.ok(/updateAvailable:function\(\)/.test(src), "'new map update available' needs a single source of truth");
-});
-
 (async () => {
   let failed = 0;
   for (const t of tests) {

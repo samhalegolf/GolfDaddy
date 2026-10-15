@@ -235,17 +235,6 @@
       inputs: [], outputs: [], owns: [], doesNotOwn: [],
       connections: [{ target: "course-mapping", direction: "child-of", label: "" }],
       keyFunctions: [], status: "documented-only", needsVerification: true },
-    { id: "manual-mapping", label: "Manual Mapping", parent: "course-mapping",
-      function: "Manual green/pin fallback and hand-corrected geometry when automated mapping cannot resolve a hole.",
-      owner: "scripts/gd-app-core.js (gdGreenFocusScreenFallback) + scripts/gd-course-play-pipeline.js (interactiveGreenFallbackActive)",
-      runtime: { app: true, studio: false, server: false },
-      code: [
-        { role: "Fallback UI (do not move — in-round, app-facing)", path: "scripts/gd-app-core.js" },
-        { role: "Fallback state gate", path: "scripts/gd-course-play-pipeline.js" }
-      ],
-      inputs: [], outputs: [], owns: [], doesNotOwn: [],
-      connections: [{ target: "course-mapping", direction: "child-of", label: "" }],
-      keyFunctions: [], status: "documented-only", needsVerification: false },
     { id: "validation", label: "Validation", parent: "course-mapping",
       function: "Checks a mapping draft's completeness/consistency before it is eligible for Course Database acceptance.",
       owner: "Needs verification", runtime: { app: false, studio: false, server: false },
@@ -630,9 +619,9 @@
     { id: "gps-hole-completion", label: "Hole Completion", parent: "gps-hole-lifecycle", function: "Not yet documented — placeholder nav entry.", owner: "Needs verification", runtime: { app: true, studio: false, server: false }, code: [], inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "gps-hole-lifecycle", direction: "child-of", label: "" }], keyFunctions: [], status: "placeholder", needsVerification: true },
     { id: "gps-round-completion", label: "Round Completion", parent: "gps-hole-lifecycle", function: "Not yet documented — placeholder nav entry.", owner: "Needs verification", runtime: { app: true, studio: false, server: false }, code: [], inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "gps-hole-lifecycle", direction: "child-of", label: "" }], keyFunctions: [], status: "placeholder", needsVerification: true },
     { id: "gps-map-camera", label: "Map & Camera", parent: "gps-play",
-      function: "Not yet moved into Studio. GPS framed camera model (bearing orientation, camera transform) — app-facing, do not move.",
-      owner: "scripts/gd-app-core.js (gdOrientGpsCameraToBearing, gdApplyGpsMapCameraTransform)", runtime: { app: true, studio: false, server: false },
-      code: [{ role: "Owner (do not move)", path: "scripts/gd-app-core.js" }],
+      function: "Not yet moved into Studio. GPS Play's framed camera (play-axis orientation, solved camera transform, perspective tilt) — app-facing, do not move.",
+      owner: "app/js/painter.js", runtime: { app: true, studio: false, server: false },
+      code: [{ role: "Owner (do not move)", path: "app/js/painter.js" }],
       inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "gps-play", direction: "child-of", label: "" }],
       keyFunctions: [], status: "placeholder", needsVerification: false },
     { id: "gps-garmin-preview", label: "Garmin Preview", parent: "gps-play",
@@ -695,17 +684,17 @@
       status: "implemented", needsVerification: false },
     { id: "gps-positioning", label: "Positioning", parent: "gps-map-camera", function: "Not yet documented — placeholder nav entry.", owner: "Needs verification", runtime: { app: true, studio: false, server: false }, code: [], inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "gps-map-camera", direction: "child-of", label: "" }], keyFunctions: [], status: "placeholder", needsVerification: true },
     { id: "gps-shot-planning", label: "Shot Planning", parent: "gps-play",
-      function: "On-course flag/pin placement (its file name mentions neither GPS nor shot planning, flagged here so it isn't missed) plus a jump into Bubble Projection's tuning group — see the nested gps-bubble-projection record for the bubble engine itself.",
-      owner: "scripts/gd-flag-pin.js (flag/pin placement — do not confuse with a feature-flag system)", runtime: { app: true, studio: true, server: false },
+      function: "On-course flag/pin placement plus a jump into Bubble Projection's tuning group — see the nested gps-bubble-projection record for the bubble engine itself.",
+      owner: "app/js/pin.js (flag/pin placement — do not confuse with a feature-flag system)", runtime: { app: true, studio: true, server: false },
       code: [
-        { role: "Flag/pin placement (do not move)", path: "scripts/gd-flag-pin.js" },
+        { role: "Flag/pin placement (do not move)", path: "app/js/pin.js" },
         { role: "Studio page (jump button into Bubble Geometry tuning)", path: "scripts/studio/gps-play/shot-planning/shot-planning-page.js" }
       ],
       inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "gps-play", direction: "child-of", label: "" }, { target: "gps-bubble-projection", direction: "child-of", label: "" }],
       keyFunctions: [], status: "implemented", needsVerification: false },
     { id: "gps-bubble-projection", label: "Bubble Projection", parent: "gps-shot-planning",
       function: "The live on-course GPS shot-pattern bubble overlay — distinct from \"My Bubble\" (the practice-data shot-shape comparison). Engine: calculateBubbleProfile/calculateVisualBubbleRender/getGpsBubblePayload build a smoothed polygon ring from club/carry/face-offset, clamped to on-screen caps, drawn by renderShot() onto the live map. Mirrored byte-for-byte into app/js/bubble-engine.js for the newer app shell by dev/generate-bubble-engine-client.js, verified identical by dev/fresh-app-boot.test.js. Design intent documented in docs/BUBBLE-BIBLE.md.",
-      owner: "scripts/gd-app-core.js (lines ~17915-18270, 19811) + generated mirror app/js/bubble-engine.js",
+      owner: "scripts/gd-app-core.js (bubble maths source) + generated mirror app/js/bubble-engine.js",
       runtime: { app: true, studio: true, server: false },
       code: [
         { role: "Bubble engine (profile/payload/ring math) — do not move", path: "scripts/gd-app-core.js" },
@@ -717,17 +706,17 @@
       ],
       inputs: ["Active club + carry distance", "Shot bearing (bearing(start,target) — geometric, NOT live device compass)", "bubbleGeometry.* dev-panel tuning"],
       outputs: ["Smoothed polygon ring rendered onto the live map"],
-      owns: ["Bubble shape/tilt/display-clamp math"], doesNotOwn: ["My Bubble practice-data comparison (gd-app-core.js:21874+, a different system despite the shared name)", "Map camera rotation (owned by gdOrientGpsCameraToBearing, also bearing-based, not compass-based)"],
+      owns: ["Bubble shape/tilt/display-clamp math"], doesNotOwn: ["My Bubble practice-data comparison (gd-app-core.js:21874+, a different system despite the shared name)", "Map camera rotation (app/js/painter.js, play-axis based, not compass-based)"],
       connections: [{ target: "gps-shot-planning", direction: "child-of", label: "" }],
       keyFunctions: [
         { name: "getGpsBubblePayload", purpose: "Public entry point: profile → GDB payload → fallback chain.", codePath: "scripts/gd-app-core.js" },
         { name: "gdBubbleGeometryTuning", purpose: "Reads the bubbleGeometry.* dev-panel knobs (width/depth/tilt scale, tilt clamp, GPS display caps) — this is the tunable surface, confirmed wired end-to-end, no naming drift found.", codePath: "scripts/gd-app-core.js" },
         { name: "gdBubbleShotBearing", purpose: "Returns bearing(start,target) — the orientation the bubble actually uses. Confirmed NOT fed by any live device heading.", codePath: "scripts/gd-app-core.js" },
-        { name: "renderShot", purpose: "Live-map render call site — draws the bubble's Leaflet layers.", codePath: "scripts/gd-app-core.js" }
+        { name: "GDBubbleEngine.renderModel", purpose: "What GPS Play's painter draws the bubble from.", codePath: "app/js/bubble-engine.js" }
       ],
       status: "implemented", needsVerification: false,
       warnings: [
-        "Not fed by a real compass \"deg\" value: gdBubbleShotBearing() and the map's gdOrientGpsCameraToBearing() both compute orientation purely from bearing(start,target)/bearing(start,northTarget) — geometric lat/lng trig, not device heading. A real live-heading reader exists (phoneHeading, from deviceorientation/webkitCompassHeading) but is wired only to an unrelated feature — the green-search phone-direction helper — never to the bubble or the map camera. If the bubble/camera is meant to track true device compass heading, that link does not exist in code.",
+        "Not fed by a real compass \"deg\" value: gdBubbleShotBearing() computes orientation purely from bearing(start,target) — geometric lat/lng trig, not device heading — and GPS Play's camera (app/js/painter.js) is aimed off the hole's play axis. If the bubble/camera is meant to track true device compass heading, that link does not exist in code.",
         "Bubble-SHAPE tilt (bubbleGeometry.tiltScale/tiltMaxDeg) is real and correctly wired to the dev panel — confirmed by tracing gdBubbleGeometryTuning() -> gdDeriveClusterTilt() -> calculateVisualBubbleRender() -> gdBubbleLocalToLatLng()'s rotation.",
         "A separate CAMERA/perspective tilt system (styles/inline/gd-gps-play-camera-tilt-v1.css, --gd-gps-play-camera-tilt-deg etc.) was found to be fully dead — defined, linked, styled, but no script ever set those custom properties or toggled its gating body classes, and its target element (#gdHoleImageCameraLayer) did not exist anywhere else in the codebase. Removed 2026-08-05 (see git history) rather than left as misleading dead configuration.",
         "The newer app/ shell has its own perspective tilt (--tiltDeg:32 in app/styles.css, actively used and read back for input un-tilting in app/js/painter.js's unTilt()) — but it's a hardcoded constant with no dev-panel/config path at all, since app/ has no DEV_DEFS/devTuningControls mechanism. It shares no config with bubbleGeometry.tiltScale/tiltMaxDeg."

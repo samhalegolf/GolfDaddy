@@ -825,7 +825,7 @@
   function closePickerSurface(reason){
     if(window.GDShell&&typeof window.GDShell.closeCoursePicker==="function"){
       if(reason==="course-picker-mapping")window.GDShell.openCoursePicker({source:reason,replace:true});
-      else window.GDShell.closeCoursePicker({reason:reason||"course-picker-owner",to:"gps"});
+      else window.GDShell.closeCoursePicker({reason:reason||"course-picker-owner",to:"origin"});
     }
     safe(()=>{document.body.dataset.gdCoursePickerClosedBy=String(reason||"course-picker-owner");});
     safe(()=>{window.__gdCoursePickerPinPromptActive=false;});
@@ -1067,7 +1067,6 @@
     }
     if(course.gdDatabaseMapAvailable===true&&localSavedPlayable(course)){
       if(typeof bridge().hidePin==="function")bridge().hidePin();
-      closePickerSurface("saved-playable-course");
       setMappingStatus({playable:true,holes:0,saved:0});
       return enterGpsPlay(course,{playable:true,course,source:"saved-playable-course"},opts);
     }
@@ -1580,7 +1579,6 @@
     safe(()=>{const context=window.GDPlayContext?.returnContext?.({source:state.source,returnTarget:window.__gdCoursePickerReturnTarget});if(context?.surface==="coach-player")window.__gdCoursePickerReturnTarget="coach-player";});
     safe(()=>{window.__gdCoursePickerChangingAt=Date.now();window.__gdCoursePickerFirstHoleOpenToken=null;window.__gdStableMappedHoleOneLast=null;});
     safe(()=>{if(window.__gdPreLockHoleFrameTimer)clearTimeout(window.__gdPreLockHoleFrameTimer);});
-    safe(()=>{if(typeof gdClearMappedStartPromptChrome==="function")gdClearMappedStartPromptChrome();});
     safe(()=>{
       if(window.GDShell&&typeof window.GDShell.openCoursePicker==="function"){
         window.GDShell.openCoursePicker({source:state.source,returnTarget:window.__gdCoursePickerReturnTarget,replace:!!opts.replace});
@@ -1612,63 +1610,6 @@
     resumeRound({renderOnly:true,source:state.source});
     return false;
   }
-  let activeCourseHoleOneTimer=null;
-  function shouldOpenActiveCourseToHoleOne(active,opts){
-    const name=String(active?.name||active?.courseName||"").trim();
-    if(!name||/^manual gps$/i.test(name))return false;
-    if(opts&&(opts.fromBack||opts.preserve||opts.preserveState||opts.fromCoursePicker||opts.keepGps))return false;
-    if(safe(()=>typeof gdShouldSkipMappedHoleOneReset==="function"&&gdShouldSkipMappedHoleOneReset(),false))return false;
-    if(safe(()=>!!(start||target||lockedFrame),false))return false;
-    if(!activeCourseHasMappedPlayData(active,1))return false;
-    return true;
-  }
-  function activeCourseHasMappedPlayData(active,hole){
-    const h=Number(hole)||1;
-    return safe(()=>typeof window.gdCourseHasMappedGreenFairway==="function"&&window.gdCourseHasMappedGreenFairway(active,h),false);
-  }
-  function clearUnmappedActiveCourseForPlay(active){
-    const name=String(active?.name||active?.courseName||"").trim();
-    if(!name||/^manual gps$/i.test(name))return;
-    safe(()=>localStorage.removeItem("gd_active_course_v1"));
-    safe(()=>sessionStorage.removeItem("gd_assumed_course_name"));
-    safe(()=>{window.gdActiveCourse=null;window.currentCourse=null;});
-    safe(()=>{currentCourse=null;});
-    safe(()=>{
-      const line=document.getElementById("courseLine");
-      if(line){line.textContent="";line.style.display="none";}
-    });
-  }
-  function scheduleActiveCourseToHoleOne(active,opts){
-    if(!shouldOpenActiveCourseToHoleOne(active,opts))return;
-    clearTimeout(activeCourseHoleOneTimer);
-    activeCourseHoleOneTimer=setTimeout(()=>{
-      const stored=safe(()=>JSON.parse(localStorage.getItem("gd_active_course_v1")||"null"),null);
-      const course=basePayload(active||stored);
-      if(safe(()=>typeof gdShouldSkipMappedHoleOneReset==="function"&&gdShouldSkipMappedHoleOneReset(),false))return;
-      if(!shouldOpenActiveCourseToHoleOne(course,{}))return;
-      if(typeof window.openCourse==="function")window.openCourse(course);
-      else if(typeof window.gdOpenCourseToFirstHole==="function")window.gdOpenCourseToFirstHole(course);
-    },180);
-  }
-  const previousEnterGps=window.enterGpsModule;
-  window.enterGpsModule=function(opts){
-    const res=typeof previousEnterGps==="function"?previousEnterGps.call(window,opts||{}):false;
-    const forcePicker=!!(opts&&opts.forceCoursePicker)||window.gdCourseChangeMode==="change-course";
-    if(!(opts&&opts.fromCoursePicker)){
-      renderNearby();
-      return res;
-    }
-    const active=(opts&&opts.selectedCourse)||window.__gdLiveCoursePickerSelection||safe(()=>JSON.parse(localStorage.getItem("gd_active_course_v1")||"null"),null);
-    if(active&&active.name&&!forcePicker){
-      byId("courseScreen")?.classList.add("hidden");
-      if(!isManualCourse(active)){
-        if(typeof gdScheduleCoursePickerFirstHoleOpen==="function")gdScheduleCoursePickerFirstHoleOpen(active);
-        else scheduleActiveCourseToHoleOne(active,opts||{});
-      }
-    }
-    else renderNearby();
-    return res;
-  };
   function resumeRound(opts={}){
     if(opts&&opts.event){opts.event.preventDefault?.();opts.event.stopPropagation?.();opts.event.stopImmediatePropagation?.();}
     const panel=typeof window.gdEnsureResumeRoundPicker==="function"?window.gdEnsureResumeRoundPicker():null;

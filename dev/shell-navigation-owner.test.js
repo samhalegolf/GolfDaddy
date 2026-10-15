@@ -29,7 +29,6 @@ assertBefore(html, "scripts/gd-shell.js", "scripts/gd-route-audit.js", "Shell ow
 
 assertContains(shell, "window.GDShell=api", "Shell owner exposes GDShell");
 assertContains(shell, "window.gdShellBackClick=function(event)", "Shell owner exports Back click compatibility");
-assertContains(shell, "window.gdShellBackPointer=function(event)", "Shell owner exports Back pointer compatibility");
 assertContains(shell, "window.gdCanonicalShellHome=function()", "Shell owner exports canonical Home compatibility");
 assertContains(shell, "window.gdCanonicalShellBack=function()", "Shell owner exports canonical Back compatibility");
 

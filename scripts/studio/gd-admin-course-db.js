@@ -344,7 +344,7 @@ function gdAdminCourseDbPayload(courseId){
     if(cloudCourse)return cloudCourse;
   }
   try{
-    if(typeof window.__gdExportCoursePlayPayload==="function")return window.__gdExportCoursePlayPayload(courseId);
+    if(window.GDCoursePlayPipeline&&typeof window.GDCoursePlayPipeline.exportCoursePlayPayload==="function")return window.GDCoursePlayPipeline.exportCoursePlayPayload(courseId);
     if(window.GDCoursePlayPipeline&&typeof window.GDCoursePlayPipeline.buildCoursePlayDbPayload==="function")return window.GDCoursePlayPipeline.buildCoursePlayDbPayload(courseId);
   }catch(e){return {error:e&&e.message?e.message:String(e)};}
   return null;

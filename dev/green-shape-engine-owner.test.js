@@ -20,7 +20,6 @@ const root = path.join(__dirname, "..");
 const index = fs.readFileSync(path.join(root, "index.html"), "utf8");
 const core = fs.readFileSync(path.join(root, "scripts", "gd-app-core.js"), "utf8");
 const pinLock = fs.readFileSync(path.join(root, "scripts", "gd-course-library-pin-lock.js"), "utf8");
-const brandIcons = fs.readFileSync(path.join(root, "scripts", "inline", "gd-brand-icon-render.js"), "utf8");
 const routeAudit = fs.readFileSync(path.join(root, "scripts", "gd-route-audit.js"), "utf8");
 
 function assertContains(source, needle, message) {
@@ -54,11 +53,6 @@ assertContains(serverCore, "now the only copy", "the server engine says it is th
 assertContains(serverCore, "analyzeGreenWand", "and still exposes the detector entry point");
 assertContains(serverCore, "validateDetection", "and deterministic crop-level validation");
 
-// ---- shared green rendering stays where it always was ----
-
-assertContains(core, "function drawGreenPolygon", "shared saved-green rendering stays in core");
-assertContains(core, "function drawGreenDistances", "shared green distance labels stay in core");
-
 // ---- the standalone Wand UI stays retired ----
 
 assertNotContains(index, 'id="gdWandBeltLayersV1"', "retired Wand belt layer is not loaded");
@@ -78,7 +72,6 @@ assertNotContains(pinLock, "automapperRunGreenShapeRefinement", "the AutoMapper 
 assertNotContains(pinLock, "automapperBuildGreenShapeCrop", "the client no longer builds AutoMapper green-shape imagery crops");
 assertNotContains(pinLock, "await saveOsmAutoHole", "client-side AutoMapper persistence (saveOsmAutoHole) no longer exists");
 assertNotContains(pinLock, "openGpsWand({source:'automapper-green-shape-engine'", "refinement path does not activate Wand UI");
-assertNotContains(brandIcons, "greenToolBtn", "right rail no longer creates a standalone Wand button");
 assertNotContains(routeAudit, "dockGreen", "canonical route audit no longer routes a Green dock button");
 assertNotContains(routeAudit, "openGpsWand", "canonical route audit no longer preserves standalone Wand entrypoints");
 

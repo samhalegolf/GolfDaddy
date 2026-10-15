@@ -73,9 +73,7 @@ async function launchBrowser(playwright) {
       debug: !!window.GolfDaddyConditionsDebug,
       modules: Object.keys(window.GolfDaddy.modules || {}),
       engineVersion: window.GolfDaddyConditionsEngine.ENGINE_VERSION,
-      profileVersion: window.GolfDaddyConditionsToleranceProfile.latest().version,
-      // GPS Play must expose the snapshot emitter and nothing analytical.
-      gpsPlayEmitter: typeof window.gdSubmitCourseDataShotSnapshot
+      profileVersion: window.GolfDaddyConditionsToleranceProfile.latest().version
     }));
 
     Object.keys(registered).forEach((key) => {
@@ -132,8 +130,6 @@ async function launchBrowser(playwright) {
     assert.strictEqual(result.normalisationApplied, true, "normalisation applied in the browser");
     assert(Math.abs(result.rawBubbleFitScore - 0.341875) < 0.001, "raw fit score matches the vm result");
     assert(Math.abs(result.selectedBubbleFitScore - 1) < 0.001, "normalised fit score matches the vm result");
-
-    assert.strictEqual(registered.gpsPlayEmitter, "function", "GPS Play exposes the snapshot emitter");
 
     // End-to-end through the real page: submit a snapshot, let the deferred
     // analysis run, then confirm the comparison layer plots the normalised

@@ -91,7 +91,7 @@
       fallbackCarryMetres: 140
     },
 
-    // Slope plays-like model, mirroring gdSlopeAdjustedDistanceData:
+    // Slope plays-like model, mirroring GPS Play's app/js/plays-like.js:
     // a 1:1 metre-for-metre translation of elevation delta into distance.
     slopeModel: {
       metresPerMetreOfRise: 1,

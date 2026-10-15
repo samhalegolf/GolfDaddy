@@ -83,7 +83,6 @@
         if(typeof updateShellRouteLabel==='function') updateShellRouteLabel();
       }
     });
-    safe(()=>{if(typeof gdV62Refresh==='function')setTimeout(gdV62Refresh,40)});
     return false;
   }
   function wrapProfileOpen(){

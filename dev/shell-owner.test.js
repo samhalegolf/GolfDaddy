@@ -53,7 +53,6 @@ assert.strictEqual((shell.match(/window\.GDShell=api/g) || []).length, 1, "one G
   "openCoursePicker",
   "closeCoursePicker",
   "enterGps",
-  "leaveGps",
   "openModule",
   "closeModule",
   "back",

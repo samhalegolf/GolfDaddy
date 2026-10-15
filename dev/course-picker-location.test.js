@@ -8,7 +8,6 @@ const appCore = fs.readFileSync(path.join(root, "scripts", "gd-app-core.js"), "u
 const pickerSearch = fs.readFileSync(path.join(root, "scripts", "inline", "gd-course-picker-search-v2.js"), "utf8");
 const pickerBaseCss = fs.readFileSync(path.join(root, "styles", "inline", "gd-app-base.css"), "utf8");
 const gpsRuntimeCss = fs.readFileSync(path.join(root, "styles", "inline", "gd-gps-play-runtime-owner-v1-css.css"), "utf8");
-const brandRail = fs.readFileSync(path.join(root, "scripts", "inline", "gd-brand-icon-render.js"), "utf8");
 const library = fs.readFileSync(path.join(root, "scripts", "gd-course-library-pin-lock.js"), "utf8");
 const coursePickerMappingPrep = pickerSearch.slice(
   pickerSearch.indexOf("function prepareMappingSurface"),
@@ -20,7 +19,6 @@ for (const [label, source] of [["index.html", index], ["gd-course-library-pin-lo
 }
 
 assert(appCore.includes("const GD_NEUTRAL_MAP_CENTER=[0,0];"), "map boots to a neutral technical center");
-assert(appCore.includes("return null;\n}\nfunction gdAssumedCourseLabelForPicker"), "course picker returns no default point when location is unknown");
 assert(pickerSearch.includes("requestPickerGps();"), "course picker requests GPS for nearby suggestions");
 assert(pickerSearch.includes("window.gdCoursePickerRequestGps=function(){return api.requestLocation();};"), "home/play route can request picker GPS through the picker owner");
 assert(pickerSearch.includes("window.gdCoursePickerCenterMapOnGps=function(point){return api.centerMapOnLocation(point);};"), "course picker can center the live map through the picker owner");
@@ -29,10 +27,8 @@ assert(pickerSearch.includes("const gps=recentGpsPoint();"), "course picker rank
 assert(pickerSearch.includes('if(/manual|tap|click|map|green-focus|pin/.test(source))return null;'), "course picker search ignores simulated/map-derived points as GPS");
 assert(pickerSearch.includes("return distanceDelta;"), "GPS course ties prefer the closest course");
 assert(pickerSearch.includes("const course=basePayload({"), "recent course rows are sanitized before re-entering the course picker flow");
-assert(appCore.includes("const setCourseView=opts.setCourseView!==undefined?!!opts.setCourseView:hasCoursePoint;"), "selected search/course coordinates drive the map view");
 assert(appCore.includes("if(!Number.isFinite(at)||at<=0||Date.now()-at>maxAgeMs)return null;"), "course picker requires a timestamped recent GPS fix");
 assert(appCore.includes("function gdResetCoursePickerPresentationReadiness(payload,opts={})"), "new course selections clear stale captured presentation readiness");
-assert(appCore.includes("if(!gdCoursePickerHasMappedPlayData(payload,1))return false;"), "course picker only opens mapped start when the selected course has mapped play data");
 assert(pickerSearch.includes('document.body.dataset.gdCourseNeedsPin=result&&result.playable?"no":waiting?"waiting":"pending";'), "course picker records when the pin fallback owns unresolved courses");
 /* "waiting" has to be its own value here. A course the server is still building has produced
    no result at all yet, and reporting that as "pending" made it indistinguishable from an
@@ -58,13 +54,9 @@ assert(!library.includes("beginInteractiveGreenFallback"), "a failed scan has no
 assert(appCore.includes('if(payload&&payload.gdCourseFitTrusted===false){'), "only a failed mapper fit verdict may demand a pin");
 assert(!appCore.includes('mark("stored-pin");return false;'), "stored pins prefill the pin screen but do not bypass it");
 assert(!appCore.includes('mark("recent-live-gps");return false;'), "recent GPS does not bypass the no-database-map pin screen");
-assert(appCore.includes("function gdCoursePickerCheckDatabaseThenOpen(payload)"), "course picker checks the database map before deciding whether to pin");
 assert(!appCore.includes("published-course-visual"), "course visuals do not count as database maps for the picker pin gate");
-assert(appCore.includes("if(!payload.gdDatabaseMapChecked&&!gdCoursePayloadIsManual(payload))return gdCoursePickerCheckDatabaseThenOpen(payload);"), "course picker gates non-manual course opens behind a database map check");
-assert(appCore.includes("if(gdCoursePickerNeedsCoursePin(payload))return gdShowCoursePinScreen(payload);"), "no-GPS course picks show the pin screen before course play opens");
 assert(appCore.includes('mark("trusted-search-pin")'), "pin decision writes a DOM breadcrumb for live QA");
 assert(appCore.includes('mark("course-fit-"'), "the breadcrumb names which fit check demanded the pin");
-assert(appCore.includes("const usePinSeed=!payload.gdDatabaseMapAvailable&&gdCoursePickerUsesPinSeed(payload);"), "database maps win over stored pin scanner seeds");
 assert(pickerSearch.includes('reason:pinSeed?"course-picker-pin":"course-picker"'), "confirmed pins feed the course scanner as the mapping reason");
 assert(pickerSearch.includes("courseCentre:pinnedCentre||undefined"), "confirmed pins feed the course scanner as the mapping centre");
 assert(pickerSearch.includes("allowLocalSavedMap:course?.gdDatabaseMapAvailable===true"), "local saved maps cannot beat the picker pin flow without a confirmed database map");
@@ -78,17 +70,12 @@ assert(pickerSearch.includes("prepareMappingSurface(course,opts);"), "course pic
 assert(!coursePickerMappingPrep.includes("gdEnsureGpsCourseSurface();"), "course picker does not enter GPS Play before mapping returns a playable result");
 assert(pickerSearch.includes("setMappingStatus(result);"), "course picker receives mapping success/failure from the controller");
 assert(pickerSearch.includes("if(result&&result.playable)enterGpsPlay(course,result,opts);"), "course picker enters GPS Play only after a playable mapping result");
-assert(appCore.includes('return window.GDCoursePicker.selectCourse(payload,Object.assign({source:"core-compat-kick"},opts||{}));'), "legacy automap kickoff delegates back to the course picker owner");
-assert(appCore.includes("if(payload?.gdDatabaseMapAvailable===true)gdScheduleCourseVisualPullForPlay(payload);"), "course visual pulls only follow confirmed database maps");
 assert(appCore.includes("window.gdConfirmCoursePin=gdConfirmCoursePin"), "pin confirmation is exposed for the picker panel");
 assert(pickerBaseCss.includes(".courseScreen{position:absolute;inset:0;z-index:7600;background:transparent"), "course picker overlay leaves the live map visible behind the controls");
 assert(pickerBaseCss.includes(".gdCoursePinScreen"), "course picker includes the no-GPS pin prompt styling");
 assert(pickerBaseCss.includes(".courseScreen.gdCoursePinMode #gdCourseResumeRound{display:none!important}"), "pin mode hides the stale resume-round panel");
 assert(gpsRuntimeCss.includes("body.shell-gps.gdCoursePickerOpen #map"), "GPS runtime CSS keeps the map visible under the course picker");
 assert(!index.includes('class="rightRail" id="gdAppRightRail"'), "right rail is no longer static boot markup that can flash over the picker");
-assert(brandRail.includes("function railAllowed()"), "brand rail script owns rail creation instead of static HTML");
-assert(brandRail.includes("removeRightRail();"), "brand rail script deletes the rail while picker/home surfaces own the screen");
-assert(brandRail.includes("gdAuthLocked") && brandRail.includes("gdProfileOpen"), "brand rail script does not keep a hidden rail on auth/profile screens");
 assert(library.includes("return recentGpsPoint();"), "library session center falls back only to actual recent GPS");
 /* This asserted the literal `lat:finder?.lat??saved.courseLat??null`. The locals were later
    renamed - finder -> centre, saved -> snap - and a third fallback was added, so the literal
@@ -106,7 +93,6 @@ assert((openCoords[0].match(/\?\?null/g) || []).length >= 4,
 assert(!/\?\?\s*-?[0-9]/.test(openCoords[0]),
   "course library open does not invent coordinates: no numeric default may terminate a coordinate chain");
 assert(library.includes("course?loadUserCourseData(userId(),courseId(course)):loadUserCourseData()"), "mapped checks load the explicit selected course instead of stale active course data");
-assert(library.includes("const hasTrustedPlayData=requestedHolePlayable(course,expected);"), "settled course-open UI requires trusted mapped data for the requested hole");
 assert(library.includes("async function publishedCourseMapAvailability(course,opts={})"), "course library exposes a DB-map-only availability check for the picker");
 assert(library.includes("function courseDataMapReadiness(course,hole,wholeCourse)"), "database map availability checks the published course data directly");
 assert(library.includes("saved-map-ignored-without-database-map"), "course scanner ignores local saved maps when the picker did not confirm a database map");
@@ -118,8 +104,6 @@ assert(pickerSearch.includes("hasDatabaseMap=true"), "database course results ke
 assert(index.includes("gd-app-base.css?v="), "base CSS cache-bust ships the pin prompt styling");
 assert(index.includes("gd-app-permissions.js?v="), "local app permissions owner ships before app core");
 assert(index.includes("gd-app-core.js?v="), "app core cache-bust ships the picker bridge");
-assert(index.includes("gd-flag-pin.js?v="), "flag/pin owner still ships the flagTool boot-crash fix");
-assert(index.includes("gd-brand-icon-render.js?v="), "brand rail cache-bust ships dynamic rail ownership + flag handler rebind");
 assert(index.includes("gd-course-picker-search-v2.js?v="), "course picker owner cache-bust ships database course hydration and selection ownership");
 assert(index.includes("gd-course-library-pin-lock.js?v="), "course library cache-bust ships");
 

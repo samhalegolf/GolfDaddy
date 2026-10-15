@@ -88,11 +88,9 @@ function makeDocument() {
     "shellBackBtn",
     "shellHomeBtn",
     "shellProfileReturnBtn",
-    "shellSettingsBtn",
     "shellRouteLabel",
     "profilePanel",
     "bagPanel",
-    "settingsPanel",
     "developerPanel",
     "dataHubPanel",
     "gdProfileV67",
@@ -102,7 +100,7 @@ function makeDocument() {
   ].forEach((id) => {
     const el = document.createElement(id.endsWith("Btn") ? "button" : "div");
     el.id = id;
-    if (["profilePanel", "bagPanel", "settingsPanel", "developerPanel", "dataHubPanel"].includes(id)) el.className = "modulePanel";
+    if (["profilePanel", "bagPanel", "developerPanel", "dataHubPanel"].includes(id)) el.className = "modulePanel";
     if (id === "courseScreen" || id === "gdCoursePinScreen" || id === "gdProfileV67") el.classList.add("hidden");
     document.body.appendChild(el);
   });
@@ -111,7 +109,7 @@ function makeDocument() {
 
 function createHarness() {
   const document = makeDocument();
-  const calls = { settings: 0, profileReturn: 0 };
+  const calls = { profileReturn: 0 };
   const window = {
     document,
     console,
@@ -123,7 +121,6 @@ function createHarness() {
     ClarityRouter: { remember() {} },
     ClaritySession: { sync() {} },
     GolfDaddyAccounts: { returnToOwnProfile() {} },
-    openSettings() { calls.settings++; return false; },
     gdReturnToProfileWorkspace() { calls.profileReturn++; return false; }
   };
   const context = vm.createContext(Object.assign(window, { window, globalThis: window }));
@@ -146,11 +143,9 @@ function assertOneSurface(document, expected) {
     profile: visible(document.getElementById("gdProfileV67")),
     profilePanel: document.getElementById("profilePanel").classList.contains("open"),
     bag: document.getElementById("bagPanel").classList.contains("open"),
-    settings: document.getElementById("settingsPanel").classList.contains("open"),
     admin: document.getElementById("developerPanel").classList.contains("open"),
     dataHub: document.getElementById("dataHubPanel").classList.contains("open")
   };
-  surfaces.gps = document.body.classList.contains("shell-gps") && !surfaces.picker && !surfaces.profile && !surfaces.profilePanel && !surfaces.bag && !surfaces.settings && !surfaces.admin && !surfaces.dataHub;
   const active = Object.keys(surfaces).filter((key) => surfaces[key]);
   assert.deepStrictEqual(active, [expected], `only ${expected} is visible`);
 }
@@ -167,7 +162,6 @@ assert.strictEqual(document.getElementById("shellRouteLabel").textContent, "Home
 
 shell.openCoursePicker({ source: "test-play", returnTarget: "home" });
 assert.strictEqual(shell.getState().route, "course-picker", "Play opens Course Picker route");
-assert.strictEqual(shell.getState().gpsActive, false, "Course Picker is not GPS Play state");
 assert(document.body.classList.contains("gdCoursePickerOpen"), "picker compatibility class is derived");
 assertOneSurface(document, "picker");
 
@@ -175,41 +169,36 @@ shell.back();
 assert.strictEqual(shell.getState().route, "home", "Back from picker returns Home");
 assertOneSurface(document, "home");
 
-/* No course loaded: the GPS route has nothing to draw, so the shell sends the
-   caller to the course picker instead of a black GPS surface. */
+/* GPS Play is its own page (app/). Entering it from this shell always means the
+   course picker - with or without a course already chosen. There is no GPS
+   route here any more. */
 shell.enterGps({ source: "no-course" });
-assert.strictEqual(shell.getState().route, "course-picker", "entering GPS without a loaded course opens the picker");
+assert.strictEqual(shell.getState().route, "course-picker", "entering GPS opens the picker");
 assertOneSurface(document, "picker");
 shell.home();
 
 window.currentCourse = { name: "Test Course" };
-shell.enterGps({ source: "playable-course" });
-assert.strictEqual(shell.getState().route, "gps", "valid course enters GPS route");
-assert(document.body.classList.contains("shell-gps"), "GPS compatibility class is active");
-assert(!document.body.classList.contains("gdCoursePickerOpen"), "GPS route clears picker class");
-assertOneSurface(document, "gps");
+shell.enterGps({ source: "with-course" });
+assert.strictEqual(shell.getState().route, "course-picker", "a chosen course still enters through the picker");
+assertOneSurface(document, "picker");
 
 shell.openModule("profile", { fromGps: true });
 assert.strictEqual(shell.getState().route, "module", "profile opens module route");
 assert.strictEqual(shell.getState().module, "profile", "profile module identity is tracked");
 assertOneSurface(document, "profilePanel");
 
-shell.openModule("settings", { fromGps: true });
-assertOneSurface(document, "settings");
+shell.openModule("bag", { fromGps: true });
+assertOneSurface(document, "bag");
 assert(!document.getElementById("profilePanel").classList.contains("open"), "opening a second module closes the first");
-assert.strictEqual(document.getElementById("shellRouteLabel").textContent, "Settings", "module route label matches active module");
+assert.strictEqual(document.getElementById("shellRouteLabel").textContent, "Bag", "module route label matches active module");
 
 shell.back();
-assert.strictEqual(shell.getState().route, "gps", "Back from GPS-returning module returns GPS");
-assert(document.body.classList.contains("shell-gps"), "Back to GPS restores GPS shell class");
-assertOneSurface(document, "gps");
+assert.strictEqual(shell.getState().route, "course-picker", "Back from a module opened from Play returns to the picker");
+assertOneSurface(document, "picker");
 
 shell.home();
 assert.strictEqual(shell.getState().route, "home", "Home command returns Home");
 assertOneSurface(document, "home");
-
-document.getElementById("shellSettingsBtn").onclick({ preventDefault() {}, stopPropagation() {} });
-assert.strictEqual(calls.settings, 1, "Settings button delegates content to settings owner");
 
 document.getElementById("shellProfileReturnBtn").onclick({ preventDefault() {}, stopPropagation() {} });
 assert.strictEqual(calls.profileReturn, 1, "profile-return button delegates profile workspace action");

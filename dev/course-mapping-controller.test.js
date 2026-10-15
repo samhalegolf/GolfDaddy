@@ -148,7 +148,7 @@ function serverPackage(holeCount = 1) {
 
 function loadController(options = {}) {
   const events = [];
-  const calls = { fetch: 0, courseMapsGet: 0, courseLibraryGet: 0, courseMapsPost: 0, courseMapsBodies: [], courseVisualsGet: 0, courseVisualsPost: 0, fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [], packageFetches: 0, notifyOffers: [], pickerOpens: [] };
+  const calls = { fetch: 0, courseMapsGet: 0, courseLibraryGet: 0, courseMapsPost: 0, courseMapsBodies: [], courseVisualsGet: 0, courseVisualsPost: 0, fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], courseHoles: [], packageFetches: 0, notifyOffers: [], pickerOpens: [] };
   const testConsole = Object.assign({}, console, { warn() {}, info() {} });
   const localStorage = storage({
     gd_user_course_library_v1: options.seedLibrary ? JSON.stringify(options.seedLibrary) : JSON.stringify(options.savedMap ? playableStore() : { courses: {} })
@@ -223,6 +223,7 @@ function loadController(options = {}) {
       recordDebugEvent() {},
       ingestMappedCourse(courseInput, holes) {
         calls.ingestMappedCourse += 1;
+        calls.courseHoles = Array.from(holes || [], (hole) => Number(hole && (hole.holeNumber || hole.hole)));
         (holes || []).forEach((hole) => calls.ingestedHoles.push(Number(hole && (hole.holeNumber || hole.hole))));
         return { courseId: courseInput && courseInput.courseId, holes: holes || [] };
       },
@@ -231,14 +232,6 @@ function loadController(options = {}) {
         calls.ingestedHoles.push(Number(holeNumber));
         return { courseId: courseInput && courseInput.courseId, holeNumber };
       }
-    },
-    gdRenderCoursePlayHoleFrame(courseInput, holeNumber, holeData, opts) {
-      if (opts && opts.cacheOnly) {
-        calls.frameWarm += 1;
-        calls.frameWarmHoles.push(Number(holeNumber));
-        return !!(holeData && Array.isArray(holeData.route) && holeData.route.length >= 2);
-      }
-      return false;
     },
     CustomEvent: function CustomEvent(type, init) { this.type = type; this.detail = init && init.detail; },
     GolfDaddyAccounts: {
@@ -435,14 +428,13 @@ async function runScenario(options) {
     courseVisualsPost: 0,
     ingestMappedCourse: 0,
     ingestMappedHole: 0,
-    frameWarm: 0,
     packageFetches: 0
   });
   env.calls.courseMapsBodies.length = 0;
   env.calls.fetchUrls.length = 0;
   env.calls.order.length = 0;
   env.calls.ingestedHoles.length = 0;
-  env.calls.frameWarmHoles.length = 0;
+  env.calls.courseHoles = [];
   const result = await env.win.runCourseMappingAttempt({
     course: env.course,
     hole: 1,
@@ -478,7 +470,7 @@ async function main() {
   assert.strictEqual(env.result.playable, true, "whole-course published object map resolves play");
   assert.strictEqual(env.calls.courseMapsGet, 1, "whole-course object library is checked once");
   assert.strictEqual(env.calls.fetch, 0, "whole-course published object hit makes no unexpected fetch");
-  assert.deepStrictEqual(env.calls.frameWarmHoles, Array.from({ length: 18 }, (_, index) => index + 1), "whole-course published object map collects every play frame on first load");
+  assert.deepStrictEqual(env.calls.courseHoles, Array.from({ length: 18 }, (_, index) => index + 1), "whole-course published object map collects every hole on first load");
   assert.strictEqual(env.calls.ingestMappedCourse, 1, "whole-course published object map ingests the mapped course into the play pipeline");
 
   /* Stage 6/8 of the course-package migration plan: when the server has already mapped this
@@ -626,12 +618,12 @@ async function main() {
      requested hole exists; missing holes remain hole-level fallbacks. */
   env = await runScenario({ wholeCourse: true, serverCoursePackage: serverPackage(3) });
   assert.strictEqual(env.result.playable, true, "a partial published package opens when the requested hole is mapped");
-  assert.deepStrictEqual(env.calls.frameWarmHoles, [1, 2, 3], "every available partial-package hole is warmed");
+  assert.deepStrictEqual(env.calls.courseHoles, [1, 2, 3], "every available partial-package hole is collected");
   assert.strictEqual(env.calls.ingestMappedCourse, 1, "available partial geometry enters the play pipeline");
 
   env = await runScenario({ wholeCourse: true, serverCoursePackage: serverPackage(18) });
   assert.strictEqual(env.result.playable, true, "resolved server-package run confirms every assigned hole");
-  assert.deepStrictEqual(env.calls.frameWarmHoles, Array.from({ length: 18 }, (_, index) => index + 1), "complete first-load server-package success warms every newly mapped play frame");
+  assert.deepStrictEqual(env.calls.courseHoles, Array.from({ length: 18 }, (_, index) => index + 1), "complete first-load server-package success collects every newly mapped hole");
   assert.strictEqual(env.calls.ingestMappedCourse, 1, "complete first-load server-package success ingests the mapped course into the play pipeline");
   /* The map came from the server; posting it back as a "Community scan" rewrote the course
      row on every open for nothing (seen on 6 Oct 2026, one upsert per open). */

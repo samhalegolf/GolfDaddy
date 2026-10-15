@@ -235,13 +235,11 @@ test("neither shell keeps its own club-row renderer", () => {
     "app/js/bag.js must render the club list through the core");
 });
 
-test("the three doors into the bag are one panel", () => {
+test("both doors into the bag are one panel", () => {
   const shell = read("index.html");
-  /* Home tile, and the profile tool and in-play rail button, all through the
-     same openBag() and therefore the same #bagPanel. */
+  /* The home tile and the profile tool, both through the same openBag() and
+     therefore the same #bagPanel. */
   assert.ok(/gdBagTile[^>]*onclick="try\{openBag\(\)/.test(shell), "the home tile opens the bag panel");
-  assert.ok(read("scripts/inline/gd-brand-icon-render.js").includes("openBag()"),
-    "the in-play rail icon opens the same bag panel");
   assert.ok(read("scripts/inline/gd-auth-account-shell.js").includes("openBag({fromProfile:true})"),
     "the profile's bag tool opens the same bag panel");
 });

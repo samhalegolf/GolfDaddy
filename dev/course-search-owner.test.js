@@ -6,10 +6,9 @@
  * same two nodes on their own timers, plus a silent async selection whose token
  * let a second tap cancel the first.
  *
- * Unlike course-picker-behavior.test.js this harness also loads the REAL
- * competing code: gd-app-core.js's document-capture click handler and its
- * Enter listener (lifted from source, not re-typed), so the test fails if
- * either starts winning again.
+ * gd-app-core.js used to carry a competing document-capture click handler and
+ * an Enter listener for the same nodes; both are deleted, and this checks they
+ * stay deleted.
  *
  * Run: node dev/course-search-owner.test.js */
 const assert = require("assert");
@@ -22,18 +21,6 @@ const pickerSource = fs.readFileSync(path.join(ROOT, "scripts", "inline", "gd-co
 const coreSource = fs.readFileSync(path.join(ROOT, "scripts", "gd-app-core.js"), "utf8");
 const pinLockSource = fs.readFileSync(path.join(ROOT, "scripts", "gd-course-library-pin-lock.js"), "utf8");
 
-function coreFn(signature) {
-  const idx = coreSource.indexOf(signature);
-  assert.notStrictEqual(idx, -1, "could not find in core: " + signature);
-  let depth = 0, started = false;
-  for (let i = idx; i < coreSource.length; i++) {
-    if (coreSource[i] === "{") { depth++; started = true; }
-    else if (coreSource[i] === "}") { depth--; if (started && depth === 0) return coreSource.slice(idx, i + 1); }
-  }
-  throw new Error("unbalanced braces after " + signature);
-}
-const coreEnterLine = (coreSource.match(/^document\.getElementById\("searchInput"\)\?\.addEventListener\("keydown".*$/m) || [])[0];
-assert.ok(coreEnterLine, "core still binds Enter on #searchInput (lift it for the harness)");
 
 /* ---------------------------------------------------------------- fake DOM */
 class ClassList {
@@ -196,8 +183,6 @@ function createHarness(options = {}) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8"), context, { filename: f });
   }
   vm.runInContext(pickerSource, context, { filename: "gd-course-picker-search-v2.js" });
-  /* The competing code, lifted from gd-app-core.js as it is today. */
-  vm.runInContext(coreFn("function gdWireCoursePickerPlay(){") + "\ngdWireCoursePickerPlay();\n" + coreEnterLine, context, { filename: "gd-app-core.js (lifted)" });
   return { window, document, net };
 }
 function click(env, target) {
@@ -219,14 +204,14 @@ const countText = (env) => env.document.getElementById("countLine").textContent;
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
 
-test("Enter runs one search and one course-search request, with the core listener still bound", async () => {
+test("Enter runs one search and one course-search request", async () => {
   const env = createHarness();
   env.window.GDCoursePicker.open({ source: "home-play", returnTarget: "home" });
   await settle();
   env.document.getElementById("searchInput").value = "akarana";
   pressEnter(env);
   await settle();
-  assert.strictEqual(env.document.getElementById("searchInput").listeners.keydown.length, 2, "both Enter listeners are really bound in this harness");
+  assert.strictEqual(env.document.getElementById("searchInput").listeners.keydown.length, 1, "the picker is the only Enter listener");
   assert.strictEqual(env.net.courseSearch, 1, "one Enter press, one search request");
   assert.strictEqual(env.net.nominatim, 0, "the picker no longer calls Nominatim itself - the server does, politely");
   assert.ok(/q=akarana(&|$)/.test(env.net.courseSearchUrls[0]), "the typed text is sent as typed, with nothing appended");
@@ -263,8 +248,8 @@ test("opening the picker and searching does not churn the nearby block", async (
   env.window.GDCoursePicker.search();
   await settle();
   assert.strictEqual(option.rebuilds, afterOpen, "a search does not rebuild the nearby block at all");
-  /* The pin-lock's after-every-click refresh, as it now calls in. */
-  assert.ok(/window\.GDCoursePicker\.refreshAssumed\(candidate\);return;/.test(pinLockSource), "pin-lock asks the owner instead of writing the list");
+  /* The pin-lock used to refresh this block after every click; that refresh is gone. */
+  assert.ok(!/gdCourseAssumedOption/.test(pinLockSource), "pin-lock does not write the nearby block");
   env.window.GDCoursePicker.refreshAssumed({ name: "Akarana Golf Club", assumedCandidate: true, lat: AK.lat, lng: AK.lng });
   env.window.gdRefreshCourseAssumedOption({ name: "Assumed course -36.92, 174.74", assumedCandidate: true });
   assert.strictEqual(option.rebuilds, afterOpen, "the click-driven candidate refresh is a no-op when nothing changed");
@@ -319,10 +304,9 @@ test("with a query, an exact name beats a nearer partial match even when GPS is 
   assert.strictEqual(rowNames(env)[0], "Akarana Golf Club", "the course the player named is first, not the one they are standing next to");
 });
 
-test("the legacy core handlers stand down when the owner is loaded", () => {
-  const wire = coreFn("function gdWireCoursePickerPlay(){");
-  assert.ok(/if\(window\.GDCoursePicker\)return;/.test(wire), "the capture click handler defers to the owner");
-  assert.ok(/e\.key==="Enter"&&!window\.GDCoursePicker/.test(coreEnterLine), "the core Enter listener defers to the owner");
+test("the picker is the only thing handling its clicks and Enter", () => {
+  assert.ok(!coreSource.includes("function gdWireCoursePickerPlay"), "the core's competing capture click handler is gone");
+  assert.ok(!/getElementById\("searchInput"\)\?\.addEventListener\("keydown"/.test(coreSource), "the core's competing Enter listener is gone");
   assert.ok(!/onclick="gdConfirmAssumedCourse/.test(fs.readFileSync(path.join(ROOT, "index.html"), "utf8")), "the static nearby block has no second inline click path");
 });
 
