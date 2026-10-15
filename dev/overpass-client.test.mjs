@@ -26,6 +26,16 @@ answers.splice(1);
 await assert.rejects(fetchOverpass("[out:json];way(2);out;"), /incomplete answer/);
 assert.equal(__overpassClientTest.responseCache.has("[out:json];way(2);out;"), false, "a cut-short answer is never cached");
 
+/* Fairview: overpass-api.de's proxy answered 502 while its backend was busy. That is
+   waited out here, the same as a 504, instead of failing the whole job at once. */
+let proxyCalls = 0;
+globalThis.fetch = async () => (++proxyCalls < 3
+  ? { ok: false, status: 502, json: async () => ({}) }
+  : { ok: true, status: 200, json: async () => ({ elements: [{ type: "way", id: 7 }] }) });
+const recovered = await fetchOverpass("[out:json];way(3);out;");
+assert.equal(proxyCalls, 3, "two 502s are retried");
+assert.equal(recovered.elements.length, 1);
+
 globalThis.fetch = realFetch;
 globalThis.setTimeout = realTimeout;
 console.log("overpass-client: ok");

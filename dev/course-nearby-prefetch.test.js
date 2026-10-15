@@ -130,6 +130,15 @@ test("the worker takes a player job before any background job", async () => {
   assert.ok(!calls.reads.some(rest => rest.includes("kind=eq.nearby_automap")), "the background queue was not even looked at");
 });
 
+test("a job this invocation just requeued is not claimed straight back", async () => {
+  const calls = stubFetch({
+    jobs: rest => rest.includes("status=eq.queued") && !rest.includes("id=not.in.(fairview-job)") ? [{ id: "fairview-job", kind: "automap" }] : [],
+    patchedRows: rest => rest.includes("fairview-job") ? [{ id: "fairview-job", kind: "automap" }] : []
+  });
+  assert.strictEqual(await worker.claimNextJob({ allowNearby: false, skip: new Set(["fairview-job"]) }), null, "it waits for the sweeper");
+  assert.ok(calls.reads.some(rest => rest.includes("id=not.in.(fairview-job)")), "the claim excludes it");
+});
+
 test("no background job is taken while a player job is running", async () => {
   const calls = stubFetch({
     jobs: rest => {
