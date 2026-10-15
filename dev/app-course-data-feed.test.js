@@ -48,6 +48,8 @@ const idx = (needle) => order.findIndex((src) => src.includes(needle));
   "gd-conditions-geometry.js",
   "gd-conditions-engine.js",
   "gd-course-data-intake.js",
+  "gd-shot-outcomes.js",
+  "gd-shot-events.js",
   "js/course-data.js"
 ].forEach((name) => {
   assert.ok(loads(name), "app/index.html must load " + name);
@@ -62,6 +64,8 @@ assert.ok(
   "gd-conditions-debug.js is studio-only and must not ship on the play surface"
 );
 assert.ok(idx("gd-course-data-intake.js") < idx("js/course-data.js"), "the intake must load before its caller");
+assert.ok(idx("gd-shot-outcomes.js") < idx("gd-shot-events.js") && idx("gd-shot-events.js") < idx("js/course-data.js"),
+  "the Course Data screen's shot store (and the outcome pairing it calls) must load before the feed");
 assert.ok(idx("js/course-data.js") < idx("js/marshal.js"), "course-data.js must load before marshal.js, which enters holes and starts the round");
 
 /* --------------------------------------------------------------------------
@@ -82,6 +86,7 @@ function harness(options = {}) {
   const context = {
     console,
     localStorage: memoryStorage(),
+    sessionStorage: memoryStorage(),
     setTimeout: (fn) => { deferred.push(fn); return deferred.length; },
     clearTimeout: () => {},
     Date,
@@ -104,8 +109,20 @@ function harness(options = {}) {
     "scripts/course-data/conditions-engine/gd-conditions-geometry.js",
     "scripts/course-data/conditions-engine/gd-conditions-engine.js",
     "scripts/course-data/gd-course-data-intake.js",
-    "app/js/course-data.js"
+    "scripts/gd-shot-outcomes.js",
+    "scripts/gd-shot-events.js",
+    "app/js/course-data.js",
+    /* Not loaded on the play surface - this is what the Course Data screen
+       runs, loaded here only to read the shots back the way the screen does. */
+    "scripts/gd-shot-cluster-analysis.js"
   ].forEach((rel) => vm.runInContext(read(rel), context, { filename: rel }));
+  if (options.profiles) context.localStorage.setItem("gd_player_profiles_v27", JSON.stringify(options.profiles));
+  /* The bubble the shot card was showing: 40 m deep, 20 m wide, on the target. */
+  if (options.bubble !== false) {
+    context.GDBubbleEngine = {
+      renderModel: () => ({ center: TARGET, payload: { club: "7i", depthRadiusM: 20, lateralRadiusM: 10 } })
+    };
+  }
 
   const app = context.window.ClarityApp;
   /* Only what course-data.js actually reads off the app. Anything absent must
@@ -298,5 +315,49 @@ assert.ok(
   "gd_shot_snapshots_v1 holds measurements that cannot be retaken - it must be mirrored to durable storage"
 );
 
-console.log("app course data feed passed: shots reach Course Data raw, intent and evidence stay separate, "
-  + "capture methods travel verbatim, failures stay out of play, My Bubble comparison absent");
+/* 6. The shot lands on the Course Data screen. The snapshot store above is not
+      what that screen lists - it reads planned shots paired with landings from
+      gd_shot_events_v1, through gd-shot-cluster-analysis.js. Filing only the
+      snapshot is exactly how a whole round went missing from the screen, so
+      this reads the shot back the way the screen does, as the active player. */
+{
+  const h = harness({ profiles: { activeId: "p-sam", profiles: [{ id: "p-other" }, { id: "p-sam", name: "Sam", accountId: "acc-1" }] } });
+  h.app.courseData.startRound("akarana-golf-club");
+  complete(h, 4, "lock");
+
+  assert.strictEqual(h.app.courseData.stats().onScreen, 1, "the shot was filed for the screen: " + JSON.stringify(h.app.courseData.stats()));
+  const records = h.context.window.GolfDaddyShotClusterAnalysis.analyzeCurrent().records;
+  assert.strictEqual(records.length, 1, "the screen's analysis sees the shot");
+  const r = records[0];
+  assert.strictEqual(r.playerId, "p-sam", "filed under the active profile, so the screen's player filter keeps it");
+  assert.strictEqual(r.club, "7i", "the club the shot card showed");
+  assert.strictEqual(r.holeId, "hole-4", "the hole");
+  assert.strictEqual(r.bubbleWasSet, true, "the bubble the player saw is recorded");
+  assert.ok(Math.abs(r.presumedBubbleDepthM - 40) < 0.5 && Math.abs(r.presumedBubbleWidthM - 20) < 0.5,
+    "bubble size as shown: " + r.presumedBubbleDepthM + " x " + r.presumedBubbleWidthM);
+  assert.ok(Math.abs(r.depthM - -22.2) < 1, "landed ~22 m short of the bubble centre, got " + r.depthM);
+  assert.ok(Math.abs(r.lateralM) < 0.5, "and on line, got " + r.lateralM);
+
+  const snap = h.context.window.GolfDaddyCourseDataIntake.listSnapshots()[0];
+  assert.strictEqual(snap.playerId, "p-sam", "the raw snapshot carries the player too");
+
+  /* A second shot pairs with its own plan, not the first one's. */
+  complete(h, 4, "ball-tracked", { start: LANDING, target: { lat: 0.0015, lng: 0 }, end: { lat: 0.00145, lng: 0 } });
+  const after = h.context.window.GolfDaddyShotClusterAnalysis.analyzeCurrent().records;
+  assert.strictEqual(after.length, 2, "both shots on the screen");
+  assert.strictEqual(new Set(after.map((x) => x.shotId)).size, 2, "each paired once");
+}
+
+/* 7. No bubble on screen means no plan to measure the landing against. The raw
+      snapshot is still filed; nothing is invented for the screen. */
+{
+  const h = harness({ bubble: false });
+  h.app.courseData.startRound("akarana-golf-club");
+  complete(h, 5, "lock");
+  assert.strictEqual(h.context.window.GolfDaddyCourseDataIntake.listSnapshots().length, 1, "the raw snapshot is still filed");
+  assert.strictEqual(h.app.courseData.stats().onScreen, 0, "but no plan is made up for the screen");
+  assert.strictEqual(h.context.window.GolfDaddyShotClusterAnalysis.analyzeCurrent().records.length, 0, "and the screen shows nothing for it");
+}
+
+console.log("app course data feed passed: shots reach Course Data raw and land on the Course Data screen, "
+  + "intent and evidence stay separate, capture methods travel verbatim, failures stay out of play, My Bubble comparison absent");

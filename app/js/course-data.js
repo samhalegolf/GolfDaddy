@@ -33,7 +33,7 @@
 
   var roundId = null;
   var sequence = 0;
-  var state = { submitted: 0, rejected: 0, lastErrors: [] };
+  var state = { submitted: 0, onScreen: 0, rejected: 0, lastErrors: [] };
 
   function intake() {
     return window.GolfDaddyCourseDataIntake
@@ -43,6 +43,12 @@
   function snapshots() {
     return window.GolfDaddyShotSnapshot
       || (window.GolfDaddy && window.GolfDaddy.modules && window.GolfDaddy.modules.shotSnapshot)
+      || null;
+  }
+
+  function shotEvents() {
+    return window.GolfDaddyShotEvents
+      || (window.GolfDaddy && window.GolfDaddy.modules && window.GolfDaddy.modules.shotEvents)
       || null;
   }
 
@@ -139,6 +145,67 @@
     };
   }
 
+  var METERS_TO_YARDS = 1.0936132983;
+
+  /* The Course Data screen does not read the snapshot store. It reads planned
+     shots paired with landings from gd_shot_events_v1 (gd-shot-events.js), the
+     store the old play runtime filled. Filing the snapshot alone left every
+     round invisible on that screen, so the same shot is filed there too: the
+     bubble the player was shown, and where the ball finished. That is still a
+     record of what happened - the comparison is worked out on the screen.
+
+     Returns false when there is no bubble on screen (no club model up): an
+     outcome needs the bubble it is measured against, and inventing one would
+     put a shot on the screen that was never planned. */
+  function fileForScreen(shot, meta, shotId, clubId) {
+    var events = shotEvents();
+    if (!events || !shot.target) return false;
+    var model = window.GDBubbleEngine && window.GDBubbleEngine.renderModel();
+    var payload = model && model.payload;
+    var center = model && model.center;
+    if (!payload || !center) return false;
+
+    var lengthM = Math.max(1, Number(payload.depthRadiusM) * 2 || 0);
+    var widthM = Math.max(1, Number(payload.lateralRadiusM) * 2 || 0);
+    var aimM = app.distance ? app.distance.haversineMeters(shot.start, shot.target) : null;
+    var holeId = "hole-" + meta.hole;
+    var planned = Date.now();
+
+    events.logPlannedShot({
+      shotId: shotId,
+      roundId: roundId,
+      holeId: holeId,
+      origin: shot.start,
+      plannedBubble: {
+        centerLat: center.lat,
+        centerLng: center.lng,
+        orientationDeg: bearingDeg(shot.start, shot.target),
+        lengthYards: lengthM * METERS_TO_YARDS,
+        widthYards: widthM * METERS_TO_YARDS,
+        shape: "oval"
+      },
+      club: clubId || "GPS",
+      expectedDistanceYards: Number.isFinite(aimM) ? aimM * METERS_TO_YARDS : null,
+      createdAt: new Date(planned).toISOString()
+    });
+
+    /* A millisecond later, so the landing pairs with this plan and not with
+       one filed in the same tick. */
+    var fix = (app.gps && app.gps.lastFix && app.gps.lastFix()) || null;
+    events.logBallPosition({
+      roundId: roundId,
+      holeId: holeId,
+      source: "at_my_ball_button",
+      lat: shot.end.lat,
+      lng: shot.end.lng,
+      gpsAccuracyM: fix && fix.accuracy,
+      motionContext: meta.captureMethod || "unknown",
+      courseContext: "gps_course",
+      timestamp: new Date(planned + 1).toISOString()
+    });
+    return true;
+  }
+
   function submit(shot, meta) {
     var lib = snapshots();
     var sink = intake();
@@ -147,15 +214,20 @@
     sequence += 1;
     var fix = (app.gps && app.gps.lastFix && app.gps.lastFix()) || null;
     var flatM = app.distance ? app.distance.haversineMeters(shot.start, shot.end) : null;
+    var shotId = shotIdFor(meta.hole, sequence);
+    var clubId = clubForShot();
+    var events = shotEvents();
+    var scope = events && events.activePlayerScope ? events.activePlayerScope() : null;
 
     var snapshot = lib.buildShotSnapshot(Object.assign({
-      shotId: shotIdFor(meta.hole, sequence),
+      shotId: shotId,
       roundId: roundId,
+      playerId: (scope && scope.playerId) || null,
       courseId: (app.marshal && app.marshal.round().courseKey) || null,
       holeNumber: meta.hole,
       capturedAt: new Date().toISOString(),
 
-      clubId: clubForShot(),
+      clubId: clubId,
       shotStartPosition: shot.start,
       shotLandingPosition: shot.end,
       targetPosition: shot.target || null,
@@ -171,6 +243,9 @@
     var result = sink.submitShotSnapshot(snapshot);
     if (result && result.accepted) {
       state.submitted += 1;
+      try {
+        if (!result.duplicate && fileForScreen(shot, meta, shotId, clubId)) state.onScreen += 1;
+      } catch (e) { report(e, { stage: "fileForScreen", shotId: shotId }); }
     } else {
       state.rejected += 1;
       state.lastErrors = (result && result.errors) || ["SUBMIT_REFUSED"];
@@ -187,7 +262,7 @@
     startRound: function (courseKey) {
       roundId = newRoundId(courseKey);
       sequence = 0;
-      state = { submitted: 0, rejected: 0, lastErrors: [] };
+      state = { submitted: 0, onScreen: 0, rejected: 0, lastErrors: [] };
       return roundId;
     },
     roundId: function () { return roundId; },

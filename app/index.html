@@ -729,7 +729,13 @@
      gd-course-data-comparison.js is deliberately absent. That is the My Bubble
      comparison layer, and comparing a shot against a bubble is a downstream
      question asked where the analysis is read - not during play. Recording is
-     this surface's whole job. gd-conditions-debug.js is studio-only. -->
+     this surface's whole job. gd-conditions-debug.js is studio-only.
+
+     gd-shot-events.js is the store the Course Data screen actually lists shots
+     from; gd-shot-outcomes.js pairs each planned bubble with its landing as it
+     is filed. Without them a round saved its snapshots and showed nothing. -->
+<script src="../scripts/gd-shot-outcomes.js"></script>
+<script src="../scripts/gd-shot-events.js"></script>
 <script src="../scripts/gd-shot-snapshot.js"></script>
 <script src="../scripts/course-data/conditions-engine/gd-conditions-tolerance-profile.js"></script>
 <script src="../scripts/course-data/conditions-engine/gd-conditions-geometry.js"></script>

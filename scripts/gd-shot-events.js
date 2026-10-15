@@ -19,6 +19,16 @@
     phone_shake: 'medium'
   };
 
+  /* GPS Play (app/) has no profiles API, so read the active profile straight
+     from the store the main app keeps it in. Without this, shots filed during
+     play carry no playerId and the Course Data screen - which shows only the
+     active player's shots - filters every one of them out. */
+  function storedActiveProfile() {
+    var raw = readJson('gd_player_profiles_v27') || {};
+    var profiles = Array.isArray(raw.profiles) ? raw.profiles : [];
+    return profiles.filter(function (p) { return p && p.id === raw.activeId; })[0] || profiles[0] || null;
+  }
+
   function activePlayerScope() {
     var profile = null;
     var account = null;
@@ -26,7 +36,7 @@
 
     try {
       var profileApi = window.GolfDaddyProfiles || window.ClarityCaddieProfiles;
-      profile = profileApi && typeof profileApi.active === 'function' ? profileApi.active() : null;
+      profile = profileApi && typeof profileApi.active === 'function' ? profileApi.active() : storedActiveProfile();
     } catch (error) {}
 
     try {
