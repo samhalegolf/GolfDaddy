@@ -53,6 +53,12 @@
        recomputable from these by reprocessShot, so mirroring them would spend
        quota on data that is already safe. */
     "gd_shot_snapshots_v1",
+    /* What the Course Data screen lists: planned shots paired with where the
+       ball finished. Rebuildable from the snapshots above only for shots that
+       recorded a bubble, and it holds the player's deletions and the
+       pre-snapshot history the old play runtime filed - so losing it empties
+       the screen. Read lazily on every render, so a restore needs no reload. */
+    "gd_shot_events_v1",
     /* The anonymous installation id (scripts/gd-guest-identity.js). Small, and the one thing
        here that is irreplaceable in a way nothing else notices: losing it does not break
        anything visibly, it just hands the installation a fresh server-side mapping budget on

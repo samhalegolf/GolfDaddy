@@ -55,6 +55,7 @@ jobs:
           node dev/i18n.test.js
           node dev/app-native-contract.test.js
           node dev/app-course-data-feed.test.js
+          node dev/course-data-snapshot-backfill.test.js
           node dev/course-identity-resolution.test.js
           node dev/course-search.test.js
           node dev/course-search-owner.test.js

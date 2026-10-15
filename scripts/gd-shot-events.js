@@ -525,6 +525,112 @@
     return true;
   }
 
+  function bearingDeg(from, to) {
+    var toRad = Math.PI / 180;
+    var dLng = (asNumber(to.lng, 0) - asNumber(from.lng, 0)) * toRad;
+    var lat1 = asNumber(from.lat, 0) * toRad;
+    var lat2 = asNumber(to.lat, 0) * toRad;
+    var y = Math.sin(dLng) * Math.cos(lat2);
+    var x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+    return (Math.atan2(y, x) / toRad + 360) % 360;
+  }
+
+  /* Rounds played on GPS Play (app/) before it filed shots for this screen
+     saved only their raw snapshots (gd_shot_snapshots_v1), so the screen never
+     showed them. This brings those across, once.
+
+     Those snapshots never recorded the size of the bubble the player was shown,
+     and it is not made up here. Where a snapshot froze its bubble geometry
+     (the old main-app play did) the plan uses it; otherwise the plan is the aim
+     point alone, with no size. The landing is still measured long/short and
+     left/right of where the player aimed - that is real - but a zero-size plan
+     does not count as a bubble having been set, so it stays out of the bubble
+     fit (gd-shot-cluster-analysis.js).
+
+     Shots already on the screen are skipped by shotId. The done-marker lives in
+     this store, so it travels with it through a durable restore and a shot the
+     player deleted from the screen is not brought back. */
+  var SNAPSHOT_KEY = 'gd_shot_snapshots_v1';
+
+  function backfillFromSnapshots() {
+    var store = getStore();
+    if (store.snapshotBackfillAt) return 0;
+    var raw = readJson(SNAPSHOT_KEY);
+    var records = raw && raw.snapshots ? raw.snapshots : {};
+    var ids = Object.keys(records);
+    /* Nothing to bring across yet - possibly storage is mid-restore - so do not
+       mark the store done on an empty read. */
+    if (!ids.length) return 0;
+
+    var outcomeModule = root.modules.shotOutcomes;
+    var filed = {};
+    store.plannedShots.forEach(function (shot) { filed[shot.shotId] = true; });
+    var active = activePlayerScope();
+    var added = 0;
+
+    ids.forEach(function (id) {
+      var snap = records[id] && records[id].snapshot;
+      if (!snap || !snap.shotId || filed[snap.shotId]) return;
+      var start = snap.shotStartPosition;
+      var end = snap.shotLandingPosition;
+      var aim = snap.targetPosition;
+      var at = Date.parse(snap.capturedAt);
+      if (!hasLatLng(start) || !hasLatLng(end) || !hasLatLng(aim) || !Number.isFinite(at)) return;
+
+      var scope = snap.playerId ? { playerId: snap.playerId } : active;
+      var roundId = snap.roundId || 'round-' + new Date(at).toISOString().slice(0, 10);
+      var holeId = snap.holeNumber ? 'hole-' + snap.holeNumber : null;
+      var geometry = snap.myBubbleGeometry;
+      var sized = geometry && hasLatLng({ lat: geometry.centerLat, lng: geometry.centerLng });
+
+      var origin = createBallPositionEvent({
+        playerId: scope.playerId, accountId: scope.accountId, roundId: roundId, holeId: holeId,
+        source: 'bubble_rendered', lat: start.lat, lng: start.lng,
+        timestamp: new Date(at - 1).toISOString(), courseContext: 'gps_course', confidence: 'high'
+      });
+      var landing = createBallPositionEvent({
+        playerId: scope.playerId, accountId: scope.accountId, roundId: roundId, holeId: holeId,
+        source: 'at_my_ball_button', lat: end.lat, lng: end.lng,
+        gpsAccuracyM: snap.gpsAccuracy, motionContext: snap.shotCaptureMethod || 'unknown',
+        timestamp: new Date(at).toISOString(), courseContext: 'gps_course'
+      });
+      var shot = buildPlannedShot({
+        shotId: snap.shotId, roundId: roundId, holeId: holeId,
+        playerId: scope.playerId, accountId: scope.accountId,
+        plannedBubble: {
+          centerLat: sized ? geometry.centerLat : aim.lat,
+          centerLng: sized ? geometry.centerLng : aim.lng,
+          orientationDeg: sized && Number.isFinite(Number(geometry.orientationDeg)) ? geometry.orientationDeg : bearingDeg(start, aim),
+          lengthYards: sized ? asNumber(geometry.depthM, 0) * 1.0936132983 : 0,
+          widthYards: sized ? asNumber(geometry.widthM, 0) * 1.0936132983 : 0
+        },
+        club: snap.clubId || 'GPS',
+        expectedDistanceYards: distanceMeters(start, aim) * 1.0936132983,
+        createdAt: new Date(at - 1).toISOString()
+      }, origin);
+
+      var outcome = outcomeModule && outcomeModule.computeShotOutcome(shot, landing, { pairedConfidence: scorePair(shot, landing) });
+      store.ballEvents.push(origin, landing);
+      store.plannedShots.push(shot);
+      if (outcome) {
+        /* "Inside" needs a bubble. An aim point alone has none to be inside. */
+        if (!sized) outcome.insideBubble = false;
+        outcome.outcomeId = createId('outcome');
+        applyPlayerScope(outcome, resolvePlayerScope(shot, landing));
+        shot.pairedOutcomeId = outcome.outcomeId;
+        store.outcomes.push(outcome);
+      }
+      filed[snap.shotId] = true;
+      added += 1;
+    });
+
+    store.snapshotBackfillAt = new Date().toISOString();
+    saveStore(store);
+    return added;
+  }
+
+  try { backfillFromSnapshots(); } catch (error) { console.warn('[GolfDaddy] snapshot backfill skipped', error); }
+
   var api = {
     storageKey: STORAGE_KEY,
     createBallPositionEvent: createBallPositionEvent,
