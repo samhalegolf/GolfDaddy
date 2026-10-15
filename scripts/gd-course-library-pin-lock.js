@@ -3153,10 +3153,6 @@
 	    try{
 	      const c=sessionCourse(course||courseObj());
 	      if(!c||isManualGpsCourse(c))return false;
-	      if(window.__gdCoursePlayInteractiveFallbackActive||interactiveGreenFallbackState){
-	        recordCoursePlayDebug('course-mapping-schedule-skipped-manual-fallback-active',c,validHoleNumber(opts.hole)||activePlayingHole()||holeNumber()||1,{source:opts.source||'scheduled-automap',reason:'manual-fallback-terminal'});
-	        return false;
-	      }
 	      if(typeof fetch!=='function')return false;
 	      const key=`${mappedModeCourseIdentity(c)}:${opts.hole||'course'}`;
 	      if(mapperOsmAutoMapRunKey===key)return true;
@@ -3745,7 +3741,6 @@
     return showCourseLoading(course.name||course.courseName||i18nT('loading.course'));
   }
   const coursePlayResolverInFlight={};
-  let interactiveGreenFallbackState=null;
   function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
   function coursePlayResolverKey(course,hole){
     const c=sessionCourse(course||courseObj());
@@ -4103,168 +4098,13 @@
       }
     }catch(e){}
   }
-  function recentGpsFallbackPoint(){
-    try{
-      const point=recentGpsPoint();
-      return point&&typeof L!=='undefined'&&L.latLng?L.latLng(point.lat,point.lng):point;
-    }catch(e){return null;}
-  }
-  function pointDistance(a,b){
-    try{return a&&b&&map&&map.distance?map.distance(a,b):distance(a,b);}catch(e){return Infinity;}
-  }
-  function fallbackReferencePoint(course,green){
-    const candidates=[];
-    try{if(start)candidates.push(toLatLng(start));}catch(e){}
-    const gps=recentGpsFallbackPoint();
-    if(gps)candidates.push(gps);
-    try{candidates.push(toLatLng(guideCoursePoint(course)));}catch(e){}
-    const found=candidates.filter(Boolean).find(point=>{
-      const d=pointDistance(point,green);
-      return Number.isFinite(d)&&d>35&&d<2200;
-    });
-    if(found)return found;
-    try{return projectFramePoint(green,Math.PI,120);}catch(e){}
-    return null;
-  }
-  function midpointPoint(a,b){
-    const p=toLatLng(a),q=toLatLng(b);
-    if(!p||!q)return null;
-    try{return L.latLng((Number(p.lat)+Number(q.lat))/2,(Number(p.lng)+Number(q.lng))/2);}catch(e){return null;}
-  }
-  function eventLatLng(event){
-    try{
-      if(event&&Number.isFinite(Number(event.clientX))&&Number.isFinite(Number(event.clientY))){
-        if(typeof window.gdLiveLatLngFromClient==='function'){
-          const live=window.gdLiveLatLngFromClient(event.clientX,event.clientY);
-          if(live)return live;
-        }
-        const el=map&&map.getContainer?map.getContainer():document.getElementById('map');
-        const rect=el&&el.getBoundingClientRect?el.getBoundingClientRect():null;
-        if(rect&&map&&map.containerPointToLatLng)return map.containerPointToLatLng(L.point(event.clientX-rect.left,event.clientY-rect.top));
-      }
-    }catch(e){}
-    return null;
-  }
-  function interactiveGreenBlockedTarget(event){
-    const target=event&&event.target;
-    return !!(target&&target.closest&&target.closest('button,a,input,select,textarea,.leaflet-control,.rightRail,.shellBar,.dock,#gdV62UndoDock,#gdV62ModeSwitch,#shotTile,#gdV62GpsBadge,#hint,#toast,#gdMapperToolFlyout,#gdMapperToolsDrawer,#gdMapperHoleStrip,.panel,.modulePanel,#courseScreen:not(.hidden)'));
-  }
-  function saveInteractiveFallbackGreen(course,hole,greenPoint,reason){
-    const h=validHoleNumber(hole)||1;
-    const c=sessionCourse(course||courseObj());
-    const uid=userId();
-    const cid=courseId(c);
-    const name=courseName(c);
-    const green=toLatLng(greenPoint);
-    if(!green)return null;
-    const reference=fallbackReferencePoint(c,green);
-    const fairway=midpointPoint(reference,green)||reference;
-    let saved=0;
-    if(saveCourseObject({userId:uid,courseId:cid,courseName:name,course:c,type:'green',position:green,source:'interactive_green_fallback',holeNumber:h,confirmed:true,maxDedupeDistanceM:8}))saved++;
-    if(reference&&pointDistance(reference,green)>45){
-      if(saveCourseObject({userId:uid,courseId:cid,courseName:name,course:c,type:'tee',position:reference,source:'interactive_green_fallback_reference',holeNumber:h,confirmed:true,maxDedupeDistanceM:12}))saved++;
-    }
-    if(fairway){
-      if(saveCourseObject({userId:uid,courseId:cid,courseName:name,course:c,type:'fairway',position:fairway,source:'interactive_green_fallback_fairway',holeNumber:h,confirmed:true,maxDedupeDistanceM:12}))saved++;
-    }
-    const nextCourse=loadUserCourseData(uid,cid)||c;
-    try{drawHoleObjects(nextCourse,h);}catch(e){}
-    try{updateMapperHoleUi();updateMapperToolCompletion();renderCourseLibraryPanel();gdCLRefreshProfileCard();}catch(e){}
-    ingestRequestedHoleToPipeline(nextCourse,h,reason||'interactive-green-fallback');
-    return {course:nextCourse,saved,reference,fairway,green};
-  }
-  function clearInteractiveGreenFallback(reason,details={}){
-    const state=interactiveGreenFallbackState;
-    interactiveGreenFallbackState=null;
-    try{window.GDCourseMapNotify?.hide();}catch(e){}
-    try{
-      const el=state&&state.mapEl;
-      const handler=state&&state.handler;
-      if(el&&handler){
-        el.removeEventListener('click',handler,true);
-      }
-    }catch(e){}
-    try{
-      document.body.classList.remove('gdGpsInteractiveGreenFallbackActive');
-      document.body.dataset.gdInteractiveGreenFallbackClearedBy=String(reason||'clear');
-    }catch(e){}
-    if(state&&state.debugRunId&&reason!=='green-selected'){
-      const superseded=reason==='superseded';
-      recordMappingDebug(state.debugRunId,{source:'manual-fallback',phase:superseded?'superseded':'cancelled',event:superseded?'manual-fallback-superseded':'manual-fallback-cancelled',summary:superseded?'Manual fallback superseded by new active mapping attempt':'Manual fallback cancelled',details:Object.assign({hole:state.hole,reason:reason||'clear',resolutionKey:state.resolutionKey,attemptToken:state.attemptToken},details||{})});
-	    }
-	    try{delete window.__gdCoursePlayInteractiveFallbackActive;}catch(e){}
-	    try{stopFallbackPackageWatch();}catch(e){}
-	  }
-	  window.gdClearInteractiveGreenFallback=clearInteractiveGreenFallback;
-	  function finishInteractiveGreenFallback(point){
-    const state=interactiveGreenFallbackState;
-    if(!state||!point)return false;
-    const h=validHoleNumber(state.hole)||1;
-    if(!isCurrentMappingAttempt(state)){
-      recordStaleMappingActivity(state,{eventSource:'manual-fallback',event:'manual-fallback-stale-result-rejected',summary:'Manual fallback stale result rejected',attemptedAction:'persist-manual-fallback-green',callerFunction:'finishInteractiveGreenFallback'});
-      return false;
-    }
-    const saved=saveInteractiveFallbackGreen(state.course,h,point,'interactive-green-fallback');
-    if(!saved)return false;
-    recordMappingDebug(state.debugRunId,{source:'manual-fallback',phase:'completed',event:'manual-fallback-green-selected',summary:'Manual green fallback completed',details:{
-      hole:h,
-      savedObjects:saved.saved||0,
-      resolutionKey:state.resolutionKey,
-      attemptToken:state.attemptToken,
-      persistence:'local course map objects'
-    }});
-    finishMappingDebug(state.debugRunId,{status:'fallback',outcome:'manual fallback completed'});
-    try{if(typeof gdSuppressMapPlacementClick==='function')gdSuppressMapPlacementClick(900);}catch(e){}
-    try{window.__gdManualStandingPlacementActiveUntil=0;}catch(e){}
-    clearInteractiveGreenFallback('green-selected');
-    try{toastSafe(i18nT('course.greenSelected'));}catch(e){}
-    try{setMappedPlayMode('mapped',{skipFrame:true,silent:true,preserveAssist:true});}catch(e){}
-    try{mode='start';}catch(e){}
-    const playable=requestedHolePlayable(saved.course,h);
-    if(playable){
-      try{focusMappedHoleOrSavedGreen(h,{quiet:true,frame:true,promptStart:true,allowAnyStart:true,stablePreLock:true,course:saved.course});}catch(e){}
-      setTimeout(()=>{try{if(typeof window.gdFocusMappedPreLockHole==='function')window.gdFocusMappedPreLockHole(h,{source:'interactive-green-fallback',preserveGpsSession:true,reenterGps:false,refreshGps:false});}catch(e){}},80);
-      markCourseOpenReady(saved.course,h);
-    }else{
-      try{setState(i18nT('course.greenSelected'));}catch(e){}
-      try{showHint(i18nT('course.tapWhereStanding'),{mappedStart:true});}catch(e){}
-    }
-    return true;
-  }
-  /* While manual green-tap fallback is armed, the server mapper job that put us here is
-     usually still running (the wait above gave up, the job did not). This keeps polling
-     quietly in the background and, when the package lands, persists it and offers a
-     one-tap switch - the same "prompt, don't yank" rule as the mid-round map update bar
-     in /app: the player may be mid-tap, so arriving data asks rather than takes over.
-     Tapping the prompt clears the fallback FIRST (the terminal-reentry guard in
-     runCourseMappingAttempt keys off it) and then re-enters through the picker's own
-     selectCourse path, so the paid-access gate and the /app hand-off happen exactly as
-     they do on a normal entry - this replaces the player backing out and re-entering by
-     hand, which was the only way in before. The watch dies with the fallback: any
-     clearInteractiveGreenFallback (green tapped, superseded, this prompt) stops it. */
-  const FALLBACK_WATCH_POLL_MS=6000;
-  const FALLBACK_WATCH_BUDGET_MS=600000;
-  let fallbackPackageWatch=null;
-  function ensureServerMapReadyPrompt(){
-    let el=document.getElementById('gdServerMapReadyPrompt');
-    if(el)return el;
-    el=document.createElement('button');
-    el.type='button';
-    el.id='gdServerMapReadyPrompt';
-    el.className='gdServerMapReadyPrompt hidden';
-    el.textContent=i18nT('course.mapReadyTap');
-    document.body.appendChild(el);
-    if(!document.getElementById('gdServerMapReadyPromptStyle')){
-      const style=document.createElement('style');
-      style.id='gdServerMapReadyPromptStyle';
-      style.textContent='.gdServerMapReadyPrompt{position:fixed;left:50%;bottom:calc(max(12px,env(safe-area-inset-bottom)) + 148px);transform:translateX(-50%);z-index:1900;border:1px solid rgba(156,255,54,.42);border-radius:999px;background:rgba(3,18,9,.88);color:#f6fff7;padding:10px 15px;font-size:13px;font-weight:950;box-shadow:0 12px 28px rgba(0,0,0,.34),0 0 22px rgba(31,211,109,.16);backdrop-filter:blur(14px)}.gdServerMapReadyPrompt.hidden{display:none!important}';
-      document.head.appendChild(style);
-    }
-    return el;
-  }
-  function stopFallbackPackageWatch(){
-    fallbackPackageWatch=null;
-    try{document.getElementById('gdServerMapReadyPrompt')?.classList.add('hidden');}catch(e){}
+  /* The server package poll behind the "still preparing" wait below. Counted in polls so it
+     always terminates (see startServerPackageWatch). */
+  const PACKAGE_WATCH_POLL_MS=6000;
+  const PACKAGE_WATCH_BUDGET_MS=600000;
+  let serverPackageWatch=null;
+  function stopServerPackageWatch(){
+    serverPackageWatch=null;
   }
   /* Waiting is a state, not a failure.
    *
@@ -4280,7 +4120,7 @@
    * So a wait that runs out while the server is STILL PROCESSING no longer ends anything. The
    * player is told the truth - this is taking longer than usual - the package keeps being
    * polled, and when it lands the round opens by itself. The player can leave the wait and go
-   * back to the courses; manual GPS is not offered here - only after a scan has failed.
+   * back to the courses.
    */
   let serverMapWaitState=null;
   /* Set to the resolution key the player pressed "Back to Courses" on. Read by the poll
@@ -4338,14 +4178,12 @@
     try{document.getElementById('gdServerMapWaitPrompt')?.classList.add('hidden');}catch(e){}
     try{document.body.classList.remove('gdServerMapWaitActive');}catch(e){}
     try{delete window.__gdCoursePlayServerMapWaitActive;}catch(e){}
-    try{if(fallbackPackageWatch&&fallbackPackageWatch.mode==='waiting')stopFallbackPackageWatch();}catch(e){}
+    stopServerPackageWatch();
     return state;
   }
   window.gdStopServerMapWait=stopServerMapWait;
-  /* Non-terminal by construction, and that is the whole point of it existing separately from
-     beginInteractiveGreenFallback: nothing here writes __gdCoursePlayInteractiveFallbackActive
-     or interactiveGreenFallbackState, so the re-entry guard stays open and pressing Play again
-     re-checks the server instead of being turned away. */
+  /* Non-terminal by construction: pressing Play again re-checks the server instead of being
+     turned away. */
   function beginServerMapWait(course,hole,opts={}){
     const h=validHoleNumber(hole)||1;
     const c=sessionCourse(course||courseObj());
@@ -4364,50 +4202,39 @@
       stopServerMapWait('player-left-wait');
       returnToCoursePicker('player-left-wait');
     }});
-    startServerPackageWatch(c,h,key,'waiting');
+    startServerPackageWatch(c,h,key);
     return {playable:false,waiting:true,armed:true,debugRunId:opts.debugRunId||''};
   }
-  function startFallbackPackageWatch(course,hole,resolutionKey){
-    return startServerPackageWatch(course,hole,resolutionKey,'fallback');
-  }
-  /* One poll loop, two homes. In 'fallback' mode the player is already tapping a green, so an
-     arriving map PROMPTS rather than takes over. In 'waiting' mode there is nothing to
-     interrupt - the player is looking at a loading screen precisely because they are waiting
-     for this - so it continues into the round on its own, which is the "you should not have to
-     press Play again" half of the fix. */
-  function startServerPackageWatch(course,hole,resolutionKey,mode){
-    const token={startedAt:Date.now(),mode:mode||'fallback'};
-    fallbackPackageWatch=token;
+  /* Keeps polling while the player waits, and continues into the round on its own when the
+     package lands - the "you should not have to press Play again" half of the wait. */
+  function startServerPackageWatch(course,hole,resolutionKey){
+    const token={startedAt:Date.now()};
+    serverPackageWatch=token;
     (async()=>{
-      /* Counted in polls, not wall-clock: FALLBACK_WATCH_BUDGET_MS/FALLBACK_WATCH_POLL_MS
+      /* Counted in polls, not wall-clock: PACKAGE_WATCH_BUDGET_MS/PACKAGE_WATCH_POLL_MS
          requests is the same 10-minute watch when timers are real, but it also guarantees the
          loop terminates when they are not (the controller test harness runs setTimeout
          callbacks immediately, which made a Date.now() budget an infinite spin). */
-      const maxPolls=Math.ceil(FALLBACK_WATCH_BUDGET_MS/FALLBACK_WATCH_POLL_MS);
+      const maxPolls=Math.ceil(PACKAGE_WATCH_BUDGET_MS/PACKAGE_WATCH_POLL_MS);
       let watchPolls=0;
       for(;;){
-        await sleep(FALLBACK_WATCH_POLL_MS);
-        if(fallbackPackageWatch!==token)return;
-        const waiting=token.mode==='waiting';
-        const state=waiting?serverMapWaitState:interactiveGreenFallbackState;
-        if(!state||String(state.resolutionKey||'')!==String(resolutionKey))return stopFallbackPackageWatch();
+        await sleep(PACKAGE_WATCH_POLL_MS);
+        if(serverPackageWatch!==token)return;
+        const state=serverMapWaitState;
+        if(!state||String(state.resolutionKey||'')!==String(resolutionKey))return stopServerPackageWatch();
         if(++watchPolls>maxPolls){
-          /* The watch, not the course, is what ran out. In waiting mode the player is still
-             looking at a loading screen, so ending silently would strand them - offer the
-             green-tap they were spared earlier, now as the only thing left. */
-          if(waiting){
-            const waited=stopServerMapWait('watch-budget-exhausted')||{};
-            endFailedScan(course,hole,'server-map-timed-out',{resolutionKey,attemptToken:waited.attemptToken,debugRunId:waited.debugRunId,serverPackageStatus:'processing'});
-            return;
-          }
-          return stopFallbackPackageWatch();
+          /* The watch, not the course, is what ran out. The player is still looking at a
+             loading screen, so ending silently would strand them. */
+          const waited=stopServerMapWait('watch-budget-exhausted')||{};
+          endFailedScan(course,hole,'server-map-timed-out',{resolutionKey,attemptToken:waited.attemptToken,debugRunId:waited.debugRunId,serverPackageStatus:'processing'});
+          return;
         }
         let pkg=null;
         try{pkg=await fetchServerCoursePackage(course);}catch(e){pkg=null;}
-        if(fallbackPackageWatch!==token)return;
-        /* A terminal answer during an extended wait ends the wait honestly rather than
-           polling out the clock: the server has said it stopped and why. */
-        if(waiting&&pkg&&pkg.status==='failed'){
+        if(serverPackageWatch!==token)return;
+        /* A terminal answer ends the wait honestly rather than polling out the clock: the
+           server has said it stopped and why. */
+        if(pkg&&pkg.status==='failed'){
           const waited=stopServerMapWait('server-failed')||{};
           endFailedScan(course,hole,'server-map-failed',{resolutionKey,attemptToken:waited.attemptToken,debugRunId:waited.debugRunId,serverPackageStatus:'failed'});
           return;
@@ -4415,60 +4242,17 @@
         if(!serverPackageIsReady(pkg))continue;
         const persisted=persistServerCoursePackage(course,pkg);
         if(!(persisted&&persisted.holes)){
-          if(waiting)stopServerMapWait('ready-but-empty');
-          return stopFallbackPackageWatch();   // ready but empty: nothing will improve by waiting
-        }
-        const resume=()=>{
-          const picker=window.GDCoursePicker;
-          if(picker&&typeof picker.selectCourse==='function')picker.selectCourse(course,{source:'server-map-ready'});
-          else runCourseMappingAttempt({course,hole,showLoading:true,wholeCourse:true,reason:'server-map-ready'});
-        };
-        if(waiting){
-          recordCoursePlayDebug('server-map-arrived-during-extended-wait',course,hole,{resolutionKey,holes:persisted.holes,saved:persisted.saved,serverPackageStatus:pkg.status});
-          stopFallbackPackageWatch();
-          stopServerMapWait('server-map-ready');
-          resume();
+          stopServerMapWait('ready-but-empty');   // ready but empty: nothing will improve by waiting
           return;
         }
-        recordCoursePlayDebug('server-map-arrived-during-manual-fallback',course,hole,{resolutionKey,holes:persisted.holes,saved:persisted.saved,serverPackageStatus:pkg.status});
-        const prompt=ensureServerMapReadyPrompt();
-        prompt.onclick=()=>{
-          stopFallbackPackageWatch();
-          clearInteractiveGreenFallback('server-map-ready');
-          resume();
-        };
-        prompt.classList.remove('hidden');
-        return;   // polling done - the prompt holds the result; the fallback clearing hides it
+        recordCoursePlayDebug('server-map-arrived-during-extended-wait',course,hole,{resolutionKey,holes:persisted.holes,saved:persisted.saved,serverPackageStatus:pkg.status});
+        stopServerMapWait('server-map-ready');
+        const picker=window.GDCoursePicker;
+        if(picker&&typeof picker.selectCourse==='function')picker.selectCourse(course,{source:'server-map-ready'});
+        else runCourseMappingAttempt({course,hole,showLoading:true,wholeCourse:true,reason:'server-map-ready'});
+        return;
       }
     })();
-  }
-  /* How close the player has to be to the course they tried to scan for manual GPS to be
-     offered. Far enough to cover the car park and the far end of a big course; anyone further
-     away is not about to play it. */
-  const MANUAL_GPS_NEAR_COURSE_M=2000;
-  /* A real fix from the device, asked for now - not the last point anything wrote into
-     gdGpsState, which can be a tapped green or a map centre. Resolves null when GPS is off,
-     denied or too slow to answer. */
-  function deviceGpsPoint(timeoutMs=8000){
-    return new Promise(resolve=>{
-      let done=false;
-      const finish=point=>{if(!done){done=true;resolve(point);}};
-      try{
-        if(!navigator.geolocation)return finish(null);
-        navigator.geolocation.getCurrentPosition(pos=>{
-          const point={lat:Number(pos&&pos.coords&&pos.coords.latitude),lng:Number(pos&&pos.coords&&pos.coords.longitude)};
-          finish(Number.isFinite(point.lat)&&Number.isFinite(point.lng)?point:null);
-        },()=>finish(null),{enableHighAccuracy:true,maximumAge:60000,timeout:timeoutMs});
-        /* Backstop for a platform that never calls either callback. */
-        setTimeout(()=>finish(null),timeoutMs+1000);
-      }catch(e){finish(null);}
-    });
-  }
-  async function playerIsNearCourse(course){
-    const centre=guideCoursePoint(course);
-    if(!centre||!Number.isFinite(Number(centre.lat))||!Number.isFinite(Number(centre.lng)))return false;
-    const here=await deviceGpsPoint();
-    return !!here&&distance(here,centre)<=MANUAL_GPS_NEAR_COURSE_M;
   }
   function returnToCoursePicker(reason){
     hideCourseLoading(0);
@@ -4477,10 +4261,8 @@
       if(picker&&typeof picker.open==='function')picker.open({source:reason||'scan-ended',replace:true});
     }catch(e){}
   }
-  /* What a failed scan does. There is no automatic drop into manual GPS: the player goes back
-     to a fresh course picker with the map-not-available banner over it. Only if their GPS is
-     on and they are standing near that course does the banner also offer "Use Manual GPS",
-     which is the one way into manual play. */
+  /* What a failed scan does: the player goes back to a fresh course picker with the
+     map-not-available banner over it, which offers to email them when the map is ready. */
   function endFailedScan(course,hole,reason,opts={}){
     const h=validHoleNumber(hole)||1;
     const c=sessionCourse(course||courseObj());
@@ -4489,15 +4271,7 @@
     if(opts.debugRunId)recordMappingDebug(opts.debugRunId,{source:'course-loader',phase:'failed',event:'scan-failed-back-to-picker',summary:'Scan failed - player sent back to the course picker',details:{hole:h,reason:reason||'scan-failed',resolutionKey:key,attemptToken:opts.attemptToken||''}});
     returnToCoursePicker('scan-failed');
     const notify=window.GDCourseMapNotify;
-    if(notify&&typeof notify.offer==='function')Promise.resolve(notify.offer({courseId:courseId(c),courseName:courseName(c)})).then(async offerId=>{
-      if(!offerId||!(await playerIsNearCourse(c)))return;
-      try{
-        notify.offerManualGps(offerId,()=>{
-          try{window.GDCoursePicker?.close?.({reason:'manual-gps-after-failed-scan'});}catch(e){}
-          beginInteractiveGreenFallback(c,h,'player-chose-manual-gps',{resolutionKey:key,activeResolutionKey:key,attemptToken:opts.attemptToken,debugRunId:opts.debugRunId,source:'scan-failed-banner',callerFunction:'endFailedScan',serverPackageStatus:opts.serverPackageStatus||''});
-        });
-      }catch(e){}
-    }).catch(()=>{});
+    if(notify&&typeof notify.offer==='function')Promise.resolve(notify.offer({courseId:courseId(c),courseName:courseName(c)})).catch(()=>{});
     return {playable:false,failed:true,reason:reason||'scan-failed'};
   }
   /* A scan that published fewer holes than the course has. The course opens and plays - what
@@ -4548,96 +4322,6 @@
       expectedHoleCount:pkg.expectedHoleCount,
       missingHoles:pkg.missingHoles
     },opts);
-  }
-  function beginInteractiveGreenFallback(course,hole,reason,opts={}){
-    const h=validHoleNumber(hole||opts.hole)||1;
-    const selectedAt=opts.selectedAt||nowIso();
-    const c=mappingCourseSnapshot(sessionCourse(course||courseObj()),Object.assign({},opts,{selectedAt}));
-    const key=opts.resolutionKey||coursePlayResolverKey(c,h);
-    const attemptToken=opts.attemptToken||newCoursePlayAttemptToken(key);
-    const debugRunId=mappingDebugRun(c,Object.assign({},opts,{reason:reason||'interactive-green-fallback',selectedAt,attemptToken}));
-    const incomingAttempt=opts.debugAttemptContext||mappingAttemptContext(c,h,Object.assign({},opts,{debugRunId,attemptToken,resolutionKey:key,activeResolutionKey:opts.activeResolutionKey||key,selectedAt,source:opts.source||reason||'manual-fallback',callerFunction:opts.callerFunction||'beginInteractiveGreenFallback'}));
-    if(!isCurrentMappingAttempt(incomingAttempt)){
-      recordStaleMappingActivity(incomingAttempt,{eventSource:'manual-fallback',event:'manual-fallback-replacement-rejected',summary:'Manual fallback replacement rejected',attemptedAction:'open-manual-fallback',rejectionReason:'incoming request belongs to stale course attempt',callerFunction:incomingAttempt.callerFunction||'beginInteractiveGreenFallback'});
-      return {playable:false,fallback:'interactive-green',armed:false,stale:true,rejected:true,debugRunId};
-    }
-    if(interactiveGreenFallbackState){
-      const existing=interactiveGreenFallbackState;
-      const sameFallback=sameMappingAttempt(existing,incomingAttempt)||existing.resolutionKey===key&&(!attemptToken||!existing.attemptToken||existing.attemptToken===attemptToken);
-      if(sameFallback){
-        recordMappingDebug(debugRunId,{source:'manual-fallback',phase:'skipped',event:'manual-fallback-duplicate-ignored',summary:'Manual fallback duplicate request ignored',details:{hole:h,resolutionKey:key,attemptToken,callerFunction:incomingAttempt.callerFunction||'beginInteractiveGreenFallback'}});
-        return {playable:false,fallback:'interactive-green',armed:true,debugRunId:existing.debugRunId,reused:true};
-      }
-      clearInteractiveGreenFallback('superseded',{replacementRunId:debugRunId,replacementResolutionKey:key,replacementAttemptToken:attemptToken,replacementHole:h,replacementCourseId:courseId(c),replacementCourseName:courseName(c),replacementReason:reason||'automatic-resolution-failed'});
-    }
-    rememberRequestedPlayHole(h);
-    recordCoursePlayDebug('gps-play-interactive-green-fallback',c,h,{reason:reason||'automatic-resolution-failed',resolutionKey:key,attemptToken});
-    recordMappingDebug(debugRunId,{source:'manual-fallback',phase:'fallback',event:'manual-fallback-opened',summary:'Manual green fallback opened',details:{
-      invokedBy:opts.reason||reason||'automatic-resolution-failed',
-      source:opts.source||'unknown',
-      callerFunction:incomingAttempt.callerFunction||'beginInteractiveGreenFallback',
-      hole:h,
-      reason:reason||'automatic-resolution-failed',
-      resolutionKey:key,
-      attemptToken,
-      eligibilityReason:'Automatic mapping did not produce trusted playable geometry'
-    }});
-    hideCourseLoading(0);
-    try{if(typeof window.gdClearHoleImageRuntime==='function')window.gdClearHoleImageRuntime('interactive-green-fallback');}catch(e){}
-    try{
-	      window.GDShell?.enterGps?.({source:'interactive-green-fallback',replace:true,preserveState:true});
-	      document.body.classList.add('gdMappedCourseMode','gdGpsInteractiveGreenFallbackActive','gdGpsLiveMapAllowed','gdGpsExplicitMapMode');
-      document.body.classList.remove('gdCourseOpening','gdGpsFramePreparing','gdCoursePlayPipelinePreparing','gdHoleFrameLoading','gdCapturedFrameUnavailable','gdGpsLiveMapSuppressed','gdGpsHoleTransitioning','gdCapturedHoleFrameCameraOn','gdHoleImageCameraOn','gdMappedStartPromptActive','gdManualStartPlacementActive','gdHeadToTeeFrameActive','gdLockStateFrameActive','gd-frame-hard-locked');
-      document.body.dataset.gdInteractiveGreenFallbackReason=String(reason||'automatic-resolution-failed');
-      document.body.dataset.gdInteractiveGreenFallbackHole=String(h);
-      document.body.dataset.gdInteractiveGreenFallbackKey=String(key);
-    }catch(e){}
-    try{setMappedPlayMode('mapped',{skipFrame:true,silent:true,preserveAssist:true});}catch(e){}
-    try{mode='green';}catch(e){}
-    try{setState(i18nT('course.selectGreen'));}catch(e){}
-    try{showHint(i18nT('course.tapTheGreen'));}catch(e){}
-    try{
-      if(map&&map.invalidateSize)setTimeout(()=>{
-        try{map.invalidateSize(false);}catch(e){}
-        const focus=toLatLng(guideCoursePoint(c))||recentGpsFallbackPoint();
-        if(focus&&map&&map.setView)try{map.setView(focus,Math.max(map.getZoom?map.getZoom():17,17),{animate:true});}catch(e){}
-        else if(focus&&map&&map.panTo)try{map.panTo(focus,{animate:true});}catch(e){}
-      },40);
-    }catch(e){}
-    const mapEl=(map&&map.getContainer&&map.getContainer())||document.getElementById('map');
-    if(!mapEl){
-      /* The phase:'fallback' event above has already fired and closed the
-         run as "Manual green fallback opened". Without this the log claimed
-         a fallback was waiting for a tap that could never be delivered,
-         because no map element means no click handler was ever attached. */
-      recordMappingDebug(debugRunId,{source:'manual-fallback',phase:'failed',event:'manual-fallback-not-armed',summary:'Manual fallback could not arm: no map element',details:{hole:h,reason:'map-element-missing',resolutionKey:key,attemptToken}});
-      return {playable:false,fallback:'interactive-green',armed:false,reason:'map-element-missing'};
-    }
-    const handler=event=>{
-      if(!interactiveGreenFallbackState||interactiveGreenFallbackState.mapEl!==mapEl)return;
-      if(interactiveGreenBlockedTarget(event))return;
-      const ll=eventLatLng(event);
-      if(!ll)return;
-      event.preventDefault&&event.preventDefault();
-      event.stopPropagation&&event.stopPropagation();
-      if(event.stopImmediatePropagation)event.stopImmediatePropagation();
-      finishInteractiveGreenFallback(ll);
-    };
-    interactiveGreenFallbackState={course:c,hole:h,reason:reason||'automatic-resolution-failed',mapEl,handler,at:Date.now(),resolutionKey:key,attemptToken,debugRunId,runId:debugRunId,courseId:courseId(c),courseName:courseName(c),source:opts.source||'unknown',callerFunction:incomingAttempt.callerFunction||'beginInteractiveGreenFallback'};
-    mapEl.addEventListener('click',handler,true);
-    try{window.__gdInteractiveGreenFallback=interactiveGreenFallbackState;}catch(e){}
-    try{window.__gdCoursePlayInteractiveFallbackActive={course:c,courseId:courseId(c),courseName:courseName(c),hole:h,reason:reason||'automatic-resolution-failed',key,resolutionKey:key,attemptToken,debugRunId,runId:debugRunId,source:opts.source||'unknown',callerFunction:incomingAttempt.callerFunction||'beginInteractiveGreenFallback',at:Date.now()};}catch(e){}
-    /* Only watch for a server map that could actually arrive. "none" (the server declined to
-       enqueue - signed out, no location, rate limited) and "failed" are
-       terminal answers: nothing is building, so a 10-minute 6s poll would be 100 pointless
-       requests - and before "failed" became terminal server-side (2026-08-18), each of those
-       polls RE-ENQUEUED the same doomed mapper job, which is how one bad course burned the
-       per-user rate limit and starved every later scan. A timed-out or unreachable wait (or a
-       caller that does not know the status) still watches, because there a job may genuinely
-       still be running. */
-    const watchStatus=String(opts.serverPackageStatus||'');
-    if(watchStatus!=='none'&&watchStatus!=='failed')try{startFallbackPackageWatch(c,h,key);}catch(e){}
-    return {playable:false,fallback:'interactive-green',armed:true};
   }
   async function showResolvedCoursePlayHole(course,hole,reason,opts={}){
     const h=rememberRequestedPlayHole(hole||1);
@@ -4839,13 +4523,10 @@
 	    return result&&result.holes?result:null;
 	  }
 	  /* Play holds on the course-loading screen while the server mapper job runs, rather than
-	     dropping the player into the manual green-tap the instant the first request answers
-	     "processing". That first answer is nearly always "processing" for a course nobody has
+	     giving up the instant the first request answers "processing". That first answer is nearly always "processing" for a course nobody has
 	     opened before, because the job is enqueued as a SIDE EFFECT of this very request
 	     (functions/course-package.mjs buildCoursePackageWithTrigger) - so treating "processing"
-	     as "no map" meant a new course could never open mapped on its first visit, and the
-	     terminal manual-fallback guard in runCourseMappingAttempt then blocked the retry that
-	     would have found it.
+	     as "no map" meant a new course could never open mapped on its first visit.
 
 	     "none" is terminal here, not pending. The server answers "none" only when it did NOT
 	     enqueue anything (anonymous caller, no location supplied, or the per-user rate limit
@@ -4857,7 +4538,7 @@
 
 	     Everything else that is not "processing" is a TRANSIENT miss, not a verdict: a fetch
 	     timeout on flaky mobile data, a 5xx, a dropped connection. One of those used to abort
-	     the whole wait instantly, which dumped a player into manual green-tap while the mapper
+	     the whole wait instantly, which ended the wait while the mapper
 	     job was mid-run - the exact "the data arrives but I had to back out and re-enter" bug.
 	     Now only a RUN of consecutive misses gives up; a single "processing" answer resets it.
 
@@ -4987,37 +4668,16 @@
 	      recordMappingDebug(opts.debugRunId||'',{source:'course-loader',phase:'skipped',event:'mapping-attempt-skipped-manual-course',summary:'No scan: manual GPS course',details:{reason:'manual-course',requestedReason:opts.reason||'course-selected',courseName:courseName(c)||'',hole:validHoleNumber(opts.hole)||1}});
 	      return {playable:false,reason:'manual-course'};
 	    }
-	    if(opts.acceptPartialGeneratedMap)clearInteractiveGreenFallback('generated-scan-started',{courseId:courseId(c),courseName:courseName(c)});
     const h=validHoleNumber(opts.hole)||1;
     const key=opts.resolutionKey||coursePlayResolverKey(c,h);
     /* A wait for a DIFFERENT course is over the moment this one starts. Left running it would
        keep polling and could yank a player out of the round they just opened. */
     if(serverMapWaitState&&String(serverMapWaitState.resolutionKey||'')!==String(key))stopServerMapWait('new-mapping-attempt');
-    /* A new scan replaces the last one's failure banner, and with it any manual GPS offer. */
+    /* A new scan replaces the last one's failure banner. */
     try{window.GDCourseMapNotify?.hide();}catch(e){}
     /* A choice made about a previous attempt is not a choice about this one - left standing it
        would abort a fresh scan the moment it started. */
     if(serverWaitOptOut&&String(serverWaitOptOut)!==String(key))serverWaitOptOut='';
-    const activeFallback=window.__gdCoursePlayInteractiveFallbackActive||interactiveGreenFallbackState;
-    if(activeFallback&&String(activeFallback.resolutionKey||activeFallback.key||'')===String(key)){
-      /* The terminal guard is right about what it was built for - a player mid-green-tap must
-         not have the screen restarted under them - and wrong the moment the reason it opened
-         has gone away. A fallback armed because the server had nothing outlives the server
-         finally producing something, and then blocks every attempt to use it: the course maps,
-         the geometry lands, and the app still refuses to open it because of a decision it made
-         minutes earlier. So the guard now asks whether that is still true. A map the picker's
-         database check just found, or one already sitting in local storage, is proof it is
-         not, and the stale fallback is cleared instead of honoured. */
-      const databaseMapNowAvailable=opts.allowLocalSavedMap===true||c.gdDatabaseMapAvailable===true||!!(opts.course&&opts.course.gdDatabaseMapAvailable===true);
-      const savedNow=safeSavedMapReady(c,h,opts.wholeCourse!==false);
-      if(databaseMapNowAvailable||savedNow){
-        recordMappingDebug(activeFallback.debugRunId||opts.debugRunId||'',{source:'manual-fallback',phase:'superseded',event:'manual-fallback-cleared-by-available-map',summary:'Stale manual fallback cleared - a course map is available now',details:{hole:h,resolutionKey:key,databaseMapAvailable:databaseMapNowAvailable,savedMapReady:savedNow,requestedReason:opts.reason||'course-selected'}});
-        clearInteractiveGreenFallback('database-map-available',{courseId:courseId(c),courseName:courseName(c)});
-      }else{
-        recordMappingDebug(activeFallback.debugRunId||opts.debugRunId||'',{source:'manual-fallback',phase:'skipped',event:'manual-fallback-terminal-reentry-blocked',summary:'Manual fallback blocked automatic re-entry',details:{hole:h,resolutionKey:key,attemptToken:activeFallback.attemptToken||opts.attemptToken||'',requestedReason:opts.reason||'course-selected'}});
-        return {playable:false,fallback:'interactive-green',armed:true,terminal:true,debugRunId:activeFallback.debugRunId||opts.debugRunId||'',reason:'manual-fallback-active'};
-      }
-    }
     if(coursePlayResolverInFlight[key]){
       /* The other answer to "nothing scanned": a scan for this exact course
          and hole is already running and this call joined it. Silent de-dupe
@@ -5215,25 +4875,18 @@
   window.runCourseMappingAttempt=runCourseMappingAttempt;
   window.gdRunCourseMappingAttempt=runCourseMappingAttempt;
   window.gdResolveCoursePlayHole=resolveCoursePlayHole;
-  window.gdBeginInteractiveGreenFallback=beginInteractiveGreenFallback;
   async function openCourseToFirstHole(course){
     const c=sessionCourse(course||courseObj());
     if(!c||isManualGpsCourse(c)){hideCourseLoading(0);return false;}
     const h=1;
     const openingKey=courseOpenKey(c,h);
-    const activeFallback=window.__gdCoursePlayInteractiveFallbackActive||interactiveGreenFallbackState;
-    if(activeFallback&&String(activeFallback.resolutionKey||activeFallback.key||'')===String(coursePlayResolverKey(c,h))){
-      recordCoursePlayDebug('course-open-skipped-manual-fallback-active',c,h,{reason:'manual-fallback-terminal',resolutionKey:activeFallback.resolutionKey||activeFallback.key||'',attemptToken:activeFallback.attemptToken||''});
-      hideCourseLoading(0);
-      return true;
-    }
     if(courseOpenAlreadySettled(c,h)){hideCourseLoading(0);return true;}
     if(courseOpenInFlight(c,h))return true;
     window.__gdOpeningCourseToFirstHoleKey=openingKey;
     try{
       const result=await resolveCoursePlayHole(c,{hole:h,wholeCourse:true,showLoading:true,fresh:true,reason:'open-course-to-first-hole'});
       if(result&&result.playable)setTimeout(()=>scheduleOsmAutoMapForPlay(c,{frame:false,delayMs:20,resolvePlay:false}),700);
-      return !!(result&&(result.playable||result.fallback));
+      return !!(result&&result.playable);
     }catch(e){
       hideCourseLoading(250);
       reportMappedDropout(h,'course-open-error');

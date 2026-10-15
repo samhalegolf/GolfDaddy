@@ -33,7 +33,7 @@ assert(appCore.includes("const setCourseView=opts.setCourseView!==undefined?!!op
 assert(appCore.includes("if(!Number.isFinite(at)||at<=0||Date.now()-at>maxAgeMs)return null;"), "course picker requires a timestamped recent GPS fix");
 assert(appCore.includes("function gdResetCoursePickerPresentationReadiness(payload,opts={})"), "new course selections clear stale captured presentation readiness");
 assert(appCore.includes("if(!gdCoursePickerHasMappedPlayData(payload,1))return false;"), "course picker only opens mapped start when the selected course has mapped play data");
-assert(pickerSearch.includes('document.body.dataset.gdCourseNeedsPin=result&&result.fallback?"active":result&&result.playable?"no":waiting?"waiting":"pending";'), "course picker records when the pin fallback owns unresolved courses");
+assert(pickerSearch.includes('document.body.dataset.gdCourseNeedsPin=result&&result.playable?"no":waiting?"waiting":"pending";'), "course picker records when the pin fallback owns unresolved courses");
 /* "waiting" has to be its own value here. A course the server is still building has produced
    no result at all yet, and reporting that as "pending" made it indistinguishable from an
    attempt that finished and found nothing - which is the reading that used to send a player
@@ -50,7 +50,7 @@ assert(appCore.includes("function gdCoursePickerNeedsCoursePin(payload)"), "cour
 assert(library.includes("if(serverWait&&serverWait.timedOut&&serverWait.stillProcessing){"), "a wait that ran out on a LIVE job must extend, not fall back");
 assert(library.includes("timedOut:true,stillProcessing:status==='processing'"), "the wait has to report WHICH way it ran out, or the branch above cannot tell");
 assert(!library.includes("'player-chose-basic-gps'"), "there is no way into manual green-tapping while the server is still working");
-assert(library.includes("'player-chose-manual-gps'"), "manual green-tapping is only reached from the failed-scan banner, by the player choosing it");
+assert(!library.includes("beginInteractiveGreenFallback"), "a failed scan has no manual green-tap: the player goes back to the course picker");
 /* "A published map beats the pin prompt" used to be a branch in the gate. It is
    now the default for every course, mapped or not: the pin prompt is a repair
    reached only from a failed mapper verdict, so having a map is no longer a

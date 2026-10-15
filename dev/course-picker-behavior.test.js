@@ -315,11 +315,6 @@ async function tickEntry() {
   await tick();
   assert.strictEqual(failed.calls.gps, 0, "failed result does not enter GPS");
 
-  const fallback = createHarness({ immediateMappingResult: { playable: false, fallback: "interactive-green", armed: true } });
-  fallback.window.GDCoursePicker.selectCourse({ name: "Fallback", courseId: "fallback", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: false });
-  await tick();
-  assert.strictEqual(fallback.calls.gps, 0, "manual fallback result is not reimplemented by picker");
-
   const stale = createHarness();
   stale.window.GDCoursePicker.selectCourse({ name: "Old", courseId: "old", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: false });
   stale.window.GDCoursePicker.selectCourse({ name: "New", courseId: "new", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: false });
@@ -335,7 +330,7 @@ async function tickEntry() {
 
   const groundRefusal = { trusted: false, scope: "ground", reason: "multiple-courses", message: "There look to be several courses here." };
 
-  const badGround = createHarness({ immediateMappingResult: { playable: false, fallback: "interactive-green", fit: groundRefusal } });
+  const badGround = createHarness({ immediateMappingResult: { playable: false, fit: groundRefusal } });
   badGround.window.GDCoursePicker.selectCourse({ name: "Overlapping", courseId: "overlapping", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: false });
   await tick();
   assert.strictEqual(badGround.calls.pins.length, 1, "a ground refusal is exactly what the pin exists to repair");

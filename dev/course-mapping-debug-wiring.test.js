@@ -71,7 +71,7 @@ test("every source the pipeline emits is a source the recorder accepts", () => {
     (pinSrc.match(/recordMappingDebug\([^,]*,\s*\{\s*source:'[a-z-]+'/g) || [])
       .map(function (m) { return m.match(/source:'([a-z-]+)'/)[1]; })
   );
-  assert.ok(emitted.size >= 6, "expected to find the pipeline's debug sources, found " + emitted.size);
+  assert.ok(emitted.size >= 5, "expected to find the pipeline's debug sources, found " + emitted.size);
   const validBlock = debugSrc.slice(
     debugSrc.indexOf("var VALID_SOURCES"),
     debugSrc.indexOf("};", debugSrc.indexOf("var VALID_SOURCES"))
@@ -135,13 +135,6 @@ test("the silent early exits now say why nothing scanned", () => {
   assert.ok(
     /event:'mapping-attempt-joined-in-flight'/.test(pinSrc),
     "joining an in-flight scan must not look like a dropped request"
-  );
-});
-
-test("a fallback that could not arm does not log as opened", () => {
-  assert.ok(
-    /event:'manual-fallback-not-armed'/.test(pinSrc),
-    "no map element means no click handler - the log must not claim a fallback is waiting for a tap"
   );
 });
 

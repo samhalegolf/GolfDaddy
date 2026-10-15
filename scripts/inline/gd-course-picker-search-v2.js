@@ -795,10 +795,10 @@
          itself when the package lands, so nothing here should look like a finished attempt
          that produced nothing. */
       const waiting=!!(result&&result.waiting);
-      document.body.dataset.gdCourseAutoMapStatus=result&&result.stale?"stale":waiting?"waiting":result&&(result.playable||result.fallback)?"done":"empty";
+      document.body.dataset.gdCourseAutoMapStatus=result&&result.stale?"stale":waiting?"waiting":result&&result.playable?"done":"empty";
       document.body.dataset.gdCourseAutoMappedHoles=String(result?.holes||result?.persisted?.holes||0);
       document.body.dataset.gdCourseAutoMapSaved=String(result?.saved||result?.persisted?.saved||0);
-      document.body.dataset.gdCourseNeedsPin=result&&result.fallback?"active":result&&result.playable?"no":waiting?"waiting":"pending";
+      document.body.dataset.gdCourseNeedsPin=result&&result.playable?"no":waiting?"waiting":"pending";
     }catch(e){}
   }
   /* A course that opened is a course whose location was right, so nothing about a previous
