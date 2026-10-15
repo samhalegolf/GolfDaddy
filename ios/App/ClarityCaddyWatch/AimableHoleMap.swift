@@ -163,8 +163,9 @@ struct AimableHoleMap: View {
                        carries the ball (WatchConditions.windEffect), a thin
                        blue edge under the real one, with streaks blowing in
                        from the upwind side. It moves with the aim; how far to
-                       lean on it is the player's call. */
-                    if let bubble = state.bubble, ring.count >= 3,
+                       lean on it is the player's call. Off when the phone's
+                       Wind ghost setting is off. */
+                    if conditions.windGhost, let bubble = state.bubble, ring.count >= 3,
                        let ghost = windNow?.ghost {
                         let dLat = ghost.lat - bubble.target.lat, dLng = ghost.lng - bubble.target.lng
                         let shifted = ring.compactMap { imagePoint(lat: $0.lat + dLat, lng: $0.lng + dLng) }.map(place)

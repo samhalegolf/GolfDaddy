@@ -278,4 +278,19 @@ check("the driver is readable off surface(), which is the sleep rule's one gate"
     "a wrist-driven round: a phone dark in a bag is normal and must not unlock the wrist's shot");
 });
 
+check("the wrist follows the phone's Wind ghost and Slope bubble switches", () => {
+  const m = createMarshal({ now: () => 1000 });
+  m.signal("ROUND_OPENED", { courseKey: "watch-test", roundId: "round-1", pkg: PKG, hole: 1 });
+  const state = { windGhost: true, slopeBubble: false };
+  const settings = { windGhost: () => state.windGhost, slopeBubble: () => state.slopeBubble };
+  const w = createWatchBridge({ marshal: m, now: () => 1000, settings });
+  w.publish();
+  assert.deepEqual(w.scene().settings, { windGhost: true, slopeBubble: false });
+  state.windGhost = false; state.slopeBubble = true;
+  w.publish();
+  assert.deepEqual(w.scene().settings, { windGhost: false, slopeBubble: true }, "a republish carries the new switches");
+  const { w: bare } = ready();
+  assert.equal(bare.scene().settings, null, "no settings source: absent, and the wrist keeps its defaults");
+});
+
 console.log("\n" + passed + " Caddy Watch compatibility checks passed.");

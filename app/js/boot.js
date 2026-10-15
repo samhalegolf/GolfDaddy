@@ -263,8 +263,12 @@
           return window.GDBubbleEngine && window.GDBubbleEngine.renderModel
             ? window.GDBubbleEngine.renderModel() : null;
         },
-        demo: app.demoApproach || null
+        demo: app.demoApproach || null,
+        settings: app.gpsSettings || null
       });
+      /* A switch flipped in GPS Settings reaches the wrist now, not on the
+         next shot. */
+      if (app.gpsSettings) app.gpsSettings.onChange(function () { app.caddyWatch.publish(); });
       if (window.GDNativeRoundBridge && window.GDNativeRoundBridge.attach) {
         window.GDNativeRoundBridge.attach(app.caddyWatch);
       }

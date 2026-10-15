@@ -25,6 +25,12 @@ struct WatchScene: Codable, Equatable {
     let surface: Surface?
     let connection: Connection?
     let demo: Demo?
+    let settings: Settings?
+
+    /* The phone's GPS Settings that the wrist follows (app/js/gps-settings.js):
+       the map's wind ghost, and the slope bubble - whether the map's Bubble
+       is the plays-distance one. Absent from an older phone: both defaults. */
+    struct Settings: Codable, Equatable { let windGhost: Bool?; let slopeBubble: Bool? }
 
     /* A demo approach is on (app/js/demo-approach.js): the phone has put the
        player `metres` short of hole `hole`'s green, at `position`. While it is

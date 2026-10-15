@@ -65,7 +65,8 @@ enum WatchPreviewFixtures {
                            handover: driving ? .init(id: "preview-handover", state: "confirmed", from: "phone") : nil,
                            watch: .init(paired: true, appInstalled: true, reachable: true, maps: .init(total: 18, have: 18))),
             connection: .init(status: "live"),
-            demo: nil
+            demo: nil,
+            settings: nil
         )
     }
 
