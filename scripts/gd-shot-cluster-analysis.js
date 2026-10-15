@@ -162,7 +162,9 @@
       distanceViable: distanceViable,
       degreeViable: degreeViable,
       counted: distanceViable,
-      bubbleWasSet: !!shot.plannedBubble,
+      /* A plan with no size is an aim point only (shots brought back from
+         rounds that never recorded their bubble), not a bubble to fit. */
+      bubbleWasSet: !!shot.plannedBubble && asNumber(shot.plannedBubble.widthYards, 0) > 0 && asNumber(shot.plannedBubble.lengthYards, 0) > 0,
       pairedConfidence: asNumber(outcome.pairedConfidence, 0),
       sourceConfidence: outcome.sourceConfidence || resultEvent && resultEvent.confidence || 'unknown'
     };
