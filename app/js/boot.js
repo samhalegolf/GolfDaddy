@@ -964,6 +964,11 @@
        past can only pick aerial imagery if the keys are already on their way.
        This used to sit at the bottom of this handler, after openPlay. */
     app.basemap.prefetch();
+    /* Android still opens its long-press menu over map tiles despite the
+       CSS (styles.css, "A long press during play"); nothing in play uses it. */
+    document.addEventListener("contextmenu", function (e) {
+      if (document.body.classList.contains("route-play") && !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) e.preventDefault();
+    });
     document.getElementById("accountAction").addEventListener("click", function () {
       if (app.account.signedIn()) { app.account.signOut(); renderAccountState(); }
       else show("signin");

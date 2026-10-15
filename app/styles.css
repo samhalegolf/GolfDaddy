@@ -927,6 +927,13 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
 #map, #surfaceViewport, #playTopBar, .shotDock, .playChrome { touch-action: none; }
 .sheet, .sheetBody, #scoreList, #bagList, #traceList { touch-action: pan-y; }
 
+/* A long press during play is a game gesture (pin, wind, aim), never "select
+   this text" or "save this image" - stop the phone offering its copy/callout
+   menu over the map. Typed fields keep normal selection. */
+body.route-play { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+body.route-play img { -webkit-user-drag: none; }
+body.route-play input, body.route-play textarea { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+
 /* ---- Phone <-> Watch handover (watch-handover.js) ------------------------ */
 /* The card: top-right, the slot the GPS/demo badges use. 124x150 as a Watch
    (radius 34), morphing to 96x168 as a phone (radius 20) once the wrist is
