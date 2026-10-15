@@ -13,6 +13,11 @@
    once a direction is picked, taps cycle the level 1→2→3→off and a long press
    re-opens the compass. A live reading landing later replaces it.
 
+   OFF: a tap on the chip while live wind is showing turns it off - no ghost,
+   the chip goes back to its plain glyph. Readings keep being taken in the
+   background (Course Data still wants the evidence) but are not drawn. The
+   next tap turns it back on with a fresh check.
+
    Wind never touches the dispersion shape. The bubble stays on the aim and
    the wind is drawn as a ghost bubble where it would carry the ball - the
    Garmin watch's behaviour (GarminConditions.windEffect). Nothing persists
@@ -34,6 +39,7 @@
 
   var liveReading = null;    // the last measured wind, kept for Course Data too
   var manual = false;        // the engine's wind was dialled in by hand
+  var off = false;           // the player turned live wind off with a tap
   var checking = false;
   var unavailable = false;   // the last live check failed - manual wind is on offer
   var lastAttemptAt = 0;
@@ -54,6 +60,7 @@
   function applyLive() {
     var eng = engine();
     if (!eng || !liveReading) return;
+    if (off) { eng.clearWind(); manual = false; return; }
     var strength = strengthForSpeed(liveReading.speedKmh);
     if (strength > 0) eng.setWind(liveReading.directionDeg * Math.PI / 180, strength);
     else eng.clearWind();
@@ -116,9 +123,9 @@
     notify();
   }
 
-  /* The top chip. Live: a tap is "check again now". No live wind: try live
-     first; if it cannot answer the compass opens. Manual wind set: taps cycle
-     the level, 3 clears. */
+  /* The top chip. Live: a tap turns it off; off: a tap turns it back on and
+     checks again. No live wind: try live first; if it cannot answer the
+     compass opens. Manual wind set: taps cycle the level, 3 clears. */
   function press() {
     var eng = engine();
     if (!eng || checking) return;
@@ -129,6 +136,17 @@
       else eng.setWind(eng.windState().originAngle, level + 1);
       notify();
       return;
+    }
+    if (liveReading && !off) {
+      off = true;
+      applyLive();
+      notify();
+      return;
+    }
+    if (off) {
+      off = false;
+      applyLive();
+      notify();
     }
     fetchLiveWind({ fallbackToPicker: !liveReading });
   }
@@ -230,7 +248,7 @@
        Null is a real answer - "no live evidence" - and Course Data records it
        as such rather than substituting the player's setting. */
     liveReading: function () { return liveReading; },
-    isLive: function () { return !!liveReading && !manual; },
+    isLive: function () { return !!liveReading && !manual && !off; },
     isManual: function () { return manual && !!(engine() && engine().windState()); },
     /* A live check in flight - the chip's "…" state. */
     checking: function () { return checking; },
