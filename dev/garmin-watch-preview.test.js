@@ -317,6 +317,117 @@ test("a whole frame draws, in the watch's order, and a drag moves the target thr
   assert.ok(asked.length > 0 && asked.every((a) => a[0] === true && a[1] >= 0 && a[1] < 4 && a[2] >= 0 && a[2] < 5));
 });
 
+/* The numbers screen's seam: a 126 m PW with the green 106/145 m away, wind level 2. */
+function numbersSession(overrides) {
+  const calls = { holes: [], locks: 0, windToggles: 0 };
+  const session = Object.assign({
+    scene: { hasRound: () => true, isDemo: () => false, canLock: () => true, distanceTargetM: () => null, suggestedClub: () => null, shotLocked: () => false },
+    greenDistances: () => ({ front: 106, centre: 126, back: 145 }),
+    localBubble: () => ({ target: { lat: 0, lng: 0 }, targetDistanceM: 126, club: { club: "PW" } }),
+    playerPoint: () => ({ lat: 0, lng: 0 }),
+    aimTarget: () => ({ lat: 0, lng: 0 }),
+    greenPoint: () => null,
+    windEffect: () => ({ level: 2, alongM: -11.5, relRad: -136 * Math.PI / 180, kmh: 18 }),
+    playsLikeM: () => 121,
+    windApplied: () => false,
+    currentHole: () => 8,
+    yards: () => false,
+    lockedShot: () => false,
+    lockPending: () => false,
+    canCompute: () => true,
+    playState: { target: null, bubble: null, moveTarget(c) { this.target = c; return null; }, clear() { this.target = null; } },
+    sendAim: () => {},
+    stepHole: (d) => calls.holes.push(d),
+    lock: () => { calls.locks += 1; },
+    toggleWindApplied: () => { calls.windToggles += 1; },
+    requestUpdate: () => {}
+  }, overrides || {});
+  return { session, calls };
+}
+
+test("the numbers screen draws the watch's face: back, hole, target and club, plays, the AIM pill, front", () => {
+  const { session } = numbersSession();
+  const device = R.DEVICES.find((d) => d.id === "fenix843mm");
+  const face = new R.NumbersFace(session, device, () => true);
+  const { ctx, calls } = recordingContext();
+  face.onUpdate(new R.Dc(ctx, device.width, device.height, R.fontsFor(device), device.patternFill));
+  const texts = calls.filter((c) => c.name === "fillText").map((c) => c.args[0]);
+  ["Back", "Front", "145", "106", "Hole 8", "126", "m", "PW", "plays 121", "AIM", "12"].forEach((t) => assert.ok(texts.includes(t), t + " is drawn: " + texts.join(",")));
+  assert.strictEqual(calls.filter((c) => c.name === "fillRect")[0].fill, "#000000", "cleared black first");
+  /* The wind hub on the rim, where the wind comes from: up and to the right here. */
+  assert.ok(face.windHit && face.windHit[0] > 208 && face.windHit[1] < 208, "the hub sits on the rim, upwind: " + face.windHit);
+  assert.strictEqual(face.hit(face.windHit[0], face.windHit[1]), "wind");
+  assert.strictEqual(face.hit(208, 416 * 0.45), "number");
+  assert.strictEqual(face.hit(208, 400), null);
+  /* Vector type sized as the watch sizes it: a cap height over 0.72 gives :size, which is the
+     line height. */
+  const dc = new R.Dc(ctx, device.width, device.height, R.fontsFor(device), true);
+  const f = face.font(dc, 416 * 0.05, "8", 1000, ["small"]);
+  assert.strictEqual(f.builtin, false);
+  assert.strictEqual(f.px, Math.trunc(416 * 0.05 / 0.72));
+  /* The S62 has no vector type: built-in fonts, and a club's digits borrow the number font. */
+  const s62 = R.DEVICES.find((d) => d.id === "approachs62");
+  assert.strictEqual(s62.vectorFont, false);
+  const old = new R.NumbersFace(numbersSession({ localBubble: () => ({ target: { lat: 0, lng: 0 }, targetDistanceM: 126, club: { club: "9i" } }) }).session, s62, () => true);
+  const rec = recordingContext();
+  old.onUpdate(new R.Dc(rec.ctx, s62.width, s62.height, R.fontsFor(s62), s62.patternFill));
+  const oldTexts = rec.calls.filter((c) => c.name === "fillText").map((c) => c.args[0]);
+  assert.ok(oldTexts.includes("9") && oldTexts.includes("i"), "9i splits into digits and letters: " + oldTexts.join(","));
+});
+
+test("the numbers screen says LOCK when the wrist cannot aim, folds the wind in blue, and opens the compass", () => {
+  const device = R.DEVICES[0];
+  const draw = (face) => { const r = recordingContext(); face.onUpdate(new R.Dc(r.ctx, device.width, device.height, R.fontsFor(device), true)); return r.calls; };
+  const lock = draw(new R.NumbersFace(numbersSession({ localBubble: () => null }).session, device, () => false));
+  const lockTexts = lock.filter((c) => c.name === "fillText").map((c) => c.args[0]);
+  assert.ok(lockTexts.includes("LOCK") && lockTexts.includes("-"), "no Bubble: a dash for the target and LOCK on the pill: " + lockTexts.join(","));
+  const applied = draw(new R.NumbersFace(numbersSession({ windApplied: () => true }).session, device, () => true));
+  const big = applied.filter((c) => c.name === "fillText" && c.args[0] === "115")[0];
+  assert.ok(big, "the big number takes the wind's -11.5 m");
+  assert.strictEqual(big.fill, "#55aaff", "and turns the wind blue");
+  const zoomed = new R.NumbersFace(numbersSession().session, device, () => true);
+  zoomed.windZoom = true;
+  const zoomTexts = draw(zoomed).filter((c) => c.name === "fillText").map((c) => c.args[0]);
+  assert.ok(zoomTexts.includes("18 km/h") && !zoomTexts.includes("AIM"), "the compass covers the face: " + zoomTexts.join(","));
+  assert.strictEqual(zoomed.hit(5, 5), "zoom");
+});
+
+test("the playing face opens on the numbers and moves to the map as CaddyInputDelegate does", () => {
+  const { session, calls } = numbersSession();
+  const device = R.DEVICES[0];
+  const face = new R.CaddyAppView(session, device, () => null);
+  assert.strictEqual(face.showingMap, false, "a round opens on the numbers");
+  face.onUpdate(recordingContext().ctx);
+  assert.ok(/^numbers face: hole 8 /.test(face.trace), face.trace);
+  face.up(); face.down();
+  assert.deepStrictEqual(calls.holes, [1, -1], "UP is NEXT_HOLE, DOWN is PREVIOUS_HOLE off the map");
+  face.select();
+  assert.strictEqual(face.showingMap, true, "AIM opens the map");
+  assert.strictEqual(face.aiming, true, "already aiming, so the next SELECT confirms");
+  assert.strictEqual(face.mapView.camera, null, "and the map frames afresh");
+  face.back();
+  assert.strictEqual(face.aiming, false, "BACK cancels the aim first");
+  assert.strictEqual(face.showingMap, true);
+  face.back();
+  assert.strictEqual(face.showingMap, false, "then BACK returns to the numbers");
+  face.menu();
+  assert.strictEqual(face.showingMap, true, "MENU swaps to the map");
+  face.menu();
+  assert.strictEqual(face.showingMap, false, "and back");
+  /* A wrist that cannot aim LOCKs from the numbers. */
+  const noAim = new R.CaddyAppView(numbersSession({ canCompute: () => false }).session, device, () => null);
+  noAim.select();
+  assert.strictEqual(noAim.showingMap, false);
+  /* Touch: a swipe left opens the map; a long press on the big number folds the wind in. */
+  face.numbersView.numberBox = [100, 100, 300, 300];
+  face.numbersView.windHit = null;
+  face.pointerDown(200, 200, 0); face.pointerUp(200, 200, 600);
+  assert.strictEqual(calls.windToggles, 1, "a long press on the number toggles the wind");
+  face.pointerDown(400, 220, 0); face.pointerMove(150, 225, 50); face.pointerUp(150, 225, 100);
+  assert.strictEqual(face.showingMap, true, "a swipe left opens the map");
+  face.cancelPendingTap();
+});
+
 let failed = 0;
 tests.forEach(({ name, fn }) => {
   try { fn(); console.log("ok   - " + name); }

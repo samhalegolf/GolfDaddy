@@ -1,17 +1,20 @@
-/* The Garmin map face, drawn in a browser. STUDIO ONLY.
+/* The Garmin playing face - numbers and map - drawn in a browser. STUDIO ONLY.
 
-   A line-for-line port of what the watch draws - garmin/source/Maps/GarminMapView.mc with the
-   pieces it leans on (GarminMapCamera, GarminMapSpatialReference, GarminTreeSprites,
-   LayoutProfile, GarminSessionManager.mapPalette, GarminConditions.windEffect,
-   GarminPlayState.clampedToBag, GarminBubbleEngine.defaultTarget) - so a hole can be looked
+   A line-for-line port of what the watch draws - garmin/source/UI/NumbersView.mc, the screen a
+   round opens on, and garmin/source/Maps/GarminMapView.mc behind it, switched and driven the
+   way CaddyAppView and CaddyInputDelegate do, with the pieces they lean on (GarminMapCamera,
+   GarminMapSpatialReference, GarminTreeSprites, LayoutProfile, DistanceFormat,
+   GarminSessionManager.mapPalette, GarminConditions.windEffect, GarminPlayState.clampedToBag,
+   GarminBubbleEngine.defaultTarget) - so a hole can be looked
    at the way a wrist will show it before a .prg is built. The Monkey C is the source of truth:
    when it changes, this changes with it, the same way the .mc files follow the Swift.
 
    `Dc` below stands in for Toybox.Graphics.Dc over a canvas 2D context, with the same call
    names and the same integer habits (Monkey C truncates a Float with toNumber() and divides
    two Numbers to a Number), so the draw code reads like the watch's own. What cannot be
-   copied is said so: the Garmin fonts are approximated from the screen size, and a canvas
-   anti-aliases where a MIP panel cannot.
+   copied is said so: the map's bitmap fonts are approximated from the screen size (the
+   numbers' vector Roboto Condensed is the real face), and a canvas anti-aliases where a MIP
+   panel cannot.
 
    No DOM beyond the canvas context it is handed, no fetch, no Leaflet. The page
    (garmin-preview-page.js) owns the data and the inputs and hands this a `session` shaped
@@ -36,24 +39,24 @@
      draws a picture 1:1). The higher-end AMOLED watches come first; the MIP watches are kept so
      the 64-colour palette and its pattern fills can be checked beside them. */
   var DEVICES = [
-    { id: "fenix847mm", name: "fenix 8 47 mm", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "fenix851mm", name: "fenix 8 51 mm", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "fenix843mm", name: "fenix 8 43 mm", width: 416, height: 416, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "epix2pro47mm", name: "epix Pro (Gen 2) 47 mm", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "epix2pro51mm", name: "epix Pro (Gen 2) 51 mm", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "epix2pro42mm", name: "epix Pro (Gen 2) 42 mm", width: 416, height: 416, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "approachs7047mm", name: "Approach S70 47 mm", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "approachs7042mm", name: "Approach S70 42 mm", width: 390, height: 390, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "fr965", name: "Forerunner 965", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "fr970", name: "Forerunner 970", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "venu3", name: "Venu 3", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "venu3s", name: "Venu 3S", width: 390, height: 390, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "fr265", name: "Forerunner 265", width: 416, height: 416, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "venusq2", name: "Venu Sq 2 (rectangular)", width: 320, height: 360, shape: "rectangle", amoled: true, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "fenix7", name: "fenix 7 (MIP, 64 colours)", width: 260, height: 260, shape: "round", amoled: false, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "fenix7x", name: "fenix 7X (MIP, 64 colours)", width: 280, height: 280, shape: "round", amoled: false, touch: true, patternFill: true, scaledBitmap: true },
-    { id: "fr255", name: "Forerunner 255 (MIP, buttons)", width: 260, height: 260, shape: "round", amoled: false, touch: false, patternFill: true, scaledBitmap: true },
-    { id: "approachs62", name: "Approach S62 (MIP, CIQ 3.0, 1:1 picture)", width: 260, height: 260, shape: "round", amoled: false, touch: true, patternFill: false, scaledBitmap: false }
+    { id: "fenix847mm", name: "fenix 8 47 mm", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "fenix851mm", name: "fenix 8 51 mm", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "fenix843mm", name: "fenix 8 43 mm", width: 416, height: 416, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "epix2pro47mm", name: "epix Pro (Gen 2) 47 mm", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "epix2pro51mm", name: "epix Pro (Gen 2) 51 mm", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "epix2pro42mm", name: "epix Pro (Gen 2) 42 mm", width: 416, height: 416, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "approachs7047mm", name: "Approach S70 47 mm", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "approachs7042mm", name: "Approach S70 42 mm", width: 390, height: 390, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "fr965", name: "Forerunner 965", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "fr970", name: "Forerunner 970", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "venu3", name: "Venu 3", width: 454, height: 454, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "venu3s", name: "Venu 3S", width: 390, height: 390, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "fr265", name: "Forerunner 265", width: 416, height: 416, shape: "round", amoled: true, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "venusq2", name: "Venu Sq 2 (rectangular)", width: 320, height: 360, shape: "rectangle", amoled: true, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "fenix7", name: "fenix 7 (MIP, 64 colours)", width: 260, height: 260, shape: "round", amoled: false, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "fenix7x", name: "fenix 7X (MIP, 64 colours)", width: 280, height: 280, shape: "round", amoled: false, touch: true, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "fr255", name: "Forerunner 255 (MIP, buttons)", width: 260, height: 260, shape: "round", amoled: false, touch: false, patternFill: true, scaledBitmap: true, vectorFont: true },
+    { id: "approachs62", name: "Approach S62 (MIP, CIQ 3.0, 1:1 picture)", width: 260, height: 260, shape: "round", amoled: false, touch: true, patternFill: false, scaledBitmap: false, vectorFont: false }
   ];
 
   /* Garmin's fonts are the one thing a browser cannot copy: FONT_XTINY/SMALL/MEDIUM are device
@@ -277,6 +280,17 @@
   Dc.prototype.drawText = function (x, y, font, text, justify) {
     var c = this.ctx; c.font = font.css; c.textAlign = justify; c.textBaseline = "middle"; c.fillStyle = hex(this.fg);
     c.fillText(String(text), x, y + font.px / 2);
+  };
+  /* drawText with TEXT_JUSTIFY_VCENTER: the font's whole line box centred on y, so the baseline
+     sits `ascent` below the box's top - the rule NumbersView.baselineY leans on. */
+  Dc.prototype.drawTextV = function (x, y, font, text, justify) {
+    var c = this.ctx; c.font = font.css; c.textAlign = justify; c.textBaseline = "alphabetic"; c.fillStyle = hex(this.fg);
+    c.fillText(String(text), x, y - font.px / 2 + (font.ascent != null ? font.ascent : font.px * 0.8));
+  };
+  /* drawArc(..., ARC_COUNTER_CLOCKWISE, start, end): degrees from three o'clock, counter-clockwise. */
+  Dc.prototype.drawArc = function (x, y, r, startDeg, endDeg) {
+    var c = this.ctx; c.beginPath(); c.arc(x, y, r, -startDeg * Math.PI / 180, -endDeg * Math.PI / 180, true);
+    c.lineWidth = this.pen; c.strokeStyle = hex(this.fg); c.lineCap = "butt"; c.stroke();
   };
   Dc.prototype.drawBitmap = function (x, y, image) { if (image) this.ctx.drawImage(image, x, y); };
   /* drawBitmap2 with a crop and a transform, as GarminMapView.drawBitmapCropped uses it: the
@@ -912,6 +926,484 @@
     }
   }
 
+  // ------------------------------------------------------------------ NumbersView
+
+  /* garmin/source/UI/NumbersView.mc, the playing face the watch opens on: back and front of the
+     green on two dark crescents, the hole, the big target number with its club, the plays
+     number, the AIM pill and the wind hub on the rim. Every proportion is the watch's own.
+
+     Type: the watch asks for vector Roboto Condensed Bold (Graphics.getVectorFont, CIQ 4.2.1+)
+     and sizes it by cap height, which a browser can copy closely - the page loads the same face
+     from Google Fonts. A watch without vector type (the Approach S62 here) falls back to its
+     built-in bitmap fonts, whose heights below are approximations of the 260 px device profiles. */
+  var VECTOR_CSS = "'Roboto Condensed','Arial Narrow',sans-serif";
+  /* Roboto's own vertical metrics: hhea ascender 1900 and descender 500 on a 2048 em. A Garmin
+     vector font's :size is that whole line height (2400 units), not the em - measured against
+     the fenix simulator's own numbers screen, where the type stands 0.85 of a CSS font of the
+     same size. */
+  var VECTOR_EM = 2048 / 2400, VECTOR_ASCENT = 1900 / 2400;
+  var F_XTINY = "xtiny", F_TINY = "tiny", F_SMALL = "small", F_MEDIUM = "medium", F_LARGE = "large";
+  var F_NUMBER_MILD = "numberMild", F_NUMBER_MEDIUM = "numberMedium", F_NUMBER_HOT = "numberHot";
+  /* [line height at 260 px, ascent as a fraction of it, em as a fraction of it] */
+  var BUILTIN_FONTS = {
+    xtiny: [19, 0.78, 0.87], tiny: [26, 0.78, 0.87], small: [27, 0.78, 0.87], medium: [29, 0.78, 0.87], large: [34, 0.78, 0.87],
+    numberMild: [37, 0.82, 0.92], numberMedium: [54, 0.82, 0.92], numberHot: [69, 0.82, 0.92]
+  };
+  var NUMBERS_PILL_EDGE = 0x1F2A1F, NUMBERS_INK = 0x231F20, COLOR_DK_GRAY = 0x555555;
+  var NUMBERS_FACES_NOTE = "RobotoCondensedBold";
+
+  function builtinFont(name, viewHeight) {
+    var spec = BUILTIN_FONTS[name], px = Math.round(spec[0] * viewHeight / 260);
+    return { builtin: true, px: px, ascent: Math.round(px * spec[1]), css: "700 " + Math.round(px * spec[2]) + "px " + VECTOR_CSS };
+  }
+  function vectorFont(size) {
+    if (!(size > 0)) return null;
+    return { builtin: false, px: size, ascent: Math.round(size * VECTOR_ASCENT), css: "700 " + (size * VECTOR_EM).toFixed(2) + "px " + VECTOR_CSS };
+  }
+
+  /* DistanceFormat: metres in, the watch's own unit out. */
+  var Distance = {
+    value: function (metres, yards) { if (metres == null) return null; return toNumber((yards ? metres * 1.0936133 : metres) + 0.5); },
+    suffix: function (yards) { return yards ? "y" : "m"; },
+    number: function (metres, yards) { var v = Distance.value(metres, yards); return v != null ? String(v) : "-"; }
+  };
+
+  /* The `session` seam is the MapFace's, plus what the numbers read beyond the map:
+       scene.isDemo(), scene.canLock(), scene.distanceTargetM()
+       greenPoint() -> {lat,lng} | null         the green centre, the aim of last resort
+       windApplied() -> Boolean                 GarminConditions.windApplied
+       lockedShot() -> Boolean, lockPending() -> Boolean
+     `aimable` is GarminMapView.canEnterAimMode, as CaddyAppView wires it. */
+  function NumbersFace(session, device, aimable) {
+    this.session = session;
+    this.device = device;
+    this.aimable = aimable;
+    this.windZoom = false;
+    this.numberBox = null;
+    this.windHit = null;
+    this.crescentColour = device.amoled ? 0x0A3F22 : 0x005500;
+    this.pillColour = device.amoled ? 0x00BF63 : 0x00AA55;
+    this.vectorCache = {};
+    this.trace = null;
+  }
+
+  NumbersFace.prototype.onUpdate = function (dc) {
+    var session = this.session;
+    dc.setColor(COLOR_WHITE, COLOR_BLACK);
+    dc.clear();
+    var w = dc.getWidth(), h = dc.getHeight(), cx = idiv(w, 2), yards = session.yards();
+
+    var scene = session.scene;
+    if (scene == null || !scene.hasRound()) {
+      dc.drawTextV(cx, h / 2, builtinFont(F_MEDIUM, h), "No round", TEXT_CENTER);
+      this.trace = "numbers face: no round";
+      return;
+    }
+
+    var green = session.greenDistances();
+    var front = green != null ? green.front : null, centre = green != null ? green.centre : null, back = green != null ? green.back : null;
+
+    var local = session.localBubble();
+    var targetDistanceM = local != null ? local.targetDistanceM : scene.distanceTargetM();
+    var club = local != null ? local.club.club : scene.suggestedClub();
+
+    var player = session.playerPoint();
+    var aimAt = local != null ? local.target : session.aimTarget();
+    if (aimAt == null) aimAt = session.greenPoint();
+    var effect = session.windEffect(player, aimAt, targetDistanceM);
+
+    if (this.windZoom) {
+      if (effect != null) { this.drawWindZoom(dc, effect, w, h); this.trace = "numbers face: wind compass open"; return; }
+      this.windZoom = false;
+    }
+
+    this.drawCrescent(dc, cx, h * 0.415, w * 0.445, h * 0.295, h * 0.235, true);
+    this.drawCrescent(dc, cx, h * 0.585, w * 0.445, h * 0.305, h * 0.25, false);
+
+    dc.setColor(COLOR_LT_GRAY, -1);
+    var labelFont = this.font(dc, h * 0.036, "Front", w * 0.3, [F_SMALL, F_TINY, F_XTINY]);
+    if (this.fits(labelFont, h * 0.036)) {
+      dc.drawTextV(cx, h * 0.07, labelFont, "Back", TEXT_CENTER);
+      dc.drawTextV(cx, h * 0.93, labelFont, "Front", TEXT_CENTER);
+    }
+
+    if (effect != null) this.drawWindFromRim(dc, effect, w, h); else this.windHit = null;
+
+    dc.setColor(COLOR_WHITE, -1);
+    var edgeFont = this.font(dc, h * 0.05, "888", w * 0.3, [F_NUMBER_MILD, F_MEDIUM, F_SMALL, F_TINY]);
+    dc.drawTextV(cx, h * 0.15, edgeFont, Distance.number(back, yards), TEXT_CENTER);
+    dc.drawTextV(cx, h * 0.852, edgeFont, Distance.number(front, yards), TEXT_CENTER);
+
+    var holeNumber = session.currentHole();
+    var holeFont = this.font(dc, h * 0.062, "Hole 18", w * 0.5, [F_LARGE, F_MEDIUM, F_SMALL]);
+    dc.drawTextV(cx, h * 0.29, holeFont, "Hole " + (holeNumber != null ? holeNumber : "-"), TEXT_CENTER);
+
+    var note = null;
+    if (scene.isDemo()) note = "DEMO - BACK ends";
+    else if (green != null && green.fromWatch) note = "WATCH GPS";
+    if (note != null) {
+      var noteFont = this.font(dc, h * 0.03, note, w * 0.6, [F_XTINY]);
+      dc.setColor(scene.isDemo() ? COLOR_GREEN : COLOR_LT_GRAY, -1);
+      dc.drawTextV(cx, h * 0.222, noteFont, note, TEXT_CENTER);
+      dc.setColor(COLOR_WHITE, -1);
+    }
+
+    var windOn = session.windApplied() && effect != null && effect.level > 0 && targetDistanceM != null;
+    var shownM = windOn ? targetDistanceM + effect.alongM : targetDistanceM;
+    this.drawDistanceAndClub(dc, shownM, club, w, h, windOn);
+
+    var plays = session.playsLikeM(player, aimAt, targetDistanceM, effect);
+    if (plays != null) {
+      dc.setColor(SLOPE_ORANGE, -1);
+      var playsText = "plays " + Distance.number(plays, yards);
+      dc.drawTextV(cx, h * 0.575, this.font(dc, h * 0.042, playsText, w * 0.5, [F_SMALL, F_TINY, F_XTINY]), playsText, TEXT_CENTER);
+    }
+    var pill = this.drawAimButton(dc, w, h);
+
+    this.trace = "numbers face: hole " + (holeNumber != null ? holeNumber : "-") + " · back " + Distance.number(back, yards) + " · target " + Distance.number(shownM, yards) + Distance.suffix(yards)
+      + (windOn ? " (wind in)" : "") + " · " + this.shortClub(club) + " · front " + Distance.number(front, yards)
+      + (plays != null ? " · plays " + Distance.number(plays, yards) : "") + " · pill " + pill
+      + (this.device.vectorFont ? " · vector " + NUMBERS_FACES_NOTE : " · built-in fonts");
+  };
+
+  NumbersFace.prototype.drawCrescent = function (dc, cx, tipY, halfSpan, outerReach, innerReach, up) {
+    var steps = 24, sign = up ? -1 : 1, points = new Array(steps * 2 + 2);
+    for (var i = 0; i <= steps; i++) {
+      var a = Math.PI * i / steps, x = cx - halfSpan * Math.cos(a), s = Math.sin(a);
+      points[i] = [x, tipY + sign * outerReach * s];
+      points[steps * 2 + 1 - i] = [x, tipY + sign * innerReach * s];
+    }
+    dc.setColor(this.crescentColour, this.crescentColour);
+    dc.fillPolygon(points);
+  };
+
+  NumbersFace.prototype.drawDistanceAndClub = function (dc, targetDistanceM, club, w, h, windOn) {
+    var yards = this.session.yards();
+    var y = h * 0.45, distance = Distance.number(targetDistanceM, yards), clubText = this.shortClub(club), unit = Distance.suffix(yards);
+    var cap = h * 0.18;
+    var numberFont = this.font(dc, cap, "888", w * 0.5, [F_NUMBER_HOT, F_NUMBER_MEDIUM, F_NUMBER_MILD, F_LARGE]);
+    var clubFont = this.font(dc, cap, "PW", w * 0.3, [F_LARGE, F_MEDIUM, F_SMALL]);
+    var unitFont = this.font(dc, h * 0.05, "y", w, [F_TINY]);
+
+    var clubDigits = "", clubLetters = clubText;
+    if (clubFont.builtin) {
+      var n = 0;
+      while (n < clubText.length && "0123456789".indexOf(clubText.charAt(n)) >= 0) n++;
+      clubDigits = clubText.substring(0, n);
+      clubLetters = clubText.substring(n);
+    }
+
+    var numberW = dc.getTextDimensions(distance, numberFont)[0];
+    var unitSize = dc.getTextDimensions(unit, unitFont);
+    var digitsW = clubDigits.length > 0 ? dc.getTextDimensions(clubDigits, numberFont)[0] : 0;
+    var lettersW = clubLetters.length > 0 ? dc.getTextDimensions(clubLetters, clubFont)[0] : 0;
+    var gap = w * 0.06;
+    var left = (w - (numberW + unitSize[0] + gap + digitsW + lettersW)) / 2;
+    var clubLeft = left + numberW + unitSize[0] + gap;
+
+    dc.setColor(windOn ? WIND_BLUE : COLOR_WHITE, -1);
+    dc.drawTextV(left, y, numberFont, distance, TEXT_LEFT);
+    this.numberBox = [left - w * 0.03, y - cap * 0.75, left + numberW + unitSize[0] + w * 0.03, y + cap * 0.75];
+    dc.drawTextV(left + numberW, baselineY(numberFont, y), unitFont, unit, TEXT_LEFT);
+    dc.setColor(COLOR_WHITE, -1);
+    if (digitsW > 0) dc.drawTextV(clubLeft, y, numberFont, clubDigits, TEXT_LEFT);
+    if (lettersW > 0) {
+      var lettersY = digitsW > 0 ? baselineY(numberFont, y) - baselineY(clubFont, 0) : y;
+      dc.drawTextV(clubLeft + digitsW, lettersY, clubFont, clubLetters, TEXT_LEFT);
+    }
+  };
+
+  function baselineY(f, y) { return y - f.px / 2.0 + f.ascent; }
+
+  NumbersFace.prototype.shortClub = function (club) {
+    if (club == null) return "-";
+    if (club === "Driver") return "Dr";
+    return String(club);
+  };
+
+  /* Returns the pill's label, for the readout. */
+  NumbersFace.prototype.drawAimButton = function (dc, w, h) {
+    var session = this.session;
+    var canAim = this.aimable != null && this.aimable();
+    var canLock = session.scene != null && session.scene.canLock();
+    var busy = session.lockPending();
+    var label = canAim ? "AIM" : (busy ? "..." : (session.lockedShot() ? "LOCKED" : "LOCK"));
+    var live = canAim || canLock || session.lockedShot();
+
+    var left = w * 0.3, top = h * 0.625, bw = w * 0.4, bh = h * 0.165, r = bh / 2;
+    var edge = w >= 300 ? 3 : 2;
+    dc.setColor(NUMBERS_PILL_EDGE, NUMBERS_PILL_EDGE);
+    dc.fillRoundedRectangle(left - edge, top - edge, bw + edge * 2, bh + edge * 2, r + edge);
+    dc.setColor(live ? this.pillColour : COLOR_DK_GRAY, -1);
+    dc.fillRoundedRectangle(left, top, bw, bh, r);
+
+    var ccx = left + r, ccy = top + bh / 2, ring = bh * 0.36, line = w >= 300 ? 2 : 1;
+    dc.setColor(NUMBERS_INK, -1);
+    dc.setPenWidth(line);
+    for (var q = 0; q < 4; q++) dc.drawArc(ccx, ccy, ring, q * 90 + 6, q * 90 + 84);
+    var stub = bh * 0.06;
+    dc.drawLine(ccx, top - bh * 0.08, ccx, ccy - stub);
+    dc.drawLine(ccx, ccy + stub, ccx, top + bh * 1.08);
+    dc.drawLine(left, ccy, ccx - stub, ccy);
+    dc.drawLine(ccx + stub, ccy, ccx + bh * 0.58, ccy);
+    dc.fillCircle(ccx, ccy, w >= 300 ? 3 : 2);
+    dc.setPenWidth(1);
+
+    var textLeft = ccx + bh * 0.62, textRight = left + bw - r * 0.55;
+    var labelFont = this.font(dc, bh * 0.5, label, textRight - textLeft, [F_LARGE, F_MEDIUM, F_SMALL, F_TINY]);
+    dc.setColor(COLOR_BLACK, -1);
+    dc.drawTextV((textLeft + textRight) / 2, ccy, labelFont, label, TEXT_CENTER);
+    return label;
+  };
+
+  NumbersFace.prototype.drawWind = function (dc, effect, x, ay, dial, w) {
+    var r = dial * 1.05, tipR = dial * 1.3, big = dial > w * 0.15;
+    if (effect.level > 0) {
+      var a = effect.relRad, sinA = Math.sin(a), cosA = Math.cos(a);
+      var tipX = x + sinA * tipR, tipY = ay - cosA * tipR;
+      var tailX = x - sinA * r, tailY = ay + cosA * r;
+      var headBackX = x + sinA * dial * 0.82, headBackY = ay - cosA * dial * 0.82;
+      var side = dial * 0.32;
+      dc.setColor(WIND_BLUE, WIND_BLUE);
+      dc.setPenWidth(big ? 9 : (w >= 300 ? 4 : 3));
+      dc.drawLine(tailX, tailY, headBackX, headBackY);
+      dc.setPenWidth(1);
+      dc.fillPolygon([[tipX, tipY], [headBackX + cosA * side, headBackY + sinA * side], [headBackX - cosA * side, headBackY - sinA * side]]);
+    }
+    this.drawWindHub(dc, effect, x, ay, dial * 0.66, big);
+  };
+
+  NumbersFace.prototype.drawWindHub = function (dc, effect, x, ay, hub, big) {
+    var yards = this.session.yards();
+    dc.setColor(0x1A1A1A, 0x1A1A1A);
+    dc.fillCircle(x, ay, hub);
+    dc.setColor(WIND_BLUE, -1);
+    dc.setPenWidth(big ? 3 : 1);
+    dc.drawCircle(x, ay, hub);
+    dc.setPenWidth(1);
+    var digits = String(Distance.value(Math.abs(effect.alongM), yards)), unit = Distance.suffix(yards);
+    var numFont = this.font(dc, hub * 1.05, "12", hub * 1.5, big ? [F_NUMBER_HOT, F_NUMBER_MEDIUM, F_LARGE] : [F_MEDIUM, F_SMALL, F_TINY, F_XTINY]);
+    var unitFont = this.font(dc, hub * 0.32, "y", hub, big ? [F_SMALL, F_TINY] : [F_XTINY]);
+    var dw = dc.getTextDimensions(digits, numFont)[0], uw = dc.getTextDimensions(unit, unitFont)[0];
+    var left = x - (dw + uw) / 2.0;
+    dc.setColor(COLOR_WHITE, -1);
+    dc.drawTextV(left, ay, numFont, digits, TEXT_LEFT);
+    dc.setColor(COLOR_LT_GRAY, -1);
+    dc.drawTextV(left + dw, baselineY(numFont, ay) - baselineY(unitFont, 0), unitFont, unit, TEXT_LEFT);
+  };
+
+  NumbersFace.prototype.drawWindFromRim = function (dc, effect, w, h) {
+    var hubR = h * 0.078 * 0.66;
+    var phi = effect.level > 0 ? effect.relRad + Math.PI : degToRad(120);
+    var hub = this.edgePoint(phi, hubR + 2, w, h), hx = hub[0], hy = hub[1];
+    if (effect.level > 0) {
+      var dx = w / 2.0 - hx, dy = h / 2.0 - hy, d = Math.sqrt(dx * dx + dy * dy);
+      var ux = d > 0 ? dx / d : 0.0, uy = d > 0 ? dy / d : -1.0;
+      var tip = hubR + this.windTipLength(w, hubR);
+      var spread = degToRad(40), c = Math.cos(spread), sn = Math.sin(spread);
+      var lx = ux * c - uy * sn, ly = ux * sn + uy * c, rx = ux * c + uy * sn, ry = -ux * sn + uy * c;
+      dc.setColor(WIND_BLUE, WIND_BLUE);
+      dc.fillPolygon([[hx + ux * tip, hy + uy * tip], [hx + lx * hubR, hy + ly * hubR], [hx + rx * hubR, hy + ry * hubR]]);
+    }
+    this.drawWindHub(dc, effect, hx, hy, hubR, false);
+    this.windHit = [hx, hy, hubR * 1.8];
+  };
+
+  NumbersFace.prototype.windTipLength = function (w, hubR) {
+    if (w >= 390) return hubR * 0.75;
+    if (w >= 260) return hubR * 0.65;
+    return hubR * 0.55;
+  };
+
+  NumbersFace.prototype.edgePoint = function (phi, inset, w, h) {
+    var cx = w / 2.0, cy = h / 2.0, sx = Math.sin(phi), sy = -Math.cos(phi), reach;
+    if (this.device.shape === "rectangle") {
+      var ax = Math.abs(sx), ay = Math.abs(sy);
+      var tx = ax > 0.001 ? (cx - inset) / ax : 99999.0, ty = ay > 0.001 ? (cy - inset) / ay : 99999.0;
+      reach = tx < ty ? tx : ty;
+    } else {
+      reach = (cx < cy ? cx : cy) - inset;
+    }
+    return [cx + sx * reach, cy + sy * reach];
+  };
+
+  NumbersFace.prototype.drawWindZoom = function (dc, effect, w, h) {
+    dc.setColor(COLOR_BLACK, COLOR_BLACK);
+    dc.clear();
+    var dial = h * 0.25;
+    this.drawWind(dc, effect, idiv(w, 2), h * 0.46, dial, w);
+    this.windHit = [idiv(w, 2), h * 0.46, dial * 1.4];
+    var kmh = effect.kmh;
+    var speed = this.session.yards() ? toNumber(kmh / 1.609344 + 0.5) + " mph" : toNumber(kmh + 0.5) + " km/h";
+    dc.setColor(COLOR_LT_GRAY, -1);
+    dc.drawTextV(idiv(w, 2), h * 0.88, this.font(dc, h * 0.045, speed, w * 0.5, [F_SMALL, F_TINY]), speed, TEXT_CENTER);
+  };
+
+  /* "zoom" (anywhere, while the big compass is open), "wind", "number", or null. */
+  NumbersFace.prototype.hit = function (x, y) {
+    if (this.windZoom) return "zoom";
+    if (this.windHit != null) {
+      var dx = x - this.windHit[0], dy = y - this.windHit[1];
+      if (dx * dx + dy * dy <= this.windHit[2] * this.windHit[2]) return "wind";
+    }
+    var b = this.numberBox;
+    if (b != null && x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]) return "number";
+    return null;
+  };
+
+  /* Vector type sized by cap height where the watch has it; otherwise the largest built-in
+     fallback whose sample fits the box. */
+  NumbersFace.prototype.font = function (dc, capPx, sample, maxWidth, fallbacks) {
+    var h = dc.getHeight();
+    if (this.device.vectorFont) {
+      var size = toNumber(capPx / 0.72), vf = this.vector(size);
+      if (vf != null) {
+        var wide = dc.getTextDimensions(sample, vf)[0];
+        if (wide > maxWidth) vf = this.vector(toNumber(size * maxWidth / wide));
+        if (vf != null) return vf;
+      }
+    }
+    for (var i = 0; i < fallbacks.length; i++) {
+      var f = builtinFont(fallbacks[i], h);
+      if (dc.getTextDimensions(sample, f)[0] <= maxWidth && f.ascent <= capPx * 1.3) return f;
+    }
+    return builtinFont(fallbacks[fallbacks.length - 1], h);
+  };
+  NumbersFace.prototype.fits = function (f, capPx) { return !f.builtin || f.ascent <= capPx * 1.6; };
+  NumbersFace.prototype.vector = function (size) {
+    if (!this.vectorCache[size]) { var f = vectorFont(size); if (f == null) return null; this.vectorCache[size] = f; }
+    return this.vectorCache[size];
+  };
+
+  // ------------------------------------------------------------------ CaddyAppView + CaddyInputDelegate
+
+  /* The playing face as the watch composes it: Numbers first, the map behind MENU (or a swipe
+     left), and the buttons and touches routed the way CaddyInputDelegate routes them. The page
+     talks to this exactly as it talks to a MapFace; the map underneath is the MapFace above,
+     untouched.
+
+     The extra session seam: stepHole(delta) for NEXT_HOLE / PREVIOUS_HOLE, lock() for LOCK,
+     toggleWindApplied(), requestUpdate() for the double-tap timer, and report(text) for what
+     the watch would send. */
+  var DOUBLE_TAP_MS = 320, HOLD_MS = 500, SWIPE_FRACTION = 0.18;
+
+  function CaddyAppView(session, device, treeBitmap) {
+    var self = this;
+    this.session = session;
+    this.device = device;
+    this.mapView = new MapFace(session, device, treeBitmap);
+    this.numbersView = new NumbersFace(session, device, function () { return self.canEnterAimMode(); });
+    this.showingMap = false;
+    this.press = null;
+    this.pendingRegion = null; this.tapTimer = null;
+  }
+  Object.defineProperty(CaddyAppView.prototype, "aiming", { get: function () { return this.showingMap && this.mapView.aiming; } });
+  Object.defineProperty(CaddyAppView.prototype, "playsMode", { get: function () { return this.showingMap && this.mapView.playsMode; } });
+  Object.defineProperty(CaddyAppView.prototype, "trace", { get: function () { return this.showingMap ? this.mapView.trace : this.numbersView.trace; } });
+
+  CaddyAppView.prototype.onUpdate = function (ctx) {
+    var d = this.device;
+    if (this.showingMap) { this.mapView.onUpdate(ctx); return; }
+    this.numbersView.onUpdate(new Dc(ctx, d.width, d.height, this.mapView.fonts, d.patternFill));
+  };
+
+  /* GarminMapView.canEnterAimMode. */
+  CaddyAppView.prototype.canEnterAimMode = function () {
+    return this.mapView.canAimNow() && (this.session.playState.target != null || this.session.aimTarget() != null);
+  };
+  CaddyAppView.prototype.showMap = function () { if (!this.showingMap) this.mapView.camera = null; this.showingMap = true; };
+  CaddyAppView.prototype.showNumbers = function () { this.showingMap = false; };
+
+  /* The page's hooks, passed to the map; a new hole on the watch keeps whichever screen is up. */
+  CaddyAppView.prototype.onFix = function () { this.mapView.onFix(); };
+  CaddyAppView.prototype.onEngineReady = function () { this.mapView.onEngineReady(); };
+  CaddyAppView.prototype.onHole = function () { this.mapView.onHole(); this.numbersView.windZoom = false; this.cancelPendingTap(); };
+  CaddyAppView.prototype.currentBubble = function () { return this.mapView.currentBubble(); };
+  CaddyAppView.prototype.currentTarget = function () { return this.mapView.currentTarget(); };
+  CaddyAppView.prototype.onPanTick = function (now) { return this.showingMap ? this.mapView.onPanTick(now) : false; };
+
+  // ---- buttons (CaddyInputDelegate.onSelect / onBack / onMenu / onPreviousPage / onNextPage)
+
+  CaddyAppView.prototype.numbersShowing = function () { return !this.showingMap && this.session.scene != null && this.session.scene.hasRound(); };
+  CaddyAppView.prototype.select = function () {
+    if (this.numbersShowing() && this.numbersView.windZoom) { this.closeWindZoom(); return; }
+    if (this.session.scene == null || !this.session.scene.hasRound()) return;
+    if (this.showingMap) {
+      if (this.mapView.aiming) this.mapView.confirmAim(); else this.mapView.enterAimMode();
+    } else if (this.canEnterAimMode()) {
+      this.showMap();
+      this.mapView.enterAimMode();
+    } else if (this.session.scene.canLock()) {
+      this.session.lock();
+    }
+  };
+  CaddyAppView.prototype.back = function () {
+    if (this.numbersShowing() && this.numbersView.windZoom) { this.closeWindZoom(); return; }
+    if (this.showingMap && this.mapView.aiming) this.mapView.cancelAim();
+    else if (this.showingMap) this.showNumbers();
+  };
+  CaddyAppView.prototype.menu = function () {
+    if (this.session.scene == null || !this.session.scene.hasRound()) return;
+    if (this.showingMap) { if (this.mapView.aiming) this.mapView.cancelAim(); this.showNumbers(); }
+    else this.showMap();
+  };
+  /* UP is onPreviousPage: a nudge up the glass while aiming, otherwise NEXT_HOLE. */
+  CaddyAppView.prototype.up = function () {
+    if (this.showingMap && this.mapView.aiming) this.mapView.nudge(0, -NUDGE_STEP_IMAGE_PX);
+    else this.session.stepHole(1);
+  };
+  CaddyAppView.prototype.down = function () {
+    if (this.showingMap && this.mapView.aiming) this.mapView.nudge(0, NUDGE_STEP_IMAGE_PX);
+    else this.session.stepHole(-1);
+  };
+  CaddyAppView.prototype.togglePlays = function () { if (this.showingMap) this.mapView.togglePlays(); };
+
+  // ---- touch
+
+  /* On the map a finger aims, as before. On the numbers: a swipe left opens the map; a tap on
+     the compass opens it big (a tap anywhere closes it); a double-tap or a long press on the
+     compass or the big number folds the wind into the number; any other tap is SELECT. */
+  CaddyAppView.prototype.pointerDown = function (x, y, now) {
+    if (this.showingMap) { this.mapView.pointerDown(x, y, now); return; }
+    this.press = { x: x, y: y, at: now != null ? now : Date.now(), lastX: x, lastY: y };
+  };
+  CaddyAppView.prototype.pointerMove = function (x, y, now) {
+    if (this.showingMap) { this.mapView.pointerMove(x, y, now); return; }
+    if (this.press) { this.press.lastX = x; this.press.lastY = y; }
+  };
+  CaddyAppView.prototype.pointerUp = function (x, y, now) {
+    if (this.showingMap) { this.mapView.pointerUp(x, y, now); return; }
+    var press = this.press;
+    this.press = null;
+    if (!press || !this.device.touch || !this.numbersShowing()) return;
+    var dx = press.lastX - press.x, dy = press.lastY - press.y;
+    if (-dx > this.device.width * SWIPE_FRACTION && Math.abs(dx) > Math.abs(dy)) { this.cancelPendingTap(); this.showMap(); return; }
+    var region = this.numbersView.hit(press.x, press.y);
+    if ((now != null ? now : Date.now()) - press.at >= HOLD_MS) {
+      if (region != null) { this.cancelPendingTap(); this.session.toggleWindApplied(); }
+      return;
+    }
+    if (region == null) { this.select(); return; }
+    if (this.pendingRegion === region) { this.cancelPendingTap(); this.session.toggleWindApplied(); return; }
+    this.cancelPendingTap();
+    this.pendingRegion = region;
+    var self = this;
+    this.tapTimer = setTimeout(function () { self.onSingleTap(); }, DOUBLE_TAP_MS);
+  };
+  CaddyAppView.prototype.onSingleTap = function () {
+    var region = this.pendingRegion;
+    this.pendingRegion = null; this.tapTimer = null;
+    if (region === "wind") this.numbersView.windZoom = true;
+    else if (region === "zoom") this.numbersView.windZoom = false;
+    else if (region === "number") this.select();
+    this.session.requestUpdate();
+  };
+  CaddyAppView.prototype.cancelPendingTap = function () {
+    if (this.tapTimer != null) clearTimeout(this.tapTimer);
+    this.tapTimer = null; this.pendingRegion = null;
+  };
+  CaddyAppView.prototype.closeWindZoom = function () { this.cancelPendingTap(); this.numbersView.windZoom = false; };
+
   return {
     DEVICES: DEVICES,
     TREE_SIZES: TREE_SIZES,
@@ -940,6 +1432,8 @@
     skeletonDistances: common.skeletonDistances,
     skeletonLine: common.skeletonLine,
     Dc: Dc,
-    MapFace: MapFace
+    MapFace: MapFace,
+    NumbersFace: NumbersFace,
+    CaddyAppView: CaddyAppView
   };
 });
