@@ -3,4 +3,12 @@
          the map, but the plays number is slope only. On: the plays number
          includes the wind too. See source/Conditions/GarminConditions.mc. -->
     <property id="windInPlaysLike" type="boolean">false</property>
+    <!-- The map's blue wind ghost: the Bubble where the wind carries the
+         ball. Off leaves the wind on the numbers face only. -->
+    <property id="windGhost" type="boolean">true</property>
+    <!-- The slope bubble: the map's Bubble and club sized for the plays
+         distance, in orange. The plays button on the map switches it, and
+         the switch is remembered here. Same two settings as the phone's
+         GPS Settings (app/js/gps-settings.js). -->
+    <property id="slopeBubble" type="boolean">false</property>
 </properties>

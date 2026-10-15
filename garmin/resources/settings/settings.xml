@@ -2,4 +2,10 @@
     <setting propertyKey="@Properties.windInPlaysLike" title="@Strings.WindInPlaysLikeTitle">
         <settingConfig type="boolean"/>
     </setting>
+    <setting propertyKey="@Properties.windGhost" title="@Strings.WindGhostTitle">
+        <settingConfig type="boolean"/>
+    </setting>
+    <setting propertyKey="@Properties.slopeBubble" title="@Strings.SlopeBubbleTitle">
+        <settingConfig type="boolean"/>
+    </setting>
 </settings>

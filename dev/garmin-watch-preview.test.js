@@ -303,6 +303,20 @@ test("a whole frame draws, in the watch's order, and a drag moves the target thr
   face.togglePlays();
   face.onUpdate(ctx);
   assert.strictEqual(face.playsMode, true);
+  /* The slope bubble is a setting on the watch, so it survives a hole change. */
+  face.onHole();
+  assert.strictEqual(face.playsMode, true, "plays mode is remembered across holes");
+  face.togglePlays();
+
+  /* Wind ghost off: the blue ghost ring is not drawn; on, it is. */
+  const blue = (calls) => calls.filter((c) => c.name === "stroke" && /^#55aaff$/i.test(String(c.stroke || ""))).length;
+  const withGhost = recordingContext();
+  face.camera = null; face.onUpdate(withGhost.ctx);
+  face.windGhost = false;
+  const noGhost = recordingContext();
+  face.camera = null; face.onUpdate(noGhost.ctx);
+  face.windGhost = true;
+  assert.ok(blue(withGhost.calls) > blue(noGhost.calls), "turning the wind ghost off removes the blue ring");
 
   /* A MIP watch without pattern fills falls back to the solid colours, and one with them
      asks for a texture. */
