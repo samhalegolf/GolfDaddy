@@ -1,12 +1,11 @@
 /* Tool rail: a single tab in the top-right corner that drops down a panel of
    play-time tools. Owns the tab/rail toggle and wires each rail button to its
    tool module's entry point; each tool module wires its own panel/popover
-   internals (bagPanel, scorePanel, windPopover) itself. */
+   internals (bagPanel, scorePanel) itself. Wind is not on the rail: it is
+   the chip in the top bar (wind.js). */
 (function () {
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
-
-  var WIND_LONG_PRESS_MS = 450;
 
   function toggle() {
     var tab = document.getElementById("toolRailTab");
@@ -264,32 +263,5 @@
       if (app.access && !app.access.roundFeatures()) { app.access.prompt("keepScore"); return; }
       if (app.scorecard) app.scorecard.open();
     });
-
-    /* Wind: short tap turns wind on (live wind first — the compass only
-       appears when live can't answer) then cycles the level (1→2→3→off);
-       a long press opens the compass for a manual direction override —
-       same long-press as the legacy rail button. */
-    /* Same split as the pin: the long press is timed off pointerdown, the
-       short tap is the click, which every engine delivers. */
-    var windBtn = document.getElementById("railWind");
-    if (windBtn && app.wind) {
-      var pressTimer = null, longPressed = false;
-      windBtn.addEventListener("pointerdown", function () {
-        longPressed = false;
-        clearTimeout(pressTimer);
-        pressTimer = setTimeout(function () {
-          longPressed = true;
-          app.wind.openPicker();
-        }, WIND_LONG_PRESS_MS);
-      });
-      windBtn.addEventListener("pointerup", function () { clearTimeout(pressTimer); });
-      windBtn.addEventListener("pointercancel", function () { clearTimeout(pressTimer); });
-      windBtn.addEventListener("click", function (e) {
-        e.preventDefault();
-        clearTimeout(pressTimer);
-        if (longPressed) { longPressed = false; return; }
-        app.wind.press();
-      });
-    }
   });
 })();

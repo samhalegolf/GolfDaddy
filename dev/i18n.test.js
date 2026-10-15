@@ -257,21 +257,21 @@ assert.strictEqual(boot({ languages: [], extra: { es: SPANISH } }).GDI18n.locale
     },
     addEventListener() {}
   };
-  const window = boot({ languages: ['en'], document, extra: { es: { 'common.hole': 'Hoyo {n}', 'complete.shotsLogged.one': '{n} golpe registrado', 'complete.shotsLogged.other': '{n} golpes registrados', 'rail.windLevel': 'Viento {n}' } } });
+  const window = boot({ languages: ['en'], document, extra: { es: { 'common.hole': 'Hoyo {n}', 'complete.shotsLogged.one': '{n} golpe registrado', 'complete.shotsLogged.other': '{n} golpes registrados', 'wind.banner': 'VIENTO {n}' } } });
   const { GDI18n } = window;
   const title = node(), shots = node(), button = node(), course = node();
   GDI18n.set(title, 'common.hole', { n: 7 });
   GDI18n.setPlural(shots, 'complete.shotsLogged', 2);
-  GDI18n.setAttr(button, 'aria-label', 'rail.windLevel', { n: 3 });
+  GDI18n.setAttr(button, 'aria-label', 'wind.banner', { n: 3 });
   course.setAttribute('data-i18n', 'loading.course');
   GDI18n.plain(course, 'Akarana Golf Club');
   assert.strictEqual(title.textContent, 'Hole 7');
   assert.strictEqual(shots.textContent, '2 shots logged');
-  assert.strictEqual(button.attrs['aria-label'], 'Wind 3');
+  assert.strictEqual(button.attrs['aria-label'], 'WIND 3');
   GDI18n.setLocale('es');
   assert.strictEqual(title.textContent, 'Hoyo 7');
   assert.strictEqual(shots.textContent, '2 golpes registrados');
-  assert.strictEqual(button.attrs['aria-label'], 'Viento 3');
+  assert.strictEqual(button.attrs['aria-label'], 'VIENTO 3');
   assert.strictEqual(course.textContent, 'Akarana Golf Club', 'plain() text is never re-translated');
   GDI18n.set(title, null);
   assert.strictEqual(title.textContent, '');

@@ -1449,10 +1449,14 @@ async function bootCheck() {
   const backUndo = await page.evaluate(async () => {
     const app = window.ClarityApp;
     const eng = window.GDBubbleEngine;
+    /* Seed a manual wind through the compass - the fallback for when live
+       wind cannot answer; a real first tap goes through the live fetch,
+       which a test cannot wait on - then start the stack clean. */
+    const compass = document.getElementById("windCompass");
+    compass.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 0, clientY: 0 }));
     app.undo.clear();
-    eng.setWind(0, 1);   // seed a wind level directly - a real first press goes through the live-wind fetch, which a test cannot wait on
     const beforeWindPress = eng.windState();
-    app.wind.press();   // level 1 -> 2, pushes an undo entry
+    app.wind.press();   // manual level 1 -> 2, pushes an undo entry
     const afterPress = eng.windState();
     const anyAfterPress = app.undo.any();
 

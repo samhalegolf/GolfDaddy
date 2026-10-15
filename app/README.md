@@ -75,10 +75,11 @@ or writes course data back.
   storage (`clarity:bag:v1`, not the legacy per-account profile bag) and feeds
   the engine through `GDBubbleEngine.setBag` — see the `gdShotActiveProfile`
   rebind in `dev/generate-bubble-engine-client.js`.
-- `js/wind.js` — the tool-rail wind tool: tap cycles level, long-press opens a
-  compass to set direction. Drives `GDBubbleEngine.setWind`/`clearWind`, which
-  only ever swaps the *display* target the shot card/rings render against —
-  never the dispersion shape.
+- `js/wind.js` — the top-bar wind chip. Live wind (Open-Meteo) is read once
+  and refreshed only when it is old or the player has moved; manual wind (a
+  compass and levels 1–3) is offered only when live cannot answer. Drives
+  `GDBubbleEngine.setWind`/`clearWind`, which only ever moves the wind *ghost*
+  bubble — never the main bubble or its dispersion shape.
 - `js/scorecard.js` — score entry + running total. Par is read from the
   existing `/api/scorecard-store` cache (fail-open, same pattern as
   course-package.js); score state is its own storage

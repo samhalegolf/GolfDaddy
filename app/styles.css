@@ -352,6 +352,10 @@ body.ball-dragging #surfaceStage { transition: none !important; }
 .cardPlaysValue { font-size: 12px; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
 .cardPlays.playsOver .cardPlaysValue { color: #ff9d6b; }
 .cardPlays.playsUnder .cardPlaysValue { color: #7fd8ff; }
+/* PLAYS is a switch for the slope bubble: lit orange while it is on. */
+.cardPlays { cursor: pointer; border-radius: 999px; padding: 2px 6px; margin: -2px -6px; }
+.cardPlays.playsActive { box-shadow: inset 0 0 0 1px #ffaa00; }
+.cardPlays.playsActive .cardPlaysLabel { color: #ffaa00; }
 .cardSeam { flex: 0 0 auto; height: 1px; background: rgba(255, 255, 255, .16); }
 
 /* The club band, and the green's near edge. min-height is 38 rather than the
@@ -526,17 +530,12 @@ body.map-update-in-progress #surfaceStage { opacity: .72; transition: opacity 12
 .railIcon { width: 24px; height: 24px; display: block; color: #f2f7f2; }
 .railIcon svg { width: 100%; height: 100%; }
 
-/* Wind popover: a small compass anchored under the rail. */
+/* Popovers: the manual wind compass (under the wind chip) and Pin Lock. */
 .popover { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 112px); right: 64px; z-index: 618; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; border-radius: 14px; background: rgba(3, 8, 6, .9); box-shadow: 0 18px 38px rgba(0, 0, 0, .46); }
 .popover.hiddenState { display: none; }
 .windCompass { position: relative; width: 132px; height: 132px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .28); background: radial-gradient(circle, rgba(255, 255, 255, .06), transparent 70%); }
 .windCompassLabel { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; opacity: .7; text-align: center; padding: 0 20px; pointer-events: none; }
 .windPopoverActions { display: flex; gap: 12px; }
-/* Live-wind status dot. The icon shows a level whether the wind was measured
-   or dialled in by hand, and those are very different things to be playing to
-   — the dot is what tells them apart. Blue, matching the wind line. */
-#railWind { position: relative; }
-#railWind.live::after { content: ""; position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: #66dcff; box-shadow: 0 0 8px rgba(102, 220, 255, .9); }
 
 .windAutoStatus { font-size: 11px; opacity: .65; text-align: center; }
 .windAutoStatus.hiddenState { display: none; }
@@ -665,6 +664,11 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
 #pinDistance { position: absolute; z-index: 552; transform: translate(8px, -8px); font-size: 11px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .6); pointer-events: none; }
 #pinDistance.hiddenState { display: none; }
 #bubbleSvg .windLine { fill: none; stroke: #66dcff; stroke-opacity: .82; stroke-width: 3; stroke-dasharray: 6 8; stroke-linecap: round; }
+/* The wind ghost (Garmin's WIND_BLUE ghost): a thin edge and a breath of fill. */
+#bubbleSvg .windGhost { fill: #66dcff; fill-opacity: .07; stroke: #66dcff; stroke-opacity: .9; stroke-width: 1.6; stroke-linejoin: round; }
+/* The slope bubble wears the watch's plays orange (SLOPE_ORANGE). */
+#bubbleSvg .playsBubble .bubbleEdge { stroke: #ffaa00; }
+#bubbleClub.playsChip { color: #ffaa00; }
 
 /* Ghost flag that follows the pointer while dragging the Pin rail icon
    straight onto the map/surface — the second placement method, alongside
@@ -799,14 +803,17 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
 /* The wind tell — a strip in the top bar's column, in the drift line's cyan
    so banner, rail dot and on-map drift read as one system. The arrow is
    rotated by the painter to the on-screen blow direction. */
-#windBanner { display: flex; align-items: center; gap: 7px; padding: 4px 12px; font-size: 11px; font-weight: 800; letter-spacing: .06em; background: rgba(102, 220, 255, .13); color: #9fe6ff; }
-#windBanner.hiddenState { display: none; }
-#windBanner.checkingWind { opacity: .7; }
-#windBannerArrow { display: inline-flex; width: 14px; height: 14px; flex: 0 0 auto; transform-origin: 50% 50%; }
-#windBannerArrow svg { width: 100%; height: 100%; }
-#windBannerArrow.hiddenState { display: none; }
-#windBannerLive { font-size: 9px; padding: 1px 6px; border-radius: 999px; background: rgba(102, 220, 255, .22); color: #d9f6ff; }
-#windBannerLive.hiddenState { display: none; }
+/* The wind chip: top right of the nav row, up all round. Blue like the ghost
+   and the drift line; dimmer when no wind is set yet. */
+#globalNav #windChip { margin-left: auto; display: flex; align-items: center; gap: 6px; padding: 8px 12px; font-size: 12px; font-weight: 800; letter-spacing: .06em; font-variant-numeric: tabular-nums; background: rgba(7, 16, 11, .55); color: #9fe6ff; }
+#globalNav #windChip.hiddenState { display: none; }
+#windChip.windUnset { color: rgba(242, 247, 242, .72); }
+#windChip.checkingWind { opacity: .7; }
+#windChipArrow, #windChipIcon { display: inline-flex; width: 15px; height: 15px; flex: 0 0 auto; transform-origin: 50% 50%; }
+#windChipArrow svg, #windChipIcon svg { width: 100%; height: 100%; }
+#windChipArrow.hiddenState, #windChipIcon.hiddenState { display: none; }
+#windChipLive { font-size: 9px; padding: 1px 6px; border-radius: 999px; background: rgba(102, 220, 255, .22); color: #d9f6ff; }
+#windChipLive.hiddenState { display: none; }
 
 /* ── Play ─────────────────────────────────────────────────────────────────
    The one way into Live, and only present when a trusted fix says you are at

@@ -23,11 +23,6 @@
      adoption would immediately schedule another fetch of what it just took. */
   var lastUpdateCheckHole = null;
 
-  /* The start point of the shot the engine was last handed, as a value key.
-     shotChanged compares against it to tell "the shot moved on" (reset wind)
-     from "the same shot's aim is being dragged" (leave wind alone). */
-  var lastShotStartKey = null;
-
   /* Wired once, on the first Marshal. The listener outlives any single round
      and asks the Marshal fresh each time, so there is nothing to tear down. */
   var wiredSleepUnlock = false;
@@ -160,6 +155,10 @@
         holeEntered: function (hole, rec) {
           if (app.pin) app.pin.startHole(hole);
           if (app.undo) app.undo.clear();
+          /* The first hole is where live wind is first read - from the
+             player, or the tee before there is a fix - so it is up before the
+             first shot. Later holes only refresh it when it is due. */
+          if (app.wind && app.wind.refreshIfStale) app.wind.refreshIfStale(rec && rec.tee);
           /* Every way of changing hole lands here - the arrows, the hole
              picker, "Play hole N", the catch-up banner, resume - so this is
              where the freshness check belongs. It used to hang off the two
@@ -206,15 +205,10 @@
         },
         shotChanged: function (start, target) {
           if (window.GDBubbleEngine) window.GDBubbleEngine.setShot(start || null, target || null);
-          /* Wind is per shot. A different start point — or no shot at all —
-             is the next shot, and it starts calm (wind.js reset). Dragging
-             the aim only moves the TARGET, so a drag never lands here; a new
-             lock, a new placement, an unlock and a hole change all do. */
-          var key = start ? Number(start.lat).toFixed(7) + "," + Number(start.lng).toFixed(7) : null;
-          if (key !== lastShotStartKey) {
-            lastShotStartKey = key;
-            if (app.wind && app.wind.reset) app.wind.reset();
-          }
+          /* Wind carries across shots: it is one live reading for the round,
+             refreshed only when it is old or the player has moved well away
+             from where it was taken - a no-op on almost every call. */
+          if (start && app.wind && app.wind.refreshIfStale) app.wind.refreshIfStale(start);
         },
         /* GPS Play's only analytical output. Wrapped because nothing about
            Course Data may interrupt a round. */
