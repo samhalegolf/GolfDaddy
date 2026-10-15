@@ -27,13 +27,10 @@
   };
   var VALID_COURSE_STATES=Object.keys(COURSE_STATES).reduce(function(out,key){out[COURSE_STATES[key]]=true;return out;},{});
   var VALID_HOLE_STATES=Object.keys(HOLE_STATES).reduce(function(out,key){out[HOLE_STATES[key]]=true;return out;},{});
-  var PREPARING_TIMEOUT_MS=7000;
   var preparingSince={};
   var debugLogMemory=[];
   var lastDebugEventSig="";
   var lastDebugEventAt=0;
-  var lastSyncStatusByKey={};
-  var lastPipelineIdentityCorrectionByKey={};
 
   function now(){return new Date().toISOString();}
   function safe(fn,fb){try{return fn();}catch(e){return fb;}}
@@ -728,12 +725,6 @@
     var name=state&&state.courseName||courseNameFrom(seed,id);
     return Object.assign({}, seed&&typeof seed==="object"?seed:{}, {courseId:id, courseName:name, name:name});
   }
-  function snapshotCourseId(snapshot,course,state){
-    return courseIdFrom(snapshot||course||state||"course");
-  }
-  function pipelineResolutionKey(snapshot,hole){
-    return snapshotCourseId(snapshot,null,null)+":h"+String(normalizeHoleNumber(hole));
-  }
   function activeCourseFromGlobals(){
     return safe(function(){return window.gdActiveCourse||window.currentCourse||currentCourse||null;},null);
   }
@@ -841,172 +832,11 @@
   }
   function activeHoleFromApp(fallback){
     return normalizeHoleNumber(safe(function(){
-      return window.currentPlayingHole||window.selectedHole||currentPlayingHole||selectedHole||
+      return window.currentPlayingHole||currentPlayingHole||
         sessionStorage.getItem("gd_active_playing_hole")||
         sessionStorage.getItem("gd_mapper_active_hole")||
         fallback||1;
     },fallback||1));
-  }
-  function ensureActiveHolePlayData(holeNumber,opts){
-    opts=opts||{};
-    var course=activeCourseFromApp();
-    holeNumber=normalizeHoleNumber(holeNumber||activeHoleFromApp());
-    var state=getHolePlayState(course||"course",holeNumber);
-    recordDebugEvent("gps-play-requested-hole",{courseId:state.courseId,courseName:state.courseName,holeNumber:holeNumber,status:state.status,source:opts.source||"gps-play"});
-    if(state.status===HOLE_STATES.unknown||state.status===HOLE_STATES.mapping){
-      var mapped=mappedHoleFromCourseLibrary(course,holeNumber);
-      if(mapped)state=ingestMappedHole(course||"course",holeNumber,mapped,opts.source||"gps-play-read");
-      else prepareCourseForPlay(course||"course");
-    }
-    return Promise.resolve(getHolePlayState(course||"course",holeNumber));
-  }
-  function getActiveHolePlayState(holeNumber){
-    var course=activeCourseFromApp();
-    holeNumber=normalizeHoleNumber(holeNumber||activeHoleFromApp());
-    return getHolePlayState(course||"course",holeNumber);
-  }
-  function getActiveHoleMappedData(holeNumber){
-    var state=getActiveHolePlayState(holeNumber);
-    if(state.status===HOLE_STATES.unknown||state.status===HOLE_STATES.mapping){
-      var course=activeCourseFromApp();
-      var mapped=mappedHoleFromCourseLibrary(course,normalizeHoleNumber(holeNumber||activeHoleFromApp()));
-      if(mapped)state=ingestMappedHole(course||"course",normalizeHoleNumber(holeNumber||activeHoleFromApp()),mapped,"gps-play-read");
-    }
-    return holeRecordToMappedData(state);
-  }
-  function gpsActive(){
-    return !!(document.body&&(
-      document.body.classList.contains("shell-gps")||
-      document.body.classList.contains("gdGpsActive")||
-      document.body.classList.contains("gps-active")
-    ));
-  }
-  function interactiveGreenFallbackActive(){
-    return !!(window.__gdCoursePlayInteractiveFallbackActive||(document.body&&document.body.classList.contains("gdGpsInteractiveGreenFallbackActive")));
-  }
-  function coursePlayResolverActive(hole){
-    var active=window.__gdCoursePlayResolverActive;
-    if(!active)return false;
-    var activeHole=normalizeHoleNumber(active.hole||hole);
-    return activeHole===normalizeHoleNumber(hole);
-  }
-  function courseResolutionOwnerActive(hole){
-    return coursePlayResolverActive(hole)||interactiveGreenFallbackActive();
-  }
-  function pipelineStatusElement(){
-    var el=document.getElementById("gdCoursePlayPipelineStatus");
-    if(!el&&document.body){
-      el=document.createElement("div");
-      el.id="gdCoursePlayPipelineStatus";
-      el.setAttribute("role","status");
-      el.setAttribute("aria-live","polite");
-      document.body.appendChild(el);
-    }
-    return el;
-  }
-  function preparingStatus(status){
-    return status===HOLE_STATES.unknown||status===HOLE_STATES.mapping||status===HOLE_STATES.play_data_preparing;
-  }
-  function unavailableStatus(status){
-    return status===HOLE_STATES.play_data_unavailable||status===HOLE_STATES.needs_remap;
-  }
-  function syncGpsPipelineState(reason,holeNumber){
-    if(!document.body)return null;
-    var hole=normalizeHoleNumber(holeNumber||activeHoleFromApp());
-    var course=activeCourseFromApp();
-    var initialState=getActiveHolePlayState(hole);
-    var snapshot=mappingCourseSnapshot(course,initialState);
-    var snapshotId=snapshotCourseId(snapshot,course,initialState);
-    var initialId=initialState&&initialState.courseId||"";
-    var identityCorrected=!!(initialId&&snapshotId&&initialId!==snapshotId);
-    var state=identityCorrected?getHolePlayState(snapshot,hole):initialState;
-    var status=String(state&&state.status||HOLE_STATES.unknown);
-    var fallbackActive=interactiveGreenFallbackActive();
-    if(preparingStatus(status)){
-      var mapped=mappedHoleFromCourseLibrary(snapshot||course,hole);
-      if(mapped&&(Array.isArray(mapped.route)&&mapped.route.length>=2||mapped.green&&mapped.tee)){
-        state=ingestMappedHole(snapshot||course||"course",hole,mapped,reason||"pipeline-sync");
-        status=String(state&&state.status||HOLE_STATES.unknown);
-        fallbackActive=false;
-      }
-    }
-    var key=pipelineResolutionKey(snapshot,hole);
-    if(identityCorrected&&lastPipelineIdentityCorrectionByKey[key]!==initialId+"->"+snapshotId){
-      lastPipelineIdentityCorrectionByKey[key]=initialId+"->"+snapshotId;
-      recordDebugEvent("gps-play-pipeline-course-identity-corrected",{staleCourseId:initialId,correctedCourseId:snapshotId,courseName:snapshot&&snapshot.courseName||courseNameFrom(snapshot||course,"Course"),holeNumber:hole,source:reason||"sync"});
-    }
-    var syncSig=key+"|"+status+"|"+String(reason||"sync");
-    if(gpsActive()&&reason!=="interval"&&lastSyncStatusByKey[key]!==syncSig){
-      recordDebugEvent("gps-play-requested-hole",{courseId:snapshotId,courseName:snapshot&&snapshot.courseName||state&&state.courseName||courseNameFrom(snapshot||course,"Course"),holeNumber:hole,status:status,source:reason||"sync"});
-    }
-    if(preparingStatus(status)){
-      if(!preparingSince[key]){
-        preparingSince[key]=Date.now();
-      }
-      if(courseResolutionOwnerActive(hole)){
-        preparingSince[key]=Date.now();
-      }else if(Date.now()-preparingSince[key]>=PREPARING_TIMEOUT_MS){
-        preparingSince[key]=Date.now();
-        recordDebugEvent("gps-play-pipeline-waiting-for-mapping-controller",{
-          courseId:snapshotId,
-          courseName:snapshot&&snapshot.courseName||state&&state.courseName||courseNameFrom(snapshot||course,"Course"),
-          holeNumber:hole,
-          status:status,
-          reason:"mapping controller owns fallback"
-        });
-      }
-    }else{
-      delete preparingSince[key];
-    }
-    if(fallbackActive)delete preparingSince[key];
-    var preparing=gpsActive()&&!fallbackActive&&preparingStatus(status);
-    var unavailable=gpsActive()&&!fallbackActive&&unavailableStatus(status);
-    document.body.classList.toggle("gdCoursePlayPipelinePreparing",!!preparing);
-    document.body.classList.toggle("gdCoursePlayPipelineUnavailable",!!unavailable);
-    if(preparing)document.body.classList.add("gdGpsFramePreparing");
-    else if(fallbackActive)document.body.classList.remove("gdGpsFramePreparing");
-    document.body.dataset.gdCoursePlayPipelineStatus=fallbackActive?"interactive_green_fallback":status;
-    document.body.dataset.gdCoursePlayPipelineHole=String(hole);
-    document.body.dataset.gdCoursePlayPipelineReason=String(reason||"sync");
-    var el=pipelineStatusElement();
-    if(el)el.textContent=preparing?"Preparing Hole "+hole+"...":unavailable?"Hole unavailable - remap this hole":"";
-    if(gpsActive()){
-      var transitionKey=key+"|"+status+"|"+String(!!preparing)+"|"+String(!!unavailable);
-      if(lastSyncStatusByKey[key]!==transitionKey){
-        if(preparing)recordDebugEvent("gps-play-showed-loading",{courseId:snapshotId,courseName:snapshot&&snapshot.courseName||state&&state.courseName||courseNameFrom(snapshot||course,"Course"),holeNumber:hole,status:status,reason:reason||"sync"});
-        else if(unavailable)recordDebugEvent("gps-play-fell-to-unavailable",{courseId:snapshotId,courseName:snapshot&&snapshot.courseName||state&&state.courseName||courseNameFrom(snapshot||course,"Course"),holeNumber:hole,status:status,reason:state&&state.unavailableReason||reason||"unavailable"});
-        else if(status===HOLE_STATES.play_data_ready){
-          var frame=getCoursePlayFrameIndex(snapshot||state&&state.courseId||course||"course",hole);
-          var manifestKey=frame&&frame.manifestKey||state&&state.presentation&&state.presentation.capturedManifestKey||null;
-          recordDebugEvent(frame&&capturedManifestPresent(manifestKey)?"gps-play-loaded-existing-frame":"gps-play-data-ready-no-manifest",{courseId:snapshotId,courseName:snapshot&&snapshot.courseName||state&&state.courseName||courseNameFrom(snapshot||course,"Course"),holeNumber:hole,status:status,frameIndexKey:frame&&frame.frameIndexKey||null,manifestKey:manifestKey,manifestPresent:capturedManifestPresent(manifestKey),reason:reason||"sync"});
-        }
-        lastSyncStatusByKey[key]=transitionKey;
-      }
-    }
-    return state;
-  }
-  function installGpsPlayAdapter(){
-    if(window.__gdCoursePlayPipelineGpsAdapterLocked)return;
-    var wrappedAny=false;
-    function wrap(name){
-      var original=window[name];
-      if(typeof original!=="function"||original.__gdCoursePlayPipelineWrapped)return;
-      var wrapped=function(holeOrDelta,opts){
-        var hole=normalizeHoleNumber(name==="gdPlayPreviousHole"||name==="gdPlayNextHole"?activeHoleFromApp():holeOrDelta||activeHoleFromApp());
-        if(name==="gdPlayNextHole")hole=normalizeHoleNumber(activeHoleFromApp()+1);
-        if(name==="gdPlayPreviousHole")hole=Math.max(1,normalizeHoleNumber(activeHoleFromApp()-1));
-        ensureActiveHolePlayData(hole,{source:name});
-        syncGpsPipelineState(name,hole);
-        return original.apply(this,arguments);
-      };
-      wrapped.__gdCoursePlayPipelineWrapped=true;
-      window[name]=wrapped;
-      wrappedAny=true;
-    }
-    wrap("gdPlayHoleFromScorecard");
-    wrap("gdPlayNextHole");
-    wrap("gdPlayPreviousHole");
-    if(wrappedAny)window.__gdCoursePlayPipelineGpsAdapterLocked=true;
   }
   function installCourseLibraryAdapter(){
     if(window.__gdCoursePlayPipelineCourseLibraryAdapter)return;
@@ -1092,7 +922,6 @@
     syncQueueStorageKey:SYNC_QUEUE_KEY,
     courseStates:COURSE_STATES,
     holeStates:HOLE_STATES,
-    prepareCourseForPlay:prepareCourseForPlay,
     ingestMappedHole:ingestMappedHole,
     ingestMappedCourse:ingestMappedCourse,
     getCoursePlayState:getCoursePlayState,
@@ -1120,31 +949,10 @@
     prepareCourseFromCourseLibrary:prepareCourseFromCourseLibrary,
     installCourseLibraryAdapter:installCourseLibraryAdapter,
     holeRecordToMappedData:holeRecordToMappedData,
-    ensureActiveHolePlayData:ensureActiveHolePlayData,
-    getActiveHolePlayState:getActiveHolePlayState,
-    getActiveHoleMappedData:getActiveHoleMappedData,
-    installGpsPlayAdapter:installGpsPlayAdapter,
-    syncGpsPipelineState:syncGpsPipelineState,
     recordDebugEvent:recordDebugEvent,
     getDebugTimeline:loadDebugLog,
     clearDebugTimeline:clearDebugLog,
     buildDebugSnapshot:buildDebugSnapshot
-  };
-  window.__gdDumpCoursePlayPersistence=function(courseId){
-    var course=courseId||activeCourseFromApp()||"course";
-    return {
-      storageKey:STORE_KEY,
-      frameIndexStorageKey:FRAME_INDEX_KEY,
-      syncQueueStorageKey:SYNC_QUEUE_KEY,
-      course:loadCoursePlayPipeline(course),
-      dbPayload:buildCoursePlayDbPayload(course),
-      frameIndex:getCoursePlayFrameIndex(course),
-      syncQueue:getCoursePlaySyncQueue(),
-      debugSnapshot:buildDebugSnapshot(course)
-    };
-  };
-  window.__gdExportCoursePlayPayload=function(courseId){
-    return exportCoursePlayPayload(courseId||activeCourseFromApp()||"course");
   };
   window.__gdDumpCoursePlayFrameIndex=function(courseId,holeNumber){
     return getCoursePlayFrameIndex(courseId,holeNumber);
@@ -1157,7 +965,4 @@
   };
   setTimeout(installCourseLibraryAdapter,0);
   setTimeout(installCourseLibraryAdapter,800);
-  setTimeout(installGpsPlayAdapter,1200);
-  setTimeout(installGpsPlayAdapter,2600);
-  setTimeout(installGpsPlayAdapter,5200);
 })();

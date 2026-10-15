@@ -409,7 +409,6 @@
     if(opts.render !== false){
       safe(function(){ win.renderBagPanel(); }, null);
       safe(function(){ win.renderProfilePanel(); }, null);
-      safe(function(){ if(typeof win.renderShot === "function") win.renderShot(); }, null);
     }
     if(!opts.silent) toast(L('bagEditor.saved'));
     return clean;

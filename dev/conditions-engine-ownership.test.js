@@ -89,18 +89,20 @@ const html = read("index.html");
 
 // --- GPS Play emits the Shot Snapshot and nothing more ----------------------
 {
+  // GPS Play is its own page (app/); app/js/course-data.js is where a completed
+  // shot becomes a snapshot.
+  const gpsPlayFeed = read("app/js/course-data.js");
   assert(
-    appCore.includes("function gdSubmitCourseDataShotSnapshot"),
-    "GPS Play builds and submits a Shot Snapshot"
+    gpsPlayFeed.includes("lib.buildShotSnapshot("),
+    "GPS Play builds a Shot Snapshot"
   );
   assert(
-    appCore.includes("intake.submitShotSnapshot(snapshot)"),
+    gpsPlayFeed.includes("sink.submitShotSnapshot(snapshot)"),
     "GPS Play hands the snapshot to the single Course Data intake path"
   );
   assert(
-    appCore.includes("gdSubmitCourseDataShotSnapshot(ll,gpsAccuracyM,reason,logged)") &&
-      appCore.includes("gdSubmitCourseDataShotSnapshot(ll,gpsAccuracyM,reason,result)"),
-    "both shot-completion branches emit a snapshot"
+    !appCore.includes("submitShotSnapshot"),
+    "the main app no longer has a play surface of its own to emit snapshots from"
   );
 
   // GPS Play must never run the analysis itself, compare against My Bubble for
@@ -389,32 +391,6 @@ const html = read("index.html");
       `intake must not implement Recommendations Engine responsibility "${token}"`
     );
   });
-}
-
-// --- The in-round aim tools remain, and record what the player chose ---------
-{
-  // The wind picker and slope readout are player aiming aids, not analysis.
-  // They stay; what they were set to is captured on the snapshot instead.
-  assert(appCore.includes("function gdWindToolPressed"), "the wind aim tool is retained");
-  assert(appCore.includes("function gdWindPickDirection"), "the wind direction picker is retained");
-  assert(appCore.includes("function gdRenderShotCardSlope"), "the slope readout is retained");
-
-  assert(
-    appCore.includes("let gdWindSelectionSource=null;"),
-    "GPS Play tracks whether wind came from live evidence or the player"
-  );
-  assert(
-    appCore.includes('gdWindSelectionSource="live"'),
-    "applying live wind records a live provenance"
-  );
-  assert(
-    appCore.includes('gdWindSelectionSource="user"'),
-    "manual wind selection records a user provenance"
-  );
-  assert(
-    appCore.includes('const userSelectedWind=!!gdWindActive&&gdWindSelectionSource==="user";'),
-    "the snapshot distinguishes user-selected wind from live wind"
-  );
 }
 
 console.log("conditions-engine-ownership tests passed");

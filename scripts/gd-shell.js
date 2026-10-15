@@ -6,7 +6,6 @@
   var ROUTE_LABELS={
     home:"shell.home",
     "course-picker":"GPS",
-    gps:"GPS",
     "module:profile":"shell.profile",
     "module:bag":"shell.bag",
     "module:settings":"shell.settings",
@@ -35,8 +34,6 @@
     gdProfileV67:"gdProfileV67",
     bag:"bagPanel",
     bagPanel:"bagPanel",
-    settings:"settingsPanel",
-    settingsPanel:"settingsPanel",
     playerSettings:"playerSettingsPanel",
     playerSettingsPanel:"playerSettingsPanel",
     admin:"developerPanel",
@@ -56,7 +53,6 @@
     module:null,
     previousRoute:null,
     coursePickerOpen:false,
-    gpsActive:false,
     source:"init",
     enteredAt:new Date().toISOString(),
     history:["home"],
@@ -141,15 +137,13 @@
     if(!document.body)return;
     var home=state.route==="home";
     var picker=state.route==="course-picker";
-    var gps=state.route==="gps";
     var module=state.route==="module";
     document.body.classList.toggle("shell-home",home);
-    document.body.classList.toggle("shell-gps",gps||picker);
+    document.body.classList.toggle("shell-gps",picker);
     document.body.classList.toggle("shell-module",module);
-    document.body.classList.toggle("gdGpsActive",gps||picker);
-    document.body.classList.toggle("gps-active",gps||picker);
+    document.body.classList.toggle("gdGpsActive",picker);
+    document.body.classList.toggle("gps-active",picker);
     document.body.classList.toggle("gdCoursePickerOpen",picker);
-    if(!(gps||picker))document.body.classList.remove("gps-open","manual-gps-active");
     if(!picker)document.body.classList.remove("gdCoursePinPromptActive","gdCourseOpening");
   }
   function applyRouteDom(opts){
@@ -185,9 +179,7 @@
     showLabel(byId("shellRouteLabel"),label);
     var back=byId("shellBackBtn");
     if(back)back.style.visibility=route==="home"?"hidden":"visible";
-    var settings=byId("shellSettingsBtn");
-    if(settings)settings.style.visibility=(route==="gps"||route==="course-picker")?"visible":"hidden";
-    setDock(opts.dock||DOCK_NAMES[state.module]||(route==="gps"||route==="course-picker"?"gps":""));
+    setDock(opts.dock||DOCK_NAMES[state.module]||(route==="course-picker"?"gps":""));
     safe(function(){window.ClarityRouter?.remember?.(route==="module"?(state.module||"module"):route,!!opts.replace);});
     safe(function(){window.dispatchEvent(new CustomEvent("gd:shell-route-changed",{detail:clone()}));});
   }
@@ -199,7 +191,6 @@
     state.module=opts.module||null;
     state.moduleId=opts.moduleId||null;
     state.coursePickerOpen=route==="course-picker";
-    state.gpsActive=route==="gps";
     state.source=opts.source||route;
     state.enteredAt=new Date().toISOString();
     applyRouteDom(opts);
@@ -219,7 +210,6 @@
     opts=opts||{};
     window.__gdCoursePickerReturnTarget=opts.returnTarget||state.previousRoute||"home";
     clearPickerDatasets();
-    safe(function(){if(typeof gdClearMappedStartPromptChrome==="function")gdClearMappedStartPromptChrome();});
     return transition("course-picker",Object.assign({source:"course-picker",dock:"gps"},opts));
   }
   function closeCoursePicker(opts){
@@ -230,43 +220,17 @@
       if(target==="practice")return openModule("practiceData",{module:"practiceData",moduleId:"practiceDataPanel",source:"course-picker-back"});
       if(target==="coach-player")return openModule("profile",{module:"profile",source:"course-picker-back"});
     }
-    if(opts.to==="gps")return enterGps(Object.assign({replace:true,fromCoursePicker:true},opts));
     if(opts.to==="previous"&&state.previousRoute&&state.previousRoute!=="course-picker")return back(opts);
     return showHome(Object.assign({source:"course-picker-close"},opts));
   }
-  /* A course is loaded when gdStoreCoursePickerSelection has run and nothing
-     has cleared it since - the same value the GPS surface itself draws from. */
-  function courseLoaded(){
-    try{return !!(window.currentCourse&&window.currentCourse.name);}catch(e){return false;}
-  }
+  /* GPS Play is its own page (app/); the course picker is the way in, and the
+     only place in this shell that Play, the Play dock button, or "back to play"
+     can land. */
   function enterGps(opts){
     opts=opts||{};
-    /* The GPS route has nothing to draw without a course: the picker is hidden
-       (wrong route) and the map stays hidden until a course allows it, so the
-       screen is black with only Back / Home / Settings on it. Every "back to
-       GPS" and "enter GPS" call used to trust its caller that a round was in
-       progress; a fresh launch, a reload, or Settings opened from the picker
-       and closed again all proved otherwise. Send those to the picker, which
-       is the real GPS entry and offers Resume when a round exists. */
-    if(!opts.fromCoursePicker&&!opts.selectedCourse&&!courseLoaded()){
-      var pickerOpts={source:(opts.source||"gps")+"-no-course",returnTarget:opts.returnTarget||"home",replace:!!opts.replace};
-      if(window.GDCoursePicker&&typeof window.GDCoursePicker.open==="function")return window.GDCoursePicker.open(pickerOpts);
-      return openCoursePicker(pickerOpts);
-    }
-    clearPickerDatasets();
-    transition("gps",Object.assign({source:"gps",dock:"gps"},opts));
-    safe(function(){if(typeof map!=="undefined"&&map&&map.invalidateSize)setTimeout(function(){map.invalidateSize();},80);});
-    safe(function(){window.gdHydrateGpsBadge?.(true);});
-    // This is the shell's OWN enter-GPS path (window.enterGpsModule gets
-    // overwritten to delegate here, so gd-app-core.js's enterGpsModule body
-    // never actually runs for a normal GPS entry) - the "playing as" badge
-    // sync has to live here too, or it silently never fires.
-    safe(function(){window.gdSyncGpsPlayerBadge?.();});
-    return false;
-  }
-  function leaveGps(opts){
-    opts=opts||{};
-    return opts.to==="home"?showHome(opts):false;
+    var pickerOpts={source:opts.source||"gps",returnTarget:opts.returnTarget||"home",replace:!!opts.replace};
+    if(window.GDCoursePicker&&typeof window.GDCoursePicker.open==="function")return window.GDCoursePicker.open(pickerOpts);
+    return openCoursePicker(pickerOpts);
   }
   function normalModuleName(name){
     var key=String(name||"").trim();
@@ -274,7 +238,6 @@
     if(key==="dataHubPanel")return "dataHub";
     if(key==="statsPanel")return "courseData";
     if(key==="practiceDataPanel")return "practiceData";
-    if(key==="settingsPanel")return "settings";
     if(key==="bagPanel")return "bag";
     if(key==="profilePanel"||key==="gdProfileV67")return "profile";
     return key||"module";
@@ -283,7 +246,7 @@
     opts=opts||{};
     var module=normalModuleName(opts.module||name);
     var moduleId=opts.moduleId||MODULE_IDS[name]||MODULE_IDS[module]||String(name||"");
-    var wasGps=state.route==="gps"||state.route==="course-picker"||document.body?.classList.contains("shell-gps");
+    var wasGps=state.route==="course-picker";
     var wasHome=state.route==="home"||document.body?.classList.contains("shell-home");
     if(opts.fromGps)window.__gdBackTarget="gps";
     else if(opts.fromHome)window.__gdBackTarget="home";
@@ -297,7 +260,7 @@
     safe(function(){byId("gdProfileV67")?.classList.add("hidden");document.body.classList.remove("gdProfileOpen");});
     if(opts.to==="gps"||window.__gdBackTarget==="gps"){
       window.__gdBackTarget="";
-      return enterGps({replace:true,preserveState:true,fromBack:true});
+      return enterGps({replace:true,source:"module-back"});
     }
     window.__gdBackTarget="";
     return showHome({source:"module-close"});
@@ -310,7 +273,6 @@
     state.module="profile";
     state.moduleId="gdProfileV67";
     state.coursePickerOpen=false;
-    state.gpsActive=false;
     state.source=opts.source||"auth";
     state.enteredAt=new Date().toISOString();
     showElement(byId("shellHome"),false);
@@ -327,17 +289,7 @@
     opts=opts||{};
     if(state.route==="module")return closeModule(opts);
     if(state.route==="course-picker")return closeCoursePicker({to:"origin",source:"course-picker-back"});
-    if(state.route==="gps")return openCoursePicker({source:"gps-back",returnTarget:"gps"});
     return false;
-  }
-  function backPointer(event){
-    if(document.body&&document.body.classList.contains("gdMappedStartPromptActive")&&!document.body.classList.contains("gdManualStartPlacementActive")){
-      event?.preventDefault?.();
-      event?.stopPropagation?.();
-      event?.stopImmediatePropagation?.();
-      return back({source:"mapped-start-pointer"});
-    }
-    return true;
   }
   function home(event){
     event?.preventDefault?.();
@@ -361,7 +313,6 @@
     if(backBtn&&!backBtn.__gdShellOwnerBound){
       backBtn.__gdShellOwnerBound=true;
       backBtn.onclick=function(event){event?.preventDefault?.();return back({event:event,source:"back-button"});};
-      backBtn.onpointerdown=backPointer;
     }
     var profileBtn=byId("shellProfileReturnBtn");
     if(profileBtn&&!profileBtn.__gdShellOwnerBound){
@@ -370,16 +321,6 @@
         event?.preventDefault?.();
         event?.stopPropagation?.();
         return typeof window.gdReturnToProfileWorkspace==="function"?window.gdReturnToProfileWorkspace():false;
-      };
-    }
-    var settingsBtn=byId("shellSettingsBtn");
-    if(settingsBtn&&!settingsBtn.__gdShellOwnerBound){
-      settingsBtn.__gdShellOwnerBound=true;
-      settingsBtn.onclick=function(event){
-        event?.preventDefault?.();
-        event?.stopPropagation?.();
-        if(typeof window.openSettings==="function")return window.openSettings({fromGps:true});
-        return openModule("settings",{source:"shell-settings",fromGps:true});
       };
     }
     return false;
@@ -393,12 +334,10 @@
     openCoursePicker:openCoursePicker,
     closeCoursePicker:closeCoursePicker,
     enterGps:enterGps,
-    leaveGps:leaveGps,
     openModule:openModule,
     closeModule:closeModule,
     showAuth:showAuth,
     back:back,
-    backPointer:backPointer,
     home:home,
     getState:clone,
     destroy:destroy
@@ -409,14 +348,13 @@
   window.gdCanonicalShellHome=function(){return api.home.apply(api,arguments);};
   window.gdCanonicalShellBack=function(){return api.back({source:"legacy-canonical-back"});};
   window.gdShellBackClick=function(event){event?.preventDefault?.();event?.stopPropagation?.();event?.stopImmediatePropagation?.();return api.back({event:event,source:"shell-back-click"});};
-  window.gdShellBackPointer=function(event){return api.backPointer(event);};
   window.shellBack=function(event){return api.back({event:event,source:"legacy-shellBack"});};
   window.enterGpsModule=function(opts){return api.enterGps(opts||{});};
   window.openShellModule=function(id,opts){return api.openModule(id,opts||{});};
   window.showModePicker=function(){return api.showHome({source:"legacy-showModePicker"});};
   window.showModeDashboard=function(){return api.showHome({source:"legacy-showModeDashboard"});};
 
-  safe(function(){showShellHome=window.showShellHome;gdCanonicalShellHome=window.gdCanonicalShellHome;gdCanonicalShellBack=window.gdCanonicalShellBack;gdShellBackClick=window.gdShellBackClick;gdShellBackPointer=window.gdShellBackPointer;shellBack=window.shellBack;enterGpsModule=window.enterGpsModule;openShellModule=window.openShellModule;showModePicker=window.showModePicker;showModeDashboard=window.showModeDashboard;});
+  safe(function(){showShellHome=window.showShellHome;gdCanonicalShellHome=window.gdCanonicalShellHome;gdCanonicalShellBack=window.gdCanonicalShellBack;gdShellBackClick=window.gdShellBackClick;shellBack=window.shellBack;enterGpsModule=window.enterGpsModule;openShellModule=window.openShellModule;showModePicker=window.showModePicker;showModeDashboard=window.showModeDashboard;});
 
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});
   else init();

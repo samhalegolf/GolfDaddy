@@ -69,7 +69,6 @@ const pinGate = core.slice(core.indexOf("function gdCoursePickerNeedsCoursePin(p
 const pinGateBody = pinGate.slice(0, pinGate.indexOf("\nfunction gdCoursePickerConsumePinBypass"));
 assert(!pinGateBody.includes("GDCourseLocation"), "the pin gate must not depend on a stored location any more");
 assert(pinGateBody.includes('mark("trusted-search-pin")'), "the gate's default answer must be to trust the search pin");
-assert(core.includes("gdCoursePickerUsesPinSeed"), "a confirmed pin must still seed the mapper once one exists");
 assert(adminDb.includes("gdAdminCourseLocationMarkup(selected,payload)"), "Course Database/admin overview displays course-location status");
 assert(index.includes('data-gd-surface="studio" src="scripts/studio/gd-admin-course-db.js'), "the admin Course Database loads as a studio-only script");
 assert(adminDb.includes("window.gdAdminCourseLocationEdit=gdAdminCourseLocationEdit"), "Course Database/admin exposes edit location action");
@@ -84,7 +83,6 @@ assert(picker.includes("courseCentre:pinnedCentre||undefined"), "mapping control
 assert(library.includes("owner.attachToCourse({...snap,courseCentre:opts.courseCentre||opts.courseCenter||snap.courseCentre||snap.courseCenter},{requireConfirmed:false})"), "mapping snapshots attach owner-resolved course centre");
 assert(library.includes("const resolved=owner&&typeof owner.resolve==='function'&&!isManualGpsCourse(c)?owner.resolve(c,{requireConfirmed:false}):null;"), "assumed-course matching consults owner before GPS fallback");
 assert(library.includes("const resolved=owner&&typeof owner.get==='function'?owner.get(course):null;"), "Course Library finder reads owner-confirmed centre first");
-assert(library.includes("owner.confirm(c,{lat,lng},{source:source||'course-library-finder'})"), "Course Library finder saves through owner");
 /* The library's "clear this course's location" control went with the mapper UI
    (2026-07-28). Removing a whole course replaced it, and carries the same
    obligation: the owner holds the picker pin in a different store and caches the

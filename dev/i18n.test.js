@@ -203,10 +203,10 @@ assert.strictEqual(boot({ languages: [], extra: { es: SPANISH } }).GDI18n.locale
       'gd-shell.js', 'gd-course-library-pin-lock.js', 'clarity-player-settings.js', 'clarity-email.js',
       'clarity-support.js', 'clarity-backup.js', 'gd-route-audit.js',
       'gd-manual-bubble-set.js', 'clarity-garmin.js', 'clarity-garmin-founder.js', 'gd-course-map-notify.js', 'gd-app-permissions.js',
-      'gd-practice-projected-clubs.js', 'gd-flag-pin.js', 'gd-app-download-prompt.js', 'gd-app-core.js'
+      'gd-practice-projected-clubs.js', 'gd-app-download-prompt.js', 'gd-app-core.js'
     ].map((f) => path.join('scripts', f)))
     .concat(['gd-auth-account-shell.js', 'gd-course-picker-search-v2.js',
-      'gd-action-feedback-v1.js', 'gd-resume-round-picker-v1.js', 'gd-brand-icon-render.js', 'gd-durable-storage.js'].map((f) => path.join('scripts', 'inline', f)))
+      'gd-action-feedback-v1.js', 'gd-resume-round-picker-v1.js', 'gd-durable-storage.js'].map((f) => path.join('scripts', 'inline', f)))
     .concat(['index.html', 'welcome.html', path.join('functions', 'auth-reset-password.js')]);
   const used = new Map();
   sources.forEach((file) => {

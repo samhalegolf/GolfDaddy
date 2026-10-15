@@ -1,10 +1,3 @@
-html.gdGpsViewportLocked,
-html.gdGpsViewportLocked body{
-  width:100%!important;
-  height:100%!important;
-  overflow:hidden!important;
-  overscroll-behavior:none!important;
-}
 body.shell-gps{
   position:fixed!important;
   inset:0!important;
@@ -42,11 +35,6 @@ body.gdGpsActive #shellHomeBtn,
 body.gps-active #shellHomeBtn{
   order:2!important;
 }
-body.shell-gps #shellTop #shellSettingsBtn,
-body.gdGpsActive #shellTop #shellSettingsBtn,
-body.gps-active #shellTop #shellSettingsBtn{
-  order:3!important;
-}
 body.shell-gps #shellTop .spacer,
 body.gdGpsActive #shellTop .spacer,
 body.gps-active #shellTop .spacer{
@@ -61,27 +49,4 @@ body.shell-gps #shellBackBtn,
 body.shell-gps #shellTop .homeTextBtn,
 body.shell-gps #shellTop .shellRouteLabel{
   transform:none!important;
-}
-body.shell-gps #shellTop #shellSettingsBtn,
-body.gdGpsActive #shellTop #shellSettingsBtn,
-body.gps-active #shellTop #shellSettingsBtn{
-  display:grid!important;
-  visibility:visible!important;
-  opacity:1!important;
-  pointer-events:auto!important;
-  place-items:center!important;
-  width:46px!important;
-  min-width:46px!important;
-  height:46px!important;
-  padding:0!important;
-  border-radius:999px!important;
-  font-size:0!important;
-}
-body.shell-gps #shellTop #shellSettingsBtn::before,
-body.gdGpsActive #shellTop #shellSettingsBtn::before,
-body.gps-active #shellTop #shellSettingsBtn::before{
-  content:"⚙";
-  color:#fff;
-  font-size:23px;
-  line-height:1;
 }

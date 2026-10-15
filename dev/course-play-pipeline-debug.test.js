@@ -42,7 +42,6 @@ function loadPipeline() {
   const debugStarts = [];
   const debugEvents = [];
   const staleRecords = [];
-  let fallbackOpts = null;
   const body = {
     dataset: {},
     classList: classList(["gps-active"]),
@@ -95,17 +94,6 @@ function loadPipeline() {
         staleRecords.push(input);
         return input;
       }
-    },
-    gdBeginInteractiveGreenFallback(course, hole, reason, opts) {
-      fallbackOpts = Object.assign({ course, hole, reason }, opts || {});
-      window.__gdCoursePlayInteractiveFallbackActive = {
-        course,
-        hole,
-        key: opts && opts.resolutionKey,
-        attemptToken: opts && opts.attemptToken,
-        debugRunId: opts && opts.debugRunId
-      };
-      return true;
     }
   };
   window.ClarityCaddieCourseLibrary = window.GolfDaddyCourseLibrary;
@@ -131,9 +119,7 @@ function loadPipeline() {
     localStorage,
     debugStarts,
     debugEvents,
-    staleRecords,
-    fallbackOpts: () => fallbackOpts,
-    advance(ms) { fakeNow += ms; }
+    staleRecords
   };
 }
 
@@ -141,21 +127,14 @@ async function main() {
   const env = loadPipeline();
   assert(env.api, "pipeline API exports");
 
-  env.api.syncGpsPipelineState("course-picker", 1);
-  assert.strictEqual(env.debugStarts.length, 0, "pipeline does not start mapping debug runs");
-  assert.strictEqual(env.window.__gdCourseMappingDebugActiveAttempt, undefined, "pipeline does not publish active mapping attempts");
-
-  env.advance(7501);
-  env.api.syncGpsPipelineState("interval", 1);
-  assert.strictEqual(env.fallbackOpts(), null, "pipeline timeout does not open fallback");
-  assert(env.api.getDebugTimeline().some((row) => row.type === "gps-play-pipeline-waiting-for-mapping-controller"), "pipeline records controller-owned fallback wait");
-
   const originalAutoMap = () => Promise.resolve({ saved: 2, holes: 18 });
   env.window.gdAutoMapOsmCourse = originalAutoMap;
   env.api.installCourseLibraryAdapter();
   assert.strictEqual(env.window.gdAutoMapOsmCourse, originalAutoMap, "pipeline adapter does not wrap AutoMapper");
   assert(env.api.getDebugTimeline().some((row) => row.type === "course-library-adapter-passive"), "pipeline records passive adapter mode");
   assert.strictEqual(env.staleRecords.length, 0, "pipeline adapter does not own stale AutoMapper ingestion");
+  assert.strictEqual(env.debugStarts.length, 0, "pipeline does not start mapping debug runs");
+  assert.strictEqual(env.window.__gdCourseMappingDebugActiveAttempt, undefined, "pipeline does not publish active mapping attempts");
 
   const tileHeavyManifest = {
     key: "gd_captured_hole_frame_v19_maungakiekie:h1",

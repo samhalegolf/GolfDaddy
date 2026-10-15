@@ -39,7 +39,7 @@ for (const forbidden of forbiddenPickerInternals) {
 }
 
 assert(index.includes("window.GDCoursePicker.open({source:'home-play',returnTarget:'home'})"), "static Play tile delegates to GDCoursePicker.open");
-assert(routeAudit.includes('return window.GDCoursePicker.open({source:"route-audit",returnTarget:"gps"});'), "route audit defers picker opening to owner");
+assert(routeAudit.includes('window.GDShell?.enterGps?.(Object.assign({source:"route-audit-open-gps"},opts||{}))'), "route audit sends Play to the shell, which opens the picker owner");
 
 const legacyDelegates = [
   "window.renderCourses=function(courses){return api.renderCourses(courses);};",
@@ -54,7 +54,6 @@ for (const delegate of legacyDelegates) {
 }
 
 assert(core.includes("window.GDCoursePickerCoreBridge={"), "core retains only a named bridge for picker dependencies");
-assert(core.includes('return window.GDCoursePicker.selectCourse(course,{source:"core-compat-select"});'), "core course-open compatibility delegates to the owner when loaded");
 assert(!picker.includes("window.runCourseMappingAttempt||window.gdRunCourseMappingAttempt||window.gdResolveCoursePlayHole"), "picker has no fallback chain that restores old resolver ownership");
 
 console.log("course-picker-owner tests passed");

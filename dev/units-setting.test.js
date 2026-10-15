@@ -1,15 +1,12 @@
 /*
- * Metres or yards is a setting, and a setting is remembered.
+ * Metres or yards is one setting, and the main app follows it.
  *
- * It was not. `units` was a plain in-memory variable that started at "m" on
- * every launch, so a yards player re-toggled it every time they opened the app
- * - and because fmt() is the one place the whole app converts and labels a
- * distance, every number on every screen silently came back in metres with it.
- *
- * What is pinned here is the whole round trip: a fresh device defaults to
- * metres, toggling writes the choice to the device, the next launch restores
- * it, fmt() follows it, the Settings row says what is actually set, and a
- * browser that refuses storage still works rather than throwing.
+ * The player sets it in GPS Play's settings sheet (app/js/gps-settings.js,
+ * stored under clarity:gps-settings:v1). The main app has no units toggle of
+ * its own any more - its old one lived in the retired in-page GPS Settings
+ * panel - so fmt(), the one place the main app converts and labels a distance,
+ * reads that same stored setting. A yards player must not see metres on the
+ * practice or bubble screens because the two halves kept separate settings.
  *
  * Run: node dev/units-setting.test.js
  */
@@ -22,10 +19,11 @@ const vm = require('vm');
 
 const ROOT = path.join(__dirname, '..');
 const source = fs.readFileSync(path.join(ROOT, 'scripts', 'gd-app-core.js'), 'utf8');
+const gpsSettings = fs.readFileSync(path.join(ROOT, 'app', 'js', 'gps-settings.js'), 'utf8');
 
-/* The units block is lifted out of gd-app-core.js and run for real, rather
-   than pattern-matched: a test that only greps cannot tell a remembered
-   setting from one that looks like it is remembered. */
+/* The units lines are lifted out of gd-app-core.js and run for real, rather
+   than pattern-matched: a test that only greps cannot tell a followed setting
+   from one that looks like it is followed. */
 function lineStartingWith(prefix) {
   const line = source.split('\n').find((row) => row.startsWith(prefix));
   assert.ok(line, `gd-app-core.js no longer has a line starting "${prefix}"`);
@@ -33,134 +31,62 @@ function lineStartingWith(prefix) {
 }
 
 const BLOCK = [
-  lineStartingWith('function gdT('),
-  lineStartingWith('const GD_UNITS_KEY='),
   lineStartingWith('function gdStoredUnits()'),
-  lineStartingWith('function gdUnitsLabel('),
-  lineStartingWith('function gdSyncUnitsButtons()'),
-  lineStartingWith('function toggleUnits()'),
   lineStartingWith('function fmt(m)'),
   'let units=gdStoredUnits();'
 ].join('\n');
 
-/* A launch: fresh globals, one device store carried across launches. */
 function launch(store) {
-  const row = { unitsToggle: { textContent: '' }, unitsSub: { textContent: '' } };
-  const context = {
-    localStorage: store,
-    document: { getElementById: (id) => row[id] || null },
-    greenPolygon: null,
-    renderShot() {},
-    drawGreenDistances() {}
-  };
-  context.window = context;
+  const context = { localStorage: store, JSON };
   vm.createContext(context);
-  /* The page loads the translation layer and its English base first. */
-  for (const f of ['scripts/gd-i18n.js', 'scripts/i18n/en.js']) {
-    vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), context, { filename: f });
-  }
-  vm.runInContext(BLOCK + '\nthis.__read=()=>units;\nthis.__sync=gdSyncUnitsButtons;\nthis.__toggle=toggleUnits;\nthis.__fmt=fmt;', context);
-  context.__sync();
+  vm.runInContext(BLOCK + '\nthis.__read=()=>units;\nthis.__fmt=fmt;', context);
   return {
     units: () => context.__read(),
-    toggle: () => context.__toggle(),
     /* Spread back into this realm: an object built inside the vm is not the
-       same Object as ours and deepStrictEqual would fail on the prototype
-       rather than on anything the app got wrong. */
-    fmt: (m) => Object.assign({}, context.__fmt(m)),
-    toggleLabel: () => row.unitsToggle.textContent,
-    subLabel: () => row.unitsSub.textContent
+       same Object as ours and deepStrictEqual would fail on the prototype. */
+    fmt: (m) => Object.assign({}, context.__fmt(m))
   };
 }
 
 function deviceStore(initial) {
   const data = Object.assign({}, initial || {});
-  return {
-    getItem: (key) => (key in data ? data[key] : null),
-    setItem: (key, value) => { data[key] = String(value); },
-    data
-  };
+  return { getItem: (key) => (key in data ? data[key] : null), setItem: (key, value) => { data[key] = String(value); } };
 }
-
-const refusingStore = {
-  getItem() { throw new Error('storage disabled'); },
-  setItem() { throw new Error('storage disabled'); }
-};
+const gpsPlaySetting = (units) => ({ 'clarity:gps-settings:v1': JSON.stringify({ units, aimLine: true }) });
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
 
-test('a fresh device opens in metres', () => {
+test('a fresh device shows metres', () => {
   const app = launch(deviceStore());
   assert.strictEqual(app.units(), 'm');
   assert.deepStrictEqual(app.fmt(100), { value: 100, unit: 'm' });
-  assert.strictEqual(app.toggleLabel(), 'Meters');
-  assert.strictEqual(app.subLabel(), 'Meters');
 });
 
-test('toggling to yards converts every distance and says so on the row', () => {
-  const app = launch(deviceStore());
-  app.toggle();
+test('yards set in GPS Play is followed here', () => {
+  const app = launch(deviceStore(gpsPlaySetting('yd')));
   assert.strictEqual(app.units(), 'yd');
   assert.deepStrictEqual(app.fmt(100), { value: 109, unit: 'yd' });
-  assert.strictEqual(app.toggleLabel(), 'Yards');
-  assert.strictEqual(app.subLabel(), 'Yards');
 });
 
-test('the choice is written to the device', () => {
-  const store = deviceStore();
-  launch(store).toggle();
-  assert.strictEqual(store.data.gd_units_v1, 'yd');
-});
-
-test('the next launch opens in yards - the bug this fixes', () => {
-  const store = deviceStore();
-  launch(store).toggle();
-  const relaunched = launch(store);
-  assert.strictEqual(relaunched.units(), 'yd');
-  assert.deepStrictEqual(relaunched.fmt(100), { value: 109, unit: 'yd' });
-  assert.strictEqual(relaunched.toggleLabel(), 'Yards', 'the Settings row still claims Meters');
-  assert.strictEqual(relaunched.subLabel(), 'Yards');
-});
-
-test('toggling back to metres is remembered too', () => {
-  const store = deviceStore();
-  launch(store).toggle();
-  launch(store).toggle();
-  assert.strictEqual(store.data.gd_units_v1, 'm');
-  assert.strictEqual(launch(store).units(), 'm');
+test('metres set in GPS Play is followed here', () => {
+  assert.strictEqual(launch(deviceStore(gpsPlaySetting('m'))).units(), 'm');
 });
 
 test('a stored value that is not a unit is ignored', () => {
-  assert.strictEqual(launch(deviceStore({ gd_units_v1: 'furlongs' })).units(), 'm');
-  assert.strictEqual(launch(deviceStore({ gd_units_v1: '' })).units(), 'm');
+  assert.strictEqual(launch(deviceStore(gpsPlaySetting('furlongs'))).units(), 'm');
+  assert.strictEqual(launch(deviceStore({ 'clarity:gps-settings:v1': 'not json' })).units(), 'm');
 });
 
 test('a browser that refuses storage still works', () => {
-  const app = launch(refusingStore);
-  assert.strictEqual(app.units(), 'm');
-  app.toggle();
-  assert.strictEqual(app.units(), 'yd', 'a refused write must not stop the toggle');
-  assert.strictEqual(app.toggleLabel(), 'Yards');
+  const refusing = { getItem() { throw new Error('storage disabled'); } };
+  assert.strictEqual(launch(refusing).units(), 'm');
 });
 
-test('the restore runs where units is declared, not in a later hook', () => {
-  assert.ok(
-    /let units=gdStoredUnits\(\)/.test(source),
-    'units no longer restores at its declaration - something can read it before the setting is applied'
-  );
-});
-
-test('the Settings row is synced on boot', () => {
-  assert.ok(
-    /DOMContentLoaded",gdSyncUnitsButtons\)/.test(source) && /else gdSyncUnitsButtons\(\)/.test(source),
-    'nothing syncs the Units row at boot, so a restored yards setting shows as Meters'
-  );
-});
-
-test('the label is written in one place', () => {
-  const others = source.split('\n').filter((row) => /"Meters"/.test(row) && !row.startsWith('function gdUnitsLabel('));
-  assert.deepStrictEqual(others, [], 'a second place still hard-codes the Units label: ' + others.join(' | '));
+test('both halves read the same key', () => {
+  assert.ok(/STORE_KEY\s*=\s*"clarity:gps-settings:v1"/.test(gpsSettings), 'GPS Play no longer stores its settings under clarity:gps-settings:v1');
+  assert.ok(source.includes('localStorage.getItem("clarity:gps-settings:v1")'), 'the main app no longer reads GPS Play\'s units setting');
+  assert.ok(!source.includes('gd_units_v1'), 'the main app has gone back to a units setting of its own');
 });
 
 let failures = 0;

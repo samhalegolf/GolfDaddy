@@ -64,7 +64,6 @@
   function loadSafe() { try { if (typeof loadPlayerProfiles === 'function') loadPlayerProfiles(); } catch(e) {} }
   function saveSafe() {
     try { if (typeof savePlayerProfiles === 'function') savePlayerProfiles(); } catch(e) {}
-    try { if (typeof gdV62Refresh === 'function') gdV62Refresh(); } catch(e) {}
     try { if (typeof gdPatchBrandV65 === 'function') gdPatchBrandV65(); } catch(e) {}
   }
 

@@ -16,10 +16,6 @@
  * row is linked to the account). The email itself goes out from the server
  * (course-mapper-sweeper.mjs) once the course has a playable map, however it got one, and asks
  * an address with no account to sign up.
- *
- * If the player's GPS is on and they are near that course, endFailedScan then calls
- * offerManualGps, which adds a small "Use Manual GPS" button. That button is the only way
- * into manual play.
  */
 (function () {
   "use strict";
@@ -121,7 +117,6 @@
         + ".gdCourseMapNotifyActions{display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;justify-content:center}"
         + ".gdCourseMapNotifyActions button{border:1px solid rgba(246,255,247,.22);border-radius:999px;background:rgba(246,255,247,.08);color:#f6fff7;padding:7px 13px;font-size:12px;font-weight:900}"
         + ".gdCourseMapNotifyActions button[data-gd-notify-go]{border-color:rgba(255,159,47,.55);background:rgba(255,159,47,.2)}"
-        + ".gdCourseMapNotifyCard button[data-gd-notify-manual]{border:0;background:none;color:#f6fff7;opacity:.78;padding:4px 8px;font-size:11px;font-weight:800;text-decoration:underline}"
         + ".gdCourseMapNotifyActions button:disabled{opacity:.55}.gdCourseMapNotifyCard.hidden{display:none!important}";
       document.head.appendChild(style);
     }
@@ -204,21 +199,5 @@
     return offerId;
   }
 
-  /* Adds the small "Use Manual GPS" button to the card for this failed scan. The caller has
-     already checked the player's GPS is on and that they are near the course. */
-  function offerManualGps(offerId, onUse) {
-    if (!offerId || offerId !== currentOffer || typeof onUse !== "function") return false;
-    var card = document.getElementById(CARD_ID);
-    if (!card || card.classList.contains("hidden") || card.dataset.gdNotifyOffer !== String(offerId)) return false;
-    if (card.querySelector("[data-gd-notify-manual]")) return true;
-    var btn = document.createElement("button");
-    btn.type = "button";
-    btn.setAttribute("data-gd-notify-manual", "");
-    btn.innerHTML = H("mapRecovery.useManualButton");
-    btn.onclick = function () { hide(); onUse(); };
-    card.appendChild(btn);
-    return true;
-  }
-
-  window.GDCourseMapNotify = { offer: offer, offerManualGps: offerManualGps, hide: hide };
+  window.GDCourseMapNotify = { offer: offer, hide: hide };
 })();

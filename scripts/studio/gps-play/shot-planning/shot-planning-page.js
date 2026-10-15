@@ -1,6 +1,6 @@
 /* Clarity Studio — GPS Play / Shot Planning page. Studio-only, composition-only.
  *
- * Documents the flag/pin placement tool (scripts/gd-flag-pin.js, do not move) and provides a
+ * Documents the flag/pin placement tool (GPS Play's app/js/pin.js, do not move) and provides a
  * direct jump into the Bubble Geometry tuning group — the real adjustment surface for the GPS
  * shot-pattern bubble (see the gps-bubble-projection registry record for the engine itself).
  *
@@ -19,7 +19,7 @@
     intro.style.marginBottom = "14px";
     intro.innerHTML =
       "<p>Flag/pin placement (on-course, do not confuse with a feature-flag system) lives in " +
-      "gd-flag-pin.js. The GPS shot-pattern bubble's tunable geometry — width/depth scale, " +
+      "GPS Play's app/js/pin.js. The GPS shot-pattern bubble's tunable geometry — width/depth scale, " +
       "tilt scale/max, display clamps — is below.</p>";
 
     var hostSlot = document.createElement("div");
