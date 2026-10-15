@@ -950,7 +950,12 @@ function routeUnclaimed(features) {
  *     pinned course's outline;
  *   its outline carries a full club or course name - "George Golf Club", "Monterey
  *     Peninsula Country Club", "Spyglass Hill Golf Course", "Pacific Grove Golf Links" -
- *     and shares no distinctive word with the facility the player searched for.
+ *     and shares no distinctive word with the facility the player searched for;
+ *   it sits in no outline at all, and the pinned course's own outline is the club's -
+ *     named as a club, after the club the player searched for, and holding one course.
+ *     That outline is the club's boundary, so an 18 outside it belongs to someone else.
+ *     Whangaparaoa, 2026-10-15: "Whangaparaoa Golf Club" is outlined around its one 18,
+ *     and Gulf Harbour's unoutlined 18, 1.2km south, published as its "Course 2".
  *
  * An outline named only as a course label ("Coronet 18", "The Hills", "North Course")
  * is never ruled out by its name: resort courses are routinely outlined under their own
@@ -1023,9 +1028,19 @@ function neighbourReason(group, ctx) {
     if (sharesName) return null;
     if (CLUB_DESIGNATOR.test(outline.name) && ctx.facilityWords.size > 0 && words.size > 0) return "course-outline-names-another-club";
   }
+  if (ctx.clubOutline && !insideAnyOutline(group, ctx.polygons)) return "outside-the-clubs-own-outline";
   const awayM = ctx.centre ? distance(ctx.centre, ctx.centreOf(group)) : 0;
   if (awayM > SIBLING_REACH_M && !insideAnyOutline(group, ctx.facilityOutlines)) return "beyond-facility-reach";
   return null;
+}
+
+/* The pinned course's outline when it is the club's own boundary: named as a club, after
+   the club the player searched for, and a course outline rather than a facility's (one
+   drawn round several courses says nothing about what lies outside it). */
+function clubOutlineOf(pinnedOutline, facilityName, facilityOutlines) {
+  if (!pinnedOutline || facilityOutlines.includes(pinnedOutline) || !CLUB_DESIGNATOR.test(pinnedOutline.name)) return null;
+  const searched = distinctiveWords(facilityName);
+  return [...distinctiveWords(pinnedOutline.name)].some(word => searched.has(word)) ? pinnedOutline : null;
 }
 
 /* selectedName is the whole name the player picked; facilityName its facility half. The
@@ -1039,6 +1054,7 @@ export function markNeighbouringClubs(groups, polygons, centre, facilityName, se
     ? live.slice().sort((a, b) => distance(centre, centreOf(a)) - distance(centre, centreOf(b)))[0]
     : live[0];
   const pinnedOutline = outlineHolding(pinned, polygons);
+  const facilityOutlines = classifyCoursePolygons(polygons, groups.flatMap(group => group.features)).facilities;
   const ctx = {
     centre,
     centreOf,
@@ -1047,7 +1063,8 @@ export function markNeighbouringClubs(groups, polygons, centre, facilityName, se
     pinnedOutline,
     singleCourse: namesSingleCourse(selectedName == null ? facilityName : selectedName),
     facilityWords: distinctiveWords([facilityName, pinnedOutline && pinnedOutline.name].filter(Boolean).join(" ")),
-    facilityOutlines: classifyCoursePolygons(polygons, groups.flatMap(group => group.features)).facilities
+    facilityOutlines,
+    clubOutline: clubOutlineOf(pinnedOutline, facilityName || selectedName, facilityOutlines)
   };
   live.forEach(group => {
     if (group === pinned) return;

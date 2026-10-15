@@ -28,6 +28,7 @@
     "test:multi-nine": "node dev/multi-nine-ground-first.test.js",
     "test:facility-parent": "node dev/facility-parent-and-neighbours.test.js",
     "test:poppy-neighbours": "node dev/poppy-hills-neighbours.test.js",
+    "test:whangaparaoa-neighbour": "node dev/whangaparaoa-neighbour.test.js",
     "test:facility-organise": "node dev/facility-organise.test.js",
     "test:listing-led": "node dev/listing-led-resolution.test.js",
     "test:unnumbered-facility": "node dev/unnumbered-multi-loop.test.js",
