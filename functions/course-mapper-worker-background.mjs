@@ -99,16 +99,22 @@ async function claimJob(jobId, kindFilter = "") {
    trees are a second pass over a course that already plays. With neither waiting, one
    published course that has never had a tree run is taken (claimTreeBackfill) - allowBackfill
    is the caller's once-an-invocation budget for that. */
+/* skip holds the jobs this invocation has just put back after a transient failure. Without
+   it the loop below claimed the same job straight back - it is the oldest one queued - and a
+   busy Overpass took all four attempts in under a minute (Fairview, "Overpass 502 (after 4
+   attempts)"). Skipped, it waits for the sweeper's next pass, three minutes on. A skipped
+   player job still counts as waiting below, so background work does not jump it. */
 const IDLE_KINDS = "(" + NEARBY_AUTOMAP_KIND + "," + TREE_KIND + ")";
-async function claimNextJob({ allowNearby, allowBackfill }) {
-  const player = await claimJob(null, "kind=not.in." + IDLE_KINDS + "&");
+async function claimNextJob({ allowNearby, allowBackfill, skip }) {
+  const notSkipped = skip && skip.size ? "id=not.in.(" + Array.from(skip).map(encodeURIComponent).join(",") + ")&" : "";
+  const player = await claimJob(null, notSkipped + "kind=not.in." + IDLE_KINDS + "&");
   if (player || !allowNearby) return player;
   const busy = await supabaseFetch(JOBS_TABLE + "?select=id&status=in.(queued,running)&kind=not.in." + IDLE_KINDS + "&limit=1").catch(() => null);
   if (!Array.isArray(busy) || busy.length) return null;
   const running = await supabaseFetch(JOBS_TABLE + "?select=id&status=eq.running&kind=in." + IDLE_KINDS + "&limit=1").catch(() => null);
   if (!Array.isArray(running) || running.length) return null;
-  return (await claimJob(null, "kind=eq." + NEARBY_AUTOMAP_KIND + "&"))
-    || (await claimJob(null, "kind=eq." + TREE_KIND + "&"))
+  return (await claimJob(null, notSkipped + "kind=eq." + NEARBY_AUTOMAP_KIND + "&"))
+    || (await claimJob(null, notSkipped + "kind=eq." + TREE_KIND + "&"))
     || (allowBackfill ? await claimTreeBackfill() : null);
 }
 
@@ -3449,8 +3455,9 @@ export default async function courseMapperWorker(req) {
   await reapStaleJobs();
   const startedAt = Date.now();
   let backfilled = false;
+  const requeued = new Set();
   const next = async () => {
-    const job = await claimNextJob({ allowNearby: Date.now() - startedAt < NEARBY_CLAIM_BUDGET_MS, allowBackfill: !backfilled });
+    const job = await claimNextJob({ allowNearby: Date.now() - startedAt < NEARBY_CLAIM_BUDGET_MS, allowBackfill: !backfilled, skip: requeued });
     if (job && job.requested_by === "tree-backfill") backfilled = true;
     return job;
   };
@@ -3510,7 +3517,7 @@ export default async function courseMapperWorker(req) {
       const retryable = transientMapperFailure(error) && attempts < MAX_TRANSIENT_ATTEMPTS;
       const message = String(error && error.message || error).slice(0, 900);
       /* Requeued rather than failed: the sweeper picks it back up on its next
-         pass. attempts is carried on the job result, the same counter the stale
+         pass (this invocation skips it - see claimNextJob). attempts is carried on the job result, the same counter the stale
          reaper uses, so the two retry paths cannot disagree about how many
          goes a job has had. */
       /* Whatever the run learned before it died - queried centre, query stages, feature
@@ -3523,6 +3530,7 @@ export default async function courseMapperWorker(req) {
       /* Neither a background neighbour nor a tree run was promised to anyone: no debug session. */
       if (!retryable && job.kind !== NEARBY_AUTOMAP_KIND && job.kind !== TREE_KIND) Object.assign(patch.result, await requestMapperDebug(job, { message, attempts, diagnostics }));
       await finishJob(job.id, patch).catch(() => {});
+      if (retryable) requeued.add(job.id);
       /* A failed scan still says a player is golfing around here. */
       if (!retryable) await queueNeighboursAfter(job);
     }

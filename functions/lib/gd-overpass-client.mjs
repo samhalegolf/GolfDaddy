@@ -8,7 +8,7 @@
    the cheap option was accepted for now); it only keeps it from getting worse than it has to:
    a descriptive User-Agent (Overpass's policy asks for one so a heavy source can be traced
    and contacted before being blocked outright), a conservative GLOBAL (not per-course) rate
-   limiter since Overpass throttles by source IP, exponential backoff on 429/504, and a
+   limiter since Overpass throttles by source IP, exponential backoff on 429/502/503/504, and a
    process-lifetime cache keyed by the exact query so a re-run for the same course within one
    warm container doesn't refetch. */
 
@@ -23,7 +23,10 @@ const MIN_INTERVAL_MS = 1200;
 let lastRequestAt = 0;
 let queue = Promise.resolve();
 
-const RETRY_STATUSES = new Set([429, 504]);
+/* 502 and 503 are the same "busy right now" as 504: overpass-api.de's front proxy answers
+   502 when the backend behind it is overloaded or restarting. Fairview failed four times in
+   one minute on 502s that this used to treat as final. */
+const RETRY_STATUSES = new Set([429, 502, 503, 504]);
 const MAX_RETRIES = 4;
 /* A cut-short answer means the server is busy; half a second is not long enough to matter. */
 const RETRY_BASE_MS = 2000;
