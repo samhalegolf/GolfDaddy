@@ -1897,8 +1897,8 @@
 	     persistServerCoursePackage above, so every path lands the surfaces too.
 
 	     Stored as ordinary objects on the player's private course record - type fairway_area /
-	     bunker / water with a shape - because that is what everything downstream already reads:
-	     GPS Play's bubble reveal (gdMappedCourseObjects), the mapper tools, the library. Keyed by
+	     bunker / water with a shape - because that is what everything that reads this store
+	     already understands. Keyed by
 	     OSM way id, so the same physical bunker the server stores once per hole it straddles is
 	     kept once. Replaced wholesale per package objectsVersion, never merged: the package is
 	     the authority for surfaces and a stale bunker must not outlive its collection.
@@ -2145,12 +2145,10 @@
         /* No client AutoMapper below this line - per the course-package architecture doc's
            acceptance criteria, "No AutoMapper logic runs on the user's phone". The server
            (functions/course-mapper-jobs.mjs / gd-automapper-core.mjs) owns OSM querying and
-           hole resolution now. resolveGeometryFromServerPackage() both checks AND, as a side
-           effect of the request it makes, triggers a server mapping run if none exists yet
+           hole resolution now. awaitServerCoursePackage() both checks AND, as a side effect of
+           the request it makes, triggers a server mapping run if none exists yet
            (functions/course-package.mjs's buildCoursePackageWithTrigger) - so a course with
-           nothing to report here is already being mapped server-side in the background.
-           A miss here is NOT a failure: it falls through exactly as a zero-guide AutoMapper
-           result always has, to the native resolver and then manual fallback below. */
+           nothing to report here is already being mapped server-side in the background. */
         let autoMapResult=null;
         let serverWait=null;
         let serverWaitError=null;
@@ -2272,8 +2270,6 @@
   }
   window.runCourseMappingAttempt=runCourseMappingAttempt;
   window.gdRunCourseMappingAttempt=runCourseMappingAttempt;
-
-
 
   function profileCardHtml(){
     const entries=downloadedCourseEntries();
@@ -2865,8 +2861,6 @@
       }catch(e){}
     },100);
   };
-
-
 
   function install(){
     observeProfile();

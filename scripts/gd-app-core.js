@@ -14596,7 +14596,6 @@ function setMapSource(index, reason="manual"){
   });
 }
 
-
 /* Pick the best source for where the map is now: first in list order that has its key and has
    pixels here. Order is preference - regional aerial first, the global line guide last. */
 function selectBestMapSource(reason="coverage"){
@@ -14619,7 +14618,6 @@ try{
     if(!mapSourceCovers(mapSources[activeMapSourceIndex],mapViewCentre()))selectBestMapSource("coverage");
   });
 }catch(e){}
-
 
 setMapSource(0,"initial");
 
@@ -14672,10 +14670,6 @@ function closeAllPanels(){
   document.querySelectorAll(".panel.open").forEach(p=>p.classList.remove("open"));
 }
 
-
-
-
-
 function gdStartIsInMappedTeeArea(radiusM=78){
   if(!start||!map)return false;
   try{
@@ -14693,16 +14687,6 @@ function gdFairwayLineGrabAllowed(opts={}){
   return gdStartIsInMappedTeeArea(opts.radiusM||78);
 }
 window.gdFairwayLineGrabAllowed=gdFairwayLineGrabAllowed;
-
-
-
-
-
-
-
-
-
-
 
 function gdActiveShotBagRows(){
   try{return gdAccountShotBagRows();}catch(e){return []}
@@ -14770,7 +14754,6 @@ function gdSyncWindLandingFromAim(){
   gdWindLandingTarget=gdWindLandingFromAim(target);
   return gdWindLandingTarget;
 }
-
 
 /* ---------------- Course flow ---------------- */
 function gdCoursePickerFinitePoint(point){
@@ -15081,16 +15064,6 @@ function gdEnsureCoursePinScreen(){
   return panel;
 }
 
-
-
-
-
-
-
-
-
-
-
 function gdCenterCoursePinMap(payload){
   const point=gdCoursePickerFinitePoint(payload)||gdCoursePickerMapCenterPoint()||gdCoursePickerDefaultPoint();
   if(!point)return false;
@@ -15350,9 +15323,6 @@ function gdActiveMappedTeeStartPoint(){
   const data=payload.data;
   return gdMappedPointToLatLng(data?.tee?.position)||gdMappedPointToLatLng(data?.route?.[0])||null;
 }
-
-
-
 
 	/* ---------------- Core Shot / Bubble Dispersion Logic v24 ----------------
    Clean-input integration from golf_daddy_core_shot_dispersion_logic_handoff.
@@ -15959,38 +15929,15 @@ function localPointToLatLng(center, shotBrg, x, y){
   return project(center, ang, dist);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 function gdRefreshCourseDataSurfaces(){
   try{if(typeof renderStats==="function")renderStats();}catch(e){}
   try{if(typeof renderDataHubStatus==="function")renderDataHubStatus();}catch(e){}
   try{if(typeof renderCompareData==="function")renderCompareData();}catch(e){}
 }
 
-
-
-
-/* GPS watch/location lifecycle is owned by scripts/inline/gd-gps-play-runtime-owner-v1.js. */
-
-
-
 /* Standalone Wand UI retired. The Green Shape Engine is server-side only now -
    functions/lib/gd-green-shape-core.mjs. The browser copy was deleted: nothing
    called it after the AutoMapper moved off the client. */
-
-
 
 /* ---------------- Panels/settings/stats/score ---------------- */
 function openPanel(id){
@@ -18518,8 +18465,6 @@ function bearing(a,b){return Math.atan2(b.lng-a.lng,b.lat-a.lat)}
 function project(o,a,m){const earth=111320;return L.latLng(o.lat+(Math.cos(a)*m)/earth,o.lng+(Math.sin(a)*m)/(earth*Math.cos(o.lat*Math.PI/180)))}
 function projectOffset(o,a,f,s){const p=project(o,a,f),perp=a+Math.PI/2,earth=111320;return L.latLng(p.lat+(Math.cos(perp)*s)/earth,p.lng+(Math.sin(perp)*s)/(earth*Math.cos(p.lat*Math.PI/180)))}
 
-
-
 /* ---------------- App Shell Restore v22: persistent Home/Back/logo ---------------- */
 let shellMode=localStorage.getItem('gd_shell_mode')||'player';
 let lastShellModule='home';
@@ -18712,7 +18657,6 @@ closePanel=function(id){
     openRoute(previous,{replace:true});
   }
 };
-
 
 /* --- Profiles + Onboarding v27 --- */
 const GD_PROFILE_STORE_KEY='gd_player_profiles_v27';

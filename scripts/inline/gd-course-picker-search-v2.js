@@ -1638,10 +1638,10 @@
     const screen=byId("courseScreen");
     if(screen&&!screen.__gdCoursePickerOwnerBound){
       screen.__gdCoursePickerOwnerBound=true;
-      /* The one click path for rows and nearby blocks. gd-app-core.js's
-         document-capture handler (gdWireCoursePickerPlay) stands down when this
-         owner exists - it used to win by firing first, and it did not know
-         facility rows, so "Choose" mapped the facility label as a course. */
+      /* The one click path for rows and nearby blocks. gd-app-core.js used to
+         have a document-capture handler that fired first and did not know
+         facility rows, so "Choose" mapped the facility label as a course; it is
+         gone. */
       screen.addEventListener("click",event=>{
         const target=event.target&&event.target.closest&&event.target.closest("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course");
         if(!target)return;
