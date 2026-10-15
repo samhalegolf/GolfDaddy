@@ -175,7 +175,7 @@ class GarminSessionManager {
     var bubbleCache = null;
     var bubbleCacheKey = "";
 
-    // The map's plays mode (GarminMapView.playsMode): the Bubble worked out
+    // The map's plays mode (the slopeBubble setting, GarminConditions.slopeBubble): the Bubble worked out
     // for the plays distance instead of the flat one - that distance's club
     // and shape - computed for a target that far along the same line, then
     // drawn back at the real aim, where the plays club actually lands.

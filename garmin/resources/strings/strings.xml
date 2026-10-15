@@ -1,4 +1,6 @@
 <strings>
     <string id="AppName">Clarity Caddy</string>
     <string id="WindInPlaysLikeTitle">Include wind in the plays number</string>
+    <string id="WindGhostTitle">Show the wind ghost bubble</string>
+    <string id="SlopeBubbleTitle">Slope bubble (size for the plays distance)</string>
 </strings>

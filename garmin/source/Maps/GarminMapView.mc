@@ -238,10 +238,11 @@ class GarminMapView extends WatchUi.View {
             // the real one, with streaks blowing in from the upwind side. It
             // moves with the aim; how far to lean on it is the player's call.
             // Slope has no ghost: the plays button below turns the Bubble
-            // itself into the plays-distance one.
+            // itself into the plays-distance one. Both are app settings
+            // (GarminConditions.windGhost / slopeBubble).
             var target = local.target;
             var effect = session.conditions.windEffect(playerGeo, target, local.targetDistanceM);
-            var windGhost = (effect != null) ? effect["ghost"] : null;
+            var windGhost = (effect != null && session.conditions.windGhost()) ? effect["ghost"] : null;
             if (windGhost != null) {
                 drawRing(dc, local.ring, camera, reference, imageWidth, imageHeight, viewWidth,
                     [viewHeight, windGhost.lat - target.lat, windGhost.lng - target.lng, WIND_BLUE]);
@@ -255,7 +256,7 @@ class GarminMapView extends WatchUi.View {
             }
             // The Bubble itself: mint, or in plays mode the plays-distance
             // Bubble, orange, drawn back at the real aim.
-            var plays = playsMode ? playsNumber(playerGeo, local) : null;
+            var plays = session.conditions.slopeBubble() ? playsNumber(playerGeo, local) : null;
             var playsShot = (plays != null) ? session.playsBubble(local, plays) : null;
             if (playsShot != null && playsShot["bubble"].ring != null && playsShot["bubble"].ring.size() >= 3) {
                 drawRing(dc, playsShot["bubble"].ring, camera, reference, imageWidth, imageHeight, viewWidth,
@@ -654,8 +655,9 @@ class GarminMapView extends WatchUi.View {
     static const PLAYS_MAIN = -2;   // drawRing style key, not a colour
 
     // Plays mode: the plays button at the foot of the map (tapped, or held)
-    // swaps the Bubble for the plays-distance one, in orange.
-    var playsMode = false;
+    // swaps the Bubble for the plays-distance one, in orange. Whether it is
+    // on is the slopeBubble app setting, not state here, so the button and
+    // Garmin Connect switch the same thing.
     var playsClub = null;      // the plays Bubble's club while it is shown
     var playsBox = null;       // [x0, y0, x1, y1] of the plays button
 
@@ -671,8 +673,9 @@ class GarminMapView extends WatchUi.View {
     // Plays mode on or off. Turning it on warms the plays Bubble here, in
     // the tap's own callback, so the next draw only reads it.
     function togglePlays() {
-        playsMode = !playsMode;
-        if (playsMode) {
+        var on = !session.conditions.slopeBubble();
+        session.conditions.setSlopeBubble(on);
+        if (on) {
             var local = session.localBubble();
             var player = session.playerPoint();
             if (local != null && player != null) { session.playsBubble(local, playsNumber(player, local)); }
@@ -696,6 +699,7 @@ class GarminMapView extends WatchUi.View {
         var x1 = cx + tw / 2 + padX;
         // A button: an orange outline, filled orange with dark text while
         // plays mode is on. The hit box is a little bigger than it looks.
+        var playsMode = session.conditions.slopeBubble();
         dc.setColor(playsMode ? SLOPE_ORANGE : 0x1A1A1A, Graphics.COLOR_TRANSPARENT);
         dc.fillRoundedRectangle(x0, y - 1, x1 - x0, th + 2, (th + 2) / 2);
         dc.setColor(SLOPE_ORANGE, Graphics.COLOR_TRANSPARENT);

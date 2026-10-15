@@ -148,13 +148,24 @@ class GarminConditions {
         return Math.atan2(dLng, dLat);
     }
 
-    // The windInPlaysLike app setting (Garmin Connect > the app's settings).
-    function windInPlaysLike() {
+    // The app's settings (Garmin Connect > the app's settings), read live so
+    // a change made on the phone shows on the next draw.
+    function windInPlaysLike() { return setting("windInPlaysLike", false); }
+    // The map's wind ghost Bubble, on unless turned off.
+    function windGhost() { return setting("windGhost", true); }
+    // The map's slope (plays) Bubble. The plays button writes it back, so
+    // the watch starts each round the way the player last left it.
+    function slopeBubble() { return setting("slopeBubble", false); }
+    function setSlopeBubble(on) {
+        try { Application.Properties.setValue("slopeBubble", on == true); } catch (e) {}
+    }
+
+    function setting(id, fallback) {
         try {
-            var v = Application.Properties.getValue("windInPlaysLike");
-            return v == true;
+            var v = Application.Properties.getValue(id);
+            return (v == null) ? fallback : (v == true);
         } catch (e) {
-            return false;
+            return fallback;
         }
     }
 

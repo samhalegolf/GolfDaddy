@@ -364,6 +364,9 @@
     this.aiming = false; this.dragActive = false;
     this.fingerX = null; this.fingerY = null; this.edgeSince = null; this.panning = false;
     this.lastReference = null; this.lastImageWidth = null; this.lastImageHeight = null; this.lastViewWidth = null; this.lastViewHeight = null;
+    /* The watch's two app settings (GarminConditions.windGhost / slopeBubble):
+       playsMode is the slopeBubble setting, so it outlives a hole change. */
+    this.windGhost = true;
     this.playsMode = false; this.playsClub = null; this.playsBox = null;
     this.textures = {};
     this.trace = null;   // the simulator's "map frame:" line, for the page's readout
@@ -437,7 +440,7 @@
     if (local != null && local.ring != null && local.ring.length >= 3) {
       var target = local.target;
       var effect = session.windEffect(playerGeo, target, local.targetDistanceM);
-      var windGhost = effect != null ? effect.ghost : null;
+      var windGhost = effect != null && this.windGhost ? effect.ghost : null;
       if (windGhost != null) {
         this.drawRing(dc, local.ring, camera, reference, imageWidth, imageHeight, viewWidth, [viewHeight, windGhost.lat - target.lat, windGhost.lng - target.lng, WIND_BLUE]);
         var fromImg = this.imagePoint(target, reference), toImg = this.imagePoint(windGhost, reference);
@@ -727,7 +730,7 @@
   MapFace.prototype.onEngineReady = function () { this.camera = null; };
   MapFace.prototype.onHole = function () {
     this.session.playState.clear();
-    this.aiming = false; this.dragActive = false; this.playsMode = false; this.camera = null;
+    this.aiming = false; this.dragActive = false; this.camera = null;
   };
   MapFace.prototype.currentBubble = function () { return this.session.localBubble(); };
   MapFace.prototype.currentTarget = function () { var b = this.currentBubble(); return b ? b.target : this.session.aimTarget(); };
