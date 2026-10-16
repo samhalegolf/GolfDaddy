@@ -153,7 +153,7 @@ test("a session is a draft the mapper ignores until it is marked ready", () => {
 test("Course Database rows open the drawer, and it arrives with what the last run saw", () => {
   assert.ok(adminDb.includes('onclick="event.stopPropagation();return gdAdminCourseLocationOverlay('), "no Draw button on the course rows");
   assert.ok(adminDb.includes("${gdAdminCourseDbDrawButton(item,status)}"), "the Draw button is not in the row markup");
-  assert.ok(endpoint.includes("body.objects = displayObjects(saved)") && endpoint.includes("body.lastRun = await loadLastRun(ownerId)"), "the drawer's load must carry the saved objects and the last run");
+  assert.ok(endpoint.includes("body.objects = displayObjects(saved)") && endpoint.includes("const lastRun = loadLastRun(ownerId)") && endpoint.includes("body.lastRun = await lastRun"), "the drawer's load must carry the saved objects and the last run");
   assert.ok(endpoint.includes('bunker: "bunkers"'), "OSM bunkers must be drawn so they are not placed twice");
   assert.ok(page.includes("function drawObjects()") && page.includes("function renderLastRun()"), "the page must show the saved objects and the last run");
   assert.ok(/function drawObjects\(\) \{[\s\S]*?interactive: false[\s\S]*?\n    \}/.test(page), "saved objects are reference only - never clickable");
@@ -512,6 +512,30 @@ test("one screen: tools float over the map, the rest is in the pull-down", () =>
   assert.ok(page.includes('containerEl.classList.add("gdStudioOverlayHost")') && page.includes('containerEl.classList.remove("gdStudioOverlayHost")'), "the page must take over the workspace while it is up, and give it back");
   assert.ok(page.includes('data-gd-overlay="menu"') && page.includes("function setMenu(open)"), "no pull-down for the course, imagery and publishing");
   assert.ok(shell.includes(".gdStudioWorkspace.gdStudioOverlayHost { padding: 0; overflow: hidden;"), "the workspace must not scroll under the overlay page");
+});
+
+/* Whangaparaoa, 2026-10-16: Gulf Harbour's 3rd, 500m away on the course next door, was linked
+   to Whangaparaoa's own 3rd. Real hole lines from that draft: the two 3rds must split. */
+test("linking shapes on different ground asks first", () => {
+  const start = page.indexOf("var LINK_STRAY_M");
+  const end = page.indexOf("    function commitLink() {");
+  assert.ok(start > 0 && end > start, "the link gap check is missing");
+  const shapes = { distanceM: (a, b) => Math.hypot((b.lat - a.lat) * 110540, (b.lng - a.lng) * 111320 * Math.cos(a.lat * Math.PI / 180)) };
+  const strayLinkMember = new Function("shapes", page.slice(start, end) + "\nreturn strayLinkMember;")(shapes);
+  const whangaparaoa3 = { kind: "hole", points: [{ lat: -36.6071889, lng: 174.795832 }, { lat: -36.6068334, lng: 174.7975781 }] };
+  const green3 = { kind: "green", points: [{ lat: -36.6068, lng: 174.7975 }, { lat: -36.6069, lng: 174.7977 }, { lat: -36.6067, lng: 174.7977 }] };
+  const gulfHarbour3 = { kind: "hole", points: [{ lat: -36.6120285, lng: 174.7957512 }, { lat: -36.611213, lng: 174.7941955 }] };
+  assert.strictEqual(strayLinkMember([whangaparaoa3, green3]), null, "a hole and its own green link without a question");
+  const stray = strayLinkMember([whangaparaoa3, green3, gulfHarbour3]);
+  assert.ok(stray && stray.shape === gulfHarbour3 && stray.gapM > 400, "the far 3rd must be named: " + JSON.stringify(stray && stray.gapM));
+  assert.ok(page.includes("var stray = strayLinkMember(members);") && page.includes("Link anyway?"), "commitLink must ask before linking split ground");
+});
+
+test("the page opens on the course's own shapes, OSM hidden until asked for", () => {
+  assert.ok(page.includes('showOsm: false, showObjects: true'), "Show OSM must start off");
+  assert.ok(!page.includes('data-gd-overlay="osm" checked'), "the Show OSM box must not start ticked");
+  assert.ok(!/\["sourceKey", "showOsm"/.test(page), "Show OSM must not be remembered across opens");
+  assert.ok(page.includes("function objectStyle(type)"), "saved shapes must be drawn in their own kind's colours");
 });
 
 let failed = 0;
