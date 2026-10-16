@@ -1015,6 +1015,15 @@
       safe(()=>handler(course));
       return false;
     }
+    /* A round already going at this course: tapping it is Resume Round, not a
+       fresh entry. The pill and this tap now take the same road - straight to
+       /app/ at the hole the round reached - and skip the database check and the
+       library rewrite a fresh entry does. The round is on the phone; there is
+       nothing to look up and nothing to download. */
+    if(!opts.internal&&resumeRoundIsFor(course)){
+      showOpeningScreen(course,L("picker.startingRound"));
+      return resumeRound(opts);
+    }
     /* Acknowledge the tap before anything asynchronous. The database check below
        is a network round-trip during which nothing used to change on screen, so
        players tapped again - and the second tap's token silently discarded the
@@ -1609,6 +1618,15 @@
     setTimeout(()=>input?.focus(),80);
     resumeRound({renderOnly:true,source:state.source});
     return false;
+  }
+  /* Whether the saved round (app/js/resume.js, read through the Resume Round
+     owner) is at this course. Compared by the same key the rows use, because
+     the record holds exactly the courseId the picker put on the play URL. */
+  function resumeRoundIsFor(course){
+    const saved=safe(()=>typeof window.gdReadResumeRound==="function"?window.gdReadResumeRound():null,null);
+    if(!saved||!saved.courseId)return false;
+    const key=rowKey({courseId:saved.courseId});
+    return !!key&&key===rowKey(course);
   }
   function resumeRound(opts={}){
     if(opts&&opts.event){opts.event.preventDefault?.();opts.event.stopPropagation?.();opts.event.stopImmediatePropagation?.();}

@@ -366,6 +366,28 @@ async function tickEntry() {
   assert.strictEqual(resume.calls.panels, 1, "resume round presentation is delegated");
   assert.strictEqual(resume.calls.resume, 1, "resume round selection is delegated");
 
+  /* A tap on the course whose round is already going IS Resume Round: the same
+     navigation as the pill, with no database check and no mapping on the way.
+     Entry's database check rewrote the published library on the page being
+     left, and on iOS the play surface then waited behind that write for good
+     (Lake Wales, 16 Oct 2026) - while the pill, which writes nothing, opened
+     every time. */
+  const playing = createHarness();
+  playing.window.gdReadResumeRound = () => ({ courseId: "lake-wales-country-club", courseName: "Lake Wales Country Club", liveHole: 2 });
+  playing.window.GDCoursePicker.selectCourse({ name: "Lake Wales Country Club", courseId: "lake-wales-country-club" });
+  await tickEntry();
+  assert.strictEqual(playing.calls.resume, 1, "tapping the course being played resumes the round");
+  assert.strictEqual(playing.calls.mapping, 0, "and never maps it again");
+  assert.strictEqual(playing.calls.gps, 0, "nor enters it as a fresh round");
+
+  /* A saved round at a DIFFERENT course changes nothing about entering this one. */
+  const elsewhere = createHarness();
+  elsewhere.window.gdReadResumeRound = () => ({ courseId: "akarana-golf-club", courseName: "Akarana Golf Club", liveHole: 4 });
+  elsewhere.window.GDCoursePicker.selectCourse({ name: "Saved Course", courseId: "saved", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: true, databaseReady: true, savedPlayable: true });
+  await tickEntry();
+  assert.strictEqual(elsewhere.calls.resume, 0, "a round elsewhere is not resumed from here");
+  assert.strictEqual(elsewhere.calls.gps, 1, "this course enters as a fresh round");
+
   const cancel = createHarness();
   cancel.window.GDCoursePicker.selectCourse({ name: "Cancel", courseId: "cancel", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: false });
   cancel.window.GDCoursePicker.close({ reason: "test-close" });

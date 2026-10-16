@@ -48,6 +48,19 @@
   var DB_STORE = "kv";
   var FLUSH_DELAY_MS = 40;
   var CHANNEL = "clarity-course-storage";
+  /* How long the first load may hold the app up. The play surface awaits ready
+     before it decides "already on the phone" or "download", and that wait used
+     to be unbounded. On iOS it never ended: the picker's database check had
+     just rewritten the published course library (megabytes) on the page being
+     left, that IndexedDB write was still open when the phone moved to /app/,
+     and the new page's read sat behind it for good - the course screen stayed
+     on "Getting ready" (Lake Wales, 16 Oct 2026) while Resume Round, which
+     writes nothing on the way in, opened every time. So ready is a deadline,
+     not a promise that the library has loaded: past it the app carries on as if
+     the library were empty, which at worst costs a download of a course it
+     already holds; the load keeps going underneath, and settle() merges
+     anything written meanwhile exactly as it does for any early write. */
+  var READY_TIMEOUT_MS = 2500;
 
   var big = {};
   KEYS.forEach(function (key) { big[key] = true; });
@@ -234,6 +247,11 @@
   }
 
   function boot() {
+    var deadline = setTimeout(function () {
+      if (mode !== "starting") return;
+      report("Course storage slow to load", "ready released after " + READY_TIMEOUT_MS + "ms with IndexedDB still open");
+      resolveReady({ mode: mode, timedOut: true });
+    }, READY_TIMEOUT_MS);
     openDb().then(function (handle) {
       db = handle;
       safe(function () {
@@ -244,6 +262,7 @@
       return readAll(handle);
     }).then(function (loaded) {
       mode = "idb";
+      clearTimeout(deadline);
       settle(loaded);
       migrating.forEach(function (key) { dirty[key] = true; });
       flush();
@@ -252,6 +271,7 @@
     }).catch(function (error) {
       /* No IndexedDB: behave exactly as before this file existed. */
       mode = "local";
+      clearTimeout(deadline);
       var loaded = {};
       KEYS.forEach(function (key) { loaded[key] = nativeGet(key); });
       settle(loaded);
@@ -362,9 +382,11 @@
 
   window.GDCourseStorage = {
     keys: function () { return KEYS.slice(); },
-    /* Resolves once every key is loaded. Anything that must see the existing
-       library before deciding something (the round hand-off, a mapping run)
-       awaits this; in practice it has resolved before the first tap. */
+    /* Resolves once every key is loaded, or at READY_TIMEOUT_MS, whichever is
+       first - {mode, timedOut}. Anything that must see the existing library
+       before deciding something (the round hand-off, a mapping run) awaits
+       this; in practice it has resolved before the first tap. A caller that
+       finds timedOut is looking at an empty library that may still fill in. */
     ready: ready,
     mode: function () { return mode; },
     lastFailure: function () { return failure; },
