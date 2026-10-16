@@ -28,7 +28,7 @@ import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { wakeGarminBuild } from "./lib/gd-garmin-build-wake.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete, scorecardIdentityMismatch } from "./lib/gd-course-fit-core.mjs";
 import { reverseGeocodePlace } from "./lib/gd-course-place.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, ownCourseFootprints, widerRetryAdopts, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, foreignGroundClaim, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, intersectOsmFrames, SIBLING_SWEEP_M, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, HAND_DRAWN_SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, ownCourseFootprints, widerRetryAdopts, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, foreignGroundClaim, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, normalizeCourseName, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, intersectOsmFrames, SIBLING_SWEEP_M, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, HAND_DRAWN_SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole, resolverHoleCandidates } from "./lib/gd-geometry-resolver-core.mjs";
 import { partitionLoops, walkCost } from "./lib/gd-ground-loops-core.mjs";
 import { courseNameFromCard } from "./lib/gd-facility-organise-core.mjs";
@@ -1260,6 +1260,8 @@ async function publishPlayOrders(job, course, payload, origin, diagnostics, quer
  * Failures are recorded and swallowed: a neighbour is a bonus to this run, never a reason
  * for the player's own course to fail. */
 const NEIGHBOUR_MIN_HOLES = 9;
+/* How far a listing pin may sit from its course's centre: an 18 spreads about 1km. */
+const SAME_NAME_M = 1000;
 const ESTABLISHMENT_WORD = /\b(golf|club|links)\b/i;
 
 async function neighbourAlreadyMapped(loop, courseId) {
@@ -1270,12 +1272,21 @@ async function neighbourAlreadyMapped(loop, courseId) {
   const byId = await supabaseFetch(MAPS_TABLE + "?select=course_id&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
   if (Array.isArray(byId) && byId.length) return { courseId: byId[0].course_id, by: "course-id" };
   const pad = 0.01;
-  const nearby = await supabaseFetch(MAPS_TABLE + "?select=course_id,course_lat,course_lng"
+  const nearby = await supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,course_lat,course_lng"
     + "&course_lat=gte." + (loop.centre.lat - pad) + "&course_lat=lte." + (loop.centre.lat + pad)
     + "&course_lng=gte." + (loop.centre.lng - pad) + "&course_lng=lte." + (loop.centre.lng + pad) + "&limit=50");
-  const onGround = (Array.isArray(nearby) ? nearby : []).find(row => Number.isFinite(Number(row.course_lat)) && Number.isFinite(Number(row.course_lng))
-    && distance(loop.centre, { lat: Number(row.course_lat), lng: Number(row.course_lng) }) <= SAME_GROUND_M);
-  return onGround ? { courseId: onGround.course_id, by: "same-ground" } : null;
+  const placed = (Array.isArray(nearby) ? nearby : []).filter(row => Number.isFinite(Number(row.course_lat)) && Number.isFinite(Number(row.course_lng)))
+    .map(row => ({ row, metres: distance(loop.centre, { lat: Number(row.course_lat), lng: Number(row.course_lng) }) }));
+  const onGround = placed.find(entry => entry.metres <= SAME_GROUND_M);
+  if (onGround) return { courseId: onGround.row.course_id, by: "same-ground" };
+  /* A row a player picked sits on the listing's pin, not the course's centre, and holds no
+     outline until its own run succeeds. Fairview, 2026-10-15: "fairview" was picked, its run
+     failed on an Overpass 502, and Griffith E. Harris's nearby run then published the same 18
+     as "fairview-country-club" - the pin was 356m from the holes' centre, past SAME_GROUND_M.
+     The same name close by is the same course. */
+  const name = normalizeCourseName(loop.name);
+  const sameName = name && placed.find(entry => entry.metres <= SAME_NAME_M && normalizeCourseName(entry.row.course_name) === name);
+  return sameName ? { courseId: sameName.row.course_id, by: "same-name" } : null;
 }
 
 async function publishNeighbourCourses(job, course, neighbours, origin) {
