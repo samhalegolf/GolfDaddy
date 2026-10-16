@@ -12,7 +12,7 @@
  * the close is watched on the DOM rather than through a callback that only one of the two
  * exits would ever fire.
  *
- * Shared by Map Viewport and Mapping Overlay. One copy of the hand-off, one place it can be
+ * Shared by Map Viewport, Mapping Overlay and Regional Bulk Scan. One copy of the hand-off, one place it can be
  * wrong. */
 (function () {
   "use strict";

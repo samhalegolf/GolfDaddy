@@ -213,6 +213,22 @@
         { name: "buildMapperDebugText", purpose: "Builds the text the Routine is fired with: prompt, facts, captures, output contract, diagnostics.", codePath: "functions/lib/gd-mapper-failure-kinds.mjs" }
       ],
       status: "implemented", needsVerification: false },
+    { id: "region-scan", label: "Regional Bulk Scan", parent: "courses",
+      function: "Scans every course in an area at once. The centre is picked with the real course picker (pick-only mode), a distance sets how far out to look, and every course in that radius is listed - those we already hold are counted but cannot be ticked, the rest start ticked. Scanning queues the ticked courses as background mapping jobs (the nearby-prefetch kind), so the worker maps them one at a time in idle moments, behind any player.",
+      owner: "scripts/studio/courses/region-scan/region-scan-page.js", runtime: { app: false, studio: true, server: true },
+      code: [
+        { role: "Studio page", path: "scripts/studio/courses/region-scan/region-scan-page.js" },
+        { role: "Region list (GET ?region=1) and bulk queue (POST kind region_scan), admin only", path: "functions/course-mapper-jobs.mjs" },
+        { role: "Picker hand-off", path: "scripts/studio/gd-studio-course-pick.js" }
+      ],
+      inputs: ["Picked centre course", "Distance", "OSM golf courses + course_maps"], outputs: ["Background mapping jobs (nearby_automap, requested_by region:<admin>)"],
+      owns: ["Which of a region's courses to scan"], doesNotOwn: ["The mapping run itself (course-mapper-worker-background.mjs)", "Remapping courses we already hold"],
+      connections: [{ target: "course-database", direction: "writes", label: "New course rows, then their geometry as each scan finishes" }],
+      keyFunctions: [
+        { name: "coursesInRegion", purpose: "Every course within a radius, marked hasMap when we already hold it. Shared with the nearby prefetch.", codePath: "functions/course-mapper-jobs.mjs" },
+        { name: "queueBackgroundMapperJobs", purpose: "Queues background mapping jobs, skipping held, duplicate or live courses. Shared with the nearby prefetch.", codePath: "functions/course-mapper-jobs.mjs" }
+      ],
+      status: "implemented", needsVerification: false },
     { id: "osm-scan", label: "OSM Scan", parent: "course-mapping",
       function: "Fetches and caches OpenStreetMap/Overpass course objects used as mapping candidates.",
       owner: "scripts/gd-course-library-pin-lock.js (mapperOsmGuideFetch/Memory)", runtime: { app: true, studio: false, server: false },
@@ -848,7 +864,7 @@
 
   var NAV_TREE = [
     { id: "overview" },
-    { id: "courses", children: ["course-database", "course-mapping", "map-viewport", "map-overlay", "course-usage", "course-visuals", "publishing"] },
+    { id: "courses", children: ["course-database", "course-mapping", "region-scan", "map-viewport", "map-overlay", "course-usage", "course-visuals", "publishing"] },
     { id: "shot-system", children: ["photo-scan", "practice-data", "practice-email", "bubble-geometry", "pattern-finder", "my-bubble", "shot-system-course-data", "conditions", "recommendations"] },
     { id: "gps-play", children: ["gps-course-selection", "gps-round-setup", "gps-hole-lifecycle", "gps-map-camera", "gps-garmin-preview", "gps-apple-preview", "gps-shot-planning", "gps-shot-capture", "gps-scorecard", "gps-course-data-capture", "gps-sync-recovery", "gps-demo-mode"] },
     { id: "players-coaches" },
