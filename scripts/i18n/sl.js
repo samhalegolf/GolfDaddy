@@ -884,7 +884,7 @@
     "course.noneDownloadedYet": "Še ni prenesenih igrišč",
     "course.tryAnotherSearch": "Poskusi z drugim iskanjem.",
     "course.downloadAutomatically": "Igrišča se samodejno prenesejo, ko jih prvič igraš.",
-    "course.offlineMembership": "Prenosi igrišč za golf za uporabo brez povezave so vključeni v članstvo Clarity. Igrišča si lahko še vedno ogledate v spletu.",
+    "course.signInToSave": "Prijavite se in igrišča, ki jih igrate, bodo shranjena tukaj.",
     "course.publishedMap": "Objavljen zemljevid",
     "course.courseMap": "Zemljevid igrišča",
     "course.mapType": "Vrsta zemljevida",

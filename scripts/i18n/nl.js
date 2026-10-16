@@ -840,7 +840,7 @@
     "course.noneDownloadedYet": "Nog geen banen gedownload",
     "course.tryAnotherSearch": "Probeer een andere zoekopdracht.",
     "course.downloadAutomatically": "Banen worden automatisch gedownload de eerste keer dat je ze speelt.",
-    "course.offlineMembership": "Offline downloads van golfbanen zijn inbegrepen bij het Clarity-lidmaatschap. Je kunt golfbanen nog steeds online bekijken.",
+    "course.signInToSave": "Log in en de banen die je speelt worden hier opgeslagen.",
     "course.publishedMap": "Gepubliceerde kaart",
     "course.courseMap": "Baankaart",
     "course.mapType": "Kaarttype",

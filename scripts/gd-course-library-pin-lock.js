@@ -2378,9 +2378,16 @@
      record of it. One record per course: {courseId, courseName, mapType:
      "object"|"published", objectsVersion, mapVersion, pkg, savedAt, bytes}. */
   const DOWNLOADED_COURSE_LIBRARY_KEY='clarity:course-library:v1';
-  function hasOfflineCourseAccess(){
+  /* Who may keep a course in the device Course Library: anyone signed in, or
+     a device with a live store subscription - the same rule as
+     app/js/access.js canSaveCourses(), because this panel writes the very
+     same records. It used to be the paid boundary (decided 16 Oct 2026). */
+  function canSaveCourses(){
     try{
-      return !!(window.ClarityPayments&&typeof window.ClarityPayments.hasActiveAccess==='function'&&window.ClarityPayments.hasActiveAccess());
+      const auth=window.ClaritySupabaseAuth;
+      if(auth&&typeof auth.session==='function'&&auth.session())return true;
+      const billing=window.ClarityStoreBilling;
+      return !!(billing&&typeof billing.entitlementActive==='function'&&billing.entitlementActive());
     }catch(e){return false;}
   }
   function downloadedCourseEntries(){
@@ -2420,7 +2427,7 @@
      where the problem is stated. */
   async function updateDownloadedCourseEntry(entry){
     if(!entry||!entry.courseId)return {ok:false,reason:'invalid'};
-    if(!hasOfflineCourseAccess())return {ok:false,reason:'access'};
+    if(!canSaveCourses())return {ok:false,reason:'signin'};
     var client=window.GDCoursePackageClient;
     if(!client||typeof client.fetchPackage!=='function')return {ok:false,reason:'offline'};
     var pkg=await client.fetchPackage({
@@ -2564,7 +2571,7 @@
       .filter(e=>!filter||normalizeCourseName(e.courseName).includes(filter))
       .sort((a,b)=>String(a.courseName).localeCompare(String(b.courseName)));
     if(!entries.length){
-      list.innerHTML=`<div class="gdCourseCard"><strong>${filter?i18nH('course.noMatching'):i18nH('course.noneDownloadedYet')}</strong><span>${filter?i18nH('course.tryAnotherSearch'):i18nH(hasOfflineCourseAccess()?'course.downloadAutomatically':'course.offlineMembership')}</span></div>`;
+      list.innerHTML=`<div class="gdCourseCard"><strong>${filter?i18nH('course.noMatching'):i18nH('course.noneDownloadedYet')}</strong><span>${filter?i18nH('course.tryAnotherSearch'):i18nH(canSaveCourses()?'course.downloadAutomatically':'course.signInToSave')}</span></div>`;
       return;
     }
     if(detailKey){
@@ -2609,9 +2616,11 @@
         }
         updateBtn.disabled=false;
         updateBtn.textContent=i18nT('course.updateMap');
-        if(result.reason==='access'){
-          if(window.ClarityPayments&&typeof window.ClarityPayments.requireAccess==='function')window.ClarityPayments.requireAccess('offlineCourse');
-          else toastSafe(i18nT('course.offlineMembership'));
+        if(result.reason==='signin'){
+          /* A guest is asked to sign in, not to pay: the sign-in overlay from
+             gd-auth-account-shell.js, with the toast saying why it opened. */
+          toastSafe(i18nT('access.signInSaveCourse'));
+          if(typeof window.gd67OpenAuth==='function')window.gd67OpenAuth('login');
           return;
         }
         toastSafe(result.reason==='not-ready'?i18nT('course.noNewerMap')

@@ -840,7 +840,7 @@
     "course.noneDownloadedYet": "Ühtegi väljakut pole veel alla laaditud",
     "course.tryAnotherSearch": "Proovi teist otsingut.",
     "course.downloadAutomatically": "Väljakud laaditakse alla automaatselt, kui neid esimest korda mängid.",
-    "course.offlineMembership": "Golfiväljakute võrguühenduseta allalaadimine kuulub Clarity liikmesuse juurde. Väljakuid saad endiselt veebis vaadata.",
+    "course.signInToSave": "Logi sisse ja väljakud, mida mängid, salvestatakse siia.",
     "course.publishedMap": "Avaldatud kaart",
     "course.courseMap": "Väljakukaart",
     "course.mapType": "Kaardi tüüp",

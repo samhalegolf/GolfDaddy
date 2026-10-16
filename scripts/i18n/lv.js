@@ -862,7 +862,7 @@
     "course.noneDownloadedYet": "Vēl nav lejupielādētu laukumu",
     "course.tryAnotherSearch": "Mēģini meklēt citādi.",
     "course.downloadAutomatically": "Laukumi tiek lejupielādēti automātiski, kad tos spēlē pirmo reizi.",
-    "course.offlineMembership": "Golfa laukumu lejupielāde lietošanai bezsaistē ir iekļauta Clarity abonementā. Laukumus joprojām varat skatīt tiešsaistē.",
+    "course.signInToSave": "Piesakieties, un laukumi, kuros spēlējat, tiks saglabāti šeit.",
     "course.publishedMap": "Publicētā karte",
     "course.courseMap": "Laukuma karte",
     "course.mapType": "Kartes veids",

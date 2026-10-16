@@ -884,7 +884,7 @@
     "course.noneDownloadedYet": "Nie pobrano jeszcze żadnych pól",
     "course.tryAnotherSearch": "Spróbuj innego wyszukiwania.",
     "course.downloadAutomatically": "Pola pobierają się automatycznie, gdy zagrasz na nich pierwszy raz.",
-    "course.offlineMembership": "Pobieranie pól golfowych do użytku offline jest dostępne w ramach członkostwa Clarity. Nadal możesz przeglądać pola online.",
+    "course.signInToSave": "Zaloguj się, a pola, na których grasz, będą zapisywane tutaj.",
     "course.publishedMap": "Opublikowana mapa",
     "course.courseMap": "Mapa pola",
     "course.mapType": "Typ mapy",
