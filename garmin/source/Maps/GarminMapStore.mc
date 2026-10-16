@@ -56,6 +56,14 @@ class GarminMapStore {
         return null;
     }
 
+    // Why the hole has no picture, when a fetch has failed: the response
+    // code of the last attempt, or null while nothing has failed (not asked
+    // yet, or still in flight). For the map face's "Map failed" line.
+    function failureCode(holeNumber, courseKey) {
+        if (manifest == null || courseKey == null || !manifest.courseKey.equals(courseKey)) { return null; }
+        return downloader.failureCode(holeNumber, manifest.courseKey, manifest.version);
+    }
+
     function requestHole(holeNumber) {
         if (manifest == null) { return; }
         var hole = manifest.hole(holeNumber);
