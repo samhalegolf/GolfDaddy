@@ -302,7 +302,9 @@ had, just now driven by the player instead of only by the Scene), and
   in the plan ("use the existing command revision/order system rather than
   inventing special Garmin lock state").
 - **Button layout decision**: SELECT enters/confirms Aim Mode (plan step 25);
-  BACK cancels an in-progress aim or backs out to Numbers; UP/DOWN nudge
+  BACK cancels an in-progress aim or backs out to Numbers, and from the
+  top of the app it leaves it (a real round asks "Leave the round?"
+  first; the waiting, ready and demo faces exit at once); UP/DOWN nudge
   vertically while aiming, navigate holes otherwise; `WatchUi.KEY_LAP` is
   LOCK-from-the-map (plan step 22) since SELECT was already needed for aim
   entry/confirm. **No lateral (LEFT/RIGHT) nudge is wired for button

@@ -134,7 +134,11 @@ class GarminMapView extends WatchUi.View {
         var bitmap = session.mapStore.bitmapFor(holeNumber, courseKey);
         var shapes = (bitmap == null) ? session.outlinesFor(holeNumber) : null;
         if (bitmap == null && shapes == null) {
-            drawUnavailable(dc, "Loading map...");
+            // Still fetching, or failed: say which, with the response code,
+            // rather than "Loading map..." forever over a fetch that keeps
+            // failing. The downloader retries on its own schedule.
+            var code = session.mapStore.failureCode(holeNumber, courseKey);
+            drawUnavailable(dc, (code != null) ? "Map failed (" + code + ")" : "Loading map...");
             return;
         }
         var drawn = (bitmap != null);

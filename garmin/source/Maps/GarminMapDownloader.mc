@@ -54,9 +54,53 @@ class GarminMapDownloader {
     var store;       // GarminMapStore, set by the store itself on construction
     var awaiting;     // Dictionary { "holeNumber", "courseKey", "version" } or null
 
+    // Failure memory, so a hole whose fetch failed is not asked for again on
+    // the very next redraw. The map face redraws every second and used to
+    // re-request on each one, with no backoff, no cap and nothing on screen
+    // but "Loading map..." - an endless Bluetooth loop (audit GA-007).
+    // Keyed by hole number, for the package the failure happened under; a
+    // new package starts clean. Retries wait 5 s, then 15 s, then a minute
+    // between every attempt after that.
+    var failures;    // Dictionary holeNumber => { "attempts", "nextAt", "code", "courseKey", "version" }
+    static const RETRY_DELAYS_MS = [5000, 15000, 60000];
+
     function initialize(store) {
         self.store = store;
         awaiting = null;
+        failures = {};
+    }
+
+    // The remembered failure for this hole under this package, or null.
+    // A failure under another package is stale and forgotten here.
+    function failureFor(holeNumber, courseKey, version) {
+        if (!failures.hasKey(holeNumber)) { return null; }
+        var failure = failures[holeNumber];
+        if (!failure["courseKey"].equals(courseKey) || failure["version"] != version) {
+            failures.remove(holeNumber);
+            return null;
+        }
+        return failure;
+    }
+
+    // The response code of the last failed fetch for this hole, or null
+    // while nothing has failed (not asked yet, or still in flight).
+    function failureCode(holeNumber, courseKey, version) {
+        var failure = failureFor(holeNumber, courseKey, version);
+        return (failure != null) ? failure["code"] : null;
+    }
+
+    function noteFailure(holeNumber, courseKey, version, code) {
+        var previous = failureFor(holeNumber, courseKey, version);
+        var attempts = (previous != null) ? previous["attempts"] + 1 : 1;
+        var step = attempts - 1;
+        if (step >= RETRY_DELAYS_MS.size()) { step = RETRY_DELAYS_MS.size() - 1; }
+        failures[holeNumber] = {
+            "attempts" => attempts,
+            "nextAt" => System.getTimer() + RETRY_DELAYS_MS[step],
+            "code" => code,
+            "courseKey" => courseKey,
+            "version" => version
+        };
     }
 
     function requestHole(hole, courseKey, version) {
@@ -68,6 +112,8 @@ class GarminMapDownloader {
             if (GarminTransmitPolicy.muted()) { System.println("image request waiting on hole " + awaiting["holeNumber"]); }
             return;
         }
+        var failure = failureFor(hole.holeNumber, courseKey, version);
+        if (failure != null && System.getTimer() < failure["nextAt"]) { return; }
         awaiting = { "holeNumber" => hole.holeNumber, "courseKey" => courseKey, "version" => version };
 
         var options = {
@@ -83,6 +129,7 @@ class GarminMapDownloader {
         } catch (e) {
             if (GarminTransmitPolicy.muted()) { System.println("image request threw: " + e.getErrorMessage()); }
             awaiting = null;
+            noteFailure(hole.holeNumber, courseKey, version, -1);
         }
     }
 
@@ -102,13 +149,18 @@ class GarminMapDownloader {
             System.println("image response: code " + responseCode + " data=" + data
                 + (requested != null ? " hole " + requested["holeNumber"] : " (nothing requested)"));
         }
-        if (requested == null || responseCode != 200 || data == null) { return; }
+        if (requested == null) { return; }
+        if (responseCode != 200 || data == null) {
+            noteFailure(requested["holeNumber"], requested["courseKey"], requested["version"], responseCode);
+            return;
+        }
         var manifest = store.manifest;
         if (manifest == null
                 || !manifest.courseKey.equals(requested["courseKey"])
                 || manifest.version != requested["version"]) {
             return;
         }
+        failures.remove(requested["holeNumber"]);
         store.onImageDecoded(requested["holeNumber"], data);
     }
 }
