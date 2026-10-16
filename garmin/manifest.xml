@@ -25,7 +25,7 @@
         entry="ClarityCaddyApp"
         launcherIcon="@Drawables.LauncherIcon"
         minSdkVersion="3.0.0"
-        version="1.1.6">
+        version="1.1.7">
         <!-- version: the app's own release number, bumped for every store
              upload (the portal will not take one that is not higher). Unset
              through the first release (1.0.0); 1.1.0 = trees, hazards and
@@ -36,7 +36,11 @@
              button on the map, 2026-10-08; 1.1.5 = folding the wind into
              the big number moves the plays numbers too; 1.1.6 = BACK leaves
              the app (a real round asks first) and a failed map fetch backs
-             off and says so, 2026-10-16. -->
+             off and says so, 2026-10-16; 1.1.7 = a button nudge at the edge
+             of the glass pans the map (button-only watches could nudge the
+             aim off-screen), and a relock starts from the phone's fresh
+             target instead of an aim confirmed earlier on the hole,
+             2026-10-17. -->
         <!-- Connect IQ 3.0 baseline per plan step 29. The 3.2.0 minimum this
              carried until 2026-09-19 was a guess, and it locked out the
              Approach S62 entirely: that device tops out at CIQ 3.0.12, so
