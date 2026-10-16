@@ -161,6 +161,21 @@ test("a neighbour we already have is never overwritten", async () => {
   assert.deepStrictEqual(spyglass.existing, { courseId: "spyglass-hill", by: "osm-outline" });
 });
 
+/* Fairview, 2026-10-15: the player's own row, picked from a listing, sat on the listing's pin
+   356m from the holes' centre with no outline yet (its run had failed). A neighbour run then
+   published the same 18 again under the OSM name's slug. */
+test("a picked row of the same name close by is the same course", async () => {
+  const picked = {
+    course_id: "spyglass", course_name: "Spyglass Hill Golf Course", course_lat: SPYGLASS.lat, course_lng: SPYGLASS.lng,
+    osm_course_ref: null, facility_key: null, objects_json: {}, holes_json: {}
+  };
+  const { job, maps } = await replay({ existingMaps: [picked] });
+  assert.strictEqual(job.status, "done");
+  assert.ok(!maps.has("spyglass-hill-golf-course"), "no second Spyglass row");
+  const spyglass = job.result.diagnostics.neighbourCourses.find(entry => entry.name === "Spyglass Hill Golf Course");
+  assert.deepStrictEqual(spyglass.existing, { courseId: "spyglass", by: "same-name" }, "matched by name, not ground: " + JSON.stringify(spyglass));
+});
+
 (async () => {
   let failed = 0;
   for (const { name, fn } of tests) {
