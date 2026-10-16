@@ -47,10 +47,28 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
         return true;
     }
 
+    // BACK, from the top down:
+    //   - the big compass closes;
+    //   - on the map it cancels an aim, or goes back to Numbers;
+    //   - on a demo's numbers face it ends the demo;
+    //   - on a real round's numbers face it asks before leaving the round;
+    //   - on every other face (Waiting for round, Ready, Taking over) it
+    //     LEAVES THE APP, by returning false so the system pops the root
+    //     view - the way BACK leaves every Garmin app from its top screen.
+    // Until 1.1.6 this always returned true, so the app could not be left
+    // at all: the only way off "Waiting for round" was to hold the power
+    // button until the watch rebooted (store review, 2026-10-14; audit
+    // finding GA-008).
     function onBack() {
         if (numbersShowing() && view.numbersView.windZoom) { closeWindZoom(); return true; }
-        router.dispatch(InputAction.BACK);
-        return true;
+        if (view.showingMap) { router.dispatch(InputAction.BACK); return true; }
+        if (session.face().equals(GarminSessionManager.FACE_PLAYING)) {
+            if (session.isDemo()) { router.dispatch(InputAction.BACK); return true; }
+            WatchUi.pushView(new WatchUi.Confirmation("Leave the round?"), new ExitConfirmationDelegate(), WatchUi.SLIDE_IMMEDIATE);
+            return true;
+        }
+        session.dismissHandoverNotice();
+        return false;
     }
 
     // The dedicated MENU input (a long-press or MENU button on most Garmin
@@ -346,15 +364,16 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
         } else if (action.equals(InputAction.AIM_RIGHT)) {
             view.mapView.nudge(GarminMapView.NUDGE_STEP_IMAGE_PX, 0);
         } else if (action.equals(InputAction.BACK)) {
-            // On the map while aiming, BACK cancels the aim (plan step 21)
-            // rather than leaving the screen. Otherwise it is the quick way
-            // back to Numbers (plan step 23), or — on Numbers — dismisses
-            // whatever transient state is showing, same as Phase 1.
+            // Dispatched by onBack only on the map or a demo's numbers face;
+            // everywhere else onBack leaves the app (or asks) itself. On the
+            // map while aiming, BACK cancels the aim (plan step 21) rather
+            // than leaving the screen; otherwise it is the quick way back to
+            // Numbers (plan step 23).
             if (view.showingMap && view.mapView.aiming) {
                 view.mapView.cancelAim();
             } else if (view.showingMap) {
                 view.showNumbers();
-            } else if (session.isDemo() && session.face().equals(GarminSessionManager.FACE_PLAYING)) {
+            } else {
                 // On a demo's numbers face BACK ends it, as the face says.
                 // Any notice goes with it: the numbers face never draws one,
                 // so letting an invisible notice swallow the press (as it
@@ -362,9 +381,6 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
                 session.dismissRejection();
                 session.dismissHandoverNotice();
                 session.sendSimple(GarminCommandKind.DEMO_END);
-            } else {
-                session.dismissRejection();
-                session.dismissHandoverNotice();
             }
         }
         WatchUi.requestUpdate();
@@ -397,5 +413,19 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
         } else if (face.equals(GarminSessionManager.FACE_READY)) {
             session.sendSimple(GarminCommandKind.TAKE_OVER);
         }
+    }
+}
+
+// "Leave the round?" - the one modal in the app. YES exits the app
+// (System.exit); NO pops straight back to the numbers face, untouched. Only
+// a real round asks: the round itself lives on the phone, but this wrist
+// has no way to ask for the latest Scene after a relaunch (audit GA-010),
+// so one accidental BACK mid-round would cost the watch its round until the
+// phone next published one.
+class ExitConfirmationDelegate extends WatchUi.ConfirmationDelegate {
+    function initialize() { ConfirmationDelegate.initialize(); }
+    function onResponse(response) {
+        if (response == WatchUi.CONFIRM_YES) { System.exit(); }
+        return true;
     }
 }
