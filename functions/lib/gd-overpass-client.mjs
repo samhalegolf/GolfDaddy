@@ -54,17 +54,27 @@ async function throttle() {
   lastRequestAt = Date.now();
 }
 
-async function requestOnce(query) {
+async function requestOnce(query, deadline) {
   await throttle();
-  const response = await fetch(OVERPASS_URL + "?data=" + encodeURIComponent(query), {
-    headers: { Accept: "application/json", "User-Agent": USER_AGENT }
-  });
-  if (!response.ok) {
-    const error = new Error("Overpass " + response.status);
-    error.status = response.status;
-    throw error;
+  const left = deadline - Date.now();
+  if (left <= 0) throw new Error("Overpass did not answer in time");
+  const abort = new AbortController();
+  const timer = Number.isFinite(left) ? setTimeout(() => abort.abort(), left) : null;
+  let data;
+  try {
+    const response = await fetch(OVERPASS_URL + "?data=" + encodeURIComponent(query), {
+      headers: { Accept: "application/json", "User-Agent": USER_AGENT },
+      signal: abort.signal
+    });
+    if (!response.ok) {
+      const error = new Error("Overpass " + response.status);
+      error.status = response.status;
+      throw error;
+    }
+    data = await response.json();
+  } finally {
+    clearTimeout(timer);
   }
-  const data = await response.json();
   /* A busy Overpass answers 200 with whatever it had gathered when it ran out of time or
      memory, and says so only in `remark`. Darenth Valley and High Elms both came back as
      2-3 elements and failed as "no hole geometry" on courses OSM has fully mapped; Sonning
@@ -80,21 +90,30 @@ async function requestOnce(query) {
 }
 
 /* Serialised through `queue` so overlapping calls within one process still respect
-   MIN_INTERVAL_MS instead of racing the throttle check. */
-export async function fetchOverpass(query) {
+   MIN_INTERVAL_MS instead of racing the throttle check.
+
+   timeoutMs bounds the whole call - queue wait, every attempt and every backoff. A background
+   worker can afford the full retry ladder (~14s of backoff alone); a function answering a
+   person in the browser cannot, because Netlify kills it and the caller gets a bare 504 instead
+   of the rest of its answer. Past the budget the request is aborted and no retry starts. */
+export async function fetchOverpass(query, { timeoutMs } = {}) {
   const cached = cacheGet(query);
   if (cached) return cached;
+  const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Infinity;
   const run = queue.then(async () => {
     let lastError = null;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
-        const data = await requestOnce(query);
+        const data = await requestOnce(query, deadline);
         cachePut(query, data);
         return data;
       } catch (error) {
+        if (error && error.name === "AbortError") throw new Error("Overpass did not answer in time");
         lastError = error;
         if (!RETRY_STATUSES.has(error && error.status)) throw error;
-        if (attempt < MAX_RETRIES - 1) await new Promise(resolve => setTimeout(resolve, RETRY_BASE_MS * Math.pow(2, attempt)));
+        const backoff = RETRY_BASE_MS * Math.pow(2, attempt);
+        if (attempt === MAX_RETRIES - 1 || Date.now() + backoff >= deadline) break;
+        await new Promise(resolve => setTimeout(resolve, backoff));
       }
     }
     throw lastError || new Error("Overpass request failed");
