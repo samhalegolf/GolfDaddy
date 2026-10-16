@@ -19,6 +19,10 @@
    GET ?playerRequests=1 (admin only) -> {items} - every course players (not admins) asked the
    app to map, one item per course with request and player counts, newest first
    (lib/gd-player-requests.mjs). Studio's Course Mapping page is that list.
+   GET ?region=1&lat=&lng=&radiusKm= (admin only) -> {courses} - every course within the radius,
+   marked hasMap when we hold it. Studio's Regional Bulk Scan page is that list.
+   POST {kind:"region_scan", courses:[{name,lat,lng}]} (admin only) -> queues the ticked
+   courses as background mapping jobs; {queued, skipped}.
 
    The worker itself is functions/course-mapper-worker-background.mjs. */
 
@@ -522,14 +526,70 @@ export async function promoteNearbyJob(courseId, origin) {
   return !!job;
 }
 
+/* Every golf course within radiusM of a point, marked hasMap when we already hold a
+   course_maps row for it. Same OSM list and same library merge as /api/courses-near, so what
+   Studio's Regional Scan shows is what the picker would show around that point. Library rows
+   are read unpublished too: a course mid-build or one that already failed has a row, and is
+   not new. {unavailable:true} when Overpass does not answer - a library-only list would read
+   as "nothing to scan here", which is not what we know. */
+export async function coursesInRegion({ lat, lng, radiusM, timeoutMs } = {}) {
+  const anchor = { lat: Number(lat), lng: Number(lng) };
+  const box = boundingBox(anchor.lat, anchor.lng, radiusM);
+  const [library, overpass] = await Promise.all([
+    supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,course_lat,course_lng"
+      + "&course_lat=gte." + box.minLat + "&course_lat=lte." + box.maxLat
+      + "&course_lng=gte." + box.minLng + "&course_lng=lte." + box.maxLng + "&limit=1000").catch(() => []),
+    fetchOverpass(nearbyCoursesQuery(anchor.lat, anchor.lng, radiusM), { timeoutMs }).catch(error => ({ __error: error }))
+  ]);
+  if (overpass && overpass.__error) return { unavailable: true, courses: [] };
+  const courses = mergeWithLibrary(coursesFromOverpass(overpass, anchor), library, anchor)
+    .filter(course => slug(course.name) && !(Number(course.distanceM) > radiusM));
+  return { courses };
+}
+
+/* Queue background mapping jobs (NEARBY_AUTOMAP_KIND) for courses we hold nothing for, each
+   under the id the picker gives an unmapped OSM course (a slug of its name), so the job lands
+   on the row a player will later open. Every course is re-checked here, whatever the caller
+   thought of it: a mapped duplicate nearby, an id another course already owns and a live job
+   all skip it. Returns what was queued and why the rest were not. */
+async function queueBackgroundMapperJobs(courses, requestedBy) {
+  const queued = [];
+  const skipped = [];
+  for (const course of courses) {
+    const courseId = slug(course.name);
+    const lat = Number(course.lat), lng = Number(course.lng);
+    const skip = reason => skipped.push({ courseId, name: course.name, reason });
+    if (!courseId || !Number.isFinite(lat) || !Number.isFinite(lng)) { skip("no-location"); continue; }
+    const center = { lat, lng };
+    const duplicate = await findDuplicateCourseWithGeometry(supabaseFetch, {
+      courseId, courseName: course.name, center, radiusM: ASSUMED_COURSE_MATCH_RADIUS_M
+    }).catch(() => null);
+    if (duplicate) { skip("already-mapped"); continue; }
+    /* The id is a name slug, so a same-named course anywhere in the world already owns it.
+       Writing this centre over that row would move the other course here. Likewise any live
+       job for the id, of any kind - a player may have opened it in the meantime. */
+    const [owned, live] = await Promise.all([
+      supabaseFetch(MAPS_TABLE + "?select=course_id&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => null),
+      supabaseFetch(TABLE + "?select=id&course_id=eq." + encodeURIComponent(courseId) + "&status=in.(queued,running)&limit=1").catch(() => null)
+    ]);
+    if (!Array.isArray(owned) || owned.length) { skip("already-held"); continue; }
+    if (!Array.isArray(live) || live.length) { skip("already-queued"); continue; }
+    if (!await ensureCourseCenter(courseId, { courseLat: lat, courseLng: lng, courseName: course.name })) { skip("no-location"); continue; }
+    await supabaseFetch(TABLE, {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify([{ course_id: courseId, kind: NEARBY_AUTOMAP_KIND, status: "queued", mapper_version: MAPPER_VERSION, requested_by: requestedBy }])
+    }).then(() => queued.push(courseId), () => skip("insert-failed"));
+  }
+  return { queued, skipped };
+}
+
 /* Queue the courses nearest to a scanned one that we hold nothing for. Called by the worker
    after a player's scan has settled, so the one Overpass query here never competes with it.
 
    "Hold nothing for" means no course_maps row near it: a mapped course, a course mid-build and
    a course that already failed all have one (ensureCourseCenter writes it before any job), so
-   none of them is queued again. Same OSM list and same library merge as /api/courses-near, and
-   the same id the picker gives an unmapped OSM course (a slug of its name), so the job lands
-   on the row the player will later open.
+   none of them is queued again.
 
    Best-effort throughout: a busy Overpass simply means no neighbours this time. */
 export async function enqueueNearbyMapperJobs({ sourceCourseId, limit = NEARBY_PREFETCH_COUNT } = {}) {
@@ -538,44 +598,21 @@ export async function enqueueNearbyMapperJobs({ sourceCourseId, limit = NEARBY_P
   const lat = Number(source && source.course_lat), lng = Number(source && source.course_lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { queued: [], reason: "source-has-no-centre" };
 
-  const box = boundingBox(lat, lng, NEARBY_PREFETCH_RADIUS_M);
-  const [library, overpass] = await Promise.all([
-    supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,course_lat,course_lng"
-      + "&course_lat=gte." + box.minLat + "&course_lat=lte." + box.maxLat
-      + "&course_lng=gte." + box.minLng + "&course_lng=lte." + box.maxLng + "&limit=500").catch(() => []),
-    fetchOverpass(nearbyCoursesQuery(lat, lng, NEARBY_PREFETCH_RADIUS_M)).catch(error => ({ __error: error }))
-  ]);
-  if (overpass && overpass.__error) return { queued: [], reason: "overpass-unavailable" };
-
-  const candidates = mergeWithLibrary(coursesFromOverpass(overpass, { lat, lng }), library, { lat, lng })
-    .filter(course => !course.hasMap && slug(course.name))
-    .slice(0, limit);
-
-  const queued = [];
-  for (const course of candidates) {
-    const courseId = slug(course.name);
-    const center = { lat: course.lat, lng: course.lng };
-    const duplicate = await findDuplicateCourseWithGeometry(supabaseFetch, {
-      courseId, courseName: course.name, center, radiusM: ASSUMED_COURSE_MATCH_RADIUS_M
-    }).catch(() => null);
-    if (duplicate) continue;
-    /* The id is a name slug, so a same-named course anywhere in the world already owns it.
-       Writing this centre over that row would move the other course here. Likewise any live
-       job for the id, of any kind - a player may have opened it in the meantime. */
-    const [owned, live] = await Promise.all([
-      supabaseFetch(MAPS_TABLE + "?select=course_id&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => null),
-      supabaseFetch(TABLE + "?select=id&course_id=eq." + encodeURIComponent(courseId) + "&status=in.(queued,running)&limit=1").catch(() => null)
-    ]);
-    if (!Array.isArray(owned) || owned.length || !Array.isArray(live) || live.length) continue;
-    if (!await ensureCourseCenter(courseId, { courseLat: center.lat, courseLng: center.lng, courseName: course.name })) continue;
-    await supabaseFetch(TABLE, {
-      method: "POST",
-      headers: { Prefer: "return=minimal" },
-      body: JSON.stringify([{ course_id: courseId, kind: NEARBY_AUTOMAP_KIND, status: "queued", mapper_version: MAPPER_VERSION, requested_by: NEARBY_ACTOR_PREFIX + sourceCourseId }])
-    }).then(() => queued.push(courseId)).catch(() => {});
-  }
+  const region = await coursesInRegion({ lat, lng, radiusM: NEARBY_PREFETCH_RADIUS_M });
+  if (region.unavailable) return { queued: [], reason: "overpass-unavailable" };
+  const candidates = region.courses.filter(course => !course.hasMap).slice(0, limit);
+  const { queued } = await queueBackgroundMapperJobs(candidates, NEARBY_ACTOR_PREFIX + sourceCourseId);
   return { queued, candidates: candidates.length };
 }
+
+/* Studio's Regional Scan: the operator picked which of a region's unmapped courses to map.
+   Same background kind as the nearby prefetch, so a bulk scan runs one course at a time in
+   the worker's idle moments and never gets in a player's way; requested_by names the admin
+   who asked. Capped per request so one call stays well inside a function's time - the page
+   sends a long selection in batches. */
+const REGION_SCAN_BATCH_MAX = 25;
+const REGION_SCAN_MAX_RADIUS_M = 50000;
+const REGION_ACTOR_PREFIX = "region:";
 
 /* Enrichment has its own enqueue rather than reusing enqueueMapperJob, because every gate in
    that one is wrong here. It refuses a course that already has geometry at the current mapper
@@ -652,6 +689,19 @@ export default async function courseMapperJobs(req) {
       /* The caller's own scans in the app are not player requests. */
       return json(200, { items: await loadPlayerRequests(supabaseFetch, { adminUserIds: [user.id] }) });
     }
+    /* Studio's Regional Scan list (admin only): every course within radiusKm of lat/lng. */
+    if (url.searchParams.get("region") === "1") {
+      const user = await verifiedUser(req);
+      if (!(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
+      const lat = Number(url.searchParams.get("lat")), lng = Number(url.searchParams.get("lng"));
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+        return json(400, { error: "lat and lng are required" });
+      }
+      const radiusM = Math.min(REGION_SCAN_MAX_RADIUS_M, Math.max(1000, Number(url.searchParams.get("radiusKm")) * 1000 || 0));
+      const region = await coursesInRegion({ lat, lng, radiusM, timeoutMs: 20000 });
+      if (region.unavailable) return json(503, { error: "OpenStreetMap did not answer - try again in a minute" });
+      return json(200, { anchor: { lat, lng }, radiusM, courses: region.courses });
+    }
     const courseId = slug(url.searchParams.get("courseId") || url.searchParams.get("course_id"));
     /* No courseId now means "all of them" rather than an error. The admin list
        needs every course's state at once; asking per row is what stopped it
@@ -671,6 +721,23 @@ export default async function courseMapperJobs(req) {
   const refine = requestedKind === SHAPE_REFINE_KIND;
   const trees = requestedKind === TREE_KIND;
   const user = await verifiedUser(req, payload);
+
+  /* Regional Scan: a list of courses rather than one courseId, so it is answered here, before
+     anything below asks for one. */
+  if (requestedKind === "region_scan") {
+    if (!(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
+    const courses = Array.isArray(payload && payload.courses) ? payload.courses : [];
+    if (!courses.length) return json(400, { error: "courses required" });
+    if (courses.length > REGION_SCAN_BATCH_MAX) return json(400, { error: "at most " + REGION_SCAN_BATCH_MAX + " courses per request" });
+    const result = await queueBackgroundMapperJobs(
+      courses.map(course => ({ name: String(course && course.name || "").trim(), lat: course && course.lat, lng: course && course.lng })),
+      REGION_ACTOR_PREFIX + mapperActorKey({ userId: user.id })
+    );
+    /* No job id: the worker picks the background queue up itself once nothing else is waiting. */
+    if (result.queued.length) await pingWorkerAt(new URL(req.url).origin);
+    return json(200, result);
+  }
+
   /* An anonymous caller may map, but only as itself: a guest install id is accepted here and
      nowhere else. Without a verified user AND without a usable guest id there is no actor to
      charge the run to, so nothing is read or written. */

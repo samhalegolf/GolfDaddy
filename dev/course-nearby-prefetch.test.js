@@ -11,6 +11,8 @@
  *   - a background job never queues neighbours of its own
  *   - a player opening a course still waiting in the background queue moves it to the front
  *   - a failed background run does not stop the first player getting their own attempt
+ *   - Studio's Regional Scan lists a region's courses (admin only) and queues just the ticked
+ *     ones as background jobs, skipping any we already hold
  *
  * Supabase and Overpass are stubbed at the fetch layer, so the suite is hermetic. */
 
@@ -43,6 +45,7 @@ function stubFetch(world) {
     url = String(url);
     const method = String(options.method || "GET").toUpperCase();
     if (url.includes("overpass")) return jsonResponse(200, { elements: world.osm || [] });
+    if (url.endsWith("/auth/v1/user")) return world.authUser ? jsonResponse(200, world.authUser) : jsonResponse(401, {});
     if (url.includes("/auth/v1/admin/users/")) {
       const id = decodeURIComponent(url.split("/auth/v1/admin/users/")[1]);
       return (world.users || {})[id] ? jsonResponse(200, world.users[id]) : jsonResponse(404, {});
@@ -248,6 +251,58 @@ test("a failed background run does not stop a player getting their own attempt",
   assert.strictEqual(shape.deriveCoursePackageState({ map: null, visual: null, visualJobs: [], mapperJobs: failedBackground }), "none");
   const failedPlayer = [{ kind: "automap", status: "failed", error: "no OSM holes" }];
   assert.strictEqual(shape.deriveCoursePackageState({ map: null, visual: null, visualJobs: [], mapperJobs: failedPlayer }), "failed");
+});
+
+const ADMIN = { id: "admin-uid", email: "samhalegolf@gmail.com" };
+function regionRequest(method, query, body) {
+  return new Request("https://site.test/api/course-mapper-jobs" + (query || ""), {
+    method,
+    headers: Object.assign({ Authorization: "Bearer t" }, body ? { "Content-Type": "application/json" } : {}),
+    body: body ? JSON.stringify(body) : undefined
+  });
+}
+
+test("Regional Scan lists every course in the radius, marking the ones we already hold", async () => {
+  const mapped = { course_id: "course-1-mapped", course_name: "Course 1", course_lat: 0, course_lng: 0.009 };
+  stubFetch({ authUser: ADMIN, maps: [mapped], osm: [osmCourse(1), osmCourse(2), osmCourse(30)] });
+  const res = await jobs.default(regionRequest("GET", "?region=1&lat=0&lng=0&radiusKm=10"));
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.radiusM, 10000);
+  assert.deepStrictEqual(body.courses.map(c => [c.name, c.hasMap]), [["Course 1", true], ["Course 2", false]], "Course 30 sits ~33 km out");
+});
+
+test("Regional Scan is admin only", async () => {
+  stubFetch({ authUser: { id: "player", email: "someone@example.com" }, osm: [osmCourse(1)] });
+  assert.strictEqual((await jobs.default(regionRequest("GET", "?region=1&lat=0&lng=0&radiusKm=10"))).status, 403);
+  const calls = stubFetch({ authUser: { id: "player", email: "someone@example.com" } });
+  const res = await jobs.default(regionRequest("POST", "", { kind: "region_scan", courses: [{ name: "Course 1", lat: 0, lng: 0.009 }] }));
+  assert.strictEqual(res.status, 403);
+  assert.strictEqual(jobInserts(calls).length, 0);
+});
+
+test("Regional Scan queues the ticked courses as background jobs and skips one we hold", async () => {
+  const held = { course_id: "course-2", course_name: "Course 2", course_lat: 51, course_lng: -1 };
+  const calls = stubFetch({ authUser: ADMIN, maps: [held] });
+  const res = await jobs.default(regionRequest("POST", "", { kind: "region_scan", courses: [
+    { name: "Course 1", lat: 0, lng: 0.009 }, { name: "Course 2", lat: 0, lng: 0.018 }, { name: "Course 3", lat: 0, lng: 0.027 }
+  ] }));
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.deepStrictEqual(body.queued, ["course-1", "course-3"]);
+  assert.deepStrictEqual(body.skipped.map(s => [s.courseId, s.reason]), [["course-2", "already-held"]]);
+  jobInserts(calls).forEach(row => {
+    assert.strictEqual(row.kind, jobs.NEARBY_AUTOMAP_KIND);
+    assert.strictEqual(row.requested_by, "region:user:" + ADMIN.id);
+  });
+  assert.deepStrictEqual(calls.pings, [{ jobId: null }], "the worker is woken once, with no job named");
+});
+
+test("Regional Scan refuses an oversized batch", async () => {
+  const calls = stubFetch({ authUser: ADMIN });
+  const courses = Array.from({ length: 26 }, (_, i) => ({ name: "Course " + i, lat: 0, lng: i * 0.009 }));
+  assert.strictEqual((await jobs.default(regionRequest("POST", "", { kind: "region_scan", courses }))).status, 400);
+  assert.strictEqual(jobInserts(calls).length, 0);
 });
 
 (async function run() {
