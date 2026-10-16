@@ -327,10 +327,12 @@ had, just now driven by the player instead of only by the Scene), and
 ## What's deliberately NOT done yet
 
 - Real device/simulator testing of any of the above — none of it has run.
-- No touch-drag polish (edge panning while dragging near the screen bounds,
-  live pinch/crown zoom) — `WatchMapCamera.swift`'s `panned()`/`zoomed()`
-  were deliberately not ported; add them here if real-device testing shows
-  the fixed resting-camera framing is too tight to aim comfortably within.
+- No live zoom (`WatchMapCamera.swift`'s `zoomed()` was deliberately not
+  ported). Edge panning IS ported, both ways: a drag held against the rim
+  pans after a dwell (`GarminMapView.onPanTick`), and on a button-only watch
+  a nudge that carries the target into the same edge zone slides the camera
+  by the overshoot (`GarminMapView.followNudge`, 2026-10-17) — before that
+  the target simply walked off the glass.
 - No Scene schema v2 (`surface.active.platform`/`deviceId` — original plan
   step 6). Not required for Phase 1: `surface.active == "watch"` already
   covers "a wrist is driving," Apple or Garmin alike, and the `device` field

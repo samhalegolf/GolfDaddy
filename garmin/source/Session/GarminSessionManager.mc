@@ -686,6 +686,18 @@ class GarminSessionManager {
         var incomingHole = incoming.holeNumber();
         if (incomingHole != null && (previousHole == null || previousHole != incomingHole)) {
             playState.enter(incomingHole);
+        } else if (previous != null && (previous.shotLocked() != incoming.shotLocked() || demoMoved(previous, incoming))) {
+            // A lock or an unlock is a new shot on the same hole, and so is
+            // a demo planting the player somewhere else. Apple gets this
+            // for free: HoleMapView swaps AimableHoleMap out when the shot
+            // is not aimable, so a relock starts from the phone's fresh
+            // default target. Here the play state is one shared instance,
+            // and until 2026-10-17 an aim confirmed earlier on the hole
+            // outlived the unlock, so a relock from the approach showed
+            // the old tee-shot Bubble back down the fairway instead of the
+            // green (seen in the simulator demo, hole 8 tee -> approach).
+            // Same reset as a new hole; the player's fix stays.
+            playState.enter(incomingHole);
         }
         // A demo plants the player and the wrist's GPS sits it out (stop()
         // reports a null fix, which onLocationFix ignores during a demo, so
@@ -711,6 +723,15 @@ class GarminSessionManager {
         outlinesFor(currentHole());
         reconcileOutbox(incoming);
         noteSurface(previous, incoming);
+    }
+
+    // Whether a demo Scene planted the player somewhere new (a different
+    // situation on the same hole); false outside a demo.
+    function demoMoved(previous, incoming) {
+        var a = previous.demoPosition();
+        var b = incoming.demoPosition();
+        if (a == null || b == null) { return false; }
+        return a.lat != b.lat || a.lng != b.lng;
     }
 
     // A Scene arriving is proof the phone is listening. Commands for a round

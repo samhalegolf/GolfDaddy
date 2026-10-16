@@ -942,6 +942,35 @@ class GarminMapView extends WatchUi.View {
         if (img == null) { return; }
         var d = camera.imageDirection(dxScreen, dyScreen);
         applyImagePoint(img["x"] + d[0], img["y"] + d[1]);
+        followNudge();
+    }
+
+    // The button twin of the edge pan. A drag pans the map when the finger
+    // presses against the rim, the Bubble staying on the glass; a nudge has
+    // no finger, so until 2026-10-17 a target nudged to the edge of a
+    // button-only watch (fenix, Forerunner, Instinct) just walked off the
+    // glass and the camera never moved - the drag path was the only one
+    // that panned. Now, once a nudge has carried the target into the same
+    // edge zone (insideEdge's band), the camera slides by exactly the
+    // overshoot, so the target rests on the zone's inner line and the map
+    // moves under it, as it does under a held finger. Only the focus moves,
+    // never the scale, and it stays inside the bake, like onPanTick. A
+    // nudge that stays inside the band moves nothing but the target.
+    function followNudge() {
+        var current = session.playState.target;
+        if (current == null || camera == null || lastReference == null || lastViewWidth == null) { return; }
+        var img = lastReference.imagePoint(current.lat, current.lng);
+        if (img == null) { return; }
+        var on = camera.place(img["x"], img["y"], lastImageWidth, lastImageHeight, lastViewWidth, lastViewHeight);
+        var held = insideEdge(on[0], on[1]);
+        var dx = on[0] - held[0];
+        var dy = on[1] - held[1];
+        if (dx == 0 && dy == 0) { return; }
+        var d = camera.imageDirection(dx, dy);
+        var fx = camera.focusX + d[0] / camera.scale;
+        var fy = camera.focusY + d[1] / camera.scale;
+        camera.focusX = fx < 0 ? 0.0 : (fx > lastImageWidth ? lastImageWidth : fx);
+        camera.focusY = fy < 0 ? 0.0 : (fy > lastImageHeight ? lastImageHeight : fy);
     }
 
     // ---- Touch drag (plan step 13) ----
