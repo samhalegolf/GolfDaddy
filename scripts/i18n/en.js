@@ -71,6 +71,7 @@
     "access.memberKeepScore": "A Clarity membership is needed to keep score. Distances stay free.",
     "access.membership": "Membership",
     "access.freeAccountCourseMaps": "Create a free account to prepare more courses.",
+    "access.signInSaveCourse": "Sign in to save this course to your library.",
     "access.mapServerBusy": "The map server is busy right now. Please try again soon.",
 
     /* Player badge */

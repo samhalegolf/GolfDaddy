@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Az eredmény vezetéséhez Clarity-tagság kell. A távolságok ingyenesek maradnak.",
     "access.membership": "Tagság",
     "access.freeAccountCourseMaps": "Hozzon létre ingyenes fiókot további golfpályák előkészítéséhez.",
+    "access.signInSaveCourse": "Jelentkezzen be, hogy elmentse ezt a pályát a könyvtárába.",
     "access.mapServerBusy": "A térképszerver jelenleg foglalt. Kérjük, próbálja újra hamarosan.",
 
     /* Player badge */

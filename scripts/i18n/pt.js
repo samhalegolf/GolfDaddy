@@ -65,6 +65,7 @@
     "access.memberKeepScore": "É necessária uma subscrição Clarity para registar o resultado. As distâncias continuam grátis.",
     "access.membership": "Subscrição",
     "access.freeAccountCourseMaps": "Crie uma conta gratuita para preparar mais campos de golfe.",
+    "access.signInSaveCourse": "Inicie sessão para guardar este campo na sua biblioteca.",
     "access.mapServerBusy": "O servidor de mapas está ocupado neste momento. Tente novamente em breve.",
 
     /* Player badge */

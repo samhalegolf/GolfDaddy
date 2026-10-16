@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Skoori pidamiseks on vaja Clarity liikmesust. Kaugused jäävad tasuta.",
     "access.membership": "Liikmesus",
     "access.freeAccountCourseMaps": "Loo tasuta konto, et valmistada ette rohkem golfiväljakuid.",
+    "access.signInSaveCourse": "Logi sisse, et salvestada see väljak oma kogusse.",
     "access.mapServerBusy": "Kaardiserver on praegu hõivatud. Palun proovi varsti uuesti.",
 
     /* Player badge */

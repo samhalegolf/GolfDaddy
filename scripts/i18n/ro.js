@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Ai nevoie de un abonament Clarity ca să ții scorul. Distanțele rămân gratuite.",
     "access.membership": "Abonament",
     "access.freeAccountCourseMaps": "Creați un cont gratuit pentru a pregăti mai multe terenuri de golf.",
+    "access.signInSaveCourse": "Conectați-vă pentru a salva acest teren în biblioteca dumneavoastră.",
     "access.mapServerBusy": "Serverul de hărți este ocupat momentan. Încercați din nou în curând.",
 
     /* Player badge */

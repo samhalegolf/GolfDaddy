@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Lai skaitītu rezultātu, vajadzīga Clarity dalība. Attālumi paliek bez maksas.",
     "access.membership": "Dalība",
     "access.freeAccountCourseMaps": "Izveidojiet bezmaksas kontu, lai sagatavotu vairāk golfa laukumu.",
+    "access.signInSaveCourse": "Piesakieties, lai saglabātu šo laukumu savā bibliotēkā.",
     "access.mapServerBusy": "Karšu serveris pašlaik ir aizņemts. Lūdzu, pēc brīža mēģiniet vēlreiz.",
 
     /* Player badge */

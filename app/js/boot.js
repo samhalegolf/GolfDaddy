@@ -589,15 +589,22 @@
       versionLabel: pkg.versionLabel || null,
       pkg: pkg
     });
-    /* "Not entitled" is the normal free-online path, so it stays quiet. A paid
-       save that actually hit device storage pressure is not normal and must not
-       look successful merely because play can continue from the in-memory package. */
-    if (!saved && app.courseStore.lastSaveFailure && app.courseStore.lastSaveFailure() === "storage"
-        && app.access && app.access.courseIssue) {
-      app.access.courseIssue("storage");
+    /* A refused save is said, not swallowed. A guest is asked to sign in - once
+       per course per visit, because this runs at round start and again on every
+       map update, and the answer does not change between them. Storage pressure
+       is said every time: play continues from the in-memory package, and that
+       must not look like a successful save. */
+    if (!saved && app.courseStore.lastSaveFailure && app.access && app.access.courseIssue) {
+      var why = app.courseStore.lastSaveFailure();
+      if (why === "storage") app.access.courseIssue("storage");
+      else if (why === "signin" && !signInAskedFor[course.courseId]) {
+        signInAskedFor[course.courseId] = true;
+        app.access.courseIssue("signin");
+      }
     }
     return saved;
   }
+  var signInAskedFor = {};
 
   function reportCoursePackageIssue(pkg) {
     var issue = pkg && pkg.triggerError ? String(pkg.triggerError) : "";

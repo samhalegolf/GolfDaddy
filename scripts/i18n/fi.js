@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Tulosten kirjaaminen vaatii Clarity-jäsenyyden. Etäisyydet pysyvät ilmaisina.",
     "access.membership": "Jäsenyys",
     "access.freeAccountCourseMaps": "Luo ilmainen tili, jotta voit valmistella lisää golfkenttiä.",
+    "access.signInSaveCourse": "Kirjaudu sisään tallentaaksesi tämän kentän kirjastoosi.",
     "access.mapServerBusy": "Karttapalvelin on juuri nyt varattu. Yritä pian uudelleen.",
 
     /* Player badge */

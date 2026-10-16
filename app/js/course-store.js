@@ -33,10 +33,10 @@
       lastSaveFailure = "";
       if (!entry || !entry.courseId) { lastSaveFailure = "invalid"; return null; }
       /* Fetching a package to VIEW and retaining it for OFFLINE play are deliberately
-         separate. Free/guest sessions may use the package in memory, but only an active
-         paid/staff entitlement may put it in the device Course Library. */
-      if (!app.access || typeof app.access.offlineDownloads !== "function" || !app.access.offlineDownloads()) {
-        lastSaveFailure = "access";
+         separate. A guest may use the package in memory for this round, but the device
+         Course Library belongs to an account (access.canSaveCourses). */
+      if (!app.access || typeof app.access.canSaveCourses !== "function" || !app.access.canSaveCourses()) {
+        lastSaveFailure = "signin";
         return null;
       }
       var body = JSON.stringify(entry.pkg || null);

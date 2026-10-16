@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Um deinen Score zu führen, brauchst du eine Clarity-Mitgliedschaft. Entfernungen bleiben kostenlos.",
     "access.membership": "Mitgliedschaft",
     "access.freeAccountCourseMaps": "Erstelle ein kostenloses Konto, um weitere Golfplätze vorzubereiten.",
+    "access.signInSaveCourse": "Melde dich an, um diesen Platz in deiner Bibliothek zu speichern.",
     "access.mapServerBusy": "Der Kartenserver ist gerade ausgelastet. Bitte versuche es gleich noch einmal.",
 
     /* Player badge */

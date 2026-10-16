@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Нужно е членство в Clarity, за да водиш резултата. Разстоянията остават безплатни.",
     "access.membership": "Членство",
     "access.freeAccountCourseMaps": "Създайте безплатен акаунт, за да подготвяте още голф игрища.",
+    "access.signInSaveCourse": "Влезте, за да запазите това игрище в библиотеката си.",
     "access.mapServerBusy": "Сървърът за картите е зает в момента. Моля, опитайте отново след малко.",
 
     /* Player badge */
