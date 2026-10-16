@@ -109,6 +109,30 @@ const settled = async (page) => {
     assert.strictEqual(await page.evaluate(readIdb, USER), null, "localStorage.clear() clears the course libraries too");
     await context.close();
 
+    /* ---- an IndexedDB that never answers: ready is a deadline, not a hang ----
+       The iOS shape (Lake Wales, 16 Oct 2026): the page being left had a
+       multi-megabyte write still open, and the new page's open/read never came
+       back. The app must carry on - on an empty library, with the load still
+       running - rather than sit on "Getting ready" for good. */
+    const stuck = await browser.newContext();
+    await stuck.addInitScript(() => {
+      IDBFactory.prototype.open = function () { return { onsuccess: null, onerror: null, onupgradeneeded: null, onblocked: null }; };
+    });
+    const p3 = await stuck.newPage();
+    await p3.goto(base + "app.html");
+    const released = await p3.evaluate(() => {
+      const started = performance.now();
+      return window.GDCourseStorage.ready.then((r) => Object.assign({ ms: performance.now() - started }, r));
+    });
+    assert.strictEqual(released.timedOut, true, "ready says it gave up waiting");
+    assert.ok(released.ms < 6000, "ready is released by its deadline, got " + Math.round(released.ms) + "ms");
+    assert.strictEqual(await p3.evaluate(() => window.GDCourseStorage.mode()), "starting", "the load itself is still pending underneath");
+    assert.strictEqual(await p3.evaluate((k) => localStorage.getItem(k), USER), null, "until it lands the library reads as empty");
+    await p3.evaluate((k) => localStorage.setItem(k, "{\"courses\":{\"z\":{\"id\":\"z\"}}}"), USER);
+    assert.strictEqual(await p3.evaluate((k) => localStorage.getItem(k), USER), "{\"courses\":{\"z\":{\"id\":\"z\"}}}",
+      "a write made meanwhile is readable at once, and will merge when the load lands");
+    await stuck.close();
+
     /* ---- no IndexedDB: plain localStorage, exactly as before ---- */
     const bare = await browser.newContext();
     await bare.addInitScript(() => { Object.defineProperty(window, "indexedDB", { value: undefined }); });

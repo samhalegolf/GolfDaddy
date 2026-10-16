@@ -846,7 +846,7 @@
     "course.noneDownloadedYet": "No courses downloaded yet",
     "course.tryAnotherSearch": "Try another search.",
     "course.downloadAutomatically": "Courses download automatically the first time you play them.",
-    "course.offlineMembership": "Offline course downloads are included with Clarity membership. You can still view courses online.",
+    "course.signInToSave": "Sign in and the courses you play are saved here.",
     "course.publishedMap": "Published map",
     "course.courseMap": "Course map",
     "course.mapType": "Map type",

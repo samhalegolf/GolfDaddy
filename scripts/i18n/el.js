@@ -840,7 +840,7 @@
     "course.noneDownloadedYet": "Δεν έχουν ληφθεί γήπεδα ακόμα",
     "course.tryAnotherSearch": "Δοκίμασε άλλη αναζήτηση.",
     "course.downloadAutomatically": "Τα γήπεδα λαμβάνονται αυτόματα την πρώτη φορά που τα παίζεις.",
-    "course.offlineMembership": "Οι λήψεις γηπέδων γκολφ για χρήση εκτός σύνδεσης περιλαμβάνονται στη συνδρομή Clarity. Μπορείτε ακόμη να βλέπετε γήπεδα online.",
+    "course.signInToSave": "Συνδεθείτε και τα γήπεδα που παίζετε θα αποθηκεύονται εδώ.",
     "course.publishedMap": "Δημοσιευμένος χάρτης",
     "course.courseMap": "Χάρτης γηπέδου",
     "course.mapType": "Τύπος χάρτη",

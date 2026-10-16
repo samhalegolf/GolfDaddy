@@ -862,7 +862,7 @@
     "course.noneDownloadedYet": "Još nema preuzetih terena",
     "course.tryAnotherSearch": "Pokušaj s drugom pretragom.",
     "course.downloadAutomatically": "Tereni se automatski preuzimaju kad ih prvi put igraš.",
-    "course.offlineMembership": "Preuzimanje golf terena za izvanmrežnu upotrebu uključeno je u članstvo Clarity. Terene i dalje možete pregledavati na mreži.",
+    "course.signInToSave": "Prijavite se i tereni koje igrate spremat će se ovdje.",
     "course.publishedMap": "Objavljena karta",
     "course.courseMap": "Karta terena",
     "course.mapType": "Vrsta karte",

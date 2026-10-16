@@ -840,7 +840,7 @@
     "course.noneDownloadedYet": "Inga banor nedladdade än",
     "course.tryAnotherSearch": "Prova en annan sökning.",
     "course.downloadAutomatically": "Banor laddas ner automatiskt första gången du spelar dem.",
-    "course.offlineMembership": "Offlinehämtningar av golfbanor ingår i Clarity-medlemskapet. Du kan fortfarande visa banor online.",
+    "course.signInToSave": "Logga in så sparas banorna du spelar här.",
     "course.publishedMap": "Publicerad karta",
     "course.courseMap": "Bankarta",
     "course.mapType": "Karttyp",

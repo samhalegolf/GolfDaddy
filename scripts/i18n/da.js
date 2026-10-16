@@ -840,7 +840,7 @@
     "course.noneDownloadedYet": "Ingen baner hentet endnu",
     "course.tryAnotherSearch": "Prøv en anden søgning.",
     "course.downloadAutomatically": "Baner hentes automatisk, første gang du spiller dem.",
-    "course.offlineMembership": "Offline-downloads af golfbaner er inkluderet i Clarity-medlemskabet. Du kan stadig se baner online.",
+    "course.signInToSave": "Log ind, så gemmes de baner, du spiller, her.",
     "course.publishedMap": "Udgivet kort",
     "course.courseMap": "Banekort",
     "course.mapType": "Korttype",

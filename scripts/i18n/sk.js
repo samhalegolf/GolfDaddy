@@ -862,7 +862,7 @@
     "course.noneDownloadedYet": "Zatiaľ žiadne stiahnuté ihriská",
     "course.tryAnotherSearch": "Skús iné hľadanie.",
     "course.downloadAutomatically": "Ihriská sa stiahnu automaticky, keď na nich prvýkrát hráš.",
-    "course.offlineMembership": "Sťahovanie golfových ihrísk na použitie offline je súčasťou členstva Clarity. Ihriská si stále môžete prezerať online.",
+    "course.signInToSave": "Prihláste sa a ihriská, ktoré hráte, sa budú ukladať sem.",
     "course.publishedMap": "Publikovaná mapa",
     "course.courseMap": "Mapa ihriska",
     "course.mapType": "Typ mapy",

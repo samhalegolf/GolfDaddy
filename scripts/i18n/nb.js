@@ -840,7 +840,7 @@
     "course.noneDownloadedYet": "Ingen baner lastet ned ennå",
     "course.tryAnotherSearch": "Prøv et annet søk.",
     "course.downloadAutomatically": "Baner lastes ned automatisk første gang du spiller dem.",
-    "course.offlineMembership": "Frakoblet nedlasting av golfbaner er inkludert i Clarity-medlemskapet. Du kan fortsatt se baner på nett.",
+    "course.signInToSave": "Logg inn, så lagres banene du spiller her.",
     "course.publishedMap": "Publisert kart",
     "course.courseMap": "Banekart",
     "course.mapType": "Karttype",

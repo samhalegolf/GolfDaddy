@@ -862,7 +862,7 @@
     "course.noneDownloadedYet": "Zatím žádná stažená hřiště",
     "course.tryAnotherSearch": "Zkus jiné hledání.",
     "course.downloadAutomatically": "Hřiště se stáhnou automaticky, když na nich poprvé hraješ.",
-    "course.offlineMembership": "Stahování golfových hřišť pro offline použití je součástí členství Clarity. Hřiště si stále můžete prohlížet online.",
+    "course.signInToSave": "Přihlaste se a hřiště, která hrajete, se budou ukládat sem.",
     "course.publishedMap": "Publikovaná mapa",
     "course.courseMap": "Mapa hřiště",
     "course.mapType": "Typ mapy",

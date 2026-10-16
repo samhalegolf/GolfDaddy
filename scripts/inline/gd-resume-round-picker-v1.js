@@ -149,6 +149,9 @@
 
   window.gdEnsureResumeRoundPicker = ensurePanel;
   window.gdResumeRoundFromPicker = resumeRound;
+  /* The saved round, for anything that needs to know WHICH course it is at -
+     the picker, to treat a tap on that course as Resume Round. */
+  window.gdReadResumeRound = read;
   window.gdEndRoundFromPicker = endRound;
   window.gdStartNewRoundFromPicker = endRound;
 

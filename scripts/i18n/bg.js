@@ -840,7 +840,7 @@
     "course.noneDownloadedYet": "Още няма изтеглени игрища",
     "course.tryAnotherSearch": "Опитай с друго търсене.",
     "course.downloadAutomatically": "Игрищата се изтеглят автоматично първия път, когато играеш на тях.",
-    "course.offlineMembership": "Изтеглянето на голф игрища за офлайн ползване е включено в членството Clarity. Все още можете да разглеждате игрища онлайн.",
+    "course.signInToSave": "Влезте и игрищата, които играете, ще се запазват тук.",
     "course.publishedMap": "Публикувана карта",
     "course.courseMap": "Карта на игрището",
     "course.mapType": "Тип карта",

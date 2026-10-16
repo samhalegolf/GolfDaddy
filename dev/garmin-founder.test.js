@@ -177,7 +177,7 @@ test("a Garmin Founder can keep a Starter Bubble and nothing more", () => {
   assert.strictEqual(pay.hasActiveAccess(), false, "Garmin Founder is not a membership");
   assert.strictEqual(pay.garminFounderActive(), true);
   assert.strictEqual(pay.canUse("starterBubble"), true);
-  ["saveBubble", "adoptBubble", "practiceToBag", "bubbleCentre", "offlineCourse"].forEach(function (feature) {
+  ["saveBubble", "adoptBubble", "practiceToBag", "bubbleCentre"].forEach(function (feature) {
     assert.strictEqual(pay.canUse(feature), false, feature + " must stay on membership");
   });
 });

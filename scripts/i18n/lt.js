@@ -862,7 +862,7 @@
     "course.noneDownloadedYet": "Dar nėra atsisiųstų laukų",
     "course.tryAnotherSearch": "Pabandyk ieškoti kitaip.",
     "course.downloadAutomatically": "Laukai atsisiunčiami automatiškai, kai juose žaidi pirmą kartą.",
-    "course.offlineMembership": "Golfo aikštynų atsisiuntimas naudoti neprisijungus įtrauktas į Clarity narystę. Aikštynus vis tiek galite peržiūrėti internetu.",
+    "course.signInToSave": "Prisijunkite ir aikštynai, kuriuose žaidžiate, bus išsaugoti čia.",
     "course.publishedMap": "Paskelbtas žemėlapis",
     "course.courseMap": "Lauko žemėlapis",
     "course.mapType": "Žemėlapio tipas",
