@@ -1,5 +1,7 @@
 /* Regression coverage for the boundary between transient online course packages and
- * the paid, device-retained Course Library. */
+ * the device-retained Course Library, which belongs to an account: anyone signed in may
+ * save, a guest is refused (and told so - access.courseIssue("signin")), and a live native
+ * store subscription is the one way to save without an account. */
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
@@ -51,7 +53,7 @@ function loadAccess(seed, signedIn) {
 
 function loadStore(allowed, failCourseWrites) {
   const ctx = context({}, failCourseWrites);
-  ctx.ClarityApp.access = { offlineDownloads: () => allowed };
+  ctx.ClarityApp.access = { canSaveCourses: () => allowed };
   vm.runInContext(STORE, ctx, { filename: "app/js/course-store.js" });
   return ctx;
 }
@@ -75,61 +77,53 @@ function entry(id) {
     "gd_accounts_v1": JSON.stringify({ activeId: "p1", accounts: [{ accountId: "p1", role: "player" }] }),
     "clarity:payments:status:v1": JSON.stringify({ active: false })
   }, true);
-  assert.strictEqual(ctx.ClarityApp.access.offlineDownloads(), false,
-    "a signed-in free player may view online packages but must not get a device download");
+  assert.strictEqual(ctx.ClarityApp.access.canSaveCourses(), true,
+    "a signed-in free player may save courses: the library is an account feature, not a paid one");
 }
 
 {
-  const ctx = loadAccess({
-    "gd_accounts_v1": JSON.stringify({ activeId: "coach", accounts: [{ accountId: "coach", role: "coach" }] })
-  }, true);
-  assert.strictEqual(ctx.ClarityApp.access.offlineDownloads(), true, "staff access includes offline courses");
-}
-
-{
-  const ctx = loadAccess({
-    "clarity:payments:status:v1": JSON.stringify({ active: true })
-  }, true);
-  assert.strictEqual(ctx.ClarityApp.access.offlineDownloads(), true, "active backend paid access includes offline courses");
+  const ctx = loadAccess({}, false);
+  assert.strictEqual(ctx.ClarityApp.access.canSaveCourses(), false, "a guest may not save courses");
 }
 
 {
   const ctx = loadAccess({
     "clarity:payments:status:v1": JSON.stringify({ active: true })
   }, false);
-  assert.strictEqual(ctx.ClarityApp.access.offlineDownloads(), false,
-    "a stale paid-account cache must not unlock guest downloads after sign-out");
+  assert.strictEqual(ctx.ClarityApp.access.canSaveCourses(), false,
+    "a stale paid-account cache must not stand in for a sign-in after sign-out");
 }
 
 {
   const ctx = loadAccess({
     "clarity:store-entitlement:v1": JSON.stringify({ active: true, expiresAt: "2999-01-01T00:00:00.000Z" })
   });
-  assert.strictEqual(ctx.ClarityApp.access.offlineDownloads(), true, "an active native store entitlement includes offline courses");
+  assert.strictEqual(ctx.ClarityApp.access.canSaveCourses(), true, "a live native store subscription saves without an account");
 }
 
 {
   const ctx = loadAccess({
     "clarity:store-entitlement:v1": JSON.stringify({ active: true, expiresAt: "2000-01-01T00:00:00.000Z" })
   });
-  assert.strictEqual(ctx.ClarityApp.access.offlineDownloads(), false, "an expired device entitlement must not unlock new downloads");
+  assert.strictEqual(ctx.ClarityApp.access.canSaveCourses(), false, "an expired device entitlement does not");
 }
 
 {
-  const free = loadStore(false, false);
-  const saved = free.ClarityApp.courseStore.save(entry("free-course"));
+  const guest = loadStore(false, false);
+  const saved = guest.ClarityApp.courseStore.save(entry("guest-course"));
   assert.strictEqual(saved, null);
-  assert.strictEqual(free.ClarityApp.courseStore.lastSaveFailure(), "access");
-  assert.strictEqual(free.localStorage.getItem("clarity:course-library:v1"), null,
-    "online viewing must not silently populate the offline Course Library");
+  assert.strictEqual(guest.ClarityApp.courseStore.lastSaveFailure(), "signin",
+    "a guest's refused save names the sign-in, so boot.js can ask for one");
+  assert.strictEqual(guest.localStorage.getItem("clarity:course-library:v1"), null,
+    "online viewing must not silently populate the Course Library");
 }
 
 {
-  const paid = loadStore(true, false);
-  const saved = paid.ClarityApp.courseStore.save(entry("paid-course"));
-  assert.ok(saved && saved.courseId === "paid-course");
-  assert.strictEqual(paid.ClarityApp.courseStore.lastSaveFailure(), "");
-  assert.strictEqual(paid.ClarityApp.courseStore.list().length, 1, "paid access retains the package on device");
+  const signedIn = loadStore(true, false);
+  const saved = signedIn.ClarityApp.courseStore.save(entry("saved-course"));
+  assert.ok(saved && saved.courseId === "saved-course");
+  assert.strictEqual(signedIn.ClarityApp.courseStore.lastSaveFailure(), "");
+  assert.strictEqual(signedIn.ClarityApp.courseStore.list().length, 1, "a signed-in save retains the package on device");
 }
 
 {
@@ -137,7 +131,7 @@ function entry(id) {
   const saved = full.ClarityApp.courseStore.save(entry("quota-course"));
   assert.strictEqual(saved, null);
   assert.strictEqual(full.ClarityApp.courseStore.lastSaveFailure(), "storage",
-    "a quota rejection must be distinguishable from an entitlement refusal");
+    "a quota rejection must be distinguishable from a sign-in refusal");
 }
 
 console.log("course offline entitlement passed");

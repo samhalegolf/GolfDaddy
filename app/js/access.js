@@ -65,30 +65,15 @@
     try { return !!(app.account && app.account.signedIn()); } catch (e) { return false; }
   }
 
-  /* Offline course packages are the paid boundary. Keep this lightweight on the GPS page:
-     the root shell has already refreshed these caches, and the store entitlement cache is
-     itself refreshed on native boot. This mirrors ClarityPayments.hasActiveAccess() without
-     loading the whole payments/settings UI into the round surface. */
-  function offlineDownloads() {
-    var accountSignedIn = signedIn();
-    if (accountSignedIn) {
-      try {
-        var accounts = JSON.parse(localStorage.getItem("gd_accounts_v1") || "null") || {};
-        var rows = Array.isArray(accounts.accounts) ? accounts.accounts : [];
-        var active = rows.find(function (row) { return row && row.accountId === accounts.activeId; }) || null;
-        var role = String(active && active.role || "").trim().toLowerCase();
-        if (role === "admin" || role === "coach") return true;
-      } catch (e) {}
-
-      /* The backend payment cache belongs to the signed-in account. Do not trust a stale
-         active:true after sign-out; a native store entitlement below is the one paid state
-         deliberately allowed to survive without an account. */
-      try {
-        var payment = JSON.parse(localStorage.getItem("clarity:payments:status:v1") || "null");
-        if (payment && payment.active) return true;
-      } catch (e) {}
-    }
-
+  /* Who may keep a course in the device Course Library: anyone signed in
+     (decided 16 Oct 2026). It used to be the paid boundary, and a guest who
+     found their course and was told nothing when it did not save became the
+     "won't add my local course to my profile" review. The one way to save
+     without an account is a live native store subscription, the paid state
+     that deliberately lives on the device rather than on an account; the
+     cache it reads is refreshed on native boot. */
+  function canSaveCourses() {
+    if (signedIn()) return true;
     try {
       var store = JSON.parse(localStorage.getItem("clarity:store-entitlement:v1") || "null");
       if (!store || !store.active) return false;
@@ -148,8 +133,9 @@
   }
 
   /* Course preparation/save failures use the same unobtrusive top bar but are not scored-round
-     gates. In particular, a free signed-in player may VIEW a fetched package online; only
-     writing it into the offline library is paid. */
+     gates. "signin" is the Course Library refusing a guest: the course is still playable
+     online, it just will not be kept, and the bar says so with a Sign in button rather than
+     letting the save fail in silence. */
   function courseIssue(kind) {
     var i18n = window.GDI18n;
     var bar = document.getElementById("accessNotice");
@@ -159,7 +145,16 @@
 
     action.classList.add("hiddenState");
     action.onclick = null;
-    if (kind === "guest-signup-required") {
+    if (kind === "signin") {
+      i18n.set(label, "access.signInSaveCourse");
+      i18n.set(action, "common.signIn");
+      action.classList.remove("hiddenState");
+      action.onclick = function () {
+        hideNotice();
+        if (typeof app.showRoute === "function") app.showRoute("signin");
+        else window.location.href = "/?login=1";
+      };
+    } else if (kind === "guest-signup-required") {
       i18n.set(label, "access.freeAccountCourseMaps");
       i18n.set(action, "auth.modeCreate");
       action.classList.remove("hiddenState");
@@ -177,13 +172,13 @@
 
     bar.classList.remove("hiddenState");
     clearTimeout(noticeTimer);
-    noticeTimer = setTimeout(hideNotice, kind === "guest-signup-required" ? 12000 : NOTICE_MS);
+    noticeTimer = setTimeout(hideNotice, (kind === "signin" || kind === "guest-signup-required") ? 12000 : NOTICE_MS);
   }
 
   app.access = {
     roundFeatures: roundFeatures,
     signedIn: signedIn,
-    offlineDownloads: offlineDownloads,
+    canSaveCourses: canSaveCourses,
     courseIssue: courseIssue,
     /* Returns false AND explains itself, so callers stay one line. */
     signalAllowed: function (name) {

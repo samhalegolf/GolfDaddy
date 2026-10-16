@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Za vođenje rezultata potrebno je Clarity članstvo. Udaljenosti ostaju besplatne.",
     "access.membership": "Članstvo",
     "access.freeAccountCourseMaps": "Izradite besplatan račun kako biste pripremili više golf terena.",
+    "access.signInSaveCourse": "Prijavite se kako biste spremili ovaj teren u svoju biblioteku.",
     "access.mapServerBusy": "Poslužitelj karata trenutačno je zauzet. Pokušajte ponovno uskoro.",
 
     /* Player badge */

@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Du behöver ett Clarity-medlemskap för att föra score. Avstånden är fortfarande gratis.",
     "access.membership": "Medlemskap",
     "access.freeAccountCourseMaps": "Skapa ett kostnadsfritt konto för att förbereda fler golfbanor.",
+    "access.signInSaveCourse": "Logga in för att spara den här banan i ditt bibliotek.",
     "access.mapServerBusy": "Kartservern är upptagen just nu. Försök igen om en stund.",
 
     /* Player badge */

@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Du skal have et Clarity-medlemskab for at føre score. Afstande er stadig gratis.",
     "access.membership": "Medlemskab",
     "access.freeAccountCourseMaps": "Opret en gratis konto for at klargøre flere golfbaner.",
+    "access.signInSaveCourse": "Log ind for at gemme denne bane i dit bibliotek.",
     "access.mapServerBusy": "Kortserveren er optaget lige nu. Prøv igen om lidt.",
 
     /* Player badge */

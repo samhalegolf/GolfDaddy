@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Norint skaičiuoti rezultatą, reikia Clarity narystės. Atstumai lieka nemokami.",
     "access.membership": "Narystė",
     "access.freeAccountCourseMaps": "Susikurkite nemokamą paskyrą, kad galėtumėte paruošti daugiau golfo aikštynų.",
+    "access.signInSaveCourse": "Prisijunkite, kad išsaugotumėte šį aikštyną savo bibliotekoje.",
     "access.mapServerBusy": "Žemėlapių serveris šiuo metu užimtas. Netrukus bandykite dar kartą.",
 
     /* Player badge */

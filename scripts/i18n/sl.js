@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Za vodenje rezultata potrebuješ članstvo Clarity. Razdalje ostanejo brezplačne.",
     "access.membership": "Članstvo",
     "access.freeAccountCourseMaps": "Ustvarite brezplačen račun, da lahko pripravite več igrišč za golf.",
+    "access.signInSaveCourse": "Prijavite se, da shranite to igrišče v svojo knjižnico.",
     "access.mapServerBusy": "Strežnik zemljevidov je trenutno zaseden. Poskusite znova čez nekaj trenutkov.",
 
     /* Player badge */

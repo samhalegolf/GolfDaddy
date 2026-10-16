@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Un abonnement Clarity est nécessaire pour noter votre score. Les distances restent gratuites.",
     "access.membership": "Abonnement",
     "access.freeAccountCourseMaps": "Créez un compte gratuit pour préparer davantage de parcours de golf.",
+    "access.signInSaveCourse": "Connectez-vous pour enregistrer ce parcours dans votre bibliothèque.",
     "access.mapServerBusy": "Le serveur de cartes est occupé pour le moment. Réessayez dans quelques instants.",
 
     /* Player badge */

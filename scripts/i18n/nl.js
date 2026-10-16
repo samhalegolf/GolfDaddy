@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Je hebt een Clarity-lidmaatschap nodig om je score bij te houden. Afstanden blijven gratis.",
     "access.membership": "Lidmaatschap",
     "access.freeAccountCourseMaps": "Maak een gratis account aan om meer golfbanen voor te bereiden.",
+    "access.signInSaveCourse": "Log in om deze baan in je bibliotheek op te slaan.",
     "access.mapServerBusy": "De kaartserver is momenteel bezet. Probeer het binnenkort opnieuw.",
 
     /* Player badge */

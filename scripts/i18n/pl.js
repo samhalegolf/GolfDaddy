@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Aby zapisywać wynik, potrzebne jest członkostwo Clarity. Odległości pozostają bezpłatne.",
     "access.membership": "Członkostwo",
     "access.freeAccountCourseMaps": "Utwórz bezpłatne konto, aby przygotować więcej pól golfowych.",
+    "access.signInSaveCourse": "Zaloguj się, aby zapisać to pole w swojej bibliotece.",
     "access.mapServerBusy": "Serwer map jest teraz zajęty. Spróbuj ponownie za chwilę.",
 
     /* Player badge */

@@ -65,6 +65,7 @@
     "access.memberKeepScore": "Na zapisovanie skóre potrebuješ členstvo Clarity. Vzdialenosti zostávajú zadarmo.",
     "access.membership": "Členstvo",
     "access.freeAccountCourseMaps": "Vytvorte si bezplatný účet, aby ste mohli pripraviť ďalšie golfové ihriská.",
+    "access.signInSaveCourse": "Prihláste sa, aby ste si toto ihrisko uložili do svojej knižnice.",
     "access.mapServerBusy": "Mapový server je momentálne vyťažený. Skúste to prosím znova o chvíľu.",
 
     /* Player badge */
