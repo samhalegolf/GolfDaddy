@@ -76,9 +76,12 @@ const OSM_DISPLAY_KINDS = {
   green: "greens", fairway: "fairways", tee: "tees", hole: "holes", bunker: "bunkers",
   water_hazard: "water", lateral_water_hazard: "water"
 };
+/* Overpass gets this long, then the page loads without OSM rather than the whole request
+   running into Netlify's limit and coming back as a 504 with nothing in it. */
+const OSM_TIMEOUT_MS = 7000;
 async function loadOsmContext(course, overlayFeatures, savedObjects) {
   const scope = osmQueryScope({}, { lat: course.lat, lng: course.lng });
-  const payload = await fetchOverpass(osmGuideQuery(scope));
+  const payload = await fetchOverpass(osmGuideQuery(scope), { timeoutMs: OSM_TIMEOUT_MS });
   const out = { greens: [], fairways: [], tees: [], holes: [], bunkers: [], water: [], elements: 0 };
   out.convertible = osmToOverlayFeatures(payload, overlayFeatures, savedObjects);
   ((payload && payload.elements) || []).forEach(element => {
@@ -167,10 +170,11 @@ export default async function courseMapOverlay(req) {
       /* Every course on the shared overlay, so what is already mapped on the whole ground shows. */
       const saved = (await Promise.all((courses.length ? courses.map(c => c.courseId) : [courseId])
         .map(id => loadSavedObjects(id).catch(() => [])))).flat();
+      const lastRun = loadLastRun(ownerId).catch(() => null);
       if (course.lat == null || course.lng == null) body.osm = { error: "course has no centre" };
       else body.osm = await loadOsmContext(course, overlay.features, saved).catch(error => ({ error: String(error && error.message || error).slice(0, 200) }));
       body.objects = displayObjects(saved);
-      body.lastRun = await loadLastRun(ownerId).catch(() => null);
+      body.lastRun = await lastRun;
     }
     return json(200, body);
   }
