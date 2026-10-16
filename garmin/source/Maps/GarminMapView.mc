@@ -425,6 +425,13 @@ class GarminMapView extends WatchUi.View {
         dc.drawBitmap(x, y, bitmap);
     }
 
+    // Likewise outside the `has :setFill` branch, where the narrowed type
+    // does not list fillRectangle (the fenix8solar51mm export refused it,
+    // 2026-10-17).
+    function fillWhole(dc, w, h) {
+        dc.fillRectangle(0, 0, w, h);
+    }
+
     function nativeCrop(bitmap, sx, sy, sw, sh) {
         if (!(Graphics has :createBufferedBitmap)) { return null; }
         var key = framedHoleNumber + "|" + framedPackageVersion + "|" + sx + "," + sy + "," + sw + "," + sh;
@@ -1107,7 +1114,7 @@ class GarminMapView extends WatchUi.View {
         dc.clear();
         if (rough instanceof Lang.Array && (dc has :setFill)) {
             dc.setFill(patternTexture(rough));
-            dc.fillRectangle(0, 0, viewWidth, viewHeight);
+            fillWhole(dc, viewWidth, viewHeight);
         }
         var f = camera.frame(imageWidth, imageHeight, viewWidth, viewHeight);
         var view = [viewWidth, viewHeight];
