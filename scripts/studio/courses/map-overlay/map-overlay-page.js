@@ -207,7 +207,7 @@
      lands on the same state the next render reads. */
   var session = {
     course: null, features: [], loadedFor: "", osm: null, objects: [], lastRun: null, courseMap: null, view: null, sourceKey: "",
-    showOsm: true, showObjects: true, status: "draft", hole: null,
+    showOsm: false, showObjects: true, status: "draft", hole: null,
     /* What the mapper reads with this overlay: "include" - OSM and the overlay, as always - or
        "exclude" - the overlay alone (functions/course-map-overlay.mjs). Drawing a course
        entirely by hand, OSM is hidden here and kept out of the run. */
@@ -258,7 +258,7 @@
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify({
         course: slimCourse(session.course), view: session.view, sourceKey: session.sourceKey,
-        showOsm: session.showOsm, showObjects: session.showObjects, mode: session.mode, fairwayWidth: session.fairwayWidth,
+        showObjects: session.showObjects, mode: session.mode, fairwayWidth: session.fairwayWidth,
         wandSize: session.wandSize, method: session.method, lineWandSize: session.lineWandSize, mergeBunkers: session.mergeBunkers, seams: session.seams, fullscreen: !!session.fullscreen,
         treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel, treeBandM: session.treeBandM, treeHeights: session.treeHeights, hazardCorridorM: session.hazardCorridorM, hazardFinderLevel: session.hazardFinderLevel, numberAuto: session.numberAuto, aiTask: session.aiTask,
         unsaved: session.dirty && session.loadedFor ? { courseId: session.loadedFor, features: session.features, playOrders: session.playOrders } : null
@@ -276,7 +276,7 @@
     try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) {}
     if (!saved || typeof saved !== "object") return;
     if (saved.course) { session.course = saved.course; session.view = saved.view || null; }
-    ["sourceKey", "showOsm", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "googleSplit", "treeRadius", "treeFinderLevel", "treeBandM", "treeHeights", "hazardCorridorM", "hazardFinderLevel", "numberAuto", "aiTask"].forEach(function (k) {
+    ["sourceKey", "showObjects", "mode", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "googleSplit", "treeRadius", "treeFinderLevel", "treeBandM", "treeHeights", "hazardCorridorM", "hazardFinderLevel", "numberAuto", "aiTask"].forEach(function (k) {
       if (saved[k] != null) session[k] = saved[k];
     });
     if (saved.wandSize && typeof saved.wandSize === "object") {
@@ -418,7 +418,6 @@
     osmWater: { color: "#4fb3ff", weight: 1, fillColor: "#2f8fff", fillOpacity: 0.22 },
     /* The course's saved objects: thin amber outlines, so they read as "already there" and
        never as something drawn this session. */
-    object: { color: "#ffd98a", weight: 1, dashArray: "4 4", fillColor: "#ffd98a", fillOpacity: 0.08 },
     objectPoint: { radius: 4, color: "#ffd98a", weight: 1, fillColor: "#ffd98a", fillOpacity: 0.6 }
   };
 
@@ -535,7 +534,7 @@
       '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="pick">Pick course</button>' +
       '<label class="gdStudioViewportField">Imagery <select data-gd-overlay="provider"></select></label>' +
-      '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="osm" checked> Show OSM</label>' +
+      '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="osm"> Show OSM</label>' +
       '<label class="gdStudioViewportField" title="My shapes only: the mapper does not read OpenStreetMap at all - just the shapes drawn here and the scorecard. OSM is hidden while you draw.">Mapper reads <select data-gd-overlay="osm-mode"><option value="include">OSM + my shapes</option><option value="exclude">My shapes only</option></select></label>' +
       '<label class="gdStudioViewportField"><input type="checkbox" data-gd-overlay="objects" checked> Show course objects</label>' +
       "</div>" +
@@ -3777,6 +3776,52 @@
       updateHint();
     }
 
+    /* A link is one hole, and a hole's shapes touch or nearly so: the line runs tee to green,
+       the bunkers and fairway sit along it. A shape this far from every other shape in the
+       link is on different ground - Whangaparaoa, 2026-10-16: Gulf Harbour's par-3 3rd, 500m
+       away on the course next door, was linked to Whangaparaoa's own 3rd. Asked, not refused:
+       a tee and green linked without their line can sit a par 5 apart. */
+    var LINK_STRAY_M = 300;
+
+    function gapToShapeM(p, points) {
+      if (points.length === 1) return shapes.distanceM(p, points[0]);
+      var best = Infinity, kx = 111320 * Math.cos(p.lat * Math.PI / 180), ky = 110540;
+      for (var i = 1; i < points.length; i++) {
+        var ax = (points[i - 1].lng - p.lng) * kx, ay = (points[i - 1].lat - p.lat) * ky;
+        var bx = (points[i].lng - p.lng) * kx, by = (points[i].lat - p.lat) * ky;
+        var dx = bx - ax, dy = by - ay, len = dx * dx + dy * dy;
+        var t = len ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len)) : 0;
+        best = Math.min(best, Math.hypot(ax + t * dx, ay + t * dy));
+      }
+      return best;
+    }
+
+    function shapeGapM(a, b) {
+      var best = Infinity;
+      a.points.forEach(function (p) { best = Math.min(best, gapToShapeM(p, b.points)); });
+      b.points.forEach(function (p) { best = Math.min(best, gapToShapeM(p, a.points)); });
+      return best;
+    }
+
+    /* Where a link splits into pieces more than LINK_STRAY_M apart: the smallest piece (the one
+       most likely picked by mistake) and how far it sits from the rest. Null when it holds together. */
+    function strayLinkMember(members) {
+      var list = members.filter(function (f) { return f.points && f.points.length; });
+      if (list.length < 2) return null;
+      var pieces = [];
+      list.forEach(function (f) {
+        var joined = pieces.filter(function (piece) { return piece.some(function (g) { return shapeGapM(f, g) <= LINK_STRAY_M; }); });
+        var merged = [f];
+        joined.forEach(function (piece) { merged = merged.concat(piece); pieces.splice(pieces.indexOf(piece), 1); });
+        pieces.push(merged);
+      });
+      if (pieces.length < 2) return null;
+      pieces.sort(function (a, b) { return a.length - b.length; });
+      var gap = Infinity;
+      pieces[0].forEach(function (f) { list.forEach(function (g) { if (pieces[0].indexOf(g) < 0) gap = Math.min(gap, shapeGapM(f, g)); }); });
+      return { shape: pieces[0][0], gapM: gap };
+    }
+
     function commitLink() {
       var picked = linkPick.map(findFeature).filter(Boolean);
       linkPick = [];
@@ -3795,6 +3840,14 @@
       picked.forEach(function (f) { var k = linkKey(f); if (k) keys[k] = true; });
       var id = (picked.filter(function (f) { return f.link; })[0] || {}).link || newLinkId();
       var members = session.features.filter(function (f) { return picked.indexOf(f) >= 0 || (linkKey(f) && keys[linkKey(f)]); });
+      var stray = strayLinkMember(members);
+      if (stray && !window.confirm(kindLabel(stray.shape.kind) + " is " + Math.round(stray.gapM) + "m from the other shapes in this link.\n\nShapes on one hole sit together - this may be another hole, or another course next door. Link anyway?")) {
+        linkPick = picked.map(function (f) { return f.id; });
+        drawFeatures();
+        updateHint();
+        setStatus("Not linked. Click a shape to take it out of the pick.", true);
+        return;
+      }
       members.forEach(function (f) { f.link = id; });
       drawFeatures();
       changed();
@@ -4180,7 +4233,10 @@
     function drawOsm() {
       clearOsmLayers();
       var osm = session.osm;
-      if (!osm || !session.showOsm || session.osmMode === "exclude") return;
+      if (!osm || osm.error || session.osmMode === "exclude") return;
+      /* Hidden unless asked for - the page opens on the course's own shapes. Play order still
+         shows OSM's hole lines, since picking them is what that tool is for. */
+      if (!session.showOsm && tool !== "order") return;
       function add(list, style, closed) {
         (list || []).forEach(function (item) {
           var latlngs = (item.points || []).map(function (p) { return [p.lat, p.lng]; });
@@ -4195,11 +4251,13 @@
       var converted = {};
       session.features.forEach(function (f) { if (f.osm) converted[f.osm] = true; });
       function own(list) { return (list || []).filter(function (item) { return !converted[item.id]; }); }
-      add(own(osm.fairways), STYLE.osmFairway, true);
-      add(own(osm.greens), STYLE.osmGreen, true);
-      add(own(osm.tees), STYLE.osmTee, true);
-      add(own(osm.bunkers), STYLE.osmBunker, true);
-      add(own(osm.water), STYLE.osmWater, true);
+      if (session.showOsm) {
+        add(own(osm.fairways), STYLE.osmFairway, true);
+        add(own(osm.greens), STYLE.osmGreen, true);
+        add(own(osm.tees), STYLE.osmTee, true);
+        add(own(osm.bunkers), STYLE.osmBunker, true);
+        add(own(osm.water), STYLE.osmWater, true);
+      }
       if (tool === "order") drawOrderOsmHoles(own(osm.holes));
       else add(own(osm.holes), STYLE.osmHole, false);
       /* OSM sits under the overlay, so a placed shape is never hidden behind what OSM has. */
@@ -4215,12 +4273,20 @@
       objectLayers = [];
     }
 
+    /* A saved shape in its own kind's colours, so a green reads as a green and trees as trees;
+       the dashed edge is what says it is the saved course, not a shape drawn here. */
+    var OBJECT_KIND = { fairway_area: "fairway" };
+    function objectStyle(type) {
+      var base = STYLE[OBJECT_KIND[type] || type] || STYLE.hazard;
+      return Object.assign({}, base, { interactive: false, weight: 1.5, dashArray: "4 4", fillOpacity: (base.fillOpacity || 0.3) * 0.7 });
+    }
+
     function drawObjects() {
       clearObjectLayers();
       if (!session.showObjects) return;
       (session.objects || []).forEach(function (o) {
         var shape = o.points && o.points.length >= 3
-          ? L.polygon(toLatLngs(o.points), Object.assign({ interactive: false }, STYLE.object))
+          ? L.polygon(toLatLngs(o.points), objectStyle(o.type))
           : o.point ? L.circleMarker([o.point.lat, o.point.lng], Object.assign({ interactive: false }, STYLE.objectPoint)) : null;
         if (!shape) return;
         shape.addTo(mapObj);
