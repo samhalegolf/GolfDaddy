@@ -1624,8 +1624,7 @@
         saveBubble: "pay.need.saveBubble",
         adoptBubble: "pay.need.adoptBubble",
         practiceToBag: "pay.need.practiceToBag",
-        bubbleCentre: "pay.need.bubbleCentre",
-        offlineCourse: "course.offlineMembership"
+        bubbleCentre: "pay.need.bubbleCentre"
       };
       safe(function () { return window.toast && window.toast(L(NEED[feature] || "pay.need.generic")); });
       openPaywall();

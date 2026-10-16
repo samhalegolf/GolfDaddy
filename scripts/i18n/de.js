@@ -840,7 +840,7 @@
     "course.noneDownloadedYet": "Noch keine Plätze heruntergeladen",
     "course.tryAnotherSearch": "Versuche eine andere Suche.",
     "course.downloadAutomatically": "Plätze werden automatisch heruntergeladen, wenn du sie zum ersten Mal spielst.",
-    "course.offlineMembership": "Offline-Downloads von Golfplätzen sind in der Clarity-Mitgliedschaft enthalten. Du kannst Golfplätze weiterhin online ansehen.",
+    "course.signInToSave": "Melde dich an, dann werden die Plätze, die du spielst, hier gespeichert.",
     "course.publishedMap": "Veröffentlichte Karte",
     "course.courseMap": "Platzkarte",
     "course.mapType": "Kartentyp",

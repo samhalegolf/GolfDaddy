@@ -840,7 +840,7 @@
     "course.noneDownloadedYet": "Még nincs letöltött pálya",
     "course.tryAnotherSearch": "Próbálj másik keresést.",
     "course.downloadAutomatically": "A pályák automatikusan letöltődnek, amikor először játszol rajtuk.",
-    "course.offlineMembership": "A golfpályák offline letöltése a Clarity-tagság része. A pályákat továbbra is megtekintheti online.",
+    "course.signInToSave": "Jelentkezzen be, és a lejátszott pályák ide kerülnek mentésre.",
     "course.publishedMap": "Közzétett térkép",
     "course.courseMap": "Pályatérkép",
     "course.mapType": "Térkép típusa",

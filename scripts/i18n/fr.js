@@ -840,7 +840,7 @@
     "course.noneDownloadedYet": "Aucun parcours téléchargé pour l’instant",
     "course.tryAnotherSearch": "Essayez une autre recherche.",
     "course.downloadAutomatically": "Les parcours se téléchargent automatiquement la première fois que vous y jouez.",
-    "course.offlineMembership": "Les téléchargements de parcours pour une utilisation hors ligne sont inclus avec l’abonnement Clarity. Vous pouvez toujours consulter les parcours en ligne.",
+    "course.signInToSave": "Connectez-vous et les parcours que vous jouez seront enregistrés ici.",
     "course.publishedMap": "Carte publiée",
     "course.courseMap": "Carte du parcours",
     "course.mapType": "Type de carte",

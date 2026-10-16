@@ -840,7 +840,7 @@
     "course.noneDownloadedYet": "Kenttiä ei ole vielä ladattu",
     "course.tryAnotherSearch": "Kokeile toista hakua.",
     "course.downloadAutomatically": "Kentät latautuvat automaattisesti, kun pelaat niitä ensimmäistä kertaa.",
-    "course.offlineMembership": "Golfkenttien offline-lataukset sisältyvät Clarity-jäsenyyteen. Voit silti tarkastella kenttiä verkossa.",
+    "course.signInToSave": "Kirjaudu sisään, niin pelaamasi kentät tallentuvat tänne.",
     "course.publishedMap": "Julkaistu kartta",
     "course.courseMap": "Kenttäkartta",
     "course.mapType": "Kartan tyyppi",

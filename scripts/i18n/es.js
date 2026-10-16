@@ -840,7 +840,7 @@
     "course.noneDownloadedYet": "Aún no hay campos descargados",
     "course.tryAnotherSearch": "Prueba con otra búsqueda.",
     "course.downloadAutomatically": "Los campos se descargan automáticamente la primera vez que los juegas.",
-    "course.offlineMembership": "Las descargas de campos de golf para usar sin conexión están incluidas con la membresía de Clarity. Aún puedes ver campos online.",
+    "course.signInToSave": "Inicia sesión y los campos que juegues se guardarán aquí.",
     "course.publishedMap": "Mapa publicado",
     "course.courseMap": "Mapa del campo",
     "course.mapType": "Tipo de mapa",

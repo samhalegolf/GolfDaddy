@@ -862,7 +862,7 @@
     "course.noneDownloadedYet": "Niciun teren descărcat încă",
     "course.tryAnotherSearch": "Încearcă altă căutare.",
     "course.downloadAutomatically": "Terenurile se descarcă automat prima dată când joci pe ele.",
-    "course.offlineMembership": "Descărcările terenurilor de golf pentru utilizare offline sunt incluse în abonamentul Clarity. Puteți vedea în continuare terenurile online.",
+    "course.signInToSave": "Conectați-vă și terenurile pe care jucați vor fi salvate aici.",
     "course.publishedMap": "Hartă publicată",
     "course.courseMap": "Harta terenului",
     "course.mapType": "Tip de hartă",
