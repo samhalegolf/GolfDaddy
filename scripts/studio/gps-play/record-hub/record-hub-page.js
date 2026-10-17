@@ -21,7 +21,7 @@
  *
  * Recording: a watch records straight from its canvas (no picker, the watch's own pixels). The
  * phone, and "all three as one video", record this tab cropped to that element (Region Capture,
- * Chrome) - the browser asks once which tab to share; pick this one. Each recording downloads
+ * Chrome) - the browser asks which tab to share each time; pick this one. Each recording downloads
  * when it stops. */
 (function () {
   "use strict";
@@ -80,26 +80,21 @@
     return { startedAt: Date.now(), stop: function () { if (recorder.state !== "inactive") recorder.stop(); return done; } };
   }
 
-  /* This tab, shared once and kept while the page is open; each recording takes a clone of it
-     cropped to its own element. Without Region Capture (not Chrome) the clone is the whole tab. */
-  var display = null;
-  function displayStream() {
-    var live = display && display.getVideoTracks()[0] && display.getVideoTracks()[0].readyState === "live";
-    if (live) return Promise.resolve(display);
+  /* This tab, captured for one recording and cropped to its element (Region Capture). Chrome
+     will not move a crop target while the track has clones, so every tab recording takes its
+     own capture and crops that track itself; stopping the recording ends the capture. Without
+     Region Capture (not Chrome) the recording is the whole tab. */
+  function croppedStream(element) {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) return Promise.reject(new Error("this browser cannot record a tab"));
     return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 60 }, audio: false, preferCurrentTab: true, selfBrowserSurface: "include" })
-      .then(function (stream) { display = stream; return stream; });
+      .then(function (stream) {
+        var track = stream.getVideoTracks()[0];
+        if (!window.CropTarget || typeof track.cropTo !== "function") return { stream: stream, cropped: false };
+        return window.CropTarget.fromElement(element).then(function (target) { return track.cropTo(target); })
+          .then(function () { return { stream: stream, cropped: true }; })
+          .catch(function (error) { stream.getTracks().forEach(function (t) { t.stop(); }); throw error; });
+      });
   }
-  function croppedStream(element) {
-    return displayStream().then(function (stream) {
-      var track = stream.getVideoTracks()[0].clone();
-      var out = new MediaStream([track]);
-      if (!window.CropTarget || typeof track.cropTo !== "function") return { stream: out, cropped: false };
-      return window.CropTarget.fromElement(element).then(function (target) { return track.cropTo(target); })
-        .then(function () { return { stream: out, cropped: true }; });
-    });
-  }
-  function stopDisplay() { if (display) display.getTracks().forEach(function (t) { t.stop(); }); display = null; }
 
   // ---------------------------------------------------------------- the page
 
@@ -588,17 +583,23 @@
       if (keys.indexOf("phone") >= 0 || keys.indexOf("stage") >= 0) el.stage.scrollIntoView({ block: "center" });
       /* Every stream first, then every recorder in the same tick, so recordings started
          together start together. */
-      Promise.all(keys.map(streamFor)).then(function (results) {
-        if (destroyed) { results.forEach(function (r) { r.stream.getTracks().forEach(function (t) { t.stop(); }); }); return; }
+      var pending = keys.map(streamFor);
+      function release() { pending.forEach(function (p) { p.then(function (r) { r.stream.getTracks().forEach(function (t) { t.stop(); }); }, function () {}); }); }
+      Promise.all(pending).then(function (results) {
+        if (destroyed) { release(); return; }
         var uncropped = false;
         results.forEach(function (r, i) {
-          recordings[keys[i]] = startRecording(r.stream, fileName(keys[i]));
+          var key = keys[i];
+          recordings[key] = startRecording(r.stream, fileName(key));
           if (!r.cropped) uncropped = true;
+          /* Chrome's own "Stop sharing" ends the capture: that is this recording stopping. */
+          r.stream.getVideoTracks()[0].addEventListener("ended", function () { if (recordings[key]) stopKeys([key]); });
         });
         el.recStatus.textContent = uncropped ? "This browser cannot crop a tab recording, so the phone / together video is the whole tab." : "";
         renderRecording();
         if (!tickTimer) tickTimer = setInterval(renderRecording, 500);
       }).catch(function (error) {
+        release();
         el.recStatus.textContent = "Recording did not start - " + (error && error.message || error);
       });
     }
@@ -674,7 +675,6 @@
     return function cleanup() {
       destroyed = true;
       stopKeys(RECORD_KEYS);
-      stopDisplay();
       window.removeEventListener("resize", onResize);
       phone.token += 1;
       WATCHES.forEach(function (key) { watches[key].destroy(); });
