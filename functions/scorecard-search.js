@@ -12,13 +12,17 @@
    /api/scorecard-fetch and the existing parsers, so there is one fetch path and one
    set of parsers rather than two.
 
-   Provider selection and the Brave/Google-CSE calls live in ./lib/gd-web-search.js, shared
-   with functions/marketing-hole-intel.mjs. Configure one of BRAVE_SEARCH_API_KEY, or
-   GOOGLE_CSE_KEY + GOOGLE_CSE_ID. */
+   Two ways to find the pages. For now Claude does it (./lib/gd-scorecard-search-ai.js):
+   one call with web search that returns the candidate pages. Set
+   SCORECARD_SEARCH_PROVIDER=web to go back to the search engines - the ladder of queries
+   through Brave or Google CSE in ./lib/gd-web-search.js, shared with
+   functions/marketing-hole-intel.mjs, configured by BRAVE_SEARCH_API_KEY or
+   GOOGLE_CSE_KEY + GOOGLE_CSE_ID. Both hand the same rows to the same ranking. */
 
 const { safeRemoteUrl } = require("./lib/safe-remote-url");
 const { isBlockedHost } = require("./lib/gd-polite-fetch");
 const { pickProvider } = require("./lib/gd-web-search");
+const { aiSearchEnabled, searchScorecardPagesWithAi } = require("./lib/gd-scorecard-search-ai");
 const {
   buildCourseSearchIdentity, buildSearchQueries, domainQueries, scoreSearchCandidate
 } = require("./lib/gd-course-search-identity");
@@ -70,6 +74,27 @@ exports.handler = async function scorecardSearch(event) {
   const queryPlan = buildSearchQueries(identity, { max: 12 });
   const query = queryPlan[0] && queryPlan[0].query;
 
+  if (aiSearchEnabled()) {
+    let found;
+    try {
+      found = await searchScorecardPagesWithAi(identity);
+    } catch (error) {
+      return json(502, {
+        error: "Scorecard search failed",
+        message: (error && error.message) || String(error),
+        provider: "ai",
+        query
+      });
+    }
+    const raw = found.results.map(result => Object.assign({}, result, { matchedQuery: query, queryKind: "ai" }));
+    return json(200, {
+      query, provider: "ai", model: found.model, usage: found.usage, identity,
+      queries: [{ query, kind: "ai", results: raw.length, error: null }],
+      domainsDiscovered: [],
+      results: shape(rankResults(raw, identity), limit)
+    });
+  }
+
   const provider = pickProvider();
   if (!provider) {
     return json(503, { error: "No search provider configured", query });
@@ -120,22 +145,23 @@ exports.handler = async function scorecardSearch(event) {
     });
   }
 
-  const results = rankResults(raw, identity)
-    .slice(0, limit)
-    .map(result => ({
-      url: result.url, title: result.title, snippet: result.snippet,
-      matchedQuery: result.matchedQuery || "", queryKind: result.queryKind || "",
-      candidateScore: result.score,
-      scoreReasons: result.identityScore ? result.identityScore.reasons : []
-    }));
-
   return json(200, {
     query, provider: provider.name, identity,
     queries: (payload.__trace && payload.__trace.queries) || [],
     domainsDiscovered: (payload.__trace && payload.__trace.domainsDiscovered) || [],
-    results
+    results: shape(rankResults(raw, identity), limit)
   });
 };
+
+/* The ranked rows as the response carries them. */
+function shape(ranked, limit) {
+  return ranked.slice(0, limit).map(result => ({
+    url: result.url, title: result.title, snippet: result.snippet,
+    matchedQuery: result.matchedQuery || "", queryKind: result.queryKind || "",
+    candidateScore: result.score,
+    scoreReasons: result.identityScore ? result.identityScore.reasons : []
+  }));
+}
 
 /* Reorders provider results so the pages most likely to hold a hole-by-hole table
    come first, and drops anything the fetcher would refuse anyway - no point
@@ -196,10 +222,6 @@ function cleanName(value) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
-}
-
-function env(name) {
-  return process.env[name] || "";
 }
 
 function json(statusCode, body) {

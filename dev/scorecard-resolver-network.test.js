@@ -143,6 +143,8 @@ function parse(res) {
   delete process.env.BRAVE_SEARCH_API_KEY;
   delete process.env.GOOGLE_CSE_KEY;
   delete process.env.GOOGLE_CSE_ID;
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.SCORECARD_SEARCH_PROVIDER;
   const searchPath = path.join(root, "functions", "scorecard-search");
   delete require.cache[require.resolve(searchPath)];
   let scorecardSearch = require(searchPath).handler;
@@ -196,6 +198,56 @@ function parse(res) {
     assert(out.query.includes("Auckland"), "region narrows the query");
   } finally {
     global.fetch = realFetch;
+  }
+
+  /* ---------- scorecard-search via Claude ---------- */
+
+  delete process.env.BRAVE_SEARCH_API_KEY;
+  process.env.ANTHROPIC_API_KEY = "test-key";
+  const sdkPath = require.resolve("@anthropic-ai/sdk");
+  const aiPath = require.resolve(path.join(root, "functions", "lib", "gd-scorecard-search-ai"));
+  const realSdk = require.cache[sdkPath];
+  let promptSeen = "";
+  const fakeMessage = {
+    model: "fake-model", stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5, server_tool_use: { web_search_requests: 2 } },
+    content: [{ type: "text", text: JSON.stringify({ results: [
+      { url: "https://www.facebook.com/akaranagolf", title: "Akarana Golf Club", snippet: "scorecard" },
+      { url: "https://www.akaranagolf.co.nz/hole-by-hole", title: "Hole by hole - Akarana Golf Club", snippet: "par and stroke index" },
+      { url: "https://192.168.0.9/scorecard", title: "private", snippet: "x" }
+    ] }) }]
+  };
+  function FakeAnthropic() {
+    this.beta = { messages: { stream: params => {
+      promptSeen = params.messages[0].content;
+      return { finalMessage: async () => fakeMessage };
+    } } };
+  }
+  require.cache[sdkPath] = { id: sdkPath, filename: sdkPath, loaded: true, exports: FakeAnthropic };
+  delete require.cache[aiPath];
+  delete require.cache[require.resolve(searchPath)];
+  scorecardSearch = require(searchPath).handler;
+  try {
+    const out = parse(await scorecardSearch({
+      httpMethod: "POST",
+      body: JSON.stringify({ name: "Akarana Golf Club", region: "Auckland" })
+    }));
+    assert.strictEqual(out.provider, "ai", "Claude is the provider when a key is set");
+    assert(promptSeen.includes("Akarana Golf Club") && promptSeen.includes("Auckland"), "the ask names the course and where it is");
+    const urls = out.results.map(r => r.url);
+    assert.strictEqual(urls[0], "https://www.akaranagolf.co.nz/hole-by-hole", "the hole-by-hole page still ranks first");
+    assert(!urls.includes("https://192.168.0.9/scorecard"), "private-address results are still dropped");
+    assert.strictEqual(out.usage.searches, 2, "search count is reported");
+
+    process.env.SCORECARD_SEARCH_PROVIDER = "web";
+    delete require.cache[require.resolve(searchPath)];
+    scorecardSearch = require(searchPath).handler;
+    res = await scorecardSearch({ httpMethod: "POST", body: JSON.stringify({ name: "Akarana Golf Club" }) });
+    assert.strictEqual(res.statusCode, 503, "SCORECARD_SEARCH_PROVIDER=web goes back to the search engines");
+  } finally {
+    if (realSdk) require.cache[sdkPath] = realSdk; else delete require.cache[sdkPath];
+    delete require.cache[aiPath];
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.SCORECARD_SEARCH_PROVIDER;
   }
 
   /* Guards must be shared, not copied - a second copy drifts and the weaker wins. */
