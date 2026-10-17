@@ -19,8 +19,9 @@
    GET ?playerRequests=1 (admin only) -> {items} - every course players (not admins) asked the
    app to map, one item per course with request and player counts, newest first
    (lib/gd-player-requests.mjs). Studio's Course Mapping page is that list.
-   GET ?region=1&lat=&lng=&radiusKm= (admin only) -> {courses} - every course within the radius,
-   marked hasMap when we hold it. Studio's Regional Bulk Scan page is that list.
+   POST {kind:"region_list", lat, lng, radiusKm, elements} (admin only) -> {courses} - every
+   course within the radius, marked hasMap when we hold it. `elements` is the Overpass answer,
+   fetched by the Studio page itself (see coursesInRegion). Studio's Regional Bulk Scan list.
    POST {kind:"region_scan", courses:[{name,lat,lng}]} (admin only) -> queues the ticked
    courses as background mapping jobs; {queued, skipped}.
 
@@ -531,15 +532,20 @@ export async function promoteNearbyJob(courseId, origin) {
    Studio's Regional Scan shows is what the picker would show around that point. Library rows
    are read unpublished too: a course mid-build or one that already failed has a row, and is
    not new. {unavailable:true} when Overpass does not answer - a library-only list would read
-   as "nothing to scan here", which is not what we know. */
-export async function coursesInRegion({ lat, lng, radiusM, timeoutMs } = {}) {
+   as "nothing to scan here", which is not what we know.
+
+   `overpass` is an Overpass answer the caller already has. Studio's Regional Scan fetches its
+   own from the operator's browser: a 25-50 km query is slow, it has to share Overpass's
+   per-IP allowance with every other Netlify function when asked from here, and it timed out
+   that way every time (17 Oct 2026). */
+export async function coursesInRegion({ lat, lng, radiusM, timeoutMs, overpass: given } = {}) {
   const anchor = { lat: Number(lat), lng: Number(lng) };
   const box = boundingBox(anchor.lat, anchor.lng, radiusM);
   const [library, overpass] = await Promise.all([
     supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,course_lat,course_lng"
       + "&course_lat=gte." + box.minLat + "&course_lat=lte." + box.maxLat
       + "&course_lng=gte." + box.minLng + "&course_lng=lte." + box.maxLng + "&limit=1000").catch(() => []),
-    fetchOverpass(nearbyCoursesQuery(anchor.lat, anchor.lng, radiusM), { timeoutMs }).catch(error => ({ __error: error }))
+    given || fetchOverpass(nearbyCoursesQuery(anchor.lat, anchor.lng, radiusM), { timeoutMs }).catch(error => ({ __error: error }))
   ]);
   if (overpass && overpass.__error) return { unavailable: true, courses: [] };
   const courses = mergeWithLibrary(coursesFromOverpass(overpass, anchor), library, anchor)
@@ -611,6 +617,7 @@ export async function enqueueNearbyMapperJobs({ sourceCourseId, limit = NEARBY_P
    who asked. Capped per request so one call stays well inside a function's time - the page
    sends a long selection in batches. */
 const REGION_SCAN_BATCH_MAX = 25;
+const REGION_LIST_MAX_ELEMENTS = 5000;
 const REGION_SCAN_MAX_RADIUS_M = 50000;
 const REGION_ACTOR_PREFIX = "region:";
 
@@ -689,19 +696,6 @@ export default async function courseMapperJobs(req) {
       /* The caller's own scans in the app are not player requests. */
       return json(200, { items: await loadPlayerRequests(supabaseFetch, { adminUserIds: [user.id] }) });
     }
-    /* Studio's Regional Scan list (admin only): every course within radiusKm of lat/lng. */
-    if (url.searchParams.get("region") === "1") {
-      const user = await verifiedUser(req);
-      if (!(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
-      const lat = Number(url.searchParams.get("lat")), lng = Number(url.searchParams.get("lng"));
-      if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-        return json(400, { error: "lat and lng are required" });
-      }
-      const radiusM = Math.min(REGION_SCAN_MAX_RADIUS_M, Math.max(1000, Number(url.searchParams.get("radiusKm")) * 1000 || 0));
-      const region = await coursesInRegion({ lat, lng, radiusM, timeoutMs: 20000 });
-      if (region.unavailable) return json(503, { error: "OpenStreetMap did not answer - try again in a minute" });
-      return json(200, { anchor: { lat, lng }, radiusM, courses: region.courses });
-    }
     const courseId = slug(url.searchParams.get("courseId") || url.searchParams.get("course_id"));
     /* No courseId now means "all of them" rather than an error. The admin list
        needs every course's state at once; asking per row is what stopped it
@@ -722,8 +716,21 @@ export default async function courseMapperJobs(req) {
   const trees = requestedKind === TREE_KIND;
   const user = await verifiedUser(req, payload);
 
-  /* Regional Scan: a list of courses rather than one courseId, so it is answered here, before
+  /* Regional Scan: neither of these names one courseId, so they are answered here, before
      anything below asks for one. */
+  if (requestedKind === "region_list") {
+    if (!(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
+    const lat = Number(payload && payload.lat), lng = Number(payload && payload.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      return json(400, { error: "lat and lng are required" });
+    }
+    const elements = Array.isArray(payload && payload.elements) ? payload.elements : null;
+    if (!elements) return json(400, { error: "elements required - the Overpass answer for the region" });
+    if (elements.length > REGION_LIST_MAX_ELEMENTS) return json(400, { error: "too many elements - choose a smaller distance" });
+    const radiusM = Math.min(REGION_SCAN_MAX_RADIUS_M, Math.max(1000, Number(payload && payload.radiusKm) * 1000 || 0));
+    const region = await coursesInRegion({ lat, lng, radiusM, overpass: { elements } });
+    return json(200, { anchor: { lat, lng }, radiusM, courses: region.courses });
+  }
   if (requestedKind === "region_scan") {
     if (!(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
     const courses = Array.isArray(payload && payload.courses) ? payload.courses : [];

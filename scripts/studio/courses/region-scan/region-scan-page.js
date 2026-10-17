@@ -5,9 +5,11 @@
  * course - pick any course in the area and the region is drawn around it. The distance sets
  * how far out to look.
  *
- * The list is GET /api/course-mapper-jobs?region=1 (admin only): every golf course OSM knows
- * inside the radius, merged with the courses we already hold exactly as the picker's nearby
- * list is. Courses we hold are counted and listed but cannot be ticked - this page only adds,
+ * The list is two steps. This page asks Overpass for the golf courses in the region itself,
+ * from the operator's browser: a 25-50 km query is slow, and asked from a Netlify function it
+ * shares Overpass's per-IP allowance with every other function and timed out every time. The
+ * answer then goes to POST /api/course-mapper-jobs kind "region_list" (admin only), which
+ * merges it with the courses we already hold exactly as the picker's nearby list is. Courses we hold are counted and listed but cannot be ticked - this page only adds,
  * it never remaps. Everything else starts ticked; untick what you do not want.
  *
  * "Scan" posts the ticked courses as kind "region_scan", in batches the server accepts. They
@@ -18,6 +20,8 @@
   "use strict";
 
   var API = "/api/course-mapper-jobs";
+  var OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+  var OVERPASS_TIMEOUT_S = 90;
   var BATCH = 25;
   var DISTANCES_KM = [5, 10, 25, 50];
 
@@ -54,6 +58,40 @@
         return data || {};
       });
     });
+  }
+
+  /* A box rather than Overpass's around(): far cheaper for it to answer over tens of km. The
+     server trims the corners back to the radius. Same two tags as the picker's nearby query. */
+  function overpassQuery(centre, radiusKm) {
+    var dLat = radiusKm * 1000 / 111320;
+    var dLng = radiusKm * 1000 / (111320 * Math.max(0.05, Math.cos(centre.lat * Math.PI / 180)));
+    var box = "(" + [centre.lat - dLat, centre.lng - dLng, centre.lat + dLat, centre.lng + dLng].map(function (n) { return n.toFixed(5); }).join(",") + ")";
+    var parts = [["way", "leisure", "golf_course"], ["relation", "leisure", "golf_course"], ["way", "golf", "course"], ["relation", "golf", "course"]]
+      .map(function (p) { return p[0] + '["' + p[1] + '"="' + p[2] + '"]' + box + ";"; });
+    return "[out:json][timeout:" + OVERPASS_TIMEOUT_S + "];(" + parts.join("") + ");out tags center;";
+  }
+
+  /* Only what the server reads, so a 50 km answer stays small on its way back up. */
+  function fetchRegionElements(centre, radiusKm) {
+    var abort = new AbortController();
+    var timer = setTimeout(function () { abort.abort(); }, (OVERPASS_TIMEOUT_S + 10) * 1000);
+    return fetch(OVERPASS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "data=" + encodeURIComponent(overpassQuery(centre, radiusKm)),
+      signal: abort.signal
+    }).then(function (res) {
+      if (!res.ok) throw new Error("OpenStreetMap answered " + res.status + (res.status === 429 ? " (too many requests - wait a minute)" : ""));
+      return res.json();
+    }).then(function (data) {
+      var remark = String(data && data.remark || "");
+      if (/runtime error|timed out|out of memory/i.test(remark)) throw new Error("OpenStreetMap ran out of time - try a smaller distance");
+      return (data && data.elements || []).map(function (e) {
+        return { type: e.type, id: e.id, center: e.center, lat: e.lat, lon: e.lon, tags: { name: e.tags && e.tags.name } };
+      });
+    }, function (error) {
+      throw error && error.name === "AbortError" ? new Error("OpenStreetMap did not answer in time - try again or a smaller distance") : error;
+    }).finally(function () { clearTimeout(timer); });
   }
 
   function km(metres) {
@@ -149,10 +187,16 @@
       if (!centre) { el("summary").textContent = ""; updateActions(); return; }
       var run = ++loadRun;
       el("summary").className = "gdStudioMuted";
-      el("summary").textContent = "Looking for courses within " + session.radiusKm + " km…";
+      el("summary").textContent = "Asking OpenStreetMap for courses within " + session.radiusKm + " km…";
       updateActions();
-      call("GET", "?region=1&lat=" + encodeURIComponent(centre.lat) + "&lng=" + encodeURIComponent(centre.lng) + "&radiusKm=" + session.radiusKm)
+      fetchRegionElements(centre, session.radiusKm)
+        .then(function (elements) {
+          if (destroyed || run !== loadRun) return null;
+          el("summary").textContent = "Checking which ones we already have…";
+          return call("POST", "", { kind: "region_list", lat: centre.lat, lng: centre.lng, radiusKm: session.radiusKm, elements: elements });
+        })
         .then(function (data) {
+          if (!data) return;
           if (destroyed || run !== loadRun) return;
           courses = data.courses || [];
           ticked = {};

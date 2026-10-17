@@ -214,11 +214,11 @@
       ],
       status: "implemented", needsVerification: false },
     { id: "region-scan", label: "Regional Bulk Scan", parent: "courses",
-      function: "Scans every course in an area at once. The centre is picked with the real course picker (pick-only mode), a distance sets how far out to look, and every course in that radius is listed - those we already hold are counted but cannot be ticked, the rest start ticked. Scanning queues the ticked courses as background mapping jobs (the nearby-prefetch kind), so the worker maps them one at a time in idle moments, behind any player.",
+      function: "Scans every course in an area at once. The centre is picked with the real course picker (pick-only mode), a distance sets how far out to look, and every course in that radius is listed (the page asks Overpass itself, from the browser - asked from a function it timed out) - those we already hold are counted but cannot be ticked, the rest start ticked. Scanning queues the ticked courses as background mapping jobs (the nearby-prefetch kind), so the worker maps them one at a time in idle moments, behind any player.",
       owner: "scripts/studio/courses/region-scan/region-scan-page.js", runtime: { app: false, studio: true, server: true },
       code: [
         { role: "Studio page", path: "scripts/studio/courses/region-scan/region-scan-page.js" },
-        { role: "Region list (GET ?region=1) and bulk queue (POST kind region_scan), admin only", path: "functions/course-mapper-jobs.mjs" },
+        { role: "Region list (POST kind region_list, given the Overpass answer the page fetched) and bulk queue (POST kind region_scan), admin only", path: "functions/course-mapper-jobs.mjs" },
         { role: "Picker hand-off", path: "scripts/studio/gd-studio-course-pick.js" }
       ],
       inputs: ["Picked centre course", "Distance", "OSM golf courses + course_maps"], outputs: ["Background mapping jobs (nearby_automap, requested_by region:<admin>)"],
