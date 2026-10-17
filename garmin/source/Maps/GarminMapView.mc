@@ -1127,8 +1127,9 @@ class GarminMapView extends WatchUi.View {
 
     // The hole drawn from its outlines and terrain, back to front: the rough,
     // its pieces of light and shadow, trees (flat, only for a package with no tree
-    // list - see drawTrees) and hazards under the fairways, the
-    // fairways and theirs, waste areas (flat), the green and its, then water
+    // list - see drawTrees), hazards and waste areas (flat) under the fairways
+    // (a fairway wins over a waste area wanded across it), the
+    // fairways and theirs, the green and its, then water
     // and bunkers crisp on top (never shaded). Same order as the picture
     // (gd-watch-map-core.js drawGroundLayers) and the terrain labelling. Every ring is
     // already in image pixels, so placing it is the camera's affine per
@@ -1156,9 +1157,9 @@ class GarminMapView extends WatchUi.View {
         // the flat wood is only for a package from before trees were placed.
         if (!hasTrees(shapes)) { fillRings(dc, shapes["k"], palette["k"], f, view); }
         fillRings(dc, shapes["h"], palette["h"], f, view);
+        fillRings(dc, shapes["z"], palette["z"], f, view);
         fillRings(dc, shapes["f"], palette["f"], f, view);
         drawPieces(dc, shapes["t"], 1, palette, f, view);
-        fillRings(dc, shapes["z"], palette["z"], f, view);
         if (shapes["g"] != null) { fillRings(dc, [shapes["g"]], palette["g"], f, view); }
         drawPieces(dc, shapes["t"], 2, palette, f, view);
         fillRings(dc, shapes["w"], palette["w"], f, view);

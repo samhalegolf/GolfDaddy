@@ -84,7 +84,7 @@
 
        v8 drew the hand-drawn Studio overlay surfaces: trees (a dark wood) and hazards (gorse,
        scrub - brown-olive) under the fairways, and waste areas (dull sand) under bunkers and
-       water. Water was already drawn. They are drawn only - like every surface since v4 they
+       water (and, since v11, under the fairways too). Water was already drawn. They are drawn only - like every surface since v4 they
        never decide the frame - and they ship in the outlines too (k trees, h hazard, z waste),
        so a Garmin draws them as well.
 
@@ -97,8 +97,12 @@
 
        v10 stamps the trees placed one by one in the Studio overlay (singleTreesFromOverlay) at
        their own position and size, and only makes trees up inside a wood with none of them in
-       it. A wood the tree finder has pinned is drawn as the trees that are really there. */
-    version: 10,
+       it. A wood the tree finder has pinned is drawn as the trees that are really there.
+
+       v11 moved waste under the fairways. A waste area wanded off a desert or links course
+       often runs across the fairway it borders, and the fairway is what is really there, so
+       the fairway now wins: hazards, waste, then the fairways, bunkers, water and green. */
+    version: 11,
     canvas: {
       /* Ceiling, not a fixed size - see computeCanvasFit. Most holes land under both ceilings;
          a long narrow par 5 is height-limited, a short wide-corridor hole is width-limited. */
@@ -1027,12 +1031,12 @@
         parts.push('<polygon points="' + polygonPointsAttr(points) + '" fill="' + fill + '" stroke="' + recipe.colors.outline + '" stroke-width="' + recipe.strokeWidthPx + '"/>');
       });
     }
-    /* Hazards under everything played on, so a fairway cut through the gorse stays clean;
-       waste under the bunkers and water it usually holds. */
+    /* Hazards and waste under everything played on, so a fairway cut through the gorse or
+       across a waste area stays clean; bunkers and water sit on top of the waste they lie in. */
     /* Trees are not painted: the watch stamps them from buildHoleTrees (recipe v9). */
     layer(projected.hazards || [], recipe.colors.hazard);
-    layer(projected.fairways, recipe.colors.fairway);
     layer(projected.waste || [], recipe.colors.waste);
+    layer(projected.fairways, recipe.colors.fairway);
     layer(projected.bunkers, recipe.colors.bunker);
     layer(projected.water, recipe.colors.water);
     if (projected.greenPolygon) layer([projected.greenPolygon], recipe.colors.green);

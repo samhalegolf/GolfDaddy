@@ -615,6 +615,7 @@ function sawtoothSquare() {
   assert.ok(frame.svg.indexOf('fill="' + colors.hazard + '"') > 0, "hazards are drawn");
   assert.ok(frame.svg.indexOf('fill="' + colors.hazard + '"') < frame.svg.indexOf('fill="' + colors.fairway + '"'), "hazards sit under the fairway");
   assert.ok(frame.svg.indexOf('fill="' + colors.waste + '"') < frame.svg.indexOf('fill="' + colors.bunker + '"'), "waste sits under the bunkers");
+  assert.ok(frame.svg.indexOf('fill="' + colors.waste + '"') < frame.svg.indexOf('fill="' + colors.fairway + '"'), "waste sits under the fairway, so a fairway wanded over wins");
   assert.strictEqual(frame.outlines.k.length, 1, "trees ship in the outlines as k");
   assert.strictEqual(frame.outlines.z.length, 1, "waste ships in the outlines as z");
   assert.strictEqual(frame.outlines.h.length, 1, "hazards ship in the outlines as h");

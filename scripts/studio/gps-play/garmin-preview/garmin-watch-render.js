@@ -851,9 +851,9 @@
     this.drawPieces(dc, shapes.t, 0, palette, f, view);
     if (!hasTrees(shapes)) this.fillRings(dc, shapes.k, palette.k, f, view);
     this.fillRings(dc, shapes.h, palette.h, f, view);
+    this.fillRings(dc, shapes.z, palette.z, f, view);
     this.fillRings(dc, shapes.f, palette.f, f, view);
     this.drawPieces(dc, shapes.t, 1, palette, f, view);
-    this.fillRings(dc, shapes.z, palette.z, f, view);
     if (shapes.g != null) this.fillRings(dc, [shapes.g], palette.g, f, view);
     this.drawPieces(dc, shapes.t, 2, palette, f, view);
     this.fillRings(dc, shapes.w, palette.w, f, view);
