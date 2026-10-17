@@ -46,7 +46,14 @@
       || safe(function () { return window.GolfDaddyProfiles && window.GolfDaddyProfiles.active(); }, null) || null;
     return { id: id, name: clean(profile && profile.name) || clean(session.accountName) || "Guest", ownId: clean(session.ownProfileId) };
   }
+  /* Studio's Record Hub opens /app/ with ?recording=1 to screen record it: the
+     round is played as Guest, whoever is signed in to the browser, so no real
+     name or bag ends up in a recording. */
+  function recordingAsGuest() {
+    return safe(function () { return new URLSearchParams(window.location.search).get("recording") === "1"; }, false);
+  }
   function identity() {
+    if (recordingAsGuest()) return { id: "guest", name: "Guest", ownId: "" };
     var handoff = readHandoff();
     if (handoff && clean(handoff.playerId)) return { id: clean(handoff.playerId), name: clean(handoff.playerName) || "Player", ownId: clean(handoff.ownProfileId) };
     return rootIdentity();

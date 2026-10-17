@@ -54,6 +54,8 @@
         watchSession.playState.moveTarget(coordinate);
         face.mapView.aiming = phase !== "end";
       },
+      /* Locked, the shot is looked at on the map; unlocked, the numbers - as a round opens. */
+      onLockChange: function (face, locked) { if (locked) face.showMap(); else { if (face.mapView.aiming) face.mapView.confirmAim(); face.showNumbers(); } },
       buttons: [
         { id: "select", label: "SELECT", title: "SELECT: AIM on the numbers; enter / confirm Aim Mode on the map", act: function (face) { face.select(); } },
         { id: "back", label: "BACK", title: "BACK: cancel the aim, or back to the numbers", act: function (face) { face.back(); } },

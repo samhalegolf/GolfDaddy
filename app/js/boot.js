@@ -103,8 +103,18 @@
   /* A demo approach (demo-approach.js) is a hole played from the couch: it
      must look exactly like a round and write nothing a round writes. */
   function inDemo() {
-    return !!(app.demoApproach && app.demoApproach.active());
+    return recording || !!(app.demoApproach && app.demoApproach.active());
   }
+
+  /* Studio's Record Hub opens this page with ?recording=1, in a phone frame,
+     to screen record it beside the watches. The Hub drives the round (it puts
+     the player down through DEMO_APPROACH and locks through LOCK), so there is
+     no GPS, and like a demo it writes nothing a round writes. It plays as
+     Guest (gd-play-context.js), whoever is signed in to the browser. */
+  var recording = (function () {
+    try { return new URLSearchParams(window.location.search).get("recording") === "1"; }
+    catch (e) { return false; }
+  })();
 
   function ensureMarshal() {
     if (app.marshal) return app.marshal;
@@ -142,9 +152,9 @@
            so nothing is left half-written when it ends. */
         roundStarted: function (courseKey, courseName) {
           if (app.pin) app.pin.startRound();
-          if (app.gps) app.gps.start();
+          if (app.gps && !recording) app.gps.start();
           if (app.wakeLock) app.wakeLock.start();
-          if (!roundFeatures()) return;
+          if (!roundFeatures() || recording) return;
           if (app.courseData) app.courseData.startRound(courseKey);
           if (app.scorecard) app.scorecard.setCourse(courseKey, courseName);
         },

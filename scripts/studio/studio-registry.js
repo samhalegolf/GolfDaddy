@@ -672,7 +672,7 @@
       ],
       status: "implemented", needsVerification: false },
     { id: "gps-apple-preview", label: "Apple Watch Preview", parent: "gps-play",
-      function: "A hole drawn exactly as the Apple Watch app draws it, in points on a 2x panel, beside the live aerial the course plays over. Tap the aerial to place the player (the face takes it as its GPS fix); tap the face to aim there, press-hold-drag to carry the aim, the wheel is the Digital Crown; LOCK stands in for the phone locking the shot and brings up the UNLOCK band. Reads the course's image package (GET /api/course-watch-maps), which is what every Apple Watch receives. Writes nothing - the AIM_AT the watch would send is only reported.",
+      function: "The Apple Watch app's driving face drawn exactly as the wrist draws it, in points on a 2x panel, beside the live aerial the course plays over: the numbers page (ShotView) first, AIM locking the shot and flipping to the map, a swipe back to the numbers unlocking it. Tap the aerial to place the player (the face takes it as its GPS fix); on the map tap the face to aim there, press-hold-drag to carry the aim, the wheel is the Digital Crown; LOCK stands in for the phone locking the shot and brings up the UNLOCK band. Reads the course's image package (GET /api/course-watch-maps), which is what every Apple Watch receives. Writes nothing - the AIM_AT the watch would send is only reported.",
       owner: "scripts/studio/gps-play/apple-preview/apple-preview-page.js",
       runtime: { app: false, studio: true, server: true },
       code: [
@@ -681,6 +681,8 @@
         { role: "The maths both watches share (projection, wind, layup, skeleton)", path: "scripts/studio/gps-play/watch-preview/watch-common.js" },
         { role: "The face: a port of the watch's own draw code, kept in step with it", path: "scripts/studio/gps-play/apple-preview/apple-watch-render.js" },
         { role: "Source of truth being mirrored (SwiftUI)", path: "ios/App/ClarityCaddyWatch/AimableHoleMap.swift" },
+        { role: "The numbers page before the lock, mirrored", path: "ios/App/ClarityCaddyWatch/ShotView.swift" },
+        { role: "The numbers / map paging, mirrored", path: "ios/App/ClarityCaddyWatch/ContentView.swift" },
         { role: "Camera framings mirrored", path: "ios/WatchBubbleEngine/Sources/WatchBubbleEngine/WatchMapCamera.swift" },
         { role: "Tree sprites stamped (the same PNGs the watch ships)", path: "ios/App/ClarityCaddyWatch/Assets.xcassets/tree_round.imageset/Contents.json" },
         { role: "Bubble Engine (run in its own window, forward bias off)", path: "app/js/bubble-engine.js" },
@@ -701,7 +703,7 @@
       ],
       status: "implemented", needsVerification: false },
     { id: "gps-record-hub", label: "Record Hub", parent: "gps-play",
-      function: "The Garmin, the Apple Watch and the phone app side by side on one course, for screen recording. Course, hole and where the player stands are always the same on all three; Linked carries a drag on any device onto the other two as it moves, Individual lets each aim on its own. The watches are the preview pages' own faces; the phone is the real app (app/index.html) in a phone-sized frame, driven through its own Marshal (PLACED, AIM_DRAGGED, VIEW_HOLE_CHANGED) with no GPS, so it plays in Preview. Records each watch from its canvas, and the phone or all three together from this tab cropped to them; each recording downloads when it stops. Writes nothing.",
+      function: "The Garmin, the Apple Watch and the phone app side by side on one course, for screen recording. Course, hole, where the player stands and whether the shot is locked are always the same on all three (the Unlocked / Locked switch: the numbers before the lock, or the shot on the map); Linked carries a drag on any device onto the other two as it moves, Individual lets each aim on its own. The watches are the preview pages' own faces; the phone is the real app (app/index.html?recording=1: Guest, no GPS, writes nothing) in a phone-sized frame, driven through its own Marshal (DEMO_APPROACH, LOCK / UNLOCK, AIM_DRAGGED) so it plays the hole live. Records each watch from its canvas, and the phone or all three together from this tab cropped to them; each recording downloads when it stops. Writes nothing.",
       owner: "scripts/studio/gps-play/record-hub/record-hub-page.js",
       runtime: { app: false, studio: true, server: true },
       code: [
@@ -710,7 +712,9 @@
         { role: "The Garmin's options, buttons and linked-aim hold", path: "scripts/studio/gps-play/garmin-preview/garmin-preview-page.js" },
         { role: "The Apple Watch's options, buttons and linked-aim hold", path: "scripts/studio/gps-play/apple-preview/apple-preview-page.js" },
         { role: "The phone app, opened by ?courseId= (do not change it for the hub)", path: "app/index.html" },
-        { role: "The phone's play controller the hub signals", path: "app/js/marshal.js" }
+        { role: "The phone's play controller the hub signals", path: "app/js/marshal.js" },
+        { role: "?recording=1: no GPS, no round writes", path: "app/js/boot.js" },
+        { role: "?recording=1: plays as Guest", path: "scripts/gd-play-context.js" }
       ],
       inputs: ["Course selection from the real picker, or a typed course key", "A tap on the phone's map (the player)", "A drag on any device (the aim)", "Hole, watch and phone models, sizes"],
       outputs: ["Downloaded screen recordings - nothing is written to the course or a round"],
