@@ -16,7 +16,8 @@
  * the hole live, LOCK / UNLOCK follow the switch, AIM_DRAGGED moves the aim. It is opened with
  * ?recording=1, so it plays as Guest with no GPS and writes nothing a round writes (boot.js,
  * gd-play-context.js). A tap on its map, which would be Preview's PLACED, moves the player on all
- * three instead.
+ * three instead. "Phone's live wind" hands the phone's own live reading (app.wind, Open-Meteo at
+ * the player) to both watches, as the phone would put it on the wire.
  *
  * Recording: a watch records straight from its canvas (no picker, the watch's own pixels). The
  * phone, and "all three as one video", record this tab cropped to that element (Region Capture,
@@ -37,7 +38,7 @@
 
   /* The hub's own state, kept across leaving and re-entering the page. Each watch keeps its
      own store as well (its device, map mode, units), separate from its preview page's. */
-  var hub = { courseKey: "", courseName: "", holeNumbers: [], holeNumber: null, player: null, linked: true, locked: false, phoneId: PHONES[0].id, phoneScale: "fit", watchZoom: 0.75, units: "m" };
+  var hub = { courseKey: "", courseName: "", holeNumbers: [], holeNumber: null, player: null, linked: true, locked: false, phoneWind: false, phoneId: PHONES[0].id, phoneScale: "fit", watchZoom: 0.75, units: "m" };
 
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function metres(a, b) { return window.GDWatchCommon.Geo.distance(a, b); }
@@ -164,6 +165,8 @@
       '<button type="button" class="gdStudioDiagramBtn" data-hub="linked">Linked</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-hub="individual">Individual</button>' +
       "</span>" +
+      '<label class="gdStudioViewportField" title="Use the wind the phone has measured live on both watches"><input type="checkbox" data-hub="phoneWind"> Phone\'s live wind on the watches</label>' +
+      '<span class="gdStudioMuted" data-hub="windStatus"></span>' +
       '<label class="gdStudioViewportField">Units <select data-hub="units"><option value="m">metres</option><option value="y">yards</option></select></label>' +
       '<label class="gdStudioViewportField">Watch size <select data-hub="watchZoom"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1">1×</option><option value="1.5">1.5×</option></select></label>' +
       '<label class="gdStudioViewportField">Phone size <select data-hub="phoneScale"><option value="fit">Fit to screen</option><option value="0.6">0.6×</option><option value="0.75">0.75×</option><option value="1">1×</option><option value="1.25">1.25×</option></select></label>' +
@@ -205,6 +208,7 @@
 
     var el = {};
     containerEl.querySelectorAll("[data-hub]").forEach(function (node) { el[node.getAttribute("data-hub")] = node; });
+    el.phoneWind.checked = hub.phoneWind;
     el.units.value = hub.units; el.watchZoom.value = String(hub.watchZoom); el.phoneScale.value = String(hub.phoneScale);
     if (el["mode-garmin"]) el["mode-garmin"].value = sessions.garmin.mode;
 
@@ -250,7 +254,21 @@
 
     // ---------------------------------------------------------------- the phone
 
-    var phone = { marshal: null, token: 0, applying: 0, dragging: false, note: "" };
+    var phone = { marshal: null, app: null, token: 0, applying: 0, dragging: false, note: "" };
+
+    /* The phone's live wind on the watches: the reading it is drawing with (app.wind), from
+       and speed as the watches take them. Nothing while the phone's wind is off, manual or not
+       yet measured - a watch then draws no wind, as it would with no weather. */
+    function phoneWindReading() {
+      try { var w = phone.app && phone.app.wind; return w && w.isLive() ? w.liveReading() : null; } catch (e) { return null; }
+    }
+    function applyPhoneWind() {
+      var r = hub.phoneWind ? phoneWindReading() : null;
+      var wind = r ? { fromDeg: ((Number(r.directionDeg) % 360) + 360) % 360, kmh: Math.max(0, Number(r.speedKmh)) } : null;
+      WATCHES.forEach(function (key) { sessions[key].wind = wind; watches[key].requestUpdate(); });
+      el.windStatus.textContent = !hub.phoneWind ? "" : wind ? "from " + Math.round(wind.fromDeg) + "° · " + Math.round(wind.kmh) + " km/h"
+        : phone.app ? "the phone has no live wind yet" : "waiting for the phone";
+    }
     function phoneDevice() { return PHONES.filter(function (p) { return p.id === hub.phoneId; })[0] || PHONES[0]; }
     /* A tab recording only sees what is on screen, so "Fit to screen" sizes the phone - the
        tallest device - to the window's height, stage padding and all. */
@@ -348,7 +366,7 @@
        round and its package, then puts it on the hub's hole and player. */
     function openPhone() {
       phone.token += 1;
-      phone.marshal = null; phone.dragging = false;
+      phone.marshal = null; phone.app = null; phone.dragging = false;
       var token = phone.token;
       if (!hub.courseKey) { el.phoneFrame.removeAttribute("src"); el.phoneEmpty.hidden = false; renderPhoneReadout(); return; }
       el.phoneEmpty.hidden = true;
@@ -368,6 +386,8 @@
           return;
         }
         phone.marshal = m;
+        phone.app = win.ClarityApp;
+        if (phone.app.wind) phone.app.wind.onChange(function () { if (!destroyed && token === phone.token) applyPhoneWind(); });
         m.onScene(function (scene, cause) { onPhoneScene(token, scene, cause); });
         /* A tap on the phone's map is Preview's PLACED, which a live hole refuses. Here it is
            the player moving, on all three. The hub's own signals pass straight through. */
@@ -388,6 +408,7 @@
         if (hub.holeNumber != null) phoneHole(hub.holeNumber);
         if (hub.player) phonePlace(hub.player);
         else phoneLock();
+        applyPhoneWind();
         renderPhoneReadout();
       })();
     }
@@ -559,6 +580,12 @@
     el.unlocked.addEventListener("click", function () { setLocked(false); });
     el.linked.addEventListener("click", function () { hub.linked = true; renderLink(); });
     el.individual.addEventListener("click", function () { hub.linked = false; renderLink(); });
+    el.phoneWind.addEventListener("change", function () {
+      hub.phoneWind = el.phoneWind.checked;
+      /* Asked for now rather than at the phone's next hole change. */
+      if (hub.phoneWind && !phoneWindReading() && phone.app && phone.app.wind) phone.app.wind.fetchLiveWind();
+      applyPhoneWind();
+    });
     el.units.addEventListener("change", function () {
       hub.units = el.units.value;
       WATCHES.forEach(function (key) { sessions[key].units = hub.units; watches[key].requestUpdate(); });
@@ -580,6 +607,7 @@
 
     renderLink();
     renderLock();
+    applyPhoneWind();
     layoutPhone();
     renderRecording();
     if (hub.courseKey) {
