@@ -268,7 +268,7 @@ class GarminSessionManager {
     // rough darkest, fairway, green lightest, sand, water. Trees are the
     // rough with black mixed in (black alone where there is no pattern
     // fill), hazards (gorse, scrub) dark olive, waste the 64-colour palette's
-    // olive sand.
+    // olive sand with that dark olive scattered through it as scrub.
     // Each turf surface has a dark and a light variant for the terrain
     // pieces (rd/rl, fd/fl, gd/gl). The 64-colour screens show shadow only -
     // a lighter green than the surface reads as a different surface there
@@ -283,8 +283,11 @@ class GarminSessionManager {
     // other way (the only solid colour darker than the rough is black, which
     // was far too dark). n of 4 is GRAIN instead: a 16x16 tile half and half
     // with short diagonal dashes (GarminMapView.patternTexture), the rough's
-    // and the waste's texture. `fallback` is the solid colour for a watch
-    // without pattern fills, or null to leave that surface flat there.
+    // texture. n of 5 is SCRUB: the grain with small clumps of a fifth
+    // colour [base, mix, 5, fallback, scrub] - tussock and scrub dotted over
+    // sand, so a waste area reads as desert or dune, not a bunker. `fallback`
+    // is the solid colour for a watch without pattern fills, or null to leave
+    // that surface flat there.
     // The fairway's mow lines are terrain pieces, label 5 (fairway lit), cut
     // by the server along the hole's play line: "fl" is the stripe.
     static var MIP_PALETTE = {
@@ -292,7 +295,7 @@ class GarminSessionManager {
         "f" => [0x55AA55, 0xAAFFAA, 1, 0x55AA55], "fd" => [0x55AA55, 0x005500, 1, 0x00AA55], "fl" => [0x55AA55, 0xAAFFAA, 2, 0x55FF55],
         "g" => 0xAAFFAA, "gd" => [0xAAFFAA, 0x55AA55, 1, 0x55FF55], "gl" => 0xAAFFAA,
         "b" => 0xFFFFAA, "w" => 0x0055AA,
-        "k" => [0x005500, 0x000000, 3, 0x000000], "h" => 0x555500, "z" => [0xAAAA55, 0xAAAAAA, 4, 0xAAAA55]
+        "k" => [0x005500, 0x000000, 3, 0x000000], "h" => 0x555500, "z" => [0xAAAA55, 0xAAAAAA, 5, 0xAAAA55, 0x555500]
     };
     // A surface with grain (n = 4, GarminMapView.patternTexture): the mix colour
     // for a course's own rough or waste is that colour, 8% darker - a faint
@@ -302,6 +305,12 @@ class GarminSessionManager {
         var g = ((colour >> 8) & 0xFF) * 92 / 100;
         var b = (colour & 0xFF) * 92 / 100;
         return [colour, (r << 16) | (g << 8) | b, 4, colour];
+    }
+    // The waste's grain with the course's own scrub (its hazard colour)
+    // dotted through it (n = 5).
+    function scrubOf(colour, scrub) {
+        var grain = grainOf(colour);
+        return [colour, grain[1], 5, colour, scrub];
     }
     // The base palette every package started from, with its variants worked
     // out as the phone does (watch-map-delivery.js cleanPalette: x0.8, x1.22).
@@ -328,7 +337,7 @@ class GarminSessionManager {
             }
         }
         out["r"] = grainOf(out["r"]);
-        out["z"] = grainOf(out["z"]);
+        out["z"] = scrubOf(out["z"], out["h"]);
         return out;
     }
 
