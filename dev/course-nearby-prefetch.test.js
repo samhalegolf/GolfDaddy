@@ -264,17 +264,20 @@ function regionRequest(method, query, body) {
 
 test("Regional Scan lists every course in the radius, marking the ones we already hold", async () => {
   const mapped = { course_id: "course-1-mapped", course_name: "Course 1", course_lat: 0, course_lng: 0.009 };
-  stubFetch({ authUser: ADMIN, maps: [mapped], osm: [osmCourse(1), osmCourse(2), osmCourse(30)] });
-  const res = await jobs.default(regionRequest("GET", "?region=1&lat=0&lng=0&radiusKm=10"));
+  const calls = stubFetch({ authUser: ADMIN, maps: [mapped] });
+  /* The page brings its own Overpass answer: the server must not ask again. */
+  global.fetch = (inner => async (url, options) => { if (String(url).includes("overpass")) throw new Error("server asked Overpass"); return inner(url, options); })(global.fetch);
+  const res = await jobs.default(regionRequest("POST", "", { kind: "region_list", lat: 0, lng: 0, radiusKm: 10, elements: [osmCourse(1), osmCourse(2), osmCourse(30)] }));
   assert.strictEqual(res.status, 200);
   const body = await res.json();
   assert.strictEqual(body.radiusM, 10000);
   assert.deepStrictEqual(body.courses.map(c => [c.name, c.hasMap]), [["Course 1", true], ["Course 2", false]], "Course 30 sits ~33 km out");
+  assert.strictEqual(jobInserts(calls).length, 0, "listing queues nothing");
 });
 
 test("Regional Scan is admin only", async () => {
   stubFetch({ authUser: { id: "player", email: "someone@example.com" }, osm: [osmCourse(1)] });
-  assert.strictEqual((await jobs.default(regionRequest("GET", "?region=1&lat=0&lng=0&radiusKm=10"))).status, 403);
+  assert.strictEqual((await jobs.default(regionRequest("POST", "", { kind: "region_list", lat: 0, lng: 0, radiusKm: 10, elements: [osmCourse(1)] }))).status, 403);
   const calls = stubFetch({ authUser: { id: "player", email: "someone@example.com" } });
   const res = await jobs.default(regionRequest("POST", "", { kind: "region_scan", courses: [{ name: "Course 1", lat: 0, lng: 0.009 }] }));
   assert.strictEqual(res.status, 403);
