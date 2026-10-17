@@ -700,6 +700,32 @@
         { name: "GDWatchPreviewPage.render", purpose: "The page both watches share.", codePath: "scripts/studio/gps-play/watch-preview/watch-preview-page.js" }
       ],
       status: "implemented", needsVerification: false },
+    { id: "gps-record-hub", label: "Record Hub", parent: "gps-play",
+      function: "The Garmin, the Apple Watch and the phone app side by side on one course, for screen recording. Course, hole and where the player stands are always the same on all three; Linked carries a drag on any device onto the other two as it moves, Individual lets each aim on its own. The watches are the preview pages' own faces; the phone is the real app (app/index.html) in a phone-sized frame, driven through its own Marshal (PLACED, AIM_DRAGGED, VIEW_HOLE_CHANGED) with no GPS, so it plays in Preview. Records each watch from its canvas, and the phone or all three together from this tab cropped to them; each recording downloads when it stops. Writes nothing.",
+      owner: "scripts/studio/gps-play/record-hub/record-hub-page.js",
+      runtime: { app: false, studio: true, server: true },
+      code: [
+        { role: "Page (owner): the shared round, the linked aim, the phone frame, recording", path: "scripts/studio/gps-play/record-hub/record-hub-page.js" },
+        { role: "The watch faces (mountWatch) and their packages", path: "scripts/studio/gps-play/watch-preview/watch-preview-page.js" },
+        { role: "The Garmin's options, buttons and linked-aim hold", path: "scripts/studio/gps-play/garmin-preview/garmin-preview-page.js" },
+        { role: "The Apple Watch's options, buttons and linked-aim hold", path: "scripts/studio/gps-play/apple-preview/apple-preview-page.js" },
+        { role: "The phone app, opened by ?courseId= (do not change it for the hub)", path: "app/index.html" },
+        { role: "The phone's play controller the hub signals", path: "app/js/marshal.js" }
+      ],
+      inputs: ["Course selection from the real picker, or a typed course key", "A tap on the phone's map (the player)", "A drag on any device (the aim)", "Hole, watch and phone models, sizes"],
+      outputs: ["Downloaded screen recordings - nothing is written to the course or a round"],
+      owns: ["The hub UI, its phone frame and device table, the linked aim, recording"],
+      doesNotOwn: ["What either watch draws (the preview renderers)", "What the phone app draws (app/js/painter.js)", "The Bubble Engine", "The course picker"],
+      connections: [
+        { target: "gps-play", direction: "child-of", label: "" },
+        { target: "gps-garmin-preview", direction: "reads-from", label: "The Garmin's face" },
+        { target: "gps-apple-preview", direction: "reads-from", label: "The Apple Watch's face" }
+      ],
+      keyFunctions: [
+        { name: "GDWatchPreviewPage.mountWatch", purpose: "One watch face on a canvas with its session seam and input, shared with the preview pages.", codePath: "scripts/studio/gps-play/watch-preview/watch-preview-page.js" },
+        { name: "broadcastAim", purpose: "Carries one device's aim onto the other two while Linked.", codePath: "scripts/studio/gps-play/record-hub/record-hub-page.js" }
+      ],
+      status: "implemented", needsVerification: false },
     { id: "gps-positioning", label: "Positioning", parent: "gps-map-camera", function: "Not yet documented — placeholder nav entry.", owner: "Needs verification", runtime: { app: true, studio: false, server: false }, code: [], inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "gps-map-camera", direction: "child-of", label: "" }], keyFunctions: [], status: "placeholder", needsVerification: true },
     { id: "gps-shot-planning", label: "Shot Planning", parent: "gps-play",
       function: "On-course flag/pin placement plus a jump into Bubble Projection's tuning group — see the nested gps-bubble-projection record for the bubble engine itself.",
@@ -866,7 +892,7 @@
     { id: "overview" },
     { id: "courses", children: ["course-database", "course-mapping", "region-scan", "map-viewport", "map-overlay", "course-usage", "course-visuals", "publishing"] },
     { id: "shot-system", children: ["photo-scan", "practice-data", "practice-email", "bubble-geometry", "pattern-finder", "my-bubble", "shot-system-course-data", "conditions", "recommendations"] },
-    { id: "gps-play", children: ["gps-course-selection", "gps-round-setup", "gps-hole-lifecycle", "gps-map-camera", "gps-garmin-preview", "gps-apple-preview", "gps-shot-planning", "gps-shot-capture", "gps-scorecard", "gps-course-data-capture", "gps-sync-recovery", "gps-demo-mode"] },
+    { id: "gps-play", children: ["gps-course-selection", "gps-round-setup", "gps-hole-lifecycle", "gps-map-camera", "gps-garmin-preview", "gps-apple-preview", "gps-record-hub", "gps-shot-planning", "gps-shot-capture", "gps-scorecard", "gps-course-data-capture", "gps-sync-recovery", "gps-demo-mode"] },
     { id: "players-coaches" },
     { id: "commerce" },
     { id: "communications" },

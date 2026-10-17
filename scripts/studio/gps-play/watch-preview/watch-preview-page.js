@@ -17,7 +17,10 @@
  * Each watch supplies, through `options`: its renderer (DEVICES + MapFace), which package it
  * takes, its buttons, its sprite loader. Everything else - the course picker hand-off, the
  * engine bootstrap, the side map (the app's own provider list, as the Map Viewport page draws
- * it), wind, slope and the readout - is this file, once. */
+ * it), wind, slope and the readout - is this file, once.
+ *
+ * The face itself - the session seam, the canvas, a finger on the glass, the buttons - is
+ * mountWatch(), which the Record Hub (record-hub-page.js) mounts twice beside the phone. */
 (function () {
   "use strict";
 
@@ -185,88 +188,42 @@
     return null;
   }
 
-  // ---------------------------------------------------------------- the page
+  // ---------------------------------------------------------------- the watches
 
-  /* options:
-       key            "garmin" | "apple" - the page state's own store
-       render         the watch's renderer module (DEVICES, PAN_TICK_MS, MapFace)
-       Face           the face to draw, when it is more than the map (the Garmin's CaddyAppView:
-                      its numbers screen with the map behind it); R.MapFace otherwise
-       lede           the opening paragraph, HTML
-       packages       "garmin-first" | "image"
-       pictureFormat  the asset proxy format the watch fetches ("jpeg"), or "" for the stored bytes
-       modes          [{ value, label }] for a watch that can draw as well as show a picture, or null
-       buttons        [{ id, label(face) | label, title, act(face, session) }]
-       spriteBitmap   function (onLoad) -> the bitmap function the MapFace takes
-       deviceId       the default watch
-       mapPalette     function (hole, device) -> palette, for a watch that draws (null otherwise)
-       onMount        function (redraw), once the page is up - for a face waiting on a web font */
-  function render(containerEl, options) {
+  /* Each watch's page file defines its options once (garmin-preview-page.js,
+     apple-preview-page.js); its own preview page and the Record Hub both mount it from here. */
+  var definitions = {};
+  function define(key, optionsFn) { definitions[key] = optionsFn; }
+  function watchOptions(key) { return definitions[key] ? definitions[key]() : null; }
+
+  /* A course's package for one watch, decoded into the holes a face reads. */
+  function loadWatchPackage(courseKey, preference) {
+    return loadPackage(courseKey, preference).then(function (result) {
+      var report = result.report;
+      result.holes = (report && Array.isArray(report.holes) ? report.holes : []).map(holeRecord).filter(function (h) { return h.spatialReference.isUsable(); });
+      result.version = report && report.watchPackageVersion;
+      result.status = report && report.status || "none";
+      return result;
+    });
+  }
+
+  /* One watch on the glass: its face, the session seam the face reads, a finger on the canvas,
+     its buttons. Shared by the preview page (one watch beside the aerial) and the Record Hub
+     (both watches beside the phone).
+
+       options   the watch's options (see render below)
+       host      { canvas, bezel, buttons } - the buttons container may be null
+       session   a store() - the state that survives leaving the page
+       hooks     onDraw()             after every frame
+                 onInput(phase)       a finger or a button on this watch: "move" while it aims,
+                                      "end" when the finger lifts or a button was pressed
+                 onStepHole(n)        the watch asked for the next / previous hole
+                 onWindApplied()      the watch folded the wind in or out */
+  function mountWatch(options, host, session, hooks) {
     var R = options.render, C = common();
-    var session = store(options.key, { deviceId: options.deviceId, mode: options.modes ? options.modes[0].value : "" });
-    var destroyed = false, mapObj = null, layer = null, face = null, panTimer = null;
-    var overlays = L.layerGroup(), holeLayers = L.layerGroup();
-    var aimLog = "";
-
-    if (!R || !C || typeof window.L === "undefined" || !window.GDMapSources) {
-      containerEl.innerHTML = '<p class="gdStudioMuted" style="padding:16px">The watch renderer, Leaflet or the map source list did not load on this surface.</p>';
-      return null;
-    }
-
-    var deviceOptions = R.DEVICES.map(function (d) {
-      var size = d.pixelScale > 1 ? d.width + "×" + d.height + " pt" : d.width + "×" + d.height;
-      return '<option value="' + esc(d.id) + '"' + (d.id === session.deviceId ? " selected" : "") + ">" + esc(d.name) + " · " + size + "</option>";
-    }).join("");
-    var modeOptions = options.modes ? options.modes.map(function (m) { return '<option value="' + esc(m.value) + '">' + esc(m.label) + "</option>"; }).join("") : "";
-    var buttons = (options.buttons || []).map(function (b) {
-      return '<button type="button" class="gdStudioDiagramBtn" data-gd-watch="button-' + esc(b.id) + '" title="' + esc(b.title || "") + '"></button>';
-    }).join("");
-
-    containerEl.innerHTML =
-      '<div class="gdStudioLede" style="margin-bottom:12px"><p>' + options.lede + "</p></div>" +
-      '<div class="gdStudioViewportBar">' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-watch="pick">Pick course</button>' +
-      '<label class="gdStudioViewportField">or key <input type="text" data-gd-watch="key" placeholder="course-key" style="width:160px"></label>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-watch="load">Load</button>' +
-      '<span class="gdStudioViewportCourse" data-gd-watch="course">No course loaded</span>' +
-      "</div>" +
-      '<div class="gdStudioWatch">' +
-      '<section class="gdStudioWatchPane">' +
-      '<div class="gdStudioViewportBar">' +
-      '<label class="gdStudioViewportField">Watch <select data-gd-watch="device">' + deviceOptions + "</select></label>" +
-      (options.modes ? '<label class="gdStudioViewportField">Map <select data-gd-watch="mode">' + modeOptions + "</select></label>" : "") +
-      '<label class="gdStudioViewportField">Units <select data-gd-watch="units"><option value="m">metres</option><option value="y">yards</option></select></label>' +
-      '<label class="gdStudioViewportField">Size <select data-gd-watch="zoom"><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>' +
-      "</div>" +
-      '<div class="gdStudioWatchBezel" data-gd-watch="bezel"><canvas data-gd-watch="canvas"></canvas></div>' +
-      '<div class="gdStudioViewportBar gdStudioWatchButtons">' + buttons + "</div>" +
-      '<div class="gdStudioViewportBar">' +
-      '<label class="gdStudioViewportField">Wind from <input type="number" data-gd-watch="windFrom" min="0" max="359" step="1" placeholder="deg" style="width:64px">°</label>' +
-      '<label class="gdStudioViewportField"><input type="number" data-gd-watch="windKmh" min="0" max="80" step="1" placeholder="km/h" style="width:64px"> km/h</label>' +
-      '<label class="gdStudioViewportField"><input type="checkbox" data-gd-watch="windApplied"> wind in plays</label>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-watch="calm">Calm</button>' +
-      "</div>" +
-      '<pre class="gdStudioWatchReadout" data-gd-watch="readout"></pre>' +
-      "</section>" +
-      '<section class="gdStudioWatchMapPane">' +
-      '<div class="gdStudioViewportBar">' +
-      '<label class="gdStudioViewportField">Provider <select data-gd-watch="provider"></select></label>' +
-      '<label class="gdStudioViewportField">Hole <select data-gd-watch="hole"></select></label>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-watch="fit">Whole course</button>' +
-      "</div>" +
-      '<div class="gdStudioViewportMap gdStudioWatchMap" data-gd-watch="map"></div>' +
-      '<div class="gdStudioViewportReadout" data-gd-watch="mapReadout"></div>' +
-      '<div class="gdStudioViewportCredit" data-gd-watch="credit"></div>' +
-      "</section></div>";
-
-    var el = {};
-    containerEl.querySelectorAll("[data-gd-watch]").forEach(function (node) { el[node.getAttribute("data-gd-watch")] = node; });
-    if (el.mode) el.mode.value = session.mode;
-    el.units.value = session.units; el.zoom.value = String(session.zoom);
-    if (session.wind) { el.windFrom.value = session.wind.fromDeg; el.windKmh.value = session.wind.kmh; }
-    el.windApplied.checked = session.windApplied;
-
-    /* ---- the watch ---- */
+    hooks = hooks || {};
+    var destroyed = false, face = null, panTimer = null, aimLog = "", drawError = "";
+    var canvas = host.canvas, bezel = host.bezel;
 
     function device() { return R.DEVICES.filter(function (d) { return d.id === session.deviceId; })[0] || R.DEVICES[0]; }
     function currentHole() { return session.holes.filter(function (h) { return h.holeNumber === session.holeNumber; })[0] || null; }
@@ -370,13 +327,17 @@
       lockPending: function () { return false; },
       lock: function () { session.locked = true; aimLog = "LOCK sent to the phone"; },
       windApplied: function () { return session.windApplied; },
-      toggleWindApplied: function () { session.windApplied = !session.windApplied; el.windApplied.checked = session.windApplied; aimLog = "wind " + (session.windApplied ? "folded into" : "taken out of") + " the numbers"; },
-      /* NEXT_HOLE / PREVIOUS_HOLE: the phone would move the round on; here the hole picker does. */
+      toggleWindApplied: function () {
+        session.windApplied = !session.windApplied;
+        aimLog = "wind " + (session.windApplied ? "folded into" : "taken out of") + " the numbers";
+        if (hooks.onWindApplied) hooks.onWindApplied();
+      },
+      /* NEXT_HOLE / PREVIOUS_HOLE: the phone would move the round on; here the page does. */
       stepHole: function (delta) {
         var i = session.holes.findIndex(function (h) { return h.holeNumber === session.holeNumber; }), next = session.holes[i + delta];
         if (i < 0 || !next) return;
         aimLog = (delta > 0 ? "NEXT_HOLE" : "PREVIOUS_HOLE") + " sent to the phone";
-        setHole(next.holeNumber);
+        if (hooks.onStepHole) hooks.onStepHole(next.holeNumber); else setHole(next.holeNumber);
       },
       requestUpdate: function () { requestUpdate(); },
       unlock: function () { session.locked = false; if (face && face.unlock) face.unlock(); aimLog = "UNLOCK sent to the phone"; renderButtons(); }
@@ -385,12 +346,12 @@
     function newFace() {
       face = new (options.Face || R.MapFace)(watchSession, device(), options.spriteBitmap(requestUpdate));
       var d = device(), ps = d.pixelScale || 1;
-      el.canvas.width = d.width * ps; el.canvas.height = d.height * ps;
-      el.canvas.style.width = d.width * ps * session.zoom + "px"; el.canvas.style.height = d.height * ps * session.zoom + "px";
-      el.bezel.classList.toggle("isRound", d.shape === "round");
-      el.bezel.classList.toggle("isRect", d.shape === "roundedRect");
-      el.bezel.classList.toggle("isMip", d.amoled === false);
-      el.bezel.style.setProperty("--gdWatchCorner", d.shape === "roundedRect" ? Math.round(d.corner * d.width * ps * session.zoom) + "px" : "");
+      canvas.width = d.width * ps; canvas.height = d.height * ps;
+      canvas.style.width = d.width * ps * session.zoom + "px"; canvas.style.height = d.height * ps * session.zoom + "px";
+      bezel.classList.toggle("isRound", d.shape === "round");
+      bezel.classList.toggle("isRect", d.shape === "roundedRect");
+      bezel.classList.toggle("isMip", d.amoled === false);
+      bezel.style.setProperty("--gdWatchCorner", d.shape === "roundedRect" ? Math.round(d.corner * d.width * ps * session.zoom) + "px" : "");
       if (session.holes.length && session.player && face.onFix) face.onFix();
       renderButtons();
     }
@@ -398,9 +359,9 @@
     /* The glass: a canvas clipped to the face's shape, the bezel round it in CSS. */
     function draw() {
       if (destroyed || !face) return;
-      var d = device(), ps = d.pixelScale || 1, ctx = el.canvas.getContext("2d");
+      var d = device(), ps = d.pixelScale || 1, ctx = canvas.getContext("2d");
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, el.canvas.width, el.canvas.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.save();
       ctx.scale(ps, ps);
       ctx.beginPath();
@@ -408,53 +369,71 @@
       else if (d.shape === "roundedRect") { var r = d.corner * d.width; ctx.moveTo(r, 0); ctx.arcTo(d.width, 0, d.width, d.height, r); ctx.arcTo(d.width, d.height, 0, d.height, r); ctx.arcTo(0, d.height, 0, 0, r); ctx.arcTo(0, 0, d.width, 0, r); ctx.closePath(); }
       else ctx.rect(0, 0, d.width, d.height);
       ctx.clip();
-      try { face.onUpdate(ctx); } catch (e) { ctx.restore(); el.readout.textContent = "draw error: " + (e && e.message || e); return; }
+      drawError = "";
+      try { face.onUpdate(ctx); } catch (e) { drawError = "draw error: " + (e && e.message || e); }
       ctx.restore();
-      renderReadout();
-      drawOverlays();
+      if (hooks.onDraw) hooks.onDraw();
     }
 
-    function renderReadout() {
+    function readoutLines() {
+      if (drawError) return [drawError];
       var lines = [];
       var hole = currentHole();
-      if (!hole) { lines.push(session.courseKey ? "No hole in the package yet." : "Pick a course to load its package."); }
+      if (!hole) { lines.push(session.courseKey ? "No hole in the package yet." : "Pick a course to load its package."); return lines; }
+      var d = device();
+      lines.push(d.name + " · " + d.width + "×" + d.height + (d.pixelScale > 1 ? " pt @" + d.pixelScale + "x" : "") + (options.deviceLine ? " · " + options.deviceLine(d) : ""));
+      lines.push("package: " + session.packageKind + " v" + session.packageVersion + (options.modes && session.mode === "picture" && !hole.path ? " · no picture in a Garmin package - drawing the outlines" : ""));
+      if (face && face.trace) lines.push(face.trace);
+      if (!session.player) lines.push("no GPS fix - place the player first");
       else {
-        var d = device();
-        lines.push(d.name + " · " + d.width + "×" + d.height + (d.pixelScale > 1 ? " pt @" + d.pixelScale + "x" : "") + (options.deviceLine ? " · " + options.deviceLine(d) : ""));
-        lines.push("package: " + session.packageKind + " v" + session.packageVersion + (options.modes && session.mode === "picture" && !hole.path ? " · no picture in a Garmin package - drawing the outlines" : ""));
-        if (face && face.trace) lines.push(face.trace);
-        if (!session.player) lines.push("no GPS fix - tap the aerial to place the player");
-        else {
-          var local = face.currentBubble();
-          var green = watchSession.greenDistances();
-          lines.push("player " + session.player.lat.toFixed(6) + ", " + session.player.lng.toFixed(6) + (green ? " · green F/C/B " + Math.round(green.front) + "/" + Math.round(green.centre) + "/" + Math.round(green.back) + " m" : ""));
-          if (local) lines.push("bubble: " + local.club.club + " · " + Math.round(local.targetDistanceM) + " m to aim · carry " + Math.round(local.club.carryM) + " total " + Math.round(local.club.totalM) + (playState.target || (face.state && face.state.target) ? " · wrist's aim" : " · phone's default aim"));
-          else lines.push("no local Bubble (engine still loading, or the hole has no green)");
-          /* Always said, so "nothing happened" is never a mystery: the watches' own rule is calm
-             under 5 km/h (no ghost, no streaks), and a direction with no speed is no wind. */
-          var effect = local ? watchSession.windEffect(session.player, local.target, local.targetDistanceM) : null;
-          if (!session.wind) lines.push("wind: none set (enter a direction AND a speed; the watch reads both from its weather source)");
-          else if (!effect || effect.level === 0) lines.push("wind: " + session.wind.kmh + " km/h is calm on the watch's rule (under 5 km/h): no ghost, no streaks");
-          else lines.push("wind: from " + session.wind.fromDeg + "° at " + session.wind.kmh + " km/h · level " + effect.level + " · " + (effect.alongM >= 0 ? "+" : "") + effect.alongM.toFixed(1) + " m along the shot · ghost ring " + Math.round(C.Geo.distance(local.target, effect.ghost)) + " m downwind" + (session.windApplied ? " · in the plays number" : ""));
-        }
-        lines.push((typeof face.showingMap === "boolean" ? "screen: " + (face.showingMap ? "map" : "numbers") + " · " : "") + (face.aiming ? "aiming ON" : "aiming off") + (face.playsMode ? " · plays mode ON" : "") + (session.locked ? " · shot LOCKED" : ""));
-        if (aimLog) lines.push(aimLog);
-        if (options.fontsNote) lines.push(options.fontsNote);
+        var local = face.currentBubble();
+        var green = watchSession.greenDistances();
+        lines.push("player " + session.player.lat.toFixed(6) + ", " + session.player.lng.toFixed(6) + (green ? " · green F/C/B " + Math.round(green.front) + "/" + Math.round(green.centre) + "/" + Math.round(green.back) + " m" : ""));
+        if (local) lines.push("bubble: " + local.club.club + " · " + Math.round(local.targetDistanceM) + " m to aim · carry " + Math.round(local.club.carryM) + " total " + Math.round(local.club.totalM) + (playState.target || (face.state && face.state.target) ? " · wrist's aim" : " · phone's default aim"));
+        else lines.push("no local Bubble (engine still loading, or the hole has no green)");
+        /* Always said, so "nothing happened" is never a mystery: the watches' own rule is calm
+           under 5 km/h (no ghost, no streaks), and a direction with no speed is no wind. */
+        var effect = local ? watchSession.windEffect(session.player, local.target, local.targetDistanceM) : null;
+        if (!session.wind) lines.push("wind: none set (enter a direction AND a speed; the watch reads both from its weather source)");
+        else if (!effect || effect.level === 0) lines.push("wind: " + session.wind.kmh + " km/h is calm on the watch's rule (under 5 km/h): no ghost, no streaks");
+        else lines.push("wind: from " + session.wind.fromDeg + "° at " + session.wind.kmh + " km/h · level " + effect.level + " · " + (effect.alongM >= 0 ? "+" : "") + effect.alongM.toFixed(1) + " m along the shot · ghost ring " + Math.round(C.Geo.distance(local.target, effect.ghost)) + " m downwind" + (session.windApplied ? " · in the plays number" : ""));
       }
-      el.readout.textContent = lines.join("\n");
+      lines.push((typeof face.showingMap === "boolean" ? "screen: " + (face.showingMap ? "map" : "numbers") + " · " : "") + (face.aiming ? "aiming ON" : "aiming off") + (face.playsMode ? " · plays mode ON" : "") + (session.locked ? " · shot LOCKED" : ""));
+      if (aimLog) lines.push(aimLog);
+      if (options.fontsNote) lines.push(options.fontsNote);
+      return lines;
     }
 
+    /* ---- the buttons ---- */
+
+    var buttonNodes = {};
+    if (host.buttons) {
+      host.buttons.innerHTML = (options.buttons || []).map(function (b) {
+        return '<button type="button" class="gdStudioDiagramBtn" data-gd-watch-button="' + esc(b.id) + '" title="' + esc(b.title || "") + '"></button>';
+      }).join("");
+      (options.buttons || []).forEach(function (b) {
+        var node = host.buttons.querySelector('[data-gd-watch-button="' + b.id + '"]');
+        buttonNodes[b.id] = node;
+        node.addEventListener("click", function () {
+          if (!face) return;
+          b.act(face, session, watchSession);
+          renderButtons();
+          requestUpdate();
+          if (hooks.onInput) hooks.onInput("end");
+        });
+      });
+    }
     function renderButtons() {
       (options.buttons || []).forEach(function (b) {
-        var node = el["button-" + b.id];
+        var node = buttonNodes[b.id];
         if (node) node.textContent = typeof b.label === "function" ? b.label(face, session) : b.label;
       });
     }
 
-    /* ---- face input: a finger on the glass, in the face's own points ---- */
+    /* ---- a finger on the glass, in the face's own points ---- */
 
     function canvasPoint(e) {
-      var rect = el.canvas.getBoundingClientRect(), d = device();
+      var rect = canvas.getBoundingClientRect(), d = device();
       var p = e.touches && e.touches[0] ? e.touches[0] : (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0] : e);
       return [(p.clientX - rect.left) * d.width / rect.width, (p.clientY - rect.top) * d.height / rect.height];
     }
@@ -464,8 +443,11 @@
       var xy = canvasPoint(e);
       pointerDown = true;
       face.pointerDown(xy[0], xy[1], Date.now());
-      if (!panTimer) panTimer = setInterval(function () { if (face && face.onPanTick(Date.now())) requestUpdate(); }, R.PAN_TICK_MS);
+      if (!panTimer) panTimer = setInterval(function () {
+        if (face && face.onPanTick(Date.now())) { requestUpdate(); if (hooks.onInput) hooks.onInput("move"); }
+      }, R.PAN_TICK_MS);
       requestUpdate();
+      if (hooks.onInput) hooks.onInput("move");
       e.preventDefault();
     }
     function onMove(e) {
@@ -473,6 +455,7 @@
       var xy = canvasPoint(e);
       face.pointerMove(xy[0], xy[1], Date.now());
       requestUpdate();
+      if (hooks.onInput) hooks.onInput("move");
       e.preventDefault();
     }
     function onUp(e) {
@@ -483,6 +466,7 @@
       face.pointerUp(xy[0], xy[1], Date.now());
       renderButtons();
       requestUpdate();
+      if (hooks.onInput) hooks.onInput("end");
     }
     function onWheel(e) {
       if (!face || typeof face.wheel !== "function") return;
@@ -490,28 +474,188 @@
       requestUpdate();
       e.preventDefault();
     }
-    el.canvas.addEventListener("mousedown", onDown);
-    el.canvas.addEventListener("touchstart", onDown, { passive: false });
-    el.canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("mousedown", onDown);
+    canvas.addEventListener("touchstart", onDown, { passive: false });
+    canvas.addEventListener("wheel", onWheel, { passive: false });
     window.addEventListener("mousemove", onMove);
     window.addEventListener("touchmove", onMove, { passive: false });
     window.addEventListener("mouseup", onUp);
     window.addEventListener("touchend", onUp);
 
-    (options.buttons || []).forEach(function (b) {
-      var node = el["button-" + b.id];
-      if (node) node.addEventListener("click", function () { if (face) { b.act(face, session, watchSession); renderButtons(); requestUpdate(); } });
+    /* ---- the round, as the page moves it ---- */
+
+    /* A fix: a held aim stays where it was and is re-measured from the new spot, as
+       onLocationFix re-runs moveTarget, and the face reframes the shot from there. */
+    function setPlayer(point) {
+      session.player = point ? { lat: point.lat, lng: point.lng } : null;
+      bubbleCacheKey = "";
+      if (playState.target) playState.moveTarget(playState.target);
+      if (face) face.onFix();
+      requestUpdate();
+    }
+    function setHole(n) {
+      if (n === session.holeNumber) return;
+      session.holeNumber = n;
+      session.locked = false;
+      bubbleCacheKey = "";
+      if (face) face.onHole();
+      renderButtons();
+      requestUpdate();
+    }
+    function useCourse(courseKey, courseName, loaded) {
+      session.courseKey = courseKey; session.courseName = courseName || courseKey;
+      session.holes = loaded.holes; session.packageKind = loaded.kind; session.packageVersion = loaded.version;
+      session.player = null; session.locked = false; playState.clear(); bubbleCacheKey = ""; aimLog = "";
+      session.holeNumber = loaded.holes.length ? loaded.holes[0].holeNumber : null;
+      if (options.modes && loaded.kind === "garmin" && session.mode === "picture") session.mode = options.modes[0].value;
+      if (face) face.onHole();
+      renderButtons();
+      requestUpdate();
+    }
+
+    /* Another device aimed: the same ground point, carried onto this face as its own aim
+       (options.mirrorAim knows how this watch holds one). "end" is the finger lifting. */
+    function mirrorAim(coordinate, phase) {
+      if (!face || !coordinate || !watchSession.canCompute() || !options.mirrorAim) return;
+      options.mirrorAim(face, coordinate, phase, watchSession);
+      if (phase === "end") watchSession.sendAim(face.currentTarget() || coordinate);
+      requestUpdate();
+    }
+
+    newFace();
+    if (options.onMount) options.onMount(requestUpdate);
+    loadEngine().then(function () {
+      if (destroyed) return;
+      configurePlayer();
+      bubbleCacheKey = "";
+      /* The first frame may have been drawn before the engine answered; frame again now that
+         there is a Bubble to centre on. */
+      if (face) face.onEngineReady();
+      requestUpdate();
+    }).catch(function (error) { if (!destroyed) { drawError = "Bubble Engine failed to load - " + (error && error.message || error); if (hooks.onDraw) hooks.onDraw(); } });
+    requestUpdate();
+
+    return {
+      face: function () { return face; },
+      device: device,
+      currentHole: currentHole,
+      requestUpdate: requestUpdate,
+      newFace: newFace,
+      readoutLines: readoutLines,
+      setPlayer: setPlayer,
+      setHole: setHole,
+      useCourse: useCourse,
+      mirrorAim: mirrorAim,
+      currentTarget: function () { return face ? face.currentTarget() : null; },
+      destroy: function () {
+        destroyed = true;
+        if (panTimer) { clearInterval(panTimer); panTimer = null; }
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("touchmove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        window.removeEventListener("touchend", onUp);
+        face = null;
+      }
+    };
+  }
+
+  // ---------------------------------------------------------------- the page
+
+  /* options:
+       key            "garmin" | "apple" - the page state's own store
+       render         the watch's renderer module (DEVICES, PAN_TICK_MS, MapFace)
+       Face           the face to draw, when it is more than the map (the Garmin's CaddyAppView:
+                      its numbers screen with the map behind it); R.MapFace otherwise
+       label          the watch's name, for the Record Hub
+       lede           the opening paragraph, HTML
+       packages       "garmin-first" | "image"
+       pictureFormat  the asset proxy format the watch fetches ("jpeg"), or "" for the stored bytes
+       modes          [{ value, label }] for a watch that can draw as well as show a picture, or null
+       buttons        [{ id, label(face) | label, title, act(face, session, watchSession) }]
+       spriteBitmap   function (onLoad) -> the bitmap function the MapFace takes
+       deviceId       the default watch
+       mapPalette     function (hole, device) -> palette, for a watch that draws (null otherwise)
+       mirrorAim      function (face, coordinate, phase, watchSession) - another device's aim
+                      held on this face (the Record Hub's linked drag)
+       onMount        function (redraw), once the face is up - for a face waiting on a web font */
+  function render(containerEl, options) {
+    var R = options.render, C = common();
+    var session = store(options.key, { deviceId: options.deviceId, mode: options.modes ? options.modes[0].value : "" });
+    var destroyed = false, mapObj = null, layer = null, watch = null;
+    var overlays = L.layerGroup(), holeLayers = L.layerGroup();
+
+    if (!R || !C || typeof window.L === "undefined" || !window.GDMapSources) {
+      containerEl.innerHTML = '<p class="gdStudioMuted" style="padding:16px">The watch renderer, Leaflet or the map source list did not load on this surface.</p>';
+      return null;
+    }
+
+    var deviceOptions = R.DEVICES.map(function (d) {
+      var size = d.pixelScale > 1 ? d.width + "×" + d.height + " pt" : d.width + "×" + d.height;
+      return '<option value="' + esc(d.id) + '"' + (d.id === session.deviceId ? " selected" : "") + ">" + esc(d.name) + " · " + size + "</option>";
+    }).join("");
+    var modeOptions = options.modes ? options.modes.map(function (m) { return '<option value="' + esc(m.value) + '">' + esc(m.label) + "</option>"; }).join("") : "";
+
+    containerEl.innerHTML =
+      '<div class="gdStudioLede" style="margin-bottom:12px"><p>' + options.lede + "</p></div>" +
+      '<div class="gdStudioViewportBar">' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-watch="pick">Pick course</button>' +
+      '<label class="gdStudioViewportField">or key <input type="text" data-gd-watch="key" placeholder="course-key" style="width:160px"></label>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-watch="load">Load</button>' +
+      '<span class="gdStudioViewportCourse" data-gd-watch="course">No course loaded</span>' +
+      "</div>" +
+      '<div class="gdStudioWatch">' +
+      '<section class="gdStudioWatchPane">' +
+      '<div class="gdStudioViewportBar">' +
+      '<label class="gdStudioViewportField">Watch <select data-gd-watch="device">' + deviceOptions + "</select></label>" +
+      (options.modes ? '<label class="gdStudioViewportField">Map <select data-gd-watch="mode">' + modeOptions + "</select></label>" : "") +
+      '<label class="gdStudioViewportField">Units <select data-gd-watch="units"><option value="m">metres</option><option value="y">yards</option></select></label>' +
+      '<label class="gdStudioViewportField">Size <select data-gd-watch="zoom"><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>' +
+      "</div>" +
+      '<div class="gdStudioWatchBezel" data-gd-watch="bezel"><canvas data-gd-watch="canvas"></canvas></div>' +
+      '<div class="gdStudioViewportBar gdStudioWatchButtons" data-gd-watch="buttons"></div>' +
+      '<div class="gdStudioViewportBar">' +
+      '<label class="gdStudioViewportField">Wind from <input type="number" data-gd-watch="windFrom" min="0" max="359" step="1" placeholder="deg" style="width:64px">°</label>' +
+      '<label class="gdStudioViewportField"><input type="number" data-gd-watch="windKmh" min="0" max="80" step="1" placeholder="km/h" style="width:64px"> km/h</label>' +
+      '<label class="gdStudioViewportField"><input type="checkbox" data-gd-watch="windApplied"> wind in plays</label>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-watch="calm">Calm</button>' +
+      "</div>" +
+      '<pre class="gdStudioWatchReadout" data-gd-watch="readout"></pre>' +
+      "</section>" +
+      '<section class="gdStudioWatchMapPane">' +
+      '<div class="gdStudioViewportBar">' +
+      '<label class="gdStudioViewportField">Provider <select data-gd-watch="provider"></select></label>' +
+      '<label class="gdStudioViewportField">Hole <select data-gd-watch="hole"></select></label>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-watch="fit">Whole course</button>' +
+      "</div>" +
+      '<div class="gdStudioViewportMap gdStudioWatchMap" data-gd-watch="map"></div>' +
+      '<div class="gdStudioViewportReadout" data-gd-watch="mapReadout"></div>' +
+      '<div class="gdStudioViewportCredit" data-gd-watch="credit"></div>' +
+      "</section></div>";
+
+    var el = {};
+    containerEl.querySelectorAll("[data-gd-watch]").forEach(function (node) { el[node.getAttribute("data-gd-watch")] = node; });
+    if (el.mode) el.mode.value = session.mode;
+    el.units.value = session.units; el.zoom.value = String(session.zoom);
+    if (session.wind) { el.windFrom.value = session.wind.fromDeg; el.windKmh.value = session.wind.kmh; }
+    el.windApplied.checked = session.windApplied;
+
+    /* ---- the watch ---- */
+
+    watch = mountWatch(options, { canvas: el.canvas, bezel: el.bezel, buttons: el.buttons }, session, {
+      onDraw: function () { el.readout.textContent = watch ? watch.readoutLines().join("\n") : ""; drawOverlays(); },
+      onStepHole: function (n) { setHole(n); },
+      onWindApplied: function () { el.windApplied.checked = session.windApplied; }
     });
 
-    el.device.addEventListener("change", function () { session.deviceId = el.device.value; newFace(); requestUpdate(); });
-    if (el.mode) el.mode.addEventListener("change", function () { session.mode = el.mode.value; requestUpdate(); });
-    el.units.addEventListener("change", function () { session.units = el.units.value; requestUpdate(); });
-    el.zoom.addEventListener("change", function () { session.zoom = Number(el.zoom.value) || 1; newFace(); requestUpdate(); });
+    el.device.addEventListener("change", function () { session.deviceId = el.device.value; watch.newFace(); watch.requestUpdate(); });
+    if (el.mode) el.mode.addEventListener("change", function () { session.mode = el.mode.value; watch.requestUpdate(); });
+    el.units.addEventListener("change", function () { session.units = el.units.value; watch.requestUpdate(); });
+    el.zoom.addEventListener("change", function () { session.zoom = Number(el.zoom.value) || 1; watch.newFace(); watch.requestUpdate(); });
     function readWind() {
       var from = num(el.windFrom.value), kmh = num(el.windKmh.value);
       session.wind = from != null && kmh != null ? { fromDeg: ((from % 360) + 360) % 360, kmh: Math.max(0, kmh) } : null;
       session.windApplied = el.windApplied.checked;
-      requestUpdate();
+      watch.requestUpdate();
     }
     el.windFrom.addEventListener("input", readWind);
     el.windKmh.addEventListener("input", readWind);
@@ -576,6 +720,7 @@
     function drawOverlays() {
       if (!mapObj) return;
       overlays.clearLayers();
+      var face = watch && watch.face();
       if (session.player) {
         L.circleMarker([session.player.lat, session.player.lng], { radius: 6, color: "#000", weight: 1, fillColor: "#fff", fillOpacity: 1, interactive: false }).addTo(overlays);
         var local = face ? face.currentBubble() : null;
@@ -592,27 +737,16 @@
 
     /* A tap on the aerial is the watch's next GPS fix, on the hole that is selected - the hole
        never follows the tap, as it never follows a fix on the wrist (the phone's Scene names the
-       hole; alone, the wrist only moves on when it reaches the next tee). A held aim stays where
-       it was and is re-measured from the new spot, as onLocationFix re-runs moveTarget, and the
-       face reframes the shot from there (onFix). */
+       hole; alone, the wrist only moves on when it reaches the next tee). */
     function setPlayer(latlng) {
-      session.player = { lat: latlng.lat, lng: latlng.lng };
-      bubbleCacheKey = "";
-      if (playState.target) playState.moveTarget(playState.target);
-      if (face) face.onFix();
-      requestUpdate();
+      watch.setPlayer({ lat: latlng.lat, lng: latlng.lng });
       updateMapReadout();
     }
     function setHole(n) {
       if (n === session.holeNumber) return;
-      session.holeNumber = n;
+      watch.setHole(n);
       el.hole.value = String(n);
-      session.locked = false;
-      bubbleCacheKey = "";
-      if (face) face.onHole();
-      renderButtons();
       drawHoles();
-      requestUpdate();
       updateMapReadout();
     }
     function updateMapReadout() {
@@ -638,29 +772,22 @@
       el.course.textContent = (session.courseName || session.courseKey) + " · " + session.packageKind + " package v" + session.packageVersion + " · " + session.holes.length + " holes";
       if (el.mode) {
         el.mode.disabled = session.packageKind === "garmin";
-        if (session.packageKind === "garmin" && session.mode === "picture") { session.mode = options.modes[0].value; el.mode.value = session.mode; }
+        el.mode.value = session.mode;
       }
       drawHoles();
-      requestUpdate();
+      watch.requestUpdate();
     }
 
     function loadCourse(courseKey, courseName) {
       courseKey = String(courseKey || "").trim();
       if (!courseKey) return;
       el.course.textContent = "Loading " + courseKey + "…";
-      loadPackage(courseKey, options.packages).then(function (result) {
+      loadWatchPackage(courseKey, options.packages).then(function (loaded) {
         if (destroyed) return;
-        var report = result.report;
-        var holes = (report && Array.isArray(report.holes) ? report.holes : []).map(holeRecord).filter(function (h) { return h.spatialReference.isUsable(); });
-        session.courseKey = courseKey; session.courseName = courseName || courseKey;
-        session.holes = holes; session.packageKind = result.kind; session.packageVersion = report.watchPackageVersion;
-        session.player = null; session.locked = false; playState.clear(); bubbleCacheKey = ""; aimLog = "";
-        session.holeNumber = holes.length ? holes[0].holeNumber : null;
-        if (face) face.onHole();
-        renderButtons();
-        if (!holes.length) {
-          el.course.textContent = courseKey + " · no watch package (" + (report && report.status || "none") + (result.garminStatus ? ", garmin " + result.garminStatus : "") + ")";
-          drawHoles(); requestUpdate(); return;
+        watch.useCourse(courseKey, courseName, loaded);
+        if (!loaded.holes.length) {
+          el.course.textContent = courseKey + " · no watch package (" + loaded.status + (loaded.garminStatus ? ", garmin " + loaded.garminStatus : "") + ")";
+          drawHoles(); return;
         }
         showPackage();
         fitCourse();
@@ -699,41 +826,26 @@
     el.hole.addEventListener("change", function () { setHole(Number(el.hole.value)); });
     el.fit.addEventListener("click", fitCourse);
 
-    newFace();
-    if (options.onMount) options.onMount(requestUpdate);
-    loadEngine().then(function () {
-      if (destroyed) return;
-      configurePlayer();
-      bubbleCacheKey = "";
-      /* The first frame may have been drawn before the engine answered; frame again now that
-         there is a Bubble to centre on. */
-      if (face) face.onEngineReady();
-      requestUpdate();
-    }).catch(function (error) { if (!destroyed) el.readout.textContent = "Bubble Engine failed to load - " + (error && error.message || error); });
-
     if (session.holes.length) {
       showPackage();
       if (session.view) { try { mapObj.setView([session.view.lat, session.view.lng], session.view.zoom); } catch (e) {} } else fitCourse();
-      updateMapReadout();
-    } else {
-      requestUpdate();
-      updateMapReadout();
     }
+    updateMapReadout();
     remeasure();
 
     return function cleanup() {
       destroyed = true;
-      if (panTimer) { clearInterval(panTimer); panTimer = null; }
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("touchmove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      window.removeEventListener("touchend", onUp);
+      watch.destroy();
       if (window.GDStudioCoursePick) window.GDStudioCoursePick.cancel();
       if (window.GDStudioShell) window.GDStudioShell.show();
       if (mapObj) { try { mapObj.remove(); } catch (e) {} }
-      mapObj = null; layer = null; face = null;
+      mapObj = null; layer = null; watch = null;
     };
   }
 
-  window.GDWatchPreviewPage = { render: render, spriteImage: spriteImage };
+  window.GDWatchPreviewPage = {
+    render: render, spriteImage: spriteImage,
+    define: define, watchOptions: watchOptions,
+    store: store, mountWatch: mountWatch, loadWatchPackage: loadWatchPackage, loadEngine: loadEngine, slug: slug
+  };
 })();
