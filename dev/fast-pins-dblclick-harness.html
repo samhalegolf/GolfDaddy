@@ -1,0 +1,41 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Fast pins dblclick harness</title>
+<link rel="stylesheet" href="../assets/vendor/leaflet/leaflet.css">
+<style>html,body{margin:0;height:100%}#map{position:absolute;inset:0 0 120px 0;background:#223}#log{position:absolute;left:0;right:0;bottom:0;height:120px;overflow:auto;font:12px monospace;background:#111;color:#eee;margin:0;padding:4px}</style>
+</head><body><div id="map"></div><pre id="log"></pre>
+<script src="../assets/vendor/leaflet/leaflet.js"></script>
+<script>
+/* Mimics the overlay page's Fast pins event path: the map's click drops an interactive pin under
+   the cursor; the pin has a pointerdown drag handler that stops the DOM event and disables map
+   dragging (beginDrag); the map's dblclick is what the cycle hangs off. Logs the order the events
+   arrive in, so the double-click flow can be checked without the Studio. */
+var log = document.getElementById("log");
+window.events = [];
+function note(s) { window.events.push(s); log.textContent += s + "\n"; }
+var map = L.map("map", { doubleClickZoom: false, zoomControl: false, attributionControl: false }).setView([0, 0], 5);
+var last = null;
+function echo(latlng) {
+  var now = Date.now(), at = map.latLngToContainerPoint(latlng);
+  var e = !!last && now - last.time < 500 && at.distanceTo(last.at) < 8;
+  last = { at: at, time: now };
+  return e;
+}
+var dragEndedAt = 0;
+map.on("click", function (e) {
+  if (Date.now() - dragEndedAt < 300) { note("click swallowed (dragEndedAt)"); return; }
+  if (echo(e.latlng)) { note("click swallowed (echo)"); return; }
+  note("click -> pin");
+  var pin = L.circleMarker(e.latlng, { radius: 9, interactive: true }).addTo(map);
+  pin.on("click", function (ev) { L.DomEvent.stop(ev.originalEvent); note("pin click"); map.fire("click", { latlng: ev.latlng }); });
+  var node = pin.getElement();
+  node.addEventListener("pointerdown", function (ev) {
+    if (ev.button) return;
+    note("pin pointerdown -> beginDrag");
+    L.DomEvent.stop(ev);
+    map.dragging.disable();
+    function up() { document.removeEventListener("pointerup", up); dragEndedAt = Date.now(); map.dragging.enable(); note("drag end (no move)"); }
+    document.addEventListener("pointerup", up);
+  });
+});
+map.on("dblclick", function (e) { if (e.originalEvent) L.DomEvent.stop(e.originalEvent); note("MAP DBLCLICK -> advance"); });
+</script></body></html>

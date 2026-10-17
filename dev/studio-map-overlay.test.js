@@ -174,6 +174,25 @@ test("the tool picked stays picked: placing never switches tools, and there is n
   });
   const placing = page.slice(page.indexOf("function handleMapClick("), page.indexOf("/* ---- pins into shapes ----"));
   assert.ok(placing.length > 0 && !placing.includes("setTool("), "placing a fairway, green, tee or bunker must not change the tool");
+  /* The one exception is the explicit gesture: a double-click in Fast pins steps the cycle. */
+  const fast = page.slice(page.indexOf("function fastAdvance("), page.indexOf("function linkFastHole("));
+  assert.ok(fast.includes("setTool(next)"), "Fast pins' double-click is the only thing that moves the tool on");
+  assert.strictEqual(page.split("fastAdvance();").length, 2, "fastAdvance has exactly one caller");
+  assert.ok(page.includes('if (lineTool()) finishFairway();\n      if (fastPins()) fastAdvance();'), "that caller is the map's dblclick handler, never a click");
+});
+
+test("fast pins: click pins, double-click pins and steps Green, Fairway, Tee; the tee's double-click links the hole", () => {
+  assert.ok(page.includes('data-gd-overlay="mode-fast"'), "no Fast mode button");
+  assert.ok(page.includes('var FAST_CYCLE = ["green", "fairway", "tee"];'), "the cycle is green, fairway, tee");
+  assert.ok(page.includes("if (fastPins()) fastAdvance();"), "the map's dblclick steps the cycle in Fast pins");
+  assert.ok(page.includes("if (fastPins() && fastClickEcho(latlng)) return;"), "the second click of a double-click must not pin twice");
+  assert.ok(page.includes("fastPlaced(addFeature({ kind: tool, pin: true, points: [point] }))"), "a pin placed in Fast pins joins the hole in hand");
+  assert.ok(page.includes('if (session.mode === "pins") fastPlaced(f);'), "a fairway placed from its ends joins the hole in hand");
+  const advance = page.slice(page.indexOf("function fastAdvance("), page.indexOf("/* ---- fairway line ----") > 0 ? page.length : page.length);
+  assert.ok(advance.includes("at === FAST_CYCLE.length - 1 ? linkFastHole() : null"), "only the tee's double-click links the hole");
+  assert.ok(advance.includes("members.forEach(function (f) { f.link = id; });"), "the hole's pins share one link id, like the Link tool");
+  assert.ok(page.includes('if (lineTool() || fastPins()) mapObj.doubleClickZoom.disable();'), "double-click must not zoom in Fast pins");
+  assert.ok(page.includes('setMode(key === "p" ? "pins" : key === "q" ? "fast" : "shapes")'), "Q is the Fast pins key");
 });
 
 test("bunker wand: its reach steps smaller and bigger, and overlapping bunkers merge into one", () => {
