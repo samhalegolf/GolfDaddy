@@ -11,11 +11,12 @@
 (function () {
   "use strict";
 
-  function render(containerEl) {
+  function options() {
     var R = window.GDAppleWatchRender;
-    if (!R) { containerEl.innerHTML = '<p class="gdStudioMuted" style="padding:16px">The Apple Watch renderer did not load on this surface.</p>'; return null; }
-    return window.GDWatchPreviewPage.render(containerEl, {
+    if (!R) return null;
+    return {
       key: "apple",
+      label: "Apple Watch",
       render: R,
       deviceId: "s10-46",
       lede: "The hole as the Apple Watch app draws it, beside the aerial it plays over. <strong>Tap the aerial</strong> to put the player there - the face takes it as its GPS fix. " +
@@ -33,14 +34,28 @@
           return window.GDWatchPreviewPage.spriteImage("ios/App/ClarityCaddyWatch/Assets.xcassets/" + name + ".imageset/" + name + ".png", onLoad);
         };
       },
+      /* The hub's linked drag: another device's aim, held as the wrist holds its own - in
+         WatchPlayState, the framing kept still under it as it is under a finger. */
+      mirrorAim: function (face, coordinate, phase) {
+        if (!face.camera) face.camera = face.restingCamera();
+        face.moveTarget(coordinate);
+        face.aiming = face.dragActive = phase !== "end";
+      },
       buttons: [
         { id: "lock", label: function (face, session) { return session.locked ? "UNLOCK" : "LOCK"; }, title: "The phone locks the shot (the band comes up) / the watch's UNLOCK",
           act: function (face, session, watchSession) { if (session.locked) watchSession.unlock(); else { session.locked = true; face.lock(); } } },
         { id: "plays", label: "PLAYS", title: "The plays button low on the map (tap it on the face too)", act: function (face) { face.togglePlays(); } }
       ]
-    });
+    };
   }
 
+  function render(containerEl) {
+    var opts = options();
+    if (!opts) { containerEl.innerHTML = '<p class="gdStudioMuted" style="padding:16px">The Apple Watch renderer did not load on this surface.</p>'; return null; }
+    return window.GDWatchPreviewPage.render(containerEl, opts);
+  }
+
+  window.GDWatchPreviewPage.define("apple", options);
   window.GDStudioPages = window.GDStudioPages || {};
   window.GDStudioPages["gps-apple-preview"] = render;
 })();

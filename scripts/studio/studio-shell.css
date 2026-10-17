@@ -229,6 +229,40 @@
 #gdStudioShellRoot .gdStudioWatchHoleLabel { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: rgba(0, 0, 0, 0.7); color: #fff; font: 700 11px/1 -apple-system, system-ui, sans-serif; border: 1px solid rgba(255, 255, 255, 0.5); cursor: pointer; }
 #gdStudioShellRoot .gdStudioWatchHoleLabel.isCurrent { background: var(--gdStudioAccent); color: #000; border-color: #000; }
 
+/* Record Hub: the three devices in columns. The stage is its own element spanning the columns
+   (subgrid), so "Record together" crops to the devices alone, with no controls in the video. */
+#gdStudioShellRoot .gdHubGrid { display: grid; grid-template-columns: repeat(3, auto); justify-content: start; column-gap: 0; row-gap: 8px; overflow-x: auto; padding-bottom: 6px; }
+/* Heads and button rows take no width of their own (width 0, min-width 100%): each column is as
+   wide as its device, and its controls wrap to fit. */
+#gdStudioShellRoot .gdHubHead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 14px; width: 0; min-width: 100%; box-sizing: border-box; align-self: end; }
+#gdStudioShellRoot .gdHubHead select { max-width: 170px; }
+#gdStudioShellRoot .gdHubStage { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; background: #050806; border-radius: 16px; padding: 18px 0; }
+#gdStudioShellRoot .gdHubCell { display: flex; justify-content: center; padding: 0 14px; }
+#gdStudioShellRoot .gdHubCell .gdStudioWatchBezel { margin: 0; }
+#gdStudioShellRoot .gdHubGrid > .gdStudioWatchButtons { padding: 0 14px; align-content: start; width: 0; min-width: 100%; box-sizing: border-box; }
+#gdStudioShellRoot .gdHubLink { display: inline-flex; gap: 0; }
+#gdStudioShellRoot .gdHubLink .gdStudioDiagramBtn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+#gdStudioShellRoot .gdHubLink .gdStudioDiagramBtn:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: none; }
+#gdStudioShellRoot .gdHubLink .gdStudioDiagramBtn.isActive { background: var(--gdStudioAccent); color: #000; border-color: var(--gdStudioAccent); }
+#gdStudioShellRoot .gdStudioDiagramBtn.gdHubRec.isRecording { background: #d92b2b; border-color: #d92b2b; color: #fff; }
+#gdStudioShellRoot .gdHubReadouts { margin-top: 12px; }
+#gdStudioShellRoot .gdHubReadouts summary { cursor: pointer; color: var(--gdStudioMuted); }
+
+/* The phone: a bezel round the real app in a frame, sized in the phone's own points and scaled
+   as a whole, so the app lays out exactly as it does on that screen. */
+#gdStudioShellRoot .gdHubPhoneBox { position: relative; }
+#gdStudioShellRoot .gdHubPhone { position: absolute; left: 0; top: 0; box-sizing: border-box; padding: 12px; background: #1a1d1b; box-shadow: inset 0 0 0 2px #2c312e, 0 10px 30px rgba(0, 0, 0, 0.5); transform-origin: 0 0; }
+#gdStudioShellRoot .gdHubPhoneScreen { position: relative; overflow: hidden; background: #050806; }
+#gdStudioShellRoot .gdHubPhoneScreen iframe { position: absolute; left: 0; width: 100%; border: 0; display: block; background: #050806; }
+#gdStudioShellRoot .gdHubPhoneStatus { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; color: #fff; font: 600 16px/1 -apple-system, system-ui, sans-serif; z-index: 1; }
+#gdStudioShellRoot .gdHubPhoneIcons { display: inline-flex; align-items: center; gap: 6px; }
+#gdStudioShellRoot .gdHubPhoneIcons svg { display: block; fill: #fff; }
+#gdStudioShellRoot .gdHubIsland { display: none; position: absolute; left: 50%; top: 11px; width: 124px; height: 36px; margin-left: -62px; border-radius: 18px; background: #000; }
+#gdStudioShellRoot .gdHubPhoneStatus.hasIsland .gdHubIsland { display: block; }
+#gdStudioShellRoot .gdHubHomeBar { position: absolute; left: 50%; bottom: 8px; width: 134px; height: 5px; margin-left: -67px; border-radius: 3px; background: rgba(255, 255, 255, 0.85); pointer-events: none; z-index: 1; }
+#gdStudioShellRoot .gdHubPhoneEmpty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 40px; text-align: center; color: var(--gdStudioMuted); font: 15px/1.4 -apple-system, system-ui, sans-serif; }
+#gdStudioShellRoot .gdHubPhoneEmpty[hidden] { display: none; }
+
 /* ---- Mapping Overlay ----
    One screen, in the manner of the booking app's video workspace: the page fills the Studio
    workspace (or the whole screen in full screen) and never scrolls; the map takes all of it

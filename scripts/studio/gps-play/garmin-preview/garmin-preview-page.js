@@ -23,11 +23,12 @@
     if (document.fonts && document.fonts.load) document.fonts.load("700 40px 'Roboto Condensed'").then(onReady, function () {});
   }
 
-  function render(containerEl) {
+  function options() {
     var R = window.GDGarminWatchRender;
-    if (!R) { containerEl.innerHTML = '<p class="gdStudioMuted" style="padding:16px">The Garmin renderer did not load on this surface.</p>'; return null; }
-    return window.GDWatchPreviewPage.render(containerEl, {
+    if (!R) return null;
+    return {
       key: "garmin",
+      label: "Garmin",
       render: R,
       Face: R.CaddyAppView,
       deviceId: "fenix847mm",
@@ -47,6 +48,12 @@
           return window.GDWatchPreviewPage.spriteImage("garmin/resources-trees/drawables/trees/" + set + "/" + R.TREE_TYPES[type] + "_" + size + ".png", onLoad);
         };
       },
+      /* The hub's linked drag: another device's aim, held as the Garmin holds its own - in
+         GarminPlayState, with AIMING up on the map while the other finger is down. */
+      mirrorAim: function (face, coordinate, phase, watchSession) {
+        watchSession.playState.moveTarget(coordinate);
+        face.mapView.aiming = phase !== "end";
+      },
       buttons: [
         { id: "select", label: "SELECT", title: "SELECT: AIM on the numbers; enter / confirm Aim Mode on the map", act: function (face) { face.select(); } },
         { id: "back", label: "BACK", title: "BACK: cancel the aim, or back to the numbers", act: function (face) { face.back(); } },
@@ -56,9 +63,16 @@
         { id: "plays", label: "PLAYS", title: "The plays button at the foot of the map (tap it on the face too)", act: function (face) { face.togglePlays(); } }
       ],
       onMount: function (redraw) { loadFont(redraw); }
-    });
+    };
   }
 
+  function render(containerEl) {
+    var opts = options();
+    if (!opts) { containerEl.innerHTML = '<p class="gdStudioMuted" style="padding:16px">The Garmin renderer did not load on this surface.</p>'; return null; }
+    return window.GDWatchPreviewPage.render(containerEl, opts);
+  }
+
+  window.GDWatchPreviewPage.define("garmin", options);
   window.GDStudioPages = window.GDStudioPages || {};
   window.GDStudioPages["gps-garmin-preview"] = render;
 })();
