@@ -1243,13 +1243,17 @@ class GarminMapView extends WatchUi.View {
     // its pixels in the mix colour (diagonal for 2, so the mix reads as a
     // tone, not stripes). n of 4: GRAIN, a 16x16 tile half and half by a
     // checker, with short diagonal dashes of each colour over it - the look of
-    // mown-round rough or raked sand, at the size of a few pixels.
+    // mown-round rough or raked sand, at the size of a few pixels. n of 5:
+    // SCRUB, the grain with 2x2 clumps of spec[4] scattered over it - tussock
+    // and scrub on a waste area.
     var textures = {};
     static var GRAIN_MIX_DASHES = [1, 2, 9, 5, 3, 12, 13, 9];
     static var GRAIN_BASE_DASHES = [5, 0, 12, 13, 0, 8, 8, 10];
+    static var SCRUB_CLUMPS = [2, 3, 11, 1, 6, 8, 14, 10, 3, 13, 9, 14];
     static var GRAIN_SIZE = 16;
     function patternTexture(spec) {
         var key = spec[0] + "/" + spec[1] + "/" + spec[2];
+        if (spec[2] >= 5) { key = key + "/" + spec[4]; }
         if (textures.hasKey(key)) { return textures[key]; }
         var n = spec[2];
         var size = (n >= 4) ? GRAIN_SIZE : 2;
@@ -1261,6 +1265,7 @@ class GarminMapView extends WatchUi.View {
         tile.setColor(spec[1], Graphics.COLOR_TRANSPARENT);
         if (n >= 4) {
             drawGrain(tile, spec[0], spec[1]);
+            if (n >= 5) { drawClumps(tile, spec[4]); }
         } else {
             if (n >= 1) { tile.drawPoint(0, 0); }
             if (n >= 2) { tile.drawPoint(1, 1); }
@@ -1279,6 +1284,13 @@ class GarminMapView extends WatchUi.View {
         drawDashes(tile, GRAIN_MIX_DASHES);
         tile.setColor(base, Graphics.COLOR_TRANSPARENT);
         drawDashes(tile, GRAIN_BASE_DASHES);
+    }
+
+    function drawClumps(tile, colour) {
+        tile.setColor(colour, Graphics.COLOR_TRANSPARENT);
+        for (var i = 0; i + 1 < SCRUB_CLUMPS.size(); i += 2) {
+            tile.fillRectangle(SCRUB_CLUMPS[i], SCRUB_CLUMPS[i + 1], 2, 2);
+        }
     }
 
     // Four-pixel dashes running down-right from each start, wrapping round

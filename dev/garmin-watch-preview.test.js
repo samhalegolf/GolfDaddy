@@ -81,7 +81,8 @@ test("the package palette becomes the watch's base palette by the phone's own ru
   /* The course's rough, as grain: itself and an 8% darker mix (integer per channel, as the
      watch does it), with the solid colour as the fallback. */
   assert.deepStrictEqual(tinted.r, [0x123456, 0x102F4F, 4, 0x123456]);
-  assert.deepStrictEqual(tinted.z, [R.BASE_PALETTE.z, 0xA9A190, 4, R.BASE_PALETTE.z], "waste has its grain too");
+  assert.deepStrictEqual(tinted.z, [R.BASE_PALETTE.z, 0xA9A190, 5, R.BASE_PALETTE.z, R.BASE_PALETTE.h], "waste has its grain too, with the course's scrub dotted through it");
+  assert.deepStrictEqual(R.mapPalette(true, { h: 0x112233 }).z[4], 0x112233, "the scrub is the course's own hazard colour");
   assert.strictEqual(tinted.f, R.BASE_PALETTE.f);
   assert.ok(!("nonsense" in tinted));
   assert.strictEqual(R.cleanPalette(null), null);

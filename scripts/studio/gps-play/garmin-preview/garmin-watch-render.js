@@ -89,7 +89,7 @@
     f: [0x55AA55, 0xAAFFAA, 1, 0x55AA55], fd: [0x55AA55, 0x005500, 1, 0x00AA55], fl: [0x55AA55, 0xAAFFAA, 2, 0x55FF55],
     g: 0xAAFFAA, gd: [0xAAFFAA, 0x55AA55, 1, 0x55FF55], gl: 0xAAFFAA,
     b: 0xFFFFAA, w: 0x0055AA,
-    k: [0x005500, 0x000000, 3, 0x000000], h: 0x555500, z: [0xAAAA55, 0xAAAAAA, 4, 0xAAAA55]
+    k: [0x005500, 0x000000, 3, 0x000000], h: 0x555500, z: [0xAAAA55, 0xAAAAAA, 5, 0xAAAA55, 0x555500]
   };
   var BASE_PALETTE = {
     r: 0x315833, rd: 0x274629, rl: 0x3C6B3E,
@@ -129,7 +129,7 @@
     Object.keys(BASE_PALETTE).forEach(function (k) { out[k] = BASE_PALETTE[k]; });
     if (skeletonPal) Object.keys(skeletonPal).forEach(function (k) { if (typeof skeletonPal[k] === "number" && out.hasOwnProperty(k)) out[k] = skeletonPal[k]; });
     out.r = grainOf(out.r);
-    out.z = grainOf(out.z);
+    out.z = scrubOf(out.z, out.h);
     return out;
   }
   /* GarminSessionManager.grainOf: the course's own colour with an 8% darker mix, as grain.
@@ -137,6 +137,10 @@
   function grainOf(colour) {
     var ch = function (shift) { return Math.trunc(((colour >> shift) & 0xFF) * 92 / 100); };
     return [colour, (ch(16) << 16) | (ch(8) << 8) | ch(0), 4, colour];
+  }
+  /* GarminSessionManager.scrubOf: the waste's grain with the course's scrub dotted through it. */
+  function scrubOf(colour, scrub) {
+    return [colour, grainOf(colour)[1], 5, colour, scrub];
   }
 
   // ------------------------------------------------------------------ Monkey C habits
@@ -897,10 +901,12 @@
   };
 
   /* The tile GarminMapView.patternTexture makes, as a canvas pattern: 2x2 with n of 1-3
-     pixels in the mix colour, or (n = 4) the 16x16 grain tile. */
+     pixels in the mix colour, (n = 4) the 16x16 grain tile, or (n = 5) the grain with scrub
+     clumps in spec[4]. */
   var GRAIN_SIZE = 16, GRAIN_MIX_DASHES = [1, 2, 9, 5, 3, 12, 13, 9], GRAIN_BASE_DASHES = [5, 0, 12, 13, 0, 8, 8, 10];
+  var SCRUB_CLUMPS = [2, 3, 11, 1, 6, 8, 14, 10, 3, 13, 9, 14];
   MapFace.prototype.patternTexture = function (dc, spec) {
-    var key = spec[0] + "/" + spec[1] + "/" + spec[2];
+    var key = spec[0] + "/" + spec[1] + "/" + spec[2] + (spec[2] >= 5 ? "/" + spec[4] : "");
     if (this.textures[key]) return this.textures[key];
     var tile = (typeof document !== "undefined") ? document.createElement("canvas") : null;
     if (!tile) return hex(spec[0]);
@@ -914,6 +920,10 @@
       drawDashes(t, GRAIN_MIX_DASHES);
       t.fillStyle = hex(spec[0]);
       drawDashes(t, GRAIN_BASE_DASHES);
+      if (n >= 5) {
+        t.fillStyle = hex(spec[4]);
+        for (var c = 0; c + 1 < SCRUB_CLUMPS.length; c += 2) t.fillRect(SCRUB_CLUMPS[c], SCRUB_CLUMPS[c + 1], 2, 2);
+      }
     } else {
       if (n >= 1) t.fillRect(0, 0, 1, 1);
       if (n >= 2) t.fillRect(1, 1, 1, 1);
