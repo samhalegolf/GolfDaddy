@@ -3,6 +3,8 @@
  * A line-for-line port of what the wrist draws: ios/App/ClarityCaddyWatch/AimableHoleMap.swift
  * (the map you can aim on, with HoleMapPage's chrome round it) and the pieces it leans on -
  * WatchMapCamera.swift (the shot framing), WatchMap.swift's TreeSprites, WatchConditions.swift.
+ * ShotView.swift (the numbers page in front of the map, before the lock) and ContentView's
+ * paging between the two are here too, as AppleAppView.
  * The Swift is the source of truth: when it changes, this changes with it, the same way
  * garmin-watch-render.js follows the Monkey C.
  *
@@ -583,6 +585,237 @@
   MapFace.prototype.lock = function () { this.origin = this.state.target; this.camera = this.restingCamera(); };
   MapFace.prototype.unlock = function () { this.origin = null; this.camera = this.restingCamera(); };
 
+  // ------------------------------------------------------------------ ShotView (the numbers, before the lock)
+
+  /* ShotView.swift, the driving face's first page - drawn to the same mockup as the Garmin's
+     numbers: Back on the upper crescent, Hole N, the big number and the club, plays, the AIM
+     pill that is LOCK, Front on the lower crescent, and the wind hub against the edge. The
+     wrist is driving here, so the big number is its own fix to the green centre
+     (WristDistances); the club is the Bubble's. `bubble()` is the map page's Bubble. */
+  var CRESCENT = "#0A3F22", PILL = "#00BF63", PILL_EDGE = "#1F2A1F", PILL_INK = "#231F20";
+  var SWIPE_FRACTION = 0.18;
+
+  function ShotFace(session, device, bubble) {
+    this.session = session; this.device = device; this.bubble = bubble;
+    this.pillRect = null; this.prevRect = null; this.nextRect = null;
+    this.trace = null;
+  }
+  function shotNumber(metres, yards) { return metres == null ? "—" : String(Math.round(yards ? metres * 1.0936133 : metres)); }
+  function shotSuffix(yards) { return yards ? "y" : "m"; }
+  /* The bag's names are short already ("9i", "PW"); long ones ("5 IRON", "DRIVER") are
+     shortened to match. */
+  ShotFace.shortClub = function (club) {
+    if (!club) return "—";
+    var upper = String(club).toUpperCase();
+    if (upper.indexOf("DRIVER") >= 0) return "Dr";
+    if (/ IRON$/.test(upper)) return upper.replace(/ IRON$/, "") + "i";
+    if (/ WOOD$/.test(upper)) return upper.replace(/ WOOD$/, "") + "W";
+    if (/ HYBRID$/.test(upper)) return upper.replace(/ HYBRID$/, "") + "H";
+    return String(club);
+  };
+  ShotFace.crescent = function (w, h, up) {
+    var tipY = up ? h * 0.415 : h * 0.585, half = w * 0.47, outer = h * 0.33, inner = h * 0.255, sign = up ? -1 : 1, steps = 28, points = [];
+    for (var i = 0; i <= steps; i++) { var a = Math.PI * i / steps; points.push({ x: w / 2 - half * Math.cos(a), y: tipY + sign * outer * Math.sin(a) }); }
+    for (var j = steps; j >= 0; j--) { var b = Math.PI * j / steps; points.push({ x: w / 2 - half * Math.cos(b), y: tipY + sign * inner * Math.sin(b) }); }
+    return points;
+  };
+
+  ShotFace.prototype.onUpdate = function (ctx) {
+    var d = this.device, w = d.width, h = d.height, session = this.session, yards = session.yards();
+    ctx.setTransform(d.pixelScale, 0, 0, d.pixelScale, 0, 0);
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);
+    var holeNumber = session.currentHole();
+    if (!session.scene.hasRound() || !session.manifestHole(holeNumber)) {
+      text(ctx, "CLARITY CADDY", w / 2, h / 2 - 16, font(11, "600"), MINT + "1)");
+      text(ctx, "Start a round", w / 2, h / 2 + 4, font(16, "700"), "#fff");
+      text(ctx, "on iPhone", w / 2, h / 2 + 24, font(16, "700"), "#fff");
+      this.pillRect = this.prevRect = this.nextRect = null;
+      this.trace = "numbers: no round";
+      return;
+    }
+    var green = session.greenDistances(), local = this.bubble(), player = session.playerPoint();
+    var flatM = green ? green.centre : null;
+    var aim = local ? local.target : session.greenPoint();
+    var effect = session.windEffect(player, aim, flatM);
+    var plays = session.playsLikeM(player, aim, flatM, effect);
+    var windOn = session.windApplied() && effect && effect.level > 0 && flatM != null;
+
+    fillPath(ctx, ShotFace.crescent(w, h, true), CRESCENT);
+    fillPath(ctx, ShotFace.crescent(w, h, false), CRESCENT);
+    text(ctx, "Back", w / 2, h * 0.055, font(h * 0.045, "600"), "rgba(142,142,147,1)");
+    text(ctx, "Front", w / 2, h * 0.945, font(h * 0.045, "600"), "rgba(142,142,147,1)");
+    if (effect) this.drawWind(ctx, effect, w, h, yards);
+    text(ctx, shotNumber(green ? green.back : null, yards), w / 2, h * 0.135, font(h * 0.075, "900"), "#fff");
+    text(ctx, shotNumber(green ? green.front : null, yards), w / 2, h * 0.865, font(h * 0.075, "900"), "#fff");
+
+    this.drawHole(ctx, holeNumber, w, h);
+    var shown = windOn ? flatM + effect.alongM : flatM, club = ShotFace.shortClub(local && local.club.club);
+    this.drawDistanceRow(ctx, shotNumber(shown, yards), shotSuffix(yards), club, windOn, w, h);
+    if (plays != null) text(ctx, "plays " + shotNumber(plays, yards), w / 2, h * 0.545, font(h * 0.06, "700"), PLAYS_ORANGE);
+    var pill = this.drawAim(ctx, w, h);
+    this.trace = "numbers: hole " + holeNumber + " · back " + shotNumber(green && green.back, yards) + " · " + shotNumber(shown, yards) + shotSuffix(yards) + (windOn ? " (wind in)" : "")
+      + " " + club + " · front " + shotNumber(green && green.front, yards) + (plays != null ? " · plays " + shotNumber(plays, yards) : "") + " · " + pill;
+  };
+
+  /* The hole block: "Hole N" with the live dot (the wrist is driving), an arrowed edge each
+     side where there is a hole to go to. */
+  ShotFace.prototype.drawHole = function (ctx, holeNumber, w, h) {
+    var y = h * 0.275, blockW = w * 0.62, left = (w - blockW) / 2, label = "Hole " + holeNumber, f = font(19, "900");
+    var tw = textWidth(ctx, label, f), dot = 6, gap = 4, total = tw + gap + dot;
+    ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.font = f; ctx.fillStyle = "#fff";
+    ctx.fillText(label, w / 2 - total / 2, y);
+    ctx.shadowColor = MINT + "0.8)"; ctx.shadowBlur = 4;
+    ellipse(ctx, w / 2 - total / 2 + tw + gap + dot / 2, y, dot / 2, MINT + "1)");
+    ctx.shadowColor = "transparent"; ctx.shadowBlur = 0;
+    var holes = this.session.holeNumbers ? this.session.holeNumbers() : [];
+    var i = holes.indexOf(holeNumber);
+    this.prevRect = i > 0 ? { x: left, y: y - 14, w: 26, h: 28 } : null;
+    this.nextRect = i >= 0 && i < holes.length - 1 ? { x: left + blockW - 26, y: y - 14, w: 26, h: 28 } : null;
+    if (this.prevRect) text(ctx, "‹", left + 13, y, font(15, "900"), WHITE + "0.6)");
+    if (this.nextRect) text(ctx, "›", left + blockW - 13, y, font(15, "900"), WHITE + "0.6)");
+  };
+
+  /* "130m   9i": the number (blue with the wind folded in), its unit tucked at the baseline,
+     the club - one centred row, condensed, shrunk to fit as minimumScaleFactor does. */
+  ShotFace.prototype.drawDistanceRow = function (ctx, number, unit, club, windOn, w, h) {
+    var y = h * 0.43, size = h * 0.22, room = w * 0.94;
+    var condensed = "fontStretch" in ctx;
+    if (condensed) ctx.fontStretch = "condensed";
+    var fBig = font(size, "900"), fUnit = font(h * 0.06, "700");
+    var gap = h * 0.07, nw = textWidth(ctx, number, fBig), uw = textWidth(ctx, unit, fUnit), cw = textWidth(ctx, club, fBig);
+    var total = nw + uw + gap + cw, scale = total > room ? Math.max(0.6, room / total) : 1;
+    if (scale < 1) { fBig = font(size * scale, "900"); fUnit = font(h * 0.06 * scale, "700"); gap *= scale; nw *= scale; uw *= scale; cw *= scale; total *= scale; }
+    var x = (w - total) / 2, colour = windOn ? WIND_BLUE : "#fff";
+    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    var baseline = y + size * scale * 0.36;
+    ctx.font = fBig; ctx.fillStyle = colour; ctx.fillText(number, x, baseline);
+    ctx.font = fUnit; ctx.fillText(unit, x + nw, baseline);
+    ctx.font = fBig; ctx.fillStyle = "#fff"; ctx.fillText(club, x + nw + uw + gap, baseline);
+    if (condensed) ctx.fontStretch = "normal";
+  };
+
+  /* The AIM pill - LOCK, which flips to the map. Grey and inert once the shot is locked. */
+  ShotFace.prototype.drawAim = function (ctx, w, h) {
+    var canLock = this.session.scene.canLock(), locked = this.session.locked();
+    var bw = w * 0.5, bh = h * 0.15, x = (w - bw) / 2, y = h * 0.68 - bh / 2, r = bh / 2;
+    this.pillRect = { x: x, y: y, w: bw, h: bh };
+    if (locked) {
+      capsule(ctx, x + bw * 0.1, y + bh * 0.15, bw * 0.8, bh * 0.7, "rgba(142,142,147,0.3)");
+      text(ctx, "UNLOCK", w / 2, y + bh / 2, font(11, "700"), "#fff");
+      return "UNLOCK";
+    }
+    capsule(ctx, x, y, bw, bh, canLock ? PILL : "rgba(85,85,85,1)");
+    ctx.lineWidth = 2; ctx.strokeStyle = PILL_EDGE; ctx.stroke();
+    var c = { x: x + r, y: y + bh / 2 }, ring = bh * 0.36;
+    ctx.strokeStyle = PILL_INK; ctx.lineWidth = 1.5;
+    for (var q = 0; q < 4; q++) { ctx.beginPath(); ctx.arc(c.x, c.y, ring, (q * 90 + 6) * Math.PI / 180, (q * 90 + 84) * Math.PI / 180); ctx.stroke(); }
+    ctx.beginPath();
+    ctx.moveTo(c.x, y - bh * 0.08); ctx.lineTo(c.x, c.y - 2); ctx.moveTo(c.x, c.y + 2); ctx.lineTo(c.x, y + bh * 1.08);
+    ctx.moveTo(x, c.y); ctx.lineTo(c.x - 2, c.y); ctx.moveTo(c.x + 2, c.y); ctx.lineTo(c.x + bh * 0.58, c.y);
+    ctx.stroke();
+    ellipse(ctx, c.x, c.y, 2, PILL_INK);
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = font(bh * 0.55, "900"); ctx.fillStyle = "#000";
+    ctx.fillText("AIM", x + bh * 0.95 + (bw - bh * 0.95) / 2, c.y);
+    return "AIM";
+  };
+
+  /* WindMarker, small: a hub hard against the edge where the wind comes FROM (up is the
+     target), its bump pointing the way it blows; calm, the hub alone at 4 o'clock. */
+  ShotFace.prototype.drawWind = function (ctx, effect, w, h, yards) {
+    var hubR = h * 0.058, cx = w / 2, cy = h / 2;
+    var phi = effect.level > 0 ? effect.relRad + Math.PI : Math.PI * 120 / 180, sx = Math.sin(phi), sy = -Math.cos(phi);
+    var inset = hubR + 3 + Math.min(w, h) * 0.2 * Math.abs(Math.sin(2 * phi));
+    var reach = Math.min(Math.abs(sx) > 0.001 ? (cx - inset) / Math.abs(sx) : Infinity, Math.abs(sy) > 0.001 ? (cy - inset) / Math.abs(sy) : Infinity);
+    var hx = cx + sx * reach, hy = cy + sy * reach;
+    if (effect.level > 0) {
+      var towards = Math.atan2(w / 2 - hx, -(h / 2 - hy)), ux = Math.sin(towards), uy = -Math.cos(towards), tip = hubR * 1.65, spread = Math.PI * 40 / 180;
+      var rim = function (a) { return { x: hx + (ux * Math.cos(a) - uy * Math.sin(a)) * hubR, y: hy + (ux * Math.sin(a) + uy * Math.cos(a)) * hubR }; };
+      fillPath(ctx, [{ x: hx + ux * tip, y: hy + uy * tip }, rim(spread), rim(-spread)], WIND_BLUE);
+    }
+    ellipse(ctx, hx, hy, hubR, "rgb(26,26,26)", WIND_BLUE, 1.2);
+    var value = shotNumber(Math.abs(effect.alongM), yards), unit = shotSuffix(yards), fv = font(hubR * 1.05, "900"), fu = font(hubR * 0.36, "600");
+    var vw = textWidth(ctx, value, fv), uw = textWidth(ctx, unit, fu), left = hx - (vw + uw) / 2, baseline = hy + hubR * 0.38;
+    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    ctx.font = fv; ctx.fillStyle = "#fff"; ctx.fillText(value, left, baseline);
+    ctx.font = fu; ctx.fillStyle = "rgba(142,142,147,1)"; ctx.fillText(unit, left + vw, baseline);
+  };
+
+  /* "aim", "prev", "next" or null. */
+  ShotFace.prototype.hit = function (x, y) {
+    function inside(r) { return r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }
+    if (inside(this.pillRect)) return "aim";
+    if (inside(this.prevRect)) return "prev";
+    if (inside(this.nextRect)) return "next";
+    return null;
+  };
+
+  // ------------------------------------------------------------------ ContentView's driving pages
+
+  /* The numbers first, the map beside them, as ContentView pages them: AIM (LOCK) flips to the
+     map; landing back on the numbers IS the unlock. A swipe left on the numbers looks at the map
+     without locking; a quick swipe right on the map goes back (AimableHoleMap.onSwipeBack). The
+     page talks to this exactly as it talks to a MapFace. */
+  function AppleAppView(session, device, treeBitmap) {
+    var self = this;
+    this.session = session; this.device = device;
+    this.mapView = new MapFace(session, device, treeBitmap);
+    this.shotView = new ShotFace(session, device, function () { return self.mapView.currentBubble(); });
+    this.showingMap = false;
+    this.press = null;
+  }
+  ["aiming", "dragActive", "playsMode", "state", "camera"].forEach(function (name) {
+    Object.defineProperty(AppleAppView.prototype, name, {
+      get: function () { return this.mapView[name]; },
+      set: function (v) { this.mapView[name] = v; }
+    });
+  });
+  Object.defineProperty(AppleAppView.prototype, "trace", { get: function () { return this.showingMap ? this.mapView.trace : this.shotView.trace; } });
+
+  AppleAppView.prototype.onUpdate = function (ctx) { if (this.showingMap) this.mapView.onUpdate(ctx); else this.shotView.onUpdate(ctx); };
+  AppleAppView.prototype.onFix = function () { this.mapView.onFix(); };
+  AppleAppView.prototype.onHole = function () { this.mapView.onHole(); };
+  AppleAppView.prototype.onEngineReady = function () { this.mapView.onEngineReady(); };
+  AppleAppView.prototype.currentBubble = function () { return this.mapView.currentBubble(); };
+  AppleAppView.prototype.currentTarget = function () { return this.mapView.currentTarget(); };
+  AppleAppView.prototype.moveTarget = function (c) { return this.mapView.moveTarget(c); };
+  AppleAppView.prototype.restingCamera = function () { return this.mapView.restingCamera(); };
+  AppleAppView.prototype.onPanTick = function (now) { return this.showingMap ? this.mapView.onPanTick(now) : false; };
+  AppleAppView.prototype.wheel = function (deltaY) { if (this.showingMap) this.mapView.wheel(deltaY); };
+  AppleAppView.prototype.togglePlays = function () { if (this.showingMap) this.mapView.togglePlays(); };
+  AppleAppView.prototype.showMap = function () { this.showingMap = true; };
+  AppleAppView.prototype.showNumbers = function () { this.showingMap = false; };
+  /* The lock flips to the map; the unlock lands on the numbers. */
+  AppleAppView.prototype.lock = function () { this.showingMap = true; this.mapView.lock(); };
+  AppleAppView.prototype.unlock = function () { this.mapView.unlock(); this.showingMap = false; };
+
+  AppleAppView.prototype.pointerDown = function (x, y, now) {
+    this.press = { x: x, y: y, lastX: x, lastY: y, wasDragging: false };
+    if (this.showingMap) this.mapView.pointerDown(x, y, now);
+  };
+  AppleAppView.prototype.pointerMove = function (x, y, now) {
+    if (this.press) { this.press.lastX = x; this.press.lastY = y; }
+    if (this.showingMap) { this.mapView.pointerMove(x, y, now); if (this.press && this.mapView.dragging) this.press.wasDragging = true; }
+  };
+  AppleAppView.prototype.pointerUp = function (x, y, now) {
+    var press = this.press; this.press = null;
+    var dx = press ? press.lastX - press.x : 0, dy = press ? press.lastY - press.y : 0;
+    var swipe = Math.abs(dx) > this.device.width * SWIPE_FRACTION && Math.abs(dx) > Math.abs(dy);
+    if (this.showingMap) {
+      this.mapView.pointerUp(x, y, now);
+      if (swipe && dx > 0 && press && !press.wasDragging) this.backToNumbers();
+      return;
+    }
+    if (swipe) { if (dx < 0) this.showMap(); return; }
+    var hit = press ? this.shotView.hit(press.x, press.y) : null;
+    if (hit === "aim" && this.session.scene.canLock()) { this.session.lock(); this.lock(); }
+    else if (hit === "aim" && this.session.locked()) this.session.unlock();
+    else if (hit === "prev") this.session.stepHole(-1);
+    else if (hit === "next") this.session.stepHole(1);
+  };
+  AppleAppView.prototype.backToNumbers = function () {
+    if (this.session.locked()) this.session.unlock(); else this.showingMap = false;
+  };
+
   return {
     DEVICES: DEVICES,
     PAN_TICK_MS: PAN_TICK_MS,
@@ -591,6 +824,8 @@
     BUBBLE_FRACTION: BUBBLE_FRACTION,
     Camera: Camera,
     unpackTree: unpackTree,
-    MapFace: MapFace
+    MapFace: MapFace,
+    ShotFace: ShotFace,
+    AppleAppView: AppleAppView
   };
 });

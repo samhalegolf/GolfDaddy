@@ -5,15 +5,18 @@
  * each a port of its watch's draw code); the phone is the real app (app/index.html) running in
  * a phone-sized frame, opened on the same course through its ?courseId= hand-off.
  *
- * One rule for what is shared: the course, the hole and where the player stands are always the
- * same on all three. Aiming is what "Linked" switches - linked, a drag on any one device moves
- * the aim on the other two as it goes (the same ground point, carried onto each device's own
- * aim); individual, each device aims on its own.
+ * One rule for what is shared: the course, the hole, where the player stands and whether the
+ * shot is locked are always the same on all three. Unlocked is the screen before the lock - the
+ * Garmin's and the Apple Watch's numbers, the phone tracking with no Bubble; Locked is the shot
+ * on the map. Aiming is what "Linked" switches - linked, a drag on any one device moves the aim
+ * on the other two as it goes (the same ground point, carried onto each device's own aim);
+ * individual, each device aims on its own.
  *
- * The phone is driven through its own Marshal, as its own controls drive it: PLACED puts the
- * player down, AIM_DRAGGED moves the aim, VIEW_HOLE_CHANGED changes hole. It runs with no GPS
- * (the frame is not allowed location), so it plays in Preview, which is what lets the hub place
- * the player. Nothing here writes a package or a course.
+ * The phone is driven through its own Marshal: DEMO_APPROACH makes the hub's player its fix and
+ * the hole live, LOCK / UNLOCK follow the switch, AIM_DRAGGED moves the aim. It is opened with
+ * ?recording=1, so it plays as Guest with no GPS and writes nothing a round writes (boot.js,
+ * gd-play-context.js). A tap on its map, which would be Preview's PLACED, moves the player on all
+ * three instead.
  *
  * Recording: a watch records straight from its canvas (no picker, the watch's own pixels). The
  * phone, and "all three as one video", record this tab cropped to that element (Region Capture,
@@ -34,7 +37,7 @@
 
   /* The hub's own state, kept across leaving and re-entering the page. Each watch keeps its
      own store as well (its device, map mode, units), separate from its preview page's. */
-  var hub = { courseKey: "", courseName: "", holeNumbers: [], holeNumber: null, player: null, linked: true, phoneId: PHONES[0].id, phoneScale: 1, watchZoom: 0.75, units: "m" };
+  var hub = { courseKey: "", courseName: "", holeNumbers: [], holeNumber: null, player: null, linked: true, locked: false, phoneId: PHONES[0].id, phoneScale: "fit", watchZoom: 0.75, units: "m" };
 
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function metres(a, b) { return window.GDWatchCommon.Geo.distance(a, b); }
@@ -140,7 +143,7 @@
     containerEl.innerHTML =
       '<div class="gdStudioLede" style="margin-bottom:12px"><p>The Garmin, the Apple Watch and the phone app on the same course, ready to screen record. ' +
       "Course, hole and where the player stands are always the same on all three. <strong>Tap the phone's map</strong> to place the player (or use <strong>Player on the tee</strong>). " +
-      "<strong>Linked</strong>: drag the aim on any device and the other two follow. <strong>Individual</strong>: each aims on its own. " +
+      "<strong>Unlocked / Locked</strong> sets the shot on all three - the numbers before the lock, or the shot on the map. <strong>Linked</strong>: drag the aim on any device and the other two follow. <strong>Individual</strong>: each aims on its own. " +
       "A watch records straight from its face; the phone and <strong>Record together</strong> record this tab cropped to the devices - when the browser asks, share <strong>this tab</strong>.</p></div>" +
       '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn" data-hub="pick">Pick course</button>' +
@@ -153,13 +156,17 @@
       '<label class="gdStudioViewportField">Hole <select data-hub="hole"></select></label>' +
       '<button type="button" class="gdStudioDiagramBtn" data-hub="next" title="Next hole">▶</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-hub="tee">Player on the tee</button>' +
+      '<span class="gdHubLink" role="group" aria-label="Shot">' +
+      '<button type="button" class="gdStudioDiagramBtn" data-hub="unlocked">Unlocked</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-hub="locked">Locked</button>' +
+      "</span>" +
       '<span class="gdHubLink" role="group" aria-label="Aiming">' +
       '<button type="button" class="gdStudioDiagramBtn" data-hub="linked">Linked</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-hub="individual">Individual</button>' +
       "</span>" +
       '<label class="gdStudioViewportField">Units <select data-hub="units"><option value="m">metres</option><option value="y">yards</option></select></label>' +
       '<label class="gdStudioViewportField">Watch size <select data-hub="watchZoom"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1">1×</option><option value="1.5">1.5×</option></select></label>' +
-      '<label class="gdStudioViewportField">Phone size <select data-hub="phoneScale"><option value="0.6">0.6×</option><option value="0.75">0.75×</option><option value="1">1×</option><option value="1.25">1.25×</option></select></label>' +
+      '<label class="gdStudioViewportField">Phone size <select data-hub="phoneScale"><option value="fit">Fit to screen</option><option value="0.6">0.6×</option><option value="0.75">0.75×</option><option value="1">1×</option><option value="1.25">1.25×</option></select></label>' +
       "</div>" +
       '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn gdHubRec" data-hub="recAll">● Record all three (separate files)</button>' +
@@ -208,6 +215,8 @@
        nothing is touching it (so an aim it was handed from another device is not echoed). */
     var seen = {}, gesture = {};
     function onWatchInput(key, phase) {
+      /* A LOCK or UNLOCK pressed on this watch is the switch for all three. */
+      if (phase === "end" && !!sessions[key].locked !== hub.locked) setLocked(!!sessions[key].locked);
       var t = watches[key] && watches[key].currentTarget();
       if (!hub.linked || !t) { if (phase === "end") gesture[key] = null; return; }
       var g = gesture[key], base = g ? g.last : seen[key];
@@ -243,8 +252,16 @@
 
     var phone = { marshal: null, token: 0, applying: 0, dragging: false, note: "" };
     function phoneDevice() { return PHONES.filter(function (p) { return p.id === hub.phoneId; })[0] || PHONES[0]; }
+    /* A tab recording only sees what is on screen, so "Fit to screen" sizes the phone - the
+       tallest device - to the window's height, stage padding and all. */
+    var STAGE_PADDING = 18, BEZEL = 12;
+    function phoneScale() {
+      if (hub.phoneScale !== "fit") return Number(hub.phoneScale) || 1;
+      var room = window.innerHeight - STAGE_PADDING * 2 - 8;
+      return Math.max(0.3, Math.min(1.25, room / (phoneDevice().height + BEZEL * 2)));
+    }
     function layoutPhone() {
-      var p = phoneDevice(), s = hub.phoneScale, bezel = 12;
+      var p = phoneDevice(), s = phoneScale(), bezel = BEZEL;
       el.phone.style.width = p.width + bezel * 2 + "px"; el.phone.style.height = p.height + bezel * 2 + "px";
       el.phone.style.borderRadius = p.corner + bezel + "px";
       el.phone.style.transform = "scale(" + s + ")";
@@ -285,13 +302,18 @@
       if (!hub.linked || phoneMode() !== "aim") return;
       phoneSignal("AIM_DRAGGED", { point: { lat: target.lat, lng: target.lng } });
     }
-    /* Preview places once per aim: Unlock takes the placement back, as the phone's own Unlock
-       does, and PLACED puts it down again. */
+    /* The phone plays the hole live, as a round does: DEMO_APPROACH makes the hub's player its
+       fix and the hole live, in Track - the screen before LOCK - then the switch is applied. */
     function phonePlace(point) {
-      if (!phone.marshal || !point) return;
-      if (phoneMode() === "aim") phoneSignal("UNLOCK");
-      if (!phoneSignal("PLACED", { point: { lat: point.lat, lng: point.lng } })) setPhoneNote("The phone did not take the player there (on the green, or the app is not in Preview).");
+      if (!phone.marshal || !point || hub.holeNumber == null) return;
+      if (!phoneSignal("DEMO_APPROACH", { hole: hub.holeNumber, point: { lat: point.lat, lng: point.lng } })) setPhoneNote("The phone did not take the player there.");
+      phoneLock();
       renderPhoneReadout();
+    }
+    function phoneLock() {
+      var mode = phoneMode();
+      if (hub.locked && mode === "track") phoneSignal("LOCK");
+      else if (!hub.locked && mode === "aim") phoneSignal("UNLOCK");
     }
     function phoneHole(n) {
       if (!phone.marshal) return;
@@ -304,7 +326,7 @@
       if (destroyed || token !== phone.token) return;
       renderPhoneReadout();
       if (phone.applying > 0 || !scene) return;
-      if (cause === "PLACED" && scene.player) { setPlayer(scene.player, "phone"); return; }
+      if (cause === "LOCK" || cause === "UNLOCK") { setLocked(scene.mode === "aim"); return; }
       if (/^(VIEW_HOLE_CHANGED|NEXT_HOLE|PREV_HOLE|ADVANCE_TO_HOLE|VIEW_LIVE_HOLE)$/.test(cause) && scene.hole && scene.hole.number !== hub.holeNumber) {
         setHole(scene.hole.number, "phone");
         return;
@@ -331,7 +353,7 @@
       if (!hub.courseKey) { el.phoneFrame.removeAttribute("src"); el.phoneEmpty.hidden = false; renderPhoneReadout(); return; }
       el.phoneEmpty.hidden = true;
       setPhoneNote("Opening the app on " + (hub.courseName || hub.courseKey) + "…");
-      el.phoneFrame.src = "app/index.html?courseId=" + encodeURIComponent(hub.courseKey) + (hub.holeNumber != null ? "&hole=" + hub.holeNumber : "") +
+      el.phoneFrame.src = "app/index.html?recording=1&courseId=" + encodeURIComponent(hub.courseKey) + (hub.holeNumber != null ? "&hole=" + hub.holeNumber : "") +
         (hub.courseName ? "&courseName=" + encodeURIComponent(hub.courseName) : "");
       var started = Date.now();
       (function poll() {
@@ -347,19 +369,25 @@
         }
         phone.marshal = m;
         m.onScene(function (scene, cause) { onPhoneScene(token, scene, cause); });
+        /* A tap on the phone's map is Preview's PLACED, which a live hole refuses. Here it is
+           the player moving, on all three. The hub's own signals pass straight through. */
+        var signal = m.signal;
+        m.signal = function (name, payload) {
+          if (name === "PLACED" && phone.applying === 0) {
+            var point = payload && payload.point;
+            if (point) setTimeout(function () { if (!destroyed && token === phone.token) setPlayer(point, null); }, 0);
+            return false;
+          }
+          return signal.call(m, name, payload);
+        };
         try {
-          var doc = win.document;
-          doc.addEventListener("pointerup", onPhonePointerUp, true);
-          doc.addEventListener("pointercancel", onPhonePointerUp, true);
-          /* The frame has no location on purpose (the hub places the player), so the app's
-             "Location is off" notice is noise in a recording. */
-          var style = doc.createElement("style");
-          style.textContent = "#gpsNotice{display:none !important}";
-          doc.head.appendChild(style);
+          win.document.addEventListener("pointerup", onPhonePointerUp, true);
+          win.document.addEventListener("pointercancel", onPhonePointerUp, true);
         } catch (e) {}
         setPhoneNote("");
         if (hub.holeNumber != null) phoneHole(hub.holeNumber);
         if (hub.player) phonePlace(hub.player);
+        else phoneLock();
         renderPhoneReadout();
       })();
     }
@@ -375,8 +403,21 @@
     }
     function setPlayer(point, from) {
       hub.player = point ? { lat: point.lat, lng: point.lng } : null;
-      WATCHES.forEach(function (key) { gesture[key] = null; watches[key].setPlayer(hub.player); });
+      WATCHES.forEach(function (key) { gesture[key] = null; watches[key].setPlayer(hub.player); watches[key].setLocked(hub.locked); });
       if (from !== "phone") phonePlace(hub.player);
+    }
+    /* The switch: the same LOCK / UNLOCK on all three. */
+    function setLocked(locked) {
+      hub.locked = !!locked;
+      WATCHES.forEach(function (key) { watches[key].setLocked(hub.locked); });
+      phoneLock();
+      renderLock();
+    }
+    function renderLock() {
+      el.locked.classList.toggle("isActive", hub.locked);
+      el.unlocked.classList.toggle("isActive", !hub.locked);
+      el.locked.setAttribute("aria-pressed", String(hub.locked));
+      el.unlocked.setAttribute("aria-pressed", String(!hub.locked));
     }
     /* A new hole starts from its tee on every device. */
     function setHole(n, from) {
@@ -468,6 +509,8 @@
       if (recordingType() === null) { el.recStatus.textContent = "This browser cannot record video (no MediaRecorder)."; return; }
       keys = keys.filter(function (k) { return !recordings[k]; });
       if (!keys.length) return;
+      /* The tab recordings are cropped to what is on screen: bring the devices fully into view. */
+      if (keys.indexOf("phone") >= 0 || keys.indexOf("stage") >= 0) el.stage.scrollIntoView({ block: "center" });
       /* Every stream first, then every recorder in the same tick, so recordings started
          together start together. */
       Promise.all(keys.map(streamFor)).then(function (results) {
@@ -512,6 +555,8 @@
     el.prev.addEventListener("click", function () { stepHole(-1); });
     el.next.addEventListener("click", function () { stepHole(1); });
     el.tee.addEventListener("click", function () { var tee = teeOf(hub.holeNumber); if (tee) setPlayer(tee, null); });
+    el.locked.addEventListener("click", function () { setLocked(true); });
+    el.unlocked.addEventListener("click", function () { setLocked(false); });
     el.linked.addEventListener("click", function () { hub.linked = true; renderLink(); });
     el.individual.addEventListener("click", function () { hub.linked = false; renderLink(); });
     el.units.addEventListener("change", function () {
@@ -522,7 +567,9 @@
       hub.watchZoom = Number(el.watchZoom.value) || 0.75;
       WATCHES.forEach(function (key) { sessions[key].zoom = hub.watchZoom; watches[key].newFace(); watches[key].requestUpdate(); });
     });
-    el.phoneScale.addEventListener("change", function () { hub.phoneScale = Number(el.phoneScale.value) || 1; layoutPhone(); });
+    el.phoneScale.addEventListener("change", function () { hub.phoneScale = el.phoneScale.value === "fit" ? "fit" : Number(el.phoneScale.value) || 1; layoutPhone(); });
+    function onResize() { if (hub.phoneScale === "fit") layoutPhone(); }
+    window.addEventListener("resize", onResize);
     el.phoneModel.addEventListener("change", function () { hub.phoneId = el.phoneModel.value; layoutPhone(); });
     el.phoneReload.addEventListener("click", openPhone);
     ["garmin", "apple", "phone"].forEach(function (k) { el["rec-" + k].addEventListener("click", function () { toggle([k]); }); });
@@ -532,11 +579,12 @@
     // ---------------------------------------------------------------- boot
 
     renderLink();
+    renderLock();
     layoutPhone();
     renderRecording();
     if (hub.courseKey) {
       showCourse();
-      WATCHES.forEach(function (key) { if (hub.holeNumber != null) watches[key].setHole(hub.holeNumber); watches[key].setPlayer(hub.player); });
+      WATCHES.forEach(function (key) { if (hub.holeNumber != null) watches[key].setHole(hub.holeNumber); watches[key].setPlayer(hub.player); watches[key].setLocked(hub.locked); });
       openPhone();
     } else renderPhoneReadout();
 
@@ -544,6 +592,7 @@
       destroyed = true;
       stopKeys(RECORD_KEYS);
       stopDisplay();
+      window.removeEventListener("resize", onResize);
       phone.token += 1;
       WATCHES.forEach(function (key) { watches[key].destroy(); });
       if (window.GDStudioCoursePick) window.GDStudioCoursePick.cancel();

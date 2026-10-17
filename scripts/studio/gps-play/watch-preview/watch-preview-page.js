@@ -272,6 +272,7 @@
         canLock: function () { return !!(session.player && currentHole()) && !session.locked; }
       },
       currentHole: function () { return session.holeNumber; },
+      holeNumbers: function () { return session.holes.map(function (h) { return h.holeNumber; }); },
       manifestHole: function (n) { return session.holes.filter(function (h) { return h.holeNumber === n; })[0] || null; },
       packageVersion: function () { return session.packageVersion; },
       bitmapFor: function (n) {
@@ -513,6 +514,20 @@
       requestUpdate();
     }
 
+    /* The shot locked or unlocked from outside this watch (the Record Hub's switch): the same
+       LOCK / UNLOCK the phone would send, and options.onLockChange moves the face to the page
+       the watch shows for it. */
+    function setLocked(locked) {
+      if (!face || !!session.locked === !!locked) return;
+      if (locked) {
+        if (!watchSession.scene.canLock()) return;
+        watchSession.lock();
+      } else watchSession.unlock();
+      if (options.onLockChange) options.onLockChange(face, !!locked);
+      renderButtons();
+      requestUpdate();
+    }
+
     /* Another device aimed: the same ground point, carried onto this face as its own aim
        (options.mirrorAim knows how this watch holds one). "end" is the finger lifting. */
     function mirrorAim(coordinate, phase) {
@@ -546,6 +561,7 @@
       setHole: setHole,
       useCourse: useCourse,
       mirrorAim: mirrorAim,
+      setLocked: setLocked,
       currentTarget: function () { return face ? face.currentTarget() : null; },
       destroy: function () {
         destroyed = true;
@@ -577,6 +593,8 @@
        mapPalette     function (hole, device) -> palette, for a watch that draws (null otherwise)
        mirrorAim      function (face, coordinate, phase, watchSession) - another device's aim
                       held on this face (the Record Hub's linked drag)
+       onLockChange   function (face, locked) - the page the watch turns to when the shot is
+                      locked or unlocked from outside it (the Record Hub's switch)
        onMount        function (redraw), once the face is up - for a face waiting on a web font */
   function render(containerEl, options) {
     var R = options.render, C = common();
