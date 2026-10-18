@@ -3455,7 +3455,7 @@ function gdAdminCourseProgressSettle(courseId){
   const core=gdProgressCore();
   if(!core)return;
   courseId=String(courseId||"");
-  ["mapper","visual","collect_extra_objects","refine_surface_shapes","find_trees"].forEach(suffix=>core.clearFloor(courseId+":"+suffix));
+  ["mapper","visual","collect_extra_objects","refine_surface_shapes","find_trees","resolve_scorecards"].forEach(suffix=>core.clearFloor(courseId+":"+suffix));
 }
 
 /* The build bar. One line that answers: is this course built, is it building, how far, and has
@@ -4223,7 +4223,7 @@ function gdAdminCourseVisualEnsurePipelineCourse(courseId){
    the bar was meant to answer. Bounded: it gives up after six minutes and says so. */
 let gdAdminCourseMaintenanceFollows={};
 function gdAdminCourseMaintenanceLabel(kind){
-  return kind==="refine_surface_shapes"?"Refine Shapes":kind==="find_trees"?"Find Trees":"Collect Extra Objects";
+  return kind==="refine_surface_shapes"?"Refine Shapes":kind==="find_trees"?"Find Trees":kind==="resolve_scorecards"?"Resolve Scorecards":"Collect Extra Objects";
 }
 function gdAdminCourseMaintenanceStart(courseId,kind,data){
   courseId=String(courseId||"");
@@ -4297,6 +4297,7 @@ function gdAdminCourseMaintenanceOutcome(courseId,kind,job){
     const added=n(a.bunkers)+n(a.fairways)+n(a.water);
     return label+" done for "+courseId+": "+n(t.bunker)+" bunkers, "+n(t.fairway_area)+" fairways, "+n(t.water)+" water on the map ("+(added?added+" new":"nothing new found")+")";
   }
+  if(kind==="resolve_scorecards")return label+" done for "+courseId+": "+String(r.message||"finished");
   if(kind==="find_trees"){
     if(r.written===false)return label+" left "+courseId+" as it was: "+String(r.reason||"nothing written");
     const source=r.imagery==="esri"?"Esri":r.imagery==="frames"?"its frames":"its frames and Esri";
