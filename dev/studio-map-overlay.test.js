@@ -174,25 +174,41 @@ test("the tool picked stays picked: placing never switches tools, and there is n
   });
   const placing = page.slice(page.indexOf("function handleMapClick("), page.indexOf("/* ---- pins into shapes ----"));
   assert.ok(placing.length > 0 && !placing.includes("setTool("), "placing a fairway, green, tee or bunker must not change the tool");
-  /* The one exception is the explicit gesture: a double-click in Fast pins steps the cycle. */
-  const fast = page.slice(page.indexOf("function fastAdvance("), page.indexOf("function linkFastHole("));
-  assert.ok(fast.includes("setTool(next)"), "Fast pins' double-click is the only thing that moves the tool on");
-  assert.strictEqual(page.split("fastAdvance();").length, 2, "fastAdvance has exactly one caller");
-  assert.ok(page.includes('if (lineTool()) finishFairway();\n      if (fastPins()) fastAdvance();'), "that caller is the map's dblclick handler, never a click");
+  /* The one exception is a Fast pins cycle: a pin placed moves the tool on, and only there. */
+  const fast = page.slice(page.indexOf("function fastAdvance("), page.indexOf("function fastLink("));
+  assert.ok(fast.includes("var cycle = fastCycle();") && fast.includes("if (at < 0 || draft.length) return;") && fast.includes("setTool(next)"), "fastAdvance moves the tool on only inside a Fast cycle");
+  assert.strictEqual(page.split("fastAdvance();").length, 3, "fastAdvance is called from the pin click and the finished fairway, nothing else");
+  assert.ok(!page.includes("fastClickEcho") && !page.includes("lastFastClick") && !page.includes("if (fastPins()) fastAdvance()"), "the double-click flow is gone");
+  assert.ok(page.includes('if (lineTool()) mapObj.doubleClickZoom.disable();'), "double-click zoom is off only while laying a line");
 });
 
-test("fast pins: click pins, double-click pins and steps Green, Fairway, Tee; the tee's double-click links the hole", () => {
-  assert.ok(page.includes('data-gd-overlay="mode-fast"'), "no Fast mode button");
-  assert.ok(page.includes('var FAST_CYCLE = ["green", "fairway", "tee"];'), "the cycle is green, fairway, tee");
-  assert.ok(page.includes("if (fastPins()) fastAdvance();"), "the map's dblclick steps the cycle in Fast pins");
-  assert.ok(page.includes("if (fastPins() && fastClickEcho(latlng)) return;"), "the second click of a double-click must not pin twice");
-  assert.ok(page.includes("fastPlaced(addFeature({ kind: tool, pin: true, points: [point] }))"), "a pin placed in Fast pins joins the hole in hand");
-  assert.ok(page.includes('if (session.mode === "pins") fastPlaced(f);'), "a fairway placed from its ends joins the hole in hand");
-  const advance = page.slice(page.indexOf("function fastAdvance("), page.indexOf("/* ---- fairway line ----") > 0 ? page.length : page.length);
-  assert.ok(advance.includes("at === FAST_CYCLE.length - 1 ? linkFastHole() : null"), "only the tee's double-click links the hole");
-  assert.ok(advance.includes("members.forEach(function (f) { f.link = id; });"), "the hole's pins share one link id, like the Link tool");
-  assert.ok(page.includes('if (lineTool() || fastPins()) mapObj.doubleClickZoom.disable();'), "double-click must not zoom in Fast pins");
-  assert.ok(page.includes('setMode(key === "p" ? "pins" : key === "q" ? "fast" : "shapes")'), "Q is the Fast pins key");
+test("fast pins: Single, Green → Tee and Tee → Green; a click pins (and a cycle moves on), Space links the hole", () => {
+  assert.ok(page.includes('data-gd-overlay="mode-fast"') && page.includes('data-gd-overlay="fast-order"'), "no Fast mode button or order picker");
+  assert.ok(page.includes('var FAST_ORDERS = ["single", "green-tee", "tee-green"];'), "the three orders");
+  assert.ok(page.includes('var FAST_CYCLES = { single: null, "green-tee": ["green", "fairway", "tee"], "tee-green": ["tee", "fairway", "green"] };'), "Single has no cycle; the other two run each way");
+  ["fast-single", "fast-green-tee", "fast-tee-green"].forEach((name) => assert.ok(page.includes('data-gd-overlay="' + name + '"'), "no " + name + " button"));
+  assert.ok(page.includes("fastPlaced(addFeature({ kind: tool, pin: true, points: [point] }));\n        setStatus(kindLabel(tool) + \" pinned.\");\n        fastAdvance();"), "a pin placed in Fast pins joins the hole in hand, then the cycle moves on");
+  assert.ok(page.includes('if (session.mode === "pins") fastPlaced(f);') && page.includes("startAdjust(f, { line: line });\n      setStatus(session.mode === \"pins\"") && /startAdjust\(f, \{ line: line \}\);\n[^\n]*\n      fastAdvance\(\);/.test(page), "a fairway placed from its ends joins the hole in hand, then the cycle moves on");
+  assert.ok(page.includes('if (fastPins() && canEdit() && (event.key === " " || event.key === "Spacebar" || event.key === "Enter")) { event.preventDefault(); fastLink(); return; }'), "Space links the hole in hand");
+  assert.ok(page.includes("{ commitAdjust(false); if (fastPins()) fastLink(); }"), "Space on a fairway just placed keeps it and links the hole");
+  const link = page.slice(page.indexOf("function fastLink("), page.indexOf("/* ---- fairway line ----") > 0 ? page.length : page.length);
+  assert.ok(link.includes("if (cycle && tool !== cycle[0]) setTool(cycle[0]);"), "linking sends a cycle back to its first tool");
+  assert.ok(link.includes("members.forEach(function (f) { f.link = id; });"), "the hole's pins share one link id, like the Link tool");
+  assert.ok(!page.includes("linkFastHole"), "the cycle coming round never links on its own");
+  assert.ok(page.includes('if (key === "q") { setMode("fast", fastPins() ? FAST_ORDERS[(FAST_ORDERS.indexOf(session.fast) + 1) % FAST_ORDERS.length] : ""); return; }'), "Q is Fast pins, and Q again steps the order");
+  assert.ok(page.includes("fast: session.fast,") && page.includes('"mode", "fast", "fairwayWidth"'), "the order picked is remembered across a reload");
+});
+
+test("link: the marker adds every shape its stroke touches to the pick, Space still links, and a click still picks one", () => {
+  assert.ok(page.includes('if (tool === "connect") return "mark";') && page.includes('if (gesture === "mark") { beginMark(event); return; }'), "a press-and-drag under Link is the marker");
+  const marker = page.slice(page.indexOf("/* ---- the Link marker ----"), page.indexOf("/* The quick \"linked\" confirmation"));
+  assert.ok(marker.includes("if (linkPick.indexOf(s.f.id) >= 0 || !markTouches(s, mark.last, now, ll)) return;\n        linkPick.push(s.f.id);"), "a shape the stroke touches joins the pick once");
+  assert.ok(!marker.includes("commitLink(") && !marker.includes(".link = "), "the marker never links on its own - that is Enter or Space");
+  assert.ok(marker.includes("if (!done.moved) return;\n      dragEndedAt = Date.now();"), "a press that never moved is a click, so clicking a shape still picks it");
+  assert.ok(page.includes('if (tool === "connect") { if (canEdit() && Date.now() - dragEndedAt >= 300) toggleLinkPick(f.id); return; }'), "the click pick is still there");
+  assert.ok(marker.includes("segmentsGapPx(ring[i - 1], ring[i], a, b) <= MARK_PX") && marker.includes("shapes.insideLatLngRing(ll, s.f.points)"), "touching is within the marker's reach of an edge or pin, or the stroke inside the outline");
+  assert.ok(!page.includes("linkBox(") && !page.includes("boxTouches("), "the link box is gone");
+  assert.ok(page.includes('if (event.key === "Enter" || event.key === " " || event.key === "Spacebar") { event.preventDefault(); commitLink(); return; }'), "Enter or Space links the pick");
 });
 
 test("bunker wand: its reach steps smaller and bigger, and overlapping bunkers merge into one", () => {
@@ -396,7 +412,7 @@ test("the shape just placed stays live: left/right step sensitivity, up/down siz
   assert.ok(page.includes('document.addEventListener("keydown", onAdjustKey, true);') && page.includes('document.removeEventListener("keydown", onAdjustKey, true);'),
     "the arrow keys must reach the live shape ahead of the map's own panning, and be let go on the way out");
   assert.ok(/if \(key === "ArrowLeft"\) stepSensitivity\(-1\);\s*else if \(key === "ArrowRight"\) stepSensitivity\(1\);\s*else if \(key === "ArrowUp"\) stepSize\(1\);\s*else if \(key === "ArrowDown"\) stepSize\(-1\);/.test(page), "arrow keys mapping");
-  assert.ok(page.includes('else if (key === "Enter" || key === " " || key === "Spacebar") commitAdjust(false);'), "Enter or Space keeps it");
+  assert.ok(page.includes('else if (key === "Enter" || key === " " || key === "Spacebar") { commitAdjust(false); if (fastPins()) fastLink(); }'), "Enter or Space keeps it");
   assert.ok(page.includes("shapes.fairwayFromLine(adjust.line, width)"), "up/down on a fairway changes its width");
   assert.ok(page.includes("wandOutline(mine.seed, kind, size)"), "up/down on a wand shape runs the wand again at the next size");
   assert.ok(page.includes("f.points = shapes.smoothOutline(adjust.candidates[next], f.kind);"), "left/right step through the edges the wand found");

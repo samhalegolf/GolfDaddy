@@ -14,10 +14,11 @@
  * right step the wand's sensitivity, up and down make it smaller or bigger (a fairway narrower
  * or wider), Enter or Space keeps it. Pins: the quick pass - a green, tee, bunker or water
  * hazard is its centre and a fairway is its start and end, nothing more; any pin can be turned
- * into a shape later ("Shape pins"). Fast pins is Pins with a cycle: a click pins the tool in
- * hand, a double-click pins and steps Green, Fairway, Tee, and the double-click on the tee links
- * every pin placed since the cycle began as one hole and goes back to Green - a hole is six
- * clicks and nothing else. The tool picked stays picked until another is chosen.
+ * into a shape later ("Shape pins"). Fast pins is Pins with the hole kept in hand: every pin
+ * placed joins it, and Space links them as one hole. Single: a click pins the tool in hand and
+ * stays on it. Green → Tee and Tee → Green: a click pins and moves the tool on round the cycle
+ * (a fairway is its start, then its end), so a hole is four clicks and Space. The tool picked
+ * stays picked until another is chosen, or the cycle moves it on.
  * Every shape can be dragged, reshaped by its corners, and deleted by
  * dropping it on the bin. Every change saves on its own. Hole numbers are optional: set "Hole"
  * and new shapes carry it, or select a shape and change its number. Unnumbered shapes are
@@ -226,7 +227,7 @@
     /* AI help: the task picked last. Its words live on the server (saved) or in the panel (edited). */
     aiTask: "find-greens",
     dirty: false, rev: 0, saving: false, saveError: "", fairwayWidth: 0,
-    mode: "shapes", fastPins: false, wandSize: { green: 1, bunker: 1, water: 1 }, method: { fairway: "width", green: "wand", tee: "round", bunker: "wand", water: "wand", trees: "single", hazard: "draw", waste: "grow" }, lineWandSize: { fairway: 1, bunker: 1, water: 1, waste: 1 }, mergeBunkers: true, seams: true, fullscreen: false, unsaved: null,
+    mode: "shapes", fast: "", wandSize: { green: 1, bunker: 1, water: 1 }, method: { fairway: "width", green: "wand", tee: "round", bunker: "wand", water: "wand", trees: "single", hazard: "draw", waste: "grow" }, lineWandSize: { fairway: 1, bunker: 1, water: 1, waste: 1 }, mergeBunkers: true, seams: true, fullscreen: false, unsaved: null,
     /* The size the next single tree is dropped at, and the tree finder's sensitivity. Near
        play: how far out from the fairways and greens it looks, and whether tree heights gate
        what it finds. */
@@ -261,7 +262,7 @@
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify({
         course: slimCourse(session.course), view: session.view, sourceKey: session.sourceKey,
-        showObjects: session.showObjects, mode: session.mode, fastPins: !!session.fastPins, fairwayWidth: session.fairwayWidth,
+        showObjects: session.showObjects, mode: session.mode, fast: session.fast, fairwayWidth: session.fairwayWidth,
         wandSize: session.wandSize, method: session.method, lineWandSize: session.lineWandSize, mergeBunkers: session.mergeBunkers, seams: session.seams, fullscreen: !!session.fullscreen,
         treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel, treeBandM: session.treeBandM, treeHeights: session.treeHeights, hazardCorridorM: session.hazardCorridorM, hazardFinderLevel: session.hazardFinderLevel, numberAuto: session.numberAuto, aiTask: session.aiTask,
         unsaved: session.dirty && session.loadedFor ? { courseId: session.loadedFor, features: session.features, playOrders: session.playOrders } : null
@@ -279,7 +280,7 @@
     try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) {}
     if (!saved || typeof saved !== "object") return;
     if (saved.course) { session.course = saved.course; session.view = saved.view || null; }
-    ["sourceKey", "showObjects", "mode", "fastPins", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "googleSplit", "treeRadius", "treeFinderLevel", "treeBandM", "treeHeights", "hazardCorridorM", "hazardFinderLevel", "numberAuto", "aiTask"].forEach(function (k) {
+    ["sourceKey", "showObjects", "mode", "fast", "fairwayWidth", "mergeBunkers", "seams", "fullscreen", "googleSplit", "treeRadius", "treeFinderLevel", "treeBandM", "treeHeights", "hazardCorridorM", "hazardFinderLevel", "numberAuto", "aiTask"].forEach(function (k) {
       if (saved[k] != null) session[k] = saved[k];
     });
     if (saved.wandSize && typeof saved.wandSize === "object") {
@@ -387,6 +388,8 @@
     /* A cluster oval while it is stretched, and the box the tree finder looks in. */
     stretchOval: { color: "#2fbf5a", weight: 2, dashArray: "6 6", fillColor: "#1f8a3c", fillOpacity: 0.2, interactive: false },
     stretchBox: { color: "#ffffff", weight: 2, dashArray: "6 6", fill: false, interactive: false },
+    /* The Link marker's stroke: a highlighter, as wide as its reach. */
+    marker: { color: "#ffe14d", weight: 28, opacity: 0.35, lineCap: "round", lineJoin: "round", interactive: false },
     /* The box everything inside goes to the bin from (Shift-drag in Move). */
     stretchBin: { color: "#ff6a5c", weight: 2, dashArray: "6 6", fillColor: "#ff6a5c", fillOpacity: 0.12, interactive: false },
     draft: { color: "#ffb54c", weight: 3, dashArray: "6 6", interactive: false },
@@ -487,11 +490,8 @@
     var lastPlacedId = "";
     /* Link tool: the shapes clicked so far, waiting for Enter or Space to link them. */
     var linkPick = [];
-    /* Fast pins: the pins placed since the cycle last came back to Green - the hole being
-       pinned, linked when the tee's double-click lands - and the last click, so the second click
-       a double-click delivers does not pin twice. */
+    /* Fast pins: the pins placed since Space last linked - the hole in hand. */
     var fastHole = [];
-    var lastFastClick = null;
     /* Whether the map was last drawn for the Play order tool (clickable OSM hole lines). */
     var wasOrdering = false;
     var linkLayers = [];
@@ -577,10 +577,10 @@
       "<strong>Waste</strong> - <em>Draw + grow</em>: draw roughly round it and it is pushed out to the edge of the ground it sits on. " +
       "Whatever you just placed stays live: <strong>← →</strong> step the wand's sensitivity, <strong>↑ ↓</strong> make it smaller or bigger (a fairway narrower or wider), <strong>Enter</strong> or <strong>Space</strong> keeps it, <strong>Esc</strong> removes it - placing the next one keeps it too. " +
       "<strong>Pins</strong>, the quick pass: a fairway is its start then its end and becomes a fairway straight away; greens, tees, bunkers and water stay pins until <strong>Shape pins</strong>. " +
-      "<strong>Fast</strong>, Pins with a cycle: a click pins the tool in hand and stays on it; a double-click pins and moves on - Green, then Fairway (its start, then double-click its end), then Tee - and the double-click on the tee links every pin placed since the cycle began as one hole and goes back to Green. Six clicks a hole; come back in Move to shape any pin that needs it. " +
+      "<strong>Fast</strong>, Pins with the hole kept in hand: every pin placed joins it, and <strong>Space</strong> links them as one hole. <em>Single</em>: a click pins the tool in hand and stays on it. <em>Green → Tee</em> and <em>Tee → Green</em>: a click pins and moves the tool on round the cycle - a fairway is its start, then its end - so a hole is four clicks and Space (Q again switches). Come back in Move to shape any pin that needs it. " +
       "Whatever you just placed can be dragged at once to adjust it. In <strong>Move</strong>, drag shapes and their points, and drop either on the <strong>bin</strong> to delete. A detailed outline shows only its key points - grab its edge anywhere and it bends there, the key points either side staying put. " +
       "<strong>Seams</strong> (on by default): a fairway, water, hazard, waste area or trees kept within a few metres of another - or just overlapping it - meets it in the middle, and that line is shared; drag it and both shapes follow, so it only changes which ground is which. " +
-      "<strong>Link</strong>: click the shapes that belong to one hole (click again to drop one), then <strong>Enter</strong> or <strong>Space</strong> links them and the next click starts a new link. A link only says they are one hole - it never numbers them. One shape and Enter takes it out of its link; <strong>Esc</strong> clears the pick. " +
+      "<strong>Link</strong>: click the shapes that belong to one hole (click again to drop one), then <strong>Enter</strong> or <strong>Space</strong> links them and the next click starts a new link. Or drag the marker over them: every shape the stroke touches joins the pick, and Enter or Space links it the same way. A link only says they are one hole - it never numbers them. One shape and Enter takes it out of its link; <strong>Esc</strong> clears the pick. " +
       "<strong>Number</strong>: click each hole's fairway (or any shape on it) and the whole hole takes the <em>Next hole</em> number; with <em>Auto</em> on, the number then moves on, so 1 to 18 is eighteen clicks. Each hole shows one number on its fairway - click it with any tool to type a different one. A number on two holes shows red. " +
       "<strong>Play order</strong>: where the mapper gets a site's courses wrong, say them by hand. <strong>+ New play order</strong>, name it, then click its holes in the order they are played - an OSM hole line, or any shape of a hole you have linked (link a hole's tee and green first). Click a hole again to take it out. A hole can be in several play orders, so the same nines played in a different order are just another play order. With play orders on a ready overlay, the mapper publishes exactly those courses under those names. " +
       "<strong>Undo</strong> (the arrow at the top of the right-hand buttons, or Ctrl+Z / ⌘Z) takes back the last change, one at a time. " +
@@ -612,7 +612,12 @@
       '<span class="gdStudioOverlayModes">' +
       '<button type="button" data-gd-overlay="mode-shapes" title="Place outlines - fairway lines and the wand (S)">Shapes</button>' +
       '<button type="button" data-gd-overlay="mode-pins" title="Quick pass - fairway start and end, green and tee centres (P)">Pins</button>' +
-      '<button type="button" data-gd-overlay="mode-fast" title="Fast pins - click pins, double-click pins and moves on: Green, Fairway, Tee; the double-click on the tee links the hole and goes back to Green (Q)">Fast</button>' +
+      '<button type="button" data-gd-overlay="mode-fast" title="Fast pins - every pin joins the hole in hand and Space links them (Q; Q again switches the order)">Fast</button>' +
+      "</span>" +
+      '<span class="gdStudioOverlayModes" data-gd-overlay="fast-order" hidden>' +
+      '<button type="button" data-gd-overlay="fast-single" title="A click pins the tool in hand and stays on it; Space links the pins placed as one hole">Single</button>' +
+      '<button type="button" data-gd-overlay="fast-green-tee" title="A click pins and moves on: Green, Fairway (its start, then its end), Tee; Space links the hole">Green → Tee</button>' +
+      '<button type="button" data-gd-overlay="fast-tee-green" title="A click pins and moves on: Tee, Fairway (its start, then its end), Green; Space links the hole">Tee → Green</button>' +
       "</span>" +
       '<span class="gdStudioOverlayOpt" data-gd-overlay="number-label" hidden>Next hole <input type="number" min="1" max="36" step="1" data-gd-overlay="number-next" class="gdStudioOverlayWidth gdStudioOverlayHole">' +
       '<label title="Each click numbers a hole and moves on to the next number"><input type="checkbox" data-gd-overlay="number-auto"> Auto</label></span>' +
@@ -686,7 +691,7 @@
       "</div>";
 
     var el = {};
-    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "ai-panel", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "mode-fast", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-along", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "hazard-auto-label", "hazard-corridor", "hazard-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "apply", "run", "status"].forEach(function (name) {
+    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "ai-panel", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "mode-fast", "fast-order", "fast-single", "fast-green-tee", "fast-tee-green", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-along", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "hazard-auto-label", "hazard-corridor", "hazard-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "apply", "run", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -904,21 +909,29 @@
       }
     };
 
-    /* Fast pins: Pins, with the Green - Fairway - Tee cycle on double-click. */
-    var FAST_CYCLE = ["green", "fairway", "tee"];
-    function fastPins() { return session.mode === "pins" && !!session.fastPins; }
+    /* Fast pins: Pins with the hole in hand, in one of three orders. Single has no cycle - the
+       tool stays picked; the other two move the tool on round the cycle with every pin. */
+    var FAST_ORDERS = ["single", "green-tee", "tee-green"];
+    var FAST_CYCLES = { single: null, "green-tee": ["green", "fairway", "tee"], "tee-green": ["tee", "fairway", "green"] };
+    function fastPins() { return session.mode === "pins" && FAST_ORDERS.indexOf(session.fast) >= 0; }
+    function fastCycle() { return fastPins() ? FAST_CYCLES[session.fast] : null; }
 
-    function setMode(next) {
+    /* setMode("fast", order): the order to pin in, or the one used last. */
+    function setMode(next, order) {
       settle();
       var was = fastPins();
       session.mode = next === "pins" || next === "fast" ? "pins" : "shapes";
-      session.fastPins = next === "fast";
+      session.fast = next !== "fast" ? "" : FAST_ORDERS.indexOf(order) >= 0 ? order : FAST_ORDERS.indexOf(session.fast) >= 0 ? session.fast : "single";
       if (draft.length) cancelDraft();
       el["mode-shapes"].classList.toggle("isActive", session.mode === "shapes");
-      el["mode-pins"].classList.toggle("isActive", session.mode === "pins" && !session.fastPins);
+      el["mode-pins"].classList.toggle("isActive", session.mode === "pins" && !fastPins());
       el["mode-fast"].classList.toggle("isActive", fastPins());
-      /* The cycle starts at Green, with no hole in hand. */
-      if (fastPins() && !was) { fastHole = []; lastFastClick = null; if (FAST_CYCLE.indexOf(tool) < 0) setTool("green"); }
+      el["fast-order"].hidden = !fastPins();
+      FAST_ORDERS.forEach(function (o) { el["fast-" + o].classList.toggle("isActive", fastPins() && session.fast === o); });
+      /* Coming into Fast starts with no hole in hand; a cycle starts at its first tool. */
+      if (fastPins() && !was) fastHole = [];
+      var cycle = fastCycle();
+      if (cycle && (!was || order) && tool !== cycle[0]) setTool(cycle[0]);
       syncDoubleClick();
       ["fairway", "green", "tee", "bunker", "water", "trees", "hazard", "waste"].forEach(function (name) {
         el["tool-" + name].title = TOOL_TEXT[session.mode][name];
@@ -962,8 +975,10 @@
     /* The kind a press-and-drag draws round right now, or null when the tool clicks instead. A
        waste area on Draw + grow is drawn round first, then grown. */
     function drawRoundKind() { return methodOf(tool) === "draw" || methodOf(tool) === "grow" ? tool : null; }
-    /* What a press-and-drag on the map does with the tool in hand, or null when it pans. */
+    /* What a press-and-drag on the map does with the tool in hand, or null when it pans. Under
+       Link, a drag is the marker: every shape it touches joins the pick. */
     function pressGesture() {
+      if (tool === "connect") return "mark";
       if (drawRoundKind()) return "lasso";
       var m = methodOf(tool);
       return m === "oval" ? "oval" : m === "find" ? "box" : m === "colour" ? "colour" : null;
@@ -997,13 +1012,13 @@
        last point (and finishes the line instead). */
     function syncDoubleClick() {
       if (!mapObj) return;
-      try { if (lineTool() || fastPins()) mapObj.doubleClickZoom.disable(); else mapObj.doubleClickZoom.enable(); } catch (e) {}
+      try { if (lineTool()) mapObj.doubleClickZoom.disable(); else mapObj.doubleClickZoom.enable(); } catch (e) {}
     }
 
     /* Drawing round, stretching an oval or a box, and the colour wand are a press-and-drag, so
        the map does not pan under them; any other tool pans as usual. */
     function syncMapDragging() {
-      if (!mapObj || drag || lasso || stretch || colourPress) return;
+      if (!mapObj || drag || lasso || stretch || colourPress || mark) return;
       try { if (pressGesture()) mapObj.dragging.disable(); else mapObj.dragging.enable(); } catch (e) {}
     }
 
@@ -1013,9 +1028,10 @@
     function onMapPress(event) {
       /* In Move, Shift and a press on open map stretches the bin box. */
       var gesture = pressGesture() || (tool === "move" && event.shiftKey ? "bin" : null);
-      if (!gesture || event.button || drag || lasso || stretch || colourPress || !mapObj) return;
+      if (!gesture || event.button || drag || lasso || stretch || colourPress || mark || !mapObj) return;
       if (Date.now() - dragEndedAt < 300) return;
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
+      if (gesture === "mark") { beginMark(event); return; }
       if (gesture !== "bin" && full(gesture === "box" ? "tree" : tool)) return;
       event.preventDefault();
       if (gesture === "colour") { settle(true); beginColourWand(event); return; }
@@ -2315,7 +2331,9 @@
       else if (key === "ArrowRight") stepSensitivity(1);
       else if (key === "ArrowUp") stepSize(1);
       else if (key === "ArrowDown") stepSize(-1);
-      else if (key === "Enter" || key === " " || key === "Spacebar") commitAdjust(false);
+      /* In Fast pins the live shape is a fairway just placed from its ends: Space keeps it and
+         links the hole, the same as Space with nothing live. */
+      else if (key === "Enter" || key === " " || key === "Spacebar") { commitAdjust(false); if (fastPins()) fastLink(); }
       else if (key === "Escape") discardAdjust();
       else return;
       event.preventDefault();
@@ -2363,7 +2381,6 @@
     function handleMapClick(latlng) {
       if (Date.now() - dragEndedAt < 300) return;
       if (!session.course) { setStatus("Pick a course first."); return; }
-      if (fastPins() && fastClickEcho(latlng)) return;
       /* Empty ground under the Link tool does nothing: the pick waits for Enter or Esc. */
       if (tool === "connect" || tool === "number" || tool === "order") return;
       if (tool === "move") { if (selectedId) select(""); return; }
@@ -2380,7 +2397,8 @@
       else if (pressGesture()) setStatus(pressHint());
       else if (session.mode === "pins") {
         fastPlaced(addFeature({ kind: tool, pin: true, points: [point] }));
-        setStatus(kindLabel(tool) + " pinned." + (fastPins() && FAST_CYCLE.indexOf(tool) >= 0 ? " Double-click to pin and move on." : ""));
+        setStatus(kindLabel(tool) + " pinned.");
+        fastAdvance();
       }
       else if (WAND_KINDS.indexOf(tool) >= 0) placeWand(point, tool);
       else if (tool === "tee") {
@@ -2469,7 +2487,8 @@
       var f = addFeature({ kind: "fairway", points: ring });
       if (session.mode === "pins") fastPlaced(f);
       startAdjust(f, { line: line });
-      setStatus(fastPins() ? "Fairway placed from its start and end. Double-click its end to move on to the tee, or click the next fairway's start." : session.mode === "pins" ? "Fairway placed from its start and end. Click the next fairway's start, or drag this one to adjust it." : "Fairway placed. Lay the next one, or press Move (V) to drag its corners to fit.");
+      setStatus(session.mode === "pins" ? "Fairway placed from its start and end. Click the next fairway's start, or drag this one to adjust it." : "Fairway placed. Lay the next one, or press Move (V) to drag its corners to fit.");
+      fastAdvance();
     }
 
     /* ---- the wand ---- */
@@ -3881,6 +3900,85 @@
         (numbers.length > 1 ? " They carry different hole numbers (" + numbers.sort(function (a, b) { return a - b; }).join(", ") + ") - fix the wrong one, or the mapper numbers them from the scorecard." : ""), numbers.length > 1);
     }
 
+    /* ---- the Link marker ----
+       Under Link a press-and-drag is a highlighter: every shape the stroke passes over joins
+       the pick, exactly as a click on it would, and Enter or Space links the pick. A stroke
+       can start on a shape - nothing drags under Link - and a press that never moves is left
+       to the shape's click, so clicking still picks one at a time. */
+    var MARK_PX = STYLE.marker.weight / 2;
+    var mark = null;
+
+    function beginMark(event) {
+      var at = mapObj.mouseEventToContainerPoint(event);
+      mark = {
+        x: event.clientX, y: event.clientY, moved: false, last: { x: at.x, y: at.y },
+        line: L.polyline([mapObj.containerPointToLatLng(at)], STYLE.marker).addTo(mapObj),
+        /* Every shape in screen pixels, once: the map does not move under the stroke. */
+        shapes: session.features.map(function (f) { return { f: f, xy: screenRing(f.points) }; })
+      };
+      try { mapObj.dragging.disable(); } catch (e) {}
+      document.addEventListener("pointermove", onMarkMove);
+      document.addEventListener("pointerup", onMarkEnd);
+      document.addEventListener("pointercancel", onMarkEnd);
+    }
+
+    function onMarkMove(event) {
+      if (!mark || destroyed) return;
+      if (!mark.moved && Math.hypot(event.clientX - mark.x, event.clientY - mark.y) < 4) return;
+      mark.moved = true;
+      var at = mapObj.mouseEventToContainerPoint(event), ll = mapObj.containerPointToLatLng(at), now = { x: at.x, y: at.y };
+      mark.line.addLatLng(ll);
+      var added = false;
+      mark.shapes.forEach(function (s) {
+        if (linkPick.indexOf(s.f.id) >= 0 || !markTouches(s, mark.last, now, ll)) return;
+        linkPick.push(s.f.id);
+        added = true;
+      });
+      mark.last = now;
+      if (added) { drawFeatures(); updateHint(); }
+    }
+
+    function onMarkEnd(event) {
+      document.removeEventListener("pointermove", onMarkMove);
+      document.removeEventListener("pointerup", onMarkEnd);
+      document.removeEventListener("pointercancel", onMarkEnd);
+      var done = mark;
+      mark = null;
+      if (destroyed || !done) return;
+      try { mapObj.removeLayer(done.line); } catch (e) {}
+      syncMapDragging();
+      /* A press that never moved is a click: the shape (or the map) under it has it. */
+      if (!done.moved) return;
+      dragEndedAt = Date.now();
+      if (event.type === "pointercancel") return;
+      updateHint();
+      setStatus(linkPick.length > 1 ? linkPick.length + " picked. Enter or Space links them, or mark or click more." : linkPick.length ? "The marker touched one shape. Mark the rest of the hole, then Enter or Space." : "The marker touched nothing. Drag it over the shapes of one hole.");
+    }
+
+    /* Whether the stroke's latest segment (a to b, pixels) passes over a shape: within the
+       marker's reach of a pin or an edge, or the stroke point inside the outline. */
+    function markTouches(s, a, b, ll) {
+      var xy = s.xy;
+      if (!xy.length) return false;
+      if (xy.length === 1) return pointToSegmentPx(xy[0], a, b) <= MARK_PX;
+      var outline = xy.length >= 3 && !s.f.pin;
+      var ring = outline ? xy.concat([xy[0]]) : xy;
+      for (var i = 1; i < ring.length; i++) if (segmentsGapPx(ring[i - 1], ring[i], a, b) <= MARK_PX) return true;
+      return outline && shapes.insideLatLngRing(ll, s.f.points);
+    }
+
+    function pointToSegmentPx(p, a, b) {
+      var dx = b.x - a.x, dy = b.y - a.y, len = dx * dx + dy * dy;
+      var t = len ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len)) : 0;
+      return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+    }
+
+    function segmentsGapPx(p, q, a, b) {
+      function turn(u, v, w) { return (v.x - u.x) * (w.y - u.y) - (v.y - u.y) * (w.x - u.x); }
+      if (turn(p, q, a) * turn(p, q, b) < 0 && turn(a, b, p) * turn(a, b, q) < 0) return 0;
+      return Math.min(pointToSegmentPx(p, a, b), pointToSegmentPx(q, a, b), pointToSegmentPx(a, p, q), pointToSegmentPx(b, p, q));
+    }
+
     /* The quick "linked" confirmation: the shapes pulse and a tick shows over them, so it is
        plain the link was made and the next click starts a new one. */
     function flashLinked(members) {
@@ -3901,53 +3999,45 @@
       setTimeout(function () { try { mapObj.removeLayer(badge); } catch (e) {} }, 900);
     }
 
-    /* ---- fast pins: the Green - Fairway - Tee cycle ---- */
-
-    /* A double-click delivers two clicks first, then dblclick. The first click pins; the second
-       lands on the same spot a moment later and must not pin again. */
-    function fastClickEcho(latlng) {
-      var now = Date.now();
-      var at = mapObj.latLngToContainerPoint(latlng);
-      var echo = !!lastFastClick && now - lastFastClick.time < 500 && at.distanceTo(lastFastClick.at) < 8;
-      lastFastClick = { at: at, time: now };
-      return echo;
-    }
+    /* ---- fast pins: the hole in hand, and the Green - Fairway - Tee cycle ---- */
 
     /* A pin placed in Fast pins joins the hole in hand. */
     function fastPlaced(f) {
       if (fastPins() && f && fastHole.indexOf(f.id) < 0) fastHole.push(f.id);
     }
 
-    /* The double-click: the click before it has pinned; this moves the cycle on. From the tee it
-       links the hole's pins first and comes back round to Green. */
+    /* A pin placed in a Fast cycle moves the tool on - Green, Fairway, Tee, or the other way
+       round. Coming round never links: that is Space, so a second fairway or a bunker can still
+       be added to the hole first. Single has no cycle, so the tool stays. */
     function fastAdvance() {
-      if (!session.course || !canEdit()) return;
-      var at = FAST_CYCLE.indexOf(tool);
-      if (at < 0) return;
-      if (tool === "fairway" && draft.length) { setStatus("Click where the fairway ends first - double-click there to pin it and move on to the tee."); return; }
-      var next = FAST_CYCLE[(at + 1) % FAST_CYCLE.length];
-      var linked = at === FAST_CYCLE.length - 1 ? linkFastHole() : null;
+      var cycle = fastCycle();
+      var at = cycle ? cycle.indexOf(tool) : -1;
+      if (at < 0 || draft.length) return;
+      var next = cycle[(at + 1) % cycle.length];
       setTool(next);
-      if (!linked) { setStatus(kindLabel(tool) + " next."); return; }
-      if (linked.members.length < 2) { setStatus("Back to Green. Only one pin on that hole, so nothing to link."); return; }
-      var names = linked.members.map(function (f) { return kindLabel(f.kind).toLowerCase(); });
-      setStatus("Linked " + linked.members.length + " pins as one hole (" + names.join(", ") + "). Green next." +
-        (linked.stray ? " " + kindLabel(linked.stray.shape.kind) + " is " + Math.round(linked.stray.gapM) + "m from the rest - if it is another hole's, take it out with Link (C): click it, Enter." : ""), !!linked.stray);
+      var held = fastHole.filter(findFeature).length;
+      setStatus(kindLabel(cycle[at]) + " pinned. " + kindLabel(next) + " next" + (at === cycle.length - 1 && held > 1 ? " - or Space links this hole's " + held + " pins." : "."));
     }
 
-    /* The pins placed since the cycle last came back to Green become one hole. A pin already in
-       a link brings that link's id, so the hole grows rather than splitting. */
-    function linkFastHole() {
+    /* Space in Fast pins: the pins placed since the last Space become one hole, and a cycle goes
+       back to its first tool. A pin already in a link brings that link's id, so the hole grows
+       rather than splitting. */
+    function fastLink() {
       var members = fastHole.map(findFeature).filter(Boolean);
       fastHole = [];
-      if (members.length < 2) return { members: members, stray: null };
+      var cycle = fastCycle();
+      if (cycle && tool !== cycle[0]) setTool(cycle[0]);
+      if (members.length < 2) { updateHint(); setStatus(members.length ? "Only one pin on this hole, so nothing to link." : "No pins on this hole yet - Space links the pins placed since the last link."); return; }
       var id = (members.filter(function (f) { return f.link; })[0] || {}).link || newLinkId();
       members.forEach(function (f) { f.link = id; });
       var stray = strayLinkMember(members);
       drawFeatures();
       changed();
+      updateHint();
       flashLinked(members);
-      return { members: members, stray: stray };
+      var names = members.map(function (f) { return kindLabel(f.kind).toLowerCase(); });
+      setStatus("Linked " + members.length + " pins as one hole (" + names.join(", ") + ")." + (cycle ? " " + kindLabel(cycle[0]) + " next." : "") +
+        (stray ? " " + kindLabel(stray.shape.kind) + " is " + Math.round(stray.gapM) + "m from the rest - if it is another hole's, take it out with Link (C): click it, Enter." : ""), !!stray);
     }
 
     function clearLinkLayers() {
@@ -4452,10 +4542,12 @@
 
     function fastHint() {
       var held = fastHole.filter(findFeature).length;
-      var hole = held ? " · " + held + " pin" + (held === 1 ? "" : "s") + " on this hole so far" : "";
-      if (tool === "green") return "Click the middle of the green to pin it · double-click pins it and moves on to Fairway" + hole;
-      if (tool === "fairway") return draft.length ? "Click where the fairway ends · double-click there to pin it and move on to Tee · Esc cancels" : "Click where the fairway starts" + hole;
-      return "Click the tee to pin it · double-click pins it, links this hole's pins and goes back to Green" + hole;
+      var hole = held > 1 ? " · Space links this hole's " + held + " pins" : held ? " · 1 pin on this hole so far" : "";
+      var cycle = fastCycle();
+      var next = cycle && cycle.indexOf(tool) >= 0 ? " · then " + kindLabel(cycle[(cycle.indexOf(tool) + 1) % cycle.length]) : "";
+      if (tool === "fairway") return draft.length ? "Click where the fairway ends" + next + " · Esc cancels" : "Click where the fairway starts" + hole;
+      if (NO_PIN_KINDS.indexOf(tool) >= 0) return TOOL_TEXT.pins[tool] + hole;
+      return "Click the middle of the " + kindLabel(tool).toLowerCase() + " to pin it" + next + hole;
     }
 
     function updateHint() {
@@ -4463,10 +4555,10 @@
       var text = "";
       if (!session.course) text = "Pick a course to start";
       else if (scanning) text = "AI scan running - shapes are locked until it finishes";
-      else if (tool === "connect") text = linkPick.length > 1 ? linkPick.length + " picked · Enter or Space links them · Esc clears" : linkPick.length ? "Click the other shapes on this hole · Enter alone takes this one out of its link · Esc clears" : "Click the shapes that belong to one hole, then Enter or Space";
+      else if (tool === "connect") text = linkPick.length > 1 ? linkPick.length + " picked · Enter or Space links them · click or mark more · Esc clears" : linkPick.length ? "Click or mark the other shapes on this hole · Enter alone takes this one out of its link · Esc clears" : "Click the shapes that belong to one hole, or drag the marker over them, then Enter or Space";
       else if (tool === "order") text = orderHint();
       else if (tool === "number") text = "Click each hole's fairway (or any shape on it) to give it hole " + session.numberNext + (session.numberAuto ? " · Auto moves on to the next number" : "") + " · click a number to type it";
-      else if (fastPins() && FAST_CYCLE.indexOf(tool) >= 0) text = fastHint();
+      else if (fastPins() && TOOL_TEXT.pins[tool]) text = fastHint();
       else if (tool === "fairway" && session.mode === "pins") text = draft.length ? "Click where the fairway ends · Esc cancels" : "Click where the fairway starts";
       else if (lineTool() && session.mode === "shapes") {
         var thing = tool === "fairway" ? "fairway" : kindLabel(tool).toLowerCase();
@@ -5601,7 +5693,6 @@
     mapObj.on("dblclick", function (e) {
       if (e && e.originalEvent) L.DomEvent.stop(e.originalEvent);
       if (lineTool()) finishFairway();
-      if (fastPins()) fastAdvance();
     });
     mapObj.on("mousemove", function (e) { if (google) spotHover(e); });
     mapObj.on("mouseout", function () { if (google) spotHover(null); });
@@ -5653,6 +5744,8 @@
         return;
       }
       if (!session.course || !containerEl.isConnected) return;
+      /* Fast pins: Space (or Enter) links the hole in hand. */
+      if (fastPins() && canEdit() && (event.key === " " || event.key === "Spacebar" || event.key === "Enter")) { event.preventDefault(); fastLink(); return; }
       if ((event.key === "Delete" || event.key === "Backspace") && selectedId && canEdit() && !drag) {
         event.preventDefault();
         var f = findFeature(selectedId);
@@ -5664,7 +5757,9 @@
       var key = String(event.key || "").toLowerCase();
       if (key === "h") { fitCourse(); return; }
       if (key === "z") { zoomToSelected(); return; }
-      if (key === "s" || key === "p" || key === "q") { setMode(key === "p" ? "pins" : key === "q" ? "fast" : "shapes"); return; }
+      /* Q is Fast pins; Q again steps its order: Single, Green → Tee, Tee → Green. */
+      if (key === "q") { setMode("fast", fastPins() ? FAST_ORDERS[(FAST_ORDERS.indexOf(session.fast) + 1) % FAST_ORDERS.length] : ""); return; }
+      if (key === "s" || key === "p") { setMode(key === "p" ? "pins" : "shapes"); return; }
       if (key === "[" || key === "]") { stepWandSize(key === "]" ? 1 : -1); return; }
       if (key === "k" && collarGreen()) { addCollar(); return; }
       /* The tool's own key again steps through its methods: wand, draw round, line + wand. */
@@ -5753,6 +5848,7 @@
     el["mode-shapes"].addEventListener("click", function () { setMode("shapes"); });
     el["mode-pins"].addEventListener("click", function () { setMode("pins"); });
     el["mode-fast"].addEventListener("click", function () { setMode("fast"); });
+    FAST_ORDERS.forEach(function (o) { el["fast-" + o].addEventListener("click", function () { setMode("fast", o); }); });
     el["wand-smaller"].addEventListener("click", function () { stepWandSize(-1); });
     el["wand-bigger"].addEventListener("click", function () { stepWandSize(1); });
     el.merge.checked = session.mergeBunkers;
@@ -5808,7 +5904,7 @@
     el.apply.addEventListener("click", applyShapes);
     el.run.addEventListener("click", runMapper);
 
-    setMode(session.mode === "pins" && session.fastPins ? "fast" : session.mode);
+    setMode(session.mode === "pins" && session.fast ? "fast" : session.mode);
     renderWandSize();
 
     if (session.course) {
