@@ -388,6 +388,8 @@
     /* A cluster oval while it is stretched, and the box the tree finder looks in. */
     stretchOval: { color: "#2fbf5a", weight: 2, dashArray: "6 6", fillColor: "#1f8a3c", fillOpacity: 0.2, interactive: false },
     stretchBox: { color: "#ffffff", weight: 2, dashArray: "6 6", fill: false, interactive: false },
+    /* The Link marker's stroke: a highlighter, as wide as its reach. */
+    marker: { color: "#ffe14d", weight: 28, opacity: 0.35, lineCap: "round", lineJoin: "round", interactive: false },
     /* The box everything inside goes to the bin from (Shift-drag in Move). */
     stretchBin: { color: "#ff6a5c", weight: 2, dashArray: "6 6", fillColor: "#ff6a5c", fillOpacity: 0.12, interactive: false },
     draft: { color: "#ffb54c", weight: 3, dashArray: "6 6", interactive: false },
@@ -578,7 +580,7 @@
       "<strong>Fast</strong>, Pins with the hole kept in hand: every pin placed joins it, and <strong>Space</strong> links them as one hole. <em>Single</em>: a click pins the tool in hand and stays on it. <em>Green → Tee</em> and <em>Tee → Green</em>: a click pins and moves the tool on round the cycle - a fairway is its start, then its end - so a hole is four clicks and Space (Q again switches). Come back in Move to shape any pin that needs it. " +
       "Whatever you just placed can be dragged at once to adjust it. In <strong>Move</strong>, drag shapes and their points, and drop either on the <strong>bin</strong> to delete. A detailed outline shows only its key points - grab its edge anywhere and it bends there, the key points either side staying put. " +
       "<strong>Seams</strong> (on by default): a fairway, water, hazard, waste area or trees kept within a few metres of another - or just overlapping it - meets it in the middle, and that line is shared; drag it and both shapes follow, so it only changes which ground is which. " +
-      "<strong>Link</strong>: click the shapes that belong to one hole (click again to drop one), then <strong>Enter</strong> or <strong>Space</strong> links them and the next click starts a new link - or drag a box, and every shape it touches is linked as one hole (single trees aside). A link only says they are one hole - it never numbers them. One shape and Enter takes it out of its link; <strong>Esc</strong> clears the pick. " +
+      "<strong>Link</strong>: click the shapes that belong to one hole (click again to drop one), then <strong>Enter</strong> or <strong>Space</strong> links them and the next click starts a new link. Or drag the marker over them: every shape the stroke touches joins the pick, and Enter or Space links it the same way. A link only says they are one hole - it never numbers them. One shape and Enter takes it out of its link; <strong>Esc</strong> clears the pick. " +
       "<strong>Number</strong>: click each hole's fairway (or any shape on it) and the whole hole takes the <em>Next hole</em> number; with <em>Auto</em> on, the number then moves on, so 1 to 18 is eighteen clicks. Each hole shows one number on its fairway - click it with any tool to type a different one. A number on two holes shows red. " +
       "<strong>Play order</strong>: where the mapper gets a site's courses wrong, say them by hand. <strong>+ New play order</strong>, name it, then click its holes in the order they are played - an OSM hole line, or any shape of a hole you have linked (link a hole's tee and green first). Click a hole again to take it out. A hole can be in several play orders, so the same nines played in a different order are just another play order. With play orders on a ready overlay, the mapper publishes exactly those courses under those names. " +
       "<strong>Undo</strong> (the arrow at the top of the right-hand buttons, or Ctrl+Z / ⌘Z) takes back the last change, one at a time. " +
@@ -974,9 +976,9 @@
        waste area on Draw + grow is drawn round first, then grown. */
     function drawRoundKind() { return methodOf(tool) === "draw" || methodOf(tool) === "grow" ? tool : null; }
     /* What a press-and-drag on the map does with the tool in hand, or null when it pans. Under
-       Link, a drag is a box, and every shape it touches is linked. */
+       Link, a drag is the marker: every shape it touches joins the pick. */
     function pressGesture() {
-      if (tool === "connect") return "link";
+      if (tool === "connect") return "mark";
       if (drawRoundKind()) return "lasso";
       var m = methodOf(tool);
       return m === "oval" ? "oval" : m === "find" ? "box" : m === "colour" ? "colour" : null;
@@ -1016,7 +1018,7 @@
     /* Drawing round, stretching an oval or a box, and the colour wand are a press-and-drag, so
        the map does not pan under them; any other tool pans as usual. */
     function syncMapDragging() {
-      if (!mapObj || drag || lasso || stretch || colourPress) return;
+      if (!mapObj || drag || lasso || stretch || colourPress || mark) return;
       try { if (pressGesture()) mapObj.dragging.disable(); else mapObj.dragging.enable(); } catch (e) {}
     }
 
@@ -1026,10 +1028,11 @@
     function onMapPress(event) {
       /* In Move, Shift and a press on open map stretches the bin box. */
       var gesture = pressGesture() || (tool === "move" && event.shiftKey ? "bin" : null);
-      if (!gesture || event.button || drag || lasso || stretch || colourPress || !mapObj) return;
+      if (!gesture || event.button || drag || lasso || stretch || colourPress || mark || !mapObj) return;
       if (Date.now() - dragEndedAt < 300) return;
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
-      if (gesture !== "bin" && gesture !== "link" && full(gesture === "box" ? "tree" : tool)) return;
+      if (gesture === "mark") { beginMark(event); return; }
+      if (gesture !== "bin" && full(gesture === "box" ? "tree" : tool)) return;
       event.preventDefault();
       if (gesture === "colour") { settle(true); beginColourWand(event); return; }
       settle();
@@ -1121,8 +1124,6 @@
         binBox(a, b);
         return;
       }
-      /* Under Link a press that did not stretch is a click, which the map ignores. */
-      if (done.mode === "link") { if (wide && tall) linkBox(a, b); return; }
       if (done.mode === "oval") {
         if (done.round ? !(wide || tall) : !(wide && tall)) { setStatus("Press and drag across the cluster of trees to stretch an oval over it.", true); return; }
         var ring = shapes.ellipseInBox(a, b, done.round);
@@ -3899,39 +3900,83 @@
         (numbers.length > 1 ? " They carry different hole numbers (" + numbers.sort(function (a, b) { return a - b; }).join(", ") + ") - fix the wrong one, or the mapper numbers them from the scorecard." : ""), numbers.length > 1);
     }
 
-    /* Link by box: every shape the box touches is linked as one hole, the same as picking each
-       and pressing Enter. Single trees are left out - a box over a hole would sweep up every
-       tree along it; click those in. */
-    function linkBox(a, b) {
-      var bounds = L.latLngBounds([a.lat, a.lng], [b.lat, b.lng]);
-      var touched = session.features.filter(function (f) { return f.kind !== "tree" && boxTouches(bounds, f); });
-      if (touched.length < 2) { setStatus(touched.length ? "The box touches only one shape - drag it over every shape on the hole." : "The box touches no shapes.", true); return; }
-      linkPick = touched.map(function (f) { return f.id; });
-      commitLink();
+    /* ---- the Link marker ----
+       Under Link a press-and-drag is a highlighter: every shape the stroke passes over joins
+       the pick, exactly as a click on it would, and Enter or Space links the pick. A stroke
+       can start on a shape - nothing drags under Link - and a press that never moves is left
+       to the shape's click, so clicking still picks one at a time. */
+    var MARK_PX = STYLE.marker.weight / 2;
+    var mark = null;
+
+    function beginMark(event) {
+      var at = mapObj.mouseEventToContainerPoint(event);
+      mark = {
+        x: event.clientX, y: event.clientY, moved: false, last: { x: at.x, y: at.y },
+        line: L.polyline([mapObj.containerPointToLatLng(at)], STYLE.marker).addTo(mapObj),
+        /* Every shape in screen pixels, once: the map does not move under the stroke. */
+        shapes: session.features.map(function (f) { return { f: f, xy: screenRing(f.points) }; })
+      };
+      try { mapObj.dragging.disable(); } catch (e) {}
+      document.addEventListener("pointermove", onMarkMove);
+      document.addEventListener("pointerup", onMarkEnd);
+      document.addEventListener("pointercancel", onMarkEnd);
     }
 
-    /* A shape touches the box when a point of it is inside, a corner of the box is inside the
-       shape, or an edge of the shape crosses an edge of the box (a fairway run through). */
-    function boxTouches(bounds, f) {
-      var pts = f.points || [];
-      if (pts.some(function (p) { return bounds.contains([p.lat, p.lng]); })) return true;
-      if (pts.length < 2) return false;
-      var sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
-      var corners = [{ lat: sw.lat, lng: sw.lng }, { lat: sw.lat, lng: ne.lng }, { lat: ne.lat, lng: ne.lng }, { lat: ne.lat, lng: sw.lng }];
-      if (pts.length >= 3 && !f.pin && corners.some(function (c) { return shapes.insideLatLngRing(c, pts); })) return true;
-      var ring = pts.length >= 3 && !f.pin ? pts.concat([pts[0]]) : pts;
-      for (var i = 1; i < ring.length; i++) {
-        for (var k = 0; k < 4; k++) {
-          if (segmentsCross(ring[i - 1], ring[i], corners[k], corners[(k + 1) % 4])) return true;
-        }
-      }
-      return false;
+    function onMarkMove(event) {
+      if (!mark || destroyed) return;
+      if (!mark.moved && Math.hypot(event.clientX - mark.x, event.clientY - mark.y) < 4) return;
+      mark.moved = true;
+      var at = mapObj.mouseEventToContainerPoint(event), ll = mapObj.containerPointToLatLng(at), now = { x: at.x, y: at.y };
+      mark.line.addLatLng(ll);
+      var added = false;
+      mark.shapes.forEach(function (s) {
+        if (linkPick.indexOf(s.f.id) >= 0 || !markTouches(s, mark.last, now, ll)) return;
+        linkPick.push(s.f.id);
+        added = true;
+      });
+      mark.last = now;
+      if (added) { drawFeatures(); updateHint(); }
     }
 
-    function segmentsCross(a, b, c, d) {
-      function turn(p, q, r) { return (q.lng - p.lng) * (r.lat - p.lat) - (q.lat - p.lat) * (r.lng - p.lng); }
-      var t1 = turn(a, b, c), t2 = turn(a, b, d), t3 = turn(c, d, a), t4 = turn(c, d, b);
-      return t1 * t2 < 0 && t3 * t4 < 0;
+    function onMarkEnd(event) {
+      document.removeEventListener("pointermove", onMarkMove);
+      document.removeEventListener("pointerup", onMarkEnd);
+      document.removeEventListener("pointercancel", onMarkEnd);
+      var done = mark;
+      mark = null;
+      if (destroyed || !done) return;
+      try { mapObj.removeLayer(done.line); } catch (e) {}
+      syncMapDragging();
+      /* A press that never moved is a click: the shape (or the map) under it has it. */
+      if (!done.moved) return;
+      dragEndedAt = Date.now();
+      if (event.type === "pointercancel") return;
+      updateHint();
+      setStatus(linkPick.length > 1 ? linkPick.length + " picked. Enter or Space links them, or mark or click more." : linkPick.length ? "The marker touched one shape. Mark the rest of the hole, then Enter or Space." : "The marker touched nothing. Drag it over the shapes of one hole.");
+    }
+
+    /* Whether the stroke's latest segment (a to b, pixels) passes over a shape: within the
+       marker's reach of a pin or an edge, or the stroke point inside the outline. */
+    function markTouches(s, a, b, ll) {
+      var xy = s.xy;
+      if (!xy.length) return false;
+      if (xy.length === 1) return pointToSegmentPx(xy[0], a, b) <= MARK_PX;
+      var outline = xy.length >= 3 && !s.f.pin;
+      var ring = outline ? xy.concat([xy[0]]) : xy;
+      for (var i = 1; i < ring.length; i++) if (segmentsGapPx(ring[i - 1], ring[i], a, b) <= MARK_PX) return true;
+      return outline && shapes.insideLatLngRing(ll, s.f.points);
+    }
+
+    function pointToSegmentPx(p, a, b) {
+      var dx = b.x - a.x, dy = b.y - a.y, len = dx * dx + dy * dy;
+      var t = len ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len)) : 0;
+      return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+    }
+
+    function segmentsGapPx(p, q, a, b) {
+      function turn(u, v, w) { return (v.x - u.x) * (w.y - u.y) - (v.y - u.y) * (w.x - u.x); }
+      if (turn(p, q, a) * turn(p, q, b) < 0 && turn(a, b, p) * turn(a, b, q) < 0) return 0;
+      return Math.min(pointToSegmentPx(p, a, b), pointToSegmentPx(q, a, b), pointToSegmentPx(a, p, q), pointToSegmentPx(b, p, q));
     }
 
     /* The quick "linked" confirmation: the shapes pulse and a tick shows over them, so it is
@@ -4510,7 +4555,7 @@
       var text = "";
       if (!session.course) text = "Pick a course to start";
       else if (scanning) text = "AI scan running - shapes are locked until it finishes";
-      else if (tool === "connect") text = linkPick.length > 1 ? linkPick.length + " picked · Enter or Space links them · Esc clears" : linkPick.length ? "Click the other shapes on this hole · Enter alone takes this one out of its link · Esc clears" : "Click the shapes that belong to one hole, then Enter or Space · or drag a box over them";
+      else if (tool === "connect") text = linkPick.length > 1 ? linkPick.length + " picked · Enter or Space links them · click or mark more · Esc clears" : linkPick.length ? "Click or mark the other shapes on this hole · Enter alone takes this one out of its link · Esc clears" : "Click the shapes that belong to one hole, or drag the marker over them, then Enter or Space";
       else if (tool === "order") text = orderHint();
       else if (tool === "number") text = "Click each hole's fairway (or any shape on it) to give it hole " + session.numberNext + (session.numberAuto ? " · Auto moves on to the next number" : "") + " · click a number to type it";
       else if (fastPins() && TOOL_TEXT.pins[tool]) text = fastHint();

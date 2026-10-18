@@ -199,13 +199,16 @@ test("fast pins: Single, Green → Tee and Tee → Green; a click pins (and a cy
   assert.ok(page.includes("fast: session.fast,") && page.includes('"mode", "fast", "fairwayWidth"'), "the order picked is remembered across a reload");
 });
 
-test("link: a box dragged under Link links every shape it touches", () => {
-  assert.ok(page.includes('if (tool === "connect") return "link";'), "a press-and-drag under Link is the link box");
-  assert.ok(page.includes('if (done.mode === "link") { if (wide && tall) linkBox(a, b); return; }'), "the box links on release; a plain click is left to the map");
-  const box = page.slice(page.indexOf("function linkBox("), page.indexOf("function segmentsCross("));
-  assert.ok(box.includes('f.kind !== "tree" && boxTouches(bounds, f)'), "single trees are not swept up by the box");
-  assert.ok(box.includes("linkPick = touched.map(function (f) { return f.id; });\n      commitLink();"), "the box goes through commitLink, so links merge and strays are asked about like a picked link");
-  assert.ok(box.includes("bounds.contains([p.lat, p.lng])") && box.includes("shapes.insideLatLngRing(c, pts)") && box.includes("segmentsCross(ring[i - 1], ring[i], corners[k], corners[(k + 1) % 4])"), "touching is a point inside, a corner inside the shape, or an edge crossed");
+test("link: the marker adds every shape its stroke touches to the pick, Space still links, and a click still picks one", () => {
+  assert.ok(page.includes('if (tool === "connect") return "mark";') && page.includes('if (gesture === "mark") { beginMark(event); return; }'), "a press-and-drag under Link is the marker");
+  const marker = page.slice(page.indexOf("/* ---- the Link marker ----"), page.indexOf("/* The quick \"linked\" confirmation"));
+  assert.ok(marker.includes("if (linkPick.indexOf(s.f.id) >= 0 || !markTouches(s, mark.last, now, ll)) return;\n        linkPick.push(s.f.id);"), "a shape the stroke touches joins the pick once");
+  assert.ok(!marker.includes("commitLink(") && !marker.includes(".link = "), "the marker never links on its own - that is Enter or Space");
+  assert.ok(marker.includes("if (!done.moved) return;\n      dragEndedAt = Date.now();"), "a press that never moved is a click, so clicking a shape still picks it");
+  assert.ok(page.includes('if (tool === "connect") { if (canEdit() && Date.now() - dragEndedAt >= 300) toggleLinkPick(f.id); return; }'), "the click pick is still there");
+  assert.ok(marker.includes("segmentsGapPx(ring[i - 1], ring[i], a, b) <= MARK_PX") && marker.includes("shapes.insideLatLngRing(ll, s.f.points)"), "touching is within the marker's reach of an edge or pin, or the stroke inside the outline");
+  assert.ok(!page.includes("linkBox(") && !page.includes("boxTouches("), "the link box is gone");
+  assert.ok(page.includes('if (event.key === "Enter" || event.key === " " || event.key === "Spacebar") { event.preventDefault(); commitLink(); return; }'), "Enter or Space links the pick");
 });
 
 test("bunker wand: its reach steps smaller and bigger, and overlapping bunkers merge into one", () => {
