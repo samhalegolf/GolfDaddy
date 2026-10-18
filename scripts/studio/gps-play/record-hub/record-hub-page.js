@@ -52,13 +52,14 @@
 
   function recordingType() {
     if (typeof MediaRecorder === "undefined") return null;
-    var types = ["video/mp4;codecs=avc1.640028", "video/mp4", "video/webm;codecs=vp9", "video/webm"];
+    var types = ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm"];
     for (var i = 0; i < types.length; i++) if (MediaRecorder.isTypeSupported(types[i])) return types[i];
     return "";
   }
 
-  /* One recording of one stream; stop() downloads it. */
-  function startRecording(stream, fileName) {
+  /* One recording of one stream; stop() downloads it and calls release (which ends the
+     capture behind the stream). */
+  function startRecording(stream, fileName, release) {
     var type = recordingType();
     var recorder = new MediaRecorder(stream, Object.assign({ videoBitsPerSecond: 16000000 }, type ? { mimeType: type } : {}));
     var chunks = [];
@@ -72,13 +73,15 @@
         a.download = fileName + (/mp4/.test(mime) ? ".mp4" : ".webm");
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(function () { URL.revokeObjectURL(a.href); }, 60000);
-        stream.getTracks().forEach(function (t) { t.stop(); });
+        release();
         resolve();
       };
     });
     recorder.start(1000);
     return { startedAt: Date.now(), stop: function () { if (recorder.state !== "inactive") recorder.stop(); return done; } };
   }
+
+  function stopStream(stream) { stream.getTracks().forEach(function (t) { t.stop(); }); }
 
   /* This tab, captured for one recording and cropped to its element (Region Capture). Chrome
      will not move a crop target while the track has clones, so every tab recording takes its
@@ -89,11 +92,48 @@
     return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 60 }, audio: false, preferCurrentTab: true, selfBrowserSurface: "include" })
       .then(function (stream) {
         var track = stream.getVideoTracks()[0];
-        if (!window.CropTarget || typeof track.cropTo !== "function") return { stream: stream, cropped: false };
-        return window.CropTarget.fromElement(element).then(function (target) { return track.cropTo(target); })
-          .then(function () { return { stream: stream, cropped: true }; })
-          .catch(function (error) { stream.getTracks().forEach(function (t) { t.stop(); }); throw error; });
+        var cropped = window.CropTarget && typeof track.cropTo === "function"
+          ? window.CropTarget.fromElement(element).then(function (target) { return track.cropTo(target); }).then(function () { return true; })
+          : Promise.resolve(false);
+        return cropped.then(function (isCropped) { return steadyStream(stream, isCropped); })
+          .catch(function (error) { stopStream(stream); throw error; });
       });
+  }
+
+  /* A tab capture is not fit to encode as it comes: its size is the crop's on-screen pixels
+     (often odd, which H.264 cannot take - the green, smeared frames) and it only sends a frame
+     when something on screen changes. So it is drawn into a canvas of one fixed, even size,
+     every frame, and the canvas is what is recorded. The long edge is held to 1920 px. */
+  var MAX_EDGE = 1920;
+  function steadyStream(source, cropped) {
+    var video = document.createElement("video");
+    video.muted = true; video.playsInline = true; video.srcObject = source;
+    return video.play().then(function () {
+      return new Promise(function (resolve, reject) {
+        var waited = 0;
+        (function ready() {
+          if (video.videoWidth && video.videoHeight) return resolve();
+          if ((waited += 50) > 5000) return reject(new Error("the tab capture sent no picture"));
+          setTimeout(ready, 50);
+        })();
+      });
+    }).then(function () {
+      var fit = Math.min(1, MAX_EDGE / Math.max(video.videoWidth, video.videoHeight));
+      var canvas = document.createElement("canvas");
+      canvas.width = Math.max(2, Math.round(video.videoWidth * fit / 2) * 2);
+      canvas.height = Math.max(2, Math.round(video.videoHeight * fit / 2) * 2);
+      var ctx = canvas.getContext("2d"), running = true;
+      (function draw() {
+        if (!running) return;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        window.requestAnimationFrame(draw);
+      })();
+      var stream = canvas.captureStream(60);
+      return {
+        stream: stream, cropped: cropped, source: source,
+        release: function () { running = false; stopStream(stream); stopStream(source); video.srcObject = null; }
+      };
+    });
   }
 
   // ---------------------------------------------------------------- the page
@@ -571,7 +611,8 @@
         var canvas = el["canvas-" + key];
         if (typeof canvas.captureStream !== "function") return Promise.reject(new Error("this browser cannot record a canvas"));
         watches[key].requestUpdate();
-        return Promise.resolve({ stream: canvas.captureStream(60), cropped: true });
+        var stream = canvas.captureStream(60);
+        return Promise.resolve({ stream: stream, cropped: true, source: stream, release: function () { stopStream(stream); } });
       }
       return croppedStream(key === "phone" ? el.phoneScreen : el.stage);
     }
@@ -584,16 +625,16 @@
       /* Every stream first, then every recorder in the same tick, so recordings started
          together start together. */
       var pending = keys.map(streamFor);
-      function release() { pending.forEach(function (p) { p.then(function (r) { r.stream.getTracks().forEach(function (t) { t.stop(); }); }, function () {}); }); }
+      function release() { pending.forEach(function (p) { p.then(function (r) { r.release(); }, function () {}); }); }
       Promise.all(pending).then(function (results) {
         if (destroyed) { release(); return; }
         var uncropped = false;
         results.forEach(function (r, i) {
           var key = keys[i];
-          recordings[key] = startRecording(r.stream, fileName(key));
+          recordings[key] = startRecording(r.stream, fileName(key), r.release);
           if (!r.cropped) uncropped = true;
           /* Chrome's own "Stop sharing" ends the capture: that is this recording stopping. */
-          r.stream.getVideoTracks()[0].addEventListener("ended", function () { if (recordings[key]) stopKeys([key]); });
+          r.source.getVideoTracks()[0].addEventListener("ended", function () { if (recordings[key]) stopKeys([key]); });
         });
         el.recStatus.textContent = uncropped ? "This browser cannot crop a tab recording, so the phone / together video is the whole tab." : "";
         renderRecording();

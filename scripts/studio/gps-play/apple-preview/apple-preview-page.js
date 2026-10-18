@@ -35,11 +35,12 @@
           return window.GDWatchPreviewPage.spriteImage("ios/App/ClarityCaddyWatch/Assets.xcassets/" + name + ".imageset/" + name + ".png", onLoad);
         };
       },
-      /* The hub's linked drag: another device's aim, held as the wrist holds its own - in
-         WatchPlayState, the framing kept still under it as it is under a finger. */
+      /* The hub's linked drag: another device's aim, held in WatchPlayState as the wrist holds
+         its own. No finger is on this glass, so the camera follows the shot (settle's framing)
+         rather than staying put. */
       mirrorAim: function (face, coordinate, phase) {
-        if (!face.camera) face.camera = face.restingCamera();
         face.moveTarget(coordinate);
+        face.camera = face.restingCamera();
         face.aiming = face.dragActive = phase !== "end";
       },
       /* A lock lands on the map; the unlock (WatchSessionManager.unlock -> face.unlock) has
