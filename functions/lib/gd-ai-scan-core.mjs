@@ -62,6 +62,7 @@ export const AI_SCAN_OUTPUT_SCHEMA = {
           },
           hole: { type: "integer" },
           replaces: { type: "string" },
+          seen: { type: "string" },
           confidence: { type: "number" }
         }
       }
@@ -107,11 +108,12 @@ export const AI_SCAN_TASKS = [
     label: "Pin holes from the course map",
     output: "pins",
     needsCourseMap: true,
-    when: "Needs a course map saved on this course. The AI reads the routing off the club's map, matches each hole to the ground with the scorecard, and pins its green, tee and fairway WITH the hole number. Pins only: you shape them with the wands.",
+    verify: true,
+    when: "Needs a course map saved on this course. The AI reads the routing off the club's map to know where to look, finds each hole's actual green and tee in the picture, and pins green, tee and fairway WITH the hole number. Every green and tee pin is then checked in close-up before it is kept. Pins only: you shape them with the wands.",
     defaultPrompt:
-      "Image 2 is the club's course map and the scorecard lists every hole. Use them together to work out which hole is which in image 1, then mark every green, tee and fairway you can see with a pin that carries its hole number. A green or a tee is ONE point at its centre; a fairway is TWO points, where the mown corridor starts (nearest the tee) and where it ends (nearest the green). Pins only, no outlines - the operator shapes them afterwards.\n\n" +
-      "Work in this order. 1. ORIENT. Match image 2 to image 1 by the things both show: the boundary of the property, the clubhouse and car park, roads, water, tree lines, and the direction each hole runs. Image 2 is a drawing, not to scale and not north-up, so match shapes and neighbours, never distances. Say in notes how you lined them up. 2. GREENS. Find every putting green in image 1 by appearance: " + GREEN_LOOKS + ". Give each the hole number the course map shows for that green. 3. FAIRWAYS. For each hole that is not a par 3, pin its corridor: " + FAIRWAY_LOOKS + ", running the way the map draws that hole. 4. TEES. Pin the main tee group of each hole: " + TEE_LOOKS + ", where the map starts that hole. 5. CHECK against the scorecard: a par 3 is a short hole with no fairway, a par 5 a long one; the lengths tell you which of two neighbouring corridors is which. Two pins of the same kind must never share a hole number.\n\n" +
-      "Only pin what you can SEE in image 1. Never place a green, tee or fairway because the map says one should be there - if the map shows a hole you cannot find in the picture, leave it out and name it in notes. Anything already pinned or drawn on the picture is a sample: match its appearance, take its hole number as settled, and do not return it again. Holes cut off at the edge of image 1 still get their pins. If you cannot tell which hole a feature belongs to, pin it without a number rather than guess. Skip practice greens, the driving range and anything you cannot see clearly."
+      "Image 2 is the club's course map and the scorecard lists every hole. The map tells you WHERE TO LOOK in image 1 for each hole, never where to put a pin: a pin goes on a green, tee or fairway you can actually see. Mark every one you find with a pin that carries its hole number. A green or a tee is ONE point at its centre; a fairway is TWO points, where the mown corridor starts (nearest the tee) and where it ends (nearest the green). Pins only, no outlines - the operator shapes them afterwards.\n\n" +
+      "Work in this order. 1. ORIENT. Match image 2 to image 1 by the things both show: the boundary of the property, the clubhouse and car park, roads, water, tree lines, and the direction each hole runs. Image 2 is a drawing, not to scale and not north-up, so match shapes and neighbours, never distances. Say in notes how you lined them up. 2. SWEEP, hole by hole. For each hole on the map, work out roughly where it sits in image 1 and which way it runs, then look at that part of image 1 for the real thing: the green is " + GREEN_LOOKS + "; the tee is " + TEE_LOOKS + "; the fairway is " + FAIRWAY_LOOKS + ". The tee and green you pin must sit at the two ends of a mown strip running the way the map draws the hole - if the tee-to-green direction you have disagrees with the map by more than about 30 degrees, you have the wrong shapes. 3. GROUND CHECK every pin before you return it: look at the pixels under it. Mown turf, good. Water, a roof, a road, a car park, bare earth, tree canopy or scrub - wrong, so move along the hole until you find the real shape, or leave that pin out. Write what you see under each pin in \"seen\" in a few words. 4. SCORECARD. A par 3 is a short hole with no fairway, a par 5 a long one; the lengths tell you which of two neighbouring corridors is which. Two pins of the same kind must never share a hole number.\n\n" +
+      "Never place a green, tee or fairway because the map says one should be there - if the map shows a hole you cannot find in the picture, leave it out and name it in notes. Anything already pinned or drawn on the picture is a sample: match its appearance, take its hole number as settled, and do not return it again. Holes cut off at the edge of image 1 still get their pins. If you cannot tell which hole a feature belongs to, pin it without a number rather than guess. Skip practice greens, the driving range and anything you cannot see clearly."
   },
   {
     id: "trace",
@@ -192,6 +194,7 @@ export function resolveTask(raw, shapes, stored) {
     output,
     newShapes: base.newShapes !== false,
     needsCourseMap: base.needsCourseMap === true,
+    verify: base.verify === true,
     prompt: String(words || "").trim().slice(0, AI_SCAN_PROMPT_MAX)
   };
 }
@@ -229,7 +232,7 @@ export function scorecardLines(evidence) {
 function outputRules(task) {
   const common = " Set \"confidence\" between 0 and 1 for each feature: how sure you are that it IS what you say, judged from the picture. Put anything the operator should know in \"notes\" - holes cut off at the edge, things you expected but could not see, ground you were unsure about.";
   if (task.output === "pins") {
-    return "OUTPUT RULES. Answer with pins, not outlines. Each feature's \"points\" is ONE [x, y] integer pixel in image 1 for a green, tee or bunker (its centre), or TWO for a fairway (where it starts, nearest the tee, then where it ends, nearest the green). Read every coordinate off the grid. Never set \"replaces\": a pin never replaces anything. " + (task.needsCourseMap ? "Give \"hole\" to every pin whose hole you can read off the course map with confidence; leave it out rather than guess." : "Give \"hole\" only when the task above says you may and you are confident of it.") + common;
+    return "OUTPUT RULES. Answer with pins, not outlines. Each feature's \"points\" is ONE [x, y] integer pixel in image 1 for a green, tee or bunker (its centre), or TWO for a fairway (where it starts, nearest the tee, then where it ends, nearest the green). Read every coordinate off the grid. Never set \"replaces\": a pin never replaces anything. " + (task.needsCourseMap ? "Give \"hole\" to every pin whose hole you can read off the course map with confidence; leave it out rather than guess. " : "Give \"hole\" only when the task above says you may and you are confident of it. ") + "Put what the ground under each pin looks like in \"seen\", a few words." + common;
   }
   return "OUTPUT RULES. Polygons are lists of [x, y] integer pixel corners in image 1, 4 to " + AI_SCAN_MAX_POINTS + " points, in order around the shape, entirely inside the image. A shape that corrects or completes a recorded one sets \"replaces\" to that shape's label. Omit \"hole\" unless a number is painted on the ground." + common;
 }
@@ -361,6 +364,7 @@ export function parseScanAnswer(answer, shapes, task) {
     const feature = {
       id: target ? target.id : kind + "-ai-" + (i + 1),
       kind,
+      seen: String(f && f.seen || "").slice(0, 160),
       points: (f && Array.isArray(f.points) ? f.points : []).slice(0, maxPoints),
       hole: target ? (target.hole || null) : hole != null && Number.isInteger(hole) && hole >= 1 && hole <= 36 ? hole : null,
       confidence: confidence == null ? null : Math.max(0, Math.min(1, confidence))

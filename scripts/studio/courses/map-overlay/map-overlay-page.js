@@ -5134,6 +5134,11 @@
       if (scan.task && scan.task.output === "pins") {
         var pinBits = [task + (scan.added || 0) + " pin" + (scan.added === 1 ? "" : "s") + " dropped - shape them with the wands, or drag any that landed off" +
           " · overlay now " + (scan.overlayTotal || 0) + " (" + (s.pins || 0) + " pins)"];
+        if (scan.verified && scan.verified.checked) {
+          var v = scan.verified;
+          pinBits.push(v.error ? "close-up check of " + v.checked + " pins failed (" + v.error + ") - pins kept as first placed"
+            : "close-up check of " + v.checked + " green/tee pins: " + (v.confirmed || 0) + " confirmed, " + (v.moved || 0) + " moved onto the shape, " + (v.missing || 0) + " dropped" + (v.unanswered ? ", " + v.unanswered + " unanswered" : ""));
+        }
         if (scan.dropped && scan.dropped.length) pinBits.push(scan.dropped.length + " dropped: " + scan.dropped.map(function (d) { return d.reason; }).join("; "));
         if (scan.usage) pinBits.push((scan.usage.inputTokens || 0) + " in / " + (scan.usage.outputTokens || 0) + " out tokens");
         if (scan.notes) pinBits.push("model notes: " + scan.notes);

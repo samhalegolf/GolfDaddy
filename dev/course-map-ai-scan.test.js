@@ -57,7 +57,8 @@ test("the background half trusts only the course id and clears the picture whate
   assert.ok(background.includes("saveOverlay({ courseId, features: converted.features, savedBy: request.requestedBy, append: true })"), "the result is saved onto what is there, through the store, as the person who asked");
   assert.ok(background.includes("parseScanAnswer(answer.text, shapes, task)"), "the answer is read against the recorded shapes and the task, so a correction lands on the one it replaces and a pin task yields pins");
   /* finish() writes base + outcome; base carries no image, and the outcome never does. */
-  const finish = background.slice(background.indexOf("const finish = async outcome =>"), background.indexOf("try {"));
+  const finishAt = background.indexOf("const finish = async outcome =>");
+  const finish = background.slice(finishAt, background.indexOf("try {", finishAt));
   assert.ok(finish.includes("Object.assign({}, base, outcome, { finishedAt"), "the outcome row is built from base + outcome");
   const baseLine = background.slice(background.indexOf("const base = {"), background.indexOf("};", background.indexOf("const base = {")));
   assert.ok(!baseLine.includes("image"), "base must not carry the picture, or every finished scan keeps a megabyte of JPEG on the row");
@@ -129,6 +130,10 @@ test("the task rides on the request: the sync half parks it, the background half
   assert.ok(background.includes("resolveTask(requested, shapes,"), "the background half resolves the task against what is in view");
   assert.ok(background.includes("if (task.needsCourseMap && !courseMap) {") && background.includes("needs a course map and this course has none"), "a course-map task fails before the model runs when no map is saved");
   assert.ok(page.includes("entry.needsCourseMap && !session.courseMap"), "Studio warns when the picked task needs a course map the course lacks");
+  assert.ok(background.includes("if (task.verify && task.output === \"pins\") {") && background.includes("await verifyPins("), "a verified pin task runs the close-up pass before converting or saving");
+  assert.ok(background.includes("return { features, dropped: [], verified: { checked: windows.length, error: \"close-up pass failed: \""), "a failed close-up pass keeps the first pass's pins, never fails the scan");
+  assert.ok(background.includes('await import("sharp")') === false && read("functions/lib/gd-ai-scan-crops.mjs").includes('await import("sharp")'), "sharp is loaded on demand in the cropper, as the mapper worker loads it");
+  assert.ok(page.includes("close-up check of "), "Studio reports what the close-up pass did");
   assert.ok(background.includes("await storedTask(requested ? requested.id : null, shapes)"), "a request without words runs the operator's saved words for the task");
   assert.ok(background.includes("base.task = { id: task.id, label: task.label, output: task.output, prompt: task.prompt }"), "what ran - words included - goes on the row");
   assert.ok(background.includes("parseScanAnswer(answer.text, shapes, task)"), "the answer is read as the task says - pins or outlines");
@@ -165,7 +170,7 @@ test("Studio's AI help panel: tasks from the server, words editable and saved, t
 });
 
 test("the new tests run in CI", () => {
-  ["dev/ai-scan-core.test.js", "dev/course-map-ai-scan.test.js", "dev/map-source-providers.test.mjs"].forEach(t => {
+  ["dev/ai-scan-core.test.js", "dev/ai-scan-verify-core.test.js", "dev/course-map-ai-scan.test.js", "dev/map-source-providers.test.mjs"].forEach(t => {
     assert.ok(workflow.includes("node " + t), t + " is not in structural-smoke.yml");
   });
 });

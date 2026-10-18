@@ -22,6 +22,7 @@ function entry(task, stored) {
     output: row && AI_SCAN_OUTPUTS.includes(row.output) ? row.output : task.output,
     newShapes: task.newShapes !== false,
     needsCourseMap: task.needsCourseMap === true,
+    verify: task.verify === true,
     stored: !!row,
     updatedAt: row ? row.updated_at : null,
     updatedBy: row ? row.updated_by : null,

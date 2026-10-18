@@ -16,6 +16,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { imageGeoreference, aiShapesToOverlay } from "./lib/gd-overlay-georef-core.mjs";
 import { buildScanPrompt, parseScanAnswer, scanJob, resolveTask, AI_SCAN_OUTPUT_SCHEMA } from "./lib/gd-ai-scan-core.mjs";
 import { storedTask } from "./lib/gd-ai-scan-prompts-store.mjs";
+import { verifyTargets, cropWindows, buildVerifyPrompt, parseVerifyAnswer, applyVerification, VERIFY_OUTPUT_SCHEMA } from "./lib/gd-ai-scan-verify-core.mjs";
+import { renderCrops } from "./lib/gd-ai-scan-crops.mjs";
 import { scorecardCourseKey } from "./lib/gd-scorecard-resolve.mjs";
 import { hasSupabase, slug, loadCourse, loadOverlay, loadScorecard, saveOverlay, writeAiScan, json } from "./lib/gd-map-overlay-store.mjs";
 
@@ -54,12 +56,68 @@ async function callModel({ image, prompt, courseMap }) {
     model: message.model,
     stopReason: message.stop_reason,
     stopDetails: message.stop_details || null,
-    usage: message.usage ? {
-      inputTokens: message.usage.input_tokens,
-      outputTokens: message.usage.output_tokens,
-      cacheReadInputTokens: message.usage.cache_read_input_tokens || 0
-    } : null
+    usage: usageOf(message)
   };
+}
+
+function usageOf(message) {
+  return message.usage ? {
+    inputTokens: message.usage.input_tokens,
+    outputTokens: message.usage.output_tokens,
+    cacheReadInputTokens: message.usage.cache_read_input_tokens || 0
+  } : null;
+}
+
+function addUsage(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  return { inputTokens: (a.inputTokens || 0) + (b.inputTokens || 0), outputTokens: (a.outputTokens || 0) + (b.outputTokens || 0), cacheReadInputTokens: (a.cacheReadInputTokens || 0) + (b.cacheReadInputTokens || 0) };
+}
+
+/* The second call of a verified pin task: the close-ups and the question, same model. */
+async function callVerify({ crops, prompt }) {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const stream = client.beta.messages.stream({
+    model: scanModel(),
+    max_tokens: 16000,
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    output_config: { effort: "high", format: { type: "json_schema", schema: VERIFY_OUTPUT_SCHEMA } },
+    messages: [{
+      role: "user",
+      content: crops.flatMap(c => [
+        { type: "text", text: "Crop " + c.crop + ":" },
+        { type: "image", source: { type: "base64", media_type: c.mediaType, data: c.data } }
+      ]).concat([{ type: "text", text: prompt }])
+    }]
+  });
+  const message = await stream.finalMessage();
+  const text = (message.content || []).filter(block => block.type === "text").map(block => block.text).join("");
+  return { text, model: message.model, stopReason: message.stop_reason, usage: usageOf(message) };
+}
+
+/* The close-up pass over a pin answer: every green and tee pin is cut out of the picture,
+   shown back to the model at a readable scale and confirmed, moved onto the shape it can see,
+   or dropped. A fault in this pass (a crop that will not cut, a declined call) keeps the first
+   pass's pins and says so on the outcome - a check that fails must never throw away a scan. */
+async function verifyPins({ image, georef, course, features }) {
+  const targets = verifyTargets(features);
+  if (!targets.length) return { features, dropped: [], verified: { checked: 0, skipped: "no green or tee pins to check" }, usage: null };
+  const windows = cropWindows(targets, georef);
+  try {
+    const crops = await renderCrops(image, windows);
+    const prompt = buildVerifyPrompt({ course, windows });
+    const answer = await callVerify({ crops, prompt });
+    if (answer.stopReason === "refusal" || answer.stopReason === "max_tokens") {
+      return { features, dropped: [], verified: { checked: windows.length, error: "close-up pass stopped: " + answer.stopReason }, usage: answer.usage };
+    }
+    const parsed = parseVerifyAnswer(answer.text, windows);
+    if (parsed.error) return { features, dropped: [], verified: { checked: windows.length, error: "close-up pass: " + parsed.error }, usage: answer.usage };
+    const applied = applyVerification(features, parsed, windows);
+    return { features: applied.features, dropped: applied.dropped, verified: Object.assign({}, applied.summary, { notes: parsed.notes, model: answer.model }), usage: answer.usage };
+  } catch (error) {
+    return { features, dropped: [], verified: { checked: windows.length, error: "close-up pass failed: " + String(error && error.message || error).slice(0, 300) }, usage: null };
+  }
 }
 
 /* The recorded shapes Studio drew on the picture, with where they are in it: the anchors name
@@ -128,10 +186,21 @@ async function runScan(courseId) {
     const parsed = parseScanAnswer(answer.text, shapes, task);
     if (parsed.error) return await finish({ status: "failed", job, error: parsed.error, model: answer.model, usage: answer.usage, raw: answer.text.slice(0, 2000) });
 
+    /* A verified task looks at every green and tee pin again in close-up before anything is
+       converted or saved. */
+    let verified = null;
+    if (task.verify && task.output === "pins") {
+      const check = await verifyPins({ image: request.image, georef, course, features: parsed.features });
+      parsed.features = check.features;
+      parsed.dropped = parsed.dropped.concat(check.dropped);
+      verified = check.verified;
+      answer.usage = addUsage(answer.usage, check.usage);
+    }
+
     const converted = aiShapesToOverlay(parsed.features, georef);
     if (converted.error) return await finish({ status: "failed", error: converted.error, model: answer.model, usage: answer.usage });
-    const confidence = {};
-    parsed.features.forEach(f => { if (f.confidence != null) confidence[f.id] = f.confidence; });
+    const confidence = {}, seen = {}, moved = {};
+    parsed.features.forEach(f => { if (f.confidence != null) confidence[f.id] = f.confidence; if (f.seen) seen[f.id] = f.seen; if (f.moved) moved[f.id] = true; });
 
     /* A dry run stops here: the shapes go on the outcome for Studio to draw over the picture
        they came from, and the overlay is not touched. */
@@ -146,6 +215,7 @@ async function runScan(courseId) {
         status: "done", job, replaced: 0, added: 0,
         model: answer.model, usage: answer.usage,
         found: parsed.features.length, saved: 0,
+        verified,
         summary: counts, courseMapUsed: !!courseMap, overlayTotal: saved.features.length,
         shapes: converted.features,
         pixels: converted.pixels,
@@ -172,9 +242,10 @@ async function runScan(courseId) {
       found: parsed.features.length,
       saved: converted.features.length,
       summary: savedResult ? savedResult.summary : { features: 0, fairways: 0, holeLines: 0, greens: 0, tees: 0, numbered: 0 },
+      verified,
       courseMapUsed: !!courseMap,
       overlayTotal: savedResult ? savedResult.overlay.features.length : saved.features.length,
-      features: converted.features.map(f => ({ id: f.id, kind: f.kind, confidence: confidence[f.id] != null ? confidence[f.id] : null })),
+      features: converted.features.map(f => ({ id: f.id, kind: f.kind, confidence: confidence[f.id] != null ? confidence[f.id] : null, seen: seen[f.id] || undefined, moved: moved[f.id] || undefined })),
       pixels: converted.pixels,
       dropped: parsed.dropped.concat(converted.dropped),
       notes: parsed.notes,
