@@ -378,6 +378,14 @@
     .gdAdminCourseTable tr.gdAdminCourseDropTarget td{background:rgba(31,211,109,.16);box-shadow:inset 0 0 0 1px rgba(124,255,179,.45)}
     .gdAdminCourseScorecardDrop{display:grid;gap:7px;padding:10px 11px;border:1px dashed rgba(255,255,255,.22);border-radius:12px;background:rgba(0,0,0,.16);cursor:default}
     .gdAdminCourseScorecardDrop.gdAdminCourseDropTarget{border-color:#7cffb3;background:rgba(31,211,109,.12)}
+    /* Sortable headers, and the Drop cell's two targets on every row. */
+    .gdAdminCourseTable th.gdAdminCourseSortable{cursor:pointer;user-select:none}
+    .gdAdminCourseTable th.gdAdminCourseSortable:hover,.gdAdminCourseTable th.isSorted{color:#fff}
+    .gdAdminCourseSortArrow{margin-left:4px;color:#7cffb3}
+    .gdAdminCourseTable td.gdAdminCourseRowDropCell{cursor:default}
+    .gdAdminCourseRowDrop{display:inline-block;margin-right:5px;padding:3px 9px;border:1px dashed rgba(255,255,255,.28);border-radius:999px;color:rgba(255,255,255,.7);font-size:11px;font-weight:700;cursor:pointer}
+    .gdAdminCourseRowDrop:hover{border-color:rgba(124,255,179,.6);color:#fff}
+    .gdAdminCourseRowDrop.gdAdminCourseDropTarget{border-style:solid;border-color:#7cffb3;color:#fff;background:rgba(31,211,109,.18)}
     .gdAdminCourseScorecardDropHead{display:grid;gap:3px}
     .gdAdminCourseScorecardDropHead strong{color:#fff;font:950 11px/1.25 Inter,system-ui,sans-serif}
     .gdAdminCourseScorecardDropHead span{color:rgba(255,255,255,.56);font:850 10px/1.35 Inter,system-ui,sans-serif;white-space:normal}

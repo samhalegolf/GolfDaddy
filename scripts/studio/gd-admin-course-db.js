@@ -4715,6 +4715,101 @@ function gdAdminCourseDbSetHTML(el,html){
   el.__gdLastHTML=html;
   el.innerHTML=html;
 }
+/* ---------- the list's columns ----------
+ *
+ * One entry per column: its header, what it sorts on and how its cell draws. The header,
+ * the rows and the expanded row's colspan are all read off this one list, so a column added
+ * here cannot leave the others a cell short. Sort values: text sorts A-Z first, numbers and
+ * dates newest/biggest first; a missing value always sinks to the bottom either way. */
+function gdAdminCourseDbCountry(item){
+  const course=item&&item.course||{};
+  return String(course.country||course.countryCode||"");
+}
+function gdAdminCourseDbObjectTotal(item){
+  const totals=item&&item.objectTotals||{};
+  return Object.keys(totals).reduce((sum,key)=>sum+(Number(totals[key])||0),0);
+}
+function gdAdminCourseDbColumns(scope){
+  const muted=(title)=>`<span class="gdAdminCourseMuted" title="${gdEscapeHTML(title)}">—</span>`;
+  const columns=[
+    {key:"name",label:"Course",type:"text",value:item=>item.name,cell:(item,open)=>`<td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${open?"▾":"▸"}</span> ${gdEscapeHTML(item.name)}</td>`},
+    {key:"country",label:"Country",type:"text",value:gdAdminCourseDbCountry,cell:item=>{const country=gdAdminCourseDbCountry(item);return `<td>${country?gdEscapeHTML(country):muted("No country on this course yet")}</td>`;}}
+  ];
+  if(scope)columns.push({key:"requested",label:"Requested",type:"date",value:item=>(scope.courses[item.id]||{}).requestedAt,cell:item=>`<td>${gdAdminCourseDbRequestedCell(scope.courses[item.id]||{})}</td>`});
+  columns.push(
+    {key:"version",label:"Version",type:"text",value:gdAdminCourseVersionLabel,cell:item=>{const version=gdAdminCourseVersionLabel(item);return `<td>${version?`<span class="gdAdminCourseVersion">${gdEscapeHTML(version)}</span>`:muted("No countable version yet - this course has not been rebuilt since versions existed")}</td>`;}},
+    /* The displayed status, not the stored one - see gdAdminCourseDbStatusFor. */
+    {key:"status",label:"Status",type:"text",value:gdAdminCourseDbStatusFor,cell:item=>{const status=gdAdminCourseDbStatusFor(item);return `<td><span class="gdAdminCourseStatusDot ${gdAdminCourseDbStatusTone(status,["published","ready","play_data_ready","mapped_geometry_ready"])}">${gdEscapeHTML(status)}</span>${gdAdminCourseDbDrawButton(item,status)}</td>`;}},
+    {key:"sync",label:"Sync",type:"text",value:item=>item.syncStatus,cell:item=>`<td><span class="gdAdminCourseStatusDot ${gdAdminCourseDbStatusTone(item.syncStatus,["synced","cloud","ready"])}">${gdEscapeHTML(item.syncStatus)}</span></td>`},
+    {key:"holes",label:"Holes",type:"number",value:item=>item.holeCount,cell:item=>`<td>${gdEscapeHTML(item.holeCount)}</td>`},
+    {key:"play",label:"Play",type:"number",value:item=>item.playReadyCount,cell:item=>`<td>${item.playReadyCount==null?muted("Open the row to load this course's geometry"):gdEscapeHTML(item.playReadyCount)+"/"+gdEscapeHTML(item.holeCount||0)}</td>`},
+    {key:"objects",label:"Map objects",type:"number",value:gdAdminCourseDbObjectTotal,cell:item=>`<td>${gdAdminCourseDbLayerSymbols(item.objectTotals)}</td>`},
+    {key:"visual",label:"Visual Engine",type:"text",value:item=>gdAdminCourseDbVisualState(item.id).label,cell:item=>{const visual=gdAdminCourseDbVisualState(item.id);return `<td><span class="gdAdminCourseStatusDot ${visual.tone}"${visual.title?` title="${gdEscapeHTML(visual.title)}"`:""}>${gdEscapeHTML(visual.label)}</span></td>`;}},
+    {key:"updated",label:"Updated",type:"date",value:item=>item.updatedAt,cell:item=>`<td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td>`},
+    {key:"drop",label:"Drop",cell:gdAdminCourseRowDropCell}
+  );
+  return columns;
+}
+/* The operator's chosen order, kept per browser so the list opens the way it was left.
+   null = the list's natural order: newest request first on a scoped list, newest update
+   otherwise. */
+const GD_ADMIN_COURSE_DB_SORT_KEY="gd_admin_course_db_sort_v1";
+let gdAdminCourseDbSort=(function(){
+  try{const saved=JSON.parse(localStorage.getItem(GD_ADMIN_COURSE_DB_SORT_KEY)||"null");return saved&&saved.key?saved:null;}catch(error){return null;}
+})();
+function gdAdminCourseDbActiveSort(columns){
+  const sort=gdAdminCourseDbSort;
+  if(sort&&columns.some(col=>col.key===sort.key&&col.type))return sort;
+  return {key:columns.some(col=>col.key==="requested")?"requested":"updated",dir:"desc"};
+}
+function gdAdminCourseDbSortBy(key){
+  const columns=gdAdminCourseDbColumns(gdAdminCourseDbScope);
+  const col=columns.find(c=>c.key===key);
+  if(!col||!col.type)return false;
+  const current=gdAdminCourseDbActiveSort(columns);
+  const dir=current.key===key?(current.dir==="asc"?"desc":"asc"):(col.type==="text"?"asc":"desc");
+  gdAdminCourseDbSort={key:key,dir:dir};
+  try{localStorage.setItem(GD_ADMIN_COURSE_DB_SORT_KEY,JSON.stringify(gdAdminCourseDbSort));}catch(error){}
+  gdRenderAdminCourseDatabase();
+  return false;
+}
+function gdAdminCourseDbSortRows(rows,columns){
+  const sort=gdAdminCourseDbActiveSort(columns);
+  const col=columns.find(c=>c.key===sort.key);
+  const sign=sort.dir==="asc"?1:-1;
+  const valueOf=item=>{
+    const raw=col.value(item);
+    if(col.type==="number")return raw==null||raw===""||!Number.isFinite(Number(raw))?null:Number(raw);
+    if(col.type==="date"){const at=Date.parse(raw||"");return Number.isFinite(at)?at:null;}
+    const text=String(raw==null?"":raw).trim();
+    return text?text:null;
+  };
+  return rows.map(item=>({item:item,value:valueOf(item)})).sort((a,b)=>{
+    if(a.value==null||b.value==null)return a.value==null&&b.value==null?0:a.value==null?1:-1;
+    const diff=col.type==="text"?a.value.localeCompare(b.value,undefined,{numeric:true,sensitivity:"base"}):a.value-b.value;
+    return diff*sign||a.item.name.localeCompare(b.item.name);
+  }).map(entry=>entry.item);
+}
+function gdAdminCourseDbHeaderMarkup(columns){
+  const sort=gdAdminCourseDbActiveSort(columns);
+  return columns.map(col=>{
+    if(!col.type)return `<th>${gdEscapeHTML(col.label)}</th>`;
+    const on=col.key===sort.key;
+    const arrow=on?(sort.dir==="asc"?"▲":"▼"):"";
+    return `<th class="gdAdminCourseSortable${on?" isSorted":""}" onclick="return gdAdminCourseDbSortBy(${gdAdminJsArg(col.key)})" title="Sort by ${gdEscapeHTML(col.label.toLowerCase())}">${gdEscapeHTML(col.label)}<span class="gdAdminCourseSortArrow">${arrow}</span></th>`;
+  }).join("");
+}
+/* The Drop cell: a scorecard target and a course map target on every row, open or closed.
+   Each takes a dropped file or opens a file picker on click. Dropping anywhere else on the
+   row still goes to the scorecard, as it always has. */
+function gdAdminCourseRowDropCell(item){
+  const id=gdEscapeHTML(item.id);
+  const target=(kind,label,accept,title)=>`<label class="gdAdminCourseRowDrop" data-course-id="${id}" data-kind="${kind}" title="${gdEscapeHTML(title)}">${label}<input type="file" accept="${accept}" data-course-id="${id}" data-kind="${kind}" hidden></label>`;
+  return `<td class="gdAdminCourseRowDropCell" onclick="event.stopPropagation()">`
+    +target("scorecard","Scorecard",".csv,.tsv,.txt,.html,.htm,.json,image/*,text/*","Drop a scorecard here or click to choose one - image (read by OCR), HTML, CSV, tab-separated text or JSON")
+    +target("map","Course map","image/*","Drop the club's course map here or click to choose one - the AI scan reads it alongside the aerial")
+    +`</td>`;
+}
 let gdAdminCourseDbExpanded="";
 /* Click a row to open it in place. The full tabbed panel is still one click
    further in - this answers "what happened to this course" without leaving the
@@ -4742,7 +4837,7 @@ function gdAdminCourseDbDrawButton(item,status){
 function gdAdminCourseDbDiagRow(label,value){
   return `<div class="gdAdminCourseDiagRow"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value==null||value===""?"—":String(value))}</strong></div>`;
 }
-function gdAdminCourseDbExpandedRow(item){
+function gdAdminCourseDbExpandedRow(item,colspan){
   const status=gdAdminCourseDbStatusFor(item);
   const why=gdAdminCourseDbStatusWhy(item);
   const job=gdAdminCourseDbJobState(item.id);
@@ -4773,10 +4868,9 @@ function gdAdminCourseDbExpandedRow(item){
     gdAdminCourseDbDiagRow("Map version",gdAdminCourseVersionLabel(item)||"not versioned yet"),
     gdAdminCourseDbDiagRow("Updated",gdCoursePlayDebugTime(item.updatedAt)||"unknown")
   ].join("");
-  /* colspan tracks the header above - 9 since the Map objects column joined it, one more
-     when a scope adds the Requested column. A stale number here silently narrows the
-     expanded panel rather than erroring. */
-  return `<tr class="gdAdminCourseDiagRowHost"><td colspan="${gdAdminCourseDbScope?10:9}"><div class="gdAdminCourseDiag">${banner}${progressBar}<div class="gdAdminCourseDiagGrid">${diag}</div>${gdAdminCourseScorecardDropMarkup(item)}${gdAdminCourseDbActionRail(item)}</div></td></tr>`;
+  /* colspan is the header's column count (gdAdminCourseDbColumns), so the panel always
+     spans the full table. */
+  return `<tr class="gdAdminCourseDiagRowHost"><td colspan="${colspan}"><div class="gdAdminCourseDiag">${banner}${progressBar}<div class="gdAdminCourseDiagGrid">${diag}</div>${gdAdminCourseScorecardDropMarkup(item)}${gdAdminCourseDbActionRail(item)}</div></td></tr>`;
 }
 
 /* ---------- Scorecard drop zone ----------
@@ -5104,9 +5198,10 @@ function gdAdminCourseScorecardSetDraft(courseId,text,unit){
   else delete gdAdminScorecardDraftUnits[courseId];
   document.querySelectorAll(`.gdAdminCourseScorecardPaste[data-course-id="${CSS.escape(String(courseId))}"]`).forEach(area=>{if(area.value!==(text||""))area.value=text||"";});
 }
-/* The row or drop block a drag is over, if any. */
+/* The row, drop block or row drop target a drag is over, if any - the innermost wins, so a
+   file over a row's Course map target goes to the map rather than the row's scorecard. */
 function gdAdminCourseScorecardDropHost(target){
-  return target&&target.closest?target.closest("tr[data-course-id],.gdAdminCourseScorecardDrop[data-course-id]"):null;
+  return target&&target.closest?target.closest("tr[data-course-id],.gdAdminCourseScorecardDrop[data-course-id],.gdAdminCourseRowDrop[data-course-id]"):null;
 }
 function gdAdminCourseScorecardDragHasPayload(event){
   const types=event&&event.dataTransfer?Array.from(event.dataTransfer.types||[]):[];
@@ -5131,14 +5226,16 @@ function gdAdminCourseScorecardDrop(event){
   event.stopPropagation();
   host.classList.remove("gdAdminCourseDropTarget");
   const files=Array.from((event.dataTransfer&&event.dataTransfer.files)||[]);
+  if(host.dataset.kind==="map"){gdAdminCourseMapReceive(host.dataset.courseId,files);return;}
   const text=files.length?"":String(event.dataTransfer.getData("text/plain")||"");
   gdAdminCourseScorecardReceive(host.dataset.courseId,files,text);
 }
 function gdAdminCourseScorecardChange(event){
   const input=event.target;
-  if(!input||input.type!=="file"||!input.dataset||!input.dataset.courseId||!input.closest(".gdAdminCourseScorecardDrop"))return;
+  if(!input||input.type!=="file"||!input.dataset||!input.dataset.courseId||!input.closest(".gdAdminCourseScorecardDrop,.gdAdminCourseRowDrop"))return;
   const files=Array.from(input.files||[]);
   input.value="";
+  if(input.dataset.kind==="map"){gdAdminCourseMapReceive(input.dataset.courseId,files);return;}
   gdAdminCourseScorecardReceive(input.dataset.courseId,files,"");
 }
 function gdAdminCourseScorecardClick(event){
@@ -5220,6 +5317,60 @@ if(!window.__gdAdminCourseScorecardDropBound){
     event.preventDefault();
     gdAdminCourseScorecardRename(name.dataset.courseId,name.dataset.cardKey);
   },true);
+}
+
+/* ---------- course map drop ----------
+ *
+ * The club's course map, from a row's Course map target. Stored where the Mapping Overlay
+ * keeps it (POST /api/course-map-overlay {courseId, courseMap}) and read by the AI scan as
+ * its second image. Shrinking the picture is shared with the overlay page so both store the
+ * same thing. */
+/* A course map is a small schematic; 1200px on the long side is plenty for the model to
+   read hole numbers off, and keeps the row it is stored on light. */
+const GD_COURSE_MAP_MAX_EDGE_PX=1200;
+function gdCourseMapFromFile(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        const scale=Math.min(1,GD_COURSE_MAP_MAX_EDGE_PX/Math.max(img.width,img.height));
+        const canvas=document.createElement("canvas");
+        canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);
+        canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);
+        const dataUrl=canvas.toDataURL("image/jpeg",0.85);
+        resolve({data:dataUrl.replace(/^data:[^,]+,/,""),mediaType:"image/jpeg",name:String(file.name||"").slice(0,80),width:canvas.width,height:canvas.height});
+      };
+      img.onerror=()=>reject(new Error("That file is not an image the browser can read."));
+      img.src=String(reader.result);
+    };
+    reader.onerror=()=>reject(new Error("That file could not be read."));
+    reader.readAsDataURL(file);
+  });
+}
+async function gdAdminCourseMapReceive(courseId,files){
+  courseId=String(courseId||"");
+  const file=(files||[]).find(f=>/^image\//i.test(f.type)||/\.(jpe?g|png|webp|gif)$/i.test(f.name));
+  if(!courseId)return false;
+  if(!file){gdAdminCourseVisualToast("A course map has to be an image (JPEG, PNG or WebP)");return false;}
+  try{
+    const courseMap=await gdCourseMapFromFile(file);
+    const token=await gdAdminCourseDbAccessToken();
+    if(!token){gdAdminCourseVisualToast("Sign in again to add a course map");return false;}
+    gdAdminCourseVisualToast("Saving course map…");
+    const res=await fetch("/api/course-map-overlay",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+      body:JSON.stringify({courseId:courseId,courseMap:courseMap})
+    });
+    const data=await res.json().catch(()=>null);
+    if(!res.ok){gdAdminCourseVisualToast("Course map not saved: "+((data&&(data.detail||data.error))||"HTTP "+res.status));return false;}
+    gdAdminCourseVisualToast("Course map saved - the next AI scan will see it");
+    return true;
+  }catch(error){
+    gdAdminCourseVisualToast("Course map not saved: "+(error&&error.message||error));
+    return false;
+  }
 }
 
 /* Files and pasted text -> text files for the server. Pictures go through the OCR
@@ -5485,12 +5636,13 @@ function gdRenderAdminCourseDatabaseNow(){
   if(!gdAdminCourseVersions&&!gdAdminCourseVersionsInflight)gdLoadAdminCourseVersions();
   gdAdminCourseDbSetHTML(summary,gdAdminCourseDbCloudStatusMarkup());
   const scope=gdAdminCourseDbScope;
-  const all=scope?gdAdminCourseDbSummaries().filter(item=>scope.courses[item.id]).sort((a,b)=>String(scope.courses[b.id].requestedAt||"").localeCompare(String(scope.courses[a.id].requestedAt||""))):gdAdminCourseDbSummaries();
+  const all=scope?gdAdminCourseDbSummaries().filter(item=>scope.courses[item.id]):gdAdminCourseDbSummaries();
   const search=String(document.getElementById("gdAdminCourseDbSearch")?.value||"").trim().toLowerCase();
-  const filtered=all.filter(item=>{
-    const hay=[item.name,item.key,item.status,item.syncStatus,item.source].join(" ").toLowerCase();
+  const columns=gdAdminCourseDbColumns(scope);
+  const filtered=gdAdminCourseDbSortRows(all.filter(item=>{
+    const hay=[item.name,item.key,item.status,item.syncStatus,item.source,gdAdminCourseDbCountry(item)].join(" ").toLowerCase();
     return !search||hay.indexOf(search)>=0;
-  });
+  }),columns);
   if(gdAdminCourseDatabaseSelected&&!filtered.some(item=>item.id===gdAdminCourseDatabaseSelected)){
     gdAdminCourseDatabaseSelected="";
     gdAdminCourseDatabaseTab="overview";
@@ -5500,18 +5652,11 @@ function gdRenderAdminCourseDatabaseNow(){
     gdAdminCourseDbSetHTML(detail,"");
     return;
   }
-  gdAdminCourseDbSetHTML(list,filtered.length?`<div class="gdAdminCourseTableWrap"><table class="gdAdminCourseTable"><thead><tr><th>Course</th>${scope?"<th>Requested</th>":""}<th>Version</th><th>Status</th><th>Sync</th><th>Holes</th><th>Play</th><th>Map objects</th><th>Visual Engine</th><th>Updated</th></tr></thead><tbody>${filtered.map(item=>{
-    const visual=gdAdminCourseDbVisualState(item.id);
-    /* The displayed status, not the stored one - see gdAdminCourseDbStatusFor. */
-    const status=gdAdminCourseDbStatusFor(item);
-    const statusTone=gdAdminCourseDbStatusTone(status,["published","ready","play_data_ready","mapped_geometry_ready"]);
-    const syncTone=gdAdminCourseDbStatusTone(item.syncStatus,["synced","cloud","ready"]);
-    const version=gdAdminCourseVersionLabel(item);
+  gdAdminCourseDbSetHTML(list,filtered.length?`<div class="gdAdminCourseTableWrap"><table class="gdAdminCourseTable"><thead><tr>${gdAdminCourseDbHeaderMarkup(columns)}</tr></thead><tbody>${filtered.map(item=>{
     const active=item.id===gdAdminCourseDatabaseSelected?" active":"";
     const open=item.id===gdAdminCourseDbExpanded;
-    const caret=open?"▾":"▸";
-    const row=`<tr class="${active}${open?" expanded":""}" data-course-id="${gdEscapeHTML(item.id)}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${caret}</span> ${gdEscapeHTML(item.name)}</td>${scope?`<td>${gdAdminCourseDbRequestedCell(scope.courses[item.id])}</td>`:""}<td>${version?`<span class="gdAdminCourseVersion">${gdEscapeHTML(version)}</span>`:`<span class="gdAdminCourseMuted" title="No countable version yet - this course has not been rebuilt since versions existed">\u2014</span>`}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(status)}</span>${gdAdminCourseDbDrawButton(item,status)}</td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${item.playReadyCount==null?"<span class=\"gdAdminCourseMuted\" title=\"Open the row to load this course's geometry\">\u2014</span>":gdEscapeHTML(item.playReadyCount)+"/"+gdEscapeHTML(item.holeCount||0)}</td><td>${gdAdminCourseDbLayerSymbols(item.objectTotals)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
-    return open?row+gdAdminCourseDbExpandedRow(item):row;
+    const row=`<tr class="${active}${open?" expanded":""}" data-course-id="${gdEscapeHTML(item.id)}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})">${columns.map(col=>col.cell(item,open)).join("")}</tr>`;
+    return open?row+gdAdminCourseDbExpandedRow(item,columns.length):row;
   }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current search.</div>');
   gdAdminCourseScorecardRestore(list);
   const selected=filtered.find(item=>item.id===gdAdminCourseDatabaseSelected);
@@ -5597,6 +5742,8 @@ function gdRenderAdminCourseDatabaseNow(){
 window.gdRenderAdminCourseDatabase=gdRenderAdminCourseDatabase;
 window.gdAdminCourseDbSetScope=gdAdminCourseDbSetScope;
 window.gdAdminCourseDbToggleRow=gdAdminCourseDbToggleRow;
+window.gdAdminCourseDbSortBy=gdAdminCourseDbSortBy;
+window.gdCourseMapFromFile=gdCourseMapFromFile;
 window.gdAdminCourseDbOpen=gdAdminCourseDbOpen;
 window.gdAdminCourseDbShowGeometry=gdAdminCourseDbShowGeometry;
 window.gdAdminCourseDbShowDebug=gdAdminCourseDbShowDebug;
