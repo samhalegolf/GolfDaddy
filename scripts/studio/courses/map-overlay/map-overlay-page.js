@@ -1506,23 +1506,35 @@
       el["hazard-auto"].disabled = !!wandsRunning;
     }
 
-    /* The play lines to walk: the hole lines on the overlay - the hole in hand, or all of them -
-       and, for a numbered hole with a tee and a green but no line, a straight line between
-       them (flagged: it cuts a dogleg's corner). */
+    /* The play lines to walk, one a hole - a link group, or the unlinked shapes sharing a
+       number - in hand or all of them: the hole's own line when it has one, else tee to
+       fairway to green through what is on the hole (a pinned fairway's start and end, a drawn
+       one's middle), flagged straight when there is no fairway to bend it round a dogleg. */
     function playLines() {
-      var mine = function (f) { return !session.hole || f.hole === session.hole; };
-      var lines = session.features.filter(function (f) { return f.kind === "hole" && !f.pin && f.points.length >= 2 && mine(f); })
-        .map(function (f) { return { hole: f.hole, points: f.points }; });
-      var lined = {}, tees = {}, greens = {};
-      lines.forEach(function (l) { if (l.hole) lined[l.hole] = true; });
-      session.features.forEach(function (f) {
-        if (!f.hole || !mine(f) || !outlineOf(f)) return;
-        if (f.kind === "tee" && !tees[f.hole]) tees[f.hole] = f;
-        if (f.kind === "green" && !greens[f.hole]) greens[f.hole] = f;
+      var lines = [];
+      holeGroups().forEach(function (g) {
+        var number = g.numbers.length === 1 ? g.numbers[0] : 0;
+        if (session.hole && number !== session.hole) return;
+        var link = g.key.indexOf("l:") === 0 ? g.key.slice(2) : "";
+        var drawn = g.members.filter(function (f) { return f.kind === "hole" && !f.pin && f.points.length >= 2; })[0];
+        if (drawn) { lines.push({ hole: number, link: link, points: drawn.points }); return; }
+        var first = function (kind) { return g.members.filter(function (f) { return f.kind === kind && outlineOf(f); })[0]; };
+        var tee = first("tee"), green = first("green");
+        if (!tee || !green) return;
+        var from = shapes.centroid(outlineOf(tee)), to = shapes.centroid(outlineOf(green));
+        var middle = [];
+        g.members.filter(function (f) { return f.kind === "fairway" && outlineOf(f); })
+          .sort(function (a, b) { return shapes.distanceM(from, shapes.centroid(outlineOf(a))) - shapes.distanceM(from, shapes.centroid(outlineOf(b))); })
+          .forEach(function (f) {
+            var pts = f.pin ? f.points.slice() : [shapes.centroid(f.points)];
+            if (pts.length > 1 && shapes.distanceM(from, pts[0]) > shapes.distanceM(from, pts[pts.length - 1])) pts.reverse();
+            middle = middle.concat(pts);
+          });
+        lines.push({ hole: number, link: link, points: [from].concat(middle, [to]), straight: !middle.length });
       });
-      Object.keys(tees).forEach(function (h) {
-        if (lined[h] || !greens[h]) return;
-        lines.push({ hole: Number(h), points: [shapes.centroid(outlineOf(tees[h])), shapes.centroid(outlineOf(greens[h]))], straight: true });
+      /* A hole line on no hole yet is still a line to walk. */
+      if (!session.hole) session.features.forEach(function (f) {
+        if (f.kind === "hole" && !f.pin && f.points.length >= 2 && !linkKey(f)) lines.push({ hole: 0, link: "", points: f.points });
       });
       return lines.sort(function (a, b) { return (a.hole || 99) - (b.hole || 99); });
     }
@@ -1553,7 +1565,7 @@
         else if (ALONG_AVOID_KINDS.indexOf(f.kind) >= 0) avoid.push(xy);
         if (PLAYED_KINDS.indexOf(f.kind) >= 0) played.push(xy);
         if (NEAR_PLAY_KINDS.indexOf(f.kind) >= 0) turf.push(xy);
-        if (f.kind === "fairway" && (!line.hole || !f.hole || f.hole === line.hole)) fairways.push(xy);
+        if (f.kind === "fairway" && (line.link ? f.link === line.link : !line.hole || !f.hole || f.hole === line.hole)) fairways.push(xy);
       });
       var linePx = px(line.points);
       var corridor = shapes.playBand(w, h, { lines: [linePx], surfaces: avoid, woods: woods, bandPx: corridorM / mpp, clearPx: shapes.HAZARD_CLEAR_M / mpp });
@@ -1569,9 +1581,9 @@
       var notes = [];
       if (finder.reason === "no-turf") notes.push("no turf to read");
       else if (finder.turfFrom === "line") notes.push("turf read from under the line - place the fairway for a better read");
-      if (line.straight) notes.push("no hole line on hole " + line.hole + " - a straight tee-to-green line was used");
+      if (line.straight) notes.push("no fairway on " + (line.hole ? "hole " + line.hole : "an unnumbered hole") + " - a straight tee-to-green line was used");
       if (heights.why) notes.push(heights.why);
-      return { hole: line.hole, atLevel: atLevel, notes: notes };
+      return { hole: line.hole, link: line.link, atLevel: atLevel, notes: notes };
     }
 
     function countAt(run, level) { var f = run.atLevel[level]; return f.bunkers.length + f.water.length + f.hazards.length; }
@@ -1580,7 +1592,7 @@
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (wandsRunning) return;
       var items = playLines();
-      if (!items.length) { setStatus("No play line " + (session.hole ? "on hole " + session.hole + " " : "") + "to walk yet - add the hole lines (Make OSM editable brings OSM's in), or place a tee and a green on the hole.", true); return; }
+      if (!items.length) { setStatus("No play line " + (session.hole ? "on hole " + session.hole + " " : "") + "to walk yet - a hole needs its hole line, or a tee and a green linked or numbered as one hole.", true); return; }
       settle(true);
       var id = session.loadedFor, corridorM = session.hazardCorridorM || shapes.HAZARD_CORRIDOR_M;
       var runs = [], failed = 0, notes = {}, level = hazardLevel(session.hazardFinderLevel);
@@ -1651,18 +1663,18 @@
       finder.level = level;
       session.hazardFinderLevel = level;
       var ids = [], counts = { bunker: 0, water: 0, hazard: 0 }, room = roomFor("bunker");
-      function drop(kind, ring, hole) {
+      function drop(kind, ring, run) {
         if (ids.length >= room) return;
         var points = kind === "bunker" ? shapes.smoothOutline(ring, "bunker") : ring;
         if (!points || points.length < 3) return;
-        ids.push(addFeature({ kind: kind, points: points, source: "finder", hole: hole }, true).id);
+        ids.push(addFeature({ kind: kind, points: points, source: "finder", hole: run.hole, link: run.link }, true).id);
         counts[kind]++;
       }
       finder.runs.forEach(function (run) {
         var f = run.atLevel[level];
-        f.bunkers.forEach(function (ring) { drop("bunker", ring, run.hole); });
-        f.water.forEach(function (ring) { drop("water", ring, run.hole); });
-        f.hazards.forEach(function (ring) { drop("hazard", ring, run.hole); });
+        f.bunkers.forEach(function (ring) { drop("bunker", ring, run); });
+        f.water.forEach(function (ring) { drop("water", ring, run); });
+        f.hazards.forEach(function (ring) { drop("hazard", ring, run); });
       });
       finder.ids = ids;
       drawFeatures();
@@ -2923,6 +2935,7 @@
       if (raw.source) f.source = raw.source;
       if (raw.pin) f.pin = true;
       if (raw.osm) f.osm = raw.osm;
+      if (raw.link) f.link = raw.link;
       session.features.push(f);
       if (!quiet) { lastPlacedId = f.id; selectedId = tool === "move" ? f.id : selectedId; drawFeatures(); changed(); }
       return f;
