@@ -4625,6 +4625,7 @@
         session.courseMap = (data && data.courseMap) || null;
         renderCourseMapState();
         setStatus(session.courseMap ? "Course map saved - the next AI scan will see it." : "Course map removed.");
+        if (aiOpen) renderAiPanel();
       }).catch(function (error) {
         if (destroyed) return;
         setStatus("Course map not saved: " + (error && error.message || error), true);
@@ -5146,6 +5147,7 @@
           '<span class="gdAdminCourseStatusDot ' + (entry.stored ? "good" : "muted") + '">' + (edited ? "edited, not saved" : entry.stored ? "your words" : "default words") + "</span>" +
         "</div>" +
         '<div class="gdStudioCardHint">' + esc(entry.when) + "</div>" +
+        (entry.needsCourseMap && !session.courseMap ? '<div class="gdStudioWarnText">This task needs a course map and this course has none - add one under Course map below, then run.</div>' : "") +
         '<textarea data-gd-ai="prompt" rows="7" maxlength="' + (aiTasks.promptMax || 8000) + '" spellcheck="false" placeholder="What should the AI do with this view? Leave blank and it does its best."></textarea>' +
         '<div class="gdStudioOverlayAiRow">' +
           '<input type="text" data-gd-ai="notes" maxlength="600" placeholder="Anything extra for this scan only, e.g. the 9th green is by the clubhouse">' +

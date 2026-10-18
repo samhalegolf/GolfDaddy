@@ -111,6 +111,11 @@ async function runScan(courseId) {
     const task = resolveTask(requested, shapes, requested && requested.prompt != null ? null : await storedTask(requested ? requested.id : null, shapes));
     base.task = { id: task.id, label: task.label, output: task.output, prompt: task.prompt };
     const courseMap = saved.courseMap && saved.courseMap.data ? saved.courseMap : null;
+    /* A task built on the course map has nothing to read without one: fail before the model
+       is paid for, with the fix in the message. */
+    if (task.needsCourseMap && !courseMap) {
+      return await finish({ status: "failed", job, error: "\"" + task.label + "\" needs a course map and this course has none - add one on the Mapping Overlay page (Course map), then run it again" });
+    }
     const prompt = buildScanPrompt({ course, scorecard, georef, notes: request.notes, anchors: request.anchors, grid: request.grid, courseMap: !!courseMap, shapes, task });
 
     const answer = await callModel({ image: request.image, prompt, courseMap });

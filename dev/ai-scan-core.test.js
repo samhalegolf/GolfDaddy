@@ -91,7 +91,7 @@ const PIN = { label: "P1", id: "f-9", kind: "bunker", hole: null, pin: true, pix
 const FAIRWAY_PIN = { label: "P2", id: "f-10", kind: "fairway", hole: 4, pin: true, pixels: [{ x: 100, y: 600 }, { x: 400, y: 300 }] };
 
 test("the tasks: find greens answers with pins and is first; the outline tasks keep the old jobs; a request picks one or the view does", () => {
-  assert.deepStrictEqual(core.AI_SCAN_TASKS.map(t => t.id), ["find-greens", "trace", "shape-pins", "refit", "custom"]);
+  assert.deepStrictEqual(core.AI_SCAN_TASKS.map(t => t.id), ["find-greens", "pin-from-map", "trace", "shape-pins", "refit", "custom"]);
   assert.strictEqual(core.AI_SCAN_TASKS[0].output, "pins", "the first task pins, so the operator shapes natively");
   assert.ok(core.AI_SCAN_TASKS.every(t => core.AI_SCAN_OUTPUTS.includes(t.output)));
   assert.ok(core.AI_SCAN_TASKS.every(t => t.defaultPrompt.length <= core.AI_SCAN_PROMPT_MAX));
@@ -119,6 +119,33 @@ test("the tasks: find greens answers with pins and is first; the outline tasks k
   /* The outline Studio shows is the real prompt around a marker. */
   const outline = core.scanPromptOutline({ id: "find-greens" });
   assert.ok(outline.includes("«your words»") && outline.includes("OUTPUT RULES. Answer with pins") && outline.includes("P1: tee pin, centre [[500, 200]] (hole 1)"));
+});
+
+test("pin-from-map: the course map and the card become the numbering key, and the task is useless without a map", () => {
+  const g = georef.imageGeoreference({ centre: { lat: 54.66015, lng: -5.78477 }, zoom: 17, width: 1024, height: 768 });
+  const task = core.resolveTask({ id: "pin-from-map" }, []);
+  assert.deepStrictEqual([task.output, task.needsCourseMap, task.newShapes], ["pins", true, true]);
+  assert.strictEqual(core.resolveTask({ id: "find-greens" }, []).needsCourseMap, false, "only the map task needs the map");
+  ["ORIENT", "hole number", "par 3 is a short hole with no fairway", "Never place a green, tee or fairway because the map says", "pin it without a number rather than guess"].forEach(phrase => {
+    assert.ok(task.prompt.includes(phrase), "pin-from-map's words mention: " + phrase);
+  });
+  const withMap = core.buildScanPrompt({ course: COURSE, scorecard: CARD, georef: g, shapes: [], courseMap: true, task });
+  assert.ok(withMap.includes("It IS the key to hole numbers for this task"), "the map paragraph is the keyed one");
+  assert.ok(!withMap.includes("never for numbering"), "the card is no longer forbidden as a numbering key");
+  assert.ok(withMap.includes("so use it to check which hole each green and corridor belongs to"), "the card paragraph is the keyed one");
+  assert.ok(withMap.includes("Give \"hole\" to every pin whose hole you can read off the course map"), "the output rules ask for numbers");
+  const noMap = core.buildScanPrompt({ course: COURSE, scorecard: CARD, georef: g, shapes: [], courseMap: false, task });
+  assert.ok(noMap.includes("No course map is available for this course"), "without a map the prompt says so rather than pretending");
+  /* The other tasks keep the old words. */
+  const plain = core.buildScanPrompt({ course: COURSE, scorecard: CARD, georef: g, shapes: [], courseMap: true, task: core.resolveTask({ id: "find-greens" }, []) });
+  assert.ok(plain.includes("Use it only to settle doubts") && plain.includes("never for numbering"));
+  /* Numbered pins come through the parser. */
+  const parsed = core.parseScanAnswer({ features: [
+    { kind: "green", points: [[300, 400]], hole: 7, confidence: 0.9 },
+    { kind: "fairway", points: [[100, 600], [280, 420]], hole: 7, confidence: 0.8 },
+    { kind: "tee", points: [[80, 640]], confidence: 0.6 }
+  ], notes: "lined up on the clubhouse" }, [], task);
+  assert.deepStrictEqual(parsed.features.map(f => [f.kind, f.hole, f.pin, f.points.length]), [["green", 7, true, 1], ["fairway", 7, true, 2], ["tee", null, true, 1]]);
 });
 
 test("a pin task's prompt lists the samples with their hole numbers, and asks for pins, never replacements", () => {

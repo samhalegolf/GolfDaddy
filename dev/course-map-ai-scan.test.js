@@ -125,6 +125,8 @@ test("the task rides on the request: the sync half parks it, the background half
   assert.ok(sync.includes("prompt: typeof raw.prompt === \"string\" ? raw.prompt.slice(0, AI_SCAN_PROMPT_MAX) : null"), "the operator's words are capped, never trusted whole");
   assert.ok(sync.includes("AI_SCAN_OUTPUTS.includes(raw.output) ? raw.output : task.output"), "the output is one the parser knows");
   assert.ok(background.includes("resolveTask(requested, shapes,"), "the background half resolves the task against what is in view");
+  assert.ok(background.includes("if (task.needsCourseMap && !courseMap) {") && background.includes("needs a course map and this course has none"), "a course-map task fails before the model runs when no map is saved");
+  assert.ok(page.includes("entry.needsCourseMap && !session.courseMap"), "Studio warns when the picked task needs a course map the course lacks");
   assert.ok(background.includes("await storedTask(requested ? requested.id : null, shapes)"), "a request without words runs the operator's saved words for the task");
   assert.ok(background.includes("base.task = { id: task.id, label: task.label, output: task.output, prompt: task.prompt }"), "what ran - words included - goes on the row");
   assert.ok(background.includes("parseScanAnswer(answer.text, shapes, task)"), "the answer is read as the task says - pins or outlines");

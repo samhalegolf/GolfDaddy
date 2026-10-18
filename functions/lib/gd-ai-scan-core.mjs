@@ -19,9 +19,12 @@
  *
  * The scorecard goes in as context for FINDING things - "there are 18 holes, four of them
  * par 3s" tells a model how many corridors to look for - never as a numbering key: the
- * native resolver numbers from the card once the shapes exist. The one exception is a pin
- * task whose default prompt lets the model follow the routing from a pin the operator has
- * already numbered, because that is what a numbered sample is for. */
+ * native resolver numbers from the card once the shapes exist. Two exceptions, both pin
+ * tasks: find-greens lets the model follow the routing from a pin the operator has already
+ * numbered, because that is what a numbered sample is for; and pin-from-map (needsCourseMap)
+ * is the task whose whole point is the club's course map - it reads the routing off image 2,
+ * matches it to the ground with the scorecard's pars and lengths, and numbers every pin. The
+ * scaffold says so for that task, and the background half refuses to run it without a map. */
 
 import { OVERLAY_PIN_POINTS } from "./gd-map-overlay-core.mjs";
 
@@ -98,6 +101,17 @@ export const AI_SCAN_TASKS = [
       "Work from what you can SEE, in this order. Greens first, by appearance alone: " + GREEN_LOOKS + ". Then the fairways: each is " + FAIRWAY_LOOKS + ". Then the tees: " + TEE_LOOKS + " - one tee pin per hole, on the main group. Never place a green because the routing suggests one should be there; if you cannot see it, leave it out and say so in notes.\n\n" +
       "Anything already pinned or drawn on the picture is a sample. It shows you exactly what a green, a tee or a fairway looks like in this imagery, so match that appearance when you look for the rest, and do not return the samples again. A sample that carries a hole number tells you where that hole is, and the next hole's tee is usually near its green: use it to work out the routing, and give a hole number to the pins you are confident about from it. Leave \"hole\" out when you are not sure - a wrong number costs more than none.\n\n" +
       "Pin everything in view, including holes cut off at the edge. Use the scorecard to check your count: 18 holes means up to 18 greens and 18 tee groups and about 14 fairways, since par 3s have none. Skip practice greens, the driving range and anything you cannot see clearly, and say what you left out in notes."
+  },
+  {
+    id: "pin-from-map",
+    label: "Pin holes from the course map",
+    output: "pins",
+    needsCourseMap: true,
+    when: "Needs a course map saved on this course. The AI reads the routing off the club's map, matches each hole to the ground with the scorecard, and pins its green, tee and fairway WITH the hole number. Pins only: you shape them with the wands.",
+    defaultPrompt:
+      "Image 2 is the club's course map and the scorecard lists every hole. Use them together to work out which hole is which in image 1, then mark every green, tee and fairway you can see with a pin that carries its hole number. A green or a tee is ONE point at its centre; a fairway is TWO points, where the mown corridor starts (nearest the tee) and where it ends (nearest the green). Pins only, no outlines - the operator shapes them afterwards.\n\n" +
+      "Work in this order. 1. ORIENT. Match image 2 to image 1 by the things both show: the boundary of the property, the clubhouse and car park, roads, water, tree lines, and the direction each hole runs. Image 2 is a drawing, not to scale and not north-up, so match shapes and neighbours, never distances. Say in notes how you lined them up. 2. GREENS. Find every putting green in image 1 by appearance: " + GREEN_LOOKS + ". Give each the hole number the course map shows for that green. 3. FAIRWAYS. For each hole that is not a par 3, pin its corridor: " + FAIRWAY_LOOKS + ", running the way the map draws that hole. 4. TEES. Pin the main tee group of each hole: " + TEE_LOOKS + ", where the map starts that hole. 5. CHECK against the scorecard: a par 3 is a short hole with no fairway, a par 5 a long one; the lengths tell you which of two neighbouring corridors is which. Two pins of the same kind must never share a hole number.\n\n" +
+      "Only pin what you can SEE in image 1. Never place a green, tee or fairway because the map says one should be there - if the map shows a hole you cannot find in the picture, leave it out and name it in notes. Anything already pinned or drawn on the picture is a sample: match its appearance, take its hole number as settled, and do not return it again. Holes cut off at the edge of image 1 still get their pins. If you cannot tell which hole a feature belongs to, pin it without a number rather than guess. Skip practice greens, the driving range and anything you cannot see clearly."
   },
   {
     id: "trace",
@@ -177,6 +191,7 @@ export function resolveTask(raw, shapes, stored) {
     label: base.label,
     output,
     newShapes: base.newShapes !== false,
+    needsCourseMap: base.needsCourseMap === true,
     prompt: String(words || "").trim().slice(0, AI_SCAN_PROMPT_MAX)
   };
 }
@@ -214,7 +229,7 @@ export function scorecardLines(evidence) {
 function outputRules(task) {
   const common = " Set \"confidence\" between 0 and 1 for each feature: how sure you are that it IS what you say, judged from the picture. Put anything the operator should know in \"notes\" - holes cut off at the edge, things you expected but could not see, ground you were unsure about.";
   if (task.output === "pins") {
-    return "OUTPUT RULES. Answer with pins, not outlines. Each feature's \"points\" is ONE [x, y] integer pixel in image 1 for a green, tee or bunker (its centre), or TWO for a fairway (where it starts, nearest the tee, then where it ends, nearest the green). Read every coordinate off the grid. Never set \"replaces\": a pin never replaces anything. Give \"hole\" only when the task above says you may and you are confident of it." + common;
+    return "OUTPUT RULES. Answer with pins, not outlines. Each feature's \"points\" is ONE [x, y] integer pixel in image 1 for a green, tee or bunker (its centre), or TWO for a fairway (where it starts, nearest the tee, then where it ends, nearest the green). Read every coordinate off the grid. Never set \"replaces\": a pin never replaces anything. " + (task.needsCourseMap ? "Give \"hole\" to every pin whose hole you can read off the course map with confidence; leave it out rather than guess." : "Give \"hole\" only when the task above says you may and you are confident of it.") + common;
   }
   return "OUTPUT RULES. Polygons are lists of [x, y] integer pixel corners in image 1, 4 to " + AI_SCAN_MAX_POINTS + " points, in order around the shape, entirely inside the image. A shape that corrects or completes a recorded one sets \"replaces\" to that shape's label. Omit \"hole\" unless a number is painted on the ground." + common;
 }
@@ -255,10 +270,20 @@ export function buildScanPrompt({ course, scorecard, georef, notes, anchors, gri
   if (recorded.length === 0 && !known.length) {
     parts.push("Nothing has been recorded in this view yet.");
   }
-  if (courseMap) {
+  /* For most tasks the map and the card are context for finding things and the numbering is
+     the native resolver's job. For a task that needs the course map, they are the key: the
+     map says which hole is which, the card says what each hole should look like. */
+  const keyed = chosen.needsCourseMap === true;
+  if (courseMap && keyed) {
+    parts.push("Image 2 is the club's own course map, a schematic drawing of the routing: where every hole starts, runs and ends, with its number. It is NOT to scale and NOT aligned with image 1 - never take a coordinate from it, and expect it to be rotated. It IS the key to hole numbers for this task: line it up with image 1 by the features both show, then read each hole's number off it.");
+  } else if (courseMap) {
     parts.push("Image 2 is the club's own course map, a schematic drawing. It is NOT to scale and NOT aligned with image 1: never take a coordinate from it. Use it only to settle doubts - which of two corridors is the fairway, whether a mown patch is a green or a practice area, whether you have found too many or too few holes.");
+  } else if (keyed) {
+    parts.push("No course map is available for this course, so there is no routing to read hole numbers from: pin what you can see and leave \"hole\" out unless a sample in view settles it.");
   }
-  if (lines.length) {
+  if (lines.length && keyed) {
+    parts.push("The scorecard, one line per hole (" + holeCount + " holes). With the course map it tells you what each hole should look like on the ground - a par 3 is short with no fairway, a par 5 is long - so use it to check which hole each green and corridor belongs to:\n" + lines.join("\n"));
+  } else if (lines.length) {
     parts.push("The scorecard, for the same purpose - how many holes there are (" + holeCount + ") and how long they are - never for numbering:\n" + lines.join("\n"));
   } else {
     parts.push("No scorecard is available; use what you can see.");
