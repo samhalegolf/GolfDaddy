@@ -355,9 +355,6 @@
   function holeNumber(value) { var n = num(value); return n != null && Number.isInteger(n) && n >= 1 && n <= 36 ? n : null; }
   function minPoints(f) { return f.pin ? f.points.length : isPolygon(f.kind) ? 3 : 2; }
   function toLatLngs(points) { return points.map(function (p) { return [p.lat, p.lng]; }); }
-  /* A course map is a small schematic; 1200px on the long side is plenty for the model to
-     read hole numbers off, and keeps the row it is stored on light. */
-  var COURSE_MAP_MAX_EDGE_PX = 1200;
 
   var STYLE = {
     fairway: { color: "#3cff8d", weight: 2, fillColor: "#3cff8d", fillOpacity: 0.22 },
@@ -4689,23 +4686,13 @@
       });
     }
 
+    /* Shrinking the picture is shared with the Course Database's row drop target
+       (gdCourseMapFromFile, scripts/studio/gd-admin-course-db.js) so both store the same thing. */
     function uploadCourseMap(file) {
       if (!session.course) { setStatus("Pick a course first.", true); return; }
-      var reader = new FileReader();
-      reader.onload = function () {
-        var img = new Image();
-        img.onload = function () {
-          var scale = Math.min(1, COURSE_MAP_MAX_EDGE_PX / Math.max(img.width, img.height));
-          var c = document.createElement("canvas");
-          c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
-          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-          var dataUrl = c.toDataURL("image/jpeg", 0.85);
-          saveCourseMap({ data: dataUrl.replace(/^data:[^,]+,/, ""), mediaType: "image/jpeg", name: String(file.name || "").slice(0, 80), width: c.width, height: c.height });
-        };
-        img.onerror = function () { setStatus("That file is not an image the browser can read.", true); };
-        img.src = String(reader.result);
-      };
-      reader.readAsDataURL(file);
+      window.gdCourseMapFromFile(file).then(saveCourseMap, function (error) {
+        setStatus(error && error.message || String(error), true);
+      });
     }
 
     function saveCourseMap(courseMap) {

@@ -107,7 +107,10 @@ test("the course map is stored per course and sent to the model as image 2, neve
   assert.ok(page.includes("session.courseMap = data.courseMap || null; renderCourseMapState();"), "Studio takes the course map state from the row on every poll, not from what it remembered");
   assert.ok(background.includes('{ type: "text", text: "Image 2 (course map, schematic):" }'), "the map goes to the model labelled as image 2");
   assert.ok(background.includes("courseMap: !!courseMap"), "the prompt is told whether image 2 exists, never handed the picture");
-  assert.ok(page.includes('data-gd-overlay="course-map"') && page.includes("function uploadCourseMap(") && page.includes("COURSE_MAP_MAX_EDGE_PX"), "Studio lets an operator upload and scales the map down");
+  assert.ok(page.includes('data-gd-overlay="course-map"') && page.includes("function uploadCourseMap(") && page.includes("window.gdCourseMapFromFile(file)"), "Studio lets an operator upload a map");
+  const courseDb = fs.readFileSync(path.join(ROOT, "scripts/studio/gd-admin-course-db.js"), "utf8");
+  assert.ok(courseDb.includes("function gdCourseMapFromFile(") && courseDb.includes("GD_COURSE_MAP_MAX_EDGE_PX"), "the shared helper scales the map down");
+  assert.ok(courseDb.includes('fetch("/api/course-map-overlay"') && courseDb.includes('host.dataset.kind==="map"'), "a map dropped on a Course Database row goes to the same store");
   assert.ok(page.includes('railButton("tool-tee"') && page.includes('setTool("tee")'), "tees can be drawn by hand too");
   assert.ok(fs.existsSync(path.join(ROOT, "supabase/migrations/20260929_add_course_map_overlay_course_map.sql")), "no migration adds the course_map column");
 });

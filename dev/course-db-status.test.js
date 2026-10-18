@@ -110,7 +110,7 @@ test("the row expands in place and shows the failure reason", () => {
   assert.ok(/function gdAdminCourseDbToggleRow\(courseId\)/.test(adminSrc), "rows must toggle");
   assert.ok(/window\.gdAdminCourseDbToggleRow=gdAdminCourseDbToggleRow;/.test(adminSrc), "the toggle must be reachable from the onclick");
   assert.ok(/onclick="return gdAdminCourseDbToggleRow\(/.test(adminSrc), "the row click must expand rather than only opening the panel");
-  const block = adminSrc.slice(adminSrc.indexOf("function gdAdminCourseDbExpandedRow(item){"));
+  const block = adminSrc.slice(adminSrc.indexOf("function gdAdminCourseDbExpandedRow(item,colspan){"));
   assert.ok(/gdAdminCourseDbStatusWhy\(item\)/.test(block), "the expansion must show why");
   assert.ok(/gdAdminCourseDbActionRail\(item\)/.test(block), "the full detail tabs must still be reachable");
 });
