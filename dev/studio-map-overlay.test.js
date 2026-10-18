@@ -469,7 +469,8 @@ test("hazards along play: walks each hole line, finds bunkers, water and crossin
   assert.ok(page.includes("finder = { hazards: true, ids: [], runs: runs, note: note };") && page.includes("if (finder.hazards) dropFinderShapes(next); else dropFinderTrees(next);"), "what it finds is live like the tree finder's: left / right, Enter, Esc");
   assert.ok(page.includes('var points = kind === "bunker" ? shapes.smoothOutline(ring, "bunker") : ring;') && page.includes('source: "finder"'), "a bunker is kept smooth like the wand's, water and a hazard keep their edge");
   assert.ok(page.includes("var into = mergeBunker(f.points, f.hole, f, false);") && page.includes("} else if (sealSeams(f)) joined++;"), "kept bunkers join the ones they overlap, water and hazards seam");
-  assert.ok(page.includes("points: [shapes.centroid(outlineOf(tees[h])), shapes.centroid(outlineOf(greens[h]))], straight: true"), "a hole with a tee and green but no line gets a straight one, flagged");
+  assert.ok(page.includes("holeGroups().forEach(function (g) {") && page.includes("points: [from].concat(middle, [to]), straight: !middle.length"), "a linked or numbered hole with a tee and green but no line is walked tee to fairway to green");
+  assert.ok(page.includes("source: \"finder\", hole: run.hole, link: run.link"), "what it finds on a linked hole joins that hole");
   const shapesSrc = read("scripts/studio/courses/map-overlay/map-overlay-shapes.js");
   assert.ok(shapesSrc.includes("function hazardFinder(image, opts)") && shapesSrc.includes("function crossingCase(") && shapesSrc.includes("function pathLike("), "the engine lives in the shapes module");
 });
