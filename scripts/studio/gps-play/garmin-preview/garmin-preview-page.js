@@ -49,10 +49,12 @@
         };
       },
       /* The hub's linked drag: another device's aim, held as the Garmin holds its own - in
-         GarminPlayState, with AIMING up on the map while the other finger is down. */
+         GarminPlayState, with AIMING up on the map while the other finger is down. No finger is
+         on this face, so the camera reframes onto the shot on the next frame. */
       mirrorAim: function (face, coordinate, phase, watchSession) {
         watchSession.playState.moveTarget(coordinate);
         face.mapView.aiming = phase !== "end";
+        face.mapView.camera = null;
       },
       /* Locked, the shot is looked at on the map; unlocked, the numbers - as a round opens. */
       onLockChange: function (face, locked) { if (locked) face.showMap(); else { if (face.mapView.aiming) face.mapView.confirmAim(); face.showNumbers(); } },
