@@ -5155,6 +5155,8 @@
           if (destroyed || courseIdOf(session.course) !== id) return stopScanPoll();
           var scan = data && data.aiScan;
           var state = scan && scan.status;
+          /* The row is the truth about the course map, not what the panel remembered. */
+          if (data && Object.prototype.hasOwnProperty.call(data, "courseMap")) { session.courseMap = data.courseMap || null; renderCourseMapState(); }
           if (state === "done" || state === "failed") {
             if (state === "failed") { stopScanPoll(); setStatus("AI scan failed: " + (scan.error || "unknown"), true); return; }
             session.features = (data.overlay && data.overlay.features) || [];

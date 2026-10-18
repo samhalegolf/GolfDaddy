@@ -201,6 +201,20 @@ export async function saveOverlay({ courseId, features: raw, playOrders: rawOrde
   const dropped = list.length - features.length;
   const playOrders = Array.isArray(rawOrders) ? normalizePlayOrders(rawOrders, courseId) : (await loadOverlay(courseId)).playOrders;
   if (!features.length && !playOrders.length) {
+    /* The club's course map lives on this row too, and it is not part of the overlay: a course
+       whose shapes were all removed (or never drawn) keeps its map. Only a row holding nothing
+       else is deleted. Karana Downs lost its map this way the first time the map task ran: the
+       scan's save-first step wiped the row, the scan recreated it map-less. */
+    const current = await loadOverlay(courseId);
+    if (current.courseMap) {
+      const now = new Date().toISOString();
+      await supabaseFetch(OVERLAYS_TABLE + "?on_conflict=course_id", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify({ course_id: courseId, features: [], play_orders: [], status: "draft", updated_by: savedBy, updated_at: now })
+      });
+      return { courseId, overlay: { features: [], playOrders: [], status: "draft", updatedAt: now, updatedBy: savedBy }, summary: overlaySummary([]), dropped, deleted: false };
+    }
     await supabaseFetch(OVERLAYS_TABLE + "?course_id=eq." + encodeURIComponent(courseId), { method: "DELETE" });
     return { courseId, overlay: { features: [], playOrders: [], status: "draft", updatedAt: null, updatedBy: null }, summary: overlaySummary([]), dropped, deleted: true };
   }

@@ -102,6 +102,8 @@ test("the course map is stored per course and sent to the model as image 2, neve
   assert.ok(store.includes("ai_scan,course_map&course_id=eq."), "loadOverlay must read the course map with the rest of the row");
   assert.ok(overlay.includes('Object.prototype.hasOwnProperty.call(payload, "courseMap")') && overlay.includes("writeCourseMap(ownerId, courseMap)"), "a course map save is its own request on the overlay API");
   assert.ok(overlay.includes("courseMap: publicCourseMap(overlay.courseMap)"), "GET exposes that a map exists without handing the picture back");
+  assert.ok(store.includes("if (current.courseMap) {") && store.indexOf("if (current.courseMap) {") < store.indexOf('encodeURIComponent(courseId), { method: "DELETE" }'), "an empty overlay save keeps the row when it carries a course map - the map is not part of the overlay");
+  assert.ok(page.includes("session.courseMap = data.courseMap || null; renderCourseMapState();"), "Studio takes the course map state from the row on every poll, not from what it remembered");
   assert.ok(background.includes('{ type: "text", text: "Image 2 (course map, schematic):" }'), "the map goes to the model labelled as image 2");
   assert.ok(background.includes("courseMap: !!courseMap"), "the prompt is told whether image 2 exists, never handed the picture");
   assert.ok(page.includes('data-gd-overlay="course-map"') && page.includes("function uploadCourseMap(") && page.includes("COURSE_MAP_MAX_EDGE_PX"), "Studio lets an operator upload and scales the map down");
