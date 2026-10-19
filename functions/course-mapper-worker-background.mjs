@@ -14,8 +14,8 @@
    entirely server-side, so nothing client-side needs to run either stage anymore.
 
    Multi-loop courses (hole numbers repeating across separated loops - the Royal Auckland
-   case) also hand off to the resolver now instead of refusing outright: the resolver ignores
-   OSM refs and numbers holes from scorecard distances, which is exactly the evidence a
+   case) also hand off to the resolver now instead of refusing outright: the resolver keeps
+   the holes OSM or a person numbered and numbers the rest from scorecard distances, which is exactly the evidence a
    multi-nine site needs. The refusal only remains for the case it was written for - no
    scorecard, or a resolver answer that cannot beat the collapsed count.
 
